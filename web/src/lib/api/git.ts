@@ -95,7 +95,7 @@ export interface GitChangesTreeResult extends Omit<Wire.ChangesTreeResult, 'root
 export type GitDiffTab = 'unstaged' | 'staged';
 
 export interface GitWorkbenchSnapshotTarget extends Wire.GitWorkbenchSnapshotTarget {
-	nodeId: string;
+	executorId: string;
 }
 
 export interface GitWorkbenchSnapshotReady extends Omit<
@@ -463,7 +463,7 @@ export async function getGitWorkbenchSnapshot(
 			registerGitReviewDocument(gitDocumentKey(document), span);
 			return {
 				...response,
-				target: { ...response.target, nodeId: target.nodeId },
+				target: { ...response.target, executorId: target.executorId },
 				reviewSummary: {
 					...response.reviewSummary,
 					document,

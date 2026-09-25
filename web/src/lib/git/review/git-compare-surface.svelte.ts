@@ -166,7 +166,7 @@ export class GitCompareSurfaceController implements PortableSingletonController 
 
 		const specification =
 			this.deps.comparisonPreferences.recall({
-				nodeId: identity.nodeId,
+				executorId: identity.executorId,
 				chatId: identity.chatId,
 				projectPath: identity.projectPath,
 			}) ?? DEFAULT_GIT_COMPARISON;
@@ -200,7 +200,7 @@ export class GitCompareSurfaceController implements PortableSingletonController 
 		) {
 			return null;
 		}
-		return { chatId, targetIdentity, projectPath, nodeId: this.target.nodeId };
+		return { chatId, targetIdentity, projectPath, executorId: this.target.executorId };
 	}
 
 	#rememberConfirmedChatComparison(identity = this.#loadedSessionIdentity): void {
@@ -222,7 +222,7 @@ function sameSession(
 ): boolean {
 	return (
 		left?.chatId === right.chatId &&
-		left.nodeId === right.nodeId &&
+		left.executorId === right.executorId &&
 		left.targetIdentity === right.targetIdentity &&
 		left.projectPath === right.projectPath
 	);

@@ -1,7 +1,7 @@
 import { expect, it, vi } from 'vitest';
 import { TerminalRegistry } from '$lib/terminal/sessions/terminal-registry.svelte.js';
-import { ExecutionNodesStore } from '$lib/execution-nodes/execution-nodes-store.svelte.js';
-import type { ExecutionNodeSnapshot } from '$shared/execution-nodes';
+import { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
+import type { ExecutorSnapshot } from '$shared/executors';
 import type { TerminalMetadata } from '$shared/terminal';
 import { createWorkspaceLayoutStore } from '../workspace-layout.svelte.js';
 import { WorkspaceTransitionArbiter } from '../workspace-transition-arbiter.js';
@@ -14,15 +14,15 @@ const runtimeId = '00000000-0000-4000-8000-000000000002';
 
 it.each(['local', remoteId])(
 	'isolates empty-state creation on %s from another inventory failure',
-	async (targetNode) => {
-		const nodes = new ExecutionNodesStore();
-		nodes.applySnapshot(
-			['local', remoteId].map((id): ExecutionNodeSnapshot => ({
+	async (targetExecutor) => {
+		const executors = new ExecutorsStore();
+		executors.applySnapshot(
+			['local', remoteId].map((id): ExecutorSnapshot => ({
 				id,
 				label: id,
 				kind: id === 'local' ? 'local' : 'remote',
 				enabled: true,
-				direction: id === 'local' ? null : 'node-connects',
+				direction: id === 'local' ? null : 'executor-connects',
 				availability: 'ready',
 				instanceId: null,
 				projectBasePath: '/project',
@@ -44,7 +44,7 @@ it.each(['local', remoteId])(
 		};
 		const create = vi.fn(async () => ({ success: true as const, terminal: metadata }));
 		const registry = new TerminalRegistry({
-			nodes,
+			executors,
 			connection: {
 				isConnected: false,
 				sendMessage: () => false,
@@ -79,8 +79,8 @@ it.each(['local', remoteId])(
 			isWindowReserved: () => false,
 			commit: (plan) => arbiter.commit(plan),
 			commitDestroyedRemoval: (_id, plan) => arbiter.commit(plan),
-			resolveCurrentProjectPath: async () => ({ nodeId: targetNode, projectPath: '/project' }),
-			currentProjectNodeId: () => targetNode,
+			resolveCurrentProjectPath: async () => ({ executorId: targetExecutor, projectPath: '/project' }),
+			currentProjectExecutorId: () => targetExecutor,
 			isMobile: () => false,
 			cancelWorkspaceDrag() {},
 			windowOf: () => layout.defaultWindowId,
@@ -98,10 +98,10 @@ it.each(['local', remoteId])(
 			await registry.list('local');
 			await expect(registry.list(remoteId)).rejects.toThrow('Remote inventory failed');
 			const switching = placement.focusMostRecentOrCreate(layout.defaultWindowId);
-			if (targetNode === 'local') {
+			if (targetExecutor === 'local') {
 				await switching;
 				expect(create).toHaveBeenCalledOnce();
-				expect(create).toHaveBeenCalledWith(expect.objectContaining({ nodeId: 'local' }));
+				expect(create).toHaveBeenCalledWith(expect.objectContaining({ executorId: 'local' }));
 			} else {
 				await expect(switching).rejects.toThrow('Remote inventory failed');
 				expect(create).not.toHaveBeenCalled();

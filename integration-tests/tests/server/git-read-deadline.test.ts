@@ -13,8 +13,8 @@ test('Local Git HTTP reports an expired upstream probe instead of clearing remot
     await runFixtureGit(project, 'remote', 'add', 'origin', '/synthetic-no-network');
     await runFixtureGit(project, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
     await runFixtureGit(project, 'branch', '--set-upstream-to=origin/main');
-    const endpoint = `/api/v1/git/remote-status?${new URLSearchParams({ nodeId: 'local', project })}`;
-    const expected = { nodeId: 'local', hasRemote: true, hasUpstream: true, remoteName: 'origin' };
+    const endpoint = `/api/v1/git/remote-status?${new URLSearchParams({ executorId: 'local', project })}`;
+    const expected = { executorId: 'local', hasRemote: true, hasUpstream: true, remoteName: 'origin' };
     expect(await fixture.client.get(endpoint)).toMatchObject(expected);
 
     const hold = join(project, '.git', 'hold-upstream-probe');

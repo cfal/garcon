@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { setExecutionNodesTestContext } from '$lib/execution-nodes/__tests__/execution-nodes-test-context';
+	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
 	import ConversationFeedVirtualItem from '../ConversationFeedVirtualItem.svelte';
 	import { ConversationFeedItemState } from '../ConversationFeedItemState.svelte.js';
 	import { createChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
@@ -17,7 +17,7 @@
 	const TIMESTAMP = '2026-09-05T00:00:00.000Z';
 
 	setCanonicalWorkspaceLayout();
-	setExecutionNodesTestContext();
+	setExecutorsTestContext();
 	const sessions = createChatSessionsStore();
 	for (const [chatId, title] of [
 		[SOURCE_CHAT_ID, 'Source chat'],

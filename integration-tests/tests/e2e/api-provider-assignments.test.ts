@@ -6,7 +6,7 @@ import { SpaDriver } from '../../support/spa-driver.js';
 test('provider settings support offline grants and independent profiles; remote edits preserve composer input', async () => {
   await withE2eFixture('provider-assignments-browser', async (fixture) => {
     const { client, directAgents } = fixture.integration;
-    const node = await client.post<{ id: string }>('/api/v1/execution-nodes', { label: 'Offline worker', direction: 'node-connects' });
+    const executor = await client.post<{ id: string }>('/api/v1/executors', { label: 'Offline worker', direction: 'executor-connects' });
     const app = new SpaDriver(fixture.page, fixture.integration);
     await app.open();
     await fixture.waitForSpaWebSocket();
@@ -14,9 +14,9 @@ test('provider settings support offline grants and independent profiles; remote 
     await app.waitForChatProcessing(false);
     await app.fill('textarea[placeholder="Reply..."]', 'Synthetic preserved draft');
     const providerId = directAgents.openAi.provider.providerId;
-    const assignment = `/api/v1/api-provider-assignments?nodeId=local&apiProviderId=${providerId}`;
+    const assignment = `/api/v1/api-provider-assignments?executorId=local&apiProviderId=${providerId}`;
     await client.delete(assignment);
-    await app.waitForText('The selected provider or model is unavailable on this node.');
+    await app.waitForText('The selected provider or model is unavailable on this executor.');
     expect(await fixture.page.$eval('textarea[placeholder="Reply..."]', (element) => (element as HTMLTextAreaElement).value)).toBe('Synthetic preserved draft');
     const requests = fixture.integration.fakeProviders.openAi.requests().length;
     let runRequests = 0;
@@ -57,7 +57,7 @@ test('provider settings support offline grants and independent profiles; remote 
         .find((item) => item.textContent?.trim() === 'Offline worker');
       return fieldset && !fieldset.disabled && label?.querySelector<HTMLInputElement>('input')?.checked;
     }, {}, providerId);
-    expect((await client.get<ApiProviderManagement>('/api/v1/api-providers')).assignments.assignments[node.id]).toContain(providerId);
+    expect((await client.get<ApiProviderManagement>('/api/v1/api-providers')).assignments.assignments[executor.id]).toContain(providerId);
     await app.clickButton('Duplicate Integration Fake OpenAI');
     await fixture.page.waitForSelector('#api-provider-label');
     expect(await fixture.page.$eval('#api-provider-api-key', (element) => (element as HTMLInputElement).value)).toBe('');
@@ -71,7 +71,7 @@ test('provider settings support offline grants and independent profiles; remote 
     const duplicate = management.providers.find((profile) => profile.label === 'Independent account')!;
     expect(duplicate.id).not.toBe(providerId);
     expect(management.assignments.assignments.local).toContain(duplicate.id);
-    expect(management.assignments.assignments[node.id]).not.toContain(duplicate.id);
+    expect(management.assignments.assignments[executor.id]).not.toContain(duplicate.id);
     await app.clickButton('Delete Independent account');
     await app.clickButton('Delete shared profile');
     await fixture.page.waitForFunction((id) => document.querySelector(`[data-api-provider-id="${id}"]`) === null, {}, duplicate.id);

@@ -12,7 +12,7 @@ import type {
 } from '$shared/preambles';
 
 interface NewChatPreambleSelectionStateOptions {
-	readonly nodeId?: string;
+	readonly executorId?: string;
 	readonly trimmedPath: string;
 	readonly validationStatus: PathValidationStatus;
 	readonly agentId: AgentId;
@@ -126,7 +126,7 @@ export class NewChatPreambleSelectionState {
 
 		try {
 			const preview: PreambleSelectionPreviewResponse = await preambleSelectionPreview({
-				nodeId: this.options.nodeId,
+				executorId: this.options.executorId,
 				projectPath,
 				agentId: context.agentId,
 				tags: context.tags,
@@ -152,7 +152,7 @@ export class NewChatPreambleSelectionState {
 			throw new Error('Preamble defaults are unavailable for the current project path');
 		}
 		return preambleSelectionPreview({
-			nodeId: this.options.nodeId,
+			executorId: this.options.executorId,
 			projectPath: context.projectPath,
 			agentId: context.agentId,
 			tags: context.tags,
@@ -194,7 +194,7 @@ export class NewChatPreambleSelectionState {
 			projectPath,
 			agentId,
 			tags,
-			key: `${this.options.nodeId ?? 'local'}\u0000${key}`,
+			key: `${this.options.executorId ?? 'local'}\u0000${key}`,
 		};
 	}
 

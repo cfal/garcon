@@ -11,8 +11,8 @@ import type {
   ShareChatResponse,
 } from '../../../common/share-types.js';
 import type { ChatOperationalNoticeMessage } from '../../../common/ws-events.js';
-import { NATIVE_TRANSCRIPT_DRIFT_NOTICE } from '../../../server/ledger/native-activity.js';
-import { TranscriptLedgerStore } from '../../../server/ledger/store.js';
+import { NATIVE_TRANSCRIPT_DRIFT_NOTICE } from '../../../server/controller/ledger/native-activity.js';
+import { TranscriptLedgerStore } from '../../../server/controller/ledger/store.js';
 import {
   assistantContents,
   messagesOfType,

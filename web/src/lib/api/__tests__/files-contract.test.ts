@@ -240,7 +240,7 @@ describe('files API contract', () => {
 			jsonResponse({
 				success: true,
 				identity: {
-					nodeId: 'local',
+					executorId: 'local',
 					canonicalFileRootPath: '/workspace/project',
 					normalizedRelativePath: 'src/file.ts',
 				},
@@ -256,7 +256,7 @@ describe('files API contract', () => {
 		).resolves.toEqual({
 			success: true,
 			identity: {
-				nodeId: 'local',
+				executorId: 'local',
 				canonicalFileRootPath: '/workspace/project',
 				normalizedRelativePath: 'src/file.ts',
 			},
@@ -267,13 +267,13 @@ describe('files API contract', () => {
 		expect(url).toContain('path=alias%2Ffile.ts');
 	});
 
-	it('qualifies every file operation with the captured node, without putting it in the save body', async () => {
-		const nodeId = '22222222-2222-4222-8222-222222222222';
-		const target = { nodeId, projectPath: '/worker', filePath: 'a.ts' };
+	it('qualifies every file operation with the captured executor, without putting it in the save body', async () => {
+		const executorId = '22222222-2222-4222-8222-222222222222';
+		const target = { executorId, projectPath: '/worker', filePath: 'a.ts' };
 		fetchMock.mockResolvedValueOnce(jsonResponse(treePayload));
-		await getTree({ nodeId });
+		await getTree({ executorId });
 		fetchMock.mockResolvedValueOnce(jsonResponse([]));
-		await browseDirectory('/worker', undefined, nodeId);
+		await browseDirectory('/worker', undefined, executorId);
 		fetchMock.mockResolvedValueOnce(jsonResponse([]));
 		await getFileList(target);
 		fetchMock.mockResolvedValueOnce(jsonResponse({ status: 'missing' }));
@@ -285,11 +285,11 @@ describe('files API contract', () => {
 		fetchMock.mockResolvedValueOnce(
 			jsonResponse({
 				success: true,
-				identity: { nodeId, canonicalFileRootPath: '/worker', normalizedRelativePath: 'a.ts' },
+				identity: { executorId, canonicalFileRootPath: '/worker', normalizedRelativePath: 'a.ts' },
 			}),
 		);
-		expect((await resolveFileIdentity({ ...target, relativePath: 'a.ts' })).identity.nodeId).toBe(
-			nodeId,
+		expect((await resolveFileIdentity({ ...target, relativePath: 'a.ts' })).identity.executorId).toBe(
+			executorId,
 		);
 		fetchMock.mockResolvedValueOnce(
 			jsonResponse({ success: true, path: '/worker/a.ts', revision: 'v1:saved', message: 'Saved' }),
@@ -300,11 +300,11 @@ describe('files API contract', () => {
 			expectedRevision: 'v1:read',
 			conflictResolution: 'reject',
 		});
-		expect(JSON.parse(fetchMock.mock.calls.at(-1)![1].body)).not.toHaveProperty('nodeId');
+		expect(JSON.parse(fetchMock.mock.calls.at(-1)![1].body)).not.toHaveProperty('executorId');
 		for (const [url] of fetchMock.mock.calls)
-			expect(new URL(url, 'http://controller').searchParams.get('nodeId')).toBe(nodeId);
-		expect(new URL(getContentUrl(target), 'http://controller').searchParams.get('nodeId')).toBe(
-			nodeId,
+			expect(new URL(url, 'http://controller').searchParams.get('executorId')).toBe(executorId);
+		expect(new URL(getContentUrl(target), 'http://controller').searchParams.get('executorId')).toBe(
+			executorId,
 		);
 	});
 

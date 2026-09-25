@@ -70,13 +70,13 @@
 	let activeProjectPath = $derived(activeTarget?.projectPath ?? null);
 	let viewportLayoutIdentity = $derived(
 		activeTarget
-			? `workbench:${JSON.stringify([activeTarget.nodeId, activeTarget.repoRoot, activeTarget.worktreePath])}`
+			? `workbench:${JSON.stringify([activeTarget.executorId, activeTarget.repoRoot, activeTarget.worktreePath])}`
 			: null,
 	);
 	let isWorkbenchTargetCurrent = $derived(
 		Boolean(
 			activeTarget &&
-			wb.target?.nodeId === activeTarget.nodeId &&
+			wb.target?.executorId === activeTarget.executorId &&
 			wb.target?.projectPath === activeTarget.projectPath &&
 			wb.target?.worktreePath === activeTarget.worktreePath,
 		),

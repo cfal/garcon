@@ -6,7 +6,7 @@ import {
 	type GitProjectTarget,
 	type GitReviewDocumentRef,
 } from './git-client.js';
-import type { GitNodeScope } from '$shared/git-execution';
+import type { GitExecutorScope } from '$shared/git-execution';
 import type {
 	GitReviewFilePatchBody,
 	GitReviewDocumentFileBodiesResponse,
@@ -69,7 +69,7 @@ export async function getGitReviewDocumentFileBodies(
 		purpose === 'visible' ? 'body-visible' : 'body-prefetch',
 	);
 	let bodySpanFinished = false;
-	let response: GitReviewDocumentFileBodiesResponse & GitNodeScope;
+	let response: GitReviewDocumentFileBodiesResponse & GitExecutorScope;
 	try {
 		const rawResponse = await apiFetch('/api/v1/git/review-documents/files', {
 			...options,
@@ -77,7 +77,7 @@ export async function getGitReviewDocumentFileBodies(
 			body: JSON.stringify({ ...gitProjectFields(target), document, files, purpose }),
 		});
 		if (!rawResponse.ok) {
-			response = await parseApiResponse<GitReviewDocumentFileBodiesResponse & GitNodeScope>(
+			response = await parseApiResponse<GitReviewDocumentFileBodiesResponse & GitExecutorScope>(
 				rawResponse,
 			);
 		} else {
@@ -86,7 +86,7 @@ export async function getGitReviewDocumentFileBodies(
 			bodySpanFinished = true;
 			const decodeSpan = startGitReviewPerformanceSpan('json-decode');
 			try {
-				response = JSON.parse(json) as GitReviewDocumentFileBodiesResponse & GitNodeScope;
+				response = JSON.parse(json) as GitReviewDocumentFileBodiesResponse & GitExecutorScope;
 			} finally {
 				finishGitReviewPerformanceSpan(decodeSpan);
 			}

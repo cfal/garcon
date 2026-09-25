@@ -1,6 +1,6 @@
 import type { ModelCatalogStore, ModelOption } from '$lib/agents/model-catalog-store.svelte';
-import type { ExecutionNodesStore } from '$lib/execution-nodes/execution-nodes-store.svelte.js';
-import { effectiveNodeId } from '$shared/execution-nodes';
+import type { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
+import { effectiveExecutorId } from '$shared/executors';
 import type { SessionAgentId } from '$lib/types/app';
 import { getLocale } from '$lib/paraglide/runtime.js';
 import { buildThinkingModeOptions } from '$lib/agents/thinking-mode-options';
@@ -30,12 +30,12 @@ import {
 
 interface ModelSelectorStateOptions {
 	get modelCatalog(): ModelCatalogStore;
-	readonly nodes?: ExecutionNodesStore;
+	readonly executors?: ExecutorsStore;
 	get value(): ModelSelectorValue;
 	get mode(): ModelSelectorMode;
-	getRecents(nodeId: string): ModelSelectorRecentOption[];
+	getRecents(executorId: string): ModelSelectorRecentOption[];
 	get preferRecentsOnOpen(): boolean;
-	getSelectableAgentIds?(nodeId: string): readonly SessionAgentId[];
+	getSelectableAgentIds?(executorId: string): readonly SessionAgentId[];
 	onChange: (next: ModelSelectorChange) => void | Promise<void>;
 }
 
@@ -71,12 +71,12 @@ export class ModelSelectorState {
 	activeSourceKey = $state<string | null>(null);
 	activeModelIndex = $state(0);
 	draftAgentId = $state<SessionAgentId | null>(null);
-	draftNodeId = $state<string | null>(null);
+	draftExecutorId = $state<string | null>(null);
 	draftModelValue = $state<string | null>(null);
 	draftThinkingMode = $state<ThinkingMode | null>(null);
 	contentPane = $state<ModelSelectorContentPane>('browse');
 	#draftTargetChanged = false;
-	#draftOriginNodeId: string | null = null;
+	#draftOriginExecutorId: string | null = null;
 
 	readonly #options: ModelSelectorStateOptions;
 	#sourcesCache = new Map<SessionAgentId, ModelSourceOption[]>();
@@ -120,57 +120,57 @@ export class ModelSelectorState {
 	}
 
 	get modelCatalog(): ModelCatalogStore {
-		return this.nodeId === 'local' ? this.#options.modelCatalog : this.#options.modelCatalog.forNode(this.nodeId);
+		return this.executorId === 'local' ? this.#options.modelCatalog : this.#options.modelCatalog.forExecutor(this.executorId);
 	}
 
-	get committedNodeId(): string {
-		return effectiveNodeId(this.value.nodeId);
+	get committedExecutorId(): string {
+		return effectiveExecutorId(this.value.executorId);
 	}
 
-	get nodeSelectionEnabled(): boolean {
-		return this.mode.node === 'select';
+	get executorSelectionEnabled(): boolean {
+		return this.mode.executor === 'select';
 	}
 
-	get showNodePicker(): boolean {
-		return this.nodeSelectionEnabled && (
-			this.#options.nodes?.hasRemoteNodes === true || this.committedNodeId !== 'local'
+	get showExecutorPicker(): boolean {
+		return this.executorSelectionEnabled && (
+			this.#options.executors?.hasRemoteExecutors === true || this.committedExecutorId !== 'local'
 		);
 	}
 
-	get nodeId(): string {
-		if (this.nodeSelectionEnabled && this.open && this.draftNodeId !== null) {
-			return this.draftNodeId;
+	get executorId(): string {
+		if (this.executorSelectionEnabled && this.open && this.draftExecutorId !== null) {
+			return this.draftExecutorId;
 		}
-		return this.committedNodeId;
+		return this.committedExecutorId;
 	}
 
-	get nodes() {
-		return this.#options.nodes?.nodes ?? [];
+	get executors() {
+		return this.#options.executors?.executors ?? [];
 	}
 
-	get nodeReady(): boolean {
-		return this.#options.nodes?.isReady(this.nodeId) ?? true;
+	get executorReady(): boolean {
+		return this.#options.executors?.isReady(this.executorId) ?? true;
 	}
 
-	get nodeLabel(): string {
-		return this.#options.nodes?.label(this.value.nodeId) ?? 'Local';
+	get executorLabel(): string {
+		return this.#options.executors?.label(this.value.executorId) ?? 'Local';
 	}
 
-	get draftNodeLabel(): string {
-		return this.#options.nodes?.label(this.nodeId) ?? 'Local';
+	get draftExecutorLabel(): string {
+		return this.#options.executors?.label(this.executorId) ?? 'Local';
 	}
 	get committedCatalog(): ModelCatalogStore {
-		return effectiveNodeId(this.value.nodeId) === 'local' ? this.#options.modelCatalog : this.#options.modelCatalog.forNode(this.value.nodeId);
+		return effectiveExecutorId(this.value.executorId) === 'local' ? this.#options.modelCatalog : this.#options.modelCatalog.forExecutor(this.value.executorId);
 	}
 
-	async selectNode(nodeId: string): Promise<void> {
+	async selectExecutor(executorId: string): Promise<void> {
 		if (
-			!this.nodeSelectionEnabled ||
+			!this.executorSelectionEnabled ||
 			!this.open ||
-			nodeId === this.nodeId ||
-			!this.#options.nodes?.isReady(nodeId)
+			executorId === this.executorId ||
+			!this.#options.executors?.isReady(executorId)
 		) return;
-		this.draftNodeId = nodeId;
+		this.draftExecutorId = executorId;
 		this.#draftTargetChanged = true;
 		this.draftModelValue = '';
 		this.activeSourceKey = null;
@@ -180,18 +180,18 @@ export class ModelSelectorState {
 		this.showBrowsePane();
 		const catalog = this.modelCatalog;
 		await catalog.refreshIfStale();
-		if (!this.open || this.nodeId !== nodeId) return;
+		if (!this.open || this.executorId !== executorId) return;
 		if (!this.selectableAgentIds.includes(this.agentId)) this.draftAgentId = this.selectableAgentIds[0] ?? null;
 		this.resetActiveModelIndex();
 	}
 
-	reconcileNode(): void {
-		if (this.open && this.#draftOriginNodeId !== this.committedNodeId) this.discardAndClose();
+	reconcileExecutor(): void {
+		if (this.open && this.#draftOriginExecutorId !== this.committedExecutorId) this.discardAndClose();
 	}
 
 	get selectableAgentIds(): readonly SessionAgentId[] {
 		const available = this.modelCatalog.getSelectableAgents();
-		const allowed = this.#options.getSelectableAgentIds?.(this.nodeId);
+		const allowed = this.#options.getSelectableAgentIds?.(this.executorId);
 		return allowed ? available.filter((id) => allowed.includes(id)) : available;
 	}
 
@@ -202,7 +202,7 @@ export class ModelSelectorState {
 	get recentOptions(): ModelSelectorRecentOption[] {
 		if (this.mode.surface !== 'composer' || this.mode.agent !== 'select') return [];
 		const selectable = new Set(this.selectableAgentIds);
-		return this.#options.getRecents(this.nodeId).filter((recent) => effectiveNodeId(recent.nodeId) === this.nodeId && selectable.has(recent.agentId));
+		return this.#options.getRecents(this.executorId).filter((recent) => effectiveExecutorId(recent.executorId) === this.executorId && selectable.has(recent.agentId));
 	}
 
 	get isRecentsPaneActive(): boolean {
@@ -218,7 +218,7 @@ export class ModelSelectorState {
 		const selection = this.committedSelection;
 		const selectedModel = selection.selectedModel;
 		return (
-			effectiveNodeId(recent.nodeId) === effectiveNodeId(this.value.nodeId) &&
+			effectiveExecutorId(recent.executorId) === effectiveExecutorId(this.value.executorId) &&
 			recent.agentId === selection.agentId &&
 			recent.modelValue === selection.modelValue &&
 			recent.apiProviderId === (selectedModel?.apiProviderId ?? null) &&
@@ -251,7 +251,7 @@ export class ModelSelectorState {
 	sourcesFor(agentId: SessionAgentId): ModelSourceOption[] {
 		const catalogVersion = this.modelCatalog.version ?? 0;
 		const locale = getLocale();
-		const catalogKey = JSON.stringify([this.nodeId, catalogVersion]);
+		const catalogKey = JSON.stringify([this.executorId, catalogVersion]);
 		if (this.#sourcesCacheVersion !== catalogKey || this.#sourcesCacheLocale !== locale) {
 			this.#sourcesCache.clear();
 			this.#sourcesCacheVersion = catalogKey;
@@ -289,7 +289,7 @@ export class ModelSelectorState {
 	}
 
 	get availableModels(): ModelOption[] {
-		if (!this.nodeReady) return [];
+		if (!this.executorReady) return [];
 		if (this.mode.source === 'hidden') return this.modelCatalog.getModels(this.agentId);
 		return this.source?.models ?? [];
 	}
@@ -314,7 +314,7 @@ export class ModelSelectorState {
 	get modelRows(): ModelSelectorRow[] {
 		const catalogVersion = this.modelCatalog.version ?? 0;
 		const locale = getLocale();
-		const catalogKey = JSON.stringify([this.nodeId, catalogVersion]);
+		const catalogKey = JSON.stringify([this.executorId, catalogVersion]);
 		if (this.#rowsCacheVersion !== catalogKey || this.#rowsCacheLocale !== locale) {
 			this.#rowsCache.clear();
 			this.#rowsCacheVersion = catalogKey;
@@ -400,7 +400,7 @@ export class ModelSelectorState {
 	get triggerTitle(): string {
 		const committed = this.committedSelection;
 		return [
-			this.nodeSelectionEnabled ? this.nodeLabel : '',
+			this.executorSelectionEnabled ? this.executorLabel : '',
 			committed.agentLabel,
 			this.#visibleSourceFor(committed)?.label,
 			committed.modelLabel,
@@ -445,7 +445,7 @@ export class ModelSelectorState {
 		this.contentPane = this.shouldStartFromRecentsOnOpen ? 'recents' : 'browse';
 		this.#startDraftFromValue();
 		this.resetActiveModelIndex();
-		if (this.nodeReady) void this.modelCatalog.refreshIfStale();
+		if (this.executorReady) void this.modelCatalog.refreshIfStale();
 	}
 
 	commitAndClose(): void {
@@ -593,7 +593,7 @@ export class ModelSelectorState {
 	}
 
 	selectRecent(recent: ModelSelectorRecentOption): void {
-		if (!this.nodeReady || effectiveNodeId(recent.nodeId) !== this.nodeId) return;
+		if (!this.executorReady || effectiveExecutorId(recent.executorId) !== this.executorId) return;
 		if (!this.isAgentSelectable(recent.agentId)) return;
 		if (this.effortSelectionEnabled) {
 			this.#draftTargetChanged = true;
@@ -606,7 +606,7 @@ export class ModelSelectorState {
 			return;
 		}
 		void this.#options.onChange({
-			nodeId: this.nodeId,
+			executorId: this.executorId,
 			agentId: recent.agentId,
 			modelValue: recent.modelValue,
 			model: recent.model,
@@ -618,11 +618,11 @@ export class ModelSelectorState {
 	}
 
 	emit(agentId: SessionAgentId, modelValue: string, thinkingMode?: ThinkingMode): void {
-		if (!this.nodeReady || !this.isAgentSelectable(agentId)) return;
+		if (!this.executorReady || !this.isAgentSelectable(agentId)) return;
 		let next = buildModelSelectorChange(this.modelCatalog, agentId, modelValue);
 		if (!next) return;
 		const effortOnlyChange =
-			this.nodeId === effectiveNodeId(this.value.nodeId) &&
+			this.executorId === effectiveExecutorId(this.value.executorId) &&
 			agentId === this.value.agentId &&
 			modelValue === currentModelValue(this.modelCatalog, this.value);
 		if (effortOnlyChange && this.value.modelEndpointId && !this.#draftTargetChanged) {
@@ -636,13 +636,13 @@ export class ModelSelectorState {
 		}
 		void this.#options.onChange({
 			...next,
-			nodeId: this.nodeId,
+			executorId: this.executorId,
 			...(this.effortSelectionEnabled ? { thinkingMode: normalizeThinkingMode(thinkingMode) } : {}),
 		});
 	}
 
 	isAgentSelectable(agentId: SessionAgentId): boolean {
-		return this.#options.getSelectableAgentIds?.(this.nodeId).includes(agentId) ?? true;
+		return this.#options.getSelectableAgentIds?.(this.executorId).includes(agentId) ?? true;
 	}
 
 	#commitDraftSelection(): void {
@@ -657,7 +657,7 @@ export class ModelSelectorState {
 		const endpointChanged = this.#draftTargetChanged
 			&& selectedEndpointId !== (this.value.modelEndpointId ?? null);
 		if (
-			this.nodeId === effectiveNodeId(this.value.nodeId) &&
+			this.executorId === effectiveExecutorId(this.value.executorId) &&
 			this.draftAgentId === this.value.agentId &&
 			this.draftModelValue === committedModelValue &&
 			!endpointChanged &&
@@ -669,8 +669,8 @@ export class ModelSelectorState {
 	}
 
 	#startDraftFromValue(): void {
-		this.#draftOriginNodeId = this.committedNodeId;
-		this.draftNodeId = effectiveNodeId(this.value.nodeId);
+		this.#draftOriginExecutorId = this.committedExecutorId;
+		this.draftExecutorId = effectiveExecutorId(this.value.executorId);
 		this.#draftTargetChanged = false;
 		const agentId = this.value.agentId;
 		const modelValue = currentModelValue(this.modelCatalog, this.value);
@@ -693,7 +693,7 @@ export class ModelSelectorState {
 	}
 
 	#committedModelValueFor(agentId: SessionAgentId, sourceKey: string | null): string | null {
-		if (this.nodeId !== effectiveNodeId(this.value.nodeId)) return null;
+		if (this.executorId !== effectiveExecutorId(this.value.executorId)) return null;
 		if (agentId !== this.value.agentId) return null;
 		const modelValue = currentModelValue(this.modelCatalog, this.value);
 		if (!modelValue) return null;
@@ -709,7 +709,7 @@ export class ModelSelectorState {
 	}
 
 	#clearDraft(): void {
-		this.draftNodeId = null;
+		this.draftExecutorId = null;
 		this.#draftTargetChanged = false;
 		this.draftAgentId = null;
 		this.draftModelValue = null;

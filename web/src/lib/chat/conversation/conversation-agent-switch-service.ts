@@ -3,10 +3,10 @@ import type { SessionAgentId } from '$lib/types/app';
 import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 import type { AgentSettingsEnvelope } from '$shared/agent-integration';
 import type { ApiProtocol } from '$shared/api-providers';
-import { effectiveNodeId } from '$shared/execution-nodes';
+import { effectiveExecutorId } from '$shared/executors';
 import type { ResolvedModelSelection } from '$shared/start-selection';
 import { resolveConversationModelSelection } from './conversation-model-selection.js';
-import type { NodeHandoffDestination, NodeHandoffModel } from './node-handoff-project.svelte.js';
+import type { ExecutorHandoffDestination, ExecutorHandoffModel } from './executor-handoff-project.svelte.js';
 import type {
 	ConversationExecutionDraftState,
 	ConversationExecutionSelection,
@@ -20,7 +20,7 @@ interface AgentSwitchSessions {
 }
 
 interface AgentSwitchState extends ResolvedModelSelection {
-	nodeId: string;
+	executorId: string;
 	projectPath: string;
 	agentId: SessionAgentId;
 	permissionMode: PermissionMode;
@@ -52,25 +52,25 @@ export interface ConversationAgentSwitchDeps {
 	sessions: AgentSwitchSessions;
 	agentState: AgentSwitchState;
 	modelCatalog: AgentSwitchModelCatalog;
-	modelCatalogForNode(nodeId: string): AgentSwitchModelCatalog;
+	modelCatalogForExecutor(executorId: string): AgentSwitchModelCatalog;
 	chooseDestination(
 		chatId: string,
-		nodeId: string,
+		executorId: string,
 		path: string,
-		model: NodeHandoffModel,
-	): Promise<NodeHandoffDestination | null>;
+		model: ExecutorHandoffModel,
+	): Promise<ExecutorHandoffDestination | null>;
 	executionDraft: Pick<
 		ConversationExecutionDraftState,
 		'replaceSelection' | 'replaceDestination' | 'resetToDurable' | 'isHandoffPending'
 	>;
 	getExecutionDefaults(
 		agentId: SessionAgentId,
-		nodeId?: string,
+		executorId?: string,
 	): Pick<ConversationExecutionSelection, 'permissionMode' | 'thinkingMode' | 'agentSettings'>;
 }
 
 export interface AgentSwitchSelection {
-	nodeId?: string;
+	executorId?: string;
 	agentId: SessionAgentId;
 	modelValue: string;
 }
@@ -81,11 +81,11 @@ export class ConversationAgentSwitchService {
 	async switchAgent(chatId: string, next: AgentSwitchSelection): Promise<void> {
 		const durable = this.deps.sessions.selectedChat;
 		if (!durable || durable.id !== chatId) return;
-		const nodeId = effectiveNodeId(next.nodeId ?? durable.nodeId);
+		const executorId = effectiveExecutorId(next.executorId ?? durable.executorId);
 		if (
 			!this.deps.sessions.isDraft(chatId) &&
 			next.agentId === durable.agentId &&
-			nodeId === effectiveNodeId(durable.nodeId)
+			executorId === effectiveExecutorId(durable.executorId)
 		) {
 			const selection = this.deps.executionDraft.resetToDurable();
 			if (selection) this.#applyAgentState(selection);
@@ -99,9 +99,9 @@ export class ConversationAgentSwitchService {
 			: durable.projectPath;
 		let model: ResolvedModelSelection;
 		let confirmedDestination = false;
-		if (nodeId !== effectiveNodeId(this.deps.agentState.nodeId)) {
+		if (executorId !== effectiveExecutorId(this.deps.agentState.executorId)) {
 			const current = this.deps.agentState;
-			const catalog = this.deps.modelCatalogForNode(current.nodeId);
+			const catalog = this.deps.modelCatalogForExecutor(current.executorId);
 			if (agentId === current.agentId && modelValue === current.model) {
 				model = resolveConversationModelSelection(current, catalog);
 			} else {
@@ -112,7 +112,7 @@ export class ConversationAgentSwitchService {
 					modelProtocol: null,
 				};
 			}
-			const destination = await this.deps.chooseDestination(chatId, nodeId, projectPath, {
+			const destination = await this.deps.chooseDestination(chatId, executorId, projectPath, {
 				agentId,
 				...model,
 			});
@@ -122,10 +122,10 @@ export class ConversationAgentSwitchService {
 			model = destination.selection;
 			agentId = destination.selection.agentId;
 			modelValue = this.deps
-				.modelCatalogForNode(nodeId)
+				.modelCatalogForExecutor(executorId)
 				.selectionValueFor(agentId, model.model, model.modelEndpointId);
 		} else {
-			const resolved = this.deps.modelCatalogForNode(nodeId).selectionFor(agentId, modelValue);
+			const resolved = this.deps.modelCatalogForExecutor(executorId).selectionFor(agentId, modelValue);
 			if (!resolved) return;
 			model = resolved;
 		}
@@ -138,15 +138,15 @@ export class ConversationAgentSwitchService {
 		if (
 			!this.deps.sessions.isDraft(chatId) &&
 			agentId === durable.agentId &&
-			nodeId === effectiveNodeId(durable.nodeId)
+			executorId === effectiveExecutorId(durable.executorId)
 		) {
 			const selection = this.deps.executionDraft.resetToDurable();
 			if (selection) this.#applyAgentState(selection);
 			return;
 		}
-		const defaults = this.deps.getExecutionDefaults(agentId, nodeId);
+		const defaults = this.deps.getExecutionDefaults(agentId, executorId);
 		const selection: ConversationExecutionSelection = {
-			nodeId,
+			executorId,
 			projectPath,
 			agentId,
 			model: model.model,
@@ -160,7 +160,7 @@ export class ConversationAgentSwitchService {
 
 		this.#applyAgentState(selection, modelValue);
 		if (this.deps.sessions.isDraft(chatId)) {
-			this.deps.sessions.patchDraftStartup(chatId, { ...selection, nodeId });
+			this.deps.sessions.patchDraftStartup(chatId, { ...selection, executorId });
 			this.deps.sessions.patchChat(chatId, selection);
 			return;
 		}
@@ -170,9 +170,9 @@ export class ConversationAgentSwitchService {
 
 	#applyAgentState(selection: ConversationExecutionSelection, modelValue?: string): void {
 		const { agentState } = this.deps;
-		agentState.nodeId = effectiveNodeId(selection.nodeId);
+		agentState.executorId = effectiveExecutorId(selection.executorId);
 		agentState.projectPath = selection.projectPath ?? '';
-		const modelCatalog = this.deps.modelCatalogForNode(agentState.nodeId);
+		const modelCatalog = this.deps.modelCatalogForExecutor(agentState.executorId);
 		agentState.setAgentId(selection.agentId);
 		agentState.setModelSelection({
 			model:

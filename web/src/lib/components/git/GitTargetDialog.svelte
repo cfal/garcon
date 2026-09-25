@@ -3,7 +3,7 @@
 	// only the pending path; the active target changes after OK.
 
 	import { onDestroy, untrack } from 'svelte';
-	import { getExecutionNodes, getNotifications } from '$lib/context';
+	import { getExecutors, getNotifications } from '$lib/context';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import DirectoryBrowser from '$lib/components/chat/DirectoryBrowser.svelte';
 	import ProjectPinnedPathList from '$lib/components/chat/ProjectPinnedPathList.svelte';
@@ -20,7 +20,7 @@
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface GitTargetDialogProps {
-		nodeId: string;
+		executorId: string;
 		initialPath: string;
 		projectBasePath: string;
 		pinnedProjectPaths?: string[];
@@ -31,7 +31,7 @@
 	}
 
 	let {
-		nodeId,
+		executorId,
 		initialPath,
 		projectBasePath,
 		pinnedProjectPaths = [],
@@ -41,22 +41,22 @@
 		onClose,
 	}: GitTargetDialogProps = $props();
 
-	const nodes = getExecutionNodes();
+	const executors = getExecutors();
 	const notifications = getNotifications();
-	const nodeContextKey = $derived(nodes.gitContextKey(nodeId));
+	const executorContextKey = $derived(executors.gitContextKey(executorId));
 	const dialog = new GitTargetDialogState({
 		onMutationError: (error, target) =>
 			notifications.error(
-				`${nodes.label(target.nodeId)}: ${target.projectPath}: ${error instanceof Error ? error.message : String(error)}`,
+				`${executors.label(target.executorId)}: ${target.projectPath}: ${error instanceof Error ? error.message : String(error)}`,
 			),
-		get nodeId() {
-			return nodeId;
+		get executorId() {
+			return executorId;
 		},
-		get nodeContextKey() {
-			return nodeContextKey;
+		get executorContextKey() {
+			return executorContextKey;
 		},
 		get available() {
-			return nodes.gitAvailable(nodeId);
+			return executors.gitAvailable(executorId);
 		},
 		get initialPath() {
 			return initialPath;
@@ -73,7 +73,7 @@
 
 	$effect(() => {
 		void dialog.candidatePath;
-		void nodeContextKey;
+		void executorContextKey;
 		untrack(() => dialog.scheduleValidation());
 	});
 
@@ -162,7 +162,7 @@
 										bind:value={dialog.candidatePath}
 										readonly={isUpdatingPinnedProjectPath}
 										onfocus={(event: FocusEvent & { currentTarget: HTMLInputElement }) => {
-											if (!nodes.filesAvailable(nodeId)) return;
+											if (!executors.filesAvailable(executorId)) return;
 											if (isMobile) event.currentTarget.blur();
 											if (isUpdatingPinnedProjectPath) return;
 											dialog.showBrowser = true;
@@ -206,7 +206,7 @@
 								/>
 								<button
 									type="button"
-									disabled={isUpdatingPinnedProjectPath || !nodes.filesAvailable(nodeId)}
+									disabled={isUpdatingPinnedProjectPath || !executors.filesAvailable(executorId)}
 									onclick={() => {
 										dialog.showBrowser = true;
 									}}
@@ -218,9 +218,9 @@
 								</button>
 							</div>
 
-							{#if dialog.showBrowser && !isUpdatingPinnedProjectPath && nodes.filesAvailable(nodeId)}
+							{#if dialog.showBrowser && !isUpdatingPinnedProjectPath && executors.filesAvailable(executorId)}
 								<DirectoryBrowser
-									{nodeId}
+									{executorId}
 									currentPath={dialog.trimmedPath || projectBasePath}
 									basePath={projectBasePath}
 									onSelect={(path) => {

@@ -1,5 +1,5 @@
 import { getTree } from '$lib/api/files.js';
-import { effectiveNodeId } from '$shared/execution-nodes';
+import { effectiveExecutorId } from '$shared/executors';
 import { ApiError } from '$lib/api/client.js';
 import { buildVisibleFileRows, filterFileRows } from './file-tree-rows.js';
 import { FILE_TREE_PARENT_ROW_KEY } from './file-tree-render-rows.js';
@@ -59,7 +59,7 @@ export interface FileTreeNavigationError {
 
 export type FileTreeDirectoryTargetReason =
 	| 'initial'
-	| 'node-switch'
+	| 'executor-switch'
 	| 'directory-row'
 	| 'parent-row'
 	| 'breadcrumb'
@@ -190,9 +190,9 @@ export function resizeVisibleFileTreeColumnBoundary(
 }
 
 export class FileTreeStore {
-	#nodeId = $state('local');
-	get nodeId(): string {
-		return this.#nodeId;
+	#executorId = $state('local');
+	get executorId(): string {
+		return this.#executorId;
 	}
 	navigation = $state.raw<FileTreeNavigationState>({ kind: 'idle' });
 	isRefreshing = $state(false);
@@ -338,24 +338,24 @@ export class FileTreeStore {
 		return this.#materializedRows.flatMap((row) => (row.entry.type === 'file' ? [row.entry] : []));
 	}
 
-	browseNode(nodeId: string): void {
+	browseExecutor(executorId: string): void {
 		const directoryPath = this.retainedResponse?.directory.path ?? this.#projectPath ?? '';
 		this.#resetBrowsingState();
-		this.#nodeId = nodeId;
+		this.#executorId = executorId;
 		this.#projectPath = null;
 		this.#canonicalChatProjectPath = null;
 		this.#chatProjectBreadcrumbs = [];
-		this.#effectiveProjectKey = `node:${nodeId}`;
+		this.#effectiveProjectKey = `executor:${executorId}`;
 		this.#projectRequestsAllowed = true;
 		void this.navigateTo({
 			path: directoryPath,
 			label: directoryPath,
 			breadcrumbs: [],
-			reason: 'node-switch',
+			reason: 'executor-switch',
 		});
 	}
 
-	setNodeAvailable(available: boolean): void {
+	setExecutorAvailable(available: boolean): void {
 		if (available === this.#projectRequestsAllowed) return;
 		this.#projectRequestsAllowed = available;
 		if (!available) {
@@ -377,7 +377,7 @@ export class FileTreeStore {
 		}
 	}
 
-	invalidateNodePaths(): void {
+	invalidateExecutorPaths(): void {
 		const response = this.retainedResponse;
 		let target: FileTreeDirectoryTarget;
 		if (this.navigation.kind === 'loading' || this.navigation.kind === 'error') {
@@ -414,11 +414,11 @@ export class FileTreeStore {
 				: projectState.kind === 'absent'
 					? null
 					: projectState.context;
-		const nodeId = effectiveNodeId(target?.nodeId);
-		if (this.#nodeId !== nodeId) {
+		const executorId = effectiveExecutorId(target?.executorId);
+		if (this.#executorId !== executorId) {
 			this.#resetBrowsingState();
 			this.#effectiveProjectKey = '';
-			this.#nodeId = nodeId;
+			this.#executorId = executorId;
 		}
 		if (projectState.kind === 'absent') {
 			this.#projectRequestsAllowed = false;
@@ -598,7 +598,7 @@ export class FileTreeStore {
 		this.refreshError = null;
 		try {
 			const refreshed = await getTree(
-				{ nodeId: this.nodeId, directoryPath },
+				{ executorId: this.executorId, directoryPath },
 				{ signal: controller.signal },
 			);
 			if (
@@ -659,7 +659,7 @@ export class FileTreeStore {
 		this.childErrors = errors;
 		try {
 			const response = await getTree(
-				{ nodeId: this.nodeId, directoryPath: path },
+				{ executorId: this.executorId, directoryPath: path },
 				{ signal: controller.signal },
 			);
 			if (controller.signal.aborted || this.#childControllers.get(path) !== controller) return;
@@ -843,7 +843,7 @@ export class FileTreeStore {
 		this.navigation = { kind: 'loading', target, previous };
 		try {
 			const response = await getTree(
-				{ nodeId: this.nodeId, directoryPath: target.path },
+				{ executorId: this.executorId, directoryPath: target.path },
 				{ signal: controller.signal },
 			);
 			if (controller.signal.aborted || token !== this.#navigationToken) return;
@@ -857,7 +857,7 @@ export class FileTreeStore {
 		} catch (error) {
 			if (isAbortError(error) || token !== this.#navigationToken) return;
 			if (
-				target.reason === 'node-switch' &&
+				target.reason === 'executor-switch' &&
 				target.path &&
 				error instanceof ApiError &&
 				[

@@ -29,7 +29,7 @@ function parent(): HTMLDivElement {
 
 function createController() {
 	const identity: CanonicalFileIdentity = {
-		nodeId: 'local',
+		executorId: 'local',
 		canonicalFileRootPath: '/workspace',
 		normalizedRelativePath: 'src/file.ts',
 	};

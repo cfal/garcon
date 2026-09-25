@@ -25,7 +25,7 @@ export class FileSaveCoordinator {
 			const result = await Promise.race([
 				this.options.saveText(
 					{
-						nodeId: document.nodeId,
+						executorId: document.executorId,
 						projectPath: document.canonicalFileRootPath,
 						filePath: document.relativePath,
 						content,

@@ -14,7 +14,7 @@ export interface ChatRenameConfirmation {
 }
 
 export interface ChatProjectPathDialog {
-	nodeId?: string | null;
+	executorId?: string | null;
 	chatId: string;
 	chatTitle: string;
 	currentProjectPath: string;
@@ -74,7 +74,7 @@ export class ChatActionDialogsState {
 
 	requestProjectPath(chat: ChatSessionRecord, fallbackTitle: string): void {
 		this.chatProjectPathDialog = {
-			nodeId: chat.nodeId,
+			executorId: chat.executorId,
 			chatId: chat.id,
 			chatTitle: chat.title || fallbackTitle,
 			currentProjectPath: chat.projectPath,

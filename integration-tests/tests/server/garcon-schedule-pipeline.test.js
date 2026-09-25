@@ -4,21 +4,21 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { once } from 'node:events';
 import { AssistantMessage } from '../../../common/chat-types.js';
-import { TranscriptLedgerStore } from '../../../server/ledger/store.js';
-import { TranscriptLedgerService } from '../../../server/ledger/service.js';
-import { ChatRegistry } from '../../../server/chats/store.js';
-import { AgentScheduleController } from '../../../server/chats/agent-schedule-controller.js';
-import { ChatExecutionCoordinator } from '../../../server/chat-execution/chat-execution-coordinator.js';
-import { InMemoryChatExecutionControlRepository } from '../../../server/chat-execution/chat-execution-control-repository.js';
-import { CommandSupport } from '../../../server/commands/command-support.js';
-import { CommandLedger } from '../../../server/commands/command-ledger.js';
-import { QueueCommands } from '../../../server/commands/queue-commands.js';
-import { KeyedPromiseLock } from '../../../server/lib/keyed-lock.js';
-import { inspectProjectDirectory } from '../../../server/projects/project-directory-service.js';
-import { ScheduledPromptScheduler, cronExpressionForUtcInstant } from '../../../server/scheduled-prompts/scheduler.js';
-import { ScheduledPromptStore } from '../../../server/scheduled-prompts/store.js';
-import { ScheduledPromptRunLog } from '../../../server/scheduled-prompts/run-log.js';
-import { ScheduledPromptDispatcher } from '../../../server/scheduled-prompts/dispatcher.js';
+import { TranscriptLedgerStore } from '../../../server/controller/ledger/store.js';
+import { TranscriptLedgerService } from '../../../server/controller/ledger/service.js';
+import { ChatRegistry } from '../../../server/controller/chats/store.js';
+import { AgentScheduleController } from '../../../server/controller/chats/agent-schedule-controller.js';
+import { ChatExecutionCoordinator } from '../../../server/controller/chat-execution/chat-execution-coordinator.js';
+import { InMemoryChatExecutionControlRepository } from '../../../server/controller/chat-execution/chat-execution-control-repository.js';
+import { CommandSupport } from '../../../server/controller/commands/command-support.js';
+import { CommandLedger } from '../../../server/controller/commands/command-ledger.js';
+import { QueueCommands } from '../../../server/controller/commands/queue-commands.js';
+import { KeyedPromiseLock } from '../../../server/common/keyed-lock.js';
+import { inspectProjectDirectory } from '../../../server/controller/__tests__/project-inspector.js';
+import { ScheduledPromptScheduler, cronExpressionForUtcInstant } from '../../../server/controller/scheduled-prompts/scheduler.js';
+import { ScheduledPromptStore } from '../../../server/controller/scheduled-prompts/store.js';
+import { ScheduledPromptRunLog } from '../../../server/controller/scheduled-prompts/run-log.js';
+import { ScheduledPromptDispatcher } from '../../../server/controller/scheduled-prompts/dispatcher.js';
 
 const CHAT = '1111111111111111';
 const NOW = '2030-01-01T12:00:20.000Z';
@@ -54,7 +54,7 @@ async function withPipeline(run) {
   const view = ledger.initializeChat(CHAT);
   const publisher = ledger.openProducer(CHAT, 'test');
   const dispatched = [];
-  /** @type {import('../../../server/chat-execution/accepted-input-transcript.js').AcceptedInputTranscriptPort} */
+  /** @type {import('../../../server/controller/chat-execution/accepted-input-transcript.js').AcceptedInputTranscriptPort} */
   const admission = {
     hasMatchingInput: () => false,
     admitInput: async (...args) => admission.admitQueuedInput(...args),
@@ -65,7 +65,7 @@ async function withPipeline(run) {
     },
     discardPreparedInput: (chatId, messageId) => ledger.discardPreparedInput(chatId, messageId),
   };
-  /** @type {import('../../../server/chat-execution/types.js').AgentTurnRunnerPort} */
+  /** @type {import('../../../server/controller/chat-execution/types.js').AgentTurnRunnerPort} */
   const runner = {
     async runAgentTurn(chatId, content, options) {
       expect(ledger.currentRows(chatId).filter((row) => row.kind === 'user-input')).toHaveLength(1);

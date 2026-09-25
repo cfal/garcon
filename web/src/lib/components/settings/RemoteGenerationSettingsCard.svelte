@@ -19,7 +19,7 @@
 	import {
 		RemoteGenerationSettingsCardState,
 		type GenerationSettingsKey,
-	} from './remote-generation-settings-card-state.svelte';
+	} from './remote-generation-settings-card-state.svelte.ts';
 
 	interface Props {
 		settingsKey: GenerationSettingsKey;
@@ -43,7 +43,7 @@
 	const remoteSettings = getRemoteSettings();
 	const modelCatalog = getModelCatalog();
 	const selectorMode: ModelSelectorMode = {
-		node: 'select',
+		executor: 'select',
 		agent: 'select',
 		source: 'select',
 		surface: 'settings',
@@ -52,7 +52,7 @@
 	const cardState: RemoteGenerationSettingsCardState = new RemoteGenerationSettingsCardState({
 		remoteSettings,
 		get modelCatalog() {
-			return modelCatalog.forNode(cardState.nodeId);
+			return modelCatalog.forExecutor(cardState.executorId);
 		},
 		get settingsKey() {
 			return settingsKey;

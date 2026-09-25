@@ -15,13 +15,13 @@ test('connection arguments preserve local selectors and an explicit server asser
 
 test('resolved root and role override ambient defaults and preserve URL assertions', () => {
   const configDir = "/private/worker's config";
-  const connection = { ...local, configDir, runtime: 'execution-node' as const };
+  const connection = { ...local, configDir, runtime: 'executor' as const };
   const entries = connectionOptionEntries(connection);
   expect(entries).toEqual([
-    ['--config-dir', configDir], ['--runtime', 'execution-node'], ['--server', local.serverUrl],
+    ['--config-dir', configDir], ['--runtime', 'executor'], ['--server', local.serverUrl],
   ]);
   expect(parseCliArgs([...entries.flat(), 'list', 'agents'], {
     GARCON_RUNTIME: 'controller', GARCON_CONFIG_DIR: '/wrong',
-  })).toMatchObject({ configDir, runtime: 'execution-node', serverUrl: local.serverUrl });
+  })).toMatchObject({ configDir, runtime: 'executor', serverUrl: local.serverUrl });
   expect(connectionCommandPrefix(connection).join(' ')).toContain("--config-dir '/private/worker'\"'\"'s config'");
 });

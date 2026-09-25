@@ -208,15 +208,15 @@ describe('ConversationFeed', () => {
 		expect(group.getAttribute('aria-expanded')).toBe('true');
 	});
 
-	it('keeps simultaneous message and permission file links bound to their panel node', async () => {
+	it('keeps simultaneous message and permission file links bound to their panel executor', async () => {
 		const sessionsStore = createChatSessionsStore();
 		const contexts = [
-			{ chatId: 'chat-local', nodeId: 'local', projectPath: '/workspace/local' },
-			{ chatId: 'chat-remote', nodeId: '22222222-2222-4222-8222-222222222222', projectPath: '/workspace/remote' },
+			{ chatId: 'chat-local', executorId: 'local', projectPath: '/workspace/local' },
+			{ chatId: 'chat-remote', executorId: '22222222-2222-4222-8222-222222222222', projectPath: '/workspace/remote' },
 		];
 		for (const context of contexts) sessionsStore.createDraft({
 			id: context.chatId, projectPath: context.projectPath,
-			startup: { nodeId: context.nodeId, agentId: 'codex', model: 'synthetic', permissionMode: 'default', thinkingMode: 'none', agentSettings: { ownerId: 'codex', schemaVersion: 1, values: {} }, firstMessage: 'Synthetic chat' },
+			startup: { executorId: context.executorId, agentId: 'codex', model: 'synthetic', permissionMode: 'default', thinkingMode: 'none', agentSettings: { ownerId: 'codex', schemaVersion: 1, values: {} }, firstMessage: 'Synthetic chat' },
 		});
 		const open = vi.spyOn(FileSessionRegistry.prototype, 'open').mockResolvedValue(null);
 		const feeds = contexts.map((chatContext) => render(ConversationFeedTestHost, {
@@ -233,7 +233,7 @@ describe('ConversationFeed', () => {
 				});
 				open.mockClear();
 				for (const link of links) await fireEvent.click(link);
-				if (context.nodeId === 'local') {
+				if (context.executorId === 'local') {
 					expect(open.mock.calls.map(([request]) => request.relativePath)).toEqual(['local/message.txt', 'local/plan.txt']);
 				} else {
 					expect(open).not.toHaveBeenCalled();
@@ -497,7 +497,7 @@ describe('ConversationFeed', () => {
 		expect(announcer?.closest('[data-chat-virtual-sizer]')).toBeNull();
 	});
 
-	it('publishes a fresh live-region node for repeated identical announcements', async () => {
+	it('publishes a fresh live-region executor for repeated identical announcements', async () => {
 		const { container } = render(ConversationFeedTestHost, {
 			transcriptScenario: 'row-ids',
 			showAnnouncementTrigger: true,

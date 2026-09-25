@@ -11,7 +11,7 @@
 		oncreate,
 	}: {
 		terminals: Pick<TerminalRegistry, 'hosts' | 'hasRemoteHosts' | 'canCreate'>;
-		oncreate: (nodeId?: string) => void;
+		oncreate: (executorId?: string) => void;
 	} = $props();
 	let menuChoosesHost = $state(false);
 </script>

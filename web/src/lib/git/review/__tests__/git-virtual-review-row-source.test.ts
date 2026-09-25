@@ -50,7 +50,7 @@ function options(
 ): BuildVirtualRowsOptions {
 	return {
 		summary: {
-			document: { nodeId: 'local', instanceId: 'test-instance', documentId: 'document' },
+			document: { executorId: 'local', instanceId: 'test-instance', documentId: 'document' },
 			documentId: 'document',
 			project: '/project',
 			context: 3,

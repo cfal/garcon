@@ -1,18 +1,18 @@
 export class GitProjectInvalidationStore {
-	#versionByNode = $state<Record<string, number>>({});
+	#versionByExecutor = $state<Record<string, number>>({});
 	#revision = 0;
 
-	markChanged(nodeId: string): number {
-		return (this.#versionByNode[nodeId] = ++this.#revision);
+	markChanged(executorId: string): number {
+		return (this.#versionByExecutor[executorId] = ++this.#revision);
 	}
 
-	version(nodeId: string): number {
-		return this.#versionByNode[nodeId] ?? 0;
+	version(executorId: string): number {
+		return this.#versionByExecutor[executorId] ?? 0;
 	}
 
-	pruneNodes(nodeIds: ReadonlySet<string>): void {
-		this.#versionByNode = Object.fromEntries(
-			Object.entries(this.#versionByNode).filter(([nodeId]) => nodeIds.has(nodeId)),
+	pruneExecutors(executorIds: ReadonlySet<string>): void {
+		this.#versionByExecutor = Object.fromEntries(
+			Object.entries(this.#versionByExecutor).filter(([executorId]) => executorIds.has(executorId)),
 		);
 	}
 }

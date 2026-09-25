@@ -6,7 +6,7 @@
 	import { Switch } from '$lib/components/ui/switch';
 	import * as Select from '$lib/components/ui/select';
 	import { untrack } from 'svelte';
-	import { getModelCatalog, getApiProviders, getExecutionNodes } from '$lib/context';
+	import { getModelCatalog, getApiProviders, getExecutors } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import type { ApiProtocol } from '$shared/api-providers';
@@ -31,15 +31,15 @@
 
 	const rootModelCatalog = getModelCatalog();
 	const providers = getApiProviders();
-	const nodes = getExecutionNodes();
-	let nodeId = $state('local');
-	const modelCatalog = $derived(rootModelCatalog.forNode(nodeId));
+	const executors = getExecutors();
+	let executorId = $state('local');
+	const modelCatalog = $derived(rootModelCatalog.forExecutor(executorId));
 	const dialog = new ApiProviderEndpointDialogState({
 		get modelCatalog() {
 			return modelCatalog;
 		},
 		providers,
-		isNodeReady: () => nodes.isReady(nodeId),
+		isExecutorReady: () => executors.isReady(executorId),
 		getProtocol: () => protocol,
 		getEndpointId: () => endpointId,
 		getTemplateId: () => templateId,
@@ -51,26 +51,26 @@
 		dialog.open = open;
 		if (open) {
 			untrack(() => {
-				nodeId = initialNodeId();
+				executorId = initialExecutorId();
 				void dialog.load();
 			});
 		}
 		return () => dialog.dispose();
 	});
 
-	function initialNodeId(): string {
+	function initialExecutorId(): string {
 		const found = endpointId ? providers.findEndpoint(endpointId) : null;
 		if (!found) return 'local';
 
-		const assignedNodes = nodes.nodes.filter((node) => providers.isAssigned(node.id, found.apiProvider.id));
-		const readyNode = assignedNodes.find((node) => nodes.isReady(node.id));
-		return readyNode?.id ?? assignedNodes[0]?.id ?? 'local';
+		const assignedExecutors = executors.executors.filter((executor) => providers.isAssigned(executor.id, found.apiProvider.id));
+		const readyExecutor = assignedExecutors.find((executor) => executors.isReady(executor.id));
+		return readyExecutor?.id ?? assignedExecutors[0]?.id ?? 'local';
 	}
 
-	function selectNode(value: string): void {
-		if (dialog.isSaving || value === nodeId) return;
+	function selectExecutor(value: string): void {
+		if (dialog.isSaving || value === executorId) return;
 		dialog.clearProbeResults();
-		nodeId = value;
+		executorId = value;
 	}
 
 	function handleModelsInput(event: Event) {
@@ -96,34 +96,34 @@
 				void dialog.save();
 			}}
 		>
-			{#if nodes.hasRemoteNodes}
+			{#if executors.hasRemoteExecutors}
 				<div class="grid gap-2">
-					<label class="text-sm font-medium" for="api-provider-node">
+					<label class="text-sm font-medium" for="api-provider-executor">
 						{dialog.apiProviderId
 							? m.settings_provider_test_from()
 							: m.settings_provider_create_on()}
 					</label>
 					<select
-						id="api-provider-node"
+						id="api-provider-executor"
 						class="h-9 min-w-0 w-full rounded-md border border-input bg-background px-3 text-base pointer-fine:text-sm"
-						value={nodeId}
-						onchange={(event) => selectNode(event.currentTarget.value)}
+						value={executorId}
+						onchange={(event) => selectExecutor(event.currentTarget.value)}
 						disabled={dialog.isSaving}
 					>
-						{#each nodes.nodes as node (node.id)}
-							<option value={node.id}>{node.label}</option>
+						{#each executors.executors as executor (executor.id)}
+							<option value={executor.id}>{executor.label}</option>
 						{/each}
 					</select>
 				</div>
 			{/if}
 			{#if dialog.apiProviderId}
 				<p class="text-sm text-muted-foreground">
-					Changes affect every node and workspace using this shared profile.
+					Changes affect every executor and workspace using this shared profile.
 				</p>
 			{/if}
 			{#if !dialog.canProbe}
 				<p class="text-sm text-muted-foreground">
-					Testing requires a ready node and an assigned profile or a newly entered key.
+					Testing requires a ready executor and an assigned profile or a newly entered key.
 				</p>
 			{/if}
 			<div class="grid gap-2">
@@ -291,7 +291,7 @@
 				>
 					{dialog.isTesting
 						? m.settings_api_provider_dialog_testing()
-						: `Test from ${nodes.label(nodeId)}`}
+						: `Test from ${executors.label(executorId)}`}
 				</Button>
 				<Button type="submit" disabled={!dialog.canSave}>
 					{dialog.isSaving

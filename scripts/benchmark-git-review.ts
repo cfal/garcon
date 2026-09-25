@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createGitOperations } from '../server/git/git-service.js';
+import { createGitOperations } from '../server/runtime/git/git-service.js';
 
 export type GitReviewBenchmarkScenario =
   | 'revision-24'

@@ -108,7 +108,7 @@ describe('runChatWait', () => {
     expect(capture.results).toEqual([JSON.stringify(failed, null, 2)]);
   });
 
-  test.each(['controller', 'execution-node'] as const)('does not invent a workspace for a missing receipt: runtime=%s', async (runtime) => {
+  test.each(['controller', 'executor'] as const)('does not invent a workspace for a missing receipt: runtime=%s', async (runtime) => {
     const client: ReceiptClient = {
       async getTurnReceipt() {
         throw new GarconHttpError(

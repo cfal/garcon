@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { setExecutionNodesTestContext } from '$lib/execution-nodes/__tests__/execution-nodes-test-context';
-	setExecutionNodesTestContext();
+	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
+	setExecutorsTestContext();
 	import { onDestroy, untrack } from 'svelte';
 	import ConversationFeed from '../ConversationFeed.svelte';
 	import { createModelCatalogStore } from '$lib/agents/model-catalog-store.svelte.js';
@@ -56,7 +56,7 @@
 	}
 
 	const {
-		chatContext = { chatId: 'chat-1', nodeId: 'local', projectPath: '/workspace' },
+		chatContext = { chatId: 'chat-1', executorId: 'local', projectPath: '/workspace' },
 		sessionsStore = createChatSessionsStore(),
 		onUserScrollIntent,
 		isPreparingInitialScroll = false,

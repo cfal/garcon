@@ -23,7 +23,7 @@ for (const width of [1440, 390]) {
       const bounds = await notice.boundingBox();
       expect(bounds!.width).toBeGreaterThan(0);
       expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
-      const artifacts = new URL('../../artifacts/chromium/', import.meta.url);
+      const artifacts = new URL('../../artifacts/chromium', import.meta.url);
       await mkdir(artifacts, { recursive: true });
       await page.screenshot({ path: fileURLToPath(new URL(`ticket-notice-${width}.png`, artifacts)) });
       for (let click = 0; click < 2; click++) {

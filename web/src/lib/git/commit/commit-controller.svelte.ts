@@ -34,9 +34,9 @@ export interface QuickCommitPathIntent {
 
 export interface CommitControllerDeps extends GitSurfaceControllerDeps {
 	refreshSummary?: () => Promise<void>;
-	markProjectChanged?: (nodeId: string, effectiveProjectKey: string, projectPath: string) => void;
+	markProjectChanged?: (executorId: string, effectiveProjectKey: string, projectPath: string) => void;
 	runMutation?: <T>(request: {
-		nodeId: string;
+		executorId: string;
 		effectiveProjectKey: string;
 		projectPath: string;
 		execute: () => Promise<T>;
@@ -442,7 +442,7 @@ export class CommitController implements PortableSingletonController {
 			const execute = () => gitCommitIndex(project, message);
 			const result = this.deps.runMutation
 				? await this.deps.runMutation({
-						nodeId: project.nodeId,
+						executorId: project.executorId,
 						effectiveProjectKey,
 						projectPath,
 						execute,
@@ -460,7 +460,7 @@ export class CommitController implements PortableSingletonController {
 				this.lastError = null;
 			}
 			if (!this.deps.runMutation) {
-				this.deps.markProjectChanged?.(project.nodeId, effectiveProjectKey, projectPath);
+				this.deps.markProjectChanged?.(project.executorId, effectiveProjectKey, projectPath);
 			}
 			if (this.isCurrentTarget(targetIdentity, generation)) {
 				try {
@@ -575,12 +575,12 @@ export class CommitController implements PortableSingletonController {
 		try {
 			if (!this.isRepositoryReady)
 				throw new Error(
-					'Execution node is unavailable. Inspect the repository before staging again.',
+					'Executor is unavailable. Inspect the repository before staging again.',
 				);
 			const execute = () => gitStagePaths(project, batch.paths, batch.mode);
 			const result = this.deps.runMutation
 				? await this.deps.runMutation({
-						nodeId: project.nodeId,
+						executorId: project.executorId,
 						effectiveProjectKey,
 						projectPath,
 						execute,
@@ -591,7 +591,7 @@ export class CommitController implements PortableSingletonController {
 			}
 			if (!this.isCurrentTarget(targetIdentity, generation)) {
 				if (!this.deps.runMutation) {
-					this.deps.markProjectChanged?.(project.nodeId, effectiveProjectKey, projectPath);
+					this.deps.markProjectChanged?.(project.executorId, effectiveProjectKey, projectPath);
 				}
 				return;
 			}
@@ -604,7 +604,7 @@ export class CommitController implements PortableSingletonController {
 			}
 			this.shouldRefreshAfterDrain = true;
 			if (!this.deps.runMutation) {
-				this.deps.markProjectChanged?.(project.nodeId, effectiveProjectKey, projectPath);
+				this.deps.markProjectChanged?.(project.executorId, effectiveProjectKey, projectPath);
 			}
 		} catch (error) {
 			if (!this.isCurrentTarget(targetIdentity, generation)) return;
@@ -911,10 +911,10 @@ export class CommitController implements PortableSingletonController {
 		this.pruneSnapshots();
 	}
 
-	pruneNodes(nodeIds: ReadonlySet<string>): void {
-		this.target.pruneNodes(nodeIds);
+	pruneExecutors(executorIds: ReadonlySet<string>): void {
+		this.target.pruneExecutors(executorIds);
 		for (const [key, snapshot] of this.snapshots) {
-			if (nodeIds.has(JSON.parse(key)[0])) continue;
+			if (executorIds.has(JSON.parse(key)[0])) continue;
 			if (snapshot.message.trim()) {
 				this.snapshots.set(key, { ...snapshot, tree: [], intents: {} });
 			} else this.snapshots.delete(key);

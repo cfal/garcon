@@ -8,7 +8,7 @@ import {
 function selection(agentId = 'claude'): ConversationExecutionSelection {
 	return {
 		agentId,
-		nodeId: 'local',
+		executorId: 'local',
 		model: agentId === 'claude' ? 'sonnet' : 'gpt-5.5',
 		apiProviderId: agentId === 'claude' ? null : 'openai',
 		modelEndpointId: null,
@@ -35,7 +35,7 @@ describe('ConversationExecutionDraftState', () => {
 		};
 		let draft = new ConversationExecutionDraftState(options);
 		draft.activate('chat-1');
-		const pending = { ...selection('codex'), nodeId: 'remote', projectPath: '/chosen' };
+		const pending = { ...selection('codex'), executorId: 'remote', projectPath: '/chosen' };
 		draft.replaceDestination(pending);
 
 		expect(draft.isHandoffPending).toBe(true);
@@ -66,7 +66,7 @@ describe('ConversationExecutionDraftState', () => {
 			},
 		});
 		draft.activate('chat-1');
-		durableSelection = { ...selection('codex'), nodeId: '22222222-2222-4222-8222-222222222222' };
+		durableSelection = { ...selection('codex'), executorId: '22222222-2222-4222-8222-222222222222' };
 		expect(draft.handoffRequest('epoch-2')).toBeNull();
 		expect(draft.reconcileDurable()).toBeNull();
 		expect(draft.selection).toEqual(durableSelection);
@@ -85,11 +85,11 @@ describe('ConversationExecutionDraftState', () => {
 		draft.activate('chat-1');
 		const staged = {
 			...selection('codex'),
-			nodeId: '33333333-3333-4333-8333-333333333333',
+			executorId: '33333333-3333-4333-8333-333333333333',
 			projectPath: '/explicit/destination',
 		};
 		draft.replaceSelection(staged);
-		durableSelection = { ...selection(), nodeId: '22222222-2222-4222-8222-222222222222' };
+		durableSelection = { ...selection(), executorId: '22222222-2222-4222-8222-222222222222' };
 		expect(draft.reconcileDurable()).toBeNull();
 		expect(draft.handoffRequest('epoch-2')).toEqual({
 			target: staged,
@@ -100,7 +100,7 @@ describe('ConversationExecutionDraftState', () => {
 		expect(draft.handoffRequest('epoch-3')).toBeNull();
 	});
 
-	it.each(['same-node', 'other-node'])(
+	it.each(['same-executor', 'other-executor'])(
 		'preserves a confirmed destination after a %s external move and settings edits',
 		(move) => {
 			let durableSelection = { ...selection(), projectPath: '/local' };
@@ -116,13 +116,13 @@ describe('ConversationExecutionDraftState', () => {
 			draft.activate('chat-1');
 			const staged = {
 				...selection('codex'),
-				nodeId: '33333333-3333-4333-8333-333333333333',
+				executorId: '33333333-3333-4333-8333-333333333333',
 				projectPath: '/explicit/destination',
 			};
 			draft.replaceSelection(staged);
 			durableSelection = {
 				...selection(),
-				nodeId: move === 'same-node' ? staged.nodeId : '22222222-2222-4222-8222-222222222222',
+				executorId: move === 'same-executor' ? staged.executorId : '22222222-2222-4222-8222-222222222222',
 				projectPath: '/other',
 			};
 			draft.patchSelection({ model: 'another-model' });

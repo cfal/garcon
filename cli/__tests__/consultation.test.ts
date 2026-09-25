@@ -143,7 +143,7 @@ function client(overrides: Partial<ConsultationClient> = {}): ConsultationClient
 } {
   return {
     starts: [], runs: [], titles: [],
-    defaultNodeId: 'local',
+    defaultExecutorId: 'local',
     async getChatSnapshot() { return snapshot(); },
     async getModelCatalog() { return catalog(); },
     async getSettings() { return settings; },
@@ -165,16 +165,16 @@ function client(overrides: Partial<ConsultationClient> = {}): ConsultationClient
 }
 
 describe('runConsultation', () => {
-  test('uses the snapshot node and captured epoch across a held catalog request', async () => {
-    const nodeId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  test('uses the snapshot executor and captured epoch across a held catalog request', async () => {
+    const executorId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
     const selected = snapshot();
-    selected.chat.nodeId = nodeId;
+    selected.chat.executorId = executorId;
     const loading = Promise.withResolvers<ModelCatalogResponse>();
     const entered = Promise.withResolvers<void>();
     const testClient = client({
       async getChatSnapshot() { return structuredClone(selected); },
-      async getModelCatalog(agent, _signal, node) {
-        expect([agent, node]).toEqual(['codex', nodeId]);
+      async getModelCatalog(agent, _signal, executor) {
+        expect([agent, executor]).toEqual(['codex', executorId]);
         entered.resolve();
         return loading.promise;
       },
@@ -183,7 +183,7 @@ describe('runConsultation', () => {
       chatId: CHAT_ID, model: 'gpt-5.4', prompt: 'Continue', readsPromptFromStdin: false, json: false,
     }, 'Continue', testClient, output());
     await entered.promise;
-    selected.chat.nodeId = 'local';
+    selected.chat.executorId = 'local';
     selected.chat.agentOwnershipEpoch = 'epoch-2';
     loading.resolve(catalog());
     await pending;
@@ -197,7 +197,7 @@ describe('runConsultation', () => {
     };
     let receiptRead = false;
     const testClient = client({
-      defaultNodeId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      defaultExecutorId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       async getTurnReceipt() {
         receiptRead = true;
         return receipt;
@@ -217,7 +217,7 @@ describe('runConsultation', () => {
     });
     expect(testClient.titles).toEqual([{ chatId: CHAT_ID, title: 'Async review' }]);
     expect(testClient.starts[0]).not.toHaveProperty('orderedPreambleIds');
-    expect(testClient.starts[0]?.nodeId).toBe(testClient.defaultNodeId);
+    expect(testClient.starts[0]?.executorId).toBe(testClient.defaultExecutorId);
   });
 
   test('preserves the accepted async handle when title update fails', async () => {

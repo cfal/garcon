@@ -1,6 +1,6 @@
 // Shared contract for slash-command autocomplete in the chat composer.
 // Commands are discovered per agent and project; see the server discovery
-// path (e.g. server/agents/claude/slash-command-discovery.ts) for sources.
+// path (e.g. server/controller/agents/claude/slash-command-discovery.ts) for sources.
 
 export type SlashCommandSource = 'command' | 'skill';
 

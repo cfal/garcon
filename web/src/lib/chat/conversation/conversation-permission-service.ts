@@ -15,7 +15,7 @@ import type { ConversationExecutionSelection } from './conversation-execution-dr
 export interface ConversationPermissionServiceOptions {
 	readonly deps: Pick<
 		SessionControllerDeps,
-		'sessions' | 'chatState' | 'agentState' | 'lifecycleForChat' | 'conversationUi' | 'appShell' | 'canSubmitToNode' | 'modelCatalogForNode'
+		'sessions' | 'chatState' | 'agentState' | 'lifecycleForChat' | 'conversationUi' | 'appShell' | 'canSubmitToExecutor' | 'modelCatalogForExecutor'
 	>;
 	readonly acceptedInputs: AcceptedInputSubmissionService;
 	readonly queue: ConversationQueueController;
@@ -82,12 +82,12 @@ export class ConversationPermissionService {
 		const { deps } = this.options;
 		const chat = deps.sessions.byId[chatId];
 		if (!chat) return;
-		if ((choice === 'bypass' || choice === 'approve-edits') && (!deps.canSubmitToNode(chat.nodeId ?? 'local')
-			|| !isCustomProviderSelectionAvailable(deps.modelCatalogForNode(chat.nodeId ?? 'local'), chat))) {
+		if ((choice === 'bypass' || choice === 'approve-edits') && (!deps.canSubmitToExecutor(chat.executorId ?? 'local')
+			|| !isCustomProviderSelectionAvailable(deps.modelCatalogForExecutor(chat.executorId ?? 'local'), chat))) {
 			deps.chatState.appendLocalNoticeForChat(
 				chatId,
 				'error',
-				m.chat_notice_failed_resume_plan({ detail: 'Execution node or model catalog is unavailable' }),
+				m.chat_notice_failed_resume_plan({ detail: 'Executor or model catalog is unavailable' }),
 			);
 			return;
 		}

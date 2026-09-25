@@ -8,7 +8,7 @@
 	import ChatEventCard from './rows/ChatEventCard.svelte';
 	import { agentLabelFor } from '$lib/agents/agent-labels';
 	import * as m from '$lib/paraglide/messages.js';
-	import { getExecutionNodes } from '$lib/context';
+	import { getExecutors } from '$lib/context';
 
 	interface Props {
 		message: AgentSwitchMessage;
@@ -16,13 +16,13 @@
 
 	let { message }: Props = $props();
 
-	const executionNodes = getExecutionNodes();
-	const crossNode = $derived((message.fromNodeId ?? 'local') !== (message.toNodeId ?? 'local'));
+	const executors = getExecutors();
+	const crossExecutor = $derived((message.fromExecutorId ?? 'local') !== (message.toExecutorId ?? 'local'));
 	const fromLabel = $derived(
-		`${crossNode ? executionNodes.label(message.fromNodeId) + ' / ' : ''}${agentLabelFor(message.fromAgentId)}`,
+		`${crossExecutor ? executors.label(message.fromExecutorId) + ' / ' : ''}${agentLabelFor(message.fromAgentId)}`,
 	);
 	const toLabel = $derived(
-		`${crossNode ? executionNodes.label(message.toNodeId) + ' / ' : ''}${agentLabelFor(message.toAgentId)}`,
+		`${crossExecutor ? executors.label(message.toExecutorId) + ' / ' : ''}${agentLabelFor(message.toAgentId)}`,
 	);
 </script>
 
@@ -32,8 +32,8 @@
 			<ArrowRightLeft class="h-4 w-4 flex-shrink-0" />
 			<span
 				class="text-xs font-medium"
-				title={crossNode
-					? `${message.fromNodeId ?? 'local'} / ${message.toNodeId ?? 'local'}`
+				title={crossExecutor
+					? `${message.fromExecutorId ?? 'local'} / ${message.toExecutorId ?? 'local'}`
 					: undefined}
 			>
 				{m.chat_message_agent_switch({ from: fromLabel, to: toLabel })}

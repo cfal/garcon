@@ -1,0 +1,1489 @@
+import { assertGitWorkingPath } from './operation-context.js';
+import type { GitMutationResult } from '../../../common/git.js';
+import { createHash } from 'crypto';
+import { promises as fs } from 'fs';
+import path from 'path';
+import {
+  GIT_REVIEW_DOCUMENT_LIMITS,
+  GIT_WORKING_TREE_FINGERPRINT_VERSION,
+} from './types.js';
+import { GitDomainError } from './git-types.js';
+import { createReviewDocumentOperations } from './review-document-service.js';
+import type {
+  ChangeEntry,
+  ChangeFacet,
+  ChangesTreeResult,
+  CompatibleTreeFields,
+  DiffStats,
+  GitCommandTrace,
+  GitReviewDocumentSummary,
+  GitReviewFilePatchBody,
+  GitReviewFileSummary,
+  GitWorkingTreeFingerprintOptions,
+  GitWorkingTreeFingerprintResponse,
+  GitWorkbenchSnapshotOptions,
+  GitWorkbenchSnapshotResponse,
+  GitReviewMode,
+  HunkHeaderResult,
+  HunkLineCounts,
+  NumstatMap,
+  ParsedPatch,
+  PatchHunk,
+  PorcelainStatusEntry,
+  StageHunkOptions,
+  StageSelectionOptions,
+  TransformedHunk,
+  TreeMap,
+  TreeNode,
+} from './types.js';
+import {
+  assertGitRepository,
+  isBinaryFile,
+  readGitBlobPrefix,
+  readOnlyGitOptions,
+  resolvePathWithinProject,
+  runGit,
+  runGitTraced,
+  runGitWithStdin,
+  stripDiffHeaders,
+} from './run.js';
+import { parseNumstatZ, parseUnmergedPaths } from './diff-file-list.js';
+import {
+  categoryForPath,
+  compactRenderedPatch,
+} from './rendered-diff.js';
+import {
+  changeKindForStatus,
+  hasIndexChange,
+  hasWorkTreeChange,
+  parsePorcelainV1Z,
+} from './porcelain-status.js';
+import { chunkGitPathspecs, literalGitPathspec } from './pathspecs.js';
+import { mapWithConcurrencyResult } from '../../common/concurrency.js';
+import {
+  GitReviewDocumentRegistry,
+  registeredWorkbenchFile,
+} from './review-document-registry.js';
+import { captureWorkingPathTokensFromObservation } from './working-path-token.js';
+import { measureGitReviewPhaseSync } from './review-performance.js';
+
+const GIT_EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
+
+function buildFacet(
+  status: string,
+  filePath: string,
+  stats?: DiffStats,
+  originalPath?: string,
+): ChangeFacet | undefined {
+  if (!status || status === ' ' || status === '!') return undefined;
+  return {
+    status,
+    changeKind: changeKindForStatus(status),
+    stats: stats || { additions: 0, deletions: 0 },
+    ...(originalPath ? { originalPath } : {}),
+    category: categoryForPath(filePath),
+  };
+}
+
+function compatibleTreeFields(stagedFacet?: ChangeFacet, unstagedFacet?: ChangeFacet): CompatibleTreeFields {
+  const primaryFacet = unstagedFacet ?? stagedFacet;
+  const stats = compatibleStats(stagedFacet, unstagedFacet);
+  return {
+    staged: Boolean(stagedFacet),
+    hasUnstaged: Boolean(unstagedFacet),
+    changeKind: primaryFacet?.changeKind,
+    additions: stats.additions,
+    deletions: stats.deletions,
+    category: primaryFacet?.category,
+  };
+}
+
+function compatibleStats(stagedFacet?: ChangeFacet, unstagedFacet?: ChangeFacet): DiffStats {
+  return unstagedFacet?.stats ?? stagedFacet?.stats ?? { additions: 0, deletions: 0 };
+}
+
+function buildChangeEntry(
+  statusEntry: PorcelainStatusEntry,
+  workingStats: NumstatMap,
+  cachedStats: NumstatMap,
+): ChangeEntry {
+  const filePath = statusEntry.path.replace(/\/+$/g, '');
+  const stagedFacet = hasIndexChange(statusEntry.indexStatus)
+    ? buildFacet(statusEntry.indexStatus, filePath, cachedStats[filePath], statusEntry.originalPath)
+    : undefined;
+  const unstagedStatus = statusEntry.indexStatus === '?' ? '?' : statusEntry.workTreeStatus;
+  const unstagedFacet = hasWorkTreeChange(unstagedStatus)
+    ? buildFacet(unstagedStatus, filePath, workingStats[filePath], statusEntry.originalPath)
+    : undefined;
+
+  return {
+    path: filePath,
+    indexStatus: statusEntry.indexStatus,
+    workTreeStatus: statusEntry.workTreeStatus,
+    stagedFacet,
+    unstagedFacet,
+  };
+}
+
+function mapTreeToArray(map: TreeMap): TreeNode[] {
+  const result: TreeNode[] = [];
+  for (const [, node] of map) {
+    const entry: TreeNode = { ...node, children: node.children instanceof Map ? mapTreeToArray(node.children) : node.children };
+    result.push(entry);
+  }
+  result.sort((a, b) => {
+    if (a.kind !== b.kind) return a.kind === 'directory' ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+  return result;
+}
+
+export function buildTreeFromStatus(
+  statusOutput: string,
+  workingStats: NumstatMap,
+  cachedStats: NumstatMap,
+  hasCommits: boolean,
+  statsState: ChangesTreeResult['statsState'],
+): ChangesTreeResult {
+  const entries = parsePorcelainV1Z(statusOutput)
+    .map((entry) => buildChangeEntry(entry, workingStats, cachedStats))
+    .filter((entry) => entry.path);
+  return buildTreeFromChangeEntries(entries, hasCommits, statsState);
+}
+
+function buildTreeFromStatusEntries(
+  statusEntries: PorcelainStatusEntry[],
+  workingStats: NumstatMap,
+  cachedStats: NumstatMap,
+  hasCommits: boolean,
+  statsState: ChangesTreeResult['statsState'],
+): ChangesTreeResult {
+  const entries = statusEntries
+    .map((entry) => buildChangeEntry(entry, workingStats, cachedStats))
+    .filter((entry) => entry.path);
+  return buildTreeFromChangeEntries(entries, hasCommits, statsState);
+}
+
+function buildTreeFromChangeEntries(
+  entries: ChangeEntry[],
+  hasCommits: boolean,
+  statsState: ChangesTreeResult['statsState'],
+): ChangesTreeResult {
+  const rootMap: TreeMap = new Map();
+
+  for (const entry of entries) {
+    const segments = entry.path.split('/').filter(Boolean);
+    if (segments.length === 0) continue;
+    let currentLevel = rootMap;
+
+    for (let i = 0; i < segments.length; i++) {
+      const segment = segments[i];
+      const isLastSegment = i === segments.length - 1;
+
+      if (!currentLevel.has(segment)) {
+        if (isLastSegment) {
+          const compatible = compatibleTreeFields(entry.stagedFacet, entry.unstagedFacet);
+          currentLevel.set(segment, {
+            path: entry.path,
+            name: segment,
+            kind: 'file',
+            indexStatus: entry.indexStatus,
+            workTreeStatus: entry.workTreeStatus,
+            stagedFacet: entry.stagedFacet,
+            unstagedFacet: entry.unstagedFacet,
+            ...compatible,
+          });
+        } else {
+          currentLevel.set(segment, {
+            path: segments.slice(0, i + 1).join('/'),
+            name: segment,
+            kind: 'directory',
+            indexStatus: ' ',
+            workTreeStatus: ' ',
+            staged: false,
+            hasUnstaged: false,
+            additions: 0,
+            deletions: 0,
+            children: new Map(),
+          });
+        }
+      }
+
+      const node = currentLevel.get(segment);
+      if (!node) continue;
+      if (!isLastSegment && node.kind === 'directory' && node.children instanceof Map) {
+        const stats = compatibleStats(entry.stagedFacet, entry.unstagedFacet);
+        if (entry.stagedFacet) {
+          node.staged = true;
+          node.stagedFacet = node.stagedFacet || entry.stagedFacet;
+          node.indexStatus = 'M';
+        }
+        if (entry.unstagedFacet) {
+          node.hasUnstaged = true;
+          node.unstagedFacet = node.unstagedFacet || entry.unstagedFacet;
+          node.workTreeStatus = 'M';
+        }
+        node.changeKind = node.unstagedFacet?.changeKind ?? node.stagedFacet?.changeKind;
+        node.additions = (node.additions || 0) + stats.additions;
+        node.deletions = (node.deletions || 0) + stats.deletions;
+        currentLevel = node.children;
+      }
+    }
+  }
+
+  return { root: mapTreeToArray(rootMap), hasCommits, statsState };
+}
+
+// Partial-staging implementation follows lazygit's patch-transform approach.
+// See https://github.com/jesseduffield/lazygit (pkg/commands/patch/).
+//
+// Key design decisions (lazygit-aligned):
+//
+// 1. The patch is always built from the SAME diff the UI displayed. The
+//    frontend passes viewMode and contextLines so the server reproduces
+//    the exact diff, ensuring line indices match.
+//
+// 2. For staging (forward apply): unselected deletions become context
+//    lines (the old line stays in the index unchanged). Unselected
+//    additions are dropped entirely (they won't appear in the index).
+//
+// 3. For unstaging (reverse apply): the inverse -- unselected additions
+//    become context, unselected deletions are dropped.
+//
+// 4. Hunk headers (@@ lines) are always recomputed from the transformed
+//    body rather than parsed from the original, avoiding count drift.
+//
+// 5. newStart is computed as oldStart + cumulativeOffset where the offset
+//    tracks the net line-count delta from prior transformed hunks.
+//
+// 6. The patch is applied via `git apply --cached` (staging) or
+//    `git apply --cached --reverse` (unstaging).
+
+// Replaces full diff header with minimal a/b paths, matching lazygit's
+// FileNameOverride approach. Prevents failures when partially staging
+// deleted files or files with mode changes.
+function simplifyDiffHeader(filePath: string): string[] {
+  return [
+    `--- a/${filePath}`,
+    `+++ b/${filePath}`,
+  ];
+}
+
+function stagingDiffHeader(file: string, parsed: ParsedPatch, mode: 'stage' | 'unstage'): string[] {
+  if (mode === 'stage') {
+    const fileSectionCount = parsed.header.filter((line) => line.startsWith('diff --git ')).length;
+    const createsFile = parsed.header.some((line) => line.startsWith('new file mode '));
+    if (fileSectionCount === 1 && createsFile) return parsed.header;
+  }
+  return simplifyDiffHeader(file);
+}
+
+// Strips the trailing empty element that `split('\n')` produces from a
+// newline-terminated diff -- without this, the last hunk would contain a
+// spurious empty line that corrupts line counts in buildHunkHeader.
+function parsePatch(patchText: string): ParsedPatch {
+  const allLines = patchText.split('\n');
+  if (allLines.length > 0 && allLines[allLines.length - 1] === '') {
+    allLines.pop();
+  }
+
+  const header: string[] = [];
+  const hunks: PatchHunk[] = [];
+  let current: PatchHunk | null = null;
+
+  for (const line of allLines) {
+    if (line.startsWith('diff --git ')) {
+      if (current) hunks.push(current);
+      current = null;
+      header.push(line);
+      continue;
+    }
+    if (!current && (line.startsWith('index ') ||
+      line.startsWith('new file') || line.startsWith('deleted file') ||
+      line.startsWith('---') || line.startsWith('+++') ||
+      line.startsWith('old mode') || line.startsWith('new mode'))) {
+      header.push(line);
+      continue;
+    }
+    if (line.startsWith('@@')) {
+      if (current) hunks.push(current);
+      current = { rawHeader: line, lines: [] };
+      continue;
+    }
+    if (current) {
+      current.lines.push(line);
+    }
+  }
+  if (current) hunks.push(current);
+  return { header, hunks };
+}
+
+// Transforms hunk body lines for partial staging/unstaging.
+//
+// For each line in the hunk body, decides whether to keep, convert to
+// context, or drop based on whether its diffLineIndex is in selectedSet.
+//
+// Forward staging (reverse=false):
+//   - Selected lines: kept as-is (both + and -)
+//   - Unselected `-` lines: converted to context (` ` prefix). The line
+//     exists in the old file and we're NOT removing it from the index.
+//   - Unselected `+` lines: dropped entirely. We're NOT adding them.
+//
+// Reverse staging / unstaging (reverse=true):
+//   - Selected lines: kept as-is
+//   - Unselected `+` lines: converted to context. In reverse mode,
+//     additions in the cached diff represent lines IN the index that we
+//     want to keep, so they become context.
+//   - Unselected `-` lines: dropped. In reverse mode, deletions represent
+//     lines NOT in the index; dropping them is a no-op.
+//
+// `\ No newline at end of file` markers are dropped when their preceding
+// change line was dropped, preserving patch validity.
+function transformHunkLines(
+  bodyLines: string[],
+  selectedSet: Set<number>,
+  startIndex: number,
+  reverse: boolean,
+): TransformedHunk {
+  const result: string[] = [];
+  let idx = startIndex;
+  let lastLineDropped = false;
+
+  for (const line of bodyLines) {
+    if (line.startsWith('\\')) {
+      // Keep the no-newline marker only if we kept the preceding change line.
+      if (!lastLineDropped) result.push(line);
+      continue;
+    }
+
+    const isAdd = line.startsWith('+');
+    const isDel = line.startsWith('-');
+
+    if (!isAdd && !isDel) {
+      // Context line: always preserved in the transformed patch.
+      result.push(line);
+      idx++;
+      lastLineDropped = false;
+      continue;
+    }
+
+    const selected = selectedSet.has(idx);
+    idx++;
+
+    if (selected) {
+      result.push(line);
+      lastLineDropped = false;
+    } else if (reverse ? isAdd : isDel) {
+      // Unselected deletion (forward) or addition (reverse): convert to
+      // context. This preserves the line in the index unchanged.
+      result.push(' ' + line.substring(1));
+      lastLineDropped = false;
+    } else {
+      // Unselected addition (forward) or deletion (reverse): drop from
+      // the patch entirely. This omits the change from the index.
+      lastLineDropped = true;
+    }
+  }
+
+  return { lines: result, nextIndex: idx };
+}
+
+// Returns true when a transformed hunk body contains real changes.
+function hunkHasChanges(bodyLines: string[]): boolean {
+  return bodyLines.some((l) => l.startsWith('+') || l.startsWith('-'));
+}
+
+// Counts old-side and new-side lines in a hunk body. Context lines count
+// toward both sides. `\` markers are ignored. This always recomputes from
+// the actual body content rather than trusting the original @@ header,
+// because transformHunkLines may have changed the line composition.
+function countHunkLines(bodyLines: string[]): HunkLineCounts {
+  let oldCount = 0;
+  let newCount = 0;
+  for (const l of bodyLines) {
+    if (l.startsWith('\\')) continue;
+    if (l.startsWith('-')) oldCount++;
+    else if (l.startsWith('+')) newCount++;
+    else { oldCount++; newCount++; }
+  }
+  return { oldCount, newCount };
+}
+
+// Builds a corrected @@ hunk header. `startOffset` is the cumulative
+// delta (newCount - oldCount) from all prior hunks. newStart is computed
+// as oldStart + startOffset, with an additional adjustment when a side
+// transitions to/from zero length (matching lazygit's hunk header logic).
+function buildHunkHeader(rawHeader: string, bodyLines: string[], startOffset: number): HunkHeaderResult {
+  const match = rawHeader.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$/);
+  if (!match) return { header: rawHeader, nextOffset: startOffset };
+
+  const oldStart = parseInt(match[1], 10);
+  const trailing = match[3] || '';
+  const { oldCount, newCount } = countHunkLines(bodyLines);
+
+  // When a side is zero-length (e.g. new file or deleted file), the start
+  // position needs an extra +1/-1 adjustment per unified diff convention.
+  let zeroLengthAdj = 0;
+  if (oldCount === 0) zeroLengthAdj = 1;
+  else if (newCount === 0) zeroLengthAdj = -1;
+
+  const newStart = oldStart + startOffset + zeroLengthAdj;
+  const nextOffset = startOffset + (newCount - oldCount);
+
+  return {
+    header: `@@ -${oldStart},${oldCount} +${newStart},${newCount} @@${trailing}`,
+    nextOffset,
+  };
+}
+
+function hashString(input: string): string {
+  return createHash('sha256').update(input).digest('hex').slice(0, 16);
+}
+
+async function hashFilePrefix(filePath: string): Promise<string> {
+  await assertGitWorkingPath(filePath);
+  const handle = await fs.open(filePath, 'r');
+  try {
+    const buffer = Buffer.alloc(65_536);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    return createHash('sha256').update(buffer.subarray(0, bytesRead)).digest('hex').slice(0, 16);
+  } finally {
+    await handle.close();
+  }
+}
+
+async function indexFingerprint(projectPath: string, file: string, signal?: AbortSignal): Promise<string> {
+  try {
+    const { stdout } = await runGit(
+      projectPath,
+      ['ls-files', '-s', '--', literalGitPathspec(file)],
+      readOnlyGitOptions({ signal }),
+    );
+    return stdout.trim();
+  } catch {
+    return '';
+  }
+}
+
+async function headObjectFingerprint(projectPath: string, file: string, signal?: AbortSignal): Promise<string> {
+  try {
+    const { stdout } = await runGit(
+      projectPath,
+      ['rev-parse', `HEAD:${file}`],
+      readOnlyGitOptions({ signal }),
+    );
+    return stdout.trim();
+  } catch {
+    return '';
+  }
+}
+
+async function worktreeFingerprint(
+  projectPath: string,
+  file: string,
+  options: { includeContentHash?: boolean } = {},
+): Promise<string> {
+  try {
+    const filePath = resolvePathWithinProject(projectPath, file);
+    await assertGitWorkingPath(filePath);
+    const stats = await fs.stat(filePath);
+    if (!stats.isFile()) return `not-file:${stats.size}:${stats.mtimeMs}`;
+    const parts: Array<string | number> = [
+      'file',
+      stats.size,
+      Math.trunc(stats.mtimeMs),
+    ];
+    if (options.includeContentHash) parts.push(await hashFilePrefix(filePath));
+    return parts.join(':');
+  } catch {
+    return 'missing';
+  }
+}
+
+interface BatchedFingerprintInputs {
+  indexEntriesByPath: Map<string, string>;
+  headEntriesByPath: Map<string, string>;
+}
+
+function parseLsFilesStageZ(output: string): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const token of output.split('\0')) {
+    if (!token) continue;
+    const tabIndex = token.indexOf('\t');
+    if (tabIndex < 0) continue;
+    const filePath = token.slice(tabIndex + 1);
+    if (filePath) map.set(filePath, token);
+  }
+  return map;
+}
+
+function parseLsTreeZ(output: string): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const token of output.split('\0')) {
+    if (!token) continue;
+    const tabIndex = token.indexOf('\t');
+    if (tabIndex < 0) continue;
+    const filePath = token.slice(tabIndex + 1);
+    const objectId = token.slice(0, tabIndex).split(' ')[2] ?? '';
+    if (filePath && objectId) map.set(filePath, objectId);
+  }
+  return map;
+}
+
+function uniqueGitPaths(paths: string[]): string[] {
+  return Array.from(new Set(paths.filter(Boolean))).sort();
+}
+
+async function loadFingerprintIndexEntries(
+  projectPath: string,
+  paths: string[],
+  signal?: AbortSignal,
+): Promise<string[]> {
+  const entriesByPath = await loadFingerprintIndexEntryMap(projectPath, paths, signal);
+  return Array.from(entriesByPath, ([filePath, entry]) => `${filePath}\x00${entry}`).sort();
+}
+
+async function loadFingerprintIndexEntryMap(
+  projectPath: string,
+  paths: string[],
+  signal?: AbortSignal,
+): Promise<Map<string, string>> {
+  const entries = new Map<string, string>();
+  for (const chunk of chunkGitPathspecs(paths)) {
+    try {
+      const { stdout } = await runGit(
+        projectPath,
+        ['ls-files', '-s', '-z', '--', ...chunk],
+        readOnlyGitOptions({ signal }),
+      );
+      for (const [filePath, entry] of parseLsFilesStageZ(stdout)) {
+        entries.set(filePath, entry);
+      }
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      // Status output still captures the changed path. Missing index metadata should not make freshness fail.
+    }
+  }
+  return entries;
+}
+
+async function worktreeStatFingerprint(projectPath: string, file: string): Promise<string> {
+  try {
+    const filePath = resolvePathWithinProject(projectPath, file);
+    await assertGitWorkingPath(filePath);
+    const stats = await fs.stat(filePath);
+    const kind = stats.isFile() ? 'file' : 'not-file';
+    return [
+      kind,
+      file,
+      stats.size,
+      Math.trunc(stats.mtimeMs),
+      Math.trunc(stats.ctimeMs),
+    ].join(':');
+  } catch {
+    return `missing:${file}`;
+  }
+}
+
+function shouldStatWorktreeForFingerprint(entry: PorcelainStatusEntry): boolean {
+  if (entry.workTreeStatus === 'D') return false;
+  if (entry.indexStatus === '?' || entry.workTreeStatus === '?') return true;
+  return hasWorkTreeChange(entry.workTreeStatus);
+}
+
+async function loadFingerprintWorktreeStats(
+  projectPath: string,
+  entries: PorcelainStatusEntry[],
+): Promise<string[]> {
+  const paths = uniqueGitPaths(
+    entries
+      .filter(shouldStatWorktreeForFingerprint)
+      .map((entry) => entry.path),
+  );
+  return (await mapWithConcurrencyResult(
+    paths,
+    16,
+    (filePath) => worktreeStatFingerprint(projectPath, filePath),
+  )).sort();
+}
+
+interface WorkbenchFingerprintInput {
+  projectPath: string;
+  repoRoot: string;
+  branch: string;
+  head: string;
+  statusOutput: string;
+  workingStatsOutput: string;
+  cachedStatsOutput: string;
+  unmergedOutput: string;
+  statusEntries: PorcelainStatusEntry[];
+  indexEntriesByPath?: Map<string, string>;
+  worktreeStatTokens?: string[];
+  signal?: AbortSignal;
+}
+
+async function buildWorkbenchFingerprintFromInputs({
+  projectPath,
+  repoRoot,
+  branch,
+  head,
+  statusOutput,
+  workingStatsOutput,
+  cachedStatsOutput,
+  unmergedOutput,
+  statusEntries,
+  indexEntriesByPath,
+  worktreeStatTokens: loadedWorktreeStatTokens,
+  signal,
+}: WorkbenchFingerprintInput): Promise<{ fingerprint: string; changedPathCount: number }> {
+  const changedPaths = uniqueGitPaths(statusEntries.map((entry) => entry.path));
+  const [indexEntryTokens, worktreeStatTokens] = await Promise.all([
+    indexEntriesByPath
+      ? Promise.resolve(
+          Array.from(indexEntriesByPath, ([filePath, entry]) => `${filePath}\x00${entry}`).sort(),
+        )
+      : loadFingerprintIndexEntries(projectPath, changedPaths, signal),
+    loadedWorktreeStatTokens
+      ? Promise.resolve(loadedWorktreeStatTokens)
+      : loadFingerprintWorktreeStats(projectPath, statusEntries),
+  ]);
+
+  const fingerprint = `v${GIT_WORKING_TREE_FINGERPRINT_VERSION}:${hashString([
+		`git-working-tree-fingerprint-v${GIT_WORKING_TREE_FINGERPRINT_VERSION}`,
+    projectPath,
+    repoRoot,
+    branch,
+    head,
+    statusOutput,
+    workingStatsOutput,
+    cachedStatsOutput,
+    unmergedOutput,
+    ...indexEntryTokens,
+    ...worktreeStatTokens,
+  ].join('\x1f'))}`;
+
+  return { fingerprint, changedPathCount: changedPaths.length };
+}
+
+async function loadBatchedFingerprintInputs(
+  projectPath: string,
+  files: TreeNode[],
+  existingIndexEntries: Map<string, string> | undefined,
+  signal?: AbortSignal,
+): Promise<BatchedFingerprintInputs> {
+  const paths = files.map((file) => file.path);
+  const indexEntriesByPath = new Map(existingIndexEntries);
+  const headEntriesByPath = new Map<string, string>();
+  for (const chunk of chunkGitPathspecs(paths)) {
+    const [indexResult, headResult] = await Promise.allSettled([
+      existingIndexEntries
+        ? Promise.resolve({ stdout: '' })
+        : runGit(
+            projectPath,
+            ['ls-files', '-s', '-z', '--', ...chunk],
+            readOnlyGitOptions({ signal }),
+          ),
+      runGit(projectPath, ['ls-tree', '-rz', 'HEAD', '--', ...chunk], readOnlyGitOptions({ signal })),
+    ]);
+    if (!existingIndexEntries && indexResult.status === 'fulfilled') {
+      for (const [filePath, entry] of parseLsFilesStageZ(indexResult.value.stdout)) {
+        indexEntriesByPath.set(filePath, entry);
+      }
+    }
+    if (headResult.status === 'fulfilled') {
+      for (const [filePath, entry] of parseLsTreeZ(headResult.value.stdout)) {
+        headEntriesByPath.set(filePath, entry);
+      }
+    }
+  }
+  return { indexEntriesByPath, headEntriesByPath };
+}
+
+async function buildSummaryBodyFingerprint(
+  projectPath: string,
+  file: string,
+  statusEntry: PorcelainStatusEntry,
+  mode: GitReviewMode,
+  inputs: BatchedFingerprintInputs,
+): Promise<string> {
+  const base = [
+    mode,
+    file,
+    statusEntry.originalPath ?? '',
+    statusEntry.indexStatus,
+    statusEntry.workTreeStatus,
+  ];
+  if (mode === 'staged') {
+    base.push(inputs.indexEntriesByPath.get(file) ?? '');
+  } else if (statusEntry.workTreeStatus === 'D') {
+    base.push(inputs.indexEntriesByPath.get(file) ?? '');
+    base.push(inputs.headEntriesByPath.get(file) ?? '');
+  } else {
+    base.push(await worktreeFingerprint(projectPath, file, { includeContentHash: true }));
+  }
+  return hashString(base.join('\x1f'));
+}
+
+async function buildBodyFingerprint(
+  projectPath: string,
+  file: string,
+  statusEntry: PorcelainStatusEntry,
+  mode: GitReviewMode,
+  signal?: AbortSignal,
+): Promise<string> {
+  const base = [
+    mode,
+    file,
+    statusEntry.originalPath ?? '',
+    statusEntry.indexStatus,
+    statusEntry.workTreeStatus,
+  ];
+  if (mode === 'staged') {
+    base.push(await indexFingerprint(projectPath, file, signal));
+  } else if (statusEntry.workTreeStatus === 'D') {
+    base.push(await indexFingerprint(projectPath, file, signal));
+    base.push(await headObjectFingerprint(projectPath, file, signal));
+  } else {
+    base.push(await worktreeFingerprint(projectPath, file, { includeContentHash: true }));
+  }
+  return hashString(base.join('\x1f'));
+}
+
+async function isBinaryWorktreeFile(projectPath: string, file: string): Promise<boolean> {
+  try {
+    const filePath = resolvePathWithinProject(projectPath, file);
+    await assertGitWorkingPath(filePath);
+    const stats = await fs.stat(filePath);
+    return stats.isFile() && await isBinaryFile(filePath);
+  } catch {
+    return false;
+  }
+}
+
+async function isBinaryIndexBlobPrefix(
+  projectPath: string,
+  file: string,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  try { return (await readGitBlobPrefix(projectPath, `:${file}`, signal)).includes(0x00); }
+  catch { return false; }
+}
+
+async function isSummaryBinaryFile(
+  projectPath: string,
+  file: string,
+  statusEntry: PorcelainStatusEntry,
+  mode: GitReviewMode,
+  stats: DiffStats,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  if (stats.isBinary) return true;
+  const isAmbiguousChange = stats.additions === 0 && stats.deletions === 0;
+  if (mode === 'staged') {
+    return statusEntry.indexStatus !== 'D' && isAmbiguousChange
+      ? isBinaryIndexBlobPrefix(projectPath, file, signal)
+      : false;
+  }
+  if (statusEntry.workTreeStatus === 'D') return false;
+  const isUntracked = statusEntry.indexStatus === '?' || statusEntry.workTreeStatus === '?';
+  return (isUntracked || isAmbiguousChange) && await isBinaryWorktreeFile(projectPath, file);
+}
+
+function flattenFileNodes(nodes: TreeNode[]): TreeNode[] {
+  const files: TreeNode[] = [];
+  for (const node of nodes) {
+    if (node.kind === 'file') {
+      files.push(node);
+      continue;
+    }
+    if (Array.isArray(node.children)) files.push(...flattenFileNodes(node.children));
+  }
+  return files;
+}
+
+function facetForReviewMode(node: TreeNode, mode: GitReviewMode): ChangeFacet | undefined {
+  return mode === 'staged' ? node.stagedFacet : node.unstagedFacet;
+}
+
+async function summarizeReviewFile(
+  projectPath: string,
+  node: TreeNode,
+  mode: GitReviewMode,
+  fingerprintInputs?: BatchedFingerprintInputs,
+  unmergedPaths: ReadonlySet<string> = new Set(),
+  signal?: AbortSignal,
+): Promise<GitReviewFileSummary | null> {
+  const facet = facetForReviewMode(node, mode);
+  if (!facet) return null;
+
+  const statusEntry: PorcelainStatusEntry = {
+    path: node.path,
+    originalPath: facet.originalPath,
+    indexStatus: node.indexStatus ?? ' ',
+    workTreeStatus: node.workTreeStatus ?? ' ',
+  };
+  const stats = facet.stats ?? { additions: 0, deletions: 0 };
+  const category = facet.category ?? node.category ?? categoryForPath(node.path);
+  const isBinary = await isSummaryBinaryFile(projectPath, node.path, statusEntry, mode, stats, signal);
+  const estimatedRows = Math.max(1, stats.additions + stats.deletions + 1);
+  const isConflicted = unmergedPaths.has(node.path);
+  const exceedsRowLimit = !isBinary && estimatedRows > GIT_REVIEW_DOCUMENT_LIMITS.maxFileRows;
+  const isTooLarge = isConflicted || exceedsRowLimit;
+  const bodyFingerprint = fingerprintInputs
+    ? await buildSummaryBodyFingerprint(projectPath, node.path, statusEntry, mode, fingerprintInputs)
+    : await buildBodyFingerprint(projectPath, node.path, statusEntry, mode, signal);
+
+  return {
+    path: node.path,
+    ...(facet.originalPath ? { originalPath: facet.originalPath } : {}),
+    indexStatus: statusEntry.indexStatus,
+    workTreeStatus: statusEntry.workTreeStatus,
+    category: isBinary ? 'binary' : isTooLarge ? 'large' : category,
+    additions: stats.additions,
+    deletions: stats.deletions,
+    estimatedRows,
+    bodyState: isBinary ? 'binary' : isTooLarge ? 'too-large' : 'unloaded',
+    bodyFingerprint,
+    isGenerated: category === 'generated',
+    isBinary,
+    isTooLarge,
+    ...(isBinary ? { limitReason: 'binary' as const, limitMessage: 'Binary diff is not available.' } : {}),
+    ...(isConflicted
+      ? {
+          limitReason: 'unsupported-file-kind' as const,
+          limitMessage: 'Resolve this conflict before reviewing its diff.',
+        }
+      : isTooLarge
+      ? {
+          limitReason: 'file-too-many-rows' as const,
+          limitMessage: `Diff exceeds ${GIT_REVIEW_DOCUMENT_LIMITS.maxFileRows} estimated rows.`,
+        }
+      : {}),
+  };
+}
+
+function reviewDocumentId(
+  projectPath: string,
+  mode: GitReviewMode,
+  context: number,
+  files: GitReviewFileSummary[],
+): string {
+  return hashString([
+    projectPath,
+    mode,
+    context,
+    ...files.map((file) => `${file.path}:${file.bodyFingerprint}`),
+  ].join('\x1f'));
+}
+
+async function buildReviewDocumentSummaryFromTree({
+  projectPath,
+  mode,
+  context,
+  treeRoot,
+  indexEntriesByPath,
+  unmergedPaths,
+  signal,
+}: {
+  projectPath: string;
+  mode: GitReviewMode;
+  context: number;
+  treeRoot: TreeNode[];
+  indexEntriesByPath?: Map<string, string>;
+  unmergedPaths?: ReadonlySet<string>;
+  signal?: AbortSignal;
+}): Promise<GitReviewDocumentSummary> {
+  const effectiveMode = mode === 'staged' ? 'staged' : 'working';
+  const allFiles = flattenFileNodes(treeRoot);
+  const relevantFiles = allFiles.filter((node) => Boolean(facetForReviewMode(node, effectiveMode)));
+  const limitedFiles = relevantFiles.slice(0, GIT_REVIEW_DOCUMENT_LIMITS.maxSummaryFiles);
+  const fingerprintInputs = await loadBatchedFingerprintInputs(
+    projectPath,
+    limitedFiles,
+    indexEntriesByPath,
+    signal,
+  );
+  const summaries = (await mapWithConcurrencyResult(
+    limitedFiles,
+    GIT_REVIEW_DOCUMENT_LIMITS.bodyConcurrency,
+    (node) =>
+      summarizeReviewFile(
+        projectPath,
+        node,
+        effectiveMode,
+        fingerprintInputs,
+        unmergedPaths,
+        signal,
+      ),
+  )).filter((summary): summary is GitReviewFileSummary => Boolean(summary));
+
+  const documentId = reviewDocumentId(projectPath, effectiveMode, context, summaries);
+  return {
+    documentId,
+    project: projectPath,
+    mode: effectiveMode,
+    context,
+    files: summaries,
+    limits: GIT_REVIEW_DOCUMENT_LIMITS,
+    ...(relevantFiles.length > limitedFiles.length
+      ? {
+          collectionLimit: {
+            reason: 'collection-too-many-files' as const,
+            message: `Showing ${limitedFiles.length} of ${relevantFiles.length} changed files.`,
+            visibleFiles: limitedFiles.length,
+            totalFilesKnown: relevantFiles.length,
+          },
+        }
+      : {}),
+  };
+}
+
+function chooseSelectedFile(files: GitReviewFileSummary[], selectedFile?: string | null): string | null {
+  if (selectedFile && files.some((file) => file.path === selectedFile)) return selectedFile;
+  return files[0]?.path ?? null;
+}
+
+function chooseFirstBodyCandidates(
+  files: GitReviewFileSummary[],
+  selectedFile: string | null,
+  count: number,
+): string[] {
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+  function add(filePath: string | null): void {
+    if (!filePath || seen.has(filePath) || candidates.length >= count) return;
+    const file = files.find((candidate) => candidate.path === filePath);
+    if (!file || file.bodyState !== 'unloaded') return;
+    seen.add(filePath);
+    candidates.push(filePath);
+  }
+  add(selectedFile);
+  for (const file of files) add(file.path);
+  return candidates;
+}
+
+export function notRepositorySnapshot(projectPath: string): GitWorkbenchSnapshotResponse {
+  return {
+    status: 'not-git-repository',
+    project: projectPath,
+    target: null,
+    tree: null,
+    reviewSummary: null,
+    selectedFile: null,
+    firstBodyCandidates: [],
+    message: 'Git is not initialized in this directory.',
+  };
+}
+
+export function notRepositoryFingerprint(projectPath: string): GitWorkingTreeFingerprintResponse {
+  return {
+    status: 'not-git-repository',
+    project: projectPath,
+    fingerprintVersion: GIT_WORKING_TREE_FINGERPRINT_VERSION,
+    fingerprint: null,
+    message: 'Git is not initialized in this directory.',
+  };
+}
+
+export interface GitWorkingTreeObservation {
+  projectPath: string;
+  repoRoot: string;
+  branch: string;
+  head: string;
+  statusOutput: string;
+  workingStatsOutput: string;
+  cachedStatsOutput: string;
+  unmergedOutput: string;
+  statusEntries: PorcelainStatusEntry[];
+  changedPaths: string[];
+  indexEntriesByPath: Map<string, string>;
+  worktreeStatTokens: string[];
+  fingerprint: string;
+  changedPathCount: number;
+}
+
+class GitWorkingTreeNotRepositoryError extends Error {
+  constructor(cause: unknown) {
+    super('Git working-tree observation requires a repository.', { cause });
+    this.name = 'GitWorkingTreeNotRepositoryError';
+  }
+}
+
+export async function captureWorkingTreeObservation({
+  projectPath,
+  repoRoot: knownRepoRoot,
+  trace,
+  signal,
+}: GitWorkingTreeFingerprintOptions & { repoRoot?: string }): Promise<GitWorkingTreeObservation> {
+  const [
+    repoRootResult,
+    branchResult,
+    headResult,
+    statusResult,
+    workingStatsResult,
+    cachedStatsResult,
+    unmergedResult,
+  ] = await Promise.allSettled([
+    knownRepoRoot
+      ? Promise.resolve({ stdout: knownRepoRoot, stderr: '' })
+      : runGitTraced(
+          projectPath,
+          ['rev-parse', '--show-toplevel'],
+          trace,
+          readOnlyGitOptions({ signal }),
+        ),
+    runGitTraced(projectPath, ['branch', '--show-current'], trace, readOnlyGitOptions({ signal })),
+    runGitTraced(projectPath, ['rev-parse', 'HEAD'], trace, readOnlyGitOptions({ signal })),
+    runGitTraced(
+      projectPath,
+      ['status', '--porcelain=v1', '-z', '-uall'],
+      trace,
+      readOnlyGitOptions({ signal }),
+    ),
+    runGitTraced(projectPath, ['diff', '--numstat', '-z'], trace, readOnlyGitOptions({ signal })),
+    runGitTraced(
+      projectPath,
+      ['diff', '--cached', '--numstat', '-z'],
+      trace,
+      readOnlyGitOptions({ signal }),
+    ),
+    runGitTraced(projectPath, ['ls-files', '-u', '-z'], trace, readOnlyGitOptions({ signal })),
+  ]);
+
+  if (repoRootResult.status === 'rejected') {
+    if (signal?.aborted) throw repoRootResult.reason;
+    throw new GitWorkingTreeNotRepositoryError(repoRootResult.reason);
+  }
+  if (statusResult.status === 'rejected') throw statusResult.reason;
+
+  const repoRoot = repoRootResult.value.stdout.trim() || projectPath;
+  const branch = branchResult.status === 'fulfilled' ? branchResult.value.stdout.trim() : '';
+  const head = headResult.status === 'fulfilled' ? headResult.value.stdout.trim() : '';
+  const statusEntries = parsePorcelainV1Z(statusResult.value.stdout);
+  const changedPaths = uniqueGitPaths(statusEntries.map((entry) => entry.path));
+  const [indexEntriesByPath, worktreeStatTokens] = await Promise.all([
+    loadFingerprintIndexEntryMap(projectPath, changedPaths, signal),
+    loadFingerprintWorktreeStats(projectPath, statusEntries),
+  ]);
+  const { fingerprint, changedPathCount } = await buildWorkbenchFingerprintFromInputs({
+    projectPath,
+    repoRoot,
+    branch,
+    head,
+    statusOutput: statusResult.value.stdout,
+    workingStatsOutput: workingStatsResult.status === 'fulfilled' ? workingStatsResult.value.stdout : '',
+    cachedStatsOutput: cachedStatsResult.status === 'fulfilled' ? cachedStatsResult.value.stdout : '',
+    unmergedOutput: unmergedResult.status === 'fulfilled' ? unmergedResult.value.stdout : '',
+    statusEntries,
+    indexEntriesByPath,
+    worktreeStatTokens,
+    signal,
+  });
+
+  return {
+    projectPath,
+    repoRoot,
+    branch,
+    head,
+    statusOutput: statusResult.value.stdout,
+    workingStatsOutput: workingStatsResult.status === 'fulfilled' ? workingStatsResult.value.stdout : '',
+    cachedStatsOutput: cachedStatsResult.status === 'fulfilled' ? cachedStatsResult.value.stdout : '',
+    unmergedOutput: unmergedResult.status === 'fulfilled' ? unmergedResult.value.stdout : '',
+    statusEntries,
+    changedPaths,
+    indexEntriesByPath,
+    worktreeStatTokens,
+    fingerprint,
+    changedPathCount,
+  };
+}
+
+export async function isWorkingTreeObservationCurrent(
+  observation: GitWorkingTreeObservation,
+  trace?: GitCommandTrace[],
+  signal?: AbortSignal,
+): Promise<boolean> {
+  const [branchResult, headResult, statusResult, unmergedResult] = await Promise.allSettled([
+    runGitTraced(
+      observation.projectPath,
+      ['branch', '--show-current'],
+      trace,
+      readOnlyGitOptions({ signal }),
+    ),
+    runGitTraced(
+      observation.projectPath,
+      ['rev-parse', 'HEAD'],
+      trace,
+      readOnlyGitOptions({ signal }),
+    ),
+    runGitTraced(
+      observation.projectPath,
+      ['status', '--porcelain=v1', '-z', '-uall'],
+      trace,
+      readOnlyGitOptions({ signal }),
+    ),
+    runGitTraced(
+      observation.projectPath,
+      ['ls-files', '-u', '-z'],
+      trace,
+      readOnlyGitOptions({ signal }),
+    ),
+  ]);
+  if (statusResult.status === 'rejected') throw statusResult.reason;
+
+  const branch = branchResult.status === 'fulfilled' ? branchResult.value.stdout.trim() : '';
+  const head = headResult.status === 'fulfilled' ? headResult.value.stdout.trim() : '';
+  const unmerged = unmergedResult.status === 'fulfilled' ? unmergedResult.value.stdout : '';
+  if (
+    branch !== observation.branch ||
+    head !== observation.head ||
+    statusResult.value.stdout !== observation.statusOutput ||
+    unmerged !== observation.unmergedOutput
+  ) {
+    return false;
+  }
+
+  const currentEntries = await loadFingerprintIndexEntryMap(
+    observation.projectPath,
+    observation.changedPaths,
+    signal,
+  );
+  const currentEntryTokens = Array.from(
+    currentEntries,
+    ([filePath, entry]) => `${filePath}\x00${entry}`,
+  ).sort();
+  const expectedEntryTokens = Array.from(
+    observation.indexEntriesByPath,
+    ([filePath, entry]) => `${filePath}\x00${entry}`,
+  ).sort();
+  if (currentEntryTokens.join('\x1f') !== expectedEntryTokens.join('\x1f')) return false;
+
+  const currentWorktreeStats = await loadFingerprintWorktreeStats(
+    observation.projectPath,
+    observation.statusEntries,
+  );
+  return currentWorktreeStats.join('\x1f') === observation.worktreeStatTokens.join('\x1f');
+}
+
+export async function getWorkingTreeFingerprint({
+  projectPath,
+  trace,
+  signal,
+}: GitWorkingTreeFingerprintOptions): Promise<GitWorkingTreeFingerprintResponse> {
+  try {
+    await fs.access(projectPath);
+  } catch {
+    return notRepositoryFingerprint(projectPath);
+  }
+
+  let observation: GitWorkingTreeObservation;
+  try {
+    observation = await captureWorkingTreeObservation({ projectPath, trace, signal });
+  } catch (error) {
+    if (error instanceof GitWorkingTreeNotRepositoryError) {
+      return notRepositoryFingerprint(projectPath);
+    }
+    throw error;
+  }
+
+  return {
+    status: 'ready',
+    project: projectPath,
+    fingerprintVersion: GIT_WORKING_TREE_FINGERPRINT_VERSION,
+    fingerprint: observation.fingerprint,
+    changedPathCount: observation.changedPathCount,
+  };
+}
+
+async function getWorkbenchSnapshot({
+  projectPath,
+  mode,
+  context,
+  selectedFile,
+  bodyCandidateCount = 8,
+  trace,
+  metrics,
+  signal,
+}: GitWorkbenchSnapshotOptions, registry: GitReviewDocumentRegistry): Promise<GitWorkbenchSnapshotResponse> {
+  try {
+    await fs.access(projectPath);
+  } catch {
+    return notRepositorySnapshot(projectPath);
+  }
+
+  let observation: GitWorkingTreeObservation;
+  try {
+    observation = await captureWorkingTreeObservation({ projectPath, trace, signal });
+  } catch (error) {
+    if (error instanceof GitWorkingTreeNotRepositoryError) {
+      return notRepositorySnapshot(projectPath);
+    }
+    throw error;
+  }
+  const effectiveMode = mode === 'staged' ? 'staged' : 'working';
+  const { repoRoot, branch, head, statusEntries } = observation;
+  const hasCommits = Boolean(head);
+  const workingStats = parseNumstatZ(observation.workingStatsOutput);
+  const cachedStats = parseNumstatZ(observation.cachedStatsOutput);
+  const tree = buildTreeFromStatusEntries(statusEntries, workingStats, cachedStats, hasCommits, 'loaded');
+  const reviewSummary = await buildReviewDocumentSummaryFromTree({
+    projectPath,
+    mode: effectiveMode,
+    context,
+    treeRoot: tree.root,
+    indexEntriesByPath: observation.indexEntriesByPath,
+    unmergedPaths: parseUnmergedPaths(observation.unmergedOutput),
+    signal,
+  });
+  const workingPathTokens = await captureWorkingPathTokensFromObservation(
+    repoRoot,
+    reviewSummary.files.flatMap((file) =>
+      file.originalPath ? [file.path, file.originalPath] : [file.path],
+    ),
+    observation,
+    { scope: effectiveMode === 'staged' ? 'index' : 'working-tree' },
+    signal,
+  );
+  const document = measureGitReviewPhaseSync(metrics, 'document-register', () =>
+    registry.register({
+      sourceCacheKey: `workbench:${repoRoot}:${effectiveMode}:${context}`,
+      projectPath,
+      repoRoot,
+      context,
+      source: {
+        kind: 'workbench',
+        mode: effectiveMode,
+        stagedBaseHash: head || GIT_EMPTY_TREE,
+        fingerprint: observation.fingerprint,
+      },
+      files: reviewSummary.files.map(registeredWorkbenchFile),
+      workingPathTokens,
+    }));
+  const registeredSummary = { ...reviewSummary, documentId: document.id };
+  const selected = chooseSelectedFile(registeredSummary.files, selectedFile);
+
+  return {
+    status: 'ready',
+    project: projectPath,
+    target: {
+      projectPath,
+      repoRoot,
+      worktreePath: repoRoot,
+      label: path.basename(projectPath) || projectPath,
+      branch,
+      source: 'chat-project',
+    },
+    tree: {
+      root: tree.root,
+      hasCommits,
+      statsState: 'loaded',
+    },
+    reviewSummary: registeredSummary,
+    selectedFile: selected,
+    firstBodyCandidates: chooseFirstBodyCandidates(
+      registeredSummary.files,
+      selected,
+      Math.max(0, Math.min(bodyCandidateCount, GIT_REVIEW_DOCUMENT_LIMITS.maxBodyBatchFiles)),
+    ),
+    snapshotId: document.id,
+    workbenchFingerprint: observation.fingerprint,
+  };
+}
+
+async function stageSelection({
+  projectPath,
+  file,
+  mode,
+  selection,
+}: StageSelectionOptions, patchText: string): Promise<GitMutationResult> {
+  await assertGitRepository(projectPath);
+
+  const reverse = mode === 'unstage';
+
+  if (!patchText.trim()) {
+    throw new GitDomainError('INVALID_INPUT', 'No diff is available for the requested file.');
+  }
+  const selectedSet = new Set(selection.lineIndices);
+  const parsed = parsePatch(patchText);
+  const outputLines = [...stagingDiffHeader(file, parsed, mode)];
+  const headerLength = outputLines.length;
+  let startOffset = 0;
+  let diffLineIndex = 0;
+
+  for (const hunk of parsed.hunks) {
+    const { lines: bodyLines, nextIndex } = transformHunkLines(
+      hunk.lines, selectedSet, diffLineIndex, reverse,
+    );
+    diffLineIndex = nextIndex;
+    if (!hunkHasChanges(bodyLines)) continue;
+    const { header: hunkHeader, nextOffset } = buildHunkHeader(
+      hunk.rawHeader, bodyLines, startOffset,
+    );
+    startOffset = nextOffset;
+    outputLines.push(hunkHeader, ...bodyLines);
+  }
+  if (outputLines.length === headerLength) {
+    throw new GitDomainError('INVALID_INPUT', 'No changed lines were selected.');
+  }
+  const transformedPatch = outputLines.join('\n') + '\n';
+  const applyArgs = reverse
+    ? ['apply', '--cached', '--reverse', '-']
+    : ['apply', '--cached', '-'];
+  await runGitWithStdin(projectPath, applyArgs, transformedPatch);
+  return { success: true };
+}
+
+// Stages or unstages a single hunk by its index. The hunk index refers
+// to the diff the frontend tab displayed (unstaged tab = `git diff`,
+// staged tab = `git diff --cached`).
+async function stageHunk({
+  projectPath,
+  file,
+  mode,
+  hunkIndex,
+}: StageHunkOptions, fullPatch: string): Promise<GitMutationResult> {
+  await assertGitRepository(projectPath);
+
+  const isUnstage = mode === 'unstage';
+
+  if (!fullPatch.trim()) {
+    throw new GitDomainError('INVALID_INPUT', 'No diff is available for the requested target.');
+  }
+  const parsed = parsePatch(fullPatch);
+  if (hunkIndex < 0 || hunkIndex >= parsed.hunks.length) {
+    throw new GitDomainError('INVALID_INPUT', `Invalid hunk index ${hunkIndex}`);
+  }
+  const hunk = parsed.hunks[hunkIndex];
+  const singleHunkPatch = [...stagingDiffHeader(file, parsed, mode), hunk.rawHeader, ...hunk.lines].join('\n') + '\n';
+  const applyArgs = isUnstage
+    ? ['apply', '--cached', '--reverse', '-']
+    : ['apply', '--cached', '-'];
+  await runGitWithStdin(projectPath, applyArgs, singleHunkPatch);
+  return { success: true };
+}
+
+
+export function createDiffEngine(registry: GitReviewDocumentRegistry) {
+  const documents = createReviewDocumentOperations(registry);
+  async function displayedPatch(options: StageSelectionOptions | StageHunkOptions): Promise<string> {
+    const stale = () => new GitDomainError('STALE_DOCUMENT', 'The displayed patch changed. Refresh and select it again.');
+    if (!options.documentId || !options.bodyFingerprint || !options.patchDigest) throw stale();
+    const lease = registry.acquire(options.projectPath, options.documentId);
+    if (!lease) throw stale();
+    try {
+      const expectedMode = options.mode === 'stage' ? 'working' : 'staged';
+      if (lease.document.source.kind !== 'workbench' || lease.document.source.mode !== expectedMode
+        || lease.document.context !== options.contextLines
+        || lease.document.patchDigests.get(options.file) !== options.patchDigest) throw stale();
+      const response = await documents.getReviewDocumentFileBodies({ projectPath: options.projectPath, documentId: options.documentId, files: [options.file], purpose: 'visible', signal: options.signal });
+      if (response.status !== 'ready') throw stale();
+      const body = response.files[options.file];
+      if (!body?.patch || body.bodyState !== 'loaded' || body.bodyFingerprint !== options.bodyFingerprint || body.patchDigest !== options.patchDigest) throw stale();
+      return body.patch;
+    } finally { lease.release(); }
+  }
+  return {
+    getWorkbenchSnapshot: (options: GitWorkbenchSnapshotOptions) =>
+      getWorkbenchSnapshot(options, registry),
+    getWorkingTreeFingerprint,
+    stageSelection: async (options: StageSelectionOptions) => stageSelection(options, await displayedPatch(options)),
+    stageHunk: async (options: StageHunkOptions) => stageHunk(options, await displayedPatch(options)),
+  };
+}
+
+export interface GitDiffPatchFile {
+  path: string;
+  originalPath?: string;
+  status: string;
+  changeKind: string;
+  additions: number;
+  deletions: number;
+  isBinary: boolean;
+  body: GitReviewFilePatchBody;
+}
+
+const PATCH_CHANGE_KIND: Record<string, string> = {
+  A: 'added',
+  D: 'deleted',
+  R: 'renamed',
+  C: 'renamed',
+  M: 'modified',
+};
+
+function stripAbPrefix(candidate: string): string {
+  return candidate.startsWith('a/') || candidate.startsWith('b/') ? candidate.slice(2) : candidate;
+}
+
+// Parses a single `diff --git` segment into a compact review body.
+function parseDiffFilePatch(segment: string): GitDiffPatchFile | null {
+  const lines = segment.split('\n');
+  const headerMatch = lines[0].match(/^diff --git a\/(.*) b\/(.*)$/);
+  let oldPath = headerMatch?.[1];
+  let newPath = headerMatch?.[2];
+  let status = 'M';
+  let renameFrom: string | undefined;
+  let renameTo: string | undefined;
+
+  for (const line of lines) {
+    if (line.startsWith('new file mode')) status = 'A';
+    else if (line.startsWith('deleted file mode')) status = 'D';
+    else if (line.startsWith('rename from ')) {
+      renameFrom = line.slice('rename from '.length);
+      status = 'R';
+    } else if (line.startsWith('rename to ')) {
+      renameTo = line.slice('rename to '.length);
+      status = 'R';
+    } else if (line.startsWith('--- ')) {
+      const value = line.slice(4);
+      if (value !== '/dev/null') oldPath = stripAbPrefix(value);
+    } else if (line.startsWith('+++ ')) {
+      const value = line.slice(4);
+      if (value !== '/dev/null') newPath = stripAbPrefix(value);
+    }
+    if (status !== 'M' && line.startsWith('@@')) break;
+  }
+
+  const path = status === 'D' ? oldPath ?? newPath : renameTo ?? newPath ?? oldPath;
+  if (!path) return null;
+
+  const patchBody = stripDiffHeaders(segment);
+  const fingerprint = createHash('sha1').update(segment).digest('hex').slice(0, 16);
+  const body = compactRenderedPatch(path, fingerprint, patchBody);
+
+  let additions = 0;
+  let deletions = 0;
+  let insideHunk = false;
+  for (const line of patchBody.split('\n')) {
+    if (line.startsWith('@@')) {
+      insideHunk = true;
+      continue;
+    }
+    if (!insideHunk || line.startsWith('\\')) continue;
+    if (line.startsWith('+')) additions += 1;
+    else if (line.startsWith('-')) deletions += 1;
+  }
+
+  return {
+    path,
+    originalPath: status === 'R' ? renameFrom ?? oldPath : undefined,
+    status,
+    changeKind: PATCH_CHANGE_KIND[status] ?? 'modified',
+    additions,
+    deletions,
+    isBinary: body.isBinary,
+    body,
+  };
+}
+
+// Splits a multi-file unified diff into compact per-file patch bodies.
+export function parseMultiFileDiffPatches(diffText: string): GitDiffPatchFile[] {
+  if (!diffText.trim()) return [];
+  const segments = diffText.split(/\n(?=diff --git )/);
+  const files: GitDiffPatchFile[] = [];
+  for (const segment of segments) {
+    if (!segment.startsWith('diff --git ')) continue;
+    const parsed = parseDiffFilePatch(segment);
+    if (parsed) files.push(parsed);
+  }
+  return files;
+}

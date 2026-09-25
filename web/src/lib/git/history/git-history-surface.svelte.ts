@@ -113,7 +113,7 @@ export class GitHistorySurfaceController implements PortableSingletonController 
 			const result = await this.deps.gitMutations.run({
 				surfaceId: singletonSurfaceId('git-history'),
 				effectiveProjectKey,
-				nodeId: project.nodeId,
+				executorId: project.executorId,
 				projectPath: project.projectPath,
 				execute: () => gitRevertCommit(project, target.hash),
 			});

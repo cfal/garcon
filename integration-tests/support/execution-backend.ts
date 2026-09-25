@@ -4,18 +4,18 @@ import { GarconProcess, isolatedEnvironment, pumpLines, type GarconProcessOption
 import { withTimeout } from './deferred.js';
 import { BoundedLog } from './bounded-log.js';
 import type { IntegrationDirectories } from './integration-fixture.js';
-import { parseExecutionNodes, type ExecutionNodeConnection } from '../../common/execution-nodes.js';
+import { parseExecutors, type ExecutorConnection } from '../../common/executors.js';
 
-export type ExecutionBackend = 'in-process' | 'remote-controller-dials' | 'remote-node-dials';
+export type ExecutionBackend = 'in-process' | 'remote-controller-dials' | 'remote-executor-dials';
 
 export function executionBackend(value = process.env.GARCON_TEST_EXECUTION_BACKEND ?? 'in-process'): ExecutionBackend {
-  if (value !== 'in-process' && value !== 'remote-controller-dials' && value !== 'remote-node-dials') {
+  if (value !== 'in-process' && value !== 'remote-controller-dials' && value !== 'remote-executor-dials') {
     throw new Error(`Unknown execution backend: ${value}`);
   }
   return value;
 }
 
-export class ExecutionNodeProcess {
+export class ExecutorProcess {
   readonly #logs = new BoundedLog<string>(2000);
   readonly #connected = Promise.withResolvers<void>();
   readonly #listening = Promise.withResolvers<string>();
@@ -33,13 +33,13 @@ export class ExecutionNodeProcess {
       if (!raw.startsWith('{')) { this.#logs.push(line); return; }
       try {
         const frame = JSON.parse(raw);
-        if (frame.type === 'execution-node-listening') {
+        if (frame.type === 'executor-listening') {
           this.#listening.resolve(frame.url);
           this.#connection.resolve(frame.connectionUrl);
           this.#logs.push(JSON.stringify({ type: frame.type, url: frame.url }));
           return;
         }
-        if (frame.type === 'execution-node-connected') this.#connected.resolve();
+        if (frame.type === 'executor-connected') this.#connected.resolve();
       } catch { /* Provider logs are not worker readiness frames. */ }
       this.#logs.push(line);
     };
@@ -57,18 +57,18 @@ export class ExecutionNodeProcess {
     readonly directories: IntegrationDirectories;
     readonly environment: Record<string, string>;
     readonly connection: { readonly kind: 'listen'; readonly port: number; readonly bindAddress?: string } | { readonly kind: 'dial'; readonly url: string };
-  }): Promise<ExecutionNodeProcess> {
+  }): Promise<ExecutorProcess> {
     const env = isolatedEnvironment(input.directories.home, input.environment);
     await mkdir(env.TMPDIR, { recursive: true });
     const child = Bun.spawn({
-      cmd: [process.execPath, 'server/main.ts', 'execution-node',
+      cmd: [process.execPath, 'server/main.ts', 'executor',
         ...(input.connection.kind === 'listen' ? ['--listen', String(input.connection.port)] : ['--connect', input.connection.url]),
         ...(input.connection.kind === 'listen' && input.connection.bindAddress ? ['--bind-address', input.connection.bindAddress] : []),
         '--allow-insecure-development', '--config-dir', input.directories.config,
         '--project-base-dir', input.directories.project],
       cwd: input.repoRoot, env, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe',
     });
-    return new ExecutionNodeProcess(child);
+    return new ExecutorProcess(child);
   }
 
   get logs(): readonly string[] { return this.#logs.values(); }
@@ -107,10 +107,10 @@ export class ExecutionNodeProcess {
 }
 
 export class ExecutionBackendFixture {
-  #worker: ExecutionNodeProcess | null = null;
+  #worker: ExecutorProcess | null = null;
   readonly #completedLogs: string[] = [];
-  #workerLaunch: Parameters<typeof ExecutionNodeProcess.start>[0] | null = null;
-  #nodeId: string | null = null;
+  #workerLaunch: Parameters<typeof ExecutorProcess.start>[0] | null = null;
+  #executorId: string | null = null;
   #controllerUrl: string | null = null;
   #controllerAuthToken: string | null = null;
 
@@ -121,16 +121,16 @@ export class ExecutionBackendFixture {
   ) {}
 
   get logs(): readonly string[] { return [...this.#completedLogs, ...(this.#worker?.logs ?? [])]; }
-  get nodeId(): string { return this.#nodeId ?? 'local'; }
+  get executorId(): string { return this.#executorId ?? 'local'; }
 
   async start(options: GarconProcessOptions): Promise<GarconProcess> {
     if (this.backend === 'in-process') return GarconProcess.start(options);
-    const launchWorker = async (connection: Parameters<typeof ExecutionNodeProcess.start>[0]['connection']) => {
+    const launchWorker = async (connection: Parameters<typeof ExecutorProcess.start>[0]['connection']) => {
       this.#workerLaunch = {
         repoRoot: options.repoRoot, directories: this.directories, environment: this.environment,
         connection,
       };
-      this.#worker = await ExecutionNodeProcess.start(this.#workerLaunch);
+      this.#worker = await ExecutorProcess.start(this.#workerLaunch);
       if (connection.kind === 'listen') {
         const url = await this.#worker.listening();
         this.#workerLaunch = {
@@ -143,33 +143,33 @@ export class ExecutionBackendFixture {
     try {
       controller = await GarconProcess.start({
         ...options,
-        ...(this.backend === 'remote-node-dials' && this.#controllerUrl
+        ...(this.backend === 'remote-executor-dials' && this.#controllerUrl
           ? { port: Number(new URL(this.#controllerUrl).port) } : {}),
       });
       this.#controllerUrl = controller.baseUrl;
       this.#controllerAuthToken = controller.authToken;
       if (this.backend === 'remote-controller-dials') {
         if (!this.#worker) await launchWorker(this.#workerLaunch?.connection ?? { kind: 'listen', port: 0 });
-        if (!this.#nodeId) {
+        if (!this.#executorId) {
           const url = new URL(await this.#worker!.connectionUrl());
           url.hostname = '127.0.0.1';
-          const created = await this.#request<{ id: string }>('/api/v1/execution-nodes', 'POST', {
+          const created = await this.#request<{ id: string }>('/api/v1/executors', 'POST', {
             label: 'Integration worker', direction: 'controller-connects', connectionUrl: url.href, allowInsecureDevelopment: true,
           });
-          this.#nodeId = created.id;
+          this.#executorId = created.id;
         }
       } else {
-        if (!this.#nodeId) {
-          const created = await this.#request<{ id: string } & ExecutionNodeConnection>('/api/v1/execution-nodes', 'POST', {
-            label: 'Integration worker', direction: 'node-connects', allowInsecureDevelopment: true,
+        if (!this.#executorId) {
+          const created = await this.#request<{ id: string } & ExecutorConnection>('/api/v1/executors', 'POST', {
+            label: 'Integration worker', direction: 'executor-connects', allowInsecureDevelopment: true,
           });
-          this.#nodeId = created.id;
+          this.#executorId = created.id;
           const url = new URL(created.connectionUrl);
           const controllerUrl = new URL(controller.baseUrl);
           url.protocol = 'ws:';
           url.host = controllerUrl.host;
-          await this.#request(`/api/v1/execution-nodes/${this.#nodeId}`, 'PATCH', {
-            connection: { direction: 'node-connects', connectionUrl: url.href, allowInsecureDevelopment: true },
+          await this.#request(`/api/v1/executors/${this.#executorId}`, 'PATCH', {
+            connection: { direction: 'executor-connects', connectionUrl: url.href, allowInsecureDevelopment: true },
           });
           this.#workerLaunch = { repoRoot: options.repoRoot, directories: this.directories, environment: this.environment,
             connection: { kind: 'dial', url: url.href } };
@@ -197,7 +197,7 @@ export class ExecutionBackendFixture {
     if (projectBasePath !== undefined) {
       this.#workerLaunch = { ...this.#workerLaunch, directories: { ...this.#workerLaunch.directories, project: projectBasePath } };
     }
-    this.#worker = await ExecutionNodeProcess.start(this.#workerLaunch);
+    this.#worker = await ExecutorProcess.start(this.#workerLaunch);
     await this.#worker.connected();
     await this.#waitReady();
   }
@@ -208,7 +208,7 @@ export class ExecutionBackendFixture {
         ...(this.#controllerAuthToken ? { Authorization: `Bearer ${this.#controllerAuthToken}` } : {}),
       }, body: body === undefined ? undefined : JSON.stringify(body),
     });
-    if (!response.ok) throw new Error(`Execution-node fixture request failed (${response.status})`);
+    if (!response.ok) throw new Error(`Executor fixture request failed (${response.status})`);
     return response.json() as Promise<T>;
   }
 
@@ -216,10 +216,10 @@ export class ExecutionBackendFixture {
     const deadline = Date.now() + 20_000;
     while (Date.now() < deadline) {
       this.#worker?.assertNoUnexpectedExit();
-      const result = await this.#request<{ nodes: unknown }>('/api/v1/execution-nodes');
-      const nodes = parseExecutionNodes(result.nodes);
-      if (!nodes) throw new Error('Invalid execution-node snapshot');
-      if (nodes.some((node) => node.id === this.#nodeId && node.availability === 'ready')) return;
+      const result = await this.#request<{ executors: unknown }>('/api/v1/executors');
+      const executors = parseExecutors(result.executors);
+      if (!executors) throw new Error('Invalid executor snapshot');
+      if (executors.some((executor) => executor.id === this.#executorId && executor.availability === 'ready')) return;
       await Bun.sleep(50);
     }
     throw new Error(`Controller did not initialize execution worker\n${this.logs.join('\n')}`);

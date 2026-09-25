@@ -8,7 +8,7 @@ export interface PromptComposerProps {
 	onsubmit: () => void;
 	onSteerPreferredSubmit: () => void;
 	onModelChange?: (selection: ModelSelectorChange) => void;
-	onNodeChange?: (nodeId: string) => void;
+	onExecutorChange?: (executorId: string) => void;
 	onPermissionModeChange?: (mode: PermissionMode) => void;
 	onThinkingModeChange?: (mode: ThinkingMode) => void;
 	onAgentSettingChange?: (descriptor: AgentSettingDescriptor, value: JsonValue) => void;

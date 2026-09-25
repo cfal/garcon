@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GhCapabilityStore } from '../gh-capability.svelte';
 import * as ghApi from '$lib/api/gh';
-import { ExecutionNodesStore } from '$lib/execution-nodes/execution-nodes-store.svelte.js';
+import { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
 import {
-	localExecutionNode,
-	remoteExecutionNode,
-} from '$lib/execution-nodes/__tests__/fixtures.js';
+	localExecutor,
+	remoteExecutor,
+} from '$lib/executors/__tests__/fixtures.js';
 
 vi.mock('$lib/api/gh', () => ({
 	getGhStatus: vi.fn(),
@@ -19,7 +19,7 @@ describe('GhCapabilityStore', () => {
 	});
 
 	it('starts unavailable before the first check', () => {
-		const store = new GhCapabilityStore().forNode('local');
+		const store = new GhCapabilityStore().forExecutor('local');
 
 		expect(store.available).toBe(false);
 		expect(store.authenticated).toBe(false);
@@ -35,7 +35,7 @@ describe('GhCapabilityStore', () => {
 			login: 'octocat',
 			host: 'github.com',
 		});
-		const store = new GhCapabilityStore().forNode('local');
+		const store = new GhCapabilityStore().forExecutor('local');
 
 		await store.ensureChecked();
 		await store.ensureChecked();
@@ -61,7 +61,7 @@ describe('GhCapabilityStore', () => {
 						});
 				}),
 		);
-		const store = new GhCapabilityStore().forNode('local');
+		const store = new GhCapabilityStore().forExecutor('local');
 
 		const first = store.ensureChecked();
 		const second = store.ensureChecked();
@@ -87,7 +87,7 @@ describe('GhCapabilityStore', () => {
 				login: 'hubot',
 				host: 'github.com',
 			});
-		const store = new GhCapabilityStore().forNode('local');
+		const store = new GhCapabilityStore().forExecutor('local');
 
 		await store.ensureChecked();
 		await store.refresh();
@@ -99,7 +99,7 @@ describe('GhCapabilityStore', () => {
 
 	it('fails closed when the status request fails', async () => {
 		getGhStatusMock.mockRejectedValue(new Error('network down'));
-		const store = new GhCapabilityStore().forNode('local');
+		const store = new GhCapabilityStore().forExecutor('local');
 
 		await store.ensureChecked();
 
@@ -110,15 +110,15 @@ describe('GhCapabilityStore', () => {
 		expect(store.lastError).toBe('network down');
 	});
 
-	it('fences remote status across instance replacement and prunes removed nodes', async () => {
-		const nodes = new ExecutionNodesStore();
+	it('fences remote status across instance replacement and prunes removed executors', async () => {
+		const executors = new ExecutorsStore();
 		const local = {
-			...localExecutionNode,
+			...localExecutor,
 			machineServices: { files: true, git: true, gh: true, terminals: true },
 		};
-		const remote = { ...remoteExecutionNode, machineServices: local.machineServices };
-		nodes.applySnapshot([local, remote]);
-		const capabilities = new GhCapabilityStore(nodes);
+		const remote = { ...remoteExecutor, machineServices: local.machineServices };
+		executors.applySnapshot([local, remote]);
+		const capabilities = new GhCapabilityStore(executors);
 		const pending = Promise.withResolvers<Awaited<ReturnType<typeof ghApi.getGhStatus>>>();
 		getGhStatusMock
 			.mockResolvedValueOnce({
@@ -128,13 +128,13 @@ describe('GhCapabilityStore', () => {
 				login: 'local-user',
 			})
 			.mockReturnValueOnce(pending.promise);
-		await capabilities.forNode('local').ensureChecked();
-		const oldEntry = capabilities.forNode(remote.id);
+		await capabilities.forExecutor('local').ensureChecked();
+		const oldEntry = capabilities.forExecutor(remote.id);
 		const first = oldEntry.ensureChecked();
 		const signal = getGhStatusMock.mock.calls[1][1]?.signal;
-		nodes.applySnapshot([local, { ...remote, instanceId: 'replacement' }]);
+		executors.applySnapshot([local, { ...remote, instanceId: 'replacement' }]);
 		expect(signal?.aborted).toBe(true);
-		expect(capabilities.forNode('local').login).toBe('local-user');
+		expect(capabilities.forExecutor('local').login).toBe('local-user');
 		getGhStatusMock.mockResolvedValueOnce({
 			available: true,
 			authenticated: true,
@@ -150,10 +150,10 @@ describe('GhCapabilityStore', () => {
 		});
 		await first;
 		expect(oldEntry.login).toBe('new-user');
-		nodes.applySnapshot([local]);
+		executors.applySnapshot([local]);
 		expect(oldEntry.available).toBe(false);
-		expect(capabilities.forNode(remote.id)).not.toBe(oldEntry);
-		await capabilities.forNode(remote.id).ensureChecked();
+		expect(capabilities.forExecutor(remote.id)).not.toBe(oldEntry);
+		await capabilities.forExecutor(remote.id).ensureChecked();
 		expect(getGhStatusMock).toHaveBeenCalledTimes(3);
 		capabilities.destroy();
 	});

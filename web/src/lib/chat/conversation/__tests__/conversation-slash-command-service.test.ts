@@ -103,7 +103,7 @@ function createServerEntry(id: string) {
 	};
 }
 
-type SlashCommandModelCatalog = ReturnType<ConversationSlashCommandDeps['modelCatalogForNode']>;
+type SlashCommandModelCatalog = ReturnType<ConversationSlashCommandDeps['modelCatalogForExecutor']>;
 
 function createDeps(chat = createChat()) {
 	const cursor = { transcriptViewId: 'view-1', lastOrdinal: 9 };
@@ -228,7 +228,7 @@ function createDeps(chat = createChat()) {
 			beginTurn: vi.fn(),
 			setCurrentChatId: vi.fn(),
 		},
-		modelCatalogForNode: vi.fn((_nodeId: string) => modelCatalog),
+		modelCatalogForExecutor: vi.fn((_executorId: string) => modelCatalog),
 		navigation: { navigateToChat: vi.fn() },
 		refetchTranscript: vi.fn().mockResolvedValue(undefined),
 		confirmHandoffFork: vi.fn().mockResolvedValue(true),
@@ -1051,9 +1051,9 @@ describe('ConversationSlashCommandService', () => {
 		expect(deps.lifecycle.beginTurn).toHaveBeenCalledWith('chat-2');
 	});
 
-	it('resolves fork capabilities and models from the target chat node rather than the selected chat', async () => {
-		const nodeId = '22222222-2222-4222-8222-222222222222';
-		const chat = createChat({ nodeId });
+	it('resolves fork capabilities and models from the target chat executor rather than the selected chat', async () => {
+		const executorId = '22222222-2222-4222-8222-222222222222';
+		const chat = createChat({ executorId });
 		const { deps } = createDeps(chat);
 		deps.sessions.selectedChatId = 'another-chat';
 		const remoteCatalog = {
@@ -1064,7 +1064,7 @@ describe('ConversationSlashCommandService', () => {
 				modelEndpointId: 'remote-endpoint', modelProtocol: 'openai-compatible',
 			})),
 		};
-		deps.modelCatalogForNode.mockImplementation(id => id === nodeId ? remoteCatalog : deps.modelCatalog);
+		deps.modelCatalogForExecutor.mockImplementation(id => id === executorId ? remoteCatalog : deps.modelCatalog);
 		mockForkRunChat.mockResolvedValueOnce({
 			success: true, commandType: 'fork-run', clientRequestId: 'request-1', chatId: 'chat-2',
 			turnId: 'turn-1', status: 'accepted', acceptedAt: '2026-07-14T00:00:00.000Z',

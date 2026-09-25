@@ -2,7 +2,7 @@ import { getGitTargetCandidates, type GitRefKind, type GitTargetCandidate } from
 import type { PortableSingletonController } from '$lib/workspace/portable-singleton-controller.js';
 import { singletonSurfaceId, type PortableSingletonKind } from '$lib/workspace/surface-types.js';
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
-import { effectiveNodeId } from '$shared/execution-nodes';
+import { effectiveExecutorId } from '$shared/executors';
 import type { GitProjectTarget } from '$shared/git-execution';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
 import {
@@ -31,7 +31,7 @@ export interface GitTargetSessionDeps {
 	kind: GitTargetSurfaceKind;
 	projectSelection?: GitProjectSelectionDeps;
 	createBranchSelector(): GitBranchSelectorState;
-	invalidationVersion(nodeId: string): number;
+	invalidationVersion(executorId: string): number;
 	canChangeTarget(): boolean;
 	onUnavailable?(): void;
 	onProjectSelectionChanged?(): void;
@@ -58,11 +58,11 @@ export class GitTargetSessionController implements PortableSingletonController {
 	isLoadingTargets = $state(false);
 	lastError = $state<string | null>(null);
 	baseProjectPath = $state<string | null>(null);
-	nodeId = $state('local');
+	executorId = $state('local');
 	effectiveProjectKey = $state<string | null>(null);
 
 	#targetByProject = new Map<string, GitTarget>();
-	#nodeContextKey: string | null = null;
+	#executorContextKey: string | null = null;
 	#sessionRefreshPending = false;
 	#requestAbort: AbortController | null = null;
 	#requestGeneration = 0;
@@ -92,7 +92,7 @@ export class GitTargetSessionController implements PortableSingletonController {
 		const path = this.baseProjectPath;
 		return path
 			? {
-					nodeId: this.nodeId,
+					executorId: this.executorId,
 					projectPath: path,
 					repoRoot: path,
 					worktreePath: path,
@@ -109,7 +109,7 @@ export class GitTargetSessionController implements PortableSingletonController {
 
 	get requestTarget(): GitProjectTarget | null {
 		const projectPath = this.activeProjectPath;
-		return projectPath ? { nodeId: this.nodeId, projectPath } : null;
+		return projectPath ? { executorId: this.executorId, projectPath } : null;
 	}
 
 	get activeWorktreePath(): string | null {
@@ -138,10 +138,10 @@ export class GitTargetSessionController implements PortableSingletonController {
 		this.projectSelection.setProjectState(projectState);
 	}
 
-	async selectNode(nodeId: string): Promise<void> {
+	async selectExecutor(executorId: string): Promise<void> {
 		if (!this.canChooseProject) return;
-		await this.projectSelection.selectNode(
-			nodeId,
+		await this.projectSelection.selectExecutor(
+			executorId,
 			this.activeProjectPath ?? this.projectSelection.projectPath,
 		);
 	}
@@ -165,7 +165,7 @@ export class GitTargetSessionController implements PortableSingletonController {
 		if (projectState.kind === 'unchecked' || projectState.kind === 'resolving') {
 			if (
 				this.projectSelection.followingChat &&
-				projectState.context.nodeId === this.nodeId &&
+				projectState.context.executorId === this.executorId &&
 				projectState.context.projectPath === this.baseProjectPath
 			) {
 				this.projectIdentityPending = true;
@@ -173,7 +173,7 @@ export class GitTargetSessionController implements PortableSingletonController {
 			return;
 		}
 		if (projectState.kind === 'unavailable' || projectState.kind === 'request-failed') {
-			this.#nodeContextKey = null;
+			this.#executorContextKey = null;
 			this.#suspendContext();
 			return;
 		}
@@ -185,8 +185,8 @@ export class GitTargetSessionController implements PortableSingletonController {
 		this.#setContext(
 			projectState.project.projectPath,
 			projectState.project.effectiveProjectKey,
-			effectiveNodeId(projectState.project.nodeId),
-			projectState.project.nodeContextKey ?? null,
+			effectiveExecutorId(projectState.project.executorId),
+			projectState.project.executorContextKey ?? null,
 		);
 	}
 
@@ -235,9 +235,9 @@ export class GitTargetSessionController implements PortableSingletonController {
 
 	async selectTarget(candidate: GitTargetCandidate): Promise<boolean> {
 		if (!this.canChooseProject) return false;
-		const nodeId = this.projectSelection.nodeId;
-		this.projectSelection.selectResolvedProject({ nodeId, projectPath: candidate.projectPath });
-		this.activeTarget = gitTargetFromCandidate(candidate, nodeId);
+		const executorId = this.projectSelection.executorId;
+		this.projectSelection.selectResolvedProject({ executorId, projectPath: candidate.projectPath });
+		this.activeTarget = gitTargetFromCandidate(candidate, executorId);
 		this.targets = [
 			candidate,
 			...this.targets.filter((target) => target.worktreePath !== candidate.worktreePath),
@@ -280,11 +280,11 @@ export class GitTargetSessionController implements PortableSingletonController {
 	async ensureTargets(force = false): Promise<boolean> {
 		const projectPath = this.activeProjectPath;
 		const projectKey = this.effectiveProjectKey;
-		const nodeId = this.nodeId;
+		const executorId = this.executorId;
 		if (this.projectIdentityPending || !this.presentationVisible || !projectPath || !projectKey) {
 			return false;
 		}
-		const targetFetchKey = JSON.stringify([nodeId, projectKey, projectPath]);
+		const targetFetchKey = JSON.stringify([executorId, projectKey, projectPath]);
 		if (!force && this.#lastTargetFetchKey === targetFetchKey) return false;
 		this.#requestAbort?.abort();
 		const controller = new AbortController();
@@ -296,7 +296,7 @@ export class GitTargetSessionController implements PortableSingletonController {
 		this.isLoadingTargets = true;
 		try {
 			const result = await getGitTargetCandidates(
-				{ nodeId, projectPath },
+				{ executorId, projectPath },
 				{
 					signal: controller.signal,
 				},
@@ -318,9 +318,9 @@ export class GitTargetSessionController implements PortableSingletonController {
 				result.targets.find((candidate) => !candidate.isMissing) ??
 				null;
 			this.activeTarget = selected
-				? gitTargetFromCandidate(selected, nodeId)
+				? gitTargetFromCandidate(selected, executorId)
 				: current
-					? gitTargetFromCandidate(current, nodeId)
+					? gitTargetFromCandidate(current, executorId)
 					: this.fallbackTarget;
 			this.#rememberTarget();
 			this.lastError = null;
@@ -349,7 +349,7 @@ export class GitTargetSessionController implements PortableSingletonController {
 	}
 
 	async refreshForInvalidation(effectiveProjectKey: string, version: number): Promise<boolean> {
-		const key = JSON.stringify([this.nodeId, effectiveProjectKey]);
+		const key = JSON.stringify([this.executorId, effectiveProjectKey]);
 		const handled = this.#handledInvalidationVersions.get(key) ?? 0;
 		const pending = this.#pendingInvalidationVersions.get(key) ?? 0;
 		const deferred = this.#deferredBranchInvalidationVersions.get(key) ?? 0;
@@ -414,11 +414,11 @@ export class GitTargetSessionController implements PortableSingletonController {
 		this.lastError = null;
 	}
 
-	pruneNodes(nodeIds: ReadonlySet<string>): void {
+	pruneExecutors(executorIds: ReadonlySet<string>): void {
 		for (const [key, target] of this.#targetByProject) {
-			if (!nodeIds.has(target.nodeId)) this.#targetByProject.delete(key);
+			if (!executorIds.has(target.executorId)) this.#targetByProject.delete(key);
 		}
-		if (!nodeIds.has(this.nodeId)) this.#suspendContext();
+		if (!executorIds.has(this.executorId)) this.#suspendContext();
 	}
 
 	dispose(): void {
@@ -446,7 +446,7 @@ export class GitTargetSessionController implements PortableSingletonController {
 		const projectPath = this.activeProjectPath;
 		const effectiveProjectKey = this.effectiveProjectKey;
 		const identity = this.identity;
-		const nodeId = this.nodeId;
+		const executorId = this.executorId;
 		const contextGeneration = this.#contextGeneration;
 		if (!projectPath || !effectiveProjectKey || !identity || !this.canChangeTarget) {
 			return false;
@@ -469,7 +469,7 @@ export class GitTargetSessionController implements PortableSingletonController {
 				return false;
 			}
 			changed = await mutate();
-			checkoutVersion = this.deps.invalidationVersion(nodeId);
+			checkoutVersion = this.deps.invalidationVersion(executorId);
 			if (!changed) return false;
 			if (identity !== this.identity || contextGeneration !== this.#contextGeneration) return true;
 			const nextBranch = typeof branch === 'string' ? branch : branch();
@@ -482,7 +482,7 @@ export class GitTargetSessionController implements PortableSingletonController {
 		};
 		try {
 			return await (this.deps.runCheckoutReconciliation
-				? this.deps.runCheckoutReconciliation({ nodeId, projectPath }, execute)
+				? this.deps.runCheckoutReconciliation({ executorId, projectPath }, execute)
 				: execute());
 		} finally {
 			if (contextGeneration === this.#contextGeneration) {
@@ -503,11 +503,11 @@ export class GitTargetSessionController implements PortableSingletonController {
 		changed: boolean,
 		reconciled: boolean,
 	): Promise<void> {
-		const key = JSON.stringify([this.nodeId, effectiveProjectKey]);
+		const key = JSON.stringify([this.executorId, effectiveProjectKey]);
 		const deferred = this.#deferredBranchInvalidationVersions.get(key) ?? 0;
 		this.#deferredBranchInvalidationVersions.delete(key);
 		if (effectiveProjectKey !== this.effectiveProjectKey) return;
-		const currentVersion = this.deps.invalidationVersion(this.nodeId);
+		const currentVersion = this.deps.invalidationVersion(this.executorId);
 		if (reconciled && currentVersion === checkoutVersion) {
 			storeMostRecent(this.#handledInvalidationVersions, key, currentVersion);
 			return;
@@ -551,16 +551,16 @@ export class GitTargetSessionController implements PortableSingletonController {
 	#setContext(
 		projectPath: string | null,
 		effectiveProjectKey: string | null,
-		nodeId: string,
-		nodeContextKey: string | null,
+		executorId: string,
+		executorContextKey: string | null,
 	): void {
 		if (
 			projectPath === this.baseProjectPath &&
 			effectiveProjectKey === this.effectiveProjectKey &&
-			nodeId === this.nodeId
+			executorId === this.executorId
 		) {
-			if (nodeContextKey !== this.#nodeContextKey) {
-				this.#nodeContextKey = nodeContextKey;
+			if (executorContextKey !== this.#executorContextKey) {
+				this.#executorContextKey = executorContextKey;
 				this.#cancelTargetRequest();
 				this.#contextGeneration += 1;
 				this.#sessionRefreshPending = true;
@@ -579,8 +579,8 @@ export class GitTargetSessionController implements PortableSingletonController {
 		this.#cancelTargetRequest();
 		this.#contextGeneration += 1;
 		this.branchChangePending = false;
-		this.nodeId = nodeId;
-		this.#nodeContextKey = nodeContextKey;
+		this.executorId = executorId;
+		this.#executorContextKey = executorContextKey;
 		this.#sessionRefreshPending = false;
 		this.baseProjectPath = projectPath;
 		this.effectiveProjectKey = effectiveProjectKey;
@@ -589,7 +589,7 @@ export class GitTargetSessionController implements PortableSingletonController {
 		this.#appliedIdentity = null;
 		this.lastError = null;
 		const remembered = effectiveProjectKey
-			? takeMostRecent(this.#targetByProject, JSON.stringify([nodeId, effectiveProjectKey]))
+			? takeMostRecent(this.#targetByProject, JSON.stringify([executorId, effectiveProjectKey]))
 			: null;
 		this.activeTarget = remembered ?? this.fallbackTarget;
 		if (this.presentationVisible && projectPath && effectiveProjectKey) {
@@ -619,14 +619,14 @@ export class GitTargetSessionController implements PortableSingletonController {
 				projectPath,
 				branchOverride ?? target?.branch ?? '',
 				effectiveProjectKey,
-				this.nodeId,
+				this.executorId,
 			);
 		} else {
 			this.branches.setProject(
 				projectPath,
 				branchOverride ?? target?.branch,
 				effectiveProjectKey,
-				this.nodeId,
+				this.executorId,
 			);
 		}
 		await this.deps.onTargetChanged(target, identity, reason, identityChanged);
@@ -637,7 +637,7 @@ export class GitTargetSessionController implements PortableSingletonController {
 		const key = this.effectiveProjectKey;
 		const target = this.activeTarget;
 		if (!key || !target) return;
-		storeMostRecent(this.#targetByProject, JSON.stringify([target.nodeId, key]), { ...target });
+		storeMostRecent(this.#targetByProject, JSON.stringify([target.executorId, key]), { ...target });
 	}
 
 	#updateActiveBranch(branch: string): void {

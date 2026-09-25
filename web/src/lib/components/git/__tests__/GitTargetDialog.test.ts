@@ -6,10 +6,10 @@ import * as gitApi from '$lib/api/git';
 import type { GitTargetCandidate, GitWorktreeItem } from '$lib/api/git';
 import { flushSync } from 'svelte';
 import {
-	localExecutionNode,
-	remoteExecutionNode,
-} from '$lib/execution-nodes/__tests__/fixtures.js';
-import type { ExecutionNodesStore } from '$lib/execution-nodes/execution-nodes-store.svelte.js';
+	localExecutor,
+	remoteExecutor,
+} from '$lib/executors/__tests__/fixtures.js';
+import type { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
 import { NotificationsStore } from '$lib/stores/notifications.svelte.js';
 import { ApiError } from '$lib/api/client.js';
 
@@ -25,7 +25,7 @@ vi.mock('$lib/api/git', () => ({
 
 function renderDialog(overrides: Record<string, unknown> = {}) {
 	return render(GitTargetDialog, {
-		nodeId: 'local',
+		executorId: 'local',
 		initialPath: '/workspace/repo',
 		projectBasePath: '/workspace',
 		isMobile: false,
@@ -76,7 +76,7 @@ afterEach(() => {
 });
 
 describe('GitTargetDialog', () => {
-	it('notifies creation uncertainty after the selected node disconnects', async () => {
+	it('notifies creation uncertainty after the selected executor disconnects', async () => {
 		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: true });
 		vi.mocked(gitApi.getGitWorktrees).mockResolvedValue({
 			worktrees: [makeWorktree('/workspace/repo', 'main', true)],
@@ -84,17 +84,17 @@ describe('GitTargetDialog', () => {
 		const creation = deferred<Awaited<ReturnType<typeof gitApi.gitCreateWorktree>>>();
 		vi.mocked(gitApi.gitCreateWorktree).mockReturnValueOnce(creation.promise);
 		const remote = {
-			...remoteExecutionNode,
-			machineServices: { ...remoteExecutionNode.machineServices, git: true },
+			...remoteExecutor,
+			machineServices: { ...remoteExecutor.machineServices, git: true },
 		};
 		const notifications = new NotificationsStore();
-		let nodes!: ExecutionNodesStore;
+		let executors!: ExecutorsStore;
 		renderDialog({
-			nodeId: remote.id,
-			nodes: [localExecutionNode, remote],
+			executorId: remote.id,
+			executors: [localExecutor, remote],
 			notifications,
-			onNodes: (store: ExecutionNodesStore) => {
-				nodes = store;
+			onExecutors: (store: ExecutorsStore) => {
+				executors = store;
 			},
 		});
 		await fireEvent.click(
@@ -110,7 +110,7 @@ describe('GitTargetDialog', () => {
 			true,
 		);
 		flushSync(() =>
-			nodes.applySnapshot([localExecutionNode, { ...remote, availability: 'offline' }]),
+			executors.applySnapshot([localExecutor, { ...remote, availability: 'offline' }]),
 		);
 		creation.reject(
 			new ApiError(503, 'Worktree creation outcome unknown', 'GIT_MUTATION_OUTCOME_UNKNOWN'),
@@ -122,7 +122,7 @@ describe('GitTargetDialog', () => {
 		expect(screen.queryByText('Worktree creation outcome unknown')).toBeNull();
 	});
 
-	it('retains remote worktree creation through unrelated node snapshot changes', async () => {
+	it('retains remote worktree creation through unrelated executor snapshot changes', async () => {
 		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: true });
 		vi.mocked(gitApi.getGitWorktrees).mockResolvedValue({
 			worktrees: [makeWorktree('/workspace/repo', 'main', true)],
@@ -130,15 +130,15 @@ describe('GitTargetDialog', () => {
 		const creation = deferred<Awaited<ReturnType<typeof gitApi.gitCreateWorktree>>>();
 		vi.mocked(gitApi.gitCreateWorktree).mockReturnValueOnce(creation.promise);
 		const remote = {
-			...remoteExecutionNode,
-			machineServices: { ...remoteExecutionNode.machineServices, git: true },
+			...remoteExecutor,
+			machineServices: { ...remoteExecutor.machineServices, git: true },
 		};
-		let nodes!: ExecutionNodesStore;
+		let executors!: ExecutorsStore;
 		renderDialog({
-			nodeId: remote.id,
-			nodes: [localExecutionNode, remote],
-			onNodes: (store: ExecutionNodesStore) => {
-				nodes = store;
+			executorId: remote.id,
+			executors: [localExecutor, remote],
+			onExecutors: (store: ExecutorsStore) => {
+				executors = store;
 			},
 		});
 		await fireEvent.click(
@@ -153,7 +153,7 @@ describe('GitTargetDialog', () => {
 		expect(gitApi.gitCreateWorktree).toHaveBeenCalledOnce();
 		const validations = vi.mocked(chatsApi.validateStart).mock.calls.length;
 		flushSync(() =>
-			nodes.applySnapshot([{ ...localExecutionNode, availability: 'offline' }, remote]),
+			executors.applySnapshot([{ ...localExecutor, availability: 'offline' }, remote]),
 		);
 		creation.resolve({ success: true, worktreePath: '/workspace/repo/.worktrees/feature' });
 		await screen.findByRole('dialog', { name: 'Git target' });

@@ -25,7 +25,7 @@
 		getFileSessions,
 		getGitBranchActions,
 		getGitQuickSummary,
-		getExecutionNodes,
+		getExecutors,
 		getChatProcessingReconciler,
 		getModelCatalog,
 		getLocalSettings,
@@ -110,7 +110,7 @@
 	const projectResolution = getProjectResolution();
 	const gitBranchActions = getGitBranchActions();
 	const gitQuickSummary = getGitQuickSummary();
-	const executionNodes = getExecutionNodes();
+	const executors = getExecutors();
 	const fileSessions = getFileSessions();
 	const surfaceFrames = getSurfaceFrames();
 	const processingReconciler = getChatProcessingReconciler();
@@ -210,14 +210,14 @@
 		if (!localSettings.showQuickCommitTray) return [];
 		return chatPresentations.flatMap(({ chatId }) => {
 			const chat = sessions.byId[chatId];
-			if (!chat?.projectPath || !executionNodes.gitAvailable(chat.nodeId)) return [];
+			if (!chat?.projectPath || !executors.gitAvailable(chat.executorId)) return [];
 			const target = targetForChat(chat);
 			const resolution = projectResolution.snapshotFor(target);
 			return resolution.kind === 'available'
 				? [
 						{
-							nodeId: chat.nodeId ?? 'local',
-							nodeContextKey: executionNodes.gitContextKey(chat.nodeId),
+							executorId: chat.executorId ?? 'local',
+							executorContextKey: executors.gitContextKey(chat.executorId),
 							projectPath: chat.projectPath,
 							isProcessing: chat.isProcessing,
 						},
@@ -272,15 +272,15 @@
 
 	function targetForChat(chat: {
 		id: string;
-		nodeId?: string | null;
+		executorId?: string | null;
 		status: string;
 		projectPath: string;
 	}): ProjectTarget {
 		return chat.status === 'draft'
-			? { kind: 'path', nodeId: chat.nodeId ?? 'local', projectPath: chat.projectPath }
+			? { kind: 'path', executorId: chat.executorId ?? 'local', projectPath: chat.projectPath }
 			: {
 					kind: 'chat',
-					nodeId: chat.nodeId ?? 'local',
+					executorId: chat.executorId ?? 'local',
 					chatId: chat.id,
 					projectPath: chat.projectPath,
 				};
@@ -519,7 +519,7 @@
 	{@const chat = surface?.type === 'chat' && surface.chatId ? sessions.byId[surface.chatId] : null}
 	{@const panel = surface?.type === 'chat' ? conversationPanels.panel(surface.id) : null}
 	{#if chat}
-		{@const chatCatalog = modelCatalog.forNode(chat.nodeId)}
+		{@const chatCatalog = modelCatalog.forExecutor(chat.executorId)}
 		{@const supportsFork = chatCatalog.supportsFork(chat.agentId)}
 		<CurrentChatMenuItems
 			{menu}
@@ -571,7 +571,7 @@
 				onSendToChat={sendToChat}
 				onAppendToChatDraft={appendToChatDraft}
 				onChooseProjectFolder={modelCatalog
-					.forNode(sessions.selectedChat?.nodeId)
+					.forExecutor(sessions.selectedChat?.executorId)
 					.supportsUpdateProjectPath(sessions.selectedChat?.agentId ?? '') && sessions.selectedChat
 					? () => chatActions.requestProjectPath(sessions.selectedChat!)
 					: undefined}
@@ -746,7 +746,7 @@
 <TerminalRenameDialog
 	terminal={terminalToRename}
 	hostLabel={terminalToRename
-		? terminals.nodeLabel(terminals.nodeIdFor(terminalToRename.terminalId))
+		? terminals.executorLabel(terminals.executorIdFor(terminalToRename.terminalId))
 		: 'Local'}
 	onClose={() => (renamingTerminalId = null)}
 	onRename={(terminalId, title) => terminals.rename(terminalId, title)}

@@ -26,7 +26,7 @@ const SMOKE_ISOLATION_ENV_KEYS = new Set([
   'GARCON_BIND_ADDRESS',
   'GARCON_PROJECT_BASE_DIR',
   'GARCON_DISABLE_AUTH',
-  'GARCON_AGENT_EXECUTION_NODE_CONFIG',
+  'GARCON_AGENT_EXECUTOR_CONFIG',
   'DISABLE_AUTH',
   'PI_PACKAGE_DIR',
   'GARCON_EMBEDDED_PI_PACKAGE_DIR',
@@ -140,12 +140,12 @@ async function assertBundledPreambles(url, apiFetch) {
   }
 }
 
-async function assertCompiledExecutionNode(url, executablePath, workspaceDir, apiFetch) {
-  const response = await apiFetch(`${url}/api/v1/execution-nodes`, {
+async function assertCompiledExecutor(url, executablePath, workspaceDir, apiFetch) {
+  const response = await apiFetch(`${url}/api/v1/executors`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
-      label: 'Compiled Worker', direction: 'node-connects', allowInsecureDevelopment: true,
+      label: 'Compiled Worker', direction: 'executor-connects', allowInsecureDevelopment: true,
     }),
   });
   if (!response.ok) throw new Error(`Unable to configure compiled worker: ${response.status}`);
@@ -156,7 +156,7 @@ async function assertCompiledExecutionNode(url, executablePath, workspaceDir, ap
   connection.hostname = '127.0.0.1';
   const worker = Bun.spawn({
     cmd: [
-      executablePath, 'execution-node', '--connect', connection.href,
+      executablePath, 'executor', '--connect', connection.href,
       '--allow-insecure-development', '--config-dir', path.join(workspaceDir, 'worker'),
       '--project-base-dir', workspaceDir,
     ],
@@ -169,23 +169,23 @@ async function assertCompiledExecutionNode(url, executablePath, workspaceDir, ap
     const deadline = Date.now() + STARTUP_TIMEOUT_MS;
     while (true) {
       if (worker.exitCode !== null) throw new Error(`Compiled worker exited with code ${worker.exitCode}: ${await workerErrors}`);
-      const snapshot = await apiFetch(`${url}/api/v1/execution-nodes`).then((result) => result.json());
-      if (snapshot.nodes?.some((node) => node.id === configured.id && node.availability === 'ready')) break;
+      const snapshot = await apiFetch(`${url}/api/v1/executors`).then((result) => result.json());
+      if (snapshot.executors?.some((executor) => executor.id === configured.id && executor.availability === 'ready')) break;
       if (Date.now() >= deadline) throw new Error('Compiled worker did not become ready');
       await delay(50);
     }
     const inspectionUrl = new URL('/api/v1/chats/validate-start', url);
-    inspectionUrl.searchParams.set('nodeId', configured.id);
+    inspectionUrl.searchParams.set('executorId', configured.id);
     inspectionUrl.searchParams.set('path', workspaceDir);
     const inspection = await apiFetch(inspectionUrl);
     if (!inspection.ok || !(await inspection.json()).valid) {
       throw new Error('Compiled worker project inspection failed');
     }
     const terminalsUrl = `${url}/api/v1/terminals`;
-    const inventory = await apiFetch(`${terminalsUrl}?nodeId=${configured.id}`).then(result => result.json());
+    const inventory = await apiFetch(`${terminalsUrl}?executorId=${configured.id}`).then(result => result.json());
     const created = await apiFetch(terminalsUrl, {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ nodeId: configured.id, expectedTerminalRuntimeId: inventory.terminalRuntimeId,
+      body: JSON.stringify({ executorId: configured.id, expectedTerminalRuntimeId: inventory.terminalRuntimeId,
         requestId: 'compiled-terminal', requestedInitialWorkingDirectory: workspaceDir }),
     });
     const terminal = await created.json();
@@ -325,7 +325,7 @@ async function run() {
       throw new Error('Default-off executable unexpectedly created a transcript search database.');
     }
     await assertBundledPreambles(started.url, apiFetch);
-    await assertCompiledExecutionNode(started.url, executablePath, workspaceDir, apiFetch);
+    await assertCompiledExecutor(started.url, executablePath, workspaceDir, apiFetch);
     await stopProcess(child);
 
     await writeFile(

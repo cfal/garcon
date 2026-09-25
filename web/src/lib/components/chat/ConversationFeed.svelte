@@ -117,7 +117,7 @@
 	const remoteSettings = getRemoteSettings();
 	const hiddenBashCommandMatcherFor = createHiddenBashCommandMatcherCache();
 	const rootModelCatalog = getModelCatalog();
-	const modelCatalog = $derived(rootModelCatalog.forNode(chatContext.nodeId));
+	const modelCatalog = $derived(rootModelCatalog.forExecutor(chatContext.executorId));
 
 	const supportsForkAtMessage = $derived(modelCatalog.supportsForkAtMessage(agentId));
 	const canShowForkAtMessage = $derived(

@@ -23,8 +23,8 @@ const revisionExpectation = (v: unknown) => isRecord(v) && v.kind === 'revision'
 const proofKeys = ['document', 'bodyFingerprint', 'patchDigest'];
 
 export function isGitDocumentRef(v: unknown): v is GitReviewDocumentRef {
-  return isRecord(v) && path(v.nodeId) && path(v.instanceId) && path(v.documentId)
-    && fields(v, ['nodeId', 'instanceId', 'documentId']);
+  return isRecord(v) && path(v.executorId) && path(v.instanceId) && path(v.documentId)
+    && fields(v, ['executorId', 'instanceId', 'documentId']);
 }
 
 function proof(v: Record<string, unknown>): boolean {

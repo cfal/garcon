@@ -10,7 +10,7 @@ describe('GitMutationCoordinator', () => {
 		const onChanged = vi.fn();
 		const coordinator = new GitMutationCoordinator({ onChanged });
 		const running = coordinator.run({
-			nodeId: 'local',
+			executorId: 'local',
 			surfaceId: 'singleton:git',
 			effectiveProjectKey: '/canonical/project-a',
 			projectPath: '/alias/project-a',
@@ -24,7 +24,7 @@ describe('GitMutationCoordinator', () => {
 		expect(onChanged).toHaveBeenCalledWith('local', '/canonical/project-a', '/alias/project-a');
 
 		await coordinator.run({
-			nodeId: 'local',
+			executorId: 'local',
 			surfaceId: 'singleton:git',
 			effectiveProjectKey: '/canonical/project-b',
 			projectPath: '/project-b',
@@ -39,7 +39,7 @@ describe('GitMutationCoordinator', () => {
 		const coordinator = new GitMutationCoordinator({ onChanged, onMutationError });
 		await expect(
 			coordinator.run({
-				nodeId: 'remote',
+				executorId: 'remote',
 				surfaceId: 'singleton:git',
 				effectiveProjectKey: '/project',
 				projectPath: '/project',

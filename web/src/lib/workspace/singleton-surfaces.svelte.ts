@@ -19,9 +19,9 @@ import type { ChatBoardController } from '$lib/chat-board/catalog/chat-board-con
 import type { TicketsController } from '$lib/tickets/catalog/tickets-controller.svelte.js';
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
 import { untrack } from 'svelte';
-import { effectiveNodeId } from '$shared/execution-nodes';
+import { effectiveExecutorId } from '$shared/executors';
 import { filePathRelativeToTreeRoot } from '$lib/files/tree/file-tree-path.js';
-import type { ExecutionNodesStore } from '$lib/execution-nodes/execution-nodes-store.svelte.js';
+import type { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
 
 export interface SingletonSurfaceRegistryDeps extends GitSurfaceControllerDeps {
 	createCommit(): CommitController;
@@ -29,45 +29,45 @@ export interface SingletonSurfaceRegistryDeps extends GitSurfaceControllerDeps {
 	comparisonPreferences: GitComparisonPreferences;
 	createChatBoard?(): ChatBoardController;
 	createTickets?(): TicketsController;
-	executionNodes?: Pick<ExecutionNodesStore, 'filesAvailable' | 'pathContextKey'>;
+	executors?: Pick<ExecutorsStore, 'filesAvailable' | 'pathContextKey'>;
 }
 
 export class FilesSurfaceController implements PortableSingletonController {
 	readonly tree = new FileTreeStore();
 	presentationVisible = $state(false);
 	#projectState = $state.raw<WorkspaceProjectState>({ kind: 'absent' });
-	#selectedNodeId = $state<string | null>(null);
+	#selectedExecutorId = $state<string | null>(null);
 	#projectPath: string | null = null;
 	#pendingReveal = $state.raw<{
-		nodeId: string;
+		executorId: string;
 		fileRootPath: string;
 		relativePath: string;
 	} | null>(null);
 
 	constructor(
-		private readonly nodes?: Pick<ExecutionNodesStore, 'filesAvailable' | 'pathContextKey'>,
+		private readonly executors?: Pick<ExecutorsStore, 'filesAvailable' | 'pathContextKey'>,
 	) {
-		let previous: { nodeId: string; key: string } | null = null;
+		let previous: { executorId: string; key: string } | null = null;
 		$effect(() => {
-			const nodeId = this.tree.nodeId;
-			const key = this.nodes?.pathContextKey(nodeId) ?? nodeId;
-			const browsingNode = this.browsingNode;
-			const available = this.#filesAvailable(nodeId);
+			const executorId = this.tree.executorId;
+			const key = this.executors?.pathContextKey(executorId) ?? executorId;
+			const browsingExecutor = this.browsingExecutor;
+			const available = this.#filesAvailable(executorId);
 			untrack(() => {
-				if (!available) this.tree.setNodeAvailable(false);
-				if (previous?.nodeId === nodeId && previous.key !== key) this.tree.invalidateNodePaths();
-				previous = { nodeId, key };
-				if (browsingNode && available) this.tree.setNodeAvailable(true);
+				if (!available) this.tree.setExecutorAvailable(false);
+				if (previous?.executorId === executorId && previous.key !== key) this.tree.invalidateExecutorPaths();
+				previous = { executorId, key };
+				if (browsingExecutor && available) this.tree.setExecutorAvailable(true);
 			});
 		});
 		$effect(() => {
 			const pending = this.#pendingReveal;
 			const response = this.tree.readyResponse;
 			if (!pending || !response || !this.presentationVisible) return;
-			if (!this.browsingNode && this.#projectState.kind !== 'available') return;
+			if (!this.browsingExecutor && this.#projectState.kind !== 'available') return;
 			untrack(() => {
 				this.#pendingReveal = null;
-				if (pending.nodeId !== this.tree.nodeId) return;
+				if (pending.executorId !== this.tree.executorId) return;
 				const relativePath = filePathRelativeToTreeRoot(
 					response.fileRootPath,
 					pending.fileRootPath,
@@ -78,46 +78,46 @@ export class FilesSurfaceController implements PortableSingletonController {
 		});
 	}
 
-	get browsingNode(): boolean {
-		return this.#selectedNodeId !== null || this.#projectState.kind === 'absent';
+	get browsingExecutor(): boolean {
+		return this.#selectedExecutorId !== null || this.#projectState.kind === 'absent';
 	}
 
 	get canGoToChatProject(): boolean {
 		return this.#projectState.kind === 'available';
 	}
 
-	selectNode(nodeId: string): void {
-		if (!this.#filesAvailable(nodeId)) return;
+	selectExecutor(executorId: string): void {
+		if (!this.#filesAvailable(executorId)) return;
 		this.#pendingReveal = null;
-		this.#selectedNodeId = nodeId;
-		this.tree.browseNode(nodeId);
+		this.#selectedExecutorId = executorId;
+		this.tree.browseExecutor(executorId);
 	}
 
 	goToChatProject(): void {
-		const wasBrowsingNode = this.browsingNode;
-		this.#selectedNodeId = null;
+		const wasBrowsingExecutor = this.browsingExecutor;
+		this.#selectedExecutorId = null;
 		this.#pendingReveal = null;
 		this.setProjectState(this.#projectState);
-		if (!wasBrowsingNode) void this.tree.goToChatProject();
+		if (!wasBrowsingExecutor) void this.tree.goToChatProject();
 	}
 
-	revealFile(fileRootPath: string, relativePath: string, nodeId?: string | null): void {
-		if (effectiveNodeId(nodeId) !== this.tree.nodeId) this.selectNode(effectiveNodeId(nodeId));
-		this.#pendingReveal = { nodeId: effectiveNodeId(nodeId), fileRootPath, relativePath };
+	revealFile(fileRootPath: string, relativePath: string, executorId?: string | null): void {
+		if (effectiveExecutorId(executorId) !== this.tree.executorId) this.selectExecutor(effectiveExecutorId(executorId));
+		this.#pendingReveal = { executorId: effectiveExecutorId(executorId), fileRootPath, relativePath };
 	}
 
 	setProjectState(projectState: WorkspaceProjectState): void {
 		const wasAbsent = this.#projectState.kind === 'absent';
 		this.#projectState = projectState;
-		if (this.#selectedNodeId !== null) return;
+		if (this.#selectedExecutorId !== null) return;
 		if (projectState.kind === 'absent') {
-			if (!wasAbsent || this.tree.effectiveProjectKey !== 'node:local') {
+			if (!wasAbsent || this.tree.effectiveProjectKey !== 'executor:local') {
 				this.#pendingReveal = null;
 				this.#projectPath = null;
 				this.tree.setProjectState(projectState);
-				this.tree.browseNode('local');
+				this.tree.browseExecutor('local');
 			}
-			this.tree.setNodeAvailable(this.#filesAvailable('local'));
+			this.tree.setExecutorAvailable(this.#filesAvailable('local'));
 			return;
 		}
 		const projectPath =
@@ -141,13 +141,13 @@ export class FilesSurfaceController implements PortableSingletonController {
 
 	dispose(): void {
 		this.presentationVisible = false;
-		this.#selectedNodeId = null;
+		this.#selectedExecutorId = null;
 		this.#pendingReveal = null;
 		this.tree.reset();
 	}
 
-	#filesAvailable(nodeId: string): boolean {
-		return this.nodes?.filesAvailable(nodeId) ?? nodeId === 'local';
+	#filesAvailable(executorId: string): boolean {
+		return this.executors?.filesAvailable(executorId) ?? executorId === 'local';
 	}
 }
 
@@ -206,7 +206,7 @@ export class SingletonSurfaceRegistry {
 			git: () => new GitWorkbenchSurfaceController(this.deps),
 			'git-history': () => new GitHistorySurfaceController(this.deps),
 			'git-compare': () => new GitCompareSurfaceController(this.deps),
-			files: () => new FilesSurfaceController(this.deps.executionNodes),
+			files: () => new FilesSurfaceController(this.deps.executors),
 			commit: () => this.deps.createCommit(),
 			'chat-map': () => new ChatMapController(),
 			'chat-canvas': () => new CanvasController(),
@@ -285,19 +285,19 @@ export class SingletonSurfaceRegistry {
 		}
 	}
 
-	pruneGitNodes(nodeIds: ReadonlySet<string>): void {
+	pruneGitExecutors(executorIds: ReadonlySet<string>): void {
 		for (const { controller } of this.#controllers.values()) {
 			if (
 				controller instanceof GitWorkbenchSurfaceController ||
 				controller instanceof CommitController ||
 				controller instanceof PullRequestsStore
 			)
-				controller.pruneNodes(nodeIds);
+				controller.pruneExecutors(executorIds);
 			else if (
 				controller instanceof GitHistorySurfaceController ||
 				controller instanceof GitCompareSurfaceController
 			)
-				controller.target.pruneNodes(nodeIds);
+				controller.target.pruneExecutors(executorIds);
 		}
 	}
 

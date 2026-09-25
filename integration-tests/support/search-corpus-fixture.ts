@@ -1,8 +1,8 @@
 import { Database } from 'bun:sqlite';
 import { join } from 'node:path';
 import { AssistantMessage, UserMessage } from '../../common/chat-types.js';
-import type { LedgerRowDraft } from '../../server/ledger/contracts.js';
-import { TranscriptLedgerStore } from '../../server/ledger/store.js';
+import type { LedgerRowDraft } from '../../server/controller/ledger/contracts.js';
+import { TranscriptLedgerStore } from '../../server/controller/ledger/store.js';
 import type { IntegrationFixture } from './integration-fixture.js';
 import { mulberry32, syntheticBody } from './synthetic-text.js';
 

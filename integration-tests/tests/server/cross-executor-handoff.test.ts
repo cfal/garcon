@@ -1,0 +1,48 @@
+import { expect, test } from 'bun:test';
+import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import { messagesOfType, userContents } from '../../support/chat-assertions.js';
+import { waitForPersistedChat } from '../../support/persisted-chat.js';
+
+for (const backend of ['remote-controller-dials', 'remote-executor-dials'] as const) {
+  test(`same-agent handoff starts fresh on the destination and can leave a deleted source (${backend})`, async () => {
+    await withIntegrationFixture(`cross-executor-handoff-${backend}`, async (fixture) => {
+      const client = fixture.client;
+      const agent = fixture.directAgents.openAi;
+      await client.put(`/api/v1/api-provider-assignments?executorId=local&apiProviderId=${agent.provider.providerId}`, {});
+      const chatId = fixture.newChatId();
+      const nativeId = () => waitForPersistedChat({
+        directories: fixture.dirs, chatId, select: (chat) => chat.agentSessionId,
+        timeoutMessage: 'Native session identity did not persist',
+      });
+      const local = await client.startDirectChat({ executorId: 'local', chatId, content: 'Synthetic local input', projectPath: fixture.dirs.project, agent });
+      await client.waitForTurnTerminal(chatId, local.turnId);
+      const localSession = await nativeId();
+      const original = await client.getMessages(chatId);
+      const remote = await client.handoffDirectChat({
+        chatId, agent, content: 'Synthetic remote input', executorId: client.executorId, projectPath: fixture.executionDirs.project,
+      });
+      await client.waitForTurnTerminal(chatId, remote.turnId);
+      expect((await client.listChats()).sessions.find((chat) => chat.id === chatId)).toMatchObject({ executorId: client.executorId, projectPath: fixture.executionDirs.project });
+      expect(await nativeId()).not.toBe(localSession);
+      expect((await client.getMessages(chatId)).transcriptViewId).toBe(original.transcriptViewId);
+      await client.waitForProcessing(chatId, false);
+      await client.delete(`/api/v1/executors/${client.executorId}`);
+      expect((await client.listChats()).sessions.find((chat) => chat.id === chatId)?.executorId).toBe(client.executorId);
+      expect(userContents((await client.getMessages(chatId)).messages)).toEqual(['Synthetic local input', 'Synthetic remote input']);
+      const returned = await client.handoffDirectChat({ chatId, agent, content: 'Synthetic return input', executorId: 'local', projectPath: fixture.dirs.project });
+      await client.waitForTurnTerminal(chatId, returned.turnId);
+      const row = (await client.listChats()).sessions.find((chat) => chat.id === chatId)!;
+      expect(row.executorId ?? 'local').toBe('local');
+      expect(row.projectPath).toBe(fixture.dirs.project);
+      expect(await nativeId()).not.toBe(localSession);
+      const messages = (await client.getMessages(chatId)).messages;
+      expect(userContents(messages)).toEqual(['Synthetic local input', 'Synthetic remote input', 'Synthetic return input']);
+      expect(messagesOfType(messages, 'agent-switch').map((message) => [message.fromExecutorId, message.toExecutorId])).toEqual([
+        ['local', client.executorId], [client.executorId, 'local'],
+      ]);
+      await client.reloadChat(chatId);
+      expect(messagesOfType((await client.getMessages(chatId)).messages, 'agent-switch')).toHaveLength(2);
+      expect(fixture.fakeProviders.openAi.requests()).toHaveLength(3);
+    }, { executionBackend: backend, projectRoots: 'separate' });
+  }, 45_000);
+}

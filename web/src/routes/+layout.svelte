@@ -11,8 +11,8 @@
 	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
 	import { createScheduledPromptsStore } from '$lib/scheduling/scheduled-prompts-store.svelte.js';
 	import { createPreamblesStore } from '$lib/preambles/preambles-store.svelte.js';
-	import { ExecutionNodesStore } from '$lib/execution-nodes/execution-nodes-store.svelte.js';
-	import { ExecutionNodesRouter } from '$lib/events/execution-nodes-router.svelte.js';
+	import { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
+	import { ExecutorsRouter } from '$lib/events/executors-router.svelte.js';
 	import { ApiProvidersRouter } from '$lib/events/api-providers-router.svelte.js';
 	import { ApiProvidersStore } from '$lib/api-providers/api-providers-store.svelte.js';
 	import { createChatPreambleSelectionInvalidationHub } from '$lib/preambles/chat-selection-invalidation-hub.js';
@@ -53,7 +53,7 @@
 		setGhCapability,
 		setScheduledPrompts,
 		setPreambles,
-		setExecutionNodes,
+		setExecutors,
 		setApiProviders,
 		setChatPreambleSelectionInvalidationHub,
 		setSnippets,
@@ -115,7 +115,7 @@
 	const remoteSettings = createRemoteSettingsStore();
 	const scheduledPrompts = createScheduledPromptsStore();
 	const preambles = createPreamblesStore();
-	const executionNodes = new ExecutionNodesStore();
+	const executors = new ExecutorsStore();
 	const chatPreambleSelectionInvalidationHub = createChatPreambleSelectionInvalidationHub();
 	const chatBoardInvalidations = createChatBoardInvalidationHub();
 	const ticketsInvalidations = new TicketsInvalidationHub();
@@ -133,13 +133,13 @@
 	const readReceiptOutbox = createReadReceiptOutbox(chatSessions);
 	const modelCatalog = createModelCatalogStore();
 	$effect(() => {
-		const nodes = executionNodes.nodes;
-		if (executionNodes.hasSnapshot) untrack(() => modelCatalog.reconcileNodes(nodes));
+		const snapshots = executors.executors;
+		if (executors.hasSnapshot) untrack(() => modelCatalog.reconcileExecutors(snapshots));
 	});
-	const ghCapability = createGhCapabilityStore(executionNodes);
+	const ghCapability = createGhCapabilityStore(executors);
 	const workspaceServices = createWorkspaceServices({
 		localProjectBasePath: () => remoteSettings.snapshot?.projectBasePath ?? null,
-		executionNodes,
+		executors,
 		appShell,
 		chatSessions,
 		ghCapability,
@@ -206,7 +206,7 @@
 	setRemoteSettings(remoteSettings);
 	setScheduledPrompts(scheduledPrompts);
 	setPreambles(preambles);
-	setExecutionNodes(executionNodes);
+	setExecutors(executors);
 	setChatPreambleSelectionInvalidationHub(chatPreambleSelectionInvalidationHub);
 	setSnippets(snippets);
 	setAppTitle(appTitle);
@@ -312,7 +312,7 @@
 	const scheduledPromptsRouter = new ScheduledPromptsRouter(ws, scheduledPrompts);
 	const preamblesRouter = new PreamblesRouter(ws, preambles, chatPreambleSelectionInvalidationHub);
 	const snippetsRouter = new SnippetsRouter(ws, snippets);
-	const executionNodesRouter = new ExecutionNodesRouter(ws, executionNodes);
+	const executorsRouter = new ExecutorsRouter(ws, executors);
 	const apiProviders = new ApiProvidersStore(() => modelCatalog.invalidateAll());
 	setApiProviders(apiProviders);
 	const apiProvidersRouter = new ApiProvidersRouter(ws, apiProviders);
@@ -323,7 +323,7 @@
 	scheduledPromptsRouter.start();
 	preamblesRouter.start();
 	snippetsRouter.start();
-	executionNodesRouter.start();
+	executorsRouter.start();
 	apiProvidersRouter.start();
 	chatBoardsRouter.start();
 	ticketsRouter.start();
@@ -334,7 +334,7 @@
 		scheduledPromptsRouter.tick();
 		preamblesRouter.tick();
 		snippetsRouter.tick();
-		executionNodesRouter.tick();
+		executorsRouter.tick();
 		apiProvidersRouter.tick();
 		chatBoardsRouter.tick();
 		ticketsRouter.tick();
@@ -351,7 +351,7 @@
 		untrack(() => void scheduledPrompts.refreshIfLoaded());
 		untrack(() => void preambles.refreshIfLoaded());
 		untrack(() => void snippets.refreshIfLoaded());
-		untrack(() => void executionNodes.refresh());
+		untrack(() => void executors.refresh());
 		untrack(() => { apiProviders.invalidate(); void modelCatalog.refreshIfStale(); });
 		// A reconnect also refreshes an already-open chat selection editor;
 		// its dirty draft is preserved by the controller's refresh path.
@@ -418,7 +418,7 @@
 		if (!auth.isAuthenticated) return;
 		untrack(() => {
 			void modelCatalog.refreshIfStale();
-			void executionNodes.refresh();
+			void executors.refresh();
 		});
 	});
 
@@ -441,7 +441,7 @@
 		scheduledPromptsRouter.destroy();
 		preamblesRouter.destroy();
 		snippetsRouter.destroy();
-		executionNodesRouter.destroy();
+		executorsRouter.destroy();
 		apiProvidersRouter.destroy();
 		ghCapability.destroy();
 		chatBoardsRouter.destroy();

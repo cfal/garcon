@@ -67,7 +67,7 @@
 		if (!presentationVisible) return;
 		const key = controller.target.effectiveProjectKey;
 		if (!key) return;
-		const version = gitProjectInvalidations.version(controller.target.nodeId);
+		const version = gitProjectInvalidations.version(controller.target.executorId);
 		untrack(() => void controller.refreshForInvalidation(key, version));
 	});
 
@@ -123,7 +123,7 @@
 		const projectPath = activeProjectPath;
 		if (!projectPath || !activeTarget) return;
 		void fileSessions.open({
-			nodeId: activeTarget.nodeId,
+			executorId: activeTarget.executorId,
 			fileRootPath: resolveGitEditorRoot({
 				activeProjectPath: projectPath,
 				targetRepoRoot: activeTarget?.repoRoot,

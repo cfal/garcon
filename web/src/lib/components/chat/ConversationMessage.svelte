@@ -25,7 +25,7 @@
 		getAppShell,
 		getChatSessions,
 		getFileSessions,
-		getExecutionNodes,
+		getExecutors,
 		getLocalSettings,
 		getWorkspaceCoordinator,
 	} from '$lib/context';
@@ -131,7 +131,7 @@
 
 	const sessions = getChatSessions();
 	const fileSessions = getFileSessions();
-	const nodes = getExecutionNodes();
+	const executors = getExecutors();
 	const appShell = getAppShell();
 	const workspace = getWorkspaceCoordinator();
 	const localSettings = getLocalSettings();
@@ -142,18 +142,18 @@
 		if (!selected?.id) return null;
 		return {
 			chatId: selected.id,
-			nodeId: selected.nodeId,
+			executorId: selected.executorId,
 			projectPath: selected.projectPath ?? null,
 		};
 	});
-	const nodeId = $derived(
-		activeChatContext?.nodeId ??
-			(activeChatContext ? sessions.byId[activeChatContext.chatId]?.nodeId : null) ??
+	const executorId = $derived(
+		activeChatContext?.executorId ??
+			(activeChatContext ? sessions.byId[activeChatContext.chatId]?.executorId : null) ??
 			'local',
 	);
-	const filesAvailable = $derived(nodes.filesAvailable(nodeId));
+	const filesAvailable = $derived(executors.filesAvailable(executorId));
 	const projectBasePath = $derived(
-		nodeId === 'local' ? appShell.projectBasePath : (nodes.get(nodeId)?.projectBasePath ?? ''),
+		executorId === 'local' ? appShell.projectBasePath : (executors.get(executorId)?.projectBasePath ?? ''),
 	);
 	const chatProjectPath = $derived(
 		filesAvailable ? (activeChatContext?.projectPath ?? null) : null,
@@ -466,7 +466,7 @@
 		});
 		if (!resolved) return;
 		void fileSessions.open({
-			nodeId,
+			executorId,
 			fileRootPath: resolved.fileRootPath,
 			relativePath: resolved.relativePath,
 			mode: 'auto',
@@ -489,7 +489,7 @@
 		});
 		if (!resolved) return;
 		void fileSessions.open({
-			nodeId,
+			executorId,
 			fileRootPath: resolved.fileRootPath,
 			relativePath: resolved.relativePath,
 			mode: 'auto',

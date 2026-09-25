@@ -1,7 +1,7 @@
 import { browseDirectory } from '$lib/api/files.js';
 
 interface ProjectPathCompletionTarget {
-	readonly nodeId: string;
+	readonly executorId: string;
 	readonly filesAvailable: boolean;
 	readonly pathContextKey?: string;
 	projectPath: string;
@@ -23,7 +23,7 @@ export class ProjectPathCompletionController {
 	}
 
 	async complete(): Promise<void> {
-		const { nodeId, projectPath: raw, filesAvailable, pathContextKey } = this.target;
+		const { executorId, projectPath: raw, filesAvailable, pathContextKey } = this.target;
 		if (this.#contextKey !== pathContextKey) {
 			this.reset();
 			this.#contextKey = pathContextKey;
@@ -40,11 +40,11 @@ export class ProjectPathCompletionController {
 		const partial = lastSlash >= 0 ? raw.slice(lastSlash + 1).toLowerCase() : '';
 
 		try {
-			const entries = await browseDirectory(parentDir, undefined, nodeId);
+			const entries = await browseDirectory(parentDir, undefined, executorId);
 			if (
 				this.#generation !== generation ||
 				this.target.pathContextKey !== pathContextKey ||
-				this.target.nodeId !== nodeId ||
+				this.target.executorId !== executorId ||
 				!this.target.filesAvailable ||
 				this.target.projectPath !== raw
 			)

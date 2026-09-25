@@ -1,0 +1,78 @@
+import {
+  boundAgentChildResult,
+  type AgentChildOutcomeNoticeDetail,
+  type AgentChildTerminalOutcome,
+} from '../../../common/garcon-agent-result.js';
+import type { CommandLedger, CommandLedgerRecord } from '../commands/command-ledger.js';
+import { projectAgentTurnReceipt } from '../commands/agent-turn-receipt-projector.js';
+import type { AgentCommandSource } from '../ledger/garcon-command-publication.js';
+import { AgentCommandReplies, type AgentCommandContext } from './agent-command-replies.js';
+
+export interface ChildAdmission {
+  readonly detail: AgentChildOutcomeNoticeDetail;
+  readonly turnId: string | null;
+  readonly recorded: boolean;
+  readonly start?: () => void;
+}
+
+export interface AgentChildTurnReplyOptions extends AgentCommandContext {
+  readonly turns: Pick<CommandLedger, 'waitForTurnTerminal'>;
+}
+
+export class AgentChildTurnReplies extends AgentCommandReplies {
+  constructor(private readonly options: AgentChildTurnReplyOptions) { super(options); }
+
+  launchChild(source: AgentCommandSource, admit: (signal: AbortSignal) => Promise<ChildAdmission | null>): void {
+    this.launch(source, async (signal) => {
+      const admission = await admit(signal);
+      if (!admission) return;
+      const { detail } = admission;
+      // Registers completion before dispatch so slow acknowledgments cannot outlive receipt retention.
+      let completion: Promise<AgentChildOutcomeNoticeDetail | null> | null;
+      try {
+        completion = this.#observeCompletion(source, admission, signal);
+      } finally {
+        admission.start?.();
+      }
+      if (signal.aborted) return;
+      if (admission.recorded) await this.deliver(source, detail, signal);
+      if (!completion) return;
+      const terminal = await completion;
+      if (!terminal || signal.aborted) return;
+      const recorded = await this.options.chatMutationLock.runExclusive(`chat:${source.chatId}`, async () => {
+        if (!this.current(source, signal)) return null;
+        return this.record(source, terminal);
+      });
+      if (recorded) await this.deliver(source, recorded, signal);
+    });
+  }
+
+  #observeCompletion(
+    source: AgentCommandSource,
+    admission: ChildAdmission,
+    signal: AbortSignal,
+  ): Promise<AgentChildOutcomeNoticeDetail | null> | null {
+    const { detail, turnId } = admission;
+    if (signal.aborted || detail.status !== 'accepted' || detail.async || turnId === null) return null;
+    return this.options.turns.waitForTurnTerminal(detail.chatId, turnId, signal)
+      .then((record) => boundAgentChildResult({ ...detail, ...terminalOutcome(record, detail.chatId) }))
+      .catch((error: unknown) => {
+        if (!signal.aborted) this.report(source, 'receipt', error, detail);
+        return null;
+      });
+  }
+}
+
+function terminalOutcome(record: CommandLedgerRecord | null, chatId: string): AgentChildTerminalOutcome {
+  if (!record) return { status: 'result-unavailable', chatId, reason: 'receipt-unavailable' };
+  const projected = projectAgentTurnReceipt(record);
+  if (projected.kind === 'expired') return { status: 'result-unavailable', chatId, reason: 'receipt-expired' };
+  const { receipt } = projected;
+  if (receipt.state === 'pending') return { status: 'result-unavailable', chatId, reason: 'receipt-unavailable' };
+  const output = receipt.output;
+  switch (receipt.state) {
+    case 'completed': return { status: 'completed', chatId, output };
+    case 'failed': return { status: 'failed', chatId, errorCode: receipt.errorCode, output };
+    case 'interrupted': return { status: 'interrupted', chatId, reason: receipt.reason, output };
+  }
+}

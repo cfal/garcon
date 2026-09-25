@@ -87,15 +87,15 @@ function setProject(
 	session: GitTargetSessionController,
 	projectPath: string,
 	effectiveProjectKey = projectPath,
-	nodeId = 'local',
-	nodeContextKey = 'session-a',
+	executorId = 'local',
+	executorContextKey = 'session-a',
 ): void {
 	session.setProjectState({
 		kind: 'available',
 		project: {
 			chatId: effectiveProjectKey,
-			nodeId,
-			nodeContextKey,
+			executorId,
+			executorContextKey,
 			projectPath,
 			effectiveProjectKey,
 		},
@@ -109,7 +109,7 @@ describe('GitTargetSessionController', () => {
 		api.getGitTargetCandidates.mockResolvedValue({ targets: [] });
 	});
 
-	it('fences held same-path discovery when switching nodes', async () => {
+	it('fences held same-path discovery when switching executors', async () => {
 		const local = deferred<{ targets: GitTargetCandidate[] }>();
 		api.getGitTargetCandidates
 			.mockReturnValueOnce(local.promise)
@@ -122,8 +122,8 @@ describe('GitTargetSessionController', () => {
 		await session.activate();
 		local.resolve({ targets: [candidate('/repo', { branch: 'local' })] });
 		await localActivation;
-		expect(session.activeTarget).toMatchObject({ nodeId: 'remote', branch: 'remote' });
-		expect(api.getGitTargetCandidates.mock.calls.map(([target]) => target.nodeId)).toEqual([
+		expect(session.activeTarget).toMatchObject({ executorId: 'remote', branch: 'remote' });
+		expect(api.getGitTargetCandidates.mock.calls.map(([target]) => target.executorId)).toEqual([
 			'local',
 			'remote',
 		]);
@@ -131,7 +131,7 @@ describe('GitTargetSessionController', () => {
 	});
 
 	it.each([true, false])(
-		'reloads a replacement node session without changing target (visible=%s)',
+		'reloads a replacement executor session without changing target (visible=%s)',
 		async (visible) => {
 			const { session, changes } = createSession({});
 			setProject(session, '/repo', 'chat', 'remote', 'instance-a');
@@ -455,7 +455,7 @@ describe('GitTargetSessionController', () => {
 		const runMutation = vi.fn(
 			async (
 				surfaceId: string,
-				_nodeId: string,
+				_executorId: string,
 				projectPath: string,
 				effectiveProjectKey: string,
 				execute: () => Promise<{ success: boolean }>,
@@ -486,21 +486,21 @@ describe('GitTargetSessionController', () => {
 	});
 
 	it.each([
-		{ nodeId: 'local', projectPath: '/other' },
-		{ nodeId: 'remote', projectPath: '/repo' },
-	])('retains handled invalidations when returning from $nodeId:$projectPath', async (other) => {
+		{ executorId: 'local', projectPath: '/other' },
+		{ executorId: 'remote', projectPath: '/repo' },
+	])('retains handled invalidations when returning from $executorId:$projectPath', async (other) => {
 		const invalidations = new GitProjectInvalidationStore();
 		const localVersion = invalidations.markChanged('local');
 		const otherVersion =
-			other.nodeId === 'local' ? localVersion : invalidations.markChanged(other.nodeId);
+			other.executorId === 'local' ? localVersion : invalidations.markChanged(other.executorId);
 		const { session, changes } = createSession({
-			invalidationVersion: (nodeId) => invalidations.version(nodeId),
+			invalidationVersion: (executorId) => invalidations.version(executorId),
 		});
 		setProject(session, '/repo');
 		session.setPresentationVisible(true);
 		await session.activate();
 		await expect(session.refreshForInvalidation('/repo', localVersion)).resolves.toBe(true);
-		setProject(session, other.projectPath, other.projectPath, other.nodeId);
+		setProject(session, other.projectPath, other.projectPath, other.executorId);
 		await session.activate();
 		await expect(session.refreshForInvalidation(other.projectPath, otherVersion)).resolves.toBe(
 			true,
@@ -510,7 +510,7 @@ describe('GitTargetSessionController', () => {
 			setProject(session, '/repo');
 			await session.activate();
 			await expect(session.refreshForInvalidation('/repo', localVersion)).resolves.toBe(false);
-			setProject(session, other.projectPath, other.projectPath, other.nodeId);
+			setProject(session, other.projectPath, other.projectPath, other.executorId);
 			await session.activate();
 			await expect(session.refreshForInvalidation(other.projectPath, otherVersion)).resolves.toBe(
 				false,
@@ -518,7 +518,7 @@ describe('GitTargetSessionController', () => {
 		}
 		expect(changes.filter((change) => change.reason === 'invalidation')).toHaveLength(2);
 		expect(api.getGitTargetCandidates).toHaveBeenCalledTimes(10);
-		const nextVersion = invalidations.markChanged(other.nodeId);
+		const nextVersion = invalidations.markChanged(other.executorId);
 		await expect(session.refreshForInvalidation(other.projectPath, nextVersion)).resolves.toBe(
 			true,
 		);
@@ -542,7 +542,7 @@ describe('GitTargetSessionController', () => {
 		session.dispose();
 	});
 
-	it('keeps same-path pending invalidations separate across nodes', async () => {
+	it('keeps same-path pending invalidations separate across executors', async () => {
 		const local = deferred<{ targets: GitTargetCandidate[] }>();
 		const remote = deferred<{ targets: GitTargetCandidate[] }>();
 		const { session, changes } = createSession({});
@@ -572,14 +572,14 @@ describe('GitTargetSessionController', () => {
 		const runMutation = vi.fn(
 			async (
 				_surfaceId: string,
-				nodeId: string,
+				executorId: string,
 				_projectPath: string,
 				effectiveProjectKey: string,
 				execute: () => Promise<{ success: boolean }>,
 			) => {
 				const result = await execute();
 				if (result.success) {
-					const version = invalidations.markChanged(nodeId);
+					const version = invalidations.markChanged(executorId);
 					await context.session?.refreshForInvalidation(effectiveProjectKey, version);
 				}
 				return result;
@@ -590,7 +590,7 @@ describe('GitTargetSessionController', () => {
 		});
 		const created = createSession({
 			runMutation,
-			invalidationVersion: (nodeId) => invalidations.version(nodeId),
+			invalidationVersion: (executorId) => invalidations.version(executorId),
 		});
 		context.session = created.session;
 		setProject(created.session, '/chat', 'chat');
@@ -612,10 +612,10 @@ describe('GitTargetSessionController', () => {
 		const entered = deferred<void>();
 		const release = deferred<void>();
 		const { session, changes } = createSession({
-			invalidationVersion: (nodeId) => invalidations.version(nodeId),
-			runMutation: async (_surface, nodeId, _projectPath, _key, execute) => {
+			invalidationVersion: (executorId) => invalidations.version(executorId),
+			runMutation: async (_surface, executorId, _projectPath, _key, execute) => {
 				const result = await execute();
-				if (result.success) invalidations.markChanged(nodeId);
+				if (result.success) invalidations.markChanged(executorId);
 				return result;
 			},
 			afterCheckout: async () => {
@@ -656,7 +656,7 @@ describe('GitTargetSessionController', () => {
 		const runMutation = vi.fn(
 			async (
 				_surfaceId: string,
-				_nodeId: string,
+				_executorId: string,
 				_projectPath: string,
 				_effectiveProjectKey: string,
 				execute: () => Promise<{ success: boolean }>,

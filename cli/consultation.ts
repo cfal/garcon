@@ -7,7 +7,7 @@ import type {
   StartChatCommandRequest,
 } from '@garcon/common/chat-command-contracts';
 import { createClientChatId } from '@garcon/common/client-chat-id';
-import { effectiveNodeId } from '@garcon/common/execution-nodes';
+import { effectiveExecutorId } from '@garcon/common/executors';
 import type { ChatSnapshotResponse } from '@garcon/common/chat-snapshot';
 import type {
   UpdateChatTitleRequest,
@@ -35,13 +35,13 @@ import {
 import { writeTerminalResult } from './terminal-receipt.js';
 
 export interface ConsultationClient extends ReceiptClient {
-  readonly defaultNodeId: string;
+  readonly defaultExecutorId: string;
   getChatSnapshot(
     chatId: string,
     messageLimit: number,
     signal?: AbortSignal,
   ): Promise<ChatSnapshotResponse>;
-  getModelCatalog(agentId: string, signal?: AbortSignal, nodeId?: string): Promise<ModelCatalogResponse>;
+  getModelCatalog(agentId: string, signal?: AbortSignal, executorId?: string): Promise<ModelCatalogResponse>;
   getSettings(signal?: AbortSignal): Promise<RemoteSettingsSnapshot>;
   startChat(request: StartChatCommandRequest, signal?: AbortSignal): Promise<StartChatCommandResponse>;
   runChat(request: AgentRunCommandRequest, signal?: AbortSignal): Promise<AgentTurnCommandResponse>;
@@ -128,7 +128,7 @@ async function submitStart(
         ? {}
         : { parentChatId: invocation.parentChatId }),
       agentId: invocation.agentId,
-      nodeId: client.defaultNodeId,
+      executorId: client.defaultExecutorId,
       projectPath: invocation.cwd,
       ...selection,
       command: prompt,
@@ -267,14 +267,14 @@ async function submitResume(
     || invocation.permissionMode !== undefined
     || invocation.thinkingMode !== undefined;
   const chat = snapshot.chat;
-  const nodeId = effectiveNodeId(chat.nodeId);
+  const executorId = effectiveExecutorId(chat.executorId);
   if (invocation.agentId !== undefined && invocation.agentId !== chat.agentId) {
     const [catalog, settings] = await Promise.all([
-      client.getModelCatalog(invocation.agentId, signal, nodeId),
+      client.getModelCatalog(invocation.agentId, signal, executorId),
       client.getSettings(signal),
     ]);
     request.handoff = {
-      target: { nodeId, ...resolveHandoffSelection(catalog, settings, {
+      target: { executorId, ...resolveHandoffSelection(catalog, settings, {
         agentId: invocation.agentId,
         model: invocation.model,
         providerId: invocation.providerId,
@@ -288,7 +288,7 @@ async function submitResume(
     if (invocation.agentId !== undefined) request.expectedAgentId = invocation.agentId;
   }
   if (needsCatalog && !request.handoff) {
-    const catalog = await client.getModelCatalog(chat.agentId, signal, nodeId);
+    const catalog = await client.getModelCatalog(chat.agentId, signal, executorId);
     request.expectedAgentOwnershipEpoch = chat.agentOwnershipEpoch;
     validateExplicitModes(catalog, chat.agentId, invocation);
     if (invocation.model !== undefined) {

@@ -2,25 +2,25 @@
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import * as Tabs from '$lib/components/ui/tabs';
 	import * as m from '$lib/paraglide/messages.js';
-	import { getAppShell, getRemoteSettings, getExecutionNodes } from '$lib/context';
+	import { getAppShell, getRemoteSettings, getExecutors } from '$lib/context';
 	import Network from '@lucide/svelte/icons/network';
 	import KeyRound from '@lucide/svelte/icons/key-round';
 	import Bot from '@lucide/svelte/icons/bot';
 	import GitPullRequest from '@lucide/svelte/icons/git-pull-request';
 	import SlidersHorizontal from '@lucide/svelte/icons/sliders-horizontal';
 	import ApiProvidersSection from './ApiProvidersSection.svelte';
-	import NodeAgentSettings from './NodeAgentSettings.svelte';
-	import SettingsNodeSections from './SettingsNodeSections.svelte';
+	import ExecutorAgentSettings from './ExecutorAgentSettings.svelte';
+	import SettingsExecutorSections from './SettingsExecutorSections.svelte';
 	import GitHubCliSettingsCard from './GitHubCliSettingsCard.svelte';
 	import RemoteSettingsSection from './RemoteSettingsSection.svelte';
-	import ExecutionNodesSection from '../execution-nodes/ExecutionNodesSection.svelte';
+	import ExecutorsSection from '../executors/ExecutorsSection.svelte';
 
 	const appShell = getAppShell();
 	const remoteSettings = getRemoteSettings();
-	const executionNodes = getExecutionNodes();
+	const executors = getExecutors();
 	let scrollContainer = $state<HTMLDivElement | null>(null);
 	const tabs = $derived([
-		{ value: 'execution-nodes', label: m.settings_tab_execution_nodes(), icon: Network },
+		{ value: 'executors', label: m.settings_tab_executors(), icon: Network },
 		{ value: 'providers', label: m.settings_tab_providers(), icon: KeyRound },
 		{ value: 'other-agents', label: m.settings_tab_other_agents(), icon: Bot },
 		{ value: 'github', label: m.settings_tab_github(), icon: GitPullRequest },
@@ -30,7 +30,7 @@
 	$effect(() => {
 		if (!appShell.showSettings) return;
 		void remoteSettings.refreshInBackground();
-		void executionNodes.refresh();
+		void executors.refresh();
 	});
 
 	function handleOpenChange(open: boolean) {
@@ -79,10 +79,10 @@
 			</Tabs.List>
 
 			<div class="min-w-0 flex-1 min-h-0 overflow-y-auto p-3 sm:p-6" bind:this={scrollContainer}>
-				<Tabs.Content value="execution-nodes" class="mt-0 space-y-6">
-					{#if appShell.settingsTab === 'execution-nodes'}
-						<h2 class="text-base font-semibold">{m.settings_tab_execution_nodes()}</h2>
-						<ExecutionNodesSection />
+				<Tabs.Content value="executors" class="mt-0 space-y-6">
+					{#if appShell.settingsTab === 'executors'}
+						<h2 class="text-base font-semibold">{m.settings_tab_executors()}</h2>
+						<ExecutorsSection />
 					{/if}
 				</Tabs.Content>
 
@@ -96,21 +96,21 @@
 					{#if appShell.settingsTab === 'other-agents'}
 						<h2 class="text-base font-semibold">{m.settings_tab_other_agents()}</h2>
 						<p class="text-sm text-muted-foreground">{m.settings_other_agents_description()}</p>
-						<SettingsNodeSections>
-							{#snippet children(nodeId)}<NodeAgentSettings
-									{nodeId}
+						<SettingsExecutorSections>
+							{#snippet children(executorId)}<ExecutorAgentSettings
+									{executorId}
 									section="other-agents"
 								/>{/snippet}
-						</SettingsNodeSections>
+						</SettingsExecutorSections>
 					{/if}
 				</Tabs.Content>
 
 				<Tabs.Content value="github" class="mt-0 space-y-6">
 					{#if appShell.settingsTab === 'github'}
 						<h2 class="text-base font-semibold">{m.settings_tab_github()}</h2>
-						<SettingsNodeSections>
-							{#snippet children(nodeId)}<GitHubCliSettingsCard {nodeId} />{/snippet}
-						</SettingsNodeSections>
+						<SettingsExecutorSections>
+							{#snippet children(executorId)}<GitHubCliSettingsCard {executorId} />{/snippet}
+						</SettingsExecutorSections>
 					{/if}
 				</Tabs.Content>
 

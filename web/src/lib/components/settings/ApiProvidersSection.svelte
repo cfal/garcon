@@ -1,16 +1,16 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages.js';
 	import ApiProviderProtocolPanel from './ApiProviderProtocolPanel.svelte';
-	import NodeAgentSettings from './NodeAgentSettings.svelte';
-	import SettingsNodeSections from './SettingsNodeSections.svelte';
+	import ExecutorAgentSettings from './ExecutorAgentSettings.svelte';
+	import SettingsExecutorSections from './SettingsExecutorSections.svelte';
 </script>
 
 <div class="space-y-8">
 	<section class="space-y-4">
 		<h2 class="text-base font-semibold">{m.settings_native_providers()}</h2>
-		<SettingsNodeSections>
-			{#snippet children(nodeId)}<NodeAgentSettings {nodeId} section="native" />{/snippet}
-		</SettingsNodeSections>
+		<SettingsExecutorSections>
+			{#snippet children(executorId)}<ExecutorAgentSettings {executorId} section="native" />{/snippet}
+		</SettingsExecutorSections>
 	</section>
 	<section class="space-y-6 border-t border-border pt-6">
 		<h2 class="text-base font-semibold">{m.settings_custom_providers()}</h2>

@@ -491,7 +491,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 			this.#mergeServerEntry(entry, false);
 		} else {
 		this.patchChat(entry.id, {
-				nodeId: entry.nodeId ?? 'local',
+				executorId: entry.executorId ?? 'local',
 				projectPath: entry.projectPath,
 				agentId: entry.agentId as ChatSessionRecord['agentId'],
 				agentOwnershipEpoch: entry.agentOwnershipEpoch,
@@ -768,7 +768,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	#mergeServerEntry(entry: ChatListEntry, clearStartup: boolean): void {
 		const next = toRecord(entry);
 		const previous = this.#baseById[entry.id];
-		this.#projectBindings.publishIfChanged(entry.id, previous?.projectPath, next.projectPath, previous?.nodeId, next.nodeId);
+		this.#projectBindings.publishIfChanged(entry.id, previous?.projectPath, next.projectPath, previous?.executorId, next.executorId);
 		reconcileActivityProjection(previous, next);
 		next.processingPhase = this.#resolveProcessing(entry.id, next.processingPhase);
 		next.isProcessing = next.processingPhase !== null;
@@ -862,7 +862,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		const chat = this.#baseById[chatId];
 		if (!chat) return;
 		this.#projectBindings.publishIfChanged(chatId, chat.projectPath, patch.projectPath ?? chat.projectPath,
-			chat.nodeId, 'nodeId' in patch ? patch.nodeId : chat.nodeId);
+			chat.executorId, 'executorId' in patch ? patch.executorId : chat.executorId);
 		const nextChat = {
 			...chat,
 			...patch,

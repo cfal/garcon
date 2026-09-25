@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { setExecutionNodesTestContext } from '$lib/execution-nodes/__tests__/execution-nodes-test-context';
-	import type { ExecutionNodeSnapshot } from '$shared/execution-nodes';
+	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
+	import type { ExecutorSnapshot } from '$shared/executors';
 	import PromptComposer from '../PromptComposer.svelte';
 	import ConversationPanelStatusDock from '../ConversationPanelStatusDock.svelte';
 	import { onDestroy, untrack } from 'svelte';
@@ -55,8 +55,8 @@
 	import type { ProjectTarget } from '$shared/project-resolution';
 
 	interface Props {
-		selectedNodeId?: string;
-		nodes?: readonly ExecutionNodeSnapshot[];
+		selectedExecutorId?: string;
+		executors?: readonly ExecutorSnapshot[];
 		catalog?: ModelCatalogStore;
 		selectedChatId?: string;
 		projectPath?: string;
@@ -93,8 +93,8 @@
 	}
 
 	let {
-		selectedNodeId = 'local',
-		nodes,
+		selectedExecutorId = 'local',
+		executors: executorSnapshots,
 		catalog,
 		selectedChatId = 'chat-1',
 		projectPath = '/workspace/project',
@@ -166,11 +166,11 @@
 			})
 		);
 	}
-	const executionNodes = setExecutionNodesTestContext(untrack(() => nodes));
-	export function applyExecutionNodes(snapshot: readonly ExecutionNodeSnapshot[]): void {
-		executionNodes.applySnapshot(snapshot);
+	const executors = setExecutorsTestContext(untrack(() => executorSnapshots));
+	export function applyExecutors(snapshot: readonly ExecutorSnapshot[]): void {
+		executors.applySnapshot(snapshot);
 	}
-	const projectResolution = new ProjectResolutionStore(getInitialProjectResolver(), undefined, executionNodes);
+	const projectResolution = new ProjectResolutionStore(getInitialProjectResolver(), undefined, executors);
 	const modelOptionsByAgent: Record<string, ModelOption[]> = {
 		claude: [{ value: 'opus', label: 'Opus', supportsImages: true }],
 		codex: [{ value: 'gpt-5', label: 'GPT-5', supportsImages: true }],
@@ -243,7 +243,7 @@
 	}
 
 	const selectedChat = $derived<ChatSessionRecord>({
-		nodeId: selectedNodeId,
+		executorId: selectedExecutorId,
 		id: selectedChatId,
 		parentChat: null,
 		projectPath,
@@ -273,7 +273,7 @@
 	});
 
 	$effect(() => {
-		agent.nodeId = selectedNodeId;
+		agent.executorId = selectedExecutorId;
 		agent.setAgentId(selectedAgentId);
 		agent.setThinkingMode(selectedThinkingMode);
 		agent.setModelSelection({
@@ -330,7 +330,7 @@
 	} as never);
 	const fallbackCatalog = {
 		isValidated: true,
-		forNode() { return this; },
+		forExecutor() { return this; },
 		version: 0,
 		getSelectableAgents: () => selectableAgents,
 		getAgent: (agentId: string) => ({

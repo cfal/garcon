@@ -37,7 +37,7 @@ export class GitWorkbenchSurfaceController implements PortableSingletonControlle
 				deps.gitMutations.run({
 					surfaceId: singletonSurfaceId('git'),
 					effectiveProjectKey: this.target.effectiveProjectKey ?? project.projectPath,
-					nodeId: project.nodeId,
+					executorId: project.executorId,
 					projectPath: project.projectPath,
 					execute,
 				}),
@@ -105,10 +105,10 @@ export class GitWorkbenchSurfaceController implements PortableSingletonControlle
 		this.#loadedIdentity = null;
 	}
 
-	pruneNodes(nodeIds: ReadonlySet<string>): void {
-		this.target.pruneNodes(nodeIds);
+	pruneExecutors(executorIds: ReadonlySet<string>): void {
+		this.target.pruneExecutors(executorIds);
 		for (const key of this.#selectionByTarget.keys()) {
-			if (!nodeIds.has(JSON.parse(key)[0])) this.#selectionByTarget.delete(key);
+			if (!executorIds.has(JSON.parse(key)[0])) this.#selectionByTarget.delete(key);
 		}
 	}
 

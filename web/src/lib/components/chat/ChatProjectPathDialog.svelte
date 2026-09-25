@@ -1,7 +1,7 @@
 <script lang="ts">
 	import SidebarProjectPathDialog from '$lib/components/sidebar/SidebarProjectPathDialog.svelte';
 	import type { ChatProjectPathDialog } from './chat-action-dialogs-state.svelte';
-	import { getRemoteSettings, getExecutionNodes } from '$lib/context';
+	import { getRemoteSettings, getExecutors } from '$lib/context';
 	import { togglePinnedProjectPathOptimistically } from '$lib/chat/project-paths/pinned-project-path-settings.js';
 
 	interface ChatProjectPathDialogProps {
@@ -21,18 +21,18 @@
 	}: ChatProjectPathDialogProps = $props();
 
 	const remoteSettings = getRemoteSettings();
-	const executionNodes = getExecutionNodes();
-	const nodeId = $derived(projectPathDialog?.nodeId ?? 'local');
-	const pinnedProjectPaths = $derived(nodeId === 'local' ? remoteSettings.snapshot?.paths.pinnedProjectPaths ?? [] : remoteSettings.snapshot?.paths.byNode?.[nodeId]?.pinnedPaths ?? []);
+	const executors = getExecutors();
+	const executorId = $derived(projectPathDialog?.executorId ?? 'local');
+	const pinnedProjectPaths = $derived(executorId === 'local' ? remoteSettings.snapshot?.paths.pinnedProjectPaths ?? [] : remoteSettings.snapshot?.paths.byExecutor?.[executorId]?.pinnedPaths ?? []);
 
 	async function togglePinnedProjectPath(path: string): Promise<void> {
-		await togglePinnedProjectPathOptimistically(remoteSettings, path, { nodeId });
+		await togglePinnedProjectPathOptimistically(remoteSettings, path, { executorId });
 	}
 </script>
 
 <SidebarProjectPathDialog
 	{projectPathDialog}
-	projectBasePath={nodeId === 'local' ? projectBasePath : executionNodes.get(nodeId)?.projectBasePath ?? ''}
+	projectBasePath={executorId === 'local' ? projectBasePath : executors.get(executorId)?.projectBasePath ?? ''}
 	{pinnedProjectPaths}
 	{isMobile}
 	{onClose}

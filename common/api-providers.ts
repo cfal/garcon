@@ -53,7 +53,7 @@ export interface ApiProviderManagement {
 }
 
 export interface ApiProviderCreateResult extends ApiProviderCatalogEntry {
-  assignment: { nodeId: string; status: 'assigned' | 'not-assigned' | 'unknown'; error?: string };
+  assignment: { executorId: string; status: 'assigned' | 'not-assigned' | 'unknown'; error?: string };
 }
 
 export interface ApiProviderEndpointCatalogEntry {

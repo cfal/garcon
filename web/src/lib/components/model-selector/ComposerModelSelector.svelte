@@ -12,9 +12,9 @@
 		value: ModelSelectorValue;
 		mode: ModelSelectorMode;
 		onChange: (next: ModelSelectorChange) => void | Promise<void>;
-		getRecents?: (nodeId: string) => ModelSelectorRecentOption[];
+		getRecents?: (executorId: string) => ModelSelectorRecentOption[];
 		preferRecentsOnOpen?: boolean;
-		getSelectableAgentIds?: (nodeId: string) => readonly SessionAgentId[];
+		getSelectableAgentIds?: (executorId: string) => readonly SessionAgentId[];
 		disabled?: boolean;
 		align?: 'start' | 'center' | 'end';
 		side?: 'top' | 'right' | 'bottom' | 'left';
@@ -35,7 +35,7 @@
 
 <ModelSelectorPopover
 	{value}
-	mode={{ ...mode, node: 'fixed', surface: 'composer' }}
+	mode={{ ...mode, executor: 'fixed', surface: 'composer' }}
 	{onChange}
 	{getRecents}
 	{preferRecentsOnOpen}

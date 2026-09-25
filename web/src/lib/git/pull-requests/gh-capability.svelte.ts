@@ -1,8 +1,8 @@
 import type { GhAvailabilityReason, GhStatusResponse } from '$shared/gh';
 import { getGhStatus } from '$lib/api/gh.js';
-import { ExecutionNodesStore } from '$lib/execution-nodes/execution-nodes-store.svelte.js';
+import { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
 
-export interface GhNodeCapabilityContext {
+export interface GhExecutorCapabilityContext {
 	available: boolean;
 	authenticated: boolean;
 	reason: GhAvailabilityReason | null;
@@ -16,32 +16,32 @@ export interface GhNodeCapabilityContext {
 }
 
 export interface GhCapabilityContext {
-	forNode(nodeId: string): GhNodeCapabilityContext;
+	forExecutor(executorId: string): GhExecutorCapabilityContext;
 }
 
-type GhNodesPort = Pick<
-	ExecutionNodesStore,
-	'nodes' | 'get' | 'onChanged' | 'gitContextKey' | 'ghAvailable'
+type GhExecutorsPort = Pick<
+	ExecutorsStore,
+	'executors' | 'get' | 'onChanged' | 'gitContextKey' | 'ghAvailable'
 >;
 
 export class GhCapabilityStore implements GhCapabilityContext {
-	readonly #entries = new Map<string, GhNodeCapabilityStore>();
+	readonly #entries = new Map<string, GhExecutorCapabilityStore>();
 	readonly #unsubscribe: () => void;
 
-	constructor(private readonly nodes: GhNodesPort = new ExecutionNodesStore()) {
-		this.#unsubscribe = nodes.onChanged(() => {
-			for (const [nodeId, entry] of this.#entries) {
+	constructor(private readonly executors: GhExecutorsPort = new ExecutorsStore()) {
+		this.#unsubscribe = executors.onChanged(() => {
+			for (const [executorId, entry] of this.#entries) {
 				entry.invalidate();
-				if (!nodes.get(nodeId)) this.#entries.delete(nodeId);
+				if (!executors.get(executorId)) this.#entries.delete(executorId);
 			}
 		});
 	}
 
-	forNode(nodeId: string): GhNodeCapabilityStore {
-		let entry = this.#entries.get(nodeId);
+	forExecutor(executorId: string): GhExecutorCapabilityStore {
+		let entry = this.#entries.get(executorId);
 		if (!entry) {
-			entry = new GhNodeCapabilityStore(nodeId, this.nodes);
-			if (this.nodes.get(nodeId)) this.#entries.set(nodeId, entry);
+			entry = new GhExecutorCapabilityStore(executorId, this.executors);
+			if (this.executors.get(executorId)) this.#entries.set(executorId, entry);
 		}
 		return entry;
 	}
@@ -53,7 +53,7 @@ export class GhCapabilityStore implements GhCapabilityContext {
 	}
 }
 
-export class GhNodeCapabilityStore implements GhNodeCapabilityContext {
+export class GhExecutorCapabilityStore implements GhExecutorCapabilityContext {
 	#loadGeneration = 0;
 	#startupChecked = false;
 	#startupPromise: Promise<void> | null = null;
@@ -61,11 +61,11 @@ export class GhNodeCapabilityStore implements GhNodeCapabilityContext {
 	#contextKey: string;
 
 	constructor(
-		readonly nodeId: string,
-		private readonly nodes: GhNodesPort,
+		readonly executorId: string,
+		private readonly executors: GhExecutorsPort,
 	) {
-		this.#contextKey = nodes.gitContextKey(nodeId);
-		this.hasChecked = !nodes.ghAvailable(nodeId);
+		this.#contextKey = executors.gitContextKey(executorId);
+		this.hasChecked = !executors.ghAvailable(executorId);
 	}
 
 	available = $state(false);
@@ -78,13 +78,13 @@ export class GhNodeCapabilityStore implements GhNodeCapabilityContext {
 	lastError = $state<string | null>(null);
 
 	invalidate(): void {
-		const key = this.nodes.gitContextKey(this.nodeId);
+		const key = this.executors.gitContextKey(this.executorId);
 		if (key === this.#contextKey) return;
 		this.#contextKey = key;
 		this.dispose();
 		this.available = false;
 		this.authenticated = false;
-		this.hasChecked = !this.nodes.ghAvailable(this.nodeId);
+		this.hasChecked = !this.executors.ghAvailable(this.executorId);
 		this.reason = null;
 		this.login = null;
 		this.host = null;
@@ -101,7 +101,7 @@ export class GhNodeCapabilityStore implements GhNodeCapabilityContext {
 	}
 
 	async ensureChecked(): Promise<void> {
-		if (!this.nodes.ghAvailable(this.nodeId)) return;
+		if (!this.executors.ghAvailable(this.executorId)) return;
 		if (this.#startupChecked) return;
 		if (this.#startupPromise) return this.#startupPromise;
 
@@ -129,7 +129,7 @@ export class GhNodeCapabilityStore implements GhNodeCapabilityContext {
 		this.lastError = null;
 
 		try {
-			const status = await getGhStatus(this.nodeId, { signal: controller.signal });
+			const status = await getGhStatus(this.executorId, { signal: controller.signal });
 			if (generation !== this.#loadGeneration) return;
 			this.#applyStatus(status);
 			this.hasChecked = true;
@@ -160,6 +160,6 @@ export class GhNodeCapabilityStore implements GhNodeCapabilityContext {
 	}
 }
 
-export function createGhCapabilityStore(nodes?: GhNodesPort): GhCapabilityStore {
-	return new GhCapabilityStore(nodes);
+export function createGhCapabilityStore(executors?: GhExecutorsPort): GhCapabilityStore {
+	return new GhCapabilityStore(executors);
 }

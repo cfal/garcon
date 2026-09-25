@@ -1,7 +1,7 @@
 import type { ProjectResolutionStore } from './project-resolution-store.svelte.js';
 import type { WorkspaceContextStore } from './workspace-context.svelte.js';
 import * as m from '$lib/paraglide/messages.js';
-import { effectiveNodeId } from '$shared/execution-nodes';
+import { effectiveExecutorId } from '$shared/executors';
 
 export type ProjectResolver = Pick<ProjectResolutionStore, 'retain'>;
 
@@ -11,24 +11,24 @@ interface ProjectPathResolutionDeps {
 }
 
 export interface TerminalCreationTarget {
-	nodeId: string;
+	executorId: string;
 	projectPath: string | null;
 }
 
 export async function resolveProjectPath(
 	deps: ProjectPathResolutionDeps,
-	nodeId?: string,
+	executorId?: string,
 ): Promise<TerminalCreationTarget> {
 	const target = deps.workspaceContext.currentTarget;
-	const selectedNode = nodeId ?? effectiveNodeId(target?.nodeId);
-	if (!target || selectedNode !== effectiveNodeId(target.nodeId))
-		return { nodeId: selectedNode, projectPath: null };
+	const selectedExecutor = executorId ?? effectiveExecutorId(target?.executorId);
+	if (!target || selectedExecutor !== effectiveExecutorId(target.executorId))
+		return { executorId: selectedExecutor, projectPath: null };
 	const lease = deps.projectResolution.retain(target);
 	try {
 		await lease.resolve();
 		const snapshot = lease.snapshot;
 		if (snapshot.kind === 'available')
-			return { nodeId: selectedNode, projectPath: target.projectPath };
+			return { executorId: selectedExecutor, projectPath: target.projectPath };
 		if (snapshot.kind === 'request-failed') throw new Error(snapshot.message);
 		throw new Error(m.workspace_project_unavailable());
 	} finally {

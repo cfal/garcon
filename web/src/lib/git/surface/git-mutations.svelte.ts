@@ -1,5 +1,5 @@
 export interface GitMutationRequest<T> {
-	nodeId: string;
+	executorId: string;
 	surfaceId: string;
 	effectiveProjectKey: string;
 	projectPath: string;
@@ -7,11 +7,11 @@ export interface GitMutationRequest<T> {
 }
 
 export interface GitMutationCoordinatorOptions {
-	onChanged(nodeId: string, effectiveProjectKey: string, projectPath: string): void | Promise<void>;
-	onMutationError?(error: unknown, nodeId: string, projectPath: string): void;
+	onChanged(executorId: string, effectiveProjectKey: string, projectPath: string): void | Promise<void>;
+	onMutationError?(error: unknown, executorId: string, projectPath: string): void;
 	onInvalidationError?(
 		error: unknown,
-		nodeId: string,
+		executorId: string,
 		effectiveProjectKey: string,
 		projectPath: string,
 	): void;
@@ -31,20 +31,20 @@ export class GitMutationCoordinator {
 		try {
 			return await request.execute();
 		} catch (error) {
-			this.options.onMutationError?.(error, request.nodeId, request.projectPath);
+			this.options.onMutationError?.(error, request.executorId, request.projectPath);
 			throw error;
 		} finally {
 			// Failed multi-command operations can still change refs or the index.
 			try {
 				await this.options.onChanged(
-					request.nodeId,
+					request.executorId,
 					request.effectiveProjectKey,
 					request.projectPath,
 				);
 			} catch (error) {
 				this.options.onInvalidationError?.(
 					error,
-					request.nodeId,
+					request.executorId,
 					request.effectiveProjectKey,
 					request.projectPath,
 				);

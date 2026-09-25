@@ -2,7 +2,7 @@ import type {
   CanonicalFileIdentity, FileRevisionResponse, FileTreeResponse,
   SaveTextRequest, SaveTextResponse, FileRevision,
 } from '@garcon/common/file-contracts';
-import type { NodeCallOptions } from './resources.js';
+import type { ExecutorCallOptions } from './resources.js';
 
 export interface ExecutionFileTarget {
   readonly projectPath: string;
@@ -23,11 +23,11 @@ export interface ExecutionFileRead {
 }
 
 export interface ExecutionFilesService {
-  tree(request: { readonly directoryPath?: string }, options?: NodeCallOptions): Promise<FileTreeResponse>;
-  browse(request: { readonly directoryPath?: string }, options?: NodeCallOptions): Promise<readonly ExecutionFileEntry[]>;
-  list(request: { readonly projectPath: string }, options?: NodeCallOptions): Promise<{ readonly files: readonly ExecutionFileEntry[]; readonly truncated: boolean }>;
-  identity(request: ExecutionFileTarget, options?: NodeCallOptions): Promise<CanonicalFileIdentity & { readonly nodeId: string }>;
-  revision(request: ExecutionFileTarget, options?: NodeCallOptions): Promise<FileRevisionResponse>;
-  read(request: ExecutionFileTarget, options?: NodeCallOptions): Promise<ExecutionFileRead>;
-  save(request: ExecutionFileTarget & SaveTextRequest, options?: NodeCallOptions): Promise<SaveTextResponse>;
+  tree(request: { readonly directoryPath?: string }, options?: ExecutorCallOptions): Promise<FileTreeResponse>;
+  browse(request: { readonly directoryPath?: string }, options?: ExecutorCallOptions): Promise<readonly ExecutionFileEntry[]>;
+  list(request: { readonly projectPath: string }, options?: ExecutorCallOptions): Promise<{ readonly files: readonly ExecutionFileEntry[]; readonly truncated: boolean }>;
+  identity(request: ExecutionFileTarget, options?: ExecutorCallOptions): Promise<CanonicalFileIdentity & { readonly executorId: string }>;
+  revision(request: ExecutionFileTarget, options?: ExecutorCallOptions): Promise<FileRevisionResponse>;
+  read(request: ExecutionFileTarget, options?: ExecutorCallOptions): Promise<ExecutionFileRead>;
+  save(request: ExecutionFileTarget & SaveTextRequest, options?: ExecutorCallOptions): Promise<SaveTextResponse>;
 }

@@ -20,7 +20,7 @@ afterAll(() => restoreResizeObserver());
 describe('FilePathTitle', () => {
 	it('reveals a selectable raw path from a compact remote title', async () => {
 		const path = '/workspace/project/src/file.ts';
-		render(FilePathTitle, { path, fileName: 'file.ts', dirty: false, nodeLabel: 'Worker' });
+		render(FilePathTitle, { path, fileName: 'file.ts', dirty: false, executorLabel: 'Worker' });
 		await fireEvent.click(screen.getByRole('button', { name: path }));
 		const input = screen.getByRole('textbox', { name: 'File location' }) as HTMLInputElement;
 		expect(input.value).toBe(path);

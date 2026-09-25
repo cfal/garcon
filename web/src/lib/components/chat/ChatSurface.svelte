@@ -5,7 +5,7 @@
 		getConversationPanels,
 		getGitViewLauncher,
 		getGhCapability,
-		getExecutionNodes,
+		getExecutors,
 		getWorkspaceCoordinator,
 		getModelCatalog,
 		type WorkspaceChatActions,
@@ -69,7 +69,7 @@
 	const rootModelCatalog = getModelCatalog();
 	const gitViews = getGitViewLauncher();
 	const ghCapabilities = getGhCapability();
-	const nodes = getExecutionNodes();
+	const executors = getExecutors();
 	const workspace = getWorkspaceCoordinator();
 	const transcriptCache =
 		untrack(() => providedTranscriptCache) ??
@@ -78,14 +78,14 @@
 	let prepareConversationHide: (() => void) | null = $state(null);
 
 	const selectedChat = $derived(sessions.selectedChat);
-	const modelCatalog = $derived(rootModelCatalog.forNode(selectedChat?.nodeId));
-	const gitAvailable = $derived(nodes.gitAvailable(selectedChat?.nodeId));
-	const ghCapability = $derived(ghCapabilities.forNode(selectedChat?.nodeId ?? 'local'));
+	const modelCatalog = $derived(rootModelCatalog.forExecutor(selectedChat?.executorId));
+	const gitAvailable = $derived(executors.gitAvailable(selectedChat?.executorId));
+	const ghCapability = $derived(ghCapabilities.forExecutor(selectedChat?.executorId ?? 'local'));
 	$effect(() => {
 		if (
 			!isMobile ||
 			!isVisible ||
-			!nodes.ghAvailable(selectedChat?.nodeId) ||
+			!executors.ghAvailable(selectedChat?.executorId) ||
 			ghCapability.hasChecked
 		)
 			return;

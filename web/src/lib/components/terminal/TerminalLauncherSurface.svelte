@@ -11,12 +11,12 @@
 	let creating = $state(false);
 	let error = $state<string | null>(null);
 
-	async function create(nodeId?: string): Promise<void> {
+	async function create(executorId?: string): Promise<void> {
 		if (creating) return;
 		creating = true;
 		error = null;
 		try {
-			await workspace.activateTerminalLauncher(host, nodeId);
+			await workspace.activateTerminalLauncher(host, executorId);
 		} catch (cause) {
 			error = cause instanceof Error ? cause.message : m.terminal_create_failed();
 		} finally {
@@ -34,8 +34,8 @@
 			{terminals}
 			busy={creating}
 			showLabel
-			defaultNodeId={workspace.terminalCreationNodeId}
-			oncreate={(nodeId) => void create(nodeId)}
+			defaultExecutorId={workspace.terminalCreationExecutorId}
+			oncreate={(executorId) => void create(executorId)}
 		/>
 	</div>
 </div>

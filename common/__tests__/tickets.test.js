@@ -5,7 +5,7 @@ import { parseHttpTicketMutationRequest, parseTicketMutationPayload, parseMarkup
 import { parseTicketCommentsQuery, parseTicketHistoryQuery, parseTicketListQuery, parseTicketReadQuery, ticketQueryParams } from '../ticket-query.js';
 import { ticketBody, ticketCommentBody, ticketId, ticketLabels, ticketProject, ticketRef, ticketTitle, ticketUuid,
   parseTicketAssigneeQuery } from '../ticket-validation.js';
-import { TICKET_ERROR_POLICY } from '../../server/tickets/errors.js';
+import { TICKET_ERROR_POLICY } from '../../server/common/ticket-error.js';
 import { parseTicket, parseTicketActivity, parseTicketComment, parseTicketWriteResult } from '../ticket-records.js';
 
 const REQUEST = '11111111-1111-4111-8111-111111111111';

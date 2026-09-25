@@ -1,6 +1,6 @@
 import { isRecord } from './json.js';
 import { GitServiceError } from './git-error.js';
-import { GIT_MAX_RESULT_BYTES, isGitMutation, type ExecutionGitResults, type ExecutionGhResults, type GitNodeScope } from './git-execution.js';
+import { GIT_MAX_RESULT_BYTES, isGitMutation, type ExecutionGitResults, type ExecutionGhResults, type GitExecutorScope } from './git-execution.js';
 import type { GitMethod } from './git.js';
 
 type Check = (value: unknown) => boolean;
@@ -47,13 +47,13 @@ function diagnostics(v: unknown): boolean {
     fileCount: optional(num), rowCount: optional(num), cacheHits: optional(num), batchCount: optional(num), bisectionCount: optional(num) });
 }
 
-export function validateGitResult<K extends GitMethod>(method: K, value: unknown, scope: GitNodeScope): asserts value is ExecutionGitResults[K] {
+export function validateGitResult<K extends GitMethod>(method: K, value: unknown, scope: GitExecutorScope): asserts value is ExecutionGitResults[K] {
   if (new TextEncoder().encode(JSON.stringify(value)).byteLength > GIT_MAX_RESULT_BYTES) {
     throw isGitMutation(method)
       ? new GitServiceError('GIT_MUTATION_OUTCOME_UNKNOWN', 'Git mutation result exceeds the 4 MiB limit. Inspect the repository before trying again.')
       : new GitServiceError('GIT_RESULT_TOO_LARGE', 'Git query result exceeds the 4 MiB limit');
   }
-  if (!isRecord(value) || value.nodeId !== scope.nodeId || value.instanceId !== scope.instanceId || !optional(diagnostics)(value.diagnostics) || !gitResult(method, value)) {
+  if (!isRecord(value) || value.executorId !== scope.executorId || value.instanceId !== scope.instanceId || !optional(diagnostics)(value.diagnostics) || !gitResult(method, value)) {
     throw new GitServiceError('GIT_INVALID_RESULT', `Invalid Git ${method} response`);
   }
 }
@@ -109,9 +109,9 @@ function gitResult(method: GitMethod, v: Record<string, unknown>): boolean {
   }
 }
 
-export function validateGhResult<K extends keyof ExecutionGhResults>(method: K, value: unknown, scope: GitNodeScope): asserts value is ExecutionGhResults[K] {
+export function validateGhResult<K extends keyof ExecutionGhResults>(method: K, value: unknown, scope: GitExecutorScope): asserts value is ExecutionGhResults[K] {
   if (new TextEncoder().encode(JSON.stringify(value)).byteLength > GIT_MAX_RESULT_BYTES) throw new GitServiceError('GIT_RESULT_TOO_LARGE', 'GitHub query result exceeds the 4 MiB limit');
-  if (!isRecord(value) || value.nodeId !== scope.nodeId || value.instanceId !== scope.instanceId) {
+  if (!isRecord(value) || value.executorId !== scope.executorId || value.instanceId !== scope.instanceId) {
     throw new GitServiceError('GIT_INVALID_RESULT', `Invalid GitHub ${method} response scope`);
   }
   const identity = { number: num, title: str, state: oneOf('open', 'closed', 'merged'), isDraft: bool, author: str, headRefName: str, baseRefName: str,

@@ -20,7 +20,7 @@ import type {
   AgentResumeRequestV5,
 } from './execution-v5.js';
 import type { AgentNativeSessionRef } from './transcript.js';
-import type { AgentProducerBinding, AgentResourceRef, NodeCallOptions } from './resources.js';
+import type { AgentProducerBinding, AgentResourceRef, ExecutorCallOptions } from './resources.js';
 
 export interface AgentCatalog {
   snapshot(request: { readonly strict: boolean; readonly signal: AbortSignal }): Promise<{
@@ -60,8 +60,8 @@ export interface AgentCommands {
 }
 
 export interface AgentSteering {
-  captureTarget(request: AgentSteerTargetRequest, options?: NodeCallOptions): Promise<AgentSteerTarget | null>;
-  steer(request: AgentSteerRequest, options?: NodeCallOptions): Promise<AgentSteerResult>;
+  captureTarget(request: AgentSteerTargetRequest, options?: ExecutorCallOptions): Promise<AgentSteerTarget | null>;
+  steer(request: AgentSteerRequest, options?: ExecutorCallOptions): Promise<AgentSteerResult>;
 }
 
 export type AgentSteerTarget = AgentResourceRef<'steer-target'>;
@@ -110,7 +110,7 @@ export type AgentSteerResult =
 // this facet the chat can still shed context through `/handoff`, which starts a
 // fresh session from a projected transcript instead.
 export interface AgentCompaction {
-  compact(request: AgentResumeRequestV5, options?: NodeCallOptions): Promise<AgentExecutionHandle>;
+  compact(request: AgentResumeRequestV5, options?: ExecutorCallOptions): Promise<AgentExecutionHandle>;
 }
 
 export interface AgentLifecycle {

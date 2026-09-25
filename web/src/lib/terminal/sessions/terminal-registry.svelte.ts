@@ -21,7 +21,7 @@ import { TerminalOutputFragments, decodeTerminalOutput } from './terminal-output
 import type {
 	TerminalAttachmentState,
 	TerminalClientSession,
-	TerminalNodeInventory,
+	TerminalExecutorInventory,
 	TerminalRegistryDeps,
 	TerminalRuntimeModule,
 	TerminalSessionRuntime,
@@ -39,7 +39,7 @@ export type {
 export const TERMINAL_CREATE_RETRY_WINDOW_MS = 10 * 60 * 1000;
 
 interface PendingTerminalCreate {
-	nodeId: string;
+	executorId: string;
 	terminalRuntimeId?: string;
 	requestId: string;
 	requestedInitialWorkingDirectory: string | null;
@@ -76,14 +76,14 @@ function createClientSession(
 }
 
 export class TerminalRegistry {
-	nodeInventories = $state<Record<string, TerminalNodeInventory>>({});
+	executorInventories = $state<Record<string, TerminalExecutorInventory>>({});
 	readonly #lists = new Map<string, Promise<void>>();
-	readonly #nodeVersions = new Map<string, symbol>();
-	readonly #nodeAvailability = new Map<string, string>();
+	readonly #executorVersions = new Map<string, symbol>();
+	readonly #executorAvailability = new Map<string, string>();
 	readonly #attachmentIds = new Map<string, string>();
 	readonly #gapRecovery = new Set<string>();
 	readonly #drainingOutput = new Set<string>();
-	readonly #stopNodes: () => void;
+	readonly #stopExecutors: () => void;
 	#initialized = false;
 	#inventoryRetry: ReturnType<typeof setTimeout> | null = null;
 	#onInventoryReady: (() => void) | null = null;
@@ -125,21 +125,21 @@ export class TerminalRegistry {
 			onReady: () => this.#restoreAttachments(),
 			onDisconnected: () => this.#markDisconnected(),
 		});
-		this.#stopNodes = deps.nodes?.onChanged(() => this.#nodesChanged()) ?? (() => {});
+		this.#stopExecutors = deps.executors?.onChanged(() => this.#nodesChanged()) ?? (() => {});
 		this.#nodesChanged();
 	}
 
-	nodeIdFor(terminalId: string): string {
-		return parseTerminalReference(terminalId)?.nodeId ?? 'local';
+	executorIdFor(terminalId: string): string {
+		return parseTerminalReference(terminalId)?.executorId ?? 'local';
 	}
-	nodeLabel(nodeId: string): string {
-		return this.#deps.nodes?.label(nodeId) ?? (nodeId === 'local' ? 'Local' : nodeId);
+	executorLabel(executorId: string): string {
+		return this.#deps.executors?.label(executorId) ?? (executorId === 'local' ? 'Local' : executorId);
 	}
 	displayName(metadata: TerminalMetadata): string {
-		return terminalDisplayName(metadata, this.nodeLabel(this.nodeIdFor(metadata.terminalId)));
+		return terminalDisplayName(metadata, this.executorLabel(this.executorIdFor(metadata.terminalId)));
 	}
 	get hosts() {
-		const nodes = this.#deps.nodes?.nodes ?? [
+		const executors = this.#deps.executors?.executors ?? [
 			{
 				id: 'local',
 				label: 'Local',
@@ -148,28 +148,28 @@ export class TerminalRegistry {
 				machineServices: { terminals: true },
 			},
 		];
-		return nodes
-			.filter((node) => node.id === 'local' || node.machineServices.terminals)
+		return executors
+			.filter((executor) => executor.id === 'local' || executor.machineServices.terminals)
 			.toSorted((left, right) => {
 				if (left.id === 'local') return -1;
 				if (right.id === 'local') return 1;
 				return 0;
 			})
-			.map((node) => ({
-				id: node.id,
-				label: node.label,
-				available: node.enabled && node.availability === 'ready' && node.machineServices.terminals,
+			.map((executor) => ({
+				id: executor.id,
+				label: executor.label,
+				available: executor.enabled && executor.availability === 'ready' && executor.machineServices.terminals,
 				full:
 					this.orderedSessions.filter(
-						(session) => this.nodeIdFor(session.metadata.terminalId) === node.id,
+						(session) => this.executorIdFor(session.metadata.terminalId) === executor.id,
 					).length >= TERMINAL_SESSION_LIMIT,
 			}));
 	}
 	get hasRemoteHosts(): boolean {
 		return this.hosts.some((host) => host.id !== 'local' && host.available);
 	}
-	canCreate(nodeId: string): boolean {
-		const host = this.hosts.find((host) => host.id === nodeId);
+	canCreate(executorId: string): boolean {
+		const host = this.hosts.find((host) => host.id === executorId);
 		return Boolean(host?.available && !host.full);
 	}
 
@@ -194,10 +194,10 @@ export class TerminalRegistry {
 		}
 	}
 
-	async list(nodeId?: string): Promise<void> {
-		if (nodeId !== undefined) return this.#listNode(nodeId);
+	async list(executorId?: string): Promise<void> {
+		if (executorId !== undefined) return this.#listExecutor(executorId);
 		const hosts = this.hosts.filter((host) => host.available);
-		const results = await Promise.allSettled(hosts.map((host) => this.#listNode(host.id)));
+		const results = await Promise.allSettled(hosts.map((host) => this.#listExecutor(host.id)));
 		if (!results.some((result) => result.status === 'fulfilled'))
 			throw new Error(this.listError ?? m.terminal_list_failed());
 	}
@@ -209,7 +209,7 @@ export class TerminalRegistry {
 			onInventoryReady = resolve;
 			this.#onInventoryReady = resolve;
 			void Promise.allSettled(
-				this.hosts.filter((host) => host.available).map((host) => this.#refreshNode(host.id)),
+				this.hosts.filter((host) => host.available).map((host) => this.#refreshExecutor(host.id)),
 			).then(() => reject(new Error(this.listError ?? m.terminal_list_failed())));
 		});
 		try {
@@ -219,29 +219,29 @@ export class TerminalRegistry {
 		}
 	}
 
-	async #listNode(nodeId: string): Promise<void> {
-		const pending = this.#lists.get(nodeId);
+	async #listExecutor(executorId: string): Promise<void> {
+		const pending = this.#lists.get(executorId);
 		if (pending) return pending;
-		const version = this.#nodeVersions.get(nodeId) ?? Symbol('node-inventory');
-		this.#nodeVersions.set(nodeId, version);
+		const version = this.#executorVersions.get(executorId) ?? Symbol('executor-inventory');
+		this.#executorVersions.set(executorId, version);
 		const startedAtMutationVersion = this.#sessionMutationVersion;
 		this.listStatus = 'loading';
 		this.listError = null;
-		this.nodeInventories[nodeId] = {
-			...this.nodeInventories[nodeId],
+		this.executorInventories[executorId] = {
+			...this.executorInventories[executorId],
 			status: 'loading',
 			error: null,
 		};
 		const listing = Promise.resolve().then(async () => {
 			try {
-				const response = await this.#listTerminals(nodeId);
-				if (this.#destroyed || version !== this.#nodeVersions.get(nodeId)) return;
+				const response = await this.#listTerminals(executorId);
+				if (this.#destroyed || version !== this.#executorVersions.get(executorId)) return;
 				const next: Record<string, TerminalClientSession> = Object.fromEntries(
-					Object.entries(this.sessions).filter(([id]) => this.nodeIdFor(id) !== nodeId),
+					Object.entries(this.sessions).filter(([id]) => this.executorIdFor(id) !== executorId),
 				);
 				for (const metadata of response.terminals) {
-					if (this.nodeIdFor(metadata.terminalId) !== nodeId)
-						throw new Error('Terminal inventory node mismatch');
+					if (this.executorIdFor(metadata.terminalId) !== executorId)
+						throw new Error('Terminal inventory executor mismatch');
 					const existing = this.sessions[metadata.terminalId];
 					if (
 						(this.#sessionMutationVersions.get(metadata.terminalId) ?? 0) > startedAtMutationVersion
@@ -266,10 +266,10 @@ export class TerminalRegistry {
 				}
 				this.sessions = next;
 				for (const [id, mutation] of this.#sessionMutationVersions) {
-					if (this.nodeIdFor(id) === nodeId && mutation <= startedAtMutationVersion)
+					if (this.executorIdFor(id) === executorId && mutation <= startedAtMutationVersion)
 						this.#sessionMutationVersions.delete(id);
 				}
-				this.nodeInventories[nodeId] = {
+				this.executorInventories[executorId] = {
 					status: 'ready',
 					runtimeId: response.terminalRuntimeId,
 					epoch: response.attachmentEpoch,
@@ -278,18 +278,18 @@ export class TerminalRegistry {
 				this.listStatus = 'ready';
 				this.#syncTransportDemand();
 				for (const attempt of Object.values(this.pendingCreates)) {
-					if (!attempt.requiresList || attempt.nodeId !== nodeId) continue;
+					if (!attempt.requiresList || attempt.executorId !== executorId) continue;
 					this.#clearCreateAttempt(attempt.requestId);
 				}
 				this.#deps.onSuccessfulList?.(
 					this.orderedSessions.map((session) => session.metadata.terminalId),
-					nodeId,
+					executorId,
 				);
 				this.#onInventoryReady?.();
 			} catch (error) {
-				if (this.#destroyed || version !== this.#nodeVersions.get(nodeId)) return;
-				this.nodeInventories[nodeId] = {
-					...this.nodeInventories[nodeId],
+				if (this.#destroyed || version !== this.#executorVersions.get(executorId)) return;
+				this.executorInventories[executorId] = {
+					...this.executorInventories[executorId],
 					status: 'failed',
 					error: error instanceof Error ? error.message : m.terminal_list_failed(),
 				};
@@ -298,32 +298,32 @@ export class TerminalRegistry {
 				this.#scheduleInventoryRetry();
 				throw error;
 			} finally {
-				if (this.#lists.get(nodeId) === listing) this.#lists.delete(nodeId);
+				if (this.#lists.get(executorId) === listing) this.#lists.delete(executorId);
 			}
 		});
-		this.#lists.set(nodeId, listing);
+		this.#lists.set(executorId, listing);
 		return listing;
 	}
 
 	async create(
 		requestedInitialWorkingDirectory: string | null,
 		requestId: string,
-		nodeId = 'local',
+		executorId = 'local',
 	): Promise<string> {
 		if (!requestId) throw new Error('Terminal creation requires a request ID');
-		if (!this.canCreate(nodeId) && !this.pendingCreates[requestId])
+		if (!this.canCreate(executorId) && !this.pendingCreates[requestId])
 			throw new Error(m.terminal_unavailable());
-		if (this.nodeInventories[nodeId]?.status !== 'ready') await this.list(nodeId);
+		if (this.executorInventories[executorId]?.status !== 'ready') await this.list(executorId);
 		if (
-			this.nodeInventories[nodeId]?.status !== 'ready' ||
-			!this.hosts.some((host) => host.id === nodeId && host.available)
+			this.executorInventories[executorId]?.status !== 'ready' ||
+			!this.hosts.some((host) => host.id === executorId && host.available)
 		)
 			throw new Error(m.terminal_unavailable());
 		let attempt = this.pendingCreates[requestId];
 		if (!attempt) {
 			const createdAttempt: PendingTerminalCreate = {
-				nodeId,
-				terminalRuntimeId: this.nodeInventories[nodeId]?.runtimeId,
+				executorId,
+				terminalRuntimeId: this.executorInventories[executorId]?.runtimeId,
 				requestId,
 				requestedInitialWorkingDirectory,
 				startedAt: this.#now(),
@@ -340,26 +340,26 @@ export class TerminalRegistry {
 			attempt.requiresList = true;
 		}
 		if (
-			attempt.nodeId !== nodeId ||
+			attempt.executorId !== executorId ||
 			attempt.requestedInitialWorkingDirectory !== requestedInitialWorkingDirectory
 		)
 			throw new Error('Terminal retry cannot change its target');
-		if (attempt.terminalRuntimeId !== this.nodeInventories[nodeId]?.runtimeId)
+		if (attempt.terminalRuntimeId !== this.executorInventories[executorId]?.runtimeId)
 			attempt.requiresList = true;
 		if (attempt.requiresList) {
-			await this.list(nodeId);
+			await this.list(executorId);
 			throw new Error(m.terminal_create_requires_list());
 		}
 		try {
 			const result = await this.#createTerminal({
 				requestId: attempt.requestId,
-				nodeId: attempt.nodeId,
+				executorId: attempt.executorId,
 				expectedTerminalRuntimeId: attempt.terminalRuntimeId,
 				requestedInitialWorkingDirectory: attempt.requestedInitialWorkingDirectory,
 			});
-			if (this.#destroyed || !this.#nodeVersions.has(nodeId))
+			if (this.#destroyed || !this.#executorVersions.has(executorId))
 				throw new ApiError(503, m.terminal_unavailable(), 'terminal-unavailable');
-			const observedRuntime = this.nodeInventories[nodeId]?.runtimeId;
+			const observedRuntime = this.executorInventories[executorId]?.runtimeId;
 			if (observedRuntime && observedRuntime !== attempt.terminalRuntimeId)
 				throw new ApiError(409, m.terminal_create_requires_list(), 'terminal-runtime-changed');
 			this.#upsert(result.terminal, 'detached');
@@ -375,10 +375,10 @@ export class TerminalRegistry {
 	async attach(terminalId: string, intent: 'restore' | 'takeover'): Promise<void> {
 		if (!this.sessions[terminalId] || this.#drainingOutput.has(terminalId)) return;
 		const request = this.#beginAttachment(terminalId);
-		const nodeId = this.nodeIdFor(terminalId);
+		const executorId = this.executorIdFor(terminalId);
 		if (intent === 'takeover') {
 			try {
-				await this.list(nodeId);
+				await this.list(executorId);
 			} catch {
 				if (this.#isCurrentAttachment(terminalId, request)) {
 					this.sessions[terminalId].attachmentState = 'detached';
@@ -423,7 +423,7 @@ export class TerminalRegistry {
 			afterSequence: current.lastReceivedSequence,
 			intent,
 			attachmentId,
-			attachmentEpoch: this.nodeInventories[this.nodeIdFor(terminalId)]?.epoch,
+			attachmentEpoch: this.executorInventories[this.executorIdFor(terminalId)]?.epoch,
 		});
 		if (!sent) current.attachmentState = 'detached';
 		this.#finishAttachment(terminalId, request);
@@ -527,7 +527,7 @@ export class TerminalRegistry {
 	destroy(): void {
 		this.#destroyed = true;
 		this.#clearInventoryRetry();
-		this.#stopNodes();
+		this.#stopExecutors();
 		this.#invalidateAttachments();
 		this.#transport.destroy();
 		for (const attempt of Object.values(this.pendingCreates)) {
@@ -539,9 +539,9 @@ export class TerminalRegistry {
 		this.#attachmentRequests.clear();
 		this.#sessionMutationVersions.clear();
 		this.#outputFragments.clear();
-		this.#nodeVersions.clear();
+		this.#executorVersions.clear();
 		this.#lists.clear();
-		this.#nodeAvailability.clear();
+		this.#executorAvailability.clear();
 		this.#gapRecovery.clear();
 	}
 
@@ -696,14 +696,14 @@ export class TerminalRegistry {
 		this.#sessionMutationVersions.set(terminalId, this.#sessionMutationVersion);
 	}
 
-	#restoreAttachments(nodeId?: string): void {
+	#restoreAttachments(executorId?: string): void {
 		if (this.#authSuspended || this.#transport.status !== 'connected') return;
 		for (const session of Object.values(this.sessions)) {
 			const id = session.metadata.terminalId;
-			const host = this.nodeIdFor(id);
-			if (nodeId !== undefined && nodeId !== host) continue;
+			const host = this.executorIdFor(id);
+			if (executorId !== undefined && executorId !== host) continue;
 			if (
-				this.nodeInventories[host]?.status !== 'ready' ||
+				this.executorInventories[host]?.status !== 'ready' ||
 				session.attachmentState === 'taken-over' ||
 				this.#attachmentRequests.has(id)
 			)
@@ -845,8 +845,8 @@ export class TerminalRegistry {
 		if (!this.#isCurrentAttachment(terminalId, request)) return false;
 		if (
 			!this.#authSuspended &&
-			this.hosts.some((host) => host.id === this.nodeIdFor(terminalId) && host.available) &&
-			this.nodeInventories[this.nodeIdFor(terminalId)]?.status === 'ready' &&
+			this.hosts.some((host) => host.id === this.executorIdFor(terminalId) && host.available) &&
+			this.executorInventories[this.executorIdFor(terminalId)]?.status === 'ready' &&
 			this.#transport.status === 'connected'
 		) {
 			return true;
@@ -881,7 +881,7 @@ export class TerminalRegistry {
 	}
 
 	#listPromiseFor(terminalId: string): Promise<void> | undefined {
-		return this.#lists.get(this.nodeIdFor(terminalId));
+		return this.#lists.get(this.executorIdFor(terminalId));
 	}
 
 	#recoverGap(terminalId: string): void {
@@ -910,45 +910,45 @@ export class TerminalRegistry {
 
 	#nodesChanged(): void {
 		const hosts = this.hosts;
-		const known = new Set((this.#deps.nodes?.nodes ?? hosts).map((node) => node.id));
-		for (const nodeId of known) {
-			if (hosts.some((host) => host.id === nodeId)) continue;
-			if (this.#nodeAvailability.get(nodeId) !== 'offline') this.#loseNode(nodeId);
-			this.#nodeAvailability.set(nodeId, 'offline');
+		const known = new Set((this.#deps.executors?.executors ?? hosts).map((executor) => executor.id));
+		for (const executorId of known) {
+			if (hosts.some((host) => host.id === executorId)) continue;
+			if (this.#executorAvailability.get(executorId) !== 'offline') this.#loseExecutor(executorId);
+			this.#executorAvailability.set(executorId, 'offline');
 		}
-		for (const nodeId of this.#nodeAvailability.keys()) {
-			if (known.has(nodeId)) continue;
-			this.#loseNode(nodeId);
-			this.#nodeAvailability.delete(nodeId);
-			this.#nodeVersions.delete(nodeId);
-			delete this.nodeInventories[nodeId];
+		for (const executorId of this.#executorAvailability.keys()) {
+			if (known.has(executorId)) continue;
+			this.#loseExecutor(executorId);
+			this.#executorAvailability.delete(executorId);
+			this.#executorVersions.delete(executorId);
+			delete this.executorInventories[executorId];
 			for (const id of Object.keys(this.sessions))
-				if (this.nodeIdFor(id) === nodeId) this.disposeTerminatedSession(id);
+				if (this.executorIdFor(id) === executorId) this.disposeTerminatedSession(id);
 			for (const attempt of Object.values(this.pendingCreates))
-				if (attempt.nodeId === nodeId) this.#clearCreateAttempt(attempt.requestId);
+				if (attempt.executorId === executorId) this.#clearCreateAttempt(attempt.requestId);
 			for (const id of this.#sessionMutationVersions.keys())
-				if (this.nodeIdFor(id) === nodeId) this.#sessionMutationVersions.delete(id);
-			this.#deps.onSuccessfulList?.(Object.keys(this.sessions), nodeId);
+				if (this.executorIdFor(id) === executorId) this.#sessionMutationVersions.delete(id);
+			this.#deps.onSuccessfulList?.(Object.keys(this.sessions), executorId);
 		}
 		for (const host of hosts) {
 			const availability = host.available ? 'ready' : 'offline';
-			const previous = this.#nodeAvailability.get(host.id);
-			this.#nodeAvailability.set(host.id, availability);
+			const previous = this.#executorAvailability.get(host.id);
+			this.#executorAvailability.set(host.id, availability);
 			if (previous === availability) continue;
-			if (!host.available) this.#loseNode(host.id);
+			if (!host.available) this.#loseExecutor(host.id);
 			else if (this.#initialized && !this.#authSuspended) {
-				void this.#refreshNode(host.id);
+				void this.#refreshExecutor(host.id);
 			}
 		}
 	}
 
-	async #refreshNode(nodeId: string): Promise<void> {
+	async #refreshExecutor(executorId: string): Promise<void> {
 		try {
-			await this.list(nodeId);
+			await this.list(executorId);
 		} catch {
 			return;
 		}
-		this.#restoreAttachments(nodeId);
+		this.#restoreAttachments(executorId);
 	}
 
 	#scheduleInventoryRetry(): void {
@@ -956,15 +956,15 @@ export class TerminalRegistry {
 			return;
 		if (
 			!this.hosts.some(
-				(host) => host.available && this.nodeInventories[host.id]?.status === 'failed',
+				(host) => host.available && this.executorInventories[host.id]?.status === 'failed',
 			)
 		)
 			return;
 		this.#inventoryRetry = setTimeout(() => {
 			this.#inventoryRetry = null;
 			for (const host of this.hosts)
-				if (host.available && this.nodeInventories[host.id]?.status === 'failed')
-					void this.#refreshNode(host.id);
+				if (host.available && this.executorInventories[host.id]?.status === 'failed')
+					void this.#refreshExecutor(host.id);
 		}, 5_000);
 	}
 
@@ -973,17 +973,17 @@ export class TerminalRegistry {
 		this.#inventoryRetry = null;
 	}
 
-	#loseNode(nodeId: string): void {
-		this.#nodeVersions.set(nodeId, Symbol('node-inventory'));
-		this.#lists.delete(nodeId);
-		this.nodeInventories[nodeId] = {
-			...this.nodeInventories[nodeId],
+	#loseExecutor(executorId: string): void {
+		this.#executorVersions.set(executorId, Symbol('executor-inventory'));
+		this.#lists.delete(executorId);
+		this.executorInventories[executorId] = {
+			...this.executorInventories[executorId],
 			status: 'failed',
 			error: m.terminal_unavailable(),
 		};
 		for (const session of this.orderedSessions) {
 			const id = session.metadata.terminalId;
-			if (this.nodeIdFor(id) !== nodeId) continue;
+			if (this.executorIdFor(id) !== executorId) continue;
 			this.#attachmentRequests.delete(id);
 			this.#attachmentIds.delete(id);
 			this.#gapRecovery.delete(id);

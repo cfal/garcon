@@ -5,7 +5,7 @@ import { chromium } from 'playwright';
 
 describe('File draft storage failures', () => {
   test('rolls back failed transactions and handles open failures during close', async () => {
-    const root = fileURLToPath(new URL('../../../', import.meta.url));
+    const root = fileURLToPath(new URL('../../..', import.meta.url));
     const build = await Bun.build({
       entrypoints: [`${root}web/src/lib/files/persistence/file-draft-repository.ts`],
       target: 'browser',

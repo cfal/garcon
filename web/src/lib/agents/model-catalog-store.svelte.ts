@@ -1,5 +1,5 @@
 import { apiFetch } from '$lib/api/client.js';
-import { effectiveNodeId, type ExecutionNodeSnapshot } from '$shared/execution-nodes';
+import { effectiveExecutorId, type ExecutorSnapshot } from '$shared/executors';
 import { agentLabelFor } from './agent-labels.js';
 import {
 	getLocalStorageItem,
@@ -407,9 +407,9 @@ function normalizeSnapshot(parsed: Record<string, unknown>): ModelCatalogSnapsho
 	};
 }
 
-function readNodeSnapshots(): Record<string, ModelCatalogSnapshot> {
+function readExecutorSnapshots(): Record<string, ModelCatalogSnapshot> {
 	try {
-		const parsed: unknown = JSON.parse(getLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalogNodes) ?? '{}');
+		const parsed: unknown = JSON.parse(getLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalogExecutors) ?? '{}');
 		if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
 		return Object.fromEntries(Object.entries(parsed).flatMap(([id, value]) =>
 			value && typeof value === 'object' && !Array.isArray(value)
@@ -418,9 +418,9 @@ function readNodeSnapshots(): Record<string, ModelCatalogSnapshot> {
 	} catch { return {}; }
 }
 
-function readPersisted(nodeId: string): ModelCatalogSnapshot {
+function readPersisted(executorId: string): ModelCatalogSnapshot {
 	try {
-		if (nodeId !== 'local') return readNodeSnapshots()[nodeId] ?? emptySnapshot();
+		if (executorId !== 'local') return readExecutorSnapshots()[executorId] ?? emptySnapshot();
 		const raw =
 			getLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalog) ??
 			getLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalogLegacy);
@@ -431,9 +431,9 @@ function readPersisted(nodeId: string): ModelCatalogSnapshot {
 	}
 }
 
-function persist(nodeId: string, snapshot: ModelCatalogSnapshot): void {
-	if (nodeId === 'local') setLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalog, JSON.stringify(snapshot));
-	else setLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalogNodes, JSON.stringify({ ...readNodeSnapshots(), [nodeId]: snapshot }));
+function persist(executorId: string, snapshot: ModelCatalogSnapshot): void {
+	if (executorId === 'local') setLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalog, JSON.stringify(snapshot));
+	else setLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalogExecutors, JSON.stringify({ ...readExecutorSnapshots(), [executorId]: snapshot }));
 }
 
 interface CatalogApplyResult {
@@ -467,15 +467,15 @@ export class ModelCatalogStore {
 	#syncPromise: Promise<void> | null = null;
 	#lastSyncAttemptAt = 0;
 	#requestVersion = 0;
-	#nodeAvailability = new Map<string, string>();
+	#executorAvailability = new Map<string, string>();
 
-	constructor(readonly nodeId = 'local', private readonly catalogs = new Map<string, ModelCatalogStore>()) {
-		this.catalogs.set(nodeId, this);
+	constructor(readonly executorId = 'local', private readonly catalogs = new Map<string, ModelCatalogStore>()) {
+		this.catalogs.set(executorId, this);
 		this.hydrateFromStorage();
 	}
 
-	forNode(nodeId?: string | null): ModelCatalogStore {
-		const id = effectiveNodeId(nodeId);
+	forExecutor(executorId?: string | null): ModelCatalogStore {
+		const id = effectiveExecutorId(executorId);
 		return this.catalogs.get(id) ?? new ModelCatalogStore(id, this.catalogs);
 	}
 
@@ -483,29 +483,29 @@ export class ModelCatalogStore {
 		return this.lastValidatedAt !== null && this.error === null;
 	}
 
-	reconcileNodes(nodes: readonly ExecutionNodeSnapshot[]): void {
-		const ids = new Set(nodes.map((node) => node.id));
-		const persisted = readNodeSnapshots();
+	reconcileExecutors(executors: readonly ExecutorSnapshot[]): void {
+		const ids = new Set(executors.map((executor) => executor.id));
+		const persisted = readExecutorSnapshots();
 		for (const id of Object.keys(persisted)) if (!ids.has(id)) delete persisted[id];
-		for (const id of this.#nodeAvailability.keys()) if (!ids.has(id)) this.#nodeAvailability.delete(id);
+		for (const id of this.#executorAvailability.keys()) if (!ids.has(id)) this.#executorAvailability.delete(id);
 		for (const [id, catalog] of this.catalogs) {
 			if (ids.has(id) || id === 'local') continue;
 			catalog.invalidate();
 			this.catalogs.delete(id);
 		}
-		for (const node of nodes) {
-			const availability = JSON.stringify([node.enabled, node.availability, node.instanceId]);
-			const previous = this.#nodeAvailability.get(node.id);
+		for (const executor of executors) {
+			const availability = JSON.stringify([executor.enabled, executor.availability, executor.instanceId]);
+			const previous = this.#executorAvailability.get(executor.id);
 			if (previous !== undefined && availability !== previous) {
-				if (node.id === 'local') {
+				if (executor.id === 'local') {
 					removeLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalog);
 					removeLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalogLegacy);
-				} else delete persisted[node.id];
-				this.catalogs.get(node.id)?.invalidate();
+				} else delete persisted[executor.id];
+				this.catalogs.get(executor.id)?.invalidate();
 			}
-			this.#nodeAvailability.set(node.id, availability);
+			this.#executorAvailability.set(executor.id, availability);
 		}
-		setLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalogNodes, JSON.stringify(persisted));
+		setLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalogExecutors, JSON.stringify(persisted));
 	}
 
 	invalidate(): void {
@@ -523,7 +523,7 @@ export class ModelCatalogStore {
 		for (const catalog of this.catalogs.values()) catalog.invalidate();
 		removeLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalog);
 		removeLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalogLegacy);
-		removeLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalogNodes);
+		removeLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalogExecutors);
 	}
 
 	getAgents(): SessionAgentId[] {
@@ -714,7 +714,7 @@ export class ModelCatalogStore {
 	}
 
 	hydrateFromStorage(): void {
-		const snapshot = readPersisted(this.nodeId);
+		const snapshot = readPersisted(this.executorId);
 		this.agentModels = snapshot.agentModels;
 		this.agentMetadata = snapshot.agentMetadata;
 		this.apiProviderCatalog = snapshot.apiProviderCatalog;
@@ -789,7 +789,7 @@ export class ModelCatalogStore {
 			this.lastFetchedAt = now;
 			this.lastValidatedAt = now;
 			this.error = null;
-			persist(this.nodeId, this.#currentSnapshot());
+			persist(this.executorId, this.#currentSnapshot());
 			this.version += 1;
 		} catch (error) {
 			if (requestVersion === this.#requestVersion) this.error = error instanceof Error ? error.message : 'Unknown error';
@@ -799,7 +799,7 @@ export class ModelCatalogStore {
 	}
 
 	#fetchCatalogResponse(options: { force?: boolean }): Promise<Response> {
-		const url = this.nodeId === 'local' ? '/api/v1/models' : `/api/v1/models?nodeId=${encodeURIComponent(this.nodeId)}`;
+		const url = this.executorId === 'local' ? '/api/v1/models' : `/api/v1/models?executorId=${encodeURIComponent(this.executorId)}`;
 		if (!options.force && this.etag) {
 			return apiFetch(url, {
 				headers: {
@@ -822,7 +822,7 @@ export class ModelCatalogStore {
 	}
 
 	#persistCurrentSnapshot(): void {
-		persist(this.nodeId, this.#currentSnapshot());
+		persist(this.executorId, this.#currentSnapshot());
 		this.version += 1;
 	}
 }

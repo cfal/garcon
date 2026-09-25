@@ -2,11 +2,11 @@ import { expect, test } from 'bun:test';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { ExecutionNodeProcess } from '../../support/execution-backend.js';
-import { WebSocketLink } from '../../../server/execution-nodes/websocket-link.js';
-import { parseConnectionUrl } from '../../../server/execution-nodes/connection-url.js';
-import { RemoteExecutionNode } from '../../../server/execution-nodes/remote.js';
-import { AgentRpc } from '../../../server/execution-nodes/rpc.js';
+import { ExecutorProcess } from '../../support/execution-backend.js';
+import { WebSocketLink } from '../../../server/remote/transport/websocket-link.js';
+import { parseConnectionUrl } from '../../../server/remote/transport/connection-url.js';
+import { RemoteExecutorClient } from '../../../server/remote/client/executor-client.js';
+import { ExecutorRpc } from '../../../server/remote/transport/rpc.js';
 import { discoverRuntime } from '../../../cli/discovery.js';
 import { withTimeout } from '../../support/deferred.js';
 
@@ -14,24 +14,24 @@ for (const ending of ['shutdown', 'intentional crash', 'unexpected exit'] as con
   test(`worker harness retains exit classification after connection: ${ending}`, async () => {
     const root = await mkdtemp(join(tmpdir(), 'garcon-worker-exit-'));
     const directories = {
-      root, workspace: join(root, 'config', 'execution-node'), project: join(root, 'project'),
+      root, workspace: join(root, 'config', 'executor'), project: join(root, 'project'),
       home: join(root, 'home'), config: join(root, 'config'),
     };
     let controller: WebSocketLink | null = null;
-    let worker: ExecutionNodeProcess | null = null;
+    let worker: ExecutorProcess | null = null;
     try {
       for (const directory of Object.values(directories)) await mkdir(directory, { recursive: true });
-      worker = await ExecutionNodeProcess.start({
+      worker = await ExecutorProcess.start({
         repoRoot: resolve(import.meta.dir, '../../..'), directories, environment: { PATH: '/usr/bin:/bin' },
         connection: { kind: 'listen', port: 0 },
       });
       const connection = parseConnectionUrl(await worker.connectionUrl());
       const url = new URL(connection.socketUrl);
       url.hostname = '127.0.0.1';
-      controller = new WebSocketLink({ role: 'controller', nodeId: '22222222-2222-4222-8222-222222222222', secret: connection.secret, allowInsecureDevelopment: true });
+      controller = new WebSocketLink({ role: 'controller', executorId: '22222222-2222-4222-8222-222222222222', secret: connection.secret, allowInsecureDevelopment: true });
       controller.dial(url.href);
       await worker.connected();
-      expect(worker.logs.join('\n')).not.toContain('execution-node-ready');
+      expect(worker.logs.join('\n')).not.toContain('executor-ready');
       expect(worker.logs.join('\n')).not.toContain(connection.secret);
       if (ending === 'unexpected exit') {
         worker.child.kill('SIGKILL');
@@ -49,52 +49,52 @@ for (const ending of ['shutdown', 'intentional crash', 'unexpected exit'] as con
   }, 30_000);
 }
 
-test('re-adding a running worker under a new node identity requires restarting that worker', async () => {
+test('re-adding a running worker under a new executor identity requires restarting that worker', async () => {
   const root = await mkdtemp(join(tmpdir(), 'garcon-worker-identity-'));
   const directories = {
-    root, workspace: join(root, 'config', 'execution-node'), project: join(root, 'project'),
+    root, workspace: join(root, 'config', 'executor'), project: join(root, 'project'),
     home: join(root, 'home'), config: join(root, 'config'),
   };
   const controllers: WebSocketLink[] = [];
-  let worker: ExecutionNodeProcess | null = null;
+  let worker: ExecutorProcess | null = null;
   try {
     for (const directory of Object.values(directories)) await mkdir(directory, { recursive: true });
-    worker = await ExecutionNodeProcess.start({
+    worker = await ExecutorProcess.start({
       repoRoot: resolve(import.meta.dir, '../../..'), directories, environment: { PATH: '/usr/bin:/bin' },
       connection: { kind: 'listen', port: 0 },
     });
     const connection = parseConnectionUrl(await worker.connectionUrl());
     const url = new URL(connection.socketUrl);
     url.hostname = '127.0.0.1';
-    for (const nodeId of ['22222222-2222-4222-8222-222222222222', '33333333-3333-4333-8333-333333333333']) {
-      const controller = new WebSocketLink({ role: 'controller', nodeId, secret: connection.secret, allowInsecureDevelopment: true });
+    for (const executorId of ['22222222-2222-4222-8222-222222222222', '33333333-3333-4333-8333-333333333333']) {
+      const controller = new WebSocketLink({ role: 'controller', executorId, secret: connection.secret, allowInsecureDevelopment: true });
       controllers.push(controller);
       if (controllers.length === 1) {
-        const connected = RemoteExecutionNode.connect(controller);
+        const connected = RemoteExecutorClient.connect(controller);
         controller.dial(url.href);
         await withTimeout(connected, 10_000, () => worker!.logs.join('\n'));
       } else {
-        const session = Promise.withResolvers<AgentRpc>();
-        const unsubscribe = controller.onSession((transport) => session.resolve(new AgentRpc(transport)));
+        const session = Promise.withResolvers<ExecutorRpc>();
+        const unsubscribe = controller.onSession((transport) => session.resolve(new ExecutorRpc(transport)));
         controller.dial(url.href);
         const rpc = await withTimeout(session.promise, 10_000, () => worker!.logs.join('\n'));
         await rpc.transport.ready;
         const reverseCalls: string[] = [];
         rpc.handle(async (call) => {
           reverseCalls.push(call.method);
-          return { serverInstanceId: 'synthetic-controller', defaultNodeId: nodeId, workspaceName: null };
+          return { serverInstanceId: 'synthetic-controller', defaultExecutorId: executorId, workspaceName: null };
         });
-        await expect(discoverRuntime({ configDir: directories.config, runtime: 'execution-node' }))
+        await expect(discoverRuntime({ configDir: directories.config, runtime: 'executor' }))
           .rejects.toThrow('HTTP 503');
         expect(reverseCalls).toEqual([]);
-        const description = await rpc.call('', 'node.describe', null);
-        expect(description.info.nodeId).toBe('22222222-2222-4222-8222-222222222222');
+        const description = await rpc.call('', 'executor.describe', null);
+        expect(description.info.executorId).toBe('22222222-2222-4222-8222-222222222222');
         await expect(rpc.call('', 'projects.inspect', { projectPath: directories.project }))
           .rejects.toMatchObject({ outcome: 'not-dispatched' });
         rpc.retireUnknown();
         unsubscribe();
         const failure = Promise.withResolvers<string>();
-        const remote = new RemoteExecutionNode(nodeId, controller, undefined, failure.resolve);
+        const remote = new RemoteExecutorClient(executorId, controller, undefined, failure.resolve);
         try {
           const message = await withTimeout(failure.promise, 10_000, () => worker!.logs.join('\n'));
           expect(message).toContain('restart the worker to serve');

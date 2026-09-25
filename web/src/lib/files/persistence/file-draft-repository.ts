@@ -1,5 +1,5 @@
 import type { FileRevision } from '$shared/file-contracts';
-import { effectiveNodeId, parseNodeId } from '$shared/execution-nodes';
+import { effectiveExecutorId, parseExecutorId } from '$shared/executors';
 import * as m from '$lib/paraglide/messages.js';
 import { indexedDbRequest, indexedDbTransactionCompletion } from '$lib/utils/indexed-db.js';
 
@@ -14,7 +14,7 @@ export const FILE_DRAFT_LIMIT = 20;
 export const FILE_RECENT_LIMIT = 100;
 
 export interface FileDraft {
-	nodeId?: string | null;
+	executorId?: string | null;
 	schemaVersion: 1;
 	deploymentId: string;
 	userNamespace: string;
@@ -26,7 +26,7 @@ export interface FileDraft {
 }
 
 export interface FileRecentLocationV1 {
-	nodeId?: string | null;
+	executorId?: string | null;
 	schemaVersion: 1;
 	deploymentId: string;
 	userNamespace: string;
@@ -321,13 +321,13 @@ export function fileDraftKey(
 	deploymentId: string,
 	canonicalFileRootPath: string,
 	normalizedRelativePath: string,
-	nodeId?: string | null,
+	executorId?: string | null,
 ): string {
-	if (effectiveNodeId(nodeId) !== 'local')
+	if (effectiveExecutorId(executorId) !== 'local')
 		return scopedRecordKey(
 			userNamespace,
 			deploymentId,
-			effectiveNodeId(nodeId),
+			effectiveExecutorId(executorId),
 			canonicalFileRootPath,
 			normalizedRelativePath,
 		);
@@ -347,7 +347,7 @@ function latestDrafts(
 	const latest = new Map<string, FileDraft>();
 	for (const record of [...records].sort((a, b) => b.savedAt - a.savedAt)) {
 		if (
-			!parseNodeId(record.nodeId) ||
+			!parseExecutorId(record.executorId) ||
 			record.schemaVersion !== 1 ||
 			record.userNamespace !== userNamespace ||
 			record.deploymentId !== deploymentId
@@ -358,7 +358,7 @@ function latestDrafts(
 			deploymentId,
 			record.canonicalFileRootPath,
 			record.normalizedRelativePath,
-			record.nodeId,
+			record.executorId,
 		);
 		if (!latest.has(key)) latest.set(key, record);
 	}
@@ -374,7 +374,7 @@ function draftEvictions(record: FileDraft, records: readonly FileDraft[]): strin
 		if (entry.userNamespace !== record.userNamespace || entry.deploymentId !== record.deploymentId)
 			continue;
 		if (
-			(effectiveNodeId(entry.nodeId) === effectiveNodeId(record.nodeId) &&
+			(effectiveExecutorId(entry.executorId) === effectiveExecutorId(record.executorId) &&
 				entry.canonicalFileRootPath === record.canonicalFileRootPath &&
 				entry.normalizedRelativePath === record.normalizedRelativePath) ||
 			count >= FILE_DRAFT_LIMIT ||

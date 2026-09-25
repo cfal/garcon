@@ -20,7 +20,7 @@
 		mode = 'inline',
 		menuChoosesHost = false,
 		busy = false,
-		defaultNodeId = 'local',
+		defaultExecutorId = 'local',
 		showLabel = false,
 		icon: Icon = SquareTerminal,
 		controlClass = '',
@@ -28,11 +28,11 @@
 		windowId,
 	}: {
 		terminals: Pick<TerminalRegistry, 'hosts' | 'hasRemoteHosts' | 'canCreate'>;
-		oncreate: (nodeId?: string) => void;
+		oncreate: (executorId?: string) => void;
 		mode?: 'inline' | 'menu';
 		menuChoosesHost?: boolean;
 		busy?: boolean;
-		defaultNodeId?: string;
+		defaultExecutorId?: string;
 		showLabel?: boolean;
 		icon?: Component<{ class?: string }>;
 		controlClass?: string;
@@ -41,11 +41,11 @@
 	} = $props();
 	let open = $state(false);
 	const chooseHost = $derived(mode === 'menu' ? menuChoosesHost : terminals.hasRemoteHosts || open);
-	const disabled = $derived(busy || (!chooseHost && !terminals.canCreate(defaultNodeId)));
+	const disabled = $derived(busy || (!chooseHost && !terminals.canCreate(defaultExecutorId)));
 	const label = $derived(
 		busy
 			? m.terminal_creating()
-			: !chooseHost && terminals.hosts.find((host) => host.id === defaultNodeId)?.full
+			: !chooseHost && terminals.hosts.find((host) => host.id === defaultExecutorId)?.full
 				? m.terminal_limit_reached()
 				: m.workspace_new_terminal(),
 	);
@@ -54,10 +54,10 @@
 			`inline-flex h-8 shrink-0 items-center justify-center gap-2 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 aria-disabled:opacity-50 ${showLabel ? 'px-3' : 'w-8'}`,
 	);
 
-	function create(nodeId?: string): void {
-		if (busy || !terminals.canCreate(nodeId ?? defaultNodeId)) return;
+	function create(executorId?: string): void {
+		if (busy || !terminals.canCreate(executorId ?? defaultExecutorId)) return;
 		open = false;
-		oncreate(nodeId);
+		oncreate(executorId);
 	}
 </script>
 

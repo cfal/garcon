@@ -18,7 +18,7 @@ import {
   type IntegrationFixture,
 } from '../../support/integration-fixture.js';
 
-const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
+const REPO_ROOT = fileURLToPath(new URL('../../..', import.meta.url));
 const WORKSPACE = 'cli-handoff';
 const CONTEXT_WINDOW_TOKENS = 131_072;
 const USABLE_TOKEN_BUDGET = 98_304;

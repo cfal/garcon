@@ -6,7 +6,7 @@ import { GarconClient, GarconHttpError } from '../garcon-client.js';
 
 const connection = {
   baseUrl: 'http://127.0.0.1:8080', instanceId: 'controller', endpointInstanceId: 'gateway',
-  defaultNodeId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', workspaceName: null,
+  defaultExecutorId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', workspaceName: null,
   localCapability: 'secret', workspaceDir: null,
 };
 const request = { clientRequestId: 'request', clientMessageId: 'message', chatId: '1785337200123456', command: 'Continue' };
@@ -14,21 +14,21 @@ const request = { clientRequestId: 'request', clientMessageId: 'message', chatId
 function runtimeResponse(input: string | URL | Request, controller = 'controller'): Response {
   const url = new URL(String(input));
   if (url.pathname.endsWith('/cli/context')) return Response.json({
-    serverInstanceId: controller, defaultNodeId: connection.defaultNodeId, workspaceName: null,
+    serverInstanceId: controller, defaultExecutorId: connection.defaultExecutorId, workspaceName: null,
   });
   return Response.json({ schemaVersion: 1, instanceId: 'gateway', proof: crypto.createHmac('sha256', 'secret')
     .update(runtimeProofPayload('gateway', url.searchParams.get('challenge')!)).digest('base64url') });
 }
 
 describe('CLI endpoint context', () => {
-  test('catalogs, native lookups and project defaults use the authenticated node', async () => {
+  test('catalogs, native lookups and project defaults use the authenticated executor', async () => {
     const client = new GarconClient({ ...connection, fetch: async (input, init) => {
       const url = new URL(String(input));
       if (url.pathname.endsWith('/models')) {
-        expect(url.searchParams.get('nodeId')).toBe(connection.defaultNodeId);
+        expect(url.searchParams.get('executorId')).toBe(connection.defaultExecutorId);
         return Response.json({ catalog: { agents: [], apiProviders: [] } });
       }
-      expect(JSON.parse(String(init?.body)).nodeId).toBe(connection.defaultNodeId);
+      expect(JSON.parse(String(init?.body)).executorId).toBe(connection.defaultExecutorId);
       return Response.json(url.pathname.endsWith('/project-default')
         ? { project: '/worker/project', kind: 'folder' } : { chatId: request.chatId });
     } });
@@ -37,9 +37,9 @@ describe('CLI endpoint context', () => {
     await client.getTicketProjectDefault('/worker/project');
   });
   test('inherits the parent root and role but explicit flags can override either', () => {
-    const env = { GARCON_RUNTIME: 'execution-node', GARCON_CONFIG_DIR: '/parent' };
-    expect(parseCliArgs(['list', 'agents'], env)).toMatchObject({ configDir: '/parent', runtime: 'execution-node' });
-    expect(parseCliArgs(['chats', '--config-dir', '/other'], env)).toMatchObject({ configDir: '/other', runtime: 'execution-node' });
+    const env = { GARCON_RUNTIME: 'executor', GARCON_CONFIG_DIR: '/parent' };
+    expect(parseCliArgs(['list', 'agents'], env)).toMatchObject({ configDir: '/parent', runtime: 'executor' });
+    expect(parseCliArgs(['chats', '--config-dir', '/other'], env)).toMatchObject({ configDir: '/other', runtime: 'executor' });
     expect(parseCliArgs(['chats', '--runtime', 'auto'], env)).toMatchObject({ configDir: '/parent', runtime: 'auto' });
     expect(parseCliArgs(['chats', '--runtime', 'controller', '--config-dir', '/other'], env)).toMatchObject({ configDir: '/other', runtime: 'controller' });
     expect(parseCliArgs(['chats'], { HOME: '/home/test', GARCON_CONFIG_DIR: '', GARCON_RUNTIME: '' })).toMatchObject({ configDir: '/home/test/.garcon', runtime: 'auto' });

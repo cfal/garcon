@@ -15,7 +15,7 @@
 		getChatSessions,
 		getAppShell,
 		getModelCatalog,
-		getExecutionNodes,
+		getExecutors,
 		getAgentState,
 		getNotifications,
 		getPreambles,
@@ -98,7 +98,7 @@
 		onsubmit,
 		onSteerPreferredSubmit,
 		onModelChange,
-		onNodeChange,
+		onExecutorChange,
 		onPermissionModeChange,
 		onThinkingModeChange,
 		onAgentSettingChange,
@@ -118,13 +118,13 @@
 	const sessions = getChatSessions();
 	const appShell = getAppShell();
 	const rootModelCatalog = getModelCatalog();
-	const nodes = getExecutionNodes();
-	const modelCatalog = $derived(rootModelCatalog.forNode(agentState.nodeId));
+	const executors = getExecutors();
+	const modelCatalog = $derived(rootModelCatalog.forExecutor(agentState.executorId));
 	const providerAvailable = $derived(isCustomProviderSelectionAvailable(modelCatalog, agentState));
-	const filesAvailable = $derived(nodes.filesAvailable(agentState.nodeId));
+	const filesAvailable = $derived(executors.filesAvailable(agentState.executorId));
 
 	$effect(() => {
-		if (!sessions.selectedChatId || !nodes.isReady(agentState.nodeId)) return;
+		if (!sessions.selectedChatId || !executors.isReady(agentState.executorId)) return;
 		const catalog = modelCatalog;
 		// Repeated invalidation must wake consumers even before the first validation.
 		void catalog.version;
@@ -161,7 +161,7 @@
 	const snippetInteractionKey = $derived.by(() => {
 		const chat = sessions.selectedChat;
 		return chat
-			? [chat.id, chat.status, agentState.nodeId, agentState.projectPath || chat.projectPath].join(
+			? [chat.id, chat.status, agentState.executorId, agentState.projectPath || chat.projectPath].join(
 					'\u0000',
 				)
 			: '';
@@ -179,7 +179,7 @@
 		projectResolution,
 		get executionTarget() {
 			return {
-				nodeId: agentState.nodeId,
+				executorId: agentState.executorId,
 				projectPath: agentState.projectPath || sessions.selectedChat?.projectPath || '',
 			};
 		},
@@ -187,7 +187,7 @@
 	const selectedProjectTarget = $derived(projectState.target);
 	const selectedProjectResolution = $derived(projectState.snapshot);
 	const showProjectNotice = $derived(
-		nodes.isReady(agentState.nodeId) && selectedProjectTarget !== null &&
+		executors.isReady(agentState.executorId) && selectedProjectTarget !== null &&
 		(selectedProjectResolution.kind === 'unavailable' || selectedProjectResolution.kind === 'request-failed'),
 	);
 	const completionProjectPath = $derived(projectState.completionProjectPath);
@@ -629,7 +629,7 @@
 	const isDisabled = $derived(isDraftStartupSubmitting);
 	// Loading is explained by the disabled send button so the composer keeps its height.
 	const modelsLoading = $derived(
-		nodes.isReady(agentState.nodeId) && !modelCatalog.isValidated && !modelCatalog.error,
+		executors.isReady(agentState.executorId) && !modelCatalog.isValidated && !modelCatalog.error,
 	);
 	const sendTitle = $derived.by(() => {
 		if (hasQueuedAttachmentConflict) return m.chat_notice_queue_attachments_unavailable();
@@ -642,7 +642,7 @@
 			isDisabled ||
 				directAdmissionPending ||
 				promptTransformPending ||
-				!nodes.isReady(agentState.nodeId) ||
+				!executors.isReady(agentState.executorId) ||
 				!modelCatalog.isValidated || !providerAvailable,
 			composerState.inputText,
 			composerState.images.length,
@@ -703,8 +703,8 @@
 	>
 		{#if filesAvailable}
 			<FileMentionMenu
-				nodeContextKey={nodes.pathContextKey(agentState.nodeId)}
-				nodeId={agentState.nodeId}
+				executorContextKey={executors.pathContextKey(agentState.executorId)}
+				executorId={agentState.executorId}
 				bind:this={fileMentionMenu}
 				projectPath={completionProjectPath}
 				isVisible={ui.showFileMenu && !showProjectNotice}
@@ -720,7 +720,7 @@
 				onClose={() => ui.closeFileMenu()}
 			/>
 		{/if}
-		{#if !showProjectNotice}<ComposerExecutionNotice nodeId={agentState.nodeId} {nodes} catalog={modelCatalog} {providerAvailable} />{/if}
+		{#if !showProjectNotice}<ComposerExecutionNotice executorId={agentState.executorId} {executors} catalog={modelCatalog} {providerAvailable} />{/if}
 		<ComposerSnippetPalette
 			open={ui.snippetPalette.isOpen}
 			onOpenChange={(nextOpen) => {
@@ -897,7 +897,7 @@
 					/>
 				{/snippet}
 				{#snippet modelSelector()}
-					<PromptComposerModelSelector onChange={onModelChange} {onNodeChange} />
+					<PromptComposerModelSelector onChange={onModelChange} {onExecutorChange} />
 				{/snippet}
 			</ComposerBottomBar>
 		</form>
@@ -914,13 +914,13 @@
 		<!-- Rendered outside the composer surface, which clips with overflow-hidden,
 		     so the upward-opening menu is not cut off. -->
 		<SlashCommandMenu
-			nodeContextKey={nodes.pathContextKey(agentState.nodeId)}
+			executorContextKey={executors.pathContextKey(agentState.executorId)}
 			bind:this={slashCommandMenu}
 			agent={agentState.agentId}
-			nodeId={agentState.nodeId}
+			executorId={agentState.executorId}
 			projectPath={completionProjectPath}
 			chatId={selectedProjectTarget?.kind === 'chat' ? sessions.selectedChatId : null}
-			isVisible={ui.showSlashMenu && nodes.isReady(agentState.nodeId) && !showProjectNotice}
+			isVisible={ui.showSlashMenu && executors.isReady(agentState.executorId) && !showProjectNotice}
 			projectPending={Boolean(
 				selectedProjectTarget &&
 				(selectedProjectResolution.kind === 'unchecked' ||

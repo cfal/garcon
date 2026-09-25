@@ -24,17 +24,17 @@ export interface TerminalSurfaceRegistryPort extends Pick<
 	| 'hosts'
 	| 'hasRemoteHosts'
 	| 'canCreate'
-	| 'nodeIdFor'
+	| 'executorIdFor'
 	| 'displayName'
-	| 'nodeLabel'
-	| 'nodeInventories'
+	| 'executorLabel'
+	| 'executorInventories'
 > {
 	readonly sessions: Readonly<Record<string, TerminalClientSession>>;
 	readonly orderedSessions: readonly TerminalClientSession[];
 	ensureRuntime(terminalId: string): Promise<TerminalSurfaceRuntimePort>;
 	reattach(terminalId: string): void;
 	rename(terminalId: string, title: string | null): Promise<void>;
-	list(nodeId?: string): Promise<void>;
+	list(executorId?: string): Promise<void>;
 }
 
 export interface TerminalSurfaceWorkspacePort {
@@ -43,7 +43,7 @@ export interface TerminalSurfaceWorkspacePort {
 	createTerminalReplacing(
 		currentTerminalId: string,
 		requestKey?: string,
-		nodeId?: string,
+		executorId?: string,
 	): Promise<string>;
 	terminateTerminalSession(terminalId: string): Promise<boolean>;
 	closeSurface(surfaceId: string): Promise<boolean>;

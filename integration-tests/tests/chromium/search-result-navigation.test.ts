@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { ThinkingMessage } from '../../../common/chat-types.js';
-import { TranscriptLedgerStore } from '../../../server/ledger/store.js';
+import { TranscriptLedgerStore } from '../../../server/controller/ledger/store.js';
 import type { Page, Route } from 'playwright';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import {

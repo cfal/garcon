@@ -1,9 +1,9 @@
 <script lang="ts">
-	import { setExecutionNodesTestContext } from '$lib/execution-nodes/__tests__/execution-nodes-test-context';
-	import { localExecutionNode, remoteExecutionNode } from '$lib/execution-nodes/__tests__/fixtures';
-	setExecutionNodesTestContext([
-		localExecutionNode,
-		{ ...remoteExecutionNode, machineServices: { files: true, git: false, gh: false, terminals: false } },
+	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
+	import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
+	setExecutorsTestContext([
+		localExecutor,
+		{ ...remoteExecutor, machineServices: { files: true, git: false, gh: false, terminals: false } },
 	]);
 	import { onDestroy, onMount, untrack } from 'svelte';
 	import {
@@ -29,7 +29,7 @@
 
 	let {
 		presentation,
-		nodeId = 'local',
+		executorId = 'local',
 		rendererMode = 'image',
 		loading = true,
 		stale = false,
@@ -44,7 +44,7 @@
 		closeDisabled = false,
 	}: {
 		presentation: PresentationHostId;
-		nodeId?: string;
+		executorId?: string;
 		rendererMode?: 'code' | 'markdown' | 'image';
 		loading?: boolean;
 		stale?: boolean;
@@ -59,7 +59,7 @@
 		closeDisabled?: boolean;
 	} = $props();
 	const initial = untrack(() => ({
-		nodeId,
+		executorId,
 		rendererMode,
 		loading,
 		stale,
@@ -91,7 +91,7 @@
 		resolveFileIdentity: async ({ relativePath }) => ({
 			success: true,
 			identity: {
-				nodeId: initial.nodeId,
+				executorId: initial.executorId,
 				canonicalFileRootPath: '/workspace',
 				normalizedRelativePath: relativePath,
 			},
@@ -133,7 +133,7 @@
 	}
 	const session = new FileSession(
 		{
-			nodeId: initial.nodeId,
+			executorId: initial.executorId,
 			canonicalFileRootPath: '/workspace',
 			normalizedRelativePath: relativePath,
 		},

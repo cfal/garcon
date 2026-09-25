@@ -40,7 +40,7 @@ function createForm(
 		endpointId?: string | null,
 	): ModelOption | null => findModelForSelection(getModels(agentId), model, endpointId);
 	const modelCatalog = {
-		forNode() { return this; },
+		forExecutor() { return this; },
 		get isValidated() { return catalogOverrides.isValidated ?? true; },
 		get error() { return catalogOverrides.error ?? null; },
 		isRefreshing: false,
@@ -110,13 +110,13 @@ describe('ScheduledPromptFormState', () => {
 		});
 		form.startup.validatePath = vi.fn();
 		const initializing = form.initialize(newChatPrompt({
-			type: 'new-chat', nodeId: '22222222-2222-4222-8222-222222222222',
+			type: 'new-chat', executorId: '22222222-2222-4222-8222-222222222222',
 			agentId: 'codex', projectPath: '/remote/project', model: 'gpt-5',
 			apiProviderId: null, modelEndpointId: null, modelProtocol: null,
 			permissionMode: 'acceptEdits', thinkingMode: 'high', agentSettingsById: {}, tags: [],
 		}));
-		await vi.waitFor(() => expect(form.startup.nodeId).not.toBe('local'));
-		form.startup.selectNode('local');
+		await vi.waitFor(() => expect(form.startup.executorId).not.toBe('local'));
+		form.startup.selectExecutor('local');
 		form.startup.projectPath = '/local/explicit-edit';
 		form.startup.selectModel('local-model');
 		form.startup.setPermissionMode('default');
@@ -130,11 +130,11 @@ describe('ScheduledPromptFormState', () => {
 			projectPath: '/local/explicit-edit', model: 'local-model',
 			permissionMode: 'default', thinkingMode: 'none', tags: ['edited'],
 		});
-		expect(form.startup.nodeId).toBe('local');
+		expect(form.startup.executorId).toBe('local');
 		form.dispose();
 	});
 
-	it('restores saved execution modes before a cold node catalog arrives', async () => {
+	it('restores saved execution modes before a cold executor catalog arrives', async () => {
 		const discovery = Promise.withResolvers<void>();
 		let loaded = false;
 		const form = createForm(undefined, undefined, {
@@ -146,7 +146,7 @@ describe('ScheduledPromptFormState', () => {
 		});
 		form.startup.validatePath = vi.fn();
 		await form.initialize(newChatPrompt({
-			type: 'new-chat', nodeId: '22222222-2222-4222-8222-222222222222',
+			type: 'new-chat', executorId: '22222222-2222-4222-8222-222222222222',
 			agentId: 'codex', projectPath: '/remote/project', model: 'gpt-5',
 			apiProviderId: null, modelEndpointId: null, modelProtocol: null,
 			permissionMode: 'acceptEdits', thinkingMode: 'high', agentSettingsById: {}, tags: [],
@@ -165,10 +165,10 @@ describe('ScheduledPromptFormState', () => {
 		form.dispose();
 	});
 
-	it.each(['local', '22222222-2222-4222-8222-222222222222'])('requires a validated catalog for a cached %s new-chat target', (nodeId) => {
+	it.each(['local', '22222222-2222-4222-8222-222222222222'])('requires a validated catalog for a cached %s new-chat target', (executorId) => {
 		const catalog: CatalogOverrides = { isValidated: true };
 		const form = createForm(undefined, undefined, catalog);
-		form.startup.nodeId = nodeId;
+		form.startup.executorId = executorId;
 		form.startup.settingsLoaded = true;
 		form.startup.validationStatus = 'valid';
 		form.startup.agentId = 'codex';
@@ -393,7 +393,7 @@ describe('ScheduledPromptFormState', () => {
 		const form = createForm(new Set(), () => ['claude'], catalog);
 		form.startup.validatePath = vi.fn();
 		const target = {
-			type: 'new-chat' as const, nodeId: '22222222-2222-4222-8222-222222222222',
+			type: 'new-chat' as const, executorId: '22222222-2222-4222-8222-222222222222',
 			agentId: 'claude', projectPath: '/worker', model: 'saved',
 			apiProviderId: 'provider', modelEndpointId: 'endpoint', modelProtocol: 'openai-compatible' as const,
 			permissionMode: 'default' as const, thinkingMode: 'none' as const, agentSettingsById: {}, tags: [],

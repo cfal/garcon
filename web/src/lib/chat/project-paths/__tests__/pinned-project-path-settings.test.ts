@@ -131,24 +131,24 @@ describe('pinned project path settings', () => {
 		expect(store.snapshot?.paths.pinnedProjectPaths).toEqual(['/workspace/zeta']);
 	});
 
-	it('sends only the selected remote node pins, never stale recents or other nodes', async () => {
-		const nodeId = '22222222-2222-4222-8222-222222222222';
+	it('sends only the selected remote executor pins, never stale recents or other executors', async () => {
+		const executorId = '22222222-2222-4222-8222-222222222222';
 		const otherId = '33333333-3333-4333-8333-333333333333';
 		const store = new RemoteSettingsStore();
 		const snap = makeSnapshot();
-		snap.paths.byNode = {
-			[nodeId]: { defaultPath: '/default', recentPaths: ['/old'], pinnedPaths: [] },
+		snap.paths.byExecutor = {
+			[executorId]: { defaultPath: '/default', recentPaths: ['/old'], pinnedPaths: [] },
 			[otherId]: { recentPaths: [], pinnedPaths: ['/other'] },
 		};
 		store.applySnapshot(snap);
 		const pending = deferred<Awaited<ReturnType<typeof settingsApi.updateRemoteSettings>>>();
 		mockedSettingsApi.updateRemoteSettings.mockReturnValueOnce(pending.promise);
-		const updating = togglePinnedProjectPathOptimistically(store, '/pin', { nodeId });
+		const updating = togglePinnedProjectPathOptimistically(store, '/pin', { executorId });
 		await Promise.resolve();
-		expect(mockedSettingsApi.updateRemoteSettings).toHaveBeenCalledWith({ paths: { byNode: { [nodeId]: { pinnedPaths: ['/pin'] } } } });
-		expect(store.snapshot?.paths.byNode).toEqual({ ...snap.paths.byNode, [nodeId]: { ...snap.paths.byNode[nodeId], pinnedPaths: ['/pin'] } });
-		const current = makeSnapshot({ version: 2, paths: { ...snap.paths, byNode: {
-			[nodeId]: { defaultPath: '/default', recentPaths: ['/new', '/old'], pinnedPaths: ['/pin'] },
+		expect(mockedSettingsApi.updateRemoteSettings).toHaveBeenCalledWith({ paths: { byExecutor: { [executorId]: { pinnedPaths: ['/pin'] } } } });
+		expect(store.snapshot?.paths.byExecutor).toEqual({ ...snap.paths.byExecutor, [executorId]: { ...snap.paths.byExecutor[executorId], pinnedPaths: ['/pin'] } });
+		const current = makeSnapshot({ version: 2, paths: { ...snap.paths, byExecutor: {
+			[executorId]: { defaultPath: '/default', recentPaths: ['/new', '/old'], pinnedPaths: ['/pin'] },
 			[otherId]: { recentPaths: [], pinnedPaths: ['/other-new'] },
 		} } });
 		pending.resolve({ success: true, settings: current });

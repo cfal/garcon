@@ -1,15 +1,15 @@
 <script lang="ts">
 	import FileTree from './FileTree.svelte';
-	import ExecutionNodeSelector from '$lib/components/shared/ExecutionNodeSelector.svelte';
+	import ExecutorSelector from '$lib/components/shared/ExecutorSelector.svelte';
 	import type { Snippet } from 'svelte';
 	import type { FileTreeEntry } from '$shared/file-contracts';
-	import { effectiveNodeId } from '$shared/execution-nodes';
+	import { effectiveExecutorId } from '$shared/executors';
 	import {
 		getFileSessions,
 		getNotifications,
 		getSingletonSurfaces,
 		getWorkspaceCoordinator,
-		getExecutionNodes,
+		getExecutors,
 	} from '$lib/context';
 	import type { WorkspaceWindowId } from '$lib/workspace/surface-types.js';
 	import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
@@ -39,7 +39,7 @@
 	const workspace = getWorkspaceCoordinator();
 	const controller = getSingletonSurfaces().files();
 	const tree = controller.tree;
-	const nodes = getExecutionNodes();
+	const executors = getExecutors();
 	const selectedPath = $derived.by(() => {
 		const owner = workspace.focusOwner;
 		if (owner.kind === 'chat-list') return null;
@@ -47,18 +47,18 @@
 		if (surface?.type !== 'file') return null;
 		const session = files.get(surface.fileSessionId);
 		const treeRoot = tree.fileRootPath;
-		return session && session.nodeId === tree.nodeId && treeRoot
+		return session && session.executorId === tree.executorId && treeRoot
 			? filePathRelativeToTreeRoot(treeRoot, session.canonicalFileRootPath, session.relativePath)
 			: null;
 	});
 
-	function handleFileSelect(node: FileTreeEntry): void {
+	function handleFileSelect(executor: FileTreeEntry): void {
 		const fileRootPath = tree.fileRootPath;
 		if (!fileRootPath) return;
 		void files.open({
-			nodeId: tree.nodeId,
+			executorId: tree.executorId,
 			fileRootPath,
-			relativePath: node.relativePath,
+			relativePath: executor.relativePath,
 			mode: 'auto',
 			origin: presentation,
 			reason: 'user-open',
@@ -68,7 +68,7 @@
 	async function openRecoveredFile(draft: FileDraft): Promise<void> {
 		try {
 			await files.open({
-				nodeId: draft.nodeId,
+				executorId: draft.executorId,
 				fileRootPath: draft.canonicalFileRootPath,
 				relativePath: draft.normalizedRelativePath,
 				mode: 'code',
@@ -81,32 +81,32 @@
 	}
 
 	function recoveredFileLabel(draft: FileDraft, path: string): string {
-		return effectiveNodeId(draft.nodeId) === 'local'
+		return effectiveExecutorId(draft.executorId) === 'local'
 			? path
-			: `${nodes.label(draft.nodeId)}: ${path}`;
+			: `${executors.label(draft.executorId)}: ${path}`;
 	}
 </script>
 
-{#snippet nodeCrumb()}
-	<ExecutionNodeSelector
-		{nodes}
-		nodeId={tree.nodeId}
+{#snippet executorCrumb()}
+	<ExecutorSelector
+		{executors}
+		executorId={tree.executorId}
 		service="files"
 		class="h-6 max-w-[35%] shrink-0 px-1"
-		onSelect={(nodeId) => controller.selectNode(nodeId)}
+		onSelect={(executorId) => controller.selectExecutor(executorId)}
 	/>
 {/snippet}
 
 {#snippet contentGate(contents: Snippet)}
-	{#if controller.browsingNode}
-		{#if nodes.filesAvailable(tree.nodeId)}
+	{#if controller.browsingExecutor}
+		{#if executors.filesAvailable(tree.executorId)}
 			{@render contents()}
 		{:else}
 			<div
 				class="grid h-full place-items-center px-6 text-center text-sm text-muted-foreground"
 				role="status"
 			>
-				Files unavailable on {nodes.label(tree.nodeId)}.
+				Files unavailable on {executors.label(tree.executorId)}.
 			</div>
 		{/if}
 	{:else}
@@ -174,11 +174,11 @@
 	{/if}
 	<div class="min-h-0 min-w-0 flex-1">
 		<FileTree
-			nodeCrumb={nodes.hasRemoteNodes || tree.nodeId !== 'local' ? nodeCrumb : undefined}
+			executorCrumb={executors.hasRemoteExecutors || tree.executorId !== 'local' ? executorCrumb : undefined}
 			{contentGate}
 			onGoToChatProject={() => controller.goToChatProject()}
 			canGoToChatProject={controller.canGoToChatProject}
-			isAtChatProject={!controller.browsingNode && tree.isAtChatProject}
+			isAtChatProject={!controller.browsingExecutor && tree.isAtChatProject}
 			{selectedPath}
 			store={tree}
 			onFileSelect={handleFileSelect}

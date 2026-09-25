@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { prepareFixtureAuth } from '../../support/fixture-auth.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 
-test.each(['in-process', 'remote-controller-dials', 'remote-node-dials'] as const)(
+test.each(['in-process', 'remote-controller-dials', 'remote-executor-dials'] as const)(
   'controller fixtures require authentication and retain it across restart (%s)',
   async (executionBackend) => {
     await withIntegrationFixture(`fixture-auth-${executionBackend}`, async (fixture) => {

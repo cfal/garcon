@@ -7,7 +7,7 @@ import type {
   AgentPermissionResponseRef,
   AgentProducerBinding,
   AgentResourceScope,
-  NodeCallOptions,
+  ExecutorCallOptions,
 } from './resources.js';
 
 export interface AgentProducedRow {
@@ -137,10 +137,10 @@ export interface AgentProducers {
   bind(request: {
     readonly binding: AgentProducerBinding;
     readonly chatId: string;
-  }, options?: NodeCallOptions): Promise<void>;
+  }, options?: ExecutorCallOptions): Promise<void>;
   // Closes the binding and best-effort aborts active work, never a completed operation.
   // A start still pending at closure rejects with STALE_RESOURCE.
-  close(binding: AgentProducerBinding, options?: NodeCallOptions): Promise<void>;
+  close(binding: AgentProducerBinding, options?: ExecutorCallOptions): Promise<void>;
   // Drops publication and denies permissions without aborting native work.
   detach(binding: AgentProducerBinding): void;
   // Listeners are process-local; remote adapters dispatch the fixed event channel here.
@@ -151,5 +151,5 @@ export interface AgentPermissions {
   respond(request: {
     readonly response: AgentPermissionResponseRef;
     readonly decision: PermissionDecisionPayload;
-  }, options?: NodeCallOptions): Promise<void>;
+  }, options?: ExecutorCallOptions): Promise<void>;
 }

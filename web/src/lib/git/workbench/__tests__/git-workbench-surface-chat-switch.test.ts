@@ -89,7 +89,7 @@ function fileNode(path: string): GitTreeNode {
 
 function summaryFor(project: string, paths: string[]): GitReviewDocumentSummary {
 	return {
-		document: { nodeId: 'local', instanceId: 'test-instance', documentId: `doc:${project}` },
+		document: { executorId: 'local', instanceId: 'test-instance', documentId: `doc:${project}` },
 		documentId: `doc:${project}`,
 		project,
 		mode: 'working',
@@ -117,7 +117,7 @@ function snapshotFor(project: string, paths: string[]): GitWorkbenchSnapshotResp
 		status: 'ready',
 		project,
 		target: {
-			nodeId: 'local',
+			executorId: 'local',
 			projectPath: project,
 			repoRoot: project,
 			worktreePath: project,
@@ -157,7 +157,7 @@ function installRouters(): void {
 	);
 	comparisonApi.getGitComparisonSnapshot.mockImplementation(({ projectPath }) =>
 		Promise.resolve({
-			document: { nodeId: 'local', instanceId: 'test-instance', documentId: `cmp:${projectPath}` },
+			document: { executorId: 'local', instanceId: 'test-instance', documentId: `cmp:${projectPath}` },
 			status: 'ready',
 			project: projectPath,
 			repoRoot: projectPath,

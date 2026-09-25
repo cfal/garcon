@@ -13,8 +13,8 @@ import {
   type ChatMessage,
 } from '../../../common/chat-types.js';
 import type { TranscriptMessage } from '../../../common/chat-view.js';
-import type { LedgerRowDraft } from '../../../server/ledger/contracts.js';
-import { TranscriptLedgerStore } from '../../../server/ledger/store.js';
+import type { LedgerRowDraft } from '../../../server/controller/ledger/contracts.js';
+import { TranscriptLedgerStore } from '../../../server/controller/ledger/store.js';
 import type { IntegrationFixture } from '../../support/integration-fixture.js';
 import {
   closeChromiumBrowser,

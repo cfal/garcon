@@ -1,0 +1,980 @@
+// Chat registry. Manages a single chats.json file that maps
+// chat IDs to agent-specific session metadata.
+
+import crypto from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+import { EventEmitter } from 'events';
+import {
+  normalizePermissionMode,
+  normalizeThinkingMode,
+  type PermissionMode,
+  type ThinkingMode,
+} from '../../../common/chat-modes.js';
+import {
+  parseAgentSettingsById,
+  type AgentSettingsEnvelope,
+} from '../../../common/agent-integration.js';
+import type { JsonObject, JsonValue } from '../../../common/json.js';
+import type { ApiProtocol } from '../../../common/api-providers.js';
+import { parseChatId, type ChatId } from '../../../common/chat-id.js';
+import {
+  parseParentChatRef,
+  type ParentChatRef,
+} from '../../../common/chat-parentage.js';
+import type { AgentName } from "../agents/session-types.js";
+import type { RetainExecutorReferences } from '../executors/reference-writes.js';
+import { ApiProviderDurableReferences, type RetainProviderReferences } from '../api-providers/reference-writes.js';
+import type { AgentNativeSessionRef } from '@garcon/server-agent-interface';
+import { effectiveExecutorId, isExecutorId, LOCAL_EXECUTOR_ID } from '../../../common/executors.js';
+import {
+  assertPreambleBoundaryBinding,
+  assertSeedReceiptBinding,
+  createEmptyRegistry,
+  isObjectRecord,
+  normalizeChatRegistryEntry,
+  normalizeMigrationQuarantine,
+  normalizeNativeSeedReceipt,
+  normalizePreambleSelection,
+  normalizeRegistryModes,
+  parseCarryOverSegmentRefs,
+  parsePendingPreambleBoundary,
+  requireNewParentChat,
+} from './registry-entry-codec.js';
+import { writeJsonFileAtomic, AtomicJsonWriteError } from '../../common/json-file-store.js';
+import { errorMessage } from '../../common/errors.js';
+import { KeyedPromiseLock } from '../../common/keyed-lock.js';
+import { createLogger } from '../../common/log.js';
+import type { ChatProjectPathUpdatedPayload } from '../../../common/ws-events.js';
+import { normalizeTags } from '../../../common/tags.js';
+import {
+  parseNativeSeedReceipt,
+  type NativeSeedReceipt,
+} from '../../../common/transcript-seed.js';
+import { isCarryOverSegmentId } from './carryover-segment-types.js';
+import {
+  normalizeChatPreambleSelection,
+  normalizePendingPreambleBoundary,
+  type ChatPreambleSelection,
+  type PendingPreambleBoundary,
+} from '../../../common/preambles.js';
+
+const logger = createLogger('chats:store');
+
+export const CHAT_REGISTRY_VERSION = 5;
+
+export { parseCarryOverSegmentRefs } from './registry-entry-codec.js';
+// Uses a fixed short debounce so registry mutations persist promptly while bursts coalesce.
+const REGISTRY_SAVE_DEBOUNCE_MS = 1000;
+
+interface ChatRegistryOptions {
+  saveDelayMs?: number;
+  retainExecutorReferences?: RetainExecutorReferences;
+  retainProviderReferences?: RetainProviderReferences;
+}
+const ALLOWED_PATCH_FIELDS = [
+  'agentId',
+  'nativeSession',
+  'agentOwnershipEpoch',
+  'agentSettingsById',
+  'tags',
+  'agentSessionId',
+  'model',
+  'apiProviderId',
+  'modelEndpointId',
+  'modelProtocol',
+  'lastReadAt',
+  'permissionMode',
+  'thinkingMode',
+  'carryOverSegments',
+  'nativeSeedReceipt',
+  'carryOverMigrationQuarantine',
+  'pendingPreambleBoundary',
+  'preambleSelection',
+] as const;
+
+export interface CarryOverMigrationQuarantine {
+  artifactId: string;
+  errorCode: string;
+}
+
+export interface CarryOverHandoffTarget {
+  readonly agentId: AgentName;
+  readonly model: string;
+}
+
+export interface CarryOverSegmentRef {
+  readonly id: string;
+  readonly agentId: AgentName;
+  readonly model: string;
+  readonly capturedAt: string;
+  readonly storedMessageCount: number;
+  readonly visibleMessageCount: number;
+  readonly trailingHandoff: CarryOverHandoffTarget | null;
+}
+
+export interface ChatRegistryEntry {
+  executorId?: string | null;
+  agentId: AgentName;
+  nativeSession: AgentNativeSessionRef | null;
+  agentOwnershipEpoch: string;
+  agentSettingsById: Record<string, AgentSettingsEnvelope>;
+  projectPath: string;
+  tags: string[];
+  agentSessionId: string | null;
+  model: string;
+  apiProviderId?: string | null;
+  modelEndpointId?: string | null;
+  modelProtocol?: ApiProtocol | null;
+  lastReadAt?: string | null;
+  permissionMode: PermissionMode;
+  thinkingMode: ThinkingMode;
+  carryOverSegments: readonly CarryOverSegmentRef[];
+  nativeSeedReceipt: NativeSeedReceipt | null;
+  carryOverMigrationQuarantine: CarryOverMigrationQuarantine | null;
+  pendingPreambleBoundary: PendingPreambleBoundary | null;
+  // Required normalized per-chat preamble selection; chats.json is authoritative.
+  preambleSelection: ChatPreambleSelection;
+  readonly parentChat: ParentChatRef | null;
+}
+
+export interface ChatRegistrySnapshot {
+  version: number;
+  sessions: Record<string, ChatRegistryEntry>;
+}
+
+export interface PhasedChatUpdateResult {
+  readonly entry: ChatRegistryResolvedEntry;
+  readonly durability: 'durable' | 'unknown';
+  readonly changed: boolean;
+}
+
+export type ChatMutationDurability = 'confirmed' | 'unknown' | 'unavailable';
+
+export type NativeSessionLookupResult =
+  | { readonly status: 'found'; readonly chatId: ChatId }
+  | { readonly status: 'not-found' }
+  | { readonly status: 'ambiguous' };
+
+// Raised when a phased update is attempted for a chat whose previous registry
+// write committed but never confirmed its directory durability.
+export class ChatRegistryDurabilityUnknownError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ChatRegistryDurabilityUnknownError';
+  }
+}
+
+export interface NewChatRegistryEntry {
+  id: string;
+  executorId?: string | null;
+  agentId: AgentName;
+  model: string;
+  projectPath: string;
+  nativeSession?: AgentNativeSessionRef | null;
+  agentOwnershipEpoch?: string;
+  agentSettingsById?: Record<string, AgentSettingsEnvelope>;
+  tags?: string[];
+  agentSessionId?: string | null;
+  apiProviderId?: string | null;
+  modelEndpointId?: string | null;
+  modelProtocol?: ApiProtocol | null;
+  permissionMode?: PermissionMode;
+  thinkingMode?: ThinkingMode;
+  carryOverSegments?: readonly CarryOverSegmentRef[];
+  nativeSeedReceipt?: NativeSeedReceipt | null;
+  carryOverMigrationQuarantine?: CarryOverMigrationQuarantine | null;
+  pendingPreambleBoundary?: PendingPreambleBoundary | null;
+  // Every creation path writes an explicit already-resolved selection; there is
+  // no persisted "inherit defaults" mode.
+  preambleSelection: ChatPreambleSelection;
+  parentChat: ParentChatRef | null;
+}
+
+export type ChatRegistryPatch = Partial<Pick<ChatRegistryEntry, (typeof ALLOWED_PATCH_FIELDS)[number]>>;
+export type ChatRegistryResolvedEntry = { id: string } & ChatRegistryEntry;
+
+function pickAllowedPatch(patch: ChatRegistryPatch): ChatRegistryPatch {
+  return Object.fromEntries(
+    ALLOWED_PATCH_FIELDS
+      .filter((field) => Object.hasOwn(patch, field))
+      .map((field) => [field, patch[field]]),
+  );
+}
+export interface ChatRegistryUpdateOptions {
+  flush?: boolean;
+}
+export type ChatRemovalReason = 'user-deletion' | 'start-compensation';
+export type ChatAddedCallback = (chatId: string) => void;
+export type ChatRemovedCallback = (chatId: string, reason: ChatRemovalReason) => void;
+export type ChatReadUpdatedCallback = (chatId: string, lastReadAt: string | null | undefined) => void;
+export type ChatProjectPathUpdatedCallback = (payload: ChatProjectPathUpdatedPayload) => void;
+export type ChatTagsUpdatedCallback = (chatId: string) => void;
+
+interface ChatRegistryEvents {
+  'chat-added': Parameters<ChatAddedCallback>;
+  'chat-removed': Parameters<ChatRemovedCallback>;
+  'chat-read-updated': Parameters<ChatReadUpdatedCallback>;
+  'chat-project-path-updated': Parameters<ChatProjectPathUpdatedCallback>;
+  'chat-tags-updated': Parameters<ChatTagsUpdatedCallback>;
+}
+
+export interface ChatRegistryProjectPathUpdate extends ChatProjectPathUpdatedPayload {
+  nativeSession?: AgentNativeSessionRef | null;
+}
+export type ResolveNativeSession = (
+  session: ChatRegistryEntry,
+  chatId: string,
+) => Promise<AgentNativeSessionRef | null>;
+
+export interface IChatRegistry {
+  init(): Promise<ChatRegistrySnapshot>;
+  reconcileSessions(resolveNativeSession: ResolveNativeSession): Promise<boolean>;
+  listAllChats(): Record<string, ChatRegistryEntry>;
+  // Ids are unique by construction (object keys).
+  listChatIds(): string[];
+  hasChat(id: string): boolean;
+  getChat(id: string): ChatRegistryEntry | null;
+  addChat(entry: NewChatRegistryEntry): boolean;
+  updateChat(id: string, patch: ChatRegistryPatch): ChatRegistryResolvedEntry | null;
+  updateChat(id: string, patch: ChatRegistryPatch, options: ChatRegistryUpdateOptions & { flush: true }): Promise<ChatRegistryResolvedEntry | null>;
+  updateChatPhased(id: string, patch: ChatRegistryPatch): Promise<PhasedChatUpdateResult | null>;
+  installAgentOwnership(id: string, target: {
+    executorId?: string | null;
+    projectPath: string;
+    patch: ChatRegistryPatch;
+  }): Promise<ChatRegistryResolvedEntry | null>;
+  chatMutationDurability(id: string): ChatMutationDurability;
+  reconcileUnknownDurability(id: string): Promise<'confirmed' | 'unavailable' | 'still-unknown'>;
+  updateProjectPath(
+    id: string,
+    update: ChatRegistryProjectPathUpdate,
+    options: { flush: true },
+  ): Promise<ChatRegistryResolvedEntry | null>;
+  removeChat(id: string, reason?: ChatRemovalReason): boolean;
+  getChatByAgentSessionId(agentSessionId: string | null | undefined, agentId?: AgentName, executorId?: string | null): [string, ChatRegistryEntry] | null;
+  lookupNativeSession(agentSessionId: string, agentId?: AgentName, executorId?: string | null): NativeSessionLookupResult;
+  saveRegistry(registry: ChatRegistrySnapshot): Promise<void>;
+  flush(): Promise<void>;
+  onChatAdded(cb: ChatAddedCallback): void;
+  onChatRemoved(cb: ChatRemovedCallback): void;
+  onChatReadUpdated(cb: ChatReadUpdatedCallback): void;
+  onChatProjectPathUpdated(cb: ChatProjectPathUpdatedCallback): void;
+  onChatTagsUpdated(cb: ChatTagsUpdatedCallback): void;
+}
+
+
+
+export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IChatRegistry {
+  #registry: ChatRegistrySnapshot | null = null;
+  #pendingSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  #registryWriteLock = new KeyedPromiseLock();
+  #chatMutationRevisions = new Map<string, number>();
+  #nextChatMutationRevision = 0;
+  #registryDirty = false;
+  #unknownDurabilityChats = new Set<string>();
+  readonly #removedExecutorReferences = new Map<string, { revision: number; release: () => void }>();
+  #workspaceDir: string;
+  #saveDelayMs: number;
+  readonly #retainExecutorReferences?: RetainExecutorReferences;
+  readonly #providerReferences: ApiProviderDurableReferences;
+
+  constructor(workspaceDir: string, options: ChatRegistryOptions = {}) {
+    super();
+    this.#retainExecutorReferences = options.retainExecutorReferences;
+    this.#providerReferences = new ApiProviderDurableReferences(options.retainProviderReferences);
+    this.#workspaceDir = workspaceDir;
+    this.#saveDelayMs = options.saveDelayMs ?? REGISTRY_SAVE_DEBOUNCE_MS;
+  }
+
+  #emitChatAdded(id: string): void { this.emit('chat-added', id); }
+  onChatAdded(cb: ChatAddedCallback): void { this.on('chat-added', cb); }
+
+  #emitChatRemoved(id: string, reason: ChatRemovalReason): void {
+    this.emit('chat-removed', id, reason);
+  }
+  onChatRemoved(cb: ChatRemovedCallback): void { this.on('chat-removed', cb); }
+
+  #emitChatReadUpdated(id: string, lastReadAt: string | null | undefined): void {
+    this.emit('chat-read-updated', id, lastReadAt);
+  }
+  onChatReadUpdated(cb: ChatReadUpdatedCallback): void { this.on('chat-read-updated', cb); }
+
+  #emitChatProjectPathUpdated(payload: ChatProjectPathUpdatedPayload): void {
+    this.emit('chat-project-path-updated', payload);
+  }
+  onChatProjectPathUpdated(cb: ChatProjectPathUpdatedCallback): void {
+    this.on('chat-project-path-updated', cb);
+  }
+  #emitChatTagsUpdated(id: string): void { this.emit('chat-tags-updated', id); }
+  onChatTagsUpdated(cb: ChatTagsUpdatedCallback): void { this.on('chat-tags-updated', cb); }
+
+  #sessionsFilePath(): string {
+    return path.join(this.#workspaceDir, 'chats.json');
+  }
+
+  async init(): Promise<ChatRegistrySnapshot> {
+    if (this.#registry) return this.#registry;
+    try {
+      const sessionsFilePath = this.#sessionsFilePath();
+      const raw = await fs.readFile(sessionsFilePath, 'utf8');
+      if (process.platform !== 'win32') {
+        await fs.chmod(sessionsFilePath, 0o600).catch((error) => {
+          logger.warn('sessions: failed to repair chats.json permissions:', errorMessage(error));
+        });
+      }
+      const parsed: unknown = JSON.parse(raw);
+      if (!isObjectRecord(parsed)) {
+        this.#registry = createEmptyRegistry();
+        return this.#registry;
+      }
+      if (parsed.version !== CHAT_REGISTRY_VERSION) {
+        throw new Error(`Unsupported chat registry version: ${String(parsed.version)}`);
+      }
+      if (!isObjectRecord(parsed.sessions)) {
+        this.#registry = createEmptyRegistry();
+        return this.#registry;
+      }
+      const sessions: Record<string, ChatRegistryEntry> = {};
+      for (const [rawChatId, rawEntry] of Object.entries(parsed.sessions)) {
+        const chatId = parseChatId(rawChatId);
+        if (!isObjectRecord(rawEntry)) {
+          throw new Error(`Invalid chat registry entry for ${chatId}`);
+        }
+        sessions[chatId] = normalizeChatRegistryEntry(rawEntry, chatId);
+      }
+      this.#registry = {
+        version: CHAT_REGISTRY_VERSION,
+        sessions,
+      };
+      this.#providerReferences.initialize(registryProviders(this.#registry));
+      return this.#registry;
+    } catch (error: unknown) {
+      const errno = error as NodeJS.ErrnoException;
+      if (errno.code === 'ENOENT') {
+        this.#registry = createEmptyRegistry();
+        return this.#registry;
+      }
+      throw error;
+    }
+  }
+
+  // Hands out the live snapshot; private because it bypasses the clone-on-
+  // hand-out protection every public accessor upholds.
+  private getRegistry(): ChatRegistrySnapshot {
+    if (!this.#registry) {
+      throw new Error('Registry cache not initialized. Call init() during startup.');
+    }
+    return this.#registry;
+  }
+
+  async reconcileSessions(resolveNativeSession: ResolveNativeSession): Promise<boolean> {
+    const registry = this.getRegistry();
+    const sessions = registry.sessions;
+    let dirty = false;
+
+    for (const [chatId, session] of Object.entries(sessions)) {
+      if (!session?.agentSessionId) {
+        logger.warn(`sessions: preserving chat ${chatId} with missing agentSessionId`);
+        continue;
+      }
+
+      let resolved: AgentNativeSessionRef | null;
+      try {
+        resolved = await resolveNativeSession(session, chatId);
+      } catch (error) {
+        logger.warn(`sessions: native session reconciliation failed for ${chatId}:`, (error as Error).message);
+        continue;
+      }
+      if (!resolved) {
+        logger.warn(`sessions: preserving chat ${chatId} with unresolved native session`);
+        continue;
+      }
+      if (resolved.ownerId !== session.agentId) {
+        throw new Error(`Native session owner mismatch for ${chatId}`);
+      }
+      if (isDeepStrictEqual(resolved, session.nativeSession)) continue;
+
+      // Resolver-supplied refs are plugin-owned; clone on ingest so the
+      // plugin cannot mutate registry state through the object it returned.
+      session.nativeSession = structuredClone(resolved);
+      this.#advanceChatMutationRevision(chatId);
+      dirty = true;
+    }
+
+    if (!dirty) return false;
+
+    if (this.#pendingSaveTimer) {
+      clearTimeout(this.#pendingSaveTimer);
+      this.#pendingSaveTimer = null;
+    }
+    await this.saveRegistry(registry);
+    return true;
+  }
+
+  listAllChats(): Record<string, ChatRegistryEntry> {
+    const registry = this.getRegistry();
+    return Object.fromEntries(
+      Object.entries(registry.sessions).map(([id, entry]) => [id, cloneRegistryEntry(entry)]),
+    );
+  }
+
+  referencesApiProvider(id: string): boolean {
+    return this.#providerReferences.references(id) || registryProviders(this.getRegistry()).includes(id);
+  }
+
+  // Ids-only read for callers that never touch entry data; avoids the
+  // per-entry cloning cost of listAllChats on hot paths. Ids are unique
+  // by construction (object keys).
+  listChatIds(): string[] {
+    return Object.keys(this.getRegistry().sessions);
+  }
+
+  // Existence check that skips the per-entry clone getChat pays. Own-keys
+  // only: sessions is a plain object, so a bare lookup would report
+  // Object.prototype names like "toString" as existing chats.
+  hasChat(id: string): boolean {
+    return Object.hasOwn(this.getRegistry().sessions, id);
+  }
+
+  getChat(id: string): ChatRegistryEntry | null {
+    const registry = this.getRegistry();
+    // Own-keys only, matching hasChat: a bare lookup hands back
+    // Object.prototype for names like "toString" and the clone throws.
+    const entry = Object.hasOwn(registry.sessions, id) ? registry.sessions[id] : null;
+    return entry ? cloneRegistryEntry(entry) : null;
+  }
+
+  addChat({
+    id,
+    executorId,
+    agentId,
+    model,
+    projectPath,
+    nativeSession = null,
+    agentOwnershipEpoch = crypto.randomUUID(),
+    agentSettingsById = {},
+    tags = [],
+    agentSessionId = null,
+    apiProviderId = null,
+    modelEndpointId = null,
+    modelProtocol = null,
+    permissionMode = 'default',
+    thinkingMode = 'none',
+    carryOverSegments = [],
+    nativeSeedReceipt = null,
+    carryOverMigrationQuarantine = null,
+    pendingPreambleBoundary = null,
+    preambleSelection,
+    parentChat,
+  }: NewChatRegistryEntry): boolean {
+    const chatId = parseChatId(id);
+    if (!agentId) throw new Error('Agent not specified');
+    if (executorId != null && !isExecutorId(executorId)) throw new Error('Invalid executor ID');
+    if (!model) throw new Error('Model not specified');
+    if (!projectPath) throw new Error('Project path not specified');
+    const registry = this.getRegistry();
+    if (chatId in registry.sessions) {
+      throw new Error(`Chat with ID ${chatId} already exists`);
+    }
+    if (nativeSession?.ownerId !== agentId && nativeSession !== null) {
+      throw new Error(`Native session owner mismatch for ${chatId}`);
+    }
+    const normalizedModes = normalizeRegistryModes({ permissionMode, thinkingMode });
+    const normalizedSegments = parseCarryOverSegmentRefs(carryOverSegments);
+    const normalizedReceipt = normalizeNativeSeedReceipt(nativeSeedReceipt);
+    const normalizedQuarantine = normalizeMigrationQuarantine(carryOverMigrationQuarantine);
+    const normalizedPreambleBoundary = parsePendingPreambleBoundary(pendingPreambleBoundary);
+    const normalizedPreambleSelection = normalizePreambleSelection(preambleSelection);
+    assertPreambleBoundaryBinding({
+      agentOwnershipEpoch,
+      pendingPreambleBoundary: normalizedPreambleBoundary,
+      preambleSelection: normalizedPreambleSelection,
+    });
+    const normalizedParentChat = requireNewParentChat(parentChat, chatId);
+    assertSeedReceiptBinding({
+      agentSessionId,
+      nativeSeedReceipt: normalizedReceipt,
+    });
+    // Registry additions publish synchronously before Delete can observe them.
+    const release = this.#retainExecutorReferences?.([executorId]);
+    try {
+      const releaseProvider = this.#providerReferences.retain?.([apiProviderId]);
+      try {
+        registry.sessions[chatId] = {
+          ...(executorId == null || executorId === LOCAL_EXECUTOR_ID ? {} : { executorId }),
+          agentId,
+          nativeSession: nativeSession ? structuredClone(nativeSession) : null,
+          agentOwnershipEpoch,
+          agentSettingsById: structuredClone(agentSettingsById),
+          projectPath,
+          tags: [...tags],
+          agentSessionId,
+          model,
+          apiProviderId,
+          modelEndpointId,
+          modelProtocol,
+          ...normalizedModes,
+          carryOverSegments: normalizedSegments,
+          nativeSeedReceipt: normalizedReceipt,
+          carryOverMigrationQuarantine: normalizedQuarantine,
+          pendingPreambleBoundary: normalizedPreambleBoundary,
+          preambleSelection: {
+            revision: normalizedPreambleSelection.revision,
+            orderedPreambleIds: [...normalizedPreambleSelection.orderedPreambleIds],
+          },
+          parentChat: normalizedParentChat,
+        };
+        this.#advanceChatMutationRevision(chatId);
+        this.#emitChatAdded(chatId);
+        this.#scheduleRegistrySave();
+        return true;
+      } finally {
+        releaseProvider?.();
+      }
+    } finally {
+      release?.();
+    }
+  }
+
+  updateChat(id: string, patch: ChatRegistryPatch): ChatRegistryResolvedEntry | null;
+  updateChat(id: string, patch: ChatRegistryPatch, options: ChatRegistryUpdateOptions & { flush: true }): Promise<ChatRegistryResolvedEntry | null>;
+  updateChat(
+    id: string,
+    patch: ChatRegistryPatch,
+    options: ChatRegistryUpdateOptions = {},
+  ): ChatRegistryResolvedEntry | null | Promise<ChatRegistryResolvedEntry | null> {
+    return this.#updateChat(id, patch, options);
+  }
+
+  async installAgentOwnership(id: string, target: {
+    executorId?: string | null;
+    projectPath: string;
+    patch: ChatRegistryPatch;
+  }): Promise<ChatRegistryResolvedEntry | null> {
+    const executorId = effectiveExecutorId(target.executorId);
+    if (!isExecutorId(executorId) || !target.projectPath.trim()) throw new Error('Invalid execution target');
+    return this.#updateChat(id, target.patch, { flush: true }, {
+      executorId: executorId === LOCAL_EXECUTOR_ID ? undefined : executorId,
+      projectPath: target.projectPath,
+    });
+  }
+
+  #updateChat(
+    id: string,
+    patch: ChatRegistryPatch,
+    options: ChatRegistryUpdateOptions,
+    ownership?: Pick<ChatRegistryEntry, 'executorId' | 'projectPath'>,
+  ): ChatRegistryResolvedEntry | null | Promise<ChatRegistryResolvedEntry | null> {
+    const registry = this.getRegistry();
+    const existing = registry.sessions[id];
+    if (!existing) return options.flush ? Promise.resolve(null) : null;
+    const normalizedPatch = { ...this.#normalizeChatPatch(id, existing, patch), ...ownership };
+    const candidate = { ...existing, ...normalizedPatch };
+    // Ordinary updates prove the complete boundary binding, matching
+    // initialization and phased updates: a selection-change boundary must
+    // match both the ownership epoch and the selection revision.
+    assertPreambleBoundaryBinding(candidate);
+    assertSeedReceiptBinding(candidate);
+    const previous = { ...existing };
+    const previousTags = existing.tags;
+    const releaseProvider = this.#providerReferences.retain?.([candidate.apiProviderId],
+      [previous.apiProviderId, ...(ownership ? [candidate.apiProviderId] : [])]);
+    try {
+      Object.assign(existing, normalizedPatch);
+    } finally {
+      releaseProvider?.();
+    }
+    const mutationRevision = this.#advanceChatMutationRevision(id);
+    const emitUpdateEvents = (): void => {
+      if ('lastReadAt' in normalizedPatch) {
+        this.#emitChatReadUpdated(id, normalizedPatch.lastReadAt);
+      }
+      if ('tags' in normalizedPatch && !isDeepStrictEqual(existing.tags, previousTags)) {
+        this.#emitChatTagsUpdated(id);
+      }
+    };
+    const resolved = { id, ...cloneRegistryEntry(existing) };
+    if (options.flush) {
+      const restoreIfCurrent = (): void => {
+        if (this.#chatMutationRevisions.get(id) !== mutationRevision) return;
+        registry.sessions[id] = previous;
+        this.#advanceChatMutationRevision(id);
+        this.#scheduleRegistrySave();
+      };
+      return this.#flushRegistrySave(restoreIfCurrent).then(
+        () => {
+          emitUpdateEvents();
+          return resolved;
+        },
+        (error: unknown) => {
+          restoreIfCurrent();
+          throw error;
+        },
+      );
+    }
+    emitUpdateEvents();
+    this.#scheduleRegistrySave();
+    return resolved;
+  }
+
+  #normalizeChatPatch(
+    id: string,
+    existing: ChatRegistryEntry,
+    patch: ChatRegistryPatch,
+  ): ChatRegistryPatch {
+    const normalizedPatch = pickAllowedPatch(patch);
+    if ('permissionMode' in normalizedPatch) {
+      normalizedPatch.permissionMode = normalizePermissionMode(normalizedPatch.permissionMode);
+    }
+    if ('thinkingMode' in normalizedPatch) {
+      normalizedPatch.thinkingMode = normalizeThinkingMode(normalizedPatch.thinkingMode);
+    }
+    if ('nativeSession' in normalizedPatch && normalizedPatch.nativeSession?.ownerId !== (normalizedPatch.agentId ?? existing.agentId)) {
+      if (normalizedPatch.nativeSession !== null) throw new Error(`Native session owner mismatch for ${id}`);
+    }
+    if ('agentSettingsById' in normalizedPatch && !parseAgentSettingsById(normalizedPatch.agentSettingsById)) {
+      throw new Error(`Invalid agent settings for ${id}`);
+    }
+    // Caller-owned collections are cloned before entering the registry so
+    // later caller mutations cannot alias registry state.
+    if (normalizedPatch.agentSettingsById) {
+      normalizedPatch.agentSettingsById = structuredClone(normalizedPatch.agentSettingsById);
+    }
+    if (normalizedPatch.tags) {
+      normalizedPatch.tags = [...normalizedPatch.tags];
+    }
+    if (normalizedPatch.nativeSession) {
+      normalizedPatch.nativeSession = structuredClone(normalizedPatch.nativeSession);
+    }
+    if ('carryOverSegments' in normalizedPatch) {
+      normalizedPatch.carryOverSegments = parseCarryOverSegmentRefs(normalizedPatch.carryOverSegments);
+    }
+    if ('nativeSeedReceipt' in normalizedPatch) {
+      normalizedPatch.nativeSeedReceipt = normalizeNativeSeedReceipt(normalizedPatch.nativeSeedReceipt);
+    }
+    if ('carryOverMigrationQuarantine' in normalizedPatch) {
+      normalizedPatch.carryOverMigrationQuarantine = normalizeMigrationQuarantine(
+        normalizedPatch.carryOverMigrationQuarantine,
+      );
+    }
+    if ('pendingPreambleBoundary' in normalizedPatch) {
+      normalizedPatch.pendingPreambleBoundary = parsePendingPreambleBoundary(
+        normalizedPatch.pendingPreambleBoundary,
+      );
+    }
+    if ('preambleSelection' in normalizedPatch) {
+      const selection = normalizePreambleSelection(normalizedPatch.preambleSelection);
+      normalizedPatch.preambleSelection = {
+        revision: selection.revision,
+        orderedPreambleIds: [...selection.orderedPreambleIds],
+      };
+    }
+    return normalizedPatch;
+  }
+
+  // Keeps the phased candidate private until its write either commits or reaches
+  // an unknown post-rename outcome. Generic writers therefore cannot serialize a
+  // candidate that later fails before rename.
+  async updateChatPhased(
+    id: string,
+    patch: ChatRegistryPatch,
+  ): Promise<PhasedChatUpdateResult | null> {
+    const target = this.#sessionsFilePath();
+    return this.#registryWriteLock.runExclusive(target, async () => {
+      const registry = this.getRegistry();
+      if (!Object.hasOwn(registry.sessions, id)) return null;
+      const existing = registry.sessions[id]!;
+      if (this.#unknownDurabilityChats.has(id)) {
+        throw new ChatRegistryDurabilityUnknownError(
+          `The chat registry has an unconfirmed save for ${id}; reload before further changes.`,
+        );
+      }
+      const normalizedPatch = this.#normalizeChatPatch(id, existing, patch);
+      const candidateEntry = { ...existing, ...normalizedPatch };
+      assertPreambleBoundaryBinding(candidateEntry);
+      assertSeedReceiptBinding(candidateEntry);
+      const changed = !isDeepStrictEqual(candidateEntry, existing);
+      if (!changed && !this.#registryDirty) {
+        return {
+          entry: { id, ...cloneRegistryEntry(existing) },
+          durability: 'durable',
+          changed: false,
+        };
+      }
+      const candidateRegistry = cloneRegistrySnapshot(registry);
+      candidateRegistry.sessions[id] = cloneRegistryEntry(candidateEntry);
+      const candidateBaseRevision = this.#nextChatMutationRevision;
+      let durability: 'durable' | 'unknown' = 'durable';
+      try {
+        await this.#providerReferences.publish(registryProviders(candidateRegistry),
+          () => writeJsonFileAtomic(target, candidateRegistry, { mode: 0o600 }), registryProviders(registry));
+        this.#unknownDurabilityChats.clear();
+      } catch (error) {
+        if (error instanceof AtomicJsonWriteError && error.renamed) {
+          this.#unknownDurabilityChats.add(id);
+          durability = 'unknown';
+        } else {
+          throw error;
+        }
+      }
+
+      const current = this.getRegistry().sessions[id];
+      if (!current) return null;
+      const previousTags = current.tags;
+      if (changed) Object.assign(current, normalizedPatch);
+      assertPreambleBoundaryBinding(current);
+      assertSeedReceiptBinding(current);
+      const appliedRevision = changed
+        ? this.#advanceChatMutationRevision(id)
+        : this.#nextChatMutationRevision;
+      if (
+        durability === 'durable'
+        && appliedRevision === candidateBaseRevision + (changed ? 1 : 0)
+      ) {
+        this.#registryDirty = false;
+      }
+      if (changed && 'lastReadAt' in normalizedPatch) {
+        this.#emitChatReadUpdated(id, normalizedPatch.lastReadAt);
+      }
+      if (changed && 'tags' in normalizedPatch && !isDeepStrictEqual(current.tags, previousTags)) {
+        this.#emitChatTagsUpdated(id);
+      }
+      return {
+        entry: { id, ...cloneRegistryEntry(candidateRegistry.sessions[id]!) },
+        durability,
+        changed,
+      };
+    });
+  }
+
+  chatMutationDurability(id: string): ChatMutationDurability {
+    const registry = this.getRegistry();
+    if (!Object.hasOwn(registry.sessions, id)) return 'unavailable';
+    return this.#unknownDurabilityChats.has(id) ? 'unknown' : 'confirmed';
+  }
+
+  async updateProjectPath(
+    id: string,
+    update: ChatRegistryProjectPathUpdate,
+    _options: { flush: true },
+  ): Promise<ChatRegistryResolvedEntry | null> {
+    const registry = this.getRegistry();
+    const existing = registry.sessions[id];
+    if (!existing) return null;
+    if (update.chatId !== id) {
+      throw new Error(`Project path update identity mismatch: ${id}`);
+    }
+    const previousProjectPath = existing.projectPath;
+    const previousNativeSession = existing.nativeSession;
+    existing.projectPath = update.projectPath;
+    if ('nativeSession' in update) {
+      if (update.nativeSession?.ownerId !== existing.agentId && update.nativeSession !== null) {
+        throw new Error(`Native session owner mismatch for ${id}`);
+      }
+      // Update-supplied refs stay reachable to the caller (the command layer
+      // retains one for its published session fact); clone on ingest to match
+      // addChat/updateChat aliasing protection.
+      existing.nativeSession = update.nativeSession
+        ? structuredClone(update.nativeSession)
+        : null;
+    }
+    const mutationRevision = this.#advanceChatMutationRevision(id);
+    const restoreIfCurrent = (): void => {
+      if (this.#chatMutationRevisions.get(id) !== mutationRevision) return;
+      existing.projectPath = previousProjectPath;
+      existing.nativeSession = previousNativeSession;
+      this.#advanceChatMutationRevision(id);
+      this.#scheduleRegistrySave();
+    };
+    try {
+      await this.#flushRegistrySave(restoreIfCurrent);
+    } catch (error) {
+      restoreIfCurrent();
+      throw error;
+    }
+    try {
+      this.#emitChatProjectPathUpdated({
+        chatId: update.chatId,
+        projectPath: update.projectPath,
+        effectiveProjectKey: update.effectiveProjectKey,
+        previousProjectPath: update.previousProjectPath,
+      });
+    } catch (error) {
+      logger.warn('Project-path update publication failed after persistence', {
+        chatId: id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    return { id, ...cloneRegistryEntry(existing) };
+  }
+
+  removeChat(id: string, reason: ChatRemovalReason = 'user-deletion'): boolean {
+    const registry = this.getRegistry();
+    const entry = registry.sessions[id];
+    if (!entry) return false;
+    delete registry.sessions[id];
+    this.#chatMutationRevisions.delete(id);
+    const revision = this.#markRegistryDirty();
+    const executorId = effectiveExecutorId(entry.executorId);
+    if (executorId !== LOCAL_EXECUTOR_ID && this.#retainExecutorReferences) {
+      const retained = this.#removedExecutorReferences.get(executorId);
+      if (retained) retained.revision = revision;
+      else this.#removedExecutorReferences.set(executorId, {
+        revision, release: this.#retainExecutorReferences([], [executorId]),
+      });
+    }
+    this.#emitChatRemoved(id, reason);
+    this.#scheduleRegistrySave();
+    return true;
+  }
+
+  getChatByAgentSessionId(agentSessionId: string | null | undefined, agentId?: AgentName, executorId?: string | null): [string, ChatRegistryEntry] | null {
+    if (!agentSessionId) return null;
+    const match = this.lookupNativeSession(agentSessionId, agentId, executorId);
+    return match.status === 'found' ? [match.chatId, this.getChat(match.chatId)!] : null;
+  }
+
+  lookupNativeSession(agentSessionId: string, agentId?: AgentName, executorId?: string | null): NativeSessionLookupResult {
+    let matchedChatId: ChatId | null = null;
+    for (const [chatId, entry] of Object.entries(this.getRegistry().sessions)) {
+      if (effectiveExecutorId(entry.executorId) !== effectiveExecutorId(executorId)) continue;
+      if (entry.agentSessionId !== agentSessionId) continue;
+      if (agentId !== undefined && entry.agentId !== agentId) continue;
+      if (matchedChatId !== null) return { status: 'ambiguous' };
+      matchedChatId = parseChatId(chatId);
+    }
+    return matchedChatId === null
+      ? { status: 'not-found' }
+      : { status: 'found', chatId: matchedChatId };
+  }
+
+  async saveRegistry(
+    registry: ChatRegistrySnapshot,
+    onWriteFailure?: () => void,
+  ): Promise<void> {
+    const target = this.#sessionsFilePath();
+    await this.#registryWriteLock.runExclusive(
+      target,
+      async () => {
+        const candidateRevision = this.#nextChatMutationRevision;
+        try {
+          const snapshot = cloneRegistrySnapshot(registry);
+          await this.#providerReferences.publish(registryProviders(snapshot),
+            () => writeJsonFileAtomic(target, snapshot, { mode: 0o600 }), registryProviders(this.getRegistry()));
+        } catch (error) {
+          onWriteFailure?.();
+          throw error;
+        }
+        if (this.#nextChatMutationRevision === candidateRevision) {
+          this.#registryDirty = false;
+        }
+        // Earlier snapshots and failed writes cannot prove an executor reference was removed.
+        for (const [executorId, retained] of this.#removedExecutorReferences) {
+          if (retained.revision > candidateRevision) continue;
+          retained.release();
+          this.#removedExecutorReferences.delete(executorId);
+        }
+      },
+    );
+    this.#registry = registry;
+    // A confirmed flush proves every previously unknown-durability candidate.
+    this.#unknownDurabilityChats.clear();
+  }
+
+  // Flushes any pending registry save immediately. Called during shutdown.
+  // Client-accessible reconciliation for a durability-unknown phased commit:
+  // rewriting the current in-memory registry proves the file is writable and,
+  // on success, clears the mutation fence for that chat.
+  async reconcileUnknownDurability(
+    id: string,
+  ): Promise<'confirmed' | 'unavailable' | 'still-unknown'> {
+    const registry = this.getRegistry();
+    if (!registry.sessions[id]) return 'unavailable';
+    if (!this.#unknownDurabilityChats.has(id)) return 'confirmed';
+    try {
+      await this.#flushRegistrySave();
+      return this.#unknownDurabilityChats.has(id) ? 'still-unknown' : 'confirmed';
+    } catch {
+      return 'still-unknown';
+    }
+  }
+
+  async flush(): Promise<void> {
+    await this.#flushRegistrySave();
+  }
+
+  async #flushRegistrySave(onWriteFailure?: () => void): Promise<void> {
+    if (this.#pendingSaveTimer) {
+      clearTimeout(this.#pendingSaveTimer);
+      this.#pendingSaveTimer = null;
+    }
+    await this.saveRegistry(
+      this.#registry || createEmptyRegistry(),
+      onWriteFailure,
+    );
+  }
+
+  #scheduleRegistrySave(): void {
+    if (this.#pendingSaveTimer) {
+      clearTimeout(this.#pendingSaveTimer);
+      this.#pendingSaveTimer = null;
+    }
+    this.#pendingSaveTimer = setTimeout(() => {
+      this.#pendingSaveTimer = null;
+      this.saveRegistry(this.#registry || createEmptyRegistry()).catch((error: Error) => {
+        logger.warn('sessions: failed to persist registry:', error.message);
+      });
+    }, this.#saveDelayMs);
+  }
+
+  #advanceChatMutationRevision(id: string): number {
+    const revision = this.#markRegistryDirty();
+    this.#chatMutationRevisions.set(id, revision);
+    return revision;
+  }
+
+  #markRegistryDirty(): number {
+    this.#registryDirty = true;
+    return ++this.#nextChatMutationRevision;
+  }
+
+}
+
+function cloneRegistryEntry(entry: ChatRegistryEntry): ChatRegistryEntry {
+  return {
+    ...entry,
+    // Deeply frozen fields (parentChat, carryOverSegments) are safe to share; every
+    // other nested field must be copied here so callers cannot mutate registry
+    // state through a handed-out entry. New entry fields declare themselves by
+    // landing in one of these two groups.
+    agentSettingsById: structuredClone(entry.agentSettingsById),
+    tags: [...entry.tags],
+    nativeSession: entry.nativeSession ? structuredClone(entry.nativeSession) : null,
+    nativeSeedReceipt: entry.nativeSeedReceipt ? { ...entry.nativeSeedReceipt } : null,
+    pendingPreambleBoundary: entry.pendingPreambleBoundary
+      ? { ...entry.pendingPreambleBoundary }
+      : null,
+    preambleSelection: {
+      revision: entry.preambleSelection.revision,
+      orderedPreambleIds: [...entry.preambleSelection.orderedPreambleIds],
+    },
+    carryOverMigrationQuarantine: entry.carryOverMigrationQuarantine
+      ? { ...entry.carryOverMigrationQuarantine }
+      : null,
+  };
+}
+
+function cloneRegistrySnapshot(registry: ChatRegistrySnapshot): ChatRegistrySnapshot {
+  return {
+    version: registry.version,
+    sessions: Object.fromEntries(
+      Object.entries(registry.sessions).map(([id, entry]) => [id, cloneRegistryEntry(entry)]),
+    ),
+  };
+}
+
+function registryProviders(registry: ChatRegistrySnapshot): (string | null | undefined)[] {
+  return Object.values(registry.sessions).map((chat) => chat.apiProviderId);
+}

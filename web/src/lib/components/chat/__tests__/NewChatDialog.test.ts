@@ -145,7 +145,7 @@ describe('NewChatDialog', () => {
 				sourceId: 'snippet-handoff',
 				sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 				shortName: 'handoff',
-				contextNodeId: 'local',
+				contextExecutorId: 'local',
 				contextProjectPath: request.context.projectPath,
 				expandedText: `Continue chat ${request.context.chatId}`,
 			};
@@ -176,7 +176,7 @@ describe('NewChatDialog', () => {
 			expect.objectContaining({
 				context: {
 					type: 'new-chat',
-					nodeId: 'local',
+					executorId: 'local',
 					chatId: '1787471053739199',
 					projectPath: '/workspace',
 				},

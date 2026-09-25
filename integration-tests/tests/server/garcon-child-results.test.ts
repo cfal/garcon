@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { AgentChildOutcomeNoticeDetail } from '../../../common/garcon-agent-result.js';
 import { garconCommandResultContent } from '../../../common/garcon-command-results.js';
 import type { ChatMessagesMessage } from '../../../common/ws-events.js';
-import type { ChatRegistrySnapshot } from '../../../server/chats/store.js';
+import type { ChatRegistrySnapshot } from '../../../server/controller/chats/store.js';
 import { messagesOfType, userContents } from '../../support/chat-assertions.js';
 import { withIntegrationFixture, type IntegrationFixture } from '../../support/integration-fixture.js';
 

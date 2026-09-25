@@ -19,7 +19,7 @@ export interface RuntimeConnection {
   baseUrl: string;
   instanceId: string;
   endpointInstanceId: string;
-  defaultNodeId: string;
+  defaultExecutorId: string;
   workspaceName: string | null;
   localCapability: string;
   workspaceDir: string | null;
@@ -94,7 +94,7 @@ async function readRuntimeDescriptor(descriptorPath: string, runtime: RuntimeKin
     }
     const raw = JSON.parse(await handle.readFile('utf8')) as unknown;
     const descriptor = parseCliRuntimeDescriptor(raw);
-    if (('kind' in descriptor ? 'execution-node' : 'controller') !== runtime) {
+    if (('kind' in descriptor ? 'executor' : 'controller') !== runtime) {
       throw invalid(`does not describe a ${runtime} runtime`);
     }
     return descriptor;
@@ -208,7 +208,7 @@ async function connectRuntime(candidate: RuntimeCandidate, options: RuntimeDisco
     baseUrl,
     instanceId: context.serverInstanceId,
     endpointInstanceId: descriptor.instanceId,
-    defaultNodeId: context.defaultNodeId,
+    defaultExecutorId: context.defaultExecutorId,
     workspaceName: context.workspaceName,
     localCapability: descriptor.localCapability,
     workspaceDir: 'workspaceDir' in descriptor ? descriptor.workspaceDir : null,
@@ -256,7 +256,7 @@ async function verifyEndpoint(
 
 async function selectRuntime(options: RuntimeDiscoveryOptions, dependencies: RuntimeDiscoveryDependencies): Promise<RuntimeCandidate> {
   const selection = options.runtime ?? 'auto';
-  const kinds: RuntimeKind[] = selection === 'auto' ? ['controller', 'execution-node'] : [selection];
+  const kinds: RuntimeKind[] = selection === 'auto' ? ['controller', 'executor'] : [selection];
   const candidates: RuntimeCandidate[] = [];
   const errors: unknown[] = [];
   for (const runtime of kinds) {
@@ -276,12 +276,12 @@ async function selectRuntime(options: RuntimeDiscoveryOptions, dependencies: Run
   }
   const warn = dependencies.warn ?? ((message: string) => { process.stderr.write(`${message}\n`); });
   if (errors.length > 0) {
-    if (candidates.length + errors.length > 1) warn('warning: both runtime files exist; automatic selection failed. Use --runtime controller or --runtime execution-node to select explicitly.');
+    if (candidates.length + errors.length > 1) warn('warning: both runtime files exist; automatic selection failed. Use --runtime controller or --runtime executor to select explicitly.');
     throw errors[0];
   }
   const chosen = candidates.reduce((selected, candidate) => Date.parse(candidate.descriptor.startedAt) > Date.parse(selected.descriptor.startedAt) ? candidate : selected);
   if (candidates.length > 1) {
-    warn(`warning: both runtime files exist; selected ${chosen.runtime} (startedAt ${new Date(chosen.descriptor.startedAt).toISOString()}). Use --runtime controller or --runtime execution-node to select explicitly.`);
+    warn(`warning: both runtime files exist; selected ${chosen.runtime} (startedAt ${new Date(chosen.descriptor.startedAt).toISOString()}). Use --runtime controller or --runtime executor to select explicitly.`);
   }
   const alternative = candidates.find((candidate) => candidate !== chosen)?.runtime;
   return { ...chosen, ...(alternative ? { alternative } : {}) };

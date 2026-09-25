@@ -10,7 +10,7 @@ import {
 import { withTimeout } from './deferred.js';
 import { requireCurrentWebBuild } from './web-build-gate.js';
 
-const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url));
+const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const ARTIFACT_ROOT = join(REPO_ROOT, 'integration-tests', 'artifacts', 'chromium');
 const FIXTURE_SETUP_TIMEOUT_MS = 25_000;
 const SCENARIO_TIMEOUT_MS = 120_000;

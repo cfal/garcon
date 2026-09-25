@@ -1,4 +1,4 @@
-import { isExecutionNodeId } from './execution-nodes.js';
+import { isExecutorId } from './executors.js';
 
 export const SERVER_RUNTIME_SCHEMA_VERSION = 1 as const;
 export const SERVER_RUNTIME_FILENAME = 'runtime.json';
@@ -8,19 +8,19 @@ export const CLI_SERVER_INSTANCE_HEADER = 'X-Garcon-Server-Instance';
 
 export interface CliContext {
   readonly serverInstanceId: string;
-  readonly defaultNodeId: string;
+  readonly defaultExecutorId: string;
   readonly workspaceName: string | null;
 }
 
 export function parseCliContext(value: unknown): CliContext {
   const raw = runtimeRecord(value);
-  if (!isExecutionNodeId(raw.defaultNodeId)
+  if (!isExecutorId(raw.defaultExecutorId)
     || !(raw.workspaceName === null || typeof raw.workspaceName === 'string' && raw.workspaceName.length > 0)) {
     throw new ServerRuntimeContractError('invalid CLI context');
   }
   return {
     serverInstanceId: requiredString(raw, 'serverInstanceId'),
-    defaultNodeId: raw.defaultNodeId,
+    defaultExecutorId: raw.defaultExecutorId,
     workspaceName: raw.workspaceName,
   };
 }
@@ -45,7 +45,7 @@ export interface ServerRuntimeDescriptor extends ServerRuntimeIdentity {
 }
 
 export interface CliGatewayDescriptor extends Omit<ServerRuntimeDescriptor, 'workspaceDir'> {
-  readonly kind: 'execution-node-cli';
+  readonly kind: 'executor-cli';
 }
 
 export type CliRuntimeDescriptor = ServerRuntimeDescriptor | CliGatewayDescriptor;
@@ -74,7 +74,7 @@ export function parseServerRuntimeDescriptor(value: unknown): ServerRuntimeDescr
 
 export function parseCliRuntimeDescriptor(value: unknown): CliRuntimeDescriptor {
   const raw = runtimeRecord(value);
-  if (raw.kind === 'execution-node-cli') return { ...parseRuntimeEndpoint(raw), kind: raw.kind };
+  if (raw.kind === 'executor-cli') return { ...parseRuntimeEndpoint(raw), kind: raw.kind };
   if (raw.kind !== undefined) throw new ServerRuntimeContractError('unsupported runtime kind');
   return parseServerRuntimeDescriptor(raw);
 }

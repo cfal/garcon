@@ -142,11 +142,11 @@ describe('AppShellStore', () => {
 	});
 
 	describe('settings tabs', () => {
-		it('defaults unknown server sections to execution nodes', () => {
+		it('defaults unknown server sections to executors', () => {
 			const store = new AppShellStore();
 
 			store.openSettings('display');
-			expect(store.settingsTab).toBe('execution-nodes');
+			expect(store.settingsTab).toBe('executors');
 
 			store.openSettings('general');
 			expect(store.settingsTab).toBe('general');
@@ -166,7 +166,7 @@ describe('AppShellStore', () => {
 			store.openSettings();
 			expect(store.showAppSettings).toBe(false);
 			expect(store.showSettings).toBe(true);
-			expect(store.settingsTab).toBe('execution-nodes');
+			expect(store.settingsTab).toBe('executors');
 			store.openAppSettings('unknown');
 			expect(store.appSettingsTab).toBe('general');
 			store.closeAppSettings();

@@ -4,11 +4,11 @@ import * as prApi from '$lib/api/pull-requests';
 import type { PullRequestDetail, PullRequestSummary } from '$lib/api/pull-requests';
 import { flushSync } from 'svelte';
 import { bindProject } from './pull-requests-effect-harness.svelte.js';
-import { ExecutionNodesStore } from '$lib/execution-nodes/execution-nodes-store.svelte.js';
+import { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
 import {
-	localExecutionNode,
-	remoteExecutionNode,
-} from '$lib/execution-nodes/__tests__/fixtures.js';
+	localExecutor,
+	remoteExecutor,
+} from '$lib/executors/__tests__/fixtures.js';
 import { GhCapabilityStore } from '../gh-capability.svelte.js';
 import { ProjectResolutionStore } from '$lib/workspace/project-resolution-store.svelte.js';
 import { getGhStatus } from '$lib/api/gh.js';
@@ -79,27 +79,27 @@ describe('PullRequestsStore', () => {
 		vi.resetAllMocks();
 	});
 
-	it('checks the independently selected node only while visible and ignores subsequent chat changes', async () => {
-		const nodes = new ExecutionNodesStore();
+	it('checks the independently selected executor only while visible and ignores subsequent chat changes', async () => {
+		const executors = new ExecutorsStore();
 		const remote = {
-			...remoteExecutionNode,
+			...remoteExecutor,
 			machineServices: { files: true, git: true, gh: true, terminals: true },
 		};
-		nodes.applySnapshot([
+		executors.applySnapshot([
 			{
-				...localExecutionNode,
-				machineServices: { ...localExecutionNode.machineServices, gh: false },
+				...localExecutor,
+				machineServices: { ...localExecutor.machineServices, gh: false },
 			},
 			remote,
 		]);
-		const capabilities = new GhCapabilityStore(nodes);
+		const capabilities = new GhCapabilityStore(executors);
 		const resolution = new ProjectResolutionStore(
 			async (target) => ({
 				target,
 				resolution: { kind: 'available', effectiveProjectKey: target.projectPath },
 			}),
 			undefined,
-			nodes,
+			executors,
 		);
 		vi.mocked(getGhStatus).mockResolvedValue({
 			available: true,
@@ -110,13 +110,13 @@ describe('PullRequestsStore', () => {
 		const store = new PullRequestsStore({
 			ghCapability: capabilities,
 			projectSelection: {
-				nodes,
+				executors,
 				projectResolution: resolution,
-				projectBasePath: (nodeId) => nodes.get(nodeId)?.projectBasePath ?? null,
+				projectBasePath: (executorId) => executors.get(executorId)?.projectBasePath ?? null,
 			},
 		});
 		try {
-			store.projectSelection.selectResolvedProject({ nodeId: remote.id, projectPath: '/worker' });
+			store.projectSelection.selectResolvedProject({ executorId: remote.id, projectPath: '/worker' });
 			flushSync();
 			expect(getGhStatus).not.toHaveBeenCalled();
 			expect(getPullRequestsMock).not.toHaveBeenCalled();
@@ -125,24 +125,24 @@ describe('PullRequestsStore', () => {
 			await vi.waitFor(() => expect(getPullRequestsMock).toHaveBeenCalledOnce());
 			expect(getGhStatus).toHaveBeenCalledExactlyOnceWith(remote.id, expect.anything());
 			expect(getPullRequestsMock).toHaveBeenCalledWith(
-				{ nodeId: remote.id, projectPath: '/worker' },
+				{ executorId: remote.id, projectPath: '/worker' },
 				expect.anything(),
 			);
 			store.setProjectState({
 				kind: 'available',
 				project: {
 					chatId: 'local-chat',
-					nodeId: 'local',
+					executorId: 'local',
 					projectPath: '/local',
 					effectiveProjectKey: '/local',
 				},
 			});
 			flushSync();
-			expect(store.nodeId).toBe(remote.id);
+			expect(store.executorId).toBe(remote.id);
 			expect(store.capabilityState).toBe('available');
 			store.projectSelection.goToChatProject();
 			flushSync();
-			expect(store.nodeId).toBe('local');
+			expect(store.executorId).toBe('local');
 			expect(store.capabilityState).toBe('unavailable');
 			expect(getPullRequestsMock).toHaveBeenCalledOnce();
 		} finally {
@@ -152,12 +152,12 @@ describe('PullRequestsStore', () => {
 		}
 	});
 
-	it('stabilizes reactive project binding and preserves selection for an unchanged node and path', async () => {
+	it('stabilizes reactive project binding and preserves selection for an unchanged executor and path', async () => {
 		getPullRequestsMock.mockResolvedValue({ pulls: [summary(3)], repo: null });
 		getPullRequestMock.mockResolvedValue(detail(3));
 		const store = createVisibleStore();
 		const project = {
-			nodeId: 'local',
+			executorId: 'local',
 			chatId: 'one',
 			projectPath: '/project',
 			effectiveProjectKey: '/project',
@@ -181,20 +181,20 @@ describe('PullRequestsStore', () => {
 	});
 
 	it('refreshes selected detail when replacement project resolution finishes before GitHub capability', async () => {
-		const nodes = new ExecutionNodesStore();
+		const executors = new ExecutorsStore();
 		const remote = {
-			...remoteExecutionNode,
+			...remoteExecutor,
 			machineServices: { files: true, git: true, gh: true, terminals: true },
 		};
-		nodes.applySnapshot([localExecutionNode, remote]);
-		const capabilities = new GhCapabilityStore(nodes);
+		executors.applySnapshot([localExecutor, remote]);
+		const capabilities = new GhCapabilityStore(executors);
 		const resolution = new ProjectResolutionStore(
 			async (target) => ({
 				target,
 				resolution: { kind: 'available', effectiveProjectKey: target.projectPath },
 			}),
 			undefined,
-			nodes,
+			executors,
 		);
 		const available = { available: true, authenticated: true, reason: 'authenticated' } as const;
 		const capability = deferred<Awaited<ReturnType<typeof getGhStatus>>>();
@@ -206,13 +206,13 @@ describe('PullRequestsStore', () => {
 		const store = new PullRequestsStore({
 			ghCapability: capabilities,
 			projectSelection: {
-				nodes,
+				executors,
 				projectResolution: resolution,
-				projectBasePath: (nodeId) => nodes.get(nodeId)?.projectBasePath ?? null,
+				projectBasePath: (executorId) => executors.get(executorId)?.projectBasePath ?? null,
 			},
 		});
 		try {
-			store.projectSelection.selectResolvedProject({ nodeId: remote.id, projectPath: '/worker' });
+			store.projectSelection.selectResolvedProject({ executorId: remote.id, projectPath: '/worker' });
 			flushSync();
 			store.setPresentationVisible(true);
 			flushSync();
@@ -222,7 +222,7 @@ describe('PullRequestsStore', () => {
 
 			vi.mocked(getGhStatus).mockReturnValueOnce(capability.promise);
 			const previousChecks = vi.mocked(getGhStatus).mock.calls.length;
-			nodes.applySnapshot([localExecutionNode, { ...remote, instanceId: 'replacement-instance' }]);
+			executors.applySnapshot([localExecutor, { ...remote, instanceId: 'replacement-instance' }]);
 			flushSync();
 			await vi.waitFor(() => {
 				expect(getGhStatus).toHaveBeenCalledTimes(previousChecks + 1);
@@ -237,7 +237,7 @@ describe('PullRequestsStore', () => {
 			expect(getPullRequestsMock).toHaveBeenCalledTimes(2);
 			expect(getPullRequestMock).toHaveBeenCalledTimes(2);
 			expect(getPullRequestMock).toHaveBeenLastCalledWith(
-				{ nodeId: remote.id, projectPath: '/worker' },
+				{ executorId: remote.id, projectPath: '/worker' },
 				3,
 				expect.anything(),
 			);
@@ -255,7 +255,7 @@ describe('PullRequestsStore', () => {
 			repo: { nameWithOwner: 'o/r' },
 		});
 		const store = createVisibleStore();
-		store.setProject({ nodeId: 'local', projectPath: '/proj' });
+		store.setProject({ executorId: 'local', projectPath: '/proj' });
 		await tick();
 		expect(store.pulls).toHaveLength(2);
 		expect(store.repoName).toBe('o/r');
@@ -275,11 +275,11 @@ describe('PullRequestsStore', () => {
 			store.setCapability('remote', true, true);
 			store.setPresentationVisible(true);
 			const project = {
-				nodeId: 'remote',
+				executorId: 'remote',
 				chatId: 'one',
 				projectPath: '/project',
 				effectiveProjectKey: '/project',
-				nodeContextKey: 'first',
+				executorContextKey: 'first',
 			};
 			const binding = bindProject(store, { kind: 'available', project });
 			try {
@@ -289,7 +289,7 @@ describe('PullRequestsStore', () => {
 				if (cached)
 					binding.setProject({
 						kind: 'available',
-						project: { ...project, nodeContextKey: 'replacement' },
+						project: { ...project, executorContextKey: 'replacement' },
 					});
 				flushSync();
 				await tick();
@@ -314,7 +314,7 @@ describe('PullRequestsStore', () => {
 	it('records a load error on failure', async () => {
 		getPullRequestsMock.mockRejectedValue(new Error('boom'));
 		const store = createVisibleStore();
-		store.setProject({ nodeId: 'local', projectPath: '/proj' });
+		store.setProject({ executorId: 'local', projectPath: '/proj' });
 		await tick();
 		expect(store.loadError).toBe('boom');
 	});
@@ -323,7 +323,7 @@ describe('PullRequestsStore', () => {
 		getPullRequestsMock.mockResolvedValue({ pulls: [summary(7)], repo: null });
 		getPullRequestMock.mockResolvedValue(detail(7));
 		const store = createVisibleStore();
-		store.setProject({ nodeId: 'local', projectPath: '/proj' });
+		store.setProject({ executorId: 'local', projectPath: '/proj' });
 		await tick();
 		await store.select(7);
 		expect(store.selectedNumber).toBe(7);
@@ -341,8 +341,8 @@ describe('PullRequestsStore', () => {
 			)
 			.mockResolvedValueOnce({ pulls: [summary(99)], repo: null });
 		const store = createVisibleStore();
-		store.setProject({ nodeId: 'local', projectPath: '/proj-a' });
-		store.setProject({ nodeId: 'local', projectPath: '/proj-b' });
+		store.setProject({ executorId: 'local', projectPath: '/proj-a' });
+		store.setProject({ executorId: 'local', projectPath: '/proj-b' });
 		await tick();
 		resolveFirst?.();
 		await tick();
@@ -358,7 +358,7 @@ describe('PullRequestsStore', () => {
 				}),
 		);
 		const store = createVisibleStore();
-		store.setProject({ nodeId: 'local', projectPath: '/proj' });
+		store.setProject({ executorId: 'local', projectPath: '/proj' });
 		store.setProject(null);
 		resolveFirst?.();
 		await tick();
@@ -371,11 +371,11 @@ describe('PullRequestsStore', () => {
 		getPullRequestsMock.mockResolvedValue({ pulls: [summary(1)], repo: null });
 		getPullRequestMock.mockResolvedValue(detail(1));
 		const store = createVisibleStore();
-		store.setProject({ nodeId: 'local', projectPath: '/proj' });
+		store.setProject({ executorId: 'local', projectPath: '/proj' });
 		await tick();
 		await store.select(1);
 		expect(store.hasSelection).toBe(true);
-		store.setProject({ nodeId: 'local', projectPath: '/other' });
+		store.setProject({ executorId: 'local', projectPath: '/other' });
 		expect(store.hasSelection).toBe(false);
 		expect(store.detail).toBe(null);
 	});
@@ -387,13 +387,13 @@ describe('PullRequestsStore', () => {
 			.mockResolvedValueOnce({ pulls: [summary(1)], repo: { nameWithOwner: 'o/a' } });
 		getPullRequestMock.mockResolvedValue(detail(1));
 		const store = createVisibleStore();
-		store.setProject({ nodeId: 'local', projectPath: '/project-a' }, '/canonical/a');
+		store.setProject({ executorId: 'local', projectPath: '/project-a' }, '/canonical/a');
 		await tick();
 		await store.select(1);
-		store.setProject({ nodeId: 'local', projectPath: '/project-b' }, '/canonical/b');
+		store.setProject({ executorId: 'local', projectPath: '/project-b' }, '/canonical/b');
 		await tick();
 
-		store.setProject({ nodeId: 'local', projectPath: '/project-a-alias' }, '/canonical/a');
+		store.setProject({ executorId: 'local', projectPath: '/project-a-alias' }, '/canonical/a');
 		expect(store.pulls.map((pull) => pull.number)).toEqual([1]);
 		expect(store.selectedNumber).toBe(1);
 		expect(store.detail?.number).toBe(1);
@@ -405,11 +405,11 @@ describe('PullRequestsStore', () => {
 		getPullRequestsMock.mockResolvedValue({ pulls: [summary(3)], repo: null });
 		getPullRequestMock.mockResolvedValue(detail(3));
 		const store = createVisibleStore();
-		store.setProject({ nodeId: 'local', projectPath: '/project-link' }, '/canonical/project');
+		store.setProject({ executorId: 'local', projectPath: '/project-link' }, '/canonical/project');
 		await tick();
 		await store.select(3);
 
-		store.setProject({ nodeId: 'local', projectPath: '/canonical/project' }, '/canonical/project');
+		store.setProject({ executorId: 'local', projectPath: '/canonical/project' }, '/canonical/project');
 		expect(store.selectedNumber).toBe(3);
 		expect(store.detail?.number).toBe(3);
 		expect(getPullRequestsMock).toHaveBeenCalledOnce();
@@ -419,7 +419,7 @@ describe('PullRequestsStore', () => {
 		getPullRequestsMock.mockResolvedValue({ pulls: [summary(3)], repo: null });
 		getPullRequestMock.mockResolvedValue(detail(3));
 		const store = createVisibleStore();
-		store.setProject({ nodeId: 'local', projectPath: '/project' }, '/canonical/project');
+		store.setProject({ executorId: 'local', projectPath: '/project' }, '/canonical/project');
 		await tick();
 		await store.select(3);
 
@@ -458,7 +458,7 @@ describe('PullRequestsStore', () => {
 			return list.promise;
 		});
 		const store = createVisibleStore();
-		store.setProject({ nodeId: 'local', projectPath: '/project' }, '/canonical/project');
+		store.setProject({ executorId: 'local', projectPath: '/project' }, '/canonical/project');
 		await vi.waitFor(() => expect(getPullRequestsMock).toHaveBeenCalledOnce());
 
 		store.setProjectState({
@@ -492,7 +492,7 @@ describe('PullRequestsStore', () => {
 			})
 			.mockResolvedValueOnce({ pulls: [summary(2)], repo: null });
 		const store = createVisibleStore();
-		store.setProject({ nodeId: 'local', projectPath: '/project' }, '/canonical/project');
+		store.setProject({ executorId: 'local', projectPath: '/project' }, '/canonical/project');
 		await tick();
 		const staleRefresh = store.refresh();
 		await vi.waitFor(() => expect(getPullRequestsMock).toHaveBeenCalledTimes(2));
@@ -527,7 +527,7 @@ describe('PullRequestsStore', () => {
 			.mockImplementationOnce(() => new Promise(() => undefined))
 			.mockResolvedValueOnce(detail(4));
 		const store = createVisibleStore();
-		store.setProject({ nodeId: 'local', projectPath: '/proj' });
+		store.setProject({ executorId: 'local', projectPath: '/proj' });
 		await tick();
 
 		void store.select(4);
@@ -552,7 +552,7 @@ describe('PullRequestsStore', () => {
 			})
 			.mockResolvedValueOnce({ pulls: [summary(6)], repo: null });
 		const store = createVisibleStore();
-		store.setProject({ nodeId: 'local', projectPath: '/proj' });
+		store.setProject({ executorId: 'local', projectPath: '/proj' });
 		await vi.waitFor(() => expect(getPullRequestsMock).toHaveBeenCalledOnce());
 
 		store.setPresentationVisible(false);
@@ -571,7 +571,7 @@ describe('PullRequestsStore', () => {
 			})
 			.mockResolvedValueOnce({ pulls: [summary(8)], repo: null });
 		const store = createVisibleStore();
-		store.setProject({ nodeId: 'local', projectPath: '/proj' });
+		store.setProject({ executorId: 'local', projectPath: '/proj' });
 		await tick();
 
 		store.setCapability('local', true, false);

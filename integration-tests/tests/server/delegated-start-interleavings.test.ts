@@ -4,16 +4,16 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseChatId } from '../../../common/chat-id.js';
-import { AgentStartController } from '../../../server/chats/agent-start-controller.js';
-import { AgentStartProgress } from '../../../server/chats/agent-start-progress.js';
-import type { ChatRegistryEntry } from '../../../server/chats/store.js';
-import { ChatExecutionCoordinator } from '../../../server/chat-execution/chat-execution-coordinator.js';
-import { InMemoryChatExecutionControlRepository } from '../../../server/chat-execution/chat-execution-control-repository.js';
-import { CommandLedger } from '../../../server/commands/command-ledger.js';
-import { ChatCommandSettlement } from '../../../server/commands/chat-command-settlement.js';
-import { TranscriptLedgerService } from '../../../server/ledger/service.js';
-import { TranscriptLedgerStore } from '../../../server/ledger/store.js';
-import { KeyedPromiseLock } from '../../../server/lib/keyed-lock.js';
+import { AgentStartController } from '../../../server/controller/chats/agent-start-controller.js';
+import { AgentStartProgress } from '../../../server/controller/chats/agent-start-progress.js';
+import type { ChatRegistryEntry } from '../../../server/controller/chats/store.js';
+import { ChatExecutionCoordinator } from '../../../server/controller/chat-execution/chat-execution-coordinator.js';
+import { InMemoryChatExecutionControlRepository } from '../../../server/controller/chat-execution/chat-execution-control-repository.js';
+import { CommandLedger } from '../../../server/controller/commands/command-ledger.js';
+import { ChatCommandSettlement } from '../../../server/controller/commands/chat-command-settlement.js';
+import { TranscriptLedgerService } from '../../../server/controller/ledger/service.js';
+import { TranscriptLedgerStore } from '../../../server/controller/ledger/store.js';
+import { KeyedPromiseLock } from '../../../server/common/keyed-lock.js';
 
 const PARENT = '9000000000000000';
 const CHILD = parseChatId('1000000000000000');
@@ -88,7 +88,7 @@ describe('delegated startup admission interleavings', () => {
       }, byAgent: {} }) },
       selection: {
         catalog: async () => ({ catalog: { agents: [], apiProviders: [] } }),
-        resolve: () => ({ nodeId: 'local', agentId: 'test', model: 'test', permissionMode: 'default', thinkingMode: 'none',
+        resolve: () => ({ executorId: 'local', agentId: 'test', model: 'test', permissionMode: 'default', thinkingMode: 'none',
           apiProviderId: null, modelEndpointId: null, modelProtocol: null,
           agentSettings: { ownerId: 'test', schemaVersion: 1, values: {} } }),
       },

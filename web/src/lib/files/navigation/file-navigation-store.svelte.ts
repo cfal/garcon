@@ -1,5 +1,5 @@
 import type { FileRevision } from '$shared/file-contracts';
-import { effectiveNodeId, parseNodeId } from '$shared/execution-nodes';
+import { effectiveExecutorId, parseExecutorId } from '$shared/executors';
 import { fileIdentityKey } from '$lib/files/documents/file-identity.js';
 import {
 	FILE_RECENT_LIMIT,
@@ -11,7 +11,7 @@ export const FILE_NAVIGATION_LIMIT = 200;
 export const FILE_NAVIGATION_BYTE_LIMIT = 256 * 1024;
 
 export interface FileLocation {
-	nodeId?: string | null;
+	executorId?: string | null;
 	key: string;
 	canonicalFileRootPath: string;
 	normalizedRelativePath: string;
@@ -174,7 +174,7 @@ function pruneNewestLocations(
 
 function isValidRecentRecord(record: FileRecentLocationV1): boolean {
 	return (
-		Boolean(parseNodeId(record.nodeId)) &&
+		Boolean(parseExecutorId(record.executorId)) &&
 		record.schemaVersion === 1 &&
 		typeof record.key === 'string' &&
 		typeof record.canonicalFileRootPath === 'string' &&
@@ -189,10 +189,10 @@ function toLocation(record: FileRecentLocationV1): FileLocation {
 		userNamespace: _userNamespace,
 		...location
 	} = record;
-	const nodeId = effectiveNodeId(record.nodeId);
+	const executorId = effectiveExecutorId(record.executorId);
 	return {
 		...location,
-		nodeId,
-		key: fileIdentityKey(record.canonicalFileRootPath, record.normalizedRelativePath, nodeId),
+		executorId,
+		key: fileIdentityKey(record.canonicalFileRootPath, record.normalizedRelativePath, executorId),
 	};
 }

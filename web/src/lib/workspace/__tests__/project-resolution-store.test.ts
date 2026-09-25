@@ -2,8 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { ApiError } from '$lib/api/client';
 import type { ProjectTarget } from '$shared/project-resolution';
 import { ProjectResolutionStore } from '../project-resolution-store.svelte';
-import { ExecutionNodesStore } from '$lib/execution-nodes/execution-nodes-store.svelte';
-import { localExecutionNode, remoteExecutionNode } from '$lib/execution-nodes/__tests__/fixtures';
+import { ExecutorsStore } from '$lib/executors/executors-store.svelte';
+import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 
 const CHAT_ID = '1783725900000800';
 const target = {
@@ -23,21 +23,21 @@ function deferred<T>() {
 }
 
 describe('ProjectResolutionStore', () => {
-	it('does not dispatch path inspection while the selected node is offline', async () => {
-		const nodes = new ExecutionNodesStore();
-		nodes.applySnapshot([localExecutionNode, { ...remoteExecutionNode, availability: 'offline' }]);
+	it('does not dispatch path inspection while the selected executor is offline', async () => {
+		const executors = new ExecutorsStore();
+		executors.applySnapshot([localExecutor, { ...remoteExecutor, availability: 'offline' }]);
 		const fetchResolution = vi.fn<typeof import('$lib/api/project-resolution').resolveProject>()
-			.mockRejectedValue(new ApiError(503, 'Offline', 'EXECUTION_NODE_UNAVAILABLE'));
-		const store = new ProjectResolutionStore(fetchResolution, undefined, nodes);
-		const lease = store.retain({ ...target, nodeId: remoteExecutionNode.id });
+			.mockRejectedValue(new ApiError(503, 'Offline', 'EXECUTOR_UNAVAILABLE'));
+		const store = new ProjectResolutionStore(fetchResolution, undefined, executors);
+		const lease = store.retain({ ...target, executorId: remoteExecutor.id });
 		await lease.resolve();
 		expect(fetchResolution).not.toHaveBeenCalled();
 		expect(lease.snapshot.kind).toBe('request-failed');
-		nodes.applySnapshot([localExecutionNode, remoteExecutionNode]);
+		executors.applySnapshot([localExecutor, remoteExecutor]);
 		fetchResolution.mockResolvedValue({ target, resolution: { kind: 'available', effectiveProjectKey: '/worker/project' } });
 		await lease.resolve();
 		expect(fetchResolution).not.toHaveBeenCalled();
-		const ready = store.retain({ ...target, nodeId: remoteExecutionNode.id });
+		const ready = store.retain({ ...target, executorId: remoteExecutor.id });
 		await ready.resolve();
 		expect(fetchResolution).toHaveBeenCalledTimes(1);
 		expect(ready.snapshot.kind).toBe('available');
@@ -46,23 +46,23 @@ describe('ProjectResolutionStore', () => {
 		store.destroy();
 	});
 
-	it('fences retained and pending resolutions when only the accepted node instance changes', async () => {
-		const nodes = new ExecutionNodesStore();
-		nodes.applySnapshot([localExecutionNode, remoteExecutionNode]);
+	it('fences retained and pending resolutions when only the accepted executor instance changes', async () => {
+		const executors = new ExecutorsStore();
+		executors.applySnapshot([localExecutor, remoteExecutor]);
 		const pending = deferred<Awaited<ReturnType<typeof import('$lib/api/project-resolution').resolveProject>>>();
 		const fetchResolution = vi.fn<typeof import('$lib/api/project-resolution').resolveProject>()
 			.mockResolvedValueOnce({ target, resolution: { kind: 'available', effectiveProjectKey: '/local' } })
 			.mockReturnValueOnce(pending.promise)
 			.mockResolvedValueOnce({ target, resolution: { kind: 'unavailable', reason: 'outside-base' } });
-		const store = new ProjectResolutionStore(fetchResolution, undefined, nodes);
-		const remoteTarget = { ...target, nodeId: remoteExecutionNode.id };
+		const store = new ProjectResolutionStore(fetchResolution, undefined, executors);
+		const remoteTarget = { ...target, executorId: remoteExecutor.id };
 		const local = store.retain(target);
 		await local.resolve();
 		const old = store.retain(remoteTarget);
 		const loading = old.resolve();
 		const localKey = store.lifecycleKey(target);
 		const oldKey = store.lifecycleKey(remoteTarget);
-		nodes.applySnapshot([localExecutionNode, { ...remoteExecutionNode, instanceId: 'replacement' }]);
+		executors.applySnapshot([localExecutor, { ...remoteExecutor, instanceId: 'replacement' }]);
 		expect(store.lifecycleKey(remoteTarget)).not.toBe(oldKey);
 		expect(store.lifecycleKey(target)).toBe(localKey);
 		expect(store.snapshotFor(remoteTarget).kind).toBe('unchecked');

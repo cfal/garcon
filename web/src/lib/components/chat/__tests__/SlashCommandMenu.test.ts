@@ -33,7 +33,7 @@ describe('SlashCommandMenu', () => {
 		mockedGetSlashCommands.mockReset();
 	});
 
-	it('refetches commands for a new node and discards the old node response', async () => {
+	it('refetches commands for a new executor and discards the old executor response', async () => {
 		const stale = deferred<Awaited<ReturnType<typeof getSlashCommands>>>();
 		mockedGetSlashCommands.mockReturnValueOnce(stale.promise).mockResolvedValueOnce([
 			{ name: 'remote-command', source: 'command' },
@@ -41,7 +41,7 @@ describe('SlashCommandMenu', () => {
 		const props = { ...baseProps, projectPath: '/repo', isVisible: true, query: '-command', onSelect: vi.fn(), onClose: vi.fn() };
 		const view = render(SlashCommandMenuTestHost, props);
 		await waitFor(() => expect(mockedGetSlashCommands).toHaveBeenCalledTimes(1));
-		await view.rerender({ ...props, nodeId: '11111111-1111-4111-8111-111111111111' });
+		await view.rerender({ ...props, executorId: '11111111-1111-4111-8111-111111111111' });
 		expect(await screen.findByText('/remote-command')).toBeTruthy();
 		stale.resolve([{ name: 'local-command', source: 'command' }]);
 		await tick();
@@ -49,16 +49,16 @@ describe('SlashCommandMenu', () => {
 		expect(screen.getByText('/remote-command')).toBeTruthy();
 	});
 
-	it('refetches for a replacement instance with identical node and project strings', async () => {
+	it('refetches for a replacement instance with identical executor and project strings', async () => {
 		const stale = deferred<Awaited<ReturnType<typeof getSlashCommands>>>();
 		mockedGetSlashCommands.mockReturnValueOnce(stale.promise).mockResolvedValueOnce([
 			{ name: 'current-command', source: 'command' },
 		]);
 		const view = render(SlashCommandMenuTestHost, {
-			...baseProps, projectPath: '/repo', nodeContextKey: 'old', isVisible: true, query: '-command', onSelect: vi.fn(), onClose: vi.fn(),
+			...baseProps, projectPath: '/repo', executorContextKey: 'old', isVisible: true, query: '-command', onSelect: vi.fn(), onClose: vi.fn(),
 		});
 		await waitFor(() => expect(mockedGetSlashCommands).toHaveBeenCalledOnce());
-		await view.rerender({ nodeContextKey: 'new' });
+		await view.rerender({ executorContextKey: 'new' });
 		expect(await screen.findByText('/current-command')).toBeTruthy();
 		stale.resolve([{ name: 'old-command', source: 'command' }]);
 		await tick();
@@ -362,7 +362,7 @@ describe('SlashCommandMenu', () => {
 
 		expect(await screen.findByText('/skill-11')).toBeTruthy();
 		expect(mockedGetSlashCommands).toHaveBeenCalledWith(
-			{ nodeId: 'local', agent: 'codex', chatId: null, projectPath: '/repo' },
+			{ executorId: 'local', agent: 'codex', chatId: null, projectPath: '/repo' },
 			expect.objectContaining({ signal: expect.any(AbortSignal) }),
 		);
 	});

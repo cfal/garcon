@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { TerminalRegistry } from '$lib/terminal/sessions/terminal-registry.svelte.js';
-import { ExecutionNodesStore } from '$lib/execution-nodes/execution-nodes-store.svelte.js';
+import { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
 import type {
 	TerminalCreateResponse,
 	TerminalListResponse,
@@ -14,11 +14,11 @@ import { CANONICAL_CHAT_SURFACE_ID } from '../canonical-layout.js';
 import { TERMINAL_LAUNCHER_ID, terminalSurfaceId } from '../surface-types.js';
 import { allowWorkspaceSplit } from './workspace-geometry-test-fixtures.js';
 
-const nodeId = '00000000-0000-4000-8000-000000000001';
+const executorId = '00000000-0000-4000-8000-000000000001';
 const runtimeId = '00000000-0000-4000-8000-000000000002';
 const replacementRuntimeId = '00000000-0000-4000-8000-000000000003';
 const terminal: TerminalMetadata = {
-	terminalId: `${nodeId}/${runtimeId}/00000000-0000-4000-8000-000000000004`,
+	terminalId: `${executorId}/${runtimeId}/00000000-0000-4000-8000-000000000004`,
 	title: null,
 	displaySequence: 1,
 	initialWorkingDirectory: '/project',
@@ -40,16 +40,16 @@ afterEach(() => {
 });
 
 it.each(['tab', 'new window', 'replacement', 'launcher'])(
-	'does not publish an obsolete runtime through %s creation after node reconciliation',
+	'does not publish an obsolete runtime through %s creation after executor reconciliation',
 	async (entryPoint) => {
-		const nodes = new ExecutionNodesStore();
-		nodes.applySnapshot([
+		const executors = new ExecutorsStore();
+		executors.applySnapshot([
 			{
-				id: nodeId,
+				id: executorId,
 				label: 'Worker',
 				kind: 'remote',
 				enabled: true,
-				direction: 'node-connects',
+				direction: 'executor-connects',
 				availability: 'ready',
 				instanceId: null,
 				projectBasePath: '/project',
@@ -70,7 +70,7 @@ it.each(['tab', 'new window', 'replacement', 'launcher'])(
 		const layout = createWorkspaceLayoutStore();
 		const arbiter = new WorkspaceTransitionArbiter(layout, layout);
 		const registry = new TerminalRegistry({
-			nodes,
+			executors,
 			connection: {
 				isConnected: true,
 				sendMessage: () => true,
@@ -88,7 +88,7 @@ it.each(['tab', 'new window', 'replacement', 'launcher'])(
 				suspend() {},
 				destroy() {},
 			}),
-			onSuccessfulList: (ids, node) => binding.handleSuccessfulList(ids, node),
+			onSuccessfulList: (ids, executor) => binding.handleSuccessfulList(ids, executor),
 		});
 		cleanup.push(() => registry.destroy());
 		const present = vi.fn();
@@ -99,8 +99,8 @@ it.each(['tab', 'new window', 'replacement', 'launcher'])(
 			isWindowReserved: () => false,
 			commit: (plan) => arbiter.commit(plan),
 			commitDestroyedRemoval: (_id, plan) => arbiter.commit(plan),
-			resolveCurrentProjectPath: async () => ({ nodeId, projectPath: '/project' }),
-			currentProjectNodeId: () => nodeId,
+			resolveCurrentProjectPath: async () => ({ executorId, projectPath: '/project' }),
+			currentProjectExecutorId: () => executorId,
 			isMobile: () => false,
 			cancelWorkspaceDrag() {},
 			windowOf: () => layout.defaultWindowId,
@@ -139,16 +139,16 @@ it.each(['tab', 'new window', 'replacement', 'launcher'])(
 		}
 		const placing =
 			entryPoint === 'tab'
-				? placement.create(layout.defaultWindowId, 'create', nodeId)
+				? placement.create(layout.defaultWindowId, 'create', executorId)
 				: entryPoint === 'new window'
-					? placement.createInNewWindow(layout.defaultWindowId, 'create', nodeId)
+					? placement.createInNewWindow(layout.defaultWindowId, 'create', executorId)
 					: entryPoint === 'replacement'
-						? placement.createReplacing(sourceId, 'create', nodeId)
-						: placement.activateLauncher(layout.defaultWindowId, nodeId);
+						? placement.createReplacing(sourceId, 'create', executorId)
+						: placement.activateLauncher(layout.defaultWindowId, executorId);
 		const result = expect(placing).rejects.toThrow('Terminal is no longer available');
 		await vi.waitFor(() => expect(create).toHaveBeenCalledOnce());
 		list.mockImplementationOnce(() => replacement.promise);
-		const listing = registry.list(nodeId);
+		const listing = registry.list(executorId);
 		await Promise.resolve();
 		creation.resolve({ success: true, terminal });
 		replacement.resolve(inventory(replacementRuntimeId));

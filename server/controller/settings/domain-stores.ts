@@ -1,0 +1,929 @@
+import type { IChatRegistry } from '../chats/store.js';
+import { resolveChatTitle, type DerivedChatNameInput } from '../chats/chat-title.js';
+import { createLogger } from '../../common/log.js';
+import { isRecord } from '../../../common/json.js';
+
+const logger = createLogger('settings:domain-stores');
+import {
+  DEFAULT_REMOTE_FEATURE_SETTINGS,
+  normalizeRemoteFeatureSettings,
+} from '../../../common/settings.js';
+import type {
+  PersistedChatOrderGroup,
+  ReorderChatRequest,
+  ReorderChatResponse,
+  SetChatOrderStateResponse,
+} from '../../../common/chat-order-contracts.js';
+import type { ChatOrderIdComparator } from '../../../common/chat-order-sort.js';
+import { bumpRemoteSettingsVersion } from './settings-shared.js';
+import type {
+  ChatFolder,
+  ChatOrderComparatorOverrides,
+  ChatOrderStateMutationResult,
+  ChatReorderResult,
+  FailedChatReorder,
+  ChatStartupPreferences,
+  ExecutionDefaults,
+  ProjectSettings,
+  ReorderResult,
+  SavedChatSearch,
+  SettingsStoreContext,
+  WindowReorderValidation,
+} from './types.js';
+import {
+  dedupeRecentAgentSettings,
+  withoutExecutorStartupPreferences,
+  recordRecentProjectPath,
+  sanitizeExecutionDefaults,
+  sanitizeExecutionDefaultsSettings,
+  sanitizeRecentAgentSetting,
+} from './startup-recents.js';
+import {
+  FolderAlreadyExistsError,
+  FolderNotFoundError,
+  SavedSearchAlreadyExistsError,
+  SavedSearchNotFoundError,
+} from './errors.js';
+
+const ORDER_LIST_KEYS = ['pinnedChatIds', 'normalChatIds', 'archivedChatIds'] as const;
+
+type OrderListKey = typeof ORDER_LIST_KEYS[number];
+type ChatOrderSnapshot = Record<OrderListKey, string[]>;
+
+const ORDER_GROUP_KEYS: Record<PersistedChatOrderGroup, OrderListKey> = {
+  pinned: 'pinnedChatIds',
+  normal: 'normalChatIds',
+  archived: 'archivedChatIds',
+};
+
+const ORDER_GROUP_BY_LIST_KEY: Record<OrderListKey, PersistedChatOrderGroup> = {
+  pinnedChatIds: 'pinned',
+  normalChatIds: 'normal',
+  archivedChatIds: 'archived',
+};
+
+function sameOrderedStringArray(left: string[], right: string[]): boolean {
+  if (left.length !== right.length) return false;
+  for (let i = 0; i < left.length; i += 1) {
+    if (left[i] !== right[i]) return false;
+  }
+  return true;
+}
+
+function bumpRemoteSettingsVersionForPinnedChange(settings: ProjectSettings, beforePinned: string[]): boolean {
+  const afterPinned = dedup(settings.pinnedChatIds || []);
+  const changed = !sameOrderedStringArray(beforePinned, afterPinned);
+  if (changed) {
+    bumpRemoteSettingsVersion(settings);
+  }
+  return changed;
+}
+
+function dedup(ids: unknown): string[] {
+  if (!Array.isArray(ids)) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of ids) {
+    if (typeof raw !== 'string') continue;
+    const id = raw.trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
+
+function findWindowIndex(full: string[], windowIds: string[]): number {
+  if (windowIds.length === 0 || windowIds.length > full.length) return -1;
+  for (let i = 0; i <= full.length - windowIds.length; i += 1) {
+    let ok = true;
+    for (let j = 0; j < windowIds.length; j += 1) {
+      if (full[i + j] !== windowIds[j]) { ok = false; break; }
+    }
+    if (ok) return i;
+  }
+  return -1;
+}
+
+function applyWindowReorder(full: string[], oldOrder: string[], newOrder: string[]): string[] | null {
+  const at = findWindowIndex(full, oldOrder);
+  if (at < 0) return null;
+  return [...full.slice(0, at), ...newOrder, ...full.slice(at + oldOrder.length)];
+}
+
+function validateWindowReorder(rawOldOrder: unknown, rawNewOrder: unknown): WindowReorderValidation {
+  const oldOrder = dedup(rawOldOrder);
+  const newOrder = dedup(rawNewOrder);
+
+  if (oldOrder.length === 0) {
+    return { success: false, error: 'oldOrder must not be empty', errorCode: 'ORDER_INVALID_INPUT', status: 400 };
+  }
+  if (oldOrder.length !== newOrder.length) {
+    return {
+      success: false,
+      error: 'oldOrder and newOrder must have the same length',
+      errorCode: 'ORDER_INVALID_INPUT',
+      status: 400,
+    };
+  }
+
+  const oldSet = new Set(oldOrder);
+  const newSet = new Set(newOrder);
+  if (oldOrder.length !== oldSet.size || newOrder.length !== newSet.size) {
+    return {
+      success: false,
+      error: 'oldOrder and newOrder must contain unique IDs',
+      errorCode: 'ORDER_INVALID_INPUT',
+      status: 400,
+    };
+  }
+  for (const id of newOrder) {
+    if (!oldSet.has(id)) {
+      return {
+        success: false,
+        error: 'oldOrder and newOrder must contain the same IDs',
+        errorCode: 'ORDER_INVALID_INPUT',
+        status: 400,
+      };
+    }
+  }
+
+  return { success: true, oldOrder, newOrder };
+}
+
+function orderSnapshot(settings: ProjectSettings): ChatOrderSnapshot {
+  return {
+    pinnedChatIds: [...(settings.pinnedChatIds || [])],
+    normalChatIds: [...(settings.normalChatIds || [])],
+    archivedChatIds: [...(settings.archivedChatIds || [])],
+  };
+}
+
+function restoreOrderSnapshot(settings: ProjectSettings, snapshot: ChatOrderSnapshot): void {
+  for (const key of ORDER_LIST_KEYS) settings[key] = [...snapshot[key]];
+}
+
+function sameOrderSnapshot(left: ChatOrderSnapshot, right: ChatOrderSnapshot): boolean {
+  return ORDER_LIST_KEYS.every((key) => sameOrderedStringArray(left[key], right[key]));
+}
+
+function resolveOrReconcileGroup(
+  settings: ProjectSettings,
+  chatId: string,
+): PersistedChatOrderGroup {
+  if (settings.pinnedChatIds.includes(chatId)) return 'pinned';
+  if (settings.normalChatIds.includes(chatId)) return 'normal';
+  if (settings.archivedChatIds.includes(chatId)) return 'archived';
+  settings.normalChatIds.push(chatId);
+  return 'normal';
+}
+
+function removeFromEveryOrderGroup(settings: ProjectSettings, chatId: string): void {
+  for (const key of ORDER_LIST_KEYS) {
+    settings[key] = dedup(settings[key]).filter((id) => id !== chatId);
+  }
+}
+
+function sessionNotFound(error: string): FailedChatReorder {
+  return {
+    success: false,
+    error,
+    errorCode: 'SESSION_NOT_FOUND',
+    status: 404,
+  };
+}
+
+function orderStateResponse(
+  chatId: string,
+  orderGroup: PersistedChatOrderGroup,
+  changed: boolean,
+): SetChatOrderStateResponse {
+  return {
+    success: true,
+    chatId,
+    orderGroup,
+    isPinned: orderGroup === 'pinned',
+    isArchived: orderGroup === 'archived',
+    changed,
+  };
+}
+
+export class ChatNameStore {
+  #context: SettingsStoreContext;
+
+  constructor(context: SettingsStoreContext) {
+    this.#context = context;
+  }
+
+  getChatName(chatId: string): string | null {
+    const settings = this.#context.readSettings();
+    if (!chatId) return null;
+    if (!settings.chatNames) return null;
+    return settings.chatNames[chatId] ?? null;
+  }
+
+  async #persistSessionName(
+    settings: ProjectSettings,
+    chatId: string,
+    title: string,
+  ): Promise<boolean> {
+    if (!settings.chatNames) settings.chatNames = {};
+    const trimmed = typeof title === 'string' ? title.trim() : '';
+    const existing = settings.chatNames[String(chatId)] ?? '';
+    if (existing === trimmed) return false;
+    if (!trimmed) {
+      delete settings.chatNames[String(chatId)];
+    } else {
+      settings.chatNames[String(chatId)] = trimmed;
+    }
+    await this.#context.saveAndEmitSessionName(settings, chatId, trimmed || '');
+    return true;
+  }
+
+  async setSessionName(
+    chatId: string,
+    title: string,
+  ): Promise<{ title: string; changed: boolean }> {
+    return this.#context.mutate(async () => {
+      const settings = this.#context.readSettings();
+      const normalizedTitle = title.trim();
+      const changed = await this.#persistSessionName(settings, chatId, normalizedTitle);
+      return { title: normalizedTitle, changed };
+    });
+  }
+
+  async setSessionNameIfAbsent(chatId: string, title: string): Promise<boolean> {
+    return this.#context.mutate(async () => {
+      const settings = this.#context.readSettings();
+      if (settings.chatNames?.[String(chatId)]) return false;
+      await this.#persistSessionName(settings, chatId, title);
+      return true;
+    });
+  }
+
+  async setDerivedSessionName(input: DerivedChatNameInput): Promise<string> {
+    return this.#context.mutate(async () => {
+      const settings = this.#context.readSettings();
+      const titleFor = (chatId: string) => resolveChatTitle(
+        settings.chatNames[chatId],
+        input.metadata.getChatMetadata(chatId)?.firstMessage,
+      );
+      const sourceTitle = titleFor(input.sourceChatId);
+      const occupiedTitles = new Set(input.registry.listChatIds()
+        .filter((chatId) => chatId !== input.chatId)
+        .map(titleFor));
+      let suffix = 1;
+      while (occupiedTitles.has(`${sourceTitle} (${suffix})`)) suffix += 1;
+      const title = `${sourceTitle} (${suffix})`;
+      await this.#persistSessionName(settings, input.chatId, title);
+      return title;
+    });
+  }
+
+  async removeSessionName(chatId: string): Promise<void> {
+    return this.#context.mutate(async () => {
+      const settings = this.#context.readSettings();
+      if (settings.chatNames) {
+        delete settings.chatNames[String(chatId)];
+        await this.#context.save(settings);
+      }
+    });
+  }
+}
+
+export class FeatureSettingsStore {
+  #context: SettingsStoreContext;
+
+  constructor(context: SettingsStoreContext) {
+    this.#context = context;
+  }
+
+  getFeatureSettings(): ProjectSettings['features'] {
+    const features = normalizeRemoteFeatureSettings(
+      this.#context.readSettings().features ?? DEFAULT_REMOTE_FEATURE_SETTINGS,
+    );
+    return structuredClone(features);
+  }
+
+  async setFeatureSettings(
+    patch: Partial<ProjectSettings['features']>,
+  ): Promise<ProjectSettings['features']> {
+    return this.#context.mutate(async () => {
+      const settings = this.#context.readSettings();
+      settings.features = {
+        ...normalizeRemoteFeatureSettings(settings.features),
+        ...patch,
+      };
+      bumpRemoteSettingsVersion(settings);
+      await this.#context.saveAndMaybeEmitRemote(settings, true);
+      return structuredClone(settings.features);
+    });
+  }
+}
+
+export class StartupDefaultsStore {
+  #context: SettingsStoreContext;
+
+  constructor(context: SettingsStoreContext) {
+    this.#context = context;
+  }
+
+  getRecentAgentSettings(): ProjectSettings['recentAgentSettings'] {
+    const settings = this.#context.readSettings();
+    return settings.recentAgentSettings || [];
+  }
+
+  async forgetExecutor(executorId: string): Promise<void> {
+    await this.#context.mutate(async () => {
+      const settings = this.#context.readSettings();
+      Object.assign(settings, withoutExecutorStartupPreferences(settings, executorId));
+      bumpRemoteSettingsVersion(settings);
+      await this.#context.saveAndMaybeEmitRemote(settings, true);
+    });
+  }
+
+  getRecentProjectPaths(): string[] {
+    const settings = this.#context.readSettings();
+    const paths = settings.paths || {};
+    return Array.isArray(paths.recentProjectPaths)
+      ? paths.recentProjectPaths.filter((entry): entry is string => typeof entry === 'string')
+      : [];
+  }
+
+  getExecutionDefaults(): ProjectSettings['executionDefaults'] {
+    const settings = this.#context.readSettings();
+    return sanitizeExecutionDefaultsSettings(settings.executionDefaults).defaults;
+  }
+
+  // Startup preferences are advisory: recording happens after a chat already
+  // dispatched, so a persistence failure is logged instead of failing the chat.
+  async recordChatStartup(defaults: ChatStartupPreferences | null | undefined): Promise<void> {
+    try {
+      await this.#context.mutate(async () => {
+        const settings = this.#context.readSettings();
+
+        const recent = sanitizeRecentAgentSetting(defaults);
+        if (recent) {
+          settings.recentAgentSettings = dedupeRecentAgentSettings([
+            recent,
+            ...(settings.recentAgentSettings || []),
+          ]);
+        }
+
+        settings.paths = recordRecentProjectPath(settings.paths || {}, defaults?.projectPath, defaults?.executorId);
+
+        const agentId = typeof defaults?.agentId === 'string' ? defaults.agentId.trim() : recent?.agentId ?? '';
+        if (agentId) {
+          const current = sanitizeExecutionDefaultsSettings(settings.executionDefaults).defaults;
+          // Chat starts carry a single agentSettings envelope for the starting
+          // agent rather than a prebuilt agentSettingsById map.
+          const envelope = isRecord(defaults?.agentSettings) ? defaults.agentSettings : null;
+          settings.executionDefaults = {
+            ...current,
+            byAgent: {
+              ...current.byAgent,
+              [agentId]: sanitizeExecutionDefaults({
+                permissionMode: defaults?.permissionMode,
+                thinkingMode: defaults?.thinkingMode,
+                agentSettingsById: defaults?.agentSettingsById
+                  ?? (envelope ? { [agentId]: envelope } : undefined),
+              }),
+            },
+          };
+        }
+
+        bumpRemoteSettingsVersion(settings);
+        await this.#context.saveAndMaybeEmitRemote(settings, true);
+      });
+    } catch (error: unknown) {
+      logger.warn(
+        'settings: failed to record chat startup preferences:',
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+
+  async updateExecutionDefaultsForAgent(
+    agentId: string,
+    patch: Partial<ExecutionDefaults>,
+  ): Promise<void> {
+    const trimmedAgentId = agentId.trim();
+    if (!trimmedAgentId) return;
+
+    return this.#context.mutate(async () => {
+      const settings = this.#context.readSettings();
+      const current = sanitizeExecutionDefaultsSettings(settings.executionDefaults).defaults;
+      const merged = sanitizeExecutionDefaults({
+        ...current.global,
+        ...(current.byAgent[trimmedAgentId] ?? {}),
+        ...patch,
+      });
+
+      settings.executionDefaults = {
+        ...current,
+        byAgent: {
+          ...current.byAgent,
+          [trimmedAgentId]: merged,
+        },
+      };
+      bumpRemoteSettingsVersion(settings);
+      await this.#context.saveAndMaybeEmitRemote(settings, true);
+    });
+  }
+}
+
+export class ChatOrderStore {
+  #context: SettingsStoreContext;
+
+  constructor(context: SettingsStoreContext) {
+    this.#context = context;
+  }
+
+  async reconcileWithRegistry(registry: IChatRegistry): Promise<void> {
+    return this.#context.mutate(async () => {
+      const allChatIds = new Set(registry.listChatIds());
+      const currentSettings = this.#context.readSettings();
+      const beforePinned = dedup(currentSettings.pinnedChatIds || []);
+
+      let pinned = dedup(currentSettings.pinnedChatIds || []);
+      let normal = dedup(currentSettings.normalChatIds || []);
+      let archived = dedup(currentSettings.archivedChatIds || []);
+
+      let dirty = false;
+
+      const filterUnknown = (list: string[], name: string): string[] => {
+        const unknown = list.filter((id) => !allChatIds.has(id));
+        if (unknown.length > 0) {
+          logger.info(`chat-order: removed unknown chat IDs from ${name}: ${JSON.stringify(unknown)}`);
+          dirty = true;
+          return list.filter((id) => allChatIds.has(id));
+        }
+        return list;
+      };
+
+      pinned = filterUnknown(pinned, 'pinnedChatIds');
+      normal = filterUnknown(normal, 'normalChatIds');
+      archived = filterUnknown(archived, 'archivedChatIds');
+
+      const claimed = new Set<string>();
+      const dedupeAcross = (list: string[], name: string): string[] => {
+        const dupes: string[] = [];
+        const kept: string[] = [];
+        for (const id of list) {
+          if (claimed.has(id)) {
+            dupes.push(id);
+          } else {
+            claimed.add(id);
+            kept.push(id);
+          }
+        }
+        if (dupes.length > 0) {
+          logger.info(`chat-order: removed duplicate chat IDs from ${name}: ${JSON.stringify(dupes)}`);
+          dirty = true;
+        }
+        return kept;
+      };
+
+      pinned = dedupeAcross(pinned, 'pinnedChatIds');
+      normal = dedupeAcross(normal, 'normalChatIds');
+      archived = dedupeAcross(archived, 'archivedChatIds');
+
+      const union = new Set([...pinned, ...normal, ...archived]);
+      const missing: string[] = [];
+      for (const id of allChatIds) {
+        if (!union.has(id)) missing.push(id);
+      }
+      if (missing.length > 0) {
+        missing.sort((a, b) => {
+          if (a.length !== b.length) return b.length - a.length;
+          return b.localeCompare(a);
+        });
+        normal = [...missing, ...normal];
+        logger.info(`chat-order: added missing chat IDs to normalChatIds: ${JSON.stringify(missing)}`);
+        dirty = true;
+      }
+
+      if (dirty) {
+        currentSettings.pinnedChatIds = pinned;
+        currentSettings.normalChatIds = normal;
+        currentSettings.archivedChatIds = archived;
+        bumpRemoteSettingsVersionForPinnedChange(currentSettings, beforePinned);
+        await this.#context.save(currentSettings);
+      }
+    });
+  }
+
+  getPinnedChatIds(): string[] {
+    const settings = this.#context.readSettings();
+    return settings.pinnedChatIds || [];
+  }
+
+  getArchivedChatIds(): string[] {
+    const settings = this.#context.readSettings();
+    return settings.archivedChatIds || [];
+  }
+
+  getNormalChatIds(): string[] {
+    const settings = this.#context.readSettings();
+    return settings.normalChatIds || [];
+  }
+
+  async ensureInNormal(chatId: string): Promise<void> {
+    return this.#context.mutate(async () => {
+      const settings = this.#context.readSettings();
+      const beforePinned = dedup(settings.pinnedChatIds || []);
+      for (const key of ORDER_LIST_KEYS) {
+        const ids = settings[key] || [];
+        if (ids.includes(chatId)) {
+          settings[key] = ids.filter((id) => id !== chatId);
+        }
+      }
+      settings.normalChatIds = [chatId, ...(settings.normalChatIds || [])];
+      const pinnedChanged = bumpRemoteSettingsVersionForPinnedChange(settings, beforePinned);
+      await this.#context.saveAndEmitList(settings, pinnedChanged, 'chat-added', chatId);
+    });
+  }
+
+  async insertNormalChatIdTop(chatId: string): Promise<void> {
+    return this.#context.mutate(async () => {
+      const settings = this.#context.readSettings();
+      const ids = (settings.normalChatIds || []).filter((id) => id !== chatId);
+      settings.normalChatIds = [chatId, ...ids];
+      await this.#context.save(settings);
+    });
+  }
+
+  async removeFromAllOrderLists(chatId: string): Promise<void> {
+    return this.#context.mutate(async () => {
+      const settings = this.#context.readSettings();
+      const beforePinned = dedup(settings.pinnedChatIds || []);
+      let dirty = false;
+      for (const key of ORDER_LIST_KEYS) {
+        const ids = settings[key] || [];
+        if (ids.includes(chatId)) {
+          settings[key] = ids.filter((id) => id !== chatId);
+          dirty = true;
+        }
+      }
+      if (!dirty) return;
+
+      const pinnedChanged = bumpRemoteSettingsVersionForPinnedChange(settings, beforePinned);
+      await this.#context.saveAndMaybeEmitRemote(settings, pinnedChanged);
+    });
+  }
+
+  async togglePin(chatId: string): Promise<{ isPinned: boolean }> {
+    return this.#context.mutate(async () => {
+      const s = this.#context.readSettings();
+      const pinned = s.pinnedChatIds || [];
+      const isPinned = pinned.includes(chatId);
+
+      if (isPinned) {
+        s.pinnedChatIds = pinned.filter((id) => id !== chatId);
+        s.normalChatIds = [chatId, ...(s.normalChatIds || []).filter((id) => id !== chatId)];
+      } else {
+        const position = (s.ui?.pinnedInsertPosition === 'bottom') ? 'bottom' : 'top';
+        s.normalChatIds = (s.normalChatIds || []).filter((id) => id !== chatId);
+        s.archivedChatIds = (s.archivedChatIds || []).filter((id) => id !== chatId);
+        s.pinnedChatIds = position === 'bottom' ? [...pinned, chatId] : [chatId, ...pinned];
+      }
+
+      bumpRemoteSettingsVersion(s);
+      await this.#context.saveAndEmitList(s, true, 'pinned-toggled', chatId);
+      return { isPinned: !isPinned };
+    });
+  }
+
+  async toggleArchive(chatId: string): Promise<{ isArchived: boolean }> {
+    return this.#context.mutate(async () => {
+      const s = this.#context.readSettings();
+      const beforePinned = dedup(s.pinnedChatIds || []);
+      const archived = s.archivedChatIds || [];
+      const isArchived = archived.includes(chatId);
+
+      if (isArchived) {
+        s.archivedChatIds = archived.filter((id) => id !== chatId);
+        s.normalChatIds = [chatId, ...(s.normalChatIds || []).filter((id) => id !== chatId)];
+      } else {
+        s.pinnedChatIds = (s.pinnedChatIds || []).filter((id) => id !== chatId);
+        s.normalChatIds = (s.normalChatIds || []).filter((id) => id !== chatId);
+        s.archivedChatIds = [chatId, ...archived.filter((id) => id !== chatId)];
+      }
+
+      const pinnedChanged = bumpRemoteSettingsVersionForPinnedChange(s, beforePinned);
+      await this.#context.saveAndEmitList(s, pinnedChanged, 'archive-toggled', chatId);
+      return { isArchived: !isArchived };
+    });
+  }
+
+  async setPinned(
+    chatId: string,
+    isPinned: boolean,
+    isKnownChat: (chatId: string) => boolean,
+  ): Promise<ChatOrderStateMutationResult> {
+    return this.#context.mutate(async () => {
+      if (!isKnownChat(chatId)) return sessionNotFound('Chat not found');
+      const settings = this.#context.readSettings();
+      const before = orderSnapshot(settings);
+      const beforePinned = dedup(settings.pinnedChatIds || []);
+      const currentGroup = resolveOrReconcileGroup(settings, chatId);
+      let orderGroup = currentGroup;
+      if (isPinned && currentGroup !== 'pinned') {
+        removeFromEveryOrderGroup(settings, chatId);
+        const position = settings.ui?.pinnedInsertPosition === 'bottom' ? 'bottom' : 'top';
+        settings.pinnedChatIds = position === 'bottom'
+          ? [...settings.pinnedChatIds, chatId]
+          : [chatId, ...settings.pinnedChatIds];
+        orderGroup = 'pinned';
+      } else if (!isPinned && currentGroup === 'pinned') {
+        removeFromEveryOrderGroup(settings, chatId);
+        settings.normalChatIds = [chatId, ...settings.normalChatIds];
+        orderGroup = 'normal';
+      }
+      const changed = !sameOrderSnapshot(before, orderSnapshot(settings));
+      if (changed) {
+        const pinnedChanged = bumpRemoteSettingsVersionForPinnedChange(settings, beforePinned);
+        await this.#context.saveAndEmitList(
+          settings,
+          pinnedChanged,
+          'pinned-toggled',
+          chatId,
+        );
+      }
+      return { success: true, response: orderStateResponse(chatId, orderGroup, changed) };
+    });
+  }
+
+  async setArchived(
+    chatId: string,
+    isArchived: boolean,
+    isKnownChat: (chatId: string) => boolean,
+  ): Promise<ChatOrderStateMutationResult> {
+    return this.#context.mutate(async () => {
+      if (!isKnownChat(chatId)) return sessionNotFound('Chat not found');
+      const settings = this.#context.readSettings();
+      const before = orderSnapshot(settings);
+      const beforePinned = dedup(settings.pinnedChatIds || []);
+      const currentGroup = resolveOrReconcileGroup(settings, chatId);
+      let orderGroup = currentGroup;
+      if (isArchived && currentGroup !== 'archived') {
+        removeFromEveryOrderGroup(settings, chatId);
+        settings.archivedChatIds = [chatId, ...settings.archivedChatIds];
+        orderGroup = 'archived';
+      } else if (!isArchived && currentGroup === 'archived') {
+        removeFromEveryOrderGroup(settings, chatId);
+        settings.normalChatIds = [chatId, ...settings.normalChatIds];
+        orderGroup = 'normal';
+      }
+      const changed = !sameOrderSnapshot(before, orderSnapshot(settings));
+      if (changed) {
+        const pinnedChanged = bumpRemoteSettingsVersionForPinnedChange(settings, beforePinned);
+        await this.#context.saveAndEmitList(
+          settings,
+          pinnedChanged,
+          'archive-toggled',
+          chatId,
+        );
+      }
+      return { success: true, response: orderStateResponse(chatId, orderGroup, changed) };
+    });
+  }
+
+  async reorderChat(
+    request: ReorderChatRequest,
+    isKnownChat: (chatId: string) => boolean,
+  ): Promise<ChatReorderResult> {
+    return this.#context.mutate(async () => {
+      const settings = this.#context.readSettings();
+      if (!isKnownChat(request.chatId)) return sessionNotFound('Chat not found');
+      if (
+        request.placement.kind === 'relative'
+        && !isKnownChat(request.placement.referenceChatId)
+      ) {
+        return sessionNotFound('Reference chat not found');
+      }
+
+      const before = orderSnapshot(settings);
+      const sourceGroup = resolveOrReconcileGroup(settings, request.chatId);
+      if (request.placement.kind === 'relative') {
+        const referenceGroup = resolveOrReconcileGroup(
+          settings,
+          request.placement.referenceChatId,
+        );
+        if (sourceGroup !== referenceGroup) {
+          restoreOrderSnapshot(settings, before);
+          return {
+            success: false,
+            error: 'Cross-group reorder is not allowed',
+            errorCode: 'ORDER_CROSS_GROUP',
+            status: 400,
+          };
+        }
+      }
+
+      removeFromEveryOrderGroup(settings, request.chatId);
+      const target = settings[ORDER_GROUP_KEYS[sourceGroup]];
+      if (request.placement.kind === 'boundary') {
+        const index = request.placement.boundary === 'top' ? 0 : target.length;
+        target.splice(index, 0, request.chatId);
+      } else {
+        const referenceIndex = target.indexOf(request.placement.referenceChatId);
+        if (referenceIndex < 0) {
+          throw new Error('Resolved reorder reference is absent');
+        }
+        const index = request.placement.position === 'before'
+          ? referenceIndex
+          : referenceIndex + 1;
+        target.splice(index, 0, request.chatId);
+      }
+
+      const response: ReorderChatResponse = {
+        success: true,
+        chatId: request.chatId,
+        orderGroup: sourceGroup,
+        changed: !sameOrderSnapshot(before, orderSnapshot(settings)),
+      };
+      if (!response.changed) {
+        return { success: true, response };
+      }
+
+      const remoteSettingsChanged = bumpRemoteSettingsVersionForPinnedChange(
+        settings,
+        before.pinnedChatIds,
+      );
+      await this.#context.saveAndEmitList(
+        settings,
+        remoteSettingsChanged,
+        'chats-reordered',
+        request.chatId,
+      );
+      return { success: true, response };
+    });
+  }
+
+  async sortChatOrder(
+    compareChatIds: ChatOrderIdComparator,
+    comparatorOverrides: ChatOrderComparatorOverrides = {},
+  ): Promise<{ changed: boolean }> {
+    return this.#context.mutate(async () => {
+      const settings = this.#context.readSettings();
+      const before = orderSnapshot(settings);
+      let anchorChatId: string | null = null;
+
+      for (const key of ORDER_LIST_KEYS) {
+        const compare = comparatorOverrides[ORDER_GROUP_BY_LIST_KEY[key]] ?? compareChatIds;
+        const sorted = [...before[key]].sort(compare);
+        settings[key] = sorted;
+        if (!anchorChatId && !sameOrderedStringArray(before[key], sorted)) {
+          anchorChatId = sorted[0] ?? null;
+        }
+      }
+
+      if (!anchorChatId) return { changed: false };
+
+      const remoteSettingsChanged = bumpRemoteSettingsVersionForPinnedChange(
+        settings,
+        dedup(before.pinnedChatIds),
+      );
+      await this.#context.saveAndEmitList(
+        settings,
+        remoteSettingsChanged,
+        'chats-reordered',
+        anchorChatId,
+      );
+      return { changed: true };
+    });
+  }
+}
+
+export class SavedSearchStore {
+  #context: SettingsStoreContext;
+
+  constructor(context: SettingsStoreContext) {
+    this.#context = context;
+  }
+
+  getSavedSearches(): SavedChatSearch[] {
+    const settings = this.#context.readSettings();
+    return settings.savedChatSearches || [];
+  }
+
+  async addSavedSearch(savedSearch: SavedChatSearch): Promise<SavedChatSearch> {
+    return this.#context.mutate(async () => {
+      const s = this.#context.readSettings();
+      const searches = s.savedChatSearches || [];
+      if (searches.some((entry) => entry.id === savedSearch.id)) {
+        throw new SavedSearchAlreadyExistsError(savedSearch.id);
+      }
+      s.savedChatSearches = [...searches, savedSearch];
+      await this.#context.save(s);
+      return savedSearch;
+    });
+  }
+
+  async updateSavedSearch(searchId: string, patch: Partial<SavedChatSearch>): Promise<SavedChatSearch> {
+    return this.#context.mutate(async () => {
+      const s = this.#context.readSettings();
+      const searches = s.savedChatSearches || [];
+      const idx = searches.findIndex((entry) => entry.id === searchId);
+      if (idx < 0) {
+        throw new SavedSearchNotFoundError(searchId);
+      }
+      searches[idx] = { ...searches[idx], ...patch };
+      s.savedChatSearches = searches;
+      await this.#context.save(s);
+      return searches[idx];
+    });
+  }
+
+  async removeSavedSearch(searchId: string): Promise<boolean> {
+    return this.#context.mutate(async () => {
+      const s = this.#context.readSettings();
+      const searches = s.savedChatSearches || [];
+      const idx = searches.findIndex((entry) => entry.id === searchId);
+      if (idx < 0) return false;
+      s.savedChatSearches = searches.filter((entry) => entry.id !== searchId);
+      await this.#context.save(s);
+      return true;
+    });
+  }
+
+  async reorderSavedSearches(oldOrder: unknown, newOrder: unknown): Promise<ReorderResult> {
+    const validation = validateWindowReorder(oldOrder, newOrder);
+    if (!validation.success) return validation;
+
+    return this.#context.mutate(async () => {
+      const s = this.#context.readSettings();
+      const searches = s.savedChatSearches || [];
+      const currentIds = searches.map((entry) => entry.id);
+
+      const result = applyWindowReorder(currentIds, validation.oldOrder, validation.newOrder);
+      if (!result) {
+        return {
+          success: false,
+          error: 'oldOrder is not a contiguous subsequence of the current list',
+          errorCode: 'ORDER_INVALID_INPUT',
+          status: 400,
+        };
+      }
+
+      const byId = new Map(searches.map((entry) => [entry.id, entry]));
+      s.savedChatSearches = result.map((id) => byId.get(id)).filter((entry): entry is SavedChatSearch => Boolean(entry));
+      await this.#context.save(s);
+      return { success: true };
+    });
+  }
+}
+
+export class FolderStore {
+  #context: SettingsStoreContext;
+
+  constructor(context: SettingsStoreContext) {
+    this.#context = context;
+  }
+
+  getFolders(): ChatFolder[] {
+    const settings = this.#context.readSettings();
+    return settings.chatFolders || [];
+  }
+
+  async addFolder(folder: ChatFolder): Promise<ChatFolder> {
+    return this.#context.mutate(async () => {
+      const s = this.#context.readSettings();
+      const folders = s.chatFolders || [];
+      if (folders.some((f) => f.id === folder.id)) {
+        throw new FolderAlreadyExistsError(folder.id);
+      }
+      s.chatFolders = [...folders, folder];
+      await this.#context.save(s);
+      return folder;
+    });
+  }
+
+  async updateFolder(folderId: string, patch: Partial<ChatFolder>): Promise<ChatFolder> {
+    return this.#context.mutate(async () => {
+      const s = this.#context.readSettings();
+      const folders = s.chatFolders || [];
+      const idx = folders.findIndex((f) => f.id === folderId);
+      if (idx < 0) {
+        throw new FolderNotFoundError(folderId);
+      }
+      folders[idx] = { ...folders[idx], ...patch };
+      s.chatFolders = folders;
+      await this.#context.save(s);
+      return folders[idx];
+    });
+  }
+
+  async removeFolder(folderId: string): Promise<boolean> {
+    return this.#context.mutate(async () => {
+      const s = this.#context.readSettings();
+      const folders = s.chatFolders || [];
+      const idx = folders.findIndex((f) => f.id === folderId);
+      if (idx < 0) return false;
+      s.chatFolders = folders.filter((f) => f.id !== folderId);
+      await this.#context.save(s);
+      return true;
+    });
+  }
+}

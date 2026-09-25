@@ -18,7 +18,7 @@
 		selectedPath = null,
 		onFileSelect,
 		onImageSelect,
-		nodeCrumb,
+		executorCrumb,
 		contentGate,
 		onGoToChatProject,
 		canGoToChatProject,
@@ -28,7 +28,7 @@
 		selectedPath?: string | null;
 		onFileSelect: (file: FileTreeEntry) => void;
 		onImageSelect?: (file: FileTreeEntry) => void;
-		nodeCrumb?: Snippet;
+		executorCrumb?: Snippet;
 		contentGate?: Snippet<[Snippet]>;
 		onGoToChatProject?: () => void;
 		canGoToChatProject?: boolean;
@@ -62,10 +62,10 @@
 	{@attach observeFileTreeWidth}
 >
 	<FileTreeToolbar {store} {viewMode} {onGoToChatProject} {canGoToChatProject} {isAtChatProject} />
-	{#if nodeCrumb || (store.showBreadcrumbs && store.currentBreadcrumbs.length > 0)}
+	{#if executorCrumb || (store.showBreadcrumbs && store.currentBreadcrumbs.length > 0)}
 		<FileTreeBreadcrumbs
 			breadcrumbs={store.showBreadcrumbs ? store.currentBreadcrumbs : []}
-			{nodeCrumb}
+			{executorCrumb}
 			onNavigate={(index) => void store.navigateToBreadcrumb(index)}
 		/>
 	{/if}

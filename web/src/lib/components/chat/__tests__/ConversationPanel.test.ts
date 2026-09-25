@@ -15,9 +15,9 @@ import type { ChatQueueState } from '$lib/types/chat.js';
 import type { GitQuickSummaryReady } from '$lib/api/git.js';
 import * as m from '$lib/paraglide/messages.js';
 import { UserMessage } from '$shared/chat-types';
-import { ExecutionNodesStore } from '$lib/execution-nodes/execution-nodes-store.svelte.js';
+import { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
 
-const executionNodes = new ExecutionNodesStore();
+const executors = new ExecutorsStore();
 
 const runtime = vi.hoisted(() => ({
 	autoScrollToBottom: false,
@@ -28,7 +28,7 @@ const runtime = vi.hoisted(() => ({
 }));
 
 vi.mock('$lib/context', () => ({
-	getExecutionNodes: () => executionNodes,
+	getExecutors: () => executors,
 	getAppShell: () => ({ isMobile: false }),
 	getChatSessions: () => ({ isChatProcessing: () => runtime.processing }),
 	getConversationUi: () => ({
@@ -55,7 +55,7 @@ vi.mock('$lib/context', () => ({
 		reduceMotion: runtime.reduceMotion,
 		showQuickCommitTray: true,
 	}),
-	getModelCatalog: () => ({ forNode() { return this; }, supportsSteering: () => true }),
+	getModelCatalog: () => ({ forExecutor() { return this; }, supportsSteering: () => true }),
 	getOptionalTransientLayers: () => null,
 }));
 
@@ -238,9 +238,9 @@ describe('ConversationPanel', () => {
 		expect(detach).toHaveBeenCalledOnce();
 	});
 
-	it('passes each simultaneous panel its own node and project context', async () => {
+	it('passes each simultaneous panel its own executor and project context', async () => {
 		const localChat = chat();
-		const remoteChat = { ...chat(), id: 'chat-remote', nodeId: '22222222-2222-4222-8222-222222222222', projectPath: '/remote/project' };
+		const remoteChat = { ...chat(), id: 'chat-remote', executorId: '22222222-2222-4222-8222-222222222222', projectPath: '/remote/project' };
 		const panels = [localChat, remoteChat].map((entry) => render(ConversationPanel, {
 			surfaceId: `chat-view:window-${entry.id}`,
 			chat: entry,
@@ -253,7 +253,7 @@ describe('ConversationPanel', () => {
 			const feed = panels[index].container.querySelector('[data-conversation-feed-stub]');
 			expect(JSON.parse(feed?.getAttribute('data-chat-context') ?? 'null')).toEqual({
 				chatId: entry.id,
-				nodeId: entry.nodeId ?? 'local',
+				executorId: entry.executorId ?? 'local',
 				projectPath: entry.projectPath,
 			});
 		}

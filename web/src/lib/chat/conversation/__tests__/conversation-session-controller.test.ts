@@ -24,7 +24,7 @@ import { scheduleChatPrompt } from '$lib/api/scheduled-prompts.js';
 import {
 	ConversationSessionController,
 	type SessionControllerDeps,
-} from '../conversation-session-controller.svelte';
+} from '../conversation-session-controller.svelte.ts';
 import {
 	ActiveTranscriptState,
 	type ChatLoadMessagesOptions,
@@ -630,7 +630,7 @@ function createDeps(chat = createRunningChat()) {
 			restoreDraft: vi.fn(),
 		},
 		agentState: {
-			nodeId: 'local',
+			executorId: 'local',
 			projectPath: chat.projectPath,
 			setAgentId: vi.fn(function (this: { agentId: string }, agentId: string) {
 				this.agentId = agentId;
@@ -709,10 +709,10 @@ function createDeps(chat = createRunningChat()) {
 				(agentId: string) => agentId === 'claude' || agentId === 'codex' || agentId === 'amp',
 			),
 		},
-		modelCatalogForNode(): SessionControllerDeps['modelCatalog'] {
+		modelCatalogForExecutor(): SessionControllerDeps['modelCatalog'] {
 			return this.modelCatalog;
 		},
-		canSubmitToNode: vi.fn((_nodeId: string) => true),
+		canSubmitToExecutor: vi.fn((_executorId: string) => true),
 		getExecutionDefaults: (agentId: string) => ({
 			permissionMode: 'default',
 			thinkingMode: 'none',
@@ -775,22 +775,22 @@ describe('ConversationSessionController', () => {
 	});
 
 	it('preserves saved remote settings while its catalog is empty and fences every submit route', async () => {
-		const nodeId = '22222222-2222-4222-8222-222222222222';
+		const executorId = '22222222-2222-4222-8222-222222222222';
 		const { deps } = createDeps(
-			createRunningChat({ nodeId, permissionMode: 'manualBypass', thinkingMode: 'high' }),
+			createRunningChat({ executorId, permissionMode: 'manualBypass', thinkingMode: 'high' }),
 		);
 		deps.modelCatalog.getPermissionModes.mockReturnValue([]);
 		deps.modelCatalog.getThinkingModes.mockReturnValue([]);
-		deps.canSubmitToNode.mockReturnValue(false);
+		deps.canSubmitToExecutor.mockReturnValue(false);
 		const controller = new ConversationSessionController(deps);
 		controller.handleChatSwitchIfChanged('chat-1');
-		expect(deps.agentState.nodeId).toBe(nodeId);
+		expect(deps.agentState.executorId).toBe(executorId);
 		expect(deps.agentState.permissionMode).toBe('manualBypass');
 		expect(deps.agentState.thinkingMode).toBe('high');
 		deps.composerState.inputText = 'Synthetic remote prompt';
 		expect(await controller.submitForChat('chat-1')).toBe('no-op');
 		expect(await controller.submitComposerWithSteerPreference('chat-1')).toBe('no-op');
-		expect(deps.canSubmitToNode).toHaveBeenCalledWith(nodeId);
+		expect(deps.canSubmitToExecutor).toHaveBeenCalledWith(executorId);
 		expect(mockRunChat).not.toHaveBeenCalled();
 		expect(mockSteerChat).not.toHaveBeenCalled();
 		expect(deps.composerState.clearAfterSubmit).not.toHaveBeenCalled();
@@ -1020,23 +1020,23 @@ describe('ConversationSessionController', () => {
 	it.each([true, false])(
 		'follows external ownership without reversing handoff (effect flushed: %s)',
 		async (flushEffect) => {
-			const { deps } = createDeps(createRunningChat({ nodeId: 'local', model: 'sonnet' }));
+			const { deps } = createDeps(createRunningChat({ executorId: 'local', model: 'sonnet' }));
 			const controller = new ConversationSessionController(deps);
 			controller.handleChatSwitchIfChanged('chat-1');
 			await flushPromises();
 			deps.chatState.activateChat.mockClear();
 			deps.composerState.restoreDraft.mockClear();
-			deps.composerState.inputText = 'Continue after the external node move';
+			deps.composerState.inputText = 'Continue after the external executor move';
 			const changed = {
 				...deps.sessions.selectedChat,
-				nodeId: '22222222-2222-4222-8222-222222222222',
+				executorId: '22222222-2222-4222-8222-222222222222',
 				projectPath: '/worker/project',
 				agentOwnershipEpoch: 'epoch-2',
 			};
 			deps.sessions.byId['chat-1'] = changed;
 			deps.sessions.selectedChat = changed;
 			if (flushEffect) controller.handleChatSwitchIfChanged('chat-1');
-			expect(deps.composerState.inputText).toBe('Continue after the external node move');
+			expect(deps.composerState.inputText).toBe('Continue after the external executor move');
 			expect(deps.chatState.activateChat).not.toHaveBeenCalled();
 			expect(deps.composerState.restoreDraft).not.toHaveBeenCalled();
 			mockRunChat.mockResolvedValueOnce({
@@ -1052,22 +1052,22 @@ describe('ConversationSessionController', () => {
 			expect(await controller.submitForChat('chat-1')).toBe('accepted');
 			expect(mockRunChat).toHaveBeenCalledOnce();
 			expect(mockRunChat.mock.calls[0][0]).not.toHaveProperty('handoff');
-			expect(deps.agentState.nodeId).toBe(changed.nodeId);
+			expect(deps.agentState.executorId).toBe(changed.executorId);
 			expect(deps.agentState.projectPath).toBe(changed.projectPath);
 		},
 	);
 
 	it('uses the durable remote catalog for slash commands even before activation', async () => {
-		const nodeId = '22222222-2222-4222-8222-222222222222';
-		const { deps } = createDeps(createRunningChat({ nodeId, model: 'sonnet' }));
+		const executorId = '22222222-2222-4222-8222-222222222222';
+		const { deps } = createDeps(createRunningChat({ executorId, model: 'sonnet' }));
 		const localCatalog = { ...deps.modelCatalog, supportsSteering: vi.fn(() => false) };
 		const remoteCatalog = { ...deps.modelCatalog, supportsSteering: vi.fn(() => true) };
 		const controller = new ConversationSessionController({
 			...deps,
 			get modelCatalog() {
-				return deps.agentState.nodeId === 'local' ? localCatalog : remoteCatalog;
+				return deps.agentState.executorId === 'local' ? localCatalog : remoteCatalog;
 			},
-			modelCatalogForNode: (id) => (id === 'local' ? localCatalog : remoteCatalog),
+			modelCatalogForExecutor: (id) => (id === 'local' ? localCatalog : remoteCatalog),
 		});
 		mockSteerChat.mockResolvedValue({
 			success: true,
@@ -1088,7 +1088,7 @@ describe('ConversationSessionController', () => {
 		expect(remoteCatalog.supportsSteering).toHaveBeenCalledTimes(2);
 	});
 
-	it('keeps the updated same-node folder when changing agent', async () => {
+	it('keeps the updated same-executor folder when changing agent', async () => {
 		const { deps } = createDeps(
 			createRunningChat({ projectPath: '/workspace/old', model: 'sonnet' }),
 		);
@@ -1100,7 +1100,7 @@ describe('ConversationSessionController', () => {
 		deps.sessions.byId['chat-1'] = changed;
 		controller.handleChatSwitchIfChanged('chat-1');
 		controller.handleModelSelectionChange({
-			nodeId: 'local',
+			executorId: 'local',
 			agentId: 'codex',
 			modelValue: 'gpt-5.5',
 		});
@@ -1137,7 +1137,7 @@ describe('ConversationSessionController', () => {
 			controller.handleChatSwitchIfChanged('chat-1');
 			await flushPromises();
 			controller.handleModelSelectionChange({
-				nodeId: 'local',
+				executorId: 'local',
 				agentId: 'codex',
 				modelValue: 'gpt-5.5',
 			});
@@ -1179,7 +1179,7 @@ describe('ConversationSessionController', () => {
 			if (leave === 'stay') {
 				expect(mockRunChat.mock.calls[0][0].handoff?.target).toMatchObject({
 					agentId: 'codex',
-					nodeId: 'local',
+					executorId: 'local',
 				});
 				expect(mockRunChat.mock.calls[0][0].handoff?.target).not.toHaveProperty('projectPath');
 			} else {
@@ -1191,23 +1191,23 @@ describe('ConversationSessionController', () => {
 	);
 
 	it.each([false, true])(
-		'drops an implicit location after an external node move (restored: %s)',
+		'drops an implicit location after an external executor move (restored: %s)',
 		async (restore) => {
 			const { deps } = createDeps(
-				createRunningChat({ nodeId: 'local', projectPath: '/workspace/old', model: 'sonnet' }),
+				createRunningChat({ executorId: 'local', projectPath: '/workspace/old', model: 'sonnet' }),
 			);
 			let controller = new ConversationSessionController(deps);
 			controller.handleChatSwitchIfChanged('chat-1');
 			await flushPromises();
 			controller.handleModelSelectionChange({
-				nodeId: 'local',
+				executorId: 'local',
 				agentId: 'codex',
 				modelValue: 'gpt-5.5',
 			});
 			await flushPromises();
 			const changed = {
 				...deps.sessions.selectedChat,
-				nodeId: '22222222-2222-4222-8222-222222222222',
+				executorId: '22222222-2222-4222-8222-222222222222',
 				projectPath: '/worker/project',
 				agentOwnershipEpoch: 'epoch-2',
 			};
@@ -1233,7 +1233,7 @@ describe('ConversationSessionController', () => {
 			expect(mockRunChat.mock.calls[0][0]).not.toHaveProperty('handoff');
 			expect(deps.agentState).toMatchObject({
 				agentId: 'claude',
-				nodeId: changed.nodeId,
+				executorId: changed.executorId,
 				projectPath: changed.projectPath,
 			});
 		},
@@ -2397,8 +2397,8 @@ describe('ConversationSessionController', () => {
 	it.each(['selected', 'background', 'edited'])(
 		'keeps a blocked automatic start in its %s composer without redispatch',
 		async (scenario) => {
-			const nodeId = '22222222-2222-4222-8222-222222222222';
-			const { deps } = createDeps(createRunningChat({ id: 'draft-1', status: 'draft', nodeId }));
+			const executorId = '22222222-2222-4222-8222-222222222222';
+			const { deps } = createDeps(createRunningChat({ id: 'draft-1', status: 'draft', executorId }));
 			const drafts = new ChatDraftStore();
 			const composer = new ComposerState(drafts, {
 				get activeChatId() {
@@ -2408,7 +2408,7 @@ describe('ConversationSessionController', () => {
 			const attachment = new File(['Synthetic attachment'], 'context.txt', { type: 'text/plain' });
 			deps.sessions.startupByChatId = {
 				'draft-1': createDraftStartup({
-					nodeId,
+					executorId,
 					firstMessage: 'Synthetic initial prompt',
 					initialImages: [attachment],
 				}),
@@ -2416,7 +2416,7 @@ describe('ConversationSessionController', () => {
 			const controller = new ConversationSessionController({ ...deps, composerState: composer });
 			controller.handleChatSwitch('draft-1');
 			// Invalidates between activation and the queued automatic submission.
-			deps.canSubmitToNode.mockImplementation((id) => id !== nodeId);
+			deps.canSubmitToExecutor.mockImplementation((id) => id !== executorId);
 			if (scenario === 'background') {
 				const other = createRunningChat({ id: 'other-chat' });
 				deps.sessions.byId[other.id] = other;
@@ -2450,7 +2450,7 @@ describe('ConversationSessionController', () => {
 			);
 			if (scenario === 'background') expect(composer.inputText).toBe('Unrelated draft');
 
-			deps.canSubmitToNode.mockReturnValue(true);
+			deps.canSubmitToExecutor.mockReturnValue(true);
 			deps.sessions.selectedChatId = 'draft-1';
 			deps.sessions.selectedChat = deps.sessions.byId['draft-1']!;
 			controller.handleChatSwitch('draft-1');
@@ -2471,7 +2471,7 @@ describe('ConversationSessionController', () => {
 			expect(mockStartChat).toHaveBeenCalledExactlyOnceWith(
 				expect.objectContaining({
 					chatId: 'draft-1',
-					nodeId,
+					executorId,
 					command: expectedText,
 					images: [expect.objectContaining({ name: 'context.txt' })],
 				}),
@@ -2482,8 +2482,8 @@ describe('ConversationSessionController', () => {
 	);
 
 	it('leaves latent startup text and attachments intact when a programmatic submission is unavailable', async () => {
-		const nodeId = '22222222-2222-4222-8222-222222222222';
-		const { deps } = createDeps(createRunningChat({ id: 'draft-1', status: 'draft', nodeId }));
+		const executorId = '22222222-2222-4222-8222-222222222222';
+		const { deps } = createDeps(createRunningChat({ id: 'draft-1', status: 'draft', executorId }));
 		const drafts = new ChatDraftStore();
 		const composer = new ComposerState(drafts, {
 			get activeChatId() {
@@ -2492,7 +2492,7 @@ describe('ConversationSessionController', () => {
 		});
 		const attachment = new File(['Synthetic attachment'], 'context.txt', { type: 'text/plain' });
 		const startup = createDraftStartup({
-			nodeId,
+			executorId,
 			firstMessage: 'Synthetic initial prompt',
 			initialImages: [attachment],
 		});
@@ -2503,7 +2503,7 @@ describe('ConversationSessionController', () => {
 		await flushPromises();
 		expect(mockStartChat).not.toHaveBeenCalled();
 		composer.isSubmitting = false;
-		deps.canSubmitToNode.mockReturnValue(false);
+		deps.canSubmitToExecutor.mockReturnValue(false);
 		const draftBefore = composer.draftSnapshot('draft-1');
 
 		await expect(
@@ -2649,10 +2649,10 @@ describe('ConversationSessionController', () => {
 
 	it.each(['local', '22222222-2222-4222-8222-222222222222'])(
 		'refreshes a draft path on %s after an unavailable rejection',
-		async (nodeId) => {
+		async (executorId) => {
 			const draft = createRunningChat({
 				id: 'draft-1',
-				nodeId,
+				executorId,
 				status: 'draft',
 				projectPath: '/workspace/draft-project',
 			});
@@ -2670,7 +2670,7 @@ describe('ConversationSessionController', () => {
 
 			expect(deps.onProjectUnavailable).toHaveBeenCalledWith({
 				kind: 'path',
-				nodeId,
+				executorId,
 				projectPath: '/workspace/draft-project',
 			});
 		},
@@ -2793,10 +2793,10 @@ describe('ConversationSessionController', () => {
 	);
 
 	it.each(['bypass', 'approve-edits'])(
-		'retains %s plan approval until the durable node admits input',
+		'retains %s plan approval until the durable executor admits input',
 		async (choice) => {
-			const nodeId = '22222222-2222-4222-8222-222222222222';
-			const { deps } = createDeps(createRunningChat({ nodeId, permissionMode: 'plan' }));
+			const executorId = '22222222-2222-4222-8222-222222222222';
+			const { deps } = createDeps(createRunningChat({ executorId, permissionMode: 'plan' }));
 			const request: PendingPermissionRequest = {
 				permissionOccurrenceId: 'plan-exit-1',
 				requestedTool: new ExitPlanModeToolUseMessage('', 'plan-1', 'Synthetic plan'),
@@ -2804,8 +2804,8 @@ describe('ConversationSessionController', () => {
 			deps.conversationUi.pendingPermissionRequests = [request];
 			deps.conversationUi.previousPermissionMode = 'default';
 			deps.agentState.permissionMode = 'plan';
-			deps.agentState.nodeId = 'local';
-			deps.canSubmitToNode.mockImplementation((id) => id === 'local');
+			deps.agentState.executorId = 'local';
+			deps.canSubmitToExecutor.mockImplementation((id) => id === 'local');
 			const controller = new ConversationSessionController(deps);
 
 			controller.handleExitPlanModeForChat(
@@ -2816,7 +2816,7 @@ describe('ConversationSessionController', () => {
 			);
 			await flushPromises();
 
-			expect(deps.canSubmitToNode).toHaveBeenCalledWith(nodeId);
+			expect(deps.canSubmitToExecutor).toHaveBeenCalledWith(executorId);
 			expect(mockRunChat).not.toHaveBeenCalled();
 			expect(deps.conversationUi.pendingPermissionRequests).toEqual([request]);
 			expect(deps.conversationUi.previousPermissionMode).toBe('default');
@@ -2825,10 +2825,10 @@ describe('ConversationSessionController', () => {
 			expect(deps.chatState.appendLocalNoticeForChat).toHaveBeenCalledWith(
 				'chat-1',
 				'error',
-				expect.stringContaining('Execution node or model catalog is unavailable'),
+				expect.stringContaining('Executor or model catalog is unavailable'),
 			);
 
-			deps.canSubmitToNode.mockReturnValue(true);
+			deps.canSubmitToExecutor.mockReturnValue(true);
 			mockRunChat.mockResolvedValueOnce({
 				success: true,
 				commandType: 'agent-run',
@@ -3084,11 +3084,11 @@ describe('ConversationSessionController', () => {
 
 	it.each(['local', '22222222-2222-4222-8222-222222222222'])(
 		'settles an unavailable rejection before refreshing the captured %s project',
-		async (nodeId) => {
+		async (executorId) => {
 			const pending = deferred<Awaited<ReturnType<typeof runChat>>>();
 			const refresh = deferred<void>();
 			mockRunChat.mockReturnValueOnce(pending.promise);
-			const { deps } = createDeps(createRunningChat({ nodeId }));
+			const { deps } = createDeps(createRunningChat({ executorId }));
 			deps.onProjectUnavailable.mockReturnValueOnce(refresh.promise);
 			deps.agentState.model = 'opus';
 			deps.composerState.inputText = 'check this project';
@@ -3104,7 +3104,7 @@ describe('ConversationSessionController', () => {
 			expect(deps.onProjectUnavailable).toHaveBeenCalledOnce();
 			expect(deps.onProjectUnavailable).toHaveBeenCalledWith({
 				kind: 'chat',
-				nodeId,
+				executorId,
 				chatId: 'chat-1',
 				projectPath: '/workspace/project',
 			});

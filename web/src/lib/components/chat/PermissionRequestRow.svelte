@@ -36,7 +36,7 @@
 		getAppShell,
 		getChatSessions,
 		getFileSessions,
-		getExecutionNodes,
+		getExecutors,
 		getWorkspaceCoordinator,
 	} from '$lib/context';
 	import type { PermissionQuestionDraft } from './ConversationFeedItemState.svelte.js';
@@ -74,7 +74,7 @@
 
 	const sessions = getChatSessions();
 	const fileSessions = getFileSessions();
-	const nodes = getExecutionNodes();
+	const executors = getExecutors();
 	const appShell = getAppShell();
 	const workspace = getWorkspaceCoordinator();
 
@@ -84,18 +84,18 @@
 		if (!selected?.id) return null;
 		return {
 			chatId: selected.id,
-			nodeId: selected.nodeId,
+			executorId: selected.executorId,
 			projectPath: selected.projectPath ?? null,
 		};
 	});
-	const nodeId = $derived(
-		activeChatContext?.nodeId ??
-			(activeChatContext ? sessions.byId[activeChatContext.chatId]?.nodeId : null) ??
+	const executorId = $derived(
+		activeChatContext?.executorId ??
+			(activeChatContext ? sessions.byId[activeChatContext.chatId]?.executorId : null) ??
 			'local',
 	);
-	const filesAvailable = $derived(nodes.filesAvailable(nodeId));
+	const filesAvailable = $derived(executors.filesAvailable(executorId));
 	const projectBasePath = $derived(
-		nodeId === 'local' ? appShell.projectBasePath : (nodes.get(nodeId)?.projectBasePath ?? ''),
+		executorId === 'local' ? appShell.projectBasePath : (executors.get(executorId)?.projectBasePath ?? ''),
 	);
 	const resolveChatReference: ResolveChatReference = (chatId) =>
 		resolveChatReferenceTarget(chatId, activeChatContext?.chatId, sessions.byId[chatId]);
@@ -134,7 +134,7 @@
 		});
 		if (!resolved) return;
 		void fileSessions.open({
-			nodeId,
+			executorId,
 			fileRootPath: resolved.fileRootPath,
 			relativePath: resolved.relativePath,
 			mode: 'auto',

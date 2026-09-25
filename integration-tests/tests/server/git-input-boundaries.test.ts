@@ -5,12 +5,12 @@ import type { ExecutionGitResults } from '../../../common/git-execution.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { initializeFixtureRepository, runFixtureGit } from '../../support/git-fixture.js';
 
-for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote-node-dials'] as const) {
+for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote-executor-dials'] as const) {
   test(`large selections and missing projects preserve Git HTTP contracts (${executionBackend})`, async () => {
     await withIntegrationFixture(`git-input-${executionBackend}`, async fixture => {
       const { client } = fixture;
       const project = fixture.executionDirs.project;
-      const target = { nodeId: client.nodeId, project };
+      const target = { executorId: client.executorId, project };
       await initializeFixtureRepository(project);
       const files = Array.from({ length: 6000 }, (_, index) => `file-${index.toString().padStart(6, '0')}-${'x'.repeat(29)}.txt`);
       for (let offset = 0; offset < files.length; offset += 32) {

@@ -184,7 +184,7 @@ describe("CodeMirror theme contrast", () => {
       ),
     ]);
     const assetDirectory = fileURLToPath(
-      new URL("../../../web/build/_app/immutable/assets/", import.meta.url),
+      new URL("../../../web/build/_app/immutable/assets", import.meta.url),
     );
     const cssFiles = (await readdir(assetDirectory)).filter((file) =>
       file.endsWith(".css"),

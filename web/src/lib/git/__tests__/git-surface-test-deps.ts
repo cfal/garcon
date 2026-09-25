@@ -20,11 +20,11 @@ export function createGitSurfaceTestDeps(
 	return {
 		createGitBranchSelector: () => new GitBranchSelectorState(),
 		gitMutations: new GitMutationCoordinator({
-			onChanged: (nodeId) => {
-				invalidations.markChanged(nodeId);
+			onChanged: (executorId) => {
+				invalidations.markChanged(executorId);
 			},
 		}),
-		invalidationVersion: (nodeId) => invalidations.version(nodeId),
+		invalidationVersion: (executorId) => invalidations.version(executorId),
 		reviewDisplay: new GitReviewDisplaySettingsStore(),
 		comparisonPreferences,
 	};

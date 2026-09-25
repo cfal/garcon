@@ -14,7 +14,7 @@ const stubDiscovery = async () => ({
   baseUrl: 'http://127.0.0.1:8080',
   instanceId: 'instance',
   endpointInstanceId: 'instance',
-  defaultNodeId: 'local',
+  defaultExecutorId: 'local',
   workspaceName: 'default',
   localCapability: 'cap',
   workspaceDir: '/tmp/ws',
@@ -341,7 +341,7 @@ describe('main', () => {
     });
 
     expect(exitCode).toBe(0);
-    expect(submitted).toEqual({ nodeId: 'local', nativeSessionId: 'session-123', agent: 'codex' });
+    expect(submitted).toEqual({ executorId: 'local', nativeSessionId: 'session-123', agent: 'codex' });
     expect(capture.stdout.join('')).toBe(`${CHAT_ID}\n`);
     expect(capture.stderr.join('')).toBe('');
   });

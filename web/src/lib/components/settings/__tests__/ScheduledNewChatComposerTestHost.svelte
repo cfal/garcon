@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { setExecutionNodesTestContext } from '$lib/execution-nodes/__tests__/execution-nodes-test-context';
+	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
 	import type { NewChatFormState } from '$lib/chat/new-chat/new-chat-form-state.svelte.js';
 	import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
 	import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
@@ -42,7 +42,7 @@
 	untrack(() => onAppShell?.(appShell));
 	setAppShell(appShell);
 	setPreambles(preambles);
-	setExecutionNodesTestContext();
+	setExecutorsTestContext();
 </script>
 
 <ScheduledNewChatComposer

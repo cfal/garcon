@@ -27,7 +27,7 @@ import type { TicketsInvalidationHub } from '$lib/tickets/catalog/tickets-invali
 import type { ChatBoardInvalidationHub } from '$lib/chat-board/catalog/chat-board-invalidation-hub.js';
 import { chatBoardApi } from '$lib/api/chat-boards.js';
 import { saveText } from '$lib/api/files.js';
-import { effectiveNodeId } from '$shared/execution-nodes';
+import { effectiveExecutorId } from '$shared/executors';
 import { TerminalRegistry } from '$lib/terminal/sessions/terminal-registry.svelte.js';
 import type { PrimaryWsConnectionPort } from '$lib/ws/connection.svelte.js';
 import { createWorkspaceLayoutStore } from './workspace-layout.svelte.js';
@@ -92,7 +92,7 @@ export function resolveConfiguredFilePlacement(
 }
 
 export interface WorkspaceRootDependencies {
-	executionNodes?: import('$lib/execution-nodes/execution-nodes-store.svelte.js').ExecutionNodesStore;
+	executors?: import('$lib/executors/executors-store.svelte.js').ExecutorsStore;
 	appShell: AppShellStore;
 	chatSessions: ChatSessionsStore;
 	ghCapability: GhCapabilityStore;
@@ -171,29 +171,29 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 				}
 			});
 		},
-		deps.executionNodes,
+		deps.executors,
 	);
 	const stopProjectPathBinding = deps.chatSessions.onProjectPathChanged(
-		(chatId, projectPath, nodeId) => {
+		(chatId, projectPath, executorId) => {
 			if (projectPath === null) projectResolution.removeChatTargets(chatId);
-			else projectResolution.markObsoleteChatTargets(chatId, projectPath, nodeId);
+			else projectResolution.markObsoleteChatTargets(chatId, projectPath, executorId);
 		},
 	);
 	for (const chat of deps.chatSessions.orderedChats) {
 		if (chat.status !== 'draft') {
-			projectResolution.markObsoleteChatTargets(chat.id, chat.projectPath, chat.nodeId);
+			projectResolution.markObsoleteChatTargets(chat.id, chat.projectPath, chat.executorId);
 		}
 	}
 	const context = createWorkspaceContextStore(
 		deps.chatSessions,
 		deps.modelCatalog,
 		projectResolution,
-		deps.executionNodes,
+		deps.executors,
 	);
 	let placement: WorkspaceCoordinator | null = null;
 	let terminalLayoutBinding: TerminalLayoutBinding | null = null;
 	const terminals = new TerminalRegistry({
-		nodes: deps.executionNodes,
+		executors: deps.executors,
 		connection: deps.ws,
 		getClientId: () => {
 			if (!deps.terminalIdentity.clientId) {
@@ -208,10 +208,10 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 				deps.notifications.error(m.terminal_session_cleanup_failed());
 			});
 		},
-		onSuccessfulList: (terminalIds, nodeId) => {
+		onSuccessfulList: (terminalIds, executorId) => {
 			terminalLayoutBinding?.handleSuccessfulList(
-				terminalIds.filter((id) => terminals.nodeIdFor(id) === nodeId),
-				nodeId,
+				terminalIds.filter((id) => terminals.executorIdFor(id) === executorId),
+				executorId,
 			);
 		},
 	});
@@ -268,19 +268,19 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 	const surfaceFrames = new SurfaceFrameRegistry();
 	const gitQuickSummary = new GitQuickSummaryStore();
 	const gitMutations = new GitMutationCoordinator({
-		onChanged: async (nodeId, _effectiveProjectKey, projectPath) => {
-			gitProjectInvalidations.markChanged(nodeId);
-			await gitQuickSummary.refreshFor({ nodeId, projectPath }, 'invalidation');
+		onChanged: async (executorId, _effectiveProjectKey, projectPath) => {
+			gitProjectInvalidations.markChanged(executorId);
+			await gitQuickSummary.refreshFor({ executorId, projectPath }, 'invalidation');
 		},
-		onMutationError: (error, nodeId, projectPath) => {
+		onMutationError: (error, executorId, projectPath) => {
 			deps.notifications.error(
-				`${deps.executionNodes?.label(nodeId) ?? nodeId}: ${projectPath}: ${error instanceof Error ? error.message : String(error)}`,
+				`${deps.executors?.label(executorId) ?? executorId}: ${projectPath}: ${error instanceof Error ? error.message : String(error)}`,
 			);
 		},
-		onInvalidationError: (error, nodeId, _effectiveProjectKey, projectPath) => {
+		onInvalidationError: (error, executorId, _effectiveProjectKey, projectPath) => {
 			deps.notifications.error(
 				m.git_related_refresh_failed({
-					projectPath: `${deps.executionNodes?.label(nodeId) ?? nodeId}: ${projectPath}`,
+					projectPath: `${deps.executors?.label(executorId) ?? executorId}: ${projectPath}`,
 					detail: error instanceof Error ? error.message : String(error),
 				}),
 			);
@@ -289,9 +289,9 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 	const createGitBranchSelector = () =>
 		new GitBranchSelectorState({
 			openMainInert: (commitOpen) => transientLayers.open('main-inert', commitOpen),
-			runMutation: (surfaceId, nodeId, projectPath, effectiveProjectKey, execute) =>
+			runMutation: (surfaceId, executorId, projectPath, effectiveProjectKey, execute) =>
 				gitMutations.run({
-					nodeId,
+					executorId,
 					surfaceId,
 					effectiveProjectKey,
 					projectPath,
@@ -303,14 +303,14 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 	const comparisonPreferences = new LocalGitComparisonPreferences();
 	const projectSelection = {
 		projectResolution,
-		nodes: deps.executionNodes,
-		projectBasePath: (nodeId: string) =>
-			deps.executionNodes?.get(nodeId)?.projectBasePath ??
-			(nodeId === 'local' ? deps.localProjectBasePath() : null),
+		executors: deps.executors,
+		projectBasePath: (executorId: string) =>
+			deps.executors?.get(executorId)?.projectBasePath ??
+			(executorId === 'local' ? deps.localProjectBasePath() : null),
 	};
 	const singletonSurfaces = new SingletonSurfaceRegistry({
 		projectSelection,
-		executionNodes: deps.executionNodes,
+		executors: deps.executors,
 		createTickets: () => new TicketsController({ invalidations: deps.ticketsInvalidations }),
 		createChatBoard: () =>
 			new ChatBoardController({
@@ -348,7 +348,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 				projectSelection,
 				createGitBranchSelector,
 				gitMutations,
-				invalidationVersion: (nodeId) => gitProjectInvalidations.version(nodeId),
+				invalidationVersion: (executorId) => gitProjectInvalidations.version(executorId),
 				reviewDisplay: gitReviewDisplay,
 				runMutation: (request) =>
 					gitMutations.run({
@@ -364,7 +364,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 			}),
 		createGitBranchSelector,
 		gitMutations,
-		invalidationVersion: (nodeId) => gitProjectInvalidations.version(nodeId),
+		invalidationVersion: (executorId) => gitProjectInvalidations.version(executorId),
 		reviewDisplay: gitReviewDisplay,
 		comparisonPreferences,
 	});
@@ -382,15 +382,15 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 			try {
 				return await saveText(request, options);
 			} finally {
-				const nodeId = effectiveNodeId(request.nodeId);
-				gitProjectInvalidations.markChanged(nodeId);
+				const executorId = effectiveExecutorId(request.executorId);
+				gitProjectInvalidations.markChanged(executorId);
 				for (const project of gitQuickSummary.visibleProjects) {
-					if (project.nodeId === nodeId)
+					if (project.executorId === executorId)
 						gitQuickSummary.scheduleRefreshFor(project, 'invalidation', 100);
 				}
 			}
 		},
-		isNodeAvailable: (nodeId) => deps.executionNodes?.filesAvailable(nodeId) ?? nodeId === 'local',
+		isExecutorAvailable: (executorId) => deps.executors?.filesAvailable(executorId) ?? executorId === 'local',
 		getIsMobile: () => deps.appShell.isMobile,
 		getDefaultPlacement: (mode, origin) =>
 			resolveConfiguredFilePlacement(
@@ -502,11 +502,11 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		commands,
 		localSettings: deps.localSettings,
 	});
-	const stopGitNodeBinding = deps.executionNodes?.onChanged(() => {
-		const ids = new Set(deps.executionNodes!.nodes.map((node) => node.id));
-		gitProjectInvalidations.pruneNodes(ids);
-		gitQuickSummary.pruneNodes(ids);
-		singletonSurfaces.pruneGitNodes(ids);
+	const stopGitExecutorBinding = deps.executors?.onChanged(() => {
+		const ids = new Set(deps.executors!.executors.map((executor) => executor.id));
+		gitProjectInvalidations.pruneExecutors(ids);
+		gitQuickSummary.pruneExecutors(ids);
+		singletonSurfaces.pruneGitExecutors(ids);
 	});
 
 	return {
@@ -531,7 +531,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		shortcuts,
 		commands,
 		destroy() {
-			stopGitNodeBinding?.();
+			stopGitExecutorBinding?.();
 			windowDnd.endDrag();
 			unregisterWorkspaceInteraction();
 			domainBindings.destroy();

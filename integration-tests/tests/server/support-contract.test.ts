@@ -87,7 +87,7 @@ function anthropicStreamText(body: string): string {
 }
 
 describe('integration support contracts', () => {
-  test('adds only the fixture Node shim to scripted Pi system paths', async () => {
+  test('adds only the fixture Executor shim to scripted Pi system paths', async () => {
     const root = await mkdtemp(join(tmpdir(), 'garcon-scripted-pi-path-'));
     const environment = startScriptedPiTestEnvironment();
     const directories = {
@@ -106,8 +106,8 @@ describe('integration support contracts', () => {
 
       const pathEntries = environment.serverEnvironment.PATH.split(':');
       const fixtureBin = join(directories.home, '.garcon-test-bin');
-      const runnerNode = Bun.which('node');
-      expect(runnerNode).not.toBeNull();
+      const runnerExecutor = Bun.which('executor');
+      expect(runnerExecutor).not.toBeNull();
       expect(pathEntries).toEqual([
         fixtureBin,
         '/usr/local/sbin',
@@ -117,7 +117,7 @@ describe('integration support contracts', () => {
         '/sbin',
         '/bin',
       ]);
-      expect(await realpath(join(fixtureBin, 'node'))).toBe(await realpath(runnerNode!));
+      expect(await realpath(join(fixtureBin, 'executor'))).toBe(await realpath(runnerExecutor!));
     } finally {
       environment.dispose();
       await rm(root, { recursive: true, force: true });

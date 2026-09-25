@@ -5,22 +5,22 @@ import { ProjectPathCompletionController } from '../project-path-completion.js';
 vi.mock('$lib/api/files.js', () => ({ browseDirectory: vi.fn() }));
 
 function target() {
-	return { nodeId: 'local', filesAvailable: true, projectPath: '/repo/s', showBrowser: false };
+	return { executorId: 'local', filesAvailable: true, projectPath: '/repo/s', showBrowser: false };
 }
 
 describe('ProjectPathCompletionController', () => {
 	beforeEach(() => vi.mocked(browseDirectory).mockReset());
 
-	it('completes and cycles directory matches from the selected node', async () => {
+	it('completes and cycles directory matches from the selected executor', async () => {
 		const form = target();
-		form.nodeId = '22222222-2222-4222-8222-222222222222';
+		form.executorId = '22222222-2222-4222-8222-222222222222';
 		vi.mocked(browseDirectory).mockResolvedValue([
 			{ name: 'src', path: '/repo/src', type: 'directory' },
 			{ name: 'scripts', path: '/repo/scripts', type: 'directory' },
 		]);
 		const completion = new ProjectPathCompletionController(form);
 		await completion.complete();
-		expect(browseDirectory).toHaveBeenCalledWith('/repo', undefined, form.nodeId);
+		expect(browseDirectory).toHaveBeenCalledWith('/repo', undefined, form.executorId);
 		expect(form.showBrowser).toBe(true);
 		await completion.complete();
 		expect(form.projectPath).toBe('/repo/scripts');
@@ -35,7 +35,7 @@ describe('ProjectPathCompletionController', () => {
 		expect(form.projectPath).toBe('/repo/src/');
 	});
 
-	it('invalidates a pending completion even when the node and path return to their original values', async () => {
+	it('invalidates a pending completion even when the executor and path return to their original values', async () => {
 		const form = target();
 		const pending = Promise.withResolvers<Awaited<ReturnType<typeof browseDirectory>>>();
 		vi.mocked(browseDirectory).mockReturnValueOnce(pending.promise);
@@ -48,7 +48,7 @@ describe('ProjectPathCompletionController', () => {
 		expect(form.showBrowser).toBe(false);
 	});
 
-	it('leaves unavailable nodes untouched without filesystem requests', async () => {
+	it('leaves unavailable executors untouched without filesystem requests', async () => {
 		const form = target();
 		form.filesAvailable = false;
 		await new ProjectPathCompletionController(form).complete();
@@ -56,7 +56,7 @@ describe('ProjectPathCompletionController', () => {
 		expect(form.projectPath).toBe('/repo/s');
 	});
 
-	it('drops old matches and pending replies after a same-node replacement', async () => {
+	it('drops old matches and pending replies after a same-executor replacement', async () => {
 		const form = { ...target(), pathContextKey: 'first-instance' };
 		const old = Promise.withResolvers<Awaited<ReturnType<typeof browseDirectory>>>();
 		vi.mocked(browseDirectory).mockReturnValueOnce(old.promise).mockResolvedValueOnce([

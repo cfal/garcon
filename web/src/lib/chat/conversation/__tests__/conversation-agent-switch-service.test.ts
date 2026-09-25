@@ -9,7 +9,7 @@ import {
 	ConversationExecutionDraftState,
 	type ConversationExecutionSelection,
 } from '../conversation-execution-draft-state.svelte.js';
-import type { NodeHandoffModel, NodeHandoffDestination } from '../node-handoff-project.svelte.js';
+import type { ExecutorHandoffModel, ExecutorHandoffDestination } from '../executor-handoff-project.svelte.js';
 
 function createChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord {
 	return {
@@ -67,7 +67,7 @@ function createDeps(chat = createChat()) {
 		return claudeSelection();
 	});
 	const agentState = {
-		nodeId: 'local',
+		executorId: 'local',
 		projectPath: chat.projectPath,
 		agentId: 'claude',
 		model: 'sonnet',
@@ -120,16 +120,16 @@ function createDeps(chat = createChat()) {
 				return handoffPending;
 			},
 		},
-		modelCatalogForNode(): ConversationAgentSwitchDeps['modelCatalog'] {
+		modelCatalogForExecutor(): ConversationAgentSwitchDeps['modelCatalog'] {
 			return this.modelCatalog;
 		},
 		chooseDestination: vi.fn(
 			async (
 				_chatId: string,
-				_nodeId: string,
+				_executorId: string,
 				projectPath: string,
-				selection: NodeHandoffModel,
-			): Promise<NodeHandoffDestination | null> => ({ projectPath, selection }),
+				selection: ExecutorHandoffModel,
+			): Promise<ExecutorHandoffDestination | null> => ({ projectPath, selection }),
 		),
 		getExecutionDefaults: vi.fn((agentId: string) => ({
 			permissionMode: 'bypassPermissions' as const,
@@ -143,10 +143,10 @@ function createDeps(chat = createChat()) {
 describe('ConversationAgentSwitchService', () => {
 	it.each(['local', '11111111-1111-4111-8111-111111111111'])(
 		'restores the durable selection when the dialog returns its current owner (%s)',
-		async (nodeId) => {
-			const { deps, agentState } = createDeps(createChat({ nodeId }));
-			agentState.nodeId = nodeId;
-			const durable = { ...claudeSelection(), nodeId, projectPath: '/workspace/project' };
+		async (executorId) => {
+			const { deps, agentState } = createDeps(createChat({ executorId }));
+			agentState.executorId = executorId;
+			const durable = { ...claudeSelection(), executorId, projectPath: '/workspace/project' };
 			const executionDraft = new ConversationExecutionDraftState({
 				activeChatId: 'chat-1',
 				durableSelection: durable,
@@ -155,7 +155,7 @@ describe('ConversationAgentSwitchService', () => {
 			const service = new ConversationAgentSwitchService({ ...deps, executionDraft });
 			try {
 				await service.switchAgent('chat-1', {
-					nodeId: '22222222-2222-4222-8222-222222222222',
+					executorId: '22222222-2222-4222-8222-222222222222',
 					agentId: 'codex',
 					modelValue: 'gpt-5.5',
 				});
@@ -164,7 +164,7 @@ describe('ConversationAgentSwitchService', () => {
 					projectPath: '/workspace/not-applied',
 					selection: { ...claudeSelection(), model: 'opus' },
 				});
-				await service.switchAgent('chat-1', { nodeId, agentId: 'codex', modelValue: 'gpt-5.5' });
+				await service.switchAgent('chat-1', { executorId, agentId: 'codex', modelValue: 'gpt-5.5' });
 				expect(deps.chooseDestination).toHaveBeenCalledTimes(2);
 				expect(executionDraft.handoffRequest('epoch-1')).toBeNull();
 				expect(executionDraft.selection).toEqual(durable);
@@ -175,11 +175,11 @@ describe('ConversationAgentSwitchService', () => {
 		},
 	);
 	it.each(['local', '11111111-1111-4111-8111-111111111111'])(
-		'keeps the confirmed folder when returning a pending remote selection to the chat node (%s)',
-		async (nodeId) => {
-			const { deps, agentState } = createDeps(createChat({ nodeId }));
-			agentState.nodeId = nodeId;
-			const durable = { ...claudeSelection(), nodeId, projectPath: '/workspace/project' };
+		'keeps the confirmed folder when returning a pending remote selection to the chat executor (%s)',
+		async (executorId) => {
+			const { deps, agentState } = createDeps(createChat({ executorId }));
+			agentState.executorId = executorId;
+			const durable = { ...claudeSelection(), executorId, projectPath: '/workspace/project' };
 			const executionDraft = new ConversationExecutionDraftState({
 				activeChatId: 'chat-1',
 				durableSelection: durable,
@@ -196,7 +196,7 @@ describe('ConversationAgentSwitchService', () => {
 			});
 			try {
 				await service.switchAgent('chat-1', {
-					nodeId: '22222222-2222-4222-8222-222222222222',
+					executorId: '22222222-2222-4222-8222-222222222222',
 					agentId: 'codex',
 					modelValue: 'gpt-5.5',
 				});
@@ -209,22 +209,22 @@ describe('ConversationAgentSwitchService', () => {
 						model: 'gpt-5.5',
 					},
 				});
-				await service.switchAgent('chat-1', { nodeId, agentId: 'codex', modelValue: 'gpt-5.5' });
+				await service.switchAgent('chat-1', { executorId, agentId: 'codex', modelValue: 'gpt-5.5' });
 				expect(deps.chooseDestination).toHaveBeenCalledTimes(2);
 				expect(agentState).toMatchObject({
-					nodeId,
+					executorId,
 					agentId: 'codex',
 					projectPath: '/workspace/chosen',
 				});
 				const request = executionDraft.handoffRequest('epoch-1');
 				expect(request?.target).toMatchObject({
-					nodeId,
+					executorId,
 					agentId: 'codex',
 					projectPath: '/workspace/chosen',
 				});
 				executionDraft.patchSelection({ model: 'gpt-5.4' });
 				expect(executionDraft.handoffRequest('epoch-1')?.target).toMatchObject({
-					nodeId,
+					executorId,
 					agentId: 'codex',
 					model: 'gpt-5.4',
 					projectPath: '/workspace/chosen',
@@ -237,19 +237,19 @@ describe('ConversationAgentSwitchService', () => {
 	it('stages a complete destination only after confirmation and preserves ownership on cancel', async () => {
 		const { deps, agentState, replaceSelection, patchChat } = createDeps();
 		const service = new ConversationAgentSwitchService(deps);
-		const held = Promise.withResolvers<NodeHandoffDestination | null>();
+		const held = Promise.withResolvers<ExecutorHandoffDestination | null>();
 		deps.chooseDestination.mockReturnValueOnce(held.promise);
 		const next = {
-			nodeId: '22222222-2222-4222-8222-222222222222',
+			executorId: '22222222-2222-4222-8222-222222222222',
 			agentId: 'claude',
 			modelValue: 'sonnet',
 		};
 		const pending = service.switchAgent('chat-1', next);
-		expect(agentState.nodeId).toBe('local');
+		expect(agentState.executorId).toBe('local');
 		expect(replaceSelection).not.toHaveBeenCalled();
 		held.resolve(null);
 		await pending;
-		expect(agentState.nodeId).toBe('local');
+		expect(agentState.executorId).toBe('local');
 		deps.chooseDestination.mockResolvedValueOnce({
 			projectPath: '/worker',
 			selection: { ...claudeSelection(), agentId: 'codex', model: 'gpt-5.5' },
@@ -257,7 +257,7 @@ describe('ConversationAgentSwitchService', () => {
 		await service.switchAgent('chat-1', next);
 		expect(replaceSelection).toHaveBeenCalledWith(
 			expect.objectContaining({
-				nodeId: next.nodeId,
+				executorId: next.executorId,
 				projectPath: '/worker',
 				agentId: 'codex',
 				model: 'gpt-5.5',
@@ -265,14 +265,14 @@ describe('ConversationAgentSwitchService', () => {
 		);
 		expect(patchChat).not.toHaveBeenCalled();
 	});
-	it('preserves a cold-loaded endpoint identity when proposing another node', async () => {
+	it('preserves a cold-loaded endpoint identity when proposing another executor', async () => {
 		const { deps, agentState } = createDeps();
 		agentState.modelEndpointId = 'saved-endpoint';
 		agentState.apiProviderId = 'saved-provider';
 		agentState.modelProtocol = 'openai-compatible';
 		deps.chooseDestination.mockResolvedValueOnce(null);
 		await new ConversationAgentSwitchService(deps).switchAgent('chat-1', {
-			nodeId: '22222222-2222-4222-8222-222222222222',
+			executorId: '22222222-2222-4222-8222-222222222222',
 			agentId: 'claude',
 			modelValue: 'sonnet',
 		});
@@ -293,7 +293,7 @@ describe('ConversationAgentSwitchService', () => {
 	it('keeps the confirmed directory when changing agent on a staged destination', async () => {
 		const { deps, replaceSelection } = createDeps();
 		const service = new ConversationAgentSwitchService(deps);
-		const nodeId = '22222222-2222-4222-8222-222222222222';
+		const executorId = '22222222-2222-4222-8222-222222222222';
 		deps.chooseDestination.mockResolvedValueOnce({
 			projectPath: '/worker/project',
 			selection: {
@@ -302,12 +302,12 @@ describe('ConversationAgentSwitchService', () => {
 				model: 'sonnet',
 			},
 		});
-		await service.switchAgent('chat-1', { nodeId, agentId: 'claude', modelValue: 'sonnet' });
-		await service.switchAgent('chat-1', { nodeId, agentId: 'codex', modelValue: 'gpt-5.5' });
+		await service.switchAgent('chat-1', { executorId, agentId: 'claude', modelValue: 'sonnet' });
+		await service.switchAgent('chat-1', { executorId, agentId: 'codex', modelValue: 'gpt-5.5' });
 		expect(deps.chooseDestination).toHaveBeenCalledOnce();
 		expect(replaceSelection).toHaveBeenLastCalledWith(
 			expect.objectContaining({
-				nodeId,
+				executorId,
 				projectPath: '/worker/project',
 				agentId: 'codex',
 				model: 'gpt-5.5',
@@ -319,7 +319,7 @@ describe('ConversationAgentSwitchService', () => {
 		const { deps, replaceSelection } = createDeps();
 		deps.sessions.selectedChat = { ...deps.sessions.selectedChat, projectPath: '/workspace/new' };
 		await new ConversationAgentSwitchService(deps).switchAgent('chat-1', {
-			nodeId: 'local',
+			executorId: 'local',
 			agentId: 'codex',
 			modelValue: 'gpt-5.5',
 		});
@@ -338,7 +338,7 @@ describe('ConversationAgentSwitchService', () => {
 		});
 
 		expect(replaceSelection).toHaveBeenCalledWith({
-			nodeId: 'local',
+			executorId: 'local',
 			projectPath: '/workspace/project',
 			agentId: 'codex',
 			model: 'gpt-5.5',

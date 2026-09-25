@@ -142,7 +142,7 @@ export interface DirectTestAgents {
 }
 
 export interface DirectStartInput {
-  nodeId?: string | null;
+  executorId?: string | null;
   chatId: string;
   content: string;
   projectPath: string;
@@ -161,7 +161,7 @@ export interface DirectRunInput {
 }
 
 export interface DirectHandoffInput extends DirectRunInput {
-  nodeId?: string | null;
+  executorId?: string | null;
   projectPath?: string;
   expectedAgentOwnershipEpoch?: string;
 }
@@ -204,7 +204,7 @@ interface GarconWebSocket {
 }
 
 export interface GarconTestClientOptions {
-  nodeId?: string;
+  executorId?: string;
   authToken?: string | null;
   createWebSocket?: (url: string, protocols: string[]) => GarconWebSocket;
   redactSensitiveDiagnostics?: boolean;
@@ -319,7 +319,7 @@ async function responseBody(response: Response): Promise<unknown> {
 }
 
 export class GarconTestClient {
-  readonly nodeId: string;
+  readonly executorId: string;
   readonly #baseUrl: string;
   readonly #authToken: string | null;
   readonly #createWebSocket: (url: string, protocols: string[]) => GarconWebSocket;
@@ -332,7 +332,7 @@ export class GarconTestClient {
   #protocolError: Error | null = null;
 
   private constructor(baseUrl: string, options: GarconTestClientOptions) {
-    this.nodeId = options.nodeId ?? 'local';
+    this.executorId = options.executorId ?? 'local';
     this.#baseUrl = baseUrl.replace(/\/$/, '');
     this.#authToken = options.authToken ?? null;
     this.#createWebSocket = options.createWebSocket ?? ((url, protocols) => new WebSocket(url, protocols));
@@ -431,7 +431,7 @@ export class GarconTestClient {
   }
 
   async createOpenAiProvider(providerBaseUrl: string): Promise<ConfiguredTestProvider> {
-    const created = await this.post<ApiProviderCatalogEntry>(`/api/v1/api-providers?nodeId=${encodeURIComponent(this.nodeId)}`, {
+    const created = await this.post<ApiProviderCatalogEntry>(`/api/v1/api-providers?executorId=${encodeURIComponent(this.executorId)}`, {
       templateId: 'custom',
       label: 'Integration Fake OpenAI',
       endpoint: {
@@ -457,7 +457,7 @@ export class GarconTestClient {
 
   async createOpenAiResponsesProvider(providerBaseUrl: string): Promise<ConfiguredTestProvider> {
     const model = 'integration-responses-echo';
-    const created = await this.post<ApiProviderCatalogEntry>(`/api/v1/api-providers?nodeId=${encodeURIComponent(this.nodeId)}`, {
+    const created = await this.post<ApiProviderCatalogEntry>(`/api/v1/api-providers?executorId=${encodeURIComponent(this.executorId)}`, {
       templateId: 'custom',
       label: 'Integration Fake OpenAI Responses',
       endpoint: {
@@ -483,7 +483,7 @@ export class GarconTestClient {
 
   async createAnthropicProvider(providerBaseUrl: string): Promise<ConfiguredTestProvider> {
     const model = 'integration-anthropic-echo';
-    const created = await this.post<ApiProviderCatalogEntry>(`/api/v1/api-providers?nodeId=${encodeURIComponent(this.nodeId)}`, {
+    const created = await this.post<ApiProviderCatalogEntry>(`/api/v1/api-providers?executorId=${encodeURIComponent(this.executorId)}`, {
       templateId: 'custom',
       label: 'Integration Fake Anthropic',
       endpoint: {
@@ -507,7 +507,7 @@ export class GarconTestClient {
   }
 
   listAgentCatalog(): Promise<AgentCatalog> {
-    return this.get<AgentCatalog>(`/api/v1/agents?nodeId=${encodeURIComponent(this.nodeId)}`);
+    return this.get<AgentCatalog>(`/api/v1/agents?executorId=${encodeURIComponent(this.executorId)}`);
   }
 
   listChats(): Promise<ChatListResponse> {
@@ -581,7 +581,7 @@ export class GarconTestClient {
 
   startChat(request: StartChatCommandRequest): Promise<StartChatCommandResponse> {
     return this.post<StartChatCommandResponse>('/api/v1/chats/start', {
-      ...(this.nodeId === 'local' ? {} : { nodeId: this.nodeId }), ...request,
+      ...(this.executorId === 'local' ? {} : { executorId: this.executorId }), ...request,
     });
   }
 
@@ -591,7 +591,7 @@ export class GarconTestClient {
 
   directStartRequest(input: DirectStartInput): StartChatCommandRequest {
     return {
-      ...(input.nodeId === undefined ? (this.nodeId === 'local' ? {} : { nodeId: this.nodeId }) : { nodeId: input.nodeId }),
+      ...(input.executorId === undefined ? (this.executorId === 'local' ? {} : { executorId: this.executorId }) : { executorId: input.executorId }),
       origin: 'interactive',
       clientRequestId: input.clientRequestId ?? crypto.randomUUID(),
       clientMessageId: input.clientMessageId ?? crypto.randomUUID(),
@@ -640,7 +640,7 @@ export class GarconTestClient {
       handoff: {
         expectedAgentOwnershipEpoch,
         target: {
-          ...(input.nodeId === undefined ? {} : { nodeId: input.nodeId }),
+          ...(input.executorId === undefined ? {} : { executorId: input.executorId }),
           ...(input.projectPath === undefined ? {} : { projectPath: input.projectPath }),
           agentId: input.agent.agentId,
           model: input.agent.provider.model,

@@ -36,7 +36,7 @@ describe('GitHistoryPanel refresh', () => {
 				kind: 'available',
 				project: {
 					chatId: 'chat',
-					nodeId: 'remote',
+					executorId: 'remote',
 					projectPath: '/project',
 					effectiveProjectKey: '/project',
 				},

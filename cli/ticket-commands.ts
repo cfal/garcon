@@ -11,7 +11,7 @@ import { validateTicketStdin } from './ticket-stdin.js';
 import type { CliOutput } from './output.js';
 
 export type TicketClient = Pick<GarconClient, 'getTicketBootstrap' | 'getTicketProjectDefault'
-  | 'listTickets' | 'readTicket' | 'getTicketHistory' | 'mutateTicket' | 'defaultNodeId'>;
+  | 'listTickets' | 'readTicket' | 'getTicketHistory' | 'mutateTicket' | 'defaultExecutorId'>;
 
 export function applyTicketStdin(command: TicketCliCommand, text: string): TicketCliCommand {
   const body = validateTicketStdin(text);
@@ -62,7 +62,7 @@ export async function runTicketCommand(command: TicketCliCommand, client: Ticket
   if (ticketBytes(JSON.stringify(request)) > TICKET_LIMITS.requestBytes) {
     throw argumentError('Encoded ticket request exceeds 64 KiB; reduce the submitted body');
   }
-  output.diagnostic(ticketRetryDiagnostic(request, { kind, connection: command, nodeId: client.defaultNodeId }));
+  output.diagnostic(ticketRetryDiagnostic(request, { kind, connection: command, executorId: client.defaultExecutorId }));
   signal?.throwIfAborted();
   onSubmissionStarted?.();
   try {

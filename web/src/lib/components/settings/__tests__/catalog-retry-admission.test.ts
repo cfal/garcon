@@ -28,7 +28,7 @@ const catalogBody = {
 	},
 } satisfies ModelCatalogResponse;
 
-describe.each(['local', '22222222-2222-4222-8222-222222222222'])('cached catalog retry on %s', (nodeId) => {
+describe.each(['local', '22222222-2222-4222-8222-222222222222'])('cached catalog retry on %s', (executorId) => {
 	beforeEach(() => {
 		localStorage.clear();
 		vi.mocked(apiFetch).mockReset();
@@ -36,7 +36,7 @@ describe.each(['local', '22222222-2222-4222-8222-222222222222'])('cached catalog
 
 	it.each([200, 304])('keeps new and scheduled admission closed until a successful %s retry', async (status) => {
 		const root = createModelCatalogStore();
-		const catalog = root.forNode(nodeId);
+		const catalog = root.forExecutor(executorId);
 		vi.mocked(apiFetch).mockResolvedValueOnce(Response.json(catalogBody));
 		await catalog.forceRefresh();
 		expect(catalog.lastValidatedAt).not.toBeNull();
@@ -47,7 +47,7 @@ describe.each(['local', '22222222-2222-4222-8222-222222222222'])('cached catalog
 			hasChat: () => false, isDraft: () => false,
 		}, options);
 		for (const startup of [newChat, scheduled.startup]) {
-			startup.nodeId = nodeId;
+			startup.executorId = executorId;
 			startup.agentId = 'sample';
 			startup.settingsLoaded = true;
 			startup.projectPath = '/workspace/project';

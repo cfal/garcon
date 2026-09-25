@@ -22,7 +22,7 @@ import {
   startScriptedOpenCodeTestEnvironment,
   type ScriptedOpenCodeTestEnvironment,
 } from '../../support/scripted-opencode.js';
-import { CURRENT_WORKSPACE_VERSION } from '../../../server/migrations/index.js';
+import { CURRENT_WORKSPACE_VERSION } from '../../../server/controller/migrations/index.js';
 
 // Fork matrix against the real binary: a fork taken while the first model
 // request is still held seeds only the committed prefix, a never-run chat

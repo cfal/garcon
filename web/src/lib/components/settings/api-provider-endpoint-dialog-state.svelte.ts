@@ -16,9 +16,9 @@ import {
 } from '$shared/api-providers';
 
 interface DialogOptions {
-	readonly modelCatalog: Pick<ModelCatalogStore, 'nodeId' | 'forceRefresh'>;
+	readonly modelCatalog: Pick<ModelCatalogStore, 'executorId' | 'forceRefresh'>;
 	readonly providers: Pick<ApiProvidersStore, 'findEndpoint' | 'isAssigned' | 'invalidate' | 'refresh'>;
-	isNodeReady: () => boolean;
+	isExecutorReady: () => boolean;
 	getProtocol: () => ApiProtocol;
 	getEndpointId: () => string | null;
 	getTemplateId?: () => ApiProviderTemplateId;
@@ -151,8 +151,8 @@ export class ApiProviderEndpointDialogState {
 	}
 
 	get canProbe(): boolean {
-		return this.options.isNodeReady() && (!this.apiProviderId || Boolean(this.apiKey)
-			|| this.options.providers.isAssigned(this.options.modelCatalog.nodeId, this.apiProviderId));
+		return this.options.isExecutorReady() && (!this.apiProviderId || Boolean(this.apiKey)
+			|| this.options.providers.isAssigned(this.options.modelCatalog.executorId, this.apiProviderId));
 	}
 
 	get canSave(): boolean {
@@ -308,7 +308,7 @@ export class ApiProviderEndpointDialogState {
 			if (this.apiProviderId) {
 				await updateApiProvider(this.apiProviderId, this.payload());
 			} else {
-				const created = await createApiProvider(this.payload(), catalog.nodeId);
+				const created = await createApiProvider(this.payload(), catalog.executorId);
 				if (this.#isCurrent(catalog, version)) {
 					this.apiProviderId = created.id;
 					this.#savedEndpointId = created.endpoints[0]?.id ?? null;
@@ -318,7 +318,7 @@ export class ApiProviderEndpointDialogState {
 			}
 			this.options.providers.invalidate();
 			await this.options.providers.refresh();
-			if (this.options.isNodeReady()) await catalog.forceRefresh();
+			if (this.options.isExecutorReady()) await catalog.forceRefresh();
 			if (!this.#isCurrent(catalog, version)) return;
 			this.options.onSaved?.();
 		} catch (err) {
@@ -350,7 +350,7 @@ export class ApiProviderEndpointDialogState {
 				endpointId: this.#savedEndpointId,
 				revision: this.revision,
 				modelDiscovery: discoveryKind,
-			}, catalog.nodeId);
+			}, catalog.executorId);
 			if (!this.#isCurrent(catalog, version) || draft !== JSON.stringify(this.payload())) return;
 			if (!result.success) {
 				this.error = result.error || m.settings_api_provider_dialog_fetch_failed();
@@ -383,7 +383,7 @@ export class ApiProviderEndpointDialogState {
 		this.error = null;
 		this.testMessage = null;
 		try {
-			const result = await testApiProvider(this.payload(), catalog.nodeId);
+			const result = await testApiProvider(this.payload(), catalog.executorId);
 			if (!this.#isCurrent(catalog, version) || draft !== JSON.stringify(this.payload())) return;
 			if (!result.success) {
 				this.error = result.error || m.settings_api_provider_dialog_test_failed();

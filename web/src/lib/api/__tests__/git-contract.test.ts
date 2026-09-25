@@ -39,7 +39,7 @@ import {
 	getGitComparisonSnapshot,
 } from '../git-comparison';
 
-const scope = { nodeId: 'remote-node', instanceId: 'test-instance' };
+const scope = { executorId: 'remote-executor', instanceId: 'test-instance' };
 const proof = {
 	document: { ...scope, documentId: 'doc' },
 	bodyFingerprint: 'fingerprint',
@@ -84,7 +84,7 @@ describe('git API contract', () => {
 		};
 		fetchMock.mockResolvedValue(jsonResponse(payload));
 
-		const result = await getGitStatus({ nodeId: 'remote-node', projectPath: '/project' });
+		const result = await getGitStatus({ executorId: 'remote-executor', projectPath: '/project' });
 
 		expect(result.branch).toBe('main');
 		expect(result.modified).toEqual(['a.txt']);
@@ -103,7 +103,7 @@ describe('git API contract', () => {
 			}),
 		);
 
-		const result = await gitCommit({ nodeId: 'remote-node', projectPath: '/project' }, 'fix bug', [
+		const result = await gitCommit({ executorId: 'remote-executor', projectPath: '/project' }, 'fix bug', [
 			'a.txt',
 			'b.txt',
 		]);
@@ -128,7 +128,7 @@ describe('git API contract', () => {
 		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
 
 		await gitCheckoutRef(
-			{ nodeId: 'remote-node', projectPath: '/project' },
+			{ executorId: 'remote-executor', projectPath: '/project' },
 			'refs/remotes/origin/main',
 			'remote-branch',
 		);
@@ -142,7 +142,7 @@ describe('git API contract', () => {
 	it('gitCheckout keeps the legacy helper as a ref checkout wrapper', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
 
-		await gitCheckout({ nodeId: 'remote-node', projectPath: '/project' }, 'feature');
+		await gitCheckout({ executorId: 'remote-executor', projectPath: '/project' }, 'feature');
 
 		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
 		expect(body.ref).toBe('feature');
@@ -151,7 +151,7 @@ describe('git API contract', () => {
 	it('gitCreateBranch sends POST with project, branch, and optional baseRef', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
 
-		await gitCreateBranch({ nodeId: 'remote-node', projectPath: '/project' }, 'new-branch', {
+		await gitCreateBranch({ executorId: 'remote-executor', projectPath: '/project' }, 'new-branch', {
 			baseRef: 'refs/remotes/origin/main',
 		});
 
@@ -163,7 +163,7 @@ describe('git API contract', () => {
 	it('getBranches calls GET with project param', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ branches: ['main', 'dev'] }));
 
-		const result = await getBranches({ nodeId: 'remote-node', projectPath: '/project' });
+		const result = await getBranches({ executorId: 'remote-executor', projectPath: '/project' });
 
 		expect(result.branches).toEqual(['main', 'dev']);
 	});
@@ -191,7 +191,7 @@ describe('git API contract', () => {
 		);
 
 		const result = await getGitRefs(
-			{ nodeId: 'remote-node', projectPath: '/project' },
+			{ executorId: 'remote-executor', projectPath: '/project' },
 			{
 				query: 'origin/main',
 				limit: 50,
@@ -216,7 +216,7 @@ describe('git API contract', () => {
 	it('getGitRefs sends the default sort pair', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ refs: [] }));
 
-		await getGitRefs({ nodeId: 'remote-node', projectPath: '/project' });
+		await getGitRefs({ executorId: 'remote-executor', projectPath: '/project' });
 
 		const [url] = fetchMock.mock.calls[0] as [string];
 		expect(url).toContain('sort=name');
@@ -235,7 +235,7 @@ describe('git API contract', () => {
 		};
 		fetchMock.mockResolvedValue(jsonResponse(payload));
 
-		const result = await getRemoteStatus({ nodeId: 'remote-node', projectPath: '/project' });
+		const result = await getRemoteStatus({ executorId: 'remote-executor', projectPath: '/project' });
 
 		expect(result.hasRemote).toBe(true);
 		expect(result.ahead).toBe(1);
@@ -244,7 +244,7 @@ describe('git API contract', () => {
 	it('gitFetch sends POST with project', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
 
-		await gitFetch({ nodeId: 'remote-node', projectPath: '/project' });
+		await gitFetch({ executorId: 'remote-executor', projectPath: '/project' });
 
 		const [url, opts] = fetchMock.mock.calls[0];
 		expect(url).toBe('/api/v1/git/fetch');
@@ -254,7 +254,7 @@ describe('git API contract', () => {
 	it('gitPull sends POST with project', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
 
-		await gitPull({ nodeId: 'remote-node', projectPath: '/project' });
+		await gitPull({ executorId: 'remote-executor', projectPath: '/project' });
 
 		expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/git/pull');
 	});
@@ -262,7 +262,7 @@ describe('git API contract', () => {
 	it('gitPush sends POST with project, remote, and remoteBranch', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
 
-		await gitPush({ nodeId: 'remote-node', projectPath: '/project' }, 'origin', 'feature');
+		await gitPush({ executorId: 'remote-executor', projectPath: '/project' }, 'origin', 'feature');
 
 		const [url, opts] = fetchMock.mock.calls[0];
 		expect(url).toBe('/api/v1/git/push');
@@ -276,7 +276,7 @@ describe('git API contract', () => {
 		const payload = { remotes: [{ name: 'origin', url: 'git@github.com:user/repo.git' }] };
 		fetchMock.mockResolvedValue(jsonResponse(payload));
 
-		const result = await getGitRemotes({ nodeId: 'remote-node', projectPath: '/project' });
+		const result = await getGitRemotes({ executorId: 'remote-executor', projectPath: '/project' });
 
 		expect(result.remotes).toHaveLength(1);
 		expect(result.remotes[0].name).toBe('origin');
@@ -288,7 +288,7 @@ describe('git API contract', () => {
 	it('gitDiscard sends POST with project and file', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
 
-		await gitDiscard({ nodeId: 'remote-node', projectPath: '/project' }, 'a.txt');
+		await gitDiscard({ executorId: 'remote-executor', projectPath: '/project' }, 'a.txt');
 
 		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
 		expect(body.file).toBe('a.txt');
@@ -297,7 +297,7 @@ describe('git API contract', () => {
 	it('gitDeleteUntracked sends POST with project and file', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
 
-		await gitDeleteUntracked({ nodeId: 'remote-node', projectPath: '/project' }, 'temp.txt');
+		await gitDeleteUntracked({ executorId: 'remote-executor', projectPath: '/project' }, 'temp.txt');
 
 		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
 		expect(body.file).toBe('temp.txt');
@@ -307,7 +307,7 @@ describe('git API contract', () => {
 		fetchMock.mockResolvedValue(jsonResponse({ error: 'Not a git repo' }, 400));
 
 		await expect(
-			getGitStatus({ nodeId: 'remote-node', projectPath: '/bad' }),
+			getGitStatus({ executorId: 'remote-executor', projectPath: '/bad' }),
 		).rejects.toMatchObject({
 			message: 'Not a git repo',
 		});
@@ -318,7 +318,7 @@ describe('git API contract', () => {
 	it('getGitWorkbenchSnapshot posts the first-paint workbench request', async () => {
 		const payload = {
 			status: 'ready',
-			nodeId: scope.nodeId,
+			executorId: scope.executorId,
 			project: '/project',
 			target: {
 				projectPath: '/project',
@@ -331,7 +331,7 @@ describe('git API contract', () => {
 			tree: { root: [], hasCommits: true, statsState: 'loaded' },
 			reviewSummary: {
 				documentId: 'doc',
-				nodeId: scope.nodeId,
+				executorId: scope.executorId,
 				project: '/project',
 				mode: 'working',
 				context: 5,
@@ -346,7 +346,7 @@ describe('git API contract', () => {
 		fetchMock.mockResolvedValue(jsonResponse(payload));
 
 		const result = await getGitWorkbenchSnapshot(
-			{ nodeId: 'remote-node', projectPath: '/project' },
+			{ executorId: 'remote-executor', projectPath: '/project' },
 			'unstaged',
 			5,
 			{
@@ -363,7 +363,7 @@ describe('git API contract', () => {
 		expect(opts.bodyCandidateCount).toBeUndefined();
 		const body = JSON.parse(opts.body);
 		expect(body).toEqual({
-			nodeId: scope.nodeId,
+			executorId: scope.executorId,
 			project: '/project',
 			mode: 'working',
 			context: 5,
@@ -376,7 +376,7 @@ describe('git API contract', () => {
 		fetchMock.mockResolvedValue(
 			jsonResponse({
 				status: 'not-git-repository',
-				nodeId: scope.nodeId,
+				executorId: scope.executorId,
 				project: '/project',
 				target: null,
 				tree: null,
@@ -387,7 +387,7 @@ describe('git API contract', () => {
 			}),
 		);
 
-		await getGitWorkbenchSnapshot({ nodeId: 'remote-node', projectPath: '/project' }, 'staged', 3);
+		await getGitWorkbenchSnapshot({ executorId: 'remote-executor', projectPath: '/project' }, 'staged', 3);
 
 		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
 		expect(body.mode).toBe('staged');
@@ -400,7 +400,7 @@ describe('git API contract', () => {
 		fetchMock.mockResolvedValue(
 			jsonResponse({
 				status: 'ready',
-				nodeId: scope.nodeId,
+				executorId: scope.executorId,
 				project: '/project',
 				fingerprintVersion: 1,
 				fingerprint: 'v1:current',
@@ -409,7 +409,7 @@ describe('git API contract', () => {
 		);
 
 		const result = await getGitWorkingTreeFingerprint({
-			nodeId: 'remote-node',
+			executorId: 'remote-executor',
 			projectPath: '/project',
 		});
 
@@ -421,14 +421,14 @@ describe('git API contract', () => {
 		const [url, opts] = fetchMock.mock.calls[0];
 		expect(url).toBe('/api/v1/git/working-tree/fingerprint');
 		expect(opts.method).toBe('POST');
-		expect(JSON.parse(opts.body)).toEqual({ nodeId: scope.nodeId, project: '/project' });
+		expect(JSON.parse(opts.body)).toEqual({ executorId: scope.executorId, project: '/project' });
 	});
 
 	it('getGitQuickSummary posts the quick summary request', async () => {
 		fetchMock.mockResolvedValue(
 			jsonResponse({
 				status: 'ready',
-				nodeId: scope.nodeId,
+				executorId: scope.executorId,
 				project: '/project',
 				repoRoot: '/project',
 				branch: 'main',
@@ -445,7 +445,7 @@ describe('git API contract', () => {
 			}),
 		);
 
-		const result = await getGitQuickSummary({ nodeId: 'remote-node', projectPath: '/project' });
+		const result = await getGitQuickSummary({ executorId: 'remote-executor', projectPath: '/project' });
 
 		expect(result.status).toBe('ready');
 		if (result.status === 'ready') {
@@ -455,7 +455,7 @@ describe('git API contract', () => {
 		const [url, opts] = fetchMock.mock.calls[0];
 		expect(url).toBe('/api/v1/git/quick-summary');
 		expect(opts.method).toBe('POST');
-		expect(JSON.parse(opts.body)).toEqual({ nodeId: scope.nodeId, project: '/project' });
+		expect(JSON.parse(opts.body)).toEqual({ executorId: scope.executorId, project: '/project' });
 	});
 
 	it('getGitConflictDetails returns bounded conflict content metadata', async () => {
@@ -476,7 +476,7 @@ describe('git API contract', () => {
 		fetchMock.mockResolvedValue(jsonResponse(payload));
 
 		const result = await getGitConflictDetails(
-			{ nodeId: 'remote-node', projectPath: '/project' },
+			{ executorId: 'remote-executor', projectPath: '/project' },
 			'a.txt',
 		);
 
@@ -492,7 +492,7 @@ describe('git API contract', () => {
 		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
 
 		const result = await gitStageSelection(
-			{ nodeId: 'remote-node', projectPath: '/project' },
+			{ executorId: 'remote-executor', projectPath: '/project' },
 			'a.ts',
 			'stage',
 			[1, 2, 3],
@@ -515,7 +515,7 @@ describe('git API contract', () => {
 		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
 
 		const result = await gitStageHunk(
-			{ nodeId: 'remote-node', projectPath: '/project' },
+			{ executorId: 'remote-executor', projectPath: '/project' },
 			'a.ts',
 			'stage',
 			0,
@@ -546,7 +546,7 @@ describe('git API contract', () => {
 		const controller = new AbortController();
 
 		const result = await getGitWorktrees(
-			{ nodeId: 'remote-node', projectPath: '/project' },
+			{ executorId: 'remote-executor', projectPath: '/project' },
 			{ signal: controller.signal },
 		);
 
@@ -560,7 +560,7 @@ describe('git API contract', () => {
 	it('gitCreateWorktree sends POST with worktreePath and options', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
 
-		await gitCreateWorktree({ nodeId: 'remote-node', projectPath: '/project' }, '/tmp/wt', {
+		await gitCreateWorktree({ executorId: 'remote-executor', projectPath: '/project' }, '/tmp/wt', {
 			branch: 'feat',
 			baseRef: 'main',
 		});
@@ -574,7 +574,7 @@ describe('git API contract', () => {
 	it('gitRemoveWorktree sends POST with worktreePath and force', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
 
-		await gitRemoveWorktree({ nodeId: 'remote-node', projectPath: '/project' }, '/tmp/wt', true);
+		await gitRemoveWorktree({ executorId: 'remote-executor', projectPath: '/project' }, '/tmp/wt', true);
 
 		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
 		expect(body.worktreePath).toBe('/tmp/wt');
@@ -584,7 +584,7 @@ describe('git API contract', () => {
 	it('gitRevertCommit sends POST with commit hash', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
 
-		await gitRevertCommit({ nodeId: 'remote-node', projectPath: '/project' }, 'abcdef123');
+		await gitRevertCommit({ executorId: 'remote-executor', projectPath: '/project' }, 'abcdef123');
 
 		const [url] = fetchMock.mock.calls[0];
 		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
@@ -596,7 +596,7 @@ describe('git API contract', () => {
 		fetchMock.mockResolvedValue(jsonResponse({ success: true, output: 'commit abc123' }));
 
 		const result = await gitCommitIndex(
-			{ nodeId: 'remote-node', projectPath: '/project' },
+			{ executorId: 'remote-executor', projectPath: '/project' },
 			'feat: add login',
 		);
 
@@ -617,7 +617,7 @@ describe('git API contract', () => {
 			}),
 		);
 
-		const result = await generateCommitMessage({ nodeId: 'remote-node', projectPath: '/project' }, [
+		const result = await generateCommitMessage({ executorId: 'remote-executor', projectPath: '/project' }, [
 			'src/app/login.ts',
 		]);
 
@@ -627,7 +627,7 @@ describe('git API contract', () => {
 		expect(url).toBe('/api/v1/git/generate-commit-message');
 		expect(opts.method).toBe('POST');
 		expect(JSON.parse(opts.body)).toEqual({
-			nodeId: scope.nodeId,
+			executorId: scope.executorId,
 			project: '/project',
 			files: ['src/app/login.ts'],
 		});
@@ -637,7 +637,7 @@ describe('git API contract', () => {
 		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
 
 		const result = await gitStagePaths(
-			{ nodeId: 'remote-node', projectPath: '/project' },
+			{ executorId: 'remote-executor', projectPath: '/project' },
 			['new-file.ts'],
 			'stage',
 		);
@@ -658,7 +658,7 @@ describe('git API contract', () => {
 	])('gitStagePaths preserves $errorCode without splitting or retrying the selection', async ({ status, errorCode }) => {
 		fetchMock.mockImplementationOnce(() => jsonResponse({ error: 'Rejected', errorCode }, status));
 		await expect(
-			gitStagePaths({ nodeId: scope.nodeId, projectPath: '/project' }, ['first', 'second'], 'stage'),
+			gitStagePaths({ executorId: scope.executorId, projectPath: '/project' }, ['first', 'second'], 'stage'),
 		).rejects.toMatchObject({ status, errorCode });
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 		expect(JSON.parse(fetchMock.mock.calls[0][1].body).paths).toEqual(['first', 'second']);
@@ -667,7 +667,7 @@ describe('git API contract', () => {
 	it('gitStagePaths keeps a lost mutation confirmation uncertain without retrying', async () => {
 		fetchMock.mockRejectedValueOnce(new TypeError('connection lost'));
 		await expect(
-			gitStagePaths({ nodeId: scope.nodeId, projectPath: '/project' }, ['file'], 'stage'),
+			gitStagePaths({ executorId: scope.executorId, projectPath: '/project' }, ['file'], 'stage'),
 		).rejects.toMatchObject({ errorCode: 'GIT_MUTATION_OUTCOME_UNKNOWN' });
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 	});
@@ -678,7 +678,7 @@ describe('git API contract', () => {
 		);
 
 		await getGitReviewFileBodies(
-			{ nodeId: 'remote-node', projectPath: '/project' },
+			{ executorId: 'remote-executor', projectPath: '/project' },
 			{ ...scope, documentId: 'doc' },
 			['a.ts', 'b.ts'],
 			'staged',
@@ -690,7 +690,7 @@ describe('git API contract', () => {
 		expect(opts.method).toBe('POST');
 		const body = JSON.parse(opts.body);
 		expect(body).toEqual({
-			nodeId: scope.nodeId,
+			executorId: scope.executorId,
 			project: '/project',
 			document: { ...scope, documentId: 'doc' },
 			files: ['a.ts', 'b.ts'],
@@ -701,7 +701,7 @@ describe('git API contract', () => {
 	it('getGitHistoryCommits posts paginated history requests', async () => {
 		fetchMock.mockResolvedValue(
 			jsonResponse({
-				nodeId: scope.nodeId,
+				executorId: scope.executorId,
 				project: '/project',
 				ref: 'main',
 				commits: [],
@@ -711,7 +711,7 @@ describe('git API contract', () => {
 		const controller = new AbortController();
 
 		const result = await getGitHistoryCommits(
-			{ nodeId: 'remote-node', projectPath: '/project' },
+			{ executorId: 'remote-executor', projectPath: '/project' },
 			{
 				ref: 'main',
 				limit: 25,
@@ -726,7 +726,7 @@ describe('git API contract', () => {
 		expect(opts.method).toBe('POST');
 		expect(opts.signal).toBeInstanceOf(AbortSignal);
 		expect(JSON.parse(opts.body)).toEqual({
-			nodeId: scope.nodeId,
+			executorId: scope.executorId,
 			project: '/project',
 			ref: 'main',
 			limit: 25,
@@ -738,7 +738,7 @@ describe('git API contract', () => {
 		fetchMock.mockResolvedValue(
 			jsonResponse({
 				status: 'not-found',
-				nodeId: scope.nodeId,
+				executorId: scope.executorId,
 				project: '/project',
 				commit: 'abc',
 				message: 'Commit was not found in this repository.',
@@ -747,7 +747,7 @@ describe('git API contract', () => {
 		const controller = new AbortController();
 
 		const result = await getGitCommitSnapshot(
-			{ nodeId: 'remote-node', projectPath: '/project' },
+			{ executorId: 'remote-executor', projectPath: '/project' },
 			'abc',
 			{
 				parent: 'parent',
@@ -763,7 +763,7 @@ describe('git API contract', () => {
 		expect(opts.method).toBe('POST');
 		expect(opts.signal).toBeInstanceOf(AbortSignal);
 		expect(JSON.parse(opts.body)).toEqual({
-			nodeId: scope.nodeId,
+			executorId: scope.executorId,
 			project: '/project',
 			commit: 'abc',
 			parent: 'parent',
@@ -779,7 +779,7 @@ describe('git API contract', () => {
 		const controller = new AbortController();
 
 		await getGitCommitFileBodies(
-			{ nodeId: 'remote-node', projectPath: '/project' },
+			{ executorId: 'remote-executor', projectPath: '/project' },
 			{ ...scope, documentId: 'doc' },
 			'abc',
 			[{ path: 'renamed.ts', originalPath: 'a.ts' }],
@@ -795,7 +795,7 @@ describe('git API contract', () => {
 		expect(opts.method).toBe('POST');
 		expect(opts.signal).toBeInstanceOf(AbortSignal);
 		expect(JSON.parse(opts.body)).toEqual({
-			nodeId: scope.nodeId,
+			executorId: scope.executorId,
 			project: '/project',
 			document: { ...scope, documentId: 'doc' },
 			files: ['renamed.ts'],
@@ -807,7 +807,7 @@ describe('git API contract', () => {
 		fetchMock.mockResolvedValue(
 			jsonResponse({
 				status: 'working-tree-changing',
-				nodeId: scope.nodeId,
+				executorId: scope.executorId,
 				project: '/project',
 				message: 'The Working Tree is changing.',
 			}),
@@ -815,7 +815,7 @@ describe('git API contract', () => {
 		const controller = new AbortController();
 
 		await getGitComparisonSnapshot(
-			{ nodeId: 'remote-node', projectPath: '/project' },
+			{ executorId: 'remote-executor', projectPath: '/project' },
 			{ kind: 'revision', revision: 'main' },
 			{ kind: 'working-tree' },
 			'direct',
@@ -826,7 +826,7 @@ describe('git API contract', () => {
 		expect(url).toBe('/api/v1/git/comparisons/snapshot');
 		expect(opts.signal).toBeInstanceOf(AbortSignal);
 		expect(JSON.parse(opts.body)).toEqual({
-			nodeId: scope.nodeId,
+			executorId: scope.executorId,
 			project: '/project',
 			from: { kind: 'revision', revision: 'main' },
 			to: { kind: 'working-tree' },
@@ -847,7 +847,7 @@ describe('git API contract', () => {
 		);
 
 		const result = await getGitComparisonFileBodies(
-			{ nodeId: 'remote-node', projectPath: '/project' },
+			{ executorId: 'remote-executor', projectPath: '/project' },
 			{ ...scope, documentId: 'comparison-doc' },
 			'from-hash',
 			{ kind: 'working-tree', fingerprint: 'v1:old' },
@@ -859,7 +859,7 @@ describe('git API contract', () => {
 		const [url, opts] = fetchMock.mock.calls[0];
 		expect(url).toBe('/api/v1/git/review-documents/files');
 		expect(JSON.parse(opts.body)).toEqual({
-			nodeId: scope.nodeId,
+			executorId: scope.executorId,
 			project: '/project',
 			document: { ...scope, documentId: 'comparison-doc' },
 			files: ['new.ts'],
@@ -871,7 +871,7 @@ describe('git API contract', () => {
 		fetchMock.mockResolvedValue(
 			jsonResponse({
 				status: 'ready',
-				nodeId: scope.nodeId,
+				executorId: scope.executorId,
 				project: '/project',
 				changedEndpoints: ['to'],
 				fromHash: 'a'.repeat(40),
@@ -881,7 +881,7 @@ describe('git API contract', () => {
 		const controller = new AbortController();
 
 		await getGitComparisonFreshness(
-			{ nodeId: 'remote-node', projectPath: '/project' },
+			{ executorId: 'remote-executor', projectPath: '/project' },
 			{ kind: 'revision', revision: 'origin/main', hash: 'a'.repeat(40) },
 			{ kind: 'revision', revision: 'HEAD', hash: 'b'.repeat(40) },
 			{ signal: controller.signal },
@@ -891,7 +891,7 @@ describe('git API contract', () => {
 		expect(url).toBe('/api/v1/git/comparisons/freshness');
 		expect(opts.signal).toBeInstanceOf(AbortSignal);
 		expect(JSON.parse(opts.body)).toEqual({
-			nodeId: scope.nodeId,
+			executorId: scope.executorId,
 			project: '/project',
 			from: { kind: 'revision', revision: 'origin/main', hash: 'a'.repeat(40) },
 			to: { kind: 'revision', revision: 'HEAD', hash: 'b'.repeat(40) },
@@ -903,7 +903,7 @@ describe('git API contract', () => {
 		const controller = new AbortController();
 
 		const result = await getGitTargetCandidates(
-			{ nodeId: 'remote-node', projectPath: '/repo with space' },
+			{ executorId: 'remote-executor', projectPath: '/repo with space' },
 			{ signal: controller.signal },
 		);
 

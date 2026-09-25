@@ -1,5 +1,5 @@
 export interface ConversationMessageChatContext {
-	nodeId?: string | null;
+	executorId?: string | null;
 	chatId: string;
 	projectPath: string | null;
 }

@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { setExecutionNodesTestContext } from '$lib/execution-nodes/__tests__/execution-nodes-test-context';
-	setExecutionNodesTestContext();
+	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
+	setExecutorsTestContext();
 	import { onMount } from 'svelte';
 	import SidebarVirtualSortableChatList from '../SidebarVirtualSortableChatList.svelte';
 	import {
@@ -96,7 +96,7 @@
 	} as never);
 
 	setModelCatalog({
-		forNode() { return this; },
+		forExecutor() { return this; },
 		supportsFork() {
 			return true;
 		},

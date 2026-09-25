@@ -40,7 +40,7 @@
 		getLocalSettings,
 		getAppShell,
 		getModelCatalog,
-		getExecutionNodes,
+		getExecutors,
 		getRemoteSettings,
 		getChatSessions,
 		getNotifications,
@@ -61,7 +61,7 @@
 	import { CHAT_FILE_ATTACHMENT_MIME_TYPES } from '@garcon/common/attachments';
 	import X from '@lucide/svelte/icons/x';
 	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
-	import ExecutionNodeSelector from '$lib/components/shared/ExecutionNodeSelector.svelte';
+	import ExecutorSelector from '$lib/components/shared/ExecutorSelector.svelte';
 	import type {
 		ModelSelectorChange,
 		ModelSelectorMode,
@@ -97,7 +97,7 @@
 	const localSettings = getLocalSettings();
 	const appShell = getAppShell();
 	const rootModelCatalog = getModelCatalog();
-	const executionNodes = getExecutionNodes();
+	const executors = getExecutors();
 	const remoteSettings = getRemoteSettings();
 	const sessions = getChatSessions();
 	const notifications = getNotifications();
@@ -108,18 +108,18 @@
 	const newChatSurfaceId = $derived(chatViewSurfaceId(workspaceLayout.defaultWindowId));
 	const form: NewChatFormState = new NewChatFormState({
 		modelCatalog: rootModelCatalog,
-		executionNodes,
+		executors,
 		remoteSettings,
 		get selectableAgentIds() {
 			return newChatAgentIds;
 		},
 	});
-	const modelCatalog = $derived(rootModelCatalog.forNode(form.nodeId));
-	function selectableAgentsForNode(nodeId: string) {
-		const allAgentIds = rootModelCatalog.forNode(nodeId).getSelectableAgents();
+	const modelCatalog = $derived(rootModelCatalog.forExecutor(form.executorId));
+	function selectableAgentsForExecutor(executorId: string) {
+		const allAgentIds = rootModelCatalog.forExecutor(executorId).getSelectableAgents();
 		return localSettings.allowDirectChats ? allAgentIds : nonDirectAgentIds(allAgentIds);
 	}
-	const newChatAgentIds = $derived(selectableAgentsForNode(form.nodeId));
+	const newChatAgentIds = $derived(selectableAgentsForExecutor(form.executorId));
 	const canAttachImages = $derived(modelCatalog.supportsImages(form.agentId, form.modelValue));
 	const fileAttachmentMimeTypes = $derived(
 		modelCatalog.fileAttachmentMimeTypes?.(form.agentId) ?? CHAT_FILE_ATTACHMENT_MIME_TYPES,
@@ -157,7 +157,7 @@
 	let expansionProjectPath = '';
 	let snippetInteractionGeneration = $state(0);
 	const snippetInteractionKey = $derived(
-		`${snippetInteractionGeneration}\u0000${form.nodeId}\u0000${form.trimmedPath}`,
+		`${snippetInteractionGeneration}\u0000${form.executorId}\u0000${form.trimmedPath}`,
 	);
 
 	const snippetPalette = new SnippetPaletteTriggerState();
@@ -228,7 +228,7 @@
 	});
 
 	$effect(() => {
-		if (!form.nodeReady) return;
+		if (!form.executorReady) return;
 		const catalog = modelCatalog;
 		void catalog.version;
 		untrack(() => void catalog.refreshIfStale());
@@ -404,7 +404,7 @@
 				type: 'new-chat' as const,
 				chatId: ensureProspectiveChatId(),
 				projectPath,
-				nodeId: form.nodeId,
+				executorId: form.executorId,
 			};
 		}
 		notifications.error(m.chat_new_chat_errors_project_path_required());
@@ -443,7 +443,7 @@
 			if (
 				form.trimmedPath !== projectPath ||
 				result.response.contextProjectPath !== projectPath ||
-				result.response.contextNodeId !== form.nodeId ||
+				result.response.contextExecutorId !== form.executorId ||
 				form.firstMessage !== sourceText
 			)
 				return 'cancelled';
@@ -485,7 +485,7 @@
 			if (
 				form.trimmedPath !== projectPath ||
 				result.response.contextProjectPath !== projectPath ||
-				result.response.contextNodeId !== form.nodeId ||
+				result.response.contextExecutorId !== form.executorId ||
 				form.firstMessage !== sourceText
 			)
 				return;
@@ -573,14 +573,14 @@
 		surface: 'composer',
 	};
 	const modelSelectorValue = $derived({
-		nodeId: form.nodeId,
+		executorId: form.executorId,
 		agentId: form.agentId,
 		model: form.modelValue,
 		...(form.modelSelectionTarget ?? {}),
 	});
-	function getRecents(nodeId: string) {
+	function getRecents(executorId: string) {
 		return buildModelSelectorRecents(
-			rootModelCatalog.forNode(nodeId),
+			rootModelCatalog.forExecutor(executorId),
 			remoteSettings.snapshot?.recentAgentSettings ?? [],
 		);
 	}
@@ -590,7 +590,7 @@
 
 	function handleModelSelectorChange(next: ModelSelectorChange): void {
 		if (!localSettings.allowDirectChats && nonDirectAgentIds([next.agentId]).length === 0) return;
-		if (next.nodeId !== form.nodeId) return;
+		if (next.executorId !== form.executorId) return;
 		if (!newChatAgentIds.includes(next.agentId)) return;
 		form.selectAgent(next.agentId);
 		form.selectModel(next.modelValue, next);
@@ -613,9 +613,9 @@
 			<div class="space-y-2">
 				<div class="relative">
 					<div class="flex flex-wrap gap-2 @container/project-target">
-						<ExecutionNodeSelector nodes={executionNodes} nodeId={form.nodeId} service="agents" presentation="field"
+						<ExecutorSelector executors={executors} executorId={form.executorId} service="agents" presentation="field"
 							class="h-[42px] w-full sm:h-[38px] @min-[32rem]/project-target:w-auto @min-[32rem]/project-target:max-w-44"
-							onSelect={(nodeId) => form.selectNode(nodeId)} />
+							onSelect={(executorId) => form.selectExecutor(executorId)} />
 						<div class="relative min-w-0 flex-1">
 							<input
 								id="project-path-input"
@@ -691,8 +691,8 @@
 
 					{#if form.filesAvailable && form.showBrowser && !form.isUpdatingPinnedPath}
 						<DirectoryBrowser
-							nodeContextKey={form.pathContextKey}
-							nodeId={form.nodeId}
+							executorContextKey={form.pathContextKey}
+							executorId={form.executorId}
 							currentPath={form.trimmedPath || form.browseStartPath || form.projectBasePath}
 							basePath={form.projectBasePath}
 							onSelect={(selPath) => {
@@ -755,7 +755,7 @@
 				{#if displayedFormError}
 					<div role="status" class="flex items-center gap-2 text-sm text-destructive">
 						<span>{displayedFormError}</span>
-						{#if form.nodeReady && modelCatalog.error}
+						{#if form.executorReady && modelCatalog.error}
 							<button
 								type="button"
 								class="text-foreground underline focus-visible:ring-2 focus-visible:ring-ring"
@@ -834,7 +834,7 @@
 							onChange={handleModelSelectorChange}
 							{getRecents}
 							preferRecentsOnOpen
-							getSelectableAgentIds={selectableAgentsForNode}
+							getSelectableAgentIds={selectableAgentsForExecutor}
 							align="end"
 							side="bottom"
 						/>

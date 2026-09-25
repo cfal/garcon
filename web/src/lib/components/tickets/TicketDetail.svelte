@@ -23,7 +23,7 @@
 	import TicketDiscussion from './TicketDiscussion.svelte';
 	import TicketActivity from './TicketActivity.svelte';
 	import TicketChatReference from './TicketChatReference.svelte';
-	import TicketNodeReference from './TicketNodeReference.svelte';
+	import TicketExecutorReference from './TicketExecutorReference.svelte';
 	import TicketRelationships from './TicketRelationships.svelte';
 	import TicketMarkdown from './TicketMarkdown.svelte';
 	import * as m from '$lib/paraglide/messages.js';
@@ -104,7 +104,7 @@
 			priorComments = comments;
 			const nearBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 40;
 			const anchor = [...element.querySelectorAll<HTMLElement>('[data-comment-id]')].find(
-				(node) => node.getBoundingClientRect().bottom >= element.getBoundingClientRect().top,
+				(executor) => executor.getBoundingClientRect().bottom >= element.getBoundingClientRect().top,
 			);
 			const offset = anchor?.getBoundingClientRect().top;
 			void tick().then(() => {
@@ -220,7 +220,7 @@
 			<dd class="ticket-assignee-value">
 				{#if ticket.assignee?.kind === 'chat'}
 					<TicketChatReference chatId={ticket.assignee.chatId} {chats} {onOpenChat} />
-				{:else if ticket.assignee?.kind === 'node'}<TicketNodeReference nodeId={ticket.assignee.nodeId} />
+				{:else if ticket.assignee?.kind === 'executor'}<TicketExecutorReference executorId={ticket.assignee.executorId} />
 				{:else}<span>{ticket.assignee?.username ?? m.tickets_unassigned()}</span>{/if}
 				{#if ownAssignment || (ticket.status !== 'closed' && !ticket.assignee)}
 					<button

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { ChatRegistrySnapshot } from '../../../server/chats/store.js';
+import type { ChatRegistrySnapshot } from '../../../server/controller/chats/store.js';
 import type { ChatMessagesMessage } from '../../../common/ws-events.js';
 import type { PreamblesMutationResponse, PreamblesSnapshot } from '../../../common/preambles.js';
 import type { ApiProviderCatalogEntry } from '../../../common/api-providers.js';

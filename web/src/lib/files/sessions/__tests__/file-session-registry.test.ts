@@ -29,9 +29,9 @@ import {
 const testEditorRuntime: FileEditorRuntimeModule =
 	await import('$lib/files/editor/code-editor-controller.svelte.js');
 
-function identity(path: string, nodeId = 'local'): CanonicalFileIdentity {
+function identity(path: string, executorId = 'local'): CanonicalFileIdentity {
 	return {
-		nodeId,
+		executorId,
 		canonicalFileRootPath: '/workspace',
 		normalizedRelativePath: path,
 	};
@@ -89,7 +89,7 @@ function createHarness(
 		placement?: FilePlacementPort;
 		userNamespace?: string | null;
 		isDocumentVisible?: (documentId: string) => boolean;
-		isNodeAvailable?: (nodeId: string) => boolean;
+		isExecutorAvailable?: (executorId: string) => boolean;
 	} = {},
 ) {
 	const placementCalls: Array<{ sessionId: string; target: unknown }> = [];
@@ -108,9 +108,9 @@ function createHarness(
 	};
 	const placement = options.placement ?? defaultPlacement;
 	const resolveFileIdentity = vi.fn(
-		async ({ relativePath, nodeId }: { relativePath: string; nodeId?: string | null }) => ({
+		async ({ relativePath, executorId }: { relativePath: string; executorId?: string | null }) => ({
 			success: true as const,
-			identity: identity(relativePath.replace(/^alias\//, ''), nodeId ?? 'local'),
+			identity: identity(relativePath.replace(/^alias\//, ''), executorId ?? 'local'),
 		}),
 	);
 	const readText = vi.fn(async () => ({
@@ -138,7 +138,7 @@ function createHarness(
 	);
 	const onOpenError = options.onOpenError ?? vi.fn();
 	const registry = new FileSessionRegistry({
-		isNodeAvailable: options.isNodeAvailable,
+		isExecutorAvailable: options.isExecutorAvailable,
 		getIsMobile: () => options.isMobile ?? false,
 		getDefaultPlacement,
 		getEditorSettings: () => ({
@@ -184,16 +184,16 @@ function createHarness(
 }
 
 describe('FileSessionRegistry', () => {
-	it('isolates same-path documents, IO and recovery by node across node loss', async () => {
+	it('isolates same-path documents, IO and recovery by executor across executor loss', async () => {
 		const worker = '22222222-2222-4222-8222-222222222222';
 		let workerReady = true;
 		const repository = createMemoryFileDraftRepository();
 		const harness = createHarness({
 			draftRepository: repository,
-			isNodeAvailable: (nodeId) => nodeId === 'local' || workerReady,
+			isExecutorAvailable: (executorId) => executorId === 'local' || workerReady,
 		});
 		const local = (await harness.registry.open(request('same.txt')))!;
-		const remote = (await harness.registry.open({ ...request('same.txt'), nodeId: worker }))!;
+		const remote = (await harness.registry.open({ ...request('same.txt'), executorId: worker }))!;
 		await vi.waitFor(() => expect(local.loading || remote.loading).toBe(false));
 		expect(local.document).not.toBe(remote.document);
 		expect(local.identityKey).not.toBe(remote.identityKey);
@@ -202,7 +202,7 @@ describe('FileSessionRegistry', () => {
 		await harness.registry.flushRecovery();
 		expect(
 			(await repository.getDrafts('test-user', 'test-deployment'))
-				.map((draft) => draft.nodeId)
+				.map((draft) => draft.executorId)
 				.sort(),
 		).toEqual([worker, 'local'].sort());
 		workerReady = false;
@@ -213,18 +213,18 @@ describe('FileSessionRegistry', () => {
 		workerReady = true;
 		await expect(harness.registry.save(remote.id)).resolves.toBe(true);
 		expect(harness.saveText).toHaveBeenLastCalledWith(
-			expect.objectContaining({ nodeId: worker, filePath: 'same.txt', content: 'remote edit' }),
+			expect.objectContaining({ executorId: worker, filePath: 'same.txt', content: 'remote edit' }),
 			expect.anything(),
 		);
 		await harness.registry.checkFreshness(remote.id);
 		expect(harness.getFileRevision).toHaveBeenLastCalledWith(
-			expect.objectContaining({ nodeId: worker }),
+			expect.objectContaining({ executorId: worker }),
 			expect.anything(),
 		);
 		await harness.registry.destroyAll();
 	});
 
-	it('rejects a canonical identity response from the wrong node without opening a document', async () => {
+	it('rejects a canonical identity response from the wrong executor without opening a document', async () => {
 		const harness = createHarness();
 		harness.resolveFileIdentity.mockResolvedValueOnce({
 			success: true,
@@ -233,7 +233,7 @@ describe('FileSessionRegistry', () => {
 		await expect(
 			harness.registry.open({
 				...request('same.txt'),
-				nodeId: '22222222-2222-4222-8222-222222222222',
+				executorId: '22222222-2222-4222-8222-222222222222',
 			}),
 		).resolves.toBeNull();
 		expect(harness.readText).not.toHaveBeenCalled();
@@ -575,7 +575,7 @@ describe('FileSessionRegistry', () => {
 		});
 
 		expect(harness.resolveFileIdentity).toHaveBeenCalledWith({
-			nodeId: 'local',
+			executorId: 'local',
 			projectPath: '/workspace',
 			relativePath: 'current/src/file.ts',
 		});
@@ -1226,7 +1226,7 @@ describe('FileSessionRegistry', () => {
 				projectPath: '/workspace',
 				filePath: 'src/file.ts',
 				content: 'newer edit',
-				nodeId: 'local',
+				executorId: 'local',
 				expectedRevision: 'v1:first-save',
 				conflictResolution: 'reject',
 			},
@@ -1603,7 +1603,7 @@ describe('FileSessionRegistry', () => {
 				projectPath: '/workspace',
 				filePath: 'src/file.ts',
 				content: 'merged local',
-				nodeId: 'local',
+				executorId: 'local',
 				expectedRevision: 'v1:initial',
 				conflictResolution: 'reject',
 			},
@@ -1635,7 +1635,7 @@ describe('FileSessionRegistry', () => {
 				projectPath: '/workspace',
 				filePath: 'src/file.ts',
 				content: 'local',
-				nodeId: 'local',
+				executorId: 'local',
 				expectedRevision: 'v1:initial',
 				conflictResolution: 'reject',
 			},
@@ -2531,10 +2531,10 @@ describe('best-effort file recovery', () => {
 		await harness.registry.destroyAll();
 	});
 
-	it('retains an unconfirmed remote save and reconciles that same node before another write', async () => {
-		const nodeId = '22222222-2222-4222-8222-222222222222';
+	it('retains an unconfirmed remote save and reconciles that same executor before another write', async () => {
+		const executorId = '22222222-2222-4222-8222-222222222222';
 		const harness = createHarness();
-		const session = (await harness.registry.open({ ...request('file.txt'), nodeId }))!;
+		const session = (await harness.registry.open({ ...request('file.txt'), executorId }))!;
 		await vi.waitFor(() => expect(session.loading).toBe(false));
 		session.content = 'unconfirmed edit';
 		harness.saveText.mockRejectedValueOnce(
@@ -2554,7 +2554,7 @@ describe('best-effort file recovery', () => {
 		const retry = harness.registry.save(session.id);
 		await vi.waitFor(() => expect(harness.readText).toHaveBeenCalledTimes(2));
 		expect(harness.readText).toHaveBeenLastCalledWith(
-			{ nodeId, projectPath: '/workspace', filePath: 'file.txt' },
+			{ executorId, projectPath: '/workspace', filePath: 'file.txt' },
 			{ signal: expect.any(AbortSignal) },
 		);
 		expect(harness.saveText).toHaveBeenCalledOnce();
@@ -2571,7 +2571,7 @@ describe('best-effort file recovery', () => {
 		await expect(retry).resolves.toBe(true);
 		expect(harness.saveText).toHaveBeenLastCalledWith(
 			{
-				nodeId,
+				executorId,
 				projectPath: '/workspace',
 				filePath: 'file.txt',
 				content: 'newer edit',

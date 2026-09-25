@@ -116,7 +116,7 @@ describe('Git comparison HTTP API', () => {
       await mkdir(nestedProject);
       const workingTree = await postJson<{
         status: string;
-        nodeId: string;
+        executorId: string;
         instanceId: string;
         documentId: string;
         effectiveFromHash: string;
@@ -138,7 +138,7 @@ describe('Git comparison HTTP API', () => {
         files: Record<string, { patch: string }>;
       }>(fixture.client, '/api/v1/git/review-documents/files', {
         project: nestedProject,
-        document: { nodeId: workingTree.nodeId, instanceId: workingTree.instanceId, documentId: workingTree.documentId },
+        document: { executorId: workingTree.executorId, instanceId: workingTree.instanceId, documentId: workingTree.documentId },
         files: ['untracked.txt'],
         purpose: 'visible',
       });

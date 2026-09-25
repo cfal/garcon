@@ -14,7 +14,7 @@
 	import MarkdownViewerSettingsMenu from './MarkdownViewerSettingsMenu.svelte';
 	import type { FileViewSession } from '$lib/files/sessions/file-view-session.svelte.js';
 	import type { PresentationHostId } from '$lib/workspace/surface-types.js';
-	import { getFileSessions, getWorkbenchCommands, getExecutionNodes } from '$lib/context';
+	import { getFileSessions, getWorkbenchCommands, getExecutors } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import { fileSurfaceId } from '$lib/workspace/surface-types.js';
 	import ResponsiveSurfaceActions, {
@@ -42,8 +42,8 @@
 		onAppendToChatDraft,
 	}: Props = $props();
 	const files = getFileSessions();
-	const nodes = getExecutionNodes();
-	const nodeLabel = $derived(nodes.label(session.nodeId));
+	const executors = getExecutors();
+	const executorLabel = $derived(executors.label(session.executorId));
 	const commands = getWorkbenchCommands();
 	const compact = $derived(presentation === 'mobile');
 	const toolbarActions = $derived.by<ResponsiveSurfaceAction[]>(() => {
@@ -81,7 +81,7 @@
 			label: m.file_session_refresh(),
 			icon: RefreshCw,
 			onclick: () => void files.refresh(session.id),
-			disabled: !session.document.nodeAvailable || session.loading || session.mutationGuarded,
+			disabled: !session.document.executorAvailable || session.loading || session.mutationGuarded,
 			busy: session.refreshing,
 			priority: 2,
 			iconClass: session.refreshing ? 'animate-spin' : undefined,
@@ -91,7 +91,7 @@
 				id: 'compare-file',
 				label: m.file_session_compare(),
 				icon: Eye,
-				disabled: !session.document.nodeAvailable,
+				disabled: !session.document.executorAvailable,
 				onclick: () => void files.showConflict(session.id),
 				priority: 1,
 			});
@@ -136,7 +136,7 @@
 		<FilePathTitle
 			path={session.fullPath}
 			fileName={session.fileName}
-			nodeLabel={session.nodeId === 'local' ? undefined : nodeLabel}
+			executorLabel={session.executorId === 'local' ? undefined : executorLabel}
 			dirty={session.dirty}
 		/>
 		<ResponsiveSurfaceActions
@@ -163,16 +163,16 @@
 		{/if}
 	</header>
 
-	{#if !session.document.nodeAvailable}
+	{#if !session.document.executorAvailable}
 		<div
 			class="border-b border-status-warning-border bg-status-warning px-3 py-2 text-xs text-status-warning-foreground"
 			role="status"
 		>
-			Files unavailable on {nodeLabel}. Unsaved edits are retained.
+			Files unavailable on {executorLabel}. Unsaved edits are retained.
 		</div>
 	{/if}
 
-	{#if session.document.nodeAvailable && (session.isExternallyStale || session.refreshError || session.freshnessError)}
+	{#if session.document.executorAvailable && (session.isExternallyStale || session.refreshError || session.freshnessError)}
 		<FileFreshnessBanner
 			changed={session.isExternallyStale}
 			isRefreshing={session.refreshing}

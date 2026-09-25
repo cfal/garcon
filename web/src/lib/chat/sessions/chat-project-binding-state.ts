@@ -1,7 +1,7 @@
 import type { ChatSessionRecord } from '$lib/types/chat-session';
-import { effectiveNodeId } from '$shared/execution-nodes';
+import { effectiveExecutorId } from '$shared/executors';
 
-export type ProjectPathChangedListener = (chatId: string, projectPath: string | null, nodeId?: string | null) => void;
+export type ProjectPathChangedListener = (chatId: string, projectPath: string | null, executorId?: string | null) => void;
 
 export class ChatProjectBindingState {
 	readonly #revisions = new Map<string, number>();
@@ -20,19 +20,19 @@ export class ChatProjectBindingState {
 		return () => this.#listeners.delete(listener);
 	}
 
-	publish(chatId: string, projectPath: string | null, nodeId?: string | null): void {
+	publish(chatId: string, projectPath: string | null, executorId?: string | null): void {
 		this.#revisions.set(chatId, this.revision(chatId) + 1);
-		for (const listener of this.#listeners) listener(chatId, projectPath, nodeId);
+		for (const listener of this.#listeners) listener(chatId, projectPath, executorId);
 	}
 
 	publishIfChanged(
 		chatId: string,
 		previousProjectPath: string | undefined,
 		projectPath: string,
-		previousNodeId?: string | null,
-		nodeId?: string | null,
+		previousExecutorId?: string | null,
+		executorId?: string | null,
 	): void {
-		if (previousProjectPath !== projectPath || effectiveNodeId(previousNodeId) !== effectiveNodeId(nodeId)) this.publish(chatId, projectPath, nodeId);
+		if (previousProjectPath !== projectPath || effectiveExecutorId(previousExecutorId) !== effectiveExecutorId(executorId)) this.publish(chatId, projectPath, executorId);
 	}
 
 	reconcileFetchedRecord(
@@ -45,11 +45,11 @@ export class ChatProjectBindingState {
 			previous &&
 			capturedRevisions &&
 			requestRevision !== this.revision(next.id) &&
-			(next.projectPath !== previous.projectPath || effectiveNodeId(next.nodeId) !== effectiveNodeId(previous.nodeId))
+			(next.projectPath !== previous.projectPath || effectiveExecutorId(next.executorId) !== effectiveExecutorId(previous.executorId))
 		) {
-			return { ...next, nodeId: previous.nodeId, projectPath: previous.projectPath };
+			return { ...next, executorId: previous.executorId, projectPath: previous.projectPath };
 		}
-		this.publishIfChanged(next.id, previous?.projectPath, next.projectPath, previous?.nodeId, next.nodeId);
+		this.publishIfChanged(next.id, previous?.projectPath, next.projectPath, previous?.executorId, next.executorId);
 		return next;
 	}
 }

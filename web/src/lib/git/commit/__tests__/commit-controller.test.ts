@@ -106,7 +106,7 @@ function snapshot(root: GitTreeNode[]): GitWorkbenchSnapshotReady {
 		status: 'ready',
 		project: '/project',
 		target: {
-			nodeId: 'local',
+			executorId: 'local',
 			projectPath: '/project',
 			repoRoot: '/project',
 			worktreePath: '/project',
@@ -116,7 +116,7 @@ function snapshot(root: GitTreeNode[]): GitWorkbenchSnapshotReady {
 		},
 		tree,
 		reviewSummary: {
-			document: { nodeId: 'local', instanceId: 'test-instance', documentId: 'doc' },
+			document: { executorId: 'local', instanceId: 'test-instance', documentId: 'doc' },
 			documentId: 'doc',
 			project: '/project',
 			mode: 'working',
@@ -187,11 +187,11 @@ describe('CommitController', () => {
 		async (outcome) => {
 			const controller = makeController();
 			const project = {
-				nodeId: 'worker',
+				executorId: 'worker',
 				chatId: 'chat1',
 				projectPath: '/project',
 				effectiveProjectKey: '/project',
-				nodeContextKey: 'session1',
+				executorContextKey: 'session1',
 			};
 			await controller.setProjectState({ kind: 'available', project });
 			await controller.setPresentationVisible(true);
@@ -207,7 +207,7 @@ describe('CommitController', () => {
 			const reads = mockedApi.getGitWorkbenchSnapshot.mock.calls.length;
 			const recovery = controller.setProjectState({
 				kind: 'available',
-				project: { ...project, nodeContextKey: 'session2' },
+				project: { ...project, executorContextKey: 'session2' },
 			});
 			await vi.waitFor(() =>
 				expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalledTimes(reads + 1),
@@ -236,11 +236,11 @@ describe('CommitController', () => {
 	it('rejects generated text from an earlier serving session without clearing a newer generation', async () => {
 		const controller = makeController();
 		const project = {
-			nodeId: 'worker',
+			executorId: 'worker',
 			chatId: 'chat1',
 			projectPath: '/project',
 			effectiveProjectKey: '/project',
-			nodeContextKey: 'session1',
+			executorContextKey: 'session1',
 		};
 		await controller.setProjectState({ kind: 'available', project });
 		await controller.setPresentationVisible(true);
@@ -254,7 +254,7 @@ describe('CommitController', () => {
 		await vi.waitFor(() => expect(mockedApi.generateCommitMessage).toHaveBeenCalledOnce());
 		await controller.setProjectState({
 			kind: 'available',
-			project: { ...project, nodeContextKey: 'session2' },
+			project: { ...project, executorContextKey: 'session2' },
 		});
 		const newGeneration = controller.generateMessage();
 		await vi.waitFor(() => expect(mockedApi.generateCommitMessage).toHaveBeenCalledTimes(2));
@@ -374,7 +374,7 @@ describe('CommitController', () => {
 		const commitPromise = controller.commit();
 
 		expect(mockedApi.gitStagePaths).toHaveBeenCalledWith(
-			expect.objectContaining({ nodeId: 'local', projectPath: '/project' }),
+			expect.objectContaining({ executorId: 'local', projectPath: '/project' }),
 			['unstaged.ts'],
 			'stage',
 		);
@@ -384,7 +384,7 @@ describe('CommitController', () => {
 		await commitPromise;
 
 		expect(mockedApi.gitCommitIndex).toHaveBeenCalledWith(
-			expect.objectContaining({ nodeId: 'local', projectPath: '/project' }),
+			expect.objectContaining({ executorId: 'local', projectPath: '/project' }),
 			'test: commit',
 		);
 		expect(controller.isPresentationVisible).toBe(true);
@@ -402,7 +402,7 @@ describe('CommitController', () => {
 		await controller.generateMessage();
 
 		expect(mockedApi.generateCommitMessage).toHaveBeenCalledWith(
-			expect.objectContaining({ nodeId: 'local', projectPath: '/project' }),
+			expect.objectContaining({ executorId: 'local', projectPath: '/project' }),
 			['staged.ts'],
 		);
 		expect(controller.message).toBe('src/app: feat: generated');
@@ -417,7 +417,7 @@ describe('CommitController', () => {
 			kind: 'available',
 			project: {
 				chatId: 'chat',
-				nodeId: 'remote',
+				executorId: 'remote',
 				projectPath: '/project',
 				effectiveProjectKey: '/project',
 			},
@@ -429,7 +429,7 @@ describe('CommitController', () => {
 		generated.resolve({ message: 'Generated commit' });
 		await pending;
 		expect(mockedApi.generateCommitMessage).toHaveBeenCalledWith(
-			{ nodeId: 'remote', projectPath: '/project' },
+			{ executorId: 'remote', projectPath: '/project' },
 			['staged.ts'],
 		);
 		expect(controller.message).toBe('User-authored commit');
@@ -501,7 +501,7 @@ describe('CommitController', () => {
 		const generation = controller.generateMessage();
 		await vi.waitFor(() => {
 			expect(mockedApi.generateCommitMessage).toHaveBeenCalledWith(
-				expect.objectContaining({ nodeId: 'local', projectPath: '/project-a' }),
+				expect.objectContaining({ executorId: 'local', projectPath: '/project-a' }),
 				['staged.ts'],
 			);
 		});
@@ -548,7 +548,7 @@ describe('CommitController', () => {
 
 		expect(controller.isPresentationVisible).toBe(true);
 		expect(mockedApi.gitCommitIndex).toHaveBeenCalledWith(
-			expect.objectContaining({ nodeId: 'local', projectPath: '/project' }),
+			expect.objectContaining({ executorId: 'local', projectPath: '/project' }),
 			'test: commit',
 		);
 		expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalledOnce();
@@ -642,7 +642,7 @@ describe('CommitController', () => {
 		stage.resolve({ success: true });
 		await vi.waitFor(() => {
 			expect(mockedApi.generateCommitMessage).toHaveBeenCalledWith(
-				expect.objectContaining({ nodeId: 'local', projectPath: '/project' }),
+				expect.objectContaining({ executorId: 'local', projectPath: '/project' }),
 				['unstaged.ts'],
 			);
 		});
@@ -682,7 +682,7 @@ describe('CommitController', () => {
 
 		expect(mockedApi.gitStagePaths).toHaveBeenCalledOnce();
 		expect(mockedApi.gitStagePaths).toHaveBeenCalledWith(
-			expect.objectContaining({ nodeId: 'local', projectPath: '/project' }),
+			expect.objectContaining({ executorId: 'local', projectPath: '/project' }),
 			['src/a.ts', 'src/b.ts'],
 			'stage',
 		);
@@ -716,7 +716,7 @@ describe('CommitController', () => {
 
 		expect(mockedApi.gitStagePaths).toHaveBeenCalledOnce();
 		expect(mockedApi.gitStagePaths).toHaveBeenCalledWith(
-			expect.objectContaining({ nodeId: 'local', projectPath: '/project' }),
+			expect.objectContaining({ executorId: 'local', projectPath: '/project' }),
 			['src/a.ts', 'src/b.ts'],
 			'unstage',
 		);
@@ -741,7 +741,7 @@ describe('CommitController', () => {
 
 		expect(mockedApi.gitStagePaths).toHaveBeenCalledOnce();
 		expect(mockedApi.gitStagePaths).toHaveBeenCalledWith(
-			expect.objectContaining({ nodeId: 'local', projectPath: '/project' }),
+			expect.objectContaining({ executorId: 'local', projectPath: '/project' }),
 			['src/unstaged.ts'],
 			'stage',
 		);
@@ -827,7 +827,7 @@ describe('CommitController', () => {
 		const pending = controller.generateMessage();
 		await vi.waitFor(() =>
 			expect(mockedApi.generateCommitMessage).toHaveBeenCalledWith(
-				expect.objectContaining({ nodeId: 'local', projectPath: '/repo/worktree' }),
+				expect.objectContaining({ executorId: 'local', projectPath: '/repo/worktree' }),
 				['staged.ts'],
 			),
 		);

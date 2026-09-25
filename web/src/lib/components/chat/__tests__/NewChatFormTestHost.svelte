@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { setExecutionNodesTestContext } from '$lib/execution-nodes/__tests__/execution-nodes-test-context';
-	setExecutionNodesTestContext();
+	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
+	setExecutorsTestContext();
 	import NewChatForm from '../NewChatForm.svelte';
 	import { setCanonicalWorkspaceLayout } from './workspace-layout-test-context.js';
 	import {
@@ -185,7 +185,7 @@
 	);
 
 	setModelCatalog({
-		forNode() { return this; },
+		forExecutor() { return this; },
 		get isValidated() { return catalogValidated; },
 		get error() { return catalogError; },
 		get lastValidatedAt() { return catalogValidated ? 1 : null; },

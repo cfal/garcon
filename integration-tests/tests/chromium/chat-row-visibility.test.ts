@@ -11,7 +11,7 @@ import type {
   CliPresentation,
   CliRowFormat,
 } from '../../../common/cli-presentation.js';
-import { TranscriptLedgerStore } from '../../../server/ledger/store.js';
+import { TranscriptLedgerStore } from '../../../server/controller/ledger/store.js';
 import {
   authenticateChromiumContext,
   withChromiumFixture,
@@ -341,14 +341,14 @@ async function expectComposerStable(page: Page, value: string): Promise<void> {
         ? feed.scrollHeight - feed.clientHeight - feed.scrollTop
         : Number.POSITIVE_INFINITY,
       focused: document.activeElement === scope.__chatRowComposer,
-      sameNode: scope.__chatRowComposer?.isConnected === true,
+      sameExecutor: scope.__chatRowComposer?.isConnected === true,
       value: scope.__chatRowComposer?.value ?? null,
     };
   });
   expect(snapshot).toEqual({
     distanceFromEnd: expect.any(Number),
     focused: true,
-    sameNode: true,
+    sameExecutor: true,
     value,
   });
   expect(Math.abs(snapshot.distanceFromEnd)).toBeLessThanOrEqual(1);

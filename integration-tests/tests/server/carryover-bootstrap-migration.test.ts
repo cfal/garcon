@@ -10,12 +10,12 @@ import {
   type ChatMessage,
   UserMessage,
 } from '../../../common/chat-types.js';
-import { encodeCarryOverPages } from '../../../server/chats/carryover-page-codec.js';
-import { rollbackLegacyCarryOverMigration } from '../../../server/chats/chat-carryover-rollback.js';
-import { ChatRegistry } from '../../../server/chats/store.js';
-import { transcriptViewId } from '../../../server/ledger/contracts.js';
-import { TranscriptLedgerStore } from '../../../server/ledger/store.js';
-import { CURRENT_WORKSPACE_VERSION } from '../../../server/migrations/index.js';
+import { encodeCarryOverPages } from '../../../server/controller/chats/carryover-page-codec.js';
+import { rollbackLegacyCarryOverMigration } from '../../../server/controller/chats/chat-carryover-rollback.js';
+import { ChatRegistry } from '../../../server/controller/chats/store.js';
+import { transcriptViewId } from '../../../server/controller/ledger/contracts.js';
+import { TranscriptLedgerStore } from '../../../server/controller/ledger/store.js';
+import { CURRENT_WORKSPACE_VERSION } from '../../../server/controller/migrations/index.js';
 import {
   type IntegrationDirectories,
   type IntegrationFixture,
@@ -310,7 +310,7 @@ async function writeLegacyWorkspace(directories: IntegrationDirectories): Promis
 async function writeMissingManifestWorkspace(directories: IntegrationDirectories): Promise<void> {
   const agentA = DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID;
   const agentB = DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID;
-  const nodeDirectory = join(
+  const executorDirectory = join(
     directories.workspace,
     'carryover-transcripts',
     'nodes',
@@ -318,9 +318,9 @@ async function writeMissingManifestWorkspace(directories: IntegrationDirectories
   );
   const messages = [new UserMessage(TIMESTAMP, 'healthy-linked-user')];
   const encoded = await encodeCarryOverPages(messages);
-  await mkdir(join(nodeDirectory, 'pages'), { recursive: true });
+  await mkdir(join(executorDirectory, 'pages'), { recursive: true });
   await Promise.all(encoded.map((page) => (
-    writeFile(join(nodeDirectory, page.descriptor.file), page.bytes)
+    writeFile(join(executorDirectory, page.descriptor.file), page.bytes)
   )));
   await Promise.all([
     writeFile(
@@ -380,7 +380,7 @@ async function writeMissingManifestWorkspace(directories: IntegrationDirectories
       join(directories.workspace, 'agent-ownership-journal.json'),
       JSON.stringify({ version: 2, ownershipIntents: [], transferCleanup: [] }),
     ),
-    writeFile(join(nodeDirectory, 'manifest.json'), JSON.stringify({
+    writeFile(join(executorDirectory, 'manifest.json'), JSON.stringify({
       version: 1,
       kind: 'materialized',
       id: HEALTHY_LINKED_NODE_ID,

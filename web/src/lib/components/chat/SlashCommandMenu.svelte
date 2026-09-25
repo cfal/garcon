@@ -18,8 +18,8 @@
 	const COMMAND_LIST_HEIGHT = 240;
 
 	interface Props {
-		nodeContextKey?: string;
-		nodeId?: string;
+		executorContextKey?: string;
+		executorId?: string;
 		agent: string;
 		projectPath: string;
 		chatId?: string | null;
@@ -36,8 +36,8 @@
 	}
 
 	let {
-		nodeContextKey = '',
-		nodeId = 'local',
+		executorContextKey = '',
+		executorId = 'local',
 		agent,
 		projectPath,
 		chatId = null,
@@ -63,7 +63,7 @@
 
 	let fetchedKey = '';
 	let activeLoad: AbortController | null = null;
-	const contextKey = $derived(JSON.stringify([nodeId, nodeContextKey, agent, chatId, projectPath]));
+	const contextKey = $derived(JSON.stringify([executorId, executorContextKey, agent, chatId, projectPath]));
 
 	// Defers fetch until the menu becomes visible for the first time.
 	// Re-fetches when the agent/project identity changes.
@@ -77,7 +77,7 @@
 		const controller = new AbortController();
 		activeLoad = controller;
 
-		getSlashCommands({ nodeId, agent, chatId, projectPath }, { signal: controller.signal })
+		getSlashCommands({ executorId, agent, chatId, projectPath }, { signal: controller.signal })
 			.then((commands) => {
 				if (!controller.signal.aborted) {
 					allCommands = commands;

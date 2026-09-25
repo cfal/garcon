@@ -161,11 +161,11 @@ describe('Lightpanda Git comparison', () => {
           try {
             const parsed = JSON.parse(raw) as {
               version?: unknown;
-              entries?: Array<{ chatId?: unknown; nodeId?: unknown }>;
+              entries?: Array<{ chatId?: unknown; executorId?: unknown }>;
             };
             return (
               parsed.version === 3 &&
-              parsed.entries?.some((entry) => entry.nodeId === 'local' && entry.chatId === chatId) === true
+              parsed.entries?.some((entry) => entry.executorId === 'local' && entry.chatId === chatId) === true
             );
           } catch {
             return false;
@@ -261,11 +261,11 @@ describe('Lightpanda Git comparison', () => {
           try {
             const parsed = JSON.parse(raw) as {
               version?: unknown;
-              projectEntries?: Array<{ projectPath?: unknown; nodeId?: unknown }>;
+              projectEntries?: Array<{ projectPath?: unknown; executorId?: unknown }>;
             };
             return (
               parsed.version === 3 &&
-              parsed.projectEntries?.some((entry) => entry.nodeId === 'local' && entry.projectPath === projectPath) === true
+              parsed.projectEntries?.some((entry) => entry.executorId === 'local' && entry.projectPath === projectPath) === true
             );
           } catch {
             return false;

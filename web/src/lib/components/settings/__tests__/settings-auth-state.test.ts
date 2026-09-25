@@ -82,13 +82,13 @@ describe('SettingsAuthState login lifecycle', () => {
 		expect(settingsAuth.deviceAuthFor('codex')).toEqual(DEVICE_AUTH);
 	});
 
-	it('routes login to the selected node and ignores replies after leaving that node', async () => {
-		const nodeId = '22222222-2222-4222-8222-222222222222';
+	it('routes login to the selected executor and ignores replies after leaving that executor', async () => {
+		const executorId = '22222222-2222-4222-8222-222222222222';
 		const launched = deferred<Awaited<ReturnType<typeof launchAgentAuthLogin>>>();
 		vi.mocked(launchAgentAuthLogin).mockReturnValueOnce(launched.promise);
-		const remote = new SettingsAuthState(createModelCatalog(), nodeId);
+		const remote = new SettingsAuthState(createModelCatalog(), executorId);
 		const pending = remote.handleLogin('codex');
-		expect(launchAgentAuthLogin).toHaveBeenCalledWith('codex', nodeId);
+		expect(launchAgentAuthLogin).toHaveBeenCalledWith('codex', executorId);
 		remote.destroy();
 		launched.resolve({ launched: true, alreadyRunning: false, sessionId: SESSION_ID, deviceAuth: DEVICE_AUTH });
 		await pending;

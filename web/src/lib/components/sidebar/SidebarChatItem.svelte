@@ -161,7 +161,7 @@
 
 	const appShell = getAppShell();
 	const rootModelCatalog = getModelCatalog();
-	const modelCatalog = $derived(rootModelCatalog.forNode(session.nodeId));
+	const modelCatalog = $derived(rootModelCatalog.forExecutor(session.executorId));
 	const windowDnd = getWorkspaceWindowDnd();
 	const canFork = $derived(modelCatalog.supportsFork(agentId));
 	const hasChatPlacement = $derived(windowDnd.hasChatPlacement(session.id));

@@ -5,7 +5,7 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { join } from 'node:path';
-import { CURRENT_WORKSPACE_VERSION } from '../../../server/migrations/index.js';
+import { CURRENT_WORKSPACE_VERSION } from '../../../server/controller/migrations/index.js';
 import {
   assistantContents,
   userContents,

@@ -10,7 +10,7 @@
 		projectState,
 		retainedProjectPath,
 		retainedEffectiveProjectKey,
-		retainedNodeId,
+		retainedExecutorId,
 		target,
 		onChooseFolder,
 		children,
@@ -18,7 +18,7 @@
 		projectState: WorkspaceProjectState;
 		retainedProjectPath: string | null;
 		retainedEffectiveProjectKey: string | null;
-		retainedNodeId?: string;
+		retainedExecutorId?: string;
 		target: ProjectTarget | null;
 		onChooseFolder?: () => void;
 		children: Snippet;
@@ -29,16 +29,16 @@
 		if (projectState.kind === 'absent') return retainedEffectiveProjectKey === null;
 		return (
 			projectState.kind === 'available' &&
-			(retainedNodeId === undefined ||
-				retainedNodeId === (projectState.project.nodeId ?? 'local')) &&
+			(retainedExecutorId === undefined ||
+				retainedExecutorId === (projectState.project.executorId ?? 'local')) &&
 			retainedEffectiveProjectKey === projectState.project.effectiveProjectKey
 		);
 	});
 	const resolvingSamePath = $derived(
 		(projectState.kind === 'unchecked' || projectState.kind === 'resolving') &&
 			retainedEffectiveProjectKey !== null &&
-			(retainedNodeId === undefined ||
-				retainedNodeId === (projectState.context.nodeId ?? 'local')) &&
+			(retainedExecutorId === undefined ||
+				retainedExecutorId === (projectState.context.executorId ?? 'local')) &&
 			retainedProjectPath === projectState.context.projectPath,
 	);
 	const blocked = $derived(projectState.kind === 'resolving' || !synchronized);

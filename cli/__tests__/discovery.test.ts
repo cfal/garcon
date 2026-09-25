@@ -39,7 +39,7 @@ async function fixture(overrides: Record<string, unknown> = {}): Promise<{
   roots.push(configDir);
   const workspaceDir = path.join(configDir, 'workspace-review');
   await fs.mkdir(workspaceDir);
-  const directory = overrides.kind === 'execution-node-cli' ? path.join(configDir, 'execution-node') : configDir;
+  const directory = overrides.kind === 'executor-cli' ? path.join(configDir, 'executor') : configDir;
   await fs.mkdir(directory, { recursive: true });
   const descriptorPath = path.join(directory, SERVER_RUNTIME_FILENAME);
   const descriptor = {
@@ -58,16 +58,16 @@ async function fixture(overrides: Record<string, unknown> = {}): Promise<{
 
 describe('discoverRuntime', () => {
   test('explicit gateway discovery separates endpoint and controller identities without a local workspace', async () => {
-    const testFixture = await fixture({ kind: 'execution-node-cli', workspaceDir: undefined });
-    const nodeId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
-    const options = { configDir: testFixture.configDir, runtime: 'execution-node' as const };
+    const testFixture = await fixture({ kind: 'executor-cli', workspaceDir: undefined });
+    const executorId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const options = { configDir: testFixture.configDir, runtime: 'executor' as const };
     const fetch: typeof globalThis.fetch = async (input) => String(input).endsWith('/cli/context')
-      ? Response.json({ serverInstanceId: 'controller', defaultNodeId: nodeId, workspaceName: null })
+      ? Response.json({ serverInstanceId: 'controller', defaultExecutorId: executorId, workspaceName: null })
       : Response.json({ schemaVersion: 1, instanceId: testFixture.descriptor.instanceId,
         proof: runtimeProof(String(testFixture.descriptor.localCapability), String(testFixture.descriptor.instanceId), input) });
     expect(await discoverRuntime(options, { fetch })).toMatchObject({
       instanceId: 'controller', endpointInstanceId: testFixture.descriptor.instanceId,
-      defaultNodeId: nodeId, workspaceName: null, workspaceDir: null,
+      defaultExecutorId: executorId, workspaceName: null, workspaceDir: null,
     });
     await expect(discoverRuntime({ ...options, runtime: 'controller' }, { fetch })).rejects.toThrow('no controller runtime file');
     if (process.platform !== 'win32') {
@@ -85,7 +85,7 @@ describe('discoverRuntime', () => {
     }, {
       fetch: async (input, init) => {
         authorizationHeaders.push(new Headers(init?.headers).get('authorization'));
-        if (String(input).endsWith('/cli/context')) return Response.json({ serverInstanceId: testFixture.descriptor.instanceId, defaultNodeId: 'local', workspaceName: 'review' });
+        if (String(input).endsWith('/cli/context')) return Response.json({ serverInstanceId: testFixture.descriptor.instanceId, defaultExecutorId: 'local', workspaceName: 'review' });
         return Response.json({
           schemaVersion: SERVER_RUNTIME_SCHEMA_VERSION,
           instanceId: testFixture.descriptor.instanceId,
@@ -103,7 +103,7 @@ describe('discoverRuntime', () => {
       baseUrl: 'http://127.0.0.1:8080',
       instanceId: testFixture.descriptor.instanceId,
       endpointInstanceId: testFixture.descriptor.instanceId,
-      defaultNodeId: 'local',
+      defaultExecutorId: 'local',
       workspaceName: 'review',
       localCapability: testFixture.descriptor.localCapability,
       workspaceDir: testFixture.workspaceDir,
@@ -214,7 +214,7 @@ describe('discoverRuntime', () => {
       runtime: 'controller',
     }, {
       fetch: async (input) => String(input).endsWith('/cli/context')
-        ? Response.json({ serverInstanceId: descriptor.instanceId, defaultNodeId: 'local', workspaceName: 'review-target' })
+        ? Response.json({ serverInstanceId: descriptor.instanceId, defaultExecutorId: 'local', workspaceName: 'review-target' })
         : Response.json({
         schemaVersion: SERVER_RUNTIME_SCHEMA_VERSION,
         instanceId: descriptor.instanceId,
@@ -237,7 +237,7 @@ describe('discoverRuntime', () => {
     roots.push(alias);
     await fs.symlink(f.configDir, alias, 'dir');
     const fetch: typeof globalThis.fetch = async (input) => String(input).endsWith('/cli/context')
-      ? Response.json({ serverInstanceId: f.descriptor.instanceId, defaultNodeId: 'local', workspaceName: 'review' })
+      ? Response.json({ serverInstanceId: f.descriptor.instanceId, defaultExecutorId: 'local', workspaceName: 'review' })
       : Response.json({ schemaVersion: 1, instanceId: f.descriptor.instanceId,
         proof: runtimeProof(String(f.descriptor.localCapability), String(f.descriptor.instanceId), input) });
     expect((await discoverRuntime({ configDir: alias }, { fetch })).instanceId).toBe(f.descriptor.instanceId);

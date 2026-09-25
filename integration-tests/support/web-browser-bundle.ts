@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const WEB_ROOT = fileURLToPath(new URL("../../web/", import.meta.url));
+const WEB_ROOT = fileURLToPath(new URL("../../web", import.meta.url));
 
 export async function buildWebBrowserEntry(
   entrypoint: string,

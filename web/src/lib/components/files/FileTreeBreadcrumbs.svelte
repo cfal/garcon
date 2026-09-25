@@ -17,11 +17,11 @@
 	let {
 		breadcrumbs,
 		onNavigate,
-		nodeCrumb,
+		executorCrumb,
 	}: {
 		breadcrumbs: readonly FileTreeBreadcrumb[];
 		onNavigate: (index: number) => void;
-		nodeCrumb?: Snippet;
+		executorCrumb?: Snippet;
 	} = $props();
 
 	let root = $state<HTMLElement | null>(null);
@@ -93,8 +93,8 @@
 	class="relative flex h-8 min-w-0 shrink-0 items-center overflow-hidden border-b border-border bg-background px-2 text-xs"
 	data-file-tree-breadcrumbs
 >
-	{#if nodeCrumb}
-		{@render nodeCrumb()}
+	{#if executorCrumb}
+		{@render executorCrumb()}
 		{#if breadcrumbs.length > 0}
 			<ChevronRight class="mx-0.5 size-3 shrink-0 text-muted-foreground" aria-hidden="true" />
 		{/if}

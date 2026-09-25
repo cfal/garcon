@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	SidebarChatReorderState,
 	type SidebarChatOrderMap,
-} from '../sidebar-chat-reorder-state.svelte';
+} from '../sidebar-chat-reorder-state.svelte.ts';
 
 function buildOrders(normal: string[]): SidebarChatOrderMap {
 	return {

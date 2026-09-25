@@ -3,7 +3,7 @@ import { withTimeout } from '../../support/deferred.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { webSocketProtocolsForAuth } from '../../../common/ws-auth.js';
 
-test.each(['remote-controller-dials', 'remote-node-dials'] as const)('the primary payload limit does not constrain the execution-node channel (%s)', async (executionBackend) => {
+test.each(['remote-controller-dials', 'remote-executor-dials'] as const)('the primary payload limit does not constrain the executor channel (%s)', async (executionBackend) => {
   await withIntegrationFixture('primary-payload-limit', async (fixture) => {
     const socket = new WebSocket(fixture.garcon.baseUrl.replace(/^http/, 'ws') + '/ws', webSocketProtocolsForAuth(fixture.garcon.authToken));
     const opened = new Promise<void>((resolve, reject) => {

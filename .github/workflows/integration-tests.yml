@@ -59,8 +59,8 @@ jobs:
             path: tests/sacs
             shard: "1/1"
             test_timeout: 120000
-            artifact_suffix: sacs-remote-node-dials
-            execution_backend: remote-node-dials
+            artifact_suffix: sacs-remote-executor-dials
+            execution_backend: remote-executor-dials
 
     steps:
       - name: Check out repository

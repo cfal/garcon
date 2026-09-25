@@ -82,10 +82,10 @@ export class WorkbenchCommandRegistry {
 		);
 		if (tree && fileRootPath) {
 			for (const entry of tree.knownFiles) {
-				const key = fileIdentityKey(fileRootPath, entry.relativePath, tree.nodeId);
+				const key = fileIdentityKey(fileRootPath, entry.relativePath, tree.executorId);
 				if (byKey.has(key)) continue;
 				byKey.set(key, {
-					nodeId: tree.nodeId,
+					executorId: tree.executorId,
 					key,
 					canonicalFileRootPath: fileRootPath,
 					normalizedRelativePath: entry.relativePath,
@@ -150,7 +150,7 @@ export class WorkbenchCommandRegistry {
 			? windowIdOfSurface(this.deps.workspace.layout.snapshot.desktopRoot, context.surfaceId)
 			: null;
 		const opened = await this.deps.files.open({
-			nodeId: location.nodeId,
+			executorId: location.executorId,
 			fileRootPath: location.canonicalFileRootPath,
 			relativePath: location.normalizedRelativePath,
 			mode: rendererModeForNavigation(location.viewPreference),
@@ -306,7 +306,7 @@ export class WorkbenchCommandRegistry {
 					await this.deps.workspace.openSingleton('files');
 					this.deps
 						.filesSurface()
-						.revealFile(session.canonicalFileRootPath, session.relativePath, session.nodeId);
+						.revealFile(session.canonicalFileRootPath, session.relativePath, session.executorId);
 				},
 			},
 			{
@@ -393,8 +393,8 @@ export class WorkbenchCommandRegistry {
 				category: 'Workspace',
 				isVisible: () =>
 					!this.deps.terminals.hasRemoteHosts &&
-					this.deps.terminals.canCreate(this.deps.workspace.terminalCreationNodeId),
-				isEnabled: () => this.deps.terminals.canCreate(this.deps.workspace.terminalCreationNodeId),
+					this.deps.terminals.canCreate(this.deps.workspace.terminalCreationExecutorId),
+				isEnabled: () => this.deps.terminals.canCreate(this.deps.workspace.terminalCreationExecutorId),
 				run: () => this.deps.workspace.createTerminalInAvailableSpace('command-menu:new-terminal'),
 			},
 			open('workspace-git', m.command_switch_to_git(), 'git'),

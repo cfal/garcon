@@ -1,20 +1,20 @@
 <script lang="ts">
 	import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte.js';
-	import type { ExecutionNodesStore } from '$lib/execution-nodes/execution-nodes-store.svelte.js';
+	import type { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
 
-	let { nodeId, nodes, catalog, providerAvailable = true }: {
+	let { executorId, executors, catalog, providerAvailable = true }: {
 		providerAvailable?: boolean;
-		nodeId: string;
-		nodes: Pick<ExecutionNodesStore, 'isReady' | 'hasSnapshot' | 'get' | 'label'>;
+		executorId: string;
+		executors: Pick<ExecutorsStore, 'isReady' | 'hasSnapshot' | 'get' | 'label'>;
 		catalog: Pick<ModelCatalogStore, 'isValidated' | 'error' | 'forceRefresh'>;
 	} = $props();
 </script>
 
-{#if !nodes.isReady(nodeId)}
-	<p role="status" class="break-words px-4 py-2 text-sm text-muted-foreground" title={nodeId}>
-		{#if nodes.hasSnapshot && !nodes.get(nodeId)}
-			This chat's execution node is no longer configured.
-		{:else}{nodes.label(nodeId)} is unavailable.{/if}
+{#if !executors.isReady(executorId)}
+	<p role="status" class="break-words px-4 py-2 text-sm text-muted-foreground" title={executorId}>
+		{#if executors.hasSnapshot && !executors.get(executorId)}
+			This chat's executor is no longer configured.
+		{:else}{executors.label(executorId)} is unavailable.{/if}
 	</p>
 {:else if catalog.error}
 	<div role="status" class="flex items-center gap-2 px-4 py-2 text-sm text-muted-foreground">
@@ -26,5 +26,5 @@
 		>
 	</div>
 {:else if catalog.isValidated && !providerAvailable}
-	<p role="status" class="break-words px-4 py-2 text-sm text-muted-foreground">The selected provider or model is unavailable on this node.</p>
+	<p role="status" class="break-words px-4 py-2 text-sm text-muted-foreground">The selected provider or model is unavailable on this executor.</p>
 {/if}

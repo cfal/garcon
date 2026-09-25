@@ -28,7 +28,7 @@ import {
 import { GarconProcess } from './garcon-process.js';
 import { ExecutionBackendFixture, executionBackend, type ExecutionBackend } from './execution-backend.js';
 
-const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url));
+const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const ARTIFACT_ROOT = join(REPO_ROOT, 'integration-tests', 'artifacts', 'server');
 let chatIdSequence = 0;
 
@@ -254,7 +254,7 @@ export class IntegrationFixture {
       ...dirs,
       project: options.projectRoots === 'separate' ? join(root, 'worker-project') : dirs.project,
       config: workerConfigDir,
-      workspace: join(workerConfigDir, 'execution-node'),
+      workspace: join(workerConfigDir, 'executor'),
       home: join(root, 'worker-home'),
     };
     await Promise.all(Object.values(executionDirs).map((directory) => mkdir(directory, { recursive: true })));
@@ -290,7 +290,7 @@ export class IntegrationFixture {
       });
       client = await GarconTestClient.connect(garcon.baseUrl, {
         authToken: garcon.authToken,
-        nodeId: backend.nodeId,
+        executorId: backend.executorId,
         redactSensitiveDiagnostics: options.redactSensitiveDiagnostics,
       });
       await client.ping();
@@ -318,7 +318,7 @@ export class IntegrationFixture {
       await client.updateSettings({
         ui: {
           chatTitle: options.chatTitleEnabled || hasExplicitTitleAgent ? {
-            nodeId: backend.nodeId,
+            executorId: backend.executorId,
             enabled: options.chatTitleEnabled === true,
             agentId: titleAgent.agentId,
             model: titleAgent.provider.model,
@@ -378,7 +378,7 @@ export class IntegrationFixture {
     }
     const observer = await GarconTestClient.connect(this.garcon.baseUrl, {
       authToken: this.garcon.authToken,
-      nodeId: this.#backend.nodeId,
+      executorId: this.#backend.executorId,
       redactSensitiveDiagnostics: this.#redactSensitiveDiagnostics,
     });
     try {
@@ -404,12 +404,12 @@ export class IntegrationFixture {
   async crashAndRestartGarcon(options: {
     reusePort?: boolean;
     beforeStart?: () => Promise<void>;
-    preserveExecutionWorker?: boolean;
+    preserveExecutorWorker?: boolean;
   } = {}): Promise<void> {
     const previousPort = Number(new URL(this.garcon.baseUrl).port);
     await this.#closeClients();
     await this.garcon.crash();
-    if (!options.preserveExecutionWorker) await this.#backend.stop();
+    if (!options.preserveExecutorWorker) await this.#backend.stop();
     const expiredAt = new Date(Date.now() - 60_000);
     for (const directory of new Set([this.dirs.config, this.dirs.workspace])) {
       await utimes(join(directory, '.garcon-workspace.lock'), expiredAt, expiredAt);
@@ -420,7 +420,7 @@ export class IntegrationFixture {
     await this.#startReplacementGarcon(options.reusePort ? previousPort : undefined);
   }
 
-  async crashAndRestartExecutionWorker(projectBasePath?: string): Promise<void> {
+  async crashAndRestartExecutorWorker(projectBasePath?: string): Promise<void> {
     await this.#backend.crashAndRestartWorker(projectBasePath);
   }
 
@@ -589,7 +589,7 @@ export class IntegrationFixture {
     });
     this.client = await GarconTestClient.connect(this.garcon.baseUrl, {
       authToken: this.garcon.authToken,
-      nodeId: this.#backend.nodeId,
+      executorId: this.#backend.executorId,
       redactSensitiveDiagnostics: this.#redactSensitiveDiagnostics,
     });
     this.#clients.set('primary', this.client);

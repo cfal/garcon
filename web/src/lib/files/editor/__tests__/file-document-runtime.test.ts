@@ -8,7 +8,7 @@ import {
 
 function document() {
 	const value = new FileDocumentState(
-		{ nodeId: 'local', canonicalFileRootPath: '/workspace', normalizedRelativePath: 'src/file.ts' },
+		{ executorId: 'local', canonicalFileRootPath: '/workspace', normalizedRelativePath: 'src/file.ts' },
 		'["/workspace","src/file.ts"]',
 	);
 	value.baseline = 'abc';

@@ -2,9 +2,9 @@
 	import type { Snippet } from 'svelte';
 	import Folder from '@lucide/svelte/icons/folder';
 	import LocateFixed from '@lucide/svelte/icons/locate-fixed';
-	import ExecutionNodeSelector from '$lib/components/shared/ExecutionNodeSelector.svelte';
+	import ExecutorSelector from '$lib/components/shared/ExecutorSelector.svelte';
 	import GitTargetDialog from './GitTargetDialog.svelte';
-	import { getRemoteSettings, getTransientLayers, getExecutionNodes } from '$lib/context';
+	import { getRemoteSettings, getTransientLayers, getExecutors } from '$lib/context';
 	import { togglePinnedProjectPathOptimistically } from '$lib/chat/project-paths/pinned-project-path-settings.js';
 	import type { GitProjectSelectionController } from '$lib/git/targets/git-project-selection.svelte.js';
 	import type { GitTargetCandidate } from '$lib/api/git.js';
@@ -15,7 +15,7 @@
 		path,
 		isMobile,
 		disabled = false,
-		onSelectNode,
+		onSelectExecutor,
 		onSelectFolder,
 		onGoToChatProject,
 		children,
@@ -24,29 +24,29 @@
 		path: string | null;
 		isMobile: boolean;
 		disabled?: boolean;
-		onSelectNode: (nodeId: string) => void;
+		onSelectExecutor: (executorId: string) => void;
 		onSelectFolder: (candidate: GitTargetCandidate) => void;
 		onGoToChatProject: () => void;
 		children?: Snippet;
 	} = $props();
-	const nodes = getExecutionNodes();
+	const executors = getExecutors();
 	const remoteSettings = getRemoteSettings();
 	const transientLayers = getTransientLayers();
-	const nodeId = $derived(selection.nodeId);
+	const executorId = $derived(selection.executorId);
 	const selectedPath = $derived(
 		selection.projectState.kind === 'available' ? path : selection.projectPath,
 	);
 	const folderLabel = $derived(selectedPath || m.git_panel_select_project());
-	const canSelectFolder = $derived(!disabled && nodes.gitAvailable(nodeId));
+	const canSelectFolder = $derived(!disabled && executors.gitAvailable(executorId));
 	const projectBasePath = $derived(
-		nodes.get(nodeId)?.projectBasePath ??
-			(nodeId === 'local' ? remoteSettings.snapshot?.projectBasePath : null) ??
+		executors.get(executorId)?.projectBasePath ??
+			(executorId === 'local' ? remoteSettings.snapshot?.projectBasePath : null) ??
 			'/',
 	);
 	const pinnedProjectPaths = $derived(
-		(nodeId === 'local'
+		(executorId === 'local'
 			? remoteSettings.snapshot?.paths.pinnedProjectPaths
-			: remoteSettings.snapshot?.paths.byNode?.[nodeId]?.pinnedPaths) ?? [],
+			: remoteSettings.snapshot?.paths.byExecutor?.[executorId]?.pinnedPaths) ?? [],
 	);
 
 	function openFolder(): void {
@@ -59,13 +59,13 @@
 </script>
 
 <div class="flex min-w-0 flex-1 items-center gap-1" data-git-project-selector>
-	<ExecutionNodeSelector
-		{nodes}
-		{nodeId}
+	<ExecutorSelector
+		{executors}
+		{executorId}
 		service="git"
 		class="min-w-26"
 		{disabled}
-		onSelect={onSelectNode}
+		onSelect={onSelectExecutor}
 	/>
 	{@render children?.()}
 	<button
@@ -96,7 +96,7 @@
 
 {#if selection.showFolderDialog}
 	<GitTargetDialog
-		{nodeId}
+		{executorId}
 		{isMobile}
 		initialPath={selectedPath || projectBasePath}
 		{projectBasePath}
@@ -106,6 +106,6 @@
 			selection.showFolderDialog = false;
 		}}
 		onTogglePinnedProjectPath={(folder) =>
-			void togglePinnedProjectPathOptimistically(remoteSettings, folder, { nodeId })}
+			void togglePinnedProjectPathOptimistically(remoteSettings, folder, { executorId })}
 	/>
 {/if}

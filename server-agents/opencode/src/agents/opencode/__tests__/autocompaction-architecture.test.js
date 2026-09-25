@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { existsSync, readFileSync } from 'node:fs';
 import { buildOpenCodeServerEnv } from '../server-instance.ts';
 
-const PACKAGE_ROOT = new URL('../../../../', import.meta.url);
+const PACKAGE_ROOT = new URL('../../../..', import.meta.url);
 
 describe('OpenCode V1 automatic compaction architecture', () => {
   it('[TLV5-OPENCODE.02-UNIT-01] does not force autocompaction off and preserves operator overrides', () => {

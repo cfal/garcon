@@ -46,7 +46,7 @@ export class SettingsAuthState {
 	deviceAuthInfo = $state<Partial<Record<SettingsAgentId, DeviceAuthInfo>>>({});
 	loginPending = $state<Partial<Record<SettingsAgentId, boolean>>>({});
 
-	constructor(modelCatalog: ModelCatalogStore, readonly nodeId = 'local') {
+	constructor(modelCatalog: ModelCatalogStore, readonly executorId = 'local') {
 		this.#modelCatalog = modelCatalog;
 	}
 
@@ -113,7 +113,7 @@ export class SettingsAuthState {
 		this.loginPending = { ...this.loginPending, [agentId]: true };
 
 		try {
-			const result = await launchAgentAuthLogin(agentId, this.nodeId);
+			const result = await launchAgentAuthLogin(agentId, this.executorId);
 			if (!this.#isCurrentLoginOperation(agentId, operationGeneration, lifecycleId)) return;
 			this.#loginSessionIds[agentId] = result.sessionId;
 			if (result.deviceAuth) {
@@ -150,7 +150,7 @@ export class SettingsAuthState {
 		this.loginPending = { ...this.loginPending, [agentId]: true };
 
 		try {
-			await completeAgentAuthLogin(agentId, sessionId, code, this.nodeId);
+			await completeAgentAuthLogin(agentId, sessionId, code, this.executorId);
 			if (!this.#ownsSession(agentId, sessionId, operationGeneration, lifecycleId)) return;
 			this.#startLoginSessionPolling(agentId, sessionId, operationGeneration, lifecycleId);
 		} catch (err) {
@@ -176,7 +176,7 @@ export class SettingsAuthState {
 	): Promise<boolean | undefined> {
 		const authRequestGeneration = this.#beginAuthRequest(agentId);
 		try {
-			const data = await getAgentAuthStatus(agentId, this.nodeId);
+			const data = await getAgentAuthStatus(agentId, this.executorId);
 			if (
 				!this.#canApplyAgentResult(agentId, lifecycleId, operationGeneration, authRequestGeneration)
 			)
@@ -207,7 +207,7 @@ export class SettingsAuthState {
 
 	async #checkReadiness(lifecycleId: number): Promise<void> {
 		try {
-			const readiness = await getAgentReadiness(this.nodeId);
+			const readiness = await getAgentReadiness(this.executorId);
 			if (this.#isActive(lifecycleId)) this.readinessByAgent = readiness;
 		} catch {
 			if (this.#isActive(lifecycleId)) this.readinessByAgent = {};
@@ -280,7 +280,7 @@ export class SettingsAuthState {
 
 		let status: Awaited<ReturnType<typeof getAgentAuthLoginStatus>> | undefined;
 		try {
-			status = await getAgentAuthLoginStatus(agentId, sessionId, this.nodeId);
+			status = await getAgentAuthLoginStatus(agentId, sessionId, this.executorId);
 		} catch {
 			// The server watchdog owns expiry, so transient request failures retain session ownership.
 		}
@@ -345,7 +345,7 @@ export class SettingsAuthState {
 	async #restoreLoginSession(agentId: SettingsAgentId, lifecycleId: number): Promise<void> {
 		const operationGeneration = this.#beginLoginOperation(agentId, false);
 		try {
-			const status = await getAgentAuthLoginStatus(agentId, undefined, this.nodeId);
+			const status = await getAgentAuthLoginStatus(agentId, undefined, this.executorId);
 			if (
 				!this.#isCurrentLoginOperation(agentId, operationGeneration, lifecycleId) ||
 				status.state !== 'running'

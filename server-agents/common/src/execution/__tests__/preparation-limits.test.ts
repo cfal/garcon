@@ -5,7 +5,7 @@ import { createAgentSteering } from '../control-adapters.js';
 import { createAgentProjectPathUpdates } from '../project-path-adapter.js';
 import type { AgentRuntimeExecution } from '../runtime-events.js';
 
-const scope = { nodeId: 'node', instanceId: 'runtime', integrationId: 'test' };
+const scope = { executorId: 'node', instanceId: 'runtime', integrationId: 'test' };
 const chat = {
   chatId: 'chat', agentId: 'test', agentSessionId: 'native', projectPath: '/project',
   model: 'model', nativeSession: null, nativeSeedReceipt: null, carryOverRevision: 'revision',

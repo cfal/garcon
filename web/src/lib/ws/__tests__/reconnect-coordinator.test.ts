@@ -5,7 +5,7 @@ import {
 	ChatReconnectCoordinator,
 	type ChatReconnectCoordinatorOptions,
 	type ReconnectPanelRegistryPort,
-} from '../reconnect-coordinator.svelte';
+} from '../reconnect-coordinator.svelte.ts';
 import type { ChatExecutionControlState } from '$shared/chat-execution-control';
 import ReconnectCoordinatorTestHost from './ReconnectCoordinatorTestHost.svelte';
 import { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';

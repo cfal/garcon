@@ -13,7 +13,7 @@ import {
   type AgentProducers,
   type AgentResumeRequestV5,
   type AgentRunFailureDetail,
-  type NodeCallOptions,
+  type ExecutorCallOptions,
 } from '@garcon/server-agent-interface';
 import { AgentResourceTable } from './resource-table.js';
 import type {
@@ -79,7 +79,7 @@ export function createAgentProducerAdapter(runtime: AgentRuntimeExecution, host:
 
   function denyDetachedPermission(capability: RuntimePermissionResponse): void {
     void Promise.resolve().then(() => capability.respond({ allow: false })).catch((error) => {
-      host.logger.warn('Failed to deny permission after execution-node disconnect', { reason: String(error) });
+      host.logger.warn('Failed to deny permission after executor disconnect', { reason: String(error) });
     });
   }
 
@@ -205,7 +205,7 @@ export function createAgentProducerAdapter(runtime: AgentRuntimeExecution, host:
   }
 
   function construct<T extends { readonly producerBinding: AgentProducerBinding; readonly chatId: string; readonly runId: string }>(
-    request: T, options?: NodeCallOptions,
+    request: T, options?: ExecutorCallOptions,
   ) {
     options?.signal?.throwIfAborted();
     const binding = bindings.get(request.producerBinding);
@@ -233,11 +233,11 @@ export function createAgentProducerAdapter(runtime: AgentRuntimeExecution, host:
     handles.bind(operation.handle, operation);
   }
 
-  function prepare<T extends { readonly producerBinding: AgentProducerBinding; readonly chatId: string; readonly runId: string }>(request: T, options?: NodeCallOptions) {
+  function prepare<T extends { readonly producerBinding: AgentProducerBinding; readonly chatId: string; readonly runId: string }>(request: T, options?: ExecutorCallOptions) {
     const prepared = construct(request, options);
     const prior = active.get(request.chatId);
     if (prior && prior.binding !== prepared.operation.binding) {
-      throw new AgentCallError('rejected', 'An earlier turn is still running on the execution node. Wait for it to finish or restart the worker.', 'SESSION_BUSY');
+      throw new AgentCallError('rejected', 'An earlier turn is still running on the executor. Wait for it to finish or restart the worker.', 'SESSION_BUSY');
     }
     activate(prepared.operation);
     return prepared;
@@ -285,7 +285,7 @@ export function createAgentProducerAdapter(runtime: AgentRuntimeExecution, host:
   async function runExisting<R>(
     request: AgentResumeRequestV5,
     operation: (request: AgentRuntimeResumeRequest, publish: AgentRuntimePublisher) => Promise<R>,
-    options?: NodeCallOptions,
+    options?: ExecutorCallOptions,
   ): Promise<{ readonly handle: AgentExecutionHandle; readonly value: R }> {
     const prepared = prepare(request, options);
     prepared.operation.agentSessionId = request.agentSessionId;

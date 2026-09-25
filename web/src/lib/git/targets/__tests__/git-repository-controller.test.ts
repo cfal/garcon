@@ -81,7 +81,7 @@ describe('GitRepositoryController', () => {
 			surfaceId: 'singleton:git',
 		});
 		controller.resetForProject(
-			{ nodeId: 'local', projectPath: '/project' },
+			{ executorId: 'local', projectPath: '/project' },
 			{ deferMetadata: true },
 		);
 	});
@@ -96,7 +96,7 @@ describe('GitRepositoryController', () => {
 				deleted: [],
 				untracked: [],
 			});
-			await controller.fetchGitStatus({ nodeId: 'local', projectPath: '/project' });
+			await controller.fetchGitStatus({ executorId: 'local', projectPath: '/project' });
 			expect(controller.currentBranch).toBe('main');
 			expect(controller.gitStatus?.modified).toEqual(['a.txt', 'b.txt']);
 			expect(controller.isLoading).toBe(false);
@@ -104,7 +104,7 @@ describe('GitRepositoryController', () => {
 
 		it('sets error status on API error', async () => {
 			controller.resetForProject(
-				{ nodeId: 'local', projectPath: '/bad-path' },
+				{ executorId: 'local', projectPath: '/bad-path' },
 				{ deferMetadata: true },
 			);
 			vi.mocked(getGitStatus).mockResolvedValue({
@@ -117,7 +117,7 @@ describe('GitRepositoryController', () => {
 				error: 'Not a git repo',
 				details: 'fatal: not a git repository',
 			});
-			await controller.fetchGitStatus({ nodeId: 'local', projectPath: '/bad-path' });
+			await controller.fetchGitStatus({ executorId: 'local', projectPath: '/bad-path' });
 			expect(controller.gitStatus?.error).toBe('Not a git repo');
 			expect(controller.currentBranch).toBe('');
 		});
@@ -127,7 +127,7 @@ describe('GitRepositoryController', () => {
 		it('does not fetch branch list or remote status during deferred project reset', () => {
 			controller.currentBranch = 'main';
 			controller.resetForProject(
-				{ nodeId: 'local', projectPath: '/project' },
+				{ executorId: 'local', projectPath: '/project' },
 				{ deferMetadata: true },
 			);
 
@@ -138,11 +138,11 @@ describe('GitRepositoryController', () => {
 		});
 
 		it('loads branches when branch dropdown opens', async () => {
-			await controller.openBranchDropdown({ nodeId: 'local', projectPath: '/project' });
+			await controller.openBranchDropdown({ executorId: 'local', projectPath: '/project' });
 
 			expect(controller.showBranchDropdown).toBe(true);
 			expect(getGitRefs).toHaveBeenCalledWith(
-				expect.objectContaining({ nodeId: 'local', projectPath: '/project' }),
+				expect.objectContaining({ executorId: 'local', projectPath: '/project' }),
 				{
 					query: '',
 					limit: 200,
@@ -153,8 +153,8 @@ describe('GitRepositoryController', () => {
 		});
 
 		it('keeps full and deferred metadata refreshes free of ref loads', () => {
-			controller.refreshAll({ nodeId: 'local', projectPath: '/project' });
-			controller.refreshDeferredMetadata({ nodeId: 'local', projectPath: '/project' });
+			controller.refreshAll({ executorId: 'local', projectPath: '/project' });
+			controller.refreshDeferredMetadata({ executorId: 'local', projectPath: '/project' });
 
 			expect(getGitRefs).not.toHaveBeenCalled();
 		});
@@ -169,19 +169,19 @@ describe('GitRepositoryController', () => {
 				.mockReturnValueOnce(current.promise);
 
 			controller.resetForProject(
-				{ nodeId: 'local', projectPath: '/project-a' },
+				{ executorId: 'local', projectPath: '/project-a' },
 				{ deferMetadata: true },
 			);
 			const staleLoad = controller.fetchRemoteStatus({
-				nodeId: 'local',
+				executorId: 'local',
 				projectPath: '/project-a',
 			});
 			controller.resetForProject(
-				{ nodeId: 'local', projectPath: '/project-b' },
+				{ executorId: 'local', projectPath: '/project-b' },
 				{ deferMetadata: true },
 			);
 			const currentLoad = controller.fetchRemoteStatus({
-				nodeId: 'local',
+				executorId: 'local',
 				projectPath: '/project-b',
 			});
 
@@ -199,15 +199,15 @@ describe('GitRepositoryController', () => {
 			vi.mocked(getRemoteStatus).mockReturnValueOnce(stale.promise);
 
 			controller.resetForProject(
-				{ nodeId: 'local', projectPath: '/project-a' },
+				{ executorId: 'local', projectPath: '/project-a' },
 				{ deferMetadata: true },
 			);
 			const staleLoad = controller.fetchRemoteStatus({
-				nodeId: 'local',
+				executorId: 'local',
 				projectPath: '/project-a',
 			});
 			controller.resetForProject(
-				{ nodeId: 'local', projectPath: '/project-b' },
+				{ executorId: 'local', projectPath: '/project-b' },
 				{ deferMetadata: true },
 			);
 
@@ -219,12 +219,12 @@ describe('GitRepositoryController', () => {
 
 		it('uses remote status branch when deferred metadata has no branch yet', async () => {
 			controller.resetForProject(
-				{ nodeId: 'local', projectPath: '/project' },
+				{ executorId: 'local', projectPath: '/project' },
 				{ deferMetadata: true },
 			);
 			vi.mocked(getRemoteStatus).mockResolvedValueOnce(makeRemoteStatus('main'));
 
-			await controller.fetchRemoteStatus({ nodeId: 'local', projectPath: '/project' });
+			await controller.fetchRemoteStatus({ executorId: 'local', projectPath: '/project' });
 
 			expect(controller.currentBranch).toBe('main');
 		});
@@ -232,12 +232,12 @@ describe('GitRepositoryController', () => {
 		it('does not overwrite an explicit current branch from remote status', async () => {
 			controller.currentBranch = 'feature';
 			controller.resetForProject(
-				{ nodeId: 'local', projectPath: '/project' },
+				{ executorId: 'local', projectPath: '/project' },
 				{ deferMetadata: true },
 			);
 			vi.mocked(getRemoteStatus).mockResolvedValueOnce(makeRemoteStatus('main'));
 
-			await controller.fetchRemoteStatus({ nodeId: 'local', projectPath: '/project' });
+			await controller.fetchRemoteStatus({ executorId: 'local', projectPath: '/project' });
 
 			expect(controller.currentBranch).toBe('feature');
 		});
@@ -253,7 +253,7 @@ describe('GitRepositoryController', () => {
 			controller.pushRemotes = [{ name: 'origin', url: 'git@example.com:a.git' }];
 
 			controller.resetForProject(
-				{ nodeId: 'local', projectPath: '/project-b' },
+				{ executorId: 'local', projectPath: '/project-b' },
 				{ deferMetadata: true },
 			);
 
@@ -268,10 +268,10 @@ describe('GitRepositoryController', () => {
 		it('does not publish an accepted action from the previous project', async () => {
 			const action = deferred<{ success: boolean }>();
 			vi.mocked(gitPull).mockReturnValueOnce(action.promise);
-			const pending = controller.handlePull({ nodeId: 'local', projectPath: '/project' });
+			const pending = controller.handlePull({ executorId: 'local', projectPath: '/project' });
 
 			controller.resetForProject(
-				{ nodeId: 'local', projectPath: '/project-b' },
+				{ executorId: 'local', projectPath: '/project-b' },
 				{ deferMetadata: true },
 			);
 			action.resolve({ success: true });
@@ -331,10 +331,10 @@ describe('GitRepositoryController', () => {
 			controller.commitMessage = 'test commit';
 			controller.selectedFiles = new Set(['a.txt']);
 
-			await controller.handleCommit({ nodeId: 'local', projectPath: '/project' });
+			await controller.handleCommit({ executorId: 'local', projectPath: '/project' });
 
 			expect(gitCommit).toHaveBeenCalledWith(
-				expect.objectContaining({ nodeId: 'local', projectPath: '/project' }),
+				expect.objectContaining({ executorId: 'local', projectPath: '/project' }),
 				'test commit',
 				['a.txt'],
 			);
@@ -345,14 +345,14 @@ describe('GitRepositoryController', () => {
 		it('does nothing when no files selected', async () => {
 			controller.commitMessage = 'test';
 			controller.selectedFiles = new Set();
-			await controller.handleCommit({ nodeId: 'local', projectPath: '/project' });
+			await controller.handleCommit({ executorId: 'local', projectPath: '/project' });
 			expect(gitCommit).not.toHaveBeenCalled();
 		});
 
 		it('does nothing when message is empty', async () => {
 			controller.commitMessage = '';
 			controller.selectedFiles = new Set(['a.txt']);
-			await controller.handleCommit({ nodeId: 'local', projectPath: '/project' });
+			await controller.handleCommit({ executorId: 'local', projectPath: '/project' });
 			expect(gitCommit).not.toHaveBeenCalled();
 		});
 	});
@@ -369,7 +369,7 @@ describe('GitRepositoryController', () => {
 				untracked: [],
 			});
 			await controller.handleSwitchBranch(
-				{ nodeId: 'local', projectPath: '/project' },
+				{ executorId: 'local', projectPath: '/project' },
 				'feature',
 				undefined,
 				'/project',
@@ -383,7 +383,7 @@ describe('GitRepositoryController', () => {
 		it.each(['suspend', 'switch'] as const)(
 			'publishes uncertain push failures for the captured target after %s',
 			async (transition) => {
-				const project = { nodeId: 'remote', projectPath: '/project' };
+				const project = { executorId: 'remote', projectPath: '/project' };
 				controller.resetForProject(project, { deferMetadata: true });
 				const push = deferred<Awaited<ReturnType<typeof gitPush>>>();
 				vi.mocked(gitPush).mockReturnValueOnce(push.promise);
@@ -405,7 +405,7 @@ describe('GitRepositoryController', () => {
 				if (transition === 'suspend') controller.suspend();
 				else
 					controller.resetForProject(
-						{ nodeId: 'local', projectPath: '/other' },
+						{ executorId: 'local', projectPath: '/other' },
 						{ deferMetadata: true },
 					);
 				push.reject(failure);
@@ -430,11 +430,11 @@ describe('GitRepositoryController', () => {
 			vi.mocked(getRemoteStatus).mockResolvedValue(makeRemoteStatus('main'));
 			controller.confirmAction = { type: 'pull' };
 
-			const ok = await controller.confirmAndExecute({ nodeId: 'local', projectPath: '/project' });
+			const ok = await controller.confirmAndExecute({ executorId: 'local', projectPath: '/project' });
 
 			expect(ok).toBe(true);
 			expect(gitPull).toHaveBeenCalledWith(
-				expect.objectContaining({ nodeId: 'local', projectPath: '/project' }),
+				expect.objectContaining({ executorId: 'local', projectPath: '/project' }),
 			);
 			expect(controller.confirmAction).toBeNull();
 		});
@@ -452,11 +452,11 @@ describe('GitRepositoryController', () => {
 			vi.mocked(getRemoteStatus).mockResolvedValue(makeRemoteStatus('main'));
 			controller.confirmAction = { type: 'push' };
 
-			const ok = await controller.confirmAndExecute({ nodeId: 'local', projectPath: '/project' });
+			const ok = await controller.confirmAndExecute({ executorId: 'local', projectPath: '/project' });
 
 			expect(ok).toBe(true);
 			expect(gitPush).toHaveBeenCalledWith(
-				expect.objectContaining({ nodeId: 'local', projectPath: '/project' }),
+				expect.objectContaining({ executorId: 'local', projectPath: '/project' }),
 				undefined,
 			);
 			expect(controller.confirmAction).toBeNull();
@@ -475,11 +475,11 @@ describe('GitRepositoryController', () => {
 			controller.selectedFiles = new Set(['a.txt']);
 			controller.confirmAction = { type: 'discard', file: 'a.txt' };
 
-			const ok = await controller.confirmAndExecute({ nodeId: 'local', projectPath: '/project' });
+			const ok = await controller.confirmAndExecute({ executorId: 'local', projectPath: '/project' });
 
 			expect(ok).toBe(true);
 			expect(gitDiscard).toHaveBeenCalledWith(
-				expect.objectContaining({ nodeId: 'local', projectPath: '/project' }),
+				expect.objectContaining({ executorId: 'local', projectPath: '/project' }),
 				'a.txt',
 			);
 			expect(controller.selectedFiles.has('a.txt')).toBe(false);
@@ -489,7 +489,7 @@ describe('GitRepositoryController', () => {
 			vi.mocked(gitPush).mockResolvedValue({ success: false, error: 'rejected' });
 			controller.confirmAction = { type: 'push' };
 
-			const ok = await controller.confirmAndExecute({ nodeId: 'local', projectPath: '/project' });
+			const ok = await controller.confirmAndExecute({ executorId: 'local', projectPath: '/project' });
 
 			expect(ok).toBe(false);
 			expect(controller.lastError).toBe('rejected');
@@ -509,7 +509,7 @@ describe('GitRepositoryController', () => {
 				isUpToDate: false,
 			};
 			await expect(
-				controller.prepareToolbarPush({ nodeId: 'local', projectPath: '/project' }),
+				controller.prepareToolbarPush({ executorId: 'local', projectPath: '/project' }),
 			).resolves.toBe(true);
 			expect(controller.showPushModal).toBe(false);
 			expect(controller.pushRemotes).toHaveLength(1);
@@ -528,7 +528,7 @@ describe('GitRepositoryController', () => {
 				isUpToDate: false,
 			};
 			await expect(
-				controller.prepareToolbarPush({ nodeId: 'local', projectPath: '/project' }),
+				controller.prepareToolbarPush({ executorId: 'local', projectPath: '/project' }),
 			).resolves.toBe(true);
 			expect(controller.showPushModal).toBe(false);
 			expect(controller.confirmAction).toBeNull();
@@ -537,7 +537,7 @@ describe('GitRepositoryController', () => {
 		it('does nothing when no remote', async () => {
 			controller.remoteStatus = null;
 			await expect(
-				controller.prepareToolbarPush({ nodeId: 'local', projectPath: '/project' }),
+				controller.prepareToolbarPush({ executorId: 'local', projectPath: '/project' }),
 			).resolves.toBe(false);
 			expect(controller.showPushModal).toBe(false);
 		});

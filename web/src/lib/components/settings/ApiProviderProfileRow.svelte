@@ -3,7 +3,7 @@
 	import PencilIcon from '@lucide/svelte/icons/pencil';
 	import CopyIcon from '@lucide/svelte/icons/copy';
 	import TrashIcon from '@lucide/svelte/icons/trash';
-	import { getApiProviders, getExecutionNodes } from '$lib/context';
+	import { getApiProviders, getExecutors } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import type {
 		ApiProviderCatalogEntry,
@@ -22,14 +22,14 @@
 		onDuplicate: () => void;
 	} = $props();
 	const providers = getApiProviders();
-	const nodes = getExecutionNodes();
+	const executors = getExecutors();
 	let confirmingDelete = $state(false);
 
-	function changeAssignment(input: HTMLInputElement, nodeId: string): void {
+	function changeAssignment(input: HTMLInputElement, executorId: string): void {
 		const assigned = input.checked;
 		// Keeps the DOM authoritative even when reconciliation returns the unchanged value.
-		input.checked = providers.isAssigned(nodeId, profile.id);
-		void providers.setAssignment(nodeId, profile.id, assigned);
+		input.checked = providers.isAssigned(executorId, profile.id);
+		void providers.setAssignment(executorId, profile.id, assigned);
 	}
 </script>
 
@@ -72,15 +72,15 @@
 	<fieldset class="mt-3" disabled={providers.mutating}>
 		<legend class="mb-2 text-xs text-muted-foreground">Available on - this workspace</legend>
 		<div class="flex flex-wrap gap-x-4 gap-y-2">
-			{#each nodes.nodes as node (node.id)}
+			{#each executors.executors as executor (executor.id)}
 				<label class="flex min-w-0 items-center gap-2 text-sm">
 					<input
 						type="checkbox"
 						class="size-4 shrink-0 accent-primary"
-						checked={providers.isAssigned(node.id, profile.id)}
-						onchange={(event) => changeAssignment(event.currentTarget, node.id)}
+						checked={providers.isAssigned(executor.id, profile.id)}
+						onchange={(event) => changeAssignment(event.currentTarget, executor.id)}
 					/>
-					<span class="break-words">{node.label}</span>
+					<span class="break-words">{executor.label}</span>
 				</label>
 			{/each}
 		</div>

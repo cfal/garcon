@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { setExecutionNodesTestContext } from '$lib/execution-nodes/__tests__/execution-nodes-test-context';
-	import type { ExecutionNodeSnapshot } from '$shared/execution-nodes';
+	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
+	import type { ExecutorSnapshot } from '$shared/executors';
 	import type { ConversationMessageChatContext } from '$lib/chat/transcript/conversation-message-context';
 	import ConversationMessage from '../ConversationMessage.svelte';
 	import { setAppShell, setChatSessions, setFileSessions, setLocalSettings } from '$lib/context';
@@ -19,7 +19,7 @@
 	type OpenAutoInput = FileOpenRequest;
 
 	interface Props {
-		executionNodes?: readonly ExecutionNodeSnapshot[];
+		executors?: readonly ExecutorSnapshot[];
 		chatContext?: ConversationMessageChatContext;
 		message: ChatMessage;
 		rowId?: string;
@@ -41,7 +41,7 @@
 	}
 
 	let {
-		executionNodes,
+		executors,
 		chatContext,
 		message,
 		rowId,
@@ -61,7 +61,7 @@
 		selectedChatId = 'chat-1',
 		removableChatId,
 	}: Props = $props();
-	setExecutionNodesTestContext(untrack(() => executionNodes));
+	setExecutorsTestContext(untrack(() => executors));
 	setCanonicalWorkspaceLayout();
 	const initialHost = untrack(() => ({
 		projectBasePath,

@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { CURRENT_WORKSPACE_VERSION } from '../../../server/migrations/index.js';
+import { CURRENT_WORKSPACE_VERSION } from '../../../server/controller/migrations/index.js';
 import {
   assistantContents,
   userContents,

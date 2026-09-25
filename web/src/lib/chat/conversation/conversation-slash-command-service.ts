@@ -4,7 +4,7 @@ import { scheduleChatPrompt } from '$lib/api/scheduled-prompts.js';
 import type { ChatImage } from '$shared/chat-types';
 import type { ChatListEntry } from '$shared/chat-list';
 import type { ApiProtocol } from '$shared/api-providers';
-import { effectiveNodeId } from '$shared/execution-nodes';
+import { effectiveExecutorId } from '$shared/executors';
 import { resolveConversationModelSelection } from './conversation-model-selection.js';
 import {
 	steerSubmissionRejection,
@@ -131,7 +131,7 @@ export interface ConversationSlashCommandDeps {
 	composerState: SlashCommandComposerState;
 	agentState: SlashCommandAgentState;
 	lifecycle: SlashCommandLifecycle;
-	modelCatalogForNode(nodeId: string): SlashCommandModelCatalog;
+	modelCatalogForExecutor(executorId: string): SlashCommandModelCatalog;
 	navigation: { navigateToChat?(chatId: string): void };
 	refetchTranscript?: (chatId: string) => Promise<void>;
 	// Asks the user whether to continue when the provider cannot materialize a native fork.
@@ -200,7 +200,7 @@ export class ConversationSlashCommandService {
 		}
 
 		const agentId = chat.agentId as SessionAgentId;
-		const modelCatalog = this.deps.modelCatalogForNode(effectiveNodeId(chat.nodeId));
+		const modelCatalog = this.deps.modelCatalogForExecutor(effectiveExecutorId(chat.executorId));
 		const steer = parseSteerCommand(text);
 		if (steer.kind !== 'not-command') {
 			const prompt = steer.kind === 'valid' ? steer.prompt : '';
@@ -692,7 +692,7 @@ export class ConversationSlashCommandService {
 				apiProviderId: sourceChat.apiProviderId ?? null,
 				modelEndpointId: sourceChat.modelEndpointId ?? null,
 				modelProtocol: sourceChat.modelProtocol ?? null,
-			}, deps.modelCatalogForNode(effectiveNodeId(sourceChat.nodeId)));
+			}, deps.modelCatalogForExecutor(effectiveExecutorId(sourceChat.executorId)));
 			const submission = this.acceptedInputs.fork({
 				sourceChatId,
 				chatId: forkChatId,

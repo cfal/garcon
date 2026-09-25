@@ -53,8 +53,8 @@
 	let creating = $state(false);
 	let hasCoarsePointer = $state(false);
 	const session = $derived(terminals.sessions[terminalId] ?? null);
-	const nodeId = $derived(terminals.nodeIdFor(terminalId));
-	const hostLabel = $derived(terminals.nodeLabel(nodeId));
+	const executorId = $derived(terminals.executorIdFor(terminalId));
+	const hostLabel = $derived(terminals.executorLabel(executorId));
 	const AttachmentIcon = $derived(
 		{
 			connecting: RefreshCw,
@@ -225,7 +225,7 @@
 		void workspace.switchTerminalSurface(terminalId, value);
 	}
 
-	async function createTerminal(nodeId?: string): Promise<void> {
+	async function createTerminal(executorId?: string): Promise<void> {
 		if (creating) return;
 		creating = true;
 		actionError = null;
@@ -233,7 +233,7 @@
 			await workspace.createTerminalReplacing(
 				terminalId,
 				`terminal-surface:${terminalId}:${host}`,
-				nodeId,
+				executorId,
 			);
 		} catch (error) {
 			actionError = error instanceof Error ? error.message : m.terminal_create_failed();
@@ -293,7 +293,7 @@
 							{m.terminal_session_status({
 								name: terminalContextName(
 									item.metadata,
-									terminals.nodeLabel(terminals.nodeIdFor(item.metadata.terminalId)),
+									terminals.executorLabel(terminals.executorIdFor(item.metadata.terminalId)),
 								),
 								status: item.metadata.processStatus,
 							})}{placement ? ` - ${placement}` : ''}
@@ -322,8 +322,8 @@
 				{terminals}
 				icon={Plus}
 				busy={creating}
-				defaultNodeId={nodeId}
-				oncreate={(nodeId) => void createTerminal(nodeId)}
+				defaultExecutorId={executorId}
+				oncreate={(executorId) => void createTerminal(executorId)}
 			/>
 			<div class="terminal-actions">
 				<ResponsiveSurfaceActions
@@ -354,10 +354,10 @@
 	{#if !session}
 		<div class="grid min-h-0 flex-1 place-items-center p-6 text-center">
 			<div class="max-w-sm text-sm text-muted-foreground">
-				<p>{terminals.nodeInventories[nodeId]?.error ?? m.terminal_unavailable()}</p>
+				<p>{terminals.executorInventories[executorId]?.error ?? m.terminal_unavailable()}</p>
 				<button
 					class="mt-3 rounded-md border border-border px-3 py-1.5 text-xs hover:bg-accent hover:text-foreground"
-					onclick={() => void terminals.list(nodeId).catch(() => undefined)}
+					onclick={() => void terminals.list(executorId).catch(() => undefined)}
 					>{m.common_retry()}</button
 				>
 			</div>

@@ -20,7 +20,7 @@
 		getConversationUi,
 		getGitBranchActions,
 		getGitQuickSummary,
-		getExecutionNodes,
+		getExecutors,
 		getLocalSettings,
 		getModelCatalog,
 	} from '$lib/context';
@@ -64,11 +64,11 @@
 	const conversationUi = getConversationUi();
 	const localSettings = getLocalSettings();
 	const rootModelCatalog = getModelCatalog();
-	const modelCatalog = $derived(rootModelCatalog.forNode(chat.nodeId));
+	const modelCatalog = $derived(rootModelCatalog.forExecutor(chat.executorId));
 	const appShell = getAppShell();
 	const quickGit = getGitQuickSummary();
 	const quickGitBranches = getGitBranchActions();
-	const nodes = getExecutionNodes();
+	const executors = getExecutors();
 
 	const chatId = $derived(chat.id);
 	const queue = $derived(conversationUi.getExecutionControl(chatId)?.queue ?? null);
@@ -78,13 +78,13 @@
 		isProcessing && panel.lifecycle.loadingStatus?.can_interrupt !== false,
 	);
 	const canSteer = $derived(isProcessing && modelCatalog.supportsSteering(chat.agentId));
-	const nodeId = $derived(chat.nodeId ?? 'local');
-	const projectPath = $derived(nodes.gitAvailable(nodeId) ? chat.projectPath || null : null);
-	const gitProject = $derived(projectPath ? { nodeId, projectPath } : null);
+	const executorId = $derived(chat.executorId ?? 'local');
+	const projectPath = $derived(executors.gitAvailable(executorId) ? chat.projectPath || null : null);
+	const gitProject = $derived(projectPath ? { executorId, projectPath } : null);
 	const quickGitSummary = $derived(quickGit.summaryFor(gitProject));
 	const quickGitBranchError = $derived(
 		projectPath &&
-			quickGitBranches.nodeId === nodeId &&
+			quickGitBranches.executorId === executorId &&
 			quickGitBranches.currentProjectPath === projectPath
 			? quickGitBranches.lastError
 			: null,
@@ -120,7 +120,7 @@
 		if (!projectPath || !quickGitSummary) return null;
 		const exposesCurrentBranchState =
 			isCommandOwner &&
-			quickGitBranches.nodeId === nodeId &&
+			quickGitBranches.executorId === executorId &&
 			quickGitBranches.currentProjectPath === projectPath;
 		return {
 			refs: exposesCurrentBranchState ? quickGitBranches.refs : [],
@@ -193,10 +193,10 @@
 	});
 
 	$effect(() => {
-		const node = scrollContainer;
+		const executor = scrollContainer;
 		const viewport = conversationViewport;
-		if (!node || !isVisible) return;
-		const stop = observeConversationViewportScrollGestures(node, (intent) => {
+		if (!executor || !isVisible) return;
+		const stop = observeConversationViewportScrollGestures(executor, (intent) => {
 			if (intent.touch !== null) panel.scroll.noteNativeTouchLifecycle(intent.touch);
 			if (intent.contact === 'end') {
 				panel.scroll.finishDirectionlessUserScrollIntent();
@@ -246,7 +246,7 @@
 	<div class="relative min-h-0 flex-1">
 		<svelte:boundary>
 			<ConversationFeed
-				chatContext={{ chatId, nodeId: chat.nodeId ?? 'local', projectPath: chat.projectPath }}
+				chatContext={{ chatId, executorId: chat.executorId ?? 'local', projectPath: chat.projectPath }}
 				transcript={panel.transcript}
 				agentId={chat.agentId}
 				bind:scrollContainer

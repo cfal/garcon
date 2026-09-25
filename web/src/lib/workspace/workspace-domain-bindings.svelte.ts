@@ -1,5 +1,5 @@
 import { untrack } from 'svelte';
-import { effectiveNodeId } from '$shared/execution-nodes';
+import { effectiveExecutorId } from '$shared/executors';
 import type { GitBranchSelectorState } from '$lib/git/targets/git-branch-selector-state.svelte.js';
 import { gitProjectInvalidations } from '$lib/git/surface/git-project-invalidation.svelte.js';
 import type { GitQuickSummaryStore } from '$lib/git/surface/git-quick-summary.svelte.js';
@@ -70,23 +70,23 @@ export class WorkspaceDomainBindings {
 				}
 				const currentProject = projectState.kind === 'available' ? projectState.project : null;
 				const projectPath = currentProject?.projectPath ?? null;
-				const nodeId = effectiveNodeId(currentProject?.nodeId);
-				const project = projectPath ? { nodeId, projectPath } : null;
+				const executorId = effectiveExecutorId(currentProject?.executorId);
+				const project = projectPath ? { executorId, projectPath } : null;
 				deps.gitQuickSummary.setProject(project);
 				deps.gitBranchActions.setProject(
 					projectPath,
 					deps.gitQuickSummary.summaryFor(project)?.branch,
 					currentProject?.effectiveProjectKey ?? null,
-					nodeId,
+					executorId,
 				);
 			});
 
 			$effect(() => {
 				const currentProject = deps.workspaceContext.currentProject;
 				if (!currentProject) return;
-				const nodeId = effectiveNodeId(currentProject.nodeId);
-				const version = gitProjectInvalidations.version(nodeId);
-				const key = JSON.stringify([nodeId, currentProject.effectiveProjectKey, version]);
+				const executorId = effectiveExecutorId(currentProject.executorId);
+				const version = gitProjectInvalidations.version(executorId);
+				const key = JSON.stringify([executorId, currentProject.effectiveProjectKey, version]);
 				if (version === 0 || key === lastCommitInvalidationKey) return;
 				lastCommitInvalidationKey = key;
 				untrack(() => deps.gitQuickSummary.scheduleRefresh('invalidation', 100));

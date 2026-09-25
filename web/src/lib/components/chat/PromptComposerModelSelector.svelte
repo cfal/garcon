@@ -5,9 +5,9 @@
 		getLocalSettings,
 		getModelCatalog,
 		getRemoteSettings,
-		getExecutionNodes,
+		getExecutors,
 	} from '$lib/context';
-	import ExecutionNodeSelector from '$lib/components/shared/ExecutionNodeSelector.svelte';
+	import ExecutorSelector from '$lib/components/shared/ExecutorSelector.svelte';
 	import { isDirectAgentId, nonDirectAgentIds } from '$lib/agents/direct-agents.js';
 	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
 	import { composerModelSelectorMode } from '$lib/components/model-selector/composer-model-selector-mode';
@@ -19,19 +19,19 @@
 
 	interface Props {
 		onChange?: (next: ModelSelectorChange) => void | Promise<void>;
-		onNodeChange?: (nodeId: string) => void;
+		onExecutorChange?: (executorId: string) => void;
 	}
-	let { onChange, onNodeChange }: Props = $props();
-	const nodes = getExecutionNodes();
+	let { onChange, onExecutorChange }: Props = $props();
+	const executors = getExecutors();
 	const agentState = getAgentState();
 	const sessions = getChatSessions();
 	const localSettings = getLocalSettings();
 	const rootModelCatalog = getModelCatalog();
 	const remoteSettings = getRemoteSettings();
-	const modelCatalog = $derived(rootModelCatalog.forNode(agentState.nodeId));
+	const modelCatalog = $derived(rootModelCatalog.forExecutor(agentState.executorId));
 
-	function selectableAgentsForNode(nodeId: string) {
-		const allAgentIds = rootModelCatalog.forNode(nodeId).getSelectableAgents();
+	function selectableAgentsForExecutor(executorId: string) {
+		const allAgentIds = rootModelCatalog.forExecutor(executorId).getSelectableAgents();
 		const selectedAgentId = sessions.selectedChat?.agentId;
 		if (localSettings.allowDirectChats || (selectedAgentId && isDirectAgentId(selectedAgentId))) {
 			return allAgentIds;
@@ -39,14 +39,14 @@
 		return nonDirectAgentIds(allAgentIds);
 	}
 
-	const agentIds = $derived(selectableAgentsForNode(agentState.nodeId));
+	const agentIds = $derived(selectableAgentsForExecutor(agentState.executorId));
 	const mode: ModelSelectorMode = $derived(
 		sessions.selectedChat && sessions.selectedChat.status !== 'draft'
 			? composerModelSelectorMode(modelCatalog, agentState.agentId, agentIds)
 			: { agent: 'fixed', source: 'hidden', surface: 'composer' },
 	);
 	const value = $derived({
-		nodeId: agentState.nodeId,
+		executorId: agentState.executorId,
 		agentId: agentState.agentId,
 		model: agentState.model,
 		apiProviderId: agentState.apiProviderId,
@@ -54,22 +54,22 @@
 		modelProtocol: agentState.modelProtocol,
 	});
 
-	function getRecents(nodeId: string) {
+	function getRecents(executorId: string) {
 		return buildModelSelectorRecents(
-			rootModelCatalog.forNode(nodeId),
+			rootModelCatalog.forExecutor(executorId),
 			remoteSettings.snapshot?.recentAgentSettings ?? [],
 		);
 	}
 </script>
 
 <div class="flex min-w-0 items-center gap-1 sm:gap-2">
-	<ExecutionNodeSelector
-		{nodes}
-		nodeId={agentState.nodeId}
+	<ExecutorSelector
+		{executors}
+		executorId={agentState.executorId}
 		service="agents"
 		presentation="composer"
-		onSelect={(nodeId) => {
-			if (nodeId !== agentState.nodeId) onNodeChange?.(nodeId);
+		onSelect={(executorId) => {
+			if (executorId !== agentState.executorId) onExecutorChange?.(executorId);
 		}}
 	/>
 	<ComposerModelSelector
@@ -78,7 +78,7 @@
 		onChange={(next) => onChange?.(next)}
 		{getRecents}
 		preferRecentsOnOpen
-		getSelectableAgentIds={selectableAgentsForNode}
+		getSelectableAgentIds={selectableAgentsForExecutor}
 		align="end"
 		side="top"
 	/>

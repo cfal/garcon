@@ -164,7 +164,7 @@ describe('chat status', () => {
     expect(value).not.toContain('transcript:');
   });
 
-  test.each(['controller', 'execution-node'] as const)('renders usable permission controls for runtime %s', (runtime) => {
+  test.each(['controller', 'executor'] as const)('renders usable permission controls for runtime %s', (runtime) => {
     const permissionOccurrenceId = 'permission-occurrence-1';
     const value = formatChatStatus(snapshot({
       messageLimit: 0,
@@ -456,7 +456,7 @@ describe('chat status', () => {
     expect(JSON.stringify(value)).toBe(before);
   });
 
-  test.each(['controller', 'execution-node'] as const)('does not invent a workspace for a missing chat: runtime=%s', async (runtime) => {
+  test.each(['controller', 'executor'] as const)('does not invent a workspace for a missing chat: runtime=%s', async (runtime) => {
     const client: ChatStatusClient = {
       async getChatSnapshot() {
         throw new GarconHttpError(

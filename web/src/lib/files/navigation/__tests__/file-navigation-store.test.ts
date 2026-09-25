@@ -114,9 +114,9 @@ describe('FileNavigationStore', () => {
 		async (newestLegacy) => {
 			const repository = createMemoryFileDraftRepository();
 			const local = location(0);
-			const remoteNodeId = '22222222-2222-4222-8222-222222222222';
+			const remoteExecutorId = '22222222-2222-4222-8222-222222222222';
 			const legacy = { ...local, key: JSON.stringify(['/workspace', 'src/0.ts']) };
-			const current = { ...local, nodeId: 'local', key: fileIdentityKey('/workspace', 'src/0.ts') };
+			const current = { ...local, executorId: 'local', key: fileIdentityKey('/workspace', 'src/0.ts') };
 			for (const [index, entry] of (newestLegacy
 				? [current, legacy]
 				: [legacy, current]
@@ -134,8 +134,8 @@ describe('FileNavigationStore', () => {
 				...scope,
 				...local,
 				schemaVersion: 1,
-				nodeId: remoteNodeId,
-				key: fileIdentityKey('/workspace', 'src/0.ts', remoteNodeId),
+				executorId: remoteExecutorId,
+				key: fileIdentityKey('/workspace', 'src/0.ts', remoteExecutorId),
 				timestamp: 3,
 			});
 
@@ -143,10 +143,10 @@ describe('FileNavigationStore', () => {
 			await restored.restore();
 
 			expect(restored.recents).toHaveLength(2);
-			expect(restored.recents[0]).toMatchObject({ nodeId: remoteNodeId, timestamp: 3 });
+			expect(restored.recents[0]).toMatchObject({ executorId: remoteExecutorId, timestamp: 3 });
 			expect(restored.recents[1]).toMatchObject({
 				key: current.key,
-				nodeId: 'local',
+				executorId: 'local',
 				line: 7,
 				viewPreference: 'preview',
 				timestamp: 2,

@@ -38,7 +38,7 @@ describe('agent login API contract', () => {
 		await expect(getAgentAuthLoginStatus('codex', 'session-a')).resolves.toEqual(payload);
 
 		const [url, options] = fetchMock.mock.calls[0];
-		expect(url).toBe('/api/v1/agents/auth/login?agent=codex&nodeId=local&session=session-a');
+		expect(url).toBe('/api/v1/agents/auth/login?agent=codex&executorId=local&session=session-a');
 		expect(options.method ?? 'GET').toBe('GET');
 	});
 
@@ -55,7 +55,7 @@ describe('agent login API contract', () => {
 		expect(options.method).toBe('POST');
 		expect(JSON.parse(options.body)).toEqual({
 			agentId: 'claude',
-			nodeId: 'local',
+			executorId: 'local',
 			sessionId: 'session-a',
 			code: 'auth-code',
 		});

@@ -15,7 +15,7 @@ import { parseAgentSettingsById, type AgentSettingsEnvelope } from './agent-inte
 import type { AgentId } from './agents';
 import { isAgentId } from './agents';
 import type { ApiProtocol } from './api-providers';
-import { isRemoteNodeId, parseNodeId, LOCAL_EXECUTION_NODE_ID } from './execution-nodes.js';
+import { isRemoteExecutorId, parseExecutorId, LOCAL_EXECUTOR_ID } from './executors.js';
 import { GENERATION_PROMPT_TEMPLATE_MAX_LENGTH } from './generation-prompts';
 import {
   parseAgentSwitchContextWindowTokens,
@@ -31,7 +31,7 @@ export const DEFAULT_APP_TITLE = 'Garcon';
 export const APP_TITLE_MAX_LENGTH = 120;
 
 export interface GenerationSelectionUiSettings {
-  nodeId?: string | null;
+  executorId?: string | null;
   agentId?: AgentId;
   model?: string;
   apiProviderId?: string | null;
@@ -101,7 +101,7 @@ export const GENERATION_UI_SETTING_KEYS = [
 ] as const satisfies readonly (keyof RemoteUiSettings)[];
 
 type EffectiveGenerationSelection = {
-  nodeId?: string | null;
+  executorId?: string | null;
   apiProviderId?: string | null;
   modelEndpointId?: string | null;
   modelProtocol?: ApiProtocol | null;
@@ -135,29 +135,29 @@ export interface RemotePathSettings {
   pinnedProjectPaths: string[];
   browseStartPath: string;
   recentProjectPaths: string[];
-  byNode?: Record<string, NodeProjectPreferences>;
+  byExecutor?: Record<string, ExecutorProjectPreferences>;
 }
 
-export interface NodeProjectPreferences {
+export interface ExecutorProjectPreferences {
   defaultPath?: string;
   recentPaths: string[];
   pinnedPaths: string[];
 }
 
-export type NodeProjectPreferencesPatch = Partial<Pick<NodeProjectPreferences, 'defaultPath' | 'pinnedPaths'>>;
+export type ExecutorProjectPreferencesPatch = Partial<Pick<ExecutorProjectPreferences, 'defaultPath' | 'pinnedPaths'>>;
 
-export interface RemotePathSettingsPatch extends Partial<Omit<RemotePathSettings, 'byNode'>> {
-  byNode?: Record<string, NodeProjectPreferencesPatch>;
+export interface RemotePathSettingsPatch extends Partial<Omit<RemotePathSettings, 'byExecutor'>> {
+  byExecutor?: Record<string, ExecutorProjectPreferencesPatch>;
 }
 
-export function parseNodeProjectPreferencesPatch(value: unknown): Record<string, NodeProjectPreferencesPatch> | null {
+export function parseExecutorProjectPreferencesPatch(value: unknown): Record<string, ExecutorProjectPreferencesPatch> | null {
   const raw = asRecord(value);
   if (!raw) return null;
-  const patches: Record<string, NodeProjectPreferencesPatch> = {};
+  const patches: Record<string, ExecutorProjectPreferencesPatch> = {};
   for (const [id, candidate] of Object.entries(raw)) {
     const entry = asRecord(candidate);
-    if (!isRemoteNodeId(id) || !entry || Object.keys(entry).some((key) => key !== 'defaultPath' && key !== 'pinnedPaths')) return null;
-    const patch: NodeProjectPreferencesPatch = {};
+    if (!isRemoteExecutorId(id) || !entry || Object.keys(entry).some((key) => key !== 'defaultPath' && key !== 'pinnedPaths')) return null;
+    const patch: ExecutorProjectPreferencesPatch = {};
     if (entry.defaultPath !== undefined) {
       if (typeof entry.defaultPath !== 'string') return null;
       patch.defaultPath = entry.defaultPath;
@@ -172,19 +172,19 @@ export function parseNodeProjectPreferencesPatch(value: unknown): Record<string,
   return patches;
 }
 
-export function parseNodeProjectPreferences(value: unknown): Record<string, NodeProjectPreferences> | null {
+export function parseExecutorProjectPreferences(value: unknown): Record<string, ExecutorProjectPreferences> | null {
   const raw = asRecord(value);
   if (!raw) return null;
-  const byNode: Record<string, NodeProjectPreferences> = {};
+  const byExecutor: Record<string, ExecutorProjectPreferences> = {};
   for (const [id, candidate] of Object.entries(raw)) {
     const entry = asRecord(candidate);
-    if (!isRemoteNodeId(id) || !entry || (entry.defaultPath !== undefined && typeof entry.defaultPath !== 'string')) return null;
+    if (!isRemoteExecutorId(id) || !entry || (entry.defaultPath !== undefined && typeof entry.defaultPath !== 'string')) return null;
     const recentPaths = asStringArray(entry.recentPaths);
     const pinnedPaths = asStringArray(entry.pinnedPaths);
     if (!recentPaths || !pinnedPaths) return null;
-    byNode[id] = { ...(typeof entry.defaultPath === 'string' ? { defaultPath: entry.defaultPath } : {}), recentPaths, pinnedPaths };
+    byExecutor[id] = { ...(typeof entry.defaultPath === 'string' ? { defaultPath: entry.defaultPath } : {}), recentPaths, pinnedPaths };
   }
-  return byNode;
+  return byExecutor;
 }
 
 export interface TranscriptSearchFeatureSettings {
@@ -223,7 +223,7 @@ export const DEFAULT_REMOTE_FEATURE_SETTINGS: RemoteFeatureSettings = {
 };
 
 export interface RecentAgentSetting {
-  nodeId?: string | null;
+  executorId?: string | null;
   agentId: AgentId;
   model: string;
   apiProviderId: string | null;
@@ -291,14 +291,14 @@ function safeOptionalProtocol(value: unknown): ApiProtocol | null {
   return null;
 }
 
-export function generationSelectionNodeError(value: unknown): string | null {
+export function generationSelectionExecutorError(value: unknown): string | null {
   const raw = asRecord(value);
   if (!raw) return null;
-  const nodeId = parseNodeId(raw.nodeId);
-  if (!nodeId) return 'Invalid execution node ID';
-  if (nodeId !== LOCAL_EXECUTION_NODE_ID && (
+  const executorId = parseExecutorId(raw.executorId);
+  if (!executorId) return 'Invalid executor ID';
+  if (executorId !== LOCAL_EXECUTOR_ID && (
     !isAgentId(raw.agentId) || typeof raw.model !== 'string' || !raw.model.trim()
-  )) return 'An explicit execution node requires an agent and model';
+  )) return 'An explicit executor requires an agent and model';
   return null;
 }
 
@@ -309,9 +309,9 @@ function normalizeGenerationSelection(
   if (!raw) return undefined;
 
   const normalized: GenerationSelectionUiSettings = {};
-  if (raw.nodeId !== undefined) {
+  if (raw.executorId !== undefined) {
     // Retains an invalid explicit target as unavailable rather than converting it to Local.
-    normalized.nodeId = raw.nodeId === null || typeof raw.nodeId === 'string' ? raw.nodeId : '';
+    normalized.executorId = raw.executorId === null || typeof raw.executorId === 'string' ? raw.executorId : '';
   }
   if (isAgentId(raw.agentId)) normalized.agentId = raw.agentId;
   if (typeof raw.model === 'string') normalized.model = raw.model;
@@ -403,10 +403,10 @@ function normalizeEffectiveGenerationSelection(
   raw: Record<string, unknown>,
   normalized: EffectiveGenerationSelection,
 ): void {
-  if (raw.nodeId !== undefined) {
-    const nodeId = parseNodeId(raw.nodeId);
-    if (!nodeId) throw new Error('Invalid execution node ID');
-    normalized.nodeId = nodeId;
+  if (raw.executorId !== undefined) {
+    const executorId = parseExecutorId(raw.executorId);
+    if (!executorId) throw new Error('Invalid executor ID');
+    normalized.executorId = executorId;
   }
   if (raw.apiProviderId !== undefined) normalized.apiProviderId = safeOptionalId(raw.apiProviderId);
   if (raw.modelEndpointId !== undefined) normalized.modelEndpointId = safeOptionalId(raw.modelEndpointId);
@@ -580,9 +580,9 @@ function normalizeRemotePathSettings(value: unknown): RemotePathSettings | null 
   const browseStartPath = asString(raw.browseStartPath);
   const recentProjectPaths = asStringArray(raw.recentProjectPaths);
   if (!pinnedProjectPaths || browseStartPath === null || !recentProjectPaths) return null;
-  const byNode = raw.byNode === undefined ? undefined : parseNodeProjectPreferences(raw.byNode);
-  if (byNode === null) return null;
-  return { pinnedProjectPaths, browseStartPath, recentProjectPaths, ...(byNode ? { byNode } : {}) };
+  const byExecutor = raw.byExecutor === undefined ? undefined : parseExecutorProjectPreferences(raw.byExecutor);
+  if (byExecutor === null) return null;
+  return { pinnedProjectPaths, browseStartPath, recentProjectPaths, ...(byExecutor ? { byExecutor } : {}) };
 }
 
 export function normalizeRemoteFeatureSettings(value: unknown): RemoteFeatureSettings {
@@ -640,10 +640,10 @@ function normalizeRecentAgentSetting(value: unknown): RecentAgentSetting | null 
   if (!raw) return null;
   const model = asString(raw.model);
   if (!isAgentId(raw.agentId) || model === null || !model.trim()) return null;
-  const nodeId = parseNodeId(raw.nodeId);
-  if (!nodeId) return null;
+  const executorId = parseExecutorId(raw.executorId);
+  if (!executorId) return null;
   return {
-    ...(raw.nodeId === undefined ? {} : { nodeId }),
+    ...(raw.executorId === undefined ? {} : { executorId }),
     agentId: raw.agentId,
     model,
     apiProviderId: safeOptionalId(raw.apiProviderId),

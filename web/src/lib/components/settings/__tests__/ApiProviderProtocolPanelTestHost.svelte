@@ -1,12 +1,12 @@
 <script lang="ts">
-	import { setExecutionNodesTestContext } from '$lib/execution-nodes/__tests__/execution-nodes-test-context';
+	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
 	import ApiProviderProtocolPanel from '../ApiProviderProtocolPanel.svelte';
 	import { setModelCatalog, setApiProviders } from '$lib/context';
 	import { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
 	import { ApiProvidersStore } from '$lib/api-providers/api-providers-store.svelte';
 	import { untrack } from 'svelte';
 	import type { ApiProtocol, ApiProviderCatalogEntry } from '$shared/api-providers';
-	import type { ExecutionNodeSnapshot } from '$shared/execution-nodes';
+	import type { ExecutorSnapshot } from '$shared/executors';
 
 	let {
 		protocol,
@@ -15,7 +15,7 @@
 		addLabel,
 		apiProviderCatalog = [],
 		unassign,
-		nodes,
+		executors,
 		assignments,
 	}: {
 		protocol: ApiProtocol;
@@ -24,10 +24,10 @@
 		addLabel: string;
 		apiProviderCatalog?: ApiProviderCatalogEntry[];
 		unassign?: NonNullable<ConstructorParameters<typeof ApiProvidersStore>[1]>['unassign'];
-		nodes?: readonly ExecutionNodeSnapshot[];
+		executors?: readonly ExecutorSnapshot[];
 		assignments?: Record<string, string[]>;
 	} = $props();
-	setExecutionNodesTestContext(untrack(() => nodes));
+	setExecutorsTestContext(untrack(() => executors));
 
 	const catalog = new ModelCatalogStore();
 	setModelCatalog(catalog);

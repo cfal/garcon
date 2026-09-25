@@ -18,7 +18,7 @@ import { installLightpandaWorkspaceGeometry } from './lightpanda-workspace-geome
 import { withTimeout } from './deferred.js';
 import { requireCurrentWebBuild } from './web-build-gate.js';
 
-const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url));
+const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const ARTIFACT_ROOT = join(REPO_ROOT, 'integration-tests', 'artifacts', 'e2e');
 
 export class E2eFixture {

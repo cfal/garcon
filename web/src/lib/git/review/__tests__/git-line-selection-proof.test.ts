@@ -8,7 +8,7 @@ const target: GitDiffActionTarget = {
 	mode: 'stage',
 	contextLines: 5,
 	proof: {
-		document: { nodeId: 'remote', instanceId: 'instance-a', documentId: 'document-a' },
+		document: { executorId: 'remote', instanceId: 'instance-a', documentId: 'document-a' },
 		bodyFingerprint: 'fingerprint',
 		patchDigest: 'a'.repeat(64),
 	},

@@ -170,16 +170,16 @@ describe('chat search', () => {
   });
 
   test('generated read commands retain the worker root and runtime role', () => {
-    const connection = { ...command, runtime: 'execution-node' as const };
+    const connection = { ...command, runtime: 'executor' as const };
     const result = buildChatSearchResult(connection, chatList([chat()]), response(), 1);
     const hit = result.results[0]!;
     const args = buildSearchReadCommandArguments(connection, hit, hit.snippets[0]!);
     expect(args).toContain('--config-dir');
     expect(parseCliArgs(args, { GARCON_RUNTIME: 'controller' })).toMatchObject({
-      kind: 'read', runtime: 'execution-node', configDir: '/config',
+      kind: 'read', runtime: 'executor', configDir: '/config',
     });
     expect(formatChatSearchResult(result, false, connection)).toContain(
-      "garcon-cli --config-dir '/config' --runtime 'execution-node' read",
+      "garcon-cli --config-dir '/config' --runtime 'executor' read",
     );
   });
 

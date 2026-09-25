@@ -8,7 +8,7 @@ import {
 import { type FileOpenRequest } from '$lib/files/sessions/file-session-registry.svelte.js';
 import * as m from '$lib/paraglide/messages.js';
 import FileSurfaceTestHost from './FileSurfaceTestHost.svelte';
-import { remoteExecutionNode } from '$lib/execution-nodes/__tests__/fixtures';
+import { remoteExecutor } from '$lib/executors/__tests__/fixtures';
 
 const { copyToClipboard } = vi.hoisted(() => ({ copyToClipboard: vi.fn(async () => true) }));
 vi.mock('$lib/utils/clipboard', () => ({ copyToClipboard }));
@@ -16,11 +16,11 @@ vi.mock('$lib/utils/clipboard', () => ({ copyToClipboard }));
 afterEach(cleanup);
 
 describe('FileSurface', () => {
-	it.each(['local', remoteExecutionNode.id])(
-		'copies only the filesystem path for node %s',
-		async (nodeId) => {
-			render(FileSurfaceTestHost, { presentation: 'dialog', nodeId });
-			const prefix = nodeId === 'local' ? '' : 'Worker: ';
+	it.each(['local', remoteExecutor.id])(
+		'copies only the filesystem path for executor %s',
+		async (executorId) => {
+			render(FileSurfaceTestHost, { presentation: 'dialog', executorId });
+			const prefix = executorId === 'local' ? '' : 'Worker: ';
 			expect(screen.getByRole('heading', { level: 2 }).textContent?.trim()).toBe(
 				`${prefix}image.png`,
 			);

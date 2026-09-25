@@ -1,0 +1,483 @@
+// Persistent metadata index for chat list rendering. Agent previews repair
+// missing entries, while live appends keep latest preview text durable.
+
+import { promises as fs } from 'fs';
+import { writeJsonFileAtomic } from '../../common/json-file-store.ts';
+import type { ChatMessage } from '../../../common/chat-types.js';
+import type { CarryOverSegmentRef } from './store.js';
+import type { ChatRegistryEntry, IChatRegistry } from './store.js';
+import { createLogger } from '../../common/log.js';
+import { errorMessage, hasNodeErrorCode } from '../../common/errors.js';
+import { isRecord } from '../../../common/json.js';
+import { mapWithConcurrencyResult } from '../../common/concurrency.js';
+
+const logger = createLogger('chats:metadata-store');
+
+const DEFAULT_PREVIEW_TIMEOUT_MS = 5_000;
+const DEFAULT_SAVE_DELAY_MS = 100;
+const METADATA_VERSION = 1;
+const CARRY_OVER_HEAD_WINDOW = 25;
+// Agent previews each spawn work; an unbounded repair fan-out stalls startup
+// on large registries, so repairs run through a bounded pool.
+const METADATA_REPAIR_CONCURRENCY = 6;
+// The pool bounds concurrency, not total time: ceil(N/6) stalled previews
+// would stretch init() - which runs before the listener starts - into
+// minutes. An overall deadline abandons the rest; prune passes and live
+// events backfill anything left unrepaired.
+const DEFAULT_REPAIR_DEADLINE_MS = 30_000;
+
+type MetadataSource = 'live' | 'agent-preview' | 'startup';
+
+// Composite content identity the cached preview was produced from. Ownership,
+// carryover, or ledger-content changes make the cache stale; control,
+// terminal, native-retention, and process-generation changes do not.
+export interface ChatMetadataIdentity {
+  carryOverRevision: string;
+  agentOwnershipEpoch: string;
+}
+
+export interface ChatMetadata {
+  chatId: string;
+  createdAt: string | null;
+  lastActivity: string | null;
+  lastMessage: string;
+  firstMessage: string;
+  source: MetadataSource;
+  identity?: ChatMetadataIdentity;
+}
+
+interface AgentPreviewMetadata {
+  createdAt?: string | null;
+  lastActivity?: string | null;
+  lastMessage?: string | null;
+  firstMessage: string;
+}
+
+interface MetadataIndexOptions {
+  previewTimeoutMs?: number;
+  metadataPath?: string | null;
+  saveDelayMs?: number;
+  repairDeadlineMs?: number;
+}
+
+interface MetadataAgentSource {
+  getPreview(session: ChatRegistryEntry, chatId: string): Promise<{
+    preview: unknown;
+  } | null>;
+}
+
+interface MetadataCarryOverSource {
+  revision(refs: readonly CarryOverSegmentRef[], quarantine?: unknown): string;
+  logicalMessageCount(refs: readonly CarryOverSegmentRef[]): number | Promise<number>;
+  loadPage(input: {
+    refs: readonly CarryOverSegmentRef[];
+    offset: number;
+    limit: number;
+  }): Promise<{ messages: readonly ChatMessage[] }>;
+}
+
+export class MetadataIndex {
+  #metadataByChatId = new Map<string, ChatMetadata>();
+  #registry: IChatRegistry;
+  #agents: MetadataAgentSource;
+  #carryOver: MetadataCarryOverSource;
+  #initialized = false;
+  #previewTimeoutMs: number;
+  #metadataPath: string | null;
+  #saveDelayMs: number;
+  #repairDeadlineMs: number;
+  #pendingSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  #savePromise: Promise<void> = Promise.resolve();
+
+  constructor(
+    registry: IChatRegistry,
+    agents: MetadataAgentSource,
+    carryOver: MetadataCarryOverSource,
+    options: MetadataIndexOptions = {},
+  ) {
+    this.#registry = registry;
+    this.#agents = agents;
+    this.#carryOver = carryOver;
+    this.#previewTimeoutMs = options.previewTimeoutMs ?? DEFAULT_PREVIEW_TIMEOUT_MS;
+    this.#metadataPath = options.metadataPath ?? null;
+    this.#saveDelayMs = options.saveDelayMs ?? DEFAULT_SAVE_DELAY_MS;
+    this.#repairDeadlineMs = options.repairDeadlineMs ?? DEFAULT_REPAIR_DEADLINE_MS;
+  }
+
+  async init(): Promise<void> {
+    if (!this.#initialized) {
+      this.#initialized = true;
+      this.#registry.onChatRemoved((chatId) => {
+        this.#metadataByChatId.delete(String(chatId));
+        this.#scheduleSave();
+      });
+    }
+
+    this.#metadataByChatId = await this.#loadPersistedMetadata();
+    this.#pruneMissingRegistryEntries();
+    await this.#repairFromAgentPreviews();
+    this.#pruneMissingRegistryEntries();
+    this.#scheduleSave();
+  }
+
+  getChatMetadata(chatId: string): ChatMetadata | null {
+    return this.#metadataByChatId.get(String(chatId)) || null;
+  }
+
+  listAllChatMetadata(): Map<string, ChatMetadata> {
+    return new Map(this.#metadataByChatId);
+  }
+
+  updateFromAppendedMessages(
+    chatId: string,
+    appendedMessages: ChatMessage[],
+    identity?: ChatMetadataIdentity,
+  ): void {
+    const key = String(chatId);
+    const current = this.#metadataByChatId.get(key);
+    const createdAt = current?.createdAt ?? firstTimestamp(appendedMessages) ?? new Date().toISOString();
+    const firstMessage = current?.firstMessage || firstUserText(appendedMessages) || 'New Session';
+    const lastMessage = latestPreviewText(appendedMessages) ?? current?.lastMessage ?? firstMessage;
+    const lastActivity = latestTimestamp(appendedMessages) ?? current?.lastActivity ?? createdAt;
+
+    this.#metadataByChatId.set(key, {
+      chatId: key,
+      createdAt,
+      lastActivity,
+      lastMessage,
+      firstMessage,
+      source: 'live',
+      ...(identity ?? current?.identity
+        ? { identity: identity ?? current?.identity }
+        : {}),
+    });
+    this.#scheduleSave();
+  }
+
+  // Recomputes the cached preview from the complete replacement view.
+  replaceFromTranscriptView(
+    chatId: string,
+    messages: readonly ChatMessage[],
+  ): void {
+    const key = String(chatId);
+    const current = this.#metadataByChatId.get(key);
+    const firstMessage = firstUserText([...messages]) || current?.firstMessage || 'New Session';
+    const createdAt = current?.createdAt ?? firstTimestamp([...messages]) ?? new Date().toISOString();
+    const lastMessage = latestPreviewText([...messages]) ?? firstMessage;
+    const lastActivity = latestTimestamp([...messages]) ?? createdAt;
+    this.#metadataByChatId.set(key, {
+      chatId: key,
+      createdAt,
+      lastActivity,
+      lastMessage,
+      firstMessage,
+      source: 'live',
+      ...(current?.identity ? { identity: current.identity } : {}),
+    });
+    this.#scheduleSave();
+  }
+
+  addNewChatMetadata(chatId: string, firstMessage: string): void {
+    const key = String(chatId);
+    if (this.#metadataByChatId.has(key)) {
+      throw new Error(`Chat with ID ${chatId} already exists`);
+    }
+    const createdAt = new Date().toISOString();
+    this.#metadataByChatId.set(key, {
+      chatId: key,
+      createdAt,
+      lastActivity: createdAt,
+      lastMessage: firstMessage,
+      firstMessage,
+      source: 'startup',
+    });
+    this.#scheduleSave();
+  }
+
+  async flush(): Promise<void> {
+    if (this.#pendingSaveTimer) {
+      clearTimeout(this.#pendingSaveTimer);
+      this.#pendingSaveTimer = null;
+    }
+    this.#savePromise = this.#savePromise
+      .catch(() => undefined)
+      .then(() => this.#saveNow());
+    await this.#savePromise;
+  }
+
+  async #repairFromAgentPreviews(): Promise<void> {
+    const sessions = this.#registry.listAllChats();
+    const repairEntries = Object.entries(sessions).filter(([chatId, session]) => {
+      const existing = this.#metadataByChatId.get(String(chatId));
+      return !existing || this.#isCheaplyStale(existing, session);
+    });
+
+    // Workers never reject: each returns an ok/error union so the bounded pool
+    // cannot be torn down by one failing preview, and per-entry timeouts start
+    // when the entry actually begins processing rather than at fan-out time.
+    let deadlineHit = false;
+    const repaired = new Map<string, ChatMetadata>();
+    const repairs = mapWithConcurrencyResult(
+      repairEntries,
+      METADATA_REPAIR_CONCURRENCY,
+      async ([chatId, session]): Promise<
+        { ok: true } | { ok: false; error: unknown }
+      > => {
+        if (deadlineHit) return { ok: false, error: new Error('metadata repair deadline exceeded') };
+        try {
+          const metadata = await this.#buildMetadataFromPreviewWithTimeout(chatId, session);
+          // Recorded at completion so repairs finished inside the budget
+          // survive a deadline win instead of being rebuilt every startup.
+          repaired.set(String(chatId), metadata);
+          return { ok: true };
+        } catch (error) {
+          return { ok: false, error };
+        }
+      },
+    );
+
+    // The race does not cancel the pool; the flag only stops queued workers
+    // from starting new preview work. Successes are applied below on either
+    // outcome, so a deadline abandons only chats whose previews never
+    // finished; in-flight adoption writes are serialized per chat and
+    // ownership-checked.
+    const deadline = new Promise<'deadline'>((resolve) => {
+      setTimeout(() => resolve('deadline'), this.#repairDeadlineMs).unref?.();
+    });
+    const outcome = await Promise.race([repairs, deadline]);
+    for (const [chatId, metadata] of repaired) {
+      this.#metadataByChatId.set(chatId, metadata);
+    }
+    if (outcome === 'deadline') {
+      deadlineHit = true;
+      logger.warn(
+        `metadata: repair deadline of ${this.#repairDeadlineMs}ms exceeded; ` +
+          `${repairEntries.length - repaired.size} of ${repairEntries.length} chats left for live events or the next startup`,
+      );
+      return;
+    }
+    const results = outcome;
+
+    for (let i = 0; i < results.length; i++) {
+      const [chatId] = repairEntries[i];
+      const result = results[i];
+      if (!result.ok) {
+        logger.warn(`metadata: failed to build metadata for ${chatId}:`, errorMessage(result.error));
+      }
+    }
+  }
+
+  // Detects ownership and carryover changes without opening every ledger at startup.
+  // Live transcript events keep view and ordinal identity current.
+  #isCheaplyStale(entry: ChatMetadata, session: ChatRegistryEntry): boolean {
+    const identity = entry.identity;
+    if (!identity) return false;
+    if (identity.agentOwnershipEpoch !== session.agentOwnershipEpoch) return true;
+    const carryOverRevision = this.#carryOver.revision(
+      session.carryOverSegments ?? [],
+      session.carryOverMigrationQuarantine,
+    );
+    if (identity.carryOverRevision !== carryOverRevision) return true;
+    return false;
+  }
+
+  async #buildMetadataFromPreviewWithTimeout(
+    chatId: string,
+    session: ChatRegistryEntry,
+  ): Promise<ChatMetadata> {
+    return withTimeout(
+      this.#buildMetadataFromPreview(chatId, session),
+      this.#previewTimeoutMs,
+      () => new Error(`Timed out building preview for chat ${chatId} after ${this.#previewTimeoutMs}ms`),
+    );
+  }
+
+  // Composes the segment preview with immutable carryover so title, first
+  // message, and activity describe the whole conversation, not only the
+  // current provider segment.
+  async #buildMetadataFromPreview(chatId: string, session: ChatRegistryEntry): Promise<ChatMetadata> {
+    const result = await this.#agents.getPreview(session, chatId);
+    const preview = result && isAgentPreviewMetadata(result.preview) ? result.preview : null;
+    const refs = session.carryOverSegments ?? [];
+    const carryTotal = refs.length > 0 ? await this.#carryOver.logicalMessageCount(refs) : 0;
+    const head = carryTotal > 0
+      ? [...(await this.#carryOver.loadPage({
+          refs,
+          offset: 0,
+          limit: Math.min(carryTotal, CARRY_OVER_HEAD_WINDOW),
+        })).messages]
+      : [];
+    const tail = carryTotal > 0
+      ? [...(await this.#carryOver.loadPage({
+          refs,
+          offset: Math.max(0, carryTotal - 1),
+          limit: 1,
+        })).messages]
+      : [];
+    const firstMessage = firstUserText(head) || preview?.firstMessage || '';
+    if (!firstMessage) {
+      throw new Error(`Failed to build preview for chat: ${chatId}`);
+    }
+    const createdAt = firstTimestamp(head) || preview?.createdAt || null;
+    return {
+      chatId,
+      createdAt,
+      lastActivity: preview?.lastActivity || latestTimestamp(tail) || createdAt,
+      lastMessage: preview?.lastMessage || latestPreviewText(tail) || firstMessage,
+      firstMessage,
+      source: 'agent-preview',
+      identity: {
+        carryOverRevision: this.#carryOver.revision(refs, session.carryOverMigrationQuarantine),
+        agentOwnershipEpoch: session.agentOwnershipEpoch,
+      },
+    };
+  }
+
+  #pruneMissingRegistryEntries(): void {
+    const validIds = new Set(this.#registry.listChatIds().map(String));
+    let dirty = false;
+    for (const chatId of this.#metadataByChatId.keys()) {
+      if (validIds.has(chatId)) continue;
+      this.#metadataByChatId.delete(chatId);
+      dirty = true;
+    }
+    if (dirty) this.#scheduleSave();
+  }
+
+  async #loadPersistedMetadata(): Promise<Map<string, ChatMetadata>> {
+    const result = new Map<string, ChatMetadata>();
+    if (!this.#metadataPath) return result;
+    try {
+      const raw = await fs.readFile(this.#metadataPath, 'utf8');
+      if (process.platform !== 'win32') {
+        await fs.chmod(this.#metadataPath, 0o600).catch((error) => {
+          logger.warn('metadata: failed to repair chat-metadata.json permissions:', errorMessage(error));
+        });
+      }
+      const parsed = JSON.parse(raw);
+      const chats = isRecord(parsed) ? parsed.chats : null;
+      if (!chats || typeof chats !== 'object' || Array.isArray(chats)) return result;
+      for (const [chatId, value] of Object.entries(chats)) {
+        const normalized = normalizePersistedMetadata(chatId, value);
+        if (normalized) result.set(chatId, normalized);
+      }
+    } catch (error) {
+      if (!hasNodeErrorCode(error, 'ENOENT')) {
+        logger.warn('metadata: failed to load chat metadata:', errorMessage(error));
+      }
+    }
+    return result;
+  }
+
+  #scheduleSave(): void {
+    if (!this.#metadataPath) return;
+    if (this.#pendingSaveTimer) clearTimeout(this.#pendingSaveTimer);
+    this.#pendingSaveTimer = setTimeout(() => {
+      this.#pendingSaveTimer = null;
+      this.#savePromise = this.#savePromise
+        .catch(() => undefined)
+        .then(() => this.#saveNow());
+    }, this.#saveDelayMs);
+  }
+
+  async #saveNow(): Promise<void> {
+    if (!this.#metadataPath) return;
+    const snapshot = {
+      version: METADATA_VERSION,
+      chats: Object.fromEntries(this.#metadataByChatId),
+    };
+    await writeJsonFileAtomic(this.#metadataPath, snapshot, { mode: 0o600 });
+  }
+}
+
+function isAgentPreviewMetadata(value: unknown): value is AgentPreviewMetadata {
+  return isRecord(value) && typeof value.firstMessage === 'string';
+}
+
+function normalizePersistedIdentity(value: unknown): ChatMetadataIdentity | undefined {
+  if (!isRecord(value)) return undefined;
+  if (typeof value.carryOverRevision !== 'string' || typeof value.agentOwnershipEpoch !== 'string') {
+    return undefined;
+  }
+  return {
+    carryOverRevision: value.carryOverRevision,
+    agentOwnershipEpoch: value.agentOwnershipEpoch,
+  };
+}
+
+function normalizePersistedMetadata(chatId: string, value: unknown): ChatMetadata | null {
+  if (!isRecord(value)) return null;
+  const firstMessage = typeof value.firstMessage === 'string' ? value.firstMessage : '';
+  if (!firstMessage) return null;
+  const identity = normalizePersistedIdentity(value.identity);
+  return {
+    chatId,
+    createdAt: typeof value.createdAt === 'string' ? value.createdAt : null,
+    lastActivity: typeof value.lastActivity === 'string' ? value.lastActivity : null,
+    lastMessage: typeof value.lastMessage === 'string' ? value.lastMessage : firstMessage,
+    firstMessage,
+    source: isMetadataSource(value.source)
+      ? value.source
+      : 'startup',
+    ...(identity ? { identity } : {}),
+  };
+}
+
+function isMetadataSource(value: unknown): value is MetadataSource {
+  return value === 'live' || value === 'agent-preview' || value === 'startup';
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, createTimeoutError: () => Error): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout>;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => reject(createTimeoutError()), timeoutMs);
+  });
+  return Promise.race([
+    promise.finally(() => clearTimeout(timeoutId)),
+    timeout,
+  ]) as Promise<T>;
+}
+
+function extractPreviewText(msg: ChatMessage | null | undefined): string {
+  if (!msg) return '';
+  if (msg.type === 'user-message' || msg.type === 'assistant-message') {
+    const content = typeof msg.content === 'string' ? msg.content : '';
+    return content;
+  }
+  return '';
+}
+
+function firstTimestamp(messages: ChatMessage[]): string | null {
+  for (const msg of messages ?? []) {
+    if (typeof msg?.timestamp === 'string') return msg.timestamp;
+  }
+  return null;
+}
+
+function latestTimestamp(messages: ChatMessage[]): string | null {
+  let latest: string | null = null;
+  for (const msg of messages ?? []) {
+    if (typeof msg?.timestamp === 'string' && (!latest || msg.timestamp > latest)) {
+      latest = msg.timestamp;
+    }
+  }
+  return latest;
+}
+
+function firstUserText(messages: ChatMessage[]): string | null {
+  for (const msg of messages ?? []) {
+    if (msg?.type !== 'user-message') continue;
+    const text = extractPreviewText(msg);
+    if (text) return text;
+  }
+  return null;
+}
+
+function latestPreviewText(messages: ChatMessage[]): string | null {
+  let latest: string | null = null;
+  for (const msg of messages ?? []) {
+    const text = extractPreviewText(msg);
+    if (text) latest = text;
+  }
+  return latest;
+}

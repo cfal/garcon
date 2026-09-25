@@ -7,10 +7,10 @@
 		path,
 		fileName,
 		dirty,
-		nodeLabel,
-	}: { path: string; fileName: string; dirty: boolean; nodeLabel?: string } = $props();
-	const displayPath = $derived(nodeLabel ? `${nodeLabel}: ${path}` : path);
-	const displayName = $derived(nodeLabel ? `${nodeLabel}: ${fileName}` : fileName);
+		executorLabel,
+	}: { path: string; fileName: string; dirty: boolean; executorLabel?: string } = $props();
+	const displayPath = $derived(executorLabel ? `${executorLabel}: ${path}` : path);
+	const displayName = $derived(executorLabel ? `${executorLabel}: ${fileName}` : fileName);
 	let availableSize = $state<DOMRectReadOnly>();
 	let requiredSize = $state<DOMRectReadOnly>();
 	let controlsSize = $state<DOMRectReadOnly>();

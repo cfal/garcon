@@ -14,7 +14,7 @@ const response: ExpandSnippetResponse = {
 	sourceId: 'snippet-1',
 	sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 	shortName: 'review',
-	contextNodeId: 'local',
+	contextExecutorId: 'local',
 	contextProjectPath: '/repo',
 	expandedText: 'Review the API in /repo',
 };

@@ -16,13 +16,13 @@ export type GitBranchMutation = 'switch' | 'create';
 export interface GitBranchSelectorStateOptions {
 	runMutation?: (
 		surfaceId: string,
-		nodeId: string,
+		executorId: string,
 		projectPath: string,
 		effectiveProjectKey: string,
 		execute: () => Promise<{ success: boolean; error?: string }>,
 	) => Promise<{ success: boolean; error?: string }>;
 	onMutation?: (
-		nodeId: string,
+		executorId: string,
 		projectPath: string,
 		mutation: GitBranchMutation,
 		effectiveProjectKey: string,
@@ -32,8 +32,8 @@ export interface GitBranchSelectorStateOptions {
 }
 
 export class GitBranchSelectorState {
-	nodeId = $state('local');
-	private newBranchNodeId = 'local';
+	executorId = $state('local');
+	private newBranchExecutorId = 'local';
 	currentProjectPath = $state<string | null>(null);
 	currentEffectiveProjectKey = $state<string | null>(null);
 	currentBranch = $state('');
@@ -81,10 +81,10 @@ export class GitBranchSelectorState {
 		projectPath: string | null,
 		currentBranch?: string,
 		effectiveProjectKey: string | null = projectPath,
-		nodeId = 'local',
+		executorId = 'local',
 	): void {
-		if (nodeId !== this.nodeId || effectiveProjectKey !== this.currentEffectiveProjectKey) {
-			this.resetForProject(projectPath, currentBranch ?? '', effectiveProjectKey, nodeId);
+		if (executorId !== this.executorId || effectiveProjectKey !== this.currentEffectiveProjectKey) {
+			this.resetForProject(projectPath, currentBranch ?? '', effectiveProjectKey, executorId);
 			return;
 		}
 		this.currentProjectPath = projectPath;
@@ -97,9 +97,9 @@ export class GitBranchSelectorState {
 		projectPath: string | null,
 		currentBranch = '',
 		effectiveProjectKey: string | null = projectPath,
-		nodeId = 'local',
+		executorId = 'local',
 	): void {
-		this.nodeId = nodeId;
+		this.executorId = executorId;
 		this.projectContextGeneration += 1;
 		this.cancelBranchLoad();
 		this.closeNewBranchDialog();
@@ -118,7 +118,7 @@ export class GitBranchSelectorState {
 	}
 
 	openNewBranchDialog(projectPath: string, surfaceId: string, effectiveProjectKey: string): void {
-		this.newBranchNodeId = this.nodeId;
+		this.newBranchExecutorId = this.executorId;
 		this.cancelNewBranchLoad();
 		const generation = ++this.newBranchInvocationGeneration;
 		this.newBranchProjectPath = projectPath;
@@ -196,7 +196,7 @@ export class GitBranchSelectorState {
 		this.isLoadingBranches = true;
 		try {
 			const data = await getGitRefs(
-				{ nodeId: this.nodeId, projectPath },
+				{ executorId: this.executorId, projectPath },
 				{
 					query,
 					limit: GIT_REF_RESULT_LIMITS.default,
@@ -243,7 +243,7 @@ export class GitBranchSelectorState {
 		this.isLoadingNewBranchRefs = true;
 		try {
 			const data = await getGitRefs(
-				{ nodeId: this.newBranchNodeId, projectPath },
+				{ executorId: this.newBranchExecutorId, projectPath },
 				{
 					query,
 					limit: GIT_REF_RESULT_LIMITS.default,
@@ -291,13 +291,13 @@ export class GitBranchSelectorState {
 		effectiveProjectKey: string,
 	): Promise<boolean> {
 		const projectContextGeneration = this.projectContextGeneration;
-		const nodeId = this.nodeId;
+		const executorId = this.executorId;
 		try {
-			const execute = () => gitCheckoutRef({ nodeId, projectPath }, refOption.ref, refOption.kind);
+			const execute = () => gitCheckoutRef({ executorId, projectPath }, refOption.ref, refOption.kind);
 			const data = this.options.runMutation
 				? await this.options.runMutation(
 						surfaceId,
-						nodeId,
+						executorId,
 						projectPath,
 						effectiveProjectKey,
 						execute,
@@ -313,7 +313,7 @@ export class GitBranchSelectorState {
 					this.closeBranchDropdown();
 					await this.searchBranchRefs(projectPath);
 				}
-				await this.options.onMutation?.(nodeId, projectPath, 'switch', effectiveProjectKey);
+				await this.options.onMutation?.(executorId, projectPath, 'switch', effectiveProjectKey);
 				return true;
 			}
 			this.surfaceError(data.error ?? 'Checkout ref failed');
@@ -341,7 +341,7 @@ export class GitBranchSelectorState {
 	}
 
 	async createBranch(): Promise<boolean> {
-		const nodeId = this.newBranchNodeId;
+		const executorId = this.newBranchExecutorId;
 		const projectPath = this.newBranchProjectPath;
 		const effectiveProjectKey = this.newBranchEffectiveProjectKey;
 		const surfaceId = this.newBranchSurfaceId;
@@ -354,11 +354,11 @@ export class GitBranchSelectorState {
 
 		this.isCreatingBranch = true;
 		try {
-			const execute = () => gitCreateBranch({ nodeId, projectPath }, branch, { baseRef });
+			const execute = () => gitCreateBranch({ executorId, projectPath }, branch, { baseRef });
 			const data = this.options.runMutation
 				? await this.options.runMutation(
 						surfaceId,
-						nodeId,
+						executorId,
 						projectPath,
 						effectiveProjectKey,
 						execute,
@@ -380,7 +380,7 @@ export class GitBranchSelectorState {
 					this.showBranchDropdown = false;
 					this.closeNewBranchDialog();
 				}
-				await this.options.onMutation?.(nodeId, projectPath, 'create', effectiveProjectKey);
+				await this.options.onMutation?.(executorId, projectPath, 'create', effectiveProjectKey);
 				return true;
 			}
 			this.surfaceError(data.error ?? 'Create branch failed');

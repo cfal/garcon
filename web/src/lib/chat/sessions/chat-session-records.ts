@@ -31,7 +31,7 @@ export function toRecord(session: ChatSession): ChatSessionRecord {
 	}
 	return {
 		id: session.id,
-		nodeId: session.nodeId,
+		executorId: session.executorId,
 		parentChat: session.parentChat,
 		projectPath: session.projectPath,
 		orderGroup: session.orderGroup,
@@ -69,7 +69,7 @@ export function toDraftRecord(
 		id,
 		parentChat: null,
 		projectPath,
-		nodeId: startup.nodeId,
+		executorId: startup.executorId,
 		orderGroup: null,
 		title: startup.firstMessage.trim() || fallbackTitle,
 		agentId: startup.agentId,
@@ -121,7 +121,7 @@ function sameParentChat(
 export function sameRecord(a: ChatSessionRecord, b: ChatSessionRecord): boolean {
 	return (
 		a.id === b.id &&
-		(a.nodeId ?? 'local') === (b.nodeId ?? 'local') &&
+		(a.executorId ?? 'local') === (b.executorId ?? 'local') &&
 		sameParentChat(a.parentChat, b.parentChat) &&
 		a.projectPath === b.projectPath &&
 		a.orderGroup === b.orderGroup &&

@@ -11,7 +11,7 @@ import type { ChatProcessingPhase } from '$shared/chat-types';
 export type ChatStatus = 'draft' | 'running';
 
 export interface ChatStartupConfig {
-	nodeId?: string;
+	executorId?: string;
 	agentId: SessionAgentId;
 	model: string;
 	apiProviderId?: string | null;
@@ -27,7 +27,7 @@ export interface ChatStartupConfig {
 }
 
 export interface ChatSessionRecord {
-	nodeId?: string | null;
+	executorId?: string | null;
 	id: string;
 	parentChat: ParentChatRef | null;
 	projectPath: string;

@@ -14,7 +14,7 @@ import * as commandsApi from '$lib/api/commands.js';
 import { PromptComposerHeightState } from '../prompt-composer-height-state.svelte.js';
 import type { ProjectResolutionResponse, ProjectTarget } from '$shared/project-resolution';
 import { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
-import { localExecutionNode, remoteExecutionNode } from '$lib/execution-nodes/__tests__/fixtures';
+import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 
 const appCss = readFileSync('src/app.css', 'utf8');
 
@@ -83,7 +83,7 @@ describe('PromptComposer focus', () => {
 
 	it('loads a cold remote catalog and blocks click and Enter until it is validated, including reconnect', async () => {
 		const catalog = new ModelCatalogStore();
-		const remote = catalog.forNode(remoteExecutionNode.id);
+		const remote = catalog.forExecutor(remoteExecutor.id);
 		remote.invalidate();
 		const coldLoad = Promise.withResolvers<void>();
 		const reconnectLoad = Promise.withResolvers<void>();
@@ -97,7 +97,7 @@ describe('PromptComposer focus', () => {
 		vi.spyOn(catalog, 'refreshIfStale').mockResolvedValue();
 		const onsubmit = vi.fn();
 		render(PromptComposerTestHost, {
-			selectedNodeId: remoteExecutionNode.id, nodes: [localExecutionNode, remoteExecutionNode], catalog, onsubmit,
+			selectedExecutorId: remoteExecutor.id, executors: [localExecutor, remoteExecutor], catalog, onsubmit,
 		});
 		const textarea = screen.getByRole('textbox');
 		await fireEvent.input(textarea, { target: { value: 'Synthetic remote input' } });
@@ -129,7 +129,7 @@ describe('PromptComposer focus', () => {
 
 	it('keeps remote submission blocked after catalog failure and offers an explicit retry', async () => {
 		const catalog = new ModelCatalogStore();
-		const remote = catalog.forNode(remoteExecutionNode.id);
+		const remote = catalog.forExecutor(remoteExecutor.id);
 		remote.invalidate();
 		vi.spyOn(catalog, 'refreshIfStale').mockResolvedValue();
 		vi.spyOn(remote, 'refreshIfStale').mockImplementation(async () => {
@@ -141,7 +141,7 @@ describe('PromptComposer focus', () => {
 		});
 		const onsubmit = vi.fn();
 		render(PromptComposerTestHost, {
-			selectedNodeId: remoteExecutionNode.id, nodes: [localExecutionNode, remoteExecutionNode], catalog, onsubmit,
+			selectedExecutorId: remoteExecutor.id, executors: [localExecutor, remoteExecutor], catalog, onsubmit,
 		});
 		const textarea = screen.getByRole('textbox');
 		await fireEvent.input(textarea, { target: { value: 'Synthetic retry input' } });
@@ -154,15 +154,15 @@ describe('PromptComposer focus', () => {
 		expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Send message' }).disabled).toBe(false);
 	});
 
-	it('submits file mentions with click and Enter when the ready node has no Files capability', async () => {
+	it('submits file mentions with click and Enter when the ready executor has no Files capability', async () => {
 		const catalog = new ModelCatalogStore();
-		catalog.forNode(remoteExecutionNode.id).lastValidatedAt = Date.now();
+		catalog.forExecutor(remoteExecutor.id).lastValidatedAt = Date.now();
 		vi.spyOn(catalog, 'refreshIfStale').mockResolvedValue();
-		vi.spyOn(catalog.forNode(remoteExecutionNode.id), 'refreshIfStale').mockResolvedValue();
+		vi.spyOn(catalog.forExecutor(remoteExecutor.id), 'refreshIfStale').mockResolvedValue();
 		const onsubmit = vi.fn();
 		render(PromptComposerTestHost, {
-			selectedNodeId: remoteExecutionNode.id,
-			nodes: [localExecutionNode, remoteExecutionNode], catalog, onsubmit,
+			selectedExecutorId: remoteExecutor.id,
+			executors: [localExecutor, remoteExecutor], catalog, onsubmit,
 		});
 		const textarea = screen.getByRole<HTMLTextAreaElement>('textbox');
 		const text = 'Read @README.md';
@@ -177,13 +177,13 @@ describe('PromptComposer focus', () => {
 
 	it('refreshes again when an unvalidated catalog is invalidated during its first load', async () => {
 		const catalog = new ModelCatalogStore();
-		const remote = catalog.forNode(remoteExecutionNode.id);
+		const remote = catalog.forExecutor(remoteExecutor.id);
 		remote.invalidate();
 		const pending = Promise.withResolvers<void>();
 		const refresh = vi.spyOn(remote, 'refreshIfStale').mockReturnValue(pending.promise);
 		vi.spyOn(catalog, 'refreshIfStale').mockResolvedValue();
 		render(PromptComposerTestHost, {
-			selectedNodeId: remoteExecutionNode.id, nodes: [localExecutionNode, remoteExecutionNode], catalog,
+			selectedExecutorId: remoteExecutor.id, executors: [localExecutor, remoteExecutor], catalog,
 		});
 		try {
 			await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
@@ -1290,7 +1290,7 @@ describe('PromptComposer focus', () => {
 			sourceId: 'snippet-review',
 			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
-			contextNodeId: 'local',
+			contextExecutorId: 'local',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'Review the API in /workspace/project',
 		});
@@ -1333,7 +1333,7 @@ describe('PromptComposer focus', () => {
 			sourceId: 'snippet-review',
 			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
-			contextNodeId: 'local',
+			contextExecutorId: 'local',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'draft expansion',
 		});
@@ -1353,7 +1353,7 @@ describe('PromptComposer focus', () => {
 				arguments: { type: 'default' },
 				context: {
 					type: 'new-chat',
-					nodeId: 'local',
+					executorId: 'local',
 					chatId: '1787471053739199',
 					projectPath: '/workspace/project',
 				},
@@ -1369,7 +1369,7 @@ describe('PromptComposer focus', () => {
 			sourceId: 'snippet-review',
 			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
-			contextNodeId: 'local',
+			contextExecutorId: 'local',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'expanded',
 		});
@@ -1447,7 +1447,7 @@ describe('PromptComposer focus', () => {
 			sourceId: 'snippet-review',
 			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
-			contextNodeId: 'local',
+			contextExecutorId: 'local',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'must not apply',
 		});
@@ -1520,7 +1520,7 @@ describe('PromptComposer focus', () => {
 			sourceId: 'snippet-review',
 			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
-			contextNodeId: 'local',
+			contextExecutorId: 'local',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'must not apply',
 		});
@@ -1537,7 +1537,7 @@ describe('PromptComposer focus', () => {
 			sourceId: 'snippet-review',
 			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
-			contextNodeId: 'local',
+			contextExecutorId: 'local',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'EXPANDED',
 		});
@@ -1600,7 +1600,7 @@ describe('PromptComposer focus', () => {
 			sourceId: 'snippet-review',
 			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
-			contextNodeId: 'local',
+			contextExecutorId: 'local',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'must not apply',
 		});
@@ -1640,7 +1640,7 @@ describe('PromptComposer focus', () => {
 			sourceId: 'snippet-review',
 			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
-			contextNodeId: 'local',
+			contextExecutorId: 'local',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'must not apply',
 		});
@@ -1657,7 +1657,7 @@ describe('PromptComposer focus', () => {
 			sourceId: 'snippet-review',
 			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
-			contextNodeId: 'local',
+			contextExecutorId: 'local',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'EXPANDED',
 		});
@@ -1696,7 +1696,7 @@ describe('PromptComposer focus', () => {
 			sourceId: '00000000-0000-4000-8000-000000000001',
 			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'manual',
-			contextNodeId: 'local',
+			contextExecutorId: 'local',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'PREAMBLE',
 		});
@@ -1840,7 +1840,7 @@ describe('PromptComposer focus', () => {
 				sourceId: 'snippet-review',
 				sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 				shortName: 'review',
-				contextNodeId: 'local',
+				contextExecutorId: 'local',
 				contextProjectPath: '/workspace/project',
 				expandedText: 'EXPANDED',
 			});
@@ -1893,7 +1893,7 @@ describe('PromptComposer focus', () => {
 			...identity,
 			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
-			contextNodeId: 'local',
+			contextExecutorId: 'local',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'must not apply',
 		});
@@ -1922,7 +1922,7 @@ describe('PromptComposer focus', () => {
 			sourceId: 'snippet-review',
 			sourceUpdatedAt: '2026-01-02T00:00:00.000Z',
 			shortName: 'review',
-			contextNodeId: 'local',
+			contextExecutorId: 'local',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'must not apply',
 		});
@@ -2016,7 +2016,7 @@ describe('PromptComposer focus', () => {
 			sourceId: 'snippet-review',
 			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
-			contextNodeId: 'local',
+			contextExecutorId: 'local',
 			contextProjectPath: '/workspace/two',
 			expandedText: 'must not apply',
 		});
@@ -2045,7 +2045,7 @@ describe('PromptComposer focus', () => {
 			sourceId: 'snippet-review',
 			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
-			contextNodeId: 'local',
+			contextExecutorId: 'local',
 			contextProjectPath: '/workspace/two',
 			expandedText: 'must not apply',
 		});
@@ -2064,9 +2064,9 @@ describe('PromptComposer focus', () => {
 		expect(textarea.value).toBe('/snippet review keep this');
 	});
 
-	it.each(['missing', 'request-failed'])('prioritizes node, project (%s), then catalog notices across disconnect and recovery without losing the draft', async (failure) => {
+	it.each(['missing', 'request-failed'])('prioritizes executor, project (%s), then catalog notices across disconnect and recovery without losing the draft', async (failure) => {
 		const catalog = new ModelCatalogStore();
-		const remote = catalog.forNode(remoteExecutionNode.id);
+		const remote = catalog.forExecutor(remoteExecutor.id);
 		remote.invalidate();
 		remote.error = 'Synthetic catalog failure';
 		vi.spyOn(remote, 'refreshIfStale').mockResolvedValue();
@@ -2081,7 +2081,7 @@ describe('PromptComposer focus', () => {
 			};
 		});
 		const { component, container } = render(PromptComposerTestHost, {
-			selectedNodeId: remoteExecutionNode.id, nodes: [localExecutionNode, remoteExecutionNode],
+			selectedExecutorId: remoteExecutor.id, executors: [localExecutor, remoteExecutor],
 			catalog, fetchProjectResolution,
 		});
 		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
@@ -2089,16 +2089,16 @@ describe('PromptComposer focus', () => {
 		await screen.findByText('Project folder unavailable');
 		expect(screen.queryByText('Synthetic catalog failure')).toBeNull();
 		expect(screen.queryByRole('listbox')).toBeNull();
-		component.applyExecutionNodes([localExecutionNode, { ...remoteExecutionNode, availability: 'offline' }]);
+		component.applyExecutors([localExecutor, { ...remoteExecutor, availability: 'offline' }]);
 		await screen.findByText('Worker is unavailable.');
 		expect(container.querySelector('[data-project-availability-notice]')).toBeNull();
 		expect(screen.queryByText('Synthetic catalog failure')).toBeNull();
 		expect(screen.queryByRole('listbox')).toBeNull();
-		component.applyExecutionNodes([localExecutionNode]);
-		await screen.findByText("This chat's execution node is no longer configured.");
+		component.applyExecutors([localExecutor]);
+		await screen.findByText("This chat's executor is no longer configured.");
 		expect(screen.queryByText('Project folder unavailable')).toBeNull();
 		pathAvailable = true;
-		component.applyExecutionNodes([localExecutionNode, remoteExecutionNode]);
+		component.applyExecutors([localExecutor, remoteExecutor]);
 		await waitFor(() => expect(fetchProjectResolution).toHaveBeenCalledTimes(2));
 		await screen.findByText('Synthetic catalog failure');
 		expect(screen.queryByText('Project folder unavailable')).toBeNull();
@@ -2179,7 +2179,7 @@ describe('PromptComposer focus', () => {
 			sourceId: 'snippet-review',
 			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
-			contextNodeId: 'local',
+			contextExecutorId: 'local',
 			contextProjectPath: '/workspace/project',
 			expandedText: 'must not cross chats',
 		});
@@ -2214,7 +2214,7 @@ describe('PromptComposer focus', () => {
 			sourceId: 'snippet-review',
 			sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
 			shortName: 'review',
-			contextNodeId: 'local',
+			contextExecutorId: 'local',
 			contextProjectPath: '/workspace/one',
 			expandedText: 'must not cross project paths',
 		});

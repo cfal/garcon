@@ -18,7 +18,7 @@ import {
 import * as m from '$lib/paraglide/messages.js';
 import { ApiError } from '$lib/api/client.js';
 import type { ProjectTarget } from '$shared/project-resolution';
-import { effectiveNodeId } from '$shared/execution-nodes';
+import { effectiveExecutorId } from '$shared/executors';
 
 type RouteDeps = Pick<
 	SessionControllerDeps,
@@ -87,7 +87,7 @@ export function rejectUnavailableDraftStart(
 		'error',
 		m.chat_notice_failed_start_chat({
 			detail:
-				'Execution node or model catalog is unavailable. The initial prompt is kept in the composer.',
+				'Executor or model catalog is unavailable. The initial prompt is kept in the composer.',
 		}),
 	);
 	return 'rejected';
@@ -218,7 +218,7 @@ export async function submitDraftRoute(
 	const { chatId, chat, startup } = context;
 	const submission = acceptedInputs.start({
 		chatId,
-		nodeId: startup.nodeId,
+		executorId: startup.executorId,
 		agentId: startup.agentId,
 		projectPath: chat.projectPath,
 		model: startup.model,
@@ -331,11 +331,11 @@ function refreshUnavailableProject(
 	error: unknown,
 ): void {
 	if (!(error instanceof ApiError) || error.errorCode !== 'PROJECT_UNAVAILABLE') return;
-	const nodeId = effectiveNodeId(context.chat.nodeId);
+	const executorId = effectiveExecutorId(context.chat.executorId);
 	const target: ProjectTarget =
 		context.chat.status === 'draft'
-			? { kind: 'path', nodeId, projectPath: context.chat.projectPath }
-			: { kind: 'chat', nodeId, chatId: context.chatId, projectPath: context.chat.projectPath };
+			? { kind: 'path', executorId, projectPath: context.chat.projectPath }
+			: { kind: 'chat', executorId, chatId: context.chatId, projectPath: context.chat.projectPath };
 	try {
 		void Promise.resolve(deps.onProjectUnavailable?.(target)).catch(() => undefined);
 	} catch {

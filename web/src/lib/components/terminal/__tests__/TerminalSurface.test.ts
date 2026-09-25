@@ -42,7 +42,7 @@ describe('TerminalSurface', () => {
 		render(TerminalSurfaceTestHost, {
 			host: 'mobile',
 			terminalId: 'missing',
-			nodeError: 'Local inventory failed',
+			executorError: 'Local inventory failed',
 			onList,
 		});
 		expect(screen.getByText('Local inventory failed')).toBeTruthy();

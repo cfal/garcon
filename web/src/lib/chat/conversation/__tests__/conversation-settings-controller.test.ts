@@ -72,7 +72,7 @@ function createHarness() {
 		patchChat: vi.fn(),
 	};
 	const agentState = {
-		nodeId: 'local',
+		executorId: 'local',
 		agentId: 'claude' as const,
 		model: 'opus',
 		apiProviderId: null,

@@ -7,7 +7,7 @@ import {
   type IntegrationFixture,
 } from '../../support/integration-fixture.js';
 
-const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
+const REPO_ROOT = fileURLToPath(new URL('../../..', import.meta.url));
 const WORKSPACE = 'cli-fork';
 
 async function runCli(fixture: IntegrationFixture, arguments_: readonly string[]) {

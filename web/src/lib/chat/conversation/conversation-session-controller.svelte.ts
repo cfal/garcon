@@ -26,7 +26,7 @@ import {
 import { ConversationQueueController } from '$lib/chat/conversation/conversation-queue-controller.svelte.js';
 import { ConversationSettingsController } from '$lib/chat/conversation/conversation-settings-controller.svelte.js';
 import { HandoffForkConfirmationState } from './handoff-fork-confirmation.svelte.js';
-import { NodeHandoffProjectState } from './node-handoff-project.svelte.js';
+import { ExecutorHandoffProjectState } from './executor-handoff-project.svelte.js';
 import { ConversationPermissionService } from './conversation-permission-service.js';
 import { AcceptedInputSubmissionService } from '$lib/chat/conversation/accepted-input-submission-service.js';
 import type { ConversationSubmissionOutcome } from '$lib/chat/conversation/conversation-submission-outcome.js';
@@ -83,15 +83,15 @@ export class ConversationSessionController {
 	readonly #permissions: ConversationPermissionService;
 	readonly #executionDraft: ConversationExecutionDraftState;
 	readonly #handoffForkConfirmation = new HandoffForkConfirmationState();
-	readonly nodeHandoff: NodeHandoffProjectState;
+	readonly executorHandoff: ExecutorHandoffProjectState;
 
 	constructor(private deps: SessionControllerDeps) {
-		this.nodeHandoff = new NodeHandoffProjectState(
-			(nodeId, selection) =>
-				deps.canSubmitToNode(nodeId) &&
+		this.executorHandoff = new ExecutorHandoffProjectState(
+			(executorId, selection) =>
+				deps.canSubmitToExecutor(executorId) &&
 				Boolean(
 					deps
-						.modelCatalogForNode(nodeId)
+						.modelCatalogForExecutor(executorId)
 						.getModelForSelection(selection.agentId, selection.model, selection.modelEndpointId),
 				),
 		);
@@ -116,9 +116,9 @@ export class ConversationSessionController {
 			sessions: deps.sessions,
 			agentState: deps.agentState,
 			modelCatalog: deps.modelCatalog,
-			modelCatalogForNode: deps.modelCatalogForNode,
-			chooseDestination: (chatId, nodeId, path, model) =>
-				this.nodeHandoff.ask(chatId, nodeId, path, model),
+			modelCatalogForExecutor: deps.modelCatalogForExecutor,
+			chooseDestination: (chatId, executorId, path, model) =>
+				this.executorHandoff.ask(chatId, executorId, path, model),
 			executionDraft: this.#executionDraft,
 			getExecutionDefaults: deps.getExecutionDefaults,
 		});
@@ -184,16 +184,16 @@ export class ConversationSessionController {
 			...selection,
 			...resolveConversationModelSelection(
 				selection,
-				this.deps.modelCatalogForNode(selection.nodeId ?? 'local'),
+				this.deps.modelCatalogForExecutor(selection.executorId ?? 'local'),
 			),
 		};
 	}
 
 	#applyExecutionSelection(selection: ConversationExecutionSelection): void {
 		const { agentState } = this.deps;
-		agentState.nodeId = selection.nodeId ?? 'local';
+		agentState.executorId = selection.executorId ?? 'local';
 		agentState.projectPath = selection.projectPath ?? '';
-		const modelCatalog = this.deps.modelCatalogForNode(agentState.nodeId);
+		const modelCatalog = this.deps.modelCatalogForExecutor(agentState.executorId);
 		agentState.setAgentId(selection.agentId);
 		agentState.setModelSelection({
 			model: modelCatalog.selectionValueFor(
@@ -228,8 +228,8 @@ export class ConversationSessionController {
 
 	// Deduplicates chat-switch calls so the component effect can be stateless.
 	handleChatSwitchIfChanged(chatId: string | null): void {
-		if (this.nodeHandoff.target && this.nodeHandoff.target.chatId !== chatId)
-			this.nodeHandoff.cancel();
+		if (this.executorHandoff.target && this.executorHandoff.target.chatId !== chatId)
+			this.executorHandoff.cancel();
 		if (chatId === this.#lastChatId) {
 			this.#reconcileExecutionSelection(chatId);
 			return;
@@ -280,7 +280,7 @@ export class ConversationSessionController {
 			deps.composerState.restoreDraft(chatId);
 			const startup = deps.sessions.startupByChatId[chatId];
 			if (startup) {
-				deps.agentState.nodeId = startup.nodeId ?? 'local';
+				deps.agentState.executorId = startup.executorId ?? 'local';
 				deps.agentState.projectPath = selected.projectPath;
 				deps.agentState.setAgentId(
 					startup.agentId as Parameters<typeof deps.agentState.setAgentId>[0],
@@ -484,17 +484,17 @@ export class ConversationSessionController {
 		if (!selected?.projectPath) return 'no-op';
 		const startup = deps.sessions.startupByChatId[chatId];
 		let selection: Parameters<typeof isCustomProviderSelectionAvailable>[1] & {
-			nodeId?: string | null;
+			executorId?: string | null;
 		} = selected;
 		if (selected.status === 'draft' && startup) {
 			selection = startup;
 		} else if (deps.sessions.selectedChatId === chatId) {
 			selection = deps.agentState;
 		}
-		const nodeId = selection.nodeId ?? 'local';
+		const executorId = selection.executorId ?? 'local';
 		if (
-			!deps.canSubmitToNode(nodeId) ||
-			!isCustomProviderSelectionAvailable(deps.modelCatalogForNode(nodeId), selection)
+			!deps.canSubmitToExecutor(executorId) ||
+			!isCustomProviderSelectionAvailable(deps.modelCatalogForExecutor(executorId), selection)
 		) {
 			return selected.status === 'draft' && source === 'automatic-start'
 				? rejectUnavailableDraftStart(deps, chatId, messageOverride ?? '', imageOverride ?? [])
@@ -670,9 +670,9 @@ export class ConversationSessionController {
 		if (
 			deps.sessions.selectedChatId !== chatId ||
 			this.isDirectAdmissionPending(chatId) ||
-			!deps.canSubmitToNode(deps.agentState.nodeId) ||
+			!deps.canSubmitToExecutor(deps.agentState.executorId) ||
 			!isCustomProviderSelectionAvailable(
-				deps.modelCatalogForNode(deps.agentState.nodeId),
+				deps.modelCatalogForExecutor(deps.agentState.executorId),
 				deps.agentState,
 			)
 		) {
@@ -691,7 +691,7 @@ export class ConversationSessionController {
 			chat: selected,
 			text,
 			supportsSteering: deps
-				.modelCatalogForNode(selected.nodeId ?? 'local')
+				.modelCatalogForExecutor(selected.executorId ?? 'local')
 				.supportsSteering(selected.agentId),
 			handoffPending: this.#executionDraft.isHandoffPending,
 		});

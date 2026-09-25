@@ -1,8 +1,8 @@
-import type { GhNodeCapabilityContext } from '$lib/git/pull-requests/gh-capability.svelte';
+import type { GhExecutorCapabilityContext } from '$lib/git/pull-requests/gh-capability.svelte';
 
 export function makeTestGhCapability(
-	overrides: Partial<GhNodeCapabilityContext> = {},
-): GhNodeCapabilityContext {
+	overrides: Partial<GhExecutorCapabilityContext> = {},
+): GhExecutorCapabilityContext {
 	return {
 		available: true,
 		authenticated: true,

@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { GarconProcess } from '../../support/garcon-process.js';
 import { prepareFixtureAuth } from '../../support/fixture-auth.js';
 
-const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
+const REPO_ROOT = fileURLToPath(new URL('../../..', import.meta.url));
 
 async function createDirectories() {
   const root = await mkdtemp(join(tmpdir(), 'garcon-auth-corrupt-state-'));

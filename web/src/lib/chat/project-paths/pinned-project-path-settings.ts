@@ -1,13 +1,13 @@
 import type { RemoteSettingsSnapshot, RemotePathSettings, RemotePathSettingsPatch } from '$shared/settings';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
-import { effectiveNodeId } from '$shared/execution-nodes';
+import { effectiveExecutorId } from '$shared/executors';
 import {
 	nextPinnedProjectPaths,
 	sortedPinnedProjectPaths,
 } from '$lib/chat/project-paths/project-pinned-paths.js';
 
 interface PinnedProjectPathUpdateOptions {
-	nodeId?: string;
+	executorId?: string;
 	browseStartPath?: string;
 }
 
@@ -30,17 +30,17 @@ async function persistPinnedProjectPathsOptimistically(
 	pinnedProjectPaths: string[],
 	options?: PinnedProjectPathUpdateOptions,
 ): Promise<RemoteSettingsSnapshot> {
-	const nodeId = effectiveNodeId(options?.nodeId);
+	const executorId = effectiveExecutorId(options?.executorId);
 	const pinnedPaths = sortedPinnedProjectPaths(pinnedProjectPaths);
-	const pathsPatch: RemotePathSettingsPatch = nodeId === 'local'
+	const pathsPatch: RemotePathSettingsPatch = executorId === 'local'
 		? buildPathsPatch(pinnedPaths, options)
-		: { byNode: { [nodeId]: { pinnedPaths } } };
+		: { byExecutor: { [executorId]: { pinnedPaths } } };
 	const rollback = remoteSettings.applyOptimisticSnapshot({
 		...snap,
-		paths: nodeId === 'local' ? { ...snap.paths, ...buildPathsPatch(pinnedPaths, options) } : {
+		paths: executorId === 'local' ? { ...snap.paths, ...buildPathsPatch(pinnedPaths, options) } : {
 			...snap.paths,
-			byNode: { ...snap.paths.byNode, [nodeId]: {
-				recentPaths: [], ...snap.paths.byNode?.[nodeId], pinnedPaths,
+			byExecutor: { ...snap.paths.byExecutor, [executorId]: {
+				recentPaths: [], ...snap.paths.byExecutor?.[executorId], pinnedPaths,
 			} },
 		},
 	});
@@ -68,8 +68,8 @@ export async function togglePinnedProjectPathOptimistically(
 	options?: PinnedProjectPathUpdateOptions,
 ): Promise<RemoteSettingsSnapshot> {
 	const snap = await remoteSettings.ensureLoaded();
-	const nodeId = effectiveNodeId(options?.nodeId);
-	const current = nodeId === 'local' ? snap.paths.pinnedProjectPaths : snap.paths.byNode?.[nodeId]?.pinnedPaths ?? [];
+	const executorId = effectiveExecutorId(options?.executorId);
+	const current = executorId === 'local' ? snap.paths.pinnedProjectPaths : snap.paths.byExecutor?.[executorId]?.pinnedPaths ?? [];
 	const nextPinnedPaths = nextPinnedProjectPaths(current, path);
 	return persistPinnedProjectPathsOptimistically(remoteSettings, snap, nextPinnedPaths, options);
 }

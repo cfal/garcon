@@ -83,7 +83,7 @@ function buildRows(diffMode: 'unified' | 'split', highlighted = false): DiffCont
 	};
 	return buildVirtualRows({
 		summary: {
-			document: { nodeId: 'local', instanceId: 'test-instance', documentId: 'document-1' },
+			document: { executorId: 'local', instanceId: 'test-instance', documentId: 'document-1' },
 			documentId: 'document-1',
 			project: '/project',
 			context: 5,

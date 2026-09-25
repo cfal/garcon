@@ -2,30 +2,30 @@ import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import { AssistantMessage, TranscriptNoticeMessage } from '$shared/chat-types';
 import ConversationMessageHost from './ConversationMessageHost.svelte';
-import { localExecutionNode, remoteExecutionNode } from '$lib/execution-nodes/__tests__/fixtures';
+import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 
 const TS = '2026-05-14T00:00:00.000Z';
 
 describe('ConversationMessage file links', () => {
-	it('opens a remote panel link on its owning node while Local is selected', async () => {
+	it('opens a remote panel link on its owning executor while Local is selected', async () => {
 		const openAuto = vi.fn();
 		render(ConversationMessageHost, {
 			message: new AssistantMessage(TS, 'Open [remote file](file.txt)'),
 			openAuto,
 			chatContext: {
 				chatId: 'remote-chat',
-				nodeId: remoteExecutionNode.id,
+				executorId: remoteExecutor.id,
 				projectPath: '/worker/project',
 			},
-			executionNodes: [
-				localExecutionNode,
-				{ ...remoteExecutionNode, machineServices: { files: true, git: false, gh: false, terminals: false } },
+			executors: [
+				localExecutor,
+				{ ...remoteExecutor, machineServices: { files: true, git: false, gh: false, terminals: false } },
 			],
 		});
 		await fireEvent.click(screen.getByRole('link', { name: 'remote file' }));
 		expect(openAuto).toHaveBeenCalledWith(
 			expect.objectContaining({
-				nodeId: remoteExecutionNode.id,
+				executorId: remoteExecutor.id,
 				fileRootPath: '/worker',
 				relativePath: 'project/file.txt',
 			}),
@@ -39,13 +39,13 @@ describe('ConversationMessage file links', () => {
 			openAuto,
 			chatContext: {
 				chatId: 'remote-chat',
-				nodeId: remoteExecutionNode.id,
+				executorId: remoteExecutor.id,
 				projectPath: '/workspace/project',
 			},
-			executionNodes: [
-				localExecutionNode,
+			executors: [
+				localExecutor,
 				{
-					...remoteExecutionNode,
+					...remoteExecutor,
 					availability: 'offline',
 					machineServices: { files: true, git: false, gh: false, terminals: false },
 				},

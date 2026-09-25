@@ -10,7 +10,7 @@
 		getChatSessions,
 		getLocalSettings,
 		getModelCatalog,
-		getExecutionNodes,
+		getExecutors,
 		getRemoteSettings,
 	} from '$lib/context';
 	import { nonDirectAgentIds } from '$lib/agents/direct-agents.js';
@@ -32,7 +32,7 @@
 
 	let { open, scheduledPrompt, onSave, onClose }: Props = $props();
 	const rootModelCatalog = getModelCatalog();
-	const executionNodes = getExecutionNodes();
+	const executors = getExecutors();
 	const localSettings = getLocalSettings();
 	const remoteSettings = getRemoteSettings();
 	const sessions = getChatSessions();
@@ -42,7 +42,7 @@
 
 	function createForm(): ScheduledPromptFormState {
 		return new ScheduledPromptFormState(rootModelCatalog, remoteSettings, sessions, {
-			executionNodes,
+			executors,
 			get selectableAgentIds() {
 				return selectableAgentIds;
 			},
@@ -50,13 +50,13 @@
 	}
 
 	let form = $state(createForm());
-	const modelCatalog = $derived(rootModelCatalog.forNode(form.startup.nodeId));
+	const modelCatalog = $derived(rootModelCatalog.forExecutor(form.startup.executorId));
 	const pathContextKey = $derived(form.startup.pathContextKey);
-	function selectableAgentsForNode(nodeId: string) {
-		const allAgentIds = rootModelCatalog.forNode(nodeId).getSelectableAgents();
+	function selectableAgentsForExecutor(executorId: string) {
+		const allAgentIds = rootModelCatalog.forExecutor(executorId).getSelectableAgents();
 		return localSettings.allowDirectChats ? allAgentIds : nonDirectAgentIds(allAgentIds);
 	}
-	const selectableAgentIds = $derived(selectableAgentsForNode(form.startup.nodeId));
+	const selectableAgentIds = $derived(selectableAgentsForExecutor(form.startup.executorId));
 	let pickerOpen = $state(false);
 	let isMobile = $state(false);
 	let initialization = 0;
@@ -93,7 +93,7 @@
 	});
 
 	$effect(() => {
-		if (!open || form.targetType !== 'new-chat' || !form.startup.nodeReady) return;
+		if (!open || form.targetType !== 'new-chat' || !form.startup.executorReady) return;
 		const catalog = modelCatalog;
 		void catalog.version;
 		untrack(() => void catalog.refreshIfStale());
@@ -338,7 +338,7 @@
 						startup={form.startup}
 						{modelCatalog}
 						{remoteSettings}
-						getSelectableAgentIds={selectableAgentsForNode}
+						getSelectableAgentIds={selectableAgentsForExecutor}
 						prompt={form.prompt}
 						promptError={form.promptError}
 						{knownTags}

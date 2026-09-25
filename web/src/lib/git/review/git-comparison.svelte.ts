@@ -313,7 +313,7 @@ export class GitComparisonController {
 			return;
 		try {
 			const result = await getGitComparisonFreshness(
-				{ nodeId: project.nodeId, projectPath: snapshot.repoRoot },
+				{ executorId: project.executorId, projectPath: snapshot.repoRoot },
 				{
 					kind: 'revision',
 					revision: snapshot.from.requestedRevision,

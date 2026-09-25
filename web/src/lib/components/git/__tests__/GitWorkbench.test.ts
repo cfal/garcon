@@ -12,7 +12,7 @@ import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
 
 function makeTarget(): GitWorkbenchTarget {
 	return {
-		nodeId: 'local',
+		executorId: 'local',
 		projectPath: '/project',
 		repoRoot: '/project',
 		worktreePath: '/project',

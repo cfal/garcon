@@ -57,7 +57,7 @@ describe('preamble snippet short names', () => {
         sourceId: preamble.id,
         sourceUpdatedAt: preamble.updatedAt,
         shortName: 'manual_context',
-        contextNodeId: 'local',
+        contextExecutorId: 'local',
         contextProjectPath: unmatchedProject,
         expandedText: `Chat ${chatId} / {{arguments}} / {{project_path}} / {{chat_id}}`,
       });

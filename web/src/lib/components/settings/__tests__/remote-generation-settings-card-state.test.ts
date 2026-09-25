@@ -3,7 +3,7 @@ import {
 	RemoteGenerationSettingsCardState,
 	type RemoteGenerationSettingsModelCatalog,
 	type RemoteGenerationSettingsStore,
-} from '../remote-generation-settings-card-state.svelte';
+} from '../remote-generation-settings-card-state.svelte.ts';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
 
 function snapshot(): RemoteSettingsSnapshot {
@@ -58,7 +58,7 @@ describe('RemoteGenerationSettingsCardState', () => {
 		async (settingsKey) => {
 			const current = snapshot();
 			const saved = {
-				nodeId: '22222222-2222-4222-8222-222222222222',
+				executorId: '22222222-2222-4222-8222-222222222222',
 				model: 'synthetic-model',
 				enabled: true,
 				contextWindowTokens: 1_000_000 as const,
@@ -108,9 +108,9 @@ describe('RemoteGenerationSettingsCardState', () => {
 	it.each(['chatTitle', 'agentSwitchCompaction', 'commitMessage', 'promptRefinement'] as const)(
 		'retains unavailable %s selections when the snapshot has no effective config',
 		(settingsKey) => {
-			for (const nodeId of ['not-a-node', '', '22222222-2222-4222-8222-222222222222']) {
+			for (const executorId of ['not-a-executor', '', '22222222-2222-4222-8222-222222222222']) {
 				const current = snapshot();
-				current.ui[settingsKey] = { nodeId, enabled: true, agentId: 'codex' };
+				current.ui[settingsKey] = { executorId, enabled: true, agentId: 'codex' };
 				current.uiEffective = {};
 				const cardState = new RemoteGenerationSettingsCardState({
 					remoteSettings: { snapshot: current, update: vi.fn() },
@@ -123,15 +123,15 @@ describe('RemoteGenerationSettingsCardState', () => {
 					},
 				});
 				expect(cardState.isAuto).toBe(false);
-				expect(cardState.nodeId).toBe(nodeId);
+				expect(cardState.executorId).toBe(executorId);
 				expect(cardState.enabled).toBe(true);
-				expect(cardState.selectorValue).toMatchObject({ nodeId, agentId: 'codex', model: '' });
+				expect(cardState.selectorValue).toMatchObject({ executorId, agentId: 'codex', model: '' });
 			}
 		},
 	);
 
 	it.each(['chatTitle', 'agentSwitchCompaction', 'commitMessage', 'promptRefinement'] as const)(
-		'Auto clears the node/model selection but preserves %s options',
+		'Auto clears the executor/model selection but preserves %s options',
 		async (settingsKey) => {
 			const current = snapshot();
 			const preferences =
@@ -150,7 +150,7 @@ describe('RemoteGenerationSettingsCardState', () => {
 				modelProtocol: 'openai-compatible',
 				thinkingMode: 'medium',
 				...preferences,
-				nodeId: '22222222-2222-4222-8222-222222222222',
+				executorId: '22222222-2222-4222-8222-222222222222',
 			};
 			const update = vi.fn<RemoteGenerationSettingsStore['update']>(async () => current);
 			const cardState = new RemoteGenerationSettingsCardState({
@@ -191,7 +191,7 @@ describe('RemoteGenerationSettingsCardState', () => {
 		expect(update).toHaveBeenCalledWith({
 			ui: {
 				promptRefinement: {
-					nodeId: 'local',
+					executorId: 'local',
 					agentId: 'codex',
 					model: 'gpt-stale',
 					apiProviderId: 'stale',

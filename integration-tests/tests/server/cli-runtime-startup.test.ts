@@ -3,11 +3,11 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { acquireControllerLease } from '../../../server/lib/workspace-lease.js';
+import { acquireControllerLease } from '../../../server/controller/lib/workspace-lease.js';
 import { isolatedEnvironment } from '../../support/garcon-process.js';
 import { withTimeout } from '../../support/deferred.js';
 
-const REPO = fileURLToPath(new URL('../../../', import.meta.url));
+const REPO = fileURLToPath(new URL('../../..', import.meta.url));
 
 test.each(['occupied-port', 'unclearable-runtime'] as const)('controller runtime cleanup fails closed on %s', async (failure) => {
   const root = await mkdtemp(join(homedir(), 'cli-runtime-startup-'));

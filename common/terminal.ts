@@ -1,4 +1,4 @@
-import { isExecutionNodeId } from './execution-nodes.js';
+import { isExecutorId } from './executors.js';
 
 export const TERMINAL_SESSION_LIMIT = 8;
 export const TERMINAL_REQUEST_ID_MAX_BYTES = 256;
@@ -34,7 +34,7 @@ export interface TerminalEncodedOutputChunk {
 export interface TerminalCreateRequest {
   requestId: string;
   requestedInitialWorkingDirectory: string | null;
-  nodeId?: string;
+  executorId?: string;
   expectedTerminalRuntimeId?: string;
 }
 
@@ -239,7 +239,7 @@ export function parseTerminalCreateRequest(
   const requestId = nonEmptyString(input.requestId);
   if (!requestId || utf8ByteLength(requestId) > TERMINAL_REQUEST_ID_MAX_BYTES)
     return null;
-  if (input.nodeId !== undefined && !isExecutionNodeId(input.nodeId)) return null;
+  if (input.executorId !== undefined && !isExecutorId(input.executorId)) return null;
   if (input.expectedTerminalRuntimeId !== undefined && !terminalIdentifier(input.expectedTerminalRuntimeId)) return null;
   if (
     input.requestedInitialWorkingDirectory !== null &&
@@ -248,7 +248,7 @@ export function parseTerminalCreateRequest(
     return null;
   return {
     requestId,
-    ...(input.nodeId === undefined ? {} : { nodeId: input.nodeId as string }),
+    ...(input.executorId === undefined ? {} : { executorId: input.executorId as string }),
     ...(input.expectedTerminalRuntimeId === undefined ? {} : { expectedTerminalRuntimeId: input.expectedTerminalRuntimeId as string }),
     requestedInitialWorkingDirectory: input.requestedInitialWorkingDirectory as
       | string

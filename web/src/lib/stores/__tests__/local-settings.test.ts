@@ -3,7 +3,7 @@ import {
 	createLocalSettingsStore,
 	HIDEABLE_TOOL_GROUPS,
 	SIDEBAR_INACTIVITY_DURATION_VALUES,
-} from '../local-settings.svelte';
+} from '../local-settings.svelte.ts';
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
 import { DEFAULT_THEME_PREFERENCE } from '$lib/theme/themes.js';
 import { CHAT_BOARD_MAX_COUNT, type ChatBoard } from '$shared/chat-boards';

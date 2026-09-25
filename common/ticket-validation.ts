@@ -1,5 +1,5 @@
 import { parseChatId } from './chat-id.js';
-import { isRemoteNodeId } from './execution-nodes.js';
+import { isRemoteExecutorId } from './executors.js';
 import { TICKET_LIMITS, TICKET_STATUSES, type TicketActor, type TicketOwner,
   type TicketPriority, type TicketResolution, type TicketSource, type TicketStatus } from './tickets.js';
 
@@ -144,16 +144,16 @@ export function ticketLabels(value: unknown): readonly string[] {
   return labels.sort();
 }
 
-function ticketNodeId(value: unknown): string {
-  if (!isRemoteNodeId(value)) return ticketInvalid('Invalid execution node identity.');
+function ticketExecutorId(value: unknown): string {
+  if (!isRemoteExecutorId(value)) return ticketInvalid('Invalid executor identity.');
   return value;
 }
 
 export function ticketOwner(value: unknown): TicketOwner {
-  const raw = ticketRecord(value, ['kind', 'chatId', 'username', 'nodeId']);
-  if (raw.kind === 'node') {
-    ticketRecord(raw, ['kind', 'nodeId']);
-    return { kind: 'node', nodeId: ticketNodeId(raw.nodeId) };
+  const raw = ticketRecord(value, ['kind', 'chatId', 'username', 'executorId']);
+  if (raw.kind === 'executor') {
+    ticketRecord(raw, ['kind', 'executorId']);
+    return { kind: 'executor', executorId: ticketExecutorId(raw.executorId) };
   }
   if (raw.kind === 'chat') {
     ticketRecord(raw, ['kind', 'chatId']);
@@ -173,15 +173,15 @@ export function parseTicketAssigneeQuery(value: string): TicketOwner | 'unassign
   if (separator < 0) return ticketInvalid('Invalid assignee filter.');
   if (kind === 'chat') return ticketOwner({ kind, chatId: value.slice(separator + 1) });
   if (kind === 'user') return ticketOwner({ kind, username: value.slice(separator + 1) });
-  if (kind === 'node') return ticketOwner({ kind, nodeId: value.slice(separator + 1) });
+  if (kind === 'executor') return ticketOwner({ kind, executorId: value.slice(separator + 1) });
   return ticketInvalid('Invalid assignee filter.');
 }
 
 export function ticketActor(value: unknown): TicketActor {
-  const raw = ticketRecord(value, ['kind', 'chatId', 'provenance', 'username', 'principalMode', 'declaredChatId', 'nodeId']);
-  if (raw.kind === 'node') {
-    ticketRecord(raw, ['kind', 'nodeId', 'declaredChatId']);
-    return { kind: 'node', nodeId: ticketNodeId(raw.nodeId),
+  const raw = ticketRecord(value, ['kind', 'chatId', 'provenance', 'username', 'principalMode', 'declaredChatId', 'executorId']);
+  if (raw.kind === 'executor') {
+    ticketRecord(raw, ['kind', 'executorId', 'declaredChatId']);
+    return { kind: 'executor', executorId: ticketExecutorId(raw.executorId),
       declaredChatId: raw.declaredChatId === null ? null : ticketChatId(raw.declaredChatId) };
   }
   if (raw.kind === 'chat') {

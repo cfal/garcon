@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { setExecutionNodesTestContext } from '$lib/execution-nodes/__tests__/execution-nodes-test-context';
-	setExecutionNodesTestContext();
+	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
+	setExecutorsTestContext();
 	import NewChatDialog from '../NewChatDialog.svelte';
 	import {
 		setAppShell,
@@ -76,7 +76,7 @@
 		focusChat: () => Promise.resolve(),
 	} as never);
 	setModelCatalog({
-		forNode() { return this; },
+		forExecutor() { return this; },
 		isValidated: true,
 		lastValidatedAt: 1,
 		isRefreshing: false,

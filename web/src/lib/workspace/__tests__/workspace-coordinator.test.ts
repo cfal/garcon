@@ -37,7 +37,7 @@ import type { ProjectTarget } from '$shared/project-resolution';
 import type {
 	ProjectResolutionLease,
 	ProjectResolutionSnapshot,
-} from '../project-resolution-store.svelte';
+} from '../project-resolution-store.svelte.ts';
 import type { ProjectResolver } from '../workspace-project-path-resolution';
 import { AppShellChatNavigationController } from '$lib/components/layout/app-shell-chat-navigation-controller.svelte.js';
 import { TerminalLayoutBinding } from '../terminal-layout-binding.js';
@@ -168,7 +168,7 @@ function createHarness(
 	const terminals = {
 		displayName: (metadata: TerminalMetadata) =>
 			metadata.title ?? `Local ${metadata.displaySequence}`,
-		nodeIdFor: vi.fn((_terminalId: string) => 'local'),
+		executorIdFor: vi.fn((_terminalId: string) => 'local'),
 		sessions: {} as Record<
 			string,
 			{
@@ -2733,7 +2733,7 @@ describe('WorkspaceCoordinator', () => {
 		'captures the source terminal host/directory for %s creation',
 		async (mode) => {
 			const { coordinator, layout, terminals } = createHarness();
-			terminals.nodeIdFor.mockReturnValue('remote');
+			terminals.executorIdFor.mockReturnValue('remote');
 			terminals.sessions.one = {
 				metadata: { ...terminalMetadata('one'), initialWorkingDirectory: '/remote/project' },
 				attachmentState: 'attached',
@@ -2754,7 +2754,7 @@ describe('WorkspaceCoordinator', () => {
 					},
 				]),
 			);
-			expect(coordinator.terminalCreationNodeIdFor('window-main')).toBe('remote');
+			expect(coordinator.terminalCreationExecutorIdFor('window-main')).toBe('remote');
 			if (mode === 'window') await coordinator.createTerminal('window-main');
 			else await coordinator.createTerminalReplacing('one');
 			expect(terminals.create).toHaveBeenCalledWith(
@@ -2767,7 +2767,7 @@ describe('WorkspaceCoordinator', () => {
 
 	it('uses the destination base when an existing terminal chooses a different host', async () => {
 		const { coordinator, layout, terminals } = createHarness();
-		terminals.nodeIdFor.mockReturnValue('remote');
+		terminals.executorIdFor.mockReturnValue('remote');
 		terminals.sessions.one = { metadata: terminalMetadata('one'), attachmentState: 'attached' };
 		terminals.create.mockResolvedValue('two');
 		layout.publish(
@@ -2791,9 +2791,9 @@ describe('WorkspaceCoordinator', () => {
 
 	it.each([undefined, 'remote'])(
 		'uses the visible mobile terminal directory for command creation on %s',
-		async (nodeId) => {
+		async (executorId) => {
 			const { coordinator, layout, terminals } = createHarness();
-			terminals.nodeIdFor.mockImplementation((id) =>
+			terminals.executorIdFor.mockImplementation((id) =>
 				id === 'remote-terminal' ? 'remote' : 'local',
 			);
 			for (const id of ['remote-terminal', 'local-terminal']) {
@@ -2809,9 +2809,9 @@ describe('WorkspaceCoordinator', () => {
 				terminalSurfaceId('local-terminal'),
 			);
 			expect(layout.snapshot.mobileActiveSurfaceId).toBe(terminalSurfaceId('remote-terminal'));
-			expect(coordinator.terminalCreationNodeId).toBe('remote');
+			expect(coordinator.terminalCreationExecutorId).toBe('remote');
 			terminals.create.mockResolvedValue('new-terminal');
-			await coordinator.createTerminalInAvailableSpace('command-menu:new-terminal', nodeId);
+			await coordinator.createTerminalInAvailableSpace('command-menu:new-terminal', executorId);
 			expect(terminals.create).toHaveBeenCalledWith(
 				'/remote-terminal/project',
 				expect.any(String),
@@ -2821,18 +2821,18 @@ describe('WorkspaceCoordinator', () => {
 	);
 
 	it.each([
-		{ firstNode: undefined, retryNode: 'local' },
-		{ firstNode: 'local', retryNode: undefined },
+		{ firstExecutor: undefined, retryExecutor: 'local' },
+		{ firstExecutor: 'local', retryExecutor: undefined },
 	])(
-		'retains create identity when direct/menu selection changes $firstNode to $retryNode',
-		async ({ firstNode, retryNode }) => {
+		'retains create identity when direct/menu selection changes $firstExecutor to $retryExecutor',
+		async ({ firstExecutor, retryExecutor }) => {
 			const { coordinator, terminals } = createHarness();
 			terminals.create
 				.mockImplementationOnce(
-					async (directory: string | null, requestId: string, nodeId = 'local') => {
+					async (directory: string | null, requestId: string, executorId = 'local') => {
 						terminals.pendingCreates[requestId] = {
 							requestedInitialWorkingDirectory: directory,
-							nodeId,
+							executorId,
 						};
 						throw new Error('Lost response');
 					},
@@ -2842,10 +2842,10 @@ describe('WorkspaceCoordinator', () => {
 					return 'recovered-terminal';
 				});
 			await expect(
-				coordinator.createTerminalInAvailableSpace('entry-point', firstNode),
+				coordinator.createTerminalInAvailableSpace('entry-point', firstExecutor),
 			).rejects.toThrow('Lost response');
 			await expect(
-				coordinator.createTerminalInAvailableSpace('entry-point', retryNode),
+				coordinator.createTerminalInAvailableSpace('entry-point', retryExecutor),
 			).resolves.toBe('recovered-terminal');
 			expect(terminals.create.mock.calls[1]).toEqual(terminals.create.mock.calls[0]);
 		},
@@ -3102,12 +3102,12 @@ describe('WorkspaceCoordinator', () => {
 		expect(windowTabs(layout.snapshot, 'window-main').activeId).toBe(CANONICAL_CHAT_SURFACE_ID);
 	});
 
-	it('reconciles concurrent node inventories against the latest placement without resurrecting tabs', async () => {
+	it('reconciles concurrent executor inventories against the latest placement without resurrecting tabs', async () => {
 		const { coordinator, layout, terminals } = createHarness();
 		const local = ['local-placed', 'local-hidden'];
 		const remote = ['remote-placed', 'remote-hidden'];
 		const offline = ['offline-placed', 'offline-hidden'];
-		terminals.nodeIdFor.mockImplementation((id: string) => id.split('-')[0]);
+		terminals.executorIdFor.mockImplementation((id: string) => id.split('-')[0]);
 		for (const id of [...local, ...remote, ...offline]) {
 			terminals.sessions[id] = { metadata: terminalMetadata(id), attachmentState: 'detached' };
 			await coordinator.openTerminalSession(id, 'window-main');
@@ -3135,13 +3135,13 @@ describe('WorkspaceCoordinator', () => {
 		binding.destroy();
 	});
 
-	it('does not restore a terminal removed after its node inventory queued layout reconciliation', async () => {
+	it('does not restore a terminal removed after its executor inventory queued layout reconciliation', async () => {
 		const { coordinator, layout, terminals } = createHarness();
 		const id = 'local-race';
 		terminals.sessions[id] = { metadata: terminalMetadata(id), attachmentState: 'detached' };
 		await coordinator.openTerminalSession(id, 'window-main');
 		const reconciling = coordinator.reconcileTerminals([id], {
-			nodeId: 'local',
+			executorId: 'local',
 			deriveLauncher: false,
 		});
 		delete terminals.sessions[id];

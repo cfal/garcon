@@ -71,7 +71,7 @@ type SessionComposerState = Pick<
 type SessionAgentState = Pick<
 	AgentState,
 	| 'agentId'
-	| 'nodeId'
+	| 'executorId'
 	| 'projectPath'
 	| 'model'
 	| 'apiProviderId'
@@ -144,10 +144,10 @@ export interface SessionControllerDeps {
 	>;
 	getExecutionDefaults(
 		agentId: SessionAgentId,
-		nodeId?: string,
+		executorId?: string,
 	): Pick<ConversationExecutionSelection, 'permissionMode' | 'thinkingMode' | 'agentSettings'>;
-	modelCatalogForNode(nodeId: string): SessionControllerDeps['modelCatalog'];
-	canSubmitToNode(nodeId: string): boolean;
+	modelCatalogForExecutor(executorId: string): SessionControllerDeps['modelCatalog'];
+	canSubmitToExecutor(executorId: string): boolean;
 	appShell: {
 		openNewChatDialog: (opts: { prefill: string }) => void;
 	};

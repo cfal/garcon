@@ -35,7 +35,7 @@ function makeController(): PullRequestsStore {
 		kind: 'available',
 		project: {
 			chatId: 'chat',
-			nodeId: 'local',
+			executorId: 'local',
 			projectPath: '/project',
 			effectiveProjectKey: 'project-key',
 		},

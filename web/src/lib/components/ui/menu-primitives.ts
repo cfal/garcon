@@ -7,7 +7,7 @@ import {
 	DropdownMenuSub,
 	DropdownMenuSubContent,
 	DropdownMenuSubTrigger,
-} from './dropdown-menu';
+} from './dropdown-menu/index';
 import {
 	ContextMenuItem,
 	ContextMenuLabel,
@@ -17,7 +17,7 @@ import {
 	ContextMenuSub,
 	ContextMenuSubContent,
 	ContextMenuSubTrigger,
-} from './context-menu';
+} from './context-menu/index';
 
 export const dropdownMenuPrimitives = {
 	kind: 'dropdown',

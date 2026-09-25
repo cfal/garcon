@@ -2,17 +2,17 @@ import type { GitRequests, GitResults, GitMethod } from './git.js';
 import type { GitOperationDiagnostics } from './git-diagnostics.js';
 import type { GhResults } from './gh.js';
 
-export interface GitNodeScope {
-  readonly nodeId: string;
+export interface GitExecutorScope {
+  readonly executorId: string;
   readonly instanceId: string;
 }
 
 export interface GitProjectTarget {
-  readonly nodeId: string;
+  readonly executorId: string;
   readonly projectPath: string;
 }
 
-export interface GitReviewDocumentRef extends GitNodeScope {
+export interface GitReviewDocumentRef extends GitExecutorScope {
   readonly documentId: string;
 }
 
@@ -28,8 +28,8 @@ export interface ExecutionGitRequests extends Omit<GitRequests, 'getReviewDocume
   stageHunk: GitRequests['stageHunk'] & GitSelectionProof;
 }
 
-export type ExecutionGitResults = { [K in GitMethod]: GitResults[K] & GitNodeScope & { diagnostics?: GitOperationDiagnostics } };
-export type ExecutionGhResults = { [K in keyof GhResults]: GhResults[K] & GitNodeScope };
+export type ExecutionGitResults = { [K in GitMethod]: GitResults[K] & GitExecutorScope & { diagnostics?: GitOperationDiagnostics } };
+export type ExecutionGhResults = { [K in keyof GhResults]: GhResults[K] & GitExecutorScope };
 
 export const GIT_MUTATIONS = [
   'initialCommit', 'commit', 'checkout', 'createBranch', 'fetch', 'pull', 'push', 'discard', 'deleteUntracked',

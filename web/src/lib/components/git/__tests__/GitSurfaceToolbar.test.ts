@@ -5,9 +5,9 @@ import { GitTargetSessionController } from '$lib/git/targets/git-target-session.
 import { GitBranchSelectorState } from '$lib/git/targets/git-branch-selector-state.svelte.js';
 import * as m from '$lib/paraglide/messages.js';
 import {
-	localExecutionNode,
-	remoteExecutionNode,
-} from '$lib/execution-nodes/__tests__/fixtures.js';
+	localExecutor,
+	remoteExecutor,
+} from '$lib/executors/__tests__/fixtures.js';
 
 vi.mock('$lib/api/git.js', () => ({
 	getGitTargetCandidates: vi.fn().mockResolvedValue({ targets: [] }),
@@ -39,22 +39,22 @@ async function target(): Promise<GitTargetSessionController> {
 afterEach(cleanup);
 
 describe('GitSurfaceToolbar', async () => {
-	it('keeps node navigation before the branch control when the current node is unavailable', async () => {
+	it('keeps executor navigation before the branch control when the current executor is unavailable', async () => {
 		const controller = await target();
 		controller.setProjectState({
 			kind: 'request-failed',
-			context: { chatId: 'remote', nodeId: remoteExecutionNode.id, projectPath: '/worker' },
+			context: { chatId: 'remote', executorId: remoteExecutor.id, projectPath: '/worker' },
 			message: 'Offline',
 		});
-		const chooseNode = vi.spyOn(controller, 'selectNode').mockResolvedValue();
+		const chooseExecutor = vi.spyOn(controller, 'selectExecutor').mockResolvedValue();
 		const { container } = render(GitSurfaceToolbarTestHost, {
 			props: {
 				target: controller,
 				presentation: 'mobile',
-				nodes: [localExecutionNode, { ...remoteExecutionNode, availability: 'offline' }],
+				executors: [localExecutor, { ...remoteExecutor, availability: 'offline' }],
 			},
 		});
-		const picker = screen.getByRole('button', { name: 'Execution node: Worker' });
+		const picker = screen.getByRole('button', { name: 'Executor: Worker' });
 		expect(picker.hasAttribute('disabled')).toBe(false);
 		expect(container.querySelector('[data-git-project-selector]')?.firstElementChild).toBe(picker);
 		expect(screen.getByRole('button', { name: /current ref/i }).hasAttribute('disabled')).toBe(
@@ -62,7 +62,7 @@ describe('GitSurfaceToolbar', async () => {
 		);
 		await fireEvent.click(picker);
 		await fireEvent.click(screen.getByRole('menuitemradio', { name: 'Local' }));
-		expect(chooseNode).toHaveBeenCalledWith('local');
+		expect(chooseExecutor).toHaveBeenCalledWith('local');
 	});
 
 	it('allows folder selection without a chat while keeping repository actions disabled', async () => {
@@ -91,7 +91,7 @@ describe('GitSurfaceToolbar', async () => {
 
 		expect(folder.getAttribute('title')).toBe('/very/long/workspace/project/path');
 		expect(folder.querySelector('span')?.className).toContain('truncate');
-		expect(screen.queryByRole('button', { name: /Execution node:/ })).toBeNull();
+		expect(screen.queryByRole('button', { name: /Executor:/ })).toBeNull();
 		expect(screen.getByRole('button', { name: /current ref HEAD/i })).toBeTruthy();
 	});
 

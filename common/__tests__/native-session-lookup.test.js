@@ -56,17 +56,17 @@ describe('native session lookup contract', () => {
     }
   });
 
-  it('preserves the remote node and treats null as Local without backfilling omission', () => {
+  it('preserves the remote executor and treats null as Local without backfilling omission', () => {
     const request = { nativeSessionId: 'session-123', agent: 'codex' };
-    const nodeId = '22222222-2222-4222-8222-222222222222';
+    const executorId = '22222222-2222-4222-8222-222222222222';
     expect(parseNativeSessionLookupRequest(request)).toEqual(request);
-    expect(parseNativeSessionLookupRequest({ ...request, nodeId })).toEqual({ ...request, nodeId });
+    expect(parseNativeSessionLookupRequest({ ...request, executorId })).toEqual({ ...request, executorId });
     for (const value of ['local', null]) {
-      expect(parseNativeSessionLookupRequest({ ...request, nodeId: value })).toEqual({ ...request, nodeId: 'local' });
+      expect(parseNativeSessionLookupRequest({ ...request, executorId: value })).toEqual({ ...request, executorId: 'local' });
     }
     for (const value of ['', 'worker', 1, {}, []]) {
-      expect(() => parseNativeSessionLookupRequest({ ...request, nodeId: value }))
-        .toThrow('nodeId must be a valid execution node ID');
+      expect(() => parseNativeSessionLookupRequest({ ...request, executorId: value }))
+        .toThrow('executorId must be a valid executor ID');
     }
   });
 

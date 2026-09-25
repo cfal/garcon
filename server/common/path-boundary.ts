@@ -1,0 +1,119 @@
+import { promises as fs } from 'fs';
+import path from 'path';
+
+export const PROJECT_BOUNDARY_ERROR_CODE = 'outside_project_base';
+export const PROJECT_BOUNDARY_ERROR_MESSAGE = 'Path is outside the allowed base directory';
+
+export class ProjectBoundaryError extends Error {
+  readonly errorCode = PROJECT_BOUNDARY_ERROR_CODE;
+  readonly status = 403;
+
+  constructor(message = PROJECT_BOUNDARY_ERROR_MESSAGE) {
+    super(message);
+    this.name = 'ProjectBoundaryError';
+  }
+}
+
+function isWithinResolvedRoot(rootPath: string, targetPath: string): boolean {
+  const relative = path.relative(rootPath, targetPath);
+  return relative === '' || (
+    relative !== '..'
+    && !relative.startsWith(`..${path.sep}`)
+    && !path.isAbsolute(relative)
+  );
+}
+
+function isMissingPathError(error: unknown): boolean {
+  return Boolean(
+    error
+      && typeof error === 'object'
+      && 'code' in error
+      && (error as { code?: unknown }).code === 'ENOENT',
+  );
+}
+
+async function isAbsentPathEntry(targetPath: string): Promise<boolean> {
+  try {
+    await fs.lstat(targetPath);
+    return false;
+  } catch (error) {
+    if (isMissingPathError(error)) return true;
+    throw error;
+  }
+}
+
+async function realpathClosestExistingAncestor(targetPath: string): Promise<{
+  realAncestor: string;
+  missingSegments: string[];
+}> {
+  const missingSegments: string[] = [];
+  let candidate = path.resolve(targetPath);
+
+  while (true) {
+    try {
+      return {
+        realAncestor: await fs.realpath(candidate),
+        missingSegments: missingSegments.reverse(),
+      };
+    } catch (error) {
+      if (!isMissingPathError(error)) throw error;
+      if (!(await isAbsentPathEntry(candidate))) throw error;
+      const parent = path.dirname(candidate);
+      if (parent === candidate) throw error;
+      missingSegments.push(path.basename(candidate));
+      candidate = parent;
+    }
+  }
+}
+
+async function resolveRealPathAllowMissing(targetPath: string): Promise<string> {
+  const { realAncestor, missingSegments } = await realpathClosestExistingAncestor(targetPath);
+  return path.resolve(realAncestor, ...missingSegments);
+}
+
+export async function resolveRealWithinBase(rootPath: string, inputPath: string): Promise<string> {
+  const resolvedRoot = path.resolve(rootPath);
+  const resolvedInput = path.isAbsolute(inputPath)
+    ? path.resolve(inputPath)
+    : path.resolve(resolvedRoot, inputPath);
+
+  if (!isWithinResolvedRoot(resolvedRoot, resolvedInput)) {
+    throw new ProjectBoundaryError();
+  }
+
+  const realRoot = await resolveRealPathAllowMissing(resolvedRoot);
+  return resolveRealWithinCanonicalBase(realRoot, resolvedInput);
+}
+
+export async function resolveRealWithinCanonicalBase(
+  canonicalRootPath: string,
+  inputPath: string,
+): Promise<string> {
+  const canonicalRoot = path.resolve(canonicalRootPath);
+  const resolvedInput = path.isAbsolute(inputPath)
+    ? path.resolve(inputPath)
+    : path.resolve(canonicalRoot, inputPath);
+  const { realAncestor, missingSegments } = await realpathClosestExistingAncestor(resolvedInput);
+  const realTarget = path.resolve(realAncestor, ...missingSegments);
+  if (!isWithinResolvedRoot(canonicalRoot, realTarget)) throw new ProjectBoundaryError();
+  return realTarget;
+}
+
+export async function assertRealWithinBase(rootPath: string, targetPath: string): Promise<string> {
+  const resolvedRoot = path.resolve(rootPath);
+  const resolvedTarget = path.isAbsolute(targetPath)
+    ? path.resolve(targetPath)
+    : path.resolve(resolvedRoot, targetPath);
+  if (isWithinResolvedRoot(resolvedRoot, resolvedTarget)) {
+    return resolveRealWithinBase(resolvedRoot, resolvedTarget);
+  }
+
+  const realRoot = await resolveRealPathAllowMissing(resolvedRoot);
+  const realTarget = await resolveRealPathAllowMissing(resolvedTarget);
+  if (!isWithinResolvedRoot(realRoot, realTarget)) throw new ProjectBoundaryError();
+  return realTarget;
+}
+
+export function isProjectBoundaryError(error: unknown): error is ProjectBoundaryError {
+  return error instanceof ProjectBoundaryError;
+}

@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { setExecutionNodesTestContext } from '$lib/execution-nodes/__tests__/execution-nodes-test-context';
-	setExecutionNodesTestContext();
+	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
+	setExecutorsTestContext();
 	import { untrack } from 'svelte';
 	import Sidebar from '../Sidebar.svelte';
 	import SidebarSearchDialogs from '../SidebarSearchDialogs.svelte';
@@ -176,7 +176,7 @@
 	setSidebarSearch(sidebarSearchContext);
 
 	setModelCatalog({
-		forNode() { return this; },
+		forExecutor() { return this; },
 		supportsFork() {
 			return true;
 		},

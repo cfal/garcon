@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { access, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { ChatMessagesMessage } from '../../../common/ws-events.js';
-import { TranscriptLedgerStore } from '../../../server/ledger/store.js';
+import { TranscriptLedgerStore } from '../../../server/controller/ledger/store.js';
 import { messagesOfType, userContents } from '../../support/chat-assertions.js';
 import { claudeText, claudeToolUse } from '../../support/fake-claude-model.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';

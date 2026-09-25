@@ -22,7 +22,7 @@ import {
 	WorkspaceLayoutStore,
 	assertWorkspaceLayoutInvariants,
 	reduceWorkspaceLayout,
-} from '../workspace-layout.svelte';
+} from '../workspace-layout.svelte.ts';
 import { collectWindowNodes, windowNodeById } from '../window-tree';
 
 function workspaceWindow(

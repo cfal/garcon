@@ -8,7 +8,7 @@ import type {
   PreamblesSnapshot,
 } from '../../../common/preambles.js';
 import type { AgentRunFailedMessage } from '../../../common/ws-events.js';
-import { BUNDLED_PREAMBLES } from '../../../server/preambles/bundled.js';
+import { BUNDLED_PREAMBLES } from '../../../server/controller/preambles/bundled.js';
 import { messagesOfType, userContents } from '../../support/chat-assertions.js';
 import type { ChatMessagesPage } from '../../support/garcon-client.js';
 import { GarconApiError } from '../../support/garcon-client.js';

@@ -12,7 +12,7 @@ import { LIVE_TURN_TIMEOUT_MS, waitForVisibleResponse } from '../../support/live
 import { liveClaudeStartRequest } from '../../support/live-claude.js';
 import { startScriptedClaudeTestEnvironment } from '../../support/scripted-claude.js';
 
-const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
+const REPO_ROOT = fileURLToPath(new URL('../../..', import.meta.url));
 const WORKSPACE = 'cli-export';
 
 describe('garcon-cli export', () => {

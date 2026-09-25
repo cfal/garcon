@@ -10,13 +10,13 @@ import * as m from '$lib/paraglide/messages.js';
 
 interface PromptComposerProjectStateDeps {
 	readonly selectedChat: ChatSessionRecord | null;
-	readonly executionTarget?: { nodeId: string; projectPath: string };
+	readonly executionTarget?: { executorId: string; projectPath: string };
 	readonly completionDemand: boolean;
 	projectResolution: ProjectResolutionStore;
 }
 
 export interface PromptComposerSnippetContext {
-	nodeId: string;
+	executorId: string;
 	context: SnippetExpansionContext;
 	chatId: string;
 	projectPath: string;
@@ -51,13 +51,13 @@ export class PromptComposerProjectState {
 		const execution = this.deps.executionTarget;
 		if (
 			execution &&
-			(execution.nodeId !== (chat.nodeId ?? 'local') || execution.projectPath !== chat.projectPath)
+			(execution.executorId !== (chat.executorId ?? 'local') || execution.projectPath !== chat.projectPath)
 		) {
 			return { kind: 'path', ...execution };
 		}
 		return chat.status === 'draft'
-			? { kind: 'path', nodeId: chat.nodeId, projectPath: chat.projectPath }
-			: { kind: 'chat', chatId: chat.id, nodeId: chat.nodeId, projectPath: chat.projectPath };
+			? { kind: 'path', executorId: chat.executorId, projectPath: chat.projectPath }
+			: { kind: 'chat', chatId: chat.id, executorId: chat.executorId, projectPath: chat.projectPath };
 	}
 
 	get snapshot(): ProjectResolutionSnapshot {
@@ -76,11 +76,11 @@ export class PromptComposerProjectState {
 		void lease.retry().finally(() => lease.release());
 	}
 
-	matchesSnippetContext(operation: PromptComposerSnippetContext, response: Pick<ExpandSnippetResponse, 'contextNodeId' | 'contextProjectPath'>): boolean {
+	matchesSnippetContext(operation: PromptComposerSnippetContext, response: Pick<ExpandSnippetResponse, 'contextExecutorId' | 'contextProjectPath'>): boolean {
 		return this.deps.selectedChat?.id === operation.chatId
 			&& this.target?.projectPath.trim() === operation.projectPath
-			&& (this.target?.nodeId ?? 'local') === operation.nodeId
-			&& response.contextNodeId === operation.nodeId
+			&& (this.target?.executorId ?? 'local') === operation.executorId
+			&& response.contextExecutorId === operation.executorId
 			&& response.contextProjectPath === operation.projectPath;
 	}
 
@@ -88,7 +88,7 @@ export class PromptComposerProjectState {
 		const chat = this.deps.selectedChat;
 		const target = this.target;
 		const projectPath = target?.projectPath.trim();
-		const nodeId = target?.nodeId ?? 'local';
+		const executorId = target?.executorId ?? 'local';
 		if (!chat || !target || !projectPath) throw new Error(m.chat_new_chat_errors_project_path_required());
 		signal?.throwIfAborted();
 		const lease = this.deps.projectResolution.retain(target);
@@ -129,10 +129,10 @@ export class PromptComposerProjectState {
 			release();
 		}
 		return {
-			nodeId,
+			executorId,
 			context:
 				target.kind === 'path'
-					? { type: 'new-chat', chatId: chat.id, nodeId, projectPath }
+					? { type: 'new-chat', chatId: chat.id, executorId, projectPath }
 					: { type: 'chat', chatId: chat.id },
 			chatId: chat.id,
 			projectPath,

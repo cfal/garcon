@@ -9,8 +9,8 @@ import * as chatsApi from '$lib/api/chats';
 import * as gitApi from '$lib/api/git';
 import type { GitWorktreeItem } from '$lib/api/git';
 import { ProjectPathDialogState } from '../project-path-dialog-state.svelte.js';
-import { localExecutionNode, remoteExecutionNode } from '$lib/execution-nodes/__tests__/fixtures';
-import { ExecutionNodesStore } from '$lib/execution-nodes/execution-nodes-store.svelte';
+import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
+import { ExecutorsStore } from '$lib/executors/executors-store.svelte';
 import { tick } from 'svelte';
 
 vi.mock('$lib/api/chats', async (importOriginal) => {
@@ -61,24 +61,24 @@ function makeWorktree(path: string, branch: string, isCurrent = false): GitWorkt
 }
 
 describe('Sidebar dialogs', () => {
-	it('fences remote worktree list and creation across node replacement and dialog retargeting', async () => {
-		const nodes = new ExecutionNodesStore();
+	it('fences remote worktree list and creation across executor replacement and dialog retargeting', async () => {
+		const executors = new ExecutorsStore();
 		const remote = {
-			...remoteExecutionNode,
-			machineServices: { ...remoteExecutionNode.machineServices, git: true },
+			...remoteExecutor,
+			machineServices: { ...remoteExecutor.machineServices, git: true },
 		};
-		nodes.applySnapshot([localExecutionNode, remote]);
-		const dialog = new ProjectPathDialogState(nodes);
+		executors.applySnapshot([localExecutor, remote]);
+		const dialog = new ProjectPathDialogState(executors);
 		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: true });
 		dialog.open('/worker/project', remote.id);
 		const listing = deferred<{ worktrees: GitWorktreeItem[] }>();
 		vi.mocked(gitApi.getGitWorktrees).mockReturnValueOnce(listing.promise);
 		const loading = dialog.loadWorktrees();
 		expect(gitApi.getGitWorktrees).toHaveBeenLastCalledWith(
-			{ nodeId: remote.id, projectPath: '/worker/project' },
+			{ executorId: remote.id, projectPath: '/worker/project' },
 			expect.any(Object),
 		);
-		nodes.applySnapshot([localExecutionNode, { ...remote, instanceId: 'replacement' }]);
+		executors.applySnapshot([localExecutor, { ...remote, instanceId: 'replacement' }]);
 		listing.resolve({ worktrees: [makeWorktree('/worker/old', 'old')] });
 		await loading;
 		expect(dialog.worktrees).toEqual([]);
@@ -91,7 +91,7 @@ describe('Sidebar dialogs', () => {
 		await creating;
 		expect(dialog.candidatePath).toBe('/local/project');
 		expect(gitApi.gitCreateWorktree).toHaveBeenLastCalledWith(
-			{ nodeId: remote.id, projectPath: '/worker/project' },
+			{ executorId: remote.id, projectPath: '/worker/project' },
 			'/worker/feature',
 			{ branch: 'feature', baseRef: undefined },
 		);
@@ -103,15 +103,15 @@ describe('Sidebar dialogs', () => {
 			.mockReset()
 			.mockResolvedValueOnce({ valid: true, isGitRepo: false })
 			.mockResolvedValue({ valid: false, errorCode: 'outside_base_dir' });
-		const nodes = [localExecutionNode, remoteExecutionNode];
+		const executors = [localExecutor, remoteExecutor];
 		const projectPathDialog = {
 			chatId: 'chat-1',
 			chatTitle: 'Synthetic project',
-			nodeId: remoteExecutionNode.id,
+			executorId: remoteExecutor.id,
 			currentProjectPath: '/worker/project',
 		};
 		const rendered = render(SidebarProjectPathDialog, {
-			nodes,
+			executors,
 			projectPathDialog,
 			projectBasePath: '/local',
 			isMobile: false,
@@ -123,10 +123,10 @@ describe('Sidebar dialogs', () => {
 			await vi.advanceTimersByTimeAsync(250);
 			expect(chatsApi.validateStart).toHaveBeenCalledTimes(1);
 			await rendered.rerender({
-				nodes: [
-					localExecutionNode,
+				executors: [
+					localExecutor,
 					{
-						...remoteExecutionNode,
+						...remoteExecutor,
 						instanceId: 'narrower',
 						projectBasePath: '/worker/project/narrow',
 					},
@@ -140,10 +140,10 @@ describe('Sidebar dialogs', () => {
 				'/worker/project',
 			);
 			await rendered.rerender({
-				nodes: [
-					{ ...localExecutionNode, instanceId: 'unrelated' },
+				executors: [
+					{ ...localExecutor, instanceId: 'unrelated' },
 					{
-						...remoteExecutionNode,
+						...remoteExecutor,
 						instanceId: 'narrower',
 						projectBasePath: '/worker/project/narrow',
 					},
@@ -366,7 +366,7 @@ describe('Sidebar dialogs', () => {
 			const worktreeDialog = await screen.findByRole('dialog', { name: 'Select worktree' });
 			expect(worktreeDialog).toBeTruthy();
 			expect(gitApi.getGitWorktrees).toHaveBeenCalledWith(
-				{ nodeId: 'local', projectPath: '/workspace/repo' },
+				{ executorId: 'local', projectPath: '/workspace/repo' },
 				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			);
 			await fireEvent.click(await screen.findByRole('option', { name: /feature/ }));

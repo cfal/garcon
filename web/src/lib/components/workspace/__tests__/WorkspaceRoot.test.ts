@@ -33,7 +33,7 @@ import * as m from '$lib/paraglide/messages.js';
 import { resolveUnmeasuredWorkspaceSplit } from '$lib/workspace/__tests__/workspace-geometry-test-fixtures.js';
 import { findWorkspaceChatPlacement } from '$lib/workspace/workspace-chat-placement.js';
 import { terminalDisplayName } from '$lib/terminal/sessions/terminal-display-name.js';
-import { ExecutionNodesStore } from '$lib/execution-nodes/execution-nodes-store.svelte.js';
+import { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
 import type { GhCapabilityStore } from '$lib/git/pull-requests/gh-capability.svelte.js';
 import type { WorkspaceContextStore } from '$lib/workspace/workspace-context.svelte.js';
 
@@ -48,7 +48,7 @@ vi.mock('$lib/context', () => ({
 	getChatSessions: () => testContext.current?.sessions,
 	getFileSessions: () => testContext.current?.fileSessions,
 	getGhCapability: () => testContext.current?.ghCapability,
-	getExecutionNodes: () => testContext.current?.executionNodes,
+	getExecutors: () => testContext.current?.executors,
 	getWorkspaceContext: () =>
 		({ currentTarget: null }) satisfies Pick<WorkspaceContextStore, 'currentTarget'>,
 	getGitBranchActions: () => testContext.current?.gitBranchActions,
@@ -380,7 +380,7 @@ function installContext({ showQuickCommitTray = false }: { showQuickCommitTray?:
 			);
 		}),
 		createTerminal: vi.fn(async () => 'terminal-created'),
-		terminalCreationNodeIdFor: () => 'local',
+		terminalCreationExecutorIdFor: () => 'local',
 		terminateTerminalSession: vi.fn(async () => true),
 		openTerminalSession: vi.fn(async () => undefined),
 		retryPresentation: vi.fn(async () => undefined),
@@ -390,9 +390,9 @@ function installContext({ showQuickCommitTray = false }: { showQuickCommitTray?:
 	const terminals = {
 		hasRemoteHosts: false,
 		hosts: [{ id: 'local', label: 'Local', available: true, full: false }],
-		canCreate: (nodeId: string) => nodeId === 'local',
-		nodeIdFor: () => 'local',
-		nodeLabel: () => 'Local',
+		canCreate: (executorId: string) => executorId === 'local',
+		executorIdFor: () => 'local',
+		executorLabel: () => 'Local',
 		displayName: (metadata: { title: string | null; displaySequence: number }) =>
 			terminalDisplayName(metadata, 'Local'),
 		orderedSessions: [] as TerminalClientSession[],
@@ -445,7 +445,7 @@ function installContext({ showQuickCommitTray = false }: { showQuickCommitTray?:
 		},
 		processingReconciler: { addPresentation: () => () => {} },
 		modelCatalog: {
-			forNode() { return this; },
+			forExecutor() { return this; },
 			supportsFork: () => false,
 			supportsForkWhileRunning: () => false,
 			supportsUpdateProjectPath: () => false,
@@ -456,11 +456,11 @@ function installContext({ showQuickCommitTray = false }: { showQuickCommitTray?:
 			setVisibleProjects: vi.fn(),
 			reconcilePolling: vi.fn(),
 		},
-		executionNodes: new ExecutionNodesStore(),
+		executors: new ExecutorsStore(),
 		ghCapability: {
-			forNode: (_nodeId: string) =>
+			forExecutor: (_executorId: string) =>
 				({ hasChecked: true, available: true }) satisfies Pick<
-					ReturnType<GhCapabilityStore['forNode']>,
+					ReturnType<GhCapabilityStore['forExecutor']>,
 					'hasChecked' | 'available'
 				>,
 		},

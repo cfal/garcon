@@ -60,7 +60,7 @@ describe('GitPorcelainState conflict details', () => {
 		const pending = deferred<Awaited<ReturnType<typeof gitApi.getGitStashes>>>();
 		vi.mocked(gitApi.getGitStashes).mockReturnValueOnce(pending.promise);
 		const porcelain = createState();
-		const loading = porcelain.loadStashes({ nodeId: 'remote', projectPath: '/project' });
+		const loading = porcelain.loadStashes({ executorId: 'remote', projectPath: '/project' });
 		porcelain.reset();
 		pending.resolve({
 			stashes: [
@@ -83,7 +83,7 @@ describe('GitPorcelainState conflict details', () => {
 		vi.mocked(gitApi.gitCreateStash).mockReturnValueOnce(pending.promise);
 		const porcelain = createState();
 		porcelain.stashMessage = 'Original stash';
-		const saving = porcelain.createStash({ nodeId: 'remote', projectPath: '/project' });
+		const saving = porcelain.createStash({ executorId: 'remote', projectPath: '/project' });
 		porcelain.reset();
 		porcelain.stashMessage = 'New target draft';
 		pending.resolve({ success: true });
@@ -101,12 +101,12 @@ describe('GitPorcelainState conflict details', () => {
 		const porcelain = createState();
 
 		const firstLoad = porcelain.selectConflict(
-			{ nodeId: 'local', projectPath: '/project' },
+			{ executorId: 'local', projectPath: '/project' },
 			'first.ts',
 		);
 		const firstSignal = getGitConflictDetails.mock.calls[0][2]?.signal;
 		const secondLoad = porcelain.selectConflict(
-			{ nodeId: 'local', projectPath: '/project' },
+			{ executorId: 'local', projectPath: '/project' },
 			'second.ts',
 		);
 
@@ -126,7 +126,7 @@ describe('GitPorcelainState conflict details', () => {
 		const porcelain = createState();
 
 		const load = porcelain.selectConflict(
-			{ nodeId: 'local', projectPath: '/project' },
+			{ executorId: 'local', projectPath: '/project' },
 			'conflict.ts',
 		);
 		const signal = getGitConflictDetails.mock.calls[0][2]?.signal;

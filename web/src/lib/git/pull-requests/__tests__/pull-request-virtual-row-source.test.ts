@@ -87,7 +87,7 @@ function source(
 ) {
 	const baseSource = buildGitVirtualReviewRowSource({
 		summary: {
-			document: { nodeId: 'local', instanceId: 'test-instance', documentId: 'pull-request:1' },
+			document: { executorId: 'local', instanceId: 'test-instance', documentId: 'pull-request:1' },
 			documentId: 'pull-request:1',
 			project: '',
 			context: 3,
@@ -126,7 +126,7 @@ describe('pull request virtual row source', () => {
 		const reviewBody = body(reviewFile.path);
 		const base = buildGitVirtualReviewRowSource({
 			summary: {
-				document: { nodeId: 'local', instanceId: 'test-instance', documentId: 'pull-request:1' },
+				document: { executorId: 'local', instanceId: 'test-instance', documentId: 'pull-request:1' },
 				documentId: 'pull-request:1',
 				project: '',
 				context: 3,

@@ -4,7 +4,7 @@ import type { ChatBoardApi } from '$lib/api/chat-boards';
 import {
 	ChatBoardController,
 	type ChatBoardPreferencesPort,
-} from '../catalog/chat-board-controller.svelte';
+} from '../catalog/chat-board-controller.svelte.ts';
 import { ChatBoardInvalidationHub } from '../catalog/chat-board-invalidation-hub';
 
 const first: ChatBoard = {

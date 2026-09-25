@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import type { ChatMessage } from '../../../common/chat-types.js';
-import { transcriptViewId, type LedgerRow } from '../../../server/ledger/contracts.js';
-import { TranscriptLedgerStore } from '../../../server/ledger/store.js';
+import { transcriptViewId, type LedgerRow } from '../../../server/controller/ledger/contracts.js';
+import { TranscriptLedgerStore } from '../../../server/controller/ledger/store.js';
 import { assistantContents, userContents } from '../../support/chat-assertions.js';
 import { withIntegrationFixture, type IntegrationFixture } from '../../support/integration-fixture.js';
 import { sacsScriptedDriverFactories } from './drivers.js';

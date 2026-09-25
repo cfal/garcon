@@ -211,7 +211,7 @@
 				username={auth.user?.username ?? 'local'}
 				pinnedProjectPaths={remoteSettings.snapshot?.paths.pinnedProjectPaths ?? []}
 				directory={workspaceContext.current?.projectPath ?? null}
-				nodeId={workspaceContext.current?.nodeId}
+				executorId={workspaceContext.current?.executorId}
 				onOpenChat={(chatId) => {
 					if (presentation === 'mobile') void workspace.showChatInCurrentWindow(chatId);
 					else void workspace.showChatInWindow(chatId, presentation);

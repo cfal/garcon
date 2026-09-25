@@ -2,8 +2,8 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/sve
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createAppShellStore } from '$lib/stores/app-shell.svelte';
 import { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
-import { localExecutionNode, remoteExecutionNode } from '$lib/execution-nodes/__tests__/fixtures';
-import { ExecutionNodesStore } from '$lib/execution-nodes/execution-nodes-store.svelte';
+import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
+import { ExecutorsStore } from '$lib/executors/executors-store.svelte';
 import { makeTestGhCapability } from './gh-capability-test-context';
 
 vi.mock('$lib/api/settings.js', () => ({
@@ -103,7 +103,7 @@ describe('Settings', () => {
 			expect(screen.getByRole('dialog', { name: 'Server Settings' })).toBeTruthy();
 			expect(screen.getByRole('tablist').getAttribute('aria-orientation')).toBe('vertical');
 			expect(screen.getAllByRole('tab').map((tab) => tab.getAttribute('aria-label'))).toEqual([
-				'Execution Nodes', 'Providers', 'Other Agents', 'GitHub', 'General',
+				'Executors', 'Providers', 'Other Agents', 'GitHub', 'General',
 			]);
 			expect(screen.getByRole('tab', { name: 'Providers' })).toBeTruthy();
 			expect(screen.getByRole('tab', { name: 'Other Agents' })).toBeTruthy();
@@ -111,14 +111,14 @@ describe('Settings', () => {
 			expect(screen.queryByText('GitHub CLI')).toBeNull();
 			expect(appShell.settingsTab).toBe('general');
 
-			await fireEvent.click(screen.getByRole('tab', { name: 'Execution Nodes' }));
-			expect(screen.getByRole('button', { name: 'Add Node' })).toBeTruthy();
+			await fireEvent.click(screen.getByRole('tab', { name: 'Executors' }));
+			expect(screen.getByRole('button', { name: 'Add Executor' })).toBeTruthy();
 			expect(screen.getAllByRole('dialog')).toHaveLength(1);
-			await fireEvent.click(screen.getByRole('button', { name: 'Add Node' }));
-			await fireEvent.input(screen.getByLabelText('Label'), { target: { value: 'Unsaved node' } });
+			await fireEvent.click(screen.getByRole('button', { name: 'Add Executor' }));
+			await fireEvent.input(screen.getByLabelText('Label'), { target: { value: 'Unsaved executor' } });
 			await fireEvent.click(screen.getByRole('tab', { name: 'General' }));
-			await fireEvent.click(screen.getByRole('tab', { name: 'Execution Nodes' }));
-			await fireEvent.click(screen.getByRole('button', { name: 'Add Node' }));
+			await fireEvent.click(screen.getByRole('tab', { name: 'Executors' }));
+			await fireEvent.click(screen.getByRole('button', { name: 'Add Executor' }));
 			expect((screen.getByLabelText('Label') as HTMLInputElement).value).toBe('');
 
 			await fireEvent.click(screen.getByRole('tab', { name: 'Providers' }));
@@ -127,7 +127,7 @@ describe('Settings', () => {
 			expect(screen.getByRole('heading', { name: 'Native Providers' })).toBeTruthy();
 			expect(screen.getByRole('heading', { name: 'Custom Providers' })).toBeTruthy();
 			expect(screen.queryByRole('heading', { name: 'Local' })).toBeNull();
-			expect(screen.queryByRole('combobox', { name: 'Execution node' })).toBeNull();
+			expect(screen.queryByRole('combobox', { name: 'Executor' })).toBeNull();
 			expect(screen.queryByRole('heading', { name: 'Agents' })).toBeNull();
 			expect(screen.queryByRole('heading', { name: 'API Providers' })).toBeNull();
 			const openAiHeading = screen.getByRole('heading', { name: 'OpenAI Providers' });
@@ -349,20 +349,20 @@ describe('Settings', () => {
 		}
 	});
 
-	it('shows native authentication for every ready node without querying offline nodes', async () => {
-		const offline = { ...remoteExecutionNode, id: '33333333-3333-4333-8333-333333333333', label: 'Offline worker', availability: 'offline' as const };
+	it('shows native authentication for every ready executor without querying offline executors', async () => {
+		const offline = { ...remoteExecutor, id: '33333333-3333-4333-8333-333333333333', label: 'Offline worker', availability: 'offline' as const };
 		const appShell = createAppShellStore();
 		appShell.openSettings('providers');
 		const rendered = render(SettingsTestHost, {
 			appShell, remoteSettings: new RemoteSettingsStore(),
-			nodes: [localExecutionNode, remoteExecutionNode, offline],
+			executors: [localExecutor, remoteExecutor, offline],
 		});
 		try {
-			for (const node of [localExecutionNode, remoteExecutionNode]) {
-				const section = screen.getByRole('region', { name: node.label });
-				expect(within(section).getByRole('heading', { name: node.label })).toBeTruthy();
-				await waitFor(() => expect(providersApi.getAgentAuthStatus).toHaveBeenCalledWith('claude', node.id));
-				expect(providersApi.getAgentAuthStatus).toHaveBeenCalledWith('codex', node.id);
+			for (const executor of [localExecutor, remoteExecutor]) {
+				const section = screen.getByRole('region', { name: executor.label });
+				expect(within(section).getByRole('heading', { name: executor.label })).toBeTruthy();
+				await waitFor(() => expect(providersApi.getAgentAuthStatus).toHaveBeenCalledWith('claude', executor.id));
+				expect(providersApi.getAgentAuthStatus).toHaveBeenCalledWith('codex', executor.id);
 				expect(within(section).getAllByRole('button', { name: 'Sign in' })).toHaveLength(2);
 			}
 			expect(screen.getByText('Offline worker is unavailable.')).toBeTruthy();
@@ -370,35 +370,35 @@ describe('Settings', () => {
 			expect(screen.queryByRole('combobox')).toBeNull();
 			vi.mocked(providersApi.launchAgentAuthLogin).mockRejectedValueOnce(new Error('Synthetic login error'));
 			await fireEvent.click(within(screen.getByRole('region', { name: 'Worker' })).getAllByRole('button', { name: 'Sign in' })[0]);
-			await waitFor(() => expect(providersApi.launchAgentAuthLogin).toHaveBeenCalledWith('claude', remoteExecutionNode.id));
+			await waitFor(() => expect(providersApi.launchAgentAuthLogin).toHaveBeenCalledWith('claude', remoteExecutor.id));
 		} finally { rendered.unmount(); }
 	});
 
-	it('rechecks native authentication when a ready node snapshot replaces its runtime', async () => {
-		const nodes = [localExecutionNode, remoteExecutionNode];
-		const nodeStore = new ExecutionNodesStore(async () => nodes);
-		nodeStore.applySnapshot(nodes);
+	it('rechecks native authentication when a ready executor snapshot replaces its runtime', async () => {
+		const executors = [localExecutor, remoteExecutor];
+		const executorStore = new ExecutorsStore(async () => executors);
+		executorStore.applySnapshot(executors);
 		const appShell = createAppShellStore();
 		appShell.openSettings('providers');
 		const auth = { authenticated: true, canReauth: true, label: 'Initial account' };
 		vi.mocked(providersApi.getAgentAuthStatus).mockResolvedValue(auth);
 		const rendered = render(SettingsTestHost, {
-			appShell, remoteSettings: new RemoteSettingsStore(), nodeStore,
+			appShell, remoteSettings: new RemoteSettingsStore(), executorStore,
 		});
 		try {
-			const worker = within(screen.getByRole('region', { name: remoteExecutionNode.label }));
+			const worker = within(screen.getByRole('region', { name: remoteExecutor.label }));
 			await worker.findAllByText('Initial account');
 			vi.mocked(providersApi.getAgentAuthStatus).mockResolvedValue({ ...auth, label: 'Replacement account' });
-			nodeStore.applySnapshot([localExecutionNode, { ...remoteExecutionNode, instanceId: 'replacement-runtime' }]);
+			executorStore.applySnapshot([localExecutor, { ...remoteExecutor, instanceId: 'replacement-runtime' }]);
 			await worker.findAllByText('Replacement account');
 			expect(worker.queryByText('Initial account')).toBeNull();
 		} finally { rendered.unmount(); }
 	});
 
-	it('preserves an entered OAuth code when another node changes availability', async () => {
-		const nodes = [localExecutionNode, remoteExecutionNode];
-		const nodeStore = new ExecutionNodesStore(async () => nodes);
-		nodeStore.applySnapshot(nodes);
+	it('preserves an entered OAuth code when another executor changes availability', async () => {
+		const executors = [localExecutor, remoteExecutor];
+		const executorStore = new ExecutorsStore(async () => executors);
+		executorStore.applySnapshot(executors);
 		const appShell = createAppShellStore();
 		appShell.openSettings('providers');
 		const deviceAuth = { url: 'https://example.test/authorize', needsCode: true };
@@ -406,7 +406,7 @@ describe('Settings', () => {
 			launched: true, alreadyRunning: false, sessionId: 'synthetic-login', deviceAuth,
 		});
 		const rendered = render(SettingsTestHost, {
-			appShell, remoteSettings: new RemoteSettingsStore(), nodeStore,
+			appShell, remoteSettings: new RemoteSettingsStore(), executorStore,
 		});
 		try {
 			const local = within(screen.getByRole('region', { name: 'Local' }));
@@ -414,14 +414,14 @@ describe('Settings', () => {
 			await fireEvent.click(signIn[0]);
 			const input = await local.findByRole('textbox');
 			await fireEvent.input(input, { target: { value: 'synthetic-oauth-code' } });
-			vi.mocked(providersApi.getAgentAuthLoginStatus).mockImplementation(async (agentId, _sessionId, nodeId) => {
-				if (agentId === 'claude' && nodeId === 'local') {
+			vi.mocked(providersApi.getAgentAuthLoginStatus).mockImplementation(async (agentId, _sessionId, executorId) => {
+				if (agentId === 'claude' && executorId === 'local') {
 					return { state: 'running', running: true, sessionId: 'synthetic-login', deviceAuth };
 				}
 				return { state: 'idle', running: false };
 			});
 			vi.mocked(providersApi.getAgentAuthStatus).mockClear();
-			nodeStore.applySnapshot([{ ...localExecutionNode }, { ...remoteExecutionNode, availability: 'offline' }]);
+			executorStore.applySnapshot([{ ...localExecutor }, { ...remoteExecutor, availability: 'offline' }]);
 			await screen.findByText('Worker is unavailable.');
 			expect((local.getByRole('textbox') as HTMLInputElement).value).toBe('synthetic-oauth-code');
 			expect(providersApi.getAgentAuthStatus).not.toHaveBeenCalledWith('claude', 'local');
@@ -429,15 +429,15 @@ describe('Settings', () => {
 		} finally { rendered.unmount(); }
 	});
 
-	it('shows and refreshes GitHub status per node independently of server settings loading', async () => {
-		const remote = { ...remoteExecutionNode, machineServices: { ...remoteExecutionNode.machineServices, git: true, gh: true } };
+	it('shows and refreshes GitHub status per executor independently of server settings loading', async () => {
+		const remote = { ...remoteExecutor, machineServices: { ...remoteExecutor.machineServices, git: true, gh: true } };
 		const localStatus = makeTestGhCapability();
 		const remoteStatus = makeTestGhCapability({ available: false, authenticated: false, reason: 'unauthenticated', login: null, host: null, refresh: vi.fn(async () => {}) });
 		const appShell = createAppShellStore();
 		appShell.openSettings('github');
 		const rendered = render(SettingsTestHost, {
-			appShell, remoteSettings: new RemoteSettingsStore(), nodes: [localExecutionNode, remote],
-			ghCapability: { forNode: (id) => id === 'local' ? localStatus : remoteStatus },
+			appShell, remoteSettings: new RemoteSettingsStore(), executors: [localExecutor, remote],
+			ghCapability: { forExecutor: (id) => id === 'local' ? localStatus : remoteStatus },
 		});
 		try {
 			expect(within(screen.getByRole('region', { name: 'Local' })).getByText('Connected as octocat@github.com')).toBeTruthy();

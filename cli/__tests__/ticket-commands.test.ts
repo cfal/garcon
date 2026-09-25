@@ -30,7 +30,7 @@ function harness(handle: (url: URL, body: unknown) => Response | Promise<Respons
   const run = (args: string[], extra: { readStdin?: () => Promise<string>; signal?: AbortSignal } = {}) => main(['ticket', ...args], {
     fetch: fetcher, output: createCliOutput({ write: (text) => stdout.push(text) }, { write: (text) => stderr.push(text) }),
     discoverRuntime: async () => ({ baseUrl: 'http://localhost:8080', instanceId: 'synthetic-instance',
-      endpointInstanceId: 'synthetic-instance', defaultNodeId: 'local', workspaceName: 'default',
+      endpointInstanceId: 'synthetic-instance', defaultExecutorId: 'local', workspaceName: 'default',
       localCapability: 'synthetic-capability', workspaceDir: '/workspace', selector: { runtime: 'controller' } }), ...extra,
   });
   return { run, calls, stdout, stderr };
@@ -62,7 +62,7 @@ describe('ticket CLI execution', () => {
     const testCase = harness((url, body) => {
       if (url.pathname.endsWith('/bootstrap')) return Response.json({ storeId: STORE, collectionRevision: 0, viewerKey: 'local' });
       if (url.pathname.endsWith('/project-default')) {
-        expect(body).toEqual({ directory: '/workspace/linked', nodeId: 'local' });
+        expect(body).toEqual({ directory: '/workspace/linked', executorId: 'local' });
         return Response.json({ project: '/workspace/base', kind: 'repository' });
       }
       expect(url.pathname).toBe('/api/v1/tickets/mutate');

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	buildRouterStores,
 	type ConversationRouterStoreDeps,
-} from '../conversation-router-adapter.svelte';
+} from '../conversation-router-adapter.svelte.ts';
 import { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import { AgentState } from '../agent-state.svelte';
 import { ConversationLifecycleState } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';

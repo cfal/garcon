@@ -57,7 +57,7 @@ interface GitQuickSummaryCacheEntry {
 }
 
 export interface GitQuickProjectLease extends GitProjectTarget {
-	readonly nodeContextKey?: string;
+	readonly executorContextKey?: string;
 	readonly isProcessing: boolean;
 }
 
@@ -209,7 +209,7 @@ export class GitQuickSummaryStore {
 				const current = this.visibleProjects[index];
 				return (
 					sameGitProject(current, project) &&
-					current.nodeContextKey === project.nodeContextKey &&
+					current.executorContextKey === project.executorContextKey &&
 					current.isProcessing === project.isProcessing
 				);
 			})
@@ -229,7 +229,7 @@ export class GitQuickSummaryStore {
 			this.touchProject(project);
 			const previousLease = previous.get(gitProjectKey(project));
 			if (!this.isEnabled) continue;
-			if (!previousLease || previousLease.nodeContextKey !== project.nodeContextKey) {
+			if (!previousLease || previousLease.executorContextKey !== project.executorContextKey) {
 				this.#cancelProjectWork(project);
 				this.updateEntry(project, { isRefreshing: false });
 				this.scheduleRefreshFor(project, 'project-change', QUICK_GIT_PROJECT_CHANGE_DEBOUNCE_MS);
@@ -373,14 +373,14 @@ export class GitQuickSummaryStore {
 		this.requestGenerationByProject.clear();
 	}
 
-	pruneNodes(nodeIds: ReadonlySet<string>): void {
-		this.setVisibleProjects(this.visibleProjects.filter((project) => nodeIds.has(project.nodeId)));
+	pruneExecutors(executorIds: ReadonlySet<string>): void {
+		this.setVisibleProjects(this.visibleProjects.filter((project) => executorIds.has(project.executorId)));
 		for (const entry of Object.values(this.entries)) {
-			if (!nodeIds.has(entry.project.nodeId)) this.#cancelProjectWork(entry.project);
+			if (!executorIds.has(entry.project.executorId)) this.#cancelProjectWork(entry.project);
 		}
-		if (this.project && !nodeIds.has(this.project.nodeId)) this.project = null;
+		if (this.project && !executorIds.has(this.project.executorId)) this.project = null;
 		this.entries = Object.fromEntries(
-			Object.entries(this.entries).filter(([, entry]) => nodeIds.has(entry.project.nodeId)),
+			Object.entries(this.entries).filter(([, entry]) => executorIds.has(entry.project.executorId)),
 		);
 		this.pruneCache();
 	}

@@ -30,7 +30,7 @@
 	import {
 		SidebarChatReorderState,
 		type SidebarChatReorderRequest,
-	} from './sidebar-chat-reorder-state.svelte';
+	} from './sidebar-chat-reorder-state.svelte.ts';
 	import {
 		getSidebarChatDragData,
 		getSidebarChatDropTargetData,

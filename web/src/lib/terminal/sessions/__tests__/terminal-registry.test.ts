@@ -917,7 +917,7 @@ describe('TerminalRegistry', () => {
 		await expect(registry.create('/workspace', 'request-1')).resolves.toBe(firstId);
 		expect(createTerminal).toHaveBeenCalledWith({
 			requestId: 'request-1',
-			nodeId: 'local',
+			executorId: 'local',
 			expectedTerminalRuntimeId: runtimeId,
 			requestedInitialWorkingDirectory: '/workspace',
 		});

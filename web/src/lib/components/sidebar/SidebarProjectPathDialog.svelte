@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onDestroy, untrack } from 'svelte';
-	import { getExecutionNodes } from '$lib/context';
+	import { getExecutors } from '$lib/context';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -37,19 +37,19 @@
 		onTogglePinnedProjectPath,
 	}: SidebarProjectPathDialogProps = $props();
 
-	const nodes = getExecutionNodes();
-	const projectPathDialogState = new ProjectPathDialogState(nodes);
-	const filesAvailable = $derived(nodes.filesAvailable(projectPathDialogState.nodeId));
+	const executors = getExecutors();
+	const projectPathDialogState = new ProjectPathDialogState(executors);
+	const filesAvailable = $derived(executors.filesAvailable(projectPathDialogState.executorId));
 	let activeDialogKey = $state('');
 	let pathInputRef = $state<HTMLInputElement | null>(null);
 	let isUpdatingPinnedProjectPath = $state(false);
 
 	let isOpen = $derived(projectPathDialog !== null);
-	const pathContextKey = $derived(nodes.pathContextKey(projectPathDialogState.nodeId));
+	const pathContextKey = $derived(executors.pathContextKey(projectPathDialogState.executorId));
 	let activeProjectBasePath = $derived(
-		projectPathDialogState.nodeId === 'local'
+		projectPathDialogState.executorId === 'local'
 			? projectBasePath || '/'
-			: (nodes.get(projectPathDialogState.nodeId)?.projectBasePath ?? ''),
+			: (executors.get(projectPathDialogState.executorId)?.projectBasePath ?? ''),
 	);
 	let validationMessage = $derived(
 		projectPathDialogState.submitError ?? projectPathDialogState.validationError,
@@ -77,13 +77,13 @@
 
 		const nextDialogKey = JSON.stringify([
 			projectPathDialog.chatId,
-			projectPathDialog.nodeId,
+			projectPathDialog.executorId,
 			projectPathDialog.currentProjectPath,
 		]);
 		if (activeDialogKey === nextDialogKey) return;
 
 		activeDialogKey = nextDialogKey;
-		projectPathDialogState.open(projectPathDialog.currentProjectPath, projectPathDialog.nodeId);
+		projectPathDialogState.open(projectPathDialog.currentProjectPath, projectPathDialog.executorId);
 	});
 
 	$effect(() => {
@@ -254,8 +254,8 @@
 
 							{#if filesAvailable && projectPathDialogState.showBrowser && !isUpdatingPinnedProjectPath}
 								<DirectoryBrowser
-									nodeContextKey={nodes.pathContextKey(projectPathDialogState.nodeId)}
-									nodeId={projectPathDialogState.nodeId}
+									executorContextKey={executors.pathContextKey(projectPathDialogState.executorId)}
+									executorId={projectPathDialogState.executorId}
 									currentPath={projectPathDialogState.trimmedPath || activeProjectBasePath}
 									basePath={activeProjectBasePath}
 									onSelect={(path) => {

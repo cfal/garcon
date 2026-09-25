@@ -19,7 +19,7 @@ import { createAgentProducerAdapter } from '../producer-adapter.js';
 import { createAgentResourceRef } from '@garcon/server-agent-interface';
 
 const TS = '2026-08-12T00:00:00.000Z';
-const scope = { nodeId: 'test-node', instanceId: 'test-runtime', integrationId: 'test' };
+const scope = { executorId: 'test-node', instanceId: 'test-runtime', integrationId: 'test' };
 
 describe('createAgentProducerAdapter', () => {
   it('publishes sessions, normalized rows, and terminal events through the supplied sink', async () => {

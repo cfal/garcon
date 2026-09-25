@@ -2,8 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import type { BrowserContext, Page } from 'playwright';
 import { AssistantMessage } from '../../../common/chat-types.js';
-import type { LedgerRowDraft } from '../../../server/ledger/contracts.js';
-import { TranscriptLedgerStore } from '../../../server/ledger/store.js';
+import type { LedgerRowDraft } from '../../../server/controller/ledger/contracts.js';
+import { TranscriptLedgerStore } from '../../../server/controller/ledger/store.js';
 import {
   type ChromiumFixture,
   withChromiumFixture,
@@ -43,7 +43,7 @@ interface DetachedReplayFrame {
   connected: boolean;
   offset: number | null;
   rowId: string | null;
-  sameNode: boolean;
+  sameExecutor: boolean;
   text: string | null;
 }
 
@@ -464,7 +464,7 @@ async function startDetachedReplaySampler(page: Page, anchor: DetachedReplayAnch
         connected: current?.isConnected === true,
         offset: current ? current.getBoundingClientRect().top - feed.getBoundingClientRect().top : null,
         rowId: row?.dataset.chatRowId ?? null,
-        sameNode: current === original,
+        sameExecutor: current === original,
         text: row?.textContent ?? null,
       });
       requestAnimationFrame(sample);
@@ -495,7 +495,7 @@ function expectStableDetachedFrames(
   expect(frames.length, diagnostic).toBeGreaterThan(2);
   expect(frames.filter((frame) => (
     !frame.connected
-    || !frame.sameNode
+    || !frame.sameExecutor
     || frame.offset === null
     || frame.rowId !== anchor.rowId
     || frame.text !== anchor.text

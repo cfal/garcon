@@ -259,7 +259,7 @@ export class FileDocumentIoCoordinator {
 
 	async checkFreshness(sessionId: string): Promise<void> {
 		const session = this.options.getSession(sessionId);
-		if (session && !session.document.nodeAvailable) return;
+		if (session && !session.document.executorAvailable) return;
 		const loadedRevision = session?.loadedRevision;
 		if (
 			!session ||
@@ -278,7 +278,7 @@ export class FileDocumentIoCoordinator {
 		try {
 			const result = await (this.options.getFileRevision ?? getFileRevision)(
 				{
-					nodeId: session.nodeId,
+					executorId: session.executorId,
 					projectPath: session.canonicalFileRootPath,
 					filePath: session.relativePath,
 				},
@@ -336,7 +336,7 @@ export class FileDocumentIoCoordinator {
 		try {
 			const result = await (this.options.readText ?? readText)(
 				{
-					nodeId: session.nodeId,
+					executorId: session.executorId,
 					projectPath: session.canonicalFileRootPath,
 					filePath: session.relativePath,
 				},
@@ -403,7 +403,7 @@ export class FileDocumentIoCoordinator {
 
 	async #readLatest(session: FileViewSession, signal: AbortSignal): Promise<LoadedFileContent> {
 		const params = {
-			nodeId: session.nodeId,
+			executorId: session.executorId,
 			projectPath: session.canonicalFileRootPath,
 			filePath: session.relativePath,
 		};
@@ -440,7 +440,7 @@ export class FileDocumentIoCoordinator {
 	#canRefresh(session: FileViewSession): boolean {
 		return (
 			this.options.getSession(session.id) === session &&
-			session.document.nodeAvailable &&
+			session.document.executorAvailable &&
 			!session.loading &&
 			!session.refreshing &&
 			!session.mutationGuarded

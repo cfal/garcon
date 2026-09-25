@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { SessionAgentId } from '$lib/types/app';
 
-	let { getSelectableAgentIds }: { getSelectableAgentIds?: (nodeId: string) => readonly SessionAgentId[] } = $props();
+	let { getSelectableAgentIds }: { getSelectableAgentIds?: (executorId: string) => readonly SessionAgentId[] } = $props();
 </script>
 
 <button

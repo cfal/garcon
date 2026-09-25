@@ -13,16 +13,16 @@ export function sameGitProject(
 	left: GitProjectTarget | null,
 	right: GitProjectTarget | null,
 ): boolean {
-	return left?.nodeId === right?.nodeId && left?.projectPath === right?.projectPath;
+	return left?.executorId === right?.executorId && left?.projectPath === right?.projectPath;
 }
 
 export function gitProjectKey(project: GitProjectTarget): string {
-	return JSON.stringify([project.nodeId, project.projectPath]);
+	return JSON.stringify([project.executorId, project.projectPath]);
 }
 
-export function gitTargetFromCandidate(candidate: GitTargetCandidate, nodeId: string): GitTarget {
+export function gitTargetFromCandidate(candidate: GitTargetCandidate, executorId: string): GitTarget {
 	return {
-		nodeId,
+		executorId,
 		projectPath: candidate.projectPath,
 		repoRoot: candidate.repoRoot,
 		worktreePath: candidate.worktreePath,
@@ -33,7 +33,7 @@ export function gitTargetFromCandidate(candidate: GitTargetCandidate, nodeId: st
 }
 
 export function gitTargetIdentity(effectiveProjectKey: string, target: GitTarget): string {
-	return JSON.stringify([target.nodeId, effectiveProjectKey, target.repoRoot, target.worktreePath]);
+	return JSON.stringify([target.executorId, effectiveProjectKey, target.repoRoot, target.worktreePath]);
 }
 
 export function gitTargetCandidateFromTarget(target: GitTarget): GitTargetCandidate {

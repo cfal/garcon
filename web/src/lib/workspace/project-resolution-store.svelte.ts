@@ -1,5 +1,5 @@
 import { SvelteMap } from 'svelte/reactivity';
-import { effectiveNodeId } from '$shared/execution-nodes';
+import { effectiveExecutorId } from '$shared/executors';
 import {
 	projectTargetKey,
 	type ProjectResolution,
@@ -7,7 +7,7 @@ import {
 } from '$shared/project-resolution';
 import { ApiError } from '$lib/api/client.js';
 import { resolveProject } from '$lib/api/project-resolution.js';
-import type { ExecutionNodesStore } from '$lib/execution-nodes/execution-nodes-store.svelte.js';
+import type { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
 
 export type ProjectResolutionSnapshot =
 	| { readonly kind: 'unchecked' }
@@ -35,7 +35,7 @@ interface PendingResolution {
 }
 
 interface ChatBinding {
-	nodeId: string;
+	executorId: string;
 	projectPath: string;
 	revision: number;
 }
@@ -131,7 +131,7 @@ export class ProjectResolutionStore {
 		private readonly onBindingChanged: (
 			target: Extract<ProjectTarget, { kind: 'chat' }>,
 		) => void = () => undefined,
-		private readonly nodes?: Pick<ExecutionNodesStore, 'pathContextKey' | 'isReady'>,
+		private readonly executors?: Pick<ExecutorsStore, 'pathContextKey' | 'isReady'>,
 	) {}
 
 	retain(target: ProjectTarget): ProjectResolutionLease {
@@ -143,8 +143,8 @@ export class ProjectResolutionStore {
 			const record = new ProjectResolutionRecord(
 				target,
 				(requested, signal) => {
-					if (this.nodes && !this.nodes.isReady(requested.nodeId)) {
-						throw new ApiError(503, 'Execution node is unavailable', 'EXECUTION_NODE_UNAVAILABLE');
+					if (this.executors && !this.executors.isReady(requested.executorId)) {
+						throw new ApiError(503, 'Executor is unavailable', 'EXECUTOR_UNAVAILABLE');
 					}
 					return this.fetchResolution(requested, signal);
 				},
@@ -195,16 +195,16 @@ export class ProjectResolutionStore {
 
 	#targetKey(target: ProjectTarget): string {
 		const key = projectTargetKey(target);
-		const context = this.nodes?.pathContextKey(target.nodeId);
+		const context = this.executors?.pathContextKey(target.executorId);
 		return context ? JSON.stringify([key, context]) : key;
 	}
 
-	markObsoleteChatTargets(chatId: string, currentProjectPath: string, currentNodeId?: string | null): void {
-		const nodeId = effectiveNodeId(currentNodeId);
+	markObsoleteChatTargets(chatId: string, currentProjectPath: string, currentExecutorId?: string | null): void {
+		const executorId = effectiveExecutorId(currentExecutorId);
 		const binding = this.#chatBindings.get(chatId);
-		if (binding?.projectPath === currentProjectPath && binding.nodeId === nodeId) return;
+		if (binding?.projectPath === currentProjectPath && binding.executorId === executorId) return;
 		this.#chatBindings.set(chatId, {
-			nodeId,
+			executorId,
 			projectPath: currentProjectPath,
 			revision: (binding?.revision ?? 0) + 1,
 		});
@@ -213,7 +213,7 @@ export class ProjectResolutionStore {
 			if (
 				target.kind !== 'chat' ||
 				target.chatId !== chatId ||
-				(target.projectPath === currentProjectPath && effectiveNodeId(target.nodeId) === nodeId)
+				(target.projectPath === currentProjectPath && effectiveExecutorId(target.executorId) === executorId)
 			)
 				continue;
 			retained.record.dispose();

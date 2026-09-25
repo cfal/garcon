@@ -7,7 +7,7 @@ import { parseTicketWriteResult } from '../../../common/ticket-records.js';
 import { cliEnvironment } from '../../support/cli-environment.js';
 import { withIntegrationFixture, type IntegrationFixture } from '../../support/integration-fixture.js';
 
-const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
+const REPO_ROOT = fileURLToPath(new URL('../../..', import.meta.url));
 
 async function runCli(fixture: IntegrationFixture, args: readonly string[], body?: string) {
   const child = Bun.spawn({ cmd: [process.execPath, 'cli/main.ts', '--config-dir', fixture.dirs.config,

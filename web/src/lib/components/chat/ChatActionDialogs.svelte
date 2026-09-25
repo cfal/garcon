@@ -6,7 +6,7 @@
 		ChatDeleteConfirmation,
 		ChatDetailsDialog,
 		ChatRenameConfirmation,
-	} from './chat-action-dialogs-state.svelte';
+	} from './chat-action-dialogs-state.svelte.ts';
 	import ChatDetailsTextField from './ChatDetailsTextField.svelte';
 
 	interface ChatActionDialogsProps {

@@ -15,7 +15,7 @@ import {
   collapseCanonicalFilesWindow,
 } from '../../support/chromium-workspace.js';
 
-const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
+const REPO_ROOT = fileURLToPath(new URL('../../..', import.meta.url));
 const ARTIFACT_ROOT = join(REPO_ROOT, 'integration-tests', 'artifacts', 'chromium');
 const PANEL_SELECTOR =
   '[role="tabpanel"][data-workspace-surface-id="singleton:git-history"][aria-hidden="false"]';

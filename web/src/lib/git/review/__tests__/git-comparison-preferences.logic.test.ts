@@ -57,7 +57,7 @@ function recall(
 	chatId: string,
 	projectPath = '/project',
 ): GitComparisonSpecification | null {
-	return preferences.recall({ nodeId: 'local', chatId, projectPath });
+	return preferences.recall({ executorId: 'local', chatId, projectPath });
 }
 
 function storedRecord(storage: ReturnType<typeof createPersistence>): {
@@ -69,13 +69,13 @@ function storedRecord(storage: ReturnType<typeof createPersistence>): {
 }
 
 describe('LocalGitComparisonPreferences', () => {
-	it('remembers an independent node/project selection without manufacturing a chat entry', () => {
+	it('remembers an independent executor/project selection without manufacturing a chat entry', () => {
 		const storage = createPersistence();
 		const preferences = new LocalGitComparisonPreferences(storage.persistence);
-		const context = { nodeId: 'worker', chatId: null, projectPath: '/project' };
+		const context = { executorId: 'worker', chatId: null, projectPath: '/project' };
 		preferences.rememberUserSelection(context, revision);
 		expect(preferences.recall(context)).toEqual(revision);
-		expect(preferences.recall({ ...context, nodeId: 'local' })).toBeNull();
+		expect(preferences.recall({ ...context, executorId: 'local' })).toBeNull();
 		expect(storedRecord(storage)).toMatchObject({
 			entries: [],
 			projectEntries: [{ projectPath: '/project', specification: revision }],
@@ -91,7 +91,7 @@ describe('LocalGitComparisonPreferences', () => {
 	it('persists ranges across preference service recreation', () => {
 		const storage = createPersistence();
 		new LocalGitComparisonPreferences(storage.persistence).rememberChat(
-			{ nodeId: 'local', chatId: 'chat-a' },
+			{ executorId: 'local', chatId: 'chat-a' },
 			revision,
 		);
 
@@ -108,8 +108,8 @@ describe('LocalGitComparisonPreferences', () => {
 	it('keeps one independent range per chat', () => {
 		const storage = createPersistence();
 		const preferences = new LocalGitComparisonPreferences(storage.persistence);
-		preferences.rememberChat({ nodeId: 'local', chatId: 'chat-a' }, revision);
-		preferences.rememberChat({ nodeId: 'local', chatId: 'chat-b' }, workingTree);
+		preferences.rememberChat({ executorId: 'local', chatId: 'chat-a' }, revision);
+		preferences.rememberChat({ executorId: 'local', chatId: 'chat-b' }, workingTree);
 
 		expect(recall(preferences, 'chat-a')).toEqual(revision);
 		expect(recall(preferences, 'chat-b')).toEqual(workingTree);
@@ -118,8 +118,8 @@ describe('LocalGitComparisonPreferences', () => {
 	it('replaces a chat range and keeps one persisted entry', () => {
 		const storage = createPersistence();
 		const preferences = new LocalGitComparisonPreferences(storage.persistence);
-		preferences.rememberChat({ nodeId: 'local', chatId: 'chat-a' }, revision);
-		preferences.rememberChat({ nodeId: 'local', chatId: 'chat-a' }, workingTree);
+		preferences.rememberChat({ executorId: 'local', chatId: 'chat-a' }, revision);
+		preferences.rememberChat({ executorId: 'local', chatId: 'chat-a' }, workingTree);
 
 		expect(recall(preferences, 'chat-a')).toEqual(workingTree);
 		expect(storedRecord(storage).entries).toHaveLength(1);
@@ -129,12 +129,12 @@ describe('LocalGitComparisonPreferences', () => {
 		const storage = createPersistence();
 		const preferences = new LocalGitComparisonPreferences(storage.persistence);
 		for (let index = 0; index < GIT_COMPARISON_CHAT_PREFERENCE_LIMIT; index += 1) {
-			preferences.rememberChat({ nodeId: 'local', chatId: `chat-${index}` }, revision);
+			preferences.rememberChat({ executorId: 'local', chatId: `chat-${index}` }, revision);
 		}
 		expect(recall(preferences, 'chat-0')).toEqual(revision);
 
 		preferences.rememberChat(
-			{ nodeId: 'local', chatId: `chat-${GIT_COMPARISON_CHAT_PREFERENCE_LIMIT}` },
+			{ executorId: 'local', chatId: `chat-${GIT_COMPARISON_CHAT_PREFERENCE_LIMIT}` },
 			workingTree,
 		);
 
@@ -150,18 +150,18 @@ describe('LocalGitComparisonPreferences', () => {
 		const storage = createPersistence();
 		const preferences = new LocalGitComparisonPreferences(storage.persistence);
 		preferences.rememberUserSelection(
-			{ nodeId: 'local', chatId: 'seed-root', projectPath: '/repo' },
+			{ executorId: 'local', chatId: 'seed-root', projectPath: '/repo' },
 			revision,
 		);
 		preferences.rememberUserSelection(
-			{ nodeId: 'local', chatId: 'seed-nearest', projectPath: '/repo/.worktrees' },
+			{ executorId: 'local', chatId: 'seed-nearest', projectPath: '/repo/.worktrees' },
 			workingTree,
 		);
 		preferences.rememberUserSelection(
-			{ nodeId: 'local', chatId: 'seed-exact', projectPath: '/repo/.worktrees/abc' },
+			{ executorId: 'local', chatId: 'seed-exact', projectPath: '/repo/.worktrees/abc' },
 			mergeBase,
 		);
-		preferences.rememberChat({ nodeId: 'local', chatId: 'chat-specific' }, revision);
+		preferences.rememberChat({ executorId: 'local', chatId: 'chat-specific' }, revision);
 
 		expect(recall(preferences, 'chat-specific', '/repo/.worktrees/abc')).toEqual(revision);
 		expect(recall(preferences, 'new-exact', '/repo/.worktrees/abc')).toEqual(mergeBase);
@@ -174,11 +174,11 @@ describe('LocalGitComparisonPreferences', () => {
 		const storage = createPersistence();
 		const preferences = new LocalGitComparisonPreferences(storage.persistence);
 		preferences.rememberUserSelection(
-			{ nodeId: 'local', chatId: 'seed-nearest', projectPath: '/repo/packages' },
+			{ executorId: 'local', chatId: 'seed-nearest', projectPath: '/repo/packages' },
 			workingTree,
 		);
 		preferences.rememberUserSelection(
-			{ nodeId: 'local', chatId: 'seed-root', projectPath: '/repo' },
+			{ executorId: 'local', chatId: 'seed-root', projectPath: '/repo' },
 			revision,
 		);
 
@@ -189,11 +189,11 @@ describe('LocalGitComparisonPreferences', () => {
 		const storage = createPersistence();
 		const preferences = new LocalGitComparisonPreferences(storage.persistence);
 		preferences.rememberUserSelection(
-			{ nodeId: 'local', chatId: 'seed-unix', projectPath: ' /repo//.worktrees/ ' },
+			{ executorId: 'local', chatId: 'seed-unix', projectPath: ' /repo//.worktrees/ ' },
 			revision,
 		);
 		preferences.rememberUserSelection(
-			{ nodeId: 'local', chatId: 'seed-windows', projectPath: 'C:\\workspace\\repo\\' },
+			{ executorId: 'local', chatId: 'seed-windows', projectPath: 'C:\\workspace\\repo\\' },
 			workingTree,
 		);
 
@@ -210,7 +210,7 @@ describe('LocalGitComparisonPreferences', () => {
 		const preferences = new LocalGitComparisonPreferences(storage.persistence);
 
 		preferences.rememberUserSelection(
-			{ nodeId: 'local', chatId: 'chat-a', projectPath: '/repo/.worktrees/abc' },
+			{ executorId: 'local', chatId: 'chat-a', projectPath: '/repo/.worktrees/abc' },
 			revision,
 		);
 
@@ -225,11 +225,11 @@ describe('LocalGitComparisonPreferences', () => {
 		const storage = createPersistence();
 		const preferences = new LocalGitComparisonPreferences(storage.persistence);
 		preferences.rememberUserSelection(
-			{ nodeId: 'local', chatId: 'chat-a', projectPath: '/repo/a' },
+			{ executorId: 'local', chatId: 'chat-a', projectPath: '/repo/a' },
 			revision,
 		);
 		preferences.rememberUserSelection(
-			{ nodeId: 'local', chatId: 'chat-b', projectPath: '/repo/b' },
+			{ executorId: 'local', chatId: 'chat-b', projectPath: '/repo/b' },
 			workingTree,
 		);
 
@@ -259,14 +259,14 @@ describe('LocalGitComparisonPreferences', () => {
 		const preferences = new LocalGitComparisonPreferences(storage.persistence);
 		for (let index = 0; index < GIT_COMPARISON_PROJECT_PREFERENCE_LIMIT; index += 1) {
 			preferences.rememberUserSelection(
-				{ nodeId: 'local', chatId: `seed-${index}`, projectPath: `/repo-${index}` },
+				{ executorId: 'local', chatId: `seed-${index}`, projectPath: `/repo-${index}` },
 				revision,
 			);
 		}
 		expect(recall(preferences, 'touch', '/repo-0/child')).toEqual(revision);
 
 		preferences.rememberUserSelection(
-			{ nodeId: 'local', chatId: 'seed-overflow', projectPath: '/repo-overflow' },
+			{ executorId: 'local', chatId: 'seed-overflow', projectPath: '/repo-overflow' },
 			workingTree,
 		);
 
@@ -282,7 +282,7 @@ describe('LocalGitComparisonPreferences', () => {
 		const storage = createPersistence();
 		const preferences = new LocalGitComparisonPreferences(storage.persistence);
 		preferences.rememberUserSelection(
-			{ nodeId: 'local', chatId: 'chat-a', projectPath: '/repo' },
+			{ executorId: 'local', chatId: 'chat-a', projectPath: '/repo' },
 			revision,
 		);
 		const recalledChat = recall(preferences, 'chat-a');
@@ -300,9 +300,9 @@ describe('LocalGitComparisonPreferences', () => {
 	it('restores direct working-tree and merge-base revision specifications', () => {
 		const storage = createPersistence();
 		const preferences = new LocalGitComparisonPreferences(storage.persistence);
-		preferences.rememberChat({ nodeId: 'local', chatId: 'chat-working' }, workingTree);
+		preferences.rememberChat({ executorId: 'local', chatId: 'chat-working' }, workingTree);
 		preferences.rememberUserSelection(
-			{ nodeId: 'local', chatId: 'chat-merge-base', projectPath: '/merge-base' },
+			{ executorId: 'local', chatId: 'chat-merge-base', projectPath: '/merge-base' },
 			mergeBase,
 		);
 
@@ -323,7 +323,7 @@ describe('LocalGitComparisonPreferences', () => {
 
 		expect(recall(preferences, 'chat-a')).toEqual(revision);
 		expect(recall(preferences, 'new-chat', '/repo')).toBeNull();
-		preferences.rememberChat({ nodeId: 'local', chatId: 'chat-b' }, workingTree);
+		preferences.rememberChat({ executorId: 'local', chatId: 'chat-b' }, workingTree);
 
 		expect(storedRecord(storage)).toMatchObject({
 			version: 3,
@@ -391,7 +391,7 @@ describe('LocalGitComparisonPreferences', () => {
 		const preferences = new LocalGitComparisonPreferences(storage.persistence);
 
 		preferences.rememberUserSelection(
-			{ nodeId: 'local', chatId: 'chat-a', projectPath: 'relative/project' },
+			{ executorId: 'local', chatId: 'chat-a', projectPath: 'relative/project' },
 			revision,
 		);
 
@@ -417,7 +417,7 @@ describe('LocalGitComparisonPreferences', () => {
 		const preferences = new LocalGitComparisonPreferences(storage.persistence);
 
 		preferences.rememberUserSelection(
-			{ nodeId: 'local', chatId: 'chat-a', projectPath: '/repo' },
+			{ executorId: 'local', chatId: 'chat-a', projectPath: '/repo' },
 			revision,
 		);
 
@@ -442,11 +442,11 @@ describe('LocalGitComparisonPreferences', () => {
 
 		expect(recall(readFailure, 'chat-a')).toBeNull();
 		expect(() =>
-			readFailure.rememberChat({ nodeId: 'local', chatId: 'chat-a' }, revision),
+			readFailure.rememberChat({ executorId: 'local', chatId: 'chat-a' }, revision),
 		).not.toThrow();
 		expect(() =>
 			writeFailure.rememberUserSelection(
-				{ nodeId: 'local', chatId: 'chat-a', projectPath: '/repo' },
+				{ executorId: 'local', chatId: 'chat-a', projectPath: '/repo' },
 				revision,
 			),
 		).not.toThrow();
@@ -456,9 +456,9 @@ describe('LocalGitComparisonPreferences', () => {
 		const storage = createPersistence();
 		const preferences = new LocalGitComparisonPreferences(storage.persistence);
 
-		preferences.rememberChat({ nodeId: 'local', chatId: ' ' }, revision);
+		preferences.rememberChat({ executorId: 'local', chatId: ' ' }, revision);
 		preferences.rememberUserSelection(
-			{ nodeId: 'local', chatId: ' ', projectPath: '/repo' },
+			{ executorId: 'local', chatId: ' ', projectPath: '/repo' },
 			revision,
 		);
 

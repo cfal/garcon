@@ -21,17 +21,17 @@ describe('FileMentionMenu', () => {
 		vi.mocked(getFileList).mockReset();
 	});
 
-	it('refetches after a same-node replacement and discards old-instance results', async () => {
+	it('refetches after a same-executor replacement and discards old-instance results', async () => {
 		const stale = deferred<Awaited<ReturnType<typeof getFileList>>>();
 		vi.mocked(getFileList).mockReturnValueOnce(stale.promise).mockResolvedValueOnce([
 			{ name: 'current.txt', path: '/repo/current.txt', relativePath: 'current.txt' },
 		]);
 		const view = render(FileMentionMenuTestHost, {
-			projectPath: '/repo', nodeContextKey: 'old', isVisible: true, query: '', onSelect: vi.fn(), onClose: vi.fn(),
+			projectPath: '/repo', executorContextKey: 'old', isVisible: true, query: '', onSelect: vi.fn(), onClose: vi.fn(),
 		});
 		await waitFor(() => expect(getFileList).toHaveBeenCalledOnce());
 		const signal = vi.mocked(getFileList).mock.calls[0][1]?.signal;
-		await view.rerender({ nodeContextKey: 'new' });
+		await view.rerender({ executorContextKey: 'new' });
 		expect(await screen.findByText('current.txt')).toBeTruthy();
 		expect(signal?.aborted).toBe(true);
 		stale.resolve([{ name: 'old.txt', path: '/repo/old.txt', relativePath: 'old.txt' }]);
@@ -136,9 +136,9 @@ describe('FileMentionMenu', () => {
 		expect(onSelect).not.toHaveBeenCalled();
 	});
 
-	it('reloads a same-path project on node change and ignores old file results', async () => {
+	it('reloads a same-path project on executor change and ignores old file results', async () => {
 		const local = deferred<Awaited<ReturnType<typeof getFileList>>>();
-		const nodeId = '22222222-2222-4222-8222-222222222222';
+		const executorId = '22222222-2222-4222-8222-222222222222';
 		vi.mocked(getFileList)
 			.mockReturnValueOnce(local.promise)
 			.mockResolvedValueOnce([
@@ -153,10 +153,10 @@ describe('FileMentionMenu', () => {
 		});
 		await waitFor(() => expect(getFileList).toHaveBeenCalledOnce());
 		const oldSignal = vi.mocked(getFileList).mock.calls[0][1]?.signal;
-		await view.rerender({ nodeId });
+		await view.rerender({ executorId });
 		await screen.findByText('remote.ts');
 		expect(getFileList).toHaveBeenLastCalledWith(
-			{ projectPath: '/repo', nodeId },
+			{ projectPath: '/repo', executorId },
 			expect.anything(),
 		);
 		expect(oldSignal?.aborted).toBe(true);
@@ -166,7 +166,7 @@ describe('FileMentionMenu', () => {
 		expect(screen.getByText('remote.ts')).toBeTruthy();
 	});
 
-	it('reloads the original node after another node clears its cached files', async () => {
+	it('reloads the original executor after another executor clears its cached files', async () => {
 		const remote = deferred<Awaited<ReturnType<typeof getFileList>>>();
 		vi.mocked(getFileList)
 			.mockResolvedValueOnce([{ name: 'local.ts', path: '/repo/local.ts' }])
@@ -180,14 +180,14 @@ describe('FileMentionMenu', () => {
 			onClose: vi.fn(),
 		});
 		await screen.findByText('local.ts');
-		await view.rerender({ nodeId: '22222222-2222-4222-8222-222222222222' });
+		await view.rerender({ executorId: '22222222-2222-4222-8222-222222222222' });
 		await waitFor(() => expect(getFileList).toHaveBeenCalledTimes(2));
 		expect(screen.queryByText('local.ts')).toBeNull();
 
-		await view.rerender({ nodeId: 'local' });
+		await view.rerender({ executorId: 'local' });
 		await screen.findByText('fresh-local.ts');
 		expect(getFileList).toHaveBeenLastCalledWith(
-			{ nodeId: 'local', projectPath: '/repo' },
+			{ executorId: 'local', projectPath: '/repo' },
 			expect.anything(),
 		);
 		remote.resolve([{ name: 'remote.ts', path: '/repo/remote.ts' }]);

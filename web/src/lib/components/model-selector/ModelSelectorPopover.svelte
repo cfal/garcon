@@ -3,7 +3,7 @@
 	import { untrack } from 'svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Popover from '$lib/components/ui/popover';
-	import { getModelCatalog, getExecutionNodes } from '$lib/context';
+	import { getModelCatalog, getExecutors } from '$lib/context';
 	import { cn } from '$lib/utils/cn.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import type { SessionAgentId } from '$lib/types/app';
@@ -22,9 +22,9 @@
 		value: ModelSelectorValue;
 		mode: ModelSelectorMode;
 		onChange: (next: ModelSelectorChange) => void | Promise<void>;
-		getRecents?: (nodeId: string) => ModelSelectorRecentOption[];
+		getRecents?: (executorId: string) => ModelSelectorRecentOption[];
 		preferRecentsOnOpen?: boolean;
-		getSelectableAgentIds?: (nodeId: string) => readonly SessionAgentId[];
+		getSelectableAgentIds?: (executorId: string) => readonly SessionAgentId[];
 		disabled?: boolean;
 		align?: 'start' | 'center' | 'end';
 		side?: 'top' | 'right' | 'bottom' | 'left';
@@ -47,9 +47,9 @@
 	}: Props = $props();
 
 	const modelCatalog = getModelCatalog();
-	const nodes = getExecutionNodes();
+	const executors = getExecutors();
 	const selector = new ModelSelectorState({
-		nodes,
+		executors,
 		get modelCatalog() {
 			return modelCatalog;
 		},
@@ -59,7 +59,7 @@
 		get mode() {
 			return mode;
 		},
-		getRecents: (nodeId) => getRecents(nodeId),
+		getRecents: (executorId) => getRecents(executorId),
 		get preferRecentsOnOpen() {
 			return preferRecentsOnOpen;
 		},
@@ -77,10 +77,10 @@
 	const sourceSelectionEnabled = $derived(mode.source === 'select');
 	const showSource = $derived(selector.shouldShowSourcePicker);
 	const showEffort = $derived(selector.effortSelectionEnabled);
-	const showNode = $derived(selector.showNodePicker);
+	const showExecutor = $derived(selector.showExecutorPicker);
 	const surfaceIsSettings = $derived(mode.surface === 'settings');
 	const contentWidthClass = $derived.by(() => {
-		if (showNode) {
+		if (showExecutor) {
 			if (!showAgent && !sourceSelectionEnabled) return 'w-[min(34rem,calc(100vw-1rem))]';
 			return showEffort ? 'w-[min(74rem,calc(100vw-1rem))]' : 'w-[min(62rem,calc(100vw-1rem))]';
 		}
@@ -106,7 +106,7 @@
 
 	$effect(() => {
 		if (typeof window.matchMedia !== 'function') return;
-		const compactMaxWidth = (showAgent && sourceSelectionEnabled && mode.effort === 'select' ? 899 : 639) + (showNode ? 176 : 0);
+		const compactMaxWidth = (showAgent && sourceSelectionEnabled && mode.effort === 'select' ? 899 : 639) + (showExecutor ? 176 : 0);
 		const mediaQuery = window.matchMedia(`(max-width: ${compactMaxWidth}px)`);
 		const updateLayout = () => {
 			isCompactLayout = mediaQuery.matches;
@@ -117,13 +117,13 @@
 	});
 
 	$effect(() => {
-		void selector.committedNodeId;
-		untrack(() => selector.reconcileNode());
+		void selector.committedExecutorId;
+		untrack(() => selector.reconcileExecutor());
 	});
 
 	function handleOpenChange(open: boolean): void {
 		if (open) {
-			void nodes.refresh();
+			void executors.refresh();
 			selector.openDraft();
 			return;
 		}
@@ -135,7 +135,7 @@
 	}
 
 	$effect(() => {
-		if (!selector.open || !selector.nodeReady) return;
+		if (!selector.open || !selector.executorReady) return;
 		const catalog = selector.modelCatalog;
 		void catalog.version;
 		untrack(() => { void catalog.refreshIfStale(); });
@@ -175,7 +175,7 @@
 {#snippet triggerContent()}
 	<span class="flex min-w-0 flex-1 flex-col overflow-hidden leading-tight">
 		<span class="truncate font-medium"
-			>{selector.nodeSelectionEnabled && selector.committedNodeId !== 'local' ? `${selector.nodeLabel} / ` : ''}{selector.triggerPrimary || m.model_selector_unavailable()}</span
+			>{selector.executorSelectionEnabled && selector.committedExecutorId !== 'local' ? `${selector.executorLabel} / ` : ''}{selector.triggerPrimary || m.model_selector_unavailable()}</span
 		>
 		{#if showTriggerSecondaryLine}
 			<span

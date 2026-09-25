@@ -8,7 +8,7 @@ import {
 } from '$lib/api/api-providers.js';
 import {
 	ApiProviderEndpointDialogState,
-} from '../api-provider-endpoint-dialog-state.svelte';
+} from '../api-provider-endpoint-dialog-state.svelte.ts';
 import { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
 import type { ApiProviderCatalogEntry } from '$shared/api-providers';
 
@@ -22,14 +22,14 @@ vi.mock('$lib/api/api-providers.js', () => ({
 
 function makeModelCatalog(endpoint: ReturnType<ModelCatalogStore['findEndpoint']> = null) {
 	return {
-		nodeId: 'local',
+		executorId: 'local',
 		findEndpoint: vi.fn(() => endpoint),
 		forceRefresh: vi.fn().mockResolvedValue(undefined),
 		invalidateAll: vi.fn(),
 	};
 }
 
-function dialogPorts(catalog: Pick<ModelCatalogStore, 'nodeId' | 'findEndpoint' | 'forceRefresh' | 'invalidateAll'> = makeModelCatalog()) {
+function dialogPorts(catalog: Pick<ModelCatalogStore, 'executorId' | 'findEndpoint' | 'forceRefresh' | 'invalidateAll'> = makeModelCatalog()) {
 	return {
 		modelCatalog: catalog,
 		providers: {
@@ -38,8 +38,8 @@ function dialogPorts(catalog: Pick<ModelCatalogStore, 'nodeId' | 'findEndpoint' 
 			invalidate: () => catalog.invalidateAll(),
 			refresh: async () => {},
 		},
-		isNodeReady: () => true,
-	} satisfies Pick<ConstructorParameters<typeof ApiProviderEndpointDialogState>[0], 'modelCatalog' | 'providers' | 'isNodeReady'>;
+		isExecutorReady: () => true,
+	} satisfies Pick<ConstructorParameters<typeof ApiProviderEndpointDialogState>[0], 'modelCatalog' | 'providers' | 'isExecutorReady'>;
 }
 
 describe('ApiProviderEndpointDialogState', () => {
@@ -187,7 +187,7 @@ describe('ApiProviderEndpointDialogState', () => {
 		dialog.apiKey = 'synthetic-new-key';
 		expect(dialog.canSave).toBe(true);
 		vi.mocked(createApiProvider).mockResolvedValueOnce({
-			...provider, id: 'synthetic_copy', assignment: { nodeId: 'local', status: 'assigned' },
+			...provider, id: 'synthetic_copy', assignment: { executorId: 'local', status: 'assigned' },
 		});
 		await dialog.save();
 		expect(createApiProvider).toHaveBeenCalledWith(expect.objectContaining({
@@ -514,9 +514,9 @@ describe('ApiProviderEndpointDialogState', () => {
 		}, 'local');
 	});
 
-	it.each(['fetchModels', 'test'] as const)('runs %s on the selected node and discards a response after switching nodes', async (operation) => {
-		const nodeId = '22222222-2222-4222-8222-222222222222';
-		const remote = { ...makeModelCatalog(), nodeId, findEndpoint: () => null };
+	it.each(['fetchModels', 'test'] as const)('runs %s on the selected executor and discards a response after switching executors', async (operation) => {
+		const executorId = '22222222-2222-4222-8222-222222222222';
+		const remote = { ...makeModelCatalog(), executorId, findEndpoint: () => null };
 		let catalog = remote;
 		const dialog = new ApiProviderEndpointDialogState({
 			...dialogPorts(remote),
@@ -533,9 +533,9 @@ describe('ApiProviderEndpointDialogState', () => {
 		const pending = Promise.withResolvers<Awaited<ReturnType<typeof api>>>();
 		vi.mocked(api).mockReturnValueOnce(pending.promise);
 		const request = dialog[operation]();
-		expect(api).toHaveBeenLastCalledWith(expect.any(Object), nodeId);
+		expect(api).toHaveBeenLastCalledWith(expect.any(Object), executorId);
 
-		catalog = { ...remote, nodeId: 'local' };
+		catalog = { ...remote, executorId: 'local' };
 		await dialog.load();
 		dialog.modelsText = 'current-model';
 		pending.resolve({ success: true, models: [{ value: 'stale-model', label: 'Stale Model' }] });
@@ -548,7 +548,7 @@ describe('ApiProviderEndpointDialogState', () => {
 	});
 
 	it.each(['fetchModels', 'test'] as const)('preserves the editor draft and fences %s across a host round trip', async (operation) => {
-		const remote = { ...makeModelCatalog(), nodeId: '22222222-2222-4222-8222-222222222222' };
+		const remote = { ...makeModelCatalog(), executorId: '22222222-2222-4222-8222-222222222222' };
 		let catalog = remote;
 		const dialog = new ApiProviderEndpointDialogState({
 			...dialogPorts(remote), get modelCatalog() { return catalog; },
@@ -566,7 +566,7 @@ describe('ApiProviderEndpointDialogState', () => {
 		vi.mocked(api).mockReturnValueOnce(pending.promise);
 		const request = dialog[operation]();
 		dialog.clearProbeResults();
-		catalog = { ...remote, nodeId: 'local' };
+		catalog = { ...remote, executorId: 'local' };
 		expect(dialog.payload()).toEqual(draft);
 		expect(dialog.isTesting).toBe(false);
 		expect(dialog.isFetchingModels).toBe(false);
@@ -579,8 +579,8 @@ describe('ApiProviderEndpointDialogState', () => {
 	});
 
 	it('refreshes the captured remote catalog after saving without closing a replacement dialog', async () => {
-		const remote = { ...makeModelCatalog(), nodeId: '22222222-2222-4222-8222-222222222222', findEndpoint: () => null };
-		const local = { ...remote, nodeId: 'local', forceRefresh: vi.fn(async () => {}) };
+		const remote = { ...makeModelCatalog(), executorId: '22222222-2222-4222-8222-222222222222', findEndpoint: () => null };
+		const local = { ...remote, executorId: 'local', forceRefresh: vi.fn(async () => {}) };
 		let catalog = remote;
 		const onSaved = vi.fn();
 		const dialog = new ApiProviderEndpointDialogState({
@@ -598,14 +598,14 @@ describe('ApiProviderEndpointDialogState', () => {
 		const request = dialog.save();
 		catalog = local;
 		await dialog.load();
-		pending.resolve({ id: 'synthetic', revision: 1, assignment: { nodeId: remote.nodeId, status: 'assigned' }, label: 'Synthetic', createdAt: '', updatedAt: '', endpoints: [] });
+		pending.resolve({ id: 'synthetic', revision: 1, assignment: { executorId: remote.executorId, status: 'assigned' }, label: 'Synthetic', createdAt: '', updatedAt: '', endpoints: [] });
 		await request;
 		expect(remote.forceRefresh).toHaveBeenCalledOnce();
 		expect(local.forceRefresh).not.toHaveBeenCalled();
 		expect(onSaved).not.toHaveBeenCalled();
 	});
 
-	it.each(['create', 'update'] as const)('invalidates every node catalog after a remote %s', async (operation) => {
+	it.each(['create', 'update'] as const)('invalidates every executor catalog after a remote %s', async (operation) => {
 		const provider: ApiProviderCatalogEntry = {
 			id: 'synthetic', revision: 1, label: 'Synthetic endpoint', templateId: 'custom', createdAt: '', updatedAt: '',
 			endpoints: [{
@@ -615,8 +615,8 @@ describe('ApiProviderEndpointDialogState', () => {
 			}],
 		};
 		const root = new ModelCatalogStore();
-		const remote = root.forNode('22222222-2222-4222-8222-222222222222');
-		const other = root.forNode('33333333-3333-4333-8333-333333333333');
+		const remote = root.forExecutor('22222222-2222-4222-8222-222222222222');
+		const other = root.forExecutor('33333333-3333-4333-8333-333333333333');
 		for (const catalog of [root, remote, other]) {
 			catalog.apiProviderCatalog = [provider];
 			catalog.lastValidatedAt = Date.now();
@@ -626,14 +626,14 @@ describe('ApiProviderEndpointDialogState', () => {
 			for (const catalog of [root, remote, other]) expect(catalog.isValidated).toBe(false);
 			remote.lastValidatedAt = Date.now();
 		});
-		vi.mocked(createApiProvider).mockResolvedValueOnce({ ...provider, assignment: { nodeId: remote.nodeId, status: 'assigned' } });
+		vi.mocked(createApiProvider).mockResolvedValueOnce({ ...provider, assignment: { executorId: remote.executorId, status: 'assigned' } });
 		vi.mocked(updateApiProvider).mockResolvedValueOnce(provider);
 		vi.mocked(deleteApiProvider).mockResolvedValueOnce({ success: true });
 		{
 			const dialog = new ApiProviderEndpointDialogState({
 				providers: { findEndpoint: (id) => remote.findEndpoint(id), isAssigned: () => true,
 					invalidate: () => root.invalidateAll(), refresh: async () => {} },
-				isNodeReady: () => true,
+				isExecutorReady: () => true,
 				modelCatalog: remote, getProtocol: () => 'openai-compatible',
 				getEndpointId: () => operation === 'update' ? 'synthetic_openai' : null,
 			});
@@ -653,7 +653,7 @@ describe('ApiProviderEndpointDialogState', () => {
 
 	it('calls forceRefresh after saving a new provider to refresh agentModels', async () => {
 		vi.mocked(createApiProvider).mockResolvedValueOnce({ id: 'synthetic', revision: 1,
-			assignment: { nodeId: 'local', status: 'assigned' }, label: 'Synthetic', createdAt: '', updatedAt: '', endpoints: [] });
+			assignment: { executorId: 'local', status: 'assigned' }, label: 'Synthetic', createdAt: '', updatedAt: '', endpoints: [] });
 		const catalog = makeModelCatalog();
 		const dialog = new ApiProviderEndpointDialogState({
 			...dialogPorts(catalog),
@@ -684,7 +684,7 @@ describe('ApiProviderEndpointDialogState', () => {
 		dialog.label = 'Synthetic'; dialog.baseUrl = 'http://localhost:1234/v1';
 		dialog.modelsText = 'synthetic-model'; dialog.defaultModel = 'synthetic-model';
 		vi.mocked(createApiProvider).mockResolvedValueOnce({ id: 'synthetic', revision: 1,
-			assignment: { nodeId: 'local', status, error: 'Assignment incomplete' }, label: 'Synthetic', createdAt: '', updatedAt: '', endpoints: [] });
+			assignment: { executorId: 'local', status, error: 'Assignment incomplete' }, label: 'Synthetic', createdAt: '', updatedAt: '', endpoints: [] });
 		await dialog.save();
 		expect(dialog.apiProviderId).toBe('synthetic');
 		expect(dialog.error).toBe('Assignment incomplete');
@@ -698,7 +698,7 @@ describe('ApiProviderEndpointDialogState', () => {
 
 	it('allows saving an offline configuration without testing or fetching models', async () => {
 		const catalog = makeModelCatalog();
-		const dialog = new ApiProviderEndpointDialogState({ ...dialogPorts(catalog), isNodeReady: () => false,
+		const dialog = new ApiProviderEndpointDialogState({ ...dialogPorts(catalog), isExecutorReady: () => false,
 			getProtocol: () => 'openai-compatible', getEndpointId: () => null });
 		await dialog.load();
 		dialog.label = 'Synthetic'; dialog.baseUrl = 'http://localhost:1234/v1';
@@ -707,7 +707,7 @@ describe('ApiProviderEndpointDialogState', () => {
 		await dialog.fetchModels(); await dialog.test();
 		expect(testApiProvider).not.toHaveBeenCalled(); expect(discoverApiProviderModels).not.toHaveBeenCalled();
 		vi.mocked(createApiProvider).mockResolvedValueOnce({ id: 'synthetic', revision: 1,
-			assignment: { nodeId: 'local', status: 'assigned' }, label: 'Synthetic', createdAt: '', updatedAt: '', endpoints: [] });
+			assignment: { executorId: 'local', status: 'assigned' }, label: 'Synthetic', createdAt: '', updatedAt: '', endpoints: [] });
 		await dialog.save();
 		expect(dialog.error).toBeNull(); expect(catalog.forceRefresh).not.toHaveBeenCalled();
 	});

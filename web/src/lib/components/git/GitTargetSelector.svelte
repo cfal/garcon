@@ -29,7 +29,7 @@
 	path={target.activeWorktreePath ?? target.activeProjectPath}
 	disabled={!target.canChooseProject}
 	{isMobile}
-	onSelectNode={(nodeId) => void target.selectNode(nodeId)}
+	onSelectExecutor={(executorId) => void target.selectExecutor(executorId)}
 	onSelectFolder={(candidate) => void target.selectTarget(candidate)}
 	onGoToChatProject={() => target.goToChatProject()}
 >

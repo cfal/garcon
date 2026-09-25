@@ -2,7 +2,7 @@ import type { AgentAttachment } from '@garcon/common/agent-execution';
 import type { AgentSettingsEnvelope } from '@garcon/common/agent-integration';
 import type { CarriedContext } from '@garcon/common/transcript-seed';
 import type { AgentRunningSession } from './execution.js';
-import type { AgentProducerBinding, AgentResourceRef, NodeCallOptions } from './resources.js';
+import type { AgentProducerBinding, AgentResourceRef, ExecutorCallOptions } from './resources.js';
 import type { AgentNativeSessionRef } from './transcript.js';
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
 import type { AgentEndpointSelection } from '@garcon/common/agent-execution';
@@ -35,8 +35,8 @@ export interface AgentResumeRequestV5 extends AgentExecutionContextV5 {
 }
 
 export interface AgentExecutionV5 {
-  start(request: AgentStartRequestV5, options?: NodeCallOptions): Promise<AgentExecutionHandle>;
-  resume(request: AgentResumeRequestV5, options?: NodeCallOptions): Promise<AgentExecutionHandle>;
-  abort(handle: AgentExecutionHandle, options?: NodeCallOptions): Promise<boolean>;
-  runningSessions(options?: NodeCallOptions): Promise<readonly AgentRunningSession[]>;
+  start(request: AgentStartRequestV5, options?: ExecutorCallOptions): Promise<AgentExecutionHandle>;
+  resume(request: AgentResumeRequestV5, options?: ExecutorCallOptions): Promise<AgentExecutionHandle>;
+  abort(handle: AgentExecutionHandle, options?: ExecutorCallOptions): Promise<boolean>;
+  runningSessions(options?: ExecutorCallOptions): Promise<readonly AgentRunningSession[]>;
 }

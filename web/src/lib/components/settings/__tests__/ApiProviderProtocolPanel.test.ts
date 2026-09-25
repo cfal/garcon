@@ -1,9 +1,9 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import ApiProviderProtocolPanelTestHost from './ApiProviderProtocolPanelTestHost.svelte';
-import { localExecutionNode, remoteExecutionNode } from '$lib/execution-nodes/__tests__/fixtures';
+import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 import type { ApiProviderCatalogEntry } from '$shared/api-providers';
-import type { ExecutionNodeSnapshot } from '$shared/execution-nodes';
+import type { ExecutorSnapshot } from '$shared/executors';
 
 const workerProfile = {
 	id: 'synthetic',
@@ -22,12 +22,12 @@ const workerProfile = {
 	}],
 } satisfies ApiProviderCatalogEntry;
 
-const offlineWorker = { ...remoteExecutionNode, availability: 'offline' } satisfies ExecutionNodeSnapshot;
+const offlineWorker = { ...remoteExecutor, availability: 'offline' } satisfies ExecutorSnapshot;
 const secondWorker = {
-	...remoteExecutionNode,
+	...remoteExecutor,
 	id: '33333333-3333-4333-8333-333333333333',
 	label: 'Second worker',
-} satisfies ExecutionNodeSnapshot;
+} satisfies ExecutorSnapshot;
 
 describe('ApiProviderProtocolPanel', () => {
 	afterEach(() => {
@@ -49,67 +49,67 @@ describe('ApiProviderProtocolPanel', () => {
 
 	it.each([
 		{
-			name: 'prefers a ready assigned node over an earlier offline assignment',
-			nodes: [localExecutionNode, offlineWorker, secondWorker],
+			name: 'prefers a ready assigned executor over an earlier offline assignment',
+			executors: [localExecutor, offlineWorker, secondWorker],
 			assignments: { [offlineWorker.id]: [workerProfile.id], [secondWorker.id]: [workerProfile.id] },
-			expectedNodeId: secondWorker.id,
+			expectedExecutorId: secondWorker.id,
 		},
 		{
-			name: 'keeps the assigned node when it is offline',
-			nodes: [localExecutionNode, offlineWorker],
+			name: 'keeps the assigned executor when it is offline',
+			executors: [localExecutor, offlineWorker],
 			assignments: { [offlineWorker.id]: [workerProfile.id] },
-			expectedNodeId: offlineWorker.id,
+			expectedExecutorId: offlineWorker.id,
 		},
 		{
-			name: 'uses Local when the profile has no node assignments',
-			nodes: [localExecutionNode, remoteExecutionNode],
+			name: 'uses Local when the profile has no executor assignments',
+			executors: [localExecutor, remoteExecutor],
 			assignments: {},
-			expectedNodeId: localExecutionNode.id,
+			expectedExecutorId: localExecutor.id,
 		},
 		{
 			name: 'keeps Local first when it and a worker are both assigned and ready',
-			nodes: [localExecutionNode, remoteExecutionNode],
-			assignments: { local: [workerProfile.id], [remoteExecutionNode.id]: [workerProfile.id] },
-			expectedNodeId: localExecutionNode.id,
+			executors: [localExecutor, remoteExecutor],
+			assignments: { local: [workerProfile.id], [remoteExecutor.id]: [workerProfile.id] },
+			expectedExecutorId: localExecutor.id,
 		},
 	] satisfies Array<{
 		name: string;
-		nodes: ExecutionNodeSnapshot[];
+		executors: ExecutorSnapshot[];
 		assignments: Record<string, string[]>;
-		expectedNodeId: string;
-	}>)('$name', async ({ nodes, assignments, expectedNodeId }) => {
+		expectedExecutorId: string;
+	}>)('$name', async ({ executors, assignments, expectedExecutorId }) => {
 		render(ApiProviderProtocolPanelTestHost, {
 			protocol: 'openai-compatible',
 			title: 'OpenAI Providers',
 			description: '',
 			addLabel: 'Add provider',
-			nodes,
+			executors,
 			assignments,
 			apiProviderCatalog: [workerProfile],
 		});
 		await fireEvent.click(screen.getByRole('button', { name: 'Edit Worker endpoint' }));
 		const host = await screen.findByRole<HTMLSelectElement>('combobox', { name: 'Test from' });
-		expect(host.value).toBe(expectedNodeId);
+		expect(host.value).toBe(expectedExecutorId);
 	});
 
 	it('edits a remote-only profile on its assigned host and preserves input when changing probe hosts', async () => {
 		render(ApiProviderProtocolPanelTestHost, {
 			protocol: 'openai-compatible', title: 'OpenAI Providers', description: '', addLabel: 'Add provider',
-			nodes: [localExecutionNode, remoteExecutionNode],
-			assignments: { [remoteExecutionNode.id]: ['synthetic'] },
+			executors: [localExecutor, remoteExecutor],
+			assignments: { [remoteExecutor.id]: ['synthetic'] },
 			apiProviderCatalog: [workerProfile],
 		});
 		expect(screen.queryByRole('combobox')).toBeNull();
 		await fireEvent.click(screen.getByRole('button', { name: 'Edit Worker endpoint' }));
 		const host = await screen.findByRole<HTMLSelectElement>('combobox', { name: 'Test from' });
-		expect(host.value).toBe(remoteExecutionNode.id);
+		expect(host.value).toBe(remoteExecutor.id);
 		expect(screen.getByRole('button', { name: 'Fetch models' }).hasAttribute('disabled')).toBe(false);
 		const label = screen.getByLabelText('Display name') as HTMLInputElement;
 		await fireEvent.input(label, { target: { value: 'Unsaved profile label' } });
 		await fireEvent.change(host, { target: { value: 'local' } });
 		expect(label.value).toBe('Unsaved profile label');
 		expect(screen.getByRole('button', { name: 'Fetch models' }).hasAttribute('disabled')).toBe(true);
-		await fireEvent.change(host, { target: { value: remoteExecutionNode.id } });
+		await fireEvent.change(host, { target: { value: remoteExecutor.id } });
 		expect(screen.getByRole('button', { name: 'Fetch models' }).hasAttribute('disabled')).toBe(false);
 	});
 
@@ -119,8 +119,8 @@ describe('ApiProviderProtocolPanel', () => {
 			title: 'OpenAI Providers',
 			description: '',
 			addLabel: 'Add provider',
-			nodes: [localExecutionNode, remoteExecutionNode],
-			assignments: { [remoteExecutionNode.id]: [workerProfile.id] },
+			executors: [localExecutor, remoteExecutor],
+			assignments: { [remoteExecutor.id]: [workerProfile.id] },
 			apiProviderCatalog: [workerProfile],
 		});
 
@@ -134,7 +134,7 @@ describe('ApiProviderProtocolPanel', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Duplicate Worker endpoint' }));
 		expect((await screen.findByLabelText<HTMLInputElement>('Display name')).value).toBe('Worker endpoint copy');
-		expect(screen.getByRole<HTMLSelectElement>('combobox', { name: 'Create on' }).value).toBe(remoteExecutionNode.id);
+		expect(screen.getByRole<HTMLSelectElement>('combobox', { name: 'Create on' }).value).toBe(remoteExecutor.id);
 		expect(screen.getByLabelText<HTMLInputElement>('API key or token').value).toBe('');
 		expect(screen.getByRole('button', { name: 'Save' }).hasAttribute('disabled')).toBe(true);
 		await fireEvent.input(screen.getByLabelText('API key or token'), { target: { value: 'synthetic-copy-key' } });
@@ -144,7 +144,7 @@ describe('ApiProviderProtocolPanel', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Edit Worker endpoint' }));
 		expect((await screen.findByLabelText<HTMLInputElement>('Display name')).value).toBe('Worker endpoint');
-		expect(screen.getByRole<HTMLSelectElement>('combobox', { name: 'Test from' }).value).toBe(remoteExecutionNode.id);
+		expect(screen.getByRole<HTMLSelectElement>('combobox', { name: 'Test from' }).value).toBe(remoteExecutor.id);
 		await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
 

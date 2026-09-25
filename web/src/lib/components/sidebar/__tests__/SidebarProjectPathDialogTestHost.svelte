@@ -1,14 +1,14 @@
 <script lang="ts">
 	import type { ComponentProps } from 'svelte';
 	import SidebarProjectPathDialog from '../SidebarProjectPathDialog.svelte';
-	import { setExecutionNodesTestContext } from '$lib/execution-nodes/__tests__/execution-nodes-test-context';
-	import type { ExecutionNodeSnapshot } from '$shared/execution-nodes';
-	let { nodes, ...props }: ComponentProps<typeof SidebarProjectPathDialog> & {
-		nodes?: readonly ExecutionNodeSnapshot[];
+	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
+	import type { ExecutorSnapshot } from '$shared/executors';
+	let { executors: executorSnapshots, ...props }: ComponentProps<typeof SidebarProjectPathDialog> & {
+		executors?: readonly ExecutorSnapshot[];
 	} = $props();
-	const executionNodes = setExecutionNodesTestContext();
+	const executors = setExecutorsTestContext();
 	$effect(() => {
-		if (nodes) executionNodes.applySnapshot(nodes);
+		if (executorSnapshots) executors.applySnapshot(executorSnapshots);
 	});
 </script>
 

@@ -6,7 +6,7 @@ import type { ChatListEntry } from '$shared/chat-list';
 import {
 	ChatActionController,
 	type ChatActionControllerDeps,
-} from '../chat-action-controller.svelte';
+} from '../chat-action-controller.svelte.ts';
 import { ChatActionDialogsState } from '../chat-action-dialogs-state.svelte';
 
 vi.mock('$lib/api/chats', () => ({

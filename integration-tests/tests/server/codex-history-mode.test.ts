@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CURRENT_WORKSPACE_VERSION } from '../../../server/migrations/index.js';
+import { CURRENT_WORKSPACE_VERSION } from '../../../server/controller/migrations/index.js';
 import { createCodexRolloutFileName } from '../../support/codex-rollout-filename.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 

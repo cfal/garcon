@@ -6,7 +6,7 @@ import {
 } from '../conformance.js';
 
 const settings = { ownerId: 'other', schemaVersion: 1, values: {} } as const;
-const scope = { nodeId: 'test', instanceId: 'test-instance', integrationId: 'other' };
+const scope = { executorId: 'test', instanceId: 'test-instance', integrationId: 'other' };
 const integration = {
   descriptor: {
     id: 'other',

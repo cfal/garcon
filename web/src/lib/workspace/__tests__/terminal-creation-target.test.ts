@@ -2,10 +2,10 @@ import { expect, it, vi } from 'vitest';
 import { resolveProjectPath } from '../workspace-project-path-resolution.js';
 import type { ProjectResolutionLease } from '../project-resolution-store.svelte.js';
 
-it('captures project node/path across chat changes during validation', async () => {
+it('captures project executor/path across chat changes during validation', async () => {
 	const target = {
 		kind: 'chat' as const,
-		nodeId: 'remote',
+		executorId: 'remote',
 		chatId: 'synthetic-chat',
 		projectPath: '/remote/project',
 	};
@@ -21,9 +21,9 @@ it('captures project node/path across chat changes during validation', async () 
 	const workspaceContext = { currentTarget: target };
 	const retain = vi.fn(() => lease);
 	const result = resolveProjectPath({ workspaceContext, projectResolution: { retain } });
-	workspaceContext.currentTarget = { ...target, nodeId: 'local', projectPath: '/local/project' };
+	workspaceContext.currentTarget = { ...target, executorId: 'local', projectPath: '/local/project' };
 	resolving.resolve();
-	expect(await result).toEqual({ nodeId: 'remote', projectPath: '/remote/project' });
+	expect(await result).toEqual({ executorId: 'remote', projectPath: '/remote/project' });
 	expect(release).toHaveBeenCalledOnce();
 });
 
@@ -35,17 +35,17 @@ it('uses the destination base rather than inspecting or copying another host pat
 		workspaceContext: {
 			currentTarget: {
 				kind: 'chat' as const,
-				nodeId: 'local',
+				executorId: 'local',
 				chatId: 'synthetic-chat',
 				projectPath: '/local/project',
 			},
 		},
 		projectResolution: { retain },
 	};
-	expect(await resolveProjectPath(deps, 'remote')).toEqual({ nodeId: 'remote', projectPath: null });
+	expect(await resolveProjectPath(deps, 'remote')).toEqual({ executorId: 'remote', projectPath: null });
 	expect(retain).not.toHaveBeenCalled();
 	expect(await resolveProjectPath({ ...deps, workspaceContext: { currentTarget: null } })).toEqual({
-		nodeId: 'local',
+		executorId: 'local',
 		projectPath: null,
 	});
 });

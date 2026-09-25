@@ -82,10 +82,10 @@
 			selection={pullRequests.projectSelection}
 			path={projectPath}
 			{isMobile}
-			onSelectNode={(nodeId) => void pullRequests.projectSelection.selectNode(nodeId)}
+			onSelectExecutor={(executorId) => void pullRequests.projectSelection.selectExecutor(executorId)}
 			onSelectFolder={(candidate) =>
 				pullRequests.projectSelection.selectResolvedProject({
-					nodeId: pullRequests.projectSelection.nodeId,
+					executorId: pullRequests.projectSelection.executorId,
 					projectPath: candidate.projectPath,
 				})}
 			onGoToChatProject={() => pullRequests.projectSelection.goToChatProject()}

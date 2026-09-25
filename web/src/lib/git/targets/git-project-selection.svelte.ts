@@ -1,7 +1,7 @@
-import { effectiveNodeId } from '$shared/execution-nodes';
+import { effectiveExecutorId } from '$shared/executors';
 import type { GitProjectTarget } from '$shared/git-execution';
 import type { ProjectUnavailableReason } from '$shared/project-resolution';
-import type { ExecutionNodesStore } from '$lib/execution-nodes/execution-nodes-store.svelte.js';
+import type { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
 import {
 	ProjectResolutionStore,
 	type ProjectResolutionLease,
@@ -17,13 +17,13 @@ export type GitProjectState =
 	| { kind: 'request-failed'; context: GitProjectTarget; message: string }
 	| {
 			kind: 'available';
-			project: GitProjectTarget & { effectiveProjectKey: string; nodeContextKey?: string };
+			project: GitProjectTarget & { effectiveProjectKey: string; executorContextKey?: string };
 	  };
 
 export interface GitProjectSelectionDeps {
 	projectResolution: Pick<ProjectResolutionStore, 'retain'>;
-	nodes?: Pick<ExecutionNodesStore, 'gitAvailable' | 'gitContextKey' | 'onChanged'>;
-	projectBasePath(nodeId: string): string | null;
+	executors?: Pick<ExecutorsStore, 'gitAvailable' | 'gitContextKey' | 'onChanged'>;
+	projectBasePath(executorId: string): string | null;
 }
 
 export class GitProjectSelectionController {
@@ -34,7 +34,7 @@ export class GitProjectSelectionController {
 	#visible = false;
 	#disposed = false;
 	#generation = 0;
-	#nodeContextKey: string | null = null;
+	#executorContextKey: string | null = null;
 	#lease: ProjectResolutionLease | null = null;
 	#fallbackToBase = false;
 	readonly #unsubscribe: (() => void) | undefined;
@@ -48,7 +48,7 @@ export class GitProjectSelectionController {
 			projectResolution: new ProjectResolutionStore(),
 			projectBasePath: () => null,
 		};
-		this.#unsubscribe = this.#deps.nodes?.onChanged(() => this.#nodeChanged());
+		this.#unsubscribe = this.#deps.executors?.onChanged(() => this.#executorChanged());
 	}
 
 	get followingChat(): boolean {
@@ -65,8 +65,8 @@ export class GitProjectSelectionController {
 		if (project.kind === 'absent') return null;
 		return project.kind === 'available' ? project.project : project.context;
 	}
-	get nodeId(): string {
-		return this.target?.nodeId ?? 'local';
+	get executorId(): string {
+		return this.target?.executorId ?? 'local';
 	}
 	get projectPath(): string | null {
 		return this.target?.projectPath ?? null;
@@ -85,13 +85,13 @@ export class GitProjectSelectionController {
 			case 'available':
 				this.#publish({
 					...project,
-					project: { ...project.project, nodeId: effectiveNodeId(project.project.nodeId) },
+					project: { ...project.project, executorId: effectiveExecutorId(project.project.executorId) },
 				});
 				break;
 			default:
 				this.#publish({
 					...project,
-					context: { ...project.context, nodeId: effectiveNodeId(project.context.nodeId) },
+					context: { ...project.context, executorId: effectiveExecutorId(project.context.executorId) },
 				});
 		}
 	}
@@ -101,24 +101,24 @@ export class GitProjectSelectionController {
 		this.#cancelResolution();
 		this.#pinnedTarget = target;
 		this.#fallbackToBase = false;
-		this.#nodeContextKey = this.#contextKey(target.nodeId);
+		this.#executorContextKey = this.#contextKey(target.executorId);
 		this.#publish({
 			kind: 'available',
 			project: {
 				...target,
 				effectiveProjectKey: target.projectPath,
-				nodeContextKey: this.#nodeContextKey,
+				executorContextKey: this.#executorContextKey,
 			},
 		});
 	}
 
-	async selectNode(nodeId: string, currentPath = this.projectPath): Promise<void> {
-		if (!this.#available(nodeId)) return;
+	async selectExecutor(executorId: string, currentPath = this.projectPath): Promise<void> {
+		if (!this.#available(executorId)) return;
 		this.showFolderDialog = false;
 		this.#cancelResolution();
-		const projectPath = currentPath ?? this.#deps.projectBasePath(nodeId) ?? '';
-		this.#pinnedTarget = { nodeId, projectPath };
-		this.#nodeContextKey = this.#contextKey(nodeId);
+		const projectPath = currentPath ?? this.#deps.projectBasePath(executorId) ?? '';
+		this.#pinnedTarget = { executorId, projectPath };
+		this.#executorContextKey = this.#contextKey(executorId);
 		this.#fallbackToBase = true;
 		this.#publish({ kind: 'resolving', context: this.#pinnedTarget });
 		await this.#resolveSelection();
@@ -167,19 +167,19 @@ export class GitProjectSelectionController {
 		this.#cancelResolution();
 	}
 
-	#nodeChanged(): void {
+	#executorChanged(): void {
 		const target = this.#pinnedTarget;
 		if (!target) return;
-		const key = this.#contextKey(target.nodeId);
-		if (key === this.#nodeContextKey) return;
+		const key = this.#contextKey(target.executorId);
+		if (key === this.#executorContextKey) return;
 		this.showFolderDialog = false;
-		this.#nodeContextKey = key;
+		this.#executorContextKey = key;
 		this.#cancelResolution();
-		if (!this.#available(target.nodeId)) {
+		if (!this.#available(target.executorId)) {
 			this.#publish({
 				kind: 'request-failed',
 				context: target,
-				message: 'Git is unavailable on this execution node.',
+				message: 'Git is unavailable on this executor.',
 			});
 			return;
 		}
@@ -194,15 +194,15 @@ export class GitProjectSelectionController {
 		const isCurrent = () => !this.#disposed && generation === this.#generation;
 		let requestedTarget = target;
 		try {
-			if (!this.#available(target.nodeId)) {
-				throw new Error('Git is unavailable on this execution node.');
+			if (!this.#available(target.executorId)) {
+				throw new Error('Git is unavailable on this executor.');
 			}
 			if (!requestedTarget.projectPath) {
-				throw new Error('The execution node has no project base directory.');
+				throw new Error('The executor has no project base directory.');
 			}
 			let snapshot = await this.#resolvePath(requestedTarget, isCurrent);
 			if (!isCurrent()) return;
-			const baseProjectPath = this.#deps.projectBasePath(target.nodeId);
+			const baseProjectPath = this.#deps.projectBasePath(target.executorId);
 			if (
 				this.#fallbackToBase &&
 				snapshot.kind === 'unavailable' &&
@@ -212,7 +212,7 @@ export class GitProjectSelectionController {
 				baseProjectPath &&
 				baseProjectPath !== requestedTarget.projectPath
 			) {
-				requestedTarget = { nodeId: target.nodeId, projectPath: baseProjectPath };
+				requestedTarget = { executorId: target.executorId, projectPath: baseProjectPath };
 				snapshot = await this.#resolvePath(requestedTarget, isCurrent);
 				if (!isCurrent()) return;
 			}
@@ -224,7 +224,7 @@ export class GitProjectSelectionController {
 					project: {
 						...requestedTarget,
 						effectiveProjectKey: snapshot.effectiveProjectKey,
-						nodeContextKey: this.#contextKey(target.nodeId),
+						executorContextKey: this.#contextKey(target.executorId),
 					},
 				});
 			} else {
@@ -259,11 +259,11 @@ export class GitProjectSelectionController {
 		}
 	}
 
-	#available(nodeId: string): boolean {
-		return this.#deps.nodes?.gitAvailable(nodeId) ?? nodeId === 'local';
+	#available(executorId: string): boolean {
+		return this.#deps.executors?.gitAvailable(executorId) ?? executorId === 'local';
 	}
-	#contextKey(nodeId: string): string {
-		return this.#deps.nodes?.gitContextKey(nodeId) ?? nodeId;
+	#contextKey(executorId: string): string {
+		return this.#deps.executors?.gitContextKey(executorId) ?? executorId;
 	}
 	#publish(project: GitProjectState): void {
 		this.projectState = project;

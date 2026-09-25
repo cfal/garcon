@@ -18,14 +18,14 @@ function installTree(controller: CommitController, tree: GitTreeNode[]): void {
 	controller.tree = tree;
 	controller.intents = Object.fromEntries(
 		tree
-			.flatMap((node) => node.children ?? [node])
-			.filter((node) => node.kind === 'file')
-			.map((node) => [
-				node.path,
+			.flatMap((executor) => executor.children ?? [executor])
+			.filter((executor) => executor.kind === 'file')
+			.map((executor) => [
+				executor.path,
 				{
-					path: node.path,
-					desiredSelected: Boolean(node.staged),
-					actualSelected: Boolean(node.staged),
+					path: executor.path,
+					desiredSelected: Boolean(executor.staged),
+					actualSelected: Boolean(executor.staged),
 					isRunning: false,
 					runningMode: null,
 					error: null,
@@ -76,7 +76,7 @@ describe('CommitSurface', () => {
 		expect(toolbar?.querySelector('button')).toBe(
 			screen.getByRole('button', { name: /current ref HEAD/i }),
 		);
-		expect(screen.queryByRole('button', { name: /Execution node:/ })).toBeNull();
+		expect(screen.queryByRole('button', { name: /Executor:/ })).toBeNull();
 	});
 
 	it('places the selected-file summary between the file tree and commit message', () => {

@@ -22,7 +22,7 @@ function hosts(remoteAvailable = true, localFull = false) {
 			{ id: 'remote', label: 'Build Server', available: remoteAvailable, full: false },
 		],
 		hasRemoteHosts: remoteAvailable,
-		canCreate: (nodeId: string) => (nodeId === 'local' ? !localFull : remoteAvailable),
+		canCreate: (executorId: string) => (executorId === 'local' ? !localFull : remoteAvailable),
 	} satisfies Pick<TerminalRegistry, 'hosts' | 'hasRemoteHosts' | 'canCreate'>;
 }
 
@@ -63,7 +63,7 @@ it('keeps a disconnected host disabled rather than turning an open chooser into 
 	const view = render(TerminalCreateAction, {
 		terminals: hosts(),
 		oncreate,
-		defaultNodeId: 'remote',
+		defaultExecutorId: 'remote',
 	});
 	await fireEvent.click(screen.getByRole('button', { name: 'New Terminal' }));
 	await view.rerender({ terminals: hosts(false) });
@@ -80,22 +80,22 @@ it('keeps direct Local creation when no remote is available but never redirects 
 	const view = render(TerminalCreateAction, {
 		terminals: hosts(false),
 		oncreate,
-		defaultNodeId: 'remote',
+		defaultExecutorId: 'remote',
 	});
 	const button = screen.getByRole('button', { name: 'New Terminal' });
 	expect(button.getAttribute('aria-disabled')).toBe('true');
 	await fireEvent.click(button);
 	expect(oncreate).not.toHaveBeenCalled();
-	await view.rerender({ defaultNodeId: 'local' });
+	await view.rerender({ defaultExecutorId: 'local' });
 	await fireEvent.click(button);
 	expect(oncreate).toHaveBeenCalledOnce();
 });
 
 it.each(['local', 'remote'])(
 	'keeps the trigger and restores focus when disconnect changes the %s chooser into a direct action',
-	async (defaultNodeId) => {
+	async (defaultExecutorId) => {
 		const oncreate = vi.fn();
-		const view = render(TerminalCreateAction, { terminals: hosts(), oncreate, defaultNodeId });
+		const view = render(TerminalCreateAction, { terminals: hosts(), oncreate, defaultExecutorId });
 		const trigger = screen.getByRole('button', { name: 'New Terminal' });
 		trigger.focus();
 		await fireEvent.keyDown(trigger, { key: 'Enter' });
@@ -105,7 +105,7 @@ it.each(['local', 'remote'])(
 		expect(screen.getByRole('button', { name: 'New Terminal' })).toBe(trigger);
 		expect(oncreate).not.toHaveBeenCalled();
 		await fireEvent.click(trigger);
-		expect(oncreate).toHaveBeenCalledTimes(defaultNodeId === 'local' ? 1 : 0);
+		expect(oncreate).toHaveBeenCalledTimes(defaultExecutorId === 'local' ? 1 : 0);
 	},
 );
 

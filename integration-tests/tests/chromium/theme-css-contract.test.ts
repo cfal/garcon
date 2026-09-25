@@ -116,7 +116,7 @@ async function readNormalAndHoveredColors(page: Page, selector: string) {
 describe("compiled theme CSS", () => {
   test("resolves every profile token and follows the projected dark class", async () => {
     const assetDirectory = fileURLToPath(
-      new URL("../../../web/build/_app/immutable/assets/", import.meta.url),
+      new URL("../../../web/build/_app/immutable/assets", import.meta.url),
     );
     const cssFiles = (await readdir(assetDirectory)).filter((file) =>
       file.endsWith(".css"),

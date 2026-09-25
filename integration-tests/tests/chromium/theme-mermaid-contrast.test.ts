@@ -20,7 +20,7 @@ const DIAGRAMS = [
   {
     name: "flowchart node label",
     source: "flowchart LR\nA[Start] --> B[Finish]",
-    labelSelector: ".nodeLabel",
+    labelSelector: ".executorLabel",
     backgroundSelector: ".label-container",
     labelProperty: "color",
   },

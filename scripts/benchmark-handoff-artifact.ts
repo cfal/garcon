@@ -1,12 +1,12 @@
 import { AssistantMessage, UserMessage } from '../common/chat-types.js';
 import {
   estimateHandoffTokens,
-} from '../server/chats/handoff-token-budget.js';
+} from '../server/controller/chats/handoff-token-budget.js';
 import {
   foldHandoffArtifactEntries,
   renderHandoffArtifactEntry,
-} from '../server/chats/handoff-artifact/projection.js';
-import { renderFittedHandoffArtifact } from '../server/chats/handoff-artifact/xml.js';
+} from '../server/controller/chats/handoff-artifact/projection.js';
+import { renderFittedHandoffArtifact } from '../server/controller/chats/handoff-artifact/xml.js';
 
 const AT = '2026-08-26T00:00:00.000Z';
 const TARGETS = [100_000, 500_000, 1_000_000] as const;

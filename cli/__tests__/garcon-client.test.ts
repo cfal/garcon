@@ -16,7 +16,7 @@ const connection = {
   baseUrl: 'http://127.0.0.1:8080',
   instanceId: 'instance',
   endpointInstanceId: 'instance',
-  defaultNodeId: 'local',
+  defaultExecutorId: 'local',
   workspaceName: 'default',
   localCapability: 'garcon_local_secret',
   workspaceDir: '/config/workspace-default',
@@ -46,7 +46,7 @@ function accepted(request: AgentRunCommandRequest): Response {
 
 function runtimeResponse(input: string | URL | Request, instanceId = connection.instanceId): Response {
   const url = new URL(input instanceof Request ? input.url : input);
-  if (url.pathname === '/api/v1/cli/context') return Response.json({ serverInstanceId: instanceId, defaultNodeId: 'local', workspaceName: 'default' });
+  if (url.pathname === '/api/v1/cli/context') return Response.json({ serverInstanceId: instanceId, defaultExecutorId: 'local', workspaceName: 'default' });
   const challenge = url.searchParams.get('challenge') ?? '';
   const proof = crypto.createHmac('sha256', connection.localCapability)
     .update(runtimeProofPayload(instanceId, challenge))
@@ -674,7 +674,7 @@ describe('GarconClient', () => {
       method: 'POST',
       authorization: `Bearer ${connection.localCapability}`,
       contentType: 'application/json',
-      body: { nodeId: 'local', nativeSessionId: 'session-123', agent: 'codex' },
+      body: { executorId: 'local', nativeSessionId: 'session-123', agent: 'codex' },
     });
   });
 

@@ -1,15 +1,15 @@
 <script lang="ts">
-	import { setExecutionNodesTestContext } from '$lib/execution-nodes/__tests__/execution-nodes-test-context';
+	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
 	import Settings from '../Settings.svelte';
 	import AppSettings from '../AppSettings.svelte';
-	import type { ExecutionNodeSnapshot } from '$shared/execution-nodes';
-	import type { ExecutionNodesStore } from '$lib/execution-nodes/execution-nodes-store.svelte';
+	import type { ExecutorSnapshot } from '$shared/executors';
+	import type { ExecutorsStore } from '$lib/executors/executors-store.svelte';
 	import type { GhCapabilityContext } from '$lib/git/pull-requests/gh-capability.svelte';
 	import { makeTestGhCapability } from './gh-capability-test-context';
 	import {
 		setAppShell,
 		setApiProviders,
-		setExecutionNodes,
+		setExecutors,
 		setFileSessions,
 		setGhCapability,
 		setLocalSettings,
@@ -34,8 +34,8 @@
 		onLocalSet?: (key: string, value: unknown) => void;
 		onLocalToggle?: (key: string) => void;
 		onClearRecovery?: FileSessionRegistry['clearRecovery'];
-		nodes?: readonly ExecutionNodeSnapshot[];
-		nodeStore?: ExecutionNodesStore;
+		executors?: readonly ExecutorSnapshot[];
+		executorStore?: ExecutorsStore;
 		ghCapability?: GhCapabilityContext;
 	}
 
@@ -45,13 +45,13 @@
 		onLocalSet = () => undefined,
 		onLocalToggle = () => undefined,
 		onClearRecovery = async () => true,
-		nodes,
-		nodeStore,
-		ghCapability = { forNode: () => makeTestGhCapability() },
+		executors,
+		executorStore,
+		ghCapability = { forExecutor: () => makeTestGhCapability() },
 	}: SettingsTestHostProps = $props();
 	untrack(() => {
-		if (nodeStore) setExecutionNodes(nodeStore);
-		else setExecutionNodesTestContext(nodes);
+		if (executorStore) setExecutors(executorStore);
+		else setExecutorsTestContext(executors);
 	});
 	class SettingsLocalStore extends LocalSettingsStore {
 		#notifySet: (key: string, value: unknown) => void;
@@ -216,7 +216,7 @@
 		},
 	});
 	setModelCatalog({
-		forNode() {
+		forExecutor() {
 			return this;
 		},
 		version: 0,

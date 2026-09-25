@@ -24,7 +24,7 @@ import {
   parseExecutionControlServerInstanceId,
 } from './chat-execution-control';
 import type { RemoteSettingsSnapshot } from './settings';
-import { parseExecutionNodes, type ExecutionNodeSnapshot } from './execution-nodes';
+import { parseExecutors, type ExecutorSnapshot } from './executors';
 import type { ErrorCode } from './error-codes';
 import { normalizeRemoteSettingsSnapshot } from './settings';
 import {
@@ -356,9 +356,9 @@ export class ApiProvidersInvalidatedMessage {
   readonly type = 'api-providers-invalidated' as const;
 }
 
-export class ExecutionNodesChangedMessage {
-  readonly type = 'execution-nodes-changed' as const;
-  constructor(readonly nodes: readonly ExecutionNodeSnapshot[]) {}
+export class ExecutorsChangedMessage {
+  readonly type = 'executors-changed' as const;
+  constructor(readonly executors: readonly ExecutorSnapshot[]) {}
 }
 
 export class TranscriptSearchStatusMessage {
@@ -457,7 +457,7 @@ export type ServerWsMessage =
   | TicketsInvalidatedMessage
   | SettingsChangedMessage
   | ApiProvidersInvalidatedMessage
-  | ExecutionNodesChangedMessage
+  | ExecutorsChangedMessage
   | TranscriptSearchStatusMessage
   | ScheduledPromptsInvalidatedMessage
   | SnippetsInvalidatedMessage
@@ -896,9 +896,9 @@ export function parseServerWsMessage(
     }
     case 'api-providers-invalidated':
       return Object.keys(data).length === 1 ? new ApiProvidersInvalidatedMessage() : null;
-    case 'execution-nodes-changed': {
-      const nodes = parseExecutionNodes(data.nodes);
-      return nodes ? new ExecutionNodesChangedMessage(nodes) : null;
+    case 'executors-changed': {
+      const executors = parseExecutors(data.executors);
+      return executors ? new ExecutorsChangedMessage(executors) : null;
     }
     case 'transcript-search-status':
       return isTranscriptSearchStatusV1(data.status)

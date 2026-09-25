@@ -42,7 +42,7 @@ for (const creation of ['markup', 'cli'] as const) for (const remove of [false, 
           '--runtime', 'controller', 'start-async', '--cwd', fixture.dirs.project, '--agent', agent.agentId,
           '--provider', agent.provider.providerId, '--endpoint', agent.provider.endpointId,
           '--model', agent.provider.model, '--parent', parent, 'Synthetic child task.'], {
-          cwd: fileURLToPath(new URL('../../../', import.meta.url)),
+          cwd: fileURLToPath(new URL('../../..', import.meta.url)),
           env: cliEnvironment(), stdout: 'pipe', stderr: 'pipe',
         });
         const [code, stdout, stderr] = await Promise.all([processRun.exited,

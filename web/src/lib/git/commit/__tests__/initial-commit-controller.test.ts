@@ -20,7 +20,7 @@ describe('initial commit target lifetime', () => {
 			runGitMutation: async (_project, execute) => execute(),
 		} satisfies GitInitialCommitControllerDeps;
 		const controller = new GitInitialCommitController(deps);
-		const creating = controller.create({ nodeId: 'remote', projectPath: '/repo' });
+		const creating = controller.create({ executorId: 'remote', projectPath: '/repo' });
 		controller.reset();
 		pending.resolve({ success: true });
 		await expect(creating).resolves.toBe(true);

@@ -6,7 +6,7 @@ function printHelp() {
 Usage:
   bun server/main.ts [options]
   bun run start -- [options]
-  garcon execution-node --help
+  garcon executor --help
 
 Options:
   --help, -h                     Show this help screen and exit.
@@ -47,17 +47,17 @@ Notes:
   process.stdout.write(helpText);
 }
 
-if (process.argv[2] === 'execution-node') {
-  const { runWorkerCli } = await import('./execution-nodes/worker-cli.js');
+if (process.argv[2] === 'executor') {
+  const { runWorkerCli } = await import('./remote/worker-cli.js');
   try { await runWorkerCli(process.argv.slice(3)); }
   catch (error) {
-    console.error(error instanceof Error ? error.message : 'Execution-node startup failed');
+    console.error(error instanceof Error ? error.message : 'Executor startup failed');
     process.exitCode = 1;
   }
 } else if (process.argv.includes('--help') || process.argv.includes('-h')) {
   printHelp();
 } else {
-  const { startServer } = await import('./server.js');
+  const { startServer } = await import('./controller/server.js');
   await startServer();
 }
 

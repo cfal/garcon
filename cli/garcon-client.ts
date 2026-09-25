@@ -376,7 +376,7 @@ export class GarconClient {
   readonly #baseUrl: string;
   readonly #instanceId: string;
   readonly #endpointInstanceId: string;
-  readonly defaultNodeId: string;
+  readonly defaultExecutorId: string;
   readonly workspaceName: string | null;
   readonly #capability: string;
   readonly #fetch: typeof fetch;
@@ -386,7 +386,7 @@ export class GarconClient {
     this.#baseUrl = options.baseUrl;
     this.#instanceId = options.instanceId;
     this.#endpointInstanceId = options.endpointInstanceId;
-    this.defaultNodeId = options.defaultNodeId;
+    this.defaultExecutorId = options.defaultExecutorId;
     this.workspaceName = options.workspaceName;
     this.#capability = options.localCapability;
     this.#fetch = options.fetch ?? fetch;
@@ -400,10 +400,10 @@ export class GarconClient {
   async getModelCatalog(
     agentId?: string,
     signal?: AbortSignal,
-    nodeId: string = this.defaultNodeId,
+    executorId: string = this.defaultExecutorId,
   ): Promise<ModelCatalogResponse> {
     const query = new URLSearchParams(agentId === undefined ? {} : { agent: agentId });
-    query.set('nodeId', nodeId);
+    query.set('executorId', executorId);
     const value = await this.#request(
       'catalog resolution',
       'GET',
@@ -685,7 +685,7 @@ export class GarconClient {
       'native session lookup',
       'POST',
       '/api/v1/chats/lookup-native-session',
-      { nodeId: this.defaultNodeId, ...request },
+      { executorId: this.defaultExecutorId, ...request },
       signal,
     );
     try {
@@ -1015,7 +1015,7 @@ export class GarconClient {
     )) return false;
     try {
       const context = parseCliContext(await this.#request('runtime verification', 'GET', '/api/v1/cli/context', undefined, signal));
-      return context.serverInstanceId === this.#instanceId && context.defaultNodeId === this.defaultNodeId;
+      return context.serverInstanceId === this.#instanceId && context.defaultExecutorId === this.defaultExecutorId;
     } catch (error) {
       if (error instanceof GarconHttpError && error.errorCode === 'CLI_CONTROLLER_CHANGED') return false;
       throw error;
@@ -1127,7 +1127,7 @@ export class GarconClient {
   }
 
   async getTicketProjectDefault(directory: string, signal?: AbortSignal) {
-    return this.#ticketResponse('POST', '/project-default', { directory, nodeId: this.defaultNodeId }, parseTicketProjectDefault, signal);
+    return this.#ticketResponse('POST', '/project-default', { directory, executorId: this.defaultExecutorId }, parseTicketProjectDefault, signal);
   }
 
   async listTickets(query: TicketListQuery, signal?: AbortSignal) {

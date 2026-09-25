@@ -10,7 +10,7 @@ import {
 	ChatTranscriptCache,
 	type ChatTranscriptApplyResult,
 	type ChatTranscriptSnapshot,
-} from './chat-transcript-cache.svelte';
+} from './chat-transcript-cache.svelte.ts';
 import type {
 	ConversationTranscriptOverlayMutation,
 	ConversationTranscriptOverlayView,

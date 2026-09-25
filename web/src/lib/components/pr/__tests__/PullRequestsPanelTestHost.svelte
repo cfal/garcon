@@ -6,7 +6,7 @@
 		setNotifications,
 		setTransientLayers,
 	} from '$lib/context';
-	import { setExecutionNodesTestContext } from '$lib/execution-nodes/__tests__/execution-nodes-test-context.js';
+	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context.js';
 	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
 	import { NotificationsStore } from '$lib/stores/notifications.svelte.js';
 	import { WorkspaceInteractionGate } from '$lib/workspace/workspace-interaction-gate.svelte.js';
@@ -15,7 +15,7 @@
 	import PullRequestsPanel from '../PullRequestsPanel.svelte';
 
 	let { props }: { props: ComponentProps<typeof PullRequestsPanel> } = $props();
-	setExecutionNodesTestContext();
+	setExecutorsTestContext();
 	setRemoteSettings(createRemoteSettingsStore());
 	setNotifications(new NotificationsStore());
 	setTransientLayers(new TransientLayerRegistry(new WorkspaceInteractionGate()));

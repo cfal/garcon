@@ -1367,21 +1367,21 @@ describe('ChatSessionsStore IO', () => {
 	});
 
 	it.each([
-		{ sourceNode: '00000000-0000-4000-8000-000000000001', nodeId: undefined, projectPath: '/local' },
-		{ sourceNode: 'local', nodeId: '00000000-0000-4000-8000-000000000001', projectPath: '/repo' },
-	])('publishes the accepted handoff project binding before list refresh: $sourceNode', async ({ sourceNode, nodeId, projectPath }) => {
+		{ sourceExecutor: '00000000-0000-4000-8000-000000000001', executorId: undefined, projectPath: '/local' },
+		{ sourceExecutor: 'local', executorId: '00000000-0000-4000-8000-000000000001', projectPath: '/repo' },
+	])('publishes the accepted handoff project binding before list refresh: $sourceExecutor', async ({ sourceExecutor, executorId, projectPath }) => {
 		const refresh = deferred<Awaited<ReturnType<typeof listChats>>>();
 		const store = new ChatSessionsStore({ listChats: () => refresh.promise });
-		store.upsertFromServer([makeServerSession({ nodeId: sourceNode, projectPath: '/repo' })]);
+		store.upsertFromServer([makeServerSession({ executorId: sourceExecutor, projectPath: '/repo' })]);
 		const bindingChanged = vi.fn();
 		const unsubscribe = store.onProjectPathChanged(bindingChanged);
-		const accepted = makeServerSession({ nodeId, projectPath, agentOwnershipEpoch: 'epoch-2' });
+		const accepted = makeServerSession({ executorId, projectPath, agentOwnershipEpoch: 'epoch-2' });
 		try {
 			store.reconcileAcceptedHandoffProjection(accepted);
 			expect(store.byId['chat-1']).toMatchObject({
-				nodeId: nodeId ?? 'local', projectPath, agentOwnershipEpoch: 'epoch-2',
+				executorId: executorId ?? 'local', projectPath, agentOwnershipEpoch: 'epoch-2',
 			});
-			expect(bindingChanged).toHaveBeenCalledExactlyOnceWith('chat-1', projectPath, nodeId ?? 'local');
+			expect(bindingChanged).toHaveBeenCalledExactlyOnceWith('chat-1', projectPath, executorId ?? 'local');
 		} finally {
 			refresh.resolve({ sessions: [accepted], total: 1, lastSelectedChatId: null });
 			await store.quietRefreshChats();

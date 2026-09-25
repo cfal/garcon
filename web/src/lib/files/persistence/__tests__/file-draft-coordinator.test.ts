@@ -8,7 +8,7 @@ import { createMemoryFileDraftRepository } from '$lib/files/persistence/file-dra
 
 function document() {
 	const value = new FileDocumentState(
-		{ nodeId: 'local', canonicalFileRootPath: '/workspace', normalizedRelativePath: 'src/file.ts' },
+		{ executorId: 'local', canonicalFileRootPath: '/workspace', normalizedRelativePath: 'src/file.ts' },
 		'file',
 	);
 	value.baseline = 'initial';

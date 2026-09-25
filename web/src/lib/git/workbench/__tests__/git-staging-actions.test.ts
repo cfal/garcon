@@ -9,8 +9,8 @@ import { GitMutationCoordinator } from '$lib/git/surface/git-mutations.svelte.js
 import { GitStagingActions, type GitStagingActionsDeps } from '../git-staging-actions.svelte.js';
 
 vi.mock('$lib/api/git.js', () => ({ gitStageSelection: vi.fn() }));
-const project = { nodeId: 'worker', projectPath: '/repo' };
-const document = { nodeId: 'worker', instanceId: 'instance', documentId: 'shared-document' };
+const project = { executorId: 'worker', projectPath: '/repo' };
+const document = { executorId: 'worker', instanceId: 'instance', documentId: 'shared-document' };
 
 function fixture(mode: 'stage' | 'unstage') {
 	const lineSelection = new GitLineSelectionState();

@@ -1,5 +1,5 @@
 import { testGenerationModel } from '$lib/api/settings.js';
-import { effectiveNodeId } from '$shared/execution-nodes';
+import { effectiveExecutorId } from '$shared/executors';
 import { ApiError } from '$lib/api/client.js';
 import type {
 	ModelSelectorChange,
@@ -118,13 +118,13 @@ export class RemoteGenerationSettingsCardState {
 			: (snapshot?.uiEffective.chatTitle ?? snapshot?.ui.chatTitle)?.enabled !== false;
 	}
 
-	get nodeId(): string {
-		return effectiveNodeId(this.selectionOverride?.nodeId ?? this.effectiveSelection.nodeId);
+	get executorId(): string {
+		return effectiveExecutorId(this.selectionOverride?.executorId ?? this.effectiveSelection.executorId);
 	}
 
 	get isAuto(): boolean {
 		const saved = this.options.remoteSettings.snapshot?.ui[this.options.settingsKey];
-		return !this.selectionOverride && saved?.nodeId == null && !saved?.agentId && !saved?.model;
+		return !this.selectionOverride && saved?.executorId == null && !saved?.agentId && !saved?.model;
 	}
 
 	get selectionUnavailable(): boolean {
@@ -132,7 +132,7 @@ export class RemoteGenerationSettingsCardState {
 		const saved = snapshot?.ui[this.options.settingsKey];
 		return Boolean(
 			saved &&
-			(saved.nodeId != null || saved.agentId || saved.model) &&
+			(saved.executorId != null || saved.agentId || saved.model) &&
 			!snapshot?.uiEffective[this.options.settingsKey],
 		);
 	}
@@ -142,7 +142,7 @@ export class RemoteGenerationSettingsCardState {
 			...this.options.remoteSettings.snapshot?.ui[this.options.settingsKey],
 		};
 		for (const key of [
-			'nodeId',
+			'executorId',
 			'agentId',
 			'model',
 			'apiProviderId',
@@ -210,7 +210,7 @@ export class RemoteGenerationSettingsCardState {
 
 	get selectorValue(): ModelSelectorValue {
 		return {
-			nodeId: this.nodeId,
+			executorId: this.executorId,
 			agentId: this.provider,
 			model: this.modelValue,
 			apiProviderId: this.apiProviderId,
@@ -244,7 +244,7 @@ export class RemoteGenerationSettingsCardState {
 					modelProtocol: this.modelProtocol,
 				};
 		return generationModelTestConfigurationKey({
-			nodeId: this.nodeId,
+			executorId: this.executorId,
 			agentId: this.provider,
 			...configuration,
 			thinkingMode: this.thinkingMode,
@@ -310,7 +310,7 @@ export class RemoteGenerationSettingsCardState {
 		};
 		return {
 			agentId: nextProvider,
-			nodeId: effectiveNodeId(overrides.nodeId ?? this.nodeId),
+			executorId: effectiveExecutorId(overrides.executorId ?? this.executorId),
 			model: selection.model,
 			apiProviderId: selection.apiProviderId,
 			modelEndpointId: selection.modelEndpointId,
@@ -371,7 +371,7 @@ export class RemoteGenerationSettingsCardState {
 		const previousOverride = this.selectionOverride;
 		const token = ++this.#selectionSaveToken;
 		this.selectionOverride = {
-			nodeId: effectiveNodeId(next.nodeId),
+			executorId: effectiveExecutorId(next.executorId),
 			agentId: next.agentId,
 			model: next.modelValue,
 			apiProviderId: next.apiProviderId,
@@ -381,7 +381,7 @@ export class RemoteGenerationSettingsCardState {
 		};
 
 		const selection: GenerationSelectionUiSettings = {
-			nodeId: effectiveNodeId(next.nodeId),
+			executorId: effectiveExecutorId(next.executorId),
 			agentId: next.agentId,
 			model: next.model,
 			apiProviderId: next.apiProviderId,

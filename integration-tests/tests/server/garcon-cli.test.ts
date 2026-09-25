@@ -18,7 +18,7 @@ import {
 import { GarconProcess } from '../../support/garcon-process.js';
 import { waitForPersistedNativeSession } from '../../support/persisted-chat.js';
 
-const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
+const REPO_ROOT = fileURLToPath(new URL('../../..', import.meta.url));
 const WORKSPACE = 'cli-integration';
 
 function spawnCli(arguments_: string[]) {

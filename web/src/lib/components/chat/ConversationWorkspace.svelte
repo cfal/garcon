@@ -6,7 +6,7 @@
 	import PromptComposer from './PromptComposer.svelte';
 	import QueuedInputsDialog from './QueuedInputsDialog.svelte';
 	import HandoffForkDialog from './HandoffForkDialog.svelte';
-	import NodeHandoffDialog from './NodeHandoffDialog.svelte';
+	import ExecutorHandoffDialog from './ExecutorHandoffDialog.svelte';
 	import ReloadChatDialog from './ReloadChatDialog.svelte';
 	import UserMessageNavigatorDialog from './UserMessageNavigatorDialog.svelte';
 	import {
@@ -51,7 +51,7 @@
 		setAgentState,
 		getReadReceiptOutbox,
 		getModelCatalog,
-		getExecutionNodes,
+		getExecutors,
 		getRemoteSettings,
 		getNotifications,
 		getWorkspaceCoordinator,
@@ -125,7 +125,7 @@
 	const ws = getWs();
 	const readReceiptOutbox = getReadReceiptOutbox();
 	const rootModelCatalog = getModelCatalog();
-	const nodes = getExecutionNodes();
+	const executors = getExecutors();
 	const remoteSettings = getRemoteSettings();
 	const notifications = getNotifications();
 	const workspace = getWorkspaceCoordinator();
@@ -147,7 +147,7 @@
 		},
 	});
 	const agentState = new AgentState();
-	const modelCatalog = $derived(rootModelCatalog.forNode(agentState.nodeId));
+	const modelCatalog = $derived(rootModelCatalog.forExecutor(agentState.executorId));
 	const lifecycle = new CurrentConversationLifecycle({
 		lifecycles: conversationLifecycles,
 		getSelectedChatId: () => sessions.selectedChatId,
@@ -218,7 +218,7 @@
 	);
 	const drainHandle = createDrainCursor(ws);
 	onDestroy(() => {
-		controller.nodeHandoff.cancel();
+		controller.executorHandoff.cancel();
 		reloadRequest?.complete();
 		reloadRequest = null;
 		drainHandle.cleanup();
@@ -281,11 +281,11 @@
 		get modelCatalog() {
 			return modelCatalog;
 		},
-		modelCatalogForNode: (nodeId) => rootModelCatalog.forNode(nodeId),
-		canSubmitToNode: (nodeId) =>
-			nodes.isReady(nodeId) && rootModelCatalog.forNode(nodeId).isValidated,
-		getExecutionDefaults: (agentId, nodeId) => {
-			const modelCatalog = rootModelCatalog.forNode(nodeId ?? agentState.nodeId);
+		modelCatalogForExecutor: (executorId) => rootModelCatalog.forExecutor(executorId),
+		canSubmitToExecutor: (executorId) =>
+			executors.isReady(executorId) && rootModelCatalog.forExecutor(executorId).isValidated,
+		getExecutionDefaults: (agentId, executorId) => {
+			const modelCatalog = rootModelCatalog.forExecutor(executorId ?? agentState.executorId);
 			const defaults = executionDefaultsForAgent(
 				remoteSettings.snapshot?.executionDefaults,
 				agentId,
@@ -316,7 +316,7 @@
 			if (
 				target.kind === 'chat' &&
 				(sessions.byId[target.chatId]?.projectPath !== target.projectPath ||
-					(sessions.byId[target.chatId]?.nodeId ?? 'local') !== (target.nodeId ?? 'local'))
+					(sessions.byId[target.chatId]?.executorId ?? 'local') !== (target.executorId ?? 'local'))
 			)
 				return;
 			const lease = projectResolution.retain(target);
@@ -633,11 +633,11 @@
 	}
 
 	function openCommitForPanel(surfaceId: ChatViewSurfaceId, chatId: string): void {
-		const nodeId = sessions.byId[chatId]?.nodeId ?? 'local';
-		if (!nodes.gitAvailable(nodeId)) return;
+		const executorId = sessions.byId[chatId]?.executorId ?? 'local';
+		if (!executors.gitAvailable(executorId)) return;
 		const projectPath = sessions.byId[chatId]?.projectPath;
-		if (!projectPath || !quickGit.summaryFor({ nodeId, projectPath })) return;
-		if (!singletonSurfaces.commit().target.selectProject({ nodeId, projectPath })) return;
+		if (!projectPath || !quickGit.summaryFor({ executorId, projectPath })) return;
+		if (!singletonSurfaces.commit().target.selectProject({ executorId, projectPath })) return;
 		const targetWindowId = workspace.windowOf(surfaceId);
 		let opening: Promise<void> | null = null;
 		if (appShell.isMobile) {
@@ -660,7 +660,7 @@
 		const projectPath = sessions.byId[chatId]?.projectPath;
 		if (!projectPath) return;
 		if (
-			quickGitBranches.nodeId === command.nodeId &&
+			quickGitBranches.executorId === command.executorId &&
 			quickGitBranches.currentProjectPath === projectPath &&
 			quickGitBranches.showBranchDropdown
 		) {
@@ -673,7 +673,7 @@
 			project.projectPath,
 			quickGit.summaryFor(project)?.branch,
 			project.effectiveProjectKey,
-			project.nodeId,
+			project.executorId,
 		);
 		await quickGitBranches.openBranchDropdown(project.projectPath, project.effectiveProjectKey);
 		if (command.generation === branchCommandGeneration && !ownsBranchCommand(command)) {
@@ -682,7 +682,7 @@
 	}
 
 	type BranchCommand = {
-		readonly nodeId: string;
+		readonly executorId: string;
 		readonly projectPath: string;
 		readonly generation: number;
 		readonly surfaceId: ChatViewSurfaceId;
@@ -697,8 +697,8 @@
 		opensDropdown = false,
 	): BranchCommand | null {
 		const chat = sessions.byId[chatId];
-		const nodeId = chat?.nodeId ?? 'local';
-		if (!chat?.projectPath || !nodes.gitAvailable(nodeId)) return null;
+		const executorId = chat?.executorId ?? 'local';
+		if (!chat?.projectPath || !executors.gitAvailable(executorId)) return null;
 		const panel = conversationPanels.panel(surfaceId);
 		const owner = workspace.focusOwner;
 		if (
@@ -712,7 +712,7 @@
 		const generation = ++branchCommandGeneration;
 		if (opensDropdown) branchDropdownGeneration = generation;
 		return {
-			nodeId,
+			executorId,
 			projectPath: chat.projectPath,
 			generation,
 			surfaceId,
@@ -724,9 +724,9 @@
 
 	function ownsBranchCommand(command: BranchCommand): boolean {
 		return (
-			(sessions.byId[command.chatId]?.nodeId ?? 'local') === command.nodeId &&
+			(sessions.byId[command.chatId]?.executorId ?? 'local') === command.executorId &&
 			sessions.byId[command.chatId]?.projectPath === command.projectPath &&
-			nodes.gitAvailable(command.nodeId) &&
+			executors.gitAvailable(command.executorId) &&
 			command.generation === branchCommandGeneration &&
 			workspace.focusOwnerRevision === command.focusOwnerRevision &&
 			workspace.focusOwner.kind !== 'chat-list' &&
@@ -751,7 +751,7 @@
 			project.projectPath,
 			quickGit.summaryFor(project)?.branch,
 			project.effectiveProjectKey,
-			project.nodeId,
+			project.executorId,
 		);
 		quickGitBranches.openNewBranchDialog(
 			project.projectPath,
@@ -773,7 +773,7 @@
 			project.projectPath,
 			quickGit.summaryFor(project)?.branch,
 			project.effectiveProjectKey,
-			project.nodeId,
+			project.executorId,
 		);
 		await quickGitBranches.switchBranch(
 			project.projectPath,
@@ -785,31 +785,31 @@
 	}
 
 	async function resolveChatProject(chatId: string): Promise<{
-		nodeId: string;
+		executorId: string;
 		projectPath: string;
 		effectiveProjectKey: string;
 	} | null> {
 		const chat = sessions.byId[chatId];
-		const nodeId = chat?.nodeId ?? 'local';
-		const nodeContextKey = nodes.gitContextKey(nodeId);
-		if (!chat?.projectPath || !nodes.gitAvailable(nodeId)) return null;
+		const executorId = chat?.executorId ?? 'local';
+		const executorContextKey = executors.gitContextKey(executorId);
+		if (!chat?.projectPath || !executors.gitAvailable(executorId)) return null;
 		const target =
 			chat.status === 'draft'
-				? { kind: 'path' as const, nodeId, projectPath: chat.projectPath }
-				: { kind: 'chat' as const, nodeId, chatId, projectPath: chat.projectPath };
+				? { kind: 'path' as const, executorId, projectPath: chat.projectPath }
+				: { kind: 'chat' as const, executorId, chatId, projectPath: chat.projectPath };
 		const lease = projectResolution.retain(target);
 		try {
 			await lease.resolve();
 			if (
 				sessions.byId[chatId]?.projectPath !== target.projectPath ||
-				(sessions.byId[chatId]?.nodeId ?? 'local') !== nodeId ||
-				nodeContextKey !== nodes.gitContextKey(nodeId) ||
-				!nodes.gitAvailable(nodeId)
+				(sessions.byId[chatId]?.executorId ?? 'local') !== executorId ||
+				executorContextKey !== executors.gitContextKey(executorId) ||
+				!executors.gitAvailable(executorId)
 			)
 				return null;
 			return lease.snapshot.kind === 'available'
 				? {
-						nodeId,
+						executorId,
 						projectPath: target.projectPath,
 						effectiveProjectKey: lease.snapshot.effectiveProjectKey,
 					}
@@ -857,9 +857,9 @@
 			{onSteerPreferredSubmit}
 			{onChooseProjectFolder}
 			onModelChange={(next) => controller.handleModelSelectionChange(next)}
-			onNodeChange={(nodeId) =>
+			onExecutorChange={(executorId) =>
 				controller.handleModelSelectionChange({
-					nodeId,
+					executorId,
 					agentId: agentState.agentId,
 					modelValue: agentState.model,
 				})}
@@ -922,7 +922,7 @@
 		onCancel={cancelReload}
 		onConfirm={() => void confirmReload()}
 	/>
-	<NodeHandoffDialog handoff={controller.nodeHandoff} />
+	<ExecutorHandoffDialog handoff={controller.executorHandoff} />
 	<HandoffForkDialog
 		open={controller.handoffForkConfirmation.isOpen}
 		onCancel={() => controller.handoffForkConfirmation.cancel()}

@@ -27,7 +27,7 @@ export async function getPullRequests(
 	target: GitProjectTarget,
 	options?: ApiFetchOptions,
 ): Promise<PullRequestListResult> {
-	return ghApiGet(target.nodeId, `/api/v1/gh/pull-requests?${gitProjectQuery(target)}`, options);
+	return ghApiGet(target.executorId, `/api/v1/gh/pull-requests?${gitProjectQuery(target)}`, options);
 }
 
 export async function getPullRequest(
@@ -36,7 +36,7 @@ export async function getPullRequest(
 	options?: ApiFetchOptions,
 ): Promise<PullRequestDetail> {
 	const detail = await ghApiGet<PullRequestDetailWire>(
-		target.nodeId,
+		target.executorId,
 		`/api/v1/gh/pull-request?${gitProjectQuery(target)}&number=${encodeURIComponent(number)}`,
 		{ timeoutMs: 60_000, ...options },
 	);

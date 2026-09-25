@@ -4,16 +4,16 @@
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
-	import { getGhCapability, getExecutionNodes } from '$lib/context';
+	import { getGhCapability, getExecutors } from '$lib/context';
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
 
-	let { nodeId }: { nodeId: string } = $props();
+	let { executorId }: { executorId: string } = $props();
 	const capabilities = getGhCapability();
-	const nodes = getExecutionNodes();
-	const ghCapability = $derived(capabilities.forNode(nodeId));
+	const executors = getExecutors();
+	const ghCapability = $derived(capabilities.forExecutor(executorId));
 	$effect(() => {
-		if (!nodes.ghAvailable(nodeId) || ghCapability.hasChecked) return;
+		if (!executors.ghAvailable(executorId) || ghCapability.hasChecked) return;
 		untrack(() => void ghCapability.ensureChecked());
 	});
 
@@ -22,7 +22,7 @@
 	);
 
 	const statusLabel = $derived.by(() => {
-		if (!nodes.ghAvailable(nodeId)) return 'Unavailable';
+		if (!executors.ghAvailable(executorId)) return 'Unavailable';
 		if (!ghCapability.hasChecked || ghCapability.isLoading) return m.settings_gh_status_checking();
 		if (ghCapability.lastError) return m.settings_gh_status_error();
 		if (ghCapability.available) {
@@ -37,7 +37,7 @@
 	});
 
 	const badgeClass = $derived.by(() => {
-		if (!nodes.ghAvailable(nodeId) || !ghCapability.hasChecked || ghCapability.isLoading) {
+		if (!executors.ghAvailable(executorId) || !ghCapability.hasChecked || ghCapability.isLoading) {
 			return 'bg-status-neutral text-status-neutral-foreground border-status-neutral-border';
 		}
 		if (ghCapability.available) {
@@ -77,7 +77,7 @@
 				variant="outline"
 				size="sm"
 				onclick={refreshGhStatus}
-				disabled={ghCapability.isLoading || !nodes.ghAvailable(nodeId)}
+				disabled={ghCapability.isLoading || !executors.ghAvailable(executorId)}
 				aria-label={m.settings_gh_refresh_aria()}
 			>
 				<RefreshCw class={cn('size-3.5', ghCapability.isLoading && 'animate-spin')} />
@@ -87,8 +87,8 @@
 	</div>
 
 	<div class="space-y-2 border-t border-border px-4 py-3 text-xs text-muted-foreground">
-		{#if !nodes.ghAvailable(nodeId)}
-			<p>{nodes.label(nodeId)} is unavailable.</p>
+		{#if !executors.ghAvailable(executorId)}
+			<p>{executors.label(executorId)} is unavailable.</p>
 		{:else if !ghCapability.hasChecked || ghCapability.isLoading}
 			<p>{m.settings_gh_instructions_checking()}</p>
 		{:else if ghCapability.lastError}

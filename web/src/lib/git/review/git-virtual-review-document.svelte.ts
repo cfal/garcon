@@ -525,7 +525,7 @@ export class GitVirtualReviewDocumentController {
 			maxBatchFiles: 1,
 			load: (paths, purpose, signal) =>
 				getGitReviewFileBodies(
-					{ nodeId: summary.document.nodeId, projectPath },
+					{ executorId: summary.document.executorId, projectPath },
 					summary.document,
 					paths,
 					guard.tab,

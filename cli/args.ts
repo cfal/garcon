@@ -177,7 +177,7 @@ Chat research:
 
 Options:
   --config-dir <path>          Garcon config root (default: ~/.garcon)
-  --runtime <role>             auto, controller, or execution-node (default: auto)
+  --runtime <role>             auto, controller, or executor (default: auto)
   --server <url>               Assert the selected runtime's exact URL
   --cwd <path>                 Project directory for a new chat (default: current directory)
   --parent <chat-id>           Record an existing parent for a new delegated chat
@@ -1558,8 +1558,8 @@ export function parseCliArgs(
   catch (error) { throw argumentError(error instanceof Error ? error.message : 'Invalid config directory'); }
   const runtime = nonEmptyOption(values.runtime as string | undefined, '--runtime')
     ?? resolvedEnvironmentValue(environment.GARCON_RUNTIME) ?? 'auto';
-  if (runtime !== 'auto' && runtime !== 'controller' && runtime !== 'execution-node') {
-    throw argumentError('--runtime / GARCON_RUNTIME must be auto, controller, or execution-node');
+  if (runtime !== 'auto' && runtime !== 'controller' && runtime !== 'executor') {
+    throw argumentError('--runtime / GARCON_RUNTIME must be auto, controller, or executor');
   }
   const serverUrl = nonEmptyOption(values.server as string | undefined, '--server');
   const agentId = nonEmptyOption(values.agent as string | undefined, '--agent');

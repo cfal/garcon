@@ -18,12 +18,12 @@ type CommandMenuWorkspacePort = Pick<
 	| 'openSingleton'
 	| 'focusMostRecentTerminalOrCreate'
 	| 'createTerminalInAvailableSpace'
-	| 'terminalCreationNodeId'
+	| 'terminalCreationExecutorId'
 >;
 
 const mocks = vi.hoisted(() => ({
 	workspace: {
-		terminalCreationNodeId: 'local',
+		terminalCreationExecutorId: 'local',
 		isMobile: false as boolean,
 		focusOwner: { kind: 'chat-list' },
 		focusChat: vi.fn(),
@@ -63,7 +63,7 @@ const terminals: Pick<
 		return remoteHosts;
 	},
 	hosts: [{ id: 'local', label: 'Local', available: true, full: false }],
-	canCreate: (nodeId) => nodeId === 'local',
+	canCreate: (executorId) => executorId === 'local',
 	listStatus: 'ready',
 	orderedSessions: [],
 };
@@ -77,8 +77,8 @@ const files: Pick<WorkbenchCommandRegistryDeps['files'], 'navigation' | 'open'> 
 };
 let knownFiles: FileTreeStore['knownFiles'] = [];
 let fileRootPath: string | null = null;
-const tree: Pick<FileTreeStore, 'knownFiles' | 'fileRootPath' | 'nodeId'> = {
-	nodeId: 'local',
+const tree: Pick<FileTreeStore, 'knownFiles' | 'fileRootPath' | 'executorId'> = {
+	executorId: 'local',
 	get knownFiles() {
 		return knownFiles;
 	},
@@ -188,7 +188,7 @@ describe('CommandMenu', () => {
 		files.navigation.recents = [
 			{
 				key: fileIdentityKey('/workspace', fileName),
-				nodeId: 'local',
+				executorId: 'local',
 				canonicalFileRootPath: '/workspace',
 				normalizedRelativePath: fileName,
 				displayPath: fileName,
@@ -212,7 +212,7 @@ describe('CommandMenu', () => {
 		await fireEvent.click(option);
 
 		expect(files.open).toHaveBeenCalledWith({
-			nodeId: 'local',
+			executorId: 'local',
 			fileRootPath: '/workspace',
 			relativePath: fileName,
 			mode: 'code',

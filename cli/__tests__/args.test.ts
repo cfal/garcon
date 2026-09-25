@@ -184,7 +184,7 @@ describe('parseCliArgs', () => {
     ], {
       HOME: '/home/test',
       GARCON_CONFIG_DIR: '/env/config',
-      GARCON_RUNTIME: 'execution-node',
+      GARCON_RUNTIME: 'executor',
     });
     expect(result).toMatchObject({
       configDir: '/explicit',
@@ -225,7 +225,7 @@ describe('parseCliArgs', () => {
     { args: ['resume-async', CHAT_ID, '--parent', PARENT_CHAT_ID, 'prompt'], message: '--parent cannot be used' },
     { args: ['resume', CHAT_ID, '--provider', 'p', 'prompt'], message: 'require --model' },
     { args: ['start', '--endpoint', 'e', '--agent', 'codex', '--model', 'gpt', 'prompt'], message: 'requires --provider' },
-    { args: ['list', 'agents', '--runtime', 'invalid'], message: 'must be auto, controller, or execution-node' },
+    { args: ['list', 'agents', '--runtime', 'invalid'], message: 'must be auto, controller, or executor' },
     { args: ['list', 'agents', '--runtime', 'controller', '--runtime', 'auto'], message: 'only once' },
     { args: ['list', 'agents', '--workspace', 'default'], message: 'Unknown option' },
     { args: ['list', 'agents', '--runtime-file', '/private/runtime.json'], message: 'Unknown option' },

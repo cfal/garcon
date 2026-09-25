@@ -12,11 +12,11 @@ test('settings navigation and host sections fit desktop and mobile dialogs', asy
     await page.getByRole('button', { name: 'More actions', exact: true }).click();
     await page.getByRole('menuitem', { name: 'Server Settings', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: 'Server Settings', exact: true });
-    await browserExpect(dialog.getByRole('tab', { name: 'Execution Nodes', exact: true })).toHaveAttribute('aria-selected', 'true');
+    await browserExpect(dialog.getByRole('tab', { name: 'Executors', exact: true })).toHaveAttribute('aria-selected', 'true');
     for (const width of [1440, 768, 390, 320]) {
       phase(`server settings at ${width}px`);
       await page.setViewportSize({ width, height: 900 });
-      for (const name of ['Execution Nodes', 'Providers', 'Other Agents', 'GitHub', 'General']) {
+      for (const name of ['Executors', 'Providers', 'Other Agents', 'GitHub', 'General']) {
         await dialog.getByRole('tab', { name, exact: true }).click();
         const panel = dialog.getByRole('tabpanel');
         await browserExpect(panel).toBeVisible();
@@ -49,14 +49,14 @@ test('settings navigation and host sections fit desktop and mobile dialogs', asy
   }, undefined, { executionBackend: 'remote-controller-dials' });
 }, 180_000);
 
-test('new-chat execution node and project fields have matching heights', async () => {
+test('new-chat executor and project fields have matching heights', async () => {
   await withChromiumFixture('new-chat-field-alignment', async ({ page, integration, assertNoBrowserErrors }) => {
     const label = 'Production build and review execution host';
-    await integration.client.patch(`/api/v1/execution-nodes/${integration.client.nodeId}`, { label });
+    await integration.client.patch(`/api/v1/executors/${integration.client.executorId}`, { label });
     await page.goto(integration.garcon.baseUrl);
     await page.getByRole('button', { name: 'New Chat', exact: true }).first().click();
     const dialog = page.getByRole('dialog');
-    const picker = dialog.locator('[data-execution-node-picker]');
+    const picker = dialog.locator('[data-executor-picker]');
     const project = dialog.getByLabel('Project Path', { exact: true });
     await picker.click();
     await page.getByRole('menuitemradio', { name: label, exact: true }).click();
@@ -76,14 +76,14 @@ test('new-chat execution node and project fields have matching heights', async (
   }, undefined, { executionBackend: 'remote-controller-dials', projectRoots: 'separate' });
 }, 90_000);
 
-test('scheduled-chat node and path fields align for mouse and touch input', async () => {
+test('scheduled-chat executor and path fields align for mouse and touch input', async () => {
   await withChromiumFixture('scheduled-chat-field-alignment', async ({ page, context, integration, assertNoBrowserErrors }) => {
     await page.goto(integration.garcon.baseUrl);
     await page.getByRole('button', { name: 'More actions', exact: true }).click();
     await page.getByRole('menuitem', { name: 'Scheduled prompts', exact: true }).click();
     await page.getByRole('button', { name: 'Add Prompt', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: 'Add Scheduled Prompt', exact: true });
-    const picker = dialog.locator('[data-execution-node-picker]');
+    const picker = dialog.locator('[data-executor-picker]');
     const project = dialog.locator('#scheduled-project-path');
     await browserExpect(project).toBeVisible();
     const cdp = await context.newCDPSession(page);

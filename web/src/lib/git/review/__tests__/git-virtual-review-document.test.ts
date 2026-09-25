@@ -25,7 +25,7 @@ function buildVirtualRows(options: Parameters<typeof buildGitVirtualReviewRowSou
 
 function makeSummary(files: GitReviewFileSummary[], documentId = 'doc'): GitReviewDocumentSummary {
 	return {
-		document: { nodeId: 'local', instanceId: 'test-instance', documentId },
+		document: { executorId: 'local', instanceId: 'test-instance', documentId },
 		documentId,
 		project: '/project',
 		mode: 'working',
@@ -325,7 +325,7 @@ describe('GitVirtualReviewDocumentController syntax', () => {
 		}
 	});
 
-	it.each(['document', 'node', 'instance', 'return'] as const)(
+	it.each(['document', 'executor', 'instance', 'return'] as const)(
 		'clears and refetches bodies after a %s change',
 		async (change) => {
 			const first = makeSummary([makeFile('a.ts')]);
@@ -333,7 +333,7 @@ describe('GitVirtualReviewDocumentController syntax', () => {
 				[makeFile('a.ts')],
 				change === 'document' || change === 'return' ? 'next' : first.documentId,
 			);
-			if (change === 'node') next.document = { ...next.document, nodeId: 'remote' };
+			if (change === 'executor') next.document = { ...next.document, executorId: 'remote' };
 			if (change === 'instance') next.document = { ...next.document, instanceId: 'replacement' };
 			const refreshed =
 				Promise.withResolvers<Awaited<ReturnType<typeof gitApi.getGitReviewFileBodies>>>();

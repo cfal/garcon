@@ -42,10 +42,10 @@ function deferred<T>() {
 
 describe('PromptComposerProjectState', () => {
 	it.each([undefined, '11111111-1111-4111-8111-111111111111'])(
-		'uses the pending same-node folder for completions and snippets on %s',
-		async (nodeId) => {
-			const selectedChat = chat({ nodeId });
-			let executionTarget = { nodeId: nodeId ?? 'local', projectPath: '/confirmed-folder' };
+		'uses the pending same-executor folder for completions and snippets on %s',
+		async (executorId) => {
+			const selectedChat = chat({ executorId });
+			let executionTarget = { executorId: executorId ?? 'local', projectPath: '/confirmed-folder' };
 			const fetchResolution = vi.fn(async (target: ProjectTarget) => ({
 				target,
 				resolution: { kind: 'available' as const, effectiveProjectKey: target.projectPath },
@@ -64,14 +64,14 @@ describe('PromptComposerProjectState', () => {
 				await lease.resolve();
 				expect(projectState.completionProjectPath).toBe('/confirmed-folder');
 				expect(await projectState.resolveSnippetContext()).toEqual({
-					nodeId: executionTarget.nodeId,
+					executorId: executionTarget.executorId,
 					chatId: selectedChat.id,
 					projectPath: '/confirmed-folder',
 					context: { type: 'new-chat', chatId: selectedChat.id, ...executionTarget },
 				});
 				executionTarget = { ...executionTarget, projectPath: selectedChat.projectPath };
 				expect(projectState.target).toEqual({
-					kind: 'chat', chatId: selectedChat.id, nodeId, projectPath: selectedChat.projectPath,
+					kind: 'chat', chatId: selectedChat.id, executorId, projectPath: selectedChat.projectPath,
 				});
 			} finally {
 				lease.release();
@@ -81,19 +81,19 @@ describe('PromptComposerProjectState', () => {
 		},
 	);
 
-	it('fences expansion results by node even when the project path stays unchanged', () => {
+	it('fences expansion results by executor even when the project path stays unchanged', () => {
 		const projectResolution = new ProjectResolutionStore();
 		let selectedChat = chat();
 		const projectState = new PromptComposerProjectState({
 			get selectedChat() { return selectedChat; }, completionDemand: false, projectResolution,
 		});
-		const operation = { nodeId: 'local', chatId: 'chat-1', projectPath: '/project-a', context: { type: 'chat' as const, chatId: 'chat-1' } };
-		const response = { contextNodeId: 'local', contextProjectPath: '/project-a' };
+		const operation = { executorId: 'local', chatId: 'chat-1', projectPath: '/project-a', context: { type: 'chat' as const, chatId: 'chat-1' } };
+		const response = { contextExecutorId: 'local', contextProjectPath: '/project-a' };
 		expect(projectState.matchesSnippetContext(operation, response)).toBe(true);
-		selectedChat = chat({ nodeId: '11111111-1111-4111-8111-111111111111' });
+		selectedChat = chat({ executorId: '11111111-1111-4111-8111-111111111111' });
 		expect(projectState.matchesSnippetContext(operation, response)).toBe(false);
 		selectedChat = chat();
-		expect(projectState.matchesSnippetContext(operation, { ...response, contextNodeId: '11111111-1111-4111-8111-111111111111' })).toBe(false);
+		expect(projectState.matchesSnippetContext(operation, { ...response, contextExecutorId: '11111111-1111-4111-8111-111111111111' })).toBe(false);
 		projectState.destroy();
 		projectResolution.destroy();
 	});

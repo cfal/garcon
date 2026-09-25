@@ -566,7 +566,7 @@ export class TicketsController implements PortableSingletonController {
 		} else this.error = error instanceof Error ? error.message : 'Could not load the next page';
 	}
 
-	async beginCreate(directory: string | null, nodeId = 'local'): Promise<void> {
+	async beginCreate(directory: string | null, executorId = 'local'): Promise<void> {
 		if (!this.bootstrap) return;
 		const draft = this.drafts.open('create', null, {
 			project: this.query.project ?? '',
@@ -581,7 +581,7 @@ export class TicketsController implements PortableSingletonController {
 		this.#createRequest = request;
 		const version = draft.projectDefaultVersion;
 		try {
-			const resolved = await this.#api.projectDefault(directory, request.signal, nodeId);
+			const resolved = await this.#api.projectDefault(directory, request.signal, executorId);
 			if (this.createDraft !== draft || request.signal.aborted) return;
 			draft.applyDefaultProject(resolved.project, version);
 		} catch (error) {

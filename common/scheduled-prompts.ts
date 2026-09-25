@@ -1,5 +1,5 @@
 import type { ApiProtocol } from './api-providers.js';
-import { parseNodeId, LOCAL_EXECUTION_NODE_ID } from './execution-nodes.js';
+import { parseExecutorId, LOCAL_EXECUTOR_ID } from './executors.js';
 import {
   isPermissionMode,
   isThinkingMode,
@@ -59,7 +59,7 @@ export type ScheduledPromptSchedule = OneOffScheduledPromptSchedule | RecurringS
 
 export interface NewChatScheduledPromptTarget {
   type: 'new-chat';
-  nodeId?: string | null;
+  executorId?: string | null;
   agentId: string;
   projectPath: string;
   model: string;
@@ -231,7 +231,7 @@ function normalizeApiProtocol(value: unknown): ApiProtocol | null | undefined {
 }
 
 function normalizeNewChatTarget(raw: Record<string, unknown>): NewChatScheduledPromptTarget | null {
-  const nodeId = parseNodeId(raw.nodeId);
+  const executorId = parseExecutorId(raw.executorId);
   const agentId = requiredString(raw.agentId);
   const projectPath = requiredString(raw.projectPath);
   const model = requiredString(raw.model);
@@ -248,7 +248,7 @@ function normalizeNewChatTarget(raw: Record<string, unknown>): NewChatScheduledP
   }
   const preambleChoice = normalizePreambleSelectionChoice(raw.preambleChoice);
   if (
-    !nodeId ||
+    !executorId ||
     !agentId ||
     !projectPath ||
     !model ||
@@ -265,7 +265,7 @@ function normalizeNewChatTarget(raw: Record<string, unknown>): NewChatScheduledP
 
   return {
     type: 'new-chat',
-    ...(nodeId !== LOCAL_EXECUTION_NODE_ID ? { nodeId } : {}),
+    ...(executorId !== LOCAL_EXECUTOR_ID ? { executorId } : {}),
     agentId,
     projectPath,
     model,

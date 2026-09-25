@@ -24,7 +24,7 @@ async function fixture() {
     const descriptor: CliRuntimeDescriptor = {
       schemaVersion: 1, instanceId: crypto.randomUUID(), startedAt, pid: process.pid,
       baseUrl: `http://127.0.0.1:${8000 + endpoints.size}`, localCapability: `garcon_local_${crypto.randomBytes(32).toString('base64url')}`,
-      ...(kind === 'execution-node' ? { kind: 'execution-node-cli' as const } : { workspaceDir: '/controller/workspace' }),
+      ...(kind === 'executor' ? { kind: 'executor-cli' as const } : { workspaceDir: '/controller/workspace' }),
     };
     await mkdir(path.dirname(runtimeFile), { recursive: true, mode: 0o700 });
     await writeFile(runtimeFile, JSON.stringify(descriptor), { mode: 0o600 });
@@ -36,14 +36,14 @@ async function fixture() {
     calls.push({ url, authorization: new Headers(init?.headers).get('Authorization') });
     const descriptor = endpoints.get(url.origin)!;
     if (url.pathname.endsWith('/cli/context')) return Response.json({ serverInstanceId: 'workspaceDir' in descriptor ? descriptor.instanceId : 'controller',
-      defaultNodeId: 'workspaceDir' in descriptor ? 'local' : 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', workspaceName: 'work' });
+      defaultExecutorId: 'workspaceDir' in descriptor ? 'local' : 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', workspaceName: 'work' });
     return Response.json({ schemaVersion: 1, instanceId: descriptor.instanceId, proof: crypto.createHmac('sha256', descriptor.localCapability)
       .update(runtimeProofPayload(descriptor.instanceId, url.searchParams.get('challenge')!)).digest('base64url') });
   }, { preconnect() {} }) satisfies typeof fetch;
   return { configDir, add, calls, warnings, dependencies: { fetch: fetcher, warn: (message: string) => warnings.push(message) } };
 }
 
-test.each(['controller', 'execution-node'] as const)('auto selects the sole %s and sends its capability only after proof', async (runtime) => {
+test.each(['controller', 'executor'] as const)('auto selects the sole %s and sends its capability only after proof', async (runtime) => {
   const f = await fixture();
   const endpoint = await f.add(runtime);
   const command = parseCliArgs(['--config-dir', f.configDir, 'list', 'agents'], {});
@@ -56,9 +56,9 @@ test.each(['controller', 'execution-node'] as const)('auto selects the sole %s a
   expect(f.warnings).toEqual([]);
 });
 
-test.each(['controller', 'execution-node'] as const)('auto prefers the newer %s start, not file mtime, and warns without credentials', async (runtime) => {
+test.each(['controller', 'executor'] as const)('auto prefers the newer %s start, not file mtime, and warns without credentials', async (runtime) => {
   const f = await fixture();
-  const older = await f.add(runtime === 'controller' ? 'execution-node' : 'controller');
+  const older = await f.add(runtime === 'controller' ? 'executor' : 'controller');
   const newer = await f.add(runtime, '2026-02-01T00:00:00.000Z');
   await utimes(newer.runtimeFile, new Date(0), new Date(0));
   const connection = await discoverRuntime({ configDir: f.configDir }, f.dependencies);
@@ -66,22 +66,22 @@ test.each(['controller', 'execution-node'] as const)('auto prefers the newer %s 
   expect(f.calls.every((call) => call.url.origin === newer.descriptor.baseUrl)).toBe(true);
   expect(f.warnings).toHaveLength(1);
   expect(f.warnings[0]).toContain(`both runtime files exist; selected ${runtime}`);
-  expect(f.warnings[0]).toContain('--runtime controller or --runtime execution-node');
+  expect(f.warnings[0]).toContain('--runtime controller or --runtime executor');
   expect(f.warnings[0]).not.toContain(newer.descriptor.localCapability);
   expect(f.warnings[0]).not.toContain(older.descriptor.localCapability);
 });
 
 test('equal start timestamps select controller deterministically', async () => {
   const f = await fixture();
-  await f.add('execution-node');
+  await f.add('executor');
   await f.add('controller');
   expect((await discoverRuntime({ configDir: f.configDir }, f.dependencies)).selector.runtime).toBe('controller');
 });
 
-test.each(['controller', 'execution-node'] as const)('explicit %s selection ignores newer and malformed files for the other role', async (runtime) => {
+test.each(['controller', 'executor'] as const)('explicit %s selection ignores newer and malformed files for the other role', async (runtime) => {
   const f = await fixture();
   await f.add(runtime);
-  const other = await f.add(runtime === 'controller' ? 'execution-node' : 'controller', '2026-02-01T00:00:00Z');
+  const other = await f.add(runtime === 'controller' ? 'executor' : 'controller', '2026-02-01T00:00:00Z');
   await writeFile(other.runtimeFile, 'invalid json');
   expect((await discoverRuntime({ configDir: f.configDir, runtime }, f.dependencies)).selector).toEqual({ runtime });
   expect(f.warnings).toEqual([]);
@@ -92,7 +92,7 @@ test.each(['controller', 'execution-node'] as const)('explicit %s selection igno
 test.each(['refused', 'timeout', 'reset', 'busy', 'proof', 'context'])('selected %s failure never falls back to the older runtime', async (failure) => {
   const f = await fixture();
   const older = await f.add('controller');
-  const selected = await f.add('execution-node', '2026-02-01T00:00:00Z');
+  const selected = await f.add('executor', '2026-02-01T00:00:00Z');
   const attempted: string[] = [];
   const fetcher = Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => {
     attempted.push(String(input));
@@ -113,7 +113,7 @@ test.each(['refused', 'timeout', 'reset', 'busy', 'proof', 'context'])('selected
 test.each(['schema', 'permissions', 'json', 'timestamp', 'kind', 'symlink'])('invalid %s metadata blocks auto without leaking the capability', async (failure) => {
   if ((failure === 'permissions' || failure === 'symlink') && process.platform === 'win32') return;
   const f = await fixture();
-  const suspect = await f.add('execution-node');
+  const suspect = await f.add('executor');
   await f.add('controller', '2026-02-01T00:00:00Z');
   if (failure === 'permissions') await chmod(suspect.runtimeFile, 0o644);
   if (failure === 'schema') await writeFile(suspect.runtimeFile, JSON.stringify({ ...suspect.descriptor, schemaVersion: 2 }));
@@ -140,14 +140,14 @@ test('ignores workspace descriptors and temporary files; --server is an assertio
   await writeFile(path.join(f.configDir, '.runtime.json.tmp'), 'ignored');
   await expect(discoverRuntime({ configDir: f.configDir }, f.dependencies)).rejects.toThrow('no Garcon runtime file');
   const controller = await f.add('controller');
-  await f.add('execution-node', '2026-02-01T00:00:00Z');
+  await f.add('executor', '2026-02-01T00:00:00Z');
   await expect(discoverRuntime({ configDir: f.configDir, serverUrl: controller.descriptor.baseUrl }, f.dependencies)).rejects.toThrow('must exactly match');
   expect(f.calls).toEqual([]);
 });
 
 test('discovery cancellation propagates without selecting another runtime', async () => {
   const f = await fixture();
-  await f.add('execution-node');
+  await f.add('executor');
   const abort = new AbortController();
   const fetcher = Object.assign(async () => { abort.abort(new Error('cancelled')); throw abort.signal.reason; }, { preconnect() {} }) satisfies typeof fetch;
   await expect(discoverRuntime({ configDir: f.configDir, signal: abort.signal }, { ...f.dependencies, fetch: fetcher })).rejects.toThrow('cancelled');
@@ -156,17 +156,17 @@ test('discovery cancellation propagates without selecting another runtime', asyn
 test.each([
   { runtime: 'auto' as const, both: false, suggestOther: false },
   { runtime: 'auto' as const, both: true, suggestOther: true },
-  { runtime: 'execution-node' as const, both: false, suggestOther: false },
-  { runtime: 'execution-node' as const, both: true, suggestOther: false },
+  { runtime: 'executor' as const, both: false, suggestOther: false },
+  { runtime: 'executor' as const, both: true, suggestOther: false },
 ])('failed discovery suggests another role only after auto found it: %j', async ({ runtime, both, suggestOther }) => {
   const f = await fixture();
   if (both) await f.add('controller');
-  const selected = await f.add('execution-node', '2026-02-01T00:00:00Z');
+  const selected = await f.add('executor', '2026-02-01T00:00:00Z');
   const fetcher = Object.assign(async () => { throw new Error('refused'); }, { preconnect() {} }) satisfies typeof fetch;
   const error = await discoverRuntime({ configDir: f.configDir, runtime }, { ...f.dependencies, fetch: fetcher })
     .catch((caught: unknown) => caught);
   expect(error).toBeInstanceOf(Error);
-  expect(String(error)).toContain(`execution-node runtime at ${selected.runtimeFile}`);
+  expect(String(error)).toContain(`executor runtime at ${selected.runtimeFile}`);
   expect(String(error)).toContain('No fallback was attempted');
   if (suggestOther) expect(String(error)).toContain('--runtime controller only if you intend to switch roles');
   else {

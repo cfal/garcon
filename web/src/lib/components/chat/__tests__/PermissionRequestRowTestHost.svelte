@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { setExecutionNodesTestContext } from '$lib/execution-nodes/__tests__/execution-nodes-test-context';
+	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
 	import { untrack } from 'svelte';
-	import type { ExecutionNodeSnapshot } from '$shared/execution-nodes';
+	import type { ExecutorSnapshot } from '$shared/executors';
 	import type { FileOpenRequest } from '$lib/files/sessions/file-session-registry.svelte';
 	import PermissionRequestRow from '../PermissionRequestRow.svelte';
 	import { setAppShell, setChatSessions, setFileSessions } from '$lib/context';
@@ -13,7 +13,7 @@
 	import { setCanonicalWorkspaceLayout } from './workspace-layout-test-context.js';
 
 	interface Props {
-		executionNodes?: readonly ExecutionNodeSnapshot[];
+		executors?: readonly ExecutorSnapshot[];
 		onFileOpen?: (request: FileOpenRequest) => void;
 		request: PermissionRequestMessage;
 		terminal?: PermissionTerminalState;
@@ -28,7 +28,7 @@
 	}
 
 	let {
-		executionNodes,
+		executors,
 		onFileOpen,
 		request,
 		terminal,
@@ -38,7 +38,7 @@
 		chatContext = null,
 		chatTitles = {},
 	}: Props = $props();
-	setExecutionNodesTestContext(untrack(() => executionNodes));
+	setExecutorsTestContext(untrack(() => executors));
 	setCanonicalWorkspaceLayout();
 
 	setChatSessions({

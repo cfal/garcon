@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { GitProjectInvalidationStore } from '../git-project-invalidation.svelte.js';
 
-describe('node-qualified Git invalidation', () => {
+describe('executor-qualified Git invalidation', () => {
 	it('keeps one revision per host without invalidating other hosts', () => {
 		const store = new GitProjectInvalidationStore();
 		const version = store.markChanged('remote');
@@ -13,11 +13,11 @@ describe('node-qualified Git invalidation', () => {
 		expect(store.version('local')).toBe(0);
 	});
 
-	it('prunes removed nodes without reusing an invalidation revision', () => {
+	it('prunes removed executors without reusing an invalidation revision', () => {
 		const store = new GitProjectInvalidationStore();
 		const removed = store.markChanged('removed');
 		const local = store.markChanged('local');
-		store.pruneNodes(new Set(['local']));
+		store.pruneExecutors(new Set(['local']));
 		expect(store.version('removed')).toBe(0);
 		expect(store.version('local')).toBe(local);
 		expect(store.markChanged('removed')).toBeGreaterThan(local);

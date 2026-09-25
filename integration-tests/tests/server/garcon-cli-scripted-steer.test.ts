@@ -12,7 +12,7 @@ import {
   type ScriptedCodexTestEnvironment,
 } from '../../support/scripted-codex.js';
 
-const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
+const REPO_ROOT = fileURLToPath(new URL('../../..', import.meta.url));
 const WORKSPACE = 'cli-scripted-steer';
 
 function runCli(arguments_: string[]): Promise<{

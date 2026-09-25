@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { setExecutionNodesTestContext } from '$lib/execution-nodes/__tests__/execution-nodes-test-context';
-	setExecutionNodesTestContext();
+	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
+	setExecutorsTestContext();
 	import RemoteSettingsSection from '../RemoteSettingsSection.svelte';
 	import { setLocalSettings, setModelCatalog, setRemoteSettings } from '$lib/context';
 	import { getTestRemoteSettingsStore } from './remote-settings-test-context';
@@ -43,7 +43,7 @@
 	}
 
 	setModelCatalog({
-		forNode() { return this; },
+		forExecutor() { return this; },
 		version: 0,
 		getModels(agentId: string) {
 			return [modelForAgent(agentId)];

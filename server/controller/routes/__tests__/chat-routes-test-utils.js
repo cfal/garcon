@@ -1,0 +1,132 @@
+import os from 'os';
+import path from 'path';
+import { randomUUID } from 'crypto';
+import { CommandLedger } from '../../commands/command-ledger.js';
+import { ChatCommandService } from '../../commands/chat-command-service.js';
+import { forkChatFileCopy } from '../../chats/fork-chat.js';
+import { ChatListProjector } from '../../chats/chat-list-projector.js';
+import { inspectProjectDirectory } from '../../__tests__/project-inspector.ts';
+
+export function createRouteCommandLedger(label = 'chat-routes') {
+  return new CommandLedger(path.join(os.tmpdir(), `garcon-${label}-ledger-${randomUUID()}`));
+}
+
+export function createRouteChatListProjector({ registry, settings, metadata, agents }) {
+  const processing = {
+    phase(chatId) {
+      const session = registry.getChat(chatId);
+      return session && agents.isAgentSessionRunning(session.agentId, session.agentSessionId)
+        ? 'running'
+        : null;
+    },
+  };
+  return new ChatListProjector({
+    registry,
+    settings,
+    metadata,
+    processing,
+    canReloadFromNativeHistory: () => false,
+  });
+}
+
+export function createRouteCommandService({
+  registry,
+  queue,
+  settings,
+  metadata,
+  agents,
+	commandLedger,
+	handoffs,
+	chatListProjector,
+  forkChatFileCopy: forkChatFileCopyOverride,
+  ownership,
+  transientFeeds,
+}) {
+  const transcripts = {
+    currentView: () => null,
+    highWatermark: () => ({ viewId: 'view-1', ordinal: 0 }),
+    rowsThrough: () => [],
+    initializeChat: () => ({ viewId: 'view-2' }),
+    deleteChat: () => undefined,
+  };
+  return new ChatCommandService({
+    inspectProject: inspectProjectDirectory,
+    chats: registry,
+    queue,
+    transcripts,
+    settings,
+    recentTitleIcons: {
+      getRecentIcons: () => [],
+    },
+    metadata,
+    agents,
+    ledger: commandLedger,
+    transientFeeds: transientFeeds ?? { validateAction: () => undefined },
+    preambles: { snapshot: () => ({ revision: 0, preambles: [] }) },
+	handoffs: handoffs ?? {
+		resolveTarget: async ({ handoff }) => ({
+			agentId: handoff.target.agentId,
+			model: handoff.target.model,
+			apiProviderId: handoff.target.apiProviderId ?? null,
+			modelEndpointId: handoff.target.modelEndpointId ?? null,
+			modelProtocol: handoff.target.modelProtocol ?? null,
+			permissionMode: handoff.target.permissionMode ?? 'default',
+			thinkingMode: handoff.target.thinkingMode ?? 'none',
+			agentSettings: handoff.target.agentSettings ?? {
+				ownerId: handoff.target.agentId,
+				schemaVersion: 1,
+				values: {},
+			},
+		}),
+		createPreparation: () => ({
+			prepare: async () => undefined,
+			compensate: async () => undefined,
+		}),
+		cancelPreparation: () => false,
+		seedContinuationLedger: ({ sourceChatId, targetChatId }) => {
+			const watermark = transcripts.highWatermark(sourceChatId);
+			transcripts.initializeChat(targetChatId, [], 1);
+			return watermark;
+		},
+		deleteContinuationLedger: (chatId) => transcripts.deleteChat(chatId),
+	},
+    fileMentions: { resolve: async (command) => command },
+    ownership: ownership ?? {
+      delete: async (chatId) => {
+        if (!registry.getChat(chatId)) return false;
+        registry.removeChat(chatId);
+        return true;
+      },
+    },
+	chatListProjector: chatListProjector ?? {
+		buildOne: async (chatId) => {
+			const session = registry.getChat(chatId);
+			if (!session) return null;
+			return {
+				id: chatId,
+				agentId: session.agentId,
+				model: session.model ?? null,
+				permissionMode: session.permissionMode ?? 'default',
+				thinkingMode: session.thinkingMode ?? 'none',
+				agentSettings: session.agentSettingsById?.[session.agentId] ?? {
+					ownerId: session.agentId,
+					schemaVersion: 1,
+					values: {},
+				},
+				title: 'Chat',
+				projectPath: session.projectPath,
+				orderGroup: 'normal',
+				tags: session.tags ?? [],
+				activity: { createdAt: null, lastActivityAt: null, lastReadAt: null },
+				preview: { lastMessage: '' },
+				isPinned: false,
+				isArchived: false,
+				isActive: false,
+				isUnread: false,
+			};
+		},
+	},
+    forkChatFileCopy: forkChatFileCopyOverride ?? forkChatFileCopy,
+    transcripts,
+  });
+}

@@ -12,12 +12,12 @@ it('reloads a directory after a same-path serving-instance change and rejects la
 		{ name: 'current', path: '/repo/current', type: 'directory' },
 	]);
 	const view = render(DirectoryBrowserTestHost, {
-		nodeId: '22222222-2222-4222-8222-222222222222', nodeContextKey: 'old',
+		executorId: '22222222-2222-4222-8222-222222222222', executorContextKey: 'old',
 		currentPath: '/repo/', basePath: '/repo', isMobile: false, onSelect: vi.fn(), onClose: vi.fn(),
 	});
 	await waitFor(() => expect(browseDirectory).toHaveBeenCalledOnce());
 	const signal = vi.mocked(browseDirectory).mock.calls[0][1];
-	await view.rerender({ nodeContextKey: 'new' });
+	await view.rerender({ executorContextKey: 'new' });
 	expect(await screen.findByRole('button', { name: 'current' })).toBeTruthy();
 	expect(signal?.aborted).toBe(true);
 	stale.resolve([{ name: 'stale', path: '/repo/stale', type: 'directory' }]);

@@ -3,7 +3,7 @@
 import { untrack } from 'svelte';
 import { createActionSignal } from '$lib/utils/action-signal';
 
-export type SettingsTab = 'execution-nodes' | 'providers' | 'other-agents' | 'github' | 'general';
+export type SettingsTab = 'executors' | 'providers' | 'other-agents' | 'github' | 'general';
 export type AppSettingsTab = 'general' | 'shortcuts';
 
 function normalizeSettingsTab(value: string): SettingsTab {
@@ -11,7 +11,7 @@ function normalizeSettingsTab(value: string): SettingsTab {
 	if (value === 'other-agents') return 'other-agents';
 	if (value === 'github') return 'github';
 	if (value === 'general') return 'general';
-	return 'execution-nodes';
+	return 'executors';
 }
 
 export interface NewChatDialogSeed {
@@ -32,7 +32,7 @@ export class AppShellStore {
 	showSnippets = $state(false);
 	showOnboardingWizard = $state(false);
 	chatPreambleSelectionTarget = $state<ChatPreambleSelectionTarget | null>(null);
-	settingsTab = $state<SettingsTab>('execution-nodes');
+	settingsTab = $state<SettingsTab>('executors');
 	appSettingsTab = $state<AppSettingsTab>('general');
 	sidebarOpen = $state(false);
 	isMobile = $state(false);
@@ -56,7 +56,7 @@ export class AppShellStore {
 	#snippetsReturnFocus: (() => void) | null = null;
 	#preamblesReturnFocus: (() => void) | null = null;
 
-	openSettings(section: string = 'execution-nodes'): void {
+	openSettings(section: string = 'executors'): void {
 		this.showAppSettings = false;
 		this.dismissSnippets();
 		this.showScheduledPrompts = false;

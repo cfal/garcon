@@ -25,7 +25,7 @@ test('selected PR detail refreshes after project recovery precedes GitHub capabi
       chatId, projectPath: executionDirs.project, content: 'Synthetic PR recovery chat', agent: directAgents.openAi,
     });
     await client.waitForTurnTerminal(chatId, accepted.turnId);
-    await fixture.page.evaluateOnNewDocument(nodeId => {
+    await fixture.page.evaluateOnNewDocument(executorId => {
       const originalFetch = globalThis.fetch.bind(globalThis);
       const recovery = window.__pullRequestRecovery = {
         holdCapability: false, replacement: false, listRequests: 0, detailRequests: 0,
@@ -40,8 +40,8 @@ test('selected PR detail refreshes after project recovery precedes GitHub capabi
       Object.defineProperty(globalThis, 'fetch', { configurable: true, writable: true,
         value: (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
           const url = new URL(input instanceof Request ? input.url : String(input), location.href);
-          if (url.searchParams.get('nodeId') !== nodeId) return originalFetch(input, init);
-          const scope = { nodeId, instanceId: recovery.replacement ? 'replacement-instance' : 'original-instance' };
+          if (url.searchParams.get('executorId') !== executorId) return originalFetch(input, init);
+          const scope = { executorId, instanceId: recovery.replacement ? 'replacement-instance' : 'original-instance' };
           if (url.pathname === '/api/v1/gh/status') {
             const response = () => Response.json({ ...scope, available: true, authenticated: true, reason: 'authenticated' });
             if (!recovery.holdCapability) return Promise.resolve(response());
@@ -67,7 +67,7 @@ test('selected PR detail refreshes after project recovery precedes GitHub capabi
           return originalFetch(input, init);
         },
       });
-    }, client.nodeId);
+    }, client.executorId);
 
     const app = new SpaDriver(fixture.page, fixture.integration);
     await app.setViewport(1_600, 900);
@@ -87,9 +87,9 @@ test('selected PR detail refreshes after project recovery precedes GitHub capabi
       window.__pullRequestRecovery.holdCapability = true;
       window.__pullRequestRecovery.replacement = true;
     });
-    await client.patch(`/api/v1/execution-nodes/${client.nodeId}`, { enabled: false });
-    await app.waitForText('Git is unavailable on this execution node.');
-    await client.patch(`/api/v1/execution-nodes/${client.nodeId}`, { enabled: true });
+    await client.patch(`/api/v1/executors/${client.executorId}`, { enabled: false });
+    await app.waitForText('Git is unavailable on this executor.');
+    await client.patch(`/api/v1/executors/${client.executorId}`, { enabled: true });
     await fixture.page.waitForFunction(() => window.__pullRequestRecovery.releaseCapability !== null);
     await app.waitForText('Checking pull request availability...');
     expect(await fixture.page.evaluate(() => window.__pullRequestRecovery.detailRequests)).toBe(1);

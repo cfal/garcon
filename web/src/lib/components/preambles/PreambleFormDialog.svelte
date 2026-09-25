@@ -4,7 +4,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Switch } from '$lib/components/ui/switch';
 	import DirectoryBrowser from '$lib/components/chat/DirectoryBrowser.svelte';
-	import ExecutionNodeSelector from '$lib/components/shared/ExecutionNodeSelector.svelte';
+	import ExecutorSelector from '$lib/components/shared/ExecutorSelector.svelte';
 	import PromptEditorDialog from '$lib/components/prompt-editor/PromptEditorDialog.svelte';
 	import PromptTextField from '$lib/components/prompt-editor/PromptTextField.svelte';
 	import { PromptEditorDialogState } from '$lib/prompt-editor/prompt-editor-dialog-state.svelte.js';
@@ -13,7 +13,7 @@
 		restorePromptEditorSelection,
 		type PromptEditorSelection,
 	} from '$lib/prompt-editor/prompt-editor-selection.js';
-	import { getAppShell, getLocalSettings, getModelCatalog, getSidebarSearch, getExecutionNodes } from '$lib/context';
+	import { getAppShell, getLocalSettings, getModelCatalog, getSidebarSearch, getExecutors } from '$lib/context';
 	import {
 		PREAMBLE_CHAT_ID_TOKEN,
 		type Preamble,
@@ -38,7 +38,7 @@
 	const appShell = getAppShell();
 	const localSettings = getLocalSettings();
 	const modelCatalog = getModelCatalog();
-	const executionNodes = getExecutionNodes();
+	const executors = getExecutors();
 	const sidebarSearch = getSidebarSearch();
 	const form = new PreambleFormState();
 	const agentOptions = $derived(
@@ -238,11 +238,11 @@
 					<div class="space-y-3">
 						{#each form.pathRules as rule (rule.key)}
 							{@const pathError = form.pathRuleError(rule.key)}
-							{@const nodeId = rule.nodeId ?? 'local'}
-							{@const basePath = nodeId === 'local' ? appShell.projectBasePath : executionNodes.get(nodeId)?.projectBasePath ?? ''}
+							{@const executorId = rule.executorId ?? 'local'}
+							{@const basePath = executorId === 'local' ? appShell.projectBasePath : executors.get(executorId)?.projectBasePath ?? ''}
 							<div class="relative space-y-2 rounded-md border border-border p-3">
-								<ExecutionNodeSelector nodes={executionNodes} {nodeId} service="agents" presentation="field"
-									onSelect={(next) => { rule.nodeId = next; closePathPicker(); }} />
+								<ExecutorSelector executors={executors} {executorId} service="agents" presentation="field"
+									onSelect={(next) => { rule.executorId = next; closePathPicker(); }} />
 								<div class="flex min-w-0 gap-2">
 									<input
 										type="text"
@@ -261,7 +261,7 @@
 											else openPathPicker(rule.key);
 										}}
 										aria-label={m.preambles_browse_path()}
-										disabled={!executionNodes.filesAvailable(nodeId)}
+										disabled={!executors.filesAvailable(executorId)}
 										title={m.preambles_browse_path()}
 									>
 										<FolderOpen class="h-4 w-4" />
@@ -284,13 +284,13 @@
 								<p id={`preamble-path-error-${rule.key}`} class="min-h-4 text-xs text-destructive">
 									{pathError ?? ''}
 								</p>
-								{#if pickerKey === rule.key && executionNodes.filesAvailable(nodeId)}
+								{#if pickerKey === rule.key && executors.filesAvailable(executorId)}
 									<DirectoryBrowser
-										{nodeId}
-										nodeContextKey={executionNodes.pathContextKey(nodeId)}
+										{executorId}
+										executorContextKey={executors.pathContextKey(executorId)}
 										currentPath={rule.projectPath || basePath}
 										{basePath}
-										onSelect={(projectPath) => { if ((rule.nodeId ?? 'local') === nodeId) form.setPath(rule.key, projectPath); }}
+										onSelect={(projectPath) => { if ((rule.executorId ?? 'local') === executorId) form.setPath(rule.key, projectPath); }}
 										onClose={closePathPicker}
 										isMobile={appShell.isMobile}
 									/>

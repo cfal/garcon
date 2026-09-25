@@ -1,5 +1,5 @@
 import type { FileDocumentState } from '$lib/files/documents/file-document-state.svelte.js';
-import { effectiveNodeId } from '$shared/execution-nodes';
+import { effectiveExecutorId } from '$shared/executors';
 import * as m from '$lib/paraglide/messages.js';
 import { fileDraftKey, type FileDraftRepository, type FileDraft } from './file-draft-repository.js';
 
@@ -39,26 +39,26 @@ export class FileDraftCoordinator {
 		}
 	}
 
-	find(root: string, relativePath: string, nodeId?: string | null): FileDraft | undefined {
+	find(root: string, relativePath: string, executorId?: string | null): FileDraft | undefined {
 		return this.available.find(
 			(draft) =>
-				effectiveNodeId(draft.nodeId) === effectiveNodeId(nodeId) &&
+				effectiveExecutorId(draft.executorId) === effectiveExecutorId(executorId) &&
 				draft.canonicalFileRootPath === root &&
 				draft.normalizedRelativePath === relativePath,
 		);
 	}
 
-	opened(root: string, relativePath: string, nodeId?: string | null): void {
+	opened(root: string, relativePath: string, executorId?: string | null): void {
 		this.available = this.available.filter(
 			(draft) =>
-				effectiveNodeId(draft.nodeId) !== effectiveNodeId(nodeId) ||
+				effectiveExecutorId(draft.executorId) !== effectiveExecutorId(executorId) ||
 				draft.canonicalFileRootPath !== root ||
 				draft.normalizedRelativePath !== relativePath,
 		);
 	}
 
 	discard(draft: FileDraft): void {
-		this.opened(draft.canonicalFileRootPath, draft.normalizedRelativePath, draft.nodeId);
+		this.opened(draft.canonicalFileRootPath, draft.normalizedRelativePath, draft.executorId);
 		void this.#enqueue(draft.documentId, async () => {
 			try {
 				await this.options.repository.deleteDraft(draft.documentId);
@@ -134,7 +134,7 @@ export class FileDraftCoordinator {
 			this.options.deploymentId,
 			document.canonicalFileRootPath,
 			document.relativePath,
-			document.nodeId,
+			document.executorId,
 		);
 		const record: FileDraft | null = document.dirty
 			? {
@@ -143,7 +143,7 @@ export class FileDraftCoordinator {
 					userNamespace: this.options.userNamespace,
 					documentId,
 					canonicalFileRootPath: document.canonicalFileRootPath,
-					nodeId: document.nodeId,
+					executorId: document.executorId,
 					normalizedRelativePath: document.relativePath,
 					content: document.currentContent(),
 					savedAt: Date.now(),

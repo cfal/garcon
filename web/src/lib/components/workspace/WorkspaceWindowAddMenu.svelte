@@ -72,7 +72,7 @@
 	const notifications = getNotifications();
 	let creatingTerminal = $state(false);
 	let menuChoosesTerminalHost = $state(false);
-	const creationNodeId = $derived(workspace.terminalCreationNodeIdFor(windowId));
+	const creationExecutorId = $derived(workspace.terminalCreationExecutorIdFor(windowId));
 	const unplacedTerminalSessions = $derived(
 		terminals.orderedSessions.filter(
 			(session) => !workspace.layout.surface(terminalSurfaceId(session.metadata.terminalId)),
@@ -157,11 +157,11 @@
 		return m.workspace_open_surface({ surface: singletonLabels[kind]() });
 	}
 
-	async function createTerminal(nodeId?: string): Promise<void> {
+	async function createTerminal(executorId?: string): Promise<void> {
 		if (creatingTerminal) return;
 		creatingTerminal = true;
 		try {
-			await workspace.createTerminal(windowId, `workspace-window:${windowId}`, nodeId);
+			await workspace.createTerminal(windowId, `workspace-window:${windowId}`, executorId);
 		} catch (error) {
 			notifications.error(error instanceof Error ? error.message : m.terminal_create_failed());
 		} finally {
@@ -181,8 +181,8 @@
 			mode="menu"
 			menuChoosesHost={menuChoosesTerminalHost}
 			busy={creatingTerminal}
-			defaultNodeId={creationNodeId}
-			oncreate={(nodeId) => void createTerminal(nodeId)}
+			defaultExecutorId={creationExecutorId}
+			oncreate={(executorId) => void createTerminal(executorId)}
 		/>
 	{:else}
 		<DropdownMenuItem
@@ -270,10 +270,10 @@
 				{terminals}
 				{windowId}
 				busy={creatingTerminal}
-				defaultNodeId={creationNodeId}
+				defaultExecutorId={creationExecutorId}
 				controlClass={ADD_ACTION_CONTROL_CLASS}
 				controlStyle={addControlStyle()}
-				oncreate={(nodeId) => void createTerminal(nodeId)}
+				oncreate={(executorId) => void createTerminal(executorId)}
 			/>
 		{:else}
 			<button

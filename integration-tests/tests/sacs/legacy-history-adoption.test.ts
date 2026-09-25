@@ -6,8 +6,8 @@ import {
   transcriptViewId,
   type LedgerRow,
   type LedgerSessionRow,
-} from '../../../server/ledger/contracts.js';
-import { TranscriptLedgerStore } from '../../../server/ledger/store.js';
+} from '../../../server/controller/ledger/contracts.js';
+import { TranscriptLedgerStore } from '../../../server/controller/ledger/store.js';
 import { messagesOfType } from '../../support/chat-assertions.js';
 import {
   GarconApiError,

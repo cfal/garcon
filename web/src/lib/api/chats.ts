@@ -131,7 +131,7 @@ function withParsedStopOutcome<
 }
 
 export interface StartChatParams {
-	nodeId?: string;
+	executorId?: string;
 	clientRequestId: string;
 	clientMessageId: string;
 	chatId: string;
@@ -480,10 +480,10 @@ export interface ValidateStartResponse {
 
 export async function validateStart(
 	path: string,
-	options?: ApiFetchOptions & { nodeId?: string },
+	options?: ApiFetchOptions & { executorId?: string },
 ): Promise<ValidateStartResponse> {
 	return apiGet<ValidateStartResponse>(
-		`/api/v1/chats/validate-start?path=${encodeURIComponent(path)}${options?.nodeId ? `&nodeId=${encodeURIComponent(options.nodeId)}` : ''}`,
+		`/api/v1/chats/validate-start?path=${encodeURIComponent(path)}${options?.executorId ? `&executorId=${encodeURIComponent(options.executorId)}` : ''}`,
 		options,
 	);
 }

@@ -1,5 +1,5 @@
 import type { AgentHandoffRequest, AgentHandoffTarget } from '$shared/chat-command-contracts';
-import { effectiveNodeId } from '$shared/execution-nodes';
+import { effectiveExecutorId } from '$shared/executors';
 import type { AgentSettingsEnvelope } from '$shared/agent-integration';
 import type { ApiProtocol } from '$shared/api-providers';
 import type { PermissionMode, ThinkingMode } from '$shared/chat-modes';
@@ -17,7 +17,7 @@ export interface ConversationExecutionSelection extends AgentHandoffTarget {
 }
 
 export interface ConversationExecutionProjection {
-	nodeId?: string | null;
+	executorId?: string | null;
 	projectPath?: string;
 	agentId: string;
 	model: string | null;
@@ -74,7 +74,7 @@ export class ConversationExecutionDraftState {
 		if (this.#hasStagedSelection) {
 			if (this.selection && !sameExecutionOwner(this.selection, durable)) {
 				if (this.#location === 'destination') return null;
-				if (effectiveNodeId(this.selection.nodeId) === effectiveNodeId(durable.nodeId)) {
+				if (effectiveExecutorId(this.selection.executorId) === effectiveExecutorId(durable.executorId)) {
 					if (this.selection.projectPath === durable.projectPath) return null;
 					this.selection = { ...this.selection, projectPath: durable.projectPath };
 					return this.selection;
@@ -95,11 +95,11 @@ export class ConversationExecutionDraftState {
 			this.#hasStagedSelection &&
 			this.#location === 'destination' &&
 			this.selection !== null &&
-			effectiveNodeId(selection.nodeId) === effectiveNodeId(this.selection.nodeId);
+			effectiveExecutorId(selection.executorId) === effectiveExecutorId(this.selection.executorId);
 		this.#replaceSelection(
 			selection,
 			keepsDestination ||
-				effectiveNodeId(selection.nodeId) !== effectiveNodeId(this.options.durableSelection?.nodeId)
+				effectiveExecutorId(selection.executorId) !== effectiveExecutorId(this.options.durableSelection?.executorId)
 				? 'destination'
 				: 'chat',
 		);
@@ -173,7 +173,7 @@ export function executionSelectionFromProjection(
 ): ConversationExecutionSelection | null {
 	if (!projection?.model || projection.agentSettings.ownerId !== projection.agentId) return null;
 	return cloneSelection({
-		nodeId: effectiveNodeId(projection.nodeId),
+		executorId: effectiveExecutorId(projection.executorId),
 		projectPath: projection.projectPath,
 		agentId: projection.agentId,
 		model: projection.model,
@@ -188,6 +188,6 @@ export function executionSelectionFromProjection(
 
 function sameExecutionOwner(left: AgentHandoffTarget, right: AgentHandoffTarget): boolean {
 	return (
-		left.agentId === right.agentId && effectiveNodeId(left.nodeId) === effectiveNodeId(right.nodeId)
+		left.agentId === right.agentId && effectiveExecutorId(left.executorId) === effectiveExecutorId(right.executorId)
 	);
 }

@@ -7,7 +7,7 @@ import {
   withIntegrationFixture,
 } from '../../support/integration-fixture.js';
 import { waitForPersistedChat } from '../../support/persisted-chat.js';
-import { CURRENT_WORKSPACE_VERSION } from '../../../server/migrations/index.js';
+import { CURRENT_WORKSPACE_VERSION } from '../../../server/controller/migrations/index.js';
 
 const CHAT_ID = '1786120000000002';
 

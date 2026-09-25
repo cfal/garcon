@@ -10,8 +10,8 @@
 	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id';
 
 	interface Props {
-		nodeContextKey?: string;
-		nodeId?: string;
+		executorContextKey?: string;
+		executorId?: string;
 		projectPath: string;
 		isVisible: boolean;
 		projectPending?: boolean;
@@ -23,8 +23,8 @@
 	}
 
 	let {
-		nodeContextKey = '',
-		nodeId = 'local',
+		executorContextKey = '',
+		executorId = 'local',
 		projectPath,
 		isVisible,
 		projectPending = false,
@@ -50,7 +50,7 @@
 	// Re-fetches when projectPath changes.
 	$effect(() => {
 		if (!projectPath || !isVisible) return;
-		const targetKey = JSON.stringify([nodeId, nodeContextKey, projectPath]);
+		const targetKey = JSON.stringify([executorId, executorContextKey, projectPath]);
 		if (fetchedForProject === targetKey) return;
 		allFiles = [];
 		fetchedForProject = '';
@@ -60,7 +60,7 @@
 		const controller = new AbortController();
 		activeLoad = controller;
 
-		getFileList({ nodeId, projectPath }, { signal: controller.signal })
+		getFileList({ executorId, projectPath }, { signal: controller.signal })
 			.then((files) => {
 				if (!controller.signal.aborted) {
 					allFiles = files;

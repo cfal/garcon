@@ -29,8 +29,8 @@ export class ApiProvidersStore {
 		return this.snapshot?.providers ?? [];
 	}
 
-	isAssigned(nodeId: string, providerId: string): boolean {
-		return this.snapshot?.assignments.assignments[nodeId]?.includes(providerId) === true;
+	isAssigned(executorId: string, providerId: string): boolean {
+		return this.snapshot?.assignments.assignments[executorId]?.includes(providerId) === true;
 	}
 
 	findEndpoint(endpointId: string) {
@@ -80,9 +80,9 @@ export class ApiProvidersStore {
 		return this.#request;
 	}
 
-	async setAssignment(nodeId: string, providerId: string, assigned: boolean): Promise<void> {
+	async setAssignment(executorId: string, providerId: string, assigned: boolean): Promise<void> {
 		await this.#mutate(() =>
-			assigned ? this.api.assign(nodeId, providerId) : this.api.unassign(nodeId, providerId),
+			assigned ? this.api.assign(executorId, providerId) : this.api.unassign(executorId, providerId),
 		);
 	}
 

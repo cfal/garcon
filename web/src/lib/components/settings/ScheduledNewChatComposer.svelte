@@ -8,7 +8,7 @@
 	import ProjectPinnedPathToggleButton from '$lib/components/chat/ProjectPinnedPathToggleButton.svelte';
 	import GitWorktreePickerModal from '$lib/components/git/GitWorktreePickerModal.svelte';
 	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
-	import ExecutionNodeSelector from '$lib/components/shared/ExecutionNodeSelector.svelte';
+	import ExecutorSelector from '$lib/components/shared/ExecutorSelector.svelte';
 	import NewChatPreambleControls from '$lib/components/preambles/NewChatPreambleControls.svelte';
 	import ScheduledPromptField from './ScheduledPromptField.svelte';
 	import type { NewChatFormState } from '$lib/chat/new-chat/new-chat-form-state.svelte.js';
@@ -28,13 +28,13 @@
 	import Loader2 from '@lucide/svelte/icons/loader-2';
 	import X from '@lucide/svelte/icons/x';
 	import * as m from '$lib/paraglide/messages.js';
-	import { getAppShell, getExecutionNodes } from '$lib/context';
+	import { getAppShell, getExecutors } from '$lib/context';
 
 	interface Props {
 		startup: NewChatFormState;
 		modelCatalog: ModelCatalogStore;
 		remoteSettings: RemoteSettingsStore;
-		getSelectableAgentIds: (nodeId: string) => readonly SessionAgentId[];
+		getSelectableAgentIds: (executorId: string) => readonly SessionAgentId[];
 		prompt: string;
 		promptError: string | null;
 		knownTags: string[];
@@ -57,7 +57,7 @@
 	}: Props = $props();
 	let textarea: HTMLTextAreaElement | null = $state(null);
 	const appShell = getAppShell();
-	const nodes = getExecutionNodes();
+	const executors = getExecutors();
 
 	const permissionOptions = $derived(buildPermissionOptions(startup.permissionModes));
 	const thinkingOptions = $derived(buildThinkingOptions(startup.thinkingModes, startup.modelValue));
@@ -67,14 +67,14 @@
 		surface: 'composer',
 	};
 	const modelSelectorValue = $derived({
-		nodeId: startup.nodeId,
+		executorId: startup.executorId,
 		agentId: startup.agentId,
 		model: startup.modelValue,
 		...(startup.modelSelectionTarget ?? {}),
 	});
-	function getRecents(nodeId: string) {
+	function getRecents(executorId: string) {
 		return buildModelSelectorRecents(
-			modelCatalog.forNode(nodeId),
+			modelCatalog.forExecutor(executorId),
 			remoteSettings.snapshot?.recentAgentSettings ?? [],
 		);
 	}
@@ -97,7 +97,7 @@
 	}
 
 	function handleModelChange(next: ModelSelectorChange): void {
-		if (next.nodeId !== startup.nodeId) return;
+		if (next.executorId !== startup.executorId) return;
 		startup.selectAgent(next.agentId);
 		startup.selectModel(next.modelValue, next);
 	}
@@ -110,9 +110,9 @@
 		</label>
 		<div class="relative">
 			<div class="flex flex-wrap gap-2 @container/project-target">
-				<ExecutionNodeSelector {nodes} nodeId={startup.nodeId} service="agents" presentation="field"
+				<ExecutorSelector {executors} executorId={startup.executorId} service="agents" presentation="field"
 					class="h-[42px] w-full sm:pointer-fine:h-[38px] @min-[32rem]/project-target:w-auto @min-[32rem]/project-target:max-w-44"
-					onSelect={(nodeId) => startup.selectNode(nodeId)} />
+					onSelect={(executorId) => startup.selectExecutor(executorId)} />
 				<div class="relative min-w-0 flex-1">
 					<input
 						id="scheduled-project-path"
@@ -153,8 +153,8 @@
 			</div>
 			{#if startup.filesAvailable && startup.showBrowser && !startup.isUpdatingPinnedPath}
 				<DirectoryBrowser
-					nodeId={startup.nodeId}
-					nodeContextKey={startup.pathContextKey}
+					executorId={startup.executorId}
+					executorContextKey={startup.pathContextKey}
 					currentPath={startup.trimmedPath || startup.browseStartPath || startup.projectBasePath}
 					basePath={startup.projectBasePath}
 					onSelect={(path) => {
@@ -205,7 +205,7 @@
 		{#if startup.modelSelectionError}
 			<div role="status" class="flex items-center gap-2 text-sm text-destructive">
 				<span>{startup.modelSelectionError}</span>
-				{#if startup.nodeReady && modelCatalog.error}
+				{#if startup.executorReady && modelCatalog.error}
 					<button
 						type="button"
 						class="text-foreground underline focus-visible:ring-2 focus-visible:ring-ring"

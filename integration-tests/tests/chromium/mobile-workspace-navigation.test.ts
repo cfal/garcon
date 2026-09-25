@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import type { GhStatusResponse } from '../../../common/gh.js';
-import type { PullRequestListResult } from '../../../server/gh/gh-types.js';
+import type { PullRequestListResult } from '../../../server/runtime/gh/gh-types.js';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 
 test('keeps primary mobile tabs compact and opens secondary views from the chat menu', async () => {

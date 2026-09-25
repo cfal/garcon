@@ -400,13 +400,13 @@ describe('SingletonSurfaceRegistry', () => {
 			toRevision: 'HEAD',
 			mode: 'direct' as const,
 		};
-		comparisonPreferences.rememberChat({ nodeId: 'local', chatId: 'chat-a' }, specification);
+		comparisonPreferences.rememberChat({ executorId: 'local', chatId: 'chat-a' }, specification);
 		registry.gitCompare();
 
 		registry.disposeSurface('git-compare');
 		expect(
 			comparisonPreferences.recall({
-				nodeId: 'local',
+				executorId: 'local',
 				chatId: 'chat-a',
 				projectPath: '/project-a',
 			}),
@@ -415,7 +415,7 @@ describe('SingletonSurfaceRegistry', () => {
 		registry.destroy();
 		expect(
 			comparisonPreferences.recall({
-				nodeId: 'local',
+				executorId: 'local',
 				chatId: 'chat-a',
 				projectPath: '/project-a',
 			}),

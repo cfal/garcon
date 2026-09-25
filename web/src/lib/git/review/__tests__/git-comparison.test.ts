@@ -10,7 +10,7 @@ import { GitComparisonController } from '../git-comparison.svelte.js';
 vi.mock('$lib/api/git-comparison.js', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('$lib/api/git-comparison.js')>();
 	return {
-		document: { nodeId: 'local', instanceId: 'test-instance', documentId: 'comparison-doc' },
+		document: { executorId: 'local', instanceId: 'test-instance', documentId: 'comparison-doc' },
 		...actual,
 		getGitComparisonFreshness: vi.fn(),
 		getGitComparisonSnapshot: vi.fn(),
@@ -32,7 +32,7 @@ const limits = {
 
 function workingTreeSnapshot(): GitComparisonSnapshotReady {
 	return {
-		document: { nodeId: 'local', instanceId: 'test-instance', documentId: 'comparison-doc' },
+		document: { executorId: 'local', instanceId: 'test-instance', documentId: 'comparison-doc' },
 		status: 'ready',
 		project: '/project',
 		repoRoot: '/project',
@@ -154,7 +154,7 @@ describe('GitComparisonController', () => {
 			mode: 'merge-base',
 		});
 
-		expect(await comparison.compare({ nodeId: 'local', projectPath: '/project' })).toBe(true);
+		expect(await comparison.compare({ executorId: 'local', projectPath: '/project' })).toBe(true);
 		expect(comparison.confirmedSpecification).toEqual({
 			fromRevision: 'origin/main',
 			toKind: 'revision',
@@ -173,7 +173,7 @@ describe('GitComparisonController', () => {
 		const comparison = new GitComparisonController();
 		comparison.setSpecification({ fromRevision: 'origin/main', toKind: 'working-tree' });
 
-		expect(await comparison.compare({ nodeId: 'local', projectPath: '/project' })).toBe(true);
+		expect(await comparison.compare({ executorId: 'local', projectPath: '/project' })).toBe(true);
 		expect(comparison.confirmedSpecification).toEqual({
 			fromRevision: 'origin/main',
 			toKind: 'working-tree',
@@ -196,11 +196,11 @@ describe('GitComparisonController', () => {
 			});
 		const comparison = new GitComparisonController();
 		comparison.setSpecification({ fromRevision: 'main', toKind: 'working-tree' });
-		expect(await comparison.compare({ nodeId: 'local', projectPath: '/project' })).toBe(true);
+		expect(await comparison.compare({ executorId: 'local', projectPath: '/project' })).toBe(true);
 		const confirmed = comparison.confirmedSpecification;
 
 		comparison.setSpecification({ fromRevision: 'missing', toKind: 'working-tree' });
-		expect(await comparison.compare({ nodeId: 'local', projectPath: '/project' })).toBe(false);
+		expect(await comparison.compare({ executorId: 'local', projectPath: '/project' })).toBe(false);
 		expect(comparison.confirmedSpecification).toEqual(confirmed);
 	});
 
@@ -223,12 +223,12 @@ describe('GitComparisonController', () => {
 		const comparison = new GitComparisonController();
 		comparison.openDialog({ fromRevision: 'main', toKind: 'working-tree' });
 
-		expect(await comparison.compare({ nodeId: 'local', projectPath: '/project' })).toBe(true);
+		expect(await comparison.compare({ executorId: 'local', projectPath: '/project' })).toBe(true);
 		expect(comparison.snapshot?.documentId).toBe('comparison-doc');
 		expect(comparison.dialogOpen).toBe(false);
-		await comparison.checkFreshness({ nodeId: 'local', projectPath: '/project' });
+		await comparison.checkFreshness({ executorId: 'local', projectPath: '/project' });
 		expect(getGitComparisonFreshness).toHaveBeenCalledWith(
-			expect.objectContaining({ nodeId: 'local', projectPath: '/repo' }),
+			expect.objectContaining({ executorId: 'local', projectPath: '/repo' }),
 			{ kind: 'revision', revision: 'main', hash: 'a'.repeat(40) },
 			{ kind: 'working-tree', fingerprint: 'v1:old' },
 		);
@@ -267,11 +267,11 @@ describe('GitComparisonController', () => {
 			toRevision: 'HEAD',
 		});
 
-		expect(await comparison.compare({ nodeId: 'local', projectPath: '/project' })).toBe(true);
-		await comparison.checkFreshness({ nodeId: 'local', projectPath: '/project' });
+		expect(await comparison.compare({ executorId: 'local', projectPath: '/project' })).toBe(true);
+		await comparison.checkFreshness({ executorId: 'local', projectPath: '/project' });
 
 		expect(getGitComparisonFreshness).toHaveBeenCalledWith(
-			expect.objectContaining({ nodeId: 'local', projectPath: '/project' }),
+			expect.objectContaining({ executorId: 'local', projectPath: '/project' }),
 			{ kind: 'revision', revision: 'origin/main', hash: 'a'.repeat(40) },
 			{ kind: 'revision', revision: 'HEAD', hash: 'b'.repeat(40) },
 		);
@@ -292,8 +292,8 @@ describe('GitComparisonController', () => {
 		const comparison = new GitComparisonController();
 		comparison.openDialog({ fromRevision: 'main', toKind: 'working-tree' });
 
-		await comparison.compare({ nodeId: 'local', projectPath: '/project' });
-		await comparison.checkFreshness({ nodeId: 'local', projectPath: '/project' });
+		await comparison.compare({ executorId: 'local', projectPath: '/project' });
+		await comparison.checkFreshness({ executorId: 'local', projectPath: '/project' });
 
 		expect(comparison.document.isStale).toBe(true);
 		expect(comparison.staleMessage).toContain('selected revision moved');
@@ -315,8 +315,8 @@ describe('GitComparisonController', () => {
 			toRevision: snapshot.to.hash,
 		});
 
-		await comparison.compare({ nodeId: 'local', projectPath: '/project' });
-		await comparison.checkFreshness({ nodeId: 'local', projectPath: '/project' });
+		await comparison.compare({ executorId: 'local', projectPath: '/project' });
+		await comparison.checkFreshness({ executorId: 'local', projectPath: '/project' });
 
 		expect(getGitComparisonFreshness).not.toHaveBeenCalled();
 		expect(comparison.document.isStale).toBe(false);
@@ -329,8 +329,8 @@ describe('GitComparisonController', () => {
 		const comparison = new GitComparisonController();
 		comparison.openDialog({ fromRevision: 'main', toKind: 'working-tree' });
 
-		expect(await comparison.compare({ nodeId: 'local', projectPath: '/project' })).toBe(true);
-		await comparison.checkFreshness({ nodeId: 'local', projectPath: '/project' });
+		expect(await comparison.compare({ executorId: 'local', projectPath: '/project' })).toBe(true);
+		await comparison.checkFreshness({ executorId: 'local', projectPath: '/project' });
 
 		expect(comparison.staleMessage).toBeNull();
 		expect(comparison.document.isStale).toBe(false);
@@ -353,7 +353,7 @@ describe('GitComparisonController', () => {
 		const comparison = new GitComparisonController();
 		comparison.openDialog({ fromRevision: 'main', toKind: 'working-tree' });
 
-		await comparison.compare({ nodeId: 'local', projectPath: '/project' });
+		await comparison.compare({ executorId: 'local', projectPath: '/project' });
 		await vi.waitFor(() => expect(comparison.bodyError).toContain('temporary network failure'));
 		comparison.focusFile('src/a.ts');
 		await vi.waitFor(() => expect(getGitComparisonFileBodies).toHaveBeenCalledTimes(2));
@@ -390,9 +390,9 @@ describe('GitComparisonController', () => {
 			mode: 'merge-base',
 		});
 
-		expect(await comparison.compare({ nodeId: 'local', projectPath: '/project' })).toBe(false);
+		expect(await comparison.compare({ executorId: 'local', projectPath: '/project' })).toBe(false);
 		expect(comparison.errorEndpoint).toBe('from');
-		expect(await comparison.compare({ nodeId: 'local', projectPath: '/project' })).toBe(false);
+		expect(await comparison.compare({ executorId: 'local', projectPath: '/project' })).toBe(false);
 		expect(comparison.errorStatus).toBe('no-merge-base');
 		expect(comparison.errorEndpoint).toBeNull();
 	});
@@ -413,10 +413,10 @@ describe('GitComparisonController', () => {
 		});
 		const comparison = new GitComparisonController();
 		comparison.openDialog({ fromRevision: 'main', toKind: 'working-tree' });
-		await comparison.compare({ nodeId: 'local', projectPath: '/project' });
-		await comparison.checkFreshness({ nodeId: 'local', projectPath: '/project' });
+		await comparison.compare({ executorId: 'local', projectPath: '/project' });
+		await comparison.checkFreshness({ executorId: 'local', projectPath: '/project' });
 
-		await comparison.refresh({ nodeId: 'local', projectPath: '/project' });
+		await comparison.refresh({ executorId: 'local', projectPath: '/project' });
 		expect(comparison.snapshot?.documentId).toBe(snapshot.documentId);
 		expect(comparison.staleMessage).toContain('Working Tree changed');
 		expect(comparison.document.isStale).toBe(true);
@@ -427,12 +427,12 @@ describe('GitComparisonController', () => {
 		vi.mocked(getGitComparisonSnapshot).mockResolvedValue(snapshot);
 		const comparison = new GitComparisonController();
 		comparison.openDialog({ fromRevision: 'main', toKind: 'working-tree' });
-		await comparison.compare({ nodeId: 'local', projectPath: '/project' });
+		await comparison.compare({ executorId: 'local', projectPath: '/project' });
 
 		comparison.editComparison();
 		comparison.fromRevision = 'canceled-edit';
 		comparison.closeDialog();
-		await comparison.refresh({ nodeId: 'local', projectPath: '/project' });
+		await comparison.refresh({ executorId: 'local', projectPath: '/project' });
 
 		expect(comparison.fromRevision).toBe('main');
 		expect(vi.mocked(getGitComparisonSnapshot).mock.calls[1]?.[1]).toEqual({
@@ -447,7 +447,7 @@ describe('GitComparisonController', () => {
 		const comparison = new GitComparisonController();
 		comparison.openDialog({ fromRevision: 'main', toKind: 'working-tree' });
 
-		const request = comparison.compare({ nodeId: 'local', projectPath: '/project' });
+		const request = comparison.compare({ executorId: 'local', projectPath: '/project' });
 		await vi.waitFor(() => expect(getGitComparisonSnapshot).toHaveBeenCalledOnce());
 		const signal = vi.mocked(getGitComparisonSnapshot).mock.calls[0]?.[4]?.signal;
 		comparison.closeDialog();
@@ -468,7 +468,7 @@ describe('GitComparisonController', () => {
 			{ diffMode: 'split', contextLines: 12 },
 		);
 
-		await comparison.compare({ nodeId: 'local', projectPath: '/project' });
+		await comparison.compare({ executorId: 'local', projectPath: '/project' });
 
 		expect(getGitComparisonSnapshot).toHaveBeenCalledOnce();
 		expect(vi.mocked(getGitComparisonSnapshot).mock.calls[0]?.[4]).toMatchObject({ context: 12 });
@@ -485,10 +485,10 @@ describe('GitComparisonController', () => {
 			.mockResolvedValueOnce(second);
 		const comparison = new GitComparisonController();
 		comparison.openDialog({ fromRevision: 'main', toKind: 'working-tree' });
-		const firstRequest = comparison.compare({ nodeId: 'local', projectPath: '/project' });
+		const firstRequest = comparison.compare({ executorId: 'local', projectPath: '/project' });
 		const firstSignal = vi.mocked(getGitComparisonSnapshot).mock.calls[0]?.[4]?.signal;
 
-		comparison.setDisplayOptions({ nodeId: 'local', projectPath: '/project' }, 'unified', 12);
+		comparison.setDisplayOptions({ executorId: 'local', projectPath: '/project' }, 'unified', 12);
 
 		await vi.waitFor(() => expect(getGitComparisonSnapshot).toHaveBeenCalledTimes(2));
 		await vi.waitFor(() =>
@@ -521,7 +521,7 @@ describe('GitComparisonController', () => {
 		const comparison = new GitComparisonController();
 		comparison.openDialog({ fromRevision: 'main', toKind: 'working-tree' });
 
-		await comparison.compare({ nodeId: 'local', projectPath: '/project' });
+		await comparison.compare({ executorId: 'local', projectPath: '/project' });
 
 		await vi.waitFor(() => expect(getGitComparisonSnapshot).toHaveBeenCalledTimes(2));
 		await vi.waitFor(() => expect(getGitComparisonFileBodies).toHaveBeenCalledTimes(2));
@@ -540,16 +540,16 @@ describe('GitComparisonController', () => {
 		});
 		const comparison = new GitComparisonController();
 		comparison.openDialog({ fromRevision: 'main', toKind: 'working-tree' });
-		await comparison.compare({ nodeId: 'local', projectPath: '/project' });
+		await comparison.compare({ executorId: 'local', projectPath: '/project' });
 
-		comparison.setDisplayOptions({ nodeId: 'local', projectPath: '/project' }, 'unified', 12);
+		comparison.setDisplayOptions({ executorId: 'local', projectPath: '/project' }, 'unified', 12);
 		expect(getGitComparisonSnapshot).toHaveBeenCalledOnce();
 		expect(comparison.staleMessage).toContain('Refresh the comparison');
 		comparison.focusFile('src/a.ts');
 		await vi.waitFor(() => expect(getGitComparisonFileBodies).toHaveBeenCalledOnce());
 
 		expect(vi.mocked(getGitComparisonFileBodies).mock.calls[0]?.[5]).toMatchObject({ context: 5 });
-		await comparison.refresh({ nodeId: 'local', projectPath: '/project' });
+		await comparison.refresh({ executorId: 'local', projectPath: '/project' });
 		expect(getGitComparisonSnapshot).toHaveBeenCalledTimes(2);
 		expect(vi.mocked(getGitComparisonSnapshot).mock.calls[1]?.[4]).toMatchObject({ context: 12 });
 	});
@@ -563,12 +563,12 @@ describe('GitComparisonController', () => {
 			toKind: 'revision',
 			toRevision: 'feature',
 		});
-		await comparison.compare({ nodeId: 'local', projectPath: '/project' });
+		await comparison.compare({ executorId: 'local', projectPath: '/project' });
 		comparison.document.openCommentComposer('src/a.ts', 'after', 1);
 		comparison.document.setCommentBody('Keep this draft');
 		comparison.document.setCommentSeverity('blocker');
 
-		comparison.setDisplayOptions({ nodeId: 'local', projectPath: '/project' }, 'unified', 12);
+		comparison.setDisplayOptions({ executorId: 'local', projectPath: '/project' }, 'unified', 12);
 
 		expect(getGitComparisonSnapshot).toHaveBeenCalledOnce();
 		expect(comparison.document.contextLines).toBe(5);
@@ -594,12 +594,12 @@ describe('GitComparisonController', () => {
 		});
 		const comparison = new GitComparisonController();
 		comparison.openDialog({ fromRevision: 'main', toKind: 'working-tree' });
-		await comparison.compare({ nodeId: 'local', projectPath: '/project' });
+		await comparison.compare({ executorId: 'local', projectPath: '/project' });
 		comparison.document.openCommentComposer('src/a.ts', 'after', 1);
 		comparison.document.setCommentBody('Keep this draft');
-		await comparison.checkFreshness({ nodeId: 'local', projectPath: '/project' });
+		await comparison.checkFreshness({ executorId: 'local', projectPath: '/project' });
 
-		comparison.setDisplayOptions({ nodeId: 'local', projectPath: '/project' }, 'unified', 12);
+		comparison.setDisplayOptions({ executorId: 'local', projectPath: '/project' }, 'unified', 12);
 
 		expect(getGitComparisonSnapshot).toHaveBeenCalledOnce();
 		expect(comparison.document.isStale).toBe(true);
@@ -619,11 +619,11 @@ describe('GitComparisonController', () => {
 		});
 		const comparison = new GitComparisonController();
 		comparison.openDialog({ fromRevision: 'main', toKind: 'working-tree' });
-		await comparison.compare({ nodeId: 'local', projectPath: '/project' });
-		comparison.setDisplayOptions({ nodeId: 'local', projectPath: '/project' }, 'unified', 12);
+		await comparison.compare({ executorId: 'local', projectPath: '/project' });
+		comparison.setDisplayOptions({ executorId: 'local', projectPath: '/project' }, 'unified', 12);
 
 		expect(comparison.staleMessage).toContain('Refresh the comparison');
-		await comparison.checkFreshness({ nodeId: 'local', projectPath: '/project' });
+		await comparison.checkFreshness({ executorId: 'local', projectPath: '/project' });
 
 		expect(comparison.document.isStale).toBe(true);
 		expect(comparison.staleMessage).toContain('Working Tree changed');

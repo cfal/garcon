@@ -3,8 +3,8 @@ import { validateStart, type ValidateStartErrorCode } from '$lib/api/chats.js';
 import { getGitWorktrees, gitCreateWorktree, type GitWorktreeItem } from '$lib/api/git.js';
 import * as m from '$lib/paraglide/messages.js';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
-import { effectiveNodeId } from '$shared/execution-nodes';
-import type { ExecutionNodesStore } from '$lib/execution-nodes/execution-nodes-store.svelte.js';
+import { effectiveExecutorId } from '$shared/executors';
+import type { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
 
 export type ProjectPathValidationStatus = 'idle' | 'checking' | 'valid' | 'invalid';
 export type ProjectPathGitRepoStatus = 'unknown' | 'git' | 'non-git';
@@ -12,7 +12,7 @@ export type ProjectPathGitRepoStatus = 'unknown' | 'git' | 'non-git';
 const VALIDATION_DELAY_MS = 250;
 
 export class ProjectPathDialogState {
-	nodeId = $state('local');
+	executorId = $state('local');
 	candidatePath = $state('');
 	showBrowser = $state(false);
 	validationStatus = $state<ProjectPathValidationStatus>('idle');
@@ -36,11 +36,11 @@ export class ProjectPathDialogState {
 	#worktreeAbort: AbortController | null = null;
 
 	constructor(
-		private readonly nodes?: Pick<ExecutionNodesStore, 'gitAvailable' | 'gitContextKey'>,
+		private readonly executors?: Pick<ExecutorsStore, 'gitAvailable' | 'gitContextKey'>,
 	) {}
 
 	get gitAvailable(): boolean {
-		return this.nodes?.gitAvailable(this.nodeId) ?? this.nodeId === 'local';
+		return this.executors?.gitAvailable(this.executorId) ?? this.executorId === 'local';
 	}
 
 	get trimmedPath(): string {
@@ -70,8 +70,8 @@ export class ProjectPathDialogState {
 		);
 	}
 
-	open(currentProjectPath: string, nodeId?: string | null): void {
-		this.nodeId = effectiveNodeId(nodeId);
+	open(currentProjectPath: string, executorId?: string | null): void {
+		this.executorId = effectiveExecutorId(executorId);
 		this.currentProjectPath = currentProjectPath;
 		this.candidatePath = currentProjectPath;
 		this.showBrowser = false;
@@ -107,11 +107,11 @@ export class ProjectPathDialogState {
 		this.worktreeError = null;
 	}
 
-	scheduleValidation(nodeContextKey = ''): void {
+	scheduleValidation(executorContextKey = ''): void {
 		const path = this.trimmedPath;
 		this.#clearPendingValidation();
-		if (this.#validationContextKey !== nodeContextKey) {
-			this.#validationContextKey = nodeContextKey;
+		if (this.#validationContextKey !== executorContextKey) {
+			this.#validationContextKey = executorContextKey;
 			this.gitRepoStatus = 'unknown';
 		}
 
@@ -170,8 +170,8 @@ export class ProjectPathDialogState {
 	async loadWorktrees(): Promise<void> {
 		if (!this.gitAvailable) return;
 		const path = this.trimmedPath;
-		const nodeId = this.nodeId;
-		const contextKey = this.nodes?.gitContextKey(nodeId);
+		const executorId = this.executorId;
+		const contextKey = this.executors?.gitContextKey(executorId);
 		if (!path) return;
 
 		this.#clearPendingWorktreeLoad();
@@ -180,14 +180,14 @@ export class ProjectPathDialogState {
 		const generation = ++this.#worktreeGeneration;
 		const current = () =>
 			this.#isCurrentWorktreeLoad(generation, abort.signal) &&
-			nodeId === this.nodeId &&
+			executorId === this.executorId &&
 			path === this.trimmedPath &&
-			contextKey === this.nodes?.gitContextKey(nodeId);
+			contextKey === this.executors?.gitContextKey(executorId);
 		this.isLoadingWorktrees = true;
 		this.worktreeError = null;
 
 		try {
-			const result = await getGitWorktrees({ nodeId, projectPath: path }, { signal: abort.signal });
+			const result = await getGitWorktrees({ executorId, projectPath: path }, { signal: abort.signal });
 			if (!current()) return;
 			this.worktrees = result.worktrees;
 		} catch (error) {
@@ -204,21 +204,21 @@ export class ProjectPathDialogState {
 	async createWorktree(worktreePath: string, branch?: string, baseRef?: string): Promise<void> {
 		if (!this.gitAvailable || this.isCreatingWorktree) return;
 		const projectPath = this.trimmedPath;
-		const nodeId = this.nodeId;
-		const contextKey = this.nodes?.gitContextKey(nodeId);
+		const executorId = this.executorId;
+		const contextKey = this.executors?.gitContextKey(executorId);
 		const generation = this.#worktreeGeneration;
 		const current = () =>
 			generation === this.#worktreeGeneration &&
-			nodeId === this.nodeId &&
+			executorId === this.executorId &&
 			projectPath === this.trimmedPath &&
-			contextKey === this.nodes?.gitContextKey(nodeId);
+			contextKey === this.executors?.gitContextKey(executorId);
 		if (!projectPath) return;
 
 		this.isCreatingWorktree = true;
 		this.worktreeError = null;
 
 		try {
-			const result = await gitCreateWorktree({ nodeId, projectPath }, worktreePath, {
+			const result = await gitCreateWorktree({ executorId, projectPath }, worktreePath, {
 				branch,
 				baseRef,
 			});
@@ -257,7 +257,7 @@ export class ProjectPathDialogState {
 		this.#validationAbort = abort;
 
 		try {
-			const data = await validateStart(path, { nodeId: this.nodeId, signal: abort.signal });
+			const data = await validateStart(path, { executorId: this.executorId, signal: abort.signal });
 			if (!this.#isCurrentValidation(path, generation, abort.signal)) return;
 
 			if (!data.valid) {

@@ -8,7 +8,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ChatListEntry } from '../../../common/chat-list.js';
 import type { ForkRunCommandResponse } from '../../../common/chat-command-contracts.js';
-import { CURRENT_WORKSPACE_VERSION } from '../../../server/migrations/index.js';
+import { CURRENT_WORKSPACE_VERSION } from '../../../server/controller/migrations/index.js';
 import { messagesOfType, userContents } from '../../support/chat-assertions.js';
 import { expectedCarriedInput } from '../../support/carried-context.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';

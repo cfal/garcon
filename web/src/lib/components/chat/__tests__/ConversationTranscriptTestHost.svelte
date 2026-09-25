@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { setExecutionNodesTestContext } from '$lib/execution-nodes/__tests__/execution-nodes-test-context';
+	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
 	import { onDestroy } from 'svelte';
 	import ConversationTranscript from '../ConversationTranscript.svelte';
 	import { setAppShell, setChatSessions, setFileSessions, setLocalSettings } from '$lib/context';
@@ -23,7 +23,7 @@
 
 	let { rows, pendingPermissionRequests = [], onPermissionDecision }: Props = $props();
 	setCanonicalWorkspaceLayout();
-	setExecutionNodesTestContext();
+	setExecutorsTestContext();
 
 	const chatSessions = createChatSessionsStore();
 	chatSessions.createDraft({

@@ -9,7 +9,7 @@ export type ModelSelectorSurface = 'composer' | 'settings';
 export type ModelSelectorEffortMode = 'select' | 'hidden';
 
 export interface ModelSelectorMode {
-	node?: 'fixed' | 'select';
+	executor?: 'fixed' | 'select';
 	agent: ModelSelectorAgentMode;
 	source: ModelSelectorSourceMode;
 	surface: ModelSelectorSurface;
@@ -17,7 +17,7 @@ export interface ModelSelectorMode {
 }
 
 export interface ModelSelectorValue {
-	nodeId?: string | null;
+	executorId?: string | null;
 	agentId: SessionAgentId;
 	model: string;
 	apiProviderId?: string | null;
@@ -27,7 +27,7 @@ export interface ModelSelectorValue {
 }
 
 export interface ModelSelectorChange {
-	nodeId?: string;
+	executorId?: string;
 	agentId: SessionAgentId;
 	modelValue: string;
 	model: string;

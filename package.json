@@ -46,7 +46,7 @@
     "test": "bun run test:server && bun run test:cli && bun run --cwd web test",
     "test:transcript-inventory": "bun scripts/validate-transcript-ledger-v5-cases.js",
     "test:cli": "bun run --cwd cli test",
-    "test:server": "bun test common/__tests__/*.test.js && bun test scripts/__tests__/*.test.js && bun scripts/run-test-files.js 'server-agents/**/__tests__/*.{test.js,test.ts}' && bun test server/__tests__/*.test.js && bun test server/chats/search/__tests__/*.test.js && bun scripts/run-test-files.js 'server/**/__tests__/*.{test.js,test.ts}'",
+    "test:server": "bun test common/__tests__/*.test.js && bun test scripts/__tests__/*.test.js && bun scripts/run-test-files.js 'server-agents/**/__tests__/*.{test.js,test.ts}' && bun test server/controller/__tests__/*.test.js && bun test server/controller/chats/search/__tests__/*.test.js && bun scripts/run-test-files.js 'server/**/__tests__/*.{test.js,test.ts}'",
     "test:integration": "bun run --cwd integration-tests test",
     "test:integration:server": "bun run --cwd integration-tests test:server",
     "test:integration:e2e": "bun run --cwd integration-tests test:e2e",
@@ -86,6 +86,7 @@
     "bits-ui@2.19.2": "patches/bits-ui@2.19.2.patch"
   },
   "devDependencies": {
-    "@xyflow/system": "0.0.82"
+    "@xyflow/system": "0.0.82",
+    "typescript": "^6.0.3"
   }
 }

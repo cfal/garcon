@@ -19,7 +19,7 @@
 		| null
 	>(null);
 	let loadKey = $derived(
-		JSON.stringify([project.nodeId, project.projectPath, porcelain.inspectorView, selectedFile]),
+		JSON.stringify([project.executorId, project.projectPath, porcelain.inspectorView, selectedFile]),
 	);
 	let title = $derived(
 		porcelain.inspectorView === 'conflicts'

@@ -7,11 +7,11 @@ import { SingletonSurfaceRegistry } from '../singleton-surfaces.svelte.js';
 import { CommitController } from '$lib/git/commit/commit-controller.svelte.js';
 import { PullRequestsStore } from '$lib/git/pull-requests/pull-requests-store.svelte.js';
 import { createGitSurfaceTestDeps } from '$lib/git/__tests__/git-surface-test-deps.js';
-import { ExecutionNodesStore } from '$lib/execution-nodes/execution-nodes-store.svelte.js';
+import { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
 import {
-	localExecutionNode,
-	remoteExecutionNode,
-} from '$lib/execution-nodes/__tests__/fixtures.js';
+	localExecutor,
+	remoteExecutor,
+} from '$lib/executors/__tests__/fixtures.js';
 
 vi.mock('$lib/api/files.js', () => ({ getTree: vi.fn() }));
 
@@ -35,11 +35,11 @@ function response(directoryPath = '/workspace'): FileTreeResponse {
 	};
 }
 
-function createController(executionNodes?: ExecutionNodesStore) {
+function createController(executors?: ExecutorsStore) {
 	const deps = createGitSurfaceTestDeps();
 	const registry = new SingletonSurfaceRegistry({
 		...deps,
-		executionNodes,
+		executors,
 		createCommit: () => new CommitController(deps),
 		createPullRequests: () => new PullRequestsStore(),
 	});
@@ -69,7 +69,7 @@ describe('FilesSurfaceController reveal', () => {
 			expect(controller.tree.focusPathAfterNavigation).toBe('/workspace/src/new.ts'),
 		);
 		expect(getTree).toHaveBeenLastCalledWith(
-			{ directoryPath: '/workspace/src', nodeId: 'local' },
+			{ directoryPath: '/workspace/src', executorId: 'local' },
 			expect.anything(),
 		);
 	});
@@ -102,7 +102,7 @@ describe('FilesSurfaceController reveal', () => {
 			flushSync();
 			expect(controller.tree.focusPathAfterNavigation).toBeNull();
 			expect(getTree).not.toHaveBeenCalledWith(
-				{ directoryPath: '/workspace/cancelled', nodeId: 'local' },
+				{ directoryPath: '/workspace/cancelled', executorId: 'local' },
 				expect.anything(),
 			);
 		},
@@ -131,15 +131,15 @@ describe('FilesSurfaceController reveal', () => {
 	});
 });
 
-describe('FilesSurfaceController node browsing', () => {
+describe('FilesSurfaceController executor browsing', () => {
 	it('browses the Local base without a chat and follows the next selected chat', async () => {
 		vi.mocked(getTree).mockResolvedValue(response());
 		const controller = createController();
 		controller.setProjectState({ kind: 'absent' });
 		controller.setPresentationVisible(true);
 		await vi.waitFor(() => expect(controller.tree.readyResponse).not.toBeNull());
-		expect(getTree).toHaveBeenCalledWith({ nodeId: 'local', directoryPath: '' }, expect.anything());
-		expect(controller.browsingNode).toBe(true);
+		expect(getTree).toHaveBeenCalledWith({ executorId: 'local', directoryPath: '' }, expect.anything());
+		expect(controller.browsingExecutor).toBe(true);
 		controller.setProjectState({ kind: 'absent' });
 		expect(getTree).toHaveBeenCalledTimes(1);
 		vi.mocked(getTree).mockResolvedValue(response('/workspace/chat'));
@@ -152,25 +152,25 @@ describe('FilesSurfaceController node browsing', () => {
 			},
 		});
 		await vi.waitFor(() => expect(controller.tree.currentDirectoryPath).toBe('/workspace/chat'));
-		expect(controller.browsingNode).toBe(false);
+		expect(controller.browsingExecutor).toBe(false);
 	});
 
-	function nodeStore() {
-		const nodes = new ExecutionNodesStore();
-		nodes.applySnapshot([
-			localExecutionNode,
+	function executorStore() {
+		const executors = new ExecutorsStore();
+		executors.applySnapshot([
+			localExecutor,
 			{
-				...remoteExecutionNode,
+				...remoteExecutor,
 				machineServices: { files: true, git: false, gh: false, terminals: false },
 			},
 		]);
-		return nodes;
+		return executors;
 	}
 
 	it.each([false, true])(
 		'refreshes root metadata and fences pending loads without an offline edge (browsing: %s)',
 		async (browsing) => {
-			const nodes = nodeStore();
+			const executors = executorStore();
 			const before = response('/worker/project');
 			const after = { ...before, fileRootPath: '/', homeDirectory: null };
 			const stale = Promise.withResolvers<FileTreeResponse>();
@@ -178,28 +178,28 @@ describe('FilesSurfaceController node browsing', () => {
 				.mockResolvedValueOnce(before)
 				.mockReturnValueOnce(stale.promise)
 				.mockResolvedValue(after);
-			const controller = createController(nodes);
+			const controller = createController(executors);
 			controller.setProjectState({
 				kind: 'available',
 				project: {
-					nodeId: remoteExecutionNode.id,
+					executorId: remoteExecutor.id,
 					chatId: 'chat',
 					projectPath: '/worker/project',
 					effectiveProjectKey: '/worker/project',
 				},
 			});
-			if (browsing) controller.selectNode(remoteExecutionNode.id);
+			if (browsing) controller.selectExecutor(remoteExecutor.id);
 			controller.setPresentationVisible(true);
 			flushSync();
 			await vi.waitFor(() => expect(controller.tree.readyResponse).toEqual(before));
 			controller.tree.childrenCache = new Map([['/worker/project/old', []]]);
 			const loading = controller.tree.refresh();
 			const signal = vi.mocked(getTree).mock.calls[1][1]?.signal;
-			nodes.applySnapshot(
-				nodes.nodes.map((node) =>
-					node.id === remoteExecutionNode.id
-						? { ...node, instanceId: 'replacement', projectBasePath: '/' }
-						: node,
+			executors.applySnapshot(
+				executors.executors.map((executor) =>
+					executor.id === remoteExecutor.id
+						? { ...executor, instanceId: 'replacement', projectBasePath: '/' }
+						: executor,
 				),
 			);
 			flushSync();
@@ -210,26 +210,26 @@ describe('FilesSurfaceController node browsing', () => {
 			await loading;
 			expect(controller.tree.readyResponse).toEqual(after);
 			expect(getTree).toHaveBeenLastCalledWith(
-				{ nodeId: remoteExecutionNode.id, directoryPath: '/worker/project' },
+				{ executorId: remoteExecutor.id, directoryPath: '/worker/project' },
 				expect.anything(),
 			);
 		},
 	);
 
 	it('tries the same folder on the destination, fences the old response, and returns to the current chat explicitly', async () => {
-		const nodes = nodeStore();
+		const executors = executorStore();
 		const oldRequest = Promise.withResolvers<FileTreeResponse>();
 		vi.mocked(getTree)
 			.mockReturnValueOnce(oldRequest.promise)
 			.mockResolvedValue(response('/worker'));
-		const controller = createController(nodes);
+		const controller = createController(executors);
 		controller.setPresentationVisible(true);
 		const signal = vi.mocked(getTree).mock.calls[0][1]?.signal;
-		controller.selectNode(remoteExecutionNode.id);
+		controller.selectExecutor(remoteExecutor.id);
 		expect(signal?.aborted).toBe(true);
 		await vi.waitFor(() => expect(controller.tree.currentDirectoryPath).toBe('/worker'));
 		expect(getTree).toHaveBeenLastCalledWith(
-			{ nodeId: remoteExecutionNode.id, directoryPath: '/workspace' },
+			{ executorId: remoteExecutor.id, directoryPath: '/workspace' },
 			expect.anything(),
 		);
 		oldRequest.resolve(response('/workspace/stale'));
@@ -240,22 +240,22 @@ describe('FilesSurfaceController node browsing', () => {
 			kind: 'available',
 			project: {
 				chatId: 'other-chat',
-				nodeId: 'local',
+				executorId: 'local',
 				projectPath: '/other-project',
 				effectiveProjectKey: '/other-project',
 			},
 		});
-		expect(controller.tree.nodeId).toBe(remoteExecutionNode.id);
+		expect(controller.tree.executorId).toBe(remoteExecutor.id);
 		expect(getTree).toHaveBeenCalledTimes(2);
 		vi.mocked(getTree).mockResolvedValue(response('/other-project'));
 		controller.goToChatProject();
 		await vi.waitFor(() => expect(controller.tree.currentDirectoryPath).toBe('/other-project'));
 		expect(getTree).toHaveBeenCalledTimes(3);
 		expect(getTree).toHaveBeenLastCalledWith(
-			{ nodeId: 'local', directoryPath: '/other-project' },
+			{ executorId: 'local', directoryPath: '/other-project' },
 			expect.anything(),
 		);
-		expect(controller.browsingNode).toBe(false);
+		expect(controller.browsingExecutor).toBe(false);
 	});
 
 	it.each([
@@ -263,122 +263,122 @@ describe('FilesSurfaceController node browsing', () => {
 		'FILE_TREE_DIRECTORY_REQUIRED',
 		'outside_project_base',
 	])('falls back to the destination project base for %s', async (code) => {
-		const nodes = nodeStore();
+		const executors = executorStore();
 		vi.mocked(getTree).mockResolvedValueOnce(response('/workspace/nested'));
-		const controller = createController(nodes);
+		const controller = createController(executors);
 		controller.setPresentationVisible(true);
 		await vi.waitFor(() => expect(controller.tree.currentDirectoryPath).toBe('/workspace/nested'));
 		vi.mocked(getTree)
 			.mockRejectedValueOnce(new ApiError(404, 'Directory unavailable', code))
 			.mockResolvedValue(response('/worker'));
-		controller.selectNode(remoteExecutionNode.id);
+		controller.selectExecutor(remoteExecutor.id);
 		await vi.waitFor(() => expect(controller.tree.currentDirectoryPath).toBe('/worker'));
 		expect(getTree).toHaveBeenNthCalledWith(
 			2,
-			{ nodeId: remoteExecutionNode.id, directoryPath: '/workspace/nested' },
+			{ executorId: remoteExecutor.id, directoryPath: '/workspace/nested' },
 			expect.anything(),
 		);
 		expect(getTree).toHaveBeenLastCalledWith(
-			{ nodeId: remoteExecutionNode.id, directoryPath: '' },
+			{ executorId: remoteExecutor.id, directoryPath: '' },
 			expect.anything(),
 		);
 	});
 
-	it('retains a folder that exists on the destination node', async () => {
-		const nodes = nodeStore();
+	it('retains a folder that exists on the destination executor', async () => {
+		const executors = executorStore();
 		vi.mocked(getTree).mockResolvedValue(response('/workspace/shared'));
-		const controller = createController(nodes);
+		const controller = createController(executors);
 		controller.setPresentationVisible(true);
 		await vi.waitFor(() => expect(controller.tree.currentDirectoryPath).toBe('/workspace/shared'));
-		controller.selectNode(remoteExecutionNode.id);
+		controller.selectExecutor(remoteExecutor.id);
 		await vi.waitFor(() => expect(controller.tree.readyResponse).not.toBeNull());
 		expect(getTree).toHaveBeenCalledTimes(2);
 		expect(getTree).toHaveBeenLastCalledWith(
-			{ nodeId: remoteExecutionNode.id, directoryPath: '/workspace/shared' },
+			{ executorId: remoteExecutor.id, directoryPath: '/workspace/shared' },
 			expect.anything(),
 		);
 	});
 
 	it.each([
 		[403, 'FILE_TREE_PERMISSION_DENIED'],
-		[503, 'EXECUTION_NODE_UNAVAILABLE'],
+		[503, 'EXECUTOR_UNAVAILABLE'],
 	] as const)('does not hide %s/%s behind a project-base retry', async (status, code) => {
-		const nodes = nodeStore();
+		const executors = executorStore();
 		vi.mocked(getTree).mockResolvedValueOnce(response('/workspace/nested'));
-		const controller = createController(nodes);
+		const controller = createController(executors);
 		controller.setPresentationVisible(true);
 		await vi.waitFor(() => expect(controller.tree.currentDirectoryPath).toBe('/workspace/nested'));
 		vi.mocked(getTree).mockRejectedValue(new ApiError(status, 'Directory unavailable', code));
-		controller.selectNode(remoteExecutionNode.id);
+		controller.selectExecutor(remoteExecutor.id);
 		await vi.waitFor(() => expect(controller.tree.navigation.kind).toBe('error'));
 		expect(getTree).toHaveBeenCalledTimes(2);
 		expect(getTree).toHaveBeenLastCalledWith(
-			{ nodeId: remoteExecutionNode.id, directoryPath: '/workspace/nested' },
+			{ executorId: remoteExecutor.id, directoryPath: '/workspace/nested' },
 			expect.anything(),
 		);
-		expect(controller.tree.nodeId).toBe(remoteExecutionNode.id);
+		expect(controller.tree.executorId).toBe(remoteExecutor.id);
 	});
 
 	it('browses without a chat and aborts offline requests without falling back to Local', async () => {
-		const nodes = nodeStore();
+		const executors = executorStore();
 		const pending = Promise.withResolvers<FileTreeResponse>();
 		vi.mocked(getTree).mockReturnValueOnce(pending.promise).mockResolvedValue(response('/worker'));
-		const controller = createController(nodes);
+		const controller = createController(executors);
 		controller.setProjectState({ kind: 'absent' });
-		controller.selectNode(remoteExecutionNode.id);
+		controller.selectExecutor(remoteExecutor.id);
 		controller.setPresentationVisible(true);
 		flushSync();
 		const signal = vi.mocked(getTree).mock.calls[0][1]?.signal;
-		nodes.applySnapshot([localExecutionNode, { ...remoteExecutionNode, availability: 'offline' }]);
+		executors.applySnapshot([localExecutor, { ...remoteExecutor, availability: 'offline' }]);
 		flushSync();
 		expect(signal?.aborted).toBe(true);
 		pending.resolve(response('/worker/stale'));
 		await pending.promise;
 		expect(controller.tree.readyResponse).toBeNull();
-		controller.selectNode('33333333-3333-4333-8333-333333333333');
-		controller.selectNode(remoteExecutionNode.id);
+		controller.selectExecutor('33333333-3333-4333-8333-333333333333');
+		controller.selectExecutor(remoteExecutor.id);
 		expect(getTree).toHaveBeenCalledTimes(1);
-		nodes.applySnapshot(nodeStore().nodes);
+		executors.applySnapshot(executorStore().executors);
 		flushSync();
 		await vi.waitFor(() => expect(controller.tree.currentDirectoryPath).toBe('/worker'));
 		expect(getTree).toHaveBeenCalledTimes(2);
-		expect(controller.tree.nodeId).toBe(remoteExecutionNode.id);
+		expect(controller.tree.executorId).toBe(remoteExecutor.id);
 		expect(controller.canGoToChatProject).toBe(false);
 	});
 
-	it('reveals an existing file on its owning node after browsing another node', async () => {
-		const nodes = nodeStore();
+	it('reveals an existing file on its owning executor after browsing another executor', async () => {
+		const executors = executorStore();
 		vi.mocked(getTree).mockResolvedValue(response());
-		const controller = createController(nodes);
+		const controller = createController(executors);
 		controller.setPresentationVisible(true);
-		controller.selectNode(remoteExecutionNode.id);
+		controller.selectExecutor(remoteExecutor.id);
 		await vi.waitFor(() => expect(controller.tree.readyResponse).not.toBeNull());
 		controller.revealFile('/workspace', 'file.txt', 'local');
 		flushSync();
 		await vi.waitFor(() =>
 			expect(controller.tree.focusPathAfterNavigation).toBe('/workspace/file.txt'),
 		);
-		expect(controller.tree.nodeId).toBe('local');
+		expect(controller.tree.executorId).toBe('local');
 	});
 
 	it('revalidates the selected directory after reconnect even while the browser is hidden', async () => {
-		const nodes = nodeStore();
+		const executors = executorStore();
 		vi.mocked(getTree).mockResolvedValue(response('/worker/nested'));
-		const controller = createController(nodes);
-		controller.selectNode(remoteExecutionNode.id);
+		const controller = createController(executors);
+		controller.selectExecutor(remoteExecutor.id);
 		controller.setPresentationVisible(true);
 		await vi.waitFor(() => expect(controller.tree.currentDirectoryPath).toBe('/worker/nested'));
 		controller.setPresentationVisible(false);
-		nodes.applySnapshot([localExecutionNode, { ...remoteExecutionNode, availability: 'offline' }]);
+		executors.applySnapshot([localExecutor, { ...remoteExecutor, availability: 'offline' }]);
 		flushSync();
-		nodes.applySnapshot(nodeStore().nodes);
+		executors.applySnapshot(executorStore().executors);
 		flushSync();
 		expect(getTree).toHaveBeenCalledTimes(1);
 		expect(controller.tree.navigation.kind).toBe('loading');
 		controller.setPresentationVisible(true);
 		await vi.waitFor(() => expect(controller.tree.navigation.kind).toBe('ready'));
 		expect(getTree).toHaveBeenLastCalledWith(
-			{ nodeId: remoteExecutionNode.id, directoryPath: '/worker/nested' },
+			{ executorId: remoteExecutor.id, directoryPath: '/worker/nested' },
 			expect.anything(),
 		);
 	});

@@ -5,7 +5,7 @@ import type {
 	PrimaryWsConnectionPort,
 	WsConnectionListener,
 	WsMessageConsumer,
-} from '../connection.svelte';
+} from '../connection.svelte.ts';
 import { TerminalTransport } from '../terminal-transport.svelte';
 
 class FakeConnection implements PrimaryWsConnectionPort {

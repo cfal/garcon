@@ -1,5 +1,5 @@
 import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
-import type { ExecutionNodesStore } from '$lib/execution-nodes/execution-nodes-store.svelte';
+import type { ExecutorsStore } from '$lib/executors/executors-store.svelte';
 import type { SessionAgentId } from '$lib/types/app';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 import type { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
@@ -24,7 +24,7 @@ import * as m from '$lib/paraglide/messages.js';
 const MINUTES_BY_UNIT = { minutes: 1, hours: 60, days: 1440 } as const;
 
 export interface ScheduledPromptFormStateOptions {
-	executionNodes?: ExecutionNodesStore;
+	executors?: ExecutorsStore;
 	get selectableAgentIds(): readonly SessionAgentId[];
 }
 
@@ -58,7 +58,7 @@ export class ScheduledPromptFormState {
 	) {
 		this.startup = new NewChatFormState({
 			modelCatalog,
-			executionNodes: options.executionNodes,
+			executors: options.executors,
 			remoteSettings,
 			get selectableAgentIds() {
 				return options.selectableAgentIds;
@@ -100,7 +100,7 @@ export class ScheduledPromptFormState {
 		}
 		return (
 			this.startup.settingsLoaded &&
-			this.startup.nodeReady &&
+			this.startup.executorReady &&
 			this.startup.modelCatalogValidated &&
 			this.options.selectableAgentIds.includes(this.startup.agentId) &&
 			this.startup.validationStatus === 'valid' &&
@@ -156,7 +156,7 @@ export class ScheduledPromptFormState {
 			this.busyBehavior = scheduledPrompt.target.busyBehavior;
 			return;
 		}
-		this.startup.selectNode(scheduledPrompt.target.nodeId);
+		this.startup.selectExecutor(scheduledPrompt.target.executorId);
 		this.startup.restoreSelection(scheduledPrompt.target.agentId, {
 			model: scheduledPrompt.target.model,
 			apiProviderId: scheduledPrompt.target.apiProviderId,
@@ -193,7 +193,7 @@ export class ScheduledPromptFormState {
 			schedule,
 			target: {
 				type: 'new-chat',
-				...(this.startup.nodeId === 'local' ? {} : { nodeId: this.startup.nodeId }),
+				...(this.startup.executorId === 'local' ? {} : { executorId: this.startup.executorId }),
 				agentId: this.startup.agentId,
 				projectPath: this.startup.trimmedPath,
 				model: selection.model,

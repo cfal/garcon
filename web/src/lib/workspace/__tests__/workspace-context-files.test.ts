@@ -2,18 +2,18 @@ import { describe, expect, it, vi } from 'vitest';
 import { WorkspaceContextStore } from '../workspace-context.svelte';
 import { createChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte';
 import { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
-import { ExecutionNodesStore } from '$lib/execution-nodes/execution-nodes-store.svelte';
-import { localExecutionNode, remoteExecutionNode } from '$lib/execution-nodes/__tests__/fixtures';
+import { ExecutorsStore } from '$lib/executors/executors-store.svelte';
+import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 
-describe('node-owned workspace files', () => {
-	it('enables remote Files without enabling Git or terminals, and gates only the offline node', () => {
+describe('executor-owned workspace files', () => {
+	it('enables remote Files without enabling Git or terminals, and gates only the offline executor', () => {
 		const sessions = createChatSessionsStore();
-		for (const nodeId of ['local', remoteExecutionNode.id]) {
+		for (const executorId of ['local', remoteExecutor.id]) {
 			sessions.createDraft({
-				id: nodeId,
+				id: executorId,
 				projectPath: '/same',
 				startup: {
-					nodeId,
+					executorId,
 					agentId: 'claude',
 					model: 'opus',
 					permissionMode: 'default',
@@ -24,36 +24,36 @@ describe('node-owned workspace files', () => {
 			});
 		}
 		const remote = {
-			...remoteExecutionNode,
+			...remoteExecutor,
 			machineServices: { files: true, git: false, gh: false, terminals: false },
 		};
-		const nodes = new ExecutionNodesStore(async () => [localExecutionNode, remote]);
-		nodes.applySnapshot([localExecutionNode, remote]);
+		const executors = new ExecutorsStore(async () => [localExecutor, remote]);
+		executors.applySnapshot([localExecutor, remote]);
 		const snapshotFor = vi.fn(() => ({ kind: 'available' as const, effectiveProjectKey: '/same' }));
 		const workspace = new WorkspaceContextStore(
 			sessions,
 			new ModelCatalogStore(),
 			{ snapshotFor },
-			nodes,
+			executors,
 		);
 		sessions.setSelectedChatId(remote.id);
 		expect(workspace.filesProjectState).toMatchObject({
 			kind: 'available',
-			project: { nodeId: remote.id, projectPath: '/same' },
+			project: { executorId: remote.id, projectPath: '/same' },
 		});
 		expect(snapshotFor).toHaveBeenLastCalledWith({
 			kind: 'path',
-			nodeId: remote.id,
+			executorId: remote.id,
 			projectPath: '/same',
 		});
 		expect(workspace.projectState.kind).toBe('request-failed');
 		expect(workspace.currentProject).toBeNull();
-		nodes.applySnapshot([localExecutionNode, { ...remote, availability: 'offline' }]);
+		executors.applySnapshot([localExecutor, { ...remote, availability: 'offline' }]);
 		expect(workspace.filesProjectState.kind).toBe('request-failed');
 		sessions.setSelectedChatId('local');
 		expect(workspace.filesProjectState).toMatchObject({
 			kind: 'available',
-			project: { nodeId: 'local' },
+			project: { executorId: 'local' },
 		});
 		expect(workspace.projectState.kind).toBe('available');
 	});

@@ -16,8 +16,8 @@ const VALIDATION_DELAY_MS = 150;
 
 interface GitTargetDialogOptions {
 	readonly initialPath: string;
-	readonly nodeId: string;
-	readonly nodeContextKey: string;
+	readonly executorId: string;
+	readonly executorContextKey: string;
 	readonly available: boolean;
 	onMutationError?(error: unknown, target: GitProjectTarget): void;
 }
@@ -71,8 +71,8 @@ export class GitTargetDialogState {
 
 	scheduleValidation(): void {
 		const path = this.trimmedPath;
-		const nodeId = this.options.nodeId;
-		const contextKey = this.options.nodeContextKey;
+		const executorId = this.options.executorId;
+		const contextKey = this.options.executorContextKey;
 		this.#cancelWorktreeLoad();
 		this.#targetAbort?.abort();
 		this.#validationAbort?.abort();
@@ -91,7 +91,7 @@ export class GitTargetDialogState {
 		const generation = ++this.#validationGeneration;
 
 		this.#validationTimer = setTimeout(() => {
-			void this.#validatePath(path, generation, nodeId, contextKey);
+			void this.#validatePath(path, generation, executorId, contextKey);
 		}, VALIDATION_DELAY_MS);
 	}
 
@@ -118,7 +118,7 @@ export class GitTargetDialogState {
 
 	async loadWorktrees(): Promise<void> {
 		const path = this.trimmedPath;
-		const nodeId = this.options.nodeId;
+		const executorId = this.options.executorId;
 		const current = this.#captureContext();
 		if (!path || !this.options.available || this.isCreatingWorktree) return;
 
@@ -130,7 +130,7 @@ export class GitTargetDialogState {
 		this.worktreeError = null;
 
 		try {
-			const result = await getGitWorktrees({ nodeId, projectPath: path }, { signal: abort.signal });
+			const result = await getGitWorktrees({ executorId, projectPath: path }, { signal: abort.signal });
 			if (!current() || !this.#isCurrentWorktreeLoad(generation, abort.signal)) return;
 			this.worktrees = result.worktrees;
 		} catch (error) {
@@ -149,7 +149,7 @@ export class GitTargetDialogState {
 
 	async createWorktree(worktreePath: string, branch?: string, baseRef?: string): Promise<void> {
 		const projectPath = this.trimmedPath;
-		const nodeId = this.options.nodeId;
+		const executorId = this.options.executorId;
 		const current = this.#captureContext();
 		const generation = this.#worktreeGeneration;
 		if (!projectPath || !this.options.available || this.isCreatingWorktree) return;
@@ -158,7 +158,7 @@ export class GitTargetDialogState {
 		this.worktreeError = null;
 
 		try {
-			const result = await gitCreateWorktree({ nodeId, projectPath }, worktreePath, {
+			const result = await gitCreateWorktree({ executorId, projectPath }, worktreePath, {
 				branch,
 				baseRef,
 			});
@@ -168,7 +168,7 @@ export class GitTargetDialogState {
 			if (!current() || generation !== this.#worktreeGeneration) return;
 			this.selectWorktree(result.worktreePath || worktreePath);
 		} catch (error) {
-			this.options.onMutationError?.(error, { nodeId, projectPath });
+			this.options.onMutationError?.(error, { executorId, projectPath });
 			if (!current() || generation !== this.#worktreeGeneration) return;
 			this.worktreeError =
 				error instanceof Error ? error.message : m.git_target_load_worktrees_failed();
@@ -184,14 +184,14 @@ export class GitTargetDialogState {
 		const abort = new AbortController();
 		this.#targetAbort = abort;
 		const path = this.trimmedPath;
-		const nodeId = this.options.nodeId;
+		const executorId = this.options.executorId;
 		const current = this.#captureContext();
 		this.isConfirming = true;
 		this.validationError = null;
 
 		try {
 			const result = await getGitTargetCandidates(
-				{ nodeId, projectPath: path },
+				{ executorId, projectPath: path },
 				{ signal: abort.signal },
 			);
 			if (abort.signal.aborted || !current()) return null;
@@ -227,16 +227,16 @@ export class GitTargetDialogState {
 	async #validatePath(
 		path: string,
 		generation: number,
-		nodeId: string,
+		executorId: string,
 		contextKey: string,
 	): Promise<void> {
-		if (nodeId !== this.options.nodeId || contextKey !== this.options.nodeContextKey) return;
+		if (executorId !== this.options.executorId || contextKey !== this.options.executorContextKey) return;
 		const abort = new AbortController();
 		this.#validationAbort = abort;
 		const current = this.#captureContext();
 
 		try {
-			const data = await validateStart(path, { nodeId, signal: abort.signal });
+			const data = await validateStart(path, { executorId, signal: abort.signal });
 			if (!current() || !this.#isCurrentValidation(path, generation, abort.signal)) return;
 
 			if (!data.valid) {
@@ -286,13 +286,13 @@ export class GitTargetDialogState {
 	}
 
 	#captureContext(): () => boolean {
-		const { nodeId, nodeContextKey } = this.options;
+		const { executorId, executorContextKey } = this.options;
 		const path = this.trimmedPath;
 		return () =>
 			!this.#disposed &&
 			this.options.available &&
-			nodeId === this.options.nodeId &&
-			nodeContextKey === this.options.nodeContextKey &&
+			executorId === this.options.executorId &&
+			executorContextKey === this.options.executorContextKey &&
 			path === this.trimmedPath;
 	}
 

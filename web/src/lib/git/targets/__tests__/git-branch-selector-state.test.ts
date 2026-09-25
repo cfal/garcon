@@ -29,7 +29,7 @@ function expectRefRequest(
 	sort: { key: 'name' | 'updated'; direction: 'asc' | 'desc' },
 ): void {
 	expect(getGitRefs).toHaveBeenLastCalledWith(
-		expect.objectContaining({ nodeId: 'local', projectPath }),
+		expect.objectContaining({ executorId: 'local', projectPath }),
 		{
 			query,
 			limit: 200,
@@ -339,7 +339,7 @@ describe('GitBranchSelectorState', () => {
 
 		expect(ok).toBe(true);
 		expect(gitCheckoutRef).toHaveBeenCalledWith(
-			expect.objectContaining({ nodeId: 'local', projectPath: '/project' }),
+			expect.objectContaining({ executorId: 'local', projectPath: '/project' }),
 			'refs/heads/feature',
 			'local-branch',
 		);
@@ -401,7 +401,7 @@ describe('GitBranchSelectorState', () => {
 
 		expect(ok).toBe(true);
 		expect(gitCheckoutRef).toHaveBeenCalledWith(
-			expect.objectContaining({ nodeId: 'local', projectPath: '/project' }),
+			expect.objectContaining({ executorId: 'local', projectPath: '/project' }),
 			'refs/remotes/origin/main',
 			'remote-branch',
 		);
@@ -433,7 +433,7 @@ describe('GitBranchSelectorState', () => {
 
 		expect(ok).toBe(true);
 		expect(gitCreateBranch).toHaveBeenCalledWith(
-			expect.objectContaining({ nodeId: 'local', projectPath: '/project' }),
+			expect.objectContaining({ executorId: 'local', projectPath: '/project' }),
 			'feature/new-ui',
 			{
 				baseRef: 'refs/remotes/origin/main',
@@ -455,7 +455,7 @@ describe('GitBranchSelectorState', () => {
 		const runMutation = vi.fn(
 			async (
 				_surfaceId: string,
-				_nodeId: string,
+				_executorId: string,
 				_projectPath: string,
 				_effectiveProjectKey: string,
 				execute: () => Promise<{ success: boolean; error?: string }>,
@@ -477,7 +477,7 @@ describe('GitBranchSelectorState', () => {
 		await expect(pendingCreate).resolves.toBe(true);
 
 		expect(getGitRefs).toHaveBeenCalledWith(
-			expect.objectContaining({ nodeId: 'local', projectPath: '/project/worktrees/feature' }),
+			expect.objectContaining({ executorId: 'local', projectPath: '/project/worktrees/feature' }),
 			{
 				query: 'origin',
 				limit: 200,
@@ -486,7 +486,7 @@ describe('GitBranchSelectorState', () => {
 			},
 		);
 		expect(gitCreateBranch).toHaveBeenCalledWith(
-			expect.objectContaining({ nodeId: 'local', projectPath: '/project/worktrees/feature' }),
+			expect.objectContaining({ executorId: 'local', projectPath: '/project/worktrees/feature' }),
 			'captured-target',
 			{
 				baseRef: undefined,
@@ -526,7 +526,7 @@ describe('GitBranchSelectorState', () => {
 		expect(branchSelector.currentProjectPath).toBe('/worktree-b');
 		expect(branchSelector.currentBranch).toBe('develop');
 		expect(getGitRefs).not.toHaveBeenCalledWith(
-			expect.objectContaining({ nodeId: 'local', projectPath: '/worktree-a' }),
+			expect.objectContaining({ executorId: 'local', projectPath: '/worktree-a' }),
 			{
 				query: '',
 				limit: 200,
@@ -540,7 +540,7 @@ describe('GitBranchSelectorState', () => {
 		const runMutation = vi.fn(
 			async (
 				_surfaceId: string,
-				_nodeId: string,
+				_executorId: string,
 				_projectPath: string,
 				_effectiveProjectKey: string,
 				execute: () => Promise<{ success: boolean; error?: string }>,

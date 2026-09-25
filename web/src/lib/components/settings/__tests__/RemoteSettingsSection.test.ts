@@ -42,20 +42,20 @@ describe('RemoteSettingsSection', () => {
 		vi.clearAllMocks();
 	});
 
-	it.each(['not-a-node', '', '22222222-2222-4222-8222-222222222222'])(
+	it.each(['not-a-executor', '', '22222222-2222-4222-8222-222222222222'])(
 		'shows an unavailable saved generator and requires explicit Auto repair (%s)',
-		async (nodeId) => {
+		async (executorId) => {
 			const store = new RemoteSettingsStore();
 			store.applySnapshot(
 				makeRemoteSettingsSnapshot({
-					ui: { chatTitle: { nodeId, enabled: true } },
+					ui: { chatTitle: { executorId, enabled: true } },
 					uiEffective: {},
 				}),
 			);
 			setTestRemoteSettingsStore(store);
 			mockRemoteSettingsUpdate(store);
 			render(RemoteSettingsSectionTestHost);
-			expect(screen.getByText(/Unavailable node/)).toBeTruthy();
+			expect(screen.getByText(/Unavailable executor/)).toBeTruthy();
 			const auto = screen.getAllByRole('button', { name: 'Auto (Local)' })[0];
 			expect(auto.getAttribute('aria-pressed')).toBe('false');
 			expect(updateRemoteSettings).not.toHaveBeenCalled();
@@ -63,7 +63,7 @@ describe('RemoteSettingsSection', () => {
 			await waitFor(() =>
 				expect(updateRemoteSettings).toHaveBeenCalledWith({ ui: { chatTitle: { enabled: true } } }),
 			);
-			await waitFor(() => expect(screen.queryByText(/Unavailable node/)).toBeNull());
+			await waitFor(() => expect(screen.queryByText(/Unavailable executor/)).toBeNull());
 		},
 	);
 
@@ -80,7 +80,7 @@ describe('RemoteSettingsSection', () => {
 					ui: {
 						[settingsKey]: {
 							...preferences,
-							nodeId: '22222222-2222-4222-8222-222222222222',
+							executorId: '22222222-2222-4222-8222-222222222222',
 							model: 'synthetic-model',
 						},
 					},
@@ -93,7 +93,7 @@ describe('RemoteSettingsSection', () => {
 			const toggle = screen.getByRole('switch', { name: label });
 			expect(toggle.getAttribute('aria-checked')).toBe('false');
 			const card = within(toggle.parentElement!.parentElement!);
-			expect(card.getByText(/Unavailable node/)).toBeTruthy();
+			expect(card.getByText(/Unavailable executor/)).toBeTruthy();
 			await fireEvent.click(card.getByRole('button', { name: 'Auto (Local)' }));
 			await waitFor(() =>
 				expect(updateRemoteSettings).toHaveBeenCalledWith({ ui: { [settingsKey]: preferences } }),
@@ -390,7 +390,7 @@ describe('RemoteSettingsSection', () => {
 						modelProtocol: null,
 						thinkingMode: 'none',
 						contextWindowTokens: 200_000,
-						nodeId: 'local',
+						executorId: 'local',
 					},
 				},
 			});

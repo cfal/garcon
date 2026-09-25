@@ -6,7 +6,7 @@ import { seedLocalSettings } from '../../support/local-settings-seed.js';
 import { SpaDriver } from '../../support/spa-driver.js';
 
 describe('Lightpanda on-demand project resolution', () => {
-  test('a rejected remote send refreshes the composer project on its own node', async () => {
+  test('a rejected remote send refreshes the composer project on its own executor', async () => {
     await withE2eFixture('remote-unavailable-project-submit', async fixture => {
       await fixture.page.evaluateOnNewDocument(seedLocalSettings, { showQuickCommitTray: false });
       const { client, directAgents, executionDirs } = fixture.integration;
@@ -19,7 +19,7 @@ describe('Lightpanda on-demand project resolution', () => {
       await app.setViewport(390, 844);
       await app.openChat(chatId);
       await fixture.waitForSpaWebSocket();
-      await app.waitForButton('Execution node: Integration worker');
+      await app.waitForButton('Executor: Integration worker');
       const resolutionRequests: URL[] = [];
       fixture.page.on('request', request => {
         const url = new URL(request.url());
@@ -30,7 +30,7 @@ describe('Lightpanda on-demand project resolution', () => {
       await fixture.page.waitForFunction(() =>
         document.querySelector('[data-composer-shell] [data-project-availability-notice]')?.textContent?.includes('Project folder unavailable'), { timeout: 20_000 });
       expect(resolutionRequests.length).toBeGreaterThan(0);
-      expect(resolutionRequests.every(url => url.searchParams.get('nodeId') === client.nodeId)).toBe(true);
+      expect(resolutionRequests.every(url => url.searchParams.get('executorId') === client.executorId)).toBe(true);
       expect(await fixture.page.$eval('[data-composer] textarea', element => (element as HTMLTextAreaElement).value)).toBe('Synthetic rejected send');
       await mkdir(projectPath);
       await fixture.page.$eval('[data-composer-shell] [data-project-availability-notice]', element => {
@@ -42,7 +42,7 @@ describe('Lightpanda on-demand project resolution', () => {
         !document.querySelector('[data-composer-shell] [data-project-availability-notice]'));
       await app.sendComposer('Synthetic retry after repair');
       await app.waitForAssistantMessageContaining('Synthetic retry after repair');
-      expect((await client.getChatSnapshot(chatId)).chat.nodeId).toBe(client.nodeId);
+      expect((await client.getChatSnapshot(chatId)).chat.executorId).toBe(client.executorId);
       expect(fixture.browserErrors.filter(message => !message.includes('409'))).toEqual([]);
     }, { executionBackend: 'remote-controller-dials', projectRoots: 'separate' });
   }, 60_000);

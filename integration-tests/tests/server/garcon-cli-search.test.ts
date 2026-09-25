@@ -8,7 +8,7 @@ import {
   withIntegrationFixture,
 } from '../../support/integration-fixture.js';
 
-const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
+const REPO_ROOT = fileURLToPath(new URL('../../..', import.meta.url));
 const WORKSPACE = 'cli-search-integration';
 
 function marker(prefix: string): string {

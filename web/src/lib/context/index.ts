@@ -3,7 +3,7 @@
 
 import { createContext } from 'svelte';
 import type { ApiProvidersStore } from '$lib/api-providers/api-providers-store.svelte.js';
-import type { ExecutionNodesStore } from '$lib/execution-nodes/execution-nodes-store.svelte.js';
+import type { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
 import type { AuthStore } from '$lib/stores/auth.svelte';
 import type { TicketSourceNavigationController } from '$lib/tickets/navigation/ticket-source-navigation-controller.js';
 import type { LocalSettingsStore } from '$lib/stores/local-settings.svelte';
@@ -69,7 +69,7 @@ export const [getChatProcessingReconciler, setChatProcessingReconciler] =
 export const [getFileSessions, setFileSessions] = createContext<FileSessionRegistry>();
 export const [getReadReceiptOutbox, setReadReceiptOutbox] = createContext<ReadReceiptOutboxStore>();
 export const [getModelCatalog, setModelCatalog] = createContext<ModelCatalogStore>();
-export const [getExecutionNodes, setExecutionNodes, hasExecutionNodes] = createContext<ExecutionNodesStore>();
+export const [getExecutors, setExecutors, hasExecutors] = createContext<ExecutorsStore>();
 export const [getApiProviders, setApiProviders] = createContext<ApiProvidersStore>();
 export const [getNotifications, setNotifications] = createContext<NotificationsStore>();
 export const [getSidebarSearch, setSidebarSearch] = createContext<SidebarSearchStore>();

@@ -1,10 +1,10 @@
-export interface NodeCallOptions {
+export interface ExecutorCallOptions {
   readonly signal?: AbortSignal;
   readonly timeoutMs?: number;
 }
 
 export interface AgentResourceScope {
-  readonly nodeId: string;
+  readonly executorId: string;
   readonly instanceId: string;
   readonly integrationId: string;
 }
@@ -33,10 +33,10 @@ export function isAgentResourceRef<K extends string>(
   if (!value || typeof value !== 'object') return false;
   const ref = value as Record<string, unknown>;
   return ref.kind === kind
-    && ['nodeId', 'instanceId', 'integrationId', 'id'].every((key) => (
+    && ['executorId', 'instanceId', 'integrationId', 'id'].every((key) => (
       typeof ref[key] === 'string' && ref[key].length > 0
     ))
-    && (!scope || (ref.nodeId === scope.nodeId
+    && (!scope || (ref.executorId === scope.executorId
       && ref.instanceId === scope.instanceId
       && ref.integrationId === scope.integrationId));
 }

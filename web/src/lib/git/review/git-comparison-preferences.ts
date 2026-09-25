@@ -12,7 +12,7 @@ export const GIT_COMPARISON_CHAT_PREFERENCE_LIMIT = 20;
 export const GIT_COMPARISON_PROJECT_PREFERENCE_LIMIT = 20;
 
 export interface GitComparisonPreferenceContext {
-	nodeId: string;
+	executorId: string;
 	chatId: string | null;
 	projectPath: string;
 }
@@ -20,7 +20,7 @@ export interface GitComparisonPreferenceContext {
 export interface GitComparisonPreferences {
 	recall(context: GitComparisonPreferenceContext): GitComparisonSpecification | null;
 	rememberChat(
-		context: Pick<GitComparisonPreferenceContext, 'nodeId' | 'chatId'>,
+		context: Pick<GitComparisonPreferenceContext, 'executorId' | 'chatId'>,
 		specification: GitComparisonSpecification,
 	): void;
 	rememberUserSelection(
@@ -35,13 +35,13 @@ export interface GitComparisonPreferencePersistence {
 }
 
 interface GitComparisonPreferenceEntry {
-	nodeId: string;
+	executorId: string;
 	chatId: string;
 	specification: GitComparisonSpecification;
 }
 
 interface GitComparisonProjectPreferenceEntry {
-	nodeId: string;
+	executorId: string;
 	projectPath: string;
 	specification: GitComparisonSpecification;
 }
@@ -66,7 +66,7 @@ export class LocalGitComparisonPreferences implements GitComparisonPreferences {
 		const record = this.#readRecord();
 		if (isNonEmptyString(context.chatId)) {
 			const chatIndex = record.entries.findIndex(
-				(entry) => entry.nodeId === context.nodeId && entry.chatId === context.chatId,
+				(entry) => entry.executorId === context.executorId && entry.chatId === context.chatId,
 			);
 			const chatEntry = record.entries[chatIndex];
 			if (chatEntry) {
@@ -80,7 +80,7 @@ export class LocalGitComparisonPreferences implements GitComparisonPreferences {
 
 		for (const projectPath of projectPathAndAncestors(context.projectPath)) {
 			const projectIndex = record.projectEntries.findIndex(
-				(entry) => entry.nodeId === context.nodeId && entry.projectPath === projectPath,
+				(entry) => entry.executorId === context.executorId && entry.projectPath === projectPath,
 			);
 			const projectEntry = record.projectEntries[projectIndex];
 			if (!projectEntry) continue;
@@ -94,7 +94,7 @@ export class LocalGitComparisonPreferences implements GitComparisonPreferences {
 	}
 
 	rememberChat(
-		context: Pick<GitComparisonPreferenceContext, 'nodeId' | 'chatId'>,
+		context: Pick<GitComparisonPreferenceContext, 'executorId' | 'chatId'>,
 		specification: GitComparisonSpecification,
 	): void {
 		if (!isNonEmptyString(context.chatId)) return;
@@ -114,8 +114,8 @@ export class LocalGitComparisonPreferences implements GitComparisonPreferences {
 		if (projectPath) {
 			record.projectEntries = rememberEntry(
 				record.projectEntries,
-				(entry) => entry.nodeId === context.nodeId && entry.projectPath === projectPath,
-				{ nodeId: context.nodeId, projectPath, specification: cloneSpecification(specification) },
+				(entry) => entry.executorId === context.executorId && entry.projectPath === projectPath,
+				{ executorId: context.executorId, projectPath, specification: cloneSpecification(specification) },
 				GIT_COMPARISON_PROJECT_PREFERENCE_LIMIT,
 			);
 		}
@@ -124,15 +124,15 @@ export class LocalGitComparisonPreferences implements GitComparisonPreferences {
 
 	#rememberChatEntry(
 		record: GitComparisonPreferenceRecord,
-		context: Pick<GitComparisonPreferenceContext, 'nodeId' | 'chatId'>,
+		context: Pick<GitComparisonPreferenceContext, 'executorId' | 'chatId'>,
 		specification: GitComparisonSpecification,
 	): void {
 		if (!isNonEmptyString(context.chatId)) return;
 		record.entries = rememberEntry(
 			record.entries,
-			(entry) => entry.nodeId === context.nodeId && entry.chatId === context.chatId,
+			(entry) => entry.executorId === context.executorId && entry.chatId === context.chatId,
 			{
-				nodeId: context.nodeId,
+				executorId: context.executorId,
 				chatId: context.chatId,
 				specification: cloneSpecification(specification),
 			},
@@ -193,13 +193,13 @@ function parseChatEntries(values: unknown[]): GitComparisonPreferenceEntry[] {
 	for (const valueEntry of values) {
 		if (entries.length >= GIT_COMPARISON_CHAT_PREFERENCE_LIMIT) break;
 		if (!isRecord(valueEntry) || !isNonEmptyString(valueEntry.chatId)) continue;
-		const nodeId = isNonEmptyString(valueEntry.nodeId) ? valueEntry.nodeId : 'local';
-		const key = JSON.stringify([nodeId, valueEntry.chatId]);
+		const executorId = isNonEmptyString(valueEntry.executorId) ? valueEntry.executorId : 'local';
+		const key = JSON.stringify([executorId, valueEntry.chatId]);
 		if (seenChatIds.has(key)) continue;
 		const specification = parseSpecification(valueEntry.specification);
 		if (!specification) continue;
 		seenChatIds.add(key);
-		entries.push({ nodeId, chatId: valueEntry.chatId, specification });
+		entries.push({ executorId, chatId: valueEntry.chatId, specification });
 	}
 	return entries;
 }
@@ -211,13 +211,13 @@ function parseProjectEntries(values: unknown[]): GitComparisonProjectPreferenceE
 		if (entries.length >= GIT_COMPARISON_PROJECT_PREFERENCE_LIMIT) break;
 		if (!isRecord(valueEntry) || !isNonEmptyString(valueEntry.projectPath)) continue;
 		const [projectPath] = projectPathAndAncestors(valueEntry.projectPath);
-		const nodeId = isNonEmptyString(valueEntry.nodeId) ? valueEntry.nodeId : 'local';
-		const key = JSON.stringify([nodeId, projectPath]);
+		const executorId = isNonEmptyString(valueEntry.executorId) ? valueEntry.executorId : 'local';
+		const key = JSON.stringify([executorId, projectPath]);
 		if (!projectPath || seenProjectPaths.has(key)) continue;
 		const specification = parseSpecification(valueEntry.specification);
 		if (!specification) continue;
 		seenProjectPaths.add(key);
-		entries.push({ nodeId, projectPath, specification });
+		entries.push({ executorId, projectPath, specification });
 	}
 	return entries;
 }

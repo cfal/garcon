@@ -14,7 +14,7 @@ import type {
 } from '$lib/ws/terminal-transport.svelte.js';
 import type { PrimaryWsConnectionPort } from '$lib/ws/connection.svelte.js';
 import type { TerminalMetadata, TerminalStreamClientMessage } from '$shared/terminal';
-import type { ExecutionNodesStore } from '$lib/execution-nodes/execution-nodes-store.svelte.js';
+import type { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
 
 export type TerminalSessionRuntime = Pick<
 	TerminalRuntime,
@@ -51,7 +51,7 @@ export interface TerminalClientSession {
 	replayTruncatedAt: number | null;
 }
 
-export interface TerminalNodeInventory {
+export interface TerminalExecutorInventory {
 	status: 'loading' | 'ready' | 'failed';
 	runtimeId?: string;
 	epoch?: string;
@@ -59,7 +59,7 @@ export interface TerminalNodeInventory {
 }
 
 export interface TerminalRegistryDeps {
-	nodes?: Pick<ExecutionNodesStore, 'nodes' | 'label' | 'onChanged'>;
+	executors?: Pick<ExecutorsStore, 'executors' | 'label' | 'onChanged'>;
 	connection: PrimaryWsConnectionPort;
 	getClientId(): string;
 	now?: () => number;
@@ -73,7 +73,7 @@ export interface TerminalRegistryDeps {
 	) => TerminalSessionRuntime | Promise<TerminalSessionRuntime>;
 	loadRuntime?: () => Promise<TerminalRuntimeModule>;
 	reloadApplication?: () => void;
-	onSuccessfulList?(terminalIds: readonly string[], nodeId: string): void;
+	onSuccessfulList?(terminalIds: readonly string[], executorId: string): void;
 	onSessionTerminated?(terminalId: string): void;
 }
 
