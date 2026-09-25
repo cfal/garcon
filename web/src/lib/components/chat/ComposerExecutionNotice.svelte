@@ -16,17 +16,15 @@
 			This chat's execution node is no longer configured.
 		{:else}{nodes.label(nodeId)} is unavailable.{/if}
 	</p>
-{:else if !catalog.isValidated}
+{:else if catalog.error}
 	<div role="status" class="flex items-center gap-2 px-4 py-2 text-sm text-muted-foreground">
-		{#if catalog.error}
-			<span class="min-w-0 break-words">{catalog.error}</span>
-			<button
-				type="button"
-				class="text-foreground underline focus-visible:ring-2 focus-visible:ring-ring"
-				onclick={() => void catalog.forceRefresh()}>Retry</button
-			>
-		{:else}Loading models...{/if}
+		<span class="min-w-0 break-words">{catalog.error}</span>
+		<button
+			type="button"
+			class="text-foreground underline focus-visible:ring-2 focus-visible:ring-ring"
+			onclick={() => void catalog.forceRefresh()}>Retry</button
+		>
 	</div>
-{:else if !providerAvailable}
+{:else if catalog.isValidated && !providerAvailable}
 	<p role="status" class="break-words px-4 py-2 text-sm text-muted-foreground">The selected provider or model is unavailable on this node.</p>
 {/if}

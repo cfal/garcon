@@ -26,15 +26,19 @@ describe('ComposerExecutionNotice', () => {
 		expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
 	});
 
-	it('shows loading and retry only for a ready node with an unvalidated catalog', async () => {
+	it('stays silent while models load and offers retry only for a failed catalog', async () => {
 		const { nodes, catalog } = fixture();
-		const view = render(ComposerExecutionNotice, { nodeId: remoteExecutionNode.id, nodes, catalog });
-		expect(screen.getByRole('status').textContent).toContain('Loading models...');
+		const view = render(ComposerExecutionNotice, {
+			nodeId: remoteExecutionNode.id, nodes, catalog, providerAvailable: false,
+		});
+		expect(screen.queryByRole('status')).toBeNull();
 		await view.rerender({ catalog: { ...catalog, error: 'Synthetic catalog failure' } });
 		expect(screen.getByRole('status').textContent).toContain('Synthetic catalog failure');
 		await fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
 		expect(catalog.forceRefresh).toHaveBeenCalledOnce();
 		await view.rerender({ catalog: { ...catalog, isValidated: true } });
+		expect(screen.getByRole('status').textContent).toContain('The selected provider or model is unavailable on this node.');
+		await view.rerender({ providerAvailable: true });
 		expect(screen.queryByRole('status')).toBeNull();
 	});
 });

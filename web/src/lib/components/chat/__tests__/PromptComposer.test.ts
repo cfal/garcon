@@ -101,7 +101,9 @@ describe('PromptComposer focus', () => {
 		});
 		const textarea = screen.getByRole('textbox');
 		await fireEvent.input(textarea, { target: { value: 'Synthetic remote input' } });
-		const send = screen.getByRole<HTMLButtonElement>('button', { name: 'Send message' });
+		const send = screen.getByRole<HTMLButtonElement>('button', { name: 'Loading models...' });
+		expect(send.title).toBe('Loading models...');
+		expect(screen.queryByText('Loading models...')).toBeNull();
 		await waitFor(() => expect(load).toHaveBeenCalledTimes(1));
 		expect(send.disabled).toBe(true);
 		await fireEvent.click(send);
@@ -109,12 +111,14 @@ describe('PromptComposer focus', () => {
 		expect(onsubmit).not.toHaveBeenCalled();
 		coldLoad.resolve();
 		await waitFor(() => expect(send.disabled).toBe(false));
+		expect(send.getAttribute('aria-label')).toBe('Send message');
 		await fireEvent.keyDown(textarea, { key: 'Enter' });
 		expect(onsubmit).toHaveBeenCalledTimes(1);
 
 		remote.invalidate();
 		await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
 		expect(send.disabled).toBe(true);
+		expect(send.getAttribute('aria-label')).toBe('Loading models...');
 		await fireEvent.keyDown(textarea, { key: 'Enter' });
 		expect(onsubmit).toHaveBeenCalledTimes(1);
 		reconnectLoad.resolve();
@@ -186,7 +190,7 @@ describe('PromptComposer focus', () => {
 			expect(remote.lastValidatedAt).toBeNull();
 			remote.invalidate();
 			await waitFor(() => expect(refresh).toHaveBeenCalledTimes(2));
-			expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Send message' }).disabled).toBe(true);
+			expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Loading models...' }).disabled).toBe(true);
 		} finally { pending.resolve(); }
 	});
 

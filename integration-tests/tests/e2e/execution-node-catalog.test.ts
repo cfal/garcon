@@ -41,7 +41,8 @@ test('cold remote chats load their catalog before submission and refresh it afte
       await fixture.page.waitForFunction((expected) => document.documentElement.dataset.remoteCatalogPhase === String(expected), { timeout: 20_000 }, phase);
       const prompt = `Synthetic catalog-gated turn ${phase}`;
       await app.fill('[data-composer] textarea', prompt);
-      expect(await fixture.page.$eval('[data-composer] button[aria-label="Send message"]', (element) => (element as HTMLButtonElement).disabled)).toBe(true);
+      expect(await fixture.page.$eval('[data-composer] button[aria-label="Loading models..."]', (element) => (element as HTMLButtonElement).disabled)).toBe(true);
+      expect(await fixture.page.$eval('[data-composer]', (element) => element.textContent)).not.toContain('Loading models...');
       await fixture.page.$eval('[data-composer] textarea', (element) => element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
       expect((await client.listChats()).sessions.find((chat) => chat.id === chatId)?.thinkingMode).toBe('high');
       await fixture.page.evaluate(() => document.dispatchEvent(new Event('release-remote-catalog')));
