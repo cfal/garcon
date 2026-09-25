@@ -57,6 +57,7 @@
 		createError = null,
 		closeError = null,
 	}: Props = $props();
+	let terminalFocusTarget = $state<HTMLInputElement | null>(null);
 	const localSettings = createLocalSettingsStore();
 	function sessionFor(
 		selectedTerminalId: string,
@@ -93,7 +94,10 @@
 		attach: () => ({ lease: 1, ready: Promise.resolve() }),
 		park: () => undefined,
 		scheduleFit: () => undefined,
-		focus: () => onFocus(),
+		focus: () => {
+			terminalFocusTarget?.focus();
+			onFocus();
+		},
 		pasteFromClipboard: () => Promise.resolve(),
 		applyFontSize: (fontSize: number) => onFontSize(fontSize),
 	};
@@ -171,3 +175,10 @@
 </script>
 
 <TerminalSurface {terminalId} {host} {terminals} {workspace} />
+<input
+	bind:this={terminalFocusTarget}
+	data-testid="terminal-focus-target"
+	aria-label="Terminal focus target"
+	tabindex="-1"
+	style="position: fixed; inset-inline-start: -10000px; opacity: 0;"
+/>

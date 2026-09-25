@@ -1298,6 +1298,7 @@
 	"terminal_terminate_description": "The terminal process will be terminated. This cannot be undone.",
 	"terminal_terminate": "Terminate",
 	"terminal_close_tab": "Close terminal tab",
+	"terminal_exit": "Exit terminal",
 	"commit_surface_close_title": "Close Commit?",
 	"commit_surface_close_drafts_singular": "1 commit draft will be discarded.",
 	"commit_surface_close_drafts_plural": "{count} commit drafts will be discarded.",

@@ -5,7 +5,7 @@
 	import Pencil from '@lucide/svelte/icons/pencil';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import Square from '@lucide/svelte/icons/square';
-	import X from '@lucide/svelte/icons/x';
+	import LogOut from '@lucide/svelte/icons/log-out';
 	import { getLocalSettings, getTerminalRegistry, getWorkspaceCoordinator } from '$lib/context';
 	import { terminalSurfaceId, type WorkspaceWindowId } from '$lib/workspace/surface-types';
 	import { collectWindowNodes, windowIdOfSurface } from '$lib/workspace/window-tree.js';
@@ -241,7 +241,10 @@
 	}
 
 	function toggleInputModifier(modifier: 'ctrl' | 'alt'): void {
-		runtime?.inputControls.toggleModifier(modifier);
+		const retainedRuntime = runtime;
+		if (!retainedRuntime) return;
+		retainedRuntime.inputControls.toggleModifier(modifier);
+		retainedRuntime.focus();
 	}
 
 	function sendToolbarKey(key: TerminalToolbarKey): void {
@@ -297,13 +300,14 @@
 			<TerminalSettingsMenu />
 			<button
 				type="button"
-				class="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+				class="inline-flex h-8 shrink-0 items-center gap-1 rounded-md border border-border px-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
 				onclick={() => void closeTerminal()}
 				disabled={workspace.isSurfaceCloseBlocked(terminalSurfaceId(terminalId))}
-				aria-label={m.terminal_close_tab()}
-				title={m.terminal_close_tab()}
+				aria-label={m.terminal_exit()}
+				title={m.terminal_exit()}
 			>
-				<X class="h-4 w-4" />
+				<LogOut class="h-4 w-4" />
+				<span>{m.terminal_exit()}</span>
 			</button>
 		</div>
 	{/if}
@@ -352,6 +356,7 @@
 				<button
 					type="button"
 					class="h-8 rounded-md border border-border px-2 text-xs"
+					onpointerdown={(event) => event.preventDefault()}
 					onclick={() => toggleInputModifier('ctrl')}
 					aria-pressed={runtime.inputControls.ctrlMode !== 'inactive'}
 					>{m.terminal_key_control()}</button
@@ -359,6 +364,7 @@
 				<button
 					type="button"
 					class="h-8 rounded-md border border-border px-2 text-xs"
+					onpointerdown={(event) => event.preventDefault()}
 					onclick={() => toggleInputModifier('alt')}
 					aria-pressed={runtime.inputControls.altMode !== 'inactive'}>{m.terminal_key_alt()}</button
 				>

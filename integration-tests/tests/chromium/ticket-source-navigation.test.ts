@@ -201,6 +201,8 @@ test('a held target page reports its deadline once without installing the late r
     });
     try {
       await page.getByRole('button', { name: 'Open source', exact: true }).click();
+      // Let the newly published chat surface register while the browser clock is frozen.
+      await page.clock.fastForward(100);
       await requestStarted;
       const composer = page.locator('textarea:visible');
       await composer.fill('Synthetic deadline draft.');
