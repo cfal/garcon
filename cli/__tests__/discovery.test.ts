@@ -105,6 +105,7 @@ describe('discoverRuntime', () => {
       workspaceName: 'review',
       localCapability: testFixture.descriptor.localCapability,
       workspaceDir: testFixture.workspaceDir,
+      selector: { workspace: 'review' },
     });
   });
 

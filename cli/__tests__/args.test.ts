@@ -47,7 +47,7 @@ describe('parseCliArgs', () => {
   test('parses a minimal resume and stdin prompt', () => {
     expect(parseCliArgs(['resume', CHAT_ID, '-'], ENV, '/repo')).toEqual({
       kind: 'resume',
-      workspace: 'default',
+      workspace: undefined,
       configDir: '/home/test/.garcon',
       chatId: CHAT_ID,
       prompt: null,
@@ -145,14 +145,14 @@ describe('parseCliArgs', () => {
     expect(parseCliArgs(['list', 'agents'], ENV)).toEqual({
       kind: 'list',
       resource: 'agents',
-      workspace: 'default',
+      workspace: undefined,
       configDir: '/home/test/.garcon',
       json: false,
     });
     expect(parseCliArgs(['list', 'preambles', '--json'], ENV)).toEqual({
       kind: 'list',
       resource: 'preambles',
-      workspace: 'default',
+      workspace: undefined,
       configDir: '/home/test/.garcon',
       json: true,
     });
@@ -455,7 +455,7 @@ describe('parseCliArgs', () => {
   test('parses a minimal resume-async command', () => {
     expect(parseCliArgs(['resume-async', CHAT_ID, 'Implement the review'], ENV)).toEqual({
       kind: 'resume-async',
-      workspace: 'default',
+      workspace: undefined,
       configDir: '/home/test/.garcon',
       chatId: CHAT_ID,
       allowSteer: false,
@@ -522,7 +522,7 @@ describe('parseCliArgs', () => {
   test('parses a minimal stop command with connection options', () => {
     expect(parseCliArgs(['stop', CHAT_ID], ENV)).toEqual({
       kind: 'stop',
-      workspace: 'default',
+      workspace: undefined,
       configDir: '/home/test/.garcon',
       chatId: CHAT_ID,
       json: false,
@@ -655,7 +655,7 @@ describe('parseCliArgs', () => {
       '--run', 'run-1', '--server-instance', 'instance-1', '--json',
     ], ENV)).toEqual({
       kind: 'permission-answer',
-      workspace: 'default',
+      workspace: undefined,
       configDir: '/home/test/.garcon',
       chatId: CHAT_ID,
       permissionOccurrenceId: 'permission-1',
@@ -781,7 +781,7 @@ describe('chat research arguments', () => {
       '--json',
     ], ENV)).toEqual({
       kind: 'chats',
-      workspace: 'default',
+      workspace: undefined,
       configDir: '/home/test/.garcon',
       filter: 'project:/garcon tag:cli',
       limit: 25,
@@ -835,7 +835,7 @@ describe('chat research arguments', () => {
       '--json',
     ], ENV)).toEqual({
       kind: 'read',
-      workspace: 'default',
+      workspace: undefined,
       configDir: '/home/test/.garcon',
       chatId: CHAT_ID,
       anchorOrdinal: 84,
@@ -977,7 +977,7 @@ describe('fork arguments', () => {
   test('parses bare, synchronous, asynchronous, and stdin forks', () => {
     expect(parseCliArgs(['fork', CHAT_ID], ENV)).toEqual({
       kind: 'fork',
-      workspace: 'default',
+      workspace: undefined,
       configDir: '/home/test/.garcon',
       sourceChatId: CHAT_ID,
       allowHandoffFork: false,
@@ -1096,7 +1096,7 @@ describe('handoff artifact arguments', () => {
   test('parses the default and arbitrary bounded context windows', () => {
     expect(parseCliArgs(['handoff', CHAT_ID], ENV)).toEqual({
       kind: 'handoff',
-      workspace: 'default',
+      workspace: undefined,
       configDir: '/home/test/.garcon',
       chatId: CHAT_ID,
       contextWindowTokens: 500_000,
@@ -1165,7 +1165,7 @@ describe('native session lookup arguments', () => {
     );
     expect(parseCliArgs(['lookup-native-session', 'session-123'], ENV)).toEqual({
       kind: 'lookup-native-session',
-      workspace: 'default',
+      workspace: undefined,
       configDir: '/home/test/.garcon',
       nativeSessionId: 'session-123',
     });

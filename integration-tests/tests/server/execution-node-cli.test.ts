@@ -24,14 +24,16 @@ async function runtimeFile(fixture: IntegrationFixture): Promise<string> {
   return join(directory, names[0]!);
 }
 
-async function runCli(fixture: IntegrationFixture, args: string[], runtime: string) {
+async function runCli(fixture: IntegrationFixture, args: string[], runtime?: string) {
   return runWorkerCommand(fixture, [process.execPath, CLI, ...args], runtime);
 }
 
-async function runWorkerCommand(fixture: IntegrationFixture, argv: string[], runtime: string) {
+async function runWorkerCommand(fixture: IntegrationFixture, argv: string[], runtime?: string) {
   const child = Bun.spawn(argv, {
     cwd: fixture.executionDirs.project,
-    env: { ...process.env, GARCON_CLI_RUNTIME: runtime, GARCON_WORKSPACE: 'unrelated-inherited-workspace', GARCON_CONFIG_DIR: '/missing' },
+    env: { ...process.env, GARCON_CLI_RUNTIME: runtime ?? '',
+      GARCON_WORKSPACE: runtime ? 'unrelated-inherited-workspace' : '',
+      GARCON_CONFIG_DIR: runtime ? '/missing' : fixture.executionDirs.config },
     stdout: 'pipe', stderr: 'pipe',
   });
   const [exitCode, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
@@ -67,18 +69,18 @@ for (const backend of ['remote-controller-dials', 'remote-node-dials'] as const)
       let client = fixture.client;
       const nodeId = client.nodeId;
       const runtime = await runtimeFile(fixture);
-      const discover = () => discoverRuntime({ runtimeFile: runtime, configDir: '/missing', workspace: 'unused' });
+      const discover = () => discoverRuntime({ configDir: fixture.executionDirs.config });
       await expect(discover()).rejects.toThrow('HTTP 403');
       await client.patch(`/api/v1/execution-nodes/${nodeId}`, { allowControllerCli: true });
       const connection = await discover();
       expect(connection).toMatchObject({ defaultNodeId: nodeId, workspaceName: 'cli-node-integration' });
-      const missing = await runCli(fixture, ['status', fixture.newChatId(), '--messages', '0'], runtime);
+      const missing = await runCli(fixture, ['status', fixture.newChatId(), '--messages', '0']);
       expect(missing).toMatchObject({ exitCode: 2, stdout: '' });
       expect(missing.stderr).toContain('Session not found (HTTP 404, SESSION_NOT_FOUND)');
       const oldInvocation = new GarconClient(connection);
       const agent = fixture.directAgents.openAi;
       const started = await runCli(fixture, ['start', '--cwd', fixture.executionDirs.project, '--agent', agent.agentId,
-        '--provider', agent.provider.providerId, '--endpoint', agent.provider.endpointId, '--model', agent.provider.model, 'Synthetic remote CLI task.'], runtime);
+        '--provider', agent.provider.providerId, '--endpoint', agent.provider.endpointId, '--model', agent.provider.model, 'Synthetic remote CLI task.']);
       expect(started).toMatchObject({ exitCode: 0, stderr: '' });
       const chatId = /^chat id: (\d{16})/m.exec(started.stdout)?.[1];
       expect(chatId).toBeDefined();
@@ -97,8 +99,10 @@ for (const backend of ['remote-controller-dials', 'remote-node-dials'] as const)
         expect(continued, continued.stderr).toMatchObject({ exitCode: 0 });
         expect(effectiveNodeId((await local.getChatSnapshot(localId)).chat.nodeId)).toBe('local');
       } finally { await local.close(); }
-      const created = await runCli(fixture, ['ticket', 'create', '--title', 'Synthetic node ticket', '--json'], runtime);
+      const created = await runCli(fixture, ['ticket', 'create', '--title', 'Synthetic node ticket', '--json']);
       expect(created.exitCode).toBe(0);
+      expect(created.stderr).toContain(`--runtime-file $'${runtime}'`);
+      expect(created.stderr).not.toContain('--config-dir');
       const ticket = parseTicketWriteResult(JSON.parse(created.stdout));
       expect(ticket.ticket).toMatchObject({ project: basename(fixture.executionDirs.project), createdBy: { kind: 'node', nodeId } });
       const claim = await runCli(fixture, ['ticket', 'claim', ticket.ticket.id, '--expected-revision', String(ticket.ticket.revision), '--json'], runtime);
@@ -154,7 +158,7 @@ test('a real permission-approved Claude tool inherits worker CLI discovery and c
         (row) => row.message.type === 'permission-request' && row.message.requestedTool.type === 'bash-tool-use',
         { afterIndex: cursor, timeoutMs: 60_000 });
       const runtime = await runtimeFile(fixture);
-      const status = await runCli(fixture, ['status', chatId, '--messages', '0'], runtime);
+      const status = await runCli(fixture, ['status', chatId, '--messages', '0']);
       expect(status, status.stderr).toMatchObject({ exitCode: 0 });
       const allow = /^allow command: (garcon-cli .+)$/m.exec(status.stdout)?.[1];
       expect(allow).toContain(permission.permissionOccurrenceId);

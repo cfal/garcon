@@ -47,7 +47,7 @@ export interface MainOptions {
   fetch?: typeof fetch;
   readStdin?: () => Promise<string>;
   output?: CliOutput;
-  // Overrides runtime discovery; production resolves the named workspace descriptor.
+  // Overrides runtime discovery without changing the HTTP client.
   discoverRuntime?: typeof discoverRuntime;
 }
 
@@ -135,10 +135,10 @@ async function canonicalProjectDirectory(cwd: string): Promise<string> {
   }
 }
 
-async function connectedClient(
-  command: CliConnectionOptions,
+async function connectedClient<T extends CliConnectionOptions>(
+  command: T,
   options: MainOptions,
-): Promise<GarconClient> {
+): Promise<{ command: T; client: GarconClient }> {
   const discover = options.discoverRuntime ?? discoverRuntime;
   const connection = await discover({
     configDir: command.configDir,
@@ -148,7 +148,7 @@ async function connectedClient(
     expectedWorkspace: command.expectedWorkspace,
     signal: options.signal,
   }, { fetch: options.fetch });
-  return new GarconClient({ ...connection, fetch: options.fetch });
+  return { command: { ...command, ...connection.selector }, client: new GarconClient({ ...connection, fetch: options.fetch }) };
 }
 
 function validateForkMessage(message: string | null | undefined): string | undefined {
@@ -235,57 +235,57 @@ export async function main(
       const ticketCommand = command.readsBodyFromStdin
         ? applyTicketStdin(command, await readConfiguredStdin(options,
           (signal) => readTicketStdin(Bun.stdin.stream(), signal))) : command;
-      const client = await connectedClient(ticketCommand, options);
-      await runTicketCommand(ticketCommand, client, output, options.signal, () => { ticketSubmissionStarted = true; });
+      const { client, command: connected } = await connectedClient(ticketCommand, options);
+      await runTicketCommand(connected, client, output, options.signal, () => { ticketSubmissionStarted = true; });
       return 0;
     }
     if (command.kind === 'list') {
-      const client = await connectedClient(command, options);
+      const { client } = await connectedClient(command, options);
       await runCatalogQuery(command, client, output, options.signal);
       return 0;
     }
     if (command.kind === 'wait') {
-      const client = await connectedClient(command, options);
-      await runChatWait(command, client, output, options.signal);
+      const { client, command: connected } = await connectedClient(command, options);
+      await runChatWait(connected, client, output, options.signal);
       return 0;
     }
     if (command.kind === 'status') {
-      const client = await connectedClient(command, options);
-      await runChatStatus(command, client, output, options.signal);
+      const { client, command: connected } = await connectedClient(command, options);
+      await runChatStatus(connected, client, output, options.signal);
       return 0;
     }
     if (command.kind === 'chats') {
-      const client = await connectedClient(command, options);
+      const { client } = await connectedClient(command, options);
       await runChatCatalog(command, client, output, options.signal);
       return 0;
     }
     if (command.kind === 'search') {
-      const client = await connectedClient(command, options);
-      await runChatSearch(command, client, output, options.signal);
+      const { client, command: connected } = await connectedClient(command, options);
+      await runChatSearch(connected, client, output, options.signal);
       return 0;
     }
     if (command.kind === 'transcript-search') {
-      const client = await connectedClient(command, options);
+      const { client } = await connectedClient(command, options);
       await runTranscriptSearchAdministration(command, client, output, options.signal);
       return 0;
     }
     if (command.kind === 'read') {
-      const client = await connectedClient(command, options);
+      const { client } = await connectedClient(command, options);
       await runChatRead(command, client, output, options.signal);
       return 0;
     }
     if (command.kind === 'export') {
-      const client = await connectedClient(command, options);
+      const { client } = await connectedClient(command, options);
       await runChatExport(command, client, output, options.signal);
       return 0;
     }
     if (command.kind === 'handoff') {
-      const client = await connectedClient(command, options);
+      const { client } = await connectedClient(command, options);
       await runChatHandoff(command, client, output, options.signal);
       return 0;
     }
     if (command.kind === 'lookup-native-session') {
-      const client = await connectedClient(command, options);
+      const { client } = await connectedClient(command, options);
       const chatId = await client.lookupNativeSession({
         nativeSessionId: command.nativeSessionId,
         ...(command.agentId === undefined ? {} : { agent: command.agentId }),
@@ -294,12 +294,12 @@ export async function main(
       return 0;
     }
     if (command.kind === 'permission-decision') {
-      const client = await connectedClient(command, options);
-      await runPermissionDecision(command, client, output, options.signal);
+      const { client, command: connected } = await connectedClient(command, options);
+      await runPermissionDecision(connected, client, output, options.signal);
       return 0;
     }
     if (command.kind === 'permission-answer') {
-      const client = await connectedClient(command, options);
+      const { client } = await connectedClient(command, options);
       await runPermissionAnswer(command, client, output, options.signal);
       return 0;
     }
@@ -309,22 +309,22 @@ export async function main(
       || command.kind === 'pin'
       || command.kind === 'unpin'
     ) {
-      const client = await connectedClient(command, options);
+      const { client } = await connectedClient(command, options);
       await runChatOrderMutation(command, client, output, options.signal);
       return 0;
     }
     if (command.kind === 'rename') {
-      const client = await connectedClient(command, options);
+      const { client } = await connectedClient(command, options);
       await runRename(command, client, output, options.signal);
       return 0;
     }
     if (command.kind === 'set-tags') {
-      const client = await connectedClient(command, options);
+      const { client } = await connectedClient(command, options);
       await runSetTags(command, client, output, options.signal);
       return 0;
     }
     if (command.kind === 'stop') {
-      const client = await connectedClient(command, options);
+      const { client } = await connectedClient(command, options);
       const result = await stopChat(command.chatId, client, options.signal);
       if (command.json) {
         output.result(JSON.stringify(stopJsonEnvelope({
@@ -343,7 +343,7 @@ export async function main(
       if (message.trim().length === 0) {
         throw new CliError('arguments', 'the message read from stdin must not be empty', 2);
       }
-      const client = await connectedClient(command, options);
+      const { client } = await connectedClient(command, options);
       const result = await resumeChatAsync({
         chatId: command.chatId,
         content: message,
@@ -366,7 +366,7 @@ export async function main(
       const message = validateForkMessage(command.readsMessageFromStdin
         ? await readConfiguredStdin(options)
         : command.message);
-      const client = await connectedClient(command, options);
+      const { client } = await connectedClient(command, options);
       const automationContext = {
         workspace: client.workspaceName,
         serverInstanceId: client.serverInstanceId,
@@ -431,7 +431,7 @@ export async function main(
         ? await readConfiguredStdin(options, readStrictUtf8Stdin)
         : command.content ?? '';
       const validatedContent = validateAddRowContent(content);
-      const client = await connectedClient(command, options);
+      const { client } = await connectedClient(command, options);
       if (command.json) {
         const response = await addRow(command, validatedContent, client, options.signal);
         output.result(JSON.stringify(addRowJsonEnvelope({
@@ -452,7 +452,7 @@ export async function main(
     const invocation = command.kind === 'start' || command.kind === 'start-async'
       ? { ...command, cwd: await canonicalProjectDirectory(command.cwd) }
       : command;
-    const client = await connectedClient(invocation, options);
+    const { client } = await connectedClient(invocation, options);
     if (invocation.kind === 'start-async') {
       const result = await startConsultationAsync(invocation, prompt, client, options.signal);
       if (invocation.json) {

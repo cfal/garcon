@@ -4,7 +4,8 @@ import { shellQuote } from './shell-quote.js';
 export function connectionOptionEntries(connection: CliConnectionOptions): [string, string][] {
   const entries: [string, string][] = connection.runtimeFile
     ? [['--runtime-file', connection.runtimeFile]]
-    : [['--workspace', connection.workspace], ['--config-dir', connection.configDir]];
+    : [['--config-dir', connection.configDir]];
+  if (!connection.runtimeFile && connection.workspace !== undefined) entries.unshift(['--workspace', connection.workspace]);
   if (connection.runtimeFile && connection.expectedWorkspace !== undefined) {
     entries.push(['--workspace', connection.expectedWorkspace]);
   }

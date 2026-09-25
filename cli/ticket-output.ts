@@ -1,6 +1,8 @@
 import type { HttpTicketMutationRequest } from '@garcon/common/ticket-commands';
 import type { Ticket, TicketActor, TicketActivity, TicketDetail, TicketOwner, TicketPage,
   TicketSequencePage, TicketStatus, TicketWriteResult } from '@garcon/common/tickets';
+import type { CliConnectionOptions } from './args.js';
+import { connectionOptionEntries } from './connection-options.js';
 
 const unsafeControls = /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028-\u202e\u2066-\u2069]/gu;
 const escapedControl = (character: string) => `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`;
@@ -22,19 +24,24 @@ export function ticketShellArgument(value: string): string {
   return `$'${quoted}'`;
 }
 
-export function ticketRetryDiagnostic(request: HttpTicketMutationRequest, kind?: 'repository' | 'folder' | 'explicit', runtimeFile?: string): string {
+export function ticketRetryDiagnostic(request: HttpTicketMutationRequest, options: {
+  kind: 'repository' | 'folder' | 'explicit';
+  connection: CliConnectionOptions;
+  nodeId: string;
+}): string {
   const flags = [`--request-id ${ticketShellArgument(request.requestId)}`,
     `--expected-store-id ${ticketShellArgument(request.expectedStoreId)}`];
   const lines = [`Request: ${request.requestId}`, `Store: ${request.expectedStoreId}`];
-  if (runtimeFile) {
-    flags.push(`--runtime-file ${ticketShellArgument(runtimeFile)}`);
+  if (options.nodeId !== 'local') {
     lines.push('Retry from this execution node. Switching to Local or another node does not deduplicate this request.');
   }
   if (request.payload.action === 'create') {
-    lines.push(`Project (${kind ?? 'explicit'}): ${ticketLineOutput(request.payload.input.project)}`);
-    flags.push(`--project ${ticketShellArgument(request.payload.input.project)}`);
+    lines.push(`Project (${options.kind}): ${ticketLineOutput(request.payload.input.project)}`);
+    if (options.kind !== 'explicit') flags.push(`--project ${ticketShellArgument(request.payload.input.project)}`);
   }
-  lines.push(`To retry, reuse the same arguments and body with: ${flags.join(' ')}`);
+  const prefix = ['garcon-cli', ...connectionOptionEntries(options.connection).flatMap(([flag, value]) => [flag, ticketShellArgument(value)])];
+  lines.push(`Retry command prefix: ${prefix.join(' ')}`);
+  lines.push(`Reuse the same ticket operation and body, replacing or adding: ${flags.join(' ')}`);
   return lines.join('\n');
 }
 

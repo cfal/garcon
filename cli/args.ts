@@ -148,7 +148,7 @@ Ticket management:
   Every verb accepts --json. Mutations accept --from-chat <chat-id> as declared attribution.
   Owners: chat:<id>, user:<username>, or unassigned. Read before editing to obtain revisions.
   New create defaults to the shared repository or folder path; --project is an arbitrary string.
-  Mutations print retry identity before POST. Retry with identical arguments/body and paired
+  Mutations print a retry connection prefix and identity before POST. Keep the same operation/body and paired
   --request-id <uuid> --expected-store-id <uuid>; create retries also require the printed --project.
   No automatic retries. Comment removal preserves prior versions in activity history.
 
@@ -175,7 +175,7 @@ Chat research:
   activity, not title, tag, pin, or archive modification time.
 
 Options:
-  --workspace <name>           Named Garcon data workspace (default: default)
+  --workspace <name>           Select a controller's named workspace
   --config-dir <path>          Garcon config root (default: ~/.garcon)
   --runtime-file <path>        Private CLI runtime descriptor (pins the endpoint)
   --server <url>               Assert the workspace descriptor's exact URL
@@ -230,6 +230,8 @@ Options:
   --version                    Show the Garcon version
 
 Use a single - as the prompt to read UTF-8 text from stdin.
+Without a workspace or runtime pin, select the single running endpoint below the config root.
+GARCON_CONFIG_DIR overrides --config-dir. GARCON_WORKSPACE selects a named controller workspace.
 Use -- before prompt text that begins with an option-like token.
 The cli tag records creation through garcon-cli; resume, resume-async, and stop never add it.`;
 
@@ -250,7 +252,7 @@ interface CliSelectionOptions {
 }
 
 export interface CliConnectionOptions {
-  workspace: string;
+  workspace?: string;
   configDir: string;
   serverUrl?: string;
   runtimeFile?: string;
@@ -1577,9 +1579,8 @@ export function parseCliArgs(
       ?? path.join(environment.HOME ?? os.homedir(), '.garcon'),
   );
   const explicitWorkspace = nonEmptyOption(values.workspace as string | undefined, '--workspace');
-  const workspace = validateWorkspace(
-    (runtimeFile ? undefined : resolvedEnvironmentValue(environment.GARCON_WORKSPACE)) ?? explicitWorkspace ?? 'default',
-  );
+  const workspace = (runtimeFile ? undefined : resolvedEnvironmentValue(environment.GARCON_WORKSPACE)) ?? explicitWorkspace;
+  if (workspace !== undefined) validateWorkspace(workspace);
   const serverUrl = nonEmptyOption(values.server as string | undefined, '--server');
   const agentId = nonEmptyOption(values.agent as string | undefined, '--agent');
   const providerId = nonEmptyOption(values.provider as string | undefined, '--provider');

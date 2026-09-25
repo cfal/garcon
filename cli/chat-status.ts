@@ -31,7 +31,7 @@ export async function runChatStatus(
     if (error instanceof GarconHttpError && error.errorCode === 'SESSION_NOT_FOUND') {
       throw new CliError(
         'chat status',
-        `Session not found${command.runtimeFile ? '' : ` in Garcon workspace "${command.workspace}"`} `
+        `Session not found${command.runtimeFile || command.workspace === undefined ? '' : ` in Garcon workspace "${command.workspace}"`} `
           + '(HTTP 404, SESSION_NOT_FOUND)',
         2,
         { cause: error },
