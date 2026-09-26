@@ -394,7 +394,7 @@ test('outbound executor initializes independently and mutation guards retain con
   expect(manager.config.require(configured.id).label).toBe('Safe rename');
 });
 
-test.each([false, true])('retained connections publish ready after a mutation fence (write fails: %s)', async (failWrite) => {
+test('retained connections publish ready after a disruptive update fails to persist', async () => {
   const { manager, root } = await fixture();
   const secret = Buffer.alloc(32, 6).toString('base64url');
   const remote = worker(secret, root);
@@ -406,21 +406,21 @@ test.each([false, true])('retained connections publish ready after a mutation fe
   const integration = manager.requireIntegration({ executorId: configured.id, agentId: 'test' });
   const entered = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
-  const update = manager.config.update.bind(manager.config);
-  const write = spyOn(manager.config, 'update').mockImplementation(async (id, request) => {
+  const write = spyOn(manager.config, 'update').mockImplementation(async (id, _request, assertUpdateAllowed) => {
+    const previous = manager.config.require(id);
+    assertUpdateAllowed?.(previous, { ...previous, enabled: false });
     entered.resolve();
     await release.promise;
-    if (failWrite) throw new Error('Synthetic write failure');
-    return update(id, request);
+    throw new Error('Synthetic write failure');
   });
   try {
-    const mutation = manager.update(configured.id, { enabled: true }).catch((error: unknown) => error);
+    const mutation = manager.update(configured.id, { enabled: false }).catch((error: unknown) => error);
     await entered.promise;
     expect(manager.isReady(configured.id)).toBe(false);
     const ready = waitReady(manager, configured.id);
     release.resolve();
     const result = await mutation;
-    if (failWrite) expect(result).toBeInstanceOf(Error);
+    expect(result).toBeInstanceOf(Error);
     await ready;
     expect(manager.isReady(configured.id)).toBe(true);
     expect(manager.requireIntegration({ executorId: configured.id, agentId: 'test' })).toBe(integration);
@@ -428,4 +428,42 @@ test.each([false, true])('retained connections publish ready after a mutation fe
     release.resolve();
     write.mockRestore();
   }
+});
+
+test('advertised URL and unchanged connector edits stay available while busy', async () => {
+  const { manager, root } = await fixture();
+  const config = await manager.create({ direction: 'executor-connects', label: 'Busy worker' });
+  const { url } = sharedListener(manager);
+  worker(config.secret, root).dial(url(config.id));
+  await waitReady(manager, config.id);
+  const original = manager.inboundLink(config.id);
+  const assertIdle = mock(() => { throw new DomainError('EXECUTOR_IN_USE', 'Busy', 409); });
+  manager.setGuards({ assertIdle, assertRemovable() {} });
+  const observations: boolean[] = [];
+  const update = manager.config.update.bind(manager.config);
+  const write = spyOn(manager.config, 'update').mockImplementation((id, request, assertUpdateAllowed) => (
+    update(id, request, (previous, next) => {
+      assertUpdateAllowed?.(previous, next);
+      observations.push(manager.isReady(id));
+    })
+  ));
+  try {
+    const connection = {
+      direction: 'executor-connects' as const,
+      connectionUrl: executorConnectionUrl(`wss://controller.example/executor/${config.id}`, config.secret),
+      allowInsecureDevelopment: false,
+    };
+    await manager.update(config.id, { connection });
+    await manager.update(config.id, { connection, enabled: true });
+    expect(observations).toEqual([true, true]);
+    expect(manager.inboundLink(config.id)).toBe(original);
+    expect(manager.isReady(config.id)).toBe(true);
+    expect(manager.config.require(config.id).connection).toEqual({
+      kind: 'executor-connects', advertisedUrl: `wss://controller.example/executor/${config.id}`,
+    });
+    expect(assertIdle).not.toHaveBeenCalled();
+    await expect(manager.update(config.id, { connection: { ...connection, allowInsecureDevelopment: true } }))
+      .rejects.toMatchObject({ code: 'EXECUTOR_IN_USE' });
+    expect(manager.isReady(config.id)).toBe(true);
+  } finally { write.mockRestore(); }
 });

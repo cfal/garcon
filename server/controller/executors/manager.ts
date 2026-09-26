@@ -147,15 +147,18 @@ export class ExecutorManager {
   }
 
   create(request: CreateExecutorRequest): Promise<RemoteExecutorConfig> {
-    return this.#mutate(null, async () => this.config.create(request));
+    return this.#mutate(async () => this.config.create(request));
   }
 
   update(id: string, request: UpdateExecutorRequest): Promise<RemoteExecutorConfig> {
-    return this.#mutate(request.connection || request.enabled !== undefined ? id : null, async () => this.config.update(id, request));
+    return this.#mutate((requireIdle) => this.config.update(id, request, (previous, next) => {
+      if (!sameConnector(previous, next)) requireIdle(id);
+    }));
   }
 
   remove(id: string): Promise<void> {
-    return this.#mutate(id, async () => {
+    return this.#mutate(async (requireIdle) => {
+      requireIdle(id);
       this.#referenceWrites.assertNoWrites(id);
       this.#guards.assertRemovable(id);
       await this.config.remove(id);
@@ -179,15 +182,17 @@ export class ExecutorManager {
     for (const entry of this.#remotes.values()) { entry.cliLease.abort(); entry.link?.quiesce(); }
   }
 
-  #mutate<T>(executorId: string | null, operation: () => Promise<T>): Promise<T> {
+  #mutate<T>(operation: (requireIdle: (executorId: string) => void) => Promise<T>): Promise<T> {
     const result = this.#mutations.then(async () => {
       if (this.#disposed || this.#quiescing) throw new DomainError('SERVER_SHUTTING_DOWN', 'Executors are stopping', 503);
-      if (executorId !== null) {
-        this.config.require(executorId);
-        this.#guards.assertIdle(executorId);
-        this.#changing.add(executorId);
-      }
-      try { return await operation(); }
+      let executorId: string | null = null;
+      const requireIdle = (id: string) => {
+        this.config.require(id);
+        this.#guards.assertIdle(id);
+        this.#changing.add(id);
+        executorId = id;
+      };
+      try { return await operation(requireIdle); }
       finally {
         try { if (!this.#disposed) await this.#applyConfig(); }
         finally {

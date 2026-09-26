@@ -89,7 +89,10 @@ export class ExecutorConfigStore {
     });
   }
 
-  update(id: string, input: UpdateExecutorRequest): Promise<RemoteExecutorConfig> {
+  update(
+    id: string, input: UpdateExecutorRequest,
+    assertUpdateAllowed?: (previous: RemoteExecutorConfig, next: RemoteExecutorConfig) => void,
+  ): Promise<RemoteExecutorConfig> {
     return this.#serialize(async () => {
       const request = parseUpdateExecutorRequest(input);
       if (!request) throw new ValidationDomainError('Invalid executor update');
@@ -110,6 +113,7 @@ export class ExecutorConfigStore {
           connection: direction === 'executor-connects' ? { kind: direction, advertisedUrl: socketUrl } : { kind: direction, targetUrl: socketUrl },
         };
       }
+      assertUpdateAllowed?.(previous, executor);
       await this.#save(this.#executors.map((entry) => entry.id === id ? executor : entry));
       return structuredClone(executor);
     });
