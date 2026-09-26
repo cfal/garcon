@@ -34,13 +34,14 @@ for (const factory of sacsScriptedDriverFactories) {
           expect(await fixture.client.waitForTurnTerminal(chatId, running.turnId)).toMatchObject({
             type: 'agent-run-failed', error: expect.stringContaining('Reload from native history'),
           });
-          await fixture.client.waitForProcessing(chatId, false);
+          await fixture.client.waitForProcessing(chatId, false, { afterIndex: events });
           await waitForExecutorReconnect(fixture, events);
+          const blockedEvents = fixture.client.markEvents();
           const blocked = await fixture.client.runChat(driver.runRequest(fixture, { chatId, command: 'Synthetic blocked overlap' }));
           expect(await fixture.client.waitForTurnTerminal(chatId, blocked.turnId)).toMatchObject({
             type: 'agent-run-failed', error: expect.stringContaining('earlier turn is still running'),
           });
-          await fixture.client.waitForProcessing(chatId, false);
+          await fixture.client.waitForProcessing(chatId, false, { afterIndex: blockedEvents });
           await expect(fixture.client.reloadChat(chatId)).rejects.toMatchObject({ response: {
             code: 'HISTORY_LOAD_FAILED', message: expect.stringContaining('turn is still running'),
           } });
@@ -53,12 +54,15 @@ for (const factory of sacsScriptedDriverFactories) {
           expect(assistantContents(reloaded.messages)).toEqual(['Synthetic initial reply', 'Synthetic detached reply']);
           expect(new Set(reloaded.messages.map(row => row.ordinal)).size).toBe(reloaded.messages.length);
           expect(driver.requestCountSince(fixture, cursor)).toBe(1);
-          expect(fixture.client.eventRecords().filter(({ parsed }) => parsed.type === 'agent-run-failed'
-            && parsed.chatId === chatId && parsed.turnId === running.turnId)).toHaveLength(1);
           driver.scriptAssistant(fixture, 'Synthetic explicit followup reply');
           const followup = await fixture.client.runChat(driver.runRequest(fixture, { chatId, command: 'Synthetic explicit followup' }));
           expect(await fixture.client.waitForTurnTerminal(chatId, followup.turnId)).toMatchObject({ type: 'agent-run-finished' });
           expect(driver.requestCountSince(fixture, cursor)).toBe(2);
+          for (const { turnId } of [initial, running, blocked, followup]) {
+            expect(fixture.client.events().filter(event =>
+              (event.type === 'agent-run-finished' || event.type === 'agent-run-failed')
+              && event.chatId === chatId && event.turnId === turnId)).toHaveLength(1);
+          }
           expect(proxy!.connections).toBe(2);
           driver.assertSettled(fixture);
         } finally { held.release(); }

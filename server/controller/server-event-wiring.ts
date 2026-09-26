@@ -131,13 +131,13 @@ export function wireServerEvents({
 }: ServerEventWiringDeps): ServerEventWiring {
   const broadcast = (payload: unknown) =>
     server.publish('chat', JSON.stringify(payload));
-  const recentProcessFailures = new Map<string, number>();
+  const recentTurnFailures = new Map<string, number>();
   const inlineTerminalReleases = new Set<string>();
   const chatTaskTails = new Map<string, Promise<void>>();
   const activeChatTasks = new Set<Promise<void>>();
   let firstChatTaskError: unknown;
   let hasChatTaskError = false;
-  const processFailureDedupeMs = 30_000;
+  const turnFailureDedupeMs = 30_000;
 
   chatBoards.on('invalidated', (revision, reason) => {
     broadcast(new ChatBoardsInvalidatedMessage(revision, reason));
@@ -252,37 +252,20 @@ export function wireServerEvents({
     broadcast(new PreamblesInvalidatedMessage(reason));
   });
 
-  function turnFailureKey(
-    chatId: string,
-    turnMetadata?: TurnEventMetadata,
-  ): string {
-    return `${chatId}:${turnMetadata?.turnId ?? turnMetadata?.clientRequestId ?? 'chat'}`;
-  }
-
-  function pruneRecentProcessFailures(): void {
-    const cutoff = Date.now() - processFailureDedupeMs;
-    for (const [key, markedAt] of recentProcessFailures) {
-      if (markedAt < cutoff) recentProcessFailures.delete(key);
-    }
-  }
-
-  function markProcessFailure(
-    chatId: string,
-    turnMetadata?: TurnEventMetadata,
-  ): void {
-    pruneRecentProcessFailures();
-    recentProcessFailures.set(turnFailureKey(chatId, turnMetadata), Date.now());
-  }
-
-  function consumeProcessFailure(
+  function markTurnFailure(
     chatId: string,
     turnMetadata?: TurnEventMetadata,
   ): boolean {
-    pruneRecentProcessFailures();
-    const key = turnFailureKey(chatId, turnMetadata);
-    const wasProcessFailure = recentProcessFailures.has(key);
-    if (wasProcessFailure) recentProcessFailures.delete(key);
-    return wasProcessFailure;
+    const identity = turnMetadata?.turnId ?? turnMetadata?.clientRequestId;
+    if (!identity) return true;
+    const now = Date.now();
+    for (const [key, markedAt] of recentTurnFailures) {
+      if (markedAt < now - turnFailureDedupeMs) recentTurnFailures.delete(key);
+    }
+    const key = `${chatId}:${identity}`;
+    if (recentTurnFailures.has(key)) return false;
+    recentTurnFailures.set(key, now);
+    return true;
   }
 
   function broadcastAgentFailure(
@@ -336,7 +319,7 @@ export function wireServerEvents({
     agentErrorCode: string,
     turnMetadata?: TurnEventMetadata,
   ): Promise<void> {
-    markProcessFailure(chatId, turnMetadata);
+    if (!markTurnFailure(chatId, turnMetadata)) return;
     await settleExecutionCommand(
       chatId,
       turnMetadata,
@@ -354,7 +337,7 @@ export function wireServerEvents({
     options: TurnEventMetadata,
   ): Promise<void> {
     broadcast(new ChatProcessingUpdatedMessage(chatId, processing.phase(chatId)));
-    if (consumeProcessFailure(chatId, options)) return;
+    if (!markTurnFailure(chatId, options)) return;
     await settleExecutionCommand(chatId, options, 'failed', queueErrorMessage);
     broadcastAgentFailure(chatId, queueErrorMessage, options);
     await markPublicTurnTerminal(chatId, options);

@@ -704,6 +704,43 @@ describe('server event wiring', () => {
     );
   });
 
+  it.each(['agent', 'queue'])('publishes a dispatch failure once when %s reports first', async first => {
+    const fixture = createFixture();
+    const report = (source, chatId = 'chat-1', metadata = turn) => source === 'agent'
+      ? fixture.agent.failed(chatId, 'Synthetic dispatch failure', 'SESSION_BUSY', metadata)
+      : fixture.queue.failed(chatId, 'Synthetic dispatch failure', metadata);
+    fixture.agent.transcript(providerCommit('partial answer'));
+    fixture.agent.transcript(terminalCommit('failed'));
+    report(first);
+    report(first === 'agent' ? 'queue' : 'agent');
+    await fixture.wiring.waitForIdle();
+    report(first);
+    await fixture.wiring.waitForIdle();
+
+    const terminals = () => fixture.published.filter(message =>
+      message.type === 'agent-run-failed' || message.type === 'agent-run-finished');
+    expect(terminals()).toEqual([expect.objectContaining({
+      type: 'agent-run-failed', chatId: 'chat-1', turnId: turn.turnId,
+    })]);
+    expect(fixture.commandLedger.settleTerminal).toHaveBeenCalledTimes(1);
+    expect(fixture.commandLedger.markPublicTerminal).toHaveBeenCalledTimes(1);
+    const types = fixture.published.map(message => message.type);
+    expect(types.lastIndexOf('chat-messages')).toBeLessThan(types.indexOf('agent-run-failed'));
+
+    report(first, 'chat-1', { ...turn, turnId: 'turn-2', clientRequestId: 'request-2' });
+    report(first, 'chat-2');
+    await fixture.wiring.waitForIdle();
+    expect(terminals()).toHaveLength(3);
+  });
+
+  it('does not deduplicate failures without a turn or request identity', async () => {
+    const fixture = createFixture();
+    fixture.agent.failed('chat-1', 'Synthetic first failure', 'INTERNAL_ERROR');
+    fixture.agent.failed('chat-1', 'Synthetic second failure', 'INTERNAL_ERROR');
+    await fixture.wiring.waitForIdle();
+    expect(fixture.published.filter(message => message.type === 'agent-run-failed')).toHaveLength(2);
+  });
+
   it('updates preview without scheduling a duplicate search rebuild for transcript commits', async () => {
     const fixture = createFixture();
 

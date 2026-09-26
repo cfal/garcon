@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { tcpLinkProxy } from '../../../server/remote/__tests__/tcp-link-proxy.js';
 import { messagesOfType } from '../../support/chat-assertions.js';
+import { withTimeout } from '../../support/deferred.js';
 import { waitForExecutorReconnect } from '../../support/executor-link.js';
 import { claudeText, claudeToolUse } from '../../support/fake-claude-model.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
@@ -14,11 +15,9 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
     const environment = await startScriptedClaudeTestEnvironment();
     let proxy: Awaited<ReturnType<typeof tcpLinkProxy>> | undefined;
     const command = 'touch .synthetic-must-not-exist';
-    environment.model.scriptTurn([claudeToolUse('toolu_synthetic_detached', 'Bash', { command })]);
-    const denied = environment.model.scriptHeldTurn(request => {
-      expect(JSON.stringify(request.body.messages)).toContain('"is_error":true');
-      return [claudeText('Synthetic reply after denied permission')];
-    });
+    const toolUseId = 'toolu_synthetic_detached';
+    environment.model.scriptTurn([claudeToolUse(toolUseId, 'Bash', { command })]);
+    const denied = environment.model.scriptHeldTurn([claudeText('Synthetic reply after denied permission')]);
     try {
       await withIntegrationFixture(`scripted-permission-loss-${executionBackend}`, async fixture => {
         const chatId = fixture.newChatId();
@@ -36,7 +35,12 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
         expect(await fixture.client.waitForTurnTerminal(chatId, started.turnId)).toMatchObject({
           type: 'agent-run-failed', error: expect.stringContaining('Reload from native history'),
         });
-        await denied.requested;
+        const denial = await withTimeout(denied.requested, 30_000, () => 'Claude did not receive the detached permission denial');
+        expect(denial.body.messages).toEqual(expect.arrayContaining([expect.objectContaining({
+          role: 'user', content: expect.arrayContaining([expect.objectContaining({
+            type: 'tool_result', tool_use_id: toolUseId, is_error: true,
+          })]),
+        })]));
         await waitForExecutorReconnect(fixture, cursor);
         expect((await fixture.client.getChatSnapshot(chatId, 0)).transientFeed.rows).toEqual([]);
         await expect(fixture.client.sendPermissionDecision({
@@ -49,8 +53,9 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
         expect(await Bun.file(join(fixture.dirs.project, '.synthetic-must-not-exist')).exists()).toBe(false);
         expect(environment.model.requestsSince(0)).toHaveLength(2);
         expect(proxy!.connections).toBe(2);
-        expect(fixture.client.eventRecords().filter(({ parsed }) => parsed.type === 'agent-run-failed'
-          && parsed.chatId === chatId && parsed.turnId === started.turnId)).toHaveLength(1);
+        expect(fixture.client.events().filter(event =>
+          (event.type === 'agent-run-finished' || event.type === 'agent-run-failed')
+          && event.chatId === chatId && event.turnId === started.turnId)).toHaveLength(1);
         environment.model.assertSettled();
       }, {
         executionBackend,
