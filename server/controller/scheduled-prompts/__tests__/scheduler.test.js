@@ -1,5 +1,5 @@
 import { inspectProjectDirectory } from '../../__tests__/project-inspector.ts';
-import { afterEach, describe, expect, it, mock, spyOn } from 'bun:test';
+import { afterEach, describe, expect, it, mock, setSystemTime, spyOn } from 'bun:test';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
@@ -11,6 +11,7 @@ import { ScheduledPromptStore } from '../store.ts';
 import { parseGarconSchedule, garconScheduleActionContent } from '../../../../common/garcon-schedule.ts';
 import { AtomicJsonWriteError } from '../../../common/json-file-store.ts';
 import { ExecutorReferenceWrites } from '../../executors/reference-writes.js';
+import { withPromiseTimeout } from '../../../common/promise-timeout.js';
 
 const createdDirs = [];
 
@@ -152,6 +153,56 @@ describe('scheduled prompt scheduler', () => {
     expect(cronExpressionForUtcInstant('2030-07-04T13:25:00.000Z')).toBe('25 13 4 7 *');
   });
 
+  it.each(['create', 'update'])('keeps Local occurrences claimable while %s awaits a remote project', async (method) => {
+    const due = Date.parse('2030-01-01T09:00:00.000Z');
+    setSystemTime(new Date(due - 30_000));
+    const store = new ScheduledPromptStore(await tempDir());
+    await store.init();
+    await store.create({ ...recurringPrompt(new Date(due).toISOString()), id: 'due-local',
+      schedule: { type: 'once', nextRunAt: new Date(due).toISOString() } }, 0);
+    await store.create({ ...recurringPrompt('2030-01-02T09:00:00.000Z'), id: 'editable' }, store.revision);
+    const cron = new FakeCron();
+    const entered = Promise.withResolvers();
+    const release = Promise.withResolvers();
+    const dispatched = [];
+    const scheduler = new ScheduledPromptScheduler({
+      store, cron, runLog: new ScheduledPromptRunLog(), agents: agentCapabilities(),
+      preambles: preambleCatalog(), chats: { getChat: () => ({}) },
+      dispatcher: { dispatch: async (prompt) => { dispatched.push(prompt.id); return { message: 'sent' }; } },
+      inspectProject: async (projectPath) => {
+        entered.resolve();
+        await release.promise;
+        return { kind: 'available', effectiveProjectKey: projectPath };
+      },
+    });
+    let saving;
+    let refreshing;
+    let firing;
+    try {
+      await scheduler.start(new Date(due - 30_000));
+      const occurrence = cron.jobs.find((job) => job.expression === cronExpressionForUtcInstant(new Date(due).toISOString()));
+      const definition = newChatDefinition('2030-01-02T12:00:00.000Z');
+      definition.target.executorId = '22222222-2222-4222-8222-222222222222';
+      saving = scheduler[method]({ id: 'editable', expectedRevision: store.revision, scheduledPrompt: definition })
+        .catch((error) => error);
+      await entered.promise;
+      refreshing = scheduler.snapshotAfterReconciliation();
+      setSystemTime(new Date(due + 5_000));
+      firing = occurrence.fire();
+      await withPromiseTimeout(firing, 1000, 'Local scheduled occurrence');
+      expect(dispatched).toEqual(['due-local']);
+      setSystemTime(new Date(due + 65_000));
+      release.resolve();
+      expect(await saving).toMatchObject({ code: 'SCHEDULED_PROMPT_REVISION_CONFLICT' });
+      expect(store.get('editable').target.type).toBe('existing-chat');
+    } finally {
+      release.resolve();
+      await Promise.allSettled([saving, refreshing, firing]);
+      scheduler.stop();
+      setSystemTime();
+    }
+  });
+
   it('evaluates UTC cron expressions in UTC', () => {
     const originalCron = Bun.cron;
     const cron = mock(() => ({ stop() {} }));
@@ -165,6 +216,48 @@ describe('scheduled prompt scheduler', () => {
       Bun.cron = originalCron;
     }
   });
+
+  for (const method of ['create', 'update']) {
+    it.each(['time', 'agent'])(`rechecks %s after ${method} finishes project inspection`, async (changed) => {
+      const due = Date.parse('2030-01-01T09:00:00.000Z');
+      setSystemTime(new Date(due - 30_000));
+      const store = new ScheduledPromptStore(await tempDir());
+      await store.init();
+      await store.create({ ...recurringPrompt('2030-01-02T09:00:00.000Z'), id: 'editable' }, 0);
+      const entered = Promise.withResolvers();
+      const release = Promise.withResolvers();
+      let available = true;
+      const scheduler = new ScheduledPromptScheduler({
+        store, cron: new FakeCron(), runLog: new ScheduledPromptRunLog(),
+        agents: { ...agentCapabilities(), hasAgent: () => available },
+        preambles: preambleCatalog(), chats: { getChat: () => ({}) },
+        dispatcher: { dispatch: async () => ({ message: 'sent' }) },
+        inspectProject: async (projectPath) => {
+          entered.resolve();
+          await release.promise;
+          return { kind: 'available', effectiveProjectKey: projectPath };
+        },
+      });
+      const before = store.list();
+      const saving = scheduler[method]({ id: 'editable', expectedRevision: store.revision,
+        scheduledPrompt: newChatDefinition(new Date(due).toISOString()) }).catch((error) => error);
+      try {
+        await entered.promise;
+        if (changed === 'time') setSystemTime(new Date(due + 5_000));
+        else available = false;
+        release.resolve();
+        expect(await saving).toMatchObject({
+          code: changed === 'time' ? 'SCHEDULED_PROMPT_VALIDATION_FAILED' : 'UNSUPPORTED_AGENT',
+        });
+        expect(store.list()).toEqual(before);
+      } finally {
+        release.resolve();
+        await saving;
+        scheduler.stop();
+        setSystemTime();
+      }
+    });
+  }
 
   it.each([1, 5, 60, 90])('claims and registers the next %i-minute occurrence before dispatch', async (intervalMinutes) => {
     const dir = await tempDir();

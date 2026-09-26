@@ -7,6 +7,7 @@ import {
   isScheduledPromptIntervalMinutes,
   type ScheduleForChatRequest,
   type CreateScheduledPromptRequest,
+  type NewChatScheduledPromptTarget,
   type ReorderScheduledPromptsRequest,
   type RemoveScheduledPromptRequest,
   type ScheduleInPromptRequest,
@@ -186,10 +187,12 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
   }
 
   async create(request: CreateScheduledPromptRequest): Promise<ScheduledPromptsSnapshot> {
+    const definition = this.#validateDefinition(request.scheduledPrompt);
+    if (definition.target.type === 'new-chat') await this.#validateNewChatTarget(definition.target);
     return this.#lock.runExclusive(SCHEDULER_LOCK, async () => {
+      await this.#reconcileMissed(new Date(), false);
       const now = new Date();
-      await this.#reconcileMissed(now, false);
-      const definition = await this.#validateDefinition(request.scheduledPrompt, now);
+      this.#validateDefinition(definition, now);
       await this.#createDefinition(definition, now, request.expectedRevision);
       return this.#snapshot();
     });
@@ -205,7 +208,7 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
       const duration = parseScheduleDuration(durationToken);
       if (!duration.ok) throw scheduleDurationDomainError(duration.error);
 
-      const definition = await this.#validateDefinition(
+      const definition = this.#validateDefinition(
         {
           schedule: {
             type: 'once',
@@ -233,7 +236,7 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
         ? request.firstRun.atUtc
         : scheduleInRunAt(now, request.firstRun.type === 'after'
           ? request.firstRun.minutes : request.intervalMinutes!);
-      const definition = await this.#validateDefinition({
+      const definition = this.#validateDefinition({
         schedule: request.intervalMinutes === null
           ? { type: 'once', runAtUtc: firstRunAtUtc }
           : { type: 'recurring', firstRunAtUtc, intervalMinutes: request.intervalMinutes, endAtUtc: request.endAtUtc },
@@ -246,13 +249,15 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
   }
 
   async update(request: UpdateScheduledPromptRequest): Promise<ScheduledPromptsSnapshot> {
+    const definition = this.#validateDefinition(request.scheduledPrompt);
+    if (definition.target.type === 'new-chat') await this.#validateNewChatTarget(definition.target);
     return this.#lock.runExclusive(SCHEDULER_LOCK, async () => {
       await this.#reconcileMissed(new Date(), false);
       const previous = this.deps.store.get(request.id);
       if (!previous) {
         throw new ScheduledPromptDomainError('SCHEDULED_PROMPT_NOT_FOUND', 'Scheduled prompt not found', 404);
       }
-      const definition = await this.#validateDefinition(request.scheduledPrompt);
+      this.#validateDefinition(definition);
       const replacement = this.#promptFromDefinition(request.id, definition, new Date(), previous.createdAt);
       const release = this.deps.retainExecutorReferences?.(
         replacement.target.type === 'new-chat' ? [replacement.target.executorId] : [],
@@ -305,7 +310,7 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
     });
   }
 
-  async #validateDefinition(value: unknown, now = new Date()): Promise<ScheduledPromptDefinitionInput> {
+  #validateDefinition(value: unknown, now = new Date()): ScheduledPromptDefinitionInput {
     const definition = normalizeScheduledPromptDefinitionInput(value);
     if (!definition) {
       throw new ScheduledPromptDomainError('SCHEDULED_PROMPT_VALIDATION_FAILED', 'Scheduled prompt is invalid', 400);
@@ -333,7 +338,11 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
       permissionMode: definition.target.permissionMode,
       thinkingMode: definition.target.thinkingMode,
     });
-    const resolution = await this.deps.inspectProject(definition.target.projectPath, definition.target.executorId);
+    return definition;
+  }
+
+  async #validateNewChatTarget(target: NewChatScheduledPromptTarget): Promise<void> {
+    const resolution = await this.deps.inspectProject(target.projectPath, target.executorId);
     if (resolution.kind === 'unavailable') {
       if (resolution.reason === 'outside-base') {
         throw new ScheduledPromptDomainError(
@@ -345,23 +354,22 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
       throw new ScheduledPromptDomainError('PROJECT_PATH_NOT_FOUND', 'Project path was not found', 404);
     }
     const canonicalProjectPath = resolution.effectiveProjectKey;
-    if (definition.target.preambleChoice.mode === 'explicit') {
+    if (target.preambleChoice.mode === 'explicit') {
       try {
         resolveNewChatPreambleSelection({
           catalog: this.deps.preambles.snapshot(),
           canonicalProjectPath,
-          executorId: definition.target.executorId,
-          agentId: definition.target.agentId,
-          tags: definition.target.tags,
+          executorId: target.executorId,
+          agentId: target.agentId,
+          tags: target.tags,
           chatId: CHAT_ID_VALIDATION_SAMPLE,
-          orderedPreambleIds: definition.target.preambleChoice.orderedPreambleIds,
+          orderedPreambleIds: target.preambleChoice.orderedPreambleIds,
         });
       } catch (error) {
         if (!isDomainError(error)) throw error;
         throw new ScheduledPromptDomainError(error.code, error.message, error.status, error.retryable);
       }
     }
-    return definition;
   }
 
   async #createDefinition(
