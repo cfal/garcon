@@ -1,4 +1,4 @@
-import { promises as fs } from 'node:fs';
+import { promises as fs, type Dirent } from 'node:fs';
 import path from 'node:path';
 import type { ExecutionFileEntry } from '@garcon/server-agent-interface';
 import type { FileTreeBreadcrumb, FileTreeEntry } from '../../../common/file-contracts.js';
@@ -9,6 +9,7 @@ import { toExecutorPath } from '../../common/executor-path.js';
 
 const MAX_ENTRIES = 10_000;
 const MAX_LIST_BYTES = 1024 * 1024;
+const DIRECTORY_READ_CONCURRENCY = 16;
 const SKIP_NAMES = new Set(['node_modules', 'dist', 'build', '.git', '.svn', '.hg']);
 
 export function relativeFilePath(root: string, target: string): string {
@@ -43,31 +44,57 @@ export async function readDirectoryCandidates(root: string, directory: string, s
 
 async function readDirectory(root: string, directory: string, selection: 'all' | 'directories', signal?: AbortSignal): Promise<FileTreeEntry[]> {
   const entries: FileTreeEntry[] = [];
+  const batch: Dirent[] = [];
   let bytes = 0;
+  // Batches bound metadata allocation before the encoded-byte check.
+  async function readBatch(): Promise<void> {
+    const items = await Promise.all(batch.map(async (entry): Promise<FileTreeEntry | null> => {
+      signal?.throwIfAborted();
+      const candidate = path.join(directory, entry.name);
+      let stat;
+      try {
+        await resolveRealWithinCanonicalBase(root, candidate);
+        stat = await fs.stat(candidate);
+      } catch (error) {
+        signal?.throwIfAborted();
+        if (isSkippableEntryError(error)) return null;
+        throw error;
+      }
+      signal?.throwIfAborted();
+      if (!stat.isFile() && !stat.isDirectory()) return null;
+      if (selection === 'directories' && !stat.isDirectory()) return null;
+      return {
+        name: entry.name, path: toExecutorPath(candidate), relativePath: relativeFilePath(root, candidate),
+        type: stat.isDirectory() ? 'directory' : 'file', size: stat.size,
+        modified: stat.mtime.toISOString(), permissionsRwx: permissions(stat.mode),
+      };
+    }));
+    for (const item of items) {
+      if (!item) continue;
+      bytes += Buffer.byteLength(JSON.stringify(item));
+      if (entries.length >= MAX_ENTRIES || bytes > MAX_LIST_BYTES) {
+        throw new DomainError('FILE_LIST_TOO_LARGE', 'Directory contains too many entries to display', 413);
+      }
+      entries.push(item);
+    }
+    batch.length = 0;
+  }
+  signal?.throwIfAborted();
   const handle = await fs.opendir(directory);
   for await (const entry of handle) {
     signal?.throwIfAborted();
     if (selection === 'directories' && (SKIP_NAMES.has(entry.name) || (!entry.isDirectory() && !entry.isSymbolicLink()))) continue;
-    const candidate = path.join(directory, entry.name);
-    let stat;
-    try {
-      await resolveRealWithinCanonicalBase(root, candidate);
-      stat = await fs.stat(candidate);
-    } catch { continue; }
-    if (!stat.isFile() && !stat.isDirectory()) continue;
-    if (selection === 'directories' && !stat.isDirectory()) continue;
-    const item: FileTreeEntry = {
-      name: entry.name, path: toExecutorPath(candidate), relativePath: relativeFilePath(root, candidate),
-      type: stat.isDirectory() ? 'directory' : 'file', size: stat.size,
-      modified: stat.mtime.toISOString(), permissionsRwx: permissions(stat.mode),
-    };
-    bytes += Buffer.byteLength(JSON.stringify(item));
-    if (entries.length >= MAX_ENTRIES || bytes > MAX_LIST_BYTES) {
-      throw new DomainError('FILE_LIST_TOO_LARGE', 'Directory contains too many entries to display', 413);
-    }
-    entries.push(item);
+    batch.push(entry);
+    if (batch.length === DIRECTORY_READ_CONCURRENCY) await readBatch();
   }
+  if (batch.length) await readBatch();
+  signal?.throwIfAborted();
   return entries.sort((a, b) => a.type === b.type ? a.name.localeCompare(b.name) : a.type === 'directory' ? -1 : 1);
+}
+
+function isSkippableEntryError(error: unknown): boolean {
+  return isProjectBoundaryError(error)
+    || ['EACCES', 'EPERM', 'ENOENT', 'ENOTDIR', 'ELOOP', 'ENOTCONN', 'ESTALE', 'EBUSY'].some((code) => hasNodeErrorCode(error, code));
 }
 
 export async function listProjectFiles(root: string, signal?: AbortSignal): Promise<{ files: ExecutionFileEntry[]; truncated: boolean }> {
@@ -89,7 +116,7 @@ export async function listProjectFiles(root: string, signal?: AbortSignal): Prom
           await visit(candidate, depth + 1);
         } catch (error) {
           signal?.throwIfAborted();
-          if (!isProjectBoundaryError(error) && !['EACCES', 'EPERM', 'ENOENT', 'ENOTDIR'].some((code) => hasNodeErrorCode(error, code))) throw error;
+          if (!isSkippableEntryError(error)) throw error;
         }
       } else if (entry.isFile()) {
         const item: ExecutionFileEntry = { name: entry.name, path: toExecutorPath(candidate), relativePath: relativeFilePath(root, candidate), type: 'file' };
