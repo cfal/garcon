@@ -475,6 +475,7 @@ function makeService(overrides = {}) {
     triggerDrain: mock(() => Promise.resolve(undefined)),
     ownsExecution: mock(() => false),
     readChatExecutionControl: mock(() => Promise.resolve(storedQueue())),
+    withChatExecutionControl: mock(async (chatId, operation) => operation(await queue.readChatExecutionControl(chatId))),
     createChatQueueEntry: mock(() =>
       Promise.resolve({
         entry: queueEntry('entry-1'),
@@ -613,6 +614,7 @@ function makeService(overrides = {}) {
       const preparation = {
         operation: 'agent-handoff',
         prepare: mock(async () => {
+          const commit = async () => {
           const current = sessions.get(input.chatId);
           if (!current) throw new DomainError('SESSION_NOT_FOUND', 'Session not found', 404);
           sessions.set(input.chatId, {
@@ -645,6 +647,8 @@ function makeService(overrides = {}) {
             }],
             agentOwnershipEpoch: `${current.agentOwnershipEpoch}:handoff`,
           });
+          };
+          await (input.guardDecision ? input.guardDecision(commit) : commit());
         }),
         compensate: mock(async () => undefined),
       };
@@ -2901,9 +2905,23 @@ describe('ChatCommandService', () => {
     expect(f.queue.reserveTranscriptSnapshot).toHaveBeenCalledWith(chatId);
     expect(f.handoffs.createPreparation).toHaveBeenCalledWith(expect.objectContaining({ command: null }));
     expect(f.queue.releaseTranscriptSnapshot).toHaveBeenCalledTimes(1);
+    expect(f.queue.withChatExecutionControl).toHaveBeenCalledTimes(1);
     expect(f.queue.reserveDirectTurn).not.toHaveBeenCalled();
     expect(f.queue.admitUserInput).not.toHaveBeenCalled();
     expect(f.queue.runReservedTurn).not.toHaveBeenCalled();
+  });
+
+  it('refuses a promptless decision when control input arrives after the initial idle check', async () => {
+    const pending = storedQueue([], { controlEntries: [controlEntry('reply', 'Synthetic delayed reply')] });
+    const f = makeService({ queue: {
+      withChatExecutionControl: mock(async (_chatId, operation) => operation(pending)),
+    } });
+    const { chatId, clientRequestId, handoff } = handoffRunInput();
+    await expect(f.service.submitAgentHandoff({ chatId, clientRequestId, handoff }, new AbortController().signal))
+      .rejects.toMatchObject({ code: 'AGENT_HANDOFF_REQUIRES_IDLE', status: 409, control: pending });
+    expect(f.sessions.get(chatId).agentOwnershipEpoch).toBe('epoch-1');
+    expect(f.queue.releaseTranscriptSnapshot).toHaveBeenCalledTimes(1);
+    expect(f.queue.admitUserInput).not.toHaveBeenCalled();
   });
 
   it('releases a promptless handoff reservation after stale ownership rejection', async () => {

@@ -4,6 +4,9 @@ import { AgentHandoffService } from '../agent-handoff-service.ts';
 import { AgentDirectory } from '../directory.ts';
 import { IntegrationRegistry } from '../../../runtime/agents/integration-registry.ts';
 import { LedgerFencedError } from '../../ledger/errors.ts';
+import { ChatExecutionCoordinator } from '../../chat-execution/chat-execution-coordinator.js';
+import { InMemoryChatExecutionControlRepository } from '../../chat-execution/chat-execution-control-repository.ts';
+import { assertAgentHandoffIdle } from '../agent-handoff-command.js';
 
 function envelope(ownerId) {
   return { ownerId, schemaVersion: 1, values: {} };
@@ -91,6 +94,54 @@ function installFakeTimers() {
 }
 
 describe('AgentHandoffService', () => {
+  it('preserves delayed control input on the source when it arrives during promptless planning', async () => {
+    const current = sourceChat();
+    const calls = [];
+    const ownership = handoffState(current, calls).ownership;
+    const planning = Promise.withResolvers();
+    const release = Promise.withResolvers();
+    const repository = new InMemoryChatExecutionControlRepository('test-instance');
+    const coordinator = new ChatExecutionCoordinator('/unused', {
+      captureSteerTarget: () => null, isChatRunning: () => false,
+    }, {}, () => ({}), () => true, repository, {
+      projectAdmission: { assertAvailable: async () => {} },
+      isControlInputViewCurrent: () => true,
+    });
+    const snapshot = coordinator.reserveTranscriptSnapshot('chat');
+    const service = createService({
+      registry: { getChat: () => current }, ownership, ledger: ledgerState(calls),
+      carryover: { planFor: async () => { planning.resolve(); await release.promise; return { kind: 'empty' }; } },
+      reopenProducer: () => calls.push('reopen'),
+    });
+    const preparing = service.createPreparation({
+      chatId: 'chat', clientRequestId: 'synthetic-request', source: current,
+      handoff: handoff(), target: target(), command: null,
+      guardDecision: (decide) => coordinator.withChatExecutionControl('chat', async (control) => {
+        assertAgentHandoffIdle(control, false);
+        return decide();
+      }),
+    }).prepare(context());
+    try {
+      await planning.promise;
+      expect(await coordinator.deliverServerControlInput('chat', {
+        content: 'Synthetic delayed result', transcriptViewId: 'view-1',
+        createdAt: '2026-01-01T00:00:00.000Z', receipt: null,
+      }, new AbortController().signal)).toBe('queued');
+      release.resolve();
+      await expect(preparing).rejects.toMatchObject({ code: 'AGENT_HANDOFF_REQUIRES_IDLE' });
+      expect(current).toEqual(sourceChat());
+      expect(calls).toEqual(['close', 'watermark', 'checkpoint', 'messages', 'reopen']);
+      expect(ownership.pendingHandoffs()).toEqual([]);
+      expect(repository.load('chat').controlEntries.map(entry => entry.content)).toEqual(['Synthetic delayed result']);
+    } finally {
+      release.resolve();
+      await preparing.catch(() => {});
+      coordinator.beginShutdown();
+      await coordinator.releaseTranscriptSnapshot(snapshot);
+      service.shutdown();
+    }
+  });
+
   it('resolves same-agent cross-executor handoff without contacting the source executor', async () => {
     const executorId = '22222222-2222-4222-8222-222222222222';
     const current = sourceChat();

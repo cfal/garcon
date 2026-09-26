@@ -659,6 +659,32 @@ describe('ChatExecutionCoordinator', () => {
       .toHaveLength(1);
   });
 
+  it('serializes a handoff decision against control enqueue without locking other chats', async () => {
+    const repository = new InMemoryChatExecutionControlRepository('server-instance-test');
+    ({ coordinator } = createFixture({ controlRepository: repository }));
+    const snapshot = coordinator.reserveTranscriptSnapshot('chat-1');
+    const deciding = deferred();
+    const release = deferred();
+    const decision = coordinator.withChatExecutionControl('chat-1', async (control) => {
+      expect(control.controlEntries).toEqual([]);
+      deciding.resolve();
+      await release.promise;
+    });
+    await deciding.promise;
+    const delivery = coordinator.deliverServerControlInput('chat-1', interAgentInput(), new AbortController().signal);
+    try {
+      await coordinator.withChatExecutionControl('chat-2', async () => {});
+      expect(repository.load('chat-1').controlEntries).toEqual([]);
+    } finally {
+      release.resolve();
+      await decision;
+    }
+    expect(await delivery).toBe('queued');
+    expect(repository.load('chat-1').controlEntries).toHaveLength(1);
+    coordinator.beginShutdown();
+    await coordinator.releaseTranscriptSnapshot(snapshot);
+  });
+
   it('drains preserved control input after the public queue is cleared', async () => {
     const provider = deferred();
     const fixture = createFixture({
