@@ -227,16 +227,9 @@ export default class CodexAgentIntegration implements AgentIntegration {
     });
     this.forking = createCodexForking({
       journal: journalForking,
+      resolveNativeSession: nativeEvidence.resolveNativeSession,
       resolveProfile: async (request) => {
-        let reference = request.source.nativeSession;
-        let source = nativeSessions.decode(reference);
-        if (!source.path) {
-          reference = await nativeEvidence.resolveNativeSession({
-            chat: request.source,
-            signal: request.signal,
-          });
-          source = nativeSessions.decode(reference);
-        }
+        const source = nativeSessions.decode(request.source.nativeSession);
         if (!source.path) {
           if (!request.point) return null;
           throw transcriptUnavailableForFork();

@@ -209,6 +209,13 @@ async function writeJsonl(filePath, entries) {
   await fs.writeFile(filePath, `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`, 'utf8');
 }
 
+async function writeSessionMetadata(filePath) {
+  await writeJsonl(filePath, [{
+    type: 'session_meta', timestamp: '2026-07-28T00:00:00.000Z',
+    payload: { id: 'thread-1', history_mode: 'legacy' },
+  }]);
+}
+
 function commandHistoryEntries(callId, command, output) {
   return [
     {
@@ -2031,6 +2038,88 @@ describe('CodexAppServerRuntime', () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
+  it.each(['runTurn', 'compact'])('repairs a moved supplied path before cold %s', async (method) => {
+    const nativePath = path.join(tmpDir, 'moved.jsonl');
+    await writeJsonl(nativePath, commandHistoryEntries('call-1', 'echo test', 'test'));
+    const discovery = new FakeClient({
+      listThreads: async () => ({ data: [makeThread({ path: nativePath })], nextCursor: null }),
+    });
+    const execution = new FakeClient();
+    const clients = [discovery, execution];
+    const provider = createRuntime({ createClient: () => clients.shift() });
+    try {
+      await provider[method](makeRequest({
+        agentSessionId: 'thread-1', nativePath: path.join(tmpDir, 'old.jsonl'),
+      }));
+      expect(execution.resumeThread).toHaveBeenCalledWith(expect.objectContaining({
+        threadId: 'thread-1', path: nativePath,
+      }));
+      expect(discovery.listThreads).toHaveBeenCalledTimes(1);
+      expect(execution.startThread).not.toHaveBeenCalled();
+      expect(execution[method === 'compact' ? 'compactThread' : 'startTurn']).toHaveBeenCalledTimes(1);
+    } finally {
+      await provider.shutdown();
+    }
+  });
+
+  it.each(['runTurn', 'compact'])('preserves ID-based cold %s without discovery', async (method) => {
+    const fake = new FakeClient();
+    const provider = createRuntime({ createClient: () => fake });
+    try {
+      await provider[method](makeRequest({ agentSessionId: 'archived-thread', nativePath: null }));
+      expect(fake.listThreads).not.toHaveBeenCalled();
+      expect(fake.resumeThread.mock.calls[0][0]).toMatchObject({ threadId: 'archived-thread' });
+      expect(fake.resumeThread.mock.calls[0][0].path).toBeUndefined();
+      expect(fake.startThread).not.toHaveBeenCalled();
+    } finally {
+      await provider.shutdown();
+    }
+  });
+
+  it.each([
+    ['runTurn', 'missing'], ['compact', 'missing'],
+    ['runTurn', 'mismatch'], ['compact', 'mismatch'],
+    ['runTurn', 'corrupt'], ['compact', 'corrupt'],
+  ])('fails cold %s with %s native history without starting another session', async (method, kind) => {
+    const nativePath = path.join(tmpDir, 'invalid.jsonl');
+    if (kind === 'mismatch') await writeJsonl(nativePath, [{
+      type: 'session_meta', timestamp: '2026-07-28T00:00:00.000Z', payload: { id: 'other-thread' },
+    }]);
+    if (kind === 'corrupt') await fs.writeFile(nativePath, 'invalid json\n');
+    const fake = new FakeClient();
+    const provider = createRuntime({ createClient: () => fake });
+    try {
+      await expect(provider[method](makeRequest({ agentSessionId: 'thread-1', nativePath })))
+        .rejects.toMatchObject({ code: 'TRANSCRIPT_UNAVAILABLE' });
+      expect(fake.startThread).not.toHaveBeenCalled();
+      expect(fake.resumeThread).not.toHaveBeenCalled();
+      expect(fake.startTurn).not.toHaveBeenCalled();
+      expect(fake.compactThread).not.toHaveBeenCalled();
+      expect(fake.listThreads).toHaveBeenCalledTimes(kind === 'missing' ? 1 : 0);
+    } finally {
+      await provider.shutdown();
+    }
+  });
+
+  it.each(['runTurn', 'compact'])('honors cancellation during cold %s discovery', async (method) => {
+    const admission = new AbortController();
+    const fake = new FakeClient({ listThreads: async () => {
+      admission.abort();
+      return { data: [], nextCursor: null };
+    } });
+    const provider = createRuntime({ createClient: () => fake });
+    try {
+      await expect(provider[method](makeRequest({
+        agentSessionId: 'thread-1', nativePath: path.join(tmpDir, 'old.jsonl'),
+        executionAdmission: { signal: admission.signal, markStarted: mock() },
+      }))).rejects.toMatchObject({ name: 'AbortError' });
+      expect(fake.resumeThread).not.toHaveBeenCalled();
+      expect(fake.startThread).not.toHaveBeenCalled();
+    } finally {
+      await provider.shutdown();
+    }
+  });
+
   function makeThreadSettings(overrides = {}) {
     return {
       cwd: '/repo',
@@ -2499,7 +2588,7 @@ describe('CodexAppServerRuntime', () => {
     ['start', 'skills'], ['resume', 'skills'],
   ])('does not dispatch a released %s after %s preparation', async (kind, stage) => {
     const nativePath = path.join(tmpDir, 'release-during-materialization.jsonl');
-    await fs.writeFile(nativePath, '{}\n');
+    await writeSessionMetadata(nativePath);
     const preparationStarted = createDeferred();
     const continuePreparation = createDeferred();
     const originalWriteFile = fs.writeFile;
@@ -4667,7 +4756,7 @@ describe('CodexAppServerRuntime', () => {
       }),
       startTurn: async () => {
         turnNumber += 1;
-        await fs.writeFile(nativePath, '{}\n');
+        await writeSessionMetadata(nativePath);
         return { turn: makeTurn({ id: `turn-${turnNumber}`, status: 'inProgress' }) };
       },
       updateThreadSettings: async (params) => {
@@ -4833,7 +4922,7 @@ describe('CodexAppServerRuntime', () => {
         cwd: '/repo',
       }),
       startTurn: async () => {
-        await fs.writeFile(nativePath, '{}\n');
+        await writeSessionMetadata(nativePath);
         return { turn: makeTurn({ id: 'turn-1', status: 'inProgress' }) };
       },
       interruptTurn: async () => {
@@ -4921,7 +5010,7 @@ describe('CodexAppServerRuntime', () => {
         cwd: '/repo',
       }),
       startTurn: async () => {
-        await fs.writeFile(firstPath, '{}\n');
+        await writeSessionMetadata(firstPath);
         return { turn: makeTurn({ id: 'turn-1', status: 'inProgress' }) };
       },
       interruptTurn: async () => {
@@ -5037,7 +5126,7 @@ describe('CodexAppServerRuntime', () => {
         cwd: '/repo',
       }),
       startTurn: async () => {
-        await fs.writeFile(nativePath, '{}\n');
+        await writeSessionMetadata(nativePath);
         return { turn: makeTurn({ id: 'turn-1', status: 'inProgress' }) };
       },
     });
@@ -5136,7 +5225,7 @@ describe('CodexAppServerRuntime', () => {
         cwd: '/repo',
       }),
       startTurn: async () => {
-        await fs.writeFile(nativePath, '{}\n');
+        await writeSessionMetadata(nativePath);
         return { turn: makeTurn({ id: 'turn-1', status: 'inProgress' }) };
       },
     });

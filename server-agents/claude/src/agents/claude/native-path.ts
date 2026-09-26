@@ -84,10 +84,19 @@ function configHomeDirFromNativePath(
 
 async function isFile(filePath: string): Promise<boolean> {
   try {
-    return (await fs.stat(filePath)).isFile();
-  } catch {
+    if (!(await fs.stat(filePath)).isFile()) {
+      throw new AgentIntegrationError('TRANSCRIPT_UNAVAILABLE', 'Claude native transcript is not a file', false);
+    }
+    return true;
+  } catch (error) {
+    if (!isMissingPath(error)) throw error;
     return false;
   }
+}
+
+function isMissingPath(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException).code;
+  return code === 'ENOENT' || code === 'ENOTDIR';
 }
 
 export function sanitizeClaudeProjectPath(projectPath: string): string {
@@ -121,6 +130,7 @@ async function searchClaudeProjects(
   try {
     projectDirectories = await fs.readdir(projectsDir);
   } catch (error) {
+    if (!isMissingPath(error)) throw error;
     (options.logger ?? NOOP_LOGGER).warn('Claude transcript search directory is unavailable', {
       projectsDir,
       error: error instanceof Error ? error.message : String(error),
@@ -198,6 +208,11 @@ export async function resolveClaudeNativePath(
       agentSessionId,
       matches,
     });
+    throw new AgentIntegrationError(
+      'TRANSCRIPT_UNAVAILABLE',
+      'Multiple Claude native transcripts match the selected session',
+      false,
+    );
   }
   return null;
 }

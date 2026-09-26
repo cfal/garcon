@@ -198,12 +198,10 @@ describe('resolveClaudeNativePath', () => {
     }
     const logger = createLogger();
 
-    const resolved = await resolveClaudeNativePath({
+    await expect(resolveClaudeNativePath({
       projectPath,
       agentSessionId: 'session-1',
-    }, { configHomeDir, logger });
-
-    expect(resolved).toBeNull();
+    }, { configHomeDir, logger })).rejects.toMatchObject({ code: 'TRANSCRIPT_UNAVAILABLE' });
     expect(logger.error).toHaveBeenCalledWith(
       'Claude transcript search found multiple files and refused to choose',
       expect.objectContaining({ agentSessionId: 'session-1' }),

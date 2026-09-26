@@ -38,6 +38,7 @@ function setup(profile, nativeImplementation = async () => startedSession) {
   const forkPaginatedWhole = mock(nativeImplementation);
   const forkPaginatedPoint = mock(nativeImplementation);
   const resolveProfile = mock(async () => profile);
+  const resolveNativeSession = mock(async ({ chat }) => chat.nativeSession);
   return {
     forking: createCodexForking({
       journal: {
@@ -45,6 +46,7 @@ function setup(profile, nativeImplementation = async () => startedSession) {
         discard: mock(async () => undefined),
       },
       resolveProfile,
+      resolveNativeSession,
       forkPaginatedWhole,
       forkPaginatedPoint,
     }),
@@ -52,10 +54,29 @@ function setup(profile, nativeImplementation = async () => startedSession) {
     forkPaginatedWhole,
     forkPaginatedPoint,
     resolveProfile,
+    resolveNativeSession,
   };
 }
 
 describe('createCodexForking', () => {
+  it.each([
+    [legacyProfile, null, 'legacyFork'],
+    [legacyProfile, { entryId: 'item-2' }, 'legacyFork'],
+    [paginatedProfile, null, 'forkPaginatedWhole'],
+    [paginatedProfile, { entryId: 'turn:turn-1:item:item-2' }, 'forkPaginatedPoint'],
+  ])('propagates the resolved source through profile selection and the fork strategy (%j, %j)', async (profile, point, method) => {
+    const values = setup(profile);
+    const input = request(point);
+    input.source.nativeSession = { ownerId: 'codex', schemaVersion: 1, value: { path: '/old.jsonl' } };
+    const resolved = { ownerId: 'codex', schemaVersion: 1, value: { path: profile.nativePath } };
+    values.resolveNativeSession.mockResolvedValue(resolved);
+    await values.forking.fork(input);
+    expect(values.resolveNativeSession).toHaveBeenCalledWith({ chat: input.source, signal: input.signal });
+    expect(values.resolveProfile.mock.calls[0][0].source.nativeSession).toBe(resolved);
+    expect(values[method].mock.calls[0][0].source.nativeSession).toBe(resolved);
+    expect(input.source.nativeSession.value.path).toBe('/old.jsonl');
+  });
+
   it('routes every legacy fork through the existing verified JSONL strategy', async () => {
     const full = setup(legacyProfile);
     await expect(full.forking.fork(request())).resolves.toBe(materialized);

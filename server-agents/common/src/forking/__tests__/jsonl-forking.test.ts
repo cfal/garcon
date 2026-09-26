@@ -142,6 +142,55 @@ async function createFixture() {
 }
 
 describe('createJsonlNativeForking provider positions', () => {
+  it('uses one resolved source for point lookup and copying despite a stored stale path', async () => {
+    const fixture = await createFixture();
+    const staleSession = fixture.nativeSessions.encode({
+      path: path.join(fixture.root, 'missing.jsonl'),
+      agentSessionId: sourceAgentSessionId,
+      modelEndpointId: null,
+    });
+    let resolutions = 0;
+    const forking = createJsonlNativeForking({
+      ...fixture.options,
+      nativeEvidence: {
+        ...fixture.options.nativeEvidence,
+        async resolveNativeSession({ chat }) {
+          expect(chat.nativeSession).toEqual(staleSession);
+          resolutions++;
+          return fixture.request.source.nativeSession;
+        },
+      },
+    });
+    const forked = materializedSession(await forking.fork({
+      ...fixture.request,
+      source: { ...fixture.request.source, nativeSession: staleSession },
+    }));
+    expect(resolutions).toBe(1);
+    expect(await fixture.loadMessages(fixture.nativeSessions.decode(forked.nativeSession).path!))
+      .toEqual(fixture.sourceMessages);
+  });
+
+  it('resolves the source before the native whole-session callback', async () => {
+    const fixture = await createFixture();
+    const forking = createJsonlNativeForking({
+      ...fixture.options,
+      nativeEvidence: {
+        ...fixture.options.nativeEvidence,
+        async resolveNativeSession() { return fixture.request.source.nativeSession; },
+      },
+      async forkWholeSession(request) {
+        expect(request.source.nativeSession).toEqual(fixture.request.source.nativeSession);
+        return { agentSessionId: 'forked-session', nativeSession: null };
+      },
+    });
+    const forked = materializedSession(await forking.fork({
+      ...fixture.request,
+      providerMeta: null,
+      source: { ...fixture.request.source, nativeSession: null },
+    }));
+    expect(forked.agentSessionId).toBe('forked-session');
+  });
+
   it('forks through the ledger row selected by provider metadata', async () => {
     const fixture = await createFixture();
 

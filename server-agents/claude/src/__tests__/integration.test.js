@@ -1,5 +1,5 @@
 import { describe, expect, it, mock } from 'bun:test';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import ClaudeAgentIntegration from '../index.js';
@@ -24,6 +24,60 @@ function createHost(root = '/tmp/garcon-claude-integration-test') {
 }
 
 describe('ClaudeAgentIntegration', () => {
+  it.each(['missing', 'pathless'])('resolves %s native locations only when history is consumed', async (kind) => {
+    const root = await mkdtemp(join(tmpdir(), 'garcon-claude-lazy-history-'));
+    const host = createHost(root);
+    host.environment.get.mockImplementation((key) => key === 'CLAUDE_CONFIG_DIR' ? root : undefined);
+    const integration = new ClaudeAgentIntegration(host);
+    const nativePath = join(root, 'projects', 'moved-project', 'session-1.jsonl');
+    try {
+      await mkdir(join(root, 'projects', 'moved-project'), { recursive: true });
+      await writeFile(nativePath, `${JSON.stringify({
+        sessionId: 'session-1', type: 'user', uuid: 'user-1',
+        timestamp: '2026-08-16T00:00:00.000Z',
+        message: { role: 'user', content: 'Synthetic native history' },
+      })}\n`);
+      expect(host.environment.get).not.toHaveBeenCalled();
+      const chat = nativeChat(integration, kind === 'missing' ? join(root, 'old.jsonl') : null);
+      for (const importer of [integration.nativeHistoryImport, integration.legacyHistoryImport]) {
+        await expect(importedRows(importer, chat)).resolves.toMatchObject([
+          { message: { type: 'user-message', content: 'Synthetic native history' } },
+        ]);
+      }
+      await expect(integration.nativeSessions.describeSource({
+        chat, signal: new AbortController().signal,
+      })).resolves.toEqual({ kind: 'filesystem-path', value: nativePath });
+      expect(chat.nativeSession.value.path).toBe(kind === 'missing' ? join(root, 'old.jsonl') : null);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves absent legacy history but rejects native Reload and discovery failures', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'garcon-claude-missing-history-'));
+    const host = createHost(root);
+    host.environment.get.mockImplementation((key) => key === 'CLAUDE_CONFIG_DIR' ? root : undefined);
+    const integration = new ClaudeAgentIntegration(host);
+    const chat = nativeChat(integration, join(root, 'missing.jsonl'));
+    try {
+      await expect(importedRows(integration.legacyHistoryImport, chat)).resolves.toEqual([]);
+      await expect(importedRows(integration.nativeHistoryImport, chat)).rejects.toMatchObject({
+        code: 'TRANSCRIPT_UNAVAILABLE',
+      });
+      await mkdir(chat.nativeSession.value.path);
+      await expect(importedRows(integration.legacyHistoryImport, chat)).rejects.toMatchObject({
+        code: 'TRANSCRIPT_UNAVAILABLE',
+      });
+      await rm(chat.nativeSession.value.path, { recursive: true });
+      await symlink(join(root, 'projects'), join(root, 'projects'));
+      await expect(importedRows(integration.legacyHistoryImport, chat)).rejects.toMatchObject({
+        code: 'ELOOP',
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('validates model annotations without requiring an active native session', async () => {
     const integration = new ClaudeAgentIntegration(createHost());
     const configuration = {

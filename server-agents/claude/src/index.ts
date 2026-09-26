@@ -44,10 +44,7 @@ import {
   transformClaudeForkTranscript,
 } from './agents/claude/fork-transcript.js';
 import { loadClaudeChatMessages } from './agents/claude/history-loader.js';
-import {
-  createClaudeNativePath,
-  resolveClaudeNativePath,
-} from './agents/claude/native-path.js';
+import { resolveClaudeNativePath } from './agents/claude/native-path.js';
 import { ClaudeSlashCommandDiscovery } from './agents/claude/slash-command-discovery.js';
 import { createClaudeNativeActivityProbe } from './agents/claude/native-activity.js';
 import { resolveClaudeModel } from './agents/claude/model-context.js';
@@ -292,14 +289,14 @@ function createClaudeNativeEvidence(options: {
       nativePath: native.path,
     };
   };
-  const derivedPath = async (chat: AgentChatReference) => {
-    const value = reference(chat);
-    return value.nativePath ?? (value.agentSessionId
-      ? createClaudeNativePath(chat.projectPath, value.agentSessionId, {
-          configHomeDir: options.configHomeDir() ?? undefined,
-          logger: options.logger,
-        })
-      : null);
+  const resolvePath = async (chat: AgentChatReference, signal: AbortSignal) => {
+    signal.throwIfAborted();
+    const nativePath = await resolveClaudeNativePath(reference(chat), {
+      configHomeDir: options.configHomeDir() ?? undefined,
+      logger: options.logger,
+    });
+    signal.throwIfAborted();
+    return nativePath;
   };
   return {
     async resolveNativeSession({ chat, signal }) {
@@ -307,10 +304,7 @@ function createClaudeNativeEvidence(options: {
       const current = options.nativeSessions.decode(chat.nativeSession);
       const agentSessionId = chat.agentSessionId ?? current.agentSessionId;
       if (!agentSessionId) return null;
-      const nativePath = await resolveClaudeNativePath(reference(chat), {
-        configHomeDir: options.configHomeDir() ?? undefined,
-        logger: options.logger,
-      });
+      const nativePath = await resolvePath(chat, signal);
       if (!nativePath && chat.nativeSession) return chat.nativeSession;
       return options.nativeSessions.encode({
         path: nativePath,
@@ -320,11 +314,11 @@ function createClaudeNativeEvidence(options: {
     },
     async load({ chat, signal }) {
       signal.throwIfAborted();
-      const nativePath = await derivedPath(chat);
+      const nativePath = await resolvePath(chat, signal);
       if (!nativePath) {
         throw new AgentIntegrationError(
           'TRANSCRIPT_UNAVAILABLE',
-          'Claude native transcript has no selected session',
+          'Claude native transcript is unavailable',
           false,
         );
       }
@@ -338,7 +332,7 @@ function createClaudeNativeEvidence(options: {
     },
     async loadLegacy({ chat, signal }) {
       signal.throwIfAborted();
-      const nativePath = await derivedPath(chat);
+      const nativePath = await resolvePath(chat, signal);
       if (!nativePath) return { messages: [] };
       try {
         return {
@@ -357,7 +351,7 @@ function createClaudeNativeEvidence(options: {
     },
     async describeSource({ chat, signal }) {
       signal.throwIfAborted();
-      const nativePath = await derivedPath(chat);
+      const nativePath = await resolvePath(chat, signal);
       return nativePath ? { kind: 'filesystem-path', value: nativePath } : null;
     },
     async release({ chat, signal }) {

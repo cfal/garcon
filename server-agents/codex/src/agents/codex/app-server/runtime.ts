@@ -17,6 +17,7 @@ import {
 } from '@garcon/server-agent-interface';
 import type { RuntimeSteerRequest as AgentSteerRequest, RuntimeSteerTarget as AgentSteerTarget } from '@garcon/server-agent-common/execution/runtime-events';
 import { CodexHistoryService } from '../history-source.js';
+import { resolveCodexNativePath } from '../native-path.js';
 import {
   assertCodexExecutionOpen,
   markCodexExecutionStarted,
@@ -903,6 +904,27 @@ export class CodexAppServerRuntime {
       && isTerminalSessionStatus(retained.status)
     ) {
       await this.#supersedeSource(retained);
+    }
+
+    if (request.nativePath) {
+      const nativePath = await resolveCodexNativePath({
+        agentSessionId: request.agentSessionId,
+        nativePath: request.nativePath,
+      }, {
+        discover: () => this.resolveNativePath(request),
+        logger: this.#logger,
+        signal: request.executionAdmission?.signal ?? new AbortController().signal,
+      });
+      assertCodexExecutionOpen(request);
+      if (!nativePath) {
+        this.requestNativePathDiscoveryRefresh(request.agentSessionId);
+        throw new AgentIntegrationError(
+          'TRANSCRIPT_UNAVAILABLE',
+          'Codex native transcript could not be resolved',
+          true,
+        );
+      }
+      request = { ...request, nativePath };
     }
 
     const client = this.#newClient(request, true);

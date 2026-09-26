@@ -42,6 +42,12 @@ export function createJsonlNativeForking(options: JsonlNativeForkingOptions): Ag
   return {
     async fork(request) {
       request.signal.throwIfAborted();
+      const nativeSession = await options.nativeEvidence.resolveNativeSession({
+        chat: request.source,
+        signal: request.signal,
+      });
+      request.signal.throwIfAborted();
+      request = { ...request, source: { ...request.source, nativeSession } };
       if (!request.providerMeta && options.forkWholeSession) {
         const result = await options.forkWholeSession(request);
         if (result) return { kind: 'materialized', session: result };
@@ -61,8 +67,7 @@ async function forkJsonlAtProviderPoint(
   options: JsonlNativeForkingOptions,
   request: AgentNativeForkRequest,
 ): Promise<AgentNativeForkOutcome> {
-  const resolvedReference = await resolveSourceReference(options, request);
-  const sourceNative = options.nativeSessions.decode(resolvedReference);
+  const sourceNative = options.nativeSessions.decode(request.source.nativeSession);
   const sourceAgentSessionId = request.source.agentSessionId ?? sourceNative.agentSessionId;
   const sourcePath = sourceNative.path;
   if (!sourceAgentSessionId || !sourcePath) {
@@ -185,18 +190,6 @@ function matchesProviderMeta(
     if (source[key] !== value) return false;
   }
   return compared;
-}
-
-async function resolveSourceReference(
-  options: JsonlNativeForkingOptions,
-  request: AgentNativeForkRequest,
-) {
-  const current = options.nativeSessions.decode(request.source.nativeSession);
-  if (current.path) return request.source.nativeSession;
-  return options.nativeEvidence.resolveNativeSession({
-    chat: request.source,
-    signal: request.signal,
-  });
 }
 
 function positiveSafeInteger(value: unknown): number | null {

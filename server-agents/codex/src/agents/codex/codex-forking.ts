@@ -2,6 +2,7 @@ import {
   AgentIntegrationError,
   type AgentNativeFork,
   type AgentNativeForkRequest,
+  type AgentNativeSessionAccess,
   type AgentEstablishedSession,
 } from '@garcon/server-agent-interface';
 import { missingNativePoint } from '@garcon/server-agent-common/forking/jsonl-forking';
@@ -11,6 +12,7 @@ import { codexTurnIdFromEntryId } from './message-source-identity.js';
 
 export interface CodexForkingOptions {
   readonly journal: AgentNativeFork;
+  readonly resolveNativeSession: AgentNativeSessionAccess['resolveNativeSession'];
   readonly resolveProfile: (request: {
     readonly source: AgentNativeForkRequest['source'];
     // Presence decides missing-source strictness; whole and point forks pass
@@ -33,6 +35,9 @@ export function createCodexForking(options: CodexForkingOptions): AgentNativeFor
   return {
     async fork(request) {
       request.signal.throwIfAborted();
+      const nativeSession = await options.resolveNativeSession({ chat: request.source, signal: request.signal });
+      request.signal.throwIfAborted();
+      request = { ...request, source: { ...request.source, nativeSession } };
       const profile = await options.resolveProfile({
         source: request.source,
         point: request.providerMeta,
