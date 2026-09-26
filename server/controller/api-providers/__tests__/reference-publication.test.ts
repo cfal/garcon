@@ -104,7 +104,7 @@ test.each(kinds)('a rejected %s publication releases its reservation', async (ki
   await remove();
 });
 
-test.each(kinds)('an uncertain %s publication retains possible durable references', async (kind) => {
+test.each(['settings', 'schedule', 'chat'] as const)('an uncertain %s publication retains possible durable references', async (kind) => {
   const { root, publish, remove } = await fixture();
   const open = fs.open;
   const failure = spyOn(fs, 'open').mockImplementation(async (path, flags, mode) => {
@@ -116,6 +116,37 @@ test.each(kinds)('an uncertain %s publication retains possible durable reference
     else await expect(publish(kind)).rejects.toBeInstanceOf(Error);
   } finally { failure.mockRestore(); }
   await expect(remove()).rejects.toMatchObject({ code: 'API_PROVIDER_IN_USE' });
+});
+
+test('an uncertain handoff retains provider references while confirming the same decision', async () => {
+  const { root, publish, remove, ownership } = await fixture();
+  const retry = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const open = fs.open;
+  let attempts = 0;
+  const failure = spyOn(fs, 'open').mockImplementation(async (path, flags, mode) => {
+    if (path === root && flags === 'r') {
+      attempts += 1;
+      if (attempts === 1) throw new Error('Synthetic directory sync failure');
+      retry.resolve();
+      await release.promise;
+    }
+    return open(path, flags, mode);
+  });
+  const writing = publish('handoff');
+  try {
+    await retry.promise;
+    expect(ownership.hasPending(chatId)).toBe(false);
+    await expect(remove()).rejects.toMatchObject({ code: 'API_PROVIDER_IN_USE' });
+    release.resolve();
+    await writing;
+    expect(ownership.hasPending(chatId)).toBe(true);
+    await expect(remove()).rejects.toMatchObject({ code: 'API_PROVIDER_IN_USE' });
+  } finally {
+    release.resolve();
+    failure.mockRestore();
+    await writing;
+  }
 });
 
 test.each(['confirmed', 'failed', 'uncertain'] as const)('removing the last chat reference retains disk protection until confirmed (%s)', async (outcome) => {
