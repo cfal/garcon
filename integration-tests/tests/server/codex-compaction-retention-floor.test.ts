@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CURRENT_WORKSPACE_VERSION } from '../../../server/controller/migrations/index.js';
+import { seedCurrentWorkspace } from '../../support/current-workspace.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 
 const FIRST_PROMPT = 'pre-compaction prompt';
@@ -126,10 +126,7 @@ describe('Codex compaction interleaving', () => {
           compactionMarker,
           ...turnRows('turn-2', SECOND_PROMPT, SECOND_ANSWER),
         ].join('\n')}\n`);
-        await writeFile(
-          join(directories.workspace, 'workspace-version.json'),
-          JSON.stringify({ version: CURRENT_WORKSPACE_VERSION }),
-        );
+        await seedCurrentWorkspace(directories.workspace);
         await writeFile(join(directories.workspace, 'chats.json'), JSON.stringify({
           version: 5,
           sessions: {

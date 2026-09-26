@@ -8,7 +8,7 @@ import {
 } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ChatMessagesMessage } from '../../../common/ws-events.js';
-import { CURRENT_WORKSPACE_VERSION } from '../../../server/controller/migrations/index.js';
+import { seedCurrentWorkspace } from '../../support/current-workspace.js';
 import {
   assistantContents,
   countUserContent,
@@ -648,10 +648,7 @@ async function prepareChatRecord(
   model: string,
   native: { agentSessionId: string; path: string } | null,
 ): Promise<void> {
-  await writeFile(
-    join(directories.workspace, 'workspace-version.json'),
-    JSON.stringify({ version: CURRENT_WORKSPACE_VERSION }),
-  );
+  await seedCurrentWorkspace(directories.workspace);
   await writeFile(join(directories.workspace, 'chats.json'), JSON.stringify({
     version: 5,
     sessions: {

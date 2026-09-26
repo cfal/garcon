@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { CURRENT_WORKSPACE_VERSION } from '../../../server/controller/migrations/index.js';
+import { seedCurrentWorkspace } from '../../support/current-workspace.js';
 import {
   assistantContents,
   userContents,
@@ -433,10 +433,7 @@ async function writeLegacyPiSession(input: {
       },
     },
   ].map((entry) => JSON.stringify(entry)).join('\n')}\n`);
-  await writeFile(
-    join(input.workspace, 'workspace-version.json'),
-    JSON.stringify({ version: CURRENT_WORKSPACE_VERSION }),
-  );
+  await seedCurrentWorkspace(input.workspace);
   await writeFile(join(input.workspace, 'chats.json'), JSON.stringify({
     version: 5,
     sessions: {

@@ -22,7 +22,7 @@ import {
   startScriptedOpenCodeTestEnvironment,
   type ScriptedOpenCodeTestEnvironment,
 } from '../../support/scripted-opencode.js';
-import { CURRENT_WORKSPACE_VERSION } from '../../../server/controller/migrations/index.js';
+import { seedCurrentWorkspace } from '../../support/current-workspace.js';
 
 // Fork matrix against the real binary: a fork taken while the first model
 // request is still held seeds only the committed prefix, a never-run chat
@@ -244,10 +244,7 @@ async function prepareEmptyChat(
   directories: IntegrationDirectories,
   chatId: string,
 ): Promise<void> {
-  await writeFile(
-    join(directories.workspace, 'workspace-version.json'),
-    JSON.stringify({ version: CURRENT_WORKSPACE_VERSION }),
-  );
+  await seedCurrentWorkspace(directories.workspace);
   await writeFile(join(directories.workspace, 'chats.json'), JSON.stringify({
     version: 5,
     sessions: {

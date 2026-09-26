@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AgentTurnCommandResponse } from '../../../common/chat-command-contracts.js';
-import { CURRENT_WORKSPACE_VERSION } from '../../../server/controller/migrations/index.js';
+import { seedCurrentWorkspace } from '../../support/current-workspace.js';
 import { messagesOfType } from '../../support/chat-assertions.js';
 import { claudeText, claudeToolUse } from '../../support/fake-claude-model.js';
 import { withIntegrationFixture, type IntegrationDirectories } from '../../support/integration-fixture.js';
@@ -297,10 +297,7 @@ test('Claude retires a mutated process when runtime cap verification fails and d
 }, 60_000);
 
 async function prepareUnstartedClaudeChat(dirs: IntegrationDirectories, chatId: string): Promise<void> {
-  await writeFile(
-    join(dirs.workspace, 'workspace-version.json'),
-    JSON.stringify({ version: CURRENT_WORKSPACE_VERSION }),
-  );
+  await seedCurrentWorkspace(dirs.workspace);
   await writeFile(join(dirs.workspace, 'chats.json'), JSON.stringify({
     version: 5,
     sessions: {

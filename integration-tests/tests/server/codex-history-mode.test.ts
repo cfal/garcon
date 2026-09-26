@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CURRENT_WORKSPACE_VERSION } from '../../../server/controller/migrations/index.js';
+import { seedCurrentWorkspace } from '../../support/current-workspace.js';
 import { createCodexRolloutFileName } from '../../support/codex-rollout-filename.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 
@@ -105,10 +105,7 @@ describe('Codex history modes', () => {
             history_base: null,
           },
         })}\n`);
-        await writeFile(
-          join(directories.workspace, 'workspace-version.json'),
-          JSON.stringify({ version: CURRENT_WORKSPACE_VERSION }),
-        );
+        await seedCurrentWorkspace(directories.workspace);
         await writeFile(join(directories.workspace, 'chats.json'), JSON.stringify({
           version: 5,
           sessions: {
@@ -275,10 +272,7 @@ describe('Codex history modes', () => {
           assistantItem('item-4', 'second answer'),
           '',
         ].join('\n'));
-        await writeFile(
-          join(directories.workspace, 'workspace-version.json'),
-          JSON.stringify({ version: CURRENT_WORKSPACE_VERSION }),
-        );
+        await seedCurrentWorkspace(directories.workspace);
         await writeFile(join(directories.workspace, 'chats.json'), JSON.stringify({
           version: 5,
           sessions: {

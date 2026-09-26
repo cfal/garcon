@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CURRENT_WORKSPACE_VERSION } from '../../../server/controller/migrations/index.js';
+import { seedCurrentWorkspace } from '../../support/current-workspace.js';
 import { CodexAppServerClient } from '../../../server-agents/codex/src/agents/codex/app-server/client.js';
 import { buildThreadResumeParams } from '../../../server-agents/codex/src/agents/codex/app-server/request-builders.js';
 import { projectCodexCodeModeCommands } from '../../../server-agents/codex/src/agents/codex/code-mode-command-projection.js';
@@ -304,10 +304,7 @@ describe('Codex fork at message', () => {
           }),
           '',
         ].join('\n'));
-        await writeFile(
-          join(directories.workspace, 'workspace-version.json'),
-          JSON.stringify({ version: CURRENT_WORKSPACE_VERSION }),
-        );
+        await seedCurrentWorkspace(directories.workspace);
         await writeFile(join(directories.workspace, 'chats.json'), JSON.stringify({
           version: 5,
           sessions: {
