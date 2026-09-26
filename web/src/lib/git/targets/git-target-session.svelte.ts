@@ -212,6 +212,18 @@ export class GitTargetSessionController implements PortableSingletonController {
 		) {
 			return this.#activation.promise;
 		}
+		if (this.effectiveProjectKey && (this.#sessionRefreshPending || this.#appliedIdentity === null)) {
+			const key = JSON.stringify([this.executorId, this.effectiveProjectKey]);
+			// A fresh activation snapshot includes prior executor invalidations.
+			storeMostRecent(
+				this.#handledInvalidationVersions,
+				key,
+				Math.max(
+					this.#handledInvalidationVersions.get(key) ?? 0,
+					this.deps.invalidationVersion(this.executorId),
+				),
+			);
+		}
 		const activation = (async () => {
 			await this.ensureTargets();
 			if (

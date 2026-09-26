@@ -52,4 +52,64 @@ describe('GitMutationCoordinator', () => {
 		expect(onChanged).toHaveBeenCalledWith('remote', '/project', '/project');
 		expect(onMutationError).toHaveBeenCalledWith(expect.any(Error), 'remote', '/project');
 	});
+
+	it('reports failure and releases ownership without waiting for invalidation IO', async () => {
+		let rejectRefresh!: (error: Error) => void;
+		const refresh = new Promise<void>((_resolve, reject) => {
+			rejectRefresh = reject;
+		});
+		const onChanged = vi.fn(() => refresh);
+		const onInvalidationError = vi.fn();
+		const coordinator = new GitMutationCoordinator({ onChanged, onInvalidationError });
+		const failure = new Error('mutation failed');
+		const failed = vi.fn();
+		const running = coordinator
+			.run({
+				executorId: 'remote',
+				surfaceId: 'singleton:git',
+				effectiveProjectKey: '/project',
+				projectPath: '/project',
+				execute: async () => {
+					throw failure;
+				},
+			})
+			.catch(failed);
+		try {
+			await vi.waitFor(() => expect(failed).toHaveBeenCalledWith(failure));
+			expect(coordinator.pendingCount('singleton:git')).toBe(0);
+			expect(onChanged).toHaveBeenCalledWith('remote', '/project', '/project');
+		} finally {
+			rejectRefresh(new Error('refresh failed'));
+			await running;
+		}
+		await vi.waitFor(() =>
+			expect(onInvalidationError).toHaveBeenCalledWith(
+				expect.any(Error),
+				'remote',
+				'/project',
+				'/project',
+			),
+		);
+	});
+
+	it('keeps successful completion behind reconciliation', async () => {
+		let finishRefresh!: () => void;
+		const refresh = new Promise<void>((resolve) => {
+			finishRefresh = resolve;
+		});
+		const onChanged = vi.fn(() => refresh);
+		const coordinator = new GitMutationCoordinator({ onChanged });
+		const running = coordinator.run({
+			executorId: 'local',
+			surfaceId: 'singleton:git',
+			effectiveProjectKey: '/project',
+			projectPath: '/project',
+			execute: async () => true,
+		});
+		await vi.waitFor(() => expect(onChanged).toHaveBeenCalledOnce());
+		expect(coordinator.pendingCount('singleton:git')).toBe(1);
+		finishRefresh();
+		await expect(running).resolves.toBe(true);
+		expect(coordinator.pendingCount('singleton:git')).toBe(0);
+	});
 });

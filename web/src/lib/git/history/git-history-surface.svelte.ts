@@ -25,7 +25,10 @@ export class GitHistorySurfaceController implements PortableSingletonController 
 			projectSelection: deps.projectSelection,
 			createBranchSelector: deps.createGitBranchSelector,
 			invalidationVersion: deps.invalidationVersion,
-			onUnavailable: () => this.history.suspend(),
+			onUnavailable: () => {
+				this.pendingRevertCommit = null;
+				this.history.suspend();
+			},
 			canChangeTarget: () =>
 				!this.isRevertingCommit &&
 				deps.gitMutations.pendingCount(singletonSurfaceId('git-history')) === 0,

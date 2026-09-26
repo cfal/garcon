@@ -50,10 +50,14 @@ export class GitPorcelainState {
 	graphCommits = $state<GitGraphCommit[]>([]);
 	stashMessage = $state('');
 	stashIncludeUntracked = $state(false);
-	private activeLoadId = 0;
+	private activeLoadId = $state(0);
 	private activeLoadAbort: AbortController | null = null;
 
 	constructor(private readonly deps: GitPorcelainDeps) {}
+
+	get confirmationScope(): number {
+		return this.activeLoadId;
+	}
 
 	setInspectorView(view: GitInspectorView): void {
 		this.inspectorView = this.inspectorView === view ? 'none' : view;

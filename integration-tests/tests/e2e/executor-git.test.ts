@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { openDialogModelSelector, selectExecutor } from '../../support/executor-ui.js';
-import { writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { E2eFixture } from '../../support/e2e-fixture.js';
 import { withE2eFixture } from '../../support/e2e-fixture.js';
@@ -45,7 +45,138 @@ async function waitForDiff(fixture: E2eFixture, text: string): Promise<void> {
   }, { timeout: 20_000 }, GIT_PANEL, text);
 }
 
+test('hidden Workbench return reloads retained files after an editor save', async () => {
+  await withE2eFixture('executor-git-hidden-return', async fixture => {
+    const { client, executionDirs, directAgents } = fixture.integration;
+    const chats: string[] = [];
+    const projects = ['repo-a', 'repo-b'].map(name => join(executionDirs.project, name));
+    for (const [index, projectPath] of projects.entries()) {
+      await mkdir(projectPath);
+      await initializeFixtureRepository(projectPath);
+      await writeFile(join(projectPath, 'example.txt'), 'Synthetic retained change\n');
+      const chatId = fixture.integration.newChatId();
+      const started = await client.startDirectChat({
+        chatId, projectPath, content: `Synthetic hidden chat ${index}`, agent: directAgents.openAi,
+      });
+      await client.waitForTurnTerminal(chatId, started.turnId);
+      chats.push(chatId);
+    }
+    const app = new SpaDriver(fixture.page, fixture.integration);
+    await app.setViewport(1_600, 900);
+    await app.openChat(chats[0]);
+    await fixture.waitForSpaWebSocket();
+    await app.clickWorkspaceWindowAddAction('Open Git Workbench');
+    await fixture.page.waitForSelector(GIT_PANEL);
+    await showGitDiff(fixture);
+    await waitForDiff(fixture, 'Synthetic retained change');
+    const gitWindow = await app.workspaceWindowIdForSurface('singleton:git');
+    await app.selectWorkspaceWindowSurfaceById(`chat-view:${gitWindow}`, gitWindow);
+    await app.clickSidebarChatContaining('Synthetic hidden chat 1');
+    await app.waitForSelectedChat(chats[1]);
+    await app.clickSidebarChatContaining('Synthetic hidden chat 0');
+    await app.waitForSelectedChat(chats[0]);
+    expect(await fixture.page.$(GIT_PANEL)).toBeNull();
+    const file = `[data-file-tree-row] [title="${join(projects[0], 'example.txt')}"]`;
+    await fixture.page.waitForSelector(file);
+    await fixture.page.$eval(file, element => (element.closest('[data-file-tree-row]') as HTMLElement).click());
+    const fileSurface = '[data-workspace-surface-id^="file:"][aria-hidden="false"]';
+    const editor = `${fileSurface} .cm-content`;
+    await fixture.page.waitForSelector(editor);
+    await fixture.page.$eval(editor, element => {
+      (element as HTMLElement).focus();
+      const paste = new Event('paste', { bubbles: true, cancelable: true });
+      Object.defineProperty(paste, 'clipboardData', { value: {
+        files: [], getData: (type: string) => type === 'text/plain' ? 'Synthetic refreshed change\n' : '',
+      } });
+      element.dispatchEvent(paste);
+    });
+    const [saved] = await Promise.all([
+      fixture.page.waitForResponse(response => response.request().method() === 'PUT' && new URL(response.url()).pathname === '/api/v1/files/text'),
+      app.clickResponsiveAction('Save', { within: fileSurface }),
+    ]);
+    expect(saved.status()).toBe(200);
+    await app.selectWorkspaceWindowSurfaceById('singleton:git', gitWindow);
+    await waitForDiff(fixture, 'Synthetic refreshed change');
+    fixture.assertNoBrowserErrors();
+  }, { executionBackend: 'remote-controller-dials', projectRoots: 'separate' });
+}, 90_000);
+
 for (const executionBackend of ['remote-controller-dials', 'remote-executor-dials'] as const) {
+  test(`Git destructive confirmations retire with the executor session (${executionBackend})`, async () => {
+    await withE2eFixture(`executor-git-confirmations-${executionBackend}`, async fixture => {
+      const { client, executionDirs, directAgents } = fixture.integration;
+      const project = executionDirs.project;
+      await initializeFixtureRepository(project);
+      await writeFile(join(project, 'example.txt'), 'Original stash content\n');
+      await runFixtureGit(project, 'stash', 'push', '-m', 'Original synthetic stash');
+      await writeFile(join(project, 'example.txt'), 'Pending discard content\n');
+      const chatId = fixture.integration.newChatId();
+      const accepted = await client.startDirectChat({ chatId, projectPath: project, content: 'Synthetic confirmation chat', agent: directAgents.openAi });
+      await client.waitForTurnTerminal(chatId, accepted.turnId);
+      const app = new SpaDriver(fixture.page, fixture.integration);
+      await app.setViewport(1_600, 900);
+      await app.openChat(chatId);
+      await fixture.waitForSpaWebSocket();
+      const connections = await fixture.spaWebSocketConnectionCount();
+      const mutations: string[] = [];
+      fixture.page.on('request', request => {
+        const path = new URL(request.url()).pathname;
+        if ([
+          '/api/v1/git/stash/drop', '/api/v1/git/discard',
+          '/api/v1/git/delete-untracked', '/api/v1/git/revert-commit',
+        ].includes(path)) mutations.push(path);
+      });
+      await openGit(fixture);
+      await showGitDiff(fixture);
+      await waitForDiff(fixture, 'Pending discard content');
+      await app.clickButton('Stash');
+      await app.waitForText('Original synthetic stash');
+      await app.clickButton('Drop');
+      await app.waitForButton('Confirm');
+      await client.patch(`/api/v1/executors/${client.executorId}`, { enabled: false });
+      await app.waitForText('Git is unavailable on this executor.');
+      await runFixtureGit(project, 'stash', 'push', '-m', 'Replacement synthetic stash');
+      await writeFile(join(project, 'example.txt'), 'Replacement working content\n');
+      await client.patch(`/api/v1/executors/${client.executorId}`, { enabled: true });
+      await waitForDiff(fixture, 'Replacement working content');
+      expect(await fixture.page.$eval(GIT_PANEL, panel => [...panel.querySelectorAll('button')]
+        .some(button => button.textContent?.trim() === 'Confirm'))).toBe(false);
+      expect(await runFixtureGit(project, 'stash', 'list', '--format=%s')).toContain('Replacement synthetic stash');
+
+      await fixture.page.$eval(`${GIT_PANEL} button[title="Discard changes"]`, element => (element as HTMLButtonElement).click());
+      await fixture.page.waitForSelector('[role="dialog"]');
+      await client.patch(`/api/v1/executors/${client.executorId}`, { enabled: false });
+      await app.waitForText('Git is unavailable on this executor.');
+      await runFixtureGit(project, 'rm', '--cached', 'example.txt');
+      await client.patch(`/api/v1/executors/${client.executorId}`, { enabled: true });
+      await fixture.page.waitForFunction(selector => document.querySelector(
+        `${selector} [data-git-project-content]`,
+      )?.getAttribute('aria-busy') === 'false', {}, GIT_PANEL);
+      await waitForDiff(fixture, 'Replacement working content');
+      expect(await fixture.page.$('[role="dialog"]')).toBeNull();
+      expect(await readFile(join(project, 'example.txt'), 'utf8')).toBe('Replacement working content\n');
+
+      await app.openNewWorkspaceWindow('Open Git History');
+      await app.waitForText('Initial synthetic commit');
+      await app.clickButton('Initial synthetic commit', { contains: true });
+      await app.waitForButton('Revert');
+      await app.clickButton('Revert');
+      await fixture.page.waitForSelector('[role="dialog"]');
+      await client.patch(`/api/v1/executors/${client.executorId}`, { enabled: false });
+      await app.waitForText('Git is unavailable on this executor.');
+      await runFixtureGit(project, 'add', '--all');
+      await runFixtureGit(project, 'commit', '-m', 'Replacement synthetic commit');
+      await client.patch(`/api/v1/executors/${client.executorId}`, { enabled: true });
+      await fixture.page.waitForFunction(() => document.querySelector(
+        '[data-workspace-surface-id="singleton:git-history"] [data-git-project-content]',
+      )?.getAttribute('aria-busy') === 'false');
+      expect(await fixture.page.$('[role="dialog"]')).toBeNull();
+      expect(mutations).toEqual([]);
+      expect(await fixture.spaWebSocketConnectionCount()).toBe(connections);
+      fixture.assertNoBrowserErrors();
+    }, { executionBackend, projectRoots: 'separate' });
+  }, 90_000);
+
   test(`Git views, staging, file links and reconnect remain executor-scoped (${executionBackend})`, async () => {
     await withE2eFixture(`executor-git-${executionBackend}`, async fixture => {
       const { client, dirs, executionDirs, directAgents } = fixture.integration;

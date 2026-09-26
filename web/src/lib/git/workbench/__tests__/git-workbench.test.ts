@@ -1505,6 +1505,35 @@ describe('GitWorkbenchStore', () => {
 			);
 			expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalledOnce();
 		});
+
+		it('retires a discard confirmation before refreshing replacement content', async () => {
+			await wb.setTarget(makeTarget('/project'));
+			wb.staging.requestDiscard('a.ts');
+			expect(wb.staging.pendingDiscardFile).toBe('a.ts');
+			wb.suspend();
+			mockedApi.getGitWorkbenchSnapshot.mockResolvedValue(
+				makeWorkbenchSnapshot({
+					root: [
+						{
+							path: 'a.ts',
+							name: 'a.ts',
+							kind: 'file',
+							changeKind: 'untracked',
+							staged: false,
+							hasUnstaged: true,
+						},
+					],
+				}),
+			);
+			await wb.refresh({ reason: 'git-action' });
+
+			await expect(
+				wb.staging.confirmDiscard({ executorId: 'local', projectPath: '/project' }),
+			).resolves.toBe(false);
+			expect(wb.staging.pendingDiscardFile).toBeNull();
+			expect(mockedApi.gitDiscard).not.toHaveBeenCalled();
+			expect(mockedApi.gitDeleteUntracked).not.toHaveBeenCalled();
+		});
 	});
 
 	describe('initial commit workflow', () => {

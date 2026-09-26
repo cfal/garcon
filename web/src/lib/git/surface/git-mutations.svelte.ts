@@ -28,29 +28,39 @@ export class GitMutationCoordinator {
 
 	async run<T>(request: GitMutationRequest<T>): Promise<T> {
 		this.#changePending(request.surfaceId, 1);
+		let succeeded = false;
 		try {
-			return await request.execute();
+			const result = await request.execute();
+			succeeded = true;
+			return result;
 		} catch (error) {
 			this.options.onMutationError?.(error, request.executorId, request.projectPath);
 			throw error;
 		} finally {
 			// Failed multi-command operations can still change refs or the index.
 			try {
-				await this.options.onChanged(
-					request.executorId,
-					request.effectiveProjectKey,
-					request.projectPath,
-				);
-			} catch (error) {
-				this.options.onInvalidationError?.(
-					error,
-					request.executorId,
-					request.effectiveProjectKey,
-					request.projectPath,
-				);
+				const invalidation = this.#invalidate(request);
+				if (succeeded) await invalidation;
 			} finally {
 				this.#changePending(request.surfaceId, -1);
 			}
+		}
+	}
+
+	async #invalidate(request: GitMutationRequest<unknown>): Promise<void> {
+		try {
+			await this.options.onChanged(
+				request.executorId,
+				request.effectiveProjectKey,
+				request.projectPath,
+			);
+		} catch (error) {
+			this.options.onInvalidationError?.(
+				error,
+				request.executorId,
+				request.effectiveProjectKey,
+				request.projectPath,
+			);
 		}
 	}
 

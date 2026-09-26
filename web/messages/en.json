@@ -755,6 +755,7 @@
 	"git_quick_commit_select_files": "Select files to commit",
 	"git_quick_commit_stage_operation_failed": "Git stage operation failed.",
 	"commit_surface_generate_failed": "Failed to generate a commit message.",
+	"commit_surface_busy_target_retained": "Commit is busy. Its current project is unchanged.",
 	"commit_surface_generate_failed_detail": "Generate message failed: {detail}",
 	"commit_surface_commit_failed": "Commit failed.",
 	"commit_surface_commit_failed_detail": "Commit failed: {detail}",

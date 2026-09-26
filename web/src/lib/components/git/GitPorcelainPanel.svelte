@@ -21,6 +21,7 @@
 	let loadKey = $derived(
 		JSON.stringify([project.executorId, project.projectPath, porcelain.inspectorView, selectedFile]),
 	);
+	let confirmationKey = $derived(JSON.stringify([loadKey, porcelain.confirmationScope]));
 	let title = $derived(
 		porcelain.inspectorView === 'conflicts'
 			? 'Conflicts'
@@ -33,7 +34,7 @@
 						: '',
 	);
 	let activeConfirmation = $derived(
-		pendingConfirmation?.scopeKey === loadKey ? pendingConfirmation : null,
+		pendingConfirmation?.scopeKey === confirmationKey ? pendingConfirmation : null,
 	);
 	let confirmationLabel = $derived.by(() => {
 		if (!activeConfirmation) return '';
@@ -55,11 +56,11 @@
 	});
 
 	function requestAcceptConflict(filePath: string, side: 'ours' | 'theirs'): void {
-		pendingConfirmation = { type: 'accept-conflict', scopeKey: loadKey, filePath, side };
+		pendingConfirmation = { type: 'accept-conflict', scopeKey: confirmationKey, filePath, side };
 	}
 
 	function requestDropStash(stashRef: string): void {
-		pendingConfirmation = { type: 'drop-stash', scopeKey: loadKey, stashRef };
+		pendingConfirmation = { type: 'drop-stash', scopeKey: confirmationKey, stashRef };
 	}
 
 	async function confirmPendingAction(): Promise<void> {

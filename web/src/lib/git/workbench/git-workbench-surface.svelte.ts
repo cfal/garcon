@@ -10,6 +10,7 @@ import {
 } from '$lib/git/targets/git-target-session.svelte.js';
 import { GitRepositoryController } from '$lib/git/targets/git-repository-controller.svelte.js';
 import { GitWorkbenchStore } from './git-workbench.svelte.js';
+import { targetKey } from './git-workbench-types.js';
 
 interface GitWorkbenchSelectionSnapshot {
 	selectedFile: string | null;
@@ -134,8 +135,17 @@ export class GitWorkbenchSurfaceController implements PortableSingletonControlle
 			// A retained same-path document must not carry the previous surface
 			// identity's open composer or line selection into the new identity.
 			this.workbench.resetReviewInteraction();
+			const retainedTarget = target && targetKey(this.workbench.target) === targetKey(target);
 			await this.workbench.setTarget(target, snapshot?.diffTab ?? 'unstaged');
 			if (!current()) return;
+			if (retainedTarget) {
+				await this.workbench.refresh({
+					reason: 'context-change',
+					preserveSelection: true,
+					preferSelectedFile: true,
+				});
+				if (!current()) return;
+			}
 			if (
 				target &&
 				snapshot?.selectedFile &&

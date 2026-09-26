@@ -218,6 +218,35 @@ describe('workbench surface chat-switch repro', () => {
 		installRouters();
 	});
 
+	it('refreshes retained data when returning to a hidden project after invalidation', async () => {
+		let version = 0;
+		const controller = new GitWorkbenchSurfaceController({
+			...createGitSurfaceTestDeps(),
+			invalidationVersion: () => version,
+		});
+		try {
+			controller.setProjectState(availableProject('chat-a', '/project-a'));
+			controller.setPresentationVisible(true);
+			await controller.target.activate();
+			expect(controller.workbench.files.filePaths).toEqual(['project-a.ts']);
+
+			controller.setPresentationVisible(false);
+			controller.setProjectState(availableProject('chat-b', '/project-b'));
+			controller.setProjectState(availableProject('chat-a', '/project-a'));
+			api.getGitWorkbenchSnapshot.mockResolvedValue(snapshotFor('/project-a', ['changed.ts']));
+			api.getGitWorkbenchSnapshot.mockClear();
+			version++;
+
+			controller.setPresentationVisible(true);
+			await controller.refreshForInvalidation('chat-a', version);
+			await controller.target.activate();
+			expect(api.getGitWorkbenchSnapshot).toHaveBeenCalledOnce();
+			expect(controller.workbench.files.filePaths).toEqual(['changed.ts']);
+		} finally {
+			controller.dispose();
+		}
+	});
+
 	it('W1: select repo X, A->B->A keeps listings and review doc on X', async () => {
 		const controller = new GitWorkbenchSurfaceController(createGitSurfaceTestDeps());
 		controller.setProjectState(availableProject('chat-a', '/project-a'));

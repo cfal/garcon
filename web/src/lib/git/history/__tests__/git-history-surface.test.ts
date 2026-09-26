@@ -267,6 +267,29 @@ describe('GitHistorySurfaceController', () => {
 		expect(controller.isRevertingCommit).toBe(false);
 	});
 
+	it('retires revert confirmation when the executor session changes', async () => {
+		const controller = new GitHistorySurfaceController(createGitSurfaceTestDeps());
+		setProject(controller);
+		controller.setPresentationVisible(true);
+		await controller.target.activate();
+		controller.pendingRevertCommit = { hash: 'abc', shortHash: 'abc', subject: 'Change' };
+		controller.setProjectState({
+			kind: 'available',
+			project: {
+				chatId: 'chat',
+				projectPath: '/project',
+				effectiveProjectKey: 'chat',
+				executorContextKey: 'replacement',
+			},
+		});
+		await controller.target.activate();
+
+		expect(controller.pendingRevertCommit).toBeNull();
+		await expect(controller.revertPendingCommit()).resolves.toBe(false);
+		expect(api.gitRevertCommit).not.toHaveBeenCalled();
+		controller.dispose();
+	});
+
 	it('owns successful revert mutations and relies on invalidation for reload', async () => {
 		const deps = createGitSurfaceTestDeps();
 		const run = vi.spyOn(deps.gitMutations, 'run');

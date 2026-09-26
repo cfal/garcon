@@ -296,6 +296,7 @@ export class GitWorkbenchStore {
 		this.virtualReview.suspend();
 		this.porcelain.cancelActiveLoad();
 		this.initialCommit.reset();
+		this.stagingActions.cancelDiscard();
 		this.lineSelection.clearSelection();
 		this.isExternallyStale = true;
 	}

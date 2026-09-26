@@ -7,6 +7,11 @@ import { getGitRefs } from '$lib/api/git.js';
 import { ToolResultMessage } from '$shared/chat-types';
 import type { TranscriptMessage } from '$shared/chat-view';
 import type { ProjectResolutionResponse, ProjectTarget } from '$shared/project-resolution';
+import { CommitController } from '$lib/git/commit/commit-controller.svelte.js';
+import { GitQuickSummaryStore } from '$lib/git/surface/git-quick-summary.svelte.js';
+import { createGitSurfaceTestDeps } from '$lib/git/__tests__/git-surface-test-deps.js';
+import { GIT_QUICK_SUMMARY_FINGERPRINT_VERSION } from '$shared/git';
+import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 
 type BackgroundMessagesHandler = (
 	chatId: string,
@@ -165,6 +170,43 @@ describe('ConversationWorkspace Escape abort handling', () => {
 			),
 		).toBe(true);
 		expect(patchActivity).toHaveBeenCalledWith('chat-background', timestamp);
+	});
+
+	it.each(['/other', '/workspace/project'])('opens busy quick Commit with a notice only for a different target (%s)', async (projectPath) => {
+		const commit = new CommitController(createGitSurfaceTestDeps());
+		const quickSummary = new GitQuickSummaryStore();
+		const notifications = createNotificationsStore();
+		vi.spyOn(quickSummary, 'summaryFor').mockReturnValue({
+			status: 'ready',
+			project: '/workspace/project',
+			branch: 'main',
+			changedFiles: 1,
+			stagedFiles: 1,
+			unstagedFiles: 0,
+			untrackedFiles: 0,
+			additions: 1,
+			deletions: 0,
+			repoRoot: '/workspace/project',
+			hasCommits: true,
+			trackedChangedFiles: 1,
+			fingerprintVersion: GIT_QUICK_SUMMARY_FINGERPRINT_VERSION,
+			fingerprint: 'synthetic',
+		});
+		const onOpenCommit = vi.fn(async () => {});
+		render(ConversationWorkspaceEscapeHost, { commit, quickSummary, onOpenCommit, notifications });
+		expect(commit.target.selectProject({ executorId: 'local', projectPath })).toBe(true);
+		commit.message = 'Retained draft';
+		commit.isGeneratingMessage = true;
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Open quick commit' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Open quick commit' }));
+
+		expect(onOpenCommit).toHaveBeenCalledWith('commit', 'window-main');
+		expect(commit.target.requestTarget).toEqual({ executorId: 'local', projectPath });
+		expect(commit.message).toBe('Retained draft');
+		expect(commit.isGeneratingMessage).toBe(true);
+		expect(notifications.items).toHaveLength(projectPath === '/other' ? 1 : 0);
+		quickSummary.destroy();
 	});
 
 	it('does not publish branch state after the initiating surface loses command ownership', async () => {

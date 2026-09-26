@@ -14,6 +14,7 @@
 		type ConversationPanelActions,
 	} from './conversation-panel-actions.js';
 	import { INITIAL_VISIBLE_MESSAGES } from '$lib/chat/transcript/active-transcript-state.svelte.js';
+	import { sameGitProject } from '$lib/git/targets/git-target.js';
 	import type { ResendCandidate } from '$shared/chat-view';
 	import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 	import { ComposerState } from '$lib/chat/composer/composer.svelte.js';
@@ -637,7 +638,11 @@
 		if (!executors.gitAvailable(executorId)) return;
 		const projectPath = sessions.byId[chatId]?.projectPath;
 		if (!projectPath || !quickGit.summaryFor({ executorId, projectPath })) return;
-		if (!singletonSurfaces.commit().target.selectProject({ executorId, projectPath })) return;
+		const target = { executorId, projectPath };
+		const commit = singletonSurfaces.commit();
+		if (!commit.target.selectProject(target) && !sameGitProject(commit.target.requestTarget, target)) {
+			notifications.info(m.commit_surface_busy_target_retained(), { key: 'commit-busy-target' });
+		}
 		const targetWindowId = workspace.windowOf(surfaceId);
 		let opening: Promise<void> | null = null;
 		if (appShell.isMobile) {

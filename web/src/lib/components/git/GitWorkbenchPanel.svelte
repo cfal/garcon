@@ -105,7 +105,10 @@
 	function openCommit(): void {
 		const target = controller.target.requestTarget;
 		if (!target || !controller.target.canChangeTarget) return;
-		if (!surfaces.commit().target.selectProject(target)) return;
+		const commit = surfaces.commit();
+		if (!commit.target.selectProject(target) && !sameGitProject(commit.target.requestTarget, target)) {
+			notifications.info(m.commit_surface_busy_target_retained(), { key: 'commit-busy-target' });
+		}
 		const opening = openCommitFromGitWorkbench(workspace, presentation);
 		void opening.catch((error) => {
 			notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
