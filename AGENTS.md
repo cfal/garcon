@@ -6,6 +6,7 @@ This is the operating model for how engineers design, implement, review, and evo
 
 - If there was a design doc, ALWAYS re-read it after compaction.
 - `docs/transcript-ledger-v5-design.md` is the governing transcript design; re-read it before changing transcript, ledger, history migration, provider publication, paging, replay, or transcript UX behavior.
+- Before changing execution, machine services, provider configuration, or their UI, read `docs/executor/transport.md`, `docs/file-structure.md`, and the relevant contract under `docs/executor/` or `docs/providers.md`. Current contracts supersede historical executor proposals.
 - Always git clone dependencies into /tmp to inspect if necessary
 - ALWAYS refer to Svelte 5, either docs or by cloning the repo, to make sure we're following best practices and canonical patterns
 - DO NOT add to tech debt. It is CRITICAL that we keep the architecture clean and rational, even if that means taking longer to fix or refactor what we're working on.
@@ -91,6 +92,20 @@ Required for every known tool-use addition or change:
 - `server/common/` contains backend primitives. Runtime and remoting must not import controller modules; common must not import any of those owners. Only `server/remote/worker.ts` composes concrete runtime services into remoting.
 - Keep browser/server DTOs in top-level `common/` and provider-specific code behind `@garcon/server-agent-interface` in `server-agents/`.
 - Use executor terminology for execution targets and `executorId` for their identities. Graph nodes, DOM nodes, and linked carryover nodes are unrelated concepts.
+
+### Remote Executor Contract
+
+Every execution, machine-service, and related UI change must account for Local and remote executors, not just the controller's machine.
+
+- Route machine operations through the selected `ExecutionRuntimeApi`, including Local. Paths, symlinks, native sessions, executables, environment, and `localhost` belong to that executor. Repository and model-generation targets can differ.
+- Qualify executor-owned resources and their caches, recents, and recovery drafts with `executorId`; scope ephemeral handles to their declared runtime/session/binding. Capture the owning panel or operation's target, not global chat selection. Fence dispatch and publication across awaits; never retarget stale work or fall back from an explicit remote to Local.
+- Treat readiness and capabilities per executor, independently of browser WebSocket connectivity. An unavailable executor must not block controller startup or healthy hosts. Preserve unavailable selections and drafts; invalidate affected catalogs and revalidate execution admission on every submit path without gating controller-only actions. Empty success is not an offline result.
+- Reuse the shared Noise WebSocket in both dial directions; a worker may have no reachable inbound HTTP endpoint. Bound encoded payloads, queues, and in-flight work. Liveness must observe authenticated transfer progress. Do not add channels, schedulers, or replay as incidental feature work.
+- Each disconnected socket retires its session; there is no transport replay or automatic resend. Timeout, cancellation, and lost replies are not rollback or proof of non-execution. Preserve definite versus unknown outcomes; retries require the operation's existing idempotency and generation guarantees. Start/resume/compaction have no implicit RPC deadline.
+- Worker processes outlive connection authority. Disconnected native turns may continue; fence old publication and permissions, preserve native busy guards, report uncertainty, and retain explicit native Reload recovery. Remote PTYs survive browser/controller disconnects and restarts while the worker survives; preserve bounded terminal replay, not transport replay. Local shares the controller's process lifetime.
+- Handle late success and failure against the captured operation. Clean up late remote resources only through their originating session, never a replacement. Cancellation must not release process-owned mutation locks or admission while the underlying work remains unsettled.
+- Provider profiles remain controller-owned; assignments and revisions gate execution and credential release on Local and remote executors. Derive reverse-RPC origin from the authenticated connection. CLI access is a separate, default-off workspace-wide grant. Revocation cannot erase disclosed credentials or undo admitted work.
+- Reuse executor reference-publication guards when changing durable references or deletion. Retain protection through failed or uncertain writes; do not equate an in-memory change with durable removal or publish configuration grants before durability.
 
 ### General
 
@@ -419,6 +434,13 @@ A bug or flake first observed in a live suite or in production may only be close
 - Keep credential-backed agent suites under `test:live:*`, outside routine test commands.
 - Never run live-agent tests locally unless actively changing those tests; rely on the PR CI live-provider gate otherwise.
 
+### Remote Executor Coverage
+
+- Exercise changed cross-boundary workflows through public controller/worker startup on Local and both remote dial directions. Protocol doubles alone do not establish integration correctness. Use each provider's documented test tier; reference-provider behavior requires pinned scripted coverage.
+- Use deterministic barriers for disconnect before dispatch, side effects before reply, late settlement, session replacement, and separate controller/worker restarts. Assert no duplicate execution, false success, stale publication, or premature resource release.
+- Test identical paths/IDs on different executors, partial outages, and unavailable-to-ready transitions. Browser workflows must preserve drafts and owning-panel identity across switches, reconnects, and provider revocation; click and keyboard admission must agree.
+- Transport/bounds changes need slow progressing links, silent half-open connections, and mixed chat/Files/Git/PTY pressure. Assert bounded resources and process survival without claiming latency isolation.
+
 ### Regression Focus Areas
 
 - Chat lifecycle transitions.
@@ -465,6 +487,7 @@ Reviewers should explicitly check:
 - duplicated logic and boundary leaks
 - accessibility regressions
 - missing tests for stateful behavior
+- executor-qualified routing, authority/lifetime fences, uncertain outcomes, and Local/remote coverage
 
 ## Practical Do/Don't Examples
 
