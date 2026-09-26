@@ -148,10 +148,15 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
       await fixture.page.waitForFunction(() => (document.querySelector('[data-composer] textarea') as HTMLTextAreaElement).value === '');
       expect(runRequests).toEqual([]);
       expect((await client.getChatSnapshot(chatId)).chat.model).toBe('integration-alternate');
+      const resumed = fixture.integration.fakeProviders.openAi.holdNext({ model: 'integration-echo' });
       await fixture.page.evaluate(() => (globalThis as SettingsGateGlobal).releaseSettings?.());
-      await app.waitForText('echo:Synthetic post-settings input');
+      const request = await resumed.received;
+      expect(request.lastUserText).toContain('<carried-context');
+      expect(request.lastUserText.endsWith('Synthetic post-settings input')).toBe(true);
+      expect(request.body.model).toBe('integration-echo');
+      resumed.releaseText('Synthetic settings response');
+      await app.waitForText('Synthetic settings response');
       expect(runRequests).toHaveLength(1);
-      expect(fixture.integration.fakeProviders.openAi.requests().find(request => request.lastUserText === 'Synthetic post-settings input')?.body.model).toBe('integration-echo');
       fixture.assertNoBrowserErrors();
     }, { executionBackend, projectRoots: 'separate' });
   }, 90_000);
