@@ -16,6 +16,17 @@ async function withProfile(payload, run, timestamp = '2026-07-20T00:00:00.000Z')
 }
 
 describe('inspectCodexHistoryProfile', () => {
+  it.each([['', 'empty-source'], [' \n', 'invalid-metadata'], ['{', 'invalid-metadata']])(
+    'distinguishes zero-byte history from malformed or incomplete metadata (%j)', async (content, reason) => {
+      await withProfile({ id: 'thread-1' }, async (nativePath) => {
+        await fs.writeFile(nativePath, content);
+        await expect(inspectCodexSessionIdentity({
+          nativePath, expectedThreadId: 'thread-1', signal: new AbortController().signal,
+        })).rejects.toMatchObject({ code: 'TRANSCRIPT_UNAVAILABLE', details: { reason } });
+      });
+    },
+  );
+
   it('validates session identity independently of history mode support', async () => {
     await withProfile({ id: 'thread-1', history_mode: 'future' }, async (nativePath) => {
       await expect(

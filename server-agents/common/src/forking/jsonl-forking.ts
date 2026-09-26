@@ -162,7 +162,11 @@ async function resolveProviderPoint(
     // A source file the provider has not written yet holds no native
     // positions; the typed source-level refusal keeps the retry and
     // handoff-consent flow instead of surfacing a raw filesystem error.
-    if (hasNodeErrorCode(error, 'ENOENT')) throw missingNativeSource();
+    if (hasNodeErrorCode(error, 'ENOENT') || (
+      error instanceof AgentIntegrationError
+      && error.code === 'TRANSCRIPT_UNAVAILABLE'
+      && error.details?.reason === 'source-missing'
+    )) throw missingNativeSource();
     throw error;
   });
   for (const message of native.messages) {

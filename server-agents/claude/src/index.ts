@@ -320,6 +320,7 @@ function createClaudeNativeEvidence(options: {
           'TRANSCRIPT_UNAVAILABLE',
           'Claude native transcript is unavailable',
           false,
+          { reason: 'source-missing' },
         );
       }
       return {

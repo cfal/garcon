@@ -78,6 +78,31 @@ describe('ClaudeAgentIntegration', () => {
     }
   });
 
+  it('preserves point-fork handoff consent when native history is missing', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'garcon-claude-missing-fork-'));
+    const host = createHost(root);
+    host.environment.get.mockImplementation((key) => key === 'CLAUDE_CONFIG_DIR' ? root : undefined);
+    const integration = new ClaudeAgentIntegration(host);
+    const source = nativeChat(integration, join(root, 'missing.jsonl'));
+    try {
+      await expect(integration.forking.fork({
+        chatId: 'target-chat', projectPath: root, model: 'haiku',
+        permissionMode: 'default', thinkingMode: 'none', settings: source.settings,
+        endpoint: null, signal: new AbortController().signal, source,
+        providerMeta: { entryId: 'user-1', lineNumber: 1, withinSourceOrdinal: 0 },
+      })).rejects.toMatchObject({
+        code: 'TRANSCRIPT_UNAVAILABLE', retryable: true,
+        details: { nativeForkReason: 'source-missing' },
+      });
+      await expect(importedRows(integration.nativeHistoryImport, source)).rejects.toMatchObject({
+        code: 'TRANSCRIPT_UNAVAILABLE',
+      });
+    } finally {
+      await integration.lifecycle.stop();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('validates model annotations without requiring an active native session', async () => {
     const integration = new ClaudeAgentIntegration(createHost());
     const configuration = {

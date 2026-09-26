@@ -1,3 +1,4 @@
+import { stat } from 'node:fs/promises';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
 import { parseFirstJsonlValue } from '@garcon/server-agent-common/lib/jsonl';
 import { readJsonlLineEntries } from '@garcon/server-agent-common/shared/history-loader-utils';
@@ -83,6 +84,7 @@ async function inspectCodexSessionMetadata(
 ): Promise<CodexSessionMetadata> {
   input.signal.throwIfAborted();
   let firstLine: string | null = null;
+  let emptySource = false;
   try {
     for await (const entry of readJsonlLineEntries(input.nativePath, {
       completeLinesOnly: true,
@@ -93,6 +95,7 @@ async function inspectCodexSessionMetadata(
       firstLine = entry.line;
       break;
     }
+    if (!firstLine) emptySource = (await stat(input.nativePath)).size === 0;
   } catch (error) {
     input.signal.throwIfAborted();
     throw transcriptUnavailable('Codex session metadata is unavailable', error, 'read-failed');
@@ -101,7 +104,7 @@ async function inspectCodexSessionMetadata(
     throw transcriptUnavailable(
       'Codex session metadata is unavailable',
       undefined,
-      'invalid-metadata',
+      emptySource ? 'empty-source' : 'invalid-metadata',
     );
   }
 
@@ -189,7 +192,7 @@ function rfc3339(value: unknown): string | null {
 function transcriptUnavailable(
   message: string,
   cause: unknown,
-  reason: 'read-failed' | 'invalid-metadata' | 'thread-mismatch',
+  reason: 'read-failed' | 'empty-source' | 'invalid-metadata' | 'thread-mismatch',
 ): AgentIntegrationError {
   const causeCode = errorCode(cause);
   return new AgentIntegrationError('TRANSCRIPT_UNAVAILABLE', message, false, {

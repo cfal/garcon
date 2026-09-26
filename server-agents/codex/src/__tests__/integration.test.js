@@ -24,6 +24,40 @@ function createHost(root = '/tmp/garcon-codex-integration-test') {
 }
 
 describe('CodexAgentIntegration', () => {
+  it('keeps an empty whole-fork source unmaterialized without accepting invalid history', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'garcon-codex-empty-fork-'));
+    const nativePath = join(root, 'rollout.jsonl');
+    const integration = new CodexAgentIntegration(createHost(root));
+    const source = nativeChat(integration, nativePath);
+    const request = {
+      chatId: 'target-chat', projectPath: root, model: 'gpt-6-sol',
+      permissionMode: 'default', thinkingMode: 'none', settings: source.settings,
+      endpoint: null, signal: new AbortController().signal, source, providerMeta: null,
+    };
+    try {
+      await writeFile(nativePath, '');
+      await expect(integration.forking.fork(request)).resolves.toEqual({ kind: 'unmaterialized' });
+      await expect(integration.forking.fork({
+        ...request, providerMeta: { entryId: 'item-1' },
+      })).rejects.toMatchObject({ code: 'TRANSCRIPT_UNAVAILABLE' });
+      await expect(importedRows(integration.nativeHistoryImport, source)).rejects.toMatchObject({
+        code: 'TRANSCRIPT_UNAVAILABLE',
+      });
+      for (const content of ['invalid json\n', '{', ' \n', `${JSON.stringify({
+        type: 'session_meta', timestamp: '2026-08-16T00:00:00.000Z',
+        payload: { id: 'other-thread', history_mode: 'legacy' },
+      })}\n`]) {
+        await writeFile(nativePath, content);
+        await expect(integration.forking.fork(request)).rejects.toMatchObject({
+          code: 'TRANSCRIPT_UNAVAILABLE',
+        });
+      }
+    } finally {
+      await integration.lifecycle.stop();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('composes the provider facets without reading environment during construction', () => {
     const host = createHost();
     const integration = new CodexAgentIntegration(host);

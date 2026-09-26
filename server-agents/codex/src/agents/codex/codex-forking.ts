@@ -35,9 +35,18 @@ export function createCodexForking(options: CodexForkingOptions): AgentNativeFor
   return {
     async fork(request) {
       request.signal.throwIfAborted();
-      const nativeSession = await options.resolveNativeSession({ chat: request.source, signal: request.signal });
-      request.signal.throwIfAborted();
-      request = { ...request, source: { ...request.source, nativeSession } };
+      try {
+        const nativeSession = await options.resolveNativeSession({ chat: request.source, signal: request.signal });
+        request.signal.throwIfAborted();
+        request = { ...request, source: { ...request.source, nativeSession } };
+      } catch (error) {
+        request.signal.throwIfAborted();
+        if (!request.providerMeta && error instanceof AgentIntegrationError
+          && error.code === 'TRANSCRIPT_UNAVAILABLE' && error.details?.reason === 'empty-source') {
+          return { kind: 'unmaterialized' };
+        }
+        throw error;
+      }
       const profile = await options.resolveProfile({
         source: request.source,
         point: request.providerMeta,

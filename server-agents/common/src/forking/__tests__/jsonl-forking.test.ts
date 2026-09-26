@@ -310,6 +310,26 @@ describe('createJsonlNativeForking prefix protection', () => {
     });
   });
 
+  it.each(['source-missing', 'invalid-metadata'])('preserves the typed %s distinction during point lookup', async (reason) => {
+    const fixture = await createFixture();
+    const failure = new AgentIntegrationError('TRANSCRIPT_UNAVAILABLE', 'Native history unavailable', false, { reason });
+    const forking = createJsonlNativeForking({
+      ...fixture.options,
+      nativeEvidence: {
+        ...fixture.options.nativeEvidence,
+        async load() { throw failure; },
+      },
+    });
+    if (reason === 'source-missing') {
+      await expect(forking.fork(fixture.request)).rejects.toMatchObject({
+        code: 'TRANSCRIPT_UNAVAILABLE', retryable: true,
+        details: { nativeForkReason: 'source-missing' },
+      });
+    } else {
+      await expect(forking.fork(fixture.request)).rejects.toBe(failure);
+    }
+  });
+
   it('rejects a selected row that cannot be found in native history', async () => {
     const fixture = await createFixture();
     const filesBeforeFork = await readdir(fixture.root);
