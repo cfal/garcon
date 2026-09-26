@@ -99,10 +99,11 @@ export async function remoteFixture(
   dialer: 'controller' | 'worker',
   configure: (controller: WebSocketLink, worker: WebSocketLink, fixture: ReturnType<typeof integrationFixture>) => void = () => {},
   projectBasePath?: string,
+  executorId = linkOptions.executorId,
 ) {
-  const controller = new WebSocketLink({ ...linkOptions, role: 'controller' });
-  const worker = new WebSocketLink({ ...linkOptions, role: 'worker' });
-  const fixture = integrationFixture(projectBasePath);
+  const controller = new WebSocketLink({ ...linkOptions, executorId, role: 'controller' });
+  const worker = new WebSocketLink({ ...linkOptions, executorId, role: 'worker' });
+  const fixture = integrationFixture(projectBasePath, executorId);
   const generations = [fixture];
   const scopes: ReturnType<typeof serveExecutionRuntime>[] = [];
   configure(controller, worker, fixture);

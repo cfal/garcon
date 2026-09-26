@@ -105,6 +105,63 @@ for (const driverFactory of sacsScriptedDriverFactories) {
       await driver?.dispose();
     });
 
+    if (driverFactory.id === 'claude' || driverFactory.id === 'codex') {
+      test.each(['legacy', 'ledger'] as const)('forks on first use from %s without startup native reconciliation', async (source) => {
+        const activeDriver = requireDriver(driver, driverFactory.label);
+        await withIntegrationFixture(`${activeDriver.id}-sacs-lazy-fork-${source}`, async (fixture) => {
+          try {
+            await fixture.client.updateSettings({ features: { transcriptSearch: { enabled: false } } });
+            const planted = await completedChat(fixture, activeDriver, 'LAZY_FORK');
+            await requireLegacyFacet(driverFactory.legacyHistoryImport, driverFactory.label)
+              .prepare(fixture, planted.chatId, planted.rows);
+            const binding = await readRegistrySessionBinding(fixture, planted.chatId);
+            await fixture.restartGarcon({ beforeStart: async () => {
+              await rm(join(fixture.dirs.workspace, 'chat-metadata.json'), { force: true });
+              const store = new TranscriptLedgerStore(join(fixture.dirs.workspace, 'transcript-ledgers'));
+              try {
+                const view = store.currentView(planted.chatId);
+                const session = store.currentSession(planted.chatId)?.detail;
+                if (!view || !session?.nativeSession) throw new Error('Source native binding missing');
+                const nativeSession = {
+                  ...session.nativeSession,
+                  value: { ...session.nativeSession.value, path: join(fixture.dirs.root, 'missing-native-session.jsonl') },
+                };
+                if (source === 'ledger') {
+                  store.append(planted.chatId, view.viewId, [{
+                    kind: 'session', at: SOURCE_TIMESTAMP, detail: { ...session, nativeSession }, providerMeta: null,
+                  }]);
+                } else {
+                  await updateRegistryChat(fixture, planted.chatId, (chat) => { chat.nativeSession = nativeSession; });
+                }
+              } finally {
+                store.close();
+              }
+              if (source === 'legacy') {
+                await removeLedger(fixture, planted.chatId);
+              } else {
+                await updateRegistryChat(fixture, planted.chatId, (chat) => {
+                  chat.agentSessionId = null;
+                  chat.nativeSession = null;
+                  chat.nativeSeedReceipt = null;
+                });
+              }
+            } });
+            expect(fixture.garcon.logs.join('\n')).not.toContain('native session reconciliation');
+            if (source === 'legacy') expect(readCurrentView(fixture, planted.chatId)).toBeNull();
+            const childId = fixture.newChatId();
+            await fixture.client.forkChat({ sourceChatId: planted.chatId, chatId: childId });
+            const childBinding = await readRegistrySessionBinding(fixture, childId);
+            expect(childBinding.agentSessionId).not.toBe(binding.agentSessionId);
+            expect(childBinding.nativeSession).not.toBeNull();
+            expect(conversationalContents((await fixture.client.getMessages(childId)).messages)).toEqual(planted.contents);
+            activeDriver.assertSettled(fixture);
+          } finally {
+            activeDriver.reset();
+          }
+        }, activeDriver.fixtureOptions);
+      }, SACS_TIMEOUT_MS);
+    }
+
     test('[TLV5-ADOPT.07-SACS-IMPORT-01] adopts the exact supported legacy transcript once', async () => {
       const activeDriver = requireDriver(driver, driverFactory.label);
       const legacy = requireLegacyFacet(driverFactory.legacyHistoryImport, driverFactory.label);
