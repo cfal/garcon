@@ -56,7 +56,7 @@ export async function readWorkerCliOptions(
     if (values['bind-address'] !== undefined) throw new Error('--bind-address applies only to listeners');
     if (values['advertise-url'] !== undefined) throw new Error('--advertise-url applies only to listeners');
     const { socketUrl, secret } = parseConnectionUrl(values.connect);
-    const url = validateExecutorSocketUrl(socketUrl, { direction: 'executor-connects', allowInsecureDevelopment });
+    const url = validateExecutorSocketUrl(socketUrl, { allowInsecureDevelopment });
     return { configDir, projectBasePath, allowInsecureDevelopment,
       allowUnverifiedTls: url.startsWith('wss:') && values['allow-unverified-tls'] === true, connection: { kind: 'dial', url, secret } };
   }
@@ -66,7 +66,7 @@ export async function readWorkerCliOptions(
   const bindAddress = parseBindAddress(values['bind-address']);
   if (!allowInsecureDevelopment) throw new Error('Raw listeners require --allow-insecure-development and an access-controlled TLS proxy outside development');
   const advertisedUrl = values['advertise-url'] === undefined ? undefined : validateExecutorSocketUrl(values['advertise-url'], {
-    direction: 'controller-connects', allowInsecureDevelopment, allowPlaceholder: true,
+    allowInsecureDevelopment, allowPlaceholder: true,
   });
   return { configDir, projectBasePath, allowInsecureDevelopment, connection: { kind: 'listen', port, bindAddress }, advertisedUrl };
 }

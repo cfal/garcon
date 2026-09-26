@@ -11,6 +11,8 @@ test('advertised URL edits preserve a busy executor and its running turn', async
     const connection = await client.get<ExecutorConnection>(`${route}/connection`);
     const advertised = new URL(connection.connectionUrl);
     advertised.hostname = 'advertised.example';
+    advertised.pathname = '/any-prefix';
+    advertised.search = '?route=worker';
     const held = fixture.fakeProviders.openAi.holdNext({ model: fixture.directAgents.openAi.provider.model });
     const chatId = fixture.newChatId();
     const started = await client.startDirectChat({

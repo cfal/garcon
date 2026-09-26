@@ -11,6 +11,14 @@ executor, runtime, build version, and the fresh connection. TLS is required
 outside explicit development mode; Noise remains mandatory when outer TLS
 certificate verification is disabled. The default redial delay is five seconds.
 
+Public connection URLs may use arbitrary paths and query strings. They need not
+contain an executor ID or an `/executor` suffix. A reverse proxy must forward
+WebSocket upgrades to the internal controller route `/executor/<executor-uuid>`
+for executor-initiated connections, or the worker route `/executor` for
+controller-initiated connections. The `#secret=...` fragment is removed before
+connecting; paths and query strings are forwarded as configured. No additional
+controller HTTP routes need to be exposed for the executor connection.
+
 One channel describes the current implementation, not a final topology decision.
 Channel splitting remains separate work. Correctness and resource bounds must
 stand independently; do not add scheduling, retry, or lifecycle machinery solely

@@ -81,7 +81,7 @@ export class ExecutorConfigStore {
         allowUnverifiedTls: parsed?.socketUrl.startsWith('wss:') === true && request.allowUnverifiedTls === true,
         secret: parsed?.secret ?? createExecutorSecret(),
         connection: parsed
-          ? { kind: 'controller-connects', targetUrl: validateExecutorSocketUrl(parsed.socketUrl, { direction: 'controller-connects', allowInsecureDevelopment }) }
+          ? { kind: 'controller-connects', targetUrl: validateExecutorSocketUrl(parsed.socketUrl, { allowInsecureDevelopment }) }
           : { kind: 'executor-connects', advertisedUrl: `wss://example.com/executor/${id}` },
       };
       await this.#save([...this.#executors, executor]);
@@ -106,7 +106,7 @@ export class ExecutorConfigStore {
       if (request.connection) {
         const { direction, connectionUrl, allowInsecureDevelopment } = request.connection;
         const parsed = parseConnectionUrl(connectionUrl);
-        const socketUrl = validateExecutorSocketUrl(parsed.socketUrl, { direction, allowInsecureDevelopment, executorId: id });
+        const socketUrl = validateExecutorSocketUrl(parsed.socketUrl, { allowInsecureDevelopment });
         executor = {
           ...executor, secret: parsed.secret, allowInsecureDevelopment,
           allowUnverifiedTls: direction === 'controller-connects' && socketUrl.startsWith('wss:') && request.connection.allowUnverifiedTls === true,
@@ -151,11 +151,11 @@ function parseStoredExecutor(value: unknown): RemoteExecutorConfig {
     || value.allowControllerCli !== undefined && typeof value.allowControllerCli !== 'boolean'
     || value.allowUnverifiedTls !== undefined && typeof value.allowUnverifiedTls !== 'boolean'
     || !isRecord(value.connection)) throw new Error('Invalid executor configuration');
-  const options = { executorId: value.id, allowInsecureDevelopment: value.allowInsecureDevelopment };
+  const options = { allowInsecureDevelopment: value.allowInsecureDevelopment };
   const connection = value.connection.kind === 'executor-connects' && typeof value.connection.advertisedUrl === 'string'
-    ? { kind: 'executor-connects' as const, advertisedUrl: validateExecutorSocketUrl(value.connection.advertisedUrl, { ...options, direction: 'executor-connects' }) }
+    ? { kind: 'executor-connects' as const, advertisedUrl: validateExecutorSocketUrl(value.connection.advertisedUrl, options) }
     : value.connection.kind === 'controller-connects' && typeof value.connection.targetUrl === 'string'
-      ? { kind: 'controller-connects' as const, targetUrl: validateExecutorSocketUrl(value.connection.targetUrl, { ...options, direction: 'controller-connects' }) }
+      ? { kind: 'controller-connects' as const, targetUrl: validateExecutorSocketUrl(value.connection.targetUrl, options) }
       : null;
   if (!connection || connection.kind === 'executor-connects' && value.allowUnverifiedTls === true) throw new Error('Invalid executor connection configuration');
   return { id: value.id, label: value.label, enabled: value.enabled, secret: value.secret, connection,

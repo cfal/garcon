@@ -125,7 +125,7 @@ export class WebSocketLink {
     if (target.protocol !== 'wss:' && !(target.protocol === 'ws:' && this.options.allowInsecureDevelopment)) {
       throw new Error('Executor connections require TLS outside explicit development mode');
     }
-    if (target.hash || target.search || target.username || target.password) throw new Error('Executor network URL must not contain credentials');
+    if (target.hash || target.username || target.password) throw new Error('Executor network URL must not contain userinfo or a fragment');
     this.#dialing = true;
     const connect = () => {
       this.#dialTimer = null;

@@ -77,6 +77,21 @@ test('pasted worker credentials are unique and concurrent creates do not overwri
   expect(store.list()).toHaveLength(2);
 });
 
+test.each(['executor-connects', 'controller-connects'] as const)(
+  'arbitrary public URLs survive updates and restart (%s)', async (direction) => {
+    const { root, store } = await fixture();
+    const connectionUrl = executorConnectionUrl('wss://proxy.example.com/any-prefix?route=worker&tag=a&tag=b', createExecutorSecret());
+    const executor = await store.create(direction === 'executor-connects'
+      ? { direction, label: 'Proxied worker' }
+      : { direction, label: 'Proxied worker', connectionUrl });
+    await store.update(executor.id, { connection: { direction, connectionUrl, allowInsecureDevelopment: false } });
+    const reloaded = new ExecutorConfigStore(root);
+    await reloaded.initialize();
+    expect(reloaded.connection(executor.id).connectionUrl).toBe(connectionUrl);
+    expect(reloaded.require(executor.id).id).toBe(executor.id);
+  },
+);
+
 test('insecurely readable persisted secrets reject startup', async () => {
   if (process.platform === 'win32') return;
   const { root, store } = await fixture();

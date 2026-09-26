@@ -66,6 +66,18 @@ test('listener bind address is independent of the advertised URL and rejects emp
     '--bind-address', '127.0.0.1'])).rejects.toThrow('--bind-address applies only to listeners');
 });
 
+test('dialing and advertised URLs preserve arbitrary proxy paths and query strings', async () => {
+  const root = await workspace();
+  const socketUrl = 'wss://proxy.example.com/any-prefix?route=worker&tag=a&tag=b';
+  const secret = Buffer.alloc(32, 9).toString('base64url');
+  const dialing = await readWorkerCliOptions(['--connect', `${socketUrl}#secret=${secret}`, '--config-dir', root]);
+  expect(dialing.connection).toEqual({ kind: 'dial', url: socketUrl, secret });
+  const listening = await readWorkerCliOptions([
+    '--listen', '0', '--allow-insecure-development', '--config-dir', root, '--advertise-url', socketUrl,
+  ]);
+  expect(listening.advertisedUrl).toBe(socketUrl);
+});
+
 test.each([
   ['0', '0.0.0.0'],
   ['127.1', '127.0.0.1'],
