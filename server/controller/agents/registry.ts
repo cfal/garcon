@@ -48,7 +48,7 @@ import type { UserMessage } from '@garcon/common/chat-types';
 import type { UserInputAdmissionOptions } from '../chat-execution/types.js';
 import type { TranscriptAdoptionService } from '../ledger/adoption.js';
 import { transcriptViewId } from '../ledger/contracts.js';
-import type { TranscriptCommitEvent, TranscriptLedgerService } from '../ledger/service.js';
+import type { RetiredPermissionControl, TranscriptCommitEvent, TranscriptLedgerService } from '../ledger/service.js';
 import type { PreambleService } from '../preambles/service.js';
 import {
   assertPreambleSelectionComposition,
@@ -344,6 +344,10 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   getRunningSessions() { return this.#runtime.getRunningSessions(); }
   getRunningChatIdsSnapshot(): string[] { return this.#runtime.getRunningChatIdsSnapshot(); }
   getRunningSessionCount(): number { return this.#runtime.getRunningSessionCount(); }
+  onPermissionRetired(listener: (control: RetiredPermissionControl) => void): void {
+    this.#ledger.subscribePermissionRetired(listener);
+  }
+
   resolvePermission(
     chatId: string,
     permissionOccurrenceId: string,

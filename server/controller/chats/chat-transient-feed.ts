@@ -7,7 +7,7 @@ import type {
   ChatTransientFeedSnapshot,
   TransientFeedRow,
 } from '../../../common/chat-transient-feed.js';
-import type { TranscriptCommitEvent } from '../ledger/service.js';
+import type { RetiredPermissionControl, TranscriptCommitEvent } from '../ledger/service.js';
 
 interface TransientFeedRecord {
   readonly chatId: string;
@@ -74,17 +74,19 @@ export class ChatTransientFeedStore {
         permissionOccurrenceId: lifecycle.permissionOccurrenceId,
       };
     }
-    record.transientRevision += 1;
-    return {
-      kind: 'mutation',
-      value: {
-        serverInstanceId: this.serverInstanceId,
-        chatId: event.chatId,
-        transcriptViewId: record.transcriptViewId,
-        transientRevision: record.transientRevision,
-        mutation,
-      },
-    };
+    return this.#mutation(record, mutation);
+  }
+
+  retirePermission(control: RetiredPermissionControl): AppliedTransientFeedEvent {
+    const record = this.#records.get(control.chatId);
+    if (
+      !record || record.transcriptViewId !== control.viewId
+      || record.rows.get(control.permissionOccurrenceId)?.runId !== control.runId
+    ) return { kind: 'unchanged' };
+    record.rows.delete(control.permissionOccurrenceId);
+    return this.#mutation(record, {
+      kind: 'remove', permissionOccurrenceId: control.permissionOccurrenceId,
+    });
   }
 
   snapshot(input: {
@@ -123,6 +125,20 @@ export class ChatTransientFeedStore {
 
   deleteChat(chatId: string): void {
     this.#records.delete(chatId);
+  }
+
+  #mutation(record: TransientFeedRecord, mutation: ChatTransientFeedMutation['mutation']): AppliedTransientFeedEvent {
+    record.transientRevision += 1;
+    return {
+      kind: 'mutation',
+      value: {
+        serverInstanceId: this.serverInstanceId,
+        chatId: record.chatId,
+        transcriptViewId: record.transcriptViewId,
+        transientRevision: record.transientRevision,
+        mutation,
+      },
+    };
   }
 
   #record(chatId: string, transcriptViewId: string): TransientFeedRecord {

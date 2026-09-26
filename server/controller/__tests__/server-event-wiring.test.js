@@ -3,7 +3,7 @@ import { describe, expect, it, mock } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { AssistantMessage } from '../../../common/chat-types.js';
+import { AssistantMessage, BashToolUseMessage } from '../../../common/chat-types.js';
 import { emptyStoredChatExecutionControl } from '../chat-execution/control-state.ts';
 import { ChatTransientFeedStore } from '../chats/chat-transient-feed.js';
 import { ProjectUnavailableError } from '../../common/domain-error.ts';
@@ -14,7 +14,7 @@ import { CommandLedger } from '../commands/command-ledger.js';
 import { ChatCommandSettlement } from '../commands/chat-command-settlement.js';
 import { projectAgentTurnReceipt } from '../commands/agent-turn-receipt-projector.js';
 import { AgentRegistry } from '../agents/registry.js';
-import { createProducerFixture } from '../agents/__tests__/producer-fixture.ts';
+import { createProducerFixture, permissionResponse } from '../agents/__tests__/producer-fixture.ts';
 import { TranscriptLedgerService } from '../ledger/service.js';
 import { TranscriptLedgerStore } from '../ledger/store.js';
 import { KeyedPromiseLock } from '../../common/keyed-lock.js';
@@ -89,6 +89,7 @@ function createFixture(overrides = {}) {
   const noOp = mock(() => undefined);
   const agentRegistry = {
     onTranscriptCommitted: mock((callback) => { agent.transcript = callback; }),
+    onPermissionRetired: mock((callback) => { agent.permissionRetired = callback; }),
     onSessionCreated: mock((callback) => { agent.session = callback; }),
     onFinished: mock((callback) => { agent.finished = callback; }),
     onFailed: mock((callback) => { agent.failed = callback; }),
@@ -161,6 +162,7 @@ function createFixture(overrides = {}) {
     retryProviderCleanup: mock(async () => undefined),
     ...overrides.ownershipJournal,
   };
+  const transientFeeds = new ChatTransientFeedStore('server-instance-test');
   const wiring = wireServerEvents({
     ownershipJournal,
     executors: {
@@ -180,7 +182,7 @@ function createFixture(overrides = {}) {
     processing,
     metadata,
     currentTranscriptMessages: overrides.currentTranscriptMessages ?? (() => []),
-    transientFeeds: new ChatTransientFeedStore('server-instance-test'),
+    transientFeeds,
     commandLedger,
     shareStore,
     telegramNotifier: { setBotToken: noOp, ...overrides.telegramNotifier },
@@ -227,6 +229,7 @@ function createFixture(overrides = {}) {
     snippets,
     preambles,
     chatBoards,
+    transientFeeds,
     wiring,
     removeChat() { chatPresent = false; },
   };
@@ -270,9 +273,9 @@ const turn = {
   turnId: 'turn-1',
 };
 
-function createExecutionFixture(directory, ensureAdopted) {
+function createExecutionFixture(directory, ensureAdopted, beforeWiringCommitListener) {
   const store = new TranscriptLedgerStore(directory);
-  const transcripts = new TranscriptLedgerService(store);
+  const transcripts = new TranscriptLedgerService(store, { serverInstanceId: 'server-instance-test' });
   const view = transcripts.initializeChat('chat-1');
   const agentSettings = { ownerId: 'test', schemaVersion: 1, values: {} };
   const entry = {
@@ -317,10 +320,12 @@ function createExecutionFixture(directory, ensureAdopted) {
     projectAdmission: { assertAvailable: async () => undefined }, isControlInputViewCurrent: () => true,
   });
   const ledger = new CommandLedger();
+  if (beforeWiringCommitListener) agents.onTranscriptCommitted(beforeWiringCommitListener);
   const fixture = createFixture({
     commandLedgerInstance: ledger, queueService: execution,
     agentRegistry: {
       onTranscriptCommitted: (callback) => agents.onTranscriptCommitted(callback),
+      onPermissionRetired: (callback) => agents.onPermissionRetired(callback),
       onSessionCreated: (callback) => agents.onSessionCreated(callback),
       onFinished: (callback) => agents.onFinished(callback),
       onFailed: (callback) => agents.onFailed(callback),
@@ -592,6 +597,54 @@ describe('server event wiring', () => {
       'finished',
       {},
     );
+  });
+
+  it('removes a validated permission through the production registry listener chain without a terminal fact', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'garcon-permission-retirement-wiring-'));
+    const attention = mock(() => undefined);
+    const fixture = createExecutionFixture(root, undefined, attention);
+    const ledger = fixture.transcripts;
+    try {
+      const requestApplied = Promise.withResolvers();
+      fixture.agents.onTranscriptCommitted(() => requestApplied.resolve());
+      const view = ledger.currentView('chat-1');
+      const producer = ledger.openProducer('chat-1', 'test');
+      ledger.beginRun('chat-1', 'run-1');
+      const occurrence = '11111111-1111-4111-8111-111111111111';
+      producer.sink.publish({
+        type: 'permission', runId: 'run-1',
+        lifecycle: {
+          kind: 'requested', permissionOccurrenceId: occurrence,
+          requestedTool: new BashToolUseMessage(at, 'synthetic-tool', 'pwd'), options: [],
+        },
+        decision: { permissionOccurrenceId: occurrence, response: permissionResponse(occurrence) },
+      });
+      const control = {
+        serverInstanceId: 'server-instance-test', chatId: 'chat-1', runId: 'run-1', permissionOccurrenceId: occurrence,
+      };
+      expect(() => fixture.transientFeeds.validateAction(control)).toThrow();
+      await requestApplied.promise;
+      expect(attention).toHaveBeenCalledTimes(1);
+      fixture.transientFeeds.validateAction(control);
+      const claim = ledger.claimPermissionResolution(control);
+      ledger.retirePermissionResolution(claim);
+      await Promise.resolve();
+      await fixture.wiring.waitForIdle();
+      expect(fixture.published.map(message => message.type)).toEqual([
+        'chat-messages', 'chat-transient-feed-mutation', 'chat-transient-feed-mutation',
+      ]);
+      expect(fixture.published[1]).toMatchObject({ transientRevision: 1, mutation: { kind: 'upsert' } });
+      expect(fixture.published[2]).toMatchObject({
+        serverInstanceId: 'server-instance-test', chatId: 'chat-1', transcriptViewId: view.viewId,
+        transientRevision: 2, mutation: { kind: 'remove', permissionOccurrenceId: occurrence },
+      });
+      expect(ledger.currentRows('chat-1').map(row => row.kind)).toEqual(['permission-requested']);
+      expect(ledger.isRunActive('chat-1', 'run-1')).toBe(true);
+      expect(fixture.transientFeeds.currentSnapshot('chat-1').rows).toEqual([]);
+    } finally {
+      ledger.close();
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it('preserves interrupted completion outcomes in the browser contract', async () => {

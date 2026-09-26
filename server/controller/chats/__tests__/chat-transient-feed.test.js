@@ -120,6 +120,33 @@ describe('ChatTransientFeedStore', () => {
     expect(feed.apply(runEndedEvent('unknown', 6))).toEqual({ kind: 'unchanged' });
   });
 
+  it('retires only the exact live control without changing permission history', () => {
+    const feed = new ChatTransientFeedStore('server-1');
+    feed.apply(permissionEvent());
+    feed.apply(permissionEvent({ permissionOccurrenceId: 'occurrence-two', ordinal: 4 }));
+    const control = {
+      chatId: CHAT_ID, viewId: 'view-1', runId: 'run-1', permissionOccurrenceId: 'occurrence-one',
+    };
+    for (const changed of [
+      { chatId: 'other-chat' }, { viewId: 'old-view' }, { runId: 'old-run' },
+      { permissionOccurrenceId: 'other-occurrence' },
+    ]) {
+      expect(feed.retirePermission({ ...control, ...changed })).toEqual({ kind: 'unchanged' });
+    }
+    expect(feed.retirePermission(control)).toEqual({
+      kind: 'mutation',
+      value: {
+        serverInstanceId: 'server-1', chatId: CHAT_ID, transcriptViewId: 'view-1', transientRevision: 3,
+        mutation: { kind: 'remove', permissionOccurrenceId: 'occurrence-one' },
+      },
+    });
+    expect(feed.retirePermission(control)).toEqual({ kind: 'unchanged' });
+    expect(feed.currentSnapshot(CHAT_ID)).toMatchObject({
+      transientRevision: 3, rows: [{ permissionOccurrenceId: 'occurrence-two' }],
+    });
+    expect(() => feed.validateAction(action())).toThrow(TransientControlActionError);
+  });
+
   it('keeps distinct occurrence UUIDs separately actionable', () => {
     const feed = new ChatTransientFeedStore('server-1');
     feed.apply(permissionEvent());

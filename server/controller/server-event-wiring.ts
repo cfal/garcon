@@ -11,7 +11,7 @@ import type { TurnEventMetadata } from './agents/event-bus.js';
 import type { AgentRegistry } from './agents/registry.js';
 import type { ChatRegistry } from './chats/store.js';
 import type { AgentOwnershipJournal } from './chats/agent-ownership-journal.js';
-import type { ChatTransientFeedStore } from './chats/chat-transient-feed.js';
+import type { AppliedTransientFeedEvent, ChatTransientFeedStore } from './chats/chat-transient-feed.js';
 import type { MetadataIndex } from './chats/metadata-store.js';
 import type { ShareStore } from './chats/share-store.js';
 import type { SettingsStore } from './settings/store.js';
@@ -378,6 +378,22 @@ export function wireServerEvents({
       ? agentRegistry.resendCandidates(chatId)
       : [],
   });
+  const publishTransientFeedMutation = (applied: AppliedTransientFeedEvent) => {
+    if (applied.kind === 'unchanged') return;
+    const mutation = applied.value;
+    void scheduleChatTask(mutation.chatId, 'server-events: transient feed mutation failed', () => {
+      broadcast(new ChatTransientFeedMutationMessage(
+        mutation.serverInstanceId,
+        mutation.chatId,
+        mutation.transcriptViewId,
+        mutation.transientRevision,
+        mutation.mutation,
+      ));
+    });
+  };
+  agentRegistry.onPermissionRetired(control => {
+    publishTransientFeedMutation(transientFeeds.retirePermission(control));
+  });
   agentRegistry.onTranscriptCommitted(async (event) => {
     transcriptFanout(event);
     // A committed Preambles-updated notice invalidates the per-chat selection
@@ -399,19 +415,7 @@ export function wireServerEvents({
         }
       }
     }
-    const applied = transientFeeds.apply(event);
-    if (applied.kind !== 'unchanged') {
-      const mutation = applied.value;
-      void scheduleChatTask(event.chatId, 'server-events: transient feed mutation failed', () => {
-        broadcast(new ChatTransientFeedMutationMessage(
-          mutation.serverInstanceId,
-          mutation.chatId,
-          mutation.transcriptViewId,
-          mutation.transientRevision,
-          mutation.mutation,
-        ));
-      });
-    }
+    publishTransientFeedMutation(transientFeeds.apply(event));
     if (event.type !== 'run-ended') return;
     await commandLedger.setTurnResult(event.chatId, event.runId, event.finalResponse);
   });

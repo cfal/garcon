@@ -101,6 +101,29 @@ describe('transcript permission occurrences', () => {
     });
   });
 
+  it('notifies retirement once for the current claim, never an abandoned predecessor', async () => {
+    await withLedger(async (ledger) => {
+      const retired = [];
+      ledger.subscribePermissionRetired(control => retired.push(control));
+      const { claim } = claimPermission(ledger);
+      ledger.abandonPermissionResolution(claim);
+      const successor = ledger.claimPermissionResolution(permissionControl('incarnation-1'));
+      ledger.retirePermissionResolution(claim);
+      await Promise.resolve();
+      expect(retired).toEqual([]);
+      ledger.retirePermissionResolution(successor);
+      ledger.retirePermissionResolution(successor);
+      await Promise.resolve();
+      expect(retired).toEqual([{
+        chatId: CHAT_ID, viewId: 'view-1', runId: RUN_ID, permissionOccurrenceId: 'incarnation-1',
+      }]);
+      expect(() => ledger.claimPermissionResolution(permissionControl('incarnation-1')))
+        .toThrow(PermissionNotActionableError);
+      expect(ledger.currentRows(CHAT_ID).map(row => row.kind)).toEqual(['permission-requested']);
+      expect(ledger.isRunActive(CHAT_ID, RUN_ID)).toBe(true);
+    });
+  });
+
   it('invalidates an in-flight permission claim when its view is replaced', async () => {
     await withLedger((ledger) => {
       const { claim } = claimPermission(ledger);

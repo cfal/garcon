@@ -114,6 +114,10 @@ export interface PermissionResolutionClaim {
   readonly decision: AgentPermissionResponseCapability;
 }
 
+export type RetiredPermissionControl = Pick<
+  PermissionResolutionClaim, 'chatId' | 'viewId' | 'runId' | 'permissionOccurrenceId'
+>;
+
 interface ActivePermission {
   readonly runId: string;
   readonly permissionOccurrenceId: string;
@@ -143,6 +147,7 @@ export class TranscriptLedgerService {
   readonly #commandSinks: GarconCommandSinks;
   readonly #listeners = new Set<(event: TranscriptCommitEvent) => void | Promise<void>>();
   readonly #sessionCommitListeners = new Set<(event: TranscriptSessionCommitEvent) => void>();
+  readonly #permissionRetiredListeners = new Set<(control: RetiredPermissionControl) => void>();
   readonly #leases = new Map<string, ProducerLease>();
   readonly #activeRuns = new Map<string, string>();
   readonly #activePermissions = new Map<string, Map<string, ActivePermission>>();
@@ -175,6 +180,11 @@ export class TranscriptLedgerService {
   subscribeSessionCommitted(listener: (event: TranscriptSessionCommitEvent) => void): () => void {
     this.#sessionCommitListeners.add(listener);
     return () => this.#sessionCommitListeners.delete(listener);
+  }
+
+  subscribePermissionRetired(listener: (control: RetiredPermissionControl) => void): () => void {
+    this.#permissionRetiredListeners.add(listener);
+    return () => this.#permissionRetiredListeners.delete(listener);
   }
 
   initializeChat(
@@ -421,6 +431,16 @@ export class TranscriptLedgerService {
     if (permissions?.get(claim.permissionOccurrenceId)?.claimId === claim.claimId) {
       permissions.delete(claim.permissionOccurrenceId);
       this.#deleteEmptyPermissionMap(claim.chatId);
+      const { chatId, viewId, runId, permissionOccurrenceId } = claim;
+      queueMicrotask(() => {
+        for (const listener of this.#permissionRetiredListeners) {
+          try {
+            listener({ chatId, viewId, runId, permissionOccurrenceId });
+          } catch (error) {
+            this.#onListenerError(error);
+          }
+        }
+      });
     }
   }
 
@@ -689,6 +709,7 @@ export class TranscriptLedgerService {
     this.#permissionClaims.clear();
     this.#preparedInputs.clear();
     this.#sessionCommitListeners.clear();
+    this.#permissionRetiredListeners.clear();
     this.#store.close();
   }
 

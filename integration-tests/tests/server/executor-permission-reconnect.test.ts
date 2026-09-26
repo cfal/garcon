@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { BashToolUseMessage } from '../../../common/chat-types.js';
 import { ApiProviderEndpointResolver } from '../../../server/controller/api-providers/endpoint-resolver.js';
 import { ChatRegistry } from '../../../server/controller/chats/store.js';
+import { ChatTransientFeedStore } from '../../../server/controller/chats/chat-transient-feed.js';
 import { AgentDirectory, type ExecutionIntegrationDirectory } from '../../../server/controller/agents/directory.js';
 import { AgentEventBus } from '../../../server/controller/agents/event-bus.js';
 import { IntegrationRegistry } from '../../../server/runtime/agents/integration-registry.js';
@@ -24,12 +25,18 @@ const EXECUTOR = '22222222-2222-4222-8222-222222222222';
 const CHAT = '1783725900000400';
 const OCCURRENCE = '11111111-1111-4111-8111-111111111111';
 
-for (const dialer of ['controller', 'worker'] as const) {
-  test(`disconnect denies permissions and retires their ledger actionability (${dialer} dials)`, async () => {
+for (const [dialer, scenario] of [
+  ['controller', 'disconnect'], ['worker', 'disconnect'],
+  ['controller', 'uncertain response'], ['worker', 'uncertain response'],
+] as const) {
+  test(`${scenario} retires permission actionability without recording success (${dialer} dials)`, async () => {
     const root = await mkdtemp(join(tmpdir(), 'garcon-permission-reconnect-'));
     const chats = new ChatRegistry(root);
     await chats.init();
     const ledger = new TranscriptLedgerService(new TranscriptLedgerStore(join(root, 'ledger')), { serverInstanceId: 'synthetic-server' });
+    const feed = new ChatTransientFeedStore('synthetic-server');
+    ledger.subscribe(event => { feed.apply(event); });
+    ledger.subscribePermissionRetired(control => { feed.retirePermission(control); });
     const controller = new WebSocketLink({ ...linkOptions, executorId: EXECUTOR, role: 'controller' });
     const worker = new WebSocketLink({ ...linkOptions, executorId: EXECUTOR, role: 'worker' });
     const native = integrationFixture(root, EXECUTOR);
@@ -73,17 +80,41 @@ for (const dialer of ['controller', 'worker'] as const) {
       native.nativePublishers[0]!({ type: 'permission', runId,
         lifecycle: { kind: 'requested', permissionOccurrenceId: OCCURRENCE,
           requestedTool: new BashToolUseMessage('2026-09-23T00:00:00.000Z', 'synthetic-tool', 'pwd'), options: [] },
-        decision: { permissionOccurrenceId: OCCURRENCE, async respond(decision) { decisions.push(decision.allow); } },
+        decision: { permissionOccurrenceId: OCCURRENCE, async respond(decision) {
+          decisions.push(decision.allow);
+          if (scenario === 'uncertain response') throw new Error('Synthetic uncertain permission response');
+        } },
       });
       await integration.execution.runningSessions();
       expect(ledger.currentRows(CHAT).filter(row => row.kind === 'permission-requested')).toHaveLength(1);
       const original = controller.current;
+      const control = { serverInstanceId: 'synthetic-server', chatId: CHAT, runId, permissionOccurrenceId: OCCURRENCE };
+      expect(feed.validateAction(control).permissionOccurrenceId).toBe(OCCURRENCE);
+      if (scenario === 'uncertain response') {
+        await expect(router.resolvePermission(CHAT, OCCURRENCE, { allow: true }, control))
+          .rejects.toThrow('Synthetic uncertain permission response');
+        expect(controller.current).toBe(original);
+        expect(remote.availability).toBe('ready');
+        expect(ledger.isRunActive(CHAT, runId)).toBe(true);
+        expect(feed.currentSnapshot(CHAT)?.rows).toEqual([]);
+        await expect(router.resolvePermission(CHAT, OCCURRENCE, { allow: true }, control))
+          .rejects.toBeInstanceOf(PermissionNotActionableError);
+        expect(decisions).toEqual([true]);
+        expect(ledger.currentRows(CHAT).filter(row => row.kind.startsWith('permission-')).map(row => row.kind))
+          .toEqual(['permission-requested']);
+        native.nativePublishers[0]!({ type: 'permission', runId,
+          lifecycle: { kind: 'cancelled', permissionOccurrenceId: OCCURRENCE, reason: null },
+        });
+        await integration.execution.runningSessions();
+        expect(ledger.currentRows(CHAT).filter(row => row.kind.startsWith('permission-')).map(row => row.kind))
+          .toEqual(['permission-requested', 'permission-cancelled']);
+        return;
+      }
       const restored = Promise.withResolvers<void>();
       remote.onAvailabilityChanged(availability => { if (availability === 'ready') restored.resolve(); });
       controller.disconnect();
       worker.disconnect();
       expect(remote.availability).toBe('offline');
-      const control = { serverInstanceId: 'synthetic-server', chatId: CHAT, runId, permissionOccurrenceId: OCCURRENCE };
       await restored.promise;
       expect(controller.current).not.toBe(original);
       expect(serving).toHaveLength(2);
