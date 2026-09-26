@@ -106,6 +106,51 @@ for (const driverFactory of sacsScriptedDriverFactories) {
     });
 
     if (driverFactory.id === 'claude' || driverFactory.id === 'codex') {
+      test('preserves native fork refusal and explicit handoff consent after cold source loss', async () => {
+        const activeDriver = requireDriver(driver, driverFactory.label);
+        await withIntegrationFixture(`${activeDriver.id}-sacs-lazy-fork-consent`, async (fixture) => {
+          try {
+            const planted = await completedChat(fixture, activeDriver, 'LAZY_FORK_CONSENT');
+            const source = await requireLegacyFacet(driverFactory.legacyHistoryImport, driverFactory.label)
+              .prepare(fixture, planted.chatId, planted.rows);
+            const before = await fixture.client.getMessages(planted.chatId);
+            const binding = readRows(fixture, planted.chatId, before.transcriptViewId)
+              .findLast((row) => row.kind === 'session')?.detail;
+            const anchor = before.messages.findLast((row) => row.message.type === 'assistant-message');
+            if (!anchor) throw new Error('Source transcript is missing its assistant row');
+            await fixture.restartGarcon({ beforeStart: async () => {
+              if (activeDriver.id === 'claude') {
+                await source.remove();
+              } else {
+                const nativePath = binding?.nativeSession?.value.path;
+                if (typeof nativePath !== 'string') throw new Error('Codex source has no native path');
+                await writeFile(nativePath, '');
+              }
+            } });
+            const request = {
+              sourceChatId: planted.chatId,
+              chatId: fixture.newChatId(),
+              ...(activeDriver.id === 'claude'
+                ? { upToOrdinal: anchor.ordinal, transcriptViewId: before.transcriptViewId }
+                : {}),
+            };
+            await expect(fixture.client.forkChat(request)).rejects.toMatchObject({
+              status: 409,
+              body: { errorCode: 'TRANSCRIPT_NOT_YET_PERSISTED', retryable: true },
+            });
+            await fixture.client.forkChat({ ...request, allowHandoffFork: true });
+            const child = await fixture.client.getMessages(request.chatId);
+            expect(readRows(fixture, request.chatId, child.transcriptViewId).some((row) => row.kind === 'session'))
+              .toBe(false);
+            expect(conversationalContents(child.messages)).toEqual(planted.contents);
+            expect(await fixture.client.getMessages(planted.chatId)).toEqual(before);
+            activeDriver.assertSettled(fixture);
+          } finally {
+            activeDriver.reset();
+          }
+        }, activeDriver.fixtureOptions);
+      }, SACS_TIMEOUT_MS);
+
       test.each(['legacy', 'ledger'] as const)('forks on first use from %s without startup native reconciliation', async (source) => {
         const activeDriver = requireDriver(driver, driverFactory.label);
         await withIntegrationFixture(`${activeDriver.id}-sacs-lazy-fork-${source}`, async (fixture) => {
