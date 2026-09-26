@@ -11,6 +11,11 @@ executor, runtime, build version, and the fresh connection. TLS is required
 outside explicit development mode; Noise remains mandatory when outer TLS
 certificate verification is disabled. The default redial delay is five seconds.
 
+One channel describes the current implementation, not a final topology decision.
+Channel splitting remains separate work. Correctness and resource bounds must
+stand independently; do not add scheduling, retry, or lifecycle machinery solely
+to compensate for sharing a channel.
+
 ## Ordering And Bounds
 
 Each authenticated socket owns one session. `MessageSession` is a bounded send
@@ -35,6 +40,29 @@ that reader. Oversized producer output retires only its captured binding and
 fails any active run on that binding; subsequent output cannot turn it into a
 false success. Native abort is best effort and manual Reload remains explicit.
 Aggregate reliable-publication overflow can still retire the shared session.
+
+Outgoing RPCs share a 256-request budget. Locally cancelled starts, resumes,
+compactions, native forks, history opens, and project-path preparations retain
+their budget slot until a reply arrives or the session retires. A late successful
+reply releases the slot and triggers best-effort abort, fork discard, reader
+close, or preparation rollback on that same session, never a replacement
+connection. A cancelled preparation has no controller decision to commit;
+once dispatched, its native step runs without the RPC cancellation signal so
+it can return the resource needed for compensation. Pre-dispatch cancellation
+still rejects admission. Uncertain commit results are not rolled back
+automatically. Other cancelled calls release their slots immediately.
+Compaction has no implicit RPC deadline because some
+providers return its handle only after the turn ends; explicit caller deadlines,
+Stop, and session retirement still cancel it.
+
+Stop on a returned execution handle cancels that operation's native admission
+before requesting native abort. A resume still preparing its native turn must
+not start afterward merely because its launch RPC has already returned.
+
+An uncertain or expired permission response retires the exact occurrence's
+ephemeral capability and removes its browser control through the existing
+ordered transient-feed mutation. The request remains in history; retirement
+does not record a successful response, end the run, or permit a retry.
 
 Files use single-request reads/saves up to 4 MiB; base64 bounds JSON expansion.
 Git results are limited to 4 MiB of serialized JSON. Oversized operations reject

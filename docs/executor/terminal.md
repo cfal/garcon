@@ -1,12 +1,12 @@
 # Terminals On Executors
 
-Status: implemented on Local and remote executors, updated 2026-09-24. The contracts below govern channel topology, PTY lifetime, replay, session limits, creation targets, and host selection. Illustrative wire names are not a replacement for the typed service contract.
+Status: implemented on Local and remote executors, updated 2026-09-24. The contracts below describe the current transport and govern PTY lifetime, replay, session limits, creation targets, and host selection. Channel splitting remains a separate pending decision. Illustrative wire names are not a replacement for the typed service contract.
 
 This follows [Executor Interfaces](./interface.md), [Executors In The App](./app-integration.md), and [Files On Executors](./files.md). The historical baseline was inspected at `808d869658325b62c60c23782e986f76ded8b7a3`. Terminals reuse the executor-scoped service and transport infrastructure shared with Files and agents.
 
 ## Decisions
 
-- Use one controller-to-executor Noise WebSocket for agents, files, and terminals. Do not introduce another channel or a cross-service traffic scheduler now. Add channels later only if actual use requires them; this resolves the earlier channel question in the Files discussion for the current stage.
+- Agents, files, and terminals currently share one controller-to-executor Noise WebSocket. This does not settle the channel-splitting decision. Do not add scheduling or lifecycle machinery solely to compensate for sharing a channel.
 - PTYs belong to the executor process, not its current controller connection or provider-serving generation. Browser network changes, controller restarts, and arbitrarily long disconnections must not terminate a surviving executor's shells.
 - Preserve today's bounded output tail and visible truncation. Full-screen recovery is best effort; users can run `reset` themselves. Do not build screen snapshots or automatically send recovery commands.
 - Allow eight retained terminal sessions per principal per executor, including exited sessions until removal.
@@ -243,11 +243,11 @@ Output loss is allowed only with visible truncation, unlike normalized chat rows
 
 Preserve output-before-exit-status order at each delivery boundary. Natural exit does not immediately remove metadata or replay. Verify native trailing-output behavior with a real PTY; neither transport acknowledgement nor a mocked exit callback proves all native output was drained. Explicit termination may discard subsequent output as today.
 
-## Single Channel And Bounds
+## Current Transport And Bounds
 
-Use the existing single Noise channel for terminal control/output, Files, and agent traffic. Do not introduce priority lanes, weighted queues, adaptive scheduling, or a new cross-service scheduler. Keep the existing browser terminal queue and its round-robin behavior; preserving that code is not a request to generalize it into executor-wide traffic scheduling.
+The current implementation shares one Noise channel for terminal control/output, Files, and agent traffic. Do not introduce priority lanes, weighted queues, adaptive scheduling, or a new cross-service scheduler. Keep the existing browser terminal queue and its round-robin behavior; preserving that code is not a request to generalize it into executor-wide traffic scheduling.
 
-Terminal output is an unbounded producer, unlike a bounded file snapshot. A single channel still needs basic size/admission limits, not a promise to queue every byte until delivery. The minimum policy is:
+Terminal output is an unbounded producer, unlike a bounded file snapshot. Every channel arrangement needs basic size/admission limits, not a promise to queue every byte until delivery. The minimum policy is:
 
 - Bound output queues per attachment/terminal and per executor, plus input bytes and pending control calls.
 - Use small serialized frames; the current 64-KiB browser target is a reasonable starting point, with allowance for the extra executor envelope.
@@ -262,7 +262,7 @@ The current executor send path treats exhausted socket/replay budgets as continu
 
 The installed PTY abstraction has no general pause/resume interface. Do not add OS-level flow control now: blocking a long-running program to preserve every output byte is not the intended policy. Reuse straightforward message-size and capacity checks introduced for Files where suitable, without imposing terminal truncation on provider rows or treating terminal input like retryable file reads.
 
-One channel does not guarantee latency or failure isolation between workloads. Accept that trade-off for now. Observe terminal input/chat latency during file transfers and PTY floods; add channels later if actual interference warrants it, rather than preemptively building scheduling machinery. Terminal process identity and lifetime must remain independent of any future channel arrangement.
+The current shared channel does not guarantee latency or failure isolation between workloads. Observe terminal input/chat latency during file transfers and PTY floods to inform the pending channel decision; do not preemptively build scheduling machinery. Terminal process identity and lifetime must remain independent of channel arrangement.
 
 ## Control Outcomes And Enumeration
 
@@ -329,7 +329,7 @@ Advertise terminal capability accurately for the executor platform/build. Valida
 
 ## Deferred Work
 
-No blocking product question remains in this proposal. Additional channels are deferred until needed; a new traffic scheduler is not part of the initial implementation. Exact queue/frame tuning and wire method names are implementation details, not reasons to expand scope.
+Channel splitting remains a separate pending decision, not a prerequisite for this implementation. A new traffic scheduler is out of scope. Exact queue/frame tuning and wire method names are implementation details, not reasons to expand scope.
 
 Terminal survival across executor process restart, full-screen snapshots, automatic shell reset, and stronger process-tree termination guarantees remain out of scope. Process-lifetime ownership must not accidentally grow into durable execution recovery.
 

@@ -2,7 +2,7 @@
 
 Status: implemented and reviewed, 2026-09-24. Opus and Astra reviewed the design against `e9a9cfcf5` and the implementation through `3279b49e0`; `ce725e1d5` adds the final requested regression coverage. The [current transport contract](./transport.md) supersedes older replay and chunk-transfer proposals. Source links below identify the original investigation baseline; the corrections in this document govern implementation.
 
-This extends [Executor Interfaces](./interface.md) and [Executors In The App](./app-integration.md), which deliberately excluded a spawned-CLI bridge. It retains the single-channel policy from [Files](./files.md), [Terminals](./terminal.md), and [Git](./git.md). Existing CLI behavior is documented in [Garcon CLI And Server](../cli.md).
+This extends [Executor Interfaces](./interface.md) and [Executors In The App](./app-integration.md), which deliberately excluded a spawned-CLI bridge. It reuses the current shared channel with [Files](./files.md), [Terminals](./terminal.md), and [Git](./git.md); channel splitting remains a separate pending decision. Existing CLI behavior is documented in [Garcon CLI And Server](../cli.md).
 
 ## Decision
 
@@ -294,7 +294,7 @@ The gateway owns real HTTP idle-timeout policy; synthetic controller requests ha
 
 Use explicit HTTP response-drain accounting, not Bun's `pendingRequests` counter: that counter can fall before a slow client has consumed a buffered response. The gateway uses Executor-compatible HTTP response close events, bounded writes with backpressure, a 16-response budget, a 32-connection ceiling, and a 30-second idle drain timeout. Bulk reply admission runs synchronously at RPC publication so simultaneous completions cannot each consume the same available queue capacity.
 
-One shared channel still permits head-of-line delay and shared failure. Noise fragments large replies; that is not traffic isolation. Measure chat/terminal latency under exports and polling; reconsider a second channel only for demonstrated interference.
+The current shared channel permits head-of-line delay and shared failure. Noise fragments large replies; that is not traffic isolation. Chat/terminal latency under exports and polling is useful evidence for the pending channel-splitting decision, not a prerequisite or a decision to retain one channel.
 
 ## Implementation Boundaries
 

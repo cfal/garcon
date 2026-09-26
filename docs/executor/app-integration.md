@@ -8,6 +8,12 @@ and folder. Composer text and recovered file drafts retain their existing
 persistence. An explicitly confirmed destination remains selected while staying
 in that chat, until submission or cancellation.
 
+Controller-owned composer commands (`/rename`, `/move`, `/tag`, and `/in`) remain
+available for started chats when the executor or model catalog is unavailable. Click, Enter, and
+steer-preferred submission dispatch those commands to the controller, never to
+an agent. Ordinary prompts and agent commands remain blocked. File links report
+executor unavailability rather than silently doing nothing or opening Local.
+
 Predecessor: [Executor Interfaces](./interface.md), the historical provider-remoting design. The current [transcript-ledger-v5 design](../transcript-ledger-v5-design.md) remains authoritative for transcript ownership, interruption, handoff, and manual Reload. This document extends execution selection to multiple executors; it does not replace those lifecycle rules.
 
 ## Goal

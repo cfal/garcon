@@ -14,7 +14,7 @@ Make the existing Git and read-only pull-request experience work on the reposito
 - Commit-message generation that reads the correct executor's repository while retaining independently selected one-shot generation settings.
 - Local uses the same service implementation and behavioral contract as remote executors.
 
-Keep the agreed transport policy: one shared controller-to-executor Noise WebSocket. No second channel, priority scheduler, adaptive pacing, generic Process service, or raw shell-command RPC. Bounded request/result sizes and ordinary resource admission are still required. Introduce another channel later only if measured interference warrants it.
+Reuse the current shared controller-to-executor Noise WebSocket; channel splitting remains a separate pending decision. Do not add priority scheduling, adaptive pacing, or other machinery solely to accommodate one channel. Bounded request/result sizes and ordinary resource admission remain necessary regardless of channel count. No generic Process service or raw shell-command RPC.
 
 Reuse the existing Git implementation. Do not build a second Git engine or make the controller issue primitive subprocess commands to a worker. Multi-command operations, locks, direct filesystem reads, temporary indexes, and review documents all belong beside the repository.
 
@@ -167,6 +167,7 @@ Qualify browser/controller document references by stable executor and serving `i
 - Documents belong to the worker process, subject to their TTL and supersession. Reconnect refreshes visible surfaces without replaying operations.
 - Worker restart changes the serving instance and invalidates document references. Obtain new documents before acting on retained UI selections.
 - Offline executor: retain displayed data and draft text as unavailable/stale, but disable mutations against stale review selections. Do not clear another executor's caches.
+- Retire unconfirmed destructive actions when the serving session changes. Reconnected paths, stash refs, and HEAD may describe different content; a fresh confirmation is required. Already dispatched mutations retain their existing ownership and uncertainty handling.
 - Executor removal: prune that executor's ephemeral capabilities, request maps, and cached documents; no durable Git registry is needed.
 
 Unlike PTYs, Git review documents do not need process-lifetime survival. They are derived and cheap to re-request. Reusing a path or document UUID cannot bypass an instance mismatch. Each remote call captures one session backing; its result cannot be attributed to a replacement session.
@@ -328,4 +329,4 @@ For implementation changes, run `bun run check`, `bun run test`, the focused int
 
 No blocking product decision is required for this scope. The design deliberately retains current Git/gh workflows, executor-owned credentials, request-scoped commands, and best-effort reconciliation rather than adding distributed transactions.
 
-Additional transport channels, persistent jobs/idempotency, stronger external-writer isolation, interactive credential setup, richer GitHub actions, remote ticket auto-default inference, and repository synchronization remain separate work. Exact internal result/admission tuning may change from the stated starting bounds based on tests, without changing identity, mutation safety, or single-channel policy.
+Additional transport channels, persistent jobs/idempotency, stronger external-writer isolation, interactive credential setup, richer GitHub actions, remote ticket auto-default inference, and repository synchronization remain separate work. Exact internal result/admission tuning may change from the stated starting bounds based on tests, without changing identity or mutation safety. Channel topology is an independent decision.
