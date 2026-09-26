@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { createServer, connect, type Socket, type AddressInfo } from 'node:net';
+import { tcpLinkProxy } from '../../__tests__/tcp-link-proxy.js';
 import { WebSocketLink } from '../websocket-link.js';
 import { linkOptions } from '../../__tests__/integration-fixture.js';
 
@@ -15,53 +15,13 @@ test('failures after proof verification are not reported as authentication failu
   } finally { await controller.dispose(); await worker.dispose(); }
 });
 
-async function throttledProxy(target: URL, bytesPerSecond: number) {
-  const sockets = new Set<Socket>();
-  const timers = new Set<ReturnType<typeof setTimeout>>();
-  let connections = 0;
-  const server = createServer(client => {
-    connections++;
-    const upstream = connect(Number(target.port), target.hostname);
-    sockets.add(client); sockets.add(upstream);
-    client.on('data', (chunk: Buffer) => {
-      upstream.write(chunk);
-      client.pause();
-      const timer = setTimeout(() => {
-        timers.delete(timer);
-        client.resume();
-      }, Math.ceil(chunk.length * 1000 / bytesPerSecond));
-      timers.add(timer);
-    });
-    upstream.on('data', chunk => client.write(chunk));
-    const close = () => {
-      sockets.delete(client); sockets.delete(upstream);
-      client.destroy(); upstream.destroy();
-    };
-    client.on('close', close); upstream.on('close', close);
-    client.on('error', close); upstream.on('error', close);
-  });
-  await new Promise<void>(resolve => server.listen(0, '0.0.0.0', resolve));
-  const url = new URL(target.href);
-  url.hostname = '127.0.0.1';
-  url.port = String((server.address() as AddressInfo).port);
-  return {
-    url: url.href,
-    get connections() { return connections; },
-    async close() {
-      for (const timer of timers) clearTimeout(timer);
-      for (const socket of sockets) socket.destroy();
-      await new Promise<void>(resolve => server.close(() => resolve()));
-    },
-  };
-}
-
 for (const dialer of ['controller', 'worker'] as const) {
   test(`12 MiB queued output survives socket backpressure (${dialer} dials)`, async () => {
     const controller = new WebSocketLink({ ...linkOptions, role: 'controller' });
     const worker = new WebSocketLink({ ...linkOptions, role: 'worker' });
     const sender = dialer === 'controller' ? controller : worker;
     const receiver = dialer === 'controller' ? worker : controller;
-    const proxy = await throttledProxy(new URL(receiver.listen()), 8 * 1024 * 1024);
+    const proxy = await tcpLinkProxy(new URL(receiver.listen()));
     try {
       sender.dial(proxy.url);
       const [sending, receiving] = await Promise.all([sender.ready, receiver.ready]);
@@ -73,6 +33,7 @@ for (const dialer of ['controller', 'worker'] as const) {
       });
       const failures: Error[] = [];
       sending.onFailure(error => failures.push(error));
+      proxy.throttle(8 * 1024 * 1024);
       for (let index = 0; index < 24; index++) sending.send('r'.repeat(512 * 1024));
       await done.promise;
       expect(failures).toEqual([]);
@@ -86,7 +47,7 @@ for (const dialer of ['controller', 'worker'] as const) {
     const worker = new WebSocketLink({ ...linkOptions, role: 'worker' });
     const sender = dialer === 'controller' ? controller : worker;
     const receiver = dialer === 'controller' ? worker : controller;
-    const proxy = await throttledProxy(new URL(receiver.listen()), 512 * 1024);
+    const proxy = await tcpLinkProxy(new URL(receiver.listen()));
     try {
       sender.dial(proxy.url);
       const [sending, receiving] = await Promise.all([sender.ready, receiver.ready]);
@@ -99,6 +60,7 @@ for (const dialer of ['controller', 'worker'] as const) {
         received.push(payload.length);
         if (received.length === 2) done.resolve();
       });
+      proxy.throttle(512 * 1024);
       sending.send('x'.repeat(13 * 1024 * 1024));
       sending.send('second');
       receiving.send('concurrent reverse traffic');

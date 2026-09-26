@@ -8,6 +8,7 @@ test('framing preserves UTF-8 across fragment boundaries and pauses at the socke
     get bufferedAmount() { return bufferedAmount; },
     send(fragment) {
       if (typeof fragment === 'string') throw new Error('Expected binary fragment');
+      expect(fragment.length).toBeLessThanOrEqual(32 * 1024 + 1);
       sent.push(fragment);
       bufferedAmount += fragment.length;
     },
@@ -42,7 +43,8 @@ test('framing rejects malformed fragments, invalid UTF-8, and oversized reassemb
     for (const fragment of [Buffer.from([0]), Buffer.from([2, 1]), Buffer.from([0, 1]), Buffer.from([1, 255])]) {
       expect(() => socket.receive(fragment)).toThrow();
     }
-    const fragment = Buffer.alloc(256 * 1024 + 1);
+    expect(() => socket.receive(Buffer.alloc(32 * 1024 + 2))).toThrow('Invalid session message fragment');
+    const fragment = Buffer.alloc(32 * 1024 + 1);
     for (let bytes = 0; bytes < SESSION_MESSAGE_BYTES; bytes += fragment.length - 1) socket.receive(fragment);
     expect(() => socket.receive(Buffer.from([1, 1]))).toThrow('Invalid session message fragment');
   } finally { socket.dispose(); }

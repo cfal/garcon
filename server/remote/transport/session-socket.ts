@@ -2,7 +2,7 @@ import type { NoiseWebSocket } from '@cfal/noise-ws';
 import { MessageContinuityError, type SessionSocket } from './message-session.js';
 
 export const SESSION_MESSAGE_BYTES = 16 * 1024 * 1024;
-const FRAGMENT_BYTES = 256 * 1024;
+const FRAGMENT_BYTES = 32 * 1024;
 export const SESSION_SOCKET_BUFFER_BYTES = 512 * 1024;
 
 // Noise messages are small enough to expose authenticated progress on slow links.
