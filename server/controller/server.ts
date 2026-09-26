@@ -456,9 +456,6 @@ export async function startServer(): Promise<void> {
       selectionAdmissionLock,
     });
 
-    await chatRegistry.reconcileSessions((session, chatId) =>
-      agentRegistry.resolveNativeSession(session, chatId),
-    );
     await settings.reconcileWithRegistry(chatRegistry);
 
     // Chat infrastructure uses the agent registry through narrow injected APIs.

@@ -387,12 +387,12 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     return this.#runtime.discoverSlashCommands(agentId, projectPath, executorId);
   }
 
-  // Returns the preview from the authoritative conversational ledger fold.
-  async getPreview(session: AgentChatEntry | null, chatId = ''): Promise<{
+  // Startup previews never adopt legacy history or inspect native sessions.
+  async getExistingTranscriptPreview(session: AgentChatEntry | null, chatId: string): Promise<{
     preview: unknown;
   } | null> {
     if (!session?.agentId || !chatId) return null;
-    await this.#adoption.ensure(chatId);
+    if (!this.#ledger.existingCurrentView(chatId)) return null;
     const messages = this.#ledger.conversationMessages(chatId);
     const first = messages.find((message) => message.type === 'user-message') ?? messages[0];
     const last = messages.at(-1);

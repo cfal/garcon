@@ -1072,40 +1072,6 @@ describe('ChatRegistry', () => {
     }
   });
 
-  it('reconciles missing opaque native sessions through the owning integration callback', async () => {
-    registry.addChat(newChat({ agentSessionId: 'native-1' }));
-    const resolved = nativeSession('test', { id: 'native-1' });
-    const resolver = mock(async () => resolved);
-
-    await expect(registry.reconcileSessions(resolver)).resolves.toBe(true);
-
-    expect(resolver).toHaveBeenCalledWith(expect.objectContaining({ agentId: 'test' }), CHAT_ID);
-    expect(registry.getChat(CHAT_ID)?.nativeSession).toEqual(nativeSession('test', { id: 'native-1' }));
-    await expect(registry.reconcileSessions(resolver)).resolves.toBe(false);
-    expect(resolver).toHaveBeenCalledTimes(2);
-
-    resolved.value.injected = true;
-    expect(registry.getChat(CHAT_ID)?.nativeSession).toEqual(nativeSession('test', { id: 'native-1' }));
-  });
-
-  it('replaces an existing opaque native session only when the resolver upgrades it', async () => {
-    const artificial = nativeSession('test', { path: '!test:native-1' });
-    const resolved = nativeSession('test', { path: '/sessions/native-1.jsonl' });
-    registry.addChat(newChat({ agentSessionId: 'native-1', nativeSession: artificial }));
-
-    await expect(registry.reconcileSessions(async () => resolved)).resolves.toBe(true);
-    expect(registry.getChat(CHAT_ID)?.nativeSession).toEqual(resolved);
-    await expect(registry.reconcileSessions(async () => resolved)).resolves.toBe(false);
-  });
-
-  it('preserves unresolved sessions and rejects a resolver owner mismatch', async () => {
-    registry.addChat(newChat({ agentSessionId: 'native-1' }));
-    await expect(registry.reconcileSessions(async () => null)).resolves.toBe(false);
-    expect(registry.getChat(CHAT_ID)?.nativeSession).toBeNull();
-    await expect(registry.reconcileSessions(async () => nativeSession('other')))
-      .rejects.toThrow('Native session owner mismatch');
-  });
-
   it('rejects invalid chat IDs before mutation', () => {
     expect(() => registry.addChat(newChat({ id: 'not-a-chat-id' }))).toThrow();
     expect(registry.listAllChats()).toEqual({});

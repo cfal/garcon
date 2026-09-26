@@ -223,14 +223,8 @@ interface ChatRegistryEvents {
 export interface ChatRegistryProjectPathUpdate extends ChatProjectPathUpdatedPayload {
   nativeSession?: AgentNativeSessionRef | null;
 }
-export type ResolveNativeSession = (
-  session: ChatRegistryEntry,
-  chatId: string,
-) => Promise<AgentNativeSessionRef | null>;
-
 export interface IChatRegistry {
   init(): Promise<ChatRegistrySnapshot>;
-  reconcileSessions(resolveNativeSession: ResolveNativeSession): Promise<boolean>;
   listAllChats(): Record<string, ChatRegistryEntry>;
   // Ids are unique by construction (object keys).
   listChatIds(): string[];
@@ -367,50 +361,6 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
       throw new Error('Registry cache not initialized. Call init() during startup.');
     }
     return this.#registry;
-  }
-
-  async reconcileSessions(resolveNativeSession: ResolveNativeSession): Promise<boolean> {
-    const registry = this.getRegistry();
-    const sessions = registry.sessions;
-    let dirty = false;
-
-    for (const [chatId, session] of Object.entries(sessions)) {
-      if (!session?.agentSessionId) {
-        logger.warn(`sessions: preserving chat ${chatId} with missing agentSessionId`);
-        continue;
-      }
-
-      let resolved: AgentNativeSessionRef | null;
-      try {
-        resolved = await resolveNativeSession(session, chatId);
-      } catch (error) {
-        logger.warn(`sessions: native session reconciliation failed for ${chatId}:`, (error as Error).message);
-        continue;
-      }
-      if (!resolved) {
-        logger.warn(`sessions: preserving chat ${chatId} with unresolved native session`);
-        continue;
-      }
-      if (resolved.ownerId !== session.agentId) {
-        throw new Error(`Native session owner mismatch for ${chatId}`);
-      }
-      if (isDeepStrictEqual(resolved, session.nativeSession)) continue;
-
-      // Resolver-supplied refs are plugin-owned; clone on ingest so the
-      // plugin cannot mutate registry state through the object it returned.
-      session.nativeSession = structuredClone(resolved);
-      this.#advanceChatMutationRevision(chatId);
-      dirty = true;
-    }
-
-    if (!dirty) return false;
-
-    if (this.#pendingSaveTimer) {
-      clearTimeout(this.#pendingSaveTimer);
-      this.#pendingSaveTimer = null;
-    }
-    await this.saveRegistry(registry);
-    return true;
   }
 
   listAllChats(): Record<string, ChatRegistryEntry> {

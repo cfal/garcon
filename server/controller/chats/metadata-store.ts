@@ -1,4 +1,4 @@
-// Persistent metadata index for chat list rendering. Agent previews repair
+// Persistent metadata index for chat list rendering. Ledger previews repair
 // missing entries, while live appends keep latest preview text durable.
 
 import { promises as fs } from 'fs';
@@ -16,9 +16,7 @@ const logger = createLogger('chats:metadata-store');
 const DEFAULT_PREVIEW_TIMEOUT_MS = 5_000;
 const DEFAULT_SAVE_DELAY_MS = 100;
 const METADATA_VERSION = 1;
-const CARRY_OVER_HEAD_WINDOW = 25;
-// Agent previews each spawn work; an unbounded repair fan-out stalls startup
-// on large registries, so repairs run through a bounded pool.
+// Repairs run through a bounded pool to limit startup work on large registries.
 const METADATA_REPAIR_CONCURRENCY = 6;
 // The pool bounds concurrency, not total time: ceil(N/6) stalled previews
 // would stretch init() - which runs before the listener starts - into
@@ -60,26 +58,20 @@ interface MetadataIndexOptions {
   repairDeadlineMs?: number;
 }
 
-interface MetadataAgentSource {
-  getPreview(session: ChatRegistryEntry, chatId: string): Promise<{
+interface MetadataTranscriptSource {
+  getExistingTranscriptPreview(session: ChatRegistryEntry, chatId: string): Promise<{
     preview: unknown;
   } | null>;
 }
 
 interface MetadataCarryOverSource {
   revision(refs: readonly CarryOverSegmentRef[], quarantine?: unknown): string;
-  logicalMessageCount(refs: readonly CarryOverSegmentRef[]): number | Promise<number>;
-  loadPage(input: {
-    refs: readonly CarryOverSegmentRef[];
-    offset: number;
-    limit: number;
-  }): Promise<{ messages: readonly ChatMessage[] }>;
 }
 
 export class MetadataIndex {
   #metadataByChatId = new Map<string, ChatMetadata>();
   #registry: IChatRegistry;
-  #agents: MetadataAgentSource;
+  #transcripts: MetadataTranscriptSource;
   #carryOver: MetadataCarryOverSource;
   #initialized = false;
   #previewTimeoutMs: number;
@@ -91,12 +83,12 @@ export class MetadataIndex {
 
   constructor(
     registry: IChatRegistry,
-    agents: MetadataAgentSource,
+    transcripts: MetadataTranscriptSource,
     carryOver: MetadataCarryOverSource,
     options: MetadataIndexOptions = {},
   ) {
     this.#registry = registry;
-    this.#agents = agents;
+    this.#transcripts = transcripts;
     this.#carryOver = carryOver;
     this.#previewTimeoutMs = options.previewTimeoutMs ?? DEFAULT_PREVIEW_TIMEOUT_MS;
     this.#metadataPath = options.metadataPath ?? null;
@@ -115,7 +107,7 @@ export class MetadataIndex {
 
     this.#metadataByChatId = await this.#loadPersistedMetadata();
     this.#pruneMissingRegistryEntries();
-    await this.#repairFromAgentPreviews();
+    await this.#repairFromTranscriptPreviews();
     this.#pruneMissingRegistryEntries();
     this.#scheduleSave();
   }
@@ -205,7 +197,7 @@ export class MetadataIndex {
     await this.#savePromise;
   }
 
-  async #repairFromAgentPreviews(): Promise<void> {
+  async #repairFromTranscriptPreviews(): Promise<void> {
     const sessions = this.#registry.listAllChats();
     const repairEntries = Object.entries(sessions).filter(([chatId, session]) => {
       const existing = this.#metadataByChatId.get(String(chatId));
@@ -228,7 +220,7 @@ export class MetadataIndex {
           const metadata = await this.#buildMetadataFromPreviewWithTimeout(chatId, session);
           // Recorded at completion so repairs finished inside the budget
           // survive a deadline win instead of being rebuilt every startup.
-          repaired.set(String(chatId), metadata);
+          if (metadata) repaired.set(String(chatId), metadata);
           return { ok: true };
         } catch (error) {
           return { ok: false, error };
@@ -238,9 +230,7 @@ export class MetadataIndex {
 
     // The race does not cancel the pool; the flag only stops queued workers
     // from starting new preview work. Successes are applied below on either
-    // outcome, so a deadline abandons only chats whose previews never
-    // finished; in-flight adoption writes are serialized per chat and
-    // ownership-checked.
+    // outcome, so a deadline abandons only chats whose previews never finished.
     const deadline = new Promise<'deadline'>((resolve) => {
       setTimeout(() => resolve('deadline'), this.#repairDeadlineMs).unref?.();
     });
@@ -284,7 +274,7 @@ export class MetadataIndex {
   async #buildMetadataFromPreviewWithTimeout(
     chatId: string,
     session: ChatRegistryEntry,
-  ): Promise<ChatMetadata> {
+  ): Promise<ChatMetadata | null> {
     return withTimeout(
       this.#buildMetadataFromPreview(chatId, session),
       this.#previewTimeoutMs,
@@ -292,38 +282,21 @@ export class MetadataIndex {
     );
   }
 
-  // Composes the segment preview with immutable carryover so title, first
-  // message, and activity describe the whole conversation, not only the
-  // current provider segment.
-  async #buildMetadataFromPreview(chatId: string, session: ChatRegistryEntry): Promise<ChatMetadata> {
-    const result = await this.#agents.getPreview(session, chatId);
+  async #buildMetadataFromPreview(chatId: string, session: ChatRegistryEntry): Promise<ChatMetadata | null> {
+    const result = await this.#transcripts.getExistingTranscriptPreview(session, chatId);
+    if (!result) return null;
     const preview = result && isAgentPreviewMetadata(result.preview) ? result.preview : null;
     const refs = session.carryOverSegments ?? [];
-    const carryTotal = refs.length > 0 ? await this.#carryOver.logicalMessageCount(refs) : 0;
-    const head = carryTotal > 0
-      ? [...(await this.#carryOver.loadPage({
-          refs,
-          offset: 0,
-          limit: Math.min(carryTotal, CARRY_OVER_HEAD_WINDOW),
-        })).messages]
-      : [];
-    const tail = carryTotal > 0
-      ? [...(await this.#carryOver.loadPage({
-          refs,
-          offset: Math.max(0, carryTotal - 1),
-          limit: 1,
-        })).messages]
-      : [];
-    const firstMessage = firstUserText(head) || preview?.firstMessage || '';
+    const firstMessage = preview?.firstMessage || '';
     if (!firstMessage) {
       throw new Error(`Failed to build preview for chat: ${chatId}`);
     }
-    const createdAt = firstTimestamp(head) || preview?.createdAt || null;
+    const createdAt = preview?.createdAt || null;
     return {
       chatId,
       createdAt,
-      lastActivity: preview?.lastActivity || latestTimestamp(tail) || createdAt,
-      lastMessage: preview?.lastMessage || latestPreviewText(tail) || firstMessage,
+      lastActivity: preview?.lastActivity || createdAt,
+      lastMessage: preview?.lastMessage || firstMessage,
       firstMessage,
       source: 'agent-preview',
       identity: {

@@ -1,6 +1,6 @@
 import { resolveFileMentionsInCommand } from "../../../runtime/projects/file-mentions.ts";
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -88,6 +88,34 @@ describe('AgentRegistry session cache', () => {
         : { kind, ownershipEpoch, selectionRevision },
     });
   }
+
+  it('previews existing ledgers without resolving a provider or adopting history', async () => {
+    const adoption = { ensure: mock(() => { throw new Error('Unexpected adoption'); }) };
+    const registry = createRegistry(adoption);
+    ledger.openProducer(CHAT_ID, 'test').sink.publish({
+      type: 'rows',
+      rows: [{ message: new AssistantMessage(AT, 'Stored conversation'), providerMeta: null }],
+    });
+    const before = ledger.currentRows(CHAT_ID);
+    await expect(registry.getExistingTranscriptPreview(chats.getChat(CHAT_ID), CHAT_ID))
+      .resolves.toEqual({ preview: {
+        firstMessage: 'Stored conversation', lastMessage: 'Stored conversation',
+        createdAt: AT, lastActivity: AT,
+      } });
+    expect(adoption.ensure).not.toHaveBeenCalled();
+    expect(ledger.currentRows(CHAT_ID)).toEqual(before);
+  });
+
+  it('does not materialize a ledger for an unadopted startup preview', async () => {
+    ledger.deleteChat(CHAT_ID);
+    const adoption = { ensure: mock(() => { throw new Error('Unexpected adoption'); }) };
+    const registry = createRegistry(adoption);
+    await expect(registry.getExistingTranscriptPreview(chats.getChat(CHAT_ID), CHAT_ID))
+      .resolves.toBeNull();
+    expect(adoption.ensure).not.toHaveBeenCalled();
+    await expect(stat(path.join(root, 'transcript-ledgers', CHAT_ID)))
+      .rejects.toMatchObject({ code: 'ENOENT' });
+  });
 
   it('returns a client error for unknown-agent auth and an empty command catalog', async () => {
     const registry = createRegistry();

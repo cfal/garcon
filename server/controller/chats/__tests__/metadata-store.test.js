@@ -11,7 +11,7 @@ const mockRegistry = {
   onChatRemoved: mock(() => {}),
 };
 const mockAgents = {
-  getPreview: mock(() => Promise.resolve(null)),
+  getExistingTranscriptPreview: mock(() => Promise.resolve(null)),
 };
 const mockCarryOver = {
   revision: () => 'carry-v1:0',
@@ -241,7 +241,7 @@ describe('metadata-store', () => {
           source: 'live',
         },
       })), 'utf8');
-      const agents = { getPreview: mock(() => Promise.resolve(null)) };
+      const agents = { getExistingTranscriptPreview: mock(() => Promise.resolve(null)) };
       const index = new MetadataIndex(
         makeRegistry({ 'persisted-chat': session() }),
         agents,
@@ -252,13 +252,13 @@ describe('metadata-store', () => {
       await index.init();
       await index.flush();
 
-      expect(agents.getPreview).toHaveBeenCalledTimes(0);
+      expect(agents.getExistingTranscriptPreview).toHaveBeenCalledTimes(0);
       expect(index.getChatMetadata('persisted-chat').lastMessage).toBe('last persisted');
     });
 
-    it('repairs missing metadata from agent previews', async () => {
+    it('repairs missing metadata from existing transcript previews', async () => {
       const agents = {
-        getPreview: mock(() => Promise.resolve(previewResult({
+        getExistingTranscriptPreview: mock(() => Promise.resolve(previewResult({
           firstMessage: 'first repaired',
           lastMessage: 'last repaired',
           createdAt: '2026-01-01T00:00:00Z',
@@ -273,7 +273,7 @@ describe('metadata-store', () => {
 
       await index.init();
 
-      expect(agents.getPreview).toHaveBeenCalledTimes(1);
+      expect(agents.getExistingTranscriptPreview).toHaveBeenCalledTimes(1);
       expect(index.getChatMetadata('missing-chat').lastMessage).toBe('last repaired');
       expect(index.getChatMetadata('missing-chat').source).toBe('agent-preview');
     });
@@ -283,13 +283,13 @@ describe('metadata-store', () => {
         'stalled-chat': session({ agentId: 'opencode', agentSessionId: 'opencode-session' }),
       });
       const stalledAgents = {
-        getPreview: mock(() => new Promise(() => {})),
+        getExistingTranscriptPreview: mock(() => new Promise(() => {})),
       };
       const index = new MetadataIndex(stalledRegistry, stalledAgents, mockCarryOver, { previewTimeoutMs: 5 });
 
       await index.init();
 
-      expect(stalledAgents.getPreview).toHaveBeenCalledTimes(1);
+      expect(stalledAgents.getExistingTranscriptPreview).toHaveBeenCalledTimes(1);
       expect(index.getChatMetadata('stalled-chat')).toBeNull();
     });
 
@@ -299,7 +299,7 @@ describe('metadata-store', () => {
         sessions[`stall-${i}`] = session({ agentId: 'opencode', agentSessionId: `opencode-${i}` });
       }
       const stalledAgents = {
-        getPreview: mock(() => new Promise(() => {})),
+        getExistingTranscriptPreview: mock(() => new Promise(() => {})),
       };
       const index = new MetadataIndex(makeRegistry(sessions), stalledAgents, mockCarryOver, {
         previewTimeoutMs: 200,
@@ -318,7 +318,7 @@ describe('metadata-store', () => {
       // once the in-flight previews time out, the two queued chats stay
       // unrepaired instead of starting a second wave of preview work.
       await new Promise((resolve) => setTimeout(resolve, 700));
-      expect(stalledAgents.getPreview).toHaveBeenCalledTimes(6);
+      expect(stalledAgents.getExistingTranscriptPreview).toHaveBeenCalledTimes(6);
     });
 
     it('keeps repairs completed inside the deadline when others stall', async () => {
@@ -330,7 +330,7 @@ describe('metadata-store', () => {
         sessions[`stall-${i}`] = session({ agentId: 'opencode', agentSessionId: `opencode-${i}` });
       }
       const agents = {
-        getPreview: mock((entry) => (
+        getExistingTranscriptPreview: mock((entry) => (
           entry.agentId === 'claude'
             ? Promise.resolve(previewResult({
               firstMessage: 'first repaired',
@@ -367,7 +367,7 @@ describe('metadata-store', () => {
         },
       })), 'utf8');
       const stalledAgents = {
-        getPreview: mock(() => new Promise(() => {})),
+        getExistingTranscriptPreview: mock(() => new Promise(() => {})),
       };
       const index = new MetadataIndex(
         makeRegistry({ 'stalled-chat': session({ agentId: 'opencode', agentSessionId: 'opencode-session' }) }),
@@ -379,7 +379,7 @@ describe('metadata-store', () => {
       await index.init();
       await index.flush();
 
-      expect(stalledAgents.getPreview).toHaveBeenCalledTimes(0);
+      expect(stalledAgents.getExistingTranscriptPreview).toHaveBeenCalledTimes(0);
       expect(index.getChatMetadata('stalled-chat').lastMessage).toBe('persisted last');
     });
 
@@ -399,7 +399,7 @@ describe('metadata-store', () => {
         },
       })), 'utf8');
       const agents = {
-        getPreview: mock(() => Promise.resolve(previewResult({
+        getExistingTranscriptPreview: mock(() => Promise.resolve(previewResult({
           firstMessage: 'fresh first',
           lastMessage: 'fresh last',
           createdAt: '2026-02-01T00:00:00Z',
@@ -415,7 +415,7 @@ describe('metadata-store', () => {
 
       await index.init();
 
-      expect(agents.getPreview).toHaveBeenCalledTimes(1);
+      expect(agents.getExistingTranscriptPreview).toHaveBeenCalledTimes(1);
       expect(index.getChatMetadata('stale-chat').lastMessage).toBe('fresh last');
       expect(index.getChatMetadata('stale-chat').identity).toEqual({
         carryOverRevision: 'carry-v1:0',
@@ -438,7 +438,7 @@ describe('metadata-store', () => {
           },
         },
       })), 'utf8');
-      const agents = { getPreview: mock(() => Promise.resolve(null)) };
+      const agents = { getExistingTranscriptPreview: mock(() => Promise.resolve(null)) };
       const index = new MetadataIndex(
         makeRegistry({ 'fresh-chat': session() }),
         agents,
@@ -448,31 +448,28 @@ describe('metadata-store', () => {
 
       await index.init();
 
-      expect(agents.getPreview).not.toHaveBeenCalled();
+      expect(agents.getExistingTranscriptPreview).not.toHaveBeenCalled();
       expect(index.getChatMetadata('fresh-chat').lastMessage).toBe('kept last');
     });
 
-    it('composes carryover with the segment preview for a post-handoff chat', async () => {
+    it('uses the full ledger preview without rereading legacy carryover', async () => {
       const carryOver = {
         revision: () => 'carry-v5:seg',
-        logicalMessageCount: () => 3,
-        loadPage: mock(async ({ offset }) => ({
-          messages: offset === 0
-            ? [
-                { type: 'user-message', timestamp: '2026-01-01T00:00:00Z', content: 'carried first' },
-                { type: 'assistant-message', timestamp: '2026-01-01T00:01:00Z', content: 'carried reply' },
-              ]
-            : [{ type: 'assistant-message', timestamp: '2026-01-01T00:02:00Z', content: 'carried tail' }],
-        })),
+        loadPage: mock(() => { throw new Error('Legacy carryover must not be opened'); }),
       };
-      const agents = { getPreview: mock(() => Promise.resolve(previewResult(null))) };
+      const transcripts = { getExistingTranscriptPreview: mock(async () => previewResult({
+        firstMessage: 'carried first',
+        lastMessage: 'current reply',
+        createdAt: '2026-01-01T00:00:00Z',
+        lastActivity: '2026-01-02T00:00:00Z',
+      })) };
       const index = new MetadataIndex(
         makeRegistry({
           'handoff-chat': session({
             carryOverSegments: [{ id: 'seg' }],
           }),
         }),
-        agents,
+        transcripts,
         carryOver,
       );
 
@@ -480,9 +477,40 @@ describe('metadata-store', () => {
 
       const meta = index.getChatMetadata('handoff-chat');
       expect(meta.firstMessage).toBe('carried first');
-      expect(meta.lastMessage).toBe('carried tail');
+      expect(meta.lastMessage).toBe('current reply');
       expect(meta.createdAt).toBe('2026-01-01T00:00:00Z');
       expect(meta.identity.carryOverRevision).toBe('carry-v5:seg');
+      expect(carryOver.loadPage).not.toHaveBeenCalled();
+    });
+
+    it('quietly defers missing previews and preserves stale metadata until adoption', async () => {
+      const metadataPath = path.join(tmpDir, 'chat-metadata.json');
+      await fs.writeFile(metadataPath, JSON.stringify(makeSnapshot({
+        'stale-chat': {
+          firstMessage: 'cached first',
+          lastMessage: 'cached last',
+          source: 'live',
+          identity: { carryOverRevision: 'old', agentOwnershipEpoch: 'old' },
+        },
+      })));
+      const transcripts = { getExistingTranscriptPreview: mock(async () => null) };
+      const index = new MetadataIndex(
+        makeRegistry({ 'stale-chat': session(), 'unadopted-chat': session() }),
+        transcripts,
+        mockCarryOver,
+        { metadataPath },
+      );
+      const warning = spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        await index.init();
+        await index.flush();
+        expect(transcripts.getExistingTranscriptPreview).toHaveBeenCalledTimes(2);
+        expect(index.getChatMetadata('unadopted-chat')).toBeNull();
+        expect(index.getChatMetadata('stale-chat').lastMessage).toBe('cached last');
+        expect(warning).not.toHaveBeenCalled();
+      } finally {
+        warning.mockRestore();
+      }
     });
 
     it('prunes persisted metadata for removed chats', async () => {
