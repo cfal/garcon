@@ -143,7 +143,7 @@ test.each(kinds)('a %s publication cannot start once Delete owns the executor', 
   await expect(publish(kind)).rejects.toMatchObject({ code: 'EXECUTOR_NOT_FOUND', status: 404 });
 });
 
-test.each(kinds)('an uncertain %s write only blocks deletion for ownership decisions', async (kind) => {
+test.each(['settings', 'preamble', 'schedule'] as const)('an uncertain %s write does not block executor deletion', async (kind) => {
   const { root, manager, executor, publish } = await fixture();
   const open = fs.open;
   const spy = spyOn(fs, 'open').mockImplementation(async (path, flags, mode) => {
@@ -155,10 +155,37 @@ test.each(kinds)('an uncertain %s write only blocks deletion for ownership decis
   } finally {
     spy.mockRestore();
   }
-  if (kind === 'handoff') {
+  await manager.remove(executor.id);
+});
+
+test('an uncertain ownership decision fences executor deletion until durability is confirmed', async () => {
+  const { root, manager, executor, publish, ownership } = await fixture();
+  const retry = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const open = fs.open;
+  let attempts = 0;
+  const spy = spyOn(fs, 'open').mockImplementation(async (path, flags, mode) => {
+    if (path === root && flags === 'r') {
+      attempts += 1;
+      if (attempts === 1) throw new Error('Synthetic directory sync failure');
+      retry.resolve();
+      await release.promise;
+    }
+    return open(path, flags, mode);
+  });
+  const writing = publish('handoff');
+  try {
+    await retry.promise;
+    expect(ownership.hasPending(chatId)).toBe(false);
     await expect(manager.remove(executor.id)).rejects.toMatchObject({ code: 'EXECUTOR_IN_USE', status: 409 });
-  } else {
-    await manager.remove(executor.id);
+    release.resolve();
+    await writing;
+    expect(ownership.hasPending(chatId)).toBe(true);
+    await expect(manager.remove(executor.id)).rejects.toMatchObject({ code: 'EXECUTOR_IN_USE', status: 409 });
+  } finally {
+    release.resolve();
+    spy.mockRestore();
+    await writing;
   }
 });
 
