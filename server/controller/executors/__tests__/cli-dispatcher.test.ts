@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import { ControllerCliDispatcher, type CliDispatchAccess } from '../cli-dispatcher.js';
 import type { GuardRpcReply } from '../../../remote/transport/rpc.js';
 import { CLI_REPLY_BYTES, CLI_OPERATIONS, cliPolicy, parseControllerCliRequest, type CliOperation, type ControllerCliRequest } from '../../../remote/transport/cli-protocol.js';
@@ -141,6 +141,35 @@ test.each([false, true])('oversize and queue-pressure replies preserve read/muta
     output = 'small';
     expect((await pair.worker.call('', 'controllerCli.request', request(operation, mutation ? {} : null))).body).toEqual({ output: 'small' });
   } finally { pair.close(); }
+});
+
+test.each([false, true])('bounds and cancels streamed replies before JSON parsing: mutation=%s', async (mutation) => {
+  const chunk = new Uint8Array(64 * 1024).fill(120);
+  const encoder = new TextEncoder();
+  let pulls = 0;
+  let cancelled = false;
+  const stream = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (pulls++ === 0) controller.enqueue(encoder.encode('{"output":"'));
+      else if (pulls <= 2 * CLI_REPLY_BYTES / chunk.byteLength) controller.enqueue(chunk);
+      else { controller.enqueue(encoder.encode('"}')); controller.close(); }
+    },
+    cancel() { cancelled = true; },
+  });
+  const response = new Response(stream, { headers: { 'Content-Type': 'application/json' } });
+  const parse = spyOn(response, 'json');
+  const pair = cliPair(dispatcher({
+    '/api/v1/chats/export': { GET: () => response },
+    '/api/v1/chats/run': { POST: () => response },
+  }));
+  try {
+    const operation = mutation ? 'POST /api/v1/chats/run' : 'GET /api/v1/chats/export';
+    await expect(pair.worker.call('', 'controllerCli.request', request(operation, mutation ? {} : null)))
+      .rejects.toMatchObject({ code: mutation ? 'CLI_OUTCOME_UNKNOWN' : 'CLI_RESULT_TOO_LARGE' });
+    expect(parse).not.toHaveBeenCalled();
+    expect(cancelled).toBe(true);
+    expect(pulls).toBeLessThanOrEqual(CLI_REPLY_BYTES / chunk.byteLength + 2);
+  } finally { parse.mockRestore(); pair.close(); }
 });
 
 test.each([false, true])('small replies retain the shared queue headroom during bulk traffic: mutation=%s', async (mutation) => {

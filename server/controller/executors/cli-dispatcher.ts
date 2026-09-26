@@ -1,6 +1,7 @@
 import type { CliContext } from '../../../common/server-runtime.js';
 import type { JsonValue } from '../../../common/json.js';
 import { DomainError } from '../../common/domain-error.js';
+import { readTextStreamWithLimit } from '../../common/bounded-text-stream.js';
 import { invokeRawRouteHandler, unhandledRouteErrorResponse } from '../lib/http-route.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { ExecutorRpc, GuardRpcReply } from '../../remote/transport/rpc.js';
@@ -45,6 +46,8 @@ export class ControllerCliDispatcher {
     const interrupted = () => policy.mutation
       ? new DomainError('CLI_OUTCOME_UNKNOWN', 'The CLI operation may have reached Garcon; its outcome is unknown', 503)
       : new DomainError('CLI_CONTROLLER_UNAVAILABLE', 'The controller CLI request was interrupted', 503, true);
+    const oversized = () => policy.mutation ? interrupted()
+      : new DomainError('CLI_RESULT_TOO_LARGE', 'CLI result exceeds 8 MiB; narrow the requested result', 413);
     const assertPublication = () => {
       if (signal.aborted) throw interrupted();
       try { this.#assertAdmission(access); }
@@ -76,17 +79,19 @@ export class ControllerCliDispatcher {
       try { assertPublication(); }
       catch (error) { await response.body?.cancel().catch(() => {}); throw error; }
       let bodyValue: JsonValue;
-      try { bodyValue = await response.json() as JsonValue; }
-      catch { throw interrupted(); }
+      try {
+        bodyValue = JSON.parse(await readTextStreamWithLimit(response.body, CLI_REPLY_BYTES - CLI_ENVELOPE_BYTES, oversized)) as JsonValue;
+      } catch (error) {
+        await response.body?.cancel().catch(() => {});
+        if (error instanceof DomainError && error.code === 'CLI_RESULT_TOO_LARGE') throw error;
+        throw interrupted();
+      }
       assertPublication();
       const retryAfter = response.headers.get('Retry-After');
       const reply: CliHttpResponse = { status: response.status, body: bodyValue,
         ...(retryAfter && /^\d{1,5}$/.test(retryAfter) ? { retryAfter } : {}) };
       const bytes = Buffer.byteLength(JSON.stringify(reply)) + CLI_ENVELOPE_BYTES;
-      if (bytes > CLI_REPLY_BYTES) {
-        if (policy.mutation) throw interrupted();
-        throw new DomainError('CLI_RESULT_TOO_LARGE', 'CLI result exceeds 8 MiB; narrow the requested result', 413);
-      }
+      if (bytes > CLI_REPLY_BYTES) throw oversized();
       return reply;
     })().finally(release);
     // Reservations follow actual handler settlement, not the lifetime of its cancelled waiter or RPC.
