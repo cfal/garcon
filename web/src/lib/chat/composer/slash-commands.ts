@@ -228,6 +228,13 @@ export function parseScheduleInCommand(input: string): ScheduleInCommandParseRes
 	};
 }
 
+export function isControllerSlashCommand(input: string): boolean {
+	return parseRenameCommand(input) !== null ||
+		parseMoveChatBoundaryCommand(input).kind !== 'not-command' ||
+		parseTagCommand(input).kind !== 'not-command' ||
+		parseScheduleInCommand(input).kind !== 'not-command';
+}
+
 export type SnippetCommandParseResult =
 	| { kind: 'not-command' }
 	| { kind: 'invalid'; error: 'short-name-required' | 'invalid-short-name' }

@@ -61,6 +61,7 @@
 	import {
 		applySlashCommand,
 		findSlashCommandTrigger,
+		isControllerSlashCommand,
 		parseSnippetCommand,
 		type SnippetCommandParseResult,
 	} from '$lib/chat/composer/slash-commands.js';
@@ -627,13 +628,16 @@
 	const isQueueMode = $derived(requiresQueuedSubmission);
 	const hasQueuedAttachmentConflict = $derived(isQueueMode && composerState.images.length > 0);
 	const isDisabled = $derived(isDraftStartupSubmitting);
+	const controllerCommand = $derived(
+		sessions.selectedChat?.status === 'running' && isControllerSlashCommand(composerState.inputText),
+	);
 	// Loading is explained by the disabled send button so the composer keeps its height.
 	const modelsLoading = $derived(
 		executors.isReady(agentState.executorId) && !modelCatalog.isValidated && !modelCatalog.error,
 	);
 	const sendTitle = $derived.by(() => {
 		if (hasQueuedAttachmentConflict) return m.chat_notice_queue_attachments_unavailable();
-		if (modelsLoading) return m.chat_composer_loading_models();
+		if (modelsLoading && !controllerCommand) return m.chat_composer_loading_models();
 		return isQueueMode ? m.chat_composer_queue_message() : m.chat_composer_send_message();
 	});
 
@@ -642,8 +646,8 @@
 			isDisabled ||
 				directAdmissionPending ||
 				promptTransformPending ||
-				!executors.isReady(agentState.executorId) ||
-				!modelCatalog.isValidated || !providerAvailable,
+				(!controllerCommand && (!executors.isReady(agentState.executorId) ||
+					!modelCatalog.isValidated || !providerAvailable)),
 			composerState.inputText,
 			composerState.images.length,
 		) && !hasQueuedAttachmentConflict,

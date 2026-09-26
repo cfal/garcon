@@ -216,6 +216,9 @@ describe('ConversationAgentSwitchService', () => {
 					agentId: 'codex',
 					projectPath: '/workspace/chosen',
 				});
+				expect(deps.chooseDestination).toHaveBeenLastCalledWith(
+					'chat-1', executorId, '/workspace/project', expect.objectContaining({ agentId: 'codex' }),
+				);
 				const request = executionDraft.handoffRequest('epoch-1');
 				expect(request?.target).toMatchObject({
 					executorId,

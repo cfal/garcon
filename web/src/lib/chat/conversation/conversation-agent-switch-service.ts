@@ -100,6 +100,7 @@ export class ConversationAgentSwitchService {
 		let model: ResolvedModelSelection;
 		let confirmedDestination = false;
 		if (executorId !== effectiveExecutorId(this.deps.agentState.executorId)) {
+			if (executorId === effectiveExecutorId(durable.executorId)) projectPath = durable.projectPath;
 			const current = this.deps.agentState;
 			const catalog = this.deps.modelCatalogForExecutor(current.executorId);
 			if (agentId === current.agentId && modelValue === current.model) {

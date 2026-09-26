@@ -127,6 +127,66 @@ describe('PromptComposer focus', () => {
 		expect(onsubmit).toHaveBeenCalledTimes(2);
 	});
 
+	it.each(['offline', 'cold-catalog'])(
+		'allows controller commands through click, Enter and steer shortcut with %s', async (availability) => {
+			const catalog = new ModelCatalogStore();
+			const remote = catalog.forExecutor(remoteExecutor.id);
+			remote.invalidate();
+			vi.spyOn(catalog, 'refreshIfStale').mockResolvedValue();
+			vi.spyOn(remote, 'refreshIfStale').mockResolvedValue();
+			const onsubmit = vi.fn();
+			const onSteerPreferredSubmit = vi.fn();
+			render(PromptComposerTestHost, {
+				selectedExecutorId: remoteExecutor.id,
+				executors: [localExecutor, {
+					...remoteExecutor, availability: availability === 'offline' ? 'offline' : 'ready',
+				}],
+				catalog, onsubmit, onSteerPreferredSubmit,
+			});
+			const textarea = screen.getByRole('textbox');
+			for (const text of ['/rename Synthetic title', '/move top', '/tag add urgent', '/in 1h Synthetic follow-up']) {
+				onsubmit.mockClear();
+				onSteerPreferredSubmit.mockClear();
+				await fireEvent.input(textarea, { target: { value: text } });
+				const send = screen.getByRole<HTMLButtonElement>('button', { name: 'Send message' });
+				expect(send.disabled).toBe(false);
+				await fireEvent.click(send);
+				await fireEvent.keyDown(textarea, { key: 'Enter' });
+				await fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
+				expect(onsubmit).toHaveBeenCalledTimes(2);
+				expect(onSteerPreferredSubmit).toHaveBeenCalledOnce();
+			}
+			onsubmit.mockClear();
+			onSteerPreferredSubmit.mockClear();
+			await fireEvent.input(textarea, { target: { value: '/compact' } });
+			await fireEvent.keyDown(textarea, { key: 'Enter' });
+			await fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
+			expect(onsubmit).not.toHaveBeenCalled();
+			expect(onSteerPreferredSubmit).not.toHaveBeenCalled();
+		},
+	);
+
+	it('keeps offline draft commands gated across click, Enter and the steer shortcut', async () => {
+		const onsubmit = vi.fn();
+		const onSteerPreferredSubmit = vi.fn();
+		render(PromptComposerTestHost, {
+			selectedStatus: 'draft', selectedExecutorId: remoteExecutor.id,
+			executors: [localExecutor, { ...remoteExecutor, availability: 'offline' }],
+			onsubmit, onSteerPreferredSubmit,
+		});
+		const textarea = screen.getByRole('textbox');
+		for (const text of ['/rename Synthetic title', '/move top', '/tag add urgent', '/in 1h Synthetic follow-up']) {
+			await fireEvent.input(textarea, { target: { value: text } });
+			const send = screen.getByRole<HTMLButtonElement>('button', { name: 'Send message' });
+			expect(send.disabled).toBe(true);
+			await fireEvent.click(send);
+			await fireEvent.keyDown(textarea, { key: 'Enter' });
+			await fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
+		}
+		expect(onsubmit).not.toHaveBeenCalled();
+		expect(onSteerPreferredSubmit).not.toHaveBeenCalled();
+	});
+
 	it('keeps remote submission blocked after catalog failure and offers an explicit retry', async () => {
 		const catalog = new ModelCatalogStore();
 		const remote = catalog.forExecutor(remoteExecutor.id);

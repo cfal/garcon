@@ -796,6 +796,44 @@ describe('ConversationSessionController', () => {
 		expect(deps.composerState.clearAfterSubmit).not.toHaveBeenCalled();
 	});
 
+	it.each(['submitForChat', 'submitComposerWithSteerPreference'] as const)(
+		'keeps controller commands available without executor admission through %s', async (submit) => {
+			const { deps } = createDeps(createRunningChat({
+				executorId: '22222222-2222-4222-8222-222222222222', isProcessing: true,
+			}));
+			deps.canSubmitToExecutor.mockReturnValue(false);
+			mockScheduleChatPrompt.mockResolvedValue({
+				success: true,
+				scheduledPrompt: {
+					id: 'prompt-in',
+					schedule: { type: 'once', nextRunAt: '2030-01-01T09:00:00.000Z' },
+					target: { type: 'existing-chat', chatId: 'chat-1', busyBehavior: 'skip' },
+					prompt: 'Synthetic follow-up',
+					createdAt: '2029-01-01T00:00:00.000Z',
+					updatedAt: '2029-01-01T00:00:00.000Z',
+				},
+				snapshot: { revision: 1, prompts: [], runLog: [] },
+			});
+			const controller = new ConversationSessionController(deps);
+			for (const text of ['/rename Synthetic title', '/move top', '/tag add urgent', '/in 1h Synthetic follow-up']) {
+				deps.composerState.inputText = text;
+				expect(await controller[submit]('chat-1')).toBe('accepted');
+			}
+			expect(deps.sessions.renameChat).toHaveBeenCalledWith('chat-1', 'Synthetic title');
+			expect(deps.sessions.moveChatToBoundary).toHaveBeenCalledWith('chat-1', 'top');
+			expect(deps.sessions.applyChatTagDelta).toHaveBeenCalledWith({ chatId: 'chat-1', addTags: ['urgent'] });
+			expect(mockScheduleChatPrompt).toHaveBeenCalledWith({ chatId: 'chat-1', duration: '1h', prompt: 'Synthetic follow-up' });
+			for (const text of ['Ordinary prompt', '/compact', '/fork', '/steer guidance', '/rename-agent']) {
+				deps.composerState.inputText = text;
+				expect(await controller[submit]('chat-1')).toBe('no-op');
+				expect(deps.composerState.inputText).toBe(text);
+			}
+			expect(mockRunChat).not.toHaveBeenCalled();
+			expect(mockSteerChat).not.toHaveBeenCalled();
+			expect(mockCreateQueuedInput).not.toHaveBeenCalled();
+		},
+	);
+
 	it('renames the current chat without sending or queueing the command', async () => {
 		const { deps } = createDeps(createRunningChat({ isProcessing: true }));
 		deps.composerState.inputText = '/rename Migration plan';
@@ -2394,7 +2432,91 @@ describe('ConversationSessionController', () => {
 		expect(startPayload.images).toBeUndefined();
 	});
 
-	it.each(['selected', 'background', 'edited'])(
+	it.each(['attachment-read', 'start-request'])(
+		'does not recover or redispatch its own pending automatic start during %s',
+		async (phase) => {
+			const executorId = '22222222-2222-4222-8222-222222222222';
+			const draft = createRunningChat({ id: 'draft-1', status: 'draft', executorId });
+			const { deps } = createDeps(draft);
+			const drafts = new ChatDraftStore();
+			const composer = new ComposerState(drafts, {
+				get activeChatId() { return deps.sessions.selectedChatId; },
+			});
+			const attachment = new File(['Synthetic attachment'], 'context.txt', { type: 'text/plain' });
+			deps.sessions.startupByChatId = {
+				'draft-1': createDraftStartup({
+					executorId,
+					firstMessage: 'Synthetic initial prompt',
+					initialImages: [attachment],
+				}),
+			};
+			deps.sessions.applyStartEntry.mockImplementation(() => {
+				deps.sessions.byId[draft.id] = createRunningChat({ id: draft.id, executorId, isProcessing: true });
+				deps.sessions.selectedChat = deps.sessions.byId[draft.id];
+				deps.sessions.startupByChatId = {};
+			});
+			const request = deferred<Awaited<ReturnType<typeof startChat>>>();
+			const requested = deferred<void>();
+			mockStartChat.mockImplementationOnce(() => {
+				requested.resolve();
+				return request.promise;
+			});
+			const reading = deferred<FileReader>();
+			const readAsDataURL = FileReader.prototype.readAsDataURL;
+			const read = vi.spyOn(FileReader.prototype, 'readAsDataURL').mockImplementationOnce(function (this: FileReader) {
+				reading.resolve(this);
+			});
+			const controller = new ConversationSessionController({ ...deps, composerState: composer });
+			try {
+				controller.handleChatSwitchIfChanged(draft.id);
+				const reader = await reading.promise;
+				if (phase === 'start-request') {
+					readAsDataURL.call(reader, attachment);
+					await requested.promise;
+				}
+				expect(composer.isSubmitting).toBe(true);
+				const other = createRunningChat({ id: 'other-chat' });
+				deps.sessions.byId[other.id] = other;
+				deps.sessions.selectedChatId = other.id;
+				deps.sessions.selectedChat = other;
+				controller.handleChatSwitchIfChanged(other.id);
+				deps.canSubmitToExecutor.mockReturnValue(false);
+				deps.sessions.selectedChatId = draft.id;
+				deps.sessions.selectedChat = draft;
+				controller.handleChatSwitchIfChanged(draft.id);
+				await flushPromises();
+
+				expect(composer.draftSnapshot(draft.id)).toMatchObject({ text: '', attachments: [] });
+				expect(deps.sessions.patchDraftStartup).not.toHaveBeenCalled();
+				expect(deps.chatState.appendLocalNoticeForChat).not.toHaveBeenCalled();
+				expect(controller.isDirectAdmissionPending(draft.id)).toBe(true);
+				deps.canSubmitToExecutor.mockReturnValue(true);
+				if (phase === 'attachment-read') readAsDataURL.call(reader, attachment);
+				await requested.promise;
+				request.resolve({
+					success: true,
+					commandType: 'chat-start',
+					clientRequestId: 'req-1',
+					chatId: draft.id,
+					turnId: 'turn-1',
+					status: 'accepted',
+					acceptedAt: '2026-05-14T00:00:00.000Z',
+					chat: createServerEntry(draft.id),
+				});
+				await vi.waitFor(() => expect(controller.isDirectAdmissionPending(draft.id)).toBe(false));
+				expect(deps.sessions.applyStartEntry).toHaveBeenCalledOnce();
+				expect(composer.draftSnapshot(draft.id)).toMatchObject({ text: '', attachments: [] });
+				expect(mockStartChat).toHaveBeenCalledOnce();
+				expect(mockRunChat).not.toHaveBeenCalled();
+				expect(mockCreateQueuedInput).not.toHaveBeenCalled();
+			} finally {
+				read.mockRestore();
+				drafts.destroy();
+			}
+		},
+	);
+
+	it.each(['selected', 'background', 'edited', 'other-submission'])(
 		'keeps a blocked automatic start in its %s composer without redispatch',
 		async (scenario) => {
 			const executorId = '22222222-2222-4222-8222-222222222222';
@@ -2414,6 +2536,7 @@ describe('ConversationSessionController', () => {
 				}),
 			};
 			const controller = new ConversationSessionController({ ...deps, composerState: composer });
+			composer.isSubmitting = scenario === 'other-submission';
 			controller.handleChatSwitch('draft-1');
 			// Invalidates between activation and the queued automatic submission.
 			deps.canSubmitToExecutor.mockImplementation((id) => id !== executorId);
@@ -2450,6 +2573,7 @@ describe('ConversationSessionController', () => {
 			);
 			if (scenario === 'background') expect(composer.inputText).toBe('Unrelated draft');
 
+			composer.isSubmitting = false;
 			deps.canSubmitToExecutor.mockReturnValue(true);
 			deps.sessions.selectedChatId = 'draft-1';
 			deps.sessions.selectedChat = deps.sessions.byId['draft-1']!;
@@ -2477,6 +2601,41 @@ describe('ConversationSessionController', () => {
 				}),
 			);
 			expect(composer.inputText).toBe('');
+			drafts.destroy();
+		},
+	);
+
+	it.each(['/rename Synthetic title', '/move top', '/tag add urgent', '/in 1h Synthetic follow-up'])(
+		'recovers a blocked automatic start beginning with %s without retrying it', async (firstMessage) => {
+			const executorId = '22222222-2222-4222-8222-222222222222';
+			const { deps } = createDeps(createRunningChat({ id: 'draft-1', status: 'draft', executorId }));
+			const drafts = new ChatDraftStore();
+			const composer = new ComposerState(drafts, {
+				get activeChatId() { return deps.sessions.selectedChatId; },
+			});
+			const attachment = new File(['Synthetic attachment'], 'context.txt', { type: 'text/plain' });
+			deps.sessions.startupByChatId = {
+				'draft-1': createDraftStartup({ executorId, firstMessage, initialImages: [attachment] }),
+			};
+			const controller = new ConversationSessionController({ ...deps, composerState: composer });
+			controller.handleChatSwitch('draft-1');
+			deps.canSubmitToExecutor.mockReturnValue(false);
+			await flushPromises();
+			expect(composer.draftSnapshot('draft-1')).toMatchObject({
+				text: firstMessage, attachments: [attachment],
+			});
+			expect(deps.sessions.patchDraftStartup).toHaveBeenCalledExactlyOnceWith('draft-1', {
+				firstMessage: '', initialImages: [],
+			});
+			controller.handleChatSwitch(null);
+			controller.handleChatSwitch('draft-1');
+			await flushPromises();
+			expect(deps.sessions.patchDraftStartup).toHaveBeenCalledTimes(1);
+			expect(mockStartChat).not.toHaveBeenCalled();
+			expect(deps.sessions.renameChat).not.toHaveBeenCalled();
+			expect(deps.chatState.appendLocalNoticeForChat).toHaveBeenCalledWith(
+				'draft-1', 'error', expect.stringContaining('initial prompt is kept in the composer'),
+			);
 			drafts.destroy();
 		},
 	);
@@ -2635,9 +2794,11 @@ describe('ConversationSessionController', () => {
 			new ApiError(400, 'startup unavailable', 'VALIDATION_FAILED'),
 		);
 
-		await new ConversationSessionController(deps).submitForChat('draft-1');
+		const controller = new ConversationSessionController(deps);
+		await expect(controller.submitForChat('draft-1')).resolves.toBe('rejected');
 
 		expect(deps.sessions.byId['draft-1'].status).toBe('draft');
+		expect(controller.isDirectAdmissionPending('draft-1')).toBe(false);
 		expect(deps.composerState.inputText).toBe('retry this request');
 		expect(deps.composerState.restoreDraftIfRevision).toHaveBeenCalled();
 		expect(deps.chatState.appendLocalNoticeForChat).toHaveBeenCalledWith(
@@ -2726,6 +2887,7 @@ describe('ConversationSessionController', () => {
 			const firstSubmit = controller.submitForChat('draft-1');
 
 			expect(readers).toHaveLength(1);
+			expect(controller.isDirectAdmissionPending('draft-1')).toBe(true);
 			expect(deps.composerState.isSubmitting).toBe(true);
 			expect(deps.composerState.inputText).toBe('');
 			deps.composerState.inputText = 'next message';
@@ -2738,6 +2900,7 @@ describe('ConversationSessionController', () => {
 			await firstSubmit;
 
 			expect(mockStartChat).toHaveBeenCalledTimes(1);
+			expect(controller.isDirectAdmissionPending('draft-1')).toBe(false);
 			expect(mockStartChat).toHaveBeenCalledWith(
 				expect.objectContaining({
 					images: [

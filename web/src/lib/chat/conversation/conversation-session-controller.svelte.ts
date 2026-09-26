@@ -52,6 +52,7 @@ import {
 } from './conversation-execution-draft-state.svelte.js';
 import { resolveConversationModelSelection } from './conversation-model-selection.js';
 import { isCustomProviderSelectionAvailable } from '$lib/agents/provider-selection.js';
+import { isControllerSlashCommand } from '$lib/chat/composer/slash-commands.js';
 import type {
 	SessionControllerDeps,
 	SessionTranscriptLoadTarget,
@@ -476,12 +477,20 @@ export class ConversationSessionController {
 		const { deps } = this;
 		const ownsComposer = messageOverride === undefined && imageOverride === undefined;
 		while (this.isDirectAdmissionPending(chatId)) {
-			if (ownsComposer) return 'no-op';
+			if (
+				ownsComposer ||
+				source === 'automatic-start' ||
+				deps.sessions.byId[chatId]?.status === 'draft'
+			) return 'no-op';
 			await this.#pendingDirectAdmissions.get(chatId)?.settled;
 		}
 		this.#reconcileExecutionSelection(chatId);
 		const selected = deps.sessions.byId[chatId];
 		if (!selected?.projectPath) return 'no-op';
+		const isDraft = selected.status === 'draft';
+		const draft = deps.composerState.draftSnapshot(chatId);
+		const text = messageOverride ?? draft.text.trim();
+		const submissionImages = imageOverride ?? draft.attachments;
 		const startup = deps.sessions.startupByChatId[chatId];
 		let selection: Parameters<typeof isCustomProviderSelectionAvailable>[1] & {
 			executorId?: string | null;
@@ -493,20 +502,16 @@ export class ConversationSessionController {
 		}
 		const executorId = selection.executorId ?? 'local';
 		if (
-			!deps.canSubmitToExecutor(executorId) ||
-			!isCustomProviderSelectionAvailable(deps.modelCatalogForExecutor(executorId), selection)
+			(isDraft || !isControllerSlashCommand(text)) &&
+			(!deps.canSubmitToExecutor(executorId) ||
+				!isCustomProviderSelectionAvailable(deps.modelCatalogForExecutor(executorId), selection))
 		) {
 			return selected.status === 'draft' && source === 'automatic-start'
 				? rejectUnavailableDraftStart(deps, chatId, messageOverride ?? '', imageOverride ?? [])
 				: 'no-op';
 		}
-		if (selected.status === 'draft' && deps.composerState.isSubmitting) return 'no-op';
-		const isDraft = selected.status === 'draft';
-		const draft = deps.composerState.draftSnapshot(chatId);
-		const text = messageOverride ?? draft.text.trim();
-		const submissionImages = imageOverride ?? draft.attachments;
+		if (isDraft && deps.composerState.isSubmitting) return 'no-op';
 		if (!text && submissionImages.length === 0) return 'no-op';
-
 		const previousText = draft.text;
 		const previousImages = [...draft.attachments];
 		const handoffPending = selected.status !== 'draft' && this.#executionDraft.isHandoffPending;
@@ -539,7 +544,7 @@ export class ConversationSessionController {
 
 		const activeTurn = selected.status === 'running' && selected.isProcessing;
 		let directAdmission: DirectAdmissionBarrier | null = null;
-		if (!isDraft && !activeTurn) {
+		if (!activeTurn) {
 			directAdmission = this.#claimDirectAdmission(chatId);
 			if (!directAdmission) return 'no-op';
 		}
@@ -589,7 +594,7 @@ export class ConversationSessionController {
 				);
 				return 'rejected';
 			}
-			if (route !== 'direct' && directAdmission) {
+			if (route !== 'direct' && route !== 'draft' && directAdmission) {
 				this.#releaseDirectAdmission(chatId, directAdmission);
 				directAdmission = null;
 			}
@@ -634,7 +639,7 @@ export class ConversationSessionController {
 			}
 			if (route === 'draft') {
 				if (!startup) return 'rejected';
-				return submitDraftRoute(deps, this.#acceptedInputs, { ...context, startup });
+				return await submitDraftRoute(deps, this.#acceptedInputs, { ...context, startup });
 			}
 			this.#reconcileExecutionSelection(chatId);
 			const currentChat = deps.sessions.byId[chatId];
@@ -669,12 +674,7 @@ export class ConversationSessionController {
 		this.#reconcileExecutionSelection(chatId);
 		if (
 			deps.sessions.selectedChatId !== chatId ||
-			this.isDirectAdmissionPending(chatId) ||
-			!deps.canSubmitToExecutor(deps.agentState.executorId) ||
-			!isCustomProviderSelectionAvailable(
-				deps.modelCatalogForExecutor(deps.agentState.executorId),
-				deps.agentState,
-			)
+			this.isDirectAdmissionPending(chatId)
 		) {
 			return 'no-op';
 		}
@@ -683,6 +683,16 @@ export class ConversationSessionController {
 		const text = deps.composerState.inputText.trim();
 		const hasAttachments = deps.composerState.images.length > 0;
 		if (!text && !hasAttachments) return 'no-op';
+		if (selected.status === 'running' && isControllerSlashCommand(text)) return this.submitForChat(chatId);
+		if (
+			!deps.canSubmitToExecutor(deps.agentState.executorId) ||
+			!isCustomProviderSelectionAvailable(
+				deps.modelCatalogForExecutor(deps.agentState.executorId),
+				deps.agentState,
+			)
+		) {
+			return 'no-op';
+		}
 		if (selected.status !== 'running' || !selected.isProcessing || !text) {
 			return this.submitForChat(chatId);
 		}
