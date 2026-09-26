@@ -284,6 +284,14 @@ Use synthetic endpoints and credentials, real public controller/worker startup, 
 - Browser tests: add/use existing/duplicate/remove, offline configuration, shared edit impact, model selection, multiple connected clients, persisted catalog invalidation, deferred stale responses, all submit paths, and retained draft text. Rapidly switch executors/chats without remounting heavy chat UI or moving focus/scroll unexpectedly.
 - Deployment tests: reject a second config/workspace owner, load external edits on restart, and exercise mutation notifications and revision checks.
 
+Separate-network acceptance remains a deployment verification gap. The public
+controller/worker fixtures use separate processes on one host; they cannot prove
+different `localhost` services, private routing, TLS trust, or outbound IPs.
+Before relying on those properties, test discovery and a synthetic chat against
+an endpoint reachable only from its assigned worker, then revoke the assignment
+and verify rejection without controller fallback. No privileged container or
+network-namespace harness is required for the current change.
+
 Extend the existing suites under `server/controller/api-providers/__tests__`, `server/controller/executors/__tests__` and `server/remote/__tests__`, and provider-settings/catalog frontend tests. Add black-box coverage under `integration-tests/tests/server` and browser workflow coverage under `integration-tests/tests/e2e`. Test the common denial/selection logic independently as well as through HTTP, RPC, and persistence boundaries.
 
 Implementation gates are `bun run check`, `bun run test` with applicable web coverage, focused integration/browser suites, and a timed fresh `bun run start --port 0` startup check. This document does not claim those implementation gates have run.

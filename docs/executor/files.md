@@ -1,8 +1,8 @@
 # Files On Executors
 
-Status: architecture, updated 2026-09-24. Files use bounded inline RPC over the existing shared Noise WebSocket. No bulk transfer subsystem, scheduler, or second channel is included.
+Status: implemented architecture, updated 2026-09-26. Files use bounded inline RPC over the existing shared Noise WebSocket. No bulk transfer subsystem, scheduler, or second channel is included.
 
-This follows [Executor Interfaces](./interface.md) and [Executors In The App](./app-integration.md). Current implementation references were checked at `808d869658325b62c60c23782e986f76ded8b7a3`. Earlier documents describe their respective stages; the source now includes mandatory Noise encryption on executor connections.
+The historical [Executor Interfaces](./interface.md) and [Executors In The App](./app-integration.md) describe earlier stages. [Executor Transport](./transport.md) owns the current connection contract; this document describes the implemented file service.
 
 ## Scope
 
@@ -27,19 +27,19 @@ This is not filesystem synchronization, cross-executor file copying, a general u
 
 The limits below describe the supported protocol.
 
-## Existing Building Blocks
+## Current Implementation
 
 | Area | Current behavior |
 | --- | --- |
-| [ExecutionRuntimeApi](../../server-agents/interface/src/contracts/execution-runtime.ts) | Both executor implementations advertise `files: false`; `getFilesService()` is an unsupported placeholder. Local application file routes bypass it. |
-| [File routes](../../server/controller/routes/files.ts) | Implement browsing, identity, revisions, reads, and text saves with controller-local filesystem access and local-only target guards. |
-| [File contracts](../../common/file-contracts.ts) | Already define canonical root/relative-path identity, opaque revisions, conflict policy, tree responses, and a 25 MiB viewer limit. Identity does not yet include the executor. |
+| [ExecutionRuntimeApi](../../server-agents/interface/src/contracts/execution-runtime.ts) | Local and remote executors expose the typed `getFilesService()` and advertise file support. |
+| [File routes](../../server/controller/routes/files.ts) | Resolve executor-qualified targets and route browsing, identity, revisions, reads, and text saves through the selected service. |
+| [File contracts](../../common/file-contracts.ts) | Define executor-qualified canonical root/relative-path identity, opaque revisions, conflict policy, tree responses, and a 4 MiB content limit. |
 | [Revision operations](../../server/runtime/files/file-revision.ts) | Read bytes with before/after revision checks on an opened handle. Revisions derive from filesystem metadata, not a content hash. |
 | Text saves | Serialize Garcon writes using a file lock, re-resolve the target, compare the expected revision, and return a revision from the opened write handle. The current implementation truncates/writes in place; it is not an atomic rename. |
-| [Browser file sessions](../../web/src/lib/files/sessions/file-session-registry.svelte.ts) | Own documents, views, save/conflict handling, and draft recovery. Current document identity is root plus relative path, without executor identity. |
+| [Browser file sessions](../../web/src/lib/files/sessions/file-session-registry.svelte.ts) | Own executor-qualified documents, views, save/conflict handling, and draft recovery. |
 | [Executor RPC](../../server/remote/transport/rpc-protocol.ts) | Already carries executor-level methods such as project inspection alongside provider calls. A second generic RPC framework is unnecessary. |
 
-Reuse these contracts and behaviors rather than building a separate remote editor. Move machine-dependent work behind the executor boundary instead of retaining parallel local and remote route implementations.
+Local and remote use the same machine-service implementation and editor behavior, without parallel route implementations.
 
 ## Architecture And Ownership
 
@@ -63,11 +63,11 @@ Local implementation    Remote facade
 
 The browser owns document state, unsaved buffers, conflicts, and user intent. Its API layer supplies an explicit executor-qualified target. UI components never manage transfer handles or encode chunks.
 
-The controller owns application authorization, executor selection, chat-binding validation, HTTP response construction, cancellation propagation, and remote transfer orchestration. It does not use its own `realpath`, home directory, or filesystem to interpret a remote path.
+The controller owns application authorization, executor selection, chat-binding validation, HTTP response construction, cancellation propagation, and RPC dispatch. It does not use its own `realpath`, home directory, or filesystem to interpret a remote path.
 
-The executor owns its configured filesystem boundary, canonicalization, directory enumeration, file handles, revisions, save locks, transfer storage, and final writes. Local calls invoke that implementation directly; remote calls reach the same behavior through typed handlers. Common file behavior belongs in the executor/file modules, not in individual provider packages.
+The executor owns its configured filesystem boundary, canonicalization, directory enumeration, file handles, revisions, save locks, and final writes. Local calls invoke that implementation directly; remote calls reach the same behavior through typed handlers. There is no transfer storage. Common file behavior belongs in the executor/file modules, not in individual provider packages.
 
-Add the service contract alongside `ExecutionProjectService` and make `getFilesService()` return it. Advertise support in executor descriptions and app DTOs. Enable file actions from that capability and executor availability; do not remove the independent remote Git/terminal guards. Keep project inspection and authored `@file` expansion in the existing project service.
+The service contract sits alongside `ExecutionProjectService`. Executor descriptions and app DTOs advertise support; file actions require that capability and executor availability. Git and terminals have independent service admission. Project inspection and authored `@file` expansion remain in the project service.
 
 Noise protects the controller-to-executor hop, including paths and contents. It does not hide files from the controller, encrypt the browser HTTP hop, or make local caches private. Browser connections still require the application's normal transport and authentication policy.
 
@@ -103,7 +103,7 @@ The service exposes domain operations; bounded base64 encoding is an internal re
 
 Keep the existing browser HTTP shape, adding executor qualification and bounded-list metadata. The remote facade encodes complete bounded files without exposing transport details to editor code. In-process calls do not need serialization or base64.
 
-Directory bounds must cover encoded bytes as well as entry counts. The current recursive file list has depth/result limits, but those alone do not bound the size of long paths, and the tree route is not a paged transfer. Exact paging versus capped-result behavior is still to be chosen. Do not accumulate an unlimited listing at the controller after making each individual RPC small.
+Directory responses are capped at 10,000 entries and one MiB of encoded entries. Tree/browse overflow rejects with `FILE_LIST_TOO_LARGE`; recursive project listing returns `truncated: true` when its traversal or result budget is exhausted. There are no unbounded controller-side listing accumulators or paging handles.
 
 ## Framing And Identifiers
 
@@ -111,7 +111,7 @@ There are several independent identities on the current executor connection:
 
 | Identity | Meaning |
 | --- | --- |
-| Logical transport session | The continuity lifetime that can survive a brief physical reconnection. |
+| Transport session | One authenticated socket lifetime. Every disconnect retires it; there is no transport replay or session resumption. |
 | RPC `id` | A UUID for one request, echoed by its result, error, or cancellation. |
 | Producer `binding` | Routes chat events to one exact controller publication lease, scoped by executor, serving instance, and integration. Lifecycle events also identify their run. |
 | Transcript row identity | Controller-owned durable conversation identity, independent of transport numbering. |
@@ -148,11 +148,11 @@ When switching executors, try the current directory on the destination before de
 | Executor unavailable before dispatch | Fail explicitly; do not fall back to controller-local files. Preserve open documents and unsaved buffers. |
 | Connection lost after possible dispatch | Report an uncertain save; never resend it automatically. Reads may be requested again. |
 | Missing, inaccessible, outside-root, or oversized file | Return the corresponding file error, not generic provider failure or empty successful content. |
-| Revision conflict | Preserve the buffer and use the existing conflict workflow. Overwrite remains an explicit user choice. |
+| Revision conflict | Preserve the buffer and use the existing conflict workflow. Accept Disk and Save Checked reject a comparison if its local buffer version changed. Overwrite remains an explicit user choice. |
 | Commit may have run but its result is lost | Surface uncertainty, retain the buffer, and require reconciliation before another save. Cancellation is not rollback. |
 | Chat/path/executor changes during an awaited UI request | Reject stale routing or discard stale presentation results; never attach them to a different executor's document. |
 
-File errors need typed serialization through both RPC and HTTP boundaries. Preserve useful existing codes such as `FILE_TOO_LARGE`, `FILE_CHANGED_DURING_READ`, and `FILE_REVISION_CONFLICT`, and distinguish definite rejection/non-dispatch from uncertain mutation outcomes. Throwing an arbitrary worker `DomainError` is not enough: today's RPC error adapter is agent-oriented and would otherwise lose the file-specific contract.
+File errors use typed serialization through both RPC and HTTP boundaries, preserving codes such as `FILE_TOO_LARGE`, `FILE_CHANGED_DURING_READ`, and `FILE_REVISION_CONFLICT`. The RPC adapter preserves domain errors and distinguishes definite rejection/non-dispatch from uncertain mutation outcomes.
 
 Enable remote browsing, file links, and editor actions only after the corresponding executor service is available. Keep polling bounded to existing visible/user-demanded workflows; no filesystem watcher service is required. File unavailability must not clear recovery drafts or disable unrelated Local files, chats, Git, or terminals.
 

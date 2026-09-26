@@ -41,7 +41,7 @@ Important implementation details must not disappear behind the service extractio
 - [Partial staging](../../server/runtime/git/diff-engine.ts) currently interprets indices against a newly read diff. It does not receive the browser's review-document identity. Remoting must not turn stale line/hunk indices into a different selected change.
 - The diff engine directly spawns `git show` for a bounded binary-prefix probe. Conflict and review helpers directly access files. Moving only `runGit()` would leave machine-dependent work on the controller.
 - [Project inspection](../../server/runtime/projects/project-service.ts) already performs a bounded repository probe on the executor. It stays a narrow project-service operation, not a second Git implementation.
-- [Ticket project defaults](../../server/controller/tickets/project-default.ts) explicitly reject remote automatic inference. Keep that policy in this slice; do not accidentally remove its guard when enabling Git routes. Extending ticket project semantics is separate work.
+- Ticket project defaults were Local-only at the design baseline. Subsequent work routes [controller resolution](../../server/controller/tickets/project-default.ts) through `ExecutionProjectService.ticketProjectDefault()` on the selected executor. The executor owns the bounded repository probe; this does not require a separate Git implementation.
 
 ## Ownership And Composition
 
@@ -319,7 +319,7 @@ Required scenarios:
 - Repository executor A with generation executor B, Auto Local, explicit generation failure without fallback, target switches during generation, and user edits during generation. No repository path is accidentally resolved on B.
 - Isolated fake `gh` executable with executor-specific cwd/environment and synthetic JSON/diffs: missing binary, per-executor auth/host status, PR detail, optional-comment failure, network errors, and cancellation. No real GitHub credentials or live PR mutations are required.
 - Browser multi-panel same-path Local/remote views, worktree selection in New Chat/sidebar, disabled keyboard/action parity, rapid chat switches, retained drafts, visibility-gated polling, and reconnect while primary browser `/ws` remains connected.
-- Concurrent bounded Git results, Files transfers, terminal output, and chat traffic on one channel: bounded resources, explicit failures under pressure, and no fallback or silent data mixing. Record latency without claiming cross-service isolation.
+- Mixed Git/Files/terminal/chat pressure acceptance is deferred pending the channel-splitting decision. Existing per-service bounds and uncertainty tests remain required; no latency or cross-service isolation guarantee is implied.
 
 Use disposable repositories and bare local remotes for real Git mutation tests. Use deterministic hooks/fake runners or held transport delivery to place failures after side effects; do not depend on live network timing. Keep fixtures synthetic and tests resource-bounded. No paid model calls, external push, live GitHub account, or new provider SACS tier is needed for this boundary.
 
@@ -329,4 +329,4 @@ For implementation changes, run `bun run check`, `bun run test`, the focused int
 
 No blocking product decision is required for this scope. The design deliberately retains current Git/gh workflows, executor-owned credentials, request-scoped commands, and best-effort reconciliation rather than adding distributed transactions.
 
-Additional transport channels, persistent jobs/idempotency, stronger external-writer isolation, interactive credential setup, richer GitHub actions, remote ticket auto-default inference, and repository synchronization remain separate work. Exact internal result/admission tuning may change from the stated starting bounds based on tests, without changing identity or mutation safety. Channel topology is an independent decision.
+Additional transport channels, persistent jobs/idempotency, stronger external-writer isolation, interactive credential setup, richer GitHub actions, and repository synchronization remain separate work. Exact internal result/admission tuning may change from the stated starting bounds based on tests, without changing identity or mutation safety. Channel topology is an independent decision.

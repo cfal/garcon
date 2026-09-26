@@ -126,7 +126,7 @@ Local terminal manager     Remote facade
 
 The controller retains HTTP/browser authentication, trusted principal derivation, executor selection, socket delivery queues, and stream-to-browser routing. The executor receives an explicit delegated principal identity from the authenticated controller, not browser-supplied claims or a copied browser bearer token. Avoid importing server HTTP principal types into the shared executor interface; use a narrow transportable authority contract.
 
-The executor process owns its root, shell/environment, PTYs, in-memory terminal registry, replay buffers, attachment authority, and operation ordering. Construct the terminal manager once for that process and lend its service to replaceable connection/provider facades; disposing one facade must not shut down the manager. Inject the actual executor configuration into the extracted implementation. Today's manager reads controller-global configuration and path helpers; merely constructing it in a worker would not establish the correct filesystem boundary.
+The executor process owns its root, shell/environment, PTYs, in-memory terminal registry, replay buffers, attachment authority, and operation ordering. Its terminal manager is constructed once with executor configuration and lent to replaceable connection/provider facades; disposing one facade does not shut down the manager. No remote path is interpreted through controller-global configuration.
 
 No worker HTTP listener is needed. Both controller-dials and executor-dials modes use the existing shared Noise connection. The browser continues using its primary `/ws` for Chat and terminals; no new browser socket is introduced either.
 
@@ -252,17 +252,17 @@ Terminal output is an unbounded producer, unlike a bounded file snapshot. Every 
 - Bound output queues per attachment/terminal and per executor, plus input bytes and pending control calls.
 - Use small serialized frames; the current 64-KiB browser target is a reasonable starting point, with allowance for the extra executor envelope.
 - Admit terminal output only while bounded transport capacity is available. If it is not, detach that output delivery and require replay/reattach instead of adding a scheduler or an unbounded wait queue.
-- Make that decision before assigning transport ordinals. Never discard or reorder already-numbered reliable messages to make space, and preserve per-terminal output/status order.
+- Make that decision before admitting a message to reliable delivery. Never discard or reorder admitted reliable messages to make space, and preserve per-terminal output/status order. The transport has no ordinals or replay buffer.
 - Keep the PTY draining into its bounded replay tail while delivery is detached. Emit truncation when needed on reattach; dropping delivery must not kill or indefinitely block the user's job.
 - Check the browser renderer boundary too: xterm `write()` is asynchronous, and a drained network socket does not prove the renderer has consumed its queued text. Keep queued renderer work bounded; a render-credit protocol is not automatically required.
 
 The renderer admits up to 16 MiB of queued UTF-16 text, leaving headroom above a full one-MiB UTF-8 replay tail. If that queue fills, the registry detaches delivery without advancing the rejected sequence. Once xterm drains accepted text, it automatically restores from the last accepted cursor. A throttled hidden tab resumes when parsing runs again. This does not retain rejected output locally; the executor's bounded tail and explicit truncation policy still apply.
 
-The current executor send path treats exhausted socket/replay budgets as continuity failure. Basic output admission must stop avoidable terminal overload before handing more messages to that path; it is a bounded accept-or-detach check, not prioritized delivery. If the shared connection nevertheless fails, recover attachments through the normal reconnect path without terminating PTYs.
+The executor send path pauses reliable flushing under socket backpressure and retires the session if the bounded reliable queue overflows. Terminal output instead checks immediate capacity and detaches when unavailable; this is an accept-or-detach check, not prioritized delivery. Transport-capacity detachment currently requires manual Retry. If the shared connection fails, attachments recover through the normal reconnect path without terminating PTYs.
 
 The installed PTY abstraction has no general pause/resume interface. Do not add OS-level flow control now: blocking a long-running program to preserve every output byte is not the intended policy. Reuse straightforward message-size and capacity checks introduced for Files where suitable, without imposing terminal truncation on provider rows or treating terminal input like retryable file reads.
 
-The current shared channel does not guarantee latency or failure isolation between workloads. Observe terminal input/chat latency during file transfers and PTY floods to inform the pending channel decision; do not preemptively build scheduling machinery. Terminal process identity and lifetime must remain independent of channel arrangement.
+The current shared channel does not guarantee latency or failure isolation between workloads. Mixed Files/Git/PTY pressure work is deferred pending the channel-splitting decision; do not preemptively build scheduling machinery. Terminal process identity and lifetime remain independent of channel arrangement.
 
 ## Control Outcomes And Enumeration
 
@@ -274,7 +274,7 @@ Termination success means the terminal session was removed and cleanup requested
 
 Make list authority executor-local. A successful Local response must not prune remote sessions merely because an offline worker supplied no list. Either query executors independently or return explicit per-executor ready/unavailable snapshots with their terminal runtime identity. An empty successful list is authoritative only for the stated executor and terminal runtime. Preserve existing mutation-version fencing for create, rename, exit, and removal races.
 
-The browser's retained entries can show disconnected/unavailable state, but cannot establish that a remote process still exists. Reconcile and prune only from the appropriate authoritative snapshot, explicit removal, or a confirmed terminal-runtime change. A provider-serving generation change or expired transport replay window is not such evidence. Bound retained maps/queues and clear controller-side routes when an executor is removed, without terminating its remote PTYs; do not add a durable controller terminal registry just to support presentation.
+The browser's retained entries can show disconnected/unavailable state, but cannot establish that a remote process still exists. Reconcile and prune only from the appropriate authoritative snapshot, explicit removal, or a confirmed terminal-runtime change. A provider-serving generation change or connection loss is not such evidence. Bound retained maps/queues and clear controller-side routes when an executor is removed, without terminating its remote PTYs; do not add a durable controller terminal registry just to support presentation.
 
 ## Executor Selection And Workspace UX
 
@@ -342,12 +342,12 @@ Existing focused coverage lives under [terminal manager tests](../../server/runt
 - Same-client browser replacement, different-client takeover, stale detach/attach replies, queued input during takeover, and delayed input at authorization expiry.
 - Input/resize order and adjacent-resize coalescing across RPC dispatch; bounded paste without character loss or duplicate execution.
 - Output/replay interleaving, explicit truncation, unexplained gaps, duplicate/partial fragments, and trailing output before natural exit presentation.
-- Browser network switches, executor disconnect beyond replay grace, fresh logical session, and remote controller restart: the same PTY, terminal runtime/ID, output sequence, and running job survive; only attachments change.
+- Browser network switches, arbitrarily long executor disconnect, fresh transport session, and remote controller restart: the same PTY, terminal runtime/ID, output sequence, and running job survive; only attachments change.
 - Worker restart/crash versus controller restart: only the actual terminal-runtime change invalidates terminal references. Local controller restart ends Local management because it is the executor process.
 - Executor disable/removal preserves remote jobs while removing access; worker shutdown performs cleanup. A lost create reply preserves the PTY, while process shutdown during an awaited create cleans up a late spawn.
 - Lost create/terminate responses, typed uncertain errors, retry expiry, parameter mismatch under reused request IDs, and reconciliation without duplicate PTYs.
 - One offline executor during List, stale snapshots after stream mutations, and no pruning or gating of healthy Local/other-executor sessions.
-- One shared channel under file transfers, noisy PTYs, and a slow browser: bounded memory/queues, explicit delivery detachment under pressure, reconnect without killing jobs, and measured input/chat latency. No assertion of cross-workload latency isolation or dependency on a new scheduler.
+- Mixed Files/Git/PTY/chat pressure acceptance is deferred pending the channel-splitting decision. Existing terminal bounds, detachment, and job-survival tests remain required; no cross-workload latency guarantee is implied.
 - Desktop inline and submenu creation plus mobile toolbar/overflow creation: consistent Local/remote host choices, capability filtering, per-executor limits, keyboard/touch access, and no spawn on menu dismissal. Disconnect during selection must not redirect creation; choosing a different host must use its own directory target.
 - Toolbar, tabs, and terminal menus use `Local <number>` / `<executor label> <number>` consistently; custom titles survive, clearing a title restores the default, and executor-label edits or terminal removal do not renumber or remount surviving sessions.
 - Rapid chat/executor switches and desktop/mobile renderer moves without focus loss, unnecessary xterm remount, retargeted input, or a hidden terminal being accidentally terminated.

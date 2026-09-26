@@ -1,6 +1,6 @@
 # Executor Transport
 
-Current implementation reference, 2026-09-24. This supersedes the transport
+Current implementation reference, 2026-09-26. This supersedes the transport
 descriptions in the historical [first-stage](./interface.md) and
 [second-stage](./app-integration.md) designs.
 
@@ -34,8 +34,10 @@ loss retires the session; requests are never automatically resent.
 
 Socket backpressure pauses flushing. Encoded messages cross Noise
 as binary fragments containing one final-fragment byte followed by at most
-256 KiB of UTF-8 bytes. Reassembly is capped at 16 MiB per connection. Only
-complete packets enter the ordered session; authenticated fragment arrivals
+32 KiB of UTF-8 bytes. Each fragment fits within one Noise record, so the Noise
+assembler exposes authenticated progress even at 12 KiB/s. Reassembly is capped
+at 16 MiB per connection. Only complete packets enter the ordered session;
+authenticated fragment arrivals
 refresh liveness during slow transfers. Small encrypted ping/pong messages can
 pass between fragments. This is bounded transport framing, not additional
 channels or application scheduling.
@@ -59,9 +61,9 @@ once dispatched, its native step runs without the RPC cancellation signal so
 it can return the resource needed for compensation. Pre-dispatch cancellation
 still rejects admission. Uncertain commit results are not rolled back
 automatically. Other cancelled calls release their slots immediately.
-Compaction has no implicit RPC deadline because some
-providers return its handle only after the turn ends; explicit caller deadlines,
-Stop, and session retirement still cancel it.
+Start, resume, and compaction have no implicit RPC deadline. Native admission can
+be slow, and some providers return a compaction handle only after the turn ends.
+Explicit caller deadlines, Stop, and session retirement still cancel these calls.
 
 Stop on a returned execution handle cancels that operation's native admission
 before requesting native abort. A resume still preparing its native turn must
