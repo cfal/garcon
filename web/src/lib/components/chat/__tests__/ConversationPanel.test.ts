@@ -454,4 +454,27 @@ describe('ConversationPanel', () => {
 		await fireEvent.click(screen.getByRole('button', { name: /main/ }));
 		expect(actions.toggleBranch).toHaveBeenCalledWith(panel.surfaceId, 'chat-1');
 	});
+
+	it('hides the Git tray while its composer shows an availability notice', async () => {
+		runtime.processing = false;
+		runtime.summary = gitSummary();
+		const { panel } = makePanel();
+		const props = {
+			surfaceId: panel.surfaceId,
+			chat: chat(),
+			panel,
+			isCommandOwner: true,
+			ownsComposer: true,
+			actions: makeActions(),
+			composerNoticeShown: true,
+		};
+		const rendered = render(ConversationPanel, props);
+		expect(screen.queryByRole('button', { name: /Commit/ })).toBeNull();
+
+		await rendered.rerender({ ...props, ownsComposer: false });
+		expect(screen.getByRole('button', { name: /Commit/ })).toBeTruthy();
+
+		await rendered.rerender({ ...props, composerNoticeShown: false });
+		expect(screen.getByRole('button', { name: /Commit/ })).toBeTruthy();
+	});
 });

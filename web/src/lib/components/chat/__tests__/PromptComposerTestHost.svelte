@@ -89,6 +89,7 @@
 		onAbort?: () => void;
 		onQuickCommit?: () => void;
 		onChooseProjectFolder?: (chatId: string) => void;
+		onAvailabilityNoticeChange?: (shown: boolean) => void;
 	}
 
 	let {
@@ -126,6 +127,7 @@
 		onAbort = () => {},
 		onQuickCommit = () => {},
 		onChooseProjectFolder,
+		onAvailabilityNoticeChange,
 	}: Props = $props();
 
 	const chatDrafts = new ChatDraftStore();
@@ -496,6 +498,7 @@
 	{directAdmissionPending}
 	{requiresQueuedSubmission}
 	{onChooseProjectFolder}
+	{onAvailabilityNoticeChange}
 	resendCandidates={transcript.resendCandidates}
 	onExcludeResendCandidate={(ordinal) => transcript.excludeResendCandidate(ordinal)}
 />

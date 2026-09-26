@@ -225,15 +225,27 @@ describe('PromptComposer focus', () => {
 			remote.lastValidatedAt = Date.now();
 		});
 		const onsubmit = vi.fn();
-		render(PromptComposerTestHost, {
+		const onAvailabilityNoticeChange = vi.fn();
+		const { container } = render(PromptComposerTestHost, {
 			selectedExecutorId: remoteExecutor.id,
 			executors: [localExecutor, remoteExecutor],
 			catalog,
 			onsubmit,
+			onAvailabilityNoticeChange,
 		});
 		const textarea = screen.getByRole('textbox');
+		const surface = container.querySelector<HTMLElement>('[data-composer]')!;
+		const surfaceMarkup = surface.className;
 		await fireEvent.input(textarea, { target: { value: 'Synthetic retry input' } });
 		await screen.findByText('Catalog unavailable');
+		const notice = container.querySelector('[data-composer-availability-notice="catalog-failed"]');
+		expect(notice?.textContent).toContain('Failed to load model catalog');
+		expect(notice?.contains(surface)).toBe(false);
+		expect(surface.contains(notice)).toBe(false);
+		expect(notice?.parentElement?.contains(surface)).toBe(true);
+		expect(surface.querySelector('[role="status"]')).toBeNull();
+		expect(surface.className).toBe(surfaceMarkup);
+		expect(onAvailabilityNoticeChange).toHaveBeenLastCalledWith(true);
 		expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Send message' }).disabled).toBe(
 			true,
 		);
@@ -244,6 +256,10 @@ describe('PromptComposer focus', () => {
 		expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Send message' }).disabled).toBe(
 			false,
 		);
+		expect(container.querySelector('[data-composer-availability-notice]')).toBeNull();
+		expect(onAvailabilityNoticeChange).toHaveBeenLastCalledWith(false);
+		expect(screen.getByRole('textbox')).toBe(textarea);
+		expect(surface.className).toBe(surfaceMarkup);
 	});
 
 	it('submits file mentions with click and Enter when the ready executor has no Files capability', async () => {

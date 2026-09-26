@@ -40,6 +40,8 @@
 		wrapInForm?: boolean;
 		onFormSubmit?: () => void;
 		executors?: readonly ExecutorSnapshot[];
+		catalogError?: string | null;
+		onRetryCatalog?: () => void;
 	}
 
 	let {
@@ -57,6 +59,8 @@
 		wrapInForm = false,
 		onFormSubmit = () => {},
 		executors,
+		catalogError = null,
+		onRetryCatalog = () => {},
 	}: Props = $props();
 	setExecutorsTestContext(untrack(() => executors));
 
@@ -128,6 +132,10 @@
 	setModelCatalog({
 		forExecutor() { return this; },
 		refreshIfStale: async () => {},
+		get error() {
+			return catalogError;
+		},
+		forceRefresh: async () => onRetryCatalog(),
 		getSelectableAgents: () => selectableAgents,
 		getAgent: (agentId: string) => ({
 			id: agentId,

@@ -20,4 +20,5 @@ export interface PromptComposerProps {
 	isPresented?: boolean;
 	composerEditorOpenRequestId?: number;
 	onChooseProjectFolder?: (chatId: string) => void;
+	onAvailabilityNoticeChange?: (shown: boolean) => void;
 }

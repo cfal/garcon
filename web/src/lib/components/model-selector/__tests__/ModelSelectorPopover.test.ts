@@ -198,6 +198,22 @@ describe('ModelSelectorPopover', () => {
 		});
 	}
 
+	it('offers Retry beside a model catalog failure', async () => {
+		const onRetryCatalog = vi.fn();
+		render(ModelSelectorPopoverHost, {
+			value: { agentId: 'claude', model: 'model-0' },
+			mode: { agent: 'fixed', source: 'hidden', surface: 'composer' },
+			onChange: vi.fn(),
+			catalogError: 'Failed to fetch model catalog: 502',
+			onRetryCatalog,
+		});
+		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Model 0/ }));
+		const alert = await screen.findByRole('alert');
+		expect(alert.textContent).toContain('Failed to fetch model catalog: 502');
+		await fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }));
+		expect(onRetryCatalog).toHaveBeenCalledOnce();
+	});
+
 	it('commits normal model selection immediately and closes', async () => {
 		const onChange = vi.fn();
 

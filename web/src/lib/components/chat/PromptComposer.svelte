@@ -3,8 +3,9 @@
 	import FileMentionMenu from './FileMentionMenu.svelte';
 	import SlashCommandMenu from './SlashCommandMenu.svelte';
 	import ComposerBottomBar from './ComposerBottomBar.svelte';
-	import ComposerExecutionNotice from './ComposerExecutionNotice.svelte';
+	import ComposerAvailabilityNotice from './ComposerAvailabilityNotice.svelte';
 	import { isCustomProviderSelectionAvailable } from '$lib/agents/provider-selection.js';
+	import { resolveComposerAvailabilityNotice } from '$lib/chat/composer/composer-availability.js';
 	import ComposerResizeHandle from './ComposerResizeHandle.svelte';
 	import PromptComposerEditor from './PromptComposerEditor.svelte';
 	import ComposerSnippetPalette from './ComposerSnippetPalette.svelte';
@@ -93,7 +94,6 @@
 	import { PromptComposerFocusDelivery } from './prompt-composer-focus-delivery.svelte.js';
 	import { PromptComposerProjectState } from './prompt-composer-project-state.svelte.js';
 	import type { PromptComposerProps } from './prompt-composer-props.js';
-	import ProjectAvailabilityNotice from '$lib/components/workspace/ProjectAvailabilityNotice.svelte';
 
 	let {
 		onsubmit,
@@ -111,6 +111,7 @@
 		isPresented: isPresentedOverride,
 		composerEditorOpenRequestId = 0,
 		onChooseProjectFolder,
+		onAvailabilityNoticeChange,
 	}: PromptComposerProps = $props();
 	const isPresented = $derived(isPresentedOverride ?? isVisible);
 	const composerState = getComposerState();
@@ -190,12 +191,23 @@
 	});
 	const selectedProjectTarget = $derived(projectState.target);
 	const selectedProjectResolution = $derived(projectState.snapshot);
-	const showProjectNotice = $derived(
-		executors.isReady(agentState.executorId) &&
-			selectedProjectTarget !== null &&
-			(selectedProjectResolution.kind === 'unavailable' ||
-				selectedProjectResolution.kind === 'request-failed'),
+	const availabilityNotice = $derived(
+		resolveComposerAvailabilityNotice({
+			executorId: agentState.executorId,
+			executors,
+			projectTarget: selectedProjectTarget,
+			projectResolution: selectedProjectResolution,
+			catalog: modelCatalog,
+			providerAvailable,
+		}),
 	);
+	const showProjectNotice = $derived(availabilityNotice?.kind === 'project-unavailable');
+	// The owning panel renders outside this context tree and hides its Git tray while a notice shows.
+	$effect(() => {
+		const shown = isVisible && availabilityNotice !== null;
+		untrack(() => onAvailabilityNoticeChange?.(shown));
+	});
+	onDestroy(() => onAvailabilityNoticeChange?.(false));
 	const completionProjectPath = $derived(projectState.completionProjectPath);
 	const canChooseProjectFolder = $derived(
 		Boolean(
@@ -732,12 +744,6 @@
 				onClose={() => ui.closeFileMenu()}
 			/>
 		{/if}
-		{#if !showProjectNotice}<ComposerExecutionNotice
-				executorId={agentState.executorId}
-				{executors}
-				catalog={modelCatalog}
-				{providerAvailable}
-			/>{/if}
 		<ComposerSnippetPalette
 			open={ui.snippetPalette.isOpen}
 			onOpenChange={(nextOpen) => {
@@ -976,25 +982,16 @@
 
 <div class={composerShellClass} data-composer-shell>
 	<div class={composerFrameWrapperClass}>
-		{#if showProjectNotice && selectedProjectTarget}
-			<div
-				class="mb-2 rounded-lg border border-border bg-card px-4 py-3"
-				data-project-availability-notice
-			>
-				<ProjectAvailabilityNotice
-					projectPath={selectedProjectTarget.projectPath}
-					reason={selectedProjectResolution.kind === 'unavailable'
-						? selectedProjectResolution.reason
-						: undefined}
-					requestError={selectedProjectResolution.kind === 'request-failed'
-						? selectedProjectResolution.message
-						: undefined}
-					onRetry={() => projectState.retry()}
-					onChooseFolder={canChooseProjectFolder && sessions.selectedChat
-						? () => onChooseProjectFolder?.(sessions.selectedChat!.id)
-						: undefined}
-				/>
-			</div>
+		<!-- Notices sit outside the composer surface so they never resize or restyle it. -->
+		{#if availabilityNotice}
+			<ComposerAvailabilityNotice
+				notice={availabilityNotice}
+				onRetryProject={() => projectState.retry()}
+				onChooseProjectFolder={canChooseProjectFolder && sessions.selectedChat
+					? () => onChooseProjectFolder?.(sessions.selectedChat!.id)
+					: undefined}
+				onRetryCatalog={() => void modelCatalog.forceRefresh()}
+			/>
 		{/if}
 		{@render composerFrame()}
 	</div>

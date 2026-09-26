@@ -46,6 +46,7 @@
 		onRegisterAppendToDraft,
 		onRegisterPanelActions,
 		onComposerHeightChange,
+		onComposerNoticeChange,
 		subagentToolbar,
 		chatActions = noopChatActions,
 		transcriptCache: providedTranscriptCache,
@@ -59,6 +60,7 @@
 		onRegisterAppendToDraft?: (fn: ChatDraftAppend) => void;
 		onRegisterPanelActions?: (actions: ConversationPanelActions | null) => void;
 		onComposerHeightChange?: (height: number) => void;
+		onComposerNoticeChange?: (shown: boolean) => void;
 		subagentToolbar: SubagentToolbarState;
 		chatActions?: WorkspaceChatActions;
 		transcriptCache?: ChatTranscriptCache;
@@ -206,6 +208,7 @@
 			{onRegisterReload}
 			{onRegisterPanelActions}
 			{onComposerHeightChange}
+			{onComposerNoticeChange}
 			{transcriptCache}
 			{reserveMobileToolbar}
 			isVisible={conversationWorkspaceVisible}

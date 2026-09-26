@@ -82,6 +82,7 @@
 		onRegisterPrepareHide?: (prepare: (() => void) | null) => void;
 		onRegisterPanelActions?: (actions: ConversationPanelActions | null) => void;
 		onComposerHeightChange?: (height: number) => void;
+		onComposerNoticeChange?: (shown: boolean) => void;
 		onChooseProjectFolder?: (chatId: string) => void;
 		subagentToolbar: SubagentToolbarState;
 		transcriptCache?: ChatTranscriptCache;
@@ -107,6 +108,7 @@
 		onRegisterPrepareHide,
 		onRegisterPanelActions,
 		onComposerHeightChange,
+		onComposerNoticeChange,
 		onChooseProjectFolder,
 		subagentToolbar,
 		transcriptCache: providedTranscriptCache,
@@ -861,6 +863,7 @@
 			onsubmit={onSubmit}
 			{onSteerPreferredSubmit}
 			{onChooseProjectFolder}
+			onAvailabilityNoticeChange={onComposerNoticeChange}
 			onModelChange={(next) => controller.handleModelSelectionChange(next)}
 			onExecutorChange={(executorId) =>
 				controller.handleModelSelectionChange({

@@ -41,6 +41,7 @@
 		labelFor,
 		panelActions,
 		composerInsetPx,
+		composerNoticeShown,
 		subagentToolbar,
 		titlebarMetrics,
 		surfaceMenuItems,
@@ -59,6 +60,7 @@
 		labelFor: (surfaceId: string) => string;
 		panelActions: ConversationPanelActions | null;
 		composerInsetPx: number;
+		composerNoticeShown: boolean;
 		subagentToolbar: SubagentToolbarState;
 		titlebarMetrics: WorkspaceWindowTitlebarMetrics;
 		surfaceMenuItems?: WorkspaceWindowSurfaceMenuItems;
@@ -330,6 +332,7 @@
 							isVisible={isVisible && chatIsActive}
 							actions={panelActions}
 							composerInsetPx={activeChatOwnsComposer ? composerInsetPx : 0}
+							composerNoticeShown={activeChatOwnsComposer && composerNoticeShown}
 						/>
 					{/key}
 				{:else if isVisible && chatIsActive && (activeChatPresentation === 'loading' || (activeChat && !activePanel))}

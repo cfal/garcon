@@ -176,6 +176,7 @@
 	let renamingTerminalId = $state<string | null>(null);
 	let conversationPanelActions = $state<ConversationPanelActions | null>(null);
 	let composerInsetPx = $state(0);
+	let composerNoticeShown = $state(false);
 	const PORTABLE_SURFACE_STYLE = 'inset: 0;';
 
 	const snapshot = $derived(workspace.layout.snapshot);
@@ -607,6 +608,7 @@
 				labelFor={label}
 				panelActions={conversationPanelActions}
 				{composerInsetPx}
+				composerNoticeShown={composerBound && composerNoticeShown}
 				{subagentToolbar}
 				{titlebarMetrics}
 				{surfaceMenuItems}
@@ -656,6 +658,7 @@
 						isVisible={true}
 						actions={conversationPanelActions}
 						composerInsetPx={composerBound ? composerInsetPx : 0}
+						composerNoticeShown={composerBound && composerNoticeShown}
 						reserveMobileToolbar={true}
 					/>
 				{/key}
@@ -711,6 +714,7 @@
 				onRegisterAppendToDraft={(append) => (chatDraftAppend = append)}
 				onRegisterPanelActions={(actions) => (conversationPanelActions = actions)}
 				onComposerHeightChange={(height) => (composerInsetPx = height)}
+				onComposerNoticeChange={(shown) => (composerNoticeShown = shown)}
 				{subagentToolbar}
 				{chatActions}
 				transcriptCache={chatTranscriptCache}

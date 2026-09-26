@@ -190,6 +190,19 @@
 	<ChevronDown class="size-3.5 shrink-0 text-muted-foreground" />
 {/snippet}
 
+{#snippet catalogError()}
+	{#if selector.modelCatalog.error}
+		<div role="alert" class="flex shrink-0 items-center gap-2 px-3 py-2 text-sm text-destructive">
+			<span class="min-w-0 break-words">{selector.modelCatalog.error}</span>
+			<button
+				type="button"
+				class="shrink-0 text-foreground underline focus-visible:ring-2 focus-visible:ring-ring"
+				onclick={() => void selector.modelCatalog.forceRefresh()}>{m.common_retry()}</button
+			>
+		</div>
+	{/if}
+{/snippet}
+
 {#if isCompactLayout}
 	<Dialog.Root open={selector.open} onOpenChange={handleOpenChange}>
 		<Dialog.Trigger
@@ -209,7 +222,7 @@
 			)}
 			showCloseButton={false}
 		>
-			{#if selector.modelCatalog.error}<p role="alert" class="shrink-0 px-3 py-2 text-sm text-destructive">{selector.modelCatalog.error}</p>{/if}
+			{@render catalogError()}
 			<div class="min-h-0 flex-1">
 			<ModelSelectorCompactLayout
 				{selector}
@@ -246,7 +259,7 @@
 				contentClass,
 			)}
 		>
-			{#if selector.modelCatalog.error}<p role="alert" class="shrink-0 px-3 py-2 text-sm text-destructive">{selector.modelCatalog.error}</p>{/if}
+			{@render catalogError()}
 			<div class="min-h-0 flex-1">
 			<ModelSelectorColumnsLayout {selector} {showAgent} {showSource} {modelListId} />
 			</div>

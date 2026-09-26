@@ -45,6 +45,7 @@
 		isVisible?: boolean;
 		actions: ConversationPanelActions | null;
 		composerInsetPx?: number;
+		composerNoticeShown?: boolean;
 		reserveMobileToolbar?: boolean;
 	}
 
@@ -57,6 +58,7 @@
 		isVisible = true,
 		actions,
 		composerInsetPx = 0,
+		composerNoticeShown = false,
 		reserveMobileToolbar = false,
 	}: Props = $props();
 
@@ -91,8 +93,12 @@
 	);
 	const quickGitError = $derived(quickGit.lastErrorFor(gitProject) ?? quickGitBranchError);
 	const quickGitRefreshing = $derived(quickGit.isRefreshingFor(gitProject));
+	// The composer's availability notice occupies the tray's place above the composer.
 	const quickGitTrayVisible = $derived(
-		!isProcessing && localSettings.showQuickCommitTray && quickGit.canShowTrayFor(gitProject),
+		!isProcessing &&
+			!(ownsComposer && composerNoticeShown) &&
+			localSettings.showQuickCommitTray &&
+			quickGit.canShowTrayFor(gitProject),
 	);
 	const reserveStatusCap = $derived(
 		shouldReserveComposerCapSlot({

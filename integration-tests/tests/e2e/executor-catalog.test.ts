@@ -1,6 +1,9 @@
 import { expect, test } from 'bun:test';
+import { mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
 import { openDialogModelSelector, selectExecutor } from '../../support/executor-ui.js';
 import { withE2eFixture } from '../../support/e2e-fixture.js';
+import { initializeFixtureRepository } from '../../support/git-fixture.js';
 import { SpaDriver } from '../../support/spa-driver.js';
 
 test('cold remote chats load their catalog before submission and refresh it after executor replacement', async () => {
@@ -237,3 +240,46 @@ test('new and scheduled chats retain input and require Retry after cached remote
     fixture.assertNoBrowserErrors();
   }, { executionBackend: 'remote-controller-dials' });
 }, 90_000);
+
+test('a failed model catalog replaces the Git tray with a retryable notice beside an unchanged composer', async () => {
+  await withE2eFixture('catalog-failure-notice', async (fixture) => {
+    const { client, directAgents, dirs } = fixture.integration;
+    const projectPath = join(dirs.project, 'catalog-failure-repository');
+    await mkdir(projectPath);
+    await initializeFixtureRepository(projectPath);
+    const chatId = fixture.integration.newChatId();
+    const started = await client.startDirectChat({ chatId, projectPath, content: 'Synthetic catalog failure seed', agent: directAgents.openAi });
+    await client.waitForTurnTerminal(chatId, started.turnId);
+    await fixture.page.evaluateOnNewDocument(() => {
+      const originalFetch = globalThis.fetch.bind(globalThis);
+      const failingFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(input instanceof Request ? input.url : String(input), location.href);
+        if (url.pathname === '/api/v1/models' && document.documentElement.dataset.repairCatalog !== 'true') {
+          return new Response('{}', { status: 502, headers: { 'Content-Type': 'application/json' } });
+        }
+        return originalFetch(input, init);
+      };
+      Object.defineProperty(globalThis, 'fetch', { configurable: true, writable: true, value: failingFetch });
+    });
+    const app = new SpaDriver(fixture.page, fixture.integration);
+    await app.setViewport(1_440, 900);
+    await app.openChat(chatId);
+    await fixture.waitForSpaWebSocket();
+    const notice = '[data-composer-shell] [data-composer-availability-notice="catalog-failed"]';
+    const trayChildren = () => fixture.page.evaluate(() => document.querySelector('[data-conversation-panel-status-anchor]')?.children.length ?? -1);
+    const composerHeight = () => fixture.page.$eval('[data-composer]', (element) => element.getBoundingClientRect().height);
+
+    await fixture.page.waitForSelector(notice, { timeout: 20_000 });
+    expect(await fixture.page.$eval(notice, (element) => element.textContent)).toContain('Failed to load model catalog');
+    expect(await fixture.page.$eval('[data-composer]', (element, selector) => element.querySelector(selector) === null, notice)).toBe(true);
+    expect(await trayChildren()).toBe(0);
+    const failedHeight = await composerHeight();
+
+    await fixture.page.evaluate(() => { document.documentElement.dataset.repairCatalog = 'true'; });
+    await fixture.page.$eval(`${notice} button`, (button) => (button as HTMLButtonElement).click());
+    await fixture.page.waitForFunction((selector) => !document.querySelector(selector), { timeout: 20_000 }, notice);
+    await fixture.page.waitForFunction(() => (document.querySelector('[data-conversation-panel-status-anchor]')?.children.length ?? 0) > 0, { timeout: 20_000 });
+    expect(await composerHeight()).toBe(failedHeight);
+    fixture.assertNoBrowserErrors();
+  });
+}, 60_000);
