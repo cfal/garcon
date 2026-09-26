@@ -61,6 +61,14 @@ jobs:
             test_timeout: 120000
             artifact_suffix: sacs-remote-executor-dials
             execution_backend: remote-executor-dials
+          - lane: Scripted providers remote controller dials
+            script: test:remote-scripted
+            artifact_suffix: scripted-remote-controller-dials
+            execution_backend: remote-controller-dials
+          - lane: Scripted providers remote executor dials
+            script: test:remote-scripted
+            artifact_suffix: scripted-remote-executor-dials
+            execution_backend: remote-executor-dials
 
     steps:
       - name: Check out repository
@@ -89,8 +97,14 @@ jobs:
           TEST_PATH: ${{ matrix.path }}
           TEST_SHARD: ${{ matrix.shard }}
           TEST_TIMEOUT: ${{ matrix.test_timeout }}
+          TEST_SCRIPT: ${{ matrix.script }}
           GARCON_TEST_EXECUTION_BACKEND: ${{ matrix.execution_backend || 'in-process' }}
-        run: bun test --max-concurrency=1 --timeout="$TEST_TIMEOUT" --shard="$TEST_SHARD" "$TEST_PATH"
+        run: |
+          if [ -n "$TEST_SCRIPT" ]; then
+            bun run "$TEST_SCRIPT"
+          else
+            bun test --max-concurrency=1 --timeout="$TEST_TIMEOUT" --shard="$TEST_SHARD" "$TEST_PATH"
+          fi
 
       - name: Upload server integration diagnostics
         if: ${{ failure() }}

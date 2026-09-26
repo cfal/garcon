@@ -6,6 +6,7 @@
     "test": "bun run test:server",
     "test:server": "bun test --max-concurrency=1 --timeout=30000 tests/server && bun run test:sacs",
     "test:sacs": "bun test --max-concurrency=1 --timeout=120000 tests/sacs",
+    "test:remote-scripted": "bun test --max-concurrency=1 --timeout=120000 tests/server/claude-scripted-permissions.test.ts tests/server/codex-scripted-escalation.test.ts tests/server/claude-scripted-queue.test.ts tests/server/codex-scripted-queue.test.ts tests/server/pi-scripted-queue.test.ts tests/server/opencode-scripted-queue.test.ts tests/server/opencode-scripted-compaction.test.ts tests/server/codex-scripted-shutdown.test.ts",
     "test:e2e": "bun test --max-concurrency=1 --timeout=60000 tests/e2e",
     "test:chromium": "bun ../scripts/run-test-files.js 'tests/chromium/*.test.ts' --max-concurrency=1 --timeout=120000",
     "test:search-gate": "bun test --max-concurrency=1 --timeout=900000 tests/search-gate/transcript-search-v9-scale-gate.test.ts",
