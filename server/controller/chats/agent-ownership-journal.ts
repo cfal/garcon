@@ -480,16 +480,22 @@ export class AgentOwnershipJournal {
         const executors = journalExecutors(journal);
         const release = this.#retainExecutorReferences?.(executors, [...journalExecutors(this.#journal), ...inheritedExecutors]);
         try {
-          try {
-            await this.#providerReferences.publish(journalProviders(journal),
-              () => writeJsonFileAtomic(this.#filePath, journal, { mode: 0o600 }));
-          } catch (error) {
-            // A renamed but unconfirmed decision still prevents executor deletion.
-            if (error instanceof AtomicJsonWriteError && error.renamed) {
-              for (const id of executors) this.#unconfirmedExecutorReferences.add(id);
+          await this.#providerReferences.publish(journalProviders(journal), async () => {
+            let ambiguous = false;
+            for (let attempt = 0; ; attempt += 1) {
+              try {
+                await writeJsonFileAtomic(this.#filePath, journal, { mode: 0o600 });
+                return;
+              } catch (error) {
+                ambiguous ||= error instanceof AtomicJsonWriteError && error.renamed;
+                if (!ambiguous) throw error;
+                // The same candidate must become durable before either progress or rollback.
+                for (const id of executors) this.#unconfirmedExecutorReferences.add(id);
+                logger.warn('Retrying an unconfirmed ownership decision', { attempt: attempt + 1 });
+                await new Promise(resolve => setTimeout(resolve, Math.min(1_000, 25 * 2 ** attempt)));
+              }
             }
-            throw error;
-          }
+          });
           this.#journal = journal;
           this.#unconfirmedExecutorReferences.clear();
         } finally {

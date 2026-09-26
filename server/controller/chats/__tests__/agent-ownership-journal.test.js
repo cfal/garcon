@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -170,6 +170,35 @@ describe('AgentOwnershipJournal', () => {
       version: 5,
       ownershipIntents: [first],
     });
+  });
+
+  it('retries the same decision after a post-rename failure without progressing registry ownership', async () => {
+    const registry = createRegistry({ chat: chat() });
+    const journal = new AgentOwnershipJournal({ workspaceDir, registry, integrations: createIntegrations(), ledger: { deleteChat: mock(() => {}) } });
+    await journal.initialize();
+    const open = fs.open.bind(fs);
+    const candidates = [];
+    const spy = spyOn(fs, 'open').mockImplementation(async (filePath, ...args) => {
+      const handle = await open(filePath, ...args);
+      if (filePath === workspaceDir) {
+        const candidate = await readJournal(workspaceDir);
+        candidates.push(candidate);
+        if (candidates.length === 1) {
+          handle.sync = async () => { throw Object.assign(new Error('Synthetic directory sync failure'), { code: 'EIO' }); };
+        } else {
+          expect(registry.installAgentOwnership).not.toHaveBeenCalled();
+          expect(journal.findHandoff('chat', 'request-1')).toBeNull();
+        }
+      }
+      return handle;
+    });
+    try {
+      const intent = await journal.decideHandoff(decisionInput(registry));
+      expect(candidates).toHaveLength(2);
+      expect(candidates[1]).toEqual(candidates[0]);
+      expect(journal.findHandoff('chat', 'request-1')).toEqual(intent);
+      expect(journal.hasPending('chat')).toBe(true);
+    } finally { spy.mockRestore(); }
   });
 
   it('rejects a conflicting retry without changing the durable decision', async () => {
