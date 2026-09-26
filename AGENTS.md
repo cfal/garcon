@@ -87,8 +87,11 @@ Required for every known tool-use addition or change:
 
 ### Server Ownership
 
+See `docs/file-structure.md` for the full layout. Former top-level server application domains now live under `server/controller/`. Former `server/lib/` helpers are split between shared primitives in `server/common/` and controller-only helpers in `server/controller/lib/`; do not recreate the retired paths.
+
 - `server/controller/` owns application policy, durable controller state, HTTP APIs, and browser WebSocket delivery.
 - `server/runtime/` owns machine services and provider hosting. Local and remote workers instantiate the same `ExecutionRuntime`.
+- `server/controller/agents/` owns chat-facing orchestration; `server/runtime/agents/` hosts integrations. Provider implementations remain in `server-agents/<id>/`, not either core `agents/` directory.
 - `server/remote/client/` implements `ExecutionRuntimeApi` over RPC; `server/remote/server/` dispatches onto an injected runtime. `server/remote/transport/` owns the shared encrypted channel and wire protocol.
 - `server/common/` contains backend primitives. Runtime and remoting must not import controller modules; common must not import any of those owners. Only `server/remote/worker.ts` composes concrete runtime services into remoting.
 - Keep browser/server DTOs in top-level `common/` and provider-specific code behind `@garcon/server-agent-interface` in `server-agents/`.
