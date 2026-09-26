@@ -166,41 +166,43 @@ function createDeps(chat = createChat()) {
 			changed: true,
 		}),
 		tagReconciliationKind: vi.fn((_chatId: string): ChatTagReconciliationKind => null),
-		applyChatTagDelta: vi.fn(async (request: {
-			chatId: string;
-			addTags?: readonly string[];
-			removeTags?: readonly string[];
-		}) => {
-			const current = sessions.byId[request.chatId];
-			if (!current) throw new Error('Chat not found');
-			const removed = new Set(request.removeTags ?? []);
-			const tags = [...new Set([
-				...current.tags.filter((tag) => !removed.has(tag)),
-				...(request.addTags ?? []),
-			])].sort();
-			const before = new Set(current.tags);
-			const after = new Set(tags);
-			sessions.byId[request.chatId] = { ...current, tags };
-			return {
-				success: true as const,
-				chatId: request.chatId,
-				tags,
-				addedTags: tags.filter((tag) => !before.has(tag)),
-				removedTags: current.tags.filter((tag) => !after.has(tag)),
-			};
-		}),
+		applyChatTagDelta: vi.fn(
+			async (request: {
+				chatId: string;
+				addTags?: readonly string[];
+				removeTags?: readonly string[];
+			}) => {
+				const current = sessions.byId[request.chatId];
+				if (!current) throw new Error('Chat not found');
+				const removed = new Set(request.removeTags ?? []);
+				const tags = [
+					...new Set([
+						...current.tags.filter((tag) => !removed.has(tag)),
+						...(request.addTags ?? []),
+					]),
+				].sort();
+				const before = new Set(current.tags);
+				const after = new Set(tags);
+				sessions.byId[request.chatId] = { ...current, tags };
+				return {
+					success: true as const,
+					chatId: request.chatId,
+					tags,
+					addedTags: tags.filter((tag) => !before.has(tag)),
+					removedTags: current.tags.filter((tag) => !after.has(tag)),
+				};
+			},
+		),
 		upsertServerChat: vi.fn(),
 		setSelectedChatId: vi.fn(),
 	};
 	const modelCatalog = {
-		selectionFor: vi.fn<SlashCommandModelCatalog['selectionFor']>(
-			(_agentId, model) => ({
-				model,
-				apiProviderId: null,
-				modelEndpointId: null,
-				modelProtocol: null,
-			}),
-		),
+		selectionFor: vi.fn<SlashCommandModelCatalog['selectionFor']>((_agentId, model) => ({
+			model,
+			apiProviderId: null,
+			modelEndpointId: null,
+			modelProtocol: null,
+		})),
 		supportsFork: vi.fn(() => false),
 		supportsForkWhileRunning: vi.fn(() => false),
 		supportsSteering: vi.fn(() => false),
@@ -265,7 +267,6 @@ describe('ConversationSlashCommandService', () => {
 			text: '/steer Focus on the failing assertion',
 			images: [],
 			ownsComposer: true,
-			handoffPending: false,
 		});
 
 		expect(result).toEqual({ kind: 'steer', content: 'Focus on the failing assertion' });
@@ -280,7 +281,6 @@ describe('ConversationSlashCommandService', () => {
 			text: '/steer Focus here',
 			images: [] as File[],
 			ownsComposer: true,
-			handoffPending: false,
 		};
 
 		expect(service.dispatchSubmission(input)).toEqual({ kind: 'handled', outcome: 'rejected' });
@@ -295,14 +295,6 @@ describe('ConversationSlashCommandService', () => {
 		expect(appendLocalNotice).toHaveBeenLastCalledWith(
 			'error',
 			'Remove attachments before steering the active turn.',
-		);
-
-		input.images = [];
-		input.handoffPending = true;
-		expect(service.dispatchSubmission(input)).toEqual({ kind: 'handled', outcome: 'rejected' });
-		expect(appendLocalNotice).toHaveBeenLastCalledWith(
-			'error',
-			'Wait for the current work and queued messages to finish before handing this chat to another agent.',
 		);
 	});
 
@@ -391,14 +383,15 @@ describe('ConversationSlashCommandService', () => {
 		const { deps, composerState } = createDeps(chat);
 		const service = new ConversationSlashCommandService(deps);
 
-		expect(service.dispatchSubmission({
-			chatId: chat.id,
-			chat,
-			text: '/goal pause',
-			images: [],
-			ownsComposer: true,
-			handoffPending: false,
-		})).toEqual({ kind: 'continue', content: '/goal pause' });
+		expect(
+			service.dispatchSubmission({
+				chatId: chat.id,
+				chat,
+				text: '/goal pause',
+				images: [],
+				ownsComposer: true,
+			}),
+		).toEqual({ kind: 'continue', content: '/goal pause' });
 		expect(composerState.clearAfterSubmit).not.toHaveBeenCalled();
 	});
 
@@ -415,7 +408,6 @@ describe('ConversationSlashCommandService', () => {
 			text: '/move top',
 			images: [],
 			ownsComposer: true,
-			handoffPending: false,
 		});
 
 		expect(dispatch.kind).toBe('handled');
@@ -450,7 +442,6 @@ describe('ConversationSlashCommandService', () => {
 			text: '/MOVE BOTTOM ',
 			images: [],
 			ownsComposer: true,
-			handoffPending: false,
 		});
 
 		expect(dispatch.kind).toBe('handled');
@@ -479,7 +470,6 @@ describe('ConversationSlashCommandService', () => {
 				text: input.text,
 				images: input.images,
 				ownsComposer: true,
-				handoffPending: false,
 			});
 
 			expect(dispatch.kind).toBe('handled');
@@ -618,7 +608,6 @@ describe('ConversationSlashCommandService', () => {
 			text: composerState.inputText,
 			images: [],
 			ownsComposer: true,
-			handoffPending: false,
 		});
 
 		expect(dispatch.kind).toBe('handled');
@@ -659,12 +648,30 @@ describe('ConversationSlashCommandService', () => {
 		deps.sessions.applyChatTagDelta
 			.mockImplementationOnce(async (request) => {
 				await first.promise;
-				deps.sessions.byId[request.chatId] = { ...deps.sessions.byId[request.chatId], tags: ['alpha'] };
-				return { success: true, chatId: request.chatId, tags: ['alpha'], addedTags: ['alpha'], removedTags: [] };
+				deps.sessions.byId[request.chatId] = {
+					...deps.sessions.byId[request.chatId],
+					tags: ['alpha'],
+				};
+				return {
+					success: true,
+					chatId: request.chatId,
+					tags: ['alpha'],
+					addedTags: ['alpha'],
+					removedTags: [],
+				};
 			})
 			.mockImplementationOnce(async (request) => {
-				deps.sessions.byId[request.chatId] = { ...deps.sessions.byId[request.chatId], tags: ['alpha', 'beta'] };
-				return { success: true, chatId: request.chatId, tags: ['alpha', 'beta'], addedTags: ['beta'], removedTags: [] };
+				deps.sessions.byId[request.chatId] = {
+					...deps.sessions.byId[request.chatId],
+					tags: ['alpha', 'beta'],
+				};
+				return {
+					success: true,
+					chatId: request.chatId,
+					tags: ['alpha', 'beta'],
+					addedTags: ['beta'],
+					removedTags: [],
+				};
 			});
 		const service = new ConversationSlashCommandService(deps);
 
@@ -705,12 +712,30 @@ describe('ConversationSlashCommandService', () => {
 		deps.sessions.applyChatTagDelta
 			.mockImplementationOnce(async (request) => {
 				await first.promise;
-				deps.sessions.byId[request.chatId] = { ...deps.sessions.byId[request.chatId], tags: ['existing', 'urgent'] };
-				return { success: true, chatId: request.chatId, tags: ['existing', 'urgent'], addedTags: ['urgent'], removedTags: [] };
+				deps.sessions.byId[request.chatId] = {
+					...deps.sessions.byId[request.chatId],
+					tags: ['existing', 'urgent'],
+				};
+				return {
+					success: true,
+					chatId: request.chatId,
+					tags: ['existing', 'urgent'],
+					addedTags: ['urgent'],
+					removedTags: [],
+				};
 			})
 			.mockImplementationOnce(async (request) => {
-				deps.sessions.byId[request.chatId] = { ...deps.sessions.byId[request.chatId], tags: ['urgent'] };
-				return { success: true, chatId: request.chatId, tags: ['urgent'], addedTags: [], removedTags: ['existing'] };
+				deps.sessions.byId[request.chatId] = {
+					...deps.sessions.byId[request.chatId],
+					tags: ['urgent'],
+				};
+				return {
+					success: true,
+					chatId: request.chatId,
+					tags: ['urgent'],
+					addedTags: [],
+					removedTags: ['existing'],
+				};
 			});
 		const service = new ConversationSlashCommandService(deps);
 
@@ -884,7 +909,6 @@ describe('ConversationSlashCommandService', () => {
 				text: input.text,
 				images: input.images,
 				ownsComposer: true,
-				handoffPending: false,
 			});
 
 			expect(dispatch.kind).toBe('handled');
@@ -924,7 +948,6 @@ describe('ConversationSlashCommandService', () => {
 				text: '/move-to-top',
 				images: [],
 				ownsComposer: true,
-				handoffPending: false,
 			}),
 		).toEqual({
 			kind: 'continue',
@@ -1060,26 +1083,42 @@ describe('ConversationSlashCommandService', () => {
 			...deps.modelCatalog,
 			supportsFork: vi.fn(() => true),
 			selectionFor: vi.fn<SlashCommandModelCatalog['selectionFor']>(() => ({
-				model: 'remote-model', apiProviderId: 'remote-provider',
-				modelEndpointId: 'remote-endpoint', modelProtocol: 'openai-compatible',
+				model: 'remote-model',
+				apiProviderId: 'remote-provider',
+				modelEndpointId: 'remote-endpoint',
+				modelProtocol: 'openai-compatible',
 			})),
 		};
-		deps.modelCatalogForExecutor.mockImplementation(id => id === executorId ? remoteCatalog : deps.modelCatalog);
+		deps.modelCatalogForExecutor.mockImplementation((id) =>
+			id === executorId ? remoteCatalog : deps.modelCatalog,
+		);
 		mockForkRunChat.mockResolvedValueOnce({
-			success: true, commandType: 'fork-run', clientRequestId: 'request-1', chatId: 'chat-2',
-			turnId: 'turn-1', status: 'accepted', acceptedAt: '2026-07-14T00:00:00.000Z',
+			success: true,
+			commandType: 'fork-run',
+			clientRequestId: 'request-1',
+			chatId: 'chat-2',
+			turnId: 'turn-1',
+			status: 'accepted',
+			acceptedAt: '2026-07-14T00:00:00.000Z',
 			chat: createServerEntry('chat-2'),
 		});
 		const result = new ConversationSlashCommandService(deps).dispatchSubmission({
-			chatId: chat.id, chat, text: '/fork Continue remotely', images: [],
-			ownsComposer: false, handoffPending: false,
+			chatId: chat.id,
+			chat,
+			text: '/fork Continue remotely',
+			images: [],
+			ownsComposer: false,
 		});
 		expect(result.kind).toBe('handled');
 		if (result.kind !== 'handled') throw new Error('Fork was not handled');
 		expect(await result.outcome).toBe('accepted');
-		expect(mockForkRunChat).toHaveBeenCalledWith(expect.objectContaining({
-			model: 'remote-model', apiProviderId: 'remote-provider', modelEndpointId: 'remote-endpoint',
-		}));
+		expect(mockForkRunChat).toHaveBeenCalledWith(
+			expect.objectContaining({
+				model: 'remote-model',
+				apiProviderId: 'remote-provider',
+				modelEndpointId: 'remote-endpoint',
+			}),
+		);
 		expect(deps.modelCatalog.supportsFork).not.toHaveBeenCalled();
 		expect(deps.modelCatalog.selectionFor).not.toHaveBeenCalled();
 	});
@@ -1112,12 +1151,14 @@ describe('ConversationSlashCommandService', () => {
 			true,
 		);
 
-		expect(mockForkRunChat).toHaveBeenCalledWith(expect.objectContaining({
-			model: 'gpt-stale',
-			apiProviderId: 'stale',
-			modelEndpointId: 'stale_openai',
-			modelProtocol: 'openai-compatible',
-		}));
+		expect(mockForkRunChat).toHaveBeenCalledWith(
+			expect.objectContaining({
+				model: 'gpt-stale',
+				apiProviderId: 'stale',
+				modelEndpointId: 'stale_openai',
+				modelProtocol: 'openai-compatible',
+			}),
+		);
 	});
 
 	it('asks before a fork run falls back and repeats it with the same command identities', async () => {

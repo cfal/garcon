@@ -15,12 +15,17 @@ import type {
 import type { SessionControllerDeps } from './conversation-session-controller.svelte.js';
 import { errorDetail } from './conversation-submission-helpers.js';
 import * as m from '$lib/paraglide/messages.js';
-import type { ConversationExecutionDraftState } from './conversation-execution-draft-state.svelte.js';
 
 export interface ConversationSettingsControllerOptions {
 	get sessions(): Pick<
 		SessionControllerDeps['sessions'],
-		'selectedChatId' | 'selectedChat' | 'isDraft' | 'patchDraftStartup' | 'patchChat'
+		| 'selectedChatId'
+		| 'selectedChat'
+		| 'byId'
+		| 'isDraft'
+		| 'patchDraftStartup'
+		| 'patchChat'
+		| 'quietRefreshChats'
 	>;
 	get agentState(): Pick<
 		SessionControllerDeps['agentState'],
@@ -45,29 +50,75 @@ export interface ConversationSettingsControllerOptions {
 		| 'getPermissionModes'
 		| 'getThinkingModes'
 	>;
-	get chatState(): Pick<SessionControllerDeps['chatState'], 'appendLocalNotice'>;
+	get chatState(): Pick<SessionControllerDeps['chatState'], 'appendLocalNoticeForChat'>;
 	get agentSwitch(): Pick<ConversationAgentSwitchService, 'switchAgent'>;
-	get executionDraft(): Pick<
-		ConversationExecutionDraftState,
-		'isHandoffPending' | 'patchSelection'
-	>;
 }
 
 export class ConversationSettingsController {
-	#latestAgentSettingsMutationByChatId = new Map<string, symbol>();
+	#pendingMutations = new Map<string, symbol>();
+	#pendingRequests = new Map<string, Promise<boolean>>();
 
 	constructor(private readonly options: ConversationSettingsControllerOptions) {}
+
+	hasPending(chatId: string): boolean {
+		return this.#pendingRequests.has(chatId);
+	}
+
+	async settlePending(chatId: string): Promise<boolean> {
+		let accepted = true;
+		while (this.#pendingRequests.has(chatId)) {
+			accepted = await this.#pendingRequests.get(chatId)!;
+		}
+		return accepted;
+	}
+
+	#send(chatId: string, request: () => Promise<void>): void {
+		const previous = this.#pendingRequests.get(chatId);
+		const run = async () => {
+			try {
+				await request();
+				return true;
+			} catch {
+				return false;
+			}
+		};
+		const pending = previous ? previous.then(run) : run();
+		this.#pendingRequests.set(chatId, pending);
+		void pending.then(() => {
+			if (this.#pendingRequests.get(chatId) === pending) this.#pendingRequests.delete(chatId);
+		});
+	}
+
+	#beginMutation(chatId: string, setting: string) {
+		const key = `${chatId}:${setting}`;
+		const mutation = Symbol(key);
+		const epoch = this.options.sessions.byId[chatId]?.agentOwnershipEpoch ?? undefined;
+		this.#pendingMutations.set(key, mutation);
+		return {
+			epoch,
+			isCurrent: () =>
+				this.#pendingMutations.get(key) === mutation &&
+				this.options.sessions.byId[chatId]?.agentOwnershipEpoch === epoch,
+			finish: () => {
+				if (this.#pendingMutations.get(key) === mutation) this.#pendingMutations.delete(key);
+			},
+		};
+	}
 
 	handleModelSelectionChange(next: AgentSwitchSelection): void {
 		const chatId = this.options.sessions.selectedChatId;
 		if (!chatId) return;
 		const currentAgentId = this.options.agentState.agentId;
-		if (next.agentId === currentAgentId && effectiveExecutorId(next.executorId) === effectiveExecutorId(this.options.agentState.executorId)) {
+		if (
+			next.agentId === currentAgentId &&
+			effectiveExecutorId(next.executorId) ===
+				effectiveExecutorId(this.options.agentState.executorId)
+		) {
 			this.handleModelChange(next.modelValue);
 			return;
 		}
 		void this.options.agentSwitch.switchAgent(chatId, next).catch((error) => {
-			this.options.chatState.appendLocalNotice('error', errorDetail(error));
+			this.options.chatState.appendLocalNoticeForChat(chatId, 'error', errorDetail(error));
 		});
 	}
 
@@ -77,21 +128,6 @@ export class ConversationSettingsController {
 		if (!chatId) return;
 		const agentId = agentState.agentId;
 		const selection = modelCatalog.selectionFor(agentId, model);
-		if (this.options.executionDraft.isHandoffPending) {
-			agentState.setModelSelection({
-				model,
-				apiProviderId: selection.apiProviderId,
-				modelEndpointId: selection.modelEndpointId,
-				modelProtocol: selection.modelProtocol,
-			});
-			this.options.executionDraft.patchSelection({
-				model: selection.model,
-				apiProviderId: selection.apiProviderId,
-				modelEndpointId: selection.modelEndpointId,
-				modelProtocol: selection.modelProtocol,
-			});
-			return;
-		}
 		if (sessions.isDraft(chatId)) {
 			agentState.setModelSelection({
 				model,
@@ -115,15 +151,19 @@ export class ConversationSettingsController {
 		}
 
 		const currentModel = sessions.selectedChat?.model ?? agentState.model;
-		const currentEndpointId =
-			sessions.selectedChat?.modelEndpointId ?? agentState.modelEndpointId;
-		const previousSelection = modelCatalog.getModelForSelection(agentId, currentModel, currentEndpointId);
+		const currentEndpointId = sessions.selectedChat?.modelEndpointId ?? agentState.modelEndpointId;
+		const previousSelection = modelCatalog.getModelForSelection(
+			agentId,
+			currentModel,
+			currentEndpointId,
+		);
 		const wasLocal = modelCatalog.isLocalModel(agentId, currentModel, currentEndpointId);
 		const isLocal = modelCatalog.isLocalModel(agentId, model, selection.modelEndpointId);
 		// Unavailable selections need the server's historical classification.
 		if (previousSelection && wasLocal !== isLocal) {
 			const target = isLocal ? m.chat_model_kind_local() : m.chat_model_kind_cloud();
-			chatState.appendLocalNotice(
+			chatState.appendLocalNoticeForChat(
+				chatId,
 				'error',
 				m.chat_notice_cannot_switch_model_mid_session({ target, model: selection.model }),
 			);
@@ -131,42 +171,52 @@ export class ConversationSettingsController {
 		}
 
 		const previousModel = sessions.selectedChat?.model ?? agentState.model;
-		const previousApiProviderId =
-			sessions.selectedChat?.apiProviderId ?? agentState.apiProviderId;
-		const previousEndpointId =
-			sessions.selectedChat?.modelEndpointId ?? agentState.modelEndpointId;
-		const previousProtocol =
-			sessions.selectedChat?.modelProtocol ?? agentState.modelProtocol;
+		const previousApiProviderId = sessions.selectedChat?.apiProviderId ?? agentState.apiProviderId;
+		const previousEndpointId = sessions.selectedChat?.modelEndpointId ?? agentState.modelEndpointId;
+		const previousProtocol = sessions.selectedChat?.modelProtocol ?? agentState.modelProtocol;
 		agentState.setModelSelection({
 			model,
 			apiProviderId: selection.apiProviderId,
 			modelEndpointId: selection.modelEndpointId,
 			modelProtocol: selection.modelProtocol,
 		});
-		void updateChatModel({
-			chatId,
-			model: selection.model,
-			apiProviderId: selection.apiProviderId,
-			modelEndpointId: selection.modelEndpointId,
-			modelProtocol: selection.modelProtocol,
-		}).catch((error) => {
-			agentState.setModelSelection({
-				model: modelCatalog.selectionValueFor(agentId, previousModel, previousEndpointId),
-				apiProviderId: previousApiProviderId ?? null,
-				modelEndpointId: previousEndpointId ?? null,
-				modelProtocol: previousProtocol ?? null,
-			});
-			sessions.patchChat(chatId, {
-				model: previousModel,
-				apiProviderId: previousApiProviderId ?? null,
-				modelEndpointId: previousEndpointId ?? null,
-				modelProtocol: previousProtocol ?? null,
-			});
-			chatState.appendLocalNotice(
-				'error',
-				m.chat_notice_failed_update_model({ detail: errorDetail(error) }),
-			);
-		});
+		const mutation = this.#beginMutation(chatId, 'model');
+		this.#send(chatId, () =>
+			updateChatModel({
+				chatId,
+				expectedAgentOwnershipEpoch: mutation.epoch,
+				model: selection.model,
+				apiProviderId: selection.apiProviderId,
+				modelEndpointId: selection.modelEndpointId,
+				modelProtocol: selection.modelProtocol,
+			})
+				.then(async () => {
+					if (mutation.isCurrent()) await sessions.quietRefreshChats();
+				})
+				.catch((error) => {
+					if (!mutation.isCurrent()) return;
+					if (sessions.selectedChatId === chatId)
+						agentState.setModelSelection({
+							model: modelCatalog.selectionValueFor(agentId, previousModel, previousEndpointId),
+							apiProviderId: previousApiProviderId ?? null,
+							modelEndpointId: previousEndpointId ?? null,
+							modelProtocol: previousProtocol ?? null,
+						});
+					sessions.patchChat(chatId, {
+						model: previousModel,
+						apiProviderId: previousApiProviderId ?? null,
+						modelEndpointId: previousEndpointId ?? null,
+						modelProtocol: previousProtocol ?? null,
+					});
+					chatState.appendLocalNoticeForChat(
+						chatId,
+						'error',
+						m.chat_notice_failed_update_model({ detail: errorDetail(error) }),
+					);
+					throw error;
+				})
+				.finally(mutation.finish),
+		);
 		sessions.patchChat(chatId, {
 			model: selection.model,
 			apiProviderId: selection.apiProviderId,
@@ -179,11 +229,6 @@ export class ConversationSettingsController {
 		const { sessions, agentState, modelCatalog, chatState } = this.options;
 		const chatId = sessions.selectedChatId;
 		if (!chatId) return;
-		if (this.options.executionDraft.isHandoffPending) {
-			agentState.permissionMode = mode;
-			this.options.executionDraft.patchSelection({ permissionMode: mode });
-			return;
-		}
 		if (sessions.isDraft(chatId)) {
 			sessions.patchDraftStartup(chatId, { permissionMode: mode });
 			sessions.patchChat(chatId, { permissionMode: mode });
@@ -194,25 +239,35 @@ export class ConversationSettingsController {
 			modelCatalog.getPermissionModes(agentState.agentId),
 		);
 		sessions.patchChat(chatId, { permissionMode: mode });
-		void updateExecutionSettings({ chatId, permissionMode: mode }).catch((error) => {
-			agentState.permissionMode = previous;
-			sessions.patchChat(chatId, { permissionMode: previous });
-			chatState.appendLocalNotice(
-				'error',
-				m.chat_notice_failed_update_permission_mode({ detail: errorDetail(error) }),
-			);
-		});
+		const mutation = this.#beginMutation(chatId, 'permission');
+		this.#send(chatId, () =>
+			updateExecutionSettings({
+				chatId,
+				permissionMode: mode,
+				expectedAgentOwnershipEpoch: mutation.epoch,
+			})
+				.then(async () => {
+					if (mutation.isCurrent()) await sessions.quietRefreshChats();
+				})
+				.catch((error) => {
+					if (!mutation.isCurrent()) return;
+					if (sessions.selectedChatId === chatId) agentState.permissionMode = previous;
+					sessions.patchChat(chatId, { permissionMode: previous });
+					chatState.appendLocalNoticeForChat(
+						chatId,
+						'error',
+						m.chat_notice_failed_update_permission_mode({ detail: errorDetail(error) }),
+					);
+					throw error;
+				})
+				.finally(mutation.finish),
+		);
 	}
 
 	handleThinkingModeChange(mode: ThinkingMode): void {
 		const { sessions, agentState, modelCatalog, chatState } = this.options;
 		const chatId = sessions.selectedChatId;
 		if (!chatId) return;
-		if (this.options.executionDraft.isHandoffPending) {
-			agentState.thinkingMode = mode;
-			this.options.executionDraft.patchSelection({ thinkingMode: mode });
-			return;
-		}
 		if (sessions.isDraft(chatId)) {
 			sessions.patchDraftStartup(chatId, { thinkingMode: mode });
 			sessions.patchChat(chatId, { thinkingMode: mode });
@@ -223,14 +278,29 @@ export class ConversationSettingsController {
 			modelCatalog.getThinkingModes(agentState.agentId),
 		);
 		sessions.patchChat(chatId, { thinkingMode: mode });
-		void updateExecutionSettings({ chatId, thinkingMode: mode }).catch((error) => {
-			agentState.thinkingMode = previous;
-			sessions.patchChat(chatId, { thinkingMode: previous });
-			chatState.appendLocalNotice(
-				'error',
-				m.chat_notice_failed_update_thinking_mode({ detail: errorDetail(error) }),
-			);
-		});
+		const mutation = this.#beginMutation(chatId, 'thinking');
+		this.#send(chatId, () =>
+			updateExecutionSettings({
+				chatId,
+				thinkingMode: mode,
+				expectedAgentOwnershipEpoch: mutation.epoch,
+			})
+				.then(async () => {
+					if (mutation.isCurrent()) await sessions.quietRefreshChats();
+				})
+				.catch((error) => {
+					if (!mutation.isCurrent()) return;
+					if (sessions.selectedChatId === chatId) agentState.thinkingMode = previous;
+					sessions.patchChat(chatId, { thinkingMode: previous });
+					chatState.appendLocalNoticeForChat(
+						chatId,
+						'error',
+						m.chat_notice_failed_update_thinking_mode({ detail: errorDetail(error) }),
+					);
+					throw error;
+				})
+				.finally(mutation.finish),
+		);
 	}
 
 	handleAgentSettingChange(descriptor: AgentSettingDescriptor, value: JsonValue): void {
@@ -241,10 +311,6 @@ export class ConversationSettingsController {
 		const next = withAgentSetting(previous, descriptor, value);
 		if (next === previous) return;
 		agentState.setAgentSettings(next);
-		if (this.options.executionDraft.isHandoffPending) {
-			this.options.executionDraft.patchSelection({ agentSettings: next });
-			return;
-		}
 		if (sessions.isDraft(chatId)) {
 			sessions.patchDraftStartup(chatId, { agentSettings: next });
 			sessions.patchChat(chatId, { agentSettings: next });
@@ -252,31 +318,35 @@ export class ConversationSettingsController {
 		}
 		sessions.patchChat(chatId, { agentSettings: next });
 		const agentSettingsPatch: JsonObject = { [descriptor.key]: value };
-		const mutation = Symbol(chatId);
-		this.#latestAgentSettingsMutationByChatId.set(chatId, mutation);
-		void updateExecutionSettings({ chatId, agentSettingsPatch })
-			.then((response) => {
-				if (this.#latestAgentSettingsMutationByChatId.get(chatId) !== mutation) return;
-				if (sessions.selectedChatId === chatId) {
-					agentState.setAgentSettings(response.agentSettings);
-				}
-				sessions.patchChat(chatId, { agentSettings: response.agentSettings });
+		const mutation = this.#beginMutation(chatId, 'agentSettings');
+		this.#send(chatId, () =>
+			updateExecutionSettings({
+				chatId,
+				agentSettingsPatch,
+				expectedAgentOwnershipEpoch: mutation.epoch,
 			})
-			.catch((error) => {
-				if (this.#latestAgentSettingsMutationByChatId.get(chatId) !== mutation) return;
-				if (sessions.selectedChatId === chatId) {
-					agentState.setAgentSettings(previous);
-				}
-				sessions.patchChat(chatId, { agentSettings: previous });
-				chatState.appendLocalNotice(
-					'error',
-					m.chat_notice_failed_update_agent_mode({ detail: errorDetail(error) }),
-				);
-			})
-			.finally(() => {
-				if (this.#latestAgentSettingsMutationByChatId.get(chatId) === mutation) {
-					this.#latestAgentSettingsMutationByChatId.delete(chatId);
-				}
-			});
+				.then(async (response) => {
+					if (!mutation.isCurrent()) return;
+					if (sessions.selectedChatId === chatId) {
+						agentState.setAgentSettings(response.agentSettings);
+					}
+					sessions.patchChat(chatId, { agentSettings: response.agentSettings });
+					await sessions.quietRefreshChats();
+				})
+				.catch((error) => {
+					if (!mutation.isCurrent()) return;
+					if (sessions.selectedChatId === chatId) {
+						agentState.setAgentSettings(previous);
+					}
+					sessions.patchChat(chatId, { agentSettings: previous });
+					chatState.appendLocalNoticeForChat(
+						chatId,
+						'error',
+						m.chat_notice_failed_update_agent_mode({ detail: errorDetail(error) }),
+					);
+					throw error;
+				})
+				.finally(mutation.finish),
+		);
 	}
 }

@@ -6,11 +6,12 @@ import type { ApiProtocol } from '$shared/api-providers';
 import { effectiveExecutorId } from '$shared/executors';
 import type { ResolvedModelSelection } from '$shared/start-selection';
 import { resolveConversationModelSelection } from './conversation-model-selection.js';
-import type { ExecutorHandoffDestination, ExecutorHandoffModel } from './executor-handoff-project.svelte.js';
 import type {
-	ConversationExecutionDraftState,
-	ConversationExecutionSelection,
-} from './conversation-execution-draft-state.svelte.js';
+	ExecutorHandoffDestination,
+	ExecutorHandoffModel,
+} from './executor-handoff-project.svelte.js';
+import type { ConversationExecutionSelection } from './conversation-execution-selection.js';
+import type { AgentHandoffRequest } from '$shared/chat-command-contracts';
 
 interface AgentSwitchSessions {
 	selectedChat: ChatSessionRecord | null;
@@ -51,7 +52,6 @@ interface AgentSwitchModelCatalog {
 export interface ConversationAgentSwitchDeps {
 	sessions: AgentSwitchSessions;
 	agentState: AgentSwitchState;
-	modelCatalog: AgentSwitchModelCatalog;
 	modelCatalogForExecutor(executorId: string): AgentSwitchModelCatalog;
 	chooseDestination(
 		chatId: string,
@@ -59,10 +59,7 @@ export interface ConversationAgentSwitchDeps {
 		path: string,
 		model: ExecutorHandoffModel,
 	): Promise<ExecutorHandoffDestination | null>;
-	executionDraft: Pick<
-		ConversationExecutionDraftState,
-		'replaceSelection' | 'replaceDestination' | 'resetToDurable' | 'isHandoffPending'
-	>;
+	commitHandoff(chatId: string, handoff: AgentHandoffRequest): Promise<void>;
 	getExecutionDefaults(
 		agentId: SessionAgentId,
 		executorId?: string,
@@ -76,29 +73,27 @@ export interface AgentSwitchSelection {
 }
 
 export class ConversationAgentSwitchService {
+	#selectionVersion = 0;
 	constructor(private readonly deps: ConversationAgentSwitchDeps) {}
 
 	async switchAgent(chatId: string, next: AgentSwitchSelection): Promise<void> {
+		const version = ++this.#selectionVersion;
 		const durable = this.deps.sessions.selectedChat;
 		if (!durable || durable.id !== chatId) return;
+		const ownershipEpoch = durable.agentOwnershipEpoch;
 		const executorId = effectiveExecutorId(next.executorId ?? durable.executorId);
 		if (
 			!this.deps.sessions.isDraft(chatId) &&
 			next.agentId === durable.agentId &&
 			executorId === effectiveExecutorId(durable.executorId)
 		) {
-			const selection = this.deps.executionDraft.resetToDurable();
-			if (selection) this.#applyAgentState(selection);
 			return;
 		}
 
 		let agentId = next.agentId;
 		let modelValue = next.modelValue;
-		let projectPath = this.deps.executionDraft.isHandoffPending
-			? this.deps.agentState.projectPath
-			: durable.projectPath;
+		let projectPath = durable.projectPath;
 		let model: ResolvedModelSelection;
-		let confirmedDestination = false;
 		if (executorId !== effectiveExecutorId(this.deps.agentState.executorId)) {
 			if (executorId === effectiveExecutorId(durable.executorId)) projectPath = durable.projectPath;
 			const current = this.deps.agentState;
@@ -118,7 +113,6 @@ export class ConversationAgentSwitchService {
 				...model,
 			});
 			if (!destination) return;
-			confirmedDestination = true;
 			projectPath = destination.projectPath;
 			model = destination.selection;
 			agentId = destination.selection.agentId;
@@ -126,14 +120,17 @@ export class ConversationAgentSwitchService {
 				.modelCatalogForExecutor(executorId)
 				.selectionValueFor(agentId, model.model, model.modelEndpointId);
 		} else {
-			const resolved = this.deps.modelCatalogForExecutor(executorId).selectionFor(agentId, modelValue);
+			const resolved = this.deps
+				.modelCatalogForExecutor(executorId)
+				.selectionFor(agentId, modelValue);
 			if (!resolved) return;
 			model = resolved;
 		}
 		if (
+			version !== this.#selectionVersion ||
 			!projectPath ||
 			this.deps.sessions.selectedChat?.id !== chatId ||
-			this.deps.sessions.selectedChat.agentOwnershipEpoch !== durable.agentOwnershipEpoch
+			this.deps.sessions.selectedChat.agentOwnershipEpoch !== ownershipEpoch
 		)
 			return;
 		if (
@@ -141,8 +138,6 @@ export class ConversationAgentSwitchService {
 			agentId === durable.agentId &&
 			executorId === effectiveExecutorId(durable.executorId)
 		) {
-			const selection = this.deps.executionDraft.resetToDurable();
-			if (selection) this.#applyAgentState(selection);
 			return;
 		}
 		const defaults = this.deps.getExecutionDefaults(agentId, executorId);
@@ -159,14 +154,23 @@ export class ConversationAgentSwitchService {
 			agentSettings: defaults.agentSettings,
 		};
 
-		this.#applyAgentState(selection, modelValue);
 		if (this.deps.sessions.isDraft(chatId)) {
+			this.#applyAgentState(selection, modelValue);
 			this.deps.sessions.patchDraftStartup(chatId, { ...selection, executorId });
 			this.deps.sessions.patchChat(chatId, selection);
 			return;
 		}
-		if (confirmedDestination) this.deps.executionDraft.replaceDestination(selection);
-		else this.deps.executionDraft.replaceSelection(selection);
+		if (!ownershipEpoch) throw new Error('The chat has no ownership epoch');
+		const { projectPath: destinationProjectPath, ...target } = selection;
+		await this.deps.commitHandoff(chatId, {
+			target: {
+				...target,
+				...(executorId !== effectiveExecutorId(durable.executorId)
+					? { projectPath: destinationProjectPath }
+					: {}),
+			},
+			expectedAgentOwnershipEpoch: ownershipEpoch,
+		});
 	}
 
 	#applyAgentState(selection: ConversationExecutionSelection, modelValue?: string): void {

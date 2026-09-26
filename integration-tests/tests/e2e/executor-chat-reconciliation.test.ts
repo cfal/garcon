@@ -7,7 +7,7 @@ import { withE2eFixture } from '../../support/e2e-fixture.js';
 import { SpaDriver } from '../../support/spa-driver.js';
 import { selectExecutor } from '../../support/executor-ui.js';
 
-test.each(['stay', 'chat switch', 'reload'])('pending agent choices reset on leaving but preserve composer text (%s)', async (leave) => {
+test.each(['stay', 'chat switch', 'reload'])('committed agent choices survive navigation and preserve composer text (%s)', async (leave) => {
   await withE2eFixture('executor-chat-reconciliation', async fixture => {
     const { client, directAgents, dirs, executionDirs } = fixture.integration;
     await client.put(`/api/v1/api-provider-assignments?executorId=local&apiProviderId=${directAgents.openAi.provider.providerId}`, {});
@@ -47,7 +47,10 @@ test.each(['stay', 'chat switch', 'reload'])('pending agent choices reset on lea
       await app.waitForButton('Anthropic');
       await app.clickButton('Anthropic');
       await app.waitForButton('Integration Anthropic Echo');
+      const committed = fixture.page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/chats/agent-handoff');
       await app.clickButton('Integration Anthropic Echo');
+      expect((await committed).status()).toBe(200);
+      await fixture.page.waitForFunction(() => document.querySelector<HTMLButtonElement>('[data-slot="composer-bottom-bar"] [data-executor-picker]')?.disabled === false);
     };
     await selectAnthropic();
     const composer = await fixture.page.$('[data-composer] textarea');
@@ -102,18 +105,15 @@ test.each(['stay', 'chat switch', 'reload'])('pending agent choices reset on lea
     await app.waitForAssistantMessageContaining(followup);
     await app.waitForChatProcessing(false);
     const handoff = (await runRequests()).at(-1)?.handoff;
-    if (leave !== 'stay') expect(handoff).toBeUndefined();
-    else {
-      expect(handoff?.target.agentId).toBe(directAgents.anthropic.agentId);
-      expect(handoff?.target.projectPath).toBeUndefined();
-    }
+    expect(handoff).toBeUndefined();
+    expect((await client.getChatSnapshot(chatId)).chat.agentId).toBe(directAgents.anthropic.agentId);
     expect((await client.getChatSnapshot(chatId)).chat.projectPath).toBe(projectPath);
     fixture.assertNoBrowserErrors();
   }, { executionBackend: 'remote-controller-dials', projectRoots: 'separate' });
 }, 90_000);
 
 test.each(['different agent', 'durable owner'])(
-  'returning from a pending remote switch applies the confirmed selection (%s)', async (selection) => {
+  'returning from a committed remote switch applies the confirmed folder (%s)', async (selection) => {
   await withE2eFixture('executor-return-to-chat-folder', async fixture => {
     const { client, directAgents, dirs, executionDirs } = fixture.integration;
     for (const agent of [directAgents.openAi, directAgents.anthropic]) {
@@ -134,7 +134,10 @@ test.each(['different agent', 'durable owner'])(
     await app.waitForButton('Anthropic');
     await app.clickButton('Anthropic');
     await app.waitForButton('Integration Anthropic Echo');
+    const agentCommitted = fixture.page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/chats/agent-handoff');
     await app.clickButton('Integration Anthropic Echo');
+    expect((await agentCommitted).status()).toBe(200);
+    await fixture.page.waitForFunction(() => document.querySelector<HTMLButtonElement>('[data-slot="composer-bottom-bar"] [data-executor-picker]')?.disabled === false);
     const picker = '[data-slot="composer-bottom-bar"] [data-executor-picker]';
     await selectExecutor(fixture.page, picker, 'Integration worker');
     await app.waitForText('Move to Integration worker');
@@ -157,7 +160,8 @@ test.each(['different agent', 'durable owner'])(
     await app.waitForButton('Executor: Local');
     await fixture.page.waitForFunction(() => !document.querySelector('[role="dialog"]'));
     expect(await fixture.page.$('[role="dialog"]')).toBeNull();
-    const expectedPath = selection === 'durable owner' ? dirs.project : confirmedPath;
+    const expectedPath = confirmedPath;
+    expect((await client.getChatSnapshot(chatId)).chat.projectPath).toBe(expectedPath);
     const [fileList] = await Promise.all([
       fixture.page.waitForRequest(request => new URL(request.url()).pathname === '/api/v1/files/list'),
       fixture.page.$eval('[data-composer] textarea', element => {

@@ -16,7 +16,6 @@ interface ComposerStateOptions {
 }
 
 export class ComposerState {
-	isSubmitting = $state(false);
 	isDragActive = $state(false);
 	draftAppendRequest = $state<{ chatId: string; requestId: number } | null>(null);
 	#nextDraftAppendRequestId = 0;

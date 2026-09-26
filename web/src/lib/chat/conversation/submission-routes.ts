@@ -1,8 +1,5 @@
 import type { ChatImage } from '$shared/chat-types';
 import type { ChatSessionRecord, ChatStartupConfig } from '$lib/types/chat-session';
-import type { ApiProtocol } from '$shared/api-providers';
-import type { AgentHandoffRequest } from '$shared/chat-command-contracts';
-import type { ChatListEntry } from '$shared/chat-list';
 import type { SessionControllerDeps } from './conversation-session-controller.svelte.js';
 import type { AcceptedInputSubmissionService } from './accepted-input-submission-service.js';
 import type { ConversationQueueController } from './conversation-queue-controller.svelte.js';
@@ -25,7 +22,6 @@ type RouteDeps = Pick<
 	| 'sessions'
 	| 'chatState'
 	| 'composerState'
-	| 'agentState'
 	| 'lifecycle'
 	| 'conversationUi'
 	| 'startupCoordinator'
@@ -50,13 +46,6 @@ type DraftSubmissionContext = Omit<SubmissionContext, 'startup'> & {
 	startup: ChatStartupConfig;
 };
 
-interface ExecutionModelSelection {
-	model: string;
-	apiProviderId: string | null;
-	modelEndpointId: string | null;
-	modelProtocol: ApiProtocol | null;
-}
-
 export function rejectMissingDraftStartup(
 	deps: Pick<RouteDeps, 'chatState'>,
 	chatId: string,
@@ -69,19 +58,27 @@ export function rejectMissingDraftStartup(
 	return 'rejected';
 }
 
-export function rejectUnavailableDraftStart(
-	deps: Pick<RouteDeps, 'chatState' | 'composerState' | 'sessions'>,
+export function restoreAutomaticStartDraft(
+	deps: Pick<RouteDeps, 'composerState' | 'sessions'>,
 	chatId: string,
 	text: string,
 	attachments: readonly File[],
-): ConversationSubmissionOutcome {
+): void {
 	const draft = deps.composerState.draftSnapshot(chatId);
-	const retainedText = draft.text === text ? text : [text, draft.text].filter(Boolean).join('\n\n');
+	const retainedText = draft.text.includes(text)
+		? draft.text
+		: [text, draft.text].filter(Boolean).join('\n\n');
 	deps.composerState.restoreDraftIfRevision(chatId, draft.revision, retainedText, [
 		...new Set([...attachments, ...draft.attachments]),
 	]);
 	// A blocked automatic start becomes an editable draft, never a reconnect retry.
 	deps.sessions.patchDraftStartup(chatId, { firstMessage: '', initialImages: [] });
+}
+
+export function rejectUnavailableDraftStart(
+	deps: Pick<RouteDeps, 'chatState'>,
+	chatId: string,
+): ConversationSubmissionOutcome {
 	deps.chatState.appendLocalNoticeForChat(
 		chatId,
 		'error',
@@ -178,14 +175,12 @@ export function submitSteerPreferenceRoute(
 		chat: ChatSessionRecord;
 		text: string;
 		supportsSteering: boolean;
-		handoffPending: boolean;
 	},
 ): Promise<ConversationSubmissionOutcome> {
 	const rejection = steerSubmissionRejection({
 		prompt: input.text,
 		supportsSteering: input.supportsSteering,
 		attachmentCount: deps.composerState.images.length,
-		handoffPending: input.handoffPending,
 	});
 	if (rejection) {
 		deps.chatState.appendLocalNoticeForChat(
@@ -261,8 +256,6 @@ export async function submitDraftRoute(
 				refreshUnavailableProject(deps, context, failure);
 			},
 		});
-	} finally {
-		deps.composerState.isSubmitting = false;
 	}
 }
 
@@ -271,9 +264,6 @@ export async function submitRunRoute(
 	acceptedInputs: AcceptedInputSubmissionService,
 	queue: ConversationQueueController,
 	context: SubmissionContext,
-	selection: ExecutionModelSelection,
-	handoff: AgentHandoffRequest | null,
-	onHandoffAccepted: (chat: ChatListEntry) => void,
 ): Promise<ConversationSubmissionOutcome> {
 	const submission = acceptedInputs.run({
 		chatId: context.chatId,
@@ -281,14 +271,6 @@ export async function submitRunRoute(
 		command: context.text,
 		images: context.images.length > 0 ? context.images : undefined,
 		excludedResendOrdinals: [...deps.chatState.excludedResendOrdinals],
-		...(handoff
-			? { handoff }
-			: {
-					permissionMode: deps.agentState.permissionMode,
-					thinkingMode: deps.agentState.thinkingMode,
-					agentSettings: deps.agentState.agentSettings,
-					...selection,
-				}),
 	});
 	const composerRevisionAfterClear = beginOptimisticInput(
 		deps,
@@ -297,11 +279,6 @@ export async function submitRunRoute(
 	);
 	try {
 		const response = await submission.submit();
-		if (handoff) {
-			if (!response.chat) throw new Error('Accepted handoff response omitted its chat projection');
-			deps.sessions.reconcileAcceptedHandoffProjection(response.chat);
-			onHandoffAccepted(response.chat);
-		}
 		deps.chatState.markOptimisticUserInputDelivered(submission.clientMessageId);
 		deps.chatState.clearResendExclusions();
 		deps.lifecycle.beginTurn(context.chatId);
@@ -320,8 +297,6 @@ export async function submitRunRoute(
 			refreshControl: () => queue.settleControlRefresh(queue.startControlRefresh(context.chatId)),
 			onRejected: (failure) => refreshUnavailableProject(deps, context, failure),
 		});
-	} finally {
-		deps.composerState.isSubmitting = false;
 	}
 }
 
@@ -359,7 +334,6 @@ function beginOptimisticInput(
 	);
 	if (deps.sessions.selectedChatId === context.chatId) deps.scrollToBottom();
 	const composerRevisionAfterClear = clearOwnedComposer(deps, context);
-	deps.composerState.isSubmitting = true;
 	return composerRevisionAfterClear;
 }
 

@@ -18,10 +18,11 @@
 	} from '$lib/components/model-selector/model-selector-types';
 
 	interface Props {
+		disabled?: boolean;
 		onChange?: (next: ModelSelectorChange) => void | Promise<void>;
 		onExecutorChange?: (executorId: string) => void;
 	}
-	let { onChange, onExecutorChange }: Props = $props();
+	let { onChange, onExecutorChange, disabled = false }: Props = $props();
 	const executors = getExecutors();
 	const agentState = getAgentState();
 	const sessions = getChatSessions();
@@ -64,6 +65,7 @@
 
 <div class="flex min-w-0 items-center gap-1 sm:gap-2">
 	<ExecutorSelector
+		{disabled}
 		{executors}
 		executorId={agentState.executorId}
 		service="agents"
@@ -73,6 +75,7 @@
 		}}
 	/>
 	<ComposerModelSelector
+		{disabled}
 		{value}
 		{mode}
 		onChange={(next) => onChange?.(next)}

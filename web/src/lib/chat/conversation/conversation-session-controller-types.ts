@@ -12,7 +12,7 @@ import type { StartupCoordinator } from '$lib/chat/conversation/startup-coordina
 import type { SessionAgentId } from '$lib/types/app';
 import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte.js';
 import type { ProjectTarget } from '$shared/project-resolution';
-import type { ConversationExecutionSelection } from './conversation-execution-draft-state.svelte.js';
+import type { ConversationExecutionSelection } from './conversation-execution-selection.js';
 
 type SessionTranscriptState = Pick<
 	ActiveTranscriptPort,
@@ -57,7 +57,6 @@ type SessionComposerState = Pick<
 	| 'inputText'
 	| 'images'
 	| 'contentRevision'
-	| 'isSubmitting'
 	| 'clearAfterSubmit'
 	| 'clearImages'
 	| 'draftSnapshot'

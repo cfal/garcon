@@ -50,7 +50,10 @@ import type { TranscriptMessage } from '$shared/chat-view';
 import type { ConversationSubmissionOutcome } from './conversation-submission-outcome.js';
 import * as m from '$lib/paraglide/messages.js';
 import type { ReorderChatResponse } from '$shared/chat-order-contracts';
-import type { ApplyChatTagDeltaRequest, ChatTagsMutationResponse } from '$shared/chat-tag-mutations';
+import type {
+	ApplyChatTagDeltaRequest,
+	ChatTagsMutationResponse,
+} from '$shared/chat-tag-mutations';
 import type { ChatTagReconciliationKind } from '$lib/chat/sessions/chat-sessions-contract.js';
 import { ChatTagMutationBlockedError } from '$lib/chat/sessions/chat-tag-mutation-result.js';
 
@@ -74,11 +77,7 @@ interface SlashCommandChatState {
 	isUserScrolledUp: boolean;
 	getCursor(): { transcriptViewId: string; lastOrdinal: number };
 	appendLocalNotice(noticeType: LocalNoticeType, content: string): void;
-	appendLocalNoticeForChat(
-		chatId: string,
-		noticeType: LocalNoticeType,
-		content: string,
-	): void;
+	appendLocalNoticeForChat(chatId: string, noticeType: LocalNoticeType, content: string): void;
 	noticeRevisionForChat(chatId: string): number;
 	clearLocalNoticesForChat(chatId: string, throughRevision?: number): void;
 }
@@ -164,9 +163,8 @@ export class ConversationSlashCommandService {
 		text: string;
 		images: File[];
 		ownsComposer: boolean;
-		handoffPending: boolean;
 	}): SlashCommandSubmissionResolution {
-		const { chatId, chat, text, images, ownsComposer, handoffPending } = input;
+		const { chatId, chat, text, images, ownsComposer } = input;
 		const rename = parseRenameCommand(text);
 		if (rename) {
 			return {
@@ -208,7 +206,6 @@ export class ConversationSlashCommandService {
 				prompt,
 				supportsSteering: modelCatalog.supportsSteering(agentId),
 				attachmentCount: images.length,
-				handoffPending,
 			});
 			if (rejection) {
 				this.deps.chatState.appendLocalNotice('error', steerSubmissionRejectionNotice(rejection));
@@ -431,9 +428,7 @@ export class ConversationSlashCommandService {
 			try {
 				mutation = await deps.sessions.applyChatTagDelta({
 					chatId,
-					...(command.action === 'add'
-						? { addTags: command.tags }
-						: { removeTags: command.tags }),
+					...(command.action === 'add' ? { addTags: command.tags } : { removeTags: command.tags }),
 				});
 			} catch (error) {
 				this.#restoreComposerIfUntouched({
@@ -450,9 +445,7 @@ export class ConversationSlashCommandService {
 				);
 				return 'rejected';
 			}
-			const changedTags = command.action === 'add'
-				? mutation.addedTags
-				: mutation.removedTags;
+			const changedTags = command.action === 'add' ? mutation.addedTags : mutation.removedTags;
 
 			if (deps.chatState.activeChatId === chatId) {
 				const content =
@@ -686,13 +679,16 @@ export class ConversationSlashCommandService {
 
 			const forkChatId = createClientChatId();
 			const model = sourceChat.model ?? deps.agentState.model;
-			const selection = resolveConversationModelSelection({
-				agentId: sourceChat.agentId,
-				model,
-				apiProviderId: sourceChat.apiProviderId ?? null,
-				modelEndpointId: sourceChat.modelEndpointId ?? null,
-				modelProtocol: sourceChat.modelProtocol ?? null,
-			}, deps.modelCatalogForExecutor(effectiveExecutorId(sourceChat.executorId)));
+			const selection = resolveConversationModelSelection(
+				{
+					agentId: sourceChat.agentId,
+					model,
+					apiProviderId: sourceChat.apiProviderId ?? null,
+					modelEndpointId: sourceChat.modelEndpointId ?? null,
+					modelProtocol: sourceChat.modelProtocol ?? null,
+				},
+				deps.modelCatalogForExecutor(effectiveExecutorId(sourceChat.executorId)),
+			);
 			const submission = this.acceptedInputs.fork({
 				sourceChatId,
 				chatId: forkChatId,
@@ -754,11 +750,7 @@ export class ConversationSlashCommandService {
 		try {
 			await this.#performForkOnly(sourceChatId, upToOrdinal, source);
 		} catch (error) {
-			this.deps.chatState.appendLocalNoticeForChat(
-				sourceChatId,
-				'error',
-				forkFailureNotice(error),
-			);
+			this.deps.chatState.appendLocalNoticeForChat(sourceChatId, 'error', forkFailureNotice(error));
 		}
 	}
 
@@ -792,8 +784,7 @@ export class ConversationSlashCommandService {
 		} catch (error) {
 			const defaultRefetch = this.deps.refetchTranscript;
 			const refetchTranscript =
-				source?.refetchTranscript ??
-				(defaultRefetch ? () => defaultRefetch(sourceChatId) : null);
+				source?.refetchTranscript ?? (defaultRefetch ? () => defaultRefetch(sourceChatId) : null);
 			if (!selection || !isStaleForkPointError(error) || !refetchTranscript) {
 				throw error;
 			}

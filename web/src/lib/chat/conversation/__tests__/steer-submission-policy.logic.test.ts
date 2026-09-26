@@ -11,7 +11,6 @@ describe('steerSubmissionRejection', () => {
 			prompt: 'Focus on the failing test',
 			supportsSteering: true,
 			attachmentCount: 0,
-			handoffPending: false,
 			...overrides,
 		});
 
@@ -25,14 +24,10 @@ describe('steerSubmissionRejection', () => {
 				prompt: ' ',
 				supportsSteering: false,
 				attachmentCount: 1,
-				handoffPending: true,
 			}),
 		).toBe('prompt-required');
-		expect(validate({ supportsSteering: false, attachmentCount: 1, handoffPending: true })).toBe(
-			'unsupported',
-		);
-		expect(validate({ attachmentCount: 1, handoffPending: true })).toBe('attachments-unavailable');
-		expect(validate({ handoffPending: true })).toBe('handoff-pending');
+		expect(validate({ supportsSteering: false, attachmentCount: 1 })).toBe('unsupported');
+		expect(validate({ attachmentCount: 1 })).toBe('attachments-unavailable');
 	});
 
 	it('maps every rejection to the existing localized notice', () => {
@@ -43,7 +38,6 @@ describe('steerSubmissionRejection', () => {
 		expect(steerSubmissionRejectionNotice('attachments-unavailable')).toBe(
 			'Remove attachments before steering the active turn.',
 		);
-		expect(steerSubmissionRejectionNotice('handoff-pending')).toContain('another agent');
 	});
 
 	it('uses command-neutral copy for shortcut eligibility failures', () => {

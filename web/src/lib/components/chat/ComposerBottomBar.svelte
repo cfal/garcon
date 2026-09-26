@@ -46,6 +46,7 @@
 		showAddMenu?: boolean;
 		showSendButton?: boolean;
 		addMenuDisabled?: boolean;
+		settingsDisabled?: boolean;
 		isPromptTransformPending?: boolean;
 		promptTransformStatus?: string;
 	}
@@ -76,6 +77,7 @@
 		showAddMenu = true,
 		showSendButton = true,
 		addMenuDisabled = false,
+		settingsDisabled = false,
 		isPromptTransformPending = false,
 		promptTransformStatus = m.snippets_expanding(),
 	}: Props = $props();
@@ -137,7 +139,11 @@
 	);
 </script>
 
-<div class="mt-1 w-full min-w-0 max-w-full px-2 py-1.5" style="container: composer-controls / inline-size" data-slot="composer-bottom-bar">
+<div
+	class="mt-1 w-full min-w-0 max-w-full px-2 py-1.5"
+	style="container: composer-controls / inline-size"
+	data-slot="composer-bottom-bar"
+>
 	<div
 		class="flex min-w-0 items-center gap-1 sm:gap-2 {mobileRightGroupFullRow
 			? 'flex-wrap'
@@ -160,6 +166,7 @@
 						class="inline-flex size-9 items-center justify-center rounded-lg border transition-colors {activePermission?.toneClass}"
 						title={activePermission?.label ?? m.chat_composer_permission_mode()}
 						aria-label={permissionControlLabel}
+						disabled={settingsDisabled}
 					>
 						{#if activePermission}
 							<ComposerModeIcon iconId={activePermission.iconId} class="size-4" />
@@ -169,6 +176,7 @@
 						{#each permissionOptions as option (option.value)}
 							<DropdownMenuItem
 								onclick={() => onPermissionSelect(option.value)}
+								disabled={settingsDisabled}
 								class="items-start"
 							>
 								<ComposerModeIcon iconId={option.iconId} class="mt-0.5 size-4" />
@@ -190,6 +198,7 @@
 						class="inline-flex size-9 items-center justify-center rounded-lg border transition-colors {activeThinking?.toneClass}"
 						title={activeThinking?.label ?? m.chat_composer_thinking_effort()}
 						aria-label={thinkingControlLabel}
+						disabled={settingsDisabled}
 					>
 						{#if activeThinking}
 							<ComposerModeIcon
@@ -203,6 +212,7 @@
 						{#each thinkingOptions as option (option.value)}
 							<DropdownMenuItem
 								onclick={() => onThinkingSelect(option.value)}
+								disabled={settingsDisabled}
 								class={option.rainbow ? 'rainbow-ultra-surface items-start' : 'items-start'}
 								data-thinking-mode={option.value}
 								data-rainbow={option.rainbow ? 'true' : undefined}
@@ -215,9 +225,7 @@
 								<div class="min-w-0">
 									<div class="font-medium">{option.label}</div>
 									<div
-										class={option.rainbow
-											? 'text-xs text-white'
-											: 'text-xs text-muted-foreground'}
+										class={option.rainbow ? 'text-xs text-white' : 'text-xs text-muted-foreground'}
 									>
 										{option.description}
 									</div>

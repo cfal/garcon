@@ -35,7 +35,6 @@ describe('ComposerState', () => {
 		const { composer: state } = createComposer();
 		expect(state.inputText).toBe('');
 		expect(state.images).toEqual([]);
-		expect(state.isSubmitting).toBe(false);
 		expect(state.isDragActive).toBe(false);
 	});
 

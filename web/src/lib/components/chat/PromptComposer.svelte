@@ -162,9 +162,12 @@
 	const snippetInteractionKey = $derived.by(() => {
 		const chat = sessions.selectedChat;
 		return chat
-			? [chat.id, chat.status, agentState.executorId, agentState.projectPath || chat.projectPath].join(
-					'\u0000',
-				)
+			? [
+					chat.id,
+					chat.status,
+					agentState.executorId,
+					agentState.projectPath || chat.projectPath,
+				].join('\u0000')
 			: '';
 	});
 	const snippetContextHint = $derived(
@@ -188,8 +191,10 @@
 	const selectedProjectTarget = $derived(projectState.target);
 	const selectedProjectResolution = $derived(projectState.snapshot);
 	const showProjectNotice = $derived(
-		executors.isReady(agentState.executorId) && selectedProjectTarget !== null &&
-		(selectedProjectResolution.kind === 'unavailable' || selectedProjectResolution.kind === 'request-failed'),
+		executors.isReady(agentState.executorId) &&
+			selectedProjectTarget !== null &&
+			(selectedProjectResolution.kind === 'unavailable' ||
+				selectedProjectResolution.kind === 'request-failed'),
 	);
 	const completionProjectPath = $derived(projectState.completionProjectPath);
 	const canChooseProjectFolder = $derived(
@@ -623,13 +628,14 @@
 	const thinkingReducedMotion = $derived(selectedIsProcessing && localSettings.reduceMotion);
 	const capabilityAgentId = $derived(sessions.selectedChat?.agentId ?? agentState.agentId);
 	const isDraftStartupSubmitting = $derived(
-		composerState.isSubmitting && sessions.selectedChat?.status === 'draft',
+		directAdmissionPending && sessions.selectedChat?.status === 'draft',
 	);
 	const isQueueMode = $derived(requiresQueuedSubmission);
 	const hasQueuedAttachmentConflict = $derived(isQueueMode && composerState.images.length > 0);
 	const isDisabled = $derived(isDraftStartupSubmitting);
 	const controllerCommand = $derived(
-		sessions.selectedChat?.status === 'running' && isControllerSlashCommand(composerState.inputText),
+		sessions.selectedChat?.status === 'running' &&
+			isControllerSlashCommand(composerState.inputText),
 	);
 	// Loading is explained by the disabled send button so the composer keeps its height.
 	const modelsLoading = $derived(
@@ -646,8 +652,10 @@
 			isDisabled ||
 				directAdmissionPending ||
 				promptTransformPending ||
-				(!controllerCommand && (!executors.isReady(agentState.executorId) ||
-					!modelCatalog.isValidated || !providerAvailable)),
+				(!controllerCommand &&
+					(!executors.isReady(agentState.executorId) ||
+						!modelCatalog.isValidated ||
+						!providerAvailable)),
 			composerState.inputText,
 			composerState.images.length,
 		) && !hasQueuedAttachmentConflict,
@@ -724,7 +732,12 @@
 				onClose={() => ui.closeFileMenu()}
 			/>
 		{/if}
-		{#if !showProjectNotice}<ComposerExecutionNotice executorId={agentState.executorId} {executors} catalog={modelCatalog} {providerAvailable} />{/if}
+		{#if !showProjectNotice}<ComposerExecutionNotice
+				executorId={agentState.executorId}
+				{executors}
+				catalog={modelCatalog}
+				{providerAvailable}
+			/>{/if}
 		<ComposerSnippetPalette
 			open={ui.snippetPalette.isOpen}
 			onOpenChange={(nextOpen) => {
@@ -873,6 +886,7 @@
 				canRefinePrompt={promptRefinement.canStart}
 				isPromptRefinementPending={promptRefinement.pending}
 				addMenuDisabled={isDisabled}
+				settingsDisabled={directAdmissionPending}
 				isPromptTransformPending={promptTransformPending}
 				{promptTransformStatus}
 				{permissionOptions}
@@ -897,11 +911,15 @@
 						descriptors={modelCatalog.getAgentSettingsDescriptors(agentState.agentId)}
 						envelope={agentState.agentSettings}
 						onChange={(descriptor, value) => onAgentSettingChange?.(descriptor, value)}
-						disabled={!onAgentSettingChange}
+						disabled={!onAgentSettingChange || directAdmissionPending}
 					/>
 				{/snippet}
 				{#snippet modelSelector()}
-					<PromptComposerModelSelector onChange={onModelChange} {onExecutorChange} />
+					<PromptComposerModelSelector
+						onChange={onModelChange}
+						{onExecutorChange}
+						disabled={directAdmissionPending}
+					/>
 				{/snippet}
 			</ComposerBottomBar>
 		</form>

@@ -1,4 +1,4 @@
-import type { ConversationExecutionSelection } from './conversation-execution-draft-state.svelte.js';
+import type { ConversationExecutionSelection } from './conversation-execution-selection.js';
 
 export type ConversationModelSelection = Pick<
 	ConversationExecutionSelection,

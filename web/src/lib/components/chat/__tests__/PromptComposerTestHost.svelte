@@ -64,7 +64,6 @@
 		selectedThinkingMode?: ChatSessionRecord['thinkingMode'];
 		selectedStatus?: ChatStatus;
 		selectedIsProcessing?: boolean;
-		isSubmitting?: boolean;
 		isVisible?: boolean;
 		isPresented?: boolean;
 		focusRequestToken?: number;
@@ -102,7 +101,6 @@
 		selectedThinkingMode = 'none',
 		selectedStatus = 'running',
 		selectedIsProcessing = false,
-		isSubmitting = false,
 		isVisible = true,
 		isPresented,
 		focusRequestToken = 0,
@@ -170,7 +168,11 @@
 	export function applyExecutors(snapshot: readonly ExecutorSnapshot[]): void {
 		executors.applySnapshot(snapshot);
 	}
-	const projectResolution = new ProjectResolutionStore(getInitialProjectResolver(), undefined, executors);
+	const projectResolution = new ProjectResolutionStore(
+		getInitialProjectResolver(),
+		undefined,
+		executors,
+	);
 	const modelOptionsByAgent: Record<string, ModelOption[]> = {
 		claude: [{ value: 'opus', label: 'Opus', supportsImages: true }],
 		codex: [{ value: 'gpt-5', label: 'GPT-5', supportsImages: true }],
@@ -198,7 +200,15 @@
 		version: 1,
 		features: {
 			transcriptSearch: { enabled: false },
-			agentCommands: { enabled: true, chatIdDiscovery: true, sendMessage: true, startAgent: true, resumeAgent: true, schedule: true, tickets: true },
+			agentCommands: {
+				enabled: true,
+				chatIdDiscovery: true,
+				sendMessage: true,
+				startAgent: true,
+				resumeAgent: true,
+				schedule: true,
+				tickets: true,
+			},
 		},
 		ui: {},
 		uiEffective: {},
@@ -269,10 +279,6 @@
 	});
 
 	$effect(() => {
-		composer.isSubmitting = isSubmitting;
-	});
-
-	$effect(() => {
 		agent.executorId = selectedExecutorId;
 		agent.setAgentId(selectedAgentId);
 		agent.setThinkingMode(selectedThinkingMode);
@@ -330,7 +336,9 @@
 	} as never);
 	const fallbackCatalog = {
 		isValidated: true,
-		forExecutor() { return this; },
+		forExecutor() {
+			return this;
+		},
 		version: 0,
 		getSelectableAgents: () => selectableAgents,
 		getAgent: (agentId: string) => ({

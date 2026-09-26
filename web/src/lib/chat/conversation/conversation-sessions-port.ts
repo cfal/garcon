@@ -15,6 +15,7 @@ export type ConversationSessionsPort = Pick<
 	| 'processingPhase'
 	| 'upsertServerChat'
 	| 'reconcileAcceptedHandoffProjection'
+	| 'quietRefreshChats'
 	| 'observeCommandTagMutation'
 	| 'setSelectedChatId'
 	| 'renameChat'

@@ -4,6 +4,8 @@ import type { AgentSettingDescriptor, AgentSettingsEnvelope } from '$shared/agen
 import type { ExecutionSettingsPatchResponse } from '$shared/chat-command-contracts';
 import type { ResolvedModelSelection } from '$shared/start-selection';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatListEntry, ChatListResponse } from '$shared/chat-list';
+import { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte';
 import {
 	ConversationSettingsController,
 	type ConversationSettingsControllerOptions,
@@ -16,10 +18,12 @@ vi.mock('$lib/api/chats.js', () => ({
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
-	const promise = new Promise<T>((resolvePromise) => {
+	let reject!: (reason: unknown) => void;
+	const promise = new Promise<T>((resolvePromise, rejectPromise) => {
 		resolve = resolvePromise;
+		reject = rejectPromise;
 	});
-	return { promise, resolve };
+	return { promise, resolve, reject };
 }
 
 function chat(): ChatSessionRecord {
@@ -65,11 +69,15 @@ const effort = {
 function createHarness() {
 	const selectedChat = chat();
 	const sessions = {
+		byId: { [selectedChat.id]: selectedChat },
 		selectedChatId: selectedChat.id as string | null,
 		selectedChat,
 		isDraft: vi.fn(() => false),
 		patchDraftStartup: vi.fn(),
-		patchChat: vi.fn(),
+		quietRefreshChats: vi.fn(async (): Promise<void> => {}),
+		patchChat: vi.fn((chatId: string, patch: Partial<ChatSessionRecord>) => {
+			Object.assign(sessions.byId[chatId], patch);
+		}),
 	};
 	const agentState = {
 		executorId: 'local',
@@ -78,26 +86,26 @@ function createHarness() {
 		apiProviderId: null,
 		modelEndpointId: null,
 		modelProtocol: null,
-		permissionMode: 'default' as const,
-		thinkingMode: 'none' as const,
+		permissionMode: selectedChat.permissionMode,
+		thinkingMode: selectedChat.thinkingMode,
 		agentSettings: selectedChat.agentSettings,
 		setAgentSettings: vi.fn((settings: AgentSettingsEnvelope) => {
 			agentState.agentSettings = settings;
 		}),
-		setModelSelection: vi.fn(),
+		setModelSelection: vi.fn((selection: ResolvedModelSelection) => {
+			Object.assign(agentState, selection);
+		}),
 	};
 	const modelCatalog = {
 		getModelForSelection: vi.fn<
 			ConversationSettingsControllerOptions['modelCatalog']['getModelForSelection']
 		>(() => ({ value: 'opus', label: 'Opus' })),
-		selectionFor: vi.fn(
-			(): ResolvedModelSelection => ({
-				model: 'opus',
-				apiProviderId: null,
-				modelEndpointId: null,
-				modelProtocol: null,
-			}),
-		),
+		selectionFor: vi.fn((_agentId: string, model: string): ResolvedModelSelection => ({
+			model,
+			apiProviderId: null,
+			modelEndpointId: null,
+			modelProtocol: null,
+		})),
 		selectionValueFor: vi.fn((_: unknown, model: string) => model),
 		isLocalModel: vi.fn<ConversationSettingsControllerOptions['modelCatalog']['isLocalModel']>(
 			() => false,
@@ -105,12 +113,8 @@ function createHarness() {
 		getPermissionModes: vi.fn(() => ['default'] as const),
 		getThinkingModes: vi.fn(() => ['none'] as const),
 	};
-	const chatState = { appendLocalNotice: vi.fn() };
+	const chatState = { appendLocalNoticeForChat: vi.fn() };
 	const agentSwitch = { switchAgent: vi.fn(async () => undefined) };
-	const executionDraft = {
-		isHandoffPending: false,
-		patchSelection: vi.fn(),
-	};
 	const options = {
 		get sessions() {
 			return sessions;
@@ -127,27 +131,29 @@ function createHarness() {
 		get agentSwitch() {
 			return agentSwitch;
 		},
-		get executionDraft() {
-			return executionDraft;
-		},
 	} satisfies ConversationSettingsControllerOptions;
 	return {
+		options,
 		controller: new ConversationSettingsController(options),
 		modelCatalog,
 		chatState,
 		sessions,
 		agentState,
-		executionDraft,
 	};
 }
 
 describe('ConversationSettingsController', () => {
 	beforeEach(() => {
-		vi.clearAllMocks();
+		vi.resetAllMocks();
 		vi.mocked(updateChatModel).mockResolvedValue({
 			success: true,
 			chatId: 'chat-1',
 			model: 'opus',
+		});
+		vi.mocked(updateExecutionSettings).mockResolvedValue({
+			success: true,
+			chatId: 'chat-1',
+			agentSettings: chat().agentSettings,
 		});
 	});
 
@@ -168,12 +174,46 @@ describe('ConversationSettingsController', () => {
 
 		expect(updateChatModel).toHaveBeenCalledWith({
 			chatId: 'chat-1',
+			expectedAgentOwnershipEpoch: 'epoch-1',
 			model: 'replacement',
 			apiProviderId: 'assigned',
 			modelEndpointId: 'assigned_endpoint',
 			modelProtocol: 'anthropic-messages',
 		});
-		expect(chatState.appendLocalNotice).not.toHaveBeenCalled();
+		expect(chatState.appendLocalNoticeForChat).not.toHaveBeenCalled();
+	});
+
+	it('refreshes committed settings after an older chat-list request completes', async () => {
+		const entry: ChatListEntry = {
+			...chat(),
+			orderGroup: 'normal',
+			model: 'opus',
+			activity: { createdAt: null, lastActivityAt: null, lastReadAt: null },
+			preview: { lastMessage: '' },
+			isActive: false,
+			agentOwnershipEpoch: 'epoch-1',
+		};
+		const stale = deferred<ChatListResponse>();
+		const latest: ChatListResponse = {
+			sessions: [{ ...entry, permissionMode: 'bypassPermissions' }],
+			total: 1,
+			lastSelectedChatId: entry.id,
+		};
+		const fetchChats = vi.fn().mockReturnValueOnce(stale.promise).mockResolvedValue(latest);
+		const sessions = new ChatSessionsStore({ listChats: fetchChats });
+		sessions.upsertFromServer([entry]);
+		sessions.selectedChatId = entry.id;
+		const before = sessions.quietRefreshChats();
+		const { options } = createHarness();
+		const controller = new ConversationSettingsController({ ...options, sessions });
+		controller.handlePermissionModeChange('bypassPermissions');
+		await vi.waitFor(() => expect(updateExecutionSettings).toHaveBeenCalledOnce());
+		await Promise.resolve();
+		stale.resolve({ sessions: [entry], total: 1, lastSelectedChatId: entry.id });
+		await before;
+		await controller.settlePending(entry.id);
+		expect(fetchChats).toHaveBeenCalledTimes(2);
+		expect(sessions.selectedChat?.permissionMode).toBe('bypassPermissions');
 	});
 
 	it('still blocks a known cloud-to-local switch before updating the chat', () => {
@@ -183,10 +223,14 @@ describe('ConversationSettingsController', () => {
 		controller.handleModelChange('local-model');
 
 		expect(updateChatModel).not.toHaveBeenCalled();
-		expect(chatState.appendLocalNotice).toHaveBeenCalledWith('error', expect.any(String));
+		expect(chatState.appendLocalNoticeForChat).toHaveBeenCalledWith(
+			'chat-1',
+			'error',
+			expect.any(String),
+		);
 	});
 
-	it('ignores an older agent-settings response after a newer mutation settles', async () => {
+	it('serializes settings requests and ignores a superseded response', async () => {
 		const first = deferred<ExecutionSettingsPatchResponse>();
 		const second = deferred<ExecutionSettingsPatchResponse>();
 		vi.mocked(updateExecutionSettings)
@@ -196,6 +240,7 @@ describe('ConversationSettingsController', () => {
 
 		controller.handleAgentSettingChange(effort, 'high');
 		controller.handleAgentSettingChange(effort, 'low');
+		expect(updateExecutionSettings).toHaveBeenCalledTimes(1);
 		const latest = { ownerId: 'claude', schemaVersion: 1, values: { effort: 'low' } };
 		second.resolve({ success: true, chatId: 'chat-1', agentSettings: latest });
 		await second.promise;
@@ -206,29 +251,110 @@ describe('ConversationSettingsController', () => {
 			agentSettings: { ownerId: 'claude', schemaVersion: 1, values: { effort: 'high' } },
 		});
 		await first.promise;
-		await Promise.resolve();
+		await controller.settlePending('chat-1');
 
 		expect(agentState.agentSettings).toEqual(latest);
 		expect(sessions.patchChat).toHaveBeenLastCalledWith('chat-1', { agentSettings: latest });
 	});
 
-	it('keeps target execution edits local while a handoff is pending', () => {
-		const { controller, sessions, executionDraft } = createHarness();
-		executionDraft.isHandoffPending = true;
+	it.each(['model', 'permission', 'thinking'] as const)(
+		'keeps a late %s failure out of another chat composer',
+		async (setting) => {
+			const pending = deferred<never>();
+			vi.mocked(updateChatModel).mockReturnValueOnce(pending.promise);
+			vi.mocked(updateExecutionSettings).mockReturnValueOnce(pending.promise);
+			const { controller, sessions, agentState, chatState } = createHarness();
+			if (setting === 'model') controller.handleModelChange('sonnet');
+			if (setting === 'permission') controller.handlePermissionModeChange('plan');
+			if (setting === 'thinking') controller.handleThinkingModeChange('high');
+			sessions.selectedChatId = 'chat-2';
+			agentState.model = 'other-model';
+			agentState.permissionMode = 'bypassPermissions';
+			agentState.thinkingMode = 'medium';
+			pending.reject(new Error('Synthetic rejection'));
+			await pending.promise.catch(() => undefined);
+			await Promise.resolve();
+			expect(agentState).toMatchObject({
+				model: 'other-model',
+				permissionMode: 'bypassPermissions',
+				thinkingMode: 'medium',
+			});
+			expect(chatState.appendLocalNoticeForChat).toHaveBeenCalledWith(
+				'chat-1',
+				'error',
+				expect.any(String),
+			);
+		},
+	);
 
-		controller.handleModelChange('gpt-5.5');
-		controller.handlePermissionModeChange('bypassPermissions');
-		controller.handleThinkingModeChange('high');
+	it.each(['model', 'permission', 'thinking'] as const)(
+		'ignores a superseded %s failure before sending the newer request',
+		async (setting) => {
+			const pending = deferred<never>();
+			vi.mocked(updateChatModel).mockReturnValueOnce(pending.promise);
+			vi.mocked(updateExecutionSettings)
+				.mockReturnValueOnce(pending.promise)
+				.mockResolvedValue({
+					success: true,
+					chatId: 'chat-1',
+					agentSettings: chat().agentSettings,
+				});
+			const { controller, sessions, agentState, chatState } = createHarness();
+			if (setting === 'model') {
+				controller.handleModelChange('sonnet');
+				controller.handleModelChange('new-model');
+			}
+			if (setting === 'permission') {
+				controller.handlePermissionModeChange('plan');
+				controller.handlePermissionModeChange('bypassPermissions');
+			}
+			if (setting === 'thinking') {
+				controller.handleThinkingModeChange('high');
+				controller.handleThinkingModeChange('medium');
+			}
+			await Promise.resolve();
+			await Promise.resolve();
+			const latest = { ...sessions.selectedChat };
+			const model = agentState.model;
+			pending.reject(new Error('Synthetic stale rejection'));
+			await pending.promise.catch(() => undefined);
+			await controller.settlePending('chat-1');
+			expect(sessions.selectedChat).toEqual(latest);
+			expect(agentState.model).toBe(model);
+			expect(chatState.appendLocalNoticeForChat).not.toHaveBeenCalled();
+		},
+	);
 
-		expect(executionDraft.patchSelection).toHaveBeenCalledWith(
-			expect.objectContaining({ model: 'opus' }),
-		);
-		expect(executionDraft.patchSelection).toHaveBeenCalledWith({
-			permissionMode: 'bypassPermissions',
-		});
-		expect(executionDraft.patchSelection).toHaveBeenCalledWith({ thinkingMode: 'high' });
-		expect(updateChatModel).not.toHaveBeenCalled();
-		expect(updateExecutionSettings).not.toHaveBeenCalled();
-		expect(sessions.patchChat).not.toHaveBeenCalled();
+	it('does not roll back settings across a durable ownership change', async () => {
+		const pending = deferred<never>();
+		vi.mocked(updateChatModel).mockReturnValueOnce(pending.promise);
+		const { controller, sessions, agentState } = createHarness();
+		controller.handleModelChange('sonnet');
+		sessions.selectedChat.agentOwnershipEpoch = 'epoch-2';
+		sessions.selectedChat.model = 'destination-model';
+		agentState.model = 'destination-model';
+		pending.reject(new Error('Synthetic stale rejection'));
+		await pending.promise.catch(() => undefined);
+		expect(agentState.model).toBe('destination-model');
+		expect(sessions.selectedChat.model).toBe('destination-model');
+	});
+
+	it('keeps submission pending until a successful write and its authoritative refresh settle', async () => {
+		const request = deferred<Awaited<ReturnType<typeof updateChatModel>>>();
+		const refresh = deferred<void>();
+		vi.mocked(updateChatModel).mockReturnValueOnce(request.promise);
+		const { controller, sessions } = createHarness();
+		sessions.quietRefreshChats.mockReturnValueOnce(refresh.promise);
+		controller.handleModelChange('sonnet');
+		const settled = vi.fn();
+		const waiting = controller.settlePending('chat-1').then(settled);
+		await Promise.resolve();
+		expect(settled).not.toHaveBeenCalled();
+		request.resolve({ success: true, chatId: 'chat-1', model: 'sonnet' });
+		await vi.waitFor(() => expect(sessions.quietRefreshChats).toHaveBeenCalledOnce());
+		expect(settled).not.toHaveBeenCalled();
+		refresh.resolve();
+		await waiting;
+		expect(settled).toHaveBeenCalledWith(true);
 	});
 });
