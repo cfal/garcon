@@ -97,7 +97,7 @@ export function integrationFixture(projectBasePath = '/test-project', executorId
 
 export async function remoteFixture(
   dialer: 'controller' | 'worker',
-  configure: (controller: WebSocketLink, worker: WebSocketLink) => void = () => {},
+  configure: (controller: WebSocketLink, worker: WebSocketLink, fixture: ReturnType<typeof integrationFixture>) => void = () => {},
   projectBasePath?: string,
 ) {
   const controller = new WebSocketLink({ ...linkOptions, role: 'controller' });
@@ -105,7 +105,7 @@ export async function remoteFixture(
   const fixture = integrationFixture(projectBasePath);
   const generations = [fixture];
   const scopes: ReturnType<typeof serveExecutionRuntime>[] = [];
-  configure(controller, worker);
+  configure(controller, worker, fixture);
   worker.onSession((session) => {
     scopes.push(serveExecutionRuntime(fixture.executor, new ExecutorRpc(session)));
   });

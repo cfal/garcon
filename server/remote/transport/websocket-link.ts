@@ -270,10 +270,15 @@ export class WebSocketLink {
       }
     }, this.options, executorId);
     this.#current = session;
-    for (const listener of this.#sessions) listener(session);
-    connection.session = session;
-    connection.frames = new SessionSocketFrames(connection.socket, () => this.#close(connection));
-    connection.hooks = session.attach(connection.frames);
+    try {
+      for (const listener of this.#sessions) listener(session);
+      connection.session = session;
+      connection.frames = new SessionSocketFrames(connection.socket, () => this.#close(connection));
+      connection.hooks = session.attach(connection.frames);
+    } catch (error) {
+      session.close(error instanceof Error ? error : new Error(String(error)));
+      throw error;
+    }
     if (connection.closed) { connection.hooks.disconnected(); return; }
     this.#ready.resolve(session);
     connection.heartbeat = setInterval(() => {

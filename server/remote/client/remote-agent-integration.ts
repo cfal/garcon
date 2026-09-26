@@ -6,10 +6,10 @@ import {
   type AgentIntegration,
   type AgentImportedTranscriptRow,
   type AgentProducerNotification,
+  type ExecutorCallOptions,
 } from '@garcon/server-agent-interface';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import type { ExecutorRpcMethods, IntegrationManifest } from '../transport/rpc-protocol.js';
-import type { ExecutorRpc } from '../transport/rpc.js';
 import type { RemoteSessionBacking } from './executor-client.js';
 
 const SINGLE_QUERY_RPC_GRACE_MS = 30_000;
@@ -46,12 +46,23 @@ export class RemoteAgentIntegration implements AgentIntegration {
   constructor(readonly manifest: IntegrationManifest, current: () => RemoteSessionBacking) {
     this.descriptor = manifest.descriptor;
     this.attachments = manifest.attachments;
-    const call = async <K extends keyof ExecutorRpcMethods>(method: K, request: ExecutorRpcMethods[K]['request'], options?: Parameters<ExecutorRpc['call']>[3]) => (
+    const call = async <K extends keyof ExecutorRpcMethods>(method: K, request: ExecutorRpcMethods[K]['request'], options?: ExecutorCallOptions) => (
       current().rpc.call(this.descriptor.id, method, request, options)
     );
+    const launch = async <K extends 'execution.start' | 'execution.resume' | 'compaction.compact'>(
+      method: K, request: ExecutorRpcMethods[K]['request'], options?: ExecutorCallOptions,
+    ) => {
+      const { rpc } = current();
+      return rpc.call(this.descriptor.id, method, request, {
+        ...options,
+        // Some providers return the handle only after the compaction turn ends.
+        timeoutMs: options?.timeoutMs ?? (method === 'compaction.compact' ? null : undefined),
+        onLateResult: (handle) => rpc.call(this.descriptor.id, 'execution.abort', handle),
+      });
+    };
     this.execution = {
-      start: (request, options) => call('execution.start', request, options),
-      resume: (request, options) => call('execution.resume', request, options),
+      start: (request, options) => launch('execution.start', request, options),
+      resume: (request, options) => launch('execution.resume', request, options),
       abort: (handle, options) => call('execution.abort', handle, options),
       runningSessions: (options) => call('execution.runningSessions', null, options),
     };
@@ -104,9 +115,17 @@ export class RemoteAgentIntegration implements AgentIntegration {
       ...(manifest.authMethods.loginStatus ? { loginStatus: (expectedSessionId?: string) => call('auth.loginStatus', { expectedSessionId }) } : {}),
     } : null;
     this.commands = cap.commands ? { discover: (projectPath, signal) => call('commands.discover', { projectPath }, { signal }) } : null;
-    this.compaction = cap.compaction ? { compact: (request, options) => call('compaction.compact', request, options) } : null;
+    this.compaction = cap.compaction ? { compact: (request, options) => launch('compaction.compact', request, options) } : null;
     this.forking = cap.forking ? {
-      fork: ({ signal, ...request }) => call('forking.fork', request, { signal }),
+      fork: async ({ signal, ...request }) => {
+        const { rpc } = current();
+        return rpc.call(this.descriptor.id, 'forking.fork', request, {
+          signal,
+          onLateResult: (outcome) => {
+            if (outcome.kind === 'materialized') return rpc.call(this.descriptor.id, 'forking.discard', outcome.session);
+          },
+        });
+      },
       discard: (request, signal) => call('forking.discard', request, { signal }),
     } : null;
     this.steering = cap.steering ? {
@@ -128,7 +147,9 @@ export class RemoteAgentIntegration implements AgentIntegration {
     const history = (source: 'legacyHistoryImport' | 'nativeHistoryImport'): AgentHistoryImport => ({
       async *load({ signal, ...request }) {
         const { rpc } = current();
-        const ref = await rpc.call(manifest.descriptor.id, 'history.open', { source, request }, { signal });
+        const close = (ref: ExecutorRpcMethods['history.open']['result']) =>
+          rpc.call(manifest.descriptor.id, 'history.close', ref, { timeoutMs: 2000 });
+        const ref = await rpc.call(manifest.descriptor.id, 'history.open', { source, request }, { signal, onLateResult: close });
         try {
           while (true) {
             const batch = await rpc.call(manifest.descriptor.id, 'history.next', ref, { signal });
@@ -136,7 +157,7 @@ export class RemoteAgentIntegration implements AgentIntegration {
             yield decodeRows(batch.rows);
           }
         } finally {
-          await rpc.call(manifest.descriptor.id, 'history.close', ref, { timeoutMs: 2000 }).catch(() => undefined);
+          await close(ref).catch(() => undefined);
         }
       },
     });
@@ -151,7 +172,15 @@ export class RemoteAgentIntegration implements AgentIntegration {
     this.configurationValidation = cap.configurationValidation ? { validate: (request) => call('configurationValidation.validate', request) } : null;
     this.sessionConfiguration = cap.sessionConfiguration ? { apply: (...args) => call('sessionConfiguration.apply', { args }) } : null;
     this.projectPathUpdates = cap.projectPathUpdates ? {
-      prepare: (request, options) => call('projectPathUpdates.prepare', request, options),
+      prepare: async (request, options) => {
+        const { rpc } = current();
+        return rpc.call(this.descriptor.id, 'projectPathUpdates.prepare', request, {
+          ...options,
+          onLateResult: (prepared) => {
+            if (prepared) return rpc.call(this.descriptor.id, 'projectPathUpdates.rollback', prepared.preparation);
+          },
+        });
+      },
       commit: (ref, options) => call('projectPathUpdates.commit', ref, options),
       rollback: (ref, options) => call('projectPathUpdates.rollback', ref, options),
     } : null;

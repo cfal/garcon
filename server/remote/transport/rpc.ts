@@ -6,6 +6,7 @@ import type { JsonObject } from '@garcon/common/json';
 import type { ExecutorRpcMethods, ExecutorRpcRequest, AgentProducerFrame } from './rpc-protocol.js';
 import type { SessionTransport } from './session-transport.js';
 import { DomainError } from '../../common/domain-error.js';
+import { createLogger } from '../../common/log.js';
 import { isErrorCode, type ErrorCode } from '../../../common/error-codes.js';
 import { TerminalError } from '../../../common/terminal-error.js';
 import { GitServiceError, isGitServiceErrorCode, type GitServiceErrorCode } from '../../../common/git-error.js';
@@ -28,9 +29,12 @@ type RpcFrame = ExecutorRpcRequest | AgentProducerFrame | TerminalNotification
   | { readonly type: 'error'; readonly id: string; readonly error: Failure }
   | { readonly type: 'cancel'; readonly id: string };
 
-export interface RpcCallOptions extends Omit<ExecutorCallOptions, 'timeoutMs'> {
+export interface RpcCallOptions<Result = unknown> extends Omit<ExecutorCallOptions, 'timeoutMs'> {
   readonly timeoutMs?: number | null;
+  readonly onLateResult?: (value: Result) => void | Promise<unknown>;
 }
+
+const log = createLogger('executor-rpc');
 
 type RpcReplyGuard = (bytes: number) => void;
 export type GuardRpcReply = (guard: RpcReplyGuard) => void;
@@ -38,6 +42,7 @@ type RpcHandler = (request: ExecutorRpcRequest, signal: AbortSignal, guardReply:
 
 export class ExecutorRpc {
   readonly #pending = new Map<string, { resolve(value: unknown): void; reject(error: Error): void; cleanup(): void }>();
+  readonly #lateResults = new Map<string, (value: unknown) => void | Promise<unknown>>();
   readonly #incoming = new Map<string, AbortController>();
   #handler: RpcHandler | null = null;
   #producer: ((frame: AgentProducerFrame) => void) | null = null;
@@ -64,6 +69,7 @@ export class ExecutorRpc {
       call.reject(new AgentCallError('unknown', 'Executor continuity lost after possible dispatch'));
     }
     this.#pending.clear();
+    this.#lateResults.clear();
     for (const controller of this.#incoming.values()) controller.abort();
     this.#incoming.clear();
   }
@@ -102,14 +108,14 @@ export class ExecutorRpc {
   }
 
   async call<K extends keyof ExecutorRpcMethods>(
-    integrationId: string, method: K, request: ExecutorRpcMethods[K]['request'], options?: RpcCallOptions,
+    integrationId: string, method: K, request: ExecutorRpcMethods[K]['request'], options?: RpcCallOptions<ExecutorRpcMethods[K]['result']>,
   ): Promise<ExecutorRpcMethods[K]['result']> {
     const timeoutMs = options?.timeoutMs === undefined ? 120_000 : options.timeoutMs;
     if (timeoutMs !== null && (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 2 ** 31 - 1)) {
       throw new AgentCallError('not-dispatched', 'Invalid executor deadline');
     }
     if (this.#retired || options?.signal?.aborted || !this.transport.connected) throw new AgentCallError('not-dispatched', 'Executor is unavailable');
-    if (this.#pending.size >= 256) throw new AgentCallError('not-dispatched', 'Executor request budget exhausted');
+    if (this.#pending.size + this.#lateResults.size >= 256) throw new AgentCallError('not-dispatched', 'Executor request budget exhausted');
     const id = crypto.randomUUID();
     const payload = JSON.stringify({ type: 'request', id, integrationId, method, request });
     if (!this.transport.channel.fitsFrame(payload)) {
@@ -123,6 +129,9 @@ export class ExecutorRpc {
       const pending = this.#pending.get(id);
       if (!pending) return;
       this.#pending.delete(id);
+      // Resource-producing calls retain their budget until settlement or session loss.
+      const onLateResult = options?.onLateResult;
+      if (onLateResult) this.#lateResults.set(id, (value) => onLateResult(value as ExecutorRpcMethods[K]['result']));
       pending.cleanup();
       pending.reject(new AgentCallError('unknown', 'Executor call cancelled after possible dispatch'));
       try { if (!this.#retired) this.transport.send(JSON.stringify({ type: 'cancel', id } satisfies RpcFrame)); } catch { /* Continuity failure already fences the call. */ }
@@ -159,7 +168,16 @@ export class ExecutorRpc {
     if (!('id' in frame) || typeof frame.id !== 'string') throw new Error('RPC request ID is required');
     if (frame.type === 'result' || frame.type === 'error') {
       const pending = this.#pending.get(frame.id);
-      if (!pending) return;
+      if (!pending) {
+        const onLateResult = this.#lateResults.get(frame.id);
+        this.#lateResults.delete(frame.id);
+        if (frame.type === 'result' && onLateResult) {
+          void Promise.resolve().then(() => {
+            if (!this.#retired) return onLateResult(frame.value);
+          }).catch((error) => log.warn('Failed to clean up a cancelled executor call', error));
+        }
+        return;
+      }
       const failure = frame.type === 'error' ? decodeFailure(frame.error) : null;
       this.#pending.delete(frame.id); pending.cleanup();
       if (frame.type === 'result') pending.resolve(frame.value);

@@ -224,7 +224,8 @@ export function serveExecutionRuntime(runtime: ExecutionRuntimeApi, rpc: Executo
       case 'nativeSessions.release': return required(integration.nativeSessions).release({ ...call.request, signal });
       case 'configurationValidation.validate': return required(integration.configurationValidation).validate(call.request);
       case 'sessionConfiguration.apply': return required(integration.sessionConfiguration).apply(...call.request.args);
-      case 'projectPathUpdates.prepare': return required(integration.projectPathUpdates).prepare(call.request, options);
+      // Native preparation must return its compensation resource even after the RPC waiter cancels.
+      case 'projectPathUpdates.prepare': return required(integration.projectPathUpdates).prepare(call.request);
       case 'projectPathUpdates.commit': return required(integration.projectPathUpdates).commit(call.request, options);
       case 'projectPathUpdates.rollback': return required(integration.projectPathUpdates).rollback(call.request, options);
       case 'credentials.resolve': throw new AgentCallError('rejected', 'Credential resolution is controller-owned');

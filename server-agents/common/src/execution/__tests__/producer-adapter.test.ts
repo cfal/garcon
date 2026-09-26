@@ -509,6 +509,45 @@ describe('createAgentProducerAdapter', () => {
     await resumed;
   });
 
+  it('cancels the operation admission before attempting a native abort', async () => {
+    const fixture = await createFixture();
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const settled = Promise.withResolvers<void>();
+    let admission: AbortSignal | undefined;
+    fixture.runtime.resume = async (request) => {
+      admission = request.admission.signal;
+      entered.resolve();
+      await release.promise;
+      try { request.admission.signal.throwIfAborted(); }
+      finally { settled.resolve(); }
+      await request.admission.markStarted();
+    };
+    fixture.runtime.abort = async () => {
+      expect(admission?.aborted).toBe(true);
+      return false;
+    };
+    const handle = await fixture.adapter.execution.resume({
+      ...fixture.request, agentSessionId: 'session-1', nativeSession: null,
+    });
+    await entered.promise;
+    try {
+      await expect(fixture.adapter.execution.abort(handle)).resolves.toBe(false);
+    } finally { release.resolve(); }
+    await settled.promise;
+    await Promise.resolve();
+    expect(fixture.events).toMatchObject([{ type: 'run-ended', runId: 'run-1', outcome: 'failed' }]);
+
+    let successorAdmission: AbortSignal | undefined;
+    fixture.runtime.resume = async (request) => { successorAdmission = request.admission.signal; };
+    const successor = await fixture.adapter.execution.resume({
+      ...fixture.request, runId: 'run-2', agentSessionId: 'session-1', nativeSession: null,
+    });
+    await expect(fixture.adapter.execution.abort(handle)).rejects.toMatchObject({ code: 'STALE_RESOURCE' });
+    expect(successorAdmission?.aborted).toBe(false);
+    expect(successor.id).not.toBe(handle.id);
+  });
+
   it('publishes an asynchronous resume launch failure', async () => {
     const fixture = await createFixture();
     fixture.runtime.resume = async () => {

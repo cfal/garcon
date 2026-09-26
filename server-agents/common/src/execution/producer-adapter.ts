@@ -35,6 +35,7 @@ interface ProducerBinding {
 interface Operation {
   readonly binding: ProducerBinding;
   readonly runId: string;
+  readonly cancellation: AbortController;
   agentSessionId: string | null;
   abortedSessionOnClose: string | null;
   ended: boolean;
@@ -213,13 +214,14 @@ export function createAgentProducerAdapter(runtime: AgentRuntimeExecution, host:
     if (binding.chatId !== request.chatId) throw new AgentCallError('rejected', 'Producer chat mismatch', 'STALE_RESOURCE');
     const operation: Operation = {
       binding, runId: request.runId, agentSessionId: null, abortedSessionOnClose: null, ended: false,
+      cancellation: new AbortController(),
       handle: createAgentResourceRef(host.scope, 'execution'),
     };
     const { producerBinding: _binding, ...context } = request;
     const runtimeRequest = { ...context, admission: {
       signal: options?.signal
-        ? AbortSignal.any([options.signal, binding.cancellation.signal])
-        : binding.cancellation.signal,
+        ? AbortSignal.any([options.signal, binding.cancellation.signal, operation.cancellation.signal])
+        : AbortSignal.any([binding.cancellation.signal, operation.cancellation.signal]),
       async markStarted() { emit(binding, { type: 'started', runId: request.runId }); },
     } };
     return { operation, runtimeRequest, publish: publisherFor(operation) };
@@ -276,6 +278,7 @@ export function createAgentProducerAdapter(runtime: AgentRuntimeExecution, host:
       options?.signal?.throwIfAborted();
       const operation = handles.get(ref);
       assertCurrent(operation);
+      operation.cancellation.abort();
       if (!operation.agentSessionId) return false;
       return runtime.abort(operation.agentSessionId);
     },
