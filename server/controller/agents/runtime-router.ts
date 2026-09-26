@@ -360,6 +360,8 @@ export class AgentRuntimeRouter {
     let executionInvoked = false;
     try {
       assertExecutionAdmissionOpen(opts);
+      await this.#adoption.ensure(chatId, opts.executionAdmission?.signal);
+      assertExecutionAdmissionOpen(opts);
       const entry = requireAgentChatEntry(chatId, this.#registry.getChat(chatId));
       if (!entry.agentSessionId) throw new Error(`Session missing agent session ID: ${chatId}`);
       const integration = this.#directory.require(entry.agentId, entry.executorId);

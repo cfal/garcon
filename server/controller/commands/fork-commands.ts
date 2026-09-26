@@ -42,7 +42,7 @@ export class ForkCommands {
       chatId: this.support.requireChatId(input.chatId),
     };
     return this.support.withChatMutationLocks([normalized.sourceChatId, normalized.chatId], async () => {
-      const context = await this.validateFork(normalized);
+      const context = await this.validateFork(normalized, { signal });
       await this.forkChatFromContext(context, signal);
       return { success: true, chat: await this.support.projectCommandChat(context.targetChatId) };
     });
@@ -175,7 +175,7 @@ export class ForkCommands {
 
   private async validateFork(
     input: ForkChatCommandRequest,
-    options: { allowExistingTarget?: boolean; thinkingMode?: ThinkingMode } = {},
+    options: { allowExistingTarget?: boolean; thinkingMode?: ThinkingMode; signal?: AbortSignal } = {},
   ): Promise<ForkContext> {
     const sourceChatId = this.support.requireChatId(input.sourceChatId, 'sourceChatId');
     const targetChatId = this.support.requireChatId(input.chatId);
@@ -210,7 +210,7 @@ export class ForkCommands {
       throw new CommandValidationError('UNSUPPORTED_AGENT', 'Forking is not configured on this server', 503, true);
     }
 
-    const sourceSession = this.deps.chats.getChat(sourceChatId);
+    let sourceSession = this.deps.chats.getChat(sourceChatId);
     if (!sourceSession) {
       throw new CommandValidationError('SESSION_NOT_FOUND', 'Source session not found', 404);
     }
@@ -235,21 +235,22 @@ export class ForkCommands {
         422,
       );
     }
-    if (upToOrdinal !== undefined) {
-      if (input.transcriptViewId !== undefined) {
-        const view = this.deps.transcripts.currentView(sourceChatId);
-        if (view === null || view.viewId !== input.transcriptViewId) {
-          throw new CommandValidationError(
-            'STALE_TRANSCRIPT_VIEW',
-            'The view changed since this fork point was chosen. Refetch and pick the message again.',
-            409,
-            true,
-          );
-        }
-      }
-    }
     if (!options.allowExistingTarget && this.deps.chats.getChat(targetChatId)) {
       throw new CommandValidationError('IDEMPOTENCY_CONFLICT', `Session already exists: ${targetChatId}`, 409);
+    }
+    const viewId = await this.deps.agents.currentTranscriptViewId(sourceChatId, options.signal);
+    options.signal?.throwIfAborted();
+    sourceSession = this.deps.chats.getChat(sourceChatId);
+    if (!sourceSession) {
+      throw new CommandValidationError('SESSION_NOT_FOUND', 'Source session not found', 404);
+    }
+    if (input.transcriptViewId !== undefined && viewId !== input.transcriptViewId) {
+      throw new CommandValidationError(
+        'STALE_TRANSCRIPT_VIEW',
+        'The view changed since this fork point was chosen. Refetch and pick the message again.',
+        409,
+        true,
+      );
     }
 
     return {

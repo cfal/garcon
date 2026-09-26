@@ -4039,6 +4039,23 @@ describe('ChatCommandService', () => {
     expect(forkChatFileCopy).toHaveBeenCalledOnce();
   });
 
+  it('captures the authoritative source binding after first-use fork adoption', async () => {
+    const { service, agents, sessions, forkChatFileCopy } = makeService();
+    sessions.get(SOURCE_CHAT_ID).agentSessionId = null;
+    const nativeSession = { ownerId: 'test', schemaVersion: 1, value: { id: 'current' } };
+    agents.currentTranscriptViewId.mockImplementation(async () => {
+      sessions.set(SOURCE_CHAT_ID, {
+        ...sessions.get(SOURCE_CHAT_ID), agentSessionId: 'current', nativeSession,
+      });
+      return 'view-1';
+    });
+    await service.forkChat({ sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID });
+    expect(agents.currentTranscriptViewId).toHaveBeenCalledTimes(1);
+    expect(forkChatFileCopy.mock.calls[0][0].sourceSession).toMatchObject({
+      agentSessionId: 'current', nativeSession,
+    });
+  });
+
   it('copies the transcript for a whole-head fork while the source is running', async () => {
     const { service, agents, queue, forkChatFileCopy } = makeService();
     queue.ownsExecution.mockReturnValue(true);
@@ -4098,11 +4115,8 @@ describe('ChatCommandService', () => {
   });
 
   it('refuses a fork point bound to a stale transcript view', async () => {
-    const { service, forkChatFileCopy } = makeService({
-      transcripts: {
-        currentView: mock(() => ({ viewId: 'view-2', contentStartOrdinal: 1 })),
-      },
-    });
+    const { service, agents, forkChatFileCopy } = makeService();
+    agents.currentTranscriptViewId.mockResolvedValue('view-2');
 
     await expect(service.forkChat({
       sourceChatId: SOURCE_CHAT_ID,

@@ -66,10 +66,37 @@ function makeRouter(compaction, options = {}) {
     hasPendingOwnershipTransfer: () => false,
     adoption: transcript.adoption,
   });
-  return { router, execution };
+  return { router, execution, transcript, entry };
 }
 
 describe('AgentRuntimeRouter compaction', () => {
+  it('repairs the session cache before compaction without a preceding history read', async () => {
+    const compact = mock(async () => undefined);
+    const { router, entry, transcript, execution } = makeRouter({ compact });
+    entry.agentSessionId = null;
+    const nativeSession = { ownerId: 'test', schemaVersion: 1, value: { id: 'current' } };
+    transcript.adoption.ensure = mock(async () => {
+      entry.agentSessionId = 'current';
+      entry.nativeSession = nativeSession;
+    });
+    await router.compactSession('chat-1');
+    expect(transcript.adoption.ensure).toHaveBeenCalledWith('chat-1', undefined);
+    expect(compact.mock.calls[0][0]).toMatchObject({ agentSessionId: 'current', nativeSession });
+    expect(execution.start).not.toHaveBeenCalled();
+  });
+
+  it('does not dispatch compaction after cancellation during adoption', async () => {
+    const compact = mock(async () => undefined);
+    const { router, transcript } = makeRouter({ compact });
+    const controller = new AbortController();
+    transcript.adoption.ensure = mock(async () => controller.abort());
+    await expect(router.compactSession('chat-1', {
+      executionAdmission: { signal: controller.signal, markStarted: async () => {} },
+    })).rejects.toMatchObject({ name: 'AbortError' });
+    expect(compact).not.toHaveBeenCalled();
+    expect(transcript.activeRunId()).toBeNull();
+  });
+
   it('calls the compaction facet when the integration provides one', async () => {
     const compact = mock(async () => undefined);
     const conversationMessages = mock(() => {
