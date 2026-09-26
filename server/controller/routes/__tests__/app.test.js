@@ -1178,6 +1178,48 @@ describe('PUT /api/app/settings', () => {
     }
   });
 
+  it.each(GENERATION_UI_SETTING_KEYS)('allows non-selection edits to a kept unavailable %s target', async (target) => {
+    const fixture = createMockCtx();
+    const selection = {
+      executorId: '22222222-2222-4222-8222-222222222222',
+      agentId: 'codex', model: 'synthetic-model', thinkingMode: 'none',
+    };
+    fixture.settings.getUiSettings.mockImplementation(() => ({ [target]: selection }));
+    fixture.agents.assertExecutionModeSelectionSupported.mockImplementation(() => {
+      throw new DomainError('VALIDATION_FAILED', 'Unsupported agent', 422);
+    });
+    const routes = createWorkspaceRoutes(fixture.settings, fixture.agents, undefined, undefined, '/worker/projects');
+    parseJsonBody.mockImplementationOnce(() => Promise.resolve({
+      ui: { [target]: { ...selection, enabled: false, useCommonDirPrefix: true, contextWindowTokens: 200_000 } },
+    }));
+    const response = await routes['/api/v1/app/settings'].PUT(makeRequest('http://localhost/api/v1/app/settings', 'PUT', {}));
+    expect(response.status).toBe(200);
+    expect(fixture.agents.assertExecutionModeSelectionSupported).not.toHaveBeenCalled();
+    expect(fixture.settings.setUiSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    { executorId: 'local' },
+    { agentId: 'claude' },
+    { thinkingMode: 'high' },
+  ])('validates a changed generation selection: %j', async (changed) => {
+    const fixture = createMockCtx();
+    const selection = {
+      executorId: '22222222-2222-4222-8222-222222222222',
+      agentId: 'codex', model: 'synthetic-model', thinkingMode: 'none',
+    };
+    fixture.settings.getUiSettings.mockImplementation(() => ({ chatTitle: selection }));
+    fixture.agents.assertExecutionModeSelectionSupported.mockImplementation(() => {
+      throw new DomainError('VALIDATION_FAILED', 'Unsupported selection', 422);
+    });
+    const routes = createWorkspaceRoutes(fixture.settings, fixture.agents, undefined, undefined, '/worker/projects');
+    parseJsonBody.mockImplementationOnce(() => Promise.resolve({ ui: { chatTitle: { ...selection, ...changed } } }));
+    const response = await routes['/api/v1/app/settings'].PUT(makeRequest('http://localhost/api/v1/app/settings', 'PUT', {}));
+    expect(response.status).toBe(422);
+    expect(fixture.agents.assertExecutionModeSelectionSupported).toHaveBeenCalledTimes(1);
+    expect(fixture.settings.setUiSettings).not.toHaveBeenCalled();
+  });
+
   it('patches and trims ui.appIdentity title settings', async () => {
     parseJsonBody.mockImplementation(() => Promise.resolve({
       ui: { appIdentity: { title: ' Garcon - Work ' } },

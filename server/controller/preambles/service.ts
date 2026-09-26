@@ -75,7 +75,8 @@ export class PreambleService extends EventEmitter<PreambleServiceEvents> {
     // No trim or case folding: the canonical lowercase UUID-v4 spelling only.
     const id = request.id;
     if (!isPreambleId(id)) throw this.#validationError();
-    const definition = await this.#definition(request.preamble);
+    const current = this.snapshot().preambles.find((preamble) => preamble.id === id);
+    const definition = await this.#definition(request.preamble, current);
     return this.#runSnippetNameMutation((assertAvailable) =>
       this.#mutate(
         'updated',
@@ -136,14 +137,22 @@ export class PreambleService extends EventEmitter<PreambleServiceEvents> {
     return this.#changed(reason);
   }
 
-  async #definition(value: unknown): Promise<PreambleDefinition> {
+  async #definition(value: unknown, current?: PreambleDefinition): Promise<PreambleDefinition> {
     const definition = normalizePreambleDefinitionInput(value);
     if (!definition) throw this.#validationError();
     if (definition.scope.type === 'global') return definition;
-    const canonical = await Promise.all(definition.scope.rules.map(async (rule) => ({
-      ...rule,
-      projectPath: await this.deps.projectPaths.resolve(rule.projectPath, rule.executorId),
-    })));
+    const previousRules = current?.scope.type === 'project-paths' ? current.scope.rules : [];
+    const canonical = await Promise.all(definition.scope.rules.map(async (rule) => {
+      if (previousRules.some((previous) =>
+        effectiveExecutorId(previous.executorId) === effectiveExecutorId(rule.executorId)
+        && previous.projectPath === rule.projectPath
+        && previous.includeNested === rule.includeNested
+      )) return rule;
+      return {
+        ...rule,
+        projectPath: await this.deps.projectPaths.resolve(rule.projectPath, rule.executorId),
+      };
+    }));
     if (new Set(canonical.map((rule) => JSON.stringify([effectiveExecutorId(rule.executorId), rule.projectPath]))).size !== canonical.length) {
       throw new PreambleDomainError(
         'PREAMBLE_VALIDATION_FAILED',

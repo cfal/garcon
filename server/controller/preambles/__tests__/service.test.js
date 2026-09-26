@@ -72,6 +72,66 @@ describe('preamble matching', () => {
 });
 
 describe('PreambleService', () => {
+  it('keeps unchanged executor rules editable while their paths are unavailable', async () => {
+    const executorId = uuidFor(99);
+    let available = true;
+    const projectPaths = {
+      resolve: mock(async (projectPath) => {
+        if (!available) throw new Error('Executor unavailable');
+        return projectPath;
+      }),
+    };
+    const { preambles } = await service({ projectPaths });
+    const definition = {
+      ...globalDefinition('Scoped'),
+      scope: { type: 'project-paths', rules: [
+        { projectPath: '/local', includeNested: true },
+        { executorId, projectPath: '/remote', includeNested: false },
+      ] },
+    };
+    await preambles.create({ expectedRevision: 0, preamble: definition });
+    available = false;
+    const updated = await preambles.update({
+      id: uuidFor(1), expectedRevision: 1,
+      preamble: {
+        ...definition, enabled: false, content: 'Edited while unavailable',
+        scope: { ...definition.scope, rules: [
+          definition.scope.rules[1],
+          { ...definition.scope.rules[0], executorId: 'local' },
+        ] },
+      },
+    });
+    expect(updated.preambles[0]).toMatchObject({ enabled: false, content: 'Edited while unavailable' });
+    expect(projectPaths.resolve).toHaveBeenCalledTimes(2);
+    await expect(preambles.update({
+      id: uuidFor(1), expectedRevision: 1, preamble: definition,
+    })).rejects.toMatchObject({ code: 'PREAMBLE_REVISION_CONFLICT' });
+    expect(preambles.snapshot()).toEqual(updated);
+  });
+
+  it.each([
+    { projectPath: '/changed' },
+    { executorId: uuidFor(98) },
+    { includeNested: true },
+  ])('still validates changed scope rules: %j', async (changed) => {
+    const projectPaths = { resolve: mock(async (projectPath) => projectPath) };
+    const { preambles } = await service({ projectPaths });
+    const rule = { executorId: uuidFor(99), projectPath: '/remote', includeNested: false };
+    const definition = {
+      ...globalDefinition('Scoped'),
+      scope: { type: 'project-paths', rules: [rule] },
+    };
+    await preambles.create({ expectedRevision: 0, preamble: definition });
+    projectPaths.resolve.mockImplementation(async () => { throw new Error('Executor unavailable'); });
+    await expect(preambles.update({
+      id: uuidFor(1), expectedRevision: 1,
+      preamble: { ...definition, scope: { type: 'project-paths', rules: [{ ...rule, ...changed }] } },
+    })).rejects.toThrow('Executor unavailable');
+    await expect(preambles.create({ expectedRevision: 1, preamble: definition }))
+      .rejects.toThrow('Executor unavailable');
+    expect(preambles.snapshot().revision).toBe(1);
+  });
+
   it('canonicalizes every path rule and resolves each matching preamble once in catalog order', async () => {
     const projectPaths = {
       resolve: mock(async (projectPath) => `/canonical/${path.basename(projectPath)}`),

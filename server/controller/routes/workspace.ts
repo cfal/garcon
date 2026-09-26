@@ -1,5 +1,6 @@
 import { resolveGenerationContextsForSelections } from '../settings/generation-config-source.ts';
 import { isRecord } from '../../../common/json.js';
+import { parseExecutorId } from '../../../common/executors.js';
 import { resolveEffectiveGenerationUiConfig, resolveGenerationUiSnapshot } from '../settings/generation-effective.js';
 import { normalizeUiSettings, sanitizeFolderFilter } from '../settings/settings-shared.js';
 import { sortedPinnedProjectPaths } from '../settings/startup-recents.js';
@@ -330,9 +331,18 @@ export default function createWorkspaceRoutes(
   async function assertGenerationThinkingModePatchesSupported(
     uiPatch: Record<string, unknown>,
   ): Promise<void> {
+    const saved = settings.getUiSettings();
     const selections = GENERATION_UI_SETTING_KEYS.flatMap((key) => {
       const selection = asPlainObject(uiPatch[key]);
-      return Object.hasOwn(selection, 'thinkingMode') ? [selection] : [];
+      if (!Object.hasOwn(selection, 'thinkingMode')) return [];
+      const previous = saved[key];
+      if (
+        typeof selection.agentId === 'string'
+        && selection.agentId === previous?.agentId
+        && parseExecutorId(selection.executorId) === parseExecutorId(previous.executorId)
+        && selection.thinkingMode === (previous.thinkingMode ?? 'none')
+      ) return [];
+      return [selection];
     });
     if (selections.length === 0) return;
 
