@@ -242,7 +242,8 @@ export class AgentHandoffService {
     readonly handoff: AgentHandoffRequest;
     readonly source: ChatRegistryEntry;
     readonly target: ResolvedAgentHandoffTarget;
-    readonly command: string;
+    readonly command: string | null;
+    readonly guardDecision?: (decide: () => Promise<AgentHandoffIntent>) => Promise<AgentHandoffIntent>;
   }): AgentHandoffPreparation {
     const operationId = handoffOperationId(input.chatId, input.clientRequestId);
     const submittedTargetHash = handoffTargetHash(input.handoff);
@@ -298,23 +299,27 @@ export class AgentHandoffService {
               this.#carryoverPreparations.delete(input.chatId);
             }
           }
-          this.#requireUnchangedSource(input.chatId, sourceFence);
-          context.assertAdmissionActive();
-          this.deps.integrations.require(input.target.agentId, input.target.executorId);
-          this.deps.endpointResolver.resolveSelection(input.target);
-          decisionAttempted = true;
-          const intent = await this.deps.ownership.decideHandoff({
-            operationId,
-            clientRequestId: input.clientRequestId,
-            submittedTargetHash,
-            chatId: input.chatId,
-            source: sourceSnapshot,
-            target: input.target,
-            targetAgentOwnershipEpoch: crypto.randomUUID(),
-            watermark,
-          });
+          const decide = () => {
+            this.#requireUnchangedSource(input.chatId, sourceFence);
+            context.assertAdmissionActive();
+            this.deps.integrations.require(input.target.agentId, input.target.executorId);
+            this.deps.endpointResolver.resolveSelection(input.target);
+            decisionAttempted = true;
+            return this.deps.ownership.decideHandoff({
+              operationId,
+              clientRequestId: input.clientRequestId,
+              submittedTargetHash,
+              chatId: input.chatId,
+              source: sourceSnapshot,
+              target: input.target,
+              targetAgentOwnershipEpoch: crypto.randomUUID(),
+              watermark,
+            });
+          };
+          const intent = await (input.guardDecision ? input.guardDecision(decide) : decide());
           await this.#rollForwardPersistedHandoff(intent);
-          this.deps.preparedCarryover.deposit({
+          // Promptless changes validate carryover now; the first dispatch plans its actual input budget.
+          if (input.command !== null) this.deps.preparedCarryover.deposit({
             chatId: input.chatId,
             transcriptViewId: checkpoint.viewId,
             targetAgentId: input.target.agentId,

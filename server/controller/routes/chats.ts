@@ -91,6 +91,7 @@ import {
   parseQueueEntrySteerCommandRequest,
   parseAgentInterruptAndSendCommandRequest,
   parseAgentRunCommandRequest,
+  parseAgentHandoffCommandRequest,
   parseAgentStopCommandRequest,
   parseCompactCommandRequest,
   parseDeleteChatCommandRequest,
@@ -858,21 +859,30 @@ export default function createChatRoutes({
 
       return acceptedTurnResponse(result, registry.getChat(input.chatId)?.parentChat ?? null);
     } catch (error: unknown) {
-      if (error instanceof CommandExecutionControlError) {
-        const body: QueueCommandErrorResponse = {
-          success: false,
-          error: error.message,
-          errorCode: error.code,
-          retryable: error.retryable,
-          control: toClientChatExecutionControlState(error.control),
-        };
-        return Response.json(body, { status: error.status });
-      }
-      if (error instanceof CommandValidationError) {
-        return jsonError(error.message, error.status, error.code, error.retryable);
-      }
-      return jsonErrorFromUnknown(error);
+      return handoffOrRunErrorResponse(error);
     }
+  }
+
+  async function postAgentHandoff(body: unknown, request: Request, _url: URL, server?: unknown): Promise<Response> {
+    try {
+      const input = parseCommandRequest(parseAgentHandoffCommandRequest, body);
+      if (isRequestTimeoutServer(server)) server.timeout(request, AGENT_HANDOFF_REQUEST_TIMEOUT_SECONDS);
+      return Response.json(await commands.submitAgentHandoff(input, request.signal));
+    } catch (error) {
+      return handoffOrRunErrorResponse(error);
+    }
+  }
+
+  function handoffOrRunErrorResponse(error: unknown): Response {
+    if (error instanceof CommandExecutionControlError) {
+      const body: QueueCommandErrorResponse = {
+        success: false, error: error.message, errorCode: error.code, retryable: error.retryable,
+        control: toClientChatExecutionControlState(error.control),
+      };
+      return Response.json(body, { status: error.status });
+    }
+    if (error instanceof CommandValidationError) return jsonError(error.message, error.status, error.code, error.retryable);
+    return jsonErrorFromUnknown(error);
   }
 
   async function postGenerateChatTitle(
@@ -1155,6 +1165,8 @@ export default function createChatRoutes({
   ): Promise<Response> {
     try {
       const chatId = requireStringField(body, 'chatId');
+      const expectedEpoch = body.expectedAgentOwnershipEpoch === undefined
+        ? undefined : requireStringField(body, 'expectedAgentOwnershipEpoch');
       const chat = registry.getChat(chatId);
       if (!chat) return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
       const patch: AgentSessionSettingsPatch = {};
@@ -1172,7 +1184,7 @@ export default function createChatRoutes({
       }
       const hasPatch = Object.keys(patch).length > 0;
       const updated = hasPatch
-        ? await agents.updateSessionSettings(chatId, patch)
+        ? await agents.updateSessionSettings(chatId, patch, expectedEpoch)
         : chat;
       if (hasPatch) searchIndex?.catalogMayHaveChanged(chatId);
       return Response.json({
@@ -1190,6 +1202,8 @@ export default function createChatRoutes({
   async function patchModel(body: ModelPatchRequest & Record<string, unknown>): Promise<Response> {
     try {
       const chatId = requireStringField(body, 'chatId');
+      const expectedEpoch = body.expectedAgentOwnershipEpoch === undefined
+        ? undefined : requireStringField(body, 'expectedAgentOwnershipEpoch');
       const model = requireStringField(body, 'model');
       if (!registry.hasChat(chatId)) return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
       const apiProviderId = optionalStringOrNull(body.apiProviderId);
@@ -1200,7 +1214,7 @@ export default function createChatRoutes({
       if (modelEndpointId !== undefined) patch.modelEndpointId = modelEndpointId;
       if (modelProtocol !== undefined)
         patch.modelProtocol = modelProtocol as AgentSessionSettingsPatch['modelProtocol'];
-      await agents.updateSessionSettings(chatId, patch);
+      await agents.updateSessionSettings(chatId, patch, expectedEpoch);
       searchIndex?.catalogMayHaveChanged(chatId);
       return Response.json({ success: true, chatId, ...patch });
     } catch (error: unknown) {
@@ -1271,6 +1285,7 @@ export default function createChatRoutes({
     '/api/v1/chats/execution-settings': {
       PATCH: withJsonBody(patchExecutionSettings),
     },
+    '/api/v1/chats/agent-handoff': { POST: withJsonBody(postAgentHandoff) },
     '/api/v1/chats/model': { PATCH: withJsonBody(patchModel) },
     '/api/v1/chats/project-path': { PATCH: withJsonBody(patchProjectPath) },
     '/api/v1/chats/details': { GET: getChatDetails },

@@ -549,6 +549,10 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     return this.#ownership.reserveTranscriptSnapshot(chatId);
   }
 
+  withChatExecutionControl<T>(chatId: string, operation: (control: StoredChatExecutionControlState) => Promise<T>): Promise<T> {
+    return this.#controlOperations.withControl(chatId, operation);
+  }
+
   async releaseTranscriptSnapshot(reservation: TranscriptSnapshotReservation): Promise<void> {
     this.#ownership.releaseTranscriptSnapshot(reservation);
     const drainRequested = this.#ownership.hasDrainRequest(reservation.chatId);

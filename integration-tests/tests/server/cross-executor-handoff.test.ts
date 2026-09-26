@@ -2,8 +2,66 @@ import { expect, test } from 'bun:test';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { messagesOfType, userContents } from '../../support/chat-assertions.js';
 import { waitForPersistedChat } from '../../support/persisted-chat.js';
+import type { AgentHandoffCommandRequest, AgentHandoffCommandResponse } from '../../../common/chat-command-contracts.js';
+import { writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { initializeFixtureRepository, runFixtureGit } from '../../support/git-fixture.js';
 
 for (const backend of ['remote-controller-dials', 'remote-executor-dials'] as const) {
+  test(`promptless executor handoff persists and retargets project services before any send (${backend})`, async () => {
+    await withIntegrationFixture(`immediate-executor-handoff-${backend}`, async (fixture) => {
+      const { client, directAgents, dirs, executionDirs } = fixture;
+      const agent = directAgents.openAi;
+      await client.put(`/api/v1/api-provider-assignments?executorId=local&apiProviderId=${agent.provider.providerId}`, {});
+      await initializeFixtureRepository(executionDirs.project);
+      await runFixtureGit(executionDirs.project, 'checkout', '-b', 'destination-branch');
+      await writeFile(join(executionDirs.project, 'remote-only.txt'), 'Synthetic remote file');
+      const chatId = fixture.newChatId();
+      const started = await client.startDirectChat({ executorId: 'local', chatId, projectPath: dirs.project, content: 'Synthetic original prompt', agent });
+      await client.waitForTurnTerminal(chatId, started.turnId);
+      const before = await client.getChatSnapshot(chatId);
+      if (before.transcript.availability !== 'available') throw new Error('Synthetic source transcript is unavailable');
+      const request: AgentHandoffCommandRequest = { chatId, clientRequestId: crypto.randomUUID(), handoff: {
+        expectedAgentOwnershipEpoch: before.chat.agentOwnershipEpoch,
+        target: { executorId: client.executorId, projectPath: executionDirs.project, agentId: agent.agentId,
+          model: agent.provider.model, apiProviderId: agent.provider.providerId, modelEndpointId: agent.provider.endpointId },
+      } };
+      await expect(client.post('/api/v1/chats/agent-handoff', { ...request, handoff: {
+        ...request.handoff, target: { ...request.handoff.target, projectPath: join(executionDirs.project, 'missing') },
+      } })).rejects.toMatchObject({ status: 404, body: { errorCode: 'VALIDATION_FAILED' } });
+      expect((await client.getChatSnapshot(chatId)).chat.agentOwnershipEpoch).toBe(before.chat.agentOwnershipEpoch);
+      expect(messagesOfType((await client.getMessages(chatId)).messages, 'agent-switch')).toHaveLength(0);
+      const moved = await client.post<AgentHandoffCommandResponse>('/api/v1/chats/agent-handoff', request);
+      expect(moved.chat).toMatchObject({ executorId: client.executorId, projectPath: executionDirs.project, agentId: agent.agentId, model: agent.provider.model });
+      expect(moved).not.toHaveProperty('turnId');
+      expect(moved.chat.agentOwnershipEpoch).not.toBe(before.chat.agentOwnershipEpoch);
+      for (const [route, patch] of [
+        ['model', { model: agent.provider.model }],
+        ['execution-settings', { permissionMode: 'default' }],
+      ] as const) {
+        await expect(client.patch(`/api/v1/chats/${route}`, {
+          chatId, ...patch, expectedAgentOwnershipEpoch: before.chat.agentOwnershipEpoch,
+        })).rejects.toMatchObject({ status: 409, body: { errorCode: 'STALE_CHAT_OWNERSHIP' } });
+      }
+      const persisted = await waitForPersistedChat({ directories: dirs, chatId, select: (chat) => chat,
+        timeoutMessage: 'Handoff did not persist' });
+      expect(persisted).toMatchObject({ executorId: client.executorId, projectPath: executionDirs.project, agentSessionId: null, nativeSession: null });
+      const after = await client.getMessages(chatId);
+      expect(after.transcriptViewId).toBe(before.transcript.transcriptViewId);
+      expect(userContents(after.messages)).toEqual(['Synthetic original prompt']);
+      expect(messagesOfType(after.messages, 'agent-switch')).toHaveLength(1);
+      expect(fixture.fakeProviders.openAi.requests()).toHaveLength(1);
+      const target = new URLSearchParams({ chatId, executorId: client.executorId });
+      expect(JSON.stringify(await client.get(`/api/v1/files/list?${target}`))).toContain('remote-only.txt');
+      expect(await client.get(`/api/v1/git/status?${new URLSearchParams({ executorId: moved.chat.executorId ?? 'local', project: executionDirs.project })}`)).toMatchObject({ branch: 'destination-branch' });
+      await fixture.restartGarcon();
+      expect((await fixture.client.getChatSnapshot(chatId)).chat).toMatchObject({ executorId: client.executorId, projectPath: executionDirs.project });
+      const resumed = await fixture.client.runChat({ chatId, command: 'Synthetic explicit destination prompt', clientRequestId: crypto.randomUUID(), clientMessageId: crypto.randomUUID() });
+      await fixture.client.waitForTurnTerminal(chatId, resumed.turnId);
+      expect(userContents((await fixture.client.getMessages(chatId)).messages)).toEqual(['Synthetic original prompt', 'Synthetic explicit destination prompt']);
+    }, { executionBackend: backend, projectRoots: 'separate' });
+  }, 60_000);
+
   test(`same-agent handoff starts fresh on the destination and can leave a deleted source (${backend})`, async () => {
     await withIntegrationFixture(`cross-executor-handoff-${backend}`, async (fixture) => {
       const client = fixture.client;

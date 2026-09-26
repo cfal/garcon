@@ -56,10 +56,14 @@ export class AgentSessionSettingsService {
   updateSessionSettings(
     chatId: string,
     patch: AgentSessionSettingsPatch,
+    expectedAgentOwnershipEpoch?: string,
   ): Promise<AgentChatEntry> {
     return this.#lock.runExclusive(`chat:${chatId}`, async () => {
       const entry = this.deps.registry.getChat(chatId);
       if (!entry) throw new Error(`Session not found: ${chatId}`);
+      if (expectedAgentOwnershipEpoch !== undefined && entry.agentOwnershipEpoch !== expectedAgentOwnershipEpoch) {
+        throw new DomainError('STALE_CHAT_OWNERSHIP', 'Chat ownership changed before settings were updated.', 409);
+      }
       const integration = this.deps.directory.require(entry.agentId, entry.executorId);
       const previous = this.deps.endpointResolver.describePrevious({
         model: entry.model,

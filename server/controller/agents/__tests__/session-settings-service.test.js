@@ -53,6 +53,18 @@ function makeService(thinkingMode = 'high') {
 }
 
 describe('AgentSessionSettingsService', () => {
+  it('rejects settings from a superseded owner before touching the integration or registry', async () => {
+    const { service, entry, integration, updateChat } = makeService();
+    entry.agentOwnershipEpoch = 'current-owner';
+    const validate = mock(async () => undefined);
+    integration.configurationValidation = { validate };
+    await expect(service.updateSessionSettings('chat-1', { model: 'new-model' }, 'previous-owner'))
+      .rejects.toMatchObject({ code: 'STALE_CHAT_OWNERSHIP', status: 409 });
+    expect(validate).not.toHaveBeenCalled();
+    expect(updateChat).not.toHaveBeenCalled();
+    await service.updateSessionSettings('chat-1', { model: 'new-model' }, 'current-owner');
+    expect(updateChat).toHaveBeenCalledTimes(1);
+  });
   it('enforces assignment policy even without an integration configuration-validation facet', async () => {
     const { service, endpointResolver, integration } = makeService();
     expect(integration.configurationValidation).toBeNull();

@@ -1,12 +1,10 @@
 import {
   normalizePermissionMode,
   normalizeThinkingMode,
-  isPermissionMode,
-  isThinkingMode,
   type PermissionMode,
   type ThinkingMode,
 } from './chat-modes.js';
-import { parseAgentSettingsEnvelope, type AgentSettingsEnvelope } from './agent-integration.js';
+import type { AgentSettingsEnvelope } from './agent-integration.js';
 import type { JsonObject } from './json.js';
 import type { AgentCommandImage } from './ws-requests.js';
 import type { ApiProtocol } from './api-providers.js';
@@ -18,7 +16,16 @@ import type { ParentChatRef } from './chat-parentage.js';
 import type { CommandTagMutationOutcome } from './chat-tag-mutations.js';
 import type { ErrorCode } from './error-codes.js';
 import { normalizeTags } from './tags.js';
-import { isExecutorId, parseExecutorId } from './executors.js';
+import { isExecutorId } from './executors.js';
+import {
+  optionalAgentHandoffRequest,
+  optionalPermissionMode,
+  optionalThinkingMode,
+  optionalApiProtocol,
+  requiredAgentSettings,
+  optionalAgentSettings,
+} from './chat-execution-command-parsing.js';
+export { parseAgentHandoffCommandRequest } from './chat-execution-command-parsing.js';
 import { parseHandoffForkConsent } from './chat-fork-command-parsing.js';
 import { normalizeAskUserQuestionDecisionResponse } from './ask-user-question-response.js';
 
@@ -260,6 +267,18 @@ export interface AgentHandoffRequest {
   expectedAgentOwnershipEpoch: string;
 }
 
+export interface AgentHandoffCommandRequest {
+  chatId: string;
+  clientRequestId: string;
+  handoff: AgentHandoffRequest;
+}
+
+export interface AgentHandoffCommandResponse {
+  success: true;
+  chatId: string;
+  chat: ChatListEntry;
+}
+
 export interface ForkRunCommandRequest {
   clientRequestId: string;
   clientMessageId: string;
@@ -427,6 +446,7 @@ export interface CompactCommandRequest {
 
 export interface ExecutionSettingsPatchRequest {
   chatId: string;
+  expectedAgentOwnershipEpoch?: string;
   permissionMode?: PermissionMode;
   thinkingMode?: ThinkingMode;
   agentSettingsPatch?: JsonObject;
@@ -442,6 +462,7 @@ export interface ExecutionSettingsPatchResponse {
 
 export interface ModelPatchRequest {
   chatId: string;
+  expectedAgentOwnershipEpoch?: string;
   model: string;
   apiProviderId?: string | null;
   modelEndpointId?: string | null;
@@ -621,51 +642,6 @@ export function parseAgentRunCommandRequest(value: unknown): AgentRunCommandRequ
       : {}),
     ...(handoff === undefined ? {} : { handoff }),
     ...(userMessagePresentation === undefined ? {} : { userMessagePresentation }),
-  };
-}
-
-function optionalAgentHandoffRequest(value: unknown): AgentHandoffRequest | undefined {
-  if (value === undefined) return undefined;
-  const handoff = requestRecord(value);
-  const target = requestRecord(handoff.target);
-  const executorId = parseExecutorId(target.executorId);
-  if (!executorId) throw new CommandRequestValidationError('handoff.target.executorId is invalid');
-  const projectPath = optionalString(target, 'projectPath');
-  const agentId = requiredString(target, 'agentId');
-  const model = requiredString(target, 'model');
-  const apiProviderId = optionalNullableString(target, 'apiProviderId');
-  const modelEndpointId = optionalNullableString(target, 'modelEndpointId');
-  const modelProtocol = optionalApiProtocol(target.modelProtocol);
-  if (modelEndpointId !== undefined && modelEndpointId !== null && apiProviderId == null) {
-    throw new CommandRequestValidationError(
-      'handoff.target.apiProviderId is required with modelEndpointId',
-    );
-  }
-  const permissionMode = optionalPermissionMode(target.permissionMode);
-  const thinkingMode = optionalThinkingMode(target.thinkingMode);
-  const agentSettings = optionalAgentSettings(target.agentSettings, 'handoff.target.agentSettings');
-  if (agentSettings && agentSettings.ownerId !== agentId) {
-    throw new CommandRequestValidationError(
-      'handoff.target.agentSettings must be owned by handoff.target.agentId',
-    );
-  }
-  return {
-    target: {
-      ...(target.executorId === undefined ? {} : { executorId }),
-      ...(projectPath === undefined ? {} : { projectPath }),
-      agentId,
-      model,
-      ...(apiProviderId === undefined ? {} : { apiProviderId }),
-      ...(modelEndpointId === undefined ? {} : { modelEndpointId }),
-      ...(modelProtocol === undefined ? {} : { modelProtocol }),
-      ...(permissionMode === undefined ? {} : { permissionMode }),
-      ...(thinkingMode === undefined ? {} : { thinkingMode }),
-      ...(agentSettings === undefined ? {} : { agentSettings }),
-    },
-    expectedAgentOwnershipEpoch: requiredString(
-      handoff,
-      'expectedAgentOwnershipEpoch',
-    ),
   };
 }
 
@@ -921,39 +897,6 @@ function contentOrImages(
     throw new CommandRequestValidationError(`${field} or images are required`);
   }
   return value;
-}
-
-function optionalPermissionMode(value: unknown): PermissionMode | undefined {
-  if (value === undefined || value === null) return undefined;
-  if (!isPermissionMode(value)) {
-    throw new CommandRequestValidationError('permissionMode is invalid');
-  }
-  return value;
-}
-
-function optionalThinkingMode(value: unknown): ThinkingMode | undefined {
-  if (value === undefined || value === null) return undefined;
-  if (!isThinkingMode(value)) {
-    throw new CommandRequestValidationError('thinkingMode is invalid');
-  }
-  return value;
-}
-
-function optionalApiProtocol(value: unknown): ApiProtocol | null | undefined {
-  if (value === undefined || value === null) return value;
-  if (value === 'anthropic-messages' || value === 'openai-compatible') return value;
-  throw new CommandRequestValidationError('modelProtocol is invalid');
-}
-
-function requiredAgentSettings(value: unknown, field: string): AgentSettingsEnvelope {
-  const parsed = parseAgentSettingsEnvelope(value);
-  if (!parsed) throw new CommandRequestValidationError(`${field} is invalid`);
-  return parsed;
-}
-
-function optionalAgentSettings(value: unknown, field: string): AgentSettingsEnvelope | undefined {
-  if (value === undefined || value === null) return undefined;
-  return requiredAgentSettings(value, field);
 }
 
 function optionalImages(value: unknown): AgentCommandImage[] | undefined {

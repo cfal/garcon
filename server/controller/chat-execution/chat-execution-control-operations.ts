@@ -61,6 +61,10 @@ export class ChatExecutionControlOperations {
     ));
   }
 
+  withControl<T>(chatId: string, operation: (control: StoredChatExecutionControlState) => Promise<T>): Promise<T> {
+    return this.host.runExclusive(chatId, () => operation(cloneStoredChatExecutionControl(this.#load(chatId))));
+  }
+
   async create(
     chatId: string,
     content: string,

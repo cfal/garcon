@@ -330,6 +330,23 @@ describe('AgentHandoffService', () => {
     expect(current).toMatchObject({ agentId: 'source-agent', agentOwnershipEpoch: 'source-epoch' });
   });
 
+  it('validates promptless carryover without caching a budget for an unknown next prompt', async () => {
+    const current = sourceChat();
+    const calls = [];
+    const state = handoffState(current, calls);
+    const planFor = mock(async () => ({ kind: 'full', context: { prefix: 'Synthetic carryover' } }));
+    const deposit = mock(() => {});
+    const service = createService({
+      registry: { getChat: () => current }, ownership: state.ownership, ledger: ledgerState(calls),
+      carryover: { planFor }, preparedCarryover: { deposit, discard: mock(() => {}) },
+    });
+    await service.createPreparation({ chatId: 'chat', clientRequestId: 'request-1', handoff: handoff(),
+      source: current, target: target(), command: null }).prepare(context());
+    expect(planFor.mock.calls[0][0].destination.prompt).toBeNull();
+    expect(current.agentId).toBe('target-agent');
+    expect(deposit).not.toHaveBeenCalled();
+  });
+
   it('cancels active carryover planning without deciding ownership', async () => {
     const current = sourceChat();
     const calls = [];

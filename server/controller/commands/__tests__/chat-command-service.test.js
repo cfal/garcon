@@ -2892,6 +2892,44 @@ describe('ChatCommandService', () => {
     expect(applyDeltaWhileChatLocked).toHaveBeenCalledTimes(2);
   });
 
+  it('commits a promptless handoff under a snapshot reservation without admitting work', async () => {
+    const f = makeService();
+    const { chatId, clientRequestId, handoff } = handoffRunInput();
+    const result = await f.service.submitAgentHandoff({ chatId, clientRequestId, handoff }, new AbortController().signal);
+    expect(result).toMatchObject({ success: true, chatId, chat: { agentId: 'codex', agentOwnershipEpoch: 'epoch-1:handoff' } });
+    expect(result).not.toHaveProperty('turnId');
+    expect(f.queue.reserveTranscriptSnapshot).toHaveBeenCalledWith(chatId);
+    expect(f.handoffs.createPreparation).toHaveBeenCalledWith(expect.objectContaining({ command: null }));
+    expect(f.queue.releaseTranscriptSnapshot).toHaveBeenCalledTimes(1);
+    expect(f.queue.reserveDirectTurn).not.toHaveBeenCalled();
+    expect(f.queue.admitUserInput).not.toHaveBeenCalled();
+    expect(f.queue.runReservedTurn).not.toHaveBeenCalled();
+  });
+
+  it('releases a promptless handoff reservation after stale ownership rejection', async () => {
+    const f = makeService();
+    const { chatId, clientRequestId, handoff } = handoffRunInput();
+    await expect(f.service.submitAgentHandoff({ chatId, clientRequestId, handoff: { ...handoff, expectedAgentOwnershipEpoch: 'stale' } }, new AbortController().signal)).rejects.toMatchObject({ code: 'STALE_CHAT_OWNERSHIP' });
+    expect(f.queue.releaseTranscriptSnapshot).toHaveBeenCalledTimes(1);
+    expect(f.handoffPreparations).toHaveLength(0);
+  });
+
+  it.each(['queued', 'paused', 'owned'])('rejects a promptless handoff when %s without modifying the queue', async blocked => {
+    const control = storedQueue(blocked === 'queued' ? [queueEntry('entry-1', 'Retained input')] : [],
+      { pause: blocked === 'paused' ? manualPause() : null });
+    const f = makeService({ queue: {
+      readChatExecutionControl: mock(async () => control),
+      ...(blocked === 'owned' ? { reserveTranscriptSnapshot: mock(() => { throw new DomainError('SESSION_BUSY', 'Synthetic owner', 409, true); }) } : {}),
+    } });
+    const { chatId, clientRequestId, handoff } = handoffRunInput();
+    await expect(f.service.submitAgentHandoff({ chatId, clientRequestId, handoff }, new AbortController().signal))
+      .rejects.toMatchObject({ code: 'AGENT_HANDOFF_REQUIRES_IDLE', status: 409 });
+    expect(f.queue.releaseTranscriptSnapshot).toHaveBeenCalledTimes(blocked === 'owned' ? 0 : 1);
+    expect(f.handoffPreparations).toHaveLength(0);
+    expect(f.queue.admitUserInput).not.toHaveBeenCalled();
+    expect(await f.queue.readChatExecutionControl(chatId)).toEqual(control);
+  });
+
   it('commits one cross-agent handoff before scheduling the target run', async () => {
     const {
       service,

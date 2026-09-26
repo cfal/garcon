@@ -775,6 +775,20 @@ describe('REST chat command routes', () => {
     );
   });
 
+  it('POST /agent-handoff returns the durable chat without a turn receipt', async () => {
+    const agent = createRouteAgent();
+    const server = { timeout: mock(() => undefined) };
+    const { request, response, body } = await callJson(agent.routes['/api/v1/chats/agent-handoff'].POST, {
+      chatId: CHAT_ID, clientRequestId: 'request-settings-handoff', handoff: {
+        expectedAgentOwnershipEpoch: 'epoch-1', target: { executorId: 'local', agentId: 'codex', model: 'gpt-5.5' },
+      },
+    }, 'POST', server);
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({ success: true, chatId: CHAT_ID, chat: { id: CHAT_ID } });
+    expect(body).not.toHaveProperty('turnId');
+    expect(server.timeout).toHaveBeenCalledWith(request, AGENT_HANDOFF_REQUEST_TIMEOUT_SECONDS);
+  });
+
   it('POST /run disables the Bun idle timeout for an accepted handoff', async () => {
     const agent = createRouteAgent();
     const server = { timeout: mock(() => undefined) };
@@ -1545,6 +1559,7 @@ describe('REST chat command routes', () => {
         permissionMode: 'bogus',
         thinkingMode: 'ultra',
         agentSettingsPatch: {},
+        expectedAgentOwnershipEpoch: 'source-epoch',
       },
       'PATCH',
     );
@@ -1564,6 +1579,7 @@ describe('REST chat command routes', () => {
         thinkingMode: 'ultra',
         agentSettingsPatch: {},
       }),
+      'source-epoch',
     );
   });
 
@@ -1583,7 +1599,7 @@ describe('REST chat command routes', () => {
     expect(body.permissionMode).toBe('manualBypass');
     expect(agent.agents.updateSessionSettings).toHaveBeenCalledWith(CHAT_ID, {
       permissionMode: 'manualBypass',
-    });
+    }, undefined);
   });
 
   it('PATCH /execution-settings returns 400 when chatId is missing', async () => {
@@ -1611,6 +1627,7 @@ describe('REST chat command routes', () => {
         apiProviderId: 'provider-1',
         modelEndpointId: 'endpoint',
         modelProtocol: 'openai-compatible',
+        expectedAgentOwnershipEpoch: 'source-epoch',
       },
       'PATCH',
     );
@@ -1631,6 +1648,7 @@ describe('REST chat command routes', () => {
         apiProviderId: 'provider-1',
         modelEndpointId: 'endpoint',
       }),
+      'source-epoch',
     );
     expect(agent.registry.updateChat).toHaveBeenCalledWith(
       CHAT_ID,

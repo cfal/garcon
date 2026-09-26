@@ -151,7 +151,7 @@ export interface AgentRegistryServiceContract {
     chatId: string,
   ): Promise<AgentTranscriptSourceLocation | null>;
   validateConfiguration(input: AgentConfigurationInput): Promise<void>;
-  updateSessionSettings(chatId: string, patch: AgentSessionSettingsPatch): Promise<AgentChatEntry>;
+  updateSessionSettings(chatId: string, patch: AgentSessionSettingsPatch, expectedAgentOwnershipEpoch?: string): Promise<AgentChatEntry>;
 }
 
 interface StartSessionOptions {
@@ -377,8 +377,8 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   validateConfiguration(input: AgentConfigurationInput): Promise<void> {
     return this.#settings.validateConfiguration(input);
   }
-  updateSessionSettings(chatId: string, patch: AgentSessionSettingsPatch) {
-    return this.#settings.updateSessionSettings(chatId, patch);
+  updateSessionSettings(chatId: string, patch: AgentSessionSettingsPatch, expectedAgentOwnershipEpoch?: string) {
+    return this.#settings.updateSessionSettings(chatId, patch, expectedAgentOwnershipEpoch);
   }
   runSingleQuery(prompt: string, options: RunSingleQueryOptions) {
     return this.#runtime.runSingleQuery(prompt, options);

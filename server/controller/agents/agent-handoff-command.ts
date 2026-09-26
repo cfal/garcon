@@ -5,6 +5,7 @@ import type {
 import type { ChatListEntry } from '../../../common/chat-list.js';
 import type { ChatExecutionCommands } from '../chat-execution/chat-execution-coordinator.js';
 import { hasPendingTurnInput } from '../chat-execution/control-state.js';
+import type { StoredChatExecutionControlState } from '../chat-execution/control-state.js';
 import type { ChatRegistryEntry } from '../chats/store.js';
 import { CommandExecutionControlError } from '../lib/command-execution-control-error.js';
 import type { ResolvedAgentHandoffTarget } from './agent-handoff-types.js';
@@ -48,7 +49,7 @@ export async function prepareAgentHandoffCommand(input: {
   readonly chatId: string;
   readonly clientRequestId: string;
   readonly handoff: AgentHandoffRequest;
-  readonly command: string;
+  readonly command: string | null;
   readonly source: ChatRegistryEntry;
   readonly permissionFallbackPolicy?: 'require-explicit-bypass';
   readonly service: Pick<AgentHandoffService, 'resolveTarget' | 'createPreparation'>;
@@ -67,19 +68,7 @@ export async function prepareAgentHandoffCommand(input: {
     permissionFallbackPolicy: input.permissionFallbackPolicy,
   });
   const control = await input.execution.readChatExecutionControl(input.chatId);
-  if (
-    input.execution.ownsExecution(input.chatId)
-    || hasPendingTurnInput(control)
-    || control.pause !== null
-  ) {
-    throw new CommandExecutionControlError(
-      'AGENT_HANDOFF_REQUIRES_IDLE',
-      'Agent handoff requires an idle chat with an empty, unpaused queue.',
-      409,
-      true,
-      control,
-    );
-  }
+  assertAgentHandoffIdle(control, input.execution.ownsExecution(input.chatId));
   return {
     target,
     options: resolvedRunOptions(target),
@@ -92,6 +81,17 @@ export async function prepareAgentHandoffCommand(input: {
       command: input.command,
     }),
   };
+}
+
+export function assertAgentHandoffIdle(control: StoredChatExecutionControlState, ownsExecution: boolean): void {
+  if (!ownsExecution && !hasPendingTurnInput(control) && control.pause === null) return;
+  throw new CommandExecutionControlError(
+    'AGENT_HANDOFF_REQUIRES_IDLE',
+    'Agent handoff requires an idle chat with an empty, unpaused queue.',
+    409,
+    true,
+    control,
+  );
 }
 
 export async function withHandoffChatProjection(

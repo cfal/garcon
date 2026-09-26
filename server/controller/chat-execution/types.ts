@@ -311,6 +311,8 @@ export interface ChatExecutionCommands {
   waitForDispatches(): Promise<void>;
   ownsExecution(chatId: string): boolean;
   readChatExecutionControl(chatId: string): Promise<StoredChatExecutionControlState>;
+  // Serializes a decision with queue mutations; callbacks must not re-enter queue operations.
+  withChatExecutionControl<T>(chatId: string, operation: (control: StoredChatExecutionControlState) => Promise<T>): Promise<T>;
   clearChatQueue(chatId: string): Promise<StoredChatExecutionControlState>;
   discardPendingChatInput(chatId: string): Promise<StoredChatExecutionControlState>;
   pauseChatQueue(chatId: string): Promise<StoredChatExecutionControlState>;

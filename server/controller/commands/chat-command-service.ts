@@ -1,5 +1,6 @@
 import type {
   ForkChatCommandRequest,
+  AgentHandoffCommandRequest,
   QueueEntryCreateCommandRequest,
   QueueEntryDeleteCommandRequest,
   QueueEntryMoveCommandRequest,
@@ -89,6 +90,10 @@ export class ChatCommandService {
 
   submitRun(input: SubmitRunInput) {
     return this.#session.submitRun(input);
+  }
+
+  submitAgentHandoff(input: AgentHandoffCommandRequest, signal: AbortSignal) {
+    return this.#session.submitAgentHandoff(input, signal);
   }
 
   forkChat(input: ForkChatCommandRequest, signal?: AbortSignal) {

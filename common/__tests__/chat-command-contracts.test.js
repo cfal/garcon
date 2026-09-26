@@ -7,6 +7,7 @@ import {
   CommandRequestValidationError,
   normalizeAskUserQuestionDecisionResponse,
   parseAgentRunCommandRequest,
+  parseAgentHandoffCommandRequest,
   parseForkChatCommandRequest,
   parseForkRunCommandRequest,
   parsePermissionDecisionCommandRequest,
@@ -31,6 +32,16 @@ function agentSettings(ownerId = 'claude') {
 }
 
 describe('chat command request parsers', () => {
+  it('parses a promptless handoff with explicit ownership and bounded request identity', () => {
+    const input = { chatId: CHAT_ID, clientRequestId: 'request-handoff', handoff: {
+      expectedAgentOwnershipEpoch: 'epoch-source', target: { executorId: 'local', agentId: 'codex', model: 'synthetic-model' },
+    } };
+    expect(parseAgentHandoffCommandRequest(input)).toMatchObject(input);
+    expect(() => parseAgentHandoffCommandRequest({ ...input, handoff: undefined })).toThrow('handoff is required');
+    expect(() => parseAgentHandoffCommandRequest({ ...input, chatId: '../invalid' })).toThrow();
+    expect(() => parseAgentHandoffCommandRequest({ ...input, clientRequestId: 'x'.repeat(COMMAND_CORRELATION_ID_MAX_BYTES + 1) })).toThrow();
+    expect(() => parseAgentHandoffCommandRequest({ ...input, handoff: { ...input.handoff, expectedAgentOwnershipEpoch: '' } })).toThrow();
+  });
   it('classifies every Stop outcome by command satisfaction and provider acknowledgement', () => {
     expect(CHAT_STOP_OUTCOMES.map((outcome) => ({
       outcome,

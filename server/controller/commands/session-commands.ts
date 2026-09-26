@@ -5,6 +5,8 @@ import type {
   AgentTurnCommandResponse,
   CommandAcceptedResponse,
   ProjectPathPatchResponse,
+  AgentHandoffCommandRequest,
+  AgentHandoffCommandResponse,
 } from '../../../common/chat-command-contracts.js';
 import {
   askUserQuestionDecisionValidationError,
@@ -14,7 +16,7 @@ import type { ChatRegistryEntry } from '../chats/store.js';
 import { isDirectDelegatedChild } from '../chats/agent-delegation.js';
 import { applyPostAdmissionChatTags } from '../chats/post-admission-chat-tags.js';
 import { isStopSatisfied, type ChatStopOutcome } from '../../../common/chat-types.js';
-import { prepareAgentHandoffCommand } from '../agents/agent-handoff-command.js';
+import { prepareAgentHandoffCommand, assertAgentHandoffIdle } from '../agents/agent-handoff-command.js';
 import { runOptionsForCommand } from '../agents/agent-run-command-input.js';
 import { runProjectPathUpdateTransaction } from '../agents/project-path-update-transaction.js';
 import type { StartedAgentSession } from '../agents/session-types.js';
@@ -56,6 +58,38 @@ export class SessionCommands {
     return this.support.withChatMutationLock(input.chatId, () =>
       this.submitRunLocked(input),
     );
+  }
+
+  async submitAgentHandoff(input: AgentHandoffCommandRequest, signal: AbortSignal): Promise<AgentHandoffCommandResponse> {
+    this.support.requireClientRequestId(input.clientRequestId);
+    return this.support.withChatMutationLock(input.chatId, async () => {
+      let reservation: TranscriptSnapshotReservation | undefined;
+      try {
+        signal.throwIfAborted();
+        const source = this.deps.chats.getChat(input.chatId);
+        if (!source) throw new CommandValidationError('SESSION_NOT_FOUND', 'Session not found', 404);
+        reservation = this.deps.queue.reserveTranscriptSnapshot(input.chatId);
+        assertAgentHandoffIdle(await this.deps.queue.readChatExecutionControl(input.chatId), false);
+        await this.deps.agents.currentTranscriptViewId(input.chatId, signal);
+        const target = await this.deps.handoffs.resolveTarget({ chat: source, handoff: input.handoff });
+        const preparation = this.deps.handoffs.createPreparation({
+          chatId: input.chatId, clientRequestId: input.clientRequestId,
+          handoff: input.handoff, source, target, command: null,
+          guardDecision: (decide) => this.deps.queue.withChatExecutionControl(input.chatId, async (control) => {
+            signal.throwIfAborted();
+            assertAgentHandoffIdle(control, false);
+            return decide();
+          }),
+        });
+        await preparation.prepare({ signal, assertAdmissionActive: () => signal.throwIfAborted() });
+        return { success: true, chatId: input.chatId, chat: await this.support.projectCommandChat(input.chatId) };
+      } catch (error) {
+        throw await withCurrentExecutionControl({ chatId: input.chatId, error, handoff: true,
+          readControl: (chatId) => this.deps.queue.readChatExecutionControl(chatId) });
+      } finally {
+        if (reservation) await this.deps.queue.releaseTranscriptSnapshot(reservation);
+      }
+    });
   }
 
   async submitAgentCommandResumeLocked(input: AgentCommandResumeInput, signal: AbortSignal): Promise<AgentTurnCommandResponse> {
