@@ -1,6 +1,6 @@
 import {
   AgentCallError, type AgentIntegration, type ExecutionRuntimeApi, type ExecutorInfo,
-  type ExecutionProjectService, type ExecutorAvailability,
+  type ExecutionProjectService, type ExecutorAvailability, type ExecutorCallOptions,
 } from '@garcon/server-agent-interface';
 import {
   effectiveExecutorId, LOCAL_EXECUTOR_ID, type AgentExecutionTarget,
@@ -104,12 +104,12 @@ export class ExecutorManager {
     return this.requireExecutor(executorId).getProjectService();
   }
 
-  inspectProject = async (projectPath: string, executorId?: string | null) => (
-    (await (await this.projectService(effectiveExecutorId(executorId))).inspect({ projectPath })).resolution
+  inspectProject = async (projectPath: string, executorId?: string | null, options?: ExecutorCallOptions) => (
+    (await (await this.projectService(effectiveExecutorId(executorId))).inspect({ projectPath }, options)).resolution
   );
 
-  resolveFileMentions = async (command: string, projectPath: string, executorId?: string | null): Promise<string> => (
-    (await this.projectService(effectiveExecutorId(executorId))).resolveFileMentions({ command, projectPath })
+  resolveFileMentions = async (command: string, projectPath: string, executorId?: string | null, options?: ExecutorCallOptions): Promise<string> => (
+    (await this.projectService(effectiveExecutorId(executorId))).resolveFileMentions({ command, projectPath }, options)
   );
 
   list(): readonly ExecutorSnapshot[] {

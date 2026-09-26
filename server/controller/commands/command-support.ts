@@ -150,7 +150,7 @@ export type ForkChatFileCopyDep = (args: {
 }) => Promise<ForkChatFileCopyResult>;
 
 export interface FileMentionResolverDep {
-  resolve(command: string, projectPath: string, executorId?: string | null): Promise<string>;
+  resolve(command: string, projectPath: string, executorId?: string | null, options?: { readonly signal?: AbortSignal }): Promise<string>;
 }
 
 export interface ChatCommandServiceDeps {

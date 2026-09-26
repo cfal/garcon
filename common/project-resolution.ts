@@ -20,7 +20,11 @@ export type ProjectResolution =
   | { readonly kind: 'available'; readonly effectiveProjectKey: ExecutorPath }
   | { readonly kind: 'unavailable'; readonly reason: ProjectUnavailableReason };
 
-export type ProjectInspector = (projectPath: ExecutorPath, executorId?: string | null) => Promise<ProjectResolution>;
+export type ProjectInspector = (
+  projectPath: ExecutorPath,
+  executorId?: string | null,
+  options?: { readonly signal?: AbortSignal },
+) => Promise<ProjectResolution>;
 
 export interface ProjectResolutionResponse {
   readonly target: ProjectTarget;

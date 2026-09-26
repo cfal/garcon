@@ -356,14 +356,16 @@ export default function createChatRoutes({
     return rememberedChatId;
   }
 
-  async function validateStartPath(_request: Request, url: URL): Promise<Response> {
+  async function validateStartPath(request: Request, url: URL): Promise<Response> {
     const dirPath = String(url.searchParams.get('path') || '').trim();
     if (!dirPath) {
       return pathValidationError('path is required', 'path_required', 400);
     }
 
     try {
-      const { resolution, isGitRepository } = await (await projects(executorIdFromUrl(url, registry))).inspect({ projectPath: dirPath, includeGitRepository: true });
+      const { resolution, isGitRepository } = await (await projects(executorIdFromUrl(url, registry))).inspect(
+        { projectPath: dirPath, includeGitRepository: true }, { signal: request.signal },
+      );
       if (resolution.kind === 'unavailable') {
         switch (resolution.reason) {
           case 'not-found':
@@ -381,6 +383,7 @@ export default function createChatRoutes({
       }
       return Response.json({ valid: true, isGitRepo: isGitRepository ?? false });
     } catch (error: unknown) {
+      if (request.signal.aborted) return new Response(null, { status: 499 });
       if (error instanceof AgentCallError || error instanceof DomainError) return jsonErrorFromUnknown(error);
       return pathValidationError((error as Error).message, 'unknown');
     }

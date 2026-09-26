@@ -19,6 +19,22 @@ function fixture(overrides = {}) {
 }
 
 describe('GET /api/v1/projects/resolve', () => {
+  it('forwards request cancellation and returns a quiet uncached 499', async () => {
+    const cancellation = new AbortController();
+    let inspectedSignal;
+    const { handler } = fixture({ inspect: async (_path, _executorId, options) => {
+      inspectedSignal = options?.signal;
+      cancellation.abort();
+      throw new DOMException('Aborted inspection', 'AbortError');
+    } });
+    const url = new URL('http://localhost/api/v1/projects/resolve?projectPath=/workspace/project');
+    const input = new Request(url, { signal: cancellation.signal });
+    const response = await handler(input, url);
+    expect(inspectedSignal).toBe(input.signal);
+    expect(response.status).toBe(499);
+    expect(response.headers.get('Cache-Control')).toBe('no-store');
+  });
+
   it('resolves chat and raw-path targets without caching', async () => {
     const chat = fixture();
     const chatResponse = await request(

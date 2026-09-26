@@ -21,14 +21,15 @@ export function createProjectResolutionRoutes(
   const inspect = deps.inspect;
   return {
     '/api/v1/projects/resolve': {
-      GET: async (_request, url) => {
+      GET: async (request, url) => {
         try {
           const target = parseTarget(url);
           assertCurrentBinding(deps.registry, target);
-          const resolution = await inspect(target.projectPath, target.executorId);
+          const resolution = await inspect(target.projectPath, target.executorId, { signal: request.signal });
           assertCurrentBinding(deps.registry, target);
           return noStore(Response.json({ target, resolution } satisfies ProjectResolutionResponse));
         } catch (error) {
+          if (request.signal.aborted) return noStore(new Response(null, { status: 499 }));
           return noStore(jsonErrorFromUnknown(error));
         }
       },

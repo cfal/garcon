@@ -21,12 +21,12 @@ interface FilesRouteDependencies {
 export default function createFilesRoutes(registry: IChatRegistry, dependencies: FilesRouteDependencies): RouteMap {
   const { files, inspectProject: inspect } = dependencies;
 
-  async function project(url: URL) {
+  async function project(url: URL, request: Request) {
     const chatId = url.searchParams.get('chatId');
     const captured = chatId ? registry.getChat(chatId) : null;
     const capturedPath = captured?.projectPath;
     const capturedExecutor = effectiveExecutorId(captured?.executorId);
-    const resolved = await resolveProjectPathFromUrl(registry, url, inspect);
+    const resolved = await resolveProjectPathFromUrl(registry, url, inspect, { signal: request.signal });
     if (resolved.error) return resolved;
     const service = await files(resolved.executorId);
     if (chatId) {
@@ -48,12 +48,15 @@ export default function createFilesRoutes(registry: IChatRegistry, dependencies:
   function guarded(handler: RouteHandler): RouteHandler {
     return async (...args) => {
       try { return await handler(...args); }
-      catch (error) { return jsonErrorFromUnknown(error); }
+      catch (error) {
+        if (args[0].signal.aborted) return new Response(null, { status: 499 });
+        return jsonErrorFromUnknown(error);
+      }
     };
   }
 
   const read: RouteHandler = async (request, url) => {
-    const resolved = await project(url);
+    const resolved = await project(url, request);
     if (resolved.error) return resolved.error;
     const result = await resolved.service.read({ projectPath: resolved.projectPath, filePath: filePath(url) }, callOptions(request));
     if (url.pathname.endsWith('/text')) {
@@ -81,19 +84,19 @@ export default function createFilesRoutes(registry: IChatRegistry, dependencies:
       return Response.json(await service.browse({ directoryPath: url.searchParams.get('path') || undefined }, callOptions(request)));
     }) },
     '/api/v1/files/list': { GET: guarded(async (request, url) => {
-      const resolved = await project(url);
+      const resolved = await project(url, request);
       if (resolved.error) return resolved.error;
       const result = await resolved.service.list({ projectPath: resolved.projectPath }, callOptions(request));
       return Response.json(result.files, { headers: result.truncated ? { 'X-Garcon-File-List-Truncated': 'true' } : undefined });
     }) },
     '/api/v1/files/identity': { GET: guarded(async (request, url) => {
-      const resolved = await project(url);
+      const resolved = await project(url, request);
       if (resolved.error) return resolved.error;
       const identity = await resolved.service.identity({ projectPath: resolved.projectPath, filePath: filePath(url) }, callOptions(request));
       return Response.json({ success: true, identity });
     }) },
     '/api/v1/files/revision': { GET: guarded(async (request, url) => {
-      const resolved = await project(url);
+      const resolved = await project(url, request);
       if (resolved.error) return resolved.error;
       return Response.json(await resolved.service.revision({ projectPath: resolved.projectPath, filePath: filePath(url) }, callOptions(request)));
     }) },
@@ -110,7 +113,7 @@ export default function createFilesRoutes(registry: IChatRegistry, dependencies:
         const save = parseSaveTextRequest(body);
         if (!save) throw new ValidationDomainError('Content, expectedRevision, and conflictResolution are required');
         if (chatId && registry.getChat(chatId)?.projectPath !== capturedPath) throw new DomainError('PROJECT_PATH_CHANGED', 'Project target changed while reading the request', 409, true);
-        const resolved = await project(boundUrl);
+        const resolved = await project(boundUrl, request);
         if (resolved.error) return resolved.error;
         const result = await resolved.service.save({ ...save, projectPath: resolved.projectPath, filePath: filePath(boundUrl) }, callOptions(request));
         return Response.json(result);

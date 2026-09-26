@@ -99,6 +99,22 @@ async function runGit(cwd, args) {
 }
 
 describe('GET /api/v1/chats/validate-start', () => {
+  it('forwards the request signal to project and Git validation', async () => {
+    const cancellation = new AbortController();
+    let inspectedSignal;
+    const cancelledHandler = createChatRoutes({ ...routeDeps, projects: async () => ({
+      inspect: async (_input, options) => {
+        inspectedSignal = options?.signal;
+        cancellation.abort();
+        throw new DOMException('Aborted inspection', 'AbortError');
+      },
+    }) })['/api/v1/chats/validate-start'].GET;
+    const request = new Request('http://localhost/api/v1/chats/validate-start?path=/project', { signal: cancellation.signal });
+    const response = await cancelledHandler(request, new URL(request.url));
+    expect(inspectedSignal).toBe(request.signal);
+    expect(response.status).toBe(499);
+  });
+
   it('preserves invalid and offline executor HTTP errors', async () => {
     const invalid = new Request('http://localhost/api/v1/chats/validate-start?path=/project&executorId=invalid');
     expect((await handler(invalid, new URL(invalid.url))).status).toBe(400);

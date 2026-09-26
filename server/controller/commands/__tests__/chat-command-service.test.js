@@ -5392,6 +5392,43 @@ describe('ChatCommandService', () => {
     ]);
   });
 
+  it('cancels timed-out steering file reads and admits a later resolution', async () => {
+    const stalled = deferred();
+    let signal;
+    let count = 0;
+    const target = { attempt: {}, identity: { turnId: 'turn-active' } };
+    const { service, queue, fileMentions } = makeService({
+      fileMentions: { resolve: mock(async (_content, _path, _executorId, options) => {
+        if (++count > 1) return 'Synthetic expanded context';
+        signal = options?.signal;
+        const onAbort = () => stalled.reject(signal.reason);
+        signal?.addEventListener('abort', onAbort, { once: true });
+        try { return await stalled.promise; }
+        finally { signal?.removeEventListener('abort', onAbort); }
+      }) },
+      queue: { captureSteerTarget: mock(() => target) },
+    });
+    try {
+      const first = await service.submitSteer({
+        chatId: SOURCE_CHAT_ID, content: 'Read @stalled.txt',
+        clientRequestId: 'request-steer-cancelled', clientMessageId: 'message-steer-cancelled',
+      });
+      expect(first.status).toBe('accepted');
+      expect(signal?.aborted).toBe(true);
+      expect(queue.deliverAcceptedSteer).toHaveBeenLastCalledWith(expect.objectContaining({
+        content: 'Read @stalled.txt', providerContent: 'Read @stalled.txt',
+      }));
+      await service.submitSteer({
+        chatId: SOURCE_CHAT_ID, content: 'Read @next.txt',
+        clientRequestId: 'request-steer-after-cancel', clientMessageId: 'message-steer-after-cancel',
+      });
+      expect(fileMentions.resolve).toHaveBeenCalledTimes(2);
+      expect(queue.deliverAcceptedSteer).toHaveBeenLastCalledWith(expect.objectContaining({
+        content: 'Read @next.txt', providerContent: 'Synthetic expanded context',
+      }));
+    } finally { stalled.resolve('Synthetic late context'); }
+  });
+
   it('records session deletion while steering waits for the chat mutation lock', async () => {
     const lock = new KeyedPromiseLock();
     const entered = deferred();

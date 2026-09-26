@@ -387,7 +387,10 @@ export class SteerCommands {
       return input.content;
     }
 
-    const resolution = this.deps.fileMentions.resolve(input.content, input.projectPath, input.executorId);
+    const cancellation = new AbortController();
+    const resolution = this.deps.fileMentions.resolve(input.content, input.projectPath, input.executorId, {
+      signal: cancellation.signal,
+    });
     this.#fileContextResolutions.set(input.chatId, resolution);
     const clearResolution = () => {
       if (this.#fileContextResolutions.get(input.chatId) === resolution) {
@@ -404,6 +407,7 @@ export class SteerCommands {
       );
     } catch (error) {
       if (!(error instanceof PromiseTimeoutError)) throw error;
+      cancellation.abort();
       logger.warn('steer file context timed out', {
         chatId: input.chatId,
         clientRequestId: input.clientRequestId,

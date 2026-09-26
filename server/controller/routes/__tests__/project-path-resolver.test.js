@@ -1,10 +1,31 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it, mock } from 'bun:test';
 import { resolveAccessibleProjectPath, resolveProjectPathFromUrl } from '../project-path-resolver.ts';
 import createCommandsRoutes from '../commands.ts';
 
 const PROJECT_PATH = '/workspace/project';
 
 describe('resolveAccessibleProjectPath', () => {
+  it.each(['projectPath=%2Fworkspace%2Fproject', 'chatId=1787471053739199'])('cancels command project inspection for %s', async (target) => {
+    const cancellation = new AbortController();
+    let inspectedSignal;
+    const getSlashCommands = mock(async () => []);
+    const routes = createCommandsRoutes({
+      registry: { getChat: () => ({ projectPath: PROJECT_PATH }) },
+      agents: { getSlashCommands },
+      inspectProject: async (_path, _executorId, options) => {
+        inspectedSignal = options?.signal;
+        cancellation.abort();
+        throw new DOMException('Aborted inspection', 'AbortError');
+      },
+    });
+    const url = new URL(`http://localhost/api/v1/commands?${target}&agent=codex`);
+    const request = new Request(url, { signal: cancellation.signal });
+    const response = await routes['/api/v1/commands'].GET(request, url);
+    expect(inspectedSignal).toBe(request.signal);
+    expect(response.status).toBe(499);
+    expect(getSlashCommands).not.toHaveBeenCalled();
+  });
+
   it('rejects inspection crossing a same-path executor handoff', async () => {
     const chat = { projectPath: PROJECT_PATH, executorId: 'local' };
     const result = await resolveProjectPathFromUrl({ getChat: () => chat },

@@ -17,8 +17,9 @@ export async function resolveAccessibleProjectPath(
   projectPath: string,
   inspect: ProjectInspector,
   executorId?: string | null,
+  options?: { readonly signal?: AbortSignal },
 ): Promise<ProjectPathResolution> {
-  const resolution = await inspect(projectPath, executorId);
+  const resolution = await inspect(projectPath, executorId, options);
   return resolution.kind === 'available'
     ? { projectPath: resolution.effectiveProjectKey, executorId: effectiveExecutorId(executorId) }
     : { error: unavailableResponse(projectPath, resolution.reason) };
@@ -55,6 +56,7 @@ export async function resolveProjectPathFromUrl(
   registry: IChatRegistry,
   url: URL,
   inspect: ProjectInspector,
+  options?: { readonly signal?: AbortSignal },
 ): Promise<ProjectPathResolution> {
   const executorId = executorIdFromUrl(url, registry);
   const chatId = url.searchParams.get('chatId');
@@ -66,7 +68,7 @@ export async function resolveProjectPathFromUrl(
       };
     }
     const projectPath = chat.projectPath;
-    const resolved = await resolveAccessibleProjectPath(projectPath, inspect, executorId);
+    const resolved = await resolveAccessibleProjectPath(projectPath, inspect, executorId, options);
     const current = registry.getChat(chatId);
     if (!current || current.projectPath !== projectPath || effectiveExecutorId(current.executorId) !== executorId) {
       return { error: jsonError('Project target changed during inspection', 409, 'PROJECT_PATH_CHANGED', true) };
@@ -78,5 +80,5 @@ export async function resolveProjectPathFromUrl(
   if (!projectPath) {
     return { error: Response.json({ error: 'chatId or projectPath is required' }, { status: 400 }) };
   }
-  return resolveAccessibleProjectPath(projectPath, inspect, executorId);
+  return resolveAccessibleProjectPath(projectPath, inspect, executorId, options);
 }

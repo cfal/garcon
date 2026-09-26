@@ -1,9 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import { createLocalFilesRoutes as createFilesRoutes } from './files-fixture.js';
+import createExecutorFilesRoutes from '../files.js';
 import { resetServerConfigForTests } from '../../config.js';
 import { resolveRealWithinBase } from '../../../common/path-boundary.ts';
 import { MAX_ATTACHMENT_UPLOAD_BODY_BYTES } from '../../attachments/validation.ts';
@@ -74,6 +75,51 @@ afterEach(async () => {
 });
 
 describe('files route', () => {
+  it('cancels project inspection before dispatching file operations', async () => {
+    for (const [endpoint, method] of [
+      ['list', 'GET'], ['identity', 'GET'], ['revision', 'GET'],
+      ['content', 'GET'], ['text', 'GET'], ['text', 'PUT'],
+    ]) {
+      const cancellation = new AbortController();
+      let inspectionOptions;
+      let serviceCalls = 0;
+      const routes = createExecutorFilesRoutes({ getChat: () => null }, {
+        files: async () => { serviceCalls++; throw new Error('File service must not be dispatched'); },
+        inspectProject: async (_path, _executorId, options) => {
+          inspectionOptions = options;
+          cancellation.abort();
+          throw new DOMException('Aborted inspection', 'AbortError');
+        },
+      });
+      const url = new URL(`http://localhost/api/v1/files/${endpoint}?projectPath=/project&path=example.txt`);
+      const request = new Request(url, {
+        method, signal: cancellation.signal,
+        ...(method === 'PUT' ? {
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: 'Synthetic edit', expectedRevision: 'v1:synthetic', conflictResolution: 'overwrite' }),
+        } : {}),
+      });
+      const response = await routes[url.pathname][method](request, url);
+      expect(Object.keys(inspectionOptions)).toEqual(['signal']);
+      expect(inspectionOptions.signal).toBe(request.signal);
+      expect(response.status).toBe(499);
+      expect(serviceCalls).toBe(0);
+    }
+  });
+
+  it('returns a quiet client-closed response for cancelled Local file requests', async () => {
+    const routes = createFilesRoutes({ getChat: () => null });
+    const logged = spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      for (const endpoint of ['tree', 'browse', 'list', 'identity', 'revision', 'content', 'text']) {
+        const url = new URL(`http://localhost/api/v1/files/${endpoint}?projectPath=${encodeURIComponent(projectPath)}&path=src/main.ts`);
+        const response = await routes[url.pathname].GET(new Request(url, { signal: AbortSignal.abort() }), url);
+        expect(response.status).toBe(499);
+      }
+      expect(logged).not.toHaveBeenCalled();
+    } finally { logged.mockRestore(); }
+  });
+
   it('returns a parsed base-scoped tree response', async () => {
     const routes = createFilesRoutes({ getChat: () => null });
     const url = new URL('http://localhost/api/v1/files/tree');

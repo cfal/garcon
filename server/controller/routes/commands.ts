@@ -17,10 +17,11 @@ interface CommandsRouteDeps {
 }
 
 export default function createCommandsRoutes({ registry, agents, inspectProject }: CommandsRouteDeps): RouteMap {
-  async function getCommands(_request: Request, url: URL): Promise<Response> {
+  async function getCommands(request: Request, url: URL): Promise<Response> {
     try {
-      const resolved = await resolveProjectPathFromUrl(registry, url, inspectProject);
+      const resolved = await resolveProjectPathFromUrl(registry, url, inspectProject, { signal: request.signal });
       if (resolved.error) return resolved.error;
+      request.signal.throwIfAborted();
 
       const agent = url.searchParams.get('agent')?.trim();
       if (!agent) return Response.json({ error: 'agent is required' }, { status: 400 });
@@ -28,6 +29,7 @@ export default function createCommandsRoutes({ registry, agents, inspectProject 
 
       return Response.json({ commands } satisfies SlashCommandsResponse);
     } catch (error) {
+      if (request.signal.aborted) return new Response(null, { status: 499 });
       return jsonErrorFromUnknown(error);
     }
   }
