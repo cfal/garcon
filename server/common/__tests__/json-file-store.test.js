@@ -75,7 +75,10 @@ describe('json file store', () => {
     expect(await fs.readFile(quarantinePath, 'utf8')).toBe(corruptBytes);
     expect((await fs.stat(quarantinePath)).mode & 0o777).toBe(0o600);
     await expect(fs.stat(filePath)).rejects.toMatchObject({ code: 'ENOENT' });
-    await expect(read()).rejects.toMatchObject({ quarantinePath });
+    await expect(read()).rejects.toMatchObject({
+      quarantinePath,
+      message: expect.stringContaining('Restore a valid state file before starting; keep the quarantine'),
+    });
   });
 
   it('returns empty state only when no canonical file or quarantine exists', async () => {

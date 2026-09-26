@@ -25,7 +25,6 @@ export function createApiProviderPolicy(store: ApiProviderStore, executors: Exec
       const executorIds = executors.config.list().map((executor) => executor.id);
       await migrations.run('provider-assignments', () =>
         assignments.migrate(['local', ...executorIds], store.legacyProviderIds));
-      if (migrations.isFresh) await assignments.migrate([], []);
       await assignments.initialize();
       await assignments.prune(executorIds);
     },

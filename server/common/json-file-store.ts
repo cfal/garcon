@@ -13,7 +13,7 @@ export class CorruptStateFileError extends Error {
   constructor(filePath: string, quarantinePath: string | null, options?: ErrorOptions) {
     const basename = path.basename(filePath);
     const message = quarantinePath
-      ? `State file ${basename} is corrupt. Restore or remove its quarantine before starting.`
+      ? `State file ${basename} is corrupt. Restore a valid state file before starting; keep the quarantine.`
       : `State file ${basename} is corrupt and could not be quarantined.`;
     super(message, options);
     this.name = 'CorruptStateFileError';
@@ -91,7 +91,7 @@ async function quarantineStateFile(filePath: string, cause: unknown): Promise<ne
     throw new CorruptStateFileError(filePath, quarantinePath, { cause: error });
   }
   logger.error(
-    `State file ${filePath} is corrupt and was quarantined to ${quarantinePath}. Restore or remove the quarantine before starting.`,
+    `State file ${filePath} is corrupt and was quarantined to ${quarantinePath}. Restore a valid state file before starting; keep the quarantine.`,
     cause,
   );
   throw new CorruptStateFileError(filePath, quarantinePath, { cause });

@@ -65,6 +65,27 @@ describe('ApiProviderStore', () => {
     await expect(fs.stat(filePath)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
+  it.each([1, 2])('preserves every profile and key when a v%s endpoint ID is invalid', async (version) => {
+    const store = await tempStore();
+    const dir = createdDirs.at(-1);
+    const filePath = path.join(dir, 'api-providers.json');
+    const profile = (id) => ({
+      id, revision: 1, label: 'Synthetic profile', endpoints: [{
+        id: `${id}_openai`, protocol: 'openai-compatible', baseUrl: 'http://127.0.0.1:1/v1',
+        defaultModel: 'synthetic-model', apiKey: `synthetic-key-${id}`,
+      }],
+    });
+    const bytes = JSON.stringify({ version, legacyProviderIds: [],
+      apiProviders: [profile('valid_profile'), profile(`${'a'.repeat(51)}_abcdef`)] });
+    await fs.writeFile(filePath, bytes, { mode: 0o600 });
+    await expect(store.init()).rejects.toBeInstanceOf(CorruptStateFileError);
+    const [quarantine] = (await fs.readdir(dir)).filter((entry) => entry.includes(QUARANTINE_INFIX));
+    expect(await fs.readFile(path.join(dir, quarantine), 'utf8')).toBe(bytes);
+    expect((await fs.stat(path.join(dir, quarantine))).mode & 0o777).toBe(0o600);
+    await expect(new ApiProviderStore(filePath).init()).rejects.toBeInstanceOf(CorruptStateFileError);
+    expect(await Bun.file(filePath).exists()).toBe(false);
+  });
+
   it('creates user-managed providers from templates without exposing API keys', async () => {
     const store = await tempStore();
     await store.init();

@@ -1,9 +1,10 @@
+import { open } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isApiProviderId, type ApiProviderAssignments } from '../../../common/api-providers.js';
 import { isExecutorId } from '../../../common/executors.js';
 import { isRecord } from '../../../common/json.js';
 import { DomainError, ValidationDomainError } from '../../common/domain-error.js';
-import { AtomicJsonWriteError, readJsonStateFile, writeJsonFileAtomic } from '../../common/json-file-store.js';
+import { AtomicJsonWriteError, readJsonStateFile, syncDirectory, writeJsonFileAtomic } from '../../common/json-file-store.js';
 import { KeyedPromiseLock } from '../../common/keyed-lock.js';
 import type { RetainExecutorReferences } from '../executors/reference-writes.js';
 
@@ -39,6 +40,18 @@ export class ApiProviderAssignmentStore {
 
   constructor(workspaceDir: string, private readonly retain: RetainExecutorReferences) {
     this.#path = join(workspaceDir, 'api-provider-assignments.json');
+  }
+
+  static async initializeFreshWorkspace(workspaceDir: string): Promise<void> {
+    // An interrupted first write leaves a fail-closed file, never an absent legacy policy.
+    const file = await open(join(workspaceDir, 'api-provider-assignments.json'), 'wx', 0o600);
+    try {
+      await file.writeFile(JSON.stringify({ version: 1, revision: 0, assignments: {} } satisfies AssignmentFile));
+      await file.sync();
+    } finally {
+      await file.close();
+    }
+    await syncDirectory(workspaceDir);
   }
 
   async migrate(executorIds: readonly string[], providerIds: readonly string[]): Promise<void> {
@@ -137,7 +150,10 @@ export class ApiProviderAssignmentStore {
     try {
       await writeJsonFileAtomic(this.#path, snapshot, { mode: 0o600 });
     } catch (error) {
-      if (error instanceof AtomicJsonWriteError && error.renamed) this.#snapshot = null;
+      if (error instanceof AtomicJsonWriteError && error.renamed) {
+        this.#snapshot = null;
+        for (const listener of this.#listeners) listener();
+      }
       throw error;
     }
     this.#snapshot = snapshot;

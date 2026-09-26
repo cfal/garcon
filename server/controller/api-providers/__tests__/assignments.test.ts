@@ -87,6 +87,9 @@ test.each(['profile-write-unknown', 'assignment-write-unknown'] as const)(
     const input = { executorId: remote, agentId: 'test', model: 'synthetic-model', apiProviderId: provider.id, modelEndpointId: reference.endpointId };
     const selection = resolver.resolveSelection(input);
     expect(resolver.getModelOptions('test', remote)).toHaveLength(1);
+    let invalidations = 0;
+    store.onChanged(() => { invalidations++; });
+    assignments.onChanged(() => { invalidations++; });
     {
       const open = fs.open;
       const failure = spyOn(fs, 'open').mockImplementation(async (path, flags, mode) => {
@@ -99,6 +102,7 @@ test.each(['profile-write-unknown', 'assignment-write-unknown'] as const)(
           : assignments.unassign(remote, provider.id)).rejects.toThrow('Synthetic sync failure');
       } finally { failure.mockRestore(); }
     }
+    expect(invalidations).toBe(1);
     expect(resolver.getModelOptions('test', remote)).toEqual([]);
     expect(resolver.getModelOptions('test', 'local')).toEqual([]);
     expect(service.getCatalog(remote)).toEqual([]);
@@ -142,6 +146,39 @@ test('migration grants only the legacy seed once, never newer profiles or execut
   await assignments.initialize();
   expect(assignments.allows(remote, provider.id)).toBe(false);
   expect(assignments.allows(other, provider.id)).toBe(false);
+});
+
+test('fresh assignment initialization survives a later startup failure without legacy grants', async () => {
+  const { root, provider } = await fixture();
+  const workspace = join(root, 'fresh-workspace');
+  await fs.mkdir(workspace);
+  await ApiProviderAssignmentStore.initializeFreshWorkspace(workspace);
+  const assignments = new ApiProviderAssignmentStore(workspace, () => () => {});
+  await assignments.migrate(['local', remote], [provider.id]);
+  await assignments.initialize();
+  expect(assignments.snapshot()).toEqual({ revision: 0, assignments: {} });
+  expect((await fs.stat(join(workspace, 'api-provider-assignments.json'))).mode & 0o777).toBe(0o600);
+  await expect(ApiProviderAssignmentStore.initializeFreshWorkspace(workspace)).rejects.toMatchObject({ code: 'EEXIST' });
+});
+
+test('a crash during the first assignment write fails closed and empty-policy recovery grants nothing', async () => {
+  const { root, provider } = await fixture();
+  const workspace = join(root, 'interrupted-workspace');
+  await fs.mkdir(workspace);
+  await fs.writeFile(join(workspace, 'api-provider-assignments.json'), '', { mode: 0o600 });
+  const assignments = new ApiProviderAssignmentStore(workspace, () => () => {});
+  await expect(assignments.migrate(['local', remote], [provider.id])).rejects.toThrow('corrupt');
+  await expect(assignments.migrate(['local', remote], [provider.id])).rejects.toThrow('corrupt');
+  expect(() => assignments.allows('local', provider.id)).toThrow('unavailable');
+  const [quarantine] = (await fs.readdir(workspace)).filter(name => name.startsWith('api-provider-assignments.json.corrupt-'));
+  expect(quarantine).toBeDefined();
+  await fs.writeFile(join(workspace, 'api-provider-assignments.json'), JSON.stringify({
+    version: 1, revision: 0, assignments: {},
+  }), { mode: 0o600 });
+  await assignments.migrate(['local', remote], [provider.id]);
+  await assignments.initialize();
+  expect(assignments.snapshot()).toEqual({ revision: 0, assignments: {} });
+  expect(await fs.readFile(join(workspace, quarantine!), 'utf8')).toBe('');
 });
 
 test('corrupt or missing post-migration assignments never grant legacy access', async () => {

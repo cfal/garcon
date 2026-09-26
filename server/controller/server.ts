@@ -61,6 +61,7 @@ import {
   refreshAgentIntegrationCoreRecords,
 } from './agents/core-record-migration.js';
 import { ApiProviderStore } from './api-providers/store.js';
+import { ApiProviderAssignmentStore } from './api-providers/assignments.js';
 import { ApiProviderEndpointResolver } from './api-providers/endpoint-resolver.js';
 import type { ApiProviderAccess } from './api-providers/access.js';
 import { createApiProviderPolicy } from './api-providers/composition.js';
@@ -182,6 +183,7 @@ export async function startServer(): Promise<void> {
     process.env.GARCON_CONFIG_DIR = config.configDir;
     process.env.GARCON_RUNTIME = 'controller';
     const workspaceMigrations = await WorkspaceMigrationRunner.open(workspaceDir);
+    if (workspaceMigrations.isFresh) await ApiProviderAssignmentStore.initializeFreshWorkspace(workspaceDir);
     await workspaceMigrations.run('chat-id-migration', async () => {
       const result = await migrateWorkspaceChatIds(workspaceDir);
       const migratedChatIdCount = Object.keys(result.migratedChatIds).length;
