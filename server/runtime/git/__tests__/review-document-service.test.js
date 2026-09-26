@@ -51,6 +51,50 @@ afterEach(async () => {
 });
 
 describe('Git review documents', () => {
+  it('settles cancelled queued prefetches before the active body load completes', async () => {
+    const projectPath = await createRepository();
+    const service = createService();
+    await fs.writeFile(path.join(projectPath, 'a.txt'), 'changed a\n');
+    const snapshot = await service.getWorkbenchSnapshot({ projectPath, mode: 'working', context: 2 });
+    expect(snapshot.status).toBe('ready');
+    const entered = Promise.withResolvers();
+    const release = Promise.withResolvers();
+    const originalSpawn = Bun.spawn;
+    let held = false;
+    const spawn = spyOn(Bun, 'spawn').mockImplementation((argv, options) => {
+      const process = originalSpawn(argv, options);
+      if (held || !argv.includes('--patch-with-raw')) return process;
+      held = true;
+      entered.resolve();
+      const exited = process.exited.then(async (code) => { await release.promise; return code; });
+      return new Proxy(process, { get: (target, key) => key === 'exited' ? exited : Reflect.get(target, key, target) });
+    });
+    const load = (signal) => service.getReviewDocumentFileBodies({
+      projectPath, documentId: snapshot.reviewSummary.documentId, files: ['a.txt'], purpose: 'prefetch', signal,
+    });
+    const first = load();
+    const controllers = Array.from({ length: 7 }, () => new AbortController());
+    let queued = [];
+    let timer;
+    try {
+      await entered.promise;
+      controllers[0].abort(new Error('Cancelled before queueing'));
+      queued = controllers.map(controller => load(controller.signal).catch(error => error));
+      controllers.forEach(controller => controller.abort());
+      const results = await Promise.race([
+        Promise.all(queued),
+        new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Cancelled prefetches retained the queue')), 1000); }),
+      ]);
+      expect(results).toEqual(controllers.map(controller => controller.signal.reason));
+      expect(spawn.mock.calls.filter(([argv]) => argv.includes('--patch-with-raw'))).toHaveLength(1);
+    } finally {
+      clearTimeout(timer);
+      release.resolve();
+      await Promise.allSettled([first, ...queued]);
+      spawn.mockRestore();
+    }
+  });
+
   it('retains each queued prefetch operation context after the preceding request settles', async () => {
     const projectPath = await createRepository();
     const service = createService();

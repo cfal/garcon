@@ -30,6 +30,7 @@ interface QueuedPrefetch<T> {
   task: () => Promise<T>;
   resolve: (value: T) => void;
   reject: (reason: unknown) => void;
+  cancel: () => void;
 }
 
 class GitReviewBodyExecutor {
@@ -39,12 +40,21 @@ class GitReviewBodyExecutor {
   run<T>(purpose: GitReviewBodyPurpose, signal: AbortSignal | undefined, task: () => Promise<T>): Promise<T> {
     if (purpose === 'visible') return task();
     return new Promise<T>((resolve, reject) => {
-      this.prefetchQueue.push({
+      signal?.throwIfAborted();
+      const queued: QueuedPrefetch<unknown> = {
         signal,
         task: AsyncResource.bind(task),
         resolve: resolve as (value: unknown) => void,
         reject,
-      });
+        cancel: () => {
+          const index = this.prefetchQueue.indexOf(queued);
+          if (index === -1) return;
+          this.prefetchQueue.splice(index, 1);
+          reject(signal?.reason);
+        },
+      };
+      this.prefetchQueue.push(queued);
+      signal?.addEventListener('abort', queued.cancel, { once: true });
       this.pumpPrefetch();
     });
   }
@@ -53,6 +63,7 @@ class GitReviewBodyExecutor {
     if (this.prefetchRunning) return;
     const queued = this.prefetchQueue.shift();
     if (!queued) return;
+    queued.signal?.removeEventListener('abort', queued.cancel);
     if (queued.signal?.aborted) {
       queued.reject(queued.signal.reason);
       this.pumpPrefetch();

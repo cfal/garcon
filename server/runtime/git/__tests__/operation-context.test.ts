@@ -1,5 +1,20 @@
 import { expect, test } from 'bun:test';
-import { markGitMutationDispatched, trackGitProcess, withGitOperation } from '../operation-context.js';
+import { gitOperationOptions, markGitMutationDispatched, trackGitProcess, withGitOperation } from '../operation-context.js';
+
+test('subprocess output bounds remain independent of the serialized result limit', async () => {
+  await withGitOperation('/project', undefined, async () => {
+    expect(gitOperationOptions({ disableOptionalLocks: true })).toMatchObject({
+      maxStdoutBytes: undefined, truncateStdout: false,
+    });
+    expect(gitOperationOptions({ disableOptionalLocks: true, maxStdoutBytes: 12 * 1024 * 1024 })).toMatchObject({
+      maxStdoutBytes: 12 * 1024 * 1024, truncateStdout: false,
+    });
+    expect(gitOperationOptions({})).toMatchObject({ maxStdoutBytes: 32_768, truncateStdout: true });
+    expect(gitOperationOptions({ maxStdoutBytes: 8 * 1024 * 1024, truncateStdout: false })).toMatchObject({
+      maxStdoutBytes: 8 * 1024 * 1024, truncateStdout: false,
+    });
+  });
+});
 
 test('read completion rejects cancellation swallowed by a fallback', async () => {
   const controller = new AbortController();

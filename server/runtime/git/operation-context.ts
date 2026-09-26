@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { ExecutorCallOptions } from '@garcon/server-agent-interface';
-import { GIT_MAX_RESULT_BYTES, GIT_OPERATION_TIMEOUT_MS } from '../../../common/git-execution.js';
+import { GIT_OPERATION_TIMEOUT_MS } from '../../../common/git-execution.js';
 import { GitServiceError } from '../../../common/git-error.js';
 import { resolveRealWithinBase } from '../../common/path-boundary.js';
 import type { GitCommandOptions } from './types.js';
@@ -80,7 +80,7 @@ export function gitOperationOptions(options: GitCommandOptions): GitCommandOptio
     ...options,
     signal: options.signal ? AbortSignal.any([options.signal, current.signal]) : current.signal,
     timeoutMs: Math.max(1, Math.min(options.timeoutMs ?? GIT_OPERATION_TIMEOUT_MS, current.deadline - performance.now())),
-    maxStdoutBytes: Math.min(options.maxStdoutBytes ?? (options.disableOptionalLocks ? GIT_MAX_RESULT_BYTES : 32_768), GIT_MAX_RESULT_BYTES),
+    maxStdoutBytes: options.maxStdoutBytes ?? (options.disableOptionalLocks ? undefined : 32_768),
     truncateStdout: options.truncateStdout ?? !options.disableOptionalLocks,
     env: { ...options.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' },
   };
