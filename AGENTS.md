@@ -7,6 +7,7 @@ This is the operating model for how engineers design, implement, review, and evo
 - If there was a design doc, ALWAYS re-read it after compaction.
 - `docs/transcript-ledger-v5-design.md` is the governing transcript design; re-read it before changing transcript, ledger, history migration, provider publication, paging, replay, or transcript UX behavior.
 - Before changing execution, machine services, provider configuration, or their UI, read `docs/executor/transport.md`, `docs/file-structure.md`, and the relevant contract under `docs/executor/` or `docs/providers.md`. Current contracts supersede historical executor proposals.
+- Before changing `garcon-cli`, runtime discovery, or HTTP APIs used by the CLI, read `docs/cli.md` and `docs/executor/cli.md`. Executor CLI forwarding is part of the CLI contract, not optional follow-up work.
 - Always git clone dependencies into /tmp to inspect if necessary
 - ALWAYS refer to Svelte 5, either docs or by cloning the repo, to make sure we're following best practices and canonical patterns
 - DO NOT add to tech debt. It is CRITICAL that we keep the architecture clean and rational, even if that means taking longer to fix or refactor what we're working on.
@@ -106,6 +107,17 @@ Every execution, machine-service, and related UI change must account for Local a
 - Handle late success and failure against the captured operation. Clean up late remote resources only through their originating session, never a replacement. Cancellation must not release process-owned mutation locks or admission while the underlying work remains unsettled.
 - Provider profiles remain controller-owned; assignments and revisions gate execution and credential release on Local and remote executors. Derive reverse-RPC origin from the authenticated connection. CLI access is a separate, default-off workspace-wide grant. Revocation cannot erase disclosed credentials or undo admitted work.
 - Reuse executor reference-publication guards when changing durable references or deletion. Retain protection through failed or uncertain writes; do not equate an in-memory change with durable removal or publish configuration grants before durability.
+
+### CLI Forwarding Contract
+
+Every CLI command and CLI-facing API change must account for both direct controller HTTP and the executor's loopback gateway. Working only against the controller is incomplete.
+
+- Keep `cli/garcon-client.ts` HTTP-only and command logic transport-agnostic. `server/remote/server/cli-gateway.ts` forwards allowlisted requests over the existing Noise connection via `controllerCli.*`; `server/controller/executors/cli-dispatcher.ts` invokes the same controller handlers with delegated authority. Do not require worker access to the controller's HTTP listener, add a generic proxy, or duplicate command implementations on the worker.
+- When adding or changing a client HTTP operation, review `CLI_OPERATIONS` and envelope validation in `server/remote/transport/cli-protocol.ts`, gateway adaptation, and controller dispatch together. Keep exact method/path allowlisting, typed payloads, executor-target validation, mutation classification, deadlines, admission pools, and encoded request/reply bounds aligned. A new controller route is not automatically available through the gateway; never widen forwarding to arbitrary routes or settings payloads.
+- Derive CLI origin from the authenticated executor link and enforce the current default-off `allowControllerCli` grant. Preserve delegated-executor principals, session/authorization checks, and reply-publication guards. Never substitute Local authority, trust caller-supplied origin, forward the gateway bearer as controller authentication, or copy controller credentials to workers.
+- Keep origin separate from execution target. New starts, standalone catalogs, and native-session lookup use authenticated `defaultExecutorId`; existing-chat operations use the chat's owning/target executor and ownership fences. Resolve cwd and read stdin/write output files on the CLI machine. Do not interpret worker paths on the controller or silently replace an omitted executor with Local.
+- Preserve endpoint identity, captured controller `serverInstanceId`, and RPC-session fencing through dispatch, polling, and operation-specific recovery. Forward application status, JSON errors, and supported retry metadata without gateway-specific success envelopes. Disconnects, cancellation, or undeliverable mutation replies may mean unknown outcome; never add gateway replay, automatic retargeting, or retries outside the operation's existing identity guarantees.
+- Discovery/configuration changes must preserve inherited config-root/role selection for controller and worker provider/PTY children, including gateway startup failure without fallback. Generated follow-up commands and explicit ticket retries must carry the resolved selector; switching from executor to controller changes authority and ticket retry identity. Update `docs/cli.md`, the executor CLI contract, and linked agent skill instructions when syntax or behavior changes.
 
 ### General
 
@@ -437,6 +449,7 @@ A bug or flake first observed in a live suite or in production may only be close
 ### Remote Executor Coverage
 
 - Exercise changed cross-boundary workflows through public controller/worker startup on Local and both remote dial directions. Protocol doubles alone do not establish integration correctness. Use each provider's documented test tier; reference-provider behavior requires pinned scripted coverage.
+- CLI command/API changes require direct-controller and forwarded-path coverage. Keep `server/remote/transport/__tests__/cli-allowlist.test.ts` accounting for every `GarconClient` HTTP operation; extend gateway and dispatcher contract tests for validation, authority, response parity, and bounds. Exercise affected commands with real CLI processes in `integration-tests/tests/server/garcon-cli*.test.ts` and `executor-cli*.test.ts`, including both dial directions. Changes to discovery, grants, targeting, or recovery also need relevant provider/PTY inheritance, denial/revocation, restart, and uncertain-outcome regressions.
 - Use deterministic barriers for disconnect before dispatch, side effects before reply, late settlement, session replacement, and separate controller/worker restarts. Assert no duplicate execution, false success, stale publication, or premature resource release.
 - Test identical paths/IDs on different executors, partial outages, and unavailable-to-ready transitions. Browser workflows must preserve drafts and owning-panel identity across switches, reconnects, and provider revocation; click and keyboard admission must agree.
 - Transport/bounds changes need slow progressing links, silent half-open connections, and mixed chat/Files/Git/PTY pressure. Assert bounded resources and process survival without claiming latency isolation.
@@ -488,6 +501,7 @@ Reviewers should explicitly check:
 - accessibility regressions
 - missing tests for stateful behavior
 - executor-qualified routing, authority/lifetime fences, uncertain outcomes, and Local/remote coverage
+- CLI direct/gateway parity, allowlist and policy updates, executor origin versus target, and real forwarded-command coverage
 
 ## Practical Do/Don't Examples
 
