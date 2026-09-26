@@ -111,7 +111,7 @@
 	</div>
 
 	<p class="text-xs text-muted-foreground">
-		Assigned nodes can receive this profile's credentials. Removing access does not revoke keys
+		Assigned executors can receive this profile's credentials. Removing access does not revoke keys
 		already received.
 	</p>
 	{#if providers.error}

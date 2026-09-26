@@ -193,10 +193,10 @@
 	});
 
 	$effect(() => {
-		const executor = scrollContainer;
+		const element = scrollContainer;
 		const viewport = conversationViewport;
-		if (!executor || !isVisible) return;
-		const stop = observeConversationViewportScrollGestures(executor, (intent) => {
+		if (!element || !isVisible) return;
+		const stop = observeConversationViewportScrollGestures(element, (intent) => {
 			if (intent.touch !== null) panel.scroll.noteNativeTouchLifecycle(intent.touch);
 			if (intent.contact === 'end') {
 				panel.scroll.finishDirectionlessUserScrollIntent();

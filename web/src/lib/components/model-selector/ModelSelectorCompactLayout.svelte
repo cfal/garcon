@@ -131,7 +131,7 @@
 		pane = paneAfterAgent(agentId);
 	}
 
-	function handleNodeSelect(executorId: string): void {
+	function handleExecutorSelect(executorId: string): void {
 		void selector.selectExecutor(executorId);
 		pane = firstModelPane();
 	}
@@ -233,7 +233,7 @@
 
 	<div data-slot="model-selector-compact-pane" class="flex min-h-0 flex-1 flex-col">
 		{#if pane === 'executor'}
-			<ModelSelectorExecutorPicker {selector} onSelect={handleNodeSelect} />
+			<ModelSelectorExecutorPicker {selector} onSelect={handleExecutorSelect} />
 		{:else if pane === 'menu'}
 			<div
 				class="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain p-1 [-webkit-overflow-scrolling:touch]"

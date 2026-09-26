@@ -55,7 +55,7 @@ jobs:
             test_timeout: 120000
             artifact_suffix: sacs-remote-controller-dials
             execution_backend: remote-controller-dials
-          - lane: SACS remote node dials
+          - lane: SACS remote executor dials
             path: tests/sacs
             shard: "1/1"
             test_timeout: 120000
