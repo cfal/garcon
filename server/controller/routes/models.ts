@@ -72,8 +72,9 @@ export default function createModelsRoutes({
           error: `Unknown agent: ${agentId}. Available agents: ${availableAgents}`,
         }, { status: 400 });
       }
+      modelCatalog.agents.assertAgentAvailable(agentId, executorId);
       const apiProviders = modelCatalog.apiProviders.getCatalog(executorId);
-      if (entry.requiresStrictModelDiscovery) {
+      if (entry.requiresStrictModelDiscovery || modelCatalog.agents.requiresStrictModelDiscovery(agentId, executorId)) {
         try {
           entry = await modelCatalog.agents.getAgentCatalogEntry(agentId, { strict: true, executorId }) ?? entry;
         } catch (error) {
