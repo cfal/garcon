@@ -2,8 +2,9 @@ import { expect, test } from 'bun:test';
 import type { RemoteSettingsSnapshot } from '../../../common/settings.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 
-test('executor pin mutations preserve concurrent startup recents and unrelated executor preferences', async () => {
-  await withIntegrationFixture('executor-path-preferences', async (fixture) => {
+test.each(['remote-controller-dials', 'remote-executor-dials'] as const)(
+  'executor pin mutations preserve concurrent recents and unrelated preferences (%s)', async executionBackend => {
+  await withIntegrationFixture(`executor-path-preferences-${executionBackend}`, async (fixture) => {
     const { client, directAgents, dirs } = fixture;
     const otherExecutor = '33333333-3333-4333-8333-333333333333';
     const patch = (executorId: string, pinnedPaths: string[]) => ({ paths: { byExecutor: { [executorId]: { pinnedPaths } } } });
@@ -24,5 +25,5 @@ test('executor pin mutations preserve concurrent startup recents and unrelated e
     await expect(client.put('/api/v1/app/settings', { paths: { byExecutor: { [client.executorId]: { recentPaths: [] } } } })).rejects.toThrow();
     await fixture.restartGarcon();
     expect((await fixture.client.get<RemoteSettingsSnapshot>('/api/v1/app/settings')).paths.byExecutor).toEqual(expected);
-  }, { executionBackend: 'remote-controller-dials' });
+  }, { executionBackend });
 }, 60_000);
