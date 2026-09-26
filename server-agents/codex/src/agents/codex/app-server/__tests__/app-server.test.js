@@ -2076,7 +2076,9 @@ describe('CodexAppServerRuntime', () => {
     }
   });
 
-  it.each(['runTurn', 'compact'])('reuses a recovered writer for a later %s with the stale binding', async (method) => {
+  it.each(['runTurn', 'compact'].flatMap((method) => (
+    ['invalid-mismatch', 'cancelled-recovery', 'invalid-replacement'].map((failure) => [method, failure])
+  )))('reuses a recovered writer for %s after %s', async (method, failure) => {
     const nativePath = path.join(tmpDir, 'moved.jsonl');
     await writeJsonl(nativePath, commandHistoryEntries('call-1', 'echo test', 'test'));
     const discovery = new FakeClient({
@@ -2096,10 +2098,31 @@ describe('CodexAppServerRuntime', () => {
         method: 'turn/completed', params: { threadId: 'thread-1', turn: makeTurn() },
       });
       await published.waitForEvent((event) => event.type === 'run-ended');
-      const invalidPath = path.join(tmpDir, 'invalid.jsonl');
-      await fs.writeFile(invalidPath, 'invalid json\n');
-      await expect(provider[method](makeRequest({ ...binding, nativePath: invalidPath })))
-        .rejects.toMatchObject({ code: 'TRANSCRIPT_UNAVAILABLE' });
+      if (failure === 'cancelled-recovery') {
+        const admission = new AbortController();
+        const cancelled = new Error('cancel native recovery');
+        const markStarted = mock();
+        provider.requestNativePathDiscoveryRefresh(binding.agentSessionId);
+        discovery.listThreads.mockImplementationOnce(async () => {
+          admission.abort(cancelled);
+          return { data: [makeThread({ path: nativePath })], nextCursor: null };
+        });
+        await expect(provider[method](makeRequest({
+          ...binding, executionAdmission: { signal: admission.signal, markStarted },
+        }))).rejects.toBe(cancelled);
+        expect(discovery.listThreads).toHaveBeenCalledTimes(2);
+        expect(markStarted).not.toHaveBeenCalled();
+      } else {
+        const invalidPath = failure === 'invalid-replacement' ? nativePath : path.join(tmpDir, 'invalid.jsonl');
+        await fs.writeFile(invalidPath, 'invalid json\n');
+        await expect(provider[method](makeRequest({
+          ...binding, nativePath: invalidPath,
+          ...(failure === 'invalid-replacement' ? { envOverrides: { SYNTHETIC_SETTING: 'changed' } } : {}),
+        }))).rejects.toMatchObject({ code: 'TRANSCRIPT_UNAVAILABLE' });
+        await writeJsonl(nativePath, commandHistoryEntries('call-1', 'echo test', 'test'));
+      }
+      expect(execution.startTurn).toHaveBeenCalledTimes(1);
+      expect(execution.compactThread).not.toHaveBeenCalled();
       expect(execution.shutdown).not.toHaveBeenCalled();
       await provider[method](makeRequest(binding));
       expect(createClient).toHaveBeenCalledTimes(2);
