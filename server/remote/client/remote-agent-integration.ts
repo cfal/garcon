@@ -55,8 +55,8 @@ export class RemoteAgentIntegration implements AgentIntegration {
       const { rpc } = current();
       return rpc.call(this.descriptor.id, method, request, {
         ...options,
-        // Some providers return the handle only after the compaction turn ends.
-        timeoutMs: options?.timeoutMs ?? (method === 'compaction.compact' ? null : undefined),
+        // Native admission may outlive the default RPC deadline; Stop and session loss still cancel it.
+        timeoutMs: options?.timeoutMs ?? null,
         onLateResult: (handle) => rpc.call(this.descriptor.id, 'execution.abort', handle),
       });
     };

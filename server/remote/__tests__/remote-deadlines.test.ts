@@ -36,52 +36,62 @@ function controlledTimeouts() {
 }
 
 for (const dialer of ['controller', 'worker'] as const) {
-  for (const timeoutMs of [undefined, 1000]) {
-    test(`compaction uses only an explicit RPC deadline (${dialer} dials, timeout ${timeoutMs ?? 'none'})`, async () => {
-      const entered = Promise.withResolvers<void>();
-      const release = Promise.withResolvers<void>();
-      const aborted = Promise.withResolvers<void>();
-      const fixture = await remoteFixture(dialer, (_controller, _worker, native) => {
-        Object.assign(native.integration, {
-          compaction: {
-            async compact(request, options) {
-              entered.resolve();
-              await release.promise;
-              return native.integration.execution.resume(request, options);
-            },
-          },
-        } satisfies Pick<AgentIntegration, 'compaction'>);
-        const abort = native.integration.execution.abort;
-        native.integration.execution.abort = async (...args) => {
-          const result = await abort(...args);
-          aborted.resolve();
-          return result;
-        };
-      });
-      const timers = controlledTimeouts();
-      try {
-        const integration = await fixture.executor.getAgentIntegration('test');
-        const request = { ...await requestFor(integration), agentSessionId: 'test-session', nativeSession: null };
-        const result = integration.compaction!.compact(request, { timeoutMs }).catch((error: unknown) => error);
-        await entered.promise;
-        expect(timers.at(120_000)).toHaveLength(0);
-        if (timeoutMs !== undefined) {
-          expect(timers.at(timeoutMs)).toHaveLength(1);
-          timers.at(timeoutMs)[0]![1].fire();
-          expect(await result).toMatchObject({ outcome: 'unknown' });
+  for (const method of ['start', 'resume', 'compact'] as const) {
+    for (const outcome of ['success', 'failure', 'deadline'] as const) {
+      test(`${method} preserves ${outcome} without an implicit RPC deadline (${dialer} dials)`, async () => {
+        const entered = Promise.withResolvers<void>();
+        const release = Promise.withResolvers<void>();
+        const aborted = Promise.withResolvers<void>();
+        const fixture = await remoteFixture(dialer, (_controller, _worker, native) => {
+          const start = native.integration.execution.start;
+          const resume = native.integration.execution.resume;
+          const wait = async () => {
+            entered.resolve();
+            await release.promise;
+            if (outcome === 'failure') throw new Error('Synthetic native launch failure');
+          };
+          native.integration.execution.start = async (request, options) => { await wait(); return start(request, options); };
+          native.integration.execution.resume = async (request, options) => { await wait(); return resume(request, options); };
+          Object.assign(native.integration, {
+            compaction: { compact: native.integration.execution.resume },
+          } satisfies Pick<AgentIntegration, 'compaction'>);
+          const abort = native.integration.execution.abort;
+          native.integration.execution.abort = async (...args) => {
+            const result = await abort(...args);
+            aborted.resolve();
+            return result;
+          };
+        });
+        const timers = controlledTimeouts();
+        try {
+          const integration = await fixture.executor.getAgentIntegration('test');
+          const request = { ...await requestFor(integration), agentSessionId: 'test-session', nativeSession: null };
+          const launch = method === 'compact' ? integration.compaction!.compact : integration.execution[method];
+          const result = launch(request, outcome === 'deadline' ? { timeoutMs: 1000 } : undefined).catch((error: unknown) => error);
+          await entered.promise;
+          expect(timers.at(120_000)).toHaveLength(0);
+          if (outcome === 'deadline') {
+            expect(timers.at(1000)).toHaveLength(1);
+            timers.at(1000)[0]![1].fire();
+            expect(await result).toMatchObject({ outcome: 'unknown' });
+            release.resolve();
+            await aborted.promise;
+            await integration.execution.runningSessions();
+            expect(fixture.generations[0]!.calls.abort).toBe(1);
+          } else {
+            release.resolve();
+            if (outcome === 'success') expect(await result).toMatchObject({ kind: 'execution' });
+            else expect(await result).toMatchObject({ code: 'PROVIDER_FAILURE', message: 'Synthetic native launch failure' });
+            expect(fixture.generations[0]!.calls.abort).toBe(0);
+          }
+          expect(fixture.executor.availability).toBe('ready');
+        } finally {
           release.resolve();
-          await aborted.promise;
-          await integration.execution.runningSessions();
-        } else {
-          release.resolve();
-          expect(await result).toMatchObject({ kind: 'execution' });
+          await fixture.dispose();
+          timers.restore();
         }
-      } finally {
-        release.resolve();
-        await fixture.dispose();
-        timers.restore();
-      }
-    });
+      });
+    }
   }
 
   test(`offline asynchronous facades reject through catch (${dialer} dials)`, async () => {
