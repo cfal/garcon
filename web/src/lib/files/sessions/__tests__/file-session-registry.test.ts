@@ -1765,26 +1765,56 @@ describe('FileSessionRegistry', () => {
 		expect(opened.dirty).toBe(false);
 	});
 
-	it('rejects Accept Disk after the local buffer changes behind the comparison', async () => {
+	it.each(['accept-disk', 'save-checked'] as const)(
+		'rejects %s after the local buffer changes behind the comparison',
+		async (choice) => {
+			const harness = createHarness();
+			const opened = await harness.registry.open(request('src/accept-disk-race.ts'));
+			if (!opened) throw new Error('Expected file session');
+			await vi.waitFor(() => expect(opened.loading).toBe(false));
+			opened.content = 'displayed local';
+			harness.readText.mockResolvedValueOnce({
+				content: 'displayed disk',
+				path: '/workspace/src/accept-disk-race.ts',
+				revision: 'v1:disk',
+			});
+
+			const comparison = harness.registry.showConflict(opened.id);
+			await vi.waitFor(() => expect(harness.registry.overwriteRequest).toBeTruthy());
+			opened.content = 'newer local edit';
+			harness.registry.resolveOverwrite(choice);
+			await comparison;
+
+			expect(opened.content).toBe('newer local edit');
+			expect(opened.dirty).toBe(true);
+			expect(opened.saveError).toContain('buffer changed');
+			expect(harness.saveText).not.toHaveBeenCalled();
+		},
+	);
+
+	it('does not retry a conflicted save with an obsolete comparison buffer', async () => {
 		const harness = createHarness();
-		const opened = await harness.registry.open(request('src/accept-disk-race.ts'));
+		const opened = await harness.registry.open(request('src/save-checked-race.ts'));
 		if (!opened) throw new Error('Expected file session');
 		await vi.waitFor(() => expect(opened.loading).toBe(false));
 		opened.content = 'displayed local';
+		harness.saveText.mockRejectedValueOnce(
+			new ApiError(409, 'File changed on disk', 'FILE_REVISION_CONFLICT'),
+		);
 		harness.readText.mockResolvedValueOnce({
 			content: 'displayed disk',
-			path: '/workspace/src/accept-disk-race.ts',
+			path: '/workspace/src/save-checked-race.ts',
 			revision: 'v1:disk',
 		});
-
-		const comparison = harness.registry.showConflict(opened.id);
+		const save = harness.registry.save(opened.id);
 		await vi.waitFor(() => expect(harness.registry.overwriteRequest).toBeTruthy());
 		opened.content = 'newer local edit';
-		harness.registry.resolveOverwrite('accept-disk');
-		await comparison;
-
+		harness.registry.resolveOverwrite('save-checked', 'obsolete merge');
+		await expect(save).resolves.toBe(false);
+		expect(harness.saveText).toHaveBeenCalledOnce();
 		expect(opened.content).toBe('newer local edit');
 		expect(opened.dirty).toBe(true);
+		expect(opened.saving).toBe(false);
 		expect(opened.saveError).toContain('buffer changed');
 	});
 

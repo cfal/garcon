@@ -555,7 +555,9 @@ export class FileSessionRegistry {
 		if (this.#destroyed) return null;
 		const existingDocumentId = this.#documentIdByIdentity.get(key);
 		let existingDocument = existingDocumentId ? this.documents[existingDocumentId] : null;
-		const options = { isExecutorAvailable: () => this.deps.isExecutorAvailable?.(identity.executorId) ?? true };
+		const options = {
+			isExecutorAvailable: () => this.deps.isExecutorAvailable?.(identity.executorId) ?? true,
+		};
 		let document = existingDocument ?? new FileDocumentState(identity, key, options);
 		if (!(await this.#prepareDraftRecovery(document)) || this.#destroyed) return null;
 		if (existingDocument && this.documents[document.id] !== document) {
@@ -622,7 +624,7 @@ export class FileSessionRegistry {
 		if (!disk) return;
 		const decision = await this.#confirmConflict(session, disk);
 		if (decision.choice !== 'save-checked' || !canSubmitFileWrite(session)) return;
-		this.#applyConflictResolution(session, decision);
+		if (!this.#applyConflictResolution(session, decision)) return;
 		const controller = this.#beginSave(session.document);
 		try {
 			await this.#saves.submit(
@@ -651,7 +653,11 @@ export class FileSessionRegistry {
 			document.loadedRevision ||
 			document.dirty ||
 			document.pendingRecoveryContent !== null ||
-			!this.#drafts?.find(document.canonicalFileRootPath, document.relativePath, document.executorId)
+			!this.#drafts?.find(
+				document.canonicalFileRootPath,
+				document.relativePath,
+				document.executorId,
+			)
 		)
 			return Promise.resolve(true);
 		return this.#decisionQueue.enqueue(async () => {
@@ -687,7 +693,11 @@ export class FileSessionRegistry {
 		for (const document of Object.values(this.documents)) {
 			if (document.pendingRecoveryContent !== null || (!document.loadedRevision && !document.dirty))
 				continue;
-			this.#drafts?.opened(document.canonicalFileRootPath, document.relativePath, document.executorId);
+			this.#drafts?.opened(
+				document.canonicalFileRootPath,
+				document.relativePath,
+				document.executorId,
+			);
 			void this.#drafts?.settle(document);
 		}
 	}
@@ -699,7 +709,9 @@ export class FileSessionRegistry {
 			session.document.pendingRecoveryContent !== null
 		)
 			return;
-		if (!this.#drafts?.find(session.canonicalFileRootPath, session.relativePath, session.executorId))
+		if (
+			!this.#drafts?.find(session.canonicalFileRootPath, session.relativePath, session.executorId)
+		)
 			return;
 		this.#drafts.opened(session.canonicalFileRootPath, session.relativePath, session.executorId);
 		void this.#drafts.settle(session.document);
@@ -745,7 +757,7 @@ export class FileSessionRegistry {
 		if (!disk) return false;
 		const decision = await this.#confirmConflict(session, disk, true);
 		if (decision.choice !== 'save-checked' || !session.document.executorAvailable) return false;
-		this.#applyConflictResolution(session, decision);
+		if (!this.#applyConflictResolution(session, decision)) return false;
 		await this.#saves.submit(
 			session.document,
 			decision.resolvedContent,
@@ -786,15 +798,14 @@ export class FileSessionRegistry {
 					this.overwriteRequest = snapshot;
 				});
 			});
-			if (decision.choice !== 'cancel' && !canResolve()) {
+			if (
+				decision.choice !== 'cancel' &&
+				(!canResolve() || session.document.bufferVersion !== decision.snapshot.localBufferVersion)
+			) {
 				session.saveError = m.file_conflict_buffer_changed();
 				return cancelled();
 			}
 			if (decision.choice === 'accept-disk') {
-				if (session.document.bufferVersion !== decision.snapshot.localBufferVersion) {
-					session.saveError = m.file_conflict_buffer_changed();
-					return cancelled();
-				}
 				this.#io.commitLoadedContent(session, {
 					kind: 'text',
 					content: decision.snapshot.diskContent,
@@ -806,13 +817,15 @@ export class FileSessionRegistry {
 		});
 	}
 
-	#applyConflictResolution(session: FileViewSession, decision: FileConflictDecision): void {
+	#applyConflictResolution(session: FileViewSession, decision: FileConflictDecision): boolean {
 		if (session.document.bufferVersion !== decision.snapshot.localBufferVersion) {
-			return;
+			session.saveError = m.file_conflict_buffer_changed();
+			return false;
 		}
 		if (decision.resolvedContent !== session.document.currentContent()) {
 			session.document.applyUserEdit(decision.resolvedContent);
 		}
+		return true;
 	}
 
 	#mostRecentViewId(documentId: string): string | undefined {
