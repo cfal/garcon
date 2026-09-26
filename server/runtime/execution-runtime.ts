@@ -14,7 +14,6 @@ import { discoverApiProviderModels } from './providers/discovery.js';
 import { FilesService } from './files/service.js';
 import { TerminalRuntime, type TerminalService } from './terminals/runtime.js';
 import { GitRuntime } from './git/runtime.js';
-import { unavailableService } from '../common/unavailable-service.js';
 
 export class ExecutionRuntime implements ExecutionRuntimeApi {
   readonly id: string;
@@ -53,7 +52,7 @@ export class ExecutionRuntime implements ExecutionRuntimeApi {
       instanceId,
       projectBasePath: this.#projects.projectBasePath,
       integrationIds: Object.freeze(this.#registry.list().map((integration) => integration.descriptor.id)),
-      services: Object.freeze({ agents: true, processes: false, files: true, git: true, gh: true, terminals: true }),
+      services: Object.freeze({ files: true, git: true, gh: true, terminals: true }),
     });
   }
 
@@ -69,7 +68,6 @@ export class ExecutionRuntime implements ExecutionRuntimeApi {
     return this.#registry.require(agentId);
   }
 
-  async getProcessService(): Promise<never> { throw unavailableService('processes'); }
   async discoverApiProviderModels(request: ApiProviderDiscoveryRequest, options?: ExecutorCallOptions) {
     this.#assertAvailable(options);
     return discoverApiProviderModels(request, options);

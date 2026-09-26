@@ -33,6 +33,7 @@ for (const backend of ['local', 'controller', 'worker'] as const) {
       const executor = connected ? await connected : local;
       const info = await executor.getInfo();
       expect(info.integrationIds).toHaveLength(defaultAgentIntegrations.length);
+      expect(info.services).toEqual({ files: true, git: true, gh: true, terminals: true });
       for (const integrationClass of defaultAgentIntegrations) {
         const integration = await executor.getAgentIntegration(integrationClass.integrationId);
         await runAgentIntegrationConformance({ integrationClass, integration });
@@ -46,9 +47,6 @@ for (const backend of ['local', 'controller', 'worker'] as const) {
       });
       expect((await executor.getGitService()).getStatus).toBeFunction();
       expect((await executor.getGhService()).getStatus).toBeFunction();
-      for (const service of [executor.getProcessService]) {
-        await expect(service.call(executor)).rejects.toMatchObject({ code: 'OPERATION_UNSUPPORTED', outcome: 'not-dispatched' });
-      }
       await executor.dispose();
     } finally {
       await controller.dispose(); await worker.dispose();

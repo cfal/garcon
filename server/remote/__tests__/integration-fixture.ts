@@ -82,13 +82,13 @@ export function integrationFixture(projectBasePath = '/test-project', executorId
       return {
         executorId: scope.executorId, instanceId: scope.instanceId, integrationIds: ['test'],
         projectBasePath,
-        services: { agents: true, files: false, processes: false, git: false, gh: false, terminals: false },
+        services: { files: false, git: false, gh: false, terminals: false },
       };
     },
     async getAgentIntegration() { return integration; },
     async getProjectService() { return projects; },
     discoverApiProviderModels,
-    getProcessService: unavailable, getFilesService: unavailable, getGitService: unavailable, getGhService: unavailable, getTerminalService: unavailable,
+    getFilesService: unavailable, getGitService: unavailable, getGhService: unavailable, getTerminalService: unavailable,
     onAvailabilityChanged() { return () => {}; },
     async dispose() { disposed = true; await integration.lifecycle.stop(); },
   } satisfies ExecutionRuntimeApi;

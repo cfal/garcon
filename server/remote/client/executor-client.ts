@@ -110,7 +110,6 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
     return integration;
   }
 
-  async getProcessService(): Promise<never> { throw unavailableService('processes'); }
   async discoverApiProviderModels(request: ApiProviderDiscoveryRequest, options?: ExecutorCallOptions) {
     return this.#backing().rpc.call('', 'apiProviders.discoverModels', request, {
       ...options, timeoutMs: options?.timeoutMs ?? MODEL_DISCOVERY_TIMEOUT_MS + 5_000,

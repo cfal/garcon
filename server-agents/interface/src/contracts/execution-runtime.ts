@@ -38,8 +38,6 @@ export interface ExecutorInfo {
   readonly integrationIds: readonly string[];
   readonly projectBasePath: ExecutorPath;
   readonly services: {
-    readonly agents: true;
-    readonly processes: false;
     readonly files: boolean;
     readonly git: boolean;
     readonly gh: boolean;
@@ -54,7 +52,6 @@ export interface ExecutionRuntimeApi {
   getAgentIntegration(agentId: string, options?: ExecutorCallOptions): Promise<AgentIntegration>;
   getProjectService(options?: ExecutorCallOptions): Promise<ExecutionProjectService>;
   discoverApiProviderModels(request: ApiProviderDiscoveryRequest, options?: ExecutorCallOptions): Promise<ApiProviderModelDiscoveryResponse>;
-  getProcessService(options?: ExecutorCallOptions): Promise<never>;
   getFilesService(options?: ExecutorCallOptions): Promise<ExecutionFilesService>;
   getGitService(options?: ExecutorCallOptions): Promise<ExecutionGitService>;
   getGhService(options?: ExecutorCallOptions): Promise<ExecutionGhService>;
