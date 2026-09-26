@@ -1,7 +1,7 @@
 import { expect } from 'bun:test';
 import type { PrimaryWsServerMessage as ServerWsMessage } from '../../common/ws-protocol.js';
 import { assistantContents } from './chat-assertions.js';
-import { GarconWsRequestError } from './garcon-client.js';
+import { GarconWsRequestError, type GarconTestClient } from './garcon-client.js';
 import type { IntegrationFixture } from './integration-fixture.js';
 
 export const LIVE_TURN_TIMEOUT_MS = 90_000;
@@ -93,11 +93,10 @@ function expectVisibleResponseBeforeSettlement(input: {
   expect(terminal).toBeGreaterThan(assistantResponse);
 }
 
-// A turn's execution reservation outlives its terminal event, so a reload issued as soon as the
-// turn ends is briefly refused as CHAT_RUNNING. This waits only for that reservation, not for
-// provider-native history to finish persisting.
+// Controller reservations and remote native stops can outlive the browser's terminal event.
+// Waits for idle admission, not for provider-native history to finish persisting.
 export async function reloadFromNativeHistory(
-  fixture: IntegrationFixture,
+  fixture: { client: Pick<GarconTestClient, 'reloadChat'> },
   chatId: string,
 ): Promise<void> {
   const deadline = Date.now() + RELOAD_SETTLE_TIMEOUT_MS;
@@ -107,7 +106,10 @@ export async function reloadFromNativeHistory(
       return;
     } catch (error) {
       const refusedWhileRunning = error instanceof GarconWsRequestError
-        && error.response.code === 'CHAT_RUNNING';
+        && (error.response.code === 'CHAT_RUNNING'
+          || (error.response.code === 'HISTORY_LOAD_FAILED'
+            && error.response.retryable
+            && error.response.message === 'The turn is still running on the executor. Reload from native history after it finishes.'));
       if (!refusedWhileRunning || Date.now() >= deadline) throw error;
       await Bun.sleep(POLL_INTERVAL_MS);
     }

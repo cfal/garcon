@@ -115,7 +115,8 @@ describeOnLinux('OpenCode V1 automatic compaction against a scripted model', () 
 
       const liveProjection = renderingProjection(live.messages);
       const previousSupervisors = await readSupervisorStates(fixture.dirs);
-      expect(previousSupervisors).toHaveLength(1);
+      // Remote fixtures also start Local discovery; a full fixture restart stops both owners.
+      expect(previousSupervisors).toHaveLength(fixture.client.executorId === 'local' ? 1 : 2);
       await fixture.restartGarcon({
         beforeStart: () => waitForSupervisorExit(previousSupervisors),
       });
