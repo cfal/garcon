@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import type { GhStatusResponse } from '../../../common/gh.js';
 import type { PullRequestListResult } from '../../../server/runtime/gh/gh-types.js';
+import type { GitExecutorScope } from '../../../common/git-execution.js';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 
 test('keeps primary mobile tabs compact and opens secondary views from the chat menu', async () => {
@@ -14,20 +15,27 @@ test('keeps primary mobile tabs compact and opens secondary views from the chat 
       agent: integration.directAgents.openAi,
     });
     await integration.client.waitForTurnTerminal(chatId, started.turnId);
-    await page.route('**/api/v1/gh/status', (route) =>
+    const { executorId, instanceId } = await integration.client.get<GitExecutorScope>('/api/v1/gh/status?executorId=local');
+    const scope = { executorId, instanceId } satisfies GitExecutorScope;
+    expect(scope.executorId).toBe('local');
+    await page.route('**/api/v1/gh/status?executorId=local', (route) =>
       route.fulfill({
         json: {
+          ...scope,
           available: true,
           authenticated: true,
           reason: 'authenticated',
           login: 'integration-user',
           host: 'github.com',
-        } satisfies GhStatusResponse,
+        } satisfies GhStatusResponse & GitExecutorScope,
       }),
     );
-    await page.route('**/api/v1/gh/pull-requests?*', (route) => route.fulfill({
-      json: { pulls: [], repo: null } satisfies PullRequestListResult,
-    }));
+    await page.route('**/api/v1/gh/pull-requests?*', (route) => {
+      expect(new URL(route.request().url()).searchParams.get('executorId')).toBe('local');
+      return route.fulfill({
+        json: { ...scope, pulls: [], repo: null } satisfies PullRequestListResult & GitExecutorScope,
+      });
+    });
     await page.setViewportSize({ width: 320, height: 844 });
     await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`, { waitUntil: 'domcontentloaded' });
     const navigation = page.getByRole('navigation', { name: 'Workspace navigation' });
