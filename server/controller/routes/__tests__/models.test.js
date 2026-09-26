@@ -180,7 +180,6 @@ const modelCatalog = {
         agentCatalogEntries.find((agent) => agent.id === agentId) ?? null,
       ),
     ),
-    requiresStrictModelDiscovery: mock((agentId) => agentId === "pi"),
   },
   apiProviders: {
     getCatalog: mock(() => []),
@@ -197,7 +196,8 @@ describe("GET /api/v1/models", () => {
     expect((await handler(new Request(invalid), invalid)).status).toBe(400);
     for (const query of ['', '&agent=codex']) {
       responseCache.clear();
-      modelCatalog.agents.getAgentCatalogEntries.mockRejectedValueOnce(new DomainError('EXECUTOR_UNAVAILABLE', 'Executor is offline', 503));
+      const queryCatalog = query ? modelCatalog.agents.getAgentCatalogEntry : modelCatalog.agents.getAgentCatalogEntries;
+      queryCatalog.mockRejectedValueOnce(new DomainError('EXECUTOR_UNAVAILABLE', 'Executor is offline', 503));
       const url = new URL(`http://localhost/api/v1/models?executorId=22222222-2222-4222-8222-222222222222${query}`);
       const response = await handler(new Request(url), url);
       expect(response.status).toBe(503);
@@ -208,7 +208,6 @@ describe("GET /api/v1/models", () => {
     responseCache.clear();
     modelCatalog.agents.getAgentCatalogEntries.mockClear();
     modelCatalog.agents.getAgentCatalogEntry.mockClear();
-    modelCatalog.agents.requiresStrictModelDiscovery.mockClear();
     modelCatalog.apiProviders.getCatalog.mockClear();
   });
 
@@ -479,6 +478,23 @@ describe("GET /api/v1/models", () => {
 
     expect(body.catalog.agents.length).toBe(1);
     expect(body.catalog.agents[0].id).toBe("claude");
+    expect(modelCatalog.agents.getAgentCatalogEntries).not.toHaveBeenCalled();
+    expect(modelCatalog.agents.getAgentCatalogEntry).toHaveBeenCalledTimes(1);
+    expect(modelCatalog.agents.getAgentCatalogEntry).toHaveBeenCalledWith('claude', { executorId: 'local' });
+  });
+
+  it('scopes selected-agent discovery and custom providers to the requested executor', async () => {
+    const executorId = '22222222-2222-4222-8222-222222222222';
+    const providers = [{ id: 'synthetic-provider', label: 'Synthetic provider', endpoints: [] }];
+    modelCatalog.apiProviders.getCatalog.mockReturnValueOnce(providers);
+    const url = new URL(`http://localhost/api/v1/models?agent=direct-openai-compatible&executorId=${executorId}`);
+    const response = await handler(new Request(url), url);
+    expect(response.status).toBe(200);
+    expect((await response.json()).catalog.apiProviders).toEqual(providers);
+    expect(modelCatalog.agents.getAgentCatalogEntry).toHaveBeenCalledTimes(1);
+    expect(modelCatalog.agents.getAgentCatalogEntry).toHaveBeenCalledWith('direct-openai-compatible', { executorId });
+    expect(modelCatalog.agents.getAgentCatalogEntries).not.toHaveBeenCalled();
+    expect(modelCatalog.apiProviders.getCatalog).toHaveBeenCalledWith(executorId);
   });
 
   it("lists available agents when an agent filter is unknown", async () => {
@@ -491,8 +507,10 @@ describe("GET /api/v1/models", () => {
     expect(body.error).toContain("codex");
   });
 
-  it("uses strict Pi discovery for the Pi agent filter", async () => {
-    modelCatalog.agents.getAgentCatalogEntry.mockResolvedValueOnce({
+  it("uses the first selected snapshot to discover strict Pi policy without querying other agents", async () => {
+    modelCatalog.agents.getAgentCatalogEntry
+      .mockResolvedValueOnce(agentCatalogEntries.find((agent) => agent.id === 'pi'))
+      .mockResolvedValueOnce({
       ...agentCatalogEntries.find((agent) => agent.id === "pi"),
       defaultModel: "openrouter/openai/gpt-5.4",
       models: [
@@ -508,6 +526,8 @@ describe("GET /api/v1/models", () => {
     const body = await response.json();
 
     expect(response.status).toBe(200);
+    expect(modelCatalog.agents.getAgentCatalogEntries).not.toHaveBeenCalled();
+    expect(modelCatalog.agents.getAgentCatalogEntry).toHaveBeenCalledTimes(2);
     expect(modelCatalog.agents.getAgentCatalogEntry).toHaveBeenCalledWith(
       "pi",
       { strict: true, executorId: 'local' },
@@ -531,7 +551,9 @@ describe("GET /api/v1/models", () => {
         staleModels: [],
       },
     );
-    modelCatalog.agents.getAgentCatalogEntry.mockRejectedValueOnce(error);
+    modelCatalog.agents.getAgentCatalogEntry
+      .mockResolvedValueOnce(agentCatalogEntries.find((agent) => agent.id === 'pi'))
+      .mockRejectedValueOnce(error);
     const url = new URL("http://localhost/api/v1/models?agent=pi");
     const response = await handler(new Request(url), url);
     const body = await response.json();
@@ -558,7 +580,9 @@ describe("GET /api/v1/models", () => {
         staleModels,
       },
     );
-    modelCatalog.agents.getAgentCatalogEntry.mockRejectedValueOnce(error);
+    modelCatalog.agents.getAgentCatalogEntry
+      .mockResolvedValueOnce(agentCatalogEntries.find((agent) => agent.id === 'pi'))
+      .mockRejectedValueOnce(error);
     const url = new URL("http://localhost/api/v1/models?agent=pi");
     const response = await handler(new Request(url), url);
     const body = await response.json();

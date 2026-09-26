@@ -59,37 +59,31 @@ export default function createModelsRoutes({
   modelCatalog: ModelCatalog;
   responseCache: ModelCatalogResponseCache;
 }): RouteMap {
-  const catalog = async (executorId: string) => ({
-    agents: await modelCatalog.agents.getAgentCatalogEntries(executorId),
-    apiProviders: modelCatalog.apiProviders.getCatalog(executorId),
-  });
-
   async function getModels(request: Request, url: URL): Promise<Response> {
     const executorId = executorIdFromUrl(url);
     const agentId = url?.searchParams?.get('agent');
 
     if (agentId) {
-      const currentCatalog = await catalog(executorId);
-      let entry: AgentCatalogEntry | null | undefined;
-      try {
-        const strict = modelCatalog.agents.requiresStrictModelDiscovery?.(agentId, executorId) ?? false;
-        entry = typeof modelCatalog.agents.getAgentCatalogEntry === 'function'
-          ? await modelCatalog.agents.getAgentCatalogEntry(agentId, { strict, executorId })
-          : currentCatalog.agents.find((agent) => agent.id === agentId);
-      } catch (error) {
-        const staleEntry = currentCatalog.agents.find((agent) => agent.id === agentId);
-        return modelDiscoveryUnavailableResponse(error, currentCatalog, staleEntry);
-      }
+      let entry = await modelCatalog.agents.getAgentCatalogEntry(agentId, { executorId });
       if (!entry) {
-        const availableAgents = currentCatalog.agents.map((agent) => agent.id).join(', ') || 'none';
+        const agents = await modelCatalog.agents.getAgentCatalogEntries(executorId);
+        const availableAgents = agents.map((agent) => agent.id).join(', ') || 'none';
         return Response.json({
           error: `Unknown agent: ${agentId}. Available agents: ${availableAgents}`,
         }, { status: 400 });
       }
+      const apiProviders = modelCatalog.apiProviders.getCatalog(executorId);
+      if (entry.requiresStrictModelDiscovery) {
+        try {
+          entry = await modelCatalog.agents.getAgentCatalogEntry(agentId, { strict: true, executorId }) ?? entry;
+        } catch (error) {
+          return modelDiscoveryUnavailableResponse(error, { agents: [entry], apiProviders }, entry);
+        }
+      }
       return Response.json({
         catalog: {
           agents: [entry],
-          apiProviders: currentCatalog.apiProviders,
+          apiProviders,
         },
       });
     }
