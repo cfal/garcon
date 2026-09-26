@@ -263,6 +263,20 @@ describe('selected-agent discovery with the catalog service', () => {
     expect(response.status).toBe(503);
     expect(await response.json()).toMatchObject({ errorCode: 'EXECUTOR_UNAVAILABLE' });
   });
+
+  it.each(['success', 'failure'])('rejects executor loss during strict discovery even on %s', async outcome => {
+    const fixture = discoveryFixture();
+    fixture.integration.catalog.snapshot.mockImplementation(async ({ strict }) => {
+      if (strict) {
+        fixture.offline();
+        if (outcome === 'failure') throw new DomainError('EXECUTOR_UNAVAILABLE', 'Synthetic link loss', 503);
+      }
+      return fixture.snapshot;
+    });
+    const response = await fixture.request();
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ errorCode: 'EXECUTOR_UNAVAILABLE' });
+  });
 });
 
 describe("GET /api/v1/models", () => {

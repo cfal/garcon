@@ -78,8 +78,10 @@ export default function createModelsRoutes({
         try {
           entry = await modelCatalog.agents.getAgentCatalogEntry(agentId, { strict: true, executorId }) ?? entry;
         } catch (error) {
+          modelCatalog.agents.assertAgentAvailable(agentId, executorId);
           return modelDiscoveryUnavailableResponse(error, { agents: [entry], apiProviders }, entry);
         }
+        modelCatalog.agents.assertAgentAvailable(agentId, executorId);
       }
       return Response.json({
         catalog: {
