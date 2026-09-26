@@ -29,7 +29,9 @@
 		setRemoteSettings,
 		setChatSessions,
 		setFileSessions,
+		setNotifications,
 	} from '$lib/context';
+	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 	import { setCanonicalWorkspaceLayout } from './workspace-layout-test-context.js';
 
 	interface Props {
@@ -226,6 +228,7 @@
 		};
 	}
 	setCanonicalWorkspaceLayout();
+	setNotifications(createNotificationsStore());
 	setAgentState(new AgentState());
 	const localSettings = createLocalSettingsStore();
 	localSettings.chatMaxWidth = 'medium';

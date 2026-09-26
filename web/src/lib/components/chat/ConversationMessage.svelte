@@ -27,6 +27,7 @@
 		getFileSessions,
 		getExecutors,
 		getLocalSettings,
+		getNotifications,
 		getWorkspaceCoordinator,
 	} from '$lib/context';
 	import Markdown from './Markdown.svelte';
@@ -134,6 +135,7 @@
 	const executors = getExecutors();
 	const appShell = getAppShell();
 	const workspace = getWorkspaceCoordinator();
+	const notifications = getNotifications();
 	const localSettings = getLocalSettings();
 
 	const activeChatContext = $derived.by((): ConversationMessageChatContext | null => {
@@ -457,7 +459,10 @@
 	/** Routes a file-like markdown link to the viewer overlay. */
 	function handleLinkNavigate(link: MarkdownLinkNavigateEvent): boolean | void {
 		if (link.kind !== 'file') return;
-		if (!filesAvailable) return true;
+		if (!filesAvailable) {
+			notifications.error(m.file_command_executor_unavailable(), { key: 'file-executor-unavailable' });
+			return true;
+		}
 		const chat = activeChatContext;
 		if (!chat?.projectPath) return;
 		const resolved = resolveFileLinkTarget(link.rawHref, {

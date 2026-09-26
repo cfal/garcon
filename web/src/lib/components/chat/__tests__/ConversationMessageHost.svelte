@@ -3,7 +3,8 @@
 	import type { ExecutorSnapshot } from '$shared/executors';
 	import type { ConversationMessageChatContext } from '$lib/chat/transcript/conversation-message-context';
 	import ConversationMessage from '../ConversationMessage.svelte';
-	import { setAppShell, setChatSessions, setFileSessions, setLocalSettings } from '$lib/context';
+	import { setNotifications, setAppShell, setChatSessions, setFileSessions, setLocalSettings } from '$lib/context';
+	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 	import type { ChatMessage } from '$shared/chat-types';
 	import {
 		FileSessionRegistry,
@@ -63,6 +64,7 @@
 	}: Props = $props();
 	setExecutorsTestContext(untrack(() => executors));
 	setCanonicalWorkspaceLayout();
+	const notifications = setNotifications(createNotificationsStore());
 	const initialHost = untrack(() => ({
 		projectBasePath,
 		chatProjectPath,
@@ -141,6 +143,9 @@
 />
 
 <output data-testid="draft-preview">{draftPreview}</output>
+{#each notifications.items as notification (notification.id)}
+	<output>{notification.message}</output>
+{/each}
 
 {#if chatTitleUpdate}
 	<button

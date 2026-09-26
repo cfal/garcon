@@ -4,7 +4,8 @@
 	import type { ExecutorSnapshot } from '$shared/executors';
 	import type { FileOpenRequest } from '$lib/files/sessions/file-session-registry.svelte';
 	import PermissionRequestRow from '../PermissionRequestRow.svelte';
-	import { setAppShell, setChatSessions, setFileSessions } from '$lib/context';
+	import { setNotifications, setAppShell, setChatSessions, setFileSessions } from '$lib/context';
+	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
 	import type { PermissionRequestMessage } from '$shared/chat-types';
 	import type { PermissionTerminalState } from '$lib/chat/transcript/conversation-feed-items.js';
@@ -40,6 +41,7 @@
 	}: Props = $props();
 	setExecutorsTestContext(untrack(() => executors));
 	setCanonicalWorkspaceLayout();
+	const notifications = setNotifications(createNotificationsStore());
 
 	setChatSessions({
 		get selectedChat() {
@@ -65,3 +67,6 @@
 </script>
 
 <PermissionRequestRow {request} {terminal} {onDecision} {draft} {onDraftChange} {chatContext} />
+{#each notifications.items as notification (notification.id)}
+	<output>{notification.message}</output>
+{/each}

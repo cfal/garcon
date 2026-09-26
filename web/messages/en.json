@@ -2528,6 +2528,7 @@
 	"file_command_history_back": "Go Back in File History",
 	"file_command_history_forward": "Go Forward in File History",
 	"file_command_reveal": "Reveal Active File in Explorer",
+	"file_command_executor_unavailable": "Files are unavailable on this executor.",
 	"file_command_copy_location": "Copy File Location",
 	"file_command_add_selection": "Add Selection to Chat Draft",
 	"file_command_copy_failed": "Could not copy file location.",

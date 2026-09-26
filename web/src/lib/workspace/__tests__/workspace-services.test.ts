@@ -392,6 +392,34 @@ describe('createWorkspaceServices', () => {
 		expect(reveal).toHaveBeenCalledWith('/workspace', 'file.ts', 'local');
 	});
 
+	it.each(['before-open', 'while-opening'])('reports unavailable Reveal without retargeting Files (%s)', async (when) => {
+		rootLocalSettings = createLocalSettingsStore();
+		const assembled = assembleWorkspaceServices(rootLocalSettings);
+		services = assembled.services;
+		const session = new FileSession(
+			{ executorId: 'remote', canonicalFileRootPath: '/workspace', normalizedRelativePath: 'file.ts' },
+			'command-reveal-unavailable',
+		);
+		vi.spyOn(services.files, 'get').mockReturnValue(session);
+		const available = vi.spyOn(session.document, 'executorAvailable', 'get').mockReturnValue(when !== 'before-open');
+		const attached = Promise.withResolvers<void>();
+		const open = vi.spyOn(services.coordinator, 'openSingleton').mockReturnValue(attached.promise);
+		const controller = services.singletonSurfaces.files();
+		const reveal = vi.spyOn(controller, 'revealFile');
+		const pending = services.commands.execute('file.reveal-active', {
+			viewId: session.id, surfaceId: `file:${session.id}`,
+		});
+		available.mockReturnValue(false);
+		attached.resolve();
+		await expect(pending).resolves.toBe(false);
+		expect(open).toHaveBeenCalledTimes(when === 'before-open' ? 0 : 1);
+		expect(reveal).not.toHaveBeenCalled();
+		expect(controller.tree.executorId).toBe('local');
+		expect(assembled.notifications.items).toMatchObject([
+			{ tone: 'error', message: 'Files are unavailable on this executor.' },
+		]);
+	});
+
 	it('opens a side view from the command context window', async () => {
 		rootLocalSettings = createLocalSettingsStore();
 		({ services } = assembleWorkspaceServices(rootLocalSettings));

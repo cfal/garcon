@@ -4,6 +4,49 @@ import { join } from 'node:path';
 import { withE2eFixture } from '../../support/e2e-fixture.js';
 import { SpaDriver } from '../../support/spa-driver.js';
 import { initializeFixtureRepository } from '../../support/git-fixture.js';
+import { selectExecutor } from '../../support/executor-ui.js';
+
+for (const executionBackend of ['remote-controller-dials', 'remote-executor-dials'] as const) {
+  test(`Reveal reports an unavailable file executor without opening Local Files (${executionBackend})`, async () => {
+    await withE2eFixture(`executor-file-reveal-${executionBackend}`, async fixture => {
+      const { client, executionDirs, directAgents } = fixture.integration;
+      await writeFile(join(executionDirs.project, 'reveal-file.txt'), 'Synthetic retained remote file');
+      const chatId = fixture.integration.newChatId();
+      const started = await client.startDirectChat({
+        chatId, content: '[Retained file](./reveal-file.txt)', projectPath: executionDirs.project, agent: directAgents.openAi,
+      });
+      await client.waitForTurnTerminal(chatId, started.turnId);
+      const app = new SpaDriver(fixture.page, fixture.integration);
+      await app.setViewport(1_440, 900);
+      await app.openChat(chatId);
+      await fixture.waitForSpaWebSocket();
+      const filesPicker = '[data-workspace-surface-id="singleton:files"] [data-executor-picker]';
+      await selectExecutor(fixture.page, filesPicker, 'Local');
+      const fileLink = `[data-conversation-panel-chat-id="${chatId}"] [data-chat-message-type="assistant-message"] a[href="./reveal-file.txt"]`;
+      await fixture.page.waitForSelector(fileLink);
+      await fixture.page.$eval(fileLink, element => (element as HTMLElement).click());
+      await app.waitForText('Synthetic retained remote file');
+      await client.patch(`/api/v1/executors/${client.executorId}`, { enabled: false });
+      await app.waitForText('Files unavailable on Integration worker. Unsaved edits are retained.');
+      const filePanel = '[role="tabpanel"][data-workspace-surface-id^="file:"][aria-hidden="false"]';
+      await fixture.page.$eval(`${filePanel} .cm-content`, element => (element as HTMLElement).focus());
+      await fixture.page.evaluate(() => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', ctrlKey: true, bubbles: true }));
+      });
+      await fixture.page.waitForSelector('[role="dialog"][aria-label="Command palette"]');
+      await fixture.page.evaluate(() => {
+        const command = [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')]
+          .find(element => element.textContent?.includes('Reveal Active File in Explorer'));
+        if (!command || command.disabled) throw new Error('Missing file Reveal command');
+        command.click();
+      });
+      await app.waitForText('Files are unavailable on this executor.');
+      expect(await fixture.page.$(filePanel)).not.toBeNull();
+      expect(await fixture.page.$eval(filesPicker, element => element.getAttribute('aria-label'))).toBe('Executor: Local');
+      fixture.assertNoBrowserErrors();
+    }, { executionBackend, projectRoots: 'separate' });
+  }, 60_000);
+}
 
 test('simultaneous Local and remote panels never use the selected chat for file links', async () => {
   await withE2eFixture('executor-panel-files', async (fixture) => {

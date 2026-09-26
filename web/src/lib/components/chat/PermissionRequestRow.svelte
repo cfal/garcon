@@ -37,6 +37,7 @@
 		getChatSessions,
 		getFileSessions,
 		getExecutors,
+		getNotifications,
 		getWorkspaceCoordinator,
 	} from '$lib/context';
 	import type { PermissionQuestionDraft } from './ConversationFeedItemState.svelte.js';
@@ -77,6 +78,7 @@
 	const executors = getExecutors();
 	const appShell = getAppShell();
 	const workspace = getWorkspaceCoordinator();
+	const notifications = getNotifications();
 
 	const activeChatContext = $derived.by((): ConversationMessageChatContext | null => {
 		if (chatContext?.chatId) return chatContext;
@@ -127,7 +129,10 @@
 		if (link.kind !== 'file') return;
 		const chat = activeChatContext;
 		if (!chat?.projectPath) return;
-		if (!filesAvailable) return true;
+		if (!filesAvailable) {
+			notifications.error(m.file_command_executor_unavailable(), { key: 'file-executor-unavailable' });
+			return true;
+		}
 		const resolved = resolveFileLinkTarget(link.rawHref, {
 			fileRootPath: projectBasePath,
 			sourceDirectoryPath: chat.projectPath,

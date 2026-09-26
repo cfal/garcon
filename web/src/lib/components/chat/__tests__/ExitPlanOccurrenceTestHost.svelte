@@ -3,7 +3,8 @@
 	import { onDestroy } from 'svelte';
 	import ConversationTranscriptItem from '../ConversationTranscriptItem.svelte';
 	import { buildConversationFeedRenderModel } from '$lib/chat/transcript/conversation-feed-items.js';
-	import { setAppShell, setChatSessions, setFileSessions, setLocalSettings } from '$lib/context';
+	import { setAppShell, setChatSessions, setFileSessions, setLocalSettings, setNotifications } from '$lib/context';
+	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 	import { FileSessionRegistry } from '$lib/files/sessions/file-session-registry.svelte.js';
 	import { createAppShellStore } from '$lib/stores/app-shell.svelte.js';
 	import { createChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
@@ -19,6 +20,7 @@
 
 	let { pendingPermissionRequests, onExitPlanMode }: Props = $props();
 	setCanonicalWorkspaceLayout();
+	setNotifications(createNotificationsStore());
 	setExecutorsTestContext();
 
 	const message = new ExitPlanModeToolUseMessage(

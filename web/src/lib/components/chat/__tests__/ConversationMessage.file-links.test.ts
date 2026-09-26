@@ -53,6 +53,7 @@ describe('ConversationMessage file links', () => {
 		});
 		await fireEvent.click(screen.getByRole('link', { name: 'remote file' }));
 		expect(openAuto).not.toHaveBeenCalled();
+		expect(screen.getByText('Files are unavailable on this executor.')).toBeTruthy();
 	});
 	it('opens absolute markdown links under base but outside the chat project', async () => {
 		const openAuto = vi.fn();

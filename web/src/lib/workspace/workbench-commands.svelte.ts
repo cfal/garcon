@@ -303,7 +303,9 @@ export class WorkbenchCommandRegistry {
 				run: async ({ viewId }) => {
 					const session = viewId ? this.deps.files.get(viewId) : null;
 					if (!session) return;
+					if (!session.document.executorAvailable) throw new Error(m.file_command_executor_unavailable());
 					await this.deps.workspace.openSingleton('files');
+					if (!session.document.executorAvailable) throw new Error(m.file_command_executor_unavailable());
 					this.deps
 						.filesSurface()
 						.revealFile(session.canonicalFileRootPath, session.relativePath, session.executorId);

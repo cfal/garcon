@@ -2,7 +2,8 @@
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
 	setExecutorsTestContext();
 	import PermissionRequestRow from '../PermissionRequestRow.svelte';
-	import { setAppShell, setChatSessions, setFileSessions } from '$lib/context';
+	import { setNotifications, setAppShell, setChatSessions, setFileSessions } from '$lib/context';
+	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 	import { ConversationFeedItemState } from '../ConversationFeedItemState.svelte.js';
 	import { buildConversationVirtualFeedModel } from '../conversation-feed-virtual-items.js';
 	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
@@ -19,6 +20,7 @@
 
 	let { onDecision }: Props = $props();
 	setCanonicalWorkspaceLayout();
+	setNotifications(createNotificationsStore());
 
 	const timestamp = '2026-08-15T00:00:00.000Z';
 	const itemState = new ConversationFeedItemState();

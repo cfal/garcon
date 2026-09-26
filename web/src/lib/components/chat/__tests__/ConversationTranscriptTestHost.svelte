@@ -2,7 +2,8 @@
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
 	import { onDestroy } from 'svelte';
 	import ConversationTranscript from '../ConversationTranscript.svelte';
-	import { setAppShell, setChatSessions, setFileSessions, setLocalSettings } from '$lib/context';
+	import { setAppShell, setChatSessions, setFileSessions, setLocalSettings, setNotifications } from '$lib/context';
+	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 	import type { ChatDisplayRow } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 	import type { PendingPermissionRequest } from '$lib/types/chat';
 	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
@@ -23,6 +24,7 @@
 
 	let { rows, pendingPermissionRequests = [], onPermissionDecision }: Props = $props();
 	setCanonicalWorkspaceLayout();
+	setNotifications(createNotificationsStore());
 	setExecutorsTestContext();
 
 	const chatSessions = createChatSessionsStore();
