@@ -2076,6 +2076,43 @@ describe('CodexAppServerRuntime', () => {
     }
   });
 
+  it.each(['runTurn', 'compact'])('reuses a recovered writer for a later %s with the stale binding', async (method) => {
+    const nativePath = path.join(tmpDir, 'moved.jsonl');
+    await writeJsonl(nativePath, commandHistoryEntries('call-1', 'echo test', 'test'));
+    const discovery = new FakeClient({
+      listThreads: async () => ({ data: [makeThread({ path: nativePath })], nextCursor: null }),
+    });
+    const execution = new FakeClient({
+      resumeThread: async () => ({ thread: makeThread({ path: nativePath }), model: 'gpt', cwd: '/repo' }),
+    });
+    const clients = [discovery, execution, new FakeClient()];
+    const createClient = mock(() => clients.shift());
+    const provider = createRuntime({ createClient });
+    const published = collectOperation();
+    const binding = { agentSessionId: 'thread-1', nativePath: path.join(tmpDir, 'old.jsonl') };
+    try {
+      await provider.runTurn(makeRequest({ ...binding, operation: published.operation }));
+      execution.emit('notification', {
+        method: 'turn/completed', params: { threadId: 'thread-1', turn: makeTurn() },
+      });
+      await published.waitForEvent((event) => event.type === 'run-ended');
+      const invalidPath = path.join(tmpDir, 'invalid.jsonl');
+      await fs.writeFile(invalidPath, 'invalid json\n');
+      await expect(provider[method](makeRequest({ ...binding, nativePath: invalidPath })))
+        .rejects.toMatchObject({ code: 'TRANSCRIPT_UNAVAILABLE' });
+      expect(execution.shutdown).not.toHaveBeenCalled();
+      await provider[method](makeRequest(binding));
+      expect(createClient).toHaveBeenCalledTimes(2);
+      expect(execution.shutdown).not.toHaveBeenCalled();
+      expect(execution.resumeThread).toHaveBeenCalledTimes(1);
+      expect(execution.startTurn).toHaveBeenCalledTimes(method === 'runTurn' ? 2 : 1);
+      expect(execution.compactThread).toHaveBeenCalledTimes(method === 'compact' ? 1 : 0);
+      expect(binding.nativePath).toBe(path.join(tmpDir, 'old.jsonl'));
+    } finally {
+      await provider.shutdown();
+    }
+  });
+
   it.each([
     ['runTurn', 'missing'], ['compact', 'missing'],
     ['runTurn', 'mismatch'], ['compact', 'mismatch'],

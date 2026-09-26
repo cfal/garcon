@@ -816,6 +816,10 @@ export class CodexAppServerRuntime {
   ): Promise<{ session: RunningCodexSession; buffered: boolean }> {
     const runtimeIdentity = codexSourceRuntimeIdentity(request);
     const retained = this.#latestSourceByChat.get(request.chatId);
+    if (retained && retained.threadId === request.agentSessionId
+      && retained.nativePath && request.nativePath && retained.nativePath !== request.nativePath) {
+      request = await this.#resolveResumePath(request);
+    }
     // Omitted effort is reusable only when no prior turn or settings update took ownership.
     const reasoningEffortIsReusable = () => !providerOwnsReasoningEffort(request)
       || retained?.providerOwnsReasoningEffort === true;
@@ -898,33 +902,14 @@ export class CodexAppServerRuntime {
       };
     }
 
+    request = await this.#resolveResumePath(request);
+
     if (
       retained
       && retained.threadId === request.agentSessionId
       && isTerminalSessionStatus(retained.status)
     ) {
       await this.#supersedeSource(retained);
-    }
-
-    if (request.nativePath) {
-      const nativePath = await resolveCodexNativePath({
-        agentSessionId: request.agentSessionId,
-        nativePath: request.nativePath,
-      }, {
-        discover: () => this.resolveNativePath(request),
-        logger: this.#logger,
-        signal: request.executionAdmission?.signal ?? new AbortController().signal,
-      });
-      assertCodexExecutionOpen(request);
-      if (!nativePath) {
-        this.requestNativePathDiscoveryRefresh(request.agentSessionId);
-        throw new AgentIntegrationError(
-          'TRANSCRIPT_UNAVAILABLE',
-          'Codex native transcript could not be resolved',
-          true,
-        );
-      }
-      request = { ...request, nativePath };
     }
 
     const client = this.#newClient(request, true);
@@ -951,6 +936,28 @@ export class CodexAppServerRuntime {
       this.#discardBufferedClientEvents(client);
       throw new CodexSessionActivationFailure(error, this.#shutdownClient(client));
     }
+  }
+
+  async #resolveResumePath(request: CodexResumeRequest): Promise<CodexResumeRequest> {
+    if (!request.nativePath) return request;
+    const nativePath = await resolveCodexNativePath({
+      agentSessionId: request.agentSessionId,
+      nativePath: request.nativePath,
+    }, {
+      discover: () => this.resolveNativePath(request),
+      logger: this.#logger,
+      signal: request.executionAdmission?.signal ?? new AbortController().signal,
+    });
+    assertCodexExecutionOpen(request);
+    if (!nativePath) {
+      this.requestNativePathDiscoveryRefresh(request.agentSessionId);
+      throw new AgentIntegrationError(
+        'TRANSCRIPT_UNAVAILABLE',
+        'Codex native transcript could not be resolved',
+        true,
+      );
+    }
+    return { ...request, nativePath };
   }
 
   #reactivateSession(
