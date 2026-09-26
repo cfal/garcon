@@ -53,6 +53,7 @@ export interface IntegrationDirectories {
 
 export interface IntegrationFixtureOptions {
   executionBackend?: ExecutionBackend;
+  interceptExecutorConnection?: (url: URL) => Promise<string>;
   projectRoots?: 'shared' | 'separate';
   sharedConfigRoot?: boolean;
   chatTitleEnabled?: boolean;
@@ -277,7 +278,7 @@ export class IntegrationFixture {
         ...(options.serverEnvironment ?? {}),
         ...resolvedEnvironment,
       };
-      backend = new ExecutionBackendFixture(backendKind, executionDirs, serverEnvironment);
+      backend = new ExecutionBackendFixture(backendKind, executionDirs, serverEnvironment, options.interceptExecutorConnection);
       garcon = await backend.start({
         repoRoot: REPO_ROOT,
         configDir: dirs.config,

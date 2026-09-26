@@ -118,6 +118,7 @@ export class ExecutionBackendFixture {
     readonly backend: ExecutionBackend,
     readonly directories: IntegrationDirectories,
     readonly environment: Record<string, string>,
+    private readonly interceptConnection?: (url: URL) => Promise<string>,
   ) {}
 
   get logs(): readonly string[] { return [...this.#completedLogs, ...(this.#worker?.logs ?? [])]; }
@@ -154,7 +155,8 @@ export class ExecutionBackendFixture {
           const url = new URL(await this.#worker!.connectionUrl());
           url.hostname = '127.0.0.1';
           const created = await this.#request<{ id: string }>('/api/v1/executors', 'POST', {
-            label: 'Integration worker', direction: 'controller-connects', connectionUrl: url.href, allowInsecureDevelopment: true,
+            label: 'Integration worker', direction: 'controller-connects',
+            connectionUrl: await this.interceptConnection?.(url) ?? url.href, allowInsecureDevelopment: true,
           });
           this.#executorId = created.id;
         }
@@ -168,11 +170,12 @@ export class ExecutionBackendFixture {
           const controllerUrl = new URL(controller.baseUrl);
           url.protocol = 'ws:';
           url.host = controllerUrl.host;
+          const connectionUrl = await this.interceptConnection?.(url) ?? url.href;
           await this.#request(`/api/v1/executors/${this.#executorId}`, 'PATCH', {
-            connection: { direction: 'executor-connects', connectionUrl: url.href, allowInsecureDevelopment: true },
+            connection: { direction: 'executor-connects', connectionUrl, allowInsecureDevelopment: true },
           });
           this.#workerLaunch = { repoRoot: options.repoRoot, directories: this.directories, environment: this.environment,
-            connection: { kind: 'dial', url: url.href } };
+            connection: { kind: 'dial', url: connectionUrl } };
         }
         if (!this.#worker) await launchWorker(this.#workerLaunch!.connection);
       }
