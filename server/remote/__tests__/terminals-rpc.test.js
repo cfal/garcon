@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { homedir } from 'node:os';
 import { ExecutionRuntime } from '../../runtime/execution-runtime.ts';
 import { TerminalRuntime } from '../../runtime/terminals/runtime.ts';
-import { RemoteExecutorClient } from '../client/executor-client.ts';
+import { connectRemoteExecutor } from './runtime-adapter.js';
 import { WebSocketLink } from '../transport/websocket-link.ts';
 import { serveExecutionRuntime } from '../server/executor-rpc-server.ts';
 import { ExecutorRpc } from '../transport/rpc.ts';
@@ -30,7 +30,7 @@ for (const dialer of ['controller', 'worker']) test(`terminal RPC preserves proc
   worker.onSession(transport => scopes.push(serveExecutionRuntime(new ExecutionRuntime({
     id: options.executorId, workspaceDir: homedir(), projectBasePath: homedir(), integrations: [], terminalRuntime: runtime, resolveCredential: async () => null,
   }), new ExecutorRpc(transport))));
-  const connected = RemoteExecutorClient.connect(controller);
+  const connected = connectRemoteExecutor(controller);
   if (dialer === 'controller') controller.dial(worker.listen()); else worker.dial(controller.listen());
   try {
     const executor = await connected;

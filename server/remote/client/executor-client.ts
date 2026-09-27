@@ -35,7 +35,6 @@ class ExecutorConfigurationError extends Error {}
 export class RemoteExecutorClient implements ExecutionRuntimeApi {
   readonly #integrations = new Map<string, RemoteAgentIntegration>();
   readonly #listeners = new Set<(value: ExecutorAvailability) => void>();
-  readonly #ready = Promise.withResolvers<void>();
   readonly #unsubscribe: () => void;
   #availability: ExecutorAvailability = 'offline';
   #current: RemoteSessionBacking | null = null;
@@ -57,7 +56,6 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
     private readonly reportError: (message: string) => void = () => {},
     private readonly expectedInventory: RemoteExecutorInventory | null = null,
   ) {
-    void this.#ready.promise.catch(() => undefined);
     this.#unsubscribe = link.onSession((transport) => {
       this.#candidate = transport;
       const rpc = new ExecutorRpc(transport);
@@ -79,14 +77,6 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
         transport.close(error instanceof Error ? error : new Error(String(error)));
       });
     });
-    void link.ready.catch((error: unknown) => this.#ready.reject(error));
-  }
-
-  static async connect(link: WebSocketLink, setupRpc: (rpc: ExecutorRpc) => void = () => {}): Promise<RemoteExecutorClient> {
-    if (!link.executorId) throw new Error('Remote executor requires a controller link');
-    const executor = new RemoteExecutorClient(link.executorId, link, setupRpc);
-    try { await executor.#ready.promise; return executor; }
-    catch (error) { await executor.dispose(); throw error; }
   }
 
   get availability(): ExecutorAvailability { return this.#availability; }
@@ -210,7 +200,6 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
     });
     this.#current = backing;
     this.#setAvailability('ready');
-    this.#ready.resolve();
   }
 
   #backing(): RemoteSessionBacking {

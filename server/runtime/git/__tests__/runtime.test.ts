@@ -1,4 +1,4 @@
-import { afterEach, expect, test, spyOn } from 'bun:test';
+import { afterEach, describe, expect, test, spyOn } from 'bun:test';
 import * as fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -10,10 +10,13 @@ import { withRepositoryMutation } from '../repository-coordination.js';
 import { withGitOperation, trackGitProcess } from '../operation-context.js';
 import { KeyedPromiseLock } from '../../../common/keyed-lock.js';
 import { GIT_MAX_CONCURRENT_QUERIES } from '../../../../common/git-execution.js';
+import { ExecutionRuntime } from '../../execution-runtime.js';
+import { runtimeAdapter, RUNTIME_BACKENDS } from '../../../remote/__tests__/runtime-adapter.js';
 
 const cleanups: Array<() => Promise<unknown>> = [];
 afterEach(async () => { for (const dispose of cleanups.splice(0).reverse()) await dispose(); });
 
+for (const backend of RUNTIME_BACKENDS) describe(`Git runtime contract (${backend})`, () => {
 async function fixture(registry?: GitReviewDocumentRegistry) {
   const temporary = path.join(os.homedir(), 'tmp');
   await fs.mkdir(temporary, { recursive: true });
@@ -31,7 +34,13 @@ async function fixture(registry?: GitReviewDocumentRegistry) {
   const configuration = { executorId: 'local', instanceId: 'serving-one', projectBasePath: root, assertAvailable() {}, reviewRegistry: registry };
   const runtime = new GitRuntime(configuration);
   cleanups.push(async () => runtime.dispose());
-  return { root, projectPath, runtime, git: runtime.git, original, configuration };
+  const execution = new ExecutionRuntime({ id: configuration.executorId, instanceId: configuration.instanceId,
+    workspaceDir: root, projectBasePath: root, integrations: [], resolveCredential: async () => null });
+  spyOn(execution, 'getGitService').mockResolvedValue(runtime.git);
+  cleanups.push(() => execution.dispose());
+  const adapter = await runtimeAdapter(execution, backend);
+  cleanups.push(() => adapter.dispose());
+  return { root, projectPath, runtime, git: await adapter.executor.getGitService(), original, configuration };
 }
 
 async function selection(git: GitRuntime['git'], projectPath: string, file = 'example.txt') {
@@ -44,7 +53,7 @@ async function selection(git: GitRuntime['git'], projectPath: string, file = 'ex
     bodyFingerprint: loaded.files[file].bodyFingerprint, patchDigest: loaded.files[file].patchDigest!, hunkIndex: 0 };
 }
 
-test('local machine service scopes operations and rejects untrusted fields before execution', async () => {
+test('machine service scopes operations and rejects untrusted fields before execution', async () => {
   const { git, projectPath } = await fixture();
   expect(await git.getStatus({ projectPath })).toMatchObject({ executorId: 'local', instanceId: 'serving-one', branch: 'main' });
   expect(() => validateGitRequest('checkout', { projectPath, ref: 'main', env: { GIT_DIR: '/wrong' } })).toThrow('Invalid Git');
@@ -192,4 +201,68 @@ test('linked worktrees share locks until native work settles, including across s
     await second;
     expect(secondRan).toBe(true);
   } finally { native.resolve(); await first; lockSpy.mockRestore(); }
+});
+
+test('selected-file commits preserve unrelated staged and unstaged contents', async () => {
+  const { git, projectPath } = await fixture();
+  await fs.writeFile(path.join(projectPath, 'other.txt'), 'staged\n');
+  await git.stagePaths({ projectPath, paths: ['other.txt'], mode: 'stage' });
+  await fs.writeFile(path.join(projectPath, 'other.txt'), 'unstaged\n');
+  await fs.writeFile(path.join(projectPath, 'example.txt'), 'selected\n');
+  const committed = await git.commit({ projectPath, message: 'selected only', files: ['example.txt'] });
+  expect(committed).toMatchObject({ commitScope: 'selected-files', indexSynchronized: true });
+  expect((await runGit(projectPath, ['show', '--pretty=', '--name-only', 'HEAD'])).stdout.trim()).toBe('example.txt');
+  expect((await runGit(projectPath, ['show', ':other.txt'])).stdout).toBe('staged\n');
+  expect(await fs.readFile(path.join(projectPath, 'other.txt'), 'utf8')).toBe('unstaged\n');
+  await git.commitIndex({ projectPath, message: 'staged remainder' });
+  expect((await runGit(projectPath, ['show', 'HEAD:other.txt'])).stdout).toBe('staged\n');
+});
+
+test('stash conflicts retain the stash until explicit resolution and removal', async () => {
+  const { git, projectPath, original } = await fixture();
+  await fs.writeFile(path.join(projectPath, 'example.txt'), 'stashed\n');
+  await git.createStash({ projectPath, message: 'retained conflict' });
+  await fs.writeFile(path.join(projectPath, 'example.txt'), 'committed\n');
+  await git.commit({ projectPath, message: 'conflicting change', files: ['example.txt'] });
+  for (const method of ['applyStash', 'popStash'] as const) {
+    await expect(git[method]({ projectPath, stashRef: 'stash@{0}' })).rejects.toThrow();
+    expect((await git.getStashes({ projectPath })).stashes).toHaveLength(1);
+    expect((await git.getConflicts({ projectPath })).conflicts).toHaveLength(1);
+    const details = await git.getConflictDetails({ projectPath, file: 'example.txt' });
+    expect(details.ours.content).toBe('committed\n');
+    expect(details.theirs.content).toBe('stashed\n');
+    await git.acceptConflictSide({ projectPath, file: 'example.txt', side: 'ours' });
+    await git.markConflictResolved({ projectPath, file: 'example.txt' });
+    expect((await git.getConflicts({ projectPath })).conflicts).toEqual([]);
+    expect(await fs.readFile(path.join(projectPath, 'example.txt'), 'utf8')).toBe('committed\n');
+  }
+  await git.dropStash({ projectPath, stashRef: 'stash@{0}' });
+  expect((await git.getStashes({ projectPath })).stashes).toEqual([]);
+  await git.revertCommit({ projectPath, commit: 'HEAD' });
+  expect(await fs.readFile(path.join(projectPath, 'example.txt'), 'utf8')).toBe(original);
+});
+
+test('fetch, pull and push use a disposable bare remote without external credentials', async () => {
+  const { git, projectPath, root } = await fixture();
+  const remote = path.join(root, 'origin.git');
+  await runGit(root, ['init', '--bare', '-b', 'main', remote]);
+  await runGit(projectPath, ['remote', 'add', 'origin', remote]);
+  await runGit(projectPath, ['push', '--set-upstream', 'origin', 'main']);
+  const peer = path.join(root, 'peer');
+  await runGit(root, ['clone', remote, peer]);
+  await runGit(peer, ['config', 'user.name', 'Synthetic Peer']);
+  await runGit(peer, ['config', 'user.email', 'peer@example.invalid']);
+  await fs.writeFile(path.join(peer, 'incoming.txt'), 'incoming\n');
+  await runGit(peer, ['add', '.']);
+  await runGit(peer, ['commit', '-m', 'incoming']);
+  await runGit(peer, ['push']);
+  await git.fetch({ projectPath });
+  expect((await runGit(projectPath, ['rev-list', '--count', 'HEAD..origin/main'])).stdout.trim()).toBe('1');
+  await git.pull({ projectPath });
+  expect(await fs.readFile(path.join(projectPath, 'incoming.txt'), 'utf8')).toBe('incoming\n');
+  await fs.writeFile(path.join(projectPath, 'outgoing.txt'), 'outgoing\n');
+  await git.commit({ projectPath, message: 'outgoing', files: ['outgoing.txt'] });
+  await git.push({ projectPath });
+  expect((await runGit(remote, ['show', 'main:outgoing.txt'])).stdout).toBe('outgoing\n');
+});
 });

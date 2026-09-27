@@ -14,7 +14,7 @@ import { createVersion1RecordMigration } from '@garcon/server-agent-common/migra
 import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
 import type { AgentRuntimeExecution, AgentRuntimePublisher, AgentRuntimeStartRequest } from '@garcon/server-agent-common/execution/runtime-events';
 import { ExecutorRpc } from '../transport/rpc.js';
-import { RemoteExecutorClient } from '../client/executor-client.js';
+import { connectRemoteExecutor } from './runtime-adapter.js';
 import { WebSocketLink } from '../transport/websocket-link.js';
 import { serveExecutionRuntime } from '../server/executor-rpc-server.js';
 import { ProjectService } from '../../runtime/projects/project-service.js';
@@ -110,7 +110,7 @@ export async function remoteFixture(
   worker.onSession((session) => {
     scopes.push(serveExecutionRuntime(fixture.executor, new ExecutorRpc(session)));
   });
-  const connected = RemoteExecutorClient.connect(controller);
+  const connected = connectRemoteExecutor(controller);
   if (dialer === 'controller') controller.dial(worker.listen());
   else worker.dial(controller.listen());
   const executor = await connected;

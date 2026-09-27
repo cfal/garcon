@@ -5,8 +5,10 @@ import { join } from 'node:path';
 import createFilesRoutes from '../../../server/controller/routes/files.js';
 import { ChatRegistry } from '../../../server/controller/chats/store.js';
 import { FilesService } from '../../../server/runtime/files/service.js';
+import { ExecutionRuntime } from '../../../server/runtime/execution-runtime.js';
+import { runtimeAdapter, RUNTIME_BACKENDS } from '../../../server/remote/__tests__/runtime-adapter.js';
 
-test('an HTTP disconnect cancels a Local tree read without an unhandled route error', async () => {
+for (const backend of RUNTIME_BACKENDS) test(`an HTTP disconnect cancels a tree read without an unhandled route error (${backend})`, async () => {
   const root = await mkdtemp(join(tmpdir(), 'files-http-cancel-'));
   const entered = Promise.withResolvers<void>();
   const handled = Promise.withResolvers<number>();
@@ -22,8 +24,11 @@ test('an HTTP disconnect cancels a Local tree read without an unhandled route er
       throw new Error('Request was not cancelled');
     },
   });
+  const runtime = new ExecutionRuntime({ id: 'local', workspaceDir: root, projectBasePath: root, integrations: [], resolveCredential: async () => null });
+  spyOn(runtime, 'getFilesService').mockResolvedValue(files);
+  const adapter = await runtimeAdapter(runtime, backend);
   const routes = createFilesRoutes(new ChatRegistry(root), {
-    files: async () => files, inspectProject: async () => { throw new Error('Tree requests do not inspect projects'); },
+    files: () => adapter.executor.getFilesService(), inspectProject: async () => { throw new Error('Tree requests do not inspect projects'); },
   });
   const logged = spyOn(console, 'error').mockImplementation(() => {});
   const server = Bun.serve({
@@ -46,6 +51,8 @@ test('an HTTP disconnect cancels a Local tree read without an unhandled route er
   } finally {
     cancellation.abort();
     await server.stop(true);
+    await adapter.dispose();
+    await runtime.dispose();
     logged.mockRestore();
     await rm(root, { recursive: true, force: true });
   }

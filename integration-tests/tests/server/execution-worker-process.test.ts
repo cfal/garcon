@@ -6,6 +6,7 @@ import { ExecutorProcess } from '../../support/execution-backend.js';
 import { WebSocketLink } from '../../../server/remote/transport/websocket-link.js';
 import { parseConnectionUrl } from '../../../server/remote/transport/connection-url.js';
 import { RemoteExecutorClient } from '../../../server/remote/client/executor-client.js';
+import { connectRemoteExecutor } from '../../../server/remote/__tests__/runtime-adapter.js';
 import { ExecutorRpc } from '../../../server/remote/transport/rpc.js';
 import { discoverRuntime } from '../../../cli/discovery.js';
 import { withTimeout } from '../../support/deferred.js';
@@ -70,7 +71,7 @@ test('re-adding a running worker under a new executor identity requires restarti
       const controller = new WebSocketLink({ role: 'controller', executorId, secret: connection.secret, allowInsecureDevelopment: true });
       controllers.push(controller);
       if (controllers.length === 1) {
-        const connected = RemoteExecutorClient.connect(controller);
+        const connected = connectRemoteExecutor(controller);
         controller.dial(url.href);
         await withTimeout(connected, 10_000, () => worker!.logs.join('\n'));
       } else {

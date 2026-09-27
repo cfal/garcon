@@ -3,7 +3,7 @@ import * as fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { ExecutionRuntime } from '../../runtime/execution-runtime.js';
-import { RemoteExecutorClient } from '../client/executor-client.js';
+import { connectRemoteExecutor } from './runtime-adapter.js';
 import { ExecutorRpc } from '../transport/rpc.js';
 import { serveExecutionRuntime } from '../server/executor-rpc-server.js';
 import { WebSocketLink } from '../transport/websocket-link.js';
@@ -44,7 +44,7 @@ for (const dialer of ['controller', 'worker'] as const) {
     const worker = new WebSocketLink({ ...linkOptions, role: 'worker' });
     let serving: ReturnType<typeof serveExecutionRuntime> | undefined;
     worker.onSession((transport) => { serving = serveExecutionRuntime(local, new ExecutorRpc(transport)); });
-    const connecting = RemoteExecutorClient.connect(controller);
+    const connecting = connectRemoteExecutor(controller);
     if (dialer === 'controller') controller.dial(worker.listen());
     else worker.dial(controller.listen());
     try {
@@ -85,7 +85,7 @@ for (const phase of ['before dispatch', 'after commit'] as const) {
     const worker = new WebSocketLink({ ...linkOptions, role: 'worker' });
     let serving: ReturnType<typeof serveExecutionRuntime> | undefined;
     worker.onSession((transport) => { serving = serveExecutionRuntime(local, new ExecutorRpc(transport)); });
-    const connecting = RemoteExecutorClient.connect(controller);
+    const connecting = connectRemoteExecutor(controller);
     controller.dial(worker.listen());
     const service = await local.getFilesService();
     const save = service.save.bind(service);

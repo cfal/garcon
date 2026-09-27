@@ -13,7 +13,7 @@ import { AgentRuntimeRouter } from '../../../server/controller/agents/runtime-ro
 import { integrationFixture, linkOptions } from '../../../server/remote/__tests__/integration-fixture.js';
 import { serveExecutionRuntime } from '../../../server/remote/server/executor-rpc-server.js';
 import { ExecutorRpc } from '../../../server/remote/transport/rpc.js';
-import { RemoteExecutorClient } from '../../../server/remote/client/executor-client.js';
+import { connectRemoteExecutor } from '../../../server/remote/__tests__/runtime-adapter.js';
 import { WebSocketLink } from '../../../server/remote/transport/websocket-link.js';
 import { TranscriptAdoptionService } from '../../../server/controller/ledger/adoption.js';
 import { TranscriptLedgerService } from '../../../server/controller/ledger/service.js';
@@ -42,7 +42,7 @@ for (const [dialer, scenario] of [
     const native = integrationFixture(root, EXECUTOR);
     const serving: ReturnType<typeof serveExecutionRuntime>[] = [];
     worker.onSession(session => serving.push(serveExecutionRuntime(native.executor, new ExecutorRpc(session))));
-    const connected = RemoteExecutorClient.connect(controller);
+    const connected = connectRemoteExecutor(controller);
     if (dialer === 'controller') controller.dial(worker.listen());
     else worker.dial(controller.listen());
     const remote = await connected;

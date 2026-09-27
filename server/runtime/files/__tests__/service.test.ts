@@ -3,20 +3,31 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { FilesService } from '../service.js';
+import type { ExecutionFilesService } from '@garcon/server-agent-interface';
+import { ExecutionRuntime } from '../../execution-runtime.js';
+import { runtimeAdapter, RUNTIME_BACKENDS } from '../../../remote/__tests__/runtime-adapter.js';
 import { MAX_FILE_REVISION_LENGTH, MAX_FILE_SAVE_BYTES } from '../../../../common/file-contracts.js';
 
+for (const backend of RUNTIME_BACKENDS) describe(`executor files service (${backend})`, () => {
 let directory: string;
-let service: FilesService;
+let service: ExecutionFilesService;
+let runtime: ExecutionRuntime;
+let adapter: Awaited<ReturnType<typeof runtimeAdapter>>;
 beforeEach(async () => {
   directory = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-files-service-'));
   await fs.mkdir(path.join(directory, 'project'));
   await fs.writeFile(path.join(directory, 'project/file.txt'), 'initial');
-  service = new FilesService({ executorId: 'synthetic-executor', projectBasePath: directory });
+  runtime = new ExecutionRuntime({ id: 'synthetic-executor', workspaceDir: directory, projectBasePath: directory, integrations: [], resolveCredential: async () => null });
+  adapter = await runtimeAdapter(runtime, backend);
+  service = await adapter.executor.getFilesService();
 });
-afterEach(async () => { await fs.rm(directory, { recursive: true, force: true }); });
+afterEach(async () => {
+  await adapter.dispose();
+  await runtime.dispose();
+  await fs.rm(directory, { recursive: true, force: true });
+});
 const target = () => ({ projectPath: path.join(directory, 'project'), filePath: 'file.txt' });
 
-describe('executor files service', () => {
   it('bounds process-wide reads and saves without blocking metadata calls', async () => {
     const released = Promise.withResolvers<void>();
     const entered = Promise.withResolvers<void>();
@@ -162,12 +173,14 @@ describe('executor files service', () => {
       const { revision } = await service.read(target());
       const abort = new AbortController();
       const first = service.save({ ...target(), content: 'retired', expectedRevision: revision, conflictResolution: 'reject' }, { signal: abort.signal });
+      const outcome = first.then(result => result, error => error);
       await entered.promise;
       abort.abort();
       const replacement = new FilesService({ executorId: 'synthetic-executor', projectBasePath: directory });
       const second = replacement.save({ ...target(), content: 'replacement', expectedRevision: revision, conflictResolution: 'reject' });
       resume.resolve();
-      expect((await first).success).toBe(true);
+      if (backend === 'local') expect((await outcome).success).toBe(true);
+      else expect(await outcome).toMatchObject({ code: 'FILE_SAVE_OUTCOME_UNKNOWN' });
       await expect(second).rejects.toMatchObject({ code: 'FILE_REVISION_CONFLICT' });
       const current = await replacement.read(target());
       await replacement.save({ ...target(), content: 'replacement', expectedRevision: current.revision, conflictResolution: 'reject' });
