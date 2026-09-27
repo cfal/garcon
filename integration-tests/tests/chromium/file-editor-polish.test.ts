@@ -405,6 +405,6 @@ describe('File editor controls', () => {
       expect(await surface.getByRole('button', { name: 'Reload application' }).count()).toBe(0);
       expect(await source.innerText()).toContain('unsaved one');
       fixture.assertNoBrowserErrors();
-    });
+    }, undefined, { serviceWorkers: 'allow' });
   }, 180_000);
 });

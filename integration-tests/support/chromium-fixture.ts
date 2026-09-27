@@ -29,6 +29,13 @@ export interface ChromiumFixture {
   assertNoBrowserErrors(): void;
 }
 
+export interface ChromiumFixtureOptions extends IntegrationFixtureOptions {
+  // Playwright request interception can miss requests from pages the app's service worker
+  // controls, and the worker claims open pages at an arbitrary point after load, so only
+  // tests that exercise the worker allow it.
+  serviceWorkers?: 'allow' | 'block';
+}
+
 const fixturesOwningBrowsers = new WeakSet<ChromiumFixture>();
 
 export async function launchChromiumBrowser(): Promise<Browser> {
@@ -57,9 +64,10 @@ export async function authenticateChromiumContext(
 }
 
 export async function createChromiumFixture(
-  integrationOptions: IntegrationFixtureOptions = {},
+  options: ChromiumFixtureOptions = {},
   sharedBrowser?: Browser,
 ): Promise<ChromiumFixture> {
+  const { serviceWorkers = 'block', ...integrationOptions } = options;
   await requireCurrentWebBuild();
   const integration = await createIntegrationFixture(integrationOptions);
   let browser: Browser | null = null;
@@ -69,6 +77,7 @@ export async function createChromiumFixture(
     browser = sharedBrowser ?? (await launchChromiumBrowser());
     context = await browser.newContext({
       viewport: { width: 1440, height: 900 },
+      serviceWorkers,
     });
     await authenticateChromiumContext(context, integration);
     await context.addInitScript(() => {
@@ -202,11 +211,11 @@ export async function withChromiumFixture<T>(
   testName: string,
   run: (fixture: ChromiumFixture, markPhase: MarkPhase) => Promise<T>,
   diagnostics?: (fixture: ChromiumFixture) => Promise<unknown>,
-  integrationOptions: IntegrationFixtureOptions = {},
+  options: ChromiumFixtureOptions = {},
   sharedBrowser?: Browser,
 ): Promise<T> {
   const fixture = await withTimeout(
-    createChromiumFixture(integrationOptions, sharedBrowser),
+    createChromiumFixture(options, sharedBrowser),
     FIXTURE_SETUP_TIMEOUT_MS,
     () => `Chromium fixture setup timed out for ${testName}.`,
   );
