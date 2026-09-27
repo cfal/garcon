@@ -388,6 +388,16 @@ export class FileSessionRegistry {
 		return this.#io.checkFreshness(sessionId);
 	}
 
+	/** Checks open documents on one executor now instead of waiting for the next poll. */
+	checkExecutorFreshness(executorId: string): void {
+		for (const document of Object.values(this.documents)) {
+			if (document.executorId !== executorId) continue;
+			void this.#io.checkDocumentFreshness(document.id).catch((error: unknown) => {
+				console.error('File revision check failed', error);
+			});
+		}
+	}
+
 	confirmDestructive(sessionId: string, reason: FileDestructiveReason): Promise<boolean> {
 		return this.confirmDestructiveViews([sessionId], reason);
 	}

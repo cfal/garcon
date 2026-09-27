@@ -163,3 +163,41 @@ test('saving from the Files root refreshes Git on the same host even outside the
     fixture.assertNoBrowserErrors();
   }, { executionBackend: 'remote-controller-dials' });
 }, 60_000);
+
+test('discarding a Git change refreshes the open file on the same host without waiting for polling', async () => {
+  await withE2eFixture('executor-git-discard-file-refresh', async (fixture) => {
+    const { client, dirs, directAgents } = fixture.integration;
+    const projectPath = join(dirs.project, 'repo');
+    const examplePath = join(projectPath, 'example.txt');
+    await mkdir(projectPath);
+    await initializeFixtureRepository(projectPath);
+    await writeFile(examplePath, 'Synthetic uncommitted edit\n');
+    const chatId = fixture.integration.newChatId();
+    const started = await client.startDirectChat({ chatId, content: 'Synthetic discard fixture', projectPath, agent: directAgents.openAi });
+    await client.waitForTurnTerminal(chatId, started.turnId);
+    const app = new SpaDriver(fixture.page, fixture.integration);
+    await app.setViewport(1_600, 900);
+    await app.openChat(chatId);
+    await fixture.waitForSpaWebSocket();
+    await app.selectWorkspaceWindowSurface('Open Git Workbench');
+    const gitPanel = '[data-workspace-surface-id="singleton:git"][aria-hidden="false"]';
+    await fixture.page.waitForSelector(`${gitPanel} [data-git-file-header]`);
+    await fixture.page.waitForSelector(`[data-file-tree-row] [title="${examplePath}"]`);
+    await fixture.page.$eval(`[data-file-tree-row] [title="${examplePath}"]`, (header) => (header.closest('[data-file-tree-row]') as HTMLElement).click());
+    const editor = '[data-workspace-surface-id^="file:"][aria-hidden="false"] .cm-content';
+    await fixture.page.waitForFunction(
+      (selector) => document.querySelector(selector)?.textContent?.includes('Synthetic uncommitted edit') === true,
+      {}, editor,
+    );
+    await fixture.page.waitForNetworkIdle({ idleTime: 600 });
+
+    await fixture.page.$eval(`${gitPanel} button[title="Discard changes"]`, (element) => (element as HTMLButtonElement).click());
+    await app.clickDialogButton('Discard');
+    await fixture.page.waitForFunction(
+      (selector) => document.querySelector(selector)?.textContent?.includes('initial') === true,
+      { timeout: 5_000 }, editor,
+    );
+    expect(await readFile(examplePath, 'utf8')).toBe('initial\n');
+    fixture.assertNoBrowserErrors();
+  }, { executionBackend: 'remote-controller-dials' });
+}, 60_000);

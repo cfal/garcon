@@ -297,6 +297,27 @@ describe('createWorkspaceServices', () => {
 		},
 	);
 
+	it('refreshes Files on the mutated host after a Git mutation', async () => {
+		rootLocalSettings = createLocalSettingsStore();
+		({ services } = assembleWorkspaceServices(rootLocalSettings));
+		const executorId = '22222222-2222-4222-8222-222222222222';
+		const refreshTree = vi.spyOn(services.singletonSurfaces.files(), 'refreshForExecutorChange');
+		const checkDocuments = vi.spyOn(services.files, 'checkExecutorFreshness');
+		vi.spyOn(services.gitQuickSummary, 'refreshFor').mockResolvedValue(undefined);
+
+		await services.gitMutations.run({
+			executorId,
+			surfaceId: 'singleton:git',
+			effectiveProjectKey: '/repo',
+			projectPath: '/repo',
+			execute: async () => undefined,
+		});
+
+		expect(refreshTree).toHaveBeenCalledWith(executorId);
+		expect(checkDocuments).toHaveBeenCalledWith(executorId);
+		expect(gitProjectInvalidations.version(executorId)).toBeGreaterThan(0);
+	});
+
 	it('keeps the current file command port and reports chat append outcomes', async () => {
 		rootLocalSettings = createLocalSettingsStore();
 		const assembled = assembleWorkspaceServices(rootLocalSettings);

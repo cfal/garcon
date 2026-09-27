@@ -114,6 +114,10 @@ export class FilesSurfaceController implements PortableSingletonController {
 		if (!wasBrowsingExecutor) void this.tree.goToChatProject();
 	}
 
+	refreshForExecutorChange(executorId: string): void {
+		if (this.tree.executorId === executorId) void this.tree.refresh();
+	}
+
 	revealFile(fileRootPath: string, relativePath: string, executorId?: string | null): void {
 		if (effectiveExecutorId(executorId) !== this.tree.executorId) this.selectExecutor(effectiveExecutorId(executorId));
 		this.#pendingReveal = { executorId: effectiveExecutorId(executorId), fileRootPath, relativePath };

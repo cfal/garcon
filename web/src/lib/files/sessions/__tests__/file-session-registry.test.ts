@@ -224,6 +224,27 @@ describe('FileSessionRegistry', () => {
 		await harness.registry.destroyAll();
 	});
 
+	it('checks only the named executor documents outside the polling cadence', async () => {
+		const worker = '22222222-2222-4222-8222-222222222222';
+		const harness = createHarness();
+		const local = (await harness.registry.open(request('same.txt')))!;
+		const remote = (await harness.registry.open({ ...request('same.txt'), executorId: worker }))!;
+		await vi.waitFor(() => expect(local.loading || remote.loading).toBe(false));
+		await vi.waitFor(() =>
+			expect(local.isCheckingFreshness || remote.isCheckingFreshness).toBe(false),
+		);
+		harness.getFileRevision.mockClear();
+
+		harness.registry.checkExecutorFreshness(worker);
+
+		await vi.waitFor(() => expect(harness.getFileRevision).toHaveBeenCalledOnce());
+		expect(harness.getFileRevision).toHaveBeenCalledWith(
+			expect.objectContaining({ executorId: worker, filePath: 'same.txt' }),
+			expect.anything(),
+		);
+		await harness.registry.destroyAll();
+	});
+
 	it('rejects a canonical identity response from the wrong executor without opening a document', async () => {
 		const harness = createHarness();
 		harness.resolveFileIdentity.mockResolvedValueOnce({

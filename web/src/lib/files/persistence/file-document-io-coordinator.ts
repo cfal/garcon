@@ -60,7 +60,7 @@ export class FileDocumentIoCoordinator {
 
 	constructor(private readonly options: FileDocumentIoOptions) {
 		this.#polling = new DocumentPollingCoordinator({
-			poll: (documentId) => this.#checkDocumentFreshness(documentId),
+			poll: (documentId) => this.checkDocumentFreshness(documentId),
 			isVisible: (documentId) => options.isDocumentVisible(documentId),
 		});
 	}
@@ -391,7 +391,7 @@ export class FileDocumentIoCoordinator {
 		session.isCheckingFreshness = false;
 	}
 
-	async #checkDocumentFreshness(documentId: string): Promise<void> {
+	async checkDocumentFreshness(documentId: string): Promise<void> {
 		const document = this.options.getDocument(documentId);
 		if (!document) return;
 		const view = [...document.viewIds]

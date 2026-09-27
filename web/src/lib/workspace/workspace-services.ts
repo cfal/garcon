@@ -270,6 +270,9 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 	const gitMutations = new GitMutationCoordinator({
 		onChanged: async (executorId, _effectiveProjectKey, projectPath) => {
 			gitProjectInvalidations.markChanged(executorId);
+			// Checkout, discard, stash and pull rewrite files outside the editor.
+			singletonSurfaces.filesIfPresent()?.refreshForExecutorChange(executorId);
+			files.checkExecutorFreshness(executorId);
 			await gitQuickSummary.refreshFor({ executorId, projectPath }, 'invalidation');
 		},
 		onMutationError: (error, executorId, projectPath) => {
