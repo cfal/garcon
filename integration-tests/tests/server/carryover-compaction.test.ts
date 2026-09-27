@@ -3,6 +3,10 @@ import { chmod, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { AgentSettingsEnvelope } from '../../../common/agent-integration.js';
+import type {
+  AgentHandoffCommandRequest,
+  AgentHandoffCommandResponse,
+} from '../../../common/chat-command-contracts.js';
 import { AssistantMessage, UserMessage } from '../../../common/chat-types.js';
 import {
   CARRYOVER_INJECTION_MAX_CHARS,
@@ -61,6 +65,97 @@ describe('agent switch compaction', () => {
         await fixture.client.getMessages(chatId),
         'carry on',
       );
+    });
+  }, 90_000);
+
+  test('defers compaction through promptless switches, switching back, and restart until Send', async () => {
+    await withIntegrationFixture('compaction-promptless-switches', async (fixture) => {
+      const source = fixture.directAgents.openAi;
+      const target = fixture.directAgents.anthropic;
+      const turns = largeTurns(8);
+      const chatId = await seedDirectHistory(fixture, source, turns);
+      await enableCompaction(fixture, source);
+      const sourceRequestCount = fixture.fakeProviders.openAi.requests().length;
+      const assertNoGeneration = async () => {
+        expect(fixture.fakeProviders.openAi.requests()).toHaveLength(sourceRequestCount);
+        expect(fixture.fakeProviders.anthropic.requests()).toHaveLength(0);
+        const transcript = await fixture.client.getMessages(chatId);
+        expect(noticesTitled(transcript.messages, HANDOFF_SUMMARY_TITLE)).toEqual([]);
+      };
+
+      await commitPromptlessHandoff(fixture, chatId, target);
+      await assertNoGeneration();
+      await commitPromptlessHandoff(fixture, chatId, source);
+      await assertNoGeneration();
+      if (fixture.client.executorId !== 'local') {
+        await fixture.client.put(
+          `/api/v1/api-provider-assignments?executorId=local&apiProviderId=${source.provider.providerId}`,
+          {},
+        );
+        await commitPromptlessHandoff(fixture, chatId, source, 'local');
+        await assertNoGeneration();
+        await commitPromptlessHandoff(fixture, chatId, source);
+        await assertNoGeneration();
+      }
+      await commitPromptlessHandoff(fixture, chatId, target);
+      await fixture.restartGarcon();
+      await assertNoGeneration();
+      const restored = await chatSummary(fixture, chatId);
+      expect(restored.agentId).toBe(target.agentId);
+      expect(restored.executorId ?? 'local').toBe(fixture.client.executorId);
+
+      const prompt = 'Synthetic prompt written after choosing the final target';
+      const compactionCall = fixture.fakeProviders.openAi.holdNext({ model: source.provider.model });
+      const targetCall = fixture.fakeProviders.anthropic.holdNext({ model: target.provider.model });
+      const accepted = await fixture.client.runDirectChat({ chatId, content: prompt, agent: target });
+      const compactionRequest = await compactionCall.received;
+      expect(compactionRequest.lastUserText).toContain(`Their next instruction is: ${prompt}`);
+      expect(compactionRequest.lastUserText).toContain(
+        `continued by ${target.agentId} using ${target.provider.model}`,
+      );
+      expect(compactionRequest.lastUserText).toContain(largeTurnMarker(turns.length - 1));
+      expect(compactionCall.releaseText(`<summary>${SUMMARY}</summary>`)).toBeTrue();
+      const targetRequest = await targetCall.received;
+      expect(targetRequest.lastUserText).toContain(SUMMARY);
+      expect(targetRequest.lastUserText.endsWith(prompt)).toBeTrue();
+      expect(targetCall.releaseText('Synthetic destination answer')).toBeTrue();
+      const terminal = await fixture.client.waitForTurnTerminal(chatId, accepted.turnId);
+      expect(terminal.type).toBe('agent-run-finished');
+      expect(fixture.fakeProviders.openAi.requests()).toHaveLength(sourceRequestCount + 1);
+      expect(fixture.fakeProviders.anthropic.requests()).toHaveLength(1);
+      assertOneHandoffNotice(await fixture.client.getMessages(chatId), SUMMARY, prompt);
+    });
+  }, 120_000);
+
+  test('reports missing compaction configuration on Send without reverting a promptless selection', async () => {
+    await withIntegrationFixture('compaction-promptless-disabled', async (fixture) => {
+      const source = fixture.directAgents.openAi;
+      const target = fixture.directAgents.anthropic;
+      const chatId = await seedDirectHistory(fixture, source, largeTurns(8));
+      const sourceRequestCount = fixture.fakeProviders.openAi.requests().length;
+      const selected = await commitPromptlessHandoff(fixture, chatId, target);
+      expect(fixture.fakeProviders.openAi.requests()).toHaveLength(sourceRequestCount);
+      expect(fixture.fakeProviders.anthropic.requests()).toHaveLength(0);
+
+      const accepted = await fixture.client.runDirectChat({
+        chatId,
+        content: 'Synthetic deferred failure',
+        agent: target,
+      });
+      const terminal = await fixture.client.waitForTurnTerminal(chatId, accepted.turnId);
+      expect(terminal).toMatchObject({
+        type: 'agent-run-failed',
+        error: expect.stringContaining('Enable agent-switch compaction in Settings'),
+      });
+      expect(await chatSummary(fixture, chatId)).toMatchObject({
+        agentId: target.agentId,
+        agentOwnershipEpoch: selected.chat.agentOwnershipEpoch,
+      });
+      expect(fixture.fakeProviders.openAi.requests()).toHaveLength(sourceRequestCount);
+      expect(fixture.fakeProviders.anthropic.requests()).toHaveLength(0);
+
+      await commitPromptlessHandoff(fixture, chatId, source);
+      expect(fixture.fakeProviders.openAi.requests()).toHaveLength(sourceRequestCount);
     });
   }, 90_000);
 
@@ -320,6 +415,42 @@ describe('agent switch compaction', () => {
     }, fakeClaudeOptions(environment));
   }, 120_000);
 });
+
+async function commitPromptlessHandoff(
+  fixture: IntegrationFixture,
+  chatId: string,
+  agent: ConfiguredDirectTestAgent,
+  executorId = fixture.client.executorId,
+): Promise<AgentHandoffCommandResponse> {
+  const before = await chatSummary(fixture, chatId);
+  const request = {
+    chatId,
+    clientRequestId: crypto.randomUUID(),
+    handoff: {
+      expectedAgentOwnershipEpoch: before.agentOwnershipEpoch,
+      target: {
+        executorId,
+        agentId: agent.agentId,
+        model: agent.provider.model,
+        projectPath: executorId === 'local' ? fixture.dirs.project : fixture.executionDirs.project,
+        apiProviderId: agent.provider.providerId,
+        modelEndpointId: agent.provider.endpointId,
+        permissionMode: 'default',
+        thinkingMode: 'none',
+        agentSettings: agent.agentSettings,
+      },
+    },
+  } satisfies AgentHandoffCommandRequest;
+  const response = await fixture.client.post<AgentHandoffCommandResponse>(
+    '/api/v1/chats/agent-handoff',
+    request,
+  );
+  expect(response.chat).toMatchObject({ agentId: agent.agentId, model: agent.provider.model });
+  expect(response.chat.executorId ?? 'local').toBe(executorId);
+  expect(response.chat.agentOwnershipEpoch).not.toBe(before.agentOwnershipEpoch);
+  expect(response).not.toHaveProperty('turnId');
+  return response;
+}
 
 async function seedDirectHistory(
   fixture: IntegrationFixture,

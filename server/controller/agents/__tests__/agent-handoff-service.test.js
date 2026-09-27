@@ -94,11 +94,11 @@ function installFakeTimers() {
 }
 
 describe('AgentHandoffService', () => {
-  it('preserves delayed control input on the source when it arrives during promptless planning', async () => {
+  it('preserves delayed control input on the source when it arrives before a promptless decision', async () => {
     const current = sourceChat();
     const calls = [];
     const ownership = handoffState(current, calls).ownership;
-    const planning = Promise.withResolvers();
+    const decisionReached = Promise.withResolvers();
     const release = Promise.withResolvers();
     const repository = new InMemoryChatExecutionControlRepository('test-instance');
     const coordinator = new ChatExecutionCoordinator('/unused', {
@@ -110,19 +110,22 @@ describe('AgentHandoffService', () => {
     const snapshot = coordinator.reserveTranscriptSnapshot('chat');
     const service = createService({
       registry: { getChat: () => current }, ownership, ledger: ledgerState(calls),
-      carryover: { planFor: async () => { planning.resolve(); await release.promise; return { kind: 'empty' }; } },
       reopenProducer: () => calls.push('reopen'),
     });
     const preparing = service.createPreparation({
       chatId: 'chat', clientRequestId: 'synthetic-request', source: current,
       handoff: handoff(), target: target(), command: null,
-      guardDecision: (decide) => coordinator.withChatExecutionControl('chat', async (control) => {
-        assertAgentHandoffIdle(control, false);
-        return decide();
-      }),
+      guardDecision: async (decide) => {
+        decisionReached.resolve();
+        await release.promise;
+        return coordinator.withChatExecutionControl('chat', async (control) => {
+          assertAgentHandoffIdle(control, false);
+          return decide();
+        });
+      },
     }).prepare(context());
     try {
-      await planning.promise;
+      await decisionReached.promise;
       expect(await coordinator.deliverServerControlInput('chat', {
         content: 'Synthetic delayed result', transcriptViewId: 'view-1',
         createdAt: '2026-01-01T00:00:00.000Z', receipt: null,
@@ -130,7 +133,7 @@ describe('AgentHandoffService', () => {
       release.resolve();
       await expect(preparing).rejects.toMatchObject({ code: 'AGENT_HANDOFF_REQUIRES_IDLE' });
       expect(current).toEqual(sourceChat());
-      expect(calls).toEqual(['close', 'watermark', 'checkpoint', 'messages', 'reopen']);
+      expect(calls).toEqual(['close', 'watermark', 'checkpoint', 'reopen']);
       expect(ownership.pendingHandoffs()).toEqual([]);
       expect(repository.load('chat').controlEntries.map(entry => entry.content)).toEqual(['Synthetic delayed result']);
     } finally {
@@ -381,20 +384,50 @@ describe('AgentHandoffService', () => {
     expect(current).toMatchObject({ agentId: 'source-agent', agentOwnershipEpoch: 'source-epoch' });
   });
 
-  it('validates promptless carryover without caching a budget for an unknown next prompt', async () => {
+  it('commits promptless switches and a switch back without planning or caching carryover', async () => {
     const current = sourceChat();
     const calls = [];
     const state = handoffState(current, calls);
-    const planFor = mock(async () => ({ kind: 'full', context: { prefix: 'Synthetic carryover' } }));
+    const ledger = ledgerState(calls);
+    const planFor = mock(async () => {
+      throw new Error('Compaction must wait for a prompt');
+    });
     const deposit = mock(() => {});
     const service = createService({
-      registry: { getChat: () => current }, ownership: state.ownership, ledger: ledgerState(calls),
-      carryover: { planFor }, preparedCarryover: { deposit, discard: mock(() => {}) },
+      registry: { getChat: () => current },
+      ownership: state.ownership,
+      ledger,
+      carryover: { planFor },
+      preparedCarryover: { deposit, discard: mock(() => {}) },
     });
-    await service.createPreparation({ chatId: 'chat', clientRequestId: 'request-1', handoff: handoff(),
-      source: current, target: target(), command: null }).prepare(context());
-    expect(planFor.mock.calls[0][0].destination.prompt).toBeNull();
-    expect(current.agentId).toBe('target-agent');
+    const destinations = [
+      target(),
+      {
+        ...target(),
+        agentId: 'source-agent',
+        model: 'source-model',
+        agentSettings: envelope('source-agent'),
+      },
+    ];
+
+    for (const [index, destination] of destinations.entries()) {
+      const previousEpoch = current.agentOwnershipEpoch;
+      await service.createPreparation({
+        chatId: 'chat',
+        clientRequestId: `request-${index}`,
+        handoff: { target: destination, expectedAgentOwnershipEpoch: previousEpoch },
+        source: current,
+        target: destination,
+        command: null,
+      }).prepare(context());
+      expect(current.agentId).toBe(destination.agentId);
+      expect(current.agentOwnershipEpoch).not.toBe(previousEpoch);
+    }
+
+    expect(state.ownership.decideHandoff).toHaveBeenCalledTimes(2);
+    expect(ledger.checkpointForHandoff).toHaveBeenCalledTimes(2);
+    expect(ledger.conversationMessages).not.toHaveBeenCalled();
+    expect(planFor).not.toHaveBeenCalled();
     expect(deposit).not.toHaveBeenCalled();
   });
 

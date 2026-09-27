@@ -249,7 +249,6 @@ export class AgentHandoffService {
     const submittedTargetHash = handoffTargetHash(input.handoff);
     const sourceSnapshot = cloneRegistryEntry(input.source);
     const sourceFence = ownershipFence(sourceSnapshot);
-    let completed = false;
 
     return {
       operation: 'agent-handoff',
@@ -266,7 +265,6 @@ export class AgentHandoffService {
           if (existing) {
             assertMatchingHandoff(existing, submittedTargetHash);
             await this.#rollForwardPersistedHandoff(existing);
-            completed = true;
             await this.#notifyCommitted(input.chatId);
             return;
           }
@@ -279,24 +277,27 @@ export class AgentHandoffService {
           if (checkpoint.viewId !== watermark.viewId || checkpoint.ordinal !== watermark.ordinal) {
             throw new Error('Transcript changed while the handoff checkpoint was captured');
           }
-          const planningController = new AbortController();
-          this.#carryoverPreparations.set(input.chatId, planningController);
-          let planned: CarryOverOutcome;
-          try {
-            planned = await this.deps.carryover.planFor({
-              operation: 'agent-switch',
-              chatId: input.chatId,
-              messages: this.deps.ledger.conversationMessages(input.chatId),
-              destination: {
-                agentId: input.target.agentId,
-                model: input.target.model,
-                prompt: input.command,
-              },
-              signal: AbortSignal.any([context.signal, planningController.signal]),
-            });
-          } finally {
-            if (this.#carryoverPreparations.get(input.chatId) === planningController) {
-              this.#carryoverPreparations.delete(input.chatId);
+          let carryoverOutcome: CarryOverOutcome | null = null;
+          // Selection-only changes defer compaction to dispatch with the actual prompt.
+          if (input.command !== null) {
+            const planningController = new AbortController();
+            this.#carryoverPreparations.set(input.chatId, planningController);
+            try {
+              carryoverOutcome = await this.deps.carryover.planFor({
+                operation: 'agent-switch',
+                chatId: input.chatId,
+                messages: this.deps.ledger.conversationMessages(input.chatId),
+                destination: {
+                  agentId: input.target.agentId,
+                  model: input.target.model,
+                  prompt: input.command,
+                },
+                signal: AbortSignal.any([context.signal, planningController.signal]),
+              });
+            } finally {
+              if (this.#carryoverPreparations.get(input.chatId) === planningController) {
+                this.#carryoverPreparations.delete(input.chatId);
+              }
             }
           }
           const decide = () => {
@@ -318,17 +319,17 @@ export class AgentHandoffService {
           };
           const intent = await (input.guardDecision ? input.guardDecision(decide) : decide());
           await this.#rollForwardPersistedHandoff(intent);
-          // Promptless changes validate carryover now; the first dispatch plans its actual input budget.
-          if (input.command !== null) this.deps.preparedCarryover.deposit({
-            chatId: input.chatId,
-            transcriptViewId: checkpoint.viewId,
-            targetAgentId: input.target.agentId,
-            targetExecutorId: effectiveExecutorId(input.target.executorId),
-            targetOwnershipEpoch: intent.target.agentOwnershipEpoch,
-            clientRequestId: input.clientRequestId,
-            result: planned,
-          });
-          completed = true;
+          if (carryoverOutcome) {
+            this.deps.preparedCarryover.deposit({
+              chatId: input.chatId,
+              transcriptViewId: checkpoint.viewId,
+              targetAgentId: input.target.agentId,
+              targetExecutorId: effectiveExecutorId(input.target.executorId),
+              targetOwnershipEpoch: intent.target.agentOwnershipEpoch,
+              clientRequestId: input.clientRequestId,
+              result: carryoverOutcome,
+            });
+          }
           await this.#notifyCommitted(input.chatId);
         } catch (error) {
           if (error instanceof OwnershipTransferPendingError) throw error;
@@ -339,7 +340,6 @@ export class AgentHandoffService {
           if (decisionAttempted && retained) {
             assertMatchingHandoff(retained, submittedTargetHash);
             await this.#rollForwardPersistedHandoff(retained);
-            completed = true;
             await this.#notifyCommitted(input.chatId);
             return;
           }
@@ -349,7 +349,6 @@ export class AgentHandoffService {
       },
       compensate: async () => {
         this.deps.preparedCarryover.discard(input.chatId);
-        if (completed) return;
       },
     };
   }
