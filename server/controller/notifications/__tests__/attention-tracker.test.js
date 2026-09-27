@@ -328,6 +328,29 @@ describe('AttentionTracker', () => {
       ].join('\n'));
     });
 
+    it('bounds input titles and committed assistant excerpts without a generated title or final response', () => {
+      createTracker();
+      simulateConversation('c1', 'u'.repeat(201), 'a'.repeat(401));
+      agents.emitFinished('c1', 0);
+      queue.emitChatIdle('c1');
+      expect(telegram.send.mock.calls[0][1]).toBe([
+        `<b>${'u'.repeat(119)}\u2026</b>`,
+        `${'a'.repeat(399)}\u2026`,
+        '<code>claude - ~/repo</code>',
+      ].join('\n'));
+    });
+
+    it('bounds dispatch-failure details without a ledger terminal', () => {
+      createTracker();
+      queue.emitTurnFailed('c1', 'd'.repeat(401));
+      queue.emitChatIdle('c1');
+      expect(telegram.send.mock.calls[0][1]).toBe([
+        '<b>c1</b>',
+        `Failed: ${'d'.repeat(399)}\u2026`,
+        '<code>claude - ~/repo</code>',
+      ].join('\n'));
+    });
+
     it('reports a dispatch failure without a ledger terminal', () => {
       createTracker();
       agents.emitInput('c1', 'new task');
