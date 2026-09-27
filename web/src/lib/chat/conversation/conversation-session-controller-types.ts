@@ -64,7 +64,6 @@ type SessionComposerState = Pick<
 	| 'isDraftEmpty'
 	| 'restoreDraftIfRevision'
 	| 'restoreDraft'
-	| 'saveDraft'
 >;
 
 type SessionAgentState = Pick<

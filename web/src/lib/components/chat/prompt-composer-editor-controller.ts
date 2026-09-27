@@ -9,7 +9,7 @@ import type { PromptComposerUiState } from './prompt-composer-state.svelte.js';
 
 interface PromptComposerEditorControllerOptions {
 	get ui(): PromptComposerUiState;
-	composer: Pick<ComposerState, 'inputText' | 'queueDraftSave'>;
+	composer: Pick<ComposerState, 'inputText'>;
 	get selectedChatId(): string | null;
 	get textarea(): HTMLTextAreaElement | undefined;
 	get isVisible(): boolean;
@@ -71,7 +71,6 @@ export class PromptComposerEditorController {
 			return;
 		}
 		this.options.composer.inputText = text;
-		this.options.composer.queueDraftSave(chatId, text);
 	}
 
 	updateSelection(chatId: string, selection: PromptEditorSelection): void {

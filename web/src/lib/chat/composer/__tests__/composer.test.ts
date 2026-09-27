@@ -1,10 +1,6 @@
-// Unit tests for ComposerState class. Tests synchronous state management;
-// submitMessage and localStorage-dependent draft methods are not tested here.
-
-import { afterEach, describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { ComposerState } from '../composer.svelte';
 import { ChatDraftStore } from '../chat-draft-store.svelte.js';
-import { chatDraftStorageKey } from '$lib/utils/local-persistence';
 
 function createComposer(initialChatId: string | null = 'chat-1') {
 	let activeChatId = initialChatId;
@@ -26,11 +22,6 @@ function createComposer(initialChatId: string | null = 'chat-1') {
 }
 
 describe('ComposerState', () => {
-	afterEach(() => {
-		vi.useRealTimers();
-		localStorage.clear();
-	});
-
 	it('starts with empty state', () => {
 		const { composer: state } = createComposer();
 		expect(state.inputText).toBe('');
@@ -95,43 +86,15 @@ describe('ComposerState', () => {
 		expect(state.contentRevision).toBe(initialRevision + 3);
 	});
 
-	it('debounces draft writes and persists the latest queued text', () => {
-		vi.useFakeTimers();
-		const { composer } = createComposer('chat-1');
-		composer.inputText = 'first';
-		composer.queueDraftSave('chat-1', composer.inputText);
-		composer.inputText = 'second';
-		composer.queueDraftSave('chat-1', composer.inputText);
-
-		expect(localStorage.getItem(chatDraftStorageKey('chat-1'))).toBeNull();
-		vi.advanceTimersByTime(250);
-
-		expect(localStorage.getItem(chatDraftStorageKey('chat-1'))).toBe('second');
-	});
-
 	it('does not drop an old chat draft when another chat becomes active', () => {
-		vi.useFakeTimers();
 		const { composer, selectChat } = createComposer('old-chat');
 		composer.inputText = 'old chat text';
-		composer.queueDraftSave('old-chat', composer.inputText);
 
 		selectChat('new-chat');
 		composer.inputText = 'new chat text';
-		vi.runAllTimers();
-
-		expect(localStorage.getItem(chatDraftStorageKey('old-chat'))).toBe('old chat text');
 		expect(composer.inputText).toBe('new chat text');
-	});
-
-	it('flushes a pending draft immediately', () => {
-		vi.useFakeTimers();
-		const { composer, drafts } = createComposer('chat-2');
-		composer.inputText = 'draft body';
-		composer.queueDraftSave('chat-2', composer.inputText);
-
-		drafts.flushAll();
-
-		expect(localStorage.getItem(chatDraftStorageKey('chat-2'))).toBe('draft body');
+		selectChat('old-chat');
+		expect(composer.inputText).toBe('old chat text');
 	});
 
 	it('retains attachment drafts independently for each chat', () => {
@@ -141,13 +104,11 @@ describe('ComposerState', () => {
 
 		composer.inputText = 'alpha draft';
 		composer.addImages([alphaImage]);
-		composer.saveDraft('alpha');
 		selectChat('beta');
 		expect(composer.images).toEqual([]);
 
 		composer.inputText = 'beta draft';
 		composer.addImages([betaImage]);
-		composer.saveDraft('beta');
 		selectChat('alpha');
 
 		expect(composer.inputText).toBe('alpha draft');
@@ -160,7 +121,7 @@ describe('ComposerState', () => {
 		expect(composer.images).toEqual([]);
 	});
 
-	it('appends an editable block and persists it immediately without changing attachments', () => {
+	it('appends an editable block without changing attachments', () => {
 		const { composer } = createComposer('chat-1');
 		const image = new File(['a'], 'a.png', { type: 'image/png' });
 		composer.inputText = 'Existing draft\n';
@@ -172,7 +133,6 @@ describe('ComposerState', () => {
 		expect(composer.inputText).toBe('Existing draft\n\nGit review comment');
 		expect(composer.images).toEqual([image]);
 		expect(composer.draftAppendRequest).toEqual({ chatId: 'chat-1', requestId: 1 });
-		expect(localStorage.getItem(chatDraftStorageKey('chat-1'))).toBe(composer.inputText);
 	});
 
 	it('does not duplicate an unchanged block and allows an edited block to be appended again', () => {

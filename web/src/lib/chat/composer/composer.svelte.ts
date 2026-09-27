@@ -62,14 +62,6 @@ export class ComposerState {
 		return result;
 	}
 
-	saveDraft(chatId: string): void {
-		this.drafts.flushChat(chatId);
-	}
-
-	queueDraftSave(chatId: string, text: string, delayMs?: number): void {
-		this.drafts.queuePersist(chatId, text, delayMs);
-	}
-
 	restoreDraft(chatId: string): void {
 		this.drafts.load(chatId);
 	}

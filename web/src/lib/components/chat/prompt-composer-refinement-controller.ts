@@ -12,10 +12,7 @@ import * as m from '$lib/paraglide/messages.js';
 import type { PromptComposerUiState } from './prompt-composer-state.svelte.js';
 
 interface PromptComposerRefinementOptions {
-	composer: Pick<
-		ComposerState,
-		'inputText' | 'contentRevision' | 'queueDraftSave' | 'isDragActive'
-	>;
+	composer: Pick<ComposerState, 'inputText' | 'contentRevision' | 'isDragActive'>;
 	sessions: Pick<ChatSessionsStore, 'selectedChatId'>;
 	notifications: Pick<NotificationsStore, 'info' | 'error'>;
 	ui: PromptComposerUiState;
@@ -115,7 +112,6 @@ export class PromptComposerRefinementController {
 
 			const focus = this.#focusTarget(sourceChatId, refinedPrompt.length);
 			this.options.composer.inputText = refinedPrompt;
-			this.options.composer.queueDraftSave(sourceChatId, refinedPrompt);
 			this.options.notifications.info(m.prompt_refinement_refined());
 			await focus;
 		} catch (error) {
