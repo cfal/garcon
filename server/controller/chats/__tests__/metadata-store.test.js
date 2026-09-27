@@ -11,7 +11,7 @@ const mockRegistry = {
   onChatRemoved: mock(() => {}),
 };
 const mockAgents = {
-  getExistingTranscriptPreview: mock(() => Promise.resolve(null)),
+  getExistingTranscriptPreview: mock(() => null),
 };
 const mockCarryOver = {
   revision: () => 'carry-v1:0',
@@ -41,6 +41,7 @@ function makeRegistry(sessions = {}) {
     listAllChats: mock(() => sessions),
     listChatIds: mock(() => Object.keys(sessions)),
     hasChat: (chatId) => chatId in sessions,
+    getChat: (chatId) => sessions[chatId] ?? null,
     onChatRemoved: mock(() => {}),
   };
 }
@@ -241,7 +242,7 @@ describe('metadata-store', () => {
           source: 'live',
         },
       })), 'utf8');
-      const agents = { getExistingTranscriptPreview: mock(() => Promise.resolve(null)) };
+      const agents = { getExistingTranscriptPreview: mock(() => null) };
       const index = new MetadataIndex(
         makeRegistry({ 'persisted-chat': session() }),
         agents,
@@ -258,12 +259,12 @@ describe('metadata-store', () => {
 
     it('repairs missing metadata from existing transcript previews', async () => {
       const agents = {
-        getExistingTranscriptPreview: mock(() => Promise.resolve(previewResult({
+        getExistingTranscriptPreview: mock(() => previewResult({
           firstMessage: 'first repaired',
           lastMessage: 'last repaired',
           createdAt: '2026-01-01T00:00:00Z',
           lastActivity: '2026-01-02T00:00:00Z',
-        }))),
+        })),
       };
       const index = new MetadataIndex(
         makeRegistry({ 'missing-chat': session() }),
@@ -272,87 +273,96 @@ describe('metadata-store', () => {
       );
 
       await index.init();
-
+      expect(agents.getExistingTranscriptPreview).not.toHaveBeenCalled();
+      await index.repair();
       expect(agents.getExistingTranscriptPreview).toHaveBeenCalledTimes(1);
       expect(index.getChatMetadata('missing-chat').lastMessage).toBe('last repaired');
       expect(index.getChatMetadata('missing-chat').source).toBe('agent-preview');
     });
 
-    it('does not wait indefinitely for a stalled agent preview', async () => {
-      const stalledRegistry = makeRegistry({
-        'stalled-chat': session({ agentId: 'opencode', agentSessionId: 'opencode-session' }),
-      });
-      const stalledAgents = {
-        getExistingTranscriptPreview: mock(() => new Promise(() => {})),
-      };
-      const index = new MetadataIndex(stalledRegistry, stalledAgents, mockCarryOver, { previewTimeoutMs: 5 });
-
-      await index.init();
-
-      expect(stalledAgents.getExistingTranscriptPreview).toHaveBeenCalledTimes(1);
-      expect(index.getChatMetadata('stalled-chat')).toBeNull();
-    });
-
-    it('abandons stalled repairs at the overall deadline instead of stretching init', async () => {
-      const sessions = {};
-      for (let i = 0; i < 8; i += 1) {
-        sessions[`stall-${i}`] = session({ agentId: 'opencode', agentSessionId: `opencode-${i}` });
-      }
-      const stalledAgents = {
-        getExistingTranscriptPreview: mock(() => new Promise(() => {})),
-      };
-      const index = new MetadataIndex(makeRegistry(sessions), stalledAgents, mockCarryOver, {
-        previewTimeoutMs: 200,
-        repairDeadlineMs: 30,
-      });
-      const startedAt = Date.now();
-
-      await index.init();
-
-      // The deadline must beat the first per-preview timeout, proving init
-      // returned via the deadline rather than by draining the stalled pool.
-      expect(Date.now() - startedAt).toBeLessThan(200);
-      expect(index.getChatMetadata('stall-0')).toBeNull();
-
-      // Past the deadline the pool must not dequeue the remaining entries:
-      // once the in-flight previews time out, the two queued chats stay
-      // unrepaired instead of starting a second wave of preview work.
-      await new Promise((resolve) => setTimeout(resolve, 700));
-      expect(stalledAgents.getExistingTranscriptPreview).toHaveBeenCalledTimes(6);
-    });
-
-    it('keeps repairs completed inside the deadline when others stall', async () => {
-      const sessions = {};
-      for (let i = 0; i < 6; i += 1) {
-        sessions[`fast-${i}`] = session({ agentId: 'claude', agentSessionId: `claude-${i}` });
-      }
-      for (let i = 0; i < 2; i += 1) {
-        sessions[`stall-${i}`] = session({ agentId: 'opencode', agentSessionId: `opencode-${i}` });
-      }
-      const agents = {
-        getExistingTranscriptPreview: mock((entry) => (
-          entry.agentId === 'claude'
-            ? Promise.resolve(previewResult({
-              firstMessage: 'first repaired',
-              lastMessage: 'last repaired',
-              createdAt: '2026-01-01T00:00:00Z',
-              lastActivity: '2026-01-02T00:00:00Z',
-            }))
-            : new Promise(() => {})
-        )),
-      };
+    it('yields during synchronous repairs, stops at the elapsed budget, and preserves completed work', async () => {
+      const sessions = Object.fromEntries(Array.from({ length: 48 }, (_, i) => [`chat-${i}`, session()]));
+      const agents = { getExistingTranscriptPreview: mock(() => {
+        const end = performance.now() + 4;
+        while (performance.now() < end) { /* Simulates synchronous SQLite/JSON work. */ }
+        return previewResult({ firstMessage: 'repaired' });
+      }) };
+      const metadataPath = path.join(tmpDir, 'chat-metadata.json');
       const index = new MetadataIndex(makeRegistry(sessions), agents, mockCarryOver, {
-        previewTimeoutMs: 200,
-        repairDeadlineMs: 30,
+        metadataPath, repairDeadlineMs: 20,
       });
-
       await index.init();
+      expect(agents.getExistingTranscriptPreview).not.toHaveBeenCalled();
+      let timerFired = false;
+      const timer = setTimeout(() => { timerFired = true; }, 1);
+      const repair = index.repair();
+      expect(index.repair()).toBe(repair);
+      await repair;
+      clearTimeout(timer);
+      expect(timerFired).toBe(true);
+      expect(agents.getExistingTranscriptPreview.mock.calls.length).toBeGreaterThan(0);
+      expect(agents.getExistingTranscriptPreview.mock.calls.length).toBeLessThan(48);
+      await index.flush();
+      const saved = JSON.parse(await fs.readFile(metadataPath, 'utf8'));
+      expect(Object.keys(saved.chats)).toHaveLength(agents.getExistingTranscriptPreview.mock.calls.length);
+      expect(saved.chats['chat-0'].firstMessage).toBe('repaired');
+    });
 
-      for (let i = 0; i < 6; i += 1) {
-        expect(index.getChatMetadata(`fast-${i}`)?.lastMessage).toBe('last repaired');
+    it.each(['append', 'replace', 'delete', 'ownership'])('rechecks %s changes between background reads', async (change) => {
+      const sessions = { first: session(), second: session() };
+      const firstRead = Promise.withResolvers();
+      const transcripts = { getExistingTranscriptPreview: mock((_entry, id) => {
+        if (id === 'first') firstRead.resolve();
+        return previewResult({ firstMessage: 'repaired' });
+      }) };
+      const index = new MetadataIndex(makeRegistry(sessions), transcripts, mockCarryOver);
+      await index.init();
+      const repair = index.repair();
+      await firstRead.promise;
+      if (change === 'append') index.updateFromAppendedMessages('second', [{ type: 'user-message', content: 'live' }]);
+      if (change === 'replace') index.replaceFromTranscriptView('second', [{ type: 'user-message', content: 'replacement' }]);
+      if (change === 'delete') delete sessions.second;
+      if (change === 'ownership') sessions.second = session({ agentOwnershipEpoch: 'new-owner' });
+      await repair;
+      if (change === 'append') expect(index.getChatMetadata('second').firstMessage).toBe('live');
+      if (change === 'replace') expect(index.getChatMetadata('second').firstMessage).toBe('replacement');
+      if (change === 'delete') expect(index.getChatMetadata('second')).toBeNull();
+      if (change === 'ownership') {
+        expect(index.getChatMetadata('second').identity.agentOwnershipEpoch).toBe('new-owner');
+      } else {
+        expect(transcripts.getExistingTranscriptPreview).toHaveBeenCalledTimes(1);
       }
-      expect(index.getChatMetadata('stall-0')).toBeNull();
-      expect(index.getChatMetadata('stall-1')).toBeNull();
+    });
+
+    it('stops background reads on close without losing completed repairs', async () => {
+      const firstRead = Promise.withResolvers();
+      const transcripts = { getExistingTranscriptPreview: mock(() => {
+        firstRead.resolve();
+        return previewResult({ firstMessage: 'kept' });
+      }) };
+      const metadataPath = path.join(tmpDir, 'chat-metadata.json');
+      const index = new MetadataIndex(makeRegistry({ first: session(), second: session() }), transcripts, mockCarryOver, { metadataPath });
+      await index.init();
+      const repair = index.repair();
+      await firstRead.promise;
+      await index.close();
+      await repair;
+      await index.repair();
+      await index.flush();
+      expect(transcripts.getExistingTranscriptPreview).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(await fs.readFile(metadataPath, 'utf8')).chats.first.firstMessage).toBe('kept');
+    });
+
+    it('isolates a failed preview and continues with healthy chats', async () => {
+      const transcripts = { getExistingTranscriptPreview: (_entry, id) => {
+        if (id === 'bad') throw new Error('Synthetic ledger failure');
+        return previewResult({ firstMessage: 'healthy' });
+      } };
+      const index = new MetadataIndex(makeRegistry({ bad: session(), good: session() }), transcripts, mockCarryOver);
+      await index.init();
+      await index.repair();
+      expect(index.getChatMetadata('bad')).toBeNull();
+      expect(index.getChatMetadata('good').firstMessage).toBe('healthy');
     });
 
     it('keeps persisted metadata when agent preview repair would stall', async () => {
@@ -367,16 +377,17 @@ describe('metadata-store', () => {
         },
       })), 'utf8');
       const stalledAgents = {
-        getExistingTranscriptPreview: mock(() => new Promise(() => {})),
+        getExistingTranscriptPreview: mock(() => { throw new Error('Must not read'); }),
       };
       const index = new MetadataIndex(
         makeRegistry({ 'stalled-chat': session({ agentId: 'opencode', agentSessionId: 'opencode-session' }) }),
         stalledAgents,
         mockCarryOver,
-        { metadataPath, previewTimeoutMs: 5 },
+        { metadataPath },
       );
 
       await index.init();
+      await index.repair();
       await index.flush();
 
       expect(stalledAgents.getExistingTranscriptPreview).toHaveBeenCalledTimes(0);
@@ -399,12 +410,12 @@ describe('metadata-store', () => {
         },
       })), 'utf8');
       const agents = {
-        getExistingTranscriptPreview: mock(() => Promise.resolve(previewResult({
+        getExistingTranscriptPreview: mock(() => previewResult({
           firstMessage: 'fresh first',
           lastMessage: 'fresh last',
           createdAt: '2026-02-01T00:00:00Z',
           lastActivity: '2026-02-02T00:00:00Z',
-        }))),
+        })),
       };
       const index = new MetadataIndex(
         makeRegistry({ 'stale-chat': session({ agentOwnershipEpoch: 'owner-2' }) }),
@@ -414,7 +425,7 @@ describe('metadata-store', () => {
       );
 
       await index.init();
-
+      await index.repair();
       expect(agents.getExistingTranscriptPreview).toHaveBeenCalledTimes(1);
       expect(index.getChatMetadata('stale-chat').lastMessage).toBe('fresh last');
       expect(index.getChatMetadata('stale-chat').identity).toEqual({
@@ -438,7 +449,7 @@ describe('metadata-store', () => {
           },
         },
       })), 'utf8');
-      const agents = { getExistingTranscriptPreview: mock(() => Promise.resolve(null)) };
+      const agents = { getExistingTranscriptPreview: mock(() => null) };
       const index = new MetadataIndex(
         makeRegistry({ 'fresh-chat': session() }),
         agents,
@@ -447,7 +458,7 @@ describe('metadata-store', () => {
       );
 
       await index.init();
-
+      await index.repair();
       expect(agents.getExistingTranscriptPreview).not.toHaveBeenCalled();
       expect(index.getChatMetadata('fresh-chat').lastMessage).toBe('kept last');
     });
@@ -457,7 +468,7 @@ describe('metadata-store', () => {
         revision: () => 'carry-v5:seg',
         loadPage: mock(() => { throw new Error('Legacy carryover must not be opened'); }),
       };
-      const transcripts = { getExistingTranscriptPreview: mock(async () => previewResult({
+      const transcripts = { getExistingTranscriptPreview: mock(() => previewResult({
         firstMessage: 'carried first',
         lastMessage: 'current reply',
         createdAt: '2026-01-01T00:00:00Z',
@@ -474,6 +485,7 @@ describe('metadata-store', () => {
       );
 
       await index.init();
+      await index.repair();
 
       const meta = index.getChatMetadata('handoff-chat');
       expect(meta.firstMessage).toBe('carried first');
@@ -493,7 +505,7 @@ describe('metadata-store', () => {
           identity: { carryOverRevision: 'old', agentOwnershipEpoch: 'old' },
         },
       })));
-      const transcripts = { getExistingTranscriptPreview: mock(async () => null) };
+      const transcripts = { getExistingTranscriptPreview: mock(() => null) };
       const index = new MetadataIndex(
         makeRegistry({ 'stale-chat': session(), 'unadopted-chat': session() }),
         transcripts,
@@ -503,6 +515,7 @@ describe('metadata-store', () => {
       const warning = spyOn(console, 'warn').mockImplementation(() => {});
       try {
         await index.init();
+        await index.repair();
         await index.flush();
         expect(transcripts.getExistingTranscriptPreview).toHaveBeenCalledTimes(2);
         expect(index.getChatMetadata('unadopted-chat')).toBeNull();

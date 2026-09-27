@@ -97,8 +97,8 @@ describe('AgentRegistry session cache', () => {
       rows: [{ message: new AssistantMessage(AT, 'Stored conversation'), providerMeta: null }],
     });
     const before = ledger.currentRows(CHAT_ID);
-    await expect(registry.getExistingTranscriptPreview(chats.getChat(CHAT_ID), CHAT_ID))
-      .resolves.toEqual({ preview: {
+    expect(registry.getExistingTranscriptPreview(chats.getChat(CHAT_ID), CHAT_ID))
+      .toEqual({ preview: {
         firstMessage: 'Stored conversation', lastMessage: 'Stored conversation',
         createdAt: AT, lastActivity: AT,
       } });
@@ -110,8 +110,7 @@ describe('AgentRegistry session cache', () => {
     ledger.deleteChat(CHAT_ID);
     const adoption = { ensure: mock(() => { throw new Error('Unexpected adoption'); }) };
     const registry = createRegistry(adoption);
-    await expect(registry.getExistingTranscriptPreview(chats.getChat(CHAT_ID), CHAT_ID))
-      .resolves.toBeNull();
+    expect(registry.getExistingTranscriptPreview(chats.getChat(CHAT_ID), CHAT_ID)).toBeNull();
     expect(adoption.ensure).not.toHaveBeenCalled();
     await expect(stat(path.join(root, 'transcript-ledgers', CHAT_ID)))
       .rejects.toMatchObject({ code: 'ENOENT' });

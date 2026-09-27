@@ -620,6 +620,17 @@ export class TranscriptLedgerService {
       .map(messageForConversationRow);
   }
 
+  existingPreview(chatId: string): { first: ChatMessage; last: ChatMessage } | null {
+    const view = this.#store.existingCurrentView(chatId);
+    if (!view) return null;
+    const edges = this.#store.previewEdges(chatId, view.viewId);
+    const head = edges.head.filter(isConversationalLedgerRow).map(messageForConversationRow);
+    const tail = edges.tail.filter(isConversationalLedgerRow).map(messageForConversationRow);
+    const first = head.find((message) => message.type === 'user-message') ?? head[0];
+    const last = tail.at(-1);
+    return first && last ? { first, last } : null;
+  }
+
   resendCandidates(chatId: string): readonly ResendCandidate[] {
     return this.#store.resendCandidates(chatId).map((row) => ({
       ordinal: row.ordinal,

@@ -883,6 +883,7 @@ export async function startServer(): Promise<void> {
       primaryDelivery.close();
       agentCommands.shutdown();
       carryOverGarbageCollector.shutdown();
+      const metadataClosed = metadata.close();
       logger.info('server: shutting down...');
       const reservedChatIds = queue.beginShutdown();
       executors.quiesce();
@@ -928,6 +929,7 @@ export async function startServer(): Promise<void> {
         await executors.dispose();
         transcriptLedger.close();
         terminalManager.shutdown();
+        await metadataClosed;
         await metadata.flush();
         await chatRegistry.flush();
       } catch (err) {
@@ -957,6 +959,7 @@ export async function startServer(): Promise<void> {
     process.on('SIGINT', shutdown);
 
     logServerReady(logger, { bindAddress, port: actualPort, authDisabled });
+    void metadata.repair().catch((error) => logger.warn('Metadata repair failed:', errorMessage(error)));
   } catch (error) {
     await workspaceLease?.release().catch((releaseError) => {
       logger.warn('Failed to release workspace lease:', errorMessage(releaseError));

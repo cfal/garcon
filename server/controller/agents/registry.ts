@@ -387,16 +387,14 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     return this.#runtime.discoverSlashCommands(agentId, projectPath, executorId);
   }
 
-  // Startup previews never adopt legacy history or inspect native sessions.
-  async getExistingTranscriptPreview(session: AgentChatEntry | null, chatId: string): Promise<{
+  // Best-effort previews never adopt legacy history or inspect native sessions.
+  getExistingTranscriptPreview(session: AgentChatEntry | null, chatId: string): {
     preview: unknown;
-  } | null> {
+  } | null {
     if (!session?.agentId || !chatId) return null;
-    if (!this.#ledger.existingCurrentView(chatId)) return null;
-    const messages = this.#ledger.conversationMessages(chatId);
-    const first = messages.find((message) => message.type === 'user-message') ?? messages[0];
-    const last = messages.at(-1);
-    if (!first || !last) return null;
+    const preview = this.#ledger.existingPreview(chatId);
+    if (!preview) return null;
+    const { first, last } = preview;
     return {
       preview: {
         firstMessage: messageText(first),

@@ -9,19 +9,11 @@ import type { ChatRegistryEntry, IChatRegistry } from './store.js';
 import { createLogger } from '../../common/log.js';
 import { errorMessage, hasNodeErrorCode } from '../../common/errors.js';
 import { isRecord } from '../../../common/json.js';
-import { mapWithConcurrencyResult } from '../../common/concurrency.js';
 
 const logger = createLogger('chats:metadata-store');
 
-const DEFAULT_PREVIEW_TIMEOUT_MS = 5_000;
 const DEFAULT_SAVE_DELAY_MS = 100;
 const METADATA_VERSION = 1;
-// Repairs run through a bounded pool to limit startup work on large registries.
-const METADATA_REPAIR_CONCURRENCY = 6;
-// The pool bounds concurrency, not total time: ceil(N/6) stalled previews
-// would stretch init() - which runs before the listener starts - into
-// minutes. An overall deadline abandons the rest; prune passes and live
-// events backfill anything left unrepaired.
 const DEFAULT_REPAIR_DEADLINE_MS = 30_000;
 
 type MetadataSource = 'live' | 'agent-preview' | 'startup';
@@ -52,16 +44,15 @@ interface AgentPreviewMetadata {
 }
 
 interface MetadataIndexOptions {
-  previewTimeoutMs?: number;
   metadataPath?: string | null;
   saveDelayMs?: number;
   repairDeadlineMs?: number;
 }
 
 interface MetadataTranscriptSource {
-  getExistingTranscriptPreview(session: ChatRegistryEntry, chatId: string): Promise<{
+  getExistingTranscriptPreview(session: ChatRegistryEntry, chatId: string): {
     preview: unknown;
-  } | null>;
+  } | null;
 }
 
 interface MetadataCarryOverSource {
@@ -74,10 +65,11 @@ export class MetadataIndex {
   #transcripts: MetadataTranscriptSource;
   #carryOver: MetadataCarryOverSource;
   #initialized = false;
-  #previewTimeoutMs: number;
   #metadataPath: string | null;
   #saveDelayMs: number;
   #repairDeadlineMs: number;
+  #repairPromise: Promise<void> | null = null;
+  #closed = false;
   #pendingSaveTimer: ReturnType<typeof setTimeout> | null = null;
   #savePromise: Promise<void> = Promise.resolve();
 
@@ -90,7 +82,6 @@ export class MetadataIndex {
     this.#registry = registry;
     this.#transcripts = transcripts;
     this.#carryOver = carryOver;
-    this.#previewTimeoutMs = options.previewTimeoutMs ?? DEFAULT_PREVIEW_TIMEOUT_MS;
     this.#metadataPath = options.metadataPath ?? null;
     this.#saveDelayMs = options.saveDelayMs ?? DEFAULT_SAVE_DELAY_MS;
     this.#repairDeadlineMs = options.repairDeadlineMs ?? DEFAULT_REPAIR_DEADLINE_MS;
@@ -107,9 +98,20 @@ export class MetadataIndex {
 
     this.#metadataByChatId = await this.#loadPersistedMetadata();
     this.#pruneMissingRegistryEntries();
-    await this.#repairFromTranscriptPreviews();
-    this.#pruneMissingRegistryEntries();
     this.#scheduleSave();
+  }
+
+  repair(): Promise<void> {
+    if (this.#closed) return Promise.resolve();
+    this.#repairPromise ??= this.#repairFromTranscriptPreviews().finally(() => {
+      this.#repairPromise = null;
+    });
+    return this.#repairPromise;
+  }
+
+  async close(): Promise<void> {
+    this.#closed = true;
+    await this.#repairPromise;
   }
 
   getChatMetadata(chatId: string): ChatMetadata | null {
@@ -198,61 +200,24 @@ export class MetadataIndex {
   }
 
   async #repairFromTranscriptPreviews(): Promise<void> {
-    const sessions = this.#registry.listAllChats();
-    const repairEntries = Object.entries(sessions).filter(([chatId, session]) => {
+    const started = performance.now();
+    for (const chatId of this.#registry.listChatIds()) {
+      // Timers cannot interrupt synchronous SQLite/JSON work. Yield between bounded reads.
+      await Bun.sleep(0);
+      if (this.#closed || performance.now() - started >= this.#repairDeadlineMs) break;
+      const session = this.#registry.getChat(chatId);
+      if (!session) continue;
       const existing = this.#metadataByChatId.get(String(chatId));
-      return !existing || this.#isCheaplyStale(existing, session);
-    });
-
-    // Workers never reject: each returns an ok/error union so the bounded pool
-    // cannot be torn down by one failing preview, and per-entry timeouts start
-    // when the entry actually begins processing rather than at fan-out time.
-    let deadlineHit = false;
-    const repaired = new Map<string, ChatMetadata>();
-    const repairs = mapWithConcurrencyResult(
-      repairEntries,
-      METADATA_REPAIR_CONCURRENCY,
-      async ([chatId, session]): Promise<
-        { ok: true } | { ok: false; error: unknown }
-      > => {
-        if (deadlineHit) return { ok: false, error: new Error('metadata repair deadline exceeded') };
-        try {
-          const metadata = await this.#buildMetadataFromPreviewWithTimeout(chatId, session);
-          // Recorded at completion so repairs finished inside the budget
-          // survive a deadline win instead of being rebuilt every startup.
-          if (metadata) repaired.set(String(chatId), metadata);
-          return { ok: true };
-        } catch (error) {
-          return { ok: false, error };
+      if (existing && !this.#isCheaplyStale(existing, session)) continue;
+      try {
+        // Read and publish synchronously so no live update, deletion, or view replacement can interleave.
+        const metadata = this.#buildMetadataFromPreview(chatId, session);
+        if (metadata) {
+          this.#metadataByChatId.set(chatId, metadata);
+          this.#scheduleSave();
         }
-      },
-    );
-
-    // The race does not cancel the pool; the flag only stops queued workers
-    // from starting new preview work. Successes are applied below on either
-    // outcome, so a deadline abandons only chats whose previews never finished.
-    const deadline = new Promise<'deadline'>((resolve) => {
-      setTimeout(() => resolve('deadline'), this.#repairDeadlineMs).unref?.();
-    });
-    const outcome = await Promise.race([repairs, deadline]);
-    for (const [chatId, metadata] of repaired) {
-      this.#metadataByChatId.set(chatId, metadata);
-    }
-    if (outcome === 'deadline') {
-      deadlineHit = true;
-      logger.warn(
-        `metadata: repair deadline of ${this.#repairDeadlineMs}ms exceeded; ` +
-          `${repairEntries.length - repaired.size} of ${repairEntries.length} chats left for live events or the next startup`,
-      );
-      return;
-    }
-    const results = outcome;
-
-    for (let i = 0; i < results.length; i++) {
-      const [chatId] = repairEntries[i];
-      const result = results[i];
-      if (!result.ok) {
-        logger.warn(`metadata: failed to build metadata for ${chatId}:`, errorMessage(result.error));
+      } catch (error) {
+        logger.warn(`metadata: failed to build metadata for ${chatId}:`, errorMessage(error));
       }
     }
   }
@@ -271,19 +236,8 @@ export class MetadataIndex {
     return false;
   }
 
-  async #buildMetadataFromPreviewWithTimeout(
-    chatId: string,
-    session: ChatRegistryEntry,
-  ): Promise<ChatMetadata | null> {
-    return withTimeout(
-      this.#buildMetadataFromPreview(chatId, session),
-      this.#previewTimeoutMs,
-      () => new Error(`Timed out building preview for chat ${chatId} after ${this.#previewTimeoutMs}ms`),
-    );
-  }
-
-  async #buildMetadataFromPreview(chatId: string, session: ChatRegistryEntry): Promise<ChatMetadata | null> {
-    const result = await this.#transcripts.getExistingTranscriptPreview(session, chatId);
+  #buildMetadataFromPreview(chatId: string, session: ChatRegistryEntry): ChatMetadata | null {
+    const result = this.#transcripts.getExistingTranscriptPreview(session, chatId);
     if (!result) return null;
     const preview = result && isAgentPreviewMetadata(result.preview) ? result.preview : null;
     const refs = session.carryOverSegments ?? [];
@@ -398,17 +352,6 @@ function normalizePersistedMetadata(chatId: string, value: unknown): ChatMetadat
 
 function isMetadataSource(value: unknown): value is MetadataSource {
   return value === 'live' || value === 'agent-preview' || value === 'startup';
-}
-
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, createTimeoutError: () => Error): Promise<T> {
-  let timeoutId: ReturnType<typeof setTimeout>;
-  const timeout = new Promise((_, reject) => {
-    timeoutId = setTimeout(() => reject(createTimeoutError()), timeoutMs);
-  });
-  return Promise.race([
-    promise.finally(() => clearTimeout(timeoutId)),
-    timeout,
-  ]) as Promise<T>;
 }
 
 function extractPreviewText(msg: ChatMessage | null | undefined): string {

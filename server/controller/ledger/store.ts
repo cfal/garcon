@@ -82,6 +82,8 @@ import { matchingInputSubmission, readSubmission } from './input-submission.js';
 import { findTicketOutcomeOrdinal } from './ticket-outcome-query.js';
 
 const DEFAULT_CONNECTION_CACHE_SIZE = 10;
+const PREVIEW_EDGE_ROWS = 32;
+const PREVIEW_ROW_BYTES = 64 * 1024;
 const CHAT_DIRECTORY_PATTERN = /^[A-Za-z0-9_-]+$/;
 const logger = createLogger('ledger:store');
 
@@ -476,6 +478,29 @@ export class TranscriptLedgerStore {
         SELECT view_id, ordinal, kind, at, client_message_id, payload_json
         FROM transcript_rows WHERE view_id = ? ORDER BY ordinal
       `).all(current.viewId).map(decodeStoredLedgerRow);
+    });
+  }
+
+  // Bounds both the indexed ordinal ranges and JSON decoded for best-effort previews.
+  previewEdges(chatId: string, viewId: TranscriptViewId): { head: LedgerRow[]; tail: LedgerRow[] } {
+    return this.#read(chatId, (entry) => {
+      this.#assertCurrent(entry, viewId);
+      const query = entry.db.query<Omit<StoredLedgerRow, 'payload_json'> & { payload_json: string | null }, [number, string, number, number]>(`
+        SELECT view_id, ordinal, kind, at, client_message_id,
+          CASE WHEN octet_length(payload_json) <= ? THEN payload_json END AS payload_json
+        FROM transcript_rows
+        WHERE view_id = ? AND ordinal BETWEEN ? AND ?
+          AND kind IN ('user-input', 'provider-row')
+        ORDER BY ordinal
+      `);
+      const edge = (first: number, last: number): LedgerRow[] => query
+        .all(PREVIEW_ROW_BYTES, viewId, first, last)
+        .flatMap((row) => row.payload_json === null ? [] : [decodeStoredLedgerRow({ ...row, payload_json: row.payload_json })]);
+      const last = entry.nextOrdinal - 1;
+      return {
+        head: edge(1, PREVIEW_EDGE_ROWS),
+        tail: edge(Math.max(1, last - PREVIEW_EDGE_ROWS + 1), last),
+      };
     });
   }
 
