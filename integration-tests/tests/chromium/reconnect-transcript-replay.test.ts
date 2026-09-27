@@ -335,6 +335,41 @@ function assertNoUnexpectedReconnectBrowserErrors(errors: readonly string[]): vo
   ))).toEqual([]);
 }
 
+// Keyboard paging starts a native smooth scroll that the later programmatic jump does not
+// cancel, so a reading anchor captured before it ends moves by the remaining distance.
+async function waitForSettledReadingPosition(page: Page): Promise<void> {
+  await page.locator(FEED_SELECTOR).evaluate(async (feedElement, { itemSelector, sizerSelector }) => {
+    const feed = feedElement as HTMLElement;
+    const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    const readingPosition = () => {
+      const viewport = feed.getBoundingClientRect();
+      const anchor = [...feed.querySelectorAll<HTMLElement>(itemSelector)].find((candidate) => {
+        const rect = candidate.getBoundingClientRect();
+        return rect.bottom > viewport.top + 1
+          && rect.top < viewport.bottom - 1
+          && candidate.querySelector('[data-chat-row-id]');
+      });
+      return JSON.stringify([
+        feed.scrollTop,
+        document.querySelector<HTMLElement>(sizerSelector)?.dataset.chatVirtualModelCount ?? null,
+        anchor?.dataset.chatVirtualItem ?? null,
+        anchor ? anchor.getBoundingClientRect().top - viewport.top : null,
+      ]);
+    };
+    let previous = '';
+    let stableFrames = 0;
+    for (let attempt = 0; attempt < 240; attempt += 1) {
+      await frame();
+      const current = readingPosition();
+      const idle = feed.getAttribute('aria-busy') === 'false';
+      stableFrames = idle && current === previous ? stableFrames + 1 : 0;
+      previous = current;
+      if (stableFrames >= 12) return;
+    }
+    throw new Error('The detached reading position did not settle.');
+  }, { itemSelector: ITEM_SELECTOR, sizerSelector: SIZER_SELECTOR });
+}
+
 async function revealEarlierRows(page: Page): Promise<{
   expandedModelCount: number;
   initialModelCount: number;
@@ -383,6 +418,7 @@ async function revealEarlierRows(page: Page): Promise<{
       document.querySelector<HTMLElement>(selector)?.dataset.chatPinnedToBottom === 'false',
     FEED_SELECTOR,
   );
+  await waitForSettledReadingPosition(page);
   const expandedModelCount = await page.locator(SIZER_SELECTOR).evaluate(
     (sizer) => Number((sizer as HTMLElement).dataset.chatVirtualModelCount ?? 0),
   );
