@@ -56,6 +56,26 @@ it('skips oversized payloads, provider errors, and presentation-only rows', () =
   });
 });
 
+it('falls back to the first conversational row when the head has no user input', () => {
+  store.initializeCurrentView('chat', { contentStartOrdinal: 1, rows: [
+    provider(new ErrorMessage(at, 'not conversational')),
+    provider(new AssistantMessage(at, 'first answer')),
+    provider(new AssistantMessage(at, 'last answer')),
+    { kind: 'notice', at, message: 'not a preview', detail: {} },
+  ] });
+  expect(ledger.existingPreview('chat')).toMatchObject({
+    first: { content: 'first answer' }, last: { content: 'last answer' },
+  });
+});
+
+it('leaves previews absent when the tail has no conversational row', () => {
+  const tail = Array.from({ length: 32 }, () => ({ kind: 'notice', at, message: 'notice', detail: {} }));
+  store.initializeCurrentView('chat', { contentStartOrdinal: 1, rows: [
+    provider(new UserMessage(at, 'first input')), ...tail,
+  ] });
+  expect(ledger.existingPreview('chat')).toBeNull();
+});
+
 it.each([
   ['user-input', false], ['user-input', true], ['provider-row', false], ['provider-row', true],
 ])('defers repair past an oversized %s, later input=%p', (kind, laterInput) => {
