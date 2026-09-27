@@ -524,19 +524,25 @@ describe('server event wiring', () => {
     }
   });
 
-  it.each(['pre-run', 'terminal-during-drain', 'terminal-after-drain'])('notifies on %s failure without dispatching a paused queue tail', async (phase) => {
+  it.each(['pre-run', 'offline-pre-run', 'terminal-during-drain', 'terminal-after-drain'])('notifies on %s failure without dispatching a paused queue tail', async (phase) => {
     const directory = await mkdtemp(path.join(tmpdir(), 'paused-attention-wiring-'));
     const delivered = Promise.withResolvers();
     const send = mock(async () => { delivered.resolve(); return true; });
     const fail = (runId) => fixture.sink.publish({ type: 'run-ended', runId, outcome: 'failed',
       error: { code: 'PROVIDER_FAILURE', message: 'Synthetic source unavailable' } });
     const started = mock((request) => { if (phase === 'terminal-during-drain') fail(request.runId); });
-    const fixture = createExecutionFixture(directory, phase === 'pre-run'
-      ? async () => { throw new Error('Synthetic source unavailable'); }
+    const preRun = phase.endsWith('pre-run');
+    let available = true;
+    const fixture = createExecutionFixture(directory, preRun
+      ? async () => {
+        if (phase === 'offline-pre-run') available = false;
+        throw new Error('Synthetic source unavailable');
+      }
       : undefined, undefined, {
       inputTranscript: (agents) => agents,
       beforeWiring: (ports) => observeTelegram(ports, directory, send),
       onStart: started,
+      coordinator: { canDispatch: () => available },
     });
     const { execution, transcripts } = fixture;
     try {
@@ -555,7 +561,50 @@ describe('server event wiring', () => {
       expect(send.mock.calls[0][1]).toContain('Failed: Synthetic source unavailable');
       await execution.triggerDrain('chat-1');
       expect(send).toHaveBeenCalledTimes(1);
-      expect(started).toHaveBeenCalledTimes(phase === 'pre-run' ? 0 : 1);
+      expect(started).toHaveBeenCalledTimes(preRun ? 0 : 1);
+    } finally {
+      await execution.waitForDispatches();
+      await fixture.wiring.waitForIdle();
+      transcripts.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('notifies on direct failure while an unpaused follow-up waits for its offline executor', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'offline-tail-attention-wiring-'));
+    const send = mock(async () => true);
+    let available = true;
+    let adoptionCalls = 0;
+    const fixture = createExecutionFixture(directory, async () => {
+      if (++adoptionCalls === 1) return fixture.transcripts.currentView('chat-1');
+      await fixture.execution.createChatQueueEntry('chat-1', 'Waiting follow-up');
+      available = false;
+      throw new Error('Executor unavailable');
+    }, undefined, {
+      inputTranscript: (agents) => agents,
+      beforeWiring: (ports) => observeTelegram(ports, directory, send),
+      coordinator: { canDispatch: () => available },
+    });
+    const { execution, ledger, transcripts } = fixture;
+    const startedTurn = { ...turn, clientMessageId: 'input-1' };
+    try {
+      const accepted = await ledger.accept({ ...startedTurn, chatId: 'chat-1', payload: {} });
+      await execution.scheduleDirectInput({
+        command: { key: accepted.record.key, ...startedTurn, chatId: 'chat-1' },
+        content: 'Failed input', options: startedTurn, settlement: new ChatCommandSettlement(ledger),
+      });
+      await execution.waitForDispatches();
+      await fixture.wiring.waitForIdle();
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(send.mock.calls[0][1]).toContain('Failed: Executor unavailable');
+      const control = await execution.readChatExecutionControl('chat-1');
+      expect(control.pause).toBeNull();
+      expect(control.entries.map((entry) => entry.content)).toEqual(['Waiting follow-up']);
+      await execution.triggerDrain('chat-1');
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(adoptionCalls).toBe(2);
+      expect(fixture.sink).toBeUndefined();
+      expect(execution.ownsExecution('chat-1')).toBe(false);
     } finally {
       await execution.waitForDispatches();
       await fixture.wiring.waitForIdle();

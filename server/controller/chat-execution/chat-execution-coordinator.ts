@@ -106,6 +106,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
   #turnRunner: AgentTurnRunnerPort;
   #getDrainOptions: QueueDrainOptionsResolver;
   #chatExists: ChatExistsResolver;
+  #canDispatch: (chatId: string) => boolean;
   #projectAdmission: ProjectAdmissionPort;
   #queueDrainer: QueueDrainer;
   #controlOperations: ChatExecutionControlOperations;
@@ -141,6 +142,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     this.#turnRunner = turnRunner;
     this.#getDrainOptions = getDrainOptions;
     this.#chatExists = chatExists;
+    this.#canDispatch = options.canDispatch ?? (() => true);
     this.#projectAdmission = options.projectAdmission;
     this.#acceptedInputTranscript = new AcceptedInputTranscript(inputTranscript);
     this.#controlOperations = new ChatExecutionControlOperations(controls, {
@@ -217,7 +219,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
         selectionAdmissionLock.runExclusive(`chat:${chatId}`, operation),
       projectAdmission: options.projectAdmission,
       callbacks: {
-        canDispatch: options.canDispatch ?? (() => true),
+        canDispatch: this.#canDispatch,
         isShuttingDown: () => this.#shuttingDown,
         registerQueued: (chatId, content, options) => (
           this.#acceptedInputTranscript.registerQueued(chatId, content, options)
@@ -321,7 +323,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
   }
   // Resumes queued work after every turn, including initial turns that bypass
   // runReservedTurn's post-turn drain, unless a drain already owns the chat.
-  // Paused input waits for explicit resume and does not block attention.
+  // Input blocked by pause or executor readiness does not block attention.
   async checkChatIdle(chatId: string): Promise<void> {
     if (this.#shuttingDown) return;
     if (this.#ownership.isDraining(chatId)) return;
@@ -334,7 +336,8 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       }
       return;
     }
-    const hasQueued = !queue.pause && (
+    const dispatchBlocked = Boolean(queue.pause) || !this.#canDispatch(chatId);
+    const hasQueued = !dispatchBlocked && (
       queue.controlEntries.length > 0
       || queue.entries.some((entry) => entry.status === 'queued')
     );
@@ -342,7 +345,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       await this.triggerDrain(chatId);
       return;
     }
-    if (queue.pause || !hasPendingTurnInput(queue)) {
+    if (dispatchBlocked || !hasPendingTurnInput(queue)) {
       this.#ownership.consumeDrainRequest(chatId);
       this.emit('chat-idle', chatId);
     }
