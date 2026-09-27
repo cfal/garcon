@@ -6002,6 +6002,9 @@ describe('ChatCommandService', () => {
     const realNextPath = await fs.realpath(nextPath);
 
     const result = await service.updateProjectPath({
+      expectedExecutorId: "local",
+      expectedAgentOwnershipEpoch: "epoch-1",
+      expectedProjectPath: "/repo",
       chatId: SOURCE_CHAT_ID,
       projectPath: nextPath,
     });
@@ -6035,6 +6038,34 @@ describe('ChatCommandService', () => {
     expect(sessions.get(SOURCE_CHAT_ID).projectPath).toBe(realNextPath);
   });
 
+  it.each([
+    { executorId: '22222222-2222-4222-8222-222222222222' },
+    { agentOwnershipEpoch: 'next-owner' },
+    { projectPath: '/another-project' },
+  ])('checks a captured folder binding under the chat lock before machine IO: %j', async (change) => {
+    const lock = new KeyedPromiseLock();
+    const entered = deferred();
+    const release = deferred();
+    const inspectProject = mock(async (projectPath) => ({ kind: 'available', effectiveProjectKey: projectPath }));
+    const { service, sessions, agents, chats } = makeService({ chatMutationLock: lock, inspectProject });
+    const mutating = lock.runExclusive(`chat:${SOURCE_CHAT_ID}`, async () => {
+      entered.resolve();
+      await release.promise;
+      Object.assign(sessions.get(SOURCE_CHAT_ID), change);
+    });
+    await entered.promise;
+    const changingPath = service.updateProjectPath({
+      chatId: SOURCE_CHAT_ID, projectPath: '/valid-on-either-host',
+      expectedExecutorId: 'local', expectedAgentOwnershipEpoch: 'epoch-1', expectedProjectPath: '/repo',
+    });
+    release.resolve();
+    await mutating;
+    await expect(changingPath).rejects.toMatchObject({ code: 'STALE_CHAT_OWNERSHIP', status: 409 });
+    expect(inspectProject).not.toHaveBeenCalled();
+    expect(agents.prepareProjectPathUpdate).not.toHaveBeenCalled();
+    expect(chats.updateProjectPath).not.toHaveBeenCalled();
+  });
+
   it('reports an unready executor before project path update support', async () => {
     const { service, chats, agents } = makeService({
       agents: {
@@ -6045,6 +6076,9 @@ describe('ChatCommandService', () => {
     });
 
     await expect(service.updateProjectPath({
+      expectedExecutorId: "local",
+      expectedAgentOwnershipEpoch: "epoch-1",
+      expectedProjectPath: "/repo",
       chatId: SOURCE_CHAT_ID,
       projectPath: projectBaseDir,
     })).rejects.toMatchObject({ code: 'EXECUTOR_UNAVAILABLE', status: 503 });
@@ -6059,6 +6093,9 @@ describe('ChatCommandService', () => {
 
     for (const projectPath of projectPaths) {
       await expect(service.updateProjectPath({
+        expectedExecutorId: "local",
+        expectedAgentOwnershipEpoch: "epoch-1",
+        expectedProjectPath: "/repo",
         chatId: SOURCE_CHAT_ID,
         projectPath,
       })).rejects.toMatchObject({ code: 'PROJECT_PATH_NOT_FOUND', status: 404 });
@@ -6097,6 +6134,9 @@ describe('ChatCommandService', () => {
     await fs.mkdir(nextPath, { recursive: true });
 
     await expect(fixture.service.updateProjectPath({
+      expectedExecutorId: "local",
+      expectedAgentOwnershipEpoch: "epoch-1",
+      expectedProjectPath: "/repo",
       chatId: SOURCE_CHAT_ID,
       projectPath: nextPath,
     })).resolves.toMatchObject({ success: true });
@@ -6128,6 +6168,9 @@ describe('ChatCommandService', () => {
     await fs.mkdir(nextPath, { recursive: true });
 
     await expect(fixture.service.updateProjectPath({
+      expectedExecutorId: "local",
+      expectedAgentOwnershipEpoch: "epoch-1",
+      expectedProjectPath: "/repo",
       chatId: SOURCE_CHAT_ID,
       projectPath: nextPath,
     })).resolves.toMatchObject({ success: true });
@@ -6160,6 +6203,9 @@ describe('ChatCommandService', () => {
     await fs.mkdir(nextPath, { recursive: true });
 
     await expect(fixture.service.updateProjectPath({
+      expectedExecutorId: "local",
+      expectedAgentOwnershipEpoch: "epoch-1",
+      expectedProjectPath: "/repo",
       chatId: SOURCE_CHAT_ID,
       projectPath: nextPath,
     })).rejects.toThrow('disk full');
@@ -6184,6 +6230,9 @@ describe('ChatCommandService', () => {
     await fs.mkdir(nextPath, { recursive: true });
 
     await expect(fixture.service.updateProjectPath({
+      expectedExecutorId: "local",
+      expectedAgentOwnershipEpoch: "epoch-1",
+      expectedProjectPath: "/repo",
       chatId: SOURCE_CHAT_ID,
       projectPath: nextPath,
     })).rejects.toThrow('disk full');
@@ -6209,6 +6258,9 @@ describe('ChatCommandService', () => {
     await fs.mkdir(nextPath, { recursive: true });
 
     await expect(fixture.service.updateProjectPath({
+      expectedExecutorId: "local",
+      expectedAgentOwnershipEpoch: "epoch-1",
+      expectedProjectPath: "/repo",
       chatId: SOURCE_CHAT_ID,
       projectPath: nextPath,
     })).rejects.toMatchObject({
@@ -6237,6 +6289,9 @@ describe('ChatCommandService', () => {
     await fs.mkdir(nextPath, { recursive: true });
 
     await expect(fixture.service.updateProjectPath({
+      expectedExecutorId: "local",
+      expectedAgentOwnershipEpoch: "epoch-1",
+      expectedProjectPath: "/repo",
       chatId: SOURCE_CHAT_ID,
       projectPath: nextPath,
     })).rejects.toMatchObject({
@@ -6263,6 +6318,9 @@ describe('ChatCommandService', () => {
     await fs.mkdir(nextPath, { recursive: true });
 
     await expect(fixture.service.updateProjectPath({
+      expectedExecutorId: "local",
+      expectedAgentOwnershipEpoch: "epoch-1",
+      expectedProjectPath: "/repo",
       chatId: SOURCE_CHAT_ID,
       projectPath: nextPath,
     })).resolves.toMatchObject({ success: true });
@@ -6285,6 +6343,9 @@ describe('ChatCommandService', () => {
     await fs.mkdir(nextPath, { recursive: true });
 
     await expect(fixture.service.updateProjectPath({
+      expectedExecutorId: "local",
+      expectedAgentOwnershipEpoch: "epoch-1",
+      expectedProjectPath: "/repo",
       chatId: SOURCE_CHAT_ID,
       projectPath: nextPath,
     })).rejects.toMatchObject({
@@ -6312,6 +6373,9 @@ describe('ChatCommandService', () => {
     await fs.mkdir(nextPath, { recursive: true });
 
     await expect(fixture.service.updateProjectPath({
+      expectedExecutorId: "local",
+      expectedAgentOwnershipEpoch: "epoch-1",
+      expectedProjectPath: "/repo",
       chatId: SOURCE_CHAT_ID,
       projectPath: nextPath,
     })).rejects.toMatchObject({
@@ -6339,6 +6403,9 @@ describe('ChatCommandService', () => {
     await fs.mkdir(nextPath, { recursive: true });
 
     await expect(fixture.service.updateProjectPath({
+      expectedExecutorId: "local",
+      expectedAgentOwnershipEpoch: "epoch-1",
+      expectedProjectPath: "/repo",
       chatId: SOURCE_CHAT_ID,
       projectPath: nextPath,
     })).rejects.toMatchObject({
@@ -6361,6 +6428,9 @@ describe('ChatCommandService', () => {
     await fs.mkdir(nextPath, { recursive: true });
 
     await expect(fixture.service.updateProjectPath({
+      expectedExecutorId: "local",
+      expectedAgentOwnershipEpoch: "epoch-1",
+      expectedProjectPath: "/repo",
       chatId: SOURCE_CHAT_ID,
       projectPath: nextPath,
     })).resolves.toMatchObject({ success: true });
@@ -6377,6 +6447,9 @@ describe('ChatCommandService', () => {
 
     await expect(
       service.updateProjectPath({
+        expectedExecutorId: "local",
+        expectedAgentOwnershipEpoch: "epoch-1",
+        expectedProjectPath: "/repo",
         chatId: SOURCE_CHAT_ID,
         projectPath: nextPath,
       }),
@@ -6394,6 +6467,9 @@ describe('ChatCommandService', () => {
 
     await expect(
       service.updateProjectPath({
+        expectedExecutorId: "local",
+        expectedAgentOwnershipEpoch: "epoch-1",
+        expectedProjectPath: "/repo",
         chatId: SOURCE_CHAT_ID,
         projectPath: nextPath,
       }),
@@ -6411,6 +6487,9 @@ describe('ChatCommandService', () => {
     ]));
 
     await expect(service.updateProjectPath({
+      expectedExecutorId: "local",
+      expectedAgentOwnershipEpoch: "epoch-1",
+      expectedProjectPath: "/repo",
       chatId: SOURCE_CHAT_ID,
       projectPath: nextPath,
     })).resolves.toMatchObject({ success: true });
@@ -6428,6 +6507,9 @@ describe('ChatCommandService', () => {
     ]));
 
     await expect(service.updateProjectPath({
+      expectedExecutorId: "local",
+      expectedAgentOwnershipEpoch: "epoch-1",
+      expectedProjectPath: "/repo",
       chatId: SOURCE_CHAT_ID,
       projectPath: nextPath,
     })).resolves.toMatchObject({ success: true });
@@ -6445,6 +6527,9 @@ describe('ChatCommandService', () => {
     }));
 
     await expect(service.updateProjectPath({
+      expectedExecutorId: "local",
+      expectedAgentOwnershipEpoch: "epoch-1",
+      expectedProjectPath: "/repo",
       chatId: SOURCE_CHAT_ID,
       projectPath: nextPath,
     })).resolves.toMatchObject({ success: true });
@@ -6487,6 +6572,9 @@ describe('ChatCommandService', () => {
     await fs.mkdir(nextPath, { recursive: true });
 
     await expect(service.updateProjectPath({
+      expectedExecutorId: "local",
+      expectedAgentOwnershipEpoch: "epoch-1",
+      expectedProjectPath: "/repo",
       chatId: SOURCE_CHAT_ID,
       projectPath: nextPath,
     })).rejects.toThrow('publication failed');
@@ -6506,6 +6594,9 @@ describe('ChatCommandService', () => {
     });
 
     await expect(service.updateProjectPath({
+      expectedExecutorId: "local",
+      expectedAgentOwnershipEpoch: "epoch-1",
+      expectedProjectPath: projectBaseDir,
       chatId: SOURCE_CHAT_ID,
       projectPath: projectBaseDir,
     })).resolves.toMatchObject({
@@ -6533,6 +6624,9 @@ describe('ChatCommandService', () => {
 
     try {
       await expect(service.updateProjectPath({
+        expectedExecutorId: "local",
+        expectedAgentOwnershipEpoch: "epoch-1",
+        expectedProjectPath: "/repo",
         chatId: SOURCE_CHAT_ID,
         projectPath: nextPath,
       })).rejects.toMatchObject({
@@ -6546,6 +6640,9 @@ describe('ChatCommandService', () => {
     }
 
     await expect(service.updateProjectPath({
+      expectedExecutorId: "local",
+      expectedAgentOwnershipEpoch: "epoch-1",
+      expectedProjectPath: "/repo",
       chatId: SOURCE_CHAT_ID,
       projectPath: nextPath,
     })).resolves.toMatchObject({ success: true });
@@ -6576,6 +6673,9 @@ describe('ChatCommandService', () => {
       expect(queueService.ownsExecution(SOURCE_CHAT_ID)).toBe(true);
 
       await expect(service.updateProjectPath({
+        expectedExecutorId: "local",
+        expectedAgentOwnershipEpoch: "epoch-1",
+        expectedProjectPath: "/repo",
         chatId: SOURCE_CHAT_ID,
         projectPath: nextPath,
       })).rejects.toMatchObject({
@@ -6628,6 +6728,9 @@ describe('ChatCommandService', () => {
       expect(queueService.ownsExecution(SOURCE_CHAT_ID)).toBe(true);
 
       pathUpdate = service.updateProjectPath({
+        expectedExecutorId: "local",
+        expectedAgentOwnershipEpoch: "epoch-1",
+        expectedProjectPath: "/repo",
         chatId: SOURCE_CHAT_ID,
         projectPath: nextPath,
       });
@@ -6643,6 +6746,9 @@ describe('ChatCommandService', () => {
       queueService.onAgentTurnTerminal(SOURCE_CHAT_ID, compactTurn);
       expect(queueService.ownsExecution(SOURCE_CHAT_ID)).toBe(false);
       await expect(service.updateProjectPath({
+        expectedExecutorId: "local",
+        expectedAgentOwnershipEpoch: "epoch-1",
+        expectedProjectPath: "/repo",
         chatId: SOURCE_CHAT_ID,
         projectPath: nextPath,
       })).resolves.toMatchObject({ success: true });
@@ -6667,6 +6773,9 @@ describe('ChatCommandService', () => {
     await fs.mkdir(nextPath, { recursive: true });
 
     await expect(service.updateProjectPath({
+      expectedExecutorId: "local",
+      expectedAgentOwnershipEpoch: "epoch-1",
+      expectedProjectPath: "/repo",
       chatId: SOURCE_CHAT_ID,
       projectPath: nextPath,
     })).rejects.toMatchObject({
@@ -6693,6 +6802,9 @@ describe('ChatCommandService', () => {
     await fs.mkdir(nextPath, { recursive: true });
 
     const pathUpdate = service.updateProjectPath({
+      expectedExecutorId: "local",
+      expectedAgentOwnershipEpoch: "epoch-1",
+      expectedProjectPath: "/repo",
       chatId: SOURCE_CHAT_ID,
       projectPath: nextPath,
     });

@@ -35,6 +35,12 @@ describe('GitHistoryPanel refresh', () => {
 			controller.setProjectState({
 				kind: 'available',
 				project: {
+					target: {
+						kind: 'chat' as const,
+						chatId: 'chat',
+						projectPath: '/project',
+						executorId: 'remote',
+					},
 					chatId: 'chat',
 					executorId: 'remote',
 					projectPath: '/project',

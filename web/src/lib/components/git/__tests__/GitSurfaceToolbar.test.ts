@@ -4,10 +4,7 @@ import GitSurfaceToolbarTestHost from './GitSurfaceToolbarTestHost.svelte';
 import { GitTargetSessionController } from '$lib/git/targets/git-target-session.svelte.js';
 import { GitBranchSelectorState } from '$lib/git/targets/git-branch-selector-state.svelte.js';
 import * as m from '$lib/paraglide/messages.js';
-import {
-	localExecutor,
-	remoteExecutor,
-} from '$lib/executors/__tests__/fixtures.js';
+import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures.js';
 
 vi.mock('$lib/api/git.js', () => ({
 	getGitTargetCandidates: vi.fn().mockResolvedValue({ targets: [] }),
@@ -26,6 +23,11 @@ async function target(): Promise<GitTargetSessionController> {
 	controller.setProjectState({
 		kind: 'available',
 		project: {
+			target: {
+				kind: 'chat' as const,
+				chatId: 'chat',
+				projectPath: '/very/long/workspace/project/path',
+			},
 			chatId: 'chat',
 			projectPath: '/very/long/workspace/project/path',
 			effectiveProjectKey: 'chat',
@@ -43,7 +45,17 @@ describe('GitSurfaceToolbar', async () => {
 		const controller = await target();
 		controller.setProjectState({
 			kind: 'request-failed',
-			context: { chatId: 'remote', executorId: remoteExecutor.id, projectPath: '/worker' },
+			context: {
+				target: {
+					kind: 'chat' as const,
+					chatId: 'remote',
+					projectPath: '/worker',
+					executorId: remoteExecutor.id,
+				},
+				chatId: 'remote',
+				executorId: remoteExecutor.id,
+				projectPath: '/worker',
+			},
 			message: 'Offline',
 		});
 		const chooseExecutor = vi.spyOn(controller, 'selectExecutor').mockResolvedValue();

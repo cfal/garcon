@@ -1697,7 +1697,7 @@ describe('REST chat command routes', () => {
 
     const { response, body } = await callJson(
       agent.routes['/api/v1/chats/project-path'].PATCH,
-      { chatId: CHAT_ID, projectPath: nextPath },
+      { chatId: CHAT_ID, projectPath: nextPath, expectedExecutorId: "local", expectedAgentOwnershipEpoch: "epoch-1", expectedProjectPath: "/workspace/project" },
       'PATCH',
     );
 
@@ -1739,7 +1739,7 @@ describe('REST chat command routes', () => {
 
     const { response, body } = await callJson(
       agent.routes['/api/v1/chats/project-path'].PATCH,
-      { chatId: CHAT_ID, projectPath: nextPath },
+      { chatId: CHAT_ID, projectPath: nextPath, expectedExecutorId: "local", expectedAgentOwnershipEpoch: "epoch-1", expectedProjectPath: "/workspace/project" },
       'PATCH',
     );
 
@@ -1762,7 +1762,7 @@ describe('REST chat command routes', () => {
 
     const { response, body } = await callJson(
       agent.routes['/api/v1/chats/project-path'].PATCH,
-      { chatId: CHAT_ID, projectPath: nextPath },
+      { chatId: CHAT_ID, projectPath: nextPath, expectedExecutorId: "local", expectedAgentOwnershipEpoch: "epoch-1", expectedProjectPath: "/workspace/project" },
       'PATCH',
     );
 
@@ -1784,7 +1784,7 @@ describe('REST chat command routes', () => {
 
     const { response, body } = await callJson(
       agent.routes['/api/v1/chats/project-path'].PATCH,
-      { chatId: CHAT_ID, projectPath: nextPath },
+      { chatId: CHAT_ID, projectPath: nextPath, expectedExecutorId: "local", expectedAgentOwnershipEpoch: "epoch-1", expectedProjectPath: "/workspace/project" },
       'PATCH',
     );
 

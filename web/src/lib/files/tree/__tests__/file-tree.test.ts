@@ -82,7 +82,15 @@ function availableProject(
 	effectiveProjectKey = '/workspace/project',
 	chatId = 'chat-1',
 ): WorkspaceProjectState {
-	return { kind: 'available', project: { projectPath, effectiveProjectKey, chatId } };
+	return {
+		kind: 'available',
+		project: {
+			target: { kind: 'chat' as const, chatId: chatId, projectPath: projectPath },
+			projectPath,
+			effectiveProjectKey,
+			chatId,
+		},
+	};
 }
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -237,6 +245,12 @@ describe('FileTreeStore', () => {
 		store.setProjectState({
 			kind: 'available',
 			project: {
+				target: {
+					kind: 'chat' as const,
+					chatId: 'remote',
+					projectPath: '/workspace/project',
+					executorId: executorId,
+				},
 				executorId,
 				chatId: 'remote',
 				projectPath: '/workspace/project',
@@ -362,7 +376,11 @@ describe('FileTreeStore', () => {
 		await tick();
 		store.setProjectState({
 			kind: 'resolving',
-			context: { chatId: 'draft', projectPath: '/workspace/project' },
+			context: {
+				target: { kind: 'chat' as const, chatId: 'draft', projectPath: '/workspace/project' },
+				chatId: 'draft',
+				projectPath: '/workspace/project',
+			},
 		});
 		expect(store.currentDirectoryPath).toBe('/workspace/project');
 
@@ -377,14 +395,22 @@ describe('FileTreeStore', () => {
 			label: 'unchecked',
 			projectState: {
 				kind: 'unchecked' as const,
-				context: { chatId: 'chat-1', projectPath: '/workspace/project' },
+				context: {
+					target: { kind: 'chat' as const, chatId: 'chat-1', projectPath: '/workspace/project' },
+					chatId: 'chat-1',
+					projectPath: '/workspace/project',
+				},
 			},
 		},
 		{
 			label: 'unavailable',
 			projectState: {
 				kind: 'unavailable' as const,
-				context: { chatId: 'chat-1', projectPath: '/workspace/project' },
+				context: {
+					target: { kind: 'chat' as const, chatId: 'chat-1', projectPath: '/workspace/project' },
+					chatId: 'chat-1',
+					projectPath: '/workspace/project',
+				},
 				reason: 'not-found' as const,
 			},
 		},

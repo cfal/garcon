@@ -9,7 +9,7 @@
 		projectBasePath: string;
 		isMobile: boolean;
 		onClose: () => void;
-		onConfirm: (chatId: string, projectPath: string) => Promise<void> | void;
+		onConfirm: (target: ChatProjectPathDialog, projectPath: string) => Promise<void> | void;
 	}
 
 	let {
@@ -23,7 +23,11 @@
 	const remoteSettings = getRemoteSettings();
 	const executors = getExecutors();
 	const executorId = $derived(projectPathDialog?.executorId ?? 'local');
-	const pinnedProjectPaths = $derived(executorId === 'local' ? remoteSettings.snapshot?.paths.pinnedProjectPaths ?? [] : remoteSettings.snapshot?.paths.byExecutor?.[executorId]?.pinnedPaths ?? []);
+	const pinnedProjectPaths = $derived(
+		executorId === 'local'
+			? (remoteSettings.snapshot?.paths.pinnedProjectPaths ?? [])
+			: (remoteSettings.snapshot?.paths.byExecutor?.[executorId]?.pinnedPaths ?? []),
+	);
 
 	async function togglePinnedProjectPath(path: string): Promise<void> {
 		await togglePinnedProjectPathOptimistically(remoteSettings, path, { executorId });
@@ -32,7 +36,9 @@
 
 <SidebarProjectPathDialog
 	{projectPathDialog}
-	projectBasePath={executorId === 'local' ? projectBasePath : executors.get(executorId)?.projectBasePath ?? ''}
+	projectBasePath={executorId === 'local'
+		? projectBasePath
+		: (executors.get(executorId)?.projectBasePath ?? '')}
 	{pinnedProjectPaths}
 	{isMobile}
 	{onClose}

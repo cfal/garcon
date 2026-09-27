@@ -35,6 +35,11 @@ for (const backend of ['remote-controller-dials', 'remote-executor-dials'] as co
       expect(moved.chat).toMatchObject({ executorId: client.executorId, projectPath: executionDirs.project, agentId: agent.agentId, model: agent.provider.model });
       expect(moved).not.toHaveProperty('turnId');
       expect(moved.chat.agentOwnershipEpoch).not.toBe(before.chat.agentOwnershipEpoch);
+      await expect(client.patch('/api/v1/chats/project-path', {
+        chatId, projectPath: executionDirs.project, expectedExecutorId: 'local',
+        expectedAgentOwnershipEpoch: before.chat.agentOwnershipEpoch,
+        expectedProjectPath: before.chat.projectPath,
+      })).rejects.toMatchObject({ status: 409, body: { errorCode: 'STALE_CHAT_OWNERSHIP' } });
       for (const [route, patch] of [
         ['model', { model: agent.provider.model }],
         ['execution-settings', { permissionMode: 'default' }],

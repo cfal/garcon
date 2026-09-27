@@ -87,6 +87,7 @@ function renderReady(entries: FileTreeEntry[]) {
 	store.setProjectState({
 		kind: 'available',
 		project: {
+			target: { kind: 'chat' as const, chatId: 'chat-1', projectPath: '/workspace/project' },
 			chatId: 'chat-1',
 			projectPath: '/workspace/project',
 			effectiveProjectKey: '/workspace/project',

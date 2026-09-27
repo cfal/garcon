@@ -23,7 +23,7 @@
 		pinnedProjectPaths?: string[];
 		isMobile: boolean;
 		onClose: () => void;
-		onConfirm: (chatId: string, projectPath: string) => Promise<void> | void;
+		onConfirm: (target: ChatProjectPathDialog, projectPath: string) => Promise<void> | void;
 		onTogglePinnedProjectPath?: (path: string) => void | Promise<void>;
 	}
 
@@ -78,6 +78,8 @@
 		const nextDialogKey = JSON.stringify([
 			projectPathDialog.chatId,
 			projectPathDialog.executorId,
+			projectPathDialog.agentOwnershipEpoch,
+			projectPathDialog.status,
 			projectPathDialog.currentProjectPath,
 		]);
 		if (activeDialogKey === nextDialogKey) return;
@@ -137,7 +139,7 @@
 		projectPathDialogState.isSubmitting = true;
 		projectPathDialogState.submitError = null;
 		try {
-			await onConfirm(projectPathDialog.chatId, projectPathDialogState.trimmedPath);
+			await onConfirm(projectPathDialog, projectPathDialogState.trimmedPath);
 			onClose();
 		} catch (error) {
 			projectPathDialogState.setSubmitFailure(error);

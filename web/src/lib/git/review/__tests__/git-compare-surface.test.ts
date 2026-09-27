@@ -93,6 +93,7 @@ function setProject(
 	controller.setProjectState({
 		kind: 'available',
 		project: {
+			target: { kind: 'chat' as const, chatId: chatId, projectPath: projectPath },
 			chatId,
 			projectPath,
 			effectiveProjectKey,
@@ -558,6 +559,7 @@ describe('GitCompareSurfaceController', () => {
 		controller.setProjectState({
 			kind: 'resolving',
 			context: {
+				target: { kind: 'chat' as const, chatId: 'chat-a', projectPath: '/project' },
 				chatId: 'chat-a',
 				projectPath: '/project',
 			},
@@ -726,7 +728,10 @@ describe('GitCompareSurfaceController', () => {
 			{ executorId: 'local', chatId: 'chat-a' },
 			revisionComparison,
 		);
-		deps.comparisonPreferences.rememberChat({ executorId: 'local', chatId: 'chat-b' }, chatBComparison);
+		deps.comparisonPreferences.rememberChat(
+			{ executorId: 'local', chatId: 'chat-b' },
+			chatBComparison,
+		);
 		const controller = new GitCompareSurfaceController(deps);
 		const first = deferred<boolean>();
 		const second = deferred<boolean>();
@@ -771,7 +776,10 @@ describe('GitCompareSurfaceController', () => {
 			{ executorId: 'local', chatId: 'chat-a' },
 			revisionComparison,
 		);
-		deps.comparisonPreferences.rememberChat({ executorId: 'local', chatId: 'chat-b' }, chatBComparison);
+		deps.comparisonPreferences.rememberChat(
+			{ executorId: 'local', chatId: 'chat-b' },
+			chatBComparison,
+		);
 		const controller = new GitCompareSurfaceController(deps);
 		const firstA = deferred<boolean>();
 		const pendingB = deferred<boolean>();

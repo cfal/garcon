@@ -8,6 +8,15 @@ import {
 	type ChatActionControllerDeps,
 } from '../chat-action-controller.svelte.ts';
 import { ChatActionDialogsState } from '../chat-action-dialogs-state.svelte';
+import { resolveProject } from '$lib/api/project-resolution';
+
+vi.mock('$lib/api/project-resolution', () => ({ resolveProject: vi.fn() }));
+
+function projectDialog(chat = makeChat()) {
+	const dialogs = new ChatActionDialogsState();
+	dialogs.requestProjectPath(chat, 'Chat');
+	return dialogs.chatProjectPathDialog!;
+}
 
 vi.mock('$lib/api/chats', () => ({
 	deleteChat: vi.fn(),
@@ -43,11 +52,12 @@ function makeChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord
 		processingPhase: null,
 		isUnread: false,
 		canReloadFromNativeHistory: false,
-		status: 'draft',
+		status: 'running',
 		tags: [],
 		...overrides,
 		parentChat: overrides.parentChat ?? null,
-		agentOwnershipEpoch: overrides.agentOwnershipEpoch ?? null,
+		agentOwnershipEpoch:
+			overrides.agentOwnershipEpoch === undefined ? 'epoch-1' : overrides.agentOwnershipEpoch,
 	};
 }
 
@@ -74,7 +84,8 @@ function makeServerChat(overrides: Partial<ChatListEntry> = {}): ChatListEntry {
 		canReloadFromNativeHistory: false,
 		...overrides,
 		parentChat: overrides.parentChat ?? null,
-		agentOwnershipEpoch: overrides.agentOwnershipEpoch ?? 'epoch-1',
+		agentOwnershipEpoch:
+			overrides.agentOwnershipEpoch === undefined ? 'epoch-1' : overrides.agentOwnershipEpoch,
 	};
 }
 
@@ -372,7 +383,7 @@ describe('ChatActionController', () => {
 		const { controller, callbacks } = createHarness();
 
 		await controller.updateTags('chat-1', ['existing'], ['review']);
-		await controller.updateProjectPath('chat-1', ' /workspace/canonical ');
+		await controller.updateProjectPath(projectDialog(), ' /workspace/canonical ');
 
 		expect(callbacks.replaceChatTags).toHaveBeenCalledWith({
 			chatId: 'chat-1',
@@ -382,6 +393,9 @@ describe('ChatActionController', () => {
 		expect(chatsApi.updateChatProjectPath).toHaveBeenCalledWith({
 			chatId: 'chat-1',
 			projectPath: ' /workspace/canonical ',
+			expectedExecutorId: 'local',
+			expectedAgentOwnershipEpoch: 'epoch-1',
+			expectedProjectPath: '/workspace/repo',
 		});
 		expect(callbacks.onProjectPathUpdated).toHaveBeenCalledWith('chat-1', {
 			projectPath: '/workspace/canonical',
@@ -392,7 +406,7 @@ describe('ChatActionController', () => {
 		const pending = deferred<Awaited<ReturnType<typeof chatsApi.updateChatProjectPath>>>();
 		vi.mocked(chatsApi.updateChatProjectPath).mockReturnValueOnce(pending.promise);
 		const { controller, callbacks, chats } = createHarness();
-		const update = controller.updateProjectPath('chat-1', '/workspace/requested');
+		const update = controller.updateProjectPath(projectDialog(), '/workspace/requested');
 		chats[0] = makeChat({ projectPath: '/workspace/newer' });
 		pending.resolve({
 			success: true,
@@ -411,7 +425,7 @@ describe('ChatActionController', () => {
 		const pending = deferred<Awaited<ReturnType<typeof chatsApi.updateChatProjectPath>>>();
 		vi.mocked(chatsApi.updateChatProjectPath).mockReturnValueOnce(pending.promise);
 		const { controller, callbacks, chats } = createHarness();
-		const update = controller.updateProjectPath('chat-1', '/workspace/requested');
+		const update = controller.updateProjectPath(projectDialog(), '/workspace/requested');
 		chats[0] = makeChat({ projectPath: '/workspace/requested' });
 		pending.resolve({
 			success: true,
@@ -432,7 +446,7 @@ describe('ChatActionController', () => {
 		const pending = deferred<Awaited<ReturnType<typeof chatsApi.updateChatProjectPath>>>();
 		vi.mocked(chatsApi.updateChatProjectPath).mockReturnValueOnce(pending.promise);
 		const { controller, callbacks, chats } = createHarness();
-		const update = controller.updateProjectPath('chat-1', '/workspace/requested');
+		const update = controller.updateProjectPath(projectDialog(), '/workspace/requested');
 		chats[0] = makeChat({ projectPath: '/workspace/temporary' });
 		callbacks.projectPathRevision.mockReturnValue(1);
 		chats[0] = makeChat({ projectPath: '/workspace/repo' });
@@ -457,8 +471,8 @@ describe('ChatActionController', () => {
 			.mockReturnValueOnce(first.promise)
 			.mockReturnValueOnce(second.promise);
 		const { controller, callbacks } = createHarness();
-		const firstUpdate = controller.updateProjectPath('chat-1', '/workspace/first');
-		const secondUpdate = controller.updateProjectPath('chat-1', '/workspace/second');
+		const firstUpdate = controller.updateProjectPath(projectDialog(), '/workspace/first');
+		const secondUpdate = controller.updateProjectPath(projectDialog(), '/workspace/second');
 		second.resolve({
 			success: true,
 			chatId: 'chat-1',
@@ -486,14 +500,91 @@ describe('ChatActionController', () => {
 		const missing = createHarness({ chats: [] });
 		const empty = createHarness({ chats: [makeChat({ projectPath: '' })] });
 
-		await expect(missing.controller.updateProjectPath('chat-1', '/workspace/new')).rejects.toThrow(
-			m.sidebar_project_path_errors_update_failed(),
-		);
-		await expect(empty.controller.updateProjectPath('chat-1', '/workspace/new')).rejects.toThrow(
-			m.sidebar_project_path_errors_update_failed(),
+		await expect(
+			missing.controller.updateProjectPath(projectDialog(), '/workspace/new'),
+		).rejects.toThrow(m.sidebar_project_path_errors_target_changed());
+		await expect(
+			empty.controller.updateProjectPath(projectDialog(), '/workspace/new'),
+		).rejects.toThrow(m.sidebar_project_path_errors_target_changed());
+		expect(chatsApi.updateChatProjectPath).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		{ executorId: '22222222-2222-4222-8222-222222222222' },
+		{ agentOwnershipEpoch: 'next-owner' },
+		{ projectPath: '/other' },
+	])('rejects a stale folder dialog before dispatch: %j', async (change) => {
+		const { controller, chats } = createHarness();
+		const target = projectDialog(chats[0]);
+		chats[0] = makeChat(change);
+		await expect(controller.updateProjectPath(target, '/chosen')).rejects.toThrow(
+			m.sidebar_project_path_errors_target_changed(),
 		);
 		expect(chatsApi.updateChatProjectPath).not.toHaveBeenCalled();
 	});
+
+	it('does not publish an old owner response even when the new owner uses the returned path', async () => {
+		const pending = deferred<Awaited<ReturnType<typeof chatsApi.updateChatProjectPath>>>();
+		vi.mocked(chatsApi.updateChatProjectPath).mockReturnValueOnce(pending.promise);
+		const { controller, callbacks, chats } = createHarness();
+		const updating = controller.updateProjectPath(projectDialog(chats[0]), '/chosen');
+		chats[0] = makeChat({ projectPath: '/chosen', agentOwnershipEpoch: 'new-owner' });
+		pending.resolve({
+			success: true,
+			chatId: 'chat-1',
+			projectPath: '/chosen',
+			effectiveProjectKey: '/chosen',
+			previousProjectPath: '/workspace/repo',
+		});
+		await updating;
+		expect(callbacks.onProjectPathUpdated).not.toHaveBeenCalled();
+	});
+
+	it.each(['local', '22222222-2222-4222-8222-222222222222'])(
+		'repairs a browser draft using only path validation on %s',
+		async (executorId) => {
+			const draft = makeChat({ status: 'draft', executorId, agentOwnershipEpoch: null });
+			const { controller, callbacks } = createHarness({ chats: [draft] });
+			vi.mocked(resolveProject).mockImplementationOnce(async (target) => ({
+				target,
+				resolution: { kind: 'available', effectiveProjectKey: '/canonical' },
+			}));
+			await controller.updateProjectPath(projectDialog(draft), '/chosen');
+			expect(resolveProject).toHaveBeenLastCalledWith(
+				{ kind: 'path', executorId, projectPath: '/chosen' },
+				expect.any(AbortSignal),
+			);
+			expect(chatsApi.updateChatProjectPath).not.toHaveBeenCalled();
+			expect(callbacks.onProjectPathUpdated).toHaveBeenCalledWith(draft.id, {
+				projectPath: '/canonical',
+			});
+		},
+	);
+
+	it.each(['promotion', 'retarget', 'path-change', 'unavailable'])(
+		'does not apply draft validation after %s',
+		async (change) => {
+			const draft = makeChat({ status: 'draft' });
+			const pending = deferred<Awaited<ReturnType<typeof resolveProject>>>();
+			vi.mocked(resolveProject).mockReturnValueOnce(pending.promise);
+			const { controller, callbacks, chats } = createHarness({ chats: [draft] });
+			const updating = controller.updateProjectPath(projectDialog(draft), '/chosen');
+			if (change === 'promotion') chats[0] = makeChat({ status: 'running' });
+			if (change === 'retarget') chats[0] = { ...draft, executorId: 'another-executor' };
+			if (change === 'path-change') chats[0] = { ...draft, projectPath: '/other' };
+			pending.resolve({
+				target: { kind: 'path', executorId: 'local', projectPath: '/chosen' },
+				resolution:
+					change === 'unavailable'
+						? { kind: 'unavailable', reason: 'not-found' }
+						: { kind: 'available', effectiveProjectKey: '/chosen' },
+			});
+			if (change === 'unavailable') await expect(updating).rejects.toThrow();
+			else await updating;
+			expect(callbacks.onProjectPathUpdated).not.toHaveBeenCalled();
+			expect(chatsApi.updateChatProjectPath).not.toHaveBeenCalled();
+		},
+	);
 
 	it('upserts and selects a server-confirmed fork', async () => {
 		const fork = makeServerChat();

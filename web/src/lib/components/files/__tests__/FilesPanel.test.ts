@@ -14,10 +14,7 @@ import {
 import { NotificationsStore } from '$lib/stores/notifications.svelte.js';
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
 import { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
-import {
-	localExecutor,
-	remoteExecutor,
-} from '$lib/executors/__tests__/fixtures.js';
+import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures.js';
 
 afterEach(cleanup);
 
@@ -29,7 +26,11 @@ describe('FilesPanel', () => {
 			presentation: 'mobile',
 			projectState: {
 				kind: 'unavailable',
-				context: { chatId: 'chat', projectPath: '/workspace' },
+				context: {
+					target: { kind: 'chat' as const, chatId: 'chat', projectPath: '/workspace' },
+					chatId: 'chat',
+					projectPath: '/workspace',
+				},
 				reason: 'not-found',
 			},
 		},
@@ -37,7 +38,11 @@ describe('FilesPanel', () => {
 			presentation: 'mobile',
 			projectState: {
 				kind: 'request-failed',
-				context: { chatId: 'chat', projectPath: '/workspace' },
+				context: {
+					target: { kind: 'chat' as const, chatId: 'chat', projectPath: '/workspace' },
+					chatId: 'chat',
+					projectPath: '/workspace',
+				},
 				message: 'Project request failed',
 			},
 		},

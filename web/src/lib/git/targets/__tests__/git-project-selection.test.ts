@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectResolutionResponse, ProjectTarget } from '$shared/project-resolution';
 import { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
-import {
-	localExecutor,
-	remoteExecutor,
-} from '$lib/executors/__tests__/fixtures.js';
+import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures.js';
 import { ProjectResolutionStore } from '$lib/workspace/project-resolution-store.svelte.js';
 import { GitProjectSelectionController } from '../git-project-selection.svelte.js';
+import { WorkspaceContextStore } from '$lib/workspace/workspace-context.svelte.js';
+import { createChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
+import { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte.js';
 
 const cleanups: (() => void)[] = [];
 afterEach(() => {
@@ -37,6 +37,7 @@ function setup() {
 	selection.setProjectState({
 		kind: 'available',
 		project: {
+			target: { kind: 'chat', executorId: 'local', chatId: 'a', projectPath: '/shared' },
 			executorId: 'local',
 			chatId: 'a',
 			projectPath: '/shared',
@@ -47,10 +48,64 @@ function setup() {
 		selection.dispose();
 		resolution.destroy();
 	});
-	return { selection, read, executors, remote, publish };
+	return { selection, read, executors, remote, publish, resolution };
 }
 
 describe('Git project selection', () => {
+	it.each(['local', remoteExecutor.id])(
+		'retries the existing draft path lease on %s',
+		async (executorId) => {
+			const { selection, read, executors, resolution } = setup();
+			const sessions = createChatSessionsStore();
+			sessions.createDraft({
+				id: 'unstarted',
+				projectPath: '/restored',
+				startup: {
+					executorId,
+					agentId: 'claude',
+					model: 'synthetic',
+					permissionMode: 'default',
+					thinkingMode: 'none',
+					agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
+					firstMessage: '',
+				},
+			});
+			sessions.setSelectedChatId('unstarted');
+			const workspace = new WorkspaceContextStore(
+				sessions,
+				new ModelCatalogStore(),
+				resolution,
+				executors,
+			);
+			const lease = resolution.retain(workspace.currentTarget!);
+			read.mockImplementationOnce(async (target) => ({
+				target,
+				resolution: { kind: 'unavailable', reason: 'not-found' },
+			}));
+			try {
+				await lease.resolve();
+				selection.setProjectState(workspace.projectState);
+				expect(selection.projectState.kind).toBe('unavailable');
+				await selection.retry();
+				expect(read).toHaveBeenLastCalledWith(
+					{ kind: 'path', executorId, projectPath: '/restored' },
+					expect.any(AbortSignal),
+				);
+				expect(workspace.projectState.kind).toBe('available');
+			} finally {
+				lease.release();
+			}
+		},
+	);
+
+	it('retains chat-bound resolution for persisted chats', async () => {
+		const { selection, read } = setup();
+		await selection.retry();
+		expect(read).toHaveBeenLastCalledWith(
+			{ kind: 'chat', executorId: 'local', chatId: 'a', projectPath: '/shared' },
+			expect.any(AbortSignal),
+		);
+	});
 	it('keeps an explicit executor and existing folder across chat switches until return', async () => {
 		const { selection, read, remote } = setup();
 		await selection.selectExecutor(remote.id);
@@ -61,6 +116,7 @@ describe('Git project selection', () => {
 		selection.setProjectState({
 			kind: 'available',
 			project: {
+				target: { kind: 'chat', executorId: 'local', chatId: 'b', projectPath: '/other' },
 				executorId: 'local',
 				chatId: 'b',
 				projectPath: '/other',
@@ -194,7 +250,10 @@ describe('Git project selection', () => {
 		expect(selection.serviceNotice).toBeNull();
 		await selection.selectExecutor(remote.id);
 		executors.applySnapshot([localExecutor, { ...remote, availability: 'offline' }]);
-		expect(selection.serviceNotice).toEqual({ kind: 'executor-unavailable', executorLabel: 'Worker' });
+		expect(selection.serviceNotice).toEqual({
+			kind: 'executor-unavailable',
+			executorLabel: 'Worker',
+		});
 		executors.applySnapshot([localExecutor]);
 		expect(selection.serviceNotice).toEqual({ kind: 'executor-removed', executorId: remote.id });
 		selection.goToChatProject();

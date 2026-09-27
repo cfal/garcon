@@ -481,6 +481,9 @@ export interface ModelPatchResponse {
 export interface ProjectPathPatchRequest {
   chatId: string;
   projectPath: string;
+  expectedExecutorId: string;
+  expectedAgentOwnershipEpoch: string;
+  expectedProjectPath: string;
 }
 
 export interface ProjectPathPatchResponse {
@@ -881,9 +884,14 @@ export function parseCompactCommandRequest(value: unknown): CompactCommandReques
 
 export function parseProjectPathPatchRequest(value: unknown): ProjectPathPatchRequest {
   const body = requestRecord(value);
+  const expectedExecutorId = requiredString(body, 'expectedExecutorId');
+  if (!isExecutorId(expectedExecutorId)) throw new CommandRequestValidationError('expectedExecutorId is invalid');
   return {
     chatId: requiredChatId(body, 'chatId'),
     projectPath: requiredString(body, 'projectPath'),
+    expectedExecutorId,
+    expectedAgentOwnershipEpoch: requiredString(body, 'expectedAgentOwnershipEpoch'),
+    expectedProjectPath: requiredString(body, 'expectedProjectPath'),
   };
 }
 

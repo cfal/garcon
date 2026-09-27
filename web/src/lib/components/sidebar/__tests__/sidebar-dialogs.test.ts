@@ -108,6 +108,8 @@ describe('Sidebar dialogs', () => {
 			chatId: 'chat-1',
 			chatTitle: 'Synthetic project',
 			executorId: remoteExecutor.id,
+			status: 'running' as const,
+			agentOwnershipEpoch: 'epoch-1',
 			currentProjectPath: '/worker/project',
 		};
 		const rendered = render(SidebarProjectPathDialog, {
@@ -218,6 +220,8 @@ describe('Sidebar dialogs', () => {
 			projectPathDialog: {
 				chatId: 'chat-1',
 				chatTitle: longTitle,
+				status: 'running' as const,
+				agentOwnershipEpoch: 'epoch-1',
 				currentProjectPath: '/workspace/repo',
 			},
 			projectBasePath: '/workspace',
@@ -255,6 +259,8 @@ describe('Sidebar dialogs', () => {
 			projectPathDialog: {
 				chatId: 'chat-1',
 				chatTitle: 'Feature chat',
+				status: 'running' as const,
+				agentOwnershipEpoch: 'epoch-1',
 				currentProjectPath: '/workspace/repo',
 			},
 			projectBasePath: '/workspace',
@@ -280,7 +286,10 @@ describe('Sidebar dialogs', () => {
 
 			await screen.findByText(/wait for the active turn/i);
 			expect(onClose).not.toHaveBeenCalled();
-			expect(onConfirm).toHaveBeenCalledWith('chat-1', '/workspace/repo-worktree');
+			expect(onConfirm).toHaveBeenCalledWith(
+				expect.objectContaining({ chatId: 'chat-1', agentOwnershipEpoch: 'epoch-1' }),
+				'/workspace/repo-worktree',
+			);
 
 			await fireEvent.click(updateButton);
 			await waitFor(() => {
@@ -302,6 +311,8 @@ describe('Sidebar dialogs', () => {
 			projectPathDialog: {
 				chatId: 'chat-1',
 				chatTitle: 'Feature chat',
+				status: 'running' as const,
+				agentOwnershipEpoch: 'epoch-1',
 				currentProjectPath: '/workspace/repo',
 			},
 			projectBasePath: '/workspace',
@@ -348,6 +359,8 @@ describe('Sidebar dialogs', () => {
 			projectPathDialog: {
 				chatId: 'chat-1',
 				chatTitle: 'Feature chat',
+				status: 'running' as const,
+				agentOwnershipEpoch: 'epoch-1',
 				currentProjectPath: '/workspace/repo',
 			},
 			projectBasePath: '/workspace',
@@ -384,7 +397,10 @@ describe('Sidebar dialogs', () => {
 			await fireEvent.click(updateButton);
 
 			await waitFor(() => {
-				expect(onConfirm).toHaveBeenCalledWith('chat-1', selectedPath);
+				expect(onConfirm).toHaveBeenCalledWith(
+					expect.objectContaining({ chatId: 'chat-1', agentOwnershipEpoch: 'epoch-1' }),
+					selectedPath,
+				);
 			});
 		} finally {
 			rendered.unmount();
@@ -402,6 +418,8 @@ describe('Sidebar dialogs', () => {
 			projectPathDialog: {
 				chatId: 'chat-1',
 				chatTitle: 'Feature chat',
+				status: 'running' as const,
+				agentOwnershipEpoch: 'epoch-1',
 				currentProjectPath: '/workspace/repo',
 			},
 			projectBasePath: '/workspace',
@@ -438,6 +456,8 @@ describe('Sidebar dialogs', () => {
 			projectPathDialog: {
 				chatId: 'chat-1',
 				chatTitle: 'Feature chat',
+				status: 'running' as const,
+				agentOwnershipEpoch: 'epoch-1',
 				currentProjectPath: '/workspace/plain-folder',
 			},
 			projectBasePath: '/workspace',
@@ -470,6 +490,8 @@ describe('Sidebar dialogs', () => {
 			projectPathDialog: {
 				chatId: 'chat-1',
 				chatTitle: 'Feature chat',
+				status: 'running' as const,
+				agentOwnershipEpoch: 'epoch-1',
 				currentProjectPath: '/workspace/repo',
 			},
 			projectBasePath: '/workspace',
@@ -503,6 +525,8 @@ describe('Sidebar dialogs', () => {
 			projectPathDialog: {
 				chatId: 'chat-1',
 				chatTitle: 'Feature chat',
+				status: 'running' as const,
+				agentOwnershipEpoch: 'epoch-1',
 				currentProjectPath: '/workspace/repo',
 			},
 			projectBasePath: '/workspace',
@@ -555,6 +579,8 @@ describe('Sidebar dialogs', () => {
 			projectPathDialog: {
 				chatId: 'chat-1',
 				chatTitle: 'Feature chat',
+				status: 'running' as const,
+				agentOwnershipEpoch: 'epoch-1',
 				currentProjectPath: '/workspace/repo',
 			},
 			projectBasePath: '/workspace',

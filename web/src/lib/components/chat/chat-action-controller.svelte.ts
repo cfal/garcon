@@ -3,7 +3,13 @@ import { resolveArchiveReplacementChatId } from '$lib/chat/actions/archive-navig
 import { SidebarController } from '$lib/components/sidebar/sidebar-controller.svelte';
 import type { ChatArchiveMutation } from '$lib/chat/sessions/chat-sessions-contract';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
-import type { ChatActionDialogsState } from './chat-action-dialogs-state.svelte';
+import type {
+	ChatActionDialogsState,
+	ChatProjectPathDialog,
+} from './chat-action-dialogs-state.svelte';
+import { updateChatProjectPath } from '$lib/api/chats.js';
+import { resolveProject } from '$lib/api/project-resolution.js';
+import { effectiveExecutorId } from '$shared/executors';
 import type { ChatListEntry } from '$shared/chat-list';
 import type { ChatTagsMutationResponse } from '$shared/chat-tag-mutations';
 
@@ -35,7 +41,7 @@ export interface ChatActionControllerDeps {
 
 export class ChatActionController {
 	#sidebarController: SidebarController;
-	#projectPathRequestGeneration = new Map<string, number>();
+	#projectPathRequestGeneration = new Map<string, symbol>();
 
 	constructor(private readonly deps: ChatActionControllerDeps) {
 		this.#sidebarController = new SidebarController({
@@ -140,23 +146,59 @@ export class ChatActionController {
 		await this.deps.replaceChatTags({ chatId, expectedTags: baseTags, tags });
 	}
 
-	async updateProjectPath(chatId: string, projectPath: string): Promise<void> {
-		const expectedProjectPath = this.deps.chats.find((entry) => entry.id === chatId)?.projectPath;
-		if (!expectedProjectPath) throw new Error(m.sidebar_project_path_errors_update_failed());
+	async updateProjectPath(target: ChatProjectPathDialog, projectPath: string): Promise<void> {
+		const { chatId, currentProjectPath: expectedProjectPath } = target;
+		const executorId = effectiveExecutorId(target.executorId);
+		const matchesOwner = (chat: ChatSessionRecord | undefined) =>
+			chat?.status === target.status &&
+			chat.agentOwnershipEpoch === target.agentOwnershipEpoch &&
+			effectiveExecutorId(chat.executorId) === executorId;
+		const chat = this.deps.chats.find((entry) => entry.id === chatId);
+		if (!matchesOwner(chat) || chat?.projectPath !== expectedProjectPath) {
+			throw new Error(m.sidebar_project_path_errors_target_changed());
+		}
 		const expectedRevision = this.deps.projectPathRevision(chatId);
-		const generation = (this.#projectPathRequestGeneration.get(chatId) ?? 0) + 1;
+		const generation = Symbol();
 		this.#projectPathRequestGeneration.set(chatId, generation);
-		const result = await this.#sidebarController.updateProjectPath(chatId, projectPath);
-		if (this.#projectPathRequestGeneration.get(chatId) !== generation) return;
-		const currentProjectPath = this.deps.chats.find((entry) => entry.id === chatId)?.projectPath;
+		let nextPath: string;
+		try {
+			if (target.status === 'draft') {
+				const result = await resolveProject(
+					{ kind: 'path', executorId, projectPath: projectPath.trim() },
+					new AbortController().signal,
+				);
+				if (result.resolution.kind !== 'available')
+					throw new Error(m.workspace_project_unavailable());
+				nextPath = result.resolution.effectiveProjectKey;
+			} else {
+				if (!target.agentOwnershipEpoch)
+					throw new Error(m.sidebar_project_path_errors_target_changed());
+				const result = await updateChatProjectPath({
+					chatId,
+					projectPath,
+					expectedProjectPath,
+					expectedExecutorId: executorId,
+					expectedAgentOwnershipEpoch: target.agentOwnershipEpoch,
+				});
+				nextPath = result.projectPath;
+			}
+			if (this.#projectPathRequestGeneration.get(chatId) !== generation) return;
+		} finally {
+			if (this.#projectPathRequestGeneration.get(chatId) === generation) {
+				this.#projectPathRequestGeneration.delete(chatId);
+			}
+		}
+		const current = this.deps.chats.find((entry) => entry.id === chatId);
+		if (!matchesOwner(current)) return;
+		const currentProjectPath = current?.projectPath;
 		if (
-			currentProjectPath !== result.projectPath &&
+			currentProjectPath !== nextPath &&
 			(currentProjectPath !== expectedProjectPath ||
 				this.deps.projectPathRevision(chatId) !== expectedRevision)
 		)
 			return;
 		this.deps.onProjectPathUpdated(chatId, {
-			projectPath: result.projectPath,
+			projectPath: nextPath,
 		});
 	}
 

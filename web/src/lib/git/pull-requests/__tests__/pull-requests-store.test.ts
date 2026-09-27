@@ -5,10 +5,7 @@ import type { PullRequestDetail, PullRequestSummary } from '$lib/api/pull-reques
 import { flushSync } from 'svelte';
 import { bindProject } from './pull-requests-effect-harness.svelte.js';
 import { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
-import {
-	localExecutor,
-	remoteExecutor,
-} from '$lib/executors/__tests__/fixtures.js';
+import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures.js';
 import { GhCapabilityStore } from '../gh-capability.svelte.js';
 import { ProjectResolutionStore } from '$lib/workspace/project-resolution-store.svelte.js';
 import { getGhStatus } from '$lib/api/gh.js';
@@ -116,7 +113,10 @@ describe('PullRequestsStore', () => {
 			},
 		});
 		try {
-			store.projectSelection.selectResolvedProject({ executorId: remote.id, projectPath: '/worker' });
+			store.projectSelection.selectResolvedProject({
+				executorId: remote.id,
+				projectPath: '/worker',
+			});
 			flushSync();
 			expect(getGhStatus).not.toHaveBeenCalled();
 			expect(getPullRequestsMock).not.toHaveBeenCalled();
@@ -131,6 +131,12 @@ describe('PullRequestsStore', () => {
 			store.setProjectState({
 				kind: 'available',
 				project: {
+					target: {
+						kind: 'chat' as const,
+						chatId: 'local-chat',
+						projectPath: '/local',
+						executorId: 'local',
+					},
 					chatId: 'local-chat',
 					executorId: 'local',
 					projectPath: '/local',
@@ -157,6 +163,12 @@ describe('PullRequestsStore', () => {
 		getPullRequestMock.mockResolvedValue(detail(3));
 		const store = createVisibleStore();
 		const project = {
+			target: {
+				kind: 'chat' as const,
+				chatId: 'one',
+				projectPath: '/project',
+				executorId: 'local',
+			},
 			executorId: 'local',
 			chatId: 'one',
 			projectPath: '/project',
@@ -212,7 +224,10 @@ describe('PullRequestsStore', () => {
 			},
 		});
 		try {
-			store.projectSelection.selectResolvedProject({ executorId: remote.id, projectPath: '/worker' });
+			store.projectSelection.selectResolvedProject({
+				executorId: remote.id,
+				projectPath: '/worker',
+			});
 			flushSync();
 			store.setPresentationVisible(true);
 			flushSync();
@@ -275,6 +290,12 @@ describe('PullRequestsStore', () => {
 			store.setCapability('remote', true, true);
 			store.setPresentationVisible(true);
 			const project = {
+				target: {
+					kind: 'chat' as const,
+					chatId: 'one',
+					projectPath: '/project',
+					executorId: 'remote',
+				},
 				executorId: 'remote',
 				chatId: 'one',
 				projectPath: '/project',
@@ -409,7 +430,10 @@ describe('PullRequestsStore', () => {
 		await tick();
 		await store.select(3);
 
-		store.setProject({ executorId: 'local', projectPath: '/canonical/project' }, '/canonical/project');
+		store.setProject(
+			{ executorId: 'local', projectPath: '/canonical/project' },
+			'/canonical/project',
+		);
 		expect(store.selectedNumber).toBe(3);
 		expect(store.detail?.number).toBe(3);
 		expect(getPullRequestsMock).toHaveBeenCalledOnce();
@@ -425,7 +449,11 @@ describe('PullRequestsStore', () => {
 
 		store.setProjectState({
 			kind: 'resolving',
-			context: { chatId: 'draft', projectPath: '/project' },
+			context: {
+				target: { kind: 'chat' as const, chatId: 'draft', projectPath: '/project' },
+				chatId: 'draft',
+				projectPath: '/project',
+			},
 		});
 		await store.refresh();
 		await store.select(4);
@@ -439,6 +467,7 @@ describe('PullRequestsStore', () => {
 		store.setProjectState({
 			kind: 'available',
 			project: {
+				target: { kind: 'chat' as const, chatId: 'chat2', projectPath: '/project' },
 				chatId: 'chat2',
 				projectPath: '/project',
 				effectiveProjectKey: '/canonical/project',
@@ -463,12 +492,17 @@ describe('PullRequestsStore', () => {
 
 		store.setProjectState({
 			kind: 'resolving',
-			context: { chatId: 'chat-2', projectPath: '/project' },
+			context: {
+				target: { kind: 'chat' as const, chatId: 'chat-2', projectPath: '/project' },
+				chatId: 'chat-2',
+				projectPath: '/project',
+			},
 		});
 		expect(signal?.aborted).toBe(false);
 		store.setProjectState({
 			kind: 'available',
 			project: {
+				target: { kind: 'chat' as const, chatId: 'chat-2', projectPath: '/project' },
 				chatId: 'chat-2',
 				projectPath: '/project',
 				effectiveProjectKey: '/canonical/project',
@@ -499,7 +533,11 @@ describe('PullRequestsStore', () => {
 
 		store.setProjectState({
 			kind: 'unavailable',
-			context: { chatId: 'chat-1', projectPath: '/project' },
+			context: {
+				target: { kind: 'chat' as const, chatId: 'chat-1', projectPath: '/project' },
+				chatId: 'chat-1',
+				projectPath: '/project',
+			},
 			reason: 'not-found',
 		});
 		expect(refreshSignal?.aborted).toBe(true);
@@ -507,6 +545,7 @@ describe('PullRequestsStore', () => {
 		store.setProjectState({
 			kind: 'available',
 			project: {
+				target: { kind: 'chat' as const, chatId: 'chat-1', projectPath: '/project' },
 				chatId: 'chat-1',
 				projectPath: '/project',
 				effectiveProjectKey: '/canonical/project',

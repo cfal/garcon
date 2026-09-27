@@ -724,8 +724,14 @@ export class GarconTestClient {
     };
   }
 
-  updateProjectPath(request: ProjectPathPatchRequest): Promise<ProjectPathPatchResponse> {
-    return this.patch<ProjectPathPatchResponse>('/api/v1/chats/project-path', request);
+  async updateProjectPath(request: Pick<ProjectPathPatchRequest, 'chatId' | 'projectPath'>): Promise<ProjectPathPatchResponse> {
+    const { chat } = await this.getChatSnapshot(request.chatId);
+    return this.patch<ProjectPathPatchResponse>('/api/v1/chats/project-path', {
+      ...request,
+      expectedExecutorId: chat.executorId ?? 'local',
+      expectedAgentOwnershipEpoch: chat.agentOwnershipEpoch,
+      expectedProjectPath: chat.projectPath,
+    } satisfies ProjectPathPatchRequest);
   }
 
   deleteChat(chatId: string): Promise<{ success: boolean }> {

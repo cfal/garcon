@@ -34,7 +34,11 @@ export interface QuickCommitPathIntent {
 
 export interface CommitControllerDeps extends GitSurfaceControllerDeps {
 	refreshSummary?: () => Promise<void>;
-	markProjectChanged?: (executorId: string, effectiveProjectKey: string, projectPath: string) => void;
+	markProjectChanged?: (
+		executorId: string,
+		effectiveProjectKey: string,
+		projectPath: string,
+	) => void;
 	runMutation?: <T>(request: {
 		executorId: string;
 		effectiveProjectKey: string;
@@ -238,6 +242,7 @@ export class CommitController implements PortableSingletonController {
 				? {
 						kind: 'available',
 						project: {
+							target: { kind: 'path', executorId: 'local', projectPath },
 							chatId: effectiveProjectKey,
 							effectiveProjectKey,
 							projectPath,
@@ -574,9 +579,7 @@ export class CommitController implements PortableSingletonController {
 		this.pendingMutationCount += 1;
 		try {
 			if (!this.isRepositoryReady)
-				throw new Error(
-					'Executor is unavailable. Inspect the repository before staging again.',
-				);
+				throw new Error('Executor is unavailable. Inspect the repository before staging again.');
 			const execute = () => gitStagePaths(project, batch.paths, batch.mode);
 			const result = this.deps.runMutation
 				? await this.deps.runMutation({

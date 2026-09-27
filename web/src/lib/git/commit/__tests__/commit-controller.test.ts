@@ -187,6 +187,12 @@ describe('CommitController', () => {
 		async (outcome) => {
 			const controller = makeController();
 			const project = {
+				target: {
+					kind: 'chat' as const,
+					chatId: 'chat1',
+					projectPath: '/project',
+					executorId: 'worker',
+				},
 				executorId: 'worker',
 				chatId: 'chat1',
 				projectPath: '/project',
@@ -236,6 +242,12 @@ describe('CommitController', () => {
 	it('rejects generated text from an earlier serving session without clearing a newer generation', async () => {
 		const controller = makeController();
 		const project = {
+			target: {
+				kind: 'chat' as const,
+				chatId: 'chat1',
+				projectPath: '/project',
+				executorId: 'worker',
+			},
 			executorId: 'worker',
 			chatId: 'chat1',
 			projectPath: '/project',
@@ -273,6 +285,7 @@ describe('CommitController', () => {
 		await controller.setProjectState({
 			kind: 'available',
 			project: {
+				target: { kind: 'chat' as const, chatId: 'chat1', projectPath: '/project' },
 				chatId: 'chat1',
 				projectPath: '/project',
 				effectiveProjectKey: '/canonical/project',
@@ -284,7 +297,11 @@ describe('CommitController', () => {
 
 		await controller.setProjectState({
 			kind: 'resolving',
-			context: { chatId: 'draft', projectPath: '/project' },
+			context: {
+				target: { kind: 'chat' as const, chatId: 'draft', projectPath: '/project' },
+				chatId: 'draft',
+				projectPath: '/project',
+			},
 		});
 		await controller.refreshTree();
 		controller.togglePath('unstaged.ts', true);
@@ -300,6 +317,7 @@ describe('CommitController', () => {
 		await controller.setProjectState({
 			kind: 'available',
 			project: {
+				target: { kind: 'chat' as const, chatId: 'chat2', projectPath: '/project' },
 				chatId: 'chat2',
 				projectPath: '/project',
 				effectiveProjectKey: '/canonical/project',
@@ -416,6 +434,12 @@ describe('CommitController', () => {
 		await controller.setProjectState({
 			kind: 'available',
 			project: {
+				target: {
+					kind: 'chat' as const,
+					chatId: 'chat',
+					projectPath: '/project',
+					executorId: 'remote',
+				},
 				chatId: 'chat',
 				executorId: 'remote',
 				projectPath: '/project',

@@ -219,6 +219,7 @@ describe('SingletonSurfaceRegistry', () => {
 		registry.setProjectState({
 			kind: 'available',
 			project: {
+				target: { kind: 'chat' as const, chatId: 'chat-a', projectPath: '/project-a' },
 				chatId: 'chat-a',
 				projectPath: '/project-a',
 				effectiveProjectKey: '/canonical/a',
@@ -231,6 +232,7 @@ describe('SingletonSurfaceRegistry', () => {
 		const resolving = {
 			kind: 'resolving' as const,
 			context: {
+				target: { kind: 'chat' as const, chatId: 'draft-b', projectPath: '/project-b' },
 				chatId: 'draft-b',
 				projectPath: '/project-b',
 				effectiveProjectKey: null,
@@ -366,6 +368,7 @@ describe('SingletonSurfaceRegistry', () => {
 		registry.setProjectState({
 			kind: 'available',
 			project: {
+				target: { kind: 'chat' as const, chatId: 'chat-a', projectPath: '/project-a' },
 				chatId: 'chat-a',
 				projectPath: '/project-a',
 				effectiveProjectKey: '/canonical/a',

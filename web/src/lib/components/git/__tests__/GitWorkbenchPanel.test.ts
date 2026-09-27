@@ -41,8 +41,10 @@ describe('GitWorkbenchPanel Commit navigation', () => {
 	});
 
 	it.each([
-		['window-main', '/other'], ['mobile', '/other'],
-		['window-main', '/project'], ['mobile', '/project'],
+		['window-main', '/other'],
+		['mobile', '/other'],
+		['window-main', '/project'],
+		['mobile', '/project'],
 	] as const)(
 		'opens a busy Commit without changing its project (%s, %s)',
 		async (presentation, projectPath) => {
@@ -51,14 +53,24 @@ describe('GitWorkbenchPanel Commit navigation', () => {
 			harness.commit = commit;
 			commit.setProjectState({
 				kind: 'available',
-				project: { chatId: 'other', projectPath, effectiveProjectKey: projectPath },
+				project: {
+					target: { kind: 'chat' as const, chatId: 'other', projectPath: projectPath },
+					chatId: 'other',
+					projectPath,
+					effectiveProjectKey: projectPath,
+				},
 			});
 			commit.message = 'Retained draft';
 			commit.isGeneratingMessage = true;
 			const controller = new GitWorkbenchSurfaceController(deps);
 			controller.setProjectState({
 				kind: 'available',
-				project: { chatId: 'chat', projectPath: '/project', effectiveProjectKey: '/project' },
+				project: {
+					target: { kind: 'chat' as const, chatId: 'chat', projectPath: '/project' },
+					chatId: 'chat',
+					projectPath: '/project',
+					effectiveProjectKey: '/project',
+				},
 			});
 			vi.spyOn(controller.target, 'canChangeTarget', 'get').mockReturnValue(true);
 			render(GitWorkbenchPanel, { controller, presentation, visible: false });

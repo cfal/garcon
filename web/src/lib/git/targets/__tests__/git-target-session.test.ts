@@ -93,6 +93,12 @@ function setProject(
 	session.setProjectState({
 		kind: 'available',
 		project: {
+			target: {
+				kind: 'chat' as const,
+				chatId: effectiveProjectKey,
+				projectPath: projectPath,
+				executorId: executorId,
+			},
 			chatId: effectiveProjectKey,
 			executorId,
 			executorContextKey,
@@ -192,6 +198,7 @@ describe('GitTargetSessionController', () => {
 		session.setProjectState({
 			kind: 'resolving',
 			context: {
+				target: { kind: 'chat' as const, chatId: 'draft', projectPath: '/new' },
 				chatId: 'draft',
 				projectPath: '/new',
 			},
@@ -229,7 +236,11 @@ describe('GitTargetSessionController', () => {
 
 		session.setProjectState({
 			kind: 'unavailable',
-			context: { chatId: 'chat-project', projectPath: '/project' },
+			context: {
+				target: { kind: 'chat' as const, chatId: 'chat-project', projectPath: '/project' },
+				chatId: 'chat-project',
+				projectPath: '/project',
+			},
 			reason: 'not-found',
 		});
 
@@ -264,7 +275,11 @@ describe('GitTargetSessionController', () => {
 
 		session.setProjectState({
 			kind: 'request-failed',
-			context: { chatId: 'chat-project', projectPath: '/project' },
+			context: {
+				target: { kind: 'chat' as const, chatId: 'chat-project', projectPath: '/project' },
+				chatId: 'chat-project',
+				projectPath: '/project',
+			},
 			message: 'Project check failed',
 		});
 		setProject(session, '/project', 'chat-project');
@@ -298,12 +313,20 @@ describe('GitTargetSessionController', () => {
 				kind === 'unavailable'
 					? {
 							kind,
-							context: { chatId: 'chat-project', projectPath: '/project' },
+							context: {
+								target: { kind: 'chat' as const, chatId: 'chat-project', projectPath: '/project' },
+								chatId: 'chat-project',
+								projectPath: '/project',
+							},
 							reason: 'not-found',
 						}
 					: {
 							kind,
-							context: { chatId: 'chat-project', projectPath: '/project' },
+							context: {
+								target: { kind: 'chat' as const, chatId: 'chat-project', projectPath: '/project' },
+								chatId: 'chat-project',
+								projectPath: '/project',
+							},
 							message: 'Project check failed',
 						},
 			);
@@ -336,7 +359,11 @@ describe('GitTargetSessionController', () => {
 		await vi.waitFor(() => expect(api.getGitTargetCandidates).toHaveBeenCalledTimes(2));
 		session.setProjectState({
 			kind: 'unavailable',
-			context: { chatId: 'chat-project', projectPath: '/project' },
+			context: {
+				target: { kind: 'chat' as const, chatId: 'chat-project', projectPath: '/project' },
+				chatId: 'chat-project',
+				projectPath: '/project',
+			},
 			reason: 'not-found',
 		});
 		setProject(session, '/project', 'chat-project');
@@ -608,45 +635,60 @@ describe('GitTargetSessionController', () => {
 		session.dispose();
 	});
 
-	it.each([true, false])('loads a reconnected project once despite offline invalidation (visible=%s)', async (visible) => {
-		const invalidations = new GitProjectInvalidationStore();
-		const { session, changes } = createSession({
-			invalidationVersion: (executorId) => invalidations.version(executorId),
-		});
-		setProject(session, '/repo', '/repo', 'remote', 'instance-a');
-		session.setPresentationVisible(true);
-		await session.activate();
-		session.setPresentationVisible(visible);
-		session.setProjectState({
-			kind: 'request-failed',
-			context: { chatId: '/repo', executorId: 'remote', projectPath: '/repo' },
-			message: 'Executor is unavailable',
-		});
-		const version = invalidations.markChanged('remote');
-		api.getGitTargetCandidates.mockClear();
-		changes.length = 0;
-		const result = deferred<{ targets: GitTargetCandidate[] }>();
-		api.getGitTargetCandidates.mockReturnValueOnce(result.promise);
-		setProject(session, '/repo', '/repo', 'remote', 'instance-b');
-		session.setPresentationVisible(true);
-		const activation = session.activate();
-		const invalidation = session.refreshForInvalidation('/repo', version);
-		try {
-			expect(api.getGitTargetCandidates).toHaveBeenCalledOnce();
-			expect(api.getGitTargetCandidates.mock.calls[0]?.[1]?.signal?.aborted).toBe(false);
-			result.resolve({ targets: [candidate('/repo', { branch: 'reconnected' })] });
-			await activation;
-			await expect(invalidation).resolves.toBe(false);
-			expect(changes.map((change) => change.reason)).toEqual(['session']);
-			expect(session.activeTarget?.branch).toBe('reconnected');
-			await expect(session.refreshForInvalidation('/repo', invalidations.markChanged('remote'))).resolves.toBe(true);
-		} finally {
-			result.resolve({ targets: [] });
-			await activation;
-			await invalidation;
-			session.dispose();
-		}
-	});
+	it.each([true, false])(
+		'loads a reconnected project once despite offline invalidation (visible=%s)',
+		async (visible) => {
+			const invalidations = new GitProjectInvalidationStore();
+			const { session, changes } = createSession({
+				invalidationVersion: (executorId) => invalidations.version(executorId),
+			});
+			setProject(session, '/repo', '/repo', 'remote', 'instance-a');
+			session.setPresentationVisible(true);
+			await session.activate();
+			session.setPresentationVisible(visible);
+			session.setProjectState({
+				kind: 'request-failed',
+				context: {
+					target: {
+						kind: 'chat' as const,
+						chatId: '/repo',
+						projectPath: '/repo',
+						executorId: 'remote',
+					},
+					chatId: '/repo',
+					executorId: 'remote',
+					projectPath: '/repo',
+				},
+				message: 'Executor is unavailable',
+			});
+			const version = invalidations.markChanged('remote');
+			api.getGitTargetCandidates.mockClear();
+			changes.length = 0;
+			const result = deferred<{ targets: GitTargetCandidate[] }>();
+			api.getGitTargetCandidates.mockReturnValueOnce(result.promise);
+			setProject(session, '/repo', '/repo', 'remote', 'instance-b');
+			session.setPresentationVisible(true);
+			const activation = session.activate();
+			const invalidation = session.refreshForInvalidation('/repo', version);
+			try {
+				expect(api.getGitTargetCandidates).toHaveBeenCalledOnce();
+				expect(api.getGitTargetCandidates.mock.calls[0]?.[1]?.signal?.aborted).toBe(false);
+				result.resolve({ targets: [candidate('/repo', { branch: 'reconnected' })] });
+				await activation;
+				await expect(invalidation).resolves.toBe(false);
+				expect(changes.map((change) => change.reason)).toEqual(['session']);
+				expect(session.activeTarget?.branch).toBe('reconnected');
+				await expect(
+					session.refreshForInvalidation('/repo', invalidations.markChanged('remote')),
+				).resolves.toBe(true);
+			} finally {
+				result.resolve({ targets: [] });
+				await activation;
+				await invalidation;
+				session.dispose();
+			}
+		},
+	);
 
 	it('keeps same-path pending invalidations separate across executors', async () => {
 		const local = deferred<{ targets: GitTargetCandidate[] }>();
@@ -785,7 +827,11 @@ describe('GitTargetSessionController', () => {
 		await vi.waitFor(() => expect(api.getGitTargetCandidates).toHaveBeenCalledTimes(2));
 		session.setProjectState({
 			kind: 'unavailable',
-			context: { chatId: 'chat', projectPath: '/chat' },
+			context: {
+				target: { kind: 'chat' as const, chatId: 'chat', projectPath: '/chat' },
+				chatId: 'chat',
+				projectPath: '/chat',
+			},
 			reason: 'not-found',
 		});
 		await expect(switching).resolves.toBe(true);

@@ -876,7 +876,7 @@
 	projectBasePath={appShell.projectBasePath}
 	{isMobile}
 	onClose={() => chatActionDialogs.closeProjectPathDialog()}
-	onConfirm={(chatId, projectPath) => chatActionController.updateProjectPath(chatId, projectPath)}
+	onConfirm={(target, projectPath) => chatActionController.updateProjectPath(target, projectPath)}
 />
 
 <SidebarTagDialog

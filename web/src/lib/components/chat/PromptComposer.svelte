@@ -209,7 +209,8 @@
 		Boolean(
 			onChooseProjectFolder &&
 			sessions.selectedChat &&
-			modelCatalog.supportsUpdateProjectPath(sessions.selectedChat.agentId),
+			(sessions.selectedChat.status === 'draft' ||
+				modelCatalog.supportsUpdateProjectPath(sessions.selectedChat.agentId)),
 		),
 	);
 

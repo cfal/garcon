@@ -6,6 +6,7 @@ import { effectiveExecutorId } from '$shared/executors';
 import type { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
 
 export interface WorkspaceContext {
+	target: ProjectTarget;
 	executorId?: string;
 	chatId: string;
 	projectPath: string;
@@ -39,6 +40,7 @@ export class WorkspaceContextStore {
 		const chat = this.sessions.selectedChat;
 		if (!chat) return null;
 		return {
+			target: this.currentTarget!,
 			executorId: effectiveExecutorId(chat.executorId),
 			chatId: chat.id,
 			projectPath: chat.projectPath,
@@ -54,7 +56,10 @@ export class WorkspaceContextStore {
 		const current = this.current;
 		if (
 			current &&
-			!(this.executors?.gitAvailable(current.executorId) ?? effectiveExecutorId(current.executorId) === 'local')
+			!(
+				this.executors?.gitAvailable(current.executorId) ??
+				effectiveExecutorId(current.executorId) === 'local'
+			)
 		) {
 			return {
 				kind: 'request-failed',
@@ -78,7 +83,10 @@ export class WorkspaceContextStore {
 		const current = this.current;
 		if (
 			current &&
-			!(this.executors?.filesAvailable(current.executorId) ?? effectiveExecutorId(current.executorId) === 'local')
+			!(
+				this.executors?.filesAvailable(current.executorId) ??
+				effectiveExecutorId(current.executorId) === 'local'
+			)
 		) {
 			return {
 				kind: 'request-failed',
@@ -114,7 +122,11 @@ export class WorkspaceContextStore {
 		const chat = this.sessions.selectedChat;
 		if (!chat) return null;
 		return chat.status === 'draft'
-			? { kind: 'path', executorId: effectiveExecutorId(chat.executorId), projectPath: chat.projectPath }
+			? {
+					kind: 'path',
+					executorId: effectiveExecutorId(chat.executorId),
+					projectPath: chat.projectPath,
+				}
 			: {
 					kind: 'chat',
 					executorId: effectiveExecutorId(chat.executorId),
@@ -126,7 +138,8 @@ export class WorkspaceContextStore {
 	get canUpdateProjectPath(): boolean {
 		const chat = this.sessions.selectedChat;
 		return chat
-			? this.modelCatalog.forExecutor(chat.executorId).supportsUpdateProjectPath(chat.agentId)
+			? chat.status === 'draft' ||
+					this.modelCatalog.forExecutor(chat.executorId).supportsUpdateProjectPath(chat.agentId)
 			: false;
 	}
 }

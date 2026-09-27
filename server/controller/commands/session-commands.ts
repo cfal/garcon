@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { effectiveExecutorId } from '../../../common/executors.js';
 import type {
   AgentInterruptAndSendResponse,
   AgentStopResponse,
@@ -382,8 +383,8 @@ export class SessionCommands {
     }
     return this.support.withChatMutationLock(chatId, () =>
       this.updateProjectPathLocked({
+        ...input,
         chatId,
-        projectPath: input.projectPath,
       }),
     );
   }
@@ -579,6 +580,15 @@ export class SessionCommands {
     const chat = this.deps.chats.getChat(input.chatId);
     if (!chat) {
       throw new CommandValidationError('SESSION_NOT_FOUND', 'Session not found', 404);
+    }
+    if (effectiveExecutorId(chat.executorId) !== input.expectedExecutorId
+      || chat.agentOwnershipEpoch !== input.expectedAgentOwnershipEpoch
+      || chat.projectPath !== input.expectedProjectPath) {
+      throw new CommandValidationError(
+        'STALE_CHAT_OWNERSHIP',
+        'The chat target changed. Close and reopen the folder picker before changing its path.',
+        409,
+      );
     }
     this.deps.agents.assertExecutorReady(chat.executorId);
     if (!this.deps.agents.supportsUpdateProjectPath(chat.agentId, chat.executorId)) {

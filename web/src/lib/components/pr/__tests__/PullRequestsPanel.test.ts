@@ -34,6 +34,12 @@ function makeController(): PullRequestsStore {
 	controller.setProjectState({
 		kind: 'available',
 		project: {
+			target: {
+				kind: 'chat' as const,
+				chatId: 'chat',
+				projectPath: '/project',
+				executorId: 'local',
+			},
 			chatId: 'chat',
 			executorId: 'local',
 			projectPath: '/project',

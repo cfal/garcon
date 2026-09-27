@@ -8,10 +8,7 @@ import { CommitController } from '$lib/git/commit/commit-controller.svelte.js';
 import { PullRequestsStore } from '$lib/git/pull-requests/pull-requests-store.svelte.js';
 import { createGitSurfaceTestDeps } from '$lib/git/__tests__/git-surface-test-deps.js';
 import { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
-import {
-	localExecutor,
-	remoteExecutor,
-} from '$lib/executors/__tests__/fixtures.js';
+import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures.js';
 
 vi.mock('$lib/api/files.js', () => ({ getTree: vi.fn() }));
 
@@ -47,7 +44,12 @@ function createController(executors?: ExecutorsStore) {
 	const controller = registry.files();
 	controller.setProjectState({
 		kind: 'available',
-		project: { chatId: 'chat', projectPath: '/workspace', effectiveProjectKey: '/workspace' },
+		project: {
+			target: { kind: 'chat' as const, chatId: 'chat', projectPath: '/workspace' },
+			chatId: 'chat',
+			projectPath: '/workspace',
+			effectiveProjectKey: '/workspace',
+		},
 	});
 	return controller;
 }
@@ -87,12 +89,22 @@ describe('FilesSurfaceController reveal', () => {
 				controller.dispose();
 				controller.setProjectState({
 					kind: 'available',
-					project: { chatId: 'chat', projectPath: '/workspace', effectiveProjectKey: '/workspace' },
+					project: {
+						target: { kind: 'chat' as const, chatId: 'chat', projectPath: '/workspace' },
+						chatId: 'chat',
+						projectPath: '/workspace',
+						effectiveProjectKey: '/workspace',
+					},
 				});
 			} else
 				controller.setProjectState({
 					kind: 'available',
-					project: { chatId: 'other', projectPath: '/other', effectiveProjectKey: '/other' },
+					project: {
+						target: { kind: 'chat' as const, chatId: 'other', projectPath: '/other' },
+						chatId: 'other',
+						projectPath: '/other',
+						effectiveProjectKey: '/other',
+					},
 				});
 			initial.resolve(response());
 			await initial.promise;
@@ -115,7 +127,11 @@ describe('FilesSurfaceController reveal', () => {
 		await vi.waitFor(() => expect(controller.tree.readyResponse).not.toBeNull());
 		controller.setProjectState({
 			kind: 'resolving',
-			context: { chatId: 'chat', projectPath: '/workspace' },
+			context: {
+				target: { kind: 'chat' as const, chatId: 'chat', projectPath: '/workspace' },
+				chatId: 'chat',
+				projectPath: '/workspace',
+			},
 		});
 		controller.revealFile('/workspace', 'resolved.ts');
 		flushSync();
@@ -123,7 +139,12 @@ describe('FilesSurfaceController reveal', () => {
 		expect(controller.tree.readyResponse).not.toBeNull();
 		controller.setProjectState({
 			kind: 'available',
-			project: { chatId: 'chat', projectPath: '/workspace', effectiveProjectKey: '/workspace' },
+			project: {
+				target: { kind: 'chat' as const, chatId: 'chat', projectPath: '/workspace' },
+				chatId: 'chat',
+				projectPath: '/workspace',
+				effectiveProjectKey: '/workspace',
+			},
 		});
 		await vi.waitFor(() =>
 			expect(controller.tree.focusPathAfterNavigation).toBe('/workspace/resolved.ts'),
@@ -138,7 +159,10 @@ describe('FilesSurfaceController executor browsing', () => {
 		controller.setProjectState({ kind: 'absent' });
 		controller.setPresentationVisible(true);
 		await vi.waitFor(() => expect(controller.tree.readyResponse).not.toBeNull());
-		expect(getTree).toHaveBeenCalledWith({ executorId: 'local', directoryPath: '' }, expect.anything());
+		expect(getTree).toHaveBeenCalledWith(
+			{ executorId: 'local', directoryPath: '' },
+			expect.anything(),
+		);
 		expect(controller.browsingExecutor).toBe(true);
 		controller.setProjectState({ kind: 'absent' });
 		expect(getTree).toHaveBeenCalledTimes(1);
@@ -146,6 +170,7 @@ describe('FilesSurfaceController executor browsing', () => {
 		controller.setProjectState({
 			kind: 'available',
 			project: {
+				target: { kind: 'chat' as const, chatId: 'next', projectPath: '/workspace/chat' },
 				chatId: 'next',
 				projectPath: '/workspace/chat',
 				effectiveProjectKey: '/workspace/chat',
@@ -182,6 +207,12 @@ describe('FilesSurfaceController executor browsing', () => {
 			controller.setProjectState({
 				kind: 'available',
 				project: {
+					target: {
+						kind: 'chat' as const,
+						chatId: 'chat',
+						projectPath: '/worker/project',
+						executorId: remoteExecutor.id,
+					},
 					executorId: remoteExecutor.id,
 					chatId: 'chat',
 					projectPath: '/worker/project',
@@ -239,6 +270,12 @@ describe('FilesSurfaceController executor browsing', () => {
 		controller.setProjectState({
 			kind: 'available',
 			project: {
+				target: {
+					kind: 'chat' as const,
+					chatId: 'other-chat',
+					projectPath: '/other-project',
+					executorId: 'local',
+				},
 				chatId: 'other-chat',
 				executorId: 'local',
 				projectPath: '/other-project',
@@ -388,6 +425,12 @@ describe('FilesSurfaceController executor browsing', () => {
 		vi.mocked(getTree).mockResolvedValue(response('/worker/project'));
 		const controller = createController(executors);
 		const project = {
+			target: {
+				kind: 'chat' as const,
+				chatId: 'remote-chat',
+				projectPath: '/worker/project',
+				executorId: remoteExecutor.id,
+			},
 			executorId: remoteExecutor.id,
 			chatId: 'remote-chat',
 			projectPath: '/worker/project',

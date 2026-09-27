@@ -37,14 +37,23 @@ function candidate(
 function availableProject(chatId: string, projectPath: string) {
 	return {
 		kind: 'available' as const,
-		project: { chatId, projectPath, effectiveProjectKey: chatId },
+		project: {
+			target: { kind: 'chat' as const, chatId: chatId, projectPath: projectPath },
+			chatId,
+			projectPath,
+			effectiveProjectKey: chatId,
+		},
 	};
 }
 
 function resolvingProject(chatId: string, projectPath: string) {
 	return {
 		kind: 'resolving' as const,
-		context: { chatId, projectPath },
+		context: {
+			target: { kind: 'chat' as const, chatId: chatId, projectPath: projectPath },
+			chatId,
+			projectPath,
+		},
 	};
 }
 

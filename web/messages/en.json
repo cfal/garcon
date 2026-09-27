@@ -1666,8 +1666,8 @@
 			"declarations": ["input count", "local countPlural = count: plural"],
 			"selectors": ["countPlural"],
 			"match": {
-					"countPlural=one": "execute a command",
-					"countPlural=other": "execute {count} commands"
+				"countPlural=one": "execute a command",
+				"countPlural=other": "execute {count} commands"
 			}
 		}
 	],
@@ -1676,7 +1676,7 @@
 			"declarations": ["input count", "local countPlural = count: plural"],
 			"selectors": ["countPlural"],
 			"match": {
-					"countPlural=one": "read a file",
+				"countPlural=one": "read a file",
 				"countPlural=other": "read {count} files"
 			}
 		}
@@ -1686,8 +1686,8 @@
 			"declarations": ["input count", "local countPlural = count: plural"],
 			"selectors": ["countPlural"],
 			"match": {
-					"countPlural=one": "edit a file",
-					"countPlural=other": "edit {count} files"
+				"countPlural=one": "edit a file",
+				"countPlural=other": "edit {count} files"
 			}
 		}
 	],
@@ -1696,8 +1696,8 @@
 			"declarations": ["input count", "local countPlural = count: plural"],
 			"selectors": ["countPlural"],
 			"match": {
-					"countPlural=one": "an action",
-					"countPlural=other": "{count} actions"
+				"countPlural=one": "an action",
+				"countPlural=other": "{count} actions"
 			}
 		}
 	],
@@ -2178,6 +2178,7 @@
 	"sidebar_project_path_errors_outcome_unknown": "The agent did not confirm the path change. Retry the same destination in a moment before continuing this chat.",
 	"sidebar_project_path_errors_unsupported": "This agent does not support changing the project path.",
 	"sidebar_project_path_errors_update_failed": "Failed to update project path.",
+	"sidebar_project_path_errors_target_changed": "The chat target changed. Close and reopen the folder picker before changing its path.",
 	"sidebar_project_path_menu_item": "Change project path",
 	"sidebar_project_path_new_label": "New path",
 	"sidebar_project_path_title": "Change project path",

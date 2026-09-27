@@ -103,13 +103,19 @@ export class GitProjectSelectionController {
 			case 'available':
 				this.#publish({
 					...project,
-					project: { ...project.project, executorId: effectiveExecutorId(project.project.executorId) },
+					project: {
+						...project.project,
+						executorId: effectiveExecutorId(project.project.executorId),
+					},
 				});
 				break;
 			default:
 				this.#publish({
 					...project,
-					context: { ...project.context, executorId: effectiveExecutorId(project.context.executorId) },
+					context: {
+						...project.context,
+						executorId: effectiveExecutorId(project.context.executorId),
+					},
 				});
 		}
 	}
@@ -170,7 +176,7 @@ export class GitProjectSelectionController {
 		const chat = this.#chatProjectState;
 		if (chat.kind === 'absent') return;
 		const target = chat.kind === 'available' ? chat.project : chat.context;
-		const lease = this.#deps.projectResolution.retain({ kind: 'chat', ...target });
+		const lease = this.#deps.projectResolution.retain(target.target);
 		try {
 			await lease.retry();
 		} finally {

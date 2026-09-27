@@ -187,7 +187,10 @@ export class ProjectPathDialogState {
 		this.worktreeError = null;
 
 		try {
-			const result = await getGitWorktrees({ executorId, projectPath: path }, { signal: abort.signal });
+			const result = await getGitWorktrees(
+				{ executorId, projectPath: path },
+				{ signal: abort.signal },
+			);
 			if (!current()) return;
 			this.worktrees = result.worktrees;
 		} catch (error) {
@@ -315,6 +318,8 @@ export class ProjectPathDialogState {
 	}
 
 	#apiErrorMessage(error: ApiError): string {
+		if (error.errorCode === 'STALE_CHAT_OWNERSHIP')
+			return m.sidebar_project_path_errors_target_changed();
 		if (error.errorCode === 'CHAT_NOT_IDLE') return m.sidebar_project_path_errors_chat_not_idle();
 		if (error.errorCode === 'PROJECT_PATH_UPDATE_UNSUPPORTED') {
 			return m.sidebar_project_path_errors_unsupported();

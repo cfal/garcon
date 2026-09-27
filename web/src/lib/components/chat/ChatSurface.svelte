@@ -105,7 +105,8 @@
 	const reserveMobileToolbar = $derived(isMobile && hasUsableChatContext);
 	const canUpdateSelectedProjectPath = $derived(
 		selectedChat && executors.isReady(selectedChat.executorId)
-			? (modelCatalog.supportsUpdateProjectPath?.(selectedChat.agentId) ?? false)
+			? selectedChat.status === 'draft' ||
+					(modelCatalog.supportsUpdateProjectPath?.(selectedChat.agentId) ?? false)
 			: false,
 	);
 	const canForkSelectedChat = $derived(

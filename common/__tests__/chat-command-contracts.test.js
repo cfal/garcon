@@ -16,6 +16,7 @@ import {
   parseQueueEntryReplaceCommandRequest,
   parseStartChatCommandRequest,
   parseSteerCommandRequest,
+  parseProjectPathPatchRequest,
 } from '../chat-command-contracts.ts';
 import {
   CHAT_STOP_OUTCOMES,
@@ -32,6 +33,18 @@ function agentSettings(ownerId = 'claude') {
 }
 
 describe('chat command request parsers', () => {
+  it('requires the captured executor, ownership epoch and path for folder changes', () => {
+    const input = {
+      chatId: CHAT_ID, projectPath: '/next', expectedExecutorId: 'local',
+      expectedAgentOwnershipEpoch: 'epoch-1', expectedProjectPath: '/previous',
+    };
+    expect(parseProjectPathPatchRequest(input)).toEqual(input);
+    for (const key of ['expectedExecutorId', 'expectedAgentOwnershipEpoch', 'expectedProjectPath']) {
+      expect(() => parseProjectPathPatchRequest({ ...input, [key]: undefined })).toThrow();
+      expect(() => parseProjectPathPatchRequest({ ...input, [key]: '' })).toThrow();
+    }
+    expect(() => parseProjectPathPatchRequest({ ...input, expectedExecutorId: 'not-an-executor' })).toThrow();
+  });
   it('parses a promptless handoff with explicit ownership and bounded request identity', () => {
     const input = { chatId: CHAT_ID, clientRequestId: 'request-handoff', handoff: {
       expectedAgentOwnershipEpoch: 'epoch-source', target: { executorId: 'local', agentId: 'codex', model: 'synthetic-model' },

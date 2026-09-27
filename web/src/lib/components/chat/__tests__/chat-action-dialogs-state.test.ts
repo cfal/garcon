@@ -52,6 +52,8 @@ describe('ChatActionDialogsState', () => {
 			currentName: 'New chat',
 		});
 		expect(dialogs.chatProjectPathDialog).toEqual({
+			status: chat.status,
+			agentOwnershipEpoch: chat.agentOwnershipEpoch,
 			chatId: chat.id,
 			chatTitle: 'New chat',
 			currentProjectPath: '/workspace/repo',

@@ -39,6 +39,7 @@ describe('GitComparePanel', () => {
 		controller.setProjectState({
 			kind: 'available',
 			project: {
+				target: { kind: 'chat' as const, chatId: 'chat', projectPath: '/project' },
 				chatId: 'chat',
 				projectPath: '/project',
 				effectiveProjectKey: '/project',
