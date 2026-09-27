@@ -30,12 +30,13 @@ Add a separate executor selector immediately to the left of the model selector. 
 
 On narrow layouts, collapse the executor trigger to the executor icon. Pressing it opens a menu containing full executor names, availability, and the selected item. Preserve an accessible selected-executor label and a desktop tooltip.
 
-Recommended handoff behavior preserves the existing staged ownership flow:
+Handoff behavior, as implemented:
 
 - Choosing another executor opens destination configuration rather than immediately moving the chat.
 - Confirm the destination directory, with browsing through that executor's Files service.
-- Keep the current agent/model when supported; otherwise require an explicit replacement on the destination.
-- Cancel leaves the prior selection unchanged. Confirmation stages a complete destination selection; the next submission performs the handoff through the existing admission path.
+- Keep the current agent/model when supported; otherwise require an explicit replacement on the destination, and say so while the destination catalog lacks the selection.
+- Cancel leaves the prior selection unchanged. Confirmation commits the complete destination through the promptless handoff command without sending a prompt or consuming the composer draft.
+- Switching agents on the same executor while the chat's folder is known to be unavailable opens the same dialog to choose a folder, since some agents cannot update their project path.
 - Do not implicitly stop a turn, discard queued input, or migrate project files.
 
 Executor, directory, agent, and model must not be published as a partially valid destination configuration.

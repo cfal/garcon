@@ -2,11 +2,11 @@
 
 Status: historical second-stage proposal, researched on 2026-09-19 against `2bf52dafc`. Subsequent implementation supersedes its transport and UI details. See [Current Transport](./transport.md), [Files](./files.md), [Git](./git.md), and [Terminals](./terminal.md) for the newer boundaries. The text below preserves the original proposal, not a current module or feature inventory.
 
-Current composer policy: pending agent, host, and destination-folder choices are
-ephemeral. Leaving a chat or reloading resets them to its saved execution owner
-and folder. Composer text and recovered file drafts retain their existing
-persistence. An explicitly confirmed destination remains selected while staying
-in that chat, until submission or cancellation.
+Current composer policy: executor, agent, and destination-folder choices commit
+immediately through the promptless handoff command once confirmed; model-only
+changes use the model PATCH command. Neither sends a prompt or consumes the
+composer draft, and cancelling a destination leaves the saved owner unchanged.
+Composer text and recovered file drafts retain their existing persistence.
 
 Controller-owned composer commands (`/rename`, `/move`, `/tag`, and `/in`) remain
 available for started chats when the executor or model catalog is unavailable. Click, Enter, and
@@ -147,7 +147,7 @@ A label change has no execution effect. Connection, direction, or secret edits r
 
 The delete confirmation states that chats and saved settings remain unavailable and worker data is not deleted. A chat whose executor is no longer configured shows an unavailable executor and disabled execution, retains composer input, and keeps the executor selector available for explicit recovery. Re-adding the same label creates a different executor identity and does not repair existing references.
 
-Composer notices have one recovery priority: unavailable executor, then unavailable project path, then catalog loading/error. Executor unavailability suppresses folder recovery actions; a missing path on a ready executor retains its Retry/Choose folder actions instead of a competing catalog notice. Completion menus stay hidden while the executor or project is unavailable so secondary discovery errors cannot cover the recovery notice. Readiness changes invalidate executor-qualified project resolution, so reconnection rechecks the path rather than displaying an old filesystem failure. These transitions do not replace the composer or clear drafts.
+Composer notices have one recovery priority: unavailable executor, then unavailable project path, then catalog loading/error. Executor unavailability suppresses folder recovery actions; a missing path on a ready executor retains its Retry/Choose folder actions instead of a competing catalog notice. Completion menus stay hidden while the executor or project is unavailable so secondary discovery errors cannot cover the recovery notice. Readiness changes invalidate executor-qualified project resolution, so reconnection rechecks the path rather than displaying an old filesystem failure. These transitions do not replace the composer or clear drafts. Files and Git surfaces follow the same rule: an offline, disabled, or deleted executor is reported as executor unavailability, not as a missing folder, and offers no folder actions. Operations that need the executor report `EXECUTOR_UNAVAILABLE` before consulting its agent inventory, which is known only after the executor connects to the current controller process.
 
 This is one active controller relationship per worker state directory. Do not add a worker account list, tenant selection, or worker-side executor registry.
 

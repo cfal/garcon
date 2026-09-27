@@ -2200,7 +2200,10 @@ Composer executor and agent selections commit through the promptless
 `POST /api/v1/chats/agent-handoff` command, under a transcript-snapshot
 reservation. Confirmation completes the ownership change without admitting a
 turn or consuming the editable composer draft. Files, Git, and project controls
-follow the committed chat projection immediately. Selection-only changes do not
+follow the committed chat projection immediately. A same-executor agent switch
+carries a destination folder when the chat's current folder is known to be
+unavailable; that folder is inspected before the decision and installed with
+the target, as for a cross-executor handoff. Selection-only changes do not
 plan carryover or invoke compaction; the next explicit dispatch plans against its
 actual input and final target. Switching selections, including switching back,
 must not issue a compaction query. Compaction configuration or generation failures
