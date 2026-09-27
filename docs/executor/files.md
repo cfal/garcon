@@ -1,6 +1,6 @@
 # Files On Executors
 
-Status: implemented architecture, updated 2026-09-26. Files use bounded inline RPC over the existing shared Noise WebSocket. No bulk transfer subsystem, scheduler, or second channel is included.
+Status: implemented architecture, updated 2026-09-27. Files use bounded inline RPC over the existing shared Noise WebSocket. No bulk transfer subsystem, scheduler, or second channel is included.
 
 The historical [Executor Interfaces](./interface.md) and [Executors In The App](./app-integration.md) describe earlier stages. [Executor Transport](./transport.md) owns the current connection contract; this document describes the implemented file service.
 
@@ -36,7 +36,7 @@ The limits below describe the supported protocol.
 | [File contracts](../../common/file-contracts.ts) | Define executor-qualified canonical root/relative-path identity, opaque revisions, conflict policy, tree responses, and a 4 MiB content limit. |
 | [Revision operations](../../server/runtime/files/file-revision.ts) | Read bytes with before/after revision checks on an opened handle. Revisions derive from filesystem metadata, not a content hash. |
 | Text saves | Serialize Garcon writes using a file lock, re-resolve the target, compare the expected revision, and return a revision from the opened write handle. The current implementation truncates/writes in place; it is not an atomic rename. |
-| [Browser file sessions](../../web/src/lib/files/sessions/file-session-registry.svelte.ts) | Own executor-qualified documents, views, save/conflict handling, and draft recovery. |
+| [Browser file sessions](../../web/src/lib/files/sessions/file-session-registry.svelte.ts) | Own executor-qualified live documents, views, and save/conflict handling. |
 | [Executor RPC](../../server/remote/transport/rpc-protocol.ts) | Already carries executor-level methods such as project inspection alongside provider calls. A second generic RPC framework is unnecessary. |
 
 Local and remote use the same machine-service implementation and editor behavior, without parallel route implementations.
@@ -81,7 +81,15 @@ A document identity is:
 
 Normalize absent/null executor selection to `local` at the boundary. An explicit unknown or offline remote never falls back to Local. Identical path strings on two executors identify different documents.
 
-Carry the executor through file requests, identity responses, document/session keys, pending loads, revision polling, tree/navigation state, and draft recovery keys. Keep the existing user/deployment partition on recovery data. The serving generation is not part of durable document identity: reconnecting must not lose an unsaved editor buffer.
+Carry the executor through file requests, identity responses, document/session keys, pending loads, revision polling, and tree/navigation state. Keep the existing user/deployment partition on persisted navigation. The serving generation is not part of document identity: reconnecting must not lose an unsaved live editor buffer.
+
+Unsaved content is browser-session-only. Reload or closing the browser discards it;
+there is no draft checkpointing, recovery prompt, or cross-computer synchronization.
+Retain live edits through temporary outages, ordinary view switches, and executor
+changes without transferring their original file identity. Explicit destructive
+close/replace actions still require the existing dirty-buffer confirmation, and
+page unload retains its best-effort browser guard. Saved files and navigation
+history remain durable. This policy supersedes earlier draft-recovery requirements.
 
 Resolve paths on their owning executor using its filesystem semantics and configured project base. Browsing before chat creation uses the chosen executor's base directory. Chat-scoped files remain constrained to the validated project root; a client-supplied canonical path is not authority to escape that root or the executor's base. Containment and symlink checks belong at actual file access, not just during project selection.
 
@@ -154,13 +162,13 @@ When switching executors, try the current directory on the destination before de
 
 File errors use typed serialization through both RPC and HTTP boundaries, preserving codes such as `FILE_TOO_LARGE`, `FILE_CHANGED_DURING_READ`, and `FILE_REVISION_CONFLICT`. The RPC adapter preserves domain errors and distinguishes definite rejection/non-dispatch from uncertain mutation outcomes.
 
-Enable remote browsing, file links, and editor actions only after the corresponding executor service is available. Keep polling bounded to existing visible/user-demanded workflows; no filesystem watcher service is required. File unavailability must not clear recovery drafts or disable unrelated Local files, chats, Git, or terminals.
+Enable remote browsing, file links, and editor actions only after the corresponding executor service is available. Keep polling bounded to existing visible/user-demanded workflows; no filesystem watcher service is required. File unavailability must not clear live buffers or disable unrelated Local files, chats, Git, or terminals.
 
 ## Verification Criteria
 
 The implementation must demonstrate these boundaries:
 
-- Local and two workers with identical path strings but different contents: browse, read, save, recovery, and simultaneous panels never cross executors.
+- Local and two workers with identical path strings but different contents: browse, read, save, live buffers, and simultaneous panels never cross executors.
 - Both connection directions, including an outbound-only worker with no reachable worker REST endpoint.
 - Executor-side project-base and symlink checks, target changes during awaited resolution, and independent Git/terminal guards after Files is enabled.
 - Byte-boundary and over-limit cases: image bytes, UTF-8 text, malformed base64, escaped content, and large directory responses.
