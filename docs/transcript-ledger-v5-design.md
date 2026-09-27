@@ -1761,8 +1761,8 @@ model context, carryover, or export.
   and lifecycle state are separate UI signals, never preview text.
   Cold list-cache repair is best effort: after readiness it samples bounded head
   and tail ordinal ranges rather than scanning the full ledger. Oversized tail
-  payloads are skipped; an omitted head candidate defers repair because it may
-  contain the first input. Missing candidates also leave cached metadata unchanged;
+  payloads are skipped; an omitted head candidate defers repair unless a readable
+  first user input precedes it. Missing candidates also leave cached metadata unchanged;
   live commits continue updating previews normally. Startup loads only persisted
   list metadata.
 - **Context seeding and carryover** use the conversational fold. A new-session

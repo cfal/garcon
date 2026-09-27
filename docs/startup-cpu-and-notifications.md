@@ -39,13 +39,14 @@ native history must remain an explicit failure, not an empty successful view.
 
 Preview repair samples only the first and last 32 ledger ordinals, decoding at
 most 64 KiB per candidate. Oversized tail rows are skipped. An oversized head
-candidate defers repair rather than promoting later output over a possible first
-input; imported user inputs can also be provider rows. Absent edge candidates
-likewise leave the cache unrepaired. The byte bound uses SQLite functions
+candidate defers repair only when no readable first user input precedes it;
+imported user inputs can also be provider rows. Absent edge candidates likewise
+leave the cache unrepaired. The byte bound uses SQLite functions
 available on older macOS system SQLite. This is best-effort list metadata, not
 transcript truncation. Reads and publication are synchronous within each yielded
 unit, so live updates, deletion, and view replacement cannot interleave with
-publication.
+publication. An unrepaired entry can still take its title seed from later live
+activity; this approximate cache never determines transcript content.
 
 No new transport, durable notification state, replay, or provider-specific logic
 is needed. Existing transcript and executor contracts remain authoritative.
@@ -62,6 +63,8 @@ is needed. Existing transcript and executor contracts remain authoritative.
   Real coordinator tests cover queued completion coalescing and dispatch failures
   before a ledger run exists. A committed terminal wins over a later launch error
   for the same turn; terminal-free failures reach idle after ownership is released.
+  Idle settlement does not require an available executor. Paused queue tails also
+  permit attention notifications but never dispatch until explicitly resumed.
 - Bound preview work and test synchronous timer starvation, concurrent live
   updates/deletion, cancellation, and preservation of successful partial repairs.
 - Run focused tests, repository checks/tests, and isolated timed startup without
