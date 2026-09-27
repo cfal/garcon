@@ -16,6 +16,7 @@
 	import { INITIAL_VISIBLE_MESSAGES } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 	import { sameGitProject } from '$lib/git/targets/git-target.js';
 	import type { ResendCandidate } from '$shared/chat-view';
+	import type { ProjectTarget } from '$shared/project-resolution';
 	import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 	import { ComposerState } from '$lib/chat/composer/composer.svelte.js';
 	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
@@ -328,6 +329,16 @@
 			} finally {
 				lease.release();
 			}
+		},
+		isProjectUnavailable: (chatId) => {
+			const chat = sessions.byId[chatId];
+			if (!chat?.projectPath) return false;
+			const executorId = chat.executorId ?? 'local';
+			const target: ProjectTarget =
+				chat.status === 'draft'
+					? { kind: 'path', executorId, projectPath: chat.projectPath }
+					: { kind: 'chat', executorId, chatId, projectPath: chat.projectPath };
+			return projectResolution.snapshotFor(target).kind === 'unavailable';
 		},
 		setIsViewportPinnedToBottom: (v) => {
 			currentPanel()?.scroll.setPinnedToBottom(v);

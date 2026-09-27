@@ -115,6 +115,7 @@ export class ConversationSessionController {
 			chooseDestination: (chatId, executorId, path, model) =>
 				this.executorHandoff.ask(chatId, executorId, path, model),
 			commitHandoff: (chatId, handoff) => this.#commitHandoff(chatId, handoff),
+			projectUnavailable: (chatId) => deps.isProjectUnavailable?.(chatId) ?? false,
 			getExecutionDefaults: deps.getExecutionDefaults,
 		});
 		const acceptedInputs = this.#acceptedInputs;

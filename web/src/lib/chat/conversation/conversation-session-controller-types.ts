@@ -157,4 +157,5 @@ export interface SessionControllerDeps {
 	setInitialBottomRestorePending: (chatId: string | null) => void;
 	scrollToBottom: () => void;
 	onProjectUnavailable?: (target: ProjectTarget) => Promise<void> | void;
+	isProjectUnavailable?: (chatId: string) => boolean;
 }

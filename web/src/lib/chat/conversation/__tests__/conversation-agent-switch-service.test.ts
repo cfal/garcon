@@ -71,6 +71,7 @@ function harness() {
 			selection: model,
 		})),
 		commitHandoff: vi.fn<ConversationAgentSwitchDeps['commitHandoff']>(async () => undefined),
+		projectUnavailable: vi.fn<ConversationAgentSwitchDeps['projectUnavailable']>(() => false),
 		getExecutionDefaults: (agentId: string) => ({
 			permissionMode: 'default' as const,
 			thinkingMode: 'none' as const,
@@ -191,6 +192,42 @@ describe('ConversationAgentSwitchService', () => {
 			}),
 		);
 		expect(deps.commitHandoff.mock.calls[0][1].target).not.toHaveProperty('projectPath');
+	});
+
+	it('chooses a folder for same-executor agent changes away from an unavailable project', async () => {
+		const { deps, service } = harness();
+		deps.projectUnavailable.mockReturnValue(true);
+		deps.chooseDestination.mockResolvedValueOnce({
+			projectPath: '/recovered',
+			selection: { ...model, agentId: 'codex', model: 'target-model' },
+		});
+		await service.switchAgent('chat-1', { agentId: 'codex', modelValue: 'target-model' });
+		expect(deps.projectUnavailable).toHaveBeenCalledWith('chat-1');
+		expect(deps.chooseDestination).toHaveBeenCalledWith(
+			'chat-1',
+			'local',
+			'/local',
+			expect.objectContaining({ model: 'target-model' }),
+		);
+		expect(deps.commitHandoff).toHaveBeenCalledWith(
+			'chat-1',
+			expect.objectContaining({
+				target: expect.objectContaining({
+					executorId: 'local',
+					agentId: 'codex',
+					projectPath: '/recovered',
+				}),
+			}),
+		);
+	});
+
+	it('keeps the source owner when same-executor folder recovery is cancelled', async () => {
+		const { deps, service } = harness();
+		deps.projectUnavailable.mockReturnValue(true);
+		deps.chooseDestination.mockResolvedValueOnce(null);
+		await service.switchAgent('chat-1', { agentId: 'codex', modelValue: 'target-model' });
+		expect(deps.chooseDestination).toHaveBeenCalledOnce();
+		expect(deps.commitHandoff).not.toHaveBeenCalled();
 	});
 
 	it('updates unstarted draft configuration without a server handoff', async () => {

@@ -429,6 +429,8 @@
 	"chat_executor_handoff_executor_unavailable": "Executor is unavailable",
 	"chat_executor_handoff_checking": "Checking...",
 	"chat_executor_handoff_confirm": "Use This Executor",
+	"chat_executor_handoff_folder_title": "Choose a project folder",
+	"chat_executor_handoff_folder_confirm": "Use This Folder",
 	"chat_executor_handoff_project_unavailable": "Project folder is unavailable",
 	"chat_executor_handoff_target_unavailable": "Execution target is unavailable",
 	"chat_executor_handoff_inspect_failed": "Unable to inspect project folder",

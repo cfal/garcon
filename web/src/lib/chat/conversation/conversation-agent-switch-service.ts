@@ -60,6 +60,7 @@ export interface ConversationAgentSwitchDeps {
 		model: ExecutorHandoffModel,
 	): Promise<ExecutorHandoffDestination | null>;
 	commitHandoff(chatId: string, handoff: AgentHandoffRequest): Promise<void>;
+	projectUnavailable(chatId: string): boolean;
 	getExecutionDefaults(
 		agentId: SessionAgentId,
 		executorId?: string,
@@ -94,7 +95,10 @@ export class ConversationAgentSwitchService {
 		let modelValue = next.modelValue;
 		let projectPath = durable.projectPath;
 		let model: ResolvedModelSelection;
-		if (executorId !== effectiveExecutorId(this.deps.agentState.executorId)) {
+		// Agents that cannot update their project path have no other in-place recovery
+		// from an unavailable folder, so a switch away from one also chooses a folder.
+		const chooseFolder = !this.deps.sessions.isDraft(chatId) && this.deps.projectUnavailable(chatId);
+		if (executorId !== effectiveExecutorId(this.deps.agentState.executorId) || chooseFolder) {
 			if (executorId === effectiveExecutorId(durable.executorId)) projectPath = durable.projectPath;
 			const current = this.deps.agentState;
 			const catalog = this.deps.modelCatalogForExecutor(current.executorId);
@@ -165,7 +169,8 @@ export class ConversationAgentSwitchService {
 		await this.deps.commitHandoff(chatId, {
 			target: {
 				...target,
-				...(executorId !== effectiveExecutorId(durable.executorId)
+				...(executorId !== effectiveExecutorId(durable.executorId) ||
+				destinationProjectPath !== durable.projectPath
 					? { projectPath: destinationProjectPath }
 					: {}),
 			},

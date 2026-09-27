@@ -260,3 +260,53 @@ test('the handoff dialog explains a destination model that is unavailable until 
     fixture.assertNoBrowserErrors();
   }, { executionBackend: 'remote-controller-dials', projectRoots: 'separate' });
 }, 90_000);
+
+test('a same-executor agent switch chooses a new folder when the current one is unavailable', async () => {
+  await withE2eFixture('executor-same-host-folder-recovery', async fixture => {
+    const { client, executionDirs, directAgents } = fixture.integration;
+    const missing = join(executionDirs.project, 'removed-worker-folder');
+    const recovered = join(executionDirs.project, 'recovered-worker-folder');
+    await mkdir(missing);
+    await mkdir(recovered);
+    await writeFile(join(recovered, 'recovered.txt'), 'Synthetic recovered file\n');
+    const chatId = fixture.integration.newChatId();
+    const started = await client.startDirectChat({
+      chatId, projectPath: missing, content: 'Synthetic worker prompt', agent: directAgents.openAi,
+    });
+    await client.waitForTurnTerminal(chatId, started.turnId);
+    await rm(missing, { recursive: true });
+    const runRequests: string[] = [];
+    fixture.page.on('request', request => {
+      if (new URL(request.url()).pathname === '/api/v1/chats/run') runRequests.push(request.url());
+    });
+    const app = new SpaDriver(fixture.page, fixture.integration);
+    await app.setViewport(1_600, 900);
+    await app.openChat(chatId);
+    await fixture.waitForSpaWebSocket();
+    await app.waitForText('Project folder unavailable');
+    await app.fill('[data-composer] textarea', 'Retained folder recovery draft');
+
+    await fixture.page.$eval('[data-slot="composer-bottom-bar"] button[aria-label^="Direct (Chat Completions)"]', element => (element as HTMLButtonElement).click());
+    await app.waitForButton('Anthropic');
+    await app.clickButton('Anthropic');
+    await app.waitForButton('Integration Anthropic Echo');
+    await app.clickButton('Integration Anthropic Echo');
+    await app.waitForText('Choose a project folder');
+    expect(await fixture.page.$eval('[role="dialog"] input', element => (element as HTMLInputElement).value)).toBe(missing);
+    await app.fill('[role="dialog"] input', recovered);
+    await app.waitForDialogButtonEnabled('Use This Folder');
+    const committed = fixture.page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/chats/agent-handoff');
+    await app.clickDialogButton('Use This Folder');
+    expect((await committed).status()).toBe(200);
+    expect((await client.getChatSnapshot(chatId)).chat).toMatchObject({
+      agentId: directAgents.anthropic.agentId, executorId: client.executorId, projectPath: recovered,
+    });
+    await fixture.page.waitForSelector(`[data-file-tree-row] [title="${join(recovered, 'recovered.txt')}"]`);
+    await fixture.page.waitForFunction(() => !document.body.textContent?.includes('Project folder unavailable'));
+    expect(await fixture.page.$eval('[data-composer] textarea', element => (element as HTMLTextAreaElement).value))
+      .toBe('Retained folder recovery draft');
+    expect(runRequests).toEqual([]);
+    expect(fixture.integration.fakeProviders.anthropic.requests()).toEqual([]);
+    fixture.assertNoBrowserErrors();
+  }, { executionBackend: 'remote-controller-dials', projectRoots: 'separate' });
+}, 90_000);

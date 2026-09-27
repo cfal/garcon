@@ -2,7 +2,14 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import { untrack } from 'svelte';
-	import { getExecutors, getModelCatalog, getLocalSettings, getAppShell } from '$lib/context';
+	import {
+		getExecutors,
+		getModelCatalog,
+		getLocalSettings,
+		getAppShell,
+		getChatSessions,
+	} from '$lib/context';
+	import { effectiveExecutorId } from '$shared/executors';
 	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
 	import DirectoryBrowser from './DirectoryBrowser.svelte';
 	import FolderOpen from '@lucide/svelte/icons/folder-open';
@@ -16,7 +23,13 @@
 	const rootCatalog = getModelCatalog();
 	const localSettings = getLocalSettings();
 	let showBrowser = $state(false);
+	const sessions = getChatSessions();
 	const executorId = $derived(handoff.target?.executorId ?? 'local');
+	// A destination on the chat's own executor only replaces an unavailable folder.
+	const choosingFolder = $derived(
+		handoff.target !== null &&
+			effectiveExecutorId(sessions.byId[handoff.target.chatId]?.executorId) === executorId,
+	);
 	const catalog = $derived(rootCatalog.forExecutor(executorId));
 	const basePath = $derived(executors.get(executorId)?.projectBasePath ?? '');
 	const agents = $derived(
@@ -55,7 +68,9 @@
 	<Dialog.Content class="sm:max-w-lg">
 		<Dialog.Header>
 			<Dialog.Title>
-				{m.chat_executor_handoff_title({ label: executors.label(handoff.target?.executorId) })}
+				{choosingFolder
+					? m.chat_executor_handoff_folder_title()
+					: m.chat_executor_handoff_title({ label: executors.label(handoff.target?.executorId) })}
 			</Dialog.Title>
 			<Dialog.Description>{m.chat_executor_handoff_description()}</Dialog.Description>
 		</Dialog.Header>
@@ -131,7 +146,13 @@
 					{m.common_cancel()}
 				</Button>
 				<Button type="submit" disabled={!handoff.canConfirm}>
-					{handoff.checking ? m.chat_executor_handoff_checking() : m.chat_executor_handoff_confirm()}
+					{#if handoff.checking}
+						{m.chat_executor_handoff_checking()}
+					{:else if choosingFolder}
+						{m.chat_executor_handoff_folder_confirm()}
+					{:else}
+						{m.chat_executor_handoff_confirm()}
+					{/if}
 				</Button>
 			</Dialog.Footer>
 		</form>
