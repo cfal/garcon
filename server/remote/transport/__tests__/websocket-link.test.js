@@ -4,6 +4,31 @@ import { WebSocketLink, EXECUTOR_NOISE_CONTEXT } from '../websocket-link.ts';
 
 const secret = Buffer.alloc(32, 42).toString('base64url');
 
+for (const role of ['controller', 'worker']) {
+  test(`reports a version mismatch separately from authentication (${role})`, async () => {
+    const link = new WebSocketLink({ role, executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true });
+    const errors = [];
+    link.onError(message => errors.push(message));
+    let localVersion;
+    const socket = connectNoiseWebSocket(link.listen(), {
+      psk: Buffer.from(secret, 'base64url'), context: EXECUTOR_NOISE_CONTEXT,
+      onMessage(socket, data) {
+        const hello = JSON.parse(data);
+        localVersion = hello.version;
+        const peer = { ...hello, version: 'synthetic-incompatible', role: role === 'controller' ? 'worker' : 'controller' };
+        if (peer.role === 'worker') delete peer.executorId;
+        else peer.executorId = 'synthetic-executor';
+        socket.send(JSON.stringify(peer));
+      },
+    });
+    try {
+      await socket.closed;
+      expect(link.current).toBeNull();
+      expect(errors).toEqual([`Executor version mismatch: local ${localVersion}, peer "synthetic-incompatible". Use matching builds.`]);
+    } finally { socket.close(); await link.dispose(); }
+  });
+}
+
 for (const dialer of ['controller', 'worker']) {
   test(`authenticated reconnect replaces the socket session (${dialer} dials)`, async () => {
     const common = { executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true, reconnectDelayMs: 20 };

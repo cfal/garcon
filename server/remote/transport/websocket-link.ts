@@ -236,7 +236,12 @@ export class WebSocketLink {
       if (Buffer.byteLength(encoded) > 8192) throw new Error('Handshake exceeds budget');
       const frame: unknown = JSON.parse(encoded);
       if (isHello(frame) && !connection.peer) {
-        if (frame.version !== version || frame.role === this.options.role) {
+        if (frame.version !== version) {
+          this.#reportError(`Executor version mismatch: local ${version}, peer ${JSON.stringify(frame.version.slice(0, 80))}. Use matching builds.`);
+          this.#close(connection);
+          return;
+        }
+        if (frame.role === this.options.role) {
           throw new Error('Executor handshake mismatch');
         }
         connection.peer = frame;
