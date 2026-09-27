@@ -124,6 +124,7 @@ export class StartCommands {
     const executorId = parseExecutorId(input.executorId);
     if (!executorId) throw new CommandValidationError('VALIDATION_FAILED', 'Invalid executor ID');
 
+    this.deps.agents.assertExecutorReady(executorId);
     if (!this.deps.agents.hasAgent(input.agentId, executorId)) {
       throw new CommandValidationError('UNSUPPORTED_AGENT', `Unsupported agent: ${input.agentId}`);
     }

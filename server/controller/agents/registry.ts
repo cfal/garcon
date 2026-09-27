@@ -71,6 +71,7 @@ const logger = createLogger('agents:registry');
 
 export interface AgentRegistryServiceContract {
   hasAgent(agentId: string, executorId?: string | null): boolean;
+  assertExecutorReady(executorId?: string | null): void;
   assertAgentAvailable(agentId: string, executorId?: string | null): void;
   supportsAuthLogin(agentId: string, executorId?: string | null): boolean;
   supportsAuthLoginCompletion(agentId: string, executorId?: string | null): boolean;
@@ -255,6 +256,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   }
 
   hasAgent(agentId: string, executorId?: string | null): boolean { return this.#directory.has(agentId, executorId); }
+  assertExecutorReady(executorId?: string | null): void { this.#directory.requireReady(executorId); }
   assertAgentAvailable(agentId: string, executorId?: string | null): void {
     if (!this.#directory.list(executorId).some(integration => integration.descriptor.id === agentId)) {
       throw new DomainError('UNSUPPORTED_AGENT', `Unsupported agent: ${agentId}`, 422);

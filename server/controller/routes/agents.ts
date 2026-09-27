@@ -16,6 +16,7 @@ interface AgentRouteDeps {
 
 export default function createAgentRoutes({ agents, apiProviders }: AgentRouteDeps): RouteMap {
   function validateAuthLoginAgent(agentId: string, executorId: string): Response | null {
+    agents.assertExecutorReady(executorId);
     if (!agents.hasAgent(agentId, executorId)) {
       return Response.json({ error: `Unknown agent: ${agentId}` }, { status: 400 });
     }
@@ -26,6 +27,7 @@ export default function createAgentRoutes({ agents, apiProviders }: AgentRouteDe
   }
 
   function validateAuthLoginCompletionAgent(agentId: string, executorId: string): Response | null {
+    agents.assertExecutorReady(executorId);
     if (!agents.hasAgent(agentId, executorId)) {
       return Response.json({ error: `Unknown agent: ${agentId}` }, { status: 400 });
     }

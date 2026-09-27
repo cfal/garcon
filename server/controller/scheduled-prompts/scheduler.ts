@@ -134,7 +134,7 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
       chats: Pick<IChatRegistry, 'getChat'>;
       agents: Pick<
         AgentRegistryServiceContract,
-        'hasAgent' | 'assertExecutionModeSelectionSupported'
+        'hasAgent' | 'assertExecutorReady' | 'assertExecutionModeSelectionSupported'
       >;
       preambles: Pick<PreambleService, 'snapshot'>;
       inspectProject: ProjectInspector;
@@ -330,6 +330,7 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
       }
       return definition;
     }
+    this.deps.agents.assertExecutorReady(definition.target.executorId);
     if (!this.deps.agents.hasAgent(definition.target.agentId, definition.target.executorId)) {
       throw new ScheduledPromptDomainError('UNSUPPORTED_AGENT', `Unsupported agent: ${definition.target.agentId}`, 422);
     }

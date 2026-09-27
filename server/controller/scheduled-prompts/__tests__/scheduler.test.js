@@ -79,6 +79,7 @@ function agentCapabilities(supportedThinkingModes = ['none', 'high']) {
     hasAgent() {
       return true;
     },
+    assertExecutorReady() {},
     assertExecutionModeSelectionSupported(agentId, selection) {
       if (
         selection.thinkingMode !== undefined
@@ -258,6 +259,37 @@ describe('scheduled prompt scheduler', () => {
       }
     });
   }
+
+  it('reports an unready target executor before agent inventory and project inspection', async () => {
+    const store = new ScheduledPromptStore(await tempDir());
+    await store.init();
+    const hasAgent = mock(() => false);
+    const inspectProject = mock(async (projectPath) => ({ kind: 'available', effectiveProjectKey: projectPath }));
+    const scheduler = new ScheduledPromptScheduler({
+      store, cron: new FakeCron(), runLog: new ScheduledPromptRunLog(),
+      agents: {
+        ...agentCapabilities(),
+        hasAgent,
+        assertExecutorReady() {
+          throw new DomainError('EXECUTOR_UNAVAILABLE', 'Executor is unavailable', 503, true);
+        },
+      },
+      preambles: preambleCatalog(), chats: { getChat: () => ({}) },
+      dispatcher: { dispatch: async () => ({ message: 'sent' }) },
+      inspectProject,
+    });
+    const definition = newChatDefinition('2030-01-02T09:00:00.000Z');
+    definition.target.executorId = '22222222-2222-4222-8222-222222222222';
+    try {
+      await expect(scheduler.create({ expectedRevision: store.revision, scheduledPrompt: definition }))
+        .rejects.toMatchObject({ code: 'EXECUTOR_UNAVAILABLE', status: 503 });
+      expect(hasAgent).not.toHaveBeenCalled();
+      expect(inspectProject).not.toHaveBeenCalled();
+      expect(store.list()).toEqual([]);
+    } finally {
+      scheduler.stop();
+    }
+  });
 
   it.each([1, 5, 60, 90])('claims and registers the next %i-minute occurrence before dispatch', async (intervalMinutes) => {
     const dir = await tempDir();

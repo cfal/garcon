@@ -24,3 +24,23 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
     }, { executionBackend });
   }, 30_000);
 }
+
+test('starts on never-connected or unknown executors report executor unavailability', async () => {
+  await withIntegrationFixture('unready-executor-start', async (fixture) => {
+    const { client, directAgents, dirs } = fixture;
+    const secret = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url');
+    const neverConnected = await client.post<{ id: string }>('/api/v1/executors', {
+      label: 'Synthetic unreachable worker', direction: 'controller-connects',
+      connectionUrl: `ws://127.0.0.1:9/executor#secret=${secret}`, allowInsecureDevelopment: true,
+    });
+    for (const executorId of [neverConnected.id, crypto.randomUUID()]) {
+      await expect(client.startChat(client.directStartRequest({
+        chatId: fixture.newChatId(), agent: directAgents.openAi, projectPath: dirs.project,
+        content: 'Synthetic start before the executor connects', executorId,
+      }))).rejects.toMatchObject({
+        status: 503, body: { errorCode: 'EXECUTOR_UNAVAILABLE', retryable: true },
+      });
+    }
+    expect(fixture.fakeProviders.openAi.requests()).toEqual([]);
+  }, { executionBackend: 'in-process' });
+}, 30_000);

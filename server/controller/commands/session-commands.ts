@@ -580,6 +580,7 @@ export class SessionCommands {
     if (!chat) {
       throw new CommandValidationError('SESSION_NOT_FOUND', 'Session not found', 404);
     }
+    this.deps.agents.assertExecutorReady(chat.executorId);
     if (!this.deps.agents.supportsUpdateProjectPath(chat.agentId, chat.executorId)) {
       throw new CommandValidationError(
         'PROJECT_PATH_UPDATE_UNSUPPORTED',

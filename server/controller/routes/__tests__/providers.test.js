@@ -20,6 +20,7 @@ import { DomainError } from '../../../common/domain-error.ts';
 describe('agent auth login routes', () => {
   const agents = {
     hasAgent: mock(() => true),
+    assertExecutorReady: mock(() => undefined),
     supportsAuthLogin: mock(() => true),
     supportsAuthLoginCompletion: mock(() => true),
     getAgentAuthStatus: mock(() => Promise.resolve(null)),
@@ -124,6 +125,24 @@ describe('agent auth login routes', () => {
     expect(response.status).toBe(400);
     expect(body.error).toBe('agent is required');
     expect(agents.getAgentAuthLoginStatus).not.toHaveBeenCalled();
+  });
+
+  it('reports an unready executor before the agent inventory for login', async () => {
+    const executorId = '22222222-2222-4222-8222-222222222222';
+    agents.assertExecutorReady.mockImplementationOnce(() => {
+      throw new DomainError('EXECUTOR_UNAVAILABLE', 'Executor is unavailable', 503, true);
+    });
+    parseJsonBody.mockResolvedValueOnce({ agentId: 'claude', executorId });
+
+    const response = await routes['/api/v1/agents/auth/login'].POST(
+      new Request('http://localhost/api/v1/agents/auth/login', { method: 'POST' }),
+    );
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ errorCode: 'EXECUTOR_UNAVAILABLE', retryable: true });
+    expect(agents.assertExecutorReady).toHaveBeenCalledWith(executorId);
+    expect(agents.hasAgent).not.toHaveBeenCalled();
+    expect(agents.launchAgentAuthLogin).not.toHaveBeenCalled();
   });
 
   it('returns a client error for unknown login-status agents', async () => {

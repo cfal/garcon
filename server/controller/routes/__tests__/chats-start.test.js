@@ -122,6 +122,7 @@ const agents = {
   getModels: mock(() => Promise.resolve([])),
   isAgentSessionRunning: mock(() => false),
   hasAgent: mock(() => true),
+  assertExecutorReady: mock(() => undefined),
   assertExecutionModeSelectionSupported: mock(() => undefined),
   validateConfiguration: mock(async () => undefined),
   supportsFork: mock(() => true),

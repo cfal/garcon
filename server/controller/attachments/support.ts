@@ -4,7 +4,7 @@ import { CommandValidationError } from '../lib/command-validation-error.js';
 
 type AttachmentAgentCapabilities = Pick<
   AgentRegistryServiceContract,
-  'modelSupportsImages' | 'supportsImages' | 'supportsFileAttachmentMimeType'
+  'assertExecutorReady' | 'modelSupportsImages' | 'supportsImages' | 'supportsFileAttachmentMimeType'
 >;
 
 export interface AttachmentSupportInput {
@@ -21,6 +21,7 @@ export async function assertAttachmentsSupported(
   input: AttachmentSupportInput,
 ): Promise<void> {
   if (input.attachments.length === 0) return;
+  agents.assertExecutorReady(input.executorId);
   const mimeTypes = input.attachments.map((attachment) => {
     const mimeType = attachment.mimeType?.trim().toLowerCase();
     if (!mimeType) {

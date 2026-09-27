@@ -536,6 +536,7 @@ function makeService(overrides = {}) {
   const agents = {
     currentTranscriptViewId: mock(() => Promise.resolve('view-1')),
     hasAgent: mock(() => true),
+    assertExecutorReady: mock(() => undefined),
     supportsImages: mock(() => true),
     supportsFileAttachmentMimeType: mock(
       (_agentId, mimeType) => mimeType === 'video/mp4',
@@ -1399,6 +1400,62 @@ describe('ChatCommandService', () => {
 
     expect(chats.addChat).not.toHaveBeenCalled();
     expect(agents.startSession).not.toHaveBeenCalled();
+  });
+
+  it('reports an unready executor before inventory-derived chat-start checks', async () => {
+    const executorId = '22222222-2222-4222-8222-222222222222';
+    const { service, chats, agents } = makeService({
+      agents: {
+        assertExecutorReady: mock(() => {
+          throw new DomainError('EXECUTOR_UNAVAILABLE', 'Executor is unavailable', 503, true);
+        }),
+      },
+    });
+
+    await expect(service.submitStart({
+      origin: 'interactive',
+      chatId: TARGET_CHAT_ID,
+      executorId,
+      agentId: 'claude',
+      projectPath: projectBaseDir,
+      command: 'start before the worker connects',
+      model: 'opus',
+      clientRequestId: 'req-start-unready-executor',
+      clientMessageId: 'msg-start-unready-executor',
+    })).rejects.toMatchObject({ code: 'EXECUTOR_UNAVAILABLE', status: 503, retryable: true });
+
+    expect(agents.assertExecutorReady).toHaveBeenCalledWith(executorId);
+    expect(agents.hasAgent).not.toHaveBeenCalled();
+    expect(chats.addChat).not.toHaveBeenCalled();
+  });
+
+  it('checks executor readiness before attachment capabilities but not for text-only runs', async () => {
+    const { service, agents } = makeService({
+      agents: {
+        assertExecutorReady: mock(() => {
+          throw new DomainError('EXECUTOR_UNAVAILABLE', 'Executor is unavailable', 503, true);
+        }),
+      },
+    });
+
+    await expect(service.submitRun({
+      chatId: SOURCE_CHAT_ID,
+      command: 'inspect this image before the worker connects',
+      images: [attachment('image/png')],
+      clientRequestId: 'req-run-unready-attachments',
+      clientMessageId: 'msg-run-unready-attachments',
+    })).rejects.toMatchObject({ code: 'EXECUTOR_UNAVAILABLE', status: 503 });
+    expect(agents.supportsImages).not.toHaveBeenCalled();
+    expect(agents.modelSupportsImages).not.toHaveBeenCalled();
+
+    agents.assertExecutorReady.mockClear();
+    await service.submitRun({
+      chatId: SOURCE_CHAT_ID,
+      command: 'text-only input keeps its existing admission path',
+      clientRequestId: 'req-run-text-only',
+      clientMessageId: 'msg-run-text-only',
+    });
+    expect(agents.assertExecutorReady).not.toHaveBeenCalled();
   });
 
   it('rejects unsupported chat-start thinking modes before persistence', async () => {
@@ -5976,6 +6033,24 @@ describe('ChatCommandService', () => {
       { flush: true },
     );
     expect(sessions.get(SOURCE_CHAT_ID).projectPath).toBe(realNextPath);
+  });
+
+  it('reports an unready executor before project path update support', async () => {
+    const { service, chats, agents } = makeService({
+      agents: {
+        assertExecutorReady: mock(() => {
+          throw new DomainError('EXECUTOR_UNAVAILABLE', 'Executor is unavailable', 503, true);
+        }),
+      },
+    });
+
+    await expect(service.updateProjectPath({
+      chatId: SOURCE_CHAT_ID,
+      projectPath: projectBaseDir,
+    })).rejects.toMatchObject({ code: 'EXECUTOR_UNAVAILABLE', status: 503 });
+
+    expect(agents.supportsUpdateProjectPath).not.toHaveBeenCalled();
+    expect(chats.updateProjectPath).not.toHaveBeenCalled();
   });
 
   it('maps unresolvable project path updates to not found', async () => {
