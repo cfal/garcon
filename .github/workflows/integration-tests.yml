@@ -16,59 +16,30 @@ permissions:
 
 jobs:
   server-integration-lane:
-    name: Server protocol integration / ${{ matrix.lane }}
+    name: Server protocol integration / ${{ matrix.execution_backend }} / ${{ matrix.suite.name }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - lane: server 1/4
-            path: tests/server
+        execution_backend: [in-process, remote-controller-dials, remote-executor-dials]
+        suite:
+          - name: server-1-of-4
+            script: test:server:lane
             shard: "1/4"
-            test_timeout: 30000
-            artifact_suffix: server-1-of-4
-          - lane: server 2/4
-            path: tests/server
+          - name: server-2-of-4
+            script: test:server:lane
             shard: "2/4"
-            test_timeout: 30000
-            artifact_suffix: server-2-of-4
-          - lane: server 3/4
-            path: tests/server
+          - name: server-3-of-4
+            script: test:server:lane
             shard: "3/4"
-            test_timeout: 30000
-            artifact_suffix: server-3-of-4
-          - lane: server 4/4
-            path: tests/server
+          - name: server-4-of-4
+            script: test:server:lane
             shard: "4/4"
-            test_timeout: 30000
-            artifact_suffix: server-4-of-4
-          - lane: SACS in-process
+          - name: sacs
             path: tests/sacs
             shard: "1/1"
             test_timeout: 120000
-            artifact_suffix: sacs-in-process
-            execution_backend: in-process
-          - lane: SACS remote controller dials
-            path: tests/sacs
-            shard: "1/1"
-            test_timeout: 120000
-            artifact_suffix: sacs-remote-controller-dials
-            execution_backend: remote-controller-dials
-          - lane: SACS remote executor dials
-            path: tests/sacs
-            shard: "1/1"
-            test_timeout: 120000
-            artifact_suffix: sacs-remote-executor-dials
-            execution_backend: remote-executor-dials
-          - lane: Scripted providers remote controller dials
-            script: test:remote-scripted
-            artifact_suffix: scripted-remote-controller-dials
-            execution_backend: remote-controller-dials
-          - lane: Scripted providers remote executor dials
-            script: test:remote-scripted
-            artifact_suffix: scripted-remote-executor-dials
-            execution_backend: remote-executor-dials
 
     steps:
       - name: Check out repository
@@ -94,14 +65,14 @@ jobs:
       - name: Run server integration tests
         working-directory: integration-tests
         env:
-          TEST_PATH: ${{ matrix.path }}
-          TEST_SHARD: ${{ matrix.shard }}
-          TEST_TIMEOUT: ${{ matrix.test_timeout }}
-          TEST_SCRIPT: ${{ matrix.script }}
-          GARCON_TEST_EXECUTION_BACKEND: ${{ matrix.execution_backend || 'in-process' }}
+          TEST_PATH: ${{ matrix.suite.path }}
+          TEST_SHARD: ${{ matrix.suite.shard }}
+          TEST_TIMEOUT: ${{ matrix.suite.test_timeout }}
+          TEST_SCRIPT: ${{ matrix.suite.script }}
+          GARCON_TEST_EXECUTION_BACKEND: ${{ matrix.execution_backend }}
         run: |
           if [ -n "$TEST_SCRIPT" ]; then
-            bun run "$TEST_SCRIPT"
+            bun run "$TEST_SCRIPT" --shard="$TEST_SHARD"
           else
             bun test --max-concurrency=1 --timeout="$TEST_TIMEOUT" --shard="$TEST_SHARD" "$TEST_PATH"
           fi
@@ -110,7 +81,7 @@ jobs:
         if: ${{ failure() }}
         uses: actions/upload-artifact@v4
         with:
-          name: server-integration-diagnostics-${{ matrix.artifact_suffix }}
+          name: server-integration-diagnostics-${{ matrix.execution_backend }}-${{ matrix.suite.name }}
           path: integration-tests/artifacts/server/
           if-no-files-found: ignore
           retention-days: 7

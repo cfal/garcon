@@ -74,6 +74,28 @@ Register provider holds or failure plans before sending the command. Mark the We
 
 Use `restartGarcon()` for graceful restart behavior and `crashAndRestartGarcon()` for abrupt-loss recovery. Make concurrency deterministic with provider holds and explicit release order, not timing guesses.
 
+Await WebSocket results before asserting on them. Bun 1.4.2's `.resolves`/`.rejects` matchers can synchronously re-enter its WebSocket parser from a message continuation, dropping adjacent frames and closing a healthy socket with code 1002. For an expected rejection, await `promise.then(() => null, (error: unknown) => error)` and assert the exact error synchronously; do not reconnect or relax the assertion.
+
+## Executor Parity
+
+`support/server-suite-inventory.ts` is the shared Local and remote suite inventory. New server suites run in all three lanes by default: `in-process`, `remote-controller-dials`, and `remote-executor-dials`. Explicit, reasoned exceptions run once for controller-only behavior, test infrastructure, or suites that already own their backend matrix. CI shards each lane four ways; SACS runs separately in all three modes. No live credentials are needed.
+
+```bash
+GARCON_TEST_EXECUTION_BACKEND=remote-controller-dials bun run --cwd integration-tests test:server:lane
+GARCON_TEST_EXECUTION_BACKEND=remote-executor-dials bun run --cwd integration-tests test:server:lane --shard=1/4
+bun run --cwd integration-tests test:server:lane --list
+```
+
+Selecting a backend alone does not prove remote coverage:
+
+- Chat helpers target `client.executorId`. Raw machine requests must explicitly carry that identity; the fixture never rewrites arbitrary HTTP bodies.
+- Use `executionDirs` for native files, home and project paths, and `dirs` for controller configuration and ledgers. `prepareWorkspace` prepares the execution host; `prepareControllerWorkspace` seeds controller-owned storage. Prefer `projectRoots: 'separate'` for routing assertions.
+- Inspect provider logs through `executionLogs`, not controller logs. OpenCode supervisor checks use `readExecutionSupervisorStates` to identify children of the selected runtime across restarts.
+- CLI workflows use `withCliFixture` and `cliConnectionArguments`. Remote lanes explicitly grant CLI access and connect through the worker gateway, rather than exercising controller HTTP with a remote chat. Grant denial and revocation remain in the dedicated executor CLI suite.
+- Shared Files, Git and Terminal runtime contracts also run against both real Noise adapters in their owning unit suites. Filesystem fault injection and deterministic PTY doubles remain available behind the adapter. Pure parsers, provider translations and internal algorithms still run once.
+
+Keep transport loss, late completion, session replacement and authority tests in their dedicated remote matrices. Keep real-worker and browser acceptance alongside the adapter contracts; in-process doubles do not establish process isolation or UI recovery. Mixed-pressure/channel topology is separate work, not an additional parity gate.
+
 ## E2E Test Pattern
 
 Use `withE2eFixture` and `SpaDriver`. Open the SPA and wait for its WebSocket before interacting.

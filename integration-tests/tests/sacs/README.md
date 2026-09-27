@@ -68,10 +68,11 @@ substring counts as occurrence identity.
 
 ## Remote Coverage
 
-CI runs SACS in-process and in both public dial directions. Two additional
-`test:remote-scripted` lanes run provider-specific permission, escalation,
-queue, compaction, and shutdown suites with the pinned CLIs and synthetic model
-endpoints. These are not paid/live-provider lanes.
+CI runs SACS in-process and in both public dial directions. The shared
+`test:server:lane` inventory runs provider-specific permission, escalation,
+queue, compaction, and shutdown suites on the same three backends, using pinned
+CLIs and synthetic model endpoints. Each server lane is sharded four ways;
+SACS runs separately. These are not paid/live-provider lanes.
 
 `tests/server/executor-scripted-permission-loss.test.ts` additionally drops both
 dial directions during a real Claude permission request. Transport-only tests
