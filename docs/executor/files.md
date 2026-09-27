@@ -81,15 +81,17 @@ A document identity is:
 
 Normalize absent/null executor selection to `local` at the boundary. An explicit unknown or offline remote never falls back to Local. Identical path strings on two executors identify different documents.
 
-Carry the executor through file requests, identity responses, document/session keys, pending loads, revision polling, and tree/navigation state. Keep the existing user/deployment partition on persisted navigation. The serving generation is not part of document identity: reconnecting must not lose an unsaved live editor buffer.
+Carry the executor through file requests, identity responses, document/session keys, pending loads, revision polling, tree/navigation state, and recovery drafts. Keep the existing user/deployment partition on persisted navigation and drafts. The serving generation is not part of document identity: reconnecting must not lose an unsaved editor buffer.
 
-Unsaved content is browser-session-only. Reload or closing the browser discards it;
-there is no draft checkpointing, recovery prompt, or cross-computer synchronization.
+Unsaved content has best-effort browser-local IndexedDB backups, not cross-computer
+synchronization. Retain the existing debounced checkpoints, bounded storage,
+recovery prompts, and cleanup controls. Recover only against the original
+executor/root/path; never substitute Local when that executor is unavailable.
 Retain live edits through temporary outages, ordinary view switches, and executor
 changes without transferring their original file identity. Explicit destructive
 close/replace actions still require the existing dirty-buffer confirmation, and
-page unload retains its best-effort browser guard. Saved files and navigation
-history remain durable. This policy supersedes earlier draft-recovery requirements.
+page unload retains its best-effort browser guard. Backups do not replace explicit
+saves or guarantee recovery after browser storage failure or eviction.
 
 Resolve paths on their owning executor using its filesystem semantics and configured project base. Browsing before chat creation uses the chosen executor's base directory. Chat-scoped files remain constrained to the validated project root; a client-supplied canonical path is not authority to escape that root or the executor's base. Containment and symlink checks belong at actual file access, not just during project selection.
 
