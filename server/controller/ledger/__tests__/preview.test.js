@@ -56,17 +56,20 @@ it('skips oversized payloads, provider errors, and presentation-only rows', () =
   });
 });
 
-it.each(['user-input', 'provider-row'])('defers repair rather than promoting output past an oversized %s', (kind) => {
+it.each([
+  ['user-input', false], ['user-input', true], ['provider-row', false], ['provider-row', true],
+])('defers repair past an oversized %s, later input=%s', (kind, laterInput) => {
   const message = new UserMessage(at, 'Original input', ['x'.repeat(1024 * 1024)]);
   const input = kind === 'provider-row' ? provider(message) : {
     kind, at, detail: { message, attachments: [], clientMessageId: null, steer: false },
   };
   store.initializeCurrentView('chat', { contentStartOrdinal: 1, rows: [
     input, provider(new BashToolUseMessage(at, 'tool', 'pwd')),
-    provider(new UserMessage(at, 'Later input')), provider(new AssistantMessage(at, 'answer')),
+    ...(laterInput ? [provider(new UserMessage(at, 'Later input'))] : []),
+    provider(new AssistantMessage(at, 'answer')),
   ] });
   expect(ledger.existingPreview('chat')).toBeNull();
-  expect(ledger.currentRows('chat')).toHaveLength(4);
+  expect(ledger.currentRows('chat')).toHaveLength(laterInput ? 4 : 3);
 });
 
 it('repairs on platform SQLite without octet_length and leaves the ledger writable', () => {
