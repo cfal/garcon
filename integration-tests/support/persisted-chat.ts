@@ -1,6 +1,42 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { IntegrationDirectories } from './integration-fixture.js';
+import type { IntegrationDirectories, IntegrationFixture } from './integration-fixture.js';
+import type { ChatRegistryEntry, ChatRegistrySnapshot } from '../../server/controller/chats/store.js';
+
+export async function restartWithSeededChat(
+  fixture: IntegrationFixture,
+  chatId: string,
+  entry: Pick<ChatRegistryEntry, 'agentId' | 'model'> & Partial<ChatRegistryEntry>,
+): Promise<void> {
+  await fixture.restartGarcon({ beforeStart: async () => {
+    const registryPath = join(fixture.dirs.workspace, 'chats.json');
+    const file = Bun.file(registryPath);
+    const registry: ChatRegistrySnapshot = await file.exists() ? await file.json() : { version: 5, sessions: {} };
+    registry.sessions[chatId] = {
+      executorId: fixture.client.executorId,
+      projectPath: fixture.executionDirs.project,
+      nativeSession: null,
+      agentSessionId: null,
+      agentOwnershipEpoch: crypto.randomUUID(),
+      agentSettingsById: {},
+      tags: [],
+      apiProviderId: null,
+      modelEndpointId: null,
+      modelProtocol: null,
+      lastReadAt: null,
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      carryOverSegments: [],
+      nativeSeedReceipt: null,
+      carryOverMigrationQuarantine: null,
+      pendingPreambleBoundary: null,
+      preambleSelection: { revision: 0, orderedPreambleIds: [] },
+      parentChat: null,
+      ...entry,
+    };
+    await writeFile(registryPath, JSON.stringify(registry));
+  } });
+}
 
 export interface PersistedChatBinding extends Record<string, unknown> {
   readonly agentId: string;

@@ -47,7 +47,7 @@ describeOnLinux('OpenCode global event stream through a real proxy', () => {
     testEnvironment.model.scriptTurn([chatCompletionsText(reply)]);
 
     await withIntegrationFixture('opencode-held-connected-frame', async (fixture) => {
-      const controller = OpenCodeTransportController.forFixture(fixture.dirs);
+      const controller = OpenCodeTransportController.forFixture(fixture);
       // Starting model discovery boots the pinned server and proxy without opening the
       // global event stream, so the hold can be armed deterministically.
       await fixture.client.listAgentCatalog();
@@ -105,7 +105,7 @@ describeOnLinux('OpenCode global event stream through a real proxy', () => {
     const held = testEnvironment.model.scriptHeldTurn([chatCompletionsText(heldReply)]);
 
     await withIntegrationFixture('opencode-global-stream-reset', async (fixture) => {
-      const controller = OpenCodeTransportController.forFixture(fixture.dirs);
+      const controller = OpenCodeTransportController.forFixture(fixture);
       const chatId = fixture.newChatId();
       const cursor = fixture.client.markEvents();
       const turn = await fixture.client.startChat(scriptedOpenCodeStartRequest({
@@ -185,7 +185,7 @@ describeOnLinux('OpenCode global event stream through a real proxy', () => {
     const stale = testEnvironment.model.scriptHeldTurn([chatCompletionsText(staleReply)]);
 
     await withIntegrationFixture('opencode-cross-chat-stale-publish', async (fixture) => {
-      const controller = OpenCodeTransportController.forFixture(fixture.dirs);
+      const controller = OpenCodeTransportController.forFixture(fixture);
       const staleChatId = fixture.newChatId();
       const staleCursor = fixture.client.markEvents();
       await fixture.client.startChat(scriptedOpenCodeStartRequest({
@@ -196,6 +196,10 @@ describeOnLinux('OpenCode global event stream through a real proxy', () => {
       await stale.requested;
 
       const sharedConnection = await controller.activeGlobalConnectionId();
+      if (fixture.client.executorId !== 'local') {
+        // Local discovery must not overwrite the worker proxy's observations or directives.
+        await fixture.client.get('/api/v1/models?executorId=local');
+      }
       await controller.holdGlobalStreamThroughMarkers(
         sharedConnection,
         staleReply,
@@ -203,7 +207,7 @@ describeOnLinux('OpenCode global event stream through a real proxy', () => {
       );
       stale.release();
       await controller.waitForStartMarkerHeld(sharedConnection);
-      const dropLogCursor = fixture.garcon.logs.length;
+      const dropLogCursor = fixture.executionLogs.length;
 
       const stopCursor = fixture.client.markEvents();
       expect(await fixture.client.stopChat({
@@ -260,7 +264,7 @@ describeOnLinux('OpenCode global event stream through a real proxy', () => {
         marker: liveReply,
         afterIndex: liveCursor,
       });
-      const dropLogLines = fixture.garcon.logs.slice(dropLogCursor);
+      const dropLogLines = fixture.executionLogs.slice(dropLogCursor);
       const dropLogs = dropLogLines.join('\n');
       expect(dropLogLines.flatMap((line, index) => line.includes(
         '[agent-integration:opencode] Dropped a provider event for an unavailable transcript sink',

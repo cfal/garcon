@@ -396,7 +396,7 @@ describe('Codex producer routing', () => {
       const liveThreadId = await agentSessionId(fixture, liveChatId);
       expect(liveThreadId).not.toBe(staleThreadId);
 
-      const dropLogCursor = fixture.garcon.logs.length;
+      const dropLogCursor = fixture.executionLogs.length;
       const staleContent = `cross-chat-stale-${randomUUID()}`;
       const staleControl = 'cross-chat-stale.message.json';
       await writeFile(join(controlDirectory, staleControl), JSON.stringify({
@@ -450,7 +450,7 @@ describe('Codex producer routing', () => {
       expect(assistantContents((await fixture.client.getMessages(liveChatId)).messages)
         .filter((content) => content === liveContent)).toHaveLength(1);
 
-      const dropLogLines = fixture.garcon.logs.slice(dropLogCursor);
+      const dropLogLines = fixture.executionLogs.slice(dropLogCursor);
       const dropLogs = dropLogLines.join('\n');
       expect(dropLogLines.filter((line) => line.includes(
         '[agent-integration:codex] Dropped a provider event for an unavailable transcript sink',

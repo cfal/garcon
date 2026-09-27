@@ -3,8 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { seedCurrentWorkspace } from '../../support/current-workspace.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import { restartWithSeededChat } from '../../support/persisted-chat.js';
 
 const FIRST_PROMPT = 'pre-compaction prompt';
 const FIRST_ANSWER = 'pre-compaction answer';
@@ -65,6 +65,10 @@ describe('Codex compaction interleaving', () => {
     });
 
     await withIntegrationFixture('codex-compaction-interleaving', async (fixture) => {
+      await restartWithSeededChat(fixture, chatId, {
+        agentId: 'codex', model: 'gpt-5.6-sol', agentSessionId,
+        nativeSession: { ownerId: 'codex', schemaVersion: 1, value: { path: nativePath, agentSessionId } },
+      });
       const rendered = (page: Awaited<ReturnType<typeof fixture.client.getMessages>>) =>
         page.messages.map((entry) => (
           'content' in entry.message ? entry.message.content : entry.message.type
@@ -126,35 +130,6 @@ describe('Codex compaction interleaving', () => {
           compactionMarker,
           ...turnRows('turn-2', SECOND_PROMPT, SECOND_ANSWER),
         ].join('\n')}\n`);
-        await seedCurrentWorkspace(directories.workspace);
-        await writeFile(join(directories.workspace, 'chats.json'), JSON.stringify({
-          version: 5,
-          sessions: {
-            [chatId]: {
-              agentId: 'codex',
-              nativeSession: {
-                ownerId: 'codex',
-                schemaVersion: 1,
-                value: { path: nativePath, agentSessionId },
-              },
-              agentOwnershipEpoch: randomUUID(),
-              agentSettingsById: {},
-              projectPath: directories.project,
-              tags: [],
-              agentSessionId,
-              model: 'gpt-5.6-sol',
-              apiProviderId: null,
-              modelEndpointId: null,
-              modelProtocol: null,
-              lastReadAt: null,
-              permissionMode: 'default',
-              thinkingMode: 'none',
-              carryOverSegments: [],
-              nativeSeedReceipt: null,
-              carryOverMigrationQuarantine: null,
-            },
-          },
-        }));
       },
     });
   }, 30_000);

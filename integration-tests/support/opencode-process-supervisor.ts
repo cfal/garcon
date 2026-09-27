@@ -409,7 +409,8 @@ export async function runOpenCodeProcessSupervisor(argv: string[]): Promise<numb
   const binary = process.env.GARCON_TEST_OPENCODE_REAL_BINARY;
   const processStateDir = process.env.GARCON_TEST_OPENCODE_PROCESS_STATE;
   const verificationPath = process.env.GARCON_TEST_OPENCODE_VERIFICATION;
-  const proxyDir = process.env.GARCON_TEST_OPENCODE_PROXY_DIR || null;
+  const proxyRoot = process.env.GARCON_TEST_OPENCODE_PROXY_DIR;
+  const proxyDir = proxyRoot ? join(proxyRoot, String(parentPid)) : null;
   if (!binary || !processStateDir || !verificationPath || !parentStartTimeTicks) {
     process.stderr.write(
       'OpenCode supervisor requires its binary, verification, process state, and original parent identity.\n',

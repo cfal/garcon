@@ -178,6 +178,7 @@ describe('Codex scripted default effort model switching', () => {
       await fixture.client.updateSettings({
         ui: {
           chatTitle: {
+            executorId: fixture.client.executorId,
             enabled: false,
             agentId: 'codex',
             model: 'gpt-6-sol',

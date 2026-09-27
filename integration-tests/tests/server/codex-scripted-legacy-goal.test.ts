@@ -27,7 +27,7 @@ test('resumes a legacy active goal without native goal tools or autonomous turns
       const native = await waitForPersistedNativeSession({
         directories: fixture.dirs, chatId, agentId: 'codex',
       });
-      const goalDatabasePath = join(fixture.dirs.home, '.codex', 'goals_1.sqlite');
+      const goalDatabasePath = join(fixture.executionDirs.home, '.codex', 'goals_1.sqlite');
       await fixture.restartGarcon({
         beforeStart: async () => {
           // Matches the pinned Codex goal schema; only this isolated fixture DB is changed.

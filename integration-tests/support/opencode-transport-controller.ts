@@ -4,7 +4,7 @@
 // below the fixture proxy directory. Tests synchronize on observed state, never on guessed sleeps.
 
 import { join } from 'node:path';
-import type { IntegrationDirectories } from './integration-fixture.js';
+import type { IntegrationFixture } from './integration-fixture.js';
 import { openCodePaths } from './scripted-opencode.js';
 import { readJsonFile, writeJsonAtomic } from './opencode-process-supervisor.js';
 
@@ -62,8 +62,10 @@ export class OpenCodeTransportController {
     this.#observationsPath = join(proxyDir, 'observations.json');
   }
 
-  static forFixture(directories: IntegrationDirectories): OpenCodeTransportController {
-    return new OpenCodeTransportController(openCodePaths(directories).proxy);
+  static forFixture(fixture: IntegrationFixture): OpenCodeTransportController {
+    const pid = [...fixture.executionProcessIds].at(-1);
+    if (pid === undefined) throw new Error('Execution runtime has not started.');
+    return new OpenCodeTransportController(join(openCodePaths(fixture.executionDirs).proxy, String(pid)));
   }
 
   // Resolves once the proxy has applied the hold, so the next global stream is held

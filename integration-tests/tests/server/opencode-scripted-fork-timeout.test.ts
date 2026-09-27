@@ -54,7 +54,7 @@ describeOnLinux('scripted OpenCode long-running fork', () => {
 
       const sourceNative = await openCodeNativeSession(fixture, sourceChatId);
       const forkPath = `/session/${encodeURIComponent(sourceNative.agentSessionId)}/fork`;
-      const transport = OpenCodeTransportController.forFixture(fixture.dirs);
+      const transport = OpenCodeTransportController.forFixture(fixture);
       await transport.holdNextResponse(forkPath);
       const forkChatId = fixture.newChatId();
       const outcome = fixture.client.forkChat({ sourceChatId, chatId: forkChatId }).then(
@@ -81,7 +81,7 @@ describeOnLinux('scripted OpenCode long-running fork', () => {
       expect(assistantContents(fork.messages)).toEqual([reply]);
       const forkNative = await openCodeNativeSession(fixture, forkChatId);
       expect(unroutedWarningSessionIds(
-        fixture.diagnostics().processRuns.flatMap((run) => run.serverLogs),
+        fixture.executionLogs,
       )).not.toContain(forkNative.agentSessionId);
       testEnvironment.model.assertSettled();
     }, withScriptedOpenCode());
@@ -104,7 +104,7 @@ describeOnLinux('scripted OpenCode long-running fork', () => {
 
       const sourceNative = await openCodeNativeSession(fixture, sourceChatId);
       const forkPath = `/session/${encodeURIComponent(sourceNative.agentSessionId)}/fork`;
-      const transport = OpenCodeTransportController.forFixture(fixture.dirs);
+      const transport = OpenCodeTransportController.forFixture(fixture);
       await transport.holdNextResponse(forkPath);
       const forkChatId = fixture.newChatId();
       const outcome = fixture.client.forkRunChat({

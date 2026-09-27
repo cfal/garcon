@@ -30,7 +30,7 @@ import {
   openCodePaths,
   readOpenCodeSessionCount,
   readOpenCodeSessionRows,
-  readSupervisorStates,
+  readExecutionSupervisorStates,
   scriptedOpenCodeRunRequest,
   scriptedOpenCodeStartRequest,
   startScriptedOpenCodeTestEnvironment,
@@ -268,7 +268,7 @@ describeOnLinux('OpenCode against a scripted model', () => {
       // The managed-config redirect is empty and fixture-owned, and the explicit DB exists.
       expect(await readFile(join(paths.config), 'utf8')).toContain('garcon-fake');
       expect(readOpenCodeSessionCount(paths.database)).toBeGreaterThan(0);
-      const supervisors = await readSupervisorStates(fixture.dirs);
+      const supervisors = await readExecutionSupervisorStates(fixture);
       expect(supervisors).toHaveLength(1);
       expect(supervisors[0]).toMatchObject({ mode: 'direct', version: OPENCODE_VERSION });
       testEnvironment.model.assertSettled();
@@ -712,6 +712,7 @@ describeOnLinux('OpenCode against a scripted model', () => {
       await fixture.client.updateSettings({
         ui: {
           chatTitle: {
+            executorId: fixture.client.executorId,
             enabled: false,
             agentId: 'opencode',
             model: OPENCODE_TEST_MODEL,

@@ -30,7 +30,7 @@ import {
 import {
   openCodeNativeSession,
   readOpenCodeSessionRows,
-  readSupervisorStates,
+  readExecutionSupervisorStates,
   scriptedOpenCodeRunRequest,
   scriptedOpenCodeStartRequest,
   startScriptedOpenCodeTestEnvironment,
@@ -232,7 +232,7 @@ describeOnLinux('scripted OpenCode interrupt lifecycle', () => {
       expect((abortedAssistant?.data.error as { name?: string } | undefined)?.name)
         .toBe('MessageAbortedError');
 
-      const previousSupervisors = await readSupervisorStates(fixture.dirs);
+      const previousSupervisors = await readExecutionSupervisorStates(fixture);
       expect(previousSupervisors).toHaveLength(1);
       await fixture.restartGarcon({
         beforeStart: () => waitForSupervisorExit(previousSupervisors),
@@ -476,7 +476,7 @@ async function abortOpenCodeSessionOutOfBand(
   fixture: IntegrationFixture,
   agentSessionId: string,
 ): Promise<void> {
-  const supervisors = (await readSupervisorStates(fixture.dirs))
+  const supervisors = (await readExecutionSupervisorStates(fixture))
     .filter((state) => state.status === 'running');
   if (supervisors.length !== 1 || !supervisors[0].backendUrl) {
     throw new Error('Expected one running proxied OpenCode supervisor with a backend URL.');
@@ -599,7 +599,7 @@ async function waitForRecordedProviderProcessTree(
     identity.startTimeTicks !== null);
   const deadline = Date.now() + LIVE_TURN_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    const states = await readSupervisorStates(fixture.dirs);
+    const states = await readExecutionSupervisorStates(fixture);
     const recorded = states.flatMap((state) => state.providerOwnedProcesses);
     if (expected.every((identity) => recorded.some((candidate) =>
       candidate.pid === identity.pid && candidate.startTimeTicks === identity.startTimeTicks

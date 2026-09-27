@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { seedCurrentWorkspace } from '../../support/current-workspace.js';
+import { restartWithSeededChat } from '../../support/persisted-chat.js';
 import { CodexAppServerClient } from '../../../server-agents/codex/src/agents/codex/app-server/client.js';
 import { buildThreadResumeParams } from '../../../server-agents/codex/src/agents/codex/app-server/request-builders.js';
 import { projectCodexCodeModeCommands } from '../../../server-agents/codex/src/agents/codex/code-mode-command-projection.js';
@@ -26,6 +26,10 @@ describe('Codex fork at message', () => {
     };
 
     await withIntegrationFixture('codex-fork-at-message', async (fixture) => {
+      await restartWithSeededChat(fixture, sourceChatId, {
+        agentId: 'codex', model: 'gpt-5.6-sol', agentSessionId: sourceAgentSessionId,
+        nativeSession: { ownerId: 'codex', schemaVersion: 1, value: { path: sourceNativePath, agentSessionId: sourceAgentSessionId } },
+      });
       const source = await fixture.client.getMessages(sourceChatId);
       expect(source.messages.map((entry) => [entry.ordinal, entry.message.type])).toEqual([
         [2, 'user-message'],
@@ -96,8 +100,8 @@ describe('Codex fork at message', () => {
 
       const codex = new CodexAppServerClient({
         env: {
-          HOME: fixture.dirs.home,
-          CODEX_HOME: join(fixture.dirs.home, '.codex'),
+          HOME: fixture.executionDirs.home,
+          CODEX_HOME: join(fixture.executionDirs.home, '.codex'),
         },
       });
       try {
@@ -304,39 +308,7 @@ describe('Codex fork at message', () => {
           }),
           '',
         ].join('\n'));
-        await seedCurrentWorkspace(directories.workspace);
-        await writeFile(join(directories.workspace, 'chats.json'), JSON.stringify({
-          version: 5,
-          sessions: {
-            [sourceChatId]: {
-              agentId: 'codex',
-              nativeSession: {
-                ownerId: 'codex',
-                schemaVersion: 1,
-                value: {
-                  path: sourceNativePath,
-                  agentSessionId: sourceAgentSessionId,
-                },
-              },
-              agentOwnershipEpoch: randomUUID(),
-              agentSettingsById: {},
-              projectPath: directories.project,
-              tags: [],
-              agentSessionId: sourceAgentSessionId,
-              model: 'gpt-5.6-sol',
-              apiProviderId: null,
-              modelEndpointId: null,
-              modelProtocol: null,
-              lastReadAt: null,
-              permissionMode: 'default',
-              thinkingMode: 'none',
-              carryOverSegments: [],
-              nativeSeedReceipt: null,
-              carryOverMigrationQuarantine: null,
-            },
-          },
-        }));
       },
     });
-  }, 15_000);
+  }, 30_000);
 });

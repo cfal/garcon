@@ -16,7 +16,7 @@ describe('on-demand project resolution', () => {
   test('keeps unavailable chats readable and rejects new work until the folder returns', async () => {
     await withIntegrationFixture('on-demand-project-resolution', async (fixture) => {
       await fixture.client.updateSettings({ features: { transcriptSearch: { enabled: true } } });
-      const projectPath = join(fixture.dirs.project, 'movable-project');
+      const projectPath = join(fixture.executionDirs.project, 'movable-project');
       await mkdir(projectPath);
       const chatId = fixture.newChatId();
       const marker = 'synthetic unavailable project marker';
@@ -54,7 +54,7 @@ describe('on-demand project resolution', () => {
       expect(exported.transcriptViewId).toBe(before.transcriptViewId);
       expect(exported.document).toContain(marker);
       expect(await resolveChatProject(fixture.client, chatId, projectPath)).toEqual({
-        target: { kind: 'chat', chatId, projectPath },
+        target: { kind: 'chat', chatId, projectPath, executorId: fixture.client.executorId },
         resolution: { kind: 'unavailable', reason: 'not-found' },
       });
 
@@ -105,8 +105,8 @@ describe('on-demand project resolution', () => {
 
   test('pauses before dequeue and clears pending work after a successful relocation', async () => {
     await withIntegrationFixture('on-demand-project-queue', async (fixture) => {
-      const sourceProject = join(fixture.dirs.project, 'queue-source');
-      const destinationProject = join(fixture.dirs.project, 'queue-destination');
+      const sourceProject = join(fixture.executionDirs.project, 'queue-source');
+      const destinationProject = join(fixture.executionDirs.project, 'queue-destination');
       await mkdir(sourceProject);
       await mkdir(destinationProject);
       const chatId = fixture.newChatId();
@@ -193,6 +193,6 @@ async function resolveChatProject(
   chatId: string,
   projectPath: string,
 ): Promise<ProjectResolutionResponse> {
-  const query = new URLSearchParams({ chatId, expectedProjectPath: projectPath });
+  const query = new URLSearchParams({ chatId, expectedProjectPath: projectPath, executorId: client.executorId });
   return client.get<ProjectResolutionResponse>(`/api/v1/projects/resolve?${query}`);
 }

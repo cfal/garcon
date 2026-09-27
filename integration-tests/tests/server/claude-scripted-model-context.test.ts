@@ -2,7 +2,6 @@ import { expect, test } from 'bun:test';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AgentTurnCommandResponse } from '../../../common/chat-command-contracts.js';
-import { seedCurrentWorkspace } from '../../support/current-workspace.js';
 import { messagesOfType } from '../../support/chat-assertions.js';
 import { claudeText, claudeToolUse } from '../../support/fake-claude-model.js';
 import { withIntegrationFixture, type IntegrationDirectories } from '../../support/integration-fixture.js';
@@ -29,7 +28,7 @@ test('Claude rejects invalid initial models consistently before creating a chat'
       }
       await expect(fixture.client.getChatSnapshot(chatId)).rejects.toMatchObject({ status: 404 });
       expect(environment.model.requests()).toHaveLength(0);
-      expect(fixture.garcon.logs.filter(line => line.includes('Spawning Claude CLI'))).toHaveLength(0);
+      expect(fixture.executionLogs.filter(line => line.includes('Spawning Claude CLI'))).toHaveLength(0);
 
       // Reusing the rejected request identity proves preflight did not reserve a command or chat.
       const reply = 'The initial model is corrected.';
@@ -49,6 +48,9 @@ test('Claude validates unstarted chat settings before persistence and can start 
   const chatId = '1786120000000003';
   try {
     await withIntegrationFixture('claude-model-context-validation', async (fixture) => {
+      await fixture.restartGarcon({ beforeStart: () => prepareUnstartedClaudeChat(
+        { ...fixture.executionDirs, workspace: fixture.dirs.workspace }, chatId, fixture.client.executorId,
+      ) });
       await expect(fixture.client.patch('/api/v1/chats/model', { chatId, model: 'custom[99k]' }))
         .rejects.toThrow(/returned 422:.*context suffix/);
       const registry = JSON.parse(await readFile(join(fixture.dirs.workspace, 'chats.json'), 'utf8'));
@@ -68,7 +70,6 @@ test('Claude validates unstarted chat settings before persistence and can start 
       environment.model.assertSettled();
     }, {
       serverEnvironment: environment.serverEnvironment,
-      prepareWorkspace: (dirs) => prepareUnstartedClaudeChat(dirs, chatId),
     });
   } finally {
     environment.dispose();
@@ -161,10 +162,10 @@ for (const { suffix, nextSuffix, expectsCompaction } of [
         }
         expect(requests.every(request =>
           request.body.model === 'integration-context-model')).toBe(true);
-        expect(fixture.garcon.logs.filter(line => line.includes('Spawning Claude CLI'))).toHaveLength(1);
+        expect(fixture.executionLogs.filter(line => line.includes('Spawning Claude CLI'))).toHaveLength(1);
         const boundaries = (await probe.readContextObservations()).filter(entry => entry.type === 'compact-boundary');
         expect(boundaries).toHaveLength(expectsCompaction ? 1 : 0);
-        expect(await Bun.file(join(fixture.dirs.home, '.claude', 'settings.json')).exists()).toBe(false);
+        expect(await Bun.file(join(fixture.executionDirs.home, '.claude', 'settings.json')).exists()).toBe(false);
         environment.model.assertSettled();
       }, {
         serverEnvironment,
@@ -220,7 +221,7 @@ test('Claude updates numeric caps in place through the settings API and restarts
         expect(persisted.agentSessionId).toBe(sessionId);
         expect((await fixture.client.getChatSnapshot(chatId)).chat.model).toBe(model);
         expect(environment.model.requests().at(-1)?.body.model).toBe(model.split('[')[0]);
-        const launches = fixture.garcon.logs.filter(line => line.includes('Spawning Claude CLI'));
+        const launches = fixture.executionLogs.filter(line => line.includes('Spawning Claude CLI'));
         expect(launches).toHaveLength(expectedLaunches);
       }
       const transcript = await fixture.client.getMessages(chatId);
@@ -228,9 +229,9 @@ test('Claude updates numeric caps in place through the settings API and restarts
       await expect(fixture.client.patch('/api/v1/chats/model', { chatId, model: 'third[99k]' }))
         .rejects.toThrow(/returned 422:.*context suffix/);
       expect((await fixture.client.getChatSnapshot(chatId)).chat.model).toBe('third[800k]');
-      expect(fixture.garcon.logs.filter(line => line.includes('Claude context window updated without restarting')))
+      expect(fixture.executionLogs.filter(line => line.includes('Claude context window updated without restarting')))
         .toHaveLength(3);
-      expect(fixture.garcon.logs.some(line => line.includes('Claude context-window update failed'))).toBe(false);
+      expect(fixture.executionLogs.some(line => line.includes('Claude context-window update failed'))).toBe(false);
       const observations = await probe.readContextObservations();
       const windows = observations.filter(entry => entry.type === 'context-window');
       expect(windows.map(entry => ({ model: entry.model, source: entry.source, window: entry.window })))
@@ -244,7 +245,7 @@ test('Claude updates numeric caps in place through the settings API and restarts
       const environments = observations.filter(entry => entry.type === 'flag-environment');
       expect(environments).toHaveLength(3);
       expect(environments.every(entry => entry.keys.includes('GARCON_SYNTHETIC_CONTEXT_FLAG'))).toBe(true);
-      expect(await Bun.file(join(fixture.dirs.home, '.claude', 'settings.json')).exists()).toBe(false);
+      expect(await Bun.file(join(fixture.executionDirs.home, '.claude', 'settings.json')).exists()).toBe(false);
       environment.model.assertSettled();
     }, { serverEnvironment: environment.serverEnvironment, prepareWorkspace: probe.prepareWorkspace });
   } finally {
@@ -280,15 +281,15 @@ test('Claude retires a mutated process when runtime cap verification fails and d
       expect(after.agentSessionId).toBe(before.agentSessionId);
       expect(environment.model.requests()).toHaveLength(2);
       expect(environment.model.requests().at(-1)?.body.model).toBe('second');
-      expect(fixture.garcon.logs.filter(line => line.includes('Spawning Claude CLI'))).toHaveLength(2);
-      expect(fixture.garcon.logs.filter(line => line.includes('Claude context-window update failed'))).toHaveLength(1);
+      expect(fixture.executionLogs.filter(line => line.includes('Spawning Claude CLI'))).toHaveLength(2);
+      expect(fixture.executionLogs.filter(line => line.includes('Claude context-window update failed'))).toHaveLength(1);
       const windows = (await probe.readContextObservations()).filter(entry => entry.type === 'context-window');
       expect(windows).toHaveLength(1);
       // The real CLI applied the cap; only its verification response was corrupted by the probe.
       expect(windows[0]).toMatchObject({ model: 'second[1m]', source: 'env', window: 850_000 });
       const transcript = await fixture.client.getMessages(chatId);
       expect(messagesOfType(transcript.messages, 'user-message')).toHaveLength(2);
-      expect(await Bun.file(join(fixture.dirs.home, '.claude', 'settings.json')).exists()).toBe(false);
+      expect(await Bun.file(join(fixture.executionDirs.home, '.claude', 'settings.json')).exists()).toBe(false);
       environment.model.assertSettled();
     }, { serverEnvironment: environment.serverEnvironment, prepareWorkspace: probe.prepareWorkspace });
   } finally {
@@ -296,13 +297,13 @@ test('Claude retires a mutated process when runtime cap verification fails and d
   }
 }, 60_000);
 
-async function prepareUnstartedClaudeChat(dirs: IntegrationDirectories, chatId: string): Promise<void> {
-  await seedCurrentWorkspace(dirs.workspace);
+async function prepareUnstartedClaudeChat(dirs: IntegrationDirectories, chatId: string, executorId: string): Promise<void> {
   await writeFile(join(dirs.workspace, 'chats.json'), JSON.stringify({
     version: 5,
     sessions: {
       [chatId]: {
         agentId: 'claude',
+        executorId,
         model: 'custom[1m]',
         projectPath: dirs.project,
         agentOwnershipEpoch: '00000000-0000-4000-8000-000000000003',

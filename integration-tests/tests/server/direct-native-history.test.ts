@@ -6,6 +6,8 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import type { ChatDetailsResponse } from '../../../common/chat-details.js';
+import type { AgentOwnershipJournalFileV5 } from '../../../server/controller/chats/agent-ownership-journal.js';
+import { join } from 'node:path';
 import {
   assistantContents,
   userContents,
@@ -131,6 +133,7 @@ describe('Direct native history persistence', () => {
 
       expect(await fixture.client.deleteChat(chatId)).toEqual({ success: true });
       await aborted;
+      await waitForNativeCleanup(fixture, chatId);
       await expect(stat(nativePath)).rejects.toMatchObject({ code: 'ENOENT' });
 
       await fixture.restartGarcon();
@@ -179,11 +182,23 @@ describe('Direct native history persistence', () => {
       expect(JSON.stringify(reloaded.messages)).not.toContain('<carried-context');
 
       expect(await fixture.client.deleteChat(chatId)).toEqual({ success: true });
+      await waitForNativeCleanup(fixture, chatId);
       expect((await stat(outgoingPath)).isFile()).toBeTrue();
       await expect(stat(currentPath)).rejects.toMatchObject({ code: 'ENOENT' });
     });
   }, 30_000);
 });
+
+async function waitForNativeCleanup(fixture: IntegrationFixture, chatId: string): Promise<void> {
+  const journalPath = join(fixture.dirs.workspace, 'agent-ownership-journal.json');
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    const journal: AgentOwnershipJournalFileV5 = JSON.parse(await readFile(journalPath, 'utf8'));
+    if (!journal.ownershipIntents.some(intent => intent.chatId === chatId)) return;
+    if (Date.now() >= deadline) throw new Error(`Native cleanup did not finish for ${chatId}`);
+    await Bun.sleep(25);
+  }
+}
 
 async function directSessionPath(
   fixture: IntegrationFixture,

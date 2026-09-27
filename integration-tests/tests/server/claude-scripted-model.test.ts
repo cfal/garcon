@@ -111,7 +111,7 @@ describe('Claude against a scripted model', () => {
     testEnvironment.model.scriptTurn([claudeText(reply)]);
 
     await withIntegrationFixture('claude-scripted-custom-subagent-model', async (fixture) => {
-      const created = await fixture.client.post<ApiProviderCatalogEntry>('/api/v1/api-providers', {
+      const created = await fixture.client.post<ApiProviderCatalogEntry>(`/api/v1/api-providers?executorId=${fixture.client.executorId}`, {
         templateId: 'custom',
         label: 'Integration Custom Claude',
         endpoint: {

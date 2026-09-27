@@ -1,7 +1,4 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
-import type { IntegrationDirectories } from '../../support/integration-fixture.js';
 import { assistantContents, userContents } from '../../support/chat-assertions.js';
 import { chatCompletionsText } from '../../support/fake-chat-completions-model.js';
 import {
@@ -12,7 +9,7 @@ import {
   LIVE_TURN_TIMEOUT_MS,
   waitForVisibleResponse,
 } from '../../support/live-agent.js';
-import { waitForPersistedNativeSession } from '../../support/persisted-chat.js';
+import { restartWithSeededChat, waitForPersistedNativeSession } from '../../support/persisted-chat.js';
 import {
   OPENCODE_TEST_MODEL,
   openCodeNativeSession,
@@ -22,7 +19,6 @@ import {
   startScriptedOpenCodeTestEnvironment,
   type ScriptedOpenCodeTestEnvironment,
 } from '../../support/scripted-opencode.js';
-import { seedCurrentWorkspace } from '../../support/current-workspace.js';
 
 // Fork matrix against the real binary: a fork taken while the first model
 // request is still held seeds only the committed prefix, a never-run chat
@@ -119,6 +115,9 @@ describeOnLinux('scripted OpenCode fork matrix', () => {
     const childReply = marker('EMPTY_CHILD_REPLY');
 
     await withIntegrationFixture('opencode-fork-empty', async (fixture) => {
+      await restartWithSeededChat(fixture, sourceChatId, {
+        agentId: 'opencode', model: OPENCODE_TEST_MODEL, permissionMode: 'bypassPermissions',
+      });
       const forkChatId = fixture.newChatId();
       await fixture.client.forkChat({ sourceChatId, chatId: forkChatId });
       expect((await fixture.client.getMessages(forkChatId)).messages).toEqual([]);
@@ -151,13 +150,7 @@ describeOnLinux('scripted OpenCode fork matrix', () => {
       });
       expect(typeof materialized.agentSessionId).toBe('string');
       testEnvironment.model.assertSettled();
-    }, {
-      ...withScriptedOpenCode(),
-      prepareWorkspace: async (directories) => {
-        await prepareWorkspace(directories);
-        await prepareEmptyChat(directories, sourceChatId);
-      },
-    });
+    }, withScriptedOpenCode());
   }, 120_000);
 
   test('forks immediately after the first turn settles and reforks the child', async () => {
@@ -234,41 +227,6 @@ function withScriptedOpenCode(): IntegrationFixtureOptions {
     afterGarconStop: testEnvironment.afterGarconStop,
     extraDiagnostics: testEnvironment.extraDiagnostics,
   };
-}
-
-async function prepareWorkspace(directories: IntegrationDirectories): Promise<void> {
-  await requireEnvironment().prepareWorkspace(directories);
-}
-
-async function prepareEmptyChat(
-  directories: IntegrationDirectories,
-  chatId: string,
-): Promise<void> {
-  await seedCurrentWorkspace(directories.workspace);
-  await writeFile(join(directories.workspace, 'chats.json'), JSON.stringify({
-    version: 5,
-    sessions: {
-      [chatId]: {
-        agentId: 'opencode',
-        nativeSession: null,
-        agentOwnershipEpoch: crypto.randomUUID(),
-        agentSettingsById: {},
-        projectPath: directories.project,
-        tags: [],
-        agentSessionId: null,
-        model: OPENCODE_TEST_MODEL,
-        apiProviderId: null,
-        modelEndpointId: null,
-        modelProtocol: null,
-        lastReadAt: null,
-        permissionMode: 'bypassPermissions',
-        thinkingMode: 'none',
-        carryOverSegments: [],
-        nativeSeedReceipt: null,
-        carryOverMigrationQuarantine: null,
-      },
-    },
-  }));
 }
 
 function marker(label: string): string {

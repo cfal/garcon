@@ -60,6 +60,7 @@ export interface IntegrationFixtureOptions {
   chatTitleAgent?: keyof DirectTestAgents;
   forbiddenPersistedValues?: readonly string[];
   prepareWorkspace?: (directories: IntegrationDirectories) => Promise<void>;
+  prepareControllerWorkspace?: (directories: IntegrationDirectories) => Promise<void>;
   // Runs after the final Garcon child exits and before the fixture root can be removed;
   // the only reliable place to inspect provider grandchildren. Hook failures join the
   // fixture's cleanup errors and preserve its artifact root.
@@ -273,6 +274,7 @@ export class IntegrationFixture {
       // the static record is spread afterwards because legacy tests mutate it during
       // preparation. Resolver values still win on conflicts.
       const resolvedEnvironment = options.resolveServerEnvironment?.(executionDirs) ?? {};
+      await options.prepareControllerWorkspace?.(dirs);
       await options.prepareWorkspace?.(executionDirs);
       const serverEnvironment = {
         ...(options.serverEnvironment ?? {}),
@@ -367,6 +369,12 @@ export class IntegrationFixture {
   newChatId(): string {
     chatIdSequence = (chatIdSequence + 1) % 1_000;
     return String(Date.now() * 1_000 + chatIdSequence);
+  }
+
+  get executionProcessIds(): ReadonlySet<number> { return this.#backend.executionProcessIds; }
+
+  get executionLogs(): readonly string[] {
+    return this.#backend.backend === 'in-process' ? this.garcon.logs : this.#backend.logs;
   }
 
   async connectObserver(name: string): Promise<GarconTestClient> {

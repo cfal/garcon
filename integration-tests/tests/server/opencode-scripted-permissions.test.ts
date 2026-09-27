@@ -790,8 +790,7 @@ describeOnLinux('scripted OpenCode permissions', () => {
           allowed: true,
         }),
       ]);
-      const serverLogs = fixture.diagnostics().processRuns.flatMap((run) => run.serverLogs);
-      expect(serverLogs.filter((line) => (
+      expect(fixture.executionLogs.filter((line) => (
         line.includes('Ignoring an OpenCode event without an operation identity')
       ))).toHaveLength(1);
       expect(testEnvironment.model.requestsSince(requestCursor)).toHaveLength(4);
@@ -884,8 +883,7 @@ describeOnLinux('scripted OpenCode permissions', () => {
           allowed: true,
         }),
       ]);
-      const serverLogs = fixture.diagnostics().processRuns.flatMap((run) => run.serverLogs);
-      expect(serverLogs.filter((line) => (
+      expect(fixture.executionLogs.filter((line) => (
         line.includes('Ignoring an OpenCode event without an operation identity')
       ))).toHaveLength(1);
       expect(testEnvironment.model.requestsSince(requestCursor)).toHaveLength(6);

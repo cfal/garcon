@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { seedCurrentWorkspace } from '../../support/current-workspace.js';
+import { restartWithSeededChat } from '../../support/persisted-chat.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 
 const HISTORY_PROMPT = 'settled prompt';
@@ -28,6 +28,10 @@ describe('Codex fork while a turn is running', () => {
     };
 
     await withIntegrationFixture('codex-fork-while-running', async (fixture) => {
+      await restartWithSeededChat(fixture, sourceChatId, {
+        agentId: 'codex', model: 'gpt-5.6-sol', agentSessionId: sourceAgentSessionId,
+        nativeSession: { ownerId: 'codex', schemaVersion: 1, value: { path: sourceNativePath, agentSessionId: sourceAgentSessionId } },
+      });
       const settled = await fixture.client.getMessages(sourceChatId);
       expect(settled.messages.map((entry) => entry.message.type)).toEqual([
         'user-message',
@@ -188,35 +192,6 @@ describe('Codex fork while a turn is running', () => {
             },
           }),
         ].join('\n')}\n`);
-        await seedCurrentWorkspace(directories.workspace);
-        await writeFile(join(directories.workspace, 'chats.json'), JSON.stringify({
-          version: 5,
-          sessions: {
-            [sourceChatId]: {
-              agentId: 'codex',
-              nativeSession: {
-                ownerId: 'codex',
-                schemaVersion: 1,
-                value: { path: sourceNativePath, agentSessionId: sourceAgentSessionId },
-              },
-              agentOwnershipEpoch: randomUUID(),
-              agentSettingsById: {},
-              projectPath: directories.project,
-              tags: [],
-              agentSessionId: sourceAgentSessionId,
-              model: 'gpt-5.6-sol',
-              apiProviderId: null,
-              modelEndpointId: null,
-              modelProtocol: null,
-              lastReadAt: null,
-              permissionMode: 'default',
-              thinkingMode: 'none',
-              carryOverSegments: [],
-              nativeSeedReceipt: null,
-              carryOverMigrationQuarantine: null,
-            },
-          },
-        }));
       },
     });
   }, 30_000);

@@ -21,7 +21,7 @@ import {
   FakeChatCompletionsModel,
   type ChatCompletionsFault,
 } from './fake-chat-completions-model.js';
-import type { IntegrationDirectories } from './integration-fixture.js';
+import type { IntegrationDirectories, IntegrationFixture } from './integration-fixture.js';
 import { waitForPersistedNativeSession } from './persisted-chat.js';
 import {
   buildOpenCodeProviderEnvironment,
@@ -498,6 +498,11 @@ export async function writeOpenCodePluginSeed(globalConfigDir: string): Promise<
   for (const [name, contents] of Object.entries(OPENCODE_PLUGIN_SEED_FILES)) {
     await writeFile(join(globalConfigDir, name), contents);
   }
+}
+
+export async function readExecutionSupervisorStates(fixture: IntegrationFixture): Promise<OpenCodeProcessState[]> {
+  return (await readSupervisorStates(fixture.executionDirs))
+    .filter(record => fixture.executionProcessIds.has(record.parentPid));
 }
 
 export async function readSupervisorStates(

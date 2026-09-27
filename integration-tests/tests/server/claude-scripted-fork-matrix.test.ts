@@ -8,7 +8,6 @@ import {
 } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ChatMessagesMessage } from '../../../common/ws-events.js';
-import { seedCurrentWorkspace } from '../../support/current-workspace.js';
 import {
   assistantContents,
   countUserContent,
@@ -19,9 +18,10 @@ import {
   claudeToolUse,
 } from '../../support/fake-claude-model.js';
 import {
-  type IntegrationDirectories,
+  type IntegrationFixture,
   withIntegrationFixture,
 } from '../../support/integration-fixture.js';
+import { restartWithSeededChat } from '../../support/persisted-chat.js';
 import {
   expectTranscriptNotYetPersisted,
   forkAfterSourceSettles,
@@ -444,6 +444,9 @@ describe('scripted Claude fork lifecycle matrix', () => {
     const childReply = marker('EMPTY_CHILD_REPLY');
 
     await withIntegrationFixture('claude-scripted-fork-empty', async (fixture) => {
+      await restartWithSeededChat(fixture, sourceChatId, {
+        agentId: 'claude', model: 'haiku', permissionMode: 'bypassPermissions', thinkingMode: 'low',
+      });
       const forkChatId = fixture.newChatId();
       await fixture.client.forkChat({ sourceChatId, chatId: forkChatId });
       expect((await fixture.client.getMessages(forkChatId)).messages).toEqual([]);
@@ -483,12 +486,6 @@ describe('scripted Claude fork lifecycle matrix', () => {
       testEnvironment.model.assertSettled();
     }, {
       serverEnvironment: testEnvironment.serverEnvironment,
-      prepareWorkspace: (directories) => prepareEmptyChat(
-        directories,
-        sourceChatId,
-        'claude',
-        'haiku',
-      ),
     });
   });
 
@@ -498,6 +495,7 @@ describe('scripted Claude fork lifecycle matrix', () => {
     const sourceChatId = String(Date.now() * 1_000 + 902);
 
     await withIntegrationFixture('claude-scripted-fork-unmaterialized', async (fixture) => {
+      await prepareUnmaterializedChat(fixture, sourceChatId);
       const forkChatId = fixture.newChatId();
       await expectTranscriptNotYetPersisted(fixture.client.forkChat({
         sourceChatId,
@@ -518,7 +516,6 @@ describe('scripted Claude fork lifecycle matrix', () => {
       testEnvironment.model.assertSettled();
     }, {
       serverEnvironment: testEnvironment.serverEnvironment,
-      prepareWorkspace: (directories) => prepareUnmaterializedChat(directories, sourceChatId),
     });
   });
 
@@ -614,75 +611,26 @@ function marker(label: string): string {
   return `SCRIPTED_CLAUDE_${label}_${crypto.randomUUID().replaceAll('-', '')}`;
 }
 
-async function prepareEmptyChat(
-  directories: IntegrationDirectories,
-  chatId: string,
-  agentId: string,
-  model: string,
-): Promise<void> {
-  await prepareChatRecord(directories, chatId, agentId, model, null);
-}
-
 async function prepareUnmaterializedChat(
-  directories: IntegrationDirectories,
+  fixture: IntegrationFixture,
   chatId: string,
 ): Promise<void> {
   const agentSessionId = crypto.randomUUID();
-  const nativePath = join(directories.workspace, `${agentSessionId}.jsonl`);
+  const nativePath = join(fixture.executionDirs.home, `${agentSessionId}.jsonl`);
   await writeFile(nativePath, [
     JSON.stringify({ type: 'mode', sessionId: agentSessionId }),
     JSON.stringify({ type: 'queue-operation', sessionId: agentSessionId }),
     JSON.stringify({ type: 'last-prompt', sessionId: agentSessionId }),
     '',
   ].join('\n'));
-  await prepareChatRecord(directories, chatId, 'claude', 'haiku', {
+  await restartWithSeededChat(fixture, chatId, {
+    agentId: 'claude', model: 'haiku', permissionMode: 'bypassPermissions', thinkingMode: 'low',
     agentSessionId,
-    path: nativePath,
-  });
-}
-
-async function prepareChatRecord(
-  directories: IntegrationDirectories,
-  chatId: string,
-  agentId: string,
-  model: string,
-  native: { agentSessionId: string; path: string } | null,
-): Promise<void> {
-  await seedCurrentWorkspace(directories.workspace);
-  await writeFile(join(directories.workspace, 'chats.json'), JSON.stringify({
-    version: 5,
-    sessions: {
-      [chatId]: {
-        agentId,
-        nativeSession: native
-          ? {
-              ownerId: agentId,
-              schemaVersion: 1,
-              value: {
-                path: native.path,
-                agentSessionId: native.agentSessionId,
-                modelEndpointId: null,
-              },
-            }
-          : null,
-        agentOwnershipEpoch: crypto.randomUUID(),
-        agentSettingsById: {},
-        projectPath: directories.project,
-        tags: [],
-        agentSessionId: native?.agentSessionId ?? null,
-        model,
-        apiProviderId: null,
-        modelEndpointId: null,
-        modelProtocol: null,
-        lastReadAt: null,
-        permissionMode: 'bypassPermissions',
-        thinkingMode: 'low',
-        carryOverSegments: [],
-        nativeSeedReceipt: null,
-        carryOverMigrationQuarantine: null,
-      },
+    nativeSession: {
+      ownerId: 'claude', schemaVersion: 1,
+      value: { path: nativePath, agentSessionId, modelEndpointId: null },
     },
-  }));
+  });
 }
 
 async function waitForFile(path: string): Promise<void> {

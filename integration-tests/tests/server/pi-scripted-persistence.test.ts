@@ -1,7 +1,6 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { seedCurrentWorkspace } from '../../support/current-workspace.js';
 import {
   assistantContents,
   userContents,
@@ -110,6 +109,20 @@ describe('scripted Pi persistence', () => {
     let nativePath = '';
 
     await withIntegrationFixture('pi-scripted-legacy-resume', async (fixture) => {
+      await fixture.restartGarcon({
+        beforeStart: async () => {
+          nativePath = await writeLegacyPiSession({
+            workspace: fixture.dirs.workspace,
+            projectPath: fixture.executionDirs.project,
+            sessionRoot: fixture.executionDirs.home,
+            executorId: fixture.client.executorId,
+            chatId,
+            agentSessionId,
+            legacyPrompt,
+            legacyReply,
+          });
+        },
+      });
       const restored = await fixture.client.getMessages(chatId);
       expect(userContents(restored.messages)).toEqual([legacyPrompt]);
       expect(assistantContents(restored.messages)).toEqual([legacyReply]);
@@ -137,21 +150,7 @@ describe('scripted Pi persistence', () => {
       expect(userContents((await fixture.client.getMessages(chatId)).messages))
         .toEqual([legacyPrompt, resumedPrompt]);
       testEnvironment.model.assertSettled();
-    }, {
-      serverEnvironment: testEnvironment.serverEnvironment,
-      async prepareWorkspace(directories) {
-        await testEnvironment.prepareWorkspace(directories);
-        nativePath = await writeLegacyPiSession({
-          workspace: directories.workspace,
-          projectPath: directories.project,
-          sessionRoot: directories.home,
-          chatId,
-          agentSessionId,
-          legacyPrompt,
-          legacyReply,
-        });
-      },
-    });
+    }, withScriptedPi());
   }, 120_000);
 
   test('restarts empty after a crash and resumes the session on the next turn', async () => {
@@ -378,6 +377,7 @@ async function writeLegacyPiSession(input: {
   workspace: string;
   projectPath: string;
   sessionRoot: string;
+  executorId: string;
   chatId: string;
   agentSessionId: string;
   legacyPrompt: string;
@@ -433,12 +433,12 @@ async function writeLegacyPiSession(input: {
       },
     },
   ].map((entry) => JSON.stringify(entry)).join('\n')}\n`);
-  await seedCurrentWorkspace(input.workspace);
   await writeFile(join(input.workspace, 'chats.json'), JSON.stringify({
     version: 5,
     sessions: {
       [input.chatId]: {
         agentId: 'pi',
+        executorId: input.executorId,
         nativeSession: {
           ownerId: 'pi',
           schemaVersion: 1,

@@ -20,7 +20,7 @@ import {
   openCodeNativeSession,
   OPENCODE_RETRY_EXHAUSTION_REQUEST_COUNT,
   readOpenCodeSessionRows,
-  readSupervisorStates,
+  readExecutionSupervisorStates,
   scriptOpenCodeRetryExhaustion,
   scriptedOpenCodeRunRequest,
   scriptedOpenCodeStartRequest,
@@ -84,7 +84,7 @@ describeOnLinux('scripted OpenCode provider failures', () => {
         turn.turnId,
       );
 
-      const previousSupervisors = await readSupervisorStates(fixture.dirs);
+      const previousSupervisors = await readExecutionSupervisorStates(fixture);
       expect(previousSupervisors).toHaveLength(1);
       await fixture.restartGarcon({
         beforeStart: () => waitForSupervisorExit(previousSupervisors),
@@ -134,7 +134,7 @@ describeOnLinux('scripted OpenCode provider failures', () => {
       }));
       await held.requested;
 
-      const supervisors = await readSupervisorStates(fixture.dirs);
+      const supervisors = await readExecutionSupervisorStates(fixture);
       expect(supervisors).toHaveLength(1);
       const killedAt = Date.now();
       await killScriptedOpenCodeProvider(supervisors[0]!);
@@ -194,7 +194,7 @@ describeOnLinux('scripted OpenCode provider failures', () => {
 
       // Hermetic fixture: exactly the killed supervisor plus its single
       // replacement, with the killed turn still owning exactly one terminal.
-      const supervisorsAfter = await readSupervisorStates(fixture.dirs);
+      const supervisorsAfter = await readExecutionSupervisorStates(fixture);
       expect(supervisorsAfter).toHaveLength(2);
       expect(supervisorsAfter.filter((state) => state.reason === 'provider-exited')).toHaveLength(1);
       expect(supervisorsAfter.filter((state) =>

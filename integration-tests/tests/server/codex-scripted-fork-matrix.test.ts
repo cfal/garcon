@@ -2,10 +2,8 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test
 import {
   access,
   readFile,
-  writeFile,
 } from 'node:fs/promises';
 import { join } from 'node:path';
-import { seedCurrentWorkspace } from '../../support/current-workspace.js';
 import {
   assistantContents,
   userContents,
@@ -15,7 +13,6 @@ import {
   codexExecCommandCall,
 } from '../../support/fake-codex-model.js';
 import {
-  type IntegrationDirectories,
   withIntegrationFixture,
 } from '../../support/integration-fixture.js';
 import {
@@ -35,7 +32,7 @@ import {
   startScriptedCodexTestEnvironment,
   type ScriptedCodexTestEnvironment,
 } from '../../support/scripted-codex.js';
-import { waitForPersistedNativeSession } from '../../support/persisted-chat.js';
+import { restartWithSeededChat, waitForPersistedNativeSession } from '../../support/persisted-chat.js';
 
 interface PersistedCodexChatRecord {
   agentSessionId: string | null;
@@ -197,6 +194,9 @@ describe('scripted Codex fork lifecycle matrix', () => {
     const childReply = marker('EMPTY_CHILD_REPLY');
 
     await withIntegrationFixture('codex-scripted-fork-empty', async (fixture) => {
+      await restartWithSeededChat(fixture, sourceChatId, {
+        agentId: 'codex', model: 'gpt-5.4-nano', permissionMode: 'bypassPermissions', thinkingMode: 'low',
+      });
       const forkChatId = fixture.newChatId();
       await fixture.client.forkChat({ sourceChatId, chatId: forkChatId });
       expect((await fixture.client.getMessages(forkChatId)).messages).toEqual([]);
@@ -242,10 +242,7 @@ describe('scripted Codex fork lifecycle matrix', () => {
       testEnvironment.model.assertSettled();
     }, {
       serverEnvironment: testEnvironment.serverEnvironment,
-      prepareWorkspace: async (directories) => {
-        await testEnvironment.prepareWorkspace(directories);
-        await prepareEmptyChat(directories, sourceChatId, 'codex', 'gpt-5.4-nano');
-      },
+      prepareWorkspace: testEnvironment.prepareWorkspace,
     });
   }, 120_000);
 
@@ -350,39 +347,6 @@ describe('scripted Codex fork lifecycle matrix', () => {
 
 function marker(label: string): string {
   return `SCRIPTED_CODEX_${label}_${crypto.randomUUID().replaceAll('-', '')}`;
-}
-
-async function prepareEmptyChat(
-  directories: IntegrationDirectories,
-  chatId: string,
-  agentId: string,
-  model: string,
-): Promise<void> {
-  await seedCurrentWorkspace(directories.workspace);
-  await writeFile(join(directories.workspace, 'chats.json'), JSON.stringify({
-    version: 5,
-    sessions: {
-      [chatId]: {
-        agentId,
-        nativeSession: null,
-        agentOwnershipEpoch: crypto.randomUUID(),
-        agentSettingsById: {},
-        projectPath: directories.project,
-        tags: [],
-        agentSessionId: null,
-        model,
-        apiProviderId: null,
-        modelEndpointId: null,
-        modelProtocol: null,
-        lastReadAt: null,
-        permissionMode: 'bypassPermissions',
-        thinkingMode: 'low',
-        carryOverSegments: [],
-        nativeSeedReceipt: null,
-        carryOverMigrationQuarantine: null,
-      },
-    },
-  }));
 }
 
 async function waitForFile(path: string): Promise<void> {

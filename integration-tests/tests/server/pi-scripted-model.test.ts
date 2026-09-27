@@ -89,9 +89,9 @@ describe('Pi against a scripted model', () => {
       // Locked explicitly: findPiSessionFileBySessionId, the transcript index source, and
       // fork all parse this shape.
       expect(native.path).toMatch(/\/\d{4}-\d{2}-\d{2}T[\d-]+Z_[0-9a-f-]+\.jsonl$/);
-      const sessionDir = fixture.dirs.home.endsWith('/')
-        ? fixture.dirs.home
-        : `${fixture.dirs.home}/`;
+      const sessionDir = fixture.executionDirs.home.endsWith('/')
+        ? fixture.executionDirs.home
+        : `${fixture.executionDirs.home}/`;
       expect(native.path.startsWith(sessionDir)).toBe(true);
       testEnvironment.model.assertSettled();
     }, withScriptedPi());
@@ -380,6 +380,7 @@ describe('Pi against a scripted model', () => {
       await fixture.client.updateSettings({
         ui: {
           chatTitle: {
+            executorId: fixture.client.executorId,
             enabled: false,
             agentId: 'pi',
             model: PI_TEST_MODEL,

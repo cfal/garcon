@@ -20,7 +20,7 @@ import {
 import {
   openCodeNativeSession,
   readOpenCodeSessionDirectory,
-  readSupervisorStates,
+  readExecutionSupervisorStates,
   scriptedOpenCodeRunRequest,
   scriptedOpenCodeStartRequest,
   startScriptedOpenCodeTestEnvironment,
@@ -105,7 +105,7 @@ describeOnLinux('OpenCode project path relocation', () => {
       const beforeRestart = await fixture.client.getMessages(chatId);
       expect(userContents(beforeRestart.messages)).toEqual([firstPrompt, rootPrompt, nestedPrompt]);
       expect(assistantContents(beforeRestart.messages)).toEqual([firstReply, rootReply, nestedReply]);
-      const previousSupervisors = await readSupervisorStates(fixture.dirs);
+      const previousSupervisors = await readExecutionSupervisorStates(fixture);
       await fixture.restartGarcon({
         beforeStart: () => waitForSupervisorExit(previousSupervisors),
       });

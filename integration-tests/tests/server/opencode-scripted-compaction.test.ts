@@ -24,7 +24,7 @@ import {
 import {
   openCodeNativeSession,
   readOpenCodeSessionRows,
-  readSupervisorStates,
+  readExecutionSupervisorStates,
   scriptedOpenCodeRunRequest,
   scriptedOpenCodeStartRequest,
   startScriptedOpenCodeTestEnvironment,
@@ -114,9 +114,8 @@ describeOnLinux('OpenCode V1 automatic compaction against a scripted model', () 
       testEnvironment.model.assertSettled();
 
       const liveProjection = renderingProjection(live.messages);
-      const previousSupervisors = await readSupervisorStates(fixture.dirs);
-      // Remote fixtures also start Local discovery; a full fixture restart stops both owners.
-      expect(previousSupervisors).toHaveLength(fixture.client.executorId === 'local' ? 1 : 2);
+      const previousSupervisors = await readExecutionSupervisorStates(fixture);
+      expect(previousSupervisors).toHaveLength(1);
       await fixture.restartGarcon({
         beforeStart: () => waitForSupervisorExit(previousSupervisors),
       });

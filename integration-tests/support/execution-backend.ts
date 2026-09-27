@@ -113,6 +113,7 @@ export class ExecutionBackendFixture {
   #executorId: string | null = null;
   #controllerUrl: string | null = null;
   #controllerAuthToken: string | null = null;
+  readonly executionProcessIds = new Set<number>();
 
   constructor(
     readonly backend: ExecutionBackend,
@@ -125,13 +126,18 @@ export class ExecutionBackendFixture {
   get executorId(): string { return this.#executorId ?? 'local'; }
 
   async start(options: GarconProcessOptions): Promise<GarconProcess> {
-    if (this.backend === 'in-process') return GarconProcess.start(options);
+    if (this.backend === 'in-process') {
+      const controller = await GarconProcess.start(options);
+      if (controller.pid !== null) this.executionProcessIds.add(controller.pid);
+      return controller;
+    }
     const launchWorker = async (connection: Parameters<typeof ExecutorProcess.start>[0]['connection']) => {
       this.#workerLaunch = {
         repoRoot: options.repoRoot, directories: this.directories, environment: this.environment,
         connection,
       };
       this.#worker = await ExecutorProcess.start(this.#workerLaunch);
+      this.executionProcessIds.add(this.#worker.child.pid);
       if (connection.kind === 'listen') {
         const url = await this.#worker.listening();
         this.#workerLaunch = {
@@ -201,6 +207,7 @@ export class ExecutionBackendFixture {
       this.#workerLaunch = { ...this.#workerLaunch, directories: { ...this.#workerLaunch.directories, project: projectBasePath } };
     }
     this.#worker = await ExecutorProcess.start(this.#workerLaunch);
+    this.executionProcessIds.add(this.#worker.child.pid);
     await this.#worker.connected();
     await this.#waitReady();
   }
