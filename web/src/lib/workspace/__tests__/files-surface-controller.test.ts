@@ -382,4 +382,92 @@ describe('FilesSurfaceController executor browsing', () => {
 			expect.anything(),
 		);
 	});
+
+	it('pauses a followed remote chat while its executor is offline and reloads after reconnect', async () => {
+		const executors = executorStore();
+		vi.mocked(getTree).mockResolvedValue(response('/worker/project'));
+		const controller = createController(executors);
+		const project = {
+			executorId: remoteExecutor.id,
+			chatId: 'remote-chat',
+			projectPath: '/worker/project',
+		};
+		const available = {
+			kind: 'available' as const,
+			project: { ...project, effectiveProjectKey: '/worker/project' },
+		};
+		controller.setProjectState(available);
+		controller.setPresentationVisible(true);
+		await vi.waitFor(() => expect(controller.tree.readyResponse).not.toBeNull());
+		const requests = vi.mocked(getTree).mock.calls.length;
+
+		executors.applySnapshot([localExecutor, { ...remoteExecutor, availability: 'offline' }]);
+		controller.setProjectState({
+			kind: 'request-failed',
+			context: project,
+			message: 'Files are unavailable on this executor.',
+		});
+		flushSync();
+		expect(controller.serviceNotice).toEqual({
+			kind: 'executor-unavailable',
+			executorLabel: remoteExecutor.label,
+		});
+		await controller.tree.refresh();
+		expect(getTree).toHaveBeenCalledTimes(requests);
+
+		executors.applySnapshot(executorStore().executors);
+		controller.setProjectState(available);
+		flushSync();
+		expect(controller.serviceNotice).toBeNull();
+		await vi.waitFor(() => expect(vi.mocked(getTree).mock.calls.length).toBeGreaterThan(requests));
+		expect(getTree).toHaveBeenLastCalledWith(
+			{ executorId: remoteExecutor.id, directoryPath: '/worker/project' },
+			expect.anything(),
+		);
+	});
+
+	it('keeps a removed browsing executor selected with its notice instead of falling back to Local', async () => {
+		const executors = executorStore();
+		vi.mocked(getTree).mockResolvedValue(response('/worker'));
+		const controller = createController(executors);
+		controller.setProjectState({ kind: 'absent' });
+		controller.selectExecutor(remoteExecutor.id);
+		controller.setPresentationVisible(true);
+		await vi.waitFor(() => expect(controller.tree.readyResponse).not.toBeNull());
+		const requests = vi.mocked(getTree).mock.calls.length;
+
+		executors.applySnapshot([localExecutor]);
+		flushSync();
+		expect(controller.browsingExecutor).toBe(true);
+		expect(controller.tree.executorId).toBe(remoteExecutor.id);
+		expect(controller.serviceNotice).toEqual({
+			kind: 'executor-removed',
+			executorId: remoteExecutor.id,
+		});
+		expect(getTree).toHaveBeenCalledTimes(requests);
+
+		controller.selectExecutor('local');
+		expect(controller.tree.executorId).toBe('local');
+		expect(controller.serviceNotice).toBeNull();
+	});
+
+	it('refreshes the tree only for changes on the executor it shows', async () => {
+		const executors = executorStore();
+		vi.mocked(getTree).mockResolvedValue(response('/worker'));
+		const controller = createController(executors);
+		controller.selectExecutor(remoteExecutor.id);
+		controller.setPresentationVisible(true);
+		await vi.waitFor(() => expect(controller.tree.readyResponse).not.toBeNull());
+		const requests = vi.mocked(getTree).mock.calls.length;
+
+		controller.refreshForExecutorChange('local');
+		expect(getTree).toHaveBeenCalledTimes(requests);
+
+		controller.refreshForExecutorChange(remoteExecutor.id);
+		await vi.waitFor(() => expect(getTree).toHaveBeenCalledTimes(requests + 1));
+		expect(getTree).toHaveBeenLastCalledWith(
+			{ executorId: remoteExecutor.id, directoryPath: '/worker' },
+			expect.anything(),
+		);
+	});
 });
