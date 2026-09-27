@@ -4,7 +4,7 @@ import { effectiveExecutorId } from '../../common/executors.js';
 import type { TranscriptSearchStatusV1 } from '../../common/chat-search.js';
 import { isChatListInvalidationReason } from '../../common/ws-events.ts';
 import { isErrorCode } from '../../common/error-codes.ts';
-import { toClientChatExecutionControlState } from './chat-execution/control-state.ts';
+import { hasPendingTurnInput, toClientChatExecutionControlState } from './chat-execution/control-state.ts';
 import { createTranscriptEventFanout } from './ledger/event-fanout.js';
 import { isLedgerPreambleSelectionChangedNoticeDetail } from './ledger/contracts.js';
 import type { TurnEventMetadata } from './agents/event-bus.js';
@@ -63,6 +63,23 @@ interface ChatSearchEventIndex {
   catalogMayHaveChanged(chatId: string): void;
   sourceAvailable(chatId: string): Promise<void>;
   deleteChat(chatId: string): void;
+}
+
+// Subscribes before search initialization so real startup transitions are not lost.
+export function wireSearchSourceAvailability(
+  executors: Pick<ExecutorManager, 'onAvailabilityChanged'>,
+  registry: Pick<ChatRegistry, 'listChatIds' | 'getChat'>,
+  search: Pick<ChatSearchEventIndex, 'sourceAvailable'>,
+): () => void {
+  return executors.onAvailabilityChanged((executorId, availability) => {
+    if (availability !== 'ready') return;
+    for (const chatId of registry.listChatIds()) {
+      if (effectiveExecutorId(registry.getChat(chatId)?.executorId) !== executorId) continue;
+      void search.sourceAvailable(chatId).catch((error) => {
+        logger.warn('Executor search source refresh failed', { chatId, error });
+      });
+    }
+  });
 }
 
 export interface ServerEventWiringDeps {
@@ -637,10 +654,12 @@ export function wireServerEvents({
     retryProviderCleanup(executorId);
     for (const chatId of chatRegistry.listChatIds()) {
       if (effectiveExecutorId(chatRegistry.getChat(chatId)?.executorId) !== executorId) continue;
-      void queue.triggerDrain(chatId).catch((error) => logger.warn('Executor queue drain failed', error));
-      void searchIndex?.sourceAvailable(chatId).catch((error) => {
-        logger.warn('Executor search source refresh failed', { chatId, error });
-      });
+      void queue.readChatExecutionControl(chatId).then(async (control) => {
+        const chat = chatRegistry.getChat(chatId);
+        if (chat && effectiveExecutorId(chat.executorId) === executorId && hasPendingTurnInput(control)) {
+          await queue.triggerDrain(chatId);
+        }
+      }).catch((error) => logger.warn('Executor queue drain failed', error));
     }
   };
   executors.onChanged(() => broadcast(new ExecutorsChangedMessage(executors.list())));
@@ -652,7 +671,7 @@ export function wireServerEvents({
     }
   });
   for (const executor of executors.list()) {
-    if (executor.availability === 'ready') executorReady(executor.id);
+    if (executor.availability === 'ready') retryProviderCleanup(executor.id);
   }
 
   return {

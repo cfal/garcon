@@ -139,8 +139,8 @@ export class TranscriptSearchController {
   catalogMayHaveChanged(chatId: string): void {
     this.#adoptionFailedChatIds.delete(chatId);
     if (!this.#enabled || this.#closed) return;
-    this.#deps.service.setCatalogChatTotal(this.#deps.listChatIds().length);
     if (this.#adoptingChatIds.has(chatId)) return;
+    this.#deps.service.setCatalogChatTotal(this.#deps.listChatIds().length);
     this.#schedule(chatId, 'catalog-refresh', () => this.#syncCatalogChat(chatId));
   }
 

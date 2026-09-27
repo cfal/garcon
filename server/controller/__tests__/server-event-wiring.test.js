@@ -7,7 +7,7 @@ import { AssistantMessage, BashToolUseMessage } from '../../../common/chat-types
 import { emptyStoredChatExecutionControl } from '../chat-execution/control-state.ts';
 import { ChatTransientFeedStore } from '../chats/chat-transient-feed.js';
 import { ProjectUnavailableError } from '../../common/domain-error.ts';
-import { wireServerEvents } from '../server-event-wiring.js';
+import { wireSearchSourceAvailability, wireServerEvents } from '../server-event-wiring.js';
 import { ChatExecutionCoordinator } from '../chat-execution/chat-execution-coordinator.js';
 import { InMemoryChatExecutionControlRepository } from '../chat-execution/chat-execution-control-repository.js';
 import { CommandLedger } from '../commands/command-ledger.js';
@@ -25,7 +25,7 @@ import {
 
 const at = '2026-08-12T00:00:00.000Z';
 
-it('isolates executor loss and queue wake-up, and publishes complete executor snapshots', () => {
+it('isolates executor loss and queue wake-up, and publishes complete executor snapshots', async () => {
   const remote = '22222222-2222-4222-8222-222222222222';
   const executors = [{ id: 'local', label: 'Local' }, { id: remote, label: 'Worker' }];
   const fixture = createFixture({
@@ -40,6 +40,7 @@ it('isolates executor loss and queue wake-up, and publishes complete executor sn
   expect(fixture.ownershipJournal.retryProviderCleanup).not.toHaveBeenCalled();
   expect(fixture.searchIndex.sourceAvailable).not.toHaveBeenCalled();
   fixture.executor.availability(remote, 'ready');
+  await Promise.resolve();
   expect(fixture.ownershipJournal.retryProviderCleanup.mock.calls).toEqual([[remote]]);
   expect(fixture.queueService.triggerDrain.mock.calls).toEqual([['remote-chat']]);
   expect(fixture.searchIndex.sourceAvailable.mock.calls).toEqual([['remote-chat']]);
@@ -47,11 +48,12 @@ it('isolates executor loss and queue wake-up, and publishes complete executor sn
   expect(fixture.published).toContainEqual({ type: 'executors-changed', executors });
 });
 
-it('settles executor loss and drains only when ready', () => {
+it('settles executor loss and drains only when ready', async () => {
   const fixture = createFixture();
   fixture.executor.availability('local', 'offline');
   expect(fixture.agentRegistry.executionSessionLost).toHaveBeenCalledTimes(1);
   fixture.executor.availability('local', 'ready');
+  await Promise.resolve();
   expect(fixture.queueService.triggerDrain).toHaveBeenCalledWith('chat-1');
   fixture.executor.availability('local', 'disposed');
   expect(fixture.agentRegistry.executionSessionLost).toHaveBeenCalledTimes(1);
@@ -73,6 +75,44 @@ it('retries native cleanup for executors that became ready before event wiring',
     { id: 'offline-executor', availability: 'offline' },
   ] });
   expect(fixture.ownershipJournal.retryProviderCleanup.mock.calls).toEqual([['ready-executor']]);
+  expect(fixture.queueService.readChatExecutionControl).not.toHaveBeenCalled();
+  expect(fixture.queueService.triggerDrain).not.toHaveBeenCalled();
+  expect(fixture.searchIndex.sourceAvailable).not.toHaveBeenCalled();
+});
+
+it.each(['empty', 'user', 'control'])('readiness wakes only pending inputs: %s', async (kind) => {
+  const control = emptyStoredChatExecutionControl('test');
+  if (kind === 'user') control.entries.push({ id: 'pending-user' });
+  if (kind === 'control') control.controlEntries.push({ id: 'pending-control' });
+  const fixture = createFixture({ queue: { readChatExecutionControl: mock(async () => control) } });
+  fixture.executor.availability('local', 'ready');
+  await Promise.resolve();
+  expect(fixture.queueService.triggerDrain).toHaveBeenCalledTimes(kind === 'empty' ? 0 : 1);
+});
+
+it('observes genuine source readiness before the rest of the server is wired', async () => {
+  let listener;
+  const remove = mock();
+  let failFirst;
+  let failed = false;
+  let attempts = 1;
+  const initialResync = new Promise((resolve) => { failFirst = () => { failed = true; resolve(); }; });
+  const unsubscribe = wireSearchSourceAvailability(
+    { onAvailabilityChanged(cb) { listener = cb; return remove; } },
+    { listChatIds: () => ['remote', 'local'], getChat: (id) => ({ executorId: id === 'remote' ? 'worker' : 'local' }) },
+    { async sourceAvailable(chatId) {
+      expect(chatId).toBe('remote');
+      await initialResync;
+      if (failed) attempts++;
+    } },
+  );
+  expect(attempts).toBe(1);
+  listener('worker', 'ready');
+  failFirst();
+  await initialResync;
+  expect(attempts).toBe(2);
+  unsubscribe();
+  expect(remove).toHaveBeenCalledTimes(1);
 });
 
 function createFixture(overrides = {}) {
@@ -112,6 +152,9 @@ function createFixture(overrides = {}) {
     onAgentTurnTerminal: mock(async () => undefined),
     checkChatIdle: mock(async () => undefined),
     triggerDrain: mock(async () => undefined),
+    readChatExecutionControl: mock(async () => ({
+      ...emptyStoredChatExecutionControl('test'), entries: [{ id: 'pending-input' }],
+    })),
     ...overrides.queue,
   };
   const chatRegistry = {
@@ -166,13 +209,17 @@ function createFixture(overrides = {}) {
     ...overrides.ownershipJournal,
   };
   const transientFeeds = new ChatTransientFeedStore('server-instance-test');
-  const wiring = wireServerEvents({
-    ownershipJournal,
-    executors: {
-      onAvailabilityChanged: (listener) => { executor.availability = listener; return () => {}; },
+  const availabilityListeners = [];
+  executor.availability = (id, availability) => availabilityListeners.forEach((cb) => cb(id, availability));
+  const executorManager = {
+      onAvailabilityChanged: (listener) => { availabilityListeners.push(listener); return () => {}; },
       onChanged: (listener) => { executor.changed = listener; return () => {}; },
       list: () => overrides.executors ?? [],
-    },
+  };
+  wireSearchSourceAvailability(executorManager, chatRegistry, searchIndex);
+  const wiring = wireServerEvents({
+    ownershipJournal,
+    executors: executorManager,
     projectBasePath: '/worker/projects',
     server: {
       publish: mock((_topic, payload) => published.push(JSON.parse(payload))),

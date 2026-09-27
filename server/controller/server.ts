@@ -14,7 +14,7 @@ import {
 } from './lib/websocket-auth.js';
 import { init as initAuthStore } from './auth/store.js';
 import { forkChatFileCopy } from './chats/fork-chat.js';
-import { wireServerEvents, type ServerEventWiring } from './server-event-wiring.js';
+import { wireSearchSourceAvailability, wireServerEvents, type ServerEventWiring } from './server-event-wiring.js';
 import { startExecutionControlPlane } from './execution-control-plane.js';
 
 import { ChatRegistry } from './chats/store.js';
@@ -489,6 +489,7 @@ export async function startServer(): Promise<void> {
       hasChat: (chatId) => chatRegistry.hasChat(chatId),
       logger,
     });
+    const unsubscribeSearchAvailability = wireSearchSourceAvailability(executors, chatRegistry, chatSearch);
     try {
       await chatSearch.initialize(
         settings.getFeatureSettings().transcriptSearch.enabled,
@@ -930,6 +931,7 @@ export async function startServer(): Promise<void> {
           logger.warn('server: shutdown background-task error:', errorMessage(backgroundError));
         }
         unsubscribeSearchStatus();
+        unsubscribeSearchAvailability();
         await chatSearch.close();
         await executors.dispose();
         transcriptLedger.close();
