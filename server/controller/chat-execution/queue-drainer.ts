@@ -95,13 +95,12 @@ export class QueueDrainer {
       }
 
       const pending = await controls.read(chatId);
-      if (!hasPendingTurnInput(pending)) {
+      if (!hasPendingTurnInput(pending) || pending.pause) {
         callbacks.publishIdle(chatId);
         return;
       }
       if (
-        pending.pause
-        || pending.entries.some((entry) => entry.status === 'steering')
+        pending.entries.some((entry) => entry.status === 'steering')
         || this.#shouldHalt(chatId)
       ) return;
       if (pending.entries.length > 0) {

@@ -370,6 +370,7 @@ function createExecutionFixture(directory, ensureAdopted, beforeWiringCommitList
     admitQueuedInput: () => ({ inserted: true }), discardPreparedInput() {},
   }, () => ({}), () => true, new InMemoryChatExecutionControlRepository('synthetic-server'), {
     projectAdmission: { assertAvailable: async () => undefined }, isControlInputViewCurrent: () => true,
+    ...options.coordinator,
   });
   const ledger = new CommandLedger();
   if (beforeWiringCommitListener) agents.onTranscriptCommitted(beforeWiringCommitListener);
@@ -479,21 +480,23 @@ describe('server event wiring', () => {
     }
   });
 
-  it.each(['direct', 'queued'])('notifies after a %s dispatch fails before a ledger run begins', async (kind) => {
+  it.each(['direct', 'queued', 'offline direct'])('notifies after a %s dispatch fails before a ledger run begins', async (kind) => {
     const directory = await mkdtemp(path.join(tmpdir(), 'failed-attention-wiring-'));
     const send = mock(async () => true);
+    const direct = kind !== 'queued';
     let adoptionCalls = 0;
     const fixture = createExecutionFixture(directory, async () => {
       // Direct input admission succeeds; runtime preparation fails before beginRun.
-      if (++adoptionCalls === 1 && kind === 'direct') return fixture.transcripts.currentView('chat-1');
+      if (++adoptionCalls === 1 && direct) return fixture.transcripts.currentView('chat-1');
       throw new Error('Synthetic source unavailable');
     }, undefined, {
       inputTranscript: (agents) => agents,
       beforeWiring: (ports) => observeTelegram(ports, directory, send),
+      coordinator: { canDispatch: () => kind !== 'offline direct' },
     });
     const { execution, ledger, transcripts } = fixture;
     try {
-      if (kind === 'direct') {
+      if (direct) {
         const startedTurn = { ...turn, clientMessageId: 'input-1' };
         const accepted = await ledger.accept({ ...startedTurn, chatId: 'chat-1', payload: {} });
         await execution.scheduleDirectInput({
@@ -512,7 +515,47 @@ describe('server event wiring', () => {
       expect(send).toHaveBeenCalledTimes(1);
       expect(send.mock.calls[0][1]).toContain('Failed input');
       expect(send.mock.calls[0][1]).toContain('Failed: Synthetic source unavailable');
-      expect(adoptionCalls).toBe(kind === 'direct' ? 2 : 1);
+      expect(adoptionCalls).toBe(direct ? 2 : 1);
+    } finally {
+      await execution.waitForDispatches();
+      await fixture.wiring.waitForIdle();
+      transcripts.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['pre-run', 'terminal-during-drain', 'terminal-after-drain'])('notifies on %s failure without dispatching a paused queue tail', async (phase) => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'paused-attention-wiring-'));
+    const delivered = Promise.withResolvers();
+    const send = mock(async () => { delivered.resolve(); return true; });
+    const fail = (runId) => fixture.sink.publish({ type: 'run-ended', runId, outcome: 'failed',
+      error: { code: 'PROVIDER_FAILURE', message: 'Synthetic source unavailable' } });
+    const started = mock((request) => { if (phase === 'terminal-during-drain') fail(request.runId); });
+    const fixture = createExecutionFixture(directory, phase === 'pre-run'
+      ? async () => { throw new Error('Synthetic source unavailable'); }
+      : undefined, undefined, {
+      inputTranscript: (agents) => agents,
+      beforeWiring: (ports) => observeTelegram(ports, directory, send),
+      onStart: started,
+    });
+    const { execution, transcripts } = fixture;
+    try {
+      await execution.createChatQueueEntry('chat-1', 'Failed input');
+      await execution.createChatQueueEntry('chat-1', 'Retained input');
+      await execution.triggerDrain('chat-1');
+      if (phase === 'terminal-after-drain') fail(transcripts.activeRunId('chat-1'));
+      await delivered.promise;
+      await execution.waitForExecutionOwners();
+      await fixture.wiring.waitForIdle();
+      const control = await execution.readChatExecutionControl('chat-1');
+      expect(control.pause).toMatchObject({ kind: 'queued-turn-failed' });
+      expect(control.entries.map((entry) => entry.content)).toEqual(['Retained input']);
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(send.mock.calls[0][1]).toContain('Failed input');
+      expect(send.mock.calls[0][1]).toContain('Failed: Synthetic source unavailable');
+      await execution.triggerDrain('chat-1');
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(started).toHaveBeenCalledTimes(phase === 'pre-run' ? 0 : 1);
     } finally {
       await execution.waitForDispatches();
       await fixture.wiring.waitForIdle();

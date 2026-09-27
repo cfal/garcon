@@ -321,6 +321,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
   }
   // Resumes queued work after every turn, including initial turns that bypass
   // runReservedTurn's post-turn drain, unless a drain already owns the chat.
+  // Paused input waits for explicit resume and does not block attention.
   async checkChatIdle(chatId: string): Promise<void> {
     if (this.#shuttingDown) return;
     if (this.#ownership.isDraining(chatId)) return;
@@ -341,7 +342,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       await this.triggerDrain(chatId);
       return;
     }
-    if (!hasPendingTurnInput(queue)) {
+    if (queue.pause || !hasPendingTurnInput(queue)) {
       this.#ownership.consumeDrainRequest(chatId);
       this.emit('chat-idle', chatId);
     }
@@ -660,7 +661,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       this.#ownership.notifyOwnersChanged();
       this.#invalidateProcessing(chatId);
     }
-    if (!this.#shuttingDown && this.#ownership.hasDrainRequest(chatId)) await this.triggerDrain(chatId);
+    if (!this.#shuttingDown && this.#ownership.hasDrainRequest(chatId)) await this.checkChatIdle(chatId);
   }
 
   async deleteChatQueueFile(chatId: string): Promise<void> {
@@ -845,7 +846,8 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     if (!this.#chatExists(reservation.chatId) || this.#shuttingDown) return;
     if (outcome !== 'released' || drainRequested) {
       try {
-        await this.triggerDrain(reservation.chatId);
+        if (outcome === 'failed') await this.checkChatIdle(reservation.chatId);
+        else await this.triggerDrain(reservation.chatId);
       } catch (error) {
         logger.error('queue: direct completion drain error:', error);
       }
