@@ -12,6 +12,10 @@ import type { SessionStoppedCallback, TurnFailedCallback } from '../chat-executi
 
 const logger = createLogger('notifications:attention-tracker');
 
+const TITLE_LENGTH = 120;
+const INPUT_EXCERPT_LENGTH = 200;
+const DETAIL_EXCERPT_LENGTH = 400;
+
 function escapeHtml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
@@ -85,11 +89,7 @@ export class AttentionTracker {
   // is already being surfaced.
   #pendingPermissions = new Map<string, Set<string>>();
 
-  // Records the most recent turn outcome so the idle notification can
-  // include the reason text.
   #lastTurnResult = new Map<string, TurnResult>();
-
-  // Tracks the last assistant response per chat from applied commit events.
   #lastAssistantMessage = new Map<string, string>();
   #lastUserMessage = new Map<string, string>();
 
@@ -125,7 +125,11 @@ export class AttentionTracker {
       if (this.#wasNotified(chatId, turnId)) return;
       if (turnId && this.#lastTurnResult.get(chatId)?.turnId === turnId) return;
       this.#notifiedTurns.delete(chatId);
-      this.#lastTurnResult.set(chatId, { turnId, reason: 'failed', detail: truncate(message, 400) });
+      this.#lastTurnResult.set(chatId, {
+        turnId,
+        reason: 'failed',
+        detail: truncate(message, DETAIL_EXCERPT_LENGTH),
+      });
     });
     this.#queue.onSessionStopped((chatId, outcome, _intent, turn) => {
       if (isAbortAcknowledged(outcome)) this.#handleSessionStopped(chatId, turn?.turnId ?? null);
@@ -148,9 +152,9 @@ export class AttentionTracker {
           this.#notifiedTurns.delete(event.chatId);
           this.#lastTurnResult.delete(event.chatId);
           this.#lastAssistantMessage.delete(event.chatId);
-          this.#lastUserMessage.set(event.chatId, truncate(row.detail.message.content, 200));
+          this.#lastUserMessage.set(event.chatId, truncate(row.detail.message.content, INPUT_EXCERPT_LENGTH));
         } else if (row.kind === 'provider-row' && row.message instanceof AssistantMessage) {
-          this.#lastAssistantMessage.set(event.chatId, truncate(row.message.content, 400));
+          this.#lastAssistantMessage.set(event.chatId, truncate(row.message.content, DETAIL_EXCERPT_LENGTH));
         }
       }
       return;
@@ -162,13 +166,13 @@ export class AttentionTracker {
       if (event.row.outcome === 'finished') {
         this.#lastTurnResult.set(event.chatId, { turnId: event.runId, reason: 'completed' });
         if (event.finalResponse) {
-          this.#lastAssistantMessage.set(event.chatId, truncate(event.finalResponse.text, 400));
+          this.#lastAssistantMessage.set(event.chatId, truncate(event.finalResponse.text, DETAIL_EXCERPT_LENGTH));
         }
       } else if (event.row.outcome === 'failed') {
         this.#lastTurnResult.set(event.chatId, {
           turnId: event.runId,
           reason: 'failed',
-          detail: truncate(event.row.error?.message ?? event.row.error?.code ?? '', 400),
+          detail: truncate(event.row.error?.message ?? event.row.error?.code ?? '', DETAIL_EXCERPT_LENGTH),
         });
       } else {
         this.#lastTurnResult.delete(event.chatId);
@@ -203,7 +207,9 @@ export class AttentionTracker {
     if (ids.has(permissionOccurrenceId)) return;
     ids.add(permissionOccurrenceId);
 
-    void this.#sendNotification(chatId, this.#lastUserMessage.get(chatId) ?? null, null, `Needs permission: ${toolName}`);
+    void this.#sendNotification(
+      chatId, this.#lastUserMessage.get(chatId) ?? null, null, `Needs permission: ${toolName}`,
+    );
   }
 
   #clearPermission(chatId: string, permissionOccurrenceId: string): void {
@@ -221,17 +227,17 @@ export class AttentionTracker {
     const result = this.#lastTurnResult.get(chatId);
     if (!result) return;
     this.#notifiedTurns.set(chatId, result.turnId);
-    const reason = result.reason;
     const userMsg = this.#lastUserMessage.get(chatId) ?? null;
-    const assistantMsg = this.#lastAssistantMessage.get(chatId) ?? null;
+    let assistantMsg = this.#lastAssistantMessage.get(chatId) ?? null;
 
     let status: string | null = null;
-    if (reason === 'failed') {
-      status = `Failed${result?.detail ? `: ${result.detail}` : ''}`;
+    if (result.reason === 'failed') {
+      status = result.detail ? `Failed: ${result.detail}` : 'Failed';
+      assistantMsg = null;
     }
 
     this.#cleanupChat(chatId);
-    void this.#sendNotification(chatId, userMsg, reason === 'failed' ? null : assistantMsg, status);
+    void this.#sendNotification(chatId, userMsg, assistantMsg, status);
   }
 
   #handleSessionStopped(chatId: string, turnId: string | null): void {
@@ -261,17 +267,17 @@ export class AttentionTracker {
     if (hasTitle) {
       lines.push(`<b>${escapeHtml(meta.title)}</b>`);
       if (userMsg) {
-        lines.push(`<blockquote>${escapeHtml(truncate(userMsg, 200))}</blockquote>`);
+        lines.push(`<blockquote>${escapeHtml(truncate(userMsg, INPUT_EXCERPT_LENGTH))}</blockquote>`);
       }
     } else if (userMsg) {
-      lines.push(`<b>${escapeHtml(truncate(userMsg, 120))}</b>`);
+      lines.push(`<b>${escapeHtml(truncate(userMsg, TITLE_LENGTH))}</b>`);
     } else {
       lines.push(`<b>${escapeHtml(meta.title)}</b>`);
     }
     if (status) {
       lines.push(escapeHtml(status));
     } else if (assistantMsg) {
-      lines.push(escapeHtml(truncate(assistantMsg, 400)));
+      lines.push(escapeHtml(truncate(assistantMsg, DETAIL_EXCERPT_LENGTH)));
     }
     const pathShort = meta.projectPath.replace(/^\/home\/[^/]+\//, '~/');
     lines.push(`<code>${escapeHtml(meta.agentId)} - ${escapeHtml(pathShort)}</code>`);
@@ -296,7 +302,7 @@ export class AttentionTracker {
     const title = truncate(resolveChatTitle(
       generatedTitle,
       this.#metadata.getChatMetadata(chatId)?.firstMessage || chatId.slice(0, 8),
-    ), 120);
+    ), TITLE_LENGTH);
     return {
       title,
       hasGeneratedTitle: Boolean(generatedTitle),
@@ -305,7 +311,12 @@ export class AttentionTracker {
     };
   }
 
-  async #sendNotification(chatId: string, userMsg: string | null, assistantMsg: string | null, status: string | null): Promise<void> {
+  async #sendNotification(
+    chatId: string,
+    userMsg: string | null,
+    assistantMsg: string | null,
+    status: string | null,
+  ): Promise<void> {
     if (!this.#telegram.isConfigured) return;
     try {
       const ui = this.#settings.getUiSettings();
@@ -322,5 +333,4 @@ export class AttentionTracker {
       logger.warn('attention: settings read error:', (err as Error).message);
     }
   }
-
 }

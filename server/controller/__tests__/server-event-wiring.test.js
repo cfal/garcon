@@ -524,24 +524,31 @@ describe('server event wiring', () => {
     }
   });
 
-  it.each(['pre-run', 'offline-pre-run', 'terminal-during-drain', 'offline-terminal-during-drain', 'terminal-after-drain'])('notifies on %s failure without dispatching a paused queue tail', async (phase) => {
+  it.each([
+    ['pre-run', true],
+    ['pre-run', false],
+    ['terminal-during-drain', true],
+    ['terminal-during-drain', false],
+    ['terminal-after-drain', true],
+  ])('notifies on %s failure with executor ready=%p without dispatching a paused queue tail', async (phase, readyOnFailure) => {
     const directory = await mkdtemp(path.join(tmpdir(), 'paused-attention-wiring-'));
     const delivered = Promise.withResolvers();
     const send = mock(async () => { delivered.resolve(); return true; });
     const fail = (runId) => fixture.sink.publish({ type: 'run-ended', runId, outcome: 'failed',
       error: { code: 'PROVIDER_FAILURE', message: 'Synthetic source unavailable' } });
     const started = mock((request) => {
-      if (phase === 'offline-terminal-during-drain') available = false;
-      if (phase.endsWith('terminal-during-drain')) fail(request.runId);
-    });
-    const preRun = phase.endsWith('pre-run');
-    let available = true;
-    const fixture = createExecutionFixture(directory, preRun
-      ? async () => {
-        if (phase === 'offline-pre-run') available = false;
-        throw new Error('Synthetic source unavailable');
+      if (phase === 'terminal-during-drain') {
+        available = readyOnFailure;
+        fail(request.runId);
       }
-      : undefined, undefined, {
+    });
+    const preRun = phase === 'pre-run';
+    let available = true;
+    const failAdoption = async () => {
+      available = readyOnFailure;
+      throw new Error('Synthetic source unavailable');
+    };
+    const fixture = createExecutionFixture(directory, preRun ? failAdoption : undefined, undefined, {
       inputTranscript: (agents) => agents,
       beforeWiring: (ports) => observeTelegram(ports, directory, send),
       onStart: started,

@@ -310,6 +310,24 @@ describe('AttentionTracker', () => {
       expect(html).toContain('y'.repeat(100));
     });
 
+    it.each(['completed', 'failed'])('preserves exact excerpt limits and HTML for %s notifications', (outcome) => {
+      settings.getChatName = mock(() => 't'.repeat(121));
+      createTracker();
+      simulateConversation('c1', 'u'.repeat(201), 'partial answer');
+      if (outcome === 'failed') {
+        agents.emitFailed('c1', 'd'.repeat(401));
+      } else {
+        agents.emitFinished('c1', 0, { type: 'text', text: 'd'.repeat(401) });
+      }
+      queue.emitChatIdle('c1');
+      expect(telegram.send.mock.calls[0][1]).toBe([
+        `<b>${'t'.repeat(119)}\u2026</b>`,
+        `<blockquote>${'u'.repeat(199)}\u2026</blockquote>`,
+        `${outcome === 'failed' ? 'Failed: ' : ''}${'d'.repeat(399)}\u2026`,
+        '<code>claude - ~/repo</code>',
+      ].join('\n'));
+    });
+
     it('reports a dispatch failure without a ledger terminal', () => {
       createTracker();
       agents.emitInput('c1', 'new task');
