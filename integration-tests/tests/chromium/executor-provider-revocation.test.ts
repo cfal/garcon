@@ -51,7 +51,10 @@ test('remote provider revocation preserves composer text and attachments until e
     expect(requests).toEqual([]);
     await browserExpect(composer).toHaveValue(content);
     await browserExpect(attachment).toBeVisible();
+    // The browser request event travels over CDP and can arrive after the fake model sees the turn.
+    const runRequest = page.waitForRequest(request => new URL(request.url()).pathname === '/api/v1/chats/run');
     await send.click();
+    await runRequest;
     const received = await fakeProviders.openAi.waitForRequest({ lastUserText: content });
     const message = received.body.messages.findLast(entry => entry.role === 'user');
     expect(message?.content).toEqual([
