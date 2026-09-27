@@ -4,17 +4,17 @@ import { join } from 'node:path';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { initializeFixtureRepository, runFixtureGit } from '../../support/git-fixture.js';
 
-test('Local Git HTTP reports an expired upstream probe instead of clearing remote status', async () => {
+test('Git HTTP reports an expired upstream probe instead of clearing remote status', async () => {
   const realGit = Bun.which('git');
   if (!realGit) throw new Error('Git is required for this integration test');
   await withIntegrationFixture('git-read-deadline', async fixture => {
-    const project = fixture.dirs.project;
+    const project = fixture.executionDirs.project;
     await initializeFixtureRepository(project);
     await runFixtureGit(project, 'remote', 'add', 'origin', '/synthetic-no-network');
     await runFixtureGit(project, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
     await runFixtureGit(project, 'branch', '--set-upstream-to=origin/main');
-    const endpoint = `/api/v1/git/remote-status?${new URLSearchParams({ executorId: 'local', project })}`;
-    const expected = { executorId: 'local', hasRemote: true, hasUpstream: true, remoteName: 'origin' };
+    const endpoint = `/api/v1/git/remote-status?${new URLSearchParams({ executorId: fixture.client.executorId, project })}`;
+    const expected = { executorId: fixture.client.executorId, hasRemote: true, hasUpstream: true, remoteName: 'origin' };
     expect(await fixture.client.get(endpoint)).toMatchObject(expected);
 
     const hold = join(project, '.git', 'hold-upstream-probe');
@@ -24,7 +24,7 @@ test('Local Git HTTP reports an expired upstream probe instead of clearing remot
     await rm(hold);
     expect(await fixture.client.get(endpoint)).toMatchObject(expected);
   }, {
-    executionBackend: 'in-process',
+    projectRoots: 'separate',
     serverEnvironment: { GARCON_HTTP_IDLE_TIMEOUT_SECONDS: '5' },
     resolveServerEnvironment: dirs => ({ PATH: join(dirs.root, 'git-bin') }),
     prepareWorkspace: async dirs => {

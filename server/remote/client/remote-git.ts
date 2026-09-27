@@ -72,7 +72,8 @@ export class RemoteGitServices {
     const mutation = isGitMutation(method);
     try {
       return await withDeadline(options, GIT_OPERATION_TIMEOUT_MS, async (callOptions) => {
-        const result = await backing.rpc.call('', `git.${method}`, { input: request, budgetMs: callOptions.timeoutMs }, callOptions);
+        const result = await backing.rpc.call('', `git.${method}`, { input: request, budgetMs: callOptions.timeoutMs }, callOptions)
+          .catch(error => { throw mutation ? error : readFailure(error, callOptions.signal); });
         validateGitResult(method, result, backing.info);
         return result;
       });
@@ -92,13 +93,21 @@ export class RemoteGitServices {
     return withDeadline(options, method === 'getPullRequest' ? GH_DETAIL_TIMEOUT_MS : GIT_OPERATION_TIMEOUT_MS, async (callOptions) => {
       const budgetMs = callOptions.timeoutMs;
       let result: unknown;
-      if (method === 'getStatus') result = await backing.rpc.call('', 'gh.getStatus', { input: {}, budgetMs }, callOptions);
-      else if (method === 'listPullRequests') result = await backing.rpc.call('', 'gh.listPullRequests', { input: { projectPath: request.projectPath! }, budgetMs }, callOptions);
-      else result = await backing.rpc.call('', 'gh.getPullRequest', { input: { projectPath: request.projectPath!, number: request.number! }, budgetMs }, callOptions);
+      try {
+        if (method === 'getStatus') result = await backing.rpc.call('', 'gh.getStatus', { input: {}, budgetMs }, callOptions);
+        else if (method === 'listPullRequests') result = await backing.rpc.call('', 'gh.listPullRequests', { input: { projectPath: request.projectPath! }, budgetMs }, callOptions);
+        else result = await backing.rpc.call('', 'gh.getPullRequest', { input: { projectPath: request.projectPath!, number: request.number! }, budgetMs }, callOptions);
+      } catch (error) { throw readFailure(error, callOptions.signal); }
       validateGhResult(method, result, backing.info);
       return result;
     });
   }
+}
+
+function readFailure(error: unknown, signal?: AbortSignal): unknown {
+  return signal?.aborted && error instanceof AgentCallError && error.outcome === 'unknown'
+    ? new GitServiceError('GIT_TIMEOUT', 'Git operation expired or was cancelled')
+    : error;
 }
 
 async function withDeadline<T>(options: ExecutorCallOptions | undefined, maximum: number, operation: (options: ExecutorCallOptions & { timeoutMs: number }) => Promise<T>): Promise<T> {

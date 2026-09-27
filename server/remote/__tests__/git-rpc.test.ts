@@ -7,6 +7,37 @@ import { RemoteGitServices } from '../client/remote-git.js';
 import { GIT_MAX_RESULT_BYTES } from '../../../common/git-execution.js';
 
 for (const dialer of ['controller', 'worker'] as const) {
+  test(`Git and gh read deadlines stay typed while mutations remain uncertain with ${dialer} dialing`, async () => {
+    const fixture = await gitRpcFixture(dialer);
+    const localGit = await fixture.local.getGitService();
+    const localGh = await fixture.local.getGhService();
+    const hold = Promise.withResolvers<never>();
+    const entered = Promise.withResolvers<void>();
+    const read = spyOn(localGit, 'getStatus').mockImplementation(() => { entered.resolve(); return hold.promise; });
+    const mutation = spyOn(localGit, 'commitIndex').mockImplementation(() => hold.promise);
+    const ghRead = spyOn(localGh, 'getStatus').mockImplementation(() => hold.promise);
+    try {
+      const git = await fixture.executor.getGitService();
+      const gh = await fixture.executor.getGhService();
+      const request = { projectPath: fixture.projectPath };
+      const abort = new AbortController();
+      const cancelled = git.getStatus(request, { signal: abort.signal });
+      await entered.promise;
+      abort.abort();
+      await expect(cancelled).rejects.toMatchObject({ code: 'GIT_TIMEOUT' });
+      await expect(git.getStatus(request, { timeoutMs: 10 })).rejects.toMatchObject({ code: 'GIT_TIMEOUT' });
+      await expect(gh.getStatus({ timeoutMs: 10 })).rejects.toMatchObject({ code: 'GIT_TIMEOUT' });
+      await expect(git.commitIndex({ ...request, message: 'Synthetic held commit' }, { timeoutMs: 10 }))
+        .rejects.toMatchObject({ code: 'GIT_MUTATION_OUTCOME_UNKNOWN' });
+      expect(mutation).toHaveBeenCalledTimes(1);
+      expect(fixture.executor.availability).toBe('ready');
+    } finally {
+      hold.reject(new Error('Synthetic operation settled'));
+      read.mockRestore(); mutation.mockRestore(); ghRead.mockRestore();
+      await fixture.dispose();
+    }
+  });
+
   test(`Git queries, review proofs and mutations use the repository host with ${dialer} dialing`, async () => {
     const fixture = await gitRpcFixture(dialer);
     const { projectPath, root } = fixture;
