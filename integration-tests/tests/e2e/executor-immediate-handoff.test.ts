@@ -231,3 +231,32 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
     }, { executionBackend, projectRoots: 'separate' });
   }, 90_000);
 }
+
+test('the handoff dialog explains a destination model that is unavailable until assigned', async () => {
+  await withE2eFixture('executor-handoff-unavailable-selection', async fixture => {
+    const { client, dirs, executionDirs, directAgents } = fixture.integration;
+    const chatId = fixture.integration.newChatId();
+    const started = await client.startDirectChat({
+      chatId, projectPath: executionDirs.project, content: 'Synthetic worker prompt', agent: directAgents.openAi,
+    });
+    await client.waitForTurnTerminal(chatId, started.turnId);
+    const app = new SpaDriver(fixture.page, fixture.integration);
+    await app.openChat(chatId);
+    await fixture.waitForSpaWebSocket();
+    await selectExecutor(fixture.page, '[data-slot="composer-bottom-bar"] [data-executor-picker]', 'Local');
+    await app.waitForText('Move to Local');
+    await fixture.page.waitForSelector('[role="dialog"] [data-handoff-selection-unavailable]');
+    await app.waitForText('The selected agent or model is not available on Local. Choose another before moving.');
+    await app.fill('[role="dialog"] input', dirs.project);
+    expect(await fixture.page.$eval('[role="dialog"] button[type="submit"]', element => (element as HTMLButtonElement).disabled)).toBe(true);
+
+    await client.put(`/api/v1/api-provider-assignments?executorId=local&apiProviderId=${directAgents.openAi.provider.providerId}`, {});
+    await fixture.page.waitForFunction(() => !document.querySelector('[role="dialog"] [data-handoff-selection-unavailable]'));
+    await app.waitForDialogButtonEnabled('Use This Executor');
+    const committed = fixture.page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/chats/agent-handoff');
+    await app.clickDialogButton('Use This Executor');
+    expect((await committed).status()).toBe(200);
+    expect(effectiveExecutorId((await client.getChatSnapshot(chatId)).chat.executorId)).toBe('local');
+    fixture.assertNoBrowserErrors();
+  }, { executionBackend: 'remote-controller-dials', projectRoots: 'separate' });
+}, 90_000);

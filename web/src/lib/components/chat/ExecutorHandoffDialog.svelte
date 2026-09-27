@@ -118,6 +118,10 @@
 				</p>
 			{:else if !catalog.isValidated}
 				<p role="status" class="text-sm text-muted-foreground">{m.chat_composer_loading_models()}</p>
+			{:else if !handoff.selectionAvailable}
+				<p role="status" class="text-sm text-destructive" data-handoff-selection-unavailable>
+					{m.chat_executor_handoff_selection_unavailable({ label: executors.label(executorId) })}
+				</p>
 			{/if}
 			{#if handoff.error}
 				<p role="alert" class="text-sm text-destructive">{handoff.error}</p>

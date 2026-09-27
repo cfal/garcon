@@ -45,6 +45,20 @@ describe('ExecutorHandoffProjectState', () => {
 		await expect(result).resolves.toBeNull();
 	});
 
+	it('reports when the requested selection is unavailable on the destination', () => {
+		let available = false;
+		const handoff = new ExecutorHandoffProjectState(() => available);
+		expect(handoff.selectionAvailable).toBe(true);
+		const pending = handoff.ask('chat', executorId, '/worker/project', selection);
+		expect(handoff.selectionAvailable).toBe(false);
+		expect(handoff.canConfirm).toBe(false);
+		available = true;
+		expect(handoff.selectionAvailable).toBe(true);
+		expect(handoff.canConfirm).toBe(true);
+		handoff.cancel();
+		return expect(pending).resolves.toBeNull();
+	});
+
 	it('requires a validated destination and rechecks admission after path inspection', async () => {
 		let ready = false;
 		const handoff = new ExecutorHandoffProjectState(() => ready);

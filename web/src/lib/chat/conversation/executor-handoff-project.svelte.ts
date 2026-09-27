@@ -28,6 +28,10 @@ export class ExecutorHandoffProjectState {
 		return this.isAvailable(this.target.executorId, this.selection);
 	}
 
+	get selectionAvailable(): boolean {
+		return !this.target || !this.selection || this.isAvailable(this.target.executorId, this.selection);
+	}
+
 	ask(
 		chatId: string,
 		executorId: string,
