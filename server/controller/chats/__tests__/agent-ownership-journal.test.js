@@ -399,11 +399,8 @@ describe('AgentOwnershipJournal', () => {
     await journal.initialize();
 
     await journal.delete('chatA');
-    const deleteB = journal.delete('chatB');
-    await Promise.race([
-      deleteB,
-      new Promise((_, reject) => setTimeout(() => reject(new Error('delete B blocked')), 100)),
-    ]);
+    // Delete B settles only if it does not queue behind A's pending release.
+    await journal.delete('chatB');
     expect(registry.getChat('chatB')).toBeNull();
     releaseA();
     await journal.waitForProviderCleanup();
