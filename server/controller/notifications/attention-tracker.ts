@@ -1,20 +1,14 @@
-// Translates low-level agent and queue events into Telegram
-// notifications when a chat requires user attention.
-//
-// Three notification triggers:
-// 1. Permission request  - immediate, deduped by occurrence
-// 2. Chat idle           - turn finished and queue drained (completed/failed)
-// 3. Session stopped     - user-initiated abort
+// Notifications consume live events and cached metadata, never transcript history.
 
 import {
   AssistantMessage,
   isAbortAcknowledged,
-  type ChatMessage,
   type ChatStopOutcome,
 } from '../../../common/chat-types.js';
 import type { TranscriptCommitEvent } from '../ledger/service.js';
 import type { TelegramNotifier } from './telegram.js';
 import { createLogger } from '../../common/log.js';
+import { resolveChatTitle } from '../chats/chat-title.js';
 
 const logger = createLogger('notifications:attention-tracker');
 
@@ -23,8 +17,8 @@ function escapeHtml(text: string): string {
 }
 
 function truncate(text: string, maxLen: number): string {
-  const oneLine = text.replace(/\n+/g, ' ').trim();
-  if (oneLine.length <= maxLen) return oneLine;
+  const oneLine = text.slice(0, maxLen * 4).replace(/\n+/g, ' ').trim();
+  if (text.length <= maxLen * 4 && oneLine.length <= maxLen) return oneLine;
   return oneLine.slice(0, maxLen - 1) + '\u2026';
 }
 
@@ -40,12 +34,6 @@ function toolDisplayName(requestedTool: unknown): string {
   return 'unknown';
 }
 
-function userMessageContent(message: ChatMessage): string | null {
-  return message.type === 'user-message' && 'content' in message && typeof message.content === 'string'
-    ? message.content
-    : null;
-}
-
 // Minimal interfaces for injected dependencies. Avoids importing concrete
 // classes and keeps the module unit-testable with plain mocks.
 
@@ -56,6 +44,7 @@ interface AgentRegistryDep {
 interface QueueManagerDep {
   onChatIdle(cb: (chatId: string) => void): void;
   onSessionStopped(cb: (chatId: string, outcome: ChatStopOutcome) => void): void;
+  onTurnFailed(cb: (chatId: string, message: string) => void): void;
 }
 
 interface SettingsStoreDep {
@@ -68,17 +57,13 @@ interface ChatRegistryDep {
   onChatRemoved?(cb: (chatId: string) => void): void;
 }
 
-interface ChatMessageReaderDep {
-  getMessages(chatId: string): ChatMessage[] | null;
+interface ChatMetadataDep {
+  getChatMetadata(chatId: string): { firstMessage: string } | null;
 }
 
 interface TurnResult {
   reason: 'completed' | 'failed';
   detail?: string;
-}
-
-interface TelegramConfig {
-  enabled: boolean;
 }
 
 interface TelegramSettingsDep {
@@ -90,7 +75,7 @@ export class AttentionTracker {
   #queue: QueueManagerDep;
   #settings: SettingsStoreDep;
   #registry: ChatRegistryDep;
-  #history: ChatMessageReaderDep;
+  #metadata: ChatMetadataDep;
   #telegram: TelegramNotifier;
   #telegramSettings: TelegramSettingsDep;
 
@@ -105,6 +90,7 @@ export class AttentionTracker {
 
   // Tracks the last assistant response per chat from applied commit events.
   #lastAssistantMessage = new Map<string, string>();
+  #lastUserMessage = new Map<string, string>();
 
   // Prevents repeated idle events for one settle from composing duplicate notifications.
   #idleNotified = new Set<string>();
@@ -114,7 +100,7 @@ export class AttentionTracker {
     queue: QueueManagerDep,
     settings: SettingsStoreDep,
     registry: ChatRegistryDep,
-    history: ChatMessageReaderDep,
+    metadata: ChatMetadataDep,
     telegram: TelegramNotifier,
     telegramSettings: TelegramSettingsDep,
   ) {
@@ -122,7 +108,7 @@ export class AttentionTracker {
     this.#queue = queue;
     this.#settings = settings;
     this.#registry = registry;
-    this.#history = history;
+    this.#metadata = metadata;
     this.#telegram = telegram;
     this.#telegramSettings = telegramSettings;
 
@@ -132,6 +118,12 @@ export class AttentionTracker {
   #wire(): void {
     this.#agents.onTranscriptCommitted((event) => this.#handleTranscriptCommit(event));
     this.#queue.onChatIdle((chatId) => this.#handleChatIdle(chatId));
+    this.#queue.onTurnFailed((chatId, message) => {
+      // Dispatch may fail before a ledger run exists; terminal events otherwise win.
+      if (!this.#idleNotified.has(chatId)) {
+        this.#lastTurnResult.set(chatId, { reason: 'failed', detail: truncate(message, 400) });
+      }
+    });
     this.#queue.onSessionStopped((chatId, outcome) => {
       if (isAbortAcknowledged(outcome)) this.#handleSessionStopped(chatId);
     });
@@ -142,29 +134,40 @@ export class AttentionTracker {
   }
 
   #handleTranscriptCommit(event: TranscriptCommitEvent): void {
-    this.#idleNotified.delete(event.chatId);
+    if (event.type === 'view-replaced') {
+      this.#cleanupChat(event.chatId);
+      this.#idleNotified.delete(event.chatId);
+      return;
+    }
     if (event.type === 'rows') {
       for (const row of event.rows) {
-        const message = row.kind === 'user-input'
-          ? row.detail.message
-          : row.kind === 'provider-row'
-            ? row.message
-            : null;
-        if (message instanceof AssistantMessage) {
-          this.#lastAssistantMessage.set(event.chatId, message.content);
+        if (row.kind === 'user-input') {
+          this.#idleNotified.delete(event.chatId);
+          this.#lastTurnResult.delete(event.chatId);
+          this.#lastAssistantMessage.delete(event.chatId);
+          this.#lastUserMessage.set(event.chatId, truncate(row.detail.message.content, 200));
+        } else if (row.kind === 'provider-row' && row.message instanceof AssistantMessage) {
+          this.#lastAssistantMessage.set(event.chatId, truncate(row.message.content, 400));
         }
       }
       return;
     }
     if (event.type === 'run-ended') {
       this.#pendingPermissions.delete(event.chatId);
+      this.#idleNotified.delete(event.chatId);
       if (event.row.outcome === 'finished') {
         this.#lastTurnResult.set(event.chatId, { reason: 'completed' });
+        if (event.finalResponse) {
+          this.#lastAssistantMessage.set(event.chatId, truncate(event.finalResponse.text, 400));
+        }
       } else if (event.row.outcome === 'failed') {
         this.#lastTurnResult.set(event.chatId, {
           reason: 'failed',
-          detail: event.row.error?.message ?? event.row.error?.code,
+          detail: truncate(event.row.error?.message ?? event.row.error?.code ?? '', 400),
         });
+      } else {
+        this.#lastTurnResult.delete(event.chatId);
+        this.#lastAssistantMessage.delete(event.chatId);
       }
       return;
     }
@@ -182,18 +185,6 @@ export class AttentionTracker {
     this.#clearPermission(event.chatId, lifecycle.permissionOccurrenceId);
   }
 
-  // Reads the last user message from the history cache. This covers both
-  // initial session messages (which bypass onMessages) and queued follow-ups.
-  #getLastUserMessage(chatId: string): string | null {
-    const messages = this.#history.getMessages(chatId);
-    if (!messages) return null;
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const content = userMessageContent(messages[i]);
-      if (content) return content;
-    }
-    return null;
-  }
-
   #trackPermission(
     chatId: string,
     permissionOccurrenceId: string,
@@ -207,11 +198,7 @@ export class AttentionTracker {
     if (ids.has(permissionOccurrenceId)) return;
     ids.add(permissionOccurrenceId);
 
-    const meta = this.#chatMeta(chatId);
-    const userMsg = this.#getLastUserMessage(chatId);
-    this.#sendNotification(chatId, this.#formatMessage(
-      meta, userMsg, null, `Needs permission: ${toolName}`,
-    ));
+    void this.#sendNotification(chatId, this.#lastUserMessage.get(chatId) ?? null, null, `Needs permission: ${toolName}`);
   }
 
   #clearPermission(chatId: string, permissionOccurrenceId: string): void {
@@ -227,13 +214,11 @@ export class AttentionTracker {
     if (this.#pendingPermissions.has(chatId)) return;
 
     if (this.#idleNotified.has(chatId)) return;
-    this.#idleNotified.add(chatId);
-
     const result = this.#lastTurnResult.get(chatId);
-    this.#lastTurnResult.delete(chatId);
-    const reason = result?.reason ?? 'completed';
-    const meta = this.#chatMeta(chatId);
-    const userMsg = this.#getLastUserMessage(chatId);
+    if (!result) return;
+    this.#idleNotified.add(chatId);
+    const reason = result.reason;
+    const userMsg = this.#lastUserMessage.get(chatId) ?? null;
     const assistantMsg = this.#lastAssistantMessage.get(chatId) ?? null;
 
     let status: string | null = null;
@@ -242,21 +227,16 @@ export class AttentionTracker {
     }
 
     this.#cleanupChat(chatId);
-    this.#sendNotification(chatId, this.#formatMessage(
-      meta, userMsg, reason === 'failed' ? null : assistantMsg, status,
-    ));
+    void this.#sendNotification(chatId, userMsg, reason === 'failed' ? null : assistantMsg, status);
   }
 
   #handleSessionStopped(chatId: string): void {
-    this.#pendingPermissions.delete(chatId);
-
-    const meta = this.#chatMeta(chatId);
-    const userMsg = this.#getLastUserMessage(chatId);
+    if (this.#idleNotified.has(chatId)) return;
+    this.#idleNotified.add(chatId);
+    const userMsg = this.#lastUserMessage.get(chatId) ?? null;
 
     this.#cleanupChat(chatId);
-    this.#sendNotification(chatId, this.#formatMessage(
-      meta, userMsg, null, 'Stopped',
-    ));
+    void this.#sendNotification(chatId, userMsg, null, 'Stopped');
   }
 
   // Builds an HTML-formatted notification message.
@@ -298,14 +278,16 @@ export class AttentionTracker {
     this.#pendingPermissions.delete(chatId);
     this.#lastTurnResult.delete(chatId);
     this.#lastAssistantMessage.delete(chatId);
+    this.#lastUserMessage.delete(chatId);
   }
 
   #chatMeta(chatId: string): { title: string; hasGeneratedTitle: boolean; agentId: string; projectPath: string } {
     const chat = this.#registry.getChat(chatId);
     const generatedTitle = this.#settings.getChatName(chatId);
-    const title = generatedTitle
-      || this.#titleFromHistory(chatId)
-      || chatId.slice(0, 8);
+    const title = truncate(resolveChatTitle(
+      generatedTitle,
+      this.#metadata.getChatMetadata(chatId)?.firstMessage || chatId.slice(0, 8),
+    ), 120);
     return {
       title,
       hasGeneratedTitle: Boolean(generatedTitle),
@@ -314,23 +296,15 @@ export class AttentionTracker {
     };
   }
 
-  // Falls back to the first user message as a title when no chat name exists.
-  #titleFromHistory(chatId: string): string | null {
-    const messages = this.#history.getMessages(chatId);
-    if (!messages) return null;
-    for (const msg of messages) {
-      const content = userMessageContent(msg);
-      if (content) return truncate(content, 60);
-    }
-    return null;
-  }
-
-  async #sendNotification(chatId: string, html: string): Promise<void> {
+  async #sendNotification(chatId: string, userMsg: string | null, assistantMsg: string | null, status: string | null): Promise<void> {
     if (!this.#telegram.isConfigured) return;
     try {
-      const config = await this.#getTelegramConfig();
+      const ui = this.#settings.getUiSettings();
+      const notifications = (ui.notifications ?? {}) as Record<string, unknown>;
+      const config = (notifications.telegram ?? {}) as Record<string, unknown>;
       const recipientChatId = this.#telegramSettings.getRecipientChatId();
-      if (!config.enabled || !recipientChatId) return;
+      if (config.enabled !== true || !recipientChatId || !this.#registry.getChat(chatId)) return;
+      const html = this.#formatMessage(this.#chatMeta(chatId), userMsg, assistantMsg, status);
       const ok = await this.#telegram.send(recipientChatId, html, 'HTML');
       if (!ok) {
         logger.warn(`attention: telegram delivery failed for chat ${chatId}`);
@@ -340,12 +314,4 @@ export class AttentionTracker {
     }
   }
 
-  async #getTelegramConfig(): Promise<TelegramConfig> {
-    const ui = await this.#settings.getUiSettings();
-    const notifications = (ui?.notifications ?? {}) as Record<string, unknown>;
-    const telegram = (notifications?.telegram ?? {}) as Record<string, unknown>;
-    return {
-      enabled: telegram.enabled === true,
-    };
-  }
 }

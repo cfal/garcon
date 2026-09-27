@@ -7,6 +7,11 @@ function createMockAgentRegistry() {
   const emitter = new EventEmitter();
   return {
     onTranscriptCommitted: (cb) => emitter.on('transcript', cb),
+    emitInput: (chatId, content, steer = false) => emitter.emit('transcript', {
+      type: 'rows', chatId, viewId: 'view-1',
+      rows: [{ kind: 'user-input', detail: { message: { content }, steer } }],
+    }),
+    replaceView: (chatId) => emitter.emit('transcript', { type: 'view-replaced', chatId }),
     emitAssistant: (chatId, messages) => emitter.emit('transcript', {
       type: 'rows',
       chatId,
@@ -55,11 +60,12 @@ function createMockAgentRegistry() {
       },
     }),
     emitPermissionCleared: (chatId) => emitRunEnded(emitter, chatId, 'finished'),
-    emitFinished: (chatId, exitCode) => emitRunEnded(
+    emitFinished: (chatId, exitCode, finalResponse) => emitRunEnded(
       emitter,
       chatId,
       exitCode === 0 ? 'finished' : 'failed',
       exitCode === 0 ? undefined : { code: 'PROVIDER_EXIT', message: `exit code ${exitCode}` },
+      finalResponse,
     ),
     emitFailed: (chatId, message) => emitRunEnded(
       emitter,
@@ -70,12 +76,13 @@ function createMockAgentRegistry() {
   };
 }
 
-function emitRunEnded(emitter, chatId, outcome, error) {
+function emitRunEnded(emitter, chatId, outcome, error, finalResponse = null) {
   emitter.emit('transcript', {
     type: 'run-ended',
     chatId,
     viewId: 'view-1',
     runId: 'run-1',
+    finalResponse,
     row: {
       kind: 'run-ended',
       ordinal: 3,
@@ -93,6 +100,8 @@ function createMockQueue() {
   return {
     onChatIdle: (cb) => emitter.on('chat-idle', cb),
     onSessionStopped: (cb) => emitter.on('session-stopped', cb),
+    onTurnFailed: (cb) => emitter.on('turn-failed', cb),
+    emitTurnFailed: (chatId, message) => emitter.emit('turn-failed', chatId, message),
     emitChatIdle: (chatId) => emitter.emit('chat-idle', chatId),
     emitSessionStopped: (chatId, success) => emitter.emit('session-stopped', chatId, success),
   };
@@ -100,7 +109,7 @@ function createMockQueue() {
 
 function createMockSettings(telegramConfig = { enabled: true }) {
   return {
-    getUiSettings: mock(() => Promise.resolve({
+    getUiSettings: mock(() => ({
       notifications: { telegram: telegramConfig },
     })),
     getChatName: mock(() => null),
@@ -113,15 +122,6 @@ function createMockRegistry(entry = { agentId: 'claude', projectPath: '/home/use
     getChat: mock(() => entry),
     onChatRemoved: (cb) => emitter.on('chat-removed', cb),
     emitChatRemoved: (chatId) => emitter.emit('chat-removed', chatId),
-  };
-}
-
-// Messages stored in the mock history cache. Tests push into this array
-// before triggering events.
-let historyMessages;
-function createMockHistory() {
-  return {
-    getMessages: mock(() => historyMessages),
   };
 }
 
@@ -139,34 +139,32 @@ function createMockTelegramSettings(chatId = '99999') {
 }
 
 describe('AttentionTracker', () => {
-  let agents, queue, settings, registry, history, telegram, telegramSettings;
+  let agents, queue, settings, registry, metadata, telegram, telegramSettings;
 
   beforeEach(() => {
     agents = createMockAgentRegistry();
     queue = createMockQueue();
     settings = createMockSettings();
     registry = createMockRegistry();
-    historyMessages = [];
-    history = createMockHistory();
+    metadata = { getChatMetadata: mock(() => null) };
     telegram = createMockTelegram();
     telegramSettings = createMockTelegramSettings();
   });
 
   function createTracker() {
-    return new AttentionTracker(agents, queue, settings, registry, history, telegram, telegramSettings);
+    return new AttentionTracker(agents, queue, settings, registry, metadata, telegram, telegramSettings);
   }
 
   // Simulates a conversation round and its durable assistant commit.
   function simulateConversation(chatId, userText, assistantText) {
-    historyMessages.push({ type: 'user-message', content: userText });
-    historyMessages.push({ type: 'assistant-message', content: assistantText });
+    agents.emitInput(chatId, userText);
     agents.emitAssistant(chatId, [new AssistantMessage('2024-01-01T00:00:01Z', assistantText)]);
   }
 
   describe('permission notifications', () => {
     it('sends HTML notification with user message and permission info', async () => {
       createTracker();
-      historyMessages.push({ type: 'user-message', content: 'deploy the app' });
+      agents.emitInput('c1', 'deploy the app');
       const bashTool = new BashToolUseMessage('2024-01-01T00:00:01Z', 'tool-1', 'echo hello');
       const msg = new PermissionRequestMessage(
         '2024-01-01T00:00:01Z', 'incarnation-1', bashTool,
@@ -187,7 +185,7 @@ describe('AttentionTracker', () => {
     it('uses agentId from the chat registry in notification metadata', async () => {
       registry = createMockRegistry({ agentId: 'codex', projectPath: '/home/user/repo' });
       createTracker();
-      historyMessages.push({ type: 'user-message', content: 'deploy the app' });
+      agents.emitInput('c1', 'deploy the app');
       const bashTool = new BashToolUseMessage('2024-01-01T00:00:01Z', 'tool-1', 'echo hello');
       const msg = new PermissionRequestMessage(
         '2024-01-01T00:00:01Z', 'incarnation-1', bashTool,
@@ -272,6 +270,82 @@ describe('AttentionTracker', () => {
   });
 
   describe('chat-idle notifications', () => {
+    it('ignores idle without a terminal outcome, including late output after consumption', () => {
+      createTracker();
+      queue.emitChatIdle('c1');
+      expect(telegram.send).not.toHaveBeenCalled();
+      expect(metadata.getChatMetadata).not.toHaveBeenCalled();
+      simulateConversation('c1', 'task', 'answer');
+      agents.emitFinished('c1', 0);
+      queue.emitChatIdle('c1');
+      agents.emitAssistant('c1', [new AssistantMessage('', 'late answer')]);
+      queue.emitChatIdle('c1');
+      expect(telegram.send).toHaveBeenCalledTimes(1);
+    });
+
+    it('coalesces queued turns and uses the last committed input, including steer', () => {
+      createTracker();
+      simulateConversation('c1', 'initial', 'first answer');
+      agents.emitFinished('c1', 0);
+      agents.emitInput('c1', 'queued follow-up');
+      agents.emitInput('c1', 'steered instruction', true);
+      agents.emitFinished('c1', 0, { type: 'text', text: 'final result' });
+      queue.emitChatIdle('c1');
+      expect(telegram.send).toHaveBeenCalledTimes(1);
+      const html = telegram.send.mock.calls[0][1];
+      expect(html).toContain('steered instruction');
+      expect(html).toContain('final result');
+      expect(html).not.toContain('first answer');
+      expect(html).not.toContain('initial');
+    });
+
+    it('prefers the terminal final response and bounds retained excerpts', () => {
+      createTracker();
+      simulateConversation('c1', 'x'.repeat(1_000_000), 'partial answer');
+      agents.emitFinished('c1', 0, { type: 'text', text: 'y'.repeat(1_000_000) });
+      queue.emitChatIdle('c1');
+      const html = telegram.send.mock.calls[0][1];
+      expect(html.length).toBeLessThan(700);
+      expect(html).not.toContain('partial answer');
+      expect(html).toContain('y'.repeat(100));
+    });
+
+    it('reports a dispatch failure without a ledger terminal', () => {
+      createTracker();
+      agents.emitInput('c1', 'new task');
+      queue.emitTurnFailed('c1', 'Source unavailable');
+      queue.emitChatIdle('c1');
+      expect(telegram.send.mock.calls[0][1]).toContain('Failed: Source unavailable');
+      queue.emitTurnFailed('c1', 'Source unavailable');
+      queue.emitChatIdle('c1');
+      expect(telegram.send).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(['replaceView', 'emitChatRemoved'])('clears excerpts and outcomes on %s without affecting other chats', (operation) => {
+      createTracker();
+      simulateConversation('c1', 'discard input', 'discard answer');
+      simulateConversation('c2', 'keep input', 'keep answer');
+      agents.emitFinished('c1', 0);
+      agents.emitFinished('c2', 0);
+      if (operation === 'replaceView') agents.replaceView('c1');
+      else registry.emitChatRemoved('c1');
+      queue.emitChatIdle('c1');
+      queue.emitChatIdle('c2');
+      expect(telegram.send).toHaveBeenCalledTimes(1);
+      expect(telegram.send.mock.calls[0][1]).toContain('keep answer');
+      agents.emitFinished('c1', 0);
+      queue.emitChatIdle('c1');
+      expect(telegram.send.mock.calls[1][1]).not.toContain('discard');
+    });
+
+    it('uses cached metadata when live input is unavailable', () => {
+      metadata.getChatMetadata = mock(() => ({ firstMessage: 'Cached first line\nrest' }));
+      createTracker();
+      agents.emitFinished('c1', 0);
+      queue.emitChatIdle('c1');
+      expect(telegram.send.mock.calls[0][1]).toContain('<b>Cached first line</b>');
+    });
+
     it('sends notification with user message as title and response', async () => {
       createTracker();
       simulateConversation('c1', 'fix the bug', 'Fixed the null pointer in main.ts');
@@ -302,9 +376,8 @@ describe('AttentionTracker', () => {
       expect(html).toContain('Fixed the null pointer');
     });
 
-    it('falls back to truncated chat ID when no history', async () => {
+    it('falls back to truncated chat ID when no live context or metadata exists', async () => {
       createTracker();
-      historyMessages = null;
       agents.emitFinished('c1', 0);
       queue.emitChatIdle('c1');
 
@@ -401,7 +474,7 @@ describe('AttentionTracker', () => {
   describe('session-stopped notifications', () => {
     it('sends stopped notification with user message as title', async () => {
       createTracker();
-      historyMessages.push({ type: 'user-message', content: 'run tests' });
+      agents.emitInput('c1', 'run tests');
       queue.emitSessionStopped('c1', 'interrupt-requested');
 
       await new Promise(r => setTimeout(r, 10));
@@ -414,7 +487,7 @@ describe('AttentionTracker', () => {
 
     it.each(['already-idle', 'failed'])('does not report %s as an acknowledged stop', async (outcome) => {
       createTracker();
-      historyMessages.push({ type: 'user-message', content: 'run tests' });
+      agents.emitInput('c1', 'run tests');
       queue.emitSessionStopped('c1', outcome);
 
       await new Promise(r => setTimeout(r, 10));
@@ -431,6 +504,8 @@ describe('AttentionTracker', () => {
 
       await new Promise(r => setTimeout(r, 10));
       expect(telegram.send).not.toHaveBeenCalled();
+      expect(metadata.getChatMetadata).not.toHaveBeenCalled();
+      expect(settings.getChatName).not.toHaveBeenCalled();
     });
 
     it('sends nothing when recipient is not linked', async () => {
@@ -441,6 +516,7 @@ describe('AttentionTracker', () => {
 
       await new Promise(r => setTimeout(r, 10));
       expect(telegram.send).not.toHaveBeenCalled();
+      expect(metadata.getChatMetadata).not.toHaveBeenCalled();
     });
 
     it('sends nothing when telegram notifier is not configured', async () => {
@@ -451,6 +527,8 @@ describe('AttentionTracker', () => {
 
       await new Promise(r => setTimeout(r, 10));
       expect(telegram.send).not.toHaveBeenCalled();
+      expect(settings.getUiSettings).not.toHaveBeenCalled();
+      expect(metadata.getChatMetadata).not.toHaveBeenCalled();
     });
 
     it('logs the Garcon chat id when Telegram delivery fails', async () => {

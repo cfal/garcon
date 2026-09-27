@@ -104,7 +104,6 @@ import { initializeChatBoardRuntime } from './chat-boards/setup.js';
 import { initializeTickets } from './tickets/setup.js';
 import { createTicketProjectResolver } from './tickets/project-default.js';
 import {
-  ledgerRowsToMessages,
   TranscriptAdoptionService,
   TranscriptLedgerService,
   NativeActivityPageReader,
@@ -505,13 +504,6 @@ export async function startServer(): Promise<void> {
       chatSearch,
     );
 
-    const chatMessageReader = {
-      getMessages(chatId: string) {
-        return transcriptLedger.currentView(chatId)
-          ? ledgerRowsToMessages(transcriptLedger.currentRows(chatId))
-          : null;
-      },
-    };
     const chatViewPages = new NativeActivityPageReader(
       transcriptReader,
       nativeTranscriptActivity,
@@ -667,7 +659,7 @@ export async function startServer(): Promise<void> {
       queue,
       settings,
       chatRegistry,
-      chatMessageReader,
+      metadata,
       telegramNotifier,
       telegramSettings,
     );

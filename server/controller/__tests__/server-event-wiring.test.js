@@ -18,6 +18,7 @@ import { createProducerFixture, permissionResponse } from '../agents/__tests__/p
 import { TranscriptLedgerService } from '../ledger/service.js';
 import { TranscriptLedgerStore } from '../ledger/store.js';
 import { KeyedPromiseLock } from '../../common/keyed-lock.js';
+import { AttentionTracker } from '../notifications/attention-tracker.js';
 import {
   attachNativeMessageSource,
   getNativeMessageRevisionSource,
@@ -323,7 +324,7 @@ const turn = {
   turnId: 'turn-1',
 };
 
-function createExecutionFixture(directory, ensureAdopted, beforeWiringCommitListener) {
+function createExecutionFixture(directory, ensureAdopted, beforeWiringCommitListener, options = {}) {
   const store = new TranscriptLedgerStore(directory);
   const transcripts = new TranscriptLedgerService(store, { serverInstanceId: 'server-instance-test' });
   const view = transcripts.initializeChat('chat-1');
@@ -371,7 +372,9 @@ function createExecutionFixture(directory, ensureAdopted, beforeWiringCommitList
   });
   const ledger = new CommandLedger();
   if (beforeWiringCommitListener) agents.onTranscriptCommitted(beforeWiringCommitListener);
+  options.beforeWiring?.({ agents, execution, transcripts });
   const fixture = createFixture({
+    ...options.wiring,
     commandLedgerInstance: ledger, queueService: execution,
     agentRegistry: {
       onTranscriptCommitted: (callback) => agents.onTranscriptCommitted(callback),
@@ -386,6 +389,41 @@ function createExecutionFixture(directory, ensureAdopted, beforeWiringCommitList
 }
 
 describe('server event wiring', () => {
+  it.each([false, true])('startup does not drain empty queues or read transcripts for Telegram: enabled=%s', async (enabled) => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'startup-attention-'));
+    const send = mock(async () => true);
+    const idle = mock();
+    const readHistory = mock(() => { throw new Error('Startup must not load transcript history'); });
+    const fixture = createExecutionFixture(directory, undefined, undefined, {
+      wiring: { executors: [{ id: 'local', availability: 'ready' }] },
+      beforeWiring({ agents, execution, transcripts }) {
+        transcripts.currentRows = readHistory;
+        transcripts.conversationMessages = readHistory;
+        execution.onChatIdle(idle);
+        new AttentionTracker(agents, execution,
+          { getUiSettings: () => ({ notifications: { telegram: { enabled } } }), getChatName: () => null },
+          { getChat: () => ({ agentId: 'test', projectPath: directory }) },
+          { getChatMetadata: () => ({ firstMessage: 'Cached title' }) },
+          { isConfigured: true, send }, { getRecipientChatId: () => 'recipient' },
+        );
+      },
+    });
+    try {
+      await Bun.sleep(0);
+      expect(idle).not.toHaveBeenCalled();
+      expect(readHistory).not.toHaveBeenCalled();
+      expect(send).not.toHaveBeenCalled();
+      // A genuine empty drain is still harmless; idle alone is not a completion.
+      await fixture.execution.triggerDrain('chat-1');
+      expect(idle).toHaveBeenCalledTimes(1);
+      expect(send).not.toHaveBeenCalled();
+      expect(readHistory).not.toHaveBeenCalled();
+    } finally {
+      fixture.transcripts.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   for (const method of ['stopActiveTurn', 'interruptActiveTurn']) {
     it(`settles ${method} during pre-run failure settlement and fences its successor`, async () => {
       const directory = await mkdtemp(path.join(tmpdir(), 'prerun-failure-stop-wiring-'));

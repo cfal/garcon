@@ -14,7 +14,7 @@ it('[TLV5-PERM.11-NOTIFIER-UNIT-01] ignores late inert permission history withou
   const notification = new Promise((resolve) => {
     resolveNotification = resolve;
   });
-  const getUiSettings = mock(async () => ({
+  const getUiSettings = mock(() => ({
     notifications: { telegram: { enabled: true } },
   }));
   const send = mock(async (...args) => {
@@ -27,6 +27,7 @@ it('[TLV5-PERM.11-NOTIFIER-UNIT-01] ignores late inert permission history withou
     {
       onChatIdle: (callback) => { onChatIdle = callback; },
       onSessionStopped: () => {},
+      onTurnFailed: () => {},
     },
     {
       getUiSettings,
@@ -35,7 +36,7 @@ it('[TLV5-PERM.11-NOTIFIER-UNIT-01] ignores late inert permission history withou
     {
       getChat: () => ({ agentId: 'test', projectPath: '/workspace' }),
     },
-    { getMessages: () => [] },
+    { getChatMetadata: () => null },
     { isConfigured: true, send },
     { getRecipientChatId: () => 'recipient-1' },
   );
