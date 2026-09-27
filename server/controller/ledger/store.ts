@@ -482,24 +482,25 @@ export class TranscriptLedgerStore {
   }
 
   // Bounds both the indexed ordinal ranges and JSON decoded for best-effort previews.
-  previewEdges(chatId: string, viewId: TranscriptViewId): { head: LedgerRow[]; tail: LedgerRow[] } {
+  previewEdges(chatId: string, viewId: TranscriptViewId): { head: LedgerRow[] | null; tail: LedgerRow[] } {
     return this.#read(chatId, (entry) => {
       this.#assertCurrent(entry, viewId);
       const query = entry.db.query<Omit<StoredLedgerRow, 'payload_json'> & { payload_json: string | null }, [number, string, number, number]>(`
         SELECT view_id, ordinal, kind, at, client_message_id,
-          CASE WHEN octet_length(payload_json) <= ? THEN payload_json END AS payload_json
+          CASE WHEN length(CAST(payload_json AS BLOB)) <= ? THEN payload_json END AS payload_json
         FROM transcript_rows
         WHERE view_id = ? AND ordinal BETWEEN ? AND ?
           AND kind IN ('user-input', 'provider-row')
         ORDER BY ordinal
       `);
-      const edge = (first: number, last: number): LedgerRow[] => query
-        .all(PREVIEW_ROW_BYTES, viewId, first, last)
+      const decode = (rows: ReturnType<typeof query.all>): LedgerRow[] => rows
         .flatMap((row) => row.payload_json === null ? [] : [decodeStoredLedgerRow({ ...row, payload_json: row.payload_json })]);
       const last = entry.nextOrdinal - 1;
+      const head = query.all(PREVIEW_ROW_BYTES, viewId, 1, PREVIEW_EDGE_ROWS);
       return {
-        head: edge(1, PREVIEW_EDGE_ROWS),
-        tail: edge(Math.max(1, last - PREVIEW_EDGE_ROWS + 1), last),
+        // An omitted payload could contain the first input, including imported user rows.
+        head: head.some((row) => row.payload_json === null) ? null : decode(head),
+        tail: decode(query.all(PREVIEW_ROW_BYTES, viewId, Math.max(1, last - PREVIEW_EDGE_ROWS + 1), last)),
       };
     });
   }

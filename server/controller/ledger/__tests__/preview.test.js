@@ -3,7 +3,7 @@ import { Database } from 'bun:sqlite';
 import { mkdtemp, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { AssistantMessage, ErrorMessage, UserMessage } from '../../../../common/chat-types.ts';
+import { AssistantMessage, BashToolUseMessage, ErrorMessage, UserMessage } from '../../../../common/chat-types.ts';
 import { TranscriptLedgerStore } from '../store.ts';
 import { TranscriptLedgerService } from '../service.ts';
 
@@ -45,6 +45,7 @@ it('skips oversized payloads, provider errors, and presentation-only rows', () =
   const rows = [
     { kind: 'notice', at, message: 'not a preview', detail: {} },
     provider(new UserMessage(at, 'question')),
+    ...Array.from({ length: 32 }, () => ({ kind: 'notice', at, message: 'notice', detail: {} })),
     provider(new AssistantMessage(at, 'answer')),
     provider(new AssistantMessage(at, 'x'.repeat(1024 * 1024))),
     provider(new ErrorMessage(at, 'not conversational')),
@@ -54,6 +55,34 @@ it('skips oversized payloads, provider errors, and presentation-only rows', () =
   expect(ledger.existingPreview('chat')).toMatchObject({
     first: { content: 'question' }, last: { content: 'answer' },
   });
+});
+
+it.each(['user-input', 'provider-row'])('defers repair rather than promoting output past an oversized %s', (kind) => {
+  const message = new UserMessage(at, 'Original input', ['x'.repeat(1024 * 1024)]);
+  const input = kind === 'provider-row' ? provider(message) : {
+    kind, at, detail: { message, attachments: [], clientMessageId: null, steer: false },
+  };
+  store.initializeCurrentView('chat', { contentStartOrdinal: 1, rows: [
+    input, provider(new BashToolUseMessage(at, 'tool', 'pwd')), provider(new AssistantMessage(at, 'answer')),
+  ] });
+  expect(ledger.existingPreview('chat')).toBeNull();
+  expect(ledger.currentRows('chat')).toHaveLength(3);
+});
+
+it('repairs on platform SQLite without octet_length and leaves the ledger writable', () => {
+  store.initializeCurrentView('chat', { contentStartOrdinal: 1, rows: [provider(new UserMessage(at, 'question'))] });
+  const originalQuery = Database.prototype.query;
+  const query = spyOn(Database.prototype, 'query').mockImplementation(function(sql, ...args) {
+    if (sql.includes('octet_length')) throw new Error('no such function: octet_length');
+    return originalQuery.call(this, sql, ...args);
+  });
+  try {
+    expect(ledger.existingPreview('chat').first.content).toBe('question');
+    ledger.openProducer('chat', 'test').sink.publish({ type: 'rows', rows: [{ message: new AssistantMessage(at, 'answer') }] });
+    expect(ledger.currentRows('chat')).toHaveLength(2);
+  } finally {
+    query.mockRestore();
+  }
 });
 
 it('does not search beyond an empty bounded edge or materialize an absent ledger', async () => {
