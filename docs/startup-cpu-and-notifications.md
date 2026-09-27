@@ -37,6 +37,12 @@ native history must remain an explicit failure, not an empty successful view.
    native history, overwrite newer live metadata, resurrect deleted chats, or
    outlive shutdown.
 
+Preview repair samples only the first and last 32 ledger ordinals, decoding at
+most 64 KiB per candidate. Oversized rows are skipped; absent edge candidates
+leave the cache unrepaired. This is best-effort list metadata, not transcript
+truncation. Reads and publication are synchronous within each yielded unit, so
+live updates, deletion, and view replacement cannot interleave with publication.
+
 No new transport, durable notification state, replay, or provider-specific logic
 is needed. Existing transcript and executor contracts remain authoritative.
 
