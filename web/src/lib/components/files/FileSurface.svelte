@@ -181,6 +181,21 @@
 		/>
 	{/if}
 
+	{#if session.document.recoveryError}
+		<div
+			class="flex shrink-0 items-center gap-2 border-b border-status-warning-border bg-status-warning px-3 py-2 text-xs text-status-warning-foreground"
+			role="status"
+		>
+			<TriangleAlert class="h-4 w-4 shrink-0" />
+			<span class="min-w-0 flex-1"
+				>{m.file_recovery_failed({ detail: session.document.recoveryError })}</span
+			>
+			<Button variant="outline" size="sm" onclick={() => void files.flushRecovery()}
+				>{m.common_retry()}</Button
+			>
+		</div>
+	{/if}
+
 	{#if session.saveError}
 		<div
 			class="flex shrink-0 items-center gap-2 border-b border-status-error-border bg-status-error px-3 py-2 text-xs text-status-error-foreground"

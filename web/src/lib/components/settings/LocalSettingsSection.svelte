@@ -20,7 +20,7 @@
 		SNIPPET_TRIGGER_MAX_LENGTH,
 		snippetTriggerValidationError,
 	} from '$lib/chat/composer/snippet-trigger.js';
-	import { getAppShell, getLocalSettings } from '$lib/context';
+	import { getAppShell, getFileSessions, getLocalSettings } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import CompletionSoundSettings from './CompletionSoundSettings.svelte';
 	import ThemeSettingsCard from './ThemeSettingsCard.svelte';
@@ -32,6 +32,9 @@
 
 	const ls = getLocalSettings();
 	const appShell = getAppShell();
+	const files = getFileSessions();
+	let recoveryCleanupStatus = $state<string | null>(null);
+	let clearingRecovery = $state(false);
 	const chatMaxWidthOptions: Array<{ value: ChatMaxWidth; label: () => string }> = [
 		{ value: 'none', label: m.settings_chat_max_width_none },
 		{ value: 'large', label: m.settings_chat_max_width_large },
@@ -93,6 +96,22 @@
 			}
 		});
 	});
+
+	async function clearFileRecovery(): Promise<void> {
+		if (clearingRecovery) return;
+		clearingRecovery = true;
+		recoveryCleanupStatus = null;
+		try {
+			recoveryCleanupStatus = (await files.clearRecovery())
+				? m.settings_file_recovery_cleared()
+				: m.settings_file_recovery_clear_blocked();
+		} catch (error) {
+			console.error('Failed to clear file recovery data', error);
+			recoveryCleanupStatus = m.settings_file_recovery_clear_failed();
+		} finally {
+			clearingRecovery = false;
+		}
+	}
 
 	function commitSnippetTrigger(): void {
 		const error = snippetTriggerValidationError(snippetTriggerDraft);
@@ -331,6 +350,27 @@
 					'markdownViewerOpenPlacement',
 					ls.markdownViewerOpenPlacement,
 				)}
+			</div>
+			<div class="flex items-center justify-between gap-4 border-t border-border py-2">
+				<div class="min-w-0">
+					<div class="text-sm font-medium text-foreground">{m.settings_file_recovery_title()}</div>
+					<p class="mt-0.5 text-xs text-muted-foreground">
+						{m.settings_file_recovery_description()}
+					</p>
+					{#if recoveryCleanupStatus}
+						<p class="mt-0.5 text-xs text-muted-foreground" role="status">
+							{recoveryCleanupStatus}
+						</p>
+					{/if}
+				</div>
+				<Button
+					variant="outline"
+					size="sm"
+					disabled={clearingRecovery}
+					onclick={() => void clearFileRecovery()}
+				>
+					{m.settings_file_recovery_clear()}
+				</Button>
 			</div>
 			<div class="flex items-center justify-between gap-4 border-t border-border py-2">
 				<div class="min-w-0">

@@ -147,7 +147,7 @@ function assembleWorkspaceServices(
 		isTerminalLauncherDismissed: () => false,
 		workspaceLayoutRaw: null,
 	});
-	if (clientId) void services.files.initializeNavigation('test-user');
+	if (clientId) void services.files.initializeRecovery('test-user');
 	return { services, ghCapability, chatSessions, notifications };
 }
 
@@ -223,7 +223,7 @@ describe('createWorkspaceServices', () => {
 		async (action) => {
 			rootLocalSettings = createLocalSettingsStore();
 			({ services } = assembleWorkspaceServices(rootLocalSettings));
-			await services.files.initializeNavigation('test-user');
+			await services.files.initializeRecovery('test-user');
 			const location: FileLocation = {
 				key: '["/workspace","first.md"]',
 				executorId: 'local',
@@ -267,11 +267,7 @@ describe('createWorkspaceServices', () => {
 			const assembled = assembleWorkspaceServices(rootLocalSettings);
 			services = assembled.services;
 			const session = new FileSession(
-				{
-					executorId: 'local',
-					canonicalFileRootPath: '/workspace',
-					normalizedRelativePath: 'file.ts',
-				},
+				{ executorId: 'local', canonicalFileRootPath: '/workspace', normalizedRelativePath: 'file.ts' },
 				'command-copy',
 			);
 			vi.spyOn(services.files, 'get').mockReturnValue(session);
@@ -327,11 +323,7 @@ describe('createWorkspaceServices', () => {
 		const assembled = assembleWorkspaceServices(rootLocalSettings);
 		services = assembled.services;
 		const session = new FileSession(
-			{
-				executorId: 'local',
-				canonicalFileRootPath: '/workspace',
-				normalizedRelativePath: 'file.ts',
-			},
+			{ executorId: 'local', canonicalFileRootPath: '/workspace', normalizedRelativePath: 'file.ts' },
 			'command-chat',
 		);
 		vi.spyOn(services.files, 'get').mockReturnValue(session);
@@ -369,7 +361,7 @@ describe('createWorkspaceServices', () => {
 	it('disables history commands at boundaries and while opening a target', async () => {
 		rootLocalSettings = createLocalSettingsStore();
 		({ services } = assembleWorkspaceServices(rootLocalSettings));
-		await services.files.initializeNavigation('test-user');
+		await services.files.initializeRecovery('test-user');
 		const navigation = services.files.navigation!;
 		expect(services.commands.isEnabled('file.navigate-back')).toBe(false);
 		expect(services.commands.isEnabled('file.navigate-forward')).toBe(false);
@@ -402,11 +394,7 @@ describe('createWorkspaceServices', () => {
 		rootLocalSettings = createLocalSettingsStore();
 		({ services } = assembleWorkspaceServices(rootLocalSettings));
 		const session = new FileSession(
-			{
-				executorId: 'local',
-				canonicalFileRootPath: '/workspace',
-				normalizedRelativePath: 'file.ts',
-			},
+			{ executorId: 'local', canonicalFileRootPath: '/workspace', normalizedRelativePath: 'file.ts' },
 			'command-reveal',
 		);
 		vi.spyOn(services.files, 'get').mockReturnValue(session);
@@ -425,55 +413,39 @@ describe('createWorkspaceServices', () => {
 		expect(reveal).toHaveBeenCalledWith('/workspace', 'file.ts', 'local');
 	});
 
-	it.each(['before-open', 'while-opening'])(
-		'reports unavailable Reveal without retargeting Files (%s)',
-		async (when) => {
-			rootLocalSettings = createLocalSettingsStore();
-			const assembled = assembleWorkspaceServices(rootLocalSettings);
-			services = assembled.services;
-			const session = new FileSession(
-				{
-					executorId: 'remote',
-					canonicalFileRootPath: '/workspace',
-					normalizedRelativePath: 'file.ts',
-				},
-				'command-reveal-unavailable',
-			);
-			vi.spyOn(services.files, 'get').mockReturnValue(session);
-			const available = vi
-				.spyOn(session.document, 'executorAvailable', 'get')
-				.mockReturnValue(when !== 'before-open');
-			const attached = Promise.withResolvers<void>();
-			const open = vi
-				.spyOn(services.coordinator, 'openSingleton')
-				.mockReturnValue(attached.promise);
-			const controller = services.singletonSurfaces.files();
-			const reveal = vi.spyOn(controller, 'revealFile');
-			const pending = services.commands.execute('file.reveal-active', {
-				viewId: session.id,
-				surfaceId: `file:${session.id}`,
-			});
-			available.mockReturnValue(false);
-			attached.resolve();
-			await expect(pending).resolves.toBe(false);
-			expect(open).toHaveBeenCalledTimes(when === 'before-open' ? 0 : 1);
-			expect(reveal).not.toHaveBeenCalled();
-			expect(controller.tree.executorId).toBe('local');
-			expect(assembled.notifications.items).toMatchObject([
-				{ tone: 'error', message: 'Files are unavailable on this executor.' },
-			]);
-		},
-	);
+	it.each(['before-open', 'while-opening'])('reports unavailable Reveal without retargeting Files (%s)', async (when) => {
+		rootLocalSettings = createLocalSettingsStore();
+		const assembled = assembleWorkspaceServices(rootLocalSettings);
+		services = assembled.services;
+		const session = new FileSession(
+			{ executorId: 'remote', canonicalFileRootPath: '/workspace', normalizedRelativePath: 'file.ts' },
+			'command-reveal-unavailable',
+		);
+		vi.spyOn(services.files, 'get').mockReturnValue(session);
+		const available = vi.spyOn(session.document, 'executorAvailable', 'get').mockReturnValue(when !== 'before-open');
+		const attached = Promise.withResolvers<void>();
+		const open = vi.spyOn(services.coordinator, 'openSingleton').mockReturnValue(attached.promise);
+		const controller = services.singletonSurfaces.files();
+		const reveal = vi.spyOn(controller, 'revealFile');
+		const pending = services.commands.execute('file.reveal-active', {
+			viewId: session.id, surfaceId: `file:${session.id}`,
+		});
+		available.mockReturnValue(false);
+		attached.resolve();
+		await expect(pending).resolves.toBe(false);
+		expect(open).toHaveBeenCalledTimes(when === 'before-open' ? 0 : 1);
+		expect(reveal).not.toHaveBeenCalled();
+		expect(controller.tree.executorId).toBe('local');
+		expect(assembled.notifications.items).toMatchObject([
+			{ tone: 'error', message: 'Files are unavailable on this executor.' },
+		]);
+	});
 
 	it('opens a side view from the command context window', async () => {
 		rootLocalSettings = createLocalSettingsStore();
 		({ services } = assembleWorkspaceServices(rootLocalSettings));
 		const session = new FileSession(
-			{
-				executorId: 'local',
-				canonicalFileRootPath: '/workspace',
-				normalizedRelativePath: 'file.ts',
-			},
+			{ executorId: 'local', canonicalFileRootPath: '/workspace', normalizedRelativePath: 'file.ts' },
 			'command-side',
 		);
 		vi.spyOn(services.files, 'get').mockReturnValue(session);
@@ -491,11 +463,7 @@ describe('createWorkspaceServices', () => {
 		rootLocalSettings = createLocalSettingsStore();
 		({ services } = assembleWorkspaceServices(rootLocalSettings));
 		const session = new FileSession(
-			{
-				executorId: 'local',
-				canonicalFileRootPath: '/workspace',
-				normalizedRelativePath: 'file.ts',
-			},
+			{ executorId: 'local', canonicalFileRootPath: '/workspace', normalizedRelativePath: 'file.ts' },
 			'command-save',
 		);
 		session.rendererMode = 'code';
@@ -533,11 +501,7 @@ describe('createWorkspaceServices', () => {
 		rootLocalSettings = createLocalSettingsStore();
 		({ services } = assembleWorkspaceServices(rootLocalSettings));
 		const session = new FileSession(
-			{
-				executorId: 'local',
-				canonicalFileRootPath: '/workspace',
-				normalizedRelativePath: 'file.txt',
-			},
+			{ executorId: 'local', canonicalFileRootPath: '/workspace', normalizedRelativePath: 'file.txt' },
 			'command-editor',
 		);
 		session.content = 'local text';

@@ -20,9 +20,11 @@ import {
 } from '$lib/files/sessions/file-view-session.svelte.js';
 import { FileDocumentState } from '$lib/files/documents/file-document-state.svelte.js';
 import {
-	createFileNavigationRepository,
-	type FileNavigationRepository,
-} from '$lib/files/persistence/file-navigation-repository.js';
+	createFileDraftRepository,
+	type FileDraftRepository,
+	type FileDraft,
+} from '$lib/files/persistence/file-draft-repository.js';
+import { FileDraftCoordinator } from '$lib/files/persistence/file-draft-coordinator.svelte.js';
 import {
 	FileDocumentIoCoordinator,
 	type FileDiskSnapshot,
@@ -122,6 +124,7 @@ export interface FileSessionsDeps {
 	getDefaultPlacement(mode: FileRendererMode, origin: PresentationHostId): DesktopPlacement;
 	getPlacement(): FilePlacementPort;
 	onOpenError?(request: FileOpenRequest, error: unknown): void;
+	onRecoveryError?(document: FileDocumentState, error: Error): void;
 	resolveFileIdentity?: typeof resolveFileIdentity;
 	getFileRevision?: typeof getFileRevision;
 	readText?: typeof readText;
@@ -130,7 +133,7 @@ export interface FileSessionsDeps {
 	loadEditorRuntime?: () => Promise<FileEditorRuntimeModule>;
 	reloadApplication?: () => void;
 	openMainInert?<T>(commitOpen: () => T): T;
-	navigationRepository?: FileNavigationRepository;
+	draftRepository?: FileDraftRepository;
 	deploymentId?: string;
 	isDocumentVisible?(documentId: string): boolean;
 	saveTimeoutMs?: number;
@@ -149,6 +152,7 @@ export class FileSessionRegistry {
 	guardRequest = $state<FileGuardRequest | null>(null);
 	overwriteRequest = $state<FileOverwriteRequest | null>(null);
 	thresholdRequest = $state<FileThresholdRequest | null>(null);
+	draftRequest = $state<{ fileName: string } | null>(null);
 
 	#documentIdByIdentity = new Map<string, string>();
 	#pendingByIdentity = new Map<string, Promise<FileViewSession | null>>();
@@ -159,7 +163,9 @@ export class FileSessionRegistry {
 	#creationQueue = new SerialQueue();
 	#decisionQueue = new SerialQueue();
 	#editorThemeId: RendererThemeId = 'standard-light';
-	readonly #navigationRepository: FileNavigationRepository;
+	readonly #draftRepository: FileDraftRepository;
+	#drafts = $state.raw<FileDraftCoordinator | null>(null);
+	#draftResolve: ((choice: 'resume' | 'discard' | 'cancel') => void) | null = null;
 	readonly #io: FileDocumentIoCoordinator;
 	readonly #saves: FileSaveCoordinator;
 	readonly #deploymentId: string;
@@ -169,7 +175,7 @@ export class FileSessionRegistry {
 	navigation = $state.raw<FileNavigationStore | null>(null);
 
 	constructor(private readonly deps: FileSessionsDeps) {
-		this.#navigationRepository = deps.navigationRepository ?? createFileNavigationRepository();
+		this.#draftRepository = deps.draftRepository ?? createFileDraftRepository();
 		this.#deploymentId =
 			deps.deploymentId ?? (typeof location === 'undefined' ? 'local' : location.origin);
 		this.#io = new FileDocumentIoCoordinator({
@@ -200,6 +206,14 @@ export class FileSessionRegistry {
 		return Object.values(this.documents).some((document) => document.dirty || document.saving);
 	}
 
+	get recoveredDrafts(): readonly FileDraft[] {
+		return this.#drafts?.available ?? [];
+	}
+
+	get recoveryError(): string | null {
+		return this.#drafts?.error ?? null;
+	}
+
 	reloadApplication(): void {
 		if (this.hasUnloadProtectedSessions) return;
 		(this.deps.reloadApplication ?? (() => window.location.reload()))();
@@ -217,15 +231,25 @@ export class FileSessionRegistry {
 		return this.#initialization;
 	}
 
-	initializeNavigation(userNamespace: string): Promise<void> {
+	initializeRecovery(userNamespace: string): Promise<void> {
 		if (this.#userNamespace === userNamespace) return this.#initialization;
-		if (this.#userNamespace !== null) throw new Error('File navigation is already initialized');
+		if (this.#userNamespace !== null) throw new Error('File recovery is already initialized');
 		this.#userNamespace = userNamespace;
-		this.navigation = new FileNavigationStore(this.#navigationRepository, {
+		const drafts = new FileDraftCoordinator({
+			repository: this.#draftRepository,
+			deploymentId: this.#deploymentId,
+			userNamespace,
+			onError: this.deps.onRecoveryError,
+		});
+		this.#drafts = drafts;
+		this.navigation = new FileNavigationStore(this.#draftRepository, {
 			deploymentId: this.#deploymentId,
 			userNamespace,
 		});
-		this.#initialization = this.navigation.restore().catch(() => undefined);
+		this.#initialization = Promise.all([
+			drafts.initialize(),
+			this.navigation.restore().catch(() => undefined),
+		]).then(() => this.#pruneOpenDrafts());
 		return this.#initialization;
 	}
 
@@ -334,18 +358,30 @@ export class FileSessionRegistry {
 		if (document.saveController !== controller) return;
 		document.saveController = null;
 		document.saving = false;
+		void this.#drafts?.settle(document);
 	}
 
 	async refresh(sessionId: string): Promise<void> {
 		const current = this.get(sessionId);
-		if (!current || !current.document.executorAvailable || current.loading) return;
+		if (
+			!current ||
+			!current.document.executorAvailable ||
+			current.loading ||
+			!(await this.#prepareDraftRecovery(current.document))
+		)
+			return;
 		await this.#io.refresh(sessionId, (id) => this.confirmDestructive(id, 'refresh'));
+		const session = this.get(sessionId);
+		if (session) this.#completeDraftRecovery(session);
 	}
 
 	async reload(sessionId: string): Promise<void> {
 		const current = this.get(sessionId);
-		if (!current || current.loading) return;
+		if (!current || current.loading || !(await this.#prepareDraftRecovery(current.document)))
+			return;
 		await this.#io.reload(sessionId, (id) => this.confirmDestructive(id, 'refresh'));
+		const session = this.get(sessionId);
+		if (session) this.#completeDraftRecovery(session);
 	}
 
 	checkFreshness(sessionId: string): Promise<void> {
@@ -414,6 +450,7 @@ export class FileSessionRegistry {
 				if (!session.document.editorRuntime) session.content = session.baseline;
 				session.dirty = false;
 				const discardedVersion = session.document.bufferVersion;
+				void this.#drafts?.settle(session.document);
 				return (
 					this.get(session.id) === session &&
 					session.document.bufferVersion === discardedVersion &&
@@ -463,6 +500,7 @@ export class FileSessionRegistry {
 
 	#disposeDocument(document: FileDocumentState): void {
 		if (this.documents[document.id] === document) {
+			this.#drafts?.closeDocument(document);
 			this.#io.stopPolling(document.id);
 			if (this.#documentIdByIdentity.get(document.identityKey) === document.id) {
 				this.#documentIdByIdentity.delete(document.identityKey);
@@ -476,11 +514,12 @@ export class FileSessionRegistry {
 
 	async destroyAll(): Promise<void> {
 		this.#destroyed = true;
+		this.resolveDraft('cancel');
 		this.resolveThreshold('cancel');
 		for (const session of [...this.all]) await this.destroy(session.id);
 		for (const document of Object.values(this.documents)) this.#disposeDocument(document);
 		this.#io.destroy();
-		this.#navigationRepository.close();
+		this.#drafts?.destroy();
 	}
 
 	async openToSide(
@@ -525,11 +564,18 @@ export class FileSessionRegistry {
 		await this.#teardowns.drain(key);
 		if (this.#destroyed) return null;
 		const existingDocumentId = this.#documentIdByIdentity.get(key);
-		const existingDocument = existingDocumentId ? this.documents[existingDocumentId] : null;
+		let existingDocument = existingDocumentId ? this.documents[existingDocumentId] : null;
 		const options = {
 			isExecutorAvailable: () => this.deps.isExecutorAvailable?.(identity.executorId) ?? true,
 		};
-		const document = existingDocument ?? new FileDocumentState(identity, key, options);
+		let document = existingDocument ?? new FileDocumentState(identity, key, options);
+		if (!(await this.#prepareDraftRecovery(document)) || this.#destroyed) return null;
+		if (existingDocument && this.documents[document.id] !== document) {
+			const pendingRecoveryContent = document.pendingRecoveryContent;
+			document = new FileDocumentState(identity, key, options);
+			document.pendingRecoveryContent = pendingRecoveryContent;
+			existingDocument = null;
+		}
 		const session = new FileViewSession(document);
 		session.rendererMode = resolveFileRendererMode(identity.normalizedRelativePath, request.mode);
 		if (!existingDocument) {
@@ -574,7 +620,7 @@ export class FileSessionRegistry {
 		if (existingDocument && document.loadedRevision) {
 			void this.#io.joinDocument(session);
 		} else {
-			void this.#io.loadInitial(session);
+			void this.#io.loadInitial(session).then(() => this.#completeDraftRecovery(session));
 		}
 		this.#io.startPolling(document.id);
 		this.#recordNavigation(session);
@@ -604,9 +650,101 @@ export class FileSessionRegistry {
 		}
 	}
 
+	resolveDraft(choice: 'resume' | 'discard' | 'cancel'): void {
+		const resolve = this.#draftResolve;
+		this.#draftResolve = null;
+		this.draftRequest = null;
+		resolve?.(choice);
+	}
+
+	#prepareDraftRecovery(document: FileDocumentState): Promise<boolean> {
+		if (
+			document.loading ||
+			document.loadedRevision ||
+			document.dirty ||
+			document.pendingRecoveryContent !== null ||
+			!this.#drafts?.find(
+				document.canonicalFileRootPath,
+				document.relativePath,
+				document.executorId,
+			)
+		)
+			return Promise.resolve(true);
+		return this.#decisionQueue.enqueue(async () => {
+			if (this.#destroyed) return false;
+			if (document.loadedRevision || document.dirty || document.pendingRecoveryContent !== null)
+				return true;
+			const draft = this.#drafts?.find(
+				document.canonicalFileRootPath,
+				document.relativePath,
+				document.executorId,
+			);
+			if (!draft) return true;
+			const choice = await new Promise<'resume' | 'discard' | 'cancel'>((resolve) => {
+				this.#openMainInert(() => {
+					this.#draftResolve = resolve;
+					this.draftRequest = { fileName: document.relativePath };
+				});
+			});
+			if (choice === 'cancel' || this.#destroyed) return false;
+			if (choice === 'resume') document.pendingRecoveryContent = draft.content;
+			else this.#drafts?.discard(draft);
+			return true;
+		});
+	}
+
+	async retryRecoveryDiscovery(): Promise<void> {
+		await this.#drafts?.initialize();
+		this.#pruneOpenDrafts();
+	}
+
+	#pruneOpenDrafts(): void {
+		// Live buffers take precedence over startup backups, except a Resume still awaiting disk.
+		for (const document of Object.values(this.documents)) {
+			if (document.pendingRecoveryContent !== null || (!document.loadedRevision && !document.dirty))
+				continue;
+			this.#drafts?.opened(
+				document.canonicalFileRootPath,
+				document.relativePath,
+				document.executorId,
+			);
+			void this.#drafts?.settle(document);
+		}
+	}
+
+	#completeDraftRecovery(session: FileViewSession): void {
+		if (
+			session.loadError ||
+			!session.loadedRevision ||
+			session.document.pendingRecoveryContent !== null
+		)
+			return;
+		if (
+			!this.#drafts?.find(session.canonicalFileRootPath, session.relativePath, session.executorId)
+		)
+			return;
+		this.#drafts.opened(session.canonicalFileRootPath, session.relativePath, session.executorId);
+		void this.#drafts.settle(session.document);
+	}
+
+	async clearRecovery(): Promise<boolean> {
+		if (this.hasUnloadProtectedSessions) return false;
+		const cleared = (await this.#drafts?.clear()) ?? false;
+		if (cleared) {
+			for (const document of Object.values(this.documents)) document.pendingRecoveryContent = null;
+		}
+		return cleared;
+	}
+
 	async exportContent(sessionId: string): Promise<void> {
 		const session = this.get(sessionId);
 		if (session) this.#download(session.document.currentContent(), session.fileName);
+	}
+
+	exportDraft(documentId: string): void {
+		const draft = this.recoveredDrafts.find((entry) => entry.documentId === documentId);
+		if (draft)
+			this.#download(draft.content, draft.normalizedRelativePath.split('/').pop() ?? 'draft.txt');
 	}
 
 	#download(content: string, fileName: string): void {
@@ -683,6 +821,7 @@ export class FileSessionRegistry {
 					content: decision.snapshot.diskContent,
 					revision: decision.snapshot.diskRevision,
 				});
+				void this.#drafts?.settle(session.document);
 			}
 			return this.get(session.id) === session ? decision : cancelled();
 		});
@@ -721,6 +860,10 @@ export class FileSessionRegistry {
 		});
 	}
 
+	flushRecovery(): Promise<void> {
+		return this.#drafts?.flush() ?? Promise.resolve();
+	}
+
 	viewVisibilityChanged(sessionId: string): void {
 		const session = this.get(sessionId);
 		if (session) this.#io.visibilityChanged(session.documentId);
@@ -738,6 +881,9 @@ export class FileSessionRegistry {
 	#publishDocument(document: FileDocumentState): void {
 		this.documents = { ...this.documents, [document.id]: document };
 		this.#documentIdByIdentity.set(document.identityKey, document.id);
+		document.onChange(() => {
+			this.#drafts?.schedule(document);
+		});
 	}
 
 	#openMainInert<T>(commitOpen: () => T): T {

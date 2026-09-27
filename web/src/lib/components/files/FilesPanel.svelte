@@ -3,8 +3,10 @@
 	import ExecutorSelector from '$lib/components/shared/ExecutorSelector.svelte';
 	import type { Snippet } from 'svelte';
 	import type { FileTreeEntry } from '$shared/file-contracts';
+	import { effectiveExecutorId } from '$shared/executors';
 	import {
 		getFileSessions,
+		getNotifications,
 		getSingletonSurfaces,
 		getWorkspaceCoordinator,
 		getExecutors,
@@ -15,6 +17,11 @@
 	import ProjectSurfaceGate from '$lib/components/workspace/ProjectSurfaceGate.svelte';
 	import ExecutorServiceNotice from '$lib/components/workspace/ExecutorServiceNotice.svelte';
 	import { filePathRelativeToTreeRoot } from '$lib/files/tree/file-tree-path.js';
+	import Download from '@lucide/svelte/icons/download';
+	import { Button } from '$lib/components/ui/button';
+	import type { FileDraft } from '$lib/files/persistence/file-draft-repository.js';
+	import FileText from '@lucide/svelte/icons/file-text';
+	import * as m from '$lib/paraglide/messages.js';
 
 	let {
 		presentation,
@@ -29,6 +36,7 @@
 	} = $props();
 
 	const files = getFileSessions();
+	const notifications = getNotifications();
 	const workspace = getWorkspaceCoordinator();
 	const controller = getSingletonSurfaces().files();
 	const tree = controller.tree;
@@ -56,6 +64,27 @@
 			origin: presentation,
 			reason: 'user-open',
 		});
+	}
+
+	async function openRecoveredFile(draft: FileDraft): Promise<void> {
+		try {
+			await files.open({
+				executorId: draft.executorId,
+				fileRootPath: draft.canonicalFileRootPath,
+				relativePath: draft.normalizedRelativePath,
+				mode: 'code',
+				origin: presentation,
+				reason: 'user-open',
+			});
+		} catch (error) {
+			notifications.error(error instanceof Error ? error.message : m.workspace_open_failed());
+		}
+	}
+
+	function recoveredFileLabel(draft: FileDraft, path: string): string {
+		return effectiveExecutorId(draft.executorId) === 'local'
+			? path
+			: `${executors.label(draft.executorId)}: ${path}`;
 	}
 </script>
 
@@ -93,11 +122,58 @@
 {/snippet}
 
 <div class="flex h-full min-h-0 flex-col overflow-hidden">
+	{#if files.recoveryError}
+		<div class="flex items-center gap-2 border-b border-border p-3 text-xs" role="status">
+			<span class="min-w-0 flex-1 break-words"
+				>{m.file_recovery_failed({ detail: files.recoveryError })}</span
+			>
+			<Button variant="outline" size="sm" onclick={() => void files.retryRecoveryDiscovery()}
+				>{m.common_retry()}</Button
+			>
+		</div>
+	{/if}
+	{#if files.recoveredDrafts.length > 0}
+		<section
+			class="max-h-48 shrink-0 overflow-y-auto border-b border-border"
+			aria-label={m.file_recovered_files()}
+		>
+			<h2 class="px-3 pt-3 pb-1 text-xs font-medium text-muted-foreground">
+				{m.file_recovered_files()}
+			</h2>
+			{#each files.recoveredDrafts as draft (draft.documentId)}
+				<div class="flex items-center gap-1 pr-2">
+					<button
+						type="button"
+						class="flex min-h-10 min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left text-xs hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2"
+						title={recoveredFileLabel(
+							draft,
+							draft.canonicalFileRootPath + '/' + draft.normalizedRelativePath,
+						)}
+						onclick={() => void openRecoveredFile(draft)}
+					>
+						<FileText class="size-4 shrink-0 text-muted-foreground" />
+						<span class="min-w-0 break-all"
+							>{recoveredFileLabel(draft, draft.normalizedRelativePath)}</span
+						>
+					</button>
+					<Button
+						variant="ghost"
+						size="icon-sm"
+						onclick={() => files.exportDraft(draft.documentId)}
+						aria-label={m.file_recovery_export_draft({
+							fileName: recoveredFileLabel(draft, draft.normalizedRelativePath),
+						})}
+						title={m.file_session_export_local_copy()}
+					>
+						<Download class="size-4" />
+					</Button>
+				</div>
+			{/each}
+		</section>
+	{/if}
 	<div class="min-h-0 min-w-0 flex-1">
 		<FileTree
-			executorCrumb={executors.hasRemoteExecutors || tree.executorId !== 'local'
-				? executorCrumb
-				: undefined}
+			executorCrumb={executors.hasRemoteExecutors || tree.executorId !== 'local' ? executorCrumb : undefined}
 			{contentGate}
 			onGoToChatProject={() => controller.goToChatProject()}
 			canGoToChatProject={controller.canGoToChatProject}

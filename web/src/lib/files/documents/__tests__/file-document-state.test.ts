@@ -3,11 +3,7 @@ import { FileDocumentState } from '$lib/files/documents/file-document-state.svel
 
 function document() {
 	return new FileDocumentState(
-		{
-			executorId: 'local',
-			canonicalFileRootPath: '/workspace',
-			normalizedRelativePath: 'src/file.ts',
-		},
+		{ executorId: 'local', canonicalFileRootPath: '/workspace', normalizedRelativePath: 'src/file.ts' },
 		'["/workspace","src/file.ts"]',
 	);
 }
@@ -28,6 +24,7 @@ describe('FileDocumentState', () => {
 		value.saving = true;
 		expect(value.mutationGuarded).toBe(true);
 		value.saving = false;
+		value.recoveryError = 'storage unavailable';
 		expect(value.mutationGuarded).toBe(false);
 	});
 });

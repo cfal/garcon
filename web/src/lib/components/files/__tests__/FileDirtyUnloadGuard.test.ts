@@ -1,6 +1,7 @@
 import { render } from '@testing-library/svelte';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { tick } from 'svelte';
+import { FileSessionRegistry } from '$lib/files/sessions/file-session-registry.svelte.js';
 import FileDirtyUnloadGuardTestHost from './FileDirtyUnloadGuardTestHost.svelte';
 
 function dispatchBeforeUnload(): boolean {
@@ -10,13 +11,20 @@ function dispatchBeforeUnload(): boolean {
 }
 
 describe('FileDirtyUnloadGuard', () => {
-	it('retains the unload guard after pagehide and cleans it up on unmount', async () => {
-		const view = render(FileDirtyUnloadGuardTestHost, { dirty: true });
-		window.dispatchEvent(new Event('pagehide'));
-		await tick();
-		expect(dispatchBeforeUnload()).toBe(true);
-		view.unmount();
-		expect(dispatchBeforeUnload()).toBe(false);
+	it('flushes best-effort drafts on pagehide without weakening the unload guard', async () => {
+		const persist = vi
+			.spyOn(FileSessionRegistry.prototype, 'flushRecovery')
+			.mockResolvedValue(undefined);
+		try {
+			render(FileDirtyUnloadGuardTestHost, { dirty: true });
+			window.dispatchEvent(new Event('pagehide'));
+			await tick();
+
+			expect(persist).toHaveBeenCalledOnce();
+			expect(dispatchBeforeUnload()).toBe(true);
+		} finally {
+			persist.mockRestore();
+		}
 	});
 
 	it('guards dirty buffers and active Saves', async () => {

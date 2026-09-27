@@ -4,9 +4,9 @@ import { fileIdentityKey } from '$lib/files/documents/file-identity.js';
 import {
 	FILE_RECENT_LIMIT,
 	navigationKey,
-	type FileNavigationRepository,
+	type FileDraftRepository,
 	type FileRecentLocationV1,
-} from '$lib/files/persistence/file-navigation-repository.js';
+} from '$lib/files/persistence/file-draft-repository.js';
 export const FILE_NAVIGATION_LIMIT = 200;
 export const FILE_NAVIGATION_BYTE_LIMIT = 256 * 1024;
 
@@ -30,7 +30,7 @@ export class FileNavigationStore {
 	#pendingNavigation = $state.raw<{ previousIndex: number; targetKey: string } | null>(null);
 
 	constructor(
-		private readonly repository: FileNavigationRepository,
+		private readonly repository: FileDraftRepository,
 		private readonly scope: { deploymentId: string; userNamespace: string },
 	) {}
 

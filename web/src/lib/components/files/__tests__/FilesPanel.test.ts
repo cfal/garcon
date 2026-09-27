@@ -7,10 +7,154 @@ import { PullRequestsStore } from '$lib/git/pull-requests/pull-requests-store.sv
 import { SingletonSurfaceRegistry } from '$lib/workspace/singleton-surfaces.svelte.js';
 import FilesPanelTestHost from './FilesPanelTestHost.svelte';
 import { setFilesPanelTestContext } from './files-panel-test-context.js';
+import {
+	createMemoryFileDraftRepository,
+	fileDraftKey,
+} from '$lib/files/persistence/file-draft-repository.js';
+import { NotificationsStore } from '$lib/stores/notifications.svelte.js';
+import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
+import { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
+import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures.js';
 
 afterEach(cleanup);
 
 describe('FilesPanel', () => {
+	it.each([
+		{ presentation: 'window-main', projectState: { kind: 'absent' } },
+		{ presentation: 'mobile', projectState: { kind: 'absent' } },
+		{
+			presentation: 'mobile',
+			projectState: {
+				kind: 'unavailable',
+				context: {
+					target: { kind: 'chat' as const, chatId: 'chat', projectPath: '/workspace' },
+					chatId: 'chat',
+					projectPath: '/workspace',
+				},
+				reason: 'not-found',
+			},
+		},
+		{
+			presentation: 'mobile',
+			projectState: {
+				kind: 'request-failed',
+				context: {
+					target: { kind: 'chat' as const, chatId: 'chat', projectPath: '/workspace' },
+					chatId: 'chat',
+					projectPath: '/workspace',
+				},
+				message: 'Project request failed',
+			},
+		},
+	] satisfies Array<{
+		presentation: 'window-main' | 'mobile';
+		projectState: WorkspaceProjectState;
+	}>)(
+		'exposes stored drafts independently of project availability ($presentation, $projectState.kind)',
+		async ({ presentation, projectState }) => {
+			const focusFileSession = vi.fn(async () => {});
+			const notifications = new NotificationsStore();
+			const repository = createMemoryFileDraftRepository();
+			const draftId = fileDraftKey('user', 'deployment', '/workspace', 'draft.txt');
+			await repository.putDraft({
+				schemaVersion: 1,
+				userNamespace: 'user',
+				deploymentId: 'deployment',
+				documentId: draftId,
+				executorId: 'local',
+				canonicalFileRootPath: '/workspace',
+				normalizedRelativePath: 'draft.txt',
+				content: 'local text',
+				savedAt: 1,
+			});
+			const remoteDraftId = fileDraftKey(
+				'user',
+				'deployment',
+				'/workspace',
+				'draft.txt',
+				remoteExecutor.id,
+			);
+			await repository.putDraft({
+				schemaVersion: 1,
+				userNamespace: 'user',
+				deploymentId: 'deployment',
+				documentId: remoteDraftId,
+				executorId: remoteExecutor.id,
+				canonicalFileRootPath: '/workspace',
+				normalizedRelativePath: 'draft.txt',
+				content: 'remote text',
+				savedAt: 2,
+			});
+			const executors = new ExecutorsStore();
+			executors.applySnapshot([localExecutor, remoteExecutor]);
+			const fileSessions = new FileSessionRegistry({
+				getIsMobile: () => presentation === 'mobile',
+				getDefaultPlacement: () => ({ type: 'dialog' }),
+				getEditorSettings: () => ({ wordWrap: false, showLineNumbers: true, fontSize: 12 }),
+				getPlacement: () => ({ placeFileSession: vi.fn(), focusFileSession }),
+				draftRepository: repository,
+				deploymentId: 'deployment',
+			});
+			await fileSessions.initializeRecovery('user');
+			const open = vi.spyOn(fileSessions, 'open').mockResolvedValue(null);
+			const exportDraft = vi.spyOn(fileSessions, 'exportDraft').mockReturnValue(undefined);
+			const gitSurfaceDeps = createGitSurfaceTestDeps();
+			const singletonSurfaces = new SingletonSurfaceRegistry({
+				...gitSurfaceDeps,
+				createCommit: () => new CommitController(gitSurfaceDeps),
+				createPullRequests: () => new PullRequestsStore(),
+			});
+			setFilesPanelTestContext({ fileSessions, singletonSurfaces, notifications, executors });
+			try {
+				render(FilesPanelTestHost, { presentation, focusFileSession, projectState });
+				expect(Object.keys(fileSessions.sessions)).toHaveLength(0);
+				expect(
+					screen
+						.getByRole('region', { name: 'Recovered files' })
+						.closest('[inert], [aria-hidden="true"]'),
+				).toBeNull();
+				open.mockRejectedValueOnce(new Error('Could not open draft'));
+				await fireEvent.click(screen.getByRole('button', { name: 'draft.txt' }));
+				await waitFor(() =>
+					expect(notifications.items).toMatchObject([
+						{ tone: 'error', message: 'Could not open draft' },
+					]),
+				);
+				await fireEvent.click(screen.getByRole('button', { name: 'draft.txt' }));
+				expect(open).toHaveBeenLastCalledWith({
+					executorId: 'local',
+					fileRootPath: '/workspace',
+					relativePath: 'draft.txt',
+					mode: 'code',
+					origin: presentation,
+					reason: 'user-open',
+				});
+				await fireEvent.click(screen.getByRole('button', { name: 'Export draft for draft.txt' }));
+				expect(exportDraft).toHaveBeenCalledWith(draftId);
+				const remoteDraft = screen.getByRole('button', { name: 'Worker: draft.txt' });
+				expect(remoteDraft.getAttribute('title')).toBe('Worker: /workspace/draft.txt');
+				await fireEvent.click(remoteDraft);
+				expect(open).toHaveBeenLastCalledWith(
+					expect.objectContaining({
+						executorId: remoteExecutor.id,
+						fileRootPath: '/workspace',
+						relativePath: 'draft.txt',
+					}),
+				);
+				await fireEvent.click(
+					screen.getByRole('button', { name: 'Export draft for Worker: draft.txt' }),
+				);
+				expect(exportDraft).toHaveBeenLastCalledWith(remoteDraftId);
+				await fileSessions.clearRecovery();
+				await waitFor(() =>
+					expect(screen.queryByRole('region', { name: 'Recovered files' })).toBeNull(),
+				);
+			} finally {
+				await fileSessions.destroyAll();
+			}
+		},
+	);
+
 	it.each(['window-main', 'window-sidebar', 'mobile'] as const)(
 		'opens a sibling-project file from the %s presentation against the canonical project base',
 		async (presentation) => {

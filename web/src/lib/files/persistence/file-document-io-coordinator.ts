@@ -108,6 +108,11 @@ export class FileDocumentIoCoordinator {
 				]);
 				if (!this.#isCurrentInitialLoad(document, controller)) return;
 				this.commitLoadedContent(session, loaded);
+				if (document.pendingRecoveryContent !== null) {
+					document.applyUserEdit(document.pendingRecoveryContent);
+					document.pendingRecoveryContent = null;
+					document.recovered = document.dirty;
+				}
 				if (runtime && this.options.getSession(session.id) === session && !session.editor) {
 					session.editor = new runtime.CodeEditorController(
 						session,
@@ -376,6 +381,7 @@ export class FileDocumentIoCoordinator {
 		session.refreshError = null;
 		session.freshnessError = null;
 		session.saveError = null;
+		session.document.recovered = false;
 	}
 
 	invalidateFreshness(session: FileViewSession): void {

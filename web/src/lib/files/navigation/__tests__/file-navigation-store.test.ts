@@ -3,7 +3,7 @@ import {
 	FileNavigationStore,
 	type FileLocation,
 } from '$lib/files/navigation/file-navigation-store.svelte.js';
-import { createMemoryFileNavigationRepository } from '$lib/files/persistence/file-navigation-repository.js';
+import { createMemoryFileDraftRepository } from '$lib/files/persistence/file-draft-repository.js';
 import { fileIdentityKey } from '$lib/files/documents/file-identity.js';
 
 const scope = { deploymentId: 'deployment', userNamespace: 'user' };
@@ -24,7 +24,7 @@ function location(index: number): FileLocation {
 
 describe('FileNavigationStore', () => {
 	it('disables unavailable and pending history directions', () => {
-		const store = new FileNavigationStore(createMemoryFileNavigationRepository(), scope);
+		const store = new FileNavigationStore(createMemoryFileDraftRepository(), scope);
 		expect(store.canGoBack).toBe(false);
 		expect(store.canGoForward).toBe(false);
 		store.record(location(0));
@@ -48,7 +48,7 @@ describe('FileNavigationStore', () => {
 	});
 
 	it('keeps the newest locations when count pruning applies', () => {
-		const store = new FileNavigationStore(createMemoryFileNavigationRepository(), scope);
+		const store = new FileNavigationStore(createMemoryFileDraftRepository(), scope);
 		for (let index = 0; index <= 200; index += 1) store.record(location(index));
 
 		expect(store.back()?.key).toBe('199');
@@ -57,7 +57,7 @@ describe('FileNavigationStore', () => {
 	});
 
 	it('preserves the forward branch while navigating history', () => {
-		const store = new FileNavigationStore(createMemoryFileNavigationRepository(), scope);
+		const store = new FileNavigationStore(createMemoryFileDraftRepository(), scope);
 		store.record(location(0));
 		store.record(location(1));
 		store.record(location(2));
@@ -69,7 +69,7 @@ describe('FileNavigationStore', () => {
 	});
 
 	it('restores history after a navigation target fails to open', () => {
-		const store = new FileNavigationStore(createMemoryFileNavigationRepository(), scope);
+		const store = new FileNavigationStore(createMemoryFileDraftRepository(), scope);
 		store.record(location(0));
 		store.record(location(1));
 
@@ -81,7 +81,7 @@ describe('FileNavigationStore', () => {
 	});
 
 	it('retains image view preferences in recents', async () => {
-		const repository = createMemoryFileNavigationRepository();
+		const repository = createMemoryFileDraftRepository();
 		const store = new FileNavigationStore(repository, scope);
 		store.record({ ...location(0), viewPreference: 'image' });
 		await Promise.resolve();
@@ -93,7 +93,7 @@ describe('FileNavigationStore', () => {
 	});
 
 	it('restores recents and back-forward history from browser storage', async () => {
-		const repository = createMemoryFileNavigationRepository();
+		const repository = createMemoryFileDraftRepository();
 		const first = new FileNavigationStore(repository, scope);
 		first.record(location(0));
 		first.record(location(1));
@@ -112,15 +112,11 @@ describe('FileNavigationStore', () => {
 	it.each([false, true])(
 		'deduplicates Local recents by identity, newest legacy: %s',
 		async (newestLegacy) => {
-			const repository = createMemoryFileNavigationRepository();
+			const repository = createMemoryFileDraftRepository();
 			const local = location(0);
 			const remoteExecutorId = '22222222-2222-4222-8222-222222222222';
 			const legacy = { ...local, key: JSON.stringify(['/workspace', 'src/0.ts']) };
-			const current = {
-				...local,
-				executorId: 'local',
-				key: fileIdentityKey('/workspace', 'src/0.ts'),
-			};
+			const current = { ...local, executorId: 'local', key: fileIdentityKey('/workspace', 'src/0.ts') };
 			for (const [index, entry] of (newestLegacy
 				? [current, legacy]
 				: [legacy, current]

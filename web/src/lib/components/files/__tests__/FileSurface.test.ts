@@ -286,13 +286,17 @@ describe('FileSurface', () => {
 		);
 	});
 
-	it('enables Save for a live dirty buffer', async () => {
+	it('keeps Save available when browser backup fails', async () => {
 		render(FileSurfaceTestHost, {
 			presentation: 'window-main',
 			rendererMode: 'code',
 			loading: false,
 			dirty: true,
+			onReady: (session) => {
+				session.document.recoveryError = 'Storage unavailable';
+			},
 		});
+		expect(await screen.findByText('Local recovery unavailable: Storage unavailable')).toBeTruthy();
 		const save = screen.getByRole<HTMLButtonElement>('button', { name: 'Save' });
 		expect(save.disabled).toBe(false);
 	});
