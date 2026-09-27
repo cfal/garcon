@@ -12,6 +12,7 @@
 	import { createScheduledPromptsStore } from '$lib/scheduling/scheduled-prompts-store.svelte.js';
 	import { createPreamblesStore } from '$lib/preambles/preambles-store.svelte.js';
 	import { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
+	import { ExecutorInventoryChanges } from '$lib/executors/executor-inventory-changes.js';
 	import { ExecutorsRouter } from '$lib/events/executors-router.svelte.js';
 	import { ApiProvidersRouter } from '$lib/events/api-providers-router.svelte.js';
 	import { ApiProvidersStore } from '$lib/api-providers/api-providers-store.svelte.js';
@@ -132,9 +133,14 @@
 	const chatProcessingReconciler = new ChatProcessingReconciler(ws, chatSessions);
 	const readReceiptOutbox = createReadReceiptOutbox(chatSessions);
 	const modelCatalog = createModelCatalogStore();
+	const executorInventory = new ExecutorInventoryChanges();
 	$effect(() => {
 		const snapshots = executors.executors;
-		if (executors.hasSnapshot) untrack(() => modelCatalog.reconcileExecutors(snapshots));
+		if (!executors.hasSnapshot) return;
+		untrack(() => {
+			modelCatalog.reconcileExecutors(snapshots);
+			if (executorInventory.observe(snapshots)) void chatSessions.quietRefreshChats();
+		});
 	});
 	const ghCapability = createGhCapabilityStore(executors);
 	const workspaceServices = createWorkspaceServices({
