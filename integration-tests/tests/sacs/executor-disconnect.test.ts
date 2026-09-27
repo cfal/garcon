@@ -42,7 +42,9 @@ for (const factory of sacsScriptedDriverFactories) {
             type: 'agent-run-failed', error: expect.stringContaining('earlier turn is still running'),
           });
           await fixture.client.waitForProcessing(chatId, false, { afterIndex: blockedEvents });
-          await expect(fixture.client.reloadChat(chatId)).rejects.toMatchObject({ response: {
+          // Bun's promise matchers can re-enter its WebSocket parser during event delivery.
+          const reloadError = await fixture.client.reloadChat(chatId).then(() => null, (error: unknown) => error);
+          expect(reloadError).toMatchObject({ response: {
             code: 'HISTORY_LOAD_FAILED', message: expect.stringContaining('turn is still running'),
           } });
           expect((await fixture.client.getMessages(chatId)).transcriptViewId).toBe(before.transcriptViewId);
