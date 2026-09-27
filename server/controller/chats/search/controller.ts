@@ -144,6 +144,13 @@ export class TranscriptSearchController {
     this.#schedule(chatId, 'catalog-refresh', () => this.#syncCatalogChat(chatId));
   }
 
+  async sourceAvailable(chatId: string): Promise<void> {
+    // Readiness can arrive before an offline adoption attempt has recorded its failure.
+    await this.#resyncTail;
+    await this.#chatTails.get(chatId);
+    if (this.#adoptionFailedChatIds.has(chatId)) this.catalogMayHaveChanged(chatId);
+  }
+
   deleteChat(chatId: string): void {
     this.#forgetChat(chatId);
     if (!this.#enabled || this.#closed) return;

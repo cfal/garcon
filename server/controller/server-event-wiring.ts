@@ -61,6 +61,7 @@ interface WebSocketPublisher {
 
 interface ChatSearchEventIndex {
   catalogMayHaveChanged(chatId: string): void;
+  sourceAvailable(chatId: string): Promise<void>;
   deleteChat(chatId: string): void;
 }
 
@@ -632,20 +633,26 @@ export function wireServerEvents({
       logger.warn('Executor native cleanup failed', { executorId, error });
     });
   };
+  const executorReady = (executorId: string) => {
+    retryProviderCleanup(executorId);
+    for (const chatId of chatRegistry.listChatIds()) {
+      if (effectiveExecutorId(chatRegistry.getChat(chatId)?.executorId) !== executorId) continue;
+      void queue.triggerDrain(chatId).catch((error) => logger.warn('Executor queue drain failed', error));
+      void searchIndex?.sourceAvailable(chatId).catch((error) => {
+        logger.warn('Executor search source refresh failed', { chatId, error });
+      });
+    }
+  };
   executors.onChanged(() => broadcast(new ExecutorsChangedMessage(executors.list())));
   executors.onAvailabilityChanged((executorId, availability) => {
     if (availability === 'offline') agentRegistry.executionSessionLost(executorId);
     if (availability === 'ready') {
       logger.info('Executor ready', { executorId });
-      retryProviderCleanup(executorId);
-      for (const chatId of chatRegistry.listChatIds()) {
-        if (effectiveExecutorId(chatRegistry.getChat(chatId)?.executorId) !== executorId) continue;
-        void queue.triggerDrain(chatId).catch((error) => logger.warn('Executor queue drain failed', error));
-      }
+      executorReady(executorId);
     }
   });
   for (const executor of executors.list()) {
-    if (executor.availability === 'ready') retryProviderCleanup(executor.id);
+    if (executor.availability === 'ready') executorReady(executor.id);
   }
 
   return {

@@ -38,9 +38,11 @@ it('isolates executor loss and queue wake-up, and publishes complete executor sn
   fixture.executor.availability(remote, 'offline');
   expect(fixture.agentRegistry.executionSessionLost).toHaveBeenCalledWith(remote);
   expect(fixture.ownershipJournal.retryProviderCleanup).not.toHaveBeenCalled();
+  expect(fixture.searchIndex.sourceAvailable).not.toHaveBeenCalled();
   fixture.executor.availability(remote, 'ready');
   expect(fixture.ownershipJournal.retryProviderCleanup.mock.calls).toEqual([[remote]]);
   expect(fixture.queueService.triggerDrain.mock.calls).toEqual([['remote-chat']]);
+  expect(fixture.searchIndex.sourceAvailable.mock.calls).toEqual([['remote-chat']]);
   fixture.executor.changed();
   expect(fixture.published).toContainEqual({ type: 'executors-changed', executors });
 });
@@ -147,6 +149,7 @@ function createFixture(overrides = {}) {
   };
   const searchIndex = {
     catalogMayHaveChanged: mock(() => undefined),
+    sourceAvailable: mock(async () => undefined),
     deleteChat: mock(() => undefined),
     ...overrides.searchIndex,
   };

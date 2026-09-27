@@ -476,6 +476,39 @@ describe('TranscriptSearchController v9', () => {
     await fixture.controller.close();
   });
 
+  test.each([false, true])('retries an unavailable source when readiness arrives during adoption: %s', async (duringAdoption) => {
+    const first = deferred();
+    let attempts = 0;
+    const fixture = harness({
+      unadoptedChatIds: ['chat-0001'],
+      adoptionEnsure: async (chatId, _signal, state) => {
+        if (++attempts === 1) return first.promise;
+        state.unadoptedChatIds.delete(chatId);
+        return {
+          viewId: state.chats.get(chatId).viewId,
+          status: 'current',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          contentStartOrdinal: 1,
+        };
+      },
+    });
+    await fixture.controller.start();
+    await waitFor(() => attempts === 1);
+    const earlyReady = duringAdoption ? fixture.controller.sourceAvailable('chat-0001') : null;
+    first.reject(Object.assign(new Error('Executor unavailable'), { code: 'EXECUTOR_UNAVAILABLE' }));
+    await waitFor(() => fixture.resyncScopes[0]?.completed === 1);
+    await (earlyReady ?? fixture.controller.sourceAvailable('chat-0001'));
+    await waitFor(() => fixture.service.syncChat.mock.calls.length === 1);
+    const result = await fixture.controller.search({ query: 'alpha', allowedChatIds: ['chat-0001'] });
+    expect(result.index).toMatchObject({ failedChatCount: 0, unindexedChatCount: 0 });
+    expect(attempts).toBe(2);
+    await fixture.controller.sourceAvailable('chat-0001');
+    expect(attempts).toBe(2);
+    await fixture.controller.close();
+    await fixture.controller.sourceAvailable('chat-0001');
+    expect(attempts).toBe(2);
+  });
+
   test('does not recreate failed search state when a chat is deleted during adoption', async () => {
     const adoption = deferred();
     const registry = new Set(['chat-0001']);
