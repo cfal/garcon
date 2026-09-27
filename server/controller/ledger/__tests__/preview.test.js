@@ -58,7 +58,7 @@ it('skips oversized payloads, provider errors, and presentation-only rows', () =
 
 it.each([
   ['user-input', false], ['user-input', true], ['provider-row', false], ['provider-row', true],
-])('defers repair past an oversized %s, later input=%s', (kind, laterInput) => {
+])('defers repair past an oversized %s, later input=%p', (kind, laterInput) => {
   const message = new UserMessage(at, 'Original input', ['x'.repeat(1024 * 1024)]);
   const input = kind === 'provider-row' ? provider(message) : {
     kind, at, detail: { message, attachments: [], clientMessageId: null, steer: false },

@@ -400,7 +400,7 @@ function observeTelegram({ agents, execution }, directory, send, enabled = true)
 }
 
 describe('server event wiring', () => {
-  it.each([false, true])('startup does not drain empty queues or read transcripts for Telegram: enabled=%s', async (enabled) => {
+  it.each([false, true])('startup does not drain empty queues or read transcripts for Telegram: enabled=%p', async (enabled) => {
     const directory = await mkdtemp(path.join(tmpdir(), 'startup-attention-'));
     const send = mock(async () => true);
     const idle = mock();
@@ -524,13 +524,16 @@ describe('server event wiring', () => {
     }
   });
 
-  it.each(['pre-run', 'offline-pre-run', 'terminal-during-drain', 'terminal-after-drain'])('notifies on %s failure without dispatching a paused queue tail', async (phase) => {
+  it.each(['pre-run', 'offline-pre-run', 'terminal-during-drain', 'offline-terminal-during-drain', 'terminal-after-drain'])('notifies on %s failure without dispatching a paused queue tail', async (phase) => {
     const directory = await mkdtemp(path.join(tmpdir(), 'paused-attention-wiring-'));
     const delivered = Promise.withResolvers();
     const send = mock(async () => { delivered.resolve(); return true; });
     const fail = (runId) => fixture.sink.publish({ type: 'run-ended', runId, outcome: 'failed',
       error: { code: 'PROVIDER_FAILURE', message: 'Synthetic source unavailable' } });
-    const started = mock((request) => { if (phase === 'terminal-during-drain') fail(request.runId); });
+    const started = mock((request) => {
+      if (phase === 'offline-terminal-during-drain') available = false;
+      if (phase.endsWith('terminal-during-drain')) fail(request.runId);
+    });
     const preRun = phase.endsWith('pre-run');
     let available = true;
     const fixture = createExecutionFixture(directory, preRun
