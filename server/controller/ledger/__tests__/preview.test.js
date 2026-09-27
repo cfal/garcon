@@ -45,7 +45,6 @@ it('skips oversized payloads, provider errors, and presentation-only rows', () =
   const rows = [
     { kind: 'notice', at, message: 'not a preview', detail: {} },
     provider(new UserMessage(at, 'question')),
-    ...Array.from({ length: 32 }, () => ({ kind: 'notice', at, message: 'notice', detail: {} })),
     provider(new AssistantMessage(at, 'answer')),
     provider(new AssistantMessage(at, 'x'.repeat(1024 * 1024))),
     provider(new ErrorMessage(at, 'not conversational')),
@@ -63,10 +62,11 @@ it.each(['user-input', 'provider-row'])('defers repair rather than promoting out
     kind, at, detail: { message, attachments: [], clientMessageId: null, steer: false },
   };
   store.initializeCurrentView('chat', { contentStartOrdinal: 1, rows: [
-    input, provider(new BashToolUseMessage(at, 'tool', 'pwd')), provider(new AssistantMessage(at, 'answer')),
+    input, provider(new BashToolUseMessage(at, 'tool', 'pwd')),
+    provider(new UserMessage(at, 'Later input')), provider(new AssistantMessage(at, 'answer')),
   ] });
   expect(ledger.existingPreview('chat')).toBeNull();
-  expect(ledger.currentRows('chat')).toHaveLength(3);
+  expect(ledger.currentRows('chat')).toHaveLength(4);
 });
 
 it('repairs on platform SQLite without octet_length and leaves the ledger writable', () => {

@@ -482,7 +482,7 @@ export class TranscriptLedgerStore {
   }
 
   // Bounds both the indexed ordinal ranges and JSON decoded for best-effort previews.
-  previewEdges(chatId: string, viewId: TranscriptViewId): { head: LedgerRow[] | null; tail: LedgerRow[] } {
+  previewEdges(chatId: string, viewId: TranscriptViewId): { head: LedgerRow[]; firstOmittedHeadOrdinal: number | null; tail: LedgerRow[] } {
     return this.#read(chatId, (entry) => {
       this.#assertCurrent(entry, viewId);
       const query = entry.db.query<Omit<StoredLedgerRow, 'payload_json'> & { payload_json: string | null }, [number, string, number, number]>(`
@@ -498,8 +498,9 @@ export class TranscriptLedgerStore {
       const last = entry.nextOrdinal - 1;
       const head = query.all(PREVIEW_ROW_BYTES, viewId, 1, PREVIEW_EDGE_ROWS);
       return {
+        head: decode(head),
         // An omitted payload could contain the first input, including imported user rows.
-        head: head.some((row) => row.payload_json === null) ? null : decode(head),
+        firstOmittedHeadOrdinal: head.find((row) => row.payload_json === null)?.ordinal ?? null,
         tail: decode(query.all(PREVIEW_ROW_BYTES, viewId, Math.max(1, last - PREVIEW_EDGE_ROWS + 1), last)),
       };
     });

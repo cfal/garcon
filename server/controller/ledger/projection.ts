@@ -10,11 +10,14 @@ export function messageForConversationRow(row: LedgerConversationRow): ChatMessa
   return row.kind === 'user-input' ? row.detail.message : row.message;
 }
 
-export function previewMessages(edges: { head: readonly LedgerRow[] | null; tail: readonly LedgerRow[] }): { first: ChatMessage; last: ChatMessage } | null {
-  if (edges.head === null) return null;
-  const head = edges.head.filter(isConversationalLedgerRow).map(messageForConversationRow);
+export function previewMessages(edges: { head: readonly LedgerRow[]; firstOmittedHeadOrdinal: number | null; tail: readonly LedgerRow[] }): { first: ChatMessage; last: ChatMessage } | null {
+  const head = edges.head.filter(isConversationalLedgerRow);
+  const firstUser = head.find((row) => messageForConversationRow(row).type === 'user-message');
+  const omitted = edges.firstOmittedHeadOrdinal;
+  if (omitted !== null && (!firstUser || firstUser.ordinal > omitted)) return null;
   const tail = edges.tail.filter(isConversationalLedgerRow).map(messageForConversationRow);
-  const first = head.find((message) => message.type === 'user-message') ?? head[0];
+  const firstRow = firstUser ?? head[0];
+  const first = firstRow && messageForConversationRow(firstRow);
   const last = tail.at(-1);
   return first && last ? { first, last } : null;
 }
