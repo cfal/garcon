@@ -1,4 +1,5 @@
 import { validateStart } from '$lib/api/chats.js';
+import * as m from '$lib/paraglide/messages.js';
 import type { ResolvedModelSelection } from '$shared/start-selection';
 
 export interface ExecutorHandoffModel extends ResolvedModelSelection {
@@ -59,11 +60,11 @@ export class ExecutorHandoffProjectState {
 			)
 				return;
 			if (!result.valid) {
-				this.error = result.error ?? 'Project folder is unavailable';
+				this.error = result.error ?? m.chat_executor_handoff_project_unavailable();
 				return;
 			}
 			if (!this.isAvailable(executorId, selection)) {
-				this.error = 'Execution target is unavailable';
+				this.error = m.chat_executor_handoff_target_unavailable();
 				return;
 			}
 			const resolve = this.#resolve;
@@ -72,7 +73,7 @@ export class ExecutorHandoffProjectState {
 			resolve?.({ projectPath, selection });
 		} catch (error) {
 			if (version === this.#version && this.projectPath.trim() === projectPath) {
-				this.error = error instanceof Error ? error.message : 'Unable to inspect project folder';
+				this.error = error instanceof Error ? error.message : m.chat_executor_handoff_inspect_failed();
 			}
 		} finally {
 			if (version === this.#version) this.checking = false;

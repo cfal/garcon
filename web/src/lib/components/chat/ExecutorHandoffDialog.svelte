@@ -9,6 +9,7 @@
 	import { isDirectAgentId, nonDirectAgentIds } from '$lib/agents/direct-agents';
 	import type { ExecutorHandoffProjectState } from '$lib/chat/conversation/executor-handoff-project.svelte.js';
 	import type { ModelSelectorChange } from '$lib/components/model-selector/model-selector-types';
+	import * as m from '$lib/paraglide/messages.js';
 	let { handoff }: { handoff: ExecutorHandoffProjectState } = $props();
 	const executors = getExecutors();
 	const shell = getAppShell();
@@ -53,12 +54,14 @@
 >
 	<Dialog.Content class="sm:max-w-lg">
 		<Dialog.Header>
-			<Dialog.Title>Move to {executors.label(handoff.target?.executorId)}</Dialog.Title>
-			<Dialog.Description>Destination</Dialog.Description>
+			<Dialog.Title>
+				{m.chat_executor_handoff_title({ label: executors.label(handoff.target?.executorId) })}
+			</Dialog.Title>
+			<Dialog.Description>{m.chat_executor_handoff_description()}</Dialog.Description>
 		</Dialog.Header>
 		<form class="space-y-4" onsubmit={handleSubmit}>
 			<div class="relative space-y-1">
-				<label for="handoff-path" class="text-sm">Destination project folder</label>
+				<label for="handoff-path" class="text-sm">{m.chat_executor_handoff_project_label()}</label>
 				<div class="flex gap-2">
 					<input
 						id="handoff-path"
@@ -71,8 +74,8 @@
 						type="button"
 						variant="outline"
 						size="icon"
-						title="Browse destination folder"
-						aria-label="Browse destination folder"
+						title={m.chat_executor_handoff_browse()}
+						aria-label={m.chat_executor_handoff_browse()}
 						disabled={handoff.checking || !executors.filesAvailable(executorId)}
 						onclick={() => (showBrowser = !showBrowser)}
 					>
@@ -103,24 +106,28 @@
 				/>
 			{/if}
 			{#if !executors.isReady(executorId)}
-				<p role="status" class="text-sm text-destructive">Executor is unavailable</p>
+				<p role="status" class="text-sm text-destructive">
+					{m.chat_executor_handoff_executor_unavailable()}
+				</p>
 			{:else if catalog.error}
 				<p role="alert" class="text-sm text-destructive">
 					{catalog.error}
 					<button type="button" class="underline" onclick={() => void catalog.forceRefresh()}>
-						Retry
+						{m.common_retry()}
 					</button>
 				</p>
 			{:else if !catalog.isValidated}
-				<p role="status" class="text-sm text-muted-foreground">Loading models...</p>
+				<p role="status" class="text-sm text-muted-foreground">{m.chat_composer_loading_models()}</p>
 			{/if}
 			{#if handoff.error}
 				<p role="alert" class="text-sm text-destructive">{handoff.error}</p>
 			{/if}
 			<Dialog.Footer>
-				<Button type="button" variant="outline" onclick={() => handoff.cancel()}>Cancel</Button>
+				<Button type="button" variant="outline" onclick={() => handoff.cancel()}>
+					{m.common_cancel()}
+				</Button>
 				<Button type="submit" disabled={!handoff.canConfirm}>
-					{handoff.checking ? 'Checking...' : 'Use This Executor'}
+					{handoff.checking ? m.chat_executor_handoff_checking() : m.chat_executor_handoff_confirm()}
 				</Button>
 			</Dialog.Footer>
 		</form>
