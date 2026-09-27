@@ -1,15 +1,14 @@
 import type { ExecutionRuntimeApi, ExecutorCallOptions } from '@garcon/server-agent-interface';
-import { GIT_OPERATION_TIMEOUT_MS, GH_DETAIL_TIMEOUT_MS, type GitExecutorScope } from '../../../common/git-execution.js';
+import { GIT_OPERATION_TIMEOUT_MS, GH_DETAIL_TIMEOUT_MS } from '../../../common/git-execution.js';
 import { isGitMethod, validateGitRequest } from '../../../common/git-request-validation.js';
 import type { GitMethod } from '../../../common/git.js';
 import type { ExecutionGitRequests } from '../../../common/git-execution.js';
 import { GitServiceError } from '../../../common/git-error.js';
 import { isRecord } from '../../../common/json.js';
 import type { GitRpcRequest } from '../transport/git-protocol.js';
-import { validateGitResult, validateGhResult } from '../../../common/git-result-validation.js';
 
 export class GitRpcServer {
-  constructor(private readonly executor: ExecutionRuntimeApi, private readonly scope: GitExecutorScope) {}
+  constructor(private readonly executor: ExecutionRuntimeApi) {}
 
   async handle(call: GitRpcRequest, signal: AbortSignal): Promise<unknown> {
     const maximum = call.method === 'gh.getPullRequest' ? GH_DETAIL_TIMEOUT_MS : GIT_OPERATION_TIMEOUT_MS;
@@ -26,7 +25,6 @@ export class GitRpcServer {
         const result = call.method === 'gh.getStatus' ? await gh.getStatus(options)
           : call.method === 'gh.listPullRequests' ? await gh.listPullRequests(call.request.input, options)
           : await gh.getPullRequest(call.request.input, options);
-        validateGhResult(call.method.slice(3) as 'getStatus' | 'listPullRequests' | 'getPullRequest', result, this.scope);
         return result;
       }
     }
@@ -35,8 +33,6 @@ export class GitRpcServer {
     validateGitRequest(method, input);
     const service = await this.executor.getGitService(options);
     const invoke = service[method] as (request: ExecutionGitRequests[GitMethod], options: ExecutorCallOptions) => Promise<unknown>;
-    const result = await invoke(input, options);
-    validateGitResult(method, result, this.scope);
-    return result;
+    return invoke(input, options);
   }
 }

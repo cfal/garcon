@@ -42,7 +42,7 @@ export function serveExecutionRuntime(runtime: ExecutionRuntimeApi, rpc: Executo
   const subscriptions = new Set<() => void>();
   const ready = (async () => {
     info = await runtime.getInfo();
-    gitWorker = new GitRpcServer(runtime, { executorId: info.executorId, instanceId: info.instanceId });
+    gitWorker = new GitRpcServer(runtime);
     if (info.services.terminals) {
       const service = await runtime.getTerminalService();
       terminalWorker = new TerminalRpcServer(service, rpc);
