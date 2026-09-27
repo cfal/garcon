@@ -2,8 +2,21 @@ import {
   isCarryoverMigrationQuarantineNoticeDetail,
   isPreambleApplicationNoticeDetail,
 } from '../../../common/transcript-notice-details.js';
-import type { LedgerRow, LedgerRowDraft } from './contracts.js';
-import { isPresentationOnlyProviderRow } from './contracts.js';
+import type { ChatMessage } from '../../../common/chat-types.js';
+import type { LedgerConversationRow, LedgerRow, LedgerRowDraft } from './contracts.js';
+import { isConversationalLedgerRow, isPresentationOnlyProviderRow } from './contracts.js';
+
+export function messageForConversationRow(row: LedgerConversationRow): ChatMessage {
+  return row.kind === 'user-input' ? row.detail.message : row.message;
+}
+
+export function previewMessages(edges: { head: readonly LedgerRow[]; tail: readonly LedgerRow[] }): { first: ChatMessage; last: ChatMessage } | null {
+  const head = edges.head.filter(isConversationalLedgerRow).map(messageForConversationRow);
+  const tail = edges.tail.filter(isConversationalLedgerRow).map(messageForConversationRow);
+  const first = head.find((message) => message.type === 'user-message') ?? head[0];
+  const last = tail.at(-1);
+  return first && last ? { first, last } : null;
+}
 
 export function frozenConversationDrafts(rows: readonly LedgerRow[]): LedgerRowDraft[] {
   return rows.flatMap((row): readonly LedgerRowDraft[] => {

@@ -53,6 +53,7 @@ import { PermissionNotActionableError, TranscriptSinkClosedError } from './error
 import { ProducerLease } from './producer-lease.js';
 import { projectFinalResponse } from './final-response.js';
 import { TranscriptLedgerStore } from './store.js';
+import { messageForConversationRow, previewMessages } from './projection.js';
 
 export interface TranscriptProducerLease {
   readonly sink: AgentProducerSink;
@@ -622,13 +623,7 @@ export class TranscriptLedgerService {
 
   existingPreview(chatId: string): { first: ChatMessage; last: ChatMessage } | null {
     const view = this.#store.existingCurrentView(chatId);
-    if (!view) return null;
-    const edges = this.#store.previewEdges(chatId, view.viewId);
-    const head = edges.head.filter(isConversationalLedgerRow).map(messageForConversationRow);
-    const tail = edges.tail.filter(isConversationalLedgerRow).map(messageForConversationRow);
-    const first = head.find((message) => message.type === 'user-message') ?? head[0];
-    const last = tail.at(-1);
-    return first && last ? { first, last } : null;
+    return view ? previewMessages(this.#store.previewEdges(chatId, view.viewId)) : null;
   }
 
   resendCandidates(chatId: string): readonly ResendCandidate[] {
@@ -1002,8 +997,4 @@ function permissionRowKind(
   lifecycle: Exclude<AgentPermissionLifecycle, { readonly kind: 'resolved' }>,
 ): LedgerPermissionRow['kind'] {
   return `permission-${lifecycle.kind}`;
-}
-
-function messageForConversationRow(row: LedgerConversationRow): ChatMessage {
-  return row.kind === 'user-input' ? row.detail.message : row.message;
 }
