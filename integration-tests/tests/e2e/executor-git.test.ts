@@ -407,3 +407,35 @@ test('selected lines from multiple remote files use one review document before r
     fixture.assertNoBrowserErrors();
   }, { executionBackend: 'remote-controller-dials', projectRoots: 'separate' });
 }, 90_000);
+
+test('Git views reload and stage on the worker after its process restarts', async () => {
+  await withE2eFixture('executor-git-worker-restart', async fixture => {
+    const { client, executionDirs, directAgents } = fixture.integration;
+    const example = join(executionDirs.project, 'example.txt');
+    await initializeFixtureRepository(executionDirs.project);
+    await writeFile(example, 'Before worker restart\n');
+    const chatId = fixture.integration.newChatId();
+    const accepted = await client.startDirectChat({
+      chatId, projectPath: executionDirs.project, content: 'Synthetic worker restart Git chat', agent: directAgents.openAi,
+    });
+    await client.waitForTurnTerminal(chatId, accepted.turnId);
+    const app = new SpaDriver(fixture.page, fixture.integration);
+    await app.setViewport(1_600, 900);
+    await app.openChat(chatId);
+    await fixture.waitForSpaWebSocket();
+    const connections = await fixture.spaWebSocketConnectionCount();
+    await openGit(fixture);
+    await showGitDiff(fixture);
+    await waitForDiff(fixture, 'Before worker restart');
+
+    await writeFile(example, 'After worker restart\n');
+    await fixture.integration.crashAndRestartExecutorWorker();
+    await waitForDiff(fixture, 'After worker restart');
+    const staged = fixture.page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/git/stage-paths');
+    await fixture.page.$eval(`${GIT_PANEL} button[title="Stage file"]`, element => (element as HTMLButtonElement).click());
+    expect((await staged).status()).toBe(200);
+    expect(await runFixtureGit(executionDirs.project, 'show', ':example.txt')).toBe('After worker restart\n');
+    expect(await fixture.spaWebSocketConnectionCount()).toBe(connections);
+    expect(fixture.browserErrors.filter(message => message.startsWith('pageerror:'))).toEqual([]);
+  }, { executionBackend: 'remote-controller-dials', projectRoots: 'separate' });
+}, 90_000);
