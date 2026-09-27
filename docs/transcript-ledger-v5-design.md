@@ -2190,6 +2190,17 @@ new dispatch is admitted. Source unavailability does not prevent a ledger-based
 handoff. Prepared carryover reuse is fenced by destination executor and ownership
 epoch as well as the existing request and view identities.
 
+Composer executor and agent selections commit through the promptless
+`POST /api/v1/chats/agent-handoff` command, under a transcript-snapshot
+reservation. Confirmation completes the ownership change without admitting a
+turn or consuming the editable composer draft. Files, Git, and project controls
+follow the committed chat projection immediately. Carryover validation uses a
+null next prompt; the next explicit dispatch plans against its actual input
+budget rather than reusing a prompt-specific deposit. Model-only changes retain
+the existing owner and use the model PATCH command. An uncertain handoff response
+refreshes the authoritative chat projection; it never automatically retries the
+handoff or rolls back ownership.
+
 ### 12.2 Continuation to a new chat (`/handoff`)
 
 Creates a new target chat from a source chat. The handoff record names
