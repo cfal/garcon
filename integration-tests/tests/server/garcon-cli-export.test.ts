@@ -4,9 +4,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cliEnvironment } from '../../support/cli-environment.js';
 import {
-  withIntegrationFixture,
+  withCliFixture,
+  cliConnectionArguments,
   type IntegrationFixture,
-} from '../../support/integration-fixture.js';
+} from '../../support/cli-fixture.js';
 import { claudeText, claudeToolUse } from '../../support/fake-claude-model.js';
 import { LIVE_TURN_TIMEOUT_MS, waitForVisibleResponse } from '../../support/live-agent.js';
 import { liveClaudeStartRequest } from '../../support/live-claude.js';
@@ -17,12 +18,12 @@ const WORKSPACE = 'cli-export';
 
 describe('garcon-cli export', () => {
   test('[TLV5-L01.02-EXPORT-SERVER-01] exports pinned full transcripts with filtering and atomic file output', async () => {
-    await withIntegrationFixture('garcon-cli-export', async (fixture) => {
+    await withCliFixture('garcon-cli-export', async (fixture) => {
       const chatId = fixture.newChatId();
       const started = await fixture.client.startDirectChat({
         chatId,
         content: 'synthetic export prompt',
-        projectPath: fixture.dirs.project,
+        projectPath: fixture.executionDirs.project,
         agent: fixture.directAgents.openAi,
       });
       expect((await fixture.client.waitForTurnTerminal(chatId, started.turnId)).type)
@@ -103,12 +104,12 @@ describe('garcon-cli export', () => {
     environment.model.scriptTurn([claudeText(reply)]);
 
     try {
-      await withIntegrationFixture('garcon-cli-export-tools', async (fixture) => {
+      await withCliFixture('garcon-cli-export-tools', async (fixture) => {
         const chatId = fixture.newChatId();
         const cursor = fixture.client.markEvents();
         const turn = await fixture.client.startChat(liveClaudeStartRequest({
           chatId,
-          projectPath: fixture.dirs.project,
+          projectPath: fixture.executionDirs.project,
           command: prompt,
         }));
         const permission = await fixture.client.waitForTransientPermission(
@@ -177,9 +178,7 @@ async function runCli(
     cmd: [
       process.execPath,
       'cli/main.ts',
-      '--config-dir', fixture.dirs.config,
-      '--runtime', 'controller',
-      '--server', fixture.garcon.baseUrl,
+      ...cliConnectionArguments(fixture),
       ...arguments_,
     ],
     cwd: REPO_ROOT,

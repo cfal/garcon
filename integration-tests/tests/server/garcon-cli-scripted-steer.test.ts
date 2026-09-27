@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { userContents } from '../../support/chat-assertions.js';
 import { cliEnvironment } from '../../support/cli-environment.js';
 import { codexAssistantMessage } from '../../support/fake-codex-model.js';
-import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import { cliConnectionArguments, withCliFixture } from '../../support/cli-fixture.js';
 import { expectFinished, LIVE_TURN_TIMEOUT_MS } from '../../support/live-agent.js';
 import { liveCodexStartRequest } from '../../support/live-codex.js';
 import {
@@ -55,12 +55,12 @@ describe('scripted Codex CLI steering', () => {
     const held = testEnvironment.model.scriptHeldTurn([codexAssistantMessage(firstReply)]);
     testEnvironment.model.scriptTurn([codexAssistantMessage(steeredReply)]);
 
-    await withIntegrationFixture('garcon-cli-scripted-steer', async (fixture) => {
+    await withCliFixture('garcon-cli-scripted-steer', async (fixture) => {
       const chatId = fixture.newChatId();
       const firstCursor = fixture.client.markEvents();
       const first = await fixture.client.startChat(liveCodexStartRequest({
         chatId,
-        projectPath: fixture.dirs.project,
+        projectPath: fixture.executionDirs.project,
         command: firstPrompt,
         permissionMode: 'bypassPermissions',
       }));
@@ -69,8 +69,7 @@ describe('scripted Codex CLI steering', () => {
       await held.requested;
 
       const steered = await runCli([
-        '--config-dir', fixture.dirs.config,
-        '--runtime', 'controller',
+        ...cliConnectionArguments(fixture),
         'resume-async', chatId, '--allow-steer',
         '--message-title', 'Steer context',
         '--color', '0EA5E9,7dd3fc',

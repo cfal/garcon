@@ -5,13 +5,12 @@ import { fileURLToPath } from 'node:url';
 import { parseTicketDetail, parseTicketPage } from '../../../common/ticket-responses.js';
 import { parseTicketWriteResult } from '../../../common/ticket-records.js';
 import { cliEnvironment } from '../../support/cli-environment.js';
-import { withIntegrationFixture, type IntegrationFixture } from '../../support/integration-fixture.js';
+import { cliConnectionArguments, withCliFixture, type IntegrationFixture } from '../../support/cli-fixture.js';
 
 const REPO_ROOT = fileURLToPath(new URL('../../..', import.meta.url));
 
 async function runCli(fixture: IntegrationFixture, args: readonly string[], body?: string) {
-  const child = Bun.spawn({ cmd: [process.execPath, 'cli/main.ts', '--config-dir', fixture.dirs.config,
-    '--runtime', 'controller', '--server', fixture.garcon.baseUrl, 'ticket', ...args], cwd: REPO_ROOT,
+  const child = Bun.spawn({ cmd: [process.execPath, 'cli/main.ts', ...cliConnectionArguments(fixture), 'ticket', ...args], cwd: REPO_ROOT,
     env: cliEnvironment(),
     stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' });
   if (body !== undefined) child.stdin.write(body);
@@ -22,11 +21,11 @@ async function runCli(fixture: IntegrationFixture, args: readonly string[], body
 
 describe('ticket CLI public server integration', () => {
   test('creates with a captured folder default, shares comments and fields with HTTP, and retries after restart and directory movement', async () => {
-    await withIntegrationFixture('cli-tickets', async (fixture) => {
-      const create = await runCli(fixture, ['create', '--title', 'Synthetic CLI ticket', '--cwd', fixture.dirs.project, '--json']);
+    await withCliFixture('cli-tickets', async (fixture) => {
+      const create = await runCli(fixture, ['create', '--title', 'Synthetic CLI ticket', '--cwd', fixture.executionDirs.project, '--json']);
       expect(create.exitCode).toBe(0);
       const initial = parseTicketWriteResult(JSON.parse(create.stdout));
-      expect(initial.ticket.project).toBe(basename(fixture.dirs.project));
+      expect(initial.ticket.project).toBe(basename(fixture.executionDirs.project));
       expect(create.stderr).toContain('Project (folder)');
       const requestId = /^Request: (.+)$/m.exec(create.stderr)?.[1];
       expect(requestId).toBeDefined();
@@ -39,7 +38,7 @@ describe('ticket CLI public server integration', () => {
       expect(current.ticket.title).toBe('Current server title');
       expect(current.comments.items).toHaveLength(1);
       await fixture.restartGarcon();
-      await rename(fixture.dirs.project, join(fixture.dirs.root, 'moved-project'));
+      await rename(fixture.executionDirs.project, join(fixture.dirs.root, 'moved-project'));
       const retried = await runCli(fixture, ['create', '--title', 'Synthetic CLI ticket', '--project', initial.ticket.project,
         '--request-id', requestId!, '--expected-store-id', initial.storeId, '--json']);
       expect(retried.exitCode).toBe(0);
@@ -53,7 +52,7 @@ describe('ticket CLI public server integration', () => {
   });
 
   test('denies outside-base defaults but permits an explicit project without touching that directory', async () => {
-    await withIntegrationFixture('cli-ticket-boundary', async (fixture) => {
+    await withCliFixture('cli-ticket-boundary', async (fixture) => {
       const denied = await runCli(fixture, ['create', '--title', 'Synthetic ticket', '--cwd', fixture.dirs.root]);
       expect(denied.exitCode).toBe(3);
       expect(denied.stdout).toBe('');

@@ -5,9 +5,10 @@ import type { ChatMessage } from '../../../common/chat-types.js';
 import type { ChatMessagesMessage } from '../../../common/ws-events.js';
 import { cliEnvironment } from '../../support/cli-environment.js';
 import {
-  withIntegrationFixture,
+  withCliFixture,
+  cliConnectionArguments,
   type IntegrationFixture,
-} from '../../support/integration-fixture.js';
+} from '../../support/cli-fixture.js';
 
 const REPO_ROOT = fileURLToPath(new URL('../../..', import.meta.url));
 const WORKSPACE = 'cli-add-row';
@@ -39,9 +40,7 @@ async function runAddRow(
     cmd: [
       process.execPath,
       'cli/main.ts',
-      '--config-dir', fixture.dirs.config,
-      '--runtime', 'controller',
-      '--server', fixture.garcon.baseUrl,
+      ...cliConnectionArguments(fixture),
       'add-row', chatId,
       '--type', type,
       '--title', title,
@@ -109,9 +108,7 @@ async function runStatus(fixture: IntegrationFixture, chatId: string): Promise<s
     cmd: [
       process.execPath,
       'cli/main.ts',
-      '--config-dir', fixture.dirs.config,
-      '--runtime', 'controller',
-      '--server', fixture.garcon.baseUrl,
+      ...cliConnectionArguments(fixture),
       'status', chatId,
       '--messages', '200',
     ],
@@ -155,7 +152,7 @@ function titleOf(message: ChatMessage): string | undefined {
 
 describe('garcon-cli add-row', () => {
   test('[TLV5-CHAT-ROW.05-SERVER-01] persists presentation-only rows without creating agent work', async () => {
-    await withIntegrationFixture('garcon-cli-add-row', async (fixture) => {
+    await withCliFixture('garcon-cli-add-row', async (fixture) => {
       const searchSettings = await fixture.client.updateSettings({
         features: { transcriptSearch: { enabled: true } },
       });
@@ -165,7 +162,7 @@ describe('garcon-cli add-row', () => {
       const started = await fixture.client.startDirectChat({
         chatId,
         content: 'chat-row-server-seed',
-        projectPath: fixture.dirs.project,
+        projectPath: fixture.executionDirs.project,
         agent: fixture.directAgents.openAi,
       });
       expect((await fixture.client.waitForTurnTerminal(chatId, started.turnId)).type).toBe(

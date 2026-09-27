@@ -12,10 +12,11 @@ import {
 import { expectedCarriedInput } from '../../support/carried-context.js';
 import { cliEnvironment } from '../../support/cli-environment.js';
 import {
-  withIntegrationFixture,
+  withCliFixture,
+  cliConnectionArguments,
+  cliRuntime,
   type IntegrationFixture,
-} from '../../support/integration-fixture.js';
-import { GarconProcess } from '../../support/garcon-process.js';
+} from '../../support/cli-fixture.js';
 import { waitForPersistedNativeSession } from '../../support/persisted-chat.js';
 
 const REPO_ROOT = fileURLToPath(new URL('../../..', import.meta.url));
@@ -104,10 +105,9 @@ function startArguments(
 ): string[] {
   const agent = fixture.directAgents.openAi;
   return [
-    '--config-dir', fixture.dirs.config,
-    '--runtime', 'controller',
+    ...cliConnectionArguments(fixture),
     'start',
-    '--cwd', fixture.dirs.project,
+    '--cwd', fixture.executionDirs.project,
     '--agent', agent.agentId,
     '--provider', agent.provider.providerId,
     '--endpoint', agent.provider.endpointId,
@@ -118,15 +118,14 @@ function startArguments(
 
 function controlArguments(fixture: IntegrationFixture, command: string[]): string[] {
   return [
-    '--config-dir', fixture.dirs.config,
-    '--runtime', 'controller',
+    ...cliConnectionArguments(fixture),
     ...command,
   ];
 }
 
 describe('garcon-cli', () => {
   test('resolves provider names in catalog queries and starts, rejecting duplicate names', async () => {
-    await withIntegrationFixture('garcon-cli-provider-names', async (fixture) => {
+    await withCliFixture('garcon-cli-provider-names', async (fixture) => {
       const agent = fixture.directAgents.openAi;
       const providerName = (await fixture.client.listAgentCatalog()).apiProviders
         .find((provider) => provider.id === agent.provider.providerId)?.label;
@@ -171,14 +170,14 @@ describe('garcon-cli', () => {
     );
   });
 
-  test('discovers the controller through a config-root alias independently of its workspace alias', async () => {
-    await withIntegrationFixture('garcon-cli-workspace-symlink', async (fixture) => {
+  test('discovers the selected runtime through config-root and data-directory aliases', async () => {
+    await withCliFixture('garcon-cli-workspace-symlink', async (fixture) => {
       const alias = path.join(fixture.dirs.root, 'config-alias');
-      await fs.symlink(fixture.dirs.config, alias, 'dir');
-      for (const configDir of [fixture.dirs.config, alias]) {
+      await fs.symlink(fixture.executionDirs.config, alias, 'dir');
+      for (const configDir of [fixture.executionDirs.config, alias]) {
         const listedAgents = await runCli([
           '--config-dir', configDir,
-          '--runtime', 'controller',
+          '--runtime', cliRuntime(fixture),
           'list', 'agents', '--json',
         ]);
 
@@ -198,11 +197,10 @@ describe('garcon-cli', () => {
   });
 
   test('starts and resumes a visible tagged chat through a named workspace', async () => {
-    await withIntegrationFixture('garcon-cli-start-resume', async (fixture) => {
+    await withCliFixture('garcon-cli-start-resume', async (fixture) => {
       const agent = fixture.directAgents.openAi;
       const listedAgents = await runCli([
-        '--config-dir', fixture.dirs.config,
-        '--runtime', 'controller',
+        ...cliConnectionArguments(fixture),
         'list', 'agents', '--json',
       ]);
       expect(listedAgents).toMatchObject({ exitCode: 0, stderr: '' });
@@ -211,8 +209,7 @@ describe('garcon-cli', () => {
       );
 
       const listedModels = await runCli([
-        '--config-dir', fixture.dirs.config,
-        '--runtime', 'controller',
+        ...cliConnectionArguments(fixture),
         'list', 'models',
         '--agent', agent.agentId,
         '--provider', agent.provider.providerId,
@@ -230,10 +227,9 @@ describe('garcon-cli', () => {
       );
 
       const started = await runCli([
-        '--config-dir', fixture.dirs.config,
-        '--runtime', 'controller',
+        ...cliConnectionArguments(fixture),
         'start',
-        '--cwd', fixture.dirs.project,
+        '--cwd', fixture.executionDirs.project,
         '--agent', agent.agentId,
         '--provider', agent.provider.providerId,
         '--endpoint', agent.provider.endpointId,
@@ -256,14 +252,13 @@ describe('garcon-cli', () => {
 
       const chatsAfterStart = await fixture.client.listChats();
       expect(chatsAfterStart.sessions.find((chat) => chat.id === chatId)).toMatchObject({
-        projectPath: fixture.dirs.project,
+        projectPath: fixture.executionDirs.project,
         title: 'CLI delegated review',
         tags: ['cli', 'delegated', 'review-needed'],
       });
 
       const resumed = await runCli([
-        '--config-dir', fixture.dirs.config,
-        '--runtime', 'controller',
+        ...cliConnectionArguments(fixture),
         'resume', chatId!,
         '--title', 'CLI follow-up review',
         '--message-title', 'Follow-up context',
@@ -319,7 +314,7 @@ describe('garcon-cli', () => {
   });
 
   test('start-async returns after acceptance while the visible turn keeps running', async () => {
-    await withIntegrationFixture('garcon-cli-start-async', async (fixture) => {
+    await withCliFixture('garcon-cli-start-async', async (fixture) => {
       const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'cli-start-async' });
       const arguments_ = startArguments(fixture, 'cli-start-async');
       arguments_[arguments_.indexOf('start')] = 'start-async';
@@ -345,7 +340,7 @@ describe('garcon-cli', () => {
   });
 
   test('emits stable JSON envelopes for asynchronous lifecycle commands', async () => {
-    await withIntegrationFixture('garcon-cli-automation-json', async (fixture) => {
+    await withCliFixture('garcon-cli-automation-json', async (fixture) => {
       const startHeld = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'json-start' });
       const startArgs = startArguments(fixture, 'json-start');
       startArgs[startArgs.indexOf('start')] = 'start-async';
@@ -435,7 +430,7 @@ describe('garcon-cli', () => {
   });
 
   test('emits settled JSON envelopes for synchronous lifecycle commands', async () => {
-    await withIntegrationFixture('garcon-cli-synchronous-json', async (fixture) => {
+    await withCliFixture('garcon-cli-synchronous-json', async (fixture) => {
       const startArgs = startArguments(fixture, 'json-synchronous-start');
       startArgs.splice(-1, 0, '--json');
       const started = await runCli(startArgs);
@@ -496,7 +491,7 @@ describe('garcon-cli', () => {
   }, 60_000);
 
   test('repeated metadata commands converge without toggling or reordering state', async () => {
-    await withIntegrationFixture('garcon-cli-metadata-state', async (fixture) => {
+    await withCliFixture('garcon-cli-metadata-state', async (fixture) => {
       const started = await runCli(startArguments(fixture, 'metadata-start'));
       expect(started).toMatchObject({ exitCode: 0, stderr: '' });
       const chatId = started.stdout.match(/^chat id: (\d{16})$/m)?.[1];
@@ -556,7 +551,7 @@ describe('garcon-cli', () => {
   });
 
   test('suppresses preambles explicitly and does not inherit a parent automation tag or selection', async () => {
-    await withIntegrationFixture('garcon-cli-preamble-controls', async (fixture) => {
+    await withCliFixture('garcon-cli-preamble-controls', async (fixture) => {
       const initialCatalog = await fixture.client.get<PreamblesSnapshot>('/api/v1/preambles');
       let catalog = (await fixture.client.post<{ snapshot: PreamblesSnapshot }>(
         '/api/v1/preambles',
@@ -627,7 +622,7 @@ describe('garcon-cli', () => {
   });
 
   test('starts a delegated child with durable parentage', async () => {
-    await withIntegrationFixture('garcon-cli-delegated-parent', async (fixture) => {
+    await withCliFixture('garcon-cli-delegated-parent', async (fixture) => {
       const parent = await runCli(startArguments(fixture, 'parent-implementation'));
       expect(parent).toMatchObject({ exitCode: 0, stderr: '' });
       const parentChatId = parent.stdout.match(/^chat id: (\d{16})$/m)?.[1];
@@ -666,14 +661,13 @@ describe('garcon-cli', () => {
   });
 
   test('resumes through A to B to A as visible fenced handoffs', async () => {
-    await withIntegrationFixture('garcon-cli-agent-handoff', async (fixture) => {
+    await withCliFixture('garcon-cli-agent-handoff', async (fixture) => {
       const source = fixture.directAgents.openAi;
       const target = fixture.directAgents.anthropic;
       const started = await runCli([
-        '--config-dir', fixture.dirs.config,
-        '--runtime', 'controller',
+        ...cliConnectionArguments(fixture),
         'start',
-        '--cwd', fixture.dirs.project,
+        '--cwd', fixture.executionDirs.project,
         '--agent', source.agentId,
         '--provider', source.provider.providerId,
         '--endpoint', source.provider.endpointId,
@@ -689,8 +683,7 @@ describe('garcon-cli', () => {
         model: target.provider.model,
       });
       const handoffRun = runCli([
-        '--config-dir', fixture.dirs.config,
-        '--runtime', 'controller',
+        ...cliConnectionArguments(fixture),
         'resume', chatId!,
         '--agent', target.agentId,
         '--provider', target.provider.providerId,
@@ -729,8 +722,7 @@ describe('garcon-cli', () => {
         model: source.provider.model,
       });
       const returnRun = runCli([
-        '--config-dir', fixture.dirs.config,
-        '--runtime', 'controller',
+        ...cliConnectionArguments(fixture),
         'resume', chatId!,
         '--agent', source.agentId,
         '--provider', source.provider.providerId,
@@ -794,7 +786,7 @@ describe('garcon-cli', () => {
   });
 
   test('returns provider failures without printing partial success output', async () => {
-    await withIntegrationFixture('garcon-cli-failure', async (fixture) => {
+    await withCliFixture('garcon-cli-failure', async (fixture) => {
       fixture.fakeProviders.openAi.failNextHttp(
         { lastUserText: 'cli-provider-failure' },
         400,
@@ -811,7 +803,7 @@ describe('garcon-cli', () => {
   });
 
   test('reports SPA stops and deletions as interruptions', async () => {
-    await withIntegrationFixture('garcon-cli-interruptions', async (fixture) => {
+    await withCliFixture('garcon-cli-interruptions', async (fixture) => {
       const beforeStop = new Set((await fixture.client.listChats()).sessions.map((chat) => chat.id));
       const stoppedHold = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'cli-stop' });
       const stoppedCli = startCli(startArguments(fixture, 'cli-stop'));
@@ -862,7 +854,7 @@ describe('garcon-cli', () => {
   });
 
   test('reattaches to an exact turn after the original CLI is interrupted', async () => {
-    await withIntegrationFixture('garcon-cli-wait', async (fixture) => {
+    await withCliFixture('garcon-cli-wait', async (fixture) => {
       const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'cli-wait' });
       const attached = startObservedCli(startArguments(fixture, 'cli-wait'));
       await held.received;
@@ -882,7 +874,7 @@ describe('garcon-cli', () => {
         messageLimit: 10,
         chat: {
           id: handle.chatId,
-          projectPath: fixture.dirs.project,
+          projectPath: fixture.executionDirs.project,
           tags: ['cli'],
           agentOwnershipEpoch: expect.any(String),
           carryOverRevision: expect.stringMatching(/^carry-v(?:1:0|5:)/),
@@ -951,7 +943,7 @@ describe('garcon-cli', () => {
   });
 
   test('detects a replacement Garcon instance on the same address', async () => {
-    await withIntegrationFixture('garcon-cli-restart', async (fixture) => {
+    await withCliFixture('garcon-cli-restart', async (fixture) => {
       const before = new Set((await fixture.client.listChats()).sessions.map((chat) => chat.id));
       const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'cli-restart' });
       const cli = startObservedCli(startArguments(fixture, 'cli-restart'));
@@ -961,10 +953,10 @@ describe('garcon-cli', () => {
       );
       expect(acceptedChat).toBeDefined();
       expect(await cli.acceptedChatId).toBe(acceptedChat!.id);
-      const aborted = held.expectAbort();
+      const aborted = fixture.client.executorId === 'local' ? held.expectAbort() : null;
 
-      await fixture.crashAndRestartGarcon({ reusePort: true });
-      await aborted;
+      await fixture.crashAndRestartGarcon({ reusePort: true, preserveExecutorWorker: true });
+      if (aborted) await aborted;
       held.releaseEcho();
 
       const result = await cli.result;
@@ -973,8 +965,12 @@ describe('garcon-cli', () => {
       expect(result.stdout).toBe(
         `chat id: ${acceptedChat!.id}\nturn id: ${handle.turnId}\n`,
       );
-      expect(result.stderr).toContain('transport recovery:');
-      expect(result.stderr).toContain('Garcon restarted while the turn was running');
+      const restartErrors = ['transport recovery: Garcon restarted while the turn was running\n'];
+      if (fixture.client.executorId !== 'local') {
+        // The retained gateway can reject the generation before transport recovery probes it.
+        restartErrors.push('receipt polling: Garcon restarted; start a new CLI invocation (HTTP 409, CLI_CONTROLLER_CHANGED)\n');
+      }
+      expect(restartErrors).toContain(result.stderr);
 
       const status = await runCli(controlArguments(fixture, [
         'status', acceptedChat!.id, '--messages', '0', '--json',
@@ -992,22 +988,15 @@ describe('garcon-cli', () => {
       expect(wait.exitCode).toBe(3);
       expect(wait.stdout).toBe('');
       expect(wait.stderr).toContain('the accepted turn receipt is unavailable on the verified Garcon instance');
+      expect(fixture.fakeProviders.openAi.requests().filter(
+        request => request.lastUserText === 'cli-restart',
+      )).toHaveLength(1);
     }, { namedWorkspace: WORKSPACE });
   }, 20_000);
 
   test('authenticates through the runtime capability when normal auth is enabled', async () => {
-    await withIntegrationFixture('garcon-cli-auth', async (fixture) => {
-      await fixture.client.close();
-      await fixture.garcon.stop();
-      fixture.garcon = await GarconProcess.start({
-        repoRoot: REPO_ROOT,
-        configDir: fixture.dirs.config,
-        workspaceDir: fixture.dirs.workspace,
-        workspaceName: WORKSPACE,
-        projectDir: fixture.dirs.project,
-        homeDir: fixture.dirs.home,
-        authentication: 'existing',
-      });
+    await withCliFixture('garcon-cli-auth', async (fixture) => {
+      await fixture.restartGarcon();
 
       const started = await runCli(startArguments(fixture, 'cli-authenticated'));
 
@@ -1027,18 +1016,8 @@ describe('garcon-cli', () => {
   }, 20_000);
 
   test('looks up the exact current native session through the authenticated server', async () => {
-    await withIntegrationFixture('garcon-cli-native-session-lookup', async (fixture) => {
-      await fixture.client.close();
-      await fixture.garcon.stop();
-      fixture.garcon = await GarconProcess.start({
-        repoRoot: REPO_ROOT,
-        configDir: fixture.dirs.config,
-        workspaceDir: fixture.dirs.workspace,
-        workspaceName: WORKSPACE,
-        projectDir: fixture.dirs.project,
-        homeDir: fixture.dirs.home,
-        authentication: 'existing',
-      });
+    await withCliFixture('garcon-cli-native-session-lookup', async (fixture) => {
+      await fixture.restartGarcon();
 
       const unauthenticated = await fetch(
         `${fixture.garcon.baseUrl}/api/v1/chats/lookup-native-session`,
@@ -1087,7 +1066,7 @@ describe('garcon-cli', () => {
   }, 20_000);
 
   test('reports missing chats and inspects chats whose project path disappeared', async () => {
-    await withIntegrationFixture('garcon-cli-status-paths', async (fixture) => {
+    await withCliFixture('garcon-cli-status-paths', async (fixture) => {
       const missing = await runCli(controlArguments(fixture, [
         'status', fixture.newChatId(), '--messages', '0', '--json',
       ]));
@@ -1095,7 +1074,7 @@ describe('garcon-cli', () => {
       expect(missing.stdout).toBe('');
       expect(missing.stderr).toContain('Session not found (HTTP 404, SESSION_NOT_FOUND)');
 
-      const nestedProject = `${fixture.dirs.project}/removed-project`;
+      const nestedProject = `${fixture.executionDirs.project}/removed-project`;
       await fs.mkdir(nestedProject);
       const arguments_ = startArguments(fixture, 'cli-removed-project');
       const cwdIndex = arguments_.indexOf('--cwd') + 1;
@@ -1127,12 +1106,12 @@ describe('garcon-cli', () => {
   });
 
   test('resume-async delivers a new turn to an idle non-CLI chat and exits before it settles', async () => {
-    await withIntegrationFixture('garcon-cli-resume-async-idle', async (fixture) => {
+    await withCliFixture('garcon-cli-resume-async-idle', async (fixture) => {
       const agent = fixture.directAgents.openAi;
       const chatId = fixture.newChatId();
       const initial = await fixture.client.startDirectChat({
         chatId,
-        projectPath: fixture.dirs.project,
+        projectPath: fixture.executionDirs.project,
         agent,
         content: 'cli-async-initial',
       });
@@ -1181,7 +1160,7 @@ describe('garcon-cli', () => {
   });
 
   test('resume-async without --allow-steer reports busy without queueing', async () => {
-    await withIntegrationFixture('garcon-cli-resume-async-busy', async (fixture) => {
+    await withCliFixture('garcon-cli-resume-async-busy', async (fixture) => {
       const before = new Set((await fixture.client.listChats()).sessions.map((chat) => chat.id));
       const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'cli-busy-turn' });
       const cli = startCli(startArguments(fixture, 'cli-busy-turn'));
@@ -1212,7 +1191,7 @@ describe('garcon-cli', () => {
   });
 
   test('garcon-cli stop interrupts a CLI-attached turn and pauses its queue', async () => {
-    await withIntegrationFixture('garcon-cli-stop-active', async (fixture) => {
+    await withCliFixture('garcon-cli-stop-active', async (fixture) => {
       const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'cli-stop-turn' });
       const cli = startObservedCli(startArguments(fixture, 'cli-stop-turn'));
       await held.received;
@@ -1260,7 +1239,7 @@ describe('garcon-cli', () => {
   });
 
   test('garcon-cli stop treats an idle chat as already-idle', async () => {
-    await withIntegrationFixture('garcon-cli-stop-idle', async (fixture) => {
+    await withCliFixture('garcon-cli-stop-idle', async (fixture) => {
       const before = new Set((await fixture.client.listChats()).sessions.map((chat) => chat.id));
       const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'cli-idle-turn' });
       const cli = startCli(startArguments(fixture, 'cli-idle-turn'));
@@ -1284,12 +1263,12 @@ describe('garcon-cli', () => {
   });
 
   test('resuming a non-CLI chat never adds the cli tag', async () => {
-    await withIntegrationFixture('garcon-cli-resume-no-cli', async (fixture) => {
+    await withCliFixture('garcon-cli-resume-no-cli', async (fixture) => {
       const agent = fixture.directAgents.openAi;
       const chatId = fixture.newChatId();
       const initial = await fixture.client.startDirectChat({
         chatId,
-        projectPath: fixture.dirs.project,
+        projectPath: fixture.executionDirs.project,
         agent,
         content: 'cli-no-tag-initial',
       });

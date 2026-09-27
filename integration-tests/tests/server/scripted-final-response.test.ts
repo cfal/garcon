@@ -1,3 +1,4 @@
+import { cliConnectionArguments } from '../../support/cli-fixture.js';
 import { expect, test } from 'bun:test';
 import { fileURLToPath } from 'node:url';
 import { parseAgentTurnReceipt } from '../../../common/agent-turn-receipt.js';
@@ -9,7 +10,7 @@ import type { AgentRunFinishedMessage } from '../../../common/ws-events.js';
 import { startupPhases } from '../../support/delegated-start-progress.js';
 import { assistantContents } from '../../support/chat-assertions.js';
 import { cliEnvironment } from '../../support/cli-environment.js';
-import { withIntegrationFixture, type IntegrationFixtureOptions } from '../../support/integration-fixture.js';
+import { withCliFixture, type IntegrationFixtureOptions } from '../../support/cli-fixture.js';
 import { codexAssistantMessage, codexExecCommandCall } from '../../support/fake-codex-model.js';
 import { claudeText, claudeToolUse } from '../../support/fake-claude-model.js';
 import { chatCompletionsText, chatCompletionsToolUse } from '../../support/fake-chat-completions-model.js';
@@ -59,14 +60,14 @@ for (const agent of ['claude', 'codex', 'pi', 'opencode']) {
   (agent !== 'opencode' || process.platform === 'linux' ? test : test.skip)(`${agent} start and resume receipts contain only final text, including CLI wait`, async () => {
     const environment = await environmentFor(agent);
     try {
-      await withIntegrationFixture(`${agent}-final-response`, async (fixture) => {
+      await withCliFixture(`${agent}-final-response`, async (fixture) => {
         const chatId = fixture.newChatId();
         for (const mode of ['start', 'resume']) {
           const commentary = `Synthetic ${mode} progress.`;
           const final = `Synthetic ${mode} final part A.\n\nFinal part B.`;
           environment.script(commentary, final);
           const cursor = fixture.client.markEvents();
-          const request = environment.start({ chatId, projectPath: fixture.dirs.project, command: `Synthetic ${mode} task.` });
+          const request = environment.start({ chatId, projectPath: fixture.executionDirs.project, command: `Synthetic ${mode} task.` });
           const accepted = mode === 'start' ? await fixture.client.startChat(request)
             : await fixture.client.runChat({ chatId, command: request.command, images: [],
               clientRequestId: crypto.randomUUID(), clientMessageId: crypto.randomUUID() });
@@ -81,8 +82,7 @@ for (const agent of ['claude', 'codex', 'pi', 'opencode']) {
           expect(transcript).toContain(commentary);
           expect(transcript).toContain(final);
           for (const json of [false, true]) {
-            const child = Bun.spawn(['bun', 'cli/main.ts', '--config-dir', fixture.dirs.config,
-              '--runtime', 'controller',
+            const child = Bun.spawn(['bun', 'cli/main.ts', ...cliConnectionArguments(fixture),
               'wait', chatId, '--turn', accepted.turnId, ...(json ? ['--json'] : [])], {
               cwd: fileURLToPath(new URL('../../..', import.meta.url)), stdout: 'pipe', stderr: 'pipe',
               env: cliEnvironment(),
@@ -103,14 +103,14 @@ for (const agent of ['claude', 'codex', 'pi', 'opencode']) {
   (agent !== 'opencode' || process.platform === 'linux' ? test : test.skip)(`${agent} markup start and resume return finals without commentary`, async () => {
     const environment = await environmentFor(agent);
     try {
-      await withIntegrationFixture(`${agent}-markup-final-response`, async (fixture) => {
+      await withCliFixture(`${agent}-markup-final-response`, async (fixture) => {
         const parent = fixture.newChatId();
         const parentAgent = fixture.directAgents.openAiResponses;
         const parentModel = fixture.fakeProviders.openAiResponses;
         let emission = parentModel.holdNext({ lastUserText: 'Synthetic delegation request.' });
-        const started = environment.start({ chatId: fixture.newChatId(), projectPath: fixture.dirs.project, command: 'Synthetic child task.' });
+        const started = environment.start({ chatId: fixture.newChatId(), projectPath: fixture.executionDirs.project, command: 'Synthetic child task.' });
         await fixture.client.startChat({
-          ...fixture.client.directStartRequest({ chatId: parent, projectPath: fixture.dirs.project,
+          ...fixture.client.directStartRequest({ chatId: parent, projectPath: fixture.executionDirs.project,
             agent: parentAgent, content: 'Synthetic delegation request.' }),
           permissionMode: 'bypassPermissions',
         });
