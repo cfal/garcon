@@ -2194,12 +2194,14 @@ Composer executor and agent selections commit through the promptless
 `POST /api/v1/chats/agent-handoff` command, under a transcript-snapshot
 reservation. Confirmation completes the ownership change without admitting a
 turn or consuming the editable composer draft. Files, Git, and project controls
-follow the committed chat projection immediately. Carryover validation uses a
-null next prompt; the next explicit dispatch plans against its actual input
-budget rather than reusing a prompt-specific deposit. Model-only changes retain
-the existing owner and use the model PATCH command. An uncertain handoff response
-refreshes the authoritative chat projection; it never automatically retries the
-handoff or rolls back ownership.
+follow the committed chat projection immediately. Selection-only changes do not
+plan carryover or invoke compaction; the next explicit dispatch plans against its
+actual input and final target. Switching selections, including switching back,
+must not issue a compaction query. Compaction configuration or generation failures
+are reported on dispatch without reverting the committed target. Model-only changes
+retain the existing owner and use the model PATCH command. An uncertain handoff
+response refreshes the authoritative chat projection; it never automatically
+retries the handoff or rolls back ownership.
 
 ### 12.2 Continuation to a new chat (`/handoff`)
 
