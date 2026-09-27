@@ -1,12 +1,18 @@
 import { describe, expect, it } from 'bun:test';
 import {
   ChatOperationalNoticeMessage,
+  ChatListRefreshRequestedMessage,
   ChatBoardsInvalidatedMessage,
   ChatPreamblesInvalidatedMessage,
   PreamblesInvalidatedMessage,
   parseServerWsMessage,
   TranscriptSearchStatusMessage,
 } from '../ws-events.ts';
+
+it('round-trips execution settings invalidations', () => {
+  const event = new ChatListRefreshRequestedMessage('execution-settings-updated', '1783725900000200');
+  expect(parseServerWsMessage(JSON.parse(JSON.stringify(event)))).toEqual(event);
+});
 
 describe('parseServerWsMessage chat-boards-invalidated', () => {
   it('round-trips only canonical revisions and closed reasons', () => {

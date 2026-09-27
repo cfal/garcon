@@ -41,7 +41,9 @@ function makeService(thinkingMode = 'high') {
     }),
     resolveEndpointReference: () => null,
   };
+  const onCommitted = mock(() => undefined);
   const service = new AgentSessionSettingsService({
+    onCommitted,
     registry: {
       getChat: () => entry,
       updateChat,
@@ -49,10 +51,26 @@ function makeService(thinkingMode = 'high') {
     directory: { require: () => integration },
     endpointResolver,
   });
-  return { service, updateChat, entry, integration, endpointResolver };
+  return { service, updateChat, entry, integration, endpointResolver, onCommitted };
 }
 
 describe('AgentSessionSettingsService', () => {
+  it('publishes settings only after their durable write succeeds', async () => {
+    const { service, updateChat, entry, onCommitted } = makeService('none');
+    const saved = Promise.withResolvers();
+    updateChat.mockImplementationOnce(() => saved.promise);
+    const updating = service.updateSessionSettings('chat-1', { model: 'new-model' });
+    await Promise.resolve();
+    expect(onCommitted).not.toHaveBeenCalled();
+    saved.resolve({ ...entry, model: 'new-model' });
+    await updating;
+    expect(updateChat).toHaveBeenCalledWith('chat-1', expect.any(Object), { flush: true });
+    expect(onCommitted.mock.calls).toEqual([['chat-1']]);
+    onCommitted.mockClear();
+    updateChat.mockRejectedValueOnce(new Error('disk full'));
+    await expect(service.updateSessionSettings('chat-1', { model: 'another' })).rejects.toThrow('disk full');
+    expect(onCommitted).not.toHaveBeenCalled();
+  });
   it('rejects settings from a superseded owner before touching the integration or registry', async () => {
     const { service, entry, integration, updateChat } = makeService();
     entry.agentOwnershipEpoch = 'current-owner';

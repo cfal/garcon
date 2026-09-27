@@ -1257,6 +1257,24 @@ describe('server event wiring', () => {
     expect(fixture.searchIndex.catalogMayHaveChanged).toHaveBeenCalledWith('chat-1');
   });
 
+  it('orders settings invalidation after pending transcript publication and skips deleted chats', async () => {
+    const fixture = createFixture();
+    fixture.agent.transcript(providerCommit());
+    fixture.wiring.notifyChatSettingsUpdated('chat-1');
+    await fixture.wiring.waitForIdle();
+    expect(fixture.published.map((event) => event.type)).toEqual([
+      'chat-messages', 'chat-list-refresh-requested',
+    ]);
+    expect(fixture.published.at(-1)).toMatchObject({
+      reason: 'execution-settings-updated', chatId: 'chat-1',
+    });
+    expect(fixture.searchIndex.catalogMayHaveChanged).toHaveBeenCalledWith('chat-1');
+    fixture.removeChat();
+    fixture.wiring.notifyChatSettingsUpdated('chat-1');
+    await fixture.wiring.waitForIdle();
+    expect(fixture.published).toHaveLength(2);
+  });
+
   it('deletes derived state and skips queued lifecycle broadcasts after removal', async () => {
     const fixture = createFixture();
     fixture.removeChat();

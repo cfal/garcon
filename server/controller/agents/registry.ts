@@ -206,6 +206,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     getCarryOverRevision(entry: AgentChatEntry): string;
     createCarriedContext(input: CreateCarriedContextInput): Promise<CarryOverOutcome>;
     onCarryOverChanged?: (chatId: string) => void | Promise<void>;
+    onSettingsCommitted?: (chatId: string) => void;
     chatMutationLock?: KeyedPromiseLock;
     ledger: TranscriptLedgerService;
     adoption: TranscriptAdoptionService;
@@ -244,6 +245,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
       directory: this.#directory,
       endpointResolver: args.endpointResolver,
       chatMutationLock: args.chatMutationLock,
+      onCommitted: args.onSettingsCommitted,
     });
     this.#ledger.subscribeSessionCommitted((event) => {
       this.#registry.updateChat(event.chatId, {

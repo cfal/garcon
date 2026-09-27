@@ -33,6 +33,7 @@ export class AgentSessionSettingsService {
     directory: AgentDirectory;
     endpointResolver: ApiProviderEndpointResolver;
     chatMutationLock?: KeyedPromiseLock;
+    onCommitted?: (chatId: string) => void;
   }) {
     this.#lock = deps.chatMutationLock ?? new KeyedPromiseLock();
   }
@@ -152,6 +153,7 @@ export class AgentSessionSettingsService {
         },
       }, { flush: true });
       if (!updated) throw new Error(`Session not found: ${chatId}`);
+      this.deps.onCommitted?.(chatId);
       return updated;
     });
   }

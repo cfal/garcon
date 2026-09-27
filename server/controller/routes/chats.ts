@@ -1186,7 +1186,6 @@ export default function createChatRoutes({
       const updated = hasPatch
         ? await agents.updateSessionSettings(chatId, patch, expectedEpoch)
         : chat;
-      if (hasPatch) searchIndex?.catalogMayHaveChanged(chatId);
       return Response.json({
         success: true,
         chatId,
@@ -1215,7 +1214,6 @@ export default function createChatRoutes({
       if (modelProtocol !== undefined)
         patch.modelProtocol = modelProtocol as AgentSessionSettingsPatch['modelProtocol'];
       await agents.updateSessionSettings(chatId, patch, expectedEpoch);
-      searchIndex?.catalogMayHaveChanged(chatId);
       return Response.json({ success: true, chatId, ...patch });
     } catch (error: unknown) {
       return chatSettingsPatchErrorResponse(error);

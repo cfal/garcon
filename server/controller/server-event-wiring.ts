@@ -108,6 +108,7 @@ export interface ServerEventWiringDeps {
 
 export interface ServerEventWiring {
   notifyAgentHandoff(chatId: string): void;
+  notifyChatSettingsUpdated(chatId: string): void;
   notifyTranscriptCompositionChanged(chatId: string): void;
   notifyOperationalNotice(
     chatId: string,
@@ -210,6 +211,14 @@ export function wireServerEvents({
   function notifyTranscriptCompositionChanged(chatId: string): void {
     if (!chatExists(chatId)) return;
     markSearchCatalogDirty(chatId);
+  }
+
+  function notifyChatSettingsUpdated(chatId: string): void {
+    scheduleChatTask(chatId, 'server-events: chat settings invalidation failed', () => {
+      if (!chatExists(chatId)) return;
+      markSearchCatalogDirty(chatId);
+      broadcast(new ChatListRefreshRequestedMessage('execution-settings-updated', chatId));
+    });
   }
 
   // Notices are process-only feed overlays; they never enter the transcript
@@ -676,6 +685,7 @@ export function wireServerEvents({
 
   return {
     notifyAgentHandoff,
+    notifyChatSettingsUpdated,
     notifyTranscriptCompositionChanged,
     notifyOperationalNotice,
     notifyChatPreamblesInvalidated,

@@ -411,6 +411,7 @@ export async function startServer(): Promise<void> {
     });
 
     agentRegistry = new AgentRegistry({
+      onSettingsCommitted: (chatId) => eventWiring?.notifyChatSettingsUpdated(chatId),
       resolveFileMentions,
       registry: chatRegistry,
       integrations: integrationRegistry,
