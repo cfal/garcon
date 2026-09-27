@@ -15,6 +15,7 @@
 	import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
 	import type { ProjectTarget } from '$shared/project-resolution';
 	import ProjectSurfaceGate from '$lib/components/workspace/ProjectSurfaceGate.svelte';
+	import ExecutorServiceNotice from '$lib/components/workspace/ExecutorServiceNotice.svelte';
 	import { filePathRelativeToTreeRoot } from '$lib/files/tree/file-tree-path.js';
 	import Download from '@lucide/svelte/icons/download';
 	import { Button } from '$lib/components/ui/button';
@@ -99,15 +100,12 @@
 
 {#snippet contentGate(contents: Snippet)}
 	{#if controller.browsingExecutor}
-		{#if executors.filesAvailable(tree.executorId)}
-			{@render contents()}
-		{:else}
-			<div
-				class="grid h-full place-items-center px-6 text-center text-sm text-muted-foreground"
-				role="status"
-			>
-				Files unavailable on {executors.label(tree.executorId)}.
+		{#if controller.serviceNotice}
+			<div class="grid h-full place-items-center px-6 text-sm">
+				<ExecutorServiceNotice notice={controller.serviceNotice} />
 			</div>
+		{:else}
+			{@render contents()}
 		{/if}
 	{:else}
 		<ProjectSurfaceGate
@@ -115,6 +113,7 @@
 			{target}
 			retainedProjectPath={tree.projectPath}
 			retainedEffectiveProjectKey={tree.effectiveProjectKey}
+			serviceNotice={controller.serviceNotice}
 			onChooseFolder={onChooseProjectFolder}
 		>
 			<div class="flex h-full min-h-0 flex-col">{@render contents()}</div>

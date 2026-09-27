@@ -38,6 +38,12 @@ async function showGitDiff(fixture: E2eFixture): Promise<void> {
   }, {}, GIT_PANEL);
 }
 
+async function waitForGitExecutorOutage(fixture: E2eFixture): Promise<void> {
+  await fixture.page.waitForFunction(() => [...document.querySelectorAll(
+    '[data-workspace-surface-id^="singleton:git"] [data-executor-service-notice="executor-unavailable"]',
+  )].some(notice => notice.textContent?.includes('Integration worker is unavailable.')));
+}
+
 async function waitForDiff(fixture: E2eFixture, text: string): Promise<void> {
   await fixture.page.waitForFunction((selector, expected) => {
     const panel = document.querySelector(selector);
@@ -134,7 +140,7 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
       await app.clickButton('Drop');
       await app.waitForButton('Confirm');
       await client.patch(`/api/v1/executors/${client.executorId}`, { enabled: false });
-      await app.waitForText('Git is unavailable on this executor.');
+      await waitForGitExecutorOutage(fixture);
       await runFixtureGit(project, 'stash', 'push', '-m', 'Replacement synthetic stash');
       await writeFile(join(project, 'example.txt'), 'Replacement working content\n');
       await client.patch(`/api/v1/executors/${client.executorId}`, { enabled: true });
@@ -146,7 +152,7 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
       await fixture.page.$eval(`${GIT_PANEL} button[title="Discard changes"]`, element => (element as HTMLButtonElement).click());
       await fixture.page.waitForSelector('[role="dialog"]');
       await client.patch(`/api/v1/executors/${client.executorId}`, { enabled: false });
-      await app.waitForText('Git is unavailable on this executor.');
+      await waitForGitExecutorOutage(fixture);
       await runFixtureGit(project, 'rm', '--cached', 'example.txt');
       await client.patch(`/api/v1/executors/${client.executorId}`, { enabled: true });
       await fixture.page.waitForFunction(selector => document.querySelector(
@@ -163,7 +169,7 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
       await app.clickButton('Revert');
       await fixture.page.waitForSelector('[role="dialog"]');
       await client.patch(`/api/v1/executors/${client.executorId}`, { enabled: false });
-      await app.waitForText('Git is unavailable on this executor.');
+      await waitForGitExecutorOutage(fixture);
       await runFixtureGit(project, 'add', '--all');
       await runFixtureGit(project, 'commit', '-m', 'Replacement synthetic commit');
       await client.patch(`/api/v1/executors/${client.executorId}`, { enabled: true });
@@ -231,7 +237,7 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
       expect(await runFixtureGit(dirs.project, 'show', ':example.txt')).toBe('initial\n');
 
       await client.patch(`/api/v1/executors/${client.executorId}`, { enabled: false });
-      await app.waitForText('Git is unavailable on this executor.');
+      await waitForGitExecutorOutage(fixture);
       expect(await fixture.page.$eval(GIT_PANEL, panel =>
         panel.querySelector<HTMLElement>('[aria-busy="true"] > [aria-hidden="true"]')?.inert,
       )).toBe(true);

@@ -4,6 +4,7 @@
 	import { setProjectResolution } from '$lib/context';
 	import { ProjectResolutionStore } from '$lib/workspace/project-resolution-store.svelte.js';
 	import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
+	import type { ExecutorServiceNotice } from '$lib/executors/executor-service-notice.js';
 	import type { ProjectTarget } from '$shared/project-resolution';
 
 	let {
@@ -11,6 +12,7 @@
 		retainedProjectPath,
 		retainedEffectiveProjectKey,
 		target = null,
+		serviceNotice = null,
 		onChooseFolder,
 		fetchResolution,
 	}: {
@@ -18,6 +20,7 @@
 		retainedProjectPath: string | null;
 		retainedEffectiveProjectKey: string | null;
 		target?: ProjectTarget | null;
+		serviceNotice?: ExecutorServiceNotice | null;
 		onChooseFolder?: () => void;
 		fetchResolution?: ConstructorParameters<typeof ProjectResolutionStore>[0];
 	} = $props();
@@ -36,6 +39,7 @@
 	{retainedProjectPath}
 	{retainedEffectiveProjectKey}
 	{target}
+	{serviceNotice}
 	{onChooseFolder}
 >
 	<button type="button">Project action</button>

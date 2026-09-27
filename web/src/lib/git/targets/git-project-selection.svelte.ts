@@ -3,6 +3,10 @@ import type { GitProjectTarget } from '$shared/git-execution';
 import type { ProjectUnavailableReason } from '$shared/project-resolution';
 import type { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
 import {
+	resolveExecutorServiceNotice,
+	type ExecutorServiceNotice,
+} from '$lib/executors/executor-service-notice.js';
+import {
 	ProjectResolutionStore,
 	type ProjectResolutionLease,
 	type ProjectResolutionSnapshot,
@@ -22,7 +26,17 @@ export type GitProjectState =
 
 export interface GitProjectSelectionDeps {
 	projectResolution: Pick<ProjectResolutionStore, 'retain'>;
-	executors?: Pick<ExecutorsStore, 'gitAvailable' | 'gitContextKey' | 'onChanged'>;
+	executors?: Pick<
+		ExecutorsStore,
+		| 'gitAvailable'
+		| 'filesAvailable'
+		| 'gitContextKey'
+		| 'onChanged'
+		| 'isReady'
+		| 'hasSnapshot'
+		| 'get'
+		| 'label'
+	>;
 	projectBasePath(executorId: string): string | null;
 }
 
@@ -73,6 +87,10 @@ export class GitProjectSelectionController {
 	}
 	get canGoToChatProject(): boolean {
 		return this.#chatProjectState.kind === 'available';
+	}
+	get serviceNotice(): ExecutorServiceNotice | null {
+		if (this.projectState.kind === 'absent' || !this.#deps.executors) return null;
+		return resolveExecutorServiceNotice(this.#deps.executors, this.executorId, 'git');
 	}
 
 	setProjectState(project: WorkspaceProjectState): void {

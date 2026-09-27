@@ -188,4 +188,16 @@ describe('Git project selection', () => {
 		await selection.selectExecutor('local');
 		expect(selection.executorId).toBe('local');
 	});
+
+	it('describes executor outages for the selected executor rather than the folder', async () => {
+		const { selection, executors, remote } = setup();
+		expect(selection.serviceNotice).toBeNull();
+		await selection.selectExecutor(remote.id);
+		executors.applySnapshot([localExecutor, { ...remote, availability: 'offline' }]);
+		expect(selection.serviceNotice).toEqual({ kind: 'executor-unavailable', executorLabel: 'Worker' });
+		executors.applySnapshot([localExecutor]);
+		expect(selection.serviceNotice).toEqual({ kind: 'executor-removed', executorId: remote.id });
+		selection.goToChatProject();
+		expect(selection.serviceNotice).toBeNull();
+	});
 });

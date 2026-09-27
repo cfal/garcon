@@ -22,6 +22,15 @@ import { untrack } from 'svelte';
 import { effectiveExecutorId } from '$shared/executors';
 import { filePathRelativeToTreeRoot } from '$lib/files/tree/file-tree-path.js';
 import type { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
+import {
+	resolveExecutorServiceNotice,
+	type ExecutorServiceNotice,
+} from '$lib/executors/executor-service-notice.js';
+
+type FilesExecutorsPort = Pick<
+	ExecutorsStore,
+	'filesAvailable' | 'gitAvailable' | 'pathContextKey' | 'isReady' | 'hasSnapshot' | 'get' | 'label'
+>;
 
 export interface SingletonSurfaceRegistryDeps extends GitSurfaceControllerDeps {
 	createCommit(): CommitController;
@@ -29,7 +38,7 @@ export interface SingletonSurfaceRegistryDeps extends GitSurfaceControllerDeps {
 	comparisonPreferences: GitComparisonPreferences;
 	createChatBoard?(): ChatBoardController;
 	createTickets?(): TicketsController;
-	executors?: Pick<ExecutorsStore, 'filesAvailable' | 'pathContextKey'>;
+	executors?: FilesExecutorsPort;
 }
 
 export class FilesSurfaceController implements PortableSingletonController {
@@ -44,9 +53,7 @@ export class FilesSurfaceController implements PortableSingletonController {
 		relativePath: string;
 	} | null>(null);
 
-	constructor(
-		private readonly executors?: Pick<ExecutorsStore, 'filesAvailable' | 'pathContextKey'>,
-	) {
+	constructor(private readonly executors?: FilesExecutorsPort) {
 		let previous: { executorId: string; key: string } | null = null;
 		$effect(() => {
 			const executorId = this.tree.executorId;
@@ -84,6 +91,12 @@ export class FilesSurfaceController implements PortableSingletonController {
 
 	get canGoToChatProject(): boolean {
 		return this.#projectState.kind === 'available';
+	}
+
+	get serviceNotice(): ExecutorServiceNotice | null {
+		return this.executors
+			? resolveExecutorServiceNotice(this.executors, this.tree.executorId, 'files')
+			: null;
 	}
 
 	selectExecutor(executorId: string): void {

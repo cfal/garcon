@@ -4,6 +4,8 @@
 	import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
 	import { getProjectResolution } from '$lib/context';
 	import type { ProjectTarget } from '$shared/project-resolution';
+	import type { ExecutorServiceNotice as ExecutorServiceNoticeState } from '$lib/executors/executor-service-notice.js';
+	import ExecutorServiceNotice from './ExecutorServiceNotice.svelte';
 	import ProjectAvailabilityNotice from './ProjectAvailabilityNotice.svelte';
 
 	let {
@@ -12,6 +14,7 @@
 		retainedEffectiveProjectKey,
 		retainedExecutorId,
 		target,
+		serviceNotice = null,
 		onChooseFolder,
 		children,
 	}: {
@@ -20,6 +23,7 @@
 		retainedEffectiveProjectKey: string | null;
 		retainedExecutorId?: string;
 		target: ProjectTarget | null;
+		serviceNotice?: ExecutorServiceNoticeState | null;
 		onChooseFolder?: () => void;
 		children: Snippet;
 	} = $props();
@@ -62,7 +66,11 @@
 	>
 		{@render children()}
 	</div>
-	{#if concealed && (projectState.kind === 'unchecked' || projectState.kind === 'resolving')}
+	{#if concealed && serviceNotice && projectState.kind !== 'available'}
+		<div class="absolute inset-0 grid place-items-center bg-background px-6">
+			<ExecutorServiceNotice notice={serviceNotice} />
+		</div>
+	{:else if concealed && (projectState.kind === 'unchecked' || projectState.kind === 'resolving')}
 		<div
 			class="absolute inset-0 grid place-items-center bg-background px-6 text-center text-sm text-muted-foreground"
 			role="status"

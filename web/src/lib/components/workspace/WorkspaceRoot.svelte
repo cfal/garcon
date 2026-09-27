@@ -526,7 +526,8 @@
 			{menu}
 			selectedChat={chat}
 			canReload={chat.canReloadFromNativeHistory ?? false}
-			canUpdateProjectPath={chatCatalog.supportsUpdateProjectPath(chat.agentId)}
+			canUpdateProjectPath={executors.isReady(chat.executorId) &&
+				chatCatalog.supportsUpdateProjectPath(chat.agentId)}
 			canFork={supportsFork}
 			canForkNow={canUseForkAction({
 				supportsFork,

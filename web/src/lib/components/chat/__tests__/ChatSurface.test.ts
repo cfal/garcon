@@ -40,7 +40,7 @@ vi.mock('$lib/context', () => ({
 	getOptionalTransientLayers: () => null,
 	getWorkspaceCoordinator: () => workspace,
 	getGhCapability: () => ({ forExecutor: () => ghCapability }),
-	getExecutors: () => ({ gitAvailable: () => true, ghAvailable: () => true }),
+	getExecutors: () => ({ gitAvailable: () => true, ghAvailable: () => true, isReady: () => true }),
 	getGitViewLauncher: () => ({
 		openHistory: vi.fn(),
 		openCompare: vi.fn(),

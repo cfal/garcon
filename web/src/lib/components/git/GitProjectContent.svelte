@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import type { GitProjectSelectionController } from '$lib/git/targets/git-project-selection.svelte.js';
+	import ExecutorServiceNotice from '$lib/components/workspace/ExecutorServiceNotice.svelte';
 	import ProjectAvailabilityNotice from '$lib/components/workspace/ProjectAvailabilityNotice.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 
@@ -15,6 +16,7 @@
 	} = $props();
 	const project = $derived(selection.projectState);
 	const blocked = $derived(project.kind !== 'available' || !ready);
+	const serviceNotice = $derived(project.kind === 'available' ? null : selection.serviceNotice);
 </script>
 
 <div class="relative min-h-0 min-w-0 flex-1" aria-busy={blocked} data-git-project-content>
@@ -30,7 +32,9 @@
 		<div
 			class="absolute inset-0 grid place-items-center overflow-auto bg-background p-4 text-center text-sm text-muted-foreground"
 		>
-			{#if project.kind === 'unavailable'}
+			{#if serviceNotice}
+				<ExecutorServiceNotice notice={serviceNotice} />
+			{:else if project.kind === 'unavailable'}
 				<ProjectAvailabilityNotice
 					projectPath={project.context.projectPath}
 					reason={project.reason}

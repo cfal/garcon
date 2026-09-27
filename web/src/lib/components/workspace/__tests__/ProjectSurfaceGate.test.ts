@@ -60,6 +60,26 @@ describe('ProjectSurfaceGate', () => {
 		expect(container.firstElementChild?.getAttribute('aria-busy')).toBe('false');
 	});
 
+	it('reports an executor outage instead of folder recovery actions', () => {
+		const onChooseFolder = vi.fn();
+		render(ProjectSurfaceGateTestHost, {
+			...retained,
+			onChooseFolder,
+			serviceNotice: { kind: 'executor-unavailable', executorLabel: 'Worker' },
+			projectState: {
+				kind: 'request-failed',
+				context: { chatId: 'chat', executorId: 'worker', projectPath: '/project' },
+				message: 'Files are unavailable on this executor.',
+			},
+		});
+
+		expect(screen.getByText('Executor unavailable')).toBeTruthy();
+		expect(screen.getByText('Worker is unavailable.')).toBeTruthy();
+		expect(screen.queryByText('Project folder unavailable')).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Choose folder' })).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+	});
+
 	it('shows actionable unavailable feedback and retries the explicit target', async () => {
 		const target = { kind: 'path' as const, projectPath: '/missing-project' };
 		const fetchResolution = vi.fn(async (_target: ProjectTarget) => ({

@@ -88,7 +88,9 @@ test('selected PR detail refreshes after project recovery precedes GitHub capabi
       window.__pullRequestRecovery.replacement = true;
     });
     await client.patch(`/api/v1/executors/${client.executorId}`, { enabled: false });
-    await app.waitForText('Git is unavailable on this executor.');
+    await fixture.page.waitForFunction(() => document.querySelector(
+      '[data-workspace-surface-id="singleton:pull-requests"] [data-executor-service-notice="executor-unavailable"]',
+    )?.textContent?.includes('Integration worker is unavailable.') === true);
     await client.patch(`/api/v1/executors/${client.executorId}`, { enabled: true });
     await fixture.page.waitForFunction(() => window.__pullRequestRecovery.releaseCapability !== null);
     await app.waitForText('Checking pull request availability...');

@@ -34,7 +34,7 @@ test('executor Git labels and GitHub host controls fit desktop and mobile', asyn
     await page.screenshot({ path: join(artifacts, 'executor-git-desktop.png') });
 
     await client.patch(`/api/v1/executors/${client.executorId}`, { enabled: false });
-    await panel.getByText('Git is unavailable on this executor.', { exact: true }).waitFor();
+    await panel.getByText(`${label} is unavailable.`, { exact: true }).waitFor();
     expect(await panel.locator('[aria-busy="true"] > [aria-hidden="true"]').evaluate(element =>
       (element as HTMLElement).inert && element.hasAttribute('inert'),
     )).toBe(true);

@@ -1,11 +1,14 @@
 import type { ProjectTarget, ProjectUnavailableReason } from '$shared/project-resolution';
 import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte.js';
 import type { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
+import {
+	resolveExecutorAvailabilityNotice,
+	type ExecutorAvailabilityNotice,
+} from '$lib/executors/executor-service-notice.js';
 import type { ProjectResolutionSnapshot } from '$lib/workspace/project-resolution-store.svelte.js';
 
 export type ComposerAvailabilityNotice =
-	| { readonly kind: 'executor-removed'; readonly executorId: string }
-	| { readonly kind: 'executor-unavailable'; readonly executorLabel: string }
+	| ExecutorAvailabilityNotice
 	| {
 			readonly kind: 'project-unavailable';
 			readonly projectPath: string;
@@ -30,11 +33,8 @@ export function resolveComposerAvailabilityNotice(
 	input: ComposerAvailabilityInput,
 ): ComposerAvailabilityNotice | null {
 	const { executorId, executors, projectTarget, projectResolution, catalog } = input;
-	if (!executors.isReady(executorId)) {
-		return executors.hasSnapshot && !executors.get(executorId)
-			? { kind: 'executor-removed', executorId }
-			: { kind: 'executor-unavailable', executorLabel: executors.label(executorId) };
-	}
+	const executorNotice = resolveExecutorAvailabilityNotice(executors, executorId);
+	if (executorNotice) return executorNotice;
 	if (projectTarget && projectResolution.kind === 'unavailable') {
 		return {
 			kind: 'project-unavailable',

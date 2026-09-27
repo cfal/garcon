@@ -54,7 +54,7 @@ test('uncertain push reports its captured executor after disconnection without r
       await dispatched.promise;
       phase('disconnect after side effect');
       await client.patch(`/api/v1/executors/${client.executorId}`, { enabled: false });
-      await panel.getByText('Git is unavailable on this executor.', { exact: true }).waitFor();
+      await panel.getByText('Integration worker is unavailable.', { exact: true }).waitFor();
       release.resolve();
       await page.getByText(`Integration worker: ${project}: Push outcome unknown; inspect the remote.`, { exact: true }).waitFor();
       expect(calls).toBe(1);
@@ -104,7 +104,7 @@ test('worktree creation blocks Refresh and reports uncertainty after dialog disc
       expect(lists).toBe(count);
       phase('disconnect after worktree creation');
       await client.patch(`/api/v1/executors/${client.executorId}`, { enabled: false });
-      await panel.getByText('Git is unavailable on this executor.', { exact: true }).waitFor();
+      await panel.getByText('Integration worker is unavailable.', { exact: true }).waitFor();
       release.resolve();
       await page.getByText(`Integration worker: ${project}: Worktree outcome unknown; inspect the repository.`, { exact: true }).waitFor();
       expect(calls).toBe(1);
