@@ -8,6 +8,7 @@ import {
 import type { AgentSettingDescriptor } from '$shared/agent-integration';
 import type { JsonObject, JsonValue } from '$shared/json';
 import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
+import type { ChatSessionRecord } from '$lib/types/chat-session';
 import type {
 	AgentSwitchSelection,
 	ConversationAgentSwitchService,
@@ -54,8 +55,27 @@ export interface ConversationSettingsControllerOptions {
 	get agentSwitch(): Pick<ConversationAgentSwitchService, 'switchAgent'>;
 }
 
+type SettingsPatch = Partial<
+	Pick<
+		ChatSessionRecord,
+		| 'model'
+		| 'apiProviderId'
+		| 'modelEndpointId'
+		| 'modelProtocol'
+		| 'permissionMode'
+		| 'thinkingMode'
+		| 'agentSettings'
+	>
+>;
+
+interface SettingMutation {
+	epoch: string | undefined;
+	confirmed: SettingsPatch;
+	latest: symbol;
+}
+
 export class ConversationSettingsController {
-	#pendingMutations = new Map<string, symbol>();
+	#pendingMutations = new Map<string, SettingMutation>();
 	#pendingRequests = new Map<string, Promise<boolean>>();
 
 	constructor(private readonly options: ConversationSettingsControllerOptions) {}
@@ -89,20 +109,96 @@ export class ConversationSettingsController {
 		});
 	}
 
-	#beginMutation(chatId: string, setting: string) {
+	#changeSetting(
+		chatId: string,
+		setting: 'model' | 'permissionMode' | 'thinkingMode' | 'agentSettings',
+		patch: SettingsPatch,
+		request: (epoch: string | undefined) => Promise<SettingsPatch>,
+		failureMessage: (detail: string) => string,
+	): void {
+		const { sessions, chatState } = this.options;
+		const chat = sessions.byId[chatId];
+		if (!chat) return;
 		const key = `${chatId}:${setting}`;
-		const mutation = Symbol(key);
-		const epoch = this.options.sessions.byId[chatId]?.agentOwnershipEpoch ?? undefined;
+		const epoch = chat.agentOwnershipEpoch ?? undefined;
+		const previous = this.#pendingMutations.get(key);
+		const token = Symbol(key);
+		const mutation =
+			previous && previous.epoch === epoch
+				? previous
+				: {
+						epoch,
+						confirmed: this.#readPatch(chat, patch),
+						latest: token,
+					};
+		mutation.latest = token;
 		this.#pendingMutations.set(key, mutation);
-		return {
-			epoch,
-			isCurrent: () =>
-				this.#pendingMutations.get(key) === mutation &&
-				this.options.sessions.byId[chatId]?.agentOwnershipEpoch === epoch,
-			finish: () => {
-				if (this.#pendingMutations.get(key) === mutation) this.#pendingMutations.delete(key);
-			},
-		};
+		const isCurrent = () =>
+			this.#pendingMutations.get(key) === mutation &&
+			mutation.latest === token &&
+			!!sessions.byId[chatId] &&
+			sessions.byId[chatId].agentOwnershipEpoch === epoch;
+		this.#applyPatch(chatId, patch);
+		this.#send(chatId, async () => {
+			try {
+				// Superseded successes still advance the rollback baseline for the next request.
+				mutation.confirmed = await request(epoch);
+				if (isCurrent()) this.#applyPatch(chatId, mutation.confirmed);
+			} catch (error) {
+				if (isCurrent()) {
+					this.#applyPatch(chatId, mutation.confirmed);
+					chatState.appendLocalNoticeForChat(chatId, 'error', failureMessage(errorDetail(error)));
+				}
+				throw error;
+			} finally {
+				try {
+					if (isCurrent()) {
+						// A lost reply may follow a durable write, so rollback alone is not authority.
+						await sessions.quietRefreshChats();
+						if (isCurrent())
+							this.#applyPatch(chatId, this.#readPatch(sessions.byId[chatId], patch));
+					}
+				} finally {
+					if (this.#pendingMutations.get(key) === mutation && mutation.latest === token) {
+						this.#pendingMutations.delete(key);
+					}
+				}
+			}
+		});
+	}
+
+	#readPatch(chat: ChatSessionRecord, fields: SettingsPatch): SettingsPatch {
+		return Object.fromEntries(
+			Object.keys(fields).map((key) => [key, chat[key as keyof SettingsPatch]]),
+		);
+	}
+
+	#applyPatch(chatId: string, patch: SettingsPatch): void {
+		const { sessions, agentState, modelCatalog } = this.options;
+		sessions.patchChat(chatId, patch);
+		if (sessions.selectedChatId !== chatId) return;
+		if ('model' in patch)
+			agentState.setModelSelection({
+				model: modelCatalog.selectionValueFor(
+					agentState.agentId,
+					patch.model ?? '',
+					patch.modelEndpointId,
+				),
+				apiProviderId: patch.apiProviderId ?? null,
+				modelEndpointId: patch.modelEndpointId ?? null,
+				modelProtocol: patch.modelProtocol ?? null,
+			});
+		if ('permissionMode' in patch)
+			agentState.permissionMode = normalizeSupportedPermissionMode(
+				patch.permissionMode,
+				modelCatalog.getPermissionModes(agentState.agentId),
+			);
+		if ('thinkingMode' in patch)
+			agentState.thinkingMode = normalizeSupportedThinkingMode(
+				patch.thinkingMode,
+				modelCatalog.getThinkingModes(agentState.agentId),
+			);
+		if (patch.agentSettings) agentState.setAgentSettings(patch.agentSettings);
 	}
 
 	handleModelSelectionChange(next: AgentSwitchSelection): void {
@@ -170,63 +266,29 @@ export class ConversationSettingsController {
 			return;
 		}
 
-		const previousModel = sessions.selectedChat?.model ?? agentState.model;
-		const previousApiProviderId = sessions.selectedChat?.apiProviderId ?? agentState.apiProviderId;
-		const previousEndpointId = sessions.selectedChat?.modelEndpointId ?? agentState.modelEndpointId;
-		const previousProtocol = sessions.selectedChat?.modelProtocol ?? agentState.modelProtocol;
-		agentState.setModelSelection({
-			model,
-			apiProviderId: selection.apiProviderId,
-			modelEndpointId: selection.modelEndpointId,
-			modelProtocol: selection.modelProtocol,
-		});
-		const mutation = this.#beginMutation(chatId, 'model');
-		this.#send(chatId, () =>
-			updateChatModel({
-				chatId,
-				expectedAgentOwnershipEpoch: mutation.epoch,
-				model: selection.model,
-				apiProviderId: selection.apiProviderId,
-				modelEndpointId: selection.modelEndpointId,
-				modelProtocol: selection.modelProtocol,
-			})
-				.then(async () => {
-					if (mutation.isCurrent()) await sessions.quietRefreshChats();
-				})
-				.catch((error) => {
-					if (!mutation.isCurrent()) return;
-					if (sessions.selectedChatId === chatId)
-						agentState.setModelSelection({
-							model: modelCatalog.selectionValueFor(agentId, previousModel, previousEndpointId),
-							apiProviderId: previousApiProviderId ?? null,
-							modelEndpointId: previousEndpointId ?? null,
-							modelProtocol: previousProtocol ?? null,
-						});
-					sessions.patchChat(chatId, {
-						model: previousModel,
-						apiProviderId: previousApiProviderId ?? null,
-						modelEndpointId: previousEndpointId ?? null,
-						modelProtocol: previousProtocol ?? null,
-					});
-					chatState.appendLocalNoticeForChat(
-						chatId,
-						'error',
-						m.chat_notice_failed_update_model({ detail: errorDetail(error) }),
-					);
-					throw error;
-				})
-				.finally(mutation.finish),
+		this.#changeSetting(
+			chatId,
+			'model',
+			selection,
+			async (epoch) => {
+				const response = await updateChatModel({
+					chatId,
+					expectedAgentOwnershipEpoch: epoch,
+					...selection,
+				});
+				return {
+					model: response.model,
+					apiProviderId: response.apiProviderId ?? null,
+					modelEndpointId: response.modelEndpointId ?? null,
+					modelProtocol: response.modelProtocol ?? null,
+				};
+			},
+			(detail) => m.chat_notice_failed_update_model({ detail }),
 		);
-		sessions.patchChat(chatId, {
-			model: selection.model,
-			apiProviderId: selection.apiProviderId,
-			modelEndpointId: selection.modelEndpointId,
-			modelProtocol: selection.modelProtocol,
-		});
 	}
 
 	handlePermissionModeChange(mode: PermissionMode): void {
-		const { sessions, agentState, modelCatalog, chatState } = this.options;
+		const { sessions } = this.options;
 		const chatId = sessions.selectedChatId;
 		if (!chatId) return;
 		if (sessions.isDraft(chatId)) {
@@ -234,38 +296,24 @@ export class ConversationSettingsController {
 			sessions.patchChat(chatId, { permissionMode: mode });
 			return;
 		}
-		const previous = normalizeSupportedPermissionMode(
-			sessions.selectedChat?.permissionMode,
-			modelCatalog.getPermissionModes(agentState.agentId),
-		);
-		sessions.patchChat(chatId, { permissionMode: mode });
-		const mutation = this.#beginMutation(chatId, 'permission');
-		this.#send(chatId, () =>
-			updateExecutionSettings({
-				chatId,
-				permissionMode: mode,
-				expectedAgentOwnershipEpoch: mutation.epoch,
-			})
-				.then(async () => {
-					if (mutation.isCurrent()) await sessions.quietRefreshChats();
-				})
-				.catch((error) => {
-					if (!mutation.isCurrent()) return;
-					if (sessions.selectedChatId === chatId) agentState.permissionMode = previous;
-					sessions.patchChat(chatId, { permissionMode: previous });
-					chatState.appendLocalNoticeForChat(
-						chatId,
-						'error',
-						m.chat_notice_failed_update_permission_mode({ detail: errorDetail(error) }),
-					);
-					throw error;
-				})
-				.finally(mutation.finish),
+		this.#changeSetting(
+			chatId,
+			'permissionMode',
+			{ permissionMode: mode },
+			async (epoch) => {
+				const response = await updateExecutionSettings({
+					chatId,
+					permissionMode: mode,
+					expectedAgentOwnershipEpoch: epoch,
+				});
+				return { permissionMode: response.permissionMode ?? mode };
+			},
+			(detail) => m.chat_notice_failed_update_permission_mode({ detail }),
 		);
 	}
 
 	handleThinkingModeChange(mode: ThinkingMode): void {
-		const { sessions, agentState, modelCatalog, chatState } = this.options;
+		const { sessions } = this.options;
 		const chatId = sessions.selectedChatId;
 		if (!chatId) return;
 		if (sessions.isDraft(chatId)) {
@@ -273,80 +321,49 @@ export class ConversationSettingsController {
 			sessions.patchChat(chatId, { thinkingMode: mode });
 			return;
 		}
-		const previous = normalizeSupportedThinkingMode(
-			sessions.selectedChat?.thinkingMode,
-			modelCatalog.getThinkingModes(agentState.agentId),
-		);
-		sessions.patchChat(chatId, { thinkingMode: mode });
-		const mutation = this.#beginMutation(chatId, 'thinking');
-		this.#send(chatId, () =>
-			updateExecutionSettings({
-				chatId,
-				thinkingMode: mode,
-				expectedAgentOwnershipEpoch: mutation.epoch,
-			})
-				.then(async () => {
-					if (mutation.isCurrent()) await sessions.quietRefreshChats();
-				})
-				.catch((error) => {
-					if (!mutation.isCurrent()) return;
-					if (sessions.selectedChatId === chatId) agentState.thinkingMode = previous;
-					sessions.patchChat(chatId, { thinkingMode: previous });
-					chatState.appendLocalNoticeForChat(
-						chatId,
-						'error',
-						m.chat_notice_failed_update_thinking_mode({ detail: errorDetail(error) }),
-					);
-					throw error;
-				})
-				.finally(mutation.finish),
+		this.#changeSetting(
+			chatId,
+			'thinkingMode',
+			{ thinkingMode: mode },
+			async (epoch) => {
+				const response = await updateExecutionSettings({
+					chatId,
+					thinkingMode: mode,
+					expectedAgentOwnershipEpoch: epoch,
+				});
+				return { thinkingMode: response.thinkingMode ?? mode };
+			},
+			(detail) => m.chat_notice_failed_update_thinking_mode({ detail }),
 		);
 	}
 
 	handleAgentSettingChange(descriptor: AgentSettingDescriptor, value: JsonValue): void {
-		const { sessions, agentState, chatState } = this.options;
+		const { sessions, agentState } = this.options;
 		const chatId = sessions.selectedChatId;
 		if (!chatId) return;
 		const previous = agentState.agentSettings;
 		const next = withAgentSetting(previous, descriptor, value);
 		if (next === previous) return;
-		agentState.setAgentSettings(next);
 		if (sessions.isDraft(chatId)) {
+			agentState.setAgentSettings(next);
 			sessions.patchDraftStartup(chatId, { agentSettings: next });
 			sessions.patchChat(chatId, { agentSettings: next });
 			return;
 		}
-		sessions.patchChat(chatId, { agentSettings: next });
 		const agentSettingsPatch: JsonObject = { [descriptor.key]: value };
-		const mutation = this.#beginMutation(chatId, 'agentSettings');
-		this.#send(chatId, () =>
-			updateExecutionSettings({
-				chatId,
-				agentSettingsPatch,
-				expectedAgentOwnershipEpoch: mutation.epoch,
-			})
-				.then(async (response) => {
-					if (!mutation.isCurrent()) return;
-					if (sessions.selectedChatId === chatId) {
-						agentState.setAgentSettings(response.agentSettings);
-					}
-					sessions.patchChat(chatId, { agentSettings: response.agentSettings });
-					await sessions.quietRefreshChats();
-				})
-				.catch((error) => {
-					if (!mutation.isCurrent()) return;
-					if (sessions.selectedChatId === chatId) {
-						agentState.setAgentSettings(previous);
-					}
-					sessions.patchChat(chatId, { agentSettings: previous });
-					chatState.appendLocalNoticeForChat(
-						chatId,
-						'error',
-						m.chat_notice_failed_update_agent_mode({ detail: errorDetail(error) }),
-					);
-					throw error;
-				})
-				.finally(mutation.finish),
+		this.#changeSetting(
+			chatId,
+			'agentSettings',
+			{ agentSettings: next },
+			async (epoch) => {
+				const response = await updateExecutionSettings({
+					chatId,
+					agentSettingsPatch,
+					expectedAgentOwnershipEpoch: epoch,
+				});
+				return { agentSettings: response.agentSettings };
+			},
+			(detail) => m.chat_notice_failed_update_agent_mode({ detail }),
 		);
 	}
 }

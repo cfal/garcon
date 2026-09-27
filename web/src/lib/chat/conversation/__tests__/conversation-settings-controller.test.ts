@@ -110,8 +110,8 @@ function createHarness() {
 		isLocalModel: vi.fn<ConversationSettingsControllerOptions['modelCatalog']['isLocalModel']>(
 			() => false,
 		),
-		getPermissionModes: vi.fn(() => ['default'] as const),
-		getThinkingModes: vi.fn(() => ['none'] as const),
+		getPermissionModes: vi.fn(() => ['default', 'plan', 'bypassPermissions'] as const),
+		getThinkingModes: vi.fn(() => ['none', 'high', 'medium'] as const),
 	};
 	const chatState = { appendLocalNoticeForChat: vi.fn() };
 	const agentSwitch = { switchAgent: vi.fn(async () => undefined) };
@@ -145,16 +145,140 @@ function createHarness() {
 describe('ConversationSettingsController', () => {
 	beforeEach(() => {
 		vi.resetAllMocks();
-		vi.mocked(updateChatModel).mockResolvedValue({
+		vi.mocked(updateChatModel).mockImplementation(async (request) => ({
 			success: true,
-			chatId: 'chat-1',
-			model: 'opus',
-		});
+			...request,
+		}));
 		vi.mocked(updateExecutionSettings).mockResolvedValue({
 			success: true,
 			chatId: 'chat-1',
 			agentSettings: chat().agentSettings,
 		});
+	});
+
+	for (const setting of ['model', 'permission', 'thinking', 'agentSettings'] as const) {
+		it.each([
+			[false, false],
+			[true, false],
+			[false, true],
+			[true, true],
+		])(
+			`reconciles rapid ${setting} changes against confirmed values (first=%s, second=%s)`,
+			async (firstAccepted, secondAccepted) => {
+				type Response = Awaited<ReturnType<typeof updateChatModel>> &
+					ExecutionSettingsPatchResponse;
+				const first = deferred<Response>();
+				const second = deferred<Response>();
+				vi.mocked(updateChatModel)
+					.mockReturnValueOnce(first.promise)
+					.mockReturnValueOnce(second.promise);
+				vi.mocked(updateExecutionSettings)
+					.mockReturnValueOnce(first.promise)
+					.mockReturnValueOnce(second.promise);
+				const { controller, sessions, agentState } = createHarness();
+				const original = { ...sessions.selectedChat };
+				const choices = [
+					{
+						model: 'sonnet',
+						permissionMode: 'plan',
+						thinkingMode: 'high',
+						agentSettings: { ...original.agentSettings, values: { effort: 'high' } },
+					},
+					{
+						model: 'haiku',
+						permissionMode: 'bypassPermissions',
+						thinkingMode: 'medium',
+						agentSettings: { ...original.agentSettings, values: { effort: 'low' } },
+					},
+				] as const;
+				for (const choice of choices) {
+					if (setting === 'model') controller.handleModelChange(choice.model);
+					if (setting === 'permission')
+						controller.handlePermissionModeChange(choice.permissionMode);
+					if (setting === 'thinking') controller.handleThinkingModeChange(choice.thinkingMode);
+					if (setting === 'agentSettings')
+						controller.handleAgentSettingChange(effort, choice.agentSettings.values.effort);
+				}
+				const api = setting === 'model' ? updateChatModel : updateExecutionSettings;
+				expect(api).toHaveBeenCalledTimes(1);
+				if (firstAccepted) first.resolve({ success: true, chatId: original.id, ...choices[0] });
+				else first.reject(new Error('Synthetic first rejection'));
+				await vi.waitFor(() => expect(api).toHaveBeenCalledTimes(2));
+				if (secondAccepted) second.resolve({ success: true, chatId: original.id, ...choices[1] });
+				else second.reject(new Error('Synthetic second rejection'));
+				expect(await controller.settlePending(original.id)).toBe(secondAccepted);
+				const expected = secondAccepted ? choices[1] : firstAccepted ? choices[0] : original;
+				const field =
+					setting === 'permission'
+						? 'permissionMode'
+						: setting === 'thinking'
+							? 'thinkingMode'
+							: setting;
+				expect(sessions.selectedChat[field]).toEqual(expected[field]);
+				expect(agentState[field]).toEqual(expected[field]);
+				expect(controller.hasPending(original.id)).toBe(false);
+				expect(sessions.quietRefreshChats).toHaveBeenCalledOnce();
+			},
+		);
+	}
+
+	it('reconciles a committed model whose reply was lost without replaying the write', async () => {
+		const { controller, sessions, agentState } = createHarness();
+		vi.mocked(updateChatModel).mockRejectedValueOnce(new TypeError('Synthetic lost reply'));
+		sessions.quietRefreshChats.mockImplementation(async () => {
+			sessions.selectedChat.model = 'sonnet';
+		});
+		controller.handleModelChange('sonnet');
+		expect(await controller.settlePending('chat-1')).toBe(false);
+		expect(sessions.selectedChat.model).toBe('sonnet');
+		expect(agentState.model).toBe('sonnet');
+		expect(updateChatModel).toHaveBeenCalledOnce();
+	});
+
+	it('keeps the confirmed baseline when reconciliation also fails', async () => {
+		const { controller, sessions, agentState } = createHarness();
+		vi.mocked(updateChatModel).mockRejectedValue(new TypeError('Synthetic offline'));
+		sessions.quietRefreshChats.mockRejectedValueOnce(new TypeError('Synthetic refresh failure'));
+		controller.handleModelChange('sonnet');
+		controller.handleModelChange('haiku');
+		expect(await controller.settlePending('chat-1')).toBe(false);
+		expect(sessions.selectedChat.model).toBe('opus');
+		expect(agentState.model).toBe('opus');
+		expect(controller.hasPending('chat-1')).toBe(false);
+	});
+
+	it('reconciles a newer choice made while the previous authoritative refresh is pending', async () => {
+		const { controller, sessions, agentState } = createHarness();
+		const refresh = deferred<void>();
+		sessions.quietRefreshChats.mockImplementationOnce(async () => {
+			await refresh.promise;
+			sessions.selectedChat.model = 'sonnet';
+		});
+		controller.handleModelChange('sonnet');
+		await vi.waitFor(() => expect(sessions.quietRefreshChats).toHaveBeenCalledOnce());
+		vi.mocked(updateChatModel).mockRejectedValueOnce(new Error('Synthetic latest rejection'));
+		controller.handleModelChange('haiku');
+		refresh.resolve();
+		expect(await controller.settlePending('chat-1')).toBe(false);
+		expect(sessions.selectedChat.model).toBe('sonnet');
+		expect(agentState.model).toBe('sonnet');
+		expect(controller.hasPending('chat-1')).toBe(false);
+	});
+
+	it('keeps confirmed values independent across overlapping setting groups', async () => {
+		const { controller, sessions, agentState } = createHarness();
+		const model = deferred<Awaited<ReturnType<typeof updateChatModel>>>();
+		vi.mocked(updateChatModel).mockReturnValueOnce(model.promise);
+		vi.mocked(updateExecutionSettings).mockRejectedValueOnce(
+			new Error('Synthetic permission rejection'),
+		);
+		controller.handleModelChange('sonnet');
+		controller.handlePermissionModeChange('plan');
+		model.resolve({ success: true, chatId: 'chat-1', model: 'sonnet' });
+		expect(await controller.settlePending('chat-1')).toBe(false);
+		expect(sessions.selectedChat).toMatchObject({ model: 'sonnet', permissionMode: 'default' });
+		expect(agentState).toMatchObject({ model: 'sonnet', permissionMode: 'default' });
+		expect(controller.hasPending('chat-1')).toBe(false);
 	});
 
 	it('lets the server validate repair of an unavailable local-model selection', () => {
@@ -273,7 +397,7 @@ describe('ConversationSettingsController', () => {
 			agentState.thinkingMode = 'medium';
 			pending.reject(new Error('Synthetic rejection'));
 			await pending.promise.catch(() => undefined);
-			await Promise.resolve();
+			await controller.settlePending('chat-1');
 			expect(agentState).toMatchObject({
 				model: 'other-model',
 				permissionMode: 'bypassPermissions',
@@ -292,13 +416,11 @@ describe('ConversationSettingsController', () => {
 		async (setting) => {
 			const pending = deferred<never>();
 			vi.mocked(updateChatModel).mockReturnValueOnce(pending.promise);
-			vi.mocked(updateExecutionSettings)
-				.mockReturnValueOnce(pending.promise)
-				.mockResolvedValue({
-					success: true,
-					chatId: 'chat-1',
-					agentSettings: chat().agentSettings,
-				});
+			vi.mocked(updateExecutionSettings).mockReturnValueOnce(pending.promise).mockResolvedValue({
+				success: true,
+				chatId: 'chat-1',
+				agentSettings: chat().agentSettings,
+			});
 			const { controller, sessions, agentState, chatState } = createHarness();
 			if (setting === 'model') {
 				controller.handleModelChange('sonnet');
@@ -335,6 +457,7 @@ describe('ConversationSettingsController', () => {
 		agentState.model = 'destination-model';
 		pending.reject(new Error('Synthetic stale rejection'));
 		await pending.promise.catch(() => undefined);
+		await controller.settlePending('chat-1');
 		expect(agentState.model).toBe('destination-model');
 		expect(sessions.selectedChat.model).toBe('destination-model');
 	});

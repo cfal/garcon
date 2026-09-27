@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { writeFile } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { withE2eFixture } from '../../support/e2e-fixture.js';
 import { selectExecutor } from '../../support/executor-ui.js';
@@ -10,6 +10,76 @@ import { effectiveExecutorId } from '../../../common/executors.js';
 type SettingsGateGlobal = typeof globalThis & { releaseSettings?: () => void };
 
 for (const executionBackend of ['remote-controller-dials', 'remote-executor-dials'] as const) {
+  test(`a missing source folder recovers immediately on a valid executor (${executionBackend})`, async () => {
+    await withE2eFixture('executor-missing-source-handoff', async fixture => {
+      const { client, dirs, executionDirs, directAgents } = fixture.integration;
+      await client.put(`/api/v1/api-provider-assignments?executorId=local&apiProviderId=${directAgents.openAi.provider.providerId}`, {});
+      const source = join(dirs.project, 'removed-source');
+      await mkdir(source);
+      const chatId = fixture.integration.newChatId();
+      const started = await client.startChat({
+        ...client.directStartRequest({ chatId, projectPath: source, content: 'Synthetic source prompt', agent: directAgents.openAi }),
+        executorId: 'local',
+      });
+      await client.waitForTurnTerminal(chatId, started.turnId);
+      await rm(source, { recursive: true });
+      await initializeFixtureRepository(executionDirs.project);
+      await runFixtureGit(executionDirs.project, 'checkout', '-b', 'recovered-worker');
+      await writeFile(join(executionDirs.project, 'worker-recovery.txt'), 'Synthetic destination file\n');
+      const app = new SpaDriver(fixture.page, fixture.integration);
+      await app.setViewport(1_600, 900);
+      await app.openChat(chatId);
+      await fixture.waitForSpaWebSocket();
+      await app.waitForText('Project folder unavailable');
+      const textarea = await fixture.page.$('[data-composer] textarea');
+      if (!textarea) throw new Error('Missing composer');
+      await app.fill('[data-composer] textarea', 'Retained recovery draft');
+      await fixture.page.$eval('[data-composer] input[type="file"]', element => {
+        Object.defineProperty(element, 'files', { configurable: true, value: [new File(['Synthetic attachment'], 'recovery.txt', { type: 'text/plain' })] });
+        element.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+      await app.waitForText('recovery.txt');
+      const runRequests: string[] = [];
+      fixture.page.on('request', request => {
+        if (new URL(request.url()).pathname === '/api/v1/chats/run') runRequests.push(request.url());
+      });
+      await selectExecutor(fixture.page, '[data-slot="composer-bottom-bar"] [data-executor-picker]', 'Integration worker');
+      await app.waitForText('Move to Integration worker');
+      await app.fill('[role="dialog"] input', executionDirs.project);
+      await app.waitForDialogButtonEnabled('Use This Executor');
+      await app.clickDialogButton('Use This Executor');
+      await app.waitForButton('Executor: Integration worker');
+      await app.waitForButton('Checkout ref, current ref recovered-worker');
+      await fixture.page.waitForSelector(`[data-file-tree-row] [title="${join(executionDirs.project, 'worker-recovery.txt')}"]`);
+      expect((await client.getChatSnapshot(chatId)).chat).toMatchObject({ executorId: client.executorId, projectPath: executionDirs.project });
+      expect(await fixture.page.evaluate(() => document.body.textContent?.includes('Project folder unavailable'))).toBe(false);
+      expect(await textarea.evaluate(element => document.querySelector('[data-composer] textarea') === element)).toBe(true);
+      expect(await textarea.evaluate(element => element.value)).toBe('Retained recovery draft');
+      await app.waitForText('recovery.txt');
+      expect(runRequests).toEqual([]);
+
+      const beforeAgent = (await client.getChatSnapshot(chatId)).chat;
+      await fixture.page.$eval('[data-slot="composer-bottom-bar"] button:has([data-slot="model-selector-trigger-secondary"])', element => (element as HTMLButtonElement).click());
+      await app.waitForButton('Anthropic');
+      await app.clickButton('Anthropic');
+      await app.waitForButton('Integration Anthropic Echo');
+      const agentSaved = fixture.page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/chats/agent-handoff');
+      await app.clickButton('Integration Anthropic Echo');
+      expect((await agentSaved).status()).toBe(200);
+      const afterAgent = (await client.getChatSnapshot(chatId)).chat;
+      expect(afterAgent).toMatchObject({ agentId: directAgents.anthropic.agentId, executorId: client.executorId, projectPath: executionDirs.project });
+      expect(afterAgent.agentOwnershipEpoch).not.toBe(beforeAgent.agentOwnershipEpoch);
+      await app.waitForButton('Checkout ref, current ref recovered-worker');
+      await fixture.page.waitForSelector(`[data-file-tree-row] [title="${join(executionDirs.project, 'worker-recovery.txt')}"]`);
+      expect(await textarea.evaluate(element => document.querySelector('[data-composer] textarea') === element)).toBe(true);
+      expect(await textarea.evaluate(element => element.value)).toBe('Retained recovery draft');
+      await app.waitForText('recovery.txt');
+      expect(runRequests).toEqual([]);
+      expect(fixture.integration.fakeProviders.anthropic.requests()).toEqual([]);
+      fixture.assertNoBrowserErrors();
+    }, { executionBackend, projectRoots: 'separate' });
+  }, 90_000);
+
   test(`confirmed executor changes retarget Files and Git without submitting (${executionBackend})`, async () => {
     await withE2eFixture('executor-immediate-handoff', async fixture => {
       const { client, dirs, executionDirs, directAgents } = fixture.integration;

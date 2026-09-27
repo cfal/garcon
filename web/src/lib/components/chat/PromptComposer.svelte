@@ -3,6 +3,7 @@
 	import FileMentionMenu from './FileMentionMenu.svelte';
 	import SlashCommandMenu from './SlashCommandMenu.svelte';
 	import ComposerBottomBar from './ComposerBottomBar.svelte';
+	import ComposerAttachmentList from './ComposerAttachmentList.svelte';
 	import ComposerAvailabilityNotice from './ComposerAvailabilityNotice.svelte';
 	import { isCustomProviderSelectionAvailable } from '$lib/agents/provider-selection.js';
 	import { resolveComposerAvailabilityNotice } from '$lib/chat/composer/composer-availability.js';
@@ -28,8 +29,6 @@
 	import {
 		chatAttachmentAccept,
 		ImageAttachmentState,
-		isImageAttachment,
-		isVideoChatAttachment,
 	} from '$lib/chat/composer/image-attachment.svelte.js';
 	import {
 		resolveComposerKeydownAction,
@@ -75,11 +74,8 @@
 		LOCAL_STORAGE_KEYS,
 		setLocalStorageItem,
 	} from '$lib/utils/local-persistence';
-	import FileText from '@lucide/svelte/icons/file-text';
-	import FileVideo from '@lucide/svelte/icons/file-video';
 	import { CHAT_FILE_ATTACHMENT_MIME_TYPES } from '@garcon/common/attachments';
 	import ImagePlus from '@lucide/svelte/icons/image-plus';
-	import X from '@lucide/svelte/icons/x';
 	import PromptComposerModelSelector from './PromptComposerModelSelector.svelte';
 	import { snippetTemplateUsesArguments } from '$shared/snippets';
 	import {
@@ -802,49 +798,13 @@
 				</div>
 			{/if}
 
-			{#if composerState.images.length > 0}
-				<div class={imageListClass}>
-					<div class="flex flex-wrap gap-2">
-						{#each composerState.images as file, idx (file.name + idx)}
-							<div class="relative group">
-								<div class="w-16 h-16 rounded-lg overflow-hidden border border-border">
-									{#if isImageAttachment(file)}
-										{@const url = imageAttachments.urlFor(file, idx)}
-										{#if url}
-											<img src={url} alt={file.name} class="w-full h-full object-cover" />
-										{/if}
-									{:else}
-										<div
-											class="flex h-full w-full flex-col items-center justify-center gap-1 bg-background px-1 text-muted-foreground"
-										>
-											{#if isVideoChatAttachment(file)}
-												<FileVideo class="h-5 w-5" aria-hidden="true" />
-											{:else}
-												<FileText class="h-5 w-5" aria-hidden="true" />
-											{/if}
-											<span class="w-full truncate text-center text-[10px] leading-tight"
-												>{file.name}</span
-											>
-										</div>
-									{/if}
-								</div>
-								<button
-									type="button"
-									aria-label={m.chat_composer_remove_image({ name: file.name })}
-									title={m.chat_composer_remove_image({ name: file.name })}
-									class="absolute -top-1 -right-1 w-5 h-5 bg-destructive text-destructive-foreground rounded-full text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-									onclick={() => {
-										if (!promptTransformPending) composerState.removeImage(idx);
-									}}
-									disabled={promptTransformPending}
-								>
-									<X class="w-3 h-3" aria-hidden="true" />
-								</button>
-							</div>
-						{/each}
-					</div>
-				</div>
-			{/if}
+			<ComposerAttachmentList
+				files={composerState.images}
+				previewUrls={imageAttachments.urls}
+				disabled={promptTransformPending}
+				class={imageListClass}
+				onRemove={(index) => composerState.removeImage(index)}
+			/>
 
 			<input
 				bind:this={attachmentController.fileInput}
