@@ -101,9 +101,9 @@ function createMockQueue() {
     onChatIdle: (cb) => emitter.on('chat-idle', cb),
     onSessionStopped: (cb) => emitter.on('session-stopped', cb),
     onTurnFailed: (cb) => emitter.on('turn-failed', cb),
-    emitTurnFailed: (chatId, message) => emitter.emit('turn-failed', chatId, message),
+    emitTurnFailed: (chatId, message, options = {}) => emitter.emit('turn-failed', chatId, message, options),
     emitChatIdle: (chatId) => emitter.emit('chat-idle', chatId),
-    emitSessionStopped: (chatId, success) => emitter.emit('session-stopped', chatId, success),
+    emitSessionStopped: (chatId, success, turn) => emitter.emit('session-stopped', chatId, success, 'stop', turn),
   };
 }
 
@@ -321,6 +321,29 @@ describe('AttentionTracker', () => {
       expect(telegram.send).toHaveBeenCalledTimes(1);
     });
 
+    it('reports a later control-turn failure without requiring another user input', () => {
+      createTracker();
+      agents.emitFinished('c1', 0);
+      queue.emitChatIdle('c1');
+      queue.emitTurnFailed('c1', 'Compaction admission failed', { turnId: 'control-turn' });
+      queue.emitChatIdle('c1');
+      queue.emitTurnFailed('c1', 'Compaction admission failed', { turnId: 'control-turn' });
+      queue.emitChatIdle('c1');
+      expect(telegram.send).toHaveBeenCalledTimes(2);
+      expect(telegram.send.mock.calls[1][1]).toContain('Failed: Compaction admission failed');
+    });
+
+    it('preserves a committed terminal when the same dispatch also reports failure', () => {
+      createTracker();
+      agents.emitFinished('c1', 0, { type: 'text', text: 'Completed result' });
+      queue.emitTurnFailed('c1', 'late dispatch error', { turnId: 'run-1' });
+      queue.emitChatIdle('c1');
+      agents.emitFinished('c1', 0);
+      queue.emitChatIdle('c1');
+      expect(telegram.send).toHaveBeenCalledTimes(1);
+      expect(telegram.send.mock.calls[0][1]).toContain('Completed result');
+    });
+
     it.each(['replaceView', 'emitChatRemoved'])('clears excerpts and outcomes on %s without affecting other chats', (operation) => {
       createTracker();
       simulateConversation('c1', 'discard input', 'discard answer');
@@ -472,6 +495,16 @@ describe('AttentionTracker', () => {
   });
 
   describe('session-stopped notifications', () => {
+    it('reports a later reservation-only stop once without another input', () => {
+      createTracker();
+      agents.emitFinished('c1', 0);
+      queue.emitChatIdle('c1');
+      queue.emitSessionStopped('c1', 'interrupt-requested', { turnId: 'new-control-turn' });
+      queue.emitSessionStopped('c1', 'interrupt-requested', { turnId: 'new-control-turn' });
+      queue.emitChatIdle('c1');
+      expect(telegram.send).toHaveBeenCalledTimes(2);
+      expect(telegram.send.mock.calls[1][1]).toContain('Stopped');
+    });
     it('sends stopped notification with user message as title', async () => {
       createTracker();
       agents.emitInput('c1', 'run tests');

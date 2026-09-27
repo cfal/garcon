@@ -3,12 +3,12 @@
 import {
   AssistantMessage,
   isAbortAcknowledged,
-  type ChatStopOutcome,
 } from '../../../common/chat-types.js';
 import type { TranscriptCommitEvent } from '../ledger/service.js';
 import type { TelegramNotifier } from './telegram.js';
 import { createLogger } from '../../common/log.js';
 import { resolveChatTitle } from '../chats/chat-title.js';
+import type { SessionStoppedCallback, TurnFailedCallback } from '../chat-execution/types.js';
 
 const logger = createLogger('notifications:attention-tracker');
 
@@ -43,8 +43,8 @@ interface AgentRegistryDep {
 
 interface QueueManagerDep {
   onChatIdle(cb: (chatId: string) => void): void;
-  onSessionStopped(cb: (chatId: string, outcome: ChatStopOutcome) => void): void;
-  onTurnFailed(cb: (chatId: string, message: string) => void): void;
+  onSessionStopped(cb: SessionStoppedCallback): void;
+  onTurnFailed(cb: TurnFailedCallback): void;
 }
 
 interface SettingsStoreDep {
@@ -62,6 +62,7 @@ interface ChatMetadataDep {
 }
 
 interface TurnResult {
+  turnId: string | null;
   reason: 'completed' | 'failed';
   detail?: string;
 }
@@ -93,7 +94,7 @@ export class AttentionTracker {
   #lastUserMessage = new Map<string, string>();
 
   // Prevents repeated idle events for one settle from composing duplicate notifications.
-  #idleNotified = new Set<string>();
+  #notifiedTurns = new Map<string, string | null>();
 
   constructor(
     agents: AgentRegistryDep,
@@ -118,31 +119,33 @@ export class AttentionTracker {
   #wire(): void {
     this.#agents.onTranscriptCommitted((event) => this.#handleTranscriptCommit(event));
     this.#queue.onChatIdle((chatId) => this.#handleChatIdle(chatId));
-    this.#queue.onTurnFailed((chatId, message) => {
+    this.#queue.onTurnFailed((chatId, message, options) => {
       // Dispatch may fail before a ledger run exists; terminal events otherwise win.
-      if (!this.#idleNotified.has(chatId)) {
-        this.#lastTurnResult.set(chatId, { reason: 'failed', detail: truncate(message, 400) });
-      }
+      const turnId = options.turnId ?? null;
+      if (this.#wasNotified(chatId, turnId)) return;
+      if (turnId && this.#lastTurnResult.get(chatId)?.turnId === turnId) return;
+      this.#notifiedTurns.delete(chatId);
+      this.#lastTurnResult.set(chatId, { turnId, reason: 'failed', detail: truncate(message, 400) });
     });
-    this.#queue.onSessionStopped((chatId, outcome) => {
-      if (isAbortAcknowledged(outcome)) this.#handleSessionStopped(chatId);
+    this.#queue.onSessionStopped((chatId, outcome, _intent, turn) => {
+      if (isAbortAcknowledged(outcome)) this.#handleSessionStopped(chatId, turn?.turnId ?? null);
     });
     this.#registry.onChatRemoved?.((chatId) => {
       this.#cleanupChat(chatId);
-      this.#idleNotified.delete(chatId);
+      this.#notifiedTurns.delete(chatId);
     });
   }
 
   #handleTranscriptCommit(event: TranscriptCommitEvent): void {
     if (event.type === 'view-replaced') {
       this.#cleanupChat(event.chatId);
-      this.#idleNotified.delete(event.chatId);
+      this.#notifiedTurns.delete(event.chatId);
       return;
     }
     if (event.type === 'rows') {
       for (const row of event.rows) {
         if (row.kind === 'user-input') {
-          this.#idleNotified.delete(event.chatId);
+          this.#notifiedTurns.delete(event.chatId);
           this.#lastTurnResult.delete(event.chatId);
           this.#lastAssistantMessage.delete(event.chatId);
           this.#lastUserMessage.set(event.chatId, truncate(row.detail.message.content, 200));
@@ -153,15 +156,17 @@ export class AttentionTracker {
       return;
     }
     if (event.type === 'run-ended') {
+      if (this.#wasNotified(event.chatId, event.runId)) return;
       this.#pendingPermissions.delete(event.chatId);
-      this.#idleNotified.delete(event.chatId);
+      this.#notifiedTurns.delete(event.chatId);
       if (event.row.outcome === 'finished') {
-        this.#lastTurnResult.set(event.chatId, { reason: 'completed' });
+        this.#lastTurnResult.set(event.chatId, { turnId: event.runId, reason: 'completed' });
         if (event.finalResponse) {
           this.#lastAssistantMessage.set(event.chatId, truncate(event.finalResponse.text, 400));
         }
       } else if (event.row.outcome === 'failed') {
         this.#lastTurnResult.set(event.chatId, {
+          turnId: event.runId,
           reason: 'failed',
           detail: truncate(event.row.error?.message ?? event.row.error?.code ?? '', 400),
         });
@@ -213,10 +218,9 @@ export class AttentionTracker {
     // notified about that. Skip the idle notification.
     if (this.#pendingPermissions.has(chatId)) return;
 
-    if (this.#idleNotified.has(chatId)) return;
     const result = this.#lastTurnResult.get(chatId);
     if (!result) return;
-    this.#idleNotified.add(chatId);
+    this.#notifiedTurns.set(chatId, result.turnId);
     const reason = result.reason;
     const userMsg = this.#lastUserMessage.get(chatId) ?? null;
     const assistantMsg = this.#lastAssistantMessage.get(chatId) ?? null;
@@ -230,9 +234,9 @@ export class AttentionTracker {
     void this.#sendNotification(chatId, userMsg, reason === 'failed' ? null : assistantMsg, status);
   }
 
-  #handleSessionStopped(chatId: string): void {
-    if (this.#idleNotified.has(chatId)) return;
-    this.#idleNotified.add(chatId);
+  #handleSessionStopped(chatId: string, turnId: string | null): void {
+    if (this.#wasNotified(chatId, turnId)) return;
+    this.#notifiedTurns.set(chatId, turnId);
     const userMsg = this.#lastUserMessage.get(chatId) ?? null;
 
     this.#cleanupChat(chatId);
@@ -279,6 +283,11 @@ export class AttentionTracker {
     this.#lastTurnResult.delete(chatId);
     this.#lastAssistantMessage.delete(chatId);
     this.#lastUserMessage.delete(chatId);
+  }
+
+  #wasNotified(chatId: string, turnId: string | null): boolean {
+    return this.#notifiedTurns.has(chatId)
+      && (turnId === null || this.#notifiedTurns.get(chatId) === turnId);
   }
 
   #chatMeta(chatId: string): { title: string; hasGeneratedTitle: boolean; agentId: string; projectPath: string } {
