@@ -346,6 +346,7 @@ function createExecutionFixture(directory, ensureAdopted, beforeWiringCommitList
       start: async (request) => {
         sink = { publish: (event) => producer.emit(request.producerBinding, event) };
         sink.publish({ type: 'started', runId: request.runId });
+        if (options.onStart) await options.onStart(request);
         return producer.reference('execution');
       },
       abort: async () => true,
@@ -364,7 +365,7 @@ function createExecutionFixture(directory, ensureAdopted, beforeWiringCommitList
     ledger: transcripts, adoption: { ensure: ensureAdopted ?? (async () => view) },
     hasPendingOwnershipTransfer: () => false, preambles: {}, selectionAdmissionLock: new KeyedPromiseLock(),
   });
-  const execution = new ChatExecutionCoordinator(directory, agents, {
+  const execution = new ChatExecutionCoordinator(directory, agents, options.inputTranscript?.(agents) ?? {
     admitInput: async () => ({ inserted: true }), hasMatchingInput: async () => false,
     admitQueuedInput: () => ({ inserted: true }), discardPreparedInput() {},
   }, () => ({}), () => true, new InMemoryChatExecutionControlRepository('synthetic-server'), {
@@ -388,6 +389,15 @@ function createExecutionFixture(directory, ensureAdopted, beforeWiringCommitList
   return { ...fixture, store, transcripts, agents, execution, ledger, get sink() { return sink; } };
 }
 
+function observeTelegram({ agents, execution }, directory, send, enabled = true) {
+  new AttentionTracker(agents, execution,
+    { getUiSettings: () => ({ notifications: { telegram: { enabled } } }), getChatName: () => null },
+    { getChat: () => ({ agentId: 'test', projectPath: directory }) },
+    { getChatMetadata: () => ({ firstMessage: 'Cached title' }) },
+    { isConfigured: true, send }, { getRecipientChatId: () => 'recipient' },
+  );
+}
+
 describe('server event wiring', () => {
   it.each([false, true])('startup does not drain empty queues or read transcripts for Telegram: enabled=%s', async (enabled) => {
     const directory = await mkdtemp(path.join(tmpdir(), 'startup-attention-'));
@@ -400,12 +410,7 @@ describe('server event wiring', () => {
         transcripts.currentRows = readHistory;
         transcripts.conversationMessages = readHistory;
         execution.onChatIdle(idle);
-        new AttentionTracker(agents, execution,
-          { getUiSettings: () => ({ notifications: { telegram: { enabled } } }), getChatName: () => null },
-          { getChat: () => ({ agentId: 'test', projectPath: directory }) },
-          { getChatMetadata: () => ({ firstMessage: 'Cached title' }) },
-          { isConfigured: true, send }, { getRecipientChatId: () => 'recipient' },
-        );
+        observeTelegram({ agents, execution }, directory, send, enabled);
       },
     });
     try {
@@ -420,6 +425,136 @@ describe('server event wiring', () => {
       expect(readHistory).not.toHaveBeenCalled();
     } finally {
       fixture.transcripts.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('notifies once after a direct turn and its queued follow-up using committed live context', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'queued-attention-wiring-'));
+    const delivered = Promise.withResolvers();
+    const followUpStarted = Promise.withResolvers();
+    const send = mock(async () => { delivered.resolve(); return true; });
+    const fixture = createExecutionFixture(directory, undefined, undefined, {
+      inputTranscript: (agents) => agents,
+      beforeWiring: (ports) => observeTelegram(ports, directory, send),
+      onStart: (request) => { if (request.runId !== turn.turnId) followUpStarted.resolve(request.runId); },
+    });
+    const { execution, ledger, transcripts } = fixture;
+    const startedTurn = { ...turn, clientMessageId: 'input-1' };
+    try {
+      const accepted = await ledger.accept({ ...startedTurn, chatId: 'chat-1', payload: {} });
+      await execution.scheduleDirectInput({
+        command: { key: accepted.record.key, ...startedTurn, chatId: 'chat-1' },
+        content: 'Initial input', options: startedTurn, settlement: new ChatCommandSettlement(ledger),
+      });
+      await execution.waitForDispatches();
+      await execution.createChatQueueEntry('chat-1', 'Queued follow-up');
+      fixture.sink.publish({ type: 'run-ended', runId: startedTurn.turnId, outcome: 'finished',
+        finalResponse: { type: 'text', text: 'Initial result' } });
+      const followUpRunId = await followUpStarted.promise;
+      await fixture.wiring.waitForIdle();
+      expect(send).not.toHaveBeenCalled();
+      expect(transcripts.activeRunId('chat-1')).toBe(followUpRunId);
+      expect(followUpRunId).not.toBe(startedTurn.turnId);
+
+      fixture.sink.publish({ type: 'rows', rows: [{ message: new AssistantMessage(at, 'Intermediate output') }] });
+      fixture.sink.publish({ type: 'run-ended', runId: followUpRunId, outcome: 'finished',
+        finalResponse: { type: 'text', text: 'Final queued result' } });
+      await delivered.promise;
+      await execution.waitForExecutionOwners();
+      await fixture.wiring.waitForIdle();
+      expect(execution.ownsExecution('chat-1')).toBe(false);
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(send.mock.calls[0]).toEqual(['recipient', expect.stringContaining('Queued follow-up'), 'HTML']);
+      expect(send.mock.calls[0][1]).toContain('Final queued result');
+      expect(send.mock.calls[0][1]).not.toContain('Initial input');
+      expect(send.mock.calls[0][1]).not.toContain('Intermediate output');
+      await execution.triggerDrain('chat-1');
+      expect(send).toHaveBeenCalledTimes(1);
+    } finally {
+      await execution.waitForDispatches();
+      await fixture.wiring.waitForIdle();
+      transcripts.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['direct', 'queued'])('notifies after a %s dispatch fails before a ledger run begins', async (kind) => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'failed-attention-wiring-'));
+    const send = mock(async () => true);
+    let adoptionCalls = 0;
+    const fixture = createExecutionFixture(directory, async () => {
+      // Direct input admission succeeds; runtime preparation fails before beginRun.
+      if (++adoptionCalls === 1 && kind === 'direct') return fixture.transcripts.currentView('chat-1');
+      throw new Error('Synthetic source unavailable');
+    }, undefined, {
+      inputTranscript: (agents) => agents,
+      beforeWiring: (ports) => observeTelegram(ports, directory, send),
+    });
+    const { execution, ledger, transcripts } = fixture;
+    try {
+      if (kind === 'direct') {
+        const startedTurn = { ...turn, clientMessageId: 'input-1' };
+        const accepted = await ledger.accept({ ...startedTurn, chatId: 'chat-1', payload: {} });
+        await execution.scheduleDirectInput({
+          command: { key: accepted.record.key, ...startedTurn, chatId: 'chat-1' },
+          content: 'Failed input', options: startedTurn, settlement: new ChatCommandSettlement(ledger),
+        });
+        await execution.waitForDispatches();
+      } else {
+        await execution.createChatQueueEntry('chat-1', 'Failed input');
+        await execution.triggerDrain('chat-1');
+      }
+      await fixture.wiring.waitForIdle();
+      expect(fixture.sink).toBeUndefined();
+      expect(transcripts.currentRows('chat-1').map((row) => row.kind)).toEqual(['user-input']);
+      expect(execution.ownsExecution('chat-1')).toBe(false);
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(send.mock.calls[0][1]).toContain('Failed input');
+      expect(send.mock.calls[0][1]).toContain('Failed: Synthetic source unavailable');
+      expect(adoptionCalls).toBe(kind === 'direct' ? 2 : 1);
+    } finally {
+      await execution.waitForDispatches();
+      await fixture.wiring.waitForIdle();
+      transcripts.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves a committed completion when the launch reply subsequently fails', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'late-launch-attention-wiring-'));
+    const started = Promise.withResolvers();
+    const launchReply = Promise.withResolvers();
+    const send = mock(async () => true);
+    const fixture = createExecutionFixture(directory, undefined, undefined, {
+      inputTranscript: (agents) => agents,
+      beforeWiring: (ports) => observeTelegram(ports, directory, send),
+      onStart() { started.resolve(); return launchReply.promise; },
+    });
+    const { execution, ledger, transcripts } = fixture;
+    const startedTurn = { ...turn, clientMessageId: 'input-1' };
+    try {
+      const accepted = await ledger.accept({ ...startedTurn, chatId: 'chat-1', payload: {} });
+      await execution.scheduleDirectInput({
+        command: { key: accepted.record.key, ...startedTurn, chatId: 'chat-1' },
+        content: 'Initial input', options: startedTurn, settlement: new ChatCommandSettlement(ledger),
+      });
+      await started.promise;
+      fixture.sink.publish({ type: 'run-ended', runId: turn.turnId, outcome: 'finished',
+        finalResponse: { type: 'text', text: 'Committed result' } });
+      launchReply.reject(new Error('Synthetic late launch failure'));
+      await execution.waitForDispatches();
+      await fixture.wiring.waitForIdle();
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(send.mock.calls[0][1]).toContain('Committed result');
+      expect(send.mock.calls[0][1]).not.toContain('Failed');
+      expect(execution.ownsExecution('chat-1')).toBe(false);
+      expect(transcripts.currentRows('chat-1').at(-1)).toMatchObject({ kind: 'run-ended', outcome: 'finished' });
+    } finally {
+      launchReply.resolve();
+      await execution.waitForDispatches();
+      await fixture.wiring.waitForIdle();
+      transcripts.close();
       await rm(directory, { recursive: true, force: true });
     }
   });

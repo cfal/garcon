@@ -236,6 +236,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
         },
         retireAttempt: (chatId, attempt) => {
           this.#retireAttempt(chatId, attempt);
+          this.#ownership.requestDrain(chatId);
           this.#invalidateProcessing(chatId);
         },
       },
@@ -842,7 +843,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     this.#ownership.notifyOwnersChanged();
     this.#invalidateProcessing(reservation.chatId);
     if (!this.#chatExists(reservation.chatId) || this.#shuttingDown) return;
-    if (outcome === 'completed' || drainRequested) {
+    if (outcome !== 'released' || drainRequested) {
       try {
         await this.triggerDrain(reservation.chatId);
       } catch (error) {
