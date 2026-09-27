@@ -392,6 +392,7 @@ function enableCompaction(
   return fixture.client.updateSettings({
     ui: {
       agentSwitchCompaction: {
+        executorId: fixture.client.executorId,
         enabled: true,
         contextWindowTokens: 200_000,
         agentId: agent.agentId,

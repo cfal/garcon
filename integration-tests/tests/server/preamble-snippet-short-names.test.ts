@@ -16,7 +16,7 @@ describe('preamble snippet short names', () => {
   test('expands named preambles with preamble semantics and enforces one namespace', async () => {
     await withIntegrationFixture('preamble-snippet-short-names', async (fixture) => {
       const catalog = await fixture.client.get<PreamblesSnapshot>('/api/v1/preambles');
-      const unmatchedProject = join(fixture.dirs.project, 'unmatched');
+      const unmatchedProject = join(fixture.executionDirs.project, 'unmatched');
       await mkdir(unmatchedProject);
       const created = await fixture.client.post<PreamblesMutationResponse>('/api/v1/preambles', {
         expectedRevision: catalog.revision,
@@ -27,7 +27,7 @@ describe('preamble snippet short names', () => {
           content: 'Chat {{chat_id}} / {{arguments}} / {{project_path}} / \\{{chat_id}}',
           scope: {
             type: 'project-paths',
-            rules: [{ projectPath: fixture.dirs.project, includeNested: false }],
+            rules: [{ executorId: fixture.client.executorId, projectPath: fixture.executionDirs.project, includeNested: false }],
           },
           agentIds: ['codex'],
           tagFilter: { mode: 'all', tags: ['manual'] },
@@ -45,7 +45,7 @@ describe('preamble snippet short names', () => {
           shortName: 'manual_context',
           arguments: { type: 'value', value: 'ignored' },
           context: {
-            type: 'new-chat',
+            type: 'new-chat', executorId: fixture.client.executorId,
             chatId,
             projectPath: unmatchedProject,
           },
@@ -57,7 +57,7 @@ describe('preamble snippet short names', () => {
         sourceId: preamble.id,
         sourceUpdatedAt: preamble.updatedAt,
         shortName: 'manual_context',
-        contextExecutorId: 'local',
+        contextExecutorId: fixture.client.executorId,
         contextProjectPath: unmatchedProject,
         expandedText: `Chat ${chatId} / {{arguments}} / {{project_path}} / {{chat_id}}`,
       });
@@ -98,7 +98,7 @@ describe('preamble snippet short names', () => {
       await expect(fixture.client.post<ExpandSnippetResponse>('/api/v1/snippets/expand', {
         shortName: 'manual_context',
         arguments: { type: 'default' },
-        context: { type: 'new-chat', chatId, projectPath: unmatchedProject },
+        context: { type: 'new-chat', executorId: fixture.client.executorId, chatId, projectPath: unmatchedProject },
       })).resolves.toMatchObject({
         source: 'preamble',
         sourceId: preamble.id,

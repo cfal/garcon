@@ -81,6 +81,7 @@ describe('repeated agent handoff lifecycle', () => {
               version: 5,
               ownershipIntents: [
                 recoveryIntent({
+                  executorId: fixture.client.executorId,
                   chatId: blockedChatId,
                   sourceAgentId: blockedSource.agentId,
                   sourceEpoch: blockedSource.agentOwnershipEpoch,
@@ -92,6 +93,7 @@ describe('repeated agent handoff lifecycle', () => {
                   },
                 }),
                 recoveryIntent({
+                  executorId: fixture.client.executorId,
                   chatId: recoverableChatId,
                   sourceAgentId: recoverableSource.agentId,
                   sourceEpoch: recoverableSource.agentOwnershipEpoch,
@@ -396,6 +398,7 @@ describe('repeated agent handoff lifecycle', () => {
 });
 
 function recoveryIntent(input: {
+  executorId: string;
   chatId: string;
   sourceAgentId: string;
   sourceEpoch: string;
@@ -412,11 +415,13 @@ function recoveryIntent(input: {
     chatId: input.chatId,
     phase: 'commit-decided',
     source: {
+      executorId: input.executorId,
       agentId: input.sourceAgentId,
       agentOwnershipEpoch: input.sourceEpoch,
     },
     target: {
       execution: {
+        executorId: input.executorId,
         agentId: input.targetAgent.agentId,
         model: input.targetAgent.provider.model,
         apiProviderId: input.targetAgent.provider.providerId,

@@ -417,13 +417,13 @@ describe('per-chat preambles', () => {
 
       const untagged = await fixture.client.post<PreambleSelectionPreviewResponse>(
         '/api/v1/preambles/selection-preview',
-        { projectPath: fixture.dirs.project, agentId, tags: [] },
+        { executorId: fixture.client.executorId, projectPath: fixture.dirs.project, agentId, tags: [] },
       );
       expect(untagged.orderedPreambleIds).toEqual([firstId, matchingAgentId]);
 
       const defaults = await fixture.client.post<PreambleSelectionPreviewResponse>(
         '/api/v1/preambles/selection-preview',
-        { projectPath: fixture.dirs.project, agentId, tags: ['backend'] },
+        { executorId: fixture.client.executorId, projectPath: fixture.dirs.project, agentId, tags: ['backend'] },
       );
       expect(defaults.orderedPreambleIds).toEqual([firstId, matchingAgentId, anyTagId]);
       expect(defaults.projection.eligiblePreambles).toHaveLength(3);
@@ -431,7 +431,7 @@ describe('per-chat preambles', () => {
 
       const allTags = await fixture.client.post<PreambleSelectionPreviewResponse>(
         '/api/v1/preambles/selection-preview',
-        { projectPath: fixture.dirs.project, agentId, tags: ['backend', 'reviewed'] },
+        { executorId: fixture.client.executorId, projectPath: fixture.dirs.project, agentId, tags: ['backend', 'reviewed'] },
       );
       expect(allTags.orderedPreambleIds).toEqual([
         firstId,
@@ -442,7 +442,7 @@ describe('per-chat preambles', () => {
 
       const explicit = await fixture.client.post<PreambleSelectionPreviewResponse>(
         '/api/v1/preambles/selection-preview',
-        {
+        { executorId: fixture.client.executorId,
           projectPath: fixture.dirs.project,
           agentId,
           tags: [],
@@ -457,7 +457,7 @@ describe('per-chat preambles', () => {
       const snapshotBefore = await fixture.client.get<PreamblesSnapshot>('/api/v1/preambles');
       await fixture.client.post<PreambleSelectionPreviewResponse>(
         '/api/v1/preambles/selection-preview',
-        { projectPath: fixture.dirs.project, agentId, tags: [] },
+        { executorId: fixture.client.executorId, projectPath: fixture.dirs.project, agentId, tags: [] },
       );
       expect(await fixture.client.get<PreamblesSnapshot>('/api/v1/preambles')).toEqual(snapshotBefore);
 

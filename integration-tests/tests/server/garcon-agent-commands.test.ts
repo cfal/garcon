@@ -25,7 +25,7 @@ describe('assistant start and schedule commands', () => {
   test.each(['inherited', 'model-only', 'provider-model', 'native-only'])('resolves delegated %s selection through the server and persistence', async (selection) => {
     await withIntegrationFixture(`agent-command-selection-${selection}`, async (fixture) => {
       const original = fixture.directAgents.openAi;
-      const provider = await fixture.client.post<ApiProviderCatalogEntry>('/api/v1/api-providers', {
+      const provider = await fixture.client.post<ApiProviderCatalogEntry>(`/api/v1/api-providers?executorId=${fixture.client.executorId}`, {
         templateId: 'custom', label: 'Synthetic Selection', endpoint: {
           protocol: 'openai-compatible', baseUrl: `${fixture.fakeProviders.openAi.baseUrl}/v1`,
           apiKey: INTEGRATION_OPENAI_API_KEY, capabilities: { chatCompletions: true, responses: false },

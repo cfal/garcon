@@ -34,7 +34,7 @@ async function getJson<T>(client: GarconTestClient, endpoint: string): Promise<T
 describe("Git worktree HTTP API", () => {
   test("lists linked and missing worktrees and builds target candidates", async () => {
     await withIntegrationFixture("git-worktrees", async (fixture) => {
-      const projectPath = fixture.dirs.project;
+      const projectPath = fixture.executionDirs.project;
       const linkedPath = join(projectPath, "linked");
       const missingPath = join(projectPath, "missing");
       const outsidePath = join(fixture.dirs.root, "outside");
@@ -61,7 +61,7 @@ describe("Git worktree HTTP API", () => {
       await rm(missingPath, { recursive: true, force: true });
       await runGit(projectPath, ['worktree', 'add', '-b', 'outside', outsidePath]);
 
-      const query = new URLSearchParams({ project: projectPath });
+      const query = new URLSearchParams({ executorId: fixture.client.executorId, project: projectPath });
       const { worktrees } = await getJson<{
         worktrees: Array<{
           path: string;
@@ -115,6 +115,6 @@ describe("Git worktree HTTP API", () => {
         source: "worktree",
         isMissing: true,
       });
-    });
+    }, { projectRoots: 'separate' });
   });
 });

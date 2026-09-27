@@ -48,7 +48,7 @@ async function getRefs(
   sort?: GitRefSort,
   options: { query?: string; limit?: number } = {},
 ): Promise<GitRefsResponse> {
-  const params = new URLSearchParams({ project });
+  const params = new URLSearchParams({ executorId: client.executorId, project });
   if (sort) {
     params.set("sort", sort.key);
     params.set("direction", sort.direction);
@@ -68,7 +68,7 @@ async function getRefs(
 describe("Git refs HTTP API", () => {
   test("sorts before limiting and exposes canonical branch and tag timestamps", async () => {
     await withIntegrationFixture("git-refs", async (fixture) => {
-      const project = fixture.dirs.project;
+      const project = fixture.executionDirs.project;
       const oldTimestamp = "2024-01-01T00:00:00Z";
       const newTimestamp = "2024-03-01T00:00:00Z";
       const tagTimestamp = "2024-04-01T00:00:00Z";
@@ -152,6 +152,7 @@ describe("Git refs HTTP API", () => {
       ]);
 
       const invalid = new URLSearchParams({
+        executorId: fixture.client.executorId,
         project,
         sort: "updated",
       });
@@ -163,12 +164,12 @@ describe("Git refs HTTP API", () => {
         error:
           "Invalid ref sort. Expected sort=name|updated and direction=asc|desc together.",
       });
-    });
+    }, { projectRoots: 'separate' });
   });
 
   test("preserves the non-repository API error", async () => {
     await withIntegrationFixture("git-refs-non-repository", async (fixture) => {
-      const params = new URLSearchParams({ project: fixture.dirs.project });
+      const params = new URLSearchParams({ executorId: fixture.client.executorId, project: fixture.executionDirs.project });
       const response = await fixture.client.fetch(
         `/api/v1/git/refs?${params}`,
       );
@@ -180,6 +181,6 @@ describe("Git refs HTTP API", () => {
         retryable: false,
         error: "Path is not a Git repository.",
       });
-    });
+    }, { projectRoots: 'separate' });
   });
 });

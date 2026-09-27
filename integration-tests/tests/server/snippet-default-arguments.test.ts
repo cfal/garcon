@@ -73,13 +73,13 @@ describe('snippet default arguments', () => {
             shortName: 'review',
             arguments: { type: 'default' },
             context: {
-              type: 'new-chat',
+              type: 'new-chat', executorId: fixture.client.executorId,
               chatId: prospectiveChatId,
-              projectPath: fixture.dirs.project,
+              projectPath: fixture.executionDirs.project,
             },
           },
         );
-        expect(omitted.expandedText).toBe(`Review staged\nchanges in ${fixture.dirs.project}`);
+        expect(omitted.expandedText).toBe(`Review staged\nchanges in ${fixture.executionDirs.project}`);
 
         const explicitEmpty = await fixture.client.post<ExpandSnippetResponse>(
           '/api/v1/snippets/expand',
@@ -87,13 +87,13 @@ describe('snippet default arguments', () => {
             shortName: 'review',
             arguments: { type: 'value', value: '' },
             context: {
-              type: 'new-chat',
+              type: 'new-chat', executorId: fixture.client.executorId,
               chatId: prospectiveChatId,
-              projectPath: fixture.dirs.project,
+              projectPath: fixture.executionDirs.project,
             },
           },
         );
-        expect(explicitEmpty.expandedText).toBe(`Review  in ${fixture.dirs.project}`);
+        expect(explicitEmpty.expandedText).toBe(`Review  in ${fixture.executionDirs.project}`);
 
         for (const argumentsInput of ['', { type: 'unknown' }]) {
           await expect(
@@ -101,9 +101,9 @@ describe('snippet default arguments', () => {
               shortName: 'review',
               arguments: argumentsInput,
               context: {
-                type: 'new-chat',
+                type: 'new-chat', executorId: fixture.client.executorId,
                 chatId: prospectiveChatId,
-                projectPath: fixture.dirs.project,
+                projectPath: fixture.executionDirs.project,
               },
             }),
           ).rejects.toMatchObject({
@@ -119,7 +119,7 @@ describe('snippet default arguments', () => {
           fixture.client.post('/api/v1/snippets/expand', {
             shortName: 'review',
             arguments: { type: 'default' },
-            context: { type: 'project', projectPath: fixture.dirs.project },
+            context: { type: 'project', projectPath: fixture.executionDirs.project },
           }),
         ).rejects.toMatchObject({
           status: 400,
@@ -135,17 +135,17 @@ describe('snippet default arguments', () => {
             shortName: 'review',
             arguments: { type: 'default' },
             context: {
-              type: 'new-chat',
+              type: 'new-chat', executorId: fixture.client.executorId,
               chatId: prospectiveChatId,
-              projectPath: fixture.dirs.project,
+              projectPath: fixture.executionDirs.project,
             },
           }),
         ).resolves.toMatchObject({
-          expandedText: `Review staged\nchanges in ${fixture.dirs.project}`,
+          expandedText: `Review staged\nchanges in ${fixture.executionDirs.project}`,
         });
       },
       {
-        prepareWorkspace: async ({ workspace }) => {
+        prepareControllerWorkspace: async ({ workspace }) => {
           await writeFile(
             join(workspace, 'snippets.json'),
             JSON.stringify({

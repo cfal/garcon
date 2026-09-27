@@ -20,11 +20,11 @@ async function runGit(projectPath: string, args: string[]): Promise<string> {
   return stdout.trim();
 }
 
-async function postJson<T>(client: GarconTestClient, path: string, body: unknown): Promise<T> {
+async function postJson<T>(client: GarconTestClient, path: string, body: Record<string, unknown>): Promise<T> {
   const response = await client.fetch(path, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ executorId: client.executorId, ...body }),
   });
   const payload = await response.json();
   if (!response.ok)
@@ -41,7 +41,8 @@ describe('Git comparison HTTP API', () => {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          project: fixture.dirs.project,
+          executorId: fixture.client.executorId,
+          project: fixture.executionDirs.project,
           from: { kind: 'revision', revision: 'HEAD' },
           to: { kind: 'working-tree' },
           mode: 'direct',
@@ -53,12 +54,12 @@ describe('Git comparison HTTP API', () => {
       expect(await response.json()).toMatchObject({
         errorCode: 'GIT_OUTSIDE_BASE',
       });
-    });
+    }, { projectRoots: 'separate' });
   });
 
   test('compares revisions, merge bases, and a mutable Working Tree through lazy bodies', async () => {
     await withIntegrationFixture('git-comparison-api', async (fixture) => {
-      const project = fixture.dirs.project;
+      const project = fixture.executionDirs.project;
       await runGit(project, ['init', '-b', 'main']);
       await runGit(project, ['config', 'user.email', 'test@example.com']);
       await runGit(project, ['config', 'user.name', 'Integration Test']);
@@ -130,6 +131,7 @@ describe('Git comparison HTTP API', () => {
         context: 5,
       });
       expect(workingTree.status).toBe('ready');
+      expect(workingTree.executorId).toBe(fixture.client.executorId);
       expect(workingTree.files.map((file) => file.path)).toEqual(['feature.txt', 'untracked.txt']);
       expect(workingTree.files.find((file) => file.path === 'untracked.txt')?.additions).toBe(2);
 
@@ -156,12 +158,12 @@ describe('Git comparison HTTP API', () => {
         status: 'ready',
         fingerprint: workingTree.to.fingerprint,
       });
-    });
+    }, { projectRoots: 'separate' });
   });
 
   test('reports a rewritten HEAD without replacing the frozen comparison snapshot', async () => {
     await withIntegrationFixture('git-comparison-ref-freshness', async (fixture) => {
-      const project = fixture.dirs.project;
+      const project = fixture.executionDirs.project;
       await runGit(project, ['init', '-b', 'main']);
       await runGit(project, ['config', 'user.email', 'test@example.com']);
       await runGit(project, ['config', 'user.name', 'Integration Test']);
@@ -221,6 +223,6 @@ describe('Git comparison HTTP API', () => {
         to: { kind: 'revision', hash: rewrittenHead },
       });
       expect(snapshot.documentId).toBeTruthy();
-    });
+    }, { projectRoots: 'separate' });
   });
 });

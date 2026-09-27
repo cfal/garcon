@@ -24,6 +24,7 @@ describe("scheduled prompt minute recurrence", () => {
           },
           target: {
             type: "new-chat",
+            executorId: fixture.client.executorId,
             agentId: agent.agentId,
             projectPath: fixture.dirs.project,
             model: agent.provider.model,

@@ -24,7 +24,7 @@ describe('scheduled prompt chat ID variables', () => {
         scheduledPrompt: {
           schedule: { type: 'once', runAtUtc: nextRunAtWithBoundaryBuffer() },
           target: {
-            type: 'new-chat',
+            type: 'new-chat', executorId: fixture.client.executorId,
             agentId: agent.agentId,
             projectPath: fixture.dirs.project,
             model: agent.provider.model,

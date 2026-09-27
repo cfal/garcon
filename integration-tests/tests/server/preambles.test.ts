@@ -193,7 +193,7 @@ describe('preambles', () => {
       expect(await fixture.client.get<PreamblesSnapshot>('/api/v1/preambles')).toEqual(snapshot);
       expect(await readFile(path, 'utf8')).toBe(installedFile);
     }, {
-      prepareWorkspace: async (directories) => {
+      prepareControllerWorkspace: async (directories) => {
         await writeFile(join(directories.workspace, 'preambles.json'), `${JSON.stringify({
           version: 2,
           revision: 7,
@@ -222,7 +222,7 @@ describe('preambles', () => {
           content: 'SYNTHETIC_NESTED_PROJECT_BODY',
           scope: {
             type: 'project-paths',
-            rules: [{ projectPath: fixture.dirs.project, includeNested: true }],
+            rules: [{ executorId: fixture.client.executorId, projectPath: fixture.dirs.project, includeNested: true }],
           },
         },
         {
@@ -635,7 +635,7 @@ describe('preambles', () => {
         scheduledPrompt: {
           schedule: { type: 'once', runAtUtc },
           target: {
-            type: 'new-chat',
+            type: 'new-chat', executorId: fixture.client.executorId,
             agentId: agent.agentId,
             projectPath: fixture.dirs.project,
             model: agent.provider.model,
@@ -656,7 +656,7 @@ describe('preambles', () => {
         scheduledPrompt: {
           schedule: { type: 'once', runAtUtc },
           target: {
-            type: 'new-chat',
+            type: 'new-chat', executorId: fixture.client.executorId,
             agentId: agent.agentId,
             projectPath: fixture.dirs.project,
             model: agent.provider.model,

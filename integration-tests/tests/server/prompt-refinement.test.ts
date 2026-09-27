@@ -20,6 +20,7 @@ describe('prompt refinement', () => {
         await fixture.client.updateSettings({
           ui: {
             promptRefinement: {
+              executorId: fixture.client.executorId,
               agentId: target.agentId,
               model: target.provider.model,
               apiProviderId: target.provider.providerId,
@@ -75,6 +76,7 @@ describe('prompt refinement', () => {
       await fixture.client.updateSettings({
         ui: {
           promptRefinement: {
+            executorId: fixture.client.executorId,
             agentId: target.agentId,
             model: target.provider.model,
             apiProviderId: target.provider.providerId,
