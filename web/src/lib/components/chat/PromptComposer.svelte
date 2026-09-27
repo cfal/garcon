@@ -392,6 +392,11 @@
 		return () => cancelAnimationFrame(frameId);
 	});
 
+	function queueCurrentDraft(text: string): void {
+		const chatId = sessions.selectedChatId;
+		if (chatId) composerState.queueDraftSave(chatId, text);
+	}
+
 	async function insertSlashCommand(name: string) {
 		if (promptTransformPending) return;
 		const trigger =
@@ -406,6 +411,7 @@
 		}
 		const replacement = applySlashCommand(composerState.inputText, trigger, name);
 		composerState.inputText = replacement.text;
+		queueCurrentDraft(replacement.text);
 		ui.closeSlashMenu();
 		await tick();
 		textarea?.focus();
@@ -427,6 +433,7 @@
 		}
 		const replacement = applyFileMention(composerState.inputText, trigger, path);
 		composerState.inputText = replacement.text;
+		queueCurrentDraft(replacement.text);
 		ui.closeFileMenu();
 		await tick();
 		textarea?.focus();
@@ -495,6 +502,7 @@
 						caret: start + result.response.expandedText.length,
 					};
 			composerState.inputText = replacement.text;
+			queueCurrentDraft(replacement.text);
 			await settleComposerAfterSnippet(replacement.caret);
 			return 'inserted';
 		} catch (error) {
@@ -534,6 +542,7 @@
 			)
 				return;
 			composerState.inputText = result.response.expandedText;
+			queueCurrentDraft(result.response.expandedText);
 			ui.closeSlashMenu();
 			await settleComposerAfterSnippet(result.response.expandedText.length);
 		} catch (error) {
@@ -621,6 +630,7 @@
 			localSettings.snippetTrigger,
 			(event as InputEvent).isComposing,
 		);
+		queueCurrentDraft(value);
 	}
 
 	const selectedIsProcessing = $derived(isChatProcessing(sessions.selectedChat));

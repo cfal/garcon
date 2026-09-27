@@ -4,6 +4,7 @@ import type { RefinePromptResponse } from '$shared/prompt-refinement';
 import { PROMPT_REFINEMENT_DRAFT_MAX_LENGTH } from '$shared/prompt-refinement';
 import * as refinementApi from '$lib/api/prompt-refinement';
 import { ApiError } from '$lib/api/client';
+import { chatDraftStorageKey } from '$lib/utils/local-persistence';
 import PromptComposerTestHost from './PromptComposerTestHost.svelte';
 import {
 	emitLastPromptEditorTextChange,
@@ -153,6 +154,11 @@ describe('PromptComposer prompt refinement', () => {
 		expect(textarea.selectionEnd).toBe(textarea.value.length);
 		expect(document.activeElement).toBe(textarea);
 		expect(screen.getByText('Prompt refined.')).toBeTruthy();
+		await waitFor(() => {
+			expect(localStorage.getItem(chatDraftStorageKey(chatId))).toBe(
+				'A precise and actionable request.',
+			);
+		});
 	});
 
 	it('avoids revision churn for identical output and preserves failed drafts', async () => {

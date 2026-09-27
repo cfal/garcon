@@ -259,6 +259,9 @@ export class ConversationSessionController {
 		// Route selection can arrive before the chat-list record. Defers the
 		// transition so hydration can retry without poisoning the dedupe key.
 		if (chatId && !this.deps.sessions.byId[chatId]) return;
+		if (this.#lastChatId) {
+			this.deps.composerState.saveDraft(this.#lastChatId);
+		}
 		this.#lastChatId = chatId;
 		this.handleChatSwitch(chatId);
 	}

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ChatDraftStore } from '../chat-draft-store.svelte.js';
+import { chatDraftStorageKey } from '$lib/utils/local-persistence';
 
 describe('ChatDraftStore', () => {
 	afterEach(() => {
@@ -7,24 +8,35 @@ describe('ChatDraftStore', () => {
 		localStorage.clear();
 	});
 
-	it('keeps drafts only in the current browser session, without reading old backups', () => {
-		localStorage.setItem('chat_draft_chat-a', 'obsolete backup');
-		const read = vi.spyOn(Storage.prototype, 'getItem');
-		const write = vi.spyOn(Storage.prototype, 'setItem');
+	it('coalesces persistence without dropping dirty drafts from another chat', () => {
+		vi.useFakeTimers();
 		const drafts = new ChatDraftStore();
-		expect(drafts.view('chat-a').text).toBe('');
 		drafts.setText('chat-a', 'alpha');
-		const attachment = new File(['image'], 'image.png', { type: 'image/png' });
-		drafts.setAttachments('chat-a', [attachment]);
+		drafts.queuePersist('chat-a', 'alpha');
+		vi.advanceTimersByTime(200);
+		drafts.queuePersist('chat-a', 'alpha updated');
 		drafts.setText('chat-b', 'beta');
-		window.dispatchEvent(new Event('pagehide'));
-		expect(drafts.view('chat-a')).toMatchObject({ text: 'alpha', attachments: [attachment] });
-		expect(drafts.view('chat-b').text).toBe('beta');
-		const nextSession = new ChatDraftStore();
-		expect(nextSession.view('chat-a')).toMatchObject({ text: '', attachments: [] });
-		expect(read).not.toHaveBeenCalled();
-		expect(write).not.toHaveBeenCalled();
-		vi.restoreAllMocks();
+		drafts.queuePersist('chat-b', 'beta');
+
+		vi.advanceTimersByTime(249);
+		expect(localStorage.getItem(chatDraftStorageKey('chat-a'))).toBeNull();
+		expect(localStorage.getItem(chatDraftStorageKey('chat-b'))).toBeNull();
+		vi.advanceTimersByTime(1);
+
+		expect(localStorage.getItem(chatDraftStorageKey('chat-a'))).toBe('alpha updated');
+		expect(localStorage.getItem(chatDraftStorageKey('chat-b'))).toBe('beta');
+	});
+
+	it('restores persisted text in a new store without persisting attachments', () => {
+		const drafts = new ChatDraftStore();
+		drafts.setTextAndFlush('chat-a', 'unfinished thought');
+		drafts.setAttachments('chat-a', [new File(['image'], 'image.png', { type: 'image/png' })]);
+		drafts.destroy();
+
+		const restored = new ChatDraftStore();
+		restored.load('chat-a');
+		expect(restored.view('chat-a')).toMatchObject({ text: 'unfinished thought', attachments: [] });
+		restored.destroy();
 	});
 
 	it('keeps one reactive entry for every consumer of the same chat', () => {
@@ -49,6 +61,7 @@ describe('ChatDraftStore', () => {
 		expect(drafts.appendBlock('chat-a', 'Review block')).toBe('appended');
 		expect(drafts.view('chat-a').text).toBe('Existing\n\nReview block');
 		expect(drafts.view('chat-a').attachments).toEqual([attachment]);
+		expect(localStorage.getItem(chatDraftStorageKey('chat-a'))).toBe('Existing\n\nReview block');
 	});
 
 	it('skips duplicate suppression only when appending allows duplicates', () => {
@@ -56,7 +69,9 @@ describe('ChatDraftStore', () => {
 		drafts.appendBlock('chat-a', 'Review block');
 
 		expect(drafts.appendBlock('chat-a', 'Review block')).toBe('duplicate');
-		expect(drafts.appendBlock('chat-a', 'Review block', { allowDuplicate: true })).toBe('appended');
+		expect(drafts.appendBlock('chat-a', 'Review block', { allowDuplicate: true })).toBe(
+			'appended',
+		);
 		expect(drafts.view('chat-a').text).toBe('Review block\n\nReview block');
 	});
 
@@ -72,14 +87,18 @@ describe('ChatDraftStore', () => {
 		expect(drafts.view('chat-a').text).toBe(expected);
 	});
 
-	it('clears text and attachments atomically', () => {
+	it('clears text, attachments, pending persistence, and stored text atomically', () => {
+		vi.useFakeTimers();
 		const drafts = new ChatDraftStore();
 		drafts.setText('chat-a', 'pending');
 		drafts.setAttachments('chat-a', [new File(['a'], 'a.png', { type: 'image/png' })]);
+		drafts.queuePersist('chat-a', 'pending');
 
 		const revision = drafts.clear('chat-a');
+		vi.runAllTimers();
 
 		expect(drafts.view('chat-a')).toMatchObject({ text: '', attachments: [], revision });
+		expect(localStorage.getItem(chatDraftStorageKey('chat-a'))).toBeNull();
 	});
 
 	it('restores a rejected submission only while its cleared revision is current', () => {
@@ -93,20 +112,38 @@ describe('ChatDraftStore', () => {
 
 		const secondSnapshot = drafts.snapshot('chat-a');
 		const secondClear = drafts.clear('chat-a');
-		drafts.setText('chat-a', 'newer preview edit');
+		drafts.setTextAndFlush('chat-a', 'newer preview edit');
 
 		expect(drafts.restoreIfRevision('chat-a', secondClear, secondSnapshot)).toBe(false);
 		expect(drafts.view('chat-a').text).toBe('newer preview edit');
 	});
 
-	it('discards only the deleted chat and clears all entries on destruction', () => {
+	it('keeps memory authoritative after the first load and discards only on chat deletion', () => {
+		localStorage.setItem(chatDraftStorageKey('chat-a'), 'stored');
 		const drafts = new ChatDraftStore();
-		drafts.setText('chat-a', 'alpha');
-		drafts.setText('chat-b', 'beta');
+		drafts.load('chat-a');
+		localStorage.setItem(chatDraftStorageKey('chat-a'), 'stale external value');
+		drafts.load('chat-a');
+
+		expect(drafts.view('chat-a').text).toBe('stored');
 		drafts.discardChat('chat-a');
 		expect(drafts.view('chat-a').text).toBe('');
-		expect(drafts.view('chat-b').text).toBe('beta');
-		drafts.destroy();
-		expect(drafts.view('chat-b').text).toBe('');
+		expect(localStorage.getItem(chatDraftStorageKey('chat-a'))).toBeNull();
+	});
+
+	it('flushes every dirty chat on pagehide', () => {
+		vi.useFakeTimers();
+		const drafts = new ChatDraftStore();
+		const unmount = drafts.mountPersistenceLifecycle();
+		drafts.setText('chat-a', 'alpha');
+		drafts.queuePersist('chat-a', 'alpha');
+		drafts.setText('chat-b', 'beta');
+		drafts.queuePersist('chat-b', 'beta');
+
+		window.dispatchEvent(new Event('pagehide'));
+
+		expect(localStorage.getItem(chatDraftStorageKey('chat-a'))).toBe('alpha');
+		expect(localStorage.getItem(chatDraftStorageKey('chat-b'))).toBe('beta');
+		unmount();
 	});
 });

@@ -8,7 +8,7 @@ import {
 } from '$lib/components/prompt-editor/__tests__/PromptEditorStub.svelte';
 import type { GitQuickSummaryReady } from '$lib/api/git.js';
 import { ImageAttachmentState } from '$lib/chat/composer/image-attachment.svelte.js';
-import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence.js';
+import { chatDraftStorageKey, LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence.js';
 import * as snippetsApi from '$lib/api/snippets';
 import * as commandsApi from '$lib/api/commands.js';
 import { PromptComposerHeightState } from '../prompt-composer-height-state.svelte.js';
@@ -424,6 +424,7 @@ describe('PromptComposer focus', () => {
 
 	it('opens a live expanded editor and restores directional selection on Escape', async () => {
 		const chatId = 'chat-expanded-live';
+		localStorage.removeItem(chatDraftStorageKey(chatId));
 		const { rerender } = render(PromptComposerTestHost, {
 			selectedChatId: chatId,
 			composerEditorOpenRequestId: 0,
@@ -442,6 +443,9 @@ describe('PromptComposer focus', () => {
 		await fireEvent.input(editor);
 		await fireEvent.pointerUp(editor);
 		await waitFor(() => expect(textarea.value).toBe('alpha\nbeta\ngamma'));
+		await waitFor(() =>
+			expect(localStorage.getItem(chatDraftStorageKey(chatId))).toBe('alpha\nbeta\ngamma'),
+		);
 
 		await fireEvent.keyDown(editor, { key: 'Escape' });
 		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
@@ -449,6 +453,7 @@ describe('PromptComposer focus', () => {
 		expect(textarea.selectionStart).toBe(3);
 		expect(textarea.selectionEnd).toBe(16);
 		expect(textarea.selectionDirection).toBe('backward');
+		localStorage.removeItem(chatDraftStorageKey(chatId));
 	});
 
 	it('synchronizes external composer changes without echoing a second revision', async () => {
@@ -527,10 +532,14 @@ describe('PromptComposer focus', () => {
 		emitLastPromptEditorTextChange('stale first-chat write');
 
 		expect(textarea.value).toBe('second draft');
-		await rerender({ selectedChatId: firstChatId });
-		expect(textarea.value).toBe('first draft');
-		await rerender({ selectedChatId: secondChatId });
-		expect(textarea.value).toBe('second draft');
+		await waitFor(() =>
+			expect(localStorage.getItem(chatDraftStorageKey(secondChatId))).toBe('second draft'),
+		);
+		expect(localStorage.getItem(chatDraftStorageKey(secondChatId))).not.toBe(
+			'stale first-chat write',
+		);
+		localStorage.removeItem(chatDraftStorageKey(firstChatId));
+		localStorage.removeItem(chatDraftStorageKey(secondChatId));
 	});
 
 	it('routes exact enabled Ctrl+Enter through steer-preferred submission', async () => {

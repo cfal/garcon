@@ -641,6 +641,7 @@
 		};
 	});
 
+	onMount(() => chatDrafts.mountPersistenceLifecycle());
 	onDestroy(() => chatDrafts.destroy());
 
 	function handleChatListAutohideChange(enabled: boolean): void {

@@ -633,6 +633,7 @@ function createDeps(chat = createRunningChat()) {
 				this.contentRevision += 1;
 				return true;
 			}),
+			saveDraft: vi.fn(),
 			restoreDraft: vi.fn(),
 		},
 		agentState: {
@@ -1082,7 +1083,7 @@ describe('ConversationSessionController', () => {
 		});
 	});
 
-	it('selects the next chat draft without a persistence step', () => {
+	it('persists the latest composer text before restoring the next chat draft', () => {
 		const { deps } = createDeps();
 		deps.sessions.byId['chat-2'] = createRunningChat({ id: 'chat-2' });
 		const controller = new ConversationSessionController(deps);
@@ -1091,7 +1092,10 @@ describe('ConversationSessionController', () => {
 		deps.composerState.inputText = 'unfinished thought';
 		controller.handleChatSwitchIfChanged('chat-2');
 
-		expect(deps.composerState.restoreDraft).toHaveBeenLastCalledWith('chat-2');
+		expect(deps.composerState.saveDraft).toHaveBeenCalledWith('chat-1');
+		expect(deps.composerState.saveDraft.mock.invocationCallOrder[0]).toBeLessThan(
+			deps.composerState.restoreDraft.mock.invocationCallOrder.at(-1) ?? Number.MAX_SAFE_INTEGER,
+		);
 	});
 
 	it.each([true, false])(

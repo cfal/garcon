@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+	chatDraftStorageKey,
 	getLocalStorageItem,
 	getSessionStorageItem,
 	LOCAL_STORAGE_KEYS,
@@ -25,6 +26,14 @@ describe('local persistence helpers', () => {
 		removeLocalStorageItem(LOCAL_STORAGE_KEYS.authToken);
 
 		expect(getLocalStorageItem(LOCAL_STORAGE_KEYS.authToken)).toBeNull();
+	});
+
+	it('builds typed chat draft keys', () => {
+		const key = chatDraftStorageKey('chat-1');
+
+		setLocalStorageItem(key, 'draft');
+
+		expect(localStorage.getItem('chat_draft_chat-1')).toBe('draft');
 	});
 
 	it('reads, writes, and removes sessionStorage keys', () => {

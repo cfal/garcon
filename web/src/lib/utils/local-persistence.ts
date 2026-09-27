@@ -28,13 +28,18 @@ export const LOCAL_STORAGE_KEYS = {
 	workspaceLayout: 'workspace_layout_v2',
 } as const;
 
+export const LOCAL_STORAGE_PREFIXES = {
+	chatDraft: 'chat_draft_',
+} as const;
+
 export const SESSION_STORAGE_KEYS = {
 	pendingChatId: 'pendingChatId',
 	terminalClientId: 'terminal_client_id_v1',
 	terminalLauncherDismissed: 'terminal_launcher_dismissed_v1',
 } as const;
 
-export type LocalStorageKey = ValueOf<typeof LOCAL_STORAGE_KEYS>;
+export type ChatDraftStorageKey = `${typeof LOCAL_STORAGE_PREFIXES.chatDraft}${string}`;
+export type LocalStorageKey = ValueOf<typeof LOCAL_STORAGE_KEYS> | ChatDraftStorageKey;
 export type SessionStorageKey = ValueOf<typeof SESSION_STORAGE_KEYS>;
 
 type BrowserStorageKind = 'local' | 'session';
@@ -45,6 +50,10 @@ function getBrowserStorage(kind: BrowserStorageKind): Storage | null {
 	} catch {
 		return null;
 	}
+}
+
+export function chatDraftStorageKey(chatId: string): ChatDraftStorageKey {
+	return `${LOCAL_STORAGE_PREFIXES.chatDraft}${chatId}`;
 }
 
 export function getLocalStorageItem(key: LocalStorageKey): string | null {
