@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { mkdir, rm } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { withE2eFixture } from '../../support/e2e-fixture.js';
 import { selectExecutor } from '../../support/executor-ui.js';
@@ -99,6 +99,51 @@ test('executor availability and missing project notices replace each other throu
     await fixture.page.waitForFunction(() => !document.querySelector('[data-project-availability-notice]'));
     await app.waitForButtonEnabled('Send message');
     expect(await fixture.page.$eval('[data-composer] textarea', (element) => (element as HTMLTextAreaElement).value)).toBe(draft);
+    fixture.assertNoBrowserErrors();
+  }, { executionBackend: 'remote-controller-dials', projectRoots: 'separate' });
+}, 90_000);
+
+test('choosing a folder from the missing project notice repairs a remote chat in place', async () => {
+  await withE2eFixture('executor-choose-folder-repair', async (fixture) => {
+    const { client, directAgents, executionDirs } = fixture.integration;
+    const missing = join(executionDirs.project, 'synthetic-project');
+    const chosen = join(executionDirs.project, 'chosen-project');
+    await mkdir(missing);
+    await mkdir(chosen);
+    await writeFile(join(chosen, 'chosen.txt'), 'Synthetic chosen folder\n');
+    const chatId = fixture.integration.newChatId();
+    const started = await client.startDirectChat({
+      chatId, agent: directAgents.openAi, projectPath: missing, content: 'Synthetic missing project input',
+    });
+    await client.waitForTurnTerminal(chatId, started.turnId);
+    await client.waitForProcessing(chatId, false);
+    await rm(missing, { recursive: true });
+    const app = new SpaDriver(fixture.page, fixture.integration);
+    await app.setViewport(1_600, 900);
+    await app.openChat(chatId);
+    await fixture.waitForSpaWebSocket();
+    const draft = 'Synthetic draft kept through folder repair';
+    await app.fill('[data-composer] textarea', draft);
+    await fixture.page.waitForFunction(() => [...document.querySelectorAll(
+      '[data-project-availability-notice] button',
+    )].some((button) => button.textContent?.trim() === 'Choose folder'));
+    await fixture.page.$eval('[data-project-availability-notice]', (element) => {
+      const button = [...element.querySelectorAll<HTMLButtonElement>('button')]
+        .find((candidate) => candidate.textContent?.trim() === 'Choose folder');
+      if (!button) throw new Error('Choose folder is unavailable');
+      button.click();
+    });
+    await app.waitForText('Change project path');
+    await app.fill('[role="dialog"] input', chosen);
+    await app.waitForDialogButtonEnabled('Update path');
+    await app.clickDialogButton('Update path');
+    await fixture.page.waitForFunction(() => !document.querySelector('[data-project-availability-notice]'));
+    expect((await client.getChatSnapshot(chatId)).chat).toMatchObject({
+      executorId: client.executorId, projectPath: chosen,
+    });
+    await fixture.page.waitForSelector(`[data-file-tree-row] [title="${join(chosen, 'chosen.txt')}"]`);
+    expect(await fixture.page.$eval('[data-composer] textarea', (element) => (element as HTMLTextAreaElement).value)).toBe(draft);
+    await app.waitForButtonEnabled('Send message');
     fixture.assertNoBrowserErrors();
   }, { executionBackend: 'remote-controller-dials', projectRoots: 'separate' });
 }, 90_000);
