@@ -3,18 +3,22 @@ import { expect as browserExpect } from 'playwright/test';
 import type { Request } from 'playwright';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
+import { effectiveExecutorId } from '../../../common/executors.js';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { collapseCanonicalFilesWindow } from '../../support/chromium-workspace.js';
 import { Deferred } from '../../support/deferred.js';
 
-test('chat host selectors fit narrow containers and stage complete cancellable handoffs', async () => {
+test('chat host selectors fit narrow containers and commit cancellable handoffs without sending', async () => {
   const failedResponses: Promise<{ url: string; status: number; body: string; beforeHandoff: boolean }>[] = [];
   await withChromiumFixture('chat-host-selection', async ({ page, integration, browserErrors }, phase) => {
     const requestsBeforeHandoff = new WeakSet<Request>();
     const consoleErrorUrls: string[] = [];
     let handoffSubmitted = false;
+    let runRequests = 0;
     page.on('request', request => {
-      if (new URL(request.url()).pathname === '/api/v1/chats/run') handoffSubmitted = true;
+      const { pathname } = new URL(request.url());
+      if (pathname === '/api/v1/chats/agent-handoff') handoffSubmitted = true;
+      if (pathname === '/api/v1/chats/run') runRequests += 1;
       if (!handoffSubmitted) requestsBeforeHandoff.add(request);
     });
     page.on('console', message => {
@@ -73,24 +77,29 @@ test('chat host selectors fit narrow containers and stage complete cancellable h
     await browserExpect(host()).toBeVisible();
     expect((await client.getChatSnapshot(chatId)).chat.executorId).toBe(client.executorId);
     phase('destination confirmation');
-    await host().click();
-    await page.getByRole('menuitemradio', { name: 'Local', exact: true }).click();
-    await page.getByLabel('Destination project folder').fill(integration.dirs.project);
-    await page.getByRole('button', { name: 'Use This Executor', exact: true }).click();
-    await browserExpect(controls().getByRole('button', { name: 'Executor: Local', exact: true })).toBeVisible();
-    expect((await client.getChatSnapshot(chatId)).chat.executorId).toBe(client.executorId);
+    const handoffCommitted = page.waitForResponse(response =>
+      new URL(response.url()).pathname === '/api/v1/chats/agent-handoff');
     const destinationResolution = page.waitForResponse(response => {
       const url = new URL(response.url());
       return url.pathname === '/api/v1/projects/resolve' && url.searchParams.get('chatId') === chatId
         && url.searchParams.get('executorId') === 'local' && response.status() === 200;
     });
-    await page.getByRole('button', { name: 'Send message', exact: true }).click();
-    await browserExpect(composer).toHaveValue('');
-    await browserExpect.poll(async () => (await client.getChatSnapshot(chatId)).chat.executorId ?? 'local').toBe('local');
+    await host().click();
+    await page.getByRole('menuitemradio', { name: 'Local', exact: true }).click();
+    await page.getByLabel('Destination project folder').fill(integration.dirs.project);
+    await page.getByRole('button', { name: 'Use This Executor', exact: true }).click();
+    expect((await handoffCommitted).status()).toBe(200);
+    await browserExpect(controls().getByRole('button', { name: 'Executor: Local', exact: true })).toBeVisible();
+    expect(effectiveExecutorId((await client.getChatSnapshot(chatId)).chat.executorId)).toBe('local');
     expect(await (await destinationResolution).json()).toMatchObject({
       target: { kind: 'chat', chatId, executorId: 'local', projectPath: integration.dirs.project },
       resolution: { kind: 'available' },
     });
+    await browserExpect(composer).toHaveValue('Synthetic retained handoff input');
+    expect(runRequests).toBe(0);
+    await page.getByRole('button', { name: 'Send message', exact: true }).click();
+    await browserExpect(composer).toHaveValue('');
+    expect(effectiveExecutorId((await client.getChatSnapshot(chatId)).chat.executorId)).toBe('local');
     await browserExpect(controls().getByRole('button', { name: 'Executor: Local', exact: true })).toBeVisible();
     await browserExpect(page.getByText('The chat project changed', { exact: true })).toHaveCount(0);
 
