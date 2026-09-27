@@ -1760,9 +1760,11 @@ model context, carryover, or export.
 - **Preview** selects the latest conversational row; notices, provider errors,
   and lifecycle state are separate UI signals, never preview text.
   Cold list-cache repair is best effort: after readiness it samples bounded head
-  and tail ordinal ranges, skipping oversized payloads rather than scanning the
-  full ledger. Missing candidates leave cached metadata unchanged; live commits
-  continue updating previews normally. Startup loads only persisted list metadata.
+  and tail ordinal ranges rather than scanning the full ledger. Oversized tail
+  payloads are skipped; an omitted head candidate defers repair because it may
+  contain the first input. Missing candidates also leave cached metadata unchanged;
+  live commits continue updating previews normally. Startup loads only persisted
+  list metadata.
 - **Context seeding and carryover** use the conversational fold. A new-session
   seed excludes rows composed into the outgoing prompt so they appear exactly
   once across that seed and prompt. A message the user declined to resend
