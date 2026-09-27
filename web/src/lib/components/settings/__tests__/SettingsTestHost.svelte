@@ -10,7 +10,6 @@
 		setAppShell,
 		setApiProviders,
 		setExecutors,
-		setFileSessions,
 		setGhCapability,
 		setLocalSettings,
 		setModelCatalog,
@@ -19,7 +18,6 @@
 	} from '$lib/context';
 	import type { AppShellStore } from '$lib/stores/app-shell.svelte';
 	import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
-	import type { FileSessionRegistry } from '$lib/files/sessions/file-session-registry.svelte.js';
 	import {
 		LocalSettingsStore,
 		type LocalSettingsSnapshot,
@@ -33,7 +31,6 @@
 		remoteSettings: RemoteSettingsStore;
 		onLocalSet?: (key: string, value: unknown) => void;
 		onLocalToggle?: (key: string) => void;
-		onClearRecovery?: FileSessionRegistry['clearRecovery'];
 		executors?: readonly ExecutorSnapshot[];
 		executorStore?: ExecutorsStore;
 		ghCapability?: GhCapabilityContext;
@@ -44,7 +41,6 @@
 		remoteSettings,
 		onLocalSet = () => undefined,
 		onLocalToggle = () => undefined,
-		onClearRecovery = async () => true,
 		executors,
 		executorStore,
 		ghCapability = { forExecutor: () => makeTestGhCapability() },
@@ -199,15 +195,17 @@
 	setGhCapability(untrack(() => ghCapability));
 
 	setAppShell(untrack(() => appShell));
-	setApiProviders(new ApiProvidersStore(() => {}, {
-		read: async () => ({ providers: [], assignments: { version: 1, revision: 0, assignments: {} } }),
-		assign: async () => ({ providers: [], assignments: { revision: 0, assignments: {} } }),
-		unassign: async () => ({ providers: [], assignments: { revision: 0, assignments: {} } }), delete: async () => ({ success: true }),
-	}));
-	const files: Pick<FileSessionRegistry, 'clearRecovery'> = {
-		clearRecovery: () => onClearRecovery(),
-	};
-	setFileSessions(files as FileSessionRegistry);
+	setApiProviders(
+		new ApiProvidersStore(() => {}, {
+			read: async () => ({
+				providers: [],
+				assignments: { version: 1, revision: 0, assignments: {} },
+			}),
+			assign: async () => ({ providers: [], assignments: { revision: 0, assignments: {} } }),
+			unassign: async () => ({ providers: [], assignments: { revision: 0, assignments: {} } }),
+			delete: async () => ({ success: true }),
+		}),
+	);
 	setRemoteSettings(untrack(() => remoteSettings));
 	setLocalSettings(localSettings);
 	setThemeRuntime({

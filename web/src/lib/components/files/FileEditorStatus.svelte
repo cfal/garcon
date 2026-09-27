@@ -12,7 +12,6 @@
 		if (session.document.missing) return m.editor_status_missing();
 		if (session.readOnly) return m.editor_status_read_only();
 		if (session.saving) return m.editor_actions_saving();
-		if (session.document.recovered) return m.editor_status_recovered();
 		if (session.isExternallyStale) return m.editor_status_disk_changed();
 		if (session.dirty) return m.editor_status_modified();
 		return m.editor_actions_saved();

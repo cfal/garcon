@@ -7,7 +7,7 @@ import type { WorkbenchCommandRegistryDeps } from '$lib/workspace/workbench-comm
 import type { FileTreeStore } from '$lib/files/tree/file-tree.svelte.js';
 import type { FilesSurfaceController } from '$lib/workspace/singleton-surfaces.svelte.js';
 import { FileNavigationStore } from '$lib/files/navigation/file-navigation-store.svelte.js';
-import { createMemoryFileDraftRepository } from '$lib/files/persistence/file-draft-repository.js';
+import { createMemoryFileNavigationRepository } from '$lib/files/persistence/file-navigation-repository.js';
 import { fileIdentityKey } from '$lib/files/documents/file-identity.js';
 
 type CommandMenuWorkspacePort = Pick<
@@ -181,7 +181,7 @@ describe('CommandMenu', () => {
 				permissionsRwx: 'rw-r--r--',
 			},
 		];
-		files.navigation = new FileNavigationStore(createMemoryFileDraftRepository(), {
+		files.navigation = new FileNavigationStore(createMemoryFileNavigationRepository(), {
 			userNamespace: 'test-user',
 			deploymentId: 'test-deployment',
 		});

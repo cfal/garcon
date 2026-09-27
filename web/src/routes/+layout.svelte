@@ -265,18 +265,18 @@
 	// Connects WebSocket after authentication.
 	// Uses untrack to prevent the effect from re-running when connect() mutates
 	// internal $state fields (which would cause an infinite reconnect loop).
-	let fileRecoveryInitialized = false;
+	let fileNavigationInitialized = false;
 	$effect(() => {
 		if (auth.isAuthenticated) {
 			const token = auth.token;
 			const authDisabled = auth.authDisabled;
-			if (!fileRecoveryInitialized) {
+			if (!fileNavigationInitialized) {
 				const userId = untrack(() => auth.user?.id);
 				if (authDisabled || userId) {
-					fileRecoveryInitialized = true;
+					fileNavigationInitialized = true;
 					const namespace = authDisabled ? 'local' : `user:${userId}`;
 					untrack(() => {
-						void fileSessions.initializeRecovery(namespace);
+						void fileSessions.initializeNavigation(namespace);
 					});
 				}
 			}
@@ -358,7 +358,10 @@
 		untrack(() => void preambles.refreshIfLoaded());
 		untrack(() => void snippets.refreshIfLoaded());
 		untrack(() => void executors.refresh());
-		untrack(() => { apiProviders.invalidate(); void modelCatalog.refreshIfStale(); });
+		untrack(() => {
+			apiProviders.invalidate();
+			void modelCatalog.refreshIfStale();
+		});
 		// A reconnect also refreshes an already-open chat selection editor;
 		// its dirty draft is preserved by the controller's refresh path.
 		untrack(() => chatPreambleSelectionInvalidationHub.publishReconnect());

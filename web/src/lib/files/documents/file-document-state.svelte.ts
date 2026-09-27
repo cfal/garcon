@@ -38,9 +38,6 @@ export class FileDocumentState {
 	freshnessError = $state<string | null>(null);
 	readOnly = $state(false);
 	missing = $state(false);
-	recovered = $state(false);
-	recoveryError = $state<string | null>(null);
-	pendingRecoveryContent: string | null = null;
 
 	loadedRevision = $state<FileRevision | null>(null);
 	imageObjectUrl = $state<string | null>(null);

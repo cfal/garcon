@@ -56,7 +56,6 @@ export class FileSaveCoordinator {
 			document.refreshError = null;
 			document.freshnessError = null;
 			document.saveError = null;
-			document.recovered = false;
 		} catch (error) {
 			if (!(error instanceof ApiError) || error.errorCode === 'FILE_SAVE_OUTCOME_UNKNOWN')
 				document.isExternallyStale = true;

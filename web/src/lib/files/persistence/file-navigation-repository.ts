@@ -1,29 +1,11 @@
 import type { FileRevision } from '$shared/file-contracts';
-import { effectiveExecutorId, parseExecutorId } from '$shared/executors';
-import * as m from '$lib/paraglide/messages.js';
 import { indexedDbRequest, indexedDbTransactionCompletion } from '$lib/utils/indexed-db.js';
 
-export const FILE_DRAFT_DATABASE_NAME = 'garcon-file-drafts-v1';
-export const FILE_DRAFT_STORE_NAME = 'drafts';
+export const FILE_NAVIGATION_DATABASE_NAME = 'garcon-file-drafts-v1';
 export const FILE_RECENT_STORE_NAME = 'recents';
 export const FILE_NAVIGATION_STORE_NAME = 'navigation';
-export const FILE_DRAFT_SCHEMA_VERSION = 2;
-export const FILE_DRAFT_DOCUMENT_LIMIT_BYTES = 24 * 1024 * 1024;
-export const FILE_DRAFT_TOTAL_LIMIT_BYTES = 100 * 1024 * 1024;
-export const FILE_DRAFT_LIMIT = 20;
+export const FILE_NAVIGATION_SCHEMA_VERSION = 3;
 export const FILE_RECENT_LIMIT = 100;
-
-export interface FileDraft {
-	executorId?: string | null;
-	schemaVersion: 1;
-	deploymentId: string;
-	userNamespace: string;
-	documentId: string;
-	canonicalFileRootPath: string;
-	normalizedRelativePath: string;
-	content: string;
-	savedAt: number;
-}
 
 export interface FileRecentLocationV1 {
 	executorId?: string | null;
@@ -52,12 +34,7 @@ export interface FileNavigationHistoryV1 {
 	updatedAt: number;
 }
 
-export interface FileDraftRepository {
-	readonly durable: boolean;
-	putDraft(record: FileDraft): Promise<void>;
-	deleteDraft(documentId: string): Promise<void>;
-	getDrafts(userNamespace: string, deploymentId: string): Promise<FileDraft[]>;
-	clearDrafts(userNamespace: string, deploymentId: string): Promise<void>;
+export interface FileNavigationRepository {
 	putRecent(record: FileRecentLocationV1): Promise<void>;
 	getRecents(userNamespace: string, deploymentId: string): Promise<FileRecentLocationV1[]>;
 	putNavigation(record: FileNavigationHistoryV1): Promise<void>;
@@ -68,10 +45,10 @@ export interface FileDraftRepository {
 	close(): void;
 }
 
-export function createFileDraftRepository(
+export function createFileNavigationRepository(
 	indexedDb: Pick<IDBFactory, 'open'> | undefined = globalThis.indexedDB,
-): FileDraftRepository {
-	if (!indexedDb) return createMemoryFileDraftRepository(false);
+): FileNavigationRepository {
+	if (!indexedDb) return createMemoryFileNavigationRepository();
 	let databasePromise: Promise<IDBDatabase> | null = null;
 	const open = () => {
 		if (!databasePromise) {
@@ -86,36 +63,6 @@ export function createFileDraftRepository(
 		return databasePromise;
 	};
 	return {
-		durable: true,
-		async putDraft(record) {
-			await runTransaction(await open(), FILE_DRAFT_STORE_NAME, 'readwrite', async (store) => {
-				const records = await indexedDbRequest<FileDraft[]>(store.getAll());
-				for (const id of draftEvictions(record, records)) {
-					await indexedDbRequest(store.delete(id));
-				}
-				await indexedDbRequest(store.put(record));
-			});
-		},
-		async deleteDraft(documentId) {
-			await write(await open(), FILE_DRAFT_STORE_NAME, (store) => store.delete(documentId));
-		},
-		async getDrafts(userNamespace, deploymentId) {
-			return latestDrafts(
-				await getAll<FileDraft>(await open(), FILE_DRAFT_STORE_NAME),
-				userNamespace,
-				deploymentId,
-			);
-		},
-		async clearDrafts(userNamespace, deploymentId) {
-			await runTransaction(await open(), FILE_DRAFT_STORE_NAME, 'readwrite', async (store) => {
-				const records = await indexedDbRequest<FileDraft[]>(store.getAll());
-				for (const record of records) {
-					if (record.userNamespace === userNamespace && record.deploymentId === deploymentId) {
-						await indexedDbRequest(store.delete(record.documentId));
-					}
-				}
-			});
-		},
 		async putRecent(record) {
 			const database = await open();
 			await runTransaction(database, FILE_RECENT_STORE_NAME, 'readwrite', async (store) => {
@@ -171,28 +118,10 @@ export function createFileDraftRepository(
 	};
 }
 
-export function createMemoryFileDraftRepository(durable = true): FileDraftRepository {
-	const drafts = new Map<string, FileDraft>();
+export function createMemoryFileNavigationRepository(): FileNavigationRepository {
 	const recents = new Map<string, FileRecentLocationV1>();
 	const navigation = new Map<string, FileNavigationHistoryV1>();
 	return {
-		durable,
-		async putDraft(record) {
-			for (const id of draftEvictions(record, [...drafts.values()])) drafts.delete(id);
-			drafts.set(record.documentId, structuredClone(record));
-		},
-		async deleteDraft(documentId) {
-			drafts.delete(documentId);
-		},
-		async getDrafts(userNamespace, deploymentId) {
-			return structuredClone(latestDrafts([...drafts.values()], userNamespace, deploymentId));
-		},
-		async clearDrafts(userNamespace, deploymentId) {
-			for (const [id, record] of drafts) {
-				if (record.userNamespace === userNamespace && record.deploymentId === deploymentId)
-					drafts.delete(id);
-			}
-		},
 		async putRecent(record) {
 			recents.set(
 				scopedRecordKey(record.userNamespace, record.deploymentId, record.key),
@@ -238,19 +167,20 @@ function openDatabase(
 	onVersionChange: () => void,
 ): Promise<IDBDatabase> {
 	return new Promise((resolve, reject) => {
-		const request = indexedDb.open(FILE_DRAFT_DATABASE_NAME, FILE_DRAFT_SCHEMA_VERSION);
+		const request = indexedDb.open(FILE_NAVIGATION_DATABASE_NAME, FILE_NAVIGATION_SCHEMA_VERSION);
 		let abandoned = false;
 		request.onblocked = () => {
 			abandoned = true;
-			reject(new Error(m.file_recovery_storage_blocked()));
+			reject(new Error('File navigation storage is blocked by another tab'));
 		};
 		request.onupgradeneeded = () => {
 			if (abandoned) {
 				request.transaction?.abort();
 				return;
 			}
+			if (request.result.objectStoreNames.contains('drafts'))
+				request.result.deleteObjectStore('drafts');
 			for (const [storeName, keyPath] of [
-				[FILE_DRAFT_STORE_NAME, 'documentId'],
 				[FILE_RECENT_STORE_NAME, 'key'],
 				[FILE_NAVIGATION_STORE_NAME, 'key'],
 			] as const) {
@@ -271,7 +201,7 @@ function openDatabase(
 			resolve(database);
 		};
 		request.onerror = () =>
-			reject(request.error ?? new Error(m.file_recovery_storage_open_failed()));
+			reject(request.error ?? new Error('Could not open file navigation storage'));
 	});
 }
 
@@ -314,77 +244,4 @@ async function runTransaction<T>(
 		await completion.catch(() => undefined);
 		throw error;
 	}
-}
-
-export function fileDraftKey(
-	userNamespace: string,
-	deploymentId: string,
-	canonicalFileRootPath: string,
-	normalizedRelativePath: string,
-	executorId?: string | null,
-): string {
-	if (effectiveExecutorId(executorId) !== 'local')
-		return scopedRecordKey(
-			userNamespace,
-			deploymentId,
-			effectiveExecutorId(executorId),
-			canonicalFileRootPath,
-			normalizedRelativePath,
-		);
-	return scopedRecordKey(
-		userNamespace,
-		deploymentId,
-		canonicalFileRootPath,
-		normalizedRelativePath,
-	);
-}
-
-function latestDrafts(
-	records: readonly FileDraft[],
-	userNamespace: string,
-	deploymentId: string,
-): FileDraft[] {
-	const latest = new Map<string, FileDraft>();
-	for (const record of [...records].sort((a, b) => b.savedAt - a.savedAt)) {
-		if (
-			!parseExecutorId(record.executorId) ||
-			record.schemaVersion !== 1 ||
-			record.userNamespace !== userNamespace ||
-			record.deploymentId !== deploymentId
-		)
-			continue;
-		const key = fileDraftKey(
-			userNamespace,
-			deploymentId,
-			record.canonicalFileRootPath,
-			record.normalizedRelativePath,
-			record.executorId,
-		);
-		if (!latest.has(key)) latest.set(key, record);
-	}
-	return [...latest.values()].slice(0, FILE_DRAFT_LIMIT);
-}
-
-function draftEvictions(record: FileDraft, records: readonly FileDraft[]): string[] {
-	let bytes = record.content.length * 2;
-	if (bytes > FILE_DRAFT_DOCUMENT_LIMIT_BYTES) throw new Error(m.file_recovery_document_limit());
-	let count = 1;
-	const evicted: string[] = [];
-	for (const entry of [...records].sort((a, b) => b.savedAt - a.savedAt)) {
-		if (entry.userNamespace !== record.userNamespace || entry.deploymentId !== record.deploymentId)
-			continue;
-		if (
-			(effectiveExecutorId(entry.executorId) === effectiveExecutorId(record.executorId) &&
-				entry.canonicalFileRootPath === record.canonicalFileRootPath &&
-				entry.normalizedRelativePath === record.normalizedRelativePath) ||
-			count >= FILE_DRAFT_LIMIT ||
-			bytes + entry.content.length * 2 > FILE_DRAFT_TOTAL_LIMIT_BYTES
-		) {
-			evicted.push(entry.documentId);
-		} else {
-			count += 1;
-			bytes += entry.content.length * 2;
-		}
-	}
-	return evicted;
 }

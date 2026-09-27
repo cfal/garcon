@@ -43,7 +43,7 @@ import { TerminalLayoutBinding } from './terminal-layout-binding.js';
 import { WorkspaceLayoutPersistence } from './workspace-layout-persistence.js';
 import { WorkspaceShortcutDispatcher } from './workspace-shortcuts.js';
 import { WorkbenchCommandRegistry } from './workbench-commands.svelte.js';
-import { FILE_RECOVERY_DEPLOYMENT_ID } from '$lib/files/persistence/file-recovery-identity.js';
+import { FILE_NAVIGATION_DEPLOYMENT_ID } from '$lib/files/persistence/file-navigation-identity.js';
 import { WorkspaceTransitionArbiter } from './workspace-transition-arbiter.js';
 import { WorkspaceWindowDndController } from './window-dnd.svelte.js';
 import { WorkspaceHostGeometryState } from './workspace-host-geometry.svelte.js';
@@ -393,7 +393,8 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 				}
 			}
 		},
-		isExecutorAvailable: (executorId) => deps.executors?.filesAvailable(executorId) ?? executorId === 'local',
+		isExecutorAvailable: (executorId) =>
+			deps.executors?.filesAvailable(executorId) ?? executorId === 'local',
 		getIsMobile: () => deps.appShell.isMobile,
 		getDefaultPlacement: (mode, origin) =>
 			resolveConfiguredFilePlacement(
@@ -420,22 +421,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 			if (!placement) throw new Error('Workspace placement is not ready');
 			return placement;
 		},
-		deploymentId: FILE_RECOVERY_DEPLOYMENT_ID,
-		onRecoveryError: (document, error) => {
-			deps.notifications.error(
-				m.file_recovery_checkpoint_failed({ fileName: document.fileName, detail: error.message }),
-				{
-					key: `file-recovery:${document.id}`,
-					timeoutMs: null,
-					action: {
-						label: m.file_recovery_retry(),
-						onClick: () => {
-							void files.flushRecovery();
-						},
-					},
-				},
-			);
-		},
+		deploymentId: FILE_NAVIGATION_DEPLOYMENT_ID,
 		onOpenError: (request, error) => {
 			console.error('Failed to resolve file identity', error);
 			deps.notifications.error(

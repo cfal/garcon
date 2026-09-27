@@ -5,26 +5,6 @@ import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 import FileDialogHostTestHost from './FileDialogHostTestHost.svelte';
 
 describe('FileDialogHost', () => {
-	it.each([
-		['Resume draft', 'resume'],
-		['Discard', 'discard'],
-		['Cancel', 'cancel'],
-	])('resolves a draft prompt through %s', async (name, choice) => {
-		const onResolve = vi.fn();
-		render(FileDialogHostTestHost, { request: 'draft', onResolve });
-		expect(await screen.findByRole('dialog', { name: 'Recover local changes?' })).toBeTruthy();
-		await fireEvent.click(screen.getByRole('button', { name }));
-		expect(onResolve).toHaveBeenCalledWith(choice);
-	});
-
-	it('cancels a draft prompt with Escape', async () => {
-		const onResolve = vi.fn();
-		render(FileDialogHostTestHost, { request: 'draft', onResolve });
-		await screen.findByRole('dialog', { name: 'Recover local changes?' });
-		await fireEvent.keyDown(document, { key: 'Escape' });
-		await waitFor(() => expect(onResolve).toHaveBeenCalledWith('cancel'));
-	});
-
 	it('offers one move-to-window control for the dialog file', async () => {
 		const onMove = vi.fn();
 		render(FileDialogHostTestHost, { request: 'file', onMove });

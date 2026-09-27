@@ -31,7 +31,7 @@
 		onMove = () => undefined,
 		notifications = createNotificationsStore(),
 	}: {
-		request: 'guard' | 'refresh' | 'overwrite' | 'threshold' | 'file' | 'draft';
+		request: 'guard' | 'refresh' | 'overwrite' | 'threshold' | 'file';
 		onResolve?: (choice: string) => void;
 		isMobile?: boolean;
 		moveError?: Error;
@@ -87,7 +87,6 @@
 				}
 			: null,
 	);
-	let draftRequest = $state(initialRequest === 'draft' ? { fileName: 'draft.txt' } : null);
 	const localSettings = createLocalSettingsStore();
 
 	setAppShell({
@@ -128,19 +127,10 @@
 		| 'guardRequest'
 		| 'thresholdRequest'
 		| 'overwriteRequest'
-		| 'draftRequest'
 		| 'resolveGuard'
 		| 'resolveOverwrite'
 		| 'resolveThreshold'
-		| 'resolveDraft'
 	> = {
-		get draftRequest() {
-			return draftRequest;
-		},
-		resolveDraft: (choice) => {
-			draftRequest = null;
-			onResolve(choice);
-		},
 		get guardRequest() {
 			return guardRequest;
 		},
