@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import type { Stats } from 'node:fs';
+import type { FileHandle } from 'node:fs/promises';
 import { parseFirstJsonlValue } from '../lib/jsonl.js';
 
 export interface ForkTranscriptEntryContext {
@@ -35,7 +36,6 @@ export interface ForkJsonlRequest {
   readonly allowUnmaterializedWholeSession?: boolean;
   readonly leadingLineCount?: number;
   readonly retainedMessageCounts?: ReadonlyMap<number, number>;
-  readonly sourceSnapshot?: JsonlSourceSnapshot;
   readonly rewriteEntry?: (entry: unknown, context: ForkTranscriptEntryContext) => unknown;
   readonly transformEntries?: (
     input: ForkTranscriptTransformInput,
@@ -52,10 +52,6 @@ export type ForkJsonlOutcome =
     }
   | { readonly kind: 'unmaterialized' };
 
-export interface JsonlSourceSnapshot {
-  readonly content: Buffer;
-}
-
 export class JsonlSourcePrefixChangedError extends Error {
   constructor(sourcePath: string) {
     super(`Source transcript prefix changed while reading: ${sourcePath}`);
@@ -63,127 +59,448 @@ export class JsonlSourcePrefixChangedError extends Error {
   }
 }
 
-export async function snapshotJsonlSource(sourcePath: string): Promise<JsonlSourceSnapshot> {
-  return { content: await fs.readFile(sourcePath) };
+const READ_CHUNK_BYTES = 64 * 1024;
+const WRITE_BATCH_BYTES = 1024 * 1024;
+
+interface PhysicalLine {
+  readonly bytes: Buffer;
+  readonly lineNumber: number;
+  readonly terminated: boolean;
 }
 
+interface ParsedLine {
+  readonly value: unknown;
+  readonly raw: string;
+  readonly lineNumber: number;
+}
+
+// Identifies the bytes a fork was derived from without retaining them. The prefix digest
+// excludes the final line's terminator, which a retained-prefix append may still add; the
+// byte digest covers exactly what a whole-session fork read.
+interface SourceDigest {
+  readonly prefixLength: number;
+  readonly prefixDigest: string;
+  readonly terminated: boolean;
+  readonly byteLength: number;
+  readonly byteDigest: string;
+}
+
+// Forks in one streaming pass. Each 64 KiB read yields to the event loop, only parsed entries
+// are retained, and copied lines stream to the target, so a rollout of any size neither
+// blocks other work nor holds whole-file copies. The source is then re-read by digest to
+// prove the fork was taken from a faithful prefix.
 export async function forkJsonlTranscript(request: ForkJsonlRequest): Promise<ForkJsonlOutcome> {
   const targetAgentSessionId = crypto.randomUUID();
-  const lineCount = request.cutoffLine === 0 ? (request.leadingLineCount ?? 0) : request.cutoffLine;
-  const snapshot =
-    request.cutoffLine === null
-      ? await readStableSource(
-          request.sourcePath,
-          request.allowUnmaterializedWholeSession === true,
-        )
-      : (request.sourceSnapshot ?? (await snapshotJsonlSource(request.sourcePath)));
-  const selected =
-    request.cutoffLine === null
-      ? normalizeJsonl(snapshot.content.toString('utf8'), request.sourcePath)
-      : normalizeRetainedJsonl(snapshot.content, lineCount, request.sourcePath);
-
   const context = {
     sourceAgentSessionId: request.sourceAgentSessionId,
     targetAgentSessionId,
   };
-  const projectedEntries = selected.entries.map((entry) => {
-    if (!request.rewriteEntry) return entry.value;
-    const retainedMessageCount = request.retainedMessageCounts?.get(entry.lineNumber);
-    return request.rewriteEntry(entry.value, {
-      ...context,
-      ...(retainedMessageCount !== undefined
-        ? { retainedMessageCount }
-        : {}),
-    });
-  });
-  const projectedByLine = new Map(
-    selected.entries.map((entry, index) => [entry.lineNumber, projectedEntries[index]]),
-  );
-  // Registered transformers do not fabricate entries when the selected source is empty.
-  const transformed = request.transformEntries?.({
-    selectedEntries: projectedEntries,
-    sourceEntries: normalizeJsonl(snapshot.content.toString('utf8'), request.sourcePath)
-      .entries.map((entry) => entry.value),
-    ...context,
-  });
-  const entriesByLine = new Map(selected.entries.map((entry) => [entry.lineNumber, entry]));
-  const retained = transformed
-    ? transformed.entries.map((entry) => serializeJsonlEntry(entry, request.sourcePath))
-    : Array.from({ length: selected.lineCount }, (_, index) => {
-    const lineNumber = index + 1;
-    const entry = entriesByLine.get(lineNumber);
-    if (!entry) return '';
-    if (!request.rewriteEntry) return entry.raw;
-    const rewritten = projectedByLine.get(lineNumber);
-    const serialized = Object.is(rewritten, entry.value) ? entry.raw : JSON.stringify(rewritten);
-    if (serialized === undefined) {
-      throw new Error(
-        `Fork transcript rewriter returned a non-JSON value at ${request.sourcePath}:${lineNumber}`,
-      );
-    }
-    return serialized;
-  });
-  if (
-    request.allowUnmaterializedWholeSession
-    && (transformed?.entries.length ?? selected.entries.length) === 0
-  ) {
-    if (request.cutoffLine !== null) {
-      throw new Error('Only whole-session JSONL forks can remain unmaterialized');
-    }
-    await assertWholeSessionSnapshotUnchanged(request, snapshot);
-    return { kind: 'unmaterialized' };
-  }
-
-  const targetPath =
-    request.createTargetPath?.({
-      sourcePath: request.sourcePath,
-      targetAgentSessionId,
-      createdAt: new Date(),
-    }) ?? path.join(path.dirname(request.sourcePath), `${targetAgentSessionId}.jsonl`);
-  const content = retained.length > 0 ? `${retained.join('\n')}\n` : '';
+  const target = new TargetWriter(() => request.createTargetPath?.({
+    sourcePath: request.sourcePath,
+    targetAgentSessionId,
+    createdAt: new Date(),
+  }) ?? path.join(path.dirname(request.sourcePath), `${targetAgentSessionId}.jsonl`));
   try {
-    await fs.writeFile(targetPath, content, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
-    if (request.cutoffLine === null) {
-      await assertWholeSessionSnapshotUnchanged(request, snapshot);
-    } else {
-      const current = await snapshotJsonlSource(request.sourcePath).catch(
-        (error: NodeJS.ErrnoException) => {
-          if (error.code === 'ENOENT') throw new JsonlSourcePrefixChangedError(request.sourcePath);
-          throw error;
-        },
-      );
-      const currentPrefix = retainedPhysicalPrefix(current.content, lineCount, request.sourcePath);
-      if (!sameRetainedPrefix(selected.prefix!, currentPrefix)) {
-        throw new JsonlSourcePrefixChangedError(request.sourcePath);
+    const read = request.cutoffLine === null
+      ? await readWholeSession(request, context, target)
+      : await readRetainedPrefix(request, context, target);
+    const transformed = request.transformEntries?.({
+      selectedEntries: read.entries.selected,
+      sourceEntries: read.entries.source,
+      ...context,
+    });
+    if (
+      request.allowUnmaterializedWholeSession
+      && (transformed?.entries.length ?? read.entries.selectedCount) === 0
+    ) {
+      if (request.cutoffLine !== null) {
+        throw new Error('Only whole-session JSONL forks can remain unmaterialized');
       }
+      await target.abandon();
+      await verifySource(request, read.digest);
+      return { kind: 'unmaterialized' };
     }
+    if (transformed) {
+      for (const entry of transformed.entries) await target.line(serializeJsonlEntry(entry, request.sourcePath));
+    }
+    await target.finish();
+    await verifySource(request, read.digest);
+    return {
+      kind: 'materialized',
+      agentSessionId: targetAgentSessionId,
+      nativePath: target.path!,
+      ...(transformed?.expectedSemanticDigest !== undefined
+        ? { expectedSemanticDigest: transformed.expectedSemanticDigest }
+        : {}),
+    };
   } catch (error) {
-    await fs.rm(targetPath, { force: true }).catch(() => undefined);
+    await target.remove();
     throw error;
   }
-  return {
-    kind: 'materialized',
-    agentSessionId: targetAgentSessionId,
-    nativePath: targetPath,
-    ...(transformed?.expectedSemanticDigest !== undefined
-      ? { expectedSemanticDigest: transformed.expectedSemanticDigest }
-      : {}),
-  };
 }
 
-async function assertWholeSessionSnapshotUnchanged(
-  request: Pick<ForkJsonlRequest, 'sourcePath' | 'allowUnmaterializedWholeSession'>,
-  snapshot: JsonlSourceSnapshot,
-): Promise<void> {
-  const current = await readCurrentSource(
-    request.sourcePath,
-    request.allowUnmaterializedWholeSession === true,
-  );
-  // A whole-session fork of a working chat races the provider appending its next entry.
-  // Transcripts only grow, so the snapshot stays faithful as long as the read bytes remain
-  // a prefix; only a rewrite of already-read bytes invalidates it.
-  if (!current.content.subarray(0, snapshot.content.length).equals(snapshot.content)) {
+interface SourceRead {
+  readonly entries: ForkEntries;
+  readonly digest: SourceDigest;
+}
+
+// Only a whole-graph transform needs parsed entries; a line-by-line copy just counts them.
+class ForkEntries {
+  readonly selected: unknown[] = [];
+  readonly source: unknown[] = [];
+  selectedCount = 0;
+
+  constructor(private readonly retained: boolean) {}
+
+  addSource(value: unknown): void {
+    if (this.retained) this.source.push(value);
+  }
+
+  addSelected(value: unknown): void {
+    this.selectedCount += 1;
+    if (this.retained) this.selected.push(value);
+  }
+}
+
+// A whole-session fork copies the bytes present when it starts. A working chat keeps
+// appending; the trailing partial line is left out and later bytes are never read.
+async function readWholeSession(
+  request: ForkJsonlRequest,
+  context: ForkTranscriptEntryContext,
+  target: TargetWriter,
+): Promise<SourceRead> {
+  const entries = new ForkEntries(request.transformEntries !== undefined);
+  const allowMissing = request.allowUnmaterializedWholeSession === true;
+  const before = await fs.stat(request.sourcePath).catch((error: NodeJS.ErrnoException) => {
+    if (allowMissing && error.code === 'ENOENT') return null;
+    throw error;
+  });
+  if (before === null) return { entries, digest: emptyDigest() };
+  const hash = new PrefixHash();
+  const copy = new WholeSessionCopy(request, context, target);
+  const file = await fs.open(request.sourcePath, 'r');
+  try {
+    for await (const line of readPhysicalLines(file, before.size)) {
+      hash.add(line);
+      const parsed = parseFirstJsonlValue(line.bytes.toString('utf8'));
+      if (parsed.kind === 'empty') {
+        await copy.empty();
+        continue;
+      }
+      if (parsed.kind === 'incomplete') {
+        await copy.incomplete(line.lineNumber);
+        continue;
+      }
+      if (parsed.kind !== 'value') {
+        copy.assertComplete();
+        throw invalidJsonl(request.sourcePath, line.lineNumber);
+      }
+      const entry = { value: parsed.value, raw: parsed.raw, lineNumber: line.lineNumber };
+      entries.addSource(entry.value);
+      entries.addSelected(await copy.entry(entry));
+    }
+  } finally {
+    await file.close();
+  }
+  copy.finish();
+  const after = await fs.stat(request.sourcePath);
+  if (sourceChangedDuringRead(before, after)) throw new JsonlSourcePrefixChangedError(request.sourcePath);
+  return { entries, digest: hash.digest() };
+}
+
+async function readRetainedPrefix(
+  request: ForkJsonlRequest,
+  context: ForkTranscriptEntryContext,
+  target: TargetWriter,
+): Promise<SourceRead> {
+  const lineCount = request.cutoffLine === 0 ? (request.leadingLineCount ?? 0) : request.cutoffLine!;
+  if (!Number.isSafeInteger(lineCount) || lineCount < 0) {
     throw new JsonlSourcePrefixChangedError(request.sourcePath);
+  }
+  const hash = new PrefixHash();
+  const transforms = request.transformEntries !== undefined;
+  const entries = new ForkEntries(transforms);
+  let retainedLines = 0;
+  // A transform also receives every later source entry; only the final one may be incomplete.
+  let incompleteLine: number | null = null;
+  const file = await fs.open(request.sourcePath, 'r');
+  try {
+    for await (const line of readPhysicalLines(file, null)) {
+      if (line.lineNumber > lineCount) {
+        if (!transforms) break;
+        const parsed = parseFirstJsonlValue(line.bytes.toString('utf8'));
+        if (parsed.kind === 'empty') continue;
+        if (incompleteLine !== null) throw invalidJsonl(request.sourcePath, incompleteLine);
+        if (parsed.kind === 'incomplete') incompleteLine = line.lineNumber;
+        else if (parsed.kind === 'value') entries.addSource(parsed.value);
+        else throw invalidJsonl(request.sourcePath, line.lineNumber);
+        continue;
+      }
+      hash.add(line);
+      retainedLines = line.lineNumber;
+      const parsed = parseFirstJsonlValue(line.bytes.toString('utf8'));
+      if (parsed.kind === 'empty') {
+        if (!transforms) await target.line('');
+        continue;
+      }
+      if (parsed.kind !== 'value') throw new JsonlSourcePrefixChangedError(request.sourcePath);
+      entries.addSource(parsed.value);
+      const projected = project(request, context, { value: parsed.value, raw: parsed.raw, lineNumber: line.lineNumber });
+      entries.addSelected(projected.value);
+      if (!transforms) await target.line(projected.serialized);
+    }
+  } finally {
+    await file.close();
+  }
+  if (retainedLines < lineCount) throw new JsonlSourcePrefixChangedError(request.sourcePath);
+  return { entries, digest: hash.digest() };
+}
+
+// Copies a whole session line by line. Empty lines count toward physical positions only once
+// a later entry follows them, and only the final content line may be incomplete.
+class WholeSessionCopy {
+  #pendingEmpty = 0;
+  #incompleteLine: number | null = null;
+
+  constructor(
+    private readonly request: ForkJsonlRequest,
+    private readonly context: ForkTranscriptEntryContext,
+    private readonly target: TargetWriter,
+  ) {}
+
+  async empty(): Promise<void> {
+    this.#pendingEmpty += 1;
+  }
+
+  async incomplete(lineNumber: number): Promise<void> {
+    this.assertComplete();
+    await this.#flushEmpty();
+    this.#incompleteLine = lineNumber;
+  }
+
+  async entry(entry: ParsedLine): Promise<unknown> {
+    this.assertComplete();
+    await this.#flushEmpty();
+    const projected = project(this.request, this.context, entry);
+    if (!this.request.transformEntries) await this.target.line(projected.serialized);
+    return projected.value;
+  }
+
+  finish(): void {
+    this.#pendingEmpty = 0;
+  }
+
+  assertComplete(): void {
+    if (this.#incompleteLine !== null) throw invalidJsonl(this.request.sourcePath, this.#incompleteLine);
+  }
+
+  async #flushEmpty(): Promise<void> {
+    for (; this.#pendingEmpty > 0; this.#pendingEmpty -= 1) {
+      if (!this.request.transformEntries) await this.target.line('');
+    }
+  }
+}
+
+function project(
+  request: ForkJsonlRequest,
+  context: ForkTranscriptEntryContext,
+  entry: ParsedLine,
+): { readonly value: unknown; readonly serialized: string } {
+  if (!request.rewriteEntry) return { value: entry.value, serialized: entry.raw };
+  const retainedMessageCount = request.retainedMessageCounts?.get(entry.lineNumber);
+  const rewritten = request.rewriteEntry(entry.value, {
+    ...context,
+    ...(retainedMessageCount !== undefined ? { retainedMessageCount } : {}),
+  });
+  const serialized = Object.is(rewritten, entry.value) ? entry.raw : JSON.stringify(rewritten);
+  if (serialized === undefined) {
+    throw new Error(
+      `Fork transcript rewriter returned a non-JSON value at ${request.sourcePath}:${entry.lineNumber}`,
+    );
+  }
+  return { value: rewritten, serialized };
+}
+
+async function verifySource(request: ForkJsonlRequest, expected: SourceDigest): Promise<void> {
+  if (request.cutoffLine === null) {
+    await verifyWholeSessionPrefix(request, expected);
+    return;
+  }
+  const lineCount = request.cutoffLine === 0 ? (request.leadingLineCount ?? 0) : request.cutoffLine;
+  const file = await fs.open(request.sourcePath, 'r').catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') throw new JsonlSourcePrefixChangedError(request.sourcePath);
+    throw error;
+  });
+  const hash = new PrefixHash();
+  let retainedLines = 0;
+  try {
+    for await (const line of readPhysicalLines(file, null)) {
+      if (line.lineNumber > lineCount) break;
+      hash.add(line);
+      retainedLines = line.lineNumber;
+    }
+  } finally {
+    await file.close();
+  }
+  const current = hash.digest();
+  if (
+    retainedLines < lineCount
+    || current.prefixLength !== expected.prefixLength
+    || current.prefixDigest !== expected.prefixDigest
+    || (expected.terminated && !current.terminated)
+  ) {
+    throw new JsonlSourcePrefixChangedError(request.sourcePath);
+  }
+}
+
+// Transcripts only grow, so a whole-session snapshot stays faithful while its bytes remain a
+// prefix of the source; only a rewrite of already-read bytes invalidates it.
+async function verifyWholeSessionPrefix(request: ForkJsonlRequest, expected: SourceDigest): Promise<void> {
+  const allowMissing = request.allowUnmaterializedWholeSession === true;
+  const file = await fs.open(request.sourcePath, 'r').catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT' && allowMissing && expected.byteLength === 0) return null;
+    if (error.code === 'ENOENT') throw new JsonlSourcePrefixChangedError(request.sourcePath);
+    throw error;
+  });
+  if (file === null) return;
+  const hash = crypto.createHash('sha256');
+  let length = 0;
+  try {
+    const buffer = Buffer.alloc(READ_CHUNK_BYTES);
+    while (length < expected.byteLength) {
+      const { bytesRead } = await file.read(buffer, 0, Math.min(buffer.length, expected.byteLength - length), length);
+      if (bytesRead === 0) break;
+      hash.update(buffer.subarray(0, bytesRead));
+      length += bytesRead;
+    }
+  } finally {
+    await file.close();
+  }
+  if (length !== expected.byteLength || hash.digest('hex') !== expected.byteDigest) {
+    throw new JsonlSourcePrefixChangedError(request.sourcePath);
+  }
+}
+
+async function* readPhysicalLines(file: FileHandle, limit: number | null): AsyncGenerator<PhysicalLine> {
+  const buffer = Buffer.alloc(READ_CHUNK_BYTES);
+  let position = 0;
+  let lineNumber = 1;
+  let pending: Buffer[] = [];
+  let pendingLength = 0;
+  for (;;) {
+    const length = limit === null ? buffer.length : Math.min(buffer.length, limit - position);
+    if (length <= 0) break;
+    const { bytesRead } = await file.read(buffer, 0, length, position);
+    if (bytesRead === 0) break;
+    position += bytesRead;
+    const chunk = buffer.subarray(0, bytesRead);
+    let start = 0;
+    for (let index = chunk.indexOf(0x0a); index !== -1; index = chunk.indexOf(0x0a, start)) {
+      const segment = chunk.subarray(start, index);
+      const bytes = pendingLength > 0 ? Buffer.concat([...pending, segment], pendingLength + segment.length) : Buffer.from(segment);
+      pending = [];
+      pendingLength = 0;
+      yield { bytes, lineNumber, terminated: true };
+      lineNumber += 1;
+      start = index + 1;
+    }
+    if (start < chunk.length) {
+      pending.push(Buffer.from(chunk.subarray(start)));
+      pendingLength += chunk.length - start;
+    }
+  }
+  if (pendingLength > 0) yield { bytes: Buffer.concat(pending, pendingLength), lineNumber, terminated: false };
+}
+
+class PrefixHash {
+  readonly #prefix = crypto.createHash('sha256');
+  readonly #bytes = crypto.createHash('sha256');
+  #prefixLength = 0;
+  #pendingTerminator = false;
+  #terminated = true;
+
+  add(line: PhysicalLine): void {
+    if (this.#pendingTerminator) {
+      this.#prefix.update('\n');
+      this.#prefixLength += 1;
+    }
+    this.#prefix.update(line.bytes);
+    this.#bytes.update(line.bytes);
+    this.#prefixLength += line.bytes.length;
+    if (line.terminated) this.#bytes.update('\n');
+    this.#pendingTerminator = line.terminated;
+    this.#terminated = line.terminated;
+  }
+
+  digest(): SourceDigest {
+    return {
+      prefixLength: this.#prefixLength,
+      prefixDigest: this.#prefix.digest('hex'),
+      terminated: this.#terminated,
+      byteLength: this.#prefixLength + (this.#pendingTerminator ? 1 : 0),
+      byteDigest: this.#bytes.digest('hex'),
+    };
+  }
+}
+
+function emptyDigest(): SourceDigest {
+  return new PrefixHash().digest();
+}
+
+// Opens the target only once there is content to write, so an unmaterialized or failed fork
+// never leaves a file behind.
+class TargetWriter {
+  #path: string | null = null;
+  #file: FileHandle | null = null;
+  #batch: string[] = [];
+  #batchBytes = 0;
+
+  constructor(private readonly createPath: () => string) {}
+
+  get path(): string | null { return this.#path; }
+
+  async line(text: string): Promise<void> {
+    this.#batch.push(`${text}\n`);
+    this.#batchBytes += text.length + 1;
+    if (this.#batchBytes >= WRITE_BATCH_BYTES) await this.#flush();
+  }
+
+  async finish(): Promise<void> {
+    await this.#flush();
+    await this.#open();
+    await this.#file!.close();
+    this.#file = null;
+  }
+
+  async abandon(): Promise<void> {
+    this.#batch = [];
+    this.#batchBytes = 0;
+    await this.remove();
+  }
+
+  async remove(): Promise<void> {
+    await this.#file?.close().catch(() => undefined);
+    this.#file = null;
+    if (this.#path) await fs.rm(this.#path, { force: true }).catch(() => undefined);
+  }
+
+  async #open(): Promise<void> {
+    if (this.#file) return;
+    this.#path ??= this.createPath();
+    this.#file = await fs.open(this.#path, 'wx', 0o600);
+  }
+
+  async #flush(): Promise<void> {
+    if (this.#batch.length === 0) return;
+    await this.#open();
+    const data = Buffer.from(this.#batch.join(''), 'utf8');
+    this.#batch = [];
+    this.#batchBytes = 0;
+    let written = 0;
+    while (written < data.length) {
+      const { bytesWritten } = await this.#file!.write(data, written, data.length - written);
+      written += bytesWritten;
+    }
   }
 }
 
@@ -195,142 +512,8 @@ function serializeJsonlEntry(entry: unknown, sourcePath: string): string {
   return serialized;
 }
 
-interface PhysicalPrefix {
-  readonly content: Buffer;
-  readonly terminated: boolean;
-}
-
-function retainedPhysicalPrefix(
-  source: Buffer,
-  lineCount: number | null,
-  sourcePath: string,
-): PhysicalPrefix {
-  if (!Number.isSafeInteger(lineCount) || lineCount === null || lineCount < 0) {
-    throw new JsonlSourcePrefixChangedError(sourcePath);
-  }
-  if (lineCount === 0) return { content: source.subarray(0, 0), terminated: true };
-  let lineStart = 0;
-  for (let line = 1; line <= lineCount; line += 1) {
-    const lineEnd = source.indexOf(0x0a, lineStart);
-    if (lineEnd !== -1) {
-      if (line === lineCount) {
-        return { content: source.subarray(0, lineEnd + 1), terminated: true };
-      }
-      lineStart = lineEnd + 1;
-      continue;
-    }
-    if (line === lineCount && lineStart < source.length) {
-      return { content: source, terminated: false };
-    }
-    throw new JsonlSourcePrefixChangedError(sourcePath);
-  }
-  throw new JsonlSourcePrefixChangedError(sourcePath);
-}
-
-function sameRetainedPrefix(expected: PhysicalPrefix, current: PhysicalPrefix): boolean {
-  if (expected.terminated) {
-    return current.terminated && current.content.equals(expected.content);
-  }
-  if (!current.terminated) return current.content.equals(expected.content);
-  return (
-    current.content.length === expected.content.length + 1 &&
-    current.content.subarray(0, expected.content.length).equals(expected.content)
-  );
-}
-
-function normalizeRetainedJsonl(
-  source: Buffer,
-  lineCount: number | null,
-  sourcePath: string,
-): ReturnType<typeof normalizeJsonl> & { prefix: PhysicalPrefix } {
-  const prefix = retainedPhysicalPrefix(source, lineCount, sourcePath);
-  const lines = prefix.content.toString('utf8').split('\n');
-  if (prefix.terminated) lines.pop();
-  const entries: Array<{ value: unknown; raw: string; lineNumber: number }> = [];
-  for (let index = 0; index < lines.length; index += 1) {
-    const parsed = parseFirstJsonlValue(lines[index]!);
-    if (parsed.kind === 'empty') continue;
-    if (parsed.kind !== 'value') throw new JsonlSourcePrefixChangedError(sourcePath);
-    entries.push({
-      value: parsed.value,
-      raw: parsed.raw,
-      lineNumber: index + 1,
-    });
-  }
-  return { entries, lineCount: lines.length, prefix };
-}
-
-// Reads a snapshot that is a faithful prefix of the transcript. A working chat appends while the
-// read runs, which only grows the file; the trailing partial line is discarded downstream. A
-// replaced file or one that lost bytes is not a prefix and cannot be forked.
-async function readStableSource(
-  sourcePath: string,
-  allowMissing: boolean,
-): Promise<JsonlSourceSnapshot> {
-  const before = await fs.stat(sourcePath).catch((error: NodeJS.ErrnoException) => {
-    if (allowMissing && error.code === 'ENOENT') return null;
-    throw error;
-  });
-  if (before === null) return { content: Buffer.alloc(0) };
-  const content = await fs.readFile(sourcePath);
-  const after = await fs.stat(sourcePath);
-  if (sourceChangedDuringRead(before, after)) {
-    throw new JsonlSourcePrefixChangedError(sourcePath);
-  }
-  return { content };
-}
-
-async function readCurrentSource(
-  sourcePath: string,
-  allowMissing: boolean,
-): Promise<JsonlSourceSnapshot> {
-  return snapshotJsonlSource(sourcePath).catch((error: NodeJS.ErrnoException) => {
-    if (allowMissing && error.code === 'ENOENT') return { content: Buffer.alloc(0) };
-    if (error.code === 'ENOENT') throw new JsonlSourcePrefixChangedError(sourcePath);
-    throw error;
-  });
-}
-
-function normalizeJsonl(
-  source: string,
-  sourcePath: string,
-): {
-  entries: Array<{ value: unknown; raw: string; lineNumber: number }>;
-  lineCount: number;
-  prefix?: PhysicalPrefix;
-} {
-  const lines = source.split('\n');
-  let lastContentLine = -1;
-  for (let index = lines.length - 1; index >= 0; index -= 1) {
-    if (lines[index]!.trim()) {
-      lastContentLine = index;
-      break;
-    }
-  }
-
-  const entries: Array<{ value: unknown; raw: string; lineNumber: number }> = [];
-  let incompleteLastLine = false;
-  for (let index = 0; index < lines.length; index += 1) {
-    const parsed = parseFirstJsonlValue(lines[index]!);
-    if (parsed.kind === 'empty') continue;
-    if (parsed.kind === 'value') {
-      entries.push({
-        value: parsed.value,
-        raw: parsed.raw,
-        lineNumber: index + 1,
-      });
-      continue;
-    }
-    if (parsed.kind === 'incomplete' && index === lastContentLine) {
-      incompleteLastLine = true;
-      break;
-    }
-    throw new Error(`Invalid JSONL at ${sourcePath}:${index + 1}`);
-  }
-  return {
-    entries,
-    lineCount: lastContentLine < 0 ? 0 : incompleteLastLine ? lastContentLine : lastContentLine + 1,
-  };
+function invalidJsonl(sourcePath: string, lineNumber: number): Error {
+  return new Error(`Invalid JSONL at ${sourcePath}:${lineNumber}`);
 }
 
 function sourceChangedDuringRead(before: Stats, after: Stats): boolean {

@@ -428,6 +428,62 @@ describe('forkJsonlTranscript', () => {
     ).rejects.toBeInstanceOf(JsonlSourcePrefixChangedError);
   });
 
+  it('streams a long whole-session fork byte for byte while yielding to the event loop', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-fork-jsonl-'));
+    roots.push(root);
+    const sourcePath = path.join(root, 'source.jsonl');
+    const lines = Array.from({ length: 20_000 }, (_, index) => JSON.stringify({
+      type: 'message', index, content: `synthetic ${'generic '.repeat(20)}`,
+    }));
+    const source = `${lines.slice(0, 10).join('\n')}\n\n${lines.slice(10).join('\n')}\n`;
+    await writeFile(sourcePath, source);
+    let turns = 0;
+    let running = true;
+    const tick = () => {
+      if (!running) return;
+      turns += 1;
+      setImmediate(tick);
+    };
+    setImmediate(tick);
+
+    const result = await forkJsonlTranscript({
+      sourcePath,
+      sourceAgentSessionId: 'source',
+      cutoffLine: null,
+      rewriteEntry: (entry) => entry,
+    });
+    running = false;
+
+    if (result.kind !== 'materialized') throw new Error('Expected a materialized fork');
+    expect(await readFile(result.nativePath, 'utf8')).toBe(source);
+    expect(turns).toBeGreaterThan(10);
+  });
+
+  it('gives a transform later entries and tolerates only a final incomplete one', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-fork-jsonl-'));
+    roots.push(root);
+    const sourcePath = path.join(root, 'source.jsonl');
+    const selected = JSON.stringify({ type: 'message', value: 'selected' });
+    const later = JSON.stringify({ type: 'metadata', value: 'later' });
+    await writeFile(sourcePath, `${selected}\n${later}\n{"type":"partial"\n\n`);
+    const transform = (input: { selectedEntries: readonly unknown[]; sourceEntries: readonly unknown[] }) => {
+      expect(input.selectedEntries).toEqual([{ type: 'message', value: 'selected' }]);
+      expect(input.sourceEntries).toEqual([
+        { type: 'message', value: 'selected' },
+        { type: 'metadata', value: 'later' },
+      ]);
+      return { entries: input.selectedEntries };
+    };
+
+    const result = await forkJsonlTranscript({ sourcePath, sourceAgentSessionId: 'source', cutoffLine: 1, transformEntries: transform });
+    if (result.kind !== 'materialized') throw new Error('Expected a materialized fork');
+    expect(await readFile(result.nativePath, 'utf8')).toBe(`${selected}\n`);
+
+    await writeFile(sourcePath, `${selected}\n{"type":"partial"\n${later}\n`);
+    await expect(forkJsonlTranscript({ sourcePath, sourceAgentSessionId: 'source', cutoffLine: 1, transformEntries: transform }))
+      .rejects.toThrow(`Invalid JSONL at ${sourcePath}:2`);
+  });
+
   it('rejects a non-rendered native entry mutation inside the retained physical prefix', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-fork-jsonl-'));
     roots.push(root);
