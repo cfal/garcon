@@ -79,6 +79,63 @@ for (const dialer of ['controller', 'worker'] as const) {
     } finally { await fixture.dispose(); }
   });
 
+  test(`history keeps several pages in flight and yields them in order (${dialer} dials)`, async () => {
+    const pageRequests = new Set<string>();
+    let outstanding = 0;
+    let maxOutstanding = 0;
+    let held: (() => void)[] | null = [];
+    const windowFilled = Promise.withResolvers<void>();
+    const fixture = await remoteFixture(dialer, (_controller, worker) => {
+      worker.onSession((session) => {
+        session.onMessage((encoded) => {
+          const frame = JSON.parse(encoded);
+          if (frame.type !== 'request' || frame.method !== 'history.next') return;
+          pageRequests.add(frame.id);
+          maxOutstanding = Math.max(maxOutstanding, ++outstanding);
+          if (outstanding === 4) windowFilled.resolve();
+        });
+        const send = session.send.bind(session);
+        session.send = (encoded) => {
+          if (!pageRequests.delete(JSON.parse(encoded).id)) return send(encoded);
+          const deliver = () => { outstanding -= 1; send(encoded); };
+          if (held) held.push(deliver);
+          else deliver();
+        };
+      });
+    });
+    try {
+      const integration = await fixture.executor.getAgentIntegration('test');
+      const pages = Array.from({ length: 10 }, (_, page) => [
+        { message: new AssistantMessage('2026-01-01T00:00:00Z', `page ${page}`) },
+      ]);
+      fixture.generations[0]!.hooks.history = async function* () { yield* pages; };
+      const request = await requestFor(integration);
+      const loading = (async () => {
+        const contents: string[] = [];
+        for await (const page of integration.nativeHistoryImport!.load({
+          chat: {
+            chatId: request.chatId, projectPath: request.projectPath, agentId: 'test', model: request.model,
+            agentSessionId: 'test-session', nativeSession: null, nativeSeedReceipt: null,
+            carryOverRevision: 'revision', settings: request.settings,
+          },
+          signal: new AbortController().signal,
+        })) {
+          for (const row of page) contents.push((row.message as AssistantMessage).content);
+        }
+        return contents;
+      })();
+
+      // The worker receives the whole window before any page reaches the controller.
+      await windowFilled.promise;
+      const release = held;
+      held = null;
+      for (const deliver of release) deliver();
+
+      expect(await loading).toEqual(pages.map(([row]) => (row.message as AssistantMessage).content));
+      expect(maxOutstanding).toBe(4);
+    } finally { await fixture.dispose(); }
+  });
+
   test(`publication snapshots provider-owned messages before delivery (${dialer} dials)`, async () => {
     const fixture = await remoteFixture(dialer);
     try {

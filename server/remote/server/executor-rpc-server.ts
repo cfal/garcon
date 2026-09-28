@@ -20,7 +20,9 @@ interface HistoryReader {
   readonly iterator: AsyncIterator<readonly AgentImportedTranscriptRow[]>;
   readonly controller: AbortController;
   timer: ReturnType<typeof setTimeout> | null;
-  reading: boolean;
+  // Pipelined page requests read the iterator one at a time in page order.
+  requestedPages: number;
+  tail: Promise<unknown>;
 }
 
 export interface ExecutorRpcServer {
@@ -177,7 +179,7 @@ export function serveExecutionRuntime(runtime: ExecutionRuntimeApi, rpc: Executo
         const controller = new AbortController();
         const iterator = historyPages(history.load({ ...call.request.request, signal: controller.signal }));
         const table = readers.get(call.integrationId)!;
-        const resource: HistoryReader = { iterator, controller, timer: null, reading: false };
+        const resource: HistoryReader = { iterator, controller, timer: null, requestedPages: 0, tail: Promise.resolve() };
         let ref;
         try {
           ref = table.add(resource);
@@ -196,18 +198,23 @@ export function serveExecutionRuntime(runtime: ExecutionRuntimeApi, rpc: Executo
         return ref;
       }
       case 'history.next': {
-        const resource = readers.get(call.integrationId)!.get(call.request);
-        if (resource.reading) throw new AgentCallError('rejected', 'Concurrent history reads are not permitted');
-        resource.reading = true;
+        const resource = readers.get(call.integrationId)!.get(call.request.reader);
+        if (call.request.page !== resource.requestedPages) {
+          throw new AgentCallError('rejected', 'History pages must be requested in order');
+        }
+        resource.requestedPages += 1;
         resource.timer?.refresh();
+        const page = resource.tail.then(async () => {
+          const result = await resource.iterator.next();
+          return { done: result.done === true, rows: result.value ?? [] };
+        });
+        resource.tail = page.catch(() => undefined);
         const abort = () => resource.controller.abort();
         signal.addEventListener('abort', abort, { once: true });
         try {
-          const result = await resource.iterator.next();
-          return { done: result.done === true, rows: result.value ?? [] };
+          return await page;
         } finally {
           signal.removeEventListener('abort', abort);
-          resource.reading = false;
         }
       }
       case 'history.close': {

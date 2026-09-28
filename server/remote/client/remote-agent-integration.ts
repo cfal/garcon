@@ -13,6 +13,8 @@ import type { ExecutorRpcMethods, IntegrationManifest } from '../transport/rpc-p
 import type { RemoteSessionBacking } from './executor-client.js';
 
 const SINGLE_QUERY_RPC_GRACE_MS = 30_000;
+// Each page carries at most 1 MiB, so a reader holds at most 4 MiB of replies.
+const HISTORY_PAGES_IN_FLIGHT = 4;
 
 export class RemoteAgentIntegration implements AgentIntegration {
   readonly descriptor;
@@ -150,9 +152,18 @@ export class RemoteAgentIntegration implements AgentIntegration {
         const close = (ref: ExecutorRpcMethods['history.open']['result']) =>
           rpc.call(manifest.descriptor.id, 'history.close', ref, { timeoutMs: 2000 });
         const ref = await rpc.call(manifest.descriptor.id, 'history.open', { source, request }, { signal, onLateResult: close });
+        // Keeping several pages in flight hides link latency behind the worker's
+        // reading and the controller's ledger writes.
+        const inFlight: Promise<ExecutorRpcMethods['history.next']['result']>[] = [];
+        let requested = 0;
         try {
           while (true) {
-            const batch = await rpc.call(manifest.descriptor.id, 'history.next', ref, { signal });
+            while (inFlight.length < HISTORY_PAGES_IN_FLIGHT) {
+              const page = rpc.call(manifest.descriptor.id, 'history.next', { reader: ref, page: requested++ }, { signal });
+              page.catch(() => undefined);
+              inFlight.push(page);
+            }
+            const batch = await inFlight.shift()!;
             if (batch.done) return;
             yield decodeRows(batch.rows);
           }

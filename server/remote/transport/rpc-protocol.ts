@@ -79,7 +79,8 @@ export interface ExecutorRpcMethods extends FileRpcMethods, TerminalRpcMethods, 
   'endpoints.validate': Call<Request<'endpoints', 'validate'>, void>;
   'singleQuery.run': Call<WithoutSignal<Request<'singleQuery', 'run'>>, string>;
   'history.open': Call<{ readonly source: 'legacyHistoryImport' | 'nativeHistoryImport'; readonly request: WithoutSignal<AgentHistoryImportRequest> }, HistoryReaderRef>;
-  'history.next': Call<HistoryReaderRef, { readonly done: boolean; readonly rows: readonly AgentImportedTranscriptRow[] }>;
+  // Pages are numbered from zero so a reader may keep several requests in flight.
+  'history.next': Call<{ readonly reader: HistoryReaderRef; readonly page: number }, { readonly done: boolean; readonly rows: readonly AgentImportedTranscriptRow[] }>;
   'history.close': Call<HistoryReaderRef, void>;
   'nativeActivity.lastActivity': Call<Request<'nativeActivity', 'lastActivity'>, Result<'nativeActivity', 'lastActivity'>>;
   'nativeSessions.resolveNativeSession': Call<WithoutSignal<AgentHistoryImportRequest>, Result<'nativeSessions', 'resolveNativeSession'>>;
