@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { AgentCallError } from '@garcon/server-agent-interface';
 import { effectiveExecutorId } from '../../../common/executors.js';
 import type {
   AgentInterruptAndSendResponse,
@@ -27,7 +28,7 @@ import { DomainError } from '../../common/domain-error.js';
 import { createLogger } from '../../common/log.js';
 import { withCurrentExecutionControl } from '../lib/command-execution-control-error.js';
 import { resolveUpdatedProjectPath } from '../lib/command-project-path.js';
-import { permissionDecisionError } from '../lib/permission-decision-error.js';
+import { permissionDecisionError, type PermissionDecisionErrorCode } from '../lib/permission-decision-error.js';
 import {
   CommandSupport,
   CommandValidationError,
@@ -41,7 +42,7 @@ import {
   type SubmitRunInput,
   type UpdateProjectPathInput,
 } from './command-support.js';
-import type { CommandLedgerRecord } from './command-ledger.js';
+import { PRE_SCHEDULE_FAILURE_ERROR_CODE, type CommandLedgerRecord } from './command-ledger.js';
 import { TransientControlActionError } from '../chats/chat-transient-feed.js';
 import { PermissionNotActionableError } from '../ledger/errors.js';
 import { AgentResumePreparationError } from './agent-resume-preparation-error.js';
@@ -287,7 +288,7 @@ export class SessionCommands {
 
     if (input.response?.type === 'ask-user-question-response') {
       const existing = await this.deps.ledger.observe(ledgerInput);
-      if (existing?.kind === 'duplicate') {
+      if (existing?.kind === 'duplicate' && !wasNotDelivered(existing.record)) {
         return this.replayPermissionDecision(existing.record);
       }
       if (existing) this.support.throwOnConflict(existing, 'Conflicting permission decision retry');
@@ -308,12 +309,12 @@ export class SessionCommands {
       }, input.control);
       await this.deps.ledger.settleTerminal(ledger.record.key, 'finished');
     } catch (error) {
-      const failureCode = error instanceof TransientControlActionError || error instanceof PermissionNotActionableError
-        ? 'PERMISSION_NOT_ACTIONABLE'
-        : 'PERMISSION_DECISION_OUTCOME_UNKNOWN';
+      const failureCode = permissionDecisionFailureCode(error);
       const failure = permissionDecisionError(failureCode);
       await this.deps.ledger.settleTerminal(ledger.record.key, 'failed', {
-        error: failure.message, errorCode: failure.code,
+        error: failure.message,
+        // A decision the executor never received stays retryable under the same identity.
+        errorCode: failureCode === 'PERMISSION_DECISION_NOT_DELIVERED' ? PRE_SCHEDULE_FAILURE_ERROR_CODE : failure.code,
       });
       throw failure;
     }
@@ -733,4 +734,20 @@ function recordedStopOutcome(
   record: Pick<CommandLedgerRecord, 'status' | 'stopOutcome'>,
 ): ChatStopOutcome {
   return record.stopOutcome ?? (record.status === 'finished' ? 'interrupt-requested' : 'failed');
+}
+
+// Only a delivery that may have reached the provider leaves the decision's outcome unknown.
+// A rejected delivery retires the request, and one the executor never received leaves it pending.
+function permissionDecisionFailureCode(error: unknown): PermissionDecisionErrorCode {
+  if (error instanceof TransientControlActionError || error instanceof PermissionNotActionableError) {
+    return 'PERMISSION_NOT_ACTIONABLE';
+  }
+  if (error instanceof AgentCallError && error.outcome === 'rejected') return 'PERMISSION_NOT_ACTIONABLE';
+  if (error instanceof AgentCallError && error.outcome === 'not-dispatched') return 'PERMISSION_DECISION_NOT_DELIVERED';
+  if (error instanceof DomainError && error.code === 'EXECUTOR_UNAVAILABLE') return 'PERMISSION_DECISION_NOT_DELIVERED';
+  return 'PERMISSION_DECISION_OUTCOME_UNKNOWN';
+}
+
+function wasNotDelivered(record: CommandLedgerRecord): boolean {
+  return record.status === 'failed' && record.errorCode === PRE_SCHEDULE_FAILURE_ERROR_CODE;
 }

@@ -39,8 +39,22 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
             && event.chatId === chatId && event.phase === phase,
           `${chatId} processing ${phase}`, { afterIndex: cursor, timeoutMs: 20_000 },
         );
+        proxy!.refuseConnections();
         proxy!.disconnect();
         const reconnecting = await processingPhase('reconnecting');
+
+        // An answer during the gap is definitely not sent and leaves the request pending.
+        await expect(fixture.client.sendPermissionDecision({
+          clientRequestId: crypto.randomUUID(), chatId, permissionOccurrenceId: permission.permissionOccurrenceId,
+          allow: true, alwaysAllow: false, control,
+        })).rejects.toMatchObject({
+          status: 503, body: { errorCode: 'PERMISSION_DECISION_NOT_DELIVERED', retryable: true },
+        });
+        expect((await fixture.client.getChatSnapshot(chatId, 0)).transientFeed.rows.map(row => row.message.type))
+          .toEqual(['permission-request']);
+        expect(environment.model.requestsSince(0)).toHaveLength(1);
+        proxy!.acceptConnections();
+
         await waitForExecutorReconnect(fixture, cursor);
         const resumed = await processingPhase('running');
 

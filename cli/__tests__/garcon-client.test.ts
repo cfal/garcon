@@ -1046,6 +1046,43 @@ describe('GarconClient', () => {
     expect(attempts).toBe(1);
   });
 
+  for (const [status, errorCode, retryable] of [
+    [500, 'PERMISSION_DECISION_OUTCOME_UNKNOWN', false],
+    [503, 'PERMISSION_DECISION_NOT_DELIVERED', true],
+  ] as const) {
+    test(`reports a server-classified ${errorCode} permission decision without retrying it`, async () => {
+      let attempts = 0;
+      const client = new GarconClient({
+        ...connection,
+        submissionDelay: async () => undefined,
+        fetch: async () => {
+          attempts += 1;
+          return Response.json({
+            success: false,
+            error: 'Synthetic permission decision failure',
+            errorCode,
+            retryable,
+          }, { status });
+        },
+      });
+
+      await expect(client.decidePermission({
+        clientRequestId: 'permission-v1:classified',
+        chatId: runRequest.chatId,
+        permissionOccurrenceId: 'occurrence-classified',
+        allow: true,
+        alwaysAllow: false,
+        control: {
+          serverInstanceId: connection.instanceId,
+          chatId: runRequest.chatId,
+          runId: 'run-classified',
+          permissionOccurrenceId: 'occurrence-classified',
+        },
+      })).rejects.toMatchObject({ status, errorCode, retryable });
+      expect(attempts).toBe(1);
+    });
+  }
+
   test('retries an ambiguous submission with the identical request body', async () => {
     const bodies: string[] = [];
     let attempts = 0;

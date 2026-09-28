@@ -833,10 +833,12 @@ export class GarconClient {
         && response.chatId === submitted.chatId
       ),
       ambiguityDescription: `the permission decision for chat ${request.chatId}`,
+      // The server classifies these delivery failures itself, so a prompt retry cannot improve them.
       ambiguous: (error) => (
         isAmbiguousSubmissionError(error)
         && !(error instanceof GarconHttpError
-          && error.errorCode === 'PERMISSION_DECISION_OUTCOME_UNKNOWN')
+          && (error.errorCode === 'PERMISSION_DECISION_OUTCOME_UNKNOWN'
+            || error.errorCode === 'PERMISSION_DECISION_NOT_DELIVERED'))
       ),
     }, signal);
   }

@@ -6,8 +6,10 @@ export async function tcpLinkProxy(target: URL) {
   const timers = new Set<ReturnType<typeof setTimeout>>();
   let rate: number | null = null;
   let silent = false;
+  let refusing = false;
   let connections = 0;
   const server = createServer(client => {
+    if (refusing) { client.destroy(); return; }
     connections++;
     const upstream = connect(Number(target.port), target.hostname);
     sockets.add(client); sockets.add(upstream);
@@ -53,6 +55,9 @@ export async function tcpLinkProxy(target: URL) {
     throttle(bytesPerSecond: number) { rate = bytesPerSecond; },
     blackhole() { silent = true; },
     restore() { silent = false; rate = null; },
+    // Keeps a lost link down: redials are closed until connections are accepted again.
+    refuseConnections() { refusing = true; },
+    acceptConnections() { refusing = false; },
     disconnect() { for (const socket of sockets) socket.destroy(); },
     async close() {
       for (const timer of timers) clearTimeout(timer);

@@ -464,7 +464,10 @@ and conflict protection apply while the bounded command record remains retained.
 After an ambiguous provider failure and later record eviction, retry protection
 is no longer guaranteed; inspect live permission status before another decision.
 Provider acknowledgement failure is reported as an unknown outcome and is not
-automatically redelivered while that record is retained.
+automatically redelivered while that record is retained. A decision the
+executor never received, for example while it reconnects, is reported as not
+delivered and leaves the request pending; repeating the same command once the
+executor is ready delivers it.
 
 ## Chat Metadata
 
