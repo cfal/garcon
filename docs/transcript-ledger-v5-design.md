@@ -1,10 +1,28 @@
 # Garcon Transcript Ledger V5: Core-Owned Append-Only Authority
 
-Status: revision 40 integrated design. Supersedes
+Status: revision 41 integrated design. Supersedes
 `AGENT_OWNED_TRANSCRIPT_PROJECTION_DESIGN.md`
 (V4, SHA-256 `12e6efbcbd30419c0b4580d8159f60e2b1948d8dd790857a070dee5b3f6873cf`),
 which remains untouched as the historical record of the reconciliation-based
 architecture and its implementation through commit `f029424c`.
+
+Revision 41 lets remote producer bindings survive a short executor disconnect
+and bounds whole-history work. The worker's process-level producer relay
+numbers each binding's events, retains them until the controller acknowledges
+receiving them, and replays the unacknowledged suffix when a replacement
+session resumes the binding within a 120-second reconnect grace. Its 16 MiB
+retention budget drops the oldest row batches first and never session,
+permission, or run facts; the controller detects the skipped numbers and
+records one notice on the active run. During the grace the executor is
+`reconnecting`: runs stay active in that processing phase, pending permissions
+remain answerable once the executor is ready again, and Stop is delivered after
+resume. After the grace, after a worker restart, or for a binding the worker no
+longer holds, the revision 40 loss path below applies unchanged. Staging,
+seeding, copying, and deleting whole views now run in bounded transactions
+separated by event-loop turns; a view becomes current only in one promoting
+transaction, so readers still observe atomic replacement. Manual Reload
+reports its phase and row count while it runs and can be cancelled while it
+reads native history.
 
 Revision 40 makes the complete provider integration an executor boundary.
 Core retains synchronous ledger acceptance and durable-before-visible ordering.
@@ -505,8 +523,8 @@ The decisions:
    automatic, exists only for chats whose current binding has a native
    source and a non-null `nativeHistoryImport`, preserves the frozen
    prefix before the current binding while importing exactly that one
-   source through its tail, and atomically deletes the replaced view in
-   the cutover transaction.
+   source through its tail, and atomically retires the replaced view in
+   the cutover transaction before deleting its rows in bounded steps.
 8. **Runs are ephemeral correlation.** Active execution holds an
    in-memory `runId`. `runId` is mandatory on `run-ended`, permission
    lifecycle, and producer notice events — the events that touch run or
@@ -668,7 +686,8 @@ The decisions:
   materialized a fork. The two nullable facets are declared independently and
   core never substitutes one for the other. Reload imports exactly one native
   source — the current binding through its tail — while preserving the frozen
-  prefix before it. The replaced view is deleted in the cutover transaction. A
+  prefix before it. The cutover transaction retires the replaced view, and its
+  rows are deleted in bounded transactions afterwards. A
   chat whose current binding has no native source or whose integration has a
   null `nativeHistoryImport` has no Reload action. Genesis adoption is invoked
   only by first-open activation or paced search maintenance; a search request
@@ -958,7 +977,8 @@ is forbidden because it would restore catalog order instead of chat order.
 SQLite via `bun:sqlite` is the authoritative transcript ledger — the
 repository already depends on Bun, so this adds no dependency. One
 database per chat contains that chat's current view and, transiently,
-a staging view during reload:
+`staging` views: a view being built by reload or large seeding, and a
+replaced view whose rows are still being deleted after reload cutover:
 
 ```
 <ledger-root>/<chatId>/
@@ -1019,8 +1039,17 @@ CREATE UNIQUE INDEX transcript_submission
   unique index permits at most one `current` view. An established
   database has exactly one; a brand-new empty database is the sole
   zero-current case. There is no `meta` or pointer table, no pointer
-  file, and no `retained` status — the reload cutover deletes the
-  replaced view (section 11).
+  file, and no `retained` status — the reload cutover demotes the
+  replaced view to `staging`, and its rows are then deleted in bounded
+  transactions (section 11).
+- Work proportional to a whole view never runs as one synchronous pass.
+  Staging and seeding insert at most 500 rows or 2 MiB per transaction,
+  whole-view reads page by at most 1,000 rows or 4 MiB, and deletion
+  removes at most 2,000 rows per transaction, with an event-loop turn
+  between steps. Only a view's promotion to `current` is the atomic
+  step readers observe. A generation counter fences each multi-step
+  operation, so one abandoned by chat close or deletion cannot recreate
+  the chat directory or promote its view.
 - `PRAGMA user_version` is set at creation and validated at every open;
   schema migrations run lazily and transactionally at open.
 - The canonical durable row address is `(transcriptViewId, ordinal)`;
@@ -1320,9 +1349,15 @@ is durability. Worker emission is only transport handoff:
   order and the established chat-messages-before-terminal-derived-state
   contract. A crash before broadcast is harmless; reconnect reads the
   committed rows.
-- The controller ledger does not buffer. A bounded socket queue holds unsent
-  events; these are not ledger-accepted and are discarded on disconnect. There is no
-  ledger flush or distributed publish/close protocol. The loss window
+- The controller ledger does not buffer. A remote worker's producer relay
+  retains the events it emitted until the controller acknowledges
+  receiving them, and replays the unacknowledged suffix to a replacement
+  session that resumes the binding within the reconnect grace; the
+  controller deduplicates replays by per-binding sequence number. Retained
+  events are not ledger-accepted. Under the relay's retention budget the
+  oldest row batches are dropped and reported as one gap notice (section
+  16), and events still retained when the grace ends are discarded. There
+  is no ledger flush or distributed publish/close protocol. The loss window
   is events the provider emitted that core had not yet handled at crash,
   plus the NORMAL power-loss window (4.3); a later active history load may
   surface newer native evidence where the provider persisted it, and manual
@@ -2012,8 +2047,8 @@ It is never automatic and is the sole full-transcript replacement path:
    zero-match boundary proof; a stale debounced `chats.json` write must never
    re-arm that boundary after restart.
 3. Core closes the current view-bound sink (5.3).
-4. Core creates a `staging` view row and inserts its rows
-   transactionally from two sources: the frozen prefix — every row
+4. Core creates a `staging` view row and inserts its rows in bounded
+   transactions (4.2) from two sources: the frozen prefix — every row
    before the current binding's `content_start_ordinal`, carried through
    the frozen projection — and the single native import: the current
    binding, read by its owning integration's `nativeHistoryImport`
@@ -2034,11 +2069,14 @@ It is never automatic and is the sole full-transcript replacement path:
    rows, notices, and permission rows are not carried.
    Staged rows receive fresh dense ordinals; uniqueness and structure
    are enforced by the schema; no cross-view identity is promised.
-6. Atomic cutover is one transaction in the same database: delete the
-   old `current` view row — the foreign-key cascade removes its rows —
-   then promote `staging` to `current`. The order satisfies the
-   immediate one-current constraint, and a crash exposes a valid old or
-   a valid new current view, never zero or two. A fresh database file
+6. Atomic cutover is one transaction in the same database: demote the
+   old `current` view to `staging`, then promote the new `staging` view
+   to `current`. The order satisfies the immediate one-current
+   constraint, and a crash exposes a valid old or a valid new current
+   view, never zero or two. The demoted view's rows are then deleted in
+   bounded transactions; until they are gone they are as inert as any
+   stale staging view, and a crash leaves them for lazy deletion on the
+   next open. A fresh database file
    per reload is deliberately not used: it would resurrect the
    pointer-file and directory-swap ceremony SQLite eliminated. Freed
    pages are reused by future appends; an optional best-effort `VACUUM`
@@ -2054,12 +2092,22 @@ It is never automatic and is the sole full-transcript replacement path:
 If staging fails before the cutover, core issues a fresh sink bound to
 the unchanged current view before releasing the reservation; the chat
 continues unmodified. Stale `staging` views from a crash are inert and
-deleted lazily on open. Requests qualified by the replaced view receive
+deleted lazily on open, except views that an operation still in progress
+in the same process owns. Requests qualified by the replaced view receive
 the typed stale-view error (L8) — identical behavior whether or not the
 rows still exist. Concurrent external mutation of native history during
 the operation is unsupported by the product precondition; there are no
 provider snapshot leases, mutation gates, or generalized reset
 machinery.
+
+The requesting browser receives the reload's phase — preparing, reading
+native history, or saving — and row count as soon as the request is
+accepted, on each phase change, and at least once a second, so a long
+reload stays distinguishable from a lost one without a fixed deadline.
+Cancelling before saving begins preserves the current view; a reload that
+has begun saving completes. Another client learns of the replacement
+through the ordinary view-replacement broadcast even if the requester's
+socket closed meanwhile.
 
 Lossiness is per source. The native import is the provider's record: it
 lacks Garcon-only rows other than receipt-backed preamble applications —
@@ -2117,8 +2165,9 @@ before handing off.
 Continuation, fork, and genesis adoption reuse the frozen projection defined
 above: a continuation/fork target's ledger begins with the frozen
 projection of the source's conversational fold, agent-switch boundaries, and
-carryover-quarantine notice at or below the captured watermark — copied
-transactionally into the target chat's database — followed by a fresh binding.
+carryover-quarantine notice at or below the captured watermark — copied into
+the target chat's database in bounded transactions under a staging view that
+one transaction promotes (4.2) — followed by a fresh binding.
 Target-chat creation builds the target ledger completely first and registers
 the chat last; startup removes unregistered target directories after the
 registry loads. A native-fidelity fork that
@@ -2558,6 +2607,9 @@ relevant-entry definition under the 10.2 obligation.
 | Direct assistant/checkpoint is persisted but its ledger publication is lost | Native resume retains that execution history; the served view does not change automatically. Manual Reload can import it while the session is current; Direct has no drift probe. |
 | Direct Responses checkpoint is unresolved before output | One fallback request uses the bounded native-history projection without `previous_response_id`; unrelated errors, post-output errors, and fallback failure do not retry. |
 | User interrupt | Run marked stopped in memory; `run-ended: interrupted` appended immediately; provider abort best-effort; the interruption row is transparent to the resend scan. |
+| Remote executor link lost; a replacement session resumes within the grace | Runs stay active in the `reconnecting` processing phase. The worker replays events after the controller's last received sequence number, and duplicates are ignored, so each event reaches the sink once. A permission answer during the gap fails as unavailable and stays actionable; Stop is delivered after resume. |
+| Remote output retained during the gap exceeds the relay budget | The oldest row batches are dropped and one notice on the active run reports undelivered output; manual Reload after the turn recovers it. Session, permission, and run facts are never dropped. |
+| Reconnect grace expires, the worker restarted, or the worker no longer holds the binding | The run fails with `OUTCOME_UNKNOWN` and the manual Reload warning. After its own grace the worker detaches the binding, drops later output, and denies pending permissions. |
 | Interrupt when the run already ended | Idle no-op; nothing appended. |
 | Duplicate or stale `run-ended` (stopped or unknown `runId`) | Ignored; never becomes a row; cannot stop the current run. |
 | Late provider content or session fact from an ended run | Commits normally in observed order while the sink is open; may interleave with a later run's output; cannot change processing state or actionability. A late session fact preserves the native ref resume and reload depend on. |
@@ -2638,9 +2690,10 @@ Every deliberate gap, in one place, so it is not "fixed" later:
 13. External or crash-missed native activity is adoptable only while its
     session is the current binding; handoff freezes the displayed prefix
     permanently.
-14. Manual reload deletes the replaced view in the cutover transaction;
-    there is no undo and no retained copy. Shares survive as
-    self-contained snapshots; the confirmation dialog is the safeguard.
+14. Manual reload retires the replaced view in the cutover transaction
+    and deletes its rows in bounded steps afterwards; there is no undo
+    and no retained copy. Shares survive as self-contained snapshots;
+    the confirmation dialog is the safeguard.
 15. A native-fidelity fork that crashes before target registration may
     orphan a provider artifact; best-effort rollback only.
 16. Pinned OpenCode V1 automatic compaction is adopted through marker-part
@@ -2687,6 +2740,12 @@ Every deliberate gap, in one place, so it is not "fixed" later:
     omit that one `Preambles updated` row. The selection and next-input
     application boundary remain authoritative; no recovery journal or notice
     backfill exists.
+24. Remote output that exceeds the producer relay's 16 MiB retention budget
+    during an executor disconnect loses its oldest row batches. The chat
+    records one notice and manual Reload after the turn recovers the rows;
+    the relay does not persist output or page it to disk. Output still
+    retained when the reconnect grace ends is lost as in the revision 40
+    loss path.
 
 ## 17. Testing Strategy
 
@@ -2721,11 +2780,14 @@ The catalog cites this revision, but its inventory is not repeated here.
   staging view); raw keyset paging (newest page and older pages by
   `(view_id, ordinal)`, one bounded query per request, ordinal density,
   raw-cursor stability through hidden rows); the
-  one-current partial unique constraint with delete-then-promote cutover
+  one-current partial unique constraint with demote-then-promote cutover
   fault injection (kill between staging and cutover, and mid-cutover: a
   valid old or new current view, never zero or two; stale staging views
   deleted lazily on open); replaced-view deletion with stale-view errors
-  unchanged; `user_version` validation and lazy transactional migration;
+  unchanged; bounded staging, seeding, paging, and deletion, including an
+  operation abandoned by chat close or deletion that neither recreates the
+  chat directory nor promotes its view; `user_version` validation and lazy
+  transactional migration;
   the verified checkpoint (busy-frame handling) before the handoff
   decision; commit-failure fencing through an injected database port
   (deterministic, no chmod); per-chat corruption isolation (an injected
@@ -2939,12 +3001,14 @@ The catalog cites this revision, but its inventory is not repeated here.
   one current-session row preserved; other lifecycle rows dropped; no origin
   provenance); the
   single native import with seed-receipt exclusion; the
-  delete-then-promote cutover with the replaced view gone and stale-view
-  errors intact; search deletion-then-index ordering; queued entries
-  blocking the flow; continuation/fork copying the projection
-  into the target chat database transactionally, building fully before
-  registration, with unregistered-directory startup cleanup and later
-  source appends excluded. Missing, NotFound, unreadable, malformed, or
+  demote-then-promote cutover with the replaced view unreachable, its rows
+  deleted afterwards, and stale-view errors intact; progress per phase and
+  cancellation before saving; search deletion-then-index ordering; queued
+  entries blocking the flow; continuation/fork copying the projection
+  into the target chat database under a promoted staging view, building
+  fully before registration, with unregistered-directory startup cleanup
+  and later source appends excluded.
+  Missing, NotFound, unreadable, malformed, or
   incomplete evidence for the selected concrete native session fails before
   cutover and preserves the current view; the corresponding target-seed
   failure remains fatal to a native-fidelity fork. A successfully opened,
@@ -2993,6 +3057,16 @@ The catalog cites this revision, but its inventory is not repeated here.
   cases prove prefix seeding with independent resume plus the
   not-settled refusal that becomes a sessionless handoff fork only with
   consent.
+- **Remote producer resumption**: relay numbering, acknowledgement,
+  retention drop order, and grace expiry as unit rules; resume with
+  exactly-once delivery, the gap notice, a binding the worker released, an
+  expired controller grace, and a restarted worker over real links in both
+  dial directions; a pending permission that survives a blip through the
+  runtime router and through the pinned Claude CLI; and the browser's
+  reconnecting indicator.
+- **Responsiveness**: a 30,000-row Direct chat reloads, forks, and renders a
+  handoff artifact in every execution lane while WebSocket pings stay under
+  500 ms.
 - **Scripted tiers**: the existing real-binary scripted suites (Claude,
   Codex, OpenCode, Pi) are retained and re-anchored on end-state ledger
   assertions through direct V5 assertions. Live credential suites
