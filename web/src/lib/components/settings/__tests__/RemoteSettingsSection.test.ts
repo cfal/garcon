@@ -37,7 +37,7 @@ vi.mock('$lib/api/settings.js', () => ({
 	updateRemoteSettings: vi.fn(),
 }));
 
-describe('RemoteSettingsSection', () => {
+describe('remote settings sections', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 	});
@@ -674,18 +674,19 @@ describe('RemoteSettingsSection', () => {
 		});
 	});
 
-	it('renders custom app title below Telegram notifications', async () => {
+	it('separates the custom app title from Telegram notifications', async () => {
 		const store = new RemoteSettingsStore();
 		store.applySnapshot(makeRemoteSettingsSnapshot());
 		setTestRemoteSettingsStore(store);
 
-		render(RemoteSettingsSectionTestHost);
+		const general = render(RemoteSettingsSectionTestHost, { section: 'general' });
+		expect(screen.getByText('Use custom app title')).toBeTruthy();
+		expect(screen.queryByText('Telegram notifications')).toBeNull();
+		general.unmount();
 
-		const telegramTitle = screen.getByText('Telegram notifications');
-		const appTitleToggle = screen.getByText('Use custom app title');
-		expect(
-			telegramTitle.compareDocumentPosition(appTitleToggle) & Node.DOCUMENT_POSITION_FOLLOWING,
-		).toBeTruthy();
+		render(RemoteSettingsSectionTestHost, { section: 'notifications' });
+		expect(screen.getByText('Telegram notifications')).toBeTruthy();
+		expect(screen.queryByText('Use custom app title')).toBeNull();
 	});
 
 	it('renders pinned chats settings without GitHub status', async () => {

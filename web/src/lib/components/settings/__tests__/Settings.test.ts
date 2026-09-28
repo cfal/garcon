@@ -5,6 +5,7 @@ import { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 import { ExecutorsStore } from '$lib/executors/executors-store.svelte';
 import { makeTestGhCapability } from './gh-capability-test-context';
+import { makeRemoteSettingsSnapshot } from '$lib/stores/__tests__/remote-settings-snapshot-fixture';
 
 vi.mock('$lib/api/settings.js', () => ({
 	beginTelegramRecipientLink: vi.fn(),
@@ -13,6 +14,7 @@ vi.mock('$lib/api/settings.js', () => ({
 	getRemoteSettings: vi.fn(),
 	resolveTelegramRecipientLink: vi.fn(),
 	saveTelegramBotToken: vi.fn(),
+	testGenerationModel: vi.fn(),
 	updateRemoteSettings: vi.fn(),
 	sendTelegramTest: vi.fn(),
 	testTelegramBotToken: vi.fn(),
@@ -103,7 +105,13 @@ describe('Settings', () => {
 			expect(screen.getByRole('dialog', { name: 'Server Settings' })).toBeTruthy();
 			expect(screen.getByRole('tablist').getAttribute('aria-orientation')).toBe('vertical');
 			expect(screen.getAllByRole('tab').map((tab) => tab.getAttribute('aria-label'))).toEqual([
-				'Executors', 'Providers', 'Other Agents', 'GitHub', 'General',
+				'Providers',
+				'Other Agents',
+				'General',
+				'Automation',
+				'Notifications',
+				'GitHub',
+				'Executors',
 			]);
 			expect(screen.getByRole('tab', { name: 'Providers' })).toBeTruthy();
 			expect(screen.getByRole('tab', { name: 'Other Agents' })).toBeTruthy();
@@ -327,6 +335,42 @@ describe('Settings', () => {
 			rendered.unmount();
 			await vi.runAllTimersAsync();
 			vi.useRealTimers();
+		}
+	});
+
+	it('places remote controls in General, Automation, and Notifications tabs', async () => {
+		const appShell = createAppShellStore();
+		appShell.openSettings('general');
+		const remoteSettings = new RemoteSettingsStore();
+		remoteSettings.applySnapshot(makeRemoteSettingsSnapshot());
+		const rendered = render(SettingsTestHost, { appShell, remoteSettings });
+
+		try {
+			expect(screen.getByRole('heading', { name: 'General' })).toBeTruthy();
+			expect(screen.getByText('Pinned chats are added to')).toBeTruthy();
+			expect(screen.getByText('Use custom app title')).toBeTruthy();
+			expect(screen.queryByText('Automatically generate chat titles')).toBeNull();
+			expect(screen.queryByText('Telegram notifications')).toBeNull();
+
+			await fireEvent.click(screen.getByRole('tab', { name: 'Automation' }));
+			expect(appShell.settingsTab).toBe('automation');
+			expect(screen.getByRole('heading', { name: 'Automation' })).toBeTruthy();
+			expect(screen.getByText('Automatically generate chat titles')).toBeTruthy();
+			expect(screen.getByText('Enable agent switch compaction')).toBeTruthy();
+			expect(screen.getByText('Commit message model')).toBeTruthy();
+			expect(screen.getByText('Prompt refinement model')).toBeTruthy();
+			expect(screen.queryByText('Pinned chats are added to')).toBeNull();
+			expect(screen.queryByText('Telegram notifications')).toBeNull();
+
+			await fireEvent.click(screen.getByRole('tab', { name: 'Notifications' }));
+			expect(appShell.settingsTab).toBe('notifications');
+			expect(screen.getByRole('heading', { name: 'Notifications' })).toBeTruthy();
+			expect(screen.getByText('Telegram notifications')).toBeTruthy();
+			expect(screen.queryByText('Automatically generate chat titles')).toBeNull();
+			expect(screen.queryByText('Use custom app title')).toBeNull();
+		} finally {
+			appShell.closeSettings();
+			rendered.unmount();
 		}
 	});
 

@@ -24,8 +24,8 @@ test.each([
     await app.clickButton('More actions');
     await app.waitForMenuItemEnabled('Server Settings');
     await app.clickMenuItem('Server Settings');
-    await app.waitForDialogButtonEnabled('General');
-    await app.clickButton('General');
+    await app.waitForDialogButtonEnabled('Automation');
+    await app.clickButton('Automation');
     await app.waitForText('Unavailable executor');
     const before = await fixture.integration.client.get<RemoteSettingsSnapshot>('/api/v1/app/settings');
     expect(before.ui[key]).toEqual(selection);
@@ -65,8 +65,8 @@ test('a generation toggle cannot choose an agent for an incomplete saved remote 
     await app.clickButton('More actions');
     await app.waitForMenuItemEnabled('Server Settings');
     await app.clickMenuItem('Server Settings');
-    await app.waitForDialogButtonEnabled('General');
-    await app.clickButton('General');
+    await app.waitForDialogButtonEnabled('Automation');
+    await app.clickButton('Automation');
     const toggle = '[role="switch"][aria-label="Automatically generate chat titles"]';
     await fixture.page.waitForSelector(toggle);
     await fixture.page.$eval(toggle, element => (element as HTMLButtonElement).click());
@@ -98,7 +98,7 @@ test('app settings are separate from server settings and executor-owned sections
     await app.clickMenuItem('Server Settings');
     await app.waitForButtonEnabled('Add Executor');
     expect(await fixture.page.$eval('[role="dialog"] [role="tablist"]', element => element.getAttribute('aria-orientation'))).toBe('vertical');
-    expect(await fixture.page.$$eval('[role="dialog"] [role="tab"]', tabs => tabs.map(tab => tab.getAttribute('aria-label')))).toEqual(['Executors', 'Providers', 'Other Agents', 'GitHub', 'General']);
+    expect(await fixture.page.$$eval('[role="dialog"] [role="tab"]', tabs => tabs.map(tab => tab.getAttribute('aria-label')))).toEqual(['Providers', 'Other Agents', 'General', 'Automation', 'Notifications', 'GitHub', 'Executors']);
     await app.clickButton('Providers');
     await app.waitForText('Native Providers');
     await app.waitForText('Custom Providers');
@@ -118,6 +118,12 @@ test('app settings are separate from server settings and executor-owned sections
     await app.clickButton('General');
     await app.waitForText('Pinned chats are added to');
     expect(await fixture.page.$eval('[role="dialog"] [role="tabpanel"][data-state="active"]', element => element.textContent?.includes('GitHub CLI'))).toBe(false);
+    await app.clickButton('Automation');
+    await app.waitForText('Automatically generate chat titles');
+    expect(await fixture.page.$eval('[role="dialog"] [role="tabpanel"][data-state="active"]', element => element.textContent?.includes('Telegram notifications'))).toBe(false);
+    await app.clickButton('Notifications');
+    await app.waitForText('Telegram notifications');
+    expect(await fixture.page.$eval('[role="dialog"] [role="tabpanel"][data-state="active"]', element => element.textContent?.includes('Automatically generate chat titles'))).toBe(false);
     await app.clickDialogButton('Close');
     fixture.assertNoBrowserErrors();
   }, { executionBackend: 'remote-controller-dials' });

@@ -1,7 +1,9 @@
 <script lang="ts">
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
 	setExecutorsTestContext();
-	import RemoteSettingsSection from '../RemoteSettingsSection.svelte';
+	import AutomationSettingsSection from '../AutomationSettingsSection.svelte';
+	import GeneralSettingsSection from '../GeneralSettingsSection.svelte';
+	import NotificationsSettingsSection from '../NotificationsSettingsSection.svelte';
 	import { setLocalSettings, setModelCatalog, setRemoteSettings } from '$lib/context';
 	import { getTestRemoteSettingsStore } from './remote-settings-test-context';
 	import { getTestLocalSettingsStore } from './local-settings-test-context';
@@ -15,6 +17,12 @@
 	import { LocalSettingsStore } from '$lib/stores/local-settings.svelte';
 	import { setTestLocalSettingsStore } from './local-settings-test-context';
 	import { onDestroy } from 'svelte';
+
+	interface Props {
+		section?: 'all' | 'general' | 'automation' | 'notifications';
+	}
+
+	let { section = 'all' }: Props = $props();
 
 	setRemoteSettings(getTestRemoteSettingsStore());
 
@@ -100,4 +108,12 @@
 	} as never);
 </script>
 
-<RemoteSettingsSection />
+{#if section === 'all' || section === 'general'}
+	<GeneralSettingsSection />
+{/if}
+{#if section === 'all' || section === 'automation'}
+	<AutomationSettingsSection />
+{/if}
+{#if section === 'all' || section === 'notifications'}
+	<NotificationsSettingsSection />
+{/if}

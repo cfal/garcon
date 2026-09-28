@@ -153,6 +153,12 @@ describe('AppShellStore', () => {
 
 			store.setSettingsTab('other-agents');
 			expect(store.settingsTab).toBe('other-agents');
+
+			store.setSettingsTab('automation');
+			expect(store.settingsTab).toBe('automation');
+
+			store.setSettingsTab('notifications');
+			expect(store.settingsTab).toBe('notifications');
 		});
 
 		it('keeps app and server settings mutually exclusive with independent tabs', () => {

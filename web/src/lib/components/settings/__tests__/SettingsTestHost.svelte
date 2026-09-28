@@ -244,6 +244,9 @@
 		getDefaultModel() {
 			return 'opus';
 		},
+		getThinkingModes() {
+			return ['none'];
+		},
 		getModelForSelection(_provider: string, model: string) {
 			return model === 'opus' ? { value: 'opus', label: 'Opus' } : null;
 		},

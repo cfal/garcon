@@ -3,7 +3,14 @@
 import { untrack } from 'svelte';
 import { createActionSignal } from '$lib/utils/action-signal';
 
-export type SettingsTab = 'executors' | 'providers' | 'other-agents' | 'github' | 'general';
+export type SettingsTab =
+	| 'executors'
+	| 'providers'
+	| 'other-agents'
+	| 'github'
+	| 'general'
+	| 'automation'
+	| 'notifications';
 export type AppSettingsTab = 'general' | 'shortcuts';
 
 function normalizeSettingsTab(value: string): SettingsTab {
@@ -11,6 +18,8 @@ function normalizeSettingsTab(value: string): SettingsTab {
 	if (value === 'other-agents') return 'other-agents';
 	if (value === 'github') return 'github';
 	if (value === 'general') return 'general';
+	if (value === 'automation') return 'automation';
+	if (value === 'notifications') return 'notifications';
 	return 'executors';
 }
 

@@ -1,18 +1,13 @@
-<!-- Server-stored settings. Shows a loading state until remote settings
-     are available; never renders guessed defaults. -->
 <script lang="ts">
 	import { getRemoteSettings } from '$lib/context';
 	import type { PinnedInsertPosition } from '$lib/types/session.js';
 	import * as m from '$lib/paraglide/messages.js';
-	import RemoteGenerationSettingsCard from './RemoteGenerationSettingsCard.svelte';
-	import AppTitleSettingsCard from './AppTitleSettingsCard.svelte';
-	import TelegramSettingsPanel from './TelegramSettingsPanel.svelte';
-	import TranscriptSearchSettingsCard from './TranscriptSearchSettingsCard.svelte';
 	import AgentCommandsSettingsCard from './AgentCommandsSettingsCard.svelte';
+	import AppTitleSettingsCard from './AppTitleSettingsCard.svelte';
 	import HiddenBashCommandsSettingsCard from './HiddenBashCommandsSettingsCard.svelte';
+	import TranscriptSearchSettingsCard from './TranscriptSearchSettingsCard.svelte';
 
 	const remoteSettings = getRemoteSettings();
-
 	let saveError = $state<string | null>(null);
 
 	async function save(patch: Record<string, unknown>): Promise<boolean> {
@@ -62,9 +57,9 @@
 					class="select-native shrink-0"
 					aria-describedby="remote-pinned-insert-position-hint"
 					value={remoteSettings.snapshot?.ui.pinnedInsertPosition ?? 'top'}
-					onchange={(e) =>
+					onchange={(event) =>
 						onPinnedInsertPositionChange(
-							(e.currentTarget as HTMLSelectElement).value as PinnedInsertPosition,
+							(event.currentTarget as HTMLSelectElement).value as PinnedInsertPosition,
 						)}
 				>
 					<option value="top">{m.sidebar_chats_pinned_insert_top()}</option>
@@ -75,36 +70,6 @@
 
 		<TranscriptSearchSettingsCard />
 		<AgentCommandsSettingsCard />
-
-		<RemoteGenerationSettingsCard
-			settingsKey="chatTitle"
-			enabledLabel={m.settings_chat_generate_titles()}
-			modelLabel={m.settings_chat_title_model()}
-		/>
-
-		<RemoteGenerationSettingsCard
-			settingsKey="agentSwitchCompaction"
-			enabledLabel={m.settings_agent_switch_compaction_enabled()}
-			modelLabel={m.settings_agent_switch_compaction_model()}
-			blurb={m.settings_agent_switch_compaction_hint()}
-		/>
-
-		<RemoteGenerationSettingsCard
-			settingsKey="commitMessage"
-			modelLabel={m.settings_commit_message_model()}
-			showDirectoryPrefix
-			promptKind="commit-message"
-		/>
-
-		<RemoteGenerationSettingsCard
-			settingsKey="promptRefinement"
-			modelLabel={m.settings_prompt_refinement_model()}
-			blurb={m.settings_prompt_refinement_hint()}
-			promptKind="prompt-refinement"
-		/>
-
-		<TelegramSettingsPanel />
-
 		<AppTitleSettingsCard />
 	{/if}
 </div>

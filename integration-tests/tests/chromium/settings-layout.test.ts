@@ -16,7 +16,7 @@ test('settings navigation and host sections fit desktop and mobile dialogs', asy
     for (const width of [1440, 768, 390, 320]) {
       phase(`server settings at ${width}px`);
       await page.setViewportSize({ width, height: 900 });
-      for (const name of ['Executors', 'Providers', 'Other Agents', 'GitHub', 'General']) {
+      for (const name of ['Providers', 'Other Agents', 'General', 'Automation', 'Notifications', 'GitHub', 'Executors']) {
         await dialog.getByRole('tab', { name, exact: true }).click();
         const panel = dialog.getByRole('tabpanel');
         await browserExpect(panel).toBeVisible();

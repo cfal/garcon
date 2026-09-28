@@ -1785,6 +1785,8 @@
 	"settings_tab_providers": "Providers",
 	"settings_tab_other_agents": "Other Agents",
 	"settings_tab_general": "General",
+	"settings_tab_automation": "Automation",
+	"settings_tab_notifications": "Notifications",
 	"settings_tab_executors": "Executors",
 	"settings_tab_github": "GitHub",
 	"settings_native_providers": "Native Providers",
