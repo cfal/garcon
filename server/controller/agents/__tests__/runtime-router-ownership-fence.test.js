@@ -103,7 +103,13 @@ describe('AgentRuntimeRouter ownership fence', () => {
     })).rejects.toMatchObject({ outcome: 'not-dispatched', code: 'UNAVAILABLE' });
     expect(router.isChatRunning('chat-1')).toBe(false);
     expect(events).toMatchObject([{
-      type: 'run-ended', runId: 'turn-1', row: { origin: 'core', outcome: 'failed', error: { code: 'UNAVAILABLE' } },
+      type: 'run-ended',
+      runId: 'turn-1',
+      row: {
+        origin: 'core',
+        outcome: 'failed',
+        error: { code: 'UNAVAILABLE', message: 'The turn did not start: Lost binding reply' },
+      },
     }]);
     expect(execution.start).not.toHaveBeenCalled();
     expect(execution.resume).not.toHaveBeenCalled();

@@ -70,7 +70,7 @@ export class ExecutorRpc {
     this.#terminalDetach = null;
     for (const call of this.#pending.values()) {
       call.cleanup();
-      call.reject(new AgentCallError('unknown', 'Executor continuity lost after possible dispatch'));
+      call.reject(new AgentCallError('unknown', 'The connection to the executor dropped before it replied.'));
     }
     this.#pending.clear();
     this.#lateResults.clear();
@@ -116,17 +116,19 @@ export class ExecutorRpc {
       throw new AgentCallError('not-dispatched', 'Invalid executor deadline');
     }
     if (this.#retired || options?.signal?.aborted || !this.transport.connected) throw new AgentCallError('not-dispatched', 'Executor is unavailable');
-    if (this.#pending.size + this.#lateResults.size >= 256) throw new AgentCallError('not-dispatched', 'Executor request budget exhausted');
+    if (this.#pending.size + this.#lateResults.size >= 256) {
+      throw new AgentCallError('not-dispatched', 'The executor is handling too many requests. Try again shortly.');
+    }
     const id = crypto.randomUUID();
     const payload = JSON.stringify({ type: 'request', id, integrationId, method, request });
     if (!this.transport.channel.fitsFrame(payload)) {
-      throw new AgentCallError('not-dispatched', 'Executor request exceeds the message size limit');
+      throw new AgentCallError('not-dispatched', 'The request is too large to send to the executor.');
     }
     if (!this.transport.channel.canAdmit(payload)) {
-      throw new AgentCallError('not-dispatched', 'Executor message queue budget exhausted');
+      throw new AgentCallError('not-dispatched', 'The connection to the executor is backed up. Try again shortly.');
     }
     const result = Promise.withResolvers<unknown>();
-    const cancel = () => {
+    const cancel = (message: string) => {
       const pending = this.#pending.get(id);
       if (!pending) return;
       this.#pending.delete(id);
@@ -134,19 +136,20 @@ export class ExecutorRpc {
       const onLateResult = options?.onLateResult;
       if (onLateResult) this.#lateResults.set(id, (value) => onLateResult(value as ExecutorRpcMethods[K]['result']));
       pending.cleanup();
-      pending.reject(new AgentCallError('unknown', 'Executor call cancelled after possible dispatch'));
+      pending.reject(new AgentCallError('unknown', message));
       try { if (!this.#retired) this.transport.send(JSON.stringify({ type: 'cancel', id } satisfies RpcFrame)); } catch { /* Continuity failure already fences the call. */ }
     };
-    const timer = timeoutMs === null ? null : setTimeout(cancel, timeoutMs);
+    const timer = timeoutMs === null ? null : setTimeout(() => cancel('The executor did not reply in time.'), timeoutMs);
     timer?.unref();
-    options?.signal?.addEventListener('abort', cancel, { once: true });
-    const cleanup = () => { if (timer) clearTimeout(timer); options?.signal?.removeEventListener('abort', cancel); };
+    const abort = () => cancel('The request was cancelled after it was sent to the executor.');
+    options?.signal?.addEventListener('abort', abort, { once: true });
+    const cleanup = () => { if (timer) clearTimeout(timer); options?.signal?.removeEventListener('abort', abort); };
     this.#pending.set(id, { ...result, cleanup });
     try {
       this.transport.send(payload);
-    } catch (error) {
+    } catch {
       cleanup(); this.#pending.delete(id);
-      result.reject(new AgentCallError('unknown', error instanceof Error ? error.message : 'Executor send failed'));
+      result.reject(new AgentCallError('unknown', 'The connection to the executor dropped while the request was being sent.'));
     }
     return await result.promise as ExecutorRpcMethods[K]['result'];
   }
@@ -199,7 +202,9 @@ export class ExecutorRpc {
     }
     if (this.#incoming.has(frame.id)) throw new Error('Duplicate RPC request ID');
     if (this.#incoming.size >= 256) {
-      this.#reply({ type: 'error', id: frame.id, error: encodeFailure(new AgentCallError('not-dispatched', 'Executor request budget exhausted')) });
+      this.#reply({ type: 'error', id: frame.id, error: encodeFailure(new AgentCallError(
+        'not-dispatched', 'The executor is handling too many requests. Try again shortly.',
+      )) });
       return;
     }
     const controller = new AbortController();
@@ -226,7 +231,7 @@ export class ExecutorRpc {
     }
     if (!this.transport.channel.fitsFrame(payload) || !this.transport.channel.canAdmit(payload)) {
       payload = JSON.stringify({ type: 'error', id: frame.id, error: encodeFailure(
-        new AgentCallError('unknown', 'Executor reply exceeds the message or queue budget'),
+        new AgentCallError('unknown', 'The executor ran the request, but its reply was too large to deliver.'),
       ) } satisfies RpcFrame);
     }
     this.transport.send(payload);

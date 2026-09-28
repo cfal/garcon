@@ -10,7 +10,9 @@ for (const dialer of ['controller', 'worker'] as const) {
       fixture.generations[0]!.hooks.start = async () => {
         fixture.worker.disconnect(); fixture.controller.disconnect();
       };
-      await expect(integration.execution.start(request)).rejects.toMatchObject({ outcome: 'unknown' });
+      await expect(integration.execution.start(request)).rejects.toMatchObject({
+        outcome: 'unknown', message: 'The connection to the executor dropped before it replied.',
+      });
       expect(fixture.generations[0]!.calls.start).toBe(1);
       expect(fixture.generations[0]!.calls.abort).toBe(0);
     } finally { await fixture.dispose(); }

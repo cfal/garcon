@@ -972,7 +972,7 @@ function runKey(chatId: string, runId: string): string {
 
 function executionSetupFailure(error: unknown): unknown {
   return error instanceof AgentCallError && error.outcome === 'unknown'
-    ? new AgentCallError('not-dispatched', `Execution was not dispatched: ${error.message}`)
+    ? new AgentCallError('not-dispatched', `The turn did not start: ${error.message}`)
     : error;
 }
 

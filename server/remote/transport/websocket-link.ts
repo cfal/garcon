@@ -257,7 +257,7 @@ export class WebSocketLink {
       this.#accept(connection);
     } catch (error) {
       if (error instanceof MessageContinuityError) connection.session?.close(error);
-      this.#reportError(connection.authenticated ? 'Executor continuity lost' : 'Executor authentication failed');
+      this.#reportError(connection.authenticated ? 'Executor connection lost' : 'Executor authentication failed');
       this.#close(connection);
     }
   }

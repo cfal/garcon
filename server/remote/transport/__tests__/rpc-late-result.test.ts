@@ -28,8 +28,14 @@ test('cancelled calls retain bounded cleanup until settlement and release budget
     }).catch((error: unknown) => error));
     const ids = sent.map(({ id }) => id);
     cancelled.abort();
-    for (const call of calls) expect(await call).toMatchObject({ outcome: 'unknown' });
-    await expect(rpc.call('test', 'execution.runningSessions', null)).rejects.toMatchObject({ outcome: 'not-dispatched' });
+    for (const call of calls) {
+      expect(await call).toMatchObject({
+        outcome: 'unknown', message: 'The request was cancelled after it was sent to the executor.',
+      });
+    }
+    await expect(rpc.call('test', 'execution.runningSessions', null)).rejects.toMatchObject({
+      outcome: 'not-dispatched', message: 'The executor is handling too many requests. Try again shortly.',
+    });
     connection.receive(JSON.stringify({ type: 'result', id: ids[0], value: [] }));
     await cleaned.promise;
     expect(onLateResult).toHaveBeenCalledTimes(1);
@@ -66,7 +72,7 @@ test('deadline cancellation cleans up a late result', async () => {
     const cleaned = Promise.withResolvers<unknown>();
     await expect(rpc.call('test', 'execution.runningSessions', null, {
       timeoutMs: 1, onLateResult: (value) => { cleaned.resolve(value); },
-    })).rejects.toMatchObject({ outcome: 'unknown' });
+    })).rejects.toMatchObject({ outcome: 'unknown', message: 'The executor did not reply in time.' });
     connection.receive(JSON.stringify({ type: 'result', id: sent[0]!.id, value: [] }));
     expect(await cleaned.promise).toEqual([]);
   } finally { transport.close(); }

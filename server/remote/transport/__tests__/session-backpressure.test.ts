@@ -11,7 +11,7 @@ test('failures after proof verification are not reported as authentication failu
   controller.onSession(() => { throw new Error('Synthetic post-authentication failure'); });
   try {
     controller.dial(worker.listen());
-    expect(await reported.promise).toBe('Executor continuity lost');
+    expect(await reported.promise).toBe('Executor connection lost');
   } finally { await controller.dispose(); await worker.dispose(); }
 });
 

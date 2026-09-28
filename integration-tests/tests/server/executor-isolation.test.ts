@@ -100,7 +100,7 @@ for (const backend of ['remote-controller-dials', 'remote-executor-dials'] as co
         images: [{ name: 'first.png', data }, { name: 'second.png', data }],
       })).rejects.toMatchObject({
         status: 503,
-        body: { errorCode: 'UNAVAILABLE', error: 'Executor request exceeds the message size limit' },
+        body: { errorCode: 'UNAVAILABLE', error: 'The request is too large to send to the executor.' },
       });
       expect(fakeProviders.anthropic.requests()).toHaveLength(0);
       const snapshot = await client.get<{ executors: unknown }>('/api/v1/executors');
