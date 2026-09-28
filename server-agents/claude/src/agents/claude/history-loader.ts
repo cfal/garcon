@@ -20,7 +20,12 @@ import { parseFirstJsonlValue } from '@garcon/server-agent-common/lib/jsonl';
 import type { AgentLogger } from '@garcon/server-agent-interface';
 import { deterministicTranscriptTimestamp } from '@garcon/server-agent-common/shared/transcript-timestamp';
 import { compareTranscriptTimestamps } from '@garcon/server-agent-common/shared/transcript-order';
+import { readJsonlLineEntries } from '@garcon/server-agent-common/shared/history-loader-utils';
+import { yieldToEventLoop } from '@garcon/server-agent-common/shared/event-loop';
 import { claudeSteeringInputsFromNativeContent } from './user-input.js';
+
+// Bounds each synchronous conversion step of a long native history.
+const CONVERSION_STEP_ENTRIES = 2000;
 
 const NOOP_LOGGER: AgentLogger = {
   debug() {},
@@ -143,12 +148,8 @@ export function parseClaudeJsonlEntryWithSource(
 
 export function sortClaudeEntries(entries: Record<string, unknown>[]): Record<string, unknown>[] {
   return entries
-    .map((entry, index) => ({ entry, index }))
-    .sort((a, b) => {
-      const left = timestampMs(a.entry.timestamp);
-      const right = timestampMs(b.entry.timestamp);
-      return compareTranscriptTimestamps(left, right) || a.index - b.index;
-    })
+    .map((entry, index) => ({ entry, index, time: timestampMs(entry.timestamp) }))
+    .sort((a, b) => compareTranscriptTimestamps(a.time, b.time) || a.index - b.index)
     .map(({ entry }) => entry);
 }
 
@@ -169,6 +170,26 @@ function dedupeClaudeEntriesByUuid(
 }
 
 export function convertClaudeEntries(rawEntries: Record<string, unknown>[]): ChatMessage[] {
+  const converter = createClaudeEntryConverter(rawEntries);
+  for (const entry of converter.entries) converter.convert(entry);
+  return converter.messages;
+}
+
+// Converts in bounded steps so a long transcript leaves room for other event-loop work.
+async function convertClaudeEntriesInSteps(rawEntries: Record<string, unknown>[]): Promise<ChatMessage[]> {
+  const converter = createClaudeEntryConverter(rawEntries);
+  for (let index = 0; index < converter.entries.length; index += 1) {
+    if (index > 0 && index % CONVERSION_STEP_ENTRIES === 0) await yieldToEventLoop();
+    converter.convert(converter.entries[index]!);
+  }
+  return converter.messages;
+}
+
+function createClaudeEntryConverter(rawEntries: Record<string, unknown>[]): {
+  readonly entries: readonly Record<string, unknown>[];
+  readonly messages: ChatMessage[];
+  convert(entry: Record<string, unknown>): void;
+} {
   const entries = dedupeClaudeEntriesByUuid(rawEntries);
   const messages: ChatMessage[] = [];
   const sourceOrdinals = new WeakMap<Record<string, unknown>, number>();
@@ -204,7 +225,7 @@ export function convertClaudeEntries(rawEntries: Record<string, unknown>[]): Cha
     .map((entry) => parseCompactMetadata(entry.compactMetadata ?? entry.compact_metadata));
   let compactionIndex = 0;
 
-  for (const entry of entries) {
+  function convert(entry: Record<string, unknown>): void {
     const source = getNativeMessageSource(entry);
     const ts = asString(entry.timestamp)
       || deterministicTranscriptTimestamp(source?.lineNumber, source?.byteOffset);
@@ -212,7 +233,7 @@ export function convertClaudeEntries(rawEntries: Record<string, unknown>[]): Cha
 
     if (entry.type === 'progress' || entry.type === 'queue-operation' ||
       entry.type === 'file-history-snapshot' || entry.type === 'summary') {
-      continue;
+      return;
     }
 
     const queuedPrompts = queuedCommandPrompts(entry);
@@ -221,12 +242,12 @@ export function convertClaudeEntries(rawEntries: Record<string, unknown>[]): Cha
       for (const prompt of queuedPrompts) {
         pushMessage(entry, userMessage(entry, attachmentTimestamp || ts, prompt));
       }
-      continue;
+      return;
     }
 
-    if (entry.type === 'attachment') continue;
+    if (entry.type === 'attachment') return;
 
-    if (entry.type === 'system') continue;
+    if (entry.type === 'system') return;
 
     if (entry.isCompactSummary) {
       const summaryText = getMessageText(message.content);
@@ -241,17 +262,17 @@ export function convertClaudeEntries(rawEntries: Record<string, unknown>[]): Cha
         );
         pushMessage(entry, compactionMessage);
       }
-      continue;
+      return;
     }
 
-    if (entry.isMeta) continue;
+    if (entry.isMeta) return;
 
     if (entry.isApiErrorMessage) {
       const errorText = entry.error
         ? (typeof entry.error === 'string' ? entry.error : JSON.stringify(entry.error))
         : getMessageText(message.content) || 'API error';
       pushMessage(entry, new ErrorMessage(ts, errorText));
-      continue;
+      return;
     }
 
     if (message.role === 'user') {
@@ -280,7 +301,7 @@ export function convertClaudeEntries(rawEntries: Record<string, unknown>[]): Cha
           ));
         }
       }
-      continue;
+      return;
     }
 
     if (message.role === 'assistant' && message.content) {
@@ -306,7 +327,7 @@ export function convertClaudeEntries(rawEntries: Record<string, unknown>[]): Cha
           pushMessage(entry, new AssistantMessage(ts, content));
         }
       }
-      continue;
+      return;
     }
 
     if (entry.type === 'thinking' && message.content) {
@@ -318,15 +339,20 @@ export function convertClaudeEntries(rawEntries: Record<string, unknown>[]): Cha
     }
   }
 
-  return messages;
+  return { entries, messages, convert };
 }
 
-function parseClaudeJsonlLines(lines: string[], strict = false): ChatMessage[] {
-  return convertClaudeEntries(sortClaudeEntries(lines
-    .map((line, index) => strict
-      ? parseStrictClaudeJsonlEntryWithSource(line, index + 1)
-      : parseClaudeJsonlEntryWithSource(line, index + 1))
-    .filter((entry): entry is Record<string, unknown> => Boolean(entry))));
+// Parses each line as its 64 KiB chunk arrives, so reading a long transcript interleaves with
+// other event-loop work. Conversion needs the complete chronological order and runs after.
+async function parseClaudeJsonlFile(nativePath: string, strict: boolean): Promise<ChatMessage[]> {
+  const entries: Record<string, unknown>[] = [];
+  for await (const { line, lineNumber } of readJsonlLineEntries(nativePath)) {
+    const entry = strict
+      ? parseStrictClaudeJsonlEntryWithSource(line, lineNumber!)
+      : parseClaudeJsonlEntryWithSource(line, lineNumber!);
+    if (entry) entries.push(entry);
+  }
+  return convertClaudeEntriesInSteps(sortClaudeEntries(entries));
 }
 
 function parseStrictClaudeJsonlEntryWithSource(
@@ -396,8 +422,7 @@ export async function loadClaudeChatMessages(
   }
 
   try {
-    const raw = await fs.readFile(nativePath, 'utf8');
-    return parseClaudeJsonlLines(raw.split('\n'), options.throwOnError === true);
+    return await parseClaudeJsonlFile(nativePath, options.throwOnError === true);
   } catch (error) {
     if (options.throwOnError) throw error;
     logger.error('Claude transcript load failed', {

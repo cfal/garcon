@@ -9,6 +9,7 @@ import type {
 } from '@garcon/server-agent-interface';
 import { hasNodeErrorCode } from '../lib/errors.js';
 import { syncDirectory } from '../lib/json-file-store.js';
+import { yieldToEventLoop } from '../shared/event-loop.js';
 
 const DIRECT_SESSION_NAMESPACE = 'direct-sessions-v1';
 const DIRECT_SESSION_SCHEMA_VERSION = 1;
@@ -206,7 +207,7 @@ export class DirectSessionStore {
       const filePath = await this.#sessionFilePath(validatedSessionId);
       const file = await openRegularFile(filePath, constants.O_RDONLY);
       try {
-        const parsed = parseSessionFile(
+        const parsed = await parseSessionFile(
           await this.#readFile(file),
           this.#host.agentId,
           validatedSessionId,
@@ -296,7 +297,7 @@ export class DirectSessionStore {
         const observedIdentity = fileIdentity(await file.stat({ bigint: true }));
         let appendState = this.#appendStates.get(validatedSessionId);
         if (!appendState || !sameFileIdentity(appendState.identity, observedIdentity)) {
-          const parsed = parseSessionFile(
+          const parsed = await parseSessionFile(
             await this.#readFile(file),
             this.#host.agentId,
             validatedSessionId,
@@ -395,28 +396,34 @@ async function writeAll(
   }
 }
 
-function parseSessionFile(
+// Parses in bounded steps: every resumed turn and every Reload reads the whole session.
+const PARSE_STEP_LINES = 1000;
+
+async function parseSessionFile(
   raw: Buffer,
   expectedOwnerId: string,
   expectedSessionId: string,
-): ParsedSessionFile {
+): Promise<ParsedSessionFile> {
   const endsWithNewline = raw.at(-1) === 0x0a;
   const lastNewline = raw.lastIndexOf(0x0a);
   const completeLength = endsWithNewline ? raw.length : lastNewline + 1;
   const completeLines = decodeUtf8(raw.subarray(0, completeLength))
     .split('\n')
     .slice(0, -1);
-  const values = completeLines.map((line, index) => parseJsonLine(line, index + 1));
   let ignoredTail = false;
   let separator: '' | '\n' = '';
   let appendOffset = raw.length;
 
-  if (values.length < 1) throw new TypeError('Direct session is missing its header');
-  const header = parseHeader(values[0]);
+  if (completeLines.length < 1) throw new TypeError('Direct session is missing its header');
+  const header = parseHeader(parseJsonLine(completeLines[0]!, 1));
   if (header.ownerId !== expectedOwnerId || header.sessionId !== expectedSessionId) {
     throw new TypeError('Direct session header does not match the selected session');
   }
-  let records = values.slice(1).map(parseSessionRecord);
+  let records: DirectSessionRecordV1[] = [];
+  for (let index = 1; index < completeLines.length; index += 1) {
+    if (index % PARSE_STEP_LINES === 0) await yieldToEventLoop();
+    records.push(parseSessionRecord(parseJsonLine(completeLines[index]!, index + 1)));
+  }
   validateSequence(records);
   if (!endsWithNewline && completeLength < raw.length) {
     try {
