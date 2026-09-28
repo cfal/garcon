@@ -826,13 +826,20 @@ export class SpaDriver {
 
   async openWorkspaceWindowActions(windowId?: string): Promise<void> {
     const targetWindowId = windowId ?? (await this.currentWorkspaceWindowId());
-    await this.#page.evaluate((expectedWindowId) => {
-      const trigger = [
-        ...document.querySelectorAll<HTMLButtonElement>('[data-workspace-window-menu-trigger]'),
-      ].find((element) => element.dataset.workspaceWindowMenuTrigger === expectedWindowId);
-      if (!trigger) throw new Error(`Missing workspace window menu: ${expectedWindowId}`);
-      if (trigger.getAttribute('aria-expanded') !== 'true') trigger.click();
-    }, targetWindowId);
+    try {
+      await this.#page.evaluate((expectedWindowId) => {
+        const trigger = [
+          ...document.querySelectorAll<HTMLButtonElement>('[data-workspace-window-menu-trigger]'),
+        ].find((element) => element.dataset.workspaceWindowMenuTrigger === expectedWindowId);
+        if (!trigger) throw new Error(`Missing workspace window menu: ${expectedWindowId}`);
+        if (trigger.getAttribute('aria-expanded') !== 'true') trigger.click();
+      }, targetWindowId);
+    } catch (error) {
+      // Lightpanda can collect the CDP promise while the click mounts the menu.
+      // Each caller's next menu step still verifies that the menu opened.
+      if (!(error instanceof Error) || !error.message.includes('Promise was collected'))
+        throw error;
+    }
   }
 
   async clickWorkspaceWindowAddAction(name: string, windowId?: string): Promise<void> {
