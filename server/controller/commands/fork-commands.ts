@@ -42,10 +42,20 @@ export class ForkCommands {
       chatId: this.support.requireChatId(input.chatId),
     };
     return this.support.withChatMutationLocks([normalized.sourceChatId, normalized.chatId], async () => {
+      // The client picks the target ID, so a repeated request is a retry of a lost reply; the
+      // target lock keeps it from observing a fork that is still being created.
+      if (this.isForkOf(normalized.chatId, normalized.sourceChatId)) {
+        return { success: true, chat: await this.support.projectCommandChat(normalized.chatId) };
+      }
       const context = await this.validateFork(normalized, { signal });
       await this.forkChatFromContext(context, signal);
       return { success: true, chat: await this.support.projectCommandChat(context.targetChatId) };
     });
+  }
+
+  private isForkOf(chatId: string, sourceChatId: string): boolean {
+    const parent = this.deps.chats.getChat(chatId)?.parentChat;
+    return parent?.relation === 'fork' && parent.chatId === sourceChatId;
   }
 
   async submitForkRun(input: SubmitForkRunInput): Promise<ForkRunCommandResponse> {

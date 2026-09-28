@@ -4096,6 +4096,42 @@ describe('ChatCommandService', () => {
     expect(forkChatFileCopy).toHaveBeenCalledOnce();
   });
 
+  it('answers a repeated fork request with the fork it already created', async () => {
+    let registry;
+    const forkChatFileCopy = mock(async ({ sourceChatId, targetChatId }) => {
+      registry.set(targetChatId, {
+        ...registry.get(sourceChatId),
+        id: targetChatId,
+        parentChat: { chatId: sourceChatId, relation: 'fork', transcriptViewId: 'view-1', ordinal: 2 },
+      });
+      return {
+        sourceChatId,
+        chatId: targetChatId,
+        agentId: 'claude',
+        agentSessionId: 'agent-2',
+        rollback: mock(async () => undefined),
+      };
+    });
+    const { service, sessions } = makeService({ forkChatFileCopy });
+    registry = sessions;
+    const request = { sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID };
+
+    const first = await service.forkChat(request);
+    const repeated = await service.forkChat(request);
+
+    expect(repeated).toEqual(first);
+    expect(forkChatFileCopy).toHaveBeenCalledOnce();
+  });
+
+  it('still refuses a target chat that is not a fork of the source', async () => {
+    const { service, sessions, forkChatFileCopy } = makeService();
+    sessions.set(TARGET_CHAT_ID, { ...sessions.get(SOURCE_CHAT_ID), id: TARGET_CHAT_ID, parentChat: null });
+
+    await expect(service.forkChat({ sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID }))
+      .rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT', status: 409 });
+    expect(forkChatFileCopy).not.toHaveBeenCalled();
+  });
+
   it('captures the authoritative source binding after first-use fork adoption', async () => {
     const { service, agents, sessions, forkChatFileCopy } = makeService();
     sessions.get(SOURCE_CHAT_ID).agentSessionId = null;
