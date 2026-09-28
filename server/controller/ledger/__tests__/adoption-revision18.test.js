@@ -77,7 +77,7 @@ describe('TranscriptAdoptionService Revision 18 contract', () => {
         .toThrow('Transcript ledger has no current view for chat chat-1');
 
       await expect(adoption.ensure('chat-1')).resolves.toMatchObject({ status: 'current' });
-      expect(ledger.conversationMessages('chat-1').map((message) => message.content)).toEqual([
+      expect((await ledger.conversationMessages('chat-1')).map((message) => message.content)).toEqual([
         'attempt-2',
       ]);
       expect(attempt).toBe(2);

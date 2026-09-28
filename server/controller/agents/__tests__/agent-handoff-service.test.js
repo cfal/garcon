@@ -211,27 +211,27 @@ describe('AgentHandoffService', () => {
     expect(calls).toEqual(['close', 'marker', 'boundary', 'registry', 'complete', 'reopen']);
   });
 
-  it('copies a frozen conversational prefix into a target ledger', () => {
+  it('copies a frozen conversational prefix into a target ledger', async () => {
     const ledger = {
       currentView: mock(() => null),
       highWatermark: mock(() => ({ viewId: 'view-1', ordinal: 3 })),
-      rowsThrough: mock(() => [
+      rowsThrough: mock(async () => [
         { kind: 'user-input', at: 't1', detail: { message: { type: 'user-message' } } },
         { kind: 'notice', at: 't2', message: 'ignored', detail: {} },
         { kind: 'provider-row', at: 't3', message: { type: 'assistant-message' }, providerMeta: {} },
       ]),
-      initializeChat: mock(() => ({})),
+      seedChat: mock(async () => ({})),
       deleteChat: mock(() => {}),
     };
     const service = createService({ ledger });
 
-    const watermark = service.seedContinuationLedger({
+    const watermark = await service.seedContinuationLedger({
       sourceChatId: 'source',
       targetChatId: 'target',
     });
 
     expect(watermark).toEqual({ viewId: 'view-1', ordinal: 3 });
-    expect(ledger.initializeChat).toHaveBeenCalledWith('target', [
+    expect(ledger.seedChat).toHaveBeenCalledWith('target', [
       expect.objectContaining({ kind: 'user-input', providerMeta: null }),
       expect.objectContaining({ kind: 'provider-row', providerMeta: null }),
     ], 3);

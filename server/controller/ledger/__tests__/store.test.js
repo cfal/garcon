@@ -381,17 +381,17 @@ describe('TranscriptLedgerStore', () => {
       .toThrow(LedgerFencedError);
   });
 
-  it('fences domain write failures when rollback fails and leaves the transaction active', () => {
+  it('fences domain write failures when rollback fails and leaves the transaction active', async () => {
     const current = store.initializeCurrentView('failed-chat', {
       viewId: transcriptViewId('old-view'),
       contentStartOrdinal: 1,
       rows: [provider('old')],
     });
-    const staged = store.stageView('failed-chat', {
+    const staged = (await store.stageView('failed-chat', {
       viewId: transcriptViewId('new-view'),
       contentStartOrdinal: 1,
       rows: [provider('new')],
-    });
+    }));
     const exec = Database.prototype.exec;
     const query = Database.prototype.query;
     let promotionFailed = false;
@@ -1140,17 +1140,17 @@ describe('TranscriptLedgerStore', () => {
     expect(oldest.nextBefore).toBeNull();
   });
 
-  it('[TLV5-L02.05-STORE-UNIT-01] atomically deletes the replaced view when promoting staging', () => {
+  it('[TLV5-L02.05-STORE-UNIT-01] atomically deletes the replaced view when promoting staging', async () => {
     const current = store.initializeCurrentView('chat-one', {
       viewId: transcriptViewId('old-view'),
       contentStartOrdinal: 1,
       rows: [provider('old')],
     });
-    const staged = store.stageView('chat-one', {
+    const staged = (await store.stageView('chat-one', {
       viewId: transcriptViewId('new-view'),
       contentStartOrdinal: 1,
       rows: [provider('new')],
-    });
+    }));
 
     const promoted = store.replaceCurrentView('chat-one', current.viewId, staged.viewId);
 
@@ -1168,21 +1168,21 @@ describe('TranscriptLedgerStore', () => {
     db.close();
   });
 
-  it('preserves submission identity through staging and promotion', () => {
+  it('preserves submission identity through staging and promotion', async () => {
     const current = store.initializeCurrentView('chat-one', {
       viewId: transcriptViewId('old-view'),
       contentStartOrdinal: 1,
       rows: [userDraft('message-one', 'old content')],
     });
 
-    expect(() => store.stageView('chat-one', {
+    await expect(store.stageView('chat-one', {
       viewId: transcriptViewId('invalid-stage'),
       contentStartOrdinal: 1,
       rows: [
         userDraft('message-one', 'preserved content'),
         userDraft('message-one', 'duplicate content'),
       ],
-    })).toThrow('Transcript view contains duplicate client message IDs');
+    })).rejects.toThrow('Transcript view contains duplicate client message IDs');
     expect(store.currentView('chat-one').viewId).toBe(current.viewId);
     expect(store.currentRows('chat-one')).toMatchObject([{
       kind: 'user-input',
@@ -1192,14 +1192,14 @@ describe('TranscriptLedgerStore', () => {
       },
     }]);
 
-    const staged = store.stageView('chat-one', {
+    const staged = (await store.stageView('chat-one', {
       viewId: transcriptViewId('new-view'),
       contentStartOrdinal: 1,
       rows: [
         userDraft('message-one', 'preserved content'),
         provider('replacement answer'),
       ],
-    });
+    }));
     store.replaceCurrentView('chat-one', current.viewId, staged.viewId);
 
     const retry = store.appendInputAndCompose('chat-one', {
@@ -1213,17 +1213,17 @@ describe('TranscriptLedgerStore', () => {
     expect(store.currentRows('chat-one').map((row) => row.ordinal)).toEqual([1, 2]);
   });
 
-  it('rehydrates the complete old view when cutover fails before commit', () => {
+  it('rehydrates the complete old view when cutover fails before commit', async () => {
     const current = store.initializeCurrentView('chat-one', {
       viewId: transcriptViewId('old-view'),
       contentStartOrdinal: 1,
       rows: [provider('old one'), provider('old two')],
     });
-    const staged = store.stageView('chat-one', {
+    const staged = (await store.stageView('chat-one', {
       viewId: transcriptViewId('new-view'),
       contentStartOrdinal: 1,
       rows: [provider('new one'), provider('new two')],
-    });
+    }));
     const exec = Database.prototype.exec;
     let commitFailed = false;
     Database.prototype.exec = function (sql) {
@@ -1253,17 +1253,17 @@ describe('TranscriptLedgerStore', () => {
     expect(currentViewCount(root, 'chat-one')).toBe(1);
   });
 
-  it('rehydrates the complete new view when cutover commit outcome is ambiguous', () => {
+  it('rehydrates the complete new view when cutover commit outcome is ambiguous', async () => {
     const current = store.initializeCurrentView('chat-one', {
       viewId: transcriptViewId('old-view'),
       contentStartOrdinal: 1,
       rows: [provider('old one'), provider('old two')],
     });
-    const staged = store.stageView('chat-one', {
+    const staged = (await store.stageView('chat-one', {
       viewId: transcriptViewId('new-view'),
       contentStartOrdinal: 1,
       rows: [provider('new one'), provider('new two')],
-    });
+    }));
     const exec = Database.prototype.exec;
     let commitBecameAmbiguous = false;
     Database.prototype.exec = function (sql) {
@@ -1294,16 +1294,16 @@ describe('TranscriptLedgerStore', () => {
     expect(currentViewCount(root, 'chat-one')).toBe(1);
   });
 
-  it('deletes stale staging views lazily when reopening a chat', () => {
+  it('deletes stale staging views lazily when reopening a chat', async () => {
     store.initializeCurrentView('chat-one', {
       viewId: transcriptViewId('current-view'),
       contentStartOrdinal: 1,
     });
-    store.stageView('chat-one', {
+    (await store.stageView('chat-one', {
       viewId: transcriptViewId('abandoned-stage'),
       contentStartOrdinal: 1,
       rows: [provider('abandoned')],
-    });
+    }));
     store.close();
     store = new TranscriptLedgerStore(root);
 
@@ -1714,7 +1714,7 @@ describe('TranscriptLedgerStore', () => {
     await expect(fs.readFile(filePath, 'utf8')).resolves.toBe('not a chat directory');
   });
 
-  it('carries the agent switch boundary through a reload', () => {
+  it('carries the agent switch boundary through a reload', async () => {
     const view = store.initializeCurrentView('chat-one', {
       contentStartOrdinal: 1,
       rows: [
@@ -1734,11 +1734,11 @@ describe('TranscriptLedgerStore', () => {
     });
 
     const carried = frozenConversationDrafts(store.currentRows('chat-one'));
-    const staged = store.stageView('chat-one', {
+    const staged = (await store.stageView('chat-one', {
       viewId: transcriptViewId('reloaded-view'),
       contentStartOrdinal: carried.length + 1,
       rows: carried,
-    });
+    }));
     store.replaceCurrentView('chat-one', view.viewId, staged.viewId);
 
     expect(store.currentRows('chat-one').map((row) => row.kind))

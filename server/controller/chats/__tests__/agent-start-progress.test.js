@@ -29,14 +29,14 @@ describe('delegated startup milestones', () => {
     await rm(directory, { recursive: true, force: true });
   });
 
-  it('appends persistent phase history without affecting context or the frozen seed', () => {
+  it('appends persistent phase history without affecting context or the frozen seed', async () => {
     const phases = ['preparing-context', 'compacting-context', 'starting-agent', 'started'];
     for (const phase of phases) progress.report(phase);
     progress.report('started');
     abort.abort();
     expect(ledger.currentRows('child').map((row) => row.detail.phase)).toEqual(phases);
     expect(ledger.currentRows('child').map((row) => ledgerRowToMessage(row).detail.phase)).toEqual(phases);
-    expect(ledger.conversationMessages('child')).toEqual([]);
+    expect(await ledger.conversationMessages('child')).toEqual([]);
     expect(frozenConversationDrafts(ledger.currentRows('child'))).toEqual([]);
     store.close();
     store = new TranscriptLedgerStore(directory);

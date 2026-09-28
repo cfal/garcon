@@ -41,7 +41,7 @@ describe('carryover migration quarantine notice', () => {
         ['provider-row', 'after quarantine', null],
       ]);
 
-      expect(ledger.conversationMessages(CHAT_ID).map((message) => message.content)).toEqual([
+      expect((await ledger.conversationMessages(CHAT_ID)).map((message) => message.content)).toEqual([
         'before quarantine',
         'after quarantine',
       ]);

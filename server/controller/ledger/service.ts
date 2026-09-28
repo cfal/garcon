@@ -1,5 +1,4 @@
 import crypto from 'node:crypto';
-import { isAgentResourceRef } from '@garcon/server-agent-interface';
 import { isDeepStrictEqual } from 'node:util';
 import type {
   AgentFinalResponse,
@@ -50,6 +49,7 @@ import {
   type GarconCommandSinks,
 } from './garcon-command-publication.js';
 import { PermissionNotActionableError, TranscriptSinkClosedError } from './errors.js';
+import { permissionRowKind, validatePermissionDecision } from './permission-rows.js';
 import { ProducerLease } from './producer-lease.js';
 import { projectFinalResponse } from './final-response.js';
 import { TranscriptLedgerStore } from './store.js';
@@ -194,6 +194,11 @@ export class TranscriptLedgerService {
     contentStartOrdinal = 1,
   ): TranscriptView {
     return this.#store.initializeCurrentView(chatId, { rows, contentStartOrdinal });
+  }
+
+  // Copies another history, such as a fork or adoption, without holding the event loop.
+  seedChat(chatId: string, rows: readonly LedgerRowDraft[], contentStartOrdinal: number): Promise<TranscriptView> {
+    return this.#store.seedCurrentView(chatId, { rows, contentStartOrdinal });
   }
 
   currentView(chatId: string): TranscriptView | null {
@@ -607,16 +612,16 @@ export class TranscriptLedgerService {
     return this.#store.currentRows(chatId);
   }
 
-  rowsThrough(chatId: string, watermark: TranscriptWatermark): readonly LedgerRow[] {
+  rowsThrough(chatId: string, watermark: TranscriptWatermark): Promise<readonly LedgerRow[]> {
     return this.#store.rowsThrough(chatId, watermark);
   }
 
-  conversationRows(chatId: string): readonly LedgerConversationRow[] {
-    return this.#store.currentRows(chatId).filter(isConversationalLedgerRow);
+  async conversationRows(chatId: string): Promise<readonly LedgerConversationRow[]> {
+    return (await this.#store.rowsThrough(chatId, this.#store.highWatermark(chatId))).filter(isConversationalLedgerRow);
   }
 
-  conversationMessages(chatId: string, excludedOrdinals: ReadonlySet<number> = new Set()): readonly ChatMessage[] {
-    return this.conversationRows(chatId)
+  async conversationMessages(chatId: string, excludedOrdinals: ReadonlySet<number> = new Set()): Promise<readonly ChatMessage[]> {
+    return (await this.conversationRows(chatId))
       .filter((row) => !excludedOrdinals.has(row.ordinal))
       .map(messageForConversationRow);
   }
@@ -689,12 +694,12 @@ export class TranscriptLedgerService {
     rows: readonly LedgerRowDraft[],
     contentStartOrdinal: number,
     viewId = transcriptViewId(crypto.randomUUID()),
-  ): TranscriptView {
+  ): Promise<TranscriptView> {
     return this.#store.stageView(chatId, { viewId, rows, contentStartOrdinal });
   }
 
-  discardStagingView(chatId: string, viewId: TranscriptViewId): void {
-    this.#store.discardStagingView(chatId, viewId);
+  discardStagingView(chatId: string, viewId: TranscriptViewId): Promise<void> {
+    return this.#store.discardStagingView(chatId, viewId);
   }
 
   closeChat(chatId: string): void {
@@ -977,24 +982,4 @@ function timestampAtOrAfter(candidate: string, floor: string | null): string {
   if (!Number.isFinite(candidateTime)) return floor;
   if (!Number.isFinite(floorTime)) return candidate;
   return candidateTime < floorTime ? floor : candidate;
-}
-
-function validatePermissionDecision(
-  lifecycle: Extract<AgentPermissionLifecycle, { readonly kind: 'requested' }>,
-  capability: AgentPermissionResponseCapability,
-): AgentPermissionResponseCapability {
-  if (
-    !capability
-    || capability.permissionOccurrenceId !== lifecycle.permissionOccurrenceId
-    || !isAgentResourceRef(capability.response, 'permission-response')
-  ) {
-    throw new TypeError('Permission response capability does not match its request occurrence');
-  }
-  return capability;
-}
-
-function permissionRowKind(
-  lifecycle: Exclude<AgentPermissionLifecycle, { readonly kind: 'resolved' }>,
-): LedgerPermissionRow['kind'] {
-  return `permission-${lifecycle.kind}`;
 }

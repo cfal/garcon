@@ -665,8 +665,8 @@ function makeService(overrides = {}) {
     currentView: mock(() => ({ viewId: 'view-1', contentStartOrdinal: 1 })),
     existingCurrentView: mock(() => ({ viewId: 'view-1', contentStartOrdinal: 1 })),
     highWatermark: mock(() => ({ viewId: 'view-1', ordinal: 0 })),
-    rowsThrough: mock(() => []),
-    initializeChat: mock(() => ({ viewId: 'view-2' })),
+    rowsThrough: mock(async () => []),
+    seedChat: mock(async () => ({ viewId: 'view-2' })),
     deleteChat: mock(() => undefined),
   };
   const chatListProjector = {
@@ -1156,7 +1156,7 @@ describe('ChatCommandService', () => {
         message: new AssistantMessage('2030-01-01T00:00:00.000Z', 'Synthetic committed context.'),
       }]);
       const snapshot = transcripts.highWatermark(SOURCE_CHAT_ID);
-      const expectedSeed = frozenConversationDrafts(transcripts.rowsThrough(SOURCE_CHAT_ID, snapshot));
+      const expectedSeed = frozenConversationDrafts(await transcripts.rowsThrough(SOURCE_CHAT_ID, snapshot));
       const f = makeService({ transcripts, session: { preambleSelection: { revision: 5, orderedPreambleIds: ['selected-parent'] } },
         preambles: { snapshot: () => ({ revision: 1, preambles: [{ id: 'selected-parent', enabled: true,
           title: 'Synthetic default', content: 'Never injected.', scope: { type: 'global' },
@@ -1258,9 +1258,9 @@ describe('ChatCommandService', () => {
       }));
       const source = transcripts.initializeChat(SOURCE_CHAT_ID, drafts);
       const snapshot = transcripts.highWatermark(SOURCE_CHAT_ID);
-      const expected = frozenConversationDrafts(transcripts.rowsThrough(SOURCE_CHAT_ID, snapshot));
+      const expected = frozenConversationDrafts(await transcripts.rowsThrough(SOURCE_CHAT_ID, snapshot));
       const read = spyOn(transcripts, 'rowsThrough');
-      const initialize = spyOn(transcripts, 'initializeChat');
+      const initialize = spyOn(transcripts, 'seedChat');
       const f = makeService({ transcripts });
       const admitted = await f.service.submitAgentCommandStartLocked(agentStartInput(source.viewId, {
         transcriptSnapshot: snapshot, title: 'Large synthetic snapshot',
@@ -1295,8 +1295,8 @@ describe('ChatCommandService', () => {
         message: 'Synthetic source.', detail: {}, providerMeta: null }]);
       const f = makeService({ transcripts });
       if (failure === 'seed') {
-        const initialize = transcripts.initializeChat.bind(transcripts);
-        transcripts.initializeChat = (...args) => { initialize(...args); throw new Error('seed failure'); };
+        const seed = transcripts.seedChat.bind(transcripts);
+        transcripts.seedChat = async (...args) => { await seed(...args); throw new Error('seed failure'); };
       }
       if (failure === 'title') f.settings.setSessionName.mockRejectedValue(new Error('title failure'));
       if (failure === 'registry') f.chats.flush.mockRejectedValueOnce(new Error('registry failure'));

@@ -52,7 +52,7 @@ describe('ticket command ledger evidence', () => {
     expect(calls).toHaveLength(1);
   });
 
-  test('commits exact private source evidence before dispatch and hides it through shared folds', () => {
+  test('commits exact private source evidence before dispatch and hides it through shared folds', async () => {
     const calls = [];
     const { ledger, store } = fixture((source, command) => {
       const rows = ledger.currentRows(CHAT);
@@ -69,7 +69,7 @@ describe('ticket command ledger evidence', () => {
     const rows = ledger.currentRows(CHAT);
     expect(rows.slice(1).every(isLedgerPrivateGarconCommandRow)).toBe(true);
     expect(ledgerRowsToTranscriptMessages(rows)).toEqual([{ ordinal: 1, message: new AssistantMessage(AT, 'Visible summary.') }]);
-    expect(ledger.conversationMessages(CHAT)).toEqual([new AssistantMessage(AT, 'Visible summary.')]);
+    expect((await ledger.conversationMessages(CHAT))).toEqual([new AssistantMessage(AT, 'Visible summary.')]);
     expect(JSON.stringify(rows)).not.toContain('synthetic-run');
     expect(ledger.nativeActivityState(CHAT).providerWatermark).toEqual({ ordinal: 3, at: AT });
     store.closeChat(CHAT);
@@ -112,7 +112,7 @@ describe('ticket command ledger evidence', () => {
     ]);
   });
 
-  test('imports exact rejection feedback as private native evidence, never user conversation or new work', () => {
+  test('imports exact rejection feedback as private native evidence, never user conversation or new work', async () => {
     const calls = [];
     const { ledger, store } = fixture((...args) => calls.push(args), (...args) => calls.push(args));
     const view = ledger.initializeChat(CHAT);
@@ -128,7 +128,7 @@ describe('ticket command ledger evidence', () => {
     expect(drafts.map((draft) => draft.kind)).toEqual(['provider-row', 'notice']);
     expect(drafts[0].message.content).toBe(malformed);
     expect(drafts[1].detail.type).toBe('garcon-command-rejection-input');
-    const staged = ledger.stageView(CHAT, drafts, 1);
+    const staged = (await ledger.stageView(CHAT, drafts, 1));
     ledger.replaceCurrentView(CHAT, view.viewId, staged.viewId);
     store.closeChat(CHAT);
     const rows = ledger.currentRows(CHAT);
@@ -136,7 +136,7 @@ describe('ticket command ledger evidence', () => {
     expect(rendered[1].message.content).toBe('Garcon could not parse a ticket-create command.');
     expect(rendered[1].message.detail).toBeUndefined();
     expect(JSON.stringify(rendered)).not.toContain('garcon-command-rejection-input');
-    expect(ledger.conversationMessages(CHAT)).toEqual([new AssistantMessage(AT, malformed)]);
+    expect((await ledger.conversationMessages(CHAT))).toEqual([new AssistantMessage(AT, malformed)]);
     expect(frozenDrafts(rendered.map(({ message }) => message)).map((draft) => draft.kind)).toEqual(['provider-row']);
     expect(ledger.nativeActivityState(CHAT).providerWatermark).toEqual({ ordinal: 2, at: LATER });
     expect(calls).toEqual([]);
@@ -145,7 +145,7 @@ describe('ticket command ledger evidence', () => {
     }
   });
 
-  test('imports requests and compact results without execution, preserving native evidence only on imports', () => {
+  test('imports requests and compact results without execution, preserving native evidence only on imports', async () => {
     const calls = [];
     const { ledger, store } = fixture((...args) => calls.push(args));
     const view = ledger.initializeChat(CHAT);
@@ -160,7 +160,7 @@ describe('ticket command ledger evidence', () => {
     expect(drafts[0].detail.type).toBe('ticket-command-request');
     expect(drafts[1].detail).toEqual({ ...outcome, nativeResultInput: true });
     expect(drafts[1].message).toBe('Created ticket G-1');
-    const staged = ledger.stageView(CHAT, drafts, 1);
+    const staged = (await ledger.stageView(CHAT, drafts, 1));
     ledger.replaceCurrentView(CHAT, view.viewId, staged.viewId);
     store.closeChat(CHAT);
     const rendered = ledgerRowsToTranscriptMessages(ledger.currentRows(CHAT));
@@ -169,7 +169,7 @@ describe('ticket command ledger evidence', () => {
     expect(rendered[0].message.title).toBeUndefined();
     expect(JSON.stringify(rendered)).not.toContain('nativeResultInput');
     expect(JSON.stringify(rendered)).not.toContain('storeId');
-    expect(ledger.conversationMessages(CHAT)).toEqual([]);
+    expect((await ledger.conversationMessages(CHAT))).toEqual([]);
     expect(frozenDrafts(rendered.map(({ message }) => message))).toEqual([]);
     expect(calls).toEqual([]);
     expect(ledger.nativeActivityState(CHAT).providerWatermark).toEqual({ ordinal: 2, at: LATER });

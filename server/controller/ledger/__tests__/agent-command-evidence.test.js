@@ -45,7 +45,7 @@ describe('agent command durable evidence', () => {
       const committed = ledger.currentRows(CHAT)[0].detail;
       request.mockClear();
       const drafts = importedDrafts([{ message: new AssistantMessage(AT, content), providerMeta: null }], () => AT);
-      const staged = ledger.stageView(CHAT, drafts, 1);
+      const staged = (await ledger.stageView(CHAT, drafts, 1));
       ledger.replaceCurrentView(CHAT, view.viewId, staged.viewId);
       store.closeChat(CHAT);
       expect(ledger.currentRows(CHAT)[0].detail).toEqual(committed);
@@ -71,7 +71,7 @@ describe('agent command durable evidence', () => {
       ]);
       request.mockClear();
       const drafts = importedDrafts([{ message: new AssistantMessage(LATER, STOP), providerMeta: null }], () => AT);
-      const staged = ledger.stageView(CHAT, drafts, 1);
+      const staged = (await ledger.stageView(CHAT, drafts, 1));
       ledger.replaceCurrentView(CHAT, view.viewId, staged.viewId);
       store.closeChat(CHAT);
       expect(ledger.currentRows(CHAT)).toHaveLength(1);
@@ -132,7 +132,7 @@ describe('agent command durable evidence', () => {
         { message: new UserMessage(LATER, garconCommandResultContent(detail)), providerMeta: null },
       ], () => AT);
       expect(native[0].detail.type).toBe('agent-resume-request');
-      const staged = ledger.stageView(CHAT, native, 1);
+      const staged = (await ledger.stageView(CHAT, native, 1));
       ledger.replaceCurrentView(CHAT, view.viewId, staged.viewId);
       store.closeChat(CHAT);
       const rendered = ledgerRowsToTranscriptMessages(ledger.currentRows(CHAT));
@@ -202,7 +202,7 @@ describe('agent command durable evidence', () => {
         new UserMessage(LATER, '<garcon-schedule-action />')];
       const drafts = importedDrafts(native.map((message) => ({ message, providerMeta: null })), () => AT);
       expect(drafts[2]).toMatchObject({ at: LATER, detail: { ...results[0], nativeResultInput: true } });
-      const staged = ledger.stageView(CHAT, drafts, 1);
+      const staged = (await ledger.stageView(CHAT, drafts, 1));
       ledger.replaceCurrentView(CHAT, old.viewId, staged.viewId);
       const rows = ledger.currentRows(CHAT);
       expect(rows.slice(0, 2).map((row) => row.ordinal)).toEqual([1, 2]);

@@ -68,7 +68,7 @@ test('migrates schema v1 transactionally on lazy open without rewriting row addr
 
 test('never recovers old correlation from an imported replacement view', async () => {
   store.initializeCurrentView(CHAT, { viewId: VIEW, contentStartOrdinal: 1, rows: [notice()] });
-  store.stageView(CHAT, { viewId: OTHER, contentStartOrdinal: 1, rows: [notice()] });
+  (await store.stageView(CHAT, { viewId: OTHER, contentStartOrdinal: 1, rows: [notice()] }));
   store.replaceCurrentView(CHAT, VIEW, OTHER);
   const lookup = spyOn(store, 'ticketOutcomeOrdinal');
   try {

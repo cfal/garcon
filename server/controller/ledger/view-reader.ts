@@ -217,7 +217,7 @@ export class TranscriptViewReader {
         true,
       );
     }
-    const rows = this.#ledger.rowsThrough(chatId, watermark);
+    const rows = await this.#ledger.rowsThrough(chatId, watermark);
     return {
       transcriptViewId: view.viewId,
       lastOrdinal: watermark.ordinal,

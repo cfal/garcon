@@ -2,13 +2,20 @@ import { Database } from 'bun:sqlite';
 import crypto from 'node:crypto';
 import { chmodSync, readdirSync, rmSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { yieldToEventLoop } from '@garcon/server-agent-common/shared/event-loop';
+import {
+  encodeDrafts,
+  insertEncodedRows,
+  materializeRows,
+  readBoundedPage,
+  StagingViews,
+} from './staging-views.js';
 import {
   parseChatRowContent,
   parseChatRowTitle,
 } from '../../../common/chat-row-contracts.js';
 import { createLogger } from '../../common/log.js';
 import {
-  decodeLedgerRow,
   decodeStoredLedgerRow,
   cliRowFingerprint,
   encodeLedgerDraft,
@@ -114,6 +121,7 @@ export class TranscriptLedgerStore {
   readonly #failedCloseEntries = new Map<string, ConnectionEntry>();
   readonly #openFailures = new Map<string, Error>();
   readonly #failureFences = new LedgerFailureFences<ConnectionEntry>();
+  readonly #staging: StagingViews;
 
   constructor(rootDirectory: string, options: TranscriptLedgerStoreOptions = {}) {
     this.#rootDirectory = ensureLedgerRootDirectory(rootDirectory);
@@ -125,6 +133,7 @@ export class TranscriptLedgerStore {
       ?? (() => transcriptViewId(crypto.randomUUID()));
     this.#now = options.now ?? (() => new Date().toISOString());
     this.#synchronous = options.synchronous ?? 'NORMAL';
+    this.#staging = new StagingViews((chatId, work) => this.#write(chatId, work));
   }
 
   currentView(chatId: string): TranscriptView | null {
@@ -162,6 +171,41 @@ export class TranscriptLedgerStore {
       entry.nextOrdinal = rows.length + 1;
       return entry.current;
     });
+  }
+
+  // Initializes a chat from a possibly long history. Rows commit under an inert staging view
+  // in bounded transactions; one small promotion exposes the complete view. An existing
+  // current view wins, as in initializeCurrentView.
+  async seedCurrentView(chatId: string, input: InitializeViewInput): Promise<TranscriptView> {
+    validateContentStartOrdinal(input.contentStartOrdinal, input.rows?.length ?? 0);
+    const rows = input.rows ?? [];
+    if (this.#staging.fitsOneTransaction(rows)) return this.initializeCurrentView(chatId, input);
+    const viewId = input.viewId ?? this.#createViewId();
+    const generation = this.#staging.generation(chatId);
+    const existing = this.#read(chatId, (entry) => entry.current);
+    if (existing) return existing;
+    const createdAt = this.#now();
+    this.#staging.begin(chatId, viewId, input.contentStartOrdinal, createdAt);
+    let promoted: TranscriptView | null = null;
+    try {
+      await this.#staging.insertRows(chatId, viewId, rows, generation);
+      promoted = this.#write(chatId, (entry) => {
+        if (entry.current) return null;
+        runTransaction(entry.db, () => {
+          const result = entry.db.query(
+            "UPDATE transcript_views SET status = 'current' WHERE status = 'staging' AND view_id = ?",
+          ).run(viewId);
+          if (result.changes !== 1) throw new LedgerSchemaError('Transcript staging promotion failed');
+        });
+        entry.current = { viewId, status: 'current', createdAt, contentStartOrdinal: input.contentStartOrdinal };
+        entry.nextOrdinal = rows.length + 1;
+        return entry.current;
+      });
+    } finally {
+      if (promoted) this.#staging.release(chatId, viewId);
+      else await this.#staging.discard(chatId, viewId, generation);
+    }
+    return promoted ?? this.#read(chatId, (entry) => this.#requireCurrent(entry));
   }
 
   append(
@@ -453,22 +497,27 @@ export class TranscriptLedgerStore {
     });
   }
 
-  rowsThrough(
+  // Reads in bounded pages. Rows at or below a watermark never change, so pages taken across
+  // event-loop turns form one consistent prefix; a replaced view fails as stale.
+  async rowsThrough(
     chatId: string,
     watermark: TranscriptWatermark,
-  ): readonly LedgerRow[] {
-    return this.#read(chatId, (entry) => {
-      this.#assertCurrent(entry, watermark.viewId);
-      if (!Number.isSafeInteger(watermark.ordinal) || watermark.ordinal < 0) {
-        throw new TypeError('Transcript watermark ordinal is invalid');
-      }
-      return entry.db.query<StoredLedgerRow, [string, number]>(`
-        SELECT view_id, ordinal, kind, at, client_message_id, payload_json
-        FROM transcript_rows
-        WHERE view_id = ? AND ordinal <= ?
-        ORDER BY ordinal
-      `).all(watermark.viewId, watermark.ordinal).map(decodeStoredLedgerRow);
-    });
+  ): Promise<readonly LedgerRow[]> {
+    if (!Number.isSafeInteger(watermark.ordinal) || watermark.ordinal < 0) {
+      throw new TypeError('Transcript watermark ordinal is invalid');
+    }
+    const rows: LedgerRow[] = [];
+    let after = 0;
+    for (;;) {
+      const page = this.#read(chatId, (entry) => {
+        this.#assertCurrent(entry, watermark.viewId);
+        return readBoundedPage(entry.db, watermark.viewId, after, watermark.ordinal);
+      });
+      for (const row of page.rows) rows.push(row);
+      if (page.exhausted) return rows;
+      after = page.rows[page.rows.length - 1]!.ordinal;
+      await yieldToEventLoop();
+    }
   }
 
   currentRows(chatId: string): readonly LedgerRow[] {
@@ -537,60 +586,65 @@ export class TranscriptLedgerStore {
     });
   }
 
-  stageView(chatId: string, input: StageViewInput): TranscriptView {
+  // Stages a replacement view in bounded transactions. The view stays inert, and survives a
+  // connection-cache reopen, until replaceCurrentView promotes it or it is discarded.
+  async stageView(chatId: string, input: StageViewInput): Promise<TranscriptView> {
     validateContentStartOrdinal(input.contentStartOrdinal, input.rows?.length ?? 0);
     const rows = input.rows ?? [];
-    const encoded = encodeDrafts(rows);
-    materializeRows(input.viewId, encoded, 1);
-    return this.#write(chatId, (entry) => {
-      this.#requireCurrent(entry);
-      const createdAt = this.#now();
-      runTransaction(entry.db, () => {
-        entry.db.query("DELETE FROM transcript_views WHERE status = 'staging'").run();
-        entry.db.query(`
-          INSERT INTO transcript_views(view_id, status, created_at, content_start_ordinal)
-          VALUES (?, 'staging', ?, ?)
-        `).run(input.viewId, createdAt, input.contentStartOrdinal);
-        insertEncodedRows(entry.db, input.viewId, encoded, 1);
-      });
-      return {
-        viewId: input.viewId,
-        status: 'staging',
-        createdAt,
-        contentStartOrdinal: input.contentStartOrdinal,
-      };
-    });
+    const generation = this.#staging.generation(chatId);
+    this.#read(chatId, (entry) => this.#requireCurrent(entry));
+    const createdAt = this.#now();
+    this.#staging.begin(chatId, input.viewId, input.contentStartOrdinal, createdAt);
+    try {
+      await this.#staging.insertRows(chatId, input.viewId, rows, generation);
+    } catch (error) {
+      await this.#staging.discard(chatId, input.viewId, generation);
+      throw error;
+    }
+    return {
+      viewId: input.viewId,
+      status: 'staging',
+      createdAt,
+      contentStartOrdinal: input.contentStartOrdinal,
+    };
   }
 
-  discardStagingView(chatId: string, viewId: TranscriptViewId): void {
-    this.#write(chatId, (entry) => {
-      entry.db.query("DELETE FROM transcript_views WHERE status = 'staging' AND view_id = ?").run(viewId);
-    });
+  async discardStagingView(chatId: string, viewId: TranscriptViewId): Promise<void> {
+    await this.#staging.discard(chatId, viewId);
   }
 
+  // Promotion is one small transaction. The replaced view is demoted to inert staging in the
+  // same transaction and its rows are deleted afterwards in bounded steps; a crash first
+  // leaves it for open-time cleanup, and it is never readable again either way.
   replaceCurrentView(
     chatId: string,
     expectedCurrentViewId: TranscriptViewId,
     stagingViewId: TranscriptViewId,
   ): TranscriptView {
-    return this.#write(chatId, (entry) => {
+    const current = this.#write(chatId, (entry) => {
       this.#assertCurrent(entry, expectedCurrentViewId);
       const staging = viewRecord(entry.db, stagingViewId, 'staging');
       if (!staging) throw new LedgerSchemaError('Transcript staging view is missing');
       const stagingNextOrdinal = nextOrdinal(entry.db, stagingViewId);
       runTransaction(entry.db, () => {
-        entry.db.query("DELETE FROM transcript_views WHERE status = 'current' AND view_id = ?")
-          .run(expectedCurrentViewId);
+        const demoted = entry.db.query(
+          "UPDATE transcript_views SET status = 'staging' WHERE status = 'current' AND view_id = ?",
+        ).run(expectedCurrentViewId);
+        if (demoted.changes !== 1) throw new LedgerSchemaError('Transcript current view demotion failed');
         const result = entry.db.query(
           "UPDATE transcript_views SET status = 'current' WHERE status = 'staging' AND view_id = ?",
         ).run(stagingViewId);
         if (result.changes !== 1) throw new LedgerSchemaError('Transcript staging promotion failed');
       });
-      const current = toView({ ...staging, status: 'current' });
-      entry.current = current;
+      const promoted = toView({ ...staging, status: 'current' });
+      entry.current = promoted;
       entry.nextOrdinal = stagingNextOrdinal;
-      return current;
+      return promoted;
     });
+    this.#staging.release(chatId, stagingViewId);
+    this.#staging.retain(chatId, expectedCurrentViewId);
+    void this.#staging.discard(chatId, expectedCurrentViewId);
+    return current;
   }
 
   advanceContentStart(
@@ -636,6 +690,7 @@ export class TranscriptLedgerStore {
   }
 
   closeChat(chatId: string): void {
+    this.#staging.abandon(chatId);
     const entry = this.#connections.get(chatId) ?? this.#failedCloseEntries.get(chatId);
     if (!entry) return;
     this.#connections.delete(chatId);
@@ -673,6 +728,9 @@ export class TranscriptLedgerStore {
   }
 
   close(): void {
+    for (const chatId of new Set([...this.#staging.activeChatIds(), ...this.#connections.keys()])) {
+      this.#staging.abandon(chatId);
+    }
     const entries = new Map(this.#failedCloseEntries);
     for (const [chatId, entry] of this.#connections) entries.set(chatId, entry);
     this.#connections.clear();
@@ -759,6 +817,7 @@ export class TranscriptLedgerStore {
       this.#rootDirectory,
       chatId,
       this.#synchronous,
+      this.#staging.retained(chatId),
     );
     this.#connections.set(chatId, opened);
     while (this.#connections.size > this.#cacheSize) {
@@ -798,40 +857,6 @@ export class TranscriptLedgerStore {
   }
 }
 
-interface EncodedDraft {
-  readonly draft: LedgerRowDraft;
-  readonly clientMessageId: string | null;
-  readonly payloadJson: string;
-}
-
-function encodeDrafts(drafts: readonly LedgerRowDraft[]): readonly EncodedDraft[] {
-  const encoded = drafts.map((draft) => ({ draft, ...encodeLedgerDraft(draft) }));
-  const clientMessageIds = new Set<string>();
-  for (const row of encoded) {
-    if (!row.clientMessageId) continue;
-    if (clientMessageIds.has(row.clientMessageId)) {
-      throw new LedgerSchemaError('Transcript view contains duplicate client message IDs');
-    }
-    clientMessageIds.add(row.clientMessageId);
-  }
-  return encoded;
-}
-
-function materializeRows(
-  viewId: TranscriptViewId,
-  rows: readonly EncodedDraft[],
-  firstOrdinal: number,
-): readonly LedgerRow[] {
-  return rows.map((item, index) => decodeLedgerRow({
-    view_id: viewId,
-    ordinal: firstOrdinal + index,
-    kind: item.draft.kind,
-    at: item.draft.at,
-    client_message_id: item.clientMessageId,
-    payload_json: item.payloadJson,
-  }));
-}
-
 function collectResendCandidates(
   storedRows: Iterable<StoredLedgerRow>,
   excludedOrdinals?: ReadonlySet<number>,
@@ -851,30 +876,6 @@ function collectResendCandidates(
   }
   return candidates;
 }
-
-function insertEncodedRows(
-  db: Database,
-  viewId: TranscriptViewId,
-  rows: readonly EncodedDraft[],
-  firstOrdinal: number,
-): void {
-  const insert = db.query(`
-    INSERT INTO transcript_rows(
-      view_id, ordinal, kind, at, client_message_id, payload_json
-    ) VALUES (?, ?, ?, ?, ?, ?)
-  `);
-  rows.forEach((row, index) => {
-    insert.run(
-      viewId,
-      firstOrdinal + index,
-      row.draft.kind,
-      row.draft.at,
-      row.clientMessageId,
-      row.payloadJson,
-    );
-  });
-}
-
 
 function validateChatDirectoryName(chatId: string): void {
   if (!CHAT_DIRECTORY_PATTERN.test(chatId)) {

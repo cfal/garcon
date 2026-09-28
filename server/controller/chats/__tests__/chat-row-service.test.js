@@ -74,7 +74,7 @@ describe('ChatRowService', () => {
   it('rejects a stale target without retargeting the row', async () => {
     await withService(async ({ service, ledger }) => {
       const original = ledger.currentView(CHAT_ID);
-      const staging = ledger.stageView(CHAT_ID, [], 1, transcriptViewId('replacement-view'));
+      const staging = await ledger.stageView(CHAT_ID, [], 1, transcriptViewId('replacement-view'));
       ledger.replaceCurrentView(CHAT_ID, original.viewId, staging.viewId);
 
       await expect(service.add(

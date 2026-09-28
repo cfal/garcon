@@ -45,8 +45,8 @@ export function createRouteCommandService({
   const transcripts = {
     currentView: () => null,
     highWatermark: () => ({ viewId: 'view-1', ordinal: 0 }),
-    rowsThrough: () => [],
-    initializeChat: () => ({ viewId: 'view-2' }),
+    rowsThrough: async () => [],
+    seedChat: async () => ({ viewId: 'view-2' }),
     deleteChat: () => undefined,
   };
   return new ChatCommandService({
@@ -83,9 +83,9 @@ export function createRouteCommandService({
 			compensate: async () => undefined,
 		}),
 		cancelPreparation: () => false,
-		seedContinuationLedger: ({ sourceChatId, targetChatId }) => {
+		seedContinuationLedger: async ({ sourceChatId, targetChatId }) => {
 			const watermark = transcripts.highWatermark(sourceChatId);
-			transcripts.initializeChat(targetChatId, [], 1);
+			await transcripts.seedChat(targetChatId, [], 1);
 			return watermark;
 		},
 		deleteContinuationLedger: (chatId) => transcripts.deleteChat(chatId),

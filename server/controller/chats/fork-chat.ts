@@ -70,7 +70,7 @@ interface ForkChatInput {
   metadata: ForkChatMetadata;
   ledger: Pick<
     TranscriptLedgerService,
-    'currentView' | 'highWatermark' | 'rowsThrough' | 'initializeChat' | 'deleteChat'
+    'currentView' | 'highWatermark' | 'rowsThrough' | 'seedChat' | 'deleteChat'
   >;
   ownership: Pick<AgentOwnershipJournal, 'delete'>;
   forkAgentSession: (args: {
@@ -154,7 +154,8 @@ export async function forkChatFileCopy({
     );
   }
   const selectedWatermark = { viewId: sourceWatermark.viewId, ordinal: selectedOrdinal };
-  const sourceRows = ledger.rowsThrough(sourceChatId, selectedWatermark);
+  const sourceRows = await ledger.rowsThrough(sourceChatId, selectedWatermark);
+  signal.throwIfAborted();
   const selectedRow = sourceRows.at(-1);
   if (selectedRow?.kind === 'notice' && isPreambleApplicationNoticeDetail(selectedRow.detail)) {
     throw new DomainError(
@@ -277,7 +278,7 @@ export async function forkChatFileCopy({
   const seedRows = [...frozenPrefix, ...sessionRow, ...(nativeSeed ?? [])];
   const contentStartOrdinal = frozenPrefix.length + 1;
   try {
-    ledger.initializeChat(targetChatId, seedRows, contentStartOrdinal);
+    await ledger.seedChat(targetChatId, seedRows, contentStartOrdinal);
   } catch (error) {
     const cleanupErrors = await discardForkResources(
       nativeFork,

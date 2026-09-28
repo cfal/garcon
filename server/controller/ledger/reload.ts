@@ -94,7 +94,10 @@ export class TranscriptReloadService {
       );
     }
 
-    const currentRows = this.options.ledger.currentRows(chatId);
+    const currentRows = await this.options.ledger.rowsThrough(
+      chatId,
+      this.options.ledger.highWatermark(chatId),
+    );
     const bindingRows = currentRows.filter((row) => row.ordinal >= current.contentStartOrdinal);
     const preambleEvidence = collectPreambleHistoryEvidence(bindingRows);
     const pending = entry.pendingPreambleBoundary;
@@ -131,7 +134,7 @@ export class TranscriptReloadService {
         preambleEvidence,
       });
       const contentStartOrdinal = prefix.length + 1;
-      staging = this.options.ledger.stageView(
+      staging = await this.options.ledger.stageView(
         chatId,
         [...prefix, sessionDraft, ...imported],
         contentStartOrdinal,
@@ -144,7 +147,7 @@ export class TranscriptReloadService {
     } catch (error) {
       let failure = error;
       try {
-        if (staging) this.options.ledger.discardStagingView(chatId, staging.viewId);
+        if (staging) await this.options.ledger.discardStagingView(chatId, staging.viewId);
       } catch (cleanupError) {
         if (!(cleanupError instanceof LedgerFencedError)) failure = cleanupError;
       } finally {

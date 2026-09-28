@@ -73,7 +73,7 @@ function makeDeps(overrides = {}) {
         : null),
     highWatermark: mock(() => ({ viewId: transcriptViewId('source-view'), ordinal: rows.length })),
     rowsThrough: mock((_chatId, watermark) => rows.slice(0, watermark.ordinal)),
-    initializeChat: mock((chatId, drafts, contentStartOrdinal) => {
+    seedChat: mock((chatId, drafts, contentStartOrdinal) => {
       targetViews.add(chatId);
       return { viewId: `view-${chatId}`, drafts, contentStartOrdinal };
     }),
@@ -124,7 +124,7 @@ describe('forkChatFileCopy', () => {
   it('[TLV5-FORK.05-CORE-UNIT-01] builds the frozen target ledger before registering the chat', async () => {
     const deps = makeDeps({ source: sourceSession({ agentSessionId: null, nativeSession: null }) });
     const order = [];
-    deps.ledger.initializeChat.mockImplementation((...args) => {
+    deps.ledger.seedChat.mockImplementation((...args) => {
       order.push('ledger');
       return { viewId: 'target-view', args };
     });
@@ -142,7 +142,7 @@ describe('forkChatFileCopy', () => {
     });
 
     expect(order).toEqual(['ledger', 'registry']);
-    expect(deps.ledger.initializeChat).toHaveBeenCalledWith(
+    expect(deps.ledger.seedChat).toHaveBeenCalledWith(
       'target-chat',
       [expect.objectContaining({ kind: 'user-input' }),
         expect.objectContaining({ kind: 'provider-row' }),
@@ -210,7 +210,7 @@ describe('forkChatFileCopy', () => {
       viewId: 'source-view',
       ordinal: 2,
     });
-    expect(deps.ledger.initializeChat.mock.calls[0][1]).toHaveLength(2);
+    expect(deps.ledger.seedChat.mock.calls[0][1]).toHaveLength(2);
     expect(deps.sessions.get('target-chat').parentChat).toEqual({
       chatId: 'source-chat',
       relation: 'fork',
@@ -237,7 +237,7 @@ describe('forkChatFileCopy', () => {
     });
 
     expect(deps.forkAgentSession).not.toHaveBeenCalled();
-    expect(deps.ledger.initializeChat.mock.calls[0][1]).toHaveLength(2);
+    expect(deps.ledger.seedChat.mock.calls[0][1]).toHaveLength(2);
   });
 
   it('resolves a core-authored row to the provider row before it', async () => {
@@ -259,7 +259,7 @@ describe('forkChatFileCopy', () => {
       providerMeta: { native: true },
     });
     // Three frozen conversational rows plus the session the integration handed back.
-    const drafts = deps.ledger.initializeChat.mock.calls[0][1];
+    const drafts = deps.ledger.seedChat.mock.calls[0][1];
     expect(drafts).toHaveLength(4);
     expect(drafts.at(-1)).toMatchObject({ kind: "session" });
   });
@@ -285,7 +285,7 @@ describe('forkChatFileCopy', () => {
       messageOrdinal: 3,
       providerMeta: { native: true },
     });
-    expect(deps.ledger.initializeChat.mock.calls[0][1]).toEqual([
+    expect(deps.ledger.seedChat.mock.calls[0][1]).toEqual([
       expect.objectContaining({ kind: 'user-input' }),
       expect.objectContaining({
         kind: 'provider-row',
@@ -311,12 +311,12 @@ describe('forkChatFileCopy', () => {
       messageOrdinal: 2,
       providerMeta: { native: true },
     }));
-    expect(deps.ledger.initializeChat.mock.calls[0][1]).toEqual([
+    expect(deps.ledger.seedChat.mock.calls[0][1]).toEqual([
       expect.objectContaining({ kind: 'user-input' }),
       expect.objectContaining({ kind: 'provider-row' }),
       expect.objectContaining({ kind: 'session' }),
     ]);
-    expect(deps.ledger.initializeChat.mock.calls[0][2]).toBe(3);
+    expect(deps.ledger.seedChat.mock.calls[0][2]).toBe(3);
   });
 
   it('discards a materialized native fork when admission closes before target creation', async () => {
@@ -348,7 +348,7 @@ describe('forkChatFileCopy', () => {
     expect(discardForkedAgentSession).toHaveBeenCalledWith('test', expect.objectContaining({
       agentSessionId: 'cancelled-native',
     }));
-    expect(deps.ledger.initializeChat).not.toHaveBeenCalled();
+    expect(deps.ledger.seedChat).not.toHaveBeenCalled();
     expect(deps.registry.addChat).not.toHaveBeenCalled();
   });
 
@@ -370,7 +370,7 @@ describe('forkChatFileCopy', () => {
       signal: controller.signal,
     })).rejects.toBe(reason);
 
-    expect(deps.ledger.initializeChat).not.toHaveBeenCalled();
+    expect(deps.ledger.seedChat).not.toHaveBeenCalled();
     expect(deps.registry.addChat).not.toHaveBeenCalled();
   });
 
@@ -393,7 +393,7 @@ describe('forkChatFileCopy', () => {
       signal: controller.signal,
     })).rejects.toBe(reason);
 
-    expect(deps.ledger.initializeChat).not.toHaveBeenCalled();
+    expect(deps.ledger.seedChat).not.toHaveBeenCalled();
     expect(deps.registry.addChat).not.toHaveBeenCalled();
   });
 
@@ -434,7 +434,7 @@ describe('forkChatFileCopy', () => {
       retryable: true,
     });
 
-    expect(deps.ledger.initializeChat).not.toHaveBeenCalled();
+    expect(deps.ledger.seedChat).not.toHaveBeenCalled();
     expect(deps.registry.addChat).not.toHaveBeenCalled();
   });
 
@@ -452,7 +452,7 @@ describe('forkChatFileCopy', () => {
     });
 
     expect(result.agentSessionId).toBeNull();
-    expect(deps.ledger.initializeChat.mock.calls[0][1]).toEqual([
+    expect(deps.ledger.seedChat.mock.calls[0][1]).toEqual([
       expect.objectContaining({ kind: 'user-input' }),
       expect.objectContaining({ kind: 'provider-row' }),
       expect.objectContaining({ kind: 'user-input' }),
@@ -523,7 +523,7 @@ describe('forkChatFileCopy', () => {
 
     expect(result.agentSessionId).toBe('target-native-after-retry');
     expect(deps.forkAgentSession).toHaveBeenCalledTimes(2);
-    expect(deps.ledger.initializeChat).toHaveBeenCalledOnce();
+    expect(deps.ledger.seedChat).toHaveBeenCalledOnce();
     expect(deps.registry.addChat).toHaveBeenCalledOnce();
   });
 
@@ -549,11 +549,11 @@ describe('forkChatFileCopy', () => {
     }));
     // Rows below the source content start are earlier-agent history no provider ever held,
     // so they survive alongside the imported current binding.
-    expect(deps.ledger.initializeChat.mock.calls[0][1]).toEqual([
+    expect(deps.ledger.seedChat.mock.calls[0][1]).toEqual([
       expect.objectContaining({ kind: 'session' }),
       ...imported,
     ]);
-    expect(deps.ledger.initializeChat.mock.calls[0][2]).toBe(1);
+    expect(deps.ledger.seedChat.mock.calls[0][2]).toBe(1);
   });
 
   it('passes selected current-binding preamble evidence to native fork import', async () => {
@@ -639,7 +639,7 @@ describe('forkChatFileCopy', () => {
       });
 
       expect(deps.forkAgentSession).not.toHaveBeenCalled();
-      expect(deps.ledger.initializeChat).not.toHaveBeenCalled();
+      expect(deps.ledger.seedChat).not.toHaveBeenCalled();
       expect(deps.registry.addChat).not.toHaveBeenCalled();
     });
   }
@@ -665,12 +665,12 @@ describe('forkChatFileCopy', () => {
       ...deps,
     });
 
-    expect(deps.ledger.initializeChat.mock.calls[0][1]).toEqual([
+    expect(deps.ledger.seedChat.mock.calls[0][1]).toEqual([
       expect.objectContaining({ kind: 'user-input' }),
       expect.objectContaining({ kind: 'session' }),
       ...imported,
     ]);
-    expect(deps.ledger.initializeChat.mock.calls[0][2]).toBe(2);
+    expect(deps.ledger.seedChat.mock.calls[0][2]).toBe(2);
   });
 
   it('[TLV5-ADOPT.08-NATIVE-FORK-CORE-UNIT-01] discards a native fork when its selected history cannot be read', async () => {
@@ -686,7 +686,7 @@ describe('forkChatFileCopy', () => {
       ...deps,
     })).rejects.toThrow('history unreadable');
 
-    expect(deps.ledger.initializeChat).not.toHaveBeenCalled();
+    expect(deps.ledger.seedChat).not.toHaveBeenCalled();
     expect(deps.registry.addChat).not.toHaveBeenCalled();
     expect(deps.forkAgentSession).toHaveBeenCalledOnce();
     expect(deps.readForkedNativeHistory).toHaveBeenCalledOnce();
@@ -714,7 +714,7 @@ describe('forkChatFileCopy', () => {
     })).rejects.toBe(reason);
 
     expect(deps.discardForkedAgentSession).toHaveBeenCalledOnce();
-    expect(deps.ledger.initializeChat).not.toHaveBeenCalled();
+    expect(deps.ledger.seedChat).not.toHaveBeenCalled();
     expect(deps.registry.addChat).not.toHaveBeenCalled();
   });
 
@@ -730,7 +730,7 @@ describe('forkChatFileCopy', () => {
     })).rejects.toMatchObject({ code: 'TRANSCRIPT_UNAVAILABLE', status: 422 });
 
     expect(deps.forkAgentSession).not.toHaveBeenCalled();
-    expect(deps.ledger.initializeChat).not.toHaveBeenCalled();
+    expect(deps.ledger.seedChat).not.toHaveBeenCalled();
   });
 
   it('deletes an orphan target ledger when registry publication fails', async () => {

@@ -17,6 +17,7 @@ export function openConnection(
   rootDirectory: string,
   chatId: string,
   synchronous: 'NORMAL' | 'FULL',
+  retainedStagingViews: ReadonlySet<string> = new Set(),
 ): ConnectionEntry {
   const directory = ensureLedgerChatDirectory(rootDirectory, chatId);
   const databasePath = path.join(directory, 'ledger.sqlite');
@@ -26,7 +27,7 @@ export function openConnection(
     configureConnection(db, synchronous);
     if (!existed) createSchema(db);
     else validateSchema(db);
-    const current = loadAndCleanViews(db);
+    const current = loadAndCleanViews(db, retainedStagingViews);
     chmodSync(databasePath, 0o600);
     return {
       chatId,
@@ -102,11 +103,17 @@ export function validateSchema(db: Database): void {
   }
 }
 
-export function loadAndCleanViews(db: Database): TranscriptView | null {
+// Staging views left by a crashed or abandoned operation are inert and removed on open.
+// Views still owned by an in-process bulk operation survive a connection-cache reopen.
+export function loadAndCleanViews(
+  db: Database,
+  retainedStagingViews: ReadonlySet<string> = new Set(),
+): TranscriptView | null {
   const views = loadViews(db);
   const current = validatedCurrentView(views);
-  if (views.some((view) => view.status === 'staging')) {
-    db.query("DELETE FROM transcript_views WHERE status = 'staging'").run();
+  for (const view of views) {
+    if (view.status !== 'staging' || retainedStagingViews.has(view.view_id)) continue;
+    db.query("DELETE FROM transcript_views WHERE status = 'staging' AND view_id = ?").run(view.view_id);
   }
   return current;
 }
@@ -120,9 +127,10 @@ export function loadViews(db: Database): readonly ViewRecord[] {
   ));
 }
 
+// A ledger whose only views are staging is still being seeded, not established.
 export function validatedCurrentView(views: readonly ViewRecord[]): TranscriptView | null {
   const current = views.filter((view) => view.status === 'current');
-  if (current.length !== 1 && views.length > 0) {
+  if (current.length > 1) {
     throw new LedgerSchemaError('Established transcript ledger must have exactly one current view');
   }
   return current[0] ? toView(current[0]) : null;

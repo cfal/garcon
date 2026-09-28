@@ -91,10 +91,10 @@ export class AgentHandoffService {
     this.#carryoverPreparations.get(chatId)?.abort(new Error('Turn interrupted by the user'));
   }
 
-  seedContinuationLedger(input: {
+  async seedContinuationLedger(input: {
     readonly sourceChatId: string;
     readonly targetChatId: string;
-  }): TranscriptWatermark {
+  }): Promise<TranscriptWatermark> {
     if (this.deps.ledger.currentView(input.targetChatId)) {
       throw new DomainError(
         'IDEMPOTENCY_CONFLICT',
@@ -104,9 +104,9 @@ export class AgentHandoffService {
     }
     const watermark = this.deps.ledger.highWatermark(input.sourceChatId);
     const rows = frozenConversationDrafts(
-      this.deps.ledger.rowsThrough(input.sourceChatId, watermark),
+      await this.deps.ledger.rowsThrough(input.sourceChatId, watermark),
     );
-    this.deps.ledger.initializeChat(input.targetChatId, rows, rows.length + 1);
+    await this.deps.ledger.seedChat(input.targetChatId, rows, rows.length + 1);
     return watermark;
   }
 
@@ -283,10 +283,11 @@ export class AgentHandoffService {
             const planningController = new AbortController();
             this.#carryoverPreparations.set(input.chatId, planningController);
             try {
+              const messages = await this.deps.ledger.conversationMessages(input.chatId);
               carryoverOutcome = await this.deps.carryover.planFor({
                 operation: 'agent-switch',
                 chatId: input.chatId,
-                messages: this.deps.ledger.conversationMessages(input.chatId),
+                messages,
                 destination: {
                   agentId: input.target.agentId,
                   model: input.target.model,

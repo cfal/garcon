@@ -275,11 +275,11 @@ export class StartCommands {
             if (this.deps.chats.getChat(input.chatId) || this.deps.transcripts.existingCurrentView(input.chatId)) {
               throw new CommandValidationError('CHAT_ID_COLLISION', 'Snapshot target already exists', 409);
             }
-            const rows = frozenConversationDrafts(this.deps.transcripts.rowsThrough(
+            const rows = frozenConversationDrafts(await this.deps.transcripts.rowsThrough(
               input.parentChatId!, input.transcriptSnapshot,
             ));
             seedOwned = true;
-            this.deps.transcripts.initializeChat(input.chatId, rows, rows.length + 1);
+            await this.deps.transcripts.seedChat(input.chatId, rows, rows.length + 1);
           }
           registered = this.deps.chats.addChat({
             executorId: input.executorId,

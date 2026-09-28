@@ -13,10 +13,10 @@ import {
 
 export interface TranscriptEventFanoutDeps {
   chatExists(chatId: string): boolean;
-  schedule(chatId: string, task: () => void): void;
+  schedule(chatId: string, task: () => Promise<void> | void): void;
   broadcast(payload: unknown): void;
   updateMetadata(chatId: string, messages: readonly ChatMessage[]): void;
-  replaceMetadata(chatId: string): void;
+  replaceMetadata(chatId: string): Promise<void>;
   resendCandidates(chatId: string): readonly ResendCandidate[];
 }
 
@@ -29,13 +29,14 @@ export function createTranscriptEventFanout(
   };
 }
 
-function applyTranscriptEvent(
+async function applyTranscriptEvent(
   deps: TranscriptEventFanoutDeps,
   event: TranscriptCommitEvent,
-): void {
+): Promise<void> {
   if (!deps.chatExists(event.chatId)) return;
   if (event.type === 'view-replaced') {
-    deps.replaceMetadata(event.chatId);
+    await deps.replaceMetadata(event.chatId);
+    if (!deps.chatExists(event.chatId)) return;
     deps.broadcast(new ChatTranscriptReplacedMessage(
       event.chatId,
       event.previousViewId,

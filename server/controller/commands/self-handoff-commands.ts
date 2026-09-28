@@ -175,7 +175,7 @@ export class SelfHandoffCommands {
     onRegistered: () => void,
   ): Promise<void> {
     signal.throwIfAborted();
-    const watermark = this.deps.handoffs.seedContinuationLedger({
+    const watermark = await this.deps.handoffs.seedContinuationLedger({
       sourceChatId: input.sourceChatId,
       targetChatId: input.chatId,
     });

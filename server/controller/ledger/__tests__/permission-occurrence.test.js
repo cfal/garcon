@@ -125,15 +125,15 @@ describe('transcript permission occurrences', () => {
   });
 
   it('invalidates an in-flight permission claim when its view is replaced', async () => {
-    await withLedger((ledger) => {
+    await withLedger(async (ledger) => {
       const { claim } = claimPermission(ledger);
       const current = ledger.currentView(CHAT_ID);
-      const staging = ledger.stageView(
+      const staging = (await ledger.stageView(
         CHAT_ID,
         [],
         1,
         transcriptViewId('view-2'),
-      );
+      ));
 
       ledger.replaceCurrentView(CHAT_ID, current.viewId, staging.viewId);
 

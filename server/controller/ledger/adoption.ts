@@ -74,7 +74,7 @@ export class TranscriptAdoptionService {
         : frozenDrafts(prefix, this.#now);
       const contentStartOrdinal = prefixRows.length + 1;
       const session = sessionDraft(entry, this.#now());
-      const view = this.options.ledger.initializeChat(
+      const view = await this.options.ledger.seedChat(
         chatId,
         [...prefixRows, ...(session ? [session] : []), ...importedDrafts(legacyRows, this.#now)],
         contentStartOrdinal,
