@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as chatsApi from '$lib/api/chats';
+import { ApiError } from '$lib/api/client.js';
 import * as m from '$lib/paraglide/messages.js';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import type { ChatListEntry } from '$shared/chat-list';
@@ -312,7 +313,9 @@ describe('ChatActionController', () => {
 
 		await controller.toggleArchive('selected');
 
-		expect(callbacks.notifyError).toHaveBeenCalledWith(m.notifications_archive_chat_failed());
+		expect(callbacks.notifyError).toHaveBeenCalledWith(
+			m.notifications_archive_chat_failed({ detail: 'offline' }),
+		);
 		expect(callbacks.onSelectChat).toHaveBeenCalledOnce();
 		expect(callbacks.onSelectChat).toHaveBeenCalledWith('next');
 		expect(callbacks.onNewChat).not.toHaveBeenCalled();
@@ -618,14 +621,77 @@ describe('ChatActionController', () => {
 			m.chat_notice_forking_chat(),
 		);
 		expect(callbacks.dismissProgress).not.toHaveBeenCalled();
-		response.reject(new Error('fork failed'));
+		response.reject(new ApiError(503, 'Executor is unavailable', 'EXECUTOR_UNAVAILABLE'));
 		await forking;
 
 		expect(callbacks.dismissProgress).toHaveBeenCalledOnce();
-		expect(callbacks.notifyError).toHaveBeenCalledWith(m.notifications_fork_chat_failed());
+		expect(callbacks.notifyError).toHaveBeenCalledWith(
+			m.chat_notice_failed_fork_chat({ detail: 'Executor is unavailable' }),
+		);
 		vi.mocked(chatsApi.forkChat).mockResolvedValueOnce({ success: true, chat: makeServerChat() });
 		await controller.forkChat('chat-1');
 		expect(chatsApi.forkChat).toHaveBeenCalledTimes(2);
+	});
+
+	it('retries a lost fork reply into the same target chat', async () => {
+		const fork = makeServerChat();
+		vi.mocked(chatsApi.forkChat)
+			.mockRejectedValueOnce(new TypeError('connection reset'))
+			.mockResolvedValueOnce({ success: true, chat: fork });
+		const { controller, callbacks } = createHarness();
+
+		await controller.forkChat('chat-1');
+
+		expect(vi.mocked(chatsApi.forkChat).mock.calls).toEqual([
+			[{ sourceChatId: 'chat-1', chatId: 'fork-chat-id' }],
+			[{ sourceChatId: 'chat-1', chatId: 'fork-chat-id' }],
+		]);
+		expect(callbacks.onSelectChat).toHaveBeenCalledWith('fork-chat-id');
+		expect(callbacks.notifyError).not.toHaveBeenCalled();
+	});
+
+	it('reports an unconfirmed fork after two lost replies', async () => {
+		vi.spyOn(console, 'error').mockImplementation(() => undefined);
+		vi.mocked(chatsApi.forkChat).mockRejectedValue(new TypeError('connection reset'));
+		const { controller, callbacks } = createHarness();
+
+		await controller.forkChat('chat-1');
+
+		expect(callbacks.notifyError).toHaveBeenCalledWith(m.chat_notice_fork_outcome_unconfirmed());
+		expect(callbacks.onSelectChat).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		['confirms', true],
+		['declines', false],
+	])('asks before a handoff fork and follows what the user %s', async (_label, confirmed) => {
+		const fork = makeServerChat();
+		vi.mocked(chatsApi.forkChat)
+			.mockRejectedValueOnce(
+				new ApiError(409, 'not materialized', 'TRANSCRIPT_NOT_YET_PERSISTED', undefined, true),
+			)
+			.mockResolvedValueOnce({ success: true, chat: fork });
+		const { controller, callbacks } = createHarness();
+
+		const forking = controller.forkChat('chat-1');
+		await vi.waitFor(() => expect(controller.handoffForkConfirmation.isOpen).toBe(true));
+		if (confirmed) controller.handoffForkConfirmation.confirm();
+		else controller.handoffForkConfirmation.cancel();
+		await forking;
+
+		if (confirmed) {
+			expect(chatsApi.forkChat).toHaveBeenLastCalledWith({
+				sourceChatId: 'chat-1',
+				chatId: 'fork-chat-id',
+				allowHandoffFork: true,
+			});
+			expect(callbacks.onSelectChat).toHaveBeenCalledWith('fork-chat-id');
+		} else {
+			expect(chatsApi.forkChat).toHaveBeenCalledOnce();
+			expect(callbacks.onSelectChat).not.toHaveBeenCalled();
+		}
+		expect(callbacks.notifyError).not.toHaveBeenCalled();
+		expect(callbacks.dismissProgress).toHaveBeenCalledOnce();
 	});
 
 	it('runs optional reloads through the common user-visible failure boundary', async () => {
@@ -636,7 +702,9 @@ describe('ChatActionController', () => {
 		await controller.reloadChat('chat-1');
 
 		expect(reload).toHaveBeenCalledWith('chat-1');
-		expect(callbacks.notifyError).toHaveBeenCalledWith(m.sidebar_chats_reload_failed());
+		expect(callbacks.notifyError).toHaveBeenCalledWith(
+			m.sidebar_chats_reload_failed({ detail: 'reload failed' }),
+		);
 
 		const withoutReload = createHarness();
 		await expect(withoutReload.controller.reloadChat('chat-1')).resolves.toBeUndefined();

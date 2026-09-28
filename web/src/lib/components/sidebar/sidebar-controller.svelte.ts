@@ -8,12 +8,9 @@ import {
 	reorderChat,
 	sortChatOrder,
 	getChatDetails,
-	forkChat,
 } from '$lib/api/chats.js';
 import { resolveArchiveReplacementChatId } from '$lib/chat/actions/archive-navigation';
-import { createClientChatId } from '$shared/client-chat-id';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
-import type { ChatListEntry } from '$shared/chat-list';
 import type {
 	RelativeChatOrderPlacement,
 	SortChatOrderResponse,
@@ -72,12 +69,6 @@ export class SidebarController {
 
 	async loadDetails(chatId: string) {
 		return getChatDetails(chatId);
-	}
-
-	async forkChat(sourceChatId: string): Promise<ChatListEntry> {
-		const candidateId = createClientChatId();
-		const result = await forkChat({ sourceChatId, chatId: candidateId });
-		return result.chat;
 	}
 
 	async bulkDelete(chatIds: string[]): Promise<void> {

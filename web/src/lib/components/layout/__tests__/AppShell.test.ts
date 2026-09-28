@@ -73,6 +73,9 @@ vi.mock('$lib/components/workspace/WorkspaceCloseGuard.svelte', async () => ({
 vi.mock('$lib/components/chat/ChatActionDialogs.svelte', async () => ({
 	default: (await import('./AppShellGenericStub.svelte')).default,
 }));
+vi.mock('$lib/components/chat/HandoffForkDialog.svelte', async () => ({
+	default: (await import('./AppShellGenericStub.svelte')).default,
+}));
 vi.mock('$lib/components/chat/ChatProjectPathDialog.svelte', async () => ({
 	default: (await import('./AppShellGenericStub.svelte')).default,
 }));

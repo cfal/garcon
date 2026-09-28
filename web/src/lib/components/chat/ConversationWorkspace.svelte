@@ -602,9 +602,9 @@
 
 	async function reloadSelectedChat(chatId: string): Promise<void> {
 		if (!chatId || chatId !== sessions.selectedChatId) {
-			throw new Error(m.sidebar_chats_reload_failed());
+			throw new Error(m.sidebar_chats_reload_requires_open_chat());
 		}
-		if (reloadDialog.open) throw new Error(m.sidebar_chats_reload_failed());
+		if (reloadDialog.open) throw new Error(m.sidebar_chats_reload_already_pending());
 		return reloadDialog.request(chatId, [...chatState.resendCandidates]);
 	}
 
@@ -613,7 +613,7 @@
 		options: ChatReloadOptions,
 	): Promise<ChatReloadOutcome> {
 		const panel = panelForChat(chatId);
-		if (!panel) throw new Error(m.sidebar_chats_reload_failed());
+		if (!panel) throw new Error(m.sidebar_chats_reload_requires_open_chat());
 		const outcome = await reloadChatFromNative(ws, panel.transcript, chatId, options);
 		if (
 			outcome === 'reloaded' &&

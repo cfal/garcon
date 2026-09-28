@@ -53,6 +53,7 @@
 	import { ChatActionController } from '$lib/components/chat/chat-action-controller.svelte';
 	import { ChatActionDialogsState } from '$lib/components/chat/chat-action-dialogs-state.svelte';
 	import ChatActionDialogs from '$lib/components/chat/ChatActionDialogs.svelte';
+	import HandoffForkDialog from '$lib/components/chat/HandoffForkDialog.svelte';
 	import ChatProjectPathDialog from '$lib/components/chat/ChatProjectPathDialog.svelte';
 	import ShareChatDialog from '$lib/components/chat/ShareChatDialog.svelte';
 	import SidebarTagDialog from '$lib/components/sidebar/SidebarTagDialog.svelte';
@@ -518,7 +519,7 @@
 
 	async function handleReloadChat(chatId: string): Promise<void> {
 		if (!reloadSelectedChatFn) {
-			throw new Error(m.sidebar_chats_reload_failed());
+			throw new Error(m.sidebar_chats_reload_view_unavailable());
 		}
 		await reloadSelectedChatFn(chatId);
 		await quietRefresh();
@@ -873,6 +874,12 @@
 	}}
 	chatDetailsDialog={chatActionDialogs.chatDetailsDialog}
 	onCloseDetails={() => chatActionDialogs.closeDetails()}
+/>
+
+<HandoffForkDialog
+	open={chatActionController.handoffForkConfirmation.isOpen}
+	onCancel={() => chatActionController.handoffForkConfirmation.cancel()}
+	onConfirm={() => chatActionController.handoffForkConfirmation.confirm()}
 />
 
 <ChatProjectPathDialog

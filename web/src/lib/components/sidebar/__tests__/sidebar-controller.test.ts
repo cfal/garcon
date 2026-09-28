@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SidebarController, type SidebarControllerDeps } from '../sidebar-controller.svelte';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
-import { parseChatId } from '$shared/chat-id';
 
 vi.mock('$lib/api/chats.js', () => ({
 	togglePinned: vi.fn(),
@@ -10,7 +9,6 @@ vi.mock('$lib/api/chats.js', () => ({
 	reorderChat: vi.fn(),
 	sortChatOrder: vi.fn(),
 	getChatDetails: vi.fn(),
-	forkChat: vi.fn(),
 	setChatTags: vi.fn(),
 }));
 
@@ -20,7 +18,6 @@ import {
 	reorderChat,
 	sortChatOrder,
 	getChatDetails,
-	forkChat,
 } from '$lib/api/chats.js';
 
 const mockTogglePinned = vi.mocked(togglePinned);
@@ -28,7 +25,6 @@ const mockToggleArchive = vi.mocked(toggleArchive);
 const mockReorderChat = vi.mocked(reorderChat);
 const mockSortChatOrder = vi.mocked(sortChatOrder);
 const mockGetChatDetails = vi.mocked(getChatDetails);
-const mockForkChat = vi.mocked(forkChat);
 
 function makeChat(overrides: Partial<ChatSessionRecord>): ChatSessionRecord {
 	return {
@@ -188,45 +184,6 @@ describe('SidebarController', () => {
 
 			expect(mockGetChatDetails).toHaveBeenCalledWith('c-1');
 			expect(result).toEqual(details);
-		});
-	});
-
-	describe('forkChat', () => {
-		it('forks and returns the projected server entry without discovery refresh', async () => {
-			mockForkChat.mockResolvedValue({
-				success: true,
-				chat: {
-					id: 'c-fork',
-					parentChat: null,
-					agentId: 'claude',
-					agentOwnershipEpoch: 'epoch-fork',
-					model: 'sonnet',
-					permissionMode: 'default',
-					thinkingMode: 'none',
-					agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
-					title: 'Fork',
-					projectPath: '/tmp/project',
-					orderGroup: 'normal',
-					tags: [],
-					activity: { createdAt: null, lastActivityAt: null, lastReadAt: null },
-					preview: { lastMessage: '' },
-					isPinned: false,
-					isArchived: false,
-					isActive: false,
-					isProcessing: false,
-					processingPhase: null,
-					isUnread: false,
-					canReloadFromNativeHistory: false,
-				},
-			});
-
-			const result = await controller.forkChat('c-1');
-
-			const request = mockForkChat.mock.calls[0]?.[0];
-			expect(request?.sourceChatId).toBe('c-1');
-			expect(parseChatId(request?.chatId)).toBe(request?.chatId);
-			expect(quietRefresh).not.toHaveBeenCalled();
-			expect(result.id).toBe('c-fork');
 		});
 	});
 

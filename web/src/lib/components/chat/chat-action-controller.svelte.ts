@@ -1,5 +1,9 @@
 import * as m from '$lib/paraglide/messages.js';
 import { resolveArchiveReplacementChatId } from '$lib/chat/actions/archive-navigation';
+import { forkFailureNotice, requestChatFork } from '$lib/chat/actions/fork-chat-request.js';
+import { errorDetail } from '$lib/chat/conversation/conversation-submission-helpers.js';
+import { HandoffForkConfirmationState } from '$lib/chat/conversation/handoff-fork-confirmation.svelte.js';
+import { createClientChatId } from '$shared/client-chat-id';
 import { SidebarController } from '$lib/components/sidebar/sidebar-controller.svelte';
 import type { ChatArchiveMutation } from '$lib/chat/sessions/chat-sessions-contract';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
@@ -45,6 +49,7 @@ export class ChatActionController {
 	#sidebarController: SidebarController;
 	#projectPathRequestGeneration = new Map<string, symbol>();
 	readonly #pendingForks = new Set<string>();
+	readonly handoffForkConfirmation = new HandoffForkConfirmationState();
 
 	constructor(private readonly deps: ChatActionControllerDeps) {
 		this.#sidebarController = new SidebarController({
@@ -67,7 +72,7 @@ export class ChatActionController {
 		if (this.deps.isArchiveMutationPending(chatId)) return;
 		const chat = this.deps.chats.find((entry) => entry.id === chatId);
 		const wasPinned = chat?.isPinned === true;
-		await this.run('Failed to toggle pinned:', m.notifications_pin_chat_failed(), async () => {
+		await this.run('Failed to toggle pinned:', (detail) => m.notifications_pin_chat_failed({ detail }), async () => {
 			await this.#sidebarController.togglePinned(chatId);
 			if (!wasPinned && this.deps.selectedChatId === chatId) {
 				this.deps.requestSidebarRecenter();
@@ -99,7 +104,7 @@ export class ChatActionController {
 			else this.deps.onNewChat();
 		}
 
-		await this.run('Failed to toggle archive:', m.notifications_archive_chat_failed(), async () => {
+		await this.run('Failed to toggle archive:', (detail) => m.notifications_archive_chat_failed({ detail }), async () => {
 			await mutation.completion;
 			if (wasArchived && this.deps.selectedChatId === chatId) {
 				this.deps.requestSidebarRecenter();
@@ -211,11 +216,16 @@ export class ChatActionController {
 		this.#pendingForks.add(sourceChatId);
 		const dismiss = this.deps.showProgress(`fork:${sourceChatId}`, m.chat_notice_forking_chat());
 		try {
-			await this.run('Failed to fork chat:', m.notifications_fork_chat_failed(), async () => {
-				const entry = await this.#sidebarController.forkChat(sourceChatId);
-				this.deps.onUpsertServerChat(entry);
-				this.deps.onSelectChat(entry.id);
-			});
+			const result = await requestChatFork(
+				{ sourceChatId, chatId: createClientChatId() },
+				() => this.handoffForkConfirmation.ask(),
+			);
+			if (!result) return;
+			this.deps.onUpsertServerChat(result.chat);
+			this.deps.onSelectChat(result.chat.id);
+		} catch (error) {
+			console.error('Failed to fork chat:', error);
+			this.deps.notifyError(forkFailureNotice(error));
 		} finally {
 			dismiss();
 			this.#pendingForks.delete(sourceChatId);
@@ -226,7 +236,7 @@ export class ChatActionController {
 		if (!this.deps.onReloadChat) return;
 		await this.run(
 			'Failed to reload chat from native history:',
-			m.sidebar_chats_reload_failed(),
+			(detail) => m.sidebar_chats_reload_failed({ detail }),
 			async () => {
 				await this.deps.onReloadChat?.(chatId);
 			},
@@ -235,14 +245,14 @@ export class ChatActionController {
 
 	private async run(
 		logMessage: string,
-		userMessage: string,
+		failureMessage: (detail: string) => string,
 		fn: () => Promise<void>,
 	): Promise<void> {
 		try {
 			await fn();
 		} catch (error) {
 			console.error(logMessage, error);
-			this.deps.notifyError(userMessage);
+			this.deps.notifyError(failureMessage(errorDetail(error)));
 		}
 	}
 }
