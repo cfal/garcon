@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { BashToolUseMessage } from '../../../common/chat-types.js';
+import { AssistantMessage, BashToolUseMessage } from '../../../common/chat-types.js';
 import { ApiProviderEndpointResolver } from '../../../server/controller/api-providers/endpoint-resolver.js';
 import { ChatRegistry } from '../../../server/controller/chats/store.js';
 import { ChatTransientFeedStore } from '../../../server/controller/chats/chat-transient-feed.js';
@@ -178,6 +178,23 @@ for (const dialer of ['controller', 'worker'] as const) {
       await expect(router.resolvePermission(CHAT, OCCURRENCE, { allow: true }, control))
         .rejects.toBeInstanceOf(PermissionNotActionableError);
       expect(decisions).toEqual([true]);
+    });
+  }, 30_000);
+
+  test(`output produced during a short disconnect reaches the transcript once (${dialer} dials)`, async () => {
+    await withPendingPermission(dialer, {}, async () => {}, async ({ ledger, native, serving, restored, disconnect, integration }) => {
+      const reconnected = restored();
+      disconnect();
+      native.nativePublishers[0]!({ type: 'rows', rows: [{
+        message: new AssistantMessage('2026-09-23T00:00:01.000Z', 'Synthetic output during the gap'),
+      }] });
+      await reconnected;
+      await integration.execution.runningSessions();
+
+      expect(ledger.currentRows(CHAT).flatMap(row => (
+        row.kind === 'provider-row' && row.message.type === 'assistant-message' ? [row.message.content] : []
+      ))).toEqual(['Synthetic output during the gap']);
+      expect(serving).toHaveLength(2);
     });
   }, 30_000);
 

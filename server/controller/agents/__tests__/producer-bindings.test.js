@@ -29,6 +29,30 @@ test('publication failure closes only its captured lease even if terminal persis
   healthy.close();
 });
 
+test('routes events while the integration cannot report its scope', async () => {
+  const producer = createProducerFixture();
+  const events = [];
+  const errors = [];
+  let reconnecting = false;
+  const integration = { producers: {
+    ...producer.producers,
+    get scope() {
+      if (reconnecting) throw new Error('Executor is reconnecting');
+      return producer.producers.scope;
+    },
+  } };
+  const manager = new ProducerBindings(error => errors.push(error), () => {}, () => {});
+  const lease = new ProducerLease(event => events.push(event), () => {});
+  const binding = await manager.bind(integration, 'chat-1', lease);
+  reconnecting = true;
+  expect(() => producer.emit(binding, { type: 'rows', rows: [] })).not.toThrow();
+  producer.emit({ ...binding, instanceId: 'another-instance' }, { type: 'rows', rows: [] });
+  expect(events).toEqual([{ type: 'rows', rows: [] }]);
+  expect(errors).toEqual([]);
+  reconnecting = false;
+  lease.close();
+});
+
 test('sink rejection is reported without escaping into other producer routes', async () => {
   const producer = createProducerFixture();
   const integration = { producers: producer.producers };
