@@ -47,6 +47,9 @@
 		get selectedChat() {
 			return { id: 'chat-1', projectPath: '/workspace/project' };
 		},
+		get byId() {
+			return {};
+		},
 	} as never);
 	setFileSessions({
 		open: async () => null,

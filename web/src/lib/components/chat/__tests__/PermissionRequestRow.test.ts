@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
 	AskUserQuestionToolUseMessage,
+	BashToolUseMessage,
 	CursorAskQuestionToolUseMessage,
 	ExitPlanModeToolUseMessage,
 	PermissionRequestMessage,
@@ -236,5 +237,33 @@ describe('PermissionRequestRow', () => {
 				relativePath: 'project/plan.md',
 			}),
 		);
+	});
+
+	it('holds answers while the chat executor reconnects', async () => {
+		const onDecision = vi.fn();
+		render(PermissionRequestRowTestHost, {
+			request: new PermissionRequestMessage(
+				TS,
+				'permission-bash',
+				new BashToolUseMessage(TS, 'tool-bash', 'pwd'),
+			),
+			onDecision,
+			chatContext: {
+				chatId: 'remote-chat',
+				executorId: remoteExecutor.id,
+				projectPath: '/worker/project',
+			},
+			executors: [localExecutor, { ...remoteExecutor, availability: 'reconnecting' }],
+		});
+
+		const allow = screen.getByRole('button', { name: /allow once/i }) as HTMLButtonElement;
+		const deny = screen.getByRole('button', { name: /deny/i }) as HTMLButtonElement;
+		expect(allow.disabled).toBe(true);
+		expect(deny.disabled).toBe(true);
+		expect(
+			screen.getByText('Waiting for the executor to reconnect before this can be answered.'),
+		).toBeTruthy();
+		await fireEvent.click(allow);
+		expect(onDecision).not.toHaveBeenCalled();
 	});
 });

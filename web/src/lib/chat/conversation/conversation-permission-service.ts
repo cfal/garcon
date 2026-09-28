@@ -2,9 +2,13 @@ import * as m from '$lib/paraglide/messages.js';
 import type { PermissionMode } from '$lib/types/chat';
 import { isCustomProviderSelectionAvailable } from '$lib/agents/provider-selection.js';
 import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
+import { ApiError } from '$lib/api/client.js';
 import { sendPermissionDecision } from '$lib/api/chats.js';
 import { createClientCommandId } from '$lib/chat/conversation/client-command-id.js';
-import { CommandOutcomeUnknownError } from '$lib/chat/conversation/idempotent-command.js';
+import {
+	CommandOutcomeUnknownError,
+	submitReplayedCommand,
+} from '$lib/chat/conversation/idempotent-command.js';
 import { errorDetail } from '$lib/chat/conversation/conversation-submission-helpers.js';
 import { isExecutionControlAdmissionConflict } from './execution-control-conflict.js';
 import type { AcceptedInputSubmissionService } from './accepted-input-submission-service.js';
@@ -52,7 +56,7 @@ export class ConversationPermissionService {
 			);
 			return;
 		}
-		void sendPermissionDecision({
+		const command = {
 			clientRequestId: createClientCommandId(),
 			chatId,
 			permissionOccurrenceId,
@@ -60,7 +64,8 @@ export class ConversationPermissionService {
 			allow: decision.allow,
 			alwaysAllow: Boolean(decision.alwaysAllow),
 			response: decision.response,
-		})
+		};
+		void submitReplayedCommand(() => sendPermissionDecision(command))
 			.then(() => {
 				if (!deps.sessions.byId[chatId]) return;
 				deps.conversationUi.updatePendingPermissionsForChat(
@@ -75,7 +80,9 @@ export class ConversationPermissionService {
 				deps.chatState.appendLocalNoticeForChat(
 					chatId,
 					'error',
-					m.chat_notice_failed_permission_decision({ detail: errorDetail(error) }),
+					permissionDecisionFailureNotice(error, (detail) =>
+						m.chat_notice_failed_permission_decision({ detail }),
+					),
 				);
 			});
 	}
@@ -188,19 +195,22 @@ export class ConversationPermissionService {
 				break;
 			case 'deny': {
 				if (permissionControl) {
-					void sendPermissionDecision({
+					const command = {
 						clientRequestId: createClientCommandId(),
 						chatId,
 						permissionOccurrenceId,
 						control: permissionControl,
 						allow: false,
 						alwaysAllow: false,
-					}).catch((error) => {
+					};
+					void submitReplayedCommand(() => sendPermissionDecision(command)).catch((error) => {
 						if (!deps.sessions.byId[chatId]) return;
 						deps.chatState.appendLocalNoticeForChat(
 							chatId,
 							'error',
-							m.chat_notice_failed_deny_permission({ detail: errorDetail(error) }),
+							permissionDecisionFailureNotice(error, (detail) =>
+								m.chat_notice_failed_deny_permission({ detail }),
+							),
 						);
 					});
 				} else {
@@ -214,4 +224,20 @@ export class ConversationPermissionService {
 			}
 		}
 	}
+}
+
+function permissionDecisionFailureNotice(
+	error: unknown,
+	failed: (detail: string) => string,
+): string {
+	if (
+		error instanceof CommandOutcomeUnknownError ||
+		(error instanceof ApiError && error.errorCode === 'PERMISSION_DECISION_OUTCOME_UNKNOWN')
+	) {
+		return m.chat_notice_permission_outcome_unconfirmed();
+	}
+	if (error instanceof ApiError && error.errorCode === 'PERMISSION_DECISION_NOT_DELIVERED') {
+		return m.chat_notice_permission_not_delivered();
+	}
+	return failed(errorDetail(error));
 }

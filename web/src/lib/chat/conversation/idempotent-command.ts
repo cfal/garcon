@@ -37,6 +37,36 @@ function isStructuredOutcomeUnknownFailure(error: unknown): boolean {
 	return error instanceof ApiError && OUTCOME_UNKNOWN_ERROR_CODES.has(error.errorCode ?? '');
 }
 
+// Every Garcon error envelope carries an errorCode; a response without one came from an
+// intermediary, so the server's answer never reached the browser.
+function isLostReply(error: unknown): boolean {
+	if (!(error instanceof ApiError)) return true;
+	return (
+		error.errorCode === undefined &&
+		(error.status === 408 || error.status === 425 || error.status === 429 || error.status >= 500)
+	);
+}
+
+/**
+ * Retries one lost reply with the caller's unchanged command identity, for commands whose
+ * server answers a repeated identity from its record of the first attempt or rejects it as
+ * stale. Any server answer is then authoritative; only a second lost reply leaves the
+ * outcome unknown.
+ */
+export async function submitReplayedCommand<T>(submit: () => Promise<T>): Promise<T> {
+	try {
+		return await submit();
+	} catch (firstError) {
+		if (!isLostReply(firstError)) throw firstError;
+		try {
+			return await submit();
+		} catch (secondError) {
+			if (!isLostReply(secondError)) throw secondError;
+			throw new CommandOutcomeUnknownError({ cause: secondError });
+		}
+	}
+}
+
 /** Retries one ambiguous transport outcome with the caller's unchanged command identity. */
 export async function submitIdempotentCommand<T>(submit: () => Promise<T>): Promise<T> {
 	try {

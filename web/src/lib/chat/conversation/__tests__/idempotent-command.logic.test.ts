@@ -1,6 +1,60 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ApiError } from '$lib/api/client.js';
-import { CommandOutcomeUnknownError, submitIdempotentCommand } from '../idempotent-command.js';
+import {
+	CommandOutcomeUnknownError,
+	submitIdempotentCommand,
+	submitReplayedCommand,
+} from '../idempotent-command.js';
+
+describe('submitReplayedCommand', () => {
+	it('retries one lost reply with the same submission callback', async () => {
+		const submit = vi
+			.fn()
+			.mockRejectedValueOnce(new TypeError('connection reset'))
+			.mockResolvedValueOnce({ status: 'duplicate' });
+
+		await expect(submitReplayedCommand(submit)).resolves.toEqual({ status: 'duplicate' });
+		expect(submit).toHaveBeenCalledTimes(2);
+	});
+
+	it('does not retry any server answer, including a coded server error', async () => {
+		for (const error of [
+			new ApiError(500, 'could not be confirmed', 'PERMISSION_DECISION_OUTCOME_UNKNOWN'),
+			new ApiError(503, 'not sent', 'PERMISSION_DECISION_NOT_DELIVERED', undefined, true),
+			new ApiError(409, 'stale', 'PERMISSION_NOT_ACTIONABLE'),
+		]) {
+			const submit = vi.fn().mockRejectedValue(error);
+
+			await expect(submitReplayedCommand(submit)).rejects.toBe(error);
+			expect(submit).toHaveBeenCalledOnce();
+		}
+	});
+
+	it('reports the retried server answer after a lost reply', async () => {
+		const answer = new ApiError(503, 'not sent', 'PERMISSION_DECISION_NOT_DELIVERED', undefined, true);
+		const submit = vi
+			.fn()
+			.mockRejectedValueOnce(new DOMException('signal timed out', 'TimeoutError'))
+			.mockRejectedValueOnce(answer);
+
+		await expect(submitReplayedCommand(submit)).rejects.toBe(answer);
+		expect(submit).toHaveBeenCalledTimes(2);
+	});
+
+	it('reports an unknown outcome after two lost replies', async () => {
+		const secondError = new ApiError(502, 'Bad Gateway');
+		const submit = vi
+			.fn()
+			.mockRejectedValueOnce(new TypeError('connection reset'))
+			.mockRejectedValueOnce(secondError);
+
+		const rejection = await submitReplayedCommand(submit).catch((error) => error);
+
+		expect(rejection).toBeInstanceOf(CommandOutcomeUnknownError);
+		expect((rejection as CommandOutcomeUnknownError).cause).toBe(secondError);
+		expect(submit).toHaveBeenCalledTimes(2);
+	});
+});
 
 describe('submitIdempotentCommand', () => {
 	it('retries one ambiguous transport failure with the same submission callback', async () => {
