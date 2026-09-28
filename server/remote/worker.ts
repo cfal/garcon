@@ -11,6 +11,7 @@ import { startCliGateway } from './server/cli-gateway.js';
 import { cliGatewayRuntimeFile, executorDataDirectory } from '../../common/cli-runtime-paths.js';
 import { acquireWorkspaceLease } from '../common/workspace-lease.js';
 import { loadListenerSecret } from './listener-secret.js';
+import { monitorEventLoopStalls } from '../common/event-loop-stalls.js';
 
 export interface ExecutorWorkerOptions {
   readonly configDir: string;
@@ -52,6 +53,12 @@ async function serveExecutorWorker(options: ExecutorWorkerOptions, dataDir: stri
   let serving: ReturnType<typeof serveExecutionRuntime> | null = null;
   let runtime: ExecutionRuntime | null = null;
   const relay = new ProducerRelay();
+  // A stalled worker stops answering pings, and the controller retires its link after 15 s.
+  const stopStallMonitor = monitorEventLoopStalls({
+    warn: (_message: unknown, detail: unknown) => {
+      console.warn(JSON.stringify({ type: 'executor-event-loop-stalled', ...(detail as object) }));
+    },
+  });
   let currentRpc: ExecutorRpc | null = null;
   let gateway: Awaited<ReturnType<typeof startCliGateway>> | null = null;
   let terminals: TerminalRuntime | null = null;
@@ -61,7 +68,7 @@ async function serveExecutorWorker(options: ExecutorWorkerOptions, dataDir: stri
     currentRpc = null;
     let failure: unknown;
     try {
-      for (const dispose of [() => gateway?.dispose(), () => link.dispose(), () => serving?.dispose(), () => relay.dispose(), () => runtime?.dispose(), () => terminals?.shutdown()]) {
+      for (const dispose of [stopStallMonitor, () => gateway?.dispose(), () => link.dispose(), () => serving?.dispose(), () => relay.dispose(), () => runtime?.dispose(), () => terminals?.shutdown()]) {
         try { await dispose(); } catch (error) { failure ??= error; }
       }
       if (failure !== undefined) throw failure;
