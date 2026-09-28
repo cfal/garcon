@@ -28,12 +28,22 @@ function integrationDouble() {
   return { integration, binding, publish, detach, listeners };
 }
 
-function session() {
+function session(capacity = Infinity) {
   const sent: string[] = [];
+  let limit = capacity;
+  const frames = () => sent.map((payload) => JSON.parse(payload) as { seq: number; notification: AgentProducerNotification });
   return {
     sent,
-    send: (payload: string) => { sent.push(payload); },
-    frames: () => sent.map((payload) => JSON.parse(payload) as { seq: number; notification: AgentProducerNotification }),
+    frames,
+    offer: (payload: string) => {
+      if (sent.length >= limit) return false;
+      sent.push(payload);
+      return true;
+    },
+    allow: (count: number) => { limit += count; },
+    texts: () => frames().map(({ notification: { event } }) => (
+      event.type === 'rows' ? (event.rows[0]!.message as unknown as { content: string }).content : event.type
+    )),
   };
 }
 
@@ -82,6 +92,67 @@ describe('ProducerRelay', () => {
       [1, 'rows'],
       [2, 'run-ended'],
     ]);
+    relay.dispose();
+  });
+
+  test('paces delivery to the session and keeps newer output behind the backlog', async () => {
+    const relay = new ProducerRelay();
+    const { integration, binding, publish } = integrationDouble();
+    relay.track(integration);
+    const first = session();
+    const ref = binding();
+    relay.bind(first, integration, ref);
+    relay.suspend(first);
+    for (const text of ['one', 'two', 'three', 'four']) publish({ binding: ref, event: rows(text) });
+    const second = session(2);
+
+    expect(relay.resume(second, integration, [{ binding: ref, acknowledgedSeq: 0 }])).toEqual([ref.id]);
+    publish({ binding: ref, event: rows('five') });
+    relay.acknowledge(second, [{ bindingId: ref.id, seq: 1 }]);
+    expect(second.texts()).toEqual(['one', 'two']);
+
+    second.allow(3);
+    await Bun.sleep(30);
+    expect(second.texts()).toEqual(['one', 'two', 'three', 'four', 'five']);
+    relay.dispose();
+  });
+
+  test('delivers frames from several bindings in publication order', () => {
+    const relay = new ProducerRelay();
+    const { integration, binding, publish } = integrationDouble();
+    relay.track(integration);
+    const first = session();
+    const [left, right] = [binding(), binding()];
+    relay.bind(first, integration, left);
+    relay.bind(first, integration, right);
+    relay.suspend(first);
+    publish({ binding: left, event: rows('left one') });
+    publish({ binding: right, event: rows('right one') });
+    publish({ binding: left, event: rows('left two') });
+    const second = session();
+
+    relay.resume(second, integration, [
+      { binding: right, acknowledgedSeq: 0 },
+      { binding: left, acknowledgedSeq: 0 },
+    ]);
+
+    expect(second.texts()).toEqual(['left one', 'right one', 'left two']);
+    relay.dispose();
+  });
+
+  test('keeps its place when the budget drops frames already handed to the session', async () => {
+    const relay = new ProducerRelay({ retainedBytes: 2_048 });
+    const { integration, binding, publish } = integrationDouble();
+    relay.track(integration);
+    const live = session(2);
+    const ref = binding();
+    relay.bind(live, integration, ref);
+
+    for (const text of ['one', 'two', 'three']) publish({ binding: ref, event: rows(`${text}:${'x'.repeat(600)}`) });
+    live.allow(5);
+    await Bun.sleep(30);
+
+    expect(live.frames().map((frame) => frame.seq)).toEqual([1, 2, 3]);
     relay.dispose();
   });
 

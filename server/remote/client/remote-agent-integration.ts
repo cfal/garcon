@@ -225,9 +225,10 @@ export class RemoteAgentIntegration implements AgentIntegration {
     this.#ackTimer = null;
   }
 
-  // Reattaches bindings from lost sessions. Replayed frames arrive before the
-  // reply and are deduplicated by sequence; a binding the worker no longer
-  // holds fails its run exactly as a lost session did before resumption.
+  // Reattaches bindings from lost sessions. Replayed frames stream around the
+  // reply, paced by the worker, and are deduplicated by sequence; a binding the
+  // worker no longer holds fails its run exactly as a lost session did before
+  // resumption.
   async resume(backing: RemoteSessionBacking): Promise<void> {
     const suspended = [...this.#bindings.values()].filter((state) => state.backing !== backing);
     if (suspended.length === 0) return;

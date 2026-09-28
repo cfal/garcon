@@ -94,10 +94,10 @@ export class ExecutorRpc {
     // Cleanup does not consume the RPC budget held by the work it is releasing.
     if (!this.#retired && this.transport.connected) this.transport.send(JSON.stringify({ type: 'terminal-detach', request } satisfies RpcFrame));
   }
-  // Producer frames are encoded once by the worker's relay, which also retains them for resume.
-  sendProducer(payload: string): void {
-    if (this.#retired) return;
-    this.transport.send(payload);
+  // Producer frames are encoded once by the worker's relay, which also retains
+  // them for resume and offers refused frames again.
+  offerProducer(payload: string): boolean {
+    return !this.#retired && this.transport.channel.offer(payload);
   }
   onProducerAck(handler: (acknowledgements: readonly ProducerAcknowledgement[]) => void): void {
     this.#producerAck = handler;

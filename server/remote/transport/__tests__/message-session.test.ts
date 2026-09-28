@@ -45,6 +45,24 @@ test('defers a bounded queue while the socket is backpressured', async () => {
   } finally { peer.session.close(); }
 });
 
+test('producer offers stay within their queue share and leave the rest to RPC traffic', async () => {
+  let writable = false;
+  const peer = endpoint({ maxQueuedBytes: 64 });
+  peer.session.attach({ ...peer.socket, canSend: () => writable });
+  expect(peer.session.offer('producer-1')).toBe(true);
+  expect(peer.session.offer('producer-2')).toBe(false);
+  peer.session.send('rpc-reply');
+  expect(peer.session.queuedFrames).toBe(2);
+
+  writable = true;
+  await Bun.sleep(30);
+  expect(peer.session.offer(`producer-2:${'x'.repeat(30)}`)).toBe(true);
+  expect(peer.sent).toEqual(['producer-1', 'rpc-reply', `producer-2:${'x'.repeat(30)}`]);
+  expect(peer.failures).toEqual([]);
+  peer.session.close();
+  expect(peer.session.offer('late')).toBe(false);
+});
+
 test('disconnect fails immediately and never accepts a replacement socket', () => {
   const peer = endpoint();
   const connection = peer.session.attach({ ...peer.socket, canSend: () => false });

@@ -49,6 +49,18 @@ export class MessageSession {
       && this.#pending.length < this.#limits.count;
   }
 
+  // Producer output fills at most its share of the queue, so RPC traffic is
+  // never refused behind a replay. The caller keeps a refused frame and offers
+  // it again as the queue drains; a frame larger than the share waits for an
+  // empty queue.
+  offer(body: string): boolean {
+    const bytes = Buffer.byteLength(body);
+    if (!this.canAdmit(body)) return false;
+    if (this.#pending.length > 0 && (this.#bytes + bytes > Math.min(this.#limits.bytes / 4, 4 * 1024 * 1024)
+      || this.#pending.length >= Math.min(this.#limits.count / 4, 512))) return false;
+    try { this.send(body); return this.connected; } catch { return false; }
+  }
+
   // Terminal output yields capacity to RPC and producer events before admission.
   trySend(body: string): boolean {
     const bytes = Buffer.byteLength(body);

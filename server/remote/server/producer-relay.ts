@@ -9,15 +9,21 @@ import { SESSION_MESSAGE_BYTES } from '../transport/session-socket.js';
 // Matches the controller's reconnect grace; after it, the controller fails the
 // run and this worker detaches the binding as before.
 export const PRODUCER_RESUME_GRACE_MS = 120_000;
-// A full replay must fit a fresh session's 32 MiB send queue with room to spare.
-const RETAINED_BYTES = 16 * 1024 * 1024;
+// Bounds worker memory across all bindings. Replay is paced by the session
+// queue, so the backlog need not fit that queue.
+const RETAINED_BYTES = 32 * 1024 * 1024;
+const PUMP_RETRY_MS = 10;
 
 export interface ProducerRelaySession {
-  send(payload: string): void;
+  // Returns false when the session cannot take the frame now; the relay keeps
+  // it and offers it again as the session drains.
+  offer(payload: string): boolean;
 }
 
 interface RetainedFrame {
   readonly seq: number;
+  // Relay-wide publication order, which the pump preserves across bindings.
+  readonly order: number;
   readonly payload: string;
   readonly bytes: number;
   // Only row batches are dropped under pressure; session, permission, and run
@@ -30,6 +36,8 @@ interface RelayedBinding {
   readonly ref: AgentProducerBinding;
   seq: number;
   readonly retained: RetainedFrame[];
+  // Leading retained frames already handed to `session`.
+  sent: number;
   retainedBytes: number;
   session: ProducerRelaySession | null;
   grace: ReturnType<typeof setTimeout> | null;
@@ -41,17 +49,23 @@ export interface ProducerRelayOptions {
 }
 
 // Delivers producer notifications for one worker process across controller
-// sessions. Frames stay retained until acknowledged. A lost session suspends
-// its bindings for a grace period instead of detaching them, and the next
-// session resumes them from the controller's last received frame. When the
-// retention budget overflows, the oldest row batches are dropped and the
-// controller sees the skipped sequence numbers as a delivery gap.
+// sessions, following VS Code's persistent protocol: frames stay retained until
+// acknowledged, and a resumed binding resends every unacknowledged frame ahead
+// of newer output (https://github.com/microsoft/vscode/blob/f39c7109bf651845855cbef5af2e91b2c9bd0a74/src/vs/base/parts/ipc/common/ipc.net.ts#L974-L989).
+// VS Code's socket buffers without limit; the session queue here is bounded, so
+// frames reach it in publication order only as fast as it drains. A lost
+// session suspends its bindings for a grace period instead of detaching them.
+// When the retention budget overflows, the oldest row batches are dropped and
+// the controller sees the skipped sequence numbers as a delivery gap.
 export class ProducerRelay {
   readonly #bindings = new Map<string, RelayedBinding>();
   readonly #subscriptions = new Map<AgentIntegration, () => void>();
   readonly #graceMs: number;
   readonly #retainedLimit: number;
   #retainedBytes = 0;
+  #published = 0;
+  #pumping = false;
+  #pumpRetry: ReturnType<typeof setTimeout> | null = null;
 
   constructor(options: ProducerRelayOptions = {}) {
     this.#graceMs = options.graceMs ?? PRODUCER_RESUME_GRACE_MS;
@@ -67,7 +81,7 @@ export class ProducerRelay {
 
   bind(session: ProducerRelaySession, integration: AgentIntegration, ref: AgentProducerBinding): void {
     this.#bindings.set(ref.id, {
-      integration, ref, seq: 0, retained: [], retainedBytes: 0, session, grace: null,
+      integration, ref, seq: 0, retained: [], sent: 0, retainedBytes: 0, session, grace: null,
     });
   }
 
@@ -85,12 +99,13 @@ export class ProducerRelay {
     for (const binding of this.#bindings.values()) {
       if (binding.session !== session) continue;
       binding.session = null;
+      binding.sent = 0;
       binding.grace = setTimeout(() => this.#expire(binding), this.#graceMs);
       binding.grace.unref?.();
     }
   }
 
-  // Replays retained frames in order before returning, so they precede the reply.
+  // Frames that do not fit the session queue now follow the reply.
   resume(
     session: ProducerRelaySession,
     integration: AgentIntegration,
@@ -104,9 +119,10 @@ export class ProducerRelay {
       binding.grace = null;
       binding.session = session;
       this.#release(binding, acknowledgedSeq);
-      for (const frame of binding.retained) session.send(frame.payload);
+      binding.sent = 0;
       resumed.push(ref.id);
     }
+    this.#pump();
     return resumed;
   }
 
@@ -125,6 +141,8 @@ export class ProducerRelay {
     }
     this.#bindings.clear();
     this.#retainedBytes = 0;
+    if (this.#pumpRetry) clearTimeout(this.#pumpRetry);
+    this.#pumpRetry = null;
   }
 
   #publish(integration: AgentIntegration, notification: AgentProducerNotification): void {
@@ -134,6 +152,7 @@ export class ProducerRelay {
     const payload = encodeProducerFrame(binding.seq, notification);
     const frame: RetainedFrame = {
       seq: binding.seq,
+      order: this.#published += 1,
       payload,
       bytes: Buffer.byteLength(payload),
       droppable: notification.event.type === 'rows',
@@ -144,12 +163,37 @@ export class ProducerRelay {
     while (this.#retainedBytes > this.#retainedLimit) {
       if (!this.#dropOldestRows(frame)) break;
     }
-    if (!binding.session) return;
+    if (binding.session) this.#pump();
+  }
+
+  // Offers unsent frames in publication order until a session refuses one,
+  // then retries as the session queue drains.
+  #pump(): void {
+    if (this.#pumping) return;
+    this.#pumping = true;
     try {
-      binding.session.send(payload);
-    } catch {
-      // The failed session suspends this binding; the frame stays retained for resume.
+      for (let binding = this.#nextUnsent(); binding; binding = this.#nextUnsent()) {
+        const session = binding.session!;
+        const accepted = session.offer(binding.retained[binding.sent]!.payload);
+        // A session that fails while taking the frame has already suspended the binding.
+        if (binding.session !== session) continue;
+        if (!accepted) {
+          this.#pumpRetry ??= setTimeout(() => { this.#pumpRetry = null; this.#pump(); }, PUMP_RETRY_MS);
+          this.#pumpRetry.unref?.();
+          return;
+        }
+        binding.sent += 1;
+      }
+    } finally { this.#pumping = false; }
+  }
+
+  #nextUnsent(): RelayedBinding | null {
+    let next: RelayedBinding | null = null;
+    for (const binding of this.#bindings.values()) {
+      const frame = binding.session ? binding.retained[binding.sent] : undefined;
+      if (frame && (!next || frame.order < next.retained[next.sent]!.order)) next = binding;
     }
+    return next;
   }
 
   // Drops from the largest backlog first; the newest frame is kept even when it
@@ -160,6 +204,7 @@ export class ProducerRelay {
       const index = binding.retained.findIndex((frame) => frame.droppable && frame !== newest);
       if (index < 0) continue;
       const [dropped] = binding.retained.splice(index, 1);
+      if (index < binding.sent) binding.sent -= 1;
       binding.retainedBytes -= dropped!.bytes;
       this.#retainedBytes -= dropped!.bytes;
       return true;
@@ -168,11 +213,13 @@ export class ProducerRelay {
   }
 
   #release(binding: RelayedBinding, seq: number): void {
-    while (binding.retained.length > 0 && binding.retained[0]!.seq <= seq) {
-      const frame = binding.retained.shift()!;
-      binding.retainedBytes -= frame.bytes;
-      this.#retainedBytes -= frame.bytes;
+    let count = 0;
+    for (; count < binding.retained.length && binding.retained[count]!.seq <= seq; count += 1) {
+      binding.retainedBytes -= binding.retained[count]!.bytes;
+      this.#retainedBytes -= binding.retained[count]!.bytes;
     }
+    binding.retained.splice(0, count);
+    binding.sent = Math.max(0, binding.sent - count);
   }
 
   #expire(binding: RelayedBinding): void {

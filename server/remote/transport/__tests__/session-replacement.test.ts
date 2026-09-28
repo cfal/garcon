@@ -84,6 +84,39 @@ for (const dialer of ['controller', 'worker'] as const) {
     } finally { await fixture.dispose(); }
   });
 
+  test(`a backlog beyond the session queue replays through one session in order (${dialer} dials)`, async () => {
+    const fixture = await remoteFixture(dialer);
+    try {
+      const integration = await fixture.executor.getAgentIntegration('test');
+      const request = await requestFor(integration);
+      await integration.execution.start(request);
+      const delivered: number[] = [];
+      const types: string[] = [];
+      integration.producers.subscribe(({ event }) => {
+        types.push(event.type);
+        if (event.type === 'rows') delivered.push(Number((event.rows[0]!.message as AssistantMessage).content.split(':')[0]));
+      });
+      let sessions = 0;
+      fixture.worker.onSession(() => { sessions += 1; });
+      const publish = fixture.generations[0]!.nativePublishers[0]!;
+      const ready = nextAvailability(fixture.executor, 'ready');
+      fixture.controller.disconnect(); fixture.worker.disconnect();
+      const count = 20_000;
+      for (let index = 0; index < count; index += 1) {
+        publish({ type: 'rows', rows: [{ message: new AssistantMessage('2026-01-01T00:00:00Z', `${index}:${'x'.repeat(900)}`) }] });
+      }
+      publish({ type: 'run-ended', runId: request.runId, outcome: 'finished' });
+      await ready;
+      const deadline = performance.now() + 30_000;
+      while (types.at(-1) !== 'run-ended' && performance.now() < deadline) await Bun.sleep(20);
+
+      expect(sessions).toBe(2);
+      expect(types).not.toContain('publication-gap');
+      expect(delivered).toEqual(Array.from({ length: count }, (_, index) => index));
+      expect(types.at(-1)).toBe('run-ended');
+    } finally { await fixture.dispose(); }
+  }, 60_000);
+
   test(`a start in flight during a short disconnect publishes through the resumed binding (${dialer} dials)`, async () => {
     const fixture = await remoteFixture(dialer);
     const release = Promise.withResolvers<void>();

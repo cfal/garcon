@@ -55,7 +55,7 @@ import {
 import { ProducerBindings } from './producer-bindings.js';
 import { EXECUTOR_DISCONNECTED_MID_TURN } from '../../common/executor-disconnect.js';
 const logger = createLogger('agents:runtime-router');
-const EXECUTOR_OUTPUT_GAP_NOTICE = 'Some agent output was not delivered while the executor was disconnected. Reload from native history after this turn finishes to recover it.';
+const EXECUTOR_OUTPUT_GAP_NOTICE = 'Some agent output could not be delivered from the executor. Reload from native history after this turn finishes to recover it.';
 
 interface TurnOperation extends TurnReceiptOwner {
   readonly clientMessageId: string | null;
