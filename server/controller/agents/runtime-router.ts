@@ -1,4 +1,3 @@
-import crypto from 'node:crypto';
 import { effectiveExecutorId, LOCAL_EXECUTOR_ID } from '../../../common/executors.js';
 import {
   AgentIntegrationError,
@@ -24,7 +23,6 @@ import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-reso
 import { assertSameApiProviderBoundary } from '../api-providers/endpoint-resolver.js';
 import { getMaxSessions } from '../config.js';
 import { createLogger } from '../../common/log.js';
-import type { TurnReceiptOwner } from '../lib/turn-identity.js';
 import { DomainError, transcriptUnavailableMessage } from '../../common/domain-error.js';
 import { ownershipTransferPendingError } from './ownership-transfer-fence.js';
 import type { AgentDirectory } from './directory.js';
@@ -51,16 +49,13 @@ import type {
 import type { TranscriptViewId } from '../ledger/contracts.js';
 import {
   dispatchFailureDetail,
+  executionSetupFailure,
 } from './runtime-router-errors.js';
+import { operationIdentity, operationMetadata } from './turn-operation.js';
 import { ProducerBindings } from './producer-bindings.js';
 import { EXECUTOR_DISCONNECTED_MID_TURN } from '../../common/executor-disconnect.js';
 const logger = createLogger('agents:runtime-router');
 const EXECUTOR_OUTPUT_GAP_NOTICE = 'Some agent output could not be delivered from the executor. Reload from native history after this turn finishes to recover it.';
-
-interface TurnOperation extends TurnReceiptOwner {
-  readonly clientMessageId: string | null;
-  readonly turnOwner: TurnReceiptOwner;
-}
 
 export interface AgentRuntimeRouterOptions {
   registry: IChatRegistry;
@@ -919,40 +914,6 @@ function requireAgentChatEntryWithModel(
   );
 }
 
-function operationIdentity(
-  entry: Pick<AgentChatEntry, 'agentOwnershipEpoch'>,
-  value: { clientRequestId?: string; clientMessageId?: string; turnId?: string },
-  commandType: AgentExecutionCommandType,
-): TurnOperation {
-  if (!entry.agentOwnershipEpoch) throw new Error('Agent ownership epoch is required');
-  const clientRequestId = value.clientRequestId ?? crypto.randomUUID();
-  const turnId = value.turnId ?? crypto.randomUUID();
-  const turnOwner = {
-    agentOwnershipEpoch: entry.agentOwnershipEpoch,
-    commandType,
-    clientRequestId,
-    turnId,
-  } as const;
-  return {
-    agentOwnershipEpoch: entry.agentOwnershipEpoch,
-    commandType,
-    clientRequestId,
-    clientMessageId: value.clientMessageId ?? null,
-    turnId,
-    turnOwner,
-  };
-}
-
-function operationMetadata(operation: TurnOperation) {
-  return {
-    commandType: operation.commandType,
-    ...(operation.clientRequestId ? { clientRequestId: operation.clientRequestId } : {}),
-    turnId: operation.turnId,
-    agentOwnershipEpoch: operation.agentOwnershipEpoch,
-    turnOwner: operation.turnOwner,
-  };
-}
-
 function attachments(images: RunAgentTurnOptions['images'] = []) {
   return images.map((image) => ({
     kind: 'image' as const,
@@ -968,12 +929,6 @@ function supportedValue<T extends string>(values: readonly string[], value: T, f
 
 function runKey(chatId: string, runId: string): string {
   return `${chatId}\u0000${runId}`;
-}
-
-function executionSetupFailure(error: unknown): unknown {
-  return error instanceof AgentCallError && error.outcome === 'unknown'
-    ? new AgentCallError('not-dispatched', `The turn did not start: ${error.message}`)
-    : error;
 }
 
 function isAgentSettingsEnvelope(value: unknown): value is AgentSettingsEnvelope {

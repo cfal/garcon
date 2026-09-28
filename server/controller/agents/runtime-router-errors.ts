@@ -1,8 +1,16 @@
 import {
+  AgentCallError,
   AgentIntegrationError,
   type AgentRunFailureDetail,
 } from '@garcon/server-agent-interface';
 import { DomainError } from '../../common/domain-error.js';
+
+// A failure before provider dispatch cannot have run anything.
+export function executionSetupFailure(error: unknown): unknown {
+  return error instanceof AgentCallError && error.outcome === 'unknown'
+    ? new AgentCallError('not-dispatched', `The turn did not start: ${error.message}`)
+    : error;
+}
 
 export function dispatchFailureDetail(error: unknown): AgentRunFailureDetail {
   if (error instanceof AgentIntegrationError) {
