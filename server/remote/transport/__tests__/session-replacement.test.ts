@@ -236,3 +236,40 @@ test('a restarted worker cannot resume bindings, so the controller reports them 
     for (const generation of generations) await generation.executor.dispose();
   }
 });
+
+test('bindings a restarted controller cannot resume expire after the short grace', async () => {
+  const worker = new WebSocketLink({ ...linkOptions, role: 'worker' });
+  const fixture = integrationFixture();
+  const relay = new ProducerRelay({ supersededGraceMs: 20 });
+  const scopes: ReturnType<typeof serveExecutionRuntime>[] = [];
+  worker.onSession((transport) => {
+    scopes.push(serveExecutionRuntime(fixture.executor, new ExecutorRpc(transport), relay));
+  });
+  const url = worker.listen();
+  const crashed = new WebSocketLink({ ...linkOptions, role: 'controller' });
+  const restarted = new WebSocketLink({ ...linkOptions, role: 'controller' });
+  const executors: RemoteExecutorClient[] = [];
+  const detach = spyOn(fixture.integration.producers, 'detach');
+  try {
+    const first = connectRemoteExecutor(crashed);
+    crashed.dial(url);
+    executors.push(await first);
+    const integration = await executors[0]!.getAgentIntegration('test');
+    const request = await requestFor(integration);
+    await integration.execution.start(request);
+    await crashed.dispose();
+
+    const second = connectRemoteExecutor(restarted);
+    restarted.dial(url);
+    executors.push(await second);
+    await Bun.sleep(50);
+
+    expect(detach).toHaveBeenCalledWith(request.producerBinding);
+  } finally {
+    for (const executor of executors) await executor.dispose();
+    await worker.dispose();
+    await Promise.all(scopes.map((scope) => scope.dispose()));
+    relay.dispose();
+    await fixture.executor.dispose();
+  }
+});

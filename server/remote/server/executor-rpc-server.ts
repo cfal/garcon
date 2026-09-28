@@ -44,6 +44,7 @@ export function serveExecutionRuntime(
   const unsubscribeAvailability = rpc.transport.onAvailability((connected) => { if (!connected) disconnectTerminals(); });
   const integrations = new Map<string, AgentIntegration>();
   const producerSession: ProducerRelaySession = { offer: (payload) => rpc.offerProducer(payload) };
+  relay.shortenSuspendedGrace();
   const readers = new Map<string, AgentResourceTable<'history-reader', HistoryReader>>();
   const readerResources = new Set<HistoryReader>();
   const ready = (async () => {

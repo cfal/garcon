@@ -198,6 +198,44 @@ describe('ProducerRelay', () => {
     relay.dispose();
   });
 
+  test('shortens the grace of bindings a newer session does not resume', async () => {
+    const relay = new ProducerRelay({ graceMs: 60_000, supersededGraceMs: 10 });
+    const { integration, binding, detach } = integrationDouble();
+    relay.track(integration);
+    const first = session();
+    const orphan = binding();
+    const resumed = binding();
+    relay.bind(first, integration, orphan);
+    relay.bind(first, integration, resumed);
+    relay.suspend(first);
+    const second = session();
+
+    relay.shortenSuspendedGrace();
+    relay.resume(second, integration, [{ binding: resumed, acknowledgedSeq: 0 }]);
+    await Bun.sleep(30);
+
+    expect(detach).toHaveBeenCalledTimes(1);
+    expect(detach).toHaveBeenCalledWith(orphan);
+    expect(relay.owns(second, integration, resumed)).toBe(true);
+    relay.dispose();
+  });
+
+  test('keeps an earlier expiry when a newer session starts', async () => {
+    const relay = new ProducerRelay({ graceMs: 10, supersededGraceMs: 60_000 });
+    const { integration, binding, detach } = integrationDouble();
+    relay.track(integration);
+    const first = session();
+    const ref = binding();
+    relay.bind(first, integration, ref);
+    relay.suspend(first);
+
+    relay.shortenSuspendedGrace();
+    await Bun.sleep(30);
+
+    expect(detach).toHaveBeenCalledWith(ref);
+    relay.dispose();
+  });
+
   test('keeps a resumed binding from expiring and ignores other sessions and integrations', async () => {
     const relay = new ProducerRelay({ graceMs: 10 });
     const owner = integrationDouble();

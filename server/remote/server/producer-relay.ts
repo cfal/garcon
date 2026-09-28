@@ -6,9 +6,15 @@ import type {
 import type { AgentProducerFrame, ProducerAcknowledgement } from '../transport/rpc-protocol.js';
 import { SESSION_MESSAGE_BYTES } from '../transport/session-socket.js';
 
-// Matches the controller's reconnect grace; after it, the controller fails the
-// run and this worker detaches the binding as before.
-export const PRODUCER_RESUME_GRACE_MS = 120_000;
+// Matches the controller's reconnect grace and VS Code Remote's reconnection
+// grace; after it, the controller fails the run and this worker detaches the
+// binding. https://github.com/microsoft/vscode/blob/f39c7109bf651845855cbef5af2e91b2c9bd0a74/src/vs/base/parts/ipc/common/ipc.net.ts#L301-L308
+export const PRODUCER_RESUME_GRACE_MS = 3 * 60 * 60 * 1000;
+// A controller resumes every binding it still holds while installing a new
+// session, so bindings still suspended this long after one starts belong to a
+// controller that restarted or gave up. VS Code shortens its grace the same way
+// once another client connects: https://github.com/microsoft/vscode/blob/f39c7109bf651845855cbef5af2e91b2c9bd0a74/src/vs/server/node/remoteExtensionHostAgentServer.ts#L381-L391
+export const PRODUCER_SUPERSEDED_GRACE_MS = 5 * 60 * 1000;
 // Bounds worker memory across all bindings. Replay is paced by the session
 // queue, so the backlog need not fit that queue.
 const RETAINED_BYTES = 32 * 1024 * 1024;
@@ -40,11 +46,12 @@ interface RelayedBinding {
   sent: number;
   retainedBytes: number;
   session: ProducerRelaySession | null;
-  grace: ReturnType<typeof setTimeout> | null;
+  grace: { readonly timer: ReturnType<typeof setTimeout>; readonly deadline: number } | null;
 }
 
 export interface ProducerRelayOptions {
   readonly graceMs?: number;
+  readonly supersededGraceMs?: number;
   readonly retainedBytes?: number;
 }
 
@@ -61,6 +68,7 @@ export class ProducerRelay {
   readonly #bindings = new Map<string, RelayedBinding>();
   readonly #subscriptions = new Map<AgentIntegration, () => void>();
   readonly #graceMs: number;
+  readonly #supersededGraceMs: number;
   readonly #retainedLimit: number;
   #retainedBytes = 0;
   #published = 0;
@@ -69,6 +77,7 @@ export class ProducerRelay {
 
   constructor(options: ProducerRelayOptions = {}) {
     this.#graceMs = options.graceMs ?? PRODUCER_RESUME_GRACE_MS;
+    this.#supersededGraceMs = options.supersededGraceMs ?? PRODUCER_SUPERSEDED_GRACE_MS;
     this.#retainedLimit = options.retainedBytes ?? RETAINED_BYTES;
   }
 
@@ -100,8 +109,14 @@ export class ProducerRelay {
       if (binding.session !== session) continue;
       binding.session = null;
       binding.sent = 0;
-      binding.grace = setTimeout(() => this.#expire(binding), this.#graceMs);
-      binding.grace.unref?.();
+      this.#expireWithin(binding, this.#graceMs);
+    }
+  }
+
+  // Called when a new controller session starts; it never extends a deadline.
+  shortenSuspendedGrace(): void {
+    for (const binding of this.#bindings.values()) {
+      if (!binding.session) this.#expireWithin(binding, this.#supersededGraceMs);
     }
   }
 
@@ -115,7 +130,7 @@ export class ProducerRelay {
     for (const { binding: ref, acknowledgedSeq } of requests) {
       const binding = this.#bindings.get(ref.id);
       if (binding?.integration !== integration) continue;
-      if (binding.grace) clearTimeout(binding.grace);
+      if (binding.grace) clearTimeout(binding.grace.timer);
       binding.grace = null;
       binding.session = session;
       this.#release(binding, acknowledgedSeq);
@@ -137,7 +152,7 @@ export class ProducerRelay {
     for (const unsubscribe of this.#subscriptions.values()) unsubscribe();
     this.#subscriptions.clear();
     for (const binding of this.#bindings.values()) {
-      if (binding.grace) clearTimeout(binding.grace);
+      if (binding.grace) clearTimeout(binding.grace.timer);
     }
     this.#bindings.clear();
     this.#retainedBytes = 0;
@@ -222,6 +237,15 @@ export class ProducerRelay {
     binding.sent = Math.max(0, binding.sent - count);
   }
 
+  #expireWithin(binding: RelayedBinding, graceMs: number): void {
+    const deadline = performance.now() + graceMs;
+    if (binding.grace && binding.grace.deadline <= deadline) return;
+    if (binding.grace) clearTimeout(binding.grace.timer);
+    const timer = setTimeout(() => this.#expire(binding), graceMs);
+    timer.unref?.();
+    binding.grace = { timer, deadline };
+  }
+
   #expire(binding: RelayedBinding): void {
     if (this.#bindings.get(binding.ref.id) !== binding || binding.session) return;
     this.#forget(binding);
@@ -229,7 +253,7 @@ export class ProducerRelay {
   }
 
   #forget(binding: RelayedBinding): void {
-    if (binding.grace) clearTimeout(binding.grace);
+    if (binding.grace) clearTimeout(binding.grace.timer);
     this.#bindings.delete(binding.ref.id);
     this.#retainedBytes -= binding.retainedBytes;
   }
