@@ -594,7 +594,7 @@ describe('WsConnection', () => {
 		connection.disconnect();
 	});
 
-	it('forces reconnect when a heartbeat pong is not received', async () => {
+	it('forces reconnect when two consecutive heartbeat pongs are not received', async () => {
 		const connection = new WsConnection();
 
 		connection.connect('token');
@@ -603,6 +603,14 @@ describe('WsConnection', () => {
 
 		await vi.advanceTimersByTimeAsync(15_000);
 		expect(lastSentPayload(first)).toMatchObject({ type: 'ws-ping' });
+		const firstPing = lastSentPayload(first).clientRequestId;
+
+		await vi.advanceTimersByTimeAsync(6_000);
+		await flushPromises();
+
+		expect(first.close).not.toHaveBeenCalled();
+		expect(lastSentPayload(first)).toMatchObject({ type: 'ws-ping' });
+		expect(lastSentPayload(first).clientRequestId).not.toBe(firstPing);
 
 		await vi.advanceTimersByTimeAsync(6_000);
 		await flushPromises();
@@ -620,6 +628,35 @@ describe('WsConnection', () => {
 			`${GARCON_WS_AUTH_PROTOCOL_PREFIX}stored-token`,
 		]);
 
+		connection.disconnect();
+	});
+
+	it('keeps the socket when the retry after a missed pong is answered', async () => {
+		const connection = new WsConnection();
+		connection.connect('token');
+		const socket = mockSockets[0];
+		socket.open();
+
+		await vi.advanceTimersByTimeAsync(15_000);
+		await vi.advanceTimersByTimeAsync(6_000);
+		await flushPromises();
+		const retry = lastSentPayload(socket);
+		expect(retry).toMatchObject({ type: 'ws-ping' });
+		socket.message({
+			type: 'ws-pong',
+			clientRequestId: retry.clientRequestId,
+			sentAt: retry.sentAt,
+			serverTime: '2026-06-17T00:00:00.000Z',
+			serverInstanceId: 'server-instance-test',
+			processing: { outcome: 'snapshot', chats: [] },
+		});
+		await flushPromises();
+		await vi.advanceTimersByTimeAsync(6_000);
+		await flushPromises();
+
+		expect(socket.close).not.toHaveBeenCalled();
+		expect(connection.isConnected).toBe(true);
+		expect(mockSockets).toHaveLength(1);
 		connection.disconnect();
 	});
 
@@ -646,7 +683,8 @@ describe('WsConnection', () => {
 		expect(connection.isConnected).toBe(true);
 		expect(mockSockets).toHaveLength(1);
 
-		await vi.advanceTimersByTimeAsync(21_000);
+		// The next heartbeat and its retry both go unanswered.
+		await vi.advanceTimersByTimeAsync(27_000);
 		await flushPromises();
 		expect(first.close).toHaveBeenCalledOnce();
 		expect(mockSockets).toHaveLength(2);

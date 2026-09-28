@@ -630,7 +630,9 @@ export class WsConnection {
 		}, delayMs);
 	}
 
-	async #sendHeartbeat(): Promise<void> {
+	// One missed pong can be a briefly busy server; only a second consecutive
+	// miss, with nothing else received meanwhile, treats the socket as dead.
+	async #sendHeartbeat(retryingMissedPong = false): Promise<void> {
 		if (this.#heartbeatInFlight || !this.isConnected || this.#destroyed) return;
 		const generation = this.#heartbeatGeneration;
 		this.#heartbeatInFlight = true;
@@ -645,6 +647,10 @@ export class WsConnection {
 			if (this.#destroyed || !this.isConnected) return;
 			if (this.#lastInboundAt !== null && Date.now() - this.#lastInboundAt < HEARTBEAT_TIMEOUT_MS) {
 				this.#scheduleHeartbeat(this.#nextHeartbeatDelay());
+				return;
+			}
+			if (!retryingMissedPong) {
+				void this.#sendHeartbeat(true);
 				return;
 			}
 			this.#forceReconnect('heartbeat-timeout', { reconnectNow: true });
