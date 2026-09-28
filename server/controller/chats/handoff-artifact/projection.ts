@@ -39,14 +39,11 @@ interface ProjectionAdapter extends PrioritizedProjectionEntry {
 
 export function foldHandoffArtifactEntries(
   entries: readonly TranscriptExportEntry[],
-  signal?: AbortSignal,
 ): HandoffArtifactSourceFold {
   const source: HandoffArtifactSourceEntry[] = [];
   const excludedCounts = new Map<ChatHandoffArtifactExclusionCategory, number>();
   let turn = -1;
-  for (let index = 0; index < entries.length; index += 1) {
-    if (index % 256 === 0) signal?.throwIfAborted();
-    const entry = entries[index];
+  for (const entry of entries) {
     if (entry.kind !== 'message' || !isEligibleMessage(entry.message)) {
       excludedCounts.set(entry.category, (excludedCounts.get(entry.category) ?? 0) + 1);
       continue;
@@ -59,7 +56,6 @@ export function foldHandoffArtifactEntries(
     }
     source.push(projected);
   }
-  signal?.throwIfAborted();
   return {
     entries: source,
     sourceEntryCount: entries.length,

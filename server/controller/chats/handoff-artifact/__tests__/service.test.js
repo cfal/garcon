@@ -8,6 +8,7 @@ import {
 import { transcriptViewId } from '../../../ledger/contracts.ts';
 import { DomainError } from '../../../../common/domain-error.ts';
 import { HandoffArtifactService } from '../service.ts';
+import { inlineTokenFitting } from '../../token-fitting/__tests__/inline-token-fitting.ts';
 
 const AT = '2026-08-26T00:00:00.000Z';
 const CHAT_ID = '1787505989127000';
@@ -19,6 +20,7 @@ describe('HandoffArtifactService', () => {
     const service = new HandoffArtifactService({
       summaries: { buildSummary: () => null },
       transcripts: { exportSnapshot },
+      fitting: inlineTokenFitting,
     });
 
     await expect(service.create(request(), signal())).rejects.toMatchObject({
@@ -109,6 +111,7 @@ function createService(exportSnapshot) {
   return new HandoffArtifactService({
     summaries: { buildSummary: () => ({ chat: chat() }) },
     transcripts: { exportSnapshot },
+    fitting: inlineTokenFitting,
     now: () => AT,
   });
 }

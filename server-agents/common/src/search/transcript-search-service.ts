@@ -12,7 +12,7 @@ import type {
 } from '@garcon/common/chat-search';
 import type { JsonObject } from '@garcon/common/json';
 import type { AgentLogger } from '@garcon/server-agent-interface';
-import { resolveSearchWorkerEntrypoints } from '../build/standalone-entrypoint.js';
+import { resolveWorkerEntrypoint } from '../build/standalone-entrypoint.js';
 import { searchFrames } from './query-frames.js';
 import { QueryLatencyStats } from './query-latency-stats.js';
 import {
@@ -168,10 +168,10 @@ export class TranscriptSearchService {
     this.#logger = options.logger;
     this.#readerRequestTimeoutMs =
       options.readerRequestTimeoutMs ?? SEARCH_READER_REQUEST_TIMEOUT_MS;
-    const entrypoints = resolveSearchWorkerEntrypoints({
-      indexerSourceUrl: new URL('./indexer-main.ts', import.meta.url),
-      readerSourceUrl: new URL('./reader-main.ts', import.meta.url),
-    });
+    const entrypoints = {
+      indexer: resolveWorkerEntrypoint('search-indexer', new URL('./indexer-main.ts', import.meta.url)),
+      reader: resolveWorkerEntrypoint('search-reader', new URL('./reader-main.ts', import.meta.url)),
+    };
     this.#indexer = new SearchWorkerSupervisor({
       role: 'indexer',
       moduleUrl: entrypoints.indexer,

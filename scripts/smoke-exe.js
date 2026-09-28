@@ -229,6 +229,19 @@ async function waitForTranscriptResult(url, token, chatId, getServerOutput, apiF
   );
 }
 
+// The handoff artifact renders on the embedded token-fitting Worker.
+async function assertCompiledTokenFitting(url, chatId, getServerOutput, apiFetch) {
+  const query = new URLSearchParams({ chatId, contextWindowTokens: '131072' });
+  const response = await apiFetch(`${url}/api/v1/chats/handoff-artifact?${query}`);
+  const body = await response.text();
+  if (!response.ok || !body.includes('embeddedworkertoken')) {
+    throw new Error(
+      `Compiled token fitting failed with ${response.status}: ${body || '<empty>'}. `
+        + `Captured output:\n${getServerOutput()}`,
+    );
+  }
+}
+
 function getHostTarget() {
   return `${process.platform}-${process.arch}`;
 }
@@ -403,6 +416,7 @@ async function run() {
       started.getOutput,
       apiFetch,
     );
+    await assertCompiledTokenFitting(started.url, SMOKE_CHAT_ID, started.getOutput, apiFetch);
     await stopProcess(child);
 
     child = spawnServer();

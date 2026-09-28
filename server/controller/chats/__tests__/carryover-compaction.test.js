@@ -22,6 +22,7 @@ import {
   CarryOverCompactionService,
 } from '../carryover-compaction.ts';
 import { estimateHandoffTokens } from '../handoff-token-budget.ts';
+import { inlineTokenFitting } from '../token-fitting/__tests__/inline-token-fitting.ts';
 
 const TIME = '2026-01-01T00:00:00.000Z';
 const DESTINATION = { agentId: 'claude', model: 'opus', prompt: 'keep going' };
@@ -102,6 +103,7 @@ function service({
   return {
     instance: new CarryOverCompactionService({
       agents,
+      fitting: inlineTokenFitting,
       getUiSettings: settings,
       onCompactionStarted,
     }),

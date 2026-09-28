@@ -11,8 +11,7 @@ import { isHandoffContextWindowTokens } from '../../../../common/handoff-sizing.
 import type { LedgerRow, TranscriptViewId } from '../../ledger/contracts.js';
 import { foldRowsForExport } from '../../ledger/export-fold.js';
 import { DomainError, ValidationDomainError } from '../../../common/domain-error.js';
-import { foldHandoffArtifactEntries } from './projection.js';
-import { renderFittedHandoffArtifact } from './xml.js';
+import type { TokenFitting } from '../token-fitting/client.js';
 
 export interface HandoffArtifactServiceDeps {
   readonly summaries: {
@@ -25,6 +24,7 @@ export interface HandoffArtifactServiceDeps {
       readonly rows: readonly LedgerRow[];
     }>;
   };
+  readonly fitting: Pick<TokenFitting, 'renderHandoffArtifact'>;
   readonly now?: () => string;
 }
 
@@ -42,8 +42,7 @@ export class HandoffArtifactService {
     if (!summary) throw new DomainError('SESSION_NOT_FOUND', 'Session not found', 404, false);
 
     const snapshot = await this.deps.transcripts.exportSnapshot(request.chatId, signal);
-    const sourceFold = foldHandoffArtifactEntries(foldRowsForExport(snapshot.rows), signal);
-    const rendered = renderFittedHandoffArtifact({
+    const rendered = await this.deps.fitting.renderHandoffArtifact({
       chat: {
         id: summary.chat.id,
         title: summary.chat.title,
@@ -53,9 +52,8 @@ export class HandoffArtifactService {
       transcriptViewId: snapshot.transcriptViewId,
       lastOrdinal: snapshot.lastOrdinal,
       contextWindowTokens: request.contextWindowTokens,
-      sourceFold,
-      signal,
-    });
+      entries: foldRowsForExport(snapshot.rows),
+    }, signal);
     if (!rendered) {
       throw new ValidationDomainError(
         'The requested context window is too small for a handoff artifact',

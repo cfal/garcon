@@ -37,6 +37,7 @@ import { ChatProcessingActivity } from './chats/chat-processing-activity.js';
 import { ChatRowService } from './chats/chat-row-service.js';
 import { TranscriptExportService } from './chats/transcript-export/service.js';
 import { HandoffArtifactService } from './chats/handoff-artifact/service.js';
+import { TokenFittingWorker } from './chats/token-fitting/client.js';
 import { TranscriptSearchController } from './chats/search/controller.js';
 import { TranscriptSearchSettingsCoordinator } from './chats/search/settings-coordinator.js';
 import { AgentRegistry, createForkNativeHistoryReader } from './agents/index.js';
@@ -465,8 +466,10 @@ export async function startServer(): Promise<void> {
     await metadata.init();
 
     const transientFeeds = new ChatTransientFeedStore(runtimeState.identity.instanceId);
+    const tokenFitting = new TokenFittingWorker();
     carryOverCompaction = new CarryOverCompactionService({
       agents: agentRegistry,
+      fitting: tokenFitting,
       getUiSettings: () => settings.getUiSettings(),
       onCompactionStarted(chatId) {
         eventWiring?.notifyOperationalNotice(
@@ -595,6 +598,7 @@ export async function startServer(): Promise<void> {
     const handoffArtifact = new HandoffArtifactService({
       summaries: chatListProjector,
       transcripts: transcriptReader,
+      fitting: tokenFitting,
     });
     const chatCommands = new ChatCommandService({
       chats: chatRegistry,
@@ -927,6 +931,7 @@ export async function startServer(): Promise<void> {
         unsubscribeSearchStatus();
         unsubscribeSearchAvailability();
         await chatSearch.close();
+        tokenFitting.close();
         await executors.dispose();
         transcriptLedger.close();
         terminalManager.shutdown();

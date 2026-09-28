@@ -39,7 +39,6 @@ export function renderFittedHandoffArtifact(input: {
   readonly lastOrdinal: number;
   readonly contextWindowTokens: number;
   readonly sourceFold: HandoffArtifactSourceFold;
-  readonly signal?: AbortSignal;
 }): RenderedHandoffArtifact | null {
   const usableTokenBudget = usableHandoffTokenBudget(input.contextWindowTokens);
   const fixedSelection = selectHandoffArtifactEntries({
@@ -60,7 +59,6 @@ export function renderFittedHandoffArtifact(input: {
     fixedFrameTokens: fixedFrame.estimatedTokens,
     minimumEntryBudgetTokens: 0,
     render(entryBudgetTokens) {
-      input.signal?.throwIfAborted();
       const selection = selectHandoffArtifactEntries({
         entries: input.sourceFold.entries,
         maximumCost: entryBudgetTokens,

@@ -5,17 +5,12 @@ import { CHAT_ROW_CONTENT_MAX_BYTES } from '../../../common/chat-row-contracts.j
 import type { ChatMessage } from '../../../common/chat-types.js';
 import {
   DEFAULT_HANDOFF_CONTEXT_WINDOW_TOKENS,
-  SMALL_HISTORY_NO_COMPACTION_MAX_ESTIMATED_TOKENS,
   parseAgentSwitchContextWindowTokens,
-  usableHandoffTokenBudget,
 } from '../../../common/handoff-sizing.js';
-import type { CarriedContext, CostedCarriedContext } from '../../../common/transcript-seed.js';
+import type { CarriedContext } from '../../../common/transcript-seed.js';
 import {
   CARRYOVER_INJECTION_MAX_CHARS,
-  RECENT_TURNS_VERBATIM,
   createCarryoverTranscript,
-  createCarryoverTranscriptWithinCost,
-  isProjectableMessage,
 } from '../../../common/transcript-seed.js';
 import { isRecord } from '../../../common/json.js';
 import { resolveGenerationContextForSelection } from '../settings/generation-config-source.js';
@@ -28,11 +23,15 @@ import { errorMessage } from '../../common/errors.js';
 import { createLogger } from '../../common/log.js';
 import {
   COMPACTION_QUERY_ATTEMPTS,
-  estimateHandoffTokens,
-  fitEstimatedTokenDocument,
   reducedCompactionEntryBudget,
 } from './handoff-token-budget.js';
 import type { CarryOverOutcome } from './carryover-outcome.js';
+import {
+  spineStart,
+  type CompactionDestination,
+  type CompactionPromptUnavailableReason,
+} from './token-fitting/carryover.js';
+import type { TokenFitting } from './token-fitting/client.js';
 
 const logger = createLogger('chats:carryover-compaction');
 const SUMMARY_OPEN = '<summary>';
@@ -62,14 +61,9 @@ export interface CarryOverCompactionAgents {
   }): Promise<string>;
 }
 
-export interface CarryOverCompactionDestination {
-  readonly agentId: string;
-  readonly model: string;
-  readonly prompt: string | null;
-}
-
 export interface CarryOverCompactionDeps {
   readonly agents: CarryOverCompactionAgents;
+  readonly fitting: Pick<TokenFitting, 'assessCarryover' | 'fitCompactionPrompt'>;
   getUiSettings(): { agentSwitchCompaction?: unknown } | null | undefined;
   onCompactionStarted?(chatId: string): void;
 }
@@ -79,13 +73,8 @@ export interface CarryOverCompactionInput {
   readonly operation: 'agent-switch' | 'fresh-start';
   readonly chatId: string;
   readonly messages: readonly ChatMessage[];
-  readonly destination: CarryOverCompactionDestination;
+  readonly destination: CompactionDestination;
   readonly signal?: AbortSignal;
-}
-
-interface FittedCompactionPrompt {
-  readonly olderHistory: CostedCarriedContext;
-  readonly prompt: string;
 }
 
 const UNRESOLVED = Symbol('compaction-selection-unresolved');
@@ -94,14 +83,8 @@ export class CarryOverCompactionService {
   constructor(private readonly deps: CarryOverCompactionDeps) {}
 
   async planFor(input: CarryOverCompactionInput): Promise<CarryOverOutcome> {
-    const complete = createCarryoverTranscript(input.messages, 0);
-    if (!complete) return { kind: 'no-history' };
-    if (
-      estimateHandoffTokens(complete.prefix)
-      <= SMALL_HISTORY_NO_COMPACTION_MAX_ESTIMATED_TOKENS
-    ) {
-      return { kind: 'complete', context: complete };
-    }
+    const assessment = await this.deps.fitting.assessCarryover(input.messages, input.signal);
+    if (assessment.kind !== 'needs-compaction') return assessment;
 
     const selectionSignal = createGenerationRequestSignal(input.signal);
     let selection;
@@ -130,52 +113,22 @@ export class CarryOverCompactionService {
       );
     }
 
-    const boundary = spineStart(input.messages);
-    const spine = input.messages.slice(boundary);
-    const older = input.messages.slice(0, boundary);
-    if (createCarryoverTranscript(spine, CARRYOVER_INJECTION_MAX_CHARS, { summary: '.' })
-      ?.summaryTruncated) {
-      throw compactionUnavailable(
-        input,
-        `the most recent turns already fill the ${CARRYOVER_INJECTION_MAX_CHARS} character carryover limit`,
-      );
-    }
-    if (!older.some(isProjectableMessage)) {
-      throw compactionUnavailable(
-        input,
-        'the complete history is inside the newest-three-turn verbatim spine and exceeds the 100,000 estimated-token uncompacted carry limit',
-        input.operation === 'agent-switch'
-          ? 'Continue with the current agent or start a new chat.'
-          : 'Start a new chat to continue.',
-      );
-    }
-    const recentContext = createCarryoverTranscript(spine, 0);
-    if (!recentContext) {
-      throw compactionUnavailable(input, 'the protected recent history could not be projected');
-    }
-    const first = fitCompactionPrompt(
-      older,
-      recentContext,
-      input.destination,
-      selection.contextWindowTokens,
-    );
-    if (!first) {
-      throw compactionUnavailable(input, 'the compaction prompt does not fit the configured window');
-    }
+    const fitPrompt = (maximumEntryBudgetTokens: number | null) => this.deps.fitting.fitCompactionPrompt({
+      messages: input.messages,
+      destination: input.destination,
+      contextWindowTokens: selection.contextWindowTokens,
+      maximumEntryBudgetTokens,
+    }, input.signal);
+    const first = await fitPrompt(null);
+    if (first.kind === 'unavailable') throw compactionPromptUnavailable(input, first.reason);
 
     let lastFailure: unknown = new Error('Compaction did not run');
     for (let attempt = 0; attempt < COMPACTION_QUERY_ATTEMPTS; attempt += 1) {
       input.signal?.throwIfAborted();
       const fitted = attempt === 0
         ? first
-        : fitCompactionPrompt(
-          older,
-          recentContext,
-          input.destination,
-          selection.contextWindowTokens,
-          reducedCompactionEntryBudget(first.entryBudgetTokens),
-        );
-      if (!fitted) {
+        : await fitPrompt(reducedCompactionEntryBudget(first.entryBudgetTokens));
+      if (fitted.kind === 'unavailable') {
         lastFailure = new Error('the reduced compaction prompt does not fit');
         break;
       }
@@ -184,7 +137,7 @@ export class CarryOverCompactionService {
         else this.deps.onCompactionStarted?.(input.chatId);
       }
       try {
-        const raw = await this.deps.agents.runSingleQuery(fitted.value.prompt, {
+        const raw = await this.deps.agents.runSingleQuery(fitted.prompt, {
           executorId: selection.executorId,
           agentId: selection.agentId,
           model: selection.model,
@@ -196,7 +149,10 @@ export class CarryOverCompactionService {
           signal: createGenerationRequestSignal(input.signal, CARRYOVER_COMPACTION_TIMEOUT_MS),
         });
         const summary = validateCompactionSummary(raw);
-        const context = projectSummaryWithSpine(summary, spine);
+        const context = projectSummaryWithSpine(
+          summary,
+          input.messages.slice(spineStart(input.messages)),
+        );
         return { kind: 'compacted', context, summary };
       } catch (error) {
         input.signal?.throwIfAborted();
@@ -231,42 +187,6 @@ export class CarryOverCompactionService {
         ?? DEFAULT_HANDOFF_CONTEXT_WINDOW_TOKENS,
     };
   }
-}
-
-function fitCompactionPrompt(
-  older: readonly ChatMessage[],
-  recentContext: CarriedContext,
-  destination: CarryOverCompactionDestination,
-  contextWindowTokens: number,
-  maximumEntryBudgetTokens?: number,
-) {
-  const usableTokens = usableHandoffTokenBudget(contextWindowTokens);
-  return fitEstimatedTokenDocument<FittedCompactionPrompt>({
-    usableTokens,
-    fixedFrameTokens: estimateHandoffTokens(
-      buildCompactionPrompt('', recentContext.prefix, destination),
-    ),
-    maximumEntryBudgetTokens,
-    minimumEntryBudgetTokens: 1,
-    render(entryBudgetTokens) {
-      const olderHistory = createCarryoverTranscriptWithinCost(older, {
-        maximumCost: entryBudgetTokens,
-        cost: estimateHandoffTokens,
-      });
-      return olderHistory === null
-        ? null
-        : {
-            olderHistory,
-            prompt: buildCompactionPrompt(
-              olderHistory.prefix,
-              recentContext.prefix,
-              destination,
-            ),
-          };
-    },
-    document: ({ prompt }) => prompt,
-    admittedEntryCost: ({ olderHistory }) => olderHistory.admissionCost,
-  });
 }
 
 function validateCompactionSummary(raw: string): string {
@@ -314,6 +234,31 @@ function compactionRequired(input: CarryOverCompactionInput): DomainError {
   );
 }
 
+function compactionPromptUnavailable(
+  input: CarryOverCompactionInput,
+  reason: CompactionPromptUnavailableReason,
+): DomainError {
+  switch (reason) {
+    case 'recent-turns-fill-carryover':
+      return compactionUnavailable(
+        input,
+        `the most recent turns already fill the ${CARRYOVER_INJECTION_MAX_CHARS} character carryover limit`,
+      );
+    case 'history-inside-recent-turns':
+      return compactionUnavailable(
+        input,
+        'the complete history is inside the newest-three-turn verbatim spine and exceeds the 100,000 estimated-token uncompacted carry limit',
+        input.operation === 'agent-switch'
+          ? 'Continue with the current agent or start a new chat.'
+          : 'Start a new chat to continue.',
+      );
+    case 'recent-turns-unprojectable':
+      return compactionUnavailable(input, 'the protected recent history could not be projected');
+    case 'prompt-exceeds-window':
+      return compactionUnavailable(input, 'the compaction prompt does not fit the configured window');
+  }
+}
+
 function compactionUnavailable(
   input: CarryOverCompactionInput,
   reason: string,
@@ -340,46 +285,4 @@ function compactionFailed(input: CarryOverCompactionInput, failure: unknown): Do
     true,
     { cause: failure },
   );
-}
-
-// Splits on the assembler's pinned-turn boundary so recent work remains a
-// protected output spine while also informing the summary's current state.
-function spineStart(messages: readonly ChatMessage[]): number {
-  let userTurns = 0;
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (messages[index].type !== 'user-message') continue;
-    userTurns += 1;
-    if (userTurns === RECENT_TURNS_VERBATIM) return index;
-  }
-  return 0;
-}
-
-function buildCompactionPrompt(
-  olderHistory: string,
-  recentContext: string,
-  destination: CarryOverCompactionDestination,
-): string {
-  return [
-    'Summarize the prior conversation below so another coding agent can continue the work.',
-    `It will be continued by ${destination.agentId} using ${destination.model}.`,
-    ...(destination.prompt ? [`Their next instruction is: ${destination.prompt}`] : []),
-    'Bias the summary toward what that instruction needs.',
-    'The conversation is split into older history and protected recent context.',
-    'Use both sections to determine the current state and immediate next step.',
-    'Recent completions, reversals, and blockers supersede older plans.',
-    'The recent context will also accompany the summary, so account for it without repeating it in detail.',
-    '',
-    'Reply with a single <summary> element containing these sections in order:',
-    'the original objective, decisions and constraints already established, files changed,',
-    'the current state of the work, and the immediate next step.',
-    'Do not include a <carried-context> element and do not repeat the transcript verbatim.',
-    '',
-    '<older-history>',
-    olderHistory,
-    '</older-history>',
-    '',
-    '<recent-context>',
-    recentContext,
-    '</recent-context>',
-  ].join('\n');
 }

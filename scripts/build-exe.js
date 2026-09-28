@@ -3,9 +3,15 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { GARCON_WORKER_NAMES } from '../server-agents/common/src/build/standalone-entrypoint.js';
 import { collectAgentBuildContributions } from './agent-build-metadata.js';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const EMBEDDED_WORKER_SOURCES = {
+  'search-indexer': 'server-agents/common/src/search/indexer-main.ts',
+  'search-reader': 'server-agents/common/src/search/reader-main.ts',
+  'token-fitting': 'server/controller/chats/token-fitting/worker-main.ts',
+};
 const distDir = path.resolve(repoRoot, 'web', 'build');
 const executableDir = path.resolve(repoRoot, 'dist');
 const executableTargets = {
@@ -84,26 +90,23 @@ function createVirtualMainEntrypoint(
   assetsEntrypoint,
   serverMainPath,
   preMainModules,
-  transcriptSearchWorkers,
+  embeddedWorkers,
 ) {
   const entrypointUrl = (entry) => {
     const relativePath = toPosixPath(path.relative(repoRoot, entry.filePath));
     if (relativePath.startsWith('../')) {
-      throw new Error(`Transcript search Worker is outside the compile root: ${entry.filePath}`);
+      throw new Error(`Worker bundle is outside the compile root: ${entry.filePath}`);
     }
     return `new URL(${JSON.stringify(`./${relativePath}`)}, import.meta.url).href`;
   };
-  const workerUrl = (name) => {
-    const entry = transcriptSearchWorkers.entries.find((candidate) => candidate.name === name);
-    if (!entry) throw new Error(`Missing transcript search ${name} Worker entrypoint.`);
-    return entrypointUrl(entry);
-  };
+  const workers = embeddedWorkers.entries
+    .map((entry) => `${JSON.stringify(entry.name)}: ${entrypointUrl(entry)},`)
+    .join('\n      ');
   const manifestExpression = `{
     mode: 'compiled',
     apiVersion: 1,
     workers: {
-      indexer: ${workerUrl('indexer')},
-      reader: ${workerUrl('reader')},
+      ${workers}
     }
   }`;
   return [
@@ -111,29 +114,32 @@ function createVirtualMainEntrypoint(
     ...preMainModules.map((modulePath) => `import '${toPosixPath(modulePath)}';`),
     `const deepFreeze = (value) => { if (value && typeof value === 'object' && !Object.isFrozen(value)) { Object.freeze(value); for (const nested of Object.values(value)) deepFreeze(nested); } return value; };`,
     `Object.defineProperty(globalThis, Symbol.for('garcon.compiled-mode'), { value: true, writable: false, configurable: false });`,
-    `Object.defineProperty(globalThis, Symbol.for('garcon.embedded-search-manifest.v1'), { value: deepFreeze(${manifestExpression}), writable: false, configurable: false });`,
+    `Object.defineProperty(globalThis, Symbol.for('garcon.embedded-workers.v1'), { value: deepFreeze(${manifestExpression}), writable: false, configurable: false });`,
     `await import('${serverMainPath}');`,
     '',
   ].join('\n');
 }
 
-async function bundleTranscriptSearchWorkers() {
+async function bundleEmbeddedWorkers() {
+  const sources = Object.keys(EMBEDDED_WORKER_SOURCES);
+  if (sources.length !== GARCON_WORKER_NAMES.length
+    || GARCON_WORKER_NAMES.some((name) => !sources.includes(name))) {
+    throw new Error('Embedded Worker sources must match GARCON_WORKER_NAMES.');
+  }
   // Bun preserves paths relative to the compile root for Worker entrypoints.
   const directory = await fs.mkdtemp(
-    path.join(repoRoot, 'node_modules', '.garcon-transcript-search-workers-'),
+    path.join(repoRoot, 'node_modules', '.garcon-embedded-workers-'),
   );
   const entries = [];
   try {
-    for (const [name, entrypoint] of Object.entries({
-      indexer: path.join(repoRoot, 'server-agents/common/src/search/indexer-main.ts'),
-      reader: path.join(repoRoot, 'server-agents/common/src/search/reader-main.ts'),
-    })) {
+    for (const name of GARCON_WORKER_NAMES) {
+      const entrypoint = path.join(repoRoot, EMBEDDED_WORKER_SOURCES[name]);
       const result = await Bun.build({ entrypoints: [entrypoint], target: 'bun', format: 'esm', minify: true });
       if (!result.success || result.outputs.length !== 1) {
         for (const log of result.logs) console.error(log);
-        throw new Error(`Transcript search Worker bundle failed: ${name}`);
+        throw new Error(`Worker bundle failed: ${name}`);
       }
-      const filePath = path.join(directory, `transcript-search-${name}.js`);
+      const filePath = path.join(directory, `${name}.js`);
       await fs.writeFile(filePath, await result.outputs[0].arrayBuffer());
       entries.push({ name, filePath });
     }
@@ -144,7 +150,7 @@ async function bundleTranscriptSearchWorkers() {
   }
 }
 
-async function buildExecutable(targetId, embeddedFiles, contributions, transcriptSearchWorkers) {
+async function buildExecutable(targetId, embeddedFiles, contributions, embeddedWorkers) {
   const assetsEntrypoint = '__garcon_embed_static_assets__.js';
   const mainEntrypoint = '__garcon_build_exe_main__.js';
   const serverMainPath = toPosixPath(path.join(repoRoot, 'server', 'main.js'));
@@ -162,7 +168,7 @@ async function buildExecutable(targetId, embeddedFiles, contributions, transcrip
   const result = await Bun.build({
     entrypoints: [
       mainEntrypoint,
-      ...transcriptSearchWorkers.entries.map((entry) => entry.filePath),
+      ...embeddedWorkers.entries.map((entry) => entry.filePath),
     ],
     compile: compileOptionsForTarget(targetId, outFile),
     naming: { asset: '[dir]/[name].[ext]' },
@@ -172,7 +178,7 @@ async function buildExecutable(targetId, embeddedFiles, contributions, transcrip
         assetsEntrypoint,
         serverMainPath,
         contributions.flatMap((contribution) => contribution.preMainModules),
-        transcriptSearchWorkers,
+        embeddedWorkers,
       ),
     },
   });
@@ -202,14 +208,14 @@ async function run() {
   const targetIds = parseRequestedTargets(Bun.argv.slice(2));
   const embeddedFiles = await collectEmbeddedAssetInputs();
   const contributions = await collectAgentBuildContributions({ repoRoot });
-  const transcriptSearchWorkers = await bundleTranscriptSearchWorkers();
+  const embeddedWorkers = await bundleEmbeddedWorkers();
   try {
     for (const targetId of targetIds) {
-      await buildExecutable(targetId, embeddedFiles, contributions, transcriptSearchWorkers);
+      await buildExecutable(targetId, embeddedFiles, contributions, embeddedWorkers);
       await buildCliExecutable(targetId);
     }
   } finally {
-    await fs.rm(transcriptSearchWorkers.directory, { recursive: true, force: true });
+    await fs.rm(embeddedWorkers.directory, { recursive: true, force: true });
   }
 }
 
