@@ -1421,6 +1421,23 @@ describe('ConversationSlashCommandService', () => {
 		expect(deps.sessions.setSelectedChatId).toHaveBeenCalledWith('chat-2');
 	});
 
+	it('shows fork progress on the source chat until the fork settles', async () => {
+		const { deps, appendLocalNotice, clearLocalNoticesForChat } = createDeps();
+		let resolveFork!: (value: { success: true; chat: ReturnType<typeof createServerEntry> }) => void;
+		mockForkChat.mockReturnValueOnce(new Promise((resolve) => {
+			resolveFork = resolve;
+		}));
+
+		const forking = new ConversationSlashCommandService(deps).forkChat('chat-1', 9);
+		await Promise.resolve();
+
+		expect(appendLocalNotice).toHaveBeenCalledExactlyOnceWith('progress', 'Forking chat...');
+		expect(clearLocalNoticesForChat).not.toHaveBeenCalled();
+		resolveFork({ success: true, chat: createServerEntry('chat-2') });
+		await forking;
+		expect(clearLocalNoticesForChat).toHaveBeenCalledWith('chat-1', 1);
+	});
+
 	it('forks from the explicitly supplied panel transcript', async () => {
 		const { deps } = createDeps();
 		const forked = createServerEntry('chat-2');
@@ -1479,7 +1496,7 @@ describe('ConversationSlashCommandService', () => {
 			transcriptViewId: 'view-2',
 		});
 		expect(deps.refetchTranscript).toHaveBeenCalledWith('chat-1');
-		expect(appendLocalNotice).not.toHaveBeenCalled();
+		expect(appendLocalNotice).toHaveBeenCalledExactlyOnceWith('progress', 'Forking chat...');
 		expect(deps.sessions.setSelectedChatId).toHaveBeenCalledWith('chat-2');
 	});
 
@@ -1527,7 +1544,7 @@ describe('ConversationSlashCommandService', () => {
 			upToOrdinal: 9,
 			allowHandoffFork: true,
 		});
-		expect(appendLocalNotice).not.toHaveBeenCalled();
+		expect(appendLocalNotice).toHaveBeenCalledExactlyOnceWith('progress', 'Forking chat...');
 		expect(deps.sessions.setSelectedChatId).toHaveBeenCalledWith('chat-2');
 	});
 
@@ -1547,7 +1564,7 @@ describe('ConversationSlashCommandService', () => {
 		await new ConversationSlashCommandService(deps).forkChat('chat-1', 9);
 
 		expect(mockForkChat).toHaveBeenCalledTimes(1);
-		expect(appendLocalNotice).not.toHaveBeenCalled();
+		expect(appendLocalNotice).toHaveBeenCalledExactlyOnceWith('progress', 'Forking chat...');
 		expect(deps.sessions.setSelectedChatId).not.toHaveBeenCalled();
 	});
 });

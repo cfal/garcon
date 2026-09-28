@@ -144,6 +144,10 @@
 		notifyError(message) {
 			notifications.error(message);
 		},
+		showProgress(key, message) {
+			notifications.info(message, { key, timeoutMs: null });
+			return () => notifications.dismissKey(key);
+		},
 		requestComposerFocus() {
 			appShell.requestComposerFocus();
 		},

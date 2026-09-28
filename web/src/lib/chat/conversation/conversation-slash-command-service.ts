@@ -747,10 +747,18 @@ export class ConversationSlashCommandService {
 			);
 			return;
 		}
+		this.deps.chatState.appendLocalNoticeForChat(
+			sourceChatId,
+			'progress',
+			m.chat_notice_forking_chat(),
+		);
+		const progressNoticeRevision = this.deps.chatState.noticeRevisionForChat(sourceChatId);
 		try {
 			await this.#performForkOnly(sourceChatId, upToOrdinal, source);
 		} catch (error) {
 			this.deps.chatState.appendLocalNoticeForChat(sourceChatId, 'error', forkFailureNotice(error));
+		} finally {
+			this.deps.chatState.clearLocalNoticesForChat(sourceChatId, progressNoticeRevision);
 		}
 	}
 

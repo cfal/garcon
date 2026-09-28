@@ -127,6 +127,8 @@ function createHarness(
 			removedTags: [],
 		})),
 		notifyError: vi.fn(),
+		dismissProgress: vi.fn(),
+		showProgress: vi.fn((): (() => void) => callbacks.dismissProgress),
 		requestComposerFocus: vi.fn(),
 		requestSidebarRecenter: vi.fn(),
 	};
@@ -599,6 +601,31 @@ describe('ChatActionController', () => {
 		});
 		expect(callbacks.onUpsertServerChat).toHaveBeenCalledWith(fork);
 		expect(callbacks.onSelectChat).toHaveBeenCalledWith('fork-chat-id');
+	});
+
+	it('shows fork progress until the fork settles and ignores a repeated fork meanwhile', async () => {
+		vi.spyOn(console, 'error').mockImplementation(() => undefined);
+		const response = deferred<Awaited<ReturnType<typeof chatsApi.forkChat>>>();
+		vi.mocked(chatsApi.forkChat).mockReturnValueOnce(response.promise);
+		const { controller, callbacks } = createHarness();
+
+		const forking = controller.forkChat('chat-1');
+		await controller.forkChat('chat-1');
+
+		expect(chatsApi.forkChat).toHaveBeenCalledTimes(1);
+		expect(callbacks.showProgress).toHaveBeenCalledExactlyOnceWith(
+			'fork:chat-1',
+			m.chat_notice_forking_chat(),
+		);
+		expect(callbacks.dismissProgress).not.toHaveBeenCalled();
+		response.reject(new Error('fork failed'));
+		await forking;
+
+		expect(callbacks.dismissProgress).toHaveBeenCalledOnce();
+		expect(callbacks.notifyError).toHaveBeenCalledWith(m.notifications_fork_chat_failed());
+		vi.mocked(chatsApi.forkChat).mockResolvedValueOnce({ success: true, chat: makeServerChat() });
+		await controller.forkChat('chat-1');
+		expect(chatsApi.forkChat).toHaveBeenCalledTimes(2);
 	});
 
 	it('runs optional reloads through the common user-visible failure boundary', async () => {

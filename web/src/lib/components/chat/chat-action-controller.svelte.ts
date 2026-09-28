@@ -35,6 +35,8 @@ export interface ChatActionControllerDeps {
 	}) => Promise<ChatTagsMutationResponse>;
 	onReloadChat?: (chatId: string) => Promise<void> | void;
 	notifyError: (message: string) => void;
+	/** Shows a notice until the returned function dismisses it. */
+	showProgress: (key: string, message: string) => () => void;
 	requestComposerFocus: () => void;
 	requestSidebarRecenter: () => void;
 }
@@ -42,6 +44,7 @@ export interface ChatActionControllerDeps {
 export class ChatActionController {
 	#sidebarController: SidebarController;
 	#projectPathRequestGeneration = new Map<string, symbol>();
+	readonly #pendingForks = new Set<string>();
 
 	constructor(private readonly deps: ChatActionControllerDeps) {
 		this.#sidebarController = new SidebarController({
@@ -203,11 +206,20 @@ export class ChatActionController {
 	}
 
 	async forkChat(sourceChatId: string): Promise<void> {
-		await this.run('Failed to fork chat:', m.notifications_fork_chat_failed(), async () => {
-			const entry = await this.#sidebarController.forkChat(sourceChatId);
-			this.deps.onUpsertServerChat(entry);
-			this.deps.onSelectChat(entry.id);
-		});
+		// A long fork would otherwise look idle and invite a duplicate fork.
+		if (this.#pendingForks.has(sourceChatId)) return;
+		this.#pendingForks.add(sourceChatId);
+		const dismiss = this.deps.showProgress(`fork:${sourceChatId}`, m.chat_notice_forking_chat());
+		try {
+			await this.run('Failed to fork chat:', m.notifications_fork_chat_failed(), async () => {
+				const entry = await this.#sidebarController.forkChat(sourceChatId);
+				this.deps.onUpsertServerChat(entry);
+				this.deps.onSelectChat(entry.id);
+			});
+		} finally {
+			dismiss();
+			this.#pendingForks.delete(sourceChatId);
+		}
 	}
 
 	async reloadChat(chatId: string): Promise<void> {
