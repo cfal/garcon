@@ -1,12 +1,14 @@
 import { describe, expect, mock, test } from 'bun:test';
 import type { AssistantMessage } from '@garcon/common/chat-types';
 import {
+  AgentIntegrationError,
   createAgentResourceRef,
   type AgentIntegration,
   type AgentProducerNotification,
   type AgentResourceScope,
 } from '@garcon/server-agent-interface';
 import { ProducerRelay } from '../producer-relay.js';
+import { EXECUTOR_DISCONNECTED_BEFORE_START } from '../../../common/executor-disconnect.js';
 
 const SCOPE: AgentResourceScope = { executorId: 'executor-1', instanceId: 'instance-1', integrationId: 'test' };
 
@@ -66,7 +68,8 @@ describe('ProducerRelay', () => {
     relay.suspend(first);
     const second = session();
 
-    expect(relay.resume(second, integration, [{ binding: ref, acknowledgedSeq: 1 }])).toEqual([ref.id]);
+    expect(relay.resume(second, integration, [{ binding: ref, acknowledgedSeq: 1 }]))
+      .toEqual([{ bindingId: ref.id, replayThroughSeq: 3, launch: null }]);
     expect(first.frames().map((frame) => frame.seq)).toEqual([1, 2, 3]);
     expect(second.frames().map((frame) => frame.seq)).toEqual([3]);
     publish({ binding: ref, event: rows('four') });
@@ -107,7 +110,8 @@ describe('ProducerRelay', () => {
     for (const text of ['one', 'two', 'three', 'four']) publish({ binding: ref, event: rows(text) });
     const second = session(2);
 
-    expect(relay.resume(second, integration, [{ binding: ref, acknowledgedSeq: 0 }])).toEqual([ref.id]);
+    expect(relay.resume(second, integration, [{ binding: ref, acknowledgedSeq: 0 }]).map((state) => state.bindingId))
+      .toEqual([ref.id]);
     publish({ binding: ref, event: rows('five') });
     relay.acknowledge(second, [{ bindingId: ref.id, seq: 1 }]);
     expect(second.texts()).toEqual(['one', 'two']);
@@ -177,6 +181,50 @@ describe('ProducerRelay', () => {
     expect(replayed.at(-1)).toEqual([8, 'run-ended']);
     expect(replayed.length).toBeLessThan(8);
     expect(second.sent.reduce((total, payload) => total + Buffer.byteLength(payload), 0)).toBeLessThan(3_000);
+    relay.dispose();
+  });
+
+  test('ends the replay at the last retained frame when pressure dropped the tail', () => {
+    const relay = new ProducerRelay({ retainedBytes: 2_048 });
+    const { integration, binding, publish } = integrationDouble();
+    relay.track(integration);
+    const first = session();
+    const [ref, other] = [binding(), binding()];
+    relay.bind(first, integration, ref);
+    relay.bind(first, integration, other);
+    relay.suspend(first);
+
+    publish({ binding: ref, event: { type: 'started', runId: 'run-1' } });
+    publish({ binding: ref, event: rows(`tail:${'x'.repeat(1_200)}`) });
+    publish({ binding: other, event: rows(`other:${'x'.repeat(500)}`) });
+    const second = session();
+
+    expect(relay.resume(second, integration, [{ binding: ref, acknowledgedSeq: 0 }]))
+      .toEqual([{ bindingId: ref.id, replayThroughSeq: 1, launch: null }]);
+    expect(second.frames().map((frame) => frame.seq)).toEqual([1]);
+    relay.dispose();
+  });
+
+  test('keeps the frame a resume reply names while pressure drops older rows', async () => {
+    const relay = new ProducerRelay({ retainedBytes: 2_048 });
+    const { integration, binding, publish } = integrationDouble();
+    relay.track(integration);
+    const first = session();
+    const [ref, other] = [binding(), binding()];
+    relay.bind(first, integration, ref);
+    relay.bind(first, integration, other);
+    relay.suspend(first);
+    publish({ binding: ref, event: rows(`old:${'x'.repeat(600)}`) });
+    publish({ binding: ref, event: rows(`tail:${'x'.repeat(600)}`) });
+    const second = session(0);
+
+    expect(relay.resume(second, integration, [{ binding: ref, acknowledgedSeq: 0 }])[0]!.replayThroughSeq).toBe(2);
+    publish({ binding: other, event: rows(`other:${'x'.repeat(1_400)}`) });
+    second.allow(5);
+    await Bun.sleep(30);
+
+    expect(second.texts().map((text) => text.split(':')[0])).toEqual(['tail']);
+    expect(second.frames().map((frame) => frame.seq)).toEqual([2]);
     relay.dispose();
   });
 
@@ -250,7 +298,8 @@ describe('ProducerRelay', () => {
     const second = session();
 
     expect(relay.resume(second, other.integration, [{ binding: ref, acknowledgedSeq: 0 }])).toEqual([]);
-    expect(relay.resume(second, owner.integration, [{ binding: ref, acknowledgedSeq: 0 }])).toEqual([ref.id]);
+    expect(relay.resume(second, owner.integration, [{ binding: ref, acknowledgedSeq: 0 }]).map((state) => state.bindingId))
+      .toEqual([ref.id]);
     await Bun.sleep(30);
     expect(owner.detach).not.toHaveBeenCalled();
     expect(relay.owns(second, owner.integration, ref)).toBe(true);
@@ -260,5 +309,89 @@ describe('ProducerRelay', () => {
     expect(second.frames().map((frame) => frame.seq)).toEqual([1]);
     relay.dispose();
     expect(owner.listeners.size).toBe(0);
+  });
+
+  test('reports the latest launch on resume until its run ends', async () => {
+    const relay = new ProducerRelay();
+    const { integration, binding, publish } = integrationDouble();
+    relay.track(integration);
+    const first = session();
+    const ref = binding();
+    relay.bind(first, integration, ref);
+    const handle = createAgentResourceRef(SCOPE, 'execution');
+    const release = Promise.withResolvers<typeof handle>();
+    const launch = relay.launch(first, integration, { producerBinding: ref, runId: 'run-1' }, new AbortController().signal, () => release.promise);
+    relay.suspend(first);
+    const second = session();
+
+    expect(relay.resume(second, integration, [{ binding: ref, acknowledgedSeq: 0 }]))
+      .toEqual([{ bindingId: ref.id, replayThroughSeq: 0, launch: { runId: 'run-1', handle: null } }]);
+    release.resolve(handle);
+    await launch;
+    relay.suspend(second);
+    const third = session();
+    expect(relay.resume(third, integration, [{ binding: ref, acknowledgedSeq: 1 }])[0]!.launch)
+      .toEqual({ runId: 'run-1', handle });
+    publish({ binding: ref, event: { type: 'run-ended', runId: 'run-1', outcome: 'finished' } });
+    relay.suspend(third);
+    expect(relay.resume(session(), integration, [{ binding: ref, acknowledgedSeq: 2 }])[0]!.launch).toBeNull();
+    relay.dispose();
+  });
+
+  test('publishes the outcome of a launch that settles after its session was lost', async () => {
+    const relay = new ProducerRelay();
+    const { integration, binding } = integrationDouble();
+    relay.track(integration);
+    const first = session();
+    const [started, cancelled, failed] = [binding(), binding(), binding()];
+    for (const ref of [started, cancelled, failed]) relay.bind(first, integration, ref);
+    const handle = createAgentResourceRef(SCOPE, 'execution');
+    const success = Promise.withResolvers<typeof handle>();
+    const cancellation = Promise.withResolvers<typeof handle>();
+    const failure = Promise.withResolvers<typeof handle>();
+    const retired = new AbortController();
+    const launches = [
+      relay.launch(first, integration, { producerBinding: started, runId: 'run-1' }, retired.signal, () => success.promise),
+      relay.launch(first, integration, { producerBinding: cancelled, runId: 'run-2' }, retired.signal, () => cancellation.promise).catch(() => null),
+      relay.launch(first, integration, { producerBinding: failed, runId: 'run-3' }, new AbortController().signal, () => failure.promise).catch(() => null),
+    ];
+    relay.suspend(first);
+    retired.abort();
+    success.resolve(handle);
+    cancellation.reject(new Error('Synthetic cancelled admission'));
+    failure.reject(new AgentIntegrationError('AUTH_REQUIRED', 'Synthetic sign-in required', false));
+    await Promise.all(launches);
+    const second = session();
+    relay.resume(second, integration, [
+      { binding: started, acknowledgedSeq: 0 },
+      { binding: cancelled, acknowledgedSeq: 0 },
+      { binding: failed, acknowledgedSeq: 0 },
+    ]);
+
+    expect(second.frames().map(({ notification }) => [notification.binding.id, notification.event])).toEqual([
+      [started.id, { type: 'launch-settled', runId: 'run-1', handle }],
+      [cancelled.id, { type: 'launch-settled', runId: 'run-2', error: EXECUTOR_DISCONNECTED_BEFORE_START }],
+      [failed.id, { type: 'launch-settled', runId: 'run-3', error: { code: 'AUTH_REQUIRED', message: 'Synthetic sign-in required' } }],
+    ]);
+    relay.dispose();
+  });
+
+  test('leaves the outcome of a launch settled on its own session to the reply', async () => {
+    const relay = new ProducerRelay();
+    const { integration, binding } = integrationDouble();
+    relay.track(integration);
+    const live = session();
+    const ref = binding();
+    relay.bind(live, integration, ref);
+    const handle = createAgentResourceRef(SCOPE, 'execution');
+
+    const { signal } = new AbortController();
+    await expect(relay.launch(live, integration, { producerBinding: ref, runId: 'run-1' }, signal, async () => handle)).resolves.toBe(handle);
+    await expect(relay.launch(live, integration, { producerBinding: ref, runId: 'run-2' }, signal, async () => {
+      throw new Error('Synthetic rejection');
+    })).rejects.toThrow('Synthetic rejection');
+
+    expect(live.sent).toEqual([]);
+    relay.dispose();
   });
 });

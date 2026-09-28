@@ -2,6 +2,7 @@ import type { PermissionDecisionPayload } from '@garcon/common/chat-command-cont
 import type { ChatMessage, ToolUseChatMessage } from '@garcon/common/chat-types';
 import type { JsonObject } from '@garcon/common/json';
 import type { NativeSeedReceipt } from '@garcon/common/transcript-seed';
+import type { AgentExecutionHandle } from './execution-v5.js';
 import type { AgentNativeSessionRef } from './transcript.js';
 import type {
   AgentPermissionResponseRef,
@@ -131,7 +132,11 @@ export interface AgentProducerNotification {
     | { readonly type: 'started'; readonly runId: string }
     | { readonly type: 'publication-failed'; readonly error: AgentRunFailureDetail }
     // Some of a remote binding's retained output was dropped.
-    | { readonly type: 'publication-gap' };
+    | { readonly type: 'publication-gap' }
+    // The outcome of a remote start, resume, or compaction whose reply was lost
+    // with its executor session: the run's handle, or why it did not start.
+    | { readonly type: 'launch-settled'; readonly runId: string; readonly handle: AgentExecutionHandle; readonly error?: never }
+    | { readonly type: 'launch-settled'; readonly runId: string; readonly error: AgentRunFailureDetail; readonly handle?: never };
 }
 
 export interface AgentProducers {

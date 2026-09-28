@@ -3,9 +3,12 @@ import {
   isAgentResourceRef,
   type AgentIntegration,
   type AgentProducerBinding,
+  type AgentProducerNotification,
   type AgentRunFailureDetail,
 } from '@garcon/server-agent-interface';
 import type { TranscriptProducerLease } from '../ledger/service.js';
+
+export type LaunchSettledEvent = Extract<AgentProducerNotification['event'], { readonly type: 'launch-settled' }>;
 
 export class ProducerBindings {
   readonly #leases = new WeakMap<TranscriptProducerLease, Promise<AgentProducerBinding>>();
@@ -21,6 +24,9 @@ export class ProducerBindings {
     private readonly onError: (error: unknown) => void,
     private readonly onPublicationFailed: (chatId: string, lease: TranscriptProducerLease, error: AgentRunFailureDetail) => void,
     private readonly onPublicationGap: (chatId: string, lease: TranscriptProducerLease) => void,
+    private readonly onLaunchSettled: (
+      chatId: string, lease: TranscriptProducerLease, agentId: string, event: LaunchSettledEvent,
+    ) => void,
   ) {}
 
   async bind(integration: AgentIntegration, chatId: string, lease: TranscriptProducerLease): Promise<AgentProducerBinding> {
@@ -46,6 +52,11 @@ export class ProducerBindings {
         }
         if (event.type === 'publication-gap') {
           try { this.onPublicationGap(route.chatId, route.lease); }
+          catch (error) { this.onError(error); }
+          return;
+        }
+        if (event.type === 'launch-settled') {
+          try { this.onLaunchSettled(route.chatId, route.lease, integration.descriptor.id, event); }
           catch (error) { this.onError(error); }
           return;
         }

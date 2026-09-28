@@ -7,14 +7,15 @@ import {
   type AgentImportedTranscriptRow,
   type AgentProducerBinding,
   type AgentProducerNotification,
+  type AgentResourceScope,
   type ExecutorCallOptions,
 } from '@garcon/server-agent-interface';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import type {
-  ExecutorRpcMethods, IntegrationManifest, ProducerAcknowledgement,
+  ExecutorRpcMethods, IntegrationManifest, ProducerAcknowledgement, ProducerResumeState,
 } from '../transport/rpc-protocol.js';
 import type { RemoteSessionBacking } from './executor-client.js';
-import { EXECUTOR_DISCONNECTED_MID_TURN } from '../../common/executor-disconnect.js';
+import { EXECUTOR_DISCONNECTED_BEFORE_START, EXECUTOR_DISCONNECTED_MID_TURN } from '../../common/executor-disconnect.js';
 
 const SINGLE_QUERY_RPC_GRACE_MS = 30_000;
 const PRODUCER_ACK_DELAY_MS = 250;
@@ -28,6 +29,12 @@ interface RemoteProducerBinding {
   backing: RemoteSessionBacking;
   receivedSeq: number;
   acknowledgedSeq: number;
+  // Runs whose start, resume, or compaction outcome never reached the controller.
+  readonly unsettledLaunches: Set<string>;
+  // The worker's view at resume, applied once the replay reaches it to the
+  // runs already unsettled when resume was requested. The report cannot
+  // describe a launch dispatched later, which settles through its own reply.
+  resumeReport: { readonly report: ProducerResumeState; readonly runIds: readonly string[] } | null;
 }
 
 export class RemoteAgentIntegration implements AgentIntegration {
@@ -70,12 +77,18 @@ export class RemoteAgentIntegration implements AgentIntegration {
       method: K, request: ExecutorRpcMethods[K]['request'], options?: ExecutorCallOptions,
     ) => {
       const { rpc } = current();
-      return rpc.call(this.descriptor.id, method, request, {
-        ...options,
-        // Native admission may outlive the default RPC deadline; Stop and session loss still cancel it.
-        timeoutMs: options?.timeoutMs ?? null,
-        onLateResult: (handle) => rpc.call(this.descriptor.id, 'execution.abort', handle),
-      });
+      const state = this.#bindings.get(request.producerBinding.id);
+      try {
+        return await rpc.call(this.descriptor.id, method, request, {
+          ...options,
+          // Native admission may outlive the default RPC deadline; Stop and session loss still cancel it.
+          timeoutMs: options?.timeoutMs ?? null,
+          onLateResult: (handle) => rpc.call(this.descriptor.id, 'execution.abort', handle),
+        });
+      } catch (error) {
+        if (error instanceof AgentCallError && error.outcome === 'unknown') state?.unsettledLaunches.add(request.runId);
+        throw error;
+      }
     };
     this.execution = {
       start: (request, options) => launch('execution.start', request, options),
@@ -89,7 +102,9 @@ export class RemoteAgentIntegration implements AgentIntegration {
       bind: async (request, options) => {
         const backing = current();
         if (!isAgentResourceRef(request.binding, 'producer', backing.manifests.get(this.descriptor.id)!.scope)) throw new AgentCallError('rejected', 'Producer scope mismatch', 'STALE_RESOURCE');
-        const state = { ref: request.binding, backing, receivedSeq: 0, acknowledgedSeq: 0 };
+        const state: RemoteProducerBinding = {
+          ref: request.binding, backing, receivedSeq: 0, acknowledgedSeq: 0, unsettledLaunches: new Set(), resumeReport: null,
+        };
         this.#bindings.set(request.binding.id, state);
         try { await backing.rpc.call(this.descriptor.id, 'producers.bind', request, options); }
         catch (error) {
@@ -232,13 +247,21 @@ export class RemoteAgentIntegration implements AgentIntegration {
   async resume(backing: RemoteSessionBacking): Promise<void> {
     const suspended = [...this.#bindings.values()].filter((state) => state.backing !== backing);
     if (suspended.length === 0) return;
+    const lostRunIds = new Map(suspended.map((state) => [state, [...state.unsettledLaunches]]));
     for (const state of suspended) state.backing = backing;
     const { resumed } = await backing.rpc.call(this.descriptor.id, 'producers.resume', {
       bindings: suspended.map((state) => ({ binding: state.ref, acknowledgedSeq: state.receivedSeq })),
     });
-    const retained = new Set(resumed);
+    const reports = new Map(resumeStates(resumed, backing.manifests.get(this.descriptor.id)!.scope)
+      .map((report) => [report.bindingId, report]));
     for (const state of suspended) {
-      if (retained.has(state.ref.id) || this.#bindings.get(state.ref.id) !== state) continue;
+      if (this.#bindings.get(state.ref.id) !== state) continue;
+      const report = reports.get(state.ref.id);
+      if (report) {
+        state.resumeReport = { report, runIds: lostRunIds.get(state)! };
+        this.#settleLostLaunches(state);
+        continue;
+      }
       this.#bindings.delete(state.ref.id);
       this.#emit({ binding: state.ref, event: { type: 'publication-failed', error: {
         code: 'OUTCOME_UNKNOWN', message: EXECUTOR_DISCONNECTED_MID_TURN,
@@ -258,12 +281,16 @@ export class RemoteAgentIntegration implements AgentIntegration {
     if (gap) this.#emit({ binding, event: { type: 'publication-gap' } });
     let event = notification.event;
     if (event.type === 'publication-failed') {
-      if (!event.error || typeof event.error.code !== 'string'
-        || (event.error.message !== undefined && typeof event.error.message !== 'string')) {
-        throw new Error('Invalid producer publication failure');
-      }
+      if (!isFailureDetail(event.error)) throw new Error('Invalid producer publication failure');
       this.#bindings.delete(binding.id);
     }
+    if (event.type === 'launch-settled') {
+      const scope = backing.manifests.get(this.descriptor.id)!.scope;
+      if (typeof event.runId !== 'string' || (event.handle ? !isAgentResourceRef(event.handle, 'execution', scope) : !isFailureDetail(event.error))) {
+        throw new Error('Invalid launch outcome');
+      }
+    }
+    if (event.type === 'launch-settled' || event.type === 'run-ended') state.unsettledLaunches.delete(event.runId);
     if (event.type === 'rows') event = { ...event, rows: decodeRows(event.rows) };
     if (event.type === 'permission' && event.lifecycle.kind === 'requested') {
       const tool = decodeMessage(event.lifecycle.requestedTool);
@@ -272,6 +299,26 @@ export class RemoteAgentIntegration implements AgentIntegration {
       event = { type: 'permission', runId: event.runId, lifecycle: { ...event.lifecycle, requestedTool: tool }, decision: event.decision };
     }
     this.#emit({ binding, event });
+    if (this.#bindings.get(binding.id) === state) this.#settleLostLaunches(state);
+  }
+
+  // Settles launches whose replies were lost once the replay reaches the
+  // worker's resume report, so every event it published earlier, such as a
+  // run's end, is applied first. A launch the worker has not finished reports
+  // its own outcome on the binding later.
+  #settleLostLaunches(state: RemoteProducerBinding): void {
+    const pending = state.resumeReport;
+    if (!pending || state.receivedSeq < pending.report.replayThroughSeq) return;
+    state.resumeReport = null;
+    for (const runId of pending.runIds) {
+      if (!state.unsettledLaunches.has(runId)) continue;
+      const launch = pending.report.launch?.runId === runId ? pending.report.launch : null;
+      if (launch && !launch.handle) continue;
+      state.unsettledLaunches.delete(runId);
+      this.#emit({ binding: state.ref, event: launch?.handle
+        ? { type: 'launch-settled', runId, handle: launch.handle }
+        : { type: 'launch-settled', runId, error: EXECUTOR_DISCONNECTED_BEFORE_START } });
+    }
   }
 
   #emit(notification: AgentProducerNotification): void {
@@ -295,6 +342,26 @@ export class RemoteAgentIntegration implements AgentIntegration {
     }, PRODUCER_ACK_DELAY_MS);
     this.#ackTimer.unref?.();
   }
+}
+
+function isFailureDetail(value: unknown): value is { readonly code: string; readonly message?: string } {
+  if (!value || typeof value !== 'object') return false;
+  const detail = value as Record<string, unknown>;
+  return typeof detail.code === 'string' && (detail.message === undefined || typeof detail.message === 'string');
+}
+
+function resumeStates(value: unknown, scope: AgentResourceScope): readonly ProducerResumeState[] {
+  if (!Array.isArray(value)) throw new Error('Invalid producer resume reply');
+  for (const state of value as unknown[]) {
+    const report = state as Partial<ProducerResumeState> | null;
+    const launch = report?.launch;
+    if (typeof report?.bindingId !== 'string' || !Number.isSafeInteger(report.replayThroughSeq) || report.replayThroughSeq! < 0
+      || (launch !== null && (typeof launch?.runId !== 'string'
+        || (launch.handle !== null && !isAgentResourceRef(launch.handle, 'execution', scope))))) {
+      throw new Error('Invalid producer resume reply');
+    }
+  }
+  return value as readonly ProducerResumeState[];
 }
 
 function decodeRows(rows: readonly AgentImportedTranscriptRow[]): readonly AgentImportedTranscriptRow[] {

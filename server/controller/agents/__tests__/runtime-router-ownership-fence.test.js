@@ -156,7 +156,7 @@ describe('AgentRuntimeRouter ownership fence', () => {
     transcript.ledger.subscribe((event) => events.push(event));
     const invoke = operation === 'compact' ? integration.compaction.compact : execution[operation];
     invoke.mockImplementation(async () => { throw new AgentCallError('unknown', 'Lost reply'); });
-    await expect(launch(router, method, { turnId: 'turn-1' })).rejects.toMatchObject({ outcome: 'unknown' });
+    await launch(router, method, { turnId: 'turn-1' });
     expect(router.isChatRunning('chat-1')).toBe(true);
     expect(events).toEqual([]);
     const oldSink = transcript.sink;
@@ -174,8 +174,18 @@ describe('AgentRuntimeRouter ownership fence', () => {
     const { router, execution, entry } = makeRouter(() => false);
     entry.agentSessionId = null;
     execution.start.mockImplementation(async () => { throw new AgentCallError('unknown', 'Lost start reply'); });
-    await expect(router.runAgentTurn('chat-1', 'hello', { turnId: 'turn-1' })).rejects.toMatchObject({ outcome: 'unknown' });
+    await router.runAgentTurn('chat-1', 'hello', { turnId: 'turn-1' });
     expect(router.isChatRunning('chat-1')).toBe(true);
+  });
+
+  it('still reports an unknown launch outcome once its run has ended', async () => {
+    const { router, execution } = makeRouter(() => false);
+    execution.resume.mockImplementation(async () => {
+      await router.abortSession('chat-1');
+      throw new AgentCallError('unknown', 'Lost reply');
+    });
+    await expect(router.runAgentTurn('chat-1', 'hello', { turnId: 'turn-1' })).rejects.toMatchObject({ outcome: 'unknown' });
+    expect(router.isChatRunning('chat-1')).toBe(false);
   });
 
   it('fences a start reply and producer event arriving after terminal session loss', async () => {
@@ -204,6 +214,46 @@ describe('AgentRuntimeRouter ownership fence', () => {
       turnId: 'turn-1',
     })).rejects.toMatchObject({ code: 'OWNERSHIP_TRANSFER_PENDING' });
     expect(execution.resume).not.toHaveBeenCalled();
+  });
+
+  describe('a launch whose reply was lost', () => {
+    async function lostLaunch() {
+      const context = makeRouter(() => false);
+      context.execution.resume.mockImplementation(async () => { throw new AgentCallError('unknown', 'Lost reply'); });
+      await context.router.runAgentTurn('chat-1', 'hello', { turnId: 'turn-1' });
+      return { ...context, binding: context.execution.resume.mock.calls[0][0].producerBinding };
+    }
+
+    it('adopts the execution handle the resumed executor reports', async () => {
+      const { router, execution, producer, binding } = await lostLaunch();
+      const handle = producer.reference('execution');
+      producer.emit(binding, { type: 'launch-settled', runId: 'turn-1', handle });
+      expect(router.isChatRunning('chat-1')).toBe(true);
+      await router.abortSession('chat-1');
+      expect(execution.abort).toHaveBeenCalledWith(handle);
+    });
+
+    it('aborts a run stopped while its reply was missing once its handle arrives', async () => {
+      const { router, execution, producer, binding } = await lostLaunch();
+      await router.abortSession('chat-1');
+      expect(execution.abort).not.toHaveBeenCalled();
+      const handle = producer.reference('execution');
+      producer.emit(binding, { type: 'launch-settled', runId: 'turn-1', handle });
+      expect(execution.abort).toHaveBeenCalledWith(handle);
+      expect(router.isChatRunning('chat-1')).toBe(false);
+    });
+
+    it('fails a run the executor never began, once', async () => {
+      const { router, transcript, producer, binding } = await lostLaunch();
+      const events = [];
+      transcript.ledger.subscribe((event) => events.push(event));
+      const error = { code: 'EXECUTOR_UNAVAILABLE', message: 'Synthetic lost start' };
+      producer.emit(binding, { type: 'launch-settled', runId: 'turn-1', error });
+      expect(router.isChatRunning('chat-1')).toBe(false);
+      expect(events).toMatchObject([{ type: 'run-ended', runId: 'turn-1', row: { origin: 'core', outcome: 'failed', error } }]);
+      producer.emit(binding, { type: 'launch-settled', runId: 'turn-1', error });
+      expect(events).toHaveLength(1);
+    });
   });
 
   it('[TLV5-HANDOFF.04-CORE-UNIT-01] resumes publishing once roll-forward discharges the decision', async () => {

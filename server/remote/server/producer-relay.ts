@@ -1,10 +1,13 @@
 import type {
+  AgentExecutionHandle,
   AgentIntegration,
   AgentProducerBinding,
   AgentProducerNotification,
 } from '@garcon/server-agent-interface';
-import type { AgentProducerFrame, ProducerAcknowledgement } from '../transport/rpc-protocol.js';
+import { failureDetail } from '@garcon/server-agent-common/execution/producer-adapter';
+import type { AgentProducerFrame, ProducerAcknowledgement, ProducerResumeState } from '../transport/rpc-protocol.js';
 import { SESSION_MESSAGE_BYTES } from '../transport/session-socket.js';
+import { EXECUTOR_DISCONNECTED_BEFORE_START } from '../../common/executor-disconnect.js';
 
 // Matches the controller's reconnect grace and VS Code Remote's reconnection
 // grace; after it, the controller fails the run and this worker detaches the
@@ -37,6 +40,12 @@ interface RetainedFrame {
   readonly droppable: boolean;
 }
 
+interface RelayedLaunch {
+  readonly runId: string;
+  // Null until the launch returns.
+  handle: AgentExecutionHandle | null;
+}
+
 interface RelayedBinding {
   readonly integration: AgentIntegration;
   readonly ref: AgentProducerBinding;
@@ -47,6 +56,8 @@ interface RelayedBinding {
   retainedBytes: number;
   session: ProducerRelaySession | null;
   grace: { readonly timer: ReturnType<typeof setTimeout>; readonly deadline: number } | null;
+  // The latest launch until its run ends or it fails, reported on resume.
+  launch: RelayedLaunch | null;
 }
 
 interface UnsentFrame {
@@ -69,7 +80,10 @@ export interface ProducerRelayOptions {
 // frames reach it in publication order only as fast as it drains. A lost
 // session suspends its bindings for a grace period instead of detaching them.
 // When the retention budget overflows, the oldest row batches are dropped and
-// the controller sees the skipped sequence numbers as a delivery gap.
+// the controller sees the skipped sequence numbers as a delivery gap. A launch
+// whose reply is lost with its session reaches the controller the same way:
+// the resume reply reports each binding's latest launch, and a launch that
+// settles after its session was lost publishes its outcome on the binding.
 export class ProducerRelay {
   readonly #bindings = new Map<string, RelayedBinding>();
   readonly #subscriptions = new Map<AgentIntegration, () => void>();
@@ -96,8 +110,49 @@ export class ProducerRelay {
 
   bind(session: ProducerRelaySession, integration: AgentIntegration, ref: AgentProducerBinding): void {
     this.#bindings.set(ref.id, {
-      integration, ref, seq: 0, retained: [], sent: 0, retainedBytes: 0, session, grace: null,
+      integration, ref, seq: 0, retained: [], sent: 0, retainedBytes: 0, session, grace: null, launch: null,
     });
+  }
+
+  // Runs a start, resume, or compaction dispatched by `session`. Only an
+  // outcome settled after that session was lost is published, because its
+  // reply can no longer reach the controller. `signal` is the call's, which
+  // the session aborts when it retires.
+  async launch(
+    session: ProducerRelaySession,
+    integration: AgentIntegration,
+    request: { readonly producerBinding: AgentProducerBinding; readonly runId: string },
+    signal: AbortSignal,
+    run: () => Promise<AgentExecutionHandle>,
+  ): Promise<AgentExecutionHandle> {
+    const binding = this.#bindings.get(request.producerBinding.id);
+    if (binding?.integration !== integration) return run();
+    const launch: RelayedLaunch = { runId: request.runId, handle: null };
+    binding.launch = launch;
+    let handle: AgentExecutionHandle;
+    try {
+      handle = await run();
+    } catch (error) {
+      if (binding.launch === launch) {
+        binding.launch = null;
+        if (binding.session !== session) {
+          // A launch cancelled with its session never started; any other failure is its own.
+          this.#publish(integration, { binding: binding.ref, event: {
+            type: 'launch-settled',
+            runId: launch.runId,
+            error: signal.aborted ? EXECUTOR_DISCONNECTED_BEFORE_START : failureDetail(error),
+          } });
+        }
+      }
+      throw error;
+    }
+    if (binding.launch === launch) {
+      launch.handle = handle;
+      if (binding.session !== session) {
+        this.#publish(integration, { binding: binding.ref, event: { type: 'launch-settled', runId: launch.runId, handle } });
+      }
+    }
+    return handle;
   }
 
   owns(session: ProducerRelaySession, integration: AgentIntegration, ref: AgentProducerBinding): boolean {
@@ -131,8 +186,8 @@ export class ProducerRelay {
     session: ProducerRelaySession,
     integration: AgentIntegration,
     requests: readonly { readonly binding: AgentProducerBinding; readonly acknowledgedSeq: number }[],
-  ): string[] {
-    const resumed: string[] = [];
+  ): ProducerResumeState[] {
+    const resumed: ProducerResumeState[] = [];
     for (const { binding: ref, acknowledgedSeq } of requests) {
       const binding = this.#bindings.get(ref.id);
       if (binding?.integration !== integration) continue;
@@ -141,10 +196,26 @@ export class ProducerRelay {
       binding.session = session;
       this.#release(binding, acknowledgedSeq);
       binding.sent = 0;
-      resumed.push(ref.id);
+      resumed.push({
+        bindingId: ref.id,
+        replayThroughSeq: this.#pinReplayTail(binding, acknowledgedSeq),
+        launch: binding.launch && { runId: binding.launch.runId, handle: binding.launch.handle },
+      });
     }
     this.#pump();
     return resumed;
+  }
+
+  // The controller settles lost launches once its replay reaches the returned
+  // sequence, so the frame carrying it must survive the pressure that drops
+  // older rows. Rows already dropped from the tail are never replayed, so the
+  // replay ends at the last frame still retained.
+  #pinReplayTail(binding: RelayedBinding, acknowledgedSeq: number): number {
+    const index = binding.retained.length - 1;
+    const tail = binding.retained[index];
+    if (!tail) return acknowledgedSeq;
+    if (tail.droppable) binding.retained[index] = { ...tail, droppable: false };
+    return tail.seq;
   }
 
   acknowledge(session: ProducerRelaySession, acknowledgements: readonly ProducerAcknowledgement[]): void {
@@ -169,6 +240,8 @@ export class ProducerRelay {
   #publish(integration: AgentIntegration, notification: AgentProducerNotification): void {
     const binding = this.#bindings.get(notification.binding.id);
     if (binding?.integration !== integration) return;
+    const { event } = notification;
+    if (event.type === 'run-ended' && binding.launch?.runId === event.runId) binding.launch = null;
     binding.seq += 1;
     this.#published += 1;
     const payload = encodeProducerFrame(binding.seq, notification);

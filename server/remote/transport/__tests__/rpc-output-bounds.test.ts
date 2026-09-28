@@ -15,7 +15,7 @@ for (const dialer of ['controller', 'worker'] as const) {
       const session = fixture.controller.current;
       const errors: unknown[] = [];
       const failures: string[] = [];
-      const bindings = new ProducerBindings(error => errors.push(error), chatId => failures.push(chatId), () => {});
+      const bindings = new ProducerBindings(error => errors.push(error), chatId => failures.push(chatId), () => {}, () => {});
       const lease = new ProducerLease(() => {}, () => {});
       const producerBinding = await bindings.bind(integration, 'test-chat', lease);
       const closed = Promise.withResolvers<void>();

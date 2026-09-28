@@ -153,8 +153,10 @@ export function serveExecutionRuntime(
         return { resumed: relay.resume(producerSession, integration, call.request.bindings) };
       }
       case 'permissions.respond': return integration.permissions.respond(call.request, options);
-      case 'execution.start': return integration.execution.start(call.request, options);
-      case 'execution.resume': return integration.execution.resume(call.request, options);
+      case 'execution.start':
+        return relay.launch(producerSession, integration, call.request, signal, () => integration.execution.start(call.request, options));
+      case 'execution.resume':
+        return relay.launch(producerSession, integration, call.request, signal, () => integration.execution.resume(call.request, options));
       case 'execution.abort': return integration.execution.abort(call.request, options);
       case 'execution.runningSessions': return integration.execution.runningSessions(options);
       case 'catalog.snapshot': return integration.catalog.snapshot({ ...call.request, signal });
@@ -170,7 +172,10 @@ export function serveExecutionRuntime(
       case 'auth.completeLogin': return required(required(integration.auth).completeLogin)(call.request.sessionId, call.request.code);
       case 'auth.loginStatus': return required(required(integration.auth).loginStatus)(call.request.expectedSessionId);
       case 'commands.discover': return required(integration.commands).discover(call.request.projectPath, signal);
-      case 'compaction.compact': return required(integration.compaction).compact(call.request, options);
+      case 'compaction.compact': {
+        const compaction = required(integration.compaction);
+        return relay.launch(producerSession, integration, call.request, signal, () => compaction.compact(call.request, options));
+      }
       case 'forking.fork': return required(integration.forking).fork({ ...call.request, signal });
       case 'forking.discard': return required(integration.forking).discard(call.request, signal);
       case 'steering.captureTarget': return required(integration.steering).captureTarget(call.request, options);

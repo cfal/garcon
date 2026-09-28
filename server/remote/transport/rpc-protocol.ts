@@ -4,6 +4,7 @@ import type { GitRpcMethods } from './git-protocol.js';
 import type { TerminalRpcMethods } from './terminal-protocol.js';
 import type { CliRpcMethods } from './cli-protocol.js';
 import type {
+  AgentExecutionHandle,
   AgentIntegration,
   AgentHost,
   AgentHistoryImportRequest,
@@ -58,7 +59,7 @@ export interface ExecutorRpcMethods extends FileRpcMethods, TerminalRpcMethods, 
   // frames after `acknowledgedSeq` and omits bindings it no longer holds.
   'producers.resume': Call<{
     readonly bindings: readonly { readonly binding: AgentProducerBinding; readonly acknowledgedSeq: number }[];
-  }, { readonly resumed: readonly string[] }>;
+  }, { readonly resumed: readonly ProducerResumeState[] }>;
   'permissions.respond': Call<Request<'permissions', 'respond'>, void>;
   'execution.start': Call<Request<'execution', 'start'>, Result<'execution', 'start'>>;
   'execution.resume': Call<Request<'execution', 'resume'>, Result<'execution', 'resume'>>;
@@ -118,6 +119,16 @@ export interface AgentProducerFrame {
 export interface ProducerAcknowledgement {
   readonly bindingId: string;
   readonly seq: number;
+}
+
+// What a resumed binding looked like on the worker when it replied: the last
+// sequence number its replay delivers, and its latest start, resume, or
+// compaction until that run ends or the launch fails. A null handle means the
+// launch has not returned yet; its outcome follows on the binding.
+export interface ProducerResumeState {
+  readonly bindingId: string;
+  readonly replayThroughSeq: number;
+  readonly launch: { readonly runId: string; readonly handle: AgentExecutionHandle | null } | null;
 }
 
 // Controller-to-worker, fire-and-forget: releases buffered frames through `seq`.

@@ -12,6 +12,11 @@ export function executionSetupFailure(error: unknown): unknown {
     : error;
 }
 
+// A remote launch whose reply was lost with its executor session.
+export function isLostLaunchReply(error: unknown): error is AgentCallError {
+  return error instanceof AgentCallError && error.outcome === 'unknown';
+}
+
 export function dispatchFailureDetail(error: unknown): AgentRunFailureDetail {
   if (error instanceof AgentIntegrationError) {
     return { code: error.code, ...(error.message ? { message: error.message } : {}) };

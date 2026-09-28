@@ -1,8 +1,9 @@
 import { expect, spyOn, test } from 'bun:test';
 import { AssistantMessage } from '@garcon/common/chat-types';
-import { type ExecutorAvailability } from '@garcon/server-agent-interface';
+import { type AgentProducerNotification, type ExecutorAvailability } from '@garcon/server-agent-interface';
 import { RemoteExecutorClient } from '../../client/executor-client.js';
-import { integrationFixture, linkOptions, remoteFixture, requestFor } from '../../__tests__/integration-fixture.js';
+import { integrationFixture, linkOptions, outgoingFault, remoteFixture, requestFor } from '../../__tests__/integration-fixture.js';
+import { EXECUTOR_DISCONNECTED_BEFORE_START } from '../../../common/executor-disconnect.js';
 import { connectRemoteExecutor } from '../../__tests__/runtime-adapter.js';
 import { serveExecutionRuntime } from '../../server/executor-rpc-server.js';
 import { ProducerRelay } from '../../server/producer-relay.js';
@@ -27,6 +28,23 @@ function availabilityLog(executor: RemoteExecutorClient) {
   const log: ExecutorAvailability[] = [];
   executor.onAvailabilityChanged((value) => log.push(value));
   return log;
+}
+
+type LaunchOutcome = Extract<AgentProducerNotification['event'], { readonly type: 'launch-settled' }>;
+
+function launchOutcomes(integration: Awaited<ReturnType<RemoteExecutorClient['getAgentIntegration']>>) {
+  const outcomes: LaunchOutcome[] = [];
+  integration.producers.subscribe(({ event }) => { if (event.type === 'launch-settled') outcomes.push(event); });
+  return outcomes;
+}
+
+// Fails the first outgoing message that matches, closing the link as it is sent.
+function disconnectOn(fault: ReturnType<typeof outgoingFault>, matches: (encoded: string) => boolean) {
+  fault.inject = (encoded) => {
+    if (!matches(encoded)) return null;
+    fault.inject = () => null;
+    return 'disconnect';
+  };
 }
 
 for (const dialer of ['controller', 'worker'] as const) {
@@ -117,7 +135,7 @@ for (const dialer of ['controller', 'worker'] as const) {
     } finally { await fixture.dispose(); }
   }, 60_000);
 
-  test(`a start in flight during a short disconnect publishes through the resumed binding (${dialer} dials)`, async () => {
+  test(`a start in flight during a short disconnect reports its handle through the resumed binding (${dialer} dials)`, async () => {
     const fixture = await remoteFixture(dialer);
     const release = Promise.withResolvers<void>();
     try {
@@ -127,6 +145,7 @@ for (const dialer of ['controller', 'worker'] as const) {
       const worker = fixture.generations[0]!;
       worker.hooks.start = async () => { entered.resolve(); await release.promise; };
       const events = record(integration);
+      const outcomes = launchOutcomes(integration);
       const call = integration.execution.start(request).catch((error: unknown) => error);
       await entered.promise;
       const ready = nextAvailability(fixture.executor, 'ready');
@@ -136,10 +155,112 @@ for (const dialer of ['controller', 'worker'] as const) {
       await expect(integration.execution.start(await requestFor(integration))).rejects.toMatchObject({ code: 'SESSION_BUSY' });
       release.resolve();
       await integration.execution.runningSessions();
-      expect(events).toEqual(['session']);
-      expect(worker.calls).toMatchObject({ start: 1, abort: 0, stop: 0 });
+      expect(events).toEqual(['session', 'launch-settled']);
+      expect(outcomes).toEqual([{ type: 'launch-settled', runId: request.runId, handle: expect.objectContaining({ kind: 'execution' }) }]);
+      await integration.execution.abort(outcomes[0]!.handle!);
+      expect(worker.calls).toMatchObject({ start: 1, abort: 1, stop: 0 });
     } finally { release.resolve(); await fixture.dispose(); }
   });
+
+  test(`a start cancelled by a disconnect reports that it did not start (${dialer} dials)`, async () => {
+    const fixture = await remoteFixture(dialer);
+    try {
+      const integration = await fixture.executor.getAgentIntegration('test');
+      const request = await requestFor(integration);
+      const entered = Promise.withResolvers<void>();
+      const worker = fixture.generations[0]!;
+      worker.hooks.start = async ({ admission }) => {
+        entered.resolve();
+        await new Promise<never>((_, reject) => admission.signal.addEventListener('abort', () => {
+          reject(new Error('Synthetic cancelled admission'));
+        }, { once: true }));
+      };
+      const outcomes = launchOutcomes(integration);
+      const call = integration.execution.start(request).catch((error: unknown) => error);
+      await entered.promise;
+      const ready = nextAvailability(fixture.executor, 'ready');
+      fixture.controller.disconnect(); fixture.worker.disconnect();
+      expect(await call).toMatchObject({ outcome: 'unknown' });
+      await ready;
+      await integration.execution.runningSessions();
+      expect(outcomes).toEqual([{ type: 'launch-settled', runId: request.runId, error: EXECUTOR_DISCONNECTED_BEFORE_START }]);
+      worker.hooks.start = async () => {};
+      await integration.execution.start(await requestFor(integration));
+      expect(worker.calls.start).toBe(2);
+    } finally { await fixture.dispose(); }
+  });
+
+  test(`a start whose reply was lost reports its handle once the binding resumes (${dialer} dials)`, async () => {
+    let fault!: ReturnType<typeof outgoingFault>;
+    const fixture = await remoteFixture(dialer, (_controller, worker) => { fault = outgoingFault(worker); });
+    try {
+      const integration = await fixture.executor.getAgentIntegration('test');
+      const request = await requestFor(integration);
+      const outcomes = launchOutcomes(integration);
+      disconnectOn(fault, (encoded) => encoded.includes('"type":"result"') && encoded.includes('"kind":"execution"'));
+      const ready = nextAvailability(fixture.executor, 'ready');
+      expect(await integration.execution.start(request).catch((error: unknown) => error)).toMatchObject({ outcome: 'unknown' });
+      await ready;
+      await integration.execution.runningSessions();
+      expect(outcomes).toEqual([{ type: 'launch-settled', runId: request.runId, handle: expect.objectContaining({ kind: 'execution' }) }]);
+      await integration.execution.abort(outcomes[0]!.handle!);
+      expect(fixture.generations[0]!.calls).toMatchObject({ start: 1, abort: 1 });
+    } finally { await fixture.dispose(); }
+  });
+
+  test(`a start request lost before the worker reports that it did not start (${dialer} dials)`, async () => {
+    let fault!: ReturnType<typeof outgoingFault>;
+    const fixture = await remoteFixture(dialer, (controller) => { fault = outgoingFault(controller); });
+    try {
+      const integration = await fixture.executor.getAgentIntegration('test');
+      const request = await requestFor(integration);
+      const outcomes = launchOutcomes(integration);
+      disconnectOn(fault, (encoded) => encoded.includes('"method":"execution.start"'));
+      const ready = nextAvailability(fixture.executor, 'ready');
+      expect(await integration.execution.start(request).catch((error: unknown) => error)).toMatchObject({ outcome: 'unknown' });
+      await ready;
+      await integration.execution.runningSessions();
+      expect(outcomes).toEqual([{ type: 'launch-settled', runId: request.runId, error: EXECUTOR_DISCONNECTED_BEFORE_START }]);
+      expect(fixture.generations[0]!.calls.start).toBe(0);
+    } finally { await fixture.dispose(); }
+  });
+
+  test(`a start dispatched while a replay drains settles through its own reply (${dialer} dials)`, async () => {
+    const fixture = await remoteFixture(dialer);
+    const release = Promise.withResolvers<void>();
+    try {
+      const integration = await fixture.executor.getAgentIntegration('test');
+      const first = await requestFor(integration);
+      await integration.execution.start(first);
+      const types: string[] = [];
+      integration.producers.subscribe(({ event }) => { types.push(event.type); });
+      const rowsReceived = () => types.filter((type) => type === 'rows').length;
+      const worker = fixture.generations[0]!;
+      const publish = worker.nativePublishers[0]!;
+      const ready = nextAvailability(fixture.executor, 'ready');
+      fixture.controller.disconnect(); fixture.worker.disconnect();
+      // Beyond the producer share of the session queue, so the replay tail follows the resume reply.
+      const count = 1_500;
+      for (let index = 0; index < count; index += 1) {
+        publish({ type: 'rows', rows: [{ message: new AssistantMessage('2026-01-01T00:00:00Z', `${index}:${'x'.repeat(9_000)}`) }] });
+      }
+      publish({ type: 'run-ended', runId: first.runId, outcome: 'finished' });
+      await ready;
+      let rowsAtStart = count;
+      worker.hooks.start = async () => { rowsAtStart = rowsReceived(); await release.promise; };
+      const second = { ...first, runId: crypto.randomUUID() };
+      const launch = integration.execution.start(second);
+      const deadline = performance.now() + 30_000;
+      while (!types.includes('run-ended') && performance.now() < deadline) await Bun.sleep(5);
+      await integration.execution.runningSessions();
+
+      expect(rowsAtStart).toBeLessThan(count);
+      expect(types).not.toContain('launch-settled');
+      release.resolve();
+      expect(await launch).toMatchObject({ kind: 'execution' });
+      expect(worker.calls).toMatchObject({ start: 2, abort: 0 });
+    } finally { release.resolve(); await fixture.dispose(); }
+  }, 60_000);
 
   test(`a binding the worker released fails its run and fences later output (${dialer} dials)`, async () => {
     const fixture = await remoteFixture(dialer, undefined, undefined, undefined, { relay: { graceMs: 1 } });

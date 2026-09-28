@@ -50,9 +50,10 @@ import type { TranscriptViewId } from '../ledger/contracts.js';
 import {
   dispatchFailureDetail,
   executionSetupFailure,
+  isLostLaunchReply,
 } from './runtime-router-errors.js';
 import { operationIdentity, operationMetadata } from './turn-operation.js';
-import { ProducerBindings } from './producer-bindings.js';
+import { ProducerBindings, type LaunchSettledEvent } from './producer-bindings.js';
 import { EXECUTOR_DISCONNECTED_MID_TURN } from '../../common/executor-disconnect.js';
 const logger = createLogger('agents:runtime-router');
 const EXECUTOR_OUTPUT_GAP_NOTICE = 'Some agent output could not be delivered from the executor. Reload from native history after this turn finishes to recover it.';
@@ -141,6 +142,9 @@ export class AgentRuntimeRouter {
       const runId = this.#ledger.activeRunId(chatId);
       if (!runId) return;
       lease.sink.publish({ type: 'notice', runId, title: 'Output not delivered', content: EXECUTOR_OUTPUT_GAP_NOTICE });
+    },
+    (chatId, lease, agentId, event) => {
+      if (this.#producerLeases.get(chatId)?.lease === lease) this.#settleLostLaunch(chatId, agentId, event);
     },
   );
   // Stops requested while a remote executor is unavailable, delivered when it is
@@ -239,8 +243,10 @@ export class AgentRuntimeRouter {
       assertExecutionAdmissionOpen(opts);
       this.#endpointResolver.resolveEndpointReference(selection);
       executionInvoked = true;
-      const handle = await integration.execution.start(request, { signal: opts.executionAdmission?.signal });
-      await this.#retainOrAbortHandle(chatId, entry.agentId, runId, handle);
+      const handle = await this.#launch(chatId, runId, () => integration.execution.start(request, {
+        signal: opts.executionAdmission?.signal,
+      }));
+      if (handle) await this.#retainOrAbortHandle(chatId, entry.agentId, runId, handle);
       assertExecutionAdmissionOpen(opts);
       const updated = this.#registry.updateChat(chatId, {
         model: selection.model,
@@ -296,8 +302,10 @@ export class AgentRuntimeRouter {
       assertExecutionAdmissionOpen(opts);
       this.#endpointResolver.resolveEndpointReference(selection);
       executionInvoked = true;
-      const handle = await integration.execution.resume(request, { signal: opts.executionAdmission?.signal });
-      await this.#retainOrAbortHandle(chatId, entry.agentId, runId, handle);
+      const handle = await this.#launch(chatId, runId, () => integration.execution.resume(request, {
+        signal: opts.executionAdmission?.signal,
+      }));
+      if (handle) await this.#retainOrAbortHandle(chatId, entry.agentId, runId, handle);
     } catch (error) {
       const failure = executionInvoked ? error : executionSetupFailure(error);
       this.#failDefiniteDispatch(chatId, runId, failure);
@@ -409,8 +417,10 @@ export class AgentRuntimeRouter {
       assertExecutionAdmissionOpen(opts);
       this.#endpointResolver.resolveEndpointReference(selection);
       executionInvoked = true;
-      const handle = await compaction.compact(request, { signal: opts.executionAdmission?.signal });
-      await this.#retainOrAbortHandle(chatId, entry.agentId, runId, handle);
+      const handle = await this.#launch(chatId, runId, () => compaction.compact(request, {
+        signal: opts.executionAdmission?.signal,
+      }));
+      if (handle) await this.#retainOrAbortHandle(chatId, entry.agentId, runId, handle);
     } catch (error) {
       const failure = executionInvoked ? error : executionSetupFailure(error);
       this.#failDefiniteDispatch(chatId, runId, failure);
@@ -801,6 +811,34 @@ export class AgentRuntimeRouter {
       excludedOrdinals: excluded,
       viewId,
     };
+  }
+
+  // A remote launch whose reply was lost with its executor session leaves its
+  // run active rather than failing the turn; the resumed binding settles it.
+  async #launch(chatId: string, runId: string, launch: () => Promise<AgentExecutionHandle>): Promise<AgentExecutionHandle | null> {
+    try {
+      return await launch();
+    } catch (error) {
+      if (!isLostLaunchReply(error) || !this.#ledger.isRunActive(chatId, runId)) throw error;
+      logger.warn('Execution launch reply was lost; the resumed executor settles it', { chatId, runId, reason: error.message });
+      return null;
+    }
+  }
+
+  // Applies the outcome of a launch whose reply was lost: a run still active
+  // keeps a reachable handle, a run stopped or failed meanwhile is aborted, and
+  // a run the executor never began fails as a dispatch failure.
+  #settleLostLaunch(chatId: string, agentId: string, event: LaunchSettledEvent): void {
+    this.#pendingAbortRuns.delete(runKey(chatId, event.runId));
+    const active = this.#ledger.isRunActive(chatId, event.runId);
+    if (event.handle) {
+      if (active) this.#executionHandles.set(chatId, { agentId, runId: event.runId, handle: event.handle });
+      else this.#abortHandleBestEffort(chatId, agentId, event.handle, 'lost launch');
+      return;
+    }
+    if (!active) return;
+    this.#bindings.forgetRun(event.runId);
+    this.#ledger.failRun(chatId, event.runId, event.error);
   }
 
   async #retainOrAbortHandle(
