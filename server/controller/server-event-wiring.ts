@@ -676,6 +676,7 @@ export function wireServerEvents({
     if (availability === 'offline') agentRegistry.executionSessionLost(executorId);
     if (availability === 'ready') {
       logger.info('Executor ready', { executorId });
+      agentRegistry.executionSessionResumed(executorId);
       executorReady(executorId);
     }
   });

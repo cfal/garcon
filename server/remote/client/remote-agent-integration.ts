@@ -5,16 +5,30 @@ import {
   type AgentHistoryImport,
   type AgentIntegration,
   type AgentImportedTranscriptRow,
+  type AgentProducerBinding,
   type AgentProducerNotification,
   type ExecutorCallOptions,
 } from '@garcon/server-agent-interface';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
-import type { ExecutorRpcMethods, IntegrationManifest } from '../transport/rpc-protocol.js';
+import type {
+  ExecutorRpcMethods, IntegrationManifest, ProducerAcknowledgement,
+} from '../transport/rpc-protocol.js';
 import type { RemoteSessionBacking } from './executor-client.js';
+import { EXECUTOR_DISCONNECTED_MID_TURN } from '../../common/executor-disconnect.js';
 
 const SINGLE_QUERY_RPC_GRACE_MS = 30_000;
+const PRODUCER_ACK_DELAY_MS = 250;
 // Each page carries at most 1 MiB, so a reader holds at most 4 MiB of replies.
 const HISTORY_PAGES_IN_FLIGHT = 4;
+
+interface RemoteProducerBinding {
+  readonly ref: AgentProducerBinding;
+  // The session whose frames this binding accepts; a lost session stays here
+  // until a replacement resumes the binding.
+  backing: RemoteSessionBacking;
+  receivedSeq: number;
+  acknowledgedSeq: number;
+}
 
 export class RemoteAgentIntegration implements AgentIntegration {
   readonly descriptor;
@@ -41,7 +55,8 @@ export class RemoteAgentIntegration implements AgentIntegration {
   readonly sessionConfiguration: AgentIntegration['sessionConfiguration'];
   readonly projectPathUpdates: AgentIntegration['projectPathUpdates'];
   readonly #listeners = new Set<(event: AgentProducerNotification) => void>();
-  readonly #bindings = new Map<string, RemoteSessionBacking>();
+  readonly #bindings = new Map<string, RemoteProducerBinding>();
+  #ackTimer: ReturnType<typeof setTimeout> | null = null;
   #migrated = false;
   #started = false;
 
@@ -74,10 +89,11 @@ export class RemoteAgentIntegration implements AgentIntegration {
       bind: async (request, options) => {
         const backing = current();
         if (!isAgentResourceRef(request.binding, 'producer', backing.manifests.get(this.descriptor.id)!.scope)) throw new AgentCallError('rejected', 'Producer scope mismatch', 'STALE_RESOURCE');
-        this.#bindings.set(request.binding.id, backing);
+        const state = { ref: request.binding, backing, receivedSeq: 0, acknowledgedSeq: 0 };
+        this.#bindings.set(request.binding.id, state);
         try { await backing.rpc.call(this.descriptor.id, 'producers.bind', request, options); }
         catch (error) {
-          if (this.#bindings.get(request.binding.id) === backing) this.#bindings.delete(request.binding.id);
+          if (this.#bindings.get(request.binding.id) === state) this.#bindings.delete(request.binding.id);
           throw error;
         }
       },
@@ -203,12 +219,42 @@ export class RemoteAgentIntegration implements AgentIntegration {
     if (initial) { this.#migrated = true; this.#started = true; }
   }
 
-  retire(): void { this.#bindings.clear(); }
+  retire(): void {
+    this.#bindings.clear();
+    if (this.#ackTimer) clearTimeout(this.#ackTimer);
+    this.#ackTimer = null;
+  }
 
-  receive(notification: AgentProducerNotification, backing: RemoteSessionBacking): void {
+  // Reattaches bindings from lost sessions. Replayed frames arrive before the
+  // reply and are deduplicated by sequence; a binding the worker no longer
+  // holds fails its run exactly as a lost session did before resumption.
+  async resume(backing: RemoteSessionBacking): Promise<void> {
+    const suspended = [...this.#bindings.values()].filter((state) => state.backing !== backing);
+    if (suspended.length === 0) return;
+    for (const state of suspended) state.backing = backing;
+    const { resumed } = await backing.rpc.call(this.descriptor.id, 'producers.resume', {
+      bindings: suspended.map((state) => ({ binding: state.ref, acknowledgedSeq: state.receivedSeq })),
+    });
+    const retained = new Set(resumed);
+    for (const state of suspended) {
+      if (retained.has(state.ref.id) || this.#bindings.get(state.ref.id) !== state) continue;
+      this.#bindings.delete(state.ref.id);
+      this.#emit({ binding: state.ref, event: { type: 'publication-failed', error: {
+        code: 'OUTCOME_UNKNOWN', message: EXECUTOR_DISCONNECTED_MID_TURN,
+      } } });
+    }
+    this.#scheduleAcknowledgement();
+  }
+
+  receive(notification: AgentProducerNotification, seq: number, backing: RemoteSessionBacking): void {
     const { binding } = notification;
     if (!isAgentResourceRef(binding, 'producer', backing.manifests.get(this.descriptor.id)!.scope)) throw new Error('Producer event scope mismatch');
-    if (this.#bindings.get(binding.id) !== backing) return;
+    const state = this.#bindings.get(binding.id);
+    if (state?.backing !== backing || seq <= state.receivedSeq) return;
+    const gap = seq > state.receivedSeq + 1;
+    state.receivedSeq = seq;
+    this.#scheduleAcknowledgement();
+    if (gap) this.#emit({ binding, event: { type: 'publication-gap' } });
     let event = notification.event;
     if (event.type === 'publication-failed') {
       if (!event.error || typeof event.error.code !== 'string'
@@ -224,7 +270,29 @@ export class RemoteAgentIntegration implements AgentIntegration {
       if (!event.decision) throw new Error('Permission response capability is missing');
       event = { type: 'permission', runId: event.runId, lifecycle: { ...event.lifecycle, requestedTool: tool }, decision: event.decision };
     }
-    for (const listener of this.#listeners) listener({ binding, event });
+    this.#emit({ binding, event });
+  }
+
+  #emit(notification: AgentProducerNotification): void {
+    for (const listener of this.#listeners) listener(notification);
+  }
+
+  // Acknowledges received frames in batches so the worker can release them.
+  #scheduleAcknowledgement(): void {
+    if (this.#ackTimer) return;
+    this.#ackTimer = setTimeout(() => {
+      this.#ackTimer = null;
+      const pending = new Map<RemoteSessionBacking, ProducerAcknowledgement[]>();
+      for (const state of this.#bindings.values()) {
+        if (state.receivedSeq <= state.acknowledgedSeq || !state.backing.rpc.transport.connected) continue;
+        state.acknowledgedSeq = state.receivedSeq;
+        const acknowledgements = pending.get(state.backing) ?? [];
+        acknowledgements.push({ bindingId: state.ref.id, seq: state.receivedSeq });
+        pending.set(state.backing, acknowledgements);
+      }
+      for (const [backing, acknowledgements] of pending) backing.rpc.acknowledgeProducers(acknowledgements);
+    }, PRODUCER_ACK_DELAY_MS);
+    this.#ackTimer.unref?.();
   }
 }
 

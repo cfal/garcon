@@ -74,7 +74,8 @@ queue, compaction, and shutdown suites on the same three backends, using pinned
 CLIs and synthetic model endpoints. Each server lane is sharded four ways;
 SACS runs separately. These are not paid/live-provider lanes.
 
-`tests/server/executor-scripted-permission-loss.test.ts` additionally drops both
-dial directions during a real Claude permission request. Transport-only tests
+`tests/server/executor-scripted-permission-reconnect.test.ts` additionally drops both
+dial directions during a real Claude permission request and answers it after the
+binding resumes. Transport-only tests
 cover progressing 12 KiB/s links and silent half-open connections. Mixed
 Files/Git/PTY pressure work is deferred pending the channel decision.

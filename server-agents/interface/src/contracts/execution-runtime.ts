@@ -30,7 +30,9 @@ export interface ExecutionProjectService {
   }, options?: ExecutorCallOptions): Promise<string>;
 }
 
-export type ExecutorAvailability = 'ready' | 'offline' | 'disposed';
+// `reconnecting` is a remote executor whose connection dropped while its
+// transcript bindings may still resume; it becomes `offline` when they cannot.
+export type ExecutorAvailability = 'ready' | 'reconnecting' | 'offline' | 'disposed';
 
 export interface ExecutorInfo {
   readonly executorId: string;

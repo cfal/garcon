@@ -53,7 +53,9 @@ import {
   dispatchFailureDetail,
 } from './runtime-router-errors.js';
 import { ProducerBindings } from './producer-bindings.js';
+import { EXECUTOR_DISCONNECTED_MID_TURN } from '../../common/executor-disconnect.js';
 const logger = createLogger('agents:runtime-router');
+const EXECUTOR_OUTPUT_GAP_NOTICE = 'Some agent output was not delivered while the executor was disconnected. Reload from native history after this turn finishes to recover it.';
 
 interface TurnOperation extends TurnReceiptOwner {
   readonly clientMessageId: string | null;
@@ -139,7 +141,16 @@ export class AgentRuntimeRouter {
       this.#bindings.forgetRun(runId);
       this.#ledger.failRun(chatId, runId, error);
     },
+    (chatId, lease) => {
+      const runId = this.#ledger.activeRunId(chatId);
+      if (!runId || this.#producerLeases.get(chatId)?.lease !== lease) return;
+      lease.sink.publish({ type: 'notice', runId, title: 'Output not delivered', content: EXECUTOR_OUTPUT_GAP_NOTICE });
+    },
   );
+  // Stops requested while a remote executor is unavailable, delivered when it is
+  // ready again. They outlive a lost session because the same worker may still
+  // run the turn; a replaced worker rejects the stale handle.
+  readonly #deferredAborts = new Map<string, { readonly agentId: string; readonly handle: AgentExecutionHandle }>();
 
   constructor(options: AgentRuntimeRouterOptions) {
     this.#registry = options.registry;
@@ -444,6 +455,14 @@ export class AgentRuntimeRouter {
     };
   }
 
+  executionSessionResumed(executorId: string): void {
+    for (const [chatId, deferred] of this.#deferredAborts) {
+      if (deferred.handle.executorId !== executorId) continue;
+      this.#deferredAborts.delete(chatId);
+      this.#abortHandleBestEffort(chatId, deferred.agentId, deferred.handle, 'executor reconnect');
+    }
+  }
+
   executionSessionLost(executorId = LOCAL_EXECUTOR_ID): void {
     const runs = this.#ledger.activeChatIds()
       .filter((chatId) => effectiveExecutorId(this.#registry.getChat(chatId)?.executorId) === executorId)
@@ -458,7 +477,7 @@ export class AgentRuntimeRouter {
       try {
         this.#ledger.failRun(chatId, runId, {
           code: 'OUTCOME_UNKNOWN',
-          message: 'Executor disconnected mid-turn. The turn may still be running on the executor. Reload from native history after it finishes to recover missing output.',
+          message: EXECUTOR_DISCONNECTED_MID_TURN,
         });
       } catch (error) {
         logger.warn('Unable to record executor loss', {
@@ -810,6 +829,10 @@ export class AgentRuntimeRouter {
     context: string,
   ): void {
     const failed = (error: unknown) => {
+      if (!this.#directory.isReady(handle.executorId)) {
+        this.#deferredAborts.set(chatId, { agentId, handle });
+        return;
+      }
       logger.warn(`Provider abort after ${context} failed`, {
         chatId,
         reason: error instanceof Error ? error.message : String(error),

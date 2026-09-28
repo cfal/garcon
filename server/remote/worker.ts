@@ -3,6 +3,7 @@ import { mkdir, rm } from 'node:fs/promises';
 import { defaultAgentIntegrations } from '../runtime/agents/default-agent-integrations.js';
 import { ExecutorRpc } from './transport/rpc.js';
 import { serveExecutionRuntime } from './server/executor-rpc-server.js';
+import { ProducerRelay } from './server/producer-relay.js';
 import { ExecutionRuntime } from '../runtime/execution-runtime.js';
 import { WebSocketLink } from './transport/websocket-link.js';
 import { TerminalRuntime } from '../runtime/terminals/runtime.js';
@@ -50,6 +51,7 @@ async function serveExecutorWorker(options: ExecutorWorkerOptions, dataDir: stri
     allowInsecureDevelopment: options.allowInsecureDevelopment, allowUnverifiedTls: options.allowUnverifiedTls });
   let serving: ReturnType<typeof serveExecutionRuntime> | null = null;
   let runtime: ExecutionRuntime | null = null;
+  const relay = new ProducerRelay();
   let currentRpc: ExecutorRpc | null = null;
   let gateway: Awaited<ReturnType<typeof startCliGateway>> | null = null;
   let terminals: TerminalRuntime | null = null;
@@ -59,7 +61,7 @@ async function serveExecutorWorker(options: ExecutorWorkerOptions, dataDir: stri
     currentRpc = null;
     let failure: unknown;
     try {
-      for (const dispose of [() => gateway?.dispose(), () => link.dispose(), () => serving?.dispose(), () => runtime?.dispose(), () => terminals?.shutdown()]) {
+      for (const dispose of [() => gateway?.dispose(), () => link.dispose(), () => serving?.dispose(), () => relay.dispose(), () => runtime?.dispose(), () => terminals?.shutdown()]) {
         try { await dispose(); } catch (error) { failure ??= error; }
       }
       if (failure !== undefined) throw failure;
@@ -104,7 +106,7 @@ async function serveExecutorWorker(options: ExecutorWorkerOptions, dataDir: stri
           return currentRpc.call(agentId, 'credentials.resolve', { reference }, { signal });
         },
       });
-      serving = serveExecutionRuntime(runtime, rpc);
+      serving = serveExecutionRuntime(runtime, rpc, relay);
       transport.onAvailability((connected) => {
         if (!connected) return;
         lastError = null;

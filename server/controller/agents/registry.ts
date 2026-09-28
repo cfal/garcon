@@ -340,6 +340,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   abortSession(chatId: string): Promise<boolean> { return this.#runtime.abortSession(chatId); }
 
   executionSessionLost(executorId?: string): void { this.#runtime.executionSessionLost(executorId); }
+  executionSessionResumed(executorId: string): void { this.#runtime.executionSessionResumed(executorId); }
   compactSession(chatId: string, opts: CompactSessionOptions = {}): Promise<void> { return this.#runtime.compactSession(chatId, opts); }
   isChatRunning(chatId: string): boolean { return this.#runtime.isChatRunning(chatId); }
   isAgentSessionRunning(agentId: string, agentSessionId: string | null | undefined, executorId?: string | null): boolean {

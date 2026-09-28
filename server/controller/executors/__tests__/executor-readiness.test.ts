@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import { ExecutorRpc } from '../../../remote/transport/rpc.js';
 import { serveExecutionRuntime } from '../../../remote/server/executor-rpc-server.js';
+import { ProducerRelay } from '../../../remote/server/producer-relay.js';
 import { RemoteExecutorClient } from '../../../remote/client/executor-client.js';
 import { WebSocketLink } from '../../../remote/transport/websocket-link.js';
 import { integrationFixture, linkOptions } from '../../../remote/__tests__/integration-fixture.js';
@@ -21,7 +22,7 @@ for (const dialer of ['controller', 'worker'] as const) {
       expect(transport.executorId).toBe(executorId);
       const fixture = integrationFixture('/workspace', transport.executorId);
       fixture.integration.lifecycle.start = async () => { entering.resolve(); await release.promise; };
-      scope = serveExecutionRuntime(fixture.executor, new ExecutorRpc(transport));
+      scope = serveExecutionRuntime(fixture.executor, new ExecutorRpc(transport), new ProducerRelay());
     });
     try {
       expect(executor.id).toBe(executorId);

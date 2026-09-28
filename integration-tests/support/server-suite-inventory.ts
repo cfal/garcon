@@ -15,7 +15,7 @@ export const SINGLE_RUN_SUITES: Readonly<Record<string, string>> = Object.freeze
     'executor-projects', 'executor-provider-discovery', 'executor-proxy-url',
     'executor-reference-deletion', 'executor-resource-retention', 'executor-restart',
     'executor-retained-configuration', 'executor-scheduler-isolation',
-    'executor-scripted-permission-loss', 'executor-session-setup', 'executor-shutdown',
+    'executor-scripted-permission-reconnect', 'executor-session-setup', 'executor-shutdown',
     'executor-terminal-pressure', 'executor-terminals', 'executor-ticket-defaults',
     'executor-unknown-agent', 'git-input-boundaries', 'lazy-native-compaction',
     'lazy-native-sessions',

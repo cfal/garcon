@@ -3,7 +3,9 @@ import {
   type AgentIntegrationErrorCode, type AgentDeliveryOutcome, type ExecutorCallOptions,
 } from '@garcon/server-agent-interface';
 import type { JsonObject } from '@garcon/common/json';
-import type { ExecutorRpcMethods, ExecutorRpcRequest, AgentProducerFrame } from './rpc-protocol.js';
+import type {
+  ExecutorRpcMethods, ExecutorRpcRequest, AgentProducerFrame, ProducerAckFrame, ProducerAcknowledgement,
+} from './rpc-protocol.js';
 import type { SessionTransport } from './session-transport.js';
 import { DomainError } from '../../common/domain-error.js';
 import { createLogger } from '../../common/log.js';
@@ -23,7 +25,7 @@ interface Failure {
   readonly outcome?: AgentDeliveryOutcome;
 }
 
-type RpcFrame = ExecutorRpcRequest | AgentProducerFrame | TerminalNotification
+type RpcFrame = ExecutorRpcRequest | AgentProducerFrame | ProducerAckFrame | TerminalNotification
   | { readonly type: 'terminal-detach'; readonly request: ExecutorRpcMethods['terminals.detach']['request'] }
   | { readonly type: 'result'; readonly id: string; readonly value: unknown }
   | { readonly type: 'error'; readonly id: string; readonly error: Failure }
@@ -46,6 +48,7 @@ export class ExecutorRpc {
   readonly #incoming = new Map<string, AbortController>();
   #handler: RpcHandler | null = null;
   #producer: ((frame: AgentProducerFrame) => void) | null = null;
+  #producerAck: ((acknowledgements: readonly ProducerAcknowledgement[]) => void) | null = null;
   #terminal: ((frame: TerminalNotification) => void) | null = null;
   #terminalDetach: ((request: ExecutorRpcMethods['terminals.detach']['request']) => Promise<unknown>) | null = null;
   #retired = false;
@@ -62,6 +65,7 @@ export class ExecutorRpc {
     this.#unsubscribe();
     this.#handler = null;
     this.#producer = null;
+    this.#producerAck = null;
     this.#terminal = null;
     this.#terminalDetach = null;
     for (const call of this.#pending.values()) {
@@ -90,21 +94,18 @@ export class ExecutorRpc {
     // Cleanup does not consume the RPC budget held by the work it is releasing.
     if (!this.#retired && this.transport.connected) this.transport.send(JSON.stringify({ type: 'terminal-detach', request } satisfies RpcFrame));
   }
-  publish(frame: AgentProducerFrame): void {
+  // Producer frames are encoded once by the worker's relay, which also retains them for resume.
+  sendProducer(payload: string): void {
     if (this.#retired) return;
-    let payload = JSON.stringify(frame);
-    if (!this.transport.channel.fitsFrame(payload)) {
-      payload = JSON.stringify({
-        type: 'producer', notification: {
-          binding: frame.notification.binding,
-          event: { type: 'publication-failed', error: {
-            code: 'OUTCOME_UNKNOWN',
-            message: 'Provider output exceeds the executor message size limit. Native history may contain additional output.',
-          } },
-        },
-      } satisfies AgentProducerFrame);
-    }
     this.transport.send(payload);
+  }
+  onProducerAck(handler: (acknowledgements: readonly ProducerAcknowledgement[]) => void): void {
+    this.#producerAck = handler;
+  }
+  acknowledgeProducers(acknowledgements: readonly ProducerAcknowledgement[]): void {
+    if (this.#retired || !this.transport.connected || acknowledgements.length === 0) return;
+    try { this.transport.send(JSON.stringify({ type: 'producer-ack', acknowledgements } satisfies RpcFrame)); }
+    catch { /* Resume carries the same positions if the session is lost. */ }
   }
 
   async call<K extends keyof ExecutorRpcMethods>(
@@ -162,7 +163,15 @@ export class ExecutorRpc {
     }
     if (frame.type === 'producer') {
       if (!this.#producer) throw new Error('Producer receiver is not installed');
+      if (!Number.isSafeInteger(frame.seq) || frame.seq < 1) throw new Error('Invalid producer sequence');
       this.#producer(frame);
+      return;
+    }
+    if (frame.type === 'producer-ack') {
+      if (!Array.isArray(frame.acknowledgements) || frame.acknowledgements.some((ack) => (
+        !ack || typeof ack.bindingId !== 'string' || !Number.isSafeInteger(ack.seq) || ack.seq < 0
+      ))) throw new Error('Invalid producer acknowledgement');
+      this.#producerAck?.(frame.acknowledgements);
       return;
     }
     if (!('id' in frame) || typeof frame.id !== 'string') throw new Error('RPC request ID is required');

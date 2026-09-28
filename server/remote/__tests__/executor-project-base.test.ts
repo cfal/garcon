@@ -2,6 +2,7 @@ import { expect, spyOn, test } from 'bun:test';
 import type { AgentIntegration, ExecutorAvailability } from '@garcon/server-agent-interface';
 import { ExecutorRpc } from '../transport/rpc.js';
 import { serveExecutionRuntime } from '../server/executor-rpc-server.js';
+import { ProducerRelay } from '../server/producer-relay.js';
 import { RemoteExecutorClient } from '../client/executor-client.js';
 import { RemoteAgentIntegration } from '../client/remote-agent-integration.js';
 import { WebSocketLink } from '../transport/websocket-link.js';
@@ -31,7 +32,7 @@ for (const dialer of ['controller', 'worker'] as const) {
       const entering = entered;
       fixture.integration.lifecycle.start = async () => { entering.resolve(); await barrier; };
       generations.push(fixture);
-      scopes.push(serveExecutionRuntime(fixture.executor, new ExecutorRpc(transport)));
+      scopes.push(serveExecutionRuntime(fixture.executor, new ExecutorRpc(transport), new ProducerRelay()));
     });
     try {
       const firstReady = nextAvailability(executor, 'ready');
@@ -89,7 +90,7 @@ for (const [name, change] of Object.entries(manifestChanges)) {
     worker.onSession((transport) => {
       const fixture = integrationFixture(replacement ? '/' : '/workspace');
       const integration = replacement ? change(fixture.integration) : fixture.integration;
-      scopes.push(serveExecutionRuntime({ ...fixture.executor, getAgentIntegration: async () => integration }, new ExecutorRpc(transport)));
+      scopes.push(serveExecutionRuntime({ ...fixture.executor, getAgentIntegration: async () => integration }, new ExecutorRpc(transport), new ProducerRelay()));
     });
     try {
       const ready = nextAvailability(executor, 'ready');
@@ -120,7 +121,7 @@ test('a superseded candidate cannot publish metadata or errors over the accepted
   worker.onSession((transport) => {
     const candidate = ++generation;
     const fixture = integrationFixture(candidate === 1 ? '/stale' : '/accepted');
-    scopes.push(serveExecutionRuntime(fixture.executor, new ExecutorRpc(transport)));
+    scopes.push(serveExecutionRuntime(fixture.executor, new ExecutorRpc(transport), new ProducerRelay()));
   });
   const initialize = RemoteAgentIntegration.prototype.initializeReplacement;
   const initialization = spyOn(RemoteAgentIntegration.prototype, 'initializeReplacement')

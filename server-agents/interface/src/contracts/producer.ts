@@ -129,7 +129,9 @@ export interface AgentProducerNotification {
   readonly binding: AgentProducerBinding;
   readonly event: AgentProducerEvent
     | { readonly type: 'started'; readonly runId: string }
-    | { readonly type: 'publication-failed'; readonly error: AgentRunFailureDetail };
+    | { readonly type: 'publication-failed'; readonly error: AgentRunFailureDetail }
+    // A remote binding resumed after some of its buffered output was dropped.
+    | { readonly type: 'publication-gap' };
 }
 
 export interface AgentProducers {

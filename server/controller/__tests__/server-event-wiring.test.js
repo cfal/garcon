@@ -49,6 +49,19 @@ it('isolates executor loss and queue wake-up, and publishes complete executor sn
   expect(fixture.published).toContainEqual({ type: 'executors-changed', executors });
 });
 
+it('keeps runs through a reconnect and resumes deferred work when ready', async () => {
+  const fixture = createFixture();
+  fixture.executor.availability('local', 'reconnecting');
+  expect(fixture.agentRegistry.executionSessionLost).not.toHaveBeenCalled();
+  expect(fixture.agentRegistry.executionSessionResumed).not.toHaveBeenCalled();
+  expect(fixture.queueService.triggerDrain).not.toHaveBeenCalled();
+  fixture.executor.availability('local', 'ready');
+  await Promise.resolve();
+  expect(fixture.agentRegistry.executionSessionResumed.mock.calls).toEqual([['local']]);
+  expect(fixture.agentRegistry.executionSessionLost).not.toHaveBeenCalled();
+  expect(fixture.queueService.triggerDrain).toHaveBeenCalledWith('chat-1');
+});
+
 it('settles executor loss and drains only when ready', async () => {
   const fixture = createFixture();
   fixture.executor.availability('local', 'offline');
@@ -140,6 +153,7 @@ function createFixture(overrides = {}) {
     settleTurn: mock(() => undefined),
     discardTurn: mock(() => undefined),
     executionSessionLost: mock(() => undefined),
+    executionSessionResumed: mock(() => undefined),
     ...overrides.agentRegistry,
   };
   const queueService = overrides.queueService ?? {

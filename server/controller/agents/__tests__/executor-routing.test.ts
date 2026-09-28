@@ -3,6 +3,7 @@ import { Database } from 'bun:sqlite';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import type { AgentProducerBinding } from '@garcon/server-agent-interface';
 import { effectiveExecutorId } from '../../../../common/executors.js';
 import { AssistantMessage, BashToolUseMessage } from '../../../../common/chat-types.js';
 import { ChatRegistry } from '../../chats/store.js';
@@ -164,4 +165,47 @@ test('a permission reply remains actionable while its executor is reconnecting',
   await expect(f.router.resolvePermission(chatId, occurrence, { allow: true }, control)).resolves.toBeUndefined();
   expect(respond).toHaveBeenCalledTimes(1);
   expect(f.ledger.currentRows(chatId).filter(row => row.kind === 'permission-resolved')).toHaveLength(1);
+});
+
+test('a Stop requested while its executor reconnects is delivered once it resumes', async () => {
+  const f = await fixture();
+  const chatId = CHAT_IDS[1]!;
+  await f.router.startSession(chatId, 'synthetic input');
+  f.ready.delete(FIRST);
+
+  await f.router.abortSession(chatId);
+  await f.providers[1]!.integration.execution.runningSessions();
+  expect(f.router.isChatRunning(chatId)).toBe(false);
+  expect(f.providers[1]!.calls.abort).toBe(0);
+  f.ready.add(FIRST);
+  f.router.executionSessionResumed(SECOND);
+  await f.providers[1]!.integration.execution.runningSessions();
+  expect(f.providers[1]!.calls.abort).toBe(0);
+  f.router.executionSessionResumed(FIRST);
+  f.router.executionSessionResumed(FIRST);
+  await Bun.sleep(0);
+  expect(f.providers[1]!.calls.abort).toBe(1);
+});
+
+test('a remote delivery gap records a notice on the active run', async () => {
+  const f = await fixture();
+  const chatId = CHAT_IDS[1]!;
+  const producers = f.providers[1]!.integration.producers;
+  const subscribe = producers.subscribe;
+  const routes: Parameters<typeof subscribe>[0][] = [];
+  producers.subscribe = (listener) => { routes.push(listener); return subscribe(listener); };
+  await f.router.startSession(chatId, 'synthetic input');
+  const bindings: AgentProducerBinding[] = [];
+  const unsubscribe = subscribe(({ binding }) => { bindings.push(binding); });
+  f.providers[1]!.nativePublishers[0]!({
+    type: 'rows', rows: [{ message: new AssistantMessage('2026-09-23T00:00:00.000Z', 'Synthetic output') }],
+  });
+  unsubscribe();
+
+  for (const route of routes) route({ binding: bindings[0]!, event: { type: 'publication-gap' } });
+
+  expect(f.ledger.currentRows(chatId).filter((row) => row.kind === 'notice')).toEqual([
+    expect.objectContaining({ message: expect.stringContaining('Reload from native history') }),
+  ]);
+  expect(f.router.isChatRunning(chatId)).toBe(true);
 });

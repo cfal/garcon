@@ -16,6 +16,7 @@ export class ProducerBindings {
   constructor(
     private readonly onError: (error: unknown) => void,
     private readonly onPublicationFailed: (chatId: string, lease: TranscriptProducerLease, error: AgentRunFailureDetail) => void,
+    private readonly onPublicationGap: (chatId: string, lease: TranscriptProducerLease) => void = () => {},
   ) {}
 
   async bind(integration: AgentIntegration, chatId: string, lease: TranscriptProducerLease): Promise<AgentProducerBinding> {
@@ -35,6 +36,11 @@ export class ProducerBindings {
           try { this.onPublicationFailed(route.chatId, route.lease, event.error); }
           catch (error) { this.onError(error); }
           finally { route.lease.close(); }
+          return;
+        }
+        if (event.type === 'publication-gap') {
+          try { this.onPublicationGap(route.chatId, route.lease); }
+          catch (error) { this.onError(error); }
           return;
         }
         if (event.type === 'started') {

@@ -32,6 +32,14 @@ export interface RemoteExecutorInventory {
 
 class ExecutorConfigurationError extends Error {}
 
+// Matches the worker relay's grace. Within it, a replacement session resumes
+// transcript bindings; after it, active runs fail as disconnected.
+export const EXECUTOR_RECONNECT_GRACE_MS = 120_000;
+
+export interface RemoteExecutorClientOptions {
+  readonly reconnectGraceMs?: number;
+}
+
 export class RemoteExecutorClient implements ExecutionRuntimeApi {
   readonly #integrations = new Map<string, RemoteAgentIntegration>();
   readonly #listeners = new Set<(value: ExecutorAvailability) => void>();
@@ -40,6 +48,9 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
   #current: RemoteSessionBacking | null = null;
   #candidate: SessionTransport | null = null;
   #initialized = false;
+  #instanceId: string | null = null;
+  #reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  readonly #reconnectGraceMs: number;
   readonly #files = new RemoteFilesService(() => this.#backing());
   readonly #git = new RemoteGitServices(() => this.#backing());
   readonly #terminals = new RemoteTerminalService(() => this.#backing());
@@ -55,7 +66,9 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
     setupRpc: (rpc: ExecutorRpc) => void = () => {},
     private readonly reportError: (message: string) => void = () => {},
     private readonly expectedInventory: RemoteExecutorInventory | null = null,
+    options: RemoteExecutorClientOptions = {},
   ) {
+    this.#reconnectGraceMs = options.reconnectGraceMs ?? EXECUTOR_RECONNECT_GRACE_MS;
     this.#unsubscribe = link.onSession((transport) => {
       this.#candidate = transport;
       const rpc = new ExecutorRpc(transport);
@@ -66,8 +79,8 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
         if (this.#availability === 'disposed' || this.#candidate !== transport) return;
         this.#terminals.disconnect();
         this.#current = null;
-        for (const integration of this.#integrations.values()) integration.retire();
-        this.#setAvailability('offline');
+        // A candidate that fails while already reconnecting keeps the original deadline.
+        if (this.#availability === 'ready') this.#beginReconnecting();
       });
       void this.#install(transport, rpc).catch((error: unknown) => {
         if (this.#candidate === transport && this.#availability !== 'disposed') {
@@ -138,6 +151,7 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
 
   async dispose(): Promise<void> {
     if (this.#availability === 'disposed') return;
+    this.#clearReconnectTimer();
     this.#setAvailability('disposed');
     this.#unsubscribe();
     this.#terminals.disconnect();
@@ -173,6 +187,10 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
     }
     const backing: RemoteSessionBacking = { rpc, info, manifests };
     const initial = !this.#initialized;
+    // A restarted worker holds none of the previous bindings or native turns.
+    if (this.#instanceId !== null && this.#instanceId !== info.instanceId && this.#availability === 'reconnecting') {
+      this.#abandonBindings();
+    }
     const candidates = initial ? new Map([...manifests.values()].map((manifest) => [
       manifest.descriptor.id, new RemoteAgentIntegration(manifest, () => this.#backing()),
     ])) : this.#integrations;
@@ -185,21 +203,47 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
       }
     }
     for (const integration of candidates.values()) await integration.initializeReplacement(backing, initial);
-    if (this.#candidate !== transport || this.#availability === 'disposed' || !transport.connected) {
-      throw new Error('Executor candidate session retired');
-    }
+    if (this.#candidateRetired(transport)) throw new Error('Executor candidate session retired');
     if (initial) {
       for (const [id, integration] of candidates) this.#integrations.set(id, integration);
       this.#initialized = true;
     }
-    rpc.onProducer(({ notification }) => {
-      if (this.#current !== backing) return;
+    rpc.onProducer(({ notification, seq }) => {
       const integration = this.#integrations.get(notification.binding.integrationId);
       if (!integration) throw new Error('Unknown producer integration');
-      integration.receive(notification, backing);
+      integration.receive(notification, seq, backing);
     });
+    for (const integration of this.#integrations.values()) await integration.resume(backing);
+    if (this.#candidateRetired(transport)) throw new Error('Executor candidate session retired');
+    this.#instanceId = info.instanceId;
+    this.#clearReconnectTimer();
     this.#current = backing;
     this.#setAvailability('ready');
+  }
+
+  #candidateRetired(transport: SessionTransport): boolean {
+    return this.#candidate !== transport || this.#availability === 'disposed' || !transport.connected;
+  }
+
+  #beginReconnecting(): void {
+    this.#setAvailability('reconnecting');
+    this.#reconnectTimer = setTimeout(() => {
+      this.#reconnectTimer = null;
+      if (this.#availability === 'reconnecting') this.#abandonBindings();
+    }, this.#reconnectGraceMs);
+    this.#reconnectTimer.unref?.();
+  }
+
+  // Publishes `offline` so active runs on this executor fail as disconnected.
+  #abandonBindings(): void {
+    this.#clearReconnectTimer();
+    for (const integration of this.#integrations.values()) integration.retire();
+    this.#setAvailability('offline');
+  }
+
+  #clearReconnectTimer(): void {
+    if (this.#reconnectTimer) clearTimeout(this.#reconnectTimer);
+    this.#reconnectTimer = null;
   }
 
   #backing(): RemoteSessionBacking {

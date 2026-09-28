@@ -7,6 +7,7 @@ import { ExecutorManager } from '../manager.js';
 import { WebSocketLink, EXECUTOR_NOISE_CONTEXT } from '../../../remote/transport/websocket-link.js';
 import { ExecutorRpc, type GuardRpcReply } from '../../../remote/transport/rpc.js';
 import { serveExecutionRuntime } from '../../../remote/server/executor-rpc-server.js';
+import { ProducerRelay } from '../../../remote/server/producer-relay.js';
 import { integrationFixture } from '../../../remote/__tests__/integration-fixture.js';
 import { executorConnectionUrl } from '../../../remote/transport/connection-url.js';
 import { DomainError } from '../../../common/domain-error.js';
@@ -57,7 +58,7 @@ function worker(secret: string, projectPath: string, configure: (fixture: Return
   link.onSession((transport) => {
     const provider = integrationFixture(projectPath, transport.executorId);
     configure(provider);
-    const serving = serveExecutionRuntime(provider.executor, new ExecutorRpc(transport));
+    const serving = serveExecutionRuntime(provider.executor, new ExecutorRpc(transport), new ProducerRelay());
     cleanups.push(() => serving.dispose());
   });
   return link;
@@ -72,7 +73,7 @@ test('reverse CLI dispatch checks initialization, executor grant, revocation lea
   const connected = Promise.withResolvers<ExecutorRpc>();
   link.onSession((transport) => {
     const rpc = new ExecutorRpc(transport);
-    const serving = serveExecutionRuntime(integrationFixture(root, transport.executorId).executor, rpc);
+    const serving = serveExecutionRuntime(integrationFixture(root, transport.executorId).executor, rpc, new ProducerRelay());
     cleanups.push(() => serving.dispose());
     connected.resolve(rpc);
   });
@@ -117,7 +118,7 @@ test.each(['context', 'read', 'mutation'] as const)('quiescence after handler se
   const connected = Promise.withResolvers<ExecutorRpc>();
   link.onSession((transport) => {
     const rpc = new ExecutorRpc(transport);
-    const serving = serveExecutionRuntime(integrationFixture(root, transport.executorId).executor, rpc);
+    const serving = serveExecutionRuntime(integrationFixture(root, transport.executorId).executor, rpc, new ProducerRelay());
     cleanups.push(() => serving.dispose());
     connected.resolve(rpc);
   });

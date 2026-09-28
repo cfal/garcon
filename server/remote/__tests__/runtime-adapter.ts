@@ -1,13 +1,18 @@
 import type { ExecutionRuntimeApi } from '@garcon/server-agent-interface';
-import { RemoteExecutorClient } from '../client/executor-client.js';
+import { RemoteExecutorClient, type RemoteExecutorClientOptions } from '../client/executor-client.js';
 import { serveExecutionRuntime } from '../server/executor-rpc-server.js';
+import { ProducerRelay } from '../server/producer-relay.js';
 import { ExecutorRpc } from '../transport/rpc.js';
 import { WebSocketLink } from '../transport/websocket-link.js';
 
-export async function connectRemoteExecutor(link: WebSocketLink, setupRpc: (rpc: ExecutorRpc) => void = () => {}) {
+export async function connectRemoteExecutor(
+  link: WebSocketLink,
+  setupRpc: (rpc: ExecutorRpc) => void = () => {},
+  options: RemoteExecutorClientOptions = {},
+) {
   if (!link.executorId) throw new Error('A controller link is required');
   const ready = Promise.withResolvers<void>();
-  const executor = new RemoteExecutorClient(link.executorId, link, setupRpc);
+  const executor = new RemoteExecutorClient(link.executorId, link, setupRpc, undefined, null, options);
   const unsubscribe = executor.onAvailabilityChanged(value => {
     if (value === 'ready') ready.resolve();
     if (value === 'disposed') ready.reject(new Error('Executor disposed before readiness'));
@@ -36,7 +41,8 @@ export async function runtimeAdapter(runtime: ExecutionRuntimeApi, backend: Runt
   const controller = new WebSocketLink({ ...options, role: 'controller' });
   const worker = new WebSocketLink({ ...options, role: 'worker' });
   const scopes: ReturnType<typeof serveExecutionRuntime>[] = [];
-  worker.onSession(transport => scopes.push(serveExecutionRuntime(runtime, new ExecutorRpc(transport))));
+  const relay = new ProducerRelay();
+  worker.onSession(transport => scopes.push(serveExecutionRuntime(runtime, new ExecutorRpc(transport), relay)));
   const connected = connectRemoteExecutor(controller);
   if (backend === 'controller') controller.dial(worker.listen());
   else worker.dial(controller.listen());
@@ -44,6 +50,7 @@ export async function runtimeAdapter(runtime: ExecutionRuntimeApi, backend: Runt
     await controller.dispose();
     await worker.dispose();
     for (const scope of scopes) await scope.dispose();
+    relay.dispose();
   };
   try { return { executor: await connected, dispose }; }
   catch (error) { await dispose(); throw error; }

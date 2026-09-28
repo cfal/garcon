@@ -17,6 +17,8 @@ import { ExecutorRpc } from '../transport/rpc.js';
 import { connectRemoteExecutor } from './runtime-adapter.js';
 import { WebSocketLink } from '../transport/websocket-link.js';
 import { serveExecutionRuntime } from '../server/executor-rpc-server.js';
+import { ProducerRelay, type ProducerRelayOptions } from '../server/producer-relay.js';
+import type { RemoteExecutorClientOptions } from '../client/executor-client.js';
 import { ProjectService } from '../../runtime/projects/project-service.js';
 import { discoverApiProviderModels } from '../../runtime/providers/discovery.js';
 
@@ -100,17 +102,19 @@ export async function remoteFixture(
   configure: (controller: WebSocketLink, worker: WebSocketLink, fixture: ReturnType<typeof integrationFixture>) => void = () => {},
   projectBasePath?: string,
   executorId = linkOptions.executorId,
+  resumption: { readonly relay?: ProducerRelayOptions; readonly client?: RemoteExecutorClientOptions } = {},
 ) {
   const controller = new WebSocketLink({ ...linkOptions, executorId, role: 'controller' });
   const worker = new WebSocketLink({ ...linkOptions, executorId, role: 'worker' });
   const fixture = integrationFixture(projectBasePath, executorId);
   const generations = [fixture];
   const scopes: ReturnType<typeof serveExecutionRuntime>[] = [];
+  const relay = new ProducerRelay(resumption.relay);
   configure(controller, worker, fixture);
   worker.onSession((session) => {
-    scopes.push(serveExecutionRuntime(fixture.executor, new ExecutorRpc(session)));
+    scopes.push(serveExecutionRuntime(fixture.executor, new ExecutorRpc(session), relay));
   });
-  const connected = connectRemoteExecutor(controller);
+  const connected = connectRemoteExecutor(controller, undefined, resumption.client);
   if (dialer === 'controller') controller.dial(worker.listen());
   else worker.dial(controller.listen());
   const executor = await connected;
@@ -119,6 +123,7 @@ export async function remoteFixture(
     async dispose() {
       await executor.dispose(); await worker.dispose();
       await Promise.all(scopes.map((scope) => scope.dispose()));
+      relay.dispose();
       await fixture.executor.dispose();
     },
   };

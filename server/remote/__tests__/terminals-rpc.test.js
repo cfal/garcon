@@ -5,6 +5,7 @@ import { TerminalRuntime } from '../../runtime/terminals/runtime.ts';
 import { connectRemoteExecutor } from './runtime-adapter.js';
 import { WebSocketLink } from '../transport/websocket-link.ts';
 import { serveExecutionRuntime } from '../server/executor-rpc-server.ts';
+import { ProducerRelay } from '../server/producer-relay.ts';
 import { ExecutorRpc } from '../transport/rpc.ts';
 
 const authority = { key: 'synthetic-user', expiresAtMs: null };
@@ -29,7 +30,7 @@ for (const dialer of ['controller', 'worker']) test(`terminal RPC preserves proc
   const scopes = [];
   worker.onSession(transport => scopes.push(serveExecutionRuntime(new ExecutionRuntime({
     id: options.executorId, workspaceDir: homedir(), projectBasePath: homedir(), integrations: [], terminalRuntime: runtime, resolveCredential: async () => null,
-  }), new ExecutorRpc(transport))));
+  }), new ExecutorRpc(transport), new ProducerRelay())));
   const connected = connectRemoteExecutor(controller);
   if (dialer === 'controller') controller.dial(worker.listen()); else worker.dial(controller.listen());
   try {
