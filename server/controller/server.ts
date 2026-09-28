@@ -575,7 +575,11 @@ export async function startServer(): Promise<void> {
       chatMutationLock,
       logger,
     });
-    const chatProcessingActivity = new ChatProcessingActivity(agentRegistry, queue);
+    const chatProcessingActivity = new ChatProcessingActivity(agentRegistry, queue, {
+      isChatExecutorReconnecting: (chatId) => executors.isReconnecting(
+        effectiveExecutorId(chatRegistry.getChat(chatId)?.executorId),
+      ),
+    });
     const lastSelectedChat = new InMemoryLastSelectedChatState();
     const chatIds = new ChatIdAllocator(chatRegistry);
     const chatListProjector = new ChatListProjector({

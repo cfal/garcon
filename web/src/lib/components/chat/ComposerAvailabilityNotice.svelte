@@ -41,6 +41,11 @@
 			title={m.chat_composer_model_unavailable()}
 			detail={m.chat_composer_model_unavailable_detail()}
 		/>
+	{:else if notice.kind === 'executor-reconnecting'}
+		<AvailabilityNotice
+			title={m.chat_composer_executor_reconnecting()}
+			detail={m.chat_composer_executor_reconnecting_detail({ label: notice.executorLabel })}
+		/>
 	{:else if notice.kind === 'executor-removed'}
 		<AvailabilityNotice
 			title={m.chat_composer_executor_unavailable()}

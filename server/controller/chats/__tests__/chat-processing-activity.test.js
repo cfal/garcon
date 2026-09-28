@@ -5,10 +5,12 @@ function makeActivity({
   runningIds = [],
   reservedIds = [],
   stoppingIds = [],
+  reconnectingIds = [],
 } = {}) {
   const running = new Set(runningIds);
   const reserved = new Set(reservedIds);
   const stopping = new Set(stoppingIds);
+  const reconnecting = new Set(reconnectingIds);
   return new ChatProcessingActivity(
     {
       isChatRunning: mock((chatId) => running.has(chatId)),
@@ -18,6 +20,9 @@ function makeActivity({
       isChatTurnReserved: mock((chatId) => reserved.has(chatId)),
       getTurnReservedChatIds: mock(() => [...reserved]),
       isChatStopInFlight: mock((chatId) => stopping.has(chatId)),
+    },
+    {
+      isChatExecutorReconnecting: mock((chatId) => reconnecting.has(chatId)),
     },
   );
 }
@@ -43,6 +48,18 @@ describe('ChatProcessingActivity', () => {
 
     expect(activity.phase('runtime-chat')).toBe('stopping');
     expect(activity.phase('reserved-chat')).toBe('stopping');
+    expect(activity.phase('idle-chat')).toBeNull();
+  });
+
+  it('projects an active turn on a reconnecting executor as reconnecting unless it is stopping', () => {
+    const activity = makeActivity({
+      runningIds: ['runtime-chat', 'stopping-chat'],
+      stoppingIds: ['stopping-chat'],
+      reconnectingIds: ['runtime-chat', 'stopping-chat', 'idle-chat'],
+    });
+
+    expect(activity.phase('runtime-chat')).toBe('reconnecting');
+    expect(activity.phase('stopping-chat')).toBe('stopping');
     expect(activity.phase('idle-chat')).toBeNull();
   });
 

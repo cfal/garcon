@@ -135,5 +135,6 @@ export class ExecutorsStore {
 export function executorStatus(executor: ExecutorSnapshot): string {
 	if (!executor.enabled) return 'Disabled';
 	if (executor.availability === 'ready') return 'Ready';
+	if (executor.availability === 'reconnecting') return 'Reconnecting';
 	return executor.direction === 'executor-connects' ? 'Waiting for connection' : 'Offline';
 }

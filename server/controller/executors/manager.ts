@@ -82,6 +82,10 @@ export class ExecutorManager {
     return Boolean(entry?.config.enabled && !entry.preparation && entry.integrations && entry.executor?.availability === 'ready');
   }
 
+  isReconnecting(executorId: string): boolean {
+    return !this.#disposed && this.#remotes.get(executorId)?.executor?.availability === 'reconnecting';
+  }
+
   requireExecutor(executorId: string): ExecutionRuntimeApi {
     if (!this.isReady(executorId)) throw new DomainError('EXECUTOR_UNAVAILABLE', 'Executor is unavailable', 503, true);
     return executorId === LOCAL_EXECUTOR_ID ? this.local : this.#remotes.get(executorId)!.executor!;
@@ -123,7 +127,7 @@ export class ExecutorManager {
       id: entry.config.id, label: entry.config.label, kind: 'remote', enabled: entry.config.enabled,
       allowControllerCli: entry.config.allowControllerCli,
       direction: entry.config.connection.kind,
-      availability: this.isReady(entry.config.id) ? 'ready' : 'offline',
+      availability: this.isReady(entry.config.id) ? 'ready' : this.isReconnecting(entry.config.id) ? 'reconnecting' : 'offline',
       projectBasePath: entry.info?.projectBasePath ?? null, lastError: entry.error,
       instanceId: entry.info?.instanceId ?? null,
       machineServices: { files: entry.info?.services.files === true, git: entry.info?.services.git === true, gh: entry.info?.services.gh === true, terminals: entry.info?.services.terminals === true },

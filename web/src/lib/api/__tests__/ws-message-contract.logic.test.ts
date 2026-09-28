@@ -467,6 +467,9 @@ describe('parseServerWsMessage', () => {
 			parseServerWsMessage({ type: 'chat-processing-updated', chatId: 'c-1', phase: 'stopping' }),
 		).toEqual(new ChatProcessingUpdatedMessage('c-1', 'stopping'));
 		expect(
+			parseServerWsMessage({ type: 'chat-processing-updated', chatId: 'c-1', phase: 'reconnecting' }),
+		).toEqual(new ChatProcessingUpdatedMessage('c-1', 'reconnecting'));
+		expect(
 			parseServerWsMessage({ type: 'chat-processing-updated', chatId: 'c-1', phase: null }),
 		).toEqual(new ChatProcessingUpdatedMessage('c-1', null));
 		expect(

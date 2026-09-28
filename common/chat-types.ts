@@ -45,7 +45,8 @@ export interface ChatImage {
 
 export { CHAT_STOP_OUTCOMES, isAbortAcknowledged, isStopSatisfied } from './chat-stop.js';
 export type { ChatStopIntent, ChatStopOutcome } from './chat-stop.js';
-export const CHAT_PROCESSING_PHASES = ['running', 'stopping'] as const;
+// `reconnecting` is a running turn whose remote executor link dropped and may resume.
+export const CHAT_PROCESSING_PHASES = ['running', 'stopping', 'reconnecting'] as const;
 export type ChatProcessingPhase = typeof CHAT_PROCESSING_PHASES[number];
 
 export interface ChatProcessingEntry {

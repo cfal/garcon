@@ -48,6 +48,27 @@ describe('resolveExecutorServiceNotice', () => {
 		});
 	});
 
+	it('reports a reconnecting executor distinctly from an unavailable one', () => {
+		const reconnecting = executors({
+			...remoteExecutor,
+			availability: 'reconnecting',
+			machineServices: filesAndGit,
+		});
+		expect(resolveExecutorServiceNotice(reconnecting, remoteExecutor.id, 'files')).toEqual({
+			kind: 'executor-reconnecting',
+			executorLabel: 'Worker',
+		});
+		const disabled = executors({
+			...remoteExecutor,
+			enabled: false,
+			availability: 'reconnecting',
+			machineServices: filesAndGit,
+		});
+		expect(resolveExecutorServiceNotice(disabled, remoteExecutor.id, 'files')).toMatchObject({
+			kind: 'executor-unavailable',
+		});
+	});
+
 	it('reports a ready executor that does not provide the service', () => {
 		expect(
 			resolveExecutorServiceNotice(executors(remoteExecutor), remoteExecutor.id, 'git'),

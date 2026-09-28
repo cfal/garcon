@@ -672,7 +672,14 @@ export function wireServerEvents({
     }
   };
   executors.onChanged(() => broadcast(new ExecutorsChangedMessage(executors.list())));
+  // Running turns on an executor show whether its link is reconnecting.
+  const publishExecutorProcessing = (executorId: string) => {
+    for (const { chatId } of processing.snapshot()) {
+      if (effectiveExecutorId(chatRegistry.getChat(chatId)?.executorId) === executorId) publishProcessing(chatId);
+    }
+  };
   executors.onAvailabilityChanged((executorId, availability) => {
+    if (availability === 'reconnecting' || availability === 'ready') publishExecutorProcessing(executorId);
     if (availability === 'offline') agentRegistry.executionSessionLost(executorId);
     if (availability === 'ready') {
       logger.info('Executor ready', { executorId });

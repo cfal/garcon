@@ -100,6 +100,28 @@ describe('ConversationLifecycleState', () => {
 			expect(store.loadingStatus).toMatchObject({ text: 'Processing', can_interrupt: true });
 		});
 
+		it('layers a reconnecting status over the turn and removes it when the turn resumes', () => {
+			const store = makeStore();
+			store.beginTurn('chat-1');
+			store.pushLoadingStatus({ ...makeEntry('permission-1', 'Waiting for permission'), can_interrupt: true });
+
+			store.applyProcessingPhase('chat-1', 'reconnecting');
+			store.applyProcessingPhase('chat-1', 'reconnecting');
+
+			expect(store.turnStatus).toBe('running');
+			expect(store.loadingStatus).toMatchObject({ text: 'Reconnecting to executor', can_interrupt: true });
+			expect(store.loadingStatusStack.map((entry) => entry.id)).toEqual([
+				'__default__',
+				'permission-1',
+				'__executor-reconnecting__',
+			]);
+
+			store.applyProcessingPhase('chat-1', 'running');
+
+			expect(store.loadingStatus).toMatchObject({ id: 'permission-1', text: 'Waiting for permission' });
+			expect(store.loadingStatusStack.map((entry) => entry.id)).toEqual(['__default__', 'permission-1']);
+		});
+
 		it('clears stale stopping metadata when the phase becomes idle', () => {
 			const store = makeStore();
 			store.beginTurn('chat-1');

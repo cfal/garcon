@@ -25,6 +25,8 @@ export function parseExecutorId(value: unknown): ExecutorId | null {
   return value == null ? LOCAL_EXECUTOR_ID : isExecutorId(value) ? value : null;
 }
 
+export type ExecutorSnapshotAvailability = 'ready' | 'reconnecting' | 'offline';
+
 export interface ExecutorSnapshot {
   readonly id: string;
   readonly label: string;
@@ -32,7 +34,7 @@ export interface ExecutorSnapshot {
   readonly enabled: boolean;
   readonly allowControllerCli: boolean;
   readonly direction: ExecutorDirection | null;
-  readonly availability: 'ready' | 'offline';
+  readonly availability: ExecutorSnapshotAvailability;
   readonly instanceId: string | null;
   readonly projectBasePath: string | null;
   readonly lastError: { readonly code: string; readonly message: string } | null;
@@ -127,7 +129,7 @@ export function parseExecutorSnapshot(value: unknown): ExecutorSnapshot | null {
   if (!isRecord(value) || !hasOnlyKeys(value, ['id', 'label', 'kind', 'enabled', 'direction', 'availability', 'instanceId', 'projectBasePath', 'lastError', 'machineServices', 'allowControllerCli'])
     || typeof value.allowControllerCli !== 'boolean'
     || !isExecutorId(value.id) || !isLabel(value.label) || typeof value.enabled !== 'boolean'
-    || (value.availability !== 'ready' && value.availability !== 'offline')
+    || (value.availability !== 'ready' && value.availability !== 'reconnecting' && value.availability !== 'offline')
     || !(value.instanceId === null || typeof value.instanceId === 'string' && value.instanceId.length > 0 && value.instanceId.length <= 128)
     || !(value.projectBasePath === null || typeof value.projectBasePath === 'string')) return null;
   if (value.id === LOCAL_EXECUTOR_ID

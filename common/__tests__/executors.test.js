@@ -47,6 +47,9 @@ test('public snapshots exclude credentials and preserve unavailable remote targe
   const ready = { ...remote, availability: 'ready', instanceId: 'synthetic-instance', projectBasePath: '/' };
   const readyMessage = new ExecutorsChangedMessage([ready]);
   expect(parseServerWsMessage(JSON.parse(JSON.stringify(readyMessage)))).toEqual(readyMessage);
+  const reconnecting = { ...ready, availability: 'reconnecting' };
+  expect(parseExecutors([reconnecting])).toEqual([reconnecting]);
+  expect(parseExecutors([{ ...ready, availability: 'resuming' }])).toBeNull();
   for (const instanceId of [undefined, '', 3, {}, 'x'.repeat(129)]) {
     expect(parseExecutors([{ ...remote, instanceId }])).toBeNull();
   }

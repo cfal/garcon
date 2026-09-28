@@ -4,7 +4,8 @@ type ExecutorAvailability = Pick<ExecutorsStore, 'isReady' | 'hasSnapshot' | 'ge
 
 export type ExecutorAvailabilityNotice =
 	| { readonly kind: 'executor-removed'; readonly executorId: string }
-	| { readonly kind: 'executor-unavailable'; readonly executorLabel: string };
+	| { readonly kind: 'executor-unavailable'; readonly executorLabel: string }
+	| { readonly kind: 'executor-reconnecting'; readonly executorLabel: string };
 
 export type ExecutorServiceNotice =
 	| ExecutorAvailabilityNotice
@@ -19,8 +20,10 @@ export function resolveExecutorAvailabilityNotice(
 	executorId: string,
 ): ExecutorAvailabilityNotice | null {
 	if (executors.isReady(executorId)) return null;
-	return executors.hasSnapshot && !executors.get(executorId)
-		? { kind: 'executor-removed', executorId }
+	const executor = executors.get(executorId);
+	if (executors.hasSnapshot && !executor) return { kind: 'executor-removed', executorId };
+	return executor?.enabled && executor.availability === 'reconnecting'
+		? { kind: 'executor-reconnecting', executorLabel: executors.label(executorId) }
 		: { kind: 'executor-unavailable', executorLabel: executors.label(executorId) };
 }
 

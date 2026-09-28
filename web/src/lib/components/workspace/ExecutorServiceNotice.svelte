@@ -13,6 +13,11 @@
 			detail={m.workspace_executor_removed_detail()}
 			subject={notice.executorId}
 		/>
+	{:else if notice.kind === 'executor-reconnecting'}
+		<AvailabilityNotice
+			title={m.workspace_executor_reconnecting()}
+			detail={m.workspace_executor_reconnecting_detail({ label: notice.executorLabel })}
+		/>
 	{:else if notice.kind === 'executor-unavailable'}
 		<AvailabilityNotice
 			title={m.workspace_executor_unavailable()}

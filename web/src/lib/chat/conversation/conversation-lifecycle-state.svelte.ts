@@ -23,6 +23,9 @@ export interface LoadingStatusEntry extends LoadingStatus {
 	id: string;
 }
 
+// Layered over the stack so permission and tool statuses survive a reconnect.
+const RECONNECTING_STATUS_ID = '__executor-reconnecting__';
+
 export interface StoppingSnapshot {
 	turnStatus: TurnStatus;
 	loadingStatusStack: LoadingStatusEntry[];
@@ -160,6 +163,18 @@ export class ConversationLifecycleState {
 		this.#stoppingRequestId = null;
 		this.#stoppingStartedAt = null;
 		this.markTurnRunning(chatId);
+		if (phase === 'reconnecting') {
+			if (this.loadingStatusStack.at(-1)?.id === RECONNECTING_STATUS_ID) return;
+			this.popLoadingStatus(RECONNECTING_STATUS_ID);
+			this.pushLoadingStatus({
+				id: RECONNECTING_STATUS_ID,
+				text: m.chat_loading_reconnecting(),
+				tokens: 0,
+				can_interrupt: true,
+			});
+			return;
+		}
+		this.popLoadingStatus(RECONNECTING_STATUS_ID);
 		const current = this.loadingStatus;
 		if (!current || current.text === m.chat_loading_stopping()) {
 			this.setLoadingStatus({

@@ -8,6 +8,10 @@ interface RunningChatSource {
   getRunningChatIdsSnapshot(): string[];
 }
 
+interface ExecutorReconnectSource {
+  isChatExecutorReconnecting(chatId: string): boolean;
+}
+
 interface TurnReservationSource {
   isChatTurnReserved(chatId: string): boolean;
   getTurnReservedChatIds(): string[];
@@ -18,6 +22,7 @@ export class ChatProcessingActivity {
   constructor(
     private readonly running: RunningChatSource,
     private readonly reservations: TurnReservationSource,
+    private readonly executors: ExecutorReconnectSource,
   ) {}
 
   // Answers whether the user should see a turn in progress, which is narrower than the
@@ -28,7 +33,8 @@ export class ChatProcessingActivity {
     if (!this.running.isChatRunning(chatId) && !this.reservations.isChatTurnReserved(chatId)) {
       return null;
     }
-    return this.reservations.isChatStopInFlight(chatId) ? 'stopping' : 'running';
+    if (this.reservations.isChatStopInFlight(chatId)) return 'stopping';
+    return this.executors.isChatExecutorReconnecting(chatId) ? 'reconnecting' : 'running';
   }
 
   snapshot(): ChatProcessingEntry[] {

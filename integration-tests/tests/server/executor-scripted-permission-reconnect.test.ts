@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { join } from 'node:path';
+import type { ChatProcessingUpdatedMessage } from '../../../common/ws-events.js';
 import { tcpLinkProxy } from '../../../server/remote/__tests__/tcp-link-proxy.js';
 import { messagesOfType } from '../../support/chat-assertions.js';
 import { withTimeout } from '../../support/deferred.js';
@@ -33,10 +34,20 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
           (event.type === 'agent-run-finished' || event.type === 'agent-run-failed')
           && event.chatId === chatId && event.turnId === started.turnId);
         const cursor = fixture.client.markEvents();
+        const processingPhase = (phase: ChatProcessingUpdatedMessage['phase']) => fixture.client.waitForEvent(
+          (event): event is ChatProcessingUpdatedMessage => event.type === 'chat-processing-updated'
+            && event.chatId === chatId && event.phase === phase,
+          `${chatId} processing ${phase}`, { afterIndex: cursor, timeoutMs: 20_000 },
+        );
         proxy!.disconnect();
+        const reconnecting = await processingPhase('reconnecting');
         await waitForExecutorReconnect(fixture, cursor);
+        const resumed = await processingPhase('running');
 
         // The turn and its pending permission survive the blip; nothing was denied.
+        expect(fixture.client.events().indexOf(reconnecting)).toBeLessThan(fixture.client.events().indexOf(resumed));
+        expect(fixture.client.eventsSince(cursor).some(event => event.type === 'executors-changed'
+          && event.executors.some(executor => executor.availability === 'reconnecting'))).toBe(true);
         expect(terminals()).toEqual([]);
         expect((await fixture.client.getChatSnapshot(chatId, 0)).transientFeed.rows.map(row => row.message.type))
           .toEqual(['permission-request']);
