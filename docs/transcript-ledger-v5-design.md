@@ -6,14 +6,20 @@ Status: revision 41 integrated design. Supersedes
 which remains untouched as the historical record of the reconciliation-based
 architecture and its implementation through commit `f029424c`.
 
-Revision 41 lets remote producer bindings survive a short executor disconnect
+Revision 41 lets remote producer bindings survive an executor disconnect
 and bounds whole-history work. The worker's process-level producer relay
 numbers each binding's events, retains them until the controller acknowledges
 receiving them, and replays the unacknowledged suffix when a replacement
-session resumes the binding within a 120-second reconnect grace. Its 16 MiB
-retention budget drops the oldest row batches first and never session,
-permission, or run facts; the controller detects the skipped numbers and
-records one notice on the active run. During the grace the executor is
+session resumes the binding within a three-hour reconnect grace, matching VS
+Code Remote. A controller resumes every binding it still holds while
+installing a session, so bindings a newer session has not resumed expire
+within five minutes of its start, as VS Code shortens its grace once another
+client connects. The relay offers events to the session only as fast as its
+bounded queue drains, so a replay of any size, or output behind a slow link,
+streams through one session. Its 32 MiB per-executor retention budget drops
+the oldest row batches first and never session, permission, or run facts; the
+controller detects the skipped numbers and records one notice on the active
+run. During the grace the executor is
 `reconnecting`: runs stay active in that processing phase, pending permissions
 remain answerable once the executor is ready again, and Stop is delivered after
 resume. After the grace, after a worker restart, or for a binding the worker no
@@ -1351,8 +1357,9 @@ is durability. Worker emission is only transport handoff:
   committed rows.
 - The controller ledger does not buffer. A remote worker's producer relay
   retains the events it emitted until the controller acknowledges
-  receiving them, and replays the unacknowledged suffix to a replacement
-  session that resumes the binding within the reconnect grace; the
+  receiving them, and replays the unacknowledged suffix, paced by the
+  session queue, to a replacement session that resumes the binding within
+  the reconnect grace; the
   controller deduplicates replays by per-binding sequence number. Retained
   events are not ledger-accepted. Under the relay's retention budget the
   oldest row batches are dropped and reported as one gap notice (section
@@ -2608,7 +2615,7 @@ relevant-entry definition under the 10.2 obligation.
 | Direct Responses checkpoint is unresolved before output | One fallback request uses the bounded native-history projection without `previous_response_id`; unrelated errors, post-output errors, and fallback failure do not retry. |
 | User interrupt | Run marked stopped in memory; `run-ended: interrupted` appended immediately; provider abort best-effort; the interruption row is transparent to the resend scan. |
 | Remote executor link lost; a replacement session resumes within the grace | Runs stay active in the `reconnecting` processing phase. The worker replays events after the controller's last received sequence number, and duplicates are ignored, so each event reaches the sink once. A permission answer during the gap fails as unavailable and stays actionable; Stop is delivered after resume. |
-| Remote output retained during the gap exceeds the relay budget | The oldest row batches are dropped and one notice on the active run reports undelivered output; manual Reload after the turn recovers it. Session, permission, and run facts are never dropped. |
+| Remote output retained during the gap, or backed up behind a slow link, exceeds the relay budget | The oldest row batches are dropped and one notice on the active run reports undelivered output; manual Reload after the turn recovers it. Session, permission, and run facts are never dropped. |
 | Reconnect grace expires, the worker restarted, or the worker no longer holds the binding | The run fails with `OUTCOME_UNKNOWN` and the manual Reload warning. After its own grace the worker detaches the binding, drops later output, and denies pending permissions. |
 | Interrupt when the run already ended | Idle no-op; nothing appended. |
 | Duplicate or stale `run-ended` (stopped or unknown `runId`) | Ignored; never becomes a row; cannot stop the current run. |
@@ -2740,8 +2747,9 @@ Every deliberate gap, in one place, so it is not "fixed" later:
     omit that one `Preambles updated` row. The selection and next-input
     application boundary remain authoritative; no recovery journal or notice
     backfill exists.
-24. Remote output that exceeds the producer relay's 16 MiB retention budget
-    during an executor disconnect loses its oldest row batches. The chat
+24. Remote output that exceeds the producer relay's 32 MiB retention budget
+    during an executor disconnect, or behind a link slower than the agent's
+    output, loses its oldest row batches. The chat
     records one notice and manual Reload after the turn recovers the rows;
     the relay does not persist output or page it to disk. Output still
     retained when the reconnect grace ends is lost as in the revision 40
@@ -3057,13 +3065,15 @@ The catalog cites this revision, but its inventory is not repeated here.
   cases prove prefix seeding with independent resume plus the
   not-settled refusal that becomes a sessionless handoff fork only with
   consent.
-- **Remote producer resumption**: relay numbering, acknowledgement,
-  retention drop order, and grace expiry as unit rules; resume with
-  exactly-once delivery, the gap notice, a binding the worker released, an
-  expired controller grace, and a restarted worker over real links in both
-  dial directions; a pending permission that survives a blip through the
-  runtime router and through the pinned Claude CLI; and the browser's
-  reconnecting indicator.
+- **Remote producer resumption**: relay numbering, acknowledgement, paced
+  delivery in publication order, retention drop order, grace expiry, and the
+  shorter grace once a newer session starts as unit rules; resume with
+  exactly-once delivery, a backlog far beyond the session queue through one
+  session, the gap notice, a binding the worker released, an expired
+  controller grace, a restarted worker, and a restarted controller's
+  unresumed binding over real links; a pending permission that survives a
+  blip through the runtime router and through the pinned Claude CLI; and the
+  browser's reconnecting indicator.
 - **Responsiveness**: a 30,000-row Direct chat reloads, forks, and renders a
   handoff artifact in every execution lane while WebSocket pings stay under
   500 ms.
