@@ -10,16 +10,19 @@ import {
   ClientRequestErrorMessage,
   ChatSubscribedMessage,
   ChatReloadedMessage,
+  ChatReloadProgressMessage,
   WsPongMessage,
 } from '../../../common/ws-events.ts';
 import type {
   ChatProcessingSnapshotResult,
+  ChatReloadProgress,
   ClientRequestErrorCode,
 } from '../../../common/ws-events.ts';
 import {
   parseClientWsMessage,
   ChatSubscribeRequest,
   ChatReloadRequest,
+  ChatReloadCancelRequest,
   ReconnectStateQueryRequest,
   WsPingRequest,
 } from '../../../common/ws-requests.ts';
@@ -59,9 +62,16 @@ type ChatViewsDep = {
   resendCandidates(chatId: string): readonly import('../../../common/chat-view.js').ResendCandidate[];
 };
 // Serves the manual reload as a fresh view over the authoritative ledger.
-type TranscriptReload = (chatId: string) => Promise<import('../../../common/chat-view.js').TranscriptPage>;
+type TranscriptReload = (chatId: string, options: {
+  readonly signal: AbortSignal;
+  readonly onProgress: (progress: ChatReloadProgress) => void;
+}) => Promise<import('../../../common/chat-view.js').TranscriptPage>;
 
-type WsRequestHandler = (data: ClientWsMessage, writer: WebSocketWriter) => Promise<void> | void;
+type WsRequestHandler = (
+  data: ClientWsMessage,
+  writer: WebSocketWriter,
+  ws: WS,
+) => Promise<void> | void;
 type ChatIdRequest = { type: string; chatId?: string | null };
 
 interface ChatHandlerDeps {
@@ -76,6 +86,7 @@ interface ChatHandlerDeps {
 
 const RECONNECT_CONTROL_READ_CONCURRENCY = 8;
 const MAX_TRANSCRIPT_REPLAY_FRAME_BYTES = 1024 * 1024;
+const RELOAD_PROGRESS_INTERVAL_MS = 1_000;
 
 function readProcessingSnapshot(
   processing: Pick<ChatProcessingActivity, 'snapshot'>,
@@ -192,6 +203,33 @@ interface RequestErrorParams {
   chatId?: string;
 }
 
+// Sends the latest progress now, on every phase change, and once a second, so
+// the client's liveness check also covers lock waits and slow phases. A
+// dropped progress frame never fails the reload.
+function reportReloadProgress(send: (progress: ChatReloadProgress) => void): {
+  readonly update: (progress: ChatReloadProgress) => void;
+  readonly stop: () => void;
+} {
+  let latest: ChatReloadProgress = { phase: 'preparing', rows: 0 };
+  const deliver = () => {
+    try {
+      send(latest);
+    } catch (error: unknown) {
+      if (!(error instanceof WebSocketResponseDroppedError)) throw error;
+    }
+  };
+  deliver();
+  const timer = setInterval(deliver, RELOAD_PROGRESS_INTERVAL_MS);
+  return {
+    update(progress) {
+      const phaseChanged = progress.phase !== latest.phase;
+      latest = progress;
+      if (phaseChanged) deliver();
+    },
+    stop: () => clearInterval(timer),
+  };
+}
+
 function reloadErrorCode(error: unknown): ClientRequestErrorCode {
   if (isDomainError(error) && (error.code === 'CHAT_RUNNING' || error.code === 'HISTORY_LOAD_FAILED')) {
     return error.code;
@@ -216,6 +254,9 @@ export class ChatHandler {
   #transientFeeds: Pick<ChatTransientFeedStore, 'snapshot'>;
   #registry: IChatRegistry;
   #requestHandlers: Record<ClientWsMessage['type'], WsRequestHandler>;
+  // Only the requesting socket may cancel a reload. A closed socket does not
+  // cancel it: the replacement reaches every client as a view replacement.
+  readonly #reloads = new WeakMap<WS, Map<string, { chatId: string; controller: AbortController }>>();
 
   constructor({
     serverInstanceId,
@@ -387,22 +428,47 @@ export class ChatHandler {
     }
   }
 
-  async #handleChatReload(data: ChatReloadRequest, chatId: string, writer: WebSocketWriter): Promise<void> {
+  async #handleChatReload(
+    data: ChatReloadRequest,
+    chatId: string,
+    writer: WebSocketWriter,
+    ws: WS,
+  ): Promise<void> {
     const clientRequestId = data.clientRequestId;
     if (!clientRequestId) return;
     const requestType = 'chat-reload';
+    const session = this.#registry.getChat(chatId);
+    if (!session) {
+      this.#sendRequestError(writer, {
+        clientRequestId, requestType,
+        code: 'SESSION_NOT_FOUND',
+        message: `Chat not found: ${chatId}`,
+        retryable: false, chatId,
+      });
+      return;
+    }
+    let reloads = this.#reloads.get(ws);
+    if (!reloads) this.#reloads.set(ws, reloads = new Map());
+    if (reloads.has(clientRequestId)) {
+      this.#sendRequestError(writer, {
+        clientRequestId, requestType,
+        code: 'REQUEST_VALIDATION_FAILED',
+        message: 'A reload with this request ID is already running',
+        retryable: false, chatId,
+      });
+      return;
+    }
+    const controller = new AbortController();
+    reloads.set(clientRequestId, { chatId, controller });
+    const progress = reportReloadProgress((update) => writer.send(new ChatReloadProgressMessage(
+      clientRequestId, chatId, update.phase, update.rows,
+    )));
     try {
-      const session = this.#registry.getChat(chatId);
-      if (!session) {
-        this.#sendRequestError(writer, {
-          clientRequestId, requestType,
-          code: 'SESSION_NOT_FOUND',
-          message: `Chat not found: ${chatId}`,
-          retryable: false, chatId,
-        });
-        return;
-      }
-      const reload = await this.#transcriptReload(chatId);
+      const reload = await this.#transcriptReload(chatId, {
+        signal: controller.signal,
+        onProgress: progress.update,
+      });
+      progress.stop();
       writer.send(new ChatReloadedMessage(
         clientRequestId,
         chatId,
@@ -415,7 +481,17 @@ export class ChatHandler {
         reload.hasMore,
       ));
     } catch (error: unknown) {
+      progress.stop();
       if (error instanceof WebSocketResponseDroppedError) throw error;
+      if (controller.signal.aborted) {
+        this.#sendRequestError(writer, {
+          clientRequestId, requestType,
+          code: 'REQUEST_CANCELLED',
+          message: 'Reload cancelled',
+          retryable: true, chatId,
+        });
+        return;
+      }
       const message = (error as Error).message || 'Failed to reload chat';
       this.#sendRequestError(writer, {
         clientRequestId, requestType,
@@ -423,7 +499,15 @@ export class ChatHandler {
         message,
         retryable: isDomainError(error) ? error.retryable : true, chatId,
       });
+    } finally {
+      reloads.delete(clientRequestId);
     }
+  }
+
+  #handleChatReloadCancel(data: ChatReloadCancelRequest, chatId: string, ws: WS): void {
+    if (!data.reloadRequestId) return;
+    const reload = this.#reloads.get(ws)?.get(data.reloadRequestId);
+    if (reload?.chatId === chatId) reload.controller.abort();
   }
 
   #createRequestHandlers(): Record<ClientWsMessage['type'], WsRequestHandler> {
@@ -431,8 +515,11 @@ export class ChatHandler {
       'chat-subscribe': (data, writer) => this.#withChatId(data as ChatSubscribeRequest, writer, (chatId) => {
         return this.#handleChatSubscribe(data as ChatSubscribeRequest, chatId, writer);
       }),
-      'chat-reload': (data, writer) => this.#withChatId(data as ChatReloadRequest, writer, (chatId) => {
-        return this.#handleChatReload(data as ChatReloadRequest, chatId, writer);
+      'chat-reload': (data, writer, ws) => this.#withChatId(data as ChatReloadRequest, writer, (chatId) => {
+        return this.#handleChatReload(data as ChatReloadRequest, chatId, writer, ws);
+      }),
+      'chat-reload-cancel': (data, writer, ws) => this.#withChatId(data as ChatReloadCancelRequest, writer, (chatId) => {
+        this.#handleChatReloadCancel(data as ChatReloadCancelRequest, chatId, ws);
       }),
       'reconnect-state-query': (data, writer) => this.#handleReconnectState(data as ReconnectStateQueryRequest, writer),
       'ws-ping': (data, writer) => this.#handleWsPing(data as WsPingRequest, writer),
@@ -466,7 +553,7 @@ export class ChatHandler {
         this.#handleMalformedRequest(raw, writer);
         return;
       }
-      await this.#requestHandlers[data.type](data, writer);
+      await this.#requestHandlers[data.type](data, writer, ws);
     } catch (error: unknown) {
       if (error instanceof WebSocketResponseDroppedError) throw error;
       logger.error('ws: chat error:', (error as Error).message);

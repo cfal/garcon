@@ -23,6 +23,7 @@ export interface NativeHistorySeedInput {
   readonly signal: AbortSignal;
   readonly now: () => string;
   readonly preambleEvidence?: readonly PreambleHistoryEvidence[];
+  readonly onRowsRead?: (rows: number) => void;
 }
 
 // Reads a session's native history as ledger drafts. Reload and native fork both rebuild a feed
@@ -38,6 +39,7 @@ export async function importNativeHistoryDrafts({
   signal,
   now,
   preambleEvidence = [],
+  onRowsRead,
 }: NativeHistorySeedInput): Promise<LedgerRowDraft[]> {
   const imported: ImportedRow[] = [];
   const chat = toAgentChatReference(
@@ -56,6 +58,7 @@ export async function importNativeHistoryDrafts({
     for (const row of batch) {
       imported.push({ message: row.message, providerMeta: row.providerMeta ?? null });
     }
+    onRowsRead?.(imported.length);
   }
   const sanitized = sanitizeRecordedCarriedContext({
     messages: imported.map((row) => row.message),

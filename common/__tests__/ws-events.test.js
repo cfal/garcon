@@ -4,14 +4,42 @@ import {
   ChatListRefreshRequestedMessage,
   ChatBoardsInvalidatedMessage,
   ChatPreamblesInvalidatedMessage,
+  ChatReloadProgressMessage,
   PreamblesInvalidatedMessage,
   parseServerWsMessage,
   TranscriptSearchStatusMessage,
 } from '../ws-events.ts';
+import { ChatReloadCancelRequest, parseClientWsMessage } from '../ws-requests.ts';
 
 it('round-trips execution settings invalidations', () => {
   const event = new ChatListRefreshRequestedMessage('execution-settings-updated', '1783725900000200');
   expect(parseServerWsMessage(JSON.parse(JSON.stringify(event)))).toEqual(event);
+});
+
+describe('parseServerWsMessage chat-reload-progress', () => {
+  it('round-trips each phase and rejects malformed progress', () => {
+    for (const phase of ['preparing', 'reading', 'saving']) {
+      const event = new ChatReloadProgressMessage('req-1', '1783725900000200', phase, 42);
+      expect(parseServerWsMessage(JSON.parse(JSON.stringify(event)))).toEqual(event);
+    }
+    const valid = { type: 'chat-reload-progress', clientRequestId: 'req-1', chatId: 'chat-1', phase: 'reading', rows: 0 };
+    expect(parseServerWsMessage({ ...valid, phase: 'cutting-over' })).toBeNull();
+    expect(parseServerWsMessage({ ...valid, rows: -1 })).toBeNull();
+    expect(parseServerWsMessage({ ...valid, rows: 1.5 })).toBeNull();
+    expect(parseServerWsMessage({ ...valid, clientRequestId: '' })).toBeNull();
+  });
+});
+
+describe('parseClientWsMessage chat-reload-cancel', () => {
+  it('parses the reload it cancels', () => {
+    expect(parseClientWsMessage({
+      type: 'chat-reload-cancel',
+      chatId: 'chat-1',
+      reloadRequestId: 'req-1',
+    })).toEqual(new ChatReloadCancelRequest('chat-1', 'req-1'));
+    expect(parseClientWsMessage({ type: 'chat-reload-cancel', chatId: 'chat-1', reloadRequestId: 7 }))
+      .toEqual(new ChatReloadCancelRequest('chat-1', null));
+  });
 });
 
 describe('parseServerWsMessage chat-boards-invalidated', () => {

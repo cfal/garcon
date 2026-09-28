@@ -7,6 +7,7 @@ import { webSocketProtocolsForAuth } from '$shared/ws-auth';
 import type { PrimaryWsClientMessage } from '$shared/ws-protocol';
 import { createRandomId } from '$lib/utils/random-id';
 import { reconnectDelayMs } from './reconnect-policy';
+import { WsRequestError } from './ws-request-error';
 import {
 	parseServerWsMessage,
 	WsPongMessage,
@@ -80,11 +81,26 @@ export interface PrimaryWsConnectionPort {
 	onConnectionChange(listener: WsConnectionListener): () => void;
 }
 
+export interface WsRequestProgress {
+	/** Frame type that reports progress for the request's clientRequestId. */
+	readonly type: string;
+	/** Fails the request once neither progress nor a response arrives for this long. */
+	readonly idleTimeoutMs: number;
+	readonly onProgress: (data: Record<string, unknown>) => void;
+}
+
+export interface WsProgressRequest<T> {
+	readonly clientRequestId: string;
+	readonly response: Promise<T>;
+}
+
 interface PendingRequest {
 	resolve: (data: Record<string, unknown>) => void;
 	reject: (error: Error) => void;
 	timer: ReturnType<typeof setTimeout>;
+	expire: () => void;
 	context: WsMessageContext;
+	progress: WsRequestProgress | null;
 }
 
 const INITIAL_CONNECTION_STATUS: WsConnectionStatus = {
@@ -248,12 +264,24 @@ export class WsConnection {
 					const rid = data.clientRequestId as string | undefined;
 					if (rid && this.#pendingRequests.has(rid)) {
 						const pending = this.#pendingRequests.get(rid)!;
+						if (pending.progress && data.type === pending.progress.type) {
+							clearTimeout(pending.timer);
+							pending.timer = setTimeout(pending.expire, pending.progress.idleTimeoutMs);
+							pending.progress.onProgress(data);
+							return;
+						}
 						this.#consumeMessage(data, pending.context);
 						this.#pendingRequests.delete(rid);
 						clearTimeout(pending.timer);
 
 						if (data.type === 'client-request-error') {
-							pending.reject(new Error(`${String(data.code)}: ${String(data.message)}`));
+							pending.reject(
+								new WsRequestError(
+									String(data.code),
+									String(data.message),
+									data.retryable === true,
+								),
+							);
 						} else {
 							pending.resolve(data);
 						}
@@ -433,24 +461,43 @@ export class WsConnection {
 
 	/** Sends a request and returns a Promise resolved by a matching clientRequestId response. */
 	sendRequest<T = Record<string, unknown>>(msg: object, timeoutMs = 10_000): Promise<T> {
-		return this.#sendRequest(msg, timeoutMs, {});
+		return this.#sendRequest<T>(msg, timeoutMs, {}, null).response;
 	}
 
-	#sendRequest<T>(msg: object, timeoutMs: number, context: WsMessageContext): Promise<T> {
+	/**
+	 * Sends a long-running request whose liveness comes from correlated progress
+	 * frames instead of a fixed deadline.
+	 */
+	sendProgressRequest<T = Record<string, unknown>>(
+		msg: object,
+		progress: WsRequestProgress,
+	): WsProgressRequest<T> {
+		return this.#sendRequest<T>(msg, progress.idleTimeoutMs, {}, progress);
+	}
+
+	#sendRequest<T>(
+		msg: object,
+		timeoutMs: number,
+		context: WsMessageContext,
+		progress: WsRequestProgress | null,
+	): WsProgressRequest<T> {
 		const clientRequestId = generateRequestId();
 		const payload = { ...(msg as Record<string, unknown>), clientRequestId };
 
-		return new Promise<T>((resolve, reject) => {
-			const timer = setTimeout(() => {
+		const response = new Promise<T>((resolve, reject) => {
+			const expire = () => {
 				this.#pendingRequests.delete(clientRequestId);
 				reject(new Error(`WS request timed out: ${String((msg as Record<string, unknown>).type)}`));
-			}, timeoutMs);
+			};
+			const timer = setTimeout(expire, timeoutMs);
 
 			this.#pendingRequests.set(clientRequestId, {
 				resolve: resolve as (data: Record<string, unknown>) => void,
 				reject,
 				timer,
+				expire,
 				context,
+				progress,
 			});
 
 			if (!this.sendMessage(payload)) {
@@ -459,6 +506,7 @@ export class WsConnection {
 				reject(new Error('WebSocket not connected'));
 			}
 		});
+		return { clientRequestId, response };
 	}
 
 	async requestProcessingSnapshot(
@@ -468,7 +516,8 @@ export class WsConnection {
 			{ type: 'ws-ping', sentAt: Date.now() },
 			HEARTBEAT_TIMEOUT_MS,
 			{ processingSnapshotSource: source },
-		);
+			null,
+		).response;
 		const parsed = parseServerWsMessage(raw);
 		if (!(parsed instanceof WsPongMessage)) {
 			console.error('[WsConnection] Malformed processing snapshot response', { source });

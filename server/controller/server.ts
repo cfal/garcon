@@ -769,8 +769,8 @@ export async function startServer(): Promise<void> {
           transcriptReader.replay(chatId, viewId, afterOrdinal, throughOrdinal),
         resendCandidates: (chatId) => agentRegistry.resendCandidates(chatId),
       },
-      transcriptReload: async (chatId) => {
-        await transcriptReload.reload(chatId);
+      transcriptReload: async (chatId, options) => {
+        await transcriptReload.reload(chatId, options);
         return transcriptReader.page(chatId, 100);
       },
       queue,

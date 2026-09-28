@@ -1,3 +1,4 @@
+import type { ChatReloadProgress } from '../../../common/ws-events.js';
 import type { AgentDirectory } from '../agents/directory.js';
 import type { AgentChatEntry } from '../agents/session-types.js';
 import type { IChatRegistry } from '../chats/store.js';
@@ -34,6 +35,11 @@ export interface TranscriptReloadServiceOptions {
   readonly now?: () => string;
 }
 
+export interface TranscriptReloadOptions {
+  readonly signal?: AbortSignal;
+  readonly onProgress?: (progress: ChatReloadProgress) => void;
+}
+
 export class TranscriptReloadService {
   readonly #now: () => string;
 
@@ -41,7 +47,10 @@ export class TranscriptReloadService {
     this.#now = options.now ?? (() => new Date().toISOString());
   }
 
-  async reload(chatId: string, signal = new AbortController().signal): Promise<TranscriptView> {
+  async reload(
+    chatId: string,
+    { signal = new AbortController().signal, onProgress = () => {} }: TranscriptReloadOptions = {},
+  ): Promise<TranscriptView> {
     await this.options.adoption.ensure(chatId, signal);
     return this.options.chatMutationLock.runExclusive(`chat:${chatId}`, async () => {
       const reservation = this.#reserve(chatId);
@@ -56,7 +65,7 @@ export class TranscriptReloadService {
           );
         }
         signal.throwIfAborted();
-        return await this.#reloadReserved(chatId, signal);
+        return await this.#reloadReserved(chatId, signal, onProgress);
       } finally {
         await this.options.execution.releaseTranscriptSnapshot(reservation);
       }
@@ -77,7 +86,11 @@ export class TranscriptReloadService {
     }
   }
 
-  async #reloadReserved(chatId: string, signal: AbortSignal): Promise<TranscriptView> {
+  async #reloadReserved(
+    chatId: string,
+    signal: AbortSignal,
+    onProgress: (progress: ChatReloadProgress) => void,
+  ): Promise<TranscriptView> {
     let entry = this.options.registry.getChat(chatId);
     const current = this.options.ledger.currentView(chatId);
     const session = this.options.ledger.currentSession(chatId);
@@ -122,6 +135,7 @@ export class TranscriptReloadService {
         detail: session.detail,
         providerMeta: null,
       };
+      onProgress({ phase: 'reading', rows: 0 });
       const imported = await importNativeHistoryDrafts({
         chatId,
         entry,
@@ -132,7 +146,9 @@ export class TranscriptReloadService {
         signal,
         now: this.#now,
         preambleEvidence,
+        onRowsRead: (rows) => onProgress({ phase: 'reading', rows }),
       });
+      onProgress({ phase: 'saving', rows: imported.length });
       const contentStartOrdinal = prefix.length + 1;
       staging = await this.options.ledger.stageView(
         chatId,

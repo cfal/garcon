@@ -15,14 +15,18 @@
 	} from './conversation-panel-actions.js';
 	import { INITIAL_VISIBLE_MESSAGES } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 	import { sameGitProject } from '$lib/git/targets/git-target.js';
-	import type { ResendCandidate } from '$shared/chat-view';
 	import type { ProjectTarget } from '$shared/project-resolution';
 	import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 	import { ComposerState } from '$lib/chat/composer/composer.svelte.js';
 	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
 	import type { SubagentToolbarState } from '$lib/chat/transcript/subagent-toolbar-state.svelte.js';
 	import { AgentState } from '$lib/chat/conversation/agent-state.svelte.js';
-	import { reloadChatFromNative } from '$lib/chat/conversation/reload-chat.js';
+	import {
+		reloadChatFromNative,
+		type ChatReloadOptions,
+		type ChatReloadOutcome,
+	} from '$lib/chat/conversation/reload-chat.js';
+	import { ReloadChatDialogState } from './reload-chat-dialog-state.svelte.js';
 	import { gotoChat } from '$lib/chat/actions/chat-navigation.js';
 	import { StartupCoordinator } from '$lib/chat/conversation/startup-coordinator.js';
 	import { createDrainCursor } from '$lib/ws/drain';
@@ -92,13 +96,6 @@
 		isPresented?: boolean;
 	}
 
-	type ReloadRequest = {
-		readonly chatId: string;
-		readonly candidates: readonly ResendCandidate[];
-		readonly complete: () => void;
-		readonly fail: (error: unknown) => void;
-	};
-
 	const fallbackTranscriptCache = new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES });
 
 	let {
@@ -161,8 +158,7 @@
 	let queuedInputsDialogOpen = $state(false);
 	let queuedInputsDialogChatId = $state<string | null>(null);
 	let composerEditorOpenRequestId = $state(0);
-	let reloadRequest = $state.raw<ReloadRequest | null>(null);
-	let reloadInProgress = $state(false);
+	const reloadDialog = new ReloadChatDialogState();
 	const dialogControl = $derived(conversationUi.getExecutionControl(queuedInputsDialogChatId));
 	const dialogQueue = $derived(dialogControl?.queue ?? null);
 	const composerRequiresQueuedSubmission = $derived.by(() => {
@@ -223,8 +219,7 @@
 	const drainHandle = createDrainCursor(ws);
 	onDestroy(() => {
 		controller.executorHandoff.cancel();
-		reloadRequest?.complete();
-		reloadRequest = null;
+		reloadDialog.dispose();
 		drainHandle.cleanup();
 		transcriptCache.flush();
 	});
@@ -502,7 +497,9 @@
 		if (queuedInputsDialogOpen && queuedInputsDialogChatId !== chatId) {
 			closeQueuedInputsDialog();
 		}
-		if (reloadRequest && reloadRequest.chatId !== chatId) cancelReload();
+		if (reloadDialog.open && !reloadDialog.running && reloadDialog.chatId !== chatId) {
+			reloadDialog.cancel();
+		}
 		controller.handleChatSwitchIfChanged(chatId);
 	});
 
@@ -607,43 +604,25 @@
 		if (!chatId || chatId !== sessions.selectedChatId) {
 			throw new Error(m.sidebar_chats_reload_failed());
 		}
-		if (reloadRequest) throw new Error(m.sidebar_chats_reload_failed());
-		return new Promise<void>((resolve, reject) => {
-			reloadRequest = {
-				chatId,
-				candidates: [...chatState.resendCandidates],
-				complete: resolve,
-				fail: reject,
-			};
-		});
+		if (reloadDialog.open) throw new Error(m.sidebar_chats_reload_failed());
+		return reloadDialog.request(chatId, [...chatState.resendCandidates]);
 	}
 
-	function cancelReload(): void {
-		if (reloadInProgress || !reloadRequest) return;
-		const request = reloadRequest;
-		reloadRequest = null;
-		request.complete();
-	}
-
-	async function confirmReload(): Promise<void> {
-		const request = reloadRequest;
-		if (!request || reloadInProgress) return;
-		reloadInProgress = true;
-		try {
-			const panel = panelForChat(request.chatId);
-			if (!panel) throw new Error(m.sidebar_chats_reload_failed());
-			await reloadChatFromNative(ws, panel.transcript, request.chatId);
-			if (request.chatId === sessions.selectedChatId && panel.scroll.isPinnedToBottom) {
-				panel.scroll.prepareInitialBottomRestore(request.chatId);
-			}
-			reloadRequest = null;
-			request.complete();
-		} catch (error) {
-			reloadRequest = null;
-			request.fail(error);
-		} finally {
-			reloadInProgress = false;
+	async function reloadFromNative(
+		chatId: string,
+		options: ChatReloadOptions,
+	): Promise<ChatReloadOutcome> {
+		const panel = panelForChat(chatId);
+		if (!panel) throw new Error(m.sidebar_chats_reload_failed());
+		const outcome = await reloadChatFromNative(ws, panel.transcript, chatId, options);
+		if (
+			outcome === 'reloaded' &&
+			chatId === sessions.selectedChatId &&
+			panel.scroll.isPinnedToBottom
+		) {
+			panel.scroll.prepareInitialBottomRestore(chatId);
 		}
+		return outcome;
 	}
 
 	function openCommitForPanel(surfaceId: ChatViewSurfaceId, chatId: string): void {
@@ -935,11 +914,13 @@
 	{/if}
 
 	<ReloadChatDialog
-		open={reloadRequest !== null}
-		candidates={reloadRequest?.candidates ?? []}
-		busy={reloadInProgress}
-		onCancel={cancelReload}
-		onConfirm={() => void confirmReload()}
+		open={reloadDialog.open}
+		candidates={reloadDialog.candidates}
+		busy={reloadDialog.running}
+		cancelling={reloadDialog.cancelling}
+		progress={reloadDialog.progress}
+		onCancel={() => reloadDialog.cancel()}
+		onConfirm={() => void reloadDialog.confirm(reloadFromNative)}
 	/>
 	<ExecutorHandoffDialog handoff={controller.executorHandoff} />
 	<HandoffForkDialog

@@ -1,22 +1,40 @@
 <script lang="ts">
+	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import * as m from '$lib/paraglide/messages.js';
 	import type { ResendCandidate } from '$shared/chat-view';
+	import type { ChatReloadProgress } from '$shared/ws-events';
 
 	let {
 		open,
 		candidates,
 		busy,
+		cancelling,
+		progress,
 		onCancel,
 		onConfirm,
 	}: {
 		open: boolean;
 		candidates: readonly ResendCandidate[];
 		busy: boolean;
+		cancelling: boolean;
+		progress: ChatReloadProgress | null;
 		onCancel: () => void;
 		onConfirm: () => void;
 	} = $props();
+
+	const progressLabel = $derived.by(() => {
+		if (cancelling) return m.sidebar_chats_reload_cancelling();
+		switch (progress?.phase) {
+			case 'reading':
+				return m.sidebar_chats_reload_progress_reading({ count: progress.rows.toLocaleString() });
+			case 'saving':
+				return m.sidebar_chats_reload_progress_saving({ count: progress.rows.toLocaleString() });
+			default:
+				return m.sidebar_chats_reload_progress_preparing();
+		}
+	});
 
 	function handleOpenChange(next: boolean): void {
 		if (!next && !busy) onCancel();
@@ -53,8 +71,14 @@
 				</ul>
 			</section>
 		{/if}
+		{#if busy}
+			<p class="flex items-center gap-2 text-sm text-muted-foreground" role="status">
+				<LoaderCircle class="size-4 shrink-0 animate-spin" aria-hidden="true" />
+				<span>{progressLabel}</span>
+			</p>
+		{/if}
 		<Dialog.Footer>
-			<Button variant="outline" disabled={busy} onclick={onCancel}>
+			<Button variant="outline" disabled={cancelling} onclick={onCancel}>
 				{m.sidebar_actions_cancel()}
 			</Button>
 			<Button variant="destructive" disabled={busy} onclick={onConfirm}>

@@ -10,7 +10,10 @@ import type {
   GetSharedChatResponse,
   ShareChatResponse,
 } from '../../../common/share-types.js';
-import type { ChatOperationalNoticeMessage } from '../../../common/ws-events.js';
+import type {
+  ChatOperationalNoticeMessage,
+  ChatReloadProgressMessage,
+} from '../../../common/ws-events.js';
 import { NATIVE_TRANSCRIPT_DRIFT_NOTICE } from '../../../server/controller/ledger/native-activity.js';
 import { TranscriptLedgerStore } from '../../../server/controller/ledger/store.js';
 import {
@@ -410,7 +413,18 @@ describe('native transcript reload', () => {
       expect(replay.nextAfterOrdinal).toBeGreaterThan(0);
       expect(replay.nextAfterOrdinal).toBeLessThan(replay.throughOrdinal);
 
+      const beforeReload = fixture.client.markEvents();
       await reloadFromNativeHistory(fixture, chatId);
+      const reloadEvents = fixture.client.eventsSince(beforeReload);
+      const result = reloadEvents.find((event) => event.type === 'chat-reloaded');
+      const progress = reloadEvents.filter((event): event is ChatReloadProgressMessage =>
+        event.type === 'chat-reload-progress' && event.clientRequestId === result?.clientRequestId);
+      // The reload acknowledges at once and names each phase before its result.
+      expect(progress.map((event) => event.phase)).toEqual(
+        expect.arrayContaining(['preparing', 'reading', 'saving']),
+      );
+      expect(progress[0]?.phase).toBe('preparing');
+      expect(reloadEvents.indexOf(progress.at(-1)!)).toBeLessThan(reloadEvents.indexOf(result!));
       const reloaded = await fixture.client.getMessages(chatId);
       expect(reloaded.transcriptViewId).not.toBe(beforeInjection.transcriptViewId);
       await expect(fixture.client.subscribe(

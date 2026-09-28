@@ -782,6 +782,99 @@ describe('WsConnection', () => {
 		connection.disconnect();
 	});
 
+	it('keeps a progress request alive while correlated progress arrives', async () => {
+		const connection = new WsConnection();
+		connection.connect('token');
+		const socket = mockSockets[0];
+		socket.open();
+		const onProgress = vi.fn();
+
+		const request = connection.sendProgressRequest(
+			{ type: 'chat-reload', chatId: 'chat-1' },
+			{ type: 'chat-reload-progress', idleTimeoutMs: 30_000, onProgress },
+		);
+		expect(lastSentPayload(socket)).toMatchObject({
+			type: 'chat-reload',
+			clientRequestId: request.clientRequestId,
+		});
+		let settled = false;
+		void request.response.then(() => {
+			settled = true;
+		});
+		for (let second = 0; second < 90; second += 10) {
+			await vi.advanceTimersByTimeAsync(10_000);
+			socket.message({
+				type: 'chat-reload-progress',
+				clientRequestId: request.clientRequestId,
+				chatId: 'chat-1',
+				phase: 'reading',
+				rows: second,
+			});
+		}
+		expect(settled).toBe(false);
+		expect(onProgress).toHaveBeenCalledTimes(9);
+
+		socket.message({ type: 'chat-reloaded', clientRequestId: request.clientRequestId });
+		await expect(request.response).resolves.toMatchObject({ type: 'chat-reloaded' });
+		connection.disconnect();
+	});
+
+	it('fails a progress request once progress stops for the idle timeout', async () => {
+		const connection = new WsConnection();
+		connection.connect('token');
+		const socket = mockSockets[0];
+		socket.open();
+
+		// Shorter than the heartbeat interval, so only the request can expire.
+		const request = connection.sendProgressRequest(
+			{ type: 'chat-reload', chatId: 'chat-1' },
+			{ type: 'chat-reload-progress', idleTimeoutMs: 5_000, onProgress: vi.fn() },
+		);
+		const outcome = request.response.catch((error: unknown) => error);
+		try {
+			await vi.advanceTimersByTimeAsync(4_999);
+			socket.message({ type: 'chat-reload-progress', clientRequestId: request.clientRequestId });
+			await vi.advanceTimersByTimeAsync(4_999);
+			let expired = false;
+			void outcome.then(() => {
+				expired = true;
+			});
+			await flushPromises();
+			expect(expired).toBe(false);
+			await vi.advanceTimersByTimeAsync(1);
+
+			expect(await outcome).toMatchObject({ message: 'WS request timed out: chat-reload' });
+		} finally {
+			connection.disconnect();
+		}
+	});
+
+	it('rejects correlated request errors with their structured code', async () => {
+		const connection = new WsConnection();
+		connection.connect('token');
+		const socket = mockSockets[0];
+		socket.open();
+
+		const request = connection.sendRequest({ type: 'chat-reload', chatId: 'chat-1' });
+		const { clientRequestId } = lastSentPayload(socket);
+		socket.message({
+			type: 'client-request-error',
+			clientRequestId,
+			requestType: 'chat-reload',
+			code: 'REQUEST_CANCELLED',
+			message: 'Reload cancelled',
+			retryable: true,
+		});
+
+		await expect(request).rejects.toMatchObject({
+			name: 'WsRequestError',
+			code: 'REQUEST_CANCELLED',
+			retryable: true,
+			message: 'REQUEST_CANCELLED: Reload cancelled',
+		});
+		connection.disconnect();
+	});
+
 	it('abandons offline sockets and reconnects immediately when the browser returns online', () => {
 		const connection = new WsConnection();
 

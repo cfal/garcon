@@ -9,6 +9,7 @@ import {
 	ChatProjectPathUpdatedMessage,
 	ChatReadUpdatedV1Message,
 	ChatReloadedMessage,
+	ChatReloadProgressMessage,
 	ChatSessionCreatedMessage,
 	ChatSessionDeletedWsMessage,
 	ChatSessionStoppedMessage,
@@ -25,6 +26,7 @@ import {
 	parseServerWsMessage,
 } from '$shared/ws-events';
 import {
+	ChatReloadCancelRequest,
 	ChatReloadRequest,
 	ChatSubscribeRequest,
 	ReconnectStateQueryRequest,
@@ -322,6 +324,24 @@ describe('parseServerWsMessage', () => {
 		expect((msg as ChatReloadedMessage).clientRequestId).toBe('req-reload');
 		expect((msg as ChatReloadedMessage).transcriptViewId).toBe('generation-2');
 		expect((msg as ChatReloadedMessage).nextBeforeOrdinal).toBe(51);
+	});
+
+	it('parses correlated chat-reload-progress frames', () => {
+		const msg = parseServerWsMessage({
+			type: 'chat-reload-progress',
+			clientRequestId: 'req-reload',
+			chatId: 'c-1',
+			phase: 'saving',
+			rows: 60_000,
+		});
+
+		expect(msg).toEqual(new ChatReloadProgressMessage('req-reload', 'c-1', 'saving', 60_000));
+		expect(parseServerWsMessage({
+			type: 'chat-reload-progress',
+			clientRequestId: 'req-reload',
+			chatId: 'c-1',
+			phase: 'saving',
+		})).toBeNull();
 	});
 
 	it.each([
@@ -860,6 +880,14 @@ describe('parseClientWsMessage', () => {
 				chatId: 'c-1',
 			}),
 		).toBeInstanceOf(ChatReloadRequest);
+
+		expect(
+			parseClientWsMessage({
+				type: 'chat-reload-cancel',
+				chatId: 'c-1',
+				reloadRequestId: 'req-reload',
+			}),
+		).toEqual(new ChatReloadCancelRequest('c-1', 'req-reload'));
 
 		const ping = parseClientWsMessage({
 			type: 'ws-ping',

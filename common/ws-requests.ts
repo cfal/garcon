@@ -95,6 +95,20 @@ export class ChatReloadRequest {
   }
 }
 
+// Cancels this socket's reload with the given request ID. Cancellation stops
+// reading native history; a reload already saving still completes.
+export class ChatReloadCancelRequest {
+  readonly type = 'chat-reload-cancel' as const;
+  constructor(
+    public chatId: string | null,
+    public reloadRequestId: string | null,
+  ) { }
+
+  static fromJson(data: Record<string, unknown>): ChatReloadCancelRequest {
+    return new ChatReloadCancelRequest(strOrNull(data.chatId), strOrNull(data.reloadRequestId));
+  }
+}
+
 export class WsPingRequest {
   readonly type = 'ws-ping' as const;
   constructor(
@@ -114,6 +128,7 @@ export type ClientWsMessage =
   | ReconnectStateQueryRequest
   | ChatSubscribeRequest
   | ChatReloadRequest
+  | ChatReloadCancelRequest
   | WsPingRequest;
 
 export function parseClientWsMessage(data: Record<string, unknown>): ClientWsMessage | null {
@@ -124,6 +139,8 @@ export function parseClientWsMessage(data: Record<string, unknown>): ClientWsMes
       return ChatSubscribeRequest.fromJson(data);
     case 'chat-reload':
       return ChatReloadRequest.fromJson(data);
+    case 'chat-reload-cancel':
+      return ChatReloadCancelRequest.fromJson(data);
     case 'ws-ping':
       return WsPingRequest.fromJson(data);
     default:

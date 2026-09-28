@@ -107,6 +107,27 @@ export class ChatTransientFeedMutationMessage implements ChatTransientFeedMutati
   ) {}
 }
 
+export const CHAT_RELOAD_PHASES = ['preparing', 'reading', 'saving'] as const;
+export type ChatReloadPhase = typeof CHAT_RELOAD_PHASES[number];
+
+export interface ChatReloadProgress {
+  readonly phase: ChatReloadPhase;
+  // Native history rows read so far, or the total being saved.
+  readonly rows: number;
+}
+
+// Sent at least once a second while a reload runs, so the client can tell a
+// long reload from a lost one.
+export class ChatReloadProgressMessage implements ChatReloadProgress {
+  readonly type = 'chat-reload-progress' as const;
+  constructor(
+    public clientRequestId: string,
+    public chatId: string,
+    public phase: ChatReloadPhase,
+    public rows: number,
+  ) {}
+}
+
 export class ChatReloadedMessage {
   readonly type = 'chat-reloaded' as const;
   constructor(
@@ -401,6 +422,7 @@ export type ClientRequestErrorCode = Extract<
   | 'HISTORY_LOAD_FAILED'
   | 'STALE_TRANSCRIPT_VIEW'
   | 'REQUEST_TIMEOUT'
+  | 'REQUEST_CANCELLED'
   | 'INTERNAL_ERROR'
 >;
 
@@ -413,6 +435,7 @@ const CLIENT_REQUEST_ERROR_CODES: readonly ClientRequestErrorCode[] = [
   'HISTORY_LOAD_FAILED',
   'STALE_TRANSCRIPT_VIEW',
   'REQUEST_TIMEOUT',
+  'REQUEST_CANCELLED',
   'INTERNAL_ERROR',
 ];
 
@@ -438,6 +461,7 @@ export type ServerWsMessage =
   | ChatSubscribedMessage
   | ChatTranscriptReplacedMessage
   | ChatTransientFeedMutationMessage
+  | ChatReloadProgressMessage
   | ChatReloadedMessage
   | AgentRunFinishedMessage
   | AgentRunFailedMessage
@@ -650,6 +674,14 @@ export function parseServerWsMessage(
             parsed.mutation,
           )
         : null;
+    }
+    case 'chat-reload-progress': {
+      const clientRequestId = requiredStr(data.clientRequestId);
+      const chatId = requiredStr(data.chatId);
+      const rows = nonNegativeInt(data.rows);
+      const phase = CHAT_RELOAD_PHASES.find((candidate) => candidate === data.phase);
+      if (!clientRequestId || !chatId || rows === null || !phase) return null;
+      return new ChatReloadProgressMessage(clientRequestId, chatId, phase, rows);
     }
     case 'chat-reloaded': {
       const clientRequestId = requiredStr(data.clientRequestId);

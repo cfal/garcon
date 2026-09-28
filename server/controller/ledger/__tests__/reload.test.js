@@ -50,6 +50,43 @@ describe('TranscriptReloadService', () => {
     });
   });
 
+  it('reports reading progress per native batch before saving the imported rows', async () => {
+    await withReload(async ({ reload, integration }) => {
+      integration.nativeHistoryImport.load = async function* load() {
+        yield [{ message: new UserMessage(TS, 'native prompt') }];
+        yield [
+          { message: new AssistantMessage(TS, 'native answer') },
+          { message: new AssistantMessage(TS, 'native follow-up') },
+        ];
+      };
+      const progress = [];
+
+      await reload.reload('chat-1', { onProgress: (update) => progress.push(update) });
+
+      expect(progress).toEqual([
+        { phase: 'reading', rows: 0 },
+        { phase: 'reading', rows: 1 },
+        { phase: 'reading', rows: 3 },
+        { phase: 'saving', rows: 3 },
+      ]);
+    });
+  });
+
+  it('stops reading native history when cancelled and keeps the current view', async () => {
+    await withReload(async ({ ledger, reload, integration }) => {
+      const cancellation = new AbortController();
+      integration.nativeHistoryImport.load = async function* load() {
+        yield [{ message: new UserMessage(TS, 'native prompt') }];
+        cancellation.abort(new Error('reload cancelled'));
+        yield [{ message: new AssistantMessage(TS, 'native answer') }];
+      };
+
+      await expect(reload.reload('chat-1', { signal: cancellation.signal }))
+        .rejects.toThrow('reload cancelled');
+      expect(ledger.currentView('chat-1')?.viewId).toBe('view-1');
+    });
+  });
+
   it('rejects queued work before closing the current producer', async () => {
     await withReload(async ({ ledger, reload, lease, execution }) => {
       execution.queueEntries = [{ id: 'queued-1' }];

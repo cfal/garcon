@@ -116,6 +116,10 @@ function lastSentPayload() {
   return calls.length > 0 ? calls[calls.length - 1][1] : null;
 }
 
+function sentPayloads() {
+  return sendWebSocketJson.mock.calls.map(([, payload]) => JSON.parse(JSON.stringify(payload)));
+}
+
 function deferred() {
   let resolve;
   const promise = new Promise((resolvePromise) => {
@@ -659,7 +663,10 @@ describe('chat WebSocket handler', () => {
       clientRequestId: 'req-reload-1',
     });
 
-    expect(mockTranscriptReload).toHaveBeenCalledWith('123');
+    expect(mockTranscriptReload).toHaveBeenCalledWith('123', {
+      signal: expect.any(AbortSignal),
+      onProgress: expect.any(Function),
+    });
     expect(lastSentPayload()).toMatchObject({
       type: 'chat-reloaded',
       clientRequestId: 'req-reload-1',
@@ -672,6 +679,112 @@ describe('chat WebSocket handler', () => {
       hasMore: false,
     });
     expect(ws.publish).not.toHaveBeenCalled();
+  });
+
+  it('acknowledges a reload at once and reports each phase before the result', async () => {
+    mockTranscriptReload.mockImplementationOnce(async (_chatId, { onProgress }) => {
+      onProgress({ phase: 'reading', rows: 0 });
+      onProgress({ phase: 'reading', rows: 250 });
+      onProgress({ phase: 'saving', rows: 500 });
+      return {
+        transcriptViewId: 'view-2',
+        messages: [chatViewMessage],
+        lastOrdinal: 1,
+        pageOldestOrdinal: 1,
+        pageNewestOrdinal: 1,
+        hasMore: false,
+      };
+    });
+
+    await chatHandler.message(ws, { type: 'chat-reload', chatId: '123', clientRequestId: 'req-progress' });
+
+    expect(sentPayloads().map(({ type, phase, rows }) => ({ type, phase, rows }))).toEqual([
+      { type: 'chat-reload-progress', phase: 'preparing', rows: 0 },
+      { type: 'chat-reload-progress', phase: 'reading', rows: 0 },
+      { type: 'chat-reload-progress', phase: 'saving', rows: 500 },
+      { type: 'chat-reloaded', phase: undefined, rows: undefined },
+    ]);
+    expect(sentPayloads()[0]).toMatchObject({ clientRequestId: 'req-progress', chatId: '123' });
+  });
+
+  it('repeats the latest reload progress every second while the reload runs', async () => {
+    const pending = deferred();
+    mockTranscriptReload.mockImplementationOnce(async (_chatId, { onProgress }) => {
+      onProgress({ phase: 'reading', rows: 40 });
+      onProgress({ phase: 'reading', rows: 90 });
+      return pending.promise;
+    });
+
+    const reloading = chatHandler.message(ws, {
+      type: 'chat-reload', chatId: '123', clientRequestId: 'req-slow',
+    });
+    await Bun.sleep(1_100);
+    pending.resolve({
+      transcriptViewId: 'view-2',
+      messages: [chatViewMessage],
+      lastOrdinal: 1,
+      pageOldestOrdinal: 1,
+      pageNewestOrdinal: 1,
+      hasMore: false,
+    });
+    await reloading;
+
+    const progress = sentPayloads().filter((payload) => payload.type === 'chat-reload-progress');
+    expect(progress.map(({ phase, rows }) => [phase, rows])).toEqual([
+      ['preparing', 0],
+      ['reading', 40],
+      ['reading', 90],
+    ]);
+    expect(lastSentPayload()).toMatchObject({ type: 'chat-reloaded', clientRequestId: 'req-slow' });
+  });
+
+  it('cancels a reload only for the requesting socket and reports the cancellation', async () => {
+    let signal;
+    const entered = deferred();
+    mockTranscriptReload.mockImplementationOnce(async (_chatId, options) => {
+      signal = options.signal;
+      entered.resolve();
+      await new Promise((_resolve, reject) => {
+        options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
+      });
+    });
+
+    const reloading = chatHandler.message(ws, {
+      type: 'chat-reload', chatId: '123', clientRequestId: 'req-cancel',
+    });
+    await entered.promise;
+    await chatHandler.message(createMockWs(), {
+      type: 'chat-reload-cancel', chatId: '123', reloadRequestId: 'req-cancel',
+    });
+    await chatHandler.message(ws, {
+      type: 'chat-reload-cancel', chatId: 'other-chat', reloadRequestId: 'req-cancel',
+    });
+    expect(signal.aborted).toBe(false);
+
+    await chatHandler.message(ws, {
+      type: 'chat-reload-cancel', chatId: '123', reloadRequestId: 'req-cancel',
+    });
+    await reloading;
+
+    expect(signal.aborted).toBe(true);
+    expect(lastSentPayload()).toEqual({
+      type: 'client-request-error',
+      clientRequestId: 'req-cancel',
+      requestType: 'chat-reload',
+      code: 'REQUEST_CANCELLED',
+      message: 'Reload cancelled',
+      retryable: true,
+      chatId: '123',
+    });
+  });
+
+  it('keeps reloading when a progress frame cannot be delivered', async () => {
+    sendWebSocketJson.mockImplementationOnce(() => false);
+
+    await chatHandler.message(ws, { type: 'chat-reload', chatId: '123', clientRequestId: 'req-dropped' });
+
+    expect(mockTranscriptReload).toHaveBeenCalledTimes(1);
+    expect(lastSentPayload()).toMatchObject({ type: 'chat-reloaded', clientRequestId: 'req-dropped' });
   });
 
   it('returns retryable CHAT_RUNNING for running-chat reload failures', async () => {
