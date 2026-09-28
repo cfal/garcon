@@ -97,6 +97,12 @@ describe('chat snapshot contract', () => {
     });
   });
 
+  test('parses every processing phase, including a reconnecting executor', () => {
+    for (const processingPhase of ['running', 'stopping', 'reconnecting', null]) {
+      expect(parseChatSnapshotResponse(snapshot({ processingPhase })).processingPhase).toBe(processingPhase);
+    }
+  });
+
   test('requires the explicit not-requested transcript variant for a zero limit', () => {
     expect(parseChatSnapshotResponse(snapshot({
       messageLimit: 0,

@@ -10,7 +10,7 @@ import {
   type PermissionMode,
   type ThinkingMode,
 } from './chat-modes.js';
-import type { ChatProcessingPhase } from './chat-types.js';
+import { CHAT_PROCESSING_PHASES, type ChatProcessingPhase } from './chat-types.js';
 import {
   isRelationallyValidBoundedTranscriptPage,
   isRelationallyValidNewestTranscriptPage,
@@ -103,9 +103,7 @@ export function parseChatSnapshotResponse(value: unknown): ChatSnapshotResponse 
   const chat = parseChat(raw.chat);
   const processingPhase = raw.processingPhase === null
     ? null
-    : raw.processingPhase === 'running' || raw.processingPhase === 'stopping'
-      ? raw.processingPhase
-      : fail('processingPhase is invalid');
+    : CHAT_PROCESSING_PHASES.find((phase) => phase === raw.processingPhase) ?? fail('processingPhase is invalid');
   const control = parseChatExecutionControlState(raw.control);
   if (!control) fail('control is invalid');
   const transientFeed = parseChatTransientFeedSnapshot(raw.transientFeed);
