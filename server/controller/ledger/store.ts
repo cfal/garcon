@@ -7,6 +7,7 @@ import {
   encodeDrafts,
   insertEncodedRows,
   materializeRows,
+  promoteStagingView,
   readBoundedPage,
   StagingViews,
 } from './staging-views.js';
@@ -191,12 +192,7 @@ export class TranscriptLedgerStore {
       await this.#staging.insertRows(chatId, viewId, rows, generation);
       promoted = this.#write(chatId, (entry) => {
         if (entry.current) return null;
-        runTransaction(entry.db, () => {
-          const result = entry.db.query(
-            "UPDATE transcript_views SET status = 'current' WHERE status = 'staging' AND view_id = ?",
-          ).run(viewId);
-          if (result.changes !== 1) throw new LedgerSchemaError('Transcript staging promotion failed');
-        });
+        runTransaction(entry.db, () => promoteStagingView(entry.db, viewId));
         entry.current = { viewId, status: 'current', createdAt, contentStartOrdinal: input.contentStartOrdinal };
         entry.nextOrdinal = rows.length + 1;
         return entry.current;
@@ -631,10 +627,7 @@ export class TranscriptLedgerStore {
           "UPDATE transcript_views SET status = 'staging' WHERE status = 'current' AND view_id = ?",
         ).run(expectedCurrentViewId);
         if (demoted.changes !== 1) throw new LedgerSchemaError('Transcript current view demotion failed');
-        const result = entry.db.query(
-          "UPDATE transcript_views SET status = 'current' WHERE status = 'staging' AND view_id = ?",
-        ).run(stagingViewId);
-        if (result.changes !== 1) throw new LedgerSchemaError('Transcript staging promotion failed');
+        promoteStagingView(entry.db, stagingViewId);
       });
       const promoted = toView({ ...staging, status: 'current' });
       entry.current = promoted;
@@ -728,9 +721,7 @@ export class TranscriptLedgerStore {
   }
 
   close(): void {
-    for (const chatId of new Set([...this.#staging.activeChatIds(), ...this.#connections.keys()])) {
-      this.#staging.abandon(chatId);
-    }
+    this.#staging.abandonAll();
     const entries = new Map(this.#failedCloseEntries);
     for (const [chatId, entry] of this.#connections) entries.set(chatId, entry);
     this.#connections.clear();

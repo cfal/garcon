@@ -47,10 +47,6 @@ export class StagingViews {
     return this.#active.get(chatId);
   }
 
-  activeChatIds(): readonly string[] {
-    return [...this.#active.keys()];
-  }
-
   generation(chatId: string): number {
     return this.#generations.get(chatId) ?? 0;
   }
@@ -58,6 +54,11 @@ export class StagingViews {
   abandon(chatId: string): void {
     this.#generations.set(chatId, this.generation(chatId) + 1);
     this.#active.delete(chatId);
+  }
+
+  // Every operation in flight retains its staging view, so this fences all of them.
+  abandonAll(): void {
+    for (const chatId of [...this.#active.keys()]) this.abandon(chatId);
   }
 
   retain(chatId: string, viewId: string): void {
@@ -151,6 +152,13 @@ export class StagingViews {
   #assertGeneration(chatId: string, generation: number): void {
     if (this.generation(chatId) !== generation) throw new LedgerBulkOperationAbandonedError(chatId);
   }
+}
+
+export function promoteStagingView(db: Database, viewId: TranscriptViewId): void {
+  const result = db.query(
+    "UPDATE transcript_views SET status = 'current' WHERE status = 'staging' AND view_id = ?",
+  ).run(viewId);
+  if (result.changes !== 1) throw new LedgerSchemaError('Transcript staging promotion failed');
 }
 
 export function encodeDrafts(drafts: readonly LedgerRowDraft[]): readonly EncodedDraft[] {
