@@ -11,6 +11,7 @@ import { FakeCodexModel } from '../../support/fake-codex-model.js';
 import { FakeOpenAiServer } from '../../support/fake-openai-server.js';
 import { FakeOpenAiResponsesServer } from '../../support/fake-openai-responses-server.js';
 import { GarconTestClient } from '../../support/garcon-client.js';
+import { reusableListenPort } from '../../support/execution-backend.js';
 import { redactSensitiveEnvironmentText } from '../../support/garcon-process.js';
 import { fakeAnthropicRequestHeaders } from '../../support/anthropic-test-contract.js';
 import {
@@ -505,6 +506,14 @@ describe('integration support contracts', () => {
     log.push(2);
     log.push(3);
     expect(log.values()).toEqual([2, 3]);
+  });
+
+  test('keeps reusable listen ports out of the kernel ephemeral range', async () => {
+    const [ephemeralFloor] = (await readFile('/proc/sys/net/ipv4/ip_local_port_range', 'utf8'))
+      .trim().split(/\s+/).map(Number);
+    const port = await reusableListenPort();
+    expect(port).toBeGreaterThanOrEqual(1024);
+    expect(port).toBeLessThan(ephemeralFloor!);
   });
 
   test('matches the pinned Codex rollout filename contract', () => {
