@@ -8,12 +8,15 @@ import {
 } from '../../../common/executors.js';
 import { IntegrationRegistry } from '../../runtime/agents/integration-registry.js';
 import { DomainError } from '../../common/domain-error.js';
+import { createLogger } from '../../common/log.js';
 import { ExecutorConfigStore, type RemoteExecutorConfig } from './config-store.js';
 import { ExecutionRuntime } from '../../runtime/execution-runtime.js';
 import { RemoteExecutorClient, type RemoteExecutorInventory } from '../../remote/client/executor-client.js';
 import { WebSocketLink } from '../../remote/transport/websocket-link.js';
 import { ExecutorReferenceWrites } from './reference-writes.js';
 import type { ControllerCliDispatcher } from './cli-dispatcher.js';
+
+const logger = createLogger('executors');
 
 type LocalExecutorOptions = ConstructorParameters<typeof ExecutionRuntime>[0];
 
@@ -247,6 +250,9 @@ export class ExecutorManager {
         allowInsecureDevelopment: config.allowInsecureDevelopment, allowUnverifiedTls: config.allowUnverifiedTls });
       entry.link = link;
       link.onError(reportError);
+      link.onClosure(({ cause, count }) => {
+        logger.warn('Executor link closed', { executorId: config.id, cause, count });
+      });
       entry.executor = new RemoteExecutorClient(config.id, link, (rpc) => rpc.handle(async (call, signal, guardReply) => {
         if (call.method === 'controllerCli.describe' || call.method === 'controllerCli.request') {
           const lease = entry.cliLease;

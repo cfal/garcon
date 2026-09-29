@@ -3,7 +3,7 @@ import { linkOptions } from '../../__tests__/integration-fixture.js';
 import { tcpLinkProxy } from '../../__tests__/tcp-link-proxy.js';
 import { ExecutorRpc } from '../rpc.js';
 import type { SessionTransport } from '../session-transport.js';
-import { WebSocketLink } from '../websocket-link.js';
+import { WebSocketLink, type LinkClosure } from '../websocket-link.js';
 
 for (const dialer of ['controller', 'worker'] as const) {
   test(`authenticated fragments preserve liveness at 12 KiB/s (${dialer} dials)`, async () => {
@@ -35,6 +35,9 @@ for (const dialer of ['controller', 'worker'] as const) {
     const proxy = await tcpLinkProxy(new URL(receiver.listen()));
     let requests = 0;
     receiver.onSession(session => new ExecutorRpc(session).handle(async () => { requests++; return []; }));
+    const closures: LinkClosure[] = [];
+    sender.onClosure(closure => closures.push(closure));
+    receiver.onClosure(closure => closures.push(closure));
     try {
       sender.dial(proxy.url);
       const [sending, receiving] = await Promise.all([sender.ready, receiver.ready]);
@@ -52,6 +55,10 @@ for (const dialer of ['controller', 'worker'] as const) {
       expect(Date.now() - started).toBeLessThan(25_000);
       expect(await pending).toMatchObject({ outcome: 'unknown' });
       expect(failures).toEqual([1, 1]);
+      // The first end to notice the silence closes its socket, which the other end may see first.
+      expect(closures.some(closure => closure.cause === 'liveness-timeout')).toBe(true);
+      expect(closures.every(closure => closure.count === 1
+        && (closure.cause === 'liveness-timeout' || closure.cause === 'socket-closed'))).toBe(true);
       const replacement = Promise.withResolvers<SessionTransport>();
       sender.onSession(session => { if (session !== sending) replacement.resolve(session); });
       proxy.restore();

@@ -14,9 +14,12 @@ export class SessionSocketFrames implements SessionSocket {
   #offset = 0;
   #retry: ReturnType<typeof setTimeout> | null = null;
 
+  // A failed write reports through writeFailed, so an owner can tell it from a close the
+  // session layer asked for.
   constructor(
     private readonly socket: Pick<NoiseWebSocket, 'send' | 'bufferedAmount'>,
     private readonly disconnect: () => void,
+    private readonly writeFailed: () => void = disconnect,
   ) {}
 
   canSend(): boolean { return this.#sending === null && this.socket.bufferedAmount < SESSION_SOCKET_BUFFER_BYTES; }
@@ -72,6 +75,9 @@ export class SessionSocketFrames implements SessionSocket {
         this.#retry = setTimeout(() => { this.#retry = null; this.#flush(); }, 10);
         this.#retry.unref();
       }
-    } catch { this.close(); }
+    } catch {
+      this.dispose();
+      this.writeFailed();
+    }
   }
 }

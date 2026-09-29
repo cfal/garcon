@@ -97,3 +97,61 @@ for (const role of ['controller', 'worker']) {
     });
   }
 }
+
+async function eventually(condition, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition()) {
+    if (Date.now() > deadline) throw new Error('Condition did not hold in time');
+    await Bun.sleep(5);
+  }
+}
+
+for (const dialer of ['controller', 'worker']) {
+  test(`counts session closures by cause on both ends (${dialer} dials)`, async () => {
+    const common = { executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true, reconnectDelayMs: 20 };
+    const controller = new WebSocketLink({ ...common, role: 'controller' });
+    const worker = new WebSocketLink({ ...common, role: 'worker' });
+    const [dialing, listening] = dialer === 'controller' ? [controller, worker] : [worker, controller];
+    const closures = { dialing: [], listening: [] };
+    dialing.onClosure(closure => closures.dialing.push(closure));
+    listening.onClosure(closure => closures.listening.push(closure));
+    let sessions = 0;
+    listening.onSession(() => { sessions += 1; });
+    try {
+      dialing.dial(listening.listen());
+      await eventually(() => sessions === 1 && dialing.current?.connected && listening.current?.connected);
+      listening.disconnect();
+      await eventually(() => sessions === 2 && dialing.current?.connected && listening.current?.connected);
+      listening.disconnect();
+      await eventually(() => closures.dialing.length === 2 && closures.listening.length === 2);
+
+      expect(closures.listening).toEqual([{ cause: 'local-close', count: 1 }, { cause: 'local-close', count: 2 }]);
+      expect(closures.dialing).toEqual([{ cause: 'socket-closed', count: 1 }, { cause: 'socket-closed', count: 2 }]);
+    } finally { await controller.dispose(); await worker.dispose(); }
+  });
+}
+
+for (const dialer of ['controller', 'worker']) {
+  test(`attributes closures started by the session layer and by disposal (${dialer} dials)`, async () => {
+    const common = { executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true, reconnectDelayMs: 20 };
+    const controller = new WebSocketLink({ ...common, role: 'controller' });
+    const worker = new WebSocketLink({ ...common, role: 'worker' });
+    const [dialing, listening] = dialer === 'controller' ? [controller, worker] : [worker, controller];
+    const closures = { dialing: [], listening: [] };
+    dialing.onClosure(closure => closures.dialing.push(closure));
+    listening.onClosure(closure => closures.listening.push(closure));
+    let sessions = 0;
+    listening.onSession(() => { sessions += 1; });
+    try {
+      dialing.dial(listening.listen());
+      await eventually(() => sessions === 1 && dialing.current?.connected && listening.current?.connected);
+      dialing.current.close(new Error('Synthetic session retirement'));
+      await eventually(() => sessions === 2 && dialing.current?.connected && listening.current?.connected);
+      await listening.dispose();
+      await eventually(() => closures.dialing.length === 2);
+
+      expect(closures.dialing).toEqual([{ cause: 'session-retired', count: 1 }, { cause: 'socket-closed', count: 1 }]);
+      expect(closures.listening).toEqual([{ cause: 'socket-closed', count: 1 }, { cause: 'local-close', count: 1 }]);
+    } finally { await controller.dispose(); await worker.dispose(); }
+  });
+}

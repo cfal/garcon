@@ -32,6 +32,21 @@ export interface WebSocketLinkOptions {
 
 export const EXECUTOR_NOISE_CONTEXT = 'garcon-executor/v1';
 
+// Why a connection carrying a session closed; each closure retires its session.
+export type LinkClosureCause =
+  | 'liveness-timeout'
+  | 'socket-closed'
+  | 'socket-error'
+  | 'protocol-error'
+  | 'session-retired'
+  | 'local-close';
+
+export interface LinkClosure {
+  readonly cause: LinkClosureCause;
+  // Closures with this cause over the link's lifetime, including this one.
+  readonly count: number;
+}
+
 interface Connection {
   readonly socket: NoiseWebSocket;
   readonly hello: Hello;
@@ -44,6 +59,7 @@ interface Connection {
   closed: boolean;
   authenticated: boolean;
   frames: SessionSocketFrames | null;
+  closeCause: LinkClosureCause | null;
 }
 
 export class WebSocketLink {
@@ -54,6 +70,8 @@ export class WebSocketLink {
   readonly #connections = new Set<Connection>();
   readonly #sockets = new Set<NoiseWebSocket>();
   readonly #errors = new Set<(message: string) => void>();
+  readonly #closures = new Set<(closure: LinkClosure) => void>();
+  readonly #closureCounts = new Map<LinkClosureCause, number>();
   #current: SessionTransport | null = null;
   #disposed = false;
   #quiescing = false;
@@ -77,6 +95,11 @@ export class WebSocketLink {
   onError(listener: (message: string) => void): () => void {
     this.#errors.add(listener);
     return () => { this.#errors.delete(listener); };
+  }
+
+  onClosure(listener: (closure: LinkClosure) => void): () => void {
+    this.#closures.add(listener);
+    return () => { this.#closures.delete(listener); };
   }
 
   upgrade(request: Request, server: Pick<Bun.Server<NoiseSocketData>, 'upgrade'>, noise: ReturnType<typeof createNoiseServer>): Response | undefined {
@@ -148,6 +171,7 @@ export class WebSocketLink {
   }
 
   disconnect(): void {
+    for (const connection of this.#connections) connection.closeCause ??= 'local-close';
     for (const socket of this.#sockets) socket.close();
   }
 
@@ -156,7 +180,7 @@ export class WebSocketLink {
     if (this.#dialTimer) clearTimeout(this.#dialTimer);
     this.#dialTimer = null;
     for (const socket of this.#sockets) if (socket.readyState !== 'open') socket.close();
-    for (const connection of this.#connections) if (!connection.hooks) this.#close(connection);
+    for (const connection of this.#connections) if (!connection.hooks) this.#close(connection, 'local-close');
   }
 
   async dispose(): Promise<void> {
@@ -168,6 +192,7 @@ export class WebSocketLink {
     this.disconnect();
     this.#sessions.clear();
     this.#errors.clear();
+    this.#closures.clear();
     this.#listenerNoise?.close();
     this.#listenerNoise = null;
     await this.#server?.stop(true);
@@ -202,15 +227,15 @@ export class WebSocketLink {
     };
     const connection: Connection = {
       socket, hello, peer: null, session: null, hooks: null, heartbeat: null,
-      closed: false, authenticated: false, frames: null, lastReceivedAt: Date.now(),
+      closed: false, authenticated: false, frames: null, lastReceivedAt: Date.now(), closeCause: null,
       timeout: setTimeout(() => {
         this.#reportError('Executor authentication timed out');
-        this.#close(connection);
+        this.#close(connection, 'protocol-error');
       }, 5000),
     };
     connection.timeout.unref();
     this.#connections.add(connection);
-    try { socket.send(JSON.stringify(hello)); } catch { this.#close(connection); }
+    try { socket.send(JSON.stringify(hello)); } catch { this.#close(connection, 'socket-error'); }
     return connection;
   }
 
@@ -238,7 +263,7 @@ export class WebSocketLink {
       if (isHello(frame) && !connection.peer) {
         if (frame.version !== version) {
           this.#reportError(`Executor version mismatch: local ${version}, peer ${JSON.stringify(frame.version.slice(0, 80))}. Use matching builds.`);
-          this.#close(connection);
+          this.#close(connection, 'protocol-error');
           return;
         }
         if (frame.role === this.options.role) {
@@ -256,9 +281,11 @@ export class WebSocketLink {
       connection.authenticated = true;
       this.#accept(connection);
     } catch (error) {
+      // Closing the session closes this connection first, so the cause is recorded before.
+      connection.closeCause ??= 'protocol-error';
       if (error instanceof MessageContinuityError) connection.session?.close(error);
       this.#reportError(connection.authenticated ? 'Executor connection lost' : 'Executor authentication failed');
-      this.#close(connection);
+      this.#close(connection, 'protocol-error');
     }
   }
 
@@ -271,14 +298,20 @@ export class WebSocketLink {
     const session = new SessionTransport(this.#signature(connection, 'session'), peer.runtimeId, () => {
       if (this.#current === session) this.#current = null;
       for (const attached of this.#connections) {
-        if (attached.session === session) this.#close(attached);
+        if (attached.session === session) this.#close(attached, this.#sessionClosureCause());
       }
     }, this.options, executorId);
     this.#current = session;
     try {
       for (const listener of this.#sessions) listener(session);
       connection.session = session;
-      connection.frames = new SessionSocketFrames(connection.socket, () => this.#close(connection));
+      // The session layer closes its socket before reporting why it retired, so a close
+      // through the frames is a retirement unless a write failed.
+      connection.frames = new SessionSocketFrames(
+        connection.socket,
+        () => this.#close(connection, this.#sessionClosureCause()),
+        () => this.#close(connection, 'socket-error'),
+      );
       connection.hooks = session.attach(connection.frames);
     } catch (error) {
       session.close(error instanceof Error ? error : new Error(String(error)));
@@ -288,9 +321,9 @@ export class WebSocketLink {
     this.#ready.resolve(session);
     connection.heartbeat = setInterval(() => {
       try {
-        if (Date.now() - connection.lastReceivedAt > 15_000) this.#close(connection);
+        if (Date.now() - connection.lastReceivedAt > 15_000) this.#close(connection, 'liveness-timeout');
         else this.#heartbeat(connection, 'ping');
-      } catch { this.#close(connection); }
+      } catch { this.#close(connection, 'socket-error'); }
     }, 5000);
     connection.heartbeat.unref();
   }
@@ -310,11 +343,13 @@ export class WebSocketLink {
     if (!this.#disposed) for (const listener of this.#errors) listener(message);
   }
 
-  #close(connection: Connection): void {
+  #close(connection: Connection, cause: LinkClosureCause): void {
+    connection.closeCause ??= cause;
     this.#closed(connection);
     connection.socket.close();
   }
 
+  // A close this process did not start is the peer or network closing the socket.
   #closed(connection: Connection): void {
     if (connection.closed) return;
     connection.closed = true;
@@ -322,7 +357,18 @@ export class WebSocketLink {
     if (connection.heartbeat) clearInterval(connection.heartbeat);
     connection.frames?.dispose();
     this.#connections.delete(connection);
+    if (connection.hooks) this.#reportClosure(connection.closeCause ?? 'socket-closed');
     connection.hooks?.disconnected();
+  }
+
+  #sessionClosureCause(): LinkClosureCause {
+    return this.#disposed ? 'local-close' : 'session-retired';
+  }
+
+  #reportClosure(cause: LinkClosureCause): void {
+    const count = (this.#closureCounts.get(cause) ?? 0) + 1;
+    this.#closureCounts.set(cause, count);
+    for (const listener of this.#closures) listener({ cause, count });
   }
 }
 
