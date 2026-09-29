@@ -54,6 +54,13 @@
 		class: inputClass,
 		...inputProps
 	}: Props = $props();
+
+	const hasPath = $derived(value.trim().length > 0);
+	const validationTitle = $derived(
+		hasPath && validationStatus === 'invalid'
+			? validationError || m.chat_new_chat_errors_invalid_directory()
+			: undefined,
+	);
 </script>
 
 <div class="relative min-w-0" data-slot="project-path-field">
@@ -61,9 +68,7 @@
 		{@render leading?.()}
 		<div class="relative min-w-0 flex-1">
 			<input
-				title={value.trim() && validationStatus === 'invalid'
-					? validationError || m.chat_new_chat_errors_invalid_directory()
-					: undefined}
+				title={validationTitle}
 				{...inputProps}
 				type="text"
 				bind:this={ref}
@@ -73,7 +78,7 @@
 					inputClass,
 				)}
 			/>
-			{#if value.trim()}
+			{#if hasPath}
 				<div
 					class="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2"
 					aria-hidden="true"

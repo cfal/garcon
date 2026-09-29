@@ -62,6 +62,11 @@
 	let canOpenWorktreePicker = $derived(
 		projectPathDialogState.canSelectWorktree && !isUpdatingPinnedProjectPath,
 	);
+	const showWorktreeLink = $derived(
+		projectPathDialogState.gitAvailable &&
+			projectPathDialogState.gitRepoStatus === 'git' &&
+			projectPathDialogState.validationStatus === 'valid',
+	);
 
 	$effect(() => {
 		if (!projectPathDialog) {
@@ -239,15 +244,12 @@
 								},
 							}}
 							feedback={{
-								worktree:
-									projectPathDialogState.gitAvailable &&
-									projectPathDialogState.gitRepoStatus === 'git' &&
-									projectPathDialogState.validationStatus === 'valid'
-										? {
-												disabled: !canOpenWorktreePicker,
-												onOpen: () => projectPathDialogState.openWorktreePicker(),
-											}
-										: undefined,
+								worktree: showWorktreeLink
+									? {
+											disabled: !canOpenWorktreePicker,
+											onOpen: () => projectPathDialogState.openWorktreePicker(),
+										}
+									: undefined,
 							}}
 						/>
 					</div>

@@ -15,6 +15,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await page.goto(integration.garcon.baseUrl);
       await page.getByRole('button', { name: 'New Chat', exact: true }).first().click();
       const input = page.locator('#project-path-input');
+      const field = page.locator('[data-slot="project-path-field"]');
       await browserExpect(input).toBeVisible();
       if (executionBackend !== 'in-process') {
         await page.getByRole('dialog').locator('[data-executor-picker]').click();
@@ -22,11 +23,11 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       }
       await input.fill(project);
       const prompt = page.getByPlaceholder('How can I help you today?');
-      await browserExpect(page.locator('[data-slot="project-path-field"] .text-status-success-foreground')).toBeVisible();
+      await browserExpect(field.locator('.text-status-success-foreground')).toBeVisible();
       await input.press('Enter');
       await browserExpect(prompt).toBeFocused();
-      const bounds = (await input.boundingBox())!;
-      await page.mouse.click(bounds.x + bounds.width - 12, bounds.y + bounds.height / 2);
+      const inputBounds = (await input.boundingBox())!;
+      await page.mouse.click(inputBounds.x + inputBounds.width - 12, inputBounds.y + inputBounds.height / 2);
       await browserExpect(input).toBeFocused();
       await input.press('Enter');
       await browserExpect(prompt).toBeFocused();
@@ -65,15 +66,20 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         if (touch) {
           expect(await input.evaluate(element => parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(16);
         }
-        const field = page.locator('[data-slot="project-path-field"]');
         expect(await field.evaluate(element => {
-          const bounds = element.getBoundingClientRect();
+          const fieldBounds = element.getBoundingClientRect();
           const controls = [...element.firstElementChild!.children]
             .filter(child => child.checkVisibility({ checkVisibilityCSS: true }))
             .map(child => child.getBoundingClientRect());
-          return controls.every((rect, index) => rect.left >= bounds.left && rect.right <= bounds.right + 1 &&
-            controls.slice(index + 1).every(other => rect.right <= other.left || other.right <= rect.left ||
-              rect.bottom <= other.top || other.bottom <= rect.top));
+          return controls.every((rect, index) => {
+            const fitsWithinField = rect.left >= fieldBounds.left && rect.right <= fieldBounds.right + 1;
+            if (!fitsWithinField) return false;
+            return controls.slice(index + 1).every(other => {
+              const horizontallySeparated = rect.right <= other.left || other.right <= rect.left;
+              const verticallySeparated = rect.bottom <= other.top || other.bottom <= rect.top;
+              return horizontallySeparated || verticallySeparated;
+            });
+          });
         })).toBe(true);
         await page.screenshot({ path: join(artifacts, `project-path-field-${executionBackend}-${width}.png`) });
       }
