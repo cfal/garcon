@@ -65,6 +65,10 @@ export class GitPorcelainState {
 		this.inspectorView = this.inspectorView === view ? 'none' : view;
 	}
 
+	closeInspector(): void {
+		this.inspectorView = 'none';
+	}
+
 	async loadCurrentView(project: GitProjectTarget): Promise<void> {
 		const context = this.beginTrackedLoad();
 		try {

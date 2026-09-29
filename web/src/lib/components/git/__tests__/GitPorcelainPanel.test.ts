@@ -107,4 +107,63 @@ describe('GitPorcelainPanel stash list', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
 		expect(drop).toHaveBeenCalledWith(project, { ref: 'stash@{2}', hash: 'a'.repeat(40) });
 	});
+
+	it('keeps a render failure inside the inspector and recovers after a refresh', async () => {
+		const porcelain = createPorcelain();
+		porcelain.inspectorView = 'stash';
+		const listed = makeStash(0, 'a'.repeat(40), 'Listed stash');
+		porcelain.stashes = [listed, { ...listed, message: 'Repeated selector' }];
+		const load = vi.spyOn(porcelain, 'loadCurrentView').mockResolvedValue(undefined);
+		render(GitPorcelainPanel, { project, selectedFile: null, porcelain });
+
+		expect(screen.getByRole('alert').textContent).toContain('Stash could not be displayed.');
+		expect(screen.queryByRole('button', { name: 'Apply' })).toBeNull();
+
+		load.mockImplementation(async () => {
+			porcelain.stashes = [listed];
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+		await tick();
+		expect(screen.queryByRole('alert')).toBeNull();
+		expect(screen.getByText('Listed stash')).toBeTruthy();
+
+		porcelain.stashes = [listed, { ...listed, message: 'Repeated selector' }];
+		await tick();
+		await fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+		await tick();
+		expect(porcelain.inspectorView).toBe('none');
+		expect(screen.queryByRole('alert')).toBeNull();
+	});
+
+	it('runs one render recovery at a time and resets only a mounted fallback', async () => {
+		const porcelain = createPorcelain();
+		porcelain.inspectorView = 'stash';
+		const listed = makeStash(0, 'a'.repeat(40), 'Listed stash');
+		const repeated = [listed, { ...listed, message: 'Repeated selector' }];
+		porcelain.stashes = repeated;
+		const load = vi.spyOn(porcelain, 'loadCurrentView').mockResolvedValue(undefined);
+		render(GitPorcelainPanel, { project, selectedFile: null, porcelain });
+		const reloads: Array<() => void> = [];
+		load.mockImplementation(() => new Promise<void>((resolve) => reloads.push(resolve)));
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+		expect(reloads).toHaveLength(1);
+		porcelain.stashes = [listed];
+		reloads[0]!();
+		await vi.waitFor(() => expect(screen.getByText('Listed stash')).toBeTruthy());
+		expect(screen.queryByRole('alert')).toBeNull();
+
+		porcelain.stashes = repeated;
+		await tick();
+		await fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+		porcelain.stashes = [listed];
+		reloads[1]!();
+		await tick();
+		await tick();
+		expect(porcelain.inspectorView).toBe('none');
+		expect(screen.queryByRole('alert')).toBeNull();
+		expect(screen.queryByText('Listed stash')).toBeNull();
+	});
 });
