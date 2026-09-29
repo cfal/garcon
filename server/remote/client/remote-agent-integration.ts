@@ -14,12 +14,15 @@ import { createVersionedSettings } from '@garcon/server-agent-common/settings/ve
 import type {
   ExecutorRpcMethods, IntegrationManifest, ProducerAcknowledgement, ProducerResumeState,
 } from '../transport/rpc-protocol.js';
-import type { RemoteSessionBacking } from './executor-client.js';
+import type { RemoteSessionBacking, RemoteSessions } from './executor-client.js';
 import { failureReason } from '../transport/failure-reason.js';
 import { createLogger, type Logger } from '../../common/log.js';
 import { EXECUTOR_DISCONNECTED_BEFORE_START, EXECUTOR_DISCONNECTED_MID_TURN } from '../../common/executor-disconnect.js';
 
 const SINGLE_QUERY_RPC_GRACE_MS = 30_000;
+// Answers the browser, whose requests time out after 30 s, even while the
+// executor reconnects; an answer that could not be sent stays actionable.
+const PERMISSION_RESPONSE_TIMEOUT_MS = 20_000;
 const PRODUCER_ACK_DELAY_MS = 250;
 // Each page carries at most 1 MiB, so a reader holds at most 4 MiB of replies.
 const HISTORY_PAGES_IN_FLIGHT = 4;
@@ -83,25 +86,25 @@ export class RemoteAgentIntegration implements AgentIntegration {
 
   constructor(
     readonly manifest: IntegrationManifest,
-    current: () => RemoteSessionBacking,
+    sessions: RemoteSessions,
     log: Logger = createLogger('executors'),
   ) {
     this.#log = log;
     this.descriptor = manifest.descriptor;
     this.attachments = manifest.attachments;
     const call = async <K extends keyof ExecutorRpcMethods>(method: K, request: ExecutorRpcMethods[K]['request'], options?: ExecutorCallOptions) => (
-      current().rpc.call(this.descriptor.id, method, request, options)
+      sessions.call(this.descriptor.id, method, request, options)
     );
     const launch = async <K extends 'execution.start' | 'execution.resume' | 'compaction.compact'>(
       method: K, request: ExecutorRpcMethods[K]['request'], options?: ExecutorCallOptions,
     ) => {
-      const { rpc } = current();
+      // Native admission may outlive the default RPC deadline; Stop and session loss still cancel it.
+      const { backing: { rpc }, timeoutMs } = await sessions.acquire({ signal: options?.signal, timeoutMs: options?.timeoutMs ?? null });
       const state = this.#bindings.get(request.producerBinding.id);
       try {
         return await rpc.call(this.descriptor.id, method, request, {
           ...options,
-          // Native admission may outlive the default RPC deadline; Stop and session loss still cancel it.
-          timeoutMs: options?.timeoutMs ?? null,
+          timeoutMs,
           onLateResult: (handle) => rpc.call(this.descriptor.id, 'execution.abort', handle),
         });
       } catch (error) {
@@ -117,33 +120,37 @@ export class RemoteAgentIntegration implements AgentIntegration {
     };
     this.producers = {
       detach: (binding) => { this.#bindings.delete(binding.id); },
-      get scope() { return current().manifests.get(manifest.descriptor.id)!.scope; },
+      get scope() { return sessions.latest().manifests.get(manifest.descriptor.id)!.scope; },
       bind: async (request, options) => {
-        const backing = current();
+        const { backing, timeoutMs } = await sessions.acquire(options);
         if (!isAgentResourceRef(request.binding, 'producer', backing.manifests.get(this.descriptor.id)!.scope)) throw new AgentCallError('rejected', 'Producer scope mismatch', 'STALE_RESOURCE');
         const state: RemoteProducerBinding = {
           ref: request.binding, backing, receivedSeq: 0, acknowledgedSeq: 0, unsettledLaunches: new Set(), resumeReport: null,
           lostOutputReported: false,
         };
         this.#bindings.set(request.binding.id, state);
-        try { await backing.rpc.call(this.descriptor.id, 'producers.bind', request, options); }
+        try { await backing.rpc.call(this.descriptor.id, 'producers.bind', request, { ...options, timeoutMs }); }
         catch (error) {
           if (this.#bindings.get(request.binding.id) === state) this.#bindings.delete(request.binding.id);
           throw error;
         }
       },
       close: async (binding, options) => {
-        const { rpc } = this.#bindings.get(binding.id)?.backing ?? this.#failedBindings.get(binding.id) ?? current();
+        const holder = this.#bindings.get(binding.id)?.backing ?? this.#failedBindings.get(binding.id);
         this.#bindings.delete(binding.id);
         this.#failedBindings.delete(binding.id);
-        await rpc.call(this.descriptor.id, 'producers.close', binding, options);
+        // The worker keeps a lost session's bindings for its replacement, which closes this one.
+        if (!holder?.rpc.transport.connected) return call('producers.close', binding, options);
+        await holder.rpc.call(this.descriptor.id, 'producers.close', binding, options);
       },
       subscribe: (listener) => {
         this.#listeners.add(listener);
         return () => { this.#listeners.delete(listener); };
       },
     };
-    this.permissions = { respond: (request, options) => call('permissions.respond', request, options) };
+    this.permissions = {
+      respond: (request, options) => call('permissions.respond', request, { timeoutMs: PERMISSION_RESPONSE_TIMEOUT_MS, ...options }),
+    };
     this.catalog = { snapshot: ({ signal, ...request }) => call('catalog.snapshot', request, { signal }) };
     this.settings = {
       ...createVersionedSettings({
@@ -173,9 +180,10 @@ export class RemoteAgentIntegration implements AgentIntegration {
     this.compaction = cap.compaction ? { compact: (request, options) => launch('compaction.compact', request, options) } : null;
     this.forking = cap.forking ? {
       fork: async ({ signal, ...request }) => {
-        const { rpc } = current();
+        const { backing: { rpc }, timeoutMs } = await sessions.acquire({ signal });
         return rpc.call(this.descriptor.id, 'forking.fork', request, {
           signal,
+          timeoutMs,
           onLateResult: (outcome) => {
             if (outcome.kind === 'materialized') return rpc.call(this.descriptor.id, 'forking.discard', outcome.session);
           },
@@ -201,10 +209,11 @@ export class RemoteAgentIntegration implements AgentIntegration {
     } : null;
     const history = (source: 'legacyHistoryImport' | 'nativeHistoryImport'): AgentHistoryImport => ({
       async *load({ signal, ...request }) {
-        const { rpc } = current();
+        // A reader belongs to the session that opened it.
+        const { backing: { rpc }, timeoutMs } = await sessions.acquire({ signal });
         const close = (ref: ExecutorRpcMethods['history.open']['result']) =>
           rpc.call(manifest.descriptor.id, 'history.close', ref, { timeoutMs: 2000 });
-        const ref = await rpc.call(manifest.descriptor.id, 'history.open', { source, request }, { signal, onLateResult: close });
+        const ref = await rpc.call(manifest.descriptor.id, 'history.open', { source, request }, { signal, timeoutMs, onLateResult: close });
         // Keeping several pages in flight hides link latency behind the worker's
         // reading and the controller's ledger writes.
         const inFlight: Promise<ExecutorRpcMethods['history.next']['result']>[] = [];
@@ -237,9 +246,10 @@ export class RemoteAgentIntegration implements AgentIntegration {
     this.sessionConfiguration = cap.sessionConfiguration ? { apply: (...args) => call('sessionConfiguration.apply', { args }) } : null;
     this.projectPathUpdates = cap.projectPathUpdates ? {
       prepare: async (request, options) => {
-        const { rpc } = current();
+        const { backing: { rpc }, timeoutMs } = await sessions.acquire(options);
         return rpc.call(this.descriptor.id, 'projectPathUpdates.prepare', request, {
           ...options,
+          timeoutMs,
           onLateResult: (prepared) => {
             if (prepared) return rpc.call(this.descriptor.id, 'projectPathUpdates.rollback', prepared.preparation);
           },

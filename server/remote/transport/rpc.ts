@@ -39,6 +39,8 @@ export interface RpcCallOptions<Result = unknown> extends Omit<ExecutorCallOptio
 
 const log = createLogger('executor-rpc');
 
+export const DEFAULT_RPC_TIMEOUT_MS = 120_000;
+
 type RpcReplyGuard = (bytes: number) => void;
 export type GuardRpcReply = (guard: RpcReplyGuard) => void;
 // Registers a listener for a reply the session could not take, which the caller
@@ -120,7 +122,7 @@ export class ExecutorRpc {
   async call<K extends keyof ExecutorRpcMethods>(
     integrationId: string, method: K, request: ExecutorRpcMethods[K]['request'], options?: RpcCallOptions<ExecutorRpcMethods[K]['result']>,
   ): Promise<ExecutorRpcMethods[K]['result']> {
-    const timeoutMs = options?.timeoutMs === undefined ? 120_000 : options.timeoutMs;
+    const timeoutMs = options?.timeoutMs === undefined ? DEFAULT_RPC_TIMEOUT_MS : options.timeoutMs;
     if (timeoutMs !== null && (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 2 ** 31 - 1)) {
       throw new AgentCallError('not-dispatched', 'Invalid executor deadline');
     }
