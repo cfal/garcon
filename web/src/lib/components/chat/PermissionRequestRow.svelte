@@ -102,8 +102,9 @@
 	const resolveChatReference: ResolveChatReference = (chatId) =>
 		resolveChatReferenceTarget(chatId, activeChatContext?.chatId, sessions.byId[chatId]);
 	const isPending = $derived(!terminal && actionable);
-	// An executor that is reconnecting cannot receive an answer; the request stays pending.
-	const canAnswer = $derived(isPending && executors.isReady(executorId));
+	// An executor known to be away cannot receive an answer, and the request stays pending.
+	// Before the executor list loads, the server still reports an undelivered answer safely.
+	const canAnswer = $derived(isPending && (!executors.hasSnapshot || executors.isReady(executorId)));
 	const isResolved = $derived(terminal?.state === 'resolved');
 	const wasAllowed = $derived(isResolved && terminal?.allowed === true);
 
@@ -425,11 +426,11 @@
 			{#if isPending}
 				<div class="flex flex-wrap items-center gap-2">
 					{@render executorWaitNotice()}
+					<!-- A new chat can start anywhere, so it does not wait for this chat's executor. -->
 					<button
 						type="button"
-						disabled={!canAnswer}
 						onclick={() => onExitPlanMode?.(request.permissionOccurrenceId, 'bypass-new', plan)}
-						class="inline-flex items-center gap-1.5 rounded-md text-xs font-medium px-3 py-1.5 transition-colors border border-status-warning-border bg-status-warning text-status-warning-foreground hover:bg-status-warning/90 disabled:opacity-50 disabled:cursor-not-allowed"
+						class="inline-flex items-center gap-1.5 rounded-md text-xs font-medium px-3 py-1.5 transition-colors border border-status-warning-border bg-status-warning text-status-warning-foreground hover:bg-status-warning/90"
 						title={m.chat_permission_tooltip_new_session_bypass()}
 					>
 						{m.chat_permission_yes_new_session_bypass()}

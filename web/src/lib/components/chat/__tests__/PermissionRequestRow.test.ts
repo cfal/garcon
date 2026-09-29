@@ -266,4 +266,51 @@ describe('PermissionRequestRow', () => {
 		await fireEvent.click(allow);
 		expect(onDecision).not.toHaveBeenCalled();
 	});
+
+	it('accepts answers before the executor list has loaded', () => {
+		render(PermissionRequestRowTestHost, {
+			request: new PermissionRequestMessage(
+				TS,
+				'permission-bash',
+				new BashToolUseMessage(TS, 'tool-bash', 'pwd'),
+			),
+			onDecision: vi.fn(),
+			chatContext: {
+				chatId: 'remote-chat',
+				executorId: remoteExecutor.id,
+				projectPath: '/worker/project',
+			},
+			executors: null,
+		});
+
+		expect(screen.getByRole<HTMLButtonElement>('button', { name: /allow once/i }).disabled).toBe(false);
+		expect(
+			screen.queryByText('Waiting for the executor to reconnect before this can be answered.'),
+		).toBeNull();
+	});
+
+	it('keeps moving a plan to a new chat available while the chat executor reconnects', () => {
+		render(PermissionRequestRowTestHost, {
+			request: new PermissionRequestMessage(
+				TS,
+				'permission-plan',
+				new ExitPlanModeToolUseMessage(TS, 'tool-plan', 'Synthetic plan'),
+			),
+			onDecision: vi.fn(),
+			chatContext: {
+				chatId: 'remote-chat',
+				executorId: remoteExecutor.id,
+				projectPath: '/worker/project',
+			},
+			executors: [localExecutor, { ...remoteExecutor, availability: 'reconnecting' }],
+		});
+
+		expect(
+			screen.getByRole<HTMLButtonElement>('button', { name: 'Yes, new session + bypass' }).disabled,
+		).toBe(false);
+		expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Yes, bypass permissions' }).disabled).toBe(
+			true,
+		);
+		expect(screen.getByRole<HTMLButtonElement>('button', { name: /deny/i }).disabled).toBe(true);
+	});
 });

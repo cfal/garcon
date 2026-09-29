@@ -3,9 +3,12 @@ import type { ExecutorSnapshot } from '$shared/executors';
 import { ExecutorsStore } from '../executors-store.svelte.js';
 import { localExecutor } from './fixtures';
 
-export function setExecutorsTestContext(executors: readonly ExecutorSnapshot[] = [localExecutor]): ExecutorsStore {
-	const store = new ExecutorsStore(async () => executors);
-	store.applySnapshot(executors);
+// Null leaves the store without a snapshot, as before the first executor list loads.
+export function setExecutorsTestContext(
+	executors: readonly ExecutorSnapshot[] | null = [localExecutor],
+): ExecutorsStore {
+	const store = new ExecutorsStore(async () => executors ?? []);
+	if (executors) store.applySnapshot(executors);
 	setExecutors(store);
 	return store;
 }

@@ -14,7 +14,7 @@
 	import { setCanonicalWorkspaceLayout } from './workspace-layout-test-context.js';
 
 	interface Props {
-		executors?: readonly ExecutorSnapshot[];
+		executors?: readonly ExecutorSnapshot[] | null;
 		onFileOpen?: (request: FileOpenRequest) => void;
 		request: PermissionRequestMessage;
 		terminal?: PermissionTerminalState;
