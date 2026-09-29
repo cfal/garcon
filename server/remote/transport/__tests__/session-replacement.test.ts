@@ -341,6 +341,48 @@ for (const dialer of ['controller', 'worker'] as const) {
     } finally { await fixture.dispose(); }
   });
 
+  test(`a relaunch settles on its own session when an earlier session's report is still waiting for its replay (${dialer} dials)`, async () => {
+    let fault!: ReturnType<typeof outgoingFault>;
+    let holdReplay = false;
+    const fixture = await remoteFixture(dialer, (controller, worker) => {
+      fault = outgoingFault(controller);
+      // A refused producer frame stays retained, so the replay waits.
+      worker.onSession((session) => {
+        const offer = session.channel.offer.bind(session.channel);
+        session.channel.offer = (payload) => !holdReplay && offer(payload);
+      });
+    });
+    try {
+      const integration = await fixture.executor.getAgentIntegration('test');
+      const worker = fixture.generations[0]!;
+      const request = await requestFor(integration);
+      await integration.execution.start(request);
+      worker.nativePublishers[0]!({ type: 'run-ended', runId: request.runId, outcome: 'finished' });
+      await integration.execution.runningSessions();
+      holdReplay = true;
+      worker.nativePublishers[0]!({ type: 'session', session: { agentSessionId: 'test-session', nativeSession: null, nativeSeedReceipt: null } });
+      const runId = crypto.randomUUID();
+      const outcomes = launchOutcomes(integration);
+      disconnectOn(fault, (encoded) => encoded.includes('"method":"execution.start"'));
+      const secondReady = nextAvailability(fixture.executor, 'ready');
+      await integration.execution.start({ ...request, runId }).catch(() => undefined);
+      await secondReady;
+      expect(outcomes).toEqual([]);
+      expect(worker.calls.start).toBe(1);
+
+      holdReplay = false;
+      const thirdReady = nextAvailability(fixture.executor, 'ready');
+      fixture.controller.disconnect(); fixture.worker.disconnect();
+      await thirdReady;
+      const deadline = performance.now() + 10_000;
+      while (outcomes.length === 0 && performance.now() < deadline) await Bun.sleep(5);
+      await integration.execution.runningSessions();
+
+      expect(outcomes).toEqual([{ type: 'launch-settled', runId, handle: expect.objectContaining({ kind: 'execution' }) }]);
+      expect(worker.calls.start).toBe(2);
+    } finally { await fixture.dispose(); }
+  });
+
   test(`a start dispatched while a replay drains settles through its own reply (${dialer} dials)`, async () => {
     let path!: ReturnType<typeof outgoingHold>;
     const fixture = await remoteFixture(dialer, (_controller, worker) => { path = outgoingHold(worker); });

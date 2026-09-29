@@ -306,7 +306,12 @@ export class RemoteAgentIntegration implements AgentIntegration {
     const suspended = [...this.#bindings.values()].filter((state) => state.backing !== backing);
     if (suspended.length === 0) return;
     const lostRunIds = new Map(suspended.map((state) => [state, [...state.unsettledLaunches.keys()]]));
-    for (const state of suspended) state.backing = backing;
+    // A report from an earlier session describes a replay this session does
+    // not deliver, so only this session's report may settle lost launches.
+    for (const state of suspended) {
+      state.backing = backing;
+      state.resumeReport = null;
+    }
     const { resumed } = await backing.rpc.call(this.descriptor.id, 'producers.resume', {
       bindings: suspended.map((state) => ({ binding: state.ref, acknowledgedSeq: state.receivedSeq })),
     });
