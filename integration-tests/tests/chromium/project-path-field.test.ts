@@ -67,6 +67,10 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
           expect(await input.evaluate(element => parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(16);
         }
         expect(await field.evaluate(element => {
+          const feedback = element.nextElementSibling!;
+          return feedback.getBoundingClientRect().top - element.getBoundingClientRect().bottom;
+        })).toBe(4);
+        expect(await field.evaluate(element => {
           const fieldBounds = element.getBoundingClientRect();
           const controls = [...element.firstElementChild!.children]
             .filter(child => child.checkVisibility({ checkVisibilityCSS: true }))

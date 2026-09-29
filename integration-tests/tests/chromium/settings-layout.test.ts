@@ -3,6 +3,7 @@ import { expect as browserExpect } from 'playwright/test';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
+import { initializeFixtureRepository } from '../../support/git-fixture.js';
 
 test('settings navigation and host sections fit desktop and mobile dialogs', async () => {
   await withChromiumFixture('settings-layout', async ({ page, integration, assertNoBrowserErrors }, phase) => {
@@ -78,6 +79,7 @@ test('new-chat executor and project fields have matching heights', async () => {
 
 test('scheduled-chat executor and path fields align for mouse and touch input', async () => {
   await withChromiumFixture('scheduled-chat-field-alignment', async ({ page, context, integration, assertNoBrowserErrors }) => {
+    await initializeFixtureRepository(integration.dirs.project);
     await page.goto(integration.garcon.baseUrl);
     await page.getByRole('button', { name: 'More actions', exact: true }).click();
     await page.getByRole('menuitem', { name: 'Scheduled prompts', exact: true }).click();
@@ -86,6 +88,7 @@ test('scheduled-chat executor and path fields align for mouse and touch input', 
     const picker = dialog.locator('[data-executor-picker]');
     const project = dialog.locator('#scheduled-project-path');
     await browserExpect(project).toBeVisible();
+    await browserExpect(dialog.getByRole('button', { name: 'Select a different worktree', exact: true })).toBeVisible();
     const cdp = await context.newCDPSession(page);
     const artifacts = join(import.meta.dirname, '../../artifacts/chromium');
     await mkdir(artifacts, { recursive: true });
@@ -99,6 +102,10 @@ test('scheduled-chat executor and path fields align for mouse and touch input', 
         const projectRect = (await project.boundingBox())!;
         expect(pickerRect.height).toBe(projectRect.height);
         expect(pickerRect.x + pickerRect.width <= projectRect.x || pickerRect.y + pickerRect.height <= projectRect.y).toBe(true);
+        expect(await dialog.locator('[data-slot="project-path-field"]').evaluate(element => {
+          const feedback = element.nextElementSibling!;
+          return feedback.getBoundingClientRect().top - element.getBoundingClientRect().bottom;
+        })).toBe(4);
         expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
         const bounds = (await dialog.boundingBox())!;
         expect(bounds.x).toBeGreaterThanOrEqual(0);

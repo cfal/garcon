@@ -83,6 +83,19 @@ describe('ProjectPathField', () => {
 		expect(input.disabled).toBe(true);
 	});
 
+	it('applies feedback layout classes independently of the input', async () => {
+		const view = renderField({
+			feedback: { id: 'path-feedback', class: '-mt-1' },
+		});
+		const feedback = document.getElementById('path-feedback')!;
+		expect(feedback.classList.contains('min-h-5')).toBe(true);
+		expect(feedback.classList.contains('-mt-1')).toBe(true);
+		expect(screen.getByRole('textbox').classList.contains('-mt-1')).toBe(false);
+		await view.rerender({ feedback: { id: 'path-feedback' } });
+		expect(feedback.classList.contains('min-h-5')).toBe(true);
+		expect(feedback.classList.contains('-mt-1')).toBe(false);
+	});
+
 	it.each([
 		['checking', '.animate-spin'],
 		['valid', '.text-status-success-foreground'],
