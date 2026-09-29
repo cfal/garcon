@@ -285,11 +285,11 @@ describe('TranscriptViewReader', () => {
 
       const replacementViewId = transcriptViewId('view-2');
       ledger.closeProducer('chat-1');
-      (await ledger.stageView('chat-1', [{
+      await ledger.stageView('chat-1', [{
         kind: 'provider-row',
         at: TS,
         message: new AssistantMessage(TS, 'replacement'),
-      }], 1, replacementViewId));
+      }], 1, replacementViewId);
       ledger.replaceCurrentView('chat-1', viewId, replacementViewId);
 
       await expect(reader.replay(
@@ -387,11 +387,11 @@ describe('TranscriptViewReader', () => {
       const reader = new TranscriptViewReader(ledger, {
         ensure: async () => {
           const observedView = ledger.currentView('chat-1');
-          (await ledger.stageView('chat-1', [{
+          await ledger.stageView('chat-1', [{
             kind: 'provider-row',
             at: TS,
             message: new AssistantMessage(TS, 'replacement view'),
-          }], 1, replacementViewId));
+          }], 1, replacementViewId);
           ledger.replaceCurrentView('chat-1', viewId, replacementViewId);
           return observedView;
         },

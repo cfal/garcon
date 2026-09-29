@@ -90,7 +90,7 @@ describe('transcript ledger read-fold matrix', () => {
         },
       ]);
 
-      const conversation = (await ledger.conversationRows(CHAT_ID));
+      const conversation = await ledger.conversationRows(CHAT_ID);
       expect(conversation.map((row) => [
         row.ordinal,
         conversationalText(row.kind === 'user-input' ? row.detail.message : row.message),
@@ -464,7 +464,7 @@ describe('transcript ledger read-fold matrix', () => {
         { ordinal: 2, type: 'transcript-notice' },
         { ordinal: 3, type: 'transcript-notice' },
       ]);
-      expect((await ledger.conversationMessages(CHAT_ID))).toEqual([]);
+      expect(await ledger.conversationMessages(CHAT_ID)).toEqual([]);
       expect(ledger.resendCandidates(CHAT_ID)).toEqual([]);
       expect(frozenConversationDrafts(rows)).toEqual([]);
       expect((await initializeSearchFold(ledger, rows))).toEqual([]);
@@ -545,7 +545,7 @@ describe('transcript ledger read-fold matrix', () => {
         [4, 'cli-row', 'chat row error'],
         [5, 'error', 'provider error'],
       ]);
-      expect((await ledger.conversationMessages(CHAT_ID))).toEqual([
+      expect(await ledger.conversationMessages(CHAT_ID)).toEqual([
         expect.objectContaining({ type: 'user-message', content: 'pending user input' }),
       ]);
       expect(ledger.resendCandidates(CHAT_ID).map(({ content }) => content)).toEqual([

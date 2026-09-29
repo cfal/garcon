@@ -387,11 +387,11 @@ describe('TranscriptLedgerStore', () => {
       contentStartOrdinal: 1,
       rows: [provider('old')],
     });
-    const staged = (await store.stageView('failed-chat', {
+    const staged = await store.stageView('failed-chat', {
       viewId: transcriptViewId('new-view'),
       contentStartOrdinal: 1,
       rows: [provider('new')],
-    }));
+    });
     const exec = Database.prototype.exec;
     const query = Database.prototype.query;
     let promotionFailed = false;
@@ -1146,11 +1146,11 @@ describe('TranscriptLedgerStore', () => {
       contentStartOrdinal: 1,
       rows: [provider('old')],
     });
-    const staged = (await store.stageView('chat-one', {
+    const staged = await store.stageView('chat-one', {
       viewId: transcriptViewId('new-view'),
       contentStartOrdinal: 1,
       rows: [provider('new')],
-    }));
+    });
 
     const promoted = store.replaceCurrentView('chat-one', current.viewId, staged.viewId);
 
@@ -1192,14 +1192,14 @@ describe('TranscriptLedgerStore', () => {
       },
     }]);
 
-    const staged = (await store.stageView('chat-one', {
+    const staged = await store.stageView('chat-one', {
       viewId: transcriptViewId('new-view'),
       contentStartOrdinal: 1,
       rows: [
         userDraft('message-one', 'preserved content'),
         provider('replacement answer'),
       ],
-    }));
+    });
     store.replaceCurrentView('chat-one', current.viewId, staged.viewId);
 
     const retry = store.appendInputAndCompose('chat-one', {
@@ -1219,11 +1219,11 @@ describe('TranscriptLedgerStore', () => {
       contentStartOrdinal: 1,
       rows: [provider('old one'), provider('old two')],
     });
-    const staged = (await store.stageView('chat-one', {
+    const staged = await store.stageView('chat-one', {
       viewId: transcriptViewId('new-view'),
       contentStartOrdinal: 1,
       rows: [provider('new one'), provider('new two')],
-    }));
+    });
     const exec = Database.prototype.exec;
     let commitFailed = false;
     Database.prototype.exec = function (sql) {
@@ -1259,11 +1259,11 @@ describe('TranscriptLedgerStore', () => {
       contentStartOrdinal: 1,
       rows: [provider('old one'), provider('old two')],
     });
-    const staged = (await store.stageView('chat-one', {
+    const staged = await store.stageView('chat-one', {
       viewId: transcriptViewId('new-view'),
       contentStartOrdinal: 1,
       rows: [provider('new one'), provider('new two')],
-    }));
+    });
     const exec = Database.prototype.exec;
     let commitBecameAmbiguous = false;
     Database.prototype.exec = function (sql) {
@@ -1299,11 +1299,11 @@ describe('TranscriptLedgerStore', () => {
       viewId: transcriptViewId('current-view'),
       contentStartOrdinal: 1,
     });
-    (await store.stageView('chat-one', {
+    await store.stageView('chat-one', {
       viewId: transcriptViewId('abandoned-stage'),
       contentStartOrdinal: 1,
       rows: [provider('abandoned')],
-    }));
+    });
     store.close();
     store = new TranscriptLedgerStore(root);
 
@@ -1734,11 +1734,11 @@ describe('TranscriptLedgerStore', () => {
     });
 
     const carried = frozenConversationDrafts(store.currentRows('chat-one'));
-    const staged = (await store.stageView('chat-one', {
+    const staged = await store.stageView('chat-one', {
       viewId: transcriptViewId('reloaded-view'),
       contentStartOrdinal: carried.length + 1,
       rows: carried,
-    }));
+    });
     store.replaceCurrentView('chat-one', view.viewId, staged.viewId);
 
     expect(store.currentRows('chat-one').map((row) => row.kind))

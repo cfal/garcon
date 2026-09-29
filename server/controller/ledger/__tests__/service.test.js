@@ -89,7 +89,7 @@ describe('TranscriptLedgerService', () => {
           detail: { type: 'chat-id-request' },
           providerMeta: null,
         }]);
-        expect((await ledger.conversationMessages('chat-1'))).toEqual([]);
+        expect(await ledger.conversationMessages('chat-1')).toEqual([]);
       }, {
         chatIdRequests: { request: requests },
       });
@@ -345,7 +345,7 @@ describe('TranscriptLedgerService', () => {
           },
         }],
       });
-      expect((await ledger.conversationMessages('chat-1'))).toEqual([]);
+      expect(await ledger.conversationMessages('chat-1')).toEqual([]);
     });
   });
 
@@ -1023,7 +1023,7 @@ describe('TranscriptLedgerService', () => {
     await withService(async ({ ledger, store }) => {
       const current = ledger.initializeChat('chat-1');
       const stagingId = transcriptViewId('view-2');
-      (await store.stageView('chat-1', { viewId: stagingId, contentStartOrdinal: 1 }));
+      await store.stageView('chat-1', { viewId: stagingId, contentStartOrdinal: 1 });
       const events = [];
       ledger.subscribe((event) => events.push(event));
 
@@ -1065,7 +1065,7 @@ describe('TranscriptLedgerService', () => {
           detail: { title: 'Provider retry' },
         });
         expect(rows[0]).not.toHaveProperty('runId');
-        expect((await ledger.conversationMessages('chat-1'))).toEqual([]);
+        expect(await ledger.conversationMessages('chat-1')).toEqual([]);
         await tick();
         expect(notifications).toHaveLength(1);
         expect(notifications[0]).toMatchObject({ type: 'rows', chatId: 'chat-1' });
