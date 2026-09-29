@@ -12,6 +12,7 @@ import {
 } from '@garcon/common/chat-types';
 import { stripResolvedFileMentionContext } from '@garcon/server-agent-common/shared/file-mention-context';
 import { deterministicTranscriptTimestamp } from '@garcon/server-agent-common/shared/transcript-timestamp';
+import { EventLoopSteps } from '@garcon/server-agent-common/shared/event-loop';
 import { normalizeCursorToolResultContent } from './tool-result-converter.js';
 import { convertCursorToolUse } from './tool-use-converter.js';
 
@@ -258,10 +259,19 @@ function normalizeCursorToolInput(toolName: string, rawInput: unknown): unknown 
   return normalized;
 }
 
-export function readCursorBlobs(
+const BLOB_PAGE_ROWS = 500;
+
+// Every reload and fork reads a whole session, so the blob table is read in pages, inside one
+// read transaction for a consistent snapshot, and every pass runs in time-bounded steps. The
+// graph passes still need every blob in memory.
+export async function readCursorBlobs(
   storeDbPath: string,
-  options: { signal?: AbortSignal; maxBlobBytes?: number } = {},
-): CursorMessageBlob[] {
+  options: { signal?: AbortSignal; maxBlobBytes?: number; steps?: EventLoopSteps } = {},
+): Promise<CursorMessageBlob[]> {
+  const steps = options.steps ?? new EventLoopSteps();
+  const assertNotAborted = () => {
+    if (options.signal?.aborted) throw new DOMException('Transcript search load cancelled', 'AbortError');
+  };
   const db = new Database(storeDbPath, { readonly: true, create: false });
   try {
     if (options.maxBlobBytes !== undefined) {
@@ -270,13 +280,28 @@ export function readCursorBlobs(
       `).get(options.maxBlobBytes);
       if (oversized) throw new Error(`Cursor transcript record exceeds ${options.maxBlobBytes} bytes`);
     }
-    const allBlobs = db.query('SELECT rowid, id, data FROM blobs').all() as CursorDbBlob[];
+    const allBlobs: CursorDbBlob[] = [];
+    const page = db.query<CursorDbBlob, [number, number]>(
+      'SELECT rowid, id, data FROM blobs WHERE rowid > ? ORDER BY rowid LIMIT ?',
+    );
+    db.exec('BEGIN');
+    try {
+      for (let after = Number.MIN_SAFE_INTEGER; ;) {
+        const rows = page.all(after, BLOB_PAGE_ROWS);
+        for (const row of rows) allBlobs.push(row);
+        if (rows.length < BLOB_PAGE_ROWS) break;
+        after = rows[rows.length - 1]!.rowid;
+        await steps.next();
+      }
+    } finally {
+      db.exec('COMMIT');
+    }
     const blobMap = new Map<string, CursorDbBlob>();
     const parentRefs = new Map<string, string[]>();
     const jsonBlobs: CursorJsonBlob[] = [];
 
-    for (const blob of allBlobs) {
-      if (options.signal?.aborted) throw new DOMException('Transcript search load cancelled', 'AbortError');
+    await steps.forEach(allBlobs, (blob) => {
+      assertNotAborted();
       blobMap.set(blob.id, blob);
       const data = toBuffer(blob.data);
       if (data && data[0] === 0x7B) {
@@ -286,12 +311,12 @@ export function readCursorBlobs(
           // Cursor stores non-message JSON fragments in the same blob table.
         }
       }
-    }
+    });
 
-    for (const blob of allBlobs) {
-      if (options.signal?.aborted) throw new DOMException('Transcript search load cancelled', 'AbortError');
+    await steps.forEach(allBlobs, (blob) => {
+      assertNotAborted();
       const data = toBuffer(blob.data);
-      if (!data || data[0] === 0x7B) continue;
+      if (!data || data[0] === 0x7B) return;
       const parents: string[] = [];
       let i = 0;
       while (i < data.length - 33) {
@@ -304,7 +329,7 @@ export function readCursorBlobs(
         }
       }
       if (parents.length > 0) parentRefs.set(blob.id, parents);
-    }
+    });
 
     const visited = new Set<string>();
     const sorted: CursorDbBlob[] = [];
@@ -316,29 +341,33 @@ export function readCursorBlobs(
       if (blob) sorted.push(blob);
     };
 
-    for (const blob of allBlobs) {
+    await steps.forEach(allBlobs, (blob) => {
       if (!parentRefs.has(blob.id)) visit(blob.id);
-    }
-    for (const blob of allBlobs) visit(blob.id);
+    });
+    await steps.forEach(allBlobs, (blob) => visit(blob.id));
 
+    // Each message blob's ID bytes are decoded once rather than once per graph blob.
+    const messageIds = jsonBlobs.flatMap((jsonBlob) => {
+      try {
+        return [{ id: jsonBlob.id, bytes: Buffer.from(jsonBlob.id, 'hex') }];
+      } catch {
+        // Malformed blob ids are ignored.
+        return [];
+      }
+    });
     const messageOrder = new Map<string, number>();
     let orderIndex = 0;
-    for (const blob of sorted) {
-      if (options.signal?.aborted) throw new DOMException('Transcript search load cancelled', 'AbortError');
+    await steps.forEach(sorted, (blob) => {
+      assertNotAborted();
       const data = toBuffer(blob.data);
-      if (!data || data[0] === 0x7B) continue;
-      for (const jsonBlob of jsonBlobs) {
-        try {
-          const idBytes = Buffer.from(jsonBlob.id, 'hex');
-          if (data.includes(idBytes) && !messageOrder.has(jsonBlob.id)) {
-            messageOrder.set(jsonBlob.id, orderIndex);
-            orderIndex += 1;
-          }
-        } catch {
-          // Malformed blob ids are ignored.
+      if (!data || data[0] === 0x7B) return;
+      for (const { id, bytes } of messageIds) {
+        if (data.includes(bytes) && !messageOrder.has(id)) {
+          messageOrder.set(id, orderIndex);
+          orderIndex += 1;
         }
       }
-    }
+    });
 
     return jsonBlobs
       .sort((a, b) => {
@@ -457,52 +486,55 @@ function normalizeCursorContent(content: Record<string, unknown>, blob: CursorMe
   return messages;
 }
 
-export function normalizeCursorBlobs(blobs: CursorMessageBlob[]): ChatMessage[] {
+export async function normalizeCursorBlobs(
+  blobs: CursorMessageBlob[],
+  steps = new EventLoopSteps(),
+): Promise<ChatMessage[]> {
   const messages: ChatMessage[] = [];
-  for (let index = 0; index < blobs.length; index += 1) {
-    const blob = blobs[index];
+  let index = 0;
+  await steps.forEach(blobs, (blob) => {
     const fallbackTimestamp = deterministicTranscriptTimestamp(blob.sequence ?? index + 1);
     const timestamp = timestampForContent(blob.content, fallbackTimestamp);
     messages.push(...normalizeCursorContent(blob.content, blob, timestamp));
-  }
+    index += 1;
+  });
   return messages;
 }
 
-function assertImportableCursorBlobs(blobs: readonly CursorMessageBlob[]): void {
-  for (const blob of blobs) {
-    const nestedMessage = asObject(blob.content.message);
-    const rawRole = blob.content.role ?? nestedMessage.role;
-    if (rawRole === undefined || rawRole === 'system') continue;
-    if (typeof rawRole !== 'string') {
-      throw new Error('Cursor transcript message has an invalid role');
+function assertImportableCursorBlob(blob: CursorMessageBlob): void {
+  const nestedMessage = asObject(blob.content.message);
+  const rawRole = blob.content.role ?? nestedMessage.role;
+  if (rawRole === undefined || rawRole === 'system') return;
+  if (typeof rawRole !== 'string') {
+    throw new Error('Cursor transcript message has an invalid role');
+  }
+  const content = blob.content.content ?? nestedMessage.content;
+  if (typeof content === 'string') return;
+  if (!Array.isArray(content)) {
+    throw new Error('Cursor transcript message has invalid content');
+  }
+  for (const part of content) {
+    if (typeof part === 'string') continue;
+    if (!part || typeof part !== 'object' || Array.isArray(part)) {
+      throw new Error('Cursor transcript message has an invalid content part');
     }
-    const content = blob.content.content ?? nestedMessage.content;
-    if (typeof content === 'string') continue;
-    if (!Array.isArray(content)) {
-      throw new Error('Cursor transcript message has invalid content');
-    }
-    for (const part of content) {
-      if (typeof part === 'string') continue;
-      if (!part || typeof part !== 'object' || Array.isArray(part)) {
-        throw new Error('Cursor transcript message has an invalid content part');
-      }
-      const rawPart = part as Record<string, unknown>;
-      if (
-        typeof rawPart.type !== 'string'
-        || !rawPart.type
-        || (rawPart.type === 'text' && typeof rawPart.text !== 'string')
-      ) {
-        throw new Error('Cursor transcript message has an invalid content part');
-      }
+    const rawPart = part as Record<string, unknown>;
+    if (
+      typeof rawPart.type !== 'string'
+      || !rawPart.type
+      || (rawPart.type === 'text' && typeof rawPart.text !== 'string')
+    ) {
+      throw new Error('Cursor transcript message has an invalid content part');
     }
   }
 }
 
-function readCursorSessionBlobs(
+async function readCursorSessionBlobs(
   sessionId: string,
   projectPath: string,
-  cursorHome?: string,
-): CursorMessageBlob[] {
+  cursorHome: string | undefined,
+  steps: EventLoopSteps,
+): Promise<CursorMessageBlob[]> {
   if (!sessionId) return [];
   const storeDbPath = cursorStoreDbPath(sessionId, projectPath, cursorHome);
   let stats: fs.Stats;
@@ -515,7 +547,7 @@ function readCursorSessionBlobs(
   if (!stats.isFile() || stats.isSymbolicLink()) {
     throw new Error('Cursor transcript source is not a regular file');
   }
-  return readCursorBlobs(storeDbPath);
+  return readCursorBlobs(storeDbPath, { steps });
 }
 
 export async function loadImportableCursorChatMessagesBySessionId(
@@ -523,9 +555,10 @@ export async function loadImportableCursorChatMessagesBySessionId(
   projectPath: string,
   cursorHome?: string,
 ): Promise<ChatMessage[]> {
-  const blobs = readCursorSessionBlobs(sessionId, projectPath, cursorHome);
-  assertImportableCursorBlobs(blobs);
-  return normalizeCursorBlobs(blobs);
+  const steps = new EventLoopSteps();
+  const blobs = await readCursorSessionBlobs(sessionId, projectPath, cursorHome, steps);
+  await steps.forEach(blobs, assertImportableCursorBlob);
+  return normalizeCursorBlobs(blobs, steps);
 }
 
 function hasNodeErrorCode(error: unknown, code: string): boolean {

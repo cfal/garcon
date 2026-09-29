@@ -54,8 +54,8 @@ describe('Cursor history loader', () => {
       .rejects.toThrow('Cursor transcript database not found');
   });
 
-  it('normalizes Cursor blobs into canonical chat messages', () => {
-    const messages = normalizeCursorBlobs([
+  it('normalizes Cursor blobs into canonical chat messages', async () => {
+    const messages = await normalizeCursorBlobs([
       {
         id: 'user-1',
         rowid: 1,
@@ -115,8 +115,8 @@ describe('Cursor history loader', () => {
     expect(messages[4].content).toEqual({ ok: true });
   });
 
-  it('unwraps user queries when Cursor prefixes them with timestamp metadata', () => {
-    const messages = normalizeCursorBlobs([
+  it('unwraps user queries when Cursor prefixes them with timestamp metadata', async () => {
+    const messages = await normalizeCursorBlobs([
       {
         id: 'user-1',
         rowid: 1,
@@ -140,8 +140,8 @@ describe('Cursor history loader', () => {
     expect(messages[0].content).toBe('hi');
   });
 
-  it('keeps the user query when Cursor combines metadata and query tags in one part', () => {
-    const messages = normalizeCursorBlobs([
+  it('keeps the user query when Cursor combines metadata and query tags in one part', async () => {
+    const messages = await normalizeCursorBlobs([
       {
         id: 'user-1',
         rowid: 1,
@@ -164,8 +164,8 @@ describe('Cursor history loader', () => {
     expect(messages[0].content).toBe('hi');
   });
 
-  it('normalizes Cursor Glob and Read tool results from high-level metadata', () => {
-    const messages = normalizeCursorBlobs([
+  it('normalizes Cursor Glob and Read tool results from high-level metadata', async () => {
+    const messages = await normalizeCursorBlobs([
       {
         id: 'assistant-tools',
         rowid: 1,
@@ -352,7 +352,7 @@ describe('Cursor history loader', () => {
       db.close();
     }
 
-    const display = normalizeCursorBlobs(readCursorBlobs(storeDbPath));
+    const display = await normalizeCursorBlobs(await readCursorBlobs(storeDbPath));
     expect(display.map((message) => message.content)).toEqual(['first in graph', 'second in graph']);
   });
 
