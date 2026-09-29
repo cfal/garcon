@@ -183,11 +183,12 @@ describe('metadata-store', () => {
       metadata.replaceFromTranscriptView(chatId, [
         { type: 'user-message', timestamp: '2026-01-01T00:00:00Z', content: 'surviving prompt' },
         { type: 'assistant-message', timestamp: '2026-01-01T00:01:00Z', content: 'surviving reply' },
+        { type: 'bash-tool-use', timestamp: '2026-01-01T00:02:00Z', toolId: 'tool-1', command: 'pwd' },
       ]);
 
       const meta = metadata.getChatMetadata(chatId);
       expect(meta.lastMessage).toBe('surviving reply');
-      expect(meta.lastActivity).toBe('2026-01-01T00:01:00Z');
+      expect(meta.lastActivity).toBe('2026-01-01T00:02:00Z');
       expect(meta.identity).toEqual(identity());
     });
   });

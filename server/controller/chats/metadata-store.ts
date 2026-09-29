@@ -155,10 +155,10 @@ export class MetadataIndex {
   ): void {
     const key = String(chatId);
     const current = this.#metadataByChatId.get(key);
-    const firstMessage = firstUserText([...messages]) || current?.firstMessage || 'New Session';
-    const createdAt = current?.createdAt ?? firstTimestamp([...messages]) ?? new Date().toISOString();
-    const lastMessage = latestPreviewText([...messages]) ?? firstMessage;
-    const lastActivity = latestTimestamp([...messages]) ?? createdAt;
+    const firstMessage = firstUserText(messages) || current?.firstMessage || 'New Session';
+    const createdAt = current?.createdAt ?? firstTimestamp(messages) ?? new Date().toISOString();
+    const lastMessage = latestPreviewText(messages) ?? firstMessage;
+    const lastActivity = latestTimestamp(messages) ?? createdAt;
     this.#metadataByChatId.set(key, {
       chatId: key,
       createdAt,
@@ -363,14 +363,14 @@ function extractPreviewText(msg: ChatMessage | null | undefined): string {
   return '';
 }
 
-function firstTimestamp(messages: ChatMessage[]): string | null {
+function firstTimestamp(messages: readonly ChatMessage[]): string | null {
   for (const msg of messages ?? []) {
     if (typeof msg?.timestamp === 'string') return msg.timestamp;
   }
   return null;
 }
 
-function latestTimestamp(messages: ChatMessage[]): string | null {
+function latestTimestamp(messages: readonly ChatMessage[]): string | null {
   let latest: string | null = null;
   for (const msg of messages ?? []) {
     if (typeof msg?.timestamp === 'string' && (!latest || msg.timestamp > latest)) {
@@ -380,7 +380,7 @@ function latestTimestamp(messages: ChatMessage[]): string | null {
   return latest;
 }
 
-function firstUserText(messages: ChatMessage[]): string | null {
+function firstUserText(messages: readonly ChatMessage[]): string | null {
   for (const msg of messages ?? []) {
     if (msg?.type !== 'user-message') continue;
     const text = extractPreviewText(msg);
@@ -389,11 +389,12 @@ function firstUserText(messages: ChatMessage[]): string | null {
   return null;
 }
 
-function latestPreviewText(messages: ChatMessage[]): string | null {
-  let latest: string | null = null;
-  for (const msg of messages ?? []) {
-    const text = extractPreviewText(msg);
-    if (text) latest = text;
+// Scans from the newest message, which is the one kept, so a whole view costs
+// no more than its tail.
+function latestPreviewText(messages: readonly ChatMessage[]): string | null {
+  for (let index = (messages?.length ?? 0) - 1; index >= 0; index -= 1) {
+    const text = extractPreviewText(messages[index]);
+    if (text) return text;
   }
-  return latest;
+  return null;
 }

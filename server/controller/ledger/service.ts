@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
+import { forEachInSteps } from '@garcon/server-agent-common/shared/event-loop';
 import type {
   AgentFinalResponse,
   AgentPermissionLifecycle,
@@ -617,13 +618,19 @@ export class TranscriptLedgerService {
   }
 
   async conversationRows(chatId: string): Promise<readonly LedgerConversationRow[]> {
-    return (await this.#store.rowsThrough(chatId, this.#store.highWatermark(chatId))).filter(isConversationalLedgerRow);
+    const rows: LedgerConversationRow[] = [];
+    await forEachInSteps(await this.#store.rowsThrough(chatId, this.#store.highWatermark(chatId)), (row) => {
+      if (isConversationalLedgerRow(row)) rows.push(row);
+    });
+    return rows;
   }
 
   async conversationMessages(chatId: string, excludedOrdinals: ReadonlySet<number> = new Set()): Promise<readonly ChatMessage[]> {
-    return (await this.conversationRows(chatId))
-      .filter((row) => !excludedOrdinals.has(row.ordinal))
-      .map(messageForConversationRow);
+    const messages: ChatMessage[] = [];
+    await forEachInSteps(await this.conversationRows(chatId), (row) => {
+      if (!excludedOrdinals.has(row.ordinal)) messages.push(messageForConversationRow(row));
+    });
+    return messages;
   }
 
   existingPreview(chatId: string): { first: ChatMessage; last: ChatMessage } | null {
