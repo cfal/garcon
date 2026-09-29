@@ -4,7 +4,8 @@ import { isExecutorSecret } from './connection-url.js';
 import { MessageContinuityError } from './message-session.js';
 import { SESSION_SOCKET_BUFFER_BYTES, SessionSocketFrames } from './session-socket.js';
 import { SessionTransport } from './session-transport.js';
-import { version } from '../../../package.json';
+import { EXECUTOR_PROTOCOL_REVISION } from './rpc-protocol.js';
+import { version as packageVersion } from '../../../package.json';
 
 type Role = 'controller' | 'worker';
 interface HelloFields {
@@ -31,6 +32,9 @@ export interface WebSocketLinkOptions {
 }
 
 export const EXECUTOR_NOISE_CONTEXT = 'garcon-executor/v1';
+
+// Peers must share both the release and the wire protocol revision.
+const LINK_VERSION = `${packageVersion}+protocol.${EXECUTOR_PROTOCOL_REVISION}`;
 
 // Why a connection carrying a session closed; each closure retires its session.
 export type LinkClosureCause =
@@ -221,7 +225,7 @@ export class WebSocketLink {
 
   #open(socket: NoiseWebSocket): Connection {
     const hello: Hello = {
-      type: 'hello', version,
+      type: 'hello', version: LINK_VERSION,
       ...(this.options.role === 'controller' ? { role: 'controller' as const, executorId: this.options.executorId! } : { role: 'worker' as const }),
       runtimeId: this.runtimeId, nonce: randomBytes(32).toString('hex'),
     };
@@ -261,8 +265,8 @@ export class WebSocketLink {
       if (Buffer.byteLength(encoded) > 8192) throw new Error('Handshake exceeds budget');
       const frame: unknown = JSON.parse(encoded);
       if (isHello(frame) && !connection.peer) {
-        if (frame.version !== version) {
-          this.#reportError(`Executor version mismatch: local ${version}, peer ${JSON.stringify(frame.version.slice(0, 80))}. Use matching builds.`);
+        if (frame.version !== LINK_VERSION) {
+          this.#reportError(`Executor version mismatch: local ${LINK_VERSION}, peer ${JSON.stringify(frame.version.slice(0, 80))}. Use matching builds.`);
           this.#close(connection, 'protocol-error');
           return;
         }

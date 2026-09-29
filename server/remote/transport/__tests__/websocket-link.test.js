@@ -1,32 +1,44 @@
 import { expect, test } from 'bun:test';
 import { connectNoiseWebSocket } from '@cfal/noise-ws';
 import { WebSocketLink, EXECUTOR_NOISE_CONTEXT } from '../websocket-link.ts';
+import { EXECUTOR_PROTOCOL_REVISION } from '../rpc-protocol.ts';
+import { version as packageVersion } from '../../../../package.json';
 
 const secret = Buffer.alloc(32, 42).toString('base64url');
 
+// Builds of one release share a package version, so only the protocol revision tells them apart.
+const incompatiblePeers = [
+  ['another release', 'synthetic-incompatible'],
+  ['this release without a protocol revision', packageVersion],
+  ['this release at another protocol revision', `${packageVersion}+protocol.${EXECUTOR_PROTOCOL_REVISION + 1}`],
+];
+
 for (const role of ['controller', 'worker']) {
-  test(`reports a version mismatch separately from authentication (${role})`, async () => {
-    const link = new WebSocketLink({ role, executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true });
-    const errors = [];
-    link.onError(message => errors.push(message));
-    let localVersion;
-    const socket = connectNoiseWebSocket(link.listen(), {
-      psk: Buffer.from(secret, 'base64url'), context: EXECUTOR_NOISE_CONTEXT,
-      onMessage(socket, data) {
-        const hello = JSON.parse(data);
-        localVersion = hello.version;
-        const peer = { ...hello, version: 'synthetic-incompatible', role: role === 'controller' ? 'worker' : 'controller' };
-        if (peer.role === 'worker') delete peer.executorId;
-        else peer.executorId = 'synthetic-executor';
-        socket.send(JSON.stringify(peer));
-      },
+  for (const [peerBuild, peerVersion] of incompatiblePeers) {
+    test(`reports a version mismatch with ${peerBuild} separately from authentication (${role})`, async () => {
+      const link = new WebSocketLink({ role, executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true });
+      const errors = [];
+      link.onError(message => errors.push(message));
+      let localVersion;
+      const socket = connectNoiseWebSocket(link.listen(), {
+        psk: Buffer.from(secret, 'base64url'), context: EXECUTOR_NOISE_CONTEXT,
+        onMessage(socket, data) {
+          const hello = JSON.parse(data);
+          localVersion = hello.version;
+          const peer = { ...hello, version: peerVersion, role: role === 'controller' ? 'worker' : 'controller' };
+          if (peer.role === 'worker') delete peer.executorId;
+          else peer.executorId = 'synthetic-executor';
+          socket.send(JSON.stringify(peer));
+        },
+      });
+      try {
+        await socket.closed;
+        expect(link.current).toBeNull();
+        expect(localVersion).toBe(`${packageVersion}+protocol.${EXECUTOR_PROTOCOL_REVISION}`);
+        expect(errors).toEqual([`Executor version mismatch: local ${localVersion}, peer ${JSON.stringify(peerVersion)}. Use matching builds.`]);
+      } finally { socket.close(); await link.dispose(); }
     });
-    try {
-      await socket.closed;
-      expect(link.current).toBeNull();
-      expect(errors).toEqual([`Executor version mismatch: local ${localVersion}, peer "synthetic-incompatible". Use matching builds.`]);
-    } finally { socket.close(); await link.dispose(); }
-  });
+  }
 }
 
 for (const dialer of ['controller', 'worker']) {
