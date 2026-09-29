@@ -1,4 +1,4 @@
-import { ApiError } from '$lib/api/client.js';
+import { ApiError, isIntermediaryResponse } from '$lib/api/client.js';
 import type { CommandErrorCode } from '$shared/chat-command-contracts';
 
 const OUTCOME_UNKNOWN_ERROR_CODES = new Set<string>(
@@ -37,14 +37,8 @@ function isStructuredOutcomeUnknownFailure(error: unknown): boolean {
 	return error instanceof ApiError && OUTCOME_UNKNOWN_ERROR_CODES.has(error.errorCode ?? '');
 }
 
-// Every Garcon error envelope carries an errorCode; a response without one came from an
-// intermediary, so the server's answer never reached the browser.
 function isLostReply(error: unknown): boolean {
-	if (!(error instanceof ApiError)) return true;
-	return (
-		error.errorCode === undefined &&
-		(error.status === 408 || error.status === 425 || error.status === 429 || error.status >= 500)
-	);
+	return !(error instanceof ApiError) || isIntermediaryResponse(error);
 }
 
 // The server refuses these before it looks up the command, so after a lost reply they say

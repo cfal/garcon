@@ -1,4 +1,4 @@
-import { ApiError, ApiMutationOutcomeUnknownError } from '$lib/api/client.js';
+import { ApiError, ApiMutationOutcomeUnknownError, isIntermediaryResponse } from '$lib/api/client.js';
 import type { ChatTagReconciliationKind } from './chat-sessions-contract.js';
 import type { ChatTagsMutationResponse } from '$shared/chat-tag-mutations';
 import { normalizeTags } from '$shared/tags';
@@ -37,9 +37,7 @@ export function isUnknownChatTagOutcome(error: unknown): boolean {
 	if (error instanceof ApiMutationOutcomeUnknownError) return true;
 	if (error instanceof ApiError) {
 		if (error.errorCode === 'CHAT_TAG_SAVE_UNKNOWN') return true;
-		return error.errorCode === undefined && (
-			error.status === 408 || error.status === 425 || error.status === 429 || error.status >= 500
-		);
+		return isIntermediaryResponse(error);
 	}
 	return (
 		error instanceof DOMException && (error.name === 'TimeoutError' || error.name === 'AbortError')

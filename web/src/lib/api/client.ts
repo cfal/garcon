@@ -95,6 +95,15 @@ export class ApiError extends Error {
 	}
 }
 
+// Garcon's error envelopes always carry an errorCode, so an uncoded timeout, throttle, or
+// server error came from an intermediary, and the request may or may not have reached Garcon.
+export function isIntermediaryResponse(error: ApiError): boolean {
+	return (
+		error.errorCode === undefined &&
+		(error.status === 408 || error.status === 425 || error.status === 429 || error.status >= 500)
+	);
+}
+
 export class ApiMutationOutcomeUnknownError extends Error {
 	constructor(message: string, options?: ErrorOptions) {
 		super(message, options);
