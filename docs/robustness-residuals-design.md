@@ -90,6 +90,10 @@ reached the controller as an unknown outcome with no report to follow.
   it settles the launch through the existing path.
 - Cancelled launches need no change. Execution admission is aborted only by
   Stop, shutdown, or deletion, and each already ends or removes the run.
+- A launch that fails after its session was lost reports the dispatch failure,
+  whatever its cause. The lost session cancels its calls, so the worker cannot
+  tell a failure the loss caused from the launch's own. Only a live session's
+  undeliverable reply carries the launch's own failure.
 
 ### Nested calls with unknown outcomes
 

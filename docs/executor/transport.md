@@ -136,8 +136,9 @@ run active instead of failing the turn. The worker's relay records each
 binding's latest launch until its run ends or it fails, and the resume reply
 reports it with the sequence number the binding's replay ends at; the relay
 keeps that frame when pressure drops older rows. A launch that settles after
-its session was lost publishes its outcome on the binding instead: its own
-failure, or the dispatch failure below when the lost session cancelled it.
+its session was lost publishes its outcome on the binding instead: its handle,
+or for any failure the dispatch failure below. The lost session cancels its
+calls, so a failure the loss caused cannot be told apart from the launch's own.
 Once the replay reaches that sequence number, the controller settles every
 launch whose reply it had lost when it requested the resume: a run the worker
 is executing keeps a reachable handle, so Stop reaches it, and a Stop pressed

@@ -132,7 +132,6 @@ export function serveExecutionRuntime(
     const integration = integrations.get(call.integrationId);
     if (!integration) throw new AgentCallError('not-dispatched', 'Unknown integration', 'OPERATION_UNSUPPORTED');
     const options = { signal };
-    const launchCall = { signal, onUndeliveredReply };
     switch (call.method) {
       case 'producers.bind': {
         await integration.producers.bind(call.request, options);
@@ -155,9 +154,9 @@ export function serveExecutionRuntime(
       }
       case 'permissions.respond': return integration.permissions.respond(call.request, options);
       case 'execution.start':
-        return relay.launch(producerSession, integration, call.request, launchCall, () => integration.execution.start(call.request, options));
+        return relay.launch(producerSession, integration, call.request, onUndeliveredReply, () => integration.execution.start(call.request, options));
       case 'execution.resume':
-        return relay.launch(producerSession, integration, call.request, launchCall, () => integration.execution.resume(call.request, options));
+        return relay.launch(producerSession, integration, call.request, onUndeliveredReply, () => integration.execution.resume(call.request, options));
       case 'execution.abort': return integration.execution.abort(call.request, options);
       case 'execution.runningSessions': return integration.execution.runningSessions(options);
       case 'catalog.snapshot': return integration.catalog.snapshot({ ...call.request, signal });
@@ -175,7 +174,7 @@ export function serveExecutionRuntime(
       case 'commands.discover': return required(integration.commands).discover(call.request.projectPath, signal);
       case 'compaction.compact': {
         const compaction = required(integration.compaction);
-        return relay.launch(producerSession, integration, call.request, launchCall, () => compaction.compact(call.request, options));
+        return relay.launch(producerSession, integration, call.request, onUndeliveredReply, () => compaction.compact(call.request, options));
       }
       case 'forking.fork': return required(integration.forking).fork({ ...call.request, signal });
       case 'forking.discard': return required(integration.forking).discard(call.request, signal);

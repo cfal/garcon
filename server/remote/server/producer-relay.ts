@@ -6,6 +6,7 @@ import {
   type AgentProducerNotification,
 } from '@garcon/server-agent-interface';
 import { failureDetail } from '@garcon/server-agent-common/execution/producer-adapter';
+import type { ObserveUndeliveredReply } from '../transport/rpc.js';
 import type { AgentProducerFrame, ProducerAcknowledgement, ProducerResumeState } from '../transport/rpc-protocol.js';
 import { SESSION_MESSAGE_BYTES } from '../transport/session-socket.js';
 import { EXECUTOR_DISCONNECTED_BEFORE_START } from '../../common/executor-disconnect.js';
@@ -69,13 +70,6 @@ interface UnsentFrame {
 
 type LaunchSettled = Extract<AgentProducerNotification['event'], { readonly type: 'launch-settled' }>;
 
-// The RPC call that carries a launch. The session aborts `signal` when it
-// retires, and `onUndeliveredReply` reports a reply the session could not take.
-export interface LaunchCall {
-  readonly signal: AbortSignal;
-  readonly onUndeliveredReply: (listener: () => void) => void;
-}
-
 export interface ProducerRelayOptions {
   readonly graceMs?: number;
   readonly supersededGraceMs?: number;
@@ -131,7 +125,7 @@ export class ProducerRelay {
     session: ProducerRelaySession,
     integration: AgentIntegration,
     request: { readonly producerBinding: AgentProducerBinding; readonly runId: string },
-    call: LaunchCall,
+    onUndeliveredReply: ObserveUndeliveredReply,
     run: () => Promise<AgentExecutionHandle>,
   ): Promise<AgentExecutionHandle> {
     const binding = this.#bindings.get(request.producerBinding.id);
@@ -140,7 +134,7 @@ export class ProducerRelay {
     binding.launch = launch;
     const publishIfReplyLost = (event: LaunchSettled) => {
       const publish = () => this.#publish(integration, { binding: binding.ref, event });
-      if (binding.session === session) call.onUndeliveredReply(publish);
+      if (binding.session === session) onUndeliveredReply(publish);
       else publish();
     };
     let handle: AgentExecutionHandle;
@@ -149,12 +143,12 @@ export class ProducerRelay {
     } catch (error) {
       if (binding.launch === launch) {
         binding.launch = null;
-        // A launch cancelled because its session retired never started; any other failure is its own.
-        const retired = binding.session !== session && call.signal.aborted;
+        // A lost session cancels its calls, so a failure after the loss cannot be
+        // told apart from one the loss caused and reads as the dispatch failure.
         publishIfReplyLost({
           type: 'launch-settled',
           runId: launch.runId,
-          error: retired ? EXECUTOR_DISCONNECTED_BEFORE_START : failureDetail(error),
+          error: binding.session === session ? failureDetail(error) : EXECUTOR_DISCONNECTED_BEFORE_START,
         });
       }
       throw error;
