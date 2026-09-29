@@ -1,6 +1,8 @@
 # Provider Automatic Compaction Rows
 
-Status: accepted implementation design.
+Status: implemented in #693 (`eeca7ed67`, 2026-09-07). The sections below
+record the accepted design; Behavior Before This Change describes the code it
+replaced.
 
 ## Objective
 
@@ -11,7 +13,7 @@ Codex already shows this row.
 The row is informational. It does not participate in execution, settlement,
 queueing, transcript recovery, or model context.
 
-## Current Behavior
+## Behavior Before This Change
 
 - Codex converts live `contextCompaction` items to `CompactionMessage`.
 - Claude folds a live `compact_boundary` and its synthetic summary into one

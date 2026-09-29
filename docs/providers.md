@@ -294,7 +294,7 @@ network-namespace harness is required for the current change.
 
 Extend the existing suites under `server/controller/api-providers/__tests__`, `server/controller/executors/__tests__` and `server/remote/__tests__`, and provider-settings/catalog frontend tests. Add black-box coverage under `integration-tests/tests/server` and browser workflow coverage under `integration-tests/tests/e2e`. Test the common denial/selection logic independently as well as through HTTP, RPC, and persistence boundaries.
 
-Implementation gates are `bun run check`, `bun run test` with applicable web coverage, focused integration/browser suites, and a timed fresh `bun run start --port 0` startup check. This document does not claim those implementation gates have run.
+Implementation gates are `bun run check`, `bun run test` with applicable web coverage, focused integration/browser suites, and a timed fresh `bun run start --port 0` startup check.
 
 ## Recorded Decisions
 
