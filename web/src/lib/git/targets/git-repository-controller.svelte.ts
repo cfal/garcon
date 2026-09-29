@@ -4,6 +4,7 @@ import { sameGitProject } from './git-target.js';
 // used by the Git surface.
 
 import * as m from '$lib/paraglide/messages.js';
+import { ApiError } from '$lib/api/client.js';
 import {
 	type GitStatus,
 	type GitRemoteStatus,
@@ -196,7 +197,10 @@ export class GitRepositoryController {
 				!this.isCurrentContext(project, contextGeneration)
 			)
 				return;
-			console.error('[Git] Error fetching remote status:', err);
+			// The Git surface reports executor outages itself and refreshes once the executor returns.
+			if (!(err instanceof ApiError && err.errorCode === 'EXECUTOR_UNAVAILABLE')) {
+				console.error('[Git] Error fetching remote status:', err);
+			}
 			this.remoteStatus = null;
 		}
 	}
