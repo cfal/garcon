@@ -7,9 +7,13 @@ descriptions in the historical [first-stage](./interface.md) and
 Local remains available alongside configured remote executors. Each remote uses
 one bidirectional Noise-encrypted WebSocket, regardless of which side dials.
 The shared secret authenticates Noise and the application handshake binding
-executor, runtime, build version, and the fresh connection. TLS is required
-outside explicit development mode; Noise remains mandatory when outer TLS
-certificate verification is disabled. The default redial delay is five seconds.
+executor, runtime, version, and the fresh connection. The version is the
+package version followed by the executor protocol revision, as in
+`0.3.4+protocol.1`. The revision changes with anything either side sends or
+accepts, so builds that disagree fail the handshake with "Executor version
+mismatch" instead of failing mid-session. TLS is required outside explicit
+development mode; Noise remains mandatory when outer TLS certificate
+verification is disabled. The default redial delay is five seconds.
 
 Public connection URLs may use arbitrary paths and query strings. They need not
 contain an executor ID or an `/executor` suffix. A reverse proxy must forward
