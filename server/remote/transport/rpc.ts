@@ -5,6 +5,7 @@ import {
 import type { JsonObject } from '@garcon/common/json';
 import {
   rpcContinuity,
+  SESSION_INSTALLATION_METHODS,
   type ExecutorRpcMethods, type ExecutorRpcRequest, type AgentProducerFrame, type ProducerAckFrame, type ProducerAcknowledgement,
   type OutstandingCall, type OutstandingCallState, type ReplyAckFrame, type RpcContinuity,
 } from './rpc-protocol.js';
@@ -230,7 +231,7 @@ export class ExecutorRpc {
     }
     if (options?.signal?.aborted) throw new AgentCallError('not-dispatched', 'Executor is unavailable');
     if (this.#retired || !this.transport.connected) throw new ExecutorSessionLostError('not-dispatched', 'Executor is unavailable');
-    if (this.#pending.size + this.#lateResults.size >= RPC_BUDGET) {
+    if (!SESSION_INSTALLATION_METHODS.has(method) && this.#pending.size + this.#lateResults.size >= RPC_BUDGET) {
       throw new AgentCallError('not-dispatched', 'The executor is handling too many requests. Try again shortly.');
     }
     const result = Promise.withResolvers<unknown>();
@@ -405,7 +406,7 @@ export class ExecutorRpc {
       this.#reconcile(frame);
       return;
     }
-    if (this.#incoming.size + (this.#journal?.running ?? 0) >= RPC_BUDGET) {
+    if (!SESSION_INSTALLATION_METHODS.has(frame.method) && this.#incoming.size + (this.#journal?.running ?? 0) >= RPC_BUDGET) {
       this.#reply({ type: 'error', id: frame.id, error: encodeFailure(new AgentCallError(
         'not-dispatched', 'The executor is handling too many requests. Try again shortly.',
       )) });

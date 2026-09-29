@@ -198,6 +198,12 @@ const CONTINUITY: Readonly<Record<ClassifiedMethod, RpcContinuity>> = {
   'controllerCli.request': 'session',
 };
 
+// Calls that install a replacement session. They bypass the request budgets,
+// so the calls a session recovers cannot keep it from installing.
+export const SESSION_INSTALLATION_METHODS: ReadonlySet<string> = new Set<keyof ExecutorRpcMethods>([
+  'executor.describe', 'lifecycle.migrateOwnedStorage', 'lifecycle.start', 'producers.resume', 'calls.reconcile',
+]);
+
 export function rpcContinuity(method: string): RpcContinuity {
   if (method.startsWith('files.') || isGitRpcMethod(method)) return 'journaled';
   return Object.hasOwn(CONTINUITY, method) ? CONTINUITY[method as ClassifiedMethod] : 'session';
