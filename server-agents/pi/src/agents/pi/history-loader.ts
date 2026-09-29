@@ -1,10 +1,11 @@
-import { promises as fs } from 'fs';
 import {
   buildContextEntries,
   sessionEntryToContextMessages,
   type FileEntry,
   type SessionEntry,
 } from '@earendil-works/pi-coding-agent';
+import { EventLoopSteps } from '@garcon/server-agent-common/shared/event-loop';
+import { readJsonlLineEntries } from '@garcon/server-agent-common/shared/history-loader-utils';
 import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 import {
   type ChatMessage,
@@ -15,10 +16,12 @@ function isSessionEntry(entry: FileEntry): entry is SessionEntry {
   return entry.type !== 'session';
 }
 
-function assertAcyclicActivePath(entries: SessionEntry[]): void {
-  const byId = new Map(entries.flatMap((entry) => (
-    typeof entry.id === 'string' && entry.id ? [[entry.id, entry] as const] : []
-  )));
+// The SDK walks the active path with no cycle guard, so the walk is checked first.
+async function assertAcyclicActivePath(
+  entries: readonly SessionEntry[],
+  byId: ReadonlyMap<string, SessionEntry>,
+  steps: EventLoopSteps,
+): Promise<void> {
   let current = entries.at(-1);
   const visited = new Set<string>();
   while (current && typeof current.id === 'string' && current.id) {
@@ -28,26 +31,44 @@ function assertAcyclicActivePath(entries: SessionEntry[]): void {
     visited.add(current.id);
     const parentId = typeof current.parentId === 'string' ? current.parentId : null;
     current = parentId ? byId.get(parentId) : undefined;
+    if (steps.due) await steps.next();
   }
 }
 
+// Every resumed turn, reload, and fork reads the whole session, so the file is
+// read in chunks and the passes over its entries share time-bounded steps.
 async function readPiSessionFile(sessionPath: string): Promise<ChatMessage[]> {
-  const raw = await fs.readFile(sessionPath, 'utf8');
-  const entries = parseStrictPiSessionEntries(raw);
-  const sessionEntries = entries.filter(isSessionEntry);
-  assertAcyclicActivePath(sessionEntries);
+  const steps = new EventLoopSteps();
+  const sessionEntries: SessionEntry[] = [];
+  for await (const { line, lineNumber } of readJsonlLineEntries(sessionPath)) {
+    const entry = parseStrictPiSessionEntry(line, lineNumber!);
+    if (isSessionEntry(entry)) sessionEntries.push(entry);
+    if (steps.due) await steps.next();
+  }
+  // Built the way the SDK indexes entries, and handed to it so its walk along
+  // the active path is the only whole-session pass it makes.
+  const byId = new Map<string, SessionEntry>();
+  await steps.forEach(sessionEntries, (entry) => {
+    byId.set(entry.id, entry);
+  });
+  await assertAcyclicActivePath(sessionEntries, byId, steps);
+  const contextEntries = buildContextEntries(sessionEntries, undefined, byId);
+  await steps.next();
   // buildContextEntries plus sessionEntryToContextMessages is exactly the
   // decomposition buildSessionContext performs, kept explicit here so each
   // rendered row retains its session entry identity through to providerMeta.
-  const messages = buildContextEntries(sessionEntries).flatMap((entry) => {
+  const messages: ChatMessage[] = [];
+  await steps.forEach(contextEntries, (entry) => {
     const entryId = typeof entry.id === 'string' && entry.id.length > 0 ? entry.id : null;
     const converted = sessionEntryToContextMessages(entry)
       .flatMap((message) => convertPiMessage(message));
-    if (entryId === null) return converted;
-    return converted.map((message, withinSourceOrdinal) => attachNativeMessageSource(message, {
-      entryId,
-      withinSourceOrdinal,
-    }));
+    if (entryId === null) {
+      messages.push(...converted);
+      return;
+    }
+    converted.forEach((message, withinSourceOrdinal) => {
+      messages.push(attachNativeMessageSource(message, { entryId, withinSourceOrdinal }));
+    });
   });
   return messages;
 }
@@ -56,23 +77,20 @@ export async function loadPiChatMessages(sessionPath: string): Promise<ChatMessa
   return readPiSessionFile(sessionPath);
 }
 
-function parseStrictPiSessionEntries(raw: string): FileEntry[] {
-  return raw.split('\n').flatMap((line, index) => {
-    if (!line.trim()) return [];
-    let value: unknown;
-    try {
-      value = JSON.parse(line);
-    } catch {
-      throw new Error(`Pi transcript record ${index + 1} is invalid`);
-    }
-    if (
-      !value
-      || typeof value !== 'object'
-      || Array.isArray(value)
-      || typeof (value as Record<string, unknown>).type !== 'string'
-    ) {
-      throw new Error(`Pi transcript record ${index + 1} is invalid`);
-    }
-    return [value as FileEntry];
-  });
+function parseStrictPiSessionEntry(line: string, lineNumber: number): FileEntry {
+  let value: unknown;
+  try {
+    value = JSON.parse(line);
+  } catch {
+    throw new Error(`Pi transcript record ${lineNumber} is invalid`);
+  }
+  if (
+    !value
+    || typeof value !== 'object'
+    || Array.isArray(value)
+    || typeof (value as Record<string, unknown>).type !== 'string'
+  ) {
+    throw new Error(`Pi transcript record ${lineNumber} is invalid`);
+  }
+  return value as FileEntry;
 }
