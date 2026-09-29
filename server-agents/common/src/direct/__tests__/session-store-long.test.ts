@@ -3,8 +3,9 @@ import { appendFile } from 'node:fs/promises';
 import { createTestDirectSessionStore, removeTestDirectSessionStores } from './session-store-fixture.ts';
 
 const SESSION_ID = '00000000-0000-4000-8000-00000000abcd';
-// Long enough that parsing it in one pass would hold the event loop well past the limit.
-const RUNS = 20_000;
+// Long enough that parsing it in one synchronous pass holds the event loop about
+// twice the limit; at half this length that pass stays within it.
+const RUNS = 40_000;
 const MAX_GAP_MS = 50;
 
 afterEach(removeTestDirectSessionStores);
