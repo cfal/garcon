@@ -8,7 +8,7 @@
 	import ProjectPinnedPathList from '$lib/components/chat/ProjectPinnedPathList.svelte';
 	import ProjectPinnedPathToggleButton from '$lib/components/chat/ProjectPinnedPathToggleButton.svelte';
 	import GitWorktreePickerModal from '$lib/components/git/GitWorktreePickerModal.svelte';
-	import { ProjectPathDialogState } from './project-path-dialog-state.svelte';
+	import { ProjectPathDialogState } from '$lib/chat/project-paths/project-path-dialog-state.svelte.js';
 	import { isPinnedProjectPath } from '$lib/chat/project-paths/project-pinned-paths.js';
 	import type { ChatProjectPathDialog } from '$lib/components/chat/chat-action-dialogs-state.svelte.js';
 	import FolderOpen from '@lucide/svelte/icons/folder-open';
