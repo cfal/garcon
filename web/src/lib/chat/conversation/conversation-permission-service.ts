@@ -1,7 +1,10 @@
 import * as m from '$lib/paraglide/messages.js';
 import type { PermissionMode } from '$lib/types/chat';
 import { isCustomProviderSelectionAvailable } from '$lib/agents/provider-selection.js';
-import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
+import type {
+	PermissionDecisionCommandRequest,
+	PermissionDecisionPayload,
+} from '$shared/chat-command-contracts';
 import { ApiError } from '$lib/api/client.js';
 import { sendPermissionDecision } from '$lib/api/chats.js';
 import { createClientCommandId } from '$lib/chat/conversation/client-command-id.js';
@@ -56,11 +59,26 @@ export class ConversationPermissionService {
 			);
 			return;
 		}
+		this.#sendDecision(chatId, permissionOccurrenceId, request.control, decision, (detail) =>
+			m.chat_notice_failed_permission_decision({ detail }),
+		);
+	}
+
+	// The prompt stays answerable until the server accepts the decision, so an answer the
+	// executor never received can be given again.
+	#sendDecision(
+		chatId: string,
+		permissionOccurrenceId: string,
+		control: PermissionDecisionCommandRequest['control'],
+		decision: PermissionDecisionPayload,
+		failed: (detail: string) => string,
+	): void {
+		const { deps } = this.options;
 		const command = {
 			clientRequestId: createClientCommandId(),
 			chatId,
 			permissionOccurrenceId,
-			control: request.control,
+			control,
 			allow: decision.allow,
 			alwaysAllow: Boolean(decision.alwaysAllow),
 			response: decision.response,
@@ -68,23 +86,26 @@ export class ConversationPermissionService {
 		void submitReplayedCommand(() => sendPermissionDecision(command))
 			.then(() => {
 				if (!deps.sessions.byId[chatId]) return;
-				deps.conversationUi.updatePendingPermissionsForChat(
-					chatId,
-					deps.conversationUi
-						.pendingPermissionsFor(chatId)
-						.filter((request) => request.permissionOccurrenceId !== permissionOccurrenceId),
-				);
+				this.#forgetPendingPermission(chatId, permissionOccurrenceId);
 			})
 			.catch((error) => {
 				if (!deps.sessions.byId[chatId]) return;
 				deps.chatState.appendLocalNoticeForChat(
 					chatId,
 					'error',
-					permissionDecisionFailureNotice(error, (detail) =>
-						m.chat_notice_failed_permission_decision({ detail }),
-					),
+					permissionDecisionFailureNotice(error, failed),
 				);
 			});
+	}
+
+	#forgetPendingPermission(chatId: string, permissionOccurrenceId: string): void {
+		const { conversationUi } = this.options.deps;
+		conversationUi.updatePendingPermissionsForChat(
+			chatId,
+			conversationUi
+				.pendingPermissionsFor(chatId)
+				.filter((request) => request.permissionOccurrenceId !== permissionOccurrenceId),
+		);
 	}
 
 	handleExitPlanMode(
@@ -114,12 +135,8 @@ export class ConversationPermissionService {
 		const permissionControl = deps.conversationUi
 			.pendingPermissionsFor(chatId)
 			.find((request) => request.permissionOccurrenceId === permissionOccurrenceId)?.control;
-		deps.conversationUi.updatePendingPermissionsForChat(
-			chatId,
-			deps.conversationUi
-				.pendingPermissionsFor(chatId)
-				.filter((request) => request.permissionOccurrenceId !== permissionOccurrenceId),
-		);
+		// A denial is a permission decision, so its prompt stays until the server accepts it.
+		if (choice !== 'deny') this.#forgetPendingPermission(chatId, permissionOccurrenceId);
 
 		const path = chat.projectPath;
 
@@ -195,24 +212,13 @@ export class ConversationPermissionService {
 				break;
 			case 'deny': {
 				if (permissionControl) {
-					const command = {
-						clientRequestId: createClientCommandId(),
+					this.#sendDecision(
 						chatId,
 						permissionOccurrenceId,
-						control: permissionControl,
-						allow: false,
-						alwaysAllow: false,
-					};
-					void submitReplayedCommand(() => sendPermissionDecision(command)).catch((error) => {
-						if (!deps.sessions.byId[chatId]) return;
-						deps.chatState.appendLocalNoticeForChat(
-							chatId,
-							'error',
-							permissionDecisionFailureNotice(error, (detail) =>
-								m.chat_notice_failed_deny_permission({ detail }),
-							),
-						);
-					});
+						permissionControl,
+						{ allow: false, alwaysAllow: false },
+						(detail) => m.chat_notice_failed_deny_permission({ detail }),
+					);
 				} else {
 					deps.chatState.appendLocalNoticeForChat(
 						chatId,

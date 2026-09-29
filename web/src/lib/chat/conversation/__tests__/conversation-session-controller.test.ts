@@ -3393,6 +3393,36 @@ describe('ConversationSessionController', () => {
 			expect(deps.conversationUi.pendingPermissionRequests).toHaveLength(1);
 		});
 
+		it('keeps a plan prompt whose denial was not sent', async () => {
+			const { deps, controller } = pendingPermissionController();
+			mockSendPermissionDecision.mockRejectedValueOnce(
+				new ApiError(503, 'not sent', 'PERMISSION_DECISION_NOT_DELIVERED', undefined, true),
+			);
+
+			controller.handleExitPlanModeForChat('chat-1', 'permission-1', 'deny', 'Synthetic plan');
+			await vi.waitFor(() => expect(deps.chatState.appendLocalNoticeForChat).toHaveBeenCalled());
+
+			expect(deps.chatState.appendLocalNoticeForChat).toHaveBeenCalledWith(
+				'chat-1',
+				'error',
+				expect.stringContaining('Answer again once it reconnects.'),
+			);
+			expect(mockSendPermissionDecision).toHaveBeenCalledWith(
+				expect.objectContaining({ control, allow: false, alwaysAllow: false }),
+			);
+			expect(deps.conversationUi.pendingPermissionRequests).toHaveLength(1);
+		});
+
+		it('removes a plan prompt once its denial is accepted', async () => {
+			const { deps, controller } = pendingPermissionController();
+			mockSendPermissionDecision.mockResolvedValueOnce(permissionDecisionAccepted('decision-1'));
+
+			controller.handleExitPlanModeForChat('chat-1', 'permission-1', 'deny', 'Synthetic plan');
+
+			await vi.waitFor(() => expect(deps.conversationUi.pendingPermissionRequests).toEqual([]));
+			expect(deps.chatState.appendLocalNoticeForChat).not.toHaveBeenCalled();
+		});
+
 		it('reports an unconfirmed answer after two lost replies', async () => {
 			const { deps, controller } = pendingPermissionController();
 			mockSendPermissionDecision.mockRejectedValue(new TypeError('connection reset'));
