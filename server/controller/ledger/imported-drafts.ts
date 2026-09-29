@@ -6,6 +6,7 @@ import {
   extractGarconCommands,
   parseGarconMessage,
 } from '../../../common/garcon-commands.js';
+import { GARCON_ELEMENT_PREFIX } from '../../../common/garcon-command-envelope.js';
 import {
   isCarryoverMigrationQuarantineNoticeDetail,
   isPreambleApplicationNoticeDetail,
@@ -66,7 +67,11 @@ function importedDraftFor(
   if (original.type === 'user-message' && preambleApplication) {
     return importedUserInputDrafts(original, providerMeta, at, preambleApplication);
   }
-  const commandTransform = extractGarconCommands(original);
+  // Only content containing a Garcon element can carry a command, result, message, or
+  // disclosure, and most messages have none, so the element parsers run only after this check.
+  const markup = (original.type === 'user-message' || original.type === 'assistant-message')
+    && original.content.includes(GARCON_ELEMENT_PREFIX);
+  const commandTransform = markup ? extractGarconCommands(original) : null;
   if (commandTransform) {
     return [
       ...(commandTransform.message
@@ -93,7 +98,7 @@ function importedDraftFor(
       }),
     ];
   }
-  if (original.type === 'user-message') {
+  if (markup && original.type === 'user-message') {
     const rejection = parseGarconCommandRejection(original.content);
     if (rejection) {
       return rejection.issues.map((issue) => ({ kind: 'notice', at,

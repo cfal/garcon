@@ -2,6 +2,9 @@ import { normalizeGarconCommandBody } from './garcon-command-text.js';
 import { TICKET_ACTIONS, type TicketAction } from './ticket-commands.js';
 
 export const GARCON_COMMAND_ENVELOPE_MAX_BYTES = 64 * 1024;
+// Every Garcon element a message can carry, whether a command, result,
+// rejection, message, or chat-ID disclosure, opens with this prefix.
+export const GARCON_ELEMENT_PREFIX = '<garcon-';
 const encoder = new TextEncoder();
 const XML_ENTITIES: Readonly<Record<string, string>> = {
   amp: '&', lt: '<', gt: '>', quot: '"', apos: "'",
@@ -170,9 +173,11 @@ export function parseGarconXmlEnvelope(
   name: string,
   allowedAttributes: readonly string[],
 ): GarconCommandEnvelope | null {
-  if (!content.isWellFormed() || encoder.encode(content).byteLength > GARCON_COMMAND_ENVELOPE_MAX_BYTES) return null;
   const prefix = `<${name}`;
+  // The prefix check runs first because it is constant-time and rules out
+  // almost every message; the size check encodes the whole content.
   if (!content.startsWith(prefix)) return null;
+  if (!content.isWellFormed() || encoder.encode(content).byteLength > GARCON_COMMAND_ENVELOPE_MAX_BYTES) return null;
   const openerEnd = garconEnvelopeOpenerEnd(content);
   if (openerEnd < 0) return null;
   const opener = content.slice(prefix.length, openerEnd - 1);
