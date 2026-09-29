@@ -3,8 +3,9 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ExecutionGitResults, GitReviewDocumentRef } from '../../../common/git-execution.js';
 import { GIT_MAX_RESULT_BYTES } from '../../../common/git-execution.js';
+import type { GitStashEntry } from '../../../common/git.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
-import { initializeFixtureRepository, runFixtureGit } from '../../support/git-fixture.js';
+import { initializeFixtureRepository, runFixtureGit, runFixtureGitAt } from '../../support/git-fixture.js';
 
 for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote-executor-dials'] as const) {
   test(`Git review loads bounded files independently without exhausting the document (${executionBackend})`, async () => {
@@ -106,6 +107,44 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         await expect(client.post('/api/v1/git/review-documents/files', { ...target, document, files: [file], purpose: 'visible' })).rejects.toMatchObject({ status: 409, body: { errorCode: 'GIT_STALE_DOCUMENT' } });
         expect(await client.get(`/api/v1/git/status?${query}`)).toMatchObject({ executorId, branch: 'main' });
       }
+    }, { executionBackend, projectRoots: 'separate' });
+  }, 60_000);
+
+  test(`Git HTTP stash actions act on the listed stash and reject stale selections (${executionBackend})`, async () => {
+    await withIntegrationFixture(`git-stash-${executionBackend}`, async fixture => {
+      const { client } = fixture;
+      const executorId = client.executorId;
+      const project = fixture.executionDirs.project;
+      const target = { executorId, project };
+      const query = new URLSearchParams(target);
+      await initializeFixtureRepository(project);
+      if (executorId !== 'local') await initializeFixtureRepository(fixture.dirs.project);
+      for (const name of ['first', 'second']) {
+        await writeFile(join(project, 'example.txt'), `${name}\n`);
+        await runFixtureGitAt(project, '2026-01-01T00:00:00Z', 'stash', 'push', '-m', name);
+      }
+      const list = async () => (await client.get<ExecutionGitResults['getStashes']>(`/api/v1/git/stashes?${query}`)).stashes;
+      const action = (stash: GitStashEntry) => ({ ...target, stashRef: stash.ref, expectedHash: stash.hash });
+      const [second, first] = await list();
+      expect([second, first].map(stash => ({ ref: stash!.ref, message: stash!.message, date: stash!.date }))).toEqual([
+        { ref: 'stash@{0}', message: 'On main: second', date: '2026-01-01 00:00:00 +0000' },
+        { ref: 'stash@{1}', message: 'On main: first', date: '2026-01-01 00:00:00 +0000' },
+      ]);
+
+      await client.post('/api/v1/git/stash/drop', action(first!));
+      expect((await list()).map(stash => stash.hash)).toEqual([second!.hash]);
+
+      await writeFile(join(project, 'example.txt'), 'third\n');
+      await runFixtureGit(project, 'stash', 'push', '-m', 'third');
+      await expect(client.post('/api/v1/git/stash/pop', action(second!)))
+        .rejects.toMatchObject({ status: 409, body: { errorCode: 'GIT_STALE_STASH' } });
+      const current = await list();
+      expect(current.map(stash => stash.message)).toEqual(['On main: third', 'On main: second']);
+
+      await client.post('/api/v1/git/stash/apply', action(current[1]!));
+      expect(await readFile(join(project, 'example.txt'), 'utf8')).toBe('second\n');
+      expect(await list()).toEqual(current);
+      if (executorId !== 'local') expect(await runFixtureGit(fixture.dirs.project, 'stash', 'list')).toBe('');
     }, { executionBackend, projectRoots: 'separate' });
   }, 60_000);
 }
