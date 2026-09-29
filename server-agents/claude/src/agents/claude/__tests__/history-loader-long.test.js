@@ -9,7 +9,9 @@ import {
   sortClaudeEntries,
 } from '../history-loader.js';
 
-const ENTRY_PAIRS = 3000;
+// Long enough that converting it in one pass would hold the event loop well past the limit.
+const ENTRY_PAIRS = 20_000;
+const MAX_GAP_MS = 50;
 
 function syntheticTranscript() {
   const lines = [];
@@ -34,29 +36,30 @@ function syntheticTranscript() {
 }
 
 describe('long Claude native history', () => {
-  it('matches whole-file conversion while yielding to the event loop between chunks', async () => {
+  it('matches whole-file conversion without holding the event loop for the whole file', async () => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-long-history-'));
     const filePath = path.join(directory, 'session.jsonl');
     const lines = syntheticTranscript();
     await fs.writeFile(filePath, `${lines.join('\n')}\n`, 'utf8');
     try {
-      let turns = 0;
-      let running = true;
-      const tick = () => {
-        if (!running) return;
-        turns += 1;
-        setImmediate(tick);
-      };
-      setImmediate(tick);
+      let last = performance.now();
+      let longestGap = 0;
+      const probe = setInterval(() => {
+        const now = performance.now();
+        longestGap = Math.max(longestGap, now - last);
+        last = now;
+      }, 1);
       const loaded = await loadClaudeChatMessages(filePath, undefined, { throwOnError: true });
-      running = false;
+      // A final synchronous stretch ends before the probe runs again, so it gets one more turn.
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      clearInterval(probe);
 
       const expected = convertClaudeEntries(sortClaudeEntries(lines
         .map((line, index) => parseClaudeJsonlEntryWithSource(line, index + 1))
         .filter(Boolean)));
       expect(loaded).toHaveLength(ENTRY_PAIRS * 2);
       expect(loaded).toEqual(expected);
-      expect(turns).toBeGreaterThan(10);
+      expect(longestGap).toBeLessThan(MAX_GAP_MS);
     } finally {
       await fs.rm(directory, { recursive: true, force: true });
     }

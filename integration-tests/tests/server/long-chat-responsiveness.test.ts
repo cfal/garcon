@@ -13,7 +13,7 @@ import {
 const TURNS = 15_000;
 const BODY = 'Synthetic long-chat content with generic identifiers and no real data. '.repeat(3);
 const PING_INTERVAL_MS = 25;
-const MAX_PING_ROUND_TRIP_MS = 500;
+const MAX_PING_ROUND_TRIP_MS = 100;
 
 test('a long chat reloads, forks, and renders a handoff artifact while the server stays responsive', async () => {
   await withIntegrationFixture('long-chat-responsiveness', async (fixture) => {
