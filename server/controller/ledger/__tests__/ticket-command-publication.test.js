@@ -121,7 +121,7 @@ describe('ticket command ledger evidence', () => {
       issues: [{ command: 'ticket-create', reason: 'malformed', edge: 'leading' }],
       message: TICKET_COMMAND_REJECTION_GUIDANCE,
     });
-    const drafts = importedDrafts([
+    const drafts = await importedDrafts([
       { message: new AssistantMessage(AT, malformed), providerMeta: null },
       { message: new UserMessage(LATER, feedback), providerMeta: null },
     ], () => AT);
@@ -141,7 +141,7 @@ describe('ticket command ledger evidence', () => {
     expect(ledger.nativeActivityState(CHAT).providerWatermark).toEqual({ ordinal: 2, at: LATER });
     expect(calls).toEqual([]);
     for (const content of [`Prose.\n${feedback}`, `${feedback}\nProse.`, '<garcon-command-rejected>invalid</garcon-command-rejected>']) {
-      expect(importedDrafts([{ message: new UserMessage(AT, content), providerMeta: null }], () => AT)[0].kind).toBe('user-input');
+      expect((await importedDrafts([{ message: new UserMessage(AT, content), providerMeta: null }], () => AT))[0].kind).toBe('user-input');
     }
   });
 
@@ -153,7 +153,7 @@ describe('ticket command ledger evidence', () => {
       requestOrdinal: 7, status: 'ok', data: { storeId: '33333333-3333-4333-8333-333333333333',
         ticketId: 'G-1', revision: 1, status: 'open', collectionRevision: 1 } };
     const outcome = ticketCommandOutcome(result);
-    const drafts = importedDrafts([
+    const drafts = await importedDrafts([
       { message: new AssistantMessage(AT, CREATE), providerMeta: null },
       { message: new UserMessage(LATER, garconTicketResultContent(result)), providerMeta: null },
     ], () => AT);
@@ -178,7 +178,7 @@ describe('ticket command ledger evidence', () => {
     expect(ledger.nativeActivityState(CHAT).providerWatermark).toEqual({ ordinal: 2, at: LATER });
   });
 
-  test('live and imported outcomes retain the same safe filter and relationship context', () => {
+  test('live and imported outcomes retain the same safe filter and relationship context', async () => {
     const { ledger } = fixture();
     const view = ledger.initializeChat(CHAT);
     for (const [command, context] of [
@@ -190,7 +190,7 @@ describe('ticket command ledger evidence', () => {
         errorCode: 'TICKET_COMMANDS_DISABLED', message: 'Synthetic failure.' };
       const detail = ticketCommandOutcome(result);
       ledger.appendNotice(CHAT, view.viewId, { at: AT, detail, content: ticketCommandNoticeText(detail) });
-      const drafts = importedDrafts([{ message: new UserMessage(AT, garconTicketResultContent(result)), providerMeta: null }], () => AT);
+      const drafts = await importedDrafts([{ message: new UserMessage(AT, garconTicketResultContent(result)), providerMeta: null }], () => AT);
       expect(drafts[0].detail).toEqual({ ...detail, nativeResultInput: true });
       const live = ledgerRowsToTranscriptMessages(ledger.currentRows(CHAT)).at(-1).message;
       expect(live.detail.context).toEqual(context);
@@ -199,7 +199,7 @@ describe('ticket command ledger evidence', () => {
     }
   });
 
-  test('read results never persist descriptions or comments in imported notices', () => {
+  test('read results never persist descriptions or comments in imported notices', async () => {
     const { ledger } = fixture();
     const view = ledger.initializeChat(CHAT);
     const version = { storeId: '33333333-3333-4333-8333-333333333333', collectionRevision: 1 };
@@ -209,7 +209,7 @@ describe('ticket command ledger evidence', () => {
         status: 'open', resolution: null, priority: 2, labels: [], assignee: null, parentId: null,
         createdAt: AT, updatedAt: AT, createdBy: { kind: 'chat', chatId: CHAT, provenance: 'observed' } },
         links: [], comments: { ...version, items: [], nextBeforeSequence: null } } };
-    const drafts = importedDrafts([{ message: new UserMessage(AT, garconTicketResultContent(result)), providerMeta: null }], () => AT);
+    const drafts = await importedDrafts([{ message: new UserMessage(AT, garconTicketResultContent(result)), providerMeta: null }], () => AT);
     expect(drafts).toHaveLength(1);
     expect(drafts[0].kind).toBe('notice');
     expect(drafts[0].detail).toMatchObject({ command: 'read', status: 'ok', ticketId: 'G-1', revision: 1 });

@@ -15,8 +15,8 @@ import { frozenDrafts, importedDrafts } from '../imported-drafts.ts';
 const AT = '2026-08-16T00:00:00.000Z';
 
 describe('imported transcript drafts', () => {
-  it('[TLV5-CHAT-ID-DISCOVERY.03-IMPORT-UNIT-01] strips requests and maps synthetic control inputs to one notice', () => {
-    expect(importedDrafts([
+  it('[TLV5-CHAT-ID-DISCOVERY.03-IMPORT-UNIT-01] strips requests and maps synthetic control inputs to one notice', async () => {
+    expect(await importedDrafts([
       {
         message: new AssistantMessage(
           AT,
@@ -55,8 +55,8 @@ describe('imported transcript drafts', () => {
     ]);
   });
 
-  it('retains a hidden marker-only request without synthesizing an outcome', () => {
-    expect(importedDrafts([
+  it('retains a hidden marker-only request without synthesizing an outcome', async () => {
+    expect(await importedDrafts([
       { message: new AssistantMessage(AT, '<garcon-get-chat-id />\n\n'), providerMeta: null },
     ], () => AT)).toEqual([{
       kind: 'notice',
@@ -67,8 +67,8 @@ describe('imported transcript drafts', () => {
     }]);
   });
 
-  it('canonicalizes outgoing commands and incoming inter-agent envelopes without dispatch', () => {
-    expect(importedDrafts([
+  it('canonicalizes outgoing commands and incoming inter-agent envelopes without dispatch', async () => {
+    expect(await importedDrafts([
       {
         message: new AssistantMessage(
           AT,
@@ -137,12 +137,12 @@ describe('imported transcript drafts', () => {
     ]);
   });
 
-  it('preserves malformed outgoing commands without synthesizing a diagnostic', () => {
+  it('preserves malformed outgoing commands without synthesizing a diagnostic', async () => {
     const message = new AssistantMessage(
       AT,
       '<garcon-send-message to="invalid" hide-sender="false">body</garcon-send-message>',
     );
-    expect(importedDrafts([{ message, providerMeta: null }], () => AT)).toEqual([{
+    expect(await importedDrafts([{ message, providerMeta: null }], () => AT)).toEqual([{
       kind: 'provider-row',
       at: AT,
       message,
@@ -150,12 +150,12 @@ describe('imported transcript drafts', () => {
     }]);
   });
 
-  it('preserves non-standalone disclosure content', () => {
+  it('preserves non-standalone disclosure content', async () => {
     const user = new UserMessage(
       AT,
       'Continue\n<garcon-chat-id>1787836573296800</garcon-chat-id>',
     );
-    expect(importedDrafts([
+    expect(await importedDrafts([
       { message: user, providerMeta: null },
     ], () => AT)).toEqual([{
       kind: 'user-input',
@@ -170,6 +170,32 @@ describe('imported transcript drafts', () => {
       },
       providerMeta: null,
     }]);
+  });
+
+  it('converts a long history in bounded steps and still parses its Garcon elements', async () => {
+    // Markup defeats the prefix pre-check, so converting these in one pass would take several
+    // times the limit.
+    const rows = [];
+    for (let index = 0; index < 60_000; index += 1) {
+      rows.push({ message: new UserMessage(AT, `<garcon-message from="1">Request ${index}</garcon-message> ${'Synthetic content. '.repeat(12)}`), providerMeta: null });
+      rows.push({ message: new AssistantMessage(AT, `Reply ${index}. <garcon-note>x</garcon-note> ${'Synthetic content. '.repeat(12)}`), providerMeta: null });
+    }
+    rows.push({ message: new AssistantMessage(AT, '<garcon-get-chat-id />'), providerMeta: null });
+    let last = performance.now();
+    let longestGap = 0;
+    const probe = setInterval(() => {
+      const now = performance.now();
+      longestGap = Math.max(longestGap, now - last);
+      last = now;
+    }, 1);
+    const drafts = await importedDrafts(rows, () => AT);
+    // A final synchronous stretch ends before the probe runs again, so it gets one more turn.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    clearInterval(probe);
+
+    expect(drafts).toHaveLength(120_001);
+    expect(drafts.at(-1)).toMatchObject({ kind: 'notice', detail: { type: 'chat-id-request' } });
+    expect(longestGap).toBeLessThan(100);
   });
 });
 

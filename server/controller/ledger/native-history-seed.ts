@@ -1,4 +1,7 @@
 import type { AgentHistoryImport, AgentIntegration } from '@garcon/server-agent-interface';
+import { EventLoopSteps } from '@garcon/server-agent-common/shared/event-loop';
+import type { ChatMessage } from '../../../common/chat-types.js';
+import type { JsonObject } from '../../../common/json.js';
 import { sanitizeRecordedCarriedContext } from '../../../common/transcript-seed.js';
 import { toAgentChatReference } from '../agents/integration-chat-reference.js';
 import type { AgentChatEntry } from '../agents/session-types.js';
@@ -8,6 +11,7 @@ import { importedDrafts, type ImportedRow } from './imported-drafts.js';
 import {
   sanitizeRecordedPreamblePrefixes,
   type PreambleHistoryEvidence,
+  type SanitizedPreambleMessage,
 } from './preamble-history.js';
 
 export type LedgerSessionDetail = Extract<LedgerRow, { readonly kind: 'session' }>['detail'];
@@ -41,7 +45,8 @@ export async function importNativeHistoryDrafts({
   preambleEvidence = [],
   onRowsRead,
 }: NativeHistorySeedInput): Promise<LedgerRowDraft[]> {
-  const imported: ImportedRow[] = [];
+  const messages: ChatMessage[] = [];
+  const providerMetas: (JsonObject | null)[] = [];
   const chat = toAgentChatReference(
     integration,
     chatId,
@@ -53,15 +58,18 @@ export async function importNativeHistoryDrafts({
     },
     carryOverRevision,
   );
+  const steps = new EventLoopSteps();
   for await (const batch of nativeHistoryImport.load({ chat, signal })) {
     signal.throwIfAborted();
     for (const row of batch) {
-      imported.push({ message: row.message, providerMeta: row.providerMeta ?? null });
+      messages.push(row.message);
+      providerMetas.push(row.providerMeta ?? null);
     }
-    onRowsRead?.(imported.length);
+    onRowsRead?.(messages.length);
+    await steps.next();
   }
   const sanitized = sanitizeRecordedCarriedContext({
-    messages: imported.map((row) => row.message),
+    messages,
     receipt: session.nativeSeedReceipt,
     agentSessionId: session.agentSessionId,
   });
@@ -93,14 +101,21 @@ export async function importNativeHistoryDrafts({
       false,
     );
   }
-  // Sanitizing rewrites a seed prompt in place and never changes the count, so each message
-  // keeps the provider identity it arrived with.
-  return importedDrafts(
-    preambles.messages.map(({ message, application }, index) => ({
+  return importedDrafts(importedRows(preambles.messages, providerMetas), now, steps);
+}
+
+// Sanitizing rewrites a seed prompt in place and never changes the count, so each message
+// keeps the provider identity it arrived with. Rows are produced lazily so the stepped
+// conversion, not an extra whole-history pass, pays for them.
+function* importedRows(
+  messages: readonly SanitizedPreambleMessage[],
+  providerMetas: readonly (JsonObject | null)[],
+): Generator<ImportedRow> {
+  for (const [index, { message, application }] of messages.entries()) {
+    yield {
       message,
-      providerMeta: imported[index]!.providerMeta,
+      providerMeta: providerMetas[index]!,
       ...(application ? { preambleApplication: application } : {}),
-    })),
-    now,
-  );
+    };
+  }
 }

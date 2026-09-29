@@ -7,6 +7,7 @@ import {
   parseGarconMessage,
 } from '../../../common/garcon-commands.js';
 import { GARCON_ELEMENT_PREFIX } from '../../../common/garcon-command-envelope.js';
+import { EventLoopSteps } from '@garcon/server-agent-common/shared/event-loop';
 import {
   isCarryoverMigrationQuarantineNoticeDetail,
   isPreambleApplicationNoticeDetail,
@@ -38,12 +39,17 @@ export interface ImportedRow {
 
 // Turns provider-supplied history into ledger drafts. Adoption, reload, and native fork all
 // read a provider's own record and must agree on what it becomes, so they share this mapping.
-export function importedDrafts(
-  rows: readonly ImportedRow[],
+// A whole history converts in bounded steps, continuing those of the operation that read it.
+export async function importedDrafts(
+  rows: Iterable<ImportedRow>,
   now: () => string,
-): LedgerRowDraft[] {
-  return rows.flatMap(({ message, providerMeta, preambleApplication }) =>
-    importedDraftFor(message, providerMeta, now, preambleApplication));
+  steps = new EventLoopSteps(),
+): Promise<LedgerRowDraft[]> {
+  const drafts: LedgerRowDraft[] = [];
+  await steps.forEach(rows, ({ message, providerMeta, preambleApplication }) => {
+    drafts.push(...importedDraftFor(message, providerMeta, now, preambleApplication));
+  });
+  return drafts;
 }
 
 // Turns conversation carried over from an earlier agent into frozen drafts. No provider ever

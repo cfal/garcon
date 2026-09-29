@@ -204,6 +204,30 @@ describe('TranscriptAdoptionService', () => {
       },
     });
   });
+
+  it('does not recreate a ledger deleted just after the final ownership check', async () => {
+    let registered = true;
+    let deleteChat;
+    let deletion;
+    await withFixture(async ({ adoption, ledger, root }) => {
+      deleteChat = () => {
+        registered = false;
+        ledger.deleteChat('chat-1');
+      };
+      await adoption.ensure('chat-1').catch(() => null);
+      await deletion;
+
+      expect(deletion).toBeDefined();
+      await expect(stat(path.join(root, 'chat-1'))).rejects.toMatchObject({ code: 'ENOENT' });
+    }, {
+      getChat: (_chatId, entry) => registered ? entry : null,
+      // Adoption first asks for the time after its final ownership check.
+      now: () => {
+        deletion ??= Promise.resolve().then(deleteChat);
+        return TS;
+      },
+    });
+  });
 });
 
 async function withFixture(run, options = {}) {
@@ -268,7 +292,7 @@ async function withFixture(run, options = {}) {
     },
     onAdopted: options.onAdopted,
     logger: options.logger,
-    now: () => TS,
+    now: options.now ?? (() => TS),
   });
   try {
     await run({

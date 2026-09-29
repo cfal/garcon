@@ -64,6 +64,10 @@ export class TranscriptAdoptionService {
       signal.throwIfAborted();
       const legacyRows = await this.#loadLegacy(chatId, entry, integration, signal);
       signal.throwIfAborted();
+      const importedRows = await importedDrafts(legacyRows, this.#now);
+      signal.throwIfAborted();
+      // Seeding captures the chat's deletion generation when it starts, so no
+      // await may separate it from this check.
       const latest = this.options.registry.getChat(chatId);
       if (!latest || latest.agentOwnershipEpoch !== entry.agentOwnershipEpoch) {
         throw new TypeError(`Chat ownership changed while adopting ${chatId}`);
@@ -76,7 +80,7 @@ export class TranscriptAdoptionService {
       const session = sessionDraft(entry, this.#now());
       const view = await this.options.ledger.seedChat(
         chatId,
-        [...prefixRows, ...(session ? [session] : []), ...importedDrafts(legacyRows, this.#now)],
+        [...prefixRows, ...(session ? [session] : []), ...importedRows],
         contentStartOrdinal,
       );
       this.#notifyAdopted(chatId);

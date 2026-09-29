@@ -44,7 +44,7 @@ describe('agent command durable evidence', () => {
       expect(request).toHaveBeenCalledTimes(1);
       const committed = ledger.currentRows(CHAT)[0].detail;
       request.mockClear();
-      const drafts = importedDrafts([{ message: new AssistantMessage(AT, content), providerMeta: null }], () => AT);
+      const drafts = await importedDrafts([{ message: new AssistantMessage(AT, content), providerMeta: null }], () => AT);
       const staged = await ledger.stageView(CHAT, drafts, 1);
       ledger.replaceCurrentView(CHAT, view.viewId, staged.viewId);
       store.closeChat(CHAT);
@@ -70,7 +70,7 @@ describe('agent command durable evidence', () => {
         { ordinal: 1, message: new AssistantMessage(AT, 'Retained') },
       ]);
       request.mockClear();
-      const drafts = importedDrafts([{ message: new AssistantMessage(LATER, STOP), providerMeta: null }], () => AT);
+      const drafts = await importedDrafts([{ message: new AssistantMessage(LATER, STOP), providerMeta: null }], () => AT);
       const staged = await ledger.stageView(CHAT, drafts, 1);
       ledger.replaceCurrentView(CHAT, view.viewId, staged.viewId);
       store.closeChat(CHAT);
@@ -91,7 +91,7 @@ describe('agent command durable evidence', () => {
       const detail = { type, requestViewId: view.viewId, requestOrdinal: 1, reason: 'action-failed',
         ...(type === 'agent-schedule-outcome' ? { status: 'failed' } : { status: 'rejected', ref: 'task', async: true }) };
       ledger.appendNotice(CHAT, view.viewId, { at: AT, title, content: agentCommandOutcomeContent(detail), detail });
-      store.append(CHAT, view.viewId, importedDrafts([
+      store.append(CHAT, view.viewId, await importedDrafts([
         { message: new UserMessage(LATER, garconCommandResultContent(detail)), providerMeta: null },
       ], () => AT));
       store.closeChat(CHAT);
@@ -109,7 +109,7 @@ describe('agent command durable evidence', () => {
       const detail = { type, ref: 'exact-output', async: false, requestViewId: view.viewId,
         requestOrdinal: 1, status: 'completed', chatId: '2000000000000000',
         output: { availability: 'available', completeness: 'complete', text: '\nSynthetic answer.\r' } };
-      store.append(CHAT, view.viewId, importedDrafts([
+      store.append(CHAT, view.viewId, await importedDrafts([
         { message: new UserMessage(LATER, garconCommandResultContent(detail)), providerMeta: null },
       ], () => AT));
       store.closeChat(CHAT);
@@ -127,7 +127,7 @@ describe('agent command durable evidence', () => {
         requestViewId: view.viewId, requestOrdinal: 3, status: 'completed', chatId: '2000000000000000',
         output: { availability: 'available', completeness: 'complete', text: 'x'.repeat(48 * 1024) } };
       ledger.appendNotice(CHAT, view.viewId, { at: AT, title: 'Resume agent', content: agentCommandOutcomeContent(detail), detail });
-      const native = importedDrafts([
+      const native = await importedDrafts([
         { message: new AssistantMessage(AT, RESUME), providerMeta: null },
         { message: new UserMessage(LATER, garconCommandResultContent(detail)), providerMeta: null },
       ], () => AT);
@@ -200,7 +200,7 @@ describe('agent command durable evidence', () => {
       const native = [new AssistantMessage(AT, `${START}\n${SCHEDULE}`),
         ...results.map((result) => new UserMessage(LATER, garconCommandResultContent(result))),
         new UserMessage(LATER, '<garcon-schedule-action />')];
-      const drafts = importedDrafts(native.map((message) => ({ message, providerMeta: null })), () => AT);
+      const drafts = await importedDrafts(native.map((message) => ({ message, providerMeta: null })), () => AT);
       expect(drafts[2]).toMatchObject({ at: LATER, detail: { ...results[0], nativeResultInput: true } });
       const staged = await ledger.stageView(CHAT, drafts, 1);
       ledger.replaceCurrentView(CHAT, old.viewId, staged.viewId);
@@ -224,7 +224,7 @@ describe('agent command durable evidence', () => {
         ledger.appendNotice(CHAT, view.viewId, { at: LATER, title: 'Outcome', content: 'Outcome', detail: { ...detail, ...(flag === undefined ? {} : { nativeResultInput: flag }) } });
         expect(ledger.nativeActivityState(CHAT).providerWatermark).toEqual({ ordinal: 1, at: AT });
       }
-      store.append(CHAT, view.viewId, importedDrafts([{ message: new UserMessage(LATER, garconCommandResultContent(detail)), providerMeta: null }], () => AT));
+      store.append(CHAT, view.viewId, await importedDrafts([{ message: new UserMessage(LATER, garconCommandResultContent(detail)), providerMeta: null }], () => AT));
       expect(ledger.nativeActivityState(CHAT).providerWatermark).toEqual({ ordinal: 6, at: LATER });
       ledger.appendNotice(CHAT, view.viewId, { at: '2030-01-01T03:00:00.000Z', title: 'Outcome', content: 'Newer local outcome', detail });
       store.closeChat(CHAT);
