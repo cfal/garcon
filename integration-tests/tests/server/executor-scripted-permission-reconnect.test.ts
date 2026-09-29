@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import type { ChatProcessingUpdatedMessage } from '../../../common/ws-events.js';
 import { tcpLinkProxy } from '../../../server/remote/__tests__/tcp-link-proxy.js';
 import { messagesOfType } from '../../support/chat-assertions.js';
+import { runCli } from '../../support/cli-fixture.js';
 import { withTimeout } from '../../support/deferred.js';
 import { waitForExecutorReconnect } from '../../support/executor-link.js';
 import { claudeText, claudeToolUse } from '../../support/fake-claude-model.js';
@@ -39,17 +40,27 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
             && event.chatId === chatId && event.phase === phase,
           `${chatId} processing ${phase}`, { afterIndex: cursor, timeoutMs: 20_000 },
         );
+        const decision = {
+          clientRequestId: crypto.randomUUID(), chatId, permissionOccurrenceId: permission.permissionOccurrenceId,
+          allow: true, alwaysAllow: false, control,
+        };
+        // The executor gateway is down with the link, so the CLI talks to the controller directly.
+        const cliDecision = () => runCli(fixture, [
+          'permission-decision', chatId, permission.permissionOccurrenceId, 'allow',
+          '--run', control.runId, '--server-instance', control.serverInstanceId, '--json',
+        ], 'controller');
         proxy!.refuseConnections();
         proxy!.disconnect();
         const reconnecting = await processingPhase('reconnecting');
 
         // An answer during the gap is definitely not sent and leaves the request pending.
-        await expect(fixture.client.sendPermissionDecision({
-          clientRequestId: crypto.randomUUID(), chatId, permissionOccurrenceId: permission.permissionOccurrenceId,
-          allow: true, alwaysAllow: false, control,
-        })).rejects.toMatchObject({
+        await expect(fixture.client.sendPermissionDecision(decision)).rejects.toMatchObject({
           status: 503, body: { errorCode: 'PERMISSION_DECISION_NOT_DELIVERED', retryable: true },
         });
+        const undelivered = await cliDecision();
+        expect(undelivered.exitCode).toBe(3);
+        expect(undelivered.stdout).toBe('');
+        expect(undelivered.stderr).toContain('PERMISSION_DECISION_NOT_DELIVERED');
         expect((await fixture.client.getChatSnapshot(chatId, 0)).transientFeed.rows.map(row => row.message.type))
           .toEqual(['permission-request']);
         expect(environment.model.requestsSince(0)).toHaveLength(1);
@@ -65,9 +76,13 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
         expect(terminals()).toEqual([]);
         expect((await fixture.client.getChatSnapshot(chatId, 0)).transientFeed.rows.map(row => row.message.type))
           .toEqual(['permission-request']);
-        await fixture.client.sendPermissionDecision({
-          clientRequestId: crypto.randomUUID(), chatId, permissionOccurrenceId: permission.permissionOccurrenceId,
-          allow: true, alwaysAllow: false, control,
+        // The CLI repeats its per-prompt request ID, which delivers the answer it could not send.
+        const delivered = await cliDecision();
+        expect(delivered).toMatchObject({ exitCode: 0, stderr: '' });
+        expect(JSON.parse(delivered.stdout)).toMatchObject({ commandType: 'permission-decision', chatId, status: 'accepted' });
+        // Repeating the browser's undelivered request tries again rather than replaying its failure.
+        await expect(fixture.client.sendPermissionDecision(decision)).rejects.toMatchObject({
+          status: 409, body: { errorCode: 'PERMISSION_NOT_ACTIONABLE' },
         });
         const approval = await withTimeout(approved.requested, 30_000, () => 'Claude did not receive the approved tool result');
         expect(approval.body.messages).toEqual(expect.arrayContaining([expect.objectContaining({
