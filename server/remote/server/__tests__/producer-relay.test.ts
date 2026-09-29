@@ -7,7 +7,7 @@ import {
   type AgentProducerNotification,
   type AgentResourceScope,
 } from '@garcon/server-agent-interface';
-import { ProducerRelay } from '../producer-relay.js';
+import { ProducerRelay, type LaunchCall } from '../producer-relay.js';
 import { EXECUTOR_DISCONNECTED_BEFORE_START } from '../../../common/executor-disconnect.js';
 
 const SCOPE: AgentResourceScope = { executorId: 'executor-1', instanceId: 'instance-1', integrationId: 'test' };
@@ -48,6 +48,17 @@ function session(capacity = Infinity) {
       event.type === 'rows' ? (event.rows[0]!.message as AssistantMessage).content : event.type
     )),
   };
+}
+
+// A launch's RPC call whose undelivered-reply listeners run when the test says the
+// session could not take the reply.
+function launchCall(signal = new AbortController().signal) {
+  const listeners: (() => void)[] = [];
+  const call = {
+    signal,
+    onUndeliveredReply: (listener: () => void) => { listeners.push(listener); },
+  } satisfies LaunchCall;
+  return { call, replyUndelivered: () => { for (const listener of listeners.splice(0)) listener(); } };
 }
 
 function rows(text: string): AgentProducerNotification['event'] {
@@ -320,7 +331,7 @@ describe('ProducerRelay', () => {
     relay.bind(first, integration, ref);
     const handle = createAgentResourceRef(SCOPE, 'execution');
     const release = Promise.withResolvers<typeof handle>();
-    const launch = relay.launch(first, integration, { producerBinding: ref, runId: 'run-1' }, new AbortController().signal, () => release.promise);
+    const launch = relay.launch(first, integration, { producerBinding: ref, runId: 'run-1' }, launchCall().call, () => release.promise);
     relay.suspend(first);
     const second = session();
 
@@ -351,9 +362,10 @@ describe('ProducerRelay', () => {
     const failure = Promise.withResolvers<typeof handle>();
     const retired = new AbortController();
     const launches = [
-      relay.launch(first, integration, { producerBinding: started, runId: 'run-1' }, retired.signal, () => success.promise),
-      relay.launch(first, integration, { producerBinding: cancelled, runId: 'run-2' }, retired.signal, () => cancellation.promise).catch(() => null),
-      relay.launch(first, integration, { producerBinding: failed, runId: 'run-3' }, new AbortController().signal, () => failure.promise).catch(() => null),
+      relay.launch(first, integration, { producerBinding: started, runId: 'run-1' }, launchCall(retired.signal).call, () => success.promise),
+      relay.launch(first, integration, { producerBinding: cancelled, runId: 'run-2' }, launchCall(retired.signal).call, () => cancellation.promise)
+        .catch(() => null),
+      relay.launch(first, integration, { producerBinding: failed, runId: 'run-3' }, launchCall().call, () => failure.promise).catch(() => null),
     ];
     relay.suspend(first);
     retired.abort();
@@ -385,13 +397,40 @@ describe('ProducerRelay', () => {
     relay.bind(live, integration, ref);
     const handle = createAgentResourceRef(SCOPE, 'execution');
 
-    const { signal } = new AbortController();
-    await expect(relay.launch(live, integration, { producerBinding: ref, runId: 'run-1' }, signal, async () => handle)).resolves.toBe(handle);
-    await expect(relay.launch(live, integration, { producerBinding: ref, runId: 'run-2' }, signal, async () => {
+    await expect(relay.launch(live, integration, { producerBinding: ref, runId: 'run-1' }, launchCall().call, async () => handle))
+      .resolves.toBe(handle);
+    await expect(relay.launch(live, integration, { producerBinding: ref, runId: 'run-2' }, launchCall().call, async () => {
       throw new Error('Synthetic rejection');
     })).rejects.toThrow('Synthetic rejection');
 
     expect(live.sent).toEqual([]);
+    relay.dispose();
+  });
+
+  test('publishes the outcome of a launch whose reply its live session could not take', async () => {
+    const relay = new ProducerRelay();
+    const { integration, binding } = integrationDouble();
+    relay.track(integration);
+    const live = session();
+    const [started, failed] = [binding(), binding()];
+    relay.bind(live, integration, started);
+    relay.bind(live, integration, failed);
+    const handle = createAgentResourceRef(SCOPE, 'execution');
+    const success = launchCall();
+    const failure = launchCall();
+
+    await relay.launch(live, integration, { producerBinding: started, runId: 'run-1' }, success.call, async () => handle);
+    await relay.launch(live, integration, { producerBinding: failed, runId: 'run-2' }, failure.call, async () => {
+      throw new AgentIntegrationError('AUTH_REQUIRED', 'Synthetic sign-in required', false);
+    }).catch(() => null);
+    expect(live.sent).toEqual([]);
+    success.replyUndelivered();
+    failure.replyUndelivered();
+
+    expect(live.frames().map(({ notification }) => [notification.binding.id, notification.event])).toEqual([
+      [started.id, { type: 'launch-settled', runId: 'run-1', handle }],
+      [failed.id, { type: 'launch-settled', runId: 'run-2', error: { code: 'AUTH_REQUIRED', message: 'Synthetic sign-in required' } }],
+    ]);
     relay.dispose();
   });
 });

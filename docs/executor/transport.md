@@ -146,6 +146,14 @@ failure: "The executor connection was lost before this turn started. Send it
 again." A launch dispatched on the new session settles through its own reply,
 even while the replay is still arriving.
 
+A reply the worker's session queue cannot take reaches the controller as an
+unknown outcome on a live session: "The executor's reply could not be
+delivered, so the outcome is unknown." For a launch, the relay then publishes
+the outcome on the binding behind that reply, so a running turn keeps a
+reachable handle and a failed one reports its own failure. A launch cancelled
+by Stop, shutdown, or deletion also ends with an unknown outcome, but the same
+action already ends or removes its run.
+
 A binding the worker no longer holds, a restarted worker (new instance ID), or
 an expired controller grace falls back to the loss path: the controller fails
 the active run with `OUTCOME_UNKNOWN`, closes its transcript binding, and warns:

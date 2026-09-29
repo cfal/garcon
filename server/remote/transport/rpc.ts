@@ -40,7 +40,15 @@ const log = createLogger('executor-rpc');
 
 type RpcReplyGuard = (bytes: number) => void;
 export type GuardRpcReply = (guard: RpcReplyGuard) => void;
-type RpcHandler = (request: ExecutorRpcRequest, signal: AbortSignal, guardReply: GuardRpcReply) => Promise<unknown>;
+// Registers a listener for a reply the session could not take, which the caller
+// then receives as an unknown outcome on a live session.
+export type ObserveUndeliveredReply = (listener: () => void) => void;
+type RpcHandler = (
+  request: ExecutorRpcRequest,
+  signal: AbortSignal,
+  guardReply: GuardRpcReply,
+  onUndeliveredReply: ObserveUndeliveredReply,
+) => Promise<unknown>;
 
 export class ExecutorRpc {
   readonly #pending = new Map<string, { resolve(value: unknown): void; reject(error: Error): void; cleanup(): void }>();
@@ -211,30 +219,35 @@ export class ExecutorRpc {
     this.#incoming.set(frame.id, controller);
     const handler = this.#handler;
     let replyGuard: RpcReplyGuard | undefined;
+    let undelivered: (() => void) | undefined;
     const current = () => !this.#retired && this.#incoming.get(frame.id) === controller;
     void Promise.resolve().then(() => {
       if (!current() || controller.signal.aborted) throw new AgentCallError('not-dispatched', 'RPC request cancelled before dispatch');
       if (!handler) throw new AgentCallError('not-dispatched', 'RPC receiver is not installed');
-      return handler(frame, controller.signal, (guard) => { replyGuard = guard; });
+      return handler(frame, controller.signal, (guard) => { replyGuard = guard; }, (listener) => { undelivered = listener; });
     }).then((value) => {
-      if (current()) this.#reply({ type: 'result', id: frame.id, value }, replyGuard);
+      if (current() && !this.#reply({ type: 'result', id: frame.id, value }, replyGuard)) undelivered?.();
     }, (error) => {
-      if (current()) this.#reply({ type: 'error', id: frame.id, error: encodeFailure(error) });
+      if (current() && !this.#reply({ type: 'error', id: frame.id, error: encodeFailure(error) })) undelivered?.();
     }).catch(() => undefined).finally(() => { if (current()) this.#incoming.delete(frame.id); });
   }
 
-  #reply(frame: Extract<RpcFrame, { type: 'result' | 'error' }>, guard?: RpcReplyGuard): void {
+  // Returns false when the session could not take the reply and an unknown
+  // outcome was sent in its place.
+  #reply(frame: Extract<RpcFrame, { type: 'result' | 'error' }>, guard?: RpcReplyGuard): boolean {
     let payload = JSON.stringify(frame);
     if (guard) {
       try { guard(Buffer.byteLength(payload)); }
       catch (error) { payload = JSON.stringify({ type: 'error', id: frame.id, error: encodeFailure(error) } satisfies RpcFrame); }
     }
-    if (!this.transport.channel.fitsFrame(payload) || !this.transport.channel.canAdmit(payload)) {
+    const deliverable = this.transport.channel.fitsFrame(payload) && this.transport.channel.canAdmit(payload);
+    if (!deliverable) {
       payload = JSON.stringify({ type: 'error', id: frame.id, error: encodeFailure(
         new AgentCallError('unknown', "The executor's reply could not be delivered, so the outcome is unknown."),
       ) } satisfies RpcFrame);
     }
     this.transport.send(payload);
+    return deliverable;
   }
 }
 

@@ -2627,6 +2627,7 @@ relevant-entry definition under the 10.2 obligation.
 | User interrupt | Run marked stopped in memory; `run-ended: interrupted` appended immediately; provider abort best-effort; the interruption row is transparent to the resend scan. |
 | Remote executor link lost; a replacement session resumes within the grace | Runs stay active in the `reconnecting` processing phase. The worker replays events after the controller's last received sequence number, and duplicates are ignored, so each event reaches the sink once. A permission answer during the gap fails as unavailable and stays actionable; Stop is delivered after resume. |
 | A remote start, resume, or compaction reply is lost with its session | The run stays active and the turn is not reported failed. After resume the worker reports the binding's latest launch, or publishes the outcome of one that settles later. A run it is executing keeps a reachable handle and a Stop pressed during the gap aborts it; a run it never began appends `run-ended: failed` (`origin: 'core'`) with "The executor connection was lost before this turn started. Send it again."; a launch that fails for another reason after the loss reports its own failure. A turn started on the new session settles through its own reply. |
+| A remote launch reply cannot be delivered on a live session | The worker substitutes an unknown outcome and publishes the launch's outcome on its binding, so the run stays active with a reachable handle, or fails with the launch's own failure. |
 | Remote output retained during the gap, or backed up behind a slow link, exceeds the relay budget | The oldest row batches are dropped and one notice on the active run reports undelivered output; manual Reload after the turn recovers it. Session, permission, and run facts are never dropped. |
 | Reconnect grace expires, the worker restarted, or the worker no longer holds the binding | The run fails with `OUTCOME_UNKNOWN` and the manual Reload warning. After its own grace the worker detaches the binding, drops later output, and denies pending permissions. |
 | Interrupt when the run already ended | Idle no-op; nothing appended. |
@@ -3084,12 +3085,13 @@ The catalog cites this revision, but its inventory is not repeated here.
   session queue through one session, the gap notice, a binding the worker
   released, an expired controller grace, a restarted worker, and a restarted
   controller's unresumed binding over real links; lost launch replies, whether
-  the request never arrived, a disconnect cancelled admission, or only the
-  reply was lost, settled in both dial directions and through the runtime
-  router, including a Stop during the gap and a turn started while the replay
-  still drains; output replayed while a session installs reaching the ledger
-  once; a pending permission that survives a blip through the runtime router
-  and through the pinned Claude CLI; and the browser's reconnecting indicator.
+  the request never arrived, a disconnect cancelled admission, only the reply
+  was lost, or the worker's session could not take the reply, settled in both
+  dial directions and through the runtime router, including a Stop during the
+  gap and a turn started while the replay still drains; output replayed while
+  a session installs reaching the ledger once; a pending permission that
+  survives a blip through the runtime router and through the pinned Claude
+  CLI; and the browser's reconnecting indicator.
 - **Responsiveness**: a 30,000-row Direct chat reloads, forks, and renders a
   handoff artifact in every execution lane while WebSocket pings stay under
   200 ms, which leaves room for shared CI runners. The Claude, Pi, Amp,

@@ -150,6 +150,23 @@ export function outgoingFault(link: WebSocketLink) {
   return fault;
 }
 
+// Refuses the next matching message at the session queue's admission check, as
+// a full queue does, without closing the session.
+export function admissionFault(link: WebSocketLink) {
+  let refused: ((encoded: string) => boolean) | null = null;
+  link.onSession((session) => {
+    const canAdmit = session.channel.canAdmit.bind(session.channel);
+    session.channel.canAdmit = (body) => {
+      if (!refused?.(body)) return canAdmit(body);
+      refused = null;
+      return false;
+    };
+  });
+  return {
+    refuseNext(matches: (encoded: string) => boolean): void { refused = matches; },
+  };
+}
+
 export async function requestFor(integration: AgentIntegration): Promise<AgentStartRequestV5> {
   const producerBinding = createAgentResourceRef(integration.producers.scope, 'producer');
   await integration.producers.bind({ binding: producerBinding, chatId: 'test-chat' });

@@ -66,6 +66,15 @@ interface UnsentFrame {
   readonly frame: RetainedFrame;
 }
 
+type LaunchSettled = Extract<AgentProducerNotification['event'], { readonly type: 'launch-settled' }>;
+
+// The RPC call that carries a launch. The session aborts `signal` when it
+// retires, and `onUndeliveredReply` reports a reply the session could not take.
+export interface LaunchCall {
+  readonly signal: AbortSignal;
+  readonly onUndeliveredReply: (listener: () => void) => void;
+}
+
 export interface ProducerRelayOptions {
   readonly graceMs?: number;
   readonly supersededGraceMs?: number;
@@ -114,43 +123,44 @@ export class ProducerRelay {
     });
   }
 
-  // Runs a start, resume, or compaction dispatched by `session`. Only an
-  // outcome settled after that session was lost is published, because its
-  // reply can no longer reach the controller. `signal` is the call's, which
-  // the session aborts when it retires.
+  // Runs a start, resume, or compaction dispatched by `session`. Its outcome is
+  // published on the binding only when its reply cannot reach the controller:
+  // the session was lost, or the session could not take the reply.
   async launch(
     session: ProducerRelaySession,
     integration: AgentIntegration,
     request: { readonly producerBinding: AgentProducerBinding; readonly runId: string },
-    signal: AbortSignal,
+    call: LaunchCall,
     run: () => Promise<AgentExecutionHandle>,
   ): Promise<AgentExecutionHandle> {
     const binding = this.#bindings.get(request.producerBinding.id);
     if (binding?.integration !== integration) return run();
     const launch: RelayedLaunch = { runId: request.runId, handle: null };
     binding.launch = launch;
+    const publishIfReplyLost = (event: LaunchSettled) => {
+      const publish = () => this.#publish(integration, { binding: binding.ref, event });
+      if (binding.session === session) call.onUndeliveredReply(publish);
+      else publish();
+    };
     let handle: AgentExecutionHandle;
     try {
       handle = await run();
     } catch (error) {
       if (binding.launch === launch) {
         binding.launch = null;
-        if (binding.session !== session) {
-          // A launch cancelled with its session never started; any other failure is its own.
-          this.#publish(integration, { binding: binding.ref, event: {
-            type: 'launch-settled',
-            runId: launch.runId,
-            error: signal.aborted ? EXECUTOR_DISCONNECTED_BEFORE_START : failureDetail(error),
-          } });
-        }
+        // A launch cancelled because its session retired never started; any other failure is its own.
+        const retired = binding.session !== session && call.signal.aborted;
+        publishIfReplyLost({
+          type: 'launch-settled',
+          runId: launch.runId,
+          error: retired ? EXECUTOR_DISCONNECTED_BEFORE_START : failureDetail(error),
+        });
       }
       throw error;
     }
     if (binding.launch === launch) {
       launch.handle = handle;
-      if (binding.session !== session) {
-        this.#publish(integration, { binding: binding.ref, event: { type: 'launch-settled', runId: launch.runId, handle } });
-      }
+      publishIfReplyLost({ type: 'launch-settled', runId: launch.runId, handle });
     }
     return handle;
   }

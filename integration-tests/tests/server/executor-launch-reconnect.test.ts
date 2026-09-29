@@ -9,7 +9,9 @@ import { AgentDirectory, type ExecutionIntegrationDirectory } from '../../../ser
 import { AgentEventBus } from '../../../server/controller/agents/event-bus.js';
 import { IntegrationRegistry } from '../../../server/runtime/agents/integration-registry.js';
 import { AgentRuntimeRouter } from '../../../server/controller/agents/runtime-router.js';
-import { integrationFixture, linkOptions, outgoingFault } from '../../../server/remote/__tests__/integration-fixture.js';
+import {
+  admissionFault, integrationFixture, linkOptions, outgoingFault,
+} from '../../../server/remote/__tests__/integration-fixture.js';
 import { serveExecutionRuntime } from '../../../server/remote/server/executor-rpc-server.js';
 import { ProducerRelay } from '../../../server/remote/server/producer-relay.js';
 import { ExecutorRpc } from '../../../server/remote/transport/rpc.js';
@@ -36,6 +38,7 @@ async function withRemoteRouter(dialer: Dialer, run: (context: Awaited<ReturnTyp
   const controller = new WebSocketLink({ ...linkOptions, executorId: EXECUTOR, role: 'controller' });
   const worker = new WebSocketLink({ ...linkOptions, executorId: EXECUTOR, role: 'worker' });
   const workerFault = outgoingFault(worker);
+  const workerAdmission = admissionFault(worker);
   const native = integrationFixture(root, EXECUTOR);
   const relay = new ProducerRelay();
   const serving: ReturnType<typeof serveExecutionRuntime>[] = [];
@@ -45,7 +48,7 @@ async function withRemoteRouter(dialer: Dialer, run: (context: Awaited<ReturnTyp
   else worker.dial(controller.listen());
   const remote = await connected;
   try {
-    await run(await remoteRouter({ root, chats, ledger, controller, native, remote, workerFault }));
+    await run(await remoteRouter({ root, chats, ledger, controller, native, remote, workerFault, workerAdmission }));
   } finally {
     ledger.close();
     await remote.dispose();
@@ -58,7 +61,7 @@ async function withRemoteRouter(dialer: Dialer, run: (context: Awaited<ReturnTyp
   }
 }
 
-async function remoteRouter({ root, chats, ledger, controller, native, remote, workerFault }: {
+async function remoteRouter({ root, chats, ledger, controller, native, remote, workerFault, workerAdmission }: {
   readonly root: string;
   readonly chats: ChatRegistry;
   readonly ledger: TranscriptLedgerService;
@@ -66,6 +69,7 @@ async function remoteRouter({ root, chats, ledger, controller, native, remote, w
   readonly native: ReturnType<typeof integrationFixture>;
   readonly remote: Awaited<ReturnType<typeof connectRemoteExecutor>>;
   readonly workerFault: ReturnType<typeof outgoingFault>;
+  readonly workerAdmission: ReturnType<typeof admissionFault>;
 }) {
   const integration = await remote.getAgentIntegration('test');
   const integrations = new IntegrationRegistry({ instances: [integration] });
@@ -105,7 +109,7 @@ async function remoteRouter({ root, chats, ledger, controller, native, remote, w
   const restored = () => new Promise<void>(resolve => {
     const off = remote.onAvailabilityChanged(availability => { if (availability === 'ready') { off(); resolve(); } });
   });
-  return { router, ledger, native, integration, controller, restored, workerFault };
+  return { router, ledger, native, integration, controller, restored, workerFault, workerAdmission };
 }
 
 async function until(condition: () => boolean): Promise<void> {
@@ -182,6 +186,19 @@ for (const dialer of ['controller', 'worker'] as const) {
       await router.abortSession(CHAT);
       await until(() => native.calls.abort === 1);
       expect(router.isChatRunning(CHAT)).toBe(false);
+    });
+  }, 30_000);
+
+  test(`a start whose reply the worker could not deliver keeps running and Stop reaches it (${dialer} dials)`, async () => {
+    await withRemoteRouter(dialer, async ({ router, ledger, native, integration, workerAdmission }) => {
+      workerAdmission.refuseNext((encoded) => encoded.includes('"type":"result"') && encoded.includes('"kind":"execution"'));
+      await router.startSession(CHAT, 'Synthetic input');
+      await integration.execution.runningSessions();
+      expect(router.isChatRunning(CHAT)).toBe(true);
+
+      await router.abortSession(CHAT);
+      await until(() => native.calls.abort === 1);
+      expect(runEnd(ledger)).toMatchObject({ outcome: 'interrupted', origin: 'core' });
     });
   }, 30_000);
 
