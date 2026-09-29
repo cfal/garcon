@@ -9,11 +9,13 @@ import {
 
 // 30,000 native rows. Before whole-history work moved into bounded steps and a
 // Worker, reloading a history this long held the server's event loop for over
-// a second, which dropped browser heartbeats and executor links.
+// a second, which dropped browser heartbeats and executor links. The limit
+// leaves room for shared CI runners, where round trips reach about 100 ms
+// without any step holding the loop.
 const TURNS = 15_000;
 const BODY = 'Synthetic long-chat content with generic identifiers and no real data. '.repeat(3);
 const PING_INTERVAL_MS = 25;
-const MAX_PING_ROUND_TRIP_MS = 100;
+const MAX_PING_ROUND_TRIP_MS = 200;
 
 test('a long chat reloads, forks, and renders a handoff artifact while the server stays responsive', async () => {
   await withIntegrationFixture('long-chat-responsiveness', async (fixture) => {
