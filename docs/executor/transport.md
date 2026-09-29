@@ -170,7 +170,16 @@ more is logged with its operation name (`executor-slow-step` on a worker). Each
 closed connection that carried a session is logged with its cause and the
 link's running count for that cause (`executor-link-closed` on a worker):
 `liveness-timeout`, `socket-closed`, `socket-error`, `protocol-error`,
-`session-retired`, or `local-close`.
+`session-retired`, or `local-close`. When known, the log adds the reason: the
+Noise error code of a connection that ended without an encrypted close, such
+as `TRANSPORT_CLOSED` when a tunnel drops it, or the error that retired the
+session. A link failure carries the same code and is logged when it differs
+from the previous failure, until a session starts (`executor-unavailable` on a
+worker). The controller logs a session whose setup fails with the stage it
+reached (`describe`, `start-integrations`, `resume-bindings`, or `activate`)
+and the session's own reason rather than the generic loss its pending call
+reports. A parse error's message can echo the payload it failed on, so it is
+logged, and crosses the link, as `Malformed data`.
 
 Only producer notifications and launch outcomes resume. Other RPC replies lost
 with a session remain uncertain outcomes, and requests are never resent. Hung
