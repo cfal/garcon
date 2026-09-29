@@ -468,7 +468,6 @@ export class ChatHandler {
         signal: controller.signal,
         onProgress: progress.update,
       });
-      progress.stop();
       writer.send(new ChatReloadedMessage(
         clientRequestId,
         chatId,
@@ -481,7 +480,6 @@ export class ChatHandler {
         reload.hasMore,
       ));
     } catch (error: unknown) {
-      progress.stop();
       if (error instanceof WebSocketResponseDroppedError) throw error;
       if (controller.signal.aborted) {
         this.#sendRequestError(writer, {
@@ -500,6 +498,7 @@ export class ChatHandler {
         retryable: isDomainError(error) ? error.retryable : true, chatId,
       });
     } finally {
+      progress.stop();
       reloads.delete(clientRequestId);
     }
   }

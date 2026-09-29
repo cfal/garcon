@@ -17,9 +17,9 @@ interface PendingReload {
 export class ReloadChatDialogState {
 	#pending = $state.raw<PendingReload | null>(null);
 	#progress = $state.raw<ChatReloadProgress | null>(null);
-	#running = $state(false);
+	// Set exactly while a confirmed reload runs.
+	#cancellation = $state.raw<AbortController | null>(null);
 	#cancelling = $state(false);
-	#cancellation: AbortController | null = null;
 
 	get open(): boolean {
 		return this.#pending !== null;
@@ -34,7 +34,7 @@ export class ReloadChatDialogState {
 	}
 
 	get running(): boolean {
-		return this.#running;
+		return this.#cancellation !== null;
 	}
 
 	get cancelling(): boolean {
@@ -56,9 +56,9 @@ export class ReloadChatDialogState {
 	cancel(): void {
 		const pending = this.#pending;
 		if (!pending) return;
-		if (this.#running) {
+		if (this.#cancellation) {
 			this.#cancelling = true;
-			this.#cancellation?.abort();
+			this.#cancellation.abort();
 			return;
 		}
 		this.#pending = null;
@@ -69,10 +69,9 @@ export class ReloadChatDialogState {
 		reload: (chatId: string, options: ChatReloadOptions) => Promise<ChatReloadOutcome>,
 	): Promise<void> {
 		const pending = this.#pending;
-		if (!pending || this.#running) return;
+		if (!pending || this.#cancellation) return;
 		const cancellation = new AbortController();
 		this.#cancellation = cancellation;
-		this.#running = true;
 		try {
 			await reload(pending.chatId, {
 				signal: cancellation.signal,
@@ -86,7 +85,6 @@ export class ReloadChatDialogState {
 		} finally {
 			this.#pending = null;
 			this.#progress = null;
-			this.#running = false;
 			this.#cancelling = false;
 			this.#cancellation = null;
 		}
