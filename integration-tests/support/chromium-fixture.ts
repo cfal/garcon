@@ -26,6 +26,8 @@ export interface ChromiumFixture {
   context: BrowserContext;
   page: Page;
   browserErrors: string[];
+  // Chromium reports a failed resource load without its URL, so failures are listed with it.
+  readonly failedResponses: readonly string[];
   assertNoBrowserErrors(): void;
 }
 
@@ -103,15 +105,24 @@ export async function createChromiumFixture(
     page.on('console', (message) => {
       if (message.type() === 'error') browserErrors.push(`console.error: ${message.text()}`);
     });
+    const failedResponses: string[] = [];
+    page.on('response', (response) => {
+      if (response.status() < 400) return;
+      failedResponses.push(`${response.status()} ${response.request().method()} ${response.url()}`);
+    });
     const fixture: ChromiumFixture = {
       integration,
       browser,
       context,
       page,
       browserErrors,
+      failedResponses,
       assertNoBrowserErrors() {
         if (browserErrors.length > 0) {
-          throw new Error(`Unexpected browser errors:\n${browserErrors.join('\n')}`);
+          const responses = failedResponses.length > 0
+            ? `\nFailed responses:\n${failedResponses.join('\n')}`
+            : '';
+          throw new Error(`Unexpected browser errors:\n${browserErrors.join('\n')}${responses}`);
         }
       },
     };
@@ -157,6 +168,7 @@ async function writeDiagnostics(
             : String(error),
         url: fixture.page.url(),
         browserErrors: fixture.browserErrors,
+        failedResponses: fixture.failedResponses,
         details: await details?.(fixture).catch(() => null),
         integration: fixture.integration.diagnostics(),
       },
