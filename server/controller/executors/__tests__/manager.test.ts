@@ -53,7 +53,7 @@ function waitReady(manager: ExecutorManager, id: string): Promise<void> {
 }
 
 function worker(secret: string, projectPath: string, configure: (fixture: ReturnType<typeof integrationFixture>) => void = () => {}) {
-  const link = new WebSocketLink({ role: 'worker', secret, allowInsecureDevelopment: true, reconnectDelayMs: 20 });
+  const link = new WebSocketLink({ role: 'worker', secret, allowInsecureDevelopment: true, redialDelaysMs: [20] });
   cleanups.push(() => link.dispose());
   link.onSession((transport) => {
     const provider = integrationFixture(projectPath, transport.executorId);

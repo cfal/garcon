@@ -4,7 +4,7 @@ import type { ServerWebSocket } from 'bun';
 import { WebSocketLink, EXECUTOR_NOISE_CONTEXT } from '../websocket-link.js';
 
 const secret = Buffer.alloc(32, 42).toString('base64url');
-const options = { secret, executorId: 'synthetic-executor', allowInsecureDevelopment: true, reconnectDelayMs: 20 };
+const options = { secret, executorId: 'synthetic-executor', allowInsecureDevelopment: true, redialDelaysMs: [20] };
 const cleanups: (() => unknown | Promise<unknown>)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 
@@ -99,7 +99,7 @@ test('a wire relay sees neither credentials nor large payloads, including after 
 
 test('wire tampering disconnects before delivering application data', async () => {
   const worker = link('worker');
-  const controller = link('controller', { reconnectDelayMs: 60_000 });
+  const controller = link('controller', { redialDelaysMs: [60_000] });
   const wire = relay(worker.listen());
   const received: string[] = [];
   controller.onSession((session) => session.onMessage((message) => received.push(message)));
