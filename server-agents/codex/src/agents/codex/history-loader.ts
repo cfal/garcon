@@ -1,6 +1,7 @@
 // Path-based wrappers for Codex JSONL reading.
 // Accepts absolute nativePath instead of scanning ~/.codex/sessions/.
 
+import { EventLoopSteps } from '@garcon/server-agent-common/shared/event-loop';
 import { readJsonlLineEntries } from '@garcon/server-agent-common/shared/history-loader-utils';
 import type { CodexJsonlNormalizationContext } from './history-normalizer.js';
 import {
@@ -30,28 +31,49 @@ export interface CodexMessageBuckets {
   hasCanonicalThinking: boolean;
 }
 
+interface CodexSortKey {
+  readonly message: ChatMessage;
+  readonly index: number;
+  readonly byteOffset: number | undefined;
+  readonly lineNumber: number | undefined;
+  readonly withinSourceOrdinal: number;
+}
+
+function compareCodexSortKeys(a: CodexSortKey, b: CodexSortKey): number {
+  if (a.byteOffset !== undefined && b.byteOffset !== undefined) {
+    const byteOrder = a.byteOffset - b.byteOffset;
+    if (byteOrder !== 0) return byteOrder;
+  } else if (a.lineNumber !== undefined && b.lineNumber !== undefined) {
+    const lineOrder = a.lineNumber - b.lineNumber;
+    if (lineOrder !== 0) return lineOrder;
+  }
+  return (a.withinSourceOrdinal - b.withinSourceOrdinal) || a.index - b.index;
+}
+
 // Rollout position, not wall-clock time, is the order Codex recorded. Timestamps
 // repeat and run backwards within a turn, so sorting by them reordered rows against
 // their own file - and the ledger persists whatever the importer returns, which
-// would make that reordering permanent.
-export function sortCodexMessagesBySource(messages: ChatMessage[]): ChatMessage[] {
-  return messages
-    .map((message, index) => ({ message, index }))
-    .sort((a, b) => {
-      const left = getNativeMessageRevisionSource(a.message);
-      const right = getNativeMessageRevisionSource(b.message);
-      if (left?.byteOffset !== undefined && right?.byteOffset !== undefined) {
-        const byteOrder = left.byteOffset - right.byteOffset;
-        if (byteOrder !== 0) return byteOrder;
-      } else if (left?.lineNumber !== undefined && right?.lineNumber !== undefined) {
-        const lineOrder = left.lineNumber - right.lineNumber;
-        if (lineOrder !== 0) return lineOrder;
-      }
-      const ordinalOrder =
-        (left?.withinSourceOrdinal ?? 0) - (right?.withinSourceOrdinal ?? 0);
-      return ordinalOrder || a.index - b.index;
-    })
-    .map(({ message }) => message);
+// would make that reordering permanent. Sort keys are read in steps; the sort
+// itself stays one call over input that is already close to rollout order.
+export async function sortCodexMessagesBySource(
+  messages: readonly ChatMessage[],
+  steps: EventLoopSteps,
+): Promise<ChatMessage[]> {
+  const keys: CodexSortKey[] = [];
+  await steps.forEach(messages, (message) => {
+    const source = getNativeMessageRevisionSource(message);
+    keys.push({
+      message,
+      index: keys.length,
+      byteOffset: source?.byteOffset,
+      lineNumber: source?.lineNumber,
+      withinSourceOrdinal: source?.withinSourceOrdinal ?? 0,
+    });
+  });
+  keys.sort(compareCodexSortKeys);
+  const sorted: ChatMessage[] = [];
+  await steps.forEach(keys, ({ message }) => { sorted.push(message); });
+  return sorted;
 }
 
 export function createCodexMessageBuckets(): CodexMessageBuckets {
@@ -177,12 +199,16 @@ function codexResponseItemIdentity(entry: Record<string, unknown>): {
   };
 }
 
-function finishCodexMessages(buckets: CodexMessageBuckets, includeFallback: boolean): ChatMessage[] {
+function finishCodexMessages(
+  buckets: CodexMessageBuckets,
+  includeFallback: boolean,
+  steps: EventLoopSteps,
+): Promise<ChatMessage[]> {
   const messages = [...buckets.canonical];
   if (includeFallback && !buckets.hasCanonicalUser) messages.push(...buckets.fallbackUser);
   if (includeFallback && !buckets.hasCanonicalAssistant) messages.push(...buckets.fallbackAssistant);
   if (includeFallback && !buckets.hasCanonicalThinking) messages.push(...buckets.fallbackThinking);
-  return sortCodexMessagesBySource(messages);
+  return sortCodexMessagesBySource(messages, steps);
 }
 
 // Reads a Codex JSONL file and returns ChatMessage[].
@@ -196,6 +222,7 @@ export async function loadCodexChatMessages(
   if (!nativePath) return [];
 
   try {
+    const steps = new EventLoopSteps('codex-history-load');
     const buckets = createCodexMessageBuckets();
     const projection = new LegacyCodexProjection();
 
@@ -204,9 +231,10 @@ export async function loadCodexChatMessages(
         sourceByteOffset: entry.byteOffset,
         sourceLineNumber: entry.lineNumber,
       }, projection, options.throwOnError === true);
+      if (steps.due) await steps.next();
     }
 
-    return finishCodexMessages(buckets, true);
+    return await finishCodexMessages(buckets, true, steps);
   } catch (error) {
     options.signal?.throwIfAborted();
     if (options.throwOnError) throw error;

@@ -1,5 +1,6 @@
 import type { ChatMessage } from '@garcon/common/chat-types';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
+import { EventLoopSteps } from '@garcon/server-agent-common/shared/event-loop';
 import {
   attachNativeMessageSource,
   getNativeMessageSource,
@@ -49,6 +50,7 @@ export class PaginatedCodexHistorySource {
 
   async load(signal: AbortSignal): Promise<ChatMessage[]> {
     signal.throwIfAborted();
+    const steps = new EventLoopSteps('codex-paginated-history');
     const client = this.createClient();
     try {
       // Items load before turn shells: a turn always exists before its items,
@@ -56,9 +58,9 @@ export class PaginatedCodexHistorySource {
       // shell. The reverse order would orphan that turn's items and fail the
       // whole load against an actively growing thread.
       const itemEntries = await this.#loadItemEntries(client, signal);
-      const turnShells = await this.#loadTurnShells(client, signal);
+      const turnShells = await this.#loadTurnShells(client, signal, steps);
       const turnById = new Map(turnShells.map((turn) => [turn.turnId, turn]));
-      const providerItems = convertProviderItems(itemEntries, turnById);
+      const providerItems = await convertProviderItems(itemEntries, turnById, steps);
       const evidence = await this.loadUserMessageEvidence(
         this.profile.nativePath,
         this.profile.createdAt,
@@ -66,11 +68,12 @@ export class PaginatedCodexHistorySource {
         new Set(turnById.keys()),
       );
       signal.throwIfAborted();
-      return mergeEvidence(
+      return await mergeEvidence(
         turnShells,
         providerItems,
         evidence.messages,
         evidence.orderedItemIdsByTurn,
+        steps,
       );
     } catch (error) {
       signal.throwIfAborted();
@@ -90,11 +93,12 @@ export class PaginatedCodexHistorySource {
     }
   }
 
-  #loadTurnShells(
+  async #loadTurnShells(
     client: CodexPaginatedHistoryClient,
     signal: AbortSignal,
+    steps: EventLoopSteps,
   ): Promise<PaginatedTurnShell[]> {
-    return collectHistoryPages(
+    const turns = await collectHistoryPages(
       'turn',
       signal,
       this.maxPageCount,
@@ -105,24 +109,25 @@ export class PaginatedCodexHistorySource {
         sortDirection: 'asc',
         itemsView: 'notLoaded',
       }),
-    ).then((turns) => {
-      const seenTurnIds = new Set<string>();
-      return turns.map((turn, ordinal) => {
-        if (turn.itemsView !== 'notLoaded') {
-          throw new Error(`Codex returned ${turn.itemsView} items for turn ${turn.id}`);
-        }
-        if (seenTurnIds.has(turn.id)) throw new Error(`Codex repeated history turn ${turn.id}`);
-        seenTurnIds.add(turn.id);
-        return {
-          turnId: turn.id,
-          timestamp: codexTimestamp(
-            turn.startedAt ?? turn.completedAt,
-            this.profile.createdAt,
-          ),
-          ordinal,
-        };
+    );
+    const seenTurnIds = new Set<string>();
+    const shells: PaginatedTurnShell[] = [];
+    await steps.forEach(turns, (turn) => {
+      if (turn.itemsView !== 'notLoaded') {
+        throw new Error(`Codex returned ${turn.itemsView} items for turn ${turn.id}`);
+      }
+      if (seenTurnIds.has(turn.id)) throw new Error(`Codex repeated history turn ${turn.id}`);
+      seenTurnIds.add(turn.id);
+      shells.push({
+        turnId: turn.id,
+        timestamp: codexTimestamp(
+          turn.startedAt ?? turn.completedAt,
+          this.profile.createdAt,
+        ),
+        ordinal: shells.length,
       });
     });
+    return shells;
   }
 
   #loadItemEntries(
@@ -175,12 +180,14 @@ async function collectHistoryPages<T>(
   return entries;
 }
 
-function convertProviderItems(
+async function convertProviderItems(
   entries: readonly ThreadItemEntry[],
   turnById: ReadonlyMap<string, PaginatedTurnShell>,
-): PaginatedProviderItem[] {
+  steps: EventLoopSteps,
+): Promise<PaginatedProviderItem[]> {
   const seenItems = new Set<string>();
-  return entries.map(({ turnId, item }) => {
+  const items: PaginatedProviderItem[] = [];
+  await steps.forEach(entries, ({ turnId, item }) => {
     const turn = turnById.get(turnId);
     if (!turn) throw new Error(`Codex item ${item.id} refers to unknown turn ${turnId}`);
     const itemKey = providerItemKey(turnId, item.id);
@@ -189,7 +196,7 @@ function convertProviderItems(
     const converted = convertCodexAppServerItem(item, turn.timestamp, {
       includeUserMessages: true,
     });
-    return {
+    items.push({
       turnId,
       itemId: item.id,
       messages: converted.map((message, withinSourceOrdinal) => (
@@ -198,33 +205,36 @@ function convertProviderItems(
           withinSourceOrdinal,
         })
       )),
-    };
+    });
   });
+  return items;
 }
 
-function mergeEvidence(
+async function mergeEvidence(
   turnShells: readonly PaginatedTurnShell[],
   providerItems: readonly PaginatedProviderItem[],
   evidenceMessages: readonly ChatMessage[],
   orderedItemIdsByTurn: ReadonlyMap<string, readonly string[]>,
-): ChatMessage[] {
-  const providerPositionsByTurn = collectProviderPositions(providerItems);
-  const claimedRequestIds = collectUpstreamRequestIds(providerItems);
-  const evidenceByItem = collectUnrepresentedEvidence(
+  steps: EventLoopSteps,
+): Promise<ChatMessage[]> {
+  const providerPositionsByTurn = await collectProviderPositions(providerItems, steps);
+  const claimedRequestIds = await collectUpstreamRequestIds(providerItems, steps);
+  const evidenceByItem = await collectUnrepresentedEvidence(
     evidenceMessages,
     providerItems,
     claimedRequestIds,
+    steps,
   );
   const insertions = new Map<number, ChatMessage[]>();
 
-  for (const turn of turnShells) {
+  await steps.forEach(turnShells, (turn) => {
     const orderedEvidenceIds = orderedItemIdsByTurn.get(turn.turnId) ?? [];
     const positions = providerPositionsByTurn.get(turn.turnId) ?? [];
     validateEvidenceOrder(turn.turnId, orderedEvidenceIds, positions);
     const missingIds = orderedEvidenceIds.filter((itemId) => (
       evidenceByItem.has(providerItemKey(turn.turnId, itemId))
     ));
-    if (missingIds.length === 0) continue;
+    if (missingIds.length === 0) return;
 
     if (positions.length === 0) {
       appendInsertion(
@@ -234,7 +244,7 @@ function mergeEvidence(
           evidenceByItem.get(providerItemKey(turn.turnId, itemId)) ?? []
         )),
       );
-      continue;
+      return;
     }
 
     const evidenceIndexes = new Map(
@@ -266,21 +276,22 @@ function mergeEvidence(
         evidenceByItem.get(providerItemKey(turn.turnId, itemId)) ?? [],
       );
     }
-  }
+  });
 
   const merged: ChatMessage[] = [];
-  providerItems.forEach((item, index) => {
+  await steps.forEach(providerItems.entries(), ([index, item]) => {
     merged.push(...(insertions.get(index) ?? []), ...item.messages);
   });
   merged.push(...(insertions.get(providerItems.length) ?? []));
   return merged;
 }
 
-function collectProviderPositions(
+async function collectProviderPositions(
   items: readonly PaginatedProviderItem[],
-): Map<string, ProviderItemPosition[]> {
+  steps: EventLoopSteps,
+): Promise<Map<string, ProviderItemPosition[]>> {
   const positions = new Map<string, ProviderItemPosition[]>();
-  items.forEach((item, globalIndex) => {
+  await steps.forEach(items.entries(), ([globalIndex, item]) => {
     const turnPositions = positions.get(item.turnId) ?? [];
     turnPositions.push({
       itemId: item.itemId,
@@ -311,27 +322,29 @@ function validateEvidenceOrder(
   }
 }
 
-function collectUnrepresentedEvidence(
+async function collectUnrepresentedEvidence(
   messages: readonly ChatMessage[],
   providerItems: readonly PaginatedProviderItem[],
   claimedRequestIds: Set<string>,
-): Map<string, ChatMessage[]> {
-  const providerKeys = new Set(
-    providerItems.map((item) => providerItemKey(item.turnId, item.itemId)),
-  );
+  steps: EventLoopSteps,
+): Promise<Map<string, ChatMessage[]>> {
+  const providerKeys = new Set<string>();
+  await steps.forEach(providerItems, (item) => {
+    providerKeys.add(providerItemKey(item.turnId, item.itemId));
+  });
   const evidenceByItem = new Map<string, ChatMessage[]>();
-  for (const message of messages) {
+  await steps.forEach(messages, (message) => {
     const source = sourceItemIdentity(getNativeMessageSource(message)?.entryId);
-    if (!source) continue;
+    if (!source) return;
     const key = providerItemKey(source.turnId, source.itemId);
-    if (providerKeys.has(key)) continue;
+    if (providerKeys.has(key)) return;
     const requestId = upstreamRequestId(message);
-    if (requestId && claimedRequestIds.has(requestId)) continue;
+    if (requestId && claimedRequestIds.has(requestId)) return;
     if (requestId) claimedRequestIds.add(requestId);
     const itemMessages = evidenceByItem.get(key) ?? [];
     itemMessages.push(message);
     evidenceByItem.set(key, itemMessages);
-  }
+  });
   return evidenceByItem;
 }
 
@@ -365,16 +378,17 @@ function appendInsertion(
   insertions.set(index, positioned);
 }
 
-function collectUpstreamRequestIds(
+async function collectUpstreamRequestIds(
   items: readonly PaginatedProviderItem[],
-): Set<string> {
+  steps: EventLoopSteps,
+): Promise<Set<string>> {
   const requestIds = new Set<string>();
-  for (const item of items) {
+  await steps.forEach(items, (item) => {
     for (const message of item.messages) {
       const requestId = upstreamRequestId(message);
       if (requestId) requestIds.add(requestId);
     }
-  }
+  });
   return requestIds;
 }
 
