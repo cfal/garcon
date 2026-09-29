@@ -1,12 +1,14 @@
 import { AgentCallError, type AgentImportedTranscriptRow } from '@garcon/server-agent-interface';
 import { SESSION_MESSAGE_BYTES } from './session-socket.js';
 
-const PAGE_BYTES = 1024 * 1024;
+export const PAGE_BYTES = 1024 * 1024;
 
+// Pages fill across source batches, which providers keep small so the worker's
+// event loop gets a turn between them.
 export async function* historyPages(source: AsyncIterable<readonly AgentImportedTranscriptRow[]>) {
+  let page: AgentImportedTranscriptRow[] = [];
+  let bytes = 0;
   for await (const rows of source) {
-    let page: AgentImportedTranscriptRow[] = [];
-    let bytes = 0;
     for (const row of rows) {
       const size = Buffer.byteLength(JSON.stringify(row)) + 1;
       if (size > SESSION_MESSAGE_BYTES - 1024) {
@@ -16,6 +18,6 @@ export async function* historyPages(source: AsyncIterable<readonly AgentImported
       page.push(row);
       bytes += size;
     }
-    if (page.length) yield page;
   }
+  if (page.length) yield page;
 }

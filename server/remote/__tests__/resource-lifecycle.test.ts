@@ -105,8 +105,9 @@ for (const dialer of ['controller', 'worker'] as const) {
     });
     try {
       const integration = await fixture.executor.getAgentIntegration('test');
+      // Two of these rows exceed one page, so each source batch arrives as its own page.
       const pages = Array.from({ length: 10 }, (_, page) => [
-        { message: new AssistantMessage('2026-01-01T00:00:00Z', `page ${page}`) },
+        { message: new AssistantMessage('2026-01-01T00:00:00Z', `page ${page}:${'x'.repeat(600 * 1024)}`) },
       ]);
       fixture.generations[0]!.hooks.history = async function* () { yield* pages; };
       const request = await requestFor(integration);

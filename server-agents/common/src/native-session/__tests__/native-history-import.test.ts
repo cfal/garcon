@@ -44,11 +44,28 @@ describe('createNativeHistoryImport', () => {
     await expect(importRows(importer, 'empty-session')).resolves.toEqual([]);
     await expect(importRows(importer, 'missing-session')).rejects.toBe(unavailable);
   });
+
+  it('yields a long history in bounded batches, in order', async () => {
+    const messages = Array.from(
+      { length: 600 },
+      (_, index) => new AssistantMessage('2026-08-12T00:00:00.000Z', `answer ${index}`),
+    );
+    const importer = createNativeHistoryImport({
+      async load() { return { messages }; },
+    });
+    const batchSizes: number[] = [];
+
+    const rows = await importRows(importer, 'long-session', (batch) => batchSizes.push(batch.length));
+
+    expect(batchSizes).toEqual([256, 256, 88]);
+    expect(rows.map((row) => row.message)).toEqual(messages);
+  });
 });
 
 async function importRows(
   importer: ReturnType<typeof createNativeHistoryImport>,
   agentSessionId: string,
+  onBatch: (batch: readonly unknown[]) => void = () => {},
 ) {
   const rows = [];
   for await (const batch of importer.load({
@@ -68,6 +85,9 @@ async function importRows(
       settings: { ownerId: 'test', schemaVersion: 1, values: {} },
     },
     signal: new AbortController().signal,
-  })) rows.push(...batch);
+  })) {
+    onBatch(batch);
+    rows.push(...batch);
+  }
   return rows;
 }
