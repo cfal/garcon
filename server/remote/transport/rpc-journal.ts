@@ -25,6 +25,8 @@ interface JournalEntry extends JournaledCall {
   owner: RpcJournalOwner | null;
   // Null while the handler runs.
   reply: string | null;
+  // A small unknown outcome that replaces a reply dropped under pressure.
+  undeliverable: string | null;
   bytes: number;
   delivered: boolean;
   cancelled: boolean;
@@ -71,14 +73,14 @@ export class RpcReplyJournal {
   begin(owner: RpcJournalOwner, id: string): JournaledCall {
     const controller = new AbortController();
     const entry: JournalEntry = {
-      id, controller, signal: controller.signal, owner, reply: null, bytes: 0, delivered: false, cancelled: false,
+      id, controller, signal: controller.signal, owner, reply: null, undeliverable: null, bytes: 0, delivered: false, cancelled: false,
     };
     this.#entries.set(id, entry);
     this.#running += 1;
     return entry;
   }
 
-  complete(call: JournaledCall, reply: string): void {
+  complete(call: JournaledCall, reply: string, undeliverable: string): void {
     this.#running -= 1;
     const entry = call as JournalEntry;
     if (this.#entries.get(entry.id) !== entry) return;
@@ -87,6 +89,7 @@ export class RpcReplyJournal {
       return;
     }
     entry.reply = reply;
+    entry.undeliverable = undeliverable;
     entry.bytes = Buffer.byteLength(reply);
     this.#retainedBytes += entry.bytes;
     this.#evict();
@@ -160,14 +163,25 @@ export class RpcReplyJournal {
     this.#retry = null;
   }
 
-  // Drops the oldest replies, delivered ones first, until retention fits.
+  // Drops the oldest replies, delivered ones first, until retention fits. A
+  // session still waiting for an undelivered reply gets an unknown outcome in
+  // its place, so its caller does not wait out its deadline.
   #evict(): void {
     for (const delivered of [true, false]) {
       for (const entry of [...this.#entries.values()]) {
         if (this.#retainedBytes <= this.#retainedLimit) return;
-        if (entry.reply !== null && entry.delivered === delivered) this.#forget(entry);
+        if (entry.reply === null || entry.delivered !== delivered || entry.reply === entry.undeliverable) continue;
+        if (delivered || !entry.owner || entry.undeliverable === null) this.#forget(entry);
+        else this.#replaceReply(entry, entry.undeliverable);
       }
     }
+  }
+
+  #replaceReply(entry: JournalEntry, reply: string): void {
+    const bytes = Buffer.byteLength(reply);
+    this.#retainedBytes += bytes - entry.bytes;
+    entry.reply = reply;
+    entry.bytes = bytes;
   }
 
   #discard(entry: JournalEntry): void {

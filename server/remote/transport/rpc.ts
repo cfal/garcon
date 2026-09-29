@@ -448,7 +448,7 @@ export class ExecutorRpc {
       (value) => this.#encodeReply({ type: 'result', id: frame.id, value }, replyGuard) ?? undeliverableReply(frame.id),
       (error) => this.#encodeReply({ type: 'error', id: frame.id, error: encodeFailure(error) }) ?? undeliverableReply(frame.id),
     ).catch((error) => JSON.stringify({ type: 'error', id: frame.id, error: encodeFailure(error) } satisfies RpcFrame))
-      .then((reply) => journal.complete(call, reply));
+      .then((reply) => journal.complete(call, reply, undeliverableReply(frame.id)));
   }
 
   #reconcile(frame: Extract<ExecutorRpcRequest, { readonly method: 'calls.reconcile' }>): void {
