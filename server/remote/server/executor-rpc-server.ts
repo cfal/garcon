@@ -146,7 +146,10 @@ export function serveExecutionRuntime(
         return;
       }
       case 'producers.resume': {
-        if (!Array.isArray(call.request?.bindings)) throw new AgentCallError('rejected', 'Invalid producer resume request');
+        const bindings: unknown = call.request?.bindings;
+        if (!Array.isArray(bindings) || bindings.some((entry) => (
+          !entry?.binding || !Number.isSafeInteger(entry.acknowledgedSeq) || entry.acknowledgedSeq < 0
+        ))) throw new AgentCallError('rejected', 'Invalid producer resume request');
         return { resumed: relay.resume(producerSession, integration, call.request.bindings) };
       }
       case 'permissions.respond': return integration.permissions.respond(call.request, options);
