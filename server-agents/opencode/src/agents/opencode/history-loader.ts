@@ -12,6 +12,7 @@ import path from 'node:path';
 import { convertOpenCodeToolUse } from './tool-use-converter.js';
 import { normalizeOpenCodeToolResultContent } from './tool-result-converter.js';
 import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
+import { EventLoopSteps } from '@garcon/server-agent-common/shared/event-loop';
 import { stripResolvedFileMentionContext } from '@garcon/server-agent-common/shared/file-mention-context';
 import { normalizeToolResultContent } from '@garcon/server-agent-common/shared/normalize-util';
 import { errorMessage } from '@garcon/server-agent-common/lib/errors';
@@ -135,7 +136,10 @@ function isCompactionAssistant(info: NonNullable<OpenCodeMessage['info']>): bool
 // The overflow path also replays the original prompt after its successful summary.
 // A manual compaction boundary survives as a synthetic marker row so Reload and
 // fork seeding reproduce the live transcript's compaction boundary.
-function visibleOpenCodeStoredMessages(rawMessages: readonly OpenCodeMessage[]): OpenCodeMessage[] {
+async function visibleOpenCodeStoredMessages(
+  rawMessages: readonly OpenCodeMessage[],
+  steps: EventLoopSteps,
+): Promise<OpenCodeMessage[]> {
   const visible: OpenCodeMessage[] = [];
   let overflowCompactionPending = false;
   let replayExpectedText: string | null = null;
@@ -143,6 +147,7 @@ function visibleOpenCodeStoredMessages(rawMessages: readonly OpenCodeMessage[]):
   let manualCompactionBoundary: OpenCodeMessage | null = null;
 
   for (const message of rawMessages) {
+    if (steps.due) await steps.next();
     const info = message.info ?? {};
     const parts = Array.isArray(message.parts) ? message.parts.map(asRecord) : [];
 
@@ -301,7 +306,11 @@ async function requestScopedOpenCodeStoredMessages(
   return messages;
 }
 
-export function convertOpenCodeStoredMessages(rawMessages: readonly OpenCodeMessage[]): ChatMessage[] {
+// Every reload and fork converts a whole session, so its passes share time-bounded steps.
+export async function convertOpenCodeStoredMessages(
+  rawMessages: readonly OpenCodeMessage[],
+  steps = new EventLoopSteps(),
+): Promise<ChatMessage[]> {
   const messages: ChatMessage[] = [];
   // Rows keep provider part order, and every row carries its stable provider
   // identity: part rows the part ID, message-level rows the message ID. Live
@@ -311,7 +320,8 @@ export function convertOpenCodeStoredMessages(rawMessages: readonly OpenCodeMess
       ? attachNativeMessageSource(message, { entryId, withinSourceOrdinal })
       : message);
   };
-  for (const msg of visibleOpenCodeStoredMessages(rawMessages)) {
+  for (const msg of await visibleOpenCodeStoredMessages(rawMessages, steps)) {
+    if (steps.due) await steps.next();
     const info = msg.info || {};
     const ts = dateToIso(info.time?.created)
       ?? new Date().toISOString();
@@ -435,10 +445,12 @@ export async function loadRequiredOpenCodeChatMessages(
   return convertImportableOpenCodeStoredMessages(result.messages);
 }
 
-function convertImportableOpenCodeStoredMessages(
+async function convertImportableOpenCodeStoredMessages(
   messages: readonly OpenCodeMessage[],
-): ChatMessage[] {
+): Promise<ChatMessage[]> {
+  const steps = new EventLoopSteps();
   for (const message of messages) {
+    if (steps.due) await steps.next();
     const info = asRecord(message.info);
     if (
       typeof info.id !== 'string'
@@ -467,16 +479,17 @@ function convertImportableOpenCodeStoredMessages(
       }
     }
   }
-  return convertOpenCodeStoredMessages(messages);
+  return convertOpenCodeStoredMessages(messages, steps);
 }
 
-export function latestOpenCodeStoredActivityAt(
+export async function latestOpenCodeStoredActivityAt(
   rawMessages: readonly OpenCodeMessage[],
-): string | null {
-  const messages = visibleOpenCodeStoredMessages(rawMessages);
+): Promise<string | null> {
+  const steps = new EventLoopSteps();
+  const messages = await visibleOpenCodeStoredMessages(rawMessages, steps);
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]!;
-    if (convertOpenCodeStoredMessages([message]).length === 0) continue;
+    if ((await convertOpenCodeStoredMessages([message], steps)).length === 0) continue;
     return dateToIso(message.info?.time?.created);
   }
   return null;
