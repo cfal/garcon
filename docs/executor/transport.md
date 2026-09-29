@@ -13,7 +13,11 @@ package version followed by the executor protocol revision, as in
 accepts, so builds that disagree fail the handshake with "Executor version
 mismatch" instead of failing mid-session. TLS is required outside explicit
 development mode; Noise remains mandatory when outer TLS certificate
-verification is disabled. The default redial delay is five seconds.
+verification is disabled. After losing a session, the dialing side redials at
+once, then after 5 and 5 seconds, five times after 10 seconds, and every 30
+seconds after that, VS Code Remote's reconnection delays. A session that stayed
+up for 10 seconds restarts them, so a peer that drops each session right after
+it opens is backed off.
 
 Public connection URLs may use arbitrary paths and query strings. They need not
 contain an executor ID or an `/executor` suffix. A reverse proxy must forward
@@ -36,10 +40,10 @@ RPC traffic may fill the whole queue. Producer frames are admitted only while
 it holds under 4 MiB and 512 messages, and terminal output only while the
 socket is writable and it holds under 2 MiB and 256 messages, so neither can
 crowd out RPC replies. Successful socket writes leave the queue immediately.
-The transport has no receipts, replay buffers, or resumption handshakes. Any
-connection loss retires the session; requests are never automatically resent.
-Only producer notifications and launch outcomes resume across sessions, one
-layer up; see Disconnected Turns.
+The transport has no receipts, replay buffers, or resumption handshakes, and
+any connection loss retires the session. Producer notifications, launch
+outcomes, and journaled RPC replies resume across sessions one layer up; see
+Disconnected Turns and Calls Across Reconnects.
 
 Socket backpressure pauses flushing. Encoded messages cross Noise
 as binary fragments containing one final-fragment byte followed by at most
@@ -76,7 +80,8 @@ still rejects admission. Uncertain commit results are not rolled back
 automatically. Other cancelled calls release their slots immediately.
 Start, resume, and compaction have no implicit RPC deadline. Native admission can
 be slow, and some providers return a compaction handle only after the turn ends.
-Explicit caller deadlines, Stop, and session retirement still cancel these calls.
+Explicit caller deadlines and Stop still cancel these calls; losing the session
+does not cancel a launch the worker is running.
 
 Stop on a returned execution handle cancels that operation's native admission
 before requesting native abort. A resume still preparing its native turn must
@@ -90,7 +95,7 @@ does not record a successful response, end the run, or permit a retry.
 Files use single-request reads/saves up to 4 MiB; base64 bounds JSON expansion.
 Git results are limited to 4 MiB of serialized JSON. Oversized operations reject
 explicitly; there are no application-level chunk handles, upload staging, or
-result-transfer caches.
+chunked result transfers.
 
 ## Disconnected Turns
 
@@ -123,9 +128,16 @@ so once a newer session starts, bindings it has not resumed expire within
 5 minutes, as VS Code shortens its grace once another client connects.
 
 Meanwhile the controller reports the executor, and the processing phase of its
-running chats, as `reconnecting`. Active runs stay active. New dispatch and
-permission answers fail fast as unavailable, and a permission answer that could
-not be delivered stays actionable. Stop is recorded and delivered once the
+running chats, as `reconnecting`. Active runs stay active. Calls made meanwhile
+wait for the replacement session; see Calls Across Reconnects. A permission
+answer waits at most 20 seconds, so the browser gets a reply, and one that could
+not be sent stays actionable. Admitting a new turn still requires a ready
+executor, and queued turns wait for it. A turn admitted before the loss
+continues its setup on the replacement session. A setup step that is safe to
+repeat runs again if the lost session left its outcome unknown: endpoint
+validation, file mention resolution, and the carryover compaction query, which
+are read-only, and producer binding, with a fresh binding ID. Stop, deletion,
+and shutdown cancel a held turn. Stop is recorded and delivered once the
 executor is ready again. While installing a replacement session, the controller
 calls `producers.resume` with each binding's last received sequence number. The
 worker then resends the newer retained frames, paced like live output, so the
@@ -148,24 +160,31 @@ consumer that throws on an event is logged, and the other consumers still
 receive it.
 
 A start, resume, or compaction whose reply was lost with its session leaves its
-run active instead of failing the turn. The worker's relay records each
-binding's latest launch until its run ends or it fails, and the resume reply
-reports it with the sequence number the binding's replay ends at; the relay
-keeps that frame when pressure drops older rows. A launch that settles after
-its session was lost publishes its outcome on the binding instead: its handle,
-or for any failure the dispatch failure below. The lost session cancels its
-calls, so a failure the loss caused cannot be told apart from the launch's own.
-Once the replay reaches that sequence number, the controller settles every
-launch whose reply it had lost when it requested the resume: a run the worker
-is executing keeps a reachable handle, so Stop reaches it, and a Stop pressed
-during the gap aborts it; a run the worker never began fails as a dispatch
-failure: "The executor connection was lost before this turn started. Send it
-again." A launch dispatched on the new session settles through its own reply,
-even while the replay is still arriving.
+run active instead of failing the turn, and a launch the worker is running when
+its session is lost keeps running. The worker's relay records each binding's
+latest launch until its run ends or it fails, and the runs of the latest eight
+launches it received, before running them. The resume reply reports both with
+the sequence number the binding's replay ends at; the relay keeps that frame
+when pressure drops older rows. A launch that settles after its session was
+lost publishes its outcome on the binding instead: its handle, or for any
+failure the dispatch failure below. A failure after the loss can come from a
+call the loss cut off, such as a credential read from the controller, so it
+cannot be told apart from the launch's own. Once the replay reaches that
+sequence number, the controller settles every launch whose reply it had lost
+when it requested the resume: a run the worker is executing keeps a reachable
+handle, so Stop reaches it, and a Stop pressed during the gap aborts it. A
+launch the worker never received is sent again once on the new session, with
+the same run ID and admission signal, and settles the same way. A launch the
+worker received that left no record failed before its reply was lost; it, and a
+relaunch that is lost as well, fail as a dispatch failure: "The executor
+connection was lost before this turn started. Send it again." A launch
+dispatched on the new session settles through its own reply, even while the
+replay is still arriving.
 
-A reply the worker's session queue cannot take reaches the controller as an
-unknown outcome on a live session: "The executor's reply could not be
-delivered, so the outcome is unknown." For a launch, the relay then publishes
+A reply the worker's session queue cannot take, unless the journal holds it
+(see Calls Across Reconnects), reaches the controller as an unknown outcome on
+a live session: "The executor's reply could not be delivered, so the outcome is
+unknown." For a launch, the relay then publishes
 the outcome on the binding behind that reply, so a running turn keeps a
 reachable handle and a failed one reports its own failure. A launch cancelled
 by Stop, shutdown, or deletion also ends with an unknown outcome, but the same
@@ -179,7 +198,9 @@ an expired controller grace falls back to the loss path: the controller fails
 the active run with `OUTCOME_UNKNOWN`, closes its transcript binding, and warns:
 "Executor disconnected mid-turn. The turn may still be running on the
 executor. Reload from native history after it finishes to recover missing
-output." After its own grace, the worker detaches the binding, drops further
+output." A run still in setup, whose launch the controller has not requested,
+fails with the dispatch failure instead, since no worker can have begun it.
+After its own grace, the worker detaches the binding, drops further
 publication, and denies pending or later permissions. That integration rejects
 new work for the same chat until its detached turn ends. Reload rejects while
 the native session is running. Reload requires a native session reference that
@@ -211,12 +232,56 @@ reason rather than the generic loss its pending call reports. A parse error's
 message can echo the payload it failed on, so it is logged, and crosses the
 link, as `Malformed data`.
 
-Only producer notifications and launch outcomes resume. Other RPC replies lost
-with a session remain uncertain outcomes, and requests are never resent. Hung
-detached turns require worker restart. Controller crash leaves execution state
-empty on restart; graceful controller shutdown still requests native abort.
-Explicit handoff to another provider does not coordinate with detached work on
-the old provider.
+Hung detached turns require worker restart. Controller crash leaves execution
+state empty on restart; graceful controller shutdown still requests native
+abort. Explicit handoff to another provider does not coordinate with detached
+work on the old provider.
+
+## Calls Across Reconnects
+
+Calls to a remote executor wait out a reconnect instead of failing, as VS Code
+Remote holds requests while it reconnects. `ExecutorManager.requireExecutor`
+returns a reconnecting executor whose integrations are known, and a call made
+while it reconnects waits for the replacement session of the same worker within
+its own deadline and signal. It keeps up to a second of that deadline for the
+call itself, and it fails as not dispatched when the executor goes offline, is
+disposed, or the deadline passes. Sequences that belong to one session, such as
+a history reader's pages, acquire their session once.
+
+Each method has a continuity class, `rpcContinuity` in `rpc-protocol.ts`:
+
+- `session` calls belong to their session: history readers, terminal
+  attachments, producer bindings, forks and path-update preparations with their
+  compensation, lifecycle, CLI, and credentials. Losing the session cancels the
+  handler and leaves the caller with an uncertain outcome.
+- `launch` calls (start, resume, and compaction) keep running on the worker;
+  the producer relay reports their outcomes, as described above.
+- `journaled` calls are all others, including Files, Git, projects, catalogs,
+  permission answers, abort, steering, single queries, and validation. They
+  keep running on the worker, and their replies survive the loss.
+
+Every request carries a per-session sequence number, and the worker records the
+highest it received from each recent session, so it can prove that a request
+never arrived. The worker's `RpcReplyJournal` outlives sessions: it registers a
+journaled call before its handler runs, keeps the encoded reply until the
+controller acknowledges it with a batched `reply-ack`, and delivers each reply
+through the session that owns the call as that session's queue admits it. Like
+VS Code's persistent protocol, it resends what was not acknowledged; unlike it,
+only journaled replies are kept, and requests are resent only when proven lost.
+
+The controller parks a journaled call that was pending when its session retired;
+its deadline and signal keep running. While installing a replacement session of
+the same worker instance, the controller adopts every parked call into the new
+session and, ahead of producer resumption, sends `calls.reconcile` with each
+call's ID and the session and sequence number it was last sent with. The worker
+answers per call: `pending`, whose reply follows on the new session;
+`not-received`, which the controller sends again; or `unknown`. Calls of lost
+sessions that a reconcile does not name belong to callers that gave up, so the
+worker cancels them as those callers' lost cancels would have. Retained replies
+are bounded at 64 MiB, dropping the oldest delivered ones first, and a call whose
+reply was dropped reconciles as unknown. The worker's 256-request budget covers
+running journaled calls of all sessions. A restarted worker, an expired grace,
+or a disposed executor leaves parked calls with an unknown outcome.
 
 ## Shutdown And Browser Isolation
 
@@ -227,7 +292,7 @@ Browser payload and outbound-buffer limits are enforced independently of Noise
 on the shared listener. The listener's native frame ceiling is the larger of
 the configured browser limit and Noise's 65,535-byte frame limit.
 
-Implementation: `server/remote/transport/{websocket-link,session-socket,message-session,rpc}.ts`,
+Implementation: `server/remote/transport/{websocket-link,session-socket,message-session,rpc,rpc-journal}.ts`,
 `server/remote/server/producer-relay.ts`,
 `server/remote/client/{executor-client,remote-agent-integration}.ts`,
 `server/controller/ws/{server-sockets,primary-delivery}.ts`, and `server/controller/server.ts`.
