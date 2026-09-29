@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test';
 import {
   AGENT_UNSUPPORTED_SINGLE_QUERY_THINKING_MODE,
+  AgentCallError,
   AgentIntegrationError,
 } from '@garcon/server-agent-interface';
 
@@ -262,6 +263,11 @@ describe('testGenerationModel', () => {
         failure: new Error('secret provider response'),
         code: 'GENERATION_TEST_FAILED',
         status: 502,
+      },
+      {
+        failure: new AgentCallError('not-dispatched', 'The executor did not reconnect in time.'),
+        code: 'GENERATION_TEST_UNAVAILABLE',
+        status: 503,
       },
     ];
 
