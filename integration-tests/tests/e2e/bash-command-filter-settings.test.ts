@@ -69,6 +69,9 @@ describe('Lightpanda hidden Bash command settings', () => {
         GARCON_AMP_PATTERNS.map((entry) => entry.pattern),
       );
 
+      // The settings-changed broadcast can render the patterns before the save's own response
+      // re-enables the trigger.
+      await app.waitForButtonEnabled('Add preset');
       await app.clickButton('Add preset');
       await app.waitForMenuItemEnabled('Garcon-amp rules');
       await app.clickMenuItem('Garcon-amp rules');
