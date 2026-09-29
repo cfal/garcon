@@ -49,6 +49,12 @@ interface RelayedBinding {
   grace: { readonly timer: ReturnType<typeof setTimeout>; readonly deadline: number } | null;
 }
 
+interface UnsentFrame {
+  readonly binding: RelayedBinding;
+  readonly session: ProducerRelaySession;
+  readonly frame: RetainedFrame;
+}
+
 export interface ProducerRelayOptions {
   readonly graceMs?: number;
   readonly supersededGraceMs?: number;
@@ -164,10 +170,11 @@ export class ProducerRelay {
     const binding = this.#bindings.get(notification.binding.id);
     if (binding?.integration !== integration) return;
     binding.seq += 1;
+    this.#published += 1;
     const payload = encodeProducerFrame(binding.seq, notification);
     const frame: RetainedFrame = {
       seq: binding.seq,
-      order: this.#published += 1,
+      order: this.#published,
       payload,
       bytes: Buffer.byteLength(payload),
       droppable: notification.event.type === 'rows',
@@ -187,26 +194,29 @@ export class ProducerRelay {
     if (this.#pumping) return;
     this.#pumping = true;
     try {
-      for (let binding = this.#nextUnsent(); binding; binding = this.#nextUnsent()) {
-        const session = binding.session!;
-        const accepted = session.offer(binding.retained[binding.sent]!.payload);
+      for (let next = this.#nextUnsent(); next; next = this.#nextUnsent()) {
+        const accepted = next.session.offer(next.frame.payload);
         // A session that fails while taking the frame has already suspended the binding.
-        if (binding.session !== session) continue;
+        if (next.binding.session !== next.session) continue;
         if (!accepted) {
-          this.#pumpRetry ??= setTimeout(() => { this.#pumpRetry = null; this.#pump(); }, PUMP_RETRY_MS);
-          this.#pumpRetry.unref?.();
+          if (!this.#pumpRetry) {
+            this.#pumpRetry = setTimeout(() => { this.#pumpRetry = null; this.#pump(); }, PUMP_RETRY_MS);
+            this.#pumpRetry.unref?.();
+          }
           return;
         }
-        binding.sent += 1;
+        next.binding.sent += 1;
       }
     } finally { this.#pumping = false; }
   }
 
-  #nextUnsent(): RelayedBinding | null {
-    let next: RelayedBinding | null = null;
+  // The earliest-published frame not yet handed to its binding's session.
+  #nextUnsent(): UnsentFrame | null {
+    let next: UnsentFrame | null = null;
     for (const binding of this.#bindings.values()) {
-      const frame = binding.session ? binding.retained[binding.sent] : undefined;
-      if (frame && (!next || frame.order < next.retained[next.sent]!.order)) next = binding;
+      const frame = binding.retained[binding.sent];
+      if (!binding.session || !frame) continue;
+      if (!next || frame.order < next.frame.order) next = { binding, session: binding.session, frame };
     }
     return next;
   }
@@ -228,13 +238,13 @@ export class ProducerRelay {
   }
 
   #release(binding: RelayedBinding, seq: number): void {
-    let count = 0;
-    for (; count < binding.retained.length && binding.retained[count]!.seq <= seq; count += 1) {
-      binding.retainedBytes -= binding.retained[count]!.bytes;
-      this.#retainedBytes -= binding.retained[count]!.bytes;
+    const firstKept = binding.retained.findIndex((frame) => frame.seq > seq);
+    const released = binding.retained.splice(0, firstKept < 0 ? binding.retained.length : firstKept);
+    for (const frame of released) {
+      binding.retainedBytes -= frame.bytes;
+      this.#retainedBytes -= frame.bytes;
     }
-    binding.retained.splice(0, count);
-    binding.sent = Math.max(0, binding.sent - count);
+    binding.sent = Math.max(0, binding.sent - released.length);
   }
 
   #expireWithin(binding: RelayedBinding, graceMs: number): void {

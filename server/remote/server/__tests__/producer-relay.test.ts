@@ -1,4 +1,5 @@
 import { describe, expect, mock, test } from 'bun:test';
+import type { AssistantMessage } from '@garcon/common/chat-types';
 import {
   createAgentResourceRef,
   type AgentIntegration,
@@ -42,7 +43,7 @@ function session(capacity = Infinity) {
     },
     allow: (count: number) => { limit += count; },
     texts: () => frames().map(({ notification: { event } }) => (
-      event.type === 'rows' ? (event.rows[0]!.message as unknown as { content: string }).content : event.type
+      event.type === 'rows' ? (event.rows[0]!.message as AssistantMessage).content : event.type
     )),
   };
 }
