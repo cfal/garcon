@@ -1,108 +1,65 @@
 # Local Models in Garcon
 
-This guide shows the simplest way to run local models in Garcon using Ollama.
+Garcon runs local models through custom API providers. Add an Ollama provider,
+fetch its models, and pick one in the model picker like any other provider
+model. The same flow works for any OpenAI-compatible or Anthropic
+Messages-compatible local server; Ollama has built-in templates.
 
-Garcon can auto-detect Ollama and expose local models directly in the model picker for:
+Local models are available to:
 
-- `claude`
-- `codex`
-
-When detected, local models appear with a `(local)` suffix.
+- Claude Code and Direct Chat, through an Anthropic Messages endpoint;
+- Codex and Direct Chat, through an OpenAI-compatible endpoint. Codex requires
+  Responses API support, which the Ollama template declares.
 
 ## Prerequisites
 
-- Garcon installed and runnable
-- Ollama installed
-- At least one local model pulled in Ollama
+- Ollama installed and running on the machine that runs the agent: the Local
+  executor, or the remote executor that will run the chat.
+- At least one pulled model, for example `ollama pull llama3.1:8b`.
 
-## 1) Install and start Ollama
+`curl http://localhost:11434/api/tags` on that machine should list the pulled
+models.
 
-macOS (Homebrew):
+## Add An Ollama Provider
 
-```bash
-brew install ollama
-ollama serve
-```
+1. Open Server Settings > Providers.
+2. Under Custom Providers, open Add provider in the Anthropic Providers or
+   OpenAI Providers section and choose Add Ollama.
+3. In the dialog, select the executor that will run the chats. Local is the
+   default. The new provider is assigned to that executor only.
+4. Keep the template URL (`http://localhost:11434` for Anthropic Messages,
+   `http://localhost:11434/v1` for OpenAI-compatible) or point it at another
+   Ollama host. Leave the API key blank for a local Ollama.
+5. Select Fetch models. Garcon reads Ollama's `/api/tags` from the selected
+   executor and labels each model `(local)`. Save the provider.
 
-If Ollama is already installed, only `ollama serve` is needed.
+Other executors can use the same provider after you tick them in its executor
+list. See [Custom Providers On Executors](./providers.md) for the assignment
+and credential rules.
 
-Pull at least one model:
+## Use A Local Model
 
-```bash
-ollama pull llama3.1:8b
-```
+Create a chat on an executor the provider is assigned to, choose the agent, and
+pick a model ending in `(local)` under the provider.
 
-Quick health check:
+The provider URL is resolved on the executor that runs the agent, so
+`localhost` means that executor's machine, not necessarily the controller's.
+Assigning a provider does not make an unreachable address reachable.
 
-```bash
-curl http://localhost:11434/api/tags
-```
-
-You should get JSON that includes your pulled models.
-
-## 2) Start Garcon
-
-In a second terminal:
-
-```bash
-bun run start
-```
-
-Garcon auto-detects Ollama at startup using:
-
-- `GARCON_OLLAMA_URL` (default: `http://localhost:11434`)
-- `GARCON_OLLAMA_AUTO_DETECT` (default: `true`)
-
-You should see one of these startup log lines:
-
-- `ollama: detected at http://localhost:11434 (...)`
-- `ollama: not detected (local models unavailable)`
-
-## 3) Use a local model in chat
-
-1. Open Garcon.
-2. Create a new chat.
-3. Choose provider `claude` or `codex`.
-4. Pick a model that ends with `(local)`.
-5. Send your prompt as normal.
-
-No extra provider config is required for the built-in Ollama bridge path.
-
-## Important behavior
-
-- Local/cloud switching is blocked mid-session.
-- If you start a chat on a cloud model, you cannot switch that same chat to a local model (or vice versa).
-- Start a new chat when changing local vs cloud backend.
-
-This prevents invalid session history replay across incompatible backends.
-
-## Optional: custom Ollama host
-
-If Ollama runs on another host/port:
-
-```bash
-GARCON_OLLAMA_URL=http://192.168.1.50:11434 bun run start
-```
-
-To disable auto-detection entirely:
-
-```bash
-GARCON_OLLAMA_AUTO_DETECT=false bun run start
-```
+A chat cannot switch between a local and a cloud model mid-session; start a new
+chat to change between them. This prevents replaying session history across
+incompatible backends.
 
 ## Troubleshooting
 
 ### Local models do not appear
 
-- Confirm Ollama is running: `curl http://localhost:11434/api/tags`
-- Confirm Garcon startup logs show `ollama: detected ...`
-- Restart Garcon after starting Ollama or pulling new models
-- Verify `GARCON_OLLAMA_URL` points to the correct Ollama instance
+- Confirm Ollama is running on the executor: `curl http://localhost:11434/api/tags`.
+- Confirm the provider is assigned to the chat's executor.
+- Confirm the agent matches the provider's protocol: Claude Code with an
+  Anthropic provider, Codex with an OpenAI provider.
 
-### Auth looks different for local usage
+### A newly pulled model is missing
 
-When using local models through Ollama, Garcon routes provider traffic to your local endpoint. External provider login may not be required for that chat path.
-
-### New model is missing right after pull
-
-Garcon refreshes Ollama models periodically (about once per minute). You can also restart Garcon to pick up new models immediately.
+Garcon stores the model list with the provider. Open the provider, select Fetch
+models again, and save.
