@@ -20,6 +20,9 @@ describe('buildThinkingOptions', () => {
 		const solUltra = buildThinkingOptions(allModes, 'gpt-6-sol').find(
 			(option) => option.value === 'ultra',
 		);
+		const latestSolUltra = buildThinkingOptions(allModes, 'gpt-6.1-sol').find(
+			(option) => option.value === 'ultra',
+		);
 		const previousSolUltra = buildThinkingOptions(allModes, 'gpt-5.6-sol').find(
 			(option) => option.value === 'ultra',
 		);
@@ -28,6 +31,7 @@ describe('buildThinkingOptions', () => {
 		);
 
 		expect(solUltra).toMatchObject({ rainbow: true, toneClass: 'rainbow-ultra-surface' });
+		expect(latestSolUltra).toMatchObject({ rainbow: true, toneClass: 'rainbow-ultra-surface' });
 		expect(previousSolUltra).toMatchObject({ rainbow: true, toneClass: 'rainbow-ultra-surface' });
 		expect(terraUltra).not.toHaveProperty('rainbow');
 	});

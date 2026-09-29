@@ -58,16 +58,18 @@ where a limitation below says otherwise.
   `socket-closed`. A corrupted record, a protocol violation, and a transport
   error were therefore indistinguishable from a peer closing the socket.
 - Change: `onError` records a cause from the `NoiseError` code before
-  `onClose`, and never overrides a cause already recorded:
+  `onClose`, and never overrides a cause already recorded. #797 landed the same
+  mapping concurrently, with the code as the closure's reason; this branch adds
+  `record-limit` to it:
   - `TRANSPORT_CLOSED` stays `socket-closed`: the peer or network closed
     without an authenticated close.
   - `RECORD_LIMIT` becomes `record-limit`. Noise raises it on either end when a
     busy long-lived link uses up its per-key record budget, which is a routine
     reconnect with fresh keys, not corruption.
-  - `TRANSPORT_ERROR`, `BACKPRESSURE`, `NOT_OPEN`, and `CLOSED` become
-    `socket-error`.
-  - Authentication, protocol, handshake and message timeout, size, and handler
-    failures become `protocol-error`.
+  - `TRANSPORT_ERROR` and `BACKPRESSURE` become `socket-error`, and handshake
+    and message timeouts become `liveness-timeout`.
+  - Other failures, such as authentication, protocol, size, and handler
+    failures, become `protocol-error`.
 - Test: `tcpLinkProxy` gains a fault that follows WebSocket frames in the
   client-to-target stream and flips the last payload byte of the next frame,
   part of an encrypted record's authentication tag. Following frames matters
@@ -139,8 +141,9 @@ reached the controller as an unknown outcome with no report to follow.
     deliver, fails its turn with the retryable message, and the next start
     succeeds.
 - The two #791 tests for a launch dispatched while a replay drains depended on
-  the replay streaming more slowly than the second start. They now hold the
-  worker's replayed frames at the session queue until that start is in flight.
+  the replay streaming more slowly than the second start. As merged from #797,
+  they hold everything the worker sends after its resume reply until that
+  start reaches the worker.
 - Docs: the lost-launch contract in `docs/executor/transport.md`, and the
   ledger design's failure table and test inventory.
 

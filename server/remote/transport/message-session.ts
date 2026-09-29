@@ -38,6 +38,8 @@ export class MessageSession {
   }
 
   get connected(): boolean { return this.#socket !== null; }
+  // Why the session retired; recorded before its socket closes.
+  get failure(): Error | null { return this.#failure; }
   get queuedBytes(): number { return this.#bytes; }
   get queuedFrames(): number { return this.#pending.length; }
 

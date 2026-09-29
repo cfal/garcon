@@ -1,17 +1,12 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
-import {
-  connectNoiseWebSocket,
-  createNoiseServer,
-  type NoiseErrorCode,
-  type NoiseOptions,
-  type NoiseSocketData,
-  type NoiseWebSocket,
-} from '@cfal/noise-ws';
+import { connectNoiseWebSocket, createNoiseServer, type NoiseErrorCode, type NoiseOptions, type NoiseSocketData, type NoiseWebSocket } from '@cfal/noise-ws';
 import { isExecutorSecret } from './connection-url.js';
+import { failureReason } from './failure-reason.js';
 import { MessageContinuityError } from './message-session.js';
 import { SESSION_SOCKET_BUFFER_BYTES, SessionSocketFrames } from './session-socket.js';
 import { SessionTransport } from './session-transport.js';
-import { version } from '../../../package.json';
+import { EXECUTOR_PROTOCOL_REVISION } from './rpc-protocol.js';
+import { version as packageVersion } from '../../../package.json';
 
 type Role = 'controller' | 'worker';
 interface HelloFields {
@@ -39,6 +34,9 @@ export interface WebSocketLinkOptions {
 
 export const EXECUTOR_NOISE_CONTEXT = 'garcon-executor/v1';
 
+// Peers must share both the release and the wire protocol revision.
+const LINK_VERSION = `${packageVersion}+protocol.${EXECUTOR_PROTOCOL_REVISION}`;
+
 // Why a connection carrying a session closed; each closure retires its session.
 export type LinkClosureCause =
   | 'liveness-timeout'
@@ -53,6 +51,9 @@ export interface LinkClosure {
   readonly cause: LinkClosureCause;
   // Closures with this cause over the link's lifetime, including this one.
   readonly count: number;
+  // Why the connection or its session failed, when known: the Noise error
+  // code, or the error that retired the session.
+  readonly reason?: string;
 }
 
 interface Connection {
@@ -68,6 +69,7 @@ interface Connection {
   authenticated: boolean;
   frames: SessionSocketFrames | null;
   closeCause: LinkClosureCause | null;
+  closeReason: string | null;
 }
 
 export class WebSocketLink {
@@ -219,10 +221,12 @@ export class WebSocketLink {
         if (connection) this.#receive(connection, message);
         else socket.close();
       },
-      // Noise reports why a connection failed just before it closes it.
       onError: (_socket, error) => {
-        if (connection) connection.closeCause ??= noiseClosureCause(error.code);
-        this.#reportError('Executor encrypted connection failed');
+        if (connection) {
+          connection.closeCause ??= noiseClosureCause(error.code);
+          connection.closeReason ??= `Encrypted connection failed (${error.code})`;
+        }
+        this.#reportError(`Executor encrypted connection failed (${error.code})`);
       },
       onClose: (socket) => {
         this.#sockets.delete(socket);
@@ -233,13 +237,13 @@ export class WebSocketLink {
 
   #open(socket: NoiseWebSocket): Connection {
     const hello: Hello = {
-      type: 'hello', version,
+      type: 'hello', version: LINK_VERSION,
       ...(this.options.role === 'controller' ? { role: 'controller' as const, executorId: this.options.executorId! } : { role: 'worker' as const }),
       runtimeId: this.runtimeId, nonce: randomBytes(32).toString('hex'),
     };
     const connection: Connection = {
       socket, hello, peer: null, session: null, hooks: null, heartbeat: null,
-      closed: false, authenticated: false, frames: null, lastReceivedAt: Date.now(), closeCause: null,
+      closed: false, authenticated: false, frames: null, lastReceivedAt: Date.now(), closeCause: null, closeReason: null,
       timeout: setTimeout(() => {
         this.#reportError('Executor authentication timed out');
         this.#close(connection, 'protocol-error');
@@ -247,7 +251,7 @@ export class WebSocketLink {
     };
     connection.timeout.unref();
     this.#connections.add(connection);
-    try { socket.send(JSON.stringify(hello)); } catch { this.#close(connection, 'socket-error'); }
+    try { socket.send(JSON.stringify(hello)); } catch (error) { this.#close(connection, 'socket-error', error); }
     return connection;
   }
 
@@ -273,8 +277,8 @@ export class WebSocketLink {
       if (Buffer.byteLength(encoded) > 8192) throw new Error('Handshake exceeds budget');
       const frame: unknown = JSON.parse(encoded);
       if (isHello(frame) && !connection.peer) {
-        if (frame.version !== version) {
-          this.#reportError(`Executor version mismatch: local ${version}, peer ${JSON.stringify(frame.version.slice(0, 80))}. Use matching builds.`);
+        if (frame.version !== LINK_VERSION) {
+          this.#reportError(`Executor version mismatch: local ${LINK_VERSION}, peer ${JSON.stringify(frame.version.slice(0, 80))}. Use matching builds.`);
           this.#close(connection, 'protocol-error');
           return;
         }
@@ -295,6 +299,7 @@ export class WebSocketLink {
     } catch (error) {
       // Closing the session closes this connection first, so the cause is recorded before.
       connection.closeCause ??= 'protocol-error';
+      connection.closeReason ??= failureReason(error);
       if (error instanceof MessageContinuityError) connection.session?.close(error);
       this.#reportError(connection.authenticated ? 'Executor connection lost' : 'Executor authentication failed');
       this.#close(connection, 'protocol-error');
@@ -307,22 +312,22 @@ export class WebSocketLink {
     const executorId = connection.hello.role === 'controller' ? connection.hello.executorId
       : peer.role === 'controller' ? peer.executorId : '';
     if (this.#current) throw new Error('Executor session already attached');
-    const session = new SessionTransport(this.#signature(connection, 'session'), peer.runtimeId, () => {
+    const session = new SessionTransport(this.#signature(connection, 'session'), peer.runtimeId, (error) => {
       if (this.#current === session) this.#current = null;
       for (const attached of this.#connections) {
-        if (attached.session === session) this.#close(attached, this.#sessionClosureCause());
+        if (attached.session === session) this.#retire(attached, error);
       }
     }, this.options, executorId);
     this.#current = session;
     try {
       for (const listener of this.#sessions) listener(session);
       connection.session = session;
-      // The session layer closes its socket before reporting why it retired, so a close
-      // through the frames is a retirement unless a write failed.
+      // The session layer records why it retired before closing its socket, so a close
+      // through the frames is a retirement for that reason unless a write failed.
       connection.frames = new SessionSocketFrames(
         connection.socket,
-        () => this.#close(connection, this.#sessionClosureCause()),
-        () => this.#close(connection, 'socket-error'),
+        () => this.#retire(connection, session.channel.failure),
+        (error) => this.#close(connection, 'socket-error', error),
       );
       connection.hooks = session.attach(connection.frames);
     } catch (error) {
@@ -335,7 +340,7 @@ export class WebSocketLink {
       try {
         if (Date.now() - connection.lastReceivedAt > 15_000) this.#close(connection, 'liveness-timeout');
         else this.#heartbeat(connection, 'ping');
-      } catch { this.#close(connection, 'socket-error'); }
+      } catch (error) { this.#close(connection, 'socket-error', error); }
     }, 5000);
     connection.heartbeat.unref();
   }
@@ -355,10 +360,17 @@ export class WebSocketLink {
     if (!this.#disposed) for (const listener of this.#errors) listener(message);
   }
 
-  #close(connection: Connection, cause: LinkClosureCause): void {
+  #close(connection: Connection, cause: LinkClosureCause, failure?: unknown): void {
     connection.closeCause ??= cause;
+    if (failure !== undefined && failure !== null) connection.closeReason ??= failureReason(failure);
     this.#closed(connection);
     connection.socket.close();
+  }
+
+  // Closing a session while the link is disposed is a local close, not a retirement.
+  #retire(connection: Connection, failure: Error | null): void {
+    if (this.#disposed) this.#close(connection, 'local-close');
+    else this.#close(connection, 'session-retired', failure);
   }
 
   // A close this process did not start is the peer or network closing the socket.
@@ -369,32 +381,30 @@ export class WebSocketLink {
     if (connection.heartbeat) clearInterval(connection.heartbeat);
     connection.frames?.dispose();
     this.#connections.delete(connection);
-    if (connection.hooks) this.#reportClosure(connection.closeCause ?? 'socket-closed');
+    if (connection.hooks) this.#reportClosure(connection.closeCause ?? 'socket-closed', connection.closeReason);
     connection.hooks?.disconnected();
   }
 
-  #sessionClosureCause(): LinkClosureCause {
-    return this.#disposed ? 'local-close' : 'session-retired';
-  }
-
-  #reportClosure(cause: LinkClosureCause): void {
+  #reportClosure(cause: LinkClosureCause, reason: string | null): void {
     const count = (this.#closureCounts.get(cause) ?? 0) + 1;
     this.#closureCounts.set(cause, count);
-    for (const listener of this.#closures) listener({ cause, count });
+    const closure: LinkClosure = reason === null ? { cause, count } : { cause, count, reason };
+    for (const listener of this.#closures) listener(closure);
   }
 }
 
-// A socket closed without an authenticated close record was closed by the peer
-// or the network, the same cause as a clean close this process did not start.
-// A busy long-lived link exhausts its per-key record budget and must reconnect
-// with fresh keys, which is not a protocol failure.
-function noiseClosureCause(code: NoiseErrorCode): LinkClosureCause | null {
+// Classifies a connection that Noise ended with an error. A busy long-lived link
+// that uses up its per-key record budget must reconnect with fresh keys, which
+// is routine rather than a protocol failure.
+function noiseClosureCause(code: NoiseErrorCode): LinkClosureCause {
   switch (code) {
-    case 'TRANSPORT_CLOSED': return null;
+    case 'TRANSPORT_CLOSED': return 'socket-closed';
     case 'RECORD_LIMIT': return 'record-limit';
-    case 'TRANSPORT_ERROR': case 'BACKPRESSURE': case 'NOT_OPEN': case 'CLOSED': return 'socket-error';
-    case 'AUTHENTICATION_FAILED': case 'PROTOCOL_ERROR': case 'HANDSHAKE_TIMEOUT': case 'MESSAGE_TIMEOUT':
-    case 'MESSAGE_TOO_LARGE': case 'HANDLER_ERROR': return 'protocol-error';
+    case 'TRANSPORT_ERROR':
+    case 'BACKPRESSURE': return 'socket-error';
+    case 'HANDSHAKE_TIMEOUT':
+    case 'MESSAGE_TIMEOUT': return 'liveness-timeout';
+    default: return 'protocol-error';
   }
 }
 

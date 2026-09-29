@@ -14,6 +14,7 @@ import { createVersion1RecordMigration } from '@garcon/server-agent-common/migra
 import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
 import type { AgentRuntimeExecution, AgentRuntimePublisher, AgentRuntimeStartRequest } from '@garcon/server-agent-common/execution/runtime-events';
 import { ExecutorRpc } from '../transport/rpc.js';
+import type { SessionSocket } from '../transport/message-session.js';
 import { connectRemoteExecutor } from './runtime-adapter.js';
 import { WebSocketLink } from '../transport/websocket-link.js';
 import { serveExecutionRuntime } from '../server/executor-rpc-server.js';
@@ -31,6 +32,7 @@ export function integrationFixture(projectBasePath = '/test-project', executorId
   const calls = { start: 0, resume: 0, abort: 0, migrate: 0, initialize: 0, stop: 0, import: 0, query: 0 };
   const hooks = {
     start: async (_request: AgentRuntimeStartRequest) => {},
+    initialize: async () => {},
     stop: async () => {},
     query: async (_request: AgentSingleQueryRequest) => 'query result',
     history: async function* (_signal: AbortSignal): AsyncGenerator<readonly AgentImportedTranscriptRow[]> { yield []; },
@@ -61,7 +63,7 @@ export function integrationFixture(projectBasePath = '/test-project', executorId
     settings, migration: createVersion1RecordMigration({ settings, nativeSessions: null }),
     catalog: { async snapshot() { throw new AgentCallError('rejected', 'Unused catalog'); } },
     lifecycle: {
-      async start() { calls.initialize++; },
+      async start() { calls.initialize++; await hooks.initialize(); },
       async stop() { calls.stop++; await hooks.stop(); },
       async migrateOwnedStorage() { calls.migrate++; },
     },
@@ -150,21 +152,65 @@ export function outgoingFault(link: WebSocketLink) {
   return fault;
 }
 
+// Holds a link's outgoing session messages, as a stalled network path would, so a test
+// controls when they reach the peer. The hold starts after a chosen message has passed,
+// wherever the peer's socket buffers stand. Released messages keep their order, and
+// anything sent before the backlog drains queues behind it.
+export function outgoingHold(link: WebSocketLink) {
+  const held: { readonly socket: SessionSocket; readonly encoded: string }[] = [];
+  let holding = false;
+  let startsAfter: ((encoded: string) => boolean) | null = null;
+  link.onSession((session) => {
+    const attach = session.attach.bind(session);
+    session.attach = (socket) => attach({
+      close: () => socket.close(),
+      canSend: (bytes) => holding || held.length > 0 || socket.canSend?.(bytes) !== false,
+      send(encoded) {
+        if (holding || held.length > 0) {
+          held.push({ socket, encoded });
+          return;
+        }
+        socket.send(encoded);
+        if (startsAfter?.(encoded)) {
+          startsAfter = null;
+          holding = true;
+        }
+      },
+    });
+  });
+  return {
+    holdAfter(matches: (encoded: string) => boolean) { startsAfter = matches; },
+    async release() {
+      holding = false;
+      while (held.length > 0) {
+        const next = held[0]!;
+        if (next.socket.canSend?.(Buffer.byteLength(next.encoded)) === false) {
+          await Bun.sleep(1);
+          continue;
+        }
+        held.shift();
+        next.socket.send(next.encoded);
+      }
+    },
+  };
+}
+
+export function isProducerResumeReply(encoded: string): boolean {
+  return encoded.startsWith('{"type":"result"') && encoded.includes('"resumed":');
+}
+
 // Matches the reply that carries a launch's execution handle.
 export function isExecutionHandleReply(encoded: string): boolean {
   return encoded.includes('"type":"result"') && encoded.includes('"kind":"execution"');
 }
 
-// Refuses matching messages at the session queue's admission check, as a full
-// queue does, without closing the session. A refused producer frame stays with
-// the relay, which offers it again as the queue drains.
+// Refuses the next matching message at the session queue's admission check, as
+// a full queue does, without closing the session.
 export function admissionFault(link: WebSocketLink) {
   let refused: ((encoded: string) => boolean) | null = null;
-  let held: ((encoded: string) => boolean) | null = null;
   link.onSession((session) => {
     const canAdmit = session.channel.canAdmit.bind(session.channel);
     session.channel.canAdmit = (body) => {
-      if (held?.(body)) return false;
       if (!refused?.(body)) return canAdmit(body);
       refused = null;
       return false;
@@ -172,8 +218,6 @@ export function admissionFault(link: WebSocketLink) {
   });
   return {
     refuseNext(matches: (encoded: string) => boolean): void { refused = matches; },
-    hold(matches: (encoded: string) => boolean): void { held = matches; },
-    release(): void { held = null; },
   };
 }
 

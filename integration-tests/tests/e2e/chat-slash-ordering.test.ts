@@ -20,6 +20,8 @@ describe('Lightpanda chat slash ordering', () => {
         textarea.dispatchEvent(new Event('input', { bubbles: true }));
       });
       await app.waitForText('No matching commands');
+      // The seed echo can render before its send is admitted; Enter shares the send button's gate.
+      await app.waitForButtonEnabled('Send message');
       await fixture.page.$eval('textarea[placeholder="Reply..."]', (element) => {
         element.dispatchEvent(new KeyboardEvent('keydown', {
           key: 'Enter', bubbles: true, cancelable: true,

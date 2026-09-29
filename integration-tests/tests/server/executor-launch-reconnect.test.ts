@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentEndpointSelection } from '../../../common/agent-execution.js';
 import { AssistantMessage } from '../../../common/chat-types.js';
+import type { AgentRuntimeEvent } from '../../../server-agents/common/src/execution/runtime-events.js';
 import { resolveAgentEndpoint } from '../../../server-agents/common/src/execution/resolve-endpoint.js';
 import { AgentCallError, type AgentHost } from '../../../server-agents/interface/src/index.js';
 import { ApiProviderEndpointResolver } from '../../../server/controller/api-providers/endpoint-resolver.js';
@@ -14,7 +15,7 @@ import { IntegrationHostFactory } from '../../../server/runtime/agents/integrati
 import { IntegrationRegistry } from '../../../server/runtime/agents/integration-registry.js';
 import { AgentRuntimeRouter } from '../../../server/controller/agents/runtime-router.js';
 import {
-  admissionFault, integrationFixture, isExecutionHandleReply, linkOptions, outgoingFault,
+  admissionFault, integrationFixture, isExecutionHandleReply, isProducerResumeReply, linkOptions, outgoingFault, outgoingHold,
 } from '../../../server/remote/__tests__/integration-fixture.js';
 import { serveExecutionRuntime } from '../../../server/remote/server/executor-rpc-server.js';
 import { ProducerRelay } from '../../../server/remote/server/producer-relay.js';
@@ -50,6 +51,7 @@ type RemoteRouterContext = Awaited<ReturnType<typeof remoteRouter>> & {
   readonly native: ReturnType<typeof integrationFixture>;
   readonly controller: WebSocketLink;
   readonly workerFault: ReturnType<typeof outgoingFault>;
+  readonly workerPath: ReturnType<typeof outgoingHold>;
   readonly workerAdmission: ReturnType<typeof admissionFault>;
   readonly controllerAdmission: ReturnType<typeof admissionFault>;
   readonly credentialHost: AgentHost;
@@ -65,6 +67,7 @@ async function withRemoteRouter(dialer: Dialer, run: (context: RemoteRouterConte
   const controller = new WebSocketLink({ ...linkOptions, executorId: EXECUTOR, role: 'controller' });
   const worker = new WebSocketLink({ ...linkOptions, executorId: EXECUTOR, role: 'worker' });
   const workerFault = outgoingFault(worker);
+  const workerPath = outgoingHold(worker);
   const workerAdmission = admissionFault(worker);
   const controllerAdmission = admissionFault(controller);
   const native = integrationFixture(root, EXECUTOR);
@@ -95,7 +98,7 @@ async function withRemoteRouter(dialer: Dialer, run: (context: RemoteRouterConte
   const remote = await connected;
   try {
     const routed = await remoteRouter({ root, chats, ledger, remote });
-    await run({ ...routed, ledger, native, controller, workerFault, workerAdmission, controllerAdmission, credentialHost });
+    await run({ ...routed, ledger, native, controller, workerFault, workerPath, workerAdmission, controllerAdmission, credentialHost });
   } finally {
     ledger.close();
     await remote.dispose();
@@ -277,33 +280,34 @@ for (const dialer of ['controller', 'worker'] as const) {
   }, 30_000);
 
   test(`a turn started while a replay drains keeps running until its own reply arrives (${dialer} dials)`, async () => {
-    await withRemoteRouter(dialer, async ({ router, ledger, native, integration, controller, restored, workerAdmission }) => {
+    await withRemoteRouter(dialer, async ({ router, ledger, native, integration, controller, restored, workerPath }) => {
       let rowsReceived = 0;
       integration.producers.subscribe(({ event }) => { if (event.type === 'rows') rowsReceived += 1; });
       await router.startSession(CHAT, 'Synthetic first input');
       const publish = native.nativePublishers[0]!;
       const reconnected = restored();
-      // Holds the replay behind the resume reply until the second turn is in flight.
-      workerAdmission.hold((encoded) => encoded.includes('"type":"producer"'));
+      // The replay tail after the resume reply stays on a stalled path until the new turn's start reaches the worker.
+      workerPath.holdAfter(isProducerResumeReply);
       controller.disconnect();
-      const count = 3;
+      // Beyond the producer share of the session queue, so the replay tail follows the resume reply.
+      const count = 1_500;
       for (let index = 0; index < count; index += 1) {
-        publish({ type: 'rows', rows: [{ message: new AssistantMessage('2026-01-01T00:00:00Z', `replayed ${index}`) }] });
+        publish({ type: 'rows', rows: [{ message: new AssistantMessage('2026-01-01T00:00:00Z', `${index}:${'x'.repeat(9_000)}`) }] });
       }
       await reconnected;
 
       await router.abortSession(CHAT);
-      const entered = Promise.withResolvers<void>();
       const release = Promise.withResolvers<void>();
-      native.hooks.start = async () => { entered.resolve(); await release.promise; };
+      let rowsAtStart = count;
+      native.hooks.start = async () => { rowsAtStart = rowsReceived; await release.promise; };
       const turn = router.startSession(CHAT, 'Synthetic second input');
       try {
-        await entered.promise;
-        expect(rowsReceived).toBe(0);
-        workerAdmission.release();
+        await until(() => native.calls.start === 2);
+        await workerPath.release();
         await until(() => rowsReceived === count);
         await integration.execution.runningSessions();
 
+        expect(rowsAtStart).toBeLessThan(count);
         expect(router.isChatRunning(CHAT)).toBe(true);
         expect(runEnds(ledger)).toEqual([{ outcome: 'interrupted', origin: 'core' }]);
       } finally { release.resolve(); }
@@ -311,6 +315,45 @@ for (const dialer of ['controller', 'worker'] as const) {
       await router.abortSession(CHAT);
       await until(() => native.calls.abort === 2);
       expect(runEnds(ledger)).toEqual([{ outcome: 'interrupted', origin: 'core' }, { outcome: 'interrupted', origin: 'core' }]);
+    });
+  }, 60_000);
+
+  test(`a permission request the controller cannot read fails the turn as an unknown outcome and stops it (${dialer} dials)`, async () => {
+    await withRemoteRouter(dialer, async ({ router, ledger, native }) => {
+      await router.startSession(CHAT, 'Synthetic input');
+      const permissionOccurrenceId = crypto.randomUUID();
+      // A tool message type this controller cannot parse, as a worker from a mismatched or faulty build would send.
+      native.nativePublishers[0]!({
+        type: 'permission', runId: ledger.activeRunId(CHAT)!,
+        lifecycle: {
+          kind: 'requested', permissionOccurrenceId, options: [],
+          requestedTool: { type: 'synthetic-unknown-tool', timestamp: '2026-01-01T00:00:00Z' },
+        },
+        decision: { permissionOccurrenceId, respond: async () => {} },
+      } as unknown as AgentRuntimeEvent);
+      await until(() => runEnd(ledger) !== undefined && native.calls.abort > 0);
+
+      expect(runEnd(ledger)).toMatchObject({
+        outcome: 'failed', error: { code: 'OUTCOME_UNKNOWN', message: expect.stringContaining('could not be read') },
+      });
+      expect(ledger.currentRows(CHAT).some(row => row.kind === 'permission-requested')).toBe(false);
+      expect(router.isChatRunning(CHAT)).toBe(false);
+    });
+  }, 30_000);
+
+  test(`a launch outcome the controller cannot read during a reconnect fails the turn and stops it (${dialer} dials)`, async () => {
+    await withRemoteRouter(dialer, async ({ router, ledger, native, controller, restored }) => {
+      await router.startSession(CHAT, 'Synthetic input');
+      const reconnected = restored();
+      controller.disconnect();
+      native.nativePublishers[0]!({ type: 'launch-settled', runId: 42 } as unknown as AgentRuntimeEvent);
+      await reconnected;
+      await until(() => runEnd(ledger) !== undefined && native.calls.abort > 0);
+
+      expect(runEnd(ledger)).toMatchObject({
+        outcome: 'failed', error: { code: 'OUTCOME_UNKNOWN', message: expect.stringContaining('could not be read') },
+      });
+      expect(router.isChatRunning(CHAT)).toBe(false);
     });
   }, 30_000);
 }

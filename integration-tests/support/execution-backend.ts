@@ -1,4 +1,5 @@
-import { mkdir, utimes } from 'node:fs/promises';
+import { mkdir, readFile, utimes } from 'node:fs/promises';
+import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { GarconProcess, isolatedEnvironment, pumpLines, type GarconProcessOptions } from './garcon-process.js';
 import { withTimeout } from './deferred.js';
@@ -13,6 +14,36 @@ export function executionBackend(value = process.env.GARCON_TEST_EXECUTION_BACKE
     throw new Error(`Unknown execution backend: ${value}`);
   }
   return value;
+}
+
+const WORKER_PORT_SPAN = 10_000;
+
+async function ephemeralPortFloor(): Promise<number> {
+  try {
+    const [floor] = (await readFile('/proc/sys/net/ipv4/ip_local_port_range', 'utf8')).trim().split(/\s+/);
+    if (Number.isInteger(Number(floor))) return Number(floor);
+  } catch { /* Non-Linux hosts fall back to the IANA dynamic range. */ }
+  return 49_152;
+}
+
+function canListen(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const server = createServer();
+    server.once('error', () => resolve(false));
+    server.listen(port, '0.0.0.0', () => server.close(() => resolve(true)));
+  });
+}
+
+// Restarted controllers and relaunched workers listen on their previous ports. While a process is
+// down, the kernel may assign a released ephemeral port to any socket, including a peer's redial of
+// that port from the same host, so reused ports come from below the range it assigns implicitly.
+export async function reusableListenPort(): Promise<number> {
+  const floor = await ephemeralPortFloor();
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const port = floor - 1 - Math.floor(Math.random() * WORKER_PORT_SPAN);
+    if (port >= 1024 && await canListen(port)) return port;
+  }
+  throw new Error(`No free worker port below the ephemeral range at ${floor}`);
 }
 
 export class ExecutorProcess {
@@ -126,8 +157,11 @@ export class ExecutionBackendFixture {
   get executorId(): string { return this.#executorId ?? 'local'; }
 
   async start(options: GarconProcessOptions): Promise<GarconProcess> {
+    const port = this.backend === 'remote-executor-dials' && this.#controllerUrl
+      ? Number(new URL(this.#controllerUrl).port)
+      : options.port ?? await reusableListenPort();
     if (this.backend === 'in-process') {
-      const controller = await GarconProcess.start(options);
+      const controller = await GarconProcess.start({ ...options, port });
       if (controller.pid !== null) this.executionProcessIds.add(controller.pid);
       return controller;
     }
@@ -148,15 +182,13 @@ export class ExecutionBackendFixture {
     };
     let controller: GarconProcess | null = null;
     try {
-      controller = await GarconProcess.start({
-        ...options,
-        ...(this.backend === 'remote-executor-dials' && this.#controllerUrl
-          ? { port: Number(new URL(this.#controllerUrl).port) } : {}),
-      });
+      controller = await GarconProcess.start({ ...options, port });
       this.#controllerUrl = controller.baseUrl;
       this.#controllerAuthToken = controller.authToken;
       if (this.backend === 'remote-controller-dials') {
-        if (!this.#worker) await launchWorker(this.#workerLaunch?.connection ?? { kind: 'listen', port: 0 });
+        if (!this.#worker) {
+          await launchWorker(this.#workerLaunch?.connection ?? { kind: 'listen', port: await reusableListenPort() });
+        }
         if (!this.#executorId) {
           const url = new URL(await this.#worker!.connectionUrl());
           url.hostname = '127.0.0.1';

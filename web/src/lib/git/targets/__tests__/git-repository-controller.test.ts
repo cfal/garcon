@@ -241,6 +241,32 @@ describe('GitRepositoryController', () => {
 
 			expect(controller.currentBranch).toBe('feature');
 		});
+
+		it('clears remote status without logging an executor outage', async () => {
+			const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+			controller.remoteStatus = makeRemoteStatus('main');
+			vi.mocked(getRemoteStatus).mockRejectedValueOnce(
+				new ApiError(503, 'Executor is unavailable', 'EXECUTOR_UNAVAILABLE', undefined, true),
+			);
+
+			await controller.fetchRemoteStatus({ executorId: 'local', projectPath: '/project' });
+
+			expect(controller.remoteStatus).toBeNull();
+			expect(consoleError).not.toHaveBeenCalled();
+			consoleError.mockRestore();
+		});
+
+		it('logs other remote status failures', async () => {
+			const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+			const failure = new ApiError(500, 'Remote status failed', 'INTERNAL_ERROR');
+			vi.mocked(getRemoteStatus).mockRejectedValueOnce(failure);
+
+			await controller.fetchRemoteStatus({ executorId: 'local', projectPath: '/project' });
+
+			expect(controller.remoteStatus).toBeNull();
+			expect(consoleError).toHaveBeenCalledWith('[Git] Error fetching remote status:', failure);
+			consoleError.mockRestore();
+		});
 	});
 
 	describe('project retargeting', () => {

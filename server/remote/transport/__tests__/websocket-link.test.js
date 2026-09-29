@@ -1,33 +1,45 @@
 import { expect, test } from 'bun:test';
 import { connectNoiseWebSocket } from '@cfal/noise-ws';
-import { tcpLinkProxy } from '../../__tests__/tcp-link-proxy.ts';
 import { WebSocketLink, EXECUTOR_NOISE_CONTEXT } from '../websocket-link.ts';
+import { EXECUTOR_PROTOCOL_REVISION } from '../rpc-protocol.ts';
+import { version as packageVersion } from '../../../../package.json';
+import { tcpLinkProxy } from '../../__tests__/tcp-link-proxy.ts';
 
 const secret = Buffer.alloc(32, 42).toString('base64url');
 
+// Builds of one release share a package version, so only the protocol revision tells them apart.
+const incompatiblePeers = [
+  ['another release', 'synthetic-incompatible'],
+  ['this release without a protocol revision', packageVersion],
+  ['this release at another protocol revision', `${packageVersion}+protocol.${EXECUTOR_PROTOCOL_REVISION + 1}`],
+];
+
 for (const role of ['controller', 'worker']) {
-  test(`reports a version mismatch separately from authentication (${role})`, async () => {
-    const link = new WebSocketLink({ role, executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true });
-    const errors = [];
-    link.onError(message => errors.push(message));
-    let localVersion;
-    const socket = connectNoiseWebSocket(link.listen(), {
-      psk: Buffer.from(secret, 'base64url'), context: EXECUTOR_NOISE_CONTEXT,
-      onMessage(socket, data) {
-        const hello = JSON.parse(data);
-        localVersion = hello.version;
-        const peer = { ...hello, version: 'synthetic-incompatible', role: role === 'controller' ? 'worker' : 'controller' };
-        if (peer.role === 'worker') delete peer.executorId;
-        else peer.executorId = 'synthetic-executor';
-        socket.send(JSON.stringify(peer));
-      },
+  for (const [peerBuild, peerVersion] of incompatiblePeers) {
+    test(`reports a version mismatch with ${peerBuild} separately from authentication (${role})`, async () => {
+      const link = new WebSocketLink({ role, executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true });
+      const errors = [];
+      link.onError(message => errors.push(message));
+      let localVersion;
+      const socket = connectNoiseWebSocket(link.listen(), {
+        psk: Buffer.from(secret, 'base64url'), context: EXECUTOR_NOISE_CONTEXT,
+        onMessage(socket, data) {
+          const hello = JSON.parse(data);
+          localVersion = hello.version;
+          const peer = { ...hello, version: peerVersion, role: role === 'controller' ? 'worker' : 'controller' };
+          if (peer.role === 'worker') delete peer.executorId;
+          else peer.executorId = 'synthetic-executor';
+          socket.send(JSON.stringify(peer));
+        },
+      });
+      try {
+        await socket.closed;
+        expect(link.current).toBeNull();
+        expect(localVersion).toBe(`${packageVersion}+protocol.${EXECUTOR_PROTOCOL_REVISION}`);
+        expect(errors).toEqual([`Executor version mismatch: local ${localVersion}, peer ${JSON.stringify(peerVersion)}. Use matching builds.`]);
+      } finally { socket.close(); await link.dispose(); }
     });
-    try {
-      await socket.closed;
-      expect(link.current).toBeNull();
-      expect(errors).toEqual([`Executor version mismatch: local ${localVersion}, peer "synthetic-incompatible". Use matching builds.`]);
-    } finally { socket.close(); await link.dispose(); }
-  });
+  }
 }
 
 for (const dialer of ['controller', 'worker']) {
@@ -151,7 +163,10 @@ for (const dialer of ['controller', 'worker']) {
       await listening.dispose();
       await eventually(() => closures.dialing.length === 2);
 
-      expect(closures.dialing).toEqual([{ cause: 'session-retired', count: 1 }, { cause: 'socket-closed', count: 1 }]);
+      expect(closures.dialing).toEqual([
+        { cause: 'session-retired', count: 1, reason: 'Synthetic session retirement' },
+        { cause: 'socket-closed', count: 1 },
+      ]);
       expect(closures.listening).toEqual([{ cause: 'socket-closed', count: 1 }, { cause: 'local-close', count: 1 }]);
     } finally { await controller.dispose(); await worker.dispose(); }
   });
@@ -174,8 +189,39 @@ for (const dialer of ['controller', 'worker']) {
       session.send('synthetic payload');
       await eventually(() => closures.dialing.length === 1 && closures.listening.length === 1);
 
-      expect(closures.listening).toEqual([{ cause: 'protocol-error', count: 1 }]);
-      expect(closures.dialing).toEqual([{ cause: 'socket-closed', count: 1 }]);
+      expect(closures.listening).toEqual([
+        { cause: 'protocol-error', count: 1, reason: 'Encrypted connection failed (AUTHENTICATION_FAILED)' },
+      ]);
+      expect(closures.dialing).toEqual([
+        { cause: 'socket-closed', count: 1, reason: 'Encrypted connection failed (TRANSPORT_CLOSED)' },
+      ]);
     } finally { await controller.dispose(); await worker.dispose(); await proxy.close(); }
+  });
+
+  test(`reports a dropped network path with its Noise error code on both ends (${dialer} dials)`, async () => {
+    const common = { executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true, reconnectDelayMs: 60_000 };
+    const controller = new WebSocketLink({ ...common, role: 'controller' });
+    const worker = new WebSocketLink({ ...common, role: 'worker' });
+    const [dialing, listening] = dialer === 'controller' ? [controller, worker] : [worker, controller];
+    const reports = { dialing: { errors: [], closures: [] }, listening: { errors: [], closures: [] } };
+    for (const [end, link] of [['dialing', dialing], ['listening', listening]]) {
+      link.onError(message => reports[end].errors.push(message));
+      link.onClosure(closure => reports[end].closures.push(closure));
+    }
+    // The proxy stands in for a tunnel that drops the TCP connection without a WebSocket or encrypted close.
+    const path = await tcpLinkProxy(new URL(listening.listen(0, '127.0.0.1')));
+    try {
+      dialing.dial(path.url);
+      await Promise.all([controller.ready, worker.ready]);
+      path.disconnect();
+      await eventually(() => reports.dialing.closures.length === 1 && reports.listening.closures.length === 1);
+
+      for (const end of ['dialing', 'listening']) {
+        expect(reports[end].errors).toEqual(['Executor encrypted connection failed (TRANSPORT_CLOSED)']);
+        expect(reports[end].closures).toEqual([
+          { cause: 'socket-closed', count: 1, reason: 'Encrypted connection failed (TRANSPORT_CLOSED)' },
+        ]);
+      }
+    } finally { await path.close(); await controller.dispose(); await worker.dispose(); }
   });
 }

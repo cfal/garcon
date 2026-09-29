@@ -87,8 +87,8 @@ async function serveExecutorWorker(options: ExecutorWorkerOptions, dataDir: stri
     process.on('SIGTERM', onSignal);
     process.on('SIGINT', onSignal);
     let lastError: string | null = null;
-    link.onClosure(({ cause, count }) => {
-      console.warn(JSON.stringify({ type: 'executor-link-closed', cause, count }));
+    link.onClosure((closure) => {
+      console.warn(JSON.stringify({ type: 'executor-link-closed', ...closure }));
     });
     link.onError((message) => {
       if (message !== lastError) console.warn(JSON.stringify({ type: 'executor-unavailable', message }));

@@ -34,6 +34,7 @@
 		};
 		feedback?: {
 			id?: string;
+			class?: string;
 			error?: string | null;
 			worktree?: { disabled: boolean; onOpen: () => void };
 		};
@@ -126,7 +127,7 @@
 	{/if}
 </div>
 {#if feedback}
-	<div id={feedback.id} class="min-h-5">
+	<div id={feedback.id} class={cn('min-h-5', feedback.class)}>
 		{#if feedback.error}
 			<p class="text-xs text-destructive">{feedback.error}</p>
 		{:else if feedback.worktree}

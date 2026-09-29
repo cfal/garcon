@@ -13,6 +13,8 @@ import { ExecutorRpc } from '../transport/rpc.js';
 import type { IntegrationManifest } from '../transport/rpc-protocol.js';
 import type { SessionTransport } from '../transport/session-transport.js';
 import type { WebSocketLink } from '../transport/websocket-link.js';
+import { failureReason } from '../transport/failure-reason.js';
+import { createLogger, type Logger } from '../../common/log.js';
 import { unavailableService } from '../../common/unavailable-service.js';
 import { MODEL_DISCOVERY_TIMEOUT_MS } from '../../common/provider-discovery.js';
 import { RemoteFilesService } from './remote-files.js';
@@ -38,7 +40,11 @@ const EXECUTOR_RECONNECT_GRACE_MS = 3 * 60 * 60 * 1000;
 
 export interface RemoteExecutorClientOptions {
   readonly reconnectGraceMs?: number;
+  readonly logger?: Logger;
 }
+
+// How far a session's setup got, logged when it fails.
+type SessionSetupStage = 'describe' | 'start-integrations' | 'resume-bindings' | 'activate';
 
 export class RemoteExecutorClient implements ExecutionRuntimeApi {
   readonly #integrations = new Map<string, RemoteAgentIntegration>();
@@ -51,6 +57,7 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
   #instanceId: string | null = null;
   #reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   readonly #reconnectGraceMs: number;
+  readonly #log: Logger;
   readonly #files = new RemoteFilesService(() => this.#backing());
   readonly #git = new RemoteGitServices(() => this.#backing());
   readonly #terminals = new RemoteTerminalService(() => this.#backing());
@@ -69,6 +76,7 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
     options: RemoteExecutorClientOptions = {},
   ) {
     this.#reconnectGraceMs = options.reconnectGraceMs ?? EXECUTOR_RECONNECT_GRACE_MS;
+    this.#log = options.logger ?? createLogger('executors');
     this.#unsubscribe = link.onSession((transport) => {
       this.#candidate = transport;
       const rpc = new ExecutorRpc(transport);
@@ -82,8 +90,14 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
         // A candidate that fails while already reconnecting keeps the original deadline.
         if (this.#availability === 'ready') this.#beginReconnecting();
       });
-      void this.#install(transport, rpc).catch((error: unknown) => {
+      const setup = { stage: 'describe' as SessionSetupStage };
+      void this.#install(transport, rpc, setup).catch((error: unknown) => {
         if (this.#candidate === transport && this.#availability !== 'disposed') {
+          // A session that fails during setup rejects the pending call with a generic loss,
+          // so the session's own reason is the one worth reporting.
+          this.#log.warn('Executor session setup failed', {
+            executorId: this.id, stage: setup.stage, reason: failureReason(transport.channel.failure ?? error),
+          });
           this.reportError(error instanceof ExecutorConfigurationError ? error.message
             : 'Executor initialization failed; check worker configuration and matching builds');
         }
@@ -161,7 +175,7 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
     this.#listeners.clear();
   }
 
-  async #install(transport: SessionTransport, rpc: ExecutorRpc): Promise<void> {
+  async #install(transport: SessionTransport, rpc: ExecutorRpc, setup: { stage: SessionSetupStage }): Promise<void> {
     await transport.ready;
     const { info, integrations } = await rpc.call('', 'executor.describe', null);
     if (info.executorId !== this.id || transport.executorId !== this.id) throw new ExecutorConfigurationError(`Executor identity mismatch: worker serves ${info.executorId}; restart the worker to serve ${this.id}`);
@@ -192,7 +206,7 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
       this.#abandonBindings();
     }
     const candidates = initial ? new Map([...manifests.values()].map((manifest) => [
-      manifest.descriptor.id, new RemoteAgentIntegration(manifest, () => this.#backing()),
+      manifest.descriptor.id, new RemoteAgentIntegration(manifest, () => this.#backing(), this.#log),
     ])) : this.#integrations;
     if (!initial) {
       if (this.#integrations.size !== manifests.size) throw new ExecutorConfigurationError('Executor provider inventory changed; restart the controller to accept it');
@@ -202,6 +216,7 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
         if (!isDeepStrictEqual(previous, replacement)) throw new ExecutorConfigurationError('Executor provider capabilities changed; restart the controller to accept them');
       }
     }
+    setup.stage = 'start-integrations';
     for (const integration of candidates.values()) await integration.initializeReplacement(backing, initial);
     if (this.#candidateRetired(transport)) throw new Error('Executor candidate session retired');
     if (initial) {
@@ -213,8 +228,10 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
       if (!integration) throw new Error('Unknown producer integration');
       integration.receive(notification, seq, backing);
     });
+    setup.stage = 'resume-bindings';
     for (const integration of this.#integrations.values()) await integration.resume(backing);
     if (this.#candidateRetired(transport)) throw new Error('Executor candidate session retired');
+    setup.stage = 'activate';
     this.#instanceId = info.instanceId;
     this.#clearReconnectTimer();
     this.#current = backing;

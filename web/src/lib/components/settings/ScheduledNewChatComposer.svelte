@@ -138,6 +138,7 @@
 				onClose: () => (startup.showBrowser = false),
 			}}
 			feedback={{
+				class: '-mt-1',
 				error: startup.validationStatus === 'invalid' ? startup.validationError : null,
 				worktree:
 					startup.gitAvailable && startup.gitRepoStatus === 'git'

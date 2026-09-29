@@ -26,6 +26,13 @@ type Result<F extends keyof AgentIntegration, M extends keyof Facet<F>> =
 type WithoutSignal<T> = Omit<T, 'signal'>;
 type Call<Q, R> = { readonly request: Q; readonly result: R };
 
+// Revision of what the controller and worker exchange over an executor link:
+// session framing, RPC methods and payloads, and producer, terminal, and CLI
+// frames. Bump it with any change to what either side sends or accepts. Builds
+// of one release share a package version, so without the bump a mismatched
+// pair passes the handshake and fails mid-session instead.
+export const EXECUTOR_PROTOCOL_REVISION = 1;
+
 export const NULLABLE_AGENT_FACETS = [
   'auth', 'commands', 'compaction', 'forking', 'steering', 'endpoints', 'singleQuery',
   'legacyHistoryImport', 'nativeHistoryImport', 'nativeActivity', 'nativeSessions',

@@ -185,6 +185,14 @@ function emitCapacityFailure(client, turnId) {
   });
 }
 
+function guardianDenialError() {
+  return {
+    message: 'Stopped after 3 consecutive denials',
+    codexErrorInfo: 'tooManyDenials',
+    additionalDetails: null,
+  };
+}
+
 function createControlledDelay() {
   let release;
   let resolveStarted;
@@ -978,17 +986,18 @@ describe('Codex app-server request builders', () => {
     expect(mapThinkingModeToCodexEffort('max', 'gpt-5.5')).toBe('xhigh');
     for (const model of [
       'gpt-5.6', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna',
-      'gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna',
+      'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna',
     ]) {
       expect(mapThinkingModeToCodexEffort('max', model)).toBe('max');
     }
     expect(mapThinkingModeToCodexEffort('ultra')).toBe('ultra');
+    expect(mapThinkingModeToCodexEffort('ultra', 'gpt-6.1-sol')).toBe('ultra');
     expect(mapThinkingModeToCodexEffort('ultra', 'gpt-6-sol')).toBe('ultra');
     expect(mapThinkingModeToCodexEffort('ultra', 'acme-openai:gpt-6-sol')).toBe('ultra');
   });
 
   it.each([
-    'gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna',
+    'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna',
     'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna',
     'gpt-5.5', 'gpt-5.4', 'custom-model',
   ])('leaves provider-default effort unset for %s', (model) => {
@@ -2828,6 +2837,36 @@ describe('CodexAppServerRuntime', () => {
     expect(fake.shutdown).not.toHaveBeenCalled();
   });
 
+  it('fails an interrupted turn when its completion carries the terminal error', async () => {
+    const fake = new FakeClient();
+    const provider = createRuntime({ createClient: () => fake });
+    const published = collectOperation();
+
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      nativePath: null,
+      operation: published.operation,
+    }));
+    const failed = published.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'failed',
+    );
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: {
+        threadId: 'thread-1',
+        turn: makeTurn({ status: 'interrupted', error: guardianDenialError() }),
+      },
+    });
+
+    await expect(failed).resolves.toMatchObject({
+      error: { message: 'Stopped after 3 consecutive denials' },
+    });
+    expect(terminalEvents(published.events)).toEqual([
+      expect.objectContaining({ outcome: 'failed' }),
+    ]);
+    expect(provider.isRunning('thread-1')).toBe(false);
+  });
+
   // The terminal can arrive inside interruptTurn(). The turn must still settle exactly once,
   // and the native rows this races against are never recovered into the live tail.
   it('settles once when a completed terminal notification wins the interrupt response race', async () => {
@@ -4642,6 +4681,62 @@ describe('CodexAppServerRuntime', () => {
     expect(terminalEvents(first.events)).toContainEqual(
       expect.objectContaining({ runId: 'run-a', outcome: 'finished' }),
     );
+    expect(terminalEvents(second.events)).toEqual([]);
+    expect(provider.captureSteerTarget('thread-1')).toBeTruthy();
+  });
+
+  it('fails a detached interrupted turn on its original operation', async () => {
+    const nativePath = path.join(tmpDir, 'detached-interrupted-error.jsonl');
+    const turnIds = ['turn-a', 'turn-b'];
+    let fake;
+    fake = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: nativePath }),
+        model: 'gpt',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async ({ threadId }) => {
+        const turn = makeTurn({ id: turnIds.shift(), status: 'inProgress' });
+        await fs.writeFile(nativePath, '{}\n');
+        fake.emit('notification', {
+          method: 'turn/started',
+          params: { threadId, turn },
+        });
+        return { turn };
+      },
+    });
+    const provider = createRuntime({ createClient: () => fake });
+    const first = collectOperation('chat-1', 'run-a');
+    const second = collectOperation('chat-1', 'run-b');
+
+    await provider.startSession(makeRequest({ operation: first.operation }));
+    await provider.abort('thread-1');
+    await provider.runTurn(makeRequest({
+      agentSessionId: 'thread-1',
+      nativePath,
+      operation: second.operation,
+    }));
+    const failed = first.waitForEvent(
+      (event) => event.type === 'run-ended' && event.outcome === 'failed',
+    );
+    fake.emit('notification', {
+      method: 'turn/completed',
+      params: {
+        threadId: 'thread-1',
+        turn: makeTurn({
+          id: 'turn-a',
+          status: 'interrupted',
+          error: guardianDenialError(),
+        }),
+      },
+    });
+
+    await expect(failed).resolves.toMatchObject({
+      runId: 'run-a',
+      error: { message: 'Stopped after 3 consecutive denials' },
+    });
     expect(terminalEvents(second.events)).toEqual([]);
     expect(provider.captureSteerTarget('thread-1')).toBeTruthy();
   });

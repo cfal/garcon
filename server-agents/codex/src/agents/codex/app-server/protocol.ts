@@ -70,9 +70,11 @@ export type CodexErrorInfo =
   | 'sessionBudgetExceeded'
   | 'usageLimitExceeded'
   | 'rateLimitExceeded'
+  | 'flexUnavailable'
   | 'serverOverloaded'
   | 'cyberPolicy'
   | 'misalignmentPolicyViolation'
+  | 'tooManyDenials'
   | 'internalServerError'
   | 'unauthorized'
   | 'badRequest'
@@ -294,9 +296,11 @@ const CODEX_ERROR_INFO_STRINGS = new Set<Extract<CodexErrorInfo, string>>([
   'sessionBudgetExceeded',
   'usageLimitExceeded',
   'rateLimitExceeded',
+  'flexUnavailable',
   'serverOverloaded',
   'cyberPolicy',
   'misalignmentPolicyViolation',
+  'tooManyDenials',
   'internalServerError',
   'unauthorized',
   'badRequest',

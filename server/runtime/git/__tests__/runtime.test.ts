@@ -242,6 +242,23 @@ test('stash conflicts retain the stash until explicit resolution and removal', a
   expect(await fs.readFile(path.join(projectPath, 'example.txt'), 'utf8')).toBe(original);
 });
 
+test('lists stashes by index so listed refs drive stash actions', async () => {
+  const { git, projectPath } = await fixture();
+  for (const message of ['first synthetic stash', 'second synthetic stash']) {
+    await fs.writeFile(path.join(projectPath, 'example.txt'), `${message}\n`);
+    await git.createStash({ projectPath, message });
+  }
+  const { stashes } = await git.getStashes({ projectPath });
+  expect(stashes.map(({ index, ref, message }) => ({ index, ref, message }))).toEqual([
+    { index: 0, ref: 'stash@{0}', message: expect.stringContaining('second synthetic stash') },
+    { index: 1, ref: 'stash@{1}', message: expect.stringContaining('first synthetic stash') },
+  ]);
+  await git.dropStash({ projectPath, stashRef: stashes[1]!.ref });
+  expect((await git.getStashes({ projectPath })).stashes.map((stash) => stash.message)).toEqual([
+    expect.stringContaining('second synthetic stash'),
+  ]);
+});
+
 test('fetch, pull and push use a disposable bare remote without external credentials', async () => {
   const { git, projectPath, root } = await fixture();
   const remote = path.join(root, 'origin.git');

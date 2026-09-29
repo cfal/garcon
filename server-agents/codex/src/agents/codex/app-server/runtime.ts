@@ -1302,6 +1302,12 @@ export class CodexAppServerRuntime {
       this.#finishSession(session, { failedMessage }, operation);
       return;
     }
+    if (params.turn.status === 'interrupted' && params.turn.error) {
+      session.capacityRetryCount = 0;
+      session.pendingCapacityFailure = null;
+      this.#finishSession(session, { failedMessage: params.turn.error.message }, operation);
+      return;
+    }
     const aborted = params.turn.status === 'interrupted' || session.status === 'interrupting';
     session.capacityRetryCount = 0;
     session.pendingCapacityFailure = null;
@@ -1540,7 +1546,10 @@ export class CodexAppServerRuntime {
     params: TurnCompletedNotification,
     operation: CodexOperation,
   ): void {
-    if (params.turn.status === 'failed') {
+    if (
+      params.turn.status === 'failed'
+      || (params.turn.status === 'interrupted' && params.turn.error)
+    ) {
       this.#publishFailedOnce(
         session,
         params.turn.error?.message ?? 'Codex turn failed',

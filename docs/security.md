@@ -8,17 +8,21 @@ the `Sec-WebSocket-Protocol` header because the WebSocket API cannot attach an a
 token protocol; the server echoes only the application protocol so the token is not
 returned to the browser as the selected protocol.
 
-The server also accepts `Authorization: Bearer <token>` and the legacy `token` query
-parameter for non-browser compatibility. Query strings can appear in browser history,
-reverse proxy access logs, and request logs. Server-side request logging must not record
-full WebSocket upgrade URLs. Proxies that log request URLs must strip the `token`
-parameter first.
+Non-browser clients may send `Authorization: Bearer <token>` instead. The server does not
+accept tokens in the URL, so upgrade URLs in browser history and proxy logs carry no
+credentials.
 
-The token is validated when `/ws` upgrades. Chat WebSocket commands are read/resume-only;
-mutating Chat commands use authenticated HTTP requests. Terminal input and resize are
-active shell operations, so terminal authorization also expires at the token deadline.
+The token is validated when `/ws` upgrades. Chat WebSocket commands subscribe, query
+reconnect state, ping, and run manual Reload with its progress and cancellation; every
+other mutating Chat command uses an authenticated HTTP request. Terminal input and resize
+are active shell operations, so terminal authorization also expires at the token deadline.
 Expiry clears queued terminal output and detaches terminal subscriptions without closing
 the shared Chat connection. Refreshed credentials take effect by replacing `/ws`.
+
+A worker that dials the controller upgrades `/executor/<executor-id>`, not `/ws`; a
+controller that dials a worker uses the worker's own listener. Both directions
+authenticate with the executor's shared secret over Noise rather than user tokens; see
+[Executor Transport](./executor/transport.md).
 
 ## WebSocket Compression
 

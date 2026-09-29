@@ -6,8 +6,8 @@ export const COMPILED_CODEX_MODEL_CATALOG_PATH = Symbol.for(
   'garcon.codex-model-catalog-path.v1',
 );
 
-// The catalog preserves Codex 0.156.0's bundled entries and adds the live Sol/Luna entries
-// captured from OpenAI's model service on 2026-09-22.
+// The catalog preserves Garcon's supported entries and overlays live model metadata
+// captured from OpenAI's catalog through 2026-09-29.
 export function resolveCodexModelCatalogPath(): string {
   const compiledPath = Reflect.get(globalThis, COMPILED_CODEX_MODEL_CATALOG_PATH);
   const catalogPath = typeof compiledPath === 'string'
