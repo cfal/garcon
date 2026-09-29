@@ -28,9 +28,10 @@ modules:
   Direct/OpenCode source constraints represented by its registered drivers;
 - `native-forking.test.ts` covers native point-fork fidelity for providers with
   that facet;
-- `executor-disconnect.test.ts` runs only in remote lanes and drops the encrypted
-  link with both processes alive. It covers detached native work, overlap
-  rejection, manual Reload, and explicit followup without replay or duplicates.
+- `executor-disconnect.test.ts` runs only in remote lanes and holds the
+  encrypted link down with both processes alive. It covers the reconnecting
+  phase, the resumed turn delivering its reply once, and an explicit followup
+  without replay or duplicates.
 
 Cursor remains unit-only by repository policy. Amp and Factory retain their
 provider-owned strongest-tier tests; they do not run nonexistent equivalent
