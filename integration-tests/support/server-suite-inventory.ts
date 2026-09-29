@@ -12,7 +12,7 @@ export const SINGLE_RUN_SUITES: Readonly<Record<string, string>> = Object.freeze
     'executor-git-symlinks', 'executor-git', 'executor-history-cancellation',
     'executor-isolation', 'executor-launch-cancellation', 'executor-launch-reconnect', 'executor-path-preferences',
     'executor-permission-reconnect', 'executor-project-base', 'executor-project-cancellation',
-    'executor-projects', 'executor-provider-discovery', 'executor-proxy-url',
+    'executor-projects', 'executor-provider-discovery', 'executor-proxy-url', 'executor-queue-reconnect',
     'executor-reference-deletion', 'executor-resource-retention', 'executor-restart',
     'executor-retained-configuration', 'executor-scheduler-isolation',
     'executor-scripted-permission-reconnect', 'executor-session-setup', 'executor-shutdown',
