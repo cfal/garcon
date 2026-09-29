@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { connectNoiseWebSocket } from '@cfal/noise-ws';
+import { tcpLinkProxy } from '../../__tests__/tcp-link-proxy.ts';
 import { WebSocketLink, EXECUTOR_NOISE_CONTEXT } from '../websocket-link.ts';
 
 const secret = Buffer.alloc(32, 42).toString('base64url');
@@ -153,5 +154,28 @@ for (const dialer of ['controller', 'worker']) {
       expect(closures.dialing).toEqual([{ cause: 'session-retired', count: 1 }, { cause: 'socket-closed', count: 1 }]);
       expect(closures.listening).toEqual([{ cause: 'socket-closed', count: 1 }, { cause: 'local-close', count: 1 }]);
     } finally { await controller.dispose(); await worker.dispose(); }
+  });
+}
+
+for (const dialer of ['controller', 'worker']) {
+  test(`counts a corrupted encrypted record as a protocol error where it arrives (${dialer} dials)`, async () => {
+    const common = { executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true, reconnectDelayMs: 20 };
+    const controller = new WebSocketLink({ ...common, role: 'controller' });
+    const worker = new WebSocketLink({ ...common, role: 'worker' });
+    const [dialing, listening] = dialer === 'controller' ? [controller, worker] : [worker, controller];
+    const proxy = await tcpLinkProxy(new URL(listening.listen()));
+    const closures = { dialing: [], listening: [] };
+    dialing.onClosure(closure => closures.dialing.push(closure));
+    listening.onClosure(closure => closures.listening.push(closure));
+    try {
+      dialing.dial(proxy.url);
+      const [session] = await Promise.all([dialing.ready, listening.ready]);
+      proxy.corruptNextToTarget();
+      session.send('synthetic payload');
+      await eventually(() => closures.dialing.length === 1 && closures.listening.length === 1);
+
+      expect(closures.listening).toEqual([{ cause: 'protocol-error', count: 1 }]);
+      expect(closures.dialing).toEqual([{ cause: 'socket-closed', count: 1 }]);
+    } finally { await controller.dispose(); await worker.dispose(); await proxy.close(); }
   });
 }

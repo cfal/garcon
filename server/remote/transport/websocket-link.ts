@@ -1,5 +1,12 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
-import { connectNoiseWebSocket, createNoiseServer, type NoiseOptions, type NoiseSocketData, type NoiseWebSocket } from '@cfal/noise-ws';
+import {
+  connectNoiseWebSocket,
+  createNoiseServer,
+  type NoiseErrorCode,
+  type NoiseOptions,
+  type NoiseSocketData,
+  type NoiseWebSocket,
+} from '@cfal/noise-ws';
 import { isExecutorSecret } from './connection-url.js';
 import { MessageContinuityError } from './message-session.js';
 import { SESSION_SOCKET_BUFFER_BYTES, SessionSocketFrames } from './session-socket.js';
@@ -38,6 +45,7 @@ export type LinkClosureCause =
   | 'socket-closed'
   | 'socket-error'
   | 'protocol-error'
+  | 'record-limit'
   | 'session-retired'
   | 'local-close';
 
@@ -211,7 +219,11 @@ export class WebSocketLink {
         if (connection) this.#receive(connection, message);
         else socket.close();
       },
-      onError: () => this.#reportError('Executor encrypted connection failed'),
+      // Noise reports why a connection failed just before it closes it.
+      onError: (_socket, error) => {
+        if (connection) connection.closeCause ??= noiseClosureCause(error.code);
+        this.#reportError('Executor encrypted connection failed');
+      },
       onClose: (socket) => {
         this.#sockets.delete(socket);
         if (connection) this.#closed(connection);
@@ -369,6 +381,20 @@ export class WebSocketLink {
     const count = (this.#closureCounts.get(cause) ?? 0) + 1;
     this.#closureCounts.set(cause, count);
     for (const listener of this.#closures) listener({ cause, count });
+  }
+}
+
+// A socket closed without an authenticated close record was closed by the peer
+// or the network, the same cause as a clean close this process did not start.
+// A busy long-lived link exhausts its per-key record budget and must reconnect
+// with fresh keys, which is not a protocol failure.
+function noiseClosureCause(code: NoiseErrorCode): LinkClosureCause | null {
+  switch (code) {
+    case 'TRANSPORT_CLOSED': return null;
+    case 'RECORD_LIMIT': return 'record-limit';
+    case 'TRANSPORT_ERROR': case 'BACKPRESSURE': case 'NOT_OPEN': case 'CLOSED': return 'socket-error';
+    case 'AUTHENTICATION_FAILED': case 'PROTOCOL_ERROR': case 'HANDSHAKE_TIMEOUT': case 'MESSAGE_TIMEOUT':
+    case 'MESSAGE_TOO_LARGE': case 'HANDLER_ERROR': return 'protocol-error';
   }
 }
 

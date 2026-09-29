@@ -166,7 +166,11 @@ more is logged with its operation name (`executor-slow-step` on a worker). Each
 closed connection that carried a session is logged with its cause and the
 link's running count for that cause (`executor-link-closed` on a worker):
 `liveness-timeout`, `socket-closed`, `socket-error`, `protocol-error`,
-`session-retired`, or `local-close`.
+`record-limit`, `session-retired`, or `local-close`. A record that fails Noise
+authentication or framing counts as `protocol-error` and a transport failure as
+`socket-error`; a socket the peer or network closed without an authenticated
+close record counts as `socket-closed`. `record-limit` marks a busy long-lived
+link that used up Noise's per-key record budget and reconnects with fresh keys.
 
 Only producer notifications and launch outcomes resume. Other RPC replies lost
 with a session remain uncertain outcomes, and requests are never resent. Hung
