@@ -8,8 +8,8 @@ Fork Tail is Garcon's product mark. Its speech bubble represents the visible wor
 | ------------------------------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------ |
 | [Phosphor Forest](garcon-fork-tail-forest.svg)          | `#0a714e` / white             | Website, marketing, repository and documentation identity, social artwork, and editorial illustrations.            |
 | [Carbon](garcon-fork-tail-carbon.svg)                   | `#111827` → `#475569` / white | Stable application identity: browser favicon, PWA, mobile home screen, packaged application, and launcher artwork. |
-| [Classic Ink](garcon-fork-tail-ink.svg)                 | `#262626` / white             | In-app brand mark on every dark theme.                                                                             |
-| [Classic Silver](garcon-fork-tail-silver.svg)           | `#d9d9d9` / `#111111`         | In-app brand mark on every light theme.                                                                            |
+| [Classic Ink](garcon-fork-tail-ink.svg)                 | `#262626` / white             | In-app brand mark on the Classic, Colorblind, and Phosphor dark themes.                                            |
+| [Classic Silver](garcon-fork-tail-silver.svg)           | `#d9d9d9` / `#111111`         | In-app brand mark on the Classic, Colorblind, and Phosphor light themes.                                           |
 | [Carbon Maskable](garcon-fork-tail-carbon-maskable.svg) | Carbon, full bleed            | Android/PWA maskable exports only.                                                                                 |
 
 Forest is the public brand color. Carbon is deliberately theme-independent: launcher and browser assets are cached outside Garcon and cannot reliably follow its selected theme. Ink and Silver are interface treatments, not alternate launcher identities.
@@ -29,7 +29,7 @@ Forest is the public brand color. Carbon is deliberately theme-independent: laun
 
 - `web/static/icons/` contains checksum-addressed browser, touch, and PWA exports. All except the maskable export derive from Carbon.
 - `web/static/icons/icon-maskable-512.*.png` derives from Carbon Maskable.
-- `web/src/lib/components/shared/GarconMark.svelte` uses semantic theme tokens to render Ink on dark themes and Silver on light themes.
+- `web/src/lib/components/shared/GarconMark.svelte` colors the mark from each theme's `--brand-mark-surface` and `--brand-mark-foreground` tokens: Ink and Silver on the Classic, Colorblind, and Phosphor themes, and each palette's own accent on the Neko and Owl themes.
 - The root `README.md` and any future `website/` implementation use Phosphor Forest.
 
 Run `bun scripts/generate-brand-assets.ts` from the repository root after changing a master. The script requires `rsvg-convert` from librsvg, removes superseded exports, updates the app shell and manifest, and writes deterministic filenames containing the first 12 characters of each file's SHA-256 checksum. These public exports are safe to cache as immutable for one year because changed bytes always produce a new URL.
