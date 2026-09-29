@@ -1,6 +1,6 @@
 # Executor Transport
 
-Current implementation reference, 2026-09-28. This supersedes the transport
+Current implementation reference, 2026-09-30. This supersedes the transport
 descriptions in the historical [first-stage](./interface.md) and
 [second-stage](./app-integration.md) designs.
 
@@ -34,8 +34,8 @@ socket is writable and it holds under 2 MiB and 256 messages, so neither can
 crowd out RPC replies. Successful socket writes leave the queue immediately.
 The transport has no receipts, replay buffers, or resumption handshakes. Any
 connection loss retires the session; requests are never automatically resent.
-Producer notifications alone resume across sessions, one layer up; see
-Disconnected Turns.
+Only producer notifications and launch outcomes resume across sessions, one
+layer up; see Disconnected Turns.
 
 Socket backpressure pauses flushing. Encoded messages cross Noise
 as binary fragments containing one final-fragment byte followed by at most
