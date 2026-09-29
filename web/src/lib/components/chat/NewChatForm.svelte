@@ -50,12 +50,10 @@
 		getWorkspaceLayout,
 	} from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
-	import DirectoryBrowser from './DirectoryBrowser.svelte';
+	import ProjectPathField from './ProjectPathField.svelte';
 	import ProjectPinnedPathList from './ProjectPinnedPathList.svelte';
-	import ProjectPinnedPathToggleButton from './ProjectPinnedPathToggleButton.svelte';
 	import GitWorktreePickerModal from '$lib/components/git/GitWorktreePickerModal.svelte';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
-	import Check from '@lucide/svelte/icons/check';
 	import FileText from '@lucide/svelte/icons/file-text';
 	import FileVideo from '@lucide/svelte/icons/file-video';
 	import { CHAT_FILE_ATTACHMENT_MIME_TYPES } from '@garcon/common/attachments';
@@ -611,119 +609,90 @@
 			aria-hidden={!initialContentReady}
 		>
 			<div class="space-y-2">
-				<div class="relative">
-					<div class="flex flex-wrap gap-2 @container/project-target">
-						<ExecutorSelector executors={executors} executorId={form.executorId} service="agents" presentation="field"
-							class="h-[42px] w-full sm:h-[38px] @min-[32rem]/project-target:w-auto @min-[32rem]/project-target:max-w-44"
-							onSelect={(executorId) => form.selectExecutor(executorId)} />
-						<div class="relative min-w-0 flex-1">
-							<input
-								id="project-path-input"
-								type="text"
-								aria-label={m.chat_new_chat_project_path()}
-								bind:value={form.projectPath}
-								readonly={form.isUpdatingPinnedPath}
-								onfocus={(e: FocusEvent & { currentTarget: HTMLInputElement }) => {
-									if (isMobile && form.filesAvailable) {
-										e.currentTarget.blur();
-									}
-									if (form.isUpdatingPinnedPath) return;
-									form.handlePathFocus();
-								}}
-								oninput={() => {
-									form.clearError();
-									form.resetTabCompletions();
-								}}
-								onkeydown={(e: KeyboardEvent) => {
-									if (e.key === 'Tab' && form.filesAvailable) {
-										e.preventDefault();
-										if (form.isUpdatingPinnedPath) return;
-										form.handleTabCompletion();
-									}
-									if (e.key === 'Enter') {
-										e.preventDefault();
-										form.showBrowser = false;
-										textareaRef?.focus();
-									}
-								}}
-								placeholder={form.projectBasePath}
-								class="w-full pl-3 pr-8 py-2 text-base sm:text-sm bg-background border border-border rounded-lg focus-visible:ring-2 focus-visible:ring-ring focus-visible:border-ring placeholder-muted-foreground/60 text-foreground"
-							/>
-							<div class="absolute right-2 top-1/2 -translate-y-1/2">
-								{#if !form.trimmedPath}
-									<!-- no indicator -->
-								{:else if form.validationStatus === 'checking'}
-									<Loader2
-										class="w-4 h-4 animate-spin text-muted-foreground transition-opacity duration-200"
-									/>
-								{:else if form.validationStatus === 'valid'}
-									<Check class="w-4 h-4 text-primary transition-opacity duration-200" />
-								{:else if form.validationStatus === 'invalid'}
-									<span title={form.validationError || m.chat_new_chat_errors_invalid_directory()}>
-										<X class="w-4 h-4 text-destructive transition-opacity duration-200" />
-									</span>
-								{/if}
-							</div>
-						</div>
-						<ProjectPinnedPathToggleButton
-							isPinned={form.isPinnedPath}
-							disabled={!form.trimmedPath || form.isUpdatingPinnedPath}
-							loading={form.isUpdatingPinnedPath}
-							class="px-3 py-2 text-sm border border-border rounded-lg hover:bg-muted/50 disabled:opacity-40 transition-colors"
-							onToggle={() => form.togglePinnedPath()}
-						/>
-						<ChatTagToggleButton
-							active={form.chatTags.length > 0}
-							onToggle={() => form.toggleTagInput()}
-						/>
-						{#if onCancel}
-							<button
-								type="button"
-								onclick={cancelForm}
-								class="px-3 py-2 text-sm border border-border rounded-lg hover:bg-muted/50 transition-colors"
-								title={m.editor_actions_close()}
-								aria-label={m.editor_actions_close()}
-							>
-								<X class="w-4 h-4 text-muted-foreground" aria-hidden="true" />
-							</button>
-						{/if}
-					</div>
-
-					{#if form.filesAvailable && form.showBrowser && !form.isUpdatingPinnedPath}
-						<DirectoryBrowser
-							executorContextKey={form.pathContextKey}
+				<ProjectPathField
+					id="project-path-input"
+					aria-label={m.chat_new_chat_project_path()}
+					bind:value={form.projectPath}
+					readonly={form.isUpdatingPinnedPath}
+					placeholder={form.projectBasePath}
+					class="h-[42px] sm:pointer-fine:h-[38px]"
+					validationStatus={form.validationStatus}
+					validationError={form.validationError}
+					onfocus={(event) => {
+						if (isMobile && form.filesAvailable) event.currentTarget.blur();
+						if (form.isUpdatingPinnedPath) return;
+						form.handlePathFocus();
+					}}
+					oninput={() => {
+						form.clearError();
+						form.resetTabCompletions();
+					}}
+					onkeydown={(event) => {
+						if (event.key === 'Tab' && form.filesAvailable) {
+							event.preventDefault();
+							if (form.isUpdatingPinnedPath) return;
+							void form.handleTabCompletion();
+						}
+						if (event.key === 'Enter') {
+							event.preventDefault();
+							form.showBrowser = false;
+							textareaRef?.focus();
+						}
+					}}
+					pin={{
+						isPinned: form.isPinnedPath,
+						disabled: !form.trimmedPath || form.isUpdatingPinnedPath,
+						loading: form.isUpdatingPinnedPath,
+						onToggle: () => form.togglePinnedPath(),
+					}}
+					browser={{
+						open: form.filesAvailable && form.showBrowser && !form.isUpdatingPinnedPath,
+						executorId: form.executorId,
+						executorContextKey: form.pathContextKey,
+						currentPath: form.trimmedPath || form.browseStartPath || form.projectBasePath,
+						basePath: form.projectBasePath,
+						isMobile,
+						onSelect: (path) => {
+							if (form.isUpdatingPinnedPath) return;
+							form.projectPath = path;
+							form.clearError();
+						},
+						onClose: () => (form.showBrowser = false),
+					}}
+					feedback={{
+						error: form.validationStatus === 'invalid' ? form.validationError : null,
+						worktree:
+							form.gitAvailable && form.gitRepoStatus === 'git'
+								? { disabled: form.isUpdatingPinnedPath, onOpen: () => form.openWorktreeModal() }
+								: undefined,
+					}}
+				>
+					{#snippet leading()}
+						<ExecutorSelector
+							{executors}
 							executorId={form.executorId}
-							currentPath={form.trimmedPath || form.browseStartPath || form.projectBasePath}
-							basePath={form.projectBasePath}
-							onSelect={(selPath) => {
-								if (form.isUpdatingPinnedPath) return;
-								form.projectPath = selPath;
-								form.clearError();
-							}}
-							onClose={() => (form.showBrowser = false)}
-							{isMobile}
+							service="agents"
+							presentation="field"
+							class="h-[42px] w-full sm:pointer-fine:h-[38px] @min-[32rem]/project-target:w-auto @min-[32rem]/project-target:max-w-44"
+							onSelect={(executorId) => form.selectExecutor(executorId)}
 						/>
-					{/if}
-				</div>
-
-				<div class="-mt-1 min-h-[1.25rem]">
-					{#if form.validationStatus === 'invalid' && form.validationError}
-						<p class="text-xs text-destructive transition-colors">
-							{form.validationError}
-						</p>
-					{:else if form.gitAvailable && form.gitRepoStatus === 'git'}
+					{/snippet}
+					<ChatTagToggleButton
+						active={form.chatTags.length > 0}
+						onToggle={() => form.toggleTagInput()}
+					/>
+					{#if onCancel}
 						<button
 							type="button"
-							disabled={form.isUpdatingPinnedPath}
-							onclick={() => form.openWorktreeModal()}
-							class="flex items-center gap-1.5 text-xs text-interactive-accent transition-colors hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:no-underline"
+							onclick={cancelForm}
+							class="px-3 py-2 text-sm border border-border rounded-lg hover:bg-muted/50 transition-colors"
+							title={m.editor_actions_close()}
+							aria-label={m.editor_actions_close()}
 						>
-							{m.chat_new_chat_select_different_worktree()}
+							<X class="w-4 h-4 text-muted-foreground" aria-hidden="true" />
 						</button>
-					{:else}
-						<div aria-hidden="true"></div>
 					{/if}
-				</div>
+				</ProjectPathField>
 
 				<ProjectPinnedPathList
 					pinnedProjectPaths={form.pinnedProjectPaths}

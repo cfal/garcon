@@ -3,18 +3,13 @@
 	import { getExecutors } from '$lib/context';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
-	import { Input } from '$lib/components/ui/input';
-	import DirectoryBrowser from '$lib/components/chat/DirectoryBrowser.svelte';
+	import ProjectPathField from '$lib/components/chat/ProjectPathField.svelte';
 	import ProjectPinnedPathList from '$lib/components/chat/ProjectPinnedPathList.svelte';
-	import ProjectPinnedPathToggleButton from '$lib/components/chat/ProjectPinnedPathToggleButton.svelte';
 	import GitWorktreePickerModal from '$lib/components/git/GitWorktreePickerModal.svelte';
 	import { ProjectPathDialogState } from '$lib/chat/project-paths/project-path-dialog-state.svelte.js';
 	import { isPinnedProjectPath } from '$lib/chat/project-paths/project-pinned-paths.js';
 	import type { ChatProjectPathDialog } from '$lib/components/chat/chat-action-dialogs-state.svelte.js';
-	import FolderOpen from '@lucide/svelte/icons/folder-open';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
-	import Check from '@lucide/svelte/icons/check';
-	import X from '@lucide/svelte/icons/x';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface SidebarProjectPathDialogProps {
@@ -199,91 +194,62 @@
 						>
 							{m.sidebar_project_path_new_label()}
 						</label>
-						<div class="relative">
-							<div class="flex gap-2">
-								<div class="relative min-w-0 flex-1">
-									<Input
-										id="sidebar-project-path-input"
-										bind:ref={pathInputRef}
-										type="text"
-										bind:value={projectPathDialogState.candidatePath}
-										placeholder={activeProjectBasePath}
-										disabled={projectPathDialogState.isSubmitting}
-										readonly={isUpdatingPinnedProjectPath}
-										aria-invalid={isPathInvalid}
-										aria-describedby="sidebar-project-path-feedback"
-										oninput={() => {
-											projectPathDialogState.submitError = null;
-										}}
-										onkeydown={handlePathKeydown}
-										class="pr-9 font-mono text-base sm:pointer-fine:text-xs"
-									/>
-									<div class="absolute right-2 top-1/2 -translate-y-1/2">
-										{#if !projectPathDialogState.trimmedPath}
-											<span aria-hidden="true"></span>
-										{:else if projectPathDialogState.validationStatus === 'checking'}
-											<Loader2 class="h-4 w-4 animate-spin text-muted-foreground" />
-										{:else if projectPathDialogState.validationStatus === 'valid'}
-											<Check class="h-4 w-4 text-status-success-foreground" />
-										{:else if projectPathDialogState.validationStatus === 'invalid'}
-											<X class="h-4 w-4 text-destructive" />
-										{/if}
-									</div>
-								</div>
-								<ProjectPinnedPathToggleButton
-									isPinned={isCandidatePinned}
-									disabled={!canTogglePinnedProjectPath}
-									loading={isUpdatingPinnedProjectPath}
-									class="h-9 rounded-md border border-border px-3 text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-									onToggle={togglePinnedProjectPath}
-								/>
-								<Button
-									type="button"
-									variant="outline"
-									size="icon"
-									disabled={!filesAvailable ||
+						<ProjectPathField
+							id="sidebar-project-path-input"
+							bind:ref={pathInputRef}
+							bind:value={projectPathDialogState.candidatePath}
+							placeholder={activeProjectBasePath}
+							disabled={projectPathDialogState.isSubmitting}
+							readonly={isUpdatingPinnedProjectPath}
+							aria-invalid={isPathInvalid}
+							aria-describedby="sidebar-project-path-feedback"
+							oninput={() => (projectPathDialogState.submitError = null)}
+							onkeydown={handlePathKeydown}
+							class="h-9 font-mono sm:pointer-fine:text-xs"
+							validationStatus={projectPathDialogState.validationStatus}
+							validationError={projectPathDialogState.validationError}
+							pin={{
+								isPinned: isCandidatePinned,
+								disabled: !canTogglePinnedProjectPath,
+								loading: isUpdatingPinnedProjectPath,
+								onToggle: togglePinnedProjectPath,
+							}}
+							browser={{
+								open:
+									filesAvailable &&
+									projectPathDialogState.showBrowser &&
+									!isUpdatingPinnedProjectPath,
+								executorId: projectPathDialogState.executorId,
+								executorContextKey: pathContextKey,
+								currentPath: projectPathDialogState.trimmedPath || activeProjectBasePath,
+								basePath: activeProjectBasePath,
+								isMobile,
+								onSelect: (path) => {
+									if (isUpdatingPinnedProjectPath) return;
+									projectPathDialogState.setCandidatePath(path);
+								},
+								onClose: () => (projectPathDialogState.showBrowser = false),
+								button: {
+									label: m.sidebar_project_path_browse(),
+									disabled:
+										!filesAvailable ||
 										projectPathDialogState.isSubmitting ||
-										isUpdatingPinnedProjectPath}
-									onclick={() => {
-										projectPathDialogState.showBrowser = true;
-									}}
-									title={m.sidebar_project_path_browse()}
-									aria-label={m.sidebar_project_path_browse()}
-								>
-									<FolderOpen class="h-4 w-4" />
-								</Button>
-							</div>
-
-							{#if filesAvailable && projectPathDialogState.showBrowser && !isUpdatingPinnedProjectPath}
-								<DirectoryBrowser
-									executorContextKey={executors.pathContextKey(projectPathDialogState.executorId)}
-									executorId={projectPathDialogState.executorId}
-									currentPath={projectPathDialogState.trimmedPath || activeProjectBasePath}
-									basePath={activeProjectBasePath}
-									onSelect={(path) => {
-										if (isUpdatingPinnedProjectPath) return;
-										projectPathDialogState.setCandidatePath(path);
-									}}
-									onClose={() => (projectPathDialogState.showBrowser = false)}
-									{isMobile}
-								/>
-							{/if}
-						</div>
-
-						<div class="min-h-5">
-							{#if projectPathDialogState.gitAvailable && projectPathDialogState.gitRepoStatus === 'git' && projectPathDialogState.validationStatus === 'valid'}
-								<button
-									type="button"
-									disabled={!canOpenWorktreePicker}
-									onclick={() => projectPathDialogState.openWorktreePicker()}
-									class="flex items-center gap-1.5 text-xs text-interactive-accent transition-colors hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:no-underline"
-								>
-									{m.chat_new_chat_select_different_worktree()}
-								</button>
-							{:else}
-								<span aria-hidden="true"></span>
-							{/if}
-						</div>
+										isUpdatingPinnedProjectPath,
+									onclick: () => (projectPathDialogState.showBrowser = true),
+								},
+							}}
+							feedback={{
+								worktree:
+									projectPathDialogState.gitAvailable &&
+									projectPathDialogState.gitRepoStatus === 'git' &&
+									projectPathDialogState.validationStatus === 'valid'
+										? {
+												disabled: !canOpenWorktreePicker,
+												onOpen: () => projectPathDialogState.openWorktreePicker(),
+											}
+										: undefined,
+							}}
+						/>
 					</div>
 
 					<ProjectPinnedPathList

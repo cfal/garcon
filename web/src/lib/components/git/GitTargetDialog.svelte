@@ -5,16 +5,13 @@
 	import { onDestroy, untrack } from 'svelte';
 	import { getExecutors, getNotifications } from '$lib/context';
 	import * as Dialog from '$lib/components/ui/dialog';
-	import DirectoryBrowser from '$lib/components/chat/DirectoryBrowser.svelte';
+	import ProjectPathField from '$lib/components/chat/ProjectPathField.svelte';
 	import ProjectPinnedPathList from '$lib/components/chat/ProjectPinnedPathList.svelte';
-	import ProjectPinnedPathToggleButton from '$lib/components/chat/ProjectPinnedPathToggleButton.svelte';
 	import GitWorktreePickerModal from './GitWorktreePickerModal.svelte';
 	import { GitTargetDialogState } from '$lib/git/targets/git-target-dialog.svelte.js';
 	import { isPinnedProjectPath } from '$lib/chat/project-paths/project-pinned-paths.js';
 	import type { GitTargetCandidate } from '$lib/api/git.js';
 	import Folder from '@lucide/svelte/icons/folder';
-	import FolderOpen from '@lucide/svelte/icons/folder-open';
-	import Check from '@lucide/svelte/icons/check';
 	import X from '@lucide/svelte/icons/x';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
 	import * as m from '$lib/paraglide/messages.js';
@@ -153,102 +150,68 @@
 						>
 							{m.chat_new_chat_project_path()}
 						</label>
-						<div class="relative">
-							<div class="flex gap-2">
-								<div class="relative flex-1">
-									<input
-										id="git-target-path-input"
-										type="text"
-										bind:value={dialog.candidatePath}
-										readonly={isUpdatingPinnedProjectPath}
-										onfocus={(event: FocusEvent & { currentTarget: HTMLInputElement }) => {
-											if (!executors.filesAvailable(executorId)) return;
-											if (isMobile) event.currentTarget.blur();
-											if (isUpdatingPinnedProjectPath) return;
-											dialog.showBrowser = true;
-										}}
-										oninput={() => {
-											dialog.validationError = null;
-											dialog.worktreeError = null;
-										}}
-										onkeydown={(event: KeyboardEvent) => {
-											if (event.key === 'Enter') {
-												event.preventDefault();
-												dialog.showBrowser = false;
-												void confirmSelection();
+						<ProjectPathField
+							id="git-target-path-input"
+							bind:value={dialog.candidatePath}
+							readonly={isUpdatingPinnedProjectPath}
+							placeholder={projectBasePath}
+							validationStatus={dialog.validationStatus}
+							validationError={dialog.validationError}
+							onfocus={(event) => {
+								if (!executors.filesAvailable(executorId)) return;
+								if (isMobile) event.currentTarget.blur();
+								if (isUpdatingPinnedProjectPath) return;
+								dialog.showBrowser = true;
+							}}
+							oninput={() => {
+								dialog.validationError = null;
+								dialog.worktreeError = null;
+							}}
+							onkeydown={(event) => {
+								if (event.key === 'Enter') {
+									event.preventDefault();
+									dialog.showBrowser = false;
+									void confirmSelection();
+								}
+							}}
+							pin={{
+								isPinned: isCandidatePinned,
+								disabled: !canTogglePinnedProjectPath,
+								loading: isUpdatingPinnedProjectPath,
+								onToggle: togglePinnedProjectPath,
+							}}
+							browser={{
+								open:
+									dialog.showBrowser &&
+									!isUpdatingPinnedProjectPath &&
+									executors.filesAvailable(executorId),
+								executorId,
+								executorContextKey: executors.pathContextKey(executorId),
+								currentPath: dialog.trimmedPath || projectBasePath,
+								basePath: projectBasePath,
+								isMobile,
+								onSelect: (path) => {
+									if (isUpdatingPinnedProjectPath) return;
+									dialog.setCandidatePath(path);
+								},
+								onClose: () => (dialog.showBrowser = false),
+								button: {
+									label: m.git_target_browse_folders(),
+									disabled: isUpdatingPinnedProjectPath || !executors.filesAvailable(executorId),
+									onclick: () => (dialog.showBrowser = true),
+								},
+							}}
+							feedback={{
+								error: dialog.validationStatus === 'invalid' ? dialog.validationError : null,
+								worktree:
+									dialog.validationStatus === 'valid'
+										? {
+												disabled: isUpdatingPinnedProjectPath,
+												onOpen: () => dialog.openWorktreePicker(),
 											}
-										}}
-										placeholder={projectBasePath}
-										class="w-full rounded-lg border border-border bg-background py-2 pl-3 pr-8 text-base text-foreground placeholder-muted-foreground/60 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:text-sm"
-									/>
-									<div class="absolute right-2 top-1/2 -translate-y-1/2">
-										{#if !dialog.trimmedPath}
-											<!-- no indicator -->
-										{:else if dialog.validationStatus === 'checking'}
-											<Loader2 class="h-4 w-4 animate-spin text-muted-foreground" />
-										{:else if dialog.validationStatus === 'valid'}
-											<Check class="h-4 w-4 text-primary" />
-										{:else if dialog.validationStatus === 'invalid'}
-											<span
-												title={dialog.validationError || m.chat_new_chat_errors_invalid_directory()}
-											>
-												<X class="h-4 w-4 text-destructive" />
-											</span>
-										{/if}
-									</div>
-								</div>
-								<ProjectPinnedPathToggleButton
-									isPinned={isCandidatePinned}
-									disabled={!canTogglePinnedProjectPath}
-									loading={isUpdatingPinnedProjectPath}
-									class="rounded-lg border border-border px-3 py-2 text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-									onToggle={togglePinnedProjectPath}
-								/>
-								<button
-									type="button"
-									disabled={isUpdatingPinnedProjectPath || !executors.filesAvailable(executorId)}
-									onclick={() => {
-										dialog.showBrowser = true;
-									}}
-									class="rounded-lg border border-border px-3 py-2 text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
-									title={m.git_target_browse_folders()}
-									aria-label={m.git_target_browse_folders()}
-								>
-									<FolderOpen class="h-4 w-4" />
-								</button>
-							</div>
-
-							{#if dialog.showBrowser && !isUpdatingPinnedProjectPath && executors.filesAvailable(executorId)}
-								<DirectoryBrowser
-									{executorId}
-									currentPath={dialog.trimmedPath || projectBasePath}
-									basePath={projectBasePath}
-									onSelect={(path) => {
-										if (isUpdatingPinnedProjectPath) return;
-										dialog.setCandidatePath(path);
-									}}
-									onClose={() => (dialog.showBrowser = false)}
-									{isMobile}
-								/>
-							{/if}
-						</div>
-
-						<div class="min-h-[1.25rem]">
-							{#if dialog.validationStatus === 'invalid' && dialog.validationError}
-								<p class="text-xs text-destructive">{dialog.validationError}</p>
-							{:else if dialog.validationStatus === 'valid'}
-								<button
-									type="button"
-									disabled={isUpdatingPinnedProjectPath}
-									onclick={() => dialog.openWorktreePicker()}
-									class="flex items-center gap-1.5 text-xs text-interactive-accent transition-colors hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:no-underline"
-								>
-									{m.chat_new_chat_select_different_worktree()}
-								</button>
-							{:else}
-								<div aria-hidden="true"></div>
-							{/if}
-						</div>
+										: undefined,
+							}}
+						/>
 
 						<ProjectPinnedPathList
 							{pinnedProjectPaths}

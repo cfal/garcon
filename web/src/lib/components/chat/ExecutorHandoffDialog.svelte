@@ -13,13 +13,8 @@
 	import { effectiveExecutorId } from '$shared/executors';
 	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
 	import GitWorktreePickerModal from '$lib/components/git/GitWorktreePickerModal.svelte';
-	import DirectoryBrowser from './DirectoryBrowser.svelte';
+	import ProjectPathField from './ProjectPathField.svelte';
 	import ProjectPinnedPathList from './ProjectPinnedPathList.svelte';
-	import ProjectPinnedPathToggleButton from './ProjectPinnedPathToggleButton.svelte';
-	import FolderOpen from '@lucide/svelte/icons/folder-open';
-	import Loader2 from '@lucide/svelte/icons/loader-2';
-	import Check from '@lucide/svelte/icons/check';
-	import X from '@lucide/svelte/icons/x';
 	import { isDirectAgentId, nonDirectAgentIds } from '$lib/agents/direct-agents';
 	import { ProjectPathDialogState } from '$lib/chat/project-paths/project-path-dialog-state.svelte.js';
 	import { isPinnedProjectPath } from '$lib/chat/project-paths/project-pinned-paths.js';
@@ -141,78 +136,46 @@
 		<form class="min-w-0 space-y-4" onsubmit={handleSubmit}>
 			<div class="space-y-1">
 				<label for="handoff-path" class="text-sm">{m.chat_executor_handoff_project_label()}</label>
-				<div class="relative">
-					<div class="flex gap-2">
-						<div class="relative min-w-0 flex-1">
-							<input
-								id="handoff-path"
-								class="h-10 w-full rounded-md border border-input bg-background pl-3 pr-9 text-base pointer-fine:text-sm"
-								bind:value={destination.candidatePath}
-								placeholder={basePath}
-								required
-								disabled={handoff.checking}
-								readonly={isUpdatingPinnedPath}
-								aria-invalid={destination.validationStatus === 'invalid'}
-								aria-describedby="handoff-path-feedback"
-							/>
-							{#if destination.trimmedPath}
-								<div class="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2">
-									{#if destination.validationStatus === 'checking'}
-										<Loader2 class="size-4 animate-spin text-muted-foreground" />
-									{:else if destination.validationStatus === 'valid'}
-										<Check class="size-4 text-status-success-foreground" />
-									{:else if destination.validationStatus === 'invalid'}
-										<X class="size-4 text-destructive" />
-									{/if}
-								</div>
-							{/if}
-						</div>
-						<ProjectPinnedPathToggleButton
-							isPinned={isPinnedProjectPath(pinnedProjectPaths, destination.trimmedPath)}
-							disabled={!destination.trimmedPath || handoff.checking}
-							loading={isUpdatingPinnedPath}
-							class="size-10 shrink-0 rounded-md border border-border text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-							onToggle={togglePinnedPath}
-						/>
-						<Button
-							type="button"
-							variant="outline"
-							size="icon-lg"
-							class="shrink-0"
-							title={m.chat_executor_handoff_browse()}
-							aria-label={m.chat_executor_handoff_browse()}
-							disabled={pathLocked || !filesAvailable}
-							onclick={() => (destination.showBrowser = !destination.showBrowser)}
-						>
-							<FolderOpen class="size-4" />
-						</Button>
-					</div>
-					{#if destination.showBrowser && filesAvailable && !pathLocked}
-						<DirectoryBrowser
-							{executorId}
-							executorContextKey={executors.pathContextKey(executorId)}
-							{basePath}
-							isMobile={shell.isMobile}
-							currentPath={destination.trimmedPath || basePath}
-							onSelect={(path) => destination.setCandidatePath(path)}
-							onClose={() => (destination.showBrowser = false)}
-						/>
-					{/if}
-				</div>
-				<div id="handoff-path-feedback" class="min-h-5">
-					{#if destination.validationStatus === 'invalid' && destination.validationError}
-						<p class="text-xs text-destructive">{destination.validationError}</p>
-					{:else if destination.canSelectWorktree}
-						<button
-							type="button"
-							disabled={pathLocked}
-							onclick={() => destination.openWorktreePicker()}
-							class="flex items-center gap-1.5 text-xs text-interactive-accent transition-colors hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:no-underline"
-						>
-							{m.chat_new_chat_select_different_worktree()}
-						</button>
-					{/if}
-				</div>
+				<ProjectPathField
+					id="handoff-path"
+					bind:value={destination.candidatePath}
+					placeholder={basePath}
+					required
+					disabled={handoff.checking}
+					readonly={isUpdatingPinnedPath}
+					aria-invalid={destination.validationStatus === 'invalid'}
+					aria-describedby="handoff-path-feedback"
+					validationStatus={destination.validationStatus}
+					validationError={destination.validationError}
+					pin={{
+						isPinned: isPinnedProjectPath(pinnedProjectPaths, destination.trimmedPath),
+						disabled: !destination.trimmedPath || handoff.checking,
+						loading: isUpdatingPinnedPath,
+						onToggle: togglePinnedPath,
+					}}
+					browser={{
+						open: destination.showBrowser && filesAvailable && !pathLocked,
+						executorId,
+						executorContextKey: executors.pathContextKey(executorId),
+						basePath,
+						isMobile: shell.isMobile,
+						currentPath: destination.trimmedPath || basePath,
+						onSelect: (path) => destination.setCandidatePath(path),
+						onClose: () => (destination.showBrowser = false),
+						button: {
+							label: m.chat_executor_handoff_browse(),
+							disabled: pathLocked || !filesAvailable,
+							onclick: () => (destination.showBrowser = !destination.showBrowser),
+						},
+					}}
+					feedback={{
+						id: 'handoff-path-feedback',
+						error: destination.validationStatus === 'invalid' ? destination.validationError : null,
+						worktree: destination.canSelectWorktree
+							? { disabled: pathLocked, onOpen: () => destination.openWorktreePicker() }
+							: undefined,
+					}}
+				/>
 			</div>
 			<ProjectPinnedPathList
 				{pinnedProjectPaths}
@@ -241,7 +204,9 @@
 					</button>
 				</p>
 			{:else if !catalog.isValidated}
-				<p role="status" class="text-sm text-muted-foreground">{m.chat_composer_loading_models()}</p>
+				<p role="status" class="text-sm text-muted-foreground">
+					{m.chat_composer_loading_models()}
+				</p>
 			{:else if !handoff.selectionAvailable}
 				<p role="status" class="text-sm text-destructive" data-handoff-selection-unavailable>
 					{m.chat_executor_handoff_selection_unavailable({ label: executors.label(executorId) })}

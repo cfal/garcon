@@ -3,9 +3,8 @@
 	import AgentSettingsControls from '$lib/components/chat/AgentSettingsControls.svelte';
 	import ChatTagEditor from '$lib/components/chat/ChatTagEditor.svelte';
 	import ChatTagToggleButton from '$lib/components/chat/ChatTagToggleButton.svelte';
-	import DirectoryBrowser from '$lib/components/chat/DirectoryBrowser.svelte';
+	import ProjectPathField from '$lib/components/chat/ProjectPathField.svelte';
 	import ProjectPinnedPathList from '$lib/components/chat/ProjectPinnedPathList.svelte';
-	import ProjectPinnedPathToggleButton from '$lib/components/chat/ProjectPinnedPathToggleButton.svelte';
 	import GitWorktreePickerModal from '$lib/components/git/GitWorktreePickerModal.svelte';
 	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
 	import ExecutorSelector from '$lib/components/shared/ExecutorSelector.svelte';
@@ -24,9 +23,6 @@
 	import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
 	import type { SessionAgentId } from '$lib/types/app';
 	import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
-	import Check from '@lucide/svelte/icons/check';
-	import Loader2 from '@lucide/svelte/icons/loader-2';
-	import X from '@lucide/svelte/icons/x';
 	import * as m from '$lib/paraglide/messages.js';
 	import { getAppShell, getExecutors } from '$lib/context';
 
@@ -108,79 +104,62 @@
 		<label for="scheduled-project-path" class="block text-sm font-medium text-muted-foreground">
 			{m.chat_new_chat_project_path()}
 		</label>
-		<div class="relative">
-			<div class="flex flex-wrap gap-2 @container/project-target">
-				<ExecutorSelector {executors} executorId={startup.executorId} service="agents" presentation="field"
-					class="h-[42px] w-full sm:pointer-fine:h-[38px] @min-[32rem]/project-target:w-auto @min-[32rem]/project-target:max-w-44"
-					onSelect={(executorId) => startup.selectExecutor(executorId)} />
-				<div class="relative min-w-0 flex-1">
-					<input
-						id="scheduled-project-path"
-						type="text"
-						value={startup.projectPath}
-						readonly={startup.isUpdatingPinnedPath}
-						onfocus={handlePathFocus}
-						oninput={(event) => {
-							startup.projectPath = event.currentTarget.value;
-							startup.clearError();
-							startup.resetTabCompletions();
-						}}
-						onkeydown={handlePathKeydown}
-						placeholder={startup.projectBasePath}
-						class="w-full rounded-lg border border-border bg-background py-2 pl-3 pr-8 text-base text-foreground outline-none placeholder:text-muted-foreground/60 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:text-sm"
-					/>
-					<div class="absolute right-2 top-1/2 -translate-y-1/2">
-						{#if startup.validationStatus === 'checking'}
-							<Loader2 class="size-4 animate-spin text-muted-foreground" />
-						{:else if startup.validationStatus === 'valid'}
-							<Check class="size-4 text-primary" />
-						{:else if startup.validationStatus === 'invalid'}
-							<X class="size-4 text-destructive" />
-						{/if}
-					</div>
-				</div>
-				<ProjectPinnedPathToggleButton
-					isPinned={startup.isPinnedPath}
-					disabled={!startup.trimmedPath || startup.isUpdatingPinnedPath}
-					loading={startup.isUpdatingPinnedPath}
-					class="rounded-lg border border-border px-3 py-2 text-sm transition-colors hover:bg-muted/50 disabled:opacity-40"
-					onToggle={() => startup.togglePinnedPath()}
-				/>
-				<ChatTagToggleButton
-					active={startup.chatTags.length > 0}
-					onToggle={() => startup.toggleTagInput()}
-				/>
-			</div>
-			{#if startup.filesAvailable && startup.showBrowser && !startup.isUpdatingPinnedPath}
-				<DirectoryBrowser
+		<ProjectPathField
+			id="scheduled-project-path"
+			bind:value={startup.projectPath}
+			readonly={startup.isUpdatingPinnedPath}
+			onfocus={handlePathFocus}
+			oninput={() => {
+				startup.clearError();
+				startup.resetTabCompletions();
+			}}
+			onkeydown={handlePathKeydown}
+			placeholder={startup.projectBasePath}
+			class="h-[42px] sm:pointer-fine:h-[38px]"
+			validationStatus={startup.validationStatus}
+			validationError={startup.validationError}
+			pin={{
+				isPinned: startup.isPinnedPath,
+				disabled: !startup.trimmedPath || startup.isUpdatingPinnedPath,
+				loading: startup.isUpdatingPinnedPath,
+				onToggle: () => startup.togglePinnedPath(),
+			}}
+			browser={{
+				open: startup.filesAvailable && startup.showBrowser && !startup.isUpdatingPinnedPath,
+				executorId: startup.executorId,
+				executorContextKey: startup.pathContextKey,
+				currentPath: startup.trimmedPath || startup.browseStartPath || startup.projectBasePath,
+				basePath: startup.projectBasePath,
+				isMobile,
+				onSelect: (path) => {
+					startup.projectPath = path;
+					startup.clearError();
+				},
+				onClose: () => (startup.showBrowser = false),
+			}}
+			feedback={{
+				error: startup.validationStatus === 'invalid' ? startup.validationError : null,
+				worktree:
+					startup.gitAvailable && startup.gitRepoStatus === 'git'
+						? { disabled: startup.isUpdatingPinnedPath, onOpen: () => startup.openWorktreeModal() }
+						: undefined,
+			}}
+		>
+			{#snippet leading()}
+				<ExecutorSelector
+					{executors}
 					executorId={startup.executorId}
-					executorContextKey={startup.pathContextKey}
-					currentPath={startup.trimmedPath || startup.browseStartPath || startup.projectBasePath}
-					basePath={startup.projectBasePath}
-					onSelect={(path) => {
-						startup.projectPath = path;
-						startup.clearError();
-					}}
-					onClose={() => (startup.showBrowser = false)}
-					{isMobile}
+					service="agents"
+					presentation="field"
+					class="h-[42px] w-full sm:pointer-fine:h-[38px] @min-[32rem]/project-target:w-auto @min-[32rem]/project-target:max-w-44"
+					onSelect={(executorId) => startup.selectExecutor(executorId)}
 				/>
-			{/if}
-		</div>
-
-		<div class="-mt-1 min-h-5">
-			{#if startup.validationStatus === 'invalid' && startup.validationError}
-				<p class="text-xs text-destructive">{startup.validationError}</p>
-			{:else if startup.gitAvailable && startup.gitRepoStatus === 'git'}
-				<button
-					type="button"
-					disabled={startup.isUpdatingPinnedPath}
-					onclick={() => startup.openWorktreeModal()}
-					class="flex items-center gap-1.5 text-xs text-interactive-accent transition-colors hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:no-underline"
-				>
-					{m.chat_new_chat_select_different_worktree()}
-				</button>
-			{/if}
-		</div>
+			{/snippet}
+			<ChatTagToggleButton
+				active={startup.chatTags.length > 0}
+				onToggle={() => startup.toggleTagInput()}
+			/>
+		</ProjectPathField>
 
 		<ProjectPinnedPathList
 			pinnedProjectPaths={startup.pinnedProjectPaths}
