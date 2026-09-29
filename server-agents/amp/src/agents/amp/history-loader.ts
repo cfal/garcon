@@ -10,6 +10,7 @@ import { convertAmpToolUse, isAmpHousekeepingToolUse } from './tool-use-converte
 import { normalizeToolResultContent } from '@garcon/server-agent-common/shared/normalize-util';
 import { stripResolvedFileMentionContext } from '@garcon/server-agent-common/shared/file-mention-context';
 import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
+import { EventLoopSteps } from '@garcon/server-agent-common/shared/event-loop';
 
 export interface AmpContentPart {
   type: string;
@@ -102,18 +103,24 @@ function getSortedMessages(threadExport: AmpThreadExport): AmpThreadMessage[] {
   return messages.sort((a, b) => (a.messageId ?? 0) - (b.messageId ?? 0));
 }
 
-export function loadAmpChatMessages(threadExport: AmpThreadExport): ChatMessage[] {
+// Every reload and fork converts a whole thread export, so its passes share time-bounded steps.
+export async function loadAmpChatMessages(threadExport: AmpThreadExport): Promise<ChatMessage[]> {
   assertImportableAmpThreadExport(threadExport);
+  const steps = new EventLoopSteps();
+  await steps.forEach(threadExport.messages ?? [], assertImportableAmpMessage);
 
   const createdAt = toIsoString(threadExport.created) || new Date().toISOString();
   const messages: ChatMessage[] = [];
-  const hiddenToolUseIds = new Set(getSortedMessages(threadExport)
-    .flatMap((message) => message.content ?? [])
-    .filter((part) => part.type === 'tool_use' && isAmpHousekeepingToolUse(part))
-    .map((part) => part.id)
-    .filter((id): id is string => typeof id === 'string' && id.length > 0));
+  const sortedMessages = getSortedMessages(threadExport);
+  const hiddenToolUseIds = new Set<string>();
+  await steps.forEach(sortedMessages, (message) => {
+    for (const part of message.content ?? []) {
+      if (part.type !== 'tool_use' || !isAmpHousekeepingToolUse(part)) continue;
+      if (typeof part.id === 'string' && part.id.length > 0) hiddenToolUseIds.add(part.id);
+    }
+  });
 
-  for (const message of getSortedMessages(threadExport)) {
+  await steps.forEach(sortedMessages, (message) => {
     const converted: ChatMessage[] = [];
     const timestamp = getMessageTimestamp(message, createdAt);
     const content: AmpContentPart[] = Array.isArray(message.content) ? message.content : [];
@@ -131,7 +138,7 @@ export function loadAmpChatMessages(threadExport: AmpThreadExport): ChatMessage[
         converted.push(new UserMessage(timestamp, stripResolvedFileMentionContext(text)));
       }
       appendAmpSource(messages, converted, message.messageId);
-      continue;
+      return;
     }
 
     if (message.role === 'assistant') {
@@ -146,7 +153,7 @@ export function loadAmpChatMessages(threadExport: AmpThreadExport): ChatMessage[
         }
       }
       appendAmpSource(messages, converted, message.messageId);
-      continue;
+      return;
     }
 
     if (message.role === 'info') {
@@ -156,7 +163,7 @@ export function loadAmpChatMessages(threadExport: AmpThreadExport): ChatMessage[
       }
     }
     appendAmpSource(messages, converted, message.messageId);
-  }
+  });
 
   return messages;
 }
@@ -172,29 +179,30 @@ function assertImportableAmpThreadExport(value: unknown): asserts value is AmpTh
   if (thread.created !== undefined && toIsoString(thread.created as number | string) === null) {
     throw new Error('Amp thread export has an invalid creation time');
   }
-  for (const message of thread.messages) {
-    if (!message || typeof message !== 'object' || Array.isArray(message)) {
-      throw new Error('Amp thread export contains an invalid message');
-    }
-    const record = message as Record<string, unknown>;
-    if (typeof record.role !== 'string' || !Array.isArray(record.content)) {
-      throw new Error('Amp thread export contains an invalid message');
-    }
-    if (record.messageId !== undefined && !Number.isSafeInteger(record.messageId)) {
-      throw new Error('Amp thread export contains an invalid message ID');
-    }
-    for (const part of record.content) {
-      const rawPart = part as Record<string, unknown>;
-      if (
-        !part
-        || typeof part !== 'object'
-        || Array.isArray(part)
-        || typeof rawPart.type !== 'string'
-        || !rawPart.type
-        || (rawPart.type === 'text' && typeof rawPart.text !== 'string')
-      ) {
-        throw new Error('Amp thread export contains an invalid content part');
-      }
+}
+
+function assertImportableAmpMessage(message: unknown): void {
+  if (!message || typeof message !== 'object' || Array.isArray(message)) {
+    throw new Error('Amp thread export contains an invalid message');
+  }
+  const record = message as Record<string, unknown>;
+  if (typeof record.role !== 'string' || !Array.isArray(record.content)) {
+    throw new Error('Amp thread export contains an invalid message');
+  }
+  if (record.messageId !== undefined && !Number.isSafeInteger(record.messageId)) {
+    throw new Error('Amp thread export contains an invalid message ID');
+  }
+  for (const part of record.content) {
+    const rawPart = part as Record<string, unknown>;
+    if (
+      !part
+      || typeof part !== 'object'
+      || Array.isArray(part)
+      || typeof rawPart.type !== 'string'
+      || !rawPart.type
+      || (rawPart.type === 'text' && typeof rawPart.text !== 'string')
+    ) {
+      throw new Error('Amp thread export contains an invalid content part');
     }
   }
 }

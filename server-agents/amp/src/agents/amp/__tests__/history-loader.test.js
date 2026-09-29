@@ -81,8 +81,8 @@ const THREAD_EXPORT_FIXTURE = {
 };
 
 describe('amp history loader', () => {
-  it('normalizes Amp export messages into chat messages', () => {
-    const messages = loadAmpChatMessages(THREAD_EXPORT_FIXTURE);
+  it('normalizes Amp export messages into chat messages', async () => {
+    const messages = await loadAmpChatMessages(THREAD_EXPORT_FIXTURE);
 
     expect(messages).toHaveLength(6);
     expect(messages[0].type).toBe('user-message');

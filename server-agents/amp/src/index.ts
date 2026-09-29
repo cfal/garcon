@@ -94,7 +94,7 @@ export default class AmpAgentIntegration implements AgentIntegration {
         const id = ampThreadId(chat, nativeSessions);
         if (!id) return { messages: [] };
         return {
-          messages: loadAmpChatMessages(await runtime.exportThread(id, {
+          messages: await loadAmpChatMessages(await runtime.exportThread(id, {
             cwd: chat.projectPath,
             signal,
           })),
@@ -189,7 +189,7 @@ function createAmpNativeEvidence(
         );
       }
       return {
-        messages: loadAmpChatMessages(await runtime.exportThread(id, {
+        messages: await loadAmpChatMessages(await runtime.exportThread(id, {
           cwd: chat.projectPath,
           signal,
         })),
