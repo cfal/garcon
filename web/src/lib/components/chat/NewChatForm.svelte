@@ -660,6 +660,7 @@
 						onClose: () => (form.showBrowser = false),
 					}}
 					feedback={{
+						class: '-mt-1',
 						error: form.validationStatus === 'invalid' ? form.validationError : null,
 						worktree:
 							form.gitAvailable && form.gitRepoStatus === 'git'
