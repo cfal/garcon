@@ -2005,6 +2005,7 @@
 	"scheduled_prompts_end_date": "End date",
 	"scheduled_prompts_every_days": "Every {count} days",
 	"scheduled_prompts_every_hours": "Every {count} hours",
+	"scheduled_prompts_executor": "Executor: {label}",
 	"scheduled_prompts_existing_chat": "Existing chat",
 	"scheduled_prompts_existing_chat_description": "Send the prompt to a chat that already exists.",
 	"scheduled_prompts_existing_chat_id_help": "Use {token} for the selected chat.",

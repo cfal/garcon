@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button';
-	import { getChatSessions, getScheduledPrompts } from '$lib/context';
+	import { getChatSessions, getExecutors, getScheduledPrompts } from '$lib/context';
+	import { scheduledPromptExecutorId } from '$lib/scheduling/scheduled-prompt-executor.js';
+	import type { ChatSessionRecord } from '$lib/types/chat-session';
 	import type { ScheduledPrompt, ScheduledPromptDefinitionInput } from '$shared/scheduled-prompts';
 	import ScheduledPromptDialog from './ScheduledPromptDialog.svelte';
 	import ScheduledPromptRemoveDialog from './ScheduledPromptRemoveDialog.svelte';
@@ -23,6 +25,7 @@
 	let { active }: Props = $props();
 	const prompts = getScheduledPrompts();
 	const sessions = getChatSessions();
+	const executors = getExecutors();
 	let formOpen = $state(false);
 	let editingPrompt = $state<ScheduledPrompt | null>(null);
 	let removePrompt = $state<ScheduledPrompt | null>(null);
@@ -96,6 +99,16 @@
 		} finally {
 			removing = false;
 		}
+	}
+
+	// Matches the executor selector, which stays hidden while Local is the only executor.
+	function executorLabelFor(
+		scheduledPrompt: ScheduledPrompt,
+		existingChat: ChatSessionRecord | undefined,
+	): string | undefined {
+		const executorId = scheduledPromptExecutorId(scheduledPrompt, existingChat);
+		if (!executorId || (executorId === 'local' && !executors.hasRemoteExecutors)) return undefined;
+		return executors.label(executorId);
 	}
 
 	async function move(scheduledPrompt: ScheduledPrompt, direction: 'up' | 'down'): Promise<void> {
@@ -176,14 +189,17 @@
 		<div class="space-y-2" aria-live="polite">
 			{#each prompts.prompts as scheduledPrompt, index (scheduledPrompt.id)}
 				<svelte:boundary>
+					{@const existingChat =
+						scheduledPrompt.target.type === 'existing-chat'
+							? sessions.byId[scheduledPrompt.target.chatId]
+							: undefined}
 					<ScheduledPromptRow
 						{scheduledPrompt}
 						{index}
 						{currentTime}
 						total={prompts.prompts.length}
-						existingChat={scheduledPrompt.target.type === 'existing-chat'
-							? sessions.byId[scheduledPrompt.target.chatId]
-							: undefined}
+						{existingChat}
+						executorLabel={executorLabelFor(scheduledPrompt, existingChat)}
 						disabled={movingPromptId !== null}
 						onEdit={() => openEdit(scheduledPrompt)}
 						onRemove={() => {

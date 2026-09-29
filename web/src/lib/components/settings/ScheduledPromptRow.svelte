@@ -10,6 +10,7 @@
 	import Pencil from '@lucide/svelte/icons/pencil';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import FileText from '@lucide/svelte/icons/file-text';
+	import Network from '@lucide/svelte/icons/network';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface Props {
@@ -17,6 +18,7 @@
 		index: number;
 		total: number;
 		existingChat?: ChatSessionRecord;
+		executorLabel?: string;
 		currentTime: Date;
 		disabled?: boolean;
 		onEdit: () => void;
@@ -43,6 +45,7 @@
 		index,
 		total,
 		existingChat,
+		executorLabel,
 		currentTime,
 		disabled = false,
 		onEdit,
@@ -100,6 +103,18 @@
 <article class="rounded-md border border-border bg-card p-3">
 	<div class="flex min-w-0 items-start gap-3">
 		<div class="min-w-0 flex-1 space-y-1">
+			{#if executorLabel}
+				{@const executorDescription = m.scheduled_prompts_executor({ label: executorLabel })}
+				<span
+					class="flex w-fit min-w-0 max-w-full items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+					data-slot="scheduled-prompt-executor"
+					title={executorDescription}
+				>
+					<Network class="h-3 w-3 shrink-0 text-file-icon-folder" aria-hidden="true" />
+					<span class="sr-only">{executorDescription}</span>
+					<span class="truncate" aria-hidden="true">{executorLabel}</span>
+				</span>
+			{/if}
 			<h3 class="truncate text-sm font-medium text-foreground" {title}>{title}</h3>
 			<p class="text-xs text-muted-foreground">
 				{formatScheduledInstant(scheduledPrompt.schedule.nextRunAt)}

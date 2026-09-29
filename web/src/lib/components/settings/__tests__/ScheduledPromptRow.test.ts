@@ -14,10 +14,11 @@ function makePrompt(schedule: ScheduledPromptSchedule): ScheduledPrompt {
 	};
 }
 
-function renderRow(scheduledPrompt: ScheduledPrompt, currentTime: Date) {
+function renderRow(scheduledPrompt: ScheduledPrompt, currentTime: Date, executorLabel?: string) {
 	return render(ScheduledPromptRow, {
 		scheduledPrompt,
 		currentTime,
+		executorLabel,
 		index: 0,
 		total: 1,
 		onEdit: vi.fn(),
@@ -75,6 +76,24 @@ describe('ScheduledPromptRow', () => {
 		expect(screen.getByText('+1')).toBeTruthy();
 		expect(screen.getByText('Automatic preambles')).toBeTruthy();
 		expect(target.compareDocumentPosition(agent) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+	});
+
+	it('shows the executor as a pill above the title', () => {
+		const scheduledPrompt = makePrompt({ type: 'once', nextRunAt: '2030-01-01T04:00:00.000Z' });
+		const rendered = renderRow(scheduledPrompt, new Date('2030-01-01T00:00:00.000Z'), 'Build worker');
+
+		const pill = rendered.container.querySelector('[data-slot="scheduled-prompt-executor"]');
+		expect(pill?.getAttribute('title')).toBe('Executor: Build worker');
+		expect(screen.getByText('Executor: Build worker')).toBeTruthy();
+		expect(pill?.textContent).toContain('Build worker');
+		const heading = screen.getByRole('heading', { name: 'Review the build' });
+		expect(pill!.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+		rendered.unmount();
+		const withoutExecutor = renderRow(scheduledPrompt, new Date('2030-01-01T00:00:00.000Z'));
+		expect(
+			withoutExecutor.container.querySelector('[data-slot="scheduled-prompt-executor"]'),
+		).toBeNull();
 	});
 
 	it('shows the remaining time for a one-off scheduled prompt', () => {
