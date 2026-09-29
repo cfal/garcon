@@ -65,7 +65,14 @@ export interface DirectSessionStoreOptions {
   readonly syncDirectory?: (directory: string) => Promise<void>;
 }
 
-interface ParsedSessionFile {
+// The runs a session's records have started and answered, which the next
+// record must extend.
+interface DirectSessionRuns {
+  readonly userRunIds: Set<string>;
+  readonly assistantRunIds: Set<string>;
+}
+
+interface ParsedSessionFile extends DirectSessionRuns {
   readonly header: DirectSessionHeaderV1;
   readonly records: readonly DirectSessionRecordV1[];
   readonly appendOffset: number;
@@ -81,13 +88,11 @@ interface DirectSessionFileIdentity {
   readonly size: bigint;
 }
 
-interface DirectSessionAppendState {
+interface DirectSessionAppendState extends DirectSessionRuns {
   readonly appendOffset: number;
-  readonly assistantRunIds: Set<string>;
   readonly identity: DirectSessionFileIdentity;
   readonly ignoredTail: boolean;
   readonly separator: '' | '\n';
-  readonly userRunIds: Set<string>;
 }
 
 export class DirectSessionStore {
@@ -194,7 +199,8 @@ export class DirectSessionStore {
         appendStateFor({
           appendOffset: payload.byteLength,
           identity,
-          records: [user],
+          userRunIds: new Set([user.runId]),
+          assistantRunIds: new Set(),
         }),
       );
       return { header, records: [user], path: filePath };
@@ -416,24 +422,28 @@ async function parseSessionFile(
   if (header.ownerId !== expectedOwnerId || header.sessionId !== expectedSessionId) {
     throw new TypeError('Direct session header does not match the selected session');
   }
-  let records: DirectSessionRecordV1[] = [];
+  // Each record is validated against the runs before it as it is parsed, so no
+  // pass over the whole session follows the stepped read.
+  const records: DirectSessionRecordV1[] = [];
+  const runs: DirectSessionRuns = { userRunIds: new Set(), assistantRunIds: new Set() };
   let lineNumber = 1;
   const steps = new EventLoopSteps('direct-session-parse');
   for (let start = headerEnd + 1; start < completeLength; lineNumber += 1) {
     const end = raw.indexOf(0x0a, start);
-    records.push(parseSessionRecord(parseJsonLine(decodeUtf8(raw.subarray(start, end)), lineNumber + 1)));
+    const record = parseSessionRecord(parseJsonLine(decodeUtf8(raw.subarray(start, end)), lineNumber + 1));
+    acceptNextRecord(runs, record);
+    records.push(record);
     start = end + 1;
     await steps.next();
   }
-  validateSequence(records);
   if (!endsWithNewline && completeLength < raw.length) {
     try {
       const tail = parseSessionRecord(parseJsonLine(
         decodeUtf8(raw.subarray(completeLength)),
         lineNumber + 1,
       ));
-      validateSequence([...records, tail]);
-      records = [...records, tail];
+      acceptNextRecord(runs, tail);
+      records.push(tail);
       separator = '\n';
     } catch {
       ignoredTail = true;
@@ -443,7 +453,7 @@ async function parseSessionFile(
   if (records.length < 1 || records[0]?.type !== 'user') {
     throw new TypeError('Direct session is missing its first user record');
   }
-  return { header, records, appendOffset, separator, ignoredTail };
+  return { header, records, appendOffset, separator, ignoredTail, ...runs };
 }
 
 function parseJsonLine(line: string, lineNumber: number): unknown {
@@ -563,65 +573,44 @@ function parseAttachments(value: unknown): readonly AgentAttachment[] {
   });
 }
 
-function validateSequence(records: readonly DirectSessionRecordV1[]): void {
-  const users = new Set<string>();
-  const assistants = new Set<string>();
-  for (const record of records) {
-    if (record.type === 'user') {
-      if (users.has(record.runId)) throw new TypeError('Direct session contains a duplicate user run');
-      users.add(record.runId);
-      continue;
-    }
-    if (!users.has(record.runId)) {
-      throw new TypeError('Direct assistant record has no preceding user record');
-    }
-    if (assistants.has(record.runId)) {
-      throw new TypeError('Direct session contains a duplicate assistant run');
-    }
-    assistants.add(record.runId);
-  }
-}
-
-function appendStateFor(input: {
+function appendStateFor(input: DirectSessionRuns & {
   readonly appendOffset: number;
   readonly identity: DirectSessionFileIdentity;
-  readonly records: readonly DirectSessionRecordV1[];
   readonly ignoredTail?: boolean;
   readonly separator?: '' | '\n';
 }): DirectSessionAppendState {
-  validateSequence(input.records);
-  const userRunIds = new Set<string>();
-  const assistantRunIds = new Set<string>();
-  for (const record of input.records) {
-    if (record.type === 'user') userRunIds.add(record.runId);
-    else assistantRunIds.add(record.runId);
-  }
   return {
     appendOffset: input.appendOffset,
-    assistantRunIds,
+    assistantRunIds: input.assistantRunIds,
     identity: input.identity,
     ignoredTail: input.ignoredTail ?? false,
     separator: input.separator ?? '',
-    userRunIds,
+    userRunIds: input.userRunIds,
   };
 }
 
 function validateNextRecord(
-  appendState: DirectSessionAppendState,
+  runs: DirectSessionRuns,
   record: DirectSessionRecordV1,
 ): void {
   if (record.type === 'user') {
-    if (appendState.userRunIds.has(record.runId)) {
+    if (runs.userRunIds.has(record.runId)) {
       throw new TypeError('Direct session contains a duplicate user run');
     }
     return;
   }
-  if (!appendState.userRunIds.has(record.runId)) {
+  if (!runs.userRunIds.has(record.runId)) {
     throw new TypeError('Direct assistant record has no preceding user record');
   }
-  if (appendState.assistantRunIds.has(record.runId)) {
+  if (runs.assistantRunIds.has(record.runId)) {
     throw new TypeError('Direct session contains a duplicate assistant run');
   }
+}
+
+function acceptNextRecord(runs: DirectSessionRuns, record: DirectSessionRecordV1): void {
+  validateNextRecord(runs, record);
+  if (record.type === 'user') runs.userRunIds.add(record.runId);
+  else runs.assistantRunIds.add(record.runId);
 }
 
 function fileIdentity(stats: BigIntStats): DirectSessionFileIdentity {

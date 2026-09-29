@@ -298,6 +298,64 @@ describe('DirectSessionStore', () => {
     expect(lines(repaired).at(-1)).toMatchObject({ content: 'recovered response' });
   });
 
+  test('rejects a loaded session whose runs are duplicated or unanswered in order', async () => {
+    const { store, file } = await fixture();
+    await create(store);
+    const [header, user] = lines(await readFile(file, 'utf8')) as Array<Record<string, unknown>>;
+    const assistant = (runId: string) => ({ type: 'assistant', at: TIMES[1], runId, content: 'answer', checkpoint: null });
+    const cases: Array<[readonly unknown[], string]> = [
+      [[header, user, user], 'Direct session contains a duplicate user run'],
+      [[header, user, assistant('run-1'), assistant('run-1')], 'Direct session contains a duplicate assistant run'],
+      [[header, user, assistant('run-2')], 'Direct assistant record has no preceding user record'],
+    ];
+
+    for (const [records, message] of cases) {
+      await writeFile(file, `${records.map((record) => JSON.stringify(record)).join('\n')}\n`);
+      await expect(store.load(SESSION_ID)).rejects.toThrow(message);
+    }
+  });
+
+  test('rejects appends that break the run sequence after create and after load', async () => {
+    const { store, file } = await fixture();
+    await create(store);
+    const rejectedAppends = async () => {
+      const before = await readFile(file);
+      await expect(store.appendUser({ sessionId: SESSION_ID, runId: 'run-1', content: 'again', attachments: [] }))
+        .rejects.toThrow('Direct session contains a duplicate user run');
+      await expect(store.appendAssistant({ sessionId: SESSION_ID, runId: 'run-2', content: 'orphan' }))
+        .rejects.toThrow('Direct assistant record has no preceding user record');
+      expect(await readFile(file)).toEqual(before);
+    };
+
+    await rejectedAppends();
+    await store.appendAssistant({ sessionId: SESSION_ID, runId: 'run-1', content: 'answer' });
+    await expect(store.appendAssistant({ sessionId: SESSION_ID, runId: 'run-1', content: 'again' }))
+      .rejects.toThrow('Direct session contains a duplicate assistant run');
+    await store.load(SESSION_ID);
+    await rejectedAppends();
+    await expect(store.appendAssistant({ sessionId: SESSION_ID, runId: 'run-1', content: 'again' }))
+      .rejects.toThrow('Direct session contains a duplicate assistant run');
+  });
+
+  test('ignores an unterminated tail that breaks the run sequence until an append truncates it', async () => {
+    const { store, file } = await fixture();
+    await create(store);
+    const intact = await readFile(file, 'utf8');
+    await appendFile(file, JSON.stringify({ type: 'assistant', at: TIMES[1], runId: 'run-2', content: 'orphan', checkpoint: null }));
+
+    await expect(store.load(SESSION_ID)).resolves.toMatchObject({ records: [{ type: 'user', runId: 'run-1' }] });
+    await store.appendUser({ sessionId: SESSION_ID, runId: 'run-2', content: 'second request', attachments: [] });
+    await store.appendAssistant({ sessionId: SESSION_ID, runId: 'run-2', content: 'second answer' });
+
+    const repaired = await readFile(file, 'utf8');
+    expect(repaired.startsWith(intact)).toBeTrue();
+    expect(repaired).not.toContain('orphan');
+    expect(lines(repaired).slice(1).map((record) => {
+      const { type, runId } = record as { type: string; runId: string };
+      return [type, runId];
+    })).toEqual([['user', 'run-1'], ['user', 'run-2'], ['assistant', 'run-2']]);
+  });
+
   test('fails closed on malformed complete or middle records without mutating the file', async () => {
     const { store, file } = await fixture();
     await create(store);

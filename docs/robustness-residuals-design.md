@@ -34,11 +34,22 @@ where a limitation below says otherwise.
   At 20,000 runs, even a fully synchronous parse held the loop for only 45 to
   58 ms, against the 50 ms limit.
 - Change: the test uses 40,000 runs. A fully synchronous parse now holds the
-  loop for about 110 to 120 ms and fails; the stepped parser stays near 20 ms.
+  loop for about 110 to 120 ms and fails.
+- Change: a load validated the record sequence after the stepped parse, then
+  validated it again while rebuilding the run-ID sets for appends. Those passes
+  grew the longest gap with session size, to 45 to 67 ms at 160,000 records.
+  Each record is now validated and its run recorded as it is parsed, and the
+  append state takes those sets, so the longest gap stays near 20 ms up to
+  160,000 records.
 - Limitation: the specific pre-#791 defect, one whole-file UTF-8 decode and
   split, costs about 1 ms per MB in Bun. Even 55 to 73 MB sessions measured
   only 40 to 66 ms for it, so no practical session size lets a latency test
   catch that shape.
+- Limitation: at the long-session test's size, the removed validation passes
+  stayed inside its 50 ms limit, so no latency test fails on the previous
+  code. Store tests pin the run-sequence rules that moved into the parse: on
+  load, on appends after creating and after loading, and for an unterminated
+  tail that breaks the sequence.
 
 ## 3. Noise failures and link closure causes
 
