@@ -50,6 +50,27 @@ function setupFailureLog() {
   return { failures, logger };
 }
 
+function warnings() {
+  const entries: { readonly message: unknown; readonly detail: unknown }[] = [];
+  const logger = {
+    debug() {}, info() {}, error() {},
+    warn(message: unknown, detail: unknown) { entries.push({ message, detail }); },
+  } satisfies Logger;
+  return { entries, logger };
+}
+
+// Rewrites a link's outgoing session messages, as a faulty peer build would send them.
+function outgoingRewrite(link: WebSocketLink, rewrite: (encoded: string) => string) {
+  link.onSession((session) => {
+    const attach = session.attach.bind(session);
+    session.attach = (socket) => attach({
+      close: () => socket.close(),
+      canSend: (bytes) => socket.canSend?.(bytes) !== false,
+      send(encoded) { socket.send(rewrite(encoded)); },
+    });
+  });
+}
+
 // Fails the first outgoing message that matches, closing the link as it is sent.
 function disconnectOn(fault: ReturnType<typeof outgoingFault>, matches: (encoded: string) => boolean) {
   fault.inject = (encoded) => {
@@ -322,6 +343,52 @@ for (const dialer of ['controller', 'worker'] as const) {
       expect(log.failures).toEqual([
         { executorId: linkOptions.executorId, stage: 'resume-bindings', reason: 'Executor connection lost' },
       ]);
+    } finally { await fixture.dispose(); }
+  });
+
+  test(`a resume report the controller cannot read fails only its binding (${dialer} dials)`, async () => {
+    const log = warnings();
+    let corrupt = false;
+    const fixture = await remoteFixture(dialer, (_controller, worker) => {
+      outgoingRewrite(worker, (encoded) => (
+        corrupt && encoded.startsWith('{"type":"result"') && encoded.includes('"resumed"')
+          ? encoded.replace('"kind":"execution"', '"kind":"synthetic-unreadable"') : encoded
+      ));
+    }, undefined, undefined, { client: { logger: log.logger } });
+    try {
+      const integration = await fixture.executor.getAgentIntegration('test');
+      // The running turn's launch record carries a handle that the rewrite makes unreadable.
+      const running = await requestFor(integration);
+      await integration.execution.start(running);
+      const idle = await requestFor(integration);
+      const failures: [string, AgentProducerNotification['event']][] = [];
+      const closes: Promise<void>[] = [];
+      // Closes a failed binding as the transcript route does, while the replacement session installs.
+      integration.producers.subscribe(({ binding, event }) => {
+        if (event.type !== 'publication-failed') return;
+        failures.push([binding.id, event]);
+        closes.push(integration.producers.close(binding));
+      });
+      let sessions = 0;
+      fixture.worker.onSession(() => { sessions += 1; });
+      corrupt = true;
+      const ready = nextAvailability(fixture.executor, 'ready');
+      fixture.controller.disconnect(); fixture.worker.disconnect();
+      await ready;
+
+      expect(failures).toEqual([[running.producerBinding.id, { type: 'publication-failed', error: {
+        code: 'OUTCOME_UNKNOWN',
+        message: 'An event from the executor could not be read, so this turn\'s outcome is unknown. Native history may contain additional output.',
+      } }]]);
+      expect(sessions).toBe(2);
+      expect(log.entries.filter(({ message }) => message === 'Executor producer resume report could not be read')).toEqual([{
+        message: 'Executor producer resume report could not be read',
+        detail: { integrationId: 'test', bindingId: running.producerBinding.id },
+      }]);
+      // The failed binding closed through the installing session, stopping its turn, and the other resumed.
+      await Promise.all(closes);
+      expect(fixture.generations[0]!.calls.abort).toBe(1);
+      await integration.producers.close(idle.producerBinding);
     } finally { await fixture.dispose(); }
   });
 

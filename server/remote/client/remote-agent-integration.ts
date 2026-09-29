@@ -275,8 +275,24 @@ export class RemoteAgentIntegration implements AgentIntegration {
     const { resumed } = await backing.rpc.call(this.descriptor.id, 'producers.resume', {
       bindings: suspended.map((state) => ({ binding: state.ref, acknowledgedSeq: state.receivedSeq })),
     });
-    const reports = new Map(resumeStates(resumed, backing.manifests.get(this.descriptor.id)!.scope)
-      .map((report) => [report.bindingId, report]));
+    if (!Array.isArray(resumed)) throw new Error('Invalid producer resume reply');
+    const scope = backing.manifests.get(this.descriptor.id)!.scope;
+    const requested = new Set(suspended.map((state) => state.ref.id));
+    const reports = new Map<string, ProducerResumeState>();
+    const unreadable = new Set<string>();
+    for (const report of resumed as unknown[]) {
+      if (isResumeState(report, scope)) {
+        reports.set(report.bindingId, report);
+        continue;
+      }
+      // The rest of an unreadable report is peer text, so only an ID this controller asked about is kept.
+      const bindingId = (report as { readonly bindingId?: unknown } | null)?.bindingId;
+      const requestedId = typeof bindingId === 'string' && requested.has(bindingId) ? bindingId : null;
+      if (requestedId) unreadable.add(requestedId);
+      this.#log.warn('Executor producer resume report could not be read', {
+        integrationId: this.descriptor.id, bindingId: requestedId,
+      });
+    }
     for (const state of suspended) {
       if (this.#bindings.get(state.ref.id) !== state) continue;
       const report = reports.get(state.ref.id);
@@ -285,10 +301,13 @@ export class RemoteAgentIntegration implements AgentIntegration {
         this.#settleLostLaunches(state);
         continue;
       }
+      // A binding whose report cannot be read fails like one the worker no longer holds,
+      // rather than retiring every replacement session. Reading it as no launch would
+      // settle a lost launch as never started.
       this.#retireFailed(state);
-      this.#emit({ binding: state.ref, event: { type: 'publication-failed', error: {
-        code: 'OUTCOME_UNKNOWN', message: EXECUTOR_DISCONNECTED_MID_TURN,
-      } } });
+      this.#emit({ binding: state.ref, event: { type: 'publication-failed', error: unreadable.has(state.ref.id)
+        ? UNREADABLE_EVENT_FAILURE
+        : { code: 'OUTCOME_UNKNOWN', message: EXECUTOR_DISCONNECTED_MID_TURN } } });
     }
     this.#scheduleAcknowledgement();
   }
@@ -408,18 +427,12 @@ function isFailureDetail(value: unknown): value is { readonly code: string; read
   return typeof detail.code === 'string' && (detail.message === undefined || typeof detail.message === 'string');
 }
 
-function resumeStates(value: unknown, scope: AgentResourceScope): readonly ProducerResumeState[] {
-  if (!Array.isArray(value)) throw new Error('Invalid producer resume reply');
-  for (const state of value as unknown[]) {
-    const report = state as Partial<ProducerResumeState> | null;
-    const launch = report?.launch;
-    if (typeof report?.bindingId !== 'string' || !Number.isSafeInteger(report.replayThroughSeq) || report.replayThroughSeq! < 0
-      || (launch !== null && (typeof launch?.runId !== 'string'
-        || (launch.handle !== null && !isAgentResourceRef(launch.handle, 'execution', scope))))) {
-      throw new Error('Invalid producer resume reply');
-    }
-  }
-  return value as readonly ProducerResumeState[];
+function isResumeState(value: unknown, scope: AgentResourceScope): value is ProducerResumeState {
+  const report = value as Partial<ProducerResumeState> | null;
+  const launch = report?.launch;
+  return typeof report?.bindingId === 'string' && Number.isSafeInteger(report.replayThroughSeq) && report.replayThroughSeq! >= 0
+    && (launch === null || (typeof launch?.runId === 'string'
+      && (launch.handle === null || isAgentResourceRef(launch.handle, 'execution', scope))));
 }
 
 // Rebuilds a producer event received from the worker; throws when it is malformed.
