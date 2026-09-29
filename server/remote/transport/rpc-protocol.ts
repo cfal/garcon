@@ -62,6 +62,8 @@ export interface ExecutorRpcMethods extends FileRpcMethods, TerminalRpcMethods, 
   'projects.resolveFileMentions': Call<Parameters<ExecutionProjectService['resolveFileMentions']>[0], string>;
   'producers.bind': Call<Request<'producers', 'bind'>, void>;
   'producers.close': Call<Request<'producers', 'close'>, void>;
+  // Cancels native admission of a launch whose call the controller lost.
+  'producers.cancelLaunch': Call<{ readonly binding: AgentProducerBinding; readonly runId: string }, void>;
   // Reattaches bindings from a lost session; the worker resends their retained
   // frames after `acknowledgedSeq` and omits bindings it no longer holds.
   'producers.resume': Call<{
@@ -143,6 +145,7 @@ const CONTINUITY: Readonly<Record<ClassifiedMethod, RpcContinuity>> = {
   'projects.resolveFileMentions': 'journaled',
   'producers.bind': 'session',
   'producers.close': 'session',
+  'producers.cancelLaunch': 'journaled',
   'producers.resume': 'session',
   'permissions.respond': 'journaled',
   'execution.start': 'launch',

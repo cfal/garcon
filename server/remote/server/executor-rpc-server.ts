@@ -148,6 +148,13 @@ export function serveExecutionRuntime(
         relay.close(call.request);
         return;
       }
+      case 'producers.cancelLaunch': {
+        if (typeof call.request?.binding?.id !== 'string' || typeof call.request.runId !== 'string') {
+          throw new AgentCallError('rejected', 'Invalid launch cancellation request');
+        }
+        relay.cancelLaunch(integration, call.request.binding, call.request.runId);
+        return;
+      }
       case 'producers.resume': {
         const bindings: unknown = call.request?.bindings;
         if (!Array.isArray(bindings) || bindings.some((entry) => (
@@ -157,9 +164,13 @@ export function serveExecutionRuntime(
       }
       case 'permissions.respond': return integration.permissions.respond(call.request, options);
       case 'execution.start':
-        return relay.launch(producerSession, integration, call.request, onUndeliveredReply, () => integration.execution.start(call.request, options));
+        return relay.launch(producerSession, integration, call.request, signal, onUndeliveredReply, (launchSignal) => (
+          integration.execution.start(call.request, { signal: launchSignal })
+        ));
       case 'execution.resume':
-        return relay.launch(producerSession, integration, call.request, onUndeliveredReply, () => integration.execution.resume(call.request, options));
+        return relay.launch(producerSession, integration, call.request, signal, onUndeliveredReply, (launchSignal) => (
+          integration.execution.resume(call.request, { signal: launchSignal })
+        ));
       case 'execution.abort': return integration.execution.abort(call.request, options);
       case 'execution.runningSessions': return integration.execution.runningSessions(options);
       case 'catalog.snapshot': return integration.catalog.snapshot({ ...call.request, signal });
@@ -177,7 +188,9 @@ export function serveExecutionRuntime(
       case 'commands.discover': return required(integration.commands).discover(call.request.projectPath, signal);
       case 'compaction.compact': {
         const compaction = required(integration.compaction);
-        return relay.launch(producerSession, integration, call.request, onUndeliveredReply, () => compaction.compact(call.request, options));
+        return relay.launch(producerSession, integration, call.request, signal, onUndeliveredReply, (launchSignal) => (
+          compaction.compact(call.request, { signal: launchSignal })
+        ));
       }
       case 'forking.fork': return required(integration.forking).fork({ ...call.request, signal });
       case 'forking.discard': return required(integration.forking).discard(call.request, signal);

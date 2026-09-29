@@ -37,6 +37,8 @@ const UNREADABLE_EVENT_FAILURE = {
 interface UnsettledLaunch {
   // Sends the same request on a replacement session, at most once.
   send: ((backing: RemoteSessionBacking) => Promise<AgentExecutionHandle>) | null;
+  // Stops relaying the caller's cancellation once the launch settles.
+  readonly release: () => void;
 }
 
 interface RemoteProducerBinding {
@@ -106,7 +108,7 @@ export class RemoteAgentIntegration implements AgentIntegration {
     const launch = async <K extends 'execution.start' | 'execution.resume' | 'compaction.compact'>(
       method: K, request: ExecutorRpcMethods[K]['request'], options?: ExecutorCallOptions,
     ) => {
-      // Native admission may outlive the default RPC deadline; Stop and session loss still cancel it.
+      // Native admission may outlive the default RPC deadline; Stop still cancels it.
       const { backing, timeoutMs } = await sessions.acquire({ signal: options?.signal, timeoutMs: options?.timeoutMs ?? null });
       const send = ({ rpc }: RemoteSessionBacking, deadline: number | null) => rpc.call(this.descriptor.id, method, request, {
         ...options,
@@ -117,8 +119,20 @@ export class RemoteAgentIntegration implements AgentIntegration {
       try {
         return await send(backing, timeoutMs);
       } catch (error) {
-        if (error instanceof AgentCallError && error.outcome === 'unknown') {
-          state?.unsettledLaunches.set(request.runId, { send: (replacement) => send(replacement, null) });
+        const signal = options?.signal;
+        if (state && error instanceof AgentCallError && error.outcome === 'unknown' && !signal?.aborted) {
+          // A lost call no longer carries the caller's cancellation, so a later
+          // Stop cancels the launch through the worker's relay instead.
+          const cancel = () => {
+            if (state.unsettledLaunches.get(request.runId) !== lost) return;
+            void call('producers.cancelLaunch', { binding: state.ref, runId: request.runId }).catch(() => undefined);
+          };
+          const lost: UnsettledLaunch = {
+            send: (replacement) => send(replacement, null),
+            release: () => signal?.removeEventListener('abort', cancel),
+          };
+          signal?.addEventListener('abort', cancel, { once: true });
+          state.unsettledLaunches.set(request.runId, lost);
         }
         throw error;
       }
@@ -130,7 +144,7 @@ export class RemoteAgentIntegration implements AgentIntegration {
       runningSessions: (options) => call('execution.runningSessions', null, options),
     };
     this.producers = {
-      detach: (binding) => { this.#bindings.delete(binding.id); },
+      detach: (binding) => { this.#forgetBinding(binding.id); },
       get scope() { return sessions.latest().manifests.get(manifest.descriptor.id)!.scope; },
       bind: async (request, options) => {
         const { backing, timeoutMs } = await sessions.acquire(options);
@@ -148,7 +162,7 @@ export class RemoteAgentIntegration implements AgentIntegration {
       },
       close: async (binding, options) => {
         const holder = this.#bindings.get(binding.id)?.backing ?? this.#failedBindings.get(binding.id);
-        this.#bindings.delete(binding.id);
+        this.#forgetBinding(binding.id);
         this.#failedBindings.delete(binding.id);
         // The worker keeps a lost session's bindings for its replacement, which closes this one.
         if (!holder?.rpc.transport.connected) return call('producers.close', binding, options);
@@ -278,7 +292,7 @@ export class RemoteAgentIntegration implements AgentIntegration {
   }
 
   retire(): void {
-    this.#bindings.clear();
+    for (const id of [...this.#bindings.keys()]) this.#forgetBinding(id);
     this.#failedBindings.clear();
     if (this.#ackTimer) clearTimeout(this.#ackTimer);
     this.#ackTimer = null;
@@ -348,7 +362,7 @@ export class RemoteAgentIntegration implements AgentIntegration {
     else {
       state.lostOutputReported = false;
       if (event.type === 'publication-failed') this.#retireFailed(state);
-      if (event.type === 'launch-settled' || event.type === 'run-ended') state.unsettledLaunches.delete(event.runId);
+      if (event.type === 'launch-settled' || event.type === 'run-ended') this.#forgetLaunch(state, event.runId);
       this.#emit({ binding, event });
     }
     if (this.#bindings.get(binding.id) === state) this.#settleLostLaunches(state);
@@ -361,7 +375,7 @@ export class RemoteAgentIntegration implements AgentIntegration {
   }
 
   #retireFailed(state: RemoteProducerBinding): void {
-    this.#bindings.delete(state.ref.id);
+    this.#forgetBinding(state.ref.id);
     this.#failedBindings.set(state.ref.id, state.backing);
   }
 
@@ -408,7 +422,7 @@ export class RemoteAgentIntegration implements AgentIntegration {
         this.#relaunch(state, runId, lost, lost.send);
         continue;
       }
-      state.unsettledLaunches.delete(runId);
+      this.#forgetLaunch(state, runId);
       this.#emit({ binding: state.ref, event: launch?.handle
         ? { type: 'launch-settled', runId, handle: launch.handle }
         : { type: 'launch-settled', runId, error: EXECUTOR_DISCONNECTED_BEFORE_START } });
@@ -424,7 +438,7 @@ export class RemoteAgentIntegration implements AgentIntegration {
     lost.send = null;
     const settle = (event: Extract<AgentProducerNotification['event'], { readonly type: 'launch-settled' }>) => {
       if (state.unsettledLaunches.get(runId) !== lost) return;
-      state.unsettledLaunches.delete(runId);
+      this.#forgetLaunch(state, runId);
       this.#emit({ binding: state.ref, event });
     };
     void send(state.backing).then(
@@ -433,6 +447,18 @@ export class RemoteAgentIntegration implements AgentIntegration {
         if (!(error instanceof AgentCallError && error.outcome === 'unknown')) settle({ type: 'launch-settled', runId, error: failureDetail(error) });
       },
     );
+  }
+
+  #forgetLaunch(state: RemoteProducerBinding, runId: string): void {
+    state.unsettledLaunches.get(runId)?.release();
+    state.unsettledLaunches.delete(runId);
+  }
+
+  #forgetBinding(id: string): void {
+    const state = this.#bindings.get(id);
+    if (!state) return;
+    for (const lost of state.unsettledLaunches.values()) lost.release();
+    this.#bindings.delete(id);
   }
 
   // A listener that throws would otherwise retire the session delivering the event,

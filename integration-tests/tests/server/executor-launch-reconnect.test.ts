@@ -191,6 +191,11 @@ function holdNextReconnect(native: ReturnType<typeof integrationFixture>): () =>
   return () => release.resolve();
 }
 
+// A round trip on the current session, after which earlier requests have reached the worker.
+async function integrationRoundTrip(remote: Awaited<ReturnType<typeof connectRemoteExecutor>>): Promise<void> {
+  await (await remote.getAgentIntegration('test')).execution.runningSessions();
+}
+
 async function until(condition: () => boolean): Promise<void> {
   const deadline = performance.now() + 20_000;
   while (!condition()) {
@@ -519,6 +524,102 @@ for (const dialer of ['controller', 'worker'] as const) {
       expect(sent).toBe(2);
       expect(native.calls.start).toBe(0);
       expect(runEnd(ledger)).toMatchObject({ outcome: 'failed', origin: 'core', error: EXECUTOR_DISCONNECTED_BEFORE_START });
+    });
+  }, 30_000);
+
+  for (const stopAt of ['during the gap', 'after the reconnect'] as const) {
+    test(`Stop ${stopAt} cancels a start still in native admission whose call was lost (${dialer} dials)`, async () => {
+      await withRemoteRouter(dialer, async ({ router, ledger, native, remote, controller }) => {
+        const entered = Promise.withResolvers<AbortSignal>();
+        const release = Promise.withResolvers<void>();
+        let submitted = false;
+        native.hooks.start = async ({ admission }) => {
+          entered.resolve(admission.signal);
+          await release.promise;
+          admission.signal.throwIfAborted();
+          submitted = true;
+        };
+        try {
+          const admission = new AbortController();
+          const turn = router.startSession(CHAT, 'Synthetic input', {
+            executionAdmission: { signal: admission.signal, markStarted: async () => {} },
+          });
+          const nativeAdmission = await entered.promise;
+          const releaseReconnect = holdNextReconnect(native);
+          const ready = availability(remote, 'ready');
+          controller.disconnect();
+          await turn;
+          expect(router.isChatRunning(CHAT)).toBe(true);
+          if (stopAt === 'after the reconnect') {
+            releaseReconnect();
+            await ready;
+          }
+          // The execution coordinator's Stop aborts admission, then the session.
+          admission.abort(new Error('Synthetic stop'));
+          await router.abortSession(CHAT);
+          releaseReconnect();
+          await ready;
+
+          await until(() => nativeAdmission.aborted);
+          release.resolve();
+          await integrationRoundTrip(remote);
+          expect(submitted).toBe(false);
+          expect(runEnds(ledger)).toEqual([{ outcome: 'interrupted', origin: 'core' }]);
+        } finally { release.resolve(); }
+      });
+    }, 30_000);
+  }
+
+  test(`a new turn cancels an earlier start still in admission whose call was lost (${dialer} dials)`, async () => {
+    await withRemoteRouter(dialer, async ({ router, native, controller, restored }) => {
+      const admissions: AbortSignal[] = [];
+      const release = Promise.withResolvers<void>();
+      native.hooks.start = async ({ admission }) => {
+        admissions.push(admission.signal);
+        if (admissions.length === 1) await release.promise;
+      };
+      try {
+        const reconnected = restored();
+        const first = router.startSession(CHAT, 'Synthetic first input');
+        await until(() => admissions.length === 1);
+        controller.disconnect();
+        await first;
+        await reconnected;
+        // Without an admission signal, Stop cannot name the lost start to the worker.
+        await router.abortSession(CHAT);
+        await router.startSession(CHAT, 'Synthetic second input');
+
+        expect(admissions).toHaveLength(2);
+        expect(admissions[0]!.aborted).toBe(true);
+        expect(admissions[1]!.aborted).toBe(false);
+        expect(router.isChatRunning(CHAT)).toBe(true);
+      } finally { release.resolve(); }
+    });
+  }, 30_000);
+
+  test(`Stop during the gap suppresses the relaunch of a start the worker never received (${dialer} dials)`, async () => {
+    await withRemoteRouter(dialer, async ({ router, ledger, native, remote, controllerFault }) => {
+      let sent = 0;
+      const releaseReconnect = holdNextReconnect(native);
+      controllerFault.inject = (encoded) => {
+        if (!encoded.includes('"method":"execution.start"')) return null;
+        sent += 1;
+        return sent === 1 ? 'disconnect' : null;
+      };
+      const admission = new AbortController();
+      await router.startSession(CHAT, 'Synthetic input', {
+        executionAdmission: { signal: admission.signal, markStarted: async () => {} },
+      });
+      admission.abort(new Error('Synthetic stop'));
+      await router.abortSession(CHAT);
+      const ready = availability(remote, 'ready');
+      releaseReconnect();
+      await ready;
+      await integrationRoundTrip(remote);
+
+      expect(sent).toBe(1);
+      expect(native.calls.start).toBe(0);
+      expect(runEnds(ledger)).toEqual([{ outcome: 'interrupted', origin: 'core' }]);
     });
   }, 30_000);
 }
