@@ -35,7 +35,15 @@
 		isAtChatProject?: boolean;
 	} = $props();
 
+	let treeRoot = $state<HTMLDivElement | null>(null);
 	let navigationRetryButton = $state<HTMLButtonElement | null>(null);
+	// Moving focus to Retry serves someone navigating from the tree. A load that
+	// fails while focus is elsewhere, such as one started by an executor
+	// reconnect, must not pull focus out of another surface. Plain rather than
+	// $state so gaining focus never re-runs the effect below. Focus that leaves
+	// for nowhere, as when a focused row is removed while loading, keeps the
+	// claim until it lands outside the tree, which the tree hears no event for.
+	let treeHoldsFocus = false;
 	let containerWidth = $state(0);
 	const observeFileTreeWidth = observeContainerWidth((width) => {
 		containerWidth = width;
@@ -51,14 +59,25 @@
 	$effect(() => {
 		const navigation = store.navigation;
 		const retryButton = navigationRetryButton;
-		if (navigation.kind === 'error' && retryButton) retryButton.focus();
+		if (navigation.kind !== 'error' || !retryButton || !treeHoldsFocus) return;
+		const focused = document.activeElement;
+		if (focused && focused !== document.body && !treeRoot?.contains(focused)) treeHoldsFocus = false;
+		else retryButton.focus();
 	});
+
+	function noteFocusOut(event: FocusEvent & { currentTarget: HTMLElement }): void {
+		const next = event.relatedTarget;
+		if (next instanceof Node && !event.currentTarget.contains(next)) treeHoldsFocus = false;
+	}
 </script>
 
 <div
 	class="flex h-full min-h-0 min-w-0 flex-col bg-background"
+	bind:this={treeRoot}
 	data-file-tree-root
 	data-file-tree-layout={viewMode}
+	onfocusin={() => (treeHoldsFocus = true)}
+	onfocusout={noteFocusOut}
 	{@attach observeFileTreeWidth}
 >
 	<FileTreeToolbar {store} {viewMode} {onGoToChatProject} {canGoToChatProject} {isAtChatProject} />

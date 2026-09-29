@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { tick } from 'svelte';
 import type { FileTreeEntry, FileTreeResponse } from '$shared/file-contracts';
 import { FileTreeStore } from '$lib/files/tree/file-tree.svelte.js';
 import * as filesApi from '$lib/api/files';
@@ -658,26 +659,60 @@ describe('FileTree', () => {
 		expect(current.getAttribute('aria-label')).toBe('/workspace/project');
 	});
 
-	it('announces destination errors and moves focus to Retry', async () => {
-		const store = new FileTreeStore();
-		store.navigation = {
-			kind: 'error',
-			target: {
-				path: '/workspace/missing',
-				label: 'missing',
-				breadcrumbs: [{ name: 'workspace', path: '/workspace' }],
-				reason: 'directory-row',
-			},
-			previous: response([]),
-			error: { message: 'Directory not found', retryable: false },
-		};
-		render(FileTree, { store, onFileSelect: vi.fn() });
+	it('announces destination errors and moves focus to Retry when navigating from the tree', async () => {
+		const missing = entry('missing', 'directory');
+		const { container, store } = renderReady([missing]);
+		focusRow(container, missing.path);
+		store.navigation = destinationError([missing]);
 
-		expect(screen.getByRole('alert')).toBeTruthy();
+		expect(await screen.findByRole('alert')).toBeTruthy();
 		expect(screen.getByText('Could not open this directory')).toBeTruthy();
 		expect(screen.getByText('Directory not found')).toBeTruthy();
 		const retry = screen.getByRole('button', { name: 'Retry' });
 		await waitFor(() => expect(document.activeElement).toBe(retry));
 		expect(screen.getByRole('button', { name: 'Back' })).toBeTruthy();
 	});
+
+	it.each([
+		['never held focus', 'untouched'],
+		['lost focus to it before the failure', 'row'],
+		['lost focus to nowhere and then to it', 'blurred row'],
+	] as const)('leaves focus in another surface when the tree %s', async (_case, treeFocus) => {
+		const missing = entry('missing', 'directory');
+		const composer = document.createElement('textarea');
+		document.body.append(composer);
+		try {
+			const { container, store } = renderReady([missing]);
+			if (treeFocus !== 'untouched') focusRow(container, missing.path);
+			if (treeFocus === 'blurred row') (document.activeElement as HTMLElement).blur();
+			composer.focus();
+			store.navigation = destinationError([missing]);
+
+			expect(await screen.findByRole('alert')).toBeTruthy();
+			await tick();
+			expect(document.activeElement).toBe(composer);
+		} finally {
+			composer.remove();
+		}
+	});
 });
+
+function focusRow(container: HTMLElement, path: string): void {
+	const row = container.querySelector<HTMLElement>(`[data-file-tree-row-key="${path}"]`);
+	if (!row) throw new Error(`Expected a row for ${path}`);
+	row.focus();
+}
+
+function destinationError(previous: FileTreeEntry[]): FileTreeStore['navigation'] {
+	return {
+		kind: 'error',
+		target: {
+			path: '/workspace/project/missing',
+			label: 'missing',
+			breadcrumbs: [{ name: 'workspace', path: '/workspace' }],
+			reason: 'directory-row',
+		},
+		previous: response(previous),
+		error: { message: 'Directory not found', retryable: false },
+	};
+}
