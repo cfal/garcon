@@ -2,7 +2,10 @@
 	import SidebarProjectPathDialog from '$lib/components/sidebar/SidebarProjectPathDialog.svelte';
 	import type { ChatProjectPathDialog } from './chat-action-dialogs-state.svelte';
 	import { getRemoteSettings, getExecutors } from '$lib/context';
-	import { togglePinnedProjectPathOptimistically } from '$lib/chat/project-paths/pinned-project-path-settings.js';
+	import {
+		executorPinnedProjectPaths,
+		togglePinnedProjectPathOptimistically,
+	} from '$lib/chat/project-paths/pinned-project-path-settings.js';
 
 	interface ChatProjectPathDialogProps {
 		projectPathDialog: ChatProjectPathDialog | null;
@@ -24,9 +27,7 @@
 	const executors = getExecutors();
 	const executorId = $derived(projectPathDialog?.executorId ?? 'local');
 	const pinnedProjectPaths = $derived(
-		executorId === 'local'
-			? (remoteSettings.snapshot?.paths.pinnedProjectPaths ?? [])
-			: (remoteSettings.snapshot?.paths.byExecutor?.[executorId]?.pinnedPaths ?? []),
+		executorPinnedProjectPaths(remoteSettings.snapshot, executorId),
 	);
 
 	async function togglePinnedProjectPath(path: string): Promise<void> {

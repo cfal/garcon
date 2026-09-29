@@ -11,6 +11,15 @@ interface PinnedProjectPathUpdateOptions {
 	browseStartPath?: string;
 }
 
+export function executorPinnedProjectPaths(
+	snapshot: RemoteSettingsSnapshot | null,
+	executorId?: string | null,
+): string[] {
+	const id = effectiveExecutorId(executorId);
+	const paths = snapshot?.paths;
+	return (id === 'local' ? paths?.pinnedProjectPaths : paths?.byExecutor?.[id]?.pinnedPaths) ?? [];
+}
+
 function buildPathsPatch(
 	pinnedProjectPaths: string[],
 	options: PinnedProjectPathUpdateOptions = {},
@@ -68,8 +77,7 @@ export async function togglePinnedProjectPathOptimistically(
 	options?: PinnedProjectPathUpdateOptions,
 ): Promise<RemoteSettingsSnapshot> {
 	const snap = await remoteSettings.ensureLoaded();
-	const executorId = effectiveExecutorId(options?.executorId);
-	const current = executorId === 'local' ? snap.paths.pinnedProjectPaths : snap.paths.byExecutor?.[executorId]?.pinnedPaths ?? [];
+	const current = executorPinnedProjectPaths(snap, options?.executorId);
 	const nextPinnedPaths = nextPinnedProjectPaths(current, path);
 	return persistPinnedProjectPathsOptimistically(remoteSettings, snap, nextPinnedPaths, options);
 }

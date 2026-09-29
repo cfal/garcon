@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
-import { togglePinnedProjectPathOptimistically } from '$lib/chat/project-paths/pinned-project-path-settings.js';
+import {
+	executorPinnedProjectPaths,
+	togglePinnedProjectPathOptimistically,
+} from '$lib/chat/project-paths/pinned-project-path-settings.js';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
 
 vi.mock('$lib/api/settings.js', () => ({
@@ -154,5 +157,19 @@ describe('pinned project path settings', () => {
 		pending.resolve({ success: true, settings: current });
 		await updating;
 		expect(store.snapshot?.paths).toEqual(current.paths);
+	});
+
+	it('reads the pins of the requested executor only', () => {
+		const executorId = '22222222-2222-4222-8222-222222222222';
+		const snap = makeSnapshot({
+			paths: { pinnedProjectPaths: ['/local-pin'], browseStartPath: '', recentProjectPaths: [] },
+		});
+		snap.paths.byExecutor = { [executorId]: { recentPaths: ['/recent'], pinnedPaths: ['/worker-pin'] } };
+
+		expect(executorPinnedProjectPaths(snap, 'local')).toEqual(['/local-pin']);
+		expect(executorPinnedProjectPaths(snap, null)).toEqual(['/local-pin']);
+		expect(executorPinnedProjectPaths(snap, executorId)).toEqual(['/worker-pin']);
+		expect(executorPinnedProjectPaths(snap, '33333333-3333-4333-8333-333333333333')).toEqual([]);
+		expect(executorPinnedProjectPaths(null, executorId)).toEqual([]);
 	});
 });
