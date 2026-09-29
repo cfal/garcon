@@ -9,15 +9,13 @@ import type {
 } from '@garcon/server-agent-interface';
 import { hasNodeErrorCode } from '../lib/errors.js';
 import { syncDirectory } from '../lib/json-file-store.js';
-import { yieldToEventLoop } from '../shared/event-loop.js';
+import { EventLoopSteps } from '../shared/event-loop.js';
 
 const DIRECT_SESSION_NAMESPACE = 'direct-sessions-v1';
 const DIRECT_SESSION_SCHEMA_VERSION = 1;
 const DIRECT_SESSION_HEADER_MAX_BYTES = 4 * 1024;
 const SESSION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
-// Parses in bounded steps: every resumed turn and every Reload reads the whole session.
-const PARSE_STEP_LINES = 1000;
 const utf8Decoder = new TextDecoder('utf-8', { fatal: true });
 
 export interface DirectSessionHeaderV1 {
@@ -398,6 +396,8 @@ async function writeAll(
   }
 }
 
+// Every resumed turn and every Reload reads the whole session, so each line is
+// decoded and parsed on its own in time-bounded steps rather than as one string.
 async function parseSessionFile(
   raw: Buffer,
   expectedOwnerId: string,
@@ -406,29 +406,31 @@ async function parseSessionFile(
   const endsWithNewline = raw.at(-1) === 0x0a;
   const lastNewline = raw.lastIndexOf(0x0a);
   const completeLength = endsWithNewline ? raw.length : lastNewline + 1;
-  const completeLines = decodeUtf8(raw.subarray(0, completeLength))
-    .split('\n')
-    .slice(0, -1);
   let ignoredTail = false;
   let separator: '' | '\n' = '';
   let appendOffset = raw.length;
 
-  if (completeLines.length < 1) throw new TypeError('Direct session is missing its header');
-  const header = parseHeader(parseJsonLine(completeLines[0]!, 1));
+  if (completeLength < 1) throw new TypeError('Direct session is missing its header');
+  const headerEnd = raw.indexOf(0x0a);
+  const header = parseHeader(parseJsonLine(decodeUtf8(raw.subarray(0, headerEnd)), 1));
   if (header.ownerId !== expectedOwnerId || header.sessionId !== expectedSessionId) {
     throw new TypeError('Direct session header does not match the selected session');
   }
   let records: DirectSessionRecordV1[] = [];
-  for (let index = 1; index < completeLines.length; index += 1) {
-    if (index % PARSE_STEP_LINES === 0) await yieldToEventLoop();
-    records.push(parseSessionRecord(parseJsonLine(completeLines[index]!, index + 1)));
+  let lineNumber = 1;
+  const steps = new EventLoopSteps();
+  for (let start = headerEnd + 1; start < completeLength; lineNumber += 1) {
+    const end = raw.indexOf(0x0a, start);
+    records.push(parseSessionRecord(parseJsonLine(decodeUtf8(raw.subarray(start, end)), lineNumber + 1)));
+    start = end + 1;
+    await steps.next();
   }
   validateSequence(records);
   if (!endsWithNewline && completeLength < raw.length) {
     try {
       const tail = parseSessionRecord(parseJsonLine(
         decodeUtf8(raw.subarray(completeLength)),
-        completeLines.length + 1,
+        lineNumber + 1,
       ));
       validateSequence([...records, tail]);
       records = [...records, tail];
