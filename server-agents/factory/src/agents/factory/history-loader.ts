@@ -10,6 +10,7 @@ import { convertFactoryToolUse } from './tool-use-converter.js';
 import { normalizeToolResultContent } from '@garcon/server-agent-common/shared/normalize-util';
 import { stripResolvedFileMentionContext } from '@garcon/server-agent-common/shared/file-mention-context';
 import { readJsonlLineEntries } from '@garcon/server-agent-common/shared/history-loader-utils';
+import { EventLoopSteps } from '@garcon/server-agent-common/shared/event-loop';
 import { attachNativeMessageSource, type NativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 import { hasNodeErrorCode } from '@garcon/server-agent-common/lib/errors';
 import type { AgentLogger } from '@garcon/server-agent-interface';
@@ -296,11 +297,13 @@ export async function findFactorySessionFileBySessionIdStrict(
 async function readFactorySessionEvents(
   sessionPath: string,
   logger: AgentLogger,
-  throwOnError = false,
+  throwOnError: boolean,
+  steps: EventLoopSteps,
 ): Promise<FactoryStoredEventWithSource[]> {
   const events: FactoryStoredEventWithSource[] = [];
 
   for await (const entry of readJsonlLineEntries(sessionPath)) {
+    if (steps.due) await steps.next();
     try {
       const event = JSON.parse(entry.line) as FactoryStoredEvent;
       if (!event || typeof event !== 'object' || typeof event.type !== 'string') {
@@ -402,64 +405,64 @@ function pushMessages(
 
 export function loadFactoryChatMessagesFromEvents(events: FactoryStoredEventInput[]): ChatMessage[] {
   const messages: ChatMessage[] = [];
+  for (const input of events) appendFactoryEventMessages(messages, input);
+  return messages;
+}
 
-  for (const input of events) {
-    const { event, source } = normalizeFactoryStoredEventInput(input);
-    if (event.type !== 'message' || !event.message) continue;
-    if (isHiddenFactoryMessage(event)) continue;
+function appendFactoryEventMessages(messages: ChatMessage[], input: FactoryStoredEventInput): void {
+  const { event, source } = normalizeFactoryStoredEventInput(input);
+  if (event.type !== 'message' || !event.message) return;
+  if (isHiddenFactoryMessage(event)) return;
 
-    const timestamp = getMessageTimestamp(event);
-    const role = event.message.role;
-    const content = Array.isArray(event.message.content) ? event.message.content : [];
-    let sourceOrdinal = 0;
+  const timestamp = getMessageTimestamp(event);
+  const role = event.message.role;
+  const content = Array.isArray(event.message.content) ? event.message.content : [];
+  let sourceOrdinal = 0;
 
-    if (role === 'user') {
-      for (const part of content) {
-        if (part.type !== 'tool_result') continue;
-        const toolUseId = (part as FactoryToolResultPart).tool_use_id || (part as FactoryToolResultPart).toolUseID || '';
-        const rawValue = (part as FactoryToolResultPart).value ?? (part as FactoryToolResultPart).content;
-        sourceOrdinal = pushMessages(messages, source, [
-          new ToolResultMessage(
-            timestamp,
-            toolUseId,
-            normalizeToolResultContent(rawValue),
-            Boolean((part as FactoryToolResultPart).is_error),
-          ),
-        ], sourceOrdinal);
-      }
-
-      const text = getVisibleUserTextParts(content).join('\n');
-      if (text) {
-        pushMessages(messages, source, [
-          new UserMessage(timestamp, stripResolvedFileMentionContext(text)),
-        ], sourceOrdinal);
-      }
-      continue;
+  if (role === 'user') {
+    for (const part of content) {
+      if (part.type !== 'tool_result') continue;
+      const toolUseId = (part as FactoryToolResultPart).tool_use_id || (part as FactoryToolResultPart).toolUseID || '';
+      const rawValue = (part as FactoryToolResultPart).value ?? (part as FactoryToolResultPart).content;
+      sourceOrdinal = pushMessages(messages, source, [
+        new ToolResultMessage(
+          timestamp,
+          toolUseId,
+          normalizeToolResultContent(rawValue),
+          Boolean((part as FactoryToolResultPart).is_error),
+        ),
+      ], sourceOrdinal);
     }
 
-    if (role === 'assistant') {
-      for (const part of content) {
-        if (part.type === 'thinking' && typeof (part as FactoryTextPart).thinking === 'string') {
-          sourceOrdinal = pushMessages(messages, source, [
-            new ThinkingMessage(timestamp, (part as FactoryTextPart).thinking!),
-          ], sourceOrdinal);
-        } else if (part.type === 'text' && typeof (part as FactoryTextPart).text === 'string') {
-          sourceOrdinal = pushMessages(
-            messages,
-            source,
-            convertFactoryAssistantText(timestamp, (part as FactoryTextPart).text!),
-            sourceOrdinal,
-          );
-        } else if (part.type === 'tool_use') {
-          sourceOrdinal = pushMessages(messages, source, [
-            convertFactoryToolUse(timestamp, part as FactoryToolUsePart),
-          ], sourceOrdinal);
-        }
+    const text = getVisibleUserTextParts(content).join('\n');
+    if (text) {
+      pushMessages(messages, source, [
+        new UserMessage(timestamp, stripResolvedFileMentionContext(text)),
+      ], sourceOrdinal);
+    }
+    return;
+  }
+
+  if (role === 'assistant') {
+    for (const part of content) {
+      if (part.type === 'thinking' && typeof (part as FactoryTextPart).thinking === 'string') {
+        sourceOrdinal = pushMessages(messages, source, [
+          new ThinkingMessage(timestamp, (part as FactoryTextPart).thinking!),
+        ], sourceOrdinal);
+      } else if (part.type === 'text' && typeof (part as FactoryTextPart).text === 'string') {
+        sourceOrdinal = pushMessages(
+          messages,
+          source,
+          convertFactoryAssistantText(timestamp, (part as FactoryTextPart).text!),
+          sourceOrdinal,
+        );
+      } else if (part.type === 'tool_use') {
+        sourceOrdinal = pushMessages(messages, source, [
+          convertFactoryToolUse(timestamp, part as FactoryToolUsePart),
+        ], sourceOrdinal);
       }
     }
   }
-
-  return messages;
 }
 
 export function factoryStoredEventActivityTimestamp(value: unknown): string | null | undefined {
@@ -480,8 +483,11 @@ export async function loadFactoryChatMessages(
   options: { readonly throwOnError?: boolean } = {},
 ): Promise<ChatMessage[]> {
   try {
-    const events = await readFactorySessionEvents(sessionPath, logger, options.throwOnError);
-    const messages = loadFactoryChatMessagesFromEvents(events);
+    // Every reload and fork reads the whole session, so its passes share time-bounded steps.
+    const steps = new EventLoopSteps();
+    const events = await readFactorySessionEvents(sessionPath, logger, options.throwOnError === true, steps);
+    const messages: ChatMessage[] = [];
+    await steps.forEach(events, (input) => appendFactoryEventMessages(messages, input));
     if (!options.throwOnError) return messages;
     return messages.filter((message) => message.type !== 'thinking' || message.content.length > 0);
   } catch (error) {
