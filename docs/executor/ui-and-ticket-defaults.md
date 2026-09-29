@@ -1,6 +1,6 @@
 # Executor UI And Ticket Defaults
 
-Discussion summary, 2026-09-23. This document records the requested UI changes, agreed ticket defaults, and recommended interaction details. It does not indicate implementation completion.
+Status: implemented. This document began as a 2026-09-23 discussion summary and now describes the shared executor selector, executor-scoped directory and model choices, and executor-resolved ticket project defaults.
 
 ## Shared Executor Selector
 
@@ -14,26 +14,28 @@ Reuse the [executor selector](../../web/src/lib/components/shared/ExecutorSelect
 
 ## New Chat And Scheduled New Chat
 
-Move executor selection out of the model picker and place it beside the project directory:
+Executor selection sits beside the project directory rather than in the model picker:
 
 - Wide layout: executor selector to the left of the directory field.
 - Narrow layout: executor selector above the directory field, retaining its full label.
-- Apply the same arrangement to scheduled New Chat.
-- Scope directory browsing, Tab completion, pinned/recent paths, worktrees, and model discovery to that executor.
-- Make the model picker fixed to the selected executor. Neither its ordinary options nor its recents may switch executors implicitly.
+- Scheduled New Chat uses the same arrangement.
+- Directory browsing, Tab completion, pinned/recent paths, worktrees, and model discovery are scoped to that executor.
+- The model picker is fixed to the selected executor. Neither its ordinary options nor its recents switch executors implicitly.
 
-Recommended executor-change behavior: retain the current New Chat policy of choosing the destination's saved default/recent directory, falling back to its advertised project base. Preserve prompt text and attachments. Keep an agent/model selection only when valid on the destination, and require a validated destination catalog before submission.
+Changing the executor chooses the destination's saved default or most recent directory, falling back to its advertised project base. Prompt text and attachments are preserved. An agent/model selection is kept only when valid on the destination, and submission requires a validated destination catalog.
+
+The scheduled prompts list shows each prompt's executor as a pill: the executor a new chat will start on, or the current executor of an existing chat. A prompt whose chat no longer exists shows no pill, and the pill is hidden while Local is the only executor.
 
 ## Chat Composer
 
-Add a separate executor selector immediately to the left of the model selector. Remove executor selection from the composer's model picker and remove the redundant executor prefix from its model trigger.
+A separate executor selector sits immediately to the left of the model selector. The composer's model picker does not select executors, and its trigger carries no executor prefix.
 
-On narrow layouts, collapse the executor trigger to the executor icon. Pressing it opens a menu containing full executor names, availability, and the selected item. Preserve an accessible selected-executor label and a desktop tooltip.
+In narrow composers the executor trigger collapses to its icon. Pressing it opens a menu containing full executor names, availability, and the selected item. The trigger keeps an accessible selected-executor label and a desktop tooltip.
 
-Handoff behavior, as implemented:
+Handoff behavior:
 
 - Choosing another executor opens destination configuration rather than immediately moving the chat.
-- Confirm the destination directory, with browsing through that executor's Files service.
+- Confirm the destination directory with that executor's pinned folders, a pin toggle, a live folder check, browsing through its Files service, and worktree selection when the folder is a Git repository. "Use This Executor" stays disabled until the folder validates on the destination, and the folder is checked again on confirmation.
 - Keep the current agent/model when supported; otherwise require an explicit replacement on the destination, and say so while the destination catalog lacks the selection.
 - Cancel leaves the prior selection unchanged. Confirmation commits the complete destination through the promptless handoff command without sending a prompt or consuming the composer draft.
 - Switching agents on the same executor while the chat's folder is known to be unavailable opens the same dialog to choose a folder, since some agents cannot update their project path.
@@ -43,49 +45,40 @@ Executor, directory, agent, and model must not be published as a partially valid
 
 ## One-Shot Model Preferences
 
-Keep executor selection inside the model picker for title generation, commit-message generation, and other one-shot preferences, but replace the top dropdown with the leftmost desktop column:
+Title generation, commit-message generation, and other one-shot preferences keep executor selection inside the model picker, as its leftmost desktop column:
 
 ```text
 Executor | Agent | Provider | Model | Effort
 ```
 
-Other columns remain conditional on the selection's capabilities. New Chat, scheduled New Chat, and the chat composer omit the executor column because their enclosing UI owns executor selection.
+The executor column appears once a remote executor is configured or the saved selection is not Local. Other columns remain conditional on the selection's capabilities. New Chat, scheduled New Chat, and the chat composer omit the executor column because their enclosing UI owns executor selection.
 
-Recommended compact behavior: make Executor a pane in the existing compact picker instead of squeezing additional columns onto a small screen. Preserve draft selection and cancellation behavior when navigating between panes.
+In the compact picker, Executor is a pane rather than an additional column squeezed onto a small screen. Draft selection and cancellation behavior are preserved when navigating between panes.
 
-Keep generation placement independent of project placement. In particular, selecting a commit-message model on executor B does not move Git operations from repository executor A. Preserve the existing Auto generation behavior.
+Generation placement is independent of project placement. In particular, selecting a commit-message model on executor B does not move Git operations from repository executor A. Auto generation always runs on Local.
 
 ## Remaining Directory Pickers
 
-- Scheduled New Chat: replace the remaining Local-only browsing and completion guards with Files capability checks, and pass the selected executor into the directory browser.
-- Preamble path rules: retain per-rule executor selection, reuse the shared selector styling, and enable browsing against that rule's executor and project base instead of the controller's directory.
-- The composer handoff's destination picker should use the same executor-qualified browser.
+- Scheduled New Chat gates browsing and completion on Files capability and passes the selected executor into the directory browser.
+- Preamble path rules keep per-rule executor selection with the shared selector styling, and browse against that rule's executor and project base instead of the controller's directory.
+- The composer handoff's destination picker uses the same executor-qualified browser.
 
-Executor changes must cancel or invalidate obsolete directory, worktree, and catalog requests. Results remain bound to the captured executor/path even when identical path strings exist on multiple executors. Preserve manual path entry and existing validation/error states when browsing is unavailable.
+Executor changes must cancel or invalidate obsolete directory, worktree, and catalog requests. Results remain bound to the captured executor/path even when identical path strings exist on multiple executors. Manual path entry and its validation/error states remain available when browsing is unavailable.
 
 ## Ticket Project Defaults
 
-Ticket projects remain global, editable labels, not executor-owned filesystem identities. Change automatic defaults from full paths to repository names:
+Ticket projects remain global, editable labels, not executor-owned filesystem identities. Automatic defaults are repository names rather than full paths:
 
 - `/work/repo` defaults to `repo`.
 - Subdirectories and linked worktrees use the primary checkout's directory name, not the linked worktree's folder name.
 - Non-Git directories use their folder name.
-- Resolve the directory and repository on the owning executor, then return the name as the suggested project label.
+- The owning executor resolves the directory and repository and returns the name as the suggested project label.
 - Identical names intentionally share a ticket project across executors. Users can supply distinct labels for unrelated repositories with the same name, or a common label for differently named clones.
-- Do not add executor prefixes, infer identity from Git remote URLs, or introduce a project-mapping system.
-- Explicit project labels bypass automatic inference. Existing ticket labels remain unchanged; the new rule affects automatic defaults for new tickets.
+- Defaults carry no executor prefix, identity is not inferred from Git remote URLs, and there is no project-mapping system.
+- Explicit project labels bypass automatic inference. The rule does not rewrite existing ticket labels; it applies only to automatic defaults for new tickets.
 
-Extract the existing best-effort [project resolver](../../server/controller/tickets/project-default.ts) behind a narrow typed executor project-service query. Preserve primary-checkout grouping, executor-local filesystem boundaries, bounded probing, cancellation, and directory fallback. The current Git `getRepoInfo` result alone is insufficient because it describes the current worktree rather than necessarily identifying the shared primary checkout.
+The [controller resolver](../../server/controller/tickets/project-default.ts) asks the owning executor through the typed `ticketProjectDefault` project-service query, which [resolves the name on that machine](../../server/runtime/projects/ticket-project-default.ts). It preserves primary-checkout grouping, executor-local filesystem boundaries, bounded probing, cancellation, and directory fallback. The Git `getRepoInfo` result alone is insufficient because it describes the current worktree rather than necessarily identifying the shared primary checkout.
 
-Use the same resolver for the browser and controller-handled agent commands. Executor unavailability must not trigger controller-local inspection. If no usable default can be produced, retain explicit project entry. Ticket storage and CRUD remain controller-owned and do not depend on executor availability.
+The browser and controller-handled agent commands use the same resolver. Executor unavailability never triggers controller-local inspection. If no usable default can be produced, explicit project entry remains. Ticket storage and CRUD remain controller-owned and do not depend on executor availability.
 
-## Implementation Grouping
-
-Keep the work reviewable in separate changes:
-
-1. Shared selector presentation and explicit fixed-executor versus selectable-executor model-picker modes.
-2. New Chat, scheduled New Chat, preamble browsing, and composer handoff integration.
-3. One-shot desktop columns and compact navigation.
-4. Executor-side ticket default resolution and repository-name suggestions for both Local and remote executors.
-
-Verification should cover narrow and split-panel layouts, long executor names, unavailable executors, failed catalog refreshes, cancelled handoffs, rapid executor changes, and stale same-path responses. Ticket coverage should include linked worktrees, ordinary folders, matching names across executors, explicit overrides, and preservation of existing labels.
+Changes to these flows should be verified across narrow and split-panel layouts, long executor names, unavailable executors, failed catalog refreshes, cancelled handoffs, rapid executor changes, and stale same-path responses. Ticket changes should cover linked worktrees, ordinary folders, matching names across executors, explicit overrides, and preservation of existing labels.
