@@ -41,6 +41,24 @@ describe('submitReplayedCommand', () => {
 		expect(submit).toHaveBeenCalledTimes(2);
 	});
 
+	it('keeps the outcome unknown when the retry is refused before the command runs', async () => {
+		for (const refusal of [
+			new ApiError(503, 'The server is shutting down', 'SERVER_SHUTTING_DOWN', undefined, true),
+			new ApiError(401, 'Invalid token', 'VALIDATION_FAILED'),
+			new ApiError(429, 'Too many requests', 'RATE_LIMITED', undefined, true),
+		]) {
+			const submit = vi
+				.fn()
+				.mockRejectedValueOnce(new TypeError('connection reset'))
+				.mockRejectedValueOnce(refusal);
+
+			const rejection = await submitReplayedCommand(submit).catch((error) => error);
+
+			expect(rejection).toBeInstanceOf(CommandOutcomeUnknownError);
+			expect((rejection as CommandOutcomeUnknownError).cause).toBe(refusal);
+		}
+	});
+
 	it('reports an unknown outcome after two lost replies', async () => {
 		const secondError = new ApiError(502, 'Bad Gateway');
 		const submit = vi

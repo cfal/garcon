@@ -47,11 +47,23 @@ function isLostReply(error: unknown): boolean {
 	);
 }
 
+// The server refuses these before it looks up the command, so after a lost reply they say
+// nothing about what the first attempt did.
+function isAdmissionRefusal(error: unknown): boolean {
+	return (
+		error instanceof ApiError &&
+		(error.status === 401 ||
+			error.status === 403 ||
+			error.status === 429 ||
+			error.errorCode === 'SERVER_SHUTTING_DOWN')
+	);
+}
+
 /**
  * Retries one lost reply with the caller's unchanged command identity, for commands whose
  * server answers a repeated identity from its record of the first attempt or rejects it as
- * stale. Any server answer is then authoritative; only a second lost reply leaves the
- * outcome unknown.
+ * stale. The command's answer to the retry is then authoritative; a second lost reply or an
+ * admission refusal leaves the outcome unknown.
  */
 export async function submitReplayedCommand<T>(submit: () => Promise<T>): Promise<T> {
 	try {
@@ -61,7 +73,7 @@ export async function submitReplayedCommand<T>(submit: () => Promise<T>): Promis
 		try {
 			return await submit();
 		} catch (secondError) {
-			if (!isLostReply(secondError)) throw secondError;
+			if (!isLostReply(secondError) && !isAdmissionRefusal(secondError)) throw secondError;
 			throw new CommandOutcomeUnknownError({ cause: secondError });
 		}
 	}
