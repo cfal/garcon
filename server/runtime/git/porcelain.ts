@@ -290,6 +290,22 @@ async function getStashes({ projectPath, signal }: ProjectOptions): Promise<{ st
   return { stashes: await listStashes(projectPath, signal) };
 }
 
+// Stash entries have no stable name: a numeric reflog selector moves when stashes are created
+// or dropped elsewhere. Rechecking the listed commit rejects an action chosen from an older
+// listing, though an external change between this check and the command remains possible.
+async function listedStashSelector({ projectPath, stashRef, expectedHash, signal }: StashRefOptions): Promise<string> {
+  assertSafeStashRef(stashRef);
+  await assertGitRepository(projectPath);
+  const current = (await listStashes(projectPath, signal)).find((stash) => stash.ref === stashRef);
+  if (current?.hash !== expectedHash) {
+    throw new GitDomainError(
+      'STALE_STASH',
+      'The stash list changed since it was loaded. Select the stash again from the current list.',
+    );
+  }
+  return `refs/${stashRef}`;
+}
+
 async function createStash({
   projectPath,
   message,
@@ -304,24 +320,22 @@ async function createStash({
   return { success: true, output: stdout.trim() };
 }
 
-async function applyStash({ projectPath, stashRef, signal }: StashRefOptions): Promise<{ success: boolean }> {
-  assertSafeStashRef(stashRef);
-  await assertGitRepository(projectPath);
-  await runGit(projectPath, ['stash', 'apply', stashRef], { signal });
+// Apply accepts the verified stash commit itself; Pop and Drop must name the reflog entry they remove.
+async function applyStash(options: StashRefOptions): Promise<{ success: boolean }> {
+  await listedStashSelector(options);
+  await runGit(options.projectPath, ['stash', 'apply', options.expectedHash], { signal: options.signal });
   return { success: true };
 }
 
-async function popStash({ projectPath, stashRef, signal }: StashRefOptions): Promise<{ success: boolean }> {
-  assertSafeStashRef(stashRef);
-  await assertGitRepository(projectPath);
-  await runGit(projectPath, ['stash', 'pop', stashRef], { signal });
+async function popStash(options: StashRefOptions): Promise<{ success: boolean }> {
+  const selector = await listedStashSelector(options);
+  await runGit(options.projectPath, ['stash', 'pop', selector], { signal: options.signal });
   return { success: true };
 }
 
-async function dropStash({ projectPath, stashRef, signal }: StashRefOptions): Promise<{ success: boolean }> {
-  assertSafeStashRef(stashRef);
-  await assertGitRepository(projectPath);
-  await runGit(projectPath, ['stash', 'drop', stashRef], { signal });
+async function dropStash(options: StashRefOptions): Promise<{ success: boolean }> {
+  const selector = await listedStashSelector(options);
+  await runGit(options.projectPath, ['stash', 'drop', selector], { signal: options.signal });
   return { success: true };
 }
 

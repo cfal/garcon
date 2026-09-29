@@ -78,8 +78,11 @@ for (const dialer of ['controller', 'worker'] as const) {
       await git.checkout({ ...request, ref: 'main' });
       await fs.writeFile(path.join(projectPath, 'example.txt'), 'stash\n');
       await git.createStash({ ...request, message: 'synthetic stash' });
-      expect((await git.getStashes(request)).stashes.length).toBe(1);
-      await git.popStash({ ...request, stashRef: 'stash@{0}' });
+      const [stash] = (await git.getStashes(request)).stashes;
+      expect(stash).toMatchObject({ index: 0, ref: 'stash@{0}', message: 'On main: synthetic stash' });
+      await expect(git.dropStash({ ...request, stashRef: stash!.ref, expectedHash: '0'.repeat(40) }))
+        .rejects.toMatchObject({ code: 'GIT_STALE_STASH', status: 409 });
+      await git.popStash({ ...request, stashRef: stash!.ref, expectedHash: stash!.hash });
       await git.discard({ ...request, file: 'example.txt' });
       const destination = path.join(root, 'linked');
       await git.createWorktree({ ...request, worktreePath: destination, branch: 'linked' });

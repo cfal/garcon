@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import type { GitProjectTarget } from '$lib/api/git-client.js';
+	import type { GitStashTarget } from '$lib/api/git.js';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import type { GitPorcelainState } from '$lib/git/workbench/git-porcelain.svelte.js';
@@ -15,7 +16,7 @@
 	let { project, selectedFile, porcelain }: GitPorcelainPanelProps = $props();
 	let pendingConfirmation = $state<
 		| { type: 'accept-conflict'; scopeKey: string; filePath: string; side: 'ours' | 'theirs' }
-		| { type: 'drop-stash'; scopeKey: string; stashRef: string }
+		| { type: 'drop-stash'; scopeKey: string; stash: GitStashTarget }
 		| null
 	>(null);
 	let loadKey = $derived(
@@ -41,7 +42,7 @@
 		if (activeConfirmation.type === 'accept-conflict') {
 			return `Accept ${activeConfirmation.side} for ${activeConfirmation.filePath}? This replaces the working conflict content with that side and stages the file.`;
 		}
-		return `Drop ${activeConfirmation.stashRef}? This removes the stash entry and cannot be undone from this panel.`;
+		return `Drop ${activeConfirmation.stash.ref}? This removes the stash entry and cannot be undone from this panel.`;
 	});
 	const contextualScrollRegion = nativeWorkspaceScrollRegion('contextual');
 
@@ -59,8 +60,20 @@
 		pendingConfirmation = { type: 'accept-conflict', scopeKey: confirmationKey, filePath, side };
 	}
 
-	function requestDropStash(stashRef: string): void {
-		pendingConfirmation = { type: 'drop-stash', scopeKey: confirmationKey, stashRef };
+	function requestDropStash(stash: GitStashTarget): void {
+		pendingConfirmation = {
+			type: 'drop-stash',
+			scopeKey: confirmationKey,
+			stash: { ref: stash.ref, hash: stash.hash },
+		};
+	}
+
+	function isPendingDrop(stash: GitStashTarget): boolean {
+		return (
+			activeConfirmation?.type === 'drop-stash' &&
+			activeConfirmation.stash.ref === stash.ref &&
+			activeConfirmation.stash.hash === stash.hash
+		);
 	}
 
 	async function confirmPendingAction(): Promise<void> {
@@ -71,7 +84,7 @@
 			await porcelain.acceptConflictSide(project, confirmation.filePath, confirmation.side);
 			return;
 		}
-		await porcelain.dropStash(project, confirmation.stashRef);
+		await porcelain.dropStash(project, confirmation.stash);
 	}
 </script>
 
@@ -217,26 +230,26 @@
 								<button
 									type="button"
 									class="rounded bg-muted px-2 py-1 text-muted-foreground hover:text-foreground"
-									onclick={() => porcelain.applyStash(project, stash.ref)}
+									onclick={() => porcelain.applyStash(project, stash)}
 								>
 									Apply
 								</button>
 								<button
 									type="button"
 									class="rounded bg-muted px-2 py-1 text-muted-foreground hover:text-foreground"
-									onclick={() => porcelain.popStash(project, stash.ref)}
+									onclick={() => porcelain.popStash(project, stash)}
 								>
 									Pop
 								</button>
 								<button
 									type="button"
 									class="rounded bg-muted px-2 py-1 text-muted-foreground hover:text-status-error-foreground"
-									onclick={() => requestDropStash(stash.ref)}
+									onclick={() => requestDropStash(stash)}
 								>
 									Drop
 								</button>
 							</div>
-							{#if activeConfirmation?.type === 'drop-stash' && activeConfirmation.stashRef === stash.ref}
+							{#if isPendingDrop(stash)}
 								<div
 									class="ml-2 rounded border border-status-warning-border bg-status-warning/10 p-2 text-status-warning-muted-foreground"
 								>

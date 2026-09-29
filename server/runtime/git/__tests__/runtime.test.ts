@@ -60,6 +60,11 @@ test('machine service scopes operations and rejects untrusted fields before exec
   expect(await git.getStatus({ projectPath })).toMatchObject({ executorId: 'local', instanceId: 'serving-one', branch: 'main' });
   expect(() => validateGitRequest('checkout', { projectPath, ref: 'main', env: { GIT_DIR: '/wrong' } })).toThrow('Invalid Git');
   expect(() => validateGitRequest('stageSelection', { projectPath, file: 'x', mode: 'stage', selection: { lineIndices: [0] } })).toThrow('Invalid Git');
+  for (const method of ['applyStash', 'popStash', 'dropStash'] as const) {
+    expect(() => validateGitRequest(method, { projectPath, stashRef: 'stash@{0}' })).toThrow('Invalid Git');
+    expect(() => validateGitRequest(method, { projectPath, stashRef: 'stash@{0}', expectedHash: 'HEAD' })).toThrow('Invalid Git');
+    expect(() => validateGitRequest(method, { projectPath, stashRef: 'stash@{0}', expectedHash: 'a'.repeat(40) })).not.toThrow();
+  }
   const scope = { executorId: 'local', instanceId: 'serving-one' };
   const listed = (stashes: unknown[]) => ({ ...scope, stashes });
   const entry = { index: 0, ref: 'stash@{0}', hash: 'a'.repeat(40), message: 'On main: listed', date: '2026-01-01 00:00:00 +0000' };
@@ -245,8 +250,8 @@ test('stash listings expose unique numeric refs that remain valid mutation targe
   expect(stashes.map(stash => stash.ref)).toEqual(['stash@{0}', 'stash@{1}']);
   expect(stashes.map(stash => stash.index)).toEqual([0, 1]);
 
-  await git.dropStash({ projectPath, stashRef: stashes[1].ref });
-  await git.dropStash({ projectPath, stashRef: stashes[0].ref });
+  await git.dropStash({ projectPath, stashRef: stashes[1].ref, expectedHash: stashes[1].hash });
+  await git.dropStash({ projectPath, stashRef: stashes[0].ref, expectedHash: stashes[0].hash });
   expect((await git.getStashes({ projectPath })).stashes).toEqual([]);
 });
 
@@ -254,10 +259,12 @@ test('stash conflicts retain the stash until explicit resolution and removal', a
   const { git, projectPath, original } = await fixture();
   await fs.writeFile(path.join(projectPath, 'example.txt'), 'stashed\n');
   await git.createStash({ projectPath, message: 'retained conflict' });
+  const [stash] = (await git.getStashes({ projectPath })).stashes;
+  const target = { projectPath, stashRef: stash!.ref, expectedHash: stash!.hash };
   await fs.writeFile(path.join(projectPath, 'example.txt'), 'committed\n');
   await git.commit({ projectPath, message: 'conflicting change', files: ['example.txt'] });
   for (const method of ['applyStash', 'popStash'] as const) {
-    await expect(git[method]({ projectPath, stashRef: 'stash@{0}' })).rejects.toThrow();
+    await expect(git[method](target)).rejects.toThrow();
     expect((await git.getStashes({ projectPath })).stashes).toHaveLength(1);
     expect((await git.getConflicts({ projectPath })).conflicts).toHaveLength(1);
     const details = await git.getConflictDetails({ projectPath, file: 'example.txt' });
@@ -268,7 +275,7 @@ test('stash conflicts retain the stash until explicit resolution and removal', a
     expect((await git.getConflicts({ projectPath })).conflicts).toEqual([]);
     expect(await fs.readFile(path.join(projectPath, 'example.txt'), 'utf8')).toBe('committed\n');
   }
-  await git.dropStash({ projectPath, stashRef: 'stash@{0}' });
+  await git.dropStash(target);
   expect((await git.getStashes({ projectPath })).stashes).toEqual([]);
   await git.revertCommit({ projectPath, commit: 'HEAD' });
   expect(await fs.readFile(path.join(projectPath, 'example.txt'), 'utf8')).toBe(original);
@@ -285,7 +292,7 @@ test('lists stashes by index so listed refs drive stash actions', async () => {
     { index: 0, ref: 'stash@{0}', message: expect.stringContaining('second synthetic stash') },
     { index: 1, ref: 'stash@{1}', message: expect.stringContaining('first synthetic stash') },
   ]);
-  await git.dropStash({ projectPath, stashRef: stashes[1]!.ref });
+  await git.dropStash({ projectPath, stashRef: stashes[1]!.ref, expectedHash: stashes[1]!.hash });
   expect((await git.getStashes({ projectPath })).stashes.map((stash) => stash.message)).toEqual([
     expect.stringContaining('second synthetic stash'),
   ]);
@@ -307,7 +314,7 @@ test('stashes pushed in the same second list and act through their own selectors
     { index: 2, ref: 'stash@{2}', message: 'On main: first' },
   ]);
   const [third, second, first] = listed;
-  const target = (stash: GitStashEntry) => ({ projectPath, stashRef: stash.ref });
+  const target = (stash: GitStashEntry) => ({ projectPath, stashRef: stash.ref, expectedHash: stash.hash });
   const hashes = async () => (await git.getStashes({ projectPath })).stashes.map((stash) => stash.hash);
 
   await git.applyStash(target(second!));
@@ -324,6 +331,25 @@ test('stashes pushed in the same second list and act through their own selectors
   expect(await hashes()).toEqual([third!.hash]);
 });
 
+test('a stash action chosen from an older listing fails without changing the repository', async () => {
+  const { git, projectPath, original } = await fixture();
+  await fs.writeFile(path.join(projectPath, 'example.txt'), 'listed\n');
+  await git.createStash({ projectPath, message: 'listed' });
+  const [listed] = (await git.getStashes({ projectPath })).stashes;
+  await fs.writeFile(path.join(projectPath, 'example.txt'), 'external\n');
+  await runGit(projectPath, ['stash', 'push', '-m', 'external']);
+  const current = (await git.getStashes({ projectPath })).stashes;
+  expect(current[1]?.hash).toBe(listed!.hash);
+  for (const stashRef of [listed!.ref, 'stash@{5}']) {
+    for (const method of ['applyStash', 'popStash', 'dropStash'] as const) {
+      await expect(git[method]({ projectPath, stashRef, expectedHash: listed!.hash }))
+        .rejects.toMatchObject({ code: 'GIT_STALE_STASH', status: 409 });
+    }
+  }
+  expect((await git.getStashes({ projectPath })).stashes).toEqual(current);
+  expect(await fs.readFile(path.join(projectPath, 'example.txt'), 'utf8')).toBe(original);
+});
+
 test('a stash commit stored twice lists as separately selectable entries', async () => {
   const { git, projectPath } = await fixture();
   for (const name of ['older', 'newer']) {
@@ -338,7 +364,7 @@ test('a stash commit stored twice lists as separately selectable entries', async
     { ref: 'stash@{1}', hash: newer!.hash },
     { ref: 'stash@{2}', hash: older!.hash },
   ]);
-  await git.dropStash({ projectPath, stashRef: 'stash@{2}' });
+  await git.dropStash({ projectPath, stashRef: 'stash@{2}', expectedHash: older!.hash });
   expect((await git.getStashes({ projectPath })).stashes.map((stash) => stash.hash)).toEqual([older!.hash, newer!.hash]);
 });
 

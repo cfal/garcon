@@ -45,7 +45,8 @@ export const GIT_REQUEST_FIELDS = {
   stageSelection: ['file', 'mode', 'selection', 'contextLines', ...proofKeys],
   stageHunk: ['file', 'mode', 'hunkIndex', 'contextLines', ...proofKeys],
   getConflictDetails: ['file'], acceptConflictSide: ['file', 'side'], markConflictResolved: ['file'],
-  createStash: ['message', 'includeUntracked'], applyStash: ['stashRef'], popStash: ['stashRef'], dropStash: ['stashRef'],
+  createStash: ['message', 'includeUntracked'], applyStash: ['stashRef', 'expectedHash'],
+  popStash: ['stashRef', 'expectedHash'], dropStash: ['stashRef', 'expectedHash'],
   getFileHistory: ['file', 'limit'], getBlame: ['file', 'ref', 'limit'], getGraph: ['limit'],
   createWorktree: ['worktreePath', 'branch', 'baseRef', 'detach'], removeWorktree: ['worktreePath', 'force'],
   commitIndex: ['message'], stagePaths: ['paths', 'mode'], revertCommit: ['commit'], collectCommitMessageContext: ['files'],
@@ -91,7 +92,7 @@ export function validateGitRequest<K extends GitMethod>(method: K, request: unkn
     case 'createBranch': if (!path(v.branch)) fail(); break;
     case 'revertCommit': case 'getCommitSnapshot': if (!path(v.commit)) fail(); break;
     case 'createWorktree': case 'removeWorktree': if (!path(v.worktreePath)) fail(); break;
-    case 'applyStash': case 'popStash': case 'dropStash': if (!path(v.stashRef)) fail(); break;
+    case 'applyStash': case 'popStash': case 'dropStash': if (!path(v.stashRef) || !hash(v.expectedHash)) fail(); break;
     case 'getWorkbenchSnapshot': if (!oneOf(v.mode, ['working', 'staged']) || !integer(v.context, 50)) fail(); break;
     case 'getReviewDocumentFileBodies':
       if (!isGitDocumentRef(v.document) || !paths(v.files) || (v.files as unknown[]).length > 24 || !oneOf(v.purpose, ['visible', 'prefetch'])) fail();

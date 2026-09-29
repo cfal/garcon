@@ -712,41 +712,28 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
     );
   }
 
-  async function postApplyStash(body: JsonBody, request: Request): Promise<Response> {
-    const input = asJsonBody(body);
-    const project = nonEmptyString(input.project);
-    const stashRef = nonEmptyString(input.stashRef);
-    if (!project || !stashRef) {
-      return gitRouteError('Missing required parameters: project and stashRef.', 400);
-    }
-    return gitJson(git, () =>
-      git.applyStash({ executorId: asJsonBody(body).executorId,
+  function stashAction(method: 'applyStash' | 'popStash' | 'dropStash') {
+    return async (body: JsonBody, request: Request): Promise<Response> => {
+      const input = asJsonBody(body);
+      const project = nonEmptyString(input.project);
+      const stashRef = nonEmptyString(input.stashRef);
+      const expectedHash = nonEmptyString(input.expectedHash);
+      if (!project || !stashRef || !expectedHash) {
+        return gitRouteError('Missing required parameters: project, stashRef, and expectedHash.', 400);
+      }
+      return gitJson(git, () => git[method]({
+        executorId: input.executorId,
         projectPath: project,
         stashRef,
+        expectedHash,
         signal: request.signal,
-      }),
-    );
+      }));
+    };
   }
 
-  async function postPopStash(body: JsonBody, request: Request): Promise<Response> {
-    const input = asJsonBody(body);
-    const project = nonEmptyString(input.project);
-    const stashRef = nonEmptyString(input.stashRef);
-    if (!project || !stashRef) {
-      return gitRouteError('Missing required parameters: project and stashRef.', 400);
-    }
-    return gitJson(git, () => git.popStash({ executorId: asJsonBody(body).executorId, projectPath: project, stashRef, signal: request.signal }));
-  }
-
-  async function postDropStash(body: JsonBody, request: Request): Promise<Response> {
-    const input = asJsonBody(body);
-    const project = nonEmptyString(input.project);
-    const stashRef = nonEmptyString(input.stashRef);
-    if (!project || !stashRef) {
-      return gitRouteError('Missing required parameters: project and stashRef.', 400);
-    }
-    return gitJson(git, () => git.dropStash({ executorId: asJsonBody(body).executorId, projectPath: project, stashRef, signal: request.signal }));
-  }
+  const postApplyStash = stashAction('applyStash');
+  const postPopStash = stashAction('popStash');
+  const postDropStash = stashAction('dropStash');
 
   async function getFileHistory(request: Request, url: URL): Promise<Response> {
     const input = requiredQueryStrings(url, ['project', 'file'], 'Missing required parameters: project and file.');

@@ -730,6 +730,8 @@ export interface StashCreateOptions extends ProjectOptions {
 
 export interface StashRefOptions extends ProjectOptions {
   stashRef: string;
+  /** Stash commit listed at `stashRef`; the action is rejected once that entry holds another. */
+  expectedHash: string;
 }
 
 export interface FileHistoryOptions extends FileOptions {
