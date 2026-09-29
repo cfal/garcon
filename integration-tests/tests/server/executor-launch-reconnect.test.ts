@@ -277,30 +277,33 @@ for (const dialer of ['controller', 'worker'] as const) {
   }, 30_000);
 
   test(`a turn started while a replay drains keeps running until its own reply arrives (${dialer} dials)`, async () => {
-    await withRemoteRouter(dialer, async ({ router, ledger, native, integration, controller, restored }) => {
+    await withRemoteRouter(dialer, async ({ router, ledger, native, integration, controller, restored, workerAdmission }) => {
       let rowsReceived = 0;
       integration.producers.subscribe(({ event }) => { if (event.type === 'rows') rowsReceived += 1; });
       await router.startSession(CHAT, 'Synthetic first input');
       const publish = native.nativePublishers[0]!;
       const reconnected = restored();
+      // Holds the replay behind the resume reply until the second turn is in flight.
+      workerAdmission.hold((encoded) => encoded.includes('"type":"producer"'));
       controller.disconnect();
-      // Beyond the producer share of the session queue, so the replay tail follows the resume reply.
-      const count = 1_500;
+      const count = 3;
       for (let index = 0; index < count; index += 1) {
-        publish({ type: 'rows', rows: [{ message: new AssistantMessage('2026-01-01T00:00:00Z', `${index}:${'x'.repeat(9_000)}`) }] });
+        publish({ type: 'rows', rows: [{ message: new AssistantMessage('2026-01-01T00:00:00Z', `replayed ${index}`) }] });
       }
       await reconnected;
 
       await router.abortSession(CHAT);
+      const entered = Promise.withResolvers<void>();
       const release = Promise.withResolvers<void>();
-      let rowsAtStart = count;
-      native.hooks.start = async () => { rowsAtStart = rowsReceived; await release.promise; };
+      native.hooks.start = async () => { entered.resolve(); await release.promise; };
       const turn = router.startSession(CHAT, 'Synthetic second input');
       try {
-        await until(() => native.calls.start === 2 && rowsReceived === count);
+        await entered.promise;
+        expect(rowsReceived).toBe(0);
+        workerAdmission.release();
+        await until(() => rowsReceived === count);
         await integration.execution.runningSessions();
 
-        expect(rowsAtStart).toBeLessThan(count);
         expect(router.isChatRunning(CHAT)).toBe(true);
         expect(runEnds(ledger)).toEqual([{ outcome: 'interrupted', origin: 'core' }]);
       } finally { release.resolve(); }
@@ -309,5 +312,5 @@ for (const dialer of ['controller', 'worker'] as const) {
       await until(() => native.calls.abort === 2);
       expect(runEnds(ledger)).toEqual([{ outcome: 'interrupted', origin: 'core' }, { outcome: 'interrupted', origin: 'core' }]);
     });
-  }, 60_000);
+  }, 30_000);
 }

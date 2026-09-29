@@ -150,13 +150,16 @@ export function outgoingFault(link: WebSocketLink) {
   return fault;
 }
 
-// Refuses the next matching message at the session queue's admission check, as
-// a full queue does, without closing the session.
+// Refuses matching messages at the session queue's admission check, as a full
+// queue does, without closing the session. A refused producer frame stays with
+// the relay, which offers it again as the queue drains.
 export function admissionFault(link: WebSocketLink) {
   let refused: ((encoded: string) => boolean) | null = null;
+  let held: ((encoded: string) => boolean) | null = null;
   link.onSession((session) => {
     const canAdmit = session.channel.canAdmit.bind(session.channel);
     session.channel.canAdmit = (body) => {
+      if (held?.(body)) return false;
       if (!refused?.(body)) return canAdmit(body);
       refused = null;
       return false;
@@ -164,6 +167,8 @@ export function admissionFault(link: WebSocketLink) {
   });
   return {
     refuseNext(matches: (encoded: string) => boolean): void { refused = matches; },
+    hold(matches: (encoded: string) => boolean): void { held = matches; },
+    release(): void { held = null; },
   };
 }
 

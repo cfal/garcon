@@ -306,7 +306,8 @@ for (const dialer of ['controller', 'worker'] as const) {
   });
 
   test(`a start dispatched while a replay drains settles through its own reply (${dialer} dials)`, async () => {
-    const fixture = await remoteFixture(dialer);
+    let fault!: ReturnType<typeof admissionFault>;
+    const fixture = await remoteFixture(dialer, (_controller, worker) => { fault = admissionFault(worker); });
     const release = Promise.withResolvers<void>();
     try {
       const integration = await fixture.executor.getAgentIntegration('test');
@@ -314,33 +315,31 @@ for (const dialer of ['controller', 'worker'] as const) {
       await integration.execution.start(first);
       const types: string[] = [];
       integration.producers.subscribe(({ event }) => { types.push(event.type); });
-      const rowsReceived = () => types.filter((type) => type === 'rows').length;
       const worker = fixture.generations[0]!;
       const publish = worker.nativePublishers[0]!;
       const ready = nextAvailability(fixture.executor, 'ready');
+      // Holds the replay behind the resume reply until the second start is in flight.
+      fault.hold((encoded) => encoded.includes('"type":"producer"'));
       fixture.controller.disconnect(); fixture.worker.disconnect();
-      // Beyond the producer share of the session queue, so the replay tail follows the resume reply.
-      const count = 1_500;
-      for (let index = 0; index < count; index += 1) {
-        publish({ type: 'rows', rows: [{ message: new AssistantMessage('2026-01-01T00:00:00Z', `${index}:${'x'.repeat(9_000)}`) }] });
-      }
+      publish({ type: 'rows', rows: [{ message: new AssistantMessage('2026-01-01T00:00:00Z', 'replayed') }] });
       publish({ type: 'run-ended', runId: first.runId, outcome: 'finished' });
       await ready;
-      let rowsAtStart = count;
-      worker.hooks.start = async () => { rowsAtStart = rowsReceived(); await release.promise; };
-      const second = { ...first, runId: crypto.randomUUID() };
-      const launch = integration.execution.start(second);
-      const deadline = performance.now() + 30_000;
+      const entered = Promise.withResolvers<void>();
+      worker.hooks.start = async () => { entered.resolve(); await release.promise; };
+      const launch = integration.execution.start({ ...first, runId: crypto.randomUUID() });
+      await entered.promise;
+      expect(types).toEqual([]);
+      fault.release();
+      const deadline = performance.now() + 10_000;
       while (!types.includes('run-ended') && performance.now() < deadline) await Bun.sleep(5);
       await integration.execution.runningSessions();
 
-      expect(rowsAtStart).toBeLessThan(count);
-      expect(types).not.toContain('launch-settled');
+      expect(types).toEqual(['rows', 'run-ended']);
       release.resolve();
       expect(await launch).toMatchObject({ kind: 'execution' });
       expect(worker.calls).toMatchObject({ start: 2, abort: 0 });
     } finally { release.resolve(); await fixture.dispose(); }
-  }, 60_000);
+  }, 15_000);
 
   test(`a binding the worker released fails its run and fences later output (${dialer} dials)`, async () => {
     const fixture = await remoteFixture(dialer, undefined, undefined, undefined, { relay: { graceMs: 1 } });
