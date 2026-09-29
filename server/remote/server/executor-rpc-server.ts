@@ -7,7 +7,7 @@ import {
   type ExecutorInfo,
 } from '@garcon/server-agent-interface';
 import { AgentResourceTable } from '@garcon/server-agent-common/execution/resource-table';
-import { NULLABLE_AGENT_FACETS, type ExecutorRpcRequest, type IntegrationManifest } from '../transport/rpc-protocol.js';
+import { NULLABLE_AGENT_FACETS, rpcContinuity, type ExecutorRpcRequest, type IntegrationManifest } from '../transport/rpc-protocol.js';
 import type { ExecutorRpc } from '../transport/rpc.js';
 import { decodeFileText, validateFileRpcRequest, invalidFileData } from '../transport/file-protocol.js';
 import { TerminalRpcServer } from './terminal-rpc-server.js';
@@ -90,7 +90,10 @@ export function serveExecutionRuntime(
   });
   rpc.handle(async (call, signal, _guardReply, onUndeliveredReply) => {
     await ready;
-    if (disposed || signal.aborted) throw new AgentCallError('not-dispatched', 'Worker session retired or request cancelled');
+    // A journaled call runs to completion even if its session retired first.
+    if (signal.aborted || (disposed && rpcContinuity(call.method) !== 'journaled')) {
+      throw new AgentCallError('not-dispatched', 'Worker session retired or request cancelled');
+    }
     if (call.method === 'executor.describe') return { info, integrations: [...integrations.values()].map(manifest) };
     if (call.method === 'controllerCli.describe' || call.method === 'controllerCli.request') {
       throw new AgentCallError('rejected', 'CLI dispatch is controller-owned');
@@ -251,6 +254,7 @@ export function serveExecutionRuntime(
       case 'projectPathUpdates.commit': return required(integration.projectPathUpdates).commit(call.request, options);
       case 'projectPathUpdates.rollback': return required(integration.projectPathUpdates).rollback(call.request, options);
       case 'credentials.resolve': throw new AgentCallError('rejected', 'Credential resolution is controller-owned');
+      case 'calls.reconcile': throw new AgentCallError('rejected', 'Call reconciliation belongs to the RPC layer');
       default: return unknownMethod(call);
     }
   });

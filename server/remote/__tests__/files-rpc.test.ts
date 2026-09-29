@@ -107,9 +107,9 @@ for (const phase of ['before dispatch', 'after commit'] as const) {
       const { revision } = await files.read(target);
       const content = 'replacement';
       if (phase === 'before dispatch') await controller.dispose();
-      // A disposed link never reconnects, so a held save runs out its deadline undispatched.
-      const result = files.save({ ...target, content, expectedRevision: revision, conflictResolution: 'reject' },
-        phase === 'before dispatch' ? { timeoutMs: 500 } : undefined);
+      // A disposed link never reconnects: a held save runs out its deadline undispatched,
+      // and a save whose reply was lost runs out its deadline waiting for that reply.
+      const result = files.save({ ...target, content, expectedRevision: revision, conflictResolution: 'reject' }, { timeoutMs: 1_000 });
       if (phase === 'after commit') await expect(result).rejects.toMatchObject({ code: 'FILE_SAVE_OUTCOME_UNKNOWN' });
       else await expect(result).rejects.toThrow();
       expect(saved).toHaveBeenCalledTimes(phase === 'after commit' ? 1 : 0);

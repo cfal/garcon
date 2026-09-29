@@ -108,7 +108,8 @@ test('lost mutation confirmation never replays a completed commit', async () => 
     const git = await fixture.executor.getGitService();
     await fs.writeFile(path.join(fixture.projectPath, 'new.txt'), 'new\n');
     await git.stagePaths({ projectPath: fixture.projectPath, paths: ['new.txt'], mode: 'stage' });
-    await expect(git.commitIndex({ projectPath: fixture.projectPath, message: 'confirmed side effect' }))
+    // A disposed link never reconnects, so the lost reply is waited for until the deadline.
+    await expect(git.commitIndex({ projectPath: fixture.projectPath, message: 'confirmed side effect' }, { timeoutMs: 1_000 }))
       .rejects.toMatchObject({ code: 'GIT_MUTATION_OUTCOME_UNKNOWN' });
     expect(dispatched).toHaveBeenCalledTimes(1);
     expect((await runGit(fixture.projectPath, ['log', '-1', '--format=%s'])).stdout.trim()).toBe('confirmed side effect');

@@ -19,6 +19,7 @@ import {
 } from '../../../server/remote/__tests__/integration-fixture.js';
 import { serveExecutionRuntime } from '../../../server/remote/server/executor-rpc-server.js';
 import { ProducerRelay } from '../../../server/remote/server/producer-relay.js';
+import { RpcReplyJournal } from '../../../server/remote/transport/rpc-journal.js';
 import { ExecutorRpc } from '../../../server/remote/transport/rpc.js';
 import { connectRemoteExecutor } from '../../../server/remote/__tests__/runtime-adapter.js';
 import { WebSocketLink } from '../../../server/remote/transport/websocket-link.js';
@@ -79,10 +80,11 @@ async function withRemoteRouter(
   const controllerAdmission = admissionFault(controller);
   const native = integrationFixture(root, EXECUTOR);
   const relay = new ProducerRelay();
+  const journal = new RpcReplyJournal();
   const serving: ReturnType<typeof serveExecutionRuntime>[] = [];
   let workerRpc: ExecutorRpc | null = null;
   worker.onSession(session => {
-    workerRpc = new ExecutorRpc(session);
+    workerRpc = new ExecutorRpc(session, { journal });
     serving.push(serveExecutionRuntime(native.executor, workerRpc, relay));
   });
   // Reads credentials from the controller over the current session, as the worker process does.
@@ -115,6 +117,7 @@ async function withRemoteRouter(
     await worker.dispose();
     await Promise.all(serving.map(scope => scope.dispose()));
     relay.dispose();
+    journal.dispose();
     await native.executor.dispose();
     await chats.flush();
     await rm(root, { recursive: true, force: true });
@@ -205,15 +208,11 @@ function runEnds(ledger: TranscriptLedgerService) {
 }
 
 for (const dialer of ['controller', 'worker'] as const) {
-  test(`a start cancelled by a disconnect fails its turn once the executor reconnects (${dialer} dials)`, async () => {
+  test(`a start in flight when the link drops keeps running, and Stop reaches it after the reconnect (${dialer} dials)`, async () => {
     await withRemoteRouter(dialer, async ({ router, ledger, native, controller, restored }) => {
       const entered = Promise.withResolvers<void>();
-      native.hooks.start = async ({ admission }) => {
-        entered.resolve();
-        await new Promise<never>((_, reject) => admission.signal.addEventListener('abort', () => {
-          reject(new Error('Synthetic cancelled admission'));
-        }, { once: true }));
-      };
+      const release = Promise.withResolvers<void>();
+      native.hooks.start = async () => { entered.resolve(); await release.promise; };
       const reconnected = restored();
       const turn = router.startSession(CHAT, 'Synthetic input');
       await entered.promise;
@@ -222,8 +221,11 @@ for (const dialer of ['controller', 'worker'] as const) {
       expect(router.isChatRunning(CHAT)).toBe(true);
 
       await reconnected;
-      await until(() => !router.isChatRunning(CHAT));
-      expect(runEnd(ledger)).toMatchObject({ outcome: 'failed', origin: 'core', error: EXECUTOR_DISCONNECTED_BEFORE_START });
+      release.resolve();
+      await router.abortSession(CHAT);
+      await until(() => native.calls.abort === 1);
+      expect(native.calls.start).toBe(1);
+      expect(runEnds(ledger)).toEqual([{ outcome: 'interrupted', origin: 'core' }]);
     });
   }, 30_000);
 

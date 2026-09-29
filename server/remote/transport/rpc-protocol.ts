@@ -1,6 +1,6 @@
 import type { AgentDescriptor, AgentSettingDescriptor, AgentSettingsEnvelope } from '@garcon/common/agent-integration';
 import type { FileRpcMethods } from './file-protocol.js';
-import type { GitRpcMethods } from './git-protocol.js';
+import { isGitRpcMethod, type GitRpcMethods } from './git-protocol.js';
 import type { TerminalRpcMethods } from './terminal-protocol.js';
 import type { CliRpcMethods } from './cli-protocol.js';
 import type {
@@ -106,14 +106,121 @@ export interface ExecutorRpcMethods extends FileRpcMethods, TerminalRpcMethods, 
   'projectPathUpdates.commit': Call<Request<'projectPathUpdates', 'commit'>, void>;
   'projectPathUpdates.rollback': Call<Request<'projectPathUpdates', 'rollback'>, void>;
   'credentials.resolve': Call<WithoutSignal<Parameters<AgentHost['apiProviders']['resolveCredential']>[0]>, Awaited<ReturnType<AgentHost['apiProviders']['resolveCredential']>>>;
+  // Settles the journaled calls lost sessions left outstanding; see `RpcContinuity`.
+  'calls.reconcile': Call<{ readonly calls: readonly OutstandingCall[] }, { readonly states: readonly OutstandingCallState[] }>;
 }
 
 export type ExecutorRpcRequest = {
   [K in keyof ExecutorRpcMethods]: {
     readonly type: 'request'; readonly id: string; readonly integrationId: string;
+    // Numbers each session's requests from 1, so a worker can tell a request it
+    // never received from one whose reply it no longer holds.
+    readonly seq: number;
     readonly method: K; readonly request: ExecutorRpcMethods[K]['request'];
   }
 }[keyof ExecutorRpcMethods];
+
+// How a call relates to the session that carries it:
+// - `session`: bound to that session. Losing the session cancels its handler,
+//   and its caller sees an unknown outcome.
+// - `launch`: a start, resume, or compaction. Its handler outlives the session,
+//   and the producer relay reports its outcome.
+// - `journaled`: its handler outlives the session, and the worker keeps its
+//   reply until the controller acknowledges it. A controller parks the call
+//   when the session is lost and reconciles it on the replacement session, so
+//   its caller sees the real outcome.
+export type RpcContinuity = 'session' | 'launch' | 'journaled';
+
+type ClassifiedMethod = Exclude<keyof ExecutorRpcMethods, keyof FileRpcMethods | keyof GitRpcMethods>;
+
+// History readers, terminal attachments, producer bindings, forks and path
+// preparations with their compensation, and CLI calls belong to one session.
+const CONTINUITY: Readonly<Record<ClassifiedMethod, RpcContinuity>> = {
+  'executor.describe': 'session',
+  'apiProviders.discoverModels': 'journaled',
+  'projects.inspect': 'journaled',
+  'projects.ticketProjectDefault': 'journaled',
+  'projects.resolveFileMentions': 'journaled',
+  'producers.bind': 'session',
+  'producers.close': 'session',
+  'producers.resume': 'session',
+  'permissions.respond': 'journaled',
+  'execution.start': 'launch',
+  'execution.resume': 'launch',
+  'execution.abort': 'journaled',
+  'execution.runningSessions': 'journaled',
+  'catalog.snapshot': 'journaled',
+  'settings.migrate': 'journaled',
+  'lifecycle.start': 'session',
+  'lifecycle.stop': 'session',
+  'lifecycle.migrateOwnedStorage': 'session',
+  'migration.translateLegacyModel': 'journaled',
+  'migration.translateLegacyNativeSession': 'journaled',
+  'migration.translateLegacySettings': 'journaled',
+  'auth.status': 'journaled',
+  'auth.launchLogin': 'journaled',
+  'auth.completeLogin': 'journaled',
+  'auth.loginStatus': 'journaled',
+  'commands.discover': 'journaled',
+  'compaction.compact': 'launch',
+  'forking.fork': 'session',
+  'forking.discard': 'journaled',
+  'steering.captureTarget': 'journaled',
+  'steering.steer': 'journaled',
+  'endpoints.validate': 'journaled',
+  'singleQuery.run': 'journaled',
+  'history.open': 'session',
+  'history.next': 'session',
+  'history.close': 'session',
+  'nativeActivity.lastActivity': 'journaled',
+  'nativeSessions.resolveNativeSession': 'journaled',
+  'nativeSessions.describeSource': 'journaled',
+  'nativeSessions.release': 'journaled',
+  'configurationValidation.validate': 'journaled',
+  'sessionConfiguration.apply': 'journaled',
+  'projectPathUpdates.prepare': 'session',
+  'projectPathUpdates.commit': 'journaled',
+  'projectPathUpdates.rollback': 'journaled',
+  'credentials.resolve': 'session',
+  'calls.reconcile': 'session',
+  'terminals.list': 'session',
+  'terminals.create': 'session',
+  'terminals.rename': 'session',
+  'terminals.terminate': 'session',
+  'terminals.attach': 'session',
+  'terminals.input': 'session',
+  'terminals.resize': 'session',
+  'terminals.detach': 'session',
+  'controllerCli.describe': 'session',
+  'controllerCli.request': 'session',
+};
+
+export function rpcContinuity(method: string): RpcContinuity {
+  if (method.startsWith('files.') || isGitRpcMethod(method)) return 'journaled';
+  return Object.hasOwn(CONTINUITY, method) ? CONTINUITY[method as ClassifiedMethod] : 'session';
+}
+
+// A journaled call a lost session left outstanding, named by where it was last sent.
+export interface OutstandingCall {
+  readonly id: string;
+  readonly session: string;
+  readonly seq: number;
+}
+
+// `pending`: the worker has or will have its reply, which it delivers on the
+// session that asked. `not-received`: the request never arrived, so the
+// controller sends it again. `unknown`: the worker kept no record of it.
+export interface OutstandingCallState {
+  readonly id: string;
+  readonly state: 'pending' | 'not-received' | 'unknown';
+}
+
+// Controller-to-worker, fire-and-forget: releases the worker's copies of these
+// journaled replies.
+export interface ReplyAckFrame {
+  readonly type: 'reply-ack';
+  readonly ids: readonly string[];
+}
 
 export interface AgentProducerFrame {
   readonly type: 'producer';

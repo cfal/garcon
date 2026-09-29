@@ -19,6 +19,7 @@ import { connectRemoteExecutor } from './runtime-adapter.js';
 import { WebSocketLink } from '../transport/websocket-link.js';
 import { serveExecutionRuntime } from '../server/executor-rpc-server.js';
 import { ProducerRelay, type ProducerRelayOptions } from '../server/producer-relay.js';
+import { RpcReplyJournal } from '../transport/rpc-journal.js';
 import type { RemoteExecutorClientOptions } from '../client/executor-client.js';
 import { ProjectService } from '../../runtime/projects/project-service.js';
 import { discoverApiProviderModels } from '../../runtime/providers/discovery.js';
@@ -112,20 +113,22 @@ export async function remoteFixture(
   const generations = [fixture];
   const scopes: ReturnType<typeof serveExecutionRuntime>[] = [];
   const relay = new ProducerRelay(resumption.relay);
+  const journal = new RpcReplyJournal();
   configure(controller, worker, fixture);
   worker.onSession((session) => {
-    scopes.push(serveExecutionRuntime(fixture.executor, new ExecutorRpc(session), relay));
+    scopes.push(serveExecutionRuntime(fixture.executor, new ExecutorRpc(session, { journal }), relay));
   });
   const connected = connectRemoteExecutor(controller, undefined, resumption.client);
   if (dialer === 'controller') controller.dial(worker.listen());
   else worker.dial(controller.listen());
   const executor = await connected;
   return {
-    controller, worker, executor, generations,
+    controller, worker, executor, generations, journal,
     async dispose() {
       await executor.dispose(); await worker.dispose();
       await Promise.all(scopes.map((scope) => scope.dispose()));
       relay.dispose();
+      journal.dispose();
       await fixture.executor.dispose();
     },
   };

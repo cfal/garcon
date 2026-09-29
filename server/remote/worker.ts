@@ -2,6 +2,7 @@ import { AgentCallError } from '@garcon/server-agent-interface';
 import { mkdir, rm } from 'node:fs/promises';
 import { defaultAgentIntegrations } from '../runtime/agents/default-agent-integrations.js';
 import { ExecutorRpc } from './transport/rpc.js';
+import { RpcReplyJournal } from './transport/rpc-journal.js';
 import { serveExecutionRuntime } from './server/executor-rpc-server.js';
 import { ProducerRelay } from './server/producer-relay.js';
 import { ExecutionRuntime } from '../runtime/execution-runtime.js';
@@ -54,6 +55,7 @@ async function serveExecutorWorker(options: ExecutorWorkerOptions, dataDir: stri
   let serving: ReturnType<typeof serveExecutionRuntime> | null = null;
   let runtime: ExecutionRuntime | null = null;
   const relay = new ProducerRelay();
+  const journal = new RpcReplyJournal();
   // A stalled worker stops answering pings, and the controller retires its link after 15 s.
   const stopStallMonitor = monitorEventLoopStalls((stallMs) => {
     console.warn(JSON.stringify({ type: 'executor-event-loop-stalled', stallMs }));
@@ -70,7 +72,7 @@ async function serveExecutorWorker(options: ExecutorWorkerOptions, dataDir: stri
     currentRpc = null;
     let failure: unknown;
     try {
-      for (const dispose of [stopStallMonitor, stopSlowStepReports, () => gateway?.dispose(), () => link.dispose(), () => serving?.dispose(), () => relay.dispose(), () => runtime?.dispose(), () => terminals?.shutdown()]) {
+      for (const dispose of [stopStallMonitor, stopSlowStepReports, () => gateway?.dispose(), () => link.dispose(), () => serving?.dispose(), () => relay.dispose(), () => journal.dispose(), () => runtime?.dispose(), () => terminals?.shutdown()]) {
         try { await dispose(); } catch (error) { failure ??= error; }
       }
       if (failure !== undefined) throw failure;
@@ -96,8 +98,8 @@ async function serveExecutorWorker(options: ExecutorWorkerOptions, dataDir: stri
     });
     link.onSession((transport) => {
       void serving?.dispose();
-      const rpc = new ExecutorRpc(transport);
       if (runtime && transport.executorId !== runtime.id) {
+        const rpc = new ExecutorRpc(transport);
         currentRpc = null;
         const retained = runtime;
         // Description lets the controller report the required restart without rebinding retained processes.
@@ -107,6 +109,8 @@ async function serveExecutorWorker(options: ExecutorWorkerOptions, dataDir: stri
         });
         return;
       }
+      // Replies outlive sessions only for the controller of the executor this worker serves.
+      const rpc = new ExecutorRpc(transport, { journal });
       currentRpc = rpc;
       transport.onFailure(() => { if (currentRpc === rpc) currentRpc = null; });
       runtime ??= new ExecutionRuntime({

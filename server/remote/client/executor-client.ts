@@ -9,7 +9,7 @@ import {
   type ApiProviderDiscoveryRequest,
 } from '@garcon/server-agent-interface';
 import { RemoteAgentIntegration } from './remote-agent-integration.js';
-import { DEFAULT_RPC_TIMEOUT_MS, ExecutorRpc, type RpcCallOptions } from '../transport/rpc.js';
+import { DEFAULT_RPC_TIMEOUT_MS, ExecutorRpc, ParkedRpcCalls, type RpcCallOptions } from '../transport/rpc.js';
 import type { ExecutorRpcMethods, IntegrationManifest } from '../transport/rpc-protocol.js';
 import type { SessionTransport } from '../transport/session-transport.js';
 import type { WebSocketLink } from '../transport/websocket-link.js';
@@ -93,6 +93,7 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
   #instanceId: string | null = null;
   #reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   readonly #waiters = new Set<SessionWaiter>();
+  readonly #parked = new ParkedRpcCalls();
   readonly #reconnectGraceMs: number;
   readonly #log: Logger;
   readonly #sessions: RemoteSessions = {
@@ -124,7 +125,7 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
     this.#log = options.logger ?? createLogger('executors');
     this.#unsubscribe = link.onSession((transport) => {
       this.#candidate = transport;
-      const rpc = new ExecutorRpc(transport);
+      const rpc = new ExecutorRpc(transport, { parked: this.#parked });
       rpc.onTerminal((frame) => this.#terminals.receive(frame, rpc));
       setupRpc(rpc);
       transport.onFailure(() => {
@@ -215,6 +216,7 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
     this.#unsubscribe();
     this.#terminals.disconnect();
     this.#current = null;
+    this.#parked.close();
     for (const integration of this.#integrations.values()) integration.retire();
     await this.link.dispose();
     this.#listeners.clear();
@@ -274,7 +276,11 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
       integration.receive(notification, seq, backing);
     });
     setup.stage = 'resume-bindings';
+    // Sent ahead of producer resumption, whose replay can fill the session queue.
+    const reconciling = rpc.reconcileParked();
+    reconciling.catch(() => undefined);
     for (const integration of this.#integrations.values()) await integration.resume(backing);
+    await reconciling;
     if (this.#candidateRetired(transport)) throw new Error('Executor candidate session retired');
     setup.stage = 'activate';
     this.#instanceId = info.instanceId;
@@ -302,6 +308,7 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
   #abandonBindings(): void {
     this.#clearReconnectTimer();
     for (const integration of this.#integrations.values()) integration.retire();
+    this.#parked.rejectAll();
     this.#setAvailability('offline');
   }
 

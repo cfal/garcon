@@ -6,7 +6,6 @@ import {
   admissionFault, integrationFixture, isExecutionHandleReply, isProducerResumeReply, linkOptions, outgoingFault, outgoingHold,
   remoteFixture, requestFor,
 } from '../../__tests__/integration-fixture.js';
-import { EXECUTOR_DISCONNECTED_BEFORE_START } from '../../../common/executor-disconnect.js';
 import { connectRemoteExecutor } from '../../__tests__/runtime-adapter.js';
 import { serveExecutionRuntime } from '../../server/executor-rpc-server.js';
 import { ProducerRelay } from '../../server/producer-relay.js';
@@ -196,18 +195,19 @@ for (const dialer of ['controller', 'worker'] as const) {
     } finally { release.resolve(); await fixture.dispose(); }
   });
 
-  test(`a start cancelled by a disconnect reports that it did not start (${dialer} dials)`, async () => {
+  test(`a start in flight when the link drops keeps running and reports its handle (${dialer} dials)`, async () => {
     const fixture = await remoteFixture(dialer);
+    const release = Promise.withResolvers<void>();
     try {
       const integration = await fixture.executor.getAgentIntegration('test');
       const request = await requestFor(integration);
       const entered = Promise.withResolvers<void>();
       const worker = fixture.generations[0]!;
+      let cancelled = false;
       worker.hooks.start = async ({ admission }) => {
+        admission.signal.addEventListener('abort', () => { cancelled = true; }, { once: true });
         entered.resolve();
-        await new Promise<never>((_, reject) => admission.signal.addEventListener('abort', () => {
-          reject(new Error('Synthetic cancelled admission'));
-        }, { once: true }));
+        await release.promise;
       };
       const outcomes = launchOutcomes(integration);
       const call = integration.execution.start(request).catch((error: unknown) => error);
@@ -216,12 +216,14 @@ for (const dialer of ['controller', 'worker'] as const) {
       fixture.controller.disconnect(); fixture.worker.disconnect();
       expect(await call).toMatchObject({ outcome: 'unknown' });
       await ready;
-      await integration.execution.runningSessions();
-      expect(outcomes).toEqual([{ type: 'launch-settled', runId: request.runId, error: EXECUTOR_DISCONNECTED_BEFORE_START }]);
-      worker.hooks.start = async () => {};
-      await integration.execution.start(await requestFor(integration));
-      expect(worker.calls.start).toBe(2);
-    } finally { await fixture.dispose(); }
+      release.resolve();
+      const deadline = performance.now() + 10_000;
+      while (outcomes.length === 0 && performance.now() < deadline) await Bun.sleep(5);
+
+      expect(cancelled).toBe(false);
+      expect(outcomes).toEqual([{ type: 'launch-settled', runId: request.runId, handle: expect.objectContaining({ kind: 'execution' }) }]);
+      expect(worker.calls.start).toBe(1);
+    } finally { release.resolve(); await fixture.dispose(); }
   });
 
   test(`a start whose reply was lost reports its handle once the binding resumes (${dialer} dials)`, async () => {

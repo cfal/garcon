@@ -2,6 +2,7 @@ import type { ExecutionRuntimeApi } from '@garcon/server-agent-interface';
 import { RemoteExecutorClient, type RemoteExecutorClientOptions } from '../client/executor-client.js';
 import { serveExecutionRuntime } from '../server/executor-rpc-server.js';
 import { ProducerRelay } from '../server/producer-relay.js';
+import { RpcReplyJournal } from '../transport/rpc-journal.js';
 import { ExecutorRpc } from '../transport/rpc.js';
 import { WebSocketLink } from '../transport/websocket-link.js';
 
@@ -42,7 +43,8 @@ export async function runtimeAdapter(runtime: ExecutionRuntimeApi, backend: Runt
   const worker = new WebSocketLink({ ...options, role: 'worker' });
   const scopes: ReturnType<typeof serveExecutionRuntime>[] = [];
   const relay = new ProducerRelay();
-  worker.onSession(transport => scopes.push(serveExecutionRuntime(runtime, new ExecutorRpc(transport), relay)));
+  const journal = new RpcReplyJournal();
+  worker.onSession(transport => scopes.push(serveExecutionRuntime(runtime, new ExecutorRpc(transport, { journal }), relay)));
   const connected = connectRemoteExecutor(controller);
   if (backend === 'controller') controller.dial(worker.listen());
   else worker.dial(controller.listen());
@@ -51,6 +53,7 @@ export async function runtimeAdapter(runtime: ExecutionRuntimeApi, backend: Runt
     await worker.dispose();
     for (const scope of scopes) await scope.dispose();
     relay.dispose();
+    journal.dispose();
   };
   try { return { executor: await connected, dispose }; }
   catch (error) { await dispose(); throw error; }

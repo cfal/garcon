@@ -128,7 +128,8 @@ export class ProducerRelay {
 
   // Runs a start, resume, or compaction dispatched by `session`. Its outcome is
   // published on the binding only when its reply cannot reach the controller:
-  // the session was lost, or the session could not take the reply.
+  // the session was lost, or the session could not take the reply. Losing the
+  // session does not cancel the launch.
   async launch(
     session: ProducerRelaySession,
     integration: AgentIntegration,
@@ -153,8 +154,9 @@ export class ProducerRelay {
     } catch (error) {
       if (binding.launch === launch) {
         binding.launch = null;
-        // A lost session cancels its calls, so a failure after the loss cannot be
-        // told apart from one the loss caused and reads as the dispatch failure.
+        // A failure after the session was lost may come from a call the loss cut
+        // off, such as a credential read, and cannot be told apart from the
+        // launch's own, so it reads as the dispatch failure.
         publishIfReplyLost({
           type: 'launch-settled',
           runId: launch.runId,
