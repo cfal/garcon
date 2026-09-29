@@ -135,6 +135,18 @@ number means dropped output and records one notice on the active run: "Some
 agent output could not be delivered from the executor. Reload from native
 history after this turn finishes to recover it."
 
+A row batch the controller cannot decode is logged and counts as undelivered
+output; consecutive undecodable batches record one notice with the same text.
+Any other event it cannot read, such as a permission request or a launch
+outcome, leaves its run's state unknown. It is logged, the run fails with
+`OUTCOME_UNKNOWN`, and the binding closes through the session that holds it,
+which stops the native turn. A resume report the controller cannot read fails
+its binding the same way. None of these retire the session: that would
+interrupt every binding the session carries, and a failure that recurs on
+replayed events would retire each replacement session in turn. A controller
+consumer that throws on an event is logged, and the other consumers still
+receive it.
+
 A start, resume, or compaction whose reply was lost with its session leaves its
 run active instead of failing the turn. The worker's relay records each
 binding's latest launch until its run ends or it fails, and the resume reply
