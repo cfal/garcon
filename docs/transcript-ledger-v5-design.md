@@ -1042,6 +1042,10 @@ CREATE TABLE transcript_rows (
 CREATE UNIQUE INDEX transcript_submission
   ON transcript_rows(view_id, client_message_id)
   WHERE client_message_id IS NOT NULL;
+
+CREATE INDEX transcript_session_rows
+  ON transcript_rows(view_id, ordinal)
+  WHERE kind = 'session';
 ```
 
 - `transcript_views` is the sole current-view authority: the partial
@@ -1061,6 +1065,10 @@ CREATE UNIQUE INDEX transcript_submission
   the chat directory or promote its view.
 - `PRAGMA user_version` is set at creation and validated at every open;
   schema migrations run lazily and transactionally at open.
+- The current-session lookup behind every transcript read names
+  `transcript_session_rows` with `INDEXED BY`. A view's session row
+  usually sits near its start, and without statistics the planner
+  prefers the primary key and scans the whole view newest-first.
 - The canonical durable row address is `(transcriptViewId, ordinal)`;
   there is no `rowUuid` and no imported-row origin provenance. If future
   diagnostics ever need origin provenance, its only valid
@@ -3084,7 +3092,10 @@ The catalog cites this revision, but its inventory is not repeated here.
   and through the pinned Claude CLI; and the browser's reconnecting indicator.
 - **Responsiveness**: a 30,000-row Direct chat reloads, forks, and renders a
   handoff artifact in every execution lane while WebSocket pings stay under
-  500 ms.
+  100 ms. The Claude, Pi, Amp, OpenCode, Factory, Cursor, and Direct
+  long-history loads, and the shared draft conversion, each keep their
+  longest event-loop gap under a limit that a single synchronous pass over
+  the same history exceeds.
 - **Scripted tiers**: the existing real-binary scripted suites (Claude,
   Codex, OpenCode, Pi) are retained and re-anchored on end-state ledger
   assertions through direct V5 assertions. Live credential suites
