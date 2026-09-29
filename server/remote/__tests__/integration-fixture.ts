@@ -32,6 +32,7 @@ export function integrationFixture(projectBasePath = '/test-project', executorId
   const calls = { start: 0, resume: 0, abort: 0, migrate: 0, initialize: 0, stop: 0, import: 0, query: 0 };
   const hooks = {
     start: async (_request: AgentRuntimeStartRequest) => {},
+    initialize: async () => {},
     stop: async () => {},
     query: async (_request: AgentSingleQueryRequest) => 'query result',
     history: async function* (_signal: AbortSignal): AsyncGenerator<readonly AgentImportedTranscriptRow[]> { yield []; },
@@ -62,7 +63,7 @@ export function integrationFixture(projectBasePath = '/test-project', executorId
     settings, migration: createVersion1RecordMigration({ settings, nativeSessions: null }),
     catalog: { async snapshot() { throw new AgentCallError('rejected', 'Unused catalog'); } },
     lifecycle: {
-      async start() { calls.initialize++; },
+      async start() { calls.initialize++; await hooks.initialize(); },
       async stop() { calls.stop++; await hooks.stop(); },
       async migrateOwnedStorage() { calls.migrate++; },
     },

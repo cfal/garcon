@@ -19,7 +19,7 @@ export class SessionSocketFrames implements SessionSocket {
   constructor(
     private readonly socket: Pick<NoiseWebSocket, 'send' | 'bufferedAmount'>,
     private readonly disconnect: () => void,
-    private readonly writeFailed: () => void = disconnect,
+    private readonly writeFailed: (error: unknown) => void = disconnect,
   ) {}
 
   canSend(): boolean { return this.#sending === null && this.socket.bufferedAmount < SESSION_SOCKET_BUFFER_BYTES; }
@@ -75,9 +75,9 @@ export class SessionSocketFrames implements SessionSocket {
         this.#retry = setTimeout(() => { this.#retry = null; this.#flush(); }, 10);
         this.#retry.unref();
       }
-    } catch {
+    } catch (error) {
       this.dispose();
-      this.writeFailed();
+      this.writeFailed(error);
     }
   }
 }

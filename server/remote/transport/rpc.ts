@@ -9,6 +9,7 @@ import type {
 import type { SessionTransport } from './session-transport.js';
 import { DomainError } from '../../common/domain-error.js';
 import { createLogger } from '../../common/log.js';
+import { MALFORMED_DATA } from './failure-reason.js';
 import { isErrorCode, type ErrorCode } from '../../../common/error-codes.js';
 import { TerminalError } from '../../../common/terminal-error.js';
 import { GitServiceError, isGitServiceErrorCode, type GitServiceErrorCode } from '../../../common/git-error.js';
@@ -247,7 +248,9 @@ function encodeFailure(error: unknown): Failure {
     ...(error.details ? { details: error.details } : {}),
     ...(error instanceof AgentCallError ? { outcome: error.outcome } : {}),
   };
-  return { code: 'PROVIDER_FAILURE', message: error instanceof Error ? error.message : 'Provider operation failed', retryable: false };
+  // A parse error's message can echo the payload it failed on, so it does not cross the link.
+  const message = error instanceof SyntaxError ? MALFORMED_DATA : error instanceof Error ? error.message : 'Provider operation failed';
+  return { code: 'PROVIDER_FAILURE', message, retryable: false };
 }
 
 function decodeFailure(error: Failure): Error {

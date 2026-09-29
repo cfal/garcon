@@ -3,6 +3,7 @@ import { connectNoiseWebSocket } from '@cfal/noise-ws';
 import { WebSocketLink, EXECUTOR_NOISE_CONTEXT } from '../websocket-link.ts';
 import { EXECUTOR_PROTOCOL_REVISION } from '../rpc-protocol.ts';
 import { version as packageVersion } from '../../../../package.json';
+import { tcpLinkProxy } from '../../__tests__/tcp-link-proxy.ts';
 
 const secret = Buffer.alloc(32, 42).toString('base64url');
 
@@ -162,8 +163,40 @@ for (const dialer of ['controller', 'worker']) {
       await listening.dispose();
       await eventually(() => closures.dialing.length === 2);
 
-      expect(closures.dialing).toEqual([{ cause: 'session-retired', count: 1 }, { cause: 'socket-closed', count: 1 }]);
+      expect(closures.dialing).toEqual([
+        { cause: 'session-retired', count: 1, reason: 'Synthetic session retirement' },
+        { cause: 'socket-closed', count: 1 },
+      ]);
       expect(closures.listening).toEqual([{ cause: 'socket-closed', count: 1 }, { cause: 'local-close', count: 1 }]);
     } finally { await controller.dispose(); await worker.dispose(); }
+  });
+}
+
+for (const dialer of ['controller', 'worker']) {
+  test(`reports a dropped network path with its Noise error code on both ends (${dialer} dials)`, async () => {
+    const common = { executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true, reconnectDelayMs: 60_000 };
+    const controller = new WebSocketLink({ ...common, role: 'controller' });
+    const worker = new WebSocketLink({ ...common, role: 'worker' });
+    const [dialing, listening] = dialer === 'controller' ? [controller, worker] : [worker, controller];
+    const reports = { dialing: { errors: [], closures: [] }, listening: { errors: [], closures: [] } };
+    for (const [end, link] of [['dialing', dialing], ['listening', listening]]) {
+      link.onError(message => reports[end].errors.push(message));
+      link.onClosure(closure => reports[end].closures.push(closure));
+    }
+    // The proxy stands in for a tunnel that drops the TCP connection without a WebSocket or encrypted close.
+    const path = await tcpLinkProxy(new URL(listening.listen(0, '127.0.0.1')));
+    try {
+      dialing.dial(path.url);
+      await Promise.all([controller.ready, worker.ready]);
+      path.disconnect();
+      await eventually(() => reports.dialing.closures.length === 1 && reports.listening.closures.length === 1);
+
+      for (const end of ['dialing', 'listening']) {
+        expect(reports[end].errors).toEqual(['Executor encrypted connection failed (TRANSPORT_CLOSED)']);
+        expect(reports[end].closures).toEqual([
+          { cause: 'socket-closed', count: 1, reason: 'Encrypted connection failed (TRANSPORT_CLOSED)' },
+        ]);
+      }
+    } finally { await path.close(); await controller.dispose(); await worker.dispose(); }
   });
 }

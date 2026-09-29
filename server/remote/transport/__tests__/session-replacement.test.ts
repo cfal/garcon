@@ -1,6 +1,6 @@
 import { expect, spyOn, test } from 'bun:test';
 import { AssistantMessage } from '@garcon/common/chat-types';
-import { type AgentProducerNotification, type ExecutorAvailability } from '@garcon/server-agent-interface';
+import { AgentIntegrationError, type AgentProducerNotification, type ExecutorAvailability } from '@garcon/server-agent-interface';
 import { RemoteExecutorClient } from '../../client/executor-client.js';
 import {
   integrationFixture, isProducerResumeReply, linkOptions, outgoingFault, outgoingHold, remoteFixture, requestFor,
@@ -11,6 +11,7 @@ import { serveExecutionRuntime } from '../../server/executor-rpc-server.js';
 import { ProducerRelay } from '../../server/producer-relay.js';
 import { ExecutorRpc } from '../rpc.js';
 import { WebSocketLink } from '../websocket-link.js';
+import type { Logger } from '../../../common/log.js';
 
 function nextAvailability(executor: RemoteExecutorClient, value: ExecutorAvailability) {
   const reached = Promise.withResolvers<void>();
@@ -38,6 +39,15 @@ function launchOutcomes(integration: Awaited<ReturnType<RemoteExecutorClient['ge
   const outcomes: LaunchOutcome[] = [];
   integration.producers.subscribe(({ event }) => { if (event.type === 'launch-settled') outcomes.push(event); });
   return outcomes;
+}
+
+function setupFailureLog() {
+  const failures: unknown[] = [];
+  const logger = {
+    debug() {}, info() {}, error() {},
+    warn(message: unknown, detail: unknown) { if (message === 'Executor session setup failed') failures.push(detail); },
+  } satisfies Logger;
+  return { failures, logger };
 }
 
 // Fails the first outgoing message that matches, closing the link as it is sent.
@@ -269,6 +279,51 @@ for (const dialer of ['controller', 'worker'] as const) {
       expect(worker.calls).toMatchObject({ start: 2, abort: 0 });
     } finally { release.resolve(); await fixture.dispose(); }
   }, 60_000);
+
+  for (const [failure, thrown, reason] of [
+    ['provider error', () => new AgentIntegrationError('UNAVAILABLE', 'Synthetic provider start failure', false), 'Synthetic provider start failure'],
+    // A parse error's message can echo the payload it failed on, so neither the reply nor the log carries it.
+    ['parse error', () => new SyntaxError('JSON Parse error: Unexpected identifier "SYNTHETIC_SENTINEL"'), 'Malformed data'],
+  ] as const) {
+    test(`a replacement session that cannot start its integrations logs the stage and a ${failure}'s reason (${dialer} dials)`, async () => {
+      const log = setupFailureLog();
+      const fixture = await remoteFixture(dialer, undefined, undefined, undefined, { client: { logger: log.logger } });
+      try {
+        const worker = fixture.generations[0]!;
+        worker.hooks.initialize = async () => {
+          worker.hooks.initialize = async () => {};
+          throw thrown();
+        };
+        const ready = nextAvailability(fixture.executor, 'ready');
+        fixture.controller.disconnect(); fixture.worker.disconnect();
+        await ready;
+
+        expect(log.failures).toEqual([
+          { executorId: linkOptions.executorId, stage: 'start-integrations', reason },
+        ]);
+      } finally { await fixture.dispose(); }
+    });
+  }
+
+  test(`a replacement session lost while resuming logs its own reason, not the lost call (${dialer} dials)`, async () => {
+    const log = setupFailureLog();
+    let fault!: ReturnType<typeof outgoingFault>;
+    const fixture = await remoteFixture(dialer, (controller) => { fault = outgoingFault(controller); }, undefined, undefined, {
+      client: { logger: log.logger },
+    });
+    try {
+      const integration = await fixture.executor.getAgentIntegration('test');
+      await integration.execution.start(await requestFor(integration));
+      disconnectOn(fault, (encoded) => encoded.includes('"method":"producers.resume"'));
+      const ready = nextAvailability(fixture.executor, 'ready');
+      fixture.controller.disconnect(); fixture.worker.disconnect();
+      await ready;
+
+      expect(log.failures).toEqual([
+        { executorId: linkOptions.executorId, stage: 'resume-bindings', reason: 'Executor connection lost' },
+      ]);
+    } finally { await fixture.dispose(); }
+  });
 
   test(`a binding the worker released fails its run and fences later output (${dialer} dials)`, async () => {
     const fixture = await remoteFixture(dialer, undefined, undefined, undefined, { relay: { graceMs: 1 } });
