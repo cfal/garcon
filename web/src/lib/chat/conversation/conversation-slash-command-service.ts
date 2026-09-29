@@ -838,9 +838,13 @@ export class ConversationSlashCommandService {
 			}
 			return 'accepted';
 		} catch (error) {
-			this.#restoreComposer(sourceChatId, previousText, previousImages, clearedRevision);
+			// An unconfirmed fork may already exist; restoring the command would invite a second one.
+			const outcomeUnknown = error instanceof CommandOutcomeUnknownError;
+			if (!outcomeUnknown) {
+				this.#restoreComposer(sourceChatId, previousText, previousImages, clearedRevision);
+			}
 			this.deps.chatState.appendLocalNotice('error', forkFailureNotice(error));
-			return 'rejected';
+			return outcomeUnknown ? 'unknown' : 'rejected';
 		}
 	}
 

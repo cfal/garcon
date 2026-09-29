@@ -1259,6 +1259,28 @@ describe('ConversationSlashCommandService', () => {
 		);
 	});
 
+	it('does not restore a bare fork command after two lost replies', async () => {
+		const { deps, composerState, appendLocalNotice } = createDeps();
+		mockForkChat.mockRejectedValue(new TypeError('connection closed'));
+
+		const outcome = await new ConversationSlashCommandService(deps).submitForkCommand(
+			'chat-1',
+			deps.sessions.byId['chat-1'],
+			'',
+			[],
+			true,
+		);
+
+		expect(outcome).toBe('unknown');
+		expect(mockForkChat).toHaveBeenCalledTimes(2);
+		expect(mockForkChat.mock.calls[1][0]).toEqual(mockForkChat.mock.calls[0][0]);
+		expect(composerState.restoreDraftIfRevision).not.toHaveBeenCalled();
+		expect(appendLocalNotice).toHaveBeenCalledWith(
+			'error',
+			'Could not confirm whether the fork was created. Check the chat list before trying again.',
+		);
+	});
+
 	it('clears the forking progress notice through its captured revision on success', async () => {
 		const { deps, appendLocalNotice, noticeRevisionForChat, clearLocalNoticesForChat } =
 			createDeps();
