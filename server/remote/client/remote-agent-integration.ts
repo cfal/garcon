@@ -195,7 +195,7 @@ export class RemoteAgentIntegration implements AgentIntegration {
       captureTarget: (request, options) => call('steering.captureTarget', request, options),
       steer: (request, options) => call('steering.steer', request, options),
     } : null;
-    this.endpoints = cap.endpoints ? { validate: (request) => call('endpoints.validate', request) } : null;
+    this.endpoints = cap.endpoints ? { validate: (request, options) => call('endpoints.validate', request, options) } : null;
     this.singleQuery = cap.singleQuery ? {
       run: async ({ signal, ...request }) => {
         const timeoutMs = request.timeoutMs;

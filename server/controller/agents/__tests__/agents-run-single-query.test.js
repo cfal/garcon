@@ -102,7 +102,7 @@ describe('AgentRuntimeRouter.runSingleQuery', () => {
     expect(integration.endpoints.validate).toHaveBeenCalledWith(expect.objectContaining({
       endpointId: 'endpoint-a',
       protocol: 'openai-compatible',
-    }));
+    }), { signal: undefined });
     expect(run).toHaveBeenCalledWith(expect.objectContaining({
       model: 'model-a',
       settings,

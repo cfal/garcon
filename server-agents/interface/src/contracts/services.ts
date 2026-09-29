@@ -45,7 +45,7 @@ export interface AgentSettings {
 }
 
 export interface AgentEndpoints {
-  validate(selection: AgentEndpointSelection): Promise<void>;
+  validate(selection: AgentEndpointSelection, options?: ExecutorCallOptions): Promise<void>;
 }
 
 export interface AgentAuth {

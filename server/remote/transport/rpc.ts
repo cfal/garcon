@@ -8,6 +8,7 @@ import type {
 } from './rpc-protocol.js';
 import type { SessionTransport } from './session-transport.js';
 import { DomainError } from '../../common/domain-error.js';
+import { ExecutorSessionLostError } from '../../common/executor-disconnect.js';
 import { createLogger } from '../../common/log.js';
 import { MALFORMED_DATA } from './failure-reason.js';
 import { isErrorCode, type ErrorCode } from '../../../common/error-codes.js';
@@ -81,7 +82,7 @@ export class ExecutorRpc {
     this.#terminalDetach = null;
     for (const call of this.#pending.values()) {
       call.cleanup();
-      call.reject(new AgentCallError('unknown', 'The connection to the executor dropped before it replied.'));
+      call.reject(new ExecutorSessionLostError('unknown', 'The connection to the executor dropped before it replied.'));
     }
     this.#pending.clear();
     this.#lateResults.clear();
@@ -126,7 +127,8 @@ export class ExecutorRpc {
     if (timeoutMs !== null && (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 2 ** 31 - 1)) {
       throw new AgentCallError('not-dispatched', 'Invalid executor deadline');
     }
-    if (this.#retired || options?.signal?.aborted || !this.transport.connected) throw new AgentCallError('not-dispatched', 'Executor is unavailable');
+    if (options?.signal?.aborted) throw new AgentCallError('not-dispatched', 'Executor is unavailable');
+    if (this.#retired || !this.transport.connected) throw new ExecutorSessionLostError('not-dispatched', 'Executor is unavailable');
     if (this.#pending.size + this.#lateResults.size >= 256) {
       throw new AgentCallError('not-dispatched', 'The executor is handling too many requests. Try again shortly.');
     }
@@ -160,7 +162,7 @@ export class ExecutorRpc {
       this.transport.send(payload);
     } catch {
       cleanup(); this.#pending.delete(id);
-      result.reject(new AgentCallError('unknown', 'The connection to the executor dropped while the request was being sent.'));
+      result.reject(new ExecutorSessionLostError('unknown', 'The connection to the executor dropped while the request was being sent.'));
     }
     return await result.promise as ExecutorRpcMethods[K]['result'];
   }

@@ -6,7 +6,7 @@ import type { AgentEndpointSelection } from '../../../common/agent-execution.js'
 import { AssistantMessage } from '../../../common/chat-types.js';
 import type { AgentRuntimeEvent } from '../../../server-agents/common/src/execution/runtime-events.js';
 import { resolveAgentEndpoint } from '../../../server-agents/common/src/execution/resolve-endpoint.js';
-import { AgentCallError, type AgentHost } from '../../../server-agents/interface/src/index.js';
+import { AgentCallError, type AgentHost, type ExecutorAvailability } from '../../../server-agents/interface/src/index.js';
 import { ApiProviderEndpointResolver } from '../../../server/controller/api-providers/endpoint-resolver.js';
 import { ChatRegistry } from '../../../server/controller/chats/store.js';
 import { AgentDirectory, type ExecutionIntegrationDirectory } from '../../../server/controller/agents/directory.js';
@@ -50,6 +50,8 @@ type RemoteRouterContext = Awaited<ReturnType<typeof remoteRouter>> & {
   readonly ledger: TranscriptLedgerService;
   readonly native: ReturnType<typeof integrationFixture>;
   readonly controller: WebSocketLink;
+  readonly remote: Awaited<ReturnType<typeof connectRemoteExecutor>>;
+  readonly controllerFault: ReturnType<typeof outgoingFault>;
   readonly workerFault: ReturnType<typeof outgoingFault>;
   readonly workerPath: ReturnType<typeof outgoingHold>;
   readonly workerAdmission: ReturnType<typeof admissionFault>;
@@ -59,13 +61,18 @@ type RemoteRouterContext = Awaited<ReturnType<typeof remoteRouter>> & {
 
 // Runs one chat's turns through the real runtime router against a worker over
 // real links, so a lost start reply crosses the same boundaries as production.
-async function withRemoteRouter(dialer: Dialer, run: (context: RemoteRouterContext) => Promise<void>) {
+async function withRemoteRouter(
+  dialer: Dialer,
+  run: (context: RemoteRouterContext) => Promise<void>,
+  options: { readonly reconnectGraceMs?: number } = {},
+) {
   const root = await mkdtemp(join(tmpdir(), 'garcon-launch-reconnect-'));
   const chats = new ChatRegistry(root);
   await chats.init();
   const ledger = new TranscriptLedgerService(new TranscriptLedgerStore(join(root, 'ledger')), { serverInstanceId: 'synthetic-server' });
   const controller = new WebSocketLink({ ...linkOptions, executorId: EXECUTOR, role: 'controller' });
   const worker = new WebSocketLink({ ...linkOptions, executorId: EXECUTOR, role: 'worker' });
+  const controllerFault = outgoingFault(controller);
   const workerFault = outgoingFault(worker);
   const workerPath = outgoingHold(worker);
   const workerAdmission = admissionFault(worker);
@@ -92,13 +99,16 @@ async function withRemoteRouter(dialer: Dialer, run: (context: RemoteRouterConte
   const connected = connectRemoteExecutor(controller, rpc => rpc.handle(async call => {
     if (call.method !== 'credentials.resolve') throw new AgentCallError('rejected', 'Operation is not permitted on the controller');
     return SYNTHETIC_CREDENTIAL;
-  }));
+  }), options);
   if (dialer === 'controller') controller.dial(worker.listen());
   else worker.dial(controller.listen());
   const remote = await connected;
   try {
     const routed = await remoteRouter({ root, chats, ledger, remote });
-    await run({ ...routed, ledger, native, controller, workerFault, workerPath, workerAdmission, controllerAdmission, credentialHost });
+    await run({
+      ...routed, ledger, native, controller, remote, controllerFault, workerFault, workerPath, workerAdmission, controllerAdmission,
+      credentialHost,
+    });
   } finally {
     ledger.close();
     await remote.dispose();
@@ -119,12 +129,13 @@ async function remoteRouter({ root, chats, ledger, remote }: {
 }) {
   const integration = await remote.getAgentIntegration('test');
   const integrations = new IntegrationRegistry({ instances: [integration] });
+  // As the executor manager does, lookups succeed while the executor reconnects.
   const executors = {
     isReady: () => remote.availability === 'ready',
     integrationsFor() { return integrations; },
     knownIntegration: ({ agentId }) => integrations.get(agentId),
     requireIntegration({ agentId }) {
-      if (remote.availability !== 'ready') {
+      if (remote.availability !== 'ready' && remote.availability !== 'reconnecting') {
         throw new DomainError('EXECUTOR_UNAVAILABLE', 'Executor is unavailable', 503, true);
       }
       return integrations.require(agentId);
@@ -156,6 +167,25 @@ async function remoteRouter({ root, chats, ledger, remote }: {
     const off = remote.onAvailabilityChanged(availability => { if (availability === 'ready') { off(); resolve(); } });
   });
   return { router, integration, restored };
+}
+
+function availability(remote: Awaited<ReturnType<typeof connectRemoteExecutor>>, expected: ExecutorAvailability): Promise<void> {
+  return new Promise(resolve => {
+    const off = remote.onAvailabilityChanged(value => { if (value === expected) { off(); resolve(); } });
+  });
+}
+
+// Keeps the executor reconnecting until released: the next worker session
+// describes itself only then.
+function holdNextReconnect(native: ReturnType<typeof integrationFixture>): () => void {
+  const release = Promise.withResolvers<void>();
+  const getInfo = native.executor.getInfo;
+  native.executor.getInfo = async () => {
+    native.executor.getInfo = getInfo;
+    await release.promise;
+    return getInfo();
+  };
+  return () => release.resolve();
 }
 
 async function until(condition: () => boolean): Promise<void> {
@@ -355,5 +385,81 @@ for (const dialer of ['controller', 'worker'] as const) {
       });
       expect(router.isChatRunning(CHAT)).toBe(false);
     });
+  }, 30_000);
+
+  test(`a link lost as a turn binds its producer retries with a fresh binding and starts once (${dialer} dials)`, async () => {
+    await withRemoteRouter(dialer, async ({ router, native, controllerFault }) => {
+      const bindings: string[] = [];
+      controllerFault.inject = (encoded) => {
+        if (!encoded.includes('"method":"producers.bind"')) return null;
+        bindings.push(JSON.parse(encoded).request.binding.id);
+        return bindings.length === 1 ? 'disconnect' : null;
+      };
+      await router.startSession(CHAT, 'Synthetic input');
+
+      expect(native.calls.start).toBe(1);
+      expect(router.isChatRunning(CHAT)).toBe(true);
+      expect(bindings).toHaveLength(2);
+      expect(bindings[1]).not.toBe(bindings[0]);
+    });
+  }, 30_000);
+
+  test(`a turn admitted while the executor reconnects starts once it is ready (${dialer} dials)`, async () => {
+    await withRemoteRouter(dialer, async ({ router, native, remote, controller }) => {
+      const release = holdNextReconnect(native);
+      const reconnecting = availability(remote, 'reconnecting');
+      controller.disconnect();
+      await reconnecting;
+      const turn = router.startSession(CHAT, 'Synthetic input');
+      await until(() => router.isChatRunning(CHAT));
+      expect(native.calls.start).toBe(0);
+
+      release();
+      await turn;
+      expect(native.calls.start).toBe(1);
+      expect(router.isChatRunning(CHAT)).toBe(true);
+    });
+  }, 30_000);
+
+  test(`Stop cancels a turn held for a reconnecting executor without starting it (${dialer} dials)`, async () => {
+    await withRemoteRouter(dialer, async ({ router, ledger, native, integration, remote, controller }) => {
+      const release = holdNextReconnect(native);
+      const reconnecting = availability(remote, 'reconnecting');
+      controller.disconnect();
+      await reconnecting;
+      const admission = new AbortController();
+      const turn = router.startSession(CHAT, 'Synthetic input', {
+        executionAdmission: { signal: admission.signal, markStarted: async () => {} },
+      }).then(() => null, (error: unknown) => error);
+      await until(() => router.isChatRunning(CHAT));
+      // The execution coordinator's Stop aborts admission, then the session.
+      admission.abort(new Error('Synthetic stop'));
+      await router.abortSession(CHAT);
+      expect(await turn).toBeInstanceOf(Error);
+
+      const ready = availability(remote, 'ready');
+      release();
+      await ready;
+      await integration.execution.runningSessions();
+      expect(native.calls.start).toBe(0);
+      expect(runEnds(ledger)).toEqual([{ outcome: 'interrupted', origin: 'core' }]);
+    });
+  }, 30_000);
+
+  test(`a turn held past the reconnect grace fails before it starts, not with an unknown outcome (${dialer} dials)`, async () => {
+    await withRemoteRouter(dialer, async ({ router, ledger, native, remote, controller }) => {
+      const release = holdNextReconnect(native);
+      try {
+        const reconnecting = availability(remote, 'reconnecting');
+        controller.disconnect();
+        await reconnecting;
+        const failure = await router.startSession(CHAT, 'Synthetic input').then(() => null, (error: unknown) => error);
+
+        expect(failure).toMatchObject({ outcome: 'not-dispatched' });
+        expect(native.calls.start).toBe(0);
+        expect(runEnds(ledger)).toEqual([{ outcome: 'failed', origin: 'core' }]);
+        expect(runEnd(ledger)).toMatchObject({ error: EXECUTOR_DISCONNECTED_BEFORE_START });
+      } finally { release(); }
+    }, { reconnectGraceMs: 300 });
   }, 30_000);
 }
