@@ -152,7 +152,10 @@ delivered, so the outcome is unknown." For a launch, the relay then publishes
 the outcome on the binding behind that reply, so a running turn keeps a
 reachable handle and a failed one reports its own failure. A launch cancelled
 by Stop, shutdown, or deletion also ends with an unknown outcome, but the same
-action already ends or removes its run.
+action already ends or removes its run. A launch that fails on the worker
+reports a definite failure even when a nested call, such as a credential read,
+had an unknown outcome; an unknown credential read fails as "Provider
+credential could not be read from the controller. Try again."
 
 A binding the worker no longer holds, a restarted worker (new instance ID), or
 an expired controller grace falls back to the loss path: the controller fails

@@ -1,8 +1,9 @@
-import type {
-  AgentExecutionHandle,
-  AgentIntegration,
-  AgentProducerBinding,
-  AgentProducerNotification,
+import {
+  AgentCallError,
+  type AgentExecutionHandle,
+  type AgentIntegration,
+  type AgentProducerBinding,
+  type AgentProducerNotification,
 } from '@garcon/server-agent-interface';
 import { failureDetail } from '@garcon/server-agent-common/execution/producer-adapter';
 import type { AgentProducerFrame, ProducerAcknowledgement, ProducerResumeState } from '../transport/rpc-protocol.js';
@@ -134,7 +135,7 @@ export class ProducerRelay {
     run: () => Promise<AgentExecutionHandle>,
   ): Promise<AgentExecutionHandle> {
     const binding = this.#bindings.get(request.producerBinding.id);
-    if (binding?.integration !== integration) return run();
+    if (binding?.integration !== integration) return runLaunch(run);
     const launch: RelayedLaunch = { runId: request.runId, handle: null };
     binding.launch = launch;
     const publishIfReplyLost = (event: LaunchSettled) => {
@@ -144,7 +145,7 @@ export class ProducerRelay {
     };
     let handle: AgentExecutionHandle;
     try {
-      handle = await run();
+      handle = await runLaunch(run);
     } catch (error) {
       if (binding.launch === launch) {
         binding.launch = null;
@@ -349,6 +350,20 @@ export class ProducerRelay {
     if (binding.grace) clearTimeout(binding.grace.timer);
     this.#bindings.delete(binding.ref.id);
     this.#retainedBytes -= binding.retainedBytes;
+  }
+}
+
+// A launch that throws returns no handle, so the controller has no report to wait
+// for. An unknown outcome it carries belongs to a nested call, such as a
+// credential read, and must not reach the controller as a lost launch reply.
+async function runLaunch(run: () => Promise<AgentExecutionHandle>): Promise<AgentExecutionHandle> {
+  try {
+    return await run();
+  } catch (error) {
+    if (error instanceof AgentCallError && error.outcome === 'unknown') {
+      throw new AgentCallError('rejected', error.message, error.code);
+    }
+    throw error;
   }
 }
 

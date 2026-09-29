@@ -1,6 +1,6 @@
 import { expect, spyOn, test } from 'bun:test';
 import { AssistantMessage } from '@garcon/common/chat-types';
-import { type AgentProducerNotification, type ExecutorAvailability } from '@garcon/server-agent-interface';
+import { AgentCallError, type AgentProducerNotification, type ExecutorAvailability } from '@garcon/server-agent-interface';
 import { RemoteExecutorClient } from '../../client/executor-client.js';
 import {
   admissionFault, integrationFixture, linkOptions, outgoingFault, remoteFixture, requestFor,
@@ -269,6 +269,23 @@ for (const dialer of ['controller', 'worker'] as const) {
       expect(outcomes).toEqual([{ type: 'launch-settled', runId: request.runId, handle: expect.objectContaining({ kind: 'execution' }) }]);
       expect(worker.calls).toMatchObject({ start: 1, abort: 0 });
     } finally { release.resolve(); await fixture.dispose(); }
+  });
+
+  test(`a start that fails with a nested unknown outcome fails definitely (${dialer} dials)`, async () => {
+    const fixture = await remoteFixture(dialer);
+    try {
+      const integration = await fixture.executor.getAgentIntegration('test');
+      const request = await requestFor(integration);
+      const outcomes = launchOutcomes(integration);
+      fixture.generations[0]!.hooks.start = async () => {
+        throw new AgentCallError('unknown', 'Synthetic nested call outcome is unknown');
+      };
+      expect(await integration.execution.start(request).catch((error: unknown) => error)).toMatchObject({
+        outcome: 'rejected', message: 'Synthetic nested call outcome is unknown',
+      });
+      await integration.execution.runningSessions();
+      expect(outcomes).toEqual([]);
+    } finally { await fixture.dispose(); }
   });
 
   test(`a start request lost before the worker reports that it did not start (${dialer} dials)`, async () => {

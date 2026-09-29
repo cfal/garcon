@@ -1,6 +1,7 @@
 import { describe, expect, mock, test } from 'bun:test';
 import type { AssistantMessage } from '@garcon/common/chat-types';
 import {
+  AgentCallError,
   AgentIntegrationError,
   createAgentResourceRef,
   type AgentIntegration,
@@ -404,6 +405,24 @@ describe('ProducerRelay', () => {
     })).rejects.toThrow('Synthetic rejection');
 
     expect(live.sent).toEqual([]);
+    relay.dispose();
+  });
+
+  test('reports a launch that throws with a nested unknown outcome as a definite failure', async () => {
+    const relay = new ProducerRelay();
+    const { integration, binding } = integrationDouble();
+    relay.track(integration);
+    const live = session();
+    const ref = binding();
+    relay.bind(live, integration, ref);
+    const nested = new AgentCallError('unknown', 'Synthetic credential read outcome is unknown');
+    const untracked = binding();
+
+    for (const producerBinding of [ref, untracked]) {
+      await expect(relay.launch(live, integration, { producerBinding, runId: 'run-1' }, launchCall().call, async () => {
+        throw nested;
+      })).rejects.toMatchObject({ outcome: 'rejected', code: nested.code, message: nested.message });
+    }
     relay.dispose();
   });
 

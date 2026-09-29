@@ -2,11 +2,15 @@ import { expect, test } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { AgentEndpointSelection } from '../../../common/agent-execution.js';
 import { AssistantMessage } from '../../../common/chat-types.js';
+import { resolveAgentEndpoint } from '../../../server-agents/common/src/execution/resolve-endpoint.js';
+import { AgentCallError, type AgentHost } from '../../../server-agents/interface/src/index.js';
 import { ApiProviderEndpointResolver } from '../../../server/controller/api-providers/endpoint-resolver.js';
 import { ChatRegistry } from '../../../server/controller/chats/store.js';
 import { AgentDirectory, type ExecutionIntegrationDirectory } from '../../../server/controller/agents/directory.js';
 import { AgentEventBus } from '../../../server/controller/agents/event-bus.js';
+import { IntegrationHostFactory } from '../../../server/runtime/agents/integration-host.js';
 import { IntegrationRegistry } from '../../../server/runtime/agents/integration-registry.js';
 import { AgentRuntimeRouter } from '../../../server/controller/agents/runtime-router.js';
 import {
@@ -25,12 +29,35 @@ import { EXECUTOR_DISCONNECTED_BEFORE_START } from '../../../server/common/execu
 
 const EXECUTOR = '33333333-3333-4333-8333-333333333333';
 const CHAT = '1783725900000500';
+const SYNTHETIC_CREDENTIAL = { kind: 'token', value: 'synthetic-credential' };
+const CREDENTIALED_ENDPOINT = {
+  apiProviderId: 'synthetic-provider',
+  endpointId: 'synthetic-endpoint',
+  providerLabel: 'Synthetic provider',
+  protocol: 'openai-compatible',
+  baseUrl: 'https://example.test',
+  model: 'synthetic-model',
+  isLocal: false,
+  capabilities: { chatCompletions: false, responses: true },
+  headers: {},
+  credential: { kind: 'api-provider-endpoint', apiProviderId: 'synthetic-provider', endpointId: 'synthetic-endpoint', revision: 1 },
+} satisfies AgentEndpointSelection;
 
 type Dialer = 'controller' | 'worker';
 
+type RemoteRouterContext = Awaited<ReturnType<typeof remoteRouter>> & {
+  readonly ledger: TranscriptLedgerService;
+  readonly native: ReturnType<typeof integrationFixture>;
+  readonly controller: WebSocketLink;
+  readonly workerFault: ReturnType<typeof outgoingFault>;
+  readonly workerAdmission: ReturnType<typeof admissionFault>;
+  readonly controllerAdmission: ReturnType<typeof admissionFault>;
+  readonly credentialHost: AgentHost;
+};
+
 // Runs one chat's turns through the real runtime router against a worker over
 // real links, so a lost start reply crosses the same boundaries as production.
-async function withRemoteRouter(dialer: Dialer, run: (context: Awaited<ReturnType<typeof remoteRouter>>) => Promise<void>) {
+async function withRemoteRouter(dialer: Dialer, run: (context: RemoteRouterContext) => Promise<void>) {
   const root = await mkdtemp(join(tmpdir(), 'garcon-launch-reconnect-'));
   const chats = new ChatRegistry(root);
   await chats.init();
@@ -39,16 +66,36 @@ async function withRemoteRouter(dialer: Dialer, run: (context: Awaited<ReturnTyp
   const worker = new WebSocketLink({ ...linkOptions, executorId: EXECUTOR, role: 'worker' });
   const workerFault = outgoingFault(worker);
   const workerAdmission = admissionFault(worker);
+  const controllerAdmission = admissionFault(controller);
   const native = integrationFixture(root, EXECUTOR);
   const relay = new ProducerRelay();
   const serving: ReturnType<typeof serveExecutionRuntime>[] = [];
-  worker.onSession(session => serving.push(serveExecutionRuntime(native.executor, new ExecutorRpc(session), relay)));
-  const connected = connectRemoteExecutor(controller);
+  let workerRpc: ExecutorRpc | null = null;
+  worker.onSession(session => {
+    workerRpc = new ExecutorRpc(session);
+    serving.push(serveExecutionRuntime(native.executor, workerRpc, relay));
+  });
+  // Reads credentials from the controller over the current session, as the worker process does.
+  const credentialHost = new IntegrationHostFactory({
+    workspaceDir: root,
+    executorId: EXECUTOR,
+    resolveCredential: ({ agentId, reference, signal }) => {
+      const rpc = workerRpc;
+      if (!rpc) throw new AgentCallError('not-dispatched', 'Executor controller is disconnected');
+      return rpc.call(agentId, 'credentials.resolve', { reference }, { signal });
+    },
+  }).forAgent('test');
+  // Serves those reads, as the controller's executor manager does.
+  const connected = connectRemoteExecutor(controller, rpc => rpc.handle(async call => {
+    if (call.method !== 'credentials.resolve') throw new AgentCallError('rejected', 'Operation is not permitted on the controller');
+    return SYNTHETIC_CREDENTIAL;
+  }));
   if (dialer === 'controller') controller.dial(worker.listen());
   else worker.dial(controller.listen());
   const remote = await connected;
   try {
-    await run(await remoteRouter({ root, chats, ledger, controller, native, remote, workerFault, workerAdmission }));
+    const routed = await remoteRouter({ root, chats, ledger, remote });
+    await run({ ...routed, ledger, native, controller, workerFault, workerAdmission, controllerAdmission, credentialHost });
   } finally {
     ledger.close();
     await remote.dispose();
@@ -61,15 +108,11 @@ async function withRemoteRouter(dialer: Dialer, run: (context: Awaited<ReturnTyp
   }
 }
 
-async function remoteRouter({ root, chats, ledger, controller, native, remote, workerFault, workerAdmission }: {
+async function remoteRouter({ root, chats, ledger, remote }: {
   readonly root: string;
   readonly chats: ChatRegistry;
   readonly ledger: TranscriptLedgerService;
-  readonly controller: WebSocketLink;
-  readonly native: ReturnType<typeof integrationFixture>;
   readonly remote: Awaited<ReturnType<typeof connectRemoteExecutor>>;
-  readonly workerFault: ReturnType<typeof outgoingFault>;
-  readonly workerAdmission: ReturnType<typeof admissionFault>;
 }) {
   const integration = await remote.getAgentIntegration('test');
   const integrations = new IntegrationRegistry({ instances: [integration] });
@@ -109,7 +152,7 @@ async function remoteRouter({ root, chats, ledger, controller, native, remote, w
   const restored = () => new Promise<void>(resolve => {
     const off = remote.onAvailabilityChanged(availability => { if (availability === 'ready') { off(); resolve(); } });
   });
-  return { router, ledger, native, integration, controller, restored, workerFault, workerAdmission };
+  return { router, integration, restored };
 }
 
 async function until(condition: () => boolean): Promise<void> {
@@ -199,6 +242,37 @@ for (const dialer of ['controller', 'worker'] as const) {
       await router.abortSession(CHAT);
       await until(() => native.calls.abort === 1);
       expect(runEnd(ledger)).toMatchObject({ outcome: 'interrupted', origin: 'core' });
+    });
+  }, 30_000);
+
+  test(`a start that fails with a nested unknown outcome fails its turn (${dialer} dials)`, async () => {
+    await withRemoteRouter(dialer, async ({ router, ledger, native }) => {
+      native.hooks.start = async () => {
+        throw new AgentCallError('unknown', 'Synthetic nested call outcome is unknown');
+      };
+      await expect(router.startSession(CHAT, 'Synthetic input')).rejects.toMatchObject({ outcome: 'rejected' });
+
+      expect(router.isChatRunning(CHAT)).toBe(false);
+      expect(runEnd(ledger)).toMatchObject({
+        outcome: 'failed', origin: 'core', error: { message: 'Synthetic nested call outcome is unknown' },
+      });
+    });
+  }, 30_000);
+
+  test(`a start whose credential read the controller could not answer fails its turn and can be retried (${dialer} dials)`, async () => {
+    await withRemoteRouter(dialer, async ({ router, ledger, native, controllerAdmission, credentialHost }) => {
+      native.hooks.start = async ({ admission }) => {
+        await resolveAgentEndpoint(credentialHost, CREDENTIALED_ENDPOINT, admission.signal);
+      };
+      const unreadable = 'Provider credential could not be read from the controller. Try again.';
+      controllerAdmission.refuseNext(encoded => encoded.includes('"type":"result"') && encoded.includes(SYNTHETIC_CREDENTIAL.value));
+      await expect(router.startSession(CHAT, 'Synthetic input')).rejects.toMatchObject({ outcome: 'rejected', message: unreadable });
+
+      expect(router.isChatRunning(CHAT)).toBe(false);
+      expect(runEnd(ledger)).toMatchObject({ outcome: 'failed', origin: 'core', error: { message: unreadable } });
+      await router.startSession(CHAT, 'Synthetic retry');
+      expect(router.isChatRunning(CHAT)).toBe(true);
+      expect(native.calls.start).toBe(2);
     });
   }, 30_000);
 
