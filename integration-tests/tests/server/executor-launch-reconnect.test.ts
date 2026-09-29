@@ -462,4 +462,62 @@ for (const dialer of ['controller', 'worker'] as const) {
       } finally { release(); }
     }, { reconnectGraceMs: 300 });
   }, 30_000);
+
+  test(`a start lost as it is sent runs once after the executor reconnects, and Stop reaches it (${dialer} dials)`, async () => {
+    await withRemoteRouter(dialer, async ({ router, ledger, native, controllerFault, restored }) => {
+      let sent = 0;
+      controllerFault.inject = (encoded) => {
+        if (!encoded.includes('"method":"execution.start"')) return null;
+        sent += 1;
+        return sent === 1 ? 'disconnect' : null;
+      };
+      const reconnected = restored();
+      await router.startSession(CHAT, 'Synthetic input');
+      expect(router.isChatRunning(CHAT)).toBe(true);
+
+      await reconnected;
+      await until(() => native.calls.start === 1);
+      await router.abortSession(CHAT);
+      await until(() => native.calls.abort === 1);
+      expect(sent).toBe(2);
+      expect(runEnds(ledger)).toEqual([{ outcome: 'interrupted', origin: 'core' }]);
+    });
+  }, 30_000);
+
+  test(`a start the worker received is not sent again when its failure reply is lost (${dialer} dials)`, async () => {
+    await withRemoteRouter(dialer, async ({ router, ledger, native, workerFault, restored }) => {
+      native.hooks.start = async () => { throw new Error('Synthetic start failure'); };
+      workerFault.inject = (encoded) => {
+        if (!encoded.includes('"type":"error"') || !encoded.includes('Synthetic start failure')) return null;
+        workerFault.inject = () => null;
+        return 'disconnect';
+      };
+      const reconnected = restored();
+      await router.startSession(CHAT, 'Synthetic input');
+      expect(router.isChatRunning(CHAT)).toBe(true);
+
+      await reconnected;
+      await until(() => !router.isChatRunning(CHAT));
+      expect(native.calls.start).toBe(1);
+      expect(runEnd(ledger)).toMatchObject({ outcome: 'failed', origin: 'core', error: EXECUTOR_DISCONNECTED_BEFORE_START });
+    });
+  }, 30_000);
+
+  test(`a start whose relaunch is lost as well fails before it starts (${dialer} dials)`, async () => {
+    await withRemoteRouter(dialer, async ({ router, ledger, native, controllerFault }) => {
+      let sent = 0;
+      controllerFault.inject = (encoded) => {
+        if (!encoded.includes('"method":"execution.start"')) return null;
+        sent += 1;
+        return 'disconnect';
+      };
+      await router.startSession(CHAT, 'Synthetic input');
+
+      await until(() => !router.isChatRunning(CHAT));
+      expect(sent).toBe(2);
+      expect(native.calls.start).toBe(0);
+      expect(runEnd(ledger)).toMatchObject({ outcome: 'failed', origin: 'core', error: EXECUTOR_DISCONNECTED_BEFORE_START });
+    });
+  }, 30_000);
 }
+

@@ -80,7 +80,7 @@ describe('ProducerRelay', () => {
     const second = session();
 
     expect(relay.resume(second, integration, [{ binding: ref, acknowledgedSeq: 1 }]))
-      .toEqual([{ bindingId: ref.id, replayThroughSeq: 3, launch: null }]);
+      .toEqual([{ bindingId: ref.id, replayThroughSeq: 3, launch: null, receivedRunIds: [] }]);
     expect(first.frames().map((frame) => frame.seq)).toEqual([1, 2, 3]);
     expect(second.frames().map((frame) => frame.seq)).toEqual([3]);
     publish({ binding: ref, event: rows('four') });
@@ -211,7 +211,7 @@ describe('ProducerRelay', () => {
     const second = session();
 
     expect(relay.resume(second, integration, [{ binding: ref, acknowledgedSeq: 0 }]))
-      .toEqual([{ bindingId: ref.id, replayThroughSeq: 1, launch: null }]);
+      .toEqual([{ bindingId: ref.id, replayThroughSeq: 1, launch: null, receivedRunIds: [] }]);
     expect(second.frames().map((frame) => frame.seq)).toEqual([1]);
     relay.dispose();
   });
@@ -336,7 +336,7 @@ describe('ProducerRelay', () => {
     const second = session();
 
     expect(relay.resume(second, integration, [{ binding: ref, acknowledgedSeq: 0 }]))
-      .toEqual([{ bindingId: ref.id, replayThroughSeq: 0, launch: { runId: 'run-1', handle: null } }]);
+      .toEqual([{ bindingId: ref.id, replayThroughSeq: 0, launch: { runId: 'run-1', handle: null }, receivedRunIds: ['run-1'] }]);
     release.resolve(handle);
     await launch;
     relay.suspend(second);
@@ -346,6 +346,27 @@ describe('ProducerRelay', () => {
     publish({ binding: ref, event: { type: 'run-ended', runId: 'run-1', outcome: 'finished' } });
     relay.suspend(third);
     expect(relay.resume(session(), integration, [{ binding: ref, acknowledgedSeq: 2 }])[0]!.launch).toBeNull();
+    relay.dispose();
+  });
+
+  test('reports the runs of the latest launches it received', async () => {
+    const relay = new ProducerRelay();
+    const { integration, binding } = integrationDouble();
+    relay.track(integration);
+    const first = session();
+    const ref = binding();
+    relay.bind(first, integration, ref);
+    const handle = createAgentResourceRef(SCOPE, 'execution');
+    for (let run = 1; run <= 10; run += 1) {
+      await relay.launch(first, integration, { producerBinding: ref, runId: `run-${run}` }, undeliveredReplies().observe, async () => handle);
+    }
+    await relay.launch(first, integration, { producerBinding: ref, runId: 'run-failed' }, undeliveredReplies().observe, async () => {
+      throw new Error('Synthetic launch failure');
+    }).catch(() => null);
+    relay.suspend(first);
+
+    expect(relay.resume(session(), integration, [{ binding: ref, acknowledgedSeq: 0 }])[0]!.receivedRunIds)
+      .toEqual(['run-4', 'run-5', 'run-6', 'run-7', 'run-8', 'run-9', 'run-10', 'run-failed']);
     relay.dispose();
   });
 

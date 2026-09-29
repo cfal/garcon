@@ -6,10 +6,12 @@ import {
   type AgentIntegration,
   type AgentImportedTranscriptRow,
   type AgentProducerBinding,
+  type AgentExecutionHandle,
   type AgentProducerNotification,
   type AgentResourceScope,
   type ExecutorCallOptions,
 } from '@garcon/server-agent-interface';
+import { failureDetail } from '@garcon/server-agent-common/execution/producer-adapter';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import type {
   ExecutorRpcMethods, IntegrationManifest, ProducerAcknowledgement, ProducerResumeState,
@@ -31,6 +33,12 @@ const UNREADABLE_EVENT_FAILURE = {
   message: 'An event from the executor could not be read, so this turn\'s outcome is unknown. Native history may contain additional output.',
 } as const;
 
+// A start, resume, or compaction whose outcome never reached the controller.
+interface UnsettledLaunch {
+  // Sends the same request on a replacement session, at most once.
+  send: ((backing: RemoteSessionBacking) => Promise<AgentExecutionHandle>) | null;
+}
+
 interface RemoteProducerBinding {
   readonly ref: AgentProducerBinding;
   // The session whose frames this binding accepts; a lost session stays here
@@ -38,8 +46,8 @@ interface RemoteProducerBinding {
   backing: RemoteSessionBacking;
   receivedSeq: number;
   acknowledgedSeq: number;
-  // Runs whose start, resume, or compaction outcome never reached the controller.
-  readonly unsettledLaunches: Set<string>;
+  // Keyed by run ID.
+  readonly unsettledLaunches: Map<string, UnsettledLaunch>;
   // The worker's view at resume, applied once the replay reaches it to the
   // runs already unsettled when resume was requested. The report cannot
   // describe a launch dispatched later, which settles through its own reply.
@@ -99,16 +107,19 @@ export class RemoteAgentIntegration implements AgentIntegration {
       method: K, request: ExecutorRpcMethods[K]['request'], options?: ExecutorCallOptions,
     ) => {
       // Native admission may outlive the default RPC deadline; Stop and session loss still cancel it.
-      const { backing: { rpc }, timeoutMs } = await sessions.acquire({ signal: options?.signal, timeoutMs: options?.timeoutMs ?? null });
+      const { backing, timeoutMs } = await sessions.acquire({ signal: options?.signal, timeoutMs: options?.timeoutMs ?? null });
+      const send = ({ rpc }: RemoteSessionBacking, deadline: number | null) => rpc.call(this.descriptor.id, method, request, {
+        ...options,
+        timeoutMs: deadline,
+        onLateResult: (handle) => rpc.call(this.descriptor.id, 'execution.abort', handle),
+      });
       const state = this.#bindings.get(request.producerBinding.id);
       try {
-        return await rpc.call(this.descriptor.id, method, request, {
-          ...options,
-          timeoutMs,
-          onLateResult: (handle) => rpc.call(this.descriptor.id, 'execution.abort', handle),
-        });
+        return await send(backing, timeoutMs);
       } catch (error) {
-        if (error instanceof AgentCallError && error.outcome === 'unknown') state?.unsettledLaunches.add(request.runId);
+        if (error instanceof AgentCallError && error.outcome === 'unknown') {
+          state?.unsettledLaunches.set(request.runId, { send: (replacement) => send(replacement, null) });
+        }
         throw error;
       }
     };
@@ -125,7 +136,7 @@ export class RemoteAgentIntegration implements AgentIntegration {
         const { backing, timeoutMs } = await sessions.acquire(options);
         if (!isAgentResourceRef(request.binding, 'producer', backing.manifests.get(this.descriptor.id)!.scope)) throw new AgentCallError('rejected', 'Producer scope mismatch', 'STALE_RESOURCE');
         const state: RemoteProducerBinding = {
-          ref: request.binding, backing, receivedSeq: 0, acknowledgedSeq: 0, unsettledLaunches: new Set(), resumeReport: null,
+          ref: request.binding, backing, receivedSeq: 0, acknowledgedSeq: 0, unsettledLaunches: new Map(), resumeReport: null,
           lostOutputReported: false,
         };
         this.#bindings.set(request.binding.id, state);
@@ -280,7 +291,7 @@ export class RemoteAgentIntegration implements AgentIntegration {
   async resume(backing: RemoteSessionBacking): Promise<void> {
     const suspended = [...this.#bindings.values()].filter((state) => state.backing !== backing);
     if (suspended.length === 0) return;
-    const lostRunIds = new Map(suspended.map((state) => [state, [...state.unsettledLaunches]]));
+    const lostRunIds = new Map(suspended.map((state) => [state, [...state.unsettledLaunches.keys()]]));
     for (const state of suspended) state.backing = backing;
     const { resumed } = await backing.rpc.call(this.descriptor.id, 'producers.resume', {
       bindings: suspended.map((state) => ({ binding: state.ref, acknowledgedSeq: state.receivedSeq })),
@@ -381,20 +392,47 @@ export class RemoteAgentIntegration implements AgentIntegration {
   // Settles launches whose replies were lost once the replay reaches the
   // worker's resume report, so every event it published earlier, such as a
   // run's end, is applied first. A launch the worker has not finished reports
-  // its own outcome on the binding later.
+  // its own outcome on the binding later. A launch the worker never received
+  // is sent again once on the replacement session; one it received that left
+  // no record failed before its reply was lost, so it is not repeated.
   #settleLostLaunches(state: RemoteProducerBinding): void {
     const pending = state.resumeReport;
     if (!pending || state.receivedSeq < pending.report.replayThroughSeq) return;
     state.resumeReport = null;
     for (const runId of pending.runIds) {
-      if (!state.unsettledLaunches.has(runId)) continue;
+      const lost = state.unsettledLaunches.get(runId);
+      if (!lost) continue;
       const launch = pending.report.launch?.runId === runId ? pending.report.launch : null;
       if (launch && !launch.handle) continue;
+      if (!launch && lost.send && !pending.report.receivedRunIds.includes(runId)) {
+        this.#relaunch(state, runId, lost, lost.send);
+        continue;
+      }
       state.unsettledLaunches.delete(runId);
       this.#emit({ binding: state.ref, event: launch?.handle
         ? { type: 'launch-settled', runId, handle: launch.handle }
         : { type: 'launch-settled', runId, error: EXECUTOR_DISCONNECTED_BEFORE_START } });
     }
+  }
+
+  // Its outcome settles the run like a lost launch's. If this reply is lost too,
+  // the next resume report settles the run without sending it again.
+  #relaunch(
+    state: RemoteProducerBinding, runId: string, lost: UnsettledLaunch,
+    send: (backing: RemoteSessionBacking) => Promise<AgentExecutionHandle>,
+  ): void {
+    lost.send = null;
+    const settle = (event: Extract<AgentProducerNotification['event'], { readonly type: 'launch-settled' }>) => {
+      if (state.unsettledLaunches.get(runId) !== lost) return;
+      state.unsettledLaunches.delete(runId);
+      this.#emit({ binding: state.ref, event });
+    };
+    void send(state.backing).then(
+      (handle) => settle({ type: 'launch-settled', runId, handle }),
+      (error: unknown) => {
+        if (!(error instanceof AgentCallError && error.outcome === 'unknown')) settle({ type: 'launch-settled', runId, error: failureDetail(error) });
+      },
+    );
   }
 
   // A listener that throws would otherwise retire the session delivering the event,
@@ -442,7 +480,8 @@ function isResumeState(value: unknown, scope: AgentResourceScope): value is Prod
   const launch = report?.launch;
   return typeof report?.bindingId === 'string' && Number.isSafeInteger(report.replayThroughSeq) && report.replayThroughSeq! >= 0
     && (launch === null || (typeof launch?.runId === 'string'
-      && (launch.handle === null || isAgentResourceRef(launch.handle, 'execution', scope))));
+      && (launch.handle === null || isAgentResourceRef(launch.handle, 'execution', scope))))
+    && Array.isArray(report.receivedRunIds) && report.receivedRunIds.every((runId) => typeof runId === 'string');
 }
 
 // Rebuilds a producer event received from the worker; throws when it is malformed.

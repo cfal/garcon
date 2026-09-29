@@ -129,13 +129,15 @@ export interface ProducerAcknowledgement {
 }
 
 // What a resumed binding looked like on the worker when it replied: the last
-// sequence number its replay delivers, and its latest start, resume, or
-// compaction until that run ends or the launch fails. A null handle means the
-// launch has not returned yet; its outcome follows on the binding.
+// sequence number its replay delivers, its latest start, resume, or compaction
+// until that run ends or the launch fails, and the runs of its latest launches
+// the worker received. A null handle means the launch has not returned yet; its
+// outcome follows on the binding.
 export interface ProducerResumeState {
   readonly bindingId: string;
   readonly replayThroughSeq: number;
   readonly launch: { readonly runId: string; readonly handle: AgentExecutionHandle | null } | null;
+  readonly receivedRunIds: readonly string[];
 }
 
 // Controller-to-worker, fire-and-forget: releases buffered frames through `seq`.

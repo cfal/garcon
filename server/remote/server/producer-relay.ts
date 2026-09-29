@@ -24,6 +24,9 @@ const PRODUCER_SUPERSEDED_GRACE_MS = 5 * 60 * 1000;
 // queue, so the backlog need not fit that queue.
 const RETAINED_BYTES = 32 * 1024 * 1024;
 const PUMP_RETRY_MS = 10;
+// A chat launches one run at a time, so only its latest launches can have lost
+// their requests with a session.
+const RECEIVED_LAUNCHES = 8;
 
 export interface ProducerRelaySession {
   // Returns false when the session cannot take the frame now; the relay keeps
@@ -60,6 +63,9 @@ interface RelayedBinding {
   grace: { readonly timer: ReturnType<typeof setTimeout>; readonly deadline: number } | null;
   // The latest launch until its run ends or it fails, reported on resume.
   launch: RelayedLaunch | null;
+  // Run IDs of the latest launches received, oldest first, reported on resume
+  // so the controller relaunches only a request the worker never received.
+  readonly received: string[];
 }
 
 interface UnsentFrame {
@@ -87,7 +93,9 @@ export interface ProducerRelayOptions {
 // the controller sees the skipped sequence numbers as a delivery gap. A launch
 // whose reply is lost with its session reaches the controller the same way:
 // the resume reply reports each binding's latest launch, and a launch that
-// settles after its session was lost publishes its outcome on the binding.
+// settles after its session was lost publishes its outcome on the binding. The
+// reply also lists the launches received, so the controller can send again one
+// whose request never arrived.
 export class ProducerRelay {
   readonly #bindings = new Map<string, RelayedBinding>();
   readonly #subscriptions = new Map<AgentIntegration, () => void>();
@@ -114,7 +122,7 @@ export class ProducerRelay {
 
   bind(session: ProducerRelaySession, integration: AgentIntegration, ref: AgentProducerBinding): void {
     this.#bindings.set(ref.id, {
-      integration, ref, seq: 0, retained: [], sent: 0, retainedBytes: 0, session, grace: null, launch: null,
+      integration, ref, seq: 0, retained: [], sent: 0, retainedBytes: 0, session, grace: null, launch: null, received: [],
     });
   }
 
@@ -130,6 +138,8 @@ export class ProducerRelay {
   ): Promise<AgentExecutionHandle> {
     const binding = this.#bindings.get(request.producerBinding.id);
     if (binding?.integration !== integration) return runLaunch(run);
+    binding.received.push(request.runId);
+    if (binding.received.length > RECEIVED_LAUNCHES) binding.received.shift();
     const launch: RelayedLaunch = { runId: request.runId, handle: null };
     binding.launch = launch;
     const publishIfReplyLost = (event: LaunchSettled) => {
@@ -205,6 +215,7 @@ export class ProducerRelay {
         bindingId: ref.id,
         replayThroughSeq: this.#pinReplayTail(binding, acknowledgedSeq),
         launch: binding.launch && { runId: binding.launch.runId, handle: binding.launch.handle },
+        receivedRunIds: [...binding.received],
       });
     }
     this.#pump();

@@ -320,7 +320,7 @@ for (const dialer of ['controller', 'worker'] as const) {
     } finally { await fixture.dispose(); }
   });
 
-  test(`a start request lost before the worker reports that it did not start (${dialer} dials)`, async () => {
+  test(`a start request the worker never received is sent once more on the replacement session (${dialer} dials)`, async () => {
     let fault!: ReturnType<typeof outgoingFault>;
     const fixture = await remoteFixture(dialer, (controller) => { fault = outgoingFault(controller); });
     try {
@@ -331,9 +331,11 @@ for (const dialer of ['controller', 'worker'] as const) {
       const ready = nextAvailability(fixture.executor, 'ready');
       expect(await integration.execution.start(request).catch((error: unknown) => error)).toMatchObject({ outcome: 'unknown' });
       await ready;
-      await integration.execution.runningSessions();
-      expect(outcomes).toEqual([{ type: 'launch-settled', runId: request.runId, error: EXECUTOR_DISCONNECTED_BEFORE_START }]);
-      expect(fixture.generations[0]!.calls.start).toBe(0);
+      const deadline = performance.now() + 10_000;
+      while (outcomes.length === 0 && performance.now() < deadline) await Bun.sleep(5);
+
+      expect(outcomes).toEqual([{ type: 'launch-settled', runId: request.runId, handle: expect.objectContaining({ kind: 'execution' }) }]);
+      expect(fixture.generations[0]!.calls.start).toBe(1);
     } finally { await fixture.dispose(); }
   });
 
