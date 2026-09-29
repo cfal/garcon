@@ -160,7 +160,13 @@ have one.
 
 A stalled event loop looks like a lost link to its peer. Work proportional to a
 whole transcript or native history therefore runs in bounded steps or on a
-Worker, and both processes log event-loop stalls of 250 ms or more.
+Worker, and both processes log event-loop stalls of 250 ms or more. Stepped
+work runs in named `EventLoopSteps`, and a step that holds the loop for 50 ms or
+more is logged with its operation name (`executor-slow-step` on a worker). Each
+closed connection that carried a session is logged with its cause and the
+link's running count for that cause (`executor-link-closed` on a worker):
+`liveness-timeout`, `socket-closed`, `socket-error`, `protocol-error`,
+`session-retired`, or `local-close`.
 
 Only producer notifications and launch outcomes resume. Other RPC replies lost
 with a session remain uncertain outcomes, and requests are never resent. Hung
