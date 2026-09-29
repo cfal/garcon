@@ -1,6 +1,6 @@
 # Transcript Ledger V5 Conformance Test Suite
 
-Status: Revision 39 integrated catalog. PR #500 release acceptance is anchored
+Status: Revision 41 integrated catalog. PR #500 release acceptance is anchored
 historically at squash merge
 `80540fc80399957ebcfe18cb2c2a741938e5cf64`; the current post-merge corrections
 include PR #518, PR #521 presentation-only chat rows, the PR #527 native-drift
@@ -47,10 +47,18 @@ catalog inclusion is disabled. Revision 39 distinguishes combined-tool warm
 windows from bounded cold-cache restoration and treats collapsed tool groups
 as client-only projections of individually addressed ledger rows.
 
+Revision 40 makes the complete provider integration an executor boundary:
+events reach the ledger through instance-scoped producer bindings, and remote
+delivery is bounded and ordered. Revision 41 resumes remote producer bindings
+across an executor disconnect within a bounded grace, settles launches whose
+replies were lost with a session, and runs whole-view staging, copying, and
+deletion in bounded steps. Neither revision adds inventory IDs; the inventory
+has been unchanged since PR #691.
+
 Governing artifact:
 
-- `docs/transcript-ledger-v5-design.md`, revision 39, SHA-256
-  `ae917d66c3c875c8881834639d9394fd4d4dd8e27fb09b5ab21233a01803c60d`
+- `docs/transcript-ledger-v5-design.md`, revision 41, SHA-256
+  `4a9cd1beb0e3ed680b2ac0e2465279da4751f3c3413935fcbc8925f4d6d599a3`
 
 Current inventory: 419 discovered stable IDs, validated by
 `scripts/validate-transcript-ledger-v5-cases.js` against
@@ -274,7 +282,7 @@ release-only replay and hygiene evidence below.
 | 1     | `bun run test:transcript-inventory`   | Stable-ID discovery and inventory integrity                                  |
 | 2     | `git diff --check origin/main...HEAD` | Patch hygiene                                                                |
 | 3     | `bun run typecheck`                   | Provider packages, server, CLI, web, and integration contracts               |
-| 4     | `bun run check`                       | ESLint and Svelte diagnostics                                                |
+| 4     | `bun run check`                       | ESLint plus every typecheck, including Svelte diagnostics                    |
 | 5     | `bun run test`                        | Common, scripts, every provider unit, server unit, CLI, and web Vitest cases |
 | 6     | `bun run test:integration:server`     | Server black-box and required provider-scripted cases                        |
 | 7     | `bun run test:integration:e2e`        | Lightpanda browser behavior                                                  |
@@ -920,8 +928,8 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-L09.03-ROUTE-UNIT-01      | `server/controller/routes/__tests__/chats-messages.test.js`: only a newest-history request may carry activation and earlier activation is rejected | L09.03 |
 | TLV5-L09.03-RUNTIME-UNIT-01    | `server/controller/agents/__tests__/runtime-router-seed.test.js`: native resume has no native-activity scheduling dependency | L09.03 |
 | TLV5-L09.03-SNAPSHOT-ROUTE-UNIT-01 | `server/controller/routes/__tests__/chat-snapshot.test.js`: bounded background snapshots do not activate the probe | L09.03 |
-| TLV5-L09.03-WEB-BACKGROUND-01  | `web/src/lib/chat/transcript/__tests__/background-transcript-loader.test.ts`: background visible-demand paging carries no activation purpose | L09.03 |
-| TLV5-L09.03-WEB-PREVIEW-01     | `web/src/lib/chat/transcript/__tests__/chat-window-preview-store.test.ts`: Chat-window preview paging carries no activation purpose | L09.03 |
+| TLV5-L09.03-WEB-BACKGROUND-01  | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: `fills a rendered panel across hidden raw budgets without activation` | L09.03 |
+| TLV5-L09.03-WEB-PREVIEW-01     | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: `fills a rendered panel across hidden raw budgets without activation` | L09.03 |
 | TLV5-L09.03-WEB-UNIT-01        | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: only active newest visible demand is marked across hidden raw budgets | L09.03 |
 | TLV5-L09.04-CORE-UNIT-01       | `server/controller/ledger/__tests__/native-activity.test.js`: every changed agent, view, session ordinal/ref, or provider ordinal/timestamp supersedes and fences the old attempt | L09.04 |
 | TLV5-L09.04-CORE-UNIT-02       | `server/controller/ledger/__tests__/native-activity.test.js`: ineligible, failed, execution-owned, invalid, unavailable, and timed-out probes emit nothing | L09.04 |
@@ -1032,15 +1040,10 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-A12-PI-SCRIPTED-01        | `integration-tests/tests/server/pi-scripted-persistence.test.ts`: Pi output lost before core acceptance or native persistence is not synthesized after crash/restart | A12 |
 | TLV5-A13-SERVER-HANDOFF-01     | `integration-tests/tests/server/native-transcript-reload.test.ts`: old-owner native activity appended after handoff cannot enter the frozen prefix on later Reload | A13 |
 | TLV5-PERM.04-CODEX-SCRIPTED-01 | `integration-tests/tests/server/codex-producer-routing.test.ts`: `keeps reused native approval ids bound to their exact occurrences`                      | PERM.04, PERM.05            |
-| TLV5-L10.01-CODEX-STATIC-01    | `server-agents/codex/src/agents/codex/app-server/controller/__tests__/architecture.test.js`: live runtime does not import the history loader                         | L10.01, R3                  |
-| TLV5-R03-CODEX-SCRIPTED-01     | `integration-tests/tests/server/codex-scripted-interrupt.test.ts`: `imports a long native tool tail before exactly one final assistant message`           | L02.02, L10.01              |
-| TLV5-SEARCH.01-CORE-UNIT-01    | `server/controller/chats/search/__tests__/controller.test.js`: `indexes repeated ordinary commits only as ordered suffixes`                                          | R5                          |
-| TLV5-SEARCH.02-CORE-UNIT-01    | `server/controller/chats/search/__tests__/controller.test.js`: `absorbs a rejected indexing job and continues same-chat and cross-chat queues`                       | R6, L11.03                  |
-| TLV5-SEARCH.02-RESYNC-SERVICE-UNIT-01 | `server/controller/chats/search/__tests__/controller-service.test.js`: rejected chat-A replacements during startup and worker resync remain per-chat while chat B stays searchable | SEARCH.02, L11.03 |
-| TLV5-SEARCH.02-SERVICE-UNIT-01 | `server/controller/chats/search/__tests__/controller-service.test.js`: a held chat-A acknowledgement permits chat B to finish, preserves A ordering, and gives prune an exclusive barrier | SEARCH.02, L11.03 |
-| TLV5-SEARCH.05-CORE-UNIT-01    | `server-agents/common/src/search/__tests__/transcript-search.test.ts`: index health is qualified by the current view and authoritative frontier | SEARCH.05 |
-| TLV5-SEARCH.05-SERVICE-UNIT-01 | `server/controller/chats/search/__tests__/controller-service.test.js`: terminal failure records bounded failed state and acknowledged full repair clears it | SEARCH.05 |
-| TLV5-SEARCH.05-ZERO-ROW-CORE-UNIT-01 | `server-agents/common/src/search/__tests__/transcript-search.test.ts`: a valid zero-searchable-row view is indexed at its frontier and later same-view content remains searchable | SEARCH.05, L01.02 |
+| TLV5-L10.01-CODEX-STATIC-01    | `server-agents/codex/src/agents/codex/app-server/__tests__/architecture.test.js`: `does not load complete native history during live execution`                  | L10.01, R3                  |
+| TLV5-R03-CODEX-SCRIPTED-01     | `integration-tests/tests/server/codex-scripted-interrupt.test.ts`: `imports a long legacy native tool tail before exactly one final assistant message`    | L02.02, L10.01              |
+| TLV5-SEARCH.01-CORE-01         | `server/controller/chats/search/__tests__/controller.test.js`: `commits use one ordered append frame`                                                                 | R5                          |
+| TLV5-SEARCH.02-CORE-01         | `server/controller/chats/search/__tests__/controller.test.js`: `indexing failures do not block later chat work`                                                      | R6, L11.03                  |
 | TLV5-HANDOFF.05-SERVER-01      | `integration-tests/tests/server/repeated-agent-handoff.test.ts`: `recovers one pending handoff while another chat remains fenced`                         | R8, L11.03                  |
 | TLV5-L11.01-SERVER-01          | `integration-tests/tests/server/transcript-corruption-isolation.test.ts`: `fences only the chat whose SQLite ledger is corrupt`                           | L11.01                      |
 | TLV5-L11.01-STORE-UNIT-02      | `server/controller/ledger/__tests__/store.test.js`: `read-fences a query failure raised inside a write workflow`                                                      | L11.01                      |
@@ -1056,10 +1059,10 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-PAGE.08-SERVER-UNIT-02    | `server/controller/ledger/__tests__/view-reader.test.js`: an ordinal-one boundary performs one empty raw scan and reports ceiling zero with no continuation          | PAGE.08                     |
 | TLV5-PAGE.08-WEB-CONTRACT-01   | `web/src/lib/api/__tests__/chats-contract.test.ts`: a request beyond the watermark accepts the clamped raw ceiling and exact continuation                 | PAGE.08                     |
 | TLV5-PAGE.09-SERVER-UNIT-01    | `server/controller/ledger/__tests__/view-reader.test.js`: one hidden-only raw page returns no messages and advances without a presentation scan loop                 | PAGE.09                     |
-| TLV5-PAGE.09-WEB-BACKGROUND-01 | `web/src/lib/chat/transcript/__tests__/background-transcript-loader.test.ts`: background newest loading crosses two hidden raw budgets and installs the aggregated bounded snapshot once | PAGE.09 |
+| TLV5-PAGE.09-WEB-BACKGROUND-01 | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: `fills a rendered panel across hidden raw budgets without activation` | PAGE.09 |
 | TLV5-PAGE.09-WEB-CONTRACT-01   | `web/src/lib/api/__tests__/chats-contract.test.ts`: the client contract accepts an empty presented page with a strict raw continuation                    | PAGE.09                     |
-| TLV5-PAGE.09-WEB-WINDOW-PREVIEW-01 | `web/src/lib/chat/transcript/__tests__/chat-window-preview-store.test.ts`: window-preview loading crosses two hidden raw budgets before installing its visible target | PAGE.09                  |
-| TLV5-PAGE.09-WEB-STATIC-01     | `web/src/lib/chat/transcript/__tests__/transcript-retention-architecture.logic.test.ts`: active, background, and window-preview newest paths call the shared visible-demand helper | PAGE.09, supplementary |
+| TLV5-PAGE.09-WEB-WINDOW-PREVIEW-01 | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: `fills a rendered panel across hidden raw budgets without activation` | PAGE.09                  |
+| TLV5-PAGE.09-WEB-STATIC-01     | `web/src/lib/chat/transcript/__tests__/transcript-retention-architecture.logic.test.ts`: `routes rendered-panel snapshots through visible-demand paging` | PAGE.09, supplementary |
 | TLV5-PAGE.09-WEB-STORAGE-01    | `web/src/lib/chat/transcript/__tests__/chat-transcript-cache.test.ts`: cache hydration preserves the raw earlier continuation independently of visible rows | PAGE.09                  |
 | TLV5-PAGE.09-WEB-UNIT-01       | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: one earlier action aggregates fifty sparse bounded pages before one interval mutation with the exact cursor | PAGE.09 |
 | TLV5-PAGE.09-WEB-UNIT-02       | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: switch invalidation restores the bounded tail and resumes from its raw cursor      | PAGE.09, UX.17              |
@@ -1067,7 +1070,7 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-PAGE.09-WEB-UNIT-04       | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: active newest loading crosses two trailing hidden raw budgets before installing the visible target | PAGE.09 |
 | TLV5-PAGE.10-WEB-CONTRACT-01   | `web/src/lib/api/__tests__/chats-contract.test.ts`: null, zero, stalled, and hasMore-inconsistent raw continuations reject                               | PAGE.10                     |
 | TLV5-PAGE.10-WEB-UNIT-01       | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: a stalled hidden continuation fails before changing the loaded interval           | PAGE.10                     |
-| TLV5-UX.01-CHROMIUM-01         | `integration-tests/tests/chromium/transcript-virtualization.test.ts`: `preserves virtual transcript geometry across paging, appends, and scale`           | R4                          |
+| TLV5-UX.01-CHROMIUM-01         | `integration-tests/tests/chromium/transcript-virtualization.test.ts`: `preserves virtual transcript geometry across paging, appends, and workspace resizing` | R4                          |
 | TLV5-UX.06-COMPACT-TOUCH-01    | `integration-tests/tests/chromium/transcript-virtualization.test.ts`: compact touch prepend cases                                                         | R4                          |
 | TLV5-UX.06-WIDE-TOUCH-01       | `integration-tests/tests/chromium/transcript-virtualization.test.ts`: wide touch prepend cases                                                            | R4                          |
 | TLV5-UX.08-CHROMIUM-01         | `integration-tests/tests/chromium/transcript-virtualization.test.ts`: `renders mixed paged transcripts in exact ledger order on compact and wide layouts` | L02.03, final-row order     |
@@ -1223,6 +1226,8 @@ The next documentation pass should:
   gap;
 - split any test that currently claims unrelated obligations;
 - record negative-control commits for production regressions;
-- decide whether Safari is a supported environment before adding a WebKit tier.
+- decide whether Safari is a supported environment before adding a WebKit tier;
+- restore an executable case for TLV5-SEARCH.05, which has had no registered
+  case since the v9 search index rewrite in PR #528.
 
 No production change is required to complete the remaining catalog work.
