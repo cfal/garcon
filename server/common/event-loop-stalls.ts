@@ -1,5 +1,3 @@
-import type { Logger } from './log.js';
-
 const SAMPLE_INTERVAL_MS = 100;
 const REPORT_THRESHOLD_MS = 250;
 
@@ -8,10 +6,10 @@ export interface EventLoopStallOptions {
   readonly thresholdMs?: number;
 }
 
-// Warns when the event loop stalls. A stall delays every socket, heartbeat, and
-// timer in the process, so peers can mistake a busy process for a dead one.
+// Reports event-loop stalls. A stall delays every socket, heartbeat, and timer in
+// the process, so peers can mistake a busy process for a dead one.
 export function monitorEventLoopStalls(
-  logger: Pick<Logger, 'warn'>,
+  onStall: (stallMs: number) => void,
   options: EventLoopStallOptions = {},
 ): () => void {
   const intervalMs = options.intervalMs ?? SAMPLE_INTERVAL_MS;
@@ -21,7 +19,7 @@ export function monitorEventLoopStalls(
     const now = performance.now();
     const stallMs = now - expected;
     expected = now + intervalMs;
-    if (stallMs >= thresholdMs) logger.warn('Event loop stalled', { stallMs: Math.round(stallMs) });
+    if (stallMs >= thresholdMs) onStall(Math.round(stallMs));
   }, intervalMs);
   timer.unref?.();
   return () => clearInterval(timer);

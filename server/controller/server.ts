@@ -888,7 +888,7 @@ export async function startServer(): Promise<void> {
 
     // Graceful shutdown: flush pending writes and clean up timers.
     // Browser heartbeats and executor links both treat a long stall as a lost peer.
-    const stopStallMonitor = monitorEventLoopStalls(logger);
+    const stopStallMonitor = monitorEventLoopStalls((stallMs) => logger.warn('Event loop stalled', { stallMs }));
     const shutdown = async () => {
       if (shuttingDown) return;
       shuttingDown = true;

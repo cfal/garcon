@@ -54,10 +54,8 @@ async function serveExecutorWorker(options: ExecutorWorkerOptions, dataDir: stri
   let runtime: ExecutionRuntime | null = null;
   const relay = new ProducerRelay();
   // A stalled worker stops answering pings, and the controller retires its link after 15 s.
-  const stopStallMonitor = monitorEventLoopStalls({
-    warn: (_message: unknown, detail: unknown) => {
-      console.warn(JSON.stringify({ type: 'executor-event-loop-stalled', ...(detail as object) }));
-    },
+  const stopStallMonitor = monitorEventLoopStalls((stallMs) => {
+    console.warn(JSON.stringify({ type: 'executor-event-loop-stalled', stallMs }));
   });
   let currentRpc: ExecutorRpc | null = null;
   let gateway: Awaited<ReturnType<typeof startCliGateway>> | null = null;

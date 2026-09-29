@@ -7,29 +7,27 @@ function block(ms: number): void {
 }
 
 test('reports a stall longer than the threshold once and stays quiet otherwise', async () => {
-  const warn = mock((..._args: unknown[]) => undefined);
-  const stop = monitorEventLoopStalls({ warn }, { intervalMs: 20, thresholdMs: 150 });
+  const onStall = mock((_stallMs: number) => undefined);
+  const stop = monitorEventLoopStalls(onStall, { intervalMs: 20, thresholdMs: 150 });
   try {
     await Bun.sleep(100);
-    expect(warn).not.toHaveBeenCalled();
+    expect(onStall).not.toHaveBeenCalled();
 
     block(300);
     await Bun.sleep(60);
 
-    expect(warn).toHaveBeenCalledTimes(1);
-    const [message, detail] = warn.mock.calls[0]!;
-    expect(message).toBe('Event loop stalled');
-    expect((detail as { stallMs: number }).stallMs).toBeGreaterThanOrEqual(150);
+    expect(onStall).toHaveBeenCalledTimes(1);
+    expect(onStall.mock.calls[0]![0]).toBeGreaterThanOrEqual(150);
   } finally {
     stop();
   }
 });
 
 test('stops sampling once stopped', async () => {
-  const warn = mock((..._args: unknown[]) => undefined);
-  const stop = monitorEventLoopStalls({ warn }, { intervalMs: 20, thresholdMs: 50 });
+  const onStall = mock((_stallMs: number) => undefined);
+  const stop = monitorEventLoopStalls(onStall, { intervalMs: 20, thresholdMs: 50 });
   stop();
   block(120);
   await Bun.sleep(60);
-  expect(warn).not.toHaveBeenCalled();
+  expect(onStall).not.toHaveBeenCalled();
 });
