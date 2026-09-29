@@ -6,6 +6,8 @@ import { GitRuntime } from '../runtime.js';
 import { runGit } from '../run.js';
 import { GitReviewDocumentRegistry } from '../review-document-registry.js';
 import { validateGitRequest } from '../../../../common/git-request-validation.js';
+import { validateGitResult } from '../../../../common/git-result-validation.js';
+import type { GitStashEntry } from '../../../../common/git.js';
 import { withRepositoryMutation } from '../repository-coordination.js';
 import { withGitOperation, trackGitProcess } from '../operation-context.js';
 import { KeyedPromiseLock } from '../../../common/keyed-lock.js';
@@ -58,6 +60,20 @@ test('machine service scopes operations and rejects untrusted fields before exec
   expect(await git.getStatus({ projectPath })).toMatchObject({ executorId: 'local', instanceId: 'serving-one', branch: 'main' });
   expect(() => validateGitRequest('checkout', { projectPath, ref: 'main', env: { GIT_DIR: '/wrong' } })).toThrow('Invalid Git');
   expect(() => validateGitRequest('stageSelection', { projectPath, file: 'x', mode: 'stage', selection: { lineIndices: [0] } })).toThrow('Invalid Git');
+  const scope = { executorId: 'local', instanceId: 'serving-one' };
+  const listed = (stashes: unknown[]) => ({ ...scope, stashes });
+  const entry = { index: 0, ref: 'stash@{0}', hash: 'a'.repeat(40), message: 'On main: listed', date: '2026-01-01 00:00:00 +0000' };
+  expect(() => validateGitResult('getStashes', listed([entry, { ...entry, index: 1, ref: 'stash@{1}' }]), scope)).not.toThrow();
+  for (const stashes of [
+    [entry, entry],
+    [{ ...entry, index: -1, ref: 'stash@{2026-01-01 00:00:00 +0000}' }],
+    [{ ...entry, ref: 'stash@{1}' }],
+    [{ ...entry, hash: 'listed' }],
+  ]) {
+    expect(() => validateGitResult('getStashes', listed(stashes), scope)).toThrow('Invalid Git getStashes response');
+  }
+  const commit = { hash: 'b'.repeat(40), author: 'Synthetic Author', email: 'test@example.invalid', date: '2026-01-01 00:00:00 +0000', subject: 'listed' };
+  expect(() => validateGitResult('getFileHistory', { ...scope, commits: [commit, commit] }, scope)).toThrow('Invalid Git getFileHistory response');
   const folder = path.join(projectPath, 'plain');
   await fs.mkdir(folder);
   const other = path.join(path.dirname(projectPath), 'not-repo');
@@ -273,6 +289,69 @@ test('lists stashes by index so listed refs drive stash actions', async () => {
   expect((await git.getStashes({ projectPath })).stashes.map((stash) => stash.message)).toEqual([
     expect.stringContaining('second synthetic stash'),
   ]);
+});
+
+// An explicit --date once made git list every stash as a one-second timestamp selector, so
+// stashes pushed in the same second shared a rendered key and no listed stash could be acted on.
+test('stashes pushed in the same second list and act through their own selectors', async () => {
+  const { git, projectPath } = await fixture();
+  const sameSecond = { env: { GIT_AUTHOR_DATE: '2026-01-01T00:00:00Z', GIT_COMMITTER_DATE: '2026-01-01T00:00:00Z' } };
+  for (const name of ['first', 'second', 'third']) {
+    await fs.writeFile(path.join(projectPath, 'example.txt'), `${name}\n`);
+    await runGit(projectPath, ['stash', 'push', '-m', name], sameSecond);
+  }
+  const listed = (await git.getStashes({ projectPath })).stashes;
+  expect(listed.map(({ index, ref, message }) => ({ index, ref, message }))).toEqual([
+    { index: 0, ref: 'stash@{0}', message: 'On main: third' },
+    { index: 1, ref: 'stash@{1}', message: 'On main: second' },
+    { index: 2, ref: 'stash@{2}', message: 'On main: first' },
+  ]);
+  const [third, second, first] = listed;
+  const target = (stash: GitStashEntry) => ({ projectPath, stashRef: stash.ref });
+  const hashes = async () => (await git.getStashes({ projectPath })).stashes.map((stash) => stash.hash);
+
+  await git.applyStash(target(second!));
+  expect(await fs.readFile(path.join(projectPath, 'example.txt'), 'utf8')).toBe('second\n');
+  expect(await hashes()).toEqual([third!.hash, second!.hash, first!.hash]);
+  await git.discard({ projectPath, file: 'example.txt' });
+
+  await git.dropStash(target(second!));
+  expect(await hashes()).toEqual([third!.hash, first!.hash]);
+
+  const [, moved] = (await git.getStashes({ projectPath })).stashes;
+  await git.popStash(target(moved!));
+  expect(await fs.readFile(path.join(projectPath, 'example.txt'), 'utf8')).toBe('first\n');
+  expect(await hashes()).toEqual([third!.hash]);
+});
+
+test('a stash commit stored twice lists as separately selectable entries', async () => {
+  const { git, projectPath } = await fixture();
+  for (const name of ['older', 'newer']) {
+    await fs.writeFile(path.join(projectPath, 'example.txt'), `${name}\n`);
+    await git.createStash({ projectPath, message: name });
+  }
+  const [newer, older] = (await git.getStashes({ projectPath })).stashes;
+  await runGit(projectPath, ['stash', 'store', '-m', 'stored again', older!.hash]);
+  const listed = (await git.getStashes({ projectPath })).stashes;
+  expect(listed.map(({ ref, hash }) => ({ ref, hash }))).toEqual([
+    { ref: 'stash@{0}', hash: older!.hash },
+    { ref: 'stash@{1}', hash: newer!.hash },
+    { ref: 'stash@{2}', hash: older!.hash },
+  ]);
+  await git.dropStash({ projectPath, stashRef: 'stash@{2}' });
+  expect((await git.getStashes({ projectPath })).stashes.map((stash) => stash.hash)).toEqual([older!.hash, newer!.hash]);
+});
+
+test('stash and file history subjects keep record separator bytes inside one entry', async () => {
+  const { git, projectPath } = await fixture();
+  const subject = 'split\x1einjected\x1einjected';
+  await fs.writeFile(path.join(projectPath, 'example.txt'), 'separator stash\n');
+  await git.createStash({ projectPath, message: subject });
+  expect((await git.getStashes({ projectPath })).stashes.map((stash) => stash.message)).toEqual([`On main: ${subject}`]);
+  await fs.writeFile(path.join(projectPath, 'example.txt'), 'separator commit\n');
+  await git.commit({ projectPath, message: subject, files: ['example.txt'] });
+  const history = (await git.getFileHistory({ projectPath, file: 'example.txt' })).commits;
+  expect(history.map((commit) => commit.subject)).toEqual([subject, 'initial']);
 });
 
 test('fetch, pull and push use a disposable bare remote without external credentials', async () => {

@@ -677,6 +677,8 @@ export interface GitConflictDetails {
   truncated: boolean;
 }
 
+// `ref` is the reflog selector `stash@{index}`: unique within one listing, but it moves to
+// another stash whenever stashes are created or dropped. `hash` is the stash commit.
 export interface GitStashEntry {
   index: number;
   ref: string;

@@ -24,6 +24,16 @@ const target = (v: unknown) => shape(v, { projectPath: str, repoRoot: str, workt
 const worktree = (v: unknown) => shape(v, { path: str, branch: str, name: str, isCurrent: bool, isMain: bool, isPathMissing: bool, lastModifiedAt: nullable(str) });
 const commit = (v: unknown) => shape(v, { hash: str, shortHash: str, parents: array(str), author: str, authorEmail: str, authorDate: str, committer: str, committerEmail: str, committerDate: str, subject: str, refs: array(str) });
 const digest: Check = v => typeof v === 'string' && /^[a-f0-9]{64}$/.test(v);
+const objectId: Check = v => typeof v === 'string' && /^[a-f0-9]{40,64}$/.test(v);
+// The Git surface keys rendered rows by these fields, so repeated values must not reach it.
+const uniqueBy = (key: string): Check => v => Array.isArray(v)
+  && new Set(v.map(item => (isRecord(item) ? item[key] : item))).size === v.length;
+
+function stash(v: unknown): boolean {
+  if (!isRecord(v) || !shape(v, { index: num, ref: str, hash: objectId, message: str, date: str })) return false;
+  const index = v.index as number;
+  return Number.isSafeInteger(index) && index >= 0 && v.ref === `stash@{${index}}`;
+}
 
 export function isGitPatchBody(v: unknown): boolean {
   return shape(v, { path: str, bodyFingerprint: str, bodyState, category, isBinary: bool, isTooLarge: bool,
@@ -78,8 +88,9 @@ function gitResult(method: GitMethod, v: Record<string, unknown>): boolean {
       const content = (x: unknown) => shape(x, { content: nullable(str), truncated: bool, byteLength: num, lineCount: num });
       return shape(v, { path: str, base: content, ours: content, theirs: content, working: content, truncated: bool });
     }
-    case 'getStashes': return array(x => shape(x, { index: num, ref: str, hash: str, message: str, date: str }))(v.stashes);
-    case 'getFileHistory': return array(x => shape(x, { hash: str, author: str, email: str, date: str, subject: str }))(v.commits);
+    case 'getStashes': return array(stash)(v.stashes) && uniqueBy('ref')(v.stashes);
+    case 'getFileHistory': return array(x => shape(x, { hash: objectId, author: str, email: str, date: str, subject: str }))(v.commits)
+      && uniqueBy('hash')(v.commits);
     case 'getGraph': return array(x => shape(x, { graph: str, hash: str, parents: array(str), decorations: array(str), author: str, date: str, subject: str }))(v.commits);
     case 'getBlame': return bool(v.truncated) && array(x => shape(x, { line: num, originalLine: num, finalLine: num, commit: str, author: str, authorMail: str, authorTime: str, summary: str, content: str }))(v.lines);
     case 'getHistoryCommits': return shape(v, { project: str, ref: str, nextOffset: nullable(num), commits: array(commit, 200) });
