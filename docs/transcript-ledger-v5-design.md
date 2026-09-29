@@ -2319,7 +2319,11 @@ native fork only, and propagates the refusal instead of substituting
 something else. The client turns that refusal into a question rather than
 an error: it asks whether to continue with a handoff fork, and repeats the
 request with consent if the user agrees. The refusal is a probe, not a
-failure.
+failure. A fork request carrying a client request ID is idempotent:
+repeating it returns the fork it completed, and consent is not part of its
+identity, so the consenting repeat keeps the same ID. A failed fork left no
+chat to return and runs again. Reusing the ID for a different source,
+target, or fork point is a conflict.
 
 Falling back silently is the specific outcome this rule prevents. A
 handoff fork is a good result when the user chooses it and a poor one when
