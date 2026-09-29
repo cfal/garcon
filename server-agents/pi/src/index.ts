@@ -155,7 +155,13 @@ export default class PiAgentIntegration implements AgentIntegration {
       steer: (request) => runtime.steer(request),
     });
     this.lifecycle = createIntegrationLifecycle({
-      start: () => runtime.startPurgeTimer(),
+      start: async () => {
+        // The SDK compiles its modules on first import, holding the event loop for over a
+        // second. Loading it while the controller starts, or while an executor is being set
+        // up, keeps that stall out of live work. A failure surfaces when Pi is first used.
+        await import('@earendil-works/pi-coding-agent').catch(() => undefined);
+        runtime.startPurgeTimer();
+      },
       stop: async () => {
         await runtime.shutdown();
       },
