@@ -150,6 +150,11 @@ export function outgoingFault(link: WebSocketLink) {
   return fault;
 }
 
+// Matches the reply that carries a launch's execution handle.
+export function isExecutionHandleReply(encoded: string): boolean {
+  return encoded.includes('"type":"result"') && encoded.includes('"kind":"execution"');
+}
+
 // Refuses matching messages at the session queue's admission check, as a full
 // queue does, without closing the session. A refused producer frame stays with
 // the relay, which offers it again as the queue drains.

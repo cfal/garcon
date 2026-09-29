@@ -3,7 +3,7 @@ import { AssistantMessage } from '@garcon/common/chat-types';
 import { AgentCallError, type AgentProducerNotification, type ExecutorAvailability } from '@garcon/server-agent-interface';
 import { RemoteExecutorClient } from '../../client/executor-client.js';
 import {
-  admissionFault, integrationFixture, linkOptions, outgoingFault, remoteFixture, requestFor,
+  admissionFault, integrationFixture, isExecutionHandleReply, linkOptions, outgoingFault, remoteFixture, requestFor,
 } from '../../__tests__/integration-fixture.js';
 import { EXECUTOR_DISCONNECTED_BEFORE_START } from '../../../common/executor-disconnect.js';
 import { connectRemoteExecutor } from '../../__tests__/runtime-adapter.js';
@@ -199,7 +199,7 @@ for (const dialer of ['controller', 'worker'] as const) {
       const integration = await fixture.executor.getAgentIntegration('test');
       const request = await requestFor(integration);
       const outcomes = launchOutcomes(integration);
-      disconnectOn(fault, (encoded) => encoded.includes('"type":"result"') && encoded.includes('"kind":"execution"'));
+      disconnectOn(fault, isExecutionHandleReply);
       const ready = nextAvailability(fixture.executor, 'ready');
       expect(await integration.execution.start(request).catch((error: unknown) => error)).toMatchObject({ outcome: 'unknown' });
       await ready;
@@ -218,7 +218,7 @@ for (const dialer of ['controller', 'worker'] as const) {
       const request = await requestFor(integration);
       const outcomes = launchOutcomes(integration);
       const availability = availabilityLog(fixture.executor);
-      fault.refuseNext((encoded) => encoded.includes('"type":"result"') && encoded.includes('"kind":"execution"'));
+      fault.refuseNext(isExecutionHandleReply);
       expect(await integration.execution.start(request).catch((error: unknown) => error)).toMatchObject({
         outcome: 'unknown', message: "The executor's reply could not be delivered, so the outcome is unknown.",
       });
@@ -258,7 +258,7 @@ for (const dialer of ['controller', 'worker'] as const) {
       const entered = Promise.withResolvers<void>();
       const worker = fixture.generations[0]!;
       worker.hooks.start = async () => { entered.resolve(); await release.promise; };
-      fault.refuseNext((encoded) => encoded.includes('"type":"result"') && encoded.includes('"kind":"execution"'));
+      fault.refuseNext(isExecutionHandleReply);
       const cancel = new AbortController();
       const call = integration.execution.start(request, { signal: cancel.signal }).catch((error: unknown) => error);
       await entered.promise;

@@ -14,7 +14,7 @@ import { IntegrationHostFactory } from '../../../server/runtime/agents/integrati
 import { IntegrationRegistry } from '../../../server/runtime/agents/integration-registry.js';
 import { AgentRuntimeRouter } from '../../../server/controller/agents/runtime-router.js';
 import {
-  admissionFault, integrationFixture, linkOptions, outgoingFault,
+  admissionFault, integrationFixture, isExecutionHandleReply, linkOptions, outgoingFault,
 } from '../../../server/remote/__tests__/integration-fixture.js';
 import { serveExecutionRuntime } from '../../../server/remote/server/executor-rpc-server.js';
 import { ProducerRelay } from '../../../server/remote/server/producer-relay.js';
@@ -197,7 +197,7 @@ for (const dialer of ['controller', 'worker'] as const) {
   test(`a Stop sent while a start reply was lost reaches the worker after it reconnects (${dialer} dials)`, async () => {
     await withRemoteRouter(dialer, async ({ router, ledger, native, restored, workerFault }) => {
       workerFault.inject = (encoded) => {
-        if (!encoded.includes('"type":"result"') || !encoded.includes('"kind":"execution"')) return null;
+        if (!isExecutionHandleReply(encoded)) return null;
         workerFault.inject = () => null;
         return 'disconnect';
       };
@@ -216,7 +216,7 @@ for (const dialer of ['controller', 'worker'] as const) {
   test(`a start whose reply was lost keeps running and stops after the executor reconnects (${dialer} dials)`, async () => {
     await withRemoteRouter(dialer, async ({ router, native, restored, workerFault }) => {
       workerFault.inject = (encoded) => {
-        if (!encoded.includes('"type":"result"') || !encoded.includes('"kind":"execution"')) return null;
+        if (!isExecutionHandleReply(encoded)) return null;
         workerFault.inject = () => null;
         return 'disconnect';
       };
@@ -234,7 +234,7 @@ for (const dialer of ['controller', 'worker'] as const) {
 
   test(`a start whose reply the worker could not deliver keeps running and Stop reaches it (${dialer} dials)`, async () => {
     await withRemoteRouter(dialer, async ({ router, ledger, native, integration, workerAdmission }) => {
-      workerAdmission.refuseNext((encoded) => encoded.includes('"type":"result"') && encoded.includes('"kind":"execution"'));
+      workerAdmission.refuseNext(isExecutionHandleReply);
       await router.startSession(CHAT, 'Synthetic input');
       await integration.execution.runningSessions();
       expect(router.isChatRunning(CHAT)).toBe(true);
