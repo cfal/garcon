@@ -238,9 +238,9 @@ fallback. The fallback preserves the provider-neutral transcript but starts a
 new native session. Fork-at-message is not exposed by this CLI command.
 
 Prompted forks use the command ledger and safely retry an identical correlated
-request after ambiguous transport failure. Bare forks are not automatically
-retried because the fork-only server operation has no command-ledger identity;
-an ambiguous failure names the generated target chat ID to inspect first.
+request after ambiguous transport failure. Bare forks are sent without a
+request identity, so they are not automatically retried; an ambiguous failure
+names the generated target chat ID to inspect first.
 
 ## Discover Exact Selections
 

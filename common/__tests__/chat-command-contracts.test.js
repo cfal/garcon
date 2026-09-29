@@ -466,6 +466,18 @@ describe('chat command request parsers', () => {
       .toThrow('allowHandoffFork must be a boolean');
   });
 
+  it('carries an optional request identity on bare fork requests', () => {
+    const fork = { sourceChatId: SOURCE_CHAT_ID, chatId: CHAT_ID };
+
+    expect(parseForkChatCommandRequest({ ...fork, clientRequestId: ' request-fork ' }))
+      .toMatchObject({ clientRequestId: 'request-fork' });
+    expect(parseForkChatCommandRequest(fork)).not.toHaveProperty('clientRequestId');
+    expect(() => parseForkChatCommandRequest({ ...fork, clientRequestId: '' }))
+      .toThrow('clientRequestId is required');
+    expect(() => parseForkChatCommandRequest({ ...fork, clientRequestId: 'x'.repeat(257) }))
+      .toThrow('clientRequestId must be at most 256 bytes');
+  });
+
   it('rejects malformed structured command fields', () => {
     expect(() => parseQueueEntryReplaceCommandRequest({
       clientRequestId: 'request-4',

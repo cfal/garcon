@@ -510,6 +510,8 @@ export interface ForkChatParams {
 	// Set only after the user confirms a handoff fork, so an unconfirmed request still
 	// surfaces the refusal the confirmation is asked about.
 	allowHandoffFork?: boolean;
+	// A repeat under the same ID returns the fork the server already completed.
+	clientRequestId: string;
 }
 
 /** Forks (clones) an existing chat session into a new chat. */

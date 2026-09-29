@@ -42,20 +42,44 @@ export class ForkCommands {
       chatId: this.support.requireChatId(input.chatId),
     };
     return this.support.withChatMutationLocks([normalized.sourceChatId, normalized.chatId], async () => {
-      // The client picks the target ID, so a repeated request is a retry of a lost reply; the
-      // target lock keeps it from observing a fork that is still being created.
-      if (this.isForkOf(normalized.chatId, normalized.sourceChatId)) {
-        return { success: true, chat: await this.support.projectCommandChat(normalized.chatId) };
+      if (normalized.clientRequestId === undefined) {
+        await this.createFork(normalized, signal);
+      } else {
+        await this.createForkOnce(normalized, normalized.clientRequestId, signal);
       }
-      const context = await this.validateFork(normalized, { signal });
-      await this.forkChatFromContext(context, signal);
-      return { success: true, chat: await this.support.projectCommandChat(context.targetChatId) };
+      return { success: true, chat: await this.support.projectCommandChat(normalized.chatId) };
     });
   }
 
-  private isForkOf(chatId: string, sourceChatId: string): boolean {
-    const parent = this.deps.chats.getChat(chatId)?.parentChat;
-    return parent?.relation === 'fork' && parent.chatId === sourceChatId;
+  private async createFork(input: ForkChatCommandRequest, signal: AbortSignal): Promise<void> {
+    await this.forkChatFromContext(await this.validateFork(input, { signal }), signal);
+  }
+
+  // A repeat of a completed fork returns it. Anything else runs again: a failed fork left no
+  // chat to return, and validation refuses a target that a failed rollback left behind.
+  private async createForkOnce(
+    input: ForkChatCommandRequest,
+    clientRequestId: string,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const ledger = await this.deps.ledger.accept({
+      commandType: 'fork',
+      chatId: input.chatId,
+      clientRequestId: this.support.requireClientRequestId(clientRequestId),
+      payload: forkChatPayload(input),
+    });
+    this.support.throwOnConflict(ledger, 'clientRequestId was reused with different payload');
+    if (ledger.kind === 'duplicate' && ledger.record.status === 'finished') return;
+    try {
+      await this.createFork(input, signal);
+    } catch (error) {
+      await this.deps.ledger.settleTerminal(ledger.record.key, 'failed', {
+        error: error instanceof Error ? error.message : String(error),
+        errorCode: PRE_SCHEDULE_FAILURE_ERROR_CODE,
+      });
+      throw error;
+    }
+    await this.deps.ledger.settleTerminal(ledger.record.key, 'finished');
   }
 
   async submitForkRun(input: SubmitForkRunInput): Promise<ForkRunCommandResponse> {
@@ -334,6 +358,16 @@ export class ForkCommands {
       readForkedNativeHistory: this.deps.readForkedNativeHistory,
     });
   }
+}
+
+// As in forkPayload, handoff consent repeats the same logical fork after its refusal.
+function forkChatPayload(input: ForkChatCommandRequest): Record<string, unknown> {
+  return {
+    sourceChatId: input.sourceChatId,
+    chatId: input.chatId,
+    upToOrdinal: input.upToOrdinal,
+    transcriptViewId: input.transcriptViewId,
+  };
 }
 
 function forkPayload(input: NormalizedSubmitForkRunInput, clientMessageId: string): Record<string, unknown> {

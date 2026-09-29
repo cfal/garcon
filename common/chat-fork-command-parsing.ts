@@ -3,6 +3,7 @@ import {
   optionalNonEmptyString,
   requestRecord,
   requiredChatId,
+  requiredCommandCorrelationId,
 } from './command-request-validation.js';
 import type { DeleteChatCommandRequest, ForkChatCommandRequest } from './chat-command-contracts.js';
 
@@ -23,12 +24,16 @@ export function parseForkChatCommandRequest(value: unknown): ForkChatCommandRequ
     throw new CommandRequestValidationError('upToOrdinal requires transcriptViewId');
   }
   const allowHandoffFork = parseHandoffForkConsent(body);
+  const clientRequestId = body.clientRequestId === undefined
+    ? undefined
+    : requiredCommandCorrelationId(body, 'clientRequestId');
   return {
     sourceChatId: requiredChatId(body, 'sourceChatId'),
     chatId: requiredChatId(body, 'chatId'),
     ...(upToOrdinal === undefined ? {} : { upToOrdinal: Number(upToOrdinal) }),
     ...(allowHandoffFork ? { allowHandoffFork: true } : {}),
     ...(transcriptViewId === undefined ? {} : { transcriptViewId }),
+    ...(clientRequestId === undefined ? {} : { clientRequestId }),
   };
 }
 

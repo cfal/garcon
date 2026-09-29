@@ -601,6 +601,7 @@ describe('ChatActionController', () => {
 		expect(chatsApi.forkChat).toHaveBeenCalledWith({
 			sourceChatId: 'chat-1',
 			chatId: 'fork-chat-id',
+			clientRequestId: expect.any(String),
 		});
 		expect(callbacks.onUpsertServerChat).toHaveBeenCalledWith(fork);
 		expect(callbacks.onSelectChat).toHaveBeenCalledWith('fork-chat-id');
@@ -642,10 +643,13 @@ describe('ChatActionController', () => {
 
 		await controller.forkChat('chat-1');
 
-		expect(vi.mocked(chatsApi.forkChat).mock.calls).toEqual([
-			[{ sourceChatId: 'chat-1', chatId: 'fork-chat-id' }],
-			[{ sourceChatId: 'chat-1', chatId: 'fork-chat-id' }],
-		]);
+		const [[first], [retry]] = vi.mocked(chatsApi.forkChat).mock.calls;
+		expect(first).toEqual({
+			sourceChatId: 'chat-1',
+			chatId: 'fork-chat-id',
+			clientRequestId: expect.any(String),
+		});
+		expect(retry).toEqual(first);
 		expect(callbacks.onSelectChat).toHaveBeenCalledWith('fork-chat-id');
 		expect(callbacks.notifyError).not.toHaveBeenCalled();
 	});
@@ -681,8 +685,7 @@ describe('ChatActionController', () => {
 
 		if (confirmed) {
 			expect(chatsApi.forkChat).toHaveBeenLastCalledWith({
-				sourceChatId: 'chat-1',
-				chatId: 'fork-chat-id',
+				...vi.mocked(chatsApi.forkChat).mock.calls[0]?.[0],
 				allowHandoffFork: true,
 			});
 			expect(callbacks.onSelectChat).toHaveBeenCalledWith('fork-chat-id');

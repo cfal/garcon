@@ -1571,20 +1571,24 @@ describe('chats API contract', () => {
 		);
 	});
 
-	it('forkChat sends POST with sourceChatId and chatId', async () => {
+	it('forkChat sends POST with sourceChatId, chatId, and its request ID', async () => {
 		const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
 		fetchMock.mockResolvedValue(
 			jsonResponse({ success: true, sourceChatId: '1', chatId: '2', agentId: 'claude' }),
 		);
 
-		const result = await forkChat({ sourceChatId: '1', chatId: '2' });
+		const result = await forkChat({ sourceChatId: '1', chatId: '2', clientRequestId: 'fork-1' });
 
 		expect(result.success).toBe(true);
 		const [url, opts] = fetchMock.mock.calls[0];
 		expect(url).toBe('/api/v1/chats/fork');
 		expect(opts.method).toBe('POST');
 		expect(timeoutSpy).not.toHaveBeenCalled();
-		expect(JSON.parse(opts.body)).toEqual({ sourceChatId: '1', chatId: '2' });
+		expect(JSON.parse(opts.body)).toEqual({
+			sourceChatId: '1',
+			chatId: '2',
+			clientRequestId: 'fork-1',
+		});
 	});
 
 	it('forkChat surfaces retryable transcript-persistence refusals', async () => {
@@ -1603,7 +1607,7 @@ describe('chats API contract', () => {
 
 		let failure: unknown;
 		try {
-			await forkChat({ sourceChatId: '1', chatId: '2' });
+			await forkChat({ sourceChatId: '1', chatId: '2', clientRequestId: 'fork-1' });
 		} catch (error) {
 			failure = error;
 		}
@@ -1627,6 +1631,7 @@ describe('chats API contract', () => {
 			chatId: '2',
 			upToOrdinal: 7,
 			transcriptViewId: 'view-1',
+			clientRequestId: 'fork-1',
 		});
 
 		const [, opts] = fetchMock.mock.calls[0];
@@ -1635,6 +1640,7 @@ describe('chats API contract', () => {
 			chatId: '2',
 			upToOrdinal: 7,
 			transcriptViewId: 'view-1',
+			clientRequestId: 'fork-1',
 		});
 	});
 
@@ -1649,6 +1655,7 @@ describe('chats API contract', () => {
 			upToOrdinal: 7,
 			transcriptViewId: 'view-1',
 			allowHandoffFork: true,
+			clientRequestId: 'fork-1',
 		});
 
 		const [, opts] = fetchMock.mock.calls[0];
@@ -1658,6 +1665,7 @@ describe('chats API contract', () => {
 			upToOrdinal: 7,
 			transcriptViewId: 'view-1',
 			allowHandoffFork: true,
+			clientRequestId: 'fork-1',
 		});
 	});
 

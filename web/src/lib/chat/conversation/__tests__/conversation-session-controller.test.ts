@@ -1980,6 +1980,7 @@ describe('ConversationSessionController', () => {
 		expect(mockForkChat).toHaveBeenCalledWith({
 			sourceChatId: '123',
 			chatId: expect.stringMatching(/^\d+$/),
+			clientRequestId: expect.any(String),
 		});
 		expect(deps.chatState.appendLocalNotice).toHaveBeenCalledWith('progress', 'Forking chat...');
 		expect(deps.chatState.clearLocalNoticesForChat).toHaveBeenCalledWith('123', 1);
@@ -2076,6 +2077,7 @@ describe('ConversationSessionController', () => {
 			chatId: expect.stringMatching(/^\d+$/),
 			upToOrdinal: 9,
 			transcriptViewId: 'generation-1',
+			clientRequestId: expect.any(String),
 		});
 		expect(deps.sessions.setSelectedChatId).toHaveBeenCalledWith('456');
 	});
@@ -2112,6 +2114,7 @@ describe('ConversationSessionController', () => {
 			chatId: expect.stringMatching(/^\d+$/),
 			upToOrdinal: 4,
 			transcriptViewId: 'generation-panel',
+			clientRequestId: expect.any(String),
 		});
 	});
 

@@ -4096,40 +4096,97 @@ describe('ChatCommandService', () => {
     expect(forkChatFileCopy).toHaveBeenCalledOnce();
   });
 
-  it('answers a repeated fork request with the fork it already created', async () => {
-    let registry;
-    const forkChatFileCopy = mock(async ({ sourceChatId, targetChatId }) => {
-      registry.set(targetChatId, {
-        ...registry.get(sourceChatId),
-        id: targetChatId,
-        parentChat: { chatId: sourceChatId, relation: 'fork', transcriptViewId: 'view-1', ordinal: 2 },
+  describe('repeated fork requests', () => {
+    function registeringForkCopy(failures = 0) {
+      let registry;
+      let remainingFailures = failures;
+      const forkChatFileCopy = mock(async ({ sourceChatId, targetChatId }) => {
+        registry.set(targetChatId, {
+          ...registry.get(sourceChatId),
+          id: targetChatId,
+          parentChat: { chatId: sourceChatId, relation: 'fork', transcriptViewId: 'view-1', ordinal: 2 },
+        });
+        if (remainingFailures > 0) {
+          remainingFailures -= 1;
+          throw new Error('Synthetic fork settings failure');
+        }
+        return {
+          sourceChatId,
+          chatId: targetChatId,
+          agentId: 'claude',
+          agentSessionId: 'agent-2',
+          rollback: mock(async () => undefined),
+        };
       });
-      return {
-        sourceChatId,
-        chatId: targetChatId,
-        agentId: 'claude',
-        agentSessionId: 'agent-2',
-        rollback: mock(async () => undefined),
-      };
+      const fixture = makeService({ forkChatFileCopy });
+      registry = fixture.sessions;
+      return fixture;
+    }
+
+    it('returns the completed fork for a repeated request ID', async () => {
+      const { service, forkChatFileCopy } = registeringForkCopy();
+      const request = { sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID, clientRequestId: 'fork-request-1' };
+
+      const first = await service.forkChat(request);
+      const repeated = await service.forkChat(request);
+
+      expect(repeated).toEqual(first);
+      expect(forkChatFileCopy).toHaveBeenCalledOnce();
     });
-    const { service, sessions } = makeService({ forkChatFileCopy });
-    registry = sessions;
-    const request = { sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID };
 
-    const first = await service.forkChat(request);
-    const repeated = await service.forkChat(request);
+    it('refuses a repeated request ID that names a different fork point', async () => {
+      const { service, forkChatFileCopy } = registeringForkCopy();
+      await service.forkChat({ sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID, clientRequestId: 'fork-request-1' });
 
-    expect(repeated).toEqual(first);
-    expect(forkChatFileCopy).toHaveBeenCalledOnce();
-  });
+      await expect(service.forkChat({
+        sourceChatId: SOURCE_CHAT_ID,
+        chatId: TARGET_CHAT_ID,
+        clientRequestId: 'fork-request-1',
+        upToOrdinal: 1,
+        transcriptViewId: 'view-1',
+      })).rejects.toMatchObject({
+        code: 'IDEMPOTENCY_CONFLICT',
+        status: 409,
+        message: 'clientRequestId was reused with different payload',
+      });
+      expect(forkChatFileCopy).toHaveBeenCalledOnce();
+    });
 
-  it('still refuses a target chat that is not a fork of the source', async () => {
-    const { service, sessions, forkChatFileCopy } = makeService();
-    sessions.set(TARGET_CHAT_ID, { ...sessions.get(SOURCE_CHAT_ID), id: TARGET_CHAT_ID, parentChat: null });
+    it('does not report a fork that failed after registering its target as created', async () => {
+      const { service, forkChatFileCopy } = registeringForkCopy(1);
+      const request = { sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID, clientRequestId: 'fork-request-1' };
 
-    await expect(service.forkChat({ sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID }))
-      .rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT', status: 409 });
-    expect(forkChatFileCopy).not.toHaveBeenCalled();
+      await expect(service.forkChat(request)).rejects.toThrow('Synthetic fork settings failure');
+      await expect(service.forkChat(request)).rejects.toMatchObject({
+        code: 'IDEMPOTENCY_CONFLICT',
+        message: `Session already exists: ${TARGET_CHAT_ID}`,
+      });
+      expect(forkChatFileCopy).toHaveBeenCalledOnce();
+    });
+
+    it('runs a fork that failed without leaving a target again under the same request ID', async () => {
+      const { service, forkChatFileCopy } = makeService();
+      forkChatFileCopy.mockImplementationOnce(async () => { throw new Error('Synthetic provider fork failure'); });
+      const request = { sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID, clientRequestId: 'fork-request-1' };
+
+      await expect(service.forkChat(request)).rejects.toThrow('Synthetic provider fork failure');
+      await service.forkChat(request);
+
+      expect(forkChatFileCopy).toHaveBeenCalledTimes(2);
+    });
+
+    it('refuses an existing target when the request has no ID', async () => {
+      const { service, forkChatFileCopy } = registeringForkCopy();
+      const request = { sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID };
+      await service.forkChat(request);
+
+      await expect(service.forkChat(request)).rejects.toMatchObject({
+        code: 'IDEMPOTENCY_CONFLICT',
+        status: 409,
+        message: `Session already exists: ${TARGET_CHAT_ID}`,
+      });
+      expect(forkChatFileCopy).toHaveBeenCalledOnce();
+    });
   });
 
   it('captures the authoritative source binding after first-use fork adoption', async () => {

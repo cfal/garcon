@@ -188,6 +188,9 @@ export interface ForkChatCommandRequest {
   // only after asking the user, so an unconfirmed request surfaces the refusal instead.
   allowHandoffFork?: boolean;
   transcriptViewId?: string;
+  // A repeat under the same ID returns the fork it completed. Without one, an existing target
+  // chat is refused.
+  clientRequestId?: string;
 }
 
 export interface DeleteChatCommandRequest {
