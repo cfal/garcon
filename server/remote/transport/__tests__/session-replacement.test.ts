@@ -2,7 +2,9 @@ import { expect, spyOn, test } from 'bun:test';
 import { AssistantMessage } from '@garcon/common/chat-types';
 import { type AgentProducerNotification, type ExecutorAvailability } from '@garcon/server-agent-interface';
 import { RemoteExecutorClient } from '../../client/executor-client.js';
-import { integrationFixture, linkOptions, outgoingFault, remoteFixture, requestFor } from '../../__tests__/integration-fixture.js';
+import {
+  integrationFixture, isProducerResumeReply, linkOptions, outgoingFault, outgoingHold, remoteFixture, requestFor,
+} from '../../__tests__/integration-fixture.js';
 import { EXECUTOR_DISCONNECTED_BEFORE_START } from '../../../common/executor-disconnect.js';
 import { connectRemoteExecutor } from '../../__tests__/runtime-adapter.js';
 import { serveExecutionRuntime } from '../../server/executor-rpc-server.js';
@@ -226,7 +228,8 @@ for (const dialer of ['controller', 'worker'] as const) {
   });
 
   test(`a start dispatched while a replay drains settles through its own reply (${dialer} dials)`, async () => {
-    const fixture = await remoteFixture(dialer);
+    let path!: ReturnType<typeof outgoingHold>;
+    const fixture = await remoteFixture(dialer, (_controller, worker) => { path = outgoingHold(worker); });
     const release = Promise.withResolvers<void>();
     try {
       const integration = await fixture.executor.getAgentIntegration('test');
@@ -238,6 +241,8 @@ for (const dialer of ['controller', 'worker'] as const) {
       const worker = fixture.generations[0]!;
       const publish = worker.nativePublishers[0]!;
       const ready = nextAvailability(fixture.executor, 'ready');
+      // The replay tail after the resume reply stays on a stalled path until the new start reaches the worker.
+      path.holdAfter(isProducerResumeReply);
       fixture.controller.disconnect(); fixture.worker.disconnect();
       // Beyond the producer share of the session queue, so the replay tail follows the resume reply.
       const count = 1_500;
@@ -247,9 +252,12 @@ for (const dialer of ['controller', 'worker'] as const) {
       publish({ type: 'run-ended', runId: first.runId, outcome: 'finished' });
       await ready;
       let rowsAtStart = count;
-      worker.hooks.start = async () => { rowsAtStart = rowsReceived(); await release.promise; };
+      const started = Promise.withResolvers<void>();
+      worker.hooks.start = async () => { rowsAtStart = rowsReceived(); started.resolve(); await release.promise; };
       const second = { ...first, runId: crypto.randomUUID() };
       const launch = integration.execution.start(second);
+      await started.promise;
+      await path.release();
       const deadline = performance.now() + 30_000;
       while (!types.includes('run-ended') && performance.now() < deadline) await Bun.sleep(5);
       await integration.execution.runningSessions();

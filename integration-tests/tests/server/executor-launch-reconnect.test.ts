@@ -9,7 +9,9 @@ import { AgentDirectory, type ExecutionIntegrationDirectory } from '../../../ser
 import { AgentEventBus } from '../../../server/controller/agents/event-bus.js';
 import { IntegrationRegistry } from '../../../server/runtime/agents/integration-registry.js';
 import { AgentRuntimeRouter } from '../../../server/controller/agents/runtime-router.js';
-import { integrationFixture, linkOptions, outgoingFault } from '../../../server/remote/__tests__/integration-fixture.js';
+import {
+  integrationFixture, isProducerResumeReply, linkOptions, outgoingFault, outgoingHold,
+} from '../../../server/remote/__tests__/integration-fixture.js';
 import { serveExecutionRuntime } from '../../../server/remote/server/executor-rpc-server.js';
 import { ProducerRelay } from '../../../server/remote/server/producer-relay.js';
 import { ExecutorRpc } from '../../../server/remote/transport/rpc.js';
@@ -36,6 +38,7 @@ async function withRemoteRouter(dialer: Dialer, run: (context: Awaited<ReturnTyp
   const controller = new WebSocketLink({ ...linkOptions, executorId: EXECUTOR, role: 'controller' });
   const worker = new WebSocketLink({ ...linkOptions, executorId: EXECUTOR, role: 'worker' });
   const workerFault = outgoingFault(worker);
+  const workerPath = outgoingHold(worker);
   const native = integrationFixture(root, EXECUTOR);
   const relay = new ProducerRelay();
   const serving: ReturnType<typeof serveExecutionRuntime>[] = [];
@@ -45,7 +48,7 @@ async function withRemoteRouter(dialer: Dialer, run: (context: Awaited<ReturnTyp
   else worker.dial(controller.listen());
   const remote = await connected;
   try {
-    await run(await remoteRouter({ root, chats, ledger, controller, native, remote, workerFault }));
+    await run(await remoteRouter({ root, chats, ledger, controller, native, remote, workerFault, workerPath }));
   } finally {
     ledger.close();
     await remote.dispose();
@@ -58,7 +61,7 @@ async function withRemoteRouter(dialer: Dialer, run: (context: Awaited<ReturnTyp
   }
 }
 
-async function remoteRouter({ root, chats, ledger, controller, native, remote, workerFault }: {
+async function remoteRouter({ root, chats, ledger, controller, native, remote, workerFault, workerPath }: {
   readonly root: string;
   readonly chats: ChatRegistry;
   readonly ledger: TranscriptLedgerService;
@@ -66,6 +69,7 @@ async function remoteRouter({ root, chats, ledger, controller, native, remote, w
   readonly native: ReturnType<typeof integrationFixture>;
   readonly remote: Awaited<ReturnType<typeof connectRemoteExecutor>>;
   readonly workerFault: ReturnType<typeof outgoingFault>;
+  readonly workerPath: ReturnType<typeof outgoingHold>;
 }) {
   const integration = await remote.getAgentIntegration('test');
   const integrations = new IntegrationRegistry({ instances: [integration] });
@@ -105,7 +109,7 @@ async function remoteRouter({ root, chats, ledger, controller, native, remote, w
   const restored = () => new Promise<void>(resolve => {
     const off = remote.onAvailabilityChanged(availability => { if (availability === 'ready') { off(); resolve(); } });
   });
-  return { router, ledger, native, integration, controller, restored, workerFault };
+  return { router, ledger, native, integration, controller, restored, workerFault, workerPath };
 }
 
 async function until(condition: () => boolean): Promise<void> {
@@ -186,12 +190,14 @@ for (const dialer of ['controller', 'worker'] as const) {
   }, 30_000);
 
   test(`a turn started while a replay drains keeps running until its own reply arrives (${dialer} dials)`, async () => {
-    await withRemoteRouter(dialer, async ({ router, ledger, native, integration, controller, restored }) => {
+    await withRemoteRouter(dialer, async ({ router, ledger, native, integration, controller, restored, workerPath }) => {
       let rowsReceived = 0;
       integration.producers.subscribe(({ event }) => { if (event.type === 'rows') rowsReceived += 1; });
       await router.startSession(CHAT, 'Synthetic first input');
       const publish = native.nativePublishers[0]!;
       const reconnected = restored();
+      // The replay tail after the resume reply stays on a stalled path until the new turn's start reaches the worker.
+      workerPath.holdAfter(isProducerResumeReply);
       controller.disconnect();
       // Beyond the producer share of the session queue, so the replay tail follows the resume reply.
       const count = 1_500;
@@ -206,7 +212,9 @@ for (const dialer of ['controller', 'worker'] as const) {
       native.hooks.start = async () => { rowsAtStart = rowsReceived; await release.promise; };
       const turn = router.startSession(CHAT, 'Synthetic second input');
       try {
-        await until(() => native.calls.start === 2 && rowsReceived === count);
+        await until(() => native.calls.start === 2);
+        await workerPath.release();
+        await until(() => rowsReceived === count);
         await integration.execution.runningSessions();
 
         expect(rowsAtStart).toBeLessThan(count);

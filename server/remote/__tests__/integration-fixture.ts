@@ -14,6 +14,7 @@ import { createVersion1RecordMigration } from '@garcon/server-agent-common/migra
 import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
 import type { AgentRuntimeExecution, AgentRuntimePublisher, AgentRuntimeStartRequest } from '@garcon/server-agent-common/execution/runtime-events';
 import { ExecutorRpc } from '../transport/rpc.js';
+import type { SessionSocket } from '../transport/message-session.js';
 import { connectRemoteExecutor } from './runtime-adapter.js';
 import { WebSocketLink } from '../transport/websocket-link.js';
 import { serveExecutionRuntime } from '../server/executor-rpc-server.js';
@@ -148,6 +149,53 @@ export function outgoingFault(link: WebSocketLink) {
     });
   });
   return fault;
+}
+
+// Holds a link's outgoing session messages, as a stalled network path would, so a test
+// controls when they reach the peer. The hold starts after a chosen message has passed,
+// wherever the peer's socket buffers stand. Released messages keep their order, and
+// anything sent before the backlog drains queues behind it.
+export function outgoingHold(link: WebSocketLink) {
+  const held: { readonly socket: SessionSocket; readonly encoded: string }[] = [];
+  let holding = false;
+  let startsAfter: ((encoded: string) => boolean) | null = null;
+  link.onSession((session) => {
+    const attach = session.attach.bind(session);
+    session.attach = (socket) => attach({
+      close: () => socket.close(),
+      canSend: (bytes) => holding || held.length > 0 || socket.canSend?.(bytes) !== false,
+      send(encoded) {
+        if (holding || held.length > 0) {
+          held.push({ socket, encoded });
+          return;
+        }
+        socket.send(encoded);
+        if (startsAfter?.(encoded)) {
+          startsAfter = null;
+          holding = true;
+        }
+      },
+    });
+  });
+  return {
+    holdAfter(matches: (encoded: string) => boolean) { startsAfter = matches; },
+    async release() {
+      holding = false;
+      while (held.length > 0) {
+        const next = held[0]!;
+        if (next.socket.canSend?.(Buffer.byteLength(next.encoded)) === false) {
+          await Bun.sleep(1);
+          continue;
+        }
+        held.shift();
+        next.socket.send(next.encoded);
+      }
+    },
+  };
+}
+
+export function isProducerResumeReply(encoded: string): boolean {
+  return encoded.startsWith('{"type":"result"') && encoded.includes('"resumed":');
 }
 
 export async function requestFor(integration: AgentIntegration): Promise<AgentStartRequestV5> {
