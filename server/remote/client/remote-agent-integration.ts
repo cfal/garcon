@@ -15,12 +15,18 @@ import type {
   ExecutorRpcMethods, IntegrationManifest, ProducerAcknowledgement, ProducerResumeState,
 } from '../transport/rpc-protocol.js';
 import type { RemoteSessionBacking } from './executor-client.js';
+import { failureReason } from '../transport/failure-reason.js';
+import { createLogger, type Logger } from '../../common/log.js';
 import { EXECUTOR_DISCONNECTED_BEFORE_START, EXECUTOR_DISCONNECTED_MID_TURN } from '../../common/executor-disconnect.js';
 
 const SINGLE_QUERY_RPC_GRACE_MS = 30_000;
 const PRODUCER_ACK_DELAY_MS = 250;
 // Each page carries at most 1 MiB, so a reader holds at most 4 MiB of replies.
 const HISTORY_PAGES_IN_FLIGHT = 4;
+const UNREADABLE_EVENT_FAILURE = {
+  code: 'OUTCOME_UNKNOWN',
+  message: 'An event from the executor could not be read, so this turn\'s outcome is unknown. Native history may contain additional output.',
+} as const;
 
 interface RemoteProducerBinding {
   readonly ref: AgentProducerBinding;
@@ -35,6 +41,9 @@ interface RemoteProducerBinding {
   // runs already unsettled when resume was requested. The report cannot
   // describe a launch dispatched later, which settles through its own reply.
   resumeReport: { readonly report: ProducerResumeState; readonly runIds: readonly string[] } | null;
+  // Whether lost output was reported since the last delivered event, so a run of
+  // losses records one notice.
+  lostOutputReported: boolean;
 }
 
 export class RemoteAgentIntegration implements AgentIntegration {
@@ -62,12 +71,22 @@ export class RemoteAgentIntegration implements AgentIntegration {
   readonly sessionConfiguration: AgentIntegration['sessionConfiguration'];
   readonly projectPathUpdates: AgentIntegration['projectPathUpdates'];
   readonly #listeners = new Set<(event: AgentProducerNotification) => void>();
+  readonly #log: Logger;
   readonly #bindings = new Map<string, RemoteProducerBinding>();
+  // Sessions of bindings that failed before their owner closed them. The close must
+  // reach the worker through the session that holds the binding, which can still be
+  // installing when a replayed event fails it.
+  readonly #failedBindings = new Map<string, RemoteSessionBacking>();
   #ackTimer: ReturnType<typeof setTimeout> | null = null;
   #migrated = false;
   #started = false;
 
-  constructor(readonly manifest: IntegrationManifest, current: () => RemoteSessionBacking) {
+  constructor(
+    readonly manifest: IntegrationManifest,
+    current: () => RemoteSessionBacking,
+    log: Logger = createLogger('executors'),
+  ) {
+    this.#log = log;
     this.descriptor = manifest.descriptor;
     this.attachments = manifest.attachments;
     const call = async <K extends keyof ExecutorRpcMethods>(method: K, request: ExecutorRpcMethods[K]['request'], options?: ExecutorCallOptions) => (
@@ -104,6 +123,7 @@ export class RemoteAgentIntegration implements AgentIntegration {
         if (!isAgentResourceRef(request.binding, 'producer', backing.manifests.get(this.descriptor.id)!.scope)) throw new AgentCallError('rejected', 'Producer scope mismatch', 'STALE_RESOURCE');
         const state: RemoteProducerBinding = {
           ref: request.binding, backing, receivedSeq: 0, acknowledgedSeq: 0, unsettledLaunches: new Set(), resumeReport: null,
+          lostOutputReported: false,
         };
         this.#bindings.set(request.binding.id, state);
         try { await backing.rpc.call(this.descriptor.id, 'producers.bind', request, options); }
@@ -113,8 +133,10 @@ export class RemoteAgentIntegration implements AgentIntegration {
         }
       },
       close: async (binding, options) => {
+        const { rpc } = this.#bindings.get(binding.id)?.backing ?? this.#failedBindings.get(binding.id) ?? current();
         this.#bindings.delete(binding.id);
-        await call('producers.close', binding, options);
+        this.#failedBindings.delete(binding.id);
+        await rpc.call(this.descriptor.id, 'producers.close', binding, options);
       },
       subscribe: (listener) => {
         this.#listeners.add(listener);
@@ -236,6 +258,7 @@ export class RemoteAgentIntegration implements AgentIntegration {
 
   retire(): void {
     this.#bindings.clear();
+    this.#failedBindings.clear();
     if (this.#ackTimer) clearTimeout(this.#ackTimer);
     this.#ackTimer = null;
   }
@@ -262,7 +285,7 @@ export class RemoteAgentIntegration implements AgentIntegration {
         this.#settleLostLaunches(state);
         continue;
       }
-      this.#bindings.delete(state.ref.id);
+      this.#retireFailed(state);
       this.#emit({ binding: state.ref, event: { type: 'publication-failed', error: {
         code: 'OUTCOME_UNKNOWN', message: EXECUTOR_DISCONNECTED_MID_TURN,
       } } });
@@ -272,34 +295,58 @@ export class RemoteAgentIntegration implements AgentIntegration {
 
   receive(notification: AgentProducerNotification, seq: number, backing: RemoteSessionBacking): void {
     const { binding } = notification;
-    if (!isAgentResourceRef(binding, 'producer', backing.manifests.get(this.descriptor.id)!.scope)) throw new Error('Producer event scope mismatch');
+    const scope = backing.manifests.get(this.descriptor.id)!.scope;
+    if (!isAgentResourceRef(binding, 'producer', scope)) throw new Error('Producer event scope mismatch');
     const state = this.#bindings.get(binding.id);
     if (state?.backing !== backing || seq <= state.receivedSeq) return;
     const gap = seq > state.receivedSeq + 1;
     state.receivedSeq = seq;
     this.#scheduleAcknowledgement();
-    if (gap) this.#emit({ binding, event: { type: 'publication-gap' } });
-    let event = notification.event;
-    if (event.type === 'publication-failed') {
-      if (!isFailureDetail(event.error)) throw new Error('Invalid producer publication failure');
-      this.#bindings.delete(binding.id);
+    if (gap) this.#reportLostOutput(state);
+    const event = this.#decode(notification.event, scope, binding, seq);
+    if (event.type === 'publication-gap') this.#reportLostOutput(state);
+    else {
+      state.lostOutputReported = false;
+      if (event.type === 'publication-failed') this.#retireFailed(state);
+      if (event.type === 'launch-settled' || event.type === 'run-ended') state.unsettledLaunches.delete(event.runId);
+      this.#emit({ binding, event });
     }
-    if (event.type === 'launch-settled') {
-      const scope = backing.manifests.get(this.descriptor.id)!.scope;
-      if (typeof event.runId !== 'string' || (event.handle ? !isAgentResourceRef(event.handle, 'execution', scope) : !isFailureDetail(event.error))) {
-        throw new Error('Invalid launch outcome');
-      }
-    }
-    if (event.type === 'launch-settled' || event.type === 'run-ended') state.unsettledLaunches.delete(event.runId);
-    if (event.type === 'rows') event = { ...event, rows: decodeRows(event.rows) };
-    if (event.type === 'permission' && event.lifecycle.kind === 'requested') {
-      const tool = decodeMessage(event.lifecycle.requestedTool);
-      if (!isToolUseMessage(tool)) throw new Error('Invalid permission tool');
-      if (!event.decision) throw new Error('Permission response capability is missing');
-      event = { type: 'permission', runId: event.runId, lifecycle: { ...event.lifecycle, requestedTool: tool }, decision: event.decision };
-    }
-    this.#emit({ binding, event });
     if (this.#bindings.get(binding.id) === state) this.#settleLostLaunches(state);
+  }
+
+  #reportLostOutput(state: RemoteProducerBinding): void {
+    if (state.lostOutputReported) return;
+    state.lostOutputReported = true;
+    this.#emit({ binding: state.ref, event: { type: 'publication-gap' } });
+  }
+
+  #retireFailed(state: RemoteProducerBinding): void {
+    this.#bindings.delete(state.ref.id);
+    this.#failedBindings.set(state.ref.id, state.backing);
+  }
+
+  // Undecodable rows count as lost output. Any other event the controller cannot read,
+  // such as a permission request or a launch outcome, leaves its run's state unknown, so
+  // the binding fails, and closing it stops the native turn. Throwing instead would retire
+  // the session, interrupting every binding it carries, and a failure that recurs on
+  // replayed events would retire each replacement in turn.
+  #decode(
+    event: AgentProducerNotification['event'],
+    scope: AgentResourceScope,
+    binding: AgentProducerBinding,
+    seq: number,
+  ): AgentProducerNotification['event'] {
+    try {
+      return decodeProducerEvent(event, scope);
+    } catch (error) {
+      const type = typeof event?.type === 'string' ? event.type : 'unknown';
+      this.#log.warn('Executor producer event could not be decoded', {
+        integrationId: this.descriptor.id, bindingId: binding.id, seq, type, reason: failureReason(error),
+      });
+      return type === 'rows'
+        ? { type: 'publication-gap' }
+        : { type: 'publication-failed', error: UNREADABLE_EVENT_FAILURE };
+    }
   }
 
   // Settles launches whose replies were lost once the replay reaches the
@@ -321,8 +368,19 @@ export class RemoteAgentIntegration implements AgentIntegration {
     }
   }
 
+  // A listener that throws would otherwise retire the session delivering the event,
+  // interrupting every binding it carries, and starve the listeners after it.
   #emit(notification: AgentProducerNotification): void {
-    for (const listener of this.#listeners) listener(notification);
+    for (const listener of this.#listeners) {
+      try {
+        listener(notification);
+      } catch (error) {
+        this.#log.error('Executor producer listener failed', {
+          integrationId: this.descriptor.id, bindingId: notification.binding.id,
+          type: notification.event.type, reason: failureReason(error),
+        });
+      }
+    }
   }
 
   // Acknowledges received frames in batches so the worker can release them.
@@ -362,6 +420,31 @@ function resumeStates(value: unknown, scope: AgentResourceScope): readonly Produ
     }
   }
   return value as readonly ProducerResumeState[];
+}
+
+// Rebuilds a producer event received from the worker; throws when it is malformed.
+function decodeProducerEvent(
+  event: AgentProducerNotification['event'],
+  scope: AgentResourceScope,
+): AgentProducerNotification['event'] {
+  if (event.type === 'publication-failed') {
+    if (!isFailureDetail(event.error)) throw new Error('Invalid producer publication failure');
+    return event;
+  }
+  if (event.type === 'launch-settled') {
+    if (typeof event.runId !== 'string' || (event.handle ? !isAgentResourceRef(event.handle, 'execution', scope) : !isFailureDetail(event.error))) {
+      throw new Error('Invalid launch outcome');
+    }
+    return event;
+  }
+  if (event.type === 'rows') return { ...event, rows: decodeRows(event.rows) };
+  if (event.type === 'permission' && event.lifecycle.kind === 'requested') {
+    const tool = decodeMessage(event.lifecycle.requestedTool);
+    if (!isToolUseMessage(tool)) throw new Error('Invalid permission tool');
+    if (!event.decision) throw new Error('Permission response capability is missing');
+    return { type: 'permission', runId: event.runId, lifecycle: { ...event.lifecycle, requestedTool: tool }, decision: event.decision };
+  }
+  return event;
 }
 
 function decodeRows(rows: readonly AgentImportedTranscriptRow[]): readonly AgentImportedTranscriptRow[] {

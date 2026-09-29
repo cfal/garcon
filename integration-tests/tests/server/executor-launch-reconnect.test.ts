@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AssistantMessage } from '../../../common/chat-types.js';
+import type { AgentRuntimeEvent } from '../../../server-agents/common/src/execution/runtime-events.js';
 import { ApiProviderEndpointResolver } from '../../../server/controller/api-providers/endpoint-resolver.js';
 import { ChatRegistry } from '../../../server/controller/chats/store.js';
 import { AgentDirectory, type ExecutionIntegrationDirectory } from '../../../server/controller/agents/directory.js';
@@ -227,4 +228,43 @@ for (const dialer of ['controller', 'worker'] as const) {
       expect(runEnds(ledger)).toEqual([{ outcome: 'interrupted', origin: 'core' }, { outcome: 'interrupted', origin: 'core' }]);
     });
   }, 60_000);
+
+  test(`a permission request the controller cannot read fails the turn as an unknown outcome and stops it (${dialer} dials)`, async () => {
+    await withRemoteRouter(dialer, async ({ router, ledger, native }) => {
+      await router.startSession(CHAT, 'Synthetic input');
+      const permissionOccurrenceId = crypto.randomUUID();
+      // A tool message type this controller cannot parse, as a worker from a mismatched or faulty build would send.
+      native.nativePublishers[0]!({
+        type: 'permission', runId: ledger.activeRunId(CHAT)!,
+        lifecycle: {
+          kind: 'requested', permissionOccurrenceId, options: [],
+          requestedTool: { type: 'synthetic-unknown-tool', timestamp: '2026-01-01T00:00:00Z' },
+        },
+        decision: { permissionOccurrenceId, respond: async () => {} },
+      } as unknown as AgentRuntimeEvent);
+      await until(() => runEnd(ledger) !== undefined && native.calls.abort > 0);
+
+      expect(runEnd(ledger)).toMatchObject({
+        outcome: 'failed', error: { code: 'OUTCOME_UNKNOWN', message: expect.stringContaining('could not be read') },
+      });
+      expect(ledger.currentRows(CHAT).some(row => row.kind === 'permission-requested')).toBe(false);
+      expect(router.isChatRunning(CHAT)).toBe(false);
+    });
+  }, 30_000);
+
+  test(`a launch outcome the controller cannot read during a reconnect fails the turn and stops it (${dialer} dials)`, async () => {
+    await withRemoteRouter(dialer, async ({ router, ledger, native, controller, restored }) => {
+      await router.startSession(CHAT, 'Synthetic input');
+      const reconnected = restored();
+      controller.disconnect();
+      native.nativePublishers[0]!({ type: 'launch-settled', runId: 42 } as unknown as AgentRuntimeEvent);
+      await reconnected;
+      await until(() => runEnd(ledger) !== undefined && native.calls.abort > 0);
+
+      expect(runEnd(ledger)).toMatchObject({
+        outcome: 'failed', error: { code: 'OUTCOME_UNKNOWN', message: expect.stringContaining('could not be read') },
+      });
+      expect(router.isChatRunning(CHAT)).toBe(false);
+    });
+  }, 30_000);
 }

@@ -198,6 +198,33 @@ for (const dialer of ['controller', 'worker'] as const) {
     });
   }, 30_000);
 
+  test(`output the controller cannot decode during a short disconnect becomes one notice without another reconnect (${dialer} dials)`, async () => {
+    await withPendingPermission(dialer, {}, async () => {}, async ({ ledger, native, serving, restored, disconnect, integration }) => {
+      const reconnected = restored();
+      disconnect();
+      const publish = native.nativePublishers[0]!;
+      // A message type this controller cannot parse, as a worker from a mismatched or faulty build would send.
+      for (let batch = 0; batch < 2; batch += 1) {
+        publish({ type: 'rows', rows: [{
+          message: { type: 'synthetic-unknown-message', timestamp: '2026-09-23T00:00:01.000Z' } as unknown as AssistantMessage,
+        }] });
+      }
+      publish({ type: 'rows', rows: [{
+        message: new AssistantMessage('2026-09-23T00:00:02.000Z', 'Synthetic output after the undecodable event'),
+      }] });
+      await reconnected;
+      await integration.execution.runningSessions();
+
+      expect(ledger.currentRows(CHAT).flatMap(row => (
+        row.kind === 'provider-row' && row.message.type === 'assistant-message' ? [row.message.content] : []
+      ))).toEqual(['Synthetic output after the undecodable event']);
+      expect(ledger.currentRows(CHAT).filter(row => row.kind === 'notice')).toEqual([
+        expect.objectContaining({ message: expect.stringContaining('Reload from native history') }),
+      ]);
+      expect(serving).toHaveLength(2);
+    });
+  }, 30_000);
+
   test(`an expired reconnect grace denies the permission and fails the run as disconnected (${dialer} dials)`, async () => {
     const decisions: boolean[] = [];
     await withPendingPermission(dialer, { relay: { graceMs: 1 }, client: { reconnectGraceMs: 1 } }, async (decision) => {

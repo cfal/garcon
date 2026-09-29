@@ -206,7 +206,7 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
       this.#abandonBindings();
     }
     const candidates = initial ? new Map([...manifests.values()].map((manifest) => [
-      manifest.descriptor.id, new RemoteAgentIntegration(manifest, () => this.#backing()),
+      manifest.descriptor.id, new RemoteAgentIntegration(manifest, () => this.#backing(), this.#log),
     ])) : this.#integrations;
     if (!initial) {
       if (this.#integrations.size !== manifests.size) throw new ExecutorConfigurationError('Executor provider inventory changed; restart the controller to accept it');
