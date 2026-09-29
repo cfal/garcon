@@ -70,12 +70,18 @@ export class ProjectPathDialogState {
 		);
 	}
 
-	open(currentProjectPath: string, executorId?: string | null): void {
+	// A candidate other than the current path is validated like any edit and is
+	// never treated as unchanged.
+	open(
+		currentProjectPath: string,
+		executorId?: string | null,
+		candidatePath = currentProjectPath,
+	): void {
 		this.executorId = effectiveExecutorId(executorId);
 		this.currentProjectPath = currentProjectPath;
-		this.candidatePath = currentProjectPath;
+		this.candidatePath = candidatePath;
 		this.showBrowser = false;
-		this.validationStatus = currentProjectPath ? 'valid' : 'idle';
+		this.validationStatus = candidatePath && candidatePath === currentProjectPath ? 'valid' : 'idle';
 		this.validationError = null;
 		this.submitError = null;
 		this.isSubmitting = false;

@@ -214,6 +214,7 @@ test('normal app onboarding supports both directions and sends remote chat input
       await selectExecutor(fixture.page, '[data-slot="composer-bottom-bar"] [data-executor-picker]', 'Local');
       await app.waitForText('Move to Local');
       await app.fill('[role="dialog"] input', fixture.integration.dirs.project);
+      await app.waitForDialogButtonEnabled('Use This Executor');
       await app.clickDialogButton('Use This Executor');
       await fixture.page.waitForFunction(() => document.querySelector('[role="dialog"]') === null);
       await app.waitForButton('Direct (Chat Completions) / Integration Fake OpenAI / Integration Echo');

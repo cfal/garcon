@@ -98,6 +98,43 @@ describe('ProjectPathDialogState', () => {
 		}
 	});
 
+	it('validates a proposed candidate every time instead of trusting it as the current path', async () => {
+		vi.useFakeTimers();
+		const dialog = new ProjectPathDialogState();
+		vi.mocked(chatsApi.validateStart)
+			.mockReset()
+			.mockResolvedValueOnce({ valid: false, errorCode: 'path_not_found' })
+			.mockResolvedValueOnce({ valid: true, isGitRepo: true })
+			.mockResolvedValueOnce({ valid: false, errorCode: 'path_not_found' });
+		try {
+			dialog.open('', remoteExecutor.id, '/worker/missing');
+			expect(dialog.validationStatus).toBe('idle');
+			expect(dialog.isUnchanged).toBe(false);
+			dialog.scheduleValidation('context');
+			expect(dialog.validationStatus).toBe('checking');
+			await vi.advanceTimersByTimeAsync(250);
+			expect(chatsApi.validateStart).toHaveBeenLastCalledWith('/worker/missing', {
+				executorId: remoteExecutor.id,
+				signal: expect.any(AbortSignal),
+			});
+			expect(dialog.validationStatus).toBe('invalid');
+
+			dialog.setCandidatePath('/worker/project');
+			dialog.scheduleValidation('context');
+			await vi.advanceTimersByTimeAsync(250);
+			expect(dialog.validationStatus).toBe('valid');
+			dialog.setCandidatePath('/worker/missing');
+			dialog.scheduleValidation('context');
+			expect(dialog.validationStatus).toBe('checking');
+			await vi.advanceTimersByTimeAsync(250);
+			expect(dialog.validationStatus).toBe('invalid');
+			expect(chatsApi.validateStart).toHaveBeenCalledTimes(3);
+		} finally {
+			dialog.dispose();
+			vi.useRealTimers();
+		}
+	});
+
 	it('explains rejected and unconfirmed project path updates', () => {
 		const dialog = new ProjectPathDialogState();
 

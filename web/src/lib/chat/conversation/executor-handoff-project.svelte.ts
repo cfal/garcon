@@ -12,7 +12,8 @@ export interface ExecutorHandoffDestination {
 
 export class ExecutorHandoffProjectState {
 	target = $state<{ chatId: string; executorId: string } | null>(null);
-	projectPath = $state('');
+	// The suggested folder; the dialog owns edits and confirms its final path.
+	initialProjectPath = $state('');
 	selection = $state<ExecutorHandoffModel | null>(null);
 	error = $state<string | null>(null);
 	checking = $state(false);
@@ -24,7 +25,7 @@ export class ExecutorHandoffProjectState {
 	) {}
 
 	get canConfirm(): boolean {
-		if (!this.target || !this.selection || !this.projectPath.trim() || this.checking) return false;
+		if (!this.target || !this.selection || this.checking) return false;
 		return this.isAvailable(this.target.executorId, this.selection);
 	}
 
@@ -40,29 +41,25 @@ export class ExecutorHandoffProjectState {
 	): Promise<ExecutorHandoffDestination | null> {
 		this.cancel();
 		this.target = { chatId, executorId };
-		this.projectPath = projectPath;
+		this.initialProjectPath = projectPath;
 		this.selection = selection;
 		return new Promise((resolve) => {
 			this.#resolve = resolve;
 		});
 	}
 
-	async confirm(): Promise<void> {
-		if (!this.canConfirm || !this.target || !this.selection) return;
+	// The caller keeps the path unchanged while checking.
+	async confirm(destinationPath: string): Promise<void> {
+		const projectPath = destinationPath.trim();
+		if (!projectPath || !this.canConfirm || !this.target || !this.selection) return;
 		const version = this.#version;
-		const projectPath = this.projectPath.trim();
 		const selection = this.selection;
 		const executorId = this.target.executorId;
 		this.checking = true;
 		this.error = null;
 		try {
 			const result = await validateStart(projectPath, { executorId });
-			if (
-				version !== this.#version ||
-				this.projectPath.trim() !== projectPath ||
-				this.selection !== selection
-			)
-				return;
+			if (version !== this.#version || this.selection !== selection) return;
 			if (!result.valid) {
 				this.error = result.error ?? m.chat_executor_handoff_project_unavailable();
 				return;
@@ -76,7 +73,7 @@ export class ExecutorHandoffProjectState {
 			this.cancel();
 			resolve?.({ projectPath, selection });
 		} catch (error) {
-			if (version === this.#version && this.projectPath.trim() === projectPath) {
+			if (version === this.#version) {
 				this.error = error instanceof Error ? error.message : m.chat_executor_handoff_inspect_failed();
 			}
 		} finally {
@@ -90,7 +87,7 @@ export class ExecutorHandoffProjectState {
 		this.#resolve = null;
 		this.target = null;
 		this.selection = null;
-		this.projectPath = '';
+		this.initialProjectPath = '';
 		this.checking = false;
 		this.error = null;
 	}
