@@ -2,13 +2,14 @@ import crypto from 'node:crypto';
 import type { ChatMessage } from '@garcon/common/chat-types';
 import { isRecord } from '@garcon/common/json';
 import { AgentIntegrationError } from '@garcon/server-agent-interface';
-import { orderedTranscriptDigest } from '@garcon/server-agent-common/forking/transcript-digest';
+import { EventLoopSteps } from '@garcon/server-agent-common/shared/event-loop';
+import { OrderedTranscriptDigest } from '@garcon/server-agent-common/forking/transcript-digest';
 import type {
   ForkTranscriptEntryContext,
   ForkTranscriptTransformInput,
   ForkTranscriptTransformResult,
 } from '@garcon/server-agent-common/forking/fork-jsonl';
-import { convertClaudeEntries, sortClaudeEntries } from './history-loader.js';
+import { convertClaudeEntries, convertClaudeEntriesInSteps, sortClaudeEntriesInSteps } from './history-loader.js';
 import { claudeSteeringInputsFromNativeContent } from './user-input.js';
 
 const CLAUDE_TRANSCRIPT_TYPES = new Set([
@@ -32,6 +33,8 @@ const CLAUDE_SOURCE_ONLY_FIELDS = [
 // in the tool_use input does not participate. outputTaskId is stripped as
 // task identity on the same rationale; descriptive fields stay.
 const CLAUDE_TASK_ACTIVATION_FIELDS = ['backgroundTaskId', 'outputTaskId'] as const;
+
+type ClaudeTranscriptEntry = Record<string, unknown> & { uuid: string };
 
 interface ClaudeForkTransformerOptions {
   readonly randomUUID?: () => string;
@@ -97,70 +100,82 @@ export function projectClaudeForkEntry(
 
 export function createClaudeForkTranscriptTransformer(
   options: ClaudeForkTransformerOptions = {},
-): (input: ForkTranscriptTransformInput) => ForkTranscriptTransformResult {
+): (input: ForkTranscriptTransformInput) => Promise<ForkTranscriptTransformResult> {
   const randomUUID = options.randomUUID ?? crypto.randomUUID;
   const now = options.now ?? (() => new Date().toISOString());
 
   // The Agent SDK indexes the full selected graph before resolving parent links, so
   // parentUuid may refer to a record that appears later in physical JSONL order.
   // https://github.com/anthropics/claude-agent-sdk-python/blob/f8b9ec923982082a02c485924e0f60367949c3a1/src/claude_agent_sdk/_internal/session_mutations.py#L385-L418
-  return (input) => {
+  return async (input) => {
+    const steps = new EventLoopSteps('claude-fork-transform');
     const forkTimestamp = now();
-    const transcript = input.selectedEntries
-      .filter(isClaudeTranscriptEntry)
-      .filter((entry) => entry.isSidechain !== true);
-    const byUuid = new Map(transcript.map((entry) => [entry.uuid as string, entry]));
-    const uuidMap = new Map(transcript.map((entry) => [entry.uuid as string, randomUUID()]));
-    const messages = transcript
-      .filter((entry) => entry.type !== 'progress')
-      .map((entry) => {
-        const sourceUuid = entry.uuid as string;
-        const rewritten: Record<string, unknown> = {
-          ...entry,
-          uuid: uuidMap.get(sourceUuid)!,
-          parentUuid: remapClaudeParent(
-            stringOrNull(entry.parentUuid),
-            byUuid,
-            uuidMap,
-          ),
-          sessionId: input.targetAgentSessionId,
-          isSidechain: false,
-          forkedFrom: {
-            sessionId: input.sourceAgentSessionId,
-            messageUuid: sourceUuid,
-          },
-        };
-        if (typeof entry.logicalParentUuid === 'string' && uuidMap.has(entry.logicalParentUuid)) {
-          rewritten.logicalParentUuid = uuidMap.get(entry.logicalParentUuid)!;
-        }
-        if (entry.session_id === input.sourceAgentSessionId) {
-          rewritten.session_id = input.targetAgentSessionId;
-        }
-        for (const field of CLAUDE_SOURCE_ONLY_FIELDS) delete rewritten[field];
-        stripTaskActivation(rewritten);
-        return rewritten;
-      });
+    const transcript: ClaudeTranscriptEntry[] = [];
+    await steps.forEach(input.selectedEntries, (entry) => {
+      if (isClaudeTranscriptEntry(entry) && entry.isSidechain !== true) transcript.push(entry);
+    });
+    const byUuid = new Map<string, Record<string, unknown>>();
+    const uuidMap = new Map<string, string>();
+    await steps.forEach(transcript, (entry) => {
+      byUuid.set(entry.uuid, entry);
+      uuidMap.set(entry.uuid, randomUUID());
+    });
+    const entries: Record<string, unknown>[] = [];
+    await steps.forEach(transcript, (entry) => {
+      if (entry.type === 'progress') return;
+      const sourceUuid = entry.uuid;
+      const rewritten: Record<string, unknown> = {
+        ...entry,
+        uuid: uuidMap.get(sourceUuid)!,
+        parentUuid: remapClaudeParent(
+          stringOrNull(entry.parentUuid),
+          byUuid,
+          uuidMap,
+        ),
+        sessionId: input.targetAgentSessionId,
+        isSidechain: false,
+        forkedFrom: {
+          sessionId: input.sourceAgentSessionId,
+          messageUuid: sourceUuid,
+        },
+      };
+      if (typeof entry.logicalParentUuid === 'string' && uuidMap.has(entry.logicalParentUuid)) {
+        rewritten.logicalParentUuid = uuidMap.get(entry.logicalParentUuid)!;
+      }
+      if (entry.session_id === input.sourceAgentSessionId) {
+        rewritten.session_id = input.targetAgentSessionId;
+      }
+      for (const field of CLAUDE_SOURCE_ONLY_FIELDS) delete rewritten[field];
+      stripTaskActivation(rewritten);
+      entries.push(rewritten);
+    });
 
-    if (messages.length > 0) {
-      messages[messages.length - 1] = { ...messages[messages.length - 1], timestamp: forkTimestamp };
+    if (entries.length > 0) {
+      entries[entries.length - 1] = { ...entries[entries.length - 1], timestamp: forkTimestamp };
     }
     // Microcompaction re-appends retained entries with their original uuids
     // (rechained via parentUuid), so a source uuid can legitimately occur more
     // than once. The copy preserves that structure faithfully; the graph
     // assertion permits each target uuid exactly the source's multiplicity.
     const allowedUuidCounts = new Map<string, number>();
-    for (const entry of transcript) {
-      if (entry.type === 'progress') continue;
-      const target = uuidMap.get(entry.uuid as string)!;
+    await steps.forEach(transcript, (entry) => {
+      if (entry.type === 'progress') return;
+      const target = uuidMap.get(entry.uuid)!;
       allowedUuidCounts.set(target, (allowedUuidCounts.get(target) ?? 0) + 1);
-    }
-    const entries: Record<string, unknown>[] = [...messages];
-    const replacements = input.sourceEntries
-      .filter(isRecord)
-      .filter((entry) => entry.type === 'content-replacement'
+    });
+    const replacements: unknown[] = [];
+    const sourceUuids = new Set<string>();
+    await steps.forEach(input.sourceEntries, (entry) => {
+      if (isClaudeTranscriptEntry(entry)) sourceUuids.add(entry.uuid);
+      if (
+        isRecord(entry)
+        && entry.type === 'content-replacement'
         && entry.sessionId === input.sourceAgentSessionId
-        && Array.isArray(entry.replacements))
-      .flatMap((entry) => entry.replacements as unknown[]);
+        && Array.isArray(entry.replacements)
+      ) {
+        for (const replacement of entry.replacements) replacements.push(replacement);
+      }
+    });
     if (replacements.length > 0) {
       entries.push({
         type: 'content-replacement',
@@ -171,26 +186,28 @@ export function createClaudeForkTranscriptTransformer(
       });
     }
 
-    assertClaudeForkGraph(
+    await assertClaudeForkGraph(
       entries,
-      input.sourceEntries.filter(isClaudeTranscriptEntry),
+      sourceUuids,
       input.targetAgentSessionId,
       allowedUuidCounts,
+      steps,
     );
-    return {
-      entries,
-      expectedSemanticDigest: claudeForkSemanticDigest(projectClaudeForkMessages(entries)),
-    };
+    const forkedMessages = await projectClaudeForkMessages(entries, steps);
+    return { entries, expectedSemanticDigest: await semanticDigest(forkedMessages, steps) };
   };
 }
 
 export const transformClaudeForkTranscript = createClaudeForkTranscriptTransformer();
 
-export function claudeForkSemanticDigest(messages: readonly ChatMessage[]): string {
-  return orderedTranscriptDigest(messages.map((message, index) => ({
-    seq: index + 1,
-    message: claudeForkSemanticMessage(message),
-  })));
+export function claudeForkSemanticDigest(messages: readonly ChatMessage[]): Promise<string> {
+  return semanticDigest(messages, new EventLoopSteps('claude-fork-digest'));
+}
+
+async function semanticDigest(messages: readonly ChatMessage[], steps: EventLoopSteps): Promise<string> {
+  const digest = new OrderedTranscriptDigest();
+  await steps.forEach(messages, (message) => { digest.add(claudeForkSemanticMessage(message)); });
+  return digest.digest();
 }
 
 function claudeForkSemanticMessage(message: ChatMessage): ChatMessage {
@@ -203,11 +220,14 @@ function claudeForkSemanticMessage(message: ChatMessage): ChatMessage {
   };
 }
 
-function projectClaudeForkMessages(entries: readonly Record<string, unknown>[]): ChatMessage[] {
-  return convertClaudeEntries(sortClaudeEntries([...entries]));
+async function projectClaudeForkMessages(
+  entries: readonly Record<string, unknown>[],
+  steps: EventLoopSteps,
+): Promise<ChatMessage[]> {
+  return convertClaudeEntriesInSteps(await sortClaudeEntriesInSteps(entries, steps), steps);
 }
 
-function isClaudeTranscriptEntry(entry: unknown): entry is Record<string, unknown> & { uuid: string } {
+function isClaudeTranscriptEntry(entry: unknown): entry is ClaudeTranscriptEntry {
   return isRecord(entry)
     && typeof entry.uuid === 'string'
     && typeof entry.type === 'string'
@@ -237,25 +257,23 @@ function remapClaudeParent(
   return null;
 }
 
-function assertClaudeForkGraph(
+async function assertClaudeForkGraph(
   entries: readonly Record<string, unknown>[],
-  sourceEntries: readonly (Record<string, unknown> & { uuid: string })[],
+  sourceUuids: ReadonlySet<string>,
   targetSessionId: string,
   allowedUuidCounts: ReadonlyMap<string, number>,
-): void {
-  const sourceUuids = new Set(sourceEntries.map((entry) => entry.uuid));
+  steps: EventLoopSteps,
+): Promise<void> {
   // The Agent SDK resolves parents from its complete UUID map rather than treating file
   // order as a topological order. Validation therefore checks closure over all emitted nodes.
   // https://github.com/anthropics/claude-agent-sdk-python/blob/f8b9ec923982082a02c485924e0f60367949c3a1/src/claude_agent_sdk/_internal/session_mutations.py#L396-L418
-  const emittedUuids = new Set(
-    entries
-      .filter((entry) => entry.type !== 'content-replacement')
-      .map((entry) => entry.uuid)
-      .filter((uuid): uuid is string => typeof uuid === 'string'),
-  );
+  const emittedUuids = new Set<string>();
+  await steps.forEach(entries, (entry) => {
+    if (entry.type !== 'content-replacement' && typeof entry.uuid === 'string') emittedUuids.add(entry.uuid);
+  });
   const emittedUuidCounts = new Map<string, number>();
-  for (const entry of entries) {
-    if (entry.type === 'content-replacement') continue;
+  await steps.forEach(entries, (entry) => {
+    if (entry.type === 'content-replacement') return;
     if (typeof entry.uuid !== 'string' || sourceUuids.has(entry.uuid)) {
       throw unavailable('Claude fork did not create independent message identities');
     }
@@ -270,7 +288,7 @@ function assertClaudeForkGraph(
     if (entry.parentUuid !== null && !emittedUuids.has(String(entry.parentUuid))) {
       throw unavailable('Claude fork contains an invalid parent graph');
     }
-  }
+  });
 }
 
 function unavailable(message: string): AgentIntegrationError {

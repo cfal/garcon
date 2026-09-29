@@ -143,7 +143,7 @@ describe('transformClaudeForkTranscript', () => {
 
   it.each(taskActivationShapes)(
     'strips source task identity from %s without changing rendered output',
-    (_name, toolUseResult) => {
+    async (_name, toolUseResult) => {
       const sourceEntries = [{
         type: 'user',
         uuid: 'source-result',
@@ -162,7 +162,7 @@ describe('transformClaudeForkTranscript', () => {
       }];
       const original = structuredClone(sourceEntries);
 
-      const result = transformClaudeForkTranscript({
+      const result = await transformClaudeForkTranscript({
         selectedEntries: sourceEntries,
         sourceEntries,
         ...context,
@@ -179,7 +179,7 @@ describe('transformClaudeForkTranscript', () => {
     },
   );
 
-  it('creates an independent graph and preserves provider replacement metadata', () => {
+  it('creates an independent graph and preserves provider replacement metadata', async () => {
     const uuids = [
       '10000000-0000-4000-8000-000000000001',
       '10000000-0000-4000-8000-000000000002',
@@ -220,7 +220,7 @@ describe('transformClaudeForkTranscript', () => {
     ];
     const original = structuredClone(sourceEntries);
 
-    const result = transform({
+    const result = await transform({
       selectedEntries: sourceEntries,
       sourceEntries,
       ...context,
@@ -252,7 +252,7 @@ describe('transformClaudeForkTranscript', () => {
     expect(sourceEntries).toEqual(original);
   });
 
-  it('copies microcompaction re-appends faithfully instead of refusing the duplicate uuids', () => {
+  it('copies microcompaction re-appends faithfully instead of refusing the duplicate uuids', async () => {
     const transform = createClaudeForkTranscriptTransformer({
       now: () => '2026-07-29T00:00:00.000Z',
     });
@@ -296,7 +296,7 @@ describe('transformClaudeForkTranscript', () => {
       },
     ];
 
-    const result = transform({
+    const result = await transform({
       selectedEntries,
       sourceEntries: selectedEntries,
       ...context,
@@ -321,7 +321,7 @@ describe('transformClaudeForkTranscript', () => {
     expect(result.expectedSemanticDigest).toStartWith('ordered-v1:');
   });
 
-  it('remaps a retained parent that appears later in physical file order', () => {
+  it('remaps a retained parent that appears later in physical file order', async () => {
     const sourceEntries = [
       {
         type: 'user', uuid: 'source-root', parentUuid: null,
@@ -345,7 +345,7 @@ describe('transformClaudeForkTranscript', () => {
       },
     ];
 
-    const result = transformClaudeForkTranscript({
+    const result = await transformClaudeForkTranscript({
       selectedEntries: sourceEntries,
       sourceEntries,
       ...context,

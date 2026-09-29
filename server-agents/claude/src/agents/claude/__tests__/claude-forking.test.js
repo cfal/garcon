@@ -19,7 +19,7 @@ afterEach(async () => {
 });
 
 describe('Claude JSONL forking', () => {
-  it('ignores remapped native user UUIDs without ignoring other message semantics', () => {
+  it('ignores remapped native user UUIDs without ignoring other message semantics', async () => {
     const message = (content, upstreamRequestId, clientRequestId = 'client-1') => new UserMessage(
       '2026-07-17T15:20:02.808Z',
       content,
@@ -27,14 +27,14 @@ describe('Claude JSONL forking', () => {
       { upstreamRequestId, clientRequestId },
     );
 
-    const source = claudeForkSemanticDigest([message('source prompt', 'source-native-uuid')]);
-    expect(claudeForkSemanticDigest([
+    const source = await claudeForkSemanticDigest([message('source prompt', 'source-native-uuid')]);
+    expect(await claudeForkSemanticDigest([
       message('source prompt', 'fork-native-uuid'),
     ])).toBe(source);
-    expect(claudeForkSemanticDigest([
+    expect(await claudeForkSemanticDigest([
       message('different prompt', 'fork-native-uuid'),
     ])).not.toBe(source);
-    expect(claudeForkSemanticDigest([
+    expect(await claudeForkSemanticDigest([
       message('source prompt', 'fork-native-uuid', 'client-2'),
     ])).not.toBe(source);
   });

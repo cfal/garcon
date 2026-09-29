@@ -3096,9 +3096,9 @@ The catalog cites this revision, but its inventory is not repeated here.
   handoff artifact in every execution lane while WebSocket pings stay under
   200 ms, which leaves room for shared CI runners. The Claude, Codex, Pi, Amp,
   OpenCode, Factory, Cursor, and Direct long-history loads, Codex's paginated
-  history, and the shared draft conversion each keep their longest event-loop
-  gap under a limit that a single synchronous pass over the same history
-  exceeds.
+  history, the Claude session fork, and the shared draft conversion each keep
+  their longest event-loop gap under a limit that a single synchronous pass
+  over the same history exceeds.
 - **Scripted tiers**: the existing real-binary scripted suites (Claude,
   Codex, OpenCode, Pi) are retained and re-anchored on end-state ledger
   assertions through direct V5 assertions. Live credential suites
