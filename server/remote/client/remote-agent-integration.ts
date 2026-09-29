@@ -120,7 +120,9 @@ export class RemoteAgentIntegration implements AgentIntegration {
         return await send(backing, timeoutMs);
       } catch (error) {
         const signal = options?.signal;
-        if (state && error instanceof AgentCallError && error.outcome === 'unknown' && !signal?.aborted) {
+        // A binding closed or failed meanwhile has no run left to settle or cancel.
+        if (state && this.#bindings.get(state.ref.id) === state
+          && error instanceof AgentCallError && error.outcome === 'unknown' && !signal?.aborted) {
           // A lost call no longer carries the caller's cancellation, so a later
           // Stop cancels the launch through the worker's relay instead.
           const cancel = () => {

@@ -322,6 +322,35 @@ for (const dialer of ['controller', 'worker'] as const) {
     } finally { await fixture.dispose(); }
   });
 
+  test(`a start lost after its binding closed leaves no cancellation for Stop to send (${dialer} dials)`, async () => {
+    let fault!: ReturnType<typeof outgoingFault>;
+    const fixture = await remoteFixture(dialer, (controller) => { fault = outgoingFault(controller); });
+    const release = Promise.withResolvers<void>();
+    try {
+      const integration = await fixture.executor.getAgentIntegration('test');
+      const request = await requestFor(integration);
+      const entered = Promise.withResolvers<void>();
+      fixture.generations[0]!.hooks.start = async () => { entered.resolve(); await release.promise; };
+      const admission = new AbortController();
+      const launch = integration.execution.start(request, { signal: admission.signal }).catch((error: unknown) => error);
+      await entered.promise;
+      await integration.producers.close(request.producerBinding);
+      const cancellations: string[] = [];
+      fault.inject = (encoded) => {
+        if (encoded.includes('"method":"producers.cancelLaunch"')) cancellations.push(encoded);
+        return null;
+      };
+      const ready = nextAvailability(fixture.executor, 'ready');
+      fixture.controller.disconnect(); fixture.worker.disconnect();
+      expect(await launch).toMatchObject({ outcome: 'unknown' });
+      await ready;
+      admission.abort();
+      await integration.execution.runningSessions();
+
+      expect(cancellations).toEqual([]);
+    } finally { release.resolve(); await fixture.dispose(); }
+  });
+
   test(`a start request the worker never received is sent once more on the replacement session (${dialer} dials)`, async () => {
     let fault!: ReturnType<typeof outgoingFault>;
     const fixture = await remoteFixture(dialer, (controller) => { fault = outgoingFault(controller); });
