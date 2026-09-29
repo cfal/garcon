@@ -50,7 +50,8 @@ test('chat host selectors fit narrow containers and commit cancellable handoffs 
       phase(`composer controls at ${width}px`);
       await page.setViewportSize({ width, height: 900 });
       await browserExpect(host()).toBeVisible();
-      expect(await controls().evaluate(element => {
+      // Crossing the mobile breakpoint switches the workspace presentation asynchronously.
+      await browserExpect.poll(() => controls().evaluate(element => {
         const outer = element.getBoundingClientRect();
         const buttons = [...element.querySelectorAll<HTMLButtonElement>('button')]
           .filter(button => button.checkVisibility({ checkVisibilityCSS: true }));
@@ -59,7 +60,9 @@ test('chat host selectors fit narrow containers and commit cancellable handoffs 
           && rectangles.slice(index + 1).every(other => rect.right <= other.left || rect.left >= other.right
             || rect.bottom <= other.top || rect.top >= other.bottom));
       })).toBe(true);
-      if (width < 900) expect(await host().evaluate(element => element.getBoundingClientRect().width)).toBe(36);
+      if (width < 900) {
+        await browserExpect.poll(() => host().evaluate(element => element.getBoundingClientRect().width)).toBe(36);
+      }
       await host().click();
       await browserExpect(page.getByRole('menuitemradio', { name: label, exact: true })).toBeVisible();
       await page.keyboard.press('Escape');
