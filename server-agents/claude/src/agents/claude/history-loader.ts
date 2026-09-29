@@ -13,7 +13,7 @@ import {
 } from '@garcon/common/chat-types';
 import { convertClaudeToolUse } from './tool-use-converter.js';
 import { claudeToolResultContent } from './tool-result-converter.js';
-import { extractCompactionSummary, parseCompactMetadata } from './compaction.js';
+import { extractCompactionSummary, parseCompactMetadata, type CompactionInfo } from './compaction.js';
 import { stripResolvedFileMentionContext } from '@garcon/server-agent-common/shared/file-mention-context';
 import { attachNativeMessageSource, getNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
 import { parseFirstJsonlValue } from '@garcon/server-agent-common/lib/jsonl';
@@ -21,11 +21,8 @@ import type { AgentLogger } from '@garcon/server-agent-interface';
 import { deterministicTranscriptTimestamp } from '@garcon/server-agent-common/shared/transcript-timestamp';
 import { compareTranscriptTimestamps } from '@garcon/server-agent-common/shared/transcript-order';
 import { readJsonlLineEntries } from '@garcon/server-agent-common/shared/history-loader-utils';
-import { yieldToEventLoop } from '@garcon/server-agent-common/shared/event-loop';
+import { EventLoopSteps } from '@garcon/server-agent-common/shared/event-loop';
 import { claudeSteeringInputsFromNativeContent } from './user-input.js';
-
-// Bounds each synchronous conversion step of a long native history.
-const CONVERSION_STEP_ENTRIES = 2000;
 
 const NOOP_LOGGER: AgentLogger = {
   debug() {},
@@ -146,51 +143,89 @@ export function parseClaudeJsonlEntryWithSource(
   });
 }
 
-export function sortClaudeEntries(entries: Record<string, unknown>[]): Record<string, unknown>[] {
-  return entries
-    .map((entry, index) => ({ entry, index, time: timestampMs(entry.timestamp) }))
-    .sort((a, b) => compareTranscriptTimestamps(a.time, b.time) || a.index - b.index)
-    .map(({ entry }) => entry);
+interface ClaudeSortKey {
+  readonly entry: Record<string, unknown>;
+  readonly index: number;
+  readonly time: number;
 }
 
-// Microcompaction re-appends retained entries with their original uuids and
-// content, differing only in parent rechaining, so the first occurrence is the
-// canonical one and later copies must not render again.
-function dedupeClaudeEntriesByUuid(
-  entries: Record<string, unknown>[],
-): Record<string, unknown>[] {
+function claudeSortKey(entry: Record<string, unknown>, index: number): ClaudeSortKey {
+  return { entry, index, time: timestampMs(entry.timestamp) };
+}
+
+function compareClaudeSortKeys(a: ClaudeSortKey, b: ClaudeSortKey): number {
+  return compareTranscriptTimestamps(a.time, b.time) || a.index - b.index;
+}
+
+export function sortClaudeEntries(entries: Record<string, unknown>[]): Record<string, unknown>[] {
+  return entries.map(claudeSortKey).sort(compareClaudeSortKeys).map(({ entry }) => entry);
+}
+
+// The sort itself stays one call: a transcript is appended in time order, so
+// sorting it is close to linear.
+async function sortClaudeEntriesInSteps(
+  entries: readonly Record<string, unknown>[],
+  steps: EventLoopSteps,
+): Promise<Record<string, unknown>[]> {
+  const keys: ClaudeSortKey[] = [];
+  await steps.forEach(entries, (entry) => { keys.push(claudeSortKey(entry, keys.length)); });
+  keys.sort(compareClaudeSortKeys);
+  const sorted: Record<string, unknown>[] = [];
+  await steps.forEach(keys, ({ entry }) => { sorted.push(entry); });
+  return sorted;
+}
+
+// Keeps the first occurrence of each entry and collects compaction boundaries,
+// which conversion pairs with their summaries. Microcompaction re-appends
+// retained entries with their original uuids and content, differing only in
+// parent rechaining, so the first occurrence is the canonical one and later
+// copies must not render again.
+function collectClaudeEntries(): {
+  readonly entries: Record<string, unknown>[];
+  readonly compactions: CompactionInfo[];
+  add(entry: Record<string, unknown>): void;
+} {
   const seenUuids = new Set<string>();
-  return entries.filter((entry) => {
-    const uuid = asString(entry.uuid);
-    if (!uuid) return true;
-    if (seenUuids.has(uuid)) return false;
-    seenUuids.add(uuid);
-    return true;
-  });
+  const entries: Record<string, unknown>[] = [];
+  const compactions: CompactionInfo[] = [];
+  return {
+    entries,
+    compactions,
+    add(entry) {
+      const uuid = asString(entry.uuid);
+      if (uuid && seenUuids.has(uuid)) return;
+      if (uuid) seenUuids.add(uuid);
+      entries.push(entry);
+      if (entry.type === 'system' && entry.subtype === 'compact_boundary') {
+        compactions.push(parseCompactMetadata(entry.compactMetadata ?? entry.compact_metadata));
+      }
+    },
+  };
 }
 
 export function convertClaudeEntries(rawEntries: Record<string, unknown>[]): ChatMessage[] {
-  const converter = createClaudeEntryConverter(rawEntries);
-  for (const entry of converter.entries) converter.convert(entry);
+  const collected = collectClaudeEntries();
+  for (const entry of rawEntries) collected.add(entry);
+  const converter = createClaudeEntryConverter(collected.compactions);
+  for (const entry of collected.entries) converter.convert(entry);
   return converter.messages;
 }
 
-// Converts in bounded steps so a long transcript leaves room for other event-loop work.
-async function convertClaudeEntriesInSteps(rawEntries: Record<string, unknown>[]): Promise<ChatMessage[]> {
-  const converter = createClaudeEntryConverter(rawEntries);
-  for (let index = 0; index < converter.entries.length; index += 1) {
-    if (index > 0 && index % CONVERSION_STEP_ENTRIES === 0) await yieldToEventLoop();
-    converter.convert(converter.entries[index]!);
-  }
+async function convertClaudeEntriesInSteps(
+  rawEntries: readonly Record<string, unknown>[],
+  steps: EventLoopSteps,
+): Promise<ChatMessage[]> {
+  const collected = collectClaudeEntries();
+  await steps.forEach(rawEntries, collected.add);
+  const converter = createClaudeEntryConverter(collected.compactions);
+  await steps.forEach(collected.entries, converter.convert);
   return converter.messages;
 }
 
-function createClaudeEntryConverter(rawEntries: Record<string, unknown>[]): {
-  readonly entries: readonly Record<string, unknown>[];
+function createClaudeEntryConverter(compactions: readonly CompactionInfo[]): {
   readonly messages: ChatMessage[];
   convert(entry: Record<string, unknown>): void;
 } {
-  const entries = dedupeClaudeEntriesByUuid(rawEntries);
   const messages: ChatMessage[] = [];
   const sourceOrdinals = new WeakMap<Record<string, unknown>, number>();
 
@@ -218,11 +253,8 @@ function createClaudeEntryConverter(rawEntries: Record<string, unknown>[]): {
   }
 
   // A compact_boundary and its summary carry near-identical timestamps and can be
-  // reordered by the chronological sort, so collect boundary metadata up front and
-  // pair it FIFO with the summaries rather than relying on boundary-before-summary order.
-  const compactions = entries
-    .filter((entry) => entry.type === 'system' && entry.subtype === 'compact_boundary')
-    .map((entry) => parseCompactMetadata(entry.compactMetadata ?? entry.compact_metadata));
+  // reordered by the chronological sort, so boundary metadata is collected up front and
+  // paired FIFO with the summaries rather than relying on boundary-before-summary order.
   let compactionIndex = 0;
 
   function convert(entry: Record<string, unknown>): void {
@@ -339,20 +371,22 @@ function createClaudeEntryConverter(rawEntries: Record<string, unknown>[]): {
     }
   }
 
-  return { entries, messages, convert };
+  return { messages, convert };
 }
 
-// Parses each line as its 64 KiB chunk arrives, so reading a long transcript interleaves with
-// other event-loop work. Conversion needs the complete chronological order and runs after.
+// Parses each line as its 64 KiB chunk arrives. Conversion needs the complete chronological
+// order and runs after, continuing the same time-bounded steps.
 async function parseClaudeJsonlFile(nativePath: string, strict: boolean): Promise<ChatMessage[]> {
+  const steps = new EventLoopSteps('claude-history-load');
   const entries: Record<string, unknown>[] = [];
   for await (const { line, lineNumber } of readJsonlLineEntries(nativePath)) {
     const entry = strict
       ? parseStrictClaudeJsonlEntryWithSource(line, lineNumber!)
       : parseClaudeJsonlEntryWithSource(line, lineNumber!);
     if (entry) entries.push(entry);
+    if (steps.due) await steps.next();
   }
-  return convertClaudeEntriesInSteps(sortClaudeEntries(entries));
+  return convertClaudeEntriesInSteps(await sortClaudeEntriesInSteps(entries, steps), steps);
 }
 
 function parseStrictClaudeJsonlEntryWithSource(
