@@ -271,7 +271,9 @@ async function getStashes({ projectPath, signal }: ProjectOptions): Promise<{ st
   await assertGitRepository(projectPath);
   const { stdout } = await runGit(
     projectPath,
-    ['stash', 'list', '--date=iso', '--format=%gd%x00%H%x00%ci%x00%s%x1e'],
+    // A date option would turn %gd into stash@{<date>}, which stash actions reject and which
+    // repeats for stashes made within one second; %ci already carries the date.
+    ['stash', 'list', '--format=%gd%x00%H%x00%ci%x00%s%x1e'],
     readOnlyGitOptions({ signal }),
   );
   return { stashes: parseStashes(stdout) };
