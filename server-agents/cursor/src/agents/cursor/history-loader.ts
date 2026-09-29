@@ -268,7 +268,7 @@ export async function readCursorBlobs(
   storeDbPath: string,
   options: { signal?: AbortSignal; maxBlobBytes?: number; steps?: EventLoopSteps } = {},
 ): Promise<CursorMessageBlob[]> {
-  const steps = options.steps ?? new EventLoopSteps();
+  const steps = options.steps ?? new EventLoopSteps('cursor-blob-read');
   const assertNotAborted = () => {
     if (options.signal?.aborted) throw new DOMException('Transcript search load cancelled', 'AbortError');
   };
@@ -488,7 +488,7 @@ function normalizeCursorContent(content: Record<string, unknown>, blob: CursorMe
 
 export async function normalizeCursorBlobs(
   blobs: CursorMessageBlob[],
-  steps = new EventLoopSteps(),
+  steps = new EventLoopSteps('cursor-blob-normalization'),
 ): Promise<ChatMessage[]> {
   const messages: ChatMessage[] = [];
   let index = 0;
@@ -555,7 +555,7 @@ export async function loadImportableCursorChatMessagesBySessionId(
   projectPath: string,
   cursorHome?: string,
 ): Promise<ChatMessage[]> {
-  const steps = new EventLoopSteps();
+  const steps = new EventLoopSteps('cursor-history-load');
   const blobs = await readCursorSessionBlobs(sessionId, projectPath, cursorHome, steps);
   await steps.forEach(blobs, assertImportableCursorBlob);
   return normalizeCursorBlobs(blobs, steps);

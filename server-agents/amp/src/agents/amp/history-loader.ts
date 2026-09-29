@@ -106,7 +106,7 @@ function getSortedMessages(threadExport: AmpThreadExport): AmpThreadMessage[] {
 // Every reload and fork converts a whole thread export, so its passes share time-bounded steps.
 export async function loadAmpChatMessages(threadExport: AmpThreadExport): Promise<ChatMessage[]> {
   assertImportableAmpThreadExport(threadExport);
-  const steps = new EventLoopSteps();
+  const steps = new EventLoopSteps('amp-thread-conversion');
   await steps.forEach(threadExport.messages ?? [], assertImportableAmpMessage);
 
   const createdAt = toIsoString(threadExport.created) || new Date().toISOString();

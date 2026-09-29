@@ -58,7 +58,7 @@ export async function importNativeHistoryDrafts({
     },
     carryOverRevision,
   );
-  const steps = new EventLoopSteps();
+  const steps = new EventLoopSteps('native-history-import');
   for await (const batch of nativeHistoryImport.load({ chat, signal })) {
     signal.throwIfAborted();
     for (const row of batch) {

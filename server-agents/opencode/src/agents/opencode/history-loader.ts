@@ -309,7 +309,7 @@ async function requestScopedOpenCodeStoredMessages(
 // Every reload and fork converts a whole session, so its passes share time-bounded steps.
 export async function convertOpenCodeStoredMessages(
   rawMessages: readonly OpenCodeMessage[],
-  steps = new EventLoopSteps(),
+  steps = new EventLoopSteps('opencode-history-conversion'),
 ): Promise<ChatMessage[]> {
   const messages: ChatMessage[] = [];
   // Rows keep provider part order, and every row carries its stable provider
@@ -448,7 +448,7 @@ export async function loadRequiredOpenCodeChatMessages(
 async function convertImportableOpenCodeStoredMessages(
   messages: readonly OpenCodeMessage[],
 ): Promise<ChatMessage[]> {
-  const steps = new EventLoopSteps();
+  const steps = new EventLoopSteps('opencode-history-conversion');
   for (const message of messages) {
     if (steps.due) await steps.next();
     const info = asRecord(message.info);
@@ -485,7 +485,7 @@ async function convertImportableOpenCodeStoredMessages(
 export async function latestOpenCodeStoredActivityAt(
   rawMessages: readonly OpenCodeMessage[],
 ): Promise<string | null> {
-  const steps = new EventLoopSteps();
+  const steps = new EventLoopSteps('opencode-activity-check');
   const messages = await visibleOpenCodeStoredMessages(rawMessages, steps);
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]!;

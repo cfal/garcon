@@ -418,7 +418,7 @@ async function parseSessionFile(
   }
   let records: DirectSessionRecordV1[] = [];
   let lineNumber = 1;
-  const steps = new EventLoopSteps();
+  const steps = new EventLoopSteps('direct-session-parse');
   for (let start = headerEnd + 1; start < completeLength; lineNumber += 1) {
     const end = raw.indexOf(0x0a, start);
     records.push(parseSessionRecord(parseJsonLine(decodeUtf8(raw.subarray(start, end)), lineNumber + 1)));

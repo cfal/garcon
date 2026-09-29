@@ -12,6 +12,7 @@ import { cliGatewayRuntimeFile, executorDataDirectory } from '../../common/cli-r
 import { acquireWorkspaceLease } from '../common/workspace-lease.js';
 import { loadListenerSecret } from './listener-secret.js';
 import { monitorEventLoopStalls } from '../common/event-loop-stalls.js';
+import { reportSlowSteps } from '@garcon/server-agent-common/shared/event-loop';
 
 export interface ExecutorWorkerOptions {
   readonly configDir: string;
@@ -57,6 +58,9 @@ async function serveExecutorWorker(options: ExecutorWorkerOptions, dataDir: stri
   const stopStallMonitor = monitorEventLoopStalls((stallMs) => {
     console.warn(JSON.stringify({ type: 'executor-event-loop-stalled', stallMs }));
   });
+  const stopSlowStepReports = reportSlowSteps((operation, stepMs) => {
+    console.warn(JSON.stringify({ type: 'executor-slow-step', operation, stepMs: Math.round(stepMs) }));
+  });
   let currentRpc: ExecutorRpc | null = null;
   let gateway: Awaited<ReturnType<typeof startCliGateway>> | null = null;
   let terminals: TerminalRuntime | null = null;
@@ -66,7 +70,7 @@ async function serveExecutorWorker(options: ExecutorWorkerOptions, dataDir: stri
     currentRpc = null;
     let failure: unknown;
     try {
-      for (const dispose of [stopStallMonitor, () => gateway?.dispose(), () => link.dispose(), () => serving?.dispose(), () => relay.dispose(), () => runtime?.dispose(), () => terminals?.shutdown()]) {
+      for (const dispose of [stopStallMonitor, stopSlowStepReports, () => gateway?.dispose(), () => link.dispose(), () => serving?.dispose(), () => relay.dispose(), () => runtime?.dispose(), () => terminals?.shutdown()]) {
         try { await dispose(); } catch (error) { failure ??= error; }
       }
       if (failure !== undefined) throw failure;

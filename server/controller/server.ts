@@ -81,6 +81,7 @@ import {
 } from './lib/shutdown.js';
 import { WebSocketAdmissionController } from '../common/websocket-capacity.js';
 import { monitorEventLoopStalls } from '../common/event-loop-stalls.js';
+import { reportSlowSteps } from '@garcon/server-agent-common/shared/event-loop';
 import { TranscriptSearchService } from '@garcon/server-agent-common/search/transcript-search-service';
 import { ScheduledPromptStore } from './scheduled-prompts/store.js';
 import { ScheduledPromptRunLog } from './scheduled-prompts/run-log.js';
@@ -889,10 +890,14 @@ export async function startServer(): Promise<void> {
     // Graceful shutdown: flush pending writes and clean up timers.
     // Browser heartbeats and executor links both treat a long stall as a lost peer.
     const stopStallMonitor = monitorEventLoopStalls((stallMs) => logger.warn('Event loop stalled', { stallMs }));
+    const stopSlowStepReports = reportSlowSteps((operation, stepMs) => {
+      logger.warn('Slow step', { operation, stepMs: Math.round(stepMs) });
+    });
     const shutdown = async () => {
       if (shuttingDown) return;
       shuttingDown = true;
       stopStallMonitor();
+      stopSlowStepReports();
       primaryDelivery.close();
       agentCommands.shutdown();
       carryOverGarbageCollector.shutdown();

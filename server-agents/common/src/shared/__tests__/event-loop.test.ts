@@ -1,5 +1,5 @@
-import { expect, spyOn, test } from 'bun:test';
-import { EventLoopSteps, forEachInSteps } from '../event-loop.js';
+import { expect, mock, spyOn, test } from 'bun:test';
+import { EventLoopSteps, forEachInSteps, reportSlowSteps } from '../event-loop.js';
 
 function busyWait(ms: number): void {
   const until = performance.now() + ms;
@@ -15,7 +15,7 @@ test('visits every item in order while bounding each step by elapsed time', asyn
     longestGap = Math.max(longestGap, now - last);
     last = now;
   }, 1);
-  await forEachInSteps(Array.from({ length: 60 }, (_, index) => index), (index) => {
+  await forEachInSteps('synthetic-pass', Array.from({ length: 60 }, (_, index) => index), (index) => {
     busyWait(2);
     visited.push(index);
   });
@@ -30,7 +30,7 @@ test('visits every item in order while bounding each step by elapsed time', asyn
 test('finishes cheap work without yielding', async () => {
   let turns = 0;
   const counter = setImmediate(() => { turns += 1; });
-  await forEachInSteps([1, 2, 3], () => {});
+  await forEachInSteps('synthetic-pass', [1, 2, 3], () => {});
   clearImmediate(counter);
   expect(turns).toBe(0);
 });
@@ -41,7 +41,7 @@ test('consecutive passes on shared steps yield once their combined work uses the
   let turns = 0;
   const counter = setImmediate(() => { turns += 1; });
   try {
-    const steps = new EventLoopSteps();
+    const steps = new EventLoopSteps('synthetic-passes');
     await steps.forEach([1, 2], () => { now += 4; });
     expect(turns).toBe(0);
     await steps.forEach([3], () => { now += 4; });
@@ -49,5 +49,32 @@ test('consecutive passes on shared steps yield once their combined work uses the
   } finally {
     clearImmediate(counter);
     clock.mockRestore();
+  }
+});
+
+test('reports a step that held the event loop past the slow-step limit with its operation', async () => {
+  const report = mock((_operation: string, _stepMs: number) => undefined);
+  const stop = reportSlowSteps(report);
+  try {
+    await forEachInSteps('synthetic-slow-pass', [60, 1], (ms) => { busyWait(ms); });
+    expect(report).toHaveBeenCalledTimes(1);
+    const [operation, stepMs] = report.mock.calls[0]!;
+    expect(operation).toBe('synthetic-slow-pass');
+    expect(stepMs).toBeGreaterThanOrEqual(50);
+  } finally {
+    stop();
+  }
+});
+
+test('does not report a long step that let the event loop run while it waited', async () => {
+  const report = mock((_operation: string, _stepMs: number) => undefined);
+  const stop = reportSlowSteps(report);
+  try {
+    const steps = new EventLoopSteps('synthetic-waiting-pass');
+    await Bun.sleep(60);
+    await steps.next();
+    expect(report).not.toHaveBeenCalled();
+  } finally {
+    stop();
   }
 });

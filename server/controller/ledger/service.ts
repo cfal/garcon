@@ -619,7 +619,7 @@ export class TranscriptLedgerService {
 
   async conversationRows(chatId: string): Promise<readonly LedgerConversationRow[]> {
     const rows: LedgerConversationRow[] = [];
-    await forEachInSteps(await this.#store.rowsThrough(chatId, this.#store.highWatermark(chatId)), (row) => {
+    await forEachInSteps('ledger-conversation-read', await this.#store.rowsThrough(chatId, this.#store.highWatermark(chatId)), (row) => {
       if (isConversationalLedgerRow(row)) rows.push(row);
     });
     return rows;
@@ -627,7 +627,7 @@ export class TranscriptLedgerService {
 
   async conversationMessages(chatId: string, excludedOrdinals: ReadonlySet<number> = new Set()): Promise<readonly ChatMessage[]> {
     const messages: ChatMessage[] = [];
-    await forEachInSteps(await this.conversationRows(chatId), (row) => {
+    await forEachInSteps('ledger-conversation-read', await this.conversationRows(chatId), (row) => {
       if (!excludedOrdinals.has(row.ordinal)) messages.push(messageForConversationRow(row));
     });
     return messages;

@@ -484,7 +484,7 @@ export async function loadFactoryChatMessages(
 ): Promise<ChatMessage[]> {
   try {
     // Every reload and fork reads the whole session, so its passes share time-bounded steps.
-    const steps = new EventLoopSteps();
+    const steps = new EventLoopSteps('factory-history-load');
     const events = await readFactorySessionEvents(sessionPath, logger, options.throwOnError === true, steps);
     const messages: ChatMessage[] = [];
     await steps.forEach(events, (input) => appendFactoryEventMessages(messages, input));

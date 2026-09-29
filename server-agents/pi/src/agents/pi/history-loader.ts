@@ -38,7 +38,7 @@ async function assertAcyclicActivePath(
 // Every resumed turn, reload, and fork reads the whole session, so the file is
 // read in chunks and the passes over its entries share time-bounded steps.
 async function readPiSessionFile(sessionPath: string): Promise<ChatMessage[]> {
-  const steps = new EventLoopSteps();
+  const steps = new EventLoopSteps('pi-history-load');
   const sessionEntries: SessionEntry[] = [];
   for await (const { line, lineNumber } of readJsonlLineEntries(sessionPath)) {
     const entry = parseStrictPiSessionEntry(line, lineNumber!);

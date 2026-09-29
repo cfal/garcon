@@ -43,7 +43,7 @@ export interface ImportedRow {
 export async function importedDrafts(
   rows: Iterable<ImportedRow>,
   now: () => string,
-  steps = new EventLoopSteps(),
+  steps = new EventLoopSteps('transcript-import-conversion'),
 ): Promise<LedgerRowDraft[]> {
   const drafts: LedgerRowDraft[] = [];
   await steps.forEach(rows, ({ message, providerMeta, preambleApplication }) => {
