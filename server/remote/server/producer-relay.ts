@@ -9,12 +9,12 @@ import { SESSION_MESSAGE_BYTES } from '../transport/session-socket.js';
 // Matches the controller's reconnect grace and VS Code Remote's reconnection
 // grace; after it, the controller fails the run and this worker detaches the
 // binding. https://github.com/microsoft/vscode/blob/f39c7109bf651845855cbef5af2e91b2c9bd0a74/src/vs/base/parts/ipc/common/ipc.net.ts#L301-L308
-export const PRODUCER_RESUME_GRACE_MS = 3 * 60 * 60 * 1000;
+const PRODUCER_RESUME_GRACE_MS = 3 * 60 * 60 * 1000;
 // A controller resumes every binding it still holds while installing a new
 // session, so bindings still suspended this long after one starts belong to a
 // controller that restarted or gave up. VS Code shortens its grace the same way
 // once another client connects: https://github.com/microsoft/vscode/blob/f39c7109bf651845855cbef5af2e91b2c9bd0a74/src/vs/server/node/remoteExtensionHostAgentServer.ts#L381-L391
-export const PRODUCER_SUPERSEDED_GRACE_MS = 5 * 60 * 1000;
+const PRODUCER_SUPERSEDED_GRACE_MS = 5 * 60 * 1000;
 // Bounds worker memory across all bindings. Replay is paced by the session
 // queue, so the backlog need not fit that queue.
 const RETAINED_BYTES = 32 * 1024 * 1024;

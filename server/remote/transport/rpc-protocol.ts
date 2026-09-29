@@ -54,9 +54,8 @@ export interface ExecutorRpcMethods extends FileRpcMethods, TerminalRpcMethods, 
   'projects.resolveFileMentions': Call<Parameters<ExecutionProjectService['resolveFileMentions']>[0], string>;
   'producers.bind': Call<Request<'producers', 'bind'>, void>;
   'producers.close': Call<Request<'producers', 'close'>, void>;
-  // Reattaches bindings from a lost session; the worker replays their buffered
-  // frames after `acknowledgedSeq` before replying, and omits bindings it no
-  // longer holds.
+  // Reattaches bindings from a lost session; the worker resends their retained
+  // frames after `acknowledgedSeq` and omits bindings it no longer holds.
   'producers.resume': Call<{
     readonly bindings: readonly { readonly binding: AgentProducerBinding; readonly acknowledgedSeq: number }[];
   }, { readonly resumed: readonly string[] }>;
@@ -111,7 +110,7 @@ export type ExecutorRpcRequest = {
 export interface AgentProducerFrame {
   readonly type: 'producer';
   // Numbers each binding's notifications from 1. A skipped number means the
-  // worker dropped buffered output while the controller was disconnected.
+  // worker dropped retained output.
   readonly seq: number;
   readonly notification: AgentProducerNotification;
 }

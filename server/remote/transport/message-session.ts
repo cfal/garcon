@@ -54,10 +54,10 @@ export class MessageSession {
   // it again as the queue drains; a frame larger than the share waits for an
   // empty queue.
   offer(body: string): boolean {
-    const bytes = Buffer.byteLength(body);
     if (!this.canAdmit(body)) return false;
-    if (this.#pending.length > 0 && (this.#bytes + bytes > Math.min(this.#limits.bytes / 4, 4 * 1024 * 1024)
-      || this.#pending.length >= Math.min(this.#limits.count / 4, 512))) return false;
+    const exceedsShare = this.#bytes + Buffer.byteLength(body) > Math.min(this.#limits.bytes / 4, 4 * 1024 * 1024)
+      || this.#pending.length >= Math.min(this.#limits.count / 4, 512);
+    if (this.#pending.length > 0 && exceedsShare) return false;
     try { this.send(body); return this.connected; } catch { return false; }
   }
 

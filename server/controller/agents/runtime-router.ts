@@ -142,8 +142,9 @@ export class AgentRuntimeRouter {
       this.#ledger.failRun(chatId, runId, error);
     },
     (chatId, lease) => {
+      if (this.#producerLeases.get(chatId)?.lease !== lease) return;
       const runId = this.#ledger.activeRunId(chatId);
-      if (!runId || this.#producerLeases.get(chatId)?.lease !== lease) return;
+      if (!runId) return;
       lease.sink.publish({ type: 'notice', runId, title: 'Output not delivered', content: EXECUTOR_OUTPUT_GAP_NOTICE });
     },
   );

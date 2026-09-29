@@ -16,7 +16,7 @@ export class ProducerBindings {
   constructor(
     private readonly onError: (error: unknown) => void,
     private readonly onPublicationFailed: (chatId: string, lease: TranscriptProducerLease, error: AgentRunFailureDetail) => void,
-    private readonly onPublicationGap: (chatId: string, lease: TranscriptProducerLease) => void = () => {},
+    private readonly onPublicationGap: (chatId: string, lease: TranscriptProducerLease) => void,
   ) {}
 
   async bind(integration: AgentIntegration, chatId: string, lease: TranscriptProducerLease): Promise<AgentProducerBinding> {

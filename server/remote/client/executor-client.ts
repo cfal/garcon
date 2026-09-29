@@ -34,7 +34,7 @@ class ExecutorConfigurationError extends Error {}
 
 // Matches the worker relay's grace. Within it, a replacement session resumes
 // transcript bindings; after it, active runs fail as disconnected.
-export const EXECUTOR_RECONNECT_GRACE_MS = 3 * 60 * 60 * 1000;
+const EXECUTOR_RECONNECT_GRACE_MS = 3 * 60 * 60 * 1000;
 
 export interface RemoteExecutorClientOptions {
   readonly reconnectGraceMs?: number;

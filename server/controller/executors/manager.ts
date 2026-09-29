@@ -4,7 +4,7 @@ import {
 } from '@garcon/server-agent-interface';
 import {
   effectiveExecutorId, LOCAL_EXECUTOR_ID, type AgentExecutionTarget,
-  type CreateExecutorRequest, type ExecutorSnapshot, type UpdateExecutorRequest,
+  type CreateExecutorRequest, type ExecutorSnapshot, type ExecutorSnapshotAvailability, type UpdateExecutorRequest,
 } from '../../../common/executors.js';
 import { IntegrationRegistry } from '../../runtime/agents/integration-registry.js';
 import { DomainError } from '../../common/domain-error.js';
@@ -127,7 +127,7 @@ export class ExecutorManager {
       id: entry.config.id, label: entry.config.label, kind: 'remote', enabled: entry.config.enabled,
       allowControllerCli: entry.config.allowControllerCli,
       direction: entry.config.connection.kind,
-      availability: this.isReady(entry.config.id) ? 'ready' : this.isReconnecting(entry.config.id) ? 'reconnecting' : 'offline',
+      availability: this.#snapshotAvailability(entry.config.id),
       projectBasePath: entry.info?.projectBasePath ?? null, lastError: entry.error,
       instanceId: entry.info?.instanceId ?? null,
       machineServices: { files: entry.info?.services.files === true, git: entry.info?.services.git === true, gh: entry.info?.services.gh === true, terminals: entry.info?.services.terminals === true },
@@ -312,6 +312,11 @@ export class ExecutorManager {
   #changed(): void { if (!this.#disposed) for (const listener of this.#changes) listener(); }
   #publishAvailability(executorId: string, value: ExecutorAvailability): void {
     if (!this.#disposed && !this.#quiescing) for (const listener of this.#availability) listener(executorId, value);
+  }
+  #snapshotAvailability(executorId: string): ExecutorSnapshotAvailability {
+    if (this.isReady(executorId)) return 'ready';
+    if (this.isReconnecting(executorId)) return 'reconnecting';
+    return 'offline';
   }
 }
 
