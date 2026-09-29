@@ -73,7 +73,9 @@ compactions, native forks, history opens, and project-path preparations retain
 their budget slot until a reply arrives or the session retires. A late successful
 reply releases the slot and triggers best-effort abort, fork discard, reader
 close, or preparation rollback on that same session, never a replacement
-connection. A cancelled preparation has no controller decision to commit;
+connection. A journaled compensation call that session loses is reconciled with
+the same worker instance like any other journaled call. A cancelled preparation
+has no controller decision to commit;
 once dispatched, its native step runs without the RPC cancellation signal so
 it can return the resource needed for compensation. Pre-dispatch cancellation
 still rejects admission. Uncertain commit results are not rolled back
@@ -184,14 +186,22 @@ replay is still arriving.
 A reply the worker's session queue cannot take, unless the journal holds it
 (see Calls Across Reconnects), reaches the controller as an unknown outcome on
 a live session: "The executor's reply could not be delivered, so the outcome is
-unknown." For a launch, the relay then publishes
-the outcome on the binding behind that reply, so a running turn keeps a
-reachable handle and a failed one reports its own failure. A launch cancelled
-by Stop, shutdown, or deletion also ends with an unknown outcome, but the same
-action already ends or removes its run. A launch that fails on the worker
-reports a definite failure even when a nested call, such as a credential read,
-had an unknown outcome; an unknown credential read fails as "Provider
-credential could not be read from the controller. Try again."
+unknown." For a launch, the relay then publishes the outcome on the binding
+behind that reply, so a running turn keeps a reachable handle and a failed one
+reports its own failure. A launch cancelled by Stop, shutdown, or deletion also
+ends with an unknown outcome, but the same action already ends or removes its
+run. A launch that fails on the worker reports a definite failure even when a
+nested call, such as a credential read, had an unknown outcome; an unknown
+credential read fails as "Provider credential could not be read from the
+controller. Try again."
+
+A lost call no longer carries its caller's cancellation, so Stop reaches a
+launch whose call was lost through the worker's relay: the controller names the
+run with `producers.cancelLaunch`, sent on the replacement session if the link is
+still down, and the relay cancels its native admission. A launch that finishes
+admission after it was cancelled is aborted through its handle. A newer launch
+on the same binding likewise cancels an older one still in admission, because
+the controller begins another run only after abandoning the previous one.
 
 A binding the worker no longer holds, a restarted worker (new instance ID), or
 an expired controller grace falls back to the loss path: the controller fails
@@ -251,9 +261,10 @@ a history reader's pages, acquire their session once.
 Each method has a continuity class, `rpcContinuity` in `rpc-protocol.ts`:
 
 - `session` calls belong to their session: history readers, terminal
-  attachments, producer bindings, forks and path-update preparations with their
-  compensation, lifecycle, CLI, and credentials. Losing the session cancels the
-  handler and leaves the caller with an uncertain outcome.
+  attachments, producer bindings, forks, path-update preparations, lifecycle,
+  CLI, and credentials. Losing the session cancels the handler and leaves the
+  caller with an uncertain outcome. Compensation for a fork or preparation is
+  issued on its session and is then journaled like other calls.
 - `launch` calls (start, resume, and compaction) keep running on the worker;
   the producer relay reports their outcomes, as described above.
 - `journaled` calls are all others, including Files, Git, projects, catalogs,
@@ -278,9 +289,13 @@ answers per call: `pending`, whose reply follows on the new session;
 `not-received`, which the controller sends again; or `unknown`. Calls of lost
 sessions that a reconcile does not name belong to callers that gave up, so the
 worker cancels them as those callers' lost cancels would have. Retained replies
-are bounded at 64 MiB, dropping the oldest delivered ones first, and a call whose
-reply was dropped reconciles as unknown. The worker's 256-request budget covers
-running journaled calls of all sessions. A restarted worker, an expired grace,
+are bounded at 64 MiB, dropping the oldest delivered ones first. A dropped reply
+that its session still waits for is answered at once with an unknown outcome;
+one whose session was lost reconciles as unknown. The worker's 256-request budget
+covers running journaled calls of all sessions. Calls that install a session
+(description, lifecycle initialization, producer resumption, and
+reconciliation) bypass both sides' request budgets, so the calls a session
+recovers cannot keep it from installing. A restarted worker, an expired grace,
 or a disposed executor leaves parked calls with an unknown outcome.
 
 ## Shutdown And Browser Isolation

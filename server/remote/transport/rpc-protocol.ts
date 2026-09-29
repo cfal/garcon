@@ -135,8 +135,9 @@ export type RpcContinuity = 'session' | 'launch' | 'journaled';
 
 type ClassifiedMethod = Exclude<keyof ExecutorRpcMethods, keyof FileRpcMethods | keyof GitRpcMethods>;
 
-// History readers, terminal attachments, producer bindings, forks and path
-// preparations with their compensation, and CLI calls belong to one session.
+// History readers, terminal attachments, producer bindings, forks, path
+// preparations, and CLI calls belong to one session. Compensation for a fork or
+// preparation is issued on its session and is then journaled like other calls.
 const CONTINUITY: Readonly<Record<ClassifiedMethod, RpcContinuity>> = {
   'executor.describe': 'session',
   'apiProviders.discoverModels': 'journaled',
