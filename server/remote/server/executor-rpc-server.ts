@@ -143,7 +143,11 @@ export function serveExecutionRuntime(
         return;
       }
       case 'producers.close': {
-        if (!relay.owns(producerSession, integration, call.request)) throw new AgentCallError('rejected', 'Producer binding belongs to a retired session', 'STALE_RESOURCE');
+        // No session owns a suspended binding, so the controller may close it from a
+        // replacement session without resuming it first.
+        if (!relay.owns(producerSession, integration, call.request) && !relay.suspended(integration, call.request)) {
+          throw new AgentCallError('rejected', 'Producer binding belongs to a retired session', 'STALE_RESOURCE');
+        }
         await integration.producers.close(call.request, options);
         relay.close(call.request);
         return;

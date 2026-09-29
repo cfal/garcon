@@ -566,6 +566,10 @@ for (const dialer of ['controller', 'worker'] as const) {
       await integration.execution.start(request);
       const events = record(integration);
       const availability = availabilityLog(fixture.executor);
+      const native = fixture.generations[0]!.integration.producers;
+      const detached = Promise.withResolvers<void>();
+      const detach = native.detach.bind(native);
+      native.detach = (binding) => { detach(binding); detached.resolve(); };
       const ready = nextAvailability(fixture.executor, 'ready');
       fixture.controller.disconnect(); fixture.worker.disconnect();
       await ready;
@@ -576,6 +580,8 @@ for (const dialer of ['controller', 'worker'] as const) {
 
       expect(availability).toEqual(['reconnecting', 'offline', 'ready']);
       expect(events).toEqual([]);
+      // Once the worker's own grace expires too, it no longer holds the binding.
+      await detached.promise;
       await expect(integration.producers.close(request.producerBinding)).rejects.toMatchObject({ code: 'STALE_RESOURCE' });
     } finally { await fixture.dispose(); }
   });

@@ -198,6 +198,12 @@ export class ProducerRelay {
     return binding?.integration === integration && binding.session === session;
   }
 
+  // A suspended binding waits, without a session, for one to resume it.
+  suspended(integration: AgentIntegration, ref: AgentProducerBinding): boolean {
+    const binding = this.#bindings.get(ref.id);
+    return binding?.integration === integration && binding.session === null;
+  }
+
   close(ref: AgentProducerBinding): void {
     const binding = this.#bindings.get(ref.id);
     if (binding) this.#forget(binding);

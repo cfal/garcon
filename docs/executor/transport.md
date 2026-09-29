@@ -256,7 +256,10 @@ while it reconnects waits for the replacement session of the same worker within
 its own deadline and signal. It keeps up to a second of that deadline for the
 call itself, and it fails as not dispatched when the executor goes offline, is
 disposed, or the deadline passes. Sequences that belong to one session, such as
-a history reader's pages, acquire their session once.
+a history reader's pages, acquire their session once. Closing a binding goes
+through the session that holds it. If that session was lost, the close waits for
+the replacement, and the worker closes the suspended binding, which no session
+owns, without resuming it, so its native turn stops.
 
 Each method has a continuity class, `rpcContinuity` in `rpc-protocol.ts`:
 

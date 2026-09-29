@@ -164,7 +164,8 @@ export class RemoteAgentIntegration implements AgentIntegration {
         const holder = this.#bindings.get(binding.id)?.backing ?? this.#failedBindings.get(binding.id);
         this.#forgetBinding(binding.id);
         this.#failedBindings.delete(binding.id);
-        // The worker keeps a lost session's bindings for its replacement, which closes this one.
+        // The worker suspends a lost session's bindings, and the replacement session
+        // closes this one without resuming it.
         if (!holder?.rpc.transport.connected) return call('producers.close', binding, options);
         await holder.rpc.call(this.descriptor.id, 'producers.close', binding, options);
       },

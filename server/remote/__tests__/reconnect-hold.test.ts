@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import type { ExecutorAvailability } from '@garcon/server-agent-interface';
 import type { RemoteExecutorClient } from '../client/executor-client.js';
-import { remoteFixture } from './integration-fixture.js';
+import { remoteFixture, requestFor } from './integration-fixture.js';
 
 function nextAvailability(executor: RemoteExecutorClient, expected: ExecutorAvailability): Promise<void> {
   return new Promise((resolve) => {
@@ -52,6 +52,29 @@ for (const dialer of ['controller', 'worker'] as const) {
       expect(await abandoned).toMatchObject({ outcome: 'not-dispatched', message: 'Executor is offline' });
       expect(fixture.executor.availability).toBe('offline');
       await expect(fixture.executor.getProjectService()).rejects.toMatchObject({ outcome: 'not-dispatched' });
+    } finally { await fixture.dispose(); }
+  });
+
+  test(`a binding closed while the executor reconnects closes on the replacement session and stops its turn (${dialer} dials)`, async () => {
+    const fixture = await remoteFixture(dialer);
+    try {
+      const integration = await fixture.executor.getAgentIntegration('test');
+      const request = await requestFor(integration);
+      await integration.execution.start(request);
+      const worker = fixture.generations[0]!;
+      // The replacement session describes itself, and so installs, only once the close waits for it.
+      const describe = Promise.withResolvers<void>();
+      const getInfo = worker.executor.getInfo;
+      worker.executor.getInfo = async () => { await describe.promise; return getInfo(); };
+      const reconnecting = nextAvailability(fixture.executor, 'reconnecting');
+      fixture.controller.disconnect();
+      await reconnecting;
+      const closing = integration.producers.close(request.producerBinding);
+      describe.resolve();
+      await closing;
+
+      expect(fixture.executor.availability).toBe('ready');
+      expect(worker.calls.abort).toBe(1);
     } finally { await fixture.dispose(); }
   });
 }
