@@ -131,6 +131,21 @@ number means dropped output and records one notice on the active run: "Some
 agent output could not be delivered from the executor. Reload from native
 history after this turn finishes to recover it."
 
+A start, resume, or compaction whose reply was lost with its session leaves its
+run active instead of failing the turn. The worker's relay records each
+binding's latest launch until its run ends or it fails, and the resume reply
+reports it with the sequence number the binding's replay ends at; the relay
+keeps that frame when pressure drops older rows. A launch that settles after
+its session was lost publishes its outcome on the binding instead: its own
+failure, or the dispatch failure below when the lost session cancelled it.
+Once the replay reaches that sequence number, the controller settles every
+launch whose reply it had lost when it requested the resume: a run the worker
+is executing keeps a reachable handle, so Stop reaches it, and a Stop pressed
+during the gap aborts it; a run the worker never began fails as a dispatch
+failure: "The executor connection was lost before this turn started. Send it
+again." A launch dispatched on the new session settles through its own reply,
+even while the replay is still arriving.
+
 A binding the worker no longer holds, a restarted worker (new instance ID), or
 an expired controller grace falls back to the loss path: the controller fails
 the active run with `OUTCOME_UNKNOWN`, closes its transcript binding, and warns:
@@ -147,11 +162,12 @@ A stalled event loop looks like a lost link to its peer. Work proportional to a
 whole transcript or native history therefore runs in bounded steps or on a
 Worker, and both processes log event-loop stalls of 250 ms or more.
 
-Only producer notifications resume. RPC replies lost with a session remain
-uncertain outcomes, and requests are never resent. Hung detached turns require
-worker restart. Controller crash leaves execution state empty on restart;
-graceful controller shutdown still requests native abort. Explicit handoff to
-another provider does not coordinate with detached work on the old provider.
+Only producer notifications and launch outcomes resume. Other RPC replies lost
+with a session remain uncertain outcomes, and requests are never resent. Hung
+detached turns require worker restart. Controller crash leaves execution state
+empty on restart; graceful controller shutdown still requests native abort.
+Explicit handoff to another provider does not coordinate with detached work on
+the old provider.
 
 ## Shutdown And Browser Isolation
 
