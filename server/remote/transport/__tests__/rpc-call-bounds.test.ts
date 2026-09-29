@@ -59,7 +59,9 @@ test('a reply that cannot fit the queue becomes a small uncertain error without 
     await Promise.resolve();
     expect(fixture.worker.connected).toBe(true);
     fixture.unblock();
-    await expect(result).rejects.toMatchObject({ outcome: 'unknown' });
+    await expect(result).rejects.toMatchObject({
+      outcome: 'unknown', message: "The executor's reply could not be delivered, so the outcome is unknown.",
+    });
     expect(fixture.worker.connected).toBe(true);
     fixture.service.handle(async () => []);
     await expect(fixture.client.call('test', 'commands.discover', { projectPath: '/repo' })).resolves.toEqual([]);

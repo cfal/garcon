@@ -231,7 +231,7 @@ export class ExecutorRpc {
     }
     if (!this.transport.channel.fitsFrame(payload) || !this.transport.channel.canAdmit(payload)) {
       payload = JSON.stringify({ type: 'error', id: frame.id, error: encodeFailure(
-        new AgentCallError('unknown', 'The executor ran the request, but its reply was too large to deliver.'),
+        new AgentCallError('unknown', "The executor's reply could not be delivered, so the outcome is unknown."),
       ) } satisfies RpcFrame);
     }
     this.transport.send(payload);
