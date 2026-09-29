@@ -8,10 +8,11 @@ import type { ConnectionCloseAttempt, ConnectionEntry, ViewRecord } from './conn
 import type { LedgerRow } from './contracts.js';
 import { transcriptViewId, type TranscriptView, type TranscriptViewId } from './contracts.js';
 import { lstatIfExists, statSizeIfExists } from './file-stat.js';
+import { SESSION_INDEX_SQL } from './session-query.js';
 import { asError, nextOrdinal, runQuery, runTransaction } from './sqlite-operations.js';
 import { TICKET_OUTCOME_INDEX_SQL } from './ticket-outcome-query.js';
 
-const LEDGER_SCHEMA_VERSION = 2;
+const LEDGER_SCHEMA_VERSION = 3;
 
 export function openConnection(
   rootDirectory: string,
@@ -79,13 +80,14 @@ export function createSchema(db: Database): void {
         WHERE client_message_id IS NOT NULL;
     `);
     db.exec(TICKET_OUTCOME_INDEX_SQL);
+    db.exec(SESSION_INDEX_SQL);
     db.exec(`PRAGMA user_version = ${LEDGER_SCHEMA_VERSION}`);
   });
 }
 
 export function validateSchema(db: Database): void {
   const version = Number(db.query<{ user_version: number }, []>('PRAGMA user_version').get()?.user_version ?? 0);
-  if (version !== 1 && version !== LEDGER_SCHEMA_VERSION) {
+  if (version < 1 || version > LEDGER_SCHEMA_VERSION) {
     throw new LedgerSchemaError(`Unsupported transcript ledger schema version ${version}`);
   }
   const required = new Set(['transcript_views', 'transcript_rows']);
@@ -95,9 +97,10 @@ export function validateSchema(db: Database): void {
   `).all();
   for (const record of records) required.delete(record.name);
   if (required.size > 0) throw new LedgerSchemaError('Transcript ledger schema is incomplete');
-  if (version === 1) {
+  if (version < LEDGER_SCHEMA_VERSION) {
     runTransaction(db, () => {
-      db.exec(TICKET_OUTCOME_INDEX_SQL);
+      if (version < 2) db.exec(TICKET_OUTCOME_INDEX_SQL);
+      db.exec(SESSION_INDEX_SQL);
       db.exec(`PRAGMA user_version = ${LEDGER_SCHEMA_VERSION}`);
     });
   }

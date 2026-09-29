@@ -20,6 +20,7 @@ import {
 } from '../garcon-command-request.ts';
 import { decodeLedgerRow } from '../codec.ts';
 import { frozenConversationDrafts } from '../projection.ts';
+import { CURRENT_SESSION_QUERY_SQL } from '../session-query.ts';
 
 const at = '2026-08-12T00:00:00.000Z';
 let root;
@@ -1331,6 +1332,30 @@ describe('TranscriptLedgerStore', () => {
 
     store.append('chat-one', view.viewId, [session('native-two')]);
     expect(store.currentSession('chat-one').detail.agentSessionId).toBe('native-two');
+  });
+
+  it('finds the current session through its index, including in a migrated ledger', () => {
+    const view = store.initializeCurrentView('chat-one', {
+      viewId: transcriptViewId('view-one'),
+      contentStartOrdinal: 1,
+      rows: [session('native-one'), ...Array.from({ length: 50 }, (_, index) => provider(`row ${index}`))],
+    });
+    store.close();
+    const legacy = new Database(path.join(root, 'chat-one', 'ledger.sqlite'));
+    legacy.exec('DROP INDEX transcript_session_rows; PRAGMA user_version = 2');
+    legacy.close();
+    store = new TranscriptLedgerStore(root);
+
+    expect(store.currentSession('chat-one')).toMatchObject({ ordinal: 1, detail: { agentSessionId: 'native-one' } });
+    store.close();
+    const migrated = new Database(path.join(root, 'chat-one', 'ledger.sqlite'), { readonly: true, create: false });
+    try {
+      expect(migrated.query('PRAGMA user_version').get().user_version).toBe(3);
+      const plan = migrated.query(`EXPLAIN QUERY PLAN ${CURRENT_SESSION_QUERY_SQL}`).all(view.viewId, 1);
+      expect(plan.map((row) => row.detail).join(' ')).toContain('USING INDEX transcript_session_rows');
+    } finally {
+      migrated.close();
+    }
   });
 
   it('verifies a complete WAL checkpoint at the current watermark', () => {

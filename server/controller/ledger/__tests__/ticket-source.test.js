@@ -55,13 +55,13 @@ test('migrates schema v1 transactionally on lazy open without rewriting row addr
   const original = store.currentRows(CHAT);
   store.closeChat(CHAT);
   const db = new Database(join(directory, CHAT, 'ledger.sqlite'));
-  db.exec('DROP INDEX transcript_ticket_outcome_correlation; PRAGMA user_version = 1');
+  db.exec('DROP INDEX transcript_ticket_outcome_correlation; DROP INDEX transcript_session_rows; PRAGMA user_version = 1');
   db.close();
   expect(await reader.resolveTicketSource(source)).toEqual({ kind: 'found', target: source });
   expect(store.currentRows(CHAT)).toEqual(original);
   store.closeChat(CHAT);
   const migrated = new Database(join(directory, CHAT, 'ledger.sqlite'));
-  try { expect(migrated.query('PRAGMA user_version').get().user_version).toBe(2); }
+  try { expect(migrated.query('PRAGMA user_version').get().user_version).toBe(3); }
   finally { migrated.close(); }
   expect(await reader.resolveTicketSource(source)).toEqual({ kind: 'found', target: source });
 });

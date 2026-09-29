@@ -75,6 +75,7 @@ import {
 } from './connection-setup.js';
 import { lstatIfExists, statSizeIfExists } from './file-stat.js';
 import { readProviderActivityWatermark } from './native-activity-query.js';
+import { findCurrentSession } from './session-query.js';
 import {
   asError,
   nextOrdinal,
@@ -554,14 +555,14 @@ export class TranscriptLedgerStore {
   currentSession(chatId: string): LedgerSessionRow | null {
     return this.#read(chatId, (entry) => {
       const current = this.#requireCurrent(entry);
-      return this.#currentSession(entry, current);
+      return findCurrentSession(entry.db, current);
     });
   }
 
   nativeActivityState(chatId: string): TranscriptNativeActivityState {
     return this.#read(chatId, (entry) => {
       const current = this.#requireCurrent(entry);
-      const session = this.#currentSession(entry, current);
+      const session = findCurrentSession(entry.db, current);
       const watermark = readProviderActivityWatermark(
         entry.db,
         current.viewId,
@@ -760,16 +761,6 @@ export class TranscriptLedgerStore {
         statement.finalize();
       }
     });
-  }
-
-  #currentSession(entry: ConnectionEntry, current: TranscriptView): LedgerSessionRow | null {
-    const stored = entry.db.query<StoredLedgerRow, [string, number]>(`
-      SELECT view_id, ordinal, kind, at, client_message_id, payload_json
-      FROM transcript_rows
-      WHERE view_id = ? AND ordinal >= ? AND kind = 'session'
-      ORDER BY ordinal DESC LIMIT 1
-    `).get(current.viewId, current.contentStartOrdinal);
-    return stored ? decodeStoredLedgerRow(stored) as LedgerSessionRow : null;
   }
 
   #read<T>(chatId: string, work: (entry: ConnectionEntry) => T): T {
