@@ -175,7 +175,7 @@ async function readWholeSession(
     if (allowMissing && error.code === 'ENOENT') return null;
     throw error;
   });
-  if (before === null) return { entries, digest: emptyDigest() };
+  if (before === null) return { entries, digest: new PrefixHash().digest() };
   const hash = new PrefixHash();
   const copy = new WholeSessionCopy(request, context, target);
   const file = await fs.open(request.sourcePath, 'r');
@@ -184,7 +184,7 @@ async function readWholeSession(
       hash.add(line);
       const parsed = parseFirstJsonlValue(line.bytes.toString('utf8'));
       if (parsed.kind === 'empty') {
-        await copy.empty();
+        copy.empty();
         continue;
       }
       if (parsed.kind === 'incomplete') {
@@ -202,7 +202,6 @@ async function readWholeSession(
   } finally {
     await file.close();
   }
-  copy.finish();
   const after = await fs.stat(request.sourcePath);
   if (sourceChangedDuringRead(before, after)) throw new JsonlSourcePrefixChangedError(request.sourcePath);
   return { entries, digest: hash.digest() };
@@ -213,10 +212,7 @@ async function readRetainedPrefix(
   context: ForkTranscriptEntryContext,
   target: TargetWriter,
 ): Promise<SourceRead> {
-  const lineCount = request.cutoffLine === 0 ? (request.leadingLineCount ?? 0) : request.cutoffLine!;
-  if (!Number.isSafeInteger(lineCount) || lineCount < 0) {
-    throw new JsonlSourcePrefixChangedError(request.sourcePath);
-  }
+  const lineCount = retainedLineCount(request);
   const hash = new PrefixHash();
   const transforms = request.transformEntries !== undefined;
   const entries = new ForkEntries(transforms);
@@ -268,7 +264,7 @@ class WholeSessionCopy {
     private readonly target: TargetWriter,
   ) {}
 
-  async empty(): Promise<void> {
+  empty(): void {
     this.#pendingEmpty += 1;
   }
 
@@ -286,10 +282,6 @@ class WholeSessionCopy {
     return projected.value;
   }
 
-  finish(): void {
-    this.#pendingEmpty = 0;
-  }
-
   assertComplete(): void {
     if (this.#incompleteLine !== null) throw invalidJsonl(this.request.sourcePath, this.#incompleteLine);
   }
@@ -299,6 +291,14 @@ class WholeSessionCopy {
       if (!this.request.transformEntries) await this.target.line('');
     }
   }
+}
+
+function retainedLineCount(request: ForkJsonlRequest): number {
+  const lineCount = request.cutoffLine === 0 ? (request.leadingLineCount ?? 0) : request.cutoffLine;
+  if (lineCount === null || !Number.isSafeInteger(lineCount) || lineCount < 0) {
+    throw new JsonlSourcePrefixChangedError(request.sourcePath);
+  }
+  return lineCount;
 }
 
 function project(
@@ -326,7 +326,7 @@ async function verifySource(request: ForkJsonlRequest, expected: SourceDigest): 
     await verifyWholeSessionPrefix(request, expected);
     return;
   }
-  const lineCount = request.cutoffLine === 0 ? (request.leadingLineCount ?? 0) : request.cutoffLine;
+  const lineCount = retainedLineCount(request);
   const file = await fs.open(request.sourcePath, 'r').catch((error: NodeJS.ErrnoException) => {
     if (error.code === 'ENOENT') throw new JsonlSourcePrefixChangedError(request.sourcePath);
     throw error;
@@ -441,10 +441,6 @@ class PrefixHash {
       byteDigest: this.#bytes.digest('hex'),
     };
   }
-}
-
-function emptyDigest(): SourceDigest {
-  return new PrefixHash().digest();
 }
 
 // Opens the target only once there is content to write, so an unmaterialized or failed fork

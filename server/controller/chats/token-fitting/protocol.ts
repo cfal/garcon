@@ -27,7 +27,12 @@ export function isTokenFittingRequest(value: unknown): value is TokenFittingRequ
 
 export function isTokenFittingEvent(value: unknown): value is TokenFittingEvent {
   if (!isRecord(value) || !Number.isSafeInteger(value.taskId)) return false;
-  return value.type === 'result'
-    ? 'result' in value
-    : value.type === 'failed' && typeof value.message === 'string';
+  switch (value.type) {
+    case 'result':
+      return 'result' in value;
+    case 'failed':
+      return typeof value.message === 'string';
+    default:
+      return false;
+  }
 }

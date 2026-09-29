@@ -16,6 +16,8 @@ const DIRECT_SESSION_SCHEMA_VERSION = 1;
 const DIRECT_SESSION_HEADER_MAX_BYTES = 4 * 1024;
 const SESSION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
+// Parses in bounded steps: every resumed turn and every Reload reads the whole session.
+const PARSE_STEP_LINES = 1000;
 const utf8Decoder = new TextDecoder('utf-8', { fatal: true });
 
 export interface DirectSessionHeaderV1 {
@@ -395,9 +397,6 @@ async function writeAll(
     written += result.bytesWritten;
   }
 }
-
-// Parses in bounded steps: every resumed turn and every Reload reads the whole session.
-const PARSE_STEP_LINES = 1000;
 
 async function parseSessionFile(
   raw: Buffer,
