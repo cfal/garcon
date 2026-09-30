@@ -44,6 +44,8 @@ export interface AgentIntegration {
   readonly steering: AgentSteering | null;
   readonly endpoints: AgentEndpoints | null;
   readonly singleQuery: AgentSingleQuery | null;
+  // Imports what a chat's recorded native session held before its transcript
+  // ledger existed; core skips it for a chat that records no native session.
   readonly legacyHistoryImport: AgentHistoryImport | null;
   readonly nativeHistoryImport: AgentHistoryImport | null;
   readonly nativeActivity: AgentNativeActivityProbe | null;

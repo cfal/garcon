@@ -13,6 +13,7 @@ import type { AcceptedDirectInput } from '../chat-execution/types.js';
 import { resolveStartProjectPath } from '../lib/command-project-path.js';
 import { effectiveExecutorId, parseExecutorId } from '../../../common/executors.js';
 import { createLogger } from '../../common/log.js';
+import { readBefore } from '../../common/interactive-deadline.js';
 import { createPreambleBoundaryBinding } from '../preambles/boundary.js';
 import { resolveNewChatPreambleSelection } from '../preambles/selection.js';
 import { frozenConversationDrafts } from '../ledger/projection.js';
@@ -51,21 +52,22 @@ export class StartCommands {
     const chatId = this.support.requireChatId(input.chatId);
     return this.support.withChatMutationLock(
       chatId,
-      () => this.submitStartLocked(input, chatId),
+      (deadline) => this.submitStartLocked(input, chatId, deadline),
     );
   }
 
   private async submitStartLocked(
     input: ChatStartInput,
     chatId: NormalizedChatStart['chatId'],
+    deadline: number,
     signal?: AbortSignal,
   ): Promise<StartChatCommandResponse> {
     signal?.throwIfAborted();
     const replay = await this.replayStart(input, chatId);
     if (replay) return replay;
-    const normalized = await this.normalizeStart(input, chatId);
+    const normalized = await this.normalizeStart(input, chatId, deadline);
     signal?.throwIfAborted();
-    const record = await this.admitStart(normalized, signal);
+    const record = await this.admitStart(normalized, deadline, signal);
     return {
       ...agentTurnResultFromRecord(record),
       chat: await this.support.projectCommandChat(chatId),
@@ -81,9 +83,12 @@ export class StartCommands {
     });
   }
 
+  // The caller holds the requesting chat's lock and passes the deadline it took
+  // when asking for it.
   async submitAgentCommandStartLocked(
     input: AgentCommandStartInput,
     signal: AbortSignal,
+    deadline: number,
   ): Promise<AgentCommandStartAdmission> {
     signal.throwIfAborted();
     this.support.requireChat(input.parentChatId);
@@ -102,11 +107,11 @@ export class StartCommands {
       if (!replay.turnId) throw new Error('Accepted start has no turn identity');
       return { turnId: replay.turnId, status: 'duplicate', start() {} };
     }
-    const normalized = await this.normalizeStart(request, chatId);
+    const normalized = await this.normalizeStart(request, chatId, deadline);
     signal.throwIfAborted();
     const startupGate = Promise.withResolvers<void>();
     try {
-      const record = await this.admitStart(normalized, signal, startupGate.promise);
+      const record = await this.admitStart(normalized, deadline, signal, startupGate.promise);
       if (!record.turnId) throw new Error('Accepted start has no turn identity');
       return { turnId: record.turnId, status: 'accepted', start: startupGate.resolve };
     } catch (error) {
@@ -118,6 +123,7 @@ export class StartCommands {
   private async normalizeStart(
     input: ChatStartInput,
     chatId: NormalizedChatStart['chatId'],
+    deadline: number,
   ): Promise<NormalizedChatStart> {
     const images = input.images ?? [];
     const idempotencyProjectPath = String(input.projectPath || '').trim();
@@ -169,7 +175,7 @@ export class StartCommands {
 
     // Rejected configuration must not reserve a request identity or publish a partial chat.
     try {
-      await this.deps.agents.validateConfiguration(input);
+      await this.deps.agents.validateConfiguration(input, readBefore(deadline));
     } catch (error) {
       if (error instanceof AgentIntegrationError && error.code === 'INVALID_SETTINGS') {
         throw new CommandValidationError('VALIDATION_FAILED', error.message, 422, error.retryable);
@@ -177,7 +183,7 @@ export class StartCommands {
       throw error;
     }
 
-    const projectPath = await resolveStartProjectPath(input.projectPath, this.deps.inspectProject, executorId);
+    const projectPath = await resolveStartProjectPath(input.projectPath, this.deps.inspectProject, executorId, readBefore(deadline));
 
     // Omitted IDs resolve the newest defaults here, at actual creation; an
     // explicit list is proven safe against this same catalog snapshot.
@@ -223,7 +229,9 @@ export class StartCommands {
     };
   }
 
-  private async admitStart(input: NormalizedChatStart, signal?: AbortSignal, dispatchReady?: Promise<void>): Promise<CommandLedgerRecord> {
+  private async admitStart(
+    input: NormalizedChatStart, deadline: number, signal?: AbortSignal, dispatchReady?: Promise<void>,
+  ): Promise<CommandLedgerRecord> {
     const existing = this.deps.chats.getChat(input.chatId);
     if (existing || input.transcriptSnapshot && this.deps.transcripts.existingCurrentView(input.chatId)) {
       throw new CommandValidationError(
@@ -267,6 +275,7 @@ export class StartCommands {
       },
       userMessagePresentation: input.userMessagePresentation,
       settlement: this.support.settlement,
+      admissionDeadline: deadline,
       preparation: {
         operation: 'chat-start',
         prepare: async () => {
@@ -354,6 +363,8 @@ export class StartCommands {
             } : executionAdmission,
             agentSettings: input.agentSettings,
             ...(progress ? { onContextPreparation: (phase) => progress.report(phase) } : {}),
+            // Only an agent-command start dispatches after releasing the chat lock.
+            ...(input.origin === 'agent-command' ? {} : { dispatchDeadline: deadline }),
           });
         } catch (error) {
           progress?.fail(error);

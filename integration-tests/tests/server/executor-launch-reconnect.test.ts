@@ -527,6 +527,43 @@ for (const dialer of ['controller', 'worker'] as const) {
     }, { reconnectGraceMs: 300 });
   }, 30_000);
 
+  // A new chat start holds its chat lock through dispatch, so it waits for a
+  // reconnecting executor only until its dispatch deadline.
+  test(`a start still waiting for the executor at its dispatch deadline fails before it starts (${dialer} dials)`, async () => {
+    await withRemoteRouter(dialer, async ({ router, ledger, native, integration, remote, controller }) => {
+      const release = holdNextReconnect(native);
+      const reconnecting = availability(remote, 'reconnecting');
+      controller.disconnect();
+      await reconnecting;
+      const failure = await router.startSession(CHAT, 'Synthetic input', { dispatchDeadline: performance.now() + 200 })
+        .then(() => null, (error: unknown) => error);
+
+      expect(failure).toMatchObject({ outcome: 'not-dispatched', message: 'The executor did not reconnect in time.' });
+      expect(runEnds(ledger)).toEqual([{ outcome: 'failed', origin: 'core' }]);
+      const ready = availability(remote, 'ready');
+      release();
+      await ready;
+      await integration.execution.runningSessions();
+      expect(native.calls.start).toBe(0);
+    });
+  }, 30_000);
+
+  test(`a start whose executor reconnects before its dispatch deadline runs once (${dialer} dials)`, async () => {
+    await withRemoteRouter(dialer, async ({ router, ledger, native, remote, controller }) => {
+      const release = holdNextReconnect(native);
+      const reconnecting = availability(remote, 'reconnecting');
+      controller.disconnect();
+      await reconnecting;
+      const turn = router.startSession(CHAT, 'Synthetic input', { dispatchDeadline: performance.now() + 10_000 });
+      await until(() => router.isChatRunning(CHAT));
+      release();
+      await turn;
+
+      expect(native.calls.start).toBe(1);
+      expect(runEnds(ledger)).toEqual([]);
+    });
+  }, 30_000);
+
   test(`a start lost as it is sent runs once after the executor reconnects, and Stop reaches it (${dialer} dials)`, async () => {
     await withRemoteRouter(dialer, async ({ router, ledger, native, controllerFault, restored }) => {
       let sent = 0;

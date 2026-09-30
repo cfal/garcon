@@ -1,5 +1,6 @@
-import { describe, expect, it, mock } from 'bun:test';
+import { describe, expect, it, mock, spyOn } from 'bun:test';
 import { DomainError, ProjectUnavailableError } from '../../../common/domain-error.ts';
+import { INTERACTIVE_EXECUTOR_WAIT_MS } from '../../../common/interactive-deadline.ts';
 import { KeyedPromiseLock } from '../../../common/keyed-lock.ts';
 import { InterAgentMessageController } from '../inter-agent-message-controller.ts';
 
@@ -82,6 +83,31 @@ function sourceNotices(fixture) {
 }
 
 describe('InterAgentMessageController', () => {
+  // A message queued behind another operation on the target's lock gives up
+  // waiting for a reconnecting executor in turn, so a Stop behind both is not
+  // held for two budgets.
+  it('starts an offer\'s interactive deadline when it asks for the target\'s lock', async () => {
+    let now = 1_000;
+    const clock = spyOn(performance, 'now').mockImplementation(() => now);
+    try {
+      const lock = new KeyedPromiseLock();
+      const held = deferred();
+      const holding = lock.runExclusive(`chat:${TARGET_CHAT_ID}`, () => held.promise);
+      const fixture = createFixture({ chatMutationLock: lock });
+
+      fixture.controller.request(request());
+      await Bun.sleep(20);
+      now = 30_000;
+      held.resolve();
+      await holding;
+      await waitFor(() => sourceNotices(fixture).length === 1);
+
+      expect(fixture.execution.offerServerControlInput.mock.calls[0][3]).toBe(1_000 + INTERACTIVE_EXECUTOR_WAIT_MS);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it('records a disabled outcome without adopting or delivering to targets', async () => {
     const fixture = createFixture({ isEnabled: () => false });
 
@@ -120,6 +146,7 @@ describe('InterAgentMessageController', () => {
         },
       },
       expect.any(AbortSignal),
+      expect.any(Number),
     );
     expect(fixture.notices.appendNotice.mock.calls).toEqual([
       [

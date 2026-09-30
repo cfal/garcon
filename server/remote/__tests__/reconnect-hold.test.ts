@@ -4,6 +4,7 @@ import type { AgentProducerNotification, ExecutorAvailability } from '@garcon/se
 import type { RemoteExecutorClient } from '../client/executor-client.js';
 import { ExecutorRpc } from '../transport/rpc.js';
 import { EXECUTOR_DISCONNECTED_BEFORE_START } from '../../common/executor-disconnect.js';
+import { readBefore } from '../../common/interactive-deadline.js';
 import { integrationFixture, outgoingFault, remoteFixture, requestFor } from './integration-fixture.js';
 
 function nextAvailability(executor: RemoteExecutorClient, expected: ExecutorAvailability): Promise<void> {
@@ -187,6 +188,138 @@ for (const dialer of ['controller', 'worker'] as const) {
 
       expect(sentDeadlines(calls, 'producers.cancelLaunch')).toEqual([null]);
     } finally { calls.mockRestore(); await fixture.dispose(); }
+  });
+
+  test(`a dispatch deadline bounds only the wait for a reconnecting executor (${dialer} dials)`, async () => {
+    const fixture = await remoteFixture(dialer);
+    try {
+      const projects = await fixture.executor.getProjectService();
+      const reconnecting = nextAvailability(fixture.executor, 'reconnecting');
+      await fixture.worker.dispose();
+      await reconnecting;
+      const expired = projects.inspect({ projectPath: '/test-project' }, { dispatchDeadline: performance.now() - 1 });
+      const waited = projects.inspect({ projectPath: '/test-project' }, { dispatchDeadline: performance.now() + 50 });
+      let held = false;
+      void projects.inspect({ projectPath: '/test-project' }, { timeoutMs: 5_000 }).catch(() => undefined).finally(() => { held = true; });
+
+      const timedOut = { outcome: 'not-dispatched', message: 'The executor did not reconnect in time.' };
+      await expect(expired).rejects.toMatchObject(timedOut);
+      await expect(waited).rejects.toMatchObject(timedOut);
+      // A call without one keeps waiting within its own deadline.
+      expect(held).toBe(false);
+    } finally { await fixture.dispose(); }
+  });
+
+  test(`a read sent after waiting most of its deadline for a reconnect still gets its grace to answer (${dialer} dials)`, async () => {
+    const fixture = await remoteFixture(dialer);
+    try {
+      const projects = await fixture.executor.getProjectService();
+      const worker = fixture.generations[0]!;
+      const native = await worker.executor.getProjectService();
+      const inspect = native.inspect.bind(native);
+      spyOn(native, 'inspect').mockImplementation(async (...args) => {
+        await Bun.sleep(3_500);
+        return inspect(...args);
+      });
+      const release = holdNextInstall(worker);
+      const reconnecting = nextAvailability(fixture.executor, 'reconnecting');
+      fixture.controller.disconnect();
+      await reconnecting;
+      const inspected = projects.inspect({ projectPath: '/test-project' }, readBefore(performance.now() + 6_000));
+      await Bun.sleep(3_500);
+      release();
+
+      await expect(inspected).resolves.toBeDefined();
+    } finally { await fixture.dispose(); }
+  }, 20_000);
+
+  test(`a sent call whose session is lost stops waiting for a replacement at its dispatch deadline (${dialer} dials)`, async () => {
+    let controllerFault!: ReturnType<typeof outgoingFault>;
+    let workerFault!: ReturnType<typeof outgoingFault>;
+    const fixture = await remoteFixture(dialer, (controller, worker) => {
+      controllerFault = outgoingFault(controller);
+      workerFault = outgoingFault(worker);
+    });
+    try {
+      const projects = await fixture.executor.getProjectService();
+      const release = holdNextInstall(fixture.generations[0]!);
+      const inspections: string[] = [];
+      controllerFault.inject = (encoded) => {
+        if (encoded.includes('"method":"projects.inspect"')) inspections.push(JSON.parse(encoded).id);
+        return null;
+      };
+      // Loses the session with both replies unsent, so both calls are parked.
+      workerFault.inject = (encoded) => {
+        if (inspections.length < 2 || !encoded.startsWith('{"type":"result"')) return null;
+        workerFault.inject = () => null;
+        return 'disconnect';
+      };
+      const held = projects.inspect({ projectPath: '/test-project' }, { timeoutMs: 10_000 });
+      const bounded = projects.inspect({ projectPath: '/test-project' }, { timeoutMs: 10_000, dispatchDeadline: performance.now() + 200 });
+
+      await expect(bounded).rejects.toMatchObject({
+        outcome: 'unknown', message: 'The executor did not reconnect in time, so the outcome is unknown.',
+      });
+      release();
+      // A call without one waits for the replacement session and gets its reply.
+      await expect(held).resolves.toBeDefined();
+    } finally { await fixture.dispose(); }
+  });
+
+  test(`a launch still waiting for the executor at its dispatch deadline fails and is never sent (${dialer} dials)`, async () => {
+    const fixture = await remoteFixture(dialer);
+    try {
+      const integration = await fixture.executor.getAgentIntegration('test');
+      const request = await requestFor(integration);
+      const worker = fixture.generations[0]!;
+      const release = holdNextInstall(worker);
+      const reconnecting = nextAvailability(fixture.executor, 'reconnecting');
+      fixture.controller.disconnect();
+      await reconnecting;
+
+      await expect(integration.execution.start(request, { dispatchDeadline: performance.now() + 50 }))
+        .rejects.toMatchObject({ outcome: 'not-dispatched', message: 'The executor did not reconnect in time.' });
+      const ready = nextAvailability(fixture.executor, 'ready');
+      release();
+      await ready;
+      await integration.execution.runningSessions();
+      expect(worker.calls.start).toBe(0);
+    } finally { await fixture.dispose(); }
+  });
+
+  test(`a launch sent before its dispatch deadline is not cut off at it (${dialer} dials)`, async () => {
+    const fixture = await remoteFixture(dialer);
+    try {
+      const integration = await fixture.executor.getAgentIntegration('test');
+      const request = await requestFor(integration);
+      const worker = fixture.generations[0]!;
+      const dispatchDeadline = performance.now() + 1_000;
+      worker.hooks.start = async () => { await Bun.sleep(Math.max(0, dispatchDeadline - performance.now()) + 50); };
+      const release = holdNextInstall(worker);
+      const reconnecting = nextAvailability(fixture.executor, 'reconnecting');
+      fixture.controller.disconnect();
+      await reconnecting;
+      const launch = integration.execution.start(request, { dispatchDeadline });
+      release();
+
+      await expect(launch).resolves.toBeDefined();
+      expect(performance.now()).toBeGreaterThan(dispatchDeadline);
+      expect(worker.calls.start).toBe(1);
+    } finally { await fixture.dispose(); }
+  });
+
+  test(`a call whose session retires before it is sent is not sent again past its dispatch deadline (${dialer} dials)`, async () => {
+    const fixture = await remoteFixture(dialer);
+    try {
+      const projects = await fixture.executor.getProjectService();
+      const native = await fixture.generations[0]!.executor.getProjectService();
+      const inspect = spyOn(native, 'inspect');
+      const inspected = projects.inspect({ projectPath: '/test-project' }, { dispatchDeadline: performance.now() });
+      fixture.controller.disconnect();
+
+      await expect(inspected).rejects.toMatchObject({ outcome: 'not-dispatched', message: 'The executor did not reconnect in time.' });
+      expect(inspect).not.toHaveBeenCalled();
+    } finally { await fixture.dispose(); }
   });
 
   test(`a Stop whose cancel is lost with the session cancels the launch's admission after the reconnect (${dialer} dials)`, async () => {

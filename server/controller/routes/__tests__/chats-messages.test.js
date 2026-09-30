@@ -436,7 +436,7 @@ describe('GET /api/v1/chats/messages', () => {
     const warnings = [];
     const entry = {
       agentId: 'test-provider',
-      agentSessionId: null,
+      agentSessionId: 'session-1',
       nativeSession: null,
       nativeSeedReceipt: null,
       agentOwnershipEpoch: 'owner-1',

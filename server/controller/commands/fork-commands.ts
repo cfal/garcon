@@ -96,11 +96,11 @@ export class ForkCommands {
     };
     return this.support.withChatMutationLocks(
       [normalized.sourceChatId, normalized.chatId],
-      () => this.submitHttpForkRun(normalized),
+      (deadline) => this.submitHttpForkRun(normalized, deadline),
     );
   }
 
-  private async submitHttpForkRun(input: NormalizedSubmitForkRunInput): Promise<ForkRunCommandResponse> {
+  private async submitHttpForkRun(input: NormalizedSubmitForkRunInput, deadline: number): Promise<ForkRunCommandResponse> {
     const clientRequestId = this.support.requireClientRequestId(input.clientRequestId);
     const clientMessageId = this.support.requireClientRequestId(input.clientMessageId, 'clientMessageId');
     const turnId = crypto.randomUUID();
@@ -174,7 +174,7 @@ export class ForkCommands {
         clientRequestId,
         clientMessageId,
         turnId,
-      }, 'fork-run', {
+      }, 'fork-run', deadline, {
         operation: 'fork-run',
         prepare: async ({ signal }) => {
           if (forkAlreadyCreated) return;

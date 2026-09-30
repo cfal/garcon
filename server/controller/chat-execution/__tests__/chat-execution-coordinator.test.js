@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { ChatExecutionCoordinator } from '../chat-execution-coordinator.js';
 import { InMemoryChatExecutionControlRepository } from '../chat-execution-control-repository.ts';
 import { DomainError, ProjectUnavailableError } from '../../../common/domain-error.ts';
+import { INTERACTIVE_EXECUTOR_WAIT_MS } from '../../../common/interactive-deadline.ts';
 
 function deferred() {
   let resolve;
@@ -417,6 +418,49 @@ describe('ChatExecutionCoordinator', () => {
     expect((await coordinator.readChatExecutionControl('chat-1')).controlEntries).toHaveLength(1);
     expect(fixture.turnRunner.steerInput).not.toHaveBeenCalled();
     await coordinator.releaseDirectTurn(successor);
+  });
+
+  // A steer waits for a reconnecting executor within one interactive deadline, from
+  // capturing its target to delivering the input.
+  it('captures and steers server control input within one interactive deadline', async () => {
+    const fixture = createFixture({ turnRunner: {
+      captureSteerTarget: mock(async () => ({ providerTurnId: 'provider-turn-1' })),
+      steerInput: mock(async (_chatId, _input, _options, _target, prepareDelivery) => {
+        await prepareDelivery();
+        return { kind: 'accepted' };
+      }),
+    } });
+    coordinator = fixture.coordinator;
+    const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'turn-1' });
+    const deadline = performance.now() + INTERACTIVE_EXECUTOR_WAIT_MS;
+
+    await expect(coordinator.offerServerControlInput('chat-1', interAgentInput(), new AbortController().signal, deadline))
+      .resolves.toEqual({ kind: 'delivered' });
+
+    expect(fixture.turnRunner.captureSteerTarget.mock.calls[0][1]).toBe(deadline);
+    expect(fixture.turnRunner.steerInput.mock.calls[0][5]).toBe(deadline);
+    await coordinator.releaseDirectTurn(reservation);
+  });
+
+  // Replies to agent commands hold no chat lock, so their steers keep the calls'
+  // own deadlines instead of the interactive one.
+  it('steers background server control input without an interactive deadline', async () => {
+    const fixture = createFixture({ turnRunner: {
+      captureSteerTarget: mock(async () => ({ providerTurnId: 'provider-turn-1' })),
+      steerInput: mock(async (_chatId, _input, _options, _target, prepareDelivery) => {
+        await prepareDelivery();
+        return { kind: 'accepted' };
+      }),
+    } });
+    coordinator = fixture.coordinator;
+    const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'turn-1' });
+
+    await expect(coordinator.deliverServerControlInput('chat-1', interAgentInput(), new AbortController().signal))
+      .resolves.toBe('delivered');
+
+    expect(fixture.turnRunner.captureSteerTarget).toHaveBeenCalledWith('chat-1', null);
+    expect(fixture.turnRunner.steerInput.mock.calls[0][5]).toBeNull();
+    await coordinator.releaseDirectTurn(reservation);
   });
 
   for (const failureAt of ['capture', 'dispatch']) {

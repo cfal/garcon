@@ -447,18 +447,21 @@ describe('QueueDrainer', () => {
     }));
     const callbacks = queueCallbacks();
     const unavailable = new ProjectUnavailableError('/workspace/missing', 'not-found');
+    const assertAvailable = mock(async () => { throw unavailable; });
     const drainer = new QueueDrainer({
       ownership: idleOwnership(),
       controls: { read: mock(async () => pending), pauseForUnavailableProject, dequeueNextTurn },
       turnRunner: { isChatRunning: () => false, runAgentTurn: mock(async () => undefined) },
       getDrainOptions: () => ({}),
-      projectAdmission: { assertAvailable: mock(async () => { throw unavailable; }) },
+      projectAdmission: { assertAvailable },
       runSelectionAdmissionExclusive: (_chatId, operation) => operation(),
       callbacks,
     });
 
     await drainer.run('chat-1');
 
+    // The drain holds no chat lock, so its inspection keeps the call's own deadline.
+    expect(assertAvailable).toHaveBeenCalledWith('chat-1', null);
     expect(pauseForUnavailableProject).toHaveBeenCalledWith('chat-1');
     expect(dequeueNextTurn).not.toHaveBeenCalled();
     expect(callbacks.registerQueued).not.toHaveBeenCalled();

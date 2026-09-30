@@ -120,6 +120,8 @@ describe('assistant action controllers', () => {
       thinkingMode: 'high', apiProviderId: null, agentSettings: f.entry.defaultSettings, command: START.prompt,
     });
     expect(f.commands.submitAgentCommandStartLocked.mock.calls[0][0]).not.toHaveProperty('tags');
+    // The start's interactive deadline is taken before the requesting chat's lock.
+    expect(f.commands.submitAgentCommandStartLocked.mock.calls[0][2]).toEqual(expect.any(Number));
     expect(f.events).toEqual(['start', 'notice', 'reply']);
     expect(f.replies[0].input.receipt).toBeNull();
     expect(parseGarconCommandResult(f.replies[0].input.content)).toMatchObject({ status: 'accepted', chatId: CHILD, requestViewId: SOURCE.viewId, requestOrdinal: 2 });

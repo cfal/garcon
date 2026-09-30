@@ -33,9 +33,9 @@ export class QueueCommands {
   async submitQueueEntryCreate(input: QueueEntryCreateCommandRequest): Promise<QueueEntryCommandResponse> {
     this.support.requireChat(input.chatId);
     this.support.assertContent(input.content, input.images);
-    return this.support.withChatMutationLock(input.chatId, async () => {
+    return this.support.withChatMutationLock(input.chatId, async (deadline) => {
       await this.support.assertCurrentTranscriptView(input.chatId, input.transcriptViewId);
-      return this.submitQueueEntryCreateLocked(input);
+      return this.submitQueueEntryCreateLocked(input, deadline);
     });
   }
 
@@ -223,7 +223,7 @@ export class QueueCommands {
     const chatId = input.chatId.trim();
     const command = input.command.trim();
     this.support.assertContent(command);
-    return this.support.withChatMutationLock(chatId, async () => {
+    return this.support.withChatMutationLock(chatId, async (deadline) => {
       const session = this.deps.chats.getChat(chatId);
       if (!session) {
         throw new CommandValidationError('SESSION_NOT_FOUND', 'Session not found', 404);
@@ -245,7 +245,7 @@ export class QueueCommands {
           clientRequestId: input.clientRequestId,
           clientMessageId: input.clientMessageId,
           transcriptViewId,
-        });
+        }, deadline);
         return { type: 'queued', chatId, entryId: result.entryId };
       }
       await this.support.submitHttpRun({
@@ -255,7 +255,7 @@ export class QueueCommands {
         clientRequestId: input.clientRequestId,
         clientMessageId: input.clientMessageId,
         options: {},
-      });
+      }, deadline);
       return { type: 'sent', chatId };
     });
   }
@@ -267,6 +267,7 @@ export class QueueCommands {
 
   private async submitQueueEntryCreateLocked(
     input: QueueEntryCreateCommandRequest,
+    deadline: number,
   ): Promise<QueueEntryCommandResponse> {
     const content = input.content;
     const preparedEntryId = crypto.randomUUID();
@@ -309,6 +310,7 @@ export class QueueCommands {
       transcriptViewId: input.transcriptViewId,
       excludedResendOrdinals: input.excludedResendOrdinals,
       settlement: this.support.settlement,
+      admissionDeadline: deadline,
     });
     return {
       ...commandResultFromRecord(

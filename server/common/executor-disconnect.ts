@@ -12,6 +12,11 @@ export const EXECUTOR_DISCONNECTED_BEFORE_START = {
   message: 'The executor connection was lost before this turn started. Send it again.',
 } as const;
 
+// A call that stopped waiting for a reconnecting executor before it was sent.
+export function reconnectTimedOut(): AgentCallError {
+  return new AgentCallError('not-dispatched', 'The executor did not reconnect in time.');
+}
+
 // A remote call that failed because its executor session was lost: dropped
 // while it was being sent, or outstanding when the session retired. Setup steps
 // may retry it; the retry waits for the replacement session.

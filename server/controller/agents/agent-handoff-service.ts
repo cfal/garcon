@@ -12,8 +12,10 @@ import {
 } from '../chats/agent-ownership-journal.js';
 import type { ChatRegistryEntry, IChatRegistry } from '../chats/store.js';
 import { DomainError } from '../../common/domain-error.js';
+import { readBefore } from '../../common/interactive-deadline.js';
 import { createLogger } from '../../common/log.js';
 import type { AgentDirectory } from './directory.js';
+import type { AgentModelQuery } from './catalog-service.js';
 import { effectiveExecutorId } from '../../../common/executors.js';
 import type { ProjectInspector } from '../../../common/project-resolution.js';
 import { resolveStartProjectPath } from '../lib/command-project-path.js';
@@ -67,7 +69,7 @@ export class AgentHandoffService {
     readonly inspectProject: ProjectInspector;
     readonly endpointResolver: ApiProviderEndpointResolver;
     readonly catalog: {
-      getAgentCatalogEntry(agentId: string, options?: { executorId?: string | null }): Promise<AgentCatalogEntry | null>;
+      getAgentCatalogEntry(agentId: string, options?: AgentModelQuery): Promise<AgentCatalogEntry | null>;
     };
     readonly ownership: AgentOwnershipJournal;
     readonly ledger: TranscriptLedgerService;
@@ -114,11 +116,16 @@ export class AgentHandoffService {
     this.deps.ledger.deleteChat(chatId);
   }
 
+  // Callers hold the source chat's lock, so its executor checks share the
+  // operation's interactive deadline.
   async resolveTarget(input: {
     readonly chat: ChatRegistryEntry;
     readonly handoff: AgentHandoffRequest;
     readonly permissionFallbackPolicy?: 'require-explicit-bypass';
+    readonly signal?: AbortSignal;
+    readonly deadline: number;
   }): Promise<ResolvedAgentHandoffTarget> {
+    const { deadline } = input;
     if (input.handoff.expectedAgentOwnershipEpoch !== input.chat.agentOwnershipEpoch) {
       throw new DomainError(
         'STALE_CHAT_OWNERSHIP',
@@ -135,9 +142,13 @@ export class AgentHandoffService {
         400,
       );
     }
-    const projectPath = await resolveStartProjectPath(requested.projectPath ?? input.chat.projectPath, this.deps.inspectProject, executorId);
+    const projectPath = await resolveStartProjectPath(
+      requested.projectPath ?? input.chat.projectPath, this.deps.inspectProject, executorId, readBefore(deadline, input.signal),
+    );
     const integration = this.deps.integrations.get(requested.agentId, executorId);
-    const catalog = await this.deps.catalog.getAgentCatalogEntry(requested.agentId, { executorId });
+    const catalog = await this.deps.catalog.getAgentCatalogEntry(requested.agentId, {
+      executorId, ...readBefore(deadline, input.signal),
+    });
     if (!integration || !catalog) {
       throw new DomainError(
         'UNSUPPORTED_AGENT',
@@ -184,7 +195,7 @@ export class AgentHandoffService {
           endpointId: selection.endpointId!,
           revision: endpoint.apiProvider.revision,
         },
-      });
+      }, readBefore(deadline, input.signal));
     }
 
     const permissionMode = requested.permissionMode ?? preferredValue(

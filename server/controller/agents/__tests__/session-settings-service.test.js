@@ -1,5 +1,6 @@
-import { describe, expect, it, mock } from 'bun:test';
+import { describe, expect, it, mock, spyOn } from 'bun:test';
 
+import { INTERACTIVE_EXECUTOR_WAIT_MS, SENT_READ_GRACE_MS } from '../../../common/interactive-deadline.ts';
 import { AgentSessionSettingsService } from '../session-settings-service.ts';
 
 function makeService(thinkingMode = 'high') {
@@ -99,15 +100,16 @@ describe('AgentSessionSettingsService', () => {
     integration.sessionConfiguration = { apply };
     const agentSettings = { ownerId: 'amp', schemaVersion: 2, values: {} };
 
+    const options = { timeoutMs: 5_000 };
     await service.validateConfiguration({
       agentId: 'amp', model: 'next-model', permissionMode: 'default',
       thinkingMode: 'none', agentSettings,
-    });
+    }, options);
 
     expect(validate).toHaveBeenCalledWith({
       model: 'next-model', permissionMode: 'default', thinkingMode: 'none',
       settings: agentSettings, endpoint: null,
-    });
+    }, options);
     expect(apply).not.toHaveBeenCalled();
     expect(updateChat).not.toHaveBeenCalled();
   });
@@ -128,7 +130,7 @@ describe('AgentSessionSettingsService', () => {
       thinkingMode: 'none',
       settings: { ownerId: 'amp', schemaVersion: 2, values: {} },
       endpoint: null,
-    });
+    }, expect.objectContaining({ timeoutMs: expect.any(Number) }));
     expect(apply).not.toHaveBeenCalled();
     expect(updateChat).not.toHaveBeenCalled();
   });
@@ -196,10 +198,65 @@ describe('AgentSessionSettingsService', () => {
         settings: { ownerId: 'amp', schemaVersion: 2, values: {} },
         endpoint: null,
       },
+      { dispatchDeadline: expect.any(Number) },
     );
     expect(apply.mock.invocationCallOrder[0]).toBeLessThan(
       updateChat.mock.invocationCallOrder[0],
     );
+  });
+
+  // A change queued behind another keeps the deadline it arrived with, so a Stop
+  // queued behind both is not held for two budgets.
+  it('starts each change\'s interactive deadline when it asks for the chat lock', async () => {
+    let now = 1_000;
+    const clock = spyOn(performance, 'now').mockImplementation(() => now);
+    try {
+      const { service, integration } = makeService('none');
+      const first = Promise.withResolvers();
+      const validate = mock(async () => {
+        if (validate.mock.calls.length === 1) await first.promise;
+      });
+      integration.configurationValidation = { validate };
+
+      const changing = service.updateSessionSettings('chat-1', { model: 'large' });
+      now = 5_000;
+      const queued = service.updateSessionSettings('chat-1', { model: 'larger' });
+      now = 30_000;
+      first.resolve();
+      await Promise.all([changing, queued]);
+
+      expect(validate.mock.calls.map((call) => call[1].dispatchDeadline)).toEqual([
+        1_000 + INTERACTIVE_EXECUTOR_WAIT_MS, 5_000 + INTERACTIVE_EXECUTOR_WAIT_MS,
+      ]);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  // Holding the chat lock, the update waits for a reconnecting executor within one
+  // deadline: validation is cut off at it, and the live update may wait until it to
+  // be sent but then keeps its own deadline.
+  it('bounds its executor calls by one interactive deadline', async () => {
+    let now = 1_000;
+    const clock = spyOn(performance, 'now').mockImplementation(() => now);
+    try {
+      const { service, entry, integration } = makeService('none');
+      entry.agentSessionId = 'session-1';
+      const request = new AbortController();
+      const validate = mock(async () => { now += 5_000; });
+      const apply = mock(async () => undefined);
+      integration.configurationValidation = { validate };
+      integration.sessionConfiguration = { apply };
+
+      await service.updateSessionSettings('chat-1', { model: 'large' }, undefined, request.signal);
+
+      expect(validate.mock.calls[0][1]).toEqual({
+        signal: request.signal, dispatchDeadline: 1_000 + INTERACTIVE_EXECUTOR_WAIT_MS, timeoutMs: INTERACTIVE_EXECUTOR_WAIT_MS + SENT_READ_GRACE_MS,
+      });
+      expect(apply.mock.calls[0][3]).toEqual({ dispatchDeadline: 1_000 + INTERACTIVE_EXECUTOR_WAIT_MS });
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it('does not persist when the live configuration update rejects', async () => {

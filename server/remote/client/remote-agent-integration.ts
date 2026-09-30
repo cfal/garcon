@@ -131,7 +131,7 @@ export class RemoteAgentIntegration implements AgentIntegration {
       });
       try {
         return await sessions.send(
-          { signal: options?.signal, timeoutMs: options?.timeoutMs ?? null },
+          { signal: options?.signal, timeoutMs: options?.timeoutMs ?? null, dispatchDeadline: options?.dispatchDeadline },
           ({ backing, timeoutMs }) => send(backing, timeoutMs),
         );
       } catch (error) {
@@ -198,7 +198,9 @@ export class RemoteAgentIntegration implements AgentIntegration {
     this.permissions = {
       respond: (request, options) => call('permissions.respond', request, { timeoutMs: PERMISSION_RESPONSE_TIMEOUT_MS, ...options }),
     };
-    this.catalog = { snapshot: ({ signal, ...request }) => call('catalog.snapshot', request, { signal }) };
+    this.catalog = {
+      snapshot: ({ signal, timeoutMs, dispatchDeadline, ...request }) => call('catalog.snapshot', request, { signal, timeoutMs, dispatchDeadline }),
+    };
     this.settings = {
       ...createVersionedSettings({
         ownerId: this.descriptor.id, schemaVersion: manifest.settings.defaults.schemaVersion,
@@ -289,8 +291,12 @@ export class RemoteAgentIntegration implements AgentIntegration {
       describeSource: ({ signal, ...request }) => call('nativeSessions.describeSource', request, { signal }),
       release: ({ signal, ...request }) => call('nativeSessions.release', request, { signal }),
     } : null;
-    this.configurationValidation = cap.configurationValidation ? { validate: (request) => call('configurationValidation.validate', request) } : null;
-    this.sessionConfiguration = cap.sessionConfiguration ? { apply: (...args) => call('sessionConfiguration.apply', { args }) } : null;
+    this.configurationValidation = cap.configurationValidation ? { validate: (request, options) => call('configurationValidation.validate', request, options) } : null;
+    this.sessionConfiguration = cap.sessionConfiguration ? {
+      apply: (agentSessionId, configuration, previousConfiguration, options) => call(
+        'sessionConfiguration.apply', { args: [agentSessionId, configuration, previousConfiguration] }, options,
+      ),
+    } : null;
     this.projectPathUpdates = cap.projectPathUpdates ? {
       prepare: async (request, options) => {
         const { backing: { rpc }, timeoutMs } = await sessions.acquire(options);

@@ -64,6 +64,7 @@ import {
 } from '../lib/command-execution-control-error.js';
 import { CommandValidationError } from '../lib/command-validation-error.js';
 import { KeyedPromiseLock } from '../../common/keyed-lock.js';
+import { interactiveDeadline } from '../../common/interactive-deadline.js';
 import { ChatCommandSettlement } from './chat-command-settlement.ts';
 import {
   PRE_SCHEDULE_FAILURE_ERROR_CODE,
@@ -354,13 +355,17 @@ export class CommandSupport {
     this.settlement = new ChatCommandSettlement(deps.ledger);
   }
 
-  withChatMutationLock<T>(chatId: string, fn: () => Promise<T>): Promise<T> {
-    return this.#chatMutationLocks.runExclusive(`chat:${chatId}`, fn);
+  // Hands the operation its interactive deadline, which starts when the lock is
+  // requested, so operations queued behind a long wait give up in turn.
+  withChatMutationLock<T>(chatId: string, fn: (deadline: number) => Promise<T>): Promise<T> {
+    const deadline = interactiveDeadline();
+    return this.#chatMutationLocks.runExclusive(`chat:${chatId}`, () => fn(deadline));
   }
 
-  withChatMutationLocks<T>(chatIds: string[], fn: () => Promise<T>): Promise<T> {
+  withChatMutationLocks<T>(chatIds: string[], fn: (deadline: number) => Promise<T>): Promise<T> {
+    const deadline = interactiveDeadline();
     return this.#chatMutationLocks.runExclusiveMany(
-      chatIds.map((chatId) => `chat:${chatId}`), fn,
+      chatIds.map((chatId) => `chat:${chatId}`), () => fn(deadline),
     );
   }
 
@@ -485,6 +490,7 @@ export class CommandSupport {
 
   async submitHttpRun(
     input: NormalizedSubmitRunInput,
+    admissionDeadline: number | null,
     preparation?: DirectInputPreparation,
   ): Promise<AgentTurnCommandResponse> {
     const clientRequestId = this.requireClientRequestId(input.clientRequestId);
@@ -502,12 +508,14 @@ export class CommandSupport {
       input,
       { clientRequestId, clientMessageId, turnId },
       'agent-run',
+      admissionDeadline,
       preparation,
     );
   }
 
   async replayHttpRun(
     input: NormalizedSubmitRunInput,
+    admissionDeadline: number | null,
   ): Promise<AgentTurnCommandResponse | null> {
     const clientRequestId = this.requireClientRequestId(input.clientRequestId);
     const clientMessageId = this.requireClientRequestId(input.clientMessageId, 'clientMessageId');
@@ -545,6 +553,7 @@ export class CommandSupport {
       input,
       { clientRequestId, clientMessageId, turnId: existing.turnId },
       'agent-run',
+      admissionDeadline,
     );
   }
 
@@ -553,6 +562,7 @@ export class CommandSupport {
     input: NormalizedSubmitRunInput,
     ids: { clientRequestId: string; clientMessageId: string; turnId: string },
     commandType: Extract<AgentExecutionCommandType, 'agent-run' | 'fork-run'>,
+    admissionDeadline: number | null,
     preparation?: DirectInputPreparation,
   ): Promise<AgentTurnCommandResponse> {
     if (ledger.kind === 'conflict') {
@@ -594,6 +604,7 @@ export class CommandSupport {
         userMessagePresentation: input.userMessagePresentation,
         settlement: this.settlement,
         preparation,
+        admissionDeadline,
       });
       if (scheduleOutcome === 'duplicate') {
         return this.agentTurnResultWithOptionalChat(

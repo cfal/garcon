@@ -152,9 +152,12 @@ continues its setup on the replacement session. A setup step that is safe to
 repeat runs again if the lost session left its outcome unknown: endpoint
 validation, file mention resolution, and the carryover compaction query, which
 are read-only, and producer binding, with a fresh binding ID. Stop, deletion,
-and shutdown cancel a held turn. Stop is recorded and delivered once the
-executor is ready again. While installing a replacement session, the controller
-calls `producers.resume` with each binding's last received sequence number. The
+and shutdown cancel a held turn. A new chat's start holds its chat's lock
+through setup, so Stop and deletion wait behind it until it gives up at its
+interactive deadline; see Calls Across Reconnects. Stop is recorded and
+delivered once the executor is ready again. While installing a replacement
+session, the controller calls `producers.resume` with each binding's last
+received sequence number. The
 worker then resends the newer retained frames, paced like live output, so the
 tail of a large replay follows the reply. The controller ignores numbers it
 already has, so each notification reaches the ledger sink once. A skipped
@@ -309,6 +312,36 @@ waits without a deadline, until the worker answers, the executor goes offline,
 or the client is disposed. If that session was lost, the replacement session of
 the same worker closes the suspended binding, which no session owns, without
 resuming it, so its native turn stops; a restarted worker never receives it.
+
+Interactive operations that hold a chat's lock or its queue-control lock wait
+for a reconnecting executor for at most 20 seconds
+(`INTERACTIVE_EXECUTOR_WAIT_MS` in `server/common/interactive-deadline.ts`).
+Browsers give each request 30 seconds, so the server answers first, and a Stop
+or deletion queued behind the lock still completes. The operation's deadline
+starts when it asks for the lock, so operations queued behind a long wait give
+up in turn, and all of the operation's calls share it. A call passes it as
+`dispatchDeadline`: a call not yet sent fails as not dispatched at the
+deadline, and a sent journaled call whose session is lost stops waiting for the
+replacement then, with an unknown outcome. A read-only call, such as a
+validation, a project inspection, or a catalog read, may run until 5 seconds
+past the deadline once sent, so a read sent late still gets time to answer, and
+all of the operation's reads end by then. A sent mutation or launch otherwise
+keeps its own deadline, because native startup can take longer. Settings
+changes, submits, queue creation, compaction scheduling, handoff preflight,
+permission answers, inter-agent messages, and steering follow this rule; a
+steer's capture and delivery share one deadline. So does a new chat's start,
+which holds its chat's lock through dispatch: if the executor has not
+reconnected by the deadline, the start fails as not dispatched, its chat is
+rolled back, and the user sends it again. A start or resume that an agent
+command requests takes its deadline when it asks for the requesting chat's
+lock, and a delegated start dispatches after releasing it. Queued turns, the
+queue drain's admission check, chat-ID disclosures, and replies to agent
+commands run without one, so they keep waiting within their own deadlines. Some
+lock holders do not follow the rule yet and wait within their own deadlines
+and, where the route passes one, the request's signal: forks and fork runs'
+native forks, project-path updates, Reload, handoff carryover compaction, and
+adopting a chat created before the transcript ledger. A new chat adopts without
+calling its executor.
 
 Each method has a continuity class, `rpcContinuity` in `rpc-protocol.ts`:
 

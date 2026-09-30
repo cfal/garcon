@@ -23,7 +23,7 @@ export type ProjectResolution =
 export type ProjectInspector = (
   projectPath: ExecutorPath,
   executorId?: string | null,
-  options?: { readonly signal?: AbortSignal },
+  options?: { readonly signal?: AbortSignal; readonly timeoutMs?: number; readonly dispatchDeadline?: number },
 ) => Promise<ProjectResolution>;
 
 export interface ProjectResolutionResponse {

@@ -1,6 +1,11 @@
 export interface ExecutorCallOptions {
   readonly signal?: AbortSignal;
   readonly timeoutMs?: number;
+  // Bounds only waits for a reconnecting executor, at this `performance.now()`
+  // time: a call not yet sent fails as not dispatched, and a sent call whose
+  // session was lost stops waiting for a replacement with an unknown outcome.
+  // Otherwise a sent call keeps its own deadline.
+  readonly dispatchDeadline?: number;
 }
 
 export interface AgentResourceScope {

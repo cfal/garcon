@@ -14,6 +14,7 @@ describe('TranscriptAdoptionService Revision 18 contract', () => {
     for (const legacyHistoryImport of [null, historyImport(async function* load() {})]) {
       let nativeCalls = 0;
       await withFixture({
+        entry: { agentSessionId: 'session-1' },
         legacyHistoryImport,
         nativeHistoryImport: historyImport(async function* load() {
           nativeCalls += 1;
@@ -26,9 +27,25 @@ describe('TranscriptAdoptionService Revision 18 contract', () => {
           contentStartOrdinal: 1,
         });
         expect(nativeCalls).toBe(0);
-        expect(ledger.currentRows('chat-1')).toEqual([]);
+        expect(ledger.currentRows('chat-1').map((row) => row.kind)).toEqual(['session']);
       });
     }
+  });
+
+  it('[TLV5-ADOPT.01-CORE-UNIT-02] adopts a chat that records no native session without consulting its legacy source', async () => {
+    let legacyCalls = 0;
+    await withFixture({
+      legacyHistoryImport: historyImport(async function* load() {
+        legacyCalls += 1;
+        throw new Error('A chat without a native session has no legacy source');
+      }),
+      nativeHistoryImport: forbiddenReloadImport(),
+      loadFrozenPrefix: async () => [],
+    }, async ({ adoption, ledger }) => {
+      await expect(adoption.ensure('chat-1')).resolves.toMatchObject({ status: 'current', contentStartOrdinal: 1 });
+      expect(legacyCalls).toBe(0);
+      expect(ledger.currentRows('chat-1')).toEqual([]);
+    });
   });
 
   it('[TLV5-ADOPT.02-CORE-UNIT-01] leaves no view after prefix failure and retries without blocking another chat', async () => {
@@ -36,6 +53,7 @@ describe('TranscriptAdoptionService Revision 18 contract', () => {
     const legacyCalls = [];
     await withFixture({
       chatIds: ['chat-1', 'chat-2'],
+      entry: { agentSessionId: 'session-1' },
       legacyHistoryImport: historyImport(async function* load({ chat }) {
         legacyCalls.push(chat.chatId);
       }),
@@ -62,6 +80,7 @@ describe('TranscriptAdoptionService Revision 18 contract', () => {
   it('[TLV5-ADOPT.02-CORE-UNIT-02] commits no partial view when legacy iteration fails and retries the source', async () => {
     let attempt = 0;
     await withFixture({
+      entry: { agentSessionId: 'session-1' },
       legacyHistoryImport: historyImport(async function* load() {
         attempt += 1;
         yield [{ message: new AssistantMessage(AT, `attempt-${attempt}`) }];

@@ -1166,6 +1166,7 @@ export default function createChatRoutes({
 
   async function patchExecutionSettings(
     body: ExecutionSettingsPatchRequest & Record<string, unknown>,
+    request: Request,
   ): Promise<Response> {
     try {
       const chatId = requireStringField(body, 'chatId');
@@ -1188,7 +1189,7 @@ export default function createChatRoutes({
       }
       const hasPatch = Object.keys(patch).length > 0;
       const updated = hasPatch
-        ? await agents.updateSessionSettings(chatId, patch, expectedEpoch)
+        ? await agents.updateSessionSettings(chatId, patch, expectedEpoch, request.signal)
         : chat;
       return Response.json({
         success: true,
@@ -1202,7 +1203,7 @@ export default function createChatRoutes({
     }
   }
 
-  async function patchModel(body: ModelPatchRequest & Record<string, unknown>): Promise<Response> {
+  async function patchModel(body: ModelPatchRequest & Record<string, unknown>, request: Request): Promise<Response> {
     try {
       const chatId = requireStringField(body, 'chatId');
       const expectedEpoch = body.expectedAgentOwnershipEpoch === undefined
@@ -1217,7 +1218,7 @@ export default function createChatRoutes({
       if (modelEndpointId !== undefined) patch.modelEndpointId = modelEndpointId;
       if (modelProtocol !== undefined)
         patch.modelProtocol = modelProtocol as AgentSessionSettingsPatch['modelProtocol'];
-      await agents.updateSessionSettings(chatId, patch, expectedEpoch);
+      await agents.updateSessionSettings(chatId, patch, expectedEpoch, request.signal);
       return Response.json({ success: true, chatId, ...patch });
     } catch (error: unknown) {
       return chatSettingsPatchErrorResponse(error);

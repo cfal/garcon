@@ -151,7 +151,7 @@ export class QueuedSteerDelivery {
 
   // The active turn's steering target, when that turn can take the chat's queued steers now.
   async #steerableTarget(chatId: string): Promise<CapturedSteerTarget | null> {
-    const target = await this.options.steerInput.captureTarget(chatId).catch(() => null);
+    const target = await this.options.steerInput.captureTarget(chatId, null).catch(() => null);
     if (!target?.providerTarget) return null;
     if (this.#refusingTurnIds.get(chatId) === target.identity.turnId) return null;
     return target;

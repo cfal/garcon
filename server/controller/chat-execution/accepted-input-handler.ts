@@ -105,7 +105,7 @@ export class AcceptedInputHandler {
             ? { excludedResendOrdinals: [...input.excludedResendOrdinals] }
             : {}),
         },
-      });
+      }, input.admissionDeadline);
       await input.settlement.settleQueueMutation(input.command, result.entryId);
       this.#coordinator.requestDrain(input.command.chatId, 'accepted enqueue');
       return result;
@@ -211,7 +211,7 @@ export class AcceptedInputHandler {
       assertDirectControlAvailable(control);
       await this.#checkpointAfter(
         reservation,
-        this.#projectAdmission.assertAvailable(input.command.chatId),
+        this.#projectAdmission.assertAvailable(input.command.chatId, input.admissionDeadline),
       );
       await this.#checkpointAfter(
         reservation,
@@ -576,7 +576,7 @@ export class AcceptedInputHandler {
         })));
       await this.#checkpointAfter(
         reservation,
-        this.#projectAdmission.assertAvailable(input.command.chatId),
+        this.#projectAdmission.assertAvailable(input.command.chatId, input.admissionDeadline),
       );
       const inserted = await this.#checkpointAfter(
         reservation,

@@ -14,6 +14,7 @@ import type {
   ServerControlOffer,
 } from '../chat-execution/types.js';
 import { waitAbortably } from '../../common/abortable-wait.js';
+import { interactiveDeadline } from '../../common/interactive-deadline.js';
 import { KeyedPromiseLock } from '../../common/keyed-lock.js';
 import { DomainError } from '../../common/domain-error.js';
 import type { TranscriptAdoptionService } from '../ledger/adoption.js';
@@ -39,6 +40,7 @@ export interface InterAgentMessageExecution {
     chatId: string,
     input: ServerControlInput,
     signal: AbortSignal,
+    deadline: number,
   ): Promise<ServerControlOffer>;
   queueServerControlInput(
     chatId: string,
@@ -178,8 +180,8 @@ export class InterAgentMessageController {
     }
 
     return this.#deliveries.runExclusive(targetChatId, async () => {
-      const offered = await this.#withTarget(input, sourceChatId, targetChatId, signal, (delivery) => (
-        this.#offer(input, targetChatId, delivery, signal)
+      const offered = await this.#withTarget(input, sourceChatId, targetChatId, signal, (delivery, deadline) => (
+        this.#offer(input, targetChatId, delivery, signal, deadline)
       ));
       if (!('turnSettled' in offered)) return offered;
       await waitAbortably(offered.turnSettled, signal);
@@ -194,8 +196,9 @@ export class InterAgentMessageController {
     targetChatId: ChatId,
     delivery: TargetDelivery,
     signal: AbortSignal,
+    deadline: number,
   ): Promise<InterAgentMessageResult | AfterTurn> {
-    const offer = await this.options.execution.offerServerControlInput(targetChatId, delivery.controlInput, signal);
+    const offer = await this.options.execution.offerServerControlInput(targetChatId, delivery.controlInput, signal, deadline);
     signal.throwIfAborted();
     if (offer.kind === 'after-turn') return offer;
     if (offer.kind === 'delivered') this.#appendReceipt(input, targetChatId, delivery);
@@ -214,14 +217,16 @@ export class InterAgentMessageController {
   }
 
   // Checks the target and adopts its current transcript under the target's
-  // mutation lock, then runs one delivery step addressed to that transcript.
+  // mutation lock, then runs one delivery step addressed to that transcript. The
+  // step's interactive deadline starts when it asks for the lock.
   #withTarget<T>(
     input: InterAgentMessageRequest,
     sourceChatId: ChatId,
     targetChatId: ChatId,
     signal: AbortSignal,
-    step: (delivery: TargetDelivery) => Promise<T>,
+    step: (delivery: TargetDelivery, deadline: number) => Promise<T>,
   ): Promise<T | InterAgentMessageResult> {
+    const deadline = interactiveDeadline();
     return this.options.chatMutationLock.runExclusive(`chat:${targetChatId}`, async () => {
       signal.throwIfAborted();
       if (!this.options.registry.getChat(targetChatId)) {
@@ -261,7 +266,7 @@ export class InterAgentMessageController {
           },
           receipt,
           viewId: view.viewId,
-        });
+        }, deadline);
       } catch (error) {
         signal.throwIfAborted();
         return this.#result(

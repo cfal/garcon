@@ -5,11 +5,27 @@ import {
   type AgentProducerBinding,
   type AgentProducerNotification,
   type AgentRunFailureDetail,
+  type ExecutorCallOptions,
 } from '@garcon/server-agent-interface';
 import type { TranscriptProducerLease } from '../ledger/service.js';
+import { waitAbortably } from '../../common/abortable-wait.js';
+import { reconnectTimedOut } from '../../common/executor-disconnect.js';
 import { retryAfterSessionLoss } from './session-loss-retry.js';
 
 export type LaunchSettledEvent = Extract<AgentProducerNotification['event'], { readonly type: 'launch-settled' }>;
+
+// A caller joining a registration already under way waits for it only within its
+// own dispatch deadline and signal; the registration itself continues.
+async function joinWithin<T>(registration: Promise<T>, options: ExecutorCallOptions): Promise<T> {
+  if (options.dispatchDeadline === undefined) return options.signal ? waitAbortably(registration, options.signal) : registration;
+  const expiry = new AbortController();
+  const timer = setTimeout(() => expiry.abort(reconnectTimedOut()), Math.max(0, options.dispatchDeadline - performance.now()));
+  try {
+    return await waitAbortably(registration, options.signal ? AbortSignal.any([options.signal, expiry.signal]) : expiry.signal);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export class ProducerBindings {
   readonly #leases = new WeakMap<TranscriptProducerLease, Promise<AgentProducerBinding>>();
@@ -32,17 +48,17 @@ export class ProducerBindings {
   ) {}
 
   async bind(
-    integration: AgentIntegration, chatId: string, lease: TranscriptProducerLease, signal?: AbortSignal,
+    integration: AgentIntegration, chatId: string, lease: TranscriptProducerLease, options: ExecutorCallOptions = {},
   ): Promise<AgentProducerBinding> {
     if (lease.closed) throw new Error('Producer closed during binding');
     const existing = this.#leases.get(lease);
     if (existing) {
-      const binding = await existing;
+      const binding = await joinWithin(existing, options);
       if (lease.closed) throw new Error('Producer closed during binding');
       return binding;
     }
     this.#subscribe(integration);
-    const registered = retryAfterSessionLoss(() => this.#register(integration, chatId, lease, signal), signal);
+    const registered = retryAfterSessionLoss(() => this.#register(integration, chatId, lease, options), options.signal);
     this.#leases.set(lease, registered);
     lease.onClosed(() => {
       this.#leases.delete(lease);
@@ -70,12 +86,12 @@ export class ProducerBindings {
   // Each attempt takes a fresh binding ID: a worker that received a binding whose
   // session was then lost keeps it until that session's grace ends.
   async #register(
-    integration: AgentIntegration, chatId: string, lease: TranscriptProducerLease, signal?: AbortSignal,
+    integration: AgentIntegration, chatId: string, lease: TranscriptProducerLease, options: ExecutorCallOptions,
   ): Promise<AgentProducerBinding> {
     const binding = createAgentResourceRef(integration.producers.scope, 'producer');
     this.#routes.set(binding.id, { chatId, lease, binding });
     try {
-      await integration.producers.bind({ binding, chatId }, { signal });
+      await integration.producers.bind({ binding, chatId }, options);
       return binding;
     } catch (error) {
       this.#routes.delete(binding.id);

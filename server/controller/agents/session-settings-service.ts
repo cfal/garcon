@@ -1,6 +1,7 @@
 import { normalizePermissionMode } from '../../../common/chat-modes.js';
 import type { PermissionMode, ThinkingMode } from '../../../common/chat-modes.js';
 import type { AgentSettingsEnvelope } from '../../../common/agent-integration.js';
+import type { ExecutorCallOptions } from '@garcon/server-agent-interface';
 import type { IChatRegistry } from '../chats/store.js';
 import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-resolver.js';
 import { assertSameApiProviderBoundary } from '../api-providers/endpoint-resolver.js';
@@ -13,6 +14,7 @@ import {
   normalizeSupportedThinkingMode,
 } from '../../../common/execution-defaults.js';
 import { DomainError } from '../../common/domain-error.js';
+import { interactiveDeadline, readBefore } from '../../common/interactive-deadline.js';
 
 export interface AgentConfigurationInput {
   readonly executorId?: string | null;
@@ -38,7 +40,7 @@ export class AgentSessionSettingsService {
     this.#lock = deps.chatMutationLock ?? new KeyedPromiseLock();
   }
 
-  async validateConfiguration(input: AgentConfigurationInput): Promise<void> {
+  async validateConfiguration(input: AgentConfigurationInput, options?: ExecutorCallOptions): Promise<void> {
     const integration = this.deps.directory.require(input.agentId, input.executorId);
     const selection = this.deps.endpointResolver.resolveSelection(input);
     if (!integration.configurationValidation) return;
@@ -51,14 +53,17 @@ export class AgentSessionSettingsService {
       ),
       settings: integration.settings.parse(input.agentSettings),
       endpoint: toAgentEndpointSelection(this.deps.endpointResolver, selection),
-    });
+    }, options);
   }
 
   updateSessionSettings(
     chatId: string,
     patch: AgentSessionSettingsPatch,
     expectedAgentOwnershipEpoch?: string,
+    signal?: AbortSignal,
   ): Promise<AgentChatEntry> {
+    // Starts before the lock, so a change queued behind another gives up in turn.
+    const deadline = interactiveDeadline();
     return this.#lock.runExclusive(`chat:${chatId}`, async () => {
       const entry = this.deps.registry.getChat(chatId);
       if (!entry) throw new Error(`Session not found: ${chatId}`);
@@ -85,7 +90,7 @@ export class AgentSessionSettingsService {
         if (!integration.endpoints) {
           throw new Error(`Agent integration ${entry.agentId} does not accept API provider endpoints`);
         }
-        await integration.endpoints.validate(endpoint);
+        await integration.endpoints.validate(endpoint, readBefore(deadline, signal));
       }
       assertSameApiProviderBoundary(previous, next);
 
@@ -121,7 +126,7 @@ export class AgentSessionSettingsService {
         settings,
         endpoint,
       };
-      await integration.configurationValidation?.validate(configuration);
+      await integration.configurationValidation?.validate(configuration, readBefore(deadline, signal));
       this.deps.endpointResolver.resolveEndpointReference(next);
       if (entry.agentSessionId && integration.sessionConfiguration) {
         await integration.sessionConfiguration.apply(
@@ -137,6 +142,7 @@ export class AgentSessionSettingsService {
             settings: currentSettings,
             endpoint: previous.endpoint ?? null,
           },
+          { dispatchDeadline: deadline },
         );
       }
 

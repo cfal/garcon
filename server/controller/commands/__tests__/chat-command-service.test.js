@@ -6,6 +6,7 @@ import { randomUUID } from 'crypto';
 import { AgentCallError, AgentIntegrationError } from '@garcon/server-agent-interface';
 
 import { ChatCommandService } from '../chat-command-service.ts';
+import { INTERACTIVE_EXECUTOR_WAIT_MS, SENT_READ_GRACE_MS } from '../../../common/interactive-deadline.ts';
 import { inspectProjectDirectory } from '../../__tests__/project-inspector.ts';
 import { projectAgentTurnReceipt } from '../agent-turn-receipt-projector.ts';
 import { CommandLedger, LEDGER_RECORD_LIMIT, commandLedgerKey } from '../command-ledger.ts';
@@ -1248,6 +1249,9 @@ describe('ChatCommandService', () => {
       }), new AbortController().signal);
       admitted.start();
       await f.queue.waitForDispatches();
+      // It dispatches after the requesting chat's lock is released, so it keeps
+      // waiting for a reconnecting executor within its own deadlines.
+      expect(providerOptions.dispatchDeadline).toBeUndefined();
       const phases = () => transcripts.currentRows(TARGET_CHAT_ID)
         .filter((row) => row.kind === 'notice' && row.detail.type === 'agent-start-progress')
         .map((row) => row.detail.phase);
@@ -1530,7 +1534,7 @@ describe('ChatCommandService', () => {
         code: 'VALIDATION_FAILED', status: 422, retryable: false,
       });
     }
-    expect(agents.validateConfiguration).toHaveBeenCalledWith(input);
+    expect(agents.validateConfiguration).toHaveBeenCalledWith(input, expect.objectContaining({ timeoutMs: expect.any(Number) }));
     expect(chats.addChat).not.toHaveBeenCalled();
     expect(agents.startSession).not.toHaveBeenCalled();
     expect(await readLedgerRecord(ledger, 'chat-start', input.clientRequestId, TARGET_CHAT_ID)).toBeNull();
@@ -2071,6 +2075,82 @@ describe('ChatCommandService', () => {
       .toBeLessThan(queue.failDirectTurn.mock.invocationCallOrder[0]);
     expect(chats.removeChat).toHaveBeenCalledWith(TARGET_CHAT_ID, 'start-compensation');
     expect(chats.getChat(TARGET_CHAT_ID)).toBeNull();
+  });
+
+  // A new chat start holds its chat lock through dispatch, so its executor checks,
+  // project admission, and the dispatch share one interactive deadline. A launch
+  // already sent is not cut off at it.
+  it('bounds a new chat start, dispatch included, by one interactive deadline', async () => {
+    let now = 1_000;
+    const clock = spyOn(performance, 'now').mockImplementation(() => now);
+    try {
+      const inspectProject = mock(async (projectPath) => {
+        now += 5_000;
+        return { kind: 'available', effectiveProjectKey: projectPath };
+      });
+      const { service, agents, queue } = makeService({ inspectProject });
+      await service.submitStart({
+        origin: 'interactive',
+        chatId: TARGET_CHAT_ID,
+        agentId: 'claude',
+        projectPath: projectBaseDir,
+        command: 'start within the deadline',
+        model: 'opus',
+        agentSettings: agentSettings(),
+        clientRequestId: 'req-start-deadline',
+        clientMessageId: 'msg-start-deadline',
+      });
+
+      const deadline = 1_000 + INTERACTIVE_EXECUTOR_WAIT_MS;
+      const read = { signal: undefined, dispatchDeadline: deadline, timeoutMs: INTERACTIVE_EXECUTOR_WAIT_MS + SENT_READ_GRACE_MS };
+      expect(agents.validateConfiguration.mock.calls[0][1]).toEqual(read);
+      expect(inspectProject.mock.calls[0][2]).toEqual(read);
+      expect(queue.runInitialInput.mock.calls[0][0].admissionDeadline).toBe(deadline);
+      expect(agents.startSession.mock.calls[0][2].dispatchDeadline).toBe(deadline);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  // A Stop queued behind several operations is then not held for a budget each.
+  it('hands an operation queued behind the chat lock the deadline it arrived with', async () => {
+    let now = 1_000;
+    const clock = spyOn(performance, 'now').mockImplementation(() => now);
+    try {
+      const startGate = deferred();
+      const startEntered = deferred();
+      const startSession = mock(async () => {
+        startEntered.resolve();
+        await startGate.promise;
+      });
+      const { service, queue } = makeService({ agents: { startSession } });
+      const starting = service.submitStart({
+        origin: 'interactive',
+        chatId: TARGET_CHAT_ID,
+        agentId: 'claude',
+        projectPath: projectBaseDir,
+        command: 'start before the queued entry',
+        model: 'opus',
+        agentSettings: agentSettings(),
+        clientRequestId: 'req-start-before-queue',
+        clientMessageId: 'msg-start-before-queue',
+      });
+      await startEntered.promise;
+      now = 10_000;
+      const queuing = service.submitQueueEntryCreate({
+        chatId: TARGET_CHAT_ID,
+        content: 'queued behind the start',
+        clientRequestId: 'req-queue-behind-start',
+      });
+      now = 50_000;
+      startGate.resolve();
+      await starting;
+      await queuing;
+
+      expect(queue.enqueueAccepted.mock.calls[0][0].admissionDeadline).toBe(10_000 + INTERACTIVE_EXECUTOR_WAIT_MS);
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it('keeps a compensated pre-schedule start failure reopenable', async () => {
@@ -4401,6 +4481,7 @@ describe('ChatCommandService', () => {
       permissionOccurrenceId: 'incarnation-1',
     };
 
+    const requested = performance.now();
     await service.submitPermissionDecision({
       chatId: SOURCE_CHAT_ID,
       permissionOccurrenceId: 'incarnation-1',
@@ -4411,11 +4492,15 @@ describe('ChatCommandService', () => {
       control,
     });
 
+    // The answer shares the deadline its request took when asking for the chat lock.
     expect(agents.resolvePermission).toHaveBeenCalledWith(SOURCE_CHAT_ID, 'incarnation-1', {
       allow: true,
       alwaysAllow: false,
       response,
-    }, control);
+    }, control, expect.any(Number));
+    const deadline = agents.resolvePermission.mock.calls[0][4];
+    expect(deadline).toBeGreaterThanOrEqual(requested + INTERACTIVE_EXECUTOR_WAIT_MS);
+    expect(deadline).toBeLessThanOrEqual(performance.now() + INTERACTIVE_EXECUTOR_WAIT_MS);
 
     const record = await readLedgerRecord(ledger, 'permission-decision', 'req-perm-1');
     expect(record).toMatchObject({ status: 'finished', payload: {} });
@@ -5163,6 +5248,8 @@ describe('ChatCommandService', () => {
     });
 
     expect(queue.captureSteerTarget).toHaveBeenCalledTimes(2);
+    // Capture starts the steer's interactive deadline, which its delivery shares.
+    expect(queue.captureSteerTarget).toHaveBeenCalledWith(SOURCE_CHAT_ID, expect.any(Number));
     expect(queue.deliverAcceptedSteer).toHaveBeenCalledTimes(1);
     expect(queue.readChatExecutionControl).not.toHaveBeenCalled();
     expect(queue.createChatQueueEntry).not.toHaveBeenCalled();
@@ -6004,6 +6091,9 @@ describe('ChatCommandService', () => {
     await expect(steering).resolves.toMatchObject({ status: 'accepted', turnId: 'turn-active' });
     await held;
     expect(queue.captureSteerTarget).toHaveBeenCalledTimes(2);
+    const deadline = queue.captureSteerTarget.mock.calls[0][1];
+    expect(deadline).toEqual(expect.any(Number));
+    expect(queue.captureSteerTarget.mock.calls[1][1]).toBe(deadline);
     expect(queue.deliverAcceptedSteer).toHaveBeenCalledWith(expect.objectContaining({
       target: steerableTarget,
     }));
@@ -6135,6 +6225,9 @@ describe('ChatCommandService', () => {
     await expect(steering).resolves.toMatchObject({ status: 'accepted', turnId: 'turn-active' });
     await held;
     expect(queue.captureSteerTarget).toHaveBeenCalledTimes(2);
+    const deadline = queue.captureSteerTarget.mock.calls[0][1];
+    expect(deadline).toEqual(expect.any(Number));
+    expect(queue.captureSteerTarget.mock.calls[1][1]).toBe(deadline);
     expect(queue.deliverAcceptedQueueEntrySteer).toHaveBeenCalledWith(expect.objectContaining({
       target: steerableTarget,
     }));

@@ -99,13 +99,14 @@ export interface AgentRegistryServiceContract {
   ): boolean;
   publishSessionFact(chatId: string, session: StartedAgentSession): void;
   resendCandidates(chatId: string): readonly import('../../../common/chat-view.js').ResendCandidate[];
-  captureSteerTarget(chatId: string): Promise<AgentSteerTarget | null>;
+  captureSteerTarget(chatId: string, deadline: number | null): Promise<AgentSteerTarget | null>;
   steerInput(
     chatId: string,
     input: string,
     options: AgentSteerOptions,
     target: AgentSteerTarget | null,
     prepareDelivery: () => Promise<void>,
+    deadline: number | null,
   ): Promise<AgentSteerResult>;
   getRunningSessions(): Record<string, Array<{ id: string; [key: string]: unknown }>>;
   getRunningChatIdsSnapshot(): string[];
@@ -147,6 +148,7 @@ export interface AgentRegistryServiceContract {
     permissionOccurrenceId: string,
     decision: PermissionDecisionPayload,
     control: ChatTransientControlAction,
+    deadline: number,
   ): Promise<void>;
   prepareProjectPathUpdate(
     agentId: string,
@@ -157,8 +159,10 @@ export interface AgentRegistryServiceContract {
     session: AgentChatEntry,
     chatId: string,
   ): Promise<AgentTranscriptSourceLocation | null>;
-  validateConfiguration(input: AgentConfigurationInput): Promise<void>;
-  updateSessionSettings(chatId: string, patch: AgentSessionSettingsPatch, expectedAgentOwnershipEpoch?: string): Promise<AgentChatEntry>;
+  validateConfiguration(input: AgentConfigurationInput, options?: ExecutorCallOptions): Promise<void>;
+  updateSessionSettings(
+    chatId: string, patch: AgentSessionSettingsPatch, expectedAgentOwnershipEpoch?: string, signal?: AbortSignal,
+  ): Promise<AgentChatEntry>;
 }
 
 interface StartSessionOptions {
@@ -174,6 +178,7 @@ interface StartSessionOptions {
   turnId?: string;
   commandType?: AgentExecutionCommandType;
   executionAdmission?: AgentExecutionAdmission;
+  dispatchDeadline?: number;
 }
 
 interface CompactSessionOptions {
@@ -336,8 +341,8 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   runAgentTurn(chatId: string, command: string, opts: RunAgentTurnOptions = {}): Promise<void> {
     return this.#runtime.runAgentTurn(chatId, command, opts);
   }
-  captureSteerTarget(chatId: string): Promise<AgentSteerTarget | null> {
-    return this.#runtime.captureSteerTarget(chatId);
+  captureSteerTarget(chatId: string, deadline: number | null): Promise<AgentSteerTarget | null> {
+    return this.#runtime.captureSteerTarget(chatId, deadline);
   }
   steerInput(
     chatId: string,
@@ -345,8 +350,9 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     options: AgentSteerOptions,
     target: AgentSteerTarget | null,
     prepareDelivery: () => Promise<void>,
+    deadline: number | null,
   ): Promise<AgentSteerResult> {
-    return this.#runtime.steerInput(chatId, input, options, target, prepareDelivery);
+    return this.#runtime.steerInput(chatId, input, options, target, prepareDelivery, deadline);
   }
   abortSession(chatId: string): Promise<boolean> { return this.#runtime.abortSession(chatId); }
 
@@ -369,8 +375,9 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     permissionOccurrenceId: string,
     decision: PermissionDecisionPayload,
     control: ChatTransientControlAction,
+    deadline: number,
   ): Promise<void> {
-    return this.#runtime.resolvePermission(chatId, permissionOccurrenceId, decision, control);
+    return this.#runtime.resolvePermission(chatId, permissionOccurrenceId, decision, control, deadline);
   }
   prepareProjectPathUpdate(
     agentId: string,
@@ -390,11 +397,11 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   discardForkedAgentSession(agentId: string, session: StartedAgentSession, executorId?: string | null): Promise<void> {
     return this.#runtime.discardForkedAgentSession(agentId, session, executorId);
   }
-  validateConfiguration(input: AgentConfigurationInput): Promise<void> {
-    return this.#settings.validateConfiguration(input);
+  validateConfiguration(input: AgentConfigurationInput, options?: ExecutorCallOptions): Promise<void> {
+    return this.#settings.validateConfiguration(input, options);
   }
-  updateSessionSettings(chatId: string, patch: AgentSessionSettingsPatch, expectedAgentOwnershipEpoch?: string) {
-    return this.#settings.updateSessionSettings(chatId, patch, expectedAgentOwnershipEpoch);
+  updateSessionSettings(chatId: string, patch: AgentSessionSettingsPatch, expectedAgentOwnershipEpoch?: string, signal?: AbortSignal) {
+    return this.#settings.updateSessionSettings(chatId, patch, expectedAgentOwnershipEpoch, signal);
   }
   runSingleQuery(prompt: string, options: RunSingleQueryOptions) {
     return this.#runtime.runSingleQuery(prompt, options);

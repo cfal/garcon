@@ -101,6 +101,7 @@ describe('delegated startup admission interleavings', () => {
           content: input.command, options: { commandType: 'chat-start', turnId: TURN,
             clientRequestId: input.clientRequestId, clientMessageId: input.clientMessageId },
           settlement: new ChatCommandSettlement(turns),
+          admissionDeadline: null,
           dispatch: async (admission) => {
             await gate.promise;
             admission.signal.throwIfAborted();

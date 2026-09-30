@@ -22,6 +22,7 @@ import { toClientChatExecutionControlState } from '../chat-execution/control-sta
 import type { StoredChatExecutionControlState } from '../chat-execution/control-state.ts';
 import type { AcceptedExecutionCommand, CapturedSteerTarget } from '../chat-execution/types.ts';
 import { KeyedPromiseLock } from '../../common/keyed-lock.ts';
+import { interactiveDeadline } from '../../common/interactive-deadline.ts';
 import { createLogger, type Logger } from '../../common/log.ts';
 import {
   SteerIdentityCapacityError,
@@ -61,7 +62,9 @@ export class SteerCommands {
     );
     const initialChat = this.deps.chats.getChat(input.chatId);
     const integrationId = initialChat?.agentId;
-    const observedTarget = initialChat ? await this.#captureBeforeLock(input.chatId) : null;
+    // The steer's interactive deadline starts here, before it asks for the chat lock.
+    const deadline = interactiveDeadline();
+    const observedTarget = initialChat ? await this.#captureBeforeLock(input.chatId, deadline) : null;
     const ledgerInput = {
       commandType: 'steer',
       chatId: input.chatId,
@@ -133,8 +136,8 @@ export class SteerCommands {
         let target: CapturedSteerTarget | null;
         try {
           target = queueWhenUnavailable
-            ? await this.#targetUnlessSteersQueued(input.chatId, observedTarget)
-            : await this.#currentTarget(input.chatId, observedTarget);
+            ? await this.#targetUnlessSteersQueued(input.chatId, observedTarget, deadline)
+            : await this.#currentTarget(input.chatId, observedTarget, deadline);
         } catch (error) {
           await this.support.settlement.settleSteerFailure(command, error);
           throw error;
@@ -231,7 +234,8 @@ export class SteerCommands {
       entry.id === entryId && entry.status === 'queued'
     ));
     const clientMessageId = observedEntry?.submission?.clientMessageId ?? entryId;
-    const observedTarget = initialChat ? await this.#captureBeforeLock(input.chatId) : null;
+    const deadline = interactiveDeadline();
+    const observedTarget = initialChat ? await this.#captureBeforeLock(input.chatId, deadline) : null;
     // The payload holds only request fields: a retry derives the client message ID from an
     // entry that delivery may have consumed, so including it could turn the retry into a
     // conflict once the record's payload is compacted away.
@@ -340,7 +344,7 @@ export class SteerCommands {
         }
         let target: CapturedSteerTarget | null;
         try {
-          target = await this.#queueableTarget(input.chatId, observedTarget);
+          target = await this.#queueableTarget(input.chatId, observedTarget, deadline);
         } catch (failure) {
           const error = queueSteerCaptureError(
             failure,
@@ -422,10 +426,11 @@ export class SteerCommands {
   async #targetUnlessSteersQueued(
     chatId: string,
     observed: CapturedSteerTarget | null,
+    deadline: number,
   ): Promise<CapturedSteerTarget | null> {
     const control = await this.deps.queue.readChatExecutionControl(chatId);
     if (!control.entries.some((entry) => entry.kind === 'steer')) {
-      return this.#queueableTarget(chatId, observed);
+      return this.#queueableTarget(chatId, observed, deadline);
     }
     this.#assertSteerable(chatId);
     return null;
@@ -436,10 +441,11 @@ export class SteerCommands {
   async #queueableTarget(
     chatId: string,
     observed: CapturedSteerTarget | null,
+    deadline: number,
   ): Promise<CapturedSteerTarget | null> {
     this.#assertSteerable(chatId);
     try {
-      return await this.#currentTarget(chatId, observed);
+      return await this.#currentTarget(chatId, observed, deadline);
     } catch (error) {
       if (error instanceof DomainError && error.code === 'OPERATION_UNSUPPORTED') throw error;
       return null;
@@ -485,9 +491,9 @@ export class SteerCommands {
 
   // Captures before the chat lock, so a steer does not hold the lock for the capture.
   // A failure is left to the capture under the lock to report.
-  async #captureBeforeLock(chatId: string): Promise<CapturedSteerTarget | null> {
+  async #captureBeforeLock(chatId: string, deadline: number): Promise<CapturedSteerTarget | null> {
     try {
-      return await this.deps.queue.captureSteerTarget(chatId);
+      return await this.deps.queue.captureSteerTarget(chatId, deadline);
     } catch {
       return null;
     }
@@ -500,11 +506,12 @@ export class SteerCommands {
   async #currentTarget(
     chatId: string,
     observed: CapturedSteerTarget | null,
+    deadline: number,
   ): Promise<CapturedSteerTarget | null> {
     if (observed?.providerTarget) return observed;
     let current: CapturedSteerTarget | null;
     try {
-      current = await this.deps.queue.captureSteerTarget(chatId);
+      current = await this.deps.queue.captureSteerTarget(chatId, deadline);
     } catch (error) {
       throw error instanceof DomainError ? error : new SteerDeliveryError(error, 'not-sent');
     }

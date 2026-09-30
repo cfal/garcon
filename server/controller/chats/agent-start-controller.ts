@@ -7,6 +7,7 @@ import type { ChatCommandService } from '../commands/chat-command-service.js';
 import { AgentStartCompensatedError } from '../commands/agent-start-compensated-error.js';
 import type { AgentCommandSource } from '../ledger/garcon-command-publication.js';
 import { DomainError } from '../../common/domain-error.js';
+import { interactiveDeadline } from '../../common/interactive-deadline.js';
 import { CommandValidationError } from '../lib/command-validation-error.js';
 import { StartProjectUnavailableError } from '../lib/command-project-path.js';
 import { AtomicJsonWriteError } from '../../common/json-file-store.js';
@@ -56,6 +57,7 @@ export class AgentStartController {
         const catalog = await this.options.selection.catalog(agentId, executorId).then(
           (value) => ({ value }), (error: unknown) => ({ error }),
         );
+        const deadline = interactiveDeadline();
         const result = await this.options.chatMutationLock.runExclusiveMany([`chat:${source.chatId}`, `chat:${allocated}`], async () => {
           if (!this.#replies.current(source, signal)) return null;
           const parent = this.options.registry.getChat(source.chatId)!;
@@ -89,7 +91,7 @@ export class AgentStartController {
                 projectPath: parent.projectPath,
                 ...(command.title === null ? {} : { title: command.title }),
                 ...(command.fork ? { transcriptSnapshot: { viewId: source.viewId, ordinal: source.requestOrdinal } } : {}),
-              }, signal);
+              }, signal, deadline);
               turnId = result.turnId;
               start = result.start;
               outcome = { status: 'accepted', chatId: allocated };

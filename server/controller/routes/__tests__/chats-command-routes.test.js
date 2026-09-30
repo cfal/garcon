@@ -1572,7 +1572,7 @@ describe('REST chat command routes', () => {
       allow: true,
       alwaysAllow: false,
       response: { outcome: { outcome: 'accepted' } },
-    }, decision.control);
+    }, decision.control, expect.any(Number));
   });
 
   it('POST /stop deduplicates pause-and-stop requests', async () => {
@@ -1644,6 +1644,7 @@ describe('REST chat command routes', () => {
         agentSettingsPatch: {},
       }),
       'source-epoch',
+      expect.any(AbortSignal),
     );
   });
 
@@ -1663,7 +1664,7 @@ describe('REST chat command routes', () => {
     expect(body.permissionMode).toBe('manualBypass');
     expect(agent.agents.updateSessionSettings).toHaveBeenCalledWith(CHAT_ID, {
       permissionMode: 'manualBypass',
-    }, undefined);
+    }, undefined, expect.any(AbortSignal));
   });
 
   it('PATCH /execution-settings returns 400 when chatId is missing', async () => {
@@ -1713,6 +1714,7 @@ describe('REST chat command routes', () => {
         modelEndpointId: 'endpoint',
       }),
       'source-epoch',
+      expect.any(AbortSignal),
     );
     expect(agent.registry.updateChat).toHaveBeenCalledWith(
       CHAT_ID,

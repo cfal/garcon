@@ -5,6 +5,7 @@ import { AgentResumePreparationError } from '../commands/agent-resume-preparatio
 import type { AgentCommandSource } from '../ledger/garcon-command-publication.js';
 import { CommandValidationError } from '../lib/command-validation-error.js';
 import { DomainError } from '../../common/domain-error.js';
+import { interactiveDeadline } from '../../common/interactive-deadline.js';
 import { isRecoverablePreambleAdmissionError } from '../preambles/selection.js';
 import { AgentChildTurnReplies, type AgentChildTurnReplyOptions } from './agent-child-turn-replies.js';
 import { isDirectDelegatedChild } from './agent-delegation.js';
@@ -24,6 +25,7 @@ export class AgentResumeController {
       if (signal.aborted) return null;
       const delegated = this.#delegated(source.chatId, command.chatId);
       const keys = delegated ? [source.chatId, command.chatId] : [source.chatId];
+      const deadline = interactiveDeadline();
       return this.options.chatMutationLock.runExclusiveMany(keys.map((id) => `chat:${id}`), async () => {
         if (!this.#replies.current(source, signal)) return null;
         let outcome: AgentChildAdmissionOutcome;
@@ -36,7 +38,7 @@ export class AgentResumeController {
             const result = await this.options.commands.submitAgentCommandResumeLocked({
               sourceChatId: source.chatId, sourceViewId: source.viewId, chatId: command.chatId,
               command: command.prompt, clientRequestId: crypto.randomUUID(), clientMessageId: crypto.randomUUID(),
-            }, signal);
+            }, signal, deadline);
             turnId = result.turnId;
             outcome = { status: 'accepted', chatId: command.chatId };
           } catch (error) {

@@ -15,7 +15,7 @@ import type { SessionTransport } from '../transport/session-transport.js';
 import type { WebSocketLink } from '../transport/websocket-link.js';
 import { failureReason } from '../transport/failure-reason.js';
 import { createLogger, type Logger } from '../../common/log.js';
-import { ExecutorSessionLostError } from '../../common/executor-disconnect.js';
+import { ExecutorSessionLostError, reconnectTimedOut } from '../../common/executor-disconnect.js';
 import { unavailableService } from '../../common/unavailable-service.js';
 import { MODEL_DISCOVERY_TIMEOUT_MS } from '../../common/provider-discovery.js';
 import { RemoteFilesService } from './remote-files.js';
@@ -38,6 +38,8 @@ export interface RemoteExecutorInventory {
 export interface HeldCallOptions {
   readonly signal?: AbortSignal;
   readonly timeoutMs?: number | null;
+  // Bounds only the wait; see `ExecutorCallOptions`.
+  readonly dispatchDeadline?: number;
   // Pins the call to one worker instance: a session of another instance fails it
   // as not dispatched. Cleanup belongs to the instance holding its resource. A
   // worker restart already fails waiting calls and forgets that instance's
@@ -65,7 +67,7 @@ export interface RemoteSessions {
   send<T>(options: HeldCallOptions | undefined, send: (session: HeldSession) => Promise<T>): Promise<T>;
   call<K extends keyof ExecutorRpcMethods>(
     integrationId: string, method: K, request: ExecutorRpcMethods[K]['request'],
-    options?: RpcCallOptions<ExecutorRpcMethods[K]['result']> & Pick<HeldCallOptions, 'instanceId'>,
+    options?: RpcCallOptions<ExecutorRpcMethods[K]['result']> & Pick<HeldCallOptions, 'dispatchDeadline' | 'instanceId'>,
   ): Promise<ExecutorRpcMethods[K]['result']>;
 }
 
@@ -351,10 +353,12 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
     if (this.#current?.rpc.transport.connected) return { backing: this.#current, timeoutMs };
     if (!this.#latest || !this.#holdsCalls()) throw new AgentCallError('not-dispatched', `Executor is ${this.#availability}`);
     if (options.signal?.aborted) throw heldCallCancelled();
-    if (timeoutMs === null) return { backing: await this.#nextSession(options.signal, null), timeoutMs };
+    const dispatchWaitMs = options.dispatchDeadline === undefined ? null : options.dispatchDeadline - performance.now();
+    if (dispatchWaitMs !== null && dispatchWaitMs <= 0) throw reconnectTimedOut();
+    if (timeoutMs === null) return { backing: await this.#nextSession(options.signal, dispatchWaitMs), timeoutMs };
     const reserved = Math.min(HELD_CALL_BUDGET_MS, Math.floor(timeoutMs / 2));
     const started = performance.now();
-    const backing = await this.#nextSession(options.signal, timeoutMs - reserved);
+    const backing = await this.#nextSession(options.signal, Math.min(timeoutMs - reserved, dispatchWaitMs ?? Infinity));
     return { backing, timeoutMs: Math.max(reserved, Math.ceil(timeoutMs - (performance.now() - started))) };
   }
 
@@ -407,8 +411,4 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
 
 function heldCallCancelled(): AgentCallError {
   return new AgentCallError('not-dispatched', 'The request was cancelled while the executor reconnected.');
-}
-
-function reconnectTimedOut(): AgentCallError {
-  return new AgentCallError('not-dispatched', 'The executor did not reconnect in time.');
 }

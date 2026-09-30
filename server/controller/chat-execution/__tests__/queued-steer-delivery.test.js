@@ -102,6 +102,8 @@ describe('QueuedSteerDelivery', () => {
     expect(control.entries[0].images).toEqual(images);
     expect(control.recentlyDispatched.map((entry) => entry.entryId)).toEqual(['steer-1', 'steer-2']);
     expect(f.requestDrain).toHaveBeenCalledWith(CHAT_ID, 'queued steer consumed');
+    expect(f.turnRunner.captureSteerTarget).toHaveBeenCalledWith(CHAT_ID, null);
+    expect(f.turnRunner.steerInput.mock.calls.map((call) => call[5])).toEqual([null, null]);
   });
 
   it('resolves file context for the steer it delivers', async () => {

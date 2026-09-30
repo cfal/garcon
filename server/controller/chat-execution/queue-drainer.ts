@@ -110,7 +110,7 @@ export class QueueDrainer {
       ) return;
       if (pending.entries.length > 0) {
         try {
-          await this.deps.projectAdmission.assertAvailable(chatId);
+          await this.deps.projectAdmission.assertAvailable(chatId, null);
         } catch (error) {
           if (!(error instanceof ProjectUnavailableError)) throw error;
           if (this.#shouldHalt(chatId)) return;

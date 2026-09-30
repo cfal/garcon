@@ -60,6 +60,8 @@ type ExecutorAvailability = 'ready' | 'reconnecting' | 'offline' | 'disposed';
 interface ExecutorCallOptions {
   readonly signal?: AbortSignal;
   readonly timeoutMs?: number;
+  // Bounds only the wait for a reconnecting executor (a performance.now() time).
+  readonly dispatchDeadline?: number;
 }
 
 interface ExecutionRuntimeApi {

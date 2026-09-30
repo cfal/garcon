@@ -142,6 +142,8 @@ export interface AcceptedDirectInput {
   settlement: CommandSettlementPort;
   preparation?: DirectInputPreparation;
   dispatch?: (admission: AgentExecutionAdmission) => Promise<void>; userMessagePresentation?: UserMessagePresentation;
+  // See ProjectAdmissionPort.assertAvailable.
+  admissionDeadline: number | null;
 }
 
 export type DirectInputScheduleOutcome = 'scheduled' | 'duplicate';
@@ -150,6 +152,8 @@ export interface AcceptedDirectOperation {
   command: AcceptedExecutionCommand;
   settlement: CommandSettlementPort;
   dispatch: (admission: AgentExecutionAdmission) => Promise<void>;
+  // See ProjectAdmissionPort.assertAvailable.
+  admissionDeadline: number | null;
 }
 
 export interface AcceptedQueueCreate {
@@ -160,6 +164,8 @@ export interface AcceptedQueueCreate {
   transcriptViewId: string;
   excludedResendOrdinals?: readonly number[];
   settlement: CommandSettlementPort;
+  // See ProjectAdmissionPort.assertAvailable.
+  admissionDeadline: number | null;
 }
 
 export interface AcceptedQueueReplace {
@@ -188,6 +194,9 @@ export interface CapturedSteerTarget {
   readonly attempt: QueueExecutionAttempt;
   readonly identity: Readonly<TurnIdentity> & { readonly turnId: string };
   readonly providerTarget: AgentSteerTarget | null;
+  // Capture and delivery answer one request, so they share its interactive
+  // deadline; null for background input, which holds no chat lock.
+  readonly deadline: number | null;
 }
 
 export type ServerControlInput = Omit<StoredControlInputEntry, 'id'>;
@@ -255,20 +264,24 @@ export interface TranscriptSnapshotReservation {
 
 export interface AgentTurnRunnerPort {
   runAgentTurn(chatId: string, command: string, options: RunAgentTurnOptions): Promise<void>;
-  captureSteerTarget(chatId: string): Promise<AgentSteerTarget | null>;
+  captureSteerTarget(chatId: string, deadline: number | null): Promise<AgentSteerTarget | null>;
   steerInput(
     chatId: string,
     input: string,
     options: AgentSteerOptions,
     target: AgentSteerTarget | null,
     prepareDelivery: () => Promise<void>,
+    deadline: number | null,
   ): Promise<AgentSteerResult>;
   abortSession(chatId: string): Promise<boolean>;
   isChatRunning(chatId: string): boolean;
 }
 
 export interface ProjectAdmissionPort {
-  assertAvailable(chatId: string): Promise<void>;
+  // Inspects the project within the interactive deadline of an operation holding
+  // a chat or queue-control lock; background work passes null and keeps the
+  // call's own deadline.
+  assertAvailable(chatId: string, deadline: number | null): Promise<void>;
 }
 
 // Checks queued attachments against the chat's current execution selection.
@@ -324,7 +337,7 @@ export interface ChatExecutionCommands {
   replaceAccepted(input: AcceptedQueueReplace): Promise<QueueCommandMutationResult>;
   deleteAccepted(input: AcceptedQueueDelete): Promise<QueueCommandMutationResult>;
   moveAccepted(input: AcceptedQueueMove): Promise<QueueCommandMutationResult>;
-  captureSteerTarget(chatId: string): Promise<CapturedSteerTarget | null>;
+  captureSteerTarget(chatId: string, deadline: number): Promise<CapturedSteerTarget | null>;
   deliverAcceptedSteer(input: AcceptedSteerInput): Promise<AcceptedSteerOutcome>;
   deliverAcceptedQueueEntrySteer(
     input: AcceptedQueueEntrySteer,

@@ -23,7 +23,12 @@ import type { AgentNativeSessionRef } from './transcript.js';
 import type { AgentProducerBinding, AgentResourceRef, ExecutorCallOptions } from './resources.js';
 
 export interface AgentCatalog {
-  snapshot(request: { readonly strict: boolean; readonly signal: AbortSignal }): Promise<{
+  snapshot(request: {
+    readonly strict: boolean;
+    readonly signal: AbortSignal;
+    readonly timeoutMs?: number;
+    readonly dispatchDeadline?: number;
+  }): Promise<{
     readonly models: readonly AgentModelOption[];
     readonly defaultModel: string;
     readonly requiresStrictModelDiscovery: boolean;

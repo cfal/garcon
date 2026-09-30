@@ -25,28 +25,28 @@ interface SteerInputDeliveryOptions {
 export class SteerInputDelivery {
   constructor(private readonly options: SteerInputDeliveryOptions) {}
 
-  async captureTarget(chatId: string): Promise<CapturedSteerTarget | null> {
-    const captured = this.#captureAttempt(chatId);
+  async captureTarget(chatId: string, deadline: number | null): Promise<CapturedSteerTarget | null> {
+    const captured = this.#captureAttempt(chatId, deadline);
     if (!captured) return null;
     return Object.freeze({
       ...captured,
-      providerTarget: await this.options.turnRunner.captureSteerTarget(chatId),
+      providerTarget: await this.options.turnRunner.captureSteerTarget(chatId, captured.deadline),
     });
   }
 
-  async captureControlTarget(chatId: string): Promise<CapturedSteerTarget | null> {
-    const captured = this.#captureAttempt(chatId);
+  async captureControlTarget(chatId: string, deadline: number | null): Promise<CapturedSteerTarget | null> {
+    const captured = this.#captureAttempt(chatId, deadline);
     if (!captured) return null;
     let providerTarget: CapturedSteerTarget['providerTarget'] = null;
     try {
-      providerTarget = await this.options.turnRunner.captureSteerTarget(chatId);
+      providerTarget = await this.options.turnRunner.captureSteerTarget(chatId, captured.deadline);
     } catch {
       // Capture cannot deliver input; fallback still waits for this exact attempt.
     }
     return Object.freeze({ ...captured, providerTarget });
   }
 
-  #captureAttempt(chatId: string): Omit<CapturedSteerTarget, 'providerTarget'> | null {
+  #captureAttempt(chatId: string, deadline: number | null): Omit<CapturedSteerTarget, 'providerTarget'> | null {
     const attempt = this.options.ownership.attempt(chatId);
     const identity = attempt?.identity();
     if (!attempt || attempt.isSettled || !identity?.turnId) return null;
@@ -54,6 +54,7 @@ export class SteerInputDelivery {
     return Object.freeze({
       attempt,
       identity: Object.freeze({ ...identity, turnId: identity.turnId }),
+      deadline,
     });
   }
 
@@ -118,6 +119,7 @@ export class SteerInputDelivery {
           this.#assertTarget(chatId, target);
           deliveryPrepared = true;
         },
+        target.deadline,
       );
       if (result.kind === 'accepted') {
         if (!deliveryPrepared) {

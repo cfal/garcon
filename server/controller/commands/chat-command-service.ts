@@ -76,12 +76,12 @@ export class ChatCommandService {
     return this.#start.submitScheduledStart(input);
   }
 
-  submitAgentCommandStartLocked(input: AgentCommandStartInput, signal: AbortSignal) {
-    return this.#start.submitAgentCommandStartLocked(input, signal);
+  submitAgentCommandStartLocked(input: AgentCommandStartInput, signal: AbortSignal, deadline: number) {
+    return this.#start.submitAgentCommandStartLocked(input, signal, deadline);
   }
 
-  submitAgentCommandResumeLocked(input: AgentCommandResumeInput, signal: AbortSignal) {
-    return this.#session.submitAgentCommandResumeLocked(input, signal);
+  submitAgentCommandResumeLocked(input: AgentCommandResumeInput, signal: AbortSignal, deadline: number) {
+    return this.#session.submitAgentCommandResumeLocked(input, signal, deadline);
   }
 
   submitAgentCommandStopLocked(input: AgentCommandStopInput, signal: AbortSignal) {

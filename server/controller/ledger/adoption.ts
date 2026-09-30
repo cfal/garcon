@@ -134,7 +134,9 @@ export class TranscriptAdoptionService {
     integration: AgentIntegration,
     signal: AbortSignal,
   ): Promise<readonly ImportedRow[]> {
-    if (!integration.legacyHistoryImport) return [];
+    // A chat that records no native session has no legacy history, so a new chat
+    // adopts without waiting on its executor under the caller's chat lock.
+    if (!integration.legacyHistoryImport || (!entry.agentSessionId && !entry.nativeSession)) return [];
     try {
       const rows: ImportedRow[] = [];
       const chat = toAgentChatReference(

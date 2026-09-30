@@ -131,3 +131,26 @@ test('reports a steerable run on its route without publishing it to the transcri
   expect(events).toEqual([]);
   lease.close();
 });
+
+// A capture under a chat's lock may join the run's own registration, which can
+// still be waiting for a reconnecting executor without an interactive deadline.
+test('a caller joining a registration under way waits only within its own deadline and signal', async () => {
+  const producer = createProducerFixture();
+  const registering = Promise.withResolvers();
+  const integration = { producers: { ...producer.producers, bind: () => registering.promise } };
+  const manager = new ProducerBindings(() => {}, () => {}, () => {}, () => {}, () => {});
+  const lease = new ProducerLease(() => {}, () => {});
+  const first = manager.bind(integration, 'chat-1', lease);
+
+  await expect(manager.bind(integration, 'chat-1', lease, { dispatchDeadline: performance.now() + 20 }))
+    .rejects.toMatchObject({ outcome: 'not-dispatched', message: 'The executor did not reconnect in time.' });
+  const stop = new AbortController();
+  const stopped = manager.bind(integration, 'chat-1', lease, { signal: stop.signal });
+  stop.abort(new Error('Synthetic stop'));
+  await expect(stopped).rejects.toThrow('Synthetic stop');
+
+  // The registration itself continues for its own caller.
+  registering.resolve();
+  await expect(first).resolves.toMatchObject({ kind: 'producer' });
+  lease.close();
+});

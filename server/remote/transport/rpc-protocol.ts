@@ -13,6 +13,7 @@ import type {
   AgentProducerNotification,
   AgentResourceRef,
   AgentResourceScope,
+  AgentSessionConfiguration,
   ExecutorInfo,
   ExecutionRuntimeApi,
   ExecutionProjectService,
@@ -103,7 +104,9 @@ export interface ExecutorRpcMethods extends FileRpcMethods, TerminalRpcMethods, 
   'nativeSessions.describeSource': Call<WithoutSignal<AgentHistoryImportRequest>, Result<'nativeSessions', 'describeSource'>>;
   'nativeSessions.release': Call<WithoutSignal<Request<'nativeSessions', 'release'>>, void>;
   'configurationValidation.validate': Call<Request<'configurationValidation', 'validate'>, void>;
-  'sessionConfiguration.apply': Call<{ readonly args: Parameters<Facet<'sessionConfiguration'>['apply']> }, void>;
+  'sessionConfiguration.apply': Call<{
+    readonly args: readonly [agentSessionId: string, configuration: AgentSessionConfiguration, previousConfiguration: AgentSessionConfiguration];
+  }, void>;
   'projectPathUpdates.prepare': Call<Request<'projectPathUpdates', 'prepare'>, Result<'projectPathUpdates', 'prepare'>>;
   'projectPathUpdates.commit': Call<Request<'projectPathUpdates', 'commit'>, void>;
   'projectPathUpdates.rollback': Call<Request<'projectPathUpdates', 'rollback'>, void>;

@@ -41,11 +41,11 @@ export class SelfHandoffCommands {
     }
     return this.support.withChatMutationLocks(
       [sourceChatId, chatId],
-      () => this.#submit({ ...input, sourceChatId, chatId }),
+      (deadline) => this.#submit({ ...input, sourceChatId, chatId }, deadline),
     );
   }
 
-  async #submit(input: SelfHandoffRunCommandRequest): Promise<ForkRunCommandResponse> {
+  async #submit(input: SelfHandoffRunCommandRequest, deadline: number): Promise<ForkRunCommandResponse> {
     const clientRequestId = this.support.requireClientRequestId(input.clientRequestId);
     const clientMessageId = this.support.requireClientRequestId(
       input.clientMessageId,
@@ -141,6 +141,7 @@ export class SelfHandoffCommands {
       },
       { clientRequestId, clientMessageId, turnId },
       'fork-run',
+      deadline,
       {
         operation: 'fork-run',
         prepare: async (context) => {

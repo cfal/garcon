@@ -1,5 +1,6 @@
-import { describe, expect, it, mock } from 'bun:test';
+import { describe, expect, it, mock, spyOn } from 'bun:test';
 import crypto from 'node:crypto';
+import { INTERACTIVE_EXECUTOR_WAIT_MS, SENT_READ_GRACE_MS } from '../../../common/interactive-deadline.ts';
 import { AgentHandoffService } from '../agent-handoff-service.ts';
 import { AgentDirectory } from '../directory.ts';
 import { IntegrationRegistry } from '../../../runtime/agents/integration-registry.ts';
@@ -161,12 +162,51 @@ describe('AgentHandoffService', () => {
       ...targetResolutionDeps(), inspectProject,
       integrations: { get: getIntegration, require: () => { throw new Error('Unexpected readiness recheck during resolution'); } },
     });
-    await expect(service.resolveTarget({ chat: current, handoff: request })).resolves.toMatchObject({
+    const deadline = performance.now() + 20_000;
+    await expect(service.resolveTarget({ chat: current, handoff: request, deadline })).resolves.toMatchObject({
       agentId: current.agentId, executorId, projectPath: '/destination/canonical',
     });
-    expect(inspectProject).toHaveBeenCalledWith('/destination/alias', executorId);
+    expect(inspectProject).toHaveBeenCalledWith('/destination/alias', executorId, expect.objectContaining({ dispatchDeadline: deadline }));
     expect(getIntegration).toHaveBeenCalledTimes(1);
     expect(current.agentSessionId).toBe('source-session');
+  });
+
+  it('bounds its executor checks by one interactive deadline', async () => {
+    let now = 1_000;
+    const clock = spyOn(performance, 'now').mockImplementation(() => now);
+    try {
+      const request = new AbortController();
+      const inspectProject = mock(async (projectPath) => { now += 5_000; return { kind: 'available', effectiveProjectKey: projectPath }; });
+      const getAgentCatalogEntry = mock(async () => {
+        now += 5_000;
+        return { supportedPermissionModes: ['default'], supportedThinkingModes: ['none'] };
+      });
+      const validate = mock(async () => {});
+      const deps = targetResolutionDeps();
+      const withEndpoints = (agentId) => ({ ...integration(agentId), endpoints: { validate } });
+      const service = createService({
+        ...deps, inspectProject, catalog: { getAgentCatalogEntry },
+        integrations: { get: withEndpoints, require: withEndpoints },
+        endpointResolver: {
+          ...deps.endpointResolver,
+          resolveSelection: ({ model }) => ({ model, apiProviderId: 'provider', endpointId: 'endpoint', protocol: 'openai-chat', isLocal: false }),
+          resolveEndpointReference: () => ({ apiProvider: { label: 'Provider', revision: 1 }, endpoint: { baseUrl: 'https://provider.test' } }),
+        },
+      });
+      const deadline = now + INTERACTIVE_EXECUTOR_WAIT_MS;
+      await service.resolveTarget({ chat: sourceChat(), handoff: handoff(), signal: request.signal, deadline });
+      expect([
+        inspectProject.mock.calls[0][2], getAgentCatalogEntry.mock.calls[0][1], validate.mock.calls[0][1],
+      ]).toEqual([
+        { signal: request.signal, dispatchDeadline: deadline, timeoutMs: INTERACTIVE_EXECUTOR_WAIT_MS + SENT_READ_GRACE_MS },
+        expect.objectContaining({
+          signal: request.signal, dispatchDeadline: deadline, timeoutMs: INTERACTIVE_EXECUTOR_WAIT_MS - 5_000 + SENT_READ_GRACE_MS,
+        }),
+        { signal: request.signal, dispatchDeadline: deadline, timeoutMs: INTERACTIVE_EXECUTOR_WAIT_MS - 10_000 + SENT_READ_GRACE_MS },
+      ]);
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it('fails destination validation without changing source ownership', async () => {

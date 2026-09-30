@@ -190,7 +190,8 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     ) => this.#steerInputDelivery.deliverControl(chatId, content, viewId, target);
     this.#controlSteerDelivery = new ControlSteerDelivery(deliverControlSteer);
     this.#controlInputDelivery = new ControlInputDelivery({
-      captureTarget: (chatId) => this.#steerInputDelivery.captureControlTarget(chatId),
+      // Chat ID disclosures hold no chat lock, so their steers keep their own deadlines.
+      captureTarget: (chatId) => this.#steerInputDelivery.captureControlTarget(chatId, null),
       deliverSteer: deliverControlSteer,
       scheduleRun: (chatId, content, viewId, onReserved) => (
         this.#scheduleControlRun(chatId, content, viewId, onReserved)
@@ -447,8 +448,8 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     await this.#acceptedInputHandler.scheduleOperation(input);
   }
 
-  captureSteerTarget(chatId: string): Promise<CapturedSteerTarget | null> {
-    return this.#steerInputDelivery.captureTarget(chatId);
+  captureSteerTarget(chatId: string, deadline: number): Promise<CapturedSteerTarget | null> {
+    return this.#steerInputDelivery.captureTarget(chatId, deadline);
   }
 
   async deliverControlInput(
@@ -464,12 +465,14 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     );
   }
 
+  // For callers that hold no chat lock, such as agent command replies, whose
+  // steers keep their own deadlines.
   async deliverServerControlInput(
     chatId: string,
     input: ServerControlInput,
     signal: AbortSignal,
   ): Promise<ServerControlDisposition> {
-    const offer = await this.offerServerControlInput(chatId, input, signal);
+    const offer = await this.offerServerControlInput(chatId, input, signal, null);
     if (offer.kind !== 'after-turn') return offer.kind;
     await waitAbortably(offer.turnSettled, signal);
     return this.queueServerControlInput(chatId, input, signal);
@@ -483,6 +486,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     chatId: string,
     input: ServerControlInput,
     signal: AbortSignal,
+    deadline: number | null,
   ): Promise<ServerControlOffer> {
     signal.throwIfAborted();
     if (this.#shuttingDown) throw serverShuttingDownError();
@@ -494,7 +498,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       return { kind: await this.queueServerControlInput(chatId, input, signal) };
     }
 
-    const target = await this.#steerInputDelivery.captureControlTarget(chatId);
+    const target = await this.#steerInputDelivery.captureControlTarget(chatId, deadline);
     if (!target) return { kind: await this.queueServerControlInput(chatId, input, signal) };
     const outcome = await this.#controlSteerDelivery.offerToCapturedTarget(
       chatId,
@@ -824,7 +828,8 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       if (hasPendingTurnInput(control) || control.pause) {
         throw controlInputBlockedError();
       }
-      await this.#projectAdmission.assertAvailable(chatId);
+      // Control runs start in the background, holding no chat lock.
+      await this.#projectAdmission.assertAvailable(chatId, null);
       this.#checkpointDirect(reservation);
       reservation.executionAdmission.signal.throwIfAborted();
       options = {

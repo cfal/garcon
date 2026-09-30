@@ -57,6 +57,8 @@ export async function prepareAgentHandoffCommand(input: {
     ChatExecutionCommands,
     'ownsExecution' | 'readChatExecutionControl'
   >;
+  // The interactive deadline of the run holding the chat's lock.
+  readonly deadline: number;
 }): Promise<{
   readonly target: ResolvedAgentHandoffTarget;
   readonly options: RunAgentTurnOptions;
@@ -66,6 +68,7 @@ export async function prepareAgentHandoffCommand(input: {
     chat: input.source,
     handoff: input.handoff,
     permissionFallbackPolicy: input.permissionFallbackPolicy,
+    deadline: input.deadline,
   });
   const control = await input.execution.readChatExecutionControl(input.chatId);
   assertAgentHandoffIdle(control, input.execution.ownsExecution(input.chatId));

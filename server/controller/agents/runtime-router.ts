@@ -61,6 +61,7 @@ import { operationIdentity, operationMetadata } from './turn-operation.js';
 import { ProducerBindings, type LaunchSettledEvent } from './producer-bindings.js';
 import { retryAfterSessionLoss } from './session-loss-retry.js';
 import { EXECUTOR_DISCONNECTED_BEFORE_START, EXECUTOR_DISCONNECTED_MID_TURN } from '../../common/executor-disconnect.js';
+import { readBefore } from '../../common/interactive-deadline.js';
 const logger = createLogger('agents:runtime-router');
 const EXECUTOR_OUTPUT_GAP_NOTICE = 'Some agent output could not be delivered from the executor. Reload from native history after this turn finishes to recover it.';
 
@@ -199,6 +200,7 @@ export class AgentRuntimeRouter {
     executionAdmission?: AgentExecutionAdmission;
     apiProviderId?: string | null;
     modelEndpointId?: string | null;
+    dispatchDeadline?: number;
   } = {}): Promise<void> {
     let runId: string | null = null;
     let executionInvoked = false;
@@ -217,7 +219,7 @@ export class AgentRuntimeRouter {
       const entry = requireAgentChatEntryWithModel(chatId, persistedEntry, opts.model);
       const integration = this.#directory.require(entry.agentId, entry.executorId);
       const selection = this.#resolveExecutionSelection(persistedEntry, entry, opts);
-      await this.#validateEndpoint(integration, selection, opts.executionAdmission?.signal);
+      await this.#validateEndpoint(integration, selection, opts.executionAdmission?.signal, opts.dispatchDeadline);
       const prepared = await this.#preparePrompt(chatId, prompt, opts);
       assertExecutionAdmissionOpen(opts);
       if (!prepared.dispatch) return;
@@ -247,9 +249,10 @@ export class AgentRuntimeRouter {
         this.#ledger.appendCarryoverNotice(chatId, prepared.viewId, carryover.notice);
       }
       opts.onContextPreparation?.('starting-agent');
+      const sending = { signal: opts.executionAdmission?.signal, dispatchDeadline: opts.dispatchDeadline };
       const request = {
         ...this.#executionContextV5(chatId, entry, selection, runId, opts),
-        producerBinding: await this.#bindings.bind(integration, chatId, producer, opts.executionAdmission?.signal),
+        producerBinding: await this.#bindings.bind(integration, chatId, producer, sending),
         prompt: prepared.outboundPrompt,
         attachments: prepared.attachments,
         carriedContext: carryover.context,
@@ -257,9 +260,7 @@ export class AgentRuntimeRouter {
       assertExecutionAdmissionOpen(opts);
       this.#endpointResolver.resolveEndpointReference(selection);
       executionInvoked = true;
-      const handle = await this.#launch(chatId, runId, () => integration.execution.start(request, {
-        signal: opts.executionAdmission?.signal,
-      }));
+      const handle = await this.#launch(chatId, runId, () => integration.execution.start(request, sending));
       if (handle) await this.#retainOrAbortHandle(chatId, entry.agentId, runId, handle);
       assertExecutionAdmissionOpen(opts);
       const updated = this.#registry.updateChat(chatId, {
@@ -307,7 +308,7 @@ export class AgentRuntimeRouter {
       runId = this.#beginRun(chatId, operation.turnId);
       const request = {
         ...this.#executionContextV5(chatId, entry, selection, runId, opts),
-        producerBinding: await this.#bindings.bind(integration, chatId, producer, opts.executionAdmission?.signal),
+        producerBinding: await this.#bindings.bind(integration, chatId, producer, { signal: opts.executionAdmission?.signal }),
         agentSessionId: entry.agentSessionId,
         nativeSession: entry.nativeSession ?? null,
         prompt: prepared.outboundPrompt,
@@ -333,6 +334,7 @@ export class AgentRuntimeRouter {
     options: AgentSteerOptions,
     target: AgentSteerTarget | null,
     prepareDelivery: () => Promise<void>,
+    deadline: number | null,
   ): Promise<AgentSteerResult> {
     const entry = requireAgentChatEntry(chatId, this.#registry.getChat(chatId));
     if (!entry.agentSessionId) {
@@ -354,12 +356,12 @@ export class AgentRuntimeRouter {
       target,
       input,
       clientMessageId: options.clientMessageId,
-    });
+    }, { dispatchDeadline: deadline ?? undefined });
   }
 
   // Returns null only when no turn can take steering input now, so callers can
   // tell a turn that is not ready yet from an agent that cannot be steered.
-  async captureSteerTarget(chatId: string): Promise<AgentSteerTarget | null> {
+  async captureSteerTarget(chatId: string, deadline: number | null): Promise<AgentSteerTarget | null> {
     const entry = this.#registry.getChat(chatId);
     if (!entry) return null;
     const integration = this.#directory.require(entry.agentId, entry.executorId);
@@ -368,14 +370,14 @@ export class AgentRuntimeRouter {
     if (!entry.agentSessionId) return null;
     const expectedRunId = this.#ledger.activeRunId(chatId);
     if (!expectedRunId) return null;
-    const producerBinding = await this.#bindings.bind(integration, chatId, this.#producer(chatId));
+    const producerBinding = await this.#bindings.bind(integration, chatId, this.#producer(chatId), { dispatchDeadline: deadline ?? undefined });
     return steering.captureTarget({
       chatId,
       agentSessionId: entry.agentSessionId,
       nativeSession: entry.nativeSession ?? null,
       producerBinding,
       expectedRunId,
-    });
+    }, readBefore(deadline ?? undefined));
   }
 
   async compactSession(chatId: string, opts: {
@@ -419,7 +421,7 @@ export class AgentRuntimeRouter {
       runId = this.#beginRun(chatId, operation.turnId);
       const request = {
         ...this.#executionContextV5(chatId, entry, selection, runId, opts),
-        producerBinding: await this.#bindings.bind(integration, chatId, producer, opts.executionAdmission?.signal),
+        producerBinding: await this.#bindings.bind(integration, chatId, producer, { signal: opts.executionAdmission?.signal }),
         agentSessionId: entry.agentSessionId,
         nativeSession: entry.nativeSession ?? null,
         prompt,
@@ -577,6 +579,7 @@ export class AgentRuntimeRouter {
     permissionOccurrenceId: string,
     decision: PermissionDecisionPayload,
     control: ChatTransientControlAction,
+    deadline: number,
   ): Promise<void> {
     if (!permissionOccurrenceId) throw new Error('Permission occurrence ID is required');
     if (
@@ -596,7 +599,7 @@ export class AgentRuntimeRouter {
       }
       await integration.permissions.respond({
         response: claim.decision.response, decision,
-      });
+      }, { dispatchDeadline: deadline });
     } catch (error) {
       if (error instanceof AgentCallError && error.outcome === 'not-dispatched') {
         this.#ledger.abandonPermissionResolution(claim);
@@ -785,6 +788,7 @@ export class AgentRuntimeRouter {
     integration: ReturnType<AgentDirectory['require']>,
     selection: ReturnType<ApiProviderEndpointResolver['resolveSelection']>,
     signal?: AbortSignal,
+    deadline?: number,
   ): Promise<void> {
     const endpoint = toAgentEndpointSelection(this.#endpointResolver, selection);
     if (!endpoint) return;
@@ -794,13 +798,13 @@ export class AgentRuntimeRouter {
         `Agent integration ${integration.descriptor.id} does not accept API provider endpoints`,
       );
     }
-    await retryAfterSessionLoss(() => endpoints.validate(endpoint, { signal }), signal);
+    await retryAfterSessionLoss(() => endpoints.validate(endpoint, readBefore(deadline, signal)), signal);
   }
 
   async #preparePrompt(
     chatId: string,
     fallbackPrompt: string,
-    opts: Pick<RunAgentTurnOptions, 'clientMessageId' | 'images' | 'executionAdmission'>,
+    opts: Pick<RunAgentTurnOptions, 'clientMessageId' | 'images' | 'executionAdmission'> & { readonly dispatchDeadline?: number },
   ): Promise<PreparedPrompt> {
     const composition = this.#ledger.takePreparedInput(chatId, opts.clientMessageId);
     if (composition && !composition.inserted) {
@@ -820,7 +824,7 @@ export class AgentRuntimeRouter {
     // The input is already taken, so only the resolution itself is repeated.
     const signal = opts.executionAdmission?.signal;
     const resolvedPrompt = await retryAfterSessionLoss(
-      () => this.#resolveFileMentions(prompt, entry.projectPath, entry.executorId, { signal }), signal,
+      () => this.#resolveFileMentions(prompt, entry.projectPath, entry.executorId, readBefore(opts.dispatchDeadline, signal)), signal,
     );
     return {
       dispatch: true,

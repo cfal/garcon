@@ -12,9 +12,10 @@ export async function resolveStartProjectPath(
   projectPath: string | undefined,
   inspect: ProjectInspector,
   executorId?: string | null,
+  options?: Parameters<ProjectInspector>[2],
 ): Promise<string> {
   const requestedPath = requiredProjectPath(projectPath);
-  const resolution = await inspect(requestedPath, executorId);
+  const resolution = await inspect(requestedPath, executorId, options);
   if (resolution.kind === 'unavailable') {
     throw new StartProjectUnavailableError(resolution.reason, startPathError(requestedPath, resolution.reason));
   }

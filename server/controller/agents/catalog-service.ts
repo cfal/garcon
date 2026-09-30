@@ -12,6 +12,9 @@ const logger = createLogger("agents:catalog-service");
 export interface AgentModelQuery {
   executorId?: string | null;
   strict?: boolean;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  dispatchDeadline?: number;
 }
 
 function dedupeModels(models: readonly AgentModelOption[]): AgentModelOption[] {
@@ -128,11 +131,13 @@ export class AgentCatalogService {
 
   async #snapshot(agentId: string, query: AgentModelQuery) {
     const integration = this.deps.directory.require(agentId, query.executorId);
-    const signal = new AbortController().signal;
+    const signal = query.signal ?? new AbortController().signal;
     try {
       const snapshot = await integration.catalog.snapshot({
         strict: query.strict ?? false,
         signal,
+        timeoutMs: query.timeoutMs,
+        dispatchDeadline: query.dispatchDeadline,
       });
       this.#requiresStrictByAgent.set(
         JSON.stringify([effectiveExecutorId(query.executorId), agentId]),

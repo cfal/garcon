@@ -57,14 +57,14 @@ export class SessionCommands {
   }
 
   async submitRun(input: SubmitRunInput): Promise<AgentTurnCommandResponse> {
-    return this.support.withChatMutationLock(input.chatId, () =>
-      this.submitRunLocked(input),
+    return this.support.withChatMutationLock(input.chatId, (deadline) =>
+      this.submitRunLocked(input, deadline),
     );
   }
 
   async submitAgentHandoff(input: AgentHandoffCommandRequest, signal: AbortSignal): Promise<AgentHandoffCommandResponse> {
     this.support.requireClientRequestId(input.clientRequestId);
-    return this.support.withChatMutationLock(input.chatId, async () => {
+    return this.support.withChatMutationLock(input.chatId, async (deadline) => {
       let reservation: TranscriptSnapshotReservation | undefined;
       try {
         signal.throwIfAborted();
@@ -73,7 +73,7 @@ export class SessionCommands {
         reservation = this.deps.queue.reserveTranscriptSnapshot(input.chatId);
         assertAgentHandoffIdle(await this.deps.queue.readChatExecutionControl(input.chatId), false);
         await this.deps.agents.currentTranscriptViewId(input.chatId, signal);
-        const target = await this.deps.handoffs.resolveTarget({ chat: source, handoff: input.handoff });
+        const target = await this.deps.handoffs.resolveTarget({ chat: source, handoff: input.handoff, signal, deadline });
         const preparation = this.deps.handoffs.createPreparation({
           chatId: input.chatId, clientRequestId: input.clientRequestId,
           handoff: input.handoff, source, target, command: null,
@@ -94,7 +94,10 @@ export class SessionCommands {
     });
   }
 
-  async submitAgentCommandResumeLocked(input: AgentCommandResumeInput, signal: AbortSignal): Promise<AgentTurnCommandResponse> {
+  // The caller holds the chats' locks and passes the deadline it took when asking for them.
+  async submitAgentCommandResumeLocked(
+    input: AgentCommandResumeInput, signal: AbortSignal, deadline: number,
+  ): Promise<AgentTurnCommandResponse> {
     signal.throwIfAborted();
     const child = this.deps.chats.getChat(input.chatId);
     if (!this.deps.chats.getChat(input.sourceChatId)
@@ -112,7 +115,7 @@ export class SessionCommands {
     return this.submitRunLocked({
       chatId: input.chatId, transcriptViewId, command: input.command, images: [],
       clientRequestId: input.clientRequestId, clientMessageId: input.clientMessageId,
-    });
+    }, deadline);
   }
 
   async submitAgentCommandStopLocked(input: AgentCommandStopInput, signal: AbortSignal): Promise<void> {
@@ -135,7 +138,7 @@ export class SessionCommands {
     }
   }
 
-  private async submitRunLocked(input: SubmitRunInput): Promise<AgentTurnCommandResponse> {
+  private async submitRunLocked(input: SubmitRunInput, deadline: number): Promise<AgentTurnCommandResponse> {
     await this.support.assertCurrentTranscriptView(input.chatId, input.transcriptViewId);
     const normalizedInput = {
       chatId: input.chatId,
@@ -157,7 +160,7 @@ export class SessionCommands {
       handoff: input.handoff,
       userMessagePresentation: input.userMessagePresentation,
     };
-    const replay = await this.support.replayHttpRun(normalizedInput);
+    const replay = await this.support.replayHttpRun(normalizedInput, deadline);
     if (replay) {
       return applyPostAdmissionChatTags(replay, input.chatId, input.tagsToAdd, this.deps.chatTags);
     }
@@ -186,6 +189,7 @@ export class SessionCommands {
         permissionFallbackPolicy: input.permissionFallbackPolicy,
         service: this.deps.handoffs,
         execution: this.deps.queue,
+        deadline,
       });
       this.support.assertAttachmentsSupported({
         ...handoffCommand.target, attachments: input.images ?? [],
@@ -198,6 +202,7 @@ export class SessionCommands {
       };
       const result = await this.support.submitHttpRun(
         normalizedInput,
+        deadline,
         handoffCommand.preparation,
       );
       return applyPostAdmissionChatTags(result, input.chatId, input.tagsToAdd, this.deps.chatTags);
@@ -252,7 +257,7 @@ export class SessionCommands {
       });
     }
 
-    const result = await this.support.submitHttpRun(normalizedInput);
+    const result = await this.support.submitHttpRun(normalizedInput, deadline);
     return applyPostAdmissionChatTags(result, input.chatId, input.tagsToAdd, this.deps.chatTags);
   }
 
@@ -265,11 +270,12 @@ export class SessionCommands {
   }
 
   async submitPermissionDecision(input: PermissionDecisionInput): Promise<CommandAcceptedResponse> {
-    return this.support.withChatMutationLock(input.chatId, () => this.submitPermissionDecisionLocked(input));
+    return this.support.withChatMutationLock(input.chatId, (deadline) => this.submitPermissionDecisionLocked(input, deadline));
   }
 
   private async submitPermissionDecisionLocked(
     input: PermissionDecisionInput,
+    deadline: number,
   ): Promise<CommandAcceptedResponse> {
     this.support.requireChat(input.chatId);
     const ledgerInput = {
@@ -306,7 +312,7 @@ export class SessionCommands {
         allow: input.allow,
         alwaysAllow: input.alwaysAllow,
         response: input.response,
-      }, input.control);
+      }, input.control, deadline);
       await this.deps.ledger.settleTerminal(ledger.record.key, 'finished');
     } catch (error) {
       const failureCode = permissionDecisionFailureCode(error);
@@ -374,7 +380,7 @@ export class SessionCommands {
 
   async submitCompact(input: CompactInput): Promise<CommandAcceptedResponse> {
     this.support.requireChat(input.chatId);
-    return this.support.withChatMutationLock(input.chatId, () => this.submitCompactLocked(input));
+    return this.support.withChatMutationLock(input.chatId, (deadline) => this.submitCompactLocked(input, deadline));
   }
 
   async updateProjectPath(input: UpdateProjectPathInput): Promise<ProjectPathPatchResponse> {
@@ -525,7 +531,7 @@ export class SessionCommands {
     }
   }
 
-  private async submitCompactLocked(input: CompactInput): Promise<CommandAcceptedResponse> {
+  private async submitCompactLocked(input: CompactInput, deadline: number): Promise<CommandAcceptedResponse> {
     // Compaction starts its own turn and cannot share its agent session with an active turn.
     const chat = this.deps.chats.getChat(input.chatId);
     if (chat?.agentSessionId && this.deps.agents.isAgentSessionRunning(chat.agentId, chat.agentSessionId, chat.executorId)) {
@@ -562,6 +568,7 @@ export class SessionCommands {
             turnId,
             executionAdmission,
           }),
+          admissionDeadline: deadline,
         });
       } catch (error) {
         throw await withCurrentExecutionControl({

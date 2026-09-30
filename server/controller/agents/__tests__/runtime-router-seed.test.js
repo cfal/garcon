@@ -1,5 +1,5 @@
 import { resolveFileMentionsInCommand } from "../../../runtime/projects/file-mentions.ts";
-import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -8,6 +8,7 @@ import { AssistantMessage, UserMessage } from '../../../../common/chat-types.js'
 import { renderCarriedContext } from '../../../../common/transcript-seed.js';
 import { AgentRuntimeRouter } from '../runtime-router.ts';
 import { DomainError } from '../../../common/domain-error.ts';
+import { INTERACTIVE_EXECUTOR_WAIT_MS, SENT_READ_GRACE_MS } from '../../../common/interactive-deadline.ts';
 import { createRuntimeTranscriptFixture } from './runtime-router-test-fixture.js';
 import { createProducerFixture } from './producer-fixture.ts';
 
@@ -76,6 +77,7 @@ function makeRouter(overrides = {}) {
       abort: overrides.abort ?? mock(async () => undefined),
     },
     steering: overrides.steering === undefined ? { captureTarget, steer } : overrides.steering,
+    endpoints: overrides.endpoints ?? null,
     settings: { defaults: () => settings, parse: (input) => input },
   };
   const registry = {
@@ -150,6 +152,42 @@ describe('AgentRuntimeRouter producer boundary', () => {
     });
     expect(observed).toEqual(['compacting-context', 'starting-agent']);
     expect(f.start).toHaveBeenCalledTimes(1);
+  });
+
+  // A new chat start holds its chat lock through dispatch: its read-only setup
+  // steps end at the start's deadline, and binding and launch wait for a
+  // reconnecting executor only until it.
+  it('bounds a start by its dispatch deadline', async () => {
+    let now = 1_000;
+    const clock = spyOn(performance, 'now').mockImplementation(() => now);
+    try {
+      const validate = mock(async () => { now += 5_000; });
+      const resolveFileMentions = mock(async (command) => command);
+      const f = makeRouter({
+        entry: { apiProviderId: 'provider-1', modelEndpointId: 'endpoint-1' },
+        endpoints: { validate },
+        resolveFileMentions,
+      });
+      f.endpointResolver.resolveEndpointReference.mockImplementation(() => ({
+        apiProvider: { label: 'Synthetic provider', revision: 1 },
+        endpoint: { baseUrl: 'https://provider.test' },
+      }));
+      const bind = spyOn(f.producer.producers, 'bind');
+      const dispatchDeadline = now + INTERACTIVE_EXECUTOR_WAIT_MS;
+
+      await f.router.startSession('chat-1', 'Synthetic task', { turnId: 'turn-deadline', dispatchDeadline });
+
+      expect(validate.mock.calls[0][1]).toEqual({
+        signal: undefined, dispatchDeadline, timeoutMs: INTERACTIVE_EXECUTOR_WAIT_MS + SENT_READ_GRACE_MS,
+      });
+      expect(resolveFileMentions.mock.calls[0][3]).toEqual({
+        signal: undefined, dispatchDeadline, timeoutMs: INTERACTIVE_EXECUTOR_WAIT_MS - 5_000 + SENT_READ_GRACE_MS,
+      });
+      expect(bind.mock.calls[0][1]).toEqual({ signal: undefined, dispatchDeadline });
+      expect(f.start.mock.calls[0][1]).toEqual({ signal: undefined, dispatchDeadline });
+    } finally {
+      clock.mockRestore();
+    }
   });
   beforeEach(async () => {
     projectDir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-runtime-router-'));
@@ -683,21 +721,23 @@ describe('AgentRuntimeRouter producer boundary', () => {
     transcript.ledger.openProducer('chat-1');
     transcript.ledger.beginRun('chat-1', 'turn-active');
     const prepareDelivery = mock(async () => undefined);
-    const target = await router.captureSteerTarget('chat-1');
+    const deadline = performance.now() + INTERACTIVE_EXECUTOR_WAIT_MS;
+    const target = await router.captureSteerTarget('chat-1', deadline);
 
     await expect(router.steerInput('chat-1', 'guidance', {
       clientRequestId: 'request-steer',
       clientMessageId: 'message-steer',
-    }, target, prepareDelivery)).resolves.toEqual({ kind: 'accepted' });
+    }, target, prepareDelivery, deadline)).resolves.toEqual({ kind: 'accepted' });
 
+    // Capture and delivery share the steering request's interactive deadline.
     expect(captureTarget).toHaveBeenCalledWith(expect.objectContaining({
       chatId: 'chat-1',
       agentSessionId: 'native-1',
-    }));
+    }), expect.objectContaining({ dispatchDeadline: deadline }));
     expect(steer).toHaveBeenCalledWith(expect.objectContaining({
       target: providerTarget,
       input: 'guidance',
-    }));
+    }), { dispatchDeadline: deadline });
     expect(prepareDelivery).toHaveBeenCalledTimes(1);
     expect(events.getActiveTurn()).toEqual(activeTurn);
   });

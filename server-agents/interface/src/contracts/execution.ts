@@ -40,7 +40,7 @@ export interface AgentRunningSession {
 
 export interface AgentConfigurationValidation {
   // Runs without a native session and must not mutate provider or persisted state.
-  validate(configuration: AgentSessionConfiguration): Promise<void>;
+  validate(configuration: AgentSessionConfiguration, options?: ExecutorCallOptions): Promise<void>;
 }
 
 export interface AgentSessionConfigurationUpdates {
@@ -48,6 +48,7 @@ export interface AgentSessionConfigurationUpdates {
     agentSessionId: string,
     configuration: AgentSessionConfiguration,
     previousConfiguration: AgentSessionConfiguration,
+    options?: ExecutorCallOptions,
   ): Promise<void>;
 }
 

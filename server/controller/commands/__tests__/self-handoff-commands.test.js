@@ -84,7 +84,7 @@ function harness({ source = sourceChat() } = {}) {
     assertAttachmentsSupported: mock(async () => undefined),
     throwRecordedExecutionFailure: mock(() => undefined),
     projectCommandChat: mock(async (id) => ({ id })),
-    scheduleAcceptedHttpRun: mock(async (_ledger, input, _ids, commandType, preparation) => {
+    scheduleAcceptedHttpRun: mock(async (_ledger, input, _ids, commandType, _admissionDeadline, preparation) => {
       scheduled.push({ input, commandType });
       try {
         await preparation.prepare({ signal: AbortSignal.timeout(5_000) });

@@ -81,6 +81,7 @@ export class ChatExecutionControlOperations {
       command?: QueueCommandIdentity;
       submission?: StoredQueueSubmissionIdentity;
     },
+    admissionDeadline: number | null = null,
   ): Promise<QueueCommandMutationResult & { entry: QueueEntry | null }> {
     return this.host.runExclusive(chatId, async () => {
       const current = await this.#load(chatId);
@@ -90,7 +91,7 @@ export class ChatExecutionControlOperations {
         this.#transitionContext(chatId),
       );
       if (transition.outcome.status === 'ok' && !transition.outcome.value.duplicate) {
-        await this.projectAdmission.assertAvailable(chatId);
+        await this.projectAdmission.assertAvailable(chatId, admissionDeadline);
         if (input.images.length > 0) {
           this.attachmentAdmission.assertSupported(chatId, input.images);
         }

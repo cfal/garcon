@@ -2,6 +2,7 @@ import { describe, expect, mock, test } from 'bun:test';
 import { AgentCallError } from '@garcon/server-agent-interface';
 import { AcceptedInputHandler } from '../accepted-input-handler.ts';
 import { DomainError, ProjectUnavailableError, SteerDeliveryError } from '../../../common/domain-error.js';
+import { reconnectTimedOut } from '../../../common/executor-disconnect.js';
 import { QueueEntrySteerError } from '../queue-steer-error.js';
 
 function command(overrides = {}) {
@@ -503,6 +504,8 @@ describe('AcceptedInputHandler', () => {
   test.each([
     ['ordinary failure', new Error('provider failed'), ['compensated', 'settled', 'released']],
     ['setup failure', new AgentCallError('not-dispatched', 'setup reply lost'), ['compensated', 'settled', 'released']],
+    // A start holding its chat's lock stops waiting for a reconnecting executor.
+    ['missed dispatch deadline', reconnectTimedOut(), ['compensated', 'settled', 'released']],
     ['uncertain launch', new AgentCallError('unknown', 'execution reply lost'), ['settled', 'released']],
   ])('finishes initial-input settlement before release after %s', async (_name, providerError, expected) => {
     const events = [];
