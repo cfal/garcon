@@ -567,3 +567,22 @@ test('counts an encrypted message that never completes as a liveness timeout', a
     expect(await closure.promise).toEqual({ cause: 'liveness-timeout', count: 1, reason: 'Encrypted connection failed (MESSAGE_TIMEOUT)' });
   } finally { worker.close(); await link.dispose(); await listener.stop(); }
 });
+
+test('reports a lost connection while its session is current, before its closure', async () => {
+  const link = new WebSocketLink({ role: 'controller', executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true });
+  const events = [];
+  link.onError(failure => events.push({ failure: failure.message, reason: failure.reason, sessionCurrent: link.current !== null }));
+  link.onClosure(closure => events.push({ closure: closure.cause }));
+  const worker = workerOutsideSessionLayer(link.listen());
+  try {
+    await link.ready;
+    // Session packets travel in binary frames, so a text frame breaks the session.
+    worker.send('synthetic text frame');
+    await eventually(() => events.length === 2);
+
+    expect(events).toEqual([
+      { failure: 'Executor connection lost', reason: 'Session packets require binary framing', sessionCurrent: true },
+      { closure: 'protocol-error' },
+    ]);
+  } finally { worker.close(); await link.dispose(); }
+});

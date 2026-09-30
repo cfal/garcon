@@ -350,9 +350,10 @@ export class WebSocketLink {
       const reason = failureReason(error);
       connection.closeCause ??= 'protocol-error';
       connection.closeReason ??= reason;
-      if (error instanceof MessageContinuityError) connection.session?.close(error);
+      // Reported while the session is still current, so listeners learn of the loss before its closure.
       if (connection.authenticated) this.#reportFailure('connection-lost', 'Executor connection lost', reason);
       else this.#reportFailure('authentication-failed', 'Executor authentication failed', reason);
+      if (error instanceof MessageContinuityError) connection.session?.close(error);
       this.#close(connection, 'protocol-error');
     }
   }

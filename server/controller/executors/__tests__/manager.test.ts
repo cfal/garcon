@@ -16,6 +16,7 @@ import { PrimarySocketDelivery } from '../../ws/primary-delivery.js';
 import { WebSocketAdmissionController } from '../../../common/websocket-capacity.js';
 import { ControllerCliDispatcher, type CliDispatchAccess } from '../cli-dispatcher.js';
 import { connectWithWrongKey, sendMalformedRecord } from '../../../remote/__tests__/failing-peers.js';
+import { tcpLinkProxy } from '../../../remote/__tests__/tcp-link-proxy.js';
 import type { Logger } from '../../../common/log.js';
 
 const cleanups: (() => Promise<unknown>)[] = [];
@@ -228,6 +229,8 @@ test('connector replacement retains provider checks but accepts a new project ba
   incompatible.dial(url(config.id));
   await rejected.promise;
   off();
+  // Setup closes the session after reporting why, and the closure keeps that report.
+  expect(manager.list().find((item) => item.id === config.id)?.lastError?.message).not.toContain('Executor connection lost');
   expect(manager.list().find((item) => item.id === config.id)).toMatchObject({
     projectBasePath: root, instanceId: accepted.instanceId, availability: 'offline',
     lastError: { message: expect.stringContaining('provider inventory changed') },
@@ -432,6 +435,82 @@ test('logs each closed executor session with its cause and reason', async () => 
   await closed.promise;
 
   expect(closures).toEqual([{ executorId: config.id, cause: 'session-retired', count: 1, reason: 'Synthetic session retirement' }]);
+});
+
+test('logs failed connections alongside a ready executor without showing them as its error', async () => {
+  const warnings: unknown[][] = [];
+  const { manager, root } = await fixture({ debug() {}, info() {}, warn: (...args) => { warnings.push(args); }, error() {} });
+  const config = await manager.create({ label: 'Connected', direction: 'executor-connects' });
+  const { url } = sharedListener(manager);
+  const ready = waitReady(manager, config.id);
+  worker(config.secret, root).dial(url(config.id));
+  await ready;
+  let changes = 0;
+  manager.onChanged(() => { changes++; });
+  await connectWithWrongKey(url(config.id));
+  await sendMalformedRecord(url(config.id));
+
+  expect(warnings.filter(([message]) => message === 'Executor link failed')).toHaveLength(2);
+  expect(manager.list().find((item) => item.id === config.id)).toMatchObject({ availability: 'ready', lastError: null });
+  expect(changes).toBe(0);
+});
+
+test('keeps a connection failure off an executor whose disruptive update fails to persist', async () => {
+  const { manager, root } = await fixture();
+  const config = await manager.create({ label: 'Retained', direction: 'executor-connects' });
+  const { url } = sharedListener(manager);
+  const ready = waitReady(manager, config.id);
+  worker(config.secret, root).dial(url(config.id));
+  await ready;
+  // Admitted before the update stops the link from accepting sockets.
+  const pending = await pendingSocket(url(config.id));
+  const entered = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const write = spyOn(manager.config, 'update').mockImplementation(async (id, _request, assertUpdateAllowed) => {
+    const previous = manager.config.require(id);
+    assertUpdateAllowed?.(previous, { ...previous, enabled: false });
+    entered.resolve();
+    await release.promise;
+    throw new Error('Synthetic write failure');
+  });
+  try {
+    const mutation = manager.update(config.id, { enabled: false }).catch((error: unknown) => error);
+    await entered.promise;
+    pending.socket.send(new Uint8Array(8));
+    await pending.closed;
+    release.resolve();
+    expect(await mutation).toBeInstanceOf(Error);
+
+    expect(manager.list().find((item) => item.id === config.id)).toMatchObject({ availability: 'ready', lastError: null });
+  } finally {
+    release.resolve();
+    write.mockRestore();
+  }
+});
+
+test('shows why a ready executor lost its own session', async () => {
+  const { manager, root } = await fixture();
+  const config = await manager.create({ label: 'Tunneled', direction: 'executor-connects' });
+  const { url } = sharedListener(manager);
+  const path = await tcpLinkProxy(new URL(url(config.id)));
+  cleanups.push(() => path.close());
+  const ready = waitReady(manager, config.id);
+  worker(config.secret, root).dial(path.url);
+  await ready;
+  const reconnecting = new Promise<void>((resolve) => {
+    const off = manager.onAvailabilityChanged((executorId, value) => {
+      if (executorId === config.id && value === 'reconnecting') { off(); resolve(); }
+    });
+  });
+  // A tunnel drop: no WebSocket close and no encrypted close record, and no redial gets through.
+  path.refuseConnections();
+  path.disconnect();
+  await reconnecting;
+
+  expect(manager.list().find((item) => item.id === config.id)).toMatchObject({
+    availability: 'reconnecting',
+    lastError: { code: 'EXECUTOR_UNAVAILABLE', message: 'Executor connection lost: Encrypted connection failed (TRANSPORT_CLOSED)' },
+  });
 });
 
 test('publishes an executor error only when it changes', async () => {
