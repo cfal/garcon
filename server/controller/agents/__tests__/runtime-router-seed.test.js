@@ -155,8 +155,8 @@ describe('AgentRuntimeRouter producer boundary', () => {
   });
 
   // A new chat start holds its chat lock through dispatch: its read-only setup
-  // steps end at the start's deadline, and binding and launch wait for a
-  // reconnecting executor only until it.
+  // steps wait for a reconnecting executor until the start's deadline and end by
+  // 5 s past it, and binding and launch wait only until it.
   it('bounds a start by its dispatch deadline', async () => {
     let now = 1_000;
     const clock = spyOn(performance, 'now').mockImplementation(() => now);

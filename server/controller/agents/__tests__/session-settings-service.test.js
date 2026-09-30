@@ -234,8 +234,8 @@ describe('AgentSessionSettingsService', () => {
   });
 
   // Holding the chat lock, the update waits for a reconnecting executor within one
-  // deadline: validation is cut off at it, and the live update may wait until it to
-  // be sent but then keeps its own deadline.
+  // deadline: validation waits until it and ends by 5 s past it, and the live
+  // update may wait until it to be sent but then keeps its own deadline.
   it('bounds its executor calls by one interactive deadline', async () => {
     let now = 1_000;
     const clock = spyOn(performance, 'now').mockImplementation(() => now);
