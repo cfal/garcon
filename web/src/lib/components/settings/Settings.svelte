@@ -2,7 +2,9 @@
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import * as Tabs from '$lib/components/ui/tabs';
 	import * as m from '$lib/paraglide/messages.js';
+	import { untrack } from 'svelte';
 	import { getAppShell, getRemoteSettings, getExecutors } from '$lib/context';
+	import { isServerSettingsTab } from '$lib/stores/app-shell.svelte';
 	import Network from '@lucide/svelte/icons/network';
 	import KeyRound from '@lucide/svelte/icons/key-round';
 	import Bot from '@lucide/svelte/icons/bot';
@@ -30,6 +32,7 @@
 	// App tabs are stored in this browser; server tabs are shared by every client.
 	const tabGroups = $derived([
 		{
+			id: 'app',
 			label: m.settings_group_app(),
 			tabs: [
 				{ value: 'interface', label: m.settings_tab_interface(), icon: Palette },
@@ -37,6 +40,7 @@
 			],
 		},
 		{
+			id: 'server',
 			label: m.settings_group_server(),
 			tabs: [
 				{ value: 'providers', label: m.settings_tab_providers(), icon: KeyRound },
@@ -50,10 +54,16 @@
 		},
 	]);
 
+	// Browser-local tabs need no server data, so refresh once per open on the first server tab.
+	let serverDataRefreshed = false;
 	$effect(() => {
-		if (!appShell.showSettings) return;
-		void remoteSettings.refreshInBackground();
-		void executors.refresh();
+		if (!appShell.showSettings || serverDataRefreshed) return;
+		if (!isServerSettingsTab(appShell.settingsTab)) return;
+		serverDataRefreshed = true;
+		untrack(() => {
+			void remoteSettings.refreshInBackground();
+			void executors.refresh();
+		});
 	});
 
 	function handleOpenChange(open: boolean) {
@@ -88,11 +98,12 @@
 				aria-label={m.settings_title()}
 				class="h-full w-14 shrink-0 flex-col items-stretch justify-start gap-1 overflow-y-auto rounded-none border-r border-border bg-muted/30 p-1.5 sm:w-48 sm:p-3"
 			>
-				{#each tabGroups as group, index (group.label)}
+				{#each tabGroups as group, index (group.id)}
 					{#if index > 0}
 						<div aria-hidden="true" class="mx-1 my-1 border-t border-border sm:hidden"></div>
 					{/if}
 					<div
+						id="settings-tab-group-{group.id}"
 						aria-hidden="true"
 						class="hidden px-2 pb-1 text-xs font-medium text-muted-foreground sm:block {index > 0
 							? 'pt-3'
@@ -104,6 +115,7 @@
 						<Tabs.Trigger
 							value={tab.value}
 							aria-label={tab.label}
+							aria-describedby="settings-tab-group-{group.id}"
 							title={tab.label}
 							class="h-auto min-h-10 flex-none px-2 py-2 sm:justify-start sm:gap-2 sm:whitespace-normal sm:text-left"
 						>

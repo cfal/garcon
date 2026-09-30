@@ -3,9 +3,11 @@
 import { untrack } from 'svelte';
 import { createActionSignal } from '$lib/utils/action-signal';
 
+// App tabs are stored in this browser; every other tab is server-owned.
+const APP_SETTINGS_TABS = ['interface', 'shortcuts'] as const;
+
 export const SETTINGS_TABS = [
-	'interface',
-	'shortcuts',
+	...APP_SETTINGS_TABS,
 	'providers',
 	'other-agents',
 	'general',
@@ -15,6 +17,10 @@ export const SETTINGS_TABS = [
 	'executors',
 ] as const;
 export type SettingsTab = (typeof SETTINGS_TABS)[number];
+
+export function isServerSettingsTab(tab: SettingsTab): boolean {
+	return !(APP_SETTINGS_TABS as readonly string[]).includes(tab);
+}
 
 function normalizeSettingsTab(value: string): SettingsTab {
 	return (SETTINGS_TABS as readonly string[]).includes(value)

@@ -296,11 +296,9 @@ export class WorkbenchCommandRegistry {
 				run: async ({ viewId }) => {
 					const session = viewId ? this.deps.files.get(viewId) : null;
 					if (!session) return;
-					if (!session.document.executorAvailable)
-						throw new Error(m.file_command_executor_unavailable());
+					if (!session.document.executorAvailable) throw new Error(m.file_command_executor_unavailable());
 					await this.deps.workspace.openSingleton('files');
-					if (!session.document.executorAvailable)
-						throw new Error(m.file_command_executor_unavailable());
+					if (!session.document.executorAvailable) throw new Error(m.file_command_executor_unavailable());
 					this.deps
 						.filesSurface()
 						.revealFile(session.canonicalFileRootPath, session.relativePath, session.executorId);
@@ -391,8 +389,7 @@ export class WorkbenchCommandRegistry {
 				isVisible: () =>
 					!this.deps.terminals.hasRemoteHosts &&
 					this.deps.terminals.canCreate(this.deps.workspace.terminalCreationExecutorId),
-				isEnabled: () =>
-					this.deps.terminals.canCreate(this.deps.workspace.terminalCreationExecutorId),
+				isEnabled: () => this.deps.terminals.canCreate(this.deps.workspace.terminalCreationExecutorId),
 				run: () => this.deps.workspace.createTerminalInAvailableSpace('command-menu:new-terminal'),
 			},
 			open('workspace-git', m.command_switch_to_git(), 'git'),

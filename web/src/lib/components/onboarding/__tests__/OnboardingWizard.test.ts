@@ -31,6 +31,9 @@ describe('OnboardingWizard', () => {
 		await screen.findByRole('heading', { name: 'Chat display' });
 		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 		await screen.findByRole('heading', { name: "You're all set" });
+		expect(
+			screen.getByText('Your preferences are saved. Adjust them anytime in Settings > Interface.'),
+		).toBeTruthy();
 	}
 
 	it('advances through the pages and moves focus to each page heading', async () => {

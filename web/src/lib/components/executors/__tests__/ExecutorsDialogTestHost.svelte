@@ -15,12 +15,7 @@
 
 <button onclick={() => shell.openSettings()}>Open executors</button>
 {#if shell.showSettings}
-	<Dialog.Root
-		open={shell.showSettings}
-		onOpenChange={(open) => {
-			if (!open) shell.closeSettings();
-		}}
-	>
+	<Dialog.Root open={shell.showSettings} onOpenChange={(open) => { if (!open) shell.closeSettings(); }}>
 		<Dialog.Content>
 			<Dialog.Title>Settings</Dialog.Title>
 			<ExecutorsSection />

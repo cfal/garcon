@@ -1437,7 +1437,7 @@
 	"onboarding_chat_display_title": "Chat display",
 	"onboarding_chat_display_description": "Tune how conversations look while you read.",
 	"onboarding_done_title": "You're all set",
-	"onboarding_done_description": "Your preferences are saved. Adjust them anytime under App Settings.",
+	"onboarding_done_description": "Your preferences are saved. Adjust them anytime in Settings > Interface.",
 	"onboarding_done_start": "Start using Garcon",
 	"onboarding_done_providers": "Set up API providers",
 	"onboarding_restart_wizard": "Restart setup wizard",
