@@ -16,11 +16,18 @@ async function expectNoticeAboveCap(notice: Locator, cap: Locator, composer: Loc
     const noticeBox = (await notice.boundingBox())!;
     const capBox = (await cap.boundingBox())!;
     const composerBox = (await composer.boundingBox())!;
-    return noticeBox.y + noticeBox.height <= capBox.y
-      && Math.abs(capBox.y + capBox.height - composerBox.y - 12) < 1
-      && Math.abs(capBox.x - composerBox.x) < 1
-      && Math.abs(capBox.width - composerBox.width) < 1;
-  }).toBe(true);
+    return {
+      noticeAboveCap: noticeBox.y + noticeBox.height <= capBox.y,
+      capOverlapsComposer: Math.abs(capBox.y + capBox.height - composerBox.y - 12) < 1,
+      leftEdgesAligned: Math.abs(capBox.x - composerBox.x) < 1,
+      widthsMatch: Math.abs(capBox.width - composerBox.width) < 1,
+    };
+  }).toEqual({
+    noticeAboveCap: true,
+    capOverlapsComposer: true,
+    leftEdgesAligned: true,
+    widthsMatch: true,
+  });
 }
 
 for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote-executor-dials'] as const) {
@@ -55,7 +62,8 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         const composer = page.locator('[data-composer]');
         const editor = composer.locator('textarea');
         const notice = page.locator('[data-composer-availability-notice]');
-        const cap = page.locator('[data-conversation-panel-composer-anchor="true"] [data-conversation-panel-status-anchor] > div > div');
+        const owner = page.locator('[data-conversation-panel-composer-anchor="true"]');
+        const cap = owner.locator('[data-conversation-panel-status-anchor] > div > div');
         const draft = 'Synthetic retained notice draft';
         await editor.fill(draft);
         await editor.evaluate(element => element.setAttribute('data-retained-editor', 'true'));
@@ -76,14 +84,16 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
           await withTimeout(held.received, 10_000, () => 'Held notice layout turn did not start');
           await client.pauseQueue(chatId);
           await client.enqueueNew(chatId, 'Synthetic queued layout input');
-          const status = page.locator('[data-conversation-panel-composer-anchor="true"] [data-slot="chat-processing-status"]');
+          const status = owner.locator('[data-slot="chat-processing-status"]');
           phase('catalog error and queue above processing cap');
           for (const width of [1440, 390]) {
             await page.setViewportSize({ width, height: 900 });
             await expectNoticeAboveCap(notice, status, composer);
             const queued = page.getByText('Synthetic queued layout input', { exact: true });
             await browserExpect(queued).toBeVisible();
-            expect((await queued.boundingBox())!.y + (await queued.boundingBox())!.height).toBeLessThan((await notice.boundingBox())!.y);
+            const queuedBox = (await queued.boundingBox())!;
+            const noticeBox = (await notice.boundingBox())!;
+            expect(queuedBox.y + queuedBox.height).toBeLessThan(noticeBox.y);
             await page.screenshot({ path: join(artifacts, `composer-notice-processing-${executionBackend}-${width}.png`) });
           }
           phase('switching chats retains the editor and keeps notices with their owning panel');
@@ -92,7 +102,6 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
           const processingTop = (await composer.boundingBox())!.y;
           for (const selectedChatId of [idleChatId, chatId, idleChatId, chatId]) {
             await page.locator(`[data-sidebar-virtual-row="${selectedChatId}"]`).click();
-            const owner = page.locator('[data-conversation-panel-composer-anchor="true"]');
             await browserExpect(owner).toHaveAttribute('data-conversation-panel-chat-id', selectedChatId);
             await browserExpect(owner.locator('[data-composer-availability-notice]')).toBeVisible();
             await browserExpect(notice).toHaveCount(1);
@@ -103,13 +112,13 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
             await browserExpect.poll(() => owner.locator('[data-chat-scroll-viewport]').evaluate(element =>
               element.scrollHeight - element.clientHeight - element.scrollTop)).toBeLessThanOrEqual(1);
           }
-          const before = (await composer.boundingBox())!;
+          const composerTopBeforeRetry = (await composer.boundingBox())!.y;
           await page.evaluate(() => { document.documentElement.dataset.repairCatalog = 'true'; });
           await notice.getByRole('button', { name: 'Retry', exact: true }).click();
           await browserExpect(notice).toHaveCount(0);
           await browserExpect(editor).toHaveValue(draft);
           await browserExpect(editor).toHaveAttribute('data-retained-editor', 'true');
-          expect((await composer.boundingBox())!.y).toBe(before.y);
+          expect((await composer.boundingBox())!.y).toBe(composerTopBeforeRetry);
 
           if (proxy) {
             phase('executor reconnect notice leaves the active composer joined and focused');
@@ -120,7 +129,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
             await browserExpect(notice).toHaveAttribute('data-composer-availability-notice', 'executor-reconnecting');
             await expectNoticeAboveCap(notice, status, composer);
             await browserExpect(editor).toBeFocused();
-            expect((await composer.boundingBox())!.y).toBe(before.y);
+            expect((await composer.boundingBox())!.y).toBe(composerTopBeforeRetry);
             proxy.acceptConnections();
             await waitForExecutorReconnect(integration, cursor);
             await browserExpect(notice).toHaveCount(0);
