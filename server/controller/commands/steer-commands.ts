@@ -6,11 +6,15 @@ import type {
   SteerCommandRequest,
   SteerCommandResponse,
 } from '../../../common/chat-command-contracts.ts';
-import { DomainError, SteerDeliveryError } from '../../common/domain-error.js';
+import {
+  DomainError,
+  STEER_NOT_DELIVERED_MESSAGE,
+  SteerDeliveryError,
+} from '../../common/domain-error.js';
 import { QueueEntrySteerError } from '../chat-execution/queue-steer-error.js';
 import { toClientChatExecutionControlState } from '../chat-execution/control-state.ts';
 import type { StoredChatExecutionControlState } from '../chat-execution/control-state.ts';
-import type { AcceptedExecutionCommand } from '../chat-execution/types.ts';
+import type { AcceptedExecutionCommand, CapturedSteerTarget } from '../chat-execution/types.ts';
 import { KeyedPromiseLock } from '../../common/keyed-lock.ts';
 import { createLogger, type Logger } from '../../common/log.ts';
 import { PromiseTimeoutError, withPromiseTimeout } from '../../common/promise-timeout.ts';
@@ -52,7 +56,7 @@ export class SteerCommands {
     );
     const initialChat = this.deps.chats.getChat(input.chatId);
     const integrationId = initialChat?.agentId;
-    const target = initialChat ? await this.deps.queue.captureSteerTarget(input.chatId) : null;
+    const observedTarget = initialChat ? await this.#captureBeforeLock(input.chatId) : null;
     const ledgerInput = {
       commandType: 'steer',
       chatId: input.chatId,
@@ -65,7 +69,7 @@ export class SteerCommands {
         userMessagePresentation: input.userMessagePresentation ?? null,
       },
     };
-    let outcomeTurnId = target?.identity.turnId;
+    let outcomeTurnId = observedTarget?.identity.turnId;
 
     try {
       let providerContent = input.content;
@@ -108,7 +112,7 @@ export class SteerCommands {
           return this.#duplicateResponse(ledger.record);
         }
 
-        outcomeTurnId = target?.identity.turnId;
+        outcomeTurnId = observedTarget?.identity.turnId;
         const command = {
           key: ledger.record.key,
           chatId: input.chatId,
@@ -119,6 +123,14 @@ export class SteerCommands {
           await this.support.settlement.settleSteerFailure(command, error);
           throw error;
         }
+        let target: CapturedSteerTarget | null;
+        try {
+          target = await this.#currentTarget(input.chatId, observedTarget);
+        } catch (error) {
+          await this.support.settlement.settleSteerFailure(command, error);
+          throw error;
+        }
+        outcomeTurnId = target?.identity.turnId;
         if (!target) {
           const error = new DomainError(
             'STEER_TURN_UNAVAILABLE',
@@ -211,7 +223,7 @@ export class SteerCommands {
     const clientMessageId = priorClientMessageId
       ?? observedEntry?.submission?.clientMessageId
       ?? entryId;
-    const target = initialChat ? await this.deps.queue.captureSteerTarget(input.chatId) : null;
+    const observedTarget = initialChat ? await this.#captureBeforeLock(input.chatId) : null;
     const ledgerInput = {
       commandType: 'steer',
       chatId: input.chatId,
@@ -229,7 +241,7 @@ export class SteerCommands {
       },
       entryId,
     };
-    let outcomeTurnId = target?.identity.turnId;
+    let outcomeTurnId = observedTarget?.identity.turnId;
 
     try {
       let providerContent = observedEntry?.content ?? '';
@@ -274,7 +286,7 @@ export class SteerCommands {
         );
         outcomeTurnId = ledger.record.turnId;
         if (ledger.kind === 'duplicate') return this.#duplicateQueueResponse(ledger.record);
-        outcomeTurnId = target?.identity.turnId;
+        outcomeTurnId = observedTarget?.identity.turnId;
 
         const command = {
           key: ledger.record.key,
@@ -304,6 +316,18 @@ export class SteerCommands {
           await this.#settleQueueFailure(command, error, 'not-sent');
           throw error;
         }
+        let target: CapturedSteerTarget | null;
+        try {
+          target = await this.#currentTarget(input.chatId, observedTarget);
+        } catch (failure) {
+          const error = queueSteerCaptureError(
+            failure,
+            await this.deps.queue.readChatExecutionControl(input.chatId),
+          );
+          await this.#settleQueueFailure(command, error, 'not-sent');
+          throw error;
+        }
+        outcomeTurnId = target?.identity.turnId;
         if (!target) {
           const control = await this.deps.queue.readChatExecutionControl(input.chatId);
           const error = new QueueEntrySteerError(
@@ -369,6 +393,31 @@ export class SteerCommands {
         entryId,
       }, { kind: 'failed', error });
       throw error;
+    }
+  }
+
+  // Captures before the chat lock, so a steer does not hold the lock for the capture.
+  // A failure is left to the capture under the lock to report.
+  async #captureBeforeLock(chatId: string): Promise<CapturedSteerTarget | null> {
+    try {
+      return await this.deps.queue.captureSteerTarget(chatId);
+    } catch {
+      return null;
+    }
+  }
+
+  // A steer can wait for the chat lock longer than its turn takes to become steerable,
+  // for example behind a new chat's start, so a capture without a provider target is
+  // repeated. Capture precedes admission, so a failure means nothing was sent.
+  async #currentTarget(
+    chatId: string,
+    observed: CapturedSteerTarget | null,
+  ): Promise<CapturedSteerTarget | null> {
+    if (observed?.providerTarget) return observed;
+    try {
+      return await this.deps.queue.captureSteerTarget(chatId);
+    } catch (error) {
+      throw error instanceof DomainError ? error : new SteerDeliveryError(error, 'not-sent');
     }
   }
 
@@ -574,6 +623,26 @@ function steerOutcomeErrorCode(error: unknown): CommandErrorCode {
   if (error instanceof CommandValidationError) return error.code;
   if (error instanceof DomainError) return queueSteerErrorCode(error.code);
   return 'INTERNAL_ERROR';
+}
+
+function queueSteerCaptureError(
+  error: unknown,
+  control: StoredChatExecutionControlState,
+): QueueEntrySteerError {
+  const code = error instanceof DomainError ? queueSteerErrorCode(error.code) : 'INTERNAL_ERROR';
+  if (!(error instanceof DomainError) || code === 'INTERNAL_ERROR') {
+    return new QueueEntrySteerError(
+      'STEER_NOT_DELIVERED',
+      STEER_NOT_DELIVERED_MESSAGE,
+      500,
+      'not-sent',
+      control,
+      { cause: error },
+    );
+  }
+  return new QueueEntrySteerError(code, error.message, error.status, 'not-sent', control, {
+    cause: error,
+  });
 }
 
 function recordedSteerError(record: CommandLedgerRecord): CommandValidationError {

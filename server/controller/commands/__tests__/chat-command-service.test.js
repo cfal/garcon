@@ -5051,6 +5051,7 @@ describe('ChatCommandService', () => {
   it('delivers strict steering once under the captured active turn identity', async () => {
     const target = {
       attempt: {},
+      providerTarget: {},
       identity: { clientRequestId: 'request-active', turnId: 'turn-active' },
     };
     const { service, queue, ledger } = makeService({
@@ -5088,6 +5089,7 @@ describe('ChatCommandService', () => {
   it('steers the authoritative queue head once and replays its terminal result', async () => {
     const target = {
       attempt: {},
+      providerTarget: {},
       identity: { clientRequestId: 'request-active', turnId: 'turn-active' },
     };
     const queued = storedQueue([
@@ -5169,7 +5171,7 @@ describe('ChatCommandService', () => {
   });
 
   it('identifies a queued-steer replay after chat deletion without returning control', async () => {
-    const target = { attempt: {}, identity: { turnId: 'turn-active' } };
+    const target = { attempt: {}, providerTarget: {}, identity: { turnId: 'turn-active' } };
     const queued = storedQueue([
       queueEntry('entry-head', 'authoritative content', 'queued', 1),
     ]);
@@ -5212,7 +5214,7 @@ describe('ChatCommandService', () => {
     const events = [];
     const deliveryEntered = deferred();
     const releaseDelivery = deferred();
-    const target = { attempt: {}, identity: { turnId: 'turn-active' } };
+    const target = { attempt: {}, providerTarget: {}, identity: { turnId: 'turn-active' } };
     const queued = storedQueue([
       queueEntry('entry-head', 'authoritative content', 'queued', 1),
     ]);
@@ -5267,7 +5269,7 @@ describe('ChatCommandService', () => {
   });
 
   it('rejects a changed queued-steer identity without another native delivery', async () => {
-    const target = { attempt: {}, identity: { turnId: 'turn-active' } };
+    const target = { attempt: {}, providerTarget: {}, identity: { turnId: 'turn-active' } };
     const queued = storedQueue([
       queueEntry('entry-head', 'authoritative content', 'queued', 3),
     ], { reorderRevision: 7 });
@@ -5299,7 +5301,7 @@ describe('ChatCommandService', () => {
     const current = storedQueue([
       queueEntry('entry-next', 'later turn', 'queued', 1),
     ], { reorderRevision: 8, version: 5 });
-    const target = { attempt: {}, identity: { turnId: 'turn-active' } };
+    const target = { attempt: {}, providerTarget: {}, identity: { turnId: 'turn-active' } };
     const { service, queue } = makeService({
       queue: {
         captureSteerTarget: mock(() => target),
@@ -5332,7 +5334,7 @@ describe('ChatCommandService', () => {
     const { service, queue } = makeService({
       ledger,
       queue: {
-        captureSteerTarget: mock(() => ({ attempt: {}, identity: { turnId: 'turn-active' } })),
+        captureSteerTarget: mock(() => ({ attempt: {}, providerTarget: {}, identity: { turnId: 'turn-active' } })),
         readChatExecutionControl: mock(async () => current),
       },
     });
@@ -5394,7 +5396,7 @@ describe('ChatCommandService', () => {
     const { service, queue } = makeService({
       ledger,
       queue: {
-        captureSteerTarget: mock(() => ({ attempt: {}, identity: { turnId: 'turn-active' } })),
+        captureSteerTarget: mock(() => ({ attempt: {}, providerTarget: {}, identity: { turnId: 'turn-active' } })),
         readChatExecutionControl: mock(async () => current),
         recoverQueueEntrySteer,
       },
@@ -5458,8 +5460,8 @@ describe('ChatCommandService', () => {
     const lock = new KeyedPromiseLock();
     const entered = deferred();
     const release = deferred();
-    const initialTarget = { attempt: {}, identity: { turnId: 'turn-initial' } };
-    const replacementTarget = { attempt: {}, identity: { turnId: 'turn-replacement' } };
+    const initialTarget = { attempt: {}, providerTarget: {}, identity: { turnId: 'turn-initial' } };
+    const replacementTarget = { attempt: {}, providerTarget: {}, identity: { turnId: 'turn-replacement' } };
     let currentTarget = initialTarget;
     const held = lock.runExclusive(`chat:${SOURCE_CHAT_ID}`, async () => {
       entered.resolve();
@@ -5488,11 +5490,133 @@ describe('ChatCommandService', () => {
     }));
   });
 
+  it('captures the steering target again when its turn could not be steered before the lock', async () => {
+    const lock = new KeyedPromiseLock();
+    const entered = deferred();
+    const release = deferred();
+    const startingTarget = { attempt: {}, providerTarget: null, identity: { turnId: 'turn-active' } };
+    const steerableTarget = { attempt: {}, providerTarget: {}, identity: { turnId: 'turn-active' } };
+    let currentTarget = startingTarget;
+    const held = lock.runExclusive(`chat:${SOURCE_CHAT_ID}`, async () => {
+      entered.resolve();
+      await release.promise;
+    });
+    await entered.promise;
+    const { service, queue } = makeService({
+      chatMutationLock: lock,
+      queue: { captureSteerTarget: mock(() => currentTarget) },
+    });
+
+    const steering = service.submitSteer({
+      chatId: SOURCE_CHAT_ID,
+      content: 'steer once the turn starts',
+      clientRequestId: 'request-steer-recaptured',
+      clientMessageId: 'message-steer-recaptured',
+    });
+    expect(queue.captureSteerTarget).toHaveBeenCalledOnce();
+    currentTarget = steerableTarget;
+    release.resolve();
+
+    await expect(steering).resolves.toMatchObject({ status: 'accepted', turnId: 'turn-active' });
+    await held;
+    expect(queue.captureSteerTarget).toHaveBeenCalledTimes(2);
+    expect(queue.deliverAcceptedSteer).toHaveBeenCalledWith(expect.objectContaining({
+      target: steerableTarget,
+    }));
+  });
+
+  it('reports a failed steering target capture as a steer that was not delivered', async () => {
+    const { service, queue, ledger } = makeService({
+      queue: { captureSteerTarget: mock(async () => { throw new Error('Executor link closed'); }) },
+    });
+    const input = {
+      chatId: SOURCE_CHAT_ID,
+      content: 'steer through a closed link',
+      clientRequestId: 'request-steer-capture-failed',
+      clientMessageId: 'message-steer-capture-failed',
+    };
+
+    await expect(service.submitSteer(input)).rejects.toMatchObject({
+      code: 'STEER_NOT_DELIVERED',
+      status: 500,
+    });
+    await expect(service.submitSteer(input)).rejects.toMatchObject({ code: 'STEER_NOT_DELIVERED' });
+    expect(queue.deliverAcceptedSteer).not.toHaveBeenCalled();
+    expect(await readLedgerRecord(ledger, 'steer', input.clientRequestId)).toMatchObject({
+      status: 'failed',
+      errorCode: 'STEER_NOT_DELIVERED',
+    });
+  });
+
+  it('keeps the code of a domain error from steering target capture', async () => {
+    const { service, queue } = makeService({
+      queue: {
+        captureSteerTarget: mock(async () => {
+          throw new DomainError('EXECUTOR_UNAVAILABLE', 'Executor is unavailable', 503, true);
+        }),
+      },
+    });
+
+    await expect(service.submitSteer({
+      chatId: SOURCE_CHAT_ID,
+      content: 'steer an offline executor',
+      clientRequestId: 'request-steer-executor-offline',
+      clientMessageId: 'message-steer-executor-offline',
+    })).rejects.toMatchObject({ code: 'EXECUTOR_UNAVAILABLE', status: 503 });
+    expect(queue.deliverAcceptedSteer).not.toHaveBeenCalled();
+  });
+
+  it('captures a queued steering target again when its turn could not be steered before the lock', async () => {
+    const lock = new KeyedPromiseLock();
+    const entered = deferred();
+    const release = deferred();
+    const startingTarget = { attempt: {}, providerTarget: null, identity: { turnId: 'turn-active' } };
+    const steerableTarget = { attempt: {}, providerTarget: {}, identity: { turnId: 'turn-active' } };
+    let currentTarget = startingTarget;
+    const held = lock.runExclusive(`chat:${SOURCE_CHAT_ID}`, async () => {
+      entered.resolve();
+      await release.promise;
+    });
+    await entered.promise;
+    const queued = storedQueue([queueEntry('entry-head', 'queued guidance', 'queued', 2)], {
+      reorderRevision: 3,
+    });
+    const captured = deferred();
+    const { service, queue } = makeService({
+      chatMutationLock: lock,
+      queue: {
+        captureSteerTarget: mock(() => {
+          captured.resolve();
+          return currentTarget;
+        }),
+        readChatExecutionControl: mock(async () => queued),
+      },
+    });
+
+    const steering = service.submitQueueEntrySteer({
+      chatId: SOURCE_CHAT_ID,
+      clientRequestId: 'request-queue-steer-recaptured',
+      entryId: 'entry-head',
+      expectedRevision: 2,
+      expectedReorderRevision: 3,
+    });
+    await captured.promise;
+    currentTarget = steerableTarget;
+    release.resolve();
+
+    await expect(steering).resolves.toMatchObject({ status: 'accepted', turnId: 'turn-active' });
+    await held;
+    expect(queue.captureSteerTarget).toHaveBeenCalledTimes(2);
+    expect(queue.deliverAcceptedQueueEntrySteer).toHaveBeenCalledWith(expect.objectContaining({
+      target: steerableTarget,
+    }));
+  });
+
   it('resolves steering file context without holding the chat mutation lock', async () => {
     const resolutionStarted = deferred();
     const releaseResolution = deferred();
     const lock = new KeyedPromiseLock();
-    const target = { attempt: {}, identity: { turnId: 'turn-active' } };
+    const target = { attempt: {}, providerTarget: {}, identity: { turnId: 'turn-active' } };
     const fileMentions = {
       resolve: mock(async () => {
         resolutionStarted.resolve();
@@ -5531,8 +5655,8 @@ describe('ChatCommandService', () => {
   it('keeps the first same-identity steering admission while file preparation is delayed', async () => {
     const resolutionStarted = deferred();
     const releaseResolution = deferred();
-    const firstTarget = { attempt: {}, identity: { turnId: 'turn-first' } };
-    const secondTarget = { attempt: {}, identity: { turnId: 'turn-second' } };
+    const firstTarget = { attempt: {}, providerTarget: {}, identity: { turnId: 'turn-first' } };
+    const secondTarget = { attempt: {}, providerTarget: {}, identity: { turnId: 'turn-second' } };
     let captureCount = 0;
     let resolutionCount = 0;
     const { service, queue, fileMentions } = makeService({
@@ -5582,7 +5706,7 @@ describe('ChatCommandService', () => {
     const firstDeliveryStarted = deferred();
     const releaseFirstDelivery = deferred();
     const secondResolutionStarted = deferred();
-    const target = { attempt: {}, identity: { turnId: 'turn-active' } };
+    const target = { attempt: {}, providerTarget: {}, identity: { turnId: 'turn-active' } };
     const deliveries = [];
     const { service, queue, fileMentions } = makeService({
       fileMentions: {
@@ -5656,7 +5780,7 @@ describe('ChatCommandService', () => {
   it('bounds stalled steering file preparation and skips additional uncancellable reads', async () => {
     const resolutionStarted = deferred();
     const releaseResolution = deferred();
-    const target = { attempt: {}, identity: { turnId: 'turn-active' } };
+    const target = { attempt: {}, providerTarget: {}, identity: { turnId: 'turn-active' } };
     const deliveries = [];
     const { service, queue, fileMentions } = makeService({
       fileMentions: {
@@ -5722,7 +5846,7 @@ describe('ChatCommandService', () => {
     const stalled = deferred();
     let signal;
     let count = 0;
-    const target = { attempt: {}, identity: { turnId: 'turn-active' } };
+    const target = { attempt: {}, providerTarget: {}, identity: { turnId: 'turn-active' } };
     const { service, queue, fileMentions } = makeService({
       fileMentions: { resolve: mock(async (_content, _path, _executorId, options) => {
         if (++count > 1) return 'Synthetic expanded context';
@@ -5764,7 +5888,7 @@ describe('ChatCommandService', () => {
       await release.promise;
     });
     await entered.promise;
-    const target = { attempt: {}, identity: { turnId: 'turn-initial' } };
+    const target = { attempt: {}, providerTarget: {}, identity: { turnId: 'turn-initial' } };
     const { service, queue, ledger, sessions } = makeService({
       chatMutationLock: lock,
       queue: { captureSteerTarget: mock(() => target) },
@@ -5797,7 +5921,7 @@ describe('ChatCommandService', () => {
   });
 
   it('replays a completed steer identity after its chat is deleted', async () => {
-    const target = { attempt: {}, identity: { turnId: 'turn-active' } };
+    const target = { attempt: {}, providerTarget: {}, identity: { turnId: 'turn-active' } };
     const { service, queue, sessions } = makeService({
       queue: { captureSteerTarget: mock(() => target) },
     });
@@ -5826,7 +5950,7 @@ describe('ChatCommandService', () => {
   });
 
   it('replays an unknown steer outcome after its chat is deleted', async () => {
-    const target = { attempt: {}, identity: { turnId: 'turn-active' } };
+    const target = { attempt: {}, providerTarget: {}, identity: { turnId: 'turn-active' } };
     const deliveryError = new SteerDeliveryError(new Error('connection closed'), 'unknown');
     const { service, queue, sessions } = makeService({
       queue: {
@@ -5962,7 +6086,7 @@ describe('ChatCommandService', () => {
   });
 
   it('never redelivers a steer whose provider outcome is unknown', async () => {
-    const target = { attempt: {}, identity: { turnId: 'turn-active' } };
+    const target = { attempt: {}, providerTarget: {}, identity: { turnId: 'turn-active' } };
     const deliveryError = new SteerDeliveryError(new Error('connection closed'), 'unknown');
     const { service, queue, ledger } = makeService({
       queue: {
@@ -5997,7 +6121,7 @@ describe('ChatCommandService', () => {
   });
 
   it('never redelivers the same steer identity after a definite pre-send failure', async () => {
-    const target = { attempt: {}, identity: { turnId: 'turn-active' } };
+    const target = { attempt: {}, providerTarget: {}, identity: { turnId: 'turn-active' } };
     const deliveryError = new SteerDeliveryError(new Error('serialization failed'), 'not-sent');
     const { service, queue, ledger } = makeService({
       queue: {
