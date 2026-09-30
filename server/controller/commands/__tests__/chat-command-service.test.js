@@ -5387,7 +5387,6 @@ describe('ChatCommandService', () => {
       payload: {
         chatId: input.chatId,
         transcriptViewId: 'view-1',
-        clientMessageId: input.clientMessageId,
         source: {
           kind: 'queue-entry',
           entryId: input.entryId,
@@ -5716,6 +5715,50 @@ describe('ChatCommandService', () => {
       entryId: 'entry-head',
       turnId: undefined,
     });
+    await expect(service.submitQueueEntrySteer(input)).resolves.toMatchObject({
+      status: 'duplicate',
+      delivery: 'queued',
+      entryId: 'entry-head',
+    });
+    expect(queue.markAcceptedQueueEntrySteer).toHaveBeenCalledTimes(1);
+  });
+
+  it('replays a queued-message steer after delivery consumed its entry and compaction dropped its payload', async () => {
+    const ledger = new CommandLedger(workspaceDir, { recordLimit: 1 });
+    let currentControl = storedQueue([{
+      ...queueEntry('entry-head', 'queued guidance', 'queued', 2),
+      submission: { clientMessageId: 'message-queued-guidance', transcriptViewId: 'view-1' },
+    }]);
+    const { service, queue } = makeService({
+      ledger,
+      queue: {
+        captureSteerTarget: mock(() => null),
+        readChatExecutionControl: mock(async () => currentControl),
+      },
+    });
+    const input = {
+      chatId: SOURCE_CHAT_ID,
+      clientRequestId: 'request-queue-steer-compacted',
+      entryId: 'entry-head',
+      expectedRevision: 2,
+      expectedReorderRevision: 0,
+    };
+
+    await expect(service.submitQueueEntrySteer(input)).resolves.toMatchObject({ delivery: 'queued' });
+    currentControl = storedQueue([]);
+    const filler = await ledger.accept({
+      commandType: 'agent-run',
+      chatId: SOURCE_CHAT_ID,
+      clientRequestId: 'compaction-filler',
+      payload: {},
+    });
+    await ledger.settleTerminal(filler.record.key, 'finished');
+    expect(await readLedgerRecord(ledger, 'steer', input.clientRequestId)).toMatchObject({
+      status: 'finished',
+      entryId: 'entry-head',
+      payload: {},
+    });
+
     await expect(service.submitQueueEntrySteer(input)).resolves.toMatchObject({
       status: 'duplicate',
       delivery: 'queued',

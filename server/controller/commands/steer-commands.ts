@@ -22,7 +22,6 @@ import type { AcceptedExecutionCommand, CapturedSteerTarget } from '../chat-exec
 import { KeyedPromiseLock } from '../../common/keyed-lock.ts';
 import { createLogger, type Logger } from '../../common/log.ts';
 import {
-  commandLedgerKey,
   SteerIdentityCapacityError,
   type LedgerAcceptResult,
   type CommandLedgerRecord,
@@ -228,16 +227,11 @@ export class SteerCommands {
     const observedEntry = observedControl?.entries.find((entry) => (
       entry.id === entryId && entry.status === 'queued'
     ));
-    const priorRecord = await this.deps.ledger.getRecord(
-      commandLedgerKey('steer', input.chatId, clientRequestId),
-    );
-    const priorClientMessageId = typeof priorRecord?.payload.clientMessageId === 'string'
-      ? priorRecord.payload.clientMessageId
-      : null;
-    const clientMessageId = priorClientMessageId
-      ?? observedEntry?.submission?.clientMessageId
-      ?? entryId;
+    const clientMessageId = observedEntry?.submission?.clientMessageId ?? entryId;
     const observedTarget = initialChat ? await this.#captureBeforeLock(input.chatId) : null;
+    // The payload holds only request fields: a retry derives the client message ID from an
+    // entry that delivery may have consumed, so including it could turn the retry into a
+    // conflict once the record's payload is compacted away.
     const ledgerInput = {
       commandType: 'steer',
       chatId: input.chatId,
@@ -245,7 +239,6 @@ export class SteerCommands {
       payload: {
         chatId: input.chatId,
         transcriptViewId: input.transcriptViewId,
-        clientMessageId,
         source: {
           kind: 'queue-entry',
           entryId,
