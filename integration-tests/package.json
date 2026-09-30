@@ -21,7 +21,7 @@
   "devDependencies": {
     "@anthropic-ai/claude-code": "2.1.280",
     "@earendil-works/pi-coding-agent": "0.85.1",
-    "@openai/codex": "0.159.0",
+    "@openai/codex": "0.159.2",
     "@sveltejs/vite-plugin-svelte": "^7.3.0",
     "@types/bun": "1.4.2",
     "bun-pty": "0.4.10",
