@@ -15,6 +15,7 @@ import { PromptComposerHeightState } from '../prompt-composer-height-state.svelt
 import type { ProjectResolutionResponse, ProjectTarget } from '$shared/project-resolution';
 import { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
 import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
+import type { ComposerAvailabilityNoticePresentation } from '$lib/chat/composer/composer-availability.js';
 
 const appCss = readFileSync('src/app.css', 'utf8');
 
@@ -242,10 +243,13 @@ describe('PromptComposer focus', () => {
 		expect(notice?.textContent).toContain('Failed to load model catalog');
 		expect(notice?.contains(surface)).toBe(false);
 		expect(surface.contains(notice)).toBe(false);
-		expect(notice?.parentElement?.contains(surface)).toBe(true);
+		expect(container.querySelector('[data-composer-shell]')?.contains(notice)).toBe(false);
 		expect(surface.querySelector('[role="status"]')).toBeNull();
 		expect(surface.className).toBe(surfaceMarkup);
-		expect(onAvailabilityNoticeChange).toHaveBeenLastCalledWith(true);
+		expect(onAvailabilityNoticeChange).toHaveBeenLastCalledWith(expect.objectContaining({
+			notice: { kind: 'catalog-failed', message: 'Catalog unavailable' },
+			onRetryCatalog: expect.any(Function),
+		}));
 		expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Send message' }).disabled).toBe(
 			true,
 		);
@@ -257,7 +261,7 @@ describe('PromptComposer focus', () => {
 			false,
 		);
 		expect(container.querySelector('[data-composer-availability-notice]')).toBeNull();
-		expect(onAvailabilityNoticeChange).toHaveBeenLastCalledWith(false);
+		expect(onAvailabilityNoticeChange).toHaveBeenLastCalledWith(null);
 		expect(screen.getByRole('textbox')).toBe(textarea);
 		expect(surface.className).toBe(surfaceMarkup);
 	});
@@ -2232,7 +2236,7 @@ describe('PromptComposer focus', () => {
 			const noticeContent = notice?.querySelector<HTMLElement>('[role="status"]');
 			const noticeFrame = notice?.parentElement;
 			expect(noticeContent?.className).toContain('mx-auto');
-			expect(noticeFrame?.querySelector('[data-composer]')).toBeTruthy();
+			expect(noticeFrame?.querySelector('[data-composer]')).toBeNull();
 			expect(noticeFrame?.className).toContain('w-full');
 			expect(noticeFrame?.className).toContain('lg:mx-auto');
 			expect(noticeFrame?.className).toContain('lg:max-w-3xl');
@@ -2242,6 +2246,44 @@ describe('PromptComposer focus', () => {
 			await waitFor(() => expect(fetchProjectResolution).toHaveBeenCalledTimes(2));
 		},
 	);
+
+	it('publishes chat-scoped recovery actions and clears the notice when hidden or destroyed', async () => {
+		const fetchProjectResolution = vi.fn(async (target: ProjectTarget) => ({
+			target,
+			resolution: { kind: 'unavailable' as const, reason: 'not-found' as const },
+		}));
+		const onAvailabilityNoticeChange = vi.fn<(notice: ComposerAvailabilityNoticePresentation | null) => void>();
+		const onChooseProjectFolder = vi.fn();
+		const props = {
+			selectedChatId: 'notice-chat-one',
+			fetchProjectResolution,
+			onAvailabilityNoticeChange,
+			onChooseProjectFolder,
+		};
+		const rendered = render(PromptComposerTestHost, props);
+		await fireEvent.input(screen.getByRole('textbox'), { target: { value: '/' } });
+		await screen.findByText('Project folder unavailable');
+		const firstNotice = onAvailabilityNoticeChange.mock.lastCall![0]!;
+		expect(firstNotice.chatId).toBe('notice-chat-one');
+
+		await rendered.rerender({ ...props, selectedChatId: 'notice-chat-two' });
+		const requestsBeforeRetry = fetchProjectResolution.mock.calls.length;
+		firstNotice.onRetryProject();
+		expect(fetchProjectResolution).toHaveBeenCalledTimes(requestsBeforeRetry);
+		firstNotice.onChooseProjectFolder?.();
+		expect(onChooseProjectFolder).toHaveBeenCalledWith('notice-chat-one');
+
+		await fireEvent.input(screen.getByRole('textbox'), { target: { value: '/' } });
+		await waitFor(() => expect(onAvailabilityNoticeChange).toHaveBeenLastCalledWith(
+			expect.objectContaining({ chatId: 'notice-chat-two' }),
+		));
+		await rendered.rerender({ ...props, selectedChatId: 'notice-chat-two', isVisible: false });
+		expect(onAvailabilityNoticeChange).toHaveBeenLastCalledWith(null);
+		await rendered.rerender({ ...props, selectedChatId: 'notice-chat-two', isVisible: true });
+		await screen.findByText('Project folder unavailable');
+		rendered.unmount();
+		expect(onAvailabilityNoticeChange).toHaveBeenLastCalledWith(null);
+	});
 
 	it('reports a missing project path instead of swallowing a snippet command', async () => {
 		render(PromptComposerTestHost, {

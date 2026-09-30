@@ -3,6 +3,8 @@
 	import ConversationFeed from './ConversationFeed.svelte';
 	import ConversationPanelScrollControls from './ConversationPanelScrollControls.svelte';
 	import ConversationPanelStatusDock from './ConversationPanelStatusDock.svelte';
+	import ComposerAvailabilityNotice from './ComposerAvailabilityNotice.svelte';
+	import type { ComposerAvailabilityNoticePresentation } from '$lib/chat/composer/composer-availability.js';
 	import MessageRenderFallback from './MessageRenderFallback.svelte';
 	import QueueControls from './QueueControls.svelte';
 	import type { ConversationPanelActions } from './conversation-panel-actions.js';
@@ -45,7 +47,7 @@
 		isVisible?: boolean;
 		actions: ConversationPanelActions | null;
 		composerInsetPx?: number;
-		composerNoticeShown?: boolean;
+		composerNotice?: ComposerAvailabilityNoticePresentation | null;
 		reserveMobileToolbar?: boolean;
 	}
 
@@ -58,7 +60,7 @@
 		isVisible = true,
 		actions,
 		composerInsetPx = 0,
-		composerNoticeShown = false,
+		composerNotice = null,
 		reserveMobileToolbar = false,
 	}: Props = $props();
 
@@ -73,6 +75,9 @@
 	const executors = getExecutors();
 
 	const chatId = $derived(chat.id);
+	const availabilityNotice = $derived(
+		ownsComposer && composerNotice?.chatId === chatId ? composerNotice : null,
+	);
 	const queue = $derived(conversationUi.getExecutionControl(chatId)?.queue ?? null);
 	const pendingPermissions = $derived(conversationUi.pendingPermissionsFor(chatId));
 	const isProcessing = $derived(sessions.isChatProcessing(chatId));
@@ -93,10 +98,8 @@
 	);
 	const quickGitError = $derived(quickGit.lastErrorFor(gitProject) ?? quickGitBranchError);
 	const quickGitRefreshing = $derived(quickGit.isRefreshingFor(gitProject));
-	// The composer's availability notice occupies the tray's place above the composer.
 	const quickGitTrayVisible = $derived(
 		!isProcessing &&
-			!(ownsComposer && composerNoticeShown) &&
 			localSettings.showQuickCommitTray &&
 			quickGit.canShowTrayFor(gitProject),
 	);
@@ -107,16 +110,17 @@
 		}),
 	);
 	const queueVisible = $derived((queue?.entries.length ?? 0) > 0);
-	const capSpace = $derived(composerCapReservation(reserveStatusCap, queueVisible));
+	const capSpace = $derived(
+		composerCapReservation(reserveStatusCap, queueVisible, availabilityNotice !== null),
+	);
+	const dockShellClass = $derived(
+		cn(CHAT_DOCK_SHELL_BASE_CLASS, CHAT_MAX_WIDTH_DOCK_SHELL_CLASS[localSettings.chatMaxWidth]),
+	);
 	const queueShellClass = $derived.by(() => {
 		if (!queueVisible) return '';
-		return cn(
-			CHAT_DOCK_SHELL_BASE_CLASS,
-			CHAT_MAX_WIDTH_DOCK_SHELL_CLASS[localSettings.chatMaxWidth],
-			capSpace.queue ? 'pb-14' : 'pb-2',
-		);
+		return cn(dockShellClass, capSpace.queue ? 'pb-14' : 'pb-2');
 	});
-	const queueFrameClass = $derived(chatDockFrameClass(localSettings.chatMaxWidth));
+	const dockFrameClass = $derived(chatDockFrameClass(localSettings.chatMaxWidth));
 	const surfaceIdentity = $derived(`${surfaceId}:${panel.transcript.transcriptViewId}`);
 	const isPreparingInitialScroll = $derived(
 		panel.scroll.isPreparingInitialScroll && localSettings.autoScrollToBottom,
@@ -289,7 +293,7 @@
 	</div>
 
 	<div bind:this={queueControlsContainer} class={queueShellClass}>
-		<div class={queueFrameClass}>
+		<div class={dockFrameClass}>
 			<QueueControls
 				{chatId}
 				{queue}
@@ -310,6 +314,14 @@
 			/>
 		</div>
 	</div>
+
+	{#if availabilityNotice}
+		<div class={cn(dockShellClass, capSpace.notice && 'pb-14')} data-conversation-panel-notice>
+			<div class={dockFrameClass}>
+				<ComposerAvailabilityNotice {...availabilityNotice} />
+			</div>
+		</div>
+	{/if}
 
 	<ConversationPanelStatusDock
 		chatMaxWidth={localSettings.chatMaxWidth}

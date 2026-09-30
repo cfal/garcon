@@ -4,9 +4,11 @@
 	import SlashCommandMenu from './SlashCommandMenu.svelte';
 	import ComposerBottomBar from './ComposerBottomBar.svelte';
 	import ComposerAttachmentList from './ComposerAttachmentList.svelte';
-	import ComposerAvailabilityNotice from './ComposerAvailabilityNotice.svelte';
 	import { isCustomProviderSelectionAvailable } from '$lib/agents/provider-selection.js';
-	import { resolveComposerAvailabilityNotice } from '$lib/chat/composer/composer-availability.js';
+	import {
+		resolveComposerAvailabilityNotice,
+		type ComposerAvailabilityNoticePresentation,
+	} from '$lib/chat/composer/composer-availability.js';
 	import ComposerResizeHandle from './ComposerResizeHandle.svelte';
 	import PromptComposerEditor from './PromptComposerEditor.svelte';
 	import ComposerSnippetPalette from './ComposerSnippetPalette.svelte';
@@ -198,12 +200,6 @@
 		}),
 	);
 	const showProjectNotice = $derived(availabilityNotice?.kind === 'project-unavailable');
-	// The owning panel renders outside this context tree and hides its Git tray while a notice shows.
-	$effect(() => {
-		const shown = isVisible && availabilityNotice !== null;
-		untrack(() => onAvailabilityNoticeChange?.(shown));
-	});
-	onDestroy(() => onAvailabilityNoticeChange?.(false));
 	const completionProjectPath = $derived(projectState.completionProjectPath);
 	const canChooseProjectFolder = $derived(
 		Boolean(
@@ -213,6 +209,35 @@
 				modelCatalog.supportsUpdateProjectPath(sessions.selectedChat.agentId)),
 		),
 	);
+	const noticePresentation = $derived.by<ComposerAvailabilityNoticePresentation | null>(() => {
+		const chatId = sessions.selectedChatId;
+		const notice = availabilityNotice;
+		if (!isVisible || !chatId || !notice) return null;
+		const catalog = modelCatalog;
+		const projectPath = selectedProjectTarget?.projectPath;
+		return {
+			chatId,
+			notice,
+			onRetryProject: () => {
+				if (
+					sessions.selectedChatId !== chatId ||
+					modelCatalog !== catalog ||
+					selectedProjectTarget?.projectPath !== projectPath
+				) return;
+				projectState.retry();
+			},
+			onChooseProjectFolder: canChooseProjectFolder
+				? () => onChooseProjectFolder?.(chatId)
+				: undefined,
+			onRetryCatalog: () => void catalog.forceRefresh(),
+		};
+	});
+	// The owning panel renders notices above its status cap, outside the measured composer.
+	$effect(() => {
+		const presentation = noticePresentation;
+		untrack(() => onAvailabilityNoticeChange?.(presentation));
+	});
+	onDestroy(() => onAvailabilityNoticeChange?.(null));
 
 	function requestComposerFocusForChat(chatId: string | null): void {
 		focusDelivery.request(
@@ -943,17 +968,6 @@
 
 <div class={composerShellClass} data-composer-shell>
 	<div class={composerFrameWrapperClass}>
-		<!-- Notices sit outside the composer surface so they never resize or restyle it. -->
-		{#if availabilityNotice}
-			<ComposerAvailabilityNotice
-				notice={availabilityNotice}
-				onRetryProject={() => projectState.retry()}
-				onChooseProjectFolder={canChooseProjectFolder && sessions.selectedChat
-					? () => onChooseProjectFolder?.(sessions.selectedChat!.id)
-					: undefined}
-				onRetryCatalog={() => void modelCatalog.forceRefresh()}
-			/>
-		{/if}
 		{@render composerFrame()}
 	</div>
 </div>
