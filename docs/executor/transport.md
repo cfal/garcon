@@ -228,21 +228,37 @@ closed connection that carried a session is logged with its cause and the
 link's running count for that cause (`executor-link-closed` on a worker):
 `liveness-timeout`, `socket-closed`, `socket-error`, `protocol-error`,
 `record-limit`, `session-retired`, or `local-close`. A record that fails Noise
-authentication or framing counts as `protocol-error`, a Noise handshake or
-message timeout as `liveness-timeout`, and a transport failure as
-`socket-error`; a socket the peer or network closed without an authenticated
-close record counts as `socket-closed`. `record-limit` marks a busy long-lived
-link that used up Noise's per-key record budget and reconnects with fresh keys.
-When known, the log adds the reason: the Noise error code of a connection that
-ended without an encrypted close, such as `TRANSPORT_CLOSED` when a tunnel
-drops it, or the error that retired the session. A link failure carries the
-same code and is logged when it differs from the previous failure, until a
-session starts (`executor-unavailable` on a worker). The controller logs a
-session whose setup fails with the stage it reached (`describe`,
-`start-integrations`, `resume-bindings`, or `activate`) and the session's own
-reason rather than the generic loss its pending call reports. A parse error's
-message can echo the payload it failed on, so it is logged, and crosses the
-link, as `Malformed data`.
+authentication or framing counts as `protocol-error`, a message whose remaining
+records stop arriving as `liveness-timeout`, and a transport failure or a full
+socket buffer as `socket-error`; a socket the peer or network closed without an
+authenticated close record counts as `socket-closed`. `record-limit` marks a
+busy long-lived link that used up Noise's per-key record budget and reconnects
+with fresh keys. A Noise handshake that fails or times out ends its connection
+before any session, so it appears only as a link failure. When known, the log
+adds the reason: the Noise error code of a connection that ended without an
+encrypted close, such as `TRANSPORT_CLOSED` when a tunnel drops it, or the
+error that retired the session. A link failure carries the same code, or the
+reason a peer that holds the secret failed to authenticate or lost its
+connection, and counts the failures of its kind since the last session
+started, from one again when its message or reason changes. Logs keep the
+failures whose count is 1, 2, 4, 8, ... (`executor-unavailable` on a worker).
+A peer without the secret causes only encrypted-connection failures, whose
+message is fixed for each Noise error code, so it cannot flood logs by failing
+repeatedly or by alternating between failures. The
+controller shows every failure as the executor's last error and notifies
+clients only when that error changes. The controller logs a session whose
+setup fails with the stage it reached (`describe`, `start-integrations`,
+`resume-bindings`, or `activate`) and the session's own reason rather than the
+generic loss its pending call reports. A parse error's message can echo the
+payload it failed on, so the error reply for a parse error that a handler
+throws carries it only as `Malformed data`, as does the report of a launch
+whose error reply was lost, and the side whose handler threw logs the call ID,
+integration, and method. An integration that wraps a parse error in its own
+failure passes that failure's message on, so parse failures that can reach
+callers name what failed instead. Logs describe a parse error as `Malformed
+data` with the nearest source location its stack kept, if any. A frame that
+fails to parse is named instead: `Malformed executor RPC frame` or `Malformed
+executor handshake frame`.
 
 Hung detached turns require worker restart. Controller crash leaves execution
 state empty on restart; graceful controller shutdown still requests native
