@@ -552,6 +552,18 @@ test('publishes alternating link failures at most once a second, each time with 
   expect(published.length).toBeLessThan(6);
 });
 
+test('admits a worker while sockets that never finish their handshakes fill its executor slots', async () => {
+  const { manager, root } = await fixture();
+  const config = await manager.create({ label: 'Crowded', direction: 'executor-connects' });
+  const { url } = sharedListener(manager);
+  for (let index = 0; index < 4; index++) await pendingSocket(url(config.id));
+  const ready = waitReady(manager, config.id);
+  worker(config.secret, root).dial(url(config.id));
+
+  // The silent sockets would otherwise hold the slots until their five-second handshake deadline.
+  await Promise.race([ready, Bun.sleep(2_000).then(() => { throw new Error('The worker was not admitted'); })]);
+});
+
 test('the aggregate Noise connection limit covers authenticated peers across executors', async () => {
   const { manager } = await fixture();
   const a = await manager.create({ label: 'A', direction: 'executor-connects' });

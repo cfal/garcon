@@ -791,7 +791,10 @@ export async function startServer(): Promise<void> {
     const listenPort = config.port;
     const bindAddress = config.bindAddress;
     const authDisabled = config.authDisabled;
-    const executionSockets = createNoiseServer({ maxConnections: 64, maxPendingHandshakes: 16 });
+    // Each executor's link holds a few sockets and makes room by closing its oldest
+    // unfinished handshake, so a pending limit below the total would let unfinished
+    // handshakes on some executors' endpoints turn away every other executor.
+    const executionSockets = createNoiseServer({ maxConnections: 64, maxPendingHandshakes: 64 });
     let shuttingDown = false;
     executors.setCliDispatcher(new ControllerCliDispatcher({ routes, serverInstanceId: runtimeState.identity.instanceId,
       workspaceName: config.workspaceName, isShuttingDown: () => shuttingDown }));

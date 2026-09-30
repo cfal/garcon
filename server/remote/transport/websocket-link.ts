@@ -52,6 +52,8 @@ const REDIAL_DELAYS_MS = [0, 5_000, 5_000, 10_000, 10_000, 10_000, 10_000, 10_00
 // A lost session that lasted this long is redialed at once. A peer that drops each
 // session right after it opens, such as one failing initialization, is backed off.
 const STABLE_SESSION_MS = 10_000;
+// Sockets a link holds at once, including those still authenticating.
+const MAX_SOCKETS = 4;
 
 // Why a connection carrying a session closed; each closure retires its session.
 export type LinkClosureCause =
@@ -145,7 +147,9 @@ export class WebSocketLink {
 
   get current(): SessionTransport | null { return this.#current; }
   get executorId(): string | null { return this.options.role === 'controller' ? this.options.executorId! : this.#current?.executorId ?? null; }
-  get acceptsSocket(): boolean { return !this.#disposed && !this.#quiescing && this.#sockets.size < 4; }
+  get acceptsSocket(): boolean {
+    return !this.#disposed && !this.#quiescing && (this.#sockets.size < MAX_SOCKETS || this.#displaceableSocket() !== null);
+  }
 
   onError(listener: (failure: LinkFailure) => void): () => void {
     this.#errors.add(listener);
@@ -159,6 +163,13 @@ export class WebSocketLink {
 
   upgrade(request: Request, server: Pick<Bun.Server<NoiseSocketData>, 'upgrade'>, noise: ReturnType<typeof createNoiseServer>): Response | undefined {
     if (!this.acceptsSocket) return new Response(null, { status: 503 });
+    // A peer without the secret never finishes the encrypted handshake, so a full
+    // link makes room by closing a socket still in that handshake. Only an upgrade
+    // the server will accept may do so, so a refused request cannot close a socket.
+    if (this.#sockets.size >= MAX_SOCKETS) {
+      if (!isWebSocketUpgrade(request)) return new Response(null, { status: 400 });
+      this.#displaceableSocket()?.close();
+    }
     const options = this.#noiseOptions();
     try {
       return noise.upgrade(request, {
@@ -180,7 +191,7 @@ export class WebSocketLink {
   listen(port = 0, hostname = '0.0.0.0'): string {
     if (!this.options.allowInsecureDevelopment) throw new Error('A listener without TLS requires explicit development mode; use a TLS terminator otherwise');
     if (this.#server || this.#disposed) throw new Error('Executor listener cannot start');
-    const noise = createNoiseServer({ maxConnections: 4, maxPendingHandshakes: 4 });
+    const noise = createNoiseServer({ maxConnections: MAX_SOCKETS, maxPendingHandshakes: MAX_SOCKETS });
     this.#listenerNoise = noise;
     this.#server = Bun.serve<NoiseSocketData>({
       hostname, port,
@@ -275,7 +286,8 @@ export class WebSocketLink {
           connection.closeCause ??= NOISE_CLOSURE_CAUSES[error.code];
           connection.closeReason ??= `Encrypted connection failed (${error.code})`;
         }
-        this.#reportFailure(error.code, `Executor encrypted connection failed (${error.code})`);
+        // Noise reports a socket this link closed before it opened as CLOSED, which is not the peer failing.
+        if (error.code !== 'CLOSED') this.#reportFailure(error.code, `Executor encrypted connection failed (${error.code})`);
       },
       onClose: (socket) => {
         this.#sockets.delete(socket);
@@ -410,6 +422,19 @@ export class WebSocketLink {
     return createHmac('sha256', this.options.secret).update(JSON.stringify(['garcon-executor', purpose, transcript])).digest('hex');
   }
 
+  // The oldest socket whose peer has not proven the secret, or else the oldest
+  // still finishing the handshake. A listener reaches 'confirming' only after
+  // decrypting a first message keyed by the secret, so its peer holds the secret
+  // or replayed an observed handshake.
+  #displaceableSocket(): NoiseWebSocket | null {
+    let confirming: NoiseWebSocket | null = null;
+    for (const socket of this.#sockets) {
+      if (socket.readyState === 'connecting' || socket.readyState === 'handshaking') return socket;
+      if (socket.readyState === 'confirming') confirming ??= socket;
+    }
+    return confirming;
+  }
+
   #reportFailure(kind: LinkFailureKind, message: string, reason?: string): void {
     if (this.#disposed) return;
     const previous = this.#failures.get(kind);
@@ -480,6 +505,16 @@ const NOISE_CLOSURE_CAUSES = {
 function parseHandshakeFrame(encoded: string): unknown {
   try { return JSON.parse(encoded); }
   catch { throw new Error('Malformed executor handshake frame'); }
+}
+
+// The checks a WebSocket upgrade must pass, from RFC 6455 section 4.2.1.
+function isWebSocketUpgrade(request: Request): boolean {
+  const headers = request.headers;
+  return request.method === 'GET'
+    && headers.get('upgrade')?.toLowerCase() === 'websocket'
+    && (headers.get('connection') ?? '').split(',').some((token) => token.trim().toLowerCase() === 'upgrade')
+    && headers.get('sec-websocket-version') === '13'
+    && /^[A-Za-z0-9+/]{22}==$/.test(headers.get('sec-websocket-key') ?? '');
 }
 
 function isHello(value: unknown): value is Hello {

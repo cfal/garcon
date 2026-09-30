@@ -6,7 +6,7 @@ import { EXECUTOR_PROTOCOL_REVISION } from '../rpc-protocol.ts';
 import { version as packageVersion } from '../../../../package.json';
 import { tcpLinkProxy } from '../../__tests__/tcp-link-proxy.ts';
 import { faultyNoiseListener } from '../../__tests__/noise-socket-faults.ts';
-import { connectWithWrongKey, sendMalformedRecord } from '../../__tests__/failing-peers.ts';
+import { connectWithWrongKey, openSilentSocket, sendMalformedRecord } from '../../__tests__/failing-peers.ts';
 
 const secret = Buffer.alloc(32, 42).toString('base64url');
 const linkVersion = `${packageVersion}+protocol.${EXECUTOR_PROTOCOL_REVISION}`;
@@ -124,6 +124,105 @@ test('counts a failure from one again when its reason changes', async () => {
       { message: 'Executor authentication failed', count: 1, reason: 'Executor handshake mismatch' },
     ]);
   } finally { await link.dispose(); }
+});
+
+test('makes room for a peer by closing the oldest socket that has not finished its encrypted handshake', async () => {
+  const common = { executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true, redialDelaysMs: [20] };
+  const controller = new WebSocketLink({ ...common, role: 'controller', noiseLimits: { handshakeTimeoutMs: 60_000 } });
+  const worker = new WebSocketLink({ ...common, role: 'worker' });
+  const failures = [];
+  controller.onError(failure => failures.push(failure));
+  const address = controller.listen();
+  const silent = [];
+  try {
+    for (let index = 0; index < 4; index++) silent.push(await openSilentSocket(address));
+    worker.dial(address);
+    await Promise.all([controller.ready, worker.ready]);
+    await silent[0].closed;
+
+    expect(silent.map(({ socket }) => socket.readyState)).toEqual([WebSocket.CLOSED, WebSocket.OPEN, WebSocket.OPEN, WebSocket.OPEN]);
+    // Closing a socket to make room is not a failure of the peer.
+    expect(failures).toEqual([]);
+  } finally {
+    for (const { socket } of silent) socket.close();
+    await worker.dispose(); await controller.dispose();
+  }
+});
+
+test('refuses a plain request or an invalid upgrade to a full listener without closing a socket', async () => {
+  const link = new WebSocketLink({ role: 'worker', secret, allowInsecureDevelopment: true, noiseLimits: { handshakeTimeoutMs: 60_000 } });
+  const address = link.listen();
+  const silent = [];
+  try {
+    for (let index = 0; index < 4; index++) silent.push(await openSilentSocket(address));
+    const plain = await fetch(address.replace('ws:', 'http:'));
+    // An upgrade without its WebSocket key, which the server refuses.
+    const invalidUpgrade = await fetch(address.replace('ws:', 'http:'), {
+      headers: { Upgrade: 'websocket', Connection: 'Upgrade', 'Sec-WebSocket-Version': '13' },
+    });
+    const oldest = await Promise.race([silent[0].closed.then(() => 'closed'), Bun.sleep(200).then(() => 'open')]);
+
+    expect([plain.status, invalidUpgrade.status]).toEqual([400, 400]);
+    expect(oldest).toBe('open');
+  } finally {
+    for (const { socket } of silent) socket.close();
+    await link.dispose();
+  }
+});
+
+test('makes room by closing a socket whose peer has not proven the secret before one whose peer has', async () => {
+  const link = new WebSocketLink({
+    role: 'controller', executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true, noiseLimits: { handshakeTimeoutMs: 60_000 },
+  });
+  const listener = faultyNoiseListener(link);
+  // Delivers the peer's first handshake message, which proves the secret, but not the record that opens it.
+  listener.deliverOnly(1);
+  const proven = connectNoiseWebSocket(listener.url, { psk: Buffer.from(secret, 'base64url'), context: EXECUTOR_NOISE_CONTEXT, onMessage() {} });
+  const silent = [];
+  try {
+    await eventually(() => proven.readyState === 'confirming');
+    for (let index = 0; index < 4; index++) silent.push(await openSilentSocket(listener.url));
+    await silent[0].closed;
+    const survivor = await Promise.race([proven.closed.then(() => 'closed'), Bun.sleep(200).then(() => 'open')]);
+
+    expect(survivor).toBe('open');
+  } finally {
+    for (const { socket } of silent) socket.close();
+    proven.close();
+    await link.dispose();
+    await listener.stop();
+  }
+});
+
+test('closes a socket whose peer has proven the secret when no other is still in the handshake', async () => {
+  const link = new WebSocketLink({
+    role: 'controller', executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true, noiseLimits: { handshakeTimeoutMs: 60_000 },
+  });
+  const listener = faultyNoiseListener(link);
+  const noise = { psk: Buffer.from(secret, 'base64url'), context: EXECUTOR_NOISE_CONTEXT, onMessage() {} };
+  const opened = [];
+  let silent = null;
+  const proven = [];
+  try {
+    // Encrypted connections that never answer the link's hello.
+    for (let index = 0; index < 3; index++) {
+      const socket = connectNoiseWebSocket(listener.url, noise);
+      opened.push(socket);
+      await socket.ready;
+    }
+    listener.deliverOnly(1);
+    proven.push(connectNoiseWebSocket(listener.url, noise));
+    await eventually(() => proven[0].readyState === 'confirming');
+    silent = await openSilentSocket(listener.url);
+    await proven[0].closed;
+
+    expect(opened.map(socket => socket.readyState)).toEqual(['open', 'open', 'open']);
+  } finally {
+    silent?.socket.close();
+    for (const socket of [...opened, ...proven]) socket.close();
+    await link.dispose();
+    await listener.stop();
+  }
 });
 
 test('counts each kind of connection failure until a session starts, however failures alternate', async () => {

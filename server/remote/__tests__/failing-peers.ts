@@ -10,6 +10,17 @@ export async function connectWithWrongKey(url: string): Promise<void> {
   await socket.closed;
 }
 
+// Opens a socket that never starts the encrypted handshake, resolving once the endpoint accepts it.
+export async function openSilentSocket(url: string): Promise<{ readonly socket: WebSocket; readonly closed: Promise<void> }> {
+  const socket = new WebSocket(url);
+  const closed = new Promise<void>((resolve) => socket.addEventListener('close', () => resolve()));
+  await new Promise<void>((resolve, reject) => {
+    socket.addEventListener('open', () => resolve());
+    socket.addEventListener('error', () => reject(new Error('The endpoint refused a silent socket')));
+  });
+  return { socket, closed };
+}
+
 // Resolves once the endpoint has rejected a frame too short to be a handshake as PROTOCOL_ERROR.
 export async function sendMalformedRecord(url: string): Promise<void> {
   const socket = new WebSocket(url);
