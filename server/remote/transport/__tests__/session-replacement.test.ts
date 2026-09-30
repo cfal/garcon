@@ -226,6 +226,35 @@ for (const dialer of ['controller', 'worker'] as const) {
     } finally { release.resolve(); await fixture.dispose(); }
   });
 
+  test(`a start that fails after its session was lost reports its own failure (${dialer} dials)`, async () => {
+    const fixture = await remoteFixture(dialer);
+    const fail = Promise.withResolvers<void>();
+    try {
+      const integration = await fixture.executor.getAgentIntegration('test');
+      const request = await requestFor(integration);
+      const entered = Promise.withResolvers<void>();
+      fixture.generations[0]!.hooks.start = async () => {
+        entered.resolve();
+        await fail.promise;
+        throw new AgentIntegrationError('AUTH_REQUIRED', 'Synthetic sign-in required', false);
+      };
+      const outcomes = launchOutcomes(integration);
+      const call = integration.execution.start(request).catch((error: unknown) => error);
+      await entered.promise;
+      const ready = nextAvailability(fixture.executor, 'ready');
+      fixture.controller.disconnect(); fixture.worker.disconnect();
+      expect(await call).toMatchObject({ outcome: 'unknown' });
+      await ready;
+      fail.resolve();
+      const deadline = performance.now() + 10_000;
+      while (outcomes.length === 0 && performance.now() < deadline) await Bun.sleep(5);
+
+      expect(outcomes).toEqual([{
+        type: 'launch-settled', runId: request.runId, error: { code: 'AUTH_REQUIRED', message: 'Synthetic sign-in required' },
+      }]);
+    } finally { fail.resolve(); await fixture.dispose(); }
+  });
+
   test(`a start whose reply was lost reports its handle once the binding resumes (${dialer} dials)`, async () => {
     let fault!: ReturnType<typeof outgoingFault>;
     const fixture = await remoteFixture(dialer, (_controller, worker) => { fault = outgoingFault(worker); });

@@ -167,21 +167,21 @@ its session is lost keeps running. The worker's relay records each binding's
 latest launch until its run ends or it fails, and the runs of the latest eight
 launches it received, before running them. The resume reply reports both with
 the sequence number the binding's replay ends at; the relay keeps that frame
-when pressure drops older rows. A launch that settles after its session was
-lost publishes its outcome on the binding instead: its handle, or for any
-failure the dispatch failure below. A failure after the loss can come from a
-call the loss cut off, such as a credential read from the controller, so it
-cannot be told apart from the launch's own. Once the replay reaches that
-sequence number, the controller settles every launch whose reply it had lost
-when it requested the resume: a run the worker is executing keeps a reachable
-handle, so Stop reaches it, and a Stop pressed during the gap aborts it. A
-launch the worker never received is sent again once on the new session, with
-the same run ID and admission signal, and settles the same way. A launch the
-worker received that left no record failed before its reply was lost; it, and a
-relaunch that is lost as well, fail as a dispatch failure: "The executor
-connection was lost before this turn started. Send it again." A launch
-dispatched on the new session settles through its own reply, even while the
-replay is still arriving.
+when pressure drops older rows. A launch that settles after its session was lost
+publishes its outcome on the binding instead: its handle, or its own failure,
+since losing the session does not cancel it. A nested call the loss cuts off,
+such as a credential read from the controller, fails the launch with its own
+error. A launch cancelled before it started reports the dispatch failure below.
+Once the replay reaches that sequence number, the controller settles every
+launch whose reply it had lost when it requested the resume: a run the worker is
+executing keeps a reachable handle, so Stop reaches it, and a Stop pressed
+during the gap aborts it. A launch the worker never received is sent again once
+on the new session, with the same run ID and admission signal, and settles the
+same way. A launch the worker received that left no record failed before its
+reply was lost; it, and a relaunch that is lost as well, fail as a dispatch
+failure: "The executor connection was lost before this turn started. Send it
+again." A launch dispatched on the new session settles through its own reply,
+even while the replay is still arriving.
 
 A reply the worker's session queue cannot take, unless the journal holds it
 (see Calls Across Reconnects), reaches the controller as an unknown outcome on

@@ -385,29 +385,37 @@ describe('ProducerRelay', () => {
     const { integration, binding } = integrationDouble();
     relay.track(integration);
     const first = session();
-    const [started, failed] = [binding(), binding()];
-    for (const ref of [started, failed]) relay.bind(first, integration, ref);
+    const [started, cancelled, failed] = [binding(), binding(), binding()];
+    for (const ref of [started, cancelled, failed]) relay.bind(first, integration, ref);
     const handle = createAgentResourceRef(SCOPE, 'execution');
     const success = Promise.withResolvers<typeof handle>();
+    const cancellation = Promise.withResolvers<typeof handle>();
     const failure = Promise.withResolvers<typeof handle>();
+    const abandoned = new AbortController();
     const launches = [
       relay.launch(first, integration, { producerBinding: started, runId: 'run-1' }, new AbortController().signal, undeliveredReplies().observe, () => success.promise),
-      relay.launch(first, integration, { producerBinding: failed, runId: 'run-2' }, new AbortController().signal, undeliveredReplies().observe, () => failure.promise)
+      relay.launch(first, integration, { producerBinding: cancelled, runId: 'run-2' }, abandoned.signal, undeliveredReplies().observe, () => cancellation.promise)
+        .catch(() => null),
+      relay.launch(first, integration, { producerBinding: failed, runId: 'run-3' }, new AbortController().signal, undeliveredReplies().observe, () => failure.promise)
         .catch(() => null),
     ];
     relay.suspend(first);
+    abandoned.abort();
     success.resolve(handle);
+    cancellation.reject(new Error('Synthetic cancelled admission'));
     failure.reject(new AgentIntegrationError('AUTH_REQUIRED', 'Synthetic sign-in required', false));
     await Promise.all(launches);
     const second = session();
     relay.resume(second, integration, [
       { binding: started, acknowledgedSeq: 0 },
+      { binding: cancelled, acknowledgedSeq: 0 },
       { binding: failed, acknowledgedSeq: 0 },
     ]);
 
     expect(second.frames().map(({ notification }) => [notification.binding.id, notification.event])).toEqual([
       [started.id, { type: 'launch-settled', runId: 'run-1', handle }],
-      [failed.id, { type: 'launch-settled', runId: 'run-2', error: EXECUTOR_DISCONNECTED_BEFORE_START }],
+      [cancelled.id, { type: 'launch-settled', runId: 'run-2', error: EXECUTOR_DISCONNECTED_BEFORE_START }],
+      [failed.id, { type: 'launch-settled', runId: 'run-3', error: { code: 'AUTH_REQUIRED', message: 'Synthetic sign-in required' } }],
     ]);
     relay.dispose();
   });

@@ -167,13 +167,14 @@ export class ProducerRelay {
     } catch (error) {
       if (binding.launch === launch) {
         binding.launch = null;
-        // A failure after the session was lost may come from a call the loss cut
-        // off, such as a credential read, and cannot be told apart from the
-        // launch's own, so it reads as the dispatch failure.
+        // Losing its session does not cancel a launch, so a failure is its own unless
+        // the launch was cancelled before it started. A nested call the loss cut
+        // off, such as a credential read, fails with its own error.
+        const cancelled = signal.aborted || launch.cancellation.signal.aborted;
         publishIfReplyLost({
           type: 'launch-settled',
           runId: launch.runId,
-          error: binding.session === session ? failureDetail(error) : EXECUTOR_DISCONNECTED_BEFORE_START,
+          error: cancelled && binding.session !== session ? EXECUTOR_DISCONNECTED_BEFORE_START : failureDetail(error),
         });
       }
       throw error;

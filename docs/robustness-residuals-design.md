@@ -107,6 +107,9 @@ reached the controller as an unknown outcome with no report to follow.
   whatever its cause. The lost session cancels its calls, so the worker cannot
   tell a failure the loss caused from the launch's own. Only a live session's
   undeliverable reply carries the launch's own failure.
+- Superseded by executor RPC continuity: a launch now outlives its session, so
+  one that fails after the loss reports its own failure unless it was cancelled
+  before it started, as `docs/executor/transport.md` describes.
 
 ### Nested calls with unknown outcomes
 
