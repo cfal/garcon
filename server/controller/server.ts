@@ -535,7 +535,7 @@ export async function startServer(): Promise<void> {
       logger.warn('Pending agent handoff recovery failed:', errorMessage(error));
     });
 
-    const shareStore = new ShareStore(workspaceDir);
+    const shareStore = new ShareStore(workspaceDir, { rendering: transcriptRendering });
     await shareStore.init();
 
     const commandLedger = new CommandLedger(workspaceDir);

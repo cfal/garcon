@@ -11,6 +11,8 @@ import { LedgerFencedError, safeFenceDiagnostic, StaleTranscriptViewError } from
 import { TranscriptLedgerService } from '../service.ts';
 import { TranscriptLedgerStore } from '../store.ts';
 import { TranscriptViewReader } from '../view-reader.ts';
+import { decodeStoredLedgerRow } from '../codec.ts';
+import { ledgerRowsToMessages } from '../presentation.ts';
 
 const TS = '2026-08-12T00:00:00.000Z';
 
@@ -313,7 +315,7 @@ describe('TranscriptViewReader', () => {
     });
   });
 
-  it('captures the rendering fold as a self-contained view snapshot', async () => {
+  it('captures stored rows that render as a self-contained view snapshot', async () => {
     await withReader(async ({ ledger, reader, viewId }) => {
       ledger.appendInputAndCompose({
         chatId: 'chat-1',
@@ -333,13 +335,14 @@ describe('TranscriptViewReader', () => {
         rows: [{ message: new AssistantMessage(TS, 'answer') }],
       });
 
-      const snapshot = await reader.renderingSnapshot('chat-1');
+      const snapshot = await reader.withStoredSnapshot('chat-1', captured);
 
       expect(snapshot).toMatchObject({
         transcriptViewId: viewId,
         lastOrdinal: 3,
       });
-      expect(snapshot.messages.map((message) => message.content)).toEqual(['prompt', 'answer']);
+      expect(ledgerRowsToMessages(snapshot.rows.map(decodeStoredLedgerRow)).map((message) => message.content))
+        .toEqual(['prompt', 'answer']);
     });
   });
 
@@ -399,7 +402,7 @@ describe('TranscriptViewReader', () => {
         },
       });
 
-      await expect(reader.renderingSnapshot('chat-1')).rejects.toMatchObject({
+      await expect(reader.withStoredSnapshot('chat-1', captured)).rejects.toMatchObject({
         code: 'SOURCE_REVISION_CHANGED',
         status: 409,
         retryable: true,
@@ -469,7 +472,6 @@ describe('TranscriptViewReader', () => {
       for (const read of [
         () => reader.page('chat-1', 20),
         () => reader.replay('chat-1', transcriptViewId('view-1'), 0),
-        () => reader.renderingSnapshot('chat-1'),
         () => reader.withStoredSnapshot('chat-1', captured),
       ]) {
         let failure;

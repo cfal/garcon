@@ -115,16 +115,24 @@ export async function writeJsonFileAtomic(
   value: unknown,
   options: { mode?: number; trailingNewline?: boolean } = {},
 ): Promise<void> {
+  const payload = JSON.stringify(value, null, 2) + (options.trailingNewline === false ? '' : '\n');
+  await writeFileAtomic(filePath, payload, options);
+}
+
+export async function writeFileAtomic(
+  filePath: string,
+  payload: string | Uint8Array,
+  options: { mode?: number } = {},
+): Promise<void> {
   const dir = path.dirname(filePath);
   const base = path.basename(filePath);
   const tempPath = path.join(dir, `.${base}.${process.pid}.${crypto.randomUUID()}.tmp`);
-  const payload = JSON.stringify(value, null, 2) + (options.trailingNewline === false ? '' : '\n');
   let file: Awaited<ReturnType<typeof fs.open>> | null = null;
 
   await fs.mkdir(dir, { recursive: true });
   try {
     file = await fs.open(tempPath, 'w', options.mode);
-    await file.writeFile(payload, 'utf8');
+    await file.writeFile(payload);
     await file.sync();
     await file.close();
     file = null;

@@ -7,4 +7,12 @@ export const inlineTranscriptRendering = {
     signal?.throwIfAborted();
     return runTranscriptRenderingTask({ kind: 'render-transcript-export', ...request }, structuredClone(rows));
   },
+  async renderShareSnapshot({ header, rows }, signal) {
+    signal?.throwIfAborted();
+    return runTranscriptRenderingTask({ kind: 'render-share-snapshot', header }, structuredClone(rows));
+  },
+  async convertShareSnapshot(shareToken, json, signal) {
+    signal?.throwIfAborted();
+    return runTranscriptRenderingTask({ kind: 'convert-share-snapshot', shareToken }, [json]);
+  },
 } satisfies TranscriptRendering;

@@ -4,7 +4,6 @@ import type {
   TranscriptReplayResult,
 } from '../../../common/chat-view.js';
 import { CHAT_MESSAGES_MAX_LIMIT } from '../../../common/chat-view.js';
-import type { ChatMessage } from '../../../common/chat-types.js';
 import type { TicketSource } from '../../../common/tickets.js';
 import type { TicketSourceResolution } from '../../../common/ticket-source-navigation.js';
 import { TranscriptHistoryUnavailableError } from '../chats/errors.js';
@@ -16,9 +15,9 @@ import {
   LedgerFencedError,
   StaleTranscriptViewError,
 } from './errors.js';
-import { ledgerRowsToMessages, ledgerRowsToTranscriptMessages } from './presentation.js';
+import { ledgerRowsToTranscriptMessages } from './presentation.js';
 import type { TranscriptLedgerService } from './service.js';
-import { decodeStoredLedgerRow, type StoredLedgerRow } from './codec.js';
+import type { StoredLedgerRow } from './codec.js';
 
 export class TranscriptViewReader {
   readonly #ledger: TranscriptLedgerService;
@@ -161,24 +160,9 @@ export class TranscriptViewReader {
     };
   }
 
-  async renderingSnapshot(
-    chatId: string,
-    signal: AbortSignal = new AbortController().signal,
-  ): Promise<{
-    readonly transcriptViewId: TranscriptViewId;
-    readonly lastOrdinal: number;
-    readonly messages: readonly ChatMessage[];
-  }> {
-    return this.withStoredSnapshot(chatId, async (snapshot) => ({
-      transcriptViewId: snapshot.transcriptViewId,
-      lastOrdinal: snapshot.lastOrdinal,
-      messages: ledgerRowsToMessages(snapshot.rows.map(decodeStoredLedgerRow)),
-    }), signal);
-  }
-
   // Captures the whole current view as stored rows for work that decodes them on a Worker
-  // rather than on the controller's event loop, such as export and handoff rendering. A
-  // row that fails to decode there fences the chat, as it would here.
+  // rather than on the controller's event loop, such as export, share, and handoff
+  // rendering. A row that fails to decode there fences the chat, as it would here.
   async withStoredSnapshot<T>(
     chatId: string,
     work: (snapshot: StoredTranscriptSnapshot) => Promise<T>,

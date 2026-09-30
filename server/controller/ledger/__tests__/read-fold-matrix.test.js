@@ -17,7 +17,8 @@ import {
 } from '../garcon-command-request.ts';
 import { createTranscriptEventFanout } from '../event-fanout.ts';
 import { foldRowsForExport } from '../export-fold.ts';
-import { ledgerRowsToTranscriptMessages } from '../presentation.ts';
+import { ledgerRowsToMessages, ledgerRowsToTranscriptMessages } from '../presentation.ts';
+import { decodeStoredLedgerRow } from '../codec.ts';
 import { frozenConversationDrafts } from '../projection.ts';
 import { TranscriptLedgerService } from '../service.ts';
 import { TranscriptLedgerStore } from '../store.ts';
@@ -131,10 +132,11 @@ describe('transcript ledger read-fold matrix', () => {
       const reader = new TranscriptViewReader(ledger, {
         ensure: async () => ledger.currentView(CHAT_ID),
       });
-      const snapshot = await reader.renderingSnapshot(CHAT_ID);
+      const snapshot = await reader.withStoredSnapshot(CHAT_ID, async (captured) => captured);
       expect(snapshot.transcriptViewId).toBe(VIEW_ID);
       expect(snapshot.lastOrdinal).toBe(15);
-      expect(snapshot.messages).toEqual(rendered.map((entry) => entry.message));
+      expect(ledgerRowsToMessages(snapshot.rows.map(decodeStoredLedgerRow)))
+        .toEqual(rendered.map((entry) => entry.message));
 
       const searchRows = await initializeSearchFold(ledger, rows);
       expect(searchRows.map((row) => [row.ordinal, row.role, row.body])).toEqual([

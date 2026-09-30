@@ -6,13 +6,13 @@ import { withJsonBody } from '../lib/json-route.js';
 import type { IShareStore } from '../chats/share-store.js';
 import type { IChatRegistry } from '../chats/store.js';
 import type {
-  GetSharedChatResponse,
   RevokeShareResponse,
   ShareChatResponse,
-  SharedChatSnapshot,
+  SharedChatMessagePage,
   ShareStatusResponse,
 } from '../../../common/share-types.ts';
-import { renderSharedChatText } from '../chats/share-transcript.ts';
+import type { SharedChatMessages } from '../chats/share-store.js';
+import type { TranscriptViewReader } from '../ledger/view-reader.js';
 import {
   injectSharedChatContext,
   renderStandaloneSharedHtml,
@@ -37,13 +37,7 @@ interface MetadataDep {
   getChatMetadata(chatId: string): ChatMetadata | null;
 }
 
-export interface ShareTranscriptSnapshotPort {
-  renderingSnapshot(chatId: string): Promise<{
-    readonly transcriptViewId: string;
-    readonly lastOrdinal: number;
-    readonly messages: readonly unknown[];
-  }>;
-}
+export type ShareTranscriptSnapshotPort = Pick<TranscriptViewReader, 'withStoredSnapshot'>;
 
 
 function extractLlmTokenFromPath(pathname: string): string | null {
@@ -176,8 +170,9 @@ function negotiateSharedRepresentation(
   return candidates[0]?.representation ?? null;
 }
 
-function plainTextResponse(snapshot: SharedChatSnapshot): Response {
-  return new Response(renderSharedChatText(snapshot), {
+// Streams the transcript rendered when the share was published.
+function plainTextResponse(textPath: string): Response {
+  return new Response(Bun.file(textPath), {
     headers: {
       'Content-Type': 'text/plain; charset=utf-8',
       'Cache-Control': NO_STORE,
@@ -191,6 +186,21 @@ function publicJsonResponse(body: unknown, status = 200): Response {
     status,
     headers: { 'Cache-Control': NO_STORE },
   });
+}
+
+// Builds a GetSharedChatResponse around the page's messages as stored, so serving a page
+// never parses or re-encodes them.
+function sharedChatPageResponse(
+  shared: SharedChatMessages,
+  page: SharedChatMessagePage,
+): Response {
+  const { messageCount: _messageCount, ...snapshot } = shared.header;
+  const snapshotFields = JSON.stringify(snapshot).slice(0, -1);
+  const messages = shared.messages.slice(page.start, page.end).join(',');
+  return new Response(
+    `{"snapshot":${snapshotFields},"messages":[${messages}]},"page":${JSON.stringify(page)}}`,
+    { headers: { 'Content-Type': 'application/json;charset=utf-8', 'Cache-Control': NO_STORE } },
+  );
 }
 
 export default function createShareRoutes(
@@ -221,33 +231,27 @@ export default function createShareRoutes(
         );
       }
 
-      const capture = await transcripts.renderingSnapshot(chatId);
+      const snapshot = await transcripts.withStoredSnapshot(chatId, (capture) => {
+        const meta = metadata.getChatMetadata(chatId);
+        const overrideTitle = settings.getChatName(chatId);
+        const title = extractFirstLine(
+          (overrideTitle || meta?.firstMessage || 'Untitled Chat') as string,
+        );
 
-      const meta = metadata.getChatMetadata(chatId);
-      const overrideTitle = settings.getChatName(chatId);
-      const title = extractFirstLine(
-        (overrideTitle || meta?.firstMessage || 'Untitled Chat') as string,
-      );
-
-      const partial = {
-        chatId,
-        title,
-        agentId: session.agentId as string,
-        model: session.model as string,
-        projectPath: session.projectPath as string,
-        sharedAt: new Date().toISOString(),
-        origin: {
-          transcriptViewId: capture.transcriptViewId,
-          lastOrdinal: capture.lastOrdinal,
-        },
-        messages: [...capture.messages],
-      };
-
-      // Update existing share with latest messages, or create a new one.
-      const existing = await shareStore.getShareByChatId(chatId);
-      const snapshot = existing
-        ? await shareStore.updateShare(chatId, partial)
-        : await shareStore.createShare(chatId, partial);
+        // Republishing keeps the chat's existing token and replaces its snapshot.
+        return shareStore.publish(chatId, {
+          chatId,
+          title,
+          agentId: session.agentId as string,
+          model: session.model as string,
+          projectPath: session.projectPath as string,
+          sharedAt: new Date().toISOString(),
+          origin: {
+            transcriptViewId: capture.transcriptViewId,
+            lastOrdinal: capture.lastOrdinal,
+          },
+        }, capture.rows);
+      });
 
       const resp: ShareChatResponse = {
         success: true,
@@ -307,7 +311,7 @@ export default function createShareRoutes(
       );
     }
 
-    const existing = await shareStore.getShareByChatId(chatId);
+    const existing = shareStore.getEntryByChatId(chatId);
     const resp: ShareStatusResponse = existing
       ? {
           isShared: true,
@@ -332,18 +336,18 @@ export default function createShareRoutes(
       );
     }
 
-    const snapshot = await shareStore.getShare(token);
-    if (!snapshot) {
+    const shared = await shareStore.getMessages(token);
+    if (!shared) {
       return publicJsonResponse({ error: 'Share not found' }, 404);
     }
 
-    const totalMessages = snapshot.messages.length;
+    const totalMessages = shared.header.messageCount;
     const requestedBefore = url.searchParams.get('before');
     const requestedVersion = url.searchParams.get('version');
     const cursorIsStale =
       requestedBefore !== null &&
       requestedVersion !== null &&
-      requestedVersion !== snapshot.sharedAt;
+      requestedVersion !== shared.header.sharedAt;
     const end = parseMessageCursor(
       cursorIsStale ? null : requestedBefore,
       totalMessages,
@@ -353,18 +357,14 @@ export default function createShareRoutes(
       totalMessages,
     );
     const start = Math.max(0, end - pageSize);
-    const resp: GetSharedChatResponse = {
-      snapshot: { ...snapshot, messages: snapshot.messages.slice(start, end) },
-      page: {
-        snapshotVersion: snapshot.sharedAt,
-        totalMessages,
-        start,
-        end,
-        nextBefore: start > 0 ? start : null,
-        ...(cursorIsStale ? { reset: true } : {}),
-      },
-    };
-    return publicJsonResponse(resp);
+    return sharedChatPageResponse(shared, {
+      snapshotVersion: shared.header.sharedAt,
+      totalMessages,
+      start,
+      end,
+      nextBefore: start > 0 ? start : null,
+      ...(cursorIsStale ? { reset: true } : {}),
+    });
   });
 
   // Serves a plain text transcript at /shared/llm/:token for LLM consumption.
@@ -377,12 +377,12 @@ export default function createShareRoutes(
       return publicJsonResponse({ error: 'Share token is required' }, 400);
     }
 
-    const snapshot = await shareStore.getShare(token);
-    if (!snapshot) {
+    const textPath = await shareStore.getTextPath(token);
+    if (!textPath) {
       return publicJsonResponse({ error: 'Share not found' }, 404);
     }
 
-    return plainTextResponse(snapshot);
+    return plainTextResponse(textPath);
   });
 
   // Serves the shared chat page at /shared/:token. Enriches the SPA shell with
@@ -393,7 +393,7 @@ export default function createShareRoutes(
   ): Promise<Response> {
     const shell = await loadStaticText('/index.html');
     const token = extractShareTokenFromPath(url.pathname);
-    const snapshot = token ? await shareStore.getShare(token) : null;
+    const snapshot = token ? await shareStore.getHeader(token) : null;
     const appTitle = resolvePublicAppTitle(
       settings.getUiSettings(),
       settings.getRemoteSettingsVersion(),
@@ -408,7 +408,10 @@ export default function createShareRoutes(
     }
 
     const representation = negotiateSharedRepresentation(request);
-    if (representation === 'text') return plainTextResponse(snapshot);
+    if (representation === 'text') {
+      const textPath = await shareStore.getTextPath(token);
+      return textPath ? plainTextResponse(textPath) : new Response('Not found', { status: 404 });
+    }
     if (!representation) {
       return new Response('Not acceptable', {
         status: 406,

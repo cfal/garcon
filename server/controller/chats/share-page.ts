@@ -4,9 +4,11 @@
 // to the plain-text transcript. The small no-JavaScript fallback links to the
 // transcript instead of embedding it, keeping browser parse cost bounded.
 
-import type { SharedChatSnapshot } from '../../../common/share-types.ts';
+import type { ShareSnapshotHeader } from './share-snapshot-format.js';
 import type { PublicAppTitle } from '../app-title.js';
 import { appTitleBootstrapScript } from '../app-title.js';
+
+type SharePageSummary = Pick<ShareSnapshotHeader, 'title' | 'agentId' | 'messageCount'>;
 
 const FALLBACK_ELEMENT_ID = 'garcon-shared-fallback';
 const DESCRIPTION_MAX_LENGTH = 200;
@@ -23,14 +25,14 @@ function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (char) => HTML_ESCAPES[char] ?? char);
 }
 
-function shareTitle(snapshot: SharedChatSnapshot): string {
+function shareTitle(snapshot: SharePageSummary): string {
   const title = snapshot.title?.trim();
   return title && title.length > 0 ? title : 'Shared chat';
 }
 
 // Prefers the chat title (already the first user line at share time); falls back
 // to a generic agent description when the title is absent or a placeholder.
-function shareDescription(snapshot: SharedChatSnapshot): string {
+function shareDescription(snapshot: SharePageSummary): string {
   const title = snapshot.title?.trim();
   if (title && title !== 'Untitled Chat') {
     return title.length > DESCRIPTION_MAX_LENGTH
@@ -41,7 +43,7 @@ function shareDescription(snapshot: SharedChatSnapshot): string {
 }
 
 function buildHeadTags(
-  snapshot: SharedChatSnapshot,
+  snapshot: SharePageSummary,
   token: string,
   canonicalUrl: string,
   appTitle: PublicAppTitle,
@@ -72,14 +74,14 @@ function buildHeadTags(
 // Keeps the fallback independent of transcript size. Agents can follow the
 // explicit plain-text link without forcing every browser to parse the transcript.
 function buildBodyFallback(
-  snapshot: SharedChatSnapshot,
+  snapshot: SharePageSummary,
   token: string,
   removable: boolean,
 ): string {
   const title = escapeHtml(shareTitle(snapshot));
   const agent = escapeHtml(snapshot.agentId || 'agent');
   const llmHref = escapeHtml(`/shared/llm/${encodeURIComponent(token)}`);
-  const block = `<main id="${FALLBACK_ELEMENT_ID}"><h1>${title}</h1><p>Shared ${agent} conversation with ${snapshot.messages.length} messages.</p><p><a href="${llmHref}">Read the full plain-text transcript</a></p></main>`;
+  const block = `<main id="${FALLBACK_ELEMENT_ID}"><h1>${title}</h1><p>Shared ${agent} conversation with ${snapshot.messageCount} messages.</p><p><a href="${llmHref}">Read the full plain-text transcript</a></p></main>`;
   if (!removable) return block;
   return `${block}<script>document.getElementById(${JSON.stringify(FALLBACK_ELEMENT_ID)})?.remove()</script>`;
 }
@@ -89,7 +91,7 @@ function buildBodyFallback(
 // first body child.
 export function injectSharedChatContext(
   shell: string,
-  snapshot: SharedChatSnapshot,
+  snapshot: SharePageSummary,
   token: string,
   canonicalUrl: string,
   appTitle: PublicAppTitle,
@@ -113,7 +115,7 @@ export function injectSharedChatContext(
 // Self-contained shared page used when the SPA shell is unavailable (e.g. the
 // build output is missing). Keeps the plain-text transcript link visible.
 export function renderStandaloneSharedHtml(
-  snapshot: SharedChatSnapshot,
+  snapshot: SharePageSummary,
   token: string,
   canonicalUrl: string,
   appTitle: PublicAppTitle,
