@@ -32,12 +32,12 @@ import {
   PiRpcClient,
   PiRpcCommandError,
   PiRpcTransportError,
+  type PiRpcResponse,
 } from './pi-rpc-client.js';
 import {
   classifyPiSteerRejection,
-  occurrenceCounts,
+  piInputDisposition,
   piCompactionMessage,
-  piUserMessageText,
   preparePiRpcPrompt,
   rejectedPiSteer,
   resolvePiThinkingLevel,
@@ -59,7 +59,6 @@ import type {
   PiPromptDispatch,
   PiRetireOptions,
   PiRpcSession,
-  PiSteerSubmission,
 } from './pi-rpc-session-state.js';
 
 export interface PiModelReader {
@@ -161,15 +160,17 @@ export class PiRpcRuntime {
       const currentPathExists = current?.nativePath
         ? await canonicalExistingPiSessionPath(current.nativePath) !== null
         : false;
+      // Handled-only sessions remain in memory until Pi records conversation.
       const reusable = Boolean(
         current
         && current.state === 'idle'
         && current.process
         && !current.process.killed
         && current.client
+        && !current.nativeRunOpen
         && current.model === requestedModel
         && current.thinking === requestedThinking
-        && currentPathExists,
+        && (currentPathExists || !current.conversationObserved),
       );
 
       if (reusable) {
@@ -273,21 +274,20 @@ export class PiRpcRuntime {
       rejection = this.#validateSteerTarget(request, captured);
       if (rejection) return rejection;
 
-      const submission: PiSteerSubmission = {
-        input: request.input,
-        accepted: false,
-        delivered: false,
-        persisted: false,
-      };
-      captured.turn.steerSubmissions.add(submission);
+      let acknowledgedOnTarget = false;
       try {
-        await captured.session.client!.send(
+        const response = await captured.session.client!.send(
           { type: 'steer', message: request.input },
           STEER_RESPONSE_TIMEOUT_MS,
+          () => {
+            acknowledgedOnTarget = this.#validateSteerTarget(request, captured) === null;
+          },
         );
+        if (piInputDisposition(response, 'steer') === 'handled') {
+          return { kind: 'accepted' };
+        }
       } catch (error) {
         if (error instanceof PiRpcCommandError) {
-          captured.turn.steerSubmissions.delete(submission);
           return classifyPiSteerRejection(error);
         }
         if (error instanceof PiRpcTransportError) {
@@ -296,8 +296,6 @@ export class PiRpcRuntime {
               turnOutcome: 'failed',
               failureMessage: error.message,
             });
-          } else {
-            captured.turn.steerSubmissions.delete(submission);
           }
           return {
             kind: 'failed',
@@ -308,17 +306,15 @@ export class PiRpcRuntime {
         throw error;
       }
 
-      submission.accepted = true;
-      rejection = this.#validateSteerTarget(request, captured);
-      if (rejection) {
-        if (submission.persisted && captured.turn.settleObserved) {
-          return { kind: 'accepted' };
-        }
-        captured.turn.steerSubmissions.delete(submission);
+      if (!acknowledgedOnTarget) {
         this.#retireInBackground(captured.session, 'steer missed the run', {
           turnOutcome: 'preserve',
         });
-        return rejection;
+        return {
+          kind: 'failed',
+          outcome: 'unknown',
+          message: 'Pi queued the steering input, but delivery to the target turn is unconfirmed',
+        };
       }
       this.#logger.debug('Pi steering accepted', {
         chatId: captured.session.chatId,
@@ -456,6 +452,8 @@ export class PiRpcRuntime {
       process: proc,
       client: null,
       turn: null,
+      nativeRunOpen: false,
+      conversationObserved: resume !== null,
       deliveryReservations: 0,
       pendingFinish: null,
       startTime: now,
@@ -589,12 +587,14 @@ export class PiRpcRuntime {
     });
     const turn: PiActiveTurn = {
       operation: request.operation,
+      bound: false,
       stopRequested: false,
       settleObserved: false,
+      postSettleRunObserved: false,
       completion: 'pending',
       failureMessage: null,
-      steerSubmissions: new Set(),
       steeringQueue: [],
+      followUpQueue: [],
       settle: resolveSettle,
     };
     assertPiExecutionOpen(request);
@@ -603,10 +603,14 @@ export class PiRpcRuntime {
     session.state = 'prompting';
     session.startTime = Date.now();
     session.lastActivityAt = session.startTime;
+    const generation = session.generation;
     const response = client.sendUnbounded({
       type: 'prompt',
       message: prompt.message,
       ...(prompt.images.length > 0 ? { images: prompt.images } : {}),
+    }, (accepted) => {
+      if (session.generation !== generation || turn.completion !== 'pending') return;
+      this.#acceptPrompt(session, turn, accepted);
     });
     return {
       accepted: this.#awaitPromptAcceptance(session, turn, response),
@@ -638,8 +642,24 @@ export class PiRpcRuntime {
       this.#retireInBackground(session, 'prompt rejected');
       throw new AgentIntegrationError('PROVIDER_FAILURE', message, false);
     }
-    if (turn.completion === 'pending') {
+  }
+
+  #acceptPrompt(session: PiRpcSession, turn: PiActiveTurn, response: PiRpcResponse): void {
+    try {
+      const disposition = piInputDisposition(response, 'prompt');
+      if (disposition === 'queued' || (disposition === 'started' && session.nativeRunOpen)) {
+        throw new PiRpcTransportError('Pi accepted a prompt into an unexpected native run', true);
+      }
+      if (disposition === 'handled' && !session.nativeRunOpen) {
+        this.#finishSettle(session);
+        return;
+      }
+      turn.bound = true;
       session.state = 'active';
+    } catch (error) {
+      this.#completeTurn(session, turn, 'failed', errorMessage(error));
+      this.#retireInBackground(session, 'invalid prompt acceptance');
+      throw error;
     }
   }
 
@@ -648,8 +668,28 @@ export class PiRpcRuntime {
     const timestamp = new Date().toISOString();
     const type = event.type;
 
+    if (type === 'agent_start') {
+      session.nativeRunOpen = true;
+      if (session.turn?.settleObserved) session.turn.postSettleRunObserved = true;
+      if (!session.turn) this.#retireInBackground(session, 'unowned extension run');
+      return;
+    }
+
     if (type === 'queue_update') {
-      this.#observeSteeringQueue(session, event.steering);
+      const turn = session.turn;
+      const { steering, followUp } = event;
+      if (!turn) {
+        if ([steering, followUp].some((queue) => Array.isArray(queue) && queue.length > 0)) {
+          this.#retireInBackground(session, 'unowned queued input');
+        }
+        return;
+      }
+      if (Array.isArray(steering) && steering.every((input) => typeof input === 'string')) {
+        turn.steeringQueue = [...steering];
+      }
+      if (Array.isArray(followUp) && followUp.every((input) => typeof input === 'string')) {
+        turn.followUpQueue = [...followUp];
+      }
       return;
     }
 
@@ -663,7 +703,7 @@ export class PiRpcRuntime {
 
     if (type === 'compaction_end') {
       const turn = session.turn;
-      if (!turn) return;
+      if (!turn || turn.settleObserved) return;
       const message = piCompactionMessage(event, timestamp);
       if (message) this.#publishMessages(session, turn, [message]);
       return;
@@ -677,16 +717,18 @@ export class PiRpcRuntime {
         });
         return;
       }
+      // A reserved steer acknowledgement does not extend the settled run's publication window.
+      if (turn.settleObserved) return;
       const message = event.message as unknown;
-      turn.finalResponse = piFinalResponse(message);
-      turn.failureMessage = null;
       const role = message && typeof message === 'object'
         ? (message as Record<string, unknown>).role
         : null;
-      if (role === 'user') {
-        this.#observeSteeringPersistence(session, message);
-        return;
+      if (role === 'user' || role === 'assistant') session.conversationObserved = true;
+      if (role === 'assistant') {
+        turn.finalResponse = piFinalResponse(message);
+        turn.failureMessage = null;
       }
+      if (role === 'user') return;
       const messages = convertPiMessage(message, { includeUser: false });
       if (messages.length > 0) this.#publishMessages(session, turn, messages);
 
@@ -704,42 +746,13 @@ export class PiRpcRuntime {
     }
 
     if (type === 'agent_settled') {
-      this.#handleSettle(session);
+      session.nativeRunOpen = false;
+      // Preflight extension runs can settle before the prompted run is accepted.
+      if (session.turn?.bound && !session.turn.settleObserved) this.#handleSettle(session);
       return;
     }
 
     // Ignores per-run and streaming events that do not change Garcon's rendered contract.
-  }
-
-  #observeSteeringQueue(session: PiRpcSession, value: unknown): void {
-    const turn = session.turn;
-    if (!turn || !Array.isArray(value) || !value.every((item) => typeof item === 'string')) return;
-    const next = value as string[];
-    const remaining = occurrenceCounts(next);
-    for (const input of turn.steeringQueue) {
-      const count = remaining.get(input) ?? 0;
-      if (count > 0) {
-        remaining.set(input, count - 1);
-        continue;
-      }
-      const delivered = Array.from(turn.steerSubmissions).find(
-        (submission) => !submission.delivered && submission.input === input,
-      );
-      if (delivered) delivered.delivered = true;
-    }
-    turn.steeringQueue = [...next];
-  }
-
-  #observeSteeringPersistence(session: PiRpcSession, value: unknown): void {
-    const turn = session.turn;
-    const input = piUserMessageText(value);
-    if (!turn || input === null) return;
-    const persisted = Array.from(turn.steerSubmissions).find(
-      (submission) => submission.delivered && !submission.persisted && submission.input === input,
-    );
-    if (persisted) {
-      persisted.persisted = true;
-    }
   }
 
   #handleSettle(session: PiRpcSession): void {
@@ -757,19 +770,14 @@ export class PiRpcRuntime {
   #finishSettle(session: PiRpcSession): void {
     const turn = session.turn;
     if (!turn) return;
-    const steeringUnresolved = this.#hasUnresolvedSteering(turn);
+    const shouldRetire = turn.steeringQueue.length > 0
+      || turn.followUpQueue.length > 0
+      || turn.postSettleRunObserved
+      || session.nativeRunOpen;
     this.#completeTurn(session, turn, turn.failureMessage ? 'failed' : 'finished', turn.failureMessage ?? undefined);
-    if (steeringUnresolved) {
-      this.#retireInBackground(session, 'steering remained uncertain at settle');
+    if (shouldRetire) {
+      this.#retireInBackground(session, 'input remained uncertain at settle');
     }
-  }
-
-  #hasUnresolvedSteering(turn: PiActiveTurn): boolean {
-    const hasUnpersistedSteer = Array.from(turn.steerSubmissions).some(
-      (submission) => submission.accepted && !submission.persisted,
-    );
-    const hasQueuedSteering = turn.steeringQueue.length > 0;
-    return hasUnpersistedSteer || hasQueuedSteering;
   }
 
   #handleExit(session: PiRpcSession, generation: number, code: number): void {

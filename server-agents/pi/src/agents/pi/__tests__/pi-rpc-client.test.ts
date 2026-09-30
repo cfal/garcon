@@ -86,6 +86,38 @@ async function letIoSettle(): Promise<void> {
 }
 
 describe('PiRpcClient', () => {
+  it('observes responses in wire order before events from the same chunk', async () => {
+    const fake = createFakeProc();
+    const order: string[] = [];
+    const client = new PiRpcClient(fake.proc, {
+      onEvent: (event) => order.push(String(event.type)), onMalformed: () => {},
+    });
+    const pending = client.sendUnbounded({ type: 'prompt' }, () => { order.push('accepted'); });
+    await letIoSettle();
+    const { id } = JSON.parse(fake.writes[0]);
+    fake.pushStdout([
+      { type: 'agent_settled' },
+      { type: 'response', id, command: 'prompt', success: true },
+      { type: 'agent_start' }, { type: 'agent_settled' },
+    ].map((event) => JSON.stringify(event)).join('\n') + '\n');
+    await pending;
+    expect(order).toEqual(['agent_settled', 'accepted', 'agent_start', 'agent_settled']);
+    fake.exit(0);
+  });
+
+  it('rejects a failed response observer without losing subsequent events', async () => {
+    const fake = createFakeProc();
+    const { client, events } = createClient(fake);
+    const pending = client.sendUnbounded({ type: 'prompt' }, () => { throw new Error('invalid disposition'); });
+    await letIoSettle();
+    const { id } = JSON.parse(fake.writes[0]);
+    fake.pushStdout(JSON.stringify({ type: 'response', id, command: 'prompt', success: true })
+      + '\n' + JSON.stringify({ type: 'agent_settled' }) + '\n');
+    await expect(pending).rejects.toThrow('invalid disposition');
+    expect(events).toEqual([{ type: 'agent_settled' }]);
+    fake.exit(0);
+  });
+
   it('correlates responses by id and routes non-response lines as events', async () => {
     const fake = createFakeProc();
     const { client, events } = createClient(fake);

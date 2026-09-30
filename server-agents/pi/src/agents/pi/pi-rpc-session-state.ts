@@ -4,22 +4,17 @@ import type { AgentFinalResponse } from '@garcon/server-agent-interface';
 
 export type PiRpcSessionState = 'starting' | 'idle' | 'prompting' | 'active' | 'retiring';
 
-export interface PiSteerSubmission {
-  readonly input: string;
-  accepted: boolean;
-  delivered: boolean;
-  persisted: boolean;
-}
-
 export interface PiActiveTurn {
   readonly operation: AgentRuntimeOperation;
+  bound: boolean;
   stopRequested: boolean;
   settleObserved: boolean;
+  postSettleRunObserved: boolean;
   completion: 'pending' | 'finished' | 'failed' | 'stopped' | 'shutdown';
   failureMessage: string | null;
   finalResponse?: AgentFinalResponse;
-  readonly steerSubmissions: Set<PiSteerSubmission>;
   steeringQueue: readonly string[];
+  followUpQueue: readonly string[];
   settle(): void;
 }
 
@@ -34,6 +29,8 @@ export interface PiRpcSession {
   process: ReturnType<typeof Bun.spawn> | null;
   client: PiRpcClient | null;
   turn: PiActiveTurn | null;
+  nativeRunOpen: boolean;
+  conversationObserved: boolean;
   deliveryReservations: number;
   pendingFinish: (() => void) | null;
   startTime: number;

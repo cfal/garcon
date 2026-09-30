@@ -31,6 +31,7 @@ export class PiRpcTransportError extends Error {
 
 interface PendingRequest {
   readonly command: string;
+  readonly observe?: (response: PiRpcResponse) => void;
   resolve(response: PiRpcResponse): void;
   reject(error: unknown): void;
   timer: ReturnType<typeof setTimeout> | null;
@@ -72,13 +73,17 @@ export class PiRpcClient {
   async send(
     command: Record<string, unknown>,
     timeoutMs: number = DEFAULT_RESPONSE_TIMEOUT_MS,
+    observe?: (response: PiRpcResponse) => void,
   ): Promise<PiRpcResponse> {
-    return this.#send(command, timeoutMs);
+    return this.#send(command, timeoutMs, observe);
   }
 
   // Leaves prompt preflight unbounded because it can run a full compaction call.
-  async sendUnbounded(command: Record<string, unknown>): Promise<PiRpcResponse> {
-    return this.#send(command, null);
+  async sendUnbounded(
+    command: Record<string, unknown>,
+    observe?: (response: PiRpcResponse) => void,
+  ): Promise<PiRpcResponse> {
+    return this.#send(command, null, observe);
   }
 
   // Rejects pending requests and prevents later sends.
@@ -91,6 +96,7 @@ export class PiRpcClient {
   #send(
     command: Record<string, unknown>,
     timeoutMs: number | null,
+    observe?: (response: PiRpcResponse) => void,
   ): Promise<PiRpcResponse> {
     if (this.#disposed) {
       return Promise.reject(new PiRpcTransportError('Pi RPC client is disposed', false));
@@ -98,6 +104,7 @@ export class PiRpcClient {
     const id = `garcon-${++this.#nextId}`;
     const pending: PendingRequest = {
       command: String(command.type ?? 'unknown'),
+      observe,
       resolve: () => undefined,
       reject: () => undefined,
       timer: null,
@@ -226,7 +233,13 @@ export class PiRpcClient {
           : {}),
       };
       if (response.success) {
-        pending.resolve(response);
+        try {
+          // Observes acceptance before later events in the same stdout chunk.
+          pending.observe?.(response);
+          pending.resolve(response);
+        } catch (error) {
+          pending.reject(error);
+        }
       } else {
         pending.reject(new PiRpcCommandError(response));
       }

@@ -41,7 +41,7 @@ export interface ScriptedPiTestEnvironment {
 }
 
 export function startScriptedPiTestEnvironment(
-  options: { readonly compactionKeepRecentTokens?: number } = {},
+  options: { readonly compactionKeepRecentTokens?: number; readonly extensionSource?: string } = {},
 ): ScriptedPiTestEnvironment {
   const model = FakeChatCompletionsModel.start();
   // The Pi bin uses /usr/bin/env node, so only the runner's node executable is exposed below.
@@ -67,6 +67,10 @@ export function startScriptedPiTestEnvironment(
       ]);
       await symlink(nodeBinary, join(binDir, 'node'));
       serverEnvironment.PATH = `${binDir}:${SYSTEM_PATH}`;
+      if (options.extensionSource !== undefined) {
+        await mkdir(join(agentDir, 'extensions'), { recursive: true });
+        await writeFile(join(agentDir, 'extensions', 'scripted.js'), options.extensionSource);
+      }
       await writeFile(join(agentDir, 'models.json'), JSON.stringify({
         providers: {
           [PI_TEST_PROVIDER]: {
