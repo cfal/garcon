@@ -159,7 +159,7 @@ describe('Settings', () => {
 
 			await fireEvent.click(screen.getByRole('tab', { name: 'Other Agents' }));
 			expect(appShell.settingsTab).toBe('other-agents');
-			expect(screen.getByRole('heading', { name: 'Other Agents' })).toBeTruthy();
+			expect(screen.queryByRole('heading', { name: 'Other Agents' })).toBeNull();
 			expect(
 				screen.getByText('These agents manage provider and authentication workflows internally.'),
 			).toBeTruthy();
@@ -401,7 +401,7 @@ describe('Settings', () => {
 		const rendered = render(SettingsTestHost, { appShell, remoteSettings });
 
 		try {
-			expect(screen.getByRole('heading', { name: 'General' })).toBeTruthy();
+			expect(screen.queryByRole('heading', { name: 'General' })).toBeNull();
 			expect(screen.getByText('Pinned chats are added to')).toBeTruthy();
 			expect(screen.getByText('Use custom app title')).toBeTruthy();
 			expect(screen.queryByText('Automatically generate chat titles')).toBeNull();
@@ -409,7 +409,7 @@ describe('Settings', () => {
 
 			await fireEvent.click(screen.getByRole('tab', { name: 'Automation' }));
 			expect(appShell.settingsTab).toBe('automation');
-			expect(screen.getByRole('heading', { name: 'Automation' })).toBeTruthy();
+			expect(screen.queryByRole('heading', { name: 'Automation' })).toBeNull();
 			expect(screen.getByText('Automatically generate chat titles')).toBeTruthy();
 			expect(screen.getByText('Enable agent switch compaction')).toBeTruthy();
 			expect(screen.getByText('Commit message model')).toBeTruthy();
@@ -419,10 +419,29 @@ describe('Settings', () => {
 
 			await fireEvent.click(screen.getByRole('tab', { name: 'Notifications' }));
 			expect(appShell.settingsTab).toBe('notifications');
-			expect(screen.getByRole('heading', { name: 'Notifications' })).toBeTruthy();
+			expect(screen.queryByRole('heading', { name: 'Notifications' })).toBeNull();
 			expect(screen.getByText('Telegram notifications')).toBeTruthy();
 			expect(screen.queryByText('Automatically generate chat titles')).toBeNull();
 			expect(screen.queryByText('Use custom app title')).toBeNull();
+		} finally {
+			appShell.closeSettings();
+			rendered.unmount();
+		}
+	});
+
+	it('uses tab labels without repeating them as content headings', async () => {
+		const appShell = createAppShellStore();
+		appShell.openSettings('interface');
+		const rendered = render(SettingsTestHost, {
+			appShell,
+			remoteSettings: new RemoteSettingsStore(),
+		});
+		try {
+			for (const name of ['Interface', 'Shortcuts', 'Other Agents', 'General', 'Automation', 'Notifications', 'GitHub', 'Executors']) {
+				await fireEvent.click(screen.getByRole('tab', { name }));
+				expect(screen.getByRole('tabpanel', { name })).toBeTruthy();
+				expect(screen.queryByRole('heading', { name })).toBeNull();
+			}
 		} finally {
 			appShell.closeSettings();
 			rendered.unmount();

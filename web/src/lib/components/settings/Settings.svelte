@@ -129,7 +129,6 @@
 			<div class="min-w-0 flex-1 min-h-0 overflow-y-auto p-3 sm:p-6" bind:this={scrollContainer}>
 				<Tabs.Content value="interface" class="mt-0 space-y-6">
 					{#if appShell.settingsTab === 'interface'}
-						<h2 class="text-base font-semibold">{m.settings_tab_interface()}</h2>
 						<p class="text-sm text-muted-foreground">{m.settings_scope_local_description()}</p>
 						<LocalSettingsSection />
 					{/if}
@@ -137,7 +136,6 @@
 
 				<Tabs.Content value="shortcuts" class="mt-0 space-y-6">
 					{#if appShell.settingsTab === 'shortcuts'}
-						<h2 class="text-base font-semibold">{m.settings_tab_shortcuts()}</h2>
 						<KeyboardShortcutsSection />
 					{/if}
 				</Tabs.Content>
@@ -150,7 +148,6 @@
 
 				<Tabs.Content value="other-agents" class="mt-0 space-y-6">
 					{#if appShell.settingsTab === 'other-agents'}
-						<h2 class="text-base font-semibold">{m.settings_tab_other_agents()}</h2>
 						<p class="text-sm text-muted-foreground">{m.settings_other_agents_description()}</p>
 						<SettingsExecutorSections>
 							{#snippet children(executorId)}<ExecutorAgentSettings
@@ -163,28 +160,24 @@
 
 				<Tabs.Content value="general" class="mt-0 space-y-6">
 					{#if appShell.settingsTab === 'general'}
-						<h2 class="text-base font-semibold">{m.settings_tab_general()}</h2>
 						<GeneralSettingsSection />
 					{/if}
 				</Tabs.Content>
 
 				<Tabs.Content value="automation" class="mt-0 space-y-6">
 					{#if appShell.settingsTab === 'automation'}
-						<h2 class="text-base font-semibold">{m.settings_tab_automation()}</h2>
 						<AutomationSettingsSection />
 					{/if}
 				</Tabs.Content>
 
 				<Tabs.Content value="notifications" class="mt-0 space-y-6">
 					{#if appShell.settingsTab === 'notifications'}
-						<h2 class="text-base font-semibold">{m.settings_tab_notifications()}</h2>
 						<NotificationsSettingsSection />
 					{/if}
 				</Tabs.Content>
 
 				<Tabs.Content value="github" class="mt-0 space-y-6">
 					{#if appShell.settingsTab === 'github'}
-						<h2 class="text-base font-semibold">{m.settings_tab_github()}</h2>
 						<SettingsExecutorSections>
 							{#snippet children(executorId)}<GitHubCliSettingsCard {executorId} />{/snippet}
 						</SettingsExecutorSections>
@@ -193,7 +186,6 @@
 
 				<Tabs.Content value="executors" class="mt-0 space-y-6">
 					{#if appShell.settingsTab === 'executors'}
-						<h2 class="text-base font-semibold">{m.settings_tab_executors()}</h2>
 						<ExecutorsSection />
 					{/if}
 				</Tabs.Content>

@@ -21,6 +21,7 @@ test('settings navigation and host sections fit desktop and mobile dialogs', asy
         await dialog.getByRole('tab', { name, exact: true }).click();
         const panel = dialog.getByRole('tabpanel');
         await browserExpect(panel).toBeVisible();
+        await browserExpect(panel.getByRole('heading', { name, exact: true })).toHaveCount(0);
         const navRect = (await dialog.getByRole('tablist').boundingBox())!;
         const panelRect = (await panel.boundingBox())!;
         expect(navRect.x + navRect.width <= panelRect.x).toBe(true);
