@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { tick } from 'svelte';
+import { ApiError } from '$lib/api/client';
 import type { TicketsController } from '$lib/tickets/catalog/tickets-controller.svelte';
 import { AppShellStore } from '$lib/stores/app-shell.svelte';
 import type { TicketWriteResult } from '$shared/tickets';
@@ -97,6 +98,36 @@ describe('new chat from ticket', () => {
 		await waitFor(() => expect(open).toHaveBeenCalledOnce());
 		expect(api.mutate.mock.calls[1]![0]).toEqual(request);
 	});
+
+	it.each([
+		['Create ticket', false],
+		['Create & open chat', true],
+	] as const)(
+		'honors %s after a retry definitively rejects the previous create',
+		async (action, opensChat) => {
+			const { api, appShell } = await mount();
+			api.mutate
+				.mockRejectedValueOnce(new Error('Lost response'))
+				.mockRejectedValueOnce(new ApiError(404, 'Ticket not found.', 'TICKET_NOT_FOUND'));
+			const dialog = await fillCreate();
+			await fireEvent.click(dialog.getByRole('button', { name: 'Create & open chat' }));
+			await dialog.findByRole('button', { name: 'Retry same request' });
+			const request = api.mutate.mock.calls[0]![0];
+			await fireEvent.click(dialog.getByRole('button', { name: 'Retry same request' }));
+			await waitFor(() =>
+				expect(dialog.queryByRole('button', { name: 'Retry same request' })).toBeNull(),
+			);
+			expect(api.mutate.mock.calls[1]![0]).toEqual(request);
+			expect(appShell.newChatDialogOpen).toBe(false);
+
+			await fireEvent.click(dialog.getByRole('button', { name: action }));
+			await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+			expect(api.mutate).toHaveBeenCalledTimes(3);
+			expect(api.mutate.mock.calls[2]![0].requestId).not.toBe(request.requestId);
+			expect(api.mutate.mock.calls[2]![0].payload).toEqual(request.payload);
+			expect(appShell.newChatDialogOpen).toBe(opensChat);
+		},
+	);
 
 	it('does not retain create-and-open intent after discarding a failed request', async () => {
 		const { api, appShell } = await mount();

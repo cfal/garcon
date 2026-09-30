@@ -275,6 +275,36 @@ describe('ticket draft state', () => {
 		expect(api.mutate.mock.calls[1]![0].requestId).not.toBe(request.requestId);
 	});
 
+	it.each([false, true])(
+		'advances the draft version on a definitive rejection (retry=%s)',
+		async (retry) => {
+			const recovery = memoryRecovery();
+			const { draft, api, onConfirmed } = harness(initial, recovery);
+			draft.setField('body', 'Preserved text');
+			const version = draft.current.version;
+			if (retry) api.mutate.mockRejectedValueOnce(new Error('Lost response'));
+			api.mutate.mockRejectedValueOnce(new ApiError(404, 'Ticket not found.', 'TICKET_NOT_FOUND'));
+			await draft.submit({ action: 'comment', ticketId: ticket.id, body: 'Preserved text' });
+			if (retry) {
+				expect(draft.current.version).toBe(version);
+				expect(draft.canRetry).toBe(true);
+				await draft.retry();
+				expect(api.mutate.mock.calls[1]![0]).toEqual(api.mutate.mock.calls[0]![0]);
+			}
+			expect(draft.current.version).toBe(version + 1);
+			expect(draft.current.frozen).toBeNull();
+			expect(draft.field('body')).toBe('Preserved text');
+			expect(draft.canEdit).toBe(true);
+			expect(draft.dirty).toBe(true);
+			expect(onConfirmed).not.toHaveBeenCalled();
+			expect(recovery.list(initial)[0]?.draft).toMatchObject({
+				version: version + 1,
+				frozen: null,
+				fields: { body: 'Preserved text' },
+			});
+		},
+	);
+
 	it('retains frozen identity after storage uncertainty or a store replacement', async () => {
 		for (const error of [
 			new ApiError(503, 'Storage fenced', 'TICKET_STORAGE_UNAVAILABLE'),

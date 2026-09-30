@@ -167,7 +167,8 @@ export class TicketDraftState {
 			this.conflict = ticketConflict(error);
 			this.storeChanged = error instanceof ApiError && error.errorCode === 'TICKET_STORE_CHANGED';
 			if (error instanceof ApiError && error.status < 500 && !this.storeChanged) {
-				this.#snapshot = { ...this.current, frozen: null };
+				// Retires continuations attached to the rejected submission.
+				this.#snapshot = { ...this.current, frozen: null, version: this.current.version + 1 };
 				if (this.current.kind === 'mutation') this.dirty = false;
 				this.error = error.message;
 			} else
