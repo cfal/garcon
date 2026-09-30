@@ -142,6 +142,7 @@ export async function submitSteerRoute(
 		chatId: context.chatId,
 		transcriptViewId: requireTranscriptView(deps, context.chatId),
 		content: context.content,
+		whenTurnUnavailable: 'queue',
 	});
 	deps.chatState.upsertOptimisticUserInput(
 		optimisticUserInput(context.chatId, context.content, [], submission.clientMessageId),
@@ -149,8 +150,14 @@ export async function submitSteerRoute(
 	if (deps.sessions.selectedChatId === context.chatId) deps.scrollToBottom();
 	const clearedComposerRevision = clearOwnedComposer(deps, context);
 	try {
-		await submission.submit();
-		deps.chatState.markOptimisticUserInputDelivered(submission.clientMessageId);
+		const response = await submission.submit();
+		if (response.delivery === 'queued') {
+			// The queue shows the steer until it is delivered with the same client message ID.
+			deps.chatState.clearOptimisticUserInput(submission.clientMessageId);
+			deps.conversationUi.setExecutionControlFromLiveUpdate(context.chatId, response.control);
+		} else {
+			deps.chatState.markOptimisticUserInputDelivered(submission.clientMessageId);
+		}
 		return 'accepted';
 	} catch (error) {
 		const outcomeUnknown = error instanceof CommandOutcomeUnknownError;

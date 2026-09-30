@@ -862,6 +862,62 @@ describe('chats API contract', () => {
 		});
 	});
 
+	it('validates the execution control of queued steer answers', async () => {
+		const queued = {
+			success: true,
+			commandType: 'steer',
+			clientRequestId: 'request-steer',
+			chatId: 'c-1',
+			status: 'accepted',
+			acceptedAt: '2026-09-30T00:00:00.000Z',
+			delivery: 'queued',
+			entryId: 'entry-1',
+		};
+		const steerRequest = {
+			clientRequestId: 'request-steer',
+			clientMessageId: 'message-steer',
+			chatId: 'c-1',
+			transcriptViewId: 'view-1',
+			content: 'steer when ready',
+			whenTurnUnavailable: 'queue' as const,
+		};
+		const queueEntryRequest = {
+			clientRequestId: 'request-steer',
+			chatId: 'c-1',
+			transcriptViewId: 'view-1',
+			entryId: 'entry-1',
+			expectedRevision: 3,
+			expectedReorderRevision: 7,
+		};
+		const control = emptyControl();
+
+		fetchMock.mockResolvedValueOnce(jsonResponse({ ...queued, control }, 202));
+		await expect(steerChat(steerRequest)).resolves.toMatchObject({ delivery: 'queued', control });
+		expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual(steerRequest);
+
+		fetchMock.mockResolvedValueOnce(
+			jsonResponse({ ...queued, control: { ...control, queue: { entries: [] } } }, 202),
+		);
+		await expect(steerChat(steerRequest)).rejects.toThrow(
+			'Invalid chat execution control response',
+		);
+
+		fetchMock.mockResolvedValueOnce(
+			jsonResponse({ ...queued, serverInstanceId: control.serverInstanceId, control }, 202),
+		);
+		await expect(steerQueuedEntry(queueEntryRequest)).resolves.toMatchObject({
+			delivery: 'queued',
+			control,
+		});
+
+		fetchMock.mockResolvedValueOnce(
+			jsonResponse({ ...queued, serverInstanceId: control.serverInstanceId }, 202),
+		);
+		await expect(steerQueuedEntry(queueEntryRequest)).rejects.toThrow(
+			'Invalid queued steer execution control response',
+		);
+	});
+
 	it('rejects malformed present queue-steer control snapshots', async () => {
 		fetchMock.mockResolvedValueOnce(
 			jsonResponse(

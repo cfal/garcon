@@ -539,6 +539,8 @@
 	"chat_queue_steer_queue": "Use this queued message to steer the active turn",
 	"chat_queue_steering": "This message is being used to steer the active turn.",
 	"chat_queue_other_message_steering": "Another queued message is being used to steer the active turn.",
+	"chat_queue_pending_steer": "Waiting to steer",
+	"chat_queue_pending_steer_detail": "Steers the active turn when it can take guidance, or runs next if the turn ends first.",
 	"chat_queue_resume": "Resume queue",
 	"chat_queue_resume_queue": "Resume sending queued messages",
 	"chat_queue_needs_attention": "Queue needs attention",

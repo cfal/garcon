@@ -396,6 +396,36 @@ describe('ConversationQueueController', () => {
 		expect(scrollToBottom).not.toHaveBeenCalled();
 	});
 
+	it('shows a queued message kept as a pending steer without a notice', async () => {
+		const { controller, acceptedInputs, chatState, conversationUi } = createHarness();
+		const control = emptyChatExecutionControlState('server-instance-test');
+		acceptedInputs.steerQueuedEntry.mockReturnValue({
+			clientRequestId: 'request-steer',
+			clientMessageId: 'message-steer',
+			submit: vi.fn(async () => ({
+				success: true as const,
+				commandType: 'steer' as const,
+				clientRequestId: 'request-steer',
+				chatId: 'chat-1',
+				status: 'accepted' as const,
+				acceptedAt: '2026-09-30T00:00:00.000Z',
+				delivery: 'queued' as const,
+				entryId: 'entry-head',
+				serverInstanceId: 'server-instance-test',
+				control,
+			})),
+		});
+
+		await controller.steerHeadForChat('chat-1', queueEntry('entry-head', 3), 7);
+
+		expect(conversationUi.setExecutionControlFromLiveUpdate).toHaveBeenCalledWith(
+			'chat-1',
+			control,
+		);
+		expect(chatState.loadMessages).not.toHaveBeenCalled();
+		expect(chatState.appendLocalNoticeForChat).not.toHaveBeenCalled();
+	});
+
 	it('does not reclassify success when unconfirmed transcript reconciliation fails', async () => {
 		const { controller, acceptedInputs, chatState, conversationUi } = createHarness();
 		const control = emptyChatExecutionControlState('server-instance-test');

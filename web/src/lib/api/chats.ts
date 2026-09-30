@@ -58,6 +58,7 @@ import type {
 	ProjectPathPatchResponse,
 	SteerCommandRequest,
 	SteerCommandResponse,
+	QueuedSteerCommandResponse,
 	QueueEntryCommandResponse,
 	QueueEntryCreateCommandRequest,
 	QueueEntryDeleteCommandRequest,
@@ -66,6 +67,7 @@ import type {
 	QueueEntryReplaceCommandRequest,
 	QueueEntrySteerCommandRequest,
 	QueueEntrySteerCommandResponse,
+	QueuedQueueEntrySteerCommandResponse,
 	QueueMutationResponse,
 	QueuePauseRequest,
 	QueueResumeRequest,
@@ -298,20 +300,27 @@ export async function moveQueuedInput(
 	);
 }
 
-export async function steerChat(params: SteerCommandRequest): Promise<SteerCommandResponse> {
-	return apiPost<SteerCommandResponse>('/api/v1/chats/steer', params);
+export async function steerChat(
+	params: SteerCommandRequest,
+): Promise<SteerCommandResponse | QueuedSteerCommandResponse> {
+	const response = await apiPost<SteerCommandResponse | QueuedSteerCommandResponse>(
+		'/api/v1/chats/steer',
+		params,
+	);
+	return response.delivery === 'queued' ? withParsedControl(response) : response;
 }
 
 export async function steerQueuedEntry(
 	params: QueueEntrySteerCommandRequest,
-): Promise<QueueEntrySteerCommandResponse> {
-	const response = await apiPost<QueueEntrySteerCommandResponse>(
-		'/api/v1/chats/queue/entries/steer',
-		params,
-	);
+): Promise<QueueEntrySteerCommandResponse | QueuedQueueEntrySteerCommandResponse> {
+	const response = await apiPost<
+		QueueEntrySteerCommandResponse | QueuedQueueEntrySteerCommandResponse
+	>('/api/v1/chats/queue/entries/steer', params);
 	const serverInstanceId = parseExecutionControlServerInstanceId(response.serverInstanceId);
 	if (!serverInstanceId) throw new Error('Invalid queued steer server instance response');
-	if (!response.control) return { ...response, serverInstanceId };
+	if (!response.control && response.delivery !== 'queued') {
+		return { ...response, serverInstanceId };
+	}
 	const control = parseChatExecutionControlState(response.control);
 	if (!control) throw new Error('Invalid queued steer execution control response');
 	if (control.serverInstanceId !== serverInstanceId) {

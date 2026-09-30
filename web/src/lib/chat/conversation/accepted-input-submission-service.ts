@@ -18,8 +18,10 @@ import type {
 	QueueEntryCreateCommandRequest,
 	SteerCommandRequest,
 	SteerCommandResponse,
+	QueuedSteerCommandResponse,
 	QueueEntrySteerCommandRequest,
 	QueueEntrySteerCommandResponse,
+	QueuedQueueEntrySteerCommandResponse,
 	StartChatCommandResponse,
 } from '$shared/chat-command-contracts';
 import type { ChatListEntry } from '$shared/chat-list';
@@ -45,8 +47,10 @@ export interface AcceptedInputTransport {
 	fork(request: ForkRunCommandRequest): Promise<ForkRunCommandResponse>;
 	selfHandoff(request: SelfHandoffRunCommandRequest): Promise<ForkRunCommandResponse>;
 	enqueue(request: QueueEntryCreateCommandRequest): Promise<QueueEntryCommandResponse>;
-	steer(request: SteerCommandRequest): Promise<SteerCommandResponse>;
-	steerQueuedEntry(request: QueueEntrySteerCommandRequest): Promise<QueueEntrySteerCommandResponse>;
+	steer(request: SteerCommandRequest): Promise<SteerCommandResponse | QueuedSteerCommandResponse>;
+	steerQueuedEntry(
+		request: QueueEntrySteerCommandRequest,
+	): Promise<QueueEntrySteerCommandResponse | QueuedQueueEntrySteerCommandResponse>;
 }
 
 const defaultTransport: AcceptedInputTransport = {

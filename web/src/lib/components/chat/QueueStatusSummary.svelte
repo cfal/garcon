@@ -18,6 +18,7 @@
 
 	const entryCount = $derived(queue.entries.length);
 	const currentPosition = $derived(Math.min(Math.max(position, 1), entryCount));
+	const pendingSteer = $derived(entry.kind === 'steer' && queue.steeringEntryId !== entry.id);
 </script>
 
 <section
@@ -46,6 +47,15 @@
 				</span>
 			{:else}
 				<span class="text-xs text-muted-foreground">{m.chat_queue_single_message()}</span>
+			{/if}
+
+			{#if pendingSteer}
+				<span
+					class="text-xs font-medium text-muted-foreground"
+					title={m.chat_queue_pending_steer_detail()}
+				>
+					{m.chat_queue_pending_steer()}
+				</span>
 			{/if}
 
 			{#if queue.pause}

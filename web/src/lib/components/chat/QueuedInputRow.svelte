@@ -21,6 +21,7 @@
 	import GripVertical from '@lucide/svelte/icons/grip-vertical';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
 	import Pencil from '@lucide/svelte/icons/pencil';
+	import Route from '@lucide/svelte/icons/route';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 
 	interface Props {
@@ -166,6 +167,11 @@
 			>
 				<Loader2 class="size-3.5 animate-spin" aria-hidden="true" />
 				{m.chat_queue_steering()}
+			</p>
+		{:else if entry.kind === 'steer'}
+			<p class="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+				<Route class="size-3.5 shrink-0" aria-hidden="true" />
+				{m.chat_queue_pending_steer_detail()}
 			</p>
 		{/if}
 		{#if error}

@@ -163,6 +163,34 @@ describe('QueueControls', () => {
 		expect(screen.getByRole('button', { name: m.chat_queue_resume() })).toBeTruthy();
 	});
 
+	it('labels a pending steer and leaves its delivery to the server', () => {
+		const queue = makeQueueWithIds(['q0', 'q1']);
+		queue.entries[0] = { ...queue.entries[0], kind: 'steer' };
+		renderControls(queue, {
+			canInterrupt: true,
+			onInterrupt: vi.fn(),
+			canSteer: true,
+			onSteer: vi.fn(),
+		});
+
+		const label = screen.getByText(m.chat_queue_pending_steer());
+		expect(label.getAttribute('title')).toBe(m.chat_queue_pending_steer_detail());
+		expect(screen.queryByRole('button', { name: m.chat_queue_steer() })).toBeNull();
+		expect(screen.getByRole('button', { name: m.chat_queue_interrupt_and_send() })).toBeTruthy();
+	});
+
+	it('shows a pending steer being delivered as steering', () => {
+		const queue = makeQueueWithIds(['q0', 'q1']);
+		queue.entries[0] = { ...queue.entries[0], kind: 'steer' };
+		queue.steeringEntryId = 'q0';
+		renderControls(queue, { canSteer: true, onSteer: vi.fn() });
+
+		expect(screen.queryByText(m.chat_queue_pending_steer())).toBeNull();
+		expect(
+			screen.getByRole('button', { name: m.chat_queue_steer() }).getAttribute('aria-busy'),
+		).toBe('true');
+	});
+
 	it('guards a pending queued steer and keeps the captured render observation', async () => {
 		const pending = deferred<void>();
 		const onSteer = vi.fn(() => pending.promise);

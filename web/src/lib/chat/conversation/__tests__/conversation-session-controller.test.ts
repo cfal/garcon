@@ -4554,6 +4554,7 @@ describe('ConversationSessionController', () => {
 			chatId: 'chat-1',
 			transcriptViewId: 'generation-1',
 			content: 'Focus on the failing contract test',
+			whenTurnUnavailable: 'queue',
 		});
 		const steerRequest = mockSteerChat.mock.calls[0][0];
 		expect(deps.chatState.optimisticUserInputs[0]).toMatchObject({
@@ -4563,6 +4564,49 @@ describe('ConversationSessionController', () => {
 		expect(deps.lifecycle.beginTurn).not.toHaveBeenCalled();
 		expect(deps.conversationUi.getExecutionControl).not.toHaveBeenCalled();
 		expect(deps.conversationUi.setExecutionControlFromLiveUpdate).not.toHaveBeenCalled();
+	});
+
+	it('moves a steer the turn cannot take yet from the transcript to the queue', async () => {
+		const { deps } = createDeps(createRunningChat({ agentId: 'claude', isProcessing: true }));
+		deps.composerState.inputText = '/steer Keep the current turn';
+		const control = controlWithQueue({
+			entries: [
+				{
+					id: 'entry-steer',
+					content: 'Keep the current turn',
+					kind: 'steer',
+					revision: 1,
+					createdAt: '2026-09-30T00:00:00.000Z',
+					updatedAt: '2026-09-30T00:00:00.000Z',
+				},
+			],
+		});
+		mockSteerChat.mockResolvedValueOnce({
+			success: true,
+			commandType: 'steer',
+			clientRequestId: 'req-steer',
+			chatId: 'chat-1',
+			status: 'accepted',
+			acceptedAt: '2026-09-30T00:00:00.000Z',
+			delivery: 'queued',
+			entryId: 'entry-steer',
+			control,
+		});
+
+		const outcome = await new ConversationSessionController(deps).submitForChat('chat-1');
+
+		expect(outcome).toBe('accepted');
+		const steerRequest = mockSteerChat.mock.calls[0][0];
+		expect(deps.chatState.clearOptimisticUserInput).toHaveBeenCalledWith(
+			steerRequest.clientMessageId,
+		);
+		expect(deps.chatState.optimisticUserInputs).toEqual([]);
+		expect(deps.conversationUi.setExecutionControlFromLiveUpdate).toHaveBeenCalledWith(
+			'chat-1',
+			control,
+		);
+		expect(deps.composerState.restoreDraftIfRevision).not.toHaveBeenCalled();
+		expect(deps.chatState.appendLocalNoticeForChat).not.toHaveBeenCalled();
 	});
 
 	it('restores untouched steering text after a definitive turn-state failure', async () => {
