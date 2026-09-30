@@ -250,33 +250,60 @@ async function markConflictResolved({
   return { success: true };
 }
 
+// Splits `git log -z` output whose format separates fields with %x00. Subjects may hold any
+// byte except NUL, so a printable separator could split one commit into several records.
+function nulRecords(output: string, fieldCount: number, description: string): string[][] {
+  const fields = output.split('\0');
+  if (fields.pop() !== '' || fields.length % fieldCount !== 0) {
+    throw new GitDomainError('INVALID_RESULT', `Git returned an unreadable ${description}.`);
+  }
+  const records: string[][] = [];
+  for (let offset = 0; offset < fields.length; offset += fieldCount) {
+    records.push(fields.slice(offset, offset + fieldCount));
+  }
+  return records;
+}
+
 function parseStashes(output: string): GitStashEntry[] {
-  return output
-    .split('\x1e')
-    .filter((entry) => entry.trim().length > 0)
-    .map((entry) => {
-      const [ref = '', hash = '', date = '', message = ''] = entry.replace(/^\r?\n/, '').split('\0');
-      const indexMatch = ref.match(/^stash@\{(\d+)\}$/);
-      return {
-        index: indexMatch ? Number(indexMatch[1]) : -1,
-        ref,
-        hash,
-        date,
-        message,
-      };
-    });
+  return nulRecords(output, 4, 'stash list').map(([ref, hash, date, message]) => {
+    const index = /^stash@\{(\d+)\}$/.exec(ref)?.[1];
+    if (index === undefined || !/^[a-f0-9]{40,64}$/.test(hash)) {
+      throw new GitDomainError('INVALID_RESULT', 'Git returned an unreadable stash list.');
+    }
+    return { index: Number(index), ref, hash, date, message };
+  });
+}
+
+// Passing --date would make git print reflog selectors as one-second timestamps, which
+// collide between stashes and fail the numeric selector check in assertSafeStashRef.
+async function listStashes(projectPath: string, signal?: AbortSignal): Promise<GitStashEntry[]> {
+  const { stdout } = await runGit(
+    projectPath,
+    ['stash', 'list', '-z', '--format=%gd%x00%H%x00%ci%x00%s'],
+    readOnlyGitOptions({ signal }),
+  );
+  return parseStashes(stdout);
 }
 
 async function getStashes({ projectPath, signal }: ProjectOptions): Promise<{ stashes: GitStashEntry[] }> {
   await assertGitRepository(projectPath);
-  const { stdout } = await runGit(
-    projectPath,
-    // A date option would turn %gd into stash@{<date>}, which stash actions reject and which
-    // repeats for stashes made within one second; %ci already carries the date.
-    ['stash', 'list', '--format=%gd%x00%H%x00%ci%x00%s%x1e'],
-    readOnlyGitOptions({ signal }),
-  );
-  return { stashes: parseStashes(stdout) };
+  return { stashes: await listStashes(projectPath, signal) };
+}
+
+// Stash entries have no stable name: a numeric reflog selector moves when stashes are created
+// or dropped elsewhere. Rechecking the listed commit rejects an action chosen from an older
+// listing, though an external change between this check and the command remains possible.
+async function listedStashSelector({ projectPath, stashRef, expectedHash, signal }: StashRefOptions): Promise<string> {
+  assertSafeStashRef(stashRef);
+  await assertGitRepository(projectPath);
+  const current = (await listStashes(projectPath, signal)).find((stash) => stash.ref === stashRef);
+  if (current?.hash !== expectedHash) {
+    throw new GitDomainError(
+      'STALE_STASH',
+      'The stash list changed since it was loaded. Select the stash again from the current list.',
+    );
+  }
+  return `refs/${stashRef}`;
 }
 
 async function createStash({
@@ -293,35 +320,27 @@ async function createStash({
   return { success: true, output: stdout.trim() };
 }
 
-async function applyStash({ projectPath, stashRef, signal }: StashRefOptions): Promise<{ success: boolean }> {
-  assertSafeStashRef(stashRef);
-  await assertGitRepository(projectPath);
-  await runGit(projectPath, ['stash', 'apply', stashRef], { signal });
+// Apply accepts the verified stash commit itself; Pop and Drop must name the reflog entry they remove.
+async function applyStash(options: StashRefOptions): Promise<{ success: boolean }> {
+  await listedStashSelector(options);
+  await runGit(options.projectPath, ['stash', 'apply', options.expectedHash], { signal: options.signal });
   return { success: true };
 }
 
-async function popStash({ projectPath, stashRef, signal }: StashRefOptions): Promise<{ success: boolean }> {
-  assertSafeStashRef(stashRef);
-  await assertGitRepository(projectPath);
-  await runGit(projectPath, ['stash', 'pop', stashRef], { signal });
+async function popStash(options: StashRefOptions): Promise<{ success: boolean }> {
+  const selector = await listedStashSelector(options);
+  await runGit(options.projectPath, ['stash', 'pop', selector], { signal: options.signal });
   return { success: true };
 }
 
-async function dropStash({ projectPath, stashRef, signal }: StashRefOptions): Promise<{ success: boolean }> {
-  assertSafeStashRef(stashRef);
-  await assertGitRepository(projectPath);
-  await runGit(projectPath, ['stash', 'drop', stashRef], { signal });
+async function dropStash(options: StashRefOptions): Promise<{ success: boolean }> {
+  const selector = await listedStashSelector(options);
+  await runGit(options.projectPath, ['stash', 'drop', selector], { signal: options.signal });
   return { success: true };
 }
 
 function parseFileHistory(output: string): GitFileHistoryEntry[] {
-  return output
-    .split('\x1e')
-    .filter((entry) => entry.trim().length > 0)
-    .map((entry) => {
-      const [hash = '', author = '', email = '', date = '', subject = ''] = entry.replace(/^\r?\n/, '').split('\0');
-      return { hash, author, email, date, subject };
-    });
+  return nulRecords(output, 5, 'file history').map(([hash, author, email, date, subject]) => ({ hash, author, email, date, subject }));
 }
 
 async function getFileHistory({
@@ -334,7 +353,7 @@ async function getFileHistory({
   const safeLimit = clampLimit(limit, 50, MAX_HISTORY_LIMIT);
   const { stdout } = await runGit(
     projectPath,
-    ['log', '--follow', `-n${safeLimit}`, '--format=%H%x00%an%x00%ae%x00%ai%x00%s%x1e', '--', file],
+    ['log', '--follow', '-z', `-n${safeLimit}`, '--format=%H%x00%an%x00%ae%x00%ai%x00%s', '--', file],
     readOnlyGitOptions({ signal }),
   );
   return { commits: parseFileHistory(stdout) };

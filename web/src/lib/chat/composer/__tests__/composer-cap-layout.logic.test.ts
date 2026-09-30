@@ -19,16 +19,16 @@ describe('composerCapReservation', () => {
 		);
 	});
 
-	it('reserves nothing when no cap is shown', () => {
-		expect(composerCapReservation(false, false)).toEqual({ feed: false, queue: false });
-		expect(composerCapReservation(false, true)).toEqual({ feed: false, queue: false });
-	});
-
-	it('reserves on the feed when a cap is shown without a visible queue', () => {
-		expect(composerCapReservation(true, false)).toEqual({ feed: true, queue: false });
-	});
-
-	it('reserves on the queue panel when a cap is shown with a visible queue', () => {
-		expect(composerCapReservation(true, true)).toEqual({ feed: false, queue: true });
+	it.each([
+		[false, false, false, { feed: false, queue: false, notice: false }],
+		[false, true, false, { feed: false, queue: false, notice: false }],
+		[false, false, true, { feed: false, queue: false, notice: false }],
+		[false, true, true, { feed: false, queue: false, notice: false }],
+		[true, false, false, { feed: true, queue: false, notice: false }],
+		[true, true, false, { feed: false, queue: true, notice: false }],
+		[true, false, true, { feed: false, queue: false, notice: true }],
+		[true, true, true, { feed: false, queue: false, notice: true }],
+	] as const)('reserves one slot nearest the cap (cap=%s, queue=%s, notice=%s)', (cap, queue, notice, expected) => {
+		expect(composerCapReservation(cap, queue, notice)).toEqual(expected);
 	});
 });

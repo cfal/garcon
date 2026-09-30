@@ -18,6 +18,14 @@ export type ComposerAvailabilityNotice =
 	| { readonly kind: 'catalog-failed'; readonly message: string }
 	| { readonly kind: 'provider-unavailable' };
 
+export interface ComposerAvailabilityNoticePresentation {
+	readonly chatId: string;
+	readonly notice: ComposerAvailabilityNotice;
+	readonly onRetryProject: () => void;
+	readonly onChooseProjectFolder?: () => void;
+	readonly onRetryCatalog: () => void;
+}
+
 export interface ComposerAvailabilityInput {
 	readonly executorId: string;
 	readonly executors: Pick<ExecutorsStore, 'isReady' | 'hasSnapshot' | 'get' | 'label'>;

@@ -218,7 +218,6 @@
 				isPinned={row.isPinned}
 				isArchived={row.isArchived}
 				{displayOptions}
-				showProjectPathInGroup={row.showProjectPathInGroup}
 				{isMultiSelectMode}
 				{isMultiSelected}
 				enableNativeDrag={false}

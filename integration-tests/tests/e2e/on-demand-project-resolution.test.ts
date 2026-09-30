@@ -28,18 +28,18 @@ describe('Lightpanda on-demand project resolution', () => {
       await rm(projectPath, { recursive: true });
       await app.sendComposer('Synthetic rejected send');
       await fixture.page.waitForFunction(() =>
-        document.querySelector('[data-composer-shell] [data-project-availability-notice]')?.textContent?.includes('Project folder unavailable'), { timeout: 20_000 });
+        document.querySelector('[data-conversation-panel-composer-anchor="true"] [data-project-availability-notice]')?.textContent?.includes('Project folder unavailable'), { timeout: 20_000 });
       expect(resolutionRequests.length).toBeGreaterThan(0);
       expect(resolutionRequests.every(url => url.searchParams.get('executorId') === client.executorId)).toBe(true);
       expect(await fixture.page.$eval('[data-composer] textarea', element => (element as HTMLTextAreaElement).value)).toBe('Synthetic rejected send');
       await mkdir(projectPath);
-      await fixture.page.$eval('[data-composer-shell] [data-project-availability-notice]', element => {
+      await fixture.page.$eval('[data-conversation-panel-composer-anchor="true"] [data-project-availability-notice]', element => {
         const retry = [...element.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === 'Retry');
         if (!retry) throw new Error('Project retry is unavailable');
         retry.click();
       });
       await fixture.page.waitForFunction(() =>
-        !document.querySelector('[data-composer-shell] [data-project-availability-notice]'));
+        !document.querySelector('[data-conversation-panel-composer-anchor="true"] [data-project-availability-notice]'));
       await app.sendComposer('Synthetic retry after repair');
       await app.waitForAssistantMessageContaining('Synthetic retry after repair');
       expect((await client.getChatSnapshot(chatId)).chat.executorId).toBe(client.executorId);

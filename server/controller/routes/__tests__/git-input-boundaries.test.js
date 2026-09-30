@@ -168,3 +168,23 @@ test.each(['stageHunk', 'stageSelection'])('raw %s refuses missing displayed-pat
   })).rejects.toMatchObject({ code: 'STALE_DOCUMENT' });
   expect((await runGit(project, ['diff', '--cached'])).stdout).toBe('');
 });
+
+test('stash routes require the listed commit and reject a stale selection as a typed conflict', async () => {
+  const { project, post } = await fixture();
+  await fs.writeFile(path.join(project, 'example.txt'), 'stashed\n');
+  await runGit(project, ['add', 'example.txt']);
+  await runGit(project, ['stash', 'push', '-m', 'listed']);
+  const expectedHash = (await runGit(project, ['rev-parse', 'refs/stash@{0}'])).stdout.trim();
+  for (const operation of ['stash/apply', 'stash/pop', 'stash/drop']) {
+    expect((await post(operation, { stashRef: 'stash@{0}' })).status).toBe(400);
+    const malformed = await post(operation, { stashRef: 'stash@{0}', expectedHash: 'HEAD' });
+    expect(malformed.status).toBe(400);
+    expect(await malformed.json()).toMatchObject({ errorCode: 'GIT_INVALID_INPUT' });
+    const stale = await post(operation, { stashRef: 'stash@{0}', expectedHash: 'f'.repeat(40) });
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toMatchObject({ errorCode: 'GIT_STALE_STASH' });
+  }
+  const dropped = await post('stash/drop', { stashRef: 'stash@{0}', expectedHash });
+  expect(dropped.status).toBe(200);
+  expect((await runGit(project, ['stash', 'list'])).stdout).toBe('');
+});

@@ -182,6 +182,7 @@ export type GitConflictContent = Wire.GitConflictContent;
 export type GitConflictDetails = Wire.GitConflictDetails;
 
 export type GitStashEntry = Wire.GitStashEntry;
+export type GitStashTarget = Pick<GitStashEntry, 'ref' | 'hash'>;
 
 export type GitFileHistoryEntry = Wire.GitFileHistoryEntry;
 
@@ -583,34 +584,29 @@ export async function gitCreateStash(
 	});
 }
 
+function stashFields(target: GitProjectTarget, stash: GitStashTarget) {
+	return { ...gitProjectFields(target), stashRef: stash.ref, expectedHash: stash.hash };
+}
+
 export async function gitApplyStash(
 	target: GitProjectTarget,
-	stashRef: string,
+	stash: GitStashTarget,
 ): Promise<SuccessResponse> {
-	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/stash/apply', {
-		...gitProjectFields(target),
-		stashRef,
-	});
+	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/stash/apply', stashFields(target, stash));
 }
 
 export async function gitPopStash(
 	target: GitProjectTarget,
-	stashRef: string,
+	stash: GitStashTarget,
 ): Promise<SuccessResponse> {
-	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/stash/pop', {
-		...gitProjectFields(target),
-		stashRef,
-	});
+	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/stash/pop', stashFields(target, stash));
 }
 
 export async function gitDropStash(
 	target: GitProjectTarget,
-	stashRef: string,
+	stash: GitStashTarget,
 ): Promise<SuccessResponse> {
-	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/stash/drop', {
-		...gitProjectFields(target),
-		stashRef,
-	});
+	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/stash/drop', stashFields(target, stash));
 }
 
 export async function getGitFileHistory(

@@ -45,6 +45,7 @@
 		sidebarInactivityDuration?: SidebarInactivityDuration;
 		sidebarGroupNestedProjectPaths?: boolean;
 		sidebarChatItemLayout?: ChatItemLayout;
+		sidebarShowProjectPath?: boolean;
 		chatListAutohide?: boolean;
 		chatListAutohideAvailable?: boolean;
 		chatListDock?: ChatListDock;
@@ -70,6 +71,7 @@
 		sidebarInactivityDuration = '3-days',
 		sidebarGroupNestedProjectPaths = false,
 		sidebarChatItemLayout = 'detailed',
+		sidebarShowProjectPath = false,
 		chatListAutohide = false,
 		chatListAutohideAvailable = false,
 		chatListDock = 'left',
@@ -141,6 +143,9 @@
 		get sidebarChatItemLayout() {
 			return sidebarChatItemLayout;
 		},
+		get sidebarShowProjectPath() {
+			return sidebarShowProjectPath;
+		},
 		get sidebarSortMode() {
 			return sidebarSortMode;
 		},
@@ -156,8 +161,9 @@
 		get reduceMotion() {
 			return reduceMotion;
 		},
-		toggle(_key: 'sidebarGroupNestedProjectPaths') {
-			sidebarGroupNestedProjectPaths = !sidebarGroupNestedProjectPaths;
+		toggle(key: 'sidebarGroupNestedProjectPaths' | 'sidebarShowProjectPath') {
+			if (key === 'sidebarShowProjectPath') sidebarShowProjectPath = !sidebarShowProjectPath;
+			else sidebarGroupNestedProjectPaths = !sidebarGroupNestedProjectPaths;
 		},
 		set(
 			key:

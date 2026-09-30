@@ -18,7 +18,9 @@ import {
 	type GitFileHistoryEntry,
 	type GitGraphCommit,
 	type GitStashEntry,
+	type GitStashTarget,
 } from '$lib/api/git.js';
+import { ApiError } from '$lib/api/client.js';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
 import type { GitWorkbenchMutationRunner } from '$lib/git/workbench/git-workbench-types.js';
 
@@ -61,6 +63,10 @@ export class GitPorcelainState {
 
 	setInspectorView(view: GitInspectorView): void {
 		this.inspectorView = this.inspectorView === view ? 'none' : view;
+	}
+
+	closeInspector(): void {
+		this.inspectorView = 'none';
 	}
 
 	async loadCurrentView(project: GitProjectTarget): Promise<void> {
@@ -191,11 +197,14 @@ export class GitPorcelainState {
 		});
 	}
 
-	async applyStash(project: GitProjectTarget, stashRef: string): Promise<void> {
+	async applyStash(project: GitProjectTarget, stash: GitStashTarget): Promise<void> {
+		const target = { ref: stash.ref, hash: stash.hash };
 		if (!this.deps.isCurrentTarget(project) || !this.deps.ensureFreshForGitMutation()) return;
 		await this.withLoading('Failed to apply stash', async (context) => {
 			await this.deps.runGitMutation(project, async () => {
-				const result = await gitApplyStash(project, stashRef);
+				const result = await this.submitStashAction(project, context, () =>
+					gitApplyStash(project, target),
+				);
 				if (result.success && this.isActiveLoad(context) && this.deps.isCurrentTarget(project)) {
 					await this.deps.refreshAfterMutation(project);
 				}
@@ -203,11 +212,14 @@ export class GitPorcelainState {
 		});
 	}
 
-	async popStash(project: GitProjectTarget, stashRef: string): Promise<void> {
+	async popStash(project: GitProjectTarget, stash: GitStashTarget): Promise<void> {
+		const target = { ref: stash.ref, hash: stash.hash };
 		if (!this.deps.isCurrentTarget(project) || !this.deps.ensureFreshForGitMutation()) return;
 		await this.withLoading('Failed to pop stash', async (context) => {
 			await this.deps.runGitMutation(project, async () => {
-				const result = await gitPopStash(project, stashRef);
+				const result = await this.submitStashAction(project, context, () =>
+					gitPopStash(project, target),
+				);
 				if (result.success && this.isActiveLoad(context) && this.deps.isCurrentTarget(project)) {
 					await this.loadStashes(project, context);
 					if (!this.isActiveLoad(context)) return;
@@ -217,16 +229,41 @@ export class GitPorcelainState {
 		});
 	}
 
-	async dropStash(project: GitProjectTarget, stashRef: string): Promise<void> {
+	async dropStash(project: GitProjectTarget, stash: GitStashTarget): Promise<void> {
+		const target = { ref: stash.ref, hash: stash.hash };
 		if (!this.deps.isCurrentTarget(project) || !this.deps.ensureFreshForGitMutation()) return;
 		await this.withLoading('Failed to drop stash', async (context) => {
 			await this.deps.runGitMutation(project, async () => {
-				const result = await gitDropStash(project, stashRef);
+				const result = await this.submitStashAction(project, context, () =>
+					gitDropStash(project, target),
+				);
 				if (result.success && this.isActiveLoad(context) && this.deps.isCurrentTarget(project)) {
 					await this.loadStashes(project, context);
 				}
 			});
 		});
+	}
+
+	// A selection from an outdated listing reloads the list and still fails, so the user chooses
+	// again rather than the action being retried against whichever stash now holds the selector.
+	private async submitStashAction<T>(
+		project: GitProjectTarget,
+		context: PorcelainLoadContext,
+		submit: () => Promise<T>,
+	): Promise<T> {
+		try {
+			return await submit();
+		} catch (error) {
+			if (
+				error instanceof ApiError &&
+				error.errorCode === 'GIT_STALE_STASH' &&
+				this.isActiveLoad(context) &&
+				this.deps.isCurrentTarget(project)
+			) {
+				await this.loadStashes(project, context);
+			}
+			throw error;
+		}
 	}
 
 	async loadHistory(

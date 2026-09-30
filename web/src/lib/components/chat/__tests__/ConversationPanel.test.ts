@@ -16,6 +16,7 @@ import type { GitQuickSummaryReady } from '$lib/api/git.js';
 import * as m from '$lib/paraglide/messages.js';
 import { UserMessage } from '$shared/chat-types';
 import { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
+import type { ComposerAvailabilityNoticePresentation } from '$lib/chat/composer/composer-availability.js';
 
 const executors = new ExecutorsStore();
 
@@ -23,6 +24,7 @@ const runtime = vi.hoisted(() => ({
 	autoScrollToBottom: false,
 	processing: true,
 	reduceMotion: false,
+	showQuickCommitTray: true,
 	queue: null as ChatQueueState | null,
 	summary: null as GitQuickSummaryReady | null,
 }));
@@ -53,7 +55,7 @@ vi.mock('$lib/context', () => ({
 		autoScrollToBottom: runtime.autoScrollToBottom,
 		chatMaxWidth: 'default',
 		reduceMotion: runtime.reduceMotion,
-		showQuickCommitTray: true,
+		showQuickCommitTray: runtime.showQuickCommitTray,
 	}),
 	getModelCatalog: () => ({ forExecutor() { return this; }, supportsSteering: () => true }),
 	getOptionalTransientLayers: () => null,
@@ -210,6 +212,7 @@ describe('ConversationPanel', () => {
 		runtime.autoScrollToBottom = false;
 		runtime.processing = true;
 		runtime.reduceMotion = false;
+		runtime.showQuickCommitTray = true;
 		runtime.queue = null;
 		runtime.summary = null;
 		vi.clearAllMocks();
@@ -455,10 +458,17 @@ describe('ConversationPanel', () => {
 		expect(actions.toggleBranch).toHaveBeenCalledWith(panel.surfaceId, 'chat-1');
 	});
 
-	it('hides the Git tray while its composer shows an availability notice', async () => {
-		runtime.processing = false;
+	it.each([false, true])('places the notice above the cap without hiding it (processing=%s)', async (processing) => {
+		runtime.processing = processing;
 		runtime.summary = gitSummary();
+		runtime.queue = queue();
 		const { panel } = makePanel();
+		const composerNotice: ComposerAvailabilityNoticePresentation = {
+			chatId: 'chat-1',
+			notice: { kind: 'catalog-failed', message: 'Catalog unavailable' },
+			onRetryProject: vi.fn(),
+			onRetryCatalog: vi.fn(),
+		};
 		const props = {
 			surfaceId: panel.surfaceId,
 			chat: chat(),
@@ -466,15 +476,68 @@ describe('ConversationPanel', () => {
 			isCommandOwner: true,
 			ownsComposer: true,
 			actions: makeActions(),
-			composerNoticeShown: true,
+			composerNotice,
+			composerInsetPx: 96,
 		};
 		const rendered = render(ConversationPanel, props);
-		expect(screen.queryByRole('button', { name: /Commit/ })).toBeNull();
+		const notice = rendered.container.querySelector('[data-conversation-panel-notice]')!;
+		const dock = rendered.container.querySelector('[data-conversation-panel-status-dock]')!;
+		const spacer = rendered.container.querySelector('[data-conversation-panel-composer-spacer]')!;
+		const queued = screen.getByText('Queued input');
+		expect(screen.getByRole('button', { name: /Commit/ })).toBeTruthy();
+		expect(notice.compareDocumentPosition(dock) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+		expect(queued.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+		expect(notice.classList.contains('pb-11')).toBe(true);
+		expect(queued.closest('.pb-14')).toBeNull();
+		expect(rendered.container.querySelector('[data-reserve-composer-tray-space]')?.getAttribute('data-reserve-composer-tray-space')).toBe('false');
+		expect(dock.nextElementSibling).toBe(spacer);
+		expect(spacer.getAttribute('style')).toContain('height: 96px');
+		await fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+		expect(composerNotice.onRetryCatalog).toHaveBeenCalledOnce();
 
 		await rendered.rerender({ ...props, ownsComposer: false });
+		expect(rendered.container.querySelector('[data-conversation-panel-notice]')).toBeNull();
 		expect(screen.getByRole('button', { name: /Commit/ })).toBeTruthy();
 
-		await rendered.rerender({ ...props, composerNoticeShown: false });
+		await rendered.rerender({ ...props, composerNotice: { ...composerNotice, chatId: 'previous-chat' } });
+		expect(rendered.container.querySelector('[data-conversation-panel-notice]')).toBeNull();
+
+		await rendered.rerender({ ...props, composerNotice: null });
+		expect(rendered.container.querySelector('[data-conversation-panel-notice]')).toBeNull();
+		expect(queued.closest('.pb-14')).toBeTruthy();
+		expect(spacer.getAttribute('style')).toContain('height: 96px');
 		expect(screen.getByRole('button', { name: /Commit/ })).toBeTruthy();
+	});
+
+	it('omits the notice cap slot when the tray is hidden and restores queue reservation without a notice', async () => {
+		runtime.processing = false;
+		runtime.showQuickCommitTray = false;
+		runtime.queue = queue();
+		const { panel } = makePanel();
+		const composerNotice: ComposerAvailabilityNoticePresentation = {
+			chatId: 'chat-1',
+			notice: { kind: 'catalog-failed', message: 'Catalog unavailable' },
+			onRetryProject: vi.fn(),
+			onRetryCatalog: vi.fn(),
+		};
+		const props = {
+			surfaceId: panel.surfaceId,
+			chat: chat(),
+			panel,
+			isCommandOwner: true,
+			ownsComposer: true,
+			actions: makeActions(),
+			composerNotice,
+		};
+		const rendered = render(ConversationPanel, props);
+		const notice = rendered.container.querySelector('[data-conversation-panel-notice]')!;
+		const queued = screen.getByText('Queued input');
+		expect(notice.classList.contains('pb-11')).toBe(false);
+		expect(notice.classList.contains('pb-14')).toBe(false);
+		expect(queued.closest('.pb-14')).toBeNull();
+		expect(rendered.container.querySelector('[data-conversation-panel-status-anchor]')?.children.length).toBe(0);
+
+		await rendered.rerender({ ...props, composerNotice: null });
+		expect(queued.closest('.pb-14')).toBeTruthy();
 	});
 });

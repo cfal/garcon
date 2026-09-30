@@ -157,6 +157,7 @@ export interface LocalSettingsSnapshot {
 	sidebarInactivityDuration: SidebarInactivityDuration;
 	sidebarGroupNestedProjectPaths: boolean;
 	sidebarChatItemLayout: ChatItemLayout;
+	sidebarShowProjectPath: boolean;
 	selectedChatBoardId: string | null;
 	chatBoardItemLayout: ChatItemLayout | null;
 	chatBoardActiveColumnByBoardId: Record<string, string>;
@@ -196,6 +197,7 @@ type BooleanLocalSettingKey =
 	| 'chatListAutohide'
 	| 'sidebarVisible'
 	| 'sidebarGroupNestedProjectPaths'
+	| 'sidebarShowProjectPath'
 	| 'codeEditorWordWrap'
 	| 'codeEditorVimMode'
 	| 'codeEditorLineNumbers';
@@ -223,7 +225,8 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	sidebarGrouping: 'project-and-activity',
 	sidebarInactivityDuration: '3-days',
 	sidebarGroupNestedProjectPaths: false,
-	sidebarChatItemLayout: 'compact',
+	sidebarChatItemLayout: 'single-line',
+	sidebarShowProjectPath: false,
 	selectedChatBoardId: null,
 	chatBoardItemLayout: null,
 	chatBoardActiveColumnByBoardId: {},
@@ -407,6 +410,7 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 			DEFAULTS.sidebarGroupNestedProjectPaths,
 		),
 		sidebarChatItemLayout: parseSidebarChatItemLayout(parsed.sidebarChatItemLayout),
+		sidebarShowProjectPath: parseBoolean(parsed.sidebarShowProjectPath, DEFAULTS.sidebarShowProjectPath),
 		selectedChatBoardId: isChatBoardId(parsed.selectedChatBoardId)
 			? parsed.selectedChatBoardId
 			: null,
@@ -501,6 +505,7 @@ export class LocalSettingsStore {
 	sidebarInactivityDuration = $state<SidebarInactivityDuration>(DEFAULTS.sidebarInactivityDuration);
 	sidebarGroupNestedProjectPaths = $state(DEFAULTS.sidebarGroupNestedProjectPaths);
 	sidebarChatItemLayout = $state<ChatItemLayout>(DEFAULTS.sidebarChatItemLayout);
+	sidebarShowProjectPath = $state(DEFAULTS.sidebarShowProjectPath);
 	selectedChatBoardId = $state<string | null>(DEFAULTS.selectedChatBoardId);
 	chatBoardItemLayout = $state<ChatItemLayout | null>(DEFAULTS.chatBoardItemLayout);
 	chatBoardActiveColumnByBoardId = $state<Record<string, string>>({});
@@ -625,6 +630,7 @@ export class LocalSettingsStore {
 			sidebarInactivityDuration: this.sidebarInactivityDuration,
 			sidebarGroupNestedProjectPaths: this.sidebarGroupNestedProjectPaths,
 			sidebarChatItemLayout: this.sidebarChatItemLayout,
+			sidebarShowProjectPath: this.sidebarShowProjectPath,
 			selectedChatBoardId: this.selectedChatBoardId,
 			chatBoardItemLayout: this.chatBoardItemLayout,
 			chatBoardActiveColumnByBoardId: { ...this.chatBoardActiveColumnByBoardId },
@@ -674,6 +680,7 @@ export class LocalSettingsStore {
 		this.sidebarInactivityDuration = snap.sidebarInactivityDuration;
 		this.sidebarGroupNestedProjectPaths = snap.sidebarGroupNestedProjectPaths;
 		this.sidebarChatItemLayout = snap.sidebarChatItemLayout;
+		this.sidebarShowProjectPath = snap.sidebarShowProjectPath;
 		this.selectedChatBoardId = snap.selectedChatBoardId;
 		this.chatBoardItemLayout = snap.chatBoardItemLayout;
 		this.chatBoardActiveColumnByBoardId = { ...snap.chatBoardActiveColumnByBoardId };

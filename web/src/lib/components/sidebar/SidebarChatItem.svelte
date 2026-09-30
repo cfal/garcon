@@ -3,7 +3,7 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn';
 	import { Button } from '$lib/components/ui/button';
-	import { getAppShell, getModelCatalog, getWorkspaceWindowDnd } from '$lib/context';
+	import { getAppShell, getExecutors, getModelCatalog, getWorkspaceWindowDnd } from '$lib/context';
 	import Pin from '@lucide/svelte/icons/pin';
 	import Archive from '@lucide/svelte/icons/archive';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
@@ -35,7 +35,6 @@
 		isMultiSelectMode?: boolean;
 		isMultiSelected?: boolean;
 		displayOptions?: SidebarDisplayOptions;
-		showProjectPathInGroup?: boolean;
 		enableNativeDrag?: boolean;
 		enableRecenterOnRequest?: boolean;
 		onChatSelect: (chatId: string) => void;
@@ -69,7 +68,6 @@
 		isMultiSelectMode = false,
 		isMultiSelected = false,
 		displayOptions = DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
-		showProjectPathInGroup = false,
 		enableNativeDrag = true,
 		enableRecenterOnRequest = true,
 		onChatSelect,
@@ -98,6 +96,9 @@
 	let agentId = $derived(session.agentId || 'claude');
 	let canNativeDrag = $derived(enableNativeDrag && !isMultiSelectMode);
 	let isSingleLineLayout = $derived(displayOptions.chatItemLayout === 'single-line');
+	let hasAdditionalLines = $derived(
+		!isSingleLineLayout || (displayOptions.showProjectPath && Boolean(session.projectPath?.trim())),
+	);
 
 	function handleItemClick(e: MouseEvent) {
 		if (isMultiSelectMode) {
@@ -160,6 +161,10 @@
 	}
 
 	const appShell = getAppShell();
+	const executors = getExecutors();
+	const executorLabel = $derived(
+		executors.executors.length > 1 ? executors.label(session.executorId) : undefined,
+	);
 	const rootModelCatalog = getModelCatalog();
 	const modelCatalog = $derived(rootModelCatalog.forExecutor(session.executorId));
 	const windowDnd = getWorkspaceWindowDnd();
@@ -218,10 +223,7 @@
 	{#if !isMultiSelectMode && (isPinned || isArchived)}
 		<div
 			class={cn(
-				'flex h-4 w-4 items-center justify-center rounded-full border',
-				isSingleLineLayout
-					? 'relative shrink-0'
-					: 'pointer-events-none absolute bottom-0 right-0 z-10',
+				'relative flex h-4 w-4 shrink-0 items-center justify-center rounded-full border',
 				isPinned
 					? 'border-sidebar-badge-pinned-border bg-sidebar-badge-pinned-bg'
 					: 'border-sidebar-badge-archived-border bg-sidebar-badge-archived-bg',
@@ -277,31 +279,25 @@
 			{isSelected}
 			{currentTime}
 			showTimestamp={true}
-			showProjectPath={displayOptions.grouping === 'none' || showProjectPathInGroup}
+			showProjectPath={displayOptions.showProjectPath}
+			{executorLabel}
 			chatItemLayout={displayOptions.chatItemLayout}
-			titleBadge={isSingleLineLayout ? stateBadge : undefined}
+			titleBadge={stateBadge}
 			hasDesktopOverlayMenu={!isMobile && !isMultiSelectMode}
 			onTagClick={isMultiSelectMode ? undefined : onTagClick}
 			onManageTags={isMultiSelectMode || !onManageTags ? undefined : () => onManageTags(session)}
 		/>
-		{#if !isSingleLineLayout}
-			{@render stateBadge()}
-		{/if}
 	</div>
 {/snippet}
 
 <div
-	class={cn(
-		'chat-item-root group relative',
-		isSingleLineLayout && 'flex h-full flex-col justify-center',
-	)}
+	class="chat-item-root group relative flex h-full flex-col justify-center"
 	bind:this={itemEl}
 >
 	{#if isMobile}
 		<div
 			class={cn(
-				'flex items-stretch bg-sidebar-chat-item-bg',
-				isSingleLineLayout && 'flex-1 min-h-0',
+				'flex flex-1 min-h-0 items-stretch bg-sidebar-chat-item-bg',
 				!isMultiSelectMode &&
 					isSelected &&
 					'bg-sidebar-chat-item-selected-bg text-sidebar-chat-item-selected-foreground',
@@ -337,7 +333,7 @@
 			{/if}
 		</div>
 	{:else}
-		<div class={cn(isSingleLineLayout && 'flex-1 min-h-0')}>
+		<div class="flex-1 min-h-0">
 			<Button
 				variant="ghost"
 				draggable={canNativeDrag ? true : undefined}
@@ -345,13 +341,9 @@
 				ondragend={canNativeDrag ? handleDragEnd : undefined}
 				oncontextmenu={handleRightClick}
 				class={cn(
-					'w-full justify-start pr-2 h-auto font-normal text-left rounded-none bg-sidebar-chat-item-bg hover:bg-sidebar-chat-item-hover-bg transition-colors duration-200',
-					isMultiSelectMode
-						? 'py-[5px] pl-1 border-l-0'
-						: isSingleLineLayout
-							? 'py-[2px] pl-[9px]'
-							: 'py-[5px] pl-[9px]',
-					isSingleLineLayout && 'h-full',
+					'w-full h-full justify-start pr-2 font-normal text-left rounded-none bg-sidebar-chat-item-bg hover:bg-sidebar-chat-item-hover-bg transition-colors duration-200',
+					isMultiSelectMode ? 'pl-1 border-l-0' : 'pl-[9px]',
+					isSingleLineLayout ? 'py-[2px]' : 'py-[5px]',
 					!isMultiSelectMode &&
 						isSelected &&
 						'bg-sidebar-chat-item-selected-bg text-sidebar-chat-item-selected-foreground',
@@ -376,9 +368,9 @@
 				'absolute z-20',
 				!isAtCursor &&
 					'sidebar-item-menu-anchor right-1 hidden md:block opacity-100 transition-opacity [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within:opacity-100',
-				!isAtCursor && !isSingleLineLayout && 'top-1',
+				!isAtCursor && hasAdditionalLines && 'top-1',
 				// Centered so equal space sits above and below the hover trigger.
-				!isAtCursor && isSingleLineLayout && 'top-1/2 -translate-y-1/2',
+				!isAtCursor && !hasAdditionalLines && 'top-1/2 -translate-y-1/2',
 			)}
 			style={isAtCursor ? `left:${rightClickPos!.x}px;top:${rightClickPos!.y}px` : ''}
 		>

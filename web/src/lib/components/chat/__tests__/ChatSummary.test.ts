@@ -33,6 +33,42 @@ function chat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord {
 }
 
 describe('ChatSummary', () => {
+	it.each(['single-line', 'compact', 'detailed'] as const)(
+		'builds the %s sidebar layout on the same title and optional path line',
+		async (chatItemLayout) => {
+			const view = render(ChatSummary, {
+				session: chat({ isProcessing: false }),
+				variant: 'sidebar',
+				chatItemLayout,
+				showTimestamp: true,
+				showProjectPath: false,
+				currentTime: new Date('2026-09-07T12:00:00.000Z'),
+			});
+			const summary = view.container.querySelector('[data-slot="sidebar-chat-summary"]')!;
+			expect(summary.className).toContain('flex-col gap-1');
+			const header = summary.firstElementChild!;
+			expect(header.getAttribute('data-slot')).toBe('chat-summary-header');
+			expect(header.querySelector('[data-slot="sidebar-chat-timestamp-badge"]')).toBeTruthy();
+			expect(summary.querySelector('[data-slot="chat-project-path"]')).toBeNull();
+			await view.rerender({ showProjectPath: true });
+			expect(header.nextElementSibling?.getAttribute('data-slot')).toBe('chat-project-path');
+			expect(header.nextElementSibling?.textContent?.trim()).toBe('/workspace/project');
+			expect(summary.querySelectorAll('[data-slot="sidebar-chat-timestamp-badge"]')).toHaveLength(
+				1,
+			);
+			expect(Boolean(summary.querySelector('[data-slot="chat-summary-pills"]'))).toBe(
+				chatItemLayout !== 'single-line',
+			);
+			if (chatItemLayout === 'detailed') {
+				expect(summary.lastElementChild?.getAttribute('data-slot')).toBe('chat-preview');
+			}
+			await view.rerender({ session: chat({ projectPath: '   ' }) });
+			expect(summary.querySelector('[data-slot="chat-project-path"]')).toBeNull();
+			expect(summary.querySelector('[data-slot="sidebar-chat-timestamp-badge"]')).toBeNull();
+			expect(header.querySelector('[data-slot="sidebar-chat-processing-indicator"]')).toBeTruthy();
+		},
+	);
+
 	it('renders the detailed board hierarchy with bounded preview and processing status', () => {
 		render(ChatSummary, {
 			session: chat(),

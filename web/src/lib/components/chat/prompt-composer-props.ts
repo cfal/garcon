@@ -1,5 +1,6 @@
 import type { AgentSettingDescriptor } from '$shared/agent-integration';
 import type { ResendCandidate } from '$shared/chat-view';
+import type { ComposerAvailabilityNoticePresentation } from '$lib/chat/composer/composer-availability.js';
 import type { JsonValue } from '$shared/json';
 import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 import type { ModelSelectorChange } from '$lib/components/model-selector/model-selector-types';
@@ -20,5 +21,5 @@ export interface PromptComposerProps {
 	isPresented?: boolean;
 	composerEditorOpenRequestId?: number;
 	onChooseProjectFolder?: (chatId: string) => void;
-	onAvailabilityNoticeChange?: (shown: boolean) => void;
+	onAvailabilityNoticeChange?: (notice: ComposerAvailabilityNoticePresentation | null) => void;
 }
