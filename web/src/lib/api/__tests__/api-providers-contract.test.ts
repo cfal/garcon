@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { assignApiProvider, createApiProvider, deleteApiProvider, discoverApiProviderModels, getApiProviderManagement, testApiProvider, unassignApiProvider, updateApiProvider } from '../api-providers';
+import { createApiProvider, deleteApiProvider, discoverApiProviderModels, getApiProviderManagement, testApiProvider, updateApiProvider } from '../api-providers';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -26,20 +26,17 @@ it('uses explicit executor grants and revisioned global edits with acknowledged 
 	const fetchMock = vi.fn<typeof fetch>(async () => Response.json({}));
 	vi.stubGlobal('fetch', fetchMock);
 	await getApiProviderManagement();
-	await assignApiProvider('local', 'synthetic_profile');
-	await unassignApiProvider('local', 'synthetic_profile');
-	await updateApiProvider('synthetic_profile', { revision: 3, label: 'Updated profile' });
+	await updateApiProvider('synthetic_profile', { revision: 3, label: 'Updated profile', executorIds: [] });
 	await deleteApiProvider('synthetic_profile');
-	await createApiProvider({ templateId: 'custom', label: 'New profile', endpoint: {
+	await createApiProvider({ executorIds: ['local', '22222222-2222-4222-8222-222222222222'], templateId: 'custom', label: 'New profile', endpoint: {
 		protocol: 'openai-compatible', baseUrl: 'http://localhost:11434/v1', defaultModel: 'synthetic', models: [], supportsImages: false,
-	} }, '22222222-2222-4222-8222-222222222222');
+	} });
 	expect(fetchMock.mock.calls.map(([url, options]) => [url, options?.method ?? 'GET'])).toEqual([
 		['/api/v1/api-providers', 'GET'],
-		['/api/v1/api-provider-assignments?executorId=local&apiProviderId=synthetic_profile', 'PUT'],
-		['/api/v1/api-provider-assignments?executorId=local&apiProviderId=synthetic_profile', 'DELETE'],
 		['/api/v1/api-providers?id=synthetic_profile', 'PUT'],
 		['/api/v1/api-providers?id=synthetic_profile&acknowledgeSharedImpact=true', 'DELETE'],
-		['/api/v1/api-providers?executorId=22222222-2222-4222-8222-222222222222', 'POST'],
+		['/api/v1/api-providers?executorId=local', 'POST'],
 	]);
-	expect(JSON.parse(String(fetchMock.mock.calls[3]![1]?.body))).toEqual({ revision: 3, label: 'Updated profile' });
+	expect(JSON.parse(String(fetchMock.mock.calls[1]![1]?.body))).toEqual({ revision: 3, label: 'Updated profile', executorIds: [] });
+	expect(JSON.parse(String(fetchMock.mock.calls[3]![1]?.body)).executorIds).toEqual(['local', '22222222-2222-4222-8222-222222222222']);
 });

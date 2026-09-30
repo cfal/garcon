@@ -14,7 +14,6 @@
 		description,
 		addLabel,
 		apiProviderCatalog = [],
-		unassign,
 		executors,
 		assignments,
 	}: {
@@ -23,7 +22,6 @@
 		description: string;
 		addLabel: string;
 		apiProviderCatalog?: ApiProviderCatalogEntry[];
-		unassign?: NonNullable<ConstructorParameters<typeof ApiProvidersStore>[1]>['unassign'];
 		executors?: readonly ExecutorSnapshot[];
 		assignments?: Record<string, string[]>;
 	} = $props();
@@ -40,8 +38,6 @@
 	});
 	const providers = new ApiProvidersStore(() => catalog.invalidateAll(), {
 		read: async () => snapshot(),
-		assign: async () => snapshot(),
-		unassign: untrack(() => unassign) ?? (async () => snapshot()),
 		delete: async () => ({ success: true }),
 	});
 	providers.snapshot = untrack(snapshot);

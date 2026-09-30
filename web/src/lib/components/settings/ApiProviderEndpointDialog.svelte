@@ -9,6 +9,7 @@
 	import { getModelCatalog, getApiProviders, getExecutors } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
+	import Network from '@lucide/svelte/icons/network';
 	import type { ApiProtocol } from '$shared/api-providers';
 	import type { ApiProviderTemplateId } from '$shared/api-provider-templates';
 	import { ApiProviderEndpointDialogState } from './api-provider-endpoint-dialog-state.svelte';
@@ -62,7 +63,9 @@
 		const found = endpointId ? providers.findEndpoint(endpointId) : null;
 		if (!found) return 'local';
 
-		const assignedExecutors = executors.executors.filter((executor) => providers.isAssigned(executor.id, found.apiProvider.id));
+		const assignedExecutors = executors.executors.filter((executor) =>
+			providers.isAssigned(executor.id, found.apiProvider.id),
+		);
 		const readyExecutor = assignedExecutors.find((executor) => executors.isReady(executor.id));
 		return readyExecutor?.id ?? assignedExecutors[0]?.id ?? 'local';
 	}
@@ -78,9 +81,13 @@
 		dialog.modelsText = target.value;
 		dialog.syncDefaultModelWithModels();
 	}
+
+	function requestClose(): void {
+		if (!dialog.isSaving) onOpenChange(false);
+	}
 </script>
 
-<Dialog.Root {open} {onOpenChange}>
+<Dialog.Root {open} {requestClose}>
 	<Dialog.Content
 		class="flex h-dvh w-full max-w-full flex-col rounded-none border-0 p-0 sm:h-auto sm:max-h-[calc(100dvh-2rem)] sm:max-w-3xl sm:rounded-lg sm:border"
 	>
@@ -96,209 +103,231 @@
 				void dialog.save();
 			}}
 		>
-			{#if executors.hasRemoteExecutors}
+			<fieldset class="contents" disabled={dialog.isSaving}>
+				{#if dialog.apiProviderId}
+					<p class="text-sm text-muted-foreground">
+						Changes affect every executor and workspace using this shared profile.
+					</p>
+				{/if}
 				<div class="grid gap-2">
-					<label class="text-sm font-medium" for="api-provider-executor">
-						{dialog.apiProviderId
-							? m.settings_provider_test_from()
-							: m.settings_provider_create_on()}
-					</label>
-					<select
-						id="api-provider-executor"
-						class="h-9 min-w-0 w-full rounded-md border border-input bg-background px-3 text-base pointer-fine:text-sm"
-						value={executorId}
-						onchange={(event) => selectExecutor(event.currentTarget.value)}
-						disabled={dialog.isSaving}
+					<label class="text-sm font-medium" for="api-provider-label"
+						>{m.settings_api_provider_dialog_display_name()}</label
 					>
-						{#each executors.executors as executor (executor.id)}
-							<option value={executor.id}>{executor.label}</option>
-						{/each}
-					</select>
+					<Input id="api-provider-label" bind:value={dialog.label} />
 				</div>
-			{/if}
-			{#if dialog.apiProviderId}
-				<p class="text-sm text-muted-foreground">
-					Changes affect every executor and workspace using this shared profile.
-				</p>
-			{/if}
-			{#if !dialog.canProbe}
-				<p class="text-sm text-muted-foreground">
-					Testing requires a ready executor and an assigned profile or a newly entered key.
-				</p>
-			{/if}
-			<div class="grid gap-2">
-				<label class="text-sm font-medium" for="api-provider-label"
-					>{m.settings_api_provider_dialog_display_name()}</label
-				>
-				<Input id="api-provider-label" bind:value={dialog.label} />
-			</div>
 
-			<div class="grid gap-2">
-				<label class="text-sm font-medium" for="api-provider-base-url"
-					>{m.settings_api_provider_dialog_base_url()}</label
-				>
-				<Input
-					id="api-provider-base-url"
-					bind:value={dialog.baseUrl}
-					placeholder={dialog.baseUrlPlaceholder}
-				/>
-			</div>
-
-			<div class="grid gap-2">
-				<label class="text-sm font-medium" for="api-provider-api-key"
-					>{m.settings_api_provider_dialog_api_key()}</label
-				>
-				<Input
-					id="api-provider-api-key"
-					type="password"
-					bind:value={dialog.apiKey}
-					autocomplete="off"
-					required={dialog.apiKeyRequired && !dialog.apiProviderId}
-					placeholder={dialog.apiKeyPlaceholder}
-				/>
-			</div>
-
-			<div class="grid gap-2">
-				<label class="text-sm font-medium" for="api-provider-default-model"
-					>{m.settings_api_provider_dialog_default_model()}</label
-				>
-				<Select.Root
-					type="single"
-					value={dialog.defaultModel}
-					onValueChange={(value) => {
-						if (value) dialog.defaultModel = value;
-					}}
-				>
-					<Select.Trigger
-						id="api-provider-default-model"
-						class="w-full"
-						disabled={!dialog.hasModels}
-						aria-label={m.settings_api_provider_dialog_default_model()}
+				<div class="grid gap-2">
+					<label class="text-sm font-medium" for="api-provider-base-url"
+						>{m.settings_api_provider_dialog_base_url()}</label
 					>
-						{dialog.defaultModelLabel}
-					</Select.Trigger>
-					<Select.Content>
-						{#each dialog.modelOptions as model (model.value)}
-							<Select.Item value={model.value} label={model.label}>{model.label}</Select.Item>
-						{/each}
-					</Select.Content>
-				</Select.Root>
-			</div>
+					<Input
+						id="api-provider-base-url"
+						bind:value={dialog.baseUrl}
+						placeholder={dialog.baseUrlPlaceholder}
+					/>
+				</div>
 
-			<div class="grid gap-2">
-				<div class="flex items-center justify-between gap-3">
-					<label class="text-sm font-medium" for="api-provider-models"
-						>{m.settings_api_provider_dialog_models()}</label
+				<div class="grid gap-2">
+					<label class="text-sm font-medium" for="api-provider-api-key"
+						>{m.settings_api_provider_dialog_api_key()}</label
+					>
+					<Input
+						id="api-provider-api-key"
+						type="password"
+						bind:value={dialog.apiKey}
+						autocomplete="off"
+						required={dialog.apiKeyRequired && !dialog.apiProviderId}
+						placeholder={dialog.apiKeyPlaceholder}
+					/>
+				</div>
+
+				<fieldset class="min-w-0 space-y-2">
+					<legend class="mb-2 text-sm font-medium">Available on</legend>
+					<div class="grid min-w-0 gap-2 sm:grid-cols-2">
+						{#each executors.executors as executor (executor.id)}
+							<label
+								class="flex min-w-0 cursor-pointer items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm"
+							>
+								<Network class="size-4 shrink-0 text-file-icon-folder" aria-hidden="true" />
+								<span class="min-w-0 flex-1 break-words">{executor.label}</span>
+								<Switch
+									aria-label={executor.label}
+									checked={dialog.executorIds.includes(executor.id)}
+									disabled={dialog.isSaving}
+									onCheckedChange={(checked) => dialog.setExecutorSelected(executor.id, checked)}
+								/>
+							</label>
+						{/each}
+					</div>
+				</fieldset>
+
+				{#if executors.hasRemoteExecutors}
+					<div class="grid gap-2">
+						<label class="text-sm font-medium" for="api-provider-executor"
+							>{m.settings_provider_test_from()}</label
+						>
+						<select
+							id="api-provider-executor"
+							class="h-9 min-w-0 w-full rounded-md border border-input bg-background px-3 text-base pointer-fine:text-sm"
+							value={executorId}
+							onchange={(event) => selectExecutor(event.currentTarget.value)}
+						>
+							{#each executors.executors as executor (executor.id)}
+								<option value={executor.id}>{executor.label}</option>
+							{/each}
+						</select>
+					</div>
+				{/if}
+				{#if !dialog.canProbe}
+					<p class="text-sm text-muted-foreground">
+						Testing requires a ready executor with saved access, or a newly entered key.
+					</p>
+				{/if}
+
+				<div class="grid gap-2">
+					<label class="text-sm font-medium" for="api-provider-default-model"
+						>{m.settings_api_provider_dialog_default_model()}</label
+					>
+					<Select.Root
+						type="single"
+						value={dialog.defaultModel}
+						onValueChange={(value) => {
+							if (value) dialog.defaultModel = value;
+						}}
+					>
+						<Select.Trigger
+							id="api-provider-default-model"
+							class="w-full"
+							disabled={!dialog.hasModels}
+							aria-label={m.settings_api_provider_dialog_default_model()}
+						>
+							{dialog.defaultModelLabel}
+						</Select.Trigger>
+						<Select.Content>
+							{#each dialog.modelOptions as model (model.value)}
+								<Select.Item value={model.value} label={model.label}>{model.label}</Select.Item>
+							{/each}
+						</Select.Content>
+					</Select.Root>
+				</div>
+
+				<div class="grid gap-2">
+					<div class="flex items-center justify-between gap-3">
+						<label class="text-sm font-medium" for="api-provider-models"
+							>{m.settings_api_provider_dialog_models()}</label
+						>
+						<Button
+							type="button"
+							variant="outline"
+							size="sm"
+							onclick={() => dialog.fetchModels()}
+							disabled={!dialog.canFetchModels}
+						>
+							<RefreshCwIcon class="mr-1 size-3.5" />
+							{dialog.isFetchingModels
+								? m.settings_api_provider_dialog_fetching_models()
+								: m.settings_api_provider_dialog_fetch_models()}
+						</Button>
+					</div>
+					<Textarea
+						id="api-provider-models"
+						class="h-40 max-h-60 resize-y overflow-y-auto [field-sizing:fixed]"
+						value={dialog.modelsText}
+						oninput={handleModelsInput}
+						rows={6}
+						placeholder={m.settings_api_provider_dialog_models_placeholder()}
+					/>
+				</div>
+
+				<div class="flex items-center justify-between rounded-lg border border-border p-3">
+					<div>
+						<div class="text-sm font-medium">
+							{m.settings_api_provider_dialog_supports_images()}
+						</div>
+						<div class="text-xs text-muted-foreground">
+							{m.settings_api_provider_dialog_supports_images_description()}
+						</div>
+					</div>
+					<Switch
+						checked={dialog.supportsImages}
+						onCheckedChange={(checked) => {
+							dialog.supportsImages = Boolean(checked);
+						}}
+						aria-label={m.settings_api_provider_dialog_supports_images()}
+					/>
+				</div>
+
+				{#if dialog.usesOpenAiCapabilityToggles}
+					<label class="flex items-start justify-between gap-3 rounded-lg border border-border p-3">
+						<div>
+							<div class="text-sm font-medium">
+								{m.settings_api_provider_capability_chat_completions_label()}
+							</div>
+							<div class="text-xs text-muted-foreground">
+								{m.settings_api_provider_capability_chat_completions_description()}
+							</div>
+						</div>
+						<Switch
+							checked={dialog.supportsChatCompletionsApi}
+							onCheckedChange={(checked) => dialog.setSupportsChatCompletionsApi(Boolean(checked))}
+							aria-label={m.settings_api_provider_capability_chat_completions_label()}
+						/>
+					</label>
+
+					<label class="flex items-start justify-between gap-3 rounded-lg border border-border p-3">
+						<div>
+							<div class="text-sm font-medium">
+								{m.settings_api_provider_capability_responses_label()}
+							</div>
+							<div class="text-xs text-muted-foreground">
+								{m.settings_api_provider_capability_responses_description()}
+							</div>
+						</div>
+						<Switch
+							checked={dialog.supportsResponsesApi}
+							onCheckedChange={(checked) => dialog.setSupportsResponsesApi(Boolean(checked))}
+							aria-label={m.settings_api_provider_capability_responses_label()}
+						/>
+					</label>
+				{/if}
+
+				{#if dialog.error}
+					<div
+						class="rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+					>
+						{dialog.error}
+					</div>
+				{/if}
+
+				{#if dialog.testMessage}
+					<div
+						class="rounded border border-status-success-border bg-status-success px-3 py-2 text-sm text-status-success-foreground"
+					>
+						{dialog.testMessage}
+					</div>
+				{/if}
+
+				<Dialog.Footer>
+					<Button type="button" variant="outline" onclick={requestClose}
+						>{m.settings_api_provider_dialog_cancel()}</Button
 					>
 					<Button
 						type="button"
 						variant="outline"
-						size="sm"
-						onclick={() => dialog.fetchModels()}
-						disabled={!dialog.canFetchModels}
+						onclick={() => dialog.test()}
+						disabled={!dialog.canTest}
 					>
-						<RefreshCwIcon class="mr-1 size-3.5" />
-						{dialog.isFetchingModels
-							? m.settings_api_provider_dialog_fetching_models()
-							: m.settings_api_provider_dialog_fetch_models()}
+						{dialog.isTesting
+							? m.settings_api_provider_dialog_testing()
+							: `Test from ${executors.label(executorId)}`}
 					</Button>
-				</div>
-				<Textarea
-					id="api-provider-models"
-					class="h-40 max-h-60 resize-y overflow-y-auto [field-sizing:fixed]"
-					value={dialog.modelsText}
-					oninput={handleModelsInput}
-					rows={6}
-					placeholder={m.settings_api_provider_dialog_models_placeholder()}
-				/>
-			</div>
-
-			<div class="flex items-center justify-between rounded-lg border border-border p-3">
-				<div>
-					<div class="text-sm font-medium">{m.settings_api_provider_dialog_supports_images()}</div>
-					<div class="text-xs text-muted-foreground">
-						{m.settings_api_provider_dialog_supports_images_description()}
-					</div>
-				</div>
-				<Switch
-					checked={dialog.supportsImages}
-					onCheckedChange={(checked) => {
-						dialog.supportsImages = Boolean(checked);
-					}}
-					aria-label={m.settings_api_provider_dialog_supports_images()}
-				/>
-			</div>
-
-			{#if dialog.usesOpenAiCapabilityToggles}
-				<label class="flex items-start justify-between gap-3 rounded-lg border border-border p-3">
-					<div>
-						<div class="text-sm font-medium">
-							{m.settings_api_provider_capability_chat_completions_label()}
-						</div>
-						<div class="text-xs text-muted-foreground">
-							{m.settings_api_provider_capability_chat_completions_description()}
-						</div>
-					</div>
-					<Switch
-						checked={dialog.supportsChatCompletionsApi}
-						onCheckedChange={(checked) => dialog.setSupportsChatCompletionsApi(Boolean(checked))}
-						aria-label={m.settings_api_provider_capability_chat_completions_label()}
-					/>
-				</label>
-
-				<label class="flex items-start justify-between gap-3 rounded-lg border border-border p-3">
-					<div>
-						<div class="text-sm font-medium">
-							{m.settings_api_provider_capability_responses_label()}
-						</div>
-						<div class="text-xs text-muted-foreground">
-							{m.settings_api_provider_capability_responses_description()}
-						</div>
-					</div>
-					<Switch
-						checked={dialog.supportsResponsesApi}
-						onCheckedChange={(checked) => dialog.setSupportsResponsesApi(Boolean(checked))}
-						aria-label={m.settings_api_provider_capability_responses_label()}
-					/>
-				</label>
-			{/if}
-
-			{#if dialog.error}
-				<div
-					class="rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-				>
-					{dialog.error}
-				</div>
-			{/if}
-
-			{#if dialog.testMessage}
-				<div
-					class="rounded border border-status-success-border bg-status-success px-3 py-2 text-sm text-status-success-foreground"
-				>
-					{dialog.testMessage}
-				</div>
-			{/if}
-
-			<Dialog.Footer>
-				<Button type="button" variant="outline" onclick={() => onOpenChange(false)}
-					>{m.settings_api_provider_dialog_cancel()}</Button
-				>
-				<Button
-					type="button"
-					variant="outline"
-					onclick={() => dialog.test()}
-					disabled={!dialog.canTest}
-				>
-					{dialog.isTesting
-						? m.settings_api_provider_dialog_testing()
-						: `Test from ${executors.label(executorId)}`}
-				</Button>
-				<Button type="submit" disabled={!dialog.canSave}>
-					{dialog.isSaving
-						? m.settings_api_provider_dialog_saving()
-						: m.settings_api_provider_dialog_save()}
-				</Button>
-			</Dialog.Footer>
+					<Button type="submit" disabled={!dialog.canSave}>
+						{dialog.isSaving
+							? m.settings_api_provider_dialog_saving()
+							: m.settings_api_provider_dialog_save()}
+					</Button>
+				</Dialog.Footer>
+			</fieldset>
 		</form>
 	</Dialog.Content>
 </Dialog.Root>

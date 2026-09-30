@@ -2,16 +2,21 @@
 
 import { withJsonBody } from '../lib/json-route.js';
 import type { RouteMap } from '../lib/http-route-types.js';
-import type { ApiProviderInput, ApiProviderService } from '../api-providers/service.js';
-import { isApiProviderId, type ApiProviderModelDiscoveryRequest } from '../../../common/api-providers.js';
+import type { ApiProviderService } from '../api-providers/service.js';
+import { isApiProviderId, type ApiProviderInput, type ApiProviderModelDiscoveryRequest } from '../../../common/api-providers.js';
 import type { ModelCatalogResponseCache } from './model-catalog-cache.js';
 import { errorMessage, jsonErrorFromCorruptStateFile } from './route-helpers.js';
 import { executorIdFromUrl } from './executor-target.js';
 import { DomainError, ValidationDomainError } from '../../common/domain-error.js';
 import { AgentCallError } from '@garcon/server-agent-interface';
 import { jsonErrorFromUnknown } from '../../common/http-error.js';
+import { AtomicJsonWriteError } from '../../common/json-file-store.js';
 
 function apiProviderError(error: unknown): Response {
+  if (error instanceof AtomicJsonWriteError && error.renamed) {
+    return jsonErrorFromUnknown(new DomainError('API_PROVIDER_STORAGE_UNAVAILABLE',
+      'Provider save durability is unknown. Reload after checking controller configuration.', 503));
+  }
   if (error instanceof DomainError || error instanceof AgentCallError) return jsonErrorFromUnknown(error);
   const corruptStateResponse = jsonErrorFromCorruptStateFile(error);
   if (corruptStateResponse) return corruptStateResponse;

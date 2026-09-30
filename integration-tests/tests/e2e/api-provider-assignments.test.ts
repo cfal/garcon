@@ -46,17 +46,21 @@ test('provider settings support offline grants and independent profiles; remote 
     await app.waitForButton('Providers');
     await app.clickButton('Providers');
     await app.waitForText('Integration Fake OpenAI');
-    await fixture.page.$eval(`[data-api-provider-id="${providerId}"]`, (element) => {
-      const label = [...element.querySelectorAll('label')].find((item) => item.textContent?.trim() === 'Offline worker');
-      if (!label) throw new Error('Missing offline assignment');
-      label.querySelector<HTMLInputElement>('input')!.click();
-    });
-    await fixture.page.waitForFunction((id) => {
-      const fieldset = document.querySelector<HTMLFieldSetElement>(`[data-api-provider-id="${id}"] fieldset`);
-      const label = [...fieldset?.querySelectorAll('label') ?? []]
-        .find((item) => item.textContent?.trim() === 'Offline worker');
-      return fieldset && !fieldset.disabled && label?.querySelector<HTMLInputElement>('input')?.checked;
-    }, {}, providerId);
+    await app.clickButton('Edit Integration Fake OpenAI');
+    const offlineSwitch = '[role="switch"][aria-label="Offline worker"]';
+    await fixture.page.waitForSelector(offlineSwitch);
+    await fixture.page.$eval(offlineSwitch, (element) => (element as HTMLButtonElement).click());
+    expect((await client.get<ApiProviderManagement>('/api/v1/api-providers')).assignments.assignments[executor.id] ?? []).not.toContain(providerId);
+    await app.clickButton('Cancel', { last: true });
+    await fixture.page.waitForFunction(() => document.querySelector('#api-provider-label') === null);
+    await app.clickButton('Edit Integration Fake OpenAI');
+    await fixture.page.waitForSelector(offlineSwitch);
+    expect(await fixture.page.$eval(offlineSwitch, (element) => element.getAttribute('aria-checked'))).toBe('false');
+    await fixture.page.$eval(offlineSwitch, (element) => (element as HTMLButtonElement).click());
+    await app.clickButton('Save', { last: true });
+    await fixture.page.waitForFunction(() => document.querySelector('#api-provider-label') === null);
+    await fixture.page.waitForFunction((id) => [...document.querySelectorAll(`[data-api-provider-id="${id}"] [data-slot="api-provider-executor"]`)]
+      .some(pill => pill.getAttribute('title') === 'Executor: Offline worker'), {}, providerId);
     expect((await client.get<ApiProviderManagement>('/api/v1/api-providers')).assignments.assignments[executor.id]).toContain(providerId);
     await app.clickButton('Duplicate Integration Fake OpenAI');
     await fixture.page.waitForSelector('#api-provider-label');

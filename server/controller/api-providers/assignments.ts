@@ -11,6 +11,13 @@ import type { RetainExecutorReferences } from '../executors/reference-writes.js'
 const MAX_ASSIGNMENT_EXECUTORS = 1024;
 const MAX_PROVIDERS_PER_EXECUTOR = 1024;
 
+export function validateProviderExecutorIds(value: unknown): asserts value is string[] {
+  if (!Array.isArray(value) || value.length > MAX_ASSIGNMENT_EXECUTORS
+    || !value.every(isExecutorId) || new Set(value).size !== value.length) {
+    throw new ValidationDomainError('executorIds must be a list of unique executor IDs');
+  }
+}
+
 interface AssignmentFile extends ApiProviderAssignments {
   version: 1;
 }
@@ -115,6 +122,30 @@ export class ApiProviderAssignmentStore {
         snapshot.assignments[executorId] = snapshot.assignments[executorId]!.filter((id) => id !== providerId);
       }
       await this.#save(snapshot);
+    });
+  }
+
+  setProviderExecutors(providerId: string, executorIds: readonly string[]): Promise<void> {
+    if (!isApiProviderId(providerId)) throw new ValidationDomainError('Invalid provider ID');
+    validateProviderExecutorIds(executorIds);
+    return this.#lock.runExclusive('assignments', async () => {
+      const release = this.retain(executorIds);
+      try {
+        const snapshot = structuredClone(this.#current());
+        const selected = new Set(executorIds);
+        for (const [executorId, providers] of Object.entries(snapshot.assignments)) {
+          if (!selected.has(executorId)) {
+            snapshot.assignments[executorId] = providers.filter((id) => id !== providerId);
+          }
+        }
+        for (const executorId of executorIds) {
+          const providers = snapshot.assignments[executorId] ?? [];
+          if (!providers.includes(providerId)) snapshot.assignments[executorId] = [...providers, providerId];
+        }
+        await this.#save(snapshot);
+      } finally {
+        release();
+      }
     });
   }
 

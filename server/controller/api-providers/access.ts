@@ -74,6 +74,18 @@ export class ApiProviderAccess {
     });
   }
 
+  async setAssignments(providerId: string, executorIds: readonly string[], revision: number): Promise<void> {
+    await this.store.withLock(async () => {
+      for (const executorId of executorIds) this.assertExecutor(executorId);
+      const profile = this.store.getApiProvider(providerId);
+      if (!profile) throw new DomainError('API_PROVIDER_UNAVAILABLE', 'Provider not found', 404);
+      if (profile.revision !== revision) {
+        throw new DomainError('API_PROVIDER_CONFIGURATION_CHANGED', 'Provider configuration changed. Reload before saving.', 409);
+      }
+      await this.assignments.setProviderExecutors(providerId, executorIds);
+    });
+  }
+
   async unassign(executorId: string, providerId: string): Promise<void> {
     await this.store.withLock(async () => {
       this.assertExecutor(executorId);

@@ -52,8 +52,41 @@ export interface ApiProviderManagement {
   assignments: ApiProviderAssignments;
 }
 
+export interface ApiProviderAssignmentOutcome {
+  executorIds: string[];
+  status: 'assigned' | 'not-assigned' | 'unknown';
+  error?: string;
+}
+
 export interface ApiProviderCreateResult extends ApiProviderCatalogEntry {
-  assignment: { executorId: string; status: 'assigned' | 'not-assigned' | 'unknown'; error?: string };
+  assignment: ApiProviderAssignmentOutcome;
+}
+
+export interface ApiProviderUpdateResult extends ApiProviderCatalogEntry {
+  assignment?: ApiProviderAssignmentOutcome;
+}
+
+export interface ApiProviderEndpointInput {
+  id?: string;
+  protocol: ApiProtocol;
+  baseUrl: string;
+  apiKey?: string;
+  clearApiKey?: boolean;
+  capabilities?: OpenAiEndpointCapabilities;
+  defaultModel: string;
+  models: Array<Pick<AgentModelOption, 'value' | 'label' | 'supportsImages' | 'isLocal'>>;
+  supportsImages: boolean;
+  modelDiscovery?: ModelDiscoveryKind;
+}
+
+export interface ApiProviderInput {
+  revision?: number;
+  apiProviderId?: string;
+  endpointId?: string;
+  executorIds?: string[];
+  templateId: ApiProviderTemplateId;
+  label: string;
+  endpoint: ApiProviderEndpointInput;
 }
 
 export interface ApiProviderEndpointCatalogEntry {

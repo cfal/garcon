@@ -1,8 +1,6 @@
 import {
-	assignApiProvider,
 	deleteApiProvider,
 	getApiProviderManagement,
-	unassignApiProvider,
 } from '$lib/api/api-providers.js';
 import type { ApiProviderManagement } from '$shared/api-providers';
 
@@ -19,8 +17,6 @@ export class ApiProvidersStore {
 		private readonly invalidateCatalogs: () => void,
 		private readonly api = {
 			read: getApiProviderManagement,
-			assign: assignApiProvider,
-			unassign: unassignApiProvider,
 			delete: deleteApiProvider,
 		},
 	) {}
@@ -31,6 +27,12 @@ export class ApiProvidersStore {
 
 	isAssigned(executorId: string, providerId: string): boolean {
 		return this.snapshot?.assignments.assignments[executorId]?.includes(providerId) === true;
+	}
+
+	executorIdsFor(providerId: string): string[] {
+		return Object.entries(this.snapshot?.assignments.assignments ?? {})
+			.filter(([, providerIds]) => providerIds.includes(providerId))
+			.map(([executorId]) => executorId);
 	}
 
 	findEndpoint(endpointId: string) {
@@ -78,12 +80,6 @@ export class ApiProvidersStore {
 				}
 			});
 		return this.#request;
-	}
-
-	async setAssignment(executorId: string, providerId: string, assigned: boolean): Promise<void> {
-		await this.#mutate(() =>
-			assigned ? this.api.assign(executorId, providerId) : this.api.unassign(executorId, providerId),
-		);
 	}
 
 	async deleteProfile(providerId: string): Promise<void> {

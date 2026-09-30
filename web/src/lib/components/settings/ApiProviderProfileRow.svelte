@@ -3,6 +3,7 @@
 	import PencilIcon from '@lucide/svelte/icons/pencil';
 	import CopyIcon from '@lucide/svelte/icons/copy';
 	import TrashIcon from '@lucide/svelte/icons/trash';
+	import Network from '@lucide/svelte/icons/network';
 	import { getApiProviders, getExecutors } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import type {
@@ -24,13 +25,12 @@
 	const providers = getApiProviders();
 	const executors = getExecutors();
 	let confirmingDelete = $state(false);
-
-	function changeAssignment(input: HTMLInputElement, executorId: string): void {
-		const assigned = input.checked;
-		// Keeps the DOM authoritative even when reconciliation returns the unchanged value.
-		input.checked = providers.isAssigned(executorId, profile.id);
-		void providers.setAssignment(executorId, profile.id, assigned);
-	}
+	const assignedExecutors = $derived(
+		providers.executorIdsFor(profile.id).map((id) => ({
+			id,
+			label: executors.get(id)?.label ?? id,
+		})),
+	);
 </script>
 
 <div data-api-provider-id={profile.id} class="rounded-lg border border-border px-4 py-3">
@@ -42,7 +42,9 @@
 				{endpoint.models.length} models · {endpoint.defaultModel}
 			</div>
 			<div class="text-xs text-muted-foreground">
-				{endpoint.hasApiKey ? m.settings_api_providers_key_configured() : m.settings_api_providers_no_key()}
+				{endpoint.hasApiKey
+					? m.settings_api_providers_key_configured()
+					: m.settings_api_providers_no_key()}
 			</div>
 		</div>
 		<div class="flex shrink-0 gap-1">
@@ -69,22 +71,21 @@
 			>
 		</div>
 	</div>
-	<fieldset class="mt-3" disabled={providers.mutating}>
-		<legend class="mb-2 text-xs text-muted-foreground">Available on - this workspace</legend>
-		<div class="flex flex-wrap gap-x-4 gap-y-2">
-			{#each executors.executors as executor (executor.id)}
-				<label class="flex min-w-0 items-center gap-2 text-sm">
-					<input
-						type="checkbox"
-						class="size-4 shrink-0 accent-primary"
-						checked={providers.isAssigned(executor.id, profile.id)}
-						onchange={(event) => changeAssignment(event.currentTarget, executor.id)}
-					/>
-					<span class="break-words">{executor.label}</span>
-				</label>
-			{/each}
-		</div>
-	</fieldset>
+	<div class="mt-3 flex min-w-0 flex-wrap gap-1.5">
+		{#each assignedExecutors as executor (executor.id)}
+			<span
+				class="flex w-fit min-w-0 max-w-full items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+				data-slot="api-provider-executor"
+				title={`Executor: ${executor.label}`}
+			>
+				<Network class="size-3 shrink-0 text-file-icon-folder" aria-hidden="true" />
+				<span class="sr-only">Executor: {executor.label}</span>
+				<span class="truncate" aria-hidden="true">{executor.label}</span>
+			</span>
+		{:else}
+			<span class="text-xs text-muted-foreground">No executors assigned</span>
+		{/each}
+	</div>
 	{#if confirmingDelete}
 		<div class="mt-3 space-y-2 text-sm">
 			<p class="text-destructive">

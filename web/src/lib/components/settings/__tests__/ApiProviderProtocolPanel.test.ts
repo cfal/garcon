@@ -1,9 +1,16 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { updateApiProvider } from '$lib/api/api-providers';
+import { ApiError } from '$lib/api/client';
 import ApiProviderProtocolPanelTestHost from './ApiProviderProtocolPanelTestHost.svelte';
 import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 import type { ApiProviderCatalogEntry } from '$shared/api-providers';
 import type { ExecutorSnapshot } from '$shared/executors';
+
+vi.mock('$lib/api/api-providers', async (importOriginal) => ({
+	...await importOriginal<typeof import('$lib/api/api-providers')>(),
+	updateApiProvider: vi.fn(),
+}));
 
 const workerProfile = {
 	id: 'synthetic',
@@ -30,6 +37,9 @@ const secondWorker = {
 } satisfies ExecutorSnapshot;
 
 describe('ApiProviderProtocolPanel', () => {
+	beforeEach(() => {
+		vi.mocked(updateApiProvider).mockReset().mockResolvedValue(workerProfile);
+	});
 	afterEach(() => {
 		cleanup();
 	});
@@ -127,14 +137,14 @@ describe('ApiProviderProtocolPanel', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Add provider' }));
 		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Add Ollama' }));
 		expect((await screen.findByLabelText<HTMLInputElement>('Display name')).value).toBe('Ollama');
-		expect(screen.getByRole<HTMLSelectElement>('combobox', { name: 'Create on' }).value).toBe('local');
+		expect(screen.getByRole<HTMLSelectElement>('combobox', { name: 'Test from' }).value).toBe('local');
 		await fireEvent.input(screen.getByLabelText('API key or token'), { target: { value: 'synthetic-draft-key' } });
 		await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Duplicate Worker endpoint' }));
 		expect((await screen.findByLabelText<HTMLInputElement>('Display name')).value).toBe('Worker endpoint copy');
-		expect(screen.getByRole<HTMLSelectElement>('combobox', { name: 'Create on' }).value).toBe(remoteExecutor.id);
+		expect(screen.getByRole<HTMLSelectElement>('combobox', { name: 'Test from' }).value).toBe(remoteExecutor.id);
 		expect(screen.getByLabelText<HTMLInputElement>('API key or token').value).toBe('');
 		expect(screen.getByRole('button', { name: 'Save' }).hasAttribute('disabled')).toBe(true);
 		await fireEvent.input(screen.getByLabelText('API key or token'), { target: { value: 'synthetic-copy-key' } });
@@ -151,53 +161,95 @@ describe('ApiProviderProtocolPanel', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Add provider' }));
 		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Add custom provider..' }));
 		expect((await screen.findByLabelText<HTMLInputElement>('Display name')).value).toBe('');
-		expect(screen.getByRole<HTMLSelectElement>('combobox', { name: 'Create on' }).value).toBe('local');
+		expect(screen.getByRole<HTMLSelectElement>('combobox', { name: 'Test from' }).value).toBe('local');
 		expect(screen.getByLabelText<HTMLTextAreaElement>('Models').value).toBe('');
 	});
 
-	it('restores a failed unassignment and retries revocation on the next click', async () => {
-		const unassign = vi.fn(async () => {
-			throw new Error('Assignment write failed');
-		});
+	it('keeps executor selection in the editor until Save and discards cancelled changes', async () => {
 		render(ApiProviderProtocolPanelTestHost, {
 			protocol: 'openai-compatible',
 			title: 'OpenAI Providers',
 			description: '',
 			addLabel: 'Add provider',
-			unassign,
-			apiProviderCatalog: [
-				{
-					id: 'custom',
-					revision: 1,
-					label: 'Custom',
-					templateId: 'custom',
-					createdAt: '2026-01-01T00:00:00Z',
-					updatedAt: '2026-01-01T00:00:00Z',
-					endpoints: [
-						{
-							id: 'custom_openai',
-							protocol: 'openai-compatible',
-							baseUrl: 'https://example.test/v1',
-							hasApiKey: true,
-							supportsImages: false,
-							capabilities: { chatCompletions: true, responses: false },
-							defaultModel: 'model',
-							models: [],
-							modelDiscovery: 'none',
-						},
-					],
-				},
-			],
+			executors: [localExecutor, offlineWorker],
+			assignments: { [offlineWorker.id]: [workerProfile.id] },
+			apiProviderCatalog: [workerProfile],
 		});
-		const checkbox = screen.getByRole<HTMLInputElement>('checkbox', { name: 'Local' });
-		expect(checkbox.checked).toBe(true);
-		await fireEvent.click(checkbox);
+		expect(screen.queryByRole('checkbox')).toBeNull();
+		expect(screen.queryByRole('switch')).toBeNull();
+		expect(screen.getByTitle('Executor: Worker').dataset.slot).toBe('api-provider-executor');
+		expect(screen.queryByTitle('Executor: Local')).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: 'Edit Worker endpoint' }));
+		const local = await screen.findByRole('switch', { name: 'Local' });
+		const worker = screen.getByRole('switch', { name: 'Worker' });
+		expect(worker.getAttribute('aria-checked')).toBe('true');
+		await fireEvent.click(local);
+		await fireEvent.click(worker);
+		expect(updateApiProvider).not.toHaveBeenCalled();
+		await fireEvent.change(screen.getByRole('combobox', { name: 'Test from' }), { target: { value: 'local' } });
+		expect(screen.getByRole('button', { name: 'Fetch models' }).hasAttribute('disabled')).toBe(true);
+		await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+		expect(updateApiProvider).not.toHaveBeenCalled();
+		expect(screen.getByTitle('Executor: Worker')).toBeTruthy();
+		await fireEvent.click(screen.getByRole('button', { name: 'Edit Worker endpoint' }));
+		expect((await screen.findByRole('switch', { name: 'Local' })).getAttribute('aria-checked')).toBe('false');
+		await fireEvent.click(screen.getByRole('switch', { name: 'Worker' }));
+		vi.mocked(updateApiProvider).mockRejectedValueOnce(new ApiError(400, 'Assignment write failed'));
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 		await screen.findByText('Assignment write failed');
-		await waitFor(() => expect(checkbox.closest('fieldset')?.disabled).toBe(false));
-		expect(checkbox.checked).toBe(true);
-		await fireEvent.click(checkbox);
-		await waitFor(() => expect(unassign).toHaveBeenCalledTimes(2));
-		expect(unassign).toHaveBeenLastCalledWith('local', 'custom');
+		expect(screen.getByRole('switch', { name: 'Worker' }).getAttribute('aria-checked')).toBe('false');
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+		expect(updateApiProvider).toHaveBeenCalledTimes(2);
+		expect(updateApiProvider).toHaveBeenLastCalledWith(workerProfile.id, { revision: 1, executorIds: [] });
+	});
+
+	it('labels an unassigned provider without implying Local access', () => {
+		render(ApiProviderProtocolPanelTestHost, {
+			protocol: 'openai-compatible', title: 'OpenAI Providers', description: '', addLabel: 'Add provider',
+			apiProviderCatalog: [workerProfile], assignments: {},
+		});
+		expect(screen.getByText('No executors assigned')).toBeTruthy();
+		expect(screen.queryByTitle('Executor: Local')).toBeNull();
+	});
+
+	it('shows persisted executor grants when the inventory is unavailable', () => {
+		render(ApiProviderProtocolPanelTestHost, {
+			protocol: 'openai-compatible', title: 'OpenAI Providers', description: '', addLabel: 'Add provider',
+			executors: [],
+			apiProviderCatalog: [workerProfile],
+			assignments: { [remoteExecutor.id]: [workerProfile.id] },
+		});
+		expect(screen.getByTitle(`Executor: ${remoteExecutor.id}`).dataset.slot).toBe('api-provider-executor');
+		expect(screen.queryByText('No executors assigned')).toBeNull();
+	});
+
+	it.each(['Escape', 'Close'])('keeps partial-save recovery visible after a %s close request during Save', async (closeAction) => {
+		const pending = Promise.withResolvers<Awaited<ReturnType<typeof updateApiProvider>>>();
+		vi.mocked(updateApiProvider).mockReturnValueOnce(pending.promise);
+		render(ApiProviderProtocolPanelTestHost, {
+			protocol: 'openai-compatible', title: 'OpenAI Providers', description: '', addLabel: 'Add provider',
+			executors: [localExecutor, offlineWorker],
+			apiProviderCatalog: [workerProfile], assignments: { local: [workerProfile.id] },
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Edit Worker endpoint' }));
+		await fireEvent.click(await screen.findByRole('switch', { name: 'Worker' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+		await waitFor(() => expect(updateApiProvider).toHaveBeenCalledOnce());
+		if (closeAction === 'Escape') {
+			await fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+		} else {
+			await fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+		}
+		expect(screen.getByRole('dialog')).toBeTruthy();
+		pending.resolve({ ...workerProfile,
+			assignment: { executorIds: ['local', offlineWorker.id], status: 'not-assigned', error: 'Executor access was not saved' },
+		});
+		await screen.findByText('Executor access was not saved');
+		expect(screen.getByRole('button', { name: 'Save' }).hasAttribute('disabled')).toBe(false);
+		await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
 	});
 
 	it('shows protocol-specific Anthropic add-provider templates', async () => {

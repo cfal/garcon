@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { ApiProviderCatalogEntry, ApiProviderManagement } from '../../../common/api-providers.js';
+import type { ApiProviderCatalogEntry, ApiProviderCreateResult, ApiProviderManagement, ApiProviderUpdateResult } from '../../../common/api-providers.js';
 import type { RemoteSettingsSnapshot } from '../../../common/settings.js';
 import { ApiProvidersInvalidatedMessage } from '../../../common/ws-events.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
@@ -81,4 +81,33 @@ test('external provider edits take effect after controller restart, not during e
     await fixture.restartGarcon();
     expect(await labels()).toBe('Synthetic offline edit');
   }, { executionBackend: 'remote-executor-dials' });
+}, 45_000);
+
+test.each(['in-process', 'remote-controller-dials', 'remote-executor-dials'] as const)('provider saves apply draft executor sets, including offline hosts (%s)', async (executionBackend) => {
+  await withIntegrationFixture(`provider-save-${executionBackend}`, async ({ client, fakeProviders }) => {
+    const offline = await client.post<{ id: string }>('/api/v1/executors', { label: 'Synthetic offline worker', direction: 'executor-connects' });
+    const executorIds = [...new Set(['local', client.executorId, offline.id])];
+    const saved = await client.post<ApiProviderCreateResult>('/api/v1/api-providers', {
+      templateId: 'custom', label: 'Synthetic shared account', executorIds,
+      endpoint: { protocol: 'openai-compatible', baseUrl: fakeProviders.openAi.baseUrl, apiKey: 'synthetic-key',
+        defaultModel: 'synthetic-model', models: [{ value: 'synthetic-model', label: 'Synthetic Model' }], supportsImages: false },
+    });
+    expect(saved.assignment).toEqual({ status: 'assigned', executorIds });
+    const management = () => client.get<ApiProviderManagement>('/api/v1/api-providers');
+    for (const id of executorIds) expect((await management()).assignments.assignments[id]).toContain(saved.id);
+    const endpointId = saved.endpoints[0]!.id;
+    const url = `/api/v1/api-providers?id=${saved.id}`;
+    const revoked = await client.put<ApiProviderUpdateResult>(url, { revision: saved.revision, executorIds: [] });
+    expect(revoked).toMatchObject({ revision: saved.revision, updatedAt: saved.updatedAt, assignment: { status: 'assigned', executorIds: [] } });
+    for (const ids of Object.values((await management()).assignments.assignments)) expect(ids).not.toContain(saved.id);
+    await expect(client.post(`/api/v1/api-providers/models?executorId=${client.executorId}`, {
+      protocol: 'openai-compatible', baseUrl: fakeProviders.openAi.baseUrl, apiProviderId: saved.id,
+      endpointId, revision: saved.revision, modelDiscovery: 'openai-models',
+    })).rejects.toMatchObject({ status: 409, body: { errorCode: 'API_PROVIDER_UNAVAILABLE' } });
+    const repaired = await client.put<ApiProviderUpdateResult>(url, { revision: saved.revision, label: 'Synthetic renamed account', executorIds });
+    expect(repaired).toMatchObject({ id: saved.id, revision: saved.revision + 1, assignment: { status: 'assigned' } });
+    await expect(client.put(url, { revision: saved.revision, executorIds: [] })).rejects.toMatchObject({ status: 409 });
+    for (const id of executorIds) expect((await management()).assignments.assignments[id]).toContain(saved.id);
+    expect((await management()).providers.filter((entry) => entry.id === saved.id)).toHaveLength(1);
+  }, { executionBackend });
 }, 45_000);

@@ -10,6 +10,9 @@ import {
   labelForProtocol,
   type ApiProviderCatalogEntry,
   type ApiProviderCreateResult,
+  type ApiProviderUpdateResult,
+  type ApiProviderAssignmentOutcome,
+  type ApiProviderInput,
   type ApiProviderManagement,
   type ApiProviderModelDiscoveryRequest,
   type ApiProviderModelDiscoveryResponse,
@@ -22,25 +25,7 @@ import type { ApiProviderStore, CreateApiProviderInput, StoredApiProvider, Updat
 import type { ApiProviderAccess } from './access.js';
 import { DomainError, ValidationDomainError } from '../../common/domain-error.js';
 import { AtomicJsonWriteError } from '../../common/json-file-store.js';
-
-export interface ApiProviderInput {
-  revision?: number;
-  apiProviderId?: string;
-  endpointId?: string;
-  templateId: ApiProviderTemplateId;
-  label: string;
-  endpoint: {
-    protocol: ApiProtocol;
-    baseUrl: string;
-    apiKey?: string;
-    clearApiKey?: boolean;
-    capabilities?: OpenAiEndpointCapabilities;
-    defaultModel: string;
-    models: Array<{ value: string; label: string; supportsImages?: boolean; isLocal?: boolean }>;
-    supportsImages: boolean;
-    modelDiscovery?: ModelDiscoveryKind;
-  };
-}
+import { validateProviderExecutorIds } from './assignments.js';
 
 interface ApiProviderModelDiscoveryFlatInput {
   revision?: number;
@@ -300,30 +285,50 @@ export class ApiProviderService {
   }
 
   async create(input: ApiProviderInput, executorId = 'local'): Promise<ApiProviderCreateResult> {
-    this.deps.access.assertExecutor(executorId);
+    const root = requireObject(input, 'API provider');
+    const executorIds = root.executorIds === undefined ? [executorId] : root.executorIds;
+    this.#validateExecutors(executorIds);
     const apiProvider = await this.deps.store.createApiProvider(flattenApiProviderInput(input));
+    return { ...redactApiProviderForCatalog(apiProvider), assignment: await this.#saveAssignments(apiProvider, executorIds) };
+  }
+
+  async #saveAssignments(apiProvider: StoredApiProvider, executorIds: string[]): Promise<ApiProviderAssignmentOutcome> {
     try {
-      await this.deps.access.assign(executorId, apiProvider.id);
-      return { ...redactApiProviderForCatalog(apiProvider), assignment: { executorId, status: 'assigned' } };
+      await this.deps.access.setAssignments(apiProvider.id, executorIds, apiProvider.revision);
+      return { executorIds, status: 'assigned' };
     } catch (error) {
       const uncertain = (error instanceof AtomicJsonWriteError && error.renamed)
         || (error instanceof DomainError && error.code === 'API_PROVIDER_STORAGE_UNAVAILABLE');
       return {
-        ...redactApiProviderForCatalog(apiProvider),
-        assignment: {
-          executorId,
-          status: uncertain ? 'unknown' : 'not-assigned',
-          error: uncertain
-            ? 'Profile saved, but assignment durability is unknown. Reconcile configuration before retrying.'
-            : 'Profile saved without an executor assignment. Refresh and assign the existing profile.',
-        },
+        executorIds,
+        status: uncertain ? 'unknown' : 'not-assigned',
+        error: uncertain
+          ? 'Profile saved, but executor access could not be confirmed. Reload after checking controller configuration.'
+          : 'Profile saved, but executor access was not saved. Reload the profile or retry Save.',
       };
     }
   }
 
-  async update(id: string, input: Partial<ApiProviderInput>): Promise<ApiProviderCatalogEntry> {
-    const apiProvider = await this.deps.store.updateApiProvider(id, flattenApiProviderPatch(input));
-    return redactApiProviderForCatalog(apiProvider);
+  #validateExecutors(executorIds: unknown): asserts executorIds is string[] {
+    validateProviderExecutorIds(executorIds);
+    for (const executorId of executorIds) this.deps.access.assertExecutor(executorId);
+  }
+
+  async update(id: string, input: Partial<ApiProviderInput>): Promise<ApiProviderUpdateResult> {
+    requireObject(input, 'API provider');
+    if (input.executorIds !== undefined) this.#validateExecutors(input.executorIds);
+    const patch = flattenApiProviderPatch(input);
+    const hasProfileChanges = patch.label !== undefined || patch.endpoint !== undefined;
+    const apiProvider = hasProfileChanges
+      ? await this.deps.store.updateApiProvider(id, patch)
+      : this.deps.store.getApiProvider(id);
+    if (!apiProvider) throw new DomainError('API_PROVIDER_UNAVAILABLE', 'Provider not found', 404);
+    if (!hasProfileChanges && patch.revision !== undefined && patch.revision !== apiProvider.revision) {
+      throw new DomainError('API_PROVIDER_CONFIGURATION_CHANGED', 'Provider configuration changed. Reload before saving.', 409);
+    }
+    const result: ApiProviderUpdateResult = redactApiProviderForCatalog(apiProvider);
+    if (input.executorIds !== undefined) result.assignment = await this.#saveAssignments(apiProvider, input.executorIds);
+    return result;
   }
 
   async delete(id: string): Promise<void> {

@@ -164,6 +164,8 @@ Discovery results remain draft data until Save. Saving a model list changes the 
 
 Expose specific assign/unassign commands, not browser-side replacement of the complete assignment map. Repeated assignment/removal is idempotent. Preserve changes to other executors and profiles under concurrent requests.
 
+Profile create/update requests may include `executorIds` to replace that profile's executor set in one assignment-file write; an empty list revokes all access in the current workspace. The editor keeps these selections as a draft until Save. Assignment-only updates preserve the profile revision. Combined saves persist the profile first, then access, and return an explicit assignment outcome with the saved profile identity; a partial failure retries access without rewriting the profile. Unknown outcomes require reconciliation before another save. Existing single-executor assignment commands remain available.
+
 Assignments can be edited for configured offline or disabled executors. Use configuration existence, not remote discovery, as the write precondition. An enabled assignment does not imply the endpoint is reachable.
 
 Serialize assignment changes and profile deletion through a shared controller-side mutation boundary. Retain executor references through assignment publication using the existing [reference-write mechanism](../server/controller/executors/reference-writes.ts), so an executor cannot be deleted between validation and durable publication. Do not introduce a second conflicting executor-lock scheme.
@@ -204,10 +206,9 @@ Exact route naming is an implementation detail; the separation between profile m
 
 Provider settings should support:
 
-- The existing executor selector and a list of profiles assigned to that executor.
-- Add profile, defaulting assignment to the current executor only.
-- Use existing profile, showing redacted global definitions.
-- Explicit assignment controls labeled as availability within the current workspace.
+- A redacted global profile list with pills for each assigned executor.
+- Add profile, defaulting assignment to Local only.
+- Executor switches in the profile editor, applied only on Save and discarded on Cancel.
 - Duplicate profile for an independent configuration. Do not return the original key to the browser; either require a new key or copy it server-side only after explicit user intent.
 - Test from the selected executor and clear offline/testing states.
 - Remove from executor separately from Delete shared profile.

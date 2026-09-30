@@ -3,21 +3,22 @@ import {
 	discoverApiProviderModels,
 	testApiProvider,
 	updateApiProvider,
-	type ApiProviderInput,
 } from '$lib/api/api-providers.js';
 import type { ModelCatalogStore, ModelOption } from '$lib/agents/model-catalog-store.svelte.js';
 import type { ApiProvidersStore } from '$lib/api-providers/api-providers-store.svelte.js';
+import { ApiError, isIntermediaryResponse } from '$lib/api/client.js';
 import * as m from '$lib/paraglide/messages.js';
 import { apiProviderTemplate, type ApiProviderTemplateId } from '$shared/api-provider-templates';
 import {
 	type ApiProtocol,
+	type ApiProviderInput,
 	type ModelDiscoveryKind,
 	type OpenAiEndpointCapabilities,
 } from '$shared/api-providers';
 
 interface DialogOptions {
 	readonly modelCatalog: Pick<ModelCatalogStore, 'executorId' | 'forceRefresh'>;
-	readonly providers: Pick<ApiProvidersStore, 'findEndpoint' | 'isAssigned' | 'invalidate' | 'refresh'>;
+	readonly providers: Pick<ApiProvidersStore, 'findEndpoint' | 'isAssigned' | 'executorIdsFor' | 'invalidate' | 'refresh'>;
 	isExecutorReady: () => boolean;
 	getProtocol: () => ApiProtocol;
 	getEndpointId: () => string | null;
@@ -47,6 +48,10 @@ export class ApiProviderEndpointDialogState {
 	testMessage = $state<string | null>(null);
 	apiProviderId = $state<string | null>(null);
 	revision = $state<number | undefined>();
+	executorIds = $state<string[]>([]);
+	#savedExecutorIds: string[] = [];
+	#savedDraft = '';
+	#saveUnconfirmed = $state(false);
 	#duplicateRequiresApiKey = $state(false);
 	#savedEndpointId: string | null = null;
 	#contextVersion = 0;
@@ -164,6 +169,7 @@ export class ApiProviderEndpointDialogState {
 			this.hasRequiredApiCapability &&
 			(!this.apiKeyRequired || Boolean(this.apiProviderId) || Boolean(this.apiKey.trim())) &&
 			!this.isSaving &&
+			!this.#saveUnconfirmed &&
 			!this.isFetchingModels,
 		);
 	}
@@ -193,13 +199,18 @@ export class ApiProviderEndpointDialogState {
 		this.templateId = found.apiProvider.templateId ?? 'custom';
 		this.modelsText = found.endpoint.models.map((model) => formatModelLine(model)).join('\n');
 		this.openAiCapabilities = this.openAiCapabilitiesFrom(found.endpoint.capabilities);
+		this.#savedExecutorIds = this.options.providers.executorIdsFor(found.apiProvider.id);
+		this.executorIds = [...this.#savedExecutorIds];
 		if (this.options.getDuplicate?.()) {
 			this.#duplicateRequiresApiKey = found.endpoint.hasApiKey;
 			this.apiProviderId = null;
 			this.#savedEndpointId = null;
 			this.revision = undefined;
 			this.label += ' copy';
+			this.#savedExecutorIds = [];
+			this.executorIds = [this.options.modelCatalog.executorId];
 		}
+		this.#savedDraft = JSON.stringify(this.payload());
 	}
 
 	dispose(): void {
@@ -207,6 +218,7 @@ export class ApiProviderEndpointDialogState {
 		this.isSaving = false;
 		this.apiKey = '';
 		this.#duplicateRequiresApiKey = false;
+		this.#saveUnconfirmed = false;
 	}
 
 	clearProbeResults(): void {
@@ -235,6 +247,9 @@ export class ApiProviderEndpointDialogState {
 		this.apiProviderId = null;
 		this.#savedEndpointId = null;
 		this.revision = undefined;
+		this.executorIds = [this.options.modelCatalog.executorId];
+		this.#savedExecutorIds = [];
+		this.#savedDraft = '';
 		this.templateId = template.id;
 		this.label = template.label;
 		this.baseUrl = template.baseUrl;
@@ -249,6 +264,13 @@ export class ApiProviderEndpointDialogState {
 	syncDefaultModelWithModels(): void {
 		if (this.defaultModelIsValid) return;
 		this.defaultModel = this.modelOptions[0]?.value ?? '';
+	}
+
+	setExecutorSelected(executorId: string, selected: boolean): void {
+		if (this.isSaving) return;
+		this.executorIds = selected
+			? [...new Set([...this.executorIds, executorId])]
+			: this.executorIds.filter((id) => id !== executorId);
 	}
 
 	setSupportsChatCompletionsApi(enabled: boolean): void {
@@ -300,32 +322,51 @@ export class ApiProviderEndpointDialogState {
 
 	async save(): Promise<void> {
 		if (!this.canSave) return;
+		if (this.apiProviderId && !sameExecutorIds(this.#savedExecutorIds, this.options.providers.executorIdsFor(this.apiProviderId))) {
+			this.error = 'Executor access changed while this profile was open. Reopen it before saving.';
+			return;
+		}
 		const catalog = this.options.modelCatalog;
 		const version = this.#contextVersion;
 		this.isSaving = true;
 		this.error = null;
+		let receivedSave = false;
 		try {
-			if (this.apiProviderId) {
-				await updateApiProvider(this.apiProviderId, this.payload());
-			} else {
-				const created = await createApiProvider(this.payload(), catalog.executorId);
-				if (this.#isCurrent(catalog, version)) {
-					this.apiProviderId = created.id;
-					this.#savedEndpointId = created.endpoints[0]?.id ?? null;
-					this.revision = created.revision;
-				}
-				if (created.assignment.status !== 'assigned') throw new Error(created.assignment.error);
+			const payload = this.payload();
+			const executorIds = [...this.executorIds];
+			const profilePatch = JSON.stringify(payload) === this.#savedDraft ? { revision: this.revision } : payload;
+			const saved = this.apiProviderId
+				? await updateApiProvider(this.apiProviderId, { ...profilePatch, executorIds })
+				: await createApiProvider({ ...payload, executorIds });
+			receivedSave = true;
+			if (this.#contextVersion === version) {
+				this.apiProviderId = saved.id;
+				this.#savedEndpointId = saved.endpoints[0]?.id ?? null;
+				this.revision = saved.revision;
+				this.#savedDraft = JSON.stringify(this.payload());
+				if (saved.assignment?.status === 'assigned') this.#savedExecutorIds = executorIds;
+				this.#saveUnconfirmed = saved.assignment?.status === 'unknown';
 			}
 			this.options.providers.invalidate();
 			await this.options.providers.refresh();
-			if (this.options.isExecutorReady()) await catalog.forceRefresh();
-			if (!this.#isCurrent(catalog, version)) return;
+			if (saved.assignment && saved.assignment.status !== 'assigned') {
+				throw new Error(saved.assignment.error);
+			}
+			if (this.#isCurrent(catalog, version) && this.options.isExecutorReady()) await catalog.forceRefresh();
+			if (this.#contextVersion !== version) return;
 			this.options.onSaved?.();
 		} catch (err) {
 			this.options.providers.invalidate();
-			if (this.#isCurrent(catalog, version)) this.error = err instanceof Error ? err.message : String(err);
+			if (this.#contextVersion === version) {
+				this.error = err instanceof Error ? err.message : String(err);
+				if (!receivedSave && (!(err instanceof ApiError) || isIntermediaryResponse(err)
+					|| err.errorCode === 'API_PROVIDER_STORAGE_UNAVAILABLE')) {
+					this.#saveUnconfirmed = true;
+					this.error = 'Save could not be confirmed. Close this editor and reload providers before trying again.';
+				}
+			}
 		} finally {
-			if (this.#isCurrent(catalog, version)) this.isSaving = false;
+			if (this.#contextVersion === version) this.isSaving = false;
 		}
 	}
 
@@ -402,6 +443,10 @@ export class ApiProviderEndpointDialogState {
 			if (this.#isCurrent(catalog, version)) this.isTesting = false;
 		}
 	}
+}
+
+function sameExecutorIds(left: string[], right: string[]): boolean {
+	return left.length === right.length && left.every((id) => right.includes(id));
 }
 
 function parseModelsText(text: string): ModelOption[] {

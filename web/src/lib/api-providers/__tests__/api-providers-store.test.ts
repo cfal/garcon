@@ -7,8 +7,7 @@ const snapshot = (revision = 1): ApiProviderManagement => ({
 });
 
 function fixture() {
-	const api = { read: vi.fn(async () => snapshot()), assign: vi.fn(async () => snapshot()),
-		unassign: vi.fn(async () => snapshot()), delete: vi.fn(async () => ({ success: true })) };
+	const api = { read: vi.fn(async () => snapshot()), delete: vi.fn(async () => ({ success: true })) };
 	const invalidate = vi.fn();
 	return { api, invalidate, store: new ApiProvidersStore(invalidate, api) };
 }
@@ -34,20 +33,15 @@ describe('ApiProvidersStore', () => {
 		expect(invalidate).toHaveBeenCalledTimes(2);
 	});
 
-	it('sends narrow idempotent assignments without replacing the snapshot optimistically', async () => {
-		const { api, store } = fixture();
+	it('returns an independent list of persisted executors for each profile', async () => {
+		const { store } = fixture();
 		await store.refresh();
-		const pending = Promise.withResolvers<ApiProviderManagement>();
-		api.unassign.mockReturnValue(pending.promise);
-		api.read.mockResolvedValue({ ...snapshot(2), assignments: { revision: 2, assignments: {} } });
-		const mutation = store.setAssignment('local', 'profile_one', false);
+		const executorIds = store.executorIdsFor('profile_one');
+		expect(executorIds).toEqual(['local']);
+		expect(store.executorIdsFor('missing')).toEqual([]);
+		executorIds.pop();
+		expect(store.executorIdsFor('profile_one')).toEqual(['local']);
 		expect(store.isAssigned('local', 'profile_one')).toBe(true);
-		expect(store.mutating).toBe(true);
-		pending.resolve(snapshot(2));
-		await mutation;
-		expect(api.unassign).toHaveBeenCalledWith('local', 'profile_one');
-		expect(store.isAssigned('local', 'profile_one')).toBe(false);
-		expect(store.mutating).toBe(false);
 	});
 
 	it('reconciles uncertain failures while retaining the error instead of claiming success', async () => {

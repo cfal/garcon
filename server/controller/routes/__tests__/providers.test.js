@@ -14,7 +14,7 @@ import createAgentRoutes from '../agents.js';
 import createApiProviderRoutes from '../api-providers.js';
 import { ModelCatalogResponseCache } from '../model-catalog-cache.js';
 import { AgentCallError, AgentIntegrationError } from '@garcon/server-agent-interface';
-import { CorruptStateFileError } from '../../../common/json-file-store.ts';
+import { AtomicJsonWriteError, CorruptStateFileError } from '../../../common/json-file-store.ts';
 import { DomainError } from '../../../common/domain-error.ts';
 
 describe('agent auth login routes', () => {
@@ -342,6 +342,14 @@ describe('agent auth login routes', () => {
     expect(body).toEqual({ success: true });
     expect(apiProviders.test).toHaveBeenCalledWith(input, 'local');
     expect(apiProviders.create).not.toHaveBeenCalled();
+  });
+
+  it.each(['POST', 'PUT'])('reports uncertain provider persistence explicitly for %s', async (method) => {
+    apiProviders[method === 'POST' ? 'create' : 'update'].mockRejectedValueOnce(new AtomicJsonWriteError('Synthetic sync failure', true));
+    const url = new URL('http://localhost/api/v1/api-providers?id=custom_one');
+    const response = await routes['/api/v1/api-providers'][method](new Request(url, { method }), url);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ errorCode: 'API_PROVIDER_STORAGE_UNAVAILABLE', retryable: false });
   });
 
   it('discovers API provider models without persisting them', async () => {

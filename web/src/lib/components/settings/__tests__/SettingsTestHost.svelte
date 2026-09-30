@@ -200,8 +200,7 @@
 	setAppShell(untrack(() => appShell));
 	setApiProviders(new ApiProvidersStore(() => {}, {
 		read: async () => ({ providers: [], assignments: { version: 1, revision: 0, assignments: {} } }),
-		assign: async () => ({ providers: [], assignments: { revision: 0, assignments: {} } }),
-		unassign: async () => ({ providers: [], assignments: { revision: 0, assignments: {} } }), delete: async () => ({ success: true }),
+		delete: async () => ({ success: true }),
 	}));
 	const files: Pick<FileSessionRegistry, 'clearRecovery'> = {
 		clearRecovery: () => onClearRecovery(),
