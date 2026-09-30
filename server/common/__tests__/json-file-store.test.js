@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it, spyOn } from 'bun:test';
 import { promises as fs } from 'fs';
 import { readFileSync } from 'node:fs';
 import os from 'os';
@@ -79,6 +79,25 @@ describe('json file store', () => {
       quarantinePath,
       message: expect.stringContaining('Restore a valid state file before starting; keep the quarantine'),
     });
+  });
+
+  it('quarantines state that is not JSON without logging or keeping its content', async () => {
+    const dir = await tempDir();
+    const filePath = path.join(dir, 'executor-secret.json');
+    await fs.writeFile(filePath, '{"secret": SYNTHETIC_SENTINEL}', { mode: 0o600 });
+    const logged = spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const failure = await readJsonStateFile({ filePath, empty: () => ({}), normalize: (value) => value })
+        .catch((error) => error);
+
+      expect(failure).toBeInstanceOf(CorruptStateFileError);
+      expect(failure.cause).toMatchObject({ message: 'State file is not valid JSON' });
+      const output = logged.mock.calls.flat().map((value) => (value instanceof Error ? value.stack : String(value))).join('\n');
+      expect(output).toContain('is corrupt and was quarantined');
+      expect(output).not.toContain('SYNTHETIC_SENTINEL');
+    } finally {
+      logged.mockRestore();
+    }
   });
 
   it('returns empty state only when no canonical file or quarantine exists', async () => {

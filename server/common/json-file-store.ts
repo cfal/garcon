@@ -40,8 +40,15 @@ export async function readJsonStateFile<T>(options: {
     return options.empty();
   }
 
+  let value: unknown;
   try {
-    return options.normalize(JSON.parse(raw));
+    value = JSON.parse(raw);
+  } catch {
+    // A parse error's message can echo the file's content, such as a credential.
+    return quarantineStateFile(options.filePath, new Error('State file is not valid JSON'));
+  }
+  try {
+    return options.normalize(value);
   } catch (error) {
     return quarantineStateFile(options.filePath, error);
   }
