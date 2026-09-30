@@ -27,6 +27,19 @@ controller-initiated connections. The `#secret=...` fragment is removed before
 connecting; paths and query strings are forwarded as configured. No additional
 controller HTTP routes need to be exposed for the executor connection.
 
+Each link admits at most four sockets, including those still in the encrypted
+handshake. When they are all taken, a new connection closes the oldest socket
+whose peer has not proven the secret with its first handshake message, or, if
+every socket still in the handshake has proven it, the oldest of those. A peer
+without the secret cannot prove it, so its sockets are closed first, and it
+cannot keep an executor's endpoint full with sockets that never start the
+handshake. Only a valid WebSocket upgrade closes a socket this way. Across all
+executors, the controller admits at most 64 executor sockets, any of which may
+still be in the handshake. Two limits remain: four new connections arriving
+before a legitimate peer's first handshake message can still close its socket,
+and a peer that knows sixteen executor IDs can fill the controller's 64
+sockets.
+
 One channel describes the current implementation, not a final topology decision.
 Channel splitting remains separate work. Correctness and resource bounds must
 stand independently; do not add scheduling, retry, or lifecycle machinery solely
@@ -244,10 +257,15 @@ started, from one again when its message or reason changes. Logs keep the
 failures whose count is 1, 2, 4, 8, ... (`executor-unavailable` on a worker).
 A peer without the secret causes only encrypted-connection failures, whose
 message is fixed for each Noise error code, so it cannot flood logs by failing
-repeatedly or by alternating between failures. The
-controller shows every failure as the executor's last error and notifies
-clients only when that error changes. The controller logs a session whose
-setup fails with the stage it reached (`describe`, `start-integrations`,
+repeatedly or by alternating between failures. Until the executor has an
+established session, the controller shows each failure, with its reason when it
+has one, as the executor's last error and notifies clients when that error
+changes: at once, then at most once a second with the latest error. Once it has
+one, failures of other connections are only logged, even while a configuration
+change or the session's preparation keeps the executor from ready, and losing
+its own session makes the closure's reason its error, unless setup already
+reported why it closed the session. The controller logs a session whose setup
+fails with the stage it reached (`describe`, `start-integrations`,
 `resume-bindings`, or `activate`) and the session's own reason rather than the
 generic loss its pending call reports. A parse error's message can echo the
 payload it failed on, so the error reply for a parse error that a handler
