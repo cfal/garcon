@@ -412,6 +412,28 @@ test('logs failed executor connections at powers of two per kind but shows every
   expect(failures().slice(4)).toEqual([logged(wrongKey, 1)]);
 });
 
+test('logs each closed executor session with its cause and reason', async () => {
+  const closures: unknown[] = [];
+  const closed = Promise.withResolvers<void>();
+  const { manager, root } = await fixture({
+    debug() {}, info() {}, error() {},
+    warn: (message, fields) => {
+      if (message !== 'Executor link closed') return;
+      closures.push(fields);
+      closed.resolve();
+    },
+  });
+  const config = await manager.create({ label: 'Retiring', direction: 'executor-connects' });
+  const { url } = sharedListener(manager);
+  const ready = waitReady(manager, config.id);
+  worker(config.secret, root).dial(url(config.id));
+  await ready;
+  manager.inboundLink(config.id)!.current!.close(new Error('Synthetic session retirement'));
+  await closed.promise;
+
+  expect(closures).toEqual([{ executorId: config.id, cause: 'session-retired', count: 1, reason: 'Synthetic session retirement' }]);
+});
+
 test('publishes an executor error only when it changes', async () => {
   const { manager } = await fixture();
   const config = await manager.create({ label: 'Probed', direction: 'executor-connects' });
