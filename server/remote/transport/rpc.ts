@@ -12,7 +12,7 @@ import {
 import type { SessionTransport } from './session-transport.js';
 import type { JournaledCall, RpcJournalOwner, RpcReplyJournal } from './rpc-journal.js';
 import { DomainError } from '../../common/domain-error.js';
-import { ExecutorSessionLostError } from '../../common/executor-disconnect.js';
+import { ExecutorSessionLostError, reconnectTimedOut } from '../../common/executor-disconnect.js';
 import { withActivity } from '../../common/event-loop-stalls.js';
 import { createLogger } from '../../common/log.js';
 import { failureReason, MALFORMED_DATA } from './failure-reason.js';
@@ -82,13 +82,21 @@ interface OutgoingCall {
   seq: number;
   // The session holding the call; null while it is parked.
   rpc: ExecutorRpc | null;
-  // While parked, the call waits for a replacement session only until then.
+  // Once its session is lost, the call waits for a replacement session to
+  // reconcile it only until then.
   readonly dispatchDeadline: number | undefined;
+  // Armed from parking until a replacement session has reconciled the call.
+  expiry: ReturnType<typeof setTimeout> | null;
   readonly resolve: (value: unknown) => void;
   readonly reject: (error: Error) => void;
   cleanup: () => void;
   // Settles the call with an unknown outcome.
   expire: () => void;
+}
+
+function disarmExpiry(call: OutgoingCall): void {
+  if (call.expiry) clearTimeout(call.expiry);
+  call.expiry = null;
 }
 
 interface IncomingCall {
@@ -99,10 +107,9 @@ interface IncomingCall {
 // Journaled calls whose session was lost, which a controller keeps until a
 // replacement session of the same worker reconciles them. Their deadlines and
 // signals keep running meanwhile, and a call's dispatch deadline ends its wait
-// for the replacement with an unknown outcome.
+// for the replacement, including the reconciliation, with an unknown outcome.
 export class ParkedRpcCalls {
   readonly #calls = new Map<string, OutgoingCall>();
-  readonly #expiries = new Map<string, ReturnType<typeof setTimeout>>();
   #closed = false;
 
   get size(): number { return this.#calls.size; }
@@ -110,30 +117,23 @@ export class ParkedRpcCalls {
   park(call: OutgoingCall): void {
     call.rpc = null;
     this.#calls.set(call.id, call);
-    if (call.dispatchDeadline !== undefined) {
-      const expiry = setTimeout(() => call.expire(), Math.max(0, call.dispatchDeadline - performance.now()));
-      expiry.unref?.();
-      this.#expiries.set(call.id, expiry);
+    if (call.dispatchDeadline !== undefined && !call.expiry) {
+      call.expiry = setTimeout(() => call.expire(), Math.max(0, call.dispatchDeadline - performance.now()));
+      call.expiry.unref?.();
     }
     if (this.#closed) this.rejectAll();
   }
 
   release(call: OutgoingCall): boolean {
-    this.#disarm(call.id);
+    disarmExpiry(call);
     return this.#calls.delete(call.id);
   }
 
+  // The calls' expiries stay armed while a replacement session reconciles them.
   take(): OutgoingCall[] {
     const calls = [...this.#calls.values()];
-    for (const call of calls) this.#disarm(call.id);
     this.#calls.clear();
     return calls;
-  }
-
-  #disarm(id: string): void {
-    const expiry = this.#expiries.get(id);
-    if (expiry) clearTimeout(expiry);
-    this.#expiries.delete(id);
   }
 
   // For a disposed client, whose sessions end after it stops waiting for them.
@@ -271,7 +271,7 @@ export class ExecutorRpc {
     const call: OutgoingCall = {
       id: crypto.randomUUID(), integrationId, method, request,
       journaled: this.#parked !== null && rpcContinuity(method) === 'journaled',
-      session: this.transport.id, seq: 0, rpc: this, dispatchDeadline: options?.dispatchDeadline,
+      session: this.transport.id, seq: 0, rpc: this, dispatchDeadline: options?.dispatchDeadline, expiry: null,
       resolve: result.resolve, reject: result.reject, cleanup: () => {}, expire: () => {},
     };
     const parked = this.#parked;
@@ -298,7 +298,11 @@ export class ExecutorRpc {
     timer?.unref();
     const abort = () => cancel('The request was cancelled after it was sent to the executor.');
     options?.signal?.addEventListener('abort', abort, { once: true });
-    call.cleanup = () => { if (timer) clearTimeout(timer); options?.signal?.removeEventListener('abort', abort); };
+    call.cleanup = () => {
+      if (timer) clearTimeout(timer);
+      options?.signal?.removeEventListener('abort', abort);
+      disarmExpiry(call);
+    };
     call.expire = () => cancel('The executor did not reconnect in time, so the outcome is unknown.');
     try {
       this.#dispatch(call);
@@ -331,8 +335,19 @@ export class ExecutorRpc {
     for (const call of calls) {
       if (this.#pending.get(call.id) !== call) continue;
       const state = states.get(call.id);
-      if (state === 'pending') continue;
+      if (state === 'pending') {
+        disarmExpiry(call);
+        continue;
+      }
       if (state === 'not-received') {
+        // Its expiry may not have run yet; a call past its dispatch deadline is never sent.
+        if (call.dispatchDeadline !== undefined && performance.now() >= call.dispatchDeadline) {
+          this.#pending.delete(call.id);
+          call.cleanup();
+          call.reject(reconnectTimedOut());
+          continue;
+        }
+        disarmExpiry(call);
         try { this.#dispatch(call); }
         catch (error) {
           if (this.#pending.get(call.id) !== call) continue;

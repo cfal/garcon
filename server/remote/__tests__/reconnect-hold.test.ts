@@ -5,7 +5,7 @@ import type { RemoteExecutorClient } from '../client/executor-client.js';
 import { ExecutorRpc } from '../transport/rpc.js';
 import { EXECUTOR_DISCONNECTED_BEFORE_START } from '../../common/executor-disconnect.js';
 import { readBefore } from '../../common/interactive-deadline.js';
-import { integrationFixture, outgoingFault, remoteFixture, requestFor } from './integration-fixture.js';
+import { integrationFixture, outgoingFault, outgoingHold, remoteFixture, requestFor } from './integration-fixture.js';
 
 function nextAvailability(executor: RemoteExecutorClient, expected: ExecutorAvailability): Promise<void> {
   return new Promise((resolve) => {
@@ -264,6 +264,51 @@ for (const dialer of ['controller', 'worker'] as const) {
       // A call without one waits for the replacement session and gets its reply.
       await expect(held).resolves.toBeDefined();
     } finally { await fixture.dispose(); }
+  });
+
+  test(`a lost call stops at its dispatch deadline while the replacement session reconciles it, and is never sent (${dialer} dials)`, async () => {
+    let lost = false;
+    let applied = 0;
+    let hold!: ReturnType<typeof outgoingHold>;
+    const fixture = await remoteFixture(dialer, (controller, worker, native) => {
+      Object.assign(native.integration, { sessionConfiguration: { async apply() { applied += 1; } } });
+      hold = outgoingHold(worker);
+      const fault = outgoingFault(controller);
+      fault.inject = (encoded) => {
+        const frame = JSON.parse(encoded);
+        if (frame.type !== 'request') return null;
+        // Loses the session as the change is sent, so the worker never receives it.
+        if (!lost && frame.method === 'sessionConfiguration.apply') {
+          lost = true;
+          return 'disconnect';
+        }
+        // Holds the replacement worker's replies after this one, so reconciliation stalls.
+        if (lost && frame.method === 'lifecycle.start') hold.holdAfter((reply) => JSON.parse(reply).id === frame.id);
+        return null;
+      };
+    });
+    try {
+      const integration = await fixture.executor.getAgentIntegration('test');
+      const configuration = {
+        model: 'test-model', permissionMode: 'default' as const, thinkingMode: 'medium' as const,
+        settings: integration.settings.defaults(), endpoint: null,
+      };
+      const change = integration.sessionConfiguration!.apply('test-session', configuration, configuration, {
+        dispatchDeadline: performance.now() + 500,
+      });
+
+      await expect(change).rejects.toMatchObject({
+        outcome: 'unknown', message: 'The executor did not reconnect in time, so the outcome is unknown.',
+      });
+      const ready = nextAvailability(fixture.executor, 'ready');
+      await hold.release();
+      await ready;
+      await integration.execution.runningSessions();
+      expect(applied).toBe(0);
+    } finally {
+      await hold.release();
+      await fixture.dispose();
+    }
   });
 
   test(`a launch still waiting for the executor at its dispatch deadline fails and is never sent (${dialer} dials)`, async () => {

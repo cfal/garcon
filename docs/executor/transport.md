@@ -321,8 +321,9 @@ or deletion queued behind the lock still completes. The operation's deadline
 starts when it asks for the lock, so operations queued behind a long wait give
 up in turn, and all of the operation's calls share it. A call passes it as
 `dispatchDeadline`: a call not yet sent fails as not dispatched at the
-deadline, and a sent journaled call whose session is lost stops waiting for the
-replacement then, with an unknown outcome. A read-only call, such as a
+deadline, and a sent journaled call whose session is lost stops waiting for a
+replacement session to reconcile it then, with an unknown outcome, and is never
+sent again after it. A read-only call, such as a
 validation, a project inspection, or a catalog read, may run until 5 seconds
 past the deadline once sent, so a read sent late still gets time to answer, and
 all of the operation's reads end by then. A sent mutation or launch otherwise
