@@ -412,6 +412,21 @@ test('logs failed executor connections at powers of two per kind but shows every
   expect(failures().slice(4)).toEqual([logged(wrongKey, 1)]);
 });
 
+test('publishes an executor error only when it changes', async () => {
+  const { manager } = await fixture();
+  const config = await manager.create({ label: 'Probed', direction: 'executor-connects' });
+  const { url } = sharedListener(manager);
+  let changes = 0;
+  manager.onChanged(() => { changes++; });
+  for (let attempt = 0; attempt < 3; attempt++) await connectWithWrongKey(url(config.id));
+  await sendMalformedRecord(url(config.id));
+
+  expect(changes).toBe(2);
+  expect(manager.list().find((item) => item.id === config.id)?.lastError).toEqual({
+    code: 'EXECUTOR_UNAVAILABLE', message: 'Executor encrypted connection failed (PROTOCOL_ERROR)',
+  });
+});
+
 test('the aggregate Noise connection limit covers authenticated peers across executors', async () => {
   const { manager } = await fixture();
   const a = await manager.create({ label: 'A', direction: 'executor-connects' });

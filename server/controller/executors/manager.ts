@@ -246,7 +246,7 @@ export class ExecutorManager {
       this.#remotes.set(config.id, entry);
       if (!config.enabled) continue;
       const reportError = (message: string) => {
-        if (!this.#current(entry)) return;
+        if (!this.#current(entry) || entry.error?.message === message) return;
         entry.error = { code: 'EXECUTOR_UNAVAILABLE', message };
         this.#changed();
       };
