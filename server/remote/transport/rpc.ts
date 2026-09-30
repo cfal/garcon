@@ -341,7 +341,7 @@ export class ExecutorRpc {
 
   #receive(payload: string): void {
     if (this.#retired) return;
-    const frame: RpcFrame = JSON.parse(payload);
+    const frame = parseFrame(payload);
     if (!frame || typeof frame !== 'object' || typeof frame.type !== 'string') throw new Error('Invalid executor RPC frame');
     if (frame.type === 'terminal') { this.#terminal?.(parseTerminalNotification(frame)); return; }
     if (frame.type === 'terminal-detach') {
@@ -508,6 +508,12 @@ export class ExecutorRpc {
     this.transport.send(deliverable ? payload : undeliverableReply(frame.id));
     return deliverable;
   }
+}
+
+// Names the frame instead of keeping the parse error, whose message can echo the payload.
+function parseFrame(payload: string): RpcFrame {
+  try { return JSON.parse(payload); }
+  catch { throw new Error('Malformed executor RPC frame'); }
 }
 
 function undeliverableReply(id: string): string {

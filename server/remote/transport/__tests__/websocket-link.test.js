@@ -37,6 +37,29 @@ function versionMismatch(peerVersion) {
   return `Executor version mismatch: local ${linkVersion}, peer ${JSON.stringify(peerVersion)}. Use matching builds.`;
 }
 
+// Answers a link's hello with a frame that is not JSON.
+function malformedHandshake(address) {
+  return connectNoiseWebSocket(address, {
+    psk: Buffer.from(secret, 'base64url'), context: EXECUTOR_NOISE_CONTEXT,
+    onMessage(socket) { socket.send('{"type": SYNTHETIC_SENTINEL}'); },
+  });
+}
+
+// Answers a link's hello as the peer of its role would, then its proof with a signature that does not match.
+function invalidProof(address, role) {
+  return connectNoiseWebSocket(address, {
+    psk: Buffer.from(secret, 'base64url'), context: EXECUTOR_NOISE_CONTEXT,
+    onMessage(socket, data) {
+      const local = JSON.parse(data);
+      if (local.type === 'proof') { socket.send(JSON.stringify({ type: 'proof', signature: '0'.repeat(64) })); return; }
+      const peer = { ...local, role: role === 'controller' ? 'worker' : 'controller', runtimeId: crypto.randomUUID(), nonce: crypto.randomUUID() };
+      if (peer.role === 'worker') delete peer.executorId;
+      else peer.executorId = 'synthetic-executor';
+      socket.send(JSON.stringify(peer));
+    },
+  });
+}
+
 for (const role of ['controller', 'worker']) {
   for (const [peerBuild, peerVersion] of incompatiblePeers) {
     test(`reports a version mismatch with ${peerBuild} separately from authentication (${role})`, async () => {
@@ -53,6 +76,53 @@ for (const role of ['controller', 'worker']) {
     });
   }
 }
+
+for (const role of ['controller', 'worker']) {
+  test(`reports why a peer failed to authenticate without echoing a frame that fails to parse (${role})`, async () => {
+    const link = new WebSocketLink({ role, executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true });
+    const failures = [];
+    link.onError(failure => failures.push(failure));
+    const socket = malformedHandshake(link.listen());
+    try {
+      await socket.closed;
+      expect(failures).toEqual([
+        { message: 'Executor authentication failed', count: 1, reason: 'Malformed executor handshake frame' },
+      ]);
+    } finally { socket.close(); await link.dispose(); }
+  });
+
+  test(`reports a peer whose proof does not match the handshake (${role})`, async () => {
+    const link = new WebSocketLink({ role, executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true });
+    const failures = [];
+    link.onError(failure => failures.push(failure));
+    const socket = invalidProof(link.listen(), role);
+    try {
+      await socket.closed;
+      expect(link.current).toBeNull();
+      expect(failures).toEqual([
+        { message: 'Executor authentication failed', count: 1, reason: 'Executor proof is missing or invalid' },
+      ]);
+    } finally { socket.close(); await link.dispose(); }
+  });
+}
+
+test('counts a failure from one again when its reason changes', async () => {
+  const link = new WebSocketLink({ role: 'controller', executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true });
+  const failures = [];
+  link.onError(failure => failures.push(failure));
+  const address = link.listen();
+  try {
+    await malformedHandshake(address).closed;
+    await malformedHandshake(address).closed;
+    // A peer that claims the link's own role.
+    await peerOfBuild(address, 'worker', linkVersion).socket.closed;
+    expect(failures).toEqual([
+      { message: 'Executor authentication failed', count: 1, reason: 'Malformed executor handshake frame' },
+      { message: 'Executor authentication failed', count: 2, reason: 'Malformed executor handshake frame' },
+      { message: 'Executor authentication failed', count: 1, reason: 'Executor handshake mismatch' },
+    ]);
+  } finally { await link.dispose(); }
+});
 
 test('counts each kind of connection failure until a session starts, however failures alternate', async () => {
   const common = { executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true, redialDelaysMs: [20] };

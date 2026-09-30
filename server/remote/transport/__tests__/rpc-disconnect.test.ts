@@ -1,7 +1,17 @@
 import { expect, test } from 'bun:test';
 import { remoteFixture, requestFor } from '../../__tests__/integration-fixture.js';
+import type { LinkClosure } from '../websocket-link.js';
 
 for (const dialer of ['controller', 'worker'] as const) {
+  test(`a frame that fails to parse retires the session under the frame's name (${dialer} dials)`, async () => {
+    const closed = Promise.withResolvers<LinkClosure>();
+    const fixture = await remoteFixture(dialer, (controller) => { controller.onClosure(closed.resolve); });
+    try {
+      fixture.worker.current!.send('{"type": SYNTHETIC_SENTINEL}');
+      expect(await closed.promise).toEqual({ cause: 'session-retired', count: 1, reason: 'Malformed executor RPC frame' });
+    } finally { await fixture.dispose(); }
+  });
+
   test(`lost result fails once without redispatch (${dialer} dials)`, async () => {
     const fixture = await remoteFixture(dialer);
     try {

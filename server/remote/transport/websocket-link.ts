@@ -71,9 +71,11 @@ export interface LinkClosure {
 export interface LinkFailure {
   readonly message: string;
   // Failures of this kind since the last session started, including this one.
-  // A kind whose message changes, such as a mismatch with another build, counts
-  // again from one.
+  // A kind whose message or reason changes, such as a mismatch with another
+  // build, counts again from one.
   readonly count: number;
+  // Why a peer that holds the secret failed to authenticate or lost its connection.
+  readonly reason?: string;
 }
 
 type LinkFailureKind = NoiseErrorCode | 'authentication-timeout' | 'authentication-failed' | 'version-mismatch' | 'connection-lost';
@@ -317,7 +319,7 @@ export class WebSocketLink {
         return;
       }
       if (Buffer.byteLength(encoded) > 8192) throw new Error('Handshake exceeds budget');
-      const frame: unknown = JSON.parse(encoded);
+      const frame = parseHandshakeFrame(encoded);
       if (isHello(frame) && !connection.peer) {
         if (frame.version !== LINK_VERSION) {
           this.#reportFailure('version-mismatch', `Executor version mismatch: local ${LINK_VERSION}, peer ${JSON.stringify(frame.version.slice(0, 80))}. Use matching builds.`);
@@ -334,17 +336,18 @@ export class WebSocketLink {
       if (!connection.peer || !frame || typeof frame !== 'object' || !('type' in frame) || frame.type !== 'proof'
         || !('signature' in frame) || typeof frame.signature !== 'string' || !/^[a-f0-9]{64}$/.test(frame.signature)
         || !timingSafeEqual(Buffer.from(frame.signature, 'hex'), Buffer.from(this.#signature(connection, connection.peer.role), 'hex'))) {
-        throw new Error('Executor authentication failed');
+        throw new Error('Executor proof is missing or invalid');
       }
       connection.authenticated = true;
       this.#accept(connection);
     } catch (error) {
       // Closing the session closes this connection first, so the cause is recorded before.
+      const reason = failureReason(error);
       connection.closeCause ??= 'protocol-error';
-      connection.closeReason ??= failureReason(error);
+      connection.closeReason ??= reason;
       if (error instanceof MessageContinuityError) connection.session?.close(error);
-      if (connection.authenticated) this.#reportFailure('connection-lost', 'Executor connection lost');
-      else this.#reportFailure('authentication-failed', 'Executor authentication failed');
+      if (connection.authenticated) this.#reportFailure('connection-lost', 'Executor connection lost', reason);
+      else this.#reportFailure('authentication-failed', 'Executor authentication failed', reason);
       this.#close(connection, 'protocol-error');
     }
   }
@@ -401,10 +404,11 @@ export class WebSocketLink {
     return createHmac('sha256', this.options.secret).update(JSON.stringify(['garcon-executor', purpose, transcript])).digest('hex');
   }
 
-  #reportFailure(kind: LinkFailureKind, message: string): void {
+  #reportFailure(kind: LinkFailureKind, message: string, reason?: string): void {
     if (this.#disposed) return;
     const previous = this.#failures.get(kind);
-    const failure: LinkFailure = { message, count: previous?.message === message ? previous.count + 1 : 1 };
+    const count = previous?.message === message && previous.reason === reason ? previous.count + 1 : 1;
+    const failure: LinkFailure = reason === undefined ? { message, count } : { message, count, reason };
     this.#failures.set(kind, failure);
     for (const listener of this.#errors) listener(failure);
   }
@@ -459,6 +463,12 @@ function noiseClosureCause(code: NoiseErrorCode): LinkClosureCause {
     case 'MESSAGE_TIMEOUT': return 'liveness-timeout';
     default: return 'protocol-error';
   }
+}
+
+// Names the frame instead of keeping the parse error, whose message can echo the payload.
+function parseHandshakeFrame(encoded: string): unknown {
+  try { return JSON.parse(encoded); }
+  catch { throw new Error('Malformed executor handshake frame'); }
 }
 
 function isHello(value: unknown): value is Hello {

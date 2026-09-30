@@ -1,17 +1,19 @@
 import { expect, test } from 'bun:test';
 import { tcpLinkProxy } from '../../__tests__/tcp-link-proxy.js';
-import { WebSocketLink } from '../websocket-link.js';
+import { WebSocketLink, type LinkFailure } from '../websocket-link.js';
 import { linkOptions } from '../../__tests__/integration-fixture.js';
 
 test('failures after proof verification are not reported as authentication failures', async () => {
   const controller = new WebSocketLink({ ...linkOptions, role: 'controller' });
   const worker = new WebSocketLink({ ...linkOptions, role: 'worker' });
-  const reported = Promise.withResolvers<string>();
-  controller.onError(failure => reported.resolve(failure.message));
+  const reported = Promise.withResolvers<LinkFailure>();
+  controller.onError(reported.resolve);
   controller.onSession(() => { throw new Error('Synthetic post-authentication failure'); });
   try {
     controller.dial(worker.listen());
-    expect(await reported.promise).toBe('Executor connection lost');
+    expect(await reported.promise).toEqual({
+      message: 'Executor connection lost', count: 1, reason: 'Synthetic post-authentication failure',
+    });
   } finally { await controller.dispose(); await worker.dispose(); }
 });
 
