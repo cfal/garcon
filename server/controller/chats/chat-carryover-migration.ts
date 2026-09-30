@@ -10,6 +10,7 @@ import {
 } from '../../../common/transcript-seed.js';
 import { isRecord } from '../../../common/json.js';
 import { syncDirectory, writeJsonFileAtomic } from '../../common/json-file-store.js';
+import { parseStoredJson } from '../../common/stored-json.js';
 import type { AgentOwnershipJournalFileV5 } from './agent-ownership-journal.js';
 import { assertMigrationCapacity } from './carryover-migration-budget.js';
 import { CarryOverTranscriptStore } from './carryover-transcript-store.js';
@@ -513,8 +514,9 @@ async function assertWorkspaceVersionAllowsMigration(workspaceDir: string): Prom
 
 async function readWorkspaceVersion(workspaceDir: string): Promise<number | null> {
   try {
-    const value: unknown = JSON.parse(
+    const value: unknown = parseStoredJson(
       await fs.readFile(path.join(workspaceDir, 'workspace-version.json'), 'utf8'),
+      'workspace-version.json',
     );
     if (!isRecord(value) || !Number.isSafeInteger(value.version) || Number(value.version) < 0) {
       throw new Error('Invalid workspace version file');
@@ -586,7 +588,7 @@ function parseSourceRegistryV4(bytes: Buffer): {
   readonly version: 4;
   readonly sessions: Record<string, Readonly<Record<string, unknown>>>;
 } {
-  const value: unknown = JSON.parse(bytes.toString('utf8'));
+  const value: unknown = parseStoredJson(bytes.toString('utf8'), 'Version-four chat registry');
   if (!isRecord(value) || value.version !== 4 || !isRecord(value.sessions)) {
     throw new Error('Invalid version-four chat registry');
   }
@@ -602,7 +604,7 @@ function parseTargetRegistry(bytes: Buffer): {
   readonly version: 5;
   readonly sessions: Record<string, Readonly<Record<string, unknown>>>;
 } {
-  const value: unknown = JSON.parse(bytes.toString('utf8'));
+  const value: unknown = parseStoredJson(bytes.toString('utf8'), 'Migrated chat registry');
   if (!isRecord(value) || value.version !== 5 || !isRecord(value.sessions)) {
     throw new Error('Invalid migrated chat registry');
   }
@@ -615,7 +617,7 @@ function parseTargetRegistry(bytes: Buffer): {
 }
 
 function parseTargetJournal(bytes: Buffer): AgentOwnershipJournalFileV5 {
-  const value: unknown = JSON.parse(bytes.toString('utf8'));
+  const value: unknown = parseStoredJson(bytes.toString('utf8'), 'Migrated ownership journal');
   if (
     !isRecord(value)
     || value.version !== 5

@@ -3,6 +3,7 @@
 
 import { promises as fs } from 'fs';
 import { writeJsonFileAtomic } from '../../common/json-file-store.ts';
+import { parseStoredJson } from '../../common/stored-json.js';
 import type { ChatMessage } from '../../../common/chat-types.js';
 import type { CarryOverSegmentRef } from './store.js';
 import type { ChatRegistryEntry, IChatRegistry } from './store.js';
@@ -288,7 +289,7 @@ export class MetadataIndex {
           logger.warn('metadata: failed to repair chat-metadata.json permissions:', errorMessage(error));
         });
       }
-      const parsed = JSON.parse(raw);
+      const parsed = parseStoredJson(raw, 'chat-metadata.json');
       const chats = isRecord(parsed) ? parsed.chats : null;
       if (!chats || typeof chats !== 'object' || Array.isArray(chats)) return result;
       for (const [chatId, value] of Object.entries(chats)) {

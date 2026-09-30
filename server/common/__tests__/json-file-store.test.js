@@ -91,7 +91,7 @@ describe('json file store', () => {
         .catch((error) => error);
 
       expect(failure).toBeInstanceOf(CorruptStateFileError);
-      expect(failure.cause).toMatchObject({ message: 'State file is not valid JSON' });
+      expect(failure.cause).toMatchObject({ message: 'executor-secret.json is not valid JSON' });
       const output = logged.mock.calls.flat().map((value) => (value instanceof Error ? value.stack : String(value))).join('\n');
       expect(output).toContain('is corrupt and was quarantined');
       expect(output).not.toContain('SYNTHETIC_SENTINEL');

@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { writeJsonFileAtomic } from '../../common/json-file-store.js';
+import { parseStoredJson } from '../../common/stored-json.js';
 
 export const CURRENT_WORKSPACE_VERSION = 9;
 
@@ -98,7 +99,7 @@ async function readWorkspaceVersion(workspaceDir: string): Promise<number | null
   const filePath = path.join(workspaceDir, WORKSPACE_VERSION_FILE);
   let value: unknown;
   try {
-    value = JSON.parse(await fs.readFile(filePath, 'utf8'));
+    value = parseStoredJson(await fs.readFile(filePath, 'utf8'), WORKSPACE_VERSION_FILE);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
     throw new Error(`Could not read ${WORKSPACE_VERSION_FILE}`, { cause: error });

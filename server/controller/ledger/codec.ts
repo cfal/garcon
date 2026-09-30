@@ -13,6 +13,7 @@ import {
 } from '../../../common/cli-presentation.js';
 import { parseNativeSeedReceipt } from '../../../common/transcript-seed.js';
 import { isExecutorId } from '../../../common/executors.js';
+import { parseStoredJson } from '../../common/stored-json.js';
 import { normalizePendingPreambleBoundary } from '../../../common/preambles.js';
 import { parsePreamblePrefixReceipt } from '../../../common/preamble-prefix.js';
 import type {
@@ -261,7 +262,7 @@ export function parseLedgerPreambleSelectionChangedNoticeDetail(
 }
 
 function parsePayload(value: string): StoredPayload {
-  const parsed: unknown = JSON.parse(value);
+  const parsed: unknown = parseStoredJson(value, 'Ledger payload');
   const payload = record(parsed, 'ledger payload');
   return {
     providerMeta: payload.providerMeta === null

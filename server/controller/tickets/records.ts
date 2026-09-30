@@ -3,6 +3,7 @@ import { parseTicket, parseTicketComment, parseTicketWriteResult } from '../../.
 import { ticketNumber } from '../../../common/ticket-validation.js';
 import { ticketOwnerKey, type Ticket, type TicketActivity, type TicketComment, type TicketWriteResult } from '../../../common/tickets.js';
 import { TicketDomainError } from '../../common/ticket-error.js';
+import { parseStoredJson } from '../../common/stored-json.js';
 import { nextTicketCounter } from './errors.js';
 import type { TicketMutationContext } from './contracts.js';
 
@@ -29,7 +30,7 @@ export interface StoredCommentRow {
 }
 
 export function decodeTicket(row: StoredTicketRow): Ticket {
-  const ticket = parseTicket(JSON.parse(row.payload_json));
+  const ticket = parseTicket(parseStoredJson(row.payload_json, 'Ticket record'));
   const assignee = ticket.assignee ? ticketOwnerKey(ticket.assignee) : null;
   const parent = ticket.parentId ? ticketNumber(ticket.parentId) : null;
   if (ticket.number !== row.number || ticket.revision !== row.revision || ticket.project !== row.project
@@ -80,7 +81,7 @@ export function nextAutoincrement(database: Database, table: 'tickets' | 'ticket
 }
 
 export function decodeComment(row: StoredCommentRow): TicketComment {
-  const comment = parseTicketComment(JSON.parse(row.payload_json));
+  const comment = parseTicketComment(parseStoredJson(row.payload_json, 'Ticket comment'));
   if (comment.id !== row.id || ticketNumber(comment.ticketId) !== row.ticket_number
     || comment.sequence !== row.sequence || comment.revision !== row.revision || comment.deletedAt !== row.deleted_at) {
     throw new Error('Inconsistent ticket comment.');
@@ -126,7 +127,7 @@ export function readOperation(database: Database, context: TicketMutationContext
   ).get(context.operationKey);
   if (!row) return null;
   if (row.fingerprint !== context.fingerprint) throw new TicketDomainError('TICKET_REQUEST_CONFLICT', 'This request identity was already used for different ticket content.');
-  const result = parseTicketWriteResult(JSON.parse(row.result_json));
+  const result = parseTicketWriteResult(parseStoredJson(row.result_json, 'Ticket operation result'));
   if (result.storeId !== context.expectedStoreId) throw new Error('Inconsistent ticket operation store.');
   return result;
 }

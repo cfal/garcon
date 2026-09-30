@@ -119,4 +119,14 @@ describe('ChatBoardStore', () => {
     await expect(new ChatBoardStore(directory).init()).rejects.toThrow(filePath);
     expect(await fs.readFile(filePath, 'utf8')).toBe('{"version":1,"revision":0,"boards":[');
   });
+
+  it('names persisted data that is not JSON without echoing it', async () => {
+    const directory = await temporaryDirectory();
+    await fs.writeFile(path.join(directory, 'chat-boards.json'), '{"boards": SYNTHETIC_SENTINEL}', 'utf8');
+
+    const failure = await new ChatBoardStore(directory).init().catch((error) => error);
+
+    expect(failure.message).toContain('chat-boards.json is not valid JSON');
+    expect(failure.message).not.toContain('SYNTHETIC_SENTINEL');
+  });
 });

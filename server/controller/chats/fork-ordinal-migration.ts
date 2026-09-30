@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { parseChatId } from '../../../common/chat-id.js';
 import { writeJsonFileAtomic } from '../../common/json-file-store.js';
+import { parseStoredJson } from '../../common/stored-json.js';
 import { isObjectRecord, normalizeChatRegistryEntry } from './registry-entry-codec.js';
 import { CHAT_REGISTRY_VERSION } from './store.js';
 
@@ -15,7 +16,7 @@ export async function removeLegacyForkOrdinals(workspaceDir: string): Promise<vo
     throw error;
   }
 
-  const registry: unknown = JSON.parse(raw);
+  const registry: unknown = parseStoredJson(raw, 'chats.json');
   if (!isObjectRecord(registry)
     || registry.version !== CHAT_REGISTRY_VERSION
     || !isObjectRecord(registry.sessions)) {

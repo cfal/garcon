@@ -11,6 +11,7 @@ import {
 } from '../../../common/chat-boards.js';
 import { hasNodeErrorCode } from '../../common/errors.js';
 import { AtomicJsonWriteError, writeJsonFileAtomic } from '../../common/json-file-store.js';
+import { parseStoredJson } from '../../common/stored-json.js';
 import { KeyedPromiseLock } from '../../common/keyed-lock.js';
 import { ChatBoardCatalogCommittedUnknownError, ChatBoardDomainError } from './errors.js';
 
@@ -82,7 +83,7 @@ export class ChatBoardStore {
       if (encoder.encode(raw).byteLength > CHAT_BOARDS_FILE_MAX_BYTES) {
         throw new Error('chat-boards.json exceeds the maximum file size');
       }
-      this.#file = parseFile(JSON.parse(raw) as unknown);
+      this.#file = parseFile(parseStoredJson(raw, 'chat-boards.json'));
     } catch (error) {
       throw new Error(`Failed to load ${this.#filePath}: ${error instanceof Error ? error.message : String(error)}`, {
         cause: error,

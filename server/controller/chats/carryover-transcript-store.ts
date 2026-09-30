@@ -6,6 +6,7 @@ import { boundProjectedMessage, isProjectableMessage } from '../../../common/tra
 import { AgentSwitchMessage } from '../../../common/chat-types.js';
 import { DomainError } from '../../common/domain-error.js';
 import { writeJsonFileAtomic, syncDirectory } from '../../common/json-file-store.js';
+import { parseStoredJson } from '../../common/stored-json.js';
 import {
   CarryOverPageIntegrityError,
   decodeCarryOverPage,
@@ -485,7 +486,7 @@ export class CarryOverTranscriptStore {
       const raw = await fs.readFile(path.join(this.#segmentDir(id), 'segment.json'), 'utf8');
       let index: CarryOverSegmentIndex;
       try {
-        index = parseCarryOverSegmentIndex(JSON.parse(raw), id);
+        index = parseCarryOverSegmentIndex(parseStoredJson(raw, 'Carryover segment index'), id);
       } catch (error) {
         this.#degradedSegments.add(id);
         throw new CarryOverHistoryUnavailableError({ cause: error });
@@ -592,7 +593,7 @@ export class CarryOverTranscriptStore {
   ): Promise<void> {
     try {
       const actual = parseCarryOverSegmentIndex(
-        JSON.parse(await fs.readFile(path.join(finalDir, 'segment.json'), 'utf8')),
+        parseStoredJson(await fs.readFile(path.join(finalDir, 'segment.json'), 'utf8'), 'Carryover segment index'),
         expected.id,
       );
       if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error('Index differs');

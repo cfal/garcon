@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { parseChatId } from '../../../common/chat-id.js';
 import { isRecord } from '../../../common/json.js';
+import { parseStoredJson } from '../../common/stored-json.js';
 
 export interface LegacyChatRegistryV3Snapshot {
   readonly version: 3;
@@ -36,7 +37,7 @@ export async function readLegacyChatRegistryV3(
 
 async function readRegistryFile(workspaceDir: string): Promise<unknown | null> {
   try {
-    return JSON.parse(await fs.readFile(path.join(workspaceDir, 'chats.json'), 'utf8'));
+    return parseStoredJson(await fs.readFile(path.join(workspaceDir, 'chats.json'), 'utf8'), 'chats.json');
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
     throw error;

@@ -9,6 +9,7 @@ import { effectiveExecutorId } from '../../../common/executors.js';
 import { toAgentChatReference } from '../agents/integration-chat-reference.js';
 import { isEmptyEarlierJournal, isJournalV5 } from './agent-ownership-journal-format.js';
 import { AtomicJsonWriteError, writeJsonFileAtomic } from '../../common/json-file-store.js';
+import { parseStoredJson } from '../../common/stored-json.js';
 import type { RetainExecutorReferences } from '../executors/reference-writes.js';
 import { ApiProviderDurableReferences, type RetainProviderReferences } from '../api-providers/reference-writes.js';
 import { createLogger } from '../../common/log.js';
@@ -510,7 +511,7 @@ export class AgentOwnershipJournal {
 
   async #load(): Promise<AgentOwnershipJournalFileV5> {
     try {
-      const value: unknown = JSON.parse(await fs.readFile(this.#filePath, 'utf8'));
+      const value: unknown = parseStoredJson(await fs.readFile(this.#filePath, 'utf8'), path.basename(this.#filePath));
       if (isJournalV5(value)) return value;
       if (isEmptyEarlierJournal(value)) return emptyOwnershipJournalV5();
       throw new Error('Invalid agent ownership journal');

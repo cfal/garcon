@@ -1,3 +1,4 @@
+import { parseStoredJson } from '../../../common/stored-json.js';
 import { decodeClonedStoredRows } from '../../ledger/codec.js';
 import { ledgerRowsToMessages } from '../../ledger/presentation.js';
 import { renderSharedChatText } from '../share-transcript.ts';
@@ -54,7 +55,7 @@ const TASK_HANDLERS: TaskHandlers = {
     if (items.length !== 1 || typeof items[0] !== 'string') {
       throw new Error('Transcript rendering received an invalid share snapshot');
     }
-    const legacy = decodeLegacyShareSnapshot(shareToken, JSON.parse(items[0]));
+    const legacy = decodeLegacyShareSnapshot(shareToken, parseStoredJson(items[0], 'Share snapshot'));
     if (!legacy) return null;
     const { messages, ...header } = legacy;
     return renderShareSnapshot({ ...header, messageCount: messages.length }, messages);

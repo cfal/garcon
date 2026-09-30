@@ -845,6 +845,15 @@ describe('ChatRegistry', () => {
     await expect(registry.init()).rejects.toThrow('Invalid preamble selection');
   });
 
+  it('names a registry that is not JSON without echoing it', async () => {
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-chat-registry-unparsable-'));
+    await fs.writeFile(path.join(tempDir, 'chats.json'), '{"sessions": SYNTHETIC_SENTINEL}');
+
+    const failure = await new ChatRegistry(tempDir).init().catch((error) => error);
+
+    expect(failure.message).toBe('chats.json is not valid JSON');
+  });
+
   it('binds a selection-change boundary to both the ownership epoch and selection revision', async () => {
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-chat-registry-binding-'));
     const badRevision = {

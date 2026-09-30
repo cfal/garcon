@@ -9,6 +9,7 @@ import {
 } from '../../../common/scheduled-prompts.js';
 import { hasNodeErrorCode } from '../../common/errors.js';
 import { syncDirectory, writeJsonFileAtomic } from '../../common/json-file-store.js';
+import { parseStoredJson } from '../../common/stored-json.js';
 import { effectiveExecutorId } from '../../../common/executors.js';
 import type { RetainExecutorReferences } from '../executors/reference-writes.js';
 import { ApiProviderDurableReferences, type RetainProviderReferences } from '../api-providers/reference-writes.js';
@@ -174,7 +175,7 @@ function normalizeFile(value: unknown): NormalizedScheduledPromptsFile {
 async function readFile(filePath: string): Promise<LoadedScheduledPromptsFile> {
   try {
     const sourceBytes = await fs.readFile(filePath);
-    return { ...normalizeFile(JSON.parse(sourceBytes.toString('utf8'))), sourceBytes };
+    return { ...normalizeFile(parseStoredJson(sourceBytes.toString('utf8'), path.basename(filePath))), sourceBytes };
   } catch (error) {
     if (hasNodeErrorCode(error, 'ENOENT')) {
       return {

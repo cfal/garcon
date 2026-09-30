@@ -4,6 +4,7 @@ import path from 'path';
 import { legacyChatIdToCanonical } from '../../../common/chat-id.js';
 import { isRecord } from '../../../common/json.js';
 import { writeJsonFileAtomic } from '../../common/json-file-store.js';
+import { parseStoredJson } from '../../common/stored-json.js';
 import { commandLedgerKey, commandPayloadHash } from '../commands/command-ledger.js';
 
 interface MigrationResult<T> {
@@ -23,7 +24,7 @@ async function discoverLegacyRegistryIds(
   const filePath = path.join(workspaceDir, 'chats.json');
   let parsed: unknown;
   try {
-    parsed = JSON.parse(await fs.readFile(filePath, 'utf8'));
+    parsed = parseStoredJson(await fs.readFile(filePath, 'utf8'), 'chats.json');
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
     throw error;
@@ -77,7 +78,7 @@ async function migrateJsonFile(
   const filePath = path.join(workspaceDir, fileName);
   let parsed: unknown;
   try {
-    parsed = JSON.parse(await fs.readFile(filePath, 'utf8'));
+    parsed = parseStoredJson(await fs.readFile(filePath, 'utf8'), fileName);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
     throw error;

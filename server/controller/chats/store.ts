@@ -43,6 +43,7 @@ import {
   requireNewParentChat,
 } from './registry-entry-codec.js';
 import { writeJsonFileAtomic, AtomicJsonWriteError } from '../../common/json-file-store.js';
+import { parseStoredJson } from '../../common/stored-json.js';
 import { errorMessage } from '../../common/errors.js';
 import { KeyedPromiseLock } from '../../common/keyed-lock.js';
 import { createLogger } from '../../common/log.js';
@@ -318,7 +319,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
           logger.warn('sessions: failed to repair chats.json permissions:', errorMessage(error));
         });
       }
-      const parsed: unknown = JSON.parse(raw);
+      const parsed: unknown = parseStoredJson(raw, 'chats.json');
       if (!isObjectRecord(parsed)) {
         this.#registry = createEmptyRegistry();
         return this.#registry;

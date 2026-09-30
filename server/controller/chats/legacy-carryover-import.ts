@@ -4,6 +4,7 @@ import type { ChatMessage } from '../../../common/chat-types.js';
 import { AgentSwitchMessage, parseChatMessages } from '../../../common/chat-types.js';
 import { parseNativeSeedReceipt } from '../../../common/transcript-seed.js';
 import { isRecord } from '../../../common/json.js';
+import { parseStoredJson } from '../../common/stored-json.js';
 import type { AgentChatReference } from '@garcon/server-agent-interface';
 import {
   emptyOwnershipJournalV5,
@@ -64,7 +65,7 @@ export async function migratedTranscriptMatches(
 
 export function parseLegacyCarryOverFile(bytes: Buffer): Map<string, unknown> {
   if (bytes.byteLength === 0) return new Map();
-  const parsed: unknown = JSON.parse(bytes.toString('utf8'));
+  const parsed: unknown = parseStoredJson(bytes.toString('utf8'), 'Legacy carryover file');
   if (!isRecord(parsed) || !isRecord(parsed.chats)) throw new Error('Invalid legacy carryover file');
   return new Map(Object.entries(parsed.chats));
 }
@@ -180,7 +181,7 @@ export async function migrateLegacyOwnershipJournal(input: {
   readonly store: CarryOverTranscriptStore;
 }): Promise<AgentOwnershipJournalFileV5> {
   if (input.bytes.byteLength === 0) return emptyOwnershipJournalV5();
-  const value: unknown = JSON.parse(input.bytes.toString('utf8'));
+  const value: unknown = parseStoredJson(input.bytes.toString('utf8'), 'Legacy ownership journal');
   if (!isRecord(value)) throw new Error('Invalid legacy ownership journal');
   if (value.version === 5) return value as unknown as AgentOwnershipJournalFileV5;
   if (value.version === 4 || value.version === 3 || value.version === 2) {
@@ -300,7 +301,7 @@ async function readLinkedNode(workspaceDir: string, id: string): Promise<CarryOv
       path.join(workspaceDir, 'carryover-transcripts', 'nodes', id, 'manifest.json'),
       'utf8',
     );
-    return parseCarryOverNode(JSON.parse(raw), id);
+    return parseCarryOverNode(parseStoredJson(raw, `Carryover node ${id} manifest`), id);
   } catch (error) {
     if (isFileSystemError(error) && error.code !== 'ENOENT') throw error;
     throw new LegacyCarryOverDataError(`Invalid linked carryover node ${id}`, {

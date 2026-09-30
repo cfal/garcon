@@ -8,6 +8,7 @@ import {
 } from 'node:zlib';
 import type { ChatMessage } from '../../../common/chat-types.js';
 import { parseChatMessages } from '../../../common/chat-types.js';
+import { parseStoredJson } from '../../common/stored-json.js';
 import type { CarryOverPageDescriptor } from './carryover-segment-types.js';
 
 export const CARRYOVER_PAGE_MAX_MESSAGES = 256;
@@ -139,7 +140,7 @@ export async function decodeCarryOverPage(
   }
   let messages: ChatMessage[];
   try {
-    messages = parseChatMessages(JSON.parse(uncompressed.toString('utf8')));
+    messages = parseChatMessages(parseStoredJson(uncompressed.toString('utf8'), 'Carryover page'));
   } catch (error) {
     throw new CarryOverPageIntegrityError('Carryover page payload is invalid', { cause: error });
   }

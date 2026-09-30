@@ -10,6 +10,7 @@ import {
 } from '../../../common/snippets.js';
 import { hasNodeErrorCode } from '../../common/errors.js';
 import { AtomicJsonWriteError, writeJsonFileAtomic } from '../../common/json-file-store.js';
+import { parseStoredJson } from '../../common/stored-json.js';
 import { KeyedPromiseLock } from '../../common/keyed-lock.js';
 import { SnippetDomainError } from './errors.js';
 
@@ -79,7 +80,7 @@ function normalizeFile(value: unknown): NormalizedSnippetsFile {
 async function readFile(filePath: string): Promise<NormalizedSnippetsFile> {
   try {
     const raw = await fs.readFile(filePath, 'utf8');
-    return normalizeFile(JSON.parse(raw));
+    return normalizeFile(parseStoredJson(raw, path.basename(filePath)));
   } catch (error) {
     if (hasNodeErrorCode(error, 'ENOENT')) {
       return { file: emptyFile(), migrated: false };

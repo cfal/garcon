@@ -12,6 +12,7 @@ import {
 } from '../../../common/preambles.js';
 import { hasNodeErrorCode } from '../../common/errors.js';
 import { AtomicJsonWriteError, writeJsonFileAtomic } from '../../common/json-file-store.js';
+import { parseStoredJson } from '../../common/stored-json.js';
 import { KeyedPromiseLock } from '../../common/keyed-lock.js';
 import { isCanonicalExecutorPath } from '../../common/portable-path.js';
 import { assertPreambleCatalogComposition, PreambleDomainError } from './errors.js';
@@ -179,7 +180,7 @@ export class PreambleStore {
     if (encoder.encode(raw).byteLength > PREAMBLES_FILE_MAX_BYTES) {
       throw new Error('preambles.json exceeds the maximum file size');
     }
-    const parsed: unknown = JSON.parse(raw);
+    const parsed: unknown = parseStoredJson(raw, 'preambles.json');
     const migrated = (parsed as { version?: unknown })?.version === 1;
     const file = migrated ? normalizeVersionOneFile(parsed) : normalizeVersionTwoFile(parsed);
     if (preambleCatalogCompositionViolation(file.preambles)) {

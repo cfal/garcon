@@ -7,6 +7,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { isRecord } from '../../../common/json.js';
 import { writeFileAtomic, writeJsonFileAtomic } from '../../common/json-file-store.js';
+import { parseStoredJson } from '../../common/stored-json.js';
 import { createLogger } from '../../common/log.js';
 import { hasNodeErrorCode } from '../../common/errors.js';
 import { KeyedPromiseLock } from '../../common/keyed-lock.js';
@@ -143,7 +144,7 @@ export class ShareStore implements IShareStore {
     try {
       const raw = await fs.readFile(this.#filePath(), 'utf8');
       await repairSharePermissions(this.#filePath(), 0o600, 'shared-chats.json');
-      parsed = JSON.parse(raw);
+      parsed = parseStoredJson(raw, 'shared-chats.json');
     } catch (error: unknown) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
         logger.warn('share-store: failed to read shared-chats.json:', (error as Error).message);

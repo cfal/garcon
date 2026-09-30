@@ -8,6 +8,7 @@ import type { IntegrationRegistry } from '../../runtime/agents/integration-regis
 import { normalizeSupportedThinkingMode } from '../../../common/execution-defaults.js';
 import { GENERATION_UI_SETTING_KEYS } from '../../../common/settings.js';
 import { createLogger } from '../../common/log.js';
+import { parseStoredJson } from '../../common/stored-json.js';
 
 const LEGACY_MIGRATION_ID = 'agent-integration-v1';
 const SETTINGS_REFRESH_MIGRATION_ID = 'agent-integration-settings-v2';
@@ -695,7 +696,7 @@ async function applyStagedTargets(
 
 async function readJson(filePath: string): Promise<JsonValue | null> {
   try {
-    return JSON.parse(await fs.readFile(filePath, 'utf8')) as JsonValue;
+    return parseStoredJson(await fs.readFile(filePath, 'utf8'), path.basename(filePath)) as JsonValue;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
     throw error;
@@ -725,7 +726,7 @@ async function writeManifest(journalDir: string, manifest: MigrationManifest): P
 
 async function readManifest(journalDir: string, migrationId: string): Promise<MigrationManifest | null> {
   try {
-    const value = JSON.parse(await fs.readFile(path.join(journalDir, 'manifest.json'), 'utf8')) as unknown;
+    const value = parseStoredJson(await fs.readFile(path.join(journalDir, 'manifest.json'), 'utf8'), 'Core record migration manifest');
     return parseManifest(value, migrationId);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;

@@ -2,6 +2,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { createLogger } from './log.js';
+import { parseStoredJson } from './stored-json.js';
 
 const logger = createLogger('json-file-store');
 export const QUARANTINE_INFIX = '.corrupt-';
@@ -40,15 +41,8 @@ export async function readJsonStateFile<T>(options: {
     return options.empty();
   }
 
-  let value: unknown;
   try {
-    value = JSON.parse(raw);
-  } catch {
-    // A parse error's message can echo the file's content, such as a credential.
-    return quarantineStateFile(options.filePath, new Error('State file is not valid JSON'));
-  }
-  try {
-    return options.normalize(value);
+    return options.normalize(parseStoredJson(raw, path.basename(options.filePath)));
   } catch (error) {
     return quarantineStateFile(options.filePath, error);
   }

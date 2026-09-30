@@ -7,6 +7,7 @@ import { TICKET_LIMITS, ticketOwnerKey, type TicketActivity, type TicketCollecti
   type TicketSequencePage, type TicketSummary } from '../../../common/tickets.js';
 import { ticketAuthorityKey, type TicketAuthority } from './contracts.js';
 import { TicketDomainError } from '../../common/ticket-error.js';
+import { parseStoredJson } from '../../common/stored-json.js';
 import { collectionRevision, decodeComment, decodeTicket, requireCollectionRevision, requireTicket,
   type StoredCommentRow, type StoredTicketRow } from './records.js';
 
@@ -148,7 +149,7 @@ export function readTicketHistory(database: Database, storeId: string, query: Ti
     SELECT sequence,payload_json FROM ticket_activity WHERE ticket_number=? AND sequence<? ORDER BY sequence DESC LIMIT ?
   `).all(ticketNumber(query.ticketId), query.beforeSequence ?? Number.MAX_SAFE_INTEGER, limit + 1);
   const events = rows.map((row) => {
-    const activity = parseTicketActivity(JSON.parse(row.payload_json));
+    const activity = parseTicketActivity(parseStoredJson(row.payload_json, 'Ticket activity'));
     if (activity.sequence !== row.sequence || activity.ticketId !== query.ticketId) throw new Error('Inconsistent ticket activity.');
     return activity;
   });

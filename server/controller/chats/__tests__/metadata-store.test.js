@@ -247,6 +247,21 @@ describe('metadata-store', () => {
   });
 
   describe('init', () => {
+    it('logs metadata that is not JSON by name without echoing it', async () => {
+      const metadataPath = path.join(tmpDir, 'chat-metadata.json');
+      await fs.writeFile(metadataPath, '{"chats": SYNTHETIC_SENTINEL}');
+      const warn = spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        await new MetadataIndex(mockRegistry, mockAgents, mockCarryOver, { metadataPath }).init();
+        const output = warn.mock.calls.flat().map(String).join('\n');
+
+        expect(output).toContain('chat-metadata.json is not valid JSON');
+        expect(output).not.toContain('SYNTHETIC_SENTINEL');
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
     it('repairs permissions on existing metadata', async () => {
       if (process.platform === 'win32') return;
       const metadataPath = path.join(tmpDir, 'chat-metadata.json');
