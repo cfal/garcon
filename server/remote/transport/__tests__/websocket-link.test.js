@@ -1,11 +1,13 @@
 import { expect, test } from 'bun:test';
 import { connectNoiseWebSocket } from '@cfal/noise-ws';
-import { WebSocketLink, EXECUTOR_NOISE_CONTEXT } from '../websocket-link.ts';
+import { WebSocketLink, EXECUTOR_NOISE_CONTEXT, shouldLogLinkFailure } from '../websocket-link.ts';
 import { EXECUTOR_PROTOCOL_REVISION } from '../rpc-protocol.ts';
 import { version as packageVersion } from '../../../../package.json';
 import { tcpLinkProxy } from '../../__tests__/tcp-link-proxy.ts';
+import { connectWithWrongKey, sendMalformedRecord } from '../../__tests__/failing-peers.ts';
 
 const secret = Buffer.alloc(32, 42).toString('base64url');
+const linkVersion = `${packageVersion}+protocol.${EXECUTOR_PROTOCOL_REVISION}`;
 
 // Builds of one release share a package version, so only the protocol revision tells them apart.
 const incompatiblePeers = [
@@ -14,33 +16,88 @@ const incompatiblePeers = [
   ['this release at another protocol revision', `${packageVersion}+protocol.${EXECUTOR_PROTOCOL_REVISION + 1}`],
 ];
 
+// Answers a link's hello as the peer of a role would, reporting the given build.
+function peerOfBuild(address, role, version) {
+  const hello = Promise.withResolvers();
+  const socket = connectNoiseWebSocket(address, {
+    psk: Buffer.from(secret, 'base64url'), context: EXECUTOR_NOISE_CONTEXT,
+    onMessage(socket, data) {
+      const local = JSON.parse(data);
+      hello.resolve(local);
+      const peer = { ...local, version, role: role === 'controller' ? 'worker' : 'controller' };
+      if (peer.role === 'worker') delete peer.executorId;
+      else peer.executorId = 'synthetic-executor';
+      socket.send(JSON.stringify(peer));
+    },
+  });
+  return { socket, hello: hello.promise };
+}
+
+function versionMismatch(peerVersion) {
+  return `Executor version mismatch: local ${linkVersion}, peer ${JSON.stringify(peerVersion)}. Use matching builds.`;
+}
+
 for (const role of ['controller', 'worker']) {
   for (const [peerBuild, peerVersion] of incompatiblePeers) {
     test(`reports a version mismatch with ${peerBuild} separately from authentication (${role})`, async () => {
       const link = new WebSocketLink({ role, executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true });
-      const errors = [];
-      link.onError(message => errors.push(message));
-      let localVersion;
-      const socket = connectNoiseWebSocket(link.listen(), {
-        psk: Buffer.from(secret, 'base64url'), context: EXECUTOR_NOISE_CONTEXT,
-        onMessage(socket, data) {
-          const hello = JSON.parse(data);
-          localVersion = hello.version;
-          const peer = { ...hello, version: peerVersion, role: role === 'controller' ? 'worker' : 'controller' };
-          if (peer.role === 'worker') delete peer.executorId;
-          else peer.executorId = 'synthetic-executor';
-          socket.send(JSON.stringify(peer));
-        },
-      });
+      const failures = [];
+      link.onError(failure => failures.push(failure));
+      const peer = peerOfBuild(link.listen(), role, peerVersion);
       try {
-        await socket.closed;
+        await peer.socket.closed;
         expect(link.current).toBeNull();
-        expect(localVersion).toBe(`${packageVersion}+protocol.${EXECUTOR_PROTOCOL_REVISION}`);
-        expect(errors).toEqual([`Executor version mismatch: local ${localVersion}, peer ${JSON.stringify(peerVersion)}. Use matching builds.`]);
-      } finally { socket.close(); await link.dispose(); }
+        expect((await peer.hello).version).toBe(linkVersion);
+        expect(failures).toEqual([{ message: versionMismatch(peerVersion), count: 1 }]);
+      } finally { peer.socket.close(); await link.dispose(); }
     });
   }
 }
+
+test('counts each kind of connection failure until a session starts, however failures alternate', async () => {
+  const common = { executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true, redialDelaysMs: [20] };
+  const controller = new WebSocketLink({ ...common, role: 'controller' });
+  const worker = new WebSocketLink({ ...common, role: 'worker' });
+  const failures = [];
+  controller.onError(failure => failures.push(failure));
+  const address = controller.listen();
+  const wrongKey = 'Executor encrypted connection failed (AUTHENTICATION_FAILED)';
+  const malformed = 'Executor encrypted connection failed (PROTOCOL_ERROR)';
+  try {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await connectWithWrongKey(address);
+      await sendMalformedRecord(address);
+    }
+    expect(failures).toEqual([1, 2, 3].flatMap(count => [{ message: wrongKey, count }, { message: malformed, count }]));
+
+    worker.dial(address);
+    await Promise.all([controller.ready, worker.ready]);
+    await connectWithWrongKey(address);
+    expect(failures.slice(6)).toEqual([{ message: wrongKey, count: 1 }]);
+  } finally { await worker.dispose(); await controller.dispose(); }
+});
+
+test('counts version mismatches from one again when the peer build changes', async () => {
+  const link = new WebSocketLink({ role: 'controller', executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true });
+  const failures = [];
+  link.onError(failure => failures.push(failure));
+  const address = link.listen();
+  try {
+    for (const version of ['synthetic-old', 'synthetic-old', 'synthetic-other']) {
+      await peerOfBuild(address, 'controller', version).socket.closed;
+    }
+    expect(failures).toEqual([
+      { message: versionMismatch('synthetic-old'), count: 1 },
+      { message: versionMismatch('synthetic-old'), count: 2 },
+      { message: versionMismatch('synthetic-other'), count: 1 },
+    ]);
+  } finally { await link.dispose(); }
+});
+
+test('logs a kind of link failure at its 1st, 2nd, 4th, 8th, ... occurrence', () => {
+  const counts = Array.from({ length: 40 }, (_, index) => index + 1);
+  expect(counts.filter(count => shouldLogLinkFailure({ message: 'synthetic failure', count }))).toEqual([1, 2, 4, 8, 16, 32]);
+});
 
 for (const dialer of ['controller', 'worker']) {
   test(`authenticated reconnect replaces the socket session (${dialer} dials)`, async () => {
@@ -258,9 +315,9 @@ for (const dialer of ['controller', 'worker']) {
     const controller = new WebSocketLink({ ...common, role: 'controller' });
     const worker = new WebSocketLink({ ...common, role: 'worker' });
     const [dialing, listening] = dialer === 'controller' ? [controller, worker] : [worker, controller];
-    const reports = { dialing: { errors: [], closures: [] }, listening: { errors: [], closures: [] } };
+    const reports = { dialing: { failures: [], closures: [] }, listening: { failures: [], closures: [] } };
     for (const [end, link] of [['dialing', dialing], ['listening', listening]]) {
-      link.onError(message => reports[end].errors.push(message));
+      link.onError(failure => reports[end].failures.push(failure));
       link.onClosure(closure => reports[end].closures.push(closure));
     }
     // The proxy stands in for a tunnel that drops the TCP connection without a WebSocket or encrypted close.
@@ -272,7 +329,7 @@ for (const dialer of ['controller', 'worker']) {
       await eventually(() => reports.dialing.closures.length === 1 && reports.listening.closures.length === 1);
 
       for (const end of ['dialing', 'listening']) {
-        expect(reports[end].errors).toEqual(['Executor encrypted connection failed (TRANSPORT_CLOSED)']);
+        expect(reports[end].failures).toEqual([{ message: 'Executor encrypted connection failed (TRANSPORT_CLOSED)', count: 1 }]);
         expect(reports[end].closures).toEqual([
           { cause: 'socket-closed', count: 1, reason: 'Encrypted connection failed (TRANSPORT_CLOSED)' },
         ]);

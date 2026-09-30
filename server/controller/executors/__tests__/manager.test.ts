@@ -15,18 +15,20 @@ import { createServerSocketHandlers, type WsConnectionData } from '../../ws/serv
 import { PrimarySocketDelivery } from '../../ws/primary-delivery.js';
 import { WebSocketAdmissionController } from '../../../common/websocket-capacity.js';
 import { ControllerCliDispatcher, type CliDispatchAccess } from '../cli-dispatcher.js';
+import { connectWithWrongKey, sendMalformedRecord } from '../../../remote/__tests__/failing-peers.js';
+import type { Logger } from '../../../common/log.js';
 
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 
-async function fixture() {
+async function fixture(logger?: Logger) {
   const temporary = join(homedir(), 'tmp');
   await mkdir(temporary, { recursive: true });
   const root = await mkdtemp(join(temporary, 'executor-manager-'));
   cleanups.push(() => rm(root, { recursive: true, force: true }));
   const manager = await ExecutorManager.create({
     id: 'local', workspaceDir: root, projectBasePath: root, integrations: [], resolveCredential: async () => null,
-  });
+  }, logger);
   cleanups.push(() => manager.dispose());
   return { root, manager };
 }
@@ -382,6 +384,32 @@ test('key rotation closes established and pending old-key sockets without affect
   await replaced;
   expect(manager.requireIntegration({ executorId: executor.id, agentId: 'test' }).producers.scope).not.toEqual(scope);
   expect(noise.size).toBe(1);
+});
+
+test('logs failed executor connections at powers of two per kind but shows every one', async () => {
+  const warnings: unknown[][] = [];
+  const { manager, root } = await fixture({ debug() {}, info() {}, warn: (...args) => { warnings.push(args); }, error() {} });
+  const config = await manager.create({ label: 'Probed', direction: 'executor-connects' });
+  const { url } = sharedListener(manager);
+  const failures = () => warnings.filter(([message]) => message === 'Executor link failed').map(([, fields]) => fields);
+  const wrongKey = 'Executor encrypted connection failed (AUTHENTICATION_FAILED)';
+  const malformed = 'Executor encrypted connection failed (PROTOCOL_ERROR)';
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await connectWithWrongKey(url(config.id));
+    await sendMalformedRecord(url(config.id));
+  }
+  await connectWithWrongKey(url(config.id));
+
+  const logged = (message: string, count: number) => ({ executorId: config.id, message, count });
+  expect(failures()).toEqual([logged(wrongKey, 1), logged(malformed, 1), logged(wrongKey, 2), logged(malformed, 2)]);
+  // The third wrong key was not logged, but it is the latest failure.
+  expect(manager.list().find((item) => item.id === config.id)?.lastError).toEqual({ code: 'EXECUTOR_UNAVAILABLE', message: wrongKey });
+
+  const ready = waitReady(manager, config.id);
+  worker(config.secret, root).dial(url(config.id));
+  await ready;
+  await connectWithWrongKey(url(config.id));
+  expect(failures().slice(4)).toEqual([logged(wrongKey, 1)]);
 });
 
 test('the aggregate Noise connection limit covers authenticated peers across executors', async () => {

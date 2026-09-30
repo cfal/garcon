@@ -67,6 +67,25 @@ export interface LinkClosure {
   readonly reason?: string;
 }
 
+// A connection that failed to open, to authenticate, or to keep its session.
+export interface LinkFailure {
+  readonly message: string;
+  // Failures of this kind since the last session started, including this one.
+  // A kind whose message changes, such as a mismatch with another build, counts
+  // again from one.
+  readonly count: number;
+}
+
+type LinkFailureKind = NoiseErrorCode | 'authentication-timeout' | 'authentication-failed' | 'version-mismatch' | 'connection-lost';
+
+// Logs keep each kind of failure at its 1st, 2nd, 4th, 8th, ... occurrence since
+// the last session started. A peer without the secret reaches only kinds whose
+// message is fixed, so it cannot flood them by failing repeatedly or by
+// alternating between failures.
+export function shouldLogLinkFailure(failure: LinkFailure): boolean {
+  return Number.isInteger(Math.log2(failure.count));
+}
+
 interface Connection {
   readonly socket: NoiseWebSocket;
   readonly hello: Hello;
@@ -91,7 +110,8 @@ export class WebSocketLink {
   readonly #sessions = new Set<(session: SessionTransport) => void>();
   readonly #connections = new Set<Connection>();
   readonly #sockets = new Set<NoiseWebSocket>();
-  readonly #errors = new Set<(message: string) => void>();
+  readonly #errors = new Set<(failure: LinkFailure) => void>();
+  readonly #failures = new Map<LinkFailureKind, LinkFailure>();
   readonly #closures = new Set<(closure: LinkClosure) => void>();
   readonly #closureCounts = new Map<LinkClosureCause, number>();
   #current: SessionTransport | null = null;
@@ -120,7 +140,7 @@ export class WebSocketLink {
   get executorId(): string | null { return this.options.role === 'controller' ? this.options.executorId! : this.#current?.executorId ?? null; }
   get acceptsSocket(): boolean { return !this.#disposed && !this.#quiescing && this.#sockets.size < 4; }
 
-  onError(listener: (message: string) => void): () => void {
+  onError(listener: (failure: LinkFailure) => void): () => void {
     this.#errors.add(listener);
     return () => { this.#errors.delete(listener); };
   }
@@ -248,7 +268,7 @@ export class WebSocketLink {
           connection.closeCause ??= noiseClosureCause(error.code);
           connection.closeReason ??= `Encrypted connection failed (${error.code})`;
         }
-        this.#reportError(`Executor encrypted connection failed (${error.code})`);
+        this.#reportFailure(error.code, `Executor encrypted connection failed (${error.code})`);
       },
       onClose: (socket) => {
         this.#sockets.delete(socket);
@@ -267,7 +287,7 @@ export class WebSocketLink {
       socket, hello, peer: null, session: null, hooks: null, heartbeat: null,
       closed: false, authenticated: false, frames: null, lastReceivedAt: Date.now(), closeCause: null, closeReason: null, sessionStartedAt: null,
       timeout: setTimeout(() => {
-        this.#reportError('Executor authentication timed out');
+        this.#reportFailure('authentication-timeout', 'Executor authentication timed out');
         this.#close(connection, 'protocol-error');
       }, 5000),
     };
@@ -300,7 +320,7 @@ export class WebSocketLink {
       const frame: unknown = JSON.parse(encoded);
       if (isHello(frame) && !connection.peer) {
         if (frame.version !== LINK_VERSION) {
-          this.#reportError(`Executor version mismatch: local ${LINK_VERSION}, peer ${JSON.stringify(frame.version.slice(0, 80))}. Use matching builds.`);
+          this.#reportFailure('version-mismatch', `Executor version mismatch: local ${LINK_VERSION}, peer ${JSON.stringify(frame.version.slice(0, 80))}. Use matching builds.`);
           this.#close(connection, 'protocol-error');
           return;
         }
@@ -323,7 +343,8 @@ export class WebSocketLink {
       connection.closeCause ??= 'protocol-error';
       connection.closeReason ??= failureReason(error);
       if (error instanceof MessageContinuityError) connection.session?.close(error);
-      this.#reportError(connection.authenticated ? 'Executor connection lost' : 'Executor authentication failed');
+      if (connection.authenticated) this.#reportFailure('connection-lost', 'Executor connection lost');
+      else this.#reportFailure('authentication-failed', 'Executor authentication failed');
       this.#close(connection, 'protocol-error');
     }
   }
@@ -358,6 +379,7 @@ export class WebSocketLink {
     }
     if (connection.closed) { connection.hooks.disconnected(); return; }
     connection.sessionStartedAt = performance.now();
+    this.#failures.clear();
     this.#ready.resolve(session);
     connection.heartbeat = setInterval(() => {
       try {
@@ -379,8 +401,12 @@ export class WebSocketLink {
     return createHmac('sha256', this.options.secret).update(JSON.stringify(['garcon-executor', purpose, transcript])).digest('hex');
   }
 
-  #reportError(message: string): void {
-    if (!this.#disposed) for (const listener of this.#errors) listener(message);
+  #reportFailure(kind: LinkFailureKind, message: string): void {
+    if (this.#disposed) return;
+    const previous = this.#failures.get(kind);
+    const failure: LinkFailure = { message, count: previous?.message === message ? previous.count + 1 : 1 };
+    this.#failures.set(kind, failure);
+    for (const listener of this.#errors) listener(failure);
   }
 
   #close(connection: Connection, cause: LinkClosureCause, failure?: unknown): void {

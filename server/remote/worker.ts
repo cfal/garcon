@@ -6,7 +6,7 @@ import { RpcReplyJournal } from './transport/rpc-journal.js';
 import { serveExecutionRuntime } from './server/executor-rpc-server.js';
 import { ProducerRelay } from './server/producer-relay.js';
 import { ExecutionRuntime } from '../runtime/execution-runtime.js';
-import { WebSocketLink } from './transport/websocket-link.js';
+import { shouldLogLinkFailure, WebSocketLink } from './transport/websocket-link.js';
 import { TerminalRuntime } from '../runtime/terminals/runtime.js';
 import { startCliGateway } from './server/cli-gateway.js';
 import { cliGatewayRuntimeFile, executorDataDirectory } from '../../common/cli-runtime-paths.js';
@@ -88,13 +88,11 @@ async function serveExecutorWorker(options: ExecutorWorkerOptions, dataDir: stri
     terminals = new TerminalRuntime({ projectBasePath: options.projectBasePath, terminalRuntimeId: link.runtimeId });
     process.on('SIGTERM', onSignal);
     process.on('SIGINT', onSignal);
-    let lastError: string | null = null;
     link.onClosure((closure) => {
       console.warn(JSON.stringify({ type: 'executor-link-closed', ...closure }));
     });
-    link.onError((message) => {
-      if (message !== lastError) console.warn(JSON.stringify({ type: 'executor-unavailable', message }));
-      lastError = message;
+    link.onError((failure) => {
+      if (shouldLogLinkFailure(failure)) console.warn(JSON.stringify({ type: 'executor-unavailable', ...failure }));
     });
     link.onSession((transport) => {
       void serving?.dispose();
@@ -125,7 +123,6 @@ async function serveExecutorWorker(options: ExecutorWorkerOptions, dataDir: stri
       serving = serveExecutionRuntime(runtime, rpc, relay);
       transport.onAvailability((connected) => {
         if (!connected) return;
-        lastError = null;
         console.log(JSON.stringify({ type: 'executor-connected', executorId: transport.executorId, runtimeId: link.runtimeId }));
       });
     });

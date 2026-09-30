@@ -8,15 +8,13 @@ import {
 } from '../../../common/executors.js';
 import { IntegrationRegistry } from '../../runtime/agents/integration-registry.js';
 import { DomainError } from '../../common/domain-error.js';
-import { createLogger } from '../../common/log.js';
+import { createLogger, type Logger } from '../../common/log.js';
 import { ExecutorConfigStore, type RemoteExecutorConfig } from './config-store.js';
 import { ExecutionRuntime } from '../../runtime/execution-runtime.js';
 import { RemoteExecutorClient, type RemoteExecutorInventory } from '../../remote/client/executor-client.js';
-import { WebSocketLink } from '../../remote/transport/websocket-link.js';
+import { shouldLogLinkFailure, WebSocketLink } from '../../remote/transport/websocket-link.js';
 import { ExecutorReferenceWrites } from './reference-writes.js';
 import type { ControllerCliDispatcher } from './cli-dispatcher.js';
-
-const logger = createLogger('executors');
 
 type LocalExecutorOptions = ConstructorParameters<typeof ExecutionRuntime>[0];
 
@@ -57,16 +55,17 @@ export class ExecutorManager {
     readonly localInfo: ExecutorInfo,
     readonly config: ExecutorConfigStore,
     private readonly options: LocalExecutorOptions,
+    private readonly logger: Logger,
   ) {}
 
-  static async create(options: LocalExecutorOptions): Promise<ExecutorManager> {
+  static async create(options: LocalExecutorOptions, logger: Logger = createLogger('executors')): Promise<ExecutorManager> {
     const config = new ExecutorConfigStore(options.workspaceDir);
     await config.initialize();
     const local = new ExecutionRuntime({ ...options, id: LOCAL_EXECUTOR_ID });
     try {
       const info = await local.getInfo();
       const integrations = new IntegrationRegistry({ instances: await Promise.all(info.integrationIds.map((id) => local.getAgentIntegration(id))) });
-      const manager = new ExecutorManager(local, integrations, info, config, options);
+      const manager = new ExecutorManager(local, integrations, info, config, options, logger);
       await manager.#applyConfig();
       return manager;
     } catch (error) { await local.dispose(); throw error; }
@@ -254,16 +253,12 @@ export class ExecutorManager {
       const link = new WebSocketLink({ role: 'controller', executorId: config.id, secret: config.secret,
         allowInsecureDevelopment: config.allowInsecureDevelopment, allowUnverifiedTls: config.allowUnverifiedTls });
       entry.link = link;
-      // Logs each distinct link failure once until a session starts, as the worker does.
-      let lastLinkError: string | null = null;
-      link.onError((message) => {
-        if (message !== lastLinkError) logger.warn('Executor link failed', { executorId: config.id, message });
-        lastLinkError = message;
-        reportError(message);
+      link.onError((failure) => {
+        if (shouldLogLinkFailure(failure)) this.logger.warn('Executor link failed', { executorId: config.id, ...failure });
+        reportError(failure.message);
       });
-      link.onSession(() => { lastLinkError = null; });
       link.onClosure((closure) => {
-        logger.warn('Executor link closed', { executorId: config.id, ...closure });
+        this.logger.warn('Executor link closed', { executorId: config.id, ...closure });
       });
       entry.executor = new RemoteExecutorClient(config.id, link, (rpc) => rpc.handle(async (call, signal, guardReply) => {
         if (call.method === 'controllerCli.describe' || call.method === 'controllerCli.request') {
@@ -290,7 +285,7 @@ export class ExecutorManager {
           throw new AgentCallError('rejected', 'Operation is not permitted on the controller');
         }
         return this.options.resolveCredential({ executorId: config.id, agentId: call.integrationId, reference: call.request.reference, signal });
-      }), reportError, entry.inventory, { logger });
+      }), reportError, entry.inventory, { logger: this.logger });
       entry.executor.onAvailabilityChanged((value) => {
         if (!this.#current(entry)) return;
         if (value === 'ready') {

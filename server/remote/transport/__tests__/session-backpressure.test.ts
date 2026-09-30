@@ -7,7 +7,7 @@ test('failures after proof verification are not reported as authentication failu
   const controller = new WebSocketLink({ ...linkOptions, role: 'controller' });
   const worker = new WebSocketLink({ ...linkOptions, role: 'worker' });
   const reported = Promise.withResolvers<string>();
-  controller.onError(message => reported.resolve(message));
+  controller.onError(failure => reported.resolve(failure.message));
   controller.onSession(() => { throw new Error('Synthetic post-authentication failure'); });
   try {
     controller.dial(worker.listen());
