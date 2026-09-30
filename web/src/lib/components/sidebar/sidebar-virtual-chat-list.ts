@@ -3,10 +3,11 @@ import type { PersistedChatOrderGroup } from '$shared/chat-order-contracts';
 import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 
-export const DESKTOP_CHAT_ROW_HEIGHT = 88;
-export const MOBILE_CHAT_ROW_HEIGHT = 88;
-export const COMPACT_CHAT_ROW_HEIGHT = 70;
 export const SINGLE_LINE_CHAT_ROW_HEIGHT = 40;
+export const COMPACT_CHAT_ROW_HEIGHT = 62;
+export const DESKTOP_CHAT_ROW_HEIGHT = 76;
+export const MOBILE_CHAT_ROW_HEIGHT = DESKTOP_CHAT_ROW_HEIGHT;
+export const PROJECT_PATH_LINE_HEIGHT = 18;
 export const PROJECT_HEADER_ROW_HEIGHT = 32;
 export const DEFAULT_CHAT_ROW_OVERSCAN = 8;
 export const CHAT_ROW_SEPARATOR_SLOT_HEIGHT = 2;
@@ -63,7 +64,6 @@ export interface SidebarVirtualChatRow {
 	projectPath: string;
 	groupProjectKey: string;
 	groupProjectPath: string;
-	showProjectPathInGroup: boolean;
 	reorderScopeKey: string;
 	reorderScopeIds: string[];
 }
@@ -84,13 +84,21 @@ export interface SidebarRowModel {
 export function estimateSidebarVirtualRowSize(
 	row: SidebarVirtualRow | undefined,
 	chatItemLayout: ChatItemLayout,
+	showProjectPath = false,
 ): number {
 	if (row?.type === 'project-header' || row?.type === 'section-header') {
 		return PROJECT_HEADER_ROW_HEIGHT;
 	}
-	if (chatItemLayout === 'compact') return COMPACT_CHAT_ROW_HEIGHT;
-	if (chatItemLayout === 'single-line') return SINGLE_LINE_CHAT_ROW_HEIGHT;
-	return DESKTOP_CHAT_ROW_HEIGHT;
+	const pathHeight =
+		showProjectPath && row?.chat.projectPath?.trim() ? PROJECT_PATH_LINE_HEIGHT : 0;
+	switch (chatItemLayout) {
+		case 'single-line':
+			return SINGLE_LINE_CHAT_ROW_HEIGHT + pathHeight;
+		case 'compact':
+			return COMPACT_CHAT_ROW_HEIGHT + pathHeight;
+		case 'detailed':
+			return DESKTOP_CHAT_ROW_HEIGHT + pathHeight;
+	}
 }
 
 export function clamp(value: number, min: number, max: number): number {

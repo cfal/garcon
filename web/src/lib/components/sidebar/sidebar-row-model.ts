@@ -133,7 +133,6 @@ interface NormalizedProjectPath {
 
 interface ProjectGroupingContext {
 	groupForProjectPath(projectPath: string, executorId?: string | null): SidebarProjectGroup;
-	distinctProjectPathCount(projectKey: string): number;
 }
 
 function exactProjectGroup(projectPath: string, executorId?: string | null): SidebarProjectGroup {
@@ -141,23 +140,6 @@ function exactProjectGroup(projectPath: string, executorId?: string | null): Sid
 		executorId: effectiveExecutorId(executorId),
 		projectKey: sidebarProjectKey(projectPath, executorId),
 		projectPath,
-	};
-}
-
-function createExactProjectGroupingContext(chats: ChatSessionRecord[]): ProjectGroupingContext {
-	const distinctProjectPathsByKey = new Map<string, Set<string>>();
-	for (const chat of chats) {
-		const group = exactProjectGroup(chat.projectPath, chat.executorId);
-		const distinctPaths = distinctProjectPathsByKey.get(group.projectKey) ?? new Set<string>();
-		distinctPaths.add(chat.projectPath);
-		distinctProjectPathsByKey.set(group.projectKey, distinctPaths);
-	}
-
-	return {
-		groupForProjectPath: exactProjectGroup,
-		distinctProjectPathCount(projectKey) {
-			return distinctProjectPathsByKey.get(projectKey)?.size ?? 0;
-		},
 	};
 }
 
@@ -179,7 +161,6 @@ function createNestedProjectGroupingContext(chats: ChatSessionRecord[]): Project
 		(left, right) => left.normalizedPath.length - right.normalizedPath.length,
 	);
 	const groupPathByNormalizedPath = new Map<string, string>();
-	const distinctProjectPathsByGroupKey = new Map<string, Set<string>>();
 
 	for (const project of projects) {
 		const group =
@@ -191,22 +172,11 @@ function createNestedProjectGroupingContext(chats: ChatSessionRecord[]): Project
 		groupPathByNormalizedPath.set(sidebarProjectKey(project.normalizedPath, project.executorId), group.originalPath);
 	}
 
-	for (const project of projects) {
-		const groupPath = groupPathByNormalizedPath.get(sidebarProjectKey(project.normalizedPath, project.executorId)) ?? project.originalPath;
-		const groupKey = sidebarProjectKey(groupPath, project.executorId);
-		const distinctProjectPaths = distinctProjectPathsByGroupKey.get(groupKey) ?? new Set<string>();
-		distinctProjectPaths.add(project.normalizedPath);
-		distinctProjectPathsByGroupKey.set(groupKey, distinctProjectPaths);
-	}
-
 	return {
 		groupForProjectPath(projectPath, executorId) {
 			const normalizedPath = normalizeProjectPath(projectPath);
 			const groupPath = groupPathByNormalizedPath.get(sidebarProjectKey(normalizedPath, executorId)) ?? projectPath;
 			return exactProjectGroup(groupPath, executorId);
-		},
-		distinctProjectPathCount(projectKey) {
-			return distinctProjectPathsByGroupKey.get(projectKey)?.size ?? 0;
 		},
 	};
 }
@@ -217,7 +187,7 @@ function createProjectGroupingContext(
 ): ProjectGroupingContext {
 	return groupNestedProjectPaths
 		? createNestedProjectGroupingContext(chats)
-		: createExactProjectGroupingContext(chats);
+		: { groupForProjectPath: exactProjectGroup };
 }
 
 interface ProjectOrderEntry {
@@ -277,7 +247,6 @@ function createChatRow(
 	reorderScopeKey: string,
 	reorderScopeIds: string[],
 	group: SidebarProjectGroup = exactProjectGroup(chat.projectPath, chat.executorId),
-	showProjectPathInGroup = false,
 ): SidebarVirtualChatRow {
 	return {
 		type: 'chat',
@@ -289,7 +258,6 @@ function createChatRow(
 		projectPath: chat.projectPath,
 		groupProjectKey: group.projectKey,
 		groupProjectPath: group.projectPath,
-		showProjectPathInGroup,
 		reorderScopeKey,
 		reorderScopeIds,
 	};
@@ -491,8 +459,6 @@ function appendSidebarProjectGroups(input: {
 				const chat = input.byList[list].get(chatId);
 				if (!chat) continue;
 				const group = input.grouping.groupForProjectPath(chat.projectPath, chat.executorId);
-				const showProjectPathInGroup =
-					input.grouping.distinctProjectPathCount(group.projectKey) > 1;
 				projectRowsByKey
 					.get(project)
 					?.push(
@@ -502,7 +468,6 @@ function appendSidebarProjectGroups(input: {
 							sidebarProjectReorderScopeKey(list, project, input.section),
 							scopeIds,
 							group,
-							showProjectPathInGroup,
 						),
 					);
 			}
@@ -620,8 +585,6 @@ function appendSidebarChatSection(input: {
 					list,
 					`${list}:section:${input.section}`,
 					scopeIds,
-					exactProjectGroup(chat.projectPath, chat.executorId),
-					true,
 				),
 				input.visibleOrders,
 				input.visibleChatIds,

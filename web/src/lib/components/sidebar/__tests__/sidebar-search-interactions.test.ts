@@ -605,18 +605,19 @@ describe('sidebar search interactions', () => {
 		expect(screen.getByRole('menuitemcheckbox', { name: 'Combine nested paths' })).toBeTruthy();
 		expect(items[10]?.textContent).toContain('Combine nested paths');
 		expect(screen.getByRole('menuitemradio', { name: 'Detailed' })).toBeTruthy();
-		expect(items[11]?.textContent).toContain('Detailed');
+		expect(items[13]?.textContent).toContain('Detailed');
 		expect(screen.getByRole('menuitemradio', { name: 'Compact' })).toBeTruthy();
 		expect(items[12]?.textContent).toContain('Compact');
 		expect(screen.getByRole('menuitemradio', { name: 'Single-line' })).toBeTruthy();
-		expect(items[13]?.textContent).toContain('Single-line');
-		expect(items[14]?.textContent).toContain('Autohide sidebar');
-		expect(items[15]?.textContent).toContain('Dock sidebar on the right');
-		expect(items[16]?.textContent).toContain('Scheduled prompts');
-		expect(items[17]?.textContent).toContain('Preambles');
-		expect(items[18]?.textContent).toContain('Snippets');
-		expect(items[19]?.textContent).toContain('Settings');
-		expect(items).toHaveLength(20);
+		expect(items[11]?.textContent).toContain('Single-line');
+		expect(items[14]?.textContent).toContain('Show project path');
+		expect(items[15]?.textContent).toContain('Autohide sidebar');
+		expect(items[16]?.textContent).toContain('Dock sidebar on the right');
+		expect(items[17]?.textContent).toContain('Scheduled prompts');
+		expect(items[18]?.textContent).toContain('Preambles');
+		expect(items[19]?.textContent).toContain('Snippets');
+		expect(items[20]?.textContent).toContain('Settings');
+		expect(items).toHaveLength(21);
 		expect(document.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(6);
 
 		await fireEvent.click(screen.getByRole('menuitem', { name: 'Scheduled prompts' }));
@@ -701,7 +702,7 @@ describe('sidebar search interactions', () => {
 		expect(items[8]?.textContent).toContain('Combine nested paths');
 		const detailedLayout = screen.getByRole('menuitemradio', { name: 'Detailed' });
 		expect(detailedLayout.getAttribute('aria-checked')).toBe('false');
-		expect(items[9]?.textContent).toContain('Detailed');
+		expect(items[11]?.textContent).toContain('Detailed');
 		const compactLayout = screen.getByRole('menuitemradio', { name: 'Compact' });
 		expect(compactLayout.getAttribute('aria-checked')).toBe('true');
 		expect(items[10]?.textContent).toContain('Compact');
@@ -709,22 +710,26 @@ describe('sidebar search interactions', () => {
 			name: 'Single-line',
 		});
 		expect(singleLineLayout.getAttribute('aria-checked')).toBe('false');
-		expect(items[11]?.textContent).toContain('Single-line');
+		expect(items[9]?.textContent).toContain('Single-line');
+		const showProjectPath = screen.getByRole('menuitemcheckbox', { name: 'Show project path' });
+		expect(showProjectPath.getAttribute('aria-checked')).toBe('false');
+		expect(showProjectPath.hasAttribute('data-disabled')).toBe(false);
+		expect(items[12]).toBe(showProjectPath);
 		const chatListAutohide = screen.getByRole('menuitemcheckbox', {
 			name: 'Autohide sidebar',
 		});
 		expect(chatListAutohide.getAttribute('aria-checked')).toBe('true');
-		expect(items[12]?.textContent).toContain('Autohide sidebar');
+		expect(items[13]?.textContent).toContain('Autohide sidebar');
 		const dockOnRight = screen.getByRole('menuitemcheckbox', {
 			name: 'Dock sidebar on the right',
 		});
 		expect(dockOnRight.getAttribute('aria-checked')).toBe('true');
-		expect(items[13]?.textContent).toContain('Dock sidebar on the right');
-		expect(items[14]?.textContent).toContain('Scheduled prompts');
-		expect(items[15]?.textContent).toContain('Preambles');
-		expect(items[16]?.textContent).toContain('Snippets');
-		expect(items[17]?.textContent).toContain('Settings');
-		expect(items).toHaveLength(18);
+		expect(items[14]?.textContent).toContain('Dock sidebar on the right');
+		expect(items[15]?.textContent).toContain('Scheduled prompts');
+		expect(items[16]?.textContent).toContain('Preambles');
+		expect(items[17]?.textContent).toContain('Snippets');
+		expect(items[18]?.textContent).toContain('Settings');
+		expect(items).toHaveLength(19);
 		expect(document.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(5);
 		expect(projectGrouping.querySelector('span')?.className ?? '').toContain('end-2');
 		expect(projectGrouping.className).toContain('pe-8');
@@ -759,6 +764,31 @@ describe('sidebar search interactions', () => {
 		expect(onSetChatGrouping).toHaveBeenLastCalledWith('status');
 		expect(onSetChatGrouping).toHaveBeenCalledTimes(3);
 	});
+
+	it.each(['none', 'project', 'project-and-activity', 'activity', 'status'] as const)(
+		'keeps the project-path toggle independent of %s grouping',
+		async (chatGrouping) => {
+			const onToggleShowProjectPath = vi.fn();
+			render(SidebarControlsRow, {
+				isLoading: false,
+				chatGrouping,
+				onToggleShowProjectPath,
+				onOpenSearchDialog: vi.fn(),
+				onCreateChat: vi.fn(),
+				onShowScheduledPrompts: vi.fn(),
+				onShowPreambles: vi.fn(),
+				onShowSnippets: vi.fn(),
+				onShowSettings: vi.fn(),
+			});
+
+			await fireEvent.click(screen.getAllByRole('button', { name: 'More actions' })[0]);
+			expect((await screen.findByRole('menuitemradio', { name: 'Single-line' })).getAttribute('aria-checked')).toBe('true');
+			const toggle = screen.getByRole('menuitemcheckbox', { name: 'Show project path' });
+			expect(toggle.getAttribute('data-disabled')).toBeNull();
+			await fireEvent.click(toggle);
+			expect(onToggleShowProjectPath).toHaveBeenCalledOnce();
+		},
+	);
 
 	it('invokes the sort mode handler when a sort order option is selected', async () => {
 		const onSetSortMode = vi.fn();

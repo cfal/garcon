@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { ComposerAvailabilityNoticePresentation } from '$lib/chat/composer/composer-availability.js';
 	import { onDestroy } from 'svelte';
 	import ChatEmptyState from '$lib/components/chat/ChatEmptyState.svelte';
 	import ChatLoadingState from '$lib/components/chat/ChatLoadingState.svelte';
@@ -41,7 +42,7 @@
 		labelFor,
 		panelActions,
 		composerInsetPx,
-		composerNoticeShown,
+		composerNotice,
 		subagentToolbar,
 		titlebarMetrics,
 		surfaceMenuItems,
@@ -60,7 +61,7 @@
 		labelFor: (surfaceId: string) => string;
 		panelActions: ConversationPanelActions | null;
 		composerInsetPx: number;
-		composerNoticeShown: boolean;
+		composerNotice: ComposerAvailabilityNoticePresentation | null;
 		subagentToolbar: SubagentToolbarState;
 		titlebarMetrics: WorkspaceWindowTitlebarMetrics;
 		surfaceMenuItems?: WorkspaceWindowSurfaceMenuItems;
@@ -332,7 +333,7 @@
 							isVisible={isVisible && chatIsActive}
 							actions={panelActions}
 							composerInsetPx={activeChatOwnsComposer ? composerInsetPx : 0}
-							composerNoticeShown={activeChatOwnsComposer && composerNoticeShown}
+							composerNotice={activeChatOwnsComposer ? composerNotice : null}
 						/>
 					{/key}
 				{:else if isVisible && chatIsActive && (activeChatPresentation === 'loading' || (activeChat && !activePanel))}
