@@ -68,6 +68,36 @@ test('a reply that cannot fit the queue becomes a small uncertain error without 
   } finally { release.resolve(); fixture.close(); }
 });
 
+test('tells a handler only about a reply the queue could not take', async () => {
+  const fixture = pair();
+  const entered = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const undelivered: string[] = [];
+  fixture.service.handle(async (_request, _signal, _guardReply, onUndeliveredReply) => {
+    onUndeliveredReply(() => { undelivered.push('blocked'); });
+    entered.resolve();
+    await release.promise;
+    return 'x'.repeat(2000);
+  });
+  try {
+    const result = fixture.client.call('test', 'commands.discover', { projectPath: '/repo' });
+    await entered.promise;
+    fixture.block();
+    fixture.worker.send(JSON.stringify({ type: 'result', id: 'unrelated', value: 'q'.repeat(7450) }));
+    release.resolve();
+    fixture.unblock();
+    await expect(result).rejects.toMatchObject({ outcome: 'unknown' });
+    expect(undelivered).toEqual(['blocked']);
+
+    fixture.service.handle(async (_request, _signal, _guardReply, onUndeliveredReply) => {
+      onUndeliveredReply(() => { undelivered.push('delivered'); });
+      return [];
+    });
+    await expect(fixture.client.call('test', 'commands.discover', { projectPath: '/repo' })).resolves.toEqual([]);
+    expect(undelivered).toEqual(['blocked']);
+  } finally { release.resolve(); fixture.close(); }
+});
+
 test('reply guards retain their call context across handler replacement and run before enqueue', async () => {
   const fixture = pair();
   const entered = Promise.withResolvers<void>();

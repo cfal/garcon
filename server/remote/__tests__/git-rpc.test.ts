@@ -4,6 +4,7 @@ import path from 'node:path';
 import { gitRpcFixture } from './git-rpc-fixture.js';
 import { runGit } from '../../runtime/git/run.js';
 import { RemoteGitServices } from '../client/remote-git.js';
+import type { RemoteSessions } from '../client/executor-client.js';
 import { GIT_MAX_RESULT_BYTES } from '../../../common/git-execution.js';
 
 for (const dialer of ['controller', 'worker'] as const) {
@@ -107,7 +108,8 @@ test('lost mutation confirmation never replays a completed commit', async () => 
     const git = await fixture.executor.getGitService();
     await fs.writeFile(path.join(fixture.projectPath, 'new.txt'), 'new\n');
     await git.stagePaths({ projectPath: fixture.projectPath, paths: ['new.txt'], mode: 'stage' });
-    await expect(git.commitIndex({ projectPath: fixture.projectPath, message: 'confirmed side effect' }))
+    // A disposed link never reconnects, so the lost reply is waited for until the deadline.
+    await expect(git.commitIndex({ projectPath: fixture.projectPath, message: 'confirmed side effect' }, { timeoutMs: 1_000 }))
       .rejects.toMatchObject({ code: 'GIT_MUTATION_OUTCOME_UNKNOWN' });
     expect(dispatched).toHaveBeenCalledTimes(1);
     expect((await runGit(fixture.projectPath, ['log', '-1', '--format=%s'])).stdout.trim()).toBe('confirmed side effect');
@@ -115,7 +117,8 @@ test('lost mutation confirmation never replays a completed commit', async () => 
 }, 30_000);
 
 test('invalid Git requests never acquire a remote session', async () => {
-  const services = new RemoteGitServices(() => { throw new Error('Unexpected session access'); });
+  const untouched = () => { throw new Error('Unexpected session access'); };
+  const services = new RemoteGitServices({ latest: untouched, acquire: untouched, call: untouched } satisfies RemoteSessions);
   await expect(services.git.stagePaths({ projectPath: '/repo', paths: ['x'.repeat(300_000)], mode: 'stage' }))
     .rejects.toMatchObject({ code: 'GIT_INVALID_INPUT' });
   await expect(services.gh.getPullRequest({ projectPath: '/repo', number: -1 }))
@@ -168,7 +171,8 @@ test('an invalid mutation reply is uncertain but a pre-dispatch disconnect is de
     await expect(git.createBranch({ projectPath: fixture.projectPath, branch: 'created' }))
       .rejects.toMatchObject({ code: 'GIT_MUTATION_OUTCOME_UNKNOWN' });
     await fixture.controller.dispose();
-    await expect(git.createBranch({ projectPath: fixture.projectPath, branch: 'not-created' }))
+    // A disposed link never reconnects, so the held mutation runs out its deadline undispatched.
+    await expect(git.createBranch({ projectPath: fixture.projectPath, branch: 'not-created' }, { timeoutMs: 500 }))
       .rejects.toMatchObject({ outcome: 'not-dispatched' });
     expect(dispatched).toHaveBeenCalledTimes(1);
     expect((await runGit(fixture.projectPath, ['branch', '--list', 'created'])).stdout).toContain('created');

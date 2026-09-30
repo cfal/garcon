@@ -26,7 +26,7 @@ describe('forkJsonlTranscript', () => {
       sourcePath,
       sourceAgentSessionId: 'source',
       cutoffLine: 1,
-      transformEntries(input) {
+      async transformEntries(input) {
         expect(input.selectedEntries).toEqual([{ type: 'message', value: 'selected' }]);
         expect(input.sourceEntries).toHaveLength(2);
         return {
@@ -85,7 +85,7 @@ describe('forkJsonlTranscript', () => {
       sourcePath,
       sourceAgentSessionId: 'source',
       cutoffLine: null,
-      transformEntries(input) {
+      async transformEntries(input) {
         writeFileSync(sourcePath, `${JSON.stringify({ type: 'message', value: 'after' })}\n`);
         return { entries: input.selectedEntries };
       },
@@ -107,7 +107,7 @@ describe('forkJsonlTranscript', () => {
       sourcePath,
       sourceAgentSessionId: 'source',
       cutoffLine: null,
-      transformEntries(input) {
+      async transformEntries(input) {
         appendFileSync(sourcePath, `${JSON.stringify({ type: 'message', value: 'appended' })}\n`);
         return { entries: input.selectedEntries };
       },
@@ -131,7 +131,7 @@ describe('forkJsonlTranscript', () => {
       sourceAgentSessionId: 'source',
       cutoffLine: null,
       allowUnmaterializedWholeSession: true,
-      transformEntries(input) {
+      async transformEntries(input) {
         expect(input.sourceEntries).toEqual([]);
         return { entries: input.selectedEntries };
       },
@@ -183,7 +183,7 @@ describe('forkJsonlTranscript', () => {
       sourceAgentSessionId: 'source',
       cutoffLine: null,
       allowUnmaterializedWholeSession: true,
-      transformEntries: () => ({ entries: [] }),
+      transformEntries: async () => ({ entries: [] }),
     });
 
     expect(result).toEqual({ kind: 'unmaterialized' });
@@ -466,7 +466,7 @@ describe('forkJsonlTranscript', () => {
     const selected = JSON.stringify({ type: 'message', value: 'selected' });
     const later = JSON.stringify({ type: 'metadata', value: 'later' });
     await writeFile(sourcePath, `${selected}\n${later}\n{"type":"partial"\n\n`);
-    const transform = (input: { selectedEntries: readonly unknown[]; sourceEntries: readonly unknown[] }) => {
+    const transform = async (input: { selectedEntries: readonly unknown[]; sourceEntries: readonly unknown[] }) => {
       expect(input.selectedEntries).toEqual([{ type: 'message', value: 'selected' }]);
       expect(input.sourceEntries).toEqual([
         { type: 'message', value: 'selected' },

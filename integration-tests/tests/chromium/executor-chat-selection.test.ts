@@ -50,16 +50,20 @@ test('chat host selectors fit narrow containers and commit cancellable handoffs 
       phase(`composer controls at ${width}px`);
       await page.setViewportSize({ width, height: 900 });
       await browserExpect(host()).toBeVisible();
-      expect(await controls().evaluate(element => {
+      // Crossing the mobile breakpoint switches the workspace presentation asynchronously.
+      await browserExpect.poll(() => controls().evaluate(element => {
         const outer = element.getBoundingClientRect();
         const buttons = [...element.querySelectorAll<HTMLButtonElement>('button')]
-          .filter(button => button.checkVisibility({ checkVisibilityCSS: true }));
+          .filter(button => button.checkVisibility({ checkVisibilityCSS: true })
+            && !button.closest('[aria-hidden="true"]'));
         const rectangles = buttons.map(button => button.getBoundingClientRect());
         return rectangles.every((rect, index) => rect.left >= outer.left && rect.right <= outer.right
           && rectangles.slice(index + 1).every(other => rect.right <= other.left || rect.left >= other.right
             || rect.bottom <= other.top || rect.top >= other.bottom));
       })).toBe(true);
-      if (width < 900) expect(await host().evaluate(element => element.getBoundingClientRect().width)).toBe(36);
+      if (width < 900) {
+        await browserExpect.poll(() => host().evaluate(element => element.getBoundingClientRect().width)).toBe(36);
+      }
       await host().click();
       await browserExpect(page.getByRole('menuitemradio', { name: label, exact: true })).toBeVisible();
       await page.keyboard.press('Escape');
@@ -128,7 +132,7 @@ test('chat host selectors fit narrow containers and commit cancellable handoffs 
     await page.keyboard.press('Escape');
     phase('one-shot host column');
     await page.getByRole('button', { name: 'More actions', exact: true }).click();
-    await page.getByRole('menuitem', { name: 'Server Settings', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Settings', exact: true }).click();
     await page.getByRole('tab', { name: 'Automation', exact: true }).click();
     const generation = page.getByRole('dialog').locator('button').filter({ has: page.locator('[data-slot="model-selector-trigger-secondary"]') }).first();
     await generation.click();

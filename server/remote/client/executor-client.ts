@@ -9,10 +9,12 @@ import {
   type ApiProviderDiscoveryRequest,
 } from '@garcon/server-agent-interface';
 import { RemoteAgentIntegration } from './remote-agent-integration.js';
-import { ExecutorRpc } from '../transport/rpc.js';
-import type { IntegrationManifest } from '../transport/rpc-protocol.js';
+import { DEFAULT_RPC_TIMEOUT_MS, ExecutorRpc, ParkedRpcCalls, type RpcCallOptions } from '../transport/rpc.js';
+import type { ExecutorRpcMethods, IntegrationManifest } from '../transport/rpc-protocol.js';
 import type { SessionTransport } from '../transport/session-transport.js';
 import type { WebSocketLink } from '../transport/websocket-link.js';
+import { failureReason } from '../transport/failure-reason.js';
+import { createLogger, type Logger } from '../../common/log.js';
 import { unavailableService } from '../../common/unavailable-service.js';
 import { MODEL_DISCOVERY_TIMEOUT_MS } from '../../common/provider-discovery.js';
 import { RemoteFilesService } from './remote-files.js';
@@ -30,15 +32,54 @@ export interface RemoteExecutorInventory {
   readonly integrations: readonly IntegrationManifest[];
 }
 
+// `timeoutMs` bounds both the wait and the call, as in `ExecutorRpc.call`:
+// omitted, it is that call's default; null waits without a deadline.
+export interface HeldCallOptions {
+  readonly signal?: AbortSignal;
+  readonly timeoutMs?: number | null;
+}
+
+export interface HeldSession {
+  readonly backing: RemoteSessionBacking;
+  // The caller's deadline left after waiting, for the call itself.
+  readonly timeoutMs: number | null;
+}
+
+// Hands out executor sessions. While the executor reconnects, a call waits for
+// the replacement session within its own deadline instead of failing at once,
+// as VS Code Remote holds requests while it reconnects.
+export interface RemoteSessions {
+  // The last installed session. A reconnect to the same worker keeps its
+  // identity, capabilities, and manifests.
+  latest(): RemoteSessionBacking;
+  acquire(options?: HeldCallOptions): Promise<HeldSession>;
+  call<K extends keyof ExecutorRpcMethods>(
+    integrationId: string, method: K, request: ExecutorRpcMethods[K]['request'],
+    options?: RpcCallOptions<ExecutorRpcMethods[K]['result']>,
+  ): Promise<ExecutorRpcMethods[K]['result']>;
+}
+
+interface SessionWaiter {
+  resolve(backing: RemoteSessionBacking): void;
+  reject(error: Error): void;
+}
+
 class ExecutorConfigurationError extends Error {}
 
 // Matches the worker relay's grace. Within it, a replacement session resumes
 // transcript bindings; after it, active runs fail as disconnected.
 const EXECUTOR_RECONNECT_GRACE_MS = 3 * 60 * 60 * 1000;
+// A held call keeps up to this much of its deadline for the call itself, so it is
+// not dispatched just before timing out with an unknown outcome.
+const HELD_CALL_BUDGET_MS = 1_000;
 
 export interface RemoteExecutorClientOptions {
   readonly reconnectGraceMs?: number;
+  readonly logger?: Logger;
 }
+
+// How far a session's setup got, logged when it fails.
+type SessionSetupStage = 'describe' | 'start-integrations' | 'resume-bindings' | 'activate';
 
 export class RemoteExecutorClient implements ExecutionRuntimeApi {
   readonly #integrations = new Map<string, RemoteAgentIntegration>();
@@ -46,18 +87,30 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
   readonly #unsubscribe: () => void;
   #availability: ExecutorAvailability = 'offline';
   #current: RemoteSessionBacking | null = null;
+  #latest: RemoteSessionBacking | null = null;
   #candidate: SessionTransport | null = null;
   #initialized = false;
   #instanceId: string | null = null;
   #reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  readonly #waiters = new Set<SessionWaiter>();
+  readonly #parked = new ParkedRpcCalls();
   readonly #reconnectGraceMs: number;
-  readonly #files = new RemoteFilesService(() => this.#backing());
-  readonly #git = new RemoteGitServices(() => this.#backing());
-  readonly #terminals = new RemoteTerminalService(() => this.#backing());
+  readonly #log: Logger;
+  readonly #sessions: RemoteSessions = {
+    latest: () => this.#latestSession(),
+    acquire: (options) => this.#acquire(options),
+    call: async (integrationId, method, request, options) => {
+      const { backing, timeoutMs } = await this.#acquire(options);
+      return backing.rpc.call(integrationId, method, request, { ...options, timeoutMs });
+    },
+  };
+  readonly #files = new RemoteFilesService(this.#sessions);
+  readonly #git = new RemoteGitServices(this.#sessions);
+  readonly #terminals = new RemoteTerminalService(this.#sessions);
   readonly #projects: ExecutionProjectService = {
-    ticketProjectDefault: async (request, options) => parseTicketProjectDefault(await this.#backing().rpc.call('', 'projects.ticketProjectDefault', request, options)),
-    inspect: async (request, options) => this.#backing().rpc.call('', 'projects.inspect', request, options),
-    resolveFileMentions: async (request, options) => this.#backing().rpc.call('', 'projects.resolveFileMentions', request, options),
+    ticketProjectDefault: async (request, options) => parseTicketProjectDefault(await this.#sessions.call('', 'projects.ticketProjectDefault', request, options)),
+    inspect: (request, options) => this.#sessions.call('', 'projects.inspect', request, options),
+    resolveFileMentions: (request, options) => this.#sessions.call('', 'projects.resolveFileMentions', request, options),
   };
 
   constructor(
@@ -69,9 +122,10 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
     options: RemoteExecutorClientOptions = {},
   ) {
     this.#reconnectGraceMs = options.reconnectGraceMs ?? EXECUTOR_RECONNECT_GRACE_MS;
+    this.#log = options.logger ?? createLogger('executors');
     this.#unsubscribe = link.onSession((transport) => {
       this.#candidate = transport;
-      const rpc = new ExecutorRpc(transport);
+      const rpc = new ExecutorRpc(transport, { parked: this.#parked });
       rpc.onTerminal((frame) => this.#terminals.receive(frame, rpc));
       setupRpc(rpc);
       transport.onFailure(() => {
@@ -82,8 +136,14 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
         // A candidate that fails while already reconnecting keeps the original deadline.
         if (this.#availability === 'ready') this.#beginReconnecting();
       });
-      void this.#install(transport, rpc).catch((error: unknown) => {
+      const setup = { stage: 'describe' as SessionSetupStage };
+      void this.#install(transport, rpc, setup).catch((error: unknown) => {
         if (this.#candidate === transport && this.#availability !== 'disposed') {
+          // A session that fails during setup rejects the pending call with a generic loss,
+          // so the session's own reason is the one worth reporting.
+          this.#log.warn('Executor session setup failed', {
+            executorId: this.id, stage: setup.stage, reason: failureReason(transport.channel.failure ?? error),
+          });
           this.reportError(error instanceof ExecutorConfigurationError ? error.message
             : 'Executor initialization failed; check worker configuration and matching builds');
         }
@@ -102,45 +162,45 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
 
   async getInfo(options?: ExecutorCallOptions): Promise<ExecutorInfo> {
     options?.signal?.throwIfAborted();
-    return this.#backing().info;
+    return this.#latestSession().info;
   }
 
   async getAgentIntegration(agentId: string, options?: ExecutorCallOptions) {
     options?.signal?.throwIfAborted();
-    this.#backing();
+    this.#latestSession();
     const integration = this.#integrations.get(agentId);
     if (!integration) throw new AgentCallError('not-dispatched', 'Integration is unavailable on this executor', 'OPERATION_UNSUPPORTED');
     return integration;
   }
 
   async discoverApiProviderModels(request: ApiProviderDiscoveryRequest, options?: ExecutorCallOptions) {
-    return this.#backing().rpc.call('', 'apiProviders.discoverModels', request, {
+    return this.#sessions.call('', 'apiProviders.discoverModels', request, {
       ...options, timeoutMs: options?.timeoutMs ?? MODEL_DISCOVERY_TIMEOUT_MS + 5_000,
     });
   }
   async getProjectService(options?: ExecutorCallOptions): Promise<ExecutionProjectService> {
     options?.signal?.throwIfAborted();
-    this.#backing();
+    this.#latestSession();
     return this.#projects;
   }
   async getFilesService(options?: ExecutorCallOptions) {
     options?.signal?.throwIfAborted();
-    if (!this.#backing().info.services.files) throw unavailableService('files');
+    if (!this.#latestSession().info.services.files) throw unavailableService('files');
     return this.#files;
   }
   async getGitService(options?: ExecutorCallOptions) {
     options?.signal?.throwIfAborted();
-    if (!this.#backing().info.services.git) throw unavailableService('git');
+    if (!this.#latestSession().info.services.git) throw unavailableService('git');
     return this.#git.git;
   }
   async getGhService(options?: ExecutorCallOptions) {
     options?.signal?.throwIfAborted();
-    if (!this.#backing().info.services.gh) throw unavailableService('gh');
+    if (!this.#latestSession().info.services.gh) throw unavailableService('gh');
     return this.#git.gh;
   }
   async getTerminalService(options?: ExecutorCallOptions) {
     options?.signal?.throwIfAborted();
-    if (!this.#backing().info.services.terminals) throw unavailableService('terminals');
+    if (!this.#latestSession().info.services.terminals) throw unavailableService('terminals');
     return this.#terminals;
   }
 
@@ -156,12 +216,13 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
     this.#unsubscribe();
     this.#terminals.disconnect();
     this.#current = null;
+    this.#parked.close();
     for (const integration of this.#integrations.values()) integration.retire();
     await this.link.dispose();
     this.#listeners.clear();
   }
 
-  async #install(transport: SessionTransport, rpc: ExecutorRpc): Promise<void> {
+  async #install(transport: SessionTransport, rpc: ExecutorRpc, setup: { stage: SessionSetupStage }): Promise<void> {
     await transport.ready;
     const { info, integrations } = await rpc.call('', 'executor.describe', null);
     if (info.executorId !== this.id || transport.executorId !== this.id) throw new ExecutorConfigurationError(`Executor identity mismatch: worker serves ${info.executorId}; restart the worker to serve ${this.id}`);
@@ -192,7 +253,7 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
       this.#abandonBindings();
     }
     const candidates = initial ? new Map([...manifests.values()].map((manifest) => [
-      manifest.descriptor.id, new RemoteAgentIntegration(manifest, () => this.#backing()),
+      manifest.descriptor.id, new RemoteAgentIntegration(manifest, this.#sessions, this.#log),
     ])) : this.#integrations;
     if (!initial) {
       if (this.#integrations.size !== manifests.size) throw new ExecutorConfigurationError('Executor provider inventory changed; restart the controller to accept it');
@@ -202,6 +263,7 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
         if (!isDeepStrictEqual(previous, replacement)) throw new ExecutorConfigurationError('Executor provider capabilities changed; restart the controller to accept them');
       }
     }
+    setup.stage = 'start-integrations';
     for (const integration of candidates.values()) await integration.initializeReplacement(backing, initial);
     if (this.#candidateRetired(transport)) throw new Error('Executor candidate session retired');
     if (initial) {
@@ -213,12 +275,20 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
       if (!integration) throw new Error('Unknown producer integration');
       integration.receive(notification, seq, backing);
     });
+    setup.stage = 'resume-bindings';
+    // Sent ahead of producer resumption, whose replay can fill the session queue.
+    const reconciling = rpc.reconcileParked();
+    reconciling.catch(() => undefined);
     for (const integration of this.#integrations.values()) await integration.resume(backing);
+    await reconciling;
     if (this.#candidateRetired(transport)) throw new Error('Executor candidate session retired');
+    setup.stage = 'activate';
     this.#instanceId = info.instanceId;
     this.#clearReconnectTimer();
     this.#current = backing;
+    this.#latest = backing;
     this.#setAvailability('ready');
+    for (const waiter of [...this.#waiters]) waiter.resolve(backing);
   }
 
   #candidateRetired(transport: SessionTransport): boolean {
@@ -238,6 +308,7 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
   #abandonBindings(): void {
     this.#clearReconnectTimer();
     for (const integration of this.#integrations.values()) integration.retire();
+    this.#parked.rejectAll();
     this.#setAvailability('offline');
   }
 
@@ -246,16 +317,62 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
     this.#reconnectTimer = null;
   }
 
-  #backing(): RemoteSessionBacking {
-    if (!this.#current || !this.#current.rpc.transport.connected) {
-      throw new AgentCallError('not-dispatched', `Executor is ${this.#availability}`);
-    }
-    return this.#current;
+  #latestSession(): RemoteSessionBacking {
+    if (!this.#latest || !this.#holdsCalls()) throw new AgentCallError('not-dispatched', `Executor is ${this.#availability}`);
+    return this.#latest;
+  }
+
+  // A session that has just failed may still read as ready until its failure
+  // listener marks the executor reconnecting.
+  #holdsCalls(): boolean {
+    return this.#availability === 'ready' || this.#availability === 'reconnecting';
+  }
+
+  async #acquire(options: HeldCallOptions = {}): Promise<HeldSession> {
+    const timeoutMs = options.timeoutMs === undefined ? DEFAULT_RPC_TIMEOUT_MS : options.timeoutMs;
+    if (this.#current?.rpc.transport.connected) return { backing: this.#current, timeoutMs };
+    if (!this.#latest || !this.#holdsCalls()) throw new AgentCallError('not-dispatched', `Executor is ${this.#availability}`);
+    if (options.signal?.aborted) throw heldCallCancelled();
+    if (timeoutMs === null) return { backing: await this.#nextSession(options.signal, null), timeoutMs };
+    const reserved = Math.min(HELD_CALL_BUDGET_MS, Math.floor(timeoutMs / 2));
+    const started = performance.now();
+    const backing = await this.#nextSession(options.signal, timeoutMs - reserved);
+    return { backing, timeoutMs: Math.max(reserved, Math.ceil(timeoutMs - (performance.now() - started))) };
+  }
+
+  #nextSession(signal: AbortSignal | undefined, timeoutMs: number | null): Promise<RemoteSessionBacking> {
+    const next = Promise.withResolvers<RemoteSessionBacking>();
+    const finish = () => {
+      this.#waiters.delete(waiter);
+      if (timer) clearTimeout(timer);
+      signal?.removeEventListener('abort', cancel);
+    };
+    const waiter: SessionWaiter = {
+      resolve: (backing) => { finish(); next.resolve(backing); },
+      reject: (error) => { finish(); next.reject(error); },
+    };
+    const cancel = () => waiter.reject(heldCallCancelled());
+    const timer = timeoutMs === null ? null : setTimeout(() => waiter.reject(reconnectTimedOut()), timeoutMs);
+    timer?.unref?.();
+    signal?.addEventListener('abort', cancel, { once: true });
+    this.#waiters.add(waiter);
+    return next.promise;
   }
 
   #setAvailability(value: ExecutorAvailability): void {
     if (this.#availability === value) return;
     this.#availability = value;
+    if (value === 'offline' || value === 'disposed') {
+      for (const waiter of [...this.#waiters]) waiter.reject(new AgentCallError('not-dispatched', `Executor is ${value}`));
+    }
     for (const listener of this.#listeners) listener(value);
   }
+}
+
+function heldCallCancelled(): AgentCallError {
+  return new AgentCallError('not-dispatched', 'The request was cancelled while the executor reconnected.');
+}
+
+function reconnectTimedOut(): AgentCallError {
+  return new AgentCallError('not-dispatched', 'The executor did not reconnect in time.');
 }

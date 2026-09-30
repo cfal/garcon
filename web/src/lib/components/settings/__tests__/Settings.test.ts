@@ -45,7 +45,7 @@ const SettingsTestHost = (await import('./SettingsTestHost.svelte')).default;
 describe('Settings', () => {
 	it('reports recovery cleanup failures and allows retry without concurrent cleanup', async () => {
 		const appShell = createAppShellStore();
-		appShell.openAppSettings();
+		appShell.openSettings('interface');
 		const pending = Promise.withResolvers<boolean>();
 		const onClearRecovery = vi.fn().mockReturnValueOnce(pending.promise).mockResolvedValue(true);
 		const report = vi.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -82,7 +82,7 @@ describe('Settings', () => {
 		vi.mocked(providersApi.getAgentAuthLoginStatus).mockResolvedValue({ state: 'idle', running: false });
 	});
 
-	it('separates server and app settings while preserving their controls', async () => {
+	it('combines app and server settings while preserving their controls', async () => {
 		vi.useFakeTimers({ shouldAdvanceTime: true });
 		const appShell = createAppShellStore();
 		appShell.openSettings('general');
@@ -102,9 +102,11 @@ describe('Settings', () => {
 			await waitFor(() => {
 				expect(refreshSpy).toHaveBeenCalled();
 			});
-			expect(screen.getByRole('dialog', { name: 'Server Settings' })).toBeTruthy();
+			expect(screen.getByRole('dialog', { name: 'Settings' })).toBeTruthy();
 			expect(screen.getByRole('tablist').getAttribute('aria-orientation')).toBe('vertical');
 			expect(screen.getAllByRole('tab').map((tab) => tab.getAttribute('aria-label'))).toEqual([
+				'Interface',
+				'Shortcuts',
 				'Providers',
 				'Other Agents',
 				'General',
@@ -115,7 +117,6 @@ describe('Settings', () => {
 			]);
 			expect(screen.getByRole('tab', { name: 'Providers' })).toBeTruthy();
 			expect(screen.getByRole('tab', { name: 'Other Agents' })).toBeTruthy();
-			expect(screen.queryByRole('tab', { name: 'Shortcuts' })).toBeNull();
 			expect(screen.queryByText('GitHub CLI')).toBeNull();
 			expect(appShell.settingsTab).toBe('general');
 
@@ -189,11 +190,10 @@ describe('Settings', () => {
 			expect(screen.queryByRole('heading', { name: 'Local' })).toBeNull();
 			expect(screen.queryByRole('combobox')).toBeNull();
 
-			appShell.openAppSettings();
+			await fireEvent.click(screen.getByRole('tab', { name: 'Interface' }));
 			const titlebarSize = await screen.findByRole('slider', { name: 'Titlebar size adjustment' });
-			expect(screen.getByRole('dialog', { name: 'App Settings' })).toBeTruthy();
-			expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['General', 'Shortcuts']);
-			expect(appShell.appSettingsTab).toBe('general');
+			expect(appShell.settingsTab).toBe('interface');
+			expect(screen.getByText('These settings are stored in your browser.')).toBeTruthy();
 			expect((titlebarSize as HTMLInputElement).value).toBe('0');
 			await fireEvent.input(titlebarSize, { target: { value: '6' } });
 			expect(onLocalSet).toHaveBeenCalledWith('workspaceWindowTitlebarHeightDeltaPx', 6);
@@ -312,7 +312,7 @@ describe('Settings', () => {
 			expect(screen.queryByRole('switch', { name: 'Send by Shift+Enter' })).toBeNull();
 
 			await fireEvent.click(screen.getByRole('tab', { name: 'Shortcuts' }));
-			expect(appShell.appSettingsTab).toBe('shortcuts');
+			expect(appShell.settingsTab).toBe('shortcuts');
 			expect(screen.getByText('New chat')).toBeTruthy();
 			expect(screen.getByText('Delete selected chat')).toBeTruthy();
 			expect(screen.getByText('Scroll up half a page')).toBeTruthy();
@@ -331,10 +331,65 @@ describe('Settings', () => {
 			expect(screen.getByText('/s <short-name> [arguments]')).toBeTruthy();
 		} finally {
 			appShell.closeSettings();
-			appShell.closeAppSettings();
 			rendered.unmount();
 			await vi.runAllTimersAsync();
 			vi.useRealTimers();
+		}
+	});
+
+	it('refreshes server data once, only after a server tab opens', async () => {
+		const appShell = createAppShellStore();
+		appShell.openSettings('interface');
+		const remoteSettings = new RemoteSettingsStore();
+		const refreshSpy = vi.spyOn(remoteSettings, 'refreshInBackground').mockResolvedValue();
+		const executorStore = new ExecutorsStore(async () => []);
+		const executorRefreshSpy = vi.spyOn(executorStore, 'refresh').mockResolvedValue();
+		const rendered = render(SettingsTestHost, { appShell, remoteSettings, executorStore });
+
+		try {
+			await screen.findByRole('slider', { name: 'Titlebar size adjustment' });
+			await fireEvent.click(screen.getByRole('tab', { name: 'Shortcuts' }));
+			expect(refreshSpy).not.toHaveBeenCalled();
+			expect(executorRefreshSpy).not.toHaveBeenCalled();
+
+			await fireEvent.click(screen.getByRole('tab', { name: 'Providers' }));
+			await fireEvent.click(screen.getByRole('tab', { name: 'General' }));
+			await fireEvent.click(screen.getByRole('tab', { name: 'Interface' }));
+			await fireEvent.click(screen.getByRole('tab', { name: 'Automation' }));
+			expect(refreshSpy).toHaveBeenCalledOnce();
+			expect(executorRefreshSpy).toHaveBeenCalledOnce();
+		} finally {
+			appShell.closeSettings();
+			rendered.unmount();
+		}
+	});
+
+	it('describes each tab with its App or Server group', () => {
+		const appShell = createAppShellStore();
+		appShell.openSettings('interface');
+		const rendered = render(SettingsTestHost, {
+			appShell,
+			remoteSettings: new RemoteSettingsStore(),
+		});
+
+		try {
+			for (const name of ['Interface', 'Shortcuts']) {
+				expect(screen.getByRole('tab', { name, description: 'App' })).toBeTruthy();
+			}
+			for (const name of [
+				'Providers',
+				'Other Agents',
+				'General',
+				'Automation',
+				'Notifications',
+				'GitHub',
+				'Executors',
+			]) {
+				expect(screen.getByRole('tab', { name, description: 'Server' })).toBeTruthy();
+			}
+		} finally {
+			appShell.closeSettings();
+			rendered.unmount();
 		}
 	});
 
@@ -374,9 +429,9 @@ describe('Settings', () => {
 		}
 	});
 
-	it('opens the onboarding wizard from App Settings', async () => {
+	it('opens the onboarding wizard from the Interface tab', async () => {
 		const appShell = createAppShellStore();
-		appShell.openAppSettings();
+		appShell.openSettings('interface');
 		const rendered = render(SettingsTestHost, {
 			appShell,
 			remoteSettings: new RemoteSettingsStore(),
@@ -386,7 +441,7 @@ describe('Settings', () => {
 			await fireEvent.click(screen.getByRole('button', { name: 'Restart setup wizard' }));
 
 			expect(appShell.showOnboardingWizard).toBe(true);
-			expect(appShell.showAppSettings).toBe(false);
+			expect(appShell.showSettings).toBe(false);
 		} finally {
 			appShell.closeOnboardingWizard();
 			rendered.unmount();

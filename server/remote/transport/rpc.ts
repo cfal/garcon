@@ -3,12 +3,18 @@ import {
   type AgentIntegrationErrorCode, type AgentDeliveryOutcome, type ExecutorCallOptions,
 } from '@garcon/server-agent-interface';
 import type { JsonObject } from '@garcon/common/json';
-import type {
-  ExecutorRpcMethods, ExecutorRpcRequest, AgentProducerFrame, ProducerAckFrame, ProducerAcknowledgement,
+import {
+  rpcContinuity,
+  SESSION_INSTALLATION_METHODS,
+  type ExecutorRpcMethods, type ExecutorRpcRequest, type AgentProducerFrame, type ProducerAckFrame, type ProducerAcknowledgement,
+  type OutstandingCall, type OutstandingCallState, type ReplyAckFrame, type RpcContinuity,
 } from './rpc-protocol.js';
 import type { SessionTransport } from './session-transport.js';
+import type { JournaledCall, RpcJournalOwner, RpcReplyJournal } from './rpc-journal.js';
 import { DomainError } from '../../common/domain-error.js';
+import { ExecutorSessionLostError } from '../../common/executor-disconnect.js';
 import { createLogger } from '../../common/log.js';
+import { MALFORMED_DATA } from './failure-reason.js';
 import { isErrorCode, type ErrorCode } from '../../../common/error-codes.js';
 import { TerminalError } from '../../../common/terminal-error.js';
 import { GitServiceError, isGitServiceErrorCode, type GitServiceErrorCode } from '../../../common/git-error.js';
@@ -25,10 +31,12 @@ interface Failure {
   readonly outcome?: AgentDeliveryOutcome;
 }
 
-type RpcFrame = ExecutorRpcRequest | AgentProducerFrame | ProducerAckFrame | TerminalNotification
-  | { readonly type: 'terminal-detach'; readonly request: ExecutorRpcMethods['terminals.detach']['request'] }
+type ReplyFrame =
   | { readonly type: 'result'; readonly id: string; readonly value: unknown }
-  | { readonly type: 'error'; readonly id: string; readonly error: Failure }
+  | { readonly type: 'error'; readonly id: string; readonly error: Failure };
+
+type RpcFrame = ExecutorRpcRequest | AgentProducerFrame | ProducerAckFrame | ReplyAckFrame | TerminalNotification | ReplyFrame
+  | { readonly type: 'terminal-detach'; readonly request: ExecutorRpcMethods['terminals.detach']['request'] }
   | { readonly type: 'cancel'; readonly id: string };
 
 export interface RpcCallOptions<Result = unknown> extends Omit<ExecutorCallOptions, 'timeoutMs'> {
@@ -38,14 +46,100 @@ export interface RpcCallOptions<Result = unknown> extends Omit<ExecutorCallOptio
 
 const log = createLogger('executor-rpc');
 
+export const DEFAULT_RPC_TIMEOUT_MS = 120_000;
+const RPC_BUDGET = 256;
+const REPLY_ACK_DELAY_MS = 250;
+const REPLY_ACK_BATCH = 1024;
+
 type RpcReplyGuard = (bytes: number) => void;
 export type GuardRpcReply = (guard: RpcReplyGuard) => void;
-type RpcHandler = (request: ExecutorRpcRequest, signal: AbortSignal, guardReply: GuardRpcReply) => Promise<unknown>;
+// Registers a listener for a reply the session could not take, which the caller
+// then receives as an unknown outcome on a live session.
+export type ObserveUndeliveredReply = (listener: () => void) => void;
+type RpcHandler = (
+  request: ExecutorRpcRequest,
+  signal: AbortSignal,
+  guardReply: GuardRpcReply,
+  onUndeliveredReply: ObserveUndeliveredReply,
+) => Promise<unknown>;
+
+interface OutgoingCall {
+  readonly id: string;
+  readonly integrationId: string;
+  readonly method: keyof ExecutorRpcMethods;
+  readonly request: unknown;
+  readonly journaled: boolean;
+  // Where the call was last sent, which a reconcile names.
+  session: string;
+  seq: number;
+  // The session holding the call; null while it is parked.
+  rpc: ExecutorRpc | null;
+  readonly resolve: (value: unknown) => void;
+  readonly reject: (error: Error) => void;
+  cleanup: () => void;
+}
+
+interface IncomingCall {
+  readonly controller: AbortController;
+  readonly continuity: RpcContinuity;
+}
+
+// Journaled calls whose session was lost, which a controller keeps until a
+// replacement session of the same worker reconciles them. Their deadlines and
+// signals keep running meanwhile.
+export class ParkedRpcCalls {
+  readonly #calls = new Map<string, OutgoingCall>();
+  #closed = false;
+
+  get size(): number { return this.#calls.size; }
+
+  park(call: OutgoingCall): void {
+    call.rpc = null;
+    this.#calls.set(call.id, call);
+    if (this.#closed) this.rejectAll();
+  }
+
+  release(call: OutgoingCall): boolean { return this.#calls.delete(call.id); }
+
+  take(): OutgoingCall[] {
+    const calls = [...this.#calls.values()];
+    this.#calls.clear();
+    return calls;
+  }
+
+  // For a disposed client, whose sessions end after it stops waiting for them.
+  close(): void {
+    this.#closed = true;
+    this.rejectAll();
+  }
+
+  // No replacement session of the same worker will ask for these replies.
+  rejectAll(): void {
+    for (const call of this.take()) {
+      call.cleanup();
+      call.reject(new AgentCallError('unknown', 'The connection to the executor dropped before it replied.'));
+    }
+  }
+}
+
+export interface ExecutorRpcContinuity {
+  // A controller parks journaled calls when their session is lost.
+  readonly parked?: ParkedRpcCalls;
+  // A worker runs journaled calls beyond their session and keeps their replies.
+  readonly journal?: RpcReplyJournal;
+}
 
 export class ExecutorRpc {
-  readonly #pending = new Map<string, { resolve(value: unknown): void; reject(error: Error): void; cleanup(): void }>();
+  readonly #pending = new Map<string, OutgoingCall>();
   readonly #lateResults = new Map<string, (value: unknown) => void | Promise<unknown>>();
-  readonly #incoming = new Map<string, AbortController>();
+  readonly #incoming = new Map<string, IncomingCall>();
+  readonly #parked: ParkedRpcCalls | null;
+  readonly #journal: RpcReplyJournal | null;
+  readonly #journalOwner: RpcJournalOwner;
+  #sent = 0;
+  #received = 0;
+  #replyAcks: string[] = [];
+  #replyAckTimer: ReturnType<typeof setTimeout> | null = null;
   #handler: RpcHandler | null = null;
   #producer: ((frame: AgentProducerFrame) => void) | null = null;
   #producerAck: ((acknowledgements: readonly ProducerAcknowledgement[]) => void) | null = null;
@@ -54,7 +148,16 @@ export class ExecutorRpc {
   #retired = false;
   readonly #unsubscribe: () => void;
 
-  constructor(readonly transport: SessionTransport) {
+  constructor(readonly transport: SessionTransport, continuity: ExecutorRpcContinuity = {}) {
+    this.#parked = continuity.parked ?? null;
+    this.#journal = continuity.journal ?? null;
+    this.#journalOwner = {
+      session: transport.id,
+      offer: (payload) => {
+        if (this.#retired || !this.transport.channel.canAdmit(payload)) return false;
+        try { this.transport.send(payload); return true; } catch { return false; }
+      },
+    };
     this.#unsubscribe = transport.onMessage((payload) => this.#receive(payload));
     transport.onFailure(() => this.retireUnknown());
   }
@@ -68,14 +171,25 @@ export class ExecutorRpc {
     this.#producerAck = null;
     this.#terminal = null;
     this.#terminalDetach = null;
+    if (this.#replyAckTimer) clearTimeout(this.#replyAckTimer);
+    this.#replyAckTimer = null;
+    this.#replyAcks = [];
     for (const call of this.#pending.values()) {
+      if (call.journaled && this.#parked) {
+        this.#parked.park(call);
+        continue;
+      }
       call.cleanup();
-      call.reject(new AgentCallError('unknown', 'The connection to the executor dropped before it replied.'));
+      call.reject(new ExecutorSessionLostError('unknown', 'The connection to the executor dropped before it replied.'));
     }
     this.#pending.clear();
     this.#lateResults.clear();
-    for (const controller of this.#incoming.values()) controller.abort();
+    // A launch outlives its session; the producer relay reports its outcome.
+    for (const { controller, continuity } of this.#incoming.values()) {
+      if (continuity === 'session') controller.abort();
+    }
     this.#incoming.clear();
+    this.#journal?.ownerLost(this.#journalOwner);
   }
 
   handle(handler: RpcHandler): void { this.#handler = handler; }
@@ -111,47 +225,117 @@ export class ExecutorRpc {
   async call<K extends keyof ExecutorRpcMethods>(
     integrationId: string, method: K, request: ExecutorRpcMethods[K]['request'], options?: RpcCallOptions<ExecutorRpcMethods[K]['result']>,
   ): Promise<ExecutorRpcMethods[K]['result']> {
-    const timeoutMs = options?.timeoutMs === undefined ? 120_000 : options.timeoutMs;
+    const timeoutMs = options?.timeoutMs === undefined ? DEFAULT_RPC_TIMEOUT_MS : options.timeoutMs;
     if (timeoutMs !== null && (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 2 ** 31 - 1)) {
       throw new AgentCallError('not-dispatched', 'Invalid executor deadline');
     }
-    if (this.#retired || options?.signal?.aborted || !this.transport.connected) throw new AgentCallError('not-dispatched', 'Executor is unavailable');
-    if (this.#pending.size + this.#lateResults.size >= 256) {
+    if (options?.signal?.aborted) throw new AgentCallError('not-dispatched', 'Executor is unavailable');
+    if (this.#retired || !this.transport.connected) throw new ExecutorSessionLostError('not-dispatched', 'Executor is unavailable');
+    if (!SESSION_INSTALLATION_METHODS.has(method) && this.#pending.size + this.#lateResults.size >= RPC_BUDGET) {
       throw new AgentCallError('not-dispatched', 'The executor is handling too many requests. Try again shortly.');
     }
-    const id = crypto.randomUUID();
-    const payload = JSON.stringify({ type: 'request', id, integrationId, method, request });
+    const result = Promise.withResolvers<unknown>();
+    const call: OutgoingCall = {
+      id: crypto.randomUUID(), integrationId, method, request,
+      journaled: this.#parked !== null && rpcContinuity(method) === 'journaled',
+      session: this.transport.id, seq: 0, rpc: this,
+      resolve: result.resolve, reject: result.reject, cleanup: () => {},
+    };
+    const parked = this.#parked;
+    const cancel = (message: string) => {
+      const holder = call.rpc;
+      if (holder ? holder.#pending.get(call.id) !== call : !parked?.release(call)) return;
+      if (holder) holder.#pending.delete(call.id);
+      // Resource-producing calls retain their budget until settlement or session loss.
+      const onLateResult = options?.onLateResult;
+      if (holder && onLateResult) holder.#lateResults.set(call.id, (value) => onLateResult(value as ExecutorRpcMethods[K]['result']));
+      call.cleanup();
+      call.reject(new AgentCallError('unknown', message));
+      // A parked call's worker learns of it at the next reconcile, which does not name it.
+      if (holder && !holder.#retired) {
+        try { holder.transport.send(JSON.stringify({ type: 'cancel', id: call.id } satisfies RpcFrame)); } catch { /* Continuity failure already fences the call. */ }
+      }
+    };
+    const timer = timeoutMs === null ? null : setTimeout(() => cancel('The executor did not reply in time.'), timeoutMs);
+    timer?.unref();
+    const abort = () => cancel('The request was cancelled after it was sent to the executor.');
+    options?.signal?.addEventListener('abort', abort, { once: true });
+    call.cleanup = () => { if (timer) clearTimeout(timer); options?.signal?.removeEventListener('abort', abort); };
+    try {
+      this.#dispatch(call);
+    } catch (error) {
+      call.cleanup();
+      throw error;
+    }
+    return await result.promise as ExecutorRpcMethods[K]['result'];
+  }
+
+  // Settles the journaled calls lost sessions left outstanding, on a
+  // replacement session of the same worker. The worker may send an adopted
+  // call's reply right after answering, so every call is adopted before this
+  // yields.
+  async reconcileParked(): Promise<void> {
+    const parked = this.#parked;
+    if (!parked) return;
+    const calls = parked.take();
+    const reconciling = this.call('', 'calls.reconcile', {
+      calls: calls.map(({ id, session, seq }): OutstandingCall => ({ id, session, seq })),
+    });
+    for (const call of calls) {
+      if (this.#retired) parked.park(call);
+      else {
+        call.rpc = this;
+        this.#pending.set(call.id, call);
+      }
+    }
+    const states = reconciledStates((await reconciling).states);
+    for (const call of calls) {
+      if (this.#pending.get(call.id) !== call) continue;
+      const state = states.get(call.id);
+      if (state === 'pending') continue;
+      if (state === 'not-received') {
+        try { this.#dispatch(call); }
+        catch (error) {
+          if (this.#pending.get(call.id) !== call) continue;
+          this.#pending.delete(call.id);
+          call.cleanup();
+          call.reject(error instanceof Error ? error : new Error(String(error)));
+        }
+        continue;
+      }
+      this.#pending.delete(call.id);
+      call.cleanup();
+      call.reject(new ExecutorSessionLostError('unknown', 'The executor no longer holds the reply to this request.'));
+    }
+  }
+
+  // Sends a call on this session: its first dispatch, or again once the worker
+  // reports that a lost session never delivered it.
+  #dispatch(call: OutgoingCall): void {
+    const seq = this.#sent + 1;
+    const payload = JSON.stringify({
+      type: 'request', id: call.id, seq, integrationId: call.integrationId, method: call.method, request: call.request,
+    });
     if (!this.transport.channel.fitsFrame(payload)) {
       throw new AgentCallError('not-dispatched', 'The request is too large to send to the executor.');
     }
     if (!this.transport.channel.canAdmit(payload)) {
       throw new AgentCallError('not-dispatched', 'The connection to the executor is backed up. Try again shortly.');
     }
-    const result = Promise.withResolvers<unknown>();
-    const cancel = (message: string) => {
-      const pending = this.#pending.get(id);
-      if (!pending) return;
-      this.#pending.delete(id);
-      // Resource-producing calls retain their budget until settlement or session loss.
-      const onLateResult = options?.onLateResult;
-      if (onLateResult) this.#lateResults.set(id, (value) => onLateResult(value as ExecutorRpcMethods[K]['result']));
-      pending.cleanup();
-      pending.reject(new AgentCallError('unknown', message));
-      try { if (!this.#retired) this.transport.send(JSON.stringify({ type: 'cancel', id } satisfies RpcFrame)); } catch { /* Continuity failure already fences the call. */ }
-    };
-    const timer = timeoutMs === null ? null : setTimeout(() => cancel('The executor did not reply in time.'), timeoutMs);
-    timer?.unref();
-    const abort = () => cancel('The request was cancelled after it was sent to the executor.');
-    options?.signal?.addEventListener('abort', abort, { once: true });
-    const cleanup = () => { if (timer) clearTimeout(timer); options?.signal?.removeEventListener('abort', abort); };
-    this.#pending.set(id, { ...result, cleanup });
+    this.#sent = seq;
+    call.rpc = this;
+    call.session = this.transport.id;
+    call.seq = seq;
+    this.#pending.set(call.id, call);
     try {
       this.transport.send(payload);
     } catch {
-      cleanup(); this.#pending.delete(id);
-      result.reject(new AgentCallError('unknown', 'The connection to the executor dropped while the request was being sent.'));
+      // A failed send retires the session first, which settles or parks the call.
+      if (this.#pending.get(call.id) !== call) return;
+      this.#pending.delete(call.id);
+      call.cleanup();
+      call.reject(new ExecutorSessionLostError('unknown', 'The connection to the executor dropped while the request was being sent.'));
     }
-    return await result.promise as ExecutorRpcMethods[K]['result'];
   }
 
   #receive(payload: string): void {
@@ -177,10 +361,15 @@ export class ExecutorRpc {
       this.#producerAck?.(frame.acknowledgements);
       return;
     }
+    if (frame.type === 'reply-ack') {
+      if (!Array.isArray(frame.ids) || frame.ids.some((id) => typeof id !== 'string')) throw new Error('Invalid reply acknowledgement');
+      this.#journal?.acknowledge(frame.ids);
+      return;
+    }
     if (!('id' in frame) || typeof frame.id !== 'string') throw new Error('RPC request ID is required');
     if (frame.type === 'result' || frame.type === 'error') {
-      const pending = this.#pending.get(frame.id);
-      if (!pending) {
+      const call = this.#pending.get(frame.id);
+      if (!call) {
         const onLateResult = this.#lateResults.get(frame.id);
         this.#lateResults.delete(frame.id);
         if (frame.type === 'result' && onLateResult) {
@@ -191,51 +380,146 @@ export class ExecutorRpc {
         return;
       }
       const failure = frame.type === 'error' ? decodeFailure(frame.error) : null;
-      this.#pending.delete(frame.id); pending.cleanup();
-      if (frame.type === 'result') pending.resolve(frame.value);
-      else pending.reject(failure!);
+      this.#pending.delete(frame.id); call.cleanup();
+      // A worker keeps every journaled reply until it is acknowledged.
+      if (rpcContinuity(call.method) === 'journaled') this.#acknowledgeReply(frame.id);
+      if (frame.type === 'result') call.resolve(frame.value);
+      else call.reject(failure!);
       return;
     }
-    if (frame.type === 'cancel') { this.#incoming.get(frame.id)?.abort(); return; }
+    if (frame.type === 'cancel') {
+      const incoming = this.#incoming.get(frame.id);
+      if (incoming) incoming.controller.abort();
+      else this.#journal?.cancel(frame.id);
+      return;
+    }
     if (frame.type !== 'request' || typeof frame.integrationId !== 'string' || typeof frame.method !== 'string') {
       throw new Error('Invalid executor RPC request');
     }
-    if (this.#incoming.has(frame.id)) throw new Error('Duplicate RPC request ID');
-    if (this.#incoming.size >= 256) {
+    if (!Number.isSafeInteger(frame.seq) || frame.seq < 1) throw new Error('Invalid RPC request sequence');
+    // Tracking the highest sequence stays safe if another sender numbers the
+    // same session: a request received is never reported as not received.
+    this.#received = Math.max(this.#received, frame.seq);
+    this.#journal?.received(this.transport.id, this.#received);
+    if (this.#incoming.has(frame.id) || this.#journal?.has(frame.id)) throw new Error('Duplicate RPC request ID');
+    if (frame.method === 'calls.reconcile') {
+      this.#reconcile(frame);
+      return;
+    }
+    if (!SESSION_INSTALLATION_METHODS.has(frame.method) && this.#incoming.size + (this.#journal?.running ?? 0) >= RPC_BUDGET) {
       this.#reply({ type: 'error', id: frame.id, error: encodeFailure(new AgentCallError(
         'not-dispatched', 'The executor is handling too many requests. Try again shortly.',
       )) });
       return;
     }
+    const continuity = rpcContinuity(frame.method);
+    if (continuity === 'journaled' && this.#journal) {
+      this.#runJournaled(frame, this.#journal.begin(this.#journalOwner, frame.id), this.#journal);
+      return;
+    }
     const controller = new AbortController();
-    this.#incoming.set(frame.id, controller);
+    this.#incoming.set(frame.id, { controller, continuity });
     const handler = this.#handler;
     let replyGuard: RpcReplyGuard | undefined;
-    const current = () => !this.#retired && this.#incoming.get(frame.id) === controller;
+    let undelivered: (() => void) | undefined;
+    const current = () => !this.#retired && this.#incoming.get(frame.id)?.controller === controller;
     void Promise.resolve().then(() => {
       if (!current() || controller.signal.aborted) throw new AgentCallError('not-dispatched', 'RPC request cancelled before dispatch');
       if (!handler) throw new AgentCallError('not-dispatched', 'RPC receiver is not installed');
-      return handler(frame, controller.signal, (guard) => { replyGuard = guard; });
+      return handler(frame, controller.signal, (guard) => { replyGuard = guard; }, (listener) => { undelivered = listener; });
     }).then((value) => {
-      if (current()) this.#reply({ type: 'result', id: frame.id, value }, replyGuard);
+      if (current() && !this.#reply({ type: 'result', id: frame.id, value }, replyGuard)) undelivered?.();
     }, (error) => {
-      if (current()) this.#reply({ type: 'error', id: frame.id, error: encodeFailure(error) });
+      if (current() && !this.#reply({ type: 'error', id: frame.id, error: encodeFailure(error) })) undelivered?.();
     }).catch(() => undefined).finally(() => { if (current()) this.#incoming.delete(frame.id); });
   }
 
-  #reply(frame: Extract<RpcFrame, { type: 'result' | 'error' }>, guard?: RpcReplyGuard): void {
+  // Runs a journaled call to completion even if its session is lost; the
+  // journal delivers the reply to whichever session owns the call by then.
+  #runJournaled(frame: ExecutorRpcRequest, call: JournaledCall, journal: RpcReplyJournal): void {
+    const handler = this.#handler;
+    let replyGuard: RpcReplyGuard | undefined;
+    void Promise.resolve().then(() => {
+      if (call.signal.aborted) throw new AgentCallError('not-dispatched', 'RPC request cancelled before dispatch');
+      if (!handler) throw new AgentCallError('not-dispatched', 'RPC receiver is not installed');
+      // Only launches, which the journal does not carry, observe undelivered replies.
+      return handler(frame, call.signal, (guard) => { replyGuard = guard; }, () => {});
+    }).then(
+      (value) => this.#encodeReply({ type: 'result', id: frame.id, value }, replyGuard) ?? undeliverableReply(frame.id),
+      (error) => this.#encodeReply({ type: 'error', id: frame.id, error: encodeFailure(error) }) ?? undeliverableReply(frame.id),
+    ).catch((error) => JSON.stringify({ type: 'error', id: frame.id, error: encodeFailure(error) } satisfies RpcFrame))
+      .then((reply) => journal.complete(call, reply, undeliverableReply(frame.id)));
+  }
+
+  #reconcile(frame: Extract<ExecutorRpcRequest, { readonly method: 'calls.reconcile' }>): void {
+    const calls: unknown = frame.request?.calls;
+    if (!Array.isArray(calls) || calls.some((call) => (
+      !call || typeof call.id !== 'string' || typeof call.session !== 'string' || !Number.isSafeInteger(call.seq) || call.seq < 1
+    ))) {
+      this.#reply({ type: 'error', id: frame.id, error: encodeFailure(new AgentCallError('rejected', 'Invalid call reconciliation request')) });
+      return;
+    }
+    const outstanding = calls as readonly OutstandingCall[];
+    // Without a journal, no reply outlives its session.
+    const states = this.#journal?.reconcile(this.#journalOwner, outstanding)
+      ?? outstanding.map(({ id }): OutstandingCallState => ({ id, state: 'unknown' }));
+    this.#reply({ type: 'result', id: frame.id, value: { states } });
+    this.#journal?.deliver();
+  }
+
+  #acknowledgeReply(id: string): void {
+    this.#replyAcks.push(id);
+    if (this.#replyAcks.length >= REPLY_ACK_BATCH) {
+      this.#flushReplyAcks();
+      return;
+    }
+    if (this.#replyAckTimer) return;
+    this.#replyAckTimer = setTimeout(() => this.#flushReplyAcks(), REPLY_ACK_DELAY_MS);
+    this.#replyAckTimer.unref?.();
+  }
+
+  #flushReplyAcks(): void {
+    if (this.#replyAckTimer) clearTimeout(this.#replyAckTimer);
+    this.#replyAckTimer = null;
+    const ids = this.#replyAcks;
+    this.#replyAcks = [];
+    if (this.#retired || !this.transport.connected || ids.length === 0) return;
+    try { this.transport.send(JSON.stringify({ type: 'reply-ack', ids } satisfies RpcFrame)); }
+    catch { /* The next reconcile releases replies whose calls have settled. */ }
+  }
+
+  // Returns null for a reply too large to send.
+  #encodeReply(frame: ReplyFrame, guard?: RpcReplyGuard): string | null {
     let payload = JSON.stringify(frame);
     if (guard) {
       try { guard(Buffer.byteLength(payload)); }
       catch (error) { payload = JSON.stringify({ type: 'error', id: frame.id, error: encodeFailure(error) } satisfies RpcFrame); }
     }
-    if (!this.transport.channel.fitsFrame(payload) || !this.transport.channel.canAdmit(payload)) {
-      payload = JSON.stringify({ type: 'error', id: frame.id, error: encodeFailure(
-        new AgentCallError('unknown', "The executor's reply could not be delivered, so the outcome is unknown."),
-      ) } satisfies RpcFrame);
-    }
-    this.transport.send(payload);
+    return this.transport.channel.fitsFrame(payload) ? payload : null;
   }
+
+  // Sends an unknown outcome in place of a reply that is too large or that the
+  // session cannot take, since its operation may already have run. Returns
+  // false when it did.
+  #reply(frame: ReplyFrame, guard?: RpcReplyGuard): boolean {
+    const payload = this.#encodeReply(frame, guard);
+    const deliverable = payload !== null && this.transport.channel.canAdmit(payload);
+    this.transport.send(deliverable ? payload : undeliverableReply(frame.id));
+    return deliverable;
+  }
+}
+
+function undeliverableReply(id: string): string {
+  return JSON.stringify({ type: 'error', id, error: encodeFailure(
+    new AgentCallError('unknown', "The executor's reply could not be delivered, so the outcome is unknown."),
+  ) } satisfies RpcFrame);
+}
+
+function reconciledStates(value: unknown): ReadonlyMap<string, OutstandingCallState['state']> {
+  if (!Array.isArray(value) || value.some((state) => (
+    !state || typeof state.id !== 'string' || !['pending', 'not-received', 'unknown'].includes(state.state)
+  ))) throw new Error('Invalid call reconciliation reply');
+  return new Map((value as readonly OutstandingCallState[]).map(({ id, state }) => [id, state]));
 }
 
 function encodeFailure(error: unknown): Failure {
@@ -247,7 +531,9 @@ function encodeFailure(error: unknown): Failure {
     ...(error.details ? { details: error.details } : {}),
     ...(error instanceof AgentCallError ? { outcome: error.outcome } : {}),
   };
-  return { code: 'PROVIDER_FAILURE', message: error instanceof Error ? error.message : 'Provider operation failed', retryable: false };
+  // A parse error's message can echo the payload it failed on, so it does not cross the link.
+  const message = error instanceof SyntaxError ? MALFORMED_DATA : error instanceof Error ? error.message : 'Provider operation failed';
+  return { code: 'PROVIDER_FAILURE', message, retryable: false };
 }
 
 function decodeFailure(error: Failure): Error {

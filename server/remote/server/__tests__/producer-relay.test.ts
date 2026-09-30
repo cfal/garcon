@@ -1,6 +1,7 @@
 import { describe, expect, mock, test } from 'bun:test';
 import type { AssistantMessage } from '@garcon/common/chat-types';
 import {
+  AgentCallError,
   AgentIntegrationError,
   createAgentResourceRef,
   type AgentIntegration,
@@ -15,6 +16,7 @@ const SCOPE: AgentResourceScope = { executorId: 'executor-1', instanceId: 'insta
 function integrationDouble() {
   const listeners = new Set<(notification: AgentProducerNotification) => void>();
   const detach = mock((_binding: unknown) => undefined);
+  const abort = mock(async (_handle: unknown) => true);
   const integration = {
     producers: {
       subscribe(listener: (notification: AgentProducerNotification) => void) {
@@ -23,12 +25,21 @@ function integrationDouble() {
       },
       detach,
     },
+    execution: { abort },
   } as unknown as AgentIntegration;
   const binding = () => createAgentResourceRef(SCOPE, 'producer');
   const publish = (notification: AgentProducerNotification) => {
     for (const listener of listeners) listener(notification);
   };
-  return { integration, binding, publish, detach, listeners };
+  return { integration, binding, publish, detach, abort, listeners };
+}
+
+// Native admission that ends only when its signal aborts.
+function pendingAdmission(signals: AbortSignal[]) {
+  return (signal: AbortSignal) => new Promise<never>((_, reject) => {
+    signals.push(signal);
+    signal.addEventListener('abort', () => reject(new Error('Synthetic cancelled admission')), { once: true });
+  });
 }
 
 function session(capacity = Infinity) {
@@ -47,6 +58,16 @@ function session(capacity = Infinity) {
     texts: () => frames().map(({ notification: { event } }) => (
       event.type === 'rows' ? (event.rows[0]!.message as AssistantMessage).content : event.type
     )),
+  };
+}
+
+// Collects a launch's undelivered-reply listeners, which run when the test says
+// the session could not take the reply.
+function undeliveredReplies() {
+  const listeners: (() => void)[] = [];
+  return {
+    observe: (listener: () => void) => { listeners.push(listener); },
+    fire: () => { for (const listener of listeners.splice(0)) listener(); },
   };
 }
 
@@ -69,7 +90,7 @@ describe('ProducerRelay', () => {
     const second = session();
 
     expect(relay.resume(second, integration, [{ binding: ref, acknowledgedSeq: 1 }]))
-      .toEqual([{ bindingId: ref.id, replayThroughSeq: 3, launch: null }]);
+      .toEqual([{ bindingId: ref.id, replayThroughSeq: 3, launch: null, receivedRunIds: [] }]);
     expect(first.frames().map((frame) => frame.seq)).toEqual([1, 2, 3]);
     expect(second.frames().map((frame) => frame.seq)).toEqual([3]);
     publish({ binding: ref, event: rows('four') });
@@ -200,7 +221,7 @@ describe('ProducerRelay', () => {
     const second = session();
 
     expect(relay.resume(second, integration, [{ binding: ref, acknowledgedSeq: 0 }]))
-      .toEqual([{ bindingId: ref.id, replayThroughSeq: 1, launch: null }]);
+      .toEqual([{ bindingId: ref.id, replayThroughSeq: 1, launch: null, receivedRunIds: [] }]);
     expect(second.frames().map((frame) => frame.seq)).toEqual([1]);
     relay.dispose();
   });
@@ -320,12 +341,12 @@ describe('ProducerRelay', () => {
     relay.bind(first, integration, ref);
     const handle = createAgentResourceRef(SCOPE, 'execution');
     const release = Promise.withResolvers<typeof handle>();
-    const launch = relay.launch(first, integration, { producerBinding: ref, runId: 'run-1' }, new AbortController().signal, () => release.promise);
+    const launch = relay.launch(first, integration, { producerBinding: ref, runId: 'run-1' }, new AbortController().signal, undeliveredReplies().observe, () => release.promise);
     relay.suspend(first);
     const second = session();
 
     expect(relay.resume(second, integration, [{ binding: ref, acknowledgedSeq: 0 }]))
-      .toEqual([{ bindingId: ref.id, replayThroughSeq: 0, launch: { runId: 'run-1', handle: null } }]);
+      .toEqual([{ bindingId: ref.id, replayThroughSeq: 0, launch: { runId: 'run-1', handle: null }, receivedRunIds: ['run-1'] }]);
     release.resolve(handle);
     await launch;
     relay.suspend(second);
@@ -335,6 +356,27 @@ describe('ProducerRelay', () => {
     publish({ binding: ref, event: { type: 'run-ended', runId: 'run-1', outcome: 'finished' } });
     relay.suspend(third);
     expect(relay.resume(session(), integration, [{ binding: ref, acknowledgedSeq: 2 }])[0]!.launch).toBeNull();
+    relay.dispose();
+  });
+
+  test('reports the runs of the latest launches it received', async () => {
+    const relay = new ProducerRelay();
+    const { integration, binding } = integrationDouble();
+    relay.track(integration);
+    const first = session();
+    const ref = binding();
+    relay.bind(first, integration, ref);
+    const handle = createAgentResourceRef(SCOPE, 'execution');
+    for (let run = 1; run <= 10; run += 1) {
+      await relay.launch(first, integration, { producerBinding: ref, runId: `run-${run}` }, new AbortController().signal, undeliveredReplies().observe, async () => handle);
+    }
+    await relay.launch(first, integration, { producerBinding: ref, runId: 'run-failed' }, new AbortController().signal, undeliveredReplies().observe, async () => {
+      throw new Error('Synthetic launch failure');
+    }).catch(() => null);
+    relay.suspend(first);
+
+    expect(relay.resume(session(), integration, [{ binding: ref, acknowledgedSeq: 0 }])[0]!.receivedRunIds)
+      .toEqual(['run-4', 'run-5', 'run-6', 'run-7', 'run-8', 'run-9', 'run-10', 'run-failed']);
     relay.dispose();
   });
 
@@ -349,14 +391,16 @@ describe('ProducerRelay', () => {
     const success = Promise.withResolvers<typeof handle>();
     const cancellation = Promise.withResolvers<typeof handle>();
     const failure = Promise.withResolvers<typeof handle>();
-    const retired = new AbortController();
+    const abandoned = new AbortController();
     const launches = [
-      relay.launch(first, integration, { producerBinding: started, runId: 'run-1' }, retired.signal, () => success.promise),
-      relay.launch(first, integration, { producerBinding: cancelled, runId: 'run-2' }, retired.signal, () => cancellation.promise).catch(() => null),
-      relay.launch(first, integration, { producerBinding: failed, runId: 'run-3' }, new AbortController().signal, () => failure.promise).catch(() => null),
+      relay.launch(first, integration, { producerBinding: started, runId: 'run-1' }, new AbortController().signal, undeliveredReplies().observe, () => success.promise),
+      relay.launch(first, integration, { producerBinding: cancelled, runId: 'run-2' }, abandoned.signal, undeliveredReplies().observe, () => cancellation.promise)
+        .catch(() => null),
+      relay.launch(first, integration, { producerBinding: failed, runId: 'run-3' }, new AbortController().signal, undeliveredReplies().observe, () => failure.promise)
+        .catch(() => null),
     ];
     relay.suspend(first);
-    retired.abort();
+    abandoned.abort();
     success.resolve(handle);
     cancellation.reject(new Error('Synthetic cancelled admission'));
     failure.reject(new AgentIntegrationError('AUTH_REQUIRED', 'Synthetic sign-in required', false));
@@ -376,6 +420,55 @@ describe('ProducerRelay', () => {
     relay.dispose();
   });
 
+  test('cancels a launch in admission that the controller abandons or a newer launch replaces', async () => {
+    const relay = new ProducerRelay();
+    const { integration, binding } = integrationDouble();
+    relay.track(integration);
+    const live = session();
+    const ref = binding();
+    relay.bind(live, integration, ref);
+    const signals: AbortSignal[] = [];
+    const abandoned = relay.launch(live, integration, { producerBinding: ref, runId: 'run-1' }, new AbortController().signal, undeliveredReplies().observe, pendingAdmission(signals))
+      .catch((error: unknown) => error);
+    relay.cancelLaunch(integration, ref, 'run-other');
+    expect(signals[0]!.aborted).toBe(false);
+    relay.cancelLaunch(integration, ref, 'run-1');
+    expect(signals[0]!.aborted).toBe(true);
+    expect(await abandoned).toBeInstanceOf(Error);
+
+    const replaced = relay.launch(live, integration, { producerBinding: ref, runId: 'run-2' }, new AbortController().signal, undeliveredReplies().observe, pendingAdmission(signals))
+      .catch((error: unknown) => error);
+    const handle = createAgentResourceRef(SCOPE, 'execution');
+    const newest = relay.launch(live, integration, { producerBinding: ref, runId: 'run-3' }, new AbortController().signal, undeliveredReplies().observe, async () => handle);
+    expect(signals[1]!.aborted).toBe(true);
+    expect(await replaced).toBeInstanceOf(Error);
+    expect(await newest).toBe(handle);
+    relay.suspend(live);
+    expect(relay.resume(session(), integration, [{ binding: ref, acknowledgedSeq: 0 }])[0]!.launch).toEqual({ runId: 'run-3', handle });
+    relay.dispose();
+  });
+
+  test('aborts through its handle a launch that leaves admission after it was cancelled', async () => {
+    const relay = new ProducerRelay();
+    const { integration, binding, abort } = integrationDouble();
+    relay.track(integration);
+    const live = session();
+    const ref = binding();
+    relay.bind(live, integration, ref);
+    const handle = createAgentResourceRef(SCOPE, 'execution');
+    const release = Promise.withResolvers<void>();
+    const launch = relay.launch(live, integration, { producerBinding: ref, runId: 'run-1' }, new AbortController().signal, undeliveredReplies().observe, async () => {
+      await release.promise;
+      return handle;
+    });
+    relay.cancelLaunch(integration, ref, 'run-1');
+    release.resolve();
+
+    await expect(launch).rejects.toThrow('The launch was cancelled before it started.');
+    expect(abort).toHaveBeenCalledWith(handle);
+    relay.dispose();
+  });
+
   test('leaves the outcome of a launch settled on its own session to the reply', async () => {
     const relay = new ProducerRelay();
     const { integration, binding } = integrationDouble();
@@ -385,13 +478,58 @@ describe('ProducerRelay', () => {
     relay.bind(live, integration, ref);
     const handle = createAgentResourceRef(SCOPE, 'execution');
 
-    const { signal } = new AbortController();
-    await expect(relay.launch(live, integration, { producerBinding: ref, runId: 'run-1' }, signal, async () => handle)).resolves.toBe(handle);
-    await expect(relay.launch(live, integration, { producerBinding: ref, runId: 'run-2' }, signal, async () => {
+    await expect(relay.launch(live, integration, { producerBinding: ref, runId: 'run-1' }, new AbortController().signal, undeliveredReplies().observe, async () => handle))
+      .resolves.toBe(handle);
+    await expect(relay.launch(live, integration, { producerBinding: ref, runId: 'run-2' }, new AbortController().signal, undeliveredReplies().observe, async () => {
       throw new Error('Synthetic rejection');
     })).rejects.toThrow('Synthetic rejection');
 
     expect(live.sent).toEqual([]);
+    relay.dispose();
+  });
+
+  test('reports a launch that throws with a nested unknown outcome as a definite failure', async () => {
+    const relay = new ProducerRelay();
+    const { integration, binding } = integrationDouble();
+    relay.track(integration);
+    const live = session();
+    const ref = binding();
+    relay.bind(live, integration, ref);
+    const nested = new AgentCallError('unknown', 'Synthetic credential read outcome is unknown');
+    const untracked = binding();
+
+    for (const producerBinding of [ref, untracked]) {
+      await expect(relay.launch(live, integration, { producerBinding, runId: 'run-1' }, new AbortController().signal, undeliveredReplies().observe, async () => {
+        throw nested;
+      })).rejects.toMatchObject({ outcome: 'rejected', code: nested.code, message: nested.message });
+    }
+    relay.dispose();
+  });
+
+  test('publishes the outcome of a launch whose reply its live session could not take', async () => {
+    const relay = new ProducerRelay();
+    const { integration, binding } = integrationDouble();
+    relay.track(integration);
+    const live = session();
+    const [started, failed] = [binding(), binding()];
+    relay.bind(live, integration, started);
+    relay.bind(live, integration, failed);
+    const handle = createAgentResourceRef(SCOPE, 'execution');
+    const success = undeliveredReplies();
+    const failure = undeliveredReplies();
+
+    await relay.launch(live, integration, { producerBinding: started, runId: 'run-1' }, new AbortController().signal, success.observe, async () => handle);
+    await relay.launch(live, integration, { producerBinding: failed, runId: 'run-2' }, new AbortController().signal, failure.observe, async () => {
+      throw new AgentIntegrationError('AUTH_REQUIRED', 'Synthetic sign-in required', false);
+    }).catch(() => null);
+    expect(live.sent).toEqual([]);
+    success.fire();
+    failure.fire();
+
+    expect(live.frames().map(({ notification }) => [notification.binding.id, notification.event])).toEqual([
+      [started.id, { type: 'launch-settled', runId: 'run-1', handle }],
+      [failed.id, { type: 'launch-settled', runId: 'run-2', error: { code: 'AUTH_REQUIRED', message: 'Synthetic sign-in required' } }],
+    ]);
     relay.dispose();
   });
 });

@@ -34,7 +34,6 @@ const mocks = vi.hoisted(() => ({
 	appShell: {
 		openNewChatDialog: vi.fn(),
 		openSettings: vi.fn(),
-		openAppSettings: vi.fn(),
 	},
 	notifications: {
 		error: vi.fn(),
@@ -69,7 +68,7 @@ const terminals: Pick<
 };
 const appShell: Pick<
 	WorkbenchCommandRegistryDeps['appShell'],
-	'openNewChatDialog' | 'openSettings' | 'openAppSettings'
+	'openNewChatDialog' | 'openSettings'
 > = mocks.appShell;
 const files: Pick<WorkbenchCommandRegistryDeps['files'], 'navigation' | 'open'> = {
 	navigation: null,
@@ -110,10 +109,8 @@ afterEach(() => {
 });
 
 describe('CommandMenu', () => {
-	it('routes app and server settings to their separate dialogs', async () => {
-		await commandRegistry.execute('open-app-settings');
-		expect(mocks.appShell.openAppSettings).toHaveBeenCalledOnce();
-		expect(mocks.appShell.openSettings).not.toHaveBeenCalled();
+	it('routes the settings command to the combined settings dialog', async () => {
+		expect(commandRegistry.isEnabled('open-app-settings')).toBe(false);
 		await commandRegistry.execute('open-settings');
 		expect(mocks.appShell.openSettings).toHaveBeenCalledOnce();
 	});

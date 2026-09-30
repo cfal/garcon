@@ -218,6 +218,22 @@ test('selected-file commits preserve unrelated staged and unstaged contents', as
   expect((await runGit(projectPath, ['show', 'HEAD:other.txt'])).stdout).toBe('staged\n');
 });
 
+test('stash listings expose unique numeric refs that remain valid mutation targets', async () => {
+  const { git, projectPath } = await fixture();
+  await fs.writeFile(path.join(projectPath, 'example.txt'), 'first stash\n');
+  await git.createStash({ projectPath, message: 'first stash' });
+  await fs.writeFile(path.join(projectPath, 'example.txt'), 'second stash\n');
+  await git.createStash({ projectPath, message: 'second stash' });
+
+  const { stashes } = await git.getStashes({ projectPath });
+  expect(stashes.map(stash => stash.ref)).toEqual(['stash@{0}', 'stash@{1}']);
+  expect(stashes.map(stash => stash.index)).toEqual([0, 1]);
+
+  await git.dropStash({ projectPath, stashRef: stashes[1].ref });
+  await git.dropStash({ projectPath, stashRef: stashes[0].ref });
+  expect((await git.getStashes({ projectPath })).stashes).toEqual([]);
+});
+
 test('stash conflicts retain the stash until explicit resolution and removal', async () => {
   const { git, projectPath, original } = await fixture();
   await fs.writeFile(path.join(projectPath, 'example.txt'), 'stashed\n');
@@ -240,6 +256,23 @@ test('stash conflicts retain the stash until explicit resolution and removal', a
   expect((await git.getStashes({ projectPath })).stashes).toEqual([]);
   await git.revertCommit({ projectPath, commit: 'HEAD' });
   expect(await fs.readFile(path.join(projectPath, 'example.txt'), 'utf8')).toBe(original);
+});
+
+test('lists stashes by index so listed refs drive stash actions', async () => {
+  const { git, projectPath } = await fixture();
+  for (const message of ['first synthetic stash', 'second synthetic stash']) {
+    await fs.writeFile(path.join(projectPath, 'example.txt'), `${message}\n`);
+    await git.createStash({ projectPath, message });
+  }
+  const { stashes } = await git.getStashes({ projectPath });
+  expect(stashes.map(({ index, ref, message }) => ({ index, ref, message }))).toEqual([
+    { index: 0, ref: 'stash@{0}', message: expect.stringContaining('second synthetic stash') },
+    { index: 1, ref: 'stash@{1}', message: expect.stringContaining('first synthetic stash') },
+  ]);
+  await git.dropStash({ projectPath, stashRef: stashes[1]!.ref });
+  expect((await git.getStashes({ projectPath })).stashes.map((stash) => stash.message)).toEqual([
+    expect.stringContaining('second synthetic stash'),
+  ]);
 });
 
 test('fetch, pull and push use a disposable bare remote without external credentials', async () => {

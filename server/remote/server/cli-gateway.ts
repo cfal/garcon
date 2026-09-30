@@ -66,6 +66,7 @@ export async function startCliGateway(options: {
   const server = createServer({ maxHeaderSize: 32 * 1024, requestTimeout: 30_000, headersTimeout: 10_000 }, (incoming, outgoing) => {
     const abort = new AbortController();
     responses++;
+    incoming.once('aborted', () => abort.abort());
     outgoing.once('close', () => { responses--; abort.abort(); });
     outgoing.on('error', () => abort.abort());
     const timeout = (ms: number) => outgoing.setTimeout(ms, () => outgoing.destroy());
@@ -107,7 +108,10 @@ export async function startCliGateway(options: {
           } else {
             const operation = cliOperation(request.method, url.pathname);
             if (expectedServerInstanceId === null) throw new DomainError('VALIDATION_FAILED', 'Expected controller instance is required', 400);
-            const body = await readBody(incoming);
+            const contentLength = incoming.headers['content-length'];
+            const hasBody = incoming.headers['transfer-encoding'] !== undefined
+              || contentLength !== undefined && contentLength !== '0';
+            const body = hasBody ? await readBody(incoming) : null;
             const call = parseControllerCliRequest({ expectedServerInstanceId, http: { operation, query: [...url.searchParams], body } });
             const policy = cliPolicy(call.http);
             const release = admission.acquire('gateway', policy.pool);

@@ -16,8 +16,10 @@ test('executor editor grants and revokes workspace CLI access without replacing 
     await app.open();
     await fixture.waitForSpaWebSocket();
     await app.clickButton('More actions');
-    await app.waitForMenuItemEnabled('Server Settings');
-    await app.clickMenuItem('Server Settings');
+    await app.waitForMenuItemEnabled('Settings');
+    await app.clickMenuItem('Settings');
+    await app.waitForButton('Executors');
+    await app.clickButton('Executors');
     await app.waitForButtonEnabled('Edit Integration worker');
     await app.clickButton('Edit Integration worker');
     const checkbox = 'input[aria-describedby="executor-cli-warning"]';

@@ -819,6 +819,27 @@ describe('KeyboardShortcuts', () => {
 		expect(appShell.openSettings).not.toHaveBeenCalled();
 	});
 
+	it('opens settings with Meta-Comma while a terminal owns input', () => {
+		const appShell = createMockAppShell();
+		render(KeyboardShortcutsHost, {
+			appShell,
+			navigation: createMockNavigation(),
+			focusOwner: 'terminal',
+		});
+		const terminalInput = screen.getByRole('textbox', { name: 'Terminal input' });
+		const event = new KeyboardEvent('keydown', {
+			key: ',',
+			metaKey: true,
+			bubbles: true,
+			cancelable: true,
+		});
+
+		terminalInput.dispatchEvent(event);
+
+		expect(event.defaultPrevented).toBe(true);
+		expect(appShell.openSettings).toHaveBeenCalledOnce();
+	});
+
 	it('leaves Ctrl-U and Ctrl-D untouched inside a terminal surface', () => {
 		const onPrimaryScroll = vi.fn();
 		render(KeyboardShortcutsHost, {

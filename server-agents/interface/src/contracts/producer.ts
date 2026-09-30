@@ -131,7 +131,8 @@ export interface AgentProducerNotification {
   readonly event: AgentProducerEvent
     | { readonly type: 'started'; readonly runId: string }
     | { readonly type: 'publication-failed'; readonly error: AgentRunFailureDetail }
-    // Some of a remote binding's retained output was dropped.
+    // Some of a remote binding's output could not be delivered: the executor dropped
+    // it under retention pressure, or the controller could not read it.
     | { readonly type: 'publication-gap' }
     // The outcome of a remote start, resume, or compaction whose reply was lost
     // with its executor session: the run's handle, or why it did not start.

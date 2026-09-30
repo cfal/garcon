@@ -107,16 +107,18 @@ for (const dialer of ['controller', 'worker'] as const) {
       await expect(projects.ticketProjectDefault({ projectPath: 42 } as never)).rejects.toThrow();
       const request = { command: 'Read @input.txt', projectPath: f.project };
       expect(await projects.resolveFileMentions(request)).toContain('remote content');
-      remote.controller.disconnect(); remote.worker.disconnect();
-      await expect(projects.ticketProjectDefault({ projectPath: f.project }))
-        .rejects.toMatchObject({ outcome: 'not-dispatched' });
-      await expect(Promise.resolve().then(() => projects.resolveFileMentions(request)))
-        .rejects.toMatchObject({ outcome: 'not-dispatched' });
+      const reconnecting = Promise.withResolvers<void>();
       const ready = Promise.withResolvers<void>();
       const off = remote.executor.onAvailabilityChanged((value) => {
+        if (value === 'reconnecting') reconnecting.resolve();
         if (value === 'ready') { off(); ready.resolve(); }
       });
+      remote.controller.disconnect(); remote.worker.disconnect();
+      await reconnecting.promise;
+      // A call made while the executor reconnects waits for the worker instead of failing.
+      const held = projects.resolveFileMentions(request);
       await ready.promise;
+      expect(await held).toContain('remote content');
       expect(remote.generations).toHaveLength(1);
       expect(await remote.executor.getProjectService()).toBe(projects);
       await writeFile(join(f.project, 'input.txt'), 'replacement content');

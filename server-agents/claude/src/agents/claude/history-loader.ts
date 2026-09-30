@@ -163,7 +163,7 @@ export function sortClaudeEntries(entries: Record<string, unknown>[]): Record<st
 
 // The sort itself stays one call: a transcript is appended in time order, so
 // sorting it is close to linear.
-async function sortClaudeEntriesInSteps(
+export async function sortClaudeEntriesInSteps(
   entries: readonly Record<string, unknown>[],
   steps: EventLoopSteps,
 ): Promise<Record<string, unknown>[]> {
@@ -211,7 +211,7 @@ export function convertClaudeEntries(rawEntries: Record<string, unknown>[]): Cha
   return converter.messages;
 }
 
-async function convertClaudeEntriesInSteps(
+export async function convertClaudeEntriesInSteps(
   rawEntries: readonly Record<string, unknown>[],
   steps: EventLoopSteps,
 ): Promise<ChatMessage[]> {

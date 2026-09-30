@@ -35,7 +35,9 @@ export interface JsonlNativeForkingOptions {
   readonly transformEntries?: ForkJsonlRequest['transformEntries'];
   readonly createTargetPath?: ForkJsonlRequest['createTargetPath'];
   readonly allowUnmaterializedWholeSession?: boolean;
-  readonly semanticDigest?: (messages: readonly ChatMessage[]) => string;
+  // Digests the whole forked transcript, so it must split its work into
+  // time-bounded steps.
+  readonly semanticDigest?: (messages: readonly ChatMessage[]) => Promise<string>;
 }
 
 export function createJsonlNativeForking(options: JsonlNativeForkingOptions): AgentNativeFork {
@@ -126,7 +128,7 @@ async function forkJsonlAtProviderPoint(
       forkedMessages = forked.messages;
       if (
         result.expectedSemanticDigest !== undefined
-        && options.semanticDigest?.(forked.messages) !== result.expectedSemanticDigest
+        && await options.semanticDigest?.(forked.messages) !== result.expectedSemanticDigest
       ) {
         throw transcriptUnavailable('The provider-native fork did not preserve its selected prefix');
       }

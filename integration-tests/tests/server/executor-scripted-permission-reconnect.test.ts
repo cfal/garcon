@@ -12,7 +12,7 @@ import { liveClaudeStartRequest } from '../../support/live-claude.js';
 import { startScriptedClaudeTestEnvironment } from '../../support/scripted-claude.js';
 
 for (const executionBackend of ['remote-controller-dials', 'remote-executor-dials'] as const) {
-  test(`a link blip keeps a pending real Claude permission answerable and delivers the answer once (${executionBackend})`, async () => {
+  test(`an answer sent during a link blip waits for the executor and reaches a real Claude permission once (${executionBackend})`, async () => {
     const environment = await startScriptedClaudeTestEnvironment();
     let proxy: Awaited<ReturnType<typeof tcpLinkProxy>> | undefined;
     const marker = '.synthetic-approved-after-reconnect';
@@ -44,46 +44,33 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
           clientRequestId: crypto.randomUUID(), chatId, permissionOccurrenceId: permission.permissionOccurrenceId,
           allow: true, alwaysAllow: false, control,
         };
-        // The executor gateway is down with the link, so the CLI talks to the controller directly.
-        const cliDecision = () => runCli(fixture, [
-          'permission-decision', chatId, permission.permissionOccurrenceId, 'allow',
-          '--run', control.runId, '--server-instance', control.serverInstanceId, '--json',
-        ], 'controller');
         proxy!.refuseConnections();
         proxy!.disconnect();
         const reconnecting = await processingPhase('reconnecting');
 
-        // An answer during the gap is definitely not sent and leaves the request pending.
-        await expect(fixture.client.sendPermissionDecision(decision)).rejects.toMatchObject({
-          status: 503, body: { errorCode: 'PERMISSION_DECISION_NOT_DELIVERED', retryable: true },
-        });
-        const undelivered = await cliDecision();
-        expect(undelivered.exitCode).toBe(3);
-        expect(undelivered.stdout).toBe('');
-        expect(undelivered.stderr).toContain('PERMISSION_DECISION_NOT_DELIVERED');
+        // An answer during the gap waits for the executor instead of failing.
+        const answering = fixture.client.sendPermissionDecision(decision);
+        await Bun.sleep(300);
         expect((await fixture.client.getChatSnapshot(chatId, 0)).transientFeed.rows.map(row => row.message.type))
           .toEqual(['permission-request']);
         expect(environment.model.requestsSince(0)).toHaveLength(1);
         proxy!.acceptConnections();
 
         await waitForExecutorReconnect(fixture, cursor);
+        expect(await answering).toMatchObject({ commandType: 'permission-decision', chatId, status: 'accepted' });
         const resumed = await processingPhase('running');
 
-        // The turn and its pending permission survive the blip; nothing was denied.
+        // The turn survives the blip; nothing was denied, and the answer counts once.
         expect(fixture.client.events().indexOf(reconnecting)).toBeLessThan(fixture.client.events().indexOf(resumed));
         expect(fixture.client.eventsSince(cursor).some(event => event.type === 'executors-changed'
           && event.executors.some(executor => executor.availability === 'reconnecting'))).toBe(true);
         expect(terminals()).toEqual([]);
-        expect((await fixture.client.getChatSnapshot(chatId, 0)).transientFeed.rows.map(row => row.message.type))
-          .toEqual(['permission-request']);
-        // The CLI repeats its per-prompt request ID, which delivers the answer it could not send.
-        const delivered = await cliDecision();
-        expect(delivered).toMatchObject({ exitCode: 0, stderr: '' });
-        expect(JSON.parse(delivered.stdout)).toMatchObject({ commandType: 'permission-decision', chatId, status: 'accepted' });
-        // Repeating the browser's undelivered request tries again rather than replaying its failure.
-        await expect(fixture.client.sendPermissionDecision(decision)).rejects.toMatchObject({
-          status: 409, body: { errorCode: 'PERMISSION_NOT_ACTIONABLE' },
-        });
+        const repeated = await runCli(fixture, [
+          'permission-decision', chatId, permission.permissionOccurrenceId, 'allow',
+          '--run', control.runId, '--server-instance', control.serverInstanceId, '--json',
+        ], 'controller');
+        expect(repeated.exitCode).not.toBe(0);
+        expect(repeated.stderr).toContain('PERMISSION_NOT_ACTIONABLE');
         const approval = await withTimeout(approved.requested, 30_000, () => 'Claude did not receive the approved tool result');
         expect(approval.body.messages).toEqual(expect.arrayContaining([expect.objectContaining({
           role: 'user', content: expect.arrayContaining([expect.objectContaining({

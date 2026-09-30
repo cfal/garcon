@@ -4,6 +4,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { E2eFixture } from '../../support/e2e-fixture.js';
 import { withE2eFixture } from '../../support/e2e-fixture.js';
+import { waitForExecutorReconnect } from '../../support/executor-link.js';
 import { initializeFixtureRepository, runFixtureGit } from '../../support/git-fixture.js';
 import { SpaDriver } from '../../support/spa-driver.js';
 
@@ -135,15 +136,19 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
       await openGit(fixture);
       await showGitDiff(fixture);
       await waitForDiff(fixture, 'Pending discard content');
+      const gitWindow = await app.workspaceWindowIdForSurface('singleton:git');
       await app.clickButton('Stash');
       await app.waitForText('Original synthetic stash');
       await app.clickButton('Drop');
       await app.waitForButton('Confirm');
+      const dropReconnectCursor = client.events().length;
       await client.patch(`/api/v1/executors/${client.executorId}`, { enabled: false });
       await waitForGitExecutorOutage(fixture);
       await runFixtureGit(project, 'stash', 'push', '-m', 'Replacement synthetic stash');
       await writeFile(join(project, 'example.txt'), 'Replacement working content\n');
       await client.patch(`/api/v1/executors/${client.executorId}`, { enabled: true });
+      await waitForExecutorReconnect(fixture.integration, dropReconnectCursor);
+      await app.selectWorkspaceWindowSurfaceById('singleton:git', gitWindow);
       await waitForDiff(fixture, 'Replacement working content');
       expect(await fixture.page.$eval(GIT_PANEL, panel => [...panel.querySelectorAll('button')]
         .some(button => button.textContent?.trim() === 'Confirm'))).toBe(false);
@@ -151,10 +156,13 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
 
       await fixture.page.$eval(`${GIT_PANEL} button[title="Discard changes"]`, element => (element as HTMLButtonElement).click());
       await fixture.page.waitForSelector('[role="dialog"]');
+      const discardReconnectCursor = client.events().length;
       await client.patch(`/api/v1/executors/${client.executorId}`, { enabled: false });
       await waitForGitExecutorOutage(fixture);
       await runFixtureGit(project, 'rm', '--cached', 'example.txt');
       await client.patch(`/api/v1/executors/${client.executorId}`, { enabled: true });
+      await waitForExecutorReconnect(fixture.integration, discardReconnectCursor);
+      await app.selectWorkspaceWindowSurfaceById('singleton:git', gitWindow);
       await fixture.page.waitForFunction(selector => document.querySelector(
         `${selector} [data-git-project-content]`,
       )?.getAttribute('aria-busy') === 'false', {}, GIT_PANEL);
@@ -162,17 +170,20 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
       expect(await fixture.page.$('[role="dialog"]')).toBeNull();
       expect(await readFile(join(project, 'example.txt'), 'utf8')).toBe('Replacement working content\n');
 
-      await app.openNewWorkspaceWindow('Open Git History');
+      const historyWindow = await app.openNewWorkspaceWindow('Open Git History');
       await app.waitForText('Initial synthetic commit');
       await app.clickButton('Initial synthetic commit', { contains: true });
       await app.waitForButton('Revert');
       await app.clickButton('Revert');
       await fixture.page.waitForSelector('[role="dialog"]');
+      const revertReconnectCursor = client.events().length;
       await client.patch(`/api/v1/executors/${client.executorId}`, { enabled: false });
       await waitForGitExecutorOutage(fixture);
       await runFixtureGit(project, 'add', '--all');
       await runFixtureGit(project, 'commit', '-m', 'Replacement synthetic commit');
       await client.patch(`/api/v1/executors/${client.executorId}`, { enabled: true });
+      await waitForExecutorReconnect(fixture.integration, revertReconnectCursor);
+      await app.selectWorkspaceWindowSurfaceById('singleton:git-history', historyWindow);
       await fixture.page.waitForFunction(() => document.querySelector(
         '[data-workspace-surface-id="singleton:git-history"] [data-git-project-content]',
       )?.getAttribute('aria-busy') === 'false');

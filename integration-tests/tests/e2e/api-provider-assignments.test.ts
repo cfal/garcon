@@ -41,8 +41,8 @@ test('provider settings support offline grants and independent profiles; remote 
     fixture.page.off('request', onRequest);
 
     await app.clickButton('More actions');
-    await app.waitForMenuItemEnabled('Server Settings');
-    await app.clickMenuItem('Server Settings');
+    await app.waitForMenuItemEnabled('Settings');
+    await app.clickMenuItem('Settings');
     await app.waitForButton('Providers');
     await app.clickButton('Providers');
     await app.waitForText('Integration Fake OpenAI');

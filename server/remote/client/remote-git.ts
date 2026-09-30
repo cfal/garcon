@@ -4,13 +4,13 @@ import { GIT_OPERATION_TIMEOUT_MS, GH_DETAIL_TIMEOUT_MS, isGitMutation, type Exe
 import { validateGitRequest, validateGhRequest } from '../../../common/git-request-validation.js';
 import { validateGitResult, validateGhResult } from '../../../common/git-result-validation.js';
 import { GitServiceError } from '../../../common/git-error.js';
-import type { RemoteSessionBacking } from './executor-client.js';
+import type { RemoteSessions } from './executor-client.js';
 
 export class RemoteGitServices {
   readonly git: ExecutionGitService;
   readonly gh: ExecutionGhService;
 
-  constructor(private readonly backing: () => RemoteSessionBacking) {
+  constructor(private readonly sessions: RemoteSessions) {
     this.git = {
       getStatus: (request, options) => this.#gitCall('getStatus', request, options),
       initialCommit: (request, options) => this.#gitCall('initialCommit', request, options),
@@ -67,12 +67,13 @@ export class RemoteGitServices {
 
   async #gitCall<K extends GitMethod>(method: K, request: ExecutionGitRequests[K], options?: ExecutorCallOptions): Promise<ExecutionGitResults[K]> {
     validateGitRequest(method, request);
-    const backing = this.backing();
-    if (!backing.info.services.git) throw new AgentCallError('not-dispatched', 'Git is unavailable on this executor', 'OPERATION_UNSUPPORTED');
+    if (!this.sessions.latest().info.services.git) throw new AgentCallError('not-dispatched', 'Git is unavailable on this executor', 'OPERATION_UNSUPPORTED');
     const mutation = isGitMutation(method);
     try {
       return await withDeadline(options, GIT_OPERATION_TIMEOUT_MS, async (callOptions) => {
-        const result = await backing.rpc.call('', `git.${method}`, { input: request, budgetMs: callOptions.timeoutMs }, callOptions)
+        const { backing, timeoutMs } = await this.sessions.acquire(callOptions);
+        const budgetMs = timeoutMs ?? callOptions.timeoutMs;
+        const result = await backing.rpc.call('', `git.${method}`, { input: request, budgetMs }, { ...callOptions, timeoutMs: budgetMs })
           .catch(error => { throw mutation ? error : readFailure(error, callOptions.signal); });
         validateGitResult(method, result, backing.info);
         return result;
@@ -88,15 +89,16 @@ export class RemoteGitServices {
 
   async #ghCall<K extends keyof ExecutionGhResults>(method: K, request: { projectPath?: string; number?: number }, options?: ExecutorCallOptions): Promise<ExecutionGhResults[K]> {
     validateGhRequest(method, request);
-    const backing = this.backing();
-    if (!backing.info.services.gh) throw new AgentCallError('not-dispatched', 'GitHub CLI is unavailable on this executor', 'OPERATION_UNSUPPORTED');
+    if (!this.sessions.latest().info.services.gh) throw new AgentCallError('not-dispatched', 'GitHub CLI is unavailable on this executor', 'OPERATION_UNSUPPORTED');
     return withDeadline(options, method === 'getPullRequest' ? GH_DETAIL_TIMEOUT_MS : GIT_OPERATION_TIMEOUT_MS, async (callOptions) => {
-      const budgetMs = callOptions.timeoutMs;
+      const { backing, timeoutMs } = await this.sessions.acquire(callOptions);
+      const budgetMs = timeoutMs ?? callOptions.timeoutMs;
+      const rpcOptions = { ...callOptions, timeoutMs: budgetMs };
       let result: unknown;
       try {
-        if (method === 'getStatus') result = await backing.rpc.call('', 'gh.getStatus', { input: {}, budgetMs }, callOptions);
-        else if (method === 'listPullRequests') result = await backing.rpc.call('', 'gh.listPullRequests', { input: { projectPath: request.projectPath! }, budgetMs }, callOptions);
-        else result = await backing.rpc.call('', 'gh.getPullRequest', { input: { projectPath: request.projectPath!, number: request.number! }, budgetMs }, callOptions);
+        if (method === 'getStatus') result = await backing.rpc.call('', 'gh.getStatus', { input: {}, budgetMs }, rpcOptions);
+        else if (method === 'listPullRequests') result = await backing.rpc.call('', 'gh.listPullRequests', { input: { projectPath: request.projectPath! }, budgetMs }, rpcOptions);
+        else result = await backing.rpc.call('', 'gh.getPullRequest', { input: { projectPath: request.projectPath!, number: request.number! }, budgetMs }, rpcOptions);
       } catch (error) { throw readFailure(error, callOptions.signal); }
       validateGhResult(method, result, backing.info);
       return result;

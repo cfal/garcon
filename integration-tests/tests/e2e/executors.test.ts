@@ -35,8 +35,10 @@ async function selectConnectionDirection(fixture: E2eFixture): Promise<void> {
 
 async function openExecutors(app: SpaDriver): Promise<void> {
   await app.clickButton('More actions');
-  await app.waitForMenuItemEnabled('Server Settings');
-  await app.clickMenuItem('Server Settings');
+  await app.waitForMenuItemEnabled('Settings');
+  await app.clickMenuItem('Settings');
+  await app.waitForButton('Executors');
+  await app.clickButton('Executors');
   await app.waitForButtonEnabled('Add Executor');
 }
 
@@ -189,12 +191,18 @@ test('normal app onboarding supports both directions and sends remote chat input
       expect((await fixture.integration.client.getMessages(chatId)).transcriptViewId).not.toBe(beforeReload.transcriptViewId);
 
       await app.clickButton('More actions');
-      await app.clickMenuItem('Server Settings');
+      await app.clickMenuItem('Settings');
       await app.waitForButton('Automation');
       await app.clickButton('Automation');
+      await fixture.page.waitForFunction(() => {
+        const secondary = document.querySelector('[role="dialog"] [data-slot="model-selector-trigger-secondary"]');
+        const button = secondary?.closest('button');
+        return button instanceof HTMLButtonElement && !button.disabled;
+      });
       await fixture.page.evaluate(() => {
-        const button = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find((entry) => entry.getAttribute('aria-label')?.includes(' / '));
-        if (!button) throw new Error('Generation model selector is unavailable');
+        const secondary = document.querySelector('[role="dialog"] [data-slot="model-selector-trigger-secondary"]');
+        const button = secondary?.closest('button');
+        if (!(button instanceof HTMLButtonElement)) throw new Error('Generation model selector is unavailable');
         button.click();
       });
       await app.clickButton('Inbound Worker');

@@ -61,6 +61,17 @@ async function childOutcome(fixture: IntegrationFixture, chatId: string, status:
   return detail;
 }
 
+async function waitForCommandDeliveryCount(fixture: IntegrationFixture, expected: number): Promise<void> {
+  const deadline = Date.now() + 60_000;
+  while (Date.now() < deadline) {
+    const deliveries = fixture.garcon.logs.filter((line) =>
+      line.includes('[agent-commands] Agent command result disposition')).length;
+    if (deliveries >= expected) return;
+    await Bun.sleep(10);
+  }
+  throw new Error(`Expected ${expected} delivered command results`);
+}
+
 describe('scripted provider agent commands', () => {
   for (const agent of ['pi', 'opencode'] as const) {
     (agent !== 'opencode' || process.platform === 'linux' ? test : test.skip)(`${agent} receives child acknowledgment and completion at active Bash boundaries`, async () => {
@@ -127,7 +138,8 @@ describe('scripted provider agent commands', () => {
 
   for (const agent of ['claude', 'codex']) {
     // Codex can acknowledge terminal-adjacent steering after its final pending-input check,
-    // then persist the input during finalization without sampling it. These gates expose the loss.
+    // then persist the input during finalization without sampling it. Holding each admission
+    // response through the matching completion gives both CLIs an active sampling boundary.
     // Tracks https://github.com/openai/codex/issues/15842; candidate fix: https://github.com/openai/codex/pull/30341.
     test(`${agent} reports exact snapshot-child and resumed-turn results through its real binary`, async () => {
       const environment = await environmentFor(agent);
@@ -142,6 +154,7 @@ describe('scripted provider agent commands', () => {
           const received: string[] = [];
           const command = `<garcon-start-agent ref="snapshot" fork="true" title="Synthetic delegated review" agent="${agent}" model="${escapeGarconXmlText(start.model)}" reasoning-effort="${start.thinkingMode}">${childPrompt}</garcon-start-agent>`;
           environment.script(() => `Synthetic source context.\n${command}`);
+          const cursor = fixture.client.markEvents();
           const respond = async (input: string) => {
             received.push(input);
             if (input.endsWith(childPrompt)) {
@@ -157,8 +170,15 @@ describe('scripted provider agent commands', () => {
               return 'Only the synthetic resumed answer.';
             }
             if (input.includes('status="accepted"')) {
-              if (input.includes('ref="snapshot"')) admitted.resolve();
-              else resumed.resolve();
+              if (input.includes('ref="snapshot"')) {
+                await waitForCommandDeliveryCount(fixture, 1);
+                admitted.resolve();
+                await waitForCommandDeliveryCount(fixture, 2);
+              } else {
+                await waitForCommandDeliveryCount(fixture, 3);
+                resumed.resolve();
+                await waitForCommandDeliveryCount(fixture, 4);
+              }
               return 'Synthetic admission observed.';
             }
             if (input.includes('<garcon-start-agent-result') && input.includes('status="completed"')) {
@@ -170,7 +190,6 @@ describe('scripted provider agent commands', () => {
             throw new Error('Unexpected synthetic model input');
           };
           for (let i = 0; i < 6; i++) environment.script(respond);
-          const cursor = fixture.client.markEvents();
           await fixture.client.startChat(start);
           await fixture.client.waitForEvent(
             (event): event is ChatMessagesMessage => event.type === 'chat-messages' && event.chatId === source
@@ -199,7 +218,13 @@ describe('scripted provider agent commands', () => {
           expect(userContents(history.messages)).toEqual([start.command]);
           expect(userContents((await fixture.client.getMessages(accepted.chatId)).messages)).toEqual([start.command, childPrompt, followup]);
           environment.settled();
-        }, environment.fixtureOptions);
+        }, {
+          ...environment.fixtureOptions,
+          serverEnvironment: {
+            ...environment.fixtureOptions.serverEnvironment,
+            GARCON_LOG_LEVEL: 'debug',
+          },
+        });
       } finally { admitted.resolve(); resumed.resolve(); await environment.dispose(); }
     }, 120_000);
   }

@@ -26,7 +26,8 @@ test('executor deletion confirmation and unavailable chat remain usable on deskt
     await browserExpect(page.getByRole('listbox')).toHaveCount(0);
     await composer.evaluate(element => element.setAttribute('data-retained-composer', 'true'));
     await page.getByRole('button', { name: 'More actions', exact: true }).click();
-    await page.getByRole('menuitem', { name: 'Server Settings', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Settings', exact: true }).click();
+    await page.getByRole('tab', { name: 'Executors', exact: true }).click();
     await page.getByRole('button', { name: 'Edit Integration worker', exact: true }).click();
     await page.getByRole('button', { name: 'Delete executor', exact: true }).click();
     const dialog = page.getByRole('dialog');

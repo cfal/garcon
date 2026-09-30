@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { tcpLinkProxy } from '../../../server/remote/__tests__/tcp-link-proxy.js';
 import { assistantContents } from '../../support/chat-assertions.js';
 import { withE2eFixture } from '../../support/e2e-fixture.js';
+import { waitForExecutorReconnect } from '../../support/executor-link.js';
 import { SpaDriver } from '../../support/spa-driver.js';
 
 test('a short executor blip keeps the running turn visible as reconnecting and completes it', async () => {
@@ -21,9 +22,12 @@ test('a short executor blip keeps the running turn visible as reconnecting and c
       await fixture.waitForSpaWebSocket();
       await app.waitForText('Processing');
 
+      const reconnectCursor = client.events().length;
       proxy!.disconnect();
       await app.waitForText('Reconnecting to executor');
-      await app.waitForTextAbsent('Reconnecting to executor', 30_000);
+      await waitForExecutorReconnect(fixture.integration, reconnectCursor);
+      await app.clickSidebarChatById(chatId);
+      await app.waitForTextAbsent('Reconnecting to executor');
       await app.waitForText('Processing');
 
       held.releaseText('Synthetic reply after the blip');

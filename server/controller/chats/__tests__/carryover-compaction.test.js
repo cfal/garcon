@@ -22,6 +22,7 @@ import {
   CarryOverCompactionService,
 } from '../carryover-compaction.ts';
 import { estimateHandoffTokens } from '../handoff-token-budget.ts';
+import { ExecutorSessionLostError } from '../../../common/executor-disconnect.ts';
 import { inlineTokenFitting } from '../token-fitting/__tests__/inline-token-fitting.ts';
 
 const TIME = '2026-01-01T00:00:00.000Z';
@@ -485,6 +486,26 @@ describe('carryover compaction', () => {
       message: expect.stringContaining('65536 UTF-8 bytes'),
     });
     expect(runSingleQuery).toHaveBeenCalledTimes(2);
+  });
+
+  it('repeats the same prompt after a lost executor session without using a reduction attempt', async () => {
+    let attempt = 0;
+    const { instance, runSingleQuery } = service({
+      respond: async () => {
+        attempt += 1;
+        if (attempt === 1) throw new ExecutorSessionLostError('unknown', 'The connection to the executor dropped before it replied.');
+        if (attempt === 2) throw new Error('model unavailable');
+        return '<summary>third call succeeded</summary>';
+      },
+    });
+
+    const result = await run(instance, { messages: longHistory(40) });
+
+    expect(result.summary).toBe('third call succeeded');
+    expect(runSingleQuery).toHaveBeenCalledTimes(3);
+    const [first, repeated, reduced] = runSingleQuery.mock.calls.map(([prompt]) => prompt);
+    expect(repeated).toBe(first);
+    expect(estimateHandoffTokens(reduced)).toBeLessThan(estimateHandoffTokens(first));
   });
 
   it('stops after two provider failures without returning a fallback', async () => {

@@ -15,6 +15,7 @@ for (const dialer of ['controller', 'worker'] as const) {
       await fs.chmod(path.join(bin, 'gh'), 0o755);
       await fs.symlink(process.execPath, path.join(bin, 'bun'));
       await fs.symlink(Bun.which('git')!, path.join(bin, 'git'));
+      await fs.symlink(Bun.which('bash')!, path.join(bin, 'bash'));
       process.env.PATH = bin;
       const config = { label: 'synthetic-executor', bodyBytes: 1024 * 1024, commentsFail: true };
       await fs.writeFile(path.join(fixture.root, 'gh-fixture.json'), JSON.stringify(config));

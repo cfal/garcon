@@ -22,7 +22,7 @@ models.
 
 ## Add An Ollama Provider
 
-1. Open Server Settings > Providers.
+1. Open Settings > Providers.
 2. Under Custom Providers, open Add provider in the Anthropic Providers or
    OpenAI Providers section and choose Add Ollama.
 3. In the dialog, select the executor that will run the chats. Local is the

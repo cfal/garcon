@@ -7,6 +7,7 @@ import {
   type AgentRunFailureDetail,
 } from '@garcon/server-agent-interface';
 import type { TranscriptProducerLease } from '../ledger/service.js';
+import { retryAfterSessionLoss } from './session-loss-retry.js';
 
 export type LaunchSettledEvent = Extract<AgentProducerNotification['event'], { readonly type: 'launch-settled' }>;
 
@@ -29,7 +30,9 @@ export class ProducerBindings {
     ) => void,
   ) {}
 
-  async bind(integration: AgentIntegration, chatId: string, lease: TranscriptProducerLease): Promise<AgentProducerBinding> {
+  async bind(
+    integration: AgentIntegration, chatId: string, lease: TranscriptProducerLease, signal?: AbortSignal,
+  ): Promise<AgentProducerBinding> {
     if (lease.closed) throw new Error('Producer closed during binding');
     const existing = this.#leases.get(lease);
     if (existing) {
@@ -37,6 +40,49 @@ export class ProducerBindings {
       if (lease.closed) throw new Error('Producer closed during binding');
       return binding;
     }
+    this.#subscribe(integration);
+    const registered = retryAfterSessionLoss(() => this.#register(integration, chatId, lease, signal), signal);
+    this.#leases.set(lease, registered);
+    lease.onClosed(() => {
+      this.#leases.delete(lease);
+      void registered.then((binding) => {
+        this.#routes.delete(binding.id);
+        return integration.producers.close(binding);
+      }).catch(this.onError);
+    });
+    try {
+      const binding = await registered;
+      if (lease.closed) throw new Error('Producer closed during binding');
+      return binding;
+    } catch (error) {
+      this.#leases.delete(lease);
+      throw error;
+    }
+  }
+
+  onStarted(runId: string, callback: () => Promise<void>): void {
+    this.#progress.set(runId, callback);
+  }
+
+  forgetRun(runId: string): void { this.#progress.delete(runId); }
+
+  // Each attempt takes a fresh binding ID: a worker that received a binding whose
+  // session was then lost keeps it until that session's grace ends.
+  async #register(
+    integration: AgentIntegration, chatId: string, lease: TranscriptProducerLease, signal?: AbortSignal,
+  ): Promise<AgentProducerBinding> {
+    const binding = createAgentResourceRef(integration.producers.scope, 'producer');
+    this.#routes.set(binding.id, { chatId, lease, binding });
+    try {
+      await integration.producers.bind({ binding, chatId }, { signal });
+      return binding;
+    } catch (error) {
+      this.#routes.delete(binding.id);
+      throw error;
+    }
+  }
+
+  #subscribe(integration: AgentIntegration): void {
     if (!this.#subscriptions.has(integration)) {
       const unsubscribe = integration.producers.subscribe(({ binding, event }) => {
         // Matches the route's own reference rather than the integration's live
@@ -75,29 +121,5 @@ export class ProducerBindings {
       });
       this.#subscriptions.set(integration, unsubscribe);
     }
-    const binding = createAgentResourceRef(integration.producers.scope, 'producer');
-    this.#routes.set(binding.id, { chatId, lease, binding });
-    const registered = integration.producers.bind({ binding, chatId }).then(() => binding);
-    this.#leases.set(lease, registered);
-    lease.onClosed(() => {
-      this.#routes.delete(binding.id);
-      this.#leases.delete(lease);
-      void registered.then(() => integration.producers.close(binding)).catch(this.onError);
-    });
-    try {
-      await registered;
-      if (lease.closed) throw new Error('Producer closed during binding');
-      return binding;
-    } catch (error) {
-      this.#routes.delete(binding.id);
-      this.#leases.delete(lease);
-      throw error;
-    }
   }
-
-  onStarted(runId: string, callback: () => Promise<void>): void {
-    this.#progress.set(runId, callback);
-  }
-
-  forgetRun(runId: string): void { this.#progress.delete(runId); }
 }

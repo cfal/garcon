@@ -3,24 +3,29 @@
 import { untrack } from 'svelte';
 import { createActionSignal } from '$lib/utils/action-signal';
 
-export type SettingsTab =
-	| 'executors'
-	| 'providers'
-	| 'other-agents'
-	| 'github'
-	| 'general'
-	| 'automation'
-	| 'notifications';
-export type AppSettingsTab = 'general' | 'shortcuts';
+// App tabs are stored in this browser; every other tab is server-owned.
+const APP_SETTINGS_TABS = ['interface', 'shortcuts'] as const;
+
+export const SETTINGS_TABS = [
+	...APP_SETTINGS_TABS,
+	'providers',
+	'other-agents',
+	'general',
+	'automation',
+	'notifications',
+	'github',
+	'executors',
+] as const;
+export type SettingsTab = (typeof SETTINGS_TABS)[number];
+
+export function isServerSettingsTab(tab: SettingsTab): boolean {
+	return !(APP_SETTINGS_TABS as readonly string[]).includes(tab);
+}
 
 function normalizeSettingsTab(value: string): SettingsTab {
-	if (value === 'providers') return 'providers';
-	if (value === 'other-agents') return 'other-agents';
-	if (value === 'github') return 'github';
-	if (value === 'general') return 'general';
-	if (value === 'automation') return 'automation';
-	if (value === 'notifications') return 'notifications';
-	return 'executors';
+	return (SETTINGS_TABS as readonly string[]).includes(value)
+		? (value as SettingsTab)
+		: 'interface';
 }
 
 export interface NewChatDialogSeed {
@@ -35,14 +40,12 @@ export interface ChatPreambleSelectionTarget {
 
 export class AppShellStore {
 	showSettings = $state(false);
-	showAppSettings = $state(false);
 	showScheduledPrompts = $state(false);
 	showPreambles = $state(false);
 	showSnippets = $state(false);
 	showOnboardingWizard = $state(false);
 	chatPreambleSelectionTarget = $state<ChatPreambleSelectionTarget | null>(null);
-	settingsTab = $state<SettingsTab>('executors');
-	appSettingsTab = $state<AppSettingsTab>('general');
+	settingsTab = $state<SettingsTab>('interface');
 	sidebarOpen = $state(false);
 	isMobile = $state(false);
 	composerFocusRequestId = $state(0);
@@ -65,8 +68,7 @@ export class AppShellStore {
 	#snippetsReturnFocus: (() => void) | null = null;
 	#preamblesReturnFocus: (() => void) | null = null;
 
-	openSettings(section: string = 'executors'): void {
-		this.showAppSettings = false;
+	openSettings(section: string = 'interface'): void {
 		this.dismissSnippets();
 		this.showScheduledPrompts = false;
 		this.showOnboardingWizard = false;
@@ -79,22 +81,7 @@ export class AppShellStore {
 		this.showSettings = false;
 	}
 
-	openAppSettings(section: string = 'general'): void {
-		this.dismissSnippets();
-		this.dismissPreambles();
-		this.showSettings = false;
-		this.showScheduledPrompts = false;
-		this.showOnboardingWizard = false;
-		this.showAppSettings = true;
-		this.setAppSettingsTab(section);
-	}
-
-	closeAppSettings(): void {
-		this.showAppSettings = false;
-	}
-
 	openOnboardingWizard(): void {
-		this.showAppSettings = false;
 		this.dismissSnippets();
 		this.showSettings = false;
 		this.showScheduledPrompts = false;
@@ -107,7 +94,6 @@ export class AppShellStore {
 	}
 
 	openScheduledPrompts(): void {
-		this.showAppSettings = false;
 		this.dismissSnippets();
 		this.showSettings = false;
 		this.showOnboardingWizard = false;
@@ -120,7 +106,6 @@ export class AppShellStore {
 	}
 
 	openPreambles(returnFocus?: () => void): void {
-		this.showAppSettings = false;
 		this.dismissSnippets();
 		this.showSettings = false;
 		this.showScheduledPrompts = false;
@@ -132,7 +117,6 @@ export class AppShellStore {
 	openPreamblesOverScheduledPrompts(returnFocus?: () => void): void {
 		this.dismissSnippets();
 		this.showSettings = false;
-		this.showAppSettings = false;
 		this.showOnboardingWizard = false;
 		this.#preamblesReturnFocus = returnFocus ?? null;
 		this.showPreambles = true;
@@ -159,7 +143,6 @@ export class AppShellStore {
 	}
 
 	openSnippets(returnFocus?: () => void): void {
-		this.showAppSettings = false;
 		this.showSettings = false;
 		this.showScheduledPrompts = false;
 		this.showOnboardingWizard = false;
@@ -182,10 +165,6 @@ export class AppShellStore {
 
 	setSettingsTab(tab: string): void {
 		this.settingsTab = normalizeSettingsTab(tab);
-	}
-
-	setAppSettingsTab(tab: string): void {
-		this.appSettingsTab = tab === 'shortcuts' ? 'shortcuts' : 'general';
 	}
 
 	setSidebarOpen(open: boolean): void {

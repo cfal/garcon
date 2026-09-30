@@ -26,6 +26,7 @@ import {
   reducedCompactionEntryBudget,
 } from './handoff-token-budget.js';
 import type { CarryOverOutcome } from './carryover-outcome.js';
+import { retryAfterSessionLoss } from '../agents/session-loss-retry.js';
 import {
   spineStart,
   type CompactionDestination,
@@ -137,7 +138,9 @@ export class CarryOverCompactionService {
         else this.deps.onCompactionStarted?.(input.chatId);
       }
       try {
-        const raw = await this.deps.agents.runSingleQuery(fitted.prompt, {
+        // A lost executor session says nothing about the prompt's size, so it
+        // repeats the same prompt without using a reduction attempt.
+        const raw = await retryAfterSessionLoss(() => this.deps.agents.runSingleQuery(fitted.prompt, {
           executorId: selection.executorId,
           agentId: selection.agentId,
           model: selection.model,
@@ -147,7 +150,7 @@ export class CarryOverCompactionService {
           modelProtocol: selection.modelProtocol,
           timeoutMs: CARRYOVER_COMPACTION_TIMEOUT_MS,
           signal: createGenerationRequestSignal(input.signal, CARRYOVER_COMPACTION_TIMEOUT_MS),
-        });
+        }), input.signal);
         const summary = validateCompactionSummary(raw);
         const context = projectSummaryWithSpine(
           summary,

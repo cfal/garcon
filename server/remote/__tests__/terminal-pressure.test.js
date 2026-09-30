@@ -98,8 +98,13 @@ for (const closeBeforeReply of [false, true]) test(`attachment cleanup bypasses 
   const controller = new SessionTransport('session', 'worker', () => {});
   const executor = new SessionTransport('session', 'controller', () => {});
   let controllerSocket, executorSocket;
+  // Frames toward the controller wait here while set, so an attach reply can arrive after the detach.
+  let heldReplies = null;
   controllerSocket = controller.attach({ send(data) { queueMicrotask(() => executorSocket.receive(data)); }, close() {} });
-  executorSocket = executor.attach({ send(data) { queueMicrotask(() => controllerSocket.receive(data)); }, close() {} });
+  executorSocket = executor.attach({ send(data) {
+    if (heldReplies) heldReplies.push(data);
+    else queueMicrotask(() => controllerSocket.receive(data));
+  }, close() {} });
   await Promise.all([controller.ready, executor.ready]);
   const controllerRpc = new ExecutorRpc(controller), workerRpc = new ExecutorRpc(executor);
   const worker = new TerminalRpcServer(local, workerRpc);
@@ -108,16 +113,27 @@ for (const closeBeforeReply of [false, true]) test(`attachment cleanup bypasses 
     return call.method.startsWith('terminals.') ? worker.handle(call) : new Promise(() => {});
   });
   workerRpc.onTerminalDetach(async request => { await executor.ready; await worker.handle({ method: 'terminals.detach', request }); });
-  const remote = new RemoteTerminalService(() => ({ rpc: controllerRpc, info: { executorId: 'local' }, manifests: new Map() }));
+  const backing = { rpc: controllerRpc, info: { executorId: 'local' }, manifests: new Map() };
+  const remote = new RemoteTerminalService({
+    latest: () => backing,
+    acquire: async () => ({ backing, timeoutMs: 120_000 }),
+    call: (...args) => controllerRpc.call(...args),
+  });
   controllerRpc.onTerminal(frame => remote.receive(frame, controllerRpc));
   const peer = { connectionId: 'browser', ownedTerminalIds: new Set(), sendTerminalMessage() {} };
   const pending = [];
   try {
+    if (closeBeforeReply) heldReplies = [];
     const attach = remote.attach(authority, peer, { type: 'terminal-attach', terminalId: terminal.terminalId,
       attachmentEpoch: inventory.attachmentEpoch, clientId: 'browser', intent: 'restore', afterSequence: 0 });
     if (!closeBeforeReply) await attach;
+    else {
+      for (let i = 0; i < 400 && (await local.list(authority)).terminals[0].attachmentStatus !== 'attached'; i++) await tick();
+    }
     for (let i = 0; i < (closeBeforeReply ? 255 : 256); i++) pending.push(controllerRpc.call('', 'projects.inspect', { projectPath: homedir() }).catch(error => error));
     remote.detachPeer(authority, peer);
+    for (const data of heldReplies ?? []) controllerSocket.receive(data);
+    heldReplies = null;
     await attach;
     await tick();
     expect((await local.list(authority)).terminals[0].attachmentStatus).toBe('detached');

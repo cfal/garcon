@@ -4,7 +4,7 @@ import {
   type GenerationModelTestResponse,
   type GenerationTestTarget,
 } from '../../../common/generation-test-contracts.js';
-import { isUnsupportedSingleQueryThinkingMode } from '@garcon/server-agent-interface';
+import { AgentCallError, isUnsupportedSingleQueryThinkingMode } from '@garcon/server-agent-interface';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import { DomainError } from '../../common/domain-error.js';
 import { createLogger } from '../../common/log.js';
@@ -44,7 +44,10 @@ export class GenerationModelTestError extends DomainError {
 
 function classifyGenerationModelTestError(error: unknown): GenerationModelTestError {
   if (error instanceof GenerationModelTestError) return error;
-  if (error instanceof DomainError && error.code === 'EXECUTOR_UNAVAILABLE') {
+  // A reconnecting executor holds the query, which fails undispatched if the
+  // executor does not return in time.
+  if ((error instanceof DomainError && error.code === 'EXECUTOR_UNAVAILABLE')
+    || (error instanceof AgentCallError && error.outcome === 'not-dispatched' && error.code === 'UNAVAILABLE')) {
     return new GenerationModelTestError('GENERATION_TEST_UNAVAILABLE', 'The selected executor is unavailable.', 503, true, { cause: error });
   }
   if (isUnsupportedSingleQueryThinkingMode(error)) {

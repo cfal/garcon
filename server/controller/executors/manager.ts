@@ -89,8 +89,13 @@ export class ExecutorManager {
     return !this.#disposed && this.#remotes.get(executorId)?.executor?.availability === 'reconnecting';
   }
 
+  // Also returns a remote executor that is reconnecting to a worker whose
+  // integrations are known; its calls wait for the replacement session within
+  // their own deadlines.
   requireExecutor(executorId: string): ExecutionRuntimeApi {
-    if (!this.isReady(executorId)) throw new DomainError('EXECUTOR_UNAVAILABLE', 'Executor is unavailable', 503, true);
+    if (!this.isReady(executorId) && !this.#holdsCalls(executorId)) {
+      throw new DomainError('EXECUTOR_UNAVAILABLE', 'Executor is unavailable', 503, true);
+    }
     return executorId === LOCAL_EXECUTOR_ID ? this.local : this.#remotes.get(executorId)!.executor!;
   }
 
@@ -249,9 +254,16 @@ export class ExecutorManager {
       const link = new WebSocketLink({ role: 'controller', executorId: config.id, secret: config.secret,
         allowInsecureDevelopment: config.allowInsecureDevelopment, allowUnverifiedTls: config.allowUnverifiedTls });
       entry.link = link;
-      link.onError(reportError);
-      link.onClosure(({ cause, count }) => {
-        logger.warn('Executor link closed', { executorId: config.id, cause, count });
+      // Logs each distinct link failure once until a session starts, as the worker does.
+      let lastLinkError: string | null = null;
+      link.onError((message) => {
+        if (message !== lastLinkError) logger.warn('Executor link failed', { executorId: config.id, message });
+        lastLinkError = message;
+        reportError(message);
+      });
+      link.onSession(() => { lastLinkError = null; });
+      link.onClosure((closure) => {
+        logger.warn('Executor link closed', { executorId: config.id, ...closure });
       });
       entry.executor = new RemoteExecutorClient(config.id, link, (rpc) => rpc.handle(async (call, signal, guardReply) => {
         if (call.method === 'controllerCli.describe' || call.method === 'controllerCli.request') {
@@ -278,7 +290,7 @@ export class ExecutorManager {
           throw new AgentCallError('rejected', 'Operation is not permitted on the controller');
         }
         return this.options.resolveCredential({ executorId: config.id, agentId: call.integrationId, reference: call.request.reference, signal });
-      }), reportError, entry.inventory);
+      }), reportError, entry.inventory, { logger });
       entry.executor.onAvailabilityChanged((value) => {
         if (!this.#current(entry)) return;
         if (value === 'ready') {
@@ -312,6 +324,14 @@ export class ExecutorManager {
     entry.preparation = null;
     this.#publishAvailability(entry.config.id, 'ready');
     this.#changed();
+  }
+
+  // A reconnected session is being prepared while the client reports ready.
+  #holdsCalls(executorId: string): boolean {
+    if (this.#disposed || this.#changing.has(executorId)) return false;
+    const entry = this.#remotes.get(executorId);
+    const availability = entry?.executor?.availability;
+    return Boolean(entry?.config.enabled && entry.integrations && (availability === 'reconnecting' || availability === 'ready'));
   }
 
   #current(entry: ManagedRemote): boolean { return !this.#disposed && this.#remotes.get(entry.config.id) === entry; }

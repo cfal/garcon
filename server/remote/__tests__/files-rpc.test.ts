@@ -11,6 +11,7 @@ import { WebSocketLink } from '../transport/websocket-link.js';
 import { linkOptions } from './integration-fixture.js';
 import { decodeFileData, decodeFileText } from '../transport/file-protocol.js';
 import { RemoteFilesService } from '../client/remote-files.js';
+import type { RemoteSessions } from '../client/executor-client.js';
 import { MAX_FILE_REVISION_LENGTH, MAX_FILE_VIEW_BYTES } from '../../../common/file-contracts.js';
 
 test('inline file data rejects malformed encoding and oversized payloads', () => {
@@ -22,10 +23,11 @@ test('inline file data rejects malformed encoding and oversized payloads', () =>
 
 test.each([MAX_FILE_REVISION_LENGTH + 1, 17 * 1024 * 1024])('rejects a %d-character save revision before accessing the RPC session', async (length) => {
   let backingCalls = 0;
-  const files = new RemoteFilesService(() => {
+  const untouched = () => {
     backingCalls++;
     throw new Error('Save must not access the RPC session');
-  });
+  };
+  const files = new RemoteFilesService({ latest: untouched, acquire: untouched, call: untouched } satisfies RemoteSessions);
   for (const conflictResolution of ['reject', 'overwrite'] as const) {
     await expect(files.save({
       projectPath: '/project', filePath: 'file.txt', content: 'x',
@@ -105,7 +107,9 @@ for (const phase of ['before dispatch', 'after commit'] as const) {
       const { revision } = await files.read(target);
       const content = 'replacement';
       if (phase === 'before dispatch') await controller.dispose();
-      const result = files.save({ ...target, content, expectedRevision: revision, conflictResolution: 'reject' });
+      // A disposed link never reconnects: a held save runs out its deadline undispatched,
+      // and a save whose reply was lost runs out its deadline waiting for that reply.
+      const result = files.save({ ...target, content, expectedRevision: revision, conflictResolution: 'reject' }, { timeoutMs: 1_000 });
       if (phase === 'after commit') await expect(result).rejects.toMatchObject({ code: 'FILE_SAVE_OUTCOME_UNKNOWN' });
       else await expect(result).rejects.toThrow();
       expect(saved).toHaveBeenCalledTimes(phase === 'after commit' ? 1 : 0);

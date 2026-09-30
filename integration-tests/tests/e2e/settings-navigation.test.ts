@@ -22,8 +22,8 @@ test.each([
     await app.open();
     await fixture.waitForSpaWebSocket();
     await app.clickButton('More actions');
-    await app.waitForMenuItemEnabled('Server Settings');
-    await app.clickMenuItem('Server Settings');
+    await app.waitForMenuItemEnabled('Settings');
+    await app.clickMenuItem('Settings');
     await app.waitForDialogButtonEnabled('Automation');
     await app.clickButton('Automation');
     await app.waitForText('Unavailable executor');
@@ -63,8 +63,8 @@ test('a generation toggle cannot choose an agent for an incomplete saved remote 
     await app.open();
     await fixture.waitForSpaWebSocket();
     await app.clickButton('More actions');
-    await app.waitForMenuItemEnabled('Server Settings');
-    await app.clickMenuItem('Server Settings');
+    await app.waitForMenuItemEnabled('Settings');
+    await app.clickMenuItem('Settings');
     await app.waitForDialogButtonEnabled('Automation');
     await app.clickButton('Automation');
     const toggle = '[role="switch"][aria-label="Automatically generate chat titles"]';
@@ -79,26 +79,21 @@ test('a generation toggle cannot choose an agent for an incomplete saved remote 
   }, { executionBackend: 'remote-controller-dials' });
 }, 60_000);
 
-test('app settings are separate from server settings and executor-owned sections show all hosts', async () => {
+test('one settings dialog holds app and server tabs and executor-owned sections show all hosts', async () => {
   await withE2eFixture('settings-navigation', async (fixture) => {
     const app = new SpaDriver(fixture.page, fixture.integration);
     await app.open();
     await fixture.waitForSpaWebSocket();
     await app.clickButton('More actions');
-    await app.waitForMenuItemEnabled('App Settings');
-    await app.clickMenuItem('App Settings');
+    await app.waitForMenuItemEnabled('Settings');
+    await app.clickMenuItem('Settings');
     await app.waitForText('Max chat width');
-    expect(await fixture.page.$$eval('[role="dialog"] [role="tab"]', tabs => tabs.map(tab => tab.textContent?.trim()))).toEqual(['General', 'Shortcuts']);
+    expect(await fixture.page.$eval('[role="dialog"] [role="tablist"]', element => element.getAttribute('aria-orientation'))).toBe('vertical');
+    expect(await fixture.page.$$eval('[role="dialog"] [role="tab"]', tabs => tabs.map(tab => tab.getAttribute('aria-label')))).toEqual(['Interface', 'Shortcuts', 'Providers', 'Other Agents', 'General', 'Automation', 'Notifications', 'GitHub', 'Executors']);
     await app.clickButton('Shortcuts');
     await app.waitForText('Send by Shift+Enter');
-    await app.clickDialogButton('Close');
-
-    await app.clickButton('More actions');
-    await app.waitForMenuItemEnabled('Server Settings');
-    await app.clickMenuItem('Server Settings');
+    await app.clickButton('Executors');
     await app.waitForButtonEnabled('Add Executor');
-    expect(await fixture.page.$eval('[role="dialog"] [role="tablist"]', element => element.getAttribute('aria-orientation'))).toBe('vertical');
-    expect(await fixture.page.$$eval('[role="dialog"] [role="tab"]', tabs => tabs.map(tab => tab.getAttribute('aria-label')))).toEqual(['Providers', 'Other Agents', 'General', 'Automation', 'Notifications', 'GitHub', 'Executors']);
     await app.clickButton('Providers');
     await app.waitForText('Native Providers');
     await app.waitForText('Custom Providers');
@@ -165,8 +160,8 @@ test('an unrelated executor update preserves a Local OAuth code', async () => {
     await app.open();
     await fixture.waitForSpaWebSocket();
     await app.clickButton('More actions');
-    await app.waitForMenuItemEnabled('Server Settings');
-    await app.clickMenuItem('Server Settings');
+    await app.waitForMenuItemEnabled('Settings');
+    await app.clickMenuItem('Settings');
     await app.waitForDialogButtonEnabled('Providers');
     await app.clickButton('Providers');
     await fixture.page.waitForFunction(() => [...document.querySelectorAll<HTMLButtonElement>('section[aria-label="Local"] button')]

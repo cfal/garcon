@@ -37,9 +37,11 @@ export interface ForkJsonlRequest {
   readonly leadingLineCount?: number;
   readonly retainedMessageCounts?: ReadonlyMap<number, number>;
   readonly rewriteEntry?: (entry: unknown, context: ForkTranscriptEntryContext) => unknown;
+  // Runs over the whole selected transcript, so it must split its work into
+  // time-bounded steps.
   readonly transformEntries?: (
     input: ForkTranscriptTransformInput,
-  ) => ForkTranscriptTransformResult;
+  ) => Promise<ForkTranscriptTransformResult>;
   readonly createTargetPath?: (input: ForkJsonlTargetPathInput) => string;
 }
 
@@ -104,7 +106,7 @@ export async function forkJsonlTranscript(request: ForkJsonlRequest): Promise<Fo
     const read = request.cutoffLine === null
       ? await readWholeSession(request, context, target)
       : await readRetainedPrefix(request, context, target);
-    const transformed = request.transformEntries?.({
+    const transformed = await request.transformEntries?.({
       selectedEntries: read.entries.selected,
       sourceEntries: read.entries.source,
       ...context,

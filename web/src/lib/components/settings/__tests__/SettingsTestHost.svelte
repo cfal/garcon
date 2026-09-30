@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
 	import Settings from '../Settings.svelte';
-	import AppSettings from '../AppSettings.svelte';
 	import type { ExecutorSnapshot } from '$shared/executors';
 	import type { ExecutorsStore } from '$lib/executors/executors-store.svelte';
 	import type { GhCapabilityContext } from '$lib/git/pull-requests/gh-capability.svelte';
@@ -276,4 +275,3 @@
 </script>
 
 {#if appShell.showSettings}<Settings />{/if}
-{#if appShell.showAppSettings}<AppSettings />{/if}

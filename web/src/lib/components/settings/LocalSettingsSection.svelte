@@ -180,7 +180,9 @@
 		<ThemeSettingsCard />
 
 		<div class="px-4">
-			<div class="flex items-center justify-between gap-4 border-t border-border py-2">
+			<div
+				class="flex flex-col gap-2 border-t border-border py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
+			>
 				<div class="min-w-0">
 					<label class="text-sm font-medium text-foreground" for="local-workspace-titlebar-size">
 						{m.settings_workspace_titlebar_size()}
@@ -199,7 +201,7 @@
 						value={ls.workspaceWindowTitlebarHeightDeltaPx}
 						oninput={(event) =>
 							ls.set('workspaceWindowTitlebarHeightDeltaPx', event.currentTarget.valueAsNumber)}
-						class="w-28 accent-primary"
+						class="min-w-0 flex-1 accent-primary sm:w-28 sm:flex-none"
 					/>
 					<output
 						for="local-workspace-titlebar-size"

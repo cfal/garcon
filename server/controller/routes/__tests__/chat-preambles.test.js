@@ -78,6 +78,15 @@ function putRequest(body, headers = {}) {
   });
 }
 
+function byteStream(bytes) {
+  return new ReadableStream({
+    start(controller) {
+      controller.enqueue(bytes);
+      controller.close();
+    },
+  });
+}
+
 describe('chat preamble routes', () => {
   it('returns the body-free selection target', async () => {
     const { map, targetMock } = routes();
@@ -134,7 +143,7 @@ describe('chat preamble routes', () => {
       {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
-        body: ReadableStream.from([new TextEncoder().encode(payload)]),
+        body: byteStream(new TextEncoder().encode(payload)),
         duplex: 'half',
       },
     ));
@@ -149,7 +158,7 @@ describe('chat preamble routes', () => {
       {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
-        body: ReadableStream.from([new Uint8Array([0xc3, 0x28])]),
+        body: byteStream(new Uint8Array([0xc3, 0x28])),
         duplex: 'half',
       },
     ));

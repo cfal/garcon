@@ -7,6 +7,58 @@ interface LightpandaVirtualScrollViewport extends HTMLElement {
   };
 }
 
+// Supplies the scroll geometry Lightpanda does not lay out, so a virtual list can follow its own
+// end. Without it the scroll extent is empty and every scrollTop write clamps to zero, which the
+// list adopts as its position. The viewport reports a fixed height, an extent matching the
+// sizer, and a clamped offset that shifts its reported rect as native scrolling shifts content.
+export async function installLightpandaScrollGeometry(
+  page: Page,
+  viewportSelector: string,
+  sizerSelector: string,
+  viewportHeight: number,
+): Promise<void> {
+  await page.$eval(
+    viewportSelector,
+    (element, input) => {
+      const viewport = element as HTMLElement;
+      let offset = 0;
+      const extent = () => {
+        const sizer = viewport.querySelector<HTMLElement>(input.sizerSelector);
+        return Math.max(input.viewportHeight, Number.parseFloat(sizer?.style.height ?? '') || 0);
+      };
+      Object.defineProperties(viewport, {
+        clientHeight: { configurable: true, get: () => input.viewportHeight },
+        scrollHeight: { configurable: true, get: extent },
+        scrollTop: {
+          configurable: true,
+          get: () => offset,
+          set: (value: number) => {
+            offset = Math.min(Math.max(0, value), extent() - input.viewportHeight);
+          },
+        },
+      });
+      const nativeRect = viewport.getBoundingClientRect.bind(viewport);
+      viewport.getBoundingClientRect = () => {
+        const rect = nativeRect();
+        const top = rect.top + offset;
+        return {
+          x: rect.x,
+          y: top,
+          top,
+          left: rect.left,
+          right: rect.right,
+          bottom: top + input.viewportHeight,
+          width: rect.width,
+          height: input.viewportHeight,
+          toJSON: () => ({}),
+        };
+      };
+      viewport.dispatchEvent(new Event('scroll', { bubbles: true }));
+    },
+    { sizerSelector, viewportHeight },
+  );
+}
+
 export async function setLightpandaVirtualScrollTop(
   page: Page,
   viewportSelector: string,

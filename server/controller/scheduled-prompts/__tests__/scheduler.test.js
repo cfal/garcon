@@ -609,7 +609,7 @@ describe('scheduled prompt scheduler', () => {
     const store = new ScheduledPromptStore(dir);
     await store.init();
     const scheduler = new ScheduledPromptScheduler({
-    inspectProject: inspectProjectDirectory,
+      inspectProject: async (projectPath) => ({ kind: 'available', effectiveProjectKey: projectPath }),
       store,
       runLog: new ScheduledPromptRunLog(),
       dispatcher: {
@@ -661,7 +661,7 @@ describe('scheduled prompt scheduler', () => {
     const definition = newChatDefinition('2030-01-01T09:00:00.000Z');
     definition.target.preambleChoice = { mode: 'explicit', orderedPreambleIds: ids };
     const scheduler = new ScheduledPromptScheduler({
-    inspectProject: inspectProjectDirectory,
+      inspectProject: async (projectPath) => ({ kind: 'available', effectiveProjectKey: projectPath }),
       store,
       runLog: new ScheduledPromptRunLog(),
       dispatcher: { dispatch: async () => ({ message: 'sent' }) },

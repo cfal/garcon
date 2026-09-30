@@ -87,7 +87,8 @@ describe('reader worker v9', () => {
     });
     const lifecycleEpoch = 'epoch-reader-0001';
     post(worker, { type: 'open', requestId: 1, lifecycleEpoch, dbPath });
-    await expect(waitForEvent('opened')).resolves.toMatchObject({ type: 'opened' });
+    const openedEvent = await waitForEvent('opened');
+    expect(openedEvent).toMatchObject({ type: 'opened' });
     post(worker, {
       type: 'search-start',
       requestId: 2,
@@ -138,7 +139,8 @@ describe('reader worker v9', () => {
       .toEqual(['chat-2001', 'chat-0001']);
 
     post(worker, { type: 'close', requestId: 3, lifecycleEpoch });
-    await expect(waitForEvent('closed')).resolves.toMatchObject({ type: 'closed' });
-    await expect(closed).resolves.toBeUndefined();
+    const closedEvent = await waitForEvent('closed');
+    expect(closedEvent).toMatchObject({ type: 'closed' });
+    await closed;
   });
 });

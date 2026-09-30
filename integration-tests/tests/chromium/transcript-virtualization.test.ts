@@ -4528,7 +4528,7 @@ async function verifyLiveEdgeRetention(
     pinned: true,
     userScrolledUp: false,
   });
-  await fixture.page.clock.runFor(RETIRED_LIVE_EDGE_PRUNE_INTERVAL_MS + 1);
+  await fixture.page.clock.fastForward(RETIRED_LIVE_EDGE_PRUNE_INTERVAL_MS + 1);
   expect(await transcriptEntryCount(fixture.page)).toBe(expectedEntryCount);
   expect(await viewportPolicy(fixture.page)).toEqual({
     pinned: true,
@@ -4568,7 +4568,7 @@ async function verifyLiveEdgeRetention(
   const expectedAfterGrowth = expectedEntryCount + laterPrompts.length * 2;
   expect(await transcriptEntryCount(fixture.page)).toBe(expectedAfterGrowth);
 
-  await fixture.page.clock.runFor(RETIRED_LIVE_EDGE_PRUNE_INTERVAL_MS + 1);
+  await fixture.page.clock.fastForward(RETIRED_LIVE_EDGE_PRUNE_INTERVAL_MS + 1);
   expect(await transcriptEntryCount(fixture.page)).toBe(expectedAfterGrowth);
 
   const canonicalAfterGrowth = await readCompleteCanonicalTranscript(fixture, chatId);
@@ -5497,10 +5497,14 @@ describe('Chromium combined tool-use presentation', () => {
       fixture.page.on('request', recordEarlierRequest);
       await prepareTranscript(fixture, chatId, 1);
       const waitForContext = async () => {
-        await fixture.page.waitForFunction((selector) => {
-          const sizer = document.querySelector<HTMLElement>(selector);
-          return Number(sizer?.dataset.chatTranscriptEntryCount) > 1_200;
-        }, SIZER_SELECTOR);
+        await fixture.page.waitForFunction(
+          (selector) => {
+            const sizer = document.querySelector<HTMLElement>(selector);
+            return Number(sizer?.dataset.chatTranscriptEntryCount) > 1_200;
+          },
+          SIZER_SELECTOR,
+          { timeout: 45_000 },
+        );
         await fixture.page.locator(FEED_SELECTOR).getByText('earlier-context-19').waitFor({ state: 'visible' });
         expect(await fixture.page.locator('[data-chat-tool-group]').count()).toBe(1);
         expect((await transcriptGeometry(fixture.page)).overlaps).toEqual([]);

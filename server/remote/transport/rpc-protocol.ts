@@ -1,6 +1,6 @@
 import type { AgentDescriptor, AgentSettingDescriptor, AgentSettingsEnvelope } from '@garcon/common/agent-integration';
 import type { FileRpcMethods } from './file-protocol.js';
-import type { GitRpcMethods } from './git-protocol.js';
+import { isGitRpcMethod, type GitRpcMethods } from './git-protocol.js';
 import type { TerminalRpcMethods } from './terminal-protocol.js';
 import type { CliRpcMethods } from './cli-protocol.js';
 import type {
@@ -25,6 +25,13 @@ type Result<F extends keyof AgentIntegration, M extends keyof Facet<F>> =
   Facet<F>[M] extends (...args: never[]) => infer R ? Awaited<R> : never;
 type WithoutSignal<T> = Omit<T, 'signal'>;
 type Call<Q, R> = { readonly request: Q; readonly result: R };
+
+// Revision of what the controller and worker exchange over an executor link:
+// session framing, RPC methods and payloads, and producer, terminal, and CLI
+// frames. Bump it with any change to what either side sends or accepts. Builds
+// of one release share a package version, so without the bump a mismatched
+// pair passes the handshake and fails mid-session instead.
+export const EXECUTOR_PROTOCOL_REVISION = 2;
 
 export const NULLABLE_AGENT_FACETS = [
   'auth', 'commands', 'compaction', 'forking', 'steering', 'endpoints', 'singleQuery',
@@ -55,6 +62,8 @@ export interface ExecutorRpcMethods extends FileRpcMethods, TerminalRpcMethods, 
   'projects.resolveFileMentions': Call<Parameters<ExecutionProjectService['resolveFileMentions']>[0], string>;
   'producers.bind': Call<Request<'producers', 'bind'>, void>;
   'producers.close': Call<Request<'producers', 'close'>, void>;
+  // Cancels native admission of a launch whose call the controller lost.
+  'producers.cancelLaunch': Call<{ readonly binding: AgentProducerBinding; readonly runId: string }, void>;
   // Reattaches bindings from a lost session; the worker resends their retained
   // frames after `acknowledgedSeq` and omits bindings it no longer holds.
   'producers.resume': Call<{
@@ -99,14 +108,129 @@ export interface ExecutorRpcMethods extends FileRpcMethods, TerminalRpcMethods, 
   'projectPathUpdates.commit': Call<Request<'projectPathUpdates', 'commit'>, void>;
   'projectPathUpdates.rollback': Call<Request<'projectPathUpdates', 'rollback'>, void>;
   'credentials.resolve': Call<WithoutSignal<Parameters<AgentHost['apiProviders']['resolveCredential']>[0]>, Awaited<ReturnType<AgentHost['apiProviders']['resolveCredential']>>>;
+  // Settles the journaled calls lost sessions left outstanding; see `RpcContinuity`.
+  'calls.reconcile': Call<{ readonly calls: readonly OutstandingCall[] }, { readonly states: readonly OutstandingCallState[] }>;
 }
 
 export type ExecutorRpcRequest = {
   [K in keyof ExecutorRpcMethods]: {
     readonly type: 'request'; readonly id: string; readonly integrationId: string;
+    // Numbers each session's requests from 1, so a worker can tell a request it
+    // never received from one whose reply it no longer holds.
+    readonly seq: number;
     readonly method: K; readonly request: ExecutorRpcMethods[K]['request'];
   }
 }[keyof ExecutorRpcMethods];
+
+// How a call relates to the session that carries it:
+// - `session`: bound to that session. Losing the session cancels its handler,
+//   and its caller sees an unknown outcome.
+// - `launch`: a start, resume, or compaction. Its handler outlives the session,
+//   and the producer relay reports its outcome.
+// - `journaled`: its handler outlives the session, and the worker keeps its
+//   reply until the controller acknowledges it. A controller parks the call
+//   when the session is lost and reconciles it on the replacement session, so
+//   its caller sees the real outcome.
+export type RpcContinuity = 'session' | 'launch' | 'journaled';
+
+type ClassifiedMethod = Exclude<keyof ExecutorRpcMethods, keyof FileRpcMethods | keyof GitRpcMethods>;
+
+// History readers, terminal attachments, producer bindings, forks, path
+// preparations, and CLI calls belong to one session. Compensation for a fork or
+// preparation is issued on its session and is then journaled like other calls.
+const CONTINUITY: Readonly<Record<ClassifiedMethod, RpcContinuity>> = {
+  'executor.describe': 'session',
+  'apiProviders.discoverModels': 'journaled',
+  'projects.inspect': 'journaled',
+  'projects.ticketProjectDefault': 'journaled',
+  'projects.resolveFileMentions': 'journaled',
+  'producers.bind': 'session',
+  'producers.close': 'session',
+  'producers.cancelLaunch': 'journaled',
+  'producers.resume': 'session',
+  'permissions.respond': 'journaled',
+  'execution.start': 'launch',
+  'execution.resume': 'launch',
+  'execution.abort': 'journaled',
+  'execution.runningSessions': 'journaled',
+  'catalog.snapshot': 'journaled',
+  'settings.migrate': 'journaled',
+  'lifecycle.start': 'session',
+  'lifecycle.stop': 'session',
+  'lifecycle.migrateOwnedStorage': 'session',
+  'migration.translateLegacyModel': 'journaled',
+  'migration.translateLegacyNativeSession': 'journaled',
+  'migration.translateLegacySettings': 'journaled',
+  'auth.status': 'journaled',
+  'auth.launchLogin': 'journaled',
+  'auth.completeLogin': 'journaled',
+  'auth.loginStatus': 'journaled',
+  'commands.discover': 'journaled',
+  'compaction.compact': 'launch',
+  'forking.fork': 'session',
+  'forking.discard': 'journaled',
+  'steering.captureTarget': 'journaled',
+  'steering.steer': 'journaled',
+  'endpoints.validate': 'journaled',
+  'singleQuery.run': 'journaled',
+  'history.open': 'session',
+  'history.next': 'session',
+  'history.close': 'session',
+  'nativeActivity.lastActivity': 'journaled',
+  'nativeSessions.resolveNativeSession': 'journaled',
+  'nativeSessions.describeSource': 'journaled',
+  'nativeSessions.release': 'journaled',
+  'configurationValidation.validate': 'journaled',
+  'sessionConfiguration.apply': 'journaled',
+  'projectPathUpdates.prepare': 'session',
+  'projectPathUpdates.commit': 'journaled',
+  'projectPathUpdates.rollback': 'journaled',
+  'credentials.resolve': 'session',
+  'calls.reconcile': 'session',
+  'terminals.list': 'session',
+  'terminals.create': 'session',
+  'terminals.rename': 'session',
+  'terminals.terminate': 'session',
+  'terminals.attach': 'session',
+  'terminals.input': 'session',
+  'terminals.resize': 'session',
+  'terminals.detach': 'session',
+  'controllerCli.describe': 'session',
+  'controllerCli.request': 'session',
+};
+
+// Calls that install a replacement session. They bypass the request budgets,
+// so the calls a session recovers cannot keep it from installing.
+export const SESSION_INSTALLATION_METHODS: ReadonlySet<string> = new Set<keyof ExecutorRpcMethods>([
+  'executor.describe', 'lifecycle.migrateOwnedStorage', 'lifecycle.start', 'producers.resume', 'calls.reconcile',
+]);
+
+export function rpcContinuity(method: string): RpcContinuity {
+  if (method.startsWith('files.') || isGitRpcMethod(method)) return 'journaled';
+  return Object.hasOwn(CONTINUITY, method) ? CONTINUITY[method as ClassifiedMethod] : 'session';
+}
+
+// A journaled call a lost session left outstanding, named by where it was last sent.
+export interface OutstandingCall {
+  readonly id: string;
+  readonly session: string;
+  readonly seq: number;
+}
+
+// `pending`: the worker has or will have its reply, which it delivers on the
+// session that asked. `not-received`: the request never arrived, so the
+// controller sends it again. `unknown`: the worker kept no record of it.
+export interface OutstandingCallState {
+  readonly id: string;
+  readonly state: 'pending' | 'not-received' | 'unknown';
+}
+
+// Controller-to-worker, fire-and-forget: releases the worker's copies of these
+// journaled replies.
+export interface ReplyAckFrame {
+  readonly type: 'reply-ack';
+  readonly ids: readonly string[];
+}
 
 export interface AgentProducerFrame {
   readonly type: 'producer';
@@ -122,13 +246,15 @@ export interface ProducerAcknowledgement {
 }
 
 // What a resumed binding looked like on the worker when it replied: the last
-// sequence number its replay delivers, and its latest start, resume, or
-// compaction until that run ends or the launch fails. A null handle means the
-// launch has not returned yet; its outcome follows on the binding.
+// sequence number its replay delivers, its latest start, resume, or compaction
+// until that run ends or the launch fails, and the runs of its latest launches
+// the worker received. A null handle means the launch has not returned yet; its
+// outcome follows on the binding.
 export interface ProducerResumeState {
   readonly bindingId: string;
   readonly replayThroughSeq: number;
   readonly launch: { readonly runId: string; readonly handle: AgentExecutionHandle | null } | null;
+  readonly receivedRunIds: readonly string[];
 }
 
 // Controller-to-worker, fire-and-forget: releases buffered frames through `seq`.

@@ -17,7 +17,7 @@
 {#if shell.showSettings}
 	<Dialog.Root open={shell.showSettings} onOpenChange={(open) => { if (!open) shell.closeSettings(); }}>
 		<Dialog.Content>
-			<Dialog.Title>Server Settings</Dialog.Title>
+			<Dialog.Title>Settings</Dialog.Title>
 			<ExecutorsSection />
 		</Dialog.Content>
 	</Dialog.Root>

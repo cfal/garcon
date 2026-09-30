@@ -1,10 +1,12 @@
-import type {
-  AgentExecutionHandle,
-  AgentIntegration,
-  AgentProducerBinding,
-  AgentProducerNotification,
+import {
+  AgentCallError,
+  type AgentExecutionHandle,
+  type AgentIntegration,
+  type AgentProducerBinding,
+  type AgentProducerNotification,
 } from '@garcon/server-agent-interface';
 import { failureDetail } from '@garcon/server-agent-common/execution/producer-adapter';
+import type { ObserveUndeliveredReply } from '../transport/rpc.js';
 import type { AgentProducerFrame, ProducerAcknowledgement, ProducerResumeState } from '../transport/rpc-protocol.js';
 import { SESSION_MESSAGE_BYTES } from '../transport/session-socket.js';
 import { EXECUTOR_DISCONNECTED_BEFORE_START } from '../../common/executor-disconnect.js';
@@ -22,6 +24,9 @@ const PRODUCER_SUPERSEDED_GRACE_MS = 5 * 60 * 1000;
 // queue, so the backlog need not fit that queue.
 const RETAINED_BYTES = 32 * 1024 * 1024;
 const PUMP_RETRY_MS = 10;
+// A chat launches one run at a time, so only its latest launches can have lost
+// their requests with a session.
+const RECEIVED_LAUNCHES = 8;
 
 export interface ProducerRelaySession {
   // Returns false when the session cannot take the frame now; the relay keeps
@@ -44,6 +49,9 @@ interface RelayedLaunch {
   readonly runId: string;
   // Null until the launch returns.
   handle: AgentExecutionHandle | null;
+  // Cancels native admission once the controller abandons a launch whose call
+  // it lost, or a newer launch replaces it on the binding.
+  readonly cancellation: AbortController;
 }
 
 interface RelayedBinding {
@@ -58,6 +66,9 @@ interface RelayedBinding {
   grace: { readonly timer: ReturnType<typeof setTimeout>; readonly deadline: number } | null;
   // The latest launch until its run ends or it fails, reported on resume.
   launch: RelayedLaunch | null;
+  // Run IDs of the latest launches received, oldest first, reported on resume
+  // so the controller relaunches only a request the worker never received.
+  readonly received: string[];
 }
 
 interface UnsentFrame {
@@ -65,6 +76,8 @@ interface UnsentFrame {
   readonly session: ProducerRelaySession;
   readonly frame: RetainedFrame;
 }
+
+type LaunchSettled = Extract<AgentProducerNotification['event'], { readonly type: 'launch-settled' }>;
 
 export interface ProducerRelayOptions {
   readonly graceMs?: number;
@@ -83,7 +96,9 @@ export interface ProducerRelayOptions {
 // the controller sees the skipped sequence numbers as a delivery gap. A launch
 // whose reply is lost with its session reaches the controller the same way:
 // the resume reply reports each binding's latest launch, and a launch that
-// settles after its session was lost publishes its outcome on the binding.
+// settles after its session was lost publishes its outcome on the binding. The
+// reply also lists the launches received, so the controller can send again one
+// whose request never arrived.
 export class ProducerRelay {
   readonly #bindings = new Map<string, RelayedBinding>();
   readonly #subscriptions = new Map<AgentIntegration, () => void>();
@@ -110,54 +125,84 @@ export class ProducerRelay {
 
   bind(session: ProducerRelaySession, integration: AgentIntegration, ref: AgentProducerBinding): void {
     this.#bindings.set(ref.id, {
-      integration, ref, seq: 0, retained: [], sent: 0, retainedBytes: 0, session, grace: null, launch: null,
+      integration, ref, seq: 0, retained: [], sent: 0, retainedBytes: 0, session, grace: null, launch: null, received: [],
     });
   }
 
-  // Runs a start, resume, or compaction dispatched by `session`. Only an
-  // outcome settled after that session was lost is published, because its
-  // reply can no longer reach the controller. `signal` is the call's, which
-  // the session aborts when it retires.
+  // Runs a start, resume, or compaction dispatched by `session`. Its outcome is
+  // published on the binding only when its reply cannot reach the controller:
+  // the session was lost, or the session could not take the reply. `signal` is
+  // the call's, which the controller aborts when its caller gives up; losing the
+  // session does not abort it, so `run` also observes the launch's own
+  // cancellation.
   async launch(
     session: ProducerRelaySession,
     integration: AgentIntegration,
     request: { readonly producerBinding: AgentProducerBinding; readonly runId: string },
     signal: AbortSignal,
-    run: () => Promise<AgentExecutionHandle>,
+    onUndeliveredReply: ObserveUndeliveredReply,
+    run: (signal: AbortSignal) => Promise<AgentExecutionHandle>,
   ): Promise<AgentExecutionHandle> {
     const binding = this.#bindings.get(request.producerBinding.id);
-    if (binding?.integration !== integration) return run();
-    const launch: RelayedLaunch = { runId: request.runId, handle: null };
+    if (binding?.integration !== integration) return runLaunch(() => run(signal));
+    binding.received.push(request.runId);
+    if (binding.received.length > RECEIVED_LAUNCHES) binding.received.shift();
+    // The controller begins another run on a binding only after abandoning the previous one.
+    if (binding.launch && !binding.launch.handle) binding.launch.cancellation.abort();
+    const launch: RelayedLaunch = { runId: request.runId, handle: null, cancellation: new AbortController() };
     binding.launch = launch;
+    const publishIfReplyLost = (event: LaunchSettled) => {
+      const publish = () => this.#publish(integration, { binding: binding.ref, event });
+      if (binding.session === session) onUndeliveredReply(publish);
+      else publish();
+    };
     let handle: AgentExecutionHandle;
     try {
-      handle = await run();
+      handle = await runLaunch(() => run(AbortSignal.any([signal, launch.cancellation.signal])));
+      if (launch.cancellation.signal.aborted) {
+        // Admission finished despite the cancellation, leaving a turn no one owns.
+        void integration.execution.abort(handle).catch(() => undefined);
+        throw new AgentCallError('rejected', 'The launch was cancelled before it started.');
+      }
     } catch (error) {
       if (binding.launch === launch) {
         binding.launch = null;
-        if (binding.session !== session) {
-          // A launch cancelled with its session never started; any other failure is its own.
-          this.#publish(integration, { binding: binding.ref, event: {
-            type: 'launch-settled',
-            runId: launch.runId,
-            error: signal.aborted ? EXECUTOR_DISCONNECTED_BEFORE_START : failureDetail(error),
-          } });
-        }
+        // Losing its session does not cancel a launch, so a failure is its own unless
+        // the launch was cancelled before it started. A nested call the loss cut
+        // off, such as a credential read, fails with its own error.
+        const cancelled = signal.aborted || launch.cancellation.signal.aborted;
+        publishIfReplyLost({
+          type: 'launch-settled',
+          runId: launch.runId,
+          error: cancelled && binding.session !== session ? EXECUTOR_DISCONNECTED_BEFORE_START : failureDetail(error),
+        });
       }
       throw error;
     }
     if (binding.launch === launch) {
       launch.handle = handle;
-      if (binding.session !== session) {
-        this.#publish(integration, { binding: binding.ref, event: { type: 'launch-settled', runId: launch.runId, handle } });
-      }
+      publishIfReplyLost({ type: 'launch-settled', runId: launch.runId, handle });
     }
     return handle;
+  }
+
+  // The controller abandoned a launch whose call it lost. One that already
+  // returned is aborted through its handle once the controller learns it.
+  cancelLaunch(integration: AgentIntegration, ref: AgentProducerBinding, runId: string): void {
+    const binding = this.#bindings.get(ref.id);
+    if (binding?.integration !== integration) return;
+    if (binding.launch?.runId === runId && !binding.launch.handle) binding.launch.cancellation.abort();
   }
 
   owns(session: ProducerRelaySession, integration: AgentIntegration, ref: AgentProducerBinding): boolean {
     const binding = this.#bindings.get(ref.id);
     return binding?.integration === integration && binding.session === session;
+  }
+
+  // A suspended binding waits, without a session, for one to resume it.
+  suspended(integration: AgentIntegration, ref: AgentProducerBinding): boolean {
+    const binding = this.#bindings.get(ref.id);
+    return binding?.integration === integration && binding.session === null;
   }
 
   close(ref: AgentProducerBinding): void {
@@ -200,6 +245,7 @@ export class ProducerRelay {
         bindingId: ref.id,
         replayThroughSeq: this.#pinReplayTail(binding, acknowledgedSeq),
         launch: binding.launch && { runId: binding.launch.runId, handle: binding.launch.handle },
+        receivedRunIds: [...binding.received],
       });
     }
     this.#pump();
@@ -339,6 +385,20 @@ export class ProducerRelay {
     if (binding.grace) clearTimeout(binding.grace.timer);
     this.#bindings.delete(binding.ref.id);
     this.#retainedBytes -= binding.retainedBytes;
+  }
+}
+
+// A launch that throws returns no handle, so the controller has no report to wait
+// for. An unknown outcome it carries belongs to a nested call, such as a
+// credential read, and must not reach the controller as a lost launch reply.
+async function runLaunch(run: () => Promise<AgentExecutionHandle>): Promise<AgentExecutionHandle> {
+  try {
+    return await run();
+  } catch (error) {
+    if (error instanceof AgentCallError && error.outcome === 'unknown') {
+      throw new AgentCallError('rejected', error.message, error.code);
+    }
+    throw error;
   }
 }
 

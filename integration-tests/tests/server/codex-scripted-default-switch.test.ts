@@ -15,6 +15,7 @@ import {
 
 const SCRIPTED_MODEL_DEFAULTS = {
   'gpt-6-astra': 'low',
+  'gpt-6.1-sol': 'low',
   'gpt-6-sol': 'medium',
   'gpt-6-luna': 'medium',
   'gpt-5.6-sol': 'low',
@@ -55,7 +56,7 @@ describe('Codex scripted default effort model switching', () => {
       });
 
       for (const model of [
-        'gpt-5.5', 'gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-sol',
+        'gpt-5.5', 'gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-sol',
         'gpt-5.4', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-6-astra',
       ] as const) {
         const response = await fixture.client.fetch(`/api/v1/chats/model`, {
@@ -134,28 +135,33 @@ describe('Codex scripted default effort model switching', () => {
     const testEnvironment = environment;
 
     await withIntegrationFixture('codex-scripted-sol-ultra', async (fixture) => {
-      await runScriptedTurn({
-        fixture,
-        testEnvironment,
-        chatId: fixture.newChatId(),
-        model: 'gpt-6-sol',
-        command: 'Use maximum reasoning without automatic delegation.',
-        start: true,
-        thinkingMode: 'max',
-        expectedEffort: 'max',
-        unexpectedRequestText: 'Proactive multi-agent delegation is active.',
-      });
-      await runScriptedTurn({
-        fixture,
-        testEnvironment,
-        chatId: fixture.newChatId(),
-        model: 'gpt-6-sol',
-        command: 'Use the highest Sol effort.',
-        start: true,
-        thinkingMode: 'ultra',
-        expectedEffort: 'max',
-        expectedRequestText: 'Proactive multi-agent delegation is active.',
-      });
+      for (const [model, ultraEffort] of [
+        ['gpt-6.1-sol', 'xhigh'],
+        ['gpt-6-sol', 'max'],
+      ] as const) {
+        await runScriptedTurn({
+          fixture,
+          testEnvironment,
+          chatId: fixture.newChatId(),
+          model,
+          command: 'Use maximum reasoning without automatic delegation.',
+          start: true,
+          thinkingMode: 'max',
+          expectedEffort: 'max',
+          unexpectedRequestText: 'Proactive multi-agent delegation is active.',
+        });
+        await runScriptedTurn({
+          fixture,
+          testEnvironment,
+          chatId: fixture.newChatId(),
+          model,
+          command: 'Use the highest Sol effort.',
+          start: true,
+          thinkingMode: 'ultra',
+          expectedEffort: ultraEffort,
+          expectedRequestText: 'Proactive multi-agent delegation is active.',
+        });
+      }
 
       testEnvironment.model.assertSettled();
     }, {
@@ -197,7 +203,8 @@ describe('Codex scripted default effort model switching', () => {
         model: 'gpt-5.4',
         command: 'Create a source conversation for title generation.',
         start: true,
-        expectedEffort: 'medium',
+        thinkingMode: 'high',
+        expectedEffort: 'high',
       });
 
       const requestIndex = testEnvironment.model.requests().length;
@@ -208,7 +215,7 @@ describe('Codex scripted default effort model switching', () => {
       })).resolves.toMatchObject({ success: true, title });
 
       const request = testEnvironment.model.requests()[requestIndex]?.body;
-      expect(request).toMatchObject({ reasoning: { effort: 'max' } });
+      expect(readReasoningEffort(request)).toBe('max');
       expect(JSON.stringify(request)).toContain('Proactive multi-agent delegation is active.');
       testEnvironment.model.assertSettled();
     }, {
@@ -271,10 +278,9 @@ async function runScriptedTurn(options: {
     afterIndex: cursor,
   });
 
-  expect(testEnvironment.model.requests()[requestIndex]?.body).toMatchObject({
-    model,
-    reasoning: { effort: options.expectedEffort },
-  });
+  const request = testEnvironment.model.requests()[requestIndex]?.body;
+  expect(request?.model).toBe(model);
+  expect(readReasoningEffort(request)).toBe(options.expectedEffort);
   if (options.expectedRequestText) {
     expect(JSON.stringify(testEnvironment.model.requests()[requestIndex]?.body)).toContain(
       options.expectedRequestText,
@@ -285,6 +291,13 @@ async function runScriptedTurn(options: {
       options.unexpectedRequestText,
     );
   }
+}
+
+function readReasoningEffort(body: unknown): unknown {
+  if (body === null || typeof body !== 'object') return undefined;
+  const reasoning = Reflect.get(body, 'reasoning');
+  if (reasoning === null || typeof reasoning !== 'object') return undefined;
+  return Reflect.get(reasoning, 'effort');
 }
 
 async function overlayScriptedModelDefaults(directories: IntegrationDirectories): Promise<void> {

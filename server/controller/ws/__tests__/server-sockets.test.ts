@@ -78,7 +78,7 @@ test('shared listener preserves large Noise messages and routes primary replies 
     browser.close();
     encrypted.close();
     noise.close();
-    await server.stop(true);
+    void server.stop(true);
   }
   expect(admission.size).toBe(0);
 }, 10_000);
@@ -127,7 +127,7 @@ for (const [kind, oversized] of [
       expect(received).toEqual([JSON.parse(atLimit)]);
     } finally {
       browser.close();
-      await server.stop(true);
+      void server.stop(true);
     }
     expect(admission.size).toBe(0);
   });

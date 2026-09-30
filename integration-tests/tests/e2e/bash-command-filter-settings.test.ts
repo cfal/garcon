@@ -16,8 +16,8 @@ const GARCON_AMP_PATTERNS = [
 
 async function openRemoteSettings(app: SpaDriver): Promise<void> {
   await app.clickButton('More actions');
-  await app.waitForMenuItemEnabled('Server Settings');
-  await app.clickMenuItem('Server Settings');
+  await app.waitForMenuItemEnabled('Settings');
+  await app.clickMenuItem('Settings');
   await app.waitForButton('General');
   await app.clickButton('General');
 }
@@ -57,6 +57,7 @@ describe('Lightpanda hidden Bash command settings', () => {
         { timeout: 20_000 },
       );
 
+      await app.waitForButtonEnabled('Add preset');
       await app.clickButton('Add preset');
       await app.waitForMenuItemEnabled('Garcon-amp rules');
       await app.clickMenuItem('Garcon-amp rules');
@@ -69,6 +70,9 @@ describe('Lightpanda hidden Bash command settings', () => {
         GARCON_AMP_PATTERNS.map((entry) => entry.pattern),
       );
 
+      // The settings-changed broadcast can render the patterns before the save's own response
+      // re-enables the trigger.
+      await app.waitForButtonEnabled('Add preset');
       await app.clickButton('Add preset');
       await app.waitForMenuItemEnabled('Garcon-amp rules');
       await app.clickMenuItem('Garcon-amp rules');
