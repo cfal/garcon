@@ -6,6 +6,7 @@ function entry(revision = 1, content = 'Original message'): QueueEntry {
 	return {
 		id: 'entry-1',
 		content,
+		kind: 'turn',
 		revision,
 		createdAt: '2026-07-16T00:00:00.000Z',
 		updatedAt: '2026-07-16T00:00:00.000Z',

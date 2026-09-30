@@ -31,6 +31,7 @@ function controlState(
 						{
 							id: 'queued-1',
 							content: 'queued',
+							kind: 'turn',
 							revision: 1,
 							createdAt: TS,
 							updatedAt: TS,

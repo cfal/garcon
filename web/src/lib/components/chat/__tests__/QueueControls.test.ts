@@ -22,6 +22,7 @@ function makeEntry(index: number): QueueEntry {
 	return {
 		id: `q${index}`,
 		content: `queued ${index}`,
+		kind: 'turn',
 		revision: 1,
 		createdAt: '2026-02-27T00:00:00.000Z',
 		updatedAt: '2026-02-27T00:00:00.000Z',

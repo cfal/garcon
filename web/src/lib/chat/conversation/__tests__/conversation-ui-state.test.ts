@@ -4,6 +4,7 @@ import type {
 	ChatExecutionControlState,
 	ChatQueueState,
 	PendingPermissionRequest,
+	QueueEntry,
 } from '$lib/types/chat';
 import {
 	BashToolUseMessage,
@@ -38,10 +39,11 @@ function makeControl(
 	};
 }
 
-function makeEntry(id: string, content: string, revision = 1) {
+function makeEntry(id: string, content: string, revision = 1): QueueEntry {
 	return {
 		id,
 		content,
+		kind: 'turn',
 		revision,
 		createdAt: '2026-01-01T00:00:00.000Z',
 		updatedAt: '2026-01-01T00:00:00.000Z',

@@ -117,4 +117,48 @@ describe('ChatExecutionControlOperations', () => {
     expect(assertAvailable).toHaveBeenCalledTimes(1);
     expect((await repository.load('chat-1')).entries).toHaveLength(1);
   });
+
+  it('queues a steer ahead of queued turns and publishes it once', async () => {
+    const repository = new InMemoryChatExecutionControlRepository('server-instance-test');
+    const publish = mock(() => undefined);
+    const operations = new ChatExecutionControlOperations(
+      repository,
+      { ...host(), publish },
+      { assertAvailable: mock(async () => undefined) },
+    );
+    const turn = await operations.create('chat-1', 'queued turn');
+    const command = { key: 'steer-command-1', entryId: 'steer-entry-1' };
+    const submission = { clientMessageId: 'message-steer-1', transcriptViewId: 'view-1' };
+
+    const steer = await operations.createSteer('chat-1', 'guidance', command, submission);
+    const duplicate = await operations.createSteer('chat-1', 'guidance', command, submission);
+
+    expect(steer).toMatchObject({ entryId: 'steer-entry-1', duplicate: false });
+    expect(duplicate).toMatchObject({ entryId: 'steer-entry-1', duplicate: true });
+    expect(steer.control.entries.map(({ id, kind }) => [id, kind])).toEqual([
+      ['steer-entry-1', 'steer'],
+      [turn.entryId, 'turn'],
+    ]);
+    expect(publish).toHaveBeenCalledTimes(2);
+  });
+
+  it('turns the queue head into a steer', async () => {
+    const repository = new InMemoryChatExecutionControlRepository('server-instance-test');
+    const operations = new ChatExecutionControlOperations(
+      repository,
+      host(),
+      { assertAvailable: mock(async () => undefined) },
+    );
+    const created = await operations.create('chat-1', 'queued guidance');
+
+    const marked = await operations.markSteer('chat-1', {
+      entryId: created.entryId,
+      expectedRevision: 1,
+      expectedReorderRevision: 0,
+    });
+
+    expect(marked.entries).toEqual([
+      expect.objectContaining({ id: created.entryId, kind: 'steer', status: 'queued', revision: 1 }),
+    ]);
+  });
 });

@@ -14,12 +14,14 @@ import {
   clearQueue,
   discardPendingInput,
   createQueueEntry,
+  createQueuedSteer,
   deleteQueueEntry,
   moveQueueEntry,
   pauseQueue,
   dequeueNextTurn,
   enqueueControlInput,
   consumeQueueSteer,
+  markQueueEntrySteer,
   releaseQueueSteer,
   replaceQueueEntry,
   reserveQueueSteer,
@@ -87,6 +89,48 @@ export class ChatExecutionControlOperations {
         this.#logMutation('create', chatId, result.entryId, committed.control, result.entry?.revision);
       }
       return { ...result, control: committed.control };
+    });
+  }
+
+  async createSteer(
+    chatId: string,
+    content: string,
+    command: QueueCommandIdentity,
+    submission: StoredQueueSubmissionIdentity,
+  ): Promise<QueueCommandMutationResult> {
+    return this.host.runExclusive(chatId, async () => {
+      const current = await this.#load(chatId);
+      const committed = await this.#commitTransition(
+        chatId,
+        current,
+        createQueuedSteer(current, { content, command, submission }, this.#transitionContext(chatId)),
+      );
+      const result = committed.value;
+      if (!result.duplicate) {
+        this.#logMutation('create-steer', chatId, result.entryId, committed.control);
+      }
+      return { entryId: result.entryId, control: committed.control, duplicate: result.duplicate };
+    });
+  }
+
+  async markSteer(
+    chatId: string,
+    input: {
+      entryId: string;
+      expectedRevision: number;
+      expectedReorderRevision: number;
+    },
+  ): Promise<StoredChatExecutionControlState> {
+    return this.host.runExclusive(chatId, async () => {
+      this.#assertChatExists(chatId);
+      const current = await this.#load(chatId);
+      const committed = await this.#commitTransition(
+        chatId,
+        current,
+        markQueueEntrySteer(current, input, transitionContext()),
+      );
+      if (committed.changed) this.#logMutation('mark-steer', chatId, input.entryId, committed.control);
+      return committed.control;
     });
   }
 
@@ -469,6 +513,8 @@ export class ChatExecutionControlOperations {
   #logMutation(
     operation:
       | 'create'
+      | 'create-steer'
+      | 'mark-steer'
       | 'replace'
       | 'delete'
       | 'pop'

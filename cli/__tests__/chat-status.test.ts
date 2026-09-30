@@ -127,6 +127,7 @@ describe('chat status', () => {
           entries: [{
             id: 'queued-1',
             content: 'Later',
+            kind: 'turn',
             revision: 1,
             createdAt: TIMESTAMP,
             updatedAt: TIMESTAMP,

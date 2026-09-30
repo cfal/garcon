@@ -55,6 +55,7 @@ import type {
 	PendingPermissionRequest,
 	PermissionMode,
 	ChatExecutionControlState,
+	QueueEntry,
 } from '$lib/types/chat';
 import {
 	ConversationLifecycleState,
@@ -1655,6 +1656,7 @@ describe('ConversationSessionController', () => {
 					{
 						id: 'entry-1',
 						content: 'queued',
+						kind: 'turn',
 						revision: 1,
 						createdAt: '2026-07-17T00:00:00.000Z',
 						updatedAt: '2026-07-17T00:00:00.000Z',
@@ -3639,6 +3641,7 @@ describe('ConversationSessionController', () => {
 						{
 							id: 'entry-1',
 							content: 'queue this',
+							kind: 'turn',
 							revision: 1,
 							createdAt: '2026-05-14T00:00:00.000Z',
 							updatedAt: '2026-05-14T00:00:00.000Z',
@@ -3929,6 +3932,7 @@ describe('ConversationSessionController', () => {
 						{
 							id: 'entry-1',
 							content: 'first queued message',
+							kind: 'turn',
 							revision: 1,
 							createdAt: '2026-05-14T00:00:00.000Z',
 							updatedAt: '2026-05-14T00:00:00.000Z',
@@ -3957,6 +3961,7 @@ describe('ConversationSessionController', () => {
 						{
 							id: 'entry-1',
 							content: 'first queued message',
+							kind: 'turn',
 							revision: 1,
 							createdAt: '2026-05-14T00:00:00.000Z',
 							updatedAt: '2026-05-14T00:00:00.000Z',
@@ -3964,6 +3969,7 @@ describe('ConversationSessionController', () => {
 						{
 							id: 'entry-2',
 							content: 'second queued message',
+							kind: 'turn',
 							revision: 1,
 							createdAt: '2026-05-14T00:00:01.000Z',
 							updatedAt: '2026-05-14T00:00:01.000Z',
@@ -4005,6 +4011,7 @@ describe('ConversationSessionController', () => {
 						{
 							id: 'entry-1',
 							content: 'first queued message',
+							kind: 'turn',
 							revision: 1,
 							createdAt: '2026-05-14T00:00:00.000Z',
 							updatedAt: '2026-05-14T00:00:00.000Z',
@@ -4080,6 +4087,7 @@ describe('ConversationSessionController', () => {
 					{
 						id: 'entry-1',
 						content: 'first',
+						kind: 'turn',
 						revision: 1,
 						createdAt: '2026-05-14T00:00:00.000Z',
 						updatedAt: '2026-05-14T00:00:00.000Z',
@@ -4288,6 +4296,7 @@ describe('ConversationSessionController', () => {
 					{
 						id: 'entry-1',
 						content: 'edited elsewhere',
+						kind: 'turn',
 						revision: 2,
 						createdAt: '2026-05-14T00:00:00.000Z',
 						updatedAt: '2026-05-14T00:00:01.000Z',
@@ -4403,9 +4412,10 @@ describe('ConversationSessionController', () => {
 			control,
 		});
 		const controller = new ConversationSessionController(deps);
-		const queued = {
+		const queued: QueueEntry = {
 			id: 'entry-1',
 			content: 'queued guidance',
+			kind: 'turn',
 			revision: 3,
 			createdAt: '2026-08-02T00:00:00.000Z',
 			updatedAt: '2026-08-02T00:00:00.000Z',
@@ -4513,6 +4523,7 @@ describe('ConversationSessionController', () => {
 					{
 						id: 'future-entry',
 						content: 'Run this later',
+						kind: 'turn',
 						revision: 1,
 						createdAt: '2026-07-11T00:00:00.000Z',
 						updatedAt: '2026-07-11T00:00:00.000Z',

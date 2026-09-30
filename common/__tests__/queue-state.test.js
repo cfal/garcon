@@ -42,6 +42,17 @@ describe('queue state', () => {
     })).toBeNull();
   });
 
+  it('requires each entry to say whether it starts a turn or steers the active one', () => {
+    const at = '2026-07-22T00:00:00.000Z';
+    const entry = { id: 'entry-1', content: 'guidance', revision: 1, createdAt: at, updatedAt: at };
+    expect(parseChatQueueState({
+      ...BASE_QUEUE,
+      entries: [{ ...entry, kind: 'turn' }, { ...entry, id: 'entry-2', kind: 'steer' }],
+    })?.entries.map((parsed) => parsed.kind)).toEqual(['turn', 'steer']);
+    expect(parseChatQueueState({ ...BASE_QUEUE, entries: [entry] })).toBeNull();
+    expect(parseChatQueueState({ ...BASE_QUEUE, entries: [{ ...entry, kind: 'later' }] })).toBeNull();
+  });
+
   it('requires dispatched markers to retain the dispatched content revision', () => {
     const dispatchedAt = '2026-07-22T00:00:00.000Z';
     expect(parseChatQueueState({

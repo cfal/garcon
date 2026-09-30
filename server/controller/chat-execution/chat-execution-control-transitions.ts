@@ -1,4 +1,4 @@
-import type { AutomaticQueuePauseKind, QueueEntry } from '../../../common/queue-state.ts';
+import type { AutomaticQueuePauseKind, QueueEntry, QueueEntryKind } from '../../../common/queue-state.ts';
 import type { QueueEntryPlacement } from '../../../common/chat-command-contracts.ts';
 import {
   MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES,
@@ -153,13 +153,34 @@ function missingEntryRejection(
     : { code: 'QUEUE_ENTRY_NOT_FOUND', entryId };
 }
 
+interface QueueEntryInput {
+  content: string;
+  command?: QueueCommandIdentity;
+  submission?: StoredQueueSubmissionIdentity;
+}
+
 export function createQueueEntry(
   current: StoredChatExecutionControlState,
-  input: {
-    content: string;
-    command?: QueueCommandIdentity;
-    submission?: StoredQueueSubmissionIdentity;
-  },
+  input: QueueEntryInput,
+  context: TransitionContext,
+): ControlTransition<QueueMutationValue> {
+  return insertQueueEntry(current, input, 'turn', context);
+}
+
+// Steers stay in submission order ahead of turn entries, so each reaches the active turn
+// before any queued turn starts.
+export function createQueuedSteer(
+  current: StoredChatExecutionControlState,
+  input: QueueEntryInput,
+  context: TransitionContext,
+): ControlTransition<QueueMutationValue> {
+  return insertQueueEntry(current, input, 'steer', context);
+}
+
+function insertQueueEntry(
+  current: StoredChatExecutionControlState,
+  input: QueueEntryInput,
+  kind: QueueEntryKind,
   context: TransitionContext,
 ): ControlTransition<QueueMutationValue> {
   const next = cloneStoredChatExecutionControl(current);
@@ -197,13 +218,18 @@ export function createQueueEntry(
   const entry: StoredQueueEntry = {
     id: input.command?.entryId ?? context.newId(),
     content: input.content,
+    kind,
     revision: 1,
     status: 'queued',
     createdAt: context.now,
     updatedAt: context.now,
     ...(input.submission ? { submission: { ...input.submission } } : {}),
   };
-  next.entries.push(entry);
+  const firstQueuedTurn = next.entries.findIndex((candidate) => (
+    candidate.status === 'queued' && candidate.kind === 'turn'
+  ));
+  if (kind === 'steer' && firstQueuedTurn >= 0) next.entries.splice(firstQueuedTurn, 0, entry);
+  else next.entries.push(entry);
   if (input.command) recordAppliedCommand(next, input.command, 'create', context);
   bump(next, context.now);
   return accepted(next, { entryId: entry.id, entry: toQueueEntry(entry), duplicate: false }, true);
@@ -549,6 +575,39 @@ export function reserveQueueSteer(
   return accepted(next, {
     entry: cloneQueueEntry(entry),
   }, true);
+}
+
+// Turns the head entry into a steer, so it reaches the active turn once the turn can take it.
+export function markQueueEntrySteer(
+  current: StoredChatExecutionControlState,
+  input: {
+    entryId: string;
+    expectedRevision: number;
+    expectedReorderRevision: number;
+  },
+  context: TransitionContext,
+): ControlTransition<void> {
+  const next = cloneStoredChatExecutionControl(current);
+  const entry = next.entries.find((candidate) => candidate.id === input.entryId);
+  if (!entry) return rejected(current, missingEntryRejection(current, input.entryId));
+  if (entry.status !== 'queued') {
+    return rejected(current, { code: 'QUEUE_ENTRY_IN_FLIGHT', entryId: input.entryId });
+  }
+  if (entry.revision !== input.expectedRevision) {
+    return rejected(current, {
+      code: 'QUEUE_ENTRY_REVISION_CONFLICT',
+      entryId: input.entryId,
+      actualRevision: entry.revision,
+    });
+  }
+  const head = next.entries.find((candidate) => candidate.status === 'queued');
+  if (next.reorderRevision !== input.expectedReorderRevision || head?.id !== entry.id) {
+    return rejected(current, { code: 'QUEUE_ENTRY_REORDER_CONFLICT' });
+  }
+  if (entry.kind === 'steer') return accepted(next, undefined, false);
+  entry.kind = 'steer';
+  bump(next, context.now);
+  return accepted(next, undefined, true);
 }
 
 export function releaseQueueSteer(

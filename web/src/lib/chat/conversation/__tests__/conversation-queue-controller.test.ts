@@ -10,6 +10,7 @@ import { ConversationUiState } from '../conversation-ui-state.svelte.js';
 import { submitIdempotentCommand } from '../idempotent-command.js';
 import * as m from '$lib/paraglide/messages.js';
 import type { ChatSessionRecord } from '$lib/types/chat-session.js';
+import type { QueueEntry } from '$lib/types/chat';
 
 vi.mock('$lib/api/chats.js', () => ({
 	deleteQueuedInput: vi.fn(),
@@ -20,10 +21,11 @@ vi.mock('$lib/api/chats.js', () => ({
 	resumeChatQueue: vi.fn(),
 }));
 
-function queueEntry(id: string, revision: number) {
+function queueEntry(id: string, revision: number): QueueEntry {
 	return {
 		id,
 		content: id,
+		kind: 'turn',
 		revision,
 		createdAt: '2026-07-22T00:00:00.000Z',
 		updatedAt: '2026-07-22T00:00:00.000Z',

@@ -20,6 +20,7 @@ function entry(index: number, revision = 1, content = `Queued message ${index}`)
 	return {
 		id: `entry-${index}`,
 		content,
+		kind: 'turn',
 		revision,
 		createdAt: '2026-07-16T00:00:00.000Z',
 		updatedAt: '2026-07-16T00:00:00.000Z',

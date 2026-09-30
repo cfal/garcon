@@ -34,6 +34,7 @@ describe('classifySubmission', () => {
 							{
 								id: 'entry-1',
 								content: 'first',
+								kind: 'turn',
 								revision: 1,
 								createdAt: '2026-07-19T00:00:00.000Z',
 								updatedAt: '2026-07-19T00:00:00.000Z',
@@ -77,6 +78,7 @@ describe('classifySubmission', () => {
 							{
 								id: 'entry-1',
 								content: 'first',
+								kind: 'turn',
 								revision: 1,
 								createdAt: '2026-07-19T00:00:00.000Z',
 								updatedAt: '2026-07-19T00:00:00.000Z',
@@ -106,6 +108,7 @@ describe('requiresQueuedSubmission', () => {
 							{
 								id: 'entry-1',
 								content: 'first',
+								kind: 'turn',
 								revision: 1,
 								createdAt: '2026-07-19T00:00:00.000Z',
 								updatedAt: '2026-07-19T00:00:00.000Z',

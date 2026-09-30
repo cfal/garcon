@@ -1,6 +1,11 @@
+// A turn entry waits to start the next turn. A steer entry is guidance for the active turn,
+// delivered once the turn can take it; with no turn running it starts the next turn.
+export type QueueEntryKind = 'turn' | 'steer';
+
 export interface QueueEntry {
   id: string;
   content: string;
+  kind: QueueEntryKind;
   revision: number;
   createdAt: string;
   updatedAt: string;
@@ -48,16 +53,18 @@ function parseQueueEntry(value: unknown): QueueEntry | null {
   const item = value as Record<string, unknown>;
   const id = typeof item.id === 'string' ? item.id.trim() : '';
   const content = typeof item.content === 'string' ? item.content : null;
+  const kind = item.kind === 'turn' || item.kind === 'steer' ? item.kind : null;
   const createdAt = typeof item.createdAt === 'string' ? item.createdAt : '';
   const revision = typeof item.revision === 'number' && Number.isSafeInteger(item.revision) && item.revision > 0
     ? item.revision
     : null;
   const updatedAt = typeof item.updatedAt === 'string' ? item.updatedAt : '';
-  if (!id || content === null || !createdAt || revision === null || !updatedAt) return null;
+  if (!id || content === null || kind === null || !createdAt || revision === null || !updatedAt) return null;
 
   return {
     id,
     content,
+    kind,
     revision,
     createdAt,
     updatedAt,
