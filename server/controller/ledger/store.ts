@@ -1,6 +1,7 @@
 import { Database } from 'bun:sqlite';
 import crypto from 'node:crypto';
-import { chmodSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { chmodSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs';
+import { lstat, readdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { yieldToEventLoop } from '@garcon/server-agent-common/shared/event-loop';
 import { trackActivity } from '../../common/event-loop-stalls.js';
@@ -17,6 +18,7 @@ import {
   parseChatRowTitle,
 } from '../../../common/chat-row-contracts.js';
 import { createLogger } from '../../common/log.js';
+import { hasNodeErrorCode } from '../../common/errors.js';
 import {
   decodeStoredLedgerRow,
   cliRowFingerprint,
@@ -95,6 +97,9 @@ const DEFAULT_CONNECTION_CACHE_SIZE = 10;
 const PREVIEW_EDGE_ROWS = 32;
 const PREVIEW_ROW_BYTES = 64 * 1024;
 const CHAT_DIRECTORY_PATTERN = /^[A-Za-z0-9_-]+$/;
+// Deleted chat directories wait here for asynchronous removal. The leading dot keeps it
+// outside CHAT_DIRECTORY_PATTERN.
+const TRASH_DIRECTORY = '.trash';
 const logger = createLogger('ledger:store');
 
 
@@ -698,12 +703,14 @@ export class TranscriptLedgerStore {
     this.closeChat(chatId);
     this.#openFailures.delete(chatId);
     this.#failureFences.delete(chatId);
-    rmSync(path.join(this.#rootDirectory, chatId), { recursive: true, force: true });
+    this.#discardDirectory(chatId);
   }
 
+  // Also removes chat directories whose deletion a restart interrupted.
   removeUnregisteredChatDirectories(registeredChatIds: ReadonlySet<string>): readonly string[] {
     const removed: string[] = [];
     if (statSizeIfExists(this.#rootDirectory) === null) return removed;
+    void this.#sweepTrash();
     for (const name of readdirSync(this.#rootDirectory)) {
       if (!CHAT_DIRECTORY_PATTERN.test(name) || registeredChatIds.has(name)) continue;
       const directory = path.join(this.#rootDirectory, name);
@@ -715,8 +722,10 @@ export class TranscriptLedgerStore {
         this.closeChat(name);
         this.#openFailures.delete(name);
         this.#failureFences.delete(name);
+        this.#discardDirectory(name);
+      } else {
+        rmSync(directory, { force: true });
       }
-      rmSync(directory, { recursive: isDirectory, force: true });
       removed.push(name);
     }
     return removed;
@@ -737,6 +746,48 @@ export class TranscriptLedgerStore {
       this.#failureFences.clear();
     }
     if (firstFailure) throw firstFailure;
+  }
+
+  // A rename within the ledger root is constant-time, so the chat's files disappear at
+  // once, while unlinking a large ledger can take the filesystem a noticeable time, so the
+  // removal runs off the event loop.
+  #discardDirectory(name: string): void {
+    const target = path.join(this.#trashDirectory(), `${name}-${crypto.randomUUID()}`);
+    try {
+      renameSync(path.join(this.#rootDirectory, name), target);
+    } catch (error) {
+      if (hasNodeErrorCode(error, 'ENOENT')) return;
+      throw error;
+    }
+    void this.#removeDeleted(target);
+  }
+
+  // Replaces anything but a real directory at the trash path, so removal never follows a link
+  // out of the ledger root.
+  #trashDirectory(): string {
+    const trash = path.join(this.#rootDirectory, TRASH_DIRECTORY);
+    const stats = lstatIfExists(trash);
+    if (stats?.isDirectory()) return trash;
+    if (stats) rmSync(trash, { force: true });
+    mkdirSync(trash, { mode: 0o700 });
+    return trash;
+  }
+
+  // Empties the trash entry by entry; removing the directory itself could race a rename into it.
+  async #sweepTrash(): Promise<void> {
+    const trash = path.join(this.#rootDirectory, TRASH_DIRECTORY);
+    const stats = await lstat(trash).catch(() => null);
+    if (!stats?.isDirectory()) return;
+    const entries = await readdir(trash).catch(() => []);
+    for (const entry of entries) await this.#removeDeleted(path.join(trash, entry));
+  }
+
+  async #removeDeleted(target: string): Promise<void> {
+    try {
+      await rm(target, { recursive: true, force: true });
+    } catch (error) {
+      logger.warn('Deleted transcript ledger removal failed; it is retried on the next start', error);
+    }
   }
 
   #composePrompt(
