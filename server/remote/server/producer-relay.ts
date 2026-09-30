@@ -4,8 +4,10 @@ import {
   type AgentIntegration,
   type AgentProducerBinding,
   type AgentProducerNotification,
+  type AgentRunFailureDetail,
 } from '@garcon/server-agent-interface';
 import { failureDetail } from '@garcon/server-agent-common/execution/producer-adapter';
+import { MALFORMED_DATA } from '../transport/failure-reason.js';
 import type { ObserveUndeliveredReply } from '../transport/rpc.js';
 import type { AgentProducerFrame, ProducerAcknowledgement, ProducerResumeState } from '../transport/rpc-protocol.js';
 import { SESSION_MESSAGE_BYTES } from '../transport/session-socket.js';
@@ -174,7 +176,7 @@ export class ProducerRelay {
         publishIfReplyLost({
           type: 'launch-settled',
           runId: launch.runId,
-          error: cancelled && binding.session !== session ? EXECUTOR_DISCONNECTED_BEFORE_START : failureDetail(error),
+          error: cancelled && binding.session !== session ? EXECUTOR_DISCONNECTED_BEFORE_START : launchFailure(error),
         });
       }
       throw error;
@@ -400,6 +402,12 @@ async function runLaunch(run: () => Promise<AgentExecutionHandle>): Promise<Agen
     }
     throw error;
   }
+}
+
+// Reports a failed launch as its error reply would have, so a parse error, whose
+// message can echo the payload it failed on, is only Malformed data.
+function launchFailure(error: unknown): AgentRunFailureDetail {
+  return error instanceof SyntaxError ? { code: 'PROVIDER_FAILURE', message: MALFORMED_DATA } : failureDetail(error);
 }
 
 function encodeProducerFrame(seq: number, notification: AgentProducerNotification): string {

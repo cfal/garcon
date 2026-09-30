@@ -310,6 +310,23 @@ for (const dialer of ['controller', 'worker'] as const) {
     } finally { await fixture.dispose(); }
   });
 
+  test(`a start that fails to parse and whose error reply the worker could not deliver reports malformed data (${dialer} dials)`, async () => {
+    let fault!: ReturnType<typeof admissionFault>;
+    const fixture = await remoteFixture(dialer, (_controller, worker) => { fault = admissionFault(worker); });
+    try {
+      const integration = await fixture.executor.getAgentIntegration('test');
+      const request = await requestFor(integration);
+      const outcomes = launchOutcomes(integration);
+      fixture.generations[0]!.hooks.start = async () => { JSON.parse('{"run": SYNTHETIC_SENTINEL}'); };
+      fault.refuseNext((encoded) => encoded.includes('"type":"error"') && encoded.includes('Malformed data'));
+      expect(await integration.execution.start(request).catch((error: unknown) => error)).toMatchObject({ outcome: 'unknown' });
+      await integration.execution.runningSessions();
+      expect(outcomes).toEqual([{
+        type: 'launch-settled', runId: request.runId, error: { code: 'PROVIDER_FAILURE', message: 'Malformed data' },
+      }]);
+    } finally { await fixture.dispose(); }
+  });
+
   test(`a cancelled start whose late reply the worker could not deliver reports its handle (${dialer} dials)`, async () => {
     let fault!: ReturnType<typeof admissionFault>;
     const fixture = await remoteFixture(dialer, (_controller, worker) => { fault = admissionFault(worker); });
