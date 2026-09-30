@@ -380,20 +380,22 @@ test('selected lines from multiple remote files use one review document before r
     await app.openChat(chatId);
     await openGit(fixture);
     await showGitDiff(fixture);
-    await waitForDiff(fixture, 'Synthetic second final selection');
-    await fixture.page.$eval(GIT_PANEL, panel => {
-      for (const [text, number] of [
-        ['Synthetic first selection', 2],
-        ['Synthetic second selection', 3],
-        ['Synthetic second final selection', 5],
-      ]) {
+    const selections = [
+      ['Synthetic first selection', 2],
+      ['Synthetic second selection', 3],
+      ['Synthetic second final selection', 5],
+    ] as const;
+    // Each file's rows load separately, so one file's lines do not imply the other's.
+    for (const [text] of selections) await waitForDiff(fixture, text);
+    await fixture.page.$eval(GIT_PANEL, (panel, selections) => {
+      for (const [text, number] of selections) {
         const row = [...panel.querySelectorAll('[data-git-virtual-row]')]
           .find(element => element.textContent?.includes(String(text)));
         const line = row?.querySelector(`button[aria-label="Add new line ${number} to chat"]`);
         if (!line) throw new Error(`Missing selected line: ${text}`);
         line.dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }));
       }
-    });
+    }, selections);
     await app.waitForButton('Stage (3)');
     const stagingStatuses: number[] = [];
     await Promise.all([
