@@ -13,9 +13,7 @@ import { normalizeThinkingMode, type ThinkingMode } from '$shared/chat-modes';
 import { createClientChatId } from '$shared/client-chat-id';
 import { effectiveExecutorId } from '$shared/executors';
 import type { RemoteSettingsSnapshot, TicketDispatchUiSettings, UpdateRemoteSettingsInput } from '$shared/settings';
-import type { TicketMutationPayload } from '$shared/ticket-commands';
 import { renderTicketDispatchPrompt, type TicketDispatchSubject } from '$shared/ticket-dispatch';
-import type { Ticket } from '$shared/tickets';
 import {
 	hasSavedTicketDispatchSelection,
 	resolveTicketDispatchSelection,
@@ -47,10 +45,8 @@ export interface TicketDispatchSelectionChange {
 	thinkingMode?: ThinkingMode;
 }
 
-export type DispatchableTicket = TicketDispatchSubject & Pick<Ticket, 'revision' | 'status'>;
-
 export interface TicketDispatchMutations {
-	mutate(ticket: Pick<Ticket, 'id' | 'revision'>, payload: TicketMutationPayload): Promise<boolean>;
+	assignToChat(ticketId: string, chatId: string): Promise<boolean>;
 }
 
 export type TicketDispatchPromptSaveResult = { ok: true } | { ok: false; message: string };
@@ -84,29 +80,18 @@ const SELECTION_KEYS = [
 	'thinkingMode',
 ] as const;
 
-export function ticketDispatchAssignment(
-	ticket: Pick<Ticket, 'id' | 'revision' | 'status'>,
-	chatId: string,
-): TicketMutationPayload {
-	return {
-		action: 'update',
-		ticketId: ticket.id,
-		expectedRevision: ticket.revision,
-		patch: {
-			assignee: { kind: 'chat', chatId },
-			...(ticket.status === 'open' ? { status: 'in-progress' as const } : {}),
-		},
-	};
-}
-
 export class TicketDispatchController {
 	selectionOverride = $state<TicketDispatchSelectorValue | null>(null);
-	saving = $state(false);
+	#pendingSaves = $state(0);
 	saveError = $state<string | null>(null);
 	#dispatching = $state<ReadonlySet<string>>(new Set());
 	#selectionSaveToken = 0;
 
 	constructor(private readonly deps: TicketDispatchControllerDeps) {}
+
+	get saving(): boolean {
+		return this.#pendingSaves > 0;
+	}
 
 	get saved(): TicketDispatchUiSettings | undefined {
 		return this.deps.remoteSettings.snapshot?.ui.ticketDispatch;
@@ -185,10 +170,12 @@ export class TicketDispatchController {
 			modelProtocol: next.modelProtocol,
 			thinkingMode,
 		});
+		// Only the latest selection may clear the optimistic value, whether it saved or failed.
 		if (token === this.#selectionSaveToken) this.selectionOverride = null;
 	}
 
 	async followNewChat(): Promise<void> {
+		if (this.followsNewChatDefaults) return;
 		const token = ++this.#selectionSaveToken;
 		const next: TicketDispatchUiSettings = { ...this.saved };
 		for (const key of SELECTION_KEYS) delete next[key];
@@ -203,9 +190,10 @@ export class TicketDispatchController {
 
 	/**
 	 * Starts a chat for the ticket with the saved selection and prompt, then
-	 * assigns the ticket to the chat once the server accepts the start.
+	 * assigns the ticket to the chat once the server accepts the start. The
+	 * ticket service rejects an assignee chat that does not exist yet.
 	 */
-	async dispatch(ticket: DispatchableTicket, tickets: TicketDispatchMutations): Promise<boolean> {
+	async dispatch(ticket: TicketDispatchSubject, tickets: TicketDispatchMutations): Promise<boolean> {
 		if (this.isDispatching(ticket.id)) return false;
 		this.#setDispatching(ticket.id, true);
 		let chatId: ChatId;
@@ -217,12 +205,11 @@ export class TicketDispatchController {
 		} finally {
 			this.#setDispatching(ticket.id, false);
 		}
-		if (await this.#waitForStartedChat(chatId))
-			await tickets.mutate(ticket, ticketDispatchAssignment(ticket, chatId));
+		if (await this.#waitForStartedChat(chatId)) await tickets.assignToChat(ticket.id, chatId);
 		return true;
 	}
 
-	async #prepare(ticket: DispatchableTicket): Promise<NewChatConfig | null> {
+	async #prepare(ticket: TicketDispatchSubject): Promise<NewChatConfig | null> {
 		try {
 			await this.deps.remoteSettings.ensureLoaded();
 		} catch {
@@ -232,7 +219,10 @@ export class TicketDispatchController {
 		if (this.deps.executors && !this.deps.executors.isReady(executorId))
 			return this.#fail(m.tickets_dispatch_executor_unavailable());
 		const catalog = this.deps.modelCatalog.forExecutor(executorId);
+		// Matches the new-chat gate: never start from a cached catalog the executor has not confirmed.
 		if (!catalog.isValidated) await catalog.refreshIfStale().catch(() => undefined);
+		if (!catalog.isValidated)
+			return this.#fail(catalog.error ?? m.tickets_dispatch_model_unavailable());
 		const resolution = this.resolution;
 		if (resolution.kind !== 'ready') return this.#fail(m.tickets_dispatch_model_unavailable());
 		const { selection } = resolution;
@@ -302,16 +292,15 @@ export class TicketDispatchController {
 
 	async #save(ticketDispatch: TicketDispatchUiSettings): Promise<boolean> {
 		this.saveError = null;
-		this.saving = true;
+		this.#pendingSaves += 1;
 		try {
 			await this.deps.remoteSettings.update({ ui: { ticketDispatch } });
 			return true;
 		} catch (error) {
 			this.saveError = error instanceof Error ? error.message : m.settings_save_failed();
-			this.selectionOverride = null;
 			return false;
 		} finally {
-			this.saving = false;
+			this.#pendingSaves -= 1;
 		}
 	}
 

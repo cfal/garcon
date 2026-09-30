@@ -15,6 +15,7 @@ import type { PortableSingletonController } from '$lib/workspace/portable-single
 import type { WorkspaceProjectState } from '$lib/workspace/workspace-context.svelte.js';
 import { TicketDetailState } from '../detail/ticket-detail-state.svelte.js';
 import { TicketMutationFeedback } from '../commands/ticket-mutation-feedback.svelte.js';
+import { ticketChatAssignment } from '../commands/ticket-chat-assignment.js';
 import { TicketDraftStore } from '../drafts/ticket-draft-store.svelte.js';
 import { attachTicketDraftExitGuard } from '../drafts/ticket-draft-exit-guard.js';
 import {
@@ -620,6 +621,25 @@ export class TicketsController implements PortableSingletonController {
 		}
 		await draft.submit(payload);
 		return !draft.dirty && !draft.error;
+	}
+
+	/**
+	 * Assigns a ticket to a chat at its current revision. A chat started for the
+	 * ticket may already have changed it, so the revision seen at dispatch is stale.
+	 */
+	async assignToChat(ticketId: string, chatId: string): Promise<boolean> {
+		const partition = this.bootstrap;
+		if (!partition) return false;
+		try {
+			const current = await this.#api.read({ ticketId, includeDescription: false, commentLimit: 0 });
+			if (this.bootstrap !== partition) return false;
+			requireTicketVersion(current, partition.storeId);
+			if (current.ticket.status === 'closed') return false;
+			return await this.mutate(current.ticket, ticketChatAssignment(current.ticket, chatId));
+		} catch (error) {
+			this.#pageError(error);
+			return false;
+		}
 	}
 
 	async unlink(link: TicketLink): Promise<void> {

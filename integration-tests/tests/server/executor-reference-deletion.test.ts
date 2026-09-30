@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { GENERATION_UI_SETTING_KEYS, type RemoteSettingsSnapshot } from '../../../common/settings.js';
+import { MODEL_SELECTION_UI_SETTING_KEYS, type RemoteSettingsSnapshot } from '../../../common/settings.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { userContents } from '../../support/chat-assertions.js';
 
@@ -10,7 +10,7 @@ test('concurrent executor deletion fences publication while preserving already-s
     const client = fixture.client;
     const agent = fixture.directAgents.openAi;
     const saved = new Map<string, string>();
-    for (const key of GENERATION_UI_SETTING_KEYS) {
+    for (const key of MODEL_SELECTION_UI_SETTING_KEYS) {
       const executor = await client.post<{ id: string }>('/api/v1/executors', {
         label: 'Synthetic worker', direction: 'executor-connects',
       });
@@ -37,7 +37,7 @@ test('concurrent executor deletion fences publication while preserving already-s
     const executors = await fixture.client.get<{ executors: { id: string }[] }>('/api/v1/executors');
     expect(executors.executors.map((executor) => executor.id)).toEqual(['local']);
     const settings = await fixture.client.get<RemoteSettingsSnapshot>('/api/v1/app/settings');
-    for (const key of GENERATION_UI_SETTING_KEYS) expect(settings.ui[key]?.executorId).toBe(saved.get(key));
+    for (const key of MODEL_SELECTION_UI_SETTING_KEYS) expect(settings.ui[key]?.executorId).toBe(saved.get(key));
   }, { executionBackend: 'in-process' });
 }, 30_000);
 

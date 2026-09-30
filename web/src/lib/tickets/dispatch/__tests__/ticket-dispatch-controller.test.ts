@@ -4,10 +4,9 @@ import { makeRemoteSettingsSnapshot } from '$lib/stores/__tests__/remote-setting
 import type { NewChatConfig } from '$lib/types/app.js';
 import type { ChatId } from '$shared/chat-id';
 import type { RemoteSettingsSnapshot, TicketDispatchUiSettings, UpdateRemoteSettingsInput } from '$shared/settings';
+import type { TicketDispatchSubject } from '$shared/ticket-dispatch';
 import {
 	TicketDispatchController,
-	ticketDispatchAssignment,
-	type DispatchableTicket,
 	type TicketDispatchControllerDeps,
 	type TicketDispatchMutations,
 } from '../ticket-dispatch-controller.svelte.js';
@@ -38,23 +37,29 @@ function metadata(id: string, defaultModel: string): AgentMetadata {
 	};
 }
 
-const ticket: DispatchableTicket = {
+const ticket: TicketDispatchSubject = {
 	id: 'G-1',
 	title: 'Move things out of memory',
 	project: '/repo',
 	description: 'Stop re-reading exposure per order.',
-	revision: 1,
-	status: 'open',
 };
 
-function fixture(options: { ticketDispatch?: TicketDispatchUiSettings; projectValid?: boolean } = {}) {
+function fixture(
+	options: {
+		ticketDispatch?: TicketDispatchUiSettings;
+		projectValid?: boolean;
+		catalogValidated?: boolean;
+		update?: TicketDispatchControllerDeps['remoteSettings']['update'];
+	} = {},
+) {
 	const catalog = new ModelCatalogStore();
 	catalog.agentMetadata = { claude: metadata('claude', 'opus'), codex: metadata('codex', 'gpt-5.5') };
 	catalog.agentModels = {
 		claude: [{ value: 'opus', label: 'Opus' }],
 		codex: [{ value: 'gpt-5.5', label: 'GPT-5.5' }],
 	};
-	catalog.lastValidatedAt = Date.now();
+	if (options.catalogValidated !== false) catalog.lastValidatedAt = Date.now();
+	vi.spyOn(catalog, 'refreshIfStale').mockResolvedValue();
 	let snapshot: RemoteSettingsSnapshot = makeRemoteSettingsSnapshot({
 		ui: options.ticketDispatch ? { ticketDispatch: options.ticketDispatch } : {},
 	});
@@ -66,6 +71,7 @@ function fixture(options: { ticketDispatch?: TicketDispatchUiSettings; projectVa
 		ensureLoaded: async () => snapshot,
 		update: async (patch) => {
 			updates.push(patch);
+			if (options.update) return options.update(patch);
 			snapshot = { ...snapshot, ui: { ...snapshot.ui, ...patch.ui } };
 			return snapshot;
 		},
@@ -73,7 +79,7 @@ function fixture(options: { ticketDispatch?: TicketDispatchUiSettings; projectVa
 	const sessions = new DispatchSessionsHarness();
 	const started: { chatId: ChatId; config: NewChatConfig }[] = [];
 	const notifications = { error: vi.fn() };
-	const mutations = { mutate: vi.fn(async () => true) } satisfies TicketDispatchMutations;
+	const mutations = { assignToChat: vi.fn(async () => true) } satisfies TicketDispatchMutations;
 	const controller = new TicketDispatchController({
 		remoteSettings,
 		modelCatalog: catalog,
@@ -112,16 +118,11 @@ describe('TicketDispatchController.dispatch', () => {
 			}),
 		});
 		expect(controller.isDispatching('G-1')).toBe(false);
-		expect(mutations.mutate).not.toHaveBeenCalled();
+		expect(mutations.assignToChat).not.toHaveBeenCalled();
 
 		sessions.setStatus(CHAT_ID, 'running');
 		await expect(dispatched).resolves.toBe(true);
-		expect(mutations.mutate).toHaveBeenCalledWith(ticket, {
-			action: 'update',
-			ticketId: 'G-1',
-			expectedRevision: 1,
-			patch: { assignee: { kind: 'chat', chatId: CHAT_ID }, status: 'in-progress' },
-		});
+		expect(mutations.assignToChat).toHaveBeenCalledExactlyOnceWith('G-1', CHAT_ID);
 	});
 
 	it('skips assignment when the draft chat is discarded before it starts', async () => {
@@ -132,7 +133,7 @@ describe('TicketDispatchController.dispatch', () => {
 		sessions.remove(CHAT_ID);
 
 		await expect(dispatched).resolves.toBe(true);
-		expect(mutations.mutate).not.toHaveBeenCalled();
+		expect(mutations.assignToChat).not.toHaveBeenCalled();
 	});
 
 	it('reports an invalid ticket project without starting a chat', async () => {
@@ -148,6 +149,15 @@ describe('TicketDispatchController.dispatch', () => {
 		const { controller, started, notifications, mutations } = fixture({
 			ticketDispatch: { agentId: 'claude', model: 'retired' },
 		});
+
+		await expect(controller.dispatch(ticket, mutations)).resolves.toBe(false);
+
+		expect(started).toHaveLength(0);
+		expect(notifications.error).toHaveBeenCalledOnce();
+	});
+
+	it('refuses to dispatch from a catalog the executor has not confirmed', async () => {
+		const { controller, started, notifications, mutations } = fixture({ catalogValidated: false });
 
 		await expect(controller.dispatch(ticket, mutations)).resolves.toBe(false);
 
@@ -202,6 +212,46 @@ describe('TicketDispatchController settings', () => {
 		expect(controller.selectorValue).toMatchObject({ agentId: 'codex', model: 'gpt-5.5', thinkingMode: 'high' });
 	});
 
+	it('keeps a newer optimistic selection when an older save fails', async () => {
+		let rejectFirst!: (error: Error) => void;
+		let calls = 0;
+		const { controller } = fixture({
+			update: () => {
+				calls += 1;
+				if (calls === 1)
+					return new Promise((_, reject) => {
+						rejectFirst = reject;
+					});
+				return new Promise(() => undefined);
+			},
+		});
+		const change = {
+			executorId: 'local',
+			modelValue: 'gpt-5.5',
+			model: 'gpt-5.5',
+			apiProviderId: null,
+			modelEndpointId: null,
+			modelProtocol: null,
+		};
+
+		const first = controller.persistSelection({ ...change, agentId: 'codex' });
+		void controller.persistSelection({ ...change, agentId: 'claude', modelValue: 'opus', model: 'opus' });
+		rejectFirst(new Error('Synthetic save failure'));
+		await first;
+
+		expect(controller.selectorValue).toMatchObject({ agentId: 'claude', model: 'opus' });
+		expect(controller.saveError).toBe('Synthetic save failure');
+		expect(controller.saving).toBe(true);
+	});
+
+	it('does not rewrite settings when dispatch already follows new-chat defaults', async () => {
+		const { controller, updates } = fixture({ ticketDispatch: { customPrompt: 'Do {{ticket}}' } });
+
+		await controller.followNewChat();
+
+		expect(updates).toEqual([]);
+	});
+
 	it('returns to new-chat defaults without dropping the custom prompt', async () => {
 		const { controller, updates } = fixture({
 			ticketDispatch: { agentId: 'codex', model: 'gpt-5.5', customPrompt: 'Do {{ticket}}' },
@@ -221,17 +271,6 @@ describe('TicketDispatchController settings', () => {
 
 		expect(updates.at(-1)).toEqual({
 			ui: { ticketDispatch: { agentId: 'codex', model: 'gpt-5.5', customPrompt: 'Ship {{ticket}}' } },
-		});
-	});
-});
-
-describe('ticketDispatchAssignment', () => {
-	it('keeps a ticket status that is already past open', () => {
-		expect(ticketDispatchAssignment({ id: 'G-2', revision: 4, status: 'in-review' }, CHAT_ID)).toEqual({
-			action: 'update',
-			ticketId: 'G-2',
-			expectedRevision: 4,
-			patch: { assignee: { kind: 'chat', chatId: CHAT_ID } },
 		});
 	});
 });
