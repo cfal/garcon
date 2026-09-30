@@ -309,6 +309,9 @@ function createRpcClientFixture(responder, options = {}) {
   const sendNotification = (method, params) => {
     controller.enqueue(encoder.encode(`${JSON.stringify({ method, params })}\n`));
   };
+  const sendLine = (line) => {
+    controller.enqueue(encoder.encode(`${line}\n`));
+  };
   const proc = {
     stdin: {
       write(data) {
@@ -358,6 +361,7 @@ function createRpcClientFixture(responder, options = {}) {
     sendResult,
     sendServerRequest,
     sendNotification,
+    sendLine,
   };
 }
 
@@ -487,6 +491,23 @@ describe('CodexAppServerClient lifecycle RPCs', () => {
     expect(delivered).toEqual(['first', 'second']);
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain('handler failed');
+    await client.shutdown();
+  });
+
+  it('warns about a line that is not JSON without echoing it, and keeps reading', async () => {
+    const { client, sendLine, sendNotification } = createRpcClientFixture(() => initializeResponse);
+    const warnings = [];
+    const delivered = [];
+    client.on('warning', (message) => warnings.push(message));
+    client.on('notification', (notification) => delivered.push(notification.method));
+    await client.connect();
+
+    sendLine('{"method": SYNTHETIC_SENTINEL}');
+    sendNotification('after', { threadId: 'thread-1' });
+    await waitForCondition(() => delivered.length === 1);
+
+    expect(warnings).toEqual(['Codex app-server emitted invalid JSON.']);
+    expect(delivered).toEqual(['after']);
     await client.shutdown();
   });
 

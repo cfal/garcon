@@ -56,6 +56,28 @@ describe('getCursorAuthStatus', () => {
     expect(spawnMock).not.toHaveBeenCalled();
   });
 
+  it('names status output that is not JSON without echoing it', async () => {
+    const encoder = new TextEncoder();
+    spawnMock.mockReturnValueOnce({
+      stdout: new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode('Status: SYNTHETIC_SENTINEL'));
+          controller.close();
+        },
+      }),
+      stderr: new ReadableStream({ start(controller) { controller.close(); } }),
+      exited: Promise.resolve(0),
+    });
+
+    await expect(getCursorAuthStatus(config)).resolves.toEqual({
+      authenticated: false,
+      canReauth: false,
+      label: '',
+      source: 'none',
+      detail: 'Cursor status output is not valid JSON.',
+    });
+  });
+
   it('parses authenticated CLI status JSON', async () => {
     spawnMock.mockReturnValueOnce(procWithJson({
       status: 'authenticated',

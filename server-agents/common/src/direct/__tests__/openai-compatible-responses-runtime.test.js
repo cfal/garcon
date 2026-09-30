@@ -250,6 +250,16 @@ describe('OpenAiCompatibleResponsesRuntime', () => {
     )).resolves.toBe('buffered response');
   });
 
+  it('names buffered Responses JSON that does not parse without echoing it', async () => {
+    globalThis.fetch = mock(async () => new Response('{"output": SYNTHETIC_SENTINEL', {
+      headers: { 'content-type': 'application/json' },
+    }));
+
+    const failure = await runOpenAiResponsesSingleQuery(runtimeConfig('/tmp/unused'), 'hi').catch((error) => error);
+
+    expect(failure.message).toBe('Direct (Responses) response is not valid JSON.');
+  });
+
   it('rejects failed and incomplete buffered Responses payloads', async () => {
     globalThis.fetch = mock(async () => Response.json({
       status: 'failed',

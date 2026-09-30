@@ -149,8 +149,9 @@ async function exportThread(
 
   try {
     return JSON.parse(raw) as AmpThreadExport;
-  } catch (error) {
-    throw new Error(`Failed to parse Amp thread export JSON: ${(error as Error).message}`);
+  } catch {
+    // A parse error's message can echo the thread, so the error names the export instead.
+    throw new Error('Amp thread export is not valid JSON');
   }
 }
 

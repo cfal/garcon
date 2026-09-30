@@ -1,4 +1,5 @@
 import { readSseDataEvents } from '@garcon/server-agent-common/shared/sse';
+import { readJsonResponse } from '@garcon/server-agent-common/shared/json-response';
 import { isJsonResponse } from './response-media-type.js';
 import { stripThinkBlocks } from './strip-think-blocks.js';
 
@@ -171,7 +172,7 @@ export async function readOpenAiResponsesResponse(
   let text: string;
   let completedResponseId: string | null;
   if (isJsonResponse(response)) {
-    const data = await response.json() as ResponsesJsonBody;
+    const data = await readJsonResponse(response, runtimeLabel) as ResponsesJsonBody;
     const responseError = responseErrorMessage(data);
     if (data.status === 'failed' || data.status === 'incomplete' || responseError) {
       const detail = responseError

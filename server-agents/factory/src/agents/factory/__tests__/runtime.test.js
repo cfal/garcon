@@ -609,6 +609,15 @@ describe('FactoryCliRuntime lifecycle', () => {
     });
   });
 
+  it('names a one-shot reply that is not JSON without echoing it', async () => {
+    spawnMock.mockReturnValueOnce(createCompletedProc('{"result": SYNTHETIC_SENTINEL}'));
+
+    const failure = await runSingleQuery('hello', { cwd: '/proj', model: 'claude-opus-4-6' }).catch((error) => error);
+
+    expect(failure).not.toBeInstanceOf(SyntaxError);
+    expect(failure.message).toBe('Factory emitted invalid JSON for a single query');
+  });
+
   it('forwards exact one-shot effort without the interactive fallback ladder', async () => {
     spawnMock
       .mockReturnValueOnce(createCompletedProc())

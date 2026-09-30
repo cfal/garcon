@@ -270,6 +270,17 @@ describe('OpenAiCompatibleChatRuntime', () => {
     expect(result).toBe('generated message');
   });
 
+  it('names a buffered JSON response that does not parse without echoing it', async () => {
+    globalThis.fetch = mock(async () => new Response('{"choices": SYNTHETIC_SENTINEL', {
+      headers: { 'content-type': 'application/json' },
+    }));
+
+    const failure = await runOpenAiCompatibleSingleQuery(runtimeConfig('/tmp/unused'), 'Describe the change.')
+      .catch((error) => error);
+
+    expect(failure.message).toBe('Direct (Chat Completions) response is not valid JSON.');
+  });
+
   it('strips think blocks before emitting interactive text', async () => {
     globalThis.fetch = mock(async () => streamResponse(
       '<think>private',

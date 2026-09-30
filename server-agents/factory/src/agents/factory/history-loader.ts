@@ -126,7 +126,10 @@ async function readFactorySessionDiscoveryIndexStrict(
     throw error;
   }
   signal?.throwIfAborted();
-  const parsed = JSON.parse(raw) as unknown;
+  let parsed: unknown;
+  // A parse error's message can echo the file's content, so the error names the file instead.
+  try { parsed = JSON.parse(raw); }
+  catch { throw new Error('Factory session discovery index is not valid JSON'); }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error('Factory session discovery index is invalid');
   }
@@ -320,7 +323,10 @@ async function readFactorySessionEvents(
         },
       });
     } catch (error) {
-      if (throwOnError) throw error;
+      // A parse error's message can echo the record, so the error names the record instead.
+      if (throwOnError) {
+        throw error instanceof SyntaxError ? new Error(`Factory transcript record ${entry.lineNumber} is not valid JSON`) : error;
+      }
       logger.warn('Factory transcript contains invalid JSON.', {
         sessionPath,
         lineNumber: entry.lineNumber ?? null,

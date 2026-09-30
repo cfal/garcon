@@ -57,6 +57,8 @@ export class FileAgentMigrationStore implements AgentMigrationStore {
       return parsed;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { version: 0, values: {} };
+      // A parse error's message can echo the file's content, so the error names the file instead.
+      if (error instanceof SyntaxError) throw new Error(`Invalid agent migration state: ${this.#filePath}`);
       throw error;
     }
   }

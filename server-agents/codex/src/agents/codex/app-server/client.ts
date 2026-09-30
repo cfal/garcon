@@ -467,8 +467,9 @@ export class CodexAppServerClient extends EventEmitter {
     let message: unknown;
     try {
       message = JSON.parse(line);
-    } catch (error) {
-      this.emit('warning', `Invalid Codex app-server JSON: ${(error as Error).message}`);
+    } catch {
+      // A parse error's message can echo the line, which carries session content.
+      this.emit('warning', 'Codex app-server emitted invalid JSON.');
       return;
     }
 

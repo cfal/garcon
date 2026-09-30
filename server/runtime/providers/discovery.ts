@@ -1,6 +1,7 @@
 import type { AgentModelOption } from '../../../common/agents.js';
 import type { ApiProviderModelDiscoveryResponse } from '../../../common/api-providers.js';
 import type { ApiProviderDiscoveryRequest, ExecutorCallOptions } from '@garcon/server-agent-interface';
+import { readJsonResponse } from '@garcon/server-agent-common/shared/json-response';
 
 import { MODEL_DISCOVERY_TIMEOUT_MS } from '../../common/provider-discovery.js';
 
@@ -57,7 +58,7 @@ async function discoverAnthropicModels(input: ApiProviderDiscoveryRequest, signa
       signal,
     });
     if (!response.ok) return { success: false, error: `Model discovery failed with HTTP ${response.status}.` };
-    const body = await response.json() as {
+    const body = await readJsonResponse(response, 'Model discovery') as {
       data?: Array<{ id?: string; display_name?: string; name?: string }>;
       has_more?: boolean;
       last_id?: string | null;
@@ -87,7 +88,7 @@ export async function discoverApiProviderModels(
       const baseUrl = normalized.endsWith('/v1') ? normalized.slice(0, -3) : normalized;
       const response = await fetch(`${baseUrl}/api/tags`, { signal });
       if (!response.ok) return { success: false, error: `Ollama model discovery failed with HTTP ${response.status}.` };
-      const body = await response.json() as { models?: Array<{ name?: string }> };
+      const body = await readJsonResponse(response, 'Model discovery') as { models?: Array<{ name?: string }> };
       const models = (body.models ?? [])
         .filter((model): model is { name: string } => typeof model.name === 'string' && model.name.length > 0)
         .map((model) => ({ value: model.name, label: `${model.name} (local)`, isLocal: true }));
@@ -98,7 +99,7 @@ export async function discoverApiProviderModels(
       signal,
     });
     if (!response.ok) return { success: false, error: `Model discovery failed with HTTP ${response.status}.` };
-    const models = parseOpenAiModelList(await response.json());
+    const models = parseOpenAiModelList(await readJsonResponse(response, 'Model discovery'));
     return { success: true, models: models.length > 0 ? models : undefined };
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : String(error) };

@@ -379,7 +379,10 @@ export async function runSingleQuery(
         config,
         signal,
       });
-      const parsed = JSON.parse(stdout) as { result?: string };
+      let parsed: { result?: string };
+      // A parse error's message can echo the reply, so the error names the reply instead.
+      try { parsed = JSON.parse(stdout) as { result?: string }; }
+      catch { throw new Error('Factory emitted invalid JSON for a single query'); }
       return typeof parsed.result === 'string' ? visibleFactoryAssistantText(parsed.result) : '';
     } finally {
       if (cleanup) await cleanup();

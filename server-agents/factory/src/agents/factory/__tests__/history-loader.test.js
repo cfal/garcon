@@ -9,6 +9,7 @@ import {
 } from '@garcon/server-agent-common/shared/native-message-source';
 import {
   findFactorySessionFileBySessionId,
+  findFactorySessionFileBySessionIdStrict,
   loadFactoryChatMessages,
 } from '../history-loader.js';
 
@@ -146,6 +147,28 @@ describe('factory history loader', () => {
     });
 
     expect(JSON.stringify(diagnostics)).not.toContain(privateContent);
+  });
+
+  it('names a record that is not JSON without echoing it when loading strictly', async () => {
+    const sessionPath = path.join(tmpDir, 'malformed-session.jsonl');
+    await writeJsonl(sessionPath, [{ type: 'session_start', id: 'sess-1' }, '{"type": SYNTHETIC_SENTINEL}']);
+
+    const failure = await loadFactoryChatMessages(sessionPath, undefined, { throwOnError: true }).catch((error) => error);
+
+    expect(failure).not.toBeInstanceOf(SyntaxError);
+    expect(failure.message).toBe('Factory transcript record 2 is not valid JSON');
+  });
+
+  it('names a discovery index that is not JSON without echoing it', async () => {
+    process.env.FACTORY_HOME_OVERRIDE = tmpDir;
+    const indexPath = path.join(tmpDir, '.factory', 'cache', 'session-discovery-index.json');
+    await fs.mkdir(path.dirname(indexPath), { recursive: true });
+    await fs.writeFile(indexPath, '{"entries": SYNTHETIC_SENTINEL', 'utf8');
+
+    const failure = await findFactorySessionFileBySessionIdStrict('sess-2').catch((error) => error);
+
+    expect(failure).not.toBeInstanceOf(SyntaxError);
+    expect(failure.message).toBe('Factory session discovery index is not valid JSON');
   });
 
   it('finds Factory session files under FACTORY_HOME_OVERRIDE', async () => {

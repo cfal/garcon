@@ -24,6 +24,20 @@ test('uses one deadline and credential across bounded Anthropic model pages', as
   expect(String(fetchModel.mock.calls[1]![0])).toContain('after_id=page-1');
 });
 
+test('names a discovery response that is not JSON without echoing it', async () => {
+  for (const modelDiscovery of ['openai-models', 'ollama-tags', 'anthropic-models'] as const) {
+    const fetchModel = mock(async () => new Response('{"data": SYNTHETIC_SENTINEL', {
+      headers: { 'content-type': 'application/json' },
+    }));
+    globalThis.fetch = Object.assign(fetchModel, { preconnect: originalFetch.preconnect });
+    const result = await discoverApiProviderModels({
+      protocol: modelDiscovery === 'anthropic-models' ? 'anthropic-messages' : 'openai-compatible',
+      baseUrl: 'http://localhost:11434', modelDiscovery,
+    });
+    expect(result).toEqual({ success: false, error: 'Model discovery response is not valid JSON.' });
+  }
+});
+
 test('cancels outstanding discovery at the node call deadline', async () => {
   const fetchModel = mock(async (_url: RequestInfo | URL, options?: RequestInit) => new Promise<Response>((_resolve, reject) => {
     options!.signal!.addEventListener('abort', () => reject(options!.signal!.reason), { once: true });

@@ -414,6 +414,16 @@ describe('AnthropicCompatibleChatRuntime', () => {
     )).resolves.toBe('visible');
   });
 
+  it('names buffered JSON that does not parse without echoing it', async () => {
+    globalThis.fetch = mock(async () => new Response('{"content": SYNTHETIC_SENTINEL', {
+      headers: { 'content-type': 'application/json' },
+    }));
+
+    const failure = await runAnthropicCompatibleSingleQuery(runtimeConfig('/tmp/unused'), 'test').catch((error) => error);
+
+    expect(failure.message).toBe('Direct (Anthropic) response is not valid JSON.');
+  });
+
   it('rejects partial one-shot text followed by an Anthropic error event', async () => {
     globalThis.fetch = mock(async () => streamResponse([
       { type: 'content_block_delta', delta: { type: 'text_delta', text: 'partial' } },

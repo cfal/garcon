@@ -17,6 +17,12 @@ async function runCursorStatus(config: CursorConfig): Promise<{ stdout: string; 
   return { stdout, stderr, exitCode };
 }
 
+// A parse error's message can echo the output, so the error names the output instead.
+function parseCursorStatus(stdout: string): Record<string, unknown> {
+  try { return JSON.parse(stdout || '{}') as Record<string, unknown>; }
+  catch { throw new Error('Cursor status output is not valid JSON.'); }
+}
+
 export async function getCursorAuthStatus(config: CursorConfig) {
   if (config.apiKey()) {
     return {
@@ -29,7 +35,7 @@ export async function getCursorAuthStatus(config: CursorConfig) {
 
   try {
     const { stdout, stderr, exitCode } = await runCursorStatus(config);
-    const body = JSON.parse(stdout || '{}') as Record<string, unknown>;
+    const body = parseCursorStatus(stdout);
     const authenticated = body.isAuthenticated === true
       || body.authenticated === true
       || body.status === 'authenticated';

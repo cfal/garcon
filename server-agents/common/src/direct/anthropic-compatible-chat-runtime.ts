@@ -8,6 +8,7 @@ import {
   type DirectTurnCompletion,
 } from "./direct-chat-runtime-base.js";
 import { readSseDataEvents } from '@garcon/server-agent-common/shared/sse';
+import { readJsonResponse } from '@garcon/server-agent-common/shared/json-response';
 import { appendTextAttachmentContext, attachmentDocumentBlock, documentAttachments, imageAttachments, parseAttachmentDataUrl, type AttachmentDocumentBlock } from '@garcon/server-agent-common/shared/attachments';
 import {
   directSingleQuerySignal,
@@ -139,7 +140,7 @@ async function readAnthropicCompatibleResponse(
 ): Promise<string> {
   let text: string;
   if (isJsonResponse(response)) {
-    const data = await response.json() as {
+    const data = await readJsonResponse(response, runtimeLabel) as {
       content?: Array<{ type?: string; text?: string }>;
     };
     text = (data.content ?? [])

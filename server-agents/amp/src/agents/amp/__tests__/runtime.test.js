@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+import { writeSync } from 'node:fs';
 
 import { AmpCliRuntime, runSingleQuery } from '../amp-cli.js';
 
@@ -742,5 +743,21 @@ describe('AmpCliRuntime lifecycle', () => {
 
     firstProc.close(0);
     provider.shutdown();
+  });
+
+  it('names a thread export that is not JSON without echoing it', async () => {
+    spawnMock.mockImplementationOnce((_command, options) => {
+      writeSync(options.stdout, '{"messages": SYNTHETIC_SENTINEL');
+      return {
+        stderr: new ReadableStream({ start(controller) { controller.close(); } }),
+        exited: Promise.resolve(0),
+        kill() {},
+      };
+    });
+
+    const failure = await new AmpCliRuntime().exportThread('T-10101010-1010-1010-1010-101010101010').catch((error) => error);
+
+    expect(failure).toBeInstanceOf(Error);
+    expect(failure.message).toBe('Amp thread export is not valid JSON');
   });
 });

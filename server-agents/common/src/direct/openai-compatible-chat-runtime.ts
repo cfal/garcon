@@ -2,6 +2,7 @@
 
 import type { AgentAttachment } from '@garcon/common/agent-execution';
 import { readSseDataEvents } from '@garcon/server-agent-common/shared/sse';
+import { readJsonResponse } from '@garcon/server-agent-common/shared/json-response';
 import {
   DirectChatRuntimeBase,
   type DirectChatRuntimeBaseConfig,
@@ -126,7 +127,7 @@ async function readOpenAiCompatibleResponse(
   if (!isJsonResponse(response)) {
     text = await readOpenAiCompatibleTextStream(response, runtimeLabel);
   } else {
-    const parsed = await response.json() as {
+    const parsed = await readJsonResponse(response, runtimeLabel) as {
       choices?: Array<{ message?: { content?: unknown } }>;
       error?: { message?: string };
     };
