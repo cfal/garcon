@@ -1,9 +1,11 @@
 import { expect, test } from 'bun:test';
+import { createHmac } from 'node:crypto';
 import { connectNoiseWebSocket } from '@cfal/noise-ws';
 import { WebSocketLink, EXECUTOR_NOISE_CONTEXT, shouldLogLinkFailure } from '../websocket-link.ts';
 import { EXECUTOR_PROTOCOL_REVISION } from '../rpc-protocol.ts';
 import { version as packageVersion } from '../../../../package.json';
 import { tcpLinkProxy } from '../../__tests__/tcp-link-proxy.ts';
+import { faultyNoiseListener } from '../../__tests__/noise-socket-faults.ts';
 import { connectWithWrongKey, sendMalformedRecord } from '../../__tests__/failing-peers.ts';
 
 const secret = Buffer.alloc(32, 42).toString('base64url');
@@ -406,4 +408,162 @@ for (const dialer of ['controller', 'worker']) {
       }
     } finally { await path.close(); await controller.dispose(); await worker.dispose(); }
   });
+
+  test(`reconnects with fresh keys when a busy link uses up its record budget (${dialer} dials)`, async () => {
+    const common = {
+      executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true, redialDelaysMs: [20],
+      noiseLimits: { maxRecordsPerDirection: 32 },
+    };
+    const controller = new WebSocketLink({ ...common, role: 'controller' });
+    const worker = new WebSocketLink({ ...common, role: 'worker' });
+    const [dialing, listening] = dialer === 'controller' ? [controller, worker] : [worker, controller];
+    const closures = { controller: [], worker: [] };
+    controller.onClosure(closure => closures.controller.push(closure));
+    worker.onClosure(closure => closures.worker.push(closure));
+    let sessions = 0;
+    controller.onSession(() => { sessions += 1; });
+    try {
+      dialing.dial(listening.listen());
+      const [session] = await Promise.all([worker.ready, controller.ready]);
+      expect(() => { for (let index = 0; index < 32; index++) session.send(`synthetic message ${index}`); }).toThrow();
+      await eventually(() => sessions === 2 && controller.current?.connected && worker.current?.connected);
+
+      expect(closures.worker).toEqual([{ cause: 'record-limit', count: 1, reason: 'Encrypted connection failed (RECORD_LIMIT)' }]);
+      expect(closures.controller).toEqual([
+        { cause: 'socket-closed', count: 1, reason: 'Encrypted connection failed (TRANSPORT_CLOSED)' },
+      ]);
+    } finally { await controller.dispose(); await worker.dispose(); }
+  });
+
+  test(`counts a message over the receiver's size limit as a protocol error (${dialer} dials)`, async () => {
+    const common = { executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true, redialDelaysMs: [60_000] };
+    const controller = new WebSocketLink({ ...common, role: 'controller', noiseLimits: { maxMessageBytes: 1024 } });
+    const worker = new WebSocketLink({ ...common, role: 'worker' });
+    const [dialing, listening] = dialer === 'controller' ? [controller, worker] : [worker, controller];
+    const closures = { controller: [], worker: [] };
+    controller.onClosure(closure => closures.controller.push(closure));
+    worker.onClosure(closure => closures.worker.push(closure));
+    try {
+      dialing.dial(listening.listen());
+      const [session] = await Promise.all([worker.ready, controller.ready]);
+      session.send('x'.repeat(4096));
+      await eventually(() => closures.controller.length === 1 && closures.worker.length === 1);
+
+      expect(closures.controller).toEqual([
+        { cause: 'protocol-error', count: 1, reason: 'Encrypted connection failed (MESSAGE_TOO_LARGE)' },
+      ]);
+      expect(closures.worker).toEqual([{ cause: 'socket-closed', count: 1, reason: 'Encrypted connection failed (TRANSPORT_CLOSED)' }]);
+    } finally { await controller.dispose(); await worker.dispose(); }
+  });
 }
+
+test('reports a peer that never starts the encrypted handshake', async () => {
+  const link = new WebSocketLink({
+    role: 'controller', executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true, noiseLimits: { handshakeTimeoutMs: 50 },
+  });
+  const failures = [];
+  link.onError(failure => failures.push(failure));
+  const socket = new WebSocket(link.listen());
+  const closed = new Promise(resolve => socket.addEventListener('close', resolve));
+  try {
+    await closed;
+    expect(failures).toEqual([{ message: 'Executor encrypted connection failed (HANDSHAKE_TIMEOUT)', count: 1 }]);
+  } finally { socket.close(); await link.dispose(); }
+});
+
+test('reports a dial whose encrypted handshake never completes', async () => {
+  const listening = new WebSocketLink({ role: 'worker', secret, allowInsecureDevelopment: true });
+  const dialing = new WebSocketLink({
+    role: 'controller', executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true,
+    redialDelaysMs: [60_000], noiseLimits: { handshakeTimeoutMs: 50 },
+  });
+  const path = await tcpLinkProxy(new URL(listening.listen(0, '127.0.0.1')));
+  const failures = [];
+  dialing.onError(failure => failures.push(failure));
+  try {
+    path.blackhole();
+    dialing.dial(path.url);
+    await eventually(() => failures.length > 0);
+    expect(failures).toEqual([{ message: 'Executor encrypted connection failed (HANDSHAKE_TIMEOUT)', count: 1 }]);
+  } finally { await path.close(); await dialing.dispose(); await listening.dispose(); }
+});
+
+// A controller link whose connection to its worker can be faulted beneath the encryption.
+async function faultyLinkPair() {
+  const common = { executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true, redialDelaysMs: [60_000] };
+  const controller = new WebSocketLink({ ...common, role: 'controller' });
+  const worker = new WebSocketLink({ ...common, role: 'worker' });
+  const listener = faultyNoiseListener(controller);
+  worker.dial(listener.url);
+  await Promise.all([controller.ready, worker.ready]);
+  const closure = Promise.withResolvers();
+  controller.onClosure(closure.resolve);
+  return {
+    controller, listener, closure: closure.promise,
+    async dispose() { await worker.dispose(); await controller.dispose(); await listener.stop(); },
+  };
+}
+
+test('counts a write the socket drops as a socket error', async () => {
+  const pair = await faultyLinkPair();
+  try {
+    pair.listener.dropWrites();
+    expect(() => pair.controller.current.send('synthetic payload')).toThrow();
+    expect(await pair.closure).toEqual({ cause: 'socket-error', count: 1, reason: 'Encrypted connection failed (TRANSPORT_ERROR)' });
+  } finally { await pair.dispose(); }
+});
+
+test('counts a close record that does not fit the socket buffer as a socket error', async () => {
+  const pair = await faultyLinkPair();
+  try {
+    pair.listener.fillBuffer();
+    pair.listener.closeConnections();
+    expect(await pair.closure).toEqual({ cause: 'socket-error', count: 1, reason: 'Encrypted connection failed (BACKPRESSURE)' });
+  } finally { await pair.dispose(); }
+});
+
+test('counts a frame too short to be an encrypted record as a protocol error', async () => {
+  const pair = await faultyLinkPair();
+  try {
+    pair.listener.inject(Buffer.alloc(8));
+    expect(await pair.closure).toEqual({ cause: 'protocol-error', count: 1, reason: 'Encrypted connection failed (PROTOCOL_ERROR)' });
+  } finally { await pair.dispose(); }
+});
+
+// Authenticates to a controller link as its worker would, without the session layer,
+// whose fragments each fit one encrypted record.
+function workerOutsideSessionLayer(address) {
+  let controllerHello;
+  let workerHello;
+  return connectNoiseWebSocket(address, {
+    psk: Buffer.from(secret, 'base64url'), context: EXECUTOR_NOISE_CONTEXT,
+    onMessage(socket, data) {
+      if (typeof data !== 'string') return;
+      const frame = JSON.parse(data);
+      if (frame.type === 'hello') {
+        controllerHello = frame;
+        workerHello = { type: 'hello', version: frame.version, role: 'worker', runtimeId: crypto.randomUUID(), nonce: crypto.randomUUID() };
+        socket.send(JSON.stringify(workerHello));
+      } else if (frame.type === 'proof') {
+        const transcript = JSON.stringify(['garcon-executor', 'worker', [controllerHello, workerHello]]);
+        socket.send(JSON.stringify({ type: 'proof', signature: createHmac('sha256', secret).update(transcript).digest('hex') }));
+      }
+    },
+  });
+}
+
+test('counts an encrypted message that never completes as a liveness timeout', async () => {
+  const link = new WebSocketLink({
+    role: 'controller', executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true, noiseLimits: { messageTimeoutMs: 20 },
+  });
+  const listener = faultyNoiseListener(link);
+  const closure = Promise.withResolvers();
+  link.onClosure(closure.resolve);
+  const worker = workerOutsideSessionLayer(listener.url);
+  try {
+    await link.ready;
+    listener.deliverOnly(1);
+    worker.send(new Uint8Array(70_000));
+    expect(await closure.promise).toEqual({ cause: 'liveness-timeout', count: 1, reason: 'Encrypted connection failed (MESSAGE_TIMEOUT)' });
+  } finally { worker.close(); await link.dispose(); await listener.stop(); }
+});

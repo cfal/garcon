@@ -1,5 +1,8 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
-import { connectNoiseWebSocket, createNoiseServer, type NoiseErrorCode, type NoiseOptions, type NoiseSocketData, type NoiseWebSocket } from '@cfal/noise-ws';
+import {
+  connectNoiseWebSocket, createNoiseServer,
+  type NoiseErrorCode, type NoiseLimits, type NoiseOptions, type NoiseSocketData, type NoiseWebSocket,
+} from '@cfal/noise-ws';
 import { isExecutorSecret } from './connection-url.js';
 import { failureReason } from './failure-reason.js';
 import { MessageContinuityError } from './message-session.js';
@@ -33,6 +36,8 @@ export interface WebSocketLinkOptions {
   readonly redialDelaysMs?: readonly number[];
   // How long a session must stay up before losing it restarts the redial delays.
   readonly stableSessionMs?: number;
+  // Noise's timeouts, buffer, and per-key record budget, when not its defaults.
+  readonly noiseLimits?: NoiseLimits;
 }
 
 export const EXECUTOR_NOISE_CONTEXT = 'garcon-executor/v1';
@@ -256,7 +261,7 @@ export class WebSocketLink {
   #noiseOptions(): NoiseOptions {
     let connection: Connection | null = null;
     return {
-      psk: Buffer.from(this.options.secret, 'base64url'), context: EXECUTOR_NOISE_CONTEXT,
+      psk: Buffer.from(this.options.secret, 'base64url'), context: EXECUTOR_NOISE_CONTEXT, limits: this.options.noiseLimits,
       onOpen: (socket) => {
         if (this.#disposed || this.#quiescing) { socket.close(); return; }
         connection = this.#open(socket);
@@ -267,7 +272,7 @@ export class WebSocketLink {
       },
       onError: (_socket, error) => {
         if (connection) {
-          connection.closeCause ??= noiseClosureCause(error.code);
+          connection.closeCause ??= NOISE_CLOSURE_CAUSES[error.code];
           connection.closeReason ??= `Encrypted connection failed (${error.code})`;
         }
         this.#reportFailure(error.code, `Executor encrypted connection failed (${error.code})`);
@@ -452,18 +457,23 @@ export class WebSocketLink {
 
 // Classifies a connection that Noise ended with an error. A busy long-lived link
 // that uses up its per-key record budget must reconnect with fresh keys, which
-// is routine rather than a protocol failure.
-function noiseClosureCause(code: NoiseErrorCode): LinkClosureCause {
-  switch (code) {
-    case 'TRANSPORT_CLOSED': return 'socket-closed';
-    case 'RECORD_LIMIT': return 'record-limit';
-    case 'TRANSPORT_ERROR':
-    case 'BACKPRESSURE': return 'socket-error';
-    case 'HANDSHAKE_TIMEOUT':
-    case 'MESSAGE_TIMEOUT': return 'liveness-timeout';
-    default: return 'protocol-error';
-  }
-}
+// is routine rather than a protocol failure. Handshake timeouts and CLOSED end
+// connections before they open, and NOT_OPEN only rejects a send, so no closure
+// reports them.
+const NOISE_CLOSURE_CAUSES = {
+  TRANSPORT_CLOSED: 'socket-closed',
+  RECORD_LIMIT: 'record-limit',
+  TRANSPORT_ERROR: 'socket-error',
+  BACKPRESSURE: 'socket-error',
+  HANDSHAKE_TIMEOUT: 'liveness-timeout',
+  MESSAGE_TIMEOUT: 'liveness-timeout',
+  AUTHENTICATION_FAILED: 'protocol-error',
+  PROTOCOL_ERROR: 'protocol-error',
+  MESSAGE_TOO_LARGE: 'protocol-error',
+  HANDLER_ERROR: 'protocol-error',
+  NOT_OPEN: 'protocol-error',
+  CLOSED: 'protocol-error',
+} as const satisfies Record<NoiseErrorCode, LinkClosureCause>;
 
 // Names the frame instead of keeping the parse error, whose message can echo the payload.
 function parseHandshakeFrame(encoded: string): unknown {
