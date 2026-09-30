@@ -163,7 +163,7 @@ export class TaskWorker<
     }
     this.#active = null;
     if (data.type === 'result') active.queued.resolve(data.result);
-    else active.queued.reject(new Error(data.message));
+    else active.queued.reject(Object.assign(new Error(data.message), data.code === undefined ? {} : { code: data.code }));
     this.#pump();
   }
 

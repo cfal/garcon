@@ -258,6 +258,19 @@ async function assertCompiledTokenFitting(url, chatId, getServerOutput, apiFetch
   }
 }
 
+// Transcript export renders on the embedded transcript-rendering Worker.
+async function assertCompiledTranscriptRendering(url, chatId, getServerOutput, apiFetch) {
+  const query = new URLSearchParams({ chatId, format: 'xml' });
+  const response = await apiFetch(`${url}/api/v1/chats/export?${query}`);
+  const body = await response.text();
+  if (!response.ok || !body.includes('embeddedworkertoken')) {
+    throw new Error(
+      `Compiled transcript rendering failed with ${response.status}: ${body || '<empty>'}. `
+        + `Captured output:\n${getServerOutput()}`,
+    );
+  }
+}
+
 function getHostTarget() {
   return `${process.platform}-${process.arch}`;
 }
@@ -435,6 +448,7 @@ async function run() {
       apiFetch,
     );
     await assertCompiledTokenFitting(started.url, SMOKE_CHAT_ID, started.getOutput, apiFetch);
+    await assertCompiledTranscriptRendering(started.url, SMOKE_CHAT_ID, started.getOutput, apiFetch);
     await stopProcess(child);
 
     child = spawnServer();

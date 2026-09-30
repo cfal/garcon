@@ -11,7 +11,9 @@ import {
   materializeRows,
   promoteStagingView,
   readBoundedPage,
+  readBoundedStoredPage,
   StagingViews,
+  type BoundedPage,
 } from './staging-views.js';
 import {
   parseChatRowContent,
@@ -62,6 +64,7 @@ import {
   StaleTranscriptViewError,
   SubmissionConflictError,
   TranscriptViewNotInitializedError,
+  UNDECODABLE_LEDGER_ROW,
 } from './errors.js';
 import { LedgerFailureFences } from './failure-fences.js';
 import type { ConnectionEntry } from './connection-entry.js';
@@ -119,6 +122,8 @@ export interface InitializeViewInput {
 export interface StageViewInput extends InitializeViewInput {
   readonly viewId: TranscriptViewId;
 }
+
+export type StoredRowsWork<T> = (rows: readonly StoredLedgerRow[]) => Promise<T>;
 export class TranscriptLedgerStore {
   readonly #rootDirectory: string;
   readonly #cacheSize: number;
@@ -500,21 +505,42 @@ export class TranscriptLedgerStore {
     });
   }
 
+  rowsThrough(chatId: string, watermark: TranscriptWatermark): Promise<readonly LedgerRow[]> {
+    return this.#pagesThrough(chatId, watermark, readBoundedPage);
+  }
+
+  // Reads stored rows for work that decodes them after the read, such as on a Worker. A row
+  // that fails to decode there fences the chat while its view is current, as a read that
+  // decodes rows does.
+  async withStoredRowsThrough<T>(chatId: string, watermark: TranscriptWatermark, work: StoredRowsWork<T>): Promise<T> {
+    const rows = await this.#pagesThrough(chatId, watermark, readBoundedStoredPage);
+    try {
+      return await work(rows);
+    } catch (error) {
+      if (!hasNodeErrorCode(error, UNDECODABLE_LEDGER_ROW)) throw error;
+      return this.#read(chatId, (entry) => {
+        this.#assertCurrent(entry, watermark.viewId);
+        throw error;
+      });
+    }
+  }
+
   // Reads in bounded pages. Rows at or below a watermark never change, so pages taken across
   // event-loop turns form one consistent prefix; a replaced view fails as stale.
-  async rowsThrough(
+  async #pagesThrough<Row extends { readonly ordinal: number }>(
     chatId: string,
     watermark: TranscriptWatermark,
-  ): Promise<readonly LedgerRow[]> {
+    readPage: (db: Database, viewId: TranscriptViewId, after: number, through: number) => BoundedPage<Row>,
+  ): Promise<readonly Row[]> {
     if (!Number.isSafeInteger(watermark.ordinal) || watermark.ordinal < 0) {
       throw new TypeError('Transcript watermark ordinal is invalid');
     }
-    const rows: LedgerRow[] = [];
+    const rows: Row[] = [];
     let after = 0;
     for (;;) {
       const page = this.#read(chatId, (entry) => {
         this.#assertCurrent(entry, watermark.viewId);
-        return readBoundedPage(entry.db, watermark.viewId, after, watermark.ordinal);
+        return readPage(entry.db, watermark.viewId, after, watermark.ordinal);
       });
       for (const row of page.rows) rows.push(row);
       if (page.exhausted) return rows;

@@ -9,7 +9,7 @@ export type TaskWorkerRequest<Task> =
 
 export type TaskWorkerEvent =
   | { readonly type: 'result'; readonly taskId: number; readonly result: unknown }
-  | { readonly type: 'failed'; readonly taskId: number; readonly message: string };
+  | { readonly type: 'failed'; readonly taskId: number; readonly message: string; readonly code?: string };
 
 export function isTaskWorkerRequest<Task extends { readonly kind: string }>(
   value: unknown,
@@ -34,7 +34,7 @@ export function isTaskWorkerEvent(value: unknown): value is TaskWorkerEvent {
     case 'result':
       return 'result' in value;
     case 'failed':
-      return typeof value.message === 'string';
+      return typeof value.message === 'string' && (value.code === undefined || typeof value.code === 'string');
     default:
       return false;
   }

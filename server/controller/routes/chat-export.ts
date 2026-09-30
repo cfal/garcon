@@ -28,11 +28,12 @@ export function createChatExportRoutes(service: TranscriptExportService): RouteM
         throw new ValidationDomainError('format must be markdown or xml');
       }
       const exclusions = parseExclusions(url.searchParams.getAll('exclude'));
-      return noStore(Response.json(await service.export({
+      const body = await service.export({
         chatId: parseChatId(chatId),
         format,
         exclusions,
-      }, request.signal)));
+      }, request.signal);
+      return noStore(new Response(body, { headers: { 'Content-Type': 'application/json;charset=utf-8' } }));
     } catch (error) {
       return noStore(jsonErrorFromUnknown(normalizeChatIdError(error)));
     }

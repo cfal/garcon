@@ -1,6 +1,7 @@
 import { parseChatMessage, type ChatMessage } from '../../../../common/chat-types.js';
 import { isRecord } from '../../../../common/json.js';
-import type { TranscriptExportEntry } from '../../ledger/export-fold.js';
+import { decodeClonedStoredRows, type StoredLedgerRow } from '../../ledger/codec.js';
+import { foldRowsForExport } from '../../ledger/export-fold.js';
 import type { HandoffArtifactChatMetadata, RenderedHandoffArtifact } from '../handoff-artifact/model.js';
 import { foldHandoffArtifactEntries } from '../handoff-artifact/projection.js';
 import { renderFittedHandoffArtifact } from '../handoff-artifact/xml.js';
@@ -17,7 +18,8 @@ export interface HandoffArtifactRenderInput {
   readonly transcriptViewId: string;
   readonly lastOrdinal: number;
   readonly contextWindowTokens: number;
-  readonly entries: readonly TranscriptExportEntry[];
+  // As the ledger stores them, so the Worker decodes and folds them.
+  readonly rows: readonly StoredLedgerRow[];
 }
 
 // Task parameters exclude the transcript items, which cross to the Worker
@@ -66,7 +68,7 @@ const TASK_HANDLERS: TaskHandlers = {
     transcriptViewId: task.transcriptViewId,
     lastOrdinal: task.lastOrdinal,
     contextWindowTokens: task.contextWindowTokens,
-    sourceFold: foldHandoffArtifactEntries(exportEntries(items)),
+    sourceFold: foldHandoffArtifactEntries(foldRowsForExport(decodeClonedStoredRows(items))),
   }),
 };
 
@@ -84,14 +86,6 @@ export function runTokenFittingTask<K extends TokenFittingTaskKind>(
 
 function chatMessages(items: readonly unknown[]): ChatMessage[] {
   return items.map(chatMessage);
-}
-
-function exportEntries(items: readonly unknown[]): TranscriptExportEntry[] {
-  return items.map((item) => {
-    if (!isRecord(item)) throw new Error('Token fitting received an invalid transcript entry');
-    const entry = item as unknown as TranscriptExportEntry;
-    return entry.kind === 'message' ? { ...entry, message: chatMessage(entry.message) } : entry;
-  });
 }
 
 function chatMessage(item: unknown): ChatMessage {

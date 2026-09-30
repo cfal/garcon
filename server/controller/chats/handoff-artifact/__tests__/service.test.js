@@ -9,6 +9,7 @@ import { transcriptViewId } from '../../../ledger/contracts.ts';
 import { DomainError } from '../../../../common/domain-error.ts';
 import { HandoffArtifactService } from '../service.ts';
 import { inlineTokenFitting } from '../../token-fitting/__tests__/inline-token-fitting.ts';
+import { storedRow, storedSnapshotReader } from '../../../ledger/__tests__/stored-rows.ts';
 
 const AT = '2026-08-26T00:00:00.000Z';
 const CHAT_ID = '1787505989127000';
@@ -16,10 +17,10 @@ const VIEW_ID = transcriptViewId('view-synthetic-1');
 
 describe('HandoffArtifactService', () => {
   it('returns not-found before reading a transcript', async () => {
-    const exportSnapshot = mock(async () => { throw new Error('unexpected read'); });
+    const storedSnapshot = mock(async () => { throw new Error('unexpected read'); });
     const service = new HandoffArtifactService({
       summaries: { buildSummary: () => null },
-      transcripts: { exportSnapshot },
+      transcripts: storedSnapshotReader(storedSnapshot),
       fitting: inlineTokenFitting,
     });
 
@@ -28,7 +29,7 @@ describe('HandoffArtifactService', () => {
       status: 404,
       retryable: false,
     });
-    expect(exportSnapshot).not.toHaveBeenCalled();
+    expect(storedSnapshot).not.toHaveBeenCalled();
   });
 
   it('uses one pinned snapshot and returns its exact view and watermark', async () => {
@@ -49,17 +50,17 @@ describe('HandoffArtifactService', () => {
         },
       },
     ];
-    const exportSnapshot = mock(async () => {
+    const storedSnapshot = mock(async () => {
       const rows = [...liveRows];
       liveRows.push(providerRow(5, new AssistantMessage(AT, 'Concurrent append')));
-      return { transcriptViewId: VIEW_ID, lastOrdinal: 4, rows };
+      return { transcriptViewId: VIEW_ID, lastOrdinal: 4, rows: rows.map(storedRow) };
     });
-    const service = createService(exportSnapshot);
+    const service = createService(storedSnapshot);
 
     const response = await service.create(request(131_072), signal());
 
     expect(parseChatHandoffArtifactResponse(response)).toEqual(response);
-    expect(exportSnapshot).toHaveBeenCalledTimes(1);
+    expect(storedSnapshot).toHaveBeenCalledTimes(1);
     expect(response).toMatchObject({
       chatId: CHAT_ID,
       transcriptViewId: VIEW_ID,
@@ -92,25 +93,25 @@ describe('HandoffArtifactService', () => {
   });
 
   it('rejects invalid context windows before any transcript read', async () => {
-    const exportSnapshot = mock(async () => ({
+    const storedSnapshot = mock(async () => ({
       transcriptViewId: VIEW_ID,
       lastOrdinal: 0,
       rows: [],
     }));
-    const service = createService(exportSnapshot);
+    const service = createService(storedSnapshot);
 
     await expect(service.create(request(1_023), signal())).rejects.toMatchObject({
       code: 'VALIDATION_FAILED',
       status: 400,
     });
-    expect(exportSnapshot).not.toHaveBeenCalled();
+    expect(storedSnapshot).not.toHaveBeenCalled();
   });
 });
 
-function createService(exportSnapshot) {
+function createService(storedSnapshot) {
   return new HandoffArtifactService({
     summaries: { buildSummary: () => ({ chat: chat() }) },
-    transcripts: { exportSnapshot },
+    transcripts: storedSnapshotReader(storedSnapshot),
     fitting: inlineTokenFitting,
     now: () => AT,
   });

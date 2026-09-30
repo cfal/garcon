@@ -226,12 +226,28 @@ export function insertEncodedRows(
   });
 }
 
+export interface BoundedPage<Row> {
+  readonly rows: readonly Row[];
+  readonly exhausted: boolean;
+}
+
 export function readBoundedPage(
   db: Database,
   viewId: TranscriptViewId,
   afterOrdinal: number,
   throughOrdinal: number,
-): { readonly rows: readonly LedgerRow[]; readonly exhausted: boolean } {
+): BoundedPage<LedgerRow> {
+  const page = readBoundedStoredPage(db, viewId, afterOrdinal, throughOrdinal);
+  return { rows: page.rows.map(decodeStoredLedgerRow), exhausted: page.exhausted };
+}
+
+// Reads rows as stored, for consumers that decode them elsewhere, such as on a Worker.
+export function readBoundedStoredPage(
+  db: Database,
+  viewId: TranscriptViewId,
+  afterOrdinal: number,
+  throughOrdinal: number,
+): BoundedPage<StoredLedgerRow> {
   const statement = db.prepare<StoredLedgerRow, [string, number, number]>(`
     SELECT view_id, ordinal, kind, at, client_message_id, payload_json
     FROM transcript_rows
@@ -239,10 +255,10 @@ export function readBoundedPage(
     ORDER BY ordinal
   `);
   try {
-    const rows: LedgerRow[] = [];
+    const rows: StoredLedgerRow[] = [];
     let bytes = 0;
     for (const stored of statement.iterate(viewId, afterOrdinal, throughOrdinal)) {
-      rows.push(decodeStoredLedgerRow(stored));
+      rows.push(stored);
       bytes += stored.payload_json.length;
       if (rows.length >= BULK_READ_ROWS || bytes >= BULK_READ_BYTES) return { rows, exhausted: false };
     }

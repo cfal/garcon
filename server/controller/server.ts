@@ -38,6 +38,7 @@ import { ChatRowService } from './chats/chat-row-service.js';
 import { TranscriptExportService } from './chats/transcript-export/service.js';
 import { HandoffArtifactService } from './chats/handoff-artifact/service.js';
 import { TokenFittingWorker } from './chats/token-fitting/client.js';
+import { TranscriptRenderingWorker } from './chats/transcript-rendering/client.js';
 import { TranscriptSearchController } from './chats/search/controller.js';
 import { TranscriptSearchSettingsCoordinator } from './chats/search/settings-coordinator.js';
 import { AgentRegistry, createForkNativeHistoryReader } from './agents/index.js';
@@ -469,6 +470,7 @@ export async function startServer(): Promise<void> {
 
     const transientFeeds = new ChatTransientFeedStore(runtimeState.identity.instanceId);
     const tokenFitting = new TokenFittingWorker();
+    const transcriptRendering = new TranscriptRenderingWorker();
     carryOverCompaction = new CarryOverCompactionService({
       agents: agentRegistry,
       fitting: tokenFitting,
@@ -600,6 +602,7 @@ export async function startServer(): Promise<void> {
     const transcriptExport = new TranscriptExportService({
       summaries: chatListProjector,
       transcripts: transcriptReader,
+      rendering: transcriptRendering,
     });
     const handoffArtifact = new HandoffArtifactService({
       summaries: chatListProjector,
@@ -947,6 +950,7 @@ export async function startServer(): Promise<void> {
         unsubscribeSearchAvailability();
         await chatSearch.close();
         tokenFitting.close();
+        transcriptRendering.close();
         await executors.dispose();
         transcriptLedger.close();
         terminalManager.shutdown();

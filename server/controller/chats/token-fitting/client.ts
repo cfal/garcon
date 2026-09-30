@@ -53,10 +53,10 @@ export class TokenFittingWorker implements TokenFitting {
   }
 
   renderHandoffArtifact(
-    { entries, ...parameters }: HandoffArtifactRenderInput,
+    { rows, ...parameters }: HandoffArtifactRenderInput,
     signal?: AbortSignal,
   ): Promise<RenderedHandoffArtifact | null> {
-    return this.#worker.run({ kind: 'render-handoff-artifact', ...parameters }, entries, signal);
+    return this.#worker.run({ kind: 'render-handoff-artifact', ...parameters }, rows, signal);
   }
 
   close(): void {

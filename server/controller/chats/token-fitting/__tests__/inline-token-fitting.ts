@@ -14,11 +14,11 @@ export const inlineTokenFitting = {
       structuredClone(messages),
     );
   },
-  async renderHandoffArtifact({ entries, ...parameters }, signal) {
+  async renderHandoffArtifact({ rows, ...parameters }, signal) {
     signal?.throwIfAborted();
     return runTokenFittingTask(
       { kind: 'render-handoff-artifact', ...parameters },
-      structuredClone(entries),
+      structuredClone(rows),
     );
   },
 } satisfies TokenFitting;

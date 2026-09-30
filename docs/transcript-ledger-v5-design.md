@@ -3115,7 +3115,10 @@ The catalog cites this revision, but its inventory is not repeated here.
   OpenCode, Factory, Cursor, and Direct long-history loads, Codex's paginated
   history, the Claude session fork, and the shared draft conversion each keep
   their longest event-loop gap under a limit that a single synchronous pass
-  over the same history exceeds.
+  over the same history exceeds. A long transcript export renders on the
+  transcript rendering Worker from stored rows under the same kind of limit, and
+  the Worker client keeps each transfer short even when messages are very
+  large.
 - **Scripted tiers**: the existing real-binary scripted suites (Claude,
   Codex, OpenCode, Pi) are retained and re-anchored on end-state ledger
   assertions through direct V5 assertions. Live credential suites

@@ -1,8 +1,8 @@
 import { isTaskWorkerRequest, type TaskWorkerEvent } from './task-worker-protocol.js';
 
 // Serves one task at a time inside a Worker. Protocol violations throw, so the owning
-// client retires the Worker. Byte buffers at the top level of a result move to the main
-// thread without a copy.
+// client retires the Worker. A task failure reports the error's message and string code.
+// Byte buffers at the top level of a result move to the main thread without a copy.
 export function serveTaskWorker<Task extends { readonly kind: string }>(
   label: string,
   kinds: readonly Task['kind'][],
@@ -28,7 +28,13 @@ export function serveTaskWorker<Task extends { readonly kind: string }>(
     try {
       event = { type: 'result', taskId, result: runTask(task, items) };
     } catch (error) {
-      event = { type: 'failed', taskId, message: error instanceof Error ? error.message : String(error) };
+      const code = (error as { readonly code?: unknown } | null)?.code;
+      event = {
+        type: 'failed',
+        taskId,
+        message: error instanceof Error ? error.message : String(error),
+        ...(typeof code === 'string' ? { code } : {}),
+      };
     }
     self.postMessage(event, event.type === 'result' ? transferables(event.result) : []);
   };

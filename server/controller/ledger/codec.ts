@@ -35,6 +35,7 @@ import {
   isLedgerCliRowNoticeDetail,
   isLedgerPreambleSelectionChangedNoticeDetail,
 } from './contracts.js';
+import { UndecodableLedgerRowError } from './errors.js';
 
 export interface StoredLedgerRow {
   readonly view_id: string;
@@ -157,8 +158,18 @@ export function decodeStoredLedgerRow(row: StoredLedgerRow): LedgerRow {
   try {
     return decodeLedgerRow(row);
   } catch (error) {
-    throw new Error('Stored transcript row is invalid', { cause: error });
+    throw new UndecodableLedgerRowError({ cause: error });
   }
+}
+
+// Decodes stored rows that reached a Worker as structured clones.
+export function decodeClonedStoredRows(items: readonly unknown[]): LedgerRow[] {
+  return items.map((item) => {
+    if (!isRecord(item) || typeof item.payload_json !== 'string') {
+      throw new TypeError('Received an invalid stored transcript row');
+    }
+    return decodeStoredLedgerRow(item as unknown as StoredLedgerRow);
+  });
 }
 
 export function submissionFingerprint(detail: LedgerUserInputDetail): string {
