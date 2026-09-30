@@ -1,9 +1,12 @@
 import {
   BashToolUseMessage,
   EditToolUseMessage,
+  ExecToolUseMessage,
   GlobToolUseMessage,
   GrepToolUseMessage,
   ListToolUseMessage,
+  McpToolUseMessage,
+  PiToolSearchToolUseMessage,
   ReadToolUseMessage,
   UnknownToolUseMessage,
   WriteToolUseMessage,
@@ -13,9 +16,12 @@ import { normalizeToolInput } from '@garcon/server-agent-common/shared/normalize
 type PiToolUseResult =
   | BashToolUseMessage
   | EditToolUseMessage
+  | ExecToolUseMessage
   | GlobToolUseMessage
   | GrepToolUseMessage
   | ListToolUseMessage
+  | McpToolUseMessage
+  | PiToolSearchToolUseMessage
   | ReadToolUseMessage
   | UnknownToolUseMessage
   | WriteToolUseMessage;
@@ -81,8 +87,37 @@ export function convertPiToolUse(
 ): PiToolUseResult {
   const input = asObject(args);
   const key = canonicalize(toolName || 'Unknown');
+  const mcpName = /^mcp__(.+?)__(.+)$/.exec(toolName);
+  if (mcpName) {
+    const [, server, tool] = mcpName;
+    return new McpToolUseMessage(timestamp, toolCallId, server, tool, input);
+  }
+  // Pi's 64-character cap can remove the server/tool separator; the encoded name remains opaque.
+  // https://github.com/earendil-works/pi/blob/d86654abb8862e201933517d6f1fce9f88dd117f/packages/coding-agent/src/extensions/mcp/tools.ts#L75-L89
+  if (toolName.startsWith('mcp__')) {
+    return new McpToolUseMessage(timestamp, toolCallId, '', toolName, input);
+  }
 
   switch (key) {
+    case 'codemode':
+      return new ExecToolUseMessage(timestamp, toolCallId, asString(input.code) ?? '', 'javascript');
+
+    case 'powershell':
+      return new ExecToolUseMessage(timestamp, toolCallId, asString(input.command) ?? '', 'powershell');
+
+    case 'toolsearch':
+      return new PiToolSearchToolUseMessage(
+        timestamp,
+        toolCallId,
+        asString(input.query) ?? '',
+        asNumber(input.limit),
+      );
+
+    case 'listmcpresources':
+    case 'listmcpresourcetemplates':
+    case 'readmcpresource':
+      return new McpToolUseMessage(timestamp, toolCallId, asString(input.server) ?? '', toolName, input);
+
     case 'bash': {
       const command = asString(input.command);
       if (command === undefined) break;

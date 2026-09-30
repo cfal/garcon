@@ -69,6 +69,7 @@ const DISPLAY_NAME_BY_TYPE: Record<string, string> = {
 	'amp-task-list-tool-use': 'Tasks',
 	'external-tool-use': 'Tool',
 	'mcp-tool-use': 'MCP',
+	'pi-tool-search-tool-use': 'ToolSearch',
 	'request-permissions-tool-use': 'Permissions',
 };
 
@@ -911,6 +912,21 @@ export const TOOL_DISPLAY_REGISTRY: ToolDisplayRegistry = {
 		},
 	},
 
+	'pi-tool-search-tool-use': {
+		input: {
+			mode: 'inline',
+			label: 'ToolSearch',
+			getValue: (input) => String(input.query ?? ''),
+			action: 'jumpToResult',
+		},
+		result: {
+			mode: 'collapsible',
+			defaultOpen: false,
+			contentKind: 'text',
+			getContentProps: (result) => ({ content: extractContentString(result?.content) }),
+		},
+	},
+
 	'external-tool-use': {
 		input: {
 			mode: 'collapsible',
@@ -1030,7 +1046,7 @@ export function getToolDisplayLabel(toolMessage: ToolUseChatMessage): string {
 			: toolMessage.name;
 	}
 	if (toolMessage.type === 'mcp-tool-use') {
-		return `${toolMessage.server}.${toolMessage.tool}`;
+		return toolMessage.server ? `${toolMessage.server}.${toolMessage.tool}` : toolMessage.tool;
 	}
 	return DISPLAY_NAME_BY_TYPE[toolMessage.type] || fallbackDisplayName(toolMessage.type);
 }

@@ -145,6 +145,9 @@ describe('tool display helpers', () => {
 		expect(getToolDisplayLabel(new McpToolUseMessage('', 'tool-2', 'github', 'list_prs', {}))).toBe(
 			'github.list_prs',
 		);
+		expect(getToolDisplayLabel(new McpToolUseMessage('', 'tool-3', '', 'list_mcp_resources', {}))).toBe(
+			'list_mcp_resources',
+		);
 	});
 
 	it('returns the display label for Amp-specific tool-use messages', () => {

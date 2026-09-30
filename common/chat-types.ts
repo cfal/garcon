@@ -593,6 +593,17 @@ export class AmpTaskListToolUseMessage {
   ) {}
 }
 
+export class PiToolSearchToolUseMessage {
+  readonly type = 'pi-tool-search-tool-use' as const;
+
+  constructor(
+    public timestamp: string,
+    public toolId: string,
+    public query: string,
+    public limit?: number,
+  ) {}
+}
+
 export class ExternalToolUseMessage {
   readonly type = 'external-tool-use' as const;
 
@@ -744,6 +755,7 @@ export class AgentSwitchMessage {
 
 // Union of all explicit tool-use message classes.
 export type ToolUseChatMessage =
+  | PiToolSearchToolUseMessage
   | BashToolUseMessage
   | ExecToolUseMessage
   | WaitToolUseMessage
@@ -1091,6 +1103,10 @@ const TOOL_USE_MESSAGE_PARSERS = {
       asOptionalString(data.taskId),
       asOptionalString(data.title),
       asOptionalString(data.status)),
+
+  'pi-tool-search-tool-use': (data) =>
+    new PiToolSearchToolUseMessage(
+      str(data.timestamp), str(data.toolId), str(data.query), asOptionalNumber(data.limit)),
 
   'external-tool-use': (data) =>
     new ExternalToolUseMessage(

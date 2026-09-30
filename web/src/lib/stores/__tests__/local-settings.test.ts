@@ -606,6 +606,18 @@ describe('LocalSettingsStore', () => {
 		restored.destroy();
 	});
 
+	it('hides Pi tool search with the provider tool group', () => {
+		const store = createLocalSettingsStore();
+		const provider = HIDEABLE_TOOL_GROUPS.find((group) => group.id === 'provider');
+		if (!provider) throw new Error('expected provider tool group');
+		expect(provider.toolTypes).toContain('pi-tool-search-tool-use');
+		store.setToolTypesHidden(provider.toolTypes, true);
+		expect(store.hiddenToolTypes).toContain('pi-tool-search-tool-use');
+		store.setToolTypesHidden(provider.toolTypes, false);
+		expect(store.hiddenToolTypes).not.toContain('pi-tool-search-tool-use');
+		store.destroy();
+	});
+
 	it('normalizes partial families and drops unsupported persisted tool types', () => {
 		localStorage.setItem(
 			LOCAL_STORAGE_KEYS.localSettings,

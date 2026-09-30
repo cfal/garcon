@@ -124,6 +124,7 @@ export const HIDEABLE_TOOL_GROUPS = [
 			'amp-read-thread-tool-use',
 			'external-tool-use',
 			'mcp-tool-use',
+			'pi-tool-search-tool-use',
 		],
 	},
 ] as const;
