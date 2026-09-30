@@ -889,7 +889,9 @@ export async function startServer(): Promise<void> {
 
     // Graceful shutdown: flush pending writes and clean up timers.
     // Browser heartbeats and executor links both treat a long stall as a lost peer.
-    const stopStallMonitor = monitorEventLoopStalls((stallMs) => logger.warn('Event loop stalled', { stallMs }));
+    const stopStallMonitor = monitorEventLoopStalls(({ stallMs, activities, heapUsedMb }) => {
+      logger.warn('Event loop stalled', { stallMs, heapUsedMb, activities: [...activities] });
+    });
     const stopSlowStepReports = reportSlowSteps((operation, stepMs) => {
       logger.warn('Slow step', { operation, stepMs: Math.round(stepMs) });
     });

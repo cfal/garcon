@@ -11,6 +11,7 @@ import {
   type RouteMap,
 } from './http-route-types.js';
 import { createLogger } from '../../common/log.js';
+import { trackActivity } from '../../common/event-loop-stalls.js';
 import { CLI_SERVER_INSTANCE_HEADER } from '@garcon/common/server-runtime';
 
 const logger = createLogger('lib:http-route');
@@ -95,8 +96,20 @@ export async function invokeRawRouteHandler(
   }
 }
 
-async function invokeRouteHandler(handler: RouteHandler, req: Request, server: unknown, context: HttpRouteContext): Promise<Response> {
-  return compressHttpResponse(req, await invokeRawRouteHandler(handler, req, server, context));
+// The activity names the route pattern, never the URL, which can carry share tokens.
+async function invokeRouteHandler(
+  handler: RouteHandler,
+  req: Request,
+  server: unknown,
+  context: HttpRouteContext,
+  activity: string,
+): Promise<Response> {
+  const finish = trackActivity(activity);
+  try {
+    return compressHttpResponse(req, await invokeRawRouteHandler(handler, req, server, context));
+  } finally {
+    finish();
+  }
 }
 
 export function unhandledRouteErrorResponse(error: unknown): Response {
@@ -112,12 +125,13 @@ export function wrapRoute(
   method: string,
   authOptions: HttpRouteAuthOptions = {},
 ): WrappedRouteHandler {
+  const activity = `${method} ${routePath}`;
   if (isAuthDisabled()) {
     return async (req: Request, server?: unknown): Promise<Response> => {
       if (authOptions.isShuttingDown?.()) return serverShuttingDownResponse();
       const mismatch = cliInstanceMismatch(req, authOptions.serverInstanceId);
       if (mismatch) return mismatch;
-      return invokeRouteHandler(handler, req, server, { principal: LOCAL_SERVER_PRINCIPAL });
+      return invokeRouteHandler(handler, req, server, { principal: LOCAL_SERVER_PRINCIPAL }, activity);
     };
   }
 
@@ -125,7 +139,7 @@ export function wrapRoute(
     logger.debug(`Skipping auth wrapping for ${method} ${routePath}`);
     return async (req: Request, server?: unknown): Promise<Response> => {
       if (authOptions.isShuttingDown?.()) return serverShuttingDownResponse();
-      return invokeRouteHandler(handler, req, server, { principal: null });
+      return invokeRouteHandler(handler, req, server, { principal: null }, activity);
     };
   }
 
@@ -139,7 +153,7 @@ export function wrapRoute(
     }
     const mismatch = cliInstanceMismatch(req, authOptions.serverInstanceId);
     if (mismatch) return mismatch;
-    return invokeRouteHandler(handler, req, server, { principal });
+    return invokeRouteHandler(handler, req, server, { principal }, activity);
   };
 }
 

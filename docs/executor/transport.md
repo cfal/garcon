@@ -219,7 +219,9 @@ have one.
 
 A stalled event loop looks like a lost link to its peer. Work proportional to a
 whole transcript or native history therefore runs in bounded steps or on a
-Worker, and both processes log event-loop stalls of 250 ms or more. Stepped
+Worker, and both processes log event-loop stalls of 250 ms or more, with the
+heap size and the routes, WebSocket messages, chat tasks, RPC methods, and ledger
+operations that were running or finished during the stall. Stepped
 work runs in named `EventLoopSteps`, and a step that holds the loop for 50 ms or
 more is logged with its operation name (`executor-slow-step` on a worker). Each
 closed connection that carried a session is logged with its cause and the

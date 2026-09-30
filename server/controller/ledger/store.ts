@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import { chmodSync, readdirSync, rmSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { yieldToEventLoop } from '@garcon/server-agent-common/shared/event-loop';
+import { trackActivity } from '../../common/event-loop-stalls.js';
 import {
   encodeDrafts,
   insertEncodedRows,
@@ -795,12 +796,19 @@ export class TranscriptLedgerStore {
       this.#connections.set(chatId, cached);
       return cached;
     }
-    const opened = openConnection(
-      this.#rootDirectory,
-      chatId,
-      this.#synchronous,
-      this.#staging.retained(chatId),
-    );
+    // Opening can migrate the schema or delete a leftover view, both proportional to the ledger.
+    const finishActivity = trackActivity('ledger open');
+    let opened: ConnectionEntry;
+    try {
+      opened = openConnection(
+        this.#rootDirectory,
+        chatId,
+        this.#synchronous,
+        this.#staging.retained(chatId),
+      );
+    } finally {
+      finishActivity();
+    }
     this.#connections.set(chatId, opened);
     while (this.#connections.size > this.#cacheSize) {
       const oldest = this.#connections.entries().next().value as [string, ConnectionEntry] | undefined;

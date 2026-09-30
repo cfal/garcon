@@ -26,6 +26,7 @@ import type { PreambleService } from './preambles/service.js';
 import type { ChatBoardService } from './chat-boards/service.js';
 import { createLogger } from '../common/log.js';
 import { errorMessage } from '../common/errors.js';
+import { withActivity } from '../common/event-loop-stalls.js';
 import { buildRemoteSettingsSnapshot } from './routes/workspace.js';
 import {
   AgentRunFinishedMessage,
@@ -167,12 +168,12 @@ export function wireServerEvents({
   // broadcasts would reintroduce the spinner-before-message race.
   function scheduleChatTask(
     chatId: string,
-    label: string,
+    activity: string,
     task: () => Promise<void> | void,
   ): Promise<void> {
     const previous = chatTaskTails.get(chatId) ?? Promise.resolve();
-    const current = previous.then(task).catch((error) => {
-      logger.warn(`${label}:`, errorMessage(error));
+    const current = previous.then(() => withActivity(`chat task ${activity}`, task)).catch((error) => {
+      logger.warn(`server-events: ${activity} failed:`, errorMessage(error));
       if (!hasChatTaskError) {
         hasChatTaskError = true;
         firstChatTaskError = error;
@@ -200,7 +201,7 @@ export function wireServerEvents({
   }
 
   function notifyAgentHandoff(chatId: string): void {
-    scheduleChatTask(chatId, 'server-events: agent handoff invalidation failed', () => {
+    scheduleChatTask(chatId, 'agent handoff invalidation', () => {
       const entry = chatRegistry.getChat(chatId);
       if (!entry) return;
       markSearchCatalogDirty(chatId);
@@ -214,7 +215,7 @@ export function wireServerEvents({
   }
 
   function notifyChatSettingsUpdated(chatId: string): void {
-    scheduleChatTask(chatId, 'server-events: chat settings invalidation failed', () => {
+    scheduleChatTask(chatId, 'chat settings invalidation', () => {
       if (!chatExists(chatId)) return;
       markSearchCatalogDirty(chatId);
       broadcast(new ChatListRefreshRequestedMessage('execution-settings-updated', chatId));
@@ -243,7 +244,7 @@ export function wireServerEvents({
   // reconnect refresh of the already-loaded selection.
   function notifyChatPreamblesInvalidated(chatId: string, revision: number): void {
     if (!chatExists(chatId)) return;
-    scheduleChatTask(chatId, 'server-events: chat preambles invalidation failed', () => {
+    scheduleChatTask(chatId, 'chat preambles invalidation', () => {
       if (!chatExists(chatId)) return;
       broadcast(new ChatPreamblesInvalidatedMessage(chatId, revision));
     });
@@ -375,7 +376,7 @@ export function wireServerEvents({
   const transcriptFanout = createTranscriptEventFanout({
     chatExists,
     schedule: (chatId, task) => {
-      void scheduleChatTask(chatId, 'server-events: transcript commit fanout failed', task);
+      void scheduleChatTask(chatId, 'transcript commit fanout', task);
     },
     broadcast,
     updateMetadata: (chatId, messages) => {
@@ -391,7 +392,7 @@ export function wireServerEvents({
   const publishTransientFeedMutation = (applied: AppliedTransientFeedEvent) => {
     if (applied.kind === 'unchanged') return;
     const mutation = applied.value;
-    void scheduleChatTask(mutation.chatId, 'server-events: transient feed mutation failed', () => {
+    void scheduleChatTask(mutation.chatId, 'transient feed mutation', () => {
       broadcast(new ChatTransientFeedMutationMessage(
         mutation.serverInstanceId,
         mutation.chatId,
@@ -418,7 +419,7 @@ export function wireServerEvents({
           && row.detail.selectionRevision >= 0
         ) {
           const revision = row.detail.selectionRevision;
-          scheduleChatTask(event.chatId, 'server-events: chat preambles invalidation failed', () => {
+          scheduleChatTask(event.chatId, 'chat preambles invalidation', () => {
             if (!chatExists(event.chatId)) return;
             broadcast(new ChatPreamblesInvalidatedMessage(event.chatId, revision));
           });
@@ -434,7 +435,7 @@ export function wireServerEvents({
     // Captures the phase before scheduling so rapid stop and terminal transitions
     // preserve the intermediate stopping state.
     const phase = processing.phase(chatId);
-    scheduleChatTask(chatId, 'server-events: processing broadcast failed', () => {
+    scheduleChatTask(chatId, 'processing broadcast', () => {
       if (!chatExists(chatId)) return;
       broadcast(new ChatProcessingUpdatedMessage(chatId, phase));
     });
@@ -449,7 +450,7 @@ export function wireServerEvents({
     intent: ChatStopIntent,
     interruptedTurn?: { readonly turnId?: string },
   ) => {
-    scheduleChatTask(chatId, 'server-events: session-stopped broadcast failed', async () => {
+    scheduleChatTask(chatId, 'session-stopped broadcast', async () => {
       if (outcome === 'interrupt-requested' && interruptedTurn?.turnId) {
         await commandLedger.markInterruptedWithoutRunTerminal(chatId, interruptedTurn.turnId,
           intent === 'chat-deletion' ? 'chat-deleted' : 'user-stop');
@@ -475,7 +476,7 @@ export function wireServerEvents({
   };
   agentRegistry.onSessionCreated((chatId) => {
     if (!chatExists(chatId)) return;
-    return scheduleChatTask(chatId, 'server-events: session publication failed', () => {
+    return scheduleChatTask(chatId, 'session publication', () => {
       markSearchCatalogDirty(chatId);
       broadcast(new ChatSessionCreatedMessage(chatId));
     });
@@ -483,7 +484,7 @@ export function wireServerEvents({
   agentRegistry.onFinished((chatId, exitCode, turnMetadata, outcome) => {
     if (!chatExists(chatId)) return;
     const queuedFinalization = queue.getQueuedTurnFinalization(chatId, turnMetadata?.turnId);
-    return scheduleChatTask(chatId, 'server-events: turn completion failed', async () => {
+    return scheduleChatTask(chatId, 'turn completion', async () => {
       let released = false;
       try {
         if (!chatExists(chatId)) return;
@@ -518,7 +519,7 @@ export function wireServerEvents({
   agentRegistry.onFailed(async (chatId, agentErrorMessage, agentErrorCode, turnMetadata) => {
     if (!chatExists(chatId)) return;
     const queuedFinalization = queue.getQueuedTurnFinalization(chatId, turnMetadata?.turnId);
-    return scheduleChatTask(chatId, 'server-events: turn failure handling failed', async () => {
+    return scheduleChatTask(chatId, 'turn failure handling', async () => {
       let released = false;
       try {
         if (!chatExists(chatId)) return;
@@ -580,7 +581,7 @@ export function wireServerEvents({
     agentRegistry.discardTurn(chatId);
     transientFeeds.deleteChat(chatId);
     deleteSearchChat(chatId);
-    scheduleChatTask(chatId, 'server-events: chat removal settlement failed', async () => {
+    scheduleChatTask(chatId, 'chat removal settlement', async () => {
       broadcast(new ChatSessionDeletedWsMessage(chatId));
       if (removalReason === 'user-deletion') {
         await commandLedger.markChatInterrupted(chatId, 'chat-deleted');
@@ -609,7 +610,7 @@ export function wireServerEvents({
     );
   });
   chatRegistry.onChatTagsUpdated((chatId) => {
-    scheduleChatTask(chatId, 'server-events: chat tag invalidation failed', () => {
+    scheduleChatTask(chatId, 'chat tag invalidation', () => {
       if (!chatExists(chatId)) return;
       broadcast(new ChatListRefreshRequestedMessage('tags-updated', chatId));
     });
@@ -639,11 +640,11 @@ export function wireServerEvents({
     publishProcessing(chatId);
   });
   queue.onTurnFailed((chatId, queueErrorMessage, options = {}) => {
-    scheduleChatTask(chatId, 'server-events: queued turn failure handling failed', () =>
+    scheduleChatTask(chatId, 'queued turn failure handling', () =>
       handleQueueFailure(chatId, queueErrorMessage, options));
   });
   queue.onProjectUnavailable((chatId, error) => {
-    scheduleChatTask(chatId, 'server-events: project unavailable notice failed', () => {
+    scheduleChatTask(chatId, 'project unavailable notice', () => {
       notifyOperationalNotice(chatId, 'warning', error.message, {
         type: 'project-unavailable',
         projectPath: error.projectPath,

@@ -13,6 +13,7 @@ import type { SessionTransport } from './session-transport.js';
 import type { JournaledCall, RpcJournalOwner, RpcReplyJournal } from './rpc-journal.js';
 import { DomainError } from '../../common/domain-error.js';
 import { ExecutorSessionLostError } from '../../common/executor-disconnect.js';
+import { withActivity } from '../../common/event-loop-stalls.js';
 import { createLogger } from '../../common/log.js';
 import { MALFORMED_DATA } from './failure-reason.js';
 import { isErrorCode, type ErrorCode } from '../../../common/error-codes.js';
@@ -426,7 +427,7 @@ export class ExecutorRpc {
     void Promise.resolve().then(() => {
       if (!current() || controller.signal.aborted) throw new AgentCallError('not-dispatched', 'RPC request cancelled before dispatch');
       if (!handler) throw new AgentCallError('not-dispatched', 'RPC receiver is not installed');
-      return handler(frame, controller.signal, (guard) => { replyGuard = guard; }, (listener) => { undelivered = listener; });
+      return withActivity(rpcActivity(frame.method), () => handler(frame, controller.signal, (guard) => { replyGuard = guard; }, (listener) => { undelivered = listener; }));
     }).then((value) => {
       if (current() && !this.#reply({ type: 'result', id: frame.id, value }, replyGuard)) undelivered?.();
     }, (error) => {
@@ -443,7 +444,7 @@ export class ExecutorRpc {
       if (call.signal.aborted) throw new AgentCallError('not-dispatched', 'RPC request cancelled before dispatch');
       if (!handler) throw new AgentCallError('not-dispatched', 'RPC receiver is not installed');
       // Only launches, which the journal does not carry, observe undelivered replies.
-      return handler(frame, call.signal, (guard) => { replyGuard = guard; }, () => {});
+      return withActivity(rpcActivity(frame.method), () => handler(frame, call.signal, (guard) => { replyGuard = guard; }, () => {}));
     }).then(
       (value) => this.#encodeReply({ type: 'result', id: frame.id, value }, replyGuard) ?? undeliverableReply(frame.id),
       (error) => this.#encodeReply({ type: 'error', id: frame.id, error: encodeFailure(error) }) ?? undeliverableReply(frame.id),
@@ -558,4 +559,9 @@ function decodeFailure(error: Failure): Error {
   return error.outcome
     ? new AgentCallError(error.outcome, error.message, error.code as AgentIntegrationErrorCode)
     : new AgentIntegrationError(error.code as AgentIntegrationErrorCode, error.message, error.retryable, error.details);
+}
+
+// Names the handled method in stall reports when it looks like an RPC method name.
+function rpcActivity(method: unknown): string {
+  return `rpc ${typeof method === 'string' && /^[A-Za-z][A-Za-z0-9.]{0,63}$/.test(method) ? method : 'unknown'}`;
 }

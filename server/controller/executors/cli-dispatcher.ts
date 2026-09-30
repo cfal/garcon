@@ -2,6 +2,7 @@ import type { CliContext } from '../../../common/server-runtime.js';
 import type { JsonValue } from '../../../common/json.js';
 import { DomainError } from '../../common/domain-error.js';
 import { readTextStreamWithLimit } from '../../common/bounded-text-stream.js';
+import { trackActivity } from '../../common/event-loop-stalls.js';
 import { invokeRawRouteHandler, unhandledRouteErrorResponse } from '../lib/http-route.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { ExecutorRpc, GuardRpcReply } from '../../remote/transport/rpc.js';
@@ -71,11 +72,13 @@ export class ControllerCliDispatcher {
       const body = request.http.body === null ? undefined : JSON.stringify(request.http.body);
       const req = new Request(url, { method, signal, headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body });
       let response: Response;
+      const finishActivity = trackActivity(`cli ${request.http.operation}`);
       try {
         response = await invokeRawRouteHandler(handler, req, undefined, { principal: {
           mode: 'executor', key: access.executorId, executorId: access.executorId, expiresAtMs: null,
         } });
       } catch (error) { response = unhandledRouteErrorResponse(error); }
+      finally { finishActivity(); }
       try { assertPublication(); }
       catch (error) { await response.body?.cancel().catch(() => {}); throw error; }
       let bodyValue: JsonValue;

@@ -57,8 +57,8 @@ async function serveExecutorWorker(options: ExecutorWorkerOptions, dataDir: stri
   const relay = new ProducerRelay();
   const journal = new RpcReplyJournal();
   // A stalled worker stops answering pings, and the controller retires its link after 15 s.
-  const stopStallMonitor = monitorEventLoopStalls((stallMs) => {
-    console.warn(JSON.stringify({ type: 'executor-event-loop-stalled', stallMs }));
+  const stopStallMonitor = monitorEventLoopStalls(({ stallMs, activities, heapUsedMb }) => {
+    console.warn(JSON.stringify({ type: 'executor-event-loop-stalled', stallMs, heapUsedMb, activities }));
   });
   const stopSlowStepReports = reportSlowSteps((operation, stepMs) => {
     console.warn(JSON.stringify({ type: 'executor-slow-step', operation, stepMs: Math.round(stepMs) }));

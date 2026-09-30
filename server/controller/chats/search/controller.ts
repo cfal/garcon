@@ -43,6 +43,7 @@ import type {
 } from '../../ledger/service.js';
 import type { TranscriptAdoptionService } from '../../ledger/adoption.js';
 import { TranscriptSearchUnavailableError } from './errors.js';
+import { withActivity } from '../../../common/event-loop-stalls.js';
 
 const DEFAULT_SEARCH_TIMEOUT_MS = 5_000;
 const LEDGER_PAGE_ROWS = 512;
@@ -341,13 +342,14 @@ export class TranscriptSearchController {
   ): Promise<{ view: TranscriptView; through: number } | null> {
     try {
       let view = await this.#ingestPacer.pay(
+        'ledger open',
         () => this.#deps.ledger.existingCurrentView(chatId),
       );
       if (!view) {
         this.#adoptingChatIds.add(chatId);
         try {
           const signal = this.#enableAbort?.signal ?? this.#lifecycleAbort.signal;
-          const adopted = await this.#ingestPacer.pay(() => (
+          const adopted = await this.#ingestPacer.pay('adoption', () => (
             this.#deps.hasChat(chatId)
               ? this.#deps.adoption.ensure(chatId, signal)
               : null
@@ -361,7 +363,7 @@ export class TranscriptSearchController {
           this.#adoptingChatIds.delete(chatId);
         }
       }
-      const watermark = await this.#ingestPacer.pay(() => {
+      const watermark = await this.#ingestPacer.pay('watermark', () => {
         if (!this.#deps.hasChat(chatId)) throw new Error('SEARCH_VIEW_MISMATCH');
         return this.#deps.ledger.highWatermark(chatId);
       });
@@ -538,7 +540,7 @@ export class TranscriptSearchController {
     while (cursor < throughOrdinal) {
       let frame: TranscriptSearchSyncFrame;
       try {
-        frame = await this.#ingestPacer.pay(() => {
+        frame = await this.#ingestPacer.pay('ledger page', () => {
           if (!this.#deps.hasChat(chatId)) throw new Error('SEARCH_VIEW_MISMATCH');
           const page = this.#deps.ledger.replayRows(
             chatId,
@@ -689,16 +691,16 @@ class IngestPacer {
   #debtMs = 0;
   #tail: Promise<void> = Promise.resolve();
 
-  pay<T>(work: () => T | Promise<T>): Promise<T> {
-    const run = this.#tail.then(() => this.#pay(work));
+  pay<T>(activity: string, work: () => T | Promise<T>): Promise<T> {
+    const run = this.#tail.then(() => this.#pay(activity, work));
     this.#tail = run.then(() => undefined, () => undefined);
     return run;
   }
 
-  async #pay<T>(work: () => T | Promise<T>): Promise<T> {
+  async #pay<T>(activity: string, work: () => T | Promise<T>): Promise<T> {
     const started = performance.now();
     try {
-      return await work();
+      return await withActivity(`search ${activity}`, work);
     } finally {
       const busyMs = performance.now() - started;
       this.#debtMs += busyMs * (1 - INGEST_PACING_RATIO) / INGEST_PACING_RATIO;
