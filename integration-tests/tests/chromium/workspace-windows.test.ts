@@ -1214,6 +1214,39 @@ describe('Chromium workspace windows', () => {
     }, undefined, { serverEnvironment: { GARCON_TERMINAL_SHELL: '/usr/bin/cat' } });
   });
 
+  test('closes the sole-tab menu on Tab pressed before the menu takes focus', async () => {
+    await withChromiumFixture('workspace-window-sole-tab-early-tab', async (fixture) => {
+      const chatId = await createChat(fixture, 'workspace-window-sole-tab-early-tab');
+      await openChat(fixture, chatId);
+      await collapseCanonicalFilesWindow(fixture.page);
+      const workspaceWindow = fixture.page.locator('[data-workspace-window-current="true"]');
+      const selectedTab = workspaceWindow.getByRole('tab');
+      const firstAddControl = workspaceWindow
+        .locator('[data-workspace-window-add-controls] button')
+        .first();
+      const contextMenu = fixture.page.locator('[data-workspace-window-tab-context-menu]');
+      expect(await selectedTab.count()).toBe(1);
+
+      // The paused clock holds the animation frame in which the opened menu takes focus.
+      const clockStart = Date.now();
+      await fixture.page.clock.install({ time: clockStart });
+      await fixture.page.clock.pauseAt(clockStart + 1_000);
+      await selectedTab.focus();
+      await fixture.page.keyboard.press('Shift+F10');
+      await contextMenu.waitFor({ state: 'visible' });
+      expect(await selectedTab.evaluate((element) => element === document.activeElement)).toBe(
+        true,
+      );
+      await fixture.page.keyboard.press('Tab');
+      await fixture.page.clock.runFor(100);
+      await contextMenu.waitFor({ state: 'detached' });
+      expect(await firstAddControl.evaluate((element) => element === document.activeElement)).toBe(
+        true,
+      );
+      fixture.assertNoBrowserErrors();
+    });
+  });
+
   test('drags Chat onto any window, enforces split geometry, and persists pointer resizing', async () => {
     await withChromiumFixture('workspace-window-native-dnd-resize', async (fixture, markPhase) => {
       await fixture.page.setViewportSize({ width: 1440, height: 900 });

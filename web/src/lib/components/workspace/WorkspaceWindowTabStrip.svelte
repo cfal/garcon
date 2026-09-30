@@ -207,6 +207,11 @@
 	}
 
 	function handleKeydown(event: KeyboardEvent, surfaceId: string): void {
+		// The opened menu takes focus on its next animation frame, so an earlier Tab still reaches the tab.
+		if (singleTabMenuOpen && event.key === 'Tab') {
+			void handleSingleTabMenuKeydown(event);
+			return;
+		}
 		const buttons = Array.from(
 			tabViewport?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? [],
 		);
