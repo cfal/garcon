@@ -75,7 +75,7 @@ function makeRouter(overrides = {}) {
       resume,
       abort: overrides.abort ?? mock(async () => undefined),
     },
-    steering: { captureTarget, steer },
+    steering: overrides.steering === undefined ? { captureTarget, steer } : overrides.steering,
     settings: { defaults: () => settings, parse: (input) => input },
   };
   const registry = {
@@ -699,6 +699,22 @@ describe('AgentRuntimeRouter producer boundary', () => {
     }));
     expect(prepareDelivery).toHaveBeenCalledTimes(1);
     expect(events.getActiveTurn()).toEqual(activeTurn);
+  });
+
+  it('captures no steering target before the chat has a native session', async () => {
+    const { router, captureTarget } = makeRouter();
+
+    await expect(router.captureSteerTarget('chat-1')).resolves.toBeNull();
+    expect(captureTarget).not.toHaveBeenCalled();
+  });
+
+  it('reports an agent without steering when capturing a target', async () => {
+    const { router } = makeRouter({ entry: { agentSessionId: 'native-1' }, steering: null });
+
+    await expect(router.captureSteerTarget('chat-1')).rejects.toMatchObject({
+      code: 'OPERATION_UNSUPPORTED',
+      status: 422,
+    });
   });
 
   it('replaces the producer capability before the next run', async () => {

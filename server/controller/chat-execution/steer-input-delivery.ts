@@ -69,6 +69,9 @@ export class SteerInputDelivery {
     let inserted = false;
     try {
       this.#assertTarget(chatId, target);
+      // The provider refuses a turn it cannot steer yet. Refusing first keeps a
+      // steer that was never delivered out of the transcript.
+      if (!target.providerTarget) throw steerTurnNotReadyError();
       inserted = await this.options.admitInput(chatId, content, {
         clientRequestId: options.clientRequestId,
         clientMessageId: options.clientMessageId,
@@ -156,6 +159,14 @@ export class SteerInputDelivery {
     }
   }
 
+}
+
+function steerTurnNotReadyError(): DomainError {
+  return new DomainError(
+    'STEER_TURN_UNAVAILABLE',
+    'The active turn cannot take steering input yet',
+    409,
+  );
 }
 
 function steerRejectionError(reason: AgentSteerRejectionReason): DomainError {

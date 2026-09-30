@@ -334,13 +334,7 @@ export class AgentRuntimeRouter {
       };
     }
     const integration = this.#directory.require(entry.agentId, entry.executorId);
-    if (!integration.steering) {
-      throw new DomainError(
-        'OPERATION_UNSUPPORTED',
-        'This agent does not support steering',
-        422,
-      );
-    }
+    if (!integration.steering) throw steeringUnsupportedError();
     await prepareDelivery();
     this.#ledger.takePreparedInput(chatId, options.clientMessageId);
     return integration.steering.steer({
@@ -354,12 +348,15 @@ export class AgentRuntimeRouter {
     });
   }
 
+  // Returns null only when no turn can take steering input now, so callers can
+  // tell a turn that is not ready yet from an agent that cannot be steered.
   async captureSteerTarget(chatId: string): Promise<AgentSteerTarget | null> {
     const entry = this.#registry.getChat(chatId);
-    if (!entry?.agentSessionId) return null;
+    if (!entry) return null;
     const integration = this.#directory.require(entry.agentId, entry.executorId);
     const steering = integration.steering;
-    if (!steering) return null;
+    if (!steering) throw steeringUnsupportedError();
+    if (!entry.agentSessionId) return null;
     const expectedRunId = this.#ledger.activeRunId(chatId);
     if (!expectedRunId) return null;
     const producerBinding = await this.#bindings.bind(integration, chatId, this.#producer(chatId));
@@ -983,6 +980,10 @@ function attachments(images: RunAgentTurnOptions['images'] = []) {
 
 function supportedValue<T extends string>(values: readonly string[], value: T, fallback: T): T {
   return values.includes(value) ? value : fallback;
+}
+
+function steeringUnsupportedError(): DomainError {
+  return new DomainError('OPERATION_UNSUPPORTED', 'This agent does not support steering', 422);
 }
 
 function runKey(chatId: string, runId: string): string {

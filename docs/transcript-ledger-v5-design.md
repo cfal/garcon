@@ -1491,7 +1491,8 @@ The guarantee is durable before provider dispatch, not durable at send:
 - A **steer** is appended and committed before delivery to the running
   provider is attempted. A steer initially sends only its own content;
   it is an ordinary prior `user-input` if a later turn performs the
-  fold.
+  fold. A turn whose provider cannot take steering input yet, because it
+  has not started the turn's input, refuses a steer before it is appended.
 - A **chat-ID discovery control input** is server-originated rather than a user
   submission. It creates no `user-input` row and does not participate in resend,
   queueing, or command idempotency. Core captures a steering target once and
@@ -2626,6 +2627,7 @@ relevant-entry definition under the 10.2 obligation.
 | Search maintenance reaches a registered chat without a current view | A non-materializing probe invokes the sole adoption service under pacing. Success enters ordinary derived indexing; failure creates no view and is reported as a per-chat search failure until a later adoption or maintenance retry. |
 | Search query names an unadopted chat while maintenance is incomplete | No ledger access or adoption occurs on the request path. The chat contributes to `unindexedChatCount`, returns no result, and remains visible as incomplete coverage. |
 | Durable carryover migration quarantine | Positively known prior loss: adoption creates a usable first view with no quarantined prefix rows, one durable warning carrying the artifact reference and error code, the current session fact when present, and any successfully imported current-binding rows. The notice survives frozen-projection flows; the quarantine artifact remains available for support. |
+| Steer arrives before the running turn's provider can take steering input | Refused with `STEER_TURN_UNAVAILABLE` before anything is appended; a queued message steered this way stays queued. |
 | Dispatch failure (start or steer rejected/thrown) | Best-effort kill; core appends `run-ended: failed` with optional sanitized error detail for a turn-starting failure; preceding inputs remain eligible for the next scan only if no conversational provider output or non-interrupted `run-ended` intervenes. |
 | Direct resume cannot load or validate its selected native history | The turn fails with `TRANSCRIPT_UNAVAILABLE` without an upstream request or ledger-to-native reconstruction; ordinary V5 history remains readable. |
 | Direct assistant/checkpoint is persisted but its ledger publication is lost | Native resume retains that execution history; the served view does not change automatically. Manual Reload can import it while the session is current; Direct has no drift probe. |
@@ -2828,7 +2830,9 @@ The catalog cites this revision, but its inventory is not repeated here.
   loses the queue; a paused queued entry blocks reload and in-place
   handoff with guidance; steers and immediate inputs committed before
   dispatch/delivery; the no-redispatch rule for duplicate committed
-  submissions.
+  submissions. A scripted Claude case holds a turn before its input starts
+  and proves that a refused steer leaves no row, and that a queued message
+  whose steer was refused stays queued and runs next.
 - **Chat-ID discovery**: the cleaned assistant remainder and hidden request row
   commit atomically before synchronous delivery capture, including a
   marker-only batch. Reopen preserves the physical row. Page, replay, fanout,
