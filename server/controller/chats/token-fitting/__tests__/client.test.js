@@ -81,6 +81,18 @@ describe('TokenFittingWorker', () => {
     expect(gap).toBeLessThan(MAX_EVENT_LOOP_GAP_MS);
   });
 
+  it('bounds each transfer by the text it carries, not only by message count', async () => {
+    fitting = new TokenFittingWorker();
+    // One batch of these would clone 256 MB in a single main-thread step.
+    const messages = Array.from({ length: 256 }, (_, index) => new AssistantMessage(AT, `${index} ${'x'.repeat(1_000_000)}`));
+
+    const gap = await maxEventLoopGap(async () => {
+      expect(await fitting.assessCarryover(messages)).toMatchObject({ kind: expect.any(String) });
+    });
+
+    expect(gap).toBeLessThan(MAX_EVENT_LOOP_GAP_MS);
+  }, 60_000);
+
   it('abandons an aborted running task and serves the next task from a fresh Worker', async () => {
     fitting = new TokenFittingWorker();
     const controller = new AbortController();
