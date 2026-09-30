@@ -208,12 +208,16 @@ export interface GarconTestClientOptions {
   authToken?: string | null;
   createWebSocket?: (url: string, protocols: string[]) => GarconWebSocket;
   redactSensitiveDiagnostics?: boolean;
+  requestTimeoutMs?: number;
 }
 
 export type CommittedUserInputMessage = ChatMessagesMessage;
 
 const WEB_SOCKET_OPEN = 1;
 const WEB_SOCKET_CLOSED = 3;
+// Fails a hung request before the lanes' 30 s test timeout, which would otherwise end the test
+// without naming the request or writing fixture diagnostics.
+const REQUEST_TIMEOUT_MS = 20_000;
 const SAFE_DIAGNOSTIC_STRING_KEYS = new Set([
   'agentid',
   'code',
@@ -324,6 +328,7 @@ export class GarconTestClient {
   readonly #authToken: string | null;
   readonly #createWebSocket: (url: string, protocols: string[]) => GarconWebSocket;
   readonly #redactSensitiveDiagnostics: boolean;
+  readonly #requestTimeoutMs: number;
   readonly #exchanges: HttpExchange[] = [];
   readonly #eventRecords: EventRecord[] = [];
   readonly #waiters = new Set<EventWaiter>();
@@ -337,6 +342,7 @@ export class GarconTestClient {
     this.#authToken = options.authToken ?? null;
     this.#createWebSocket = options.createWebSocket ?? ((url, protocols) => new WebSocket(url, protocols));
     this.#redactSensitiveDiagnostics = options.redactSensitiveDiagnostics === true;
+    this.#requestTimeoutMs = options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS;
   }
 
   static async connect(baseUrl: string, options: GarconTestClientOptions = {}): Promise<GarconTestClient> {
@@ -354,7 +360,12 @@ export class GarconTestClient {
     if (url.origin !== this.#baseUrl) throw new Error('Fixture requests must stay on the controller origin');
     const headers = new Headers(init.headers);
     if (this.#authToken && !headers.has('Authorization')) headers.set('Authorization', `Bearer ${this.#authToken}`);
-    return fetch(url, { ...init, headers });
+    const timeout = AbortSignal.timeout(this.#requestTimeoutMs);
+    const signal = init.signal ? AbortSignal.any([init.signal, timeout]) : timeout;
+    return fetch(url, { ...init, headers, signal }).catch((error: unknown) => {
+      if (!timeout.aborted || init.signal?.aborted) throw error;
+      throw new Error(`${init.method ?? 'GET'} ${url.pathname} did not respond within ${this.#requestTimeoutMs} ms`, { cause: error });
+    });
   }
 
   markEvents(): number {

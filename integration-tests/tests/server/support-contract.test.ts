@@ -937,6 +937,30 @@ describe('integration support contracts', () => {
     await expect(close).rejects.toThrow('Unknown or malformed WebSocket payload');
   });
 
+  test('fails a request the controller never answers with its method and path', async () => {
+    const server = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      fetch: () => new Promise<Response>(() => undefined),
+    });
+    let socket: ControlledWebSocket | null = null;
+    const client = await GarconTestClient.connect(`http://${server.hostname}:${server.port}`, {
+      createWebSocket: () => {
+        socket = new ControlledWebSocket();
+        return socket;
+      },
+      requestTimeoutMs: 50,
+    });
+    try {
+      await expect(client.get('/api/v1/chats')).rejects.toThrow('GET /api/v1/chats did not respond within 50 ms');
+    } finally {
+      const close = client.close();
+      socket!.finishClose();
+      await close;
+      server.stop(true);
+    }
+  });
+
   test('redacts credential-backed event diagnostics without changing live events', async () => {
     const privateContent = 'private provider prompt and response';
     let socket: ControlledWebSocket | null = null;
