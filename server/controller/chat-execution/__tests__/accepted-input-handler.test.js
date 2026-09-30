@@ -1,8 +1,9 @@
-import { describe, expect, mock, test } from 'bun:test';
+import { describe, expect, mock, spyOn, test } from 'bun:test';
 import { AgentCallError } from '@garcon/server-agent-interface';
 import { AcceptedInputHandler } from '../accepted-input-handler.ts';
 import { DomainError, ProjectUnavailableError, SteerDeliveryError } from '../../../common/domain-error.js';
 import { reconnectTimedOut } from '../../../common/executor-disconnect.js';
+import { INTERACTIVE_EXECUTOR_WAIT_MS } from '../../../common/interactive-deadline.ts';
 import { QueueEntrySteerError } from '../queue-steer-error.js';
 
 function command(overrides = {}) {
@@ -326,6 +327,51 @@ describe('AcceptedInputHandler', () => {
     expect(prepare).not.toHaveBeenCalled();
     expect(m.assertProjectAvailable).not.toHaveBeenCalled();
     expect(m.admitInput).not.toHaveBeenCalled();
+  });
+
+  test('starts a new interactive deadline for the admission check after a preparation', async () => {
+    let now = 1_000;
+    const clock = spyOn(performance, 'now').mockImplementation(() => now);
+    try {
+      const { handler, m } = scaffold();
+
+      await handler.schedule({
+        command: command(),
+        content: 'forked work',
+        options: { clientRequestId: 'request-1', clientMessageId: 'message-1', turnId: 'turn-1' },
+        settlement: settlement(),
+        admissionDeadline: now + INTERACTIVE_EXECUTOR_WAIT_MS,
+        preparation: {
+          operation: 'fork-run',
+          // Stands in for a native fork that outlasts the operation's deadline.
+          prepare: mock(async () => { now = 90_000; }),
+          compensate: mock(async () => undefined),
+        },
+      });
+
+      expect(m.assertProjectAvailable).toHaveBeenCalledWith('chat-1', 90_000 + INTERACTIVE_EXECUTOR_WAIT_MS);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  test('checks admission within the given deadline without a preparation, and without one for background input', async () => {
+    const { handler, m } = scaffold();
+    const input = {
+      command: command(),
+      content: 'new work',
+      options: { clientRequestId: 'request-1', clientMessageId: 'message-1', turnId: 'turn-1' },
+      settlement: settlement(),
+    };
+
+    await handler.schedule({ ...input, admissionDeadline: 21_000 });
+    await handler.schedule({
+      ...input,
+      admissionDeadline: null,
+      preparation: { operation: 'fork-run', prepare: mock(async () => undefined), compensate: mock(async () => undefined) },
+    });
+
+    expect(m.assertProjectAvailable.mock.calls).toEqual([['chat-1', 21_000], ['chat-1', null]]);
   });
 
   test('compensates preparation when the project is unavailable before transcript admission', async () => {

@@ -9,6 +9,7 @@ import type {
 import { DomainError, QUEUE_STEER_FINALIZATION_FAILED_MESSAGE, QUEUE_STEER_RECOVERY_FAILED_MESSAGE, STEER_NOT_DELIVERED_MESSAGE, STEER_OUTCOME_UNKNOWN_MESSAGE, SteerDeliveryError } from '../../common/domain-error.js';
 import { QueueEntrySteerError } from './queue-steer-error.js';
 import { createLogger } from '../../common/log.ts';
+import { interactiveDeadline } from '../../common/interactive-deadline.ts';
 import type { TurnIdentity } from '../lib/turn-identity.ts';
 import type { ChatExecutionControlOperations } from './chat-execution-control-operations.ts';
 import type {
@@ -574,9 +575,15 @@ export class AcceptedInputHandler {
           signal: reservation.executionAdmission.signal,
           assertAdmissionActive: () => this.#checkpoint(reservation),
         })));
+      // A preparation, such as a native fork or a carryover compaction, may outlast
+      // the operation's interactive deadline, so the admission check after it
+      // starts a deadline of its own.
+      const admissionDeadline = input.preparation && input.admissionDeadline !== null
+        ? interactiveDeadline()
+        : input.admissionDeadline;
       await this.#checkpointAfter(
         reservation,
-        this.#projectAdmission.assertAvailable(input.command.chatId, input.admissionDeadline),
+        this.#projectAdmission.assertAvailable(input.command.chatId, admissionDeadline),
       );
       const inserted = await this.#checkpointAfter(
         reservation,
