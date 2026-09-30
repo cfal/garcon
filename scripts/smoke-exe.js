@@ -3,6 +3,7 @@
 import path from 'node:path';
 import os from 'node:os';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { PI_DISCOVERY_MODELS, preparePiModelDiscoveryFixture } from '../server-agents/pi/src/agents/pi/__tests__/model-discovery-fixture.js';
 
 const SERVER_READY_PATTERN = /Started at (http:\/\/[^\s]+)/;
 const STARTUP_TIMEOUT_MS = 45000;
@@ -40,11 +41,15 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function isolatedServerEnvironment() {
+function isolatedServerEnvironment(piAgentDir) {
   const environment = { ...process.env };
   for (const key of Object.keys(environment)) {
     if (SMOKE_ISOLATION_ENV_KEYS.has(key.toUpperCase())) delete environment[key];
   }
+  environment.PI_CODING_AGENT_DIR = piAgentDir;
+  environment.PI_OFFLINE = '1';
+  environment.PI_TELEMETRY = '0';
+  environment.GARCON_PI_BINARY = path.resolve(import.meta.dir, '../server-agents/pi/node_modules/.bin/pi');
   return environment;
 }
 
@@ -140,7 +145,17 @@ async function assertBundledPreambles(url, apiFetch) {
   }
 }
 
-async function assertCompiledExecutor(url, executablePath, workspaceDir, apiFetch) {
+async function assertPiModelDiscovery(url, apiFetch, executorId = '') {
+  const query = new URLSearchParams({ agent: 'pi', ...(executorId ? { executorId } : {}) });
+  const response = await apiFetch(`${url}/api/v1/models?${query}`);
+  const body = await response.json();
+  const models = body.catalog?.agents?.find((agent) => agent.id === 'pi')?.models ?? [];
+  if (!response.ok || PI_DISCOVERY_MODELS.some((value) => !models.some((model) => model.value === value))) {
+    throw new Error(`Compiled Pi SDK extension discovery failed: ${JSON.stringify(body)}`);
+  }
+}
+
+async function assertCompiledExecutor(url, executablePath, workspaceDir, apiFetch, piAgentDir) {
   const response = await apiFetch(`${url}/api/v1/executors`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -160,7 +175,7 @@ async function assertCompiledExecutor(url, executablePath, workspaceDir, apiFetc
       '--allow-insecure-development', '--config-dir', path.join(workspaceDir, 'worker'),
       '--project-base-dir', workspaceDir,
     ],
-    env: isolatedServerEnvironment(),
+    env: isolatedServerEnvironment(piAgentDir),
     stdout: 'ignore',
     stderr: 'pipe',
   });
@@ -181,6 +196,7 @@ async function assertCompiledExecutor(url, executablePath, workspaceDir, apiFetc
     if (!inspection.ok || !(await inspection.json()).valid) {
       throw new Error('Compiled worker project inspection failed');
     }
+    await assertPiModelDiscovery(url, apiFetch, configured.id);
     const terminalsUrl = `${url}/api/v1/terminals`;
     const inventory = await apiFetch(`${terminalsUrl}?executorId=${configured.id}`).then(result => result.json());
     const created = await apiFetch(terminalsUrl, {
@@ -303,6 +319,7 @@ async function run() {
 
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), 'garcon-exe-smoke-'));
   const configDir = path.join(workspaceDir, 'config');
+  const piAgentDir = await preparePiModelDiscoveryFixture(workspaceDir);
   const credentials = { username: 'smoke', password: crypto.randomUUID() };
   await mkdir(configDir, { mode: 0o700 });
   await writeFile(path.join(configDir, 'auth.json'), JSON.stringify({
@@ -323,7 +340,7 @@ async function run() {
       '--project-base-dir',
       workspaceDir,
     ],
-    env: isolatedServerEnvironment(),
+    env: isolatedServerEnvironment(piAgentDir),
     stdout: 'pipe',
     stderr: 'pipe',
   });
@@ -338,7 +355,8 @@ async function run() {
       throw new Error('Default-off executable unexpectedly created a transcript search database.');
     }
     await assertBundledPreambles(started.url, apiFetch);
-    await assertCompiledExecutor(started.url, executablePath, workspaceDir, apiFetch);
+    await assertPiModelDiscovery(started.url, apiFetch);
+    await assertCompiledExecutor(started.url, executablePath, workspaceDir, apiFetch, piAgentDir);
     await stopProcess(child);
 
     await writeFile(

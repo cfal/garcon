@@ -179,6 +179,41 @@ describe('Pi history loader', () => {
       .toEqual(['active content']);
   });
 
+  it('applies active context edits without losing original source identities', async () => {
+    const sessionPath = await writeJsonl('context-edits.jsonl', [
+      { type: 'session', version: 3, id: 'session-edits', cwd: '/project' },
+      { type: 'message', id: 'user', parentId: null,
+        message: { role: 'user', content: 'original', timestamp: 1767225601000 } },
+      { type: 'message', id: 'answer', parentId: 'user',
+        message: assistantMessage([{ type: 'text', text: 'omitted' }]) },
+      { type: 'context_edit', id: 'replacement', parentId: 'answer', targetId: 'user',
+        replacement: { content: 'edited' } },
+      { type: 'context_edit', id: 'omission', parentId: 'replacement', targetId: 'answer', replacement: null },
+      { type: 'context_edit', id: 'sibling', parentId: 'answer', targetId: 'user',
+        replacement: { content: 'wrong branch' } },
+      { type: 'usage', id: 'usage', parentId: 'omission', kind: 'cache_warm' },
+    ]);
+
+    const messages = await loadPiChatMessages(sessionPath);
+    expect(messages.map((message) => message.content)).toEqual(['edited']);
+    expect(getNativeMessageRevisionSource(messages[0])).toEqual({ entryId: 'user', withinSourceOrdinal: 0 });
+  });
+
+  it('loads only the latest compaction range and ignores system checkpoints', async () => {
+    const sessionPath = await writeJsonl('compaction.jsonl', [
+      { type: 'message', id: 'old', parentId: null,
+        message: { role: 'user', content: 'old', timestamp: 1767225601000 } },
+      { type: 'compaction', id: 'first', parentId: 'old', summary: 'first summary', firstKeptEntryId: 'old', tokensBefore: 100 },
+      { type: 'message', id: 'kept', parentId: 'first',
+        message: assistantMessage([{ type: 'text', text: 'kept' }]) },
+      { type: 'compaction', id: 'second', parentId: 'kept', summary: 'second summary', firstKeptEntryId: 'first', tokensBefore: 200,
+        systemMessage: { role: 'system', content: 'internal instructions', timestamp: 1767225603000 } },
+    ]);
+    const messages = await loadPiChatMessages(sessionPath);
+    expect(messages.map((message) => message.content)).toEqual(['kept']);
+    expect(getNativeMessageRevisionSource(messages[0])).toEqual({ entryId: 'kept', withinSourceOrdinal: 0 });
+  });
+
   it('loads persisted Pi history from a real native path', async () => {
     const sessionPath = await writeJsonl('2026-01-01T00-00-00-000Z_session-agent-real.jsonl', [
       { type: 'session', version: 3, id: 'session-agent-real', timestamp: '2026-01-01T00:00:00.000Z', cwd: '/tmp/project' },

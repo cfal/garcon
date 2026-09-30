@@ -232,9 +232,10 @@ describe('scripted Pi persistence', () => {
         attachmentNames: [],
       }]);
       expect(await piNativeSession(fixture, chatId)).toEqual(nativeBeforeCrash);
-      await expect(readFile(nativeBeforeCrash.path, 'utf8')).rejects.toMatchObject({
-        code: 'ENOENT',
-      });
+      // Pi now persists at the first user message, before any assistant response.
+      const native = await readFile(nativeBeforeCrash.path, 'utf8');
+      expect(native).toContain(lostPrompt);
+      expect(native).not.toContain(lostReply);
       testEnvironment.model.assertSettled();
     }, withScriptedPi());
   }, 120_000);
