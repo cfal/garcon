@@ -99,12 +99,10 @@
 				document
 					.querySelector('meta[name="theme-color"]')
 					?.setAttribute('content', profile.themeColor);
+				// Opaque styles keep installed iOS content below the status bar.
 				document
 					.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]')
-					?.setAttribute(
-						'content',
-						profile.colorScheme === 'dark' ? 'black-translucent' : 'default',
-					);
+					?.setAttribute('content', profile.colorScheme === 'dark' ? 'black' : 'default');
 			})();
 		</script>
 		%sveltekit.head%

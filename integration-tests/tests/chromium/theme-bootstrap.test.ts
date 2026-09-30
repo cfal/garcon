@@ -195,7 +195,7 @@ describe("theme bootstrap", () => {
           themeColor: expectedProfile.browserThemeColor,
           appleStatusBarStyle:
             expectedProfile.colorScheme === "dark"
-              ? "black-translucent"
+              ? "black"
               : "default",
         });
 

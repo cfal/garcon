@@ -29,9 +29,10 @@ export function applyThemeToDocument(document: Document, profile: ThemeProfile):
 	document
 		.querySelector('meta[name="theme-color"]')
 		?.setAttribute('content', profile.browserThemeColor);
+	// Opaque styles keep installed iOS content below the status bar.
 	document
 		.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]')
-		?.setAttribute('content', profile.colorScheme === 'dark' ? 'black-translucent' : 'default');
+		?.setAttribute('content', profile.colorScheme === 'dark' ? 'black' : 'default');
 }
 
 export function readTerminalBackground(root: HTMLElement): string | null {

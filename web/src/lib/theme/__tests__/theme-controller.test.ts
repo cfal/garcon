@@ -1,7 +1,7 @@
 import { cleanup, render, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ThemeControllerTestHost from './ThemeControllerTestHost.svelte';
-import type { ThemePreference } from '../themes.js';
+import { THEME_PROFILES, type ThemePreference } from '../themes.js';
 
 interface MatchMediaHarness {
 	readonly listeners: Set<(event: MediaQueryListEvent) => void>;
@@ -83,9 +83,34 @@ describe('ThemeController', () => {
 		await waitFor(() => expect(media.listeners).toHaveLength(1));
 		media.setDark(true);
 		await waitFor(() => expect(document.documentElement.dataset.theme).toBe('classic-dark'));
+		expect(
+			document
+				.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]')
+				?.getAttribute('content'),
+		).toBe('black');
+
+		media.setDark(false);
+		await waitFor(() => expect(document.documentElement.dataset.theme).toBe('classic-light'));
+		expect(
+			document
+				.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]')
+				?.getAttribute('content'),
+		).toBe('default');
 
 		fixed.component.setPreference({ mode: 'fixed', themeId: 'phosphor-light' });
 		await waitFor(() => expect(media.listeners).toHaveLength(0));
+	});
+
+	it.each(THEME_PROFILES)('keeps the iOS status bar opaque for $id', async (profile) => {
+		installMatchMedia();
+		renderController({ mode: 'fixed', themeId: profile.id });
+		await waitFor(() => expect(document.documentElement.dataset.theme).toBe(profile.id));
+
+		expect(
+			document
+				.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]')
+				?.getAttribute('content'),
+		).toBe(profile.colorScheme === 'dark' ? 'black' : 'default');
 	});
 
 	it('projects root state and metadata before resolving the terminal background', async () => {
