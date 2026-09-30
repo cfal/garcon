@@ -176,7 +176,9 @@
 	setSidebarSearch(sidebarSearchContext);
 
 	setModelCatalog({
-		forExecutor() { return this; },
+		forExecutor() {
+			return this;
+		},
 		supportsFork() {
 			return true;
 		},
@@ -230,7 +232,6 @@
 		onShowPreambles={() => {}}
 		onShowSnippets={() => {}}
 		onShowSettings={() => {}}
-		onShowAppSettings={() => {}}
 		newWindowEdges={workspaceSplitAdmissions()}
 	/>
 {/if}

@@ -168,7 +168,7 @@
 			disabled={ls.completionSoundMode === 'off'}
 			oninput={(event) =>
 				ls.set('completionSoundVolume', Number((event.currentTarget as HTMLInputElement).value))}
-			class="w-36 accent-primary"
+			class="w-36 min-w-0 max-w-[55%] accent-primary"
 		/>
 	</div>
 

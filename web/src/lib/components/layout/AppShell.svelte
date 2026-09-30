@@ -21,7 +21,6 @@
 	const lazySettings = () => import('../settings/Settings.svelte');
 	const lazyScheduledPrompts = () => import('../settings/ScheduledPromptsDialog.svelte');
 	const lazyPreambles = () => import('../preambles/PreamblesDialog.svelte');
-	const lazyAppSettings = () => import('../settings/AppSettings.svelte');
 	const lazyChatPreambleSelection = () => import('../preambles/ChatPreambleSelectionDialog.svelte');
 	const lazySnippets = () => import('../snippets/SnippetsDialog.svelte');
 	const lazyOnboardingWizard = () => import('../onboarding/OnboardingWizard.svelte');
@@ -722,7 +721,6 @@
 		onShowScheduledPrompts={() => appShell.openScheduledPrompts()}
 		onShowPreambles={() => appShell.openPreambles()}
 		onShowSnippets={() => appShell.openSnippets()}
-		onShowAppSettings={() => appShell.openAppSettings()}
 		onShowSettings={() => appShell.openSettings()}
 		{newWindowEdges}
 	/>
@@ -929,12 +927,6 @@
 {#if appShell.showPreambles}
 	{#await lazyPreambles() then { default: PreamblesDialog }}
 		<PreamblesDialog />
-	{/await}
-{/if}
-
-{#if appShell.showAppSettings}
-	{#await lazyAppSettings() then { default: AppSettings }}
-		<AppSettings />
 	{/await}
 {/if}
 

@@ -40,8 +40,8 @@ test('provider settings test and fetch models through the selected executor', as
       await app.open();
       await fixture.waitForSpaWebSocket();
       await app.clickButton('More actions');
-      await app.waitForMenuItemEnabled('Server Settings');
-      await app.clickMenuItem('Server Settings');
+      await app.waitForMenuItemEnabled('Settings');
+      await app.clickMenuItem('Settings');
       await app.waitForButton('Providers');
       await app.clickButton('Providers');
       await app.waitForText('Synthetic discovery endpoint');

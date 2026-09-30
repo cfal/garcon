@@ -6,8 +6,8 @@ import { SpaDriver } from '../../support/spa-driver.js';
 
 async function openRemoteSettings(app: SpaDriver): Promise<void> {
   await app.clickButton('More actions');
-  await app.waitForMenuItemEnabled('Server Settings');
-  await app.clickMenuItem('Server Settings');
+  await app.waitForMenuItemEnabled('Settings');
+  await app.clickMenuItem('Settings');
   await app.waitForButton('General');
   await app.clickButton('General');
 }

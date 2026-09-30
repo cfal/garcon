@@ -69,7 +69,6 @@ describe('sidebar search interactions', () => {
 			onShowPreambles: vi.fn(),
 			onShowSnippets: vi.fn(),
 			onShowSettings: vi.fn(),
-			onShowAppSettings: vi.fn(),
 		});
 
 		expect(container.querySelector('[data-workspace-new-window-menu]')).toBeNull();
@@ -572,7 +571,6 @@ describe('sidebar search interactions', () => {
 			onShowPreambles: vi.fn(),
 			onShowSnippets,
 			onShowSettings: vi.fn(),
-			onShowAppSettings: vi.fn(),
 		});
 
 		const [mobileTrigger] = screen.getAllByRole('button', { name: 'More actions' });
@@ -617,8 +615,8 @@ describe('sidebar search interactions', () => {
 		expect(items[16]?.textContent).toContain('Scheduled prompts');
 		expect(items[17]?.textContent).toContain('Preambles');
 		expect(items[18]?.textContent).toContain('Snippets');
-		expect(items[19]?.textContent).toContain('App Settings');
-		expect(items[20]?.textContent).toContain('Server Settings');
+		expect(items[19]?.textContent).toContain('Settings');
+		expect(items).toHaveLength(20);
 		expect(document.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(6);
 
 		await fireEvent.click(screen.getByRole('menuitem', { name: 'Scheduled prompts' }));
@@ -656,7 +654,6 @@ describe('sidebar search interactions', () => {
 			onShowPreambles: vi.fn(),
 			onShowSnippets: vi.fn(),
 			onShowSettings: vi.fn(),
-			onShowAppSettings: vi.fn(),
 		});
 
 		const [mobileTrigger] = screen.getAllByRole('button', { name: 'More actions' });
@@ -726,8 +723,8 @@ describe('sidebar search interactions', () => {
 		expect(items[14]?.textContent).toContain('Scheduled prompts');
 		expect(items[15]?.textContent).toContain('Preambles');
 		expect(items[16]?.textContent).toContain('Snippets');
-		expect(items[17]?.textContent).toContain('App Settings');
-		expect(items[18]?.textContent).toContain('Server Settings');
+		expect(items[17]?.textContent).toContain('Settings');
+		expect(items).toHaveLength(18);
 		expect(document.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(5);
 		expect(projectGrouping.querySelector('span')?.className ?? '').toContain('end-2');
 		expect(projectGrouping.className).toContain('pe-8');
@@ -778,7 +775,6 @@ describe('sidebar search interactions', () => {
 			onShowPreambles: vi.fn(),
 			onShowSnippets: vi.fn(),
 			onShowSettings: vi.fn(),
-			onShowAppSettings: vi.fn(),
 		});
 
 		const [mobileTrigger] = screen.getAllByRole('button', { name: 'More actions' });
@@ -812,7 +808,6 @@ describe('sidebar search interactions', () => {
 				onShowPreambles: vi.fn(),
 				onShowSnippets: vi.fn(),
 				onShowSettings: vi.fn(),
-			onShowAppSettings: vi.fn(),
 			});
 
 			const [mobileTrigger] = screen.getAllByRole('button', { name: 'More actions' });
@@ -841,7 +836,6 @@ describe('sidebar search interactions', () => {
 			onShowPreambles: vi.fn(),
 			onShowSnippets: vi.fn(),
 			onShowSettings: vi.fn(),
-			onShowAppSettings: vi.fn(),
 		});
 
 		const [menuTrigger] = screen.getAllByRole('button', { name: 'More actions' });
@@ -871,7 +865,6 @@ describe('sidebar search interactions', () => {
 			onShowPreambles: vi.fn(),
 			onShowSnippets: vi.fn(),
 			onShowSettings: vi.fn(),
-			onShowAppSettings: vi.fn(),
 		});
 
 		let [menuTrigger] = screen.getAllByRole('button', { name: 'More actions' });
@@ -910,7 +903,6 @@ describe('sidebar search interactions', () => {
 			onShowPreambles: vi.fn(),
 			onShowSnippets: vi.fn(),
 			onShowSettings: vi.fn(),
-			onShowAppSettings: vi.fn(),
 		});
 
 		const controlsRow = document.querySelector('[data-slot="sidebar-controls-row"]');
@@ -930,7 +922,6 @@ describe('sidebar search interactions', () => {
 			onShowPreambles: vi.fn(),
 			onShowSnippets: vi.fn(),
 			onShowSettings: vi.fn(),
-			onShowAppSettings: vi.fn(),
 		});
 
 		const [mobileTrigger] = screen.getAllByRole('button', { name: 'More actions' });
@@ -1047,7 +1038,6 @@ describe('sidebar search interactions', () => {
 			onShowPreambles: vi.fn(),
 			onShowSnippets: vi.fn(),
 			onShowSettings: vi.fn(),
-			onShowAppSettings: vi.fn(),
 		});
 
 		const topDock = document.querySelector('[data-slot="sidebar-search-dock"]');

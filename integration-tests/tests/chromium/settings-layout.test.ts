@@ -11,13 +11,13 @@ test('settings navigation and host sections fit desktop and mobile dialogs', asy
     await mkdir(artifacts, { recursive: true });
     await page.goto(integration.garcon.baseUrl);
     await page.getByRole('button', { name: 'More actions', exact: true }).click();
-    await page.getByRole('menuitem', { name: 'Server Settings', exact: true }).click();
-    const dialog = page.getByRole('dialog', { name: 'Server Settings', exact: true });
-    await browserExpect(dialog.getByRole('tab', { name: 'Executors', exact: true })).toHaveAttribute('aria-selected', 'true');
+    await page.getByRole('menuitem', { name: 'Settings', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: 'Settings', exact: true });
+    await browserExpect(dialog.getByRole('tab', { name: 'Interface', exact: true })).toHaveAttribute('aria-selected', 'true');
     for (const width of [1440, 768, 390, 320]) {
-      phase(`server settings at ${width}px`);
+      phase(`settings at ${width}px`);
       await page.setViewportSize({ width, height: 900 });
-      for (const name of ['Providers', 'Other Agents', 'General', 'Automation', 'Notifications', 'GitHub', 'Executors']) {
+      for (const name of ['Interface', 'Shortcuts', 'Providers', 'Other Agents', 'General', 'Automation', 'Notifications', 'GitHub', 'Executors']) {
         await dialog.getByRole('tab', { name, exact: true }).click();
         const panel = dialog.getByRole('tabpanel');
         await browserExpect(panel).toBeVisible();
@@ -36,16 +36,11 @@ test('settings navigation and host sections fit desktop and mobile dialogs', asy
         }
       }
     }
-    await dialog.getByRole('button', { name: 'Close', exact: true }).click();
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.getByRole('button', { name: 'More actions', exact: true }).click();
-    await page.getByRole('menuitem', { name: 'App Settings', exact: true }).click();
-    const appDialog = page.getByRole('dialog', { name: 'App Settings', exact: true });
-    await browserExpect(appDialog.getByRole('tab', { name: 'General', exact: true })).toHaveAttribute('aria-selected', 'true');
-    await browserExpect(appDialog.getByRole('tab', { name: 'Providers', exact: true })).toHaveCount(0);
-    await appDialog.getByRole('tab', { name: 'Shortcuts', exact: true }).click();
-    await browserExpect(appDialog.getByRole('switch', { name: 'Send by Shift+Enter', exact: true })).toBeVisible();
+    await dialog.getByRole('tab', { name: 'Shortcuts', exact: true }).click();
+    await browserExpect(dialog.getByRole('switch', { name: 'Send by Shift+Enter', exact: true })).toBeVisible();
     await page.screenshot({ path: join(artifacts, 'settings-app-desktop.png') });
+    await dialog.getByRole('button', { name: 'Close', exact: true }).click();
     assertNoBrowserErrors();
   }, undefined, { executionBackend: 'remote-controller-dials' });
 }, 180_000);

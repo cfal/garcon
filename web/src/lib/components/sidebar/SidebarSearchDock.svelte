@@ -1,9 +1,6 @@
 <script lang="ts">
 	import SidebarControlsRow from './SidebarControlsRow.svelte';
-	import type {
-		SidebarChatGrouping,
-		SidebarSortMode,
-	} from '$lib/stores/local-settings.svelte';
+	import type { SidebarChatGrouping, SidebarSortMode } from '$lib/stores/local-settings.svelte';
 	import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
 	import SidebarSearchContext from './SidebarSearchContext.svelte';
 	import type { SavedChatSearch } from '$lib/api/settings';
@@ -36,7 +33,6 @@
 		onShowScheduledPrompts: () => void;
 		onShowPreambles: () => void;
 		onShowSnippets: () => void;
-		onShowAppSettings: () => void;
 		onShowSettings: () => void;
 	}
 
@@ -68,7 +64,6 @@
 		onShowScheduledPrompts,
 		onShowPreambles,
 		onShowSnippets,
-		onShowAppSettings,
 		onShowSettings,
 	}: SidebarSearchDockProps = $props();
 
@@ -104,7 +99,6 @@
 		{onShowScheduledPrompts}
 		{onShowPreambles}
 		{onShowSnippets}
-		{onShowAppSettings}
 		{onShowSettings}
 	/>
 	<SidebarSearchContext

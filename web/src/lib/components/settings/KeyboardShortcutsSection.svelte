@@ -111,7 +111,7 @@
 </script>
 
 {#snippet keyCombo(keys: string[])}
-	<span class="flex items-center gap-1">
+	<span class="flex flex-wrap items-center gap-1">
 		{#each keys as key, index (index)}
 			{#if index > 0}
 				<span class="text-xs text-muted-foreground">+</span>
@@ -163,7 +163,7 @@
 			<Button
 				variant={recordingId === entry.id ? 'default' : 'outline'}
 				size="sm"
-				class="min-w-28 font-mono"
+				class="h-auto min-h-8 max-w-full min-w-28 whitespace-normal font-mono"
 				onclick={() => startRecording(entry.id)}
 				onkeydown={(event) => handleBindingKeydown(event, entry.id)}
 				onblur={() => stopRecording(entry.id)}
@@ -251,7 +251,7 @@
 				>
 					<div class="text-sm text-muted-foreground">{entry.description()}</div>
 					<code
-						class="max-w-full whitespace-nowrap px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground bg-muted rounded border border-border"
+						class="max-w-full break-words sm:whitespace-nowrap px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground bg-muted rounded border border-border"
 					>
 						{entry.command}
 					</code>

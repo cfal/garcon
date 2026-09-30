@@ -20,7 +20,6 @@ describe('sidebar mark all as read menu', () => {
 			onShowPreambles: vi.fn(),
 			onShowSnippets: vi.fn(),
 			onShowSettings: vi.fn(),
-			onShowAppSettings: vi.fn(),
 		});
 
 		const [trigger] = screen.getAllByRole('button', { name: 'More actions' });

@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
 	import Settings from '../Settings.svelte';
-	import AppSettings from '../AppSettings.svelte';
 	import type { ExecutorSnapshot } from '$shared/executors';
 	import type { ExecutorsStore } from '$lib/executors/executors-store.svelte';
 	import type { GhCapabilityContext } from '$lib/git/pull-requests/gh-capability.svelte';
@@ -199,11 +198,17 @@
 	setGhCapability(untrack(() => ghCapability));
 
 	setAppShell(untrack(() => appShell));
-	setApiProviders(new ApiProvidersStore(() => {}, {
-		read: async () => ({ providers: [], assignments: { version: 1, revision: 0, assignments: {} } }),
-		assign: async () => ({ providers: [], assignments: { revision: 0, assignments: {} } }),
-		unassign: async () => ({ providers: [], assignments: { revision: 0, assignments: {} } }), delete: async () => ({ success: true }),
-	}));
+	setApiProviders(
+		new ApiProvidersStore(() => {}, {
+			read: async () => ({
+				providers: [],
+				assignments: { version: 1, revision: 0, assignments: {} },
+			}),
+			assign: async () => ({ providers: [], assignments: { revision: 0, assignments: {} } }),
+			unassign: async () => ({ providers: [], assignments: { revision: 0, assignments: {} } }),
+			delete: async () => ({ success: true }),
+		}),
+	);
 	const files: Pick<FileSessionRegistry, 'clearRecovery'> = {
 		clearRecovery: () => onClearRecovery(),
 	};
@@ -276,4 +281,3 @@
 </script>
 
 {#if appShell.showSettings}<Settings />{/if}
-{#if appShell.showAppSettings}<AppSettings />{/if}

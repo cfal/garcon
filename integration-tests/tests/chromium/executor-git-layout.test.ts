@@ -71,7 +71,7 @@ test('executor Git labels and GitHub host controls fit desktop and mobile', asyn
     await page.setViewportSize({ width: 1440, height: 900 });
 
     await page.getByRole('button', { name: 'More actions', exact: true }).click();
-    await page.getByRole('menuitem', { name: 'Server Settings', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Settings', exact: true }).click();
     const checked = page.waitForResponse(response => response.url().includes(`/api/v1/gh/status?executorId=${client.executorId}`));
     await page.getByRole('tab', { name: 'GitHub', exact: true }).click();
     const host = page.getByRole('region', { name: label, exact: true });

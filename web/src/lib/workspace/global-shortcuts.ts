@@ -91,7 +91,7 @@ export const GLOBAL_SHORTCUT_DEFINITIONS: readonly GlobalShortcutDefinition[] = 
 		context: 'workspace',
 		defaultBinding: { key: 'o', ctrl: true, shift: true },
 	},
-	{ id: 'open-settings', context: 'workspace', defaultBinding: { key: ',', ctrl: true } },
+	{ id: 'open-settings', context: 'workspace', defaultBinding: { key: ',', primary: true } },
 	{ id: 'scroll-half-page-up', context: 'workspace', defaultBinding: { key: 'u', ctrl: true } },
 	{ id: 'scroll-half-page-down', context: 'workspace', defaultBinding: { key: 'd', ctrl: true } },
 	{ id: 'file-save', context: 'file', defaultBinding: { key: 's', primary: true } },

@@ -142,11 +142,14 @@ describe('AppShellStore', () => {
 	});
 
 	describe('settings tabs', () => {
-		it('defaults unknown server sections to executors', () => {
+		it('defaults unknown sections to interface', () => {
 			const store = new AppShellStore();
 
 			store.openSettings('display');
-			expect(store.settingsTab).toBe('executors');
+			expect(store.settingsTab).toBe('interface');
+
+			store.openSettings('shortcuts');
+			expect(store.settingsTab).toBe('shortcuts');
 
 			store.openSettings('general');
 			expect(store.settingsTab).toBe('general');
@@ -161,37 +164,35 @@ describe('AppShellStore', () => {
 			expect(store.settingsTab).toBe('notifications');
 		});
 
-		it('keeps app and server settings mutually exclusive with independent tabs', () => {
+		it('opens app and server tabs in one settings dialog', () => {
 			const store = new AppShellStore();
 			store.openSettings('github');
-			store.openAppSettings('shortcuts');
-			expect(store.showSettings).toBe(false);
-			expect(store.showAppSettings).toBe(true);
-			expect(store.settingsTab).toBe('github');
-			expect(store.appSettingsTab).toBe('shortcuts');
-			store.openSettings();
-			expect(store.showAppSettings).toBe(false);
 			expect(store.showSettings).toBe(true);
-			expect(store.settingsTab).toBe('executors');
-			store.openAppSettings('unknown');
-			expect(store.appSettingsTab).toBe('general');
-			store.closeAppSettings();
-			expect(store.showAppSettings).toBe(false);
+			expect(store.settingsTab).toBe('github');
+			store.setSettingsTab('shortcuts');
+			expect(store.settingsTab).toBe('shortcuts');
+			store.openSettings();
+			expect(store.settingsTab).toBe('interface');
+			store.closeSettings();
+			expect(store.showSettings).toBe(false);
 		});
 
-		it.each(['openScheduledPrompts', 'openOnboardingWizard', 'openPreambles', 'openSnippets'] as const)(
-			'%s closes app settings', (open) => {
-				const store = new AppShellStore();
-				store.openAppSettings();
-				store[open]();
-				expect(store.showAppSettings).toBe(false);
-				store.openAppSettings();
-				expect(store.showScheduledPrompts).toBe(false);
-				expect(store.showOnboardingWizard).toBe(false);
-				expect(store.showPreambles).toBe(false);
-				expect(store.showSnippets).toBe(false);
-			},
-		);
+		it.each([
+			'openScheduledPrompts',
+			'openOnboardingWizard',
+			'openPreambles',
+			'openSnippets',
+		] as const)('%s closes settings', (open) => {
+			const store = new AppShellStore();
+			store.openSettings();
+			store[open]();
+			expect(store.showSettings).toBe(false);
+			store.openSettings();
+			expect(store.showScheduledPrompts).toBe(false);
+			expect(store.showOnboardingWizard).toBe(false);
+			expect(store.showPreambles).toBe(false);
+			expect(store.showSnippets).toBe(false);
+		});
 	});
 
 	describe('scheduled prompts dialog', () => {
@@ -275,10 +276,10 @@ describe('AppShellStore', () => {
 			const store = new AppShellStore();
 			store.openOnboardingWizard();
 
-			store.openAppSettings();
+			store.openSettings();
 
 			expect(store.showOnboardingWizard).toBe(false);
-			expect(store.showAppSettings).toBe(true);
+			expect(store.showSettings).toBe(true);
 		});
 
 		it('closes when scheduled prompts or snippets open', () => {
