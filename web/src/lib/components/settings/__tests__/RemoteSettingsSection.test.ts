@@ -19,6 +19,7 @@ import {
 	DEFAULT_PROMPT_REFINEMENT_PROMPT,
 	GENERATION_PROMPT_TEMPLATE_MAX_LENGTH,
 } from '$shared/generation-prompts';
+import { DEFAULT_TICKET_DISPATCH_PROMPT } from '$shared/ticket-dispatch';
 import {
 	makeRemoteSettingsSnapshot,
 	mockRemoteSettingsUpdate,
@@ -963,6 +964,50 @@ describe('remote settings sections', () => {
 				},
 			});
 		});
+	});
+
+	it('edits the ticket dispatch model and prompt without changing generation settings', async () => {
+		const store = new RemoteSettingsStore();
+		store.applySnapshot(
+			makeRemoteSettingsSnapshot({
+				ui: { ticketDispatch: { agentId: 'codex', model: 'gpt-5.4' } },
+			}),
+		);
+		setTestRemoteSettingsStore(store);
+		mockRemoteSettingsUpdate(store);
+		render(RemoteSettingsSectionTestHost, { section: 'automation' });
+
+		const follow = screen.getByRole('button', { name: 'Same as new chat' });
+		expect(follow.getAttribute('aria-pressed')).toBe('false');
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Edit dispatch prompt' }));
+		const prompt = screen.getByRole('textbox', { name: 'Edit ticket dispatch instructions' });
+		expect((prompt as HTMLTextAreaElement).value).toBe(DEFAULT_TICKET_DISPATCH_PROMPT);
+		expect(screen.getByText('{{ticket}}')).toBeTruthy();
+
+		await fireEvent.input(prompt, { target: { value: 'Fix it.' } });
+		expect(screen.getByText('The generation prompt must include {{ticket}}.')).toBeTruthy();
+		expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true);
+
+		await fireEvent.input(prompt, { target: { value: 'Fix: {{ticket}}' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+		await waitFor(() => {
+			expect(updateRemoteSettings).toHaveBeenLastCalledWith({
+				ui: {
+					ticketDispatch: { agentId: 'codex', model: 'gpt-5.4', customPrompt: 'Fix: {{ticket}}' },
+				},
+			});
+		});
+
+		await fireEvent.click(follow);
+		await waitFor(() => {
+			expect(updateRemoteSettings).toHaveBeenLastCalledWith({
+				ui: { ticketDispatch: { customPrompt: 'Fix: {{ticket}}' } },
+			});
+		});
+		expect(screen.getByRole('button', { name: 'Same as new chat' }).getAttribute('aria-pressed')).toBe(
+			'true',
+		);
 	});
 
 	it('keeps a failed prompt save in the dialog for retry', async () => {

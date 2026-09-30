@@ -1,4 +1,4 @@
-import type { TicketDetail } from '$shared/tickets';
+import type { TicketDetail, TicketWriteResult } from '$shared/tickets';
 import { ticketOwnerKey } from '$shared/tickets';
 import { parseTicketAssigneeQuery } from '$shared/ticket-validation';
 import { parseTicketMutationPayload, type TicketMutationPayload } from '$shared/ticket-commands';
@@ -78,8 +78,8 @@ export function canSubmitTicketForm(draft: TicketDraftState): boolean {
 	}
 }
 
-export function submitTicketForm(draft: TicketDraftState): Promise<void> {
-	return canSubmitTicketForm(draft) ? draft.submit(ticketFormPayload(draft)) : Promise.resolve();
+export function submitTicketForm(draft: TicketDraftState): Promise<TicketWriteResult | null> {
+	return canSubmitTicketForm(draft) ? draft.submit(ticketFormPayload(draft)) : Promise.resolve(null);
 }
 
 export function isTicketSubmitKey(event: KeyboardEvent, title = false): boolean {

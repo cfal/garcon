@@ -62,6 +62,52 @@
 .ticket-primary:hover {
 	background: color-mix(in oklab, hsl(var(--primary)) 88%, hsl(var(--background)));
 }
+.ticket-dispatch {
+	display: inline-flex;
+	align-items: stretch;
+	min-height: 32px;
+	border-radius: 7px;
+	background: var(--ticket-dispatch);
+	color: var(--ticket-dispatch-foreground);
+}
+.ticket-dispatch-action {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 6px 10px;
+	border-radius: 7px 0 0 7px;
+	font-size: 12px;
+	font-weight: 600;
+	cursor: pointer;
+}
+/* Overrides the composer trigger utilities so the selector reads as the trailing segment. */
+.ticket-dispatch .ticket-dispatch-model {
+	height: auto;
+	max-width: 13rem;
+	padding: 2px 8px;
+	border-left: 1px solid color-mix(in oklab, var(--ticket-dispatch-foreground) 30%, transparent);
+	border-radius: 0 7px 7px 0;
+	color: inherit;
+	font-size: 12px;
+}
+.ticket-dispatch .ticket-dispatch-model [data-slot='model-selector-trigger-secondary'],
+.ticket-dispatch .ticket-dispatch-model svg {
+	color: color-mix(in oklab, var(--ticket-dispatch-foreground) 78%, transparent);
+}
+.ticket-dispatch-action:hover:not(:disabled),
+.ticket-dispatch .ticket-dispatch-model:hover:not(:disabled) {
+	background: color-mix(in oklab, var(--ticket-dispatch-foreground) 14%, transparent);
+	color: inherit;
+}
+.ticket-dispatch-action:focus-visible,
+.ticket-dispatch .ticket-dispatch-model:focus-visible {
+	outline: 2px solid hsl(var(--ring));
+	outline-offset: 2px;
+}
+.ticket-dispatch-action:disabled {
+	opacity: 0.55;
+	cursor: default;
+}
 .ticket-button:disabled,
 .ticket-facet-picker:disabled,
 .ticket-input:disabled {

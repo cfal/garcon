@@ -11,9 +11,10 @@
 		GENERATION_PROMPT_TEMPLATE_MAX_LENGTH,
 		PROMPT_REFINEMENT_USER_PROMPT_TOKEN,
 	} from '$shared/generation-prompts';
+	import { TICKET_DISPATCH_TICKET_TOKEN, ticketDispatchPromptError } from '$shared/ticket-dispatch';
 	import type { GenerationPromptSaveResult } from './remote-generation-settings-card-state.svelte';
 
-	export type GenerationPromptKind = 'commit-message' | 'prompt-refinement';
+	export type GenerationPromptKind = 'commit-message' | 'prompt-refinement' | 'ticket-dispatch';
 
 	interface Props {
 		kind: GenerationPromptKind;
@@ -46,18 +47,25 @@
 				token: PROMPT_REFINEMENT_USER_PROMPT_TOKEN,
 			});
 		}
+		if (kind === 'ticket-dispatch' && ticketDispatchPromptError(draft) === 'missing-ticket-token') {
+			return m.settings_generation_prompt_required_token({ token: TICKET_DISPATCH_TICKET_TOKEN });
+		}
 		return null;
 	});
 
 	let title = $derived(
 		kind === 'commit-message'
 			? m.settings_commit_prompt_dialog_title()
-			: m.settings_prompt_refinement_prompt_dialog_title(),
+			: kind === 'ticket-dispatch'
+				? m.settings_ticket_dispatch_prompt_dialog_title()
+				: m.settings_prompt_refinement_prompt_dialog_title(),
 	);
 	let description = $derived(
 		kind === 'commit-message'
 			? m.settings_commit_prompt_dialog_description()
-			: m.settings_prompt_refinement_prompt_dialog_description(),
+			: kind === 'ticket-dispatch'
+				? m.settings_ticket_dispatch_prompt_dialog_description()
+				: m.settings_prompt_refinement_prompt_dialog_description(),
 	);
 
 	function handleCloseRequest(): void {
@@ -131,6 +139,11 @@
 						<div>
 							<code class="font-mono text-foreground">{COMMIT_MESSAGE_DIFF_TOKEN}</code>
 							{m.settings_commit_prompt_legend_diff()}
+						</div>
+					{:else if kind === 'ticket-dispatch'}
+						<div>
+							<code class="font-mono text-foreground">{TICKET_DISPATCH_TICKET_TOKEN}</code>
+							{m.settings_ticket_dispatch_prompt_legend_ticket()}
 						</div>
 					{:else}
 						<div>

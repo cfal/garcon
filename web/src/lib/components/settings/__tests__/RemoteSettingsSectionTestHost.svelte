@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { setTicketDispatchTestContext } from '$lib/tickets/dispatch/__tests__/ticket-dispatch-test-context';
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
 	setExecutorsTestContext();
 	import AutomationSettingsSection from '../AutomationSettingsSection.svelte';
@@ -50,7 +51,7 @@
 		return { value: 'anthropic-model', label: 'Anthropic Model' };
 	}
 
-	setModelCatalog({
+	const modelCatalog = {
 		forExecutor() { return this; },
 		version: 0,
 		getModels(agentId: string) {
@@ -105,7 +106,15 @@
 		findEndpoint() {
 			return null;
 		},
-	} as never);
+		getPermissionModes() {
+			return ['default'];
+		},
+		getDefaultAgentSettings(agentId: string) {
+			return { ownerId: agentId, schemaVersion: 1, values: {} };
+		},
+	} as never;
+	setModelCatalog(modelCatalog);
+	setTicketDispatchTestContext({ remoteSettings: getTestRemoteSettingsStore(), modelCatalog });
 </script>
 
 {#if section === 'all' || section === 'general'}

@@ -24,7 +24,7 @@ import {
 import { UiSettingsStore } from './ui-settings-store.js';
 import {
   AGENT_COMMAND_SETTING_KEYS,
-  GENERATION_UI_SETTING_KEYS,
+  MODEL_SELECTION_UI_SETTING_KEYS,
   DEFAULT_REMOTE_FEATURE_SETTINGS,
   normalizeRemoteFeatureSettings,
 } from '../../../common/settings.js';
@@ -340,7 +340,7 @@ export class SettingsStore extends EventEmitter<SettingsStoreEvents> {
   }
 
   async #writeToDisk(settings: ProjectSettings): Promise<void> {
-    await this.#providerReferences.publish(generationProviders(settings),
+    await this.#providerReferences.publish(modelSelectionProviders(settings),
       () => this.#writeFile(this.#settingsPath(), settings, { mode: 0o600 }));
   }
 
@@ -363,7 +363,7 @@ export class SettingsStore extends EventEmitter<SettingsStoreEvents> {
     await fs.mkdir(this.#workspaceDir, { recursive: true });
     const { settings, migrated } = await this.#readFromDiskWithMigration();
     this.#cache = settings;
-    this.#providerReferences.initialize(generationProviders(settings));
+    this.#providerReferences.initialize(modelSelectionProviders(settings));
     if (migrated) {
       await this.#saveSettingsWithNotificationsUnlocked(settings, []);
     }
@@ -374,7 +374,7 @@ export class SettingsStore extends EventEmitter<SettingsStoreEvents> {
     return this.#writeLock.runExclusive(SETTINGS_WRITE_LOCK_KEY, async () => {
       const { settings: newCache, migrated } = await this.#readFromDiskWithMigration();
       this.#cache = newCache;
-      this.#providerReferences.initialize(generationProviders(newCache));
+      this.#providerReferences.initialize(modelSelectionProviders(newCache));
       this.#settingsDurabilityUnknown = false;
       this.#pendingSettingsNotifications = [];
       if (migrated) {
@@ -408,8 +408,8 @@ export class SettingsStore extends EventEmitter<SettingsStoreEvents> {
   ): Promise<void> {
     const validated = sanitizeProjectSettings(settings).settings;
     const release = this.#retainExecutorReferences?.(
-      GENERATION_UI_SETTING_KEYS.map((key) => validated.ui[key]?.executorId),
-      GENERATION_UI_SETTING_KEYS.map((key) => this.#getCachedSettings().ui[key]?.executorId),
+      MODEL_SELECTION_UI_SETTING_KEYS.map((key) => validated.ui[key]?.executorId),
+      MODEL_SELECTION_UI_SETTING_KEYS.map((key) => this.#getCachedSettings().ui[key]?.executorId),
     );
     try {
       try {
@@ -682,6 +682,6 @@ export class SettingsStore extends EventEmitter<SettingsStoreEvents> {
 
 }
 
-function generationProviders(settings: ProjectSettings): (string | null | undefined)[] {
-  return GENERATION_UI_SETTING_KEYS.map((key) => settings.ui[key]?.apiProviderId);
+function modelSelectionProviders(settings: ProjectSettings): (string | null | undefined)[] {
+  return MODEL_SELECTION_UI_SETTING_KEYS.map((key) => settings.ui[key]?.apiProviderId);
 }

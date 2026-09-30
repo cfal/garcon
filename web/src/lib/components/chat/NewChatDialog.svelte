@@ -6,7 +6,7 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { getAppShell, getChatSessions, getWorkspaceCoordinator } from '$lib/context';
 	import type { ChatId } from '$shared/chat-id';
-	import { gotoChat } from '$lib/chat/actions/chat-navigation.js';
+	import { startNewChat } from '$lib/chat/actions/start-new-chat.js';
 	import type { NewChatConfig } from '$lib/types/app';
 	import NewChatForm from './NewChatForm.svelte';
 
@@ -22,29 +22,8 @@
 	}
 
 	function handleStartChat(config: NewChatConfig, chatId: ChatId) {
-		sessions.createDraft({
-			id: chatId,
-			projectPath: config.projectPath,
-			startup: {
-				executorId: config.executorId,
-				agentId: config.agentId,
-				model: config.model,
-				apiProviderId: config.apiProviderId ?? null,
-				modelEndpointId: config.modelEndpointId ?? null,
-				modelProtocol: config.modelProtocol ?? null,
-				permissionMode: config.permissionMode,
-				thinkingMode: config.thinkingMode,
-				agentSettings: config.agentSettings,
-				firstMessage: config.firstMessage,
-				initialImages: config.initialImages,
-				tags: config.tags,
-				orderedPreambleIds: config.orderedPreambleIds,
-			},
-		});
-
 		appShell.closeNewChatDialog();
-		void workspace.focusChat();
-		void gotoChat(chatId).finally(() => appShell.requestComposerFocus());
+		startNewChat({ sessions, workspace, appShell }, chatId, config);
 	}
 </script>
 

@@ -5,6 +5,7 @@ import {
   normalizeChatTitleUiSettings,
   normalizeCommitMessageUiSettings,
   normalizePromptRefinementUiSettings,
+  normalizeTicketDispatchUiSettings,
 } from '../../../common/settings.js';
 import { parseHiddenBashCommandPatterns } from '../../../common/hidden-bash-command-patterns.js';
 
@@ -53,6 +54,11 @@ export function normalizeUiSettings(ui: unknown): UiSettings {
     const promptRefinement = normalizePromptRefinementUiSettings(normalized.promptRefinement);
     if (promptRefinement) normalized.promptRefinement = promptRefinement;
     else delete normalized.promptRefinement;
+  }
+  if ('ticketDispatch' in normalized) {
+    const ticketDispatch = normalizeTicketDispatchUiSettings(normalized.ticketDispatch);
+    if (ticketDispatch) normalized.ticketDispatch = ticketDispatch;
+    else delete normalized.ticketDispatch;
   }
   return normalized;
 }

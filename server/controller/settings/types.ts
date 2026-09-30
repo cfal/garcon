@@ -17,6 +17,7 @@ import type {
   ChatTitleUiSettings,
   CommitMessageUiSettings,
   PromptRefinementUiSettings,
+  TicketDispatchUiSettings,
   TranscriptSearchFeatureSettings,
   AgentSwitchCompactionUiSettings,
 } from '../../../common/settings.js';
@@ -29,6 +30,7 @@ export interface UiSettings {
   agentSwitchCompaction?: AgentSwitchCompactionUiSettings;
   commitMessage?: CommitMessageUiSettings;
   promptRefinement?: PromptRefinementUiSettings;
+  ticketDispatch?: TicketDispatchUiSettings;
   appIdentity?: AppIdentityUiSettings;
   [key: string]: unknown;
 }

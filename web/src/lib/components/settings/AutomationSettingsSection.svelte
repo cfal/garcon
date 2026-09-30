@@ -2,6 +2,7 @@
 	import { getRemoteSettings } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import RemoteGenerationSettingsCard from './RemoteGenerationSettingsCard.svelte';
+	import TicketDispatchSettingsCard from './TicketDispatchSettingsCard.svelte';
 
 	const remoteSettings = getRemoteSettings();
 </script>
@@ -38,5 +39,7 @@
 			blurb={m.settings_prompt_refinement_hint()}
 			promptKind="prompt-refinement"
 		/>
+
+		<TicketDispatchSettingsCard />
 	{/if}
 </div>
