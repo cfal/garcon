@@ -8,7 +8,6 @@ import {
   type AgentHost,
   type AgentPermissions,
   type AgentProducerBinding,
-  type AgentProducerEvent,
   type AgentProducerNotification,
   type AgentProducers,
   type AgentResumeRequestV5,
@@ -167,8 +166,12 @@ export function createAgentProducerAdapter(runtime: AgentRuntimeExecution, host:
         return;
       }
       try {
-        let normalized: AgentProducerEvent;
-        if (event.type === 'permission') {
+        let normalized: AgentProducerNotification['event'];
+        if (event.type === 'steerable') {
+          // A retired operation's turn can no longer be steered.
+          if (operation.ended || active.get(binding.chatId) !== operation) return;
+          normalized = { type: 'steerable', runId: operation.runId };
+        } else if (event.type === 'permission') {
           if (event.lifecycle.kind === 'requested') {
             if (event.decision?.permissionOccurrenceId !== event.lifecycle.permissionOccurrenceId) {
               throw new TypeError('Permission response does not match its occurrence');

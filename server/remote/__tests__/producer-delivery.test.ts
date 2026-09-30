@@ -78,6 +78,20 @@ async function runningTurn(dialer: 'controller' | 'worker') {
 }
 
 for (const dialer of ['controller', 'worker'] as const) {
+  test(`a steerable run reaches the controller with its run ID (${dialer} dials)`, async () => {
+    const { fixture, integration, request, publish } = await runningTurn(dialer);
+    try {
+      const steerable: string[] = [];
+      integration.producers.subscribe(({ event }) => {
+        if (event.type === 'steerable') steerable.push(event.runId);
+      });
+      publish({ type: 'steerable' });
+      await integration.execution.runningSessions();
+
+      expect(steerable).toEqual([request.runId]);
+    } finally { await fixture.dispose(); }
+  });
+
   test(`row batches the controller cannot decode arrive as one loss per run of them and keep the session (${dialer} dials)`, async () => {
     const { fixture, integration, request, publish, log } = await runningTurn(dialer);
     try {

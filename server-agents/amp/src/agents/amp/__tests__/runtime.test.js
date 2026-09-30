@@ -6,13 +6,21 @@ function noopOperation(runId = 'run-default') {
   return { runId, publish() {} };
 }
 
+// Keeps the published transcript events apart from the run's steerability, which the
+// steerability case asserts.
 function collectOperation(runId, onPublish = () => undefined) {
   const events = [];
+  const steerable = [];
   return {
     events,
+    steerable,
     operation: {
       runId,
       publish: (event) => {
+        if (event.type === 'steerable') {
+          steerable.push(event);
+          return;
+        }
         events.push(event);
         onPublish(event);
       },
@@ -174,6 +182,36 @@ describe('AmpCliRuntime lifecycle', () => {
       '--mode', 'high',
     ]));
     expect(spawnMock.mock.calls[0][0]).not.toContain('--effort');
+  });
+
+  it('reports the run steerable once its Amp process is registered', async () => {
+    const provider = new AmpCliRuntime();
+    const threadId = 'T-20202020-2020-2020-2020-202020202020';
+    const observed = collectOperation('run-steerable', () => undefined);
+    let targetWhenSteerable = null;
+    const operation = {
+      ...observed.operation,
+      publish: (event) => {
+        if (event.type === 'steerable') targetWhenSteerable = provider.captureSteerTarget(threadId);
+        observed.operation.publish(event);
+      },
+    };
+    spawnMock
+      .mockReturnValueOnce(createFakeCommandProc(`${threadId}\n`))
+      .mockReturnValueOnce(createFakeProc());
+
+    await provider.startSession({
+      command: 'initial input',
+      chatId: 'chat-steerable',
+      projectPath: '/proj',
+      model: 'medium',
+      permissionMode: 'default',
+      thinkingMode: 'none',
+      operation,
+    });
+
+    expect(observed.steerable).toEqual([{ type: 'steerable' }]);
+    expect(targetWhenSteerable).not.toBeNull();
   });
 
   it('publishes Amp web inputs, suppresses local echoes, and acknowledges steering', async () => {
@@ -697,6 +735,7 @@ describe('AmpCliRuntime lifecycle', () => {
         runId: 'run-stale',
         publish(event) {
           if (firstClosed) throw new Error('Transcript producer sink is closed');
+          if (event.type === 'steerable') return;
           firstEvents.push(event);
           if (event.type === 'run-ended') resolveFirstTerminal();
         },

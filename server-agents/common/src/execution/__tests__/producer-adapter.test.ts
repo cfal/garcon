@@ -492,6 +492,22 @@ describe('createAgentProducerAdapter', () => {
     expect(fixture.warnings).toEqual([]);
   });
 
+  it('reports a run as steerable only while its operation is active', async () => {
+    const fixture = await createFixture(({ publish, runId }) => {
+      publish({ type: 'steerable' });
+      publish({ type: 'run-ended', runId, outcome: 'finished' });
+      publish({ type: 'steerable' });
+    });
+    const steerable: string[] = [];
+    fixture.adapter.producers.subscribe(({ event }) => {
+      if (event.type === 'steerable') steerable.push(event.runId);
+    });
+
+    await fixture.adapter.execution.start(fixture.request);
+
+    expect(steerable).toEqual(['run-1']);
+  });
+
   it('returns a resume handle before a blocking provider turn settles', async () => {
     const fixture = await createFixture();
     let resolveResume!: () => void;

@@ -510,6 +510,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   }
 
   onSessionCreated(cb: (chatId: string) => void | Promise<void>): void { this.#events.onSessionCreated(cb); }
+  onRunSteerable(cb: (chatId: string) => void | Promise<void>): void { this.#events.onRunSteerable(cb); }
   onFinished(cb: Parameters<AgentEventBus['onFinished']>[0]): void { this.#events.onFinished(cb); }
   onFailed(cb: (
     chatId: string,

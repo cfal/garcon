@@ -2315,6 +2315,36 @@ describe('CodexAppServerRuntime', () => {
     expect(JSON.stringify(diagnostics)).not.toContain(privateContent);
   });
 
+  it('reports the run steerable once it adopts the native turn', async () => {
+    const nativePath = path.join(tmpDir, 'steerable-thread.jsonl');
+    const collected = collectOperation('chat-1', 'run-steerable');
+    let steerableBeforeTurn = null;
+    const fake = new FakeClient({
+      startThread: async () => ({
+        thread: makeThread({ id: 'thread-1', path: nativePath }),
+        model: 'gpt',
+        modelProvider: 'openai',
+        serviceTier: null,
+        cwd: '/repo',
+      }),
+      startTurn: async () => {
+        steerableBeforeTurn = collected.events.some((event) => event.type === 'steerable');
+        await fs.writeFile(nativePath, '{}\n');
+        return { turn: makeTurn({ id: 'turn-active', status: 'inProgress' }) };
+      },
+    });
+    const provider = createRuntime({
+      createClient: () => fake,
+      materializationTimeoutMs: 20,
+    });
+
+    await provider.startSession(makeRequest({ operation: collected.operation }));
+
+    expect(steerableBeforeTurn).toBe(false);
+    expect(collected.events.filter((event) => event.type === 'steerable')).toEqual([{ type: 'steerable' }]);
+    expect(provider.captureSteerTarget('thread-1')).not.toBeNull();
+  });
+
   it('steers an ordinary active turn once with its expected native identity', async () => {
     const nativePath = path.join(tmpDir, 'strict-steer-thread.jsonl');
     const prepared = mock(async () => undefined);

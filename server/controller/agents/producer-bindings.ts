@@ -28,6 +28,7 @@ export class ProducerBindings {
     private readonly onLaunchSettled: (
       chatId: string, lease: TranscriptProducerLease, agentId: string, event: LaunchSettledEvent,
     ) => void,
+    private readonly onSteerable: (chatId: string, lease: TranscriptProducerLease, runId: string) => void,
   ) {}
 
   async bind(
@@ -103,6 +104,11 @@ export class ProducerBindings {
         }
         if (event.type === 'launch-settled') {
           try { this.onLaunchSettled(route.chatId, route.lease, integration.descriptor.id, event); }
+          catch (error) { this.onError(error); }
+          return;
+        }
+        if (event.type === 'steerable') {
+          try { this.onSteerable(route.chatId, route.lease, event.runId); }
           catch (error) { this.onError(error); }
           return;
         }

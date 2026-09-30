@@ -240,6 +240,8 @@ export function openCodeEventBelongsToTurn(
         || part?.id !== turn.providerPromptPartId
       ) return false;
       turn.providerMessageId = messageId;
+      // Steering joins the loop that answers this message, so the turn can take it from now on.
+      if (!turn.compaction) turn.operation.publish({ type: 'steerable' });
       return false;
     }
     if (messageId && turn.observedUserMessageIds.has(messageId)) {

@@ -415,10 +415,41 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       enqueueProviderState(fake, 'idle');
       await second;
 
-      expect(firstEvents.map((event) => event.type)).toEqual(['rows', 'run-ended']);
-      expect(secondEvents.map((event) => event.type)).toEqual(['rows', 'run-ended']);
+      expect(firstEvents.map((event) => event.type)).toEqual(['steerable', 'rows', 'run-ended']);
+      expect(secondEvents.map((event) => event.type)).toEqual(['steerable', 'rows', 'run-ended']);
       expect(firstEvents.at(-1)).toMatchObject({ runId: 'run-a', outcome: 'finished' });
       expect(secondEvents.at(-1)).toMatchObject({ runId: 'run-b', outcome: 'finished' });
+      await runtime.shutdown();
+    } finally {
+      Bun.spawn = originalSpawn;
+    }
+  });
+
+  it('reports the turn steerable once the CLI starts its input', async () => {
+    const originalSpawn = Bun.spawn;
+    const fake = createFakeClaudeProcess();
+    Bun.spawn = mock(() => fake.proc);
+    const events = [];
+
+    try {
+      const runtime = createRuntime();
+      const turn = runtime.startClaudeCliSession(startOptions({
+        operation: { runId: 'run-a', publish: (event) => events.push(event) },
+      }));
+      await waitForWrittenUserMessage(fake);
+      expect(events).toEqual([]);
+
+      const input = await enqueueInputStarted(fake);
+      for (let attempt = 0; attempt < 100 && events.length === 0; attempt += 1) {
+        await Promise.resolve();
+      }
+      expect(events).toEqual([{ type: 'steerable' }]);
+      expect(runtime.captureSteerTarget('expected-session')).not.toBeNull();
+
+      enqueueAssistantAndResult(fake, input.uuid, 'answer');
+      enqueueProviderState(fake, 'idle');
+      await turn;
+      expect(events.filter((event) => event.type === 'steerable')).toHaveLength(1);
       await runtime.shutdown();
     } finally {
       Bun.spawn = originalSpawn;
@@ -1785,7 +1816,11 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
       })}\n`));
 
       request();
-      for (let attempt = 0; attempt < 100 && events.length === 0; attempt += 1) {
+      for (
+        let attempt = 0;
+        attempt < 100 && !events.some((event) => event.type === 'permission');
+        attempt += 1
+      ) {
         await Promise.resolve();
       }
       const first = events.find((event) => event.type === 'permission');

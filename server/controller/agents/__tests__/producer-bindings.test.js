@@ -12,7 +12,7 @@ test('publication failure closes only its captured lease even if terminal persis
   const manager = new ProducerBindings(error => errors.push(error), (chatId, lease, error) => {
     failures.push({ chatId, lease, error });
     throw new Error('Synthetic terminal failure');
-  }, () => {}, () => {});
+  }, () => {}, () => {}, () => {});
   const failed = new ProducerLease(event => events.push(event), () => {});
   const healthy = new ProducerLease(event => events.push(event), () => {});
   const integration = { producers: producer.producers };
@@ -41,7 +41,7 @@ test('routes events while the integration cannot report its scope', async () => 
       return producer.producers.scope;
     },
   } };
-  const manager = new ProducerBindings(error => errors.push(error), () => {}, () => {}, () => {});
+  const manager = new ProducerBindings(error => errors.push(error), () => {}, () => {}, () => {}, () => {});
   const lease = new ProducerLease(event => events.push(event), () => {});
   const binding = await manager.bind(integration, 'chat-1', lease);
   reconnecting = true;
@@ -59,7 +59,7 @@ test('sink rejection is reported without escaping into other producer routes', a
   const errors = [];
   const events = [];
   const failure = new LedgerFencedError('fenced-chat');
-  const manager = new ProducerBindings(error => errors.push(error), () => {}, () => {}, () => {});
+  const manager = new ProducerBindings(error => errors.push(error), () => {}, () => {}, () => {}, () => {});
   const fenced = new ProducerLease(() => { throw failure; }, () => {});
   const healthy = new ProducerLease(event => events.push(event), () => {});
   const fencedBinding = await manager.bind(integration, 'fenced-chat', fenced);
@@ -85,7 +85,7 @@ test('every concurrent acquisition rejects closure during worker registration', 
     close: () => workerClose.promise,
   } };
   const lease = new ProducerLease(() => { throw new Error('Closed route received an event'); }, () => {});
-  const manager = new ProducerBindings(() => {}, () => {}, () => {}, () => {});
+  const manager = new ProducerBindings(() => {}, () => {}, () => {}, () => {}, () => {});
   const first = manager.bind(integration, 'chat', lease);
   const second = manager.bind(integration, 'chat', lease);
   const outcomes = Promise.allSettled([first, second]);
@@ -101,7 +101,7 @@ test('late events cannot reach a replacement while remote close is pending', asy
   const producer = createProducerFixture();
   const integration = { producers: { ...producer.producers, close: () => workerClose.promise } };
   const events = [];
-  const manager = new ProducerBindings(() => {}, () => {}, () => {}, () => {});
+  const manager = new ProducerBindings(() => {}, () => {}, () => {}, () => {}, () => {});
   const lease = new ProducerLease(event => events.push(['old', event]), () => {});
   const oldBinding = await manager.bind(integration, 'chat', lease);
   lease.close();
@@ -113,4 +113,21 @@ test('late events cannot reach a replacement while remote close is pending', asy
   await expect(manager.bind(integration, 'chat', lease)).rejects.toThrow('closed');
   replacement.close();
   workerClose.resolve();
+});
+
+test('reports a steerable run on its route without publishing it to the transcript', async () => {
+  const producer = createProducerFixture();
+  const events = [];
+  const steerable = [];
+  const manager = new ProducerBindings(() => {}, () => {}, () => {}, () => {}, (chatId, lease, runId) => {
+    steerable.push({ chatId, lease, runId });
+  });
+  const lease = new ProducerLease(event => events.push(event), () => {});
+  const binding = await manager.bind({ producers: producer.producers }, 'chat-1', lease);
+
+  producer.emit(binding, { type: 'steerable', runId: 'run-1' });
+
+  expect(steerable).toEqual([{ chatId: 'chat-1', lease, runId: 'run-1' }]);
+  expect(events).toEqual([]);
+  lease.close();
 });

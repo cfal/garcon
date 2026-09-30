@@ -726,6 +726,7 @@ class AmpCliRuntime {
     }
     this.#retireSupersededChatSessions(session);
     this.#runningSessions.set(threadId, session);
+    this.#publishTurnEvent(session, turn, { type: 'steerable' });
 
     return started;
   }
@@ -777,6 +778,7 @@ class AmpCliRuntime {
       }
       throw err;
     }
+    this.#publishTurnEvent(session, turn, { type: 'steerable' });
 
     await this.#waitForTurnComplete(turn);
   }

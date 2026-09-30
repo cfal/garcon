@@ -23,6 +23,7 @@ export class AgentEventBus {
   readonly #turnMetadataByChatId = new Map<string, TurnEventMetadata>();
   readonly #settledTurnByChatId = new Map<string, TurnEventMetadata>();
   readonly #sessionListeners = new Set<(chatId: string) => void | Promise<void>>();
+  readonly #steerableListeners = new Set<(chatId: string) => void | Promise<void>>();
   readonly #finishedListeners = new Set<(
     chatId: string,
     exitCode: number,
@@ -71,6 +72,11 @@ export class AgentEventBus {
     this.#sessionListeners.add(cb);
   }
 
+  // Fires when the chat's active run can take steering input from now on.
+  onRunSteerable(cb: (chatId: string) => void | Promise<void>): void {
+    this.#steerableListeners.add(cb);
+  }
+
   onFinished(
     cb: (
       chatId: string,
@@ -95,6 +101,10 @@ export class AgentEventBus {
 
   async publishSession(chatId: string): Promise<void> {
     await this.#dispatch('session', chatId, this.#sessionListeners, chatId);
+  }
+
+  async publishRunSteerable(chatId: string): Promise<void> {
+    await this.#dispatch('run steerable', chatId, this.#steerableListeners, chatId);
   }
 
   async publishRunEnded(chatId: string, runId: string, row: LedgerRunEndedRow): Promise<void> {

@@ -172,6 +172,7 @@ class ClaudeCliRuntime {
     const activeTurn = session.activeTurn;
     const inputEvent = activeTurn?.protocol.observeInput(msg) ?? null;
     if (inputEvent?.type === 'started') {
+      activeTurn!.operation.publish({ type: 'steerable' });
       this.#dependencies.logger.debug('Claude CLI user input started', {
         chatId: session.chatId,
         runId: activeTurn?.operation.runId ?? null,
@@ -186,9 +187,7 @@ class ClaudeCliRuntime {
       return;
     }
     const steeringEvent = activeTurn?.steering.observe(msg) ?? null;
-    if (steeringEvent) {
-      this.#steering.handleObservation(session, activeTurn!, steeringEvent);
-    }
+    if (steeringEvent) this.#steering.handleObservation(session, activeTurn!, steeringEvent);
 
     switch (msg.type) {
       case 'system':

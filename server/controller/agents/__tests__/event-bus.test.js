@@ -117,6 +117,17 @@ describe('AgentEventBus', () => {
     expect(created).toHaveBeenCalledWith('chat-1');
   });
 
+  it('publishes a steerable run to every listener', async () => {
+    const bus = new AgentEventBus();
+    const steerable = mock(() => undefined);
+    bus.onRunSteerable(() => { throw new Error('listener failed'); });
+    bus.onRunSteerable(steerable);
+
+    await bus.publishRunSteerable('chat-1');
+
+    expect(steerable).toHaveBeenCalledWith('chat-1');
+  });
+
   it('continues terminal listener delivery after a listener fails', async () => {
     const bus = new AgentEventBus();
     const finished = mock(() => undefined);

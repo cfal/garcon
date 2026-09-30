@@ -128,6 +128,8 @@ export function adoptTurn(
   session.turnRoutes.set(turnId, operation);
   session.activeTurnId = turnId;
   if (session.nextTurnOperation === operation) session.nextTurnOperation = null;
+  // Steering names the active turn, so an adopted turn can take it from now on.
+  operation.publish({ type: 'steerable' });
   return true;
 }
 

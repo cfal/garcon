@@ -661,6 +661,7 @@ export class PiRpcRuntime {
       this.#retireInBackground(session, 'invalid prompt acceptance');
       throw error;
     }
+    this.#publishTurnEvent(session, turn, { type: 'steerable' });
   }
 
   #routeEvent(session: PiRpcSession, generation: number, event: Record<string, unknown>): void {

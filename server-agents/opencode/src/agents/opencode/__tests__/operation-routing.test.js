@@ -114,8 +114,10 @@ function createRuntime(sessionIds, options = {}) {
   };
 }
 
-function operation(runId, events) {
-  return { runId, publish: (event) => events.push(event) };
+// Keeps the routed transcript events apart from the run's steerability, which the
+// steerability case asserts.
+function operation(runId, events, steerable = []) {
+  return { runId, publish: (event) => (event.type === 'steerable' ? steerable : events).push(event) };
 }
 
 function promptPart(promptAsync, callIndex) {
@@ -1124,6 +1126,32 @@ describe('OpenCode operation routing', () => {
     await waitFor(() => events.some((event) => event.type === 'run-ended'));
     eventStream.close();
     await runtime.shutdown();
+  });
+
+  it('reports a turn steerable once OpenCode records its prompt', async () => {
+    const { eventStream, promptAsync, runtime } = createRuntime(['session-1']);
+    const steerable = [];
+    await runtime.startSession({
+      command: 'first',
+      chatId: 'chat-1',
+      projectPath: '/repo',
+      permissionMode: 'default',
+      operation: operation('run-a', [], steerable),
+    });
+    expect(steerable).toEqual([]);
+    expect(runtime.steering.captureTarget('session-1')).toBeNull();
+
+    pushPrompt(eventStream, {
+      eventId: 'event-01',
+      messageId: 'user-a',
+      partId: promptPart(promptAsync, 0),
+      sessionId: 'session-1',
+      text: 'first',
+    });
+    await waitFor(() => steerable.length > 0);
+
+    expect(steerable).toEqual([{ type: 'steerable' }]);
+    expect(runtime.steering.captureTarget('session-1')).not.toBeNull();
   });
 
   it('[TLV5-L07.03-OPENCODE-UNIT-01] publishes late named rows and permissions through the operation that produced them', async () => {

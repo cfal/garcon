@@ -249,14 +249,18 @@ function baseResumeRequest(overrides = {}) {
   };
 }
 
+// Keeps the published transcript events apart from the run's steerability, which the
+// steerability case asserts.
 function collectOperation(runId: string) {
   const events: AgentRuntimeEvent[] = [];
+  const steerable: AgentRuntimeEvent[] = [];
   return {
     events,
+    steerable,
     operation: {
       runId,
       publish(event: AgentRuntimeEvent) {
-        events.push(event);
+        (event.type === 'steerable' ? steerable : events).push(event);
       },
     },
   };
@@ -1211,6 +1215,7 @@ describe('PiRpcRuntime', () => {
 
     expect(warnings.map(({ message, context }) => [message, context.eventType, context.error]))
       .toEqual([
+        ['Pi publisher rejected an event', 'steerable', 'Transcript producer sink is closed'],
         ['Pi publisher rejected an event', 'rows', 'Transcript producer sink is closed'],
         ['Pi publisher rejected an event', 'run-ended', 'Transcript producer sink is closed'],
       ]);
@@ -1407,6 +1412,21 @@ describe('PiRpcRuntime', () => {
     await turn;
     expect(runtime.captureSteerTarget('pi-session-1')).toBeNull();
     expect(runtime.abort('pi-session-1')).toBe(false);
+    await runtime.shutdown();
+  });
+
+  it('reports the run steerable once Pi accepts its prompt', async () => {
+    await fs.writeFile(baseResumeRequest().nativePath, '');
+    const runtime = createRuntime();
+    const collected = collectOperation('run-steerable');
+    const turn = runtime.runTurn(baseResumeRequest({ operation: collected.operation }));
+
+    await waitForActive(runtime);
+    expect(collected.steerable).toEqual([{ type: 'steerable' }]);
+
+    fakes[0].pushEvent({ type: 'agent_settled' });
+    await turn;
+    expect(collected.steerable).toHaveLength(1);
     await runtime.shutdown();
   });
 

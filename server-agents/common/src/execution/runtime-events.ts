@@ -46,7 +46,9 @@ export type AgentRuntimeEvent =
   | (Omit<Extract<AgentProducerEvent, { readonly type: 'permission' }>, 'decision'> & {
       readonly decision?: RuntimePermissionResponse;
     })
-  | ProviderRunEndedEvent;
+  | ProviderRunEndedEvent
+  // Published once the runtime would capture a steering target for the operation's turn.
+  | { readonly type: 'steerable' };
 
 // Captured on the concrete turn, request, or callback object that produces events, never looked
 // up per event. A runtime that demultiplexes a process-wide stream keys publishers by the

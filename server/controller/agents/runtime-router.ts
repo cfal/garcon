@@ -151,6 +151,10 @@ export class AgentRuntimeRouter {
     (chatId, lease, agentId, event) => {
       if (this.#producerLeases.get(chatId)?.lease === lease) this.#settleLostLaunch(chatId, agentId, event);
     },
+    (chatId, lease, runId) => {
+      if (this.#producerLeases.get(chatId)?.lease !== lease || this.#ledger.activeRunId(chatId) !== runId) return;
+      void this.#events.publishRunSteerable(chatId);
+    },
   );
   // Stops requested while a remote executor is unavailable, delivered when it is
   // ready again. They outlive a lost session because the same worker may still

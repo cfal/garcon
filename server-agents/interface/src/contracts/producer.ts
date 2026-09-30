@@ -130,6 +130,9 @@ export interface AgentProducerNotification {
   readonly binding: AgentProducerBinding;
   readonly event: AgentProducerEvent
     | { readonly type: 'started'; readonly runId: string }
+    // The run can take steering input from now on: its provider has started the turn's
+    // input, so a steering target captured now is live.
+    | { readonly type: 'steerable'; readonly runId: string }
     | { readonly type: 'publication-failed'; readonly error: AgentRunFailureDetail }
     // Some of a remote binding's output could not be delivered: the executor dropped
     // it under retention pressure, or the controller could not read it.
