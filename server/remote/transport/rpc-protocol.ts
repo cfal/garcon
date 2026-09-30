@@ -31,7 +31,7 @@ type Call<Q, R> = { readonly request: Q; readonly result: R };
 // frames. Bump it with any change to what either side sends or accepts. Builds
 // of one release share a package version, so without the bump a mismatched
 // pair passes the handshake and fails mid-session instead.
-export const EXECUTOR_PROTOCOL_REVISION = 4;
+export const EXECUTOR_PROTOCOL_REVISION = 5;
 
 export const NULLABLE_AGENT_FACETS = [
   'auth', 'commands', 'compaction', 'forking', 'steering', 'endpoints', 'singleQuery',
@@ -136,8 +136,10 @@ export type RpcContinuity = 'session' | 'launch' | 'journaled';
 type ClassifiedMethod = Exclude<keyof ExecutorRpcMethods, keyof FileRpcMethods | keyof GitRpcMethods>;
 
 // History readers, terminal attachments, producer bindings, forks, path
-// preparations, and CLI calls belong to one session. Compensation for a fork or
-// preparation is issued on its session and is then journaled like other calls.
+// preparations, and CLI calls belong to one session. Cleanup of a resource that
+// outlives its session is journaled: compensation for a fork or preparation, and
+// closing a producer binding, which a worker keeps suspended for a replacement
+// session of the same instance.
 const CONTINUITY: Readonly<Record<ClassifiedMethod, RpcContinuity>> = {
   'executor.describe': 'session',
   'apiProviders.discoverModels': 'journaled',
@@ -145,7 +147,7 @@ const CONTINUITY: Readonly<Record<ClassifiedMethod, RpcContinuity>> = {
   'projects.ticketProjectDefault': 'journaled',
   'projects.resolveFileMentions': 'journaled',
   'producers.bind': 'session',
-  'producers.close': 'session',
+  'producers.close': 'journaled',
   'producers.cancelLaunch': 'journaled',
   'producers.resume': 'session',
   'permissions.respond': 'journaled',

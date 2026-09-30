@@ -59,6 +59,17 @@ describe('resolveAgentEndpoint', () => {
     });
   });
 
+  test('fails the same way when the credential read never reached the controller', async () => {
+    // A worker without a controller session refuses the read before it returns a promise.
+    const host = hostResolving(() => {
+      throw new AgentCallError('not-dispatched', 'Executor controller is disconnected');
+    });
+
+    await expect(resolveAgentEndpoint(host, endpoint, new AbortController().signal)).rejects.toMatchObject({
+      outcome: 'rejected', code: 'UNAVAILABLE', message: 'Provider credential could not be read from the controller. Try again.',
+    });
+  });
+
   test('reports cancellation rather than a credential read that the cancellation left unknown', async () => {
     const cancel = new AbortController();
     const host = hostResolving(async () => {

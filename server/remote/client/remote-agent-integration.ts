@@ -108,16 +108,32 @@ export class RemoteAgentIntegration implements AgentIntegration {
     const launch = async <K extends 'execution.start' | 'execution.resume' | 'compaction.compact'>(
       method: K, request: ExecutorRpcMethods[K]['request'], options?: ExecutorCallOptions,
     ) => {
+      const state = this.#bindings.get(request.producerBinding.id);
+      // Cancellation waits for the binding's worker for as long as it may run the launch.
+      const cancelOnWorker = (binding: RemoteProducerBinding) => {
+        void sessions.call(this.descriptor.id, 'producers.cancelLaunch', { binding: binding.ref, runId: request.runId }, {
+          timeoutMs: null,
+          instanceId: binding.backing.info.instanceId,
+        }).catch(() => undefined);
+      };
       // Native admission may outlive the default RPC deadline; Stop still cancels it.
-      const { backing, timeoutMs } = await sessions.acquire({ signal: options?.signal, timeoutMs: options?.timeoutMs ?? null });
       const send = ({ rpc }: RemoteSessionBacking, deadline: number | null) => rpc.call(this.descriptor.id, method, request, {
         ...options,
         timeoutMs: deadline,
         onLateResult: (handle) => rpc.call(this.descriptor.id, 'execution.abort', handle),
+        // The session was lost before a cancelled launch reported its outcome. The
+        // replacement session's resume report settles it, and the router stops it.
+        onLateResultLost: () => {
+          if (!state || this.#bindings.get(state.ref.id) !== state || state.unsettledLaunches.has(request.runId)) return;
+          state.unsettledLaunches.set(request.runId, { send: null, release: () => undefined });
+          cancelOnWorker(state);
+        },
       });
-      const state = this.#bindings.get(request.producerBinding.id);
       try {
-        return await send(backing, timeoutMs);
+        return await sessions.send(
+          { signal: options?.signal, timeoutMs: options?.timeoutMs ?? null },
+          ({ backing, timeoutMs }) => send(backing, timeoutMs),
+        );
       } catch (error) {
         const signal = options?.signal;
         // A binding closed or failed meanwhile has no run left to settle or cancel.
@@ -126,8 +142,7 @@ export class RemoteAgentIntegration implements AgentIntegration {
           // A lost call no longer carries the caller's cancellation, so a later
           // Stop cancels the launch through the worker's relay instead.
           const cancel = () => {
-            if (state.unsettledLaunches.get(request.runId) !== lost) return;
-            void call('producers.cancelLaunch', { binding: state.ref, runId: request.runId }).catch(() => undefined);
+            if (state.unsettledLaunches.get(request.runId) === lost) cancelOnWorker(state);
           };
           const lost: UnsettledLaunch = {
             send: (replacement) => send(replacement, null),
@@ -166,10 +181,14 @@ export class RemoteAgentIntegration implements AgentIntegration {
         const holder = this.#bindings.get(binding.id)?.backing ?? this.#failedBindings.get(binding.id);
         this.#forgetBinding(binding.id);
         this.#failedBindings.delete(binding.id);
-        // The worker suspends a lost session's bindings, and the replacement session
-        // closes this one without resuming it.
-        if (!holder?.rpc.transport.connected) return call('producers.close', binding, options);
-        await holder.rpc.call(this.descriptor.id, 'producers.close', binding, options);
+        // A close waits for the worker for as long as it may hold the binding: the
+        // worker suspends a lost session's bindings, and a replacement session of
+        // the same instance closes this one without resuming it.
+        const closing = { ...options, timeoutMs: options?.timeoutMs ?? null, instanceId: holder?.info.instanceId };
+        if (holder?.rpc.transport.connected) return holder.rpc.call(this.descriptor.id, 'producers.close', binding, closing);
+        await sessions.send(closing, ({ backing, timeoutMs }) => (
+          backing.rpc.call(this.descriptor.id, 'producers.close', binding, { ...closing, timeoutMs })
+        ));
       },
       subscribe: (listener) => {
         this.#listeners.add(listener);

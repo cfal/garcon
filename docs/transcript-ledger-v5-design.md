@@ -2658,8 +2658,8 @@ relevant-entry definition under the 10.2 obligation.
 | Direct assistant/checkpoint is persisted but its ledger publication is lost | Native resume retains that execution history; the served view does not change automatically. Manual Reload can import it while the session is current; Direct has no drift probe. |
 | Direct Responses checkpoint is unresolved before output | One fallback request uses the bounded native-history projection without `previous_response_id`; unrelated errors, post-output errors, and fallback failure do not retry. |
 | User interrupt | Run marked stopped in memory; `run-ended: interrupted` appended immediately; provider abort best-effort; the interruption row is transparent to the resend scan. |
-| Remote executor link lost; a replacement session resumes within the grace | Runs stay active in the `reconnecting` processing phase. The worker replays events after the controller's last received sequence number, and duplicates are ignored, so each event reaches the sink once. A permission answer during the gap waits for the replacement session, at most 20 seconds, and stays actionable if it could not be sent; Stop is delivered after resume. A turn admitted before the loss continues its setup on the replacement session. |
-| A remote start, resume, or compaction reply is lost with its session | The run stays active and the turn is not reported failed. After resume the worker reports the binding's latest launch and the launches it received, or publishes the outcome of one that settles later. A run it is executing keeps a reachable handle and a Stop pressed during the gap aborts it; a Stop for a launch still in native admission cancels that admission through the worker's relay. A launch it never received is sent again once with the same run ID. A launch it received that left no record, or a relaunch that is lost as well, appends `run-ended: failed` (`origin: 'core'`) with "The executor connection was lost before this turn started. Send it again."; a launch that fails for another reason after the loss reports its own failure. A turn started on the new session settles through its own reply. |
+| Remote executor link lost; a replacement session resumes within the grace | Runs stay active in the `reconnecting` processing phase. The worker replays events after the controller's last received sequence number, and duplicates are ignored, so each event reaches the sink once. A permission answer during the gap waits for the replacement session, at most 20 seconds, and stays actionable if it could not be sent; Stop is delivered after resume. A turn admitted before the loss continues its setup on the replacement session. Closing a transcript binding during the gap reaches the worker once a session of the same worker installs, so a native turn it was still running stops. |
+| A remote start, resume, or compaction reply is lost with its session | The run stays active and the turn is not reported failed. After resume the worker reports the binding's latest launch and the launches it received, or publishes the outcome of one that settles later. A run it is executing keeps a reachable handle and a Stop pressed during the gap aborts it; a Stop for a launch still in native admission cancels that admission through the worker's relay. A Stop pressed while the launch call was still live, whose reply is then lost with the session, stops the turn once the binding resumes. A launch it never received is sent again once with the same run ID. A launch it received that left no record, or a relaunch that is lost as well, appends `run-ended: failed` (`origin: 'core'`) with "The executor connection was lost before this turn started. Send it again."; a launch that fails for another reason after the loss reports its own failure. A turn started on the new session settles through its own reply. |
 | A remote launch reply cannot be delivered on a live session | The worker substitutes an unknown outcome and publishes the launch's outcome on its binding, so the run stays active with a reachable handle, or fails with the launch's own failure. |
 | A remote producer event or resume report cannot be read, or a controller consumer throws on an event | The session stays up. An undecodable row batch is logged and recorded as undelivered output; consecutive ones record one notice on the active run, as for dropped rows. Any other unreadable event, such as a permission request or a launch outcome, and an unreadable resume report fail the run with `OUTCOME_UNKNOWN`, and closing the binding stops the native turn. A consumer's exception is logged, and the other consumers still receive the event. |
 | Remote output retained during the gap, or backed up behind a slow link, exceeds the relay budget | The oldest row batches are dropped and one notice on the active run reports undelivered output; manual Reload after the turn recovers it. Session, permission, and run facts are never dropped. |
@@ -3128,20 +3128,24 @@ The catalog cites this revision, but its inventory is not repeated here.
   the request never arrived and was sent again, the launch was still running,
   only the reply was lost, or the worker's session could not take the reply,
   settled in both dial directions and through the runtime router, including a
-  Stop during the gap and a turn started while the replay still drains; turns
-  held through a reconnect, a lost binding, Stop, and grace expiry; journaled
-  replies and requests reconciled across a lost session over real links and
-  through a file save; output replayed while a session installs reaching the
-  ledger once; consecutive undecodable row batches recorded as one notice
-  while the session stays up, and through the runtime router during a
-  reconnect; an unreadable publication failure, permission request, launch
-  outcome, or resume report failing only its binding, with the permission
-  request and launch outcome failing the turn and stopping it through the
-  runtime router; a binding closed, failed or by its owner, through a
-  replacement session that is still installing; a consumer that throws,
-  including while a replacement session installs; a pending permission that
-  survives a blip, and an answer held through one, through the runtime router
-  and through the pinned Claude CLI; and the browser's reconnecting indicator.
+  Stop during the gap, a Stop on a live link whose reply is then lost, and a
+  turn started while the replay still drains; turns held through a reconnect,
+  a lost binding, Stop, and grace expiry; journaled replies and requests
+  reconciled across a lost session over real links and through a file save; a
+  call whose session retires before it is sent; a binding close held through a
+  reconnect, lost as it is sent, or answered after its reply is lost, and one
+  that never reaches a restarted worker; output replayed while a session
+  installs reaching the ledger once; consecutive undecodable row batches
+  recorded as one notice while the session stays up, and through the runtime
+  router during a reconnect; an unreadable publication failure, permission
+  request, launch outcome, or resume report failing only its binding, with the
+  permission request and launch outcome failing the turn and stopping it
+  through the runtime router; a binding closed, failed or by its owner,
+  through a replacement session that is still installing; a consumer that
+  throws, including while a replacement session installs; a pending permission
+  that survives a blip, and an answer held through one, through the runtime
+  router and through the pinned Claude CLI; and the browser's reconnecting
+  indicator.
 - **Responsiveness**: a 30,000-row Direct chat reloads, forks, and renders a
   handoff artifact in every execution lane while WebSocket pings stay under
   200 ms, which leaves room for shared CI runners. The Claude, Codex, Pi, Amp,

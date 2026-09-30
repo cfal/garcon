@@ -420,6 +420,31 @@ describe('ProducerRelay', () => {
     relay.dispose();
   });
 
+  test('reports a launch cancelled after its session was lost as the dispatch failure', async () => {
+    const relay = new ProducerRelay();
+    const { integration, binding } = integrationDouble();
+    relay.track(integration);
+    const first = session();
+    const ref = binding();
+    relay.bind(first, integration, ref);
+    const signals: AbortSignal[] = [];
+    const launch = relay.launch(
+      first, integration, { producerBinding: ref, runId: 'run-1' }, new AbortController().signal,
+      undeliveredReplies().observe, pendingAdmission(signals),
+    ).catch(() => null);
+    relay.suspend(first);
+    relay.cancelLaunch(integration, ref, 'run-1');
+    await launch;
+    const second = session();
+    relay.resume(second, integration, [{ binding: ref, acknowledgedSeq: 0 }]);
+
+    expect(signals.map((signal) => signal.aborted)).toEqual([true]);
+    expect(second.frames().map(({ notification }) => notification.event)).toEqual([
+      { type: 'launch-settled', runId: 'run-1', error: EXECUTOR_DISCONNECTED_BEFORE_START },
+    ]);
+    relay.dispose();
+  });
+
   test('cancels a launch in admission that the controller abandons or a newer launch replaces', async () => {
     const relay = new ProducerRelay();
     const { integration, binding } = integrationDouble();

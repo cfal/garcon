@@ -43,6 +43,13 @@ type RpcFrame = ExecutorRpcRequest | AgentProducerFrame | ProducerAckFrame | Rep
 export interface RpcCallOptions<Result = unknown> extends Omit<ExecutorCallOptions, 'timeoutMs'> {
   readonly timeoutMs?: number | null;
   readonly onLateResult?: (value: Result) => void | Promise<unknown>;
+  // Runs when the session is lost before a cancelled call's late result arrives.
+  readonly onLateResultLost?: () => void;
+}
+
+interface LateResult {
+  readonly receive: (value: unknown) => void | Promise<unknown>;
+  readonly lost: (() => void) | undefined;
 }
 
 const log = createLogger('executor-rpc');
@@ -132,7 +139,7 @@ export interface ExecutorRpcContinuity {
 
 export class ExecutorRpc {
   readonly #pending = new Map<string, OutgoingCall>();
-  readonly #lateResults = new Map<string, (value: unknown) => void | Promise<unknown>>();
+  readonly #lateResults = new Map<string, LateResult>();
   readonly #incoming = new Map<string, IncomingCall>();
   readonly #parked: ParkedRpcCalls | null;
   readonly #journal: RpcReplyJournal | null;
@@ -184,6 +191,7 @@ export class ExecutorRpc {
       call.reject(new ExecutorSessionLostError('unknown', 'The connection to the executor dropped before it replied.'));
     }
     this.#pending.clear();
+    const lostLateResults = [...this.#lateResults.values()];
     this.#lateResults.clear();
     // A launch outlives its session; the producer relay reports its outcome.
     for (const { controller, continuity } of this.#incoming.values()) {
@@ -191,6 +199,9 @@ export class ExecutorRpc {
     }
     this.#incoming.clear();
     this.#journal?.ownerLost(this.#journalOwner);
+    for (const { lost } of lostLateResults) {
+      try { lost?.(); } catch (error) { log.warn('Failed to record a cancelled executor call whose late result was lost', error); }
+    }
   }
 
   handle(handler: RpcHandler): void { this.#handler = handler; }
@@ -249,7 +260,12 @@ export class ExecutorRpc {
       if (holder) holder.#pending.delete(call.id);
       // Resource-producing calls retain their budget until settlement or session loss.
       const onLateResult = options?.onLateResult;
-      if (holder && onLateResult) holder.#lateResults.set(call.id, (value) => onLateResult(value as ExecutorRpcMethods[K]['result']));
+      if (holder && onLateResult) {
+        holder.#lateResults.set(call.id, {
+          receive: (value) => onLateResult(value as ExecutorRpcMethods[K]['result']),
+          lost: options?.onLateResultLost,
+        });
+      }
       call.cleanup();
       call.reject(new AgentCallError('unknown', message));
       // A parked call's worker learns of it at the next reconcile, which does not name it.
@@ -371,11 +387,11 @@ export class ExecutorRpc {
     if (frame.type === 'result' || frame.type === 'error') {
       const call = this.#pending.get(frame.id);
       if (!call) {
-        const onLateResult = this.#lateResults.get(frame.id);
+        const late = this.#lateResults.get(frame.id);
         this.#lateResults.delete(frame.id);
-        if (frame.type === 'result' && onLateResult) {
+        if (frame.type === 'result' && late) {
           void Promise.resolve().then(() => {
-            if (!this.#retired) return onLateResult(frame.value);
+            if (!this.#retired) return late.receive(frame.value);
           }).catch((error) => log.warn('Failed to clean up a cancelled executor call', error));
         }
         return;

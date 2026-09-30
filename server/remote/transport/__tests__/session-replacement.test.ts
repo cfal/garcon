@@ -368,6 +368,62 @@ for (const dialer of ['controller', 'worker'] as const) {
     } finally { await fixture.dispose(); }
   });
 
+  test(`a start stopped on a live link whose reply is then lost is reported once the binding resumes (${dialer} dials)`, async () => {
+    let fault!: ReturnType<typeof outgoingFault>;
+    const fixture = await remoteFixture(dialer, (_controller, worker) => { fault = outgoingFault(worker); });
+    const release = Promise.withResolvers<void>();
+    try {
+      const integration = await fixture.executor.getAgentIntegration('test');
+      const request = await requestFor(integration);
+      const outcomes = launchOutcomes(integration);
+      const entered = Promise.withResolvers<void>();
+      // The native runtime finishes admission despite the cancellation.
+      fixture.generations[0]!.hooks.start = async () => { entered.resolve(); await release.promise; };
+      const stop = new AbortController();
+      const call = integration.execution.start(request, { signal: stop.signal }).catch((error: unknown) => error);
+      await entered.promise;
+      stop.abort();
+      expect(await call).toMatchObject({ outcome: 'unknown' });
+      disconnectOn(fault, isExecutionHandleReply);
+      const ready = nextAvailability(fixture.executor, 'ready');
+      release.resolve();
+      await ready;
+      const deadline = performance.now() + 10_000;
+      while (outcomes.length === 0 && performance.now() < deadline) await Bun.sleep(5);
+
+      expect(outcomes).toEqual([{ type: 'launch-settled', runId: request.runId, handle: expect.objectContaining({ kind: 'execution' }) }]);
+    } finally { release.resolve(); await fixture.dispose(); }
+  }, 30_000);
+
+  test(`a start stopped on a live link that fails there leaves nothing to settle after a reconnect (${dialer} dials)`, async () => {
+    const fixture = await remoteFixture(dialer);
+    const release = Promise.withResolvers<void>();
+    try {
+      const integration = await fixture.executor.getAgentIntegration('test');
+      const request = await requestFor(integration);
+      const outcomes = launchOutcomes(integration);
+      const entered = Promise.withResolvers<void>();
+      fixture.generations[0]!.hooks.start = async () => {
+        entered.resolve();
+        await release.promise;
+        throw new Error('Synthetic start failure');
+      };
+      const stop = new AbortController();
+      const call = integration.execution.start(request, { signal: stop.signal }).catch((error: unknown) => error);
+      await entered.promise;
+      stop.abort();
+      expect(await call).toMatchObject({ outcome: 'unknown' });
+      release.resolve();
+      await integration.execution.runningSessions();
+      const ready = nextAvailability(fixture.executor, 'ready');
+      fixture.controller.disconnect(); fixture.worker.disconnect();
+      await ready;
+      await integration.execution.runningSessions();
+
+      expect(outcomes).toEqual([]);
+    } finally { release.resolve(); await fixture.dispose(); }
+  });
+
   test(`a start lost after its binding closed leaves no cancellation for Stop to send (${dialer} dials)`, async () => {
     let fault!: ReturnType<typeof outgoingFault>;
     const fixture = await remoteFixture(dialer, (controller) => { fault = outgoingFault(controller); });
@@ -693,6 +749,60 @@ test('a restarted worker cannot resume bindings, so the controller reports them 
     for (const generation of generations) await generation.executor.dispose();
   }
 });
+
+for (const phase of ['held', 'parked'] as const) {
+  test(`a close ${phase} across a worker restart never reaches the restarted worker`, async () => {
+    const controller = new WebSocketLink({ ...linkOptions, role: 'controller' });
+    const worker = new WebSocketLink({ ...linkOptions, role: 'worker' });
+    const fault = outgoingFault(controller);
+    const generations: ReturnType<typeof integrationFixture>[] = [];
+    const closes: ReturnType<typeof spyOn>[] = [];
+    const scopes: ReturnType<typeof serveExecutionRuntime>[] = [];
+    const install = Promise.withResolvers<void>();
+    // Each session is a new worker instance; the restarted one installs only once the close waits.
+    worker.onSession((transport) => {
+      const fixture = integrationFixture();
+      if (generations.length > 0) {
+        const getInfo = fixture.executor.getInfo;
+        fixture.executor.getInfo = async () => { await install.promise; return getInfo(); };
+      }
+      generations.push(fixture);
+      closes.push(spyOn(fixture.integration.producers, 'close'));
+      scopes.push(serveExecutionRuntime(fixture.executor, new ExecutorRpc(transport), new ProducerRelay()));
+    });
+    const connected = connectRemoteExecutor(controller);
+    controller.dial(worker.listen());
+    const executor = await connected;
+    try {
+      const integration = await executor.getAgentIntegration('test');
+      const request = await requestFor(integration);
+      await integration.execution.start(request);
+      const ready = nextAvailability(executor, 'ready');
+      let closing: Promise<unknown>;
+      if (phase === 'held') {
+        const reconnecting = nextAvailability(executor, 'reconnecting');
+        controller.disconnect(); worker.disconnect();
+        await reconnecting;
+        closing = integration.producers.close(request.producerBinding).then(() => null, (error: unknown) => error);
+      } else {
+        disconnectOn(fault, (encoded) => encoded.includes('"method":"producers.close"'));
+        closing = integration.producers.close(request.producerBinding).then(() => null, (error: unknown) => error);
+      }
+      install.resolve();
+      await ready;
+
+      expect(await closing).toMatchObject({ outcome: phase === 'held' ? 'not-dispatched' : 'unknown' });
+      expect(generations).toHaveLength(2);
+      expect(closes[1]).not.toHaveBeenCalled();
+    } finally {
+      install.resolve();
+      await executor.dispose();
+      await worker.dispose();
+      await Promise.all(scopes.map((scope) => scope.dispose()));
+      for (const generation of generations) await generation.executor.dispose();
+    }
+  });
+}
 
 test('bindings a restarted controller cannot resume expire after the short grace', async () => {
   const worker = new WebSocketLink({ ...linkOptions, role: 'worker' });

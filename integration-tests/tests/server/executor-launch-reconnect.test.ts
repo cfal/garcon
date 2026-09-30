@@ -6,7 +6,9 @@ import type { AgentEndpointSelection } from '../../../common/agent-execution.js'
 import { AssistantMessage } from '../../../common/chat-types.js';
 import type { AgentRuntimeEvent } from '../../../server-agents/common/src/execution/runtime-events.js';
 import { resolveAgentEndpoint } from '../../../server-agents/common/src/execution/resolve-endpoint.js';
-import { AgentCallError, type AgentHost, type ExecutorAvailability } from '../../../server-agents/interface/src/index.js';
+import {
+  AgentCallError, AgentIntegrationError, type AgentHost, type ExecutorAvailability,
+} from '../../../server-agents/interface/src/index.js';
 import { ApiProviderEndpointResolver } from '../../../server/controller/api-providers/endpoint-resolver.js';
 import { ChatRegistry } from '../../../server/controller/chats/store.js';
 import { AgentDirectory, type ExecutionIntegrationDirectory } from '../../../server/controller/agents/directory.js';
@@ -213,6 +215,61 @@ function runEnds(ledger: TranscriptLedgerService) {
 }
 
 for (const dialer of ['controller', 'worker'] as const) {
+  test(`a Stop on a live link whose start reply is then lost stops the turn once after the reconnect (${dialer} dials)`, async () => {
+    await withRemoteRouter(dialer, async ({ router, ledger, native, remote, restored, workerFault }) => {
+      const entered = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      // The native runtime finishes admission despite the cancellation.
+      native.hooks.start = async () => { entered.resolve(); await release.promise; };
+      const admission = new AbortController();
+      const turn = router.startSession(CHAT, 'Synthetic input', {
+        executionAdmission: { signal: admission.signal, markStarted: async () => {} },
+      }).then(() => null, (error: unknown) => error);
+      await entered.promise;
+      // The execution coordinator's Stop aborts admission, then the session.
+      admission.abort(new Error('Synthetic stop'));
+      await router.abortSession(CHAT);
+      await turn;
+      workerFault.inject = (encoded) => {
+        if (!isExecutionHandleReply(encoded)) return null;
+        workerFault.inject = () => null;
+        return 'disconnect';
+      };
+      const reconnected = restored();
+      release.resolve();
+      await reconnected;
+      await until(() => native.calls.abort > 0);
+      // Any second abort would have reached the worker before this round trip returns.
+      await integrationRoundTrip(remote);
+
+      expect(native.calls.abort).toBe(1);
+      expect(runEnds(ledger)).toEqual([{ outcome: 'interrupted', origin: 'core' }]);
+    });
+  }, 30_000);
+
+  test(`a start that fails on its own after its session was lost fails its turn with that failure (${dialer} dials)`, async () => {
+    await withRemoteRouter(dialer, async ({ router, ledger, native, controller, restored }) => {
+      const entered = Promise.withResolvers<void>();
+      const fail = Promise.withResolvers<void>();
+      native.hooks.start = async () => {
+        entered.resolve();
+        await fail.promise;
+        throw new AgentIntegrationError('AUTH_REQUIRED', 'Synthetic sign-in required', false);
+      };
+      const turn = router.startSession(CHAT, 'Synthetic input');
+      await entered.promise;
+      const reconnected = restored();
+      controller.disconnect();
+      await reconnected;
+      await turn;
+      fail.resolve();
+      await until(() => runEnd(ledger) !== undefined);
+
+      expect(runEnds(ledger)).toEqual([{ outcome: 'failed', origin: 'core' }]);
+      expect(runEnd(ledger)).toMatchObject({ error: { code: 'AUTH_REQUIRED', message: 'Synthetic sign-in required' } });
+    });
+  }, 30_000);
+
   test(`a start in flight when the link drops keeps running, and Stop reaches it after the reconnect (${dialer} dials)`, async () => {
     await withRemoteRouter(dialer, async ({ router, ledger, native, controller, restored }) => {
       const entered = Promise.withResolvers<void>();
