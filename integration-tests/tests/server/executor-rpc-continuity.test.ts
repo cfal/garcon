@@ -6,6 +6,9 @@ import type { ExecutorsChangedMessage } from '../../../common/ws-events.js';
 import { tcpLinkProxy } from '../../../server/remote/__tests__/tcp-link-proxy.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 
+// Matches the browser's request timeout, which the interactive budget answers within.
+const BROWSER_REQUEST_TIMEOUT_MS = 30_000;
+
 for (const executionBackend of ['remote-controller-dials', 'remote-executor-dials'] as const) {
   test(`a file save sent into a silent link is saved once the executor reconnects (${executionBackend})`, async () => {
     let proxy: Awaited<ReturnType<typeof tcpLinkProxy>> | undefined;
@@ -51,10 +54,11 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
     try {
       await withIntegrationFixture(`rpc-continuity-silent-start-${executionBackend}`, async (fixture) => {
         const { client } = fixture;
+        const browser = await fixture.connectObserver('browser', { requestTimeoutMs: BROWSER_REQUEST_TIMEOUT_MS });
         const chatId = fixture.newChatId();
         proxy!.blackhole();
         const requested = performance.now();
-        const failure = await client.startDirectChat({
+        const failure = await browser.startDirectChat({
           chatId, content: 'Synthetic start into a silent link', projectPath: fixture.executionDirs.project,
           agent: fixture.directAgents.openAi,
         }).then(() => null, (error: unknown) => error);
@@ -94,12 +98,13 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
           'executor reconnecting', { afterIndex: cursor, timeoutMs: 20_000 },
         );
 
+        const browser = await fixture.connectObserver('browser', { requestTimeoutMs: BROWSER_REQUEST_TIMEOUT_MS });
         const requested = performance.now();
-        const patching = client.patch('/api/v1/chats/execution-settings', { chatId, agentSettingsPatch: {} })
+        const patching = browser.patch('/api/v1/chats/execution-settings', { chatId, agentSettingsPatch: {} })
           .then(() => null, (error: unknown) => error);
         // Lets the settings change take the chat's lock first.
         await Bun.sleep(500);
-        const stopping = client.stopChat({ chatId, clientRequestId: crypto.randomUUID() });
+        const stopping = browser.stopChat({ chatId, clientRequestId: crypto.randomUUID() });
 
         expect(await patching).toMatchObject({
           status: 503, body: expect.objectContaining({ error: 'The executor did not reconnect in time.' }),

@@ -21,6 +21,7 @@ import { FakeOpenAiServer } from './fake-openai-server.js';
 import { FakeOpenAiResponsesServer } from './fake-openai-responses-server.js';
 import {
   GarconTestClient,
+  type GarconTestClientOptions,
   type ConfiguredDirectTestAgent,
   type ConfiguredTestProvider,
   type DirectTestAgents,
@@ -377,7 +378,10 @@ export class IntegrationFixture {
     return this.#backend.backend === 'in-process' ? this.garcon.logs : this.#backend.logs;
   }
 
-  async connectObserver(name: string): Promise<GarconTestClient> {
+  async connectObserver(
+    name: string,
+    options: Pick<GarconTestClientOptions, 'requestTimeoutMs'> = {},
+  ): Promise<GarconTestClient> {
     const normalizedName = name.trim();
     if (!normalizedName || normalizedName === 'primary') {
       throw new Error('Observer name must be non-empty and cannot be "primary".');
@@ -389,6 +393,7 @@ export class IntegrationFixture {
       authToken: this.garcon.authToken,
       executorId: this.#backend.executorId,
       redactSensitiveDiagnostics: this.#redactSensitiveDiagnostics,
+      requestTimeoutMs: options.requestTimeoutMs,
     });
     try {
       await observer.ping();
