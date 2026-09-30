@@ -15,7 +15,7 @@ import { DomainError } from '../../common/domain-error.js';
 import { ExecutorSessionLostError } from '../../common/executor-disconnect.js';
 import { withActivity } from '../../common/event-loop-stalls.js';
 import { createLogger } from '../../common/log.js';
-import { MALFORMED_DATA } from './failure-reason.js';
+import { failureReason, MALFORMED_DATA } from './failure-reason.js';
 import { isErrorCode, type ErrorCode } from '../../../common/error-codes.js';
 import { TerminalError } from '../../../common/terminal-error.js';
 import { GitServiceError, isGitServiceErrorCode, type GitServiceErrorCode } from '../../../common/git-error.js';
@@ -431,6 +431,7 @@ export class ExecutorRpc {
     }).then((value) => {
       if (current() && !this.#reply({ type: 'result', id: frame.id, value }, replyGuard)) undelivered?.();
     }, (error) => {
+      logRedactedFailure(frame, error);
       if (current() && !this.#reply({ type: 'error', id: frame.id, error: encodeFailure(error) })) undelivered?.();
     }).catch(() => undefined).finally(() => { if (current()) this.#incoming.delete(frame.id); });
   }
@@ -447,7 +448,10 @@ export class ExecutorRpc {
       return withActivity(rpcActivity(frame.method), () => handler(frame, call.signal, (guard) => { replyGuard = guard; }, () => {}));
     }).then(
       (value) => this.#encodeReply({ type: 'result', id: frame.id, value }, replyGuard) ?? undeliverableReply(frame.id),
-      (error) => this.#encodeReply({ type: 'error', id: frame.id, error: encodeFailure(error) }) ?? undeliverableReply(frame.id),
+      (error) => {
+        logRedactedFailure(frame, error);
+        return this.#encodeReply({ type: 'error', id: frame.id, error: encodeFailure(error) }) ?? undeliverableReply(frame.id);
+      },
     ).catch((error) => JSON.stringify({ type: 'error', id: frame.id, error: encodeFailure(error) } satisfies RpcFrame))
       .then((reply) => journal.complete(call, reply, undeliverableReply(frame.id)));
   }
@@ -529,6 +533,15 @@ function reconciledStates(value: unknown): ReadonlyMap<string, OutstandingCallSt
   return new Map((value as readonly OutstandingCallState[]).map(({ id, state }) => [id, state]));
 }
 
+// An error reply carries a parse error only as Malformed data, so the side that threw
+// logs which call failed and where.
+function logRedactedFailure(frame: ExecutorRpcRequest, error: unknown): void {
+  if (!(error instanceof SyntaxError)) return;
+  log.warn('Executor call failed on malformed data', {
+    callId: frame.id, integrationId: frame.integrationId, method: frame.method, reason: failureReason(error),
+  });
+}
+
 function encodeFailure(error: unknown): Failure {
   if (error instanceof GitServiceError) return { domain: 'git', code: error.code, message: error.message, status: error.status, retryable: false };
   if (error instanceof TerminalError) return { domain: 'terminal', code: error.code, message: error.message, status: error.status, retryable: error.status >= 500 };
@@ -538,7 +551,7 @@ function encodeFailure(error: unknown): Failure {
     ...(error.details ? { details: error.details } : {}),
     ...(error instanceof AgentCallError ? { outcome: error.outcome } : {}),
   };
-  // A parse error's message can echo the payload it failed on, so it does not cross the link.
+  // A parse error's message can echo the payload it failed on, so an error reply does not carry it.
   const message = error instanceof SyntaxError ? MALFORMED_DATA : error instanceof Error ? error.message : 'Provider operation failed';
   return { code: 'PROVIDER_FAILURE', message, retryable: false };
 }
