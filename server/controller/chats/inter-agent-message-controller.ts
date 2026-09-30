@@ -8,8 +8,13 @@ import type {
   InterAgentMessageReceivedNoticeDetail,
   InterAgentMessageResult,
 } from '../../../common/transcript-notice-details.js';
-import type { ServerControlDisposition, ServerControlInput } from '../chat-execution/types.js';
-import type { KeyedPromiseLock } from '../../common/keyed-lock.js';
+import type {
+  ServerControlDisposition,
+  ServerControlInput,
+  ServerControlOffer,
+} from '../chat-execution/types.js';
+import { waitAbortably } from '../../common/abortable-wait.js';
+import { KeyedPromiseLock } from '../../common/keyed-lock.js';
 import { DomainError } from '../../common/domain-error.js';
 import type { TranscriptAdoptionService } from '../ledger/adoption.js';
 import type { TranscriptViewId } from '../ledger/contracts.js';
@@ -30,11 +35,26 @@ interface InterAgentMessageAttempt {
 }
 
 export interface InterAgentMessageExecution {
-  deliverServerControlInput(
+  offerServerControlInput(
     chatId: string,
     input: ServerControlInput,
     signal: AbortSignal,
-  ): Promise<ServerControlDisposition>;
+  ): Promise<ServerControlOffer>;
+  queueServerControlInput(
+    chatId: string,
+    input: ServerControlInput,
+    signal: AbortSignal,
+  ): Promise<'queued'>;
+}
+
+type AfterTurn = Extract<ServerControlOffer, { readonly kind: 'after-turn' }>;
+type MessageReceipt = NonNullable<ServerControlInput['receipt']>;
+
+// Control input addressed to the target's current transcript.
+interface TargetDelivery {
+  readonly controlInput: ServerControlInput;
+  readonly receipt: MessageReceipt;
+  readonly viewId: TranscriptViewId;
 }
 
 export interface InterAgentMessageDispositionEvent {
@@ -68,6 +88,9 @@ export interface InterAgentMessageControllerOptions {
 
 export class InterAgentMessageController {
   readonly #attempts = new Map<string, Set<InterAgentMessageAttempt>>();
+  // Keeps deliveries to one target in order without holding its mutation lock
+  // while one waits for a running turn: Stop and permission answers need it.
+  readonly #deliveries = new KeyedPromiseLock();
 
   constructor(private readonly options: InterAgentMessageControllerOptions) {}
 
@@ -154,6 +177,51 @@ export class InterAgentMessageController {
       return this.#result(input.sourceChatId, targetChatId, 'self-send');
     }
 
+    return this.#deliveries.runExclusive(targetChatId, async () => {
+      const offered = await this.#withTarget(input, sourceChatId, targetChatId, signal, (delivery) => (
+        this.#offer(input, targetChatId, delivery, signal)
+      ));
+      if (!('turnSettled' in offered)) return offered;
+      await waitAbortably(offered.turnSettled, signal);
+      return this.#withTarget(input, sourceChatId, targetChatId, signal, (delivery) => (
+        this.#queue(input, targetChatId, delivery, signal)
+      ));
+    }, signal);
+  }
+
+  async #offer(
+    input: InterAgentMessageRequest,
+    targetChatId: ChatId,
+    delivery: TargetDelivery,
+    signal: AbortSignal,
+  ): Promise<InterAgentMessageResult | AfterTurn> {
+    const offer = await this.options.execution.offerServerControlInput(targetChatId, delivery.controlInput, signal);
+    signal.throwIfAborted();
+    if (offer.kind === 'after-turn') return offer;
+    if (offer.kind === 'delivered') this.#appendReceipt(input, targetChatId, delivery);
+    return this.#result(input.sourceChatId, targetChatId, offer.kind);
+  }
+
+  async #queue(
+    input: InterAgentMessageRequest,
+    targetChatId: ChatId,
+    delivery: TargetDelivery,
+    signal: AbortSignal,
+  ): Promise<InterAgentMessageResult> {
+    const disposition = await this.options.execution.queueServerControlInput(targetChatId, delivery.controlInput, signal);
+    signal.throwIfAborted();
+    return this.#result(input.sourceChatId, targetChatId, disposition);
+  }
+
+  // Checks the target and adopts its current transcript under the target's
+  // mutation lock, then runs one delivery step addressed to that transcript.
+  #withTarget<T>(
+    input: InterAgentMessageRequest,
+    sourceChatId: ChatId,
+    targetChatId: ChatId,
+    signal: AbortSignal,
+    step: (delivery: TargetDelivery) => Promise<T>,
+  ): Promise<T | InterAgentMessageResult> {
     return this.options.chatMutationLock.runExclusive(`chat:${targetChatId}`, async () => {
       signal.throwIfAborted();
       if (!this.options.registry.getChat(targetChatId)) {
@@ -183,20 +251,17 @@ export class InterAgentMessageController {
 
       const fromChatId = input.hideSender ? null : sourceChatId;
       const receipt = receivedMessageNotice(fromChatId, input.body);
-      const controlInput: ServerControlInput = {
-        content: garconMessageContent(fromChatId, input.body),
-        transcriptViewId: view.viewId,
-        createdAt: input.requestAt,
-        receipt,
-      };
-
-      let disposition: ServerControlDisposition;
       try {
-        disposition = await this.options.execution.deliverServerControlInput(
-          targetChatId,
-          controlInput,
-          signal,
-        );
+        return await step({
+          controlInput: {
+            content: garconMessageContent(fromChatId, input.body),
+            transcriptViewId: view.viewId,
+            createdAt: input.requestAt,
+            receipt,
+          },
+          receipt,
+          viewId: view.viewId,
+        });
       } catch (error) {
         signal.throwIfAborted();
         return this.#result(
@@ -205,24 +270,22 @@ export class InterAgentMessageController {
           classifyDeliveryFailure(error),
         );
       }
+    }, signal);
+  }
 
-      signal.throwIfAborted();
-      if (disposition === 'delivered') {
-        try {
-          this.options.notices.appendNotice(targetChatId, view.viewId, {
-            ...receipt,
-            at: input.requestAt,
-          });
-        } catch (error) {
-          this.#reportError(error, {
-            sourceChatId: input.sourceChatId,
-            targetChatId,
-            phase: 'target-receipt',
-          });
-        }
-      }
-      return this.#result(input.sourceChatId, targetChatId, disposition);
-    });
+  #appendReceipt(input: InterAgentMessageRequest, targetChatId: ChatId, delivery: TargetDelivery): void {
+    try {
+      this.options.notices.appendNotice(targetChatId, delivery.viewId, {
+        ...delivery.receipt,
+        at: input.requestAt,
+      });
+    } catch (error) {
+      this.#reportError(error, {
+        sourceChatId: input.sourceChatId,
+        targetChatId,
+        phase: 'target-receipt',
+      });
+    }
   }
 
   #result(
@@ -297,7 +360,7 @@ export class InterAgentMessageController {
 function receivedMessageNotice(
   fromChatId: ChatId | null,
   body: string,
-): NonNullable<ServerControlInput['receipt']> {
+): MessageReceipt {
   const detail: InterAgentMessageReceivedNoticeDetail = {
     type: 'inter-agent-message-received',
     fromChatId,

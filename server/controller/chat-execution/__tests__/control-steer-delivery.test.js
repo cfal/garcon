@@ -79,10 +79,34 @@ describe('ControlSteerDelivery', () => {
     const delivery = steering.toCapturedTarget(
       'chat-1', 'control', 'view-1', captured, new AbortController().signal,
     );
+    let finished = false;
+    void delivery.then(() => { finished = true; });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(finished).toBe(false);
     expect(captured.attempt.waitUntilSettled).toHaveBeenCalledTimes(1);
     expect(deliver).not.toHaveBeenCalled();
     settled.resolve();
     await expect(delivery).resolves.toBe('definitive-non-delivery');
+  });
+
+  it('offers to the captured target without waiting for it after a definitive non-delivery', async () => {
+    const unsteerable = { ...target(new Promise(() => undefined)), providerTarget: null };
+    const changed = target(new Promise(() => undefined));
+    const deliver = mock(async (_chatId, _content, _viewId, captured) => {
+      if (captured === changed) throw new DomainError('STEER_TURN_CHANGED', 'changed');
+    });
+    const steering = new ControlSteerDelivery(deliver);
+    const signal = new AbortController().signal;
+
+    await expect(steering.offerToCapturedTarget('chat-1', 'control', 'view-1', unsteerable, signal))
+      .resolves.toBe('definitive-non-delivery');
+    await expect(steering.offerToCapturedTarget('chat-1', 'control', 'view-1', changed, signal))
+      .resolves.toBe('definitive-non-delivery');
+    await expect(steering.offerToCapturedTarget('chat-1', 'control', 'view-1', target(), signal))
+      .resolves.toBe('delivered');
+    expect(unsteerable.attempt.waitUntilSettled).not.toHaveBeenCalled();
+    expect(changed.attempt.waitUntilSettled).not.toHaveBeenCalled();
+    expect(deliver).toHaveBeenCalledTimes(2);
   });
 
   for (const code of ['STEER_OUTCOME_UNKNOWN', 'STEER_PROVIDER_REJECTED']) {

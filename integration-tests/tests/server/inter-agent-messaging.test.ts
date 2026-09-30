@@ -6,6 +6,7 @@ import {
   userContents,
 } from '../../support/chat-assertions.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import { withTimeout } from '../../support/deferred.js';
 
 describe('inter-agent messaging', () => {
   test('routes an assistant command through a hidden target turn with durable audit notices', async () => {
@@ -93,6 +94,85 @@ describe('inter-agent messaging', () => {
       const targetCompleted = await fixture.client.getMessages(targetChatId);
       expect(userContents(targetCompleted.messages)).toEqual([targetPrompt]);
       expect(assistantContents(targetCompleted.messages)).toEqual(['Target ready.', 'Message received.']);
+    });
+  }, 120_000);
+
+  test('keeps Stop usable while a message waits for a target turn that cannot be steered', async () => {
+    await withIntegrationFixture('inter-agent-message-unsteerable-stop', async (fixture) => {
+      const targetChatId = fixture.newChatId();
+      const sourceChatId = fixture.newChatId();
+      const targetPrompt = 'Keep working until stopped.';
+      const sourcePrompt = 'Message the busy chat.';
+      const body = 'Pick this up after the current turn.';
+      const envelope = `<garcon-message from="${sourceChatId}">\n${body}\n</garcon-message>`;
+      const command = `<garcon-send-message to="${targetChatId}" hide-sender="false">\n${body}\n</garcon-send-message>`;
+
+      // Direct agents cannot be steered, so the message waits for this turn to settle.
+      const heldTarget = fixture.fakeProviders.openAi.holdNext({ lastUserText: targetPrompt });
+      const targetStarted = await fixture.client.startDirectChat({
+        chatId: targetChatId,
+        content: targetPrompt,
+        projectPath: fixture.dirs.project,
+        agent: fixture.directAgents.openAi,
+      });
+      await heldTarget.received;
+
+      const sourceTurn = fixture.fakeProviders.openAi.holdNext({ lastUserText: sourcePrompt });
+      const hiddenTargetTurn = fixture.fakeProviders.openAi.holdNext({ lastUserText: envelope });
+      const sourceCursor = fixture.client.markEvents();
+      const sourceStarted = await fixture.client.startDirectChat({
+        chatId: sourceChatId,
+        content: sourcePrompt,
+        projectPath: fixture.dirs.project,
+        agent: fixture.directAgents.openAi,
+      });
+      await sourceTurn.received;
+      sourceTurn.releaseText(command);
+      expect((await fixture.client.waitForTurnTerminal(
+        sourceChatId,
+        sourceStarted.turnId,
+        { afterIndex: sourceCursor },
+      )).type).toBe('agent-run-finished');
+
+      const targetAborted = heldTarget.expectAbort();
+      const stopped = await withTimeout(
+        fixture.client.stopChat({ chatId: targetChatId, clientRequestId: crypto.randomUUID() }),
+        5_000,
+        () => 'Stop waited behind the pending inter-agent message',
+      );
+      expect(stopped.outcome).toBe('interrupt-requested');
+      await targetAborted;
+      expect(await fixture.client.waitForTurnTerminal(targetChatId, targetStarted.turnId))
+        .toMatchObject({ type: 'agent-run-finished', outcome: 'interrupted' });
+
+      await fixture.client.waitForEvent(
+        (event): event is ChatMessagesMessage => event.type === 'chat-messages'
+          && event.chatId === sourceChatId
+          && event.messages.some((entry) => (
+            entry.message.type === 'transcript-notice'
+            && entry.message.detail?.type === 'inter-agent-message-outcome'
+          )),
+        'queued source inter-agent outcome',
+        { afterIndex: sourceCursor },
+      );
+      const source = await fixture.client.getMessages(sourceChatId);
+      expect(messagesOfType(source.messages, 'transcript-notice')).toContainEqual(expect.objectContaining({
+        detail: {
+          type: 'inter-agent-message-outcome',
+          results: [{ chatId: targetChatId, status: 'queued' }],
+        },
+      }));
+
+      // The message waited outside the target's queue when Stop arrived, so Stop
+      // paused nothing, and the message runs once the stopped turn settles.
+      expect((await fixture.client.getExecutionControl(targetChatId)).queue.pause).toBeNull();
+      expect((await hiddenTargetTurn.received).lastUserText).toBe(envelope);
+      const hiddenCursor = fixture.client.markEvents();
+      hiddenTargetTurn.releaseText('Picked up after the stop.');
+      expect((await fixture.client.waitForTurnTerminal(targetChatId, undefined, { afterIndex: hiddenCursor })).type)
+        .toBe('agent-run-finished');
+      expect(assistantContents((await fixture.client.getMessages(targetChatId)).messages))
+        .toEqual(['Picked up after the stop.']);
     });
   }, 120_000);
 

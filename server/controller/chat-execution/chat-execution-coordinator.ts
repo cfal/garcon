@@ -8,6 +8,7 @@ import {
   type ChatStopOutcome,
 } from '../../../common/chat-types.ts';
 import type { AgentExecutionAdmission, RunAgentTurnOptions } from '../agents/session-types.js';
+import { waitAbortably } from '../../common/abortable-wait.js';
 import { KeyedPromiseLock } from '../../common/keyed-lock.js';
 import { createLogger } from '../../common/log.js';
 import { DomainError } from '../../common/domain-error.js';
@@ -46,6 +47,7 @@ import {
   type ExecutionControlUpdatedCallback,
   type ServerControlDisposition,
   type ServerControlInput,
+  type ServerControlOffer,
   type UserInputAdmissionOptions,
   type ProcessingInvalidatedCallback,
   type ProjectAdmissionPort,
@@ -467,6 +469,21 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     input: ServerControlInput,
     signal: AbortSignal,
   ): Promise<ServerControlDisposition> {
+    const offer = await this.offerServerControlInput(chatId, input, signal);
+    if (offer.kind !== 'after-turn') return offer.kind;
+    await waitAbortably(offer.turnSettled, signal);
+    return this.queueServerControlInput(chatId, input, signal);
+  }
+
+  // Steers server control input into the running turn, or queues it while the chat
+  // is idle or its queue is paused or holds control input. A running turn that
+  // provably did not receive it is returned instead: the caller queues the input
+  // once that turn settles, and need not hold a lock Stop needs meanwhile.
+  async offerServerControlInput(
+    chatId: string,
+    input: ServerControlInput,
+    signal: AbortSignal,
+  ): Promise<ServerControlOffer> {
     signal.throwIfAborted();
     if (this.#shuttingDown) throw serverShuttingDownError();
     if (!this.#chatExists(chatId)) throw chatNotFoundError();
@@ -474,22 +491,33 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     const control = await this.#controlOperations.read(chatId);
     signal.throwIfAborted();
     if (control.pause || control.controlEntries.length > 0) {
-      return this.#enqueueServerControlInput(chatId, input, signal);
+      return { kind: await this.queueServerControlInput(chatId, input, signal) };
     }
 
     const target = await this.#steerInputDelivery.captureControlTarget(chatId);
-    if (target) {
-      const outcome = await this.#controlSteerDelivery.toCapturedTarget(
-        chatId,
-        input.content,
-        input.transcriptViewId,
-        target,
-        signal,
-      );
-      if (outcome === 'delivered') return 'delivered';
-    }
+    if (!target) return { kind: await this.queueServerControlInput(chatId, input, signal) };
+    const outcome = await this.#controlSteerDelivery.offerToCapturedTarget(
+      chatId,
+      input.content,
+      input.transcriptViewId,
+      target,
+      signal,
+    );
+    if (outcome === 'delivered') return { kind: 'delivered' };
+    return { kind: 'after-turn', turnSettled: target.attempt.waitUntilSettled() };
+  }
 
-    return this.#enqueueServerControlInput(chatId, input, signal);
+  async queueServerControlInput(
+    chatId: string,
+    input: ServerControlInput,
+    signal: AbortSignal,
+  ): Promise<'queued'> {
+    signal.throwIfAborted();
+    if (this.#shuttingDown) throw serverShuttingDownError();
+    if (!this.#chatExists(chatId)) throw chatNotFoundError();
+    await this.#controlOperations.enqueueControl(chatId, input);
+    this.#requestDrain(chatId, 'server control input');
+    return 'queued';
   }
 
   async deliverAcceptedSteer(input: AcceptedSteerInput): Promise<AcceptedSteerOutcome> {
@@ -828,19 +856,6 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       );
     });
     this.#trackDispatch(task);
-  }
-
-  async #enqueueServerControlInput(
-    chatId: string,
-    input: ServerControlInput,
-    signal: AbortSignal,
-  ): Promise<'queued'> {
-    signal.throwIfAborted();
-    if (this.#shuttingDown) throw serverShuttingDownError();
-    if (!this.#chatExists(chatId)) throw chatNotFoundError();
-    await this.#controlOperations.enqueueControl(chatId, input);
-    this.#requestDrain(chatId, 'server control input');
-    return 'queued';
   }
 
   #retireAttempt(chatId: string, attempt: QueueExecutionAttempt, reason?: Error): void {

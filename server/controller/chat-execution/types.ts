@@ -194,6 +194,12 @@ export type ServerControlInput = Omit<StoredControlInputEntry, 'id'>;
 
 export type ServerControlDisposition = 'delivered' | 'queued';
 
+// Server control input steered into the running turn or queued, or the running
+// turn that provably did not receive it and must settle before it is queued.
+export type ServerControlOffer =
+  | { readonly kind: ServerControlDisposition }
+  | { readonly kind: 'after-turn'; readonly turnSettled: Promise<void> };
+
 export interface AcceptedSteerInput {
   command: AcceptedExecutionCommand;
   content: string;

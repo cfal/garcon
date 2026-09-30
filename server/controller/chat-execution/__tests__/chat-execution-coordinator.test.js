@@ -396,6 +396,29 @@ describe('ChatExecutionCoordinator', () => {
     await coordinator.releaseDirectTurn(successor);
   });
 
+  it('offers server control input and returns a running turn it did not reach without waiting for it', async () => {
+    const fixture = createFixture();
+    coordinator = fixture.coordinator;
+    const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'turn-1' });
+
+    const offer = await coordinator.offerServerControlInput('chat-1', interAgentInput(), new AbortController().signal);
+
+    expect(offer.kind).toBe('after-turn');
+    expect((await coordinator.readChatExecutionControl('chat-1')).controlEntries).toEqual([]);
+    let settled = false;
+    void offer.turnSettled.then(() => { settled = true; });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    await coordinator.releaseDirectTurn(reservation);
+    await offer.turnSettled;
+    const successor = coordinator.reserveDirectTurn('chat-1', { turnId: 'turn-2' });
+    await expect(coordinator.queueServerControlInput('chat-1', interAgentInput(), new AbortController().signal))
+      .resolves.toBe('queued');
+    expect((await coordinator.readChatExecutionControl('chat-1')).controlEntries).toHaveLength(1);
+    expect(fixture.turnRunner.steerInput).not.toHaveBeenCalled();
+    await coordinator.releaseDirectTurn(successor);
+  });
+
   for (const failureAt of ['capture', 'dispatch']) {
     it(`queues server control after unavailable ${failureAt} and exact-attempt settlement`, async () => {
       const unavailable = new DomainError('EXECUTOR_UNAVAILABLE', 'Node reconnecting', 503);

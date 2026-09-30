@@ -54,7 +54,8 @@ function createFixture(overrides = {}) {
     ...overrides.adoption,
   };
   const execution = {
-    deliverServerControlInput: mock(async () => 'delivered'),
+    offerServerControlInput: mock(async () => ({ kind: 'delivered' })),
+    queueServerControlInput: mock(async () => 'queued'),
     ...overrides.execution,
   };
   const notices = {
@@ -88,7 +89,7 @@ describe('InterAgentMessageController', () => {
     await waitFor(() => sourceNotices(fixture).length === 1);
 
     expect(fixture.adoption.ensure).not.toHaveBeenCalled();
-    expect(fixture.execution.deliverServerControlInput).not.toHaveBeenCalled();
+    expect(fixture.execution.offerServerControlInput).not.toHaveBeenCalled();
     expect(sourceNotices(fixture)[0][2]).toMatchObject({
       content: 'message body',
       detail: {
@@ -106,7 +107,7 @@ describe('InterAgentMessageController', () => {
     fixture.controller.request(request());
     await waitFor(() => sourceNotices(fixture).length === 1);
 
-    expect(fixture.execution.deliverServerControlInput).toHaveBeenCalledWith(
+    expect(fixture.execution.offerServerControlInput).toHaveBeenCalledWith(
       TARGET_CHAT_ID,
       {
         content: `<garcon-message from="${SOURCE_CHAT_ID}">\nmessage body\n</garcon-message>`,
@@ -149,13 +150,13 @@ describe('InterAgentMessageController', () => {
 
   it('hides sender identity and reports process-ephemeral queue admission honestly', async () => {
     const fixture = createFixture({
-      execution: { deliverServerControlInput: mock(async () => 'queued') },
+      execution: { offerServerControlInput: mock(async () => ({ kind: 'queued' })) },
     });
 
     fixture.controller.request(request({ hideSender: true }));
     await waitFor(() => sourceNotices(fixture).length === 1);
 
-    expect(fixture.execution.deliverServerControlInput.mock.calls[0][1]).toEqual({
+    expect(fixture.execution.offerServerControlInput.mock.calls[0][1]).toEqual({
       content: '<garcon-message>\nmessage body\n</garcon-message>',
       transcriptViewId: `view-${TARGET_CHAT_ID}`,
       createdAt: '2026-08-29T00:00:00.000Z',
@@ -177,8 +178,8 @@ describe('InterAgentMessageController', () => {
   it('fans out independently and preserves recipient order in one partial outcome', async () => {
     const fixture = createFixture({
       execution: {
-        deliverServerControlInput: mock(async (chatId) => {
-          if (chatId === TARGET_CHAT_ID) return 'delivered';
+        offerServerControlInput: mock(async (chatId) => {
+          if (chatId === TARGET_CHAT_ID) return { kind: 'delivered' };
           if (chatId === SECOND_TARGET_CHAT_ID) {
             throw new DomainError('CONTROL_INPUT_QUEUE_FULL', 'full');
           }
@@ -204,7 +205,7 @@ describe('InterAgentMessageController', () => {
       { chatId: MISSING_TARGET_CHAT_ID, status: 'failed', reason: 'target-not-found' },
       { chatId: THIRD_TARGET_CHAT_ID, status: 'failed', reason: 'delivery-unknown' },
     ]);
-    expect(fixture.execution.deliverServerControlInput).toHaveBeenCalledTimes(3);
+    expect(fixture.execution.offerServerControlInput).toHaveBeenCalledTimes(3);
   });
 
   it('records every recipient when one target lock fails unexpectedly', async () => {
@@ -244,7 +245,7 @@ describe('InterAgentMessageController', () => {
         }),
       },
       execution: {
-        deliverServerControlInput: mock(async () => {
+        offerServerControlInput: mock(async () => {
           throw new DomainError('STEER_PROVIDER_REJECTED', 'rejected');
         }),
       },
@@ -268,7 +269,7 @@ describe('InterAgentMessageController', () => {
   it('classifies project admission failure as target unavailable', async () => {
     const fixture = createFixture({
       execution: {
-        deliverServerControlInput: mock(async () => {
+        offerServerControlInput: mock(async () => {
           throw new ProjectUnavailableError('/workspace/project', 'not-found');
         }),
       },
@@ -313,23 +314,23 @@ describe('InterAgentMessageController', () => {
     let calls = 0;
     const fixture = createFixture({
       execution: {
-        deliverServerControlInput: mock(() => {
+        offerServerControlInput: mock(() => {
           calls += 1;
-          return calls === 1 ? first.promise : Promise.resolve('queued');
+          return calls === 1 ? first.promise : Promise.resolve({ kind: 'queued' });
         }),
       },
     });
 
     fixture.controller.request(request({ body: 'first' }));
     fixture.controller.request(request({ body: 'second' }));
-    await waitFor(() => fixture.execution.deliverServerControlInput.mock.calls.length === 1);
+    await waitFor(() => fixture.execution.offerServerControlInput.mock.calls.length === 1);
     expect(sourceNotices(fixture)).toHaveLength(0);
 
-    first.resolve('queued');
-    await waitFor(() => fixture.execution.deliverServerControlInput.mock.calls.length === 2);
+    first.resolve({ kind: 'queued' });
+    await waitFor(() => fixture.execution.offerServerControlInput.mock.calls.length === 2);
     await waitFor(() => sourceNotices(fixture).length === 2);
 
-    expect(fixture.execution.deliverServerControlInput.mock.calls.map((call) => call[1].receipt.content))
+    expect(fixture.execution.offerServerControlInput.mock.calls.map((call) => call[1].receipt.content))
       .toEqual(['first', 'second']);
   });
 
@@ -338,10 +339,10 @@ describe('InterAgentMessageController', () => {
     let controller;
     const fixture = createFixture({
       execution: {
-        deliverServerControlInput: mock(async () => {
+        offerServerControlInput: mock(async () => {
           targetAccepted = true;
           controller.discardSource(SOURCE_CHAT_ID);
-          return 'queued';
+          return { kind: 'queued' };
         }),
       },
     });
@@ -353,5 +354,105 @@ describe('InterAgentMessageController', () => {
 
     expect(targetAccepted).toBe(true);
     expect(sourceNotices(fixture)).toHaveLength(0);
+  });
+
+  it('waits for a running turn it could not reach without holding the target lock, then queues', async () => {
+    const turnSettled = deferred();
+    const chatMutationLock = new KeyedPromiseLock();
+    const fixture = createFixture({
+      chatMutationLock,
+      execution: {
+        offerServerControlInput: mock(async () => ({ kind: 'after-turn', turnSettled: turnSettled.promise })),
+      },
+    });
+
+    fixture.controller.request(request());
+    await waitFor(() => fixture.execution.offerServerControlInput.mock.calls.length === 1);
+    // Stop and permission answers for the target take this lock while the turn runs.
+    await chatMutationLock.runExclusive(`chat:${TARGET_CHAT_ID}`, async () => undefined);
+    expect(fixture.execution.queueServerControlInput).not.toHaveBeenCalled();
+
+    turnSettled.resolve();
+    await waitFor(() => sourceNotices(fixture).length === 1);
+
+    expect(fixture.execution.queueServerControlInput).toHaveBeenCalledWith(
+      TARGET_CHAT_ID,
+      fixture.execution.offerServerControlInput.mock.calls[0][1],
+      expect.any(AbortSignal),
+    );
+    expect(sourceNotices(fixture)[0][2].detail.results).toEqual([
+      { chatId: TARGET_CHAT_ID, status: 'queued' },
+    ]);
+    expect(fixture.notices.appendNotice).toHaveBeenCalledTimes(1);
+  });
+
+  it('checks the target again after its running turn settles', async () => {
+    const turnSettled = deferred();
+    const chats = new Set([SOURCE_CHAT_ID, TARGET_CHAT_ID, SECOND_TARGET_CHAT_ID]);
+    let view = 'view-before-reload';
+    const fixture = createFixture({
+      chats,
+      adoption: { ensure: mock(async (chatId) => ({ viewId: chatId === TARGET_CHAT_ID ? 'removed' : view })) },
+      execution: {
+        offerServerControlInput: mock(async () => ({ kind: 'after-turn', turnSettled: turnSettled.promise })),
+      },
+    });
+
+    fixture.controller.request(request({ recipients: [TARGET_CHAT_ID, SECOND_TARGET_CHAT_ID] }));
+    await waitFor(() => fixture.execution.offerServerControlInput.mock.calls.length === 2);
+    chats.delete(TARGET_CHAT_ID);
+    view = 'view-after-reload';
+    turnSettled.resolve();
+    await waitFor(() => sourceNotices(fixture).length === 1);
+
+    expect(sourceNotices(fixture)[0][2].detail.results).toEqual([
+      { chatId: TARGET_CHAT_ID, status: 'failed', reason: 'target-not-found' },
+      { chatId: SECOND_TARGET_CHAT_ID, status: 'queued' },
+    ]);
+    expect(fixture.execution.queueServerControlInput.mock.calls.map(([chatId, input]) => [chatId, input.transcriptViewId]))
+      .toEqual([[SECOND_TARGET_CHAT_ID, 'view-after-reload']]);
+  });
+
+  it('keeps later messages to a target behind one waiting for its running turn', async () => {
+    const turnSettled = deferred();
+    let offers = 0;
+    const fixture = createFixture({
+      execution: {
+        offerServerControlInput: mock(async () => {
+          offers += 1;
+          return offers === 1 ? { kind: 'after-turn', turnSettled: turnSettled.promise } : { kind: 'queued' };
+        }),
+      },
+    });
+
+    fixture.controller.request(request({ body: 'first' }));
+    fixture.controller.request(request({ body: 'second' }));
+    await waitFor(() => offers === 1);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(offers).toBe(1);
+
+    turnSettled.resolve();
+    await waitFor(() => sourceNotices(fixture).length === 2);
+    expect(fixture.execution.queueServerControlInput.mock.calls.map(([, input]) => input.receipt.content))
+      .toEqual(['first']);
+    expect(fixture.execution.offerServerControlInput.mock.calls.map(([, input]) => input.receipt.content))
+      .toEqual(['first', 'second']);
+  });
+
+  it('abandons a message waiting for a running turn when its source is discarded', async () => {
+    const fixture = createFixture({
+      execution: {
+        offerServerControlInput: mock(async () => ({ kind: 'after-turn', turnSettled: new Promise(() => undefined) })),
+      },
+    });
+
+    fixture.controller.request(request());
+    await waitFor(() => fixture.execution.offerServerControlInput.mock.calls.length === 1);
+    fixture.controller.discardSource(SOURCE_CHAT_ID);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(fixture.execution.queueServerControlInput).not.toHaveBeenCalled();
+    expect(sourceNotices(fixture)).toHaveLength(0);
+    expect(fixture.errors).toEqual([]);
   });
 });
