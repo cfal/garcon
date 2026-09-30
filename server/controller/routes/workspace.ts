@@ -23,13 +23,13 @@ import { disableRequestIdleTimeout } from '../lib/http-route.js';
 import {
   AGENT_COMMAND_SETTING_KEYS,
   DEFAULT_REMOTE_FEATURE_SETTINGS,
-  MODEL_SELECTION_UI_SETTING_KEYS,
+  GENERATION_UI_SETTING_KEYS,
   generationSelectionExecutorError,
   normalizeAgentSwitchCompactionUiSettings,
   normalizeChatTitleUiSettings,
   normalizeCommitMessageUiSettings,
   normalizePromptRefinementUiSettings,
-  normalizeTicketDispatchUiSettings,
+  normalizeTicketChatUiSettings,
   parseExecutorProjectPreferences,
   parseExecutorProjectPreferencesPatch,
   type AgentCommandsFeatureSettings,
@@ -41,7 +41,7 @@ import {
   GENERATION_PROMPT_TEMPLATE_MAX_LENGTH,
   PROMPT_REFINEMENT_USER_PROMPT_TOKEN,
 } from '../../../common/generation-prompts.js';
-import { TICKET_DISPATCH_TICKET_TOKEN, ticketDispatchPromptError } from '../../../common/ticket-dispatch.js';
+import { TICKET_CHAT_TOKENS, ticketChatPromptError } from '../../../common/ticket-chat.js';
 import { AppTitleValidationError, sanitizeAppIdentityPatch } from '../app-title-settings.js';
 import { TranscriptSearchSettingsError } from '../chats/search/settings-coordinator.js';
 import { isGenerationTestTarget } from '../../../common/generation-test-contracts.js';
@@ -275,10 +275,10 @@ export default function createWorkspaceRoutes(
       if (promptRefinement || isEmptyObject(patch.promptRefinement)) patch.promptRefinement = promptRefinement ?? {};
       else delete patch.promptRefinement;
     }
-    if ('ticketDispatch' in patch) {
-      const ticketDispatch = normalizeTicketDispatchUiSettings(patch.ticketDispatch);
-      if (ticketDispatch || isEmptyObject(patch.ticketDispatch)) patch.ticketDispatch = ticketDispatch ?? {};
-      else delete patch.ticketDispatch;
+    if ('ticketChat' in patch) {
+      const ticketChat = normalizeTicketChatUiSettings(patch.ticketChat);
+      if (ticketChat || isEmptyObject(patch.ticketChat)) patch.ticketChat = ticketChat ?? {};
+      else delete patch.ticketChat;
     }
     if ('hiddenBashCommandPatterns' in patch) {
       const patterns = parseHiddenBashCommandPatterns(patch.hiddenBashCommandPatterns);
@@ -320,15 +320,18 @@ export default function createWorkspaceRoutes(
         return `promptRefinement.customPrompt must include ${PROMPT_REFINEMENT_USER_PROMPT_TOKEN}.`;
       }
     }
-    const ticketDispatch = ui.ticketDispatch;
-    if (isRecord(ticketDispatch) && Object.hasOwn(ticketDispatch, 'customPrompt')) {
-      if (typeof ticketDispatch.customPrompt !== 'string') return 'ticketDispatch.customPrompt must be a string.';
-      const error = ticketDispatchPromptError(ticketDispatch.customPrompt);
+    const ticketChat = ui.ticketChat;
+    if (isRecord(ticketChat) && Object.hasOwn(ticketChat, 'customPrompt')) {
+      if (typeof ticketChat.customPrompt !== 'string') return 'ticketChat.customPrompt must be a string.';
+      const error = ticketChatPromptError(ticketChat.customPrompt);
       if (error === 'too-long') {
-        return `ticketDispatch.customPrompt must be at most ${GENERATION_PROMPT_TEMPLATE_MAX_LENGTH} characters.`;
+        return `ticketChat.customPrompt must be at most ${GENERATION_PROMPT_TEMPLATE_MAX_LENGTH} characters.`;
       }
-      if (error === 'missing-ticket-token') {
-        return `ticketDispatch.customPrompt must include ${TICKET_DISPATCH_TICKET_TOKEN}.`;
+      if (error === 'missing-ticket-id') {
+        return `ticketChat.customPrompt must include ${TICKET_CHAT_TOKENS.id}.`;
+      }
+      if (error === 'unknown-variable') {
+        return `ticketChat.customPrompt supports only ${Object.values(TICKET_CHAT_TOKENS).join(', ')}.`;
       }
     }
     return null;
@@ -350,7 +353,7 @@ export default function createWorkspaceRoutes(
     uiPatch: Record<string, unknown>,
   ): Promise<void> {
     const saved = settings.getUiSettings();
-    const selections = MODEL_SELECTION_UI_SETTING_KEYS.flatMap((key) => {
+    const selections = GENERATION_UI_SETTING_KEYS.flatMap((key) => {
       const selection = asPlainObject(uiPatch[key]);
       if (!Object.hasOwn(selection, 'thinkingMode')) return [];
       const previous = saved[key];
@@ -421,7 +424,7 @@ export default function createWorkspaceRoutes(
         return jsonError('Invalid executor project preferences.', 400, 'INVALID_REMOTE_SETTINGS', false);
       }
       const generationUi = asPlainObject(input.ui);
-      for (const key of MODEL_SELECTION_UI_SETTING_KEYS) {
+      for (const key of GENERATION_UI_SETTING_KEYS) {
         const error = generationSelectionExecutorError(generationUi[key]);
         if (error) return jsonError(error, 400, 'INVALID_REMOTE_SETTINGS', false);
       }

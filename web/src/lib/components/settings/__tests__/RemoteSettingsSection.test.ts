@@ -19,7 +19,7 @@ import {
 	DEFAULT_PROMPT_REFINEMENT_PROMPT,
 	GENERATION_PROMPT_TEMPLATE_MAX_LENGTH,
 } from '$shared/generation-prompts';
-import { DEFAULT_TICKET_DISPATCH_PROMPT } from '$shared/ticket-dispatch';
+import { DEFAULT_TICKET_CHAT_PROMPT, TICKET_CHAT_TOKENS } from '$shared/ticket-chat';
 import {
 	makeRemoteSettingsSnapshot,
 	mockRemoteSettingsUpdate,
@@ -966,48 +966,49 @@ describe('remote settings sections', () => {
 		});
 	});
 
-	it('edits the ticket dispatch model and prompt without changing generation settings', async () => {
+	it('edits the ticket chat prompt without introducing separate model settings', async () => {
 		const store = new RemoteSettingsStore();
 		store.applySnapshot(
 			makeRemoteSettingsSnapshot({
-				ui: { ticketDispatch: { agentId: 'codex', model: 'gpt-5.4' } },
+				ui: {},
 			}),
 		);
 		setTestRemoteSettingsStore(store);
 		mockRemoteSettingsUpdate(store);
 		render(RemoteSettingsSectionTestHost, { section: 'automation' });
 
-		const follow = screen.getByRole('button', { name: 'Same as new chat' });
-		expect(follow.getAttribute('aria-pressed')).toBe('false');
-
-		await fireEvent.click(screen.getByRole('button', { name: 'Edit dispatch prompt' }));
-		const prompt = screen.getByRole('textbox', { name: 'Edit ticket dispatch instructions' });
-		expect((prompt as HTMLTextAreaElement).value).toBe(DEFAULT_TICKET_DISPATCH_PROMPT);
-		expect(screen.getByText('{{ticket}}')).toBeTruthy();
+		expect(screen.queryByRole('button', { name: 'Same as new chat' })).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: 'Edit ticket chat prompt' }));
+		const prompt = screen.getByRole('textbox', { name: 'Edit ticket chat prompt' });
+		expect((prompt as HTMLTextAreaElement).value).toBe(DEFAULT_TICKET_CHAT_PROMPT);
+		for (const token of Object.values(TICKET_CHAT_TOKENS)) expect(screen.getByText(token)).toBeTruthy();
 
 		await fireEvent.input(prompt, { target: { value: 'Fix it.' } });
-		expect(screen.getByText('The generation prompt must include {{ticket}}.')).toBeTruthy();
+		expect(screen.getByText('The generation prompt must include {{ticket_id}}.')).toBeTruthy();
 		expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true);
 
-		await fireEvent.input(prompt, { target: { value: 'Fix: {{ticket}}' } });
+		await fireEvent.input(prompt, { target: { value: '{{ticket_id}} {{ticket}}' } });
+		expect(screen.getByText('Unknown template variable. Use the ticket variables listed below.')).toBeTruthy();
+		expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true);
+		await fireEvent.input(prompt, { target: { value: 'Fix: {{ticket_id}}' } });
 		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 		await waitFor(() => {
 			expect(updateRemoteSettings).toHaveBeenLastCalledWith({
 				ui: {
-					ticketDispatch: { agentId: 'codex', model: 'gpt-5.4', customPrompt: 'Fix: {{ticket}}' },
+					ticketChat: { customPrompt: 'Fix: {{ticket_id}}' },
 				},
 			});
 		});
 
-		await fireEvent.click(follow);
+		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+		await fireEvent.click(screen.getByRole('button', { name: 'Edit ticket chat prompt' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Restore default' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 		await waitFor(() => {
 			expect(updateRemoteSettings).toHaveBeenLastCalledWith({
-				ui: { ticketDispatch: { customPrompt: 'Fix: {{ticket}}' } },
+				ui: { ticketChat: { customPrompt: '' } },
 			});
 		});
-		expect(screen.getByRole('button', { name: 'Same as new chat' }).getAttribute('aria-pressed')).toBe(
-			'true',
-		);
 	});
 
 	it('keeps a failed prompt save in the dialog for retry', async () => {

@@ -6,7 +6,7 @@ import type { AgentIntegration, AgentLegacySettingsScope } from '@garcon/server-
 import { isRecord, type JsonObject, type JsonValue } from '@garcon/common/json';
 import type { IntegrationRegistry } from '../../runtime/agents/integration-registry.js';
 import { normalizeSupportedThinkingMode } from '../../../common/execution-defaults.js';
-import { MODEL_SELECTION_UI_SETTING_KEYS } from '../../../common/settings.js';
+import { GENERATION_UI_SETTING_KEYS } from '../../../common/settings.js';
 import { createLogger } from '../../common/log.js';
 
 const LEGACY_MIGRATION_ID = 'agent-integration-v1';
@@ -392,7 +392,7 @@ function normalizeGenerationUiThinkingModes(
 ): JsonObject | null {
   if (!isRecord(raw)) return null;
   const ui: Record<string, JsonValue> = { ...raw };
-  for (const key of MODEL_SELECTION_UI_SETTING_KEYS) {
+  for (const key of GENERATION_UI_SETTING_KEYS) {
     const selection = raw[key];
     if (!isRecord(selection) || !Object.hasOwn(selection, 'thinkingMode')) continue;
     if (selection.executorId != null && selection.executorId !== 'local') continue;

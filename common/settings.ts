@@ -54,9 +54,9 @@ export interface CommitMessageUiSettings extends PromptGenerationUiSettings {
 
 export type PromptRefinementUiSettings = PromptGenerationUiSettings;
 
-// Names the agent and model that a ticket dispatch starts a chat with, and the
-// first-message template. A selection without an agent follows new-chat defaults.
-export type TicketDispatchUiSettings = PromptGenerationUiSettings;
+export interface TicketChatUiSettings {
+  customPrompt?: string;
+}
 
 // Names the model that compacts a carried-over transcript when a chat hands off
 // to another agent, or continues in a new chat through `/handoff`.
@@ -91,7 +91,7 @@ export interface RemoteUiSettings {
   agentSwitchCompaction?: AgentSwitchCompactionUiSettings;
   commitMessage?: CommitMessageUiSettings;
   promptRefinement?: PromptRefinementUiSettings;
-  ticketDispatch?: TicketDispatchUiSettings;
+  ticketChat?: TicketChatUiSettings;
   appIdentity?: AppIdentityUiSettings;
   notifications?: {
     telegram?: TelegramNotificationSettings;
@@ -103,14 +103,6 @@ export const GENERATION_UI_SETTING_KEYS = [
   'agentSwitchCompaction',
   'commitMessage',
   'promptRefinement',
-] as const satisfies readonly (keyof RemoteUiSettings)[];
-
-// Every UI setting that stores an executor, agent, and model selection. These
-// keys share executor and provider reference guards; only the generation keys
-// resolve an effective one-shot generation model.
-export const MODEL_SELECTION_UI_SETTING_KEYS = [
-  ...GENERATION_UI_SETTING_KEYS,
-  'ticketDispatch',
 ] as const satisfies readonly (keyof RemoteUiSettings)[];
 
 type EffectiveGenerationSelection = {
@@ -403,10 +395,12 @@ export function normalizePromptRefinementUiSettings(
   return Object.keys(normalized).length > 0 ? normalized : undefined;
 }
 
-export function normalizeTicketDispatchUiSettings(
+export function normalizeTicketChatUiSettings(
   value: unknown,
-): TicketDispatchUiSettings | undefined {
-  return normalizePromptRefinementUiSettings(value);
+): TicketChatUiSettings | undefined {
+  const raw = asRecord(value);
+  if (!raw || typeof raw.customPrompt !== 'string') return undefined;
+  return { customPrompt: raw.customPrompt };
 }
 
 function normalizeAppIdentityUiSettings(value: unknown): AppIdentityUiSettings | undefined {
@@ -552,8 +546,8 @@ function normalizeRemoteUiSettings(value: unknown): RemoteUiSettings | null {
   const promptRefinement = normalizePromptRefinementUiSettings(raw.promptRefinement);
   if (promptRefinement) normalized.promptRefinement = promptRefinement;
 
-  const ticketDispatch = normalizeTicketDispatchUiSettings(raw.ticketDispatch);
-  if (ticketDispatch) normalized.ticketDispatch = ticketDispatch;
+  const ticketChat = normalizeTicketChatUiSettings(raw.ticketChat);
+  if (ticketChat) normalized.ticketChat = ticketChat;
 
   const appIdentity = normalizeAppIdentityUiSettings(raw.appIdentity);
   if (appIdentity) normalized.appIdentity = appIdentity;

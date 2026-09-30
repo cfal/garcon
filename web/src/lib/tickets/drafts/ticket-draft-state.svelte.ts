@@ -128,9 +128,8 @@ export class TicketDraftState {
 		this.flush();
 	}
 
-	/** Submits the payload and returns the confirmed write, or null when it was not confirmed. */
-	async submit(payload: TicketMutationPayload): Promise<TicketWriteResult | null> {
-		if (!this.canEdit || this.#disposed) return null;
+	async submit(payload: TicketMutationPayload): Promise<void> {
+		if (!this.canEdit || this.#disposed) return;
 		try {
 			const request = parseHttpTicketMutationRequest({
 				requestId: createRandomId(),
@@ -140,10 +139,9 @@ export class TicketDraftState {
 			requireDraftMutation(this.current, request.payload);
 			const submission: FrozenTicketSubmission = { version: this.current.version, request };
 			this.#snapshot = { ...this.current, frozen: submission };
-			return await this.#send(submission, false);
+			await this.#send(submission, false);
 		} catch (error) {
 			this.error = error instanceof Error ? error.message : 'Invalid ticket input';
-			return null;
 		}
 	}
 
@@ -152,10 +150,7 @@ export class TicketDraftState {
 		await this.#send(this.current.frozen!, true);
 	}
 
-	async #send(
-		submission: FrozenTicketSubmission,
-		reused: boolean,
-	): Promise<TicketWriteResult | null> {
+	async #send(submission: FrozenTicketSubmission, reused: boolean): Promise<void> {
 		this.pending = true;
 		this.dirty = true;
 		this.error = null;
@@ -191,10 +186,7 @@ export class TicketDraftState {
 			} catch {
 				this.error = 'Saved. Refresh Tickets to load the current server values.';
 			}
-			return confirmation.result;
-		}
-		if (this.storeChanged && this.isCurrentPartition) this.deps.onStoreChanged?.();
-		return null;
+		} else if (this.storeChanged && this.isCurrentPartition) this.deps.onStoreChanged?.();
 	}
 
 	discard(): void {

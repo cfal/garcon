@@ -1,5 +1,5 @@
 import {
-  MODEL_SELECTION_UI_SETTING_KEYS,
+  GENERATION_UI_SETTING_KEYS,
   generationSelectionExecutorError,
   parseExecutorProjectPreferences,
   parseExecutorProjectPreferencesPatch,
@@ -29,7 +29,7 @@ export class UiSettingsStore {
   }
 
   async setUiSettings(patch: Record<string, unknown>): Promise<ProjectSettings['ui']> {
-    for (const key of MODEL_SELECTION_UI_SETTING_KEYS) {
+    for (const key of GENERATION_UI_SETTING_KEYS) {
       const error = generationSelectionExecutorError(patch[key]);
       if (error) throw new ValidationDomainError(error);
     }

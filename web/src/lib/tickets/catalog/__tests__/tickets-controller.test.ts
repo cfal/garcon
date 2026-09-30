@@ -387,51 +387,6 @@ describe('Tickets controller', () => {
 		expect(invalidate).toHaveBeenCalledWith([source.id, target.id]);
 	});
 
-	it('assigns a dispatched chat at the ticket revision current after the chat starts', async () => {
-		const items = [ticket(1, { revision: 1 })];
-		const { controller, api } = harness(items);
-		controller.setPresentationVisible(true);
-		await controller.refresh();
-		items[0] = ticket(1, { revision: 4, status: 'in-review' });
-
-		await expect(controller.assignToChat('G-1', '1790000000000001')).resolves.toBe(true);
-
-		expect(api.read).toHaveBeenLastCalledWith(
-			{ ticketId: 'G-1', includeDescription: false, commentLimit: 0 },
-		);
-		expect(api.mutate.mock.lastCall?.[0].payload).toEqual({
-			action: 'update',
-			ticketId: 'G-1',
-			expectedRevision: 4,
-			patch: { assignee: { kind: 'chat', chatId: '1790000000000001' } },
-		});
-	});
-
-	it('moves an open ticket to in progress when it assigns a chat', async () => {
-		const { controller, api } = harness([ticket(1, { revision: 2 })]);
-		controller.setPresentationVisible(true);
-		await controller.refresh();
-
-		await controller.assignToChat('G-1', '1790000000000001');
-
-		expect(api.mutate.mock.lastCall?.[0].payload).toMatchObject({
-			expectedRevision: 2,
-			patch: { assignee: { kind: 'chat', chatId: '1790000000000001' }, status: 'in-progress' },
-		});
-	});
-
-	it('leaves a ticket closed before the chat started unassigned', async () => {
-		const items = [ticket(1)];
-		const { controller, api } = harness(items);
-		controller.setPresentationVisible(true);
-		await controller.refresh();
-		items[0] = ticket(1, { revision: 2, status: 'closed', resolution: 'done' });
-
-		await expect(controller.assignToChat('G-1', '1790000000000001')).resolves.toBe(false);
-
-		expect(api.mutate).not.toHaveBeenCalled();
-	});
-
 	it('reuses same-revision windows when selecting another detail', async () => {
 		const { controller, api } = harness([ticket(1), ticket(2)]);
 		controller.setPresentationVisible(true);

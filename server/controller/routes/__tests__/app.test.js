@@ -17,7 +17,7 @@ mock.module('../../config.js', () => ({
 import createWorkspaceRoutes from '../workspace.js';
 import { parseJsonBody } from '../../../common/http-body.js';
 import { generationModelTestConfigurationKey } from '../../../../common/generation-test-contracts.js';
-import { GENERATION_UI_SETTING_KEYS, MODEL_SELECTION_UI_SETTING_KEYS } from '../../../../common/settings.js';
+import { GENERATION_UI_SETTING_KEYS } from '../../../../common/settings.js';
 import {
   FolderAlreadyExistsError,
   FolderNotFoundError,
@@ -1097,15 +1097,16 @@ describe('PUT /api/app/settings', () => {
     });
   });
 
-  it('preserves ticket dispatch settings while stripping unrelated fields', async () => {
+  it('preserves the ticket chat prompt while stripping execution settings', async () => {
     parseJsonBody.mockImplementation(() => Promise.resolve({
       ui: {
-        ticketDispatch: {
+        ticketChat: {
           enabled: true,
           agentId: 'codex',
           model: 'gpt-5.5',
           thinkingMode: 'high',
-          customPrompt: 'Fix this: {{ticket}}',
+          executorId: 'remote',
+          customPrompt: '{{ticket_id}}: {{ticket_title}}\n{{ticket_project}}\n{{ticket_description}}',
           useCommonDirPrefix: true,
         },
       },
@@ -1115,22 +1116,19 @@ describe('PUT /api/app/settings', () => {
 
     expect(response.status).toBe(200);
     expect(ctx.settings.setUiSettings).toHaveBeenCalledWith({
-      ticketDispatch: {
-        agentId: 'codex',
-        model: 'gpt-5.5',
-        thinkingMode: 'high',
-        customPrompt: 'Fix this: {{ticket}}',
+      ticketChat: {
+        customPrompt: '{{ticket_id}}: {{ticket_title}}\n{{ticket_project}}\n{{ticket_description}}',
       },
     });
   });
 
-  it('accepts an empty ticket dispatch prompt as the default prompt', async () => {
-    parseJsonBody.mockImplementation(() => Promise.resolve({ ui: { ticketDispatch: { customPrompt: '' } } }));
+  it('accepts an empty ticket chat prompt as the default prompt', async () => {
+    parseJsonBody.mockImplementation(() => Promise.resolve({ ui: { ticketChat: { customPrompt: '' } } }));
 
     const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', {}));
 
     expect(response.status).toBe(200);
-    expect(ctx.settings.setUiSettings).toHaveBeenCalledWith({ ticketDispatch: { customPrompt: '' } });
+    expect(ctx.settings.setUiSettings).toHaveBeenCalledWith({ ticketChat: { customPrompt: '' } });
   });
 
   it('rejects invalid generation prompt patches before persistence', async () => {
@@ -1139,9 +1137,11 @@ describe('PUT /api/app/settings', () => {
       { commitMessage: { customPrompt: 'x'.repeat(32_001) } },
       { promptRefinement: { customPrompt: 'Missing the required token' } },
       { promptRefinement: { customPrompt: 'x'.repeat(32_001) } },
-      { ticketDispatch: { customPrompt: 7 } },
-      { ticketDispatch: { customPrompt: 'Missing the ticket token' } },
-      { ticketDispatch: { customPrompt: `{{ticket}}${'x'.repeat(32_000)}` } },
+      { ticketChat: { customPrompt: 7 } },
+      { ticketChat: { customPrompt: 'Missing the ticket token' } },
+      { ticketChat: { customPrompt: '{{ticket_id}} {{ticket}}' } },
+      { ticketChat: { customPrompt: '{{ticket_id}} {{ticket_unknown}}' } },
+      { ticketChat: { customPrompt: `{{ticket_id}}${'x'.repeat(32_000)}` } },
     ];
 
     for (const ui of cases) {
@@ -1155,7 +1155,7 @@ describe('PUT /api/app/settings', () => {
     }
   });
 
-  it.each(MODEL_SELECTION_UI_SETTING_KEYS)('rejects invalid remote agent IDs for %s before persistence', async (target) => {
+  it.each(GENERATION_UI_SETTING_KEYS)('rejects invalid remote agent IDs for %s before persistence', async (target) => {
     parseJsonBody.mockImplementationOnce(() => Promise.resolve({ ui: {
       [target]: { executorId: '22222222-2222-4222-8222-222222222222', agentId: '!', model: 'synthetic-model' },
     } }));
@@ -1165,7 +1165,7 @@ describe('PUT /api/app/settings', () => {
     expect(ctx.settings.setUiSettings).not.toHaveBeenCalled();
   });
 
-  it.each(MODEL_SELECTION_UI_SETTING_KEYS)('ignores malformed %s values rather than resetting to Auto', async (target) => {
+  it.each(GENERATION_UI_SETTING_KEYS)('ignores malformed %s values rather than resetting to Auto', async (target) => {
     for (const malformed of [null, [], '', 0, false]) {
       parseJsonBody.mockImplementationOnce(() => Promise.resolve({ ui: { [target]: malformed } }));
       const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', {}));
@@ -1174,7 +1174,7 @@ describe('PUT /api/app/settings', () => {
     }
   });
 
-  it.each(MODEL_SELECTION_UI_SETTING_KEYS)('accepts an explicit empty object to reset %s to Auto', async (target) => {
+  it.each(GENERATION_UI_SETTING_KEYS)('accepts an explicit empty object to reset %s to Auto', async (target) => {
     parseJsonBody.mockImplementationOnce(() => Promise.resolve({ ui: { [target]: {} } }));
     const response = await handler(makeRequest('http://localhost/api/app/settings', 'PUT', {}));
     expect(response.status).toBe(200);
@@ -1192,7 +1192,7 @@ describe('PUT /api/app/settings', () => {
       }
     });
 
-    for (const target of MODEL_SELECTION_UI_SETTING_KEYS) {
+    for (const target of GENERATION_UI_SETTING_KEYS) {
       ctx.settings.setUiSettings.mockClear();
       ctx.settings.setFeatureSettings.mockClear();
       ctx.settings.setPathSettings.mockClear();

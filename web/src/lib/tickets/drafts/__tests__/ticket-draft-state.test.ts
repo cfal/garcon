@@ -203,12 +203,10 @@ describe('ticket draft state', () => {
 		expect(draft.pending).toBe(true);
 		expect(draft.field('body')).toBe('Synthetic text');
 		expect(draft.current.frozen?.request.expectedStoreId).toBe(STORE);
-		await expect(
-			draft.submit({ action: 'comment', ticketId: 'G-1', body: 'Must not run' }),
-		).resolves.toBeNull();
+		await draft.submit({ action: 'comment', ticketId: 'G-1', body: 'Must not run' });
 		expect(api.mutate).toHaveBeenCalledTimes(1);
 		saved.resolve(confirmed);
-		await expect(submitted).resolves.toBe(confirmed);
+		await submitted;
 		expect(draft.field('body')).toBe('');
 		expect(draft.dirty).toBe(false);
 		expect(onConfirmed).toHaveBeenCalledWith(
@@ -222,13 +220,11 @@ describe('ticket draft state', () => {
 		const first = harness(initial, recovery);
 		first.draft.setField('body', 'Synthetic text');
 		first.api.mutate.mockRejectedValueOnce(new Error('Synthetic lost response'));
-		await expect(
-			first.draft.submit({
-				action: 'comment',
-				ticketId: 'G-1',
-				body: first.draft.field('body'),
-			}),
-		).resolves.toBeNull();
+		await first.draft.submit({
+			action: 'comment',
+			ticketId: 'G-1',
+			body: first.draft.field('body'),
+		});
 		const frozen = first.draft.current.frozen;
 		expect(first.draft.canRetry).toBe(true);
 		first.draft.setField('body', 'Cannot alter an ambiguous request');

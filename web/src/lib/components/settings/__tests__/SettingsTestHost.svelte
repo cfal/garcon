@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { setTicketDispatchTestContext } from '$lib/tickets/dispatch/__tests__/ticket-dispatch-test-context';
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
 	import Settings from '../Settings.svelte';
 	import type { ExecutorSnapshot } from '$shared/executors';
@@ -215,7 +214,7 @@
 			return getThemeProfile(resolveThemeId(localSettings.themePreference, 'light'));
 		},
 	});
-	const modelCatalog = {
+	setModelCatalog({
 		forExecutor() {
 			return this;
 		},
@@ -270,15 +269,7 @@
 		findEndpoint() {
 			return null;
 		},
-		getPermissionModes() {
-			return ['default'];
-		},
-		getDefaultAgentSettings(agentId: string) {
-			return { ownerId: agentId, schemaVersion: 1, values: {} };
-		},
-	} as never;
-	setModelCatalog(modelCatalog);
-	setTicketDispatchTestContext({ remoteSettings: untrack(() => remoteSettings), modelCatalog });
+	} as never);
 
 	onDestroy(() => localSettings.destroy());
 </script>
