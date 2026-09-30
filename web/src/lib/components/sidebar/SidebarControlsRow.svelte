@@ -39,6 +39,7 @@
 		chatGrouping?: SidebarChatGrouping;
 		groupNestedProjectPaths?: boolean;
 		chatItemLayout?: ChatItemLayout;
+		showProjectPath?: boolean;
 		sortMode?: SidebarSortMode;
 		chatListAutohide?: boolean;
 		chatListAutohideAvailable?: boolean;
@@ -51,6 +52,7 @@
 		onSetChatGrouping?: (grouping: SidebarChatGrouping) => void;
 		onToggleGroupNestedProjectPaths?: () => void;
 		onSetChatItemLayout?: (layout: ChatItemLayout) => void;
+		onToggleShowProjectPath?: () => void;
 		onSetSortMode?: (mode: SidebarSortMode) => void;
 		onToggleChatListAutohide?: () => void;
 		onSetDockOnRight?: (enabled: boolean) => void;
@@ -66,7 +68,8 @@
 		visibleUnreadCount = 0,
 		chatGrouping = 'project',
 		groupNestedProjectPaths = false,
-		chatItemLayout = 'detailed',
+		chatItemLayout = 'single-line',
+		showProjectPath = false,
 		sortMode = 'manual',
 		chatListAutohide = false,
 		chatListAutohideAvailable = false,
@@ -79,6 +82,7 @@
 		onSetChatGrouping,
 		onToggleGroupNestedProjectPaths,
 		onSetChatItemLayout,
+		onToggleShowProjectPath,
 		onSetSortMode,
 		onToggleChatListAutohide,
 		onSetDockOnRight,
@@ -233,16 +237,22 @@
 						value={chatItemLayout}
 						onValueChange={(layout) => onSetChatItemLayout?.(layout as ChatItemLayout)}
 					>
-						<DropdownMenuRadioItem value="detailed">
-							{m.settings_sidebar_chat_item_layout_detailed()}
+						<DropdownMenuRadioItem value="single-line">
+							{m.settings_sidebar_chat_item_layout_single_line()}
 						</DropdownMenuRadioItem>
 						<DropdownMenuRadioItem value="compact">
 							{m.settings_sidebar_compact_chat_items()}
 						</DropdownMenuRadioItem>
-						<DropdownMenuRadioItem value="single-line">
-							{m.settings_sidebar_chat_item_layout_single_line()}
+						<DropdownMenuRadioItem value="detailed">
+							{m.settings_sidebar_chat_item_layout_detailed()}
 						</DropdownMenuRadioItem>
 					</DropdownMenuRadioGroup>
+					<DropdownMenuCheckboxItem
+						checked={showProjectPath}
+						onCheckedChange={() => onToggleShowProjectPath?.()}
+					>
+						{m.settings_sidebar_show_project_path()}
+					</DropdownMenuCheckboxItem>
 				</DropdownMenuGroup>
 				<DropdownMenuSeparator />
 				<DropdownMenuCheckboxItem

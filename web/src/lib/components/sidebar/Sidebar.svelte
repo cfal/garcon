@@ -150,6 +150,7 @@
 		inactivityDuration: localSettings.sidebarInactivityDuration,
 		groupNestedProjectPaths: localSettings.sidebarGroupNestedProjectPaths,
 		chatItemLayout: localSettings.sidebarChatItemLayout,
+		showProjectPath: localSettings.sidebarShowProjectPath,
 		sortMode: localSettings.sidebarSortMode,
 		pinnedInsertPosition: remoteSettings.snapshot?.ui?.pinnedInsertPosition ?? 'top',
 	});
@@ -437,6 +438,7 @@
 			chatGrouping={displayOptions.grouping}
 			groupNestedProjectPaths={displayOptions.groupNestedProjectPaths}
 			chatItemLayout={displayOptions.chatItemLayout}
+			showProjectPath={displayOptions.showProjectPath}
 			sortMode={displayOptions.sortMode}
 			chatListAutohide={localSettings.chatListAutohide}
 			{chatListAutohideAvailable}
@@ -452,6 +454,7 @@
 			onSetChatGrouping={handleSetChatGrouping}
 			onToggleGroupNestedProjectPaths={handleToggleGroupNestedProjectPaths}
 			onSetChatItemLayout={handleSetChatItemLayout}
+			onToggleShowProjectPath={() => localSettings.toggle('sidebarShowProjectPath')}
 			onSetSortMode={handleSetSortMode}
 			onToggleChatListAutohide={handleToggleChatListAutohide}
 			onSetDockOnRight={handleSetDockOnRight}

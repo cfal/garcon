@@ -203,12 +203,14 @@
 	$effect.pre(() => {
 		const nextRows = rows;
 		const chatItemLayout = displayOptions.chatItemLayout;
+		const showProjectPath = displayOptions.showProjectPath;
 		const explicitRowHeight = rowHeight;
 		const rowOverscan = overscan;
 		untrack(() =>
 			virtual.update({
 				rows: nextRows,
 				chatItemLayout,
+				showProjectPath,
 				rowHeight: explicitRowHeight,
 				overscan: rowOverscan,
 			}),

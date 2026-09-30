@@ -248,14 +248,12 @@ describe('sidebar row model', () => {
 		expect(model.rows.find((row) => row.type === 'chat' && row.chat.id === 'outer')).toMatchObject({
 			groupProjectKey: sidebarProjectKey('/workspace/repo'),
 			groupProjectPath: '/workspace/repo',
-			showProjectPathInGroup: true,
 		});
 		expect(model.rows.find((row) => row.type === 'chat' && row.chat.id === 'nested')).toMatchObject(
 			{
 				projectPath: '/workspace/repo/packages/app',
 				groupProjectKey: sidebarProjectKey('/workspace/repo'),
 				groupProjectPath: '/workspace/repo',
-				showProjectPathInGroup: true,
 			},
 		);
 		expect(model.reorderScopesByChatId.get('outer')).toEqual(['outer', 'nested']);
@@ -287,11 +285,9 @@ describe('sidebar row model', () => {
 		]);
 		expect(model.rows.find((row) => row.type === 'chat' && row.chat.id === 'b')).toMatchObject({
 			groupProjectPath: '/workspace/repo/packages/b',
-			showProjectPathInGroup: false,
 		});
 		expect(model.rows.find((row) => row.type === 'chat' && row.chat.id === 'c')).toMatchObject({
 			groupProjectPath: '/workspace/repo/packages/c',
-			showProjectPathInGroup: false,
 		});
 	});
 
@@ -313,7 +309,6 @@ describe('sidebar row model', () => {
 		expect(model.projectKeys).toEqual([sidebarProjectKey('/workspace/repo')]);
 		expect(model.rows.find((row) => row.type === 'chat' && row.chat.id === 'src')).toMatchObject({
 			groupProjectPath: '/workspace/repo',
-			showProjectPathInGroup: true,
 		});
 	});
 
@@ -518,21 +513,18 @@ describe('sidebar row model with project activity grouping', () => {
 			model.rows.find((row) => row.type === 'chat' && row.chat.id === 'active-p1'),
 		).toMatchObject({
 			reorderScopeKey: 'normal:project:path:/p1',
-			showProjectPathInGroup: false,
 		});
 		expect(
 			model.rows.find((row) => row.type === 'chat' && row.chat.id === 'inactive-p2'),
 		).toMatchObject({
 			list: 'normal',
 			reorderScopeKey: 'normal:section:inactive:project:path:/p2',
-			showProjectPathInGroup: false,
 		});
 		expect(
 			model.rows.find((row) => row.type === 'chat' && row.chat.id === 'archived-old-p2'),
 		).toMatchObject({
 			list: 'archived',
 			reorderScopeKey: 'archived:section:archived',
-			showProjectPathInGroup: true,
 		});
 		expect(model.reorderScopesByChatId.get('inactive-p1')).toEqual(['inactive-p1']);
 		expect(model.reorderScopesByChatId.get('inactive-p2')).toEqual(['inactive-p2']);
@@ -631,14 +623,12 @@ describe('sidebar row model with project activity grouping', () => {
 			model.rows.find((row) => row.type === 'chat' && row.chat.id === 'inactive-app'),
 		).toMatchObject({
 			groupProjectPath: '/workspace/repo',
-			showProjectPathInGroup: true,
 			reorderScopeIds: ['inactive-app', 'inactive-cli'],
 		});
 		expect(
 			model.rows.find((row) => row.type === 'chat' && row.chat.id === 'inactive-cli'),
 		).toMatchObject({
 			groupProjectPath: '/workspace/repo',
-			showProjectPathInGroup: true,
 			reorderScopeIds: ['inactive-app', 'inactive-cli'],
 		});
 	});
@@ -671,7 +661,6 @@ describe('sidebar row model with project activity grouping', () => {
 			list: 'pinned',
 			reorderScopeKey: 'pinned:section:active',
 			reorderScopeIds: ['pinned-old-p1'],
-			showProjectPathInGroup: true,
 		});
 		expect(
 			model.rows.find((row) => row.type === 'chat' && row.chat.id === 'active-p1'),
@@ -679,7 +668,6 @@ describe('sidebar row model with project activity grouping', () => {
 			list: 'normal',
 			reorderScopeKey: 'normal:section:active',
 			reorderScopeIds: ['active-p1', 'active-p2'],
-			showProjectPathInGroup: true,
 		});
 		expect(model.rows[0]).toMatchObject({
 			type: 'section-header',
@@ -963,7 +951,6 @@ describe('sidebar row model with status grouping', () => {
 			list: 'archived',
 			reorderScopeKey: 'archived:section:ready-for-review',
 			reorderScopeIds: ['ready-archived'],
-			showProjectPathInGroup: true,
 		});
 		expect(model.rows[0]).toMatchObject({
 			type: 'section-header',

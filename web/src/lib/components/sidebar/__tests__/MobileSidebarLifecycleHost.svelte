@@ -39,6 +39,7 @@
 		sidebarInactivityDuration?: SidebarInactivityDuration;
 		sidebarGroupNestedProjectPaths?: boolean;
 		sidebarChatItemLayout?: ChatItemLayout;
+		sidebarShowProjectPath?: boolean;
 		collapsedProjectKeys?: Set<string>;
 	}
 
@@ -52,6 +53,7 @@
 		sidebarInactivityDuration = '3-days',
 		sidebarGroupNestedProjectPaths = false,
 		sidebarChatItemLayout = 'detailed',
+		sidebarShowProjectPath = false,
 		collapsedProjectKeys = new Set<string>(),
 	}: MobileSidebarLifecycleHostProps = $props();
 
@@ -134,11 +136,15 @@
 		get sidebarChatItemLayout() {
 			return sidebarChatItemLayout;
 		},
+		get sidebarShowProjectPath() {
+			return sidebarShowProjectPath;
+		},
 		get sidebarSearchResultSort() {
 			return sidebarSearchResultSort;
 		},
-		toggle(_key: 'sidebarGroupNestedProjectPaths') {
-			sidebarGroupNestedProjectPaths = !sidebarGroupNestedProjectPaths;
+		toggle(key: 'sidebarGroupNestedProjectPaths' | 'sidebarShowProjectPath') {
+			if (key === 'sidebarShowProjectPath') sidebarShowProjectPath = !sidebarShowProjectPath;
+			else sidebarGroupNestedProjectPaths = !sidebarGroupNestedProjectPaths;
 		},
 		set(
 			key: 'sidebarGrouping' | 'sidebarChatItemLayout' | 'sidebarSearchResultSort',

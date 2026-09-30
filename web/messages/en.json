@@ -1747,6 +1747,7 @@
 	"settings_sidebar_group_nested_project_paths_description": "Places chats from nested project folders under the outer project group. Useful for worktrees and monorepos.",
 	"settings_sidebar_compact_chat_items": "Compact",
 	"settings_sidebar_chat_item_layout_heading": "Chat item layout",
+	"settings_sidebar_show_project_path": "Show project path",
 	"settings_sidebar_chat_item_layout_detailed": "Detailed",
 	"settings_sidebar_chat_item_layout_single_line": "Single-line",
 	"sidebar_section_active": "Active",

@@ -27,7 +27,8 @@ describe('LocalSettingsStore', () => {
 		expect(store.sidebarGrouping).toBe('project-and-activity');
 		expect(store.sidebarInactivityDuration).toBe('3-days');
 		expect(store.sidebarGroupNestedProjectPaths).toBe(false);
-		expect(store.sidebarChatItemLayout).toBe('compact');
+		expect(store.sidebarChatItemLayout).toBe('single-line');
+		expect(store.sidebarShowProjectPath).toBe(false);
 		expect(store.selectedChatBoardId).toBeNull();
 		expect(store.chatBoardItemLayout).toBeNull();
 		expect(store.chatBoardActiveColumnByBoardId).toEqual({});
@@ -214,7 +215,7 @@ describe('LocalSettingsStore', () => {
 		restored.destroy();
 	});
 
-	it('persists every chat item layout and defaults malformed values to compact', () => {
+	it('persists every chat item layout and defaults malformed values to single-line', () => {
 		const store = createLocalSettingsStore();
 
 		store.set('sidebarChatItemLayout', 'single-line');
@@ -232,7 +233,26 @@ describe('LocalSettingsStore', () => {
 			JSON.stringify({ sidebarChatItemLayout: 'condensed' }),
 		);
 		const malformed = createLocalSettingsStore();
-		expect(malformed.sidebarChatItemLayout).toBe('compact');
+		expect(malformed.sidebarChatItemLayout).toBe('single-line');
+		malformed.destroy();
+	});
+
+	it('persists the project path toggle independently of grouping and layout', () => {
+		const store = createLocalSettingsStore();
+		store.toggle('sidebarShowProjectPath');
+		store.set('sidebarGrouping', 'project');
+		store.set('sidebarChatItemLayout', 'compact');
+		const restored = createLocalSettingsStore();
+		expect(restored.sidebarShowProjectPath).toBe(true);
+		expect(restored.sidebarChatItemLayout).toBe('compact');
+		restored.set('sidebarGrouping', 'none');
+		restored.set('sidebarChatItemLayout', 'detailed');
+		expect(restored.sidebarShowProjectPath).toBe(true);
+		store.destroy();
+		restored.destroy();
+		localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, JSON.stringify({ sidebarShowProjectPath: 'yes' }));
+		const malformed = createLocalSettingsStore();
+		expect(malformed.sidebarShowProjectPath).toBe(false);
 		malformed.destroy();
 	});
 
@@ -844,6 +864,7 @@ describe('LocalSettingsStore', () => {
 				sidebarInactivityDuration: '1-month',
 				sidebarGroupNestedProjectPaths: true,
 				sidebarChatItemLayout: 'compact',
+				sidebarShowProjectPath: true,
 				showQuickCommitTray: false,
 				allowDirectChats: true,
 				steerWithCtrlEnter: false,
@@ -869,6 +890,7 @@ describe('LocalSettingsStore', () => {
 		expect(secondStore.sidebarInactivityDuration).toBe('1-month');
 		expect(secondStore.sidebarGroupNestedProjectPaths).toBe(true);
 		expect(secondStore.sidebarChatItemLayout).toBe('compact');
+		expect(secondStore.sidebarShowProjectPath).toBe(true);
 		expect(secondStore.showQuickCommitTray).toBe(false);
 		expect(secondStore.allowDirectChats).toBe(true);
 		expect(secondStore.steerWithCtrlEnter).toBe(false);
