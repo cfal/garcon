@@ -18,6 +18,10 @@ import type { ControllerCliDispatcher } from './cli-dispatcher.js';
 
 type LocalExecutorOptions = ConstructorParameters<typeof ExecutionRuntime>[0];
 
+// Clients learn of an executor's link failures at most this often, so a peer
+// that keeps failing, however its failures alternate, cannot flood them.
+const LINK_FAILURE_NOTICE_MS = 1_000;
+
 interface ManagedRemote {
   config: RemoteExecutorConfig;
   executor: RemoteExecutorClient | null;
@@ -245,11 +249,14 @@ export class ExecutorManager {
         info: known?.info ?? null, error: null, preparation: null, cliLease: new AbortController() };
       this.#remotes.set(config.id, entry);
       if (!config.enabled) continue;
-      const reportError = (message: string) => {
-        if (!this.#current(entry) || entry.error?.message === message) return;
+      // Returns whether the executor's error changed.
+      const recordError = (message: string): boolean => {
+        if (!this.#current(entry) || entry.error?.message === message) return false;
         entry.error = { code: 'EXECUTOR_UNAVAILABLE', message };
-        this.#changed();
+        return true;
       };
+      const reportError = (message: string) => { if (recordError(message)) this.#changed(); };
+      const noticeLinkFailure = throttledNotice(LINK_FAILURE_NOTICE_MS, () => { if (this.#current(entry)) this.#changed(); });
       const link = new WebSocketLink({ role: 'controller', executorId: config.id, secret: config.secret,
         allowInsecureDevelopment: config.allowInsecureDevelopment, allowUnverifiedTls: config.allowUnverifiedTls });
       entry.link = link;
@@ -257,14 +264,14 @@ export class ExecutorManager {
         if (shouldLogLinkFailure(failure)) this.logger.warn('Executor link failed', { executorId: config.id, ...failure });
         // Another connection failing leaves an established session unaffected, even while a
         // configuration change or the session's preparation keeps the executor from ready.
-        if (entry.executor?.availability !== 'ready') reportError(failure.message);
+        if (entry.executor?.availability !== 'ready' && recordError(failure.message)) noticeLinkFailure();
       });
       link.onClosure((closure) => {
         this.logger.warn('Executor link closed', { executorId: config.id, ...closure });
         // Only the connection carrying the session reports a closure, so this is the
         // executor's own loss, unless setup retired the session after reporting why.
         if (closure.cause === 'local-close' || (closure.cause === 'session-retired' && entry.error !== null)) return;
-        reportError(closure.reason ? `Executor connection lost: ${closure.reason}` : 'Executor connection lost');
+        if (recordError(closure.reason ? `Executor connection lost: ${closure.reason}` : 'Executor connection lost')) noticeLinkFailure();
       });
       entry.executor = new RemoteExecutorClient(config.id, link, (rpc) => rpc.handle(async (call, signal, guardReply) => {
         if (call.method === 'controllerCli.describe' || call.method === 'controllerCli.request') {
@@ -345,6 +352,26 @@ export class ExecutorManager {
     if (this.isReconnecting(executorId)) return 'reconnecting';
     return 'offline';
   }
+}
+
+// Notifies at once, then at most once per interval, each time with the latest state.
+function throttledNotice(intervalMs: number, notify: () => void): () => void {
+  let notifiedAt = Number.NEGATIVE_INFINITY;
+  let pending: ReturnType<typeof setTimeout> | null = null;
+  const fire = () => {
+    pending = null;
+    notifiedAt = performance.now();
+    notify();
+  };
+  return () => {
+    if (pending) return;
+    const wait = notifiedAt + intervalMs - performance.now();
+    if (wait <= 0) fire();
+    else {
+      pending = setTimeout(fire, wait);
+      pending.unref();
+    }
+  };
 }
 
 function sameConnector(left: RemoteExecutorConfig, right: RemoteExecutorConfig): boolean {

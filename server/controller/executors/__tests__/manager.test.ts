@@ -519,13 +519,37 @@ test('publishes an executor error only when it changes', async () => {
   const { url } = sharedListener(manager);
   let changes = 0;
   manager.onChanged(() => { changes++; });
-  for (let attempt = 0; attempt < 3; attempt++) await connectWithWrongKey(url(config.id));
-  await sendMalformedRecord(url(config.id));
+  await connectWithWrongKey(url(config.id));
+  // Past the notice interval, a repeat of the same failure would publish at once.
+  await Bun.sleep(1_100);
+  await connectWithWrongKey(url(config.id));
 
-  expect(changes).toBe(2);
+  expect(changes).toBe(1);
   expect(manager.list().find((item) => item.id === config.id)?.lastError).toEqual({
-    code: 'EXECUTOR_UNAVAILABLE', message: 'Executor encrypted connection failed (PROTOCOL_ERROR)',
+    code: 'EXECUTOR_UNAVAILABLE', message: 'Executor encrypted connection failed (AUTHENTICATION_FAILED)',
   });
+});
+
+test('publishes alternating link failures at most once a second, each time with the latest', async () => {
+  const { manager } = await fixture();
+  const config = await manager.create({ label: 'Probed', direction: 'executor-connects' });
+  const { url } = sharedListener(manager);
+  const published: { readonly at: number; readonly message: string | undefined }[] = [];
+  const lastError = () => manager.list().find((item) => item.id === config.id)?.lastError;
+  manager.onChanged(() => { published.push({ at: performance.now(), message: lastError()?.message }); });
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await connectWithWrongKey(url(config.id));
+    await sendMalformedRecord(url(config.id));
+  }
+  const malformed = 'Executor encrypted connection failed (PROTOCOL_ERROR)';
+  const deadline = performance.now() + 4_000;
+  while (published.at(-1)?.message !== malformed && performance.now() < deadline) await Bun.sleep(20);
+
+  expect(published.at(-1)).toEqual({ at: expect.any(Number), message: malformed });
+  for (let index = 1; index < published.length; index++) {
+    expect(published[index]!.at - published[index - 1]!.at).toBeGreaterThanOrEqual(990);
+  }
+  expect(published.length).toBeLessThan(6);
 });
 
 test('the aggregate Noise connection limit covers authenticated peers across executors', async () => {
