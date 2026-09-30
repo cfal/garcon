@@ -103,6 +103,7 @@
 			localSettings.showQuickCommitTray &&
 			quickGit.canShowTrayFor(gitProject),
 	);
+	const statusTrayVisible = $derived(isProcessing || quickGitTrayVisible);
 	const reserveStatusCap = $derived(
 		shouldReserveComposerCapSlot({
 			hasProjectPath: Boolean(projectPath),
@@ -316,7 +317,11 @@
 	</div>
 
 	{#if availabilityNotice}
-		<div class={cn(dockShellClass, capSpace.notice && 'pb-14')} data-conversation-panel-notice>
+		<!-- The notice reserves only the visible tray height: min-h-14 minus translate-y-3. -->
+		<div
+			class={cn(dockShellClass, capSpace.notice && statusTrayVisible && 'pb-11')}
+			data-conversation-panel-notice
+		>
 			<div class={dockFrameClass}>
 				<ComposerAvailabilityNotice {...availabilityNotice} />
 			</div>

@@ -16,14 +16,15 @@ async function expectNoticeAboveCap(notice: Locator, cap: Locator, composer: Loc
     const noticeBox = (await notice.boundingBox())!;
     const capBox = (await cap.boundingBox())!;
     const composerBox = (await composer.boundingBox())!;
+    const noticeGap = capBox.y - (noticeBox.y + noticeBox.height);
     return {
-      noticeAboveCap: noticeBox.y + noticeBox.height <= capBox.y,
+      compactNoticeGap: noticeGap >= 7 && noticeGap <= 8,
       capOverlapsComposer: Math.abs(capBox.y + capBox.height - composerBox.y - 12) < 1,
       leftEdgesAligned: Math.abs(capBox.x - composerBox.x) < 1,
       widthsMatch: Math.abs(capBox.width - composerBox.width) < 1,
     };
   }).toEqual({
-    noticeAboveCap: true,
+    compactNoticeGap: true,
     capOverlapsComposer: true,
     leftEdgesAligned: true,
     widthsMatch: true,
@@ -143,6 +144,23 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         } finally {
           proxy?.acceptConnections();
           held.releaseEcho();
+        }
+
+        phase('notice stays close to the composer when the idle tray is disabled');
+        await page.evaluate(() => {
+          const settings = JSON.parse(localStorage.getItem('pref_local_settings') ?? '{}');
+          localStorage.setItem('pref_local_settings', JSON.stringify({ ...settings, showQuickCommitTray: false }));
+        });
+        await page.reload();
+        await browserExpect(notice).toBeVisible();
+        await browserExpect(cap).toHaveCount(0);
+        for (const width of [1440, 390]) {
+          await page.setViewportSize({ width, height: 900 });
+          await browserExpect.poll(async () => {
+            const noticeBox = (await notice.boundingBox())!;
+            const composerBox = (await composer.boundingBox())!;
+            return composerBox.y - (noticeBox.y + noticeBox.height);
+          }).toBeCloseTo(8, 0);
         }
         assertNoBrowserErrors();
       }, undefined, { executionBackend, projectRoots: 'separate',

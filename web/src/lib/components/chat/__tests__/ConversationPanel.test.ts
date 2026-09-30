@@ -24,6 +24,7 @@ const runtime = vi.hoisted(() => ({
 	autoScrollToBottom: false,
 	processing: true,
 	reduceMotion: false,
+	showQuickCommitTray: true,
 	queue: null as ChatQueueState | null,
 	summary: null as GitQuickSummaryReady | null,
 }));
@@ -54,7 +55,7 @@ vi.mock('$lib/context', () => ({
 		autoScrollToBottom: runtime.autoScrollToBottom,
 		chatMaxWidth: 'default',
 		reduceMotion: runtime.reduceMotion,
-		showQuickCommitTray: true,
+		showQuickCommitTray: runtime.showQuickCommitTray,
 	}),
 	getModelCatalog: () => ({ forExecutor() { return this; }, supportsSteering: () => true }),
 	getOptionalTransientLayers: () => null,
@@ -211,6 +212,7 @@ describe('ConversationPanel', () => {
 		runtime.autoScrollToBottom = false;
 		runtime.processing = true;
 		runtime.reduceMotion = false;
+		runtime.showQuickCommitTray = true;
 		runtime.queue = null;
 		runtime.summary = null;
 		vi.clearAllMocks();
@@ -485,7 +487,7 @@ describe('ConversationPanel', () => {
 		expect(screen.getByRole('button', { name: /Commit/ })).toBeTruthy();
 		expect(notice.compareDocumentPosition(dock) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 		expect(queued.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-		expect(notice.classList.contains('pb-14')).toBe(true);
+		expect(notice.classList.contains('pb-11')).toBe(true);
 		expect(queued.closest('.pb-14')).toBeNull();
 		expect(rendered.container.querySelector('[data-reserve-composer-tray-space]')?.getAttribute('data-reserve-composer-tray-space')).toBe('false');
 		expect(dock.nextElementSibling).toBe(spacer);
@@ -505,5 +507,37 @@ describe('ConversationPanel', () => {
 		expect(queued.closest('.pb-14')).toBeTruthy();
 		expect(spacer.getAttribute('style')).toContain('height: 96px');
 		expect(screen.getByRole('button', { name: /Commit/ })).toBeTruthy();
+	});
+
+	it('omits the notice cap slot when the tray is hidden and restores queue reservation without a notice', async () => {
+		runtime.processing = false;
+		runtime.showQuickCommitTray = false;
+		runtime.queue = queue();
+		const { panel } = makePanel();
+		const composerNotice: ComposerAvailabilityNoticePresentation = {
+			chatId: 'chat-1',
+			notice: { kind: 'catalog-failed', message: 'Catalog unavailable' },
+			onRetryProject: vi.fn(),
+			onRetryCatalog: vi.fn(),
+		};
+		const props = {
+			surfaceId: panel.surfaceId,
+			chat: chat(),
+			panel,
+			isCommandOwner: true,
+			ownsComposer: true,
+			actions: makeActions(),
+			composerNotice,
+		};
+		const rendered = render(ConversationPanel, props);
+		const notice = rendered.container.querySelector('[data-conversation-panel-notice]')!;
+		const queued = screen.getByText('Queued input');
+		expect(notice.classList.contains('pb-11')).toBe(false);
+		expect(notice.classList.contains('pb-14')).toBe(false);
+		expect(queued.closest('.pb-14')).toBeNull();
+		expect(rendered.container.querySelector('[data-conversation-panel-status-anchor]')?.children.length).toBe(0);
+
+		await rendered.rerender({ ...props, composerNotice: null });
+		expect(queued.closest('.pb-14')).toBeTruthy();
 	});
 });
