@@ -247,7 +247,7 @@ test("mobile Tickets opens, saves and closes without crypto.randomUUID", async (
         identityAboveTitle: true,
         numberSize: "13px",
         statusBelowTitle: true,
-        actions: ["Open", "Edit", "Close ticket"],
+        actions: ["Open", "Edit", "Close ticket", "New chat from ticket"],
       });
       expect(detailGeometry.assignmentBesideValue).toContain("Unassigned");
       expect(detailGeometry.assignmentBesideValue).toContain("Assign to me");
