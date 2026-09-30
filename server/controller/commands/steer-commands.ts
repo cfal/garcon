@@ -17,7 +17,6 @@ import type { StoredChatExecutionControlState } from '../chat-execution/control-
 import type { AcceptedExecutionCommand, CapturedSteerTarget } from '../chat-execution/types.ts';
 import { KeyedPromiseLock } from '../../common/keyed-lock.ts';
 import { createLogger, type Logger } from '../../common/log.ts';
-import { PromiseTimeoutError, withPromiseTimeout } from '../../common/promise-timeout.ts';
 import {
   commandLedgerKey,
   SteerIdentityCapacityError,
@@ -29,19 +28,20 @@ import {
   CommandValidationError,
   commandResultFromRecord,
 } from './command-support.ts';
+import { SteerFileContext } from './steer-file-context.ts';
 
 const logger = createLogger('commands:steer');
 const STEER_CAPACITY_EXHAUSTED_MESSAGE =
   'Steering is temporarily unavailable because the server has retained its maximum number of steering identities';
-const STEER_FILE_CONTEXT_TIMEOUT_MS = 2_000;
-const STEER_FILE_CONTEXT_IN_FLIGHT_LIMIT = 8;
 
 export class SteerCommands {
   // Preserves steering admission order without holding the command lock during file reads.
   readonly #preparationLocks = new KeyedPromiseLock();
-  readonly #fileContextResolutions = new Map<string, Promise<string>>();
+  readonly #fileContext: SteerFileContext;
 
-  constructor(private readonly support: CommandSupport) {}
+  constructor(private readonly support: CommandSupport) {
+    this.#fileContext = new SteerFileContext(support.deps.fileMentions);
+  }
 
   private get deps() {
     return this.support.deps;
@@ -159,7 +159,7 @@ export class SteerCommands {
         };
       });
       const scheduled = await this.#preparationLocks.runExclusive(`chat:${input.chatId}`, async () => {
-        providerContent = await this.#resolveProviderContent({
+        providerContent = await this.#fileContext.resolve({
           chatId: input.chatId,
           clientRequestId,
           content: input.content,
@@ -363,7 +363,7 @@ export class SteerCommands {
       });
       const scheduled = await this.#preparationLocks.runExclusive(`chat:${input.chatId}`, async () => {
         if (observedEntry) {
-          providerContent = await this.#resolveProviderContent({
+          providerContent = await this.#fileContext.resolve({
             chatId: input.chatId,
             clientRequestId,
             content: observedEntry.content,
@@ -418,50 +418,6 @@ export class SteerCommands {
       return await this.deps.queue.captureSteerTarget(chatId);
     } catch (error) {
       throw error instanceof DomainError ? error : new SteerDeliveryError(error, 'not-sent');
-    }
-  }
-
-  async #resolveProviderContent(input: {
-    chatId: string;
-    clientRequestId: string;
-    content: string;
-    projectPath?: string;
-    executorId?: string | null;
-  }): Promise<string> {
-    if (!input.projectPath) return input.content;
-    if (
-      this.#fileContextResolutions.has(input.chatId)
-      || this.#fileContextResolutions.size >= STEER_FILE_CONTEXT_IN_FLIGHT_LIMIT
-    ) {
-      return input.content;
-    }
-
-    const cancellation = new AbortController();
-    const resolution = this.deps.fileMentions.resolve(input.content, input.projectPath, input.executorId, {
-      signal: cancellation.signal,
-    });
-    this.#fileContextResolutions.set(input.chatId, resolution);
-    const clearResolution = () => {
-      if (this.#fileContextResolutions.get(input.chatId) === resolution) {
-        this.#fileContextResolutions.delete(input.chatId);
-      }
-    };
-    void resolution.then(clearResolution, clearResolution);
-
-    try {
-      return await withPromiseTimeout(
-        resolution,
-        STEER_FILE_CONTEXT_TIMEOUT_MS,
-        'Steering file-context preparation',
-      );
-    } catch (error) {
-      if (!(error instanceof PromiseTimeoutError)) throw error;
-      cancellation.abort();
-      logger.warn('steer file context timed out', {
-        chatId: input.chatId,
-        clientRequestId: input.clientRequestId,
-      });
-      return input.content;
     }
   }
 

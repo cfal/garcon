@@ -474,6 +474,7 @@ export function wireServerEvents({
       broadcast(new ChatProcessingUpdatedMessage(chatId, processing.phase(chatId)));
     }
   };
+  agentRegistry.onRunSteerable((chatId) => { queue.retryQueuedSteers(chatId); });
   agentRegistry.onSessionCreated((chatId) => {
     if (!chatExists(chatId)) return;
     return scheduleChatTask(chatId, 'session publication', () => {
@@ -667,6 +668,8 @@ export function wireServerEvents({
       void queue.readChatExecutionControl(chatId).then(async (control) => {
         const chat = chatRegistry.getChat(chatId);
         if (chat && effectiveExecutorId(chat.executorId) === executorId && hasPendingTurnInput(control)) {
+          // A run's one steerable report may have arrived while its steer target was unreachable.
+          queue.retryQueuedSteers(chatId);
           await queue.triggerDrain(chatId);
         }
       }).catch((error) => logger.warn('Executor queue drain failed', error));

@@ -70,6 +70,7 @@ import { createApiProviderPolicy } from './api-providers/composition.js';
 import { AgentCallError } from '@garcon/server-agent-interface';
 import { CommandLedger } from './commands/command-ledger.js';
 import { ChatCommandService } from './commands/chat-command-service.js';
+import { queuedSteerContentResolver } from './commands/steer-file-context.js';
 import { KeyedPromiseLock } from '../common/keyed-lock.js';
 import { ChatHandler } from './ws/chat.js';
 import { TelegramNotifier } from './notifications/telegram.js';
@@ -555,6 +556,7 @@ export async function startServer(): Promise<void> {
         isControlInputViewCurrent: (chatId, viewId) => chatRegistry.getChat(chatId) !== null
           && transcriptLedger.existingCurrentView(chatId)?.viewId === viewId,
         selectionAdmissionLock,
+        resolveSteerContent: queuedSteerContentResolver({ resolve: resolveFileMentions }, chatRegistry),
       },
     );
     executionQueries = queue;

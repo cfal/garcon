@@ -24,6 +24,7 @@ import {
   markQueueEntrySteer,
   releaseQueueSteer,
   replaceQueueEntry,
+  reservePendingSteer,
   reserveQueueSteer,
   requeueAndPause,
   pauseAfterDispatchFailure,
@@ -49,6 +50,8 @@ export interface ChatExecutionControlOperationsHost {
 }
 
 type ControlChangeResult = { control: StoredChatExecutionControlState; changed: boolean };
+type SteerReservationInput = Parameters<typeof reserveQueueSteer>[1];
+type ReservedSteer = { entry: StoredQueueEntry; control: StoredChatExecutionControlState };
 
 export class ChatExecutionControlOperations {
   constructor(
@@ -350,21 +353,27 @@ export class ChatExecutionControlOperations {
     });
   }
 
-  async reserveSteer(
+  reserveSteer(chatId: string, input: SteerReservationInput): Promise<ReservedSteer> {
+    return this.#reserveSteer(chatId, input, reserveQueueSteer);
+  }
+
+  // Reserves the head steer for automatic delivery, which a paused queue holds back.
+  reservePendingSteer(chatId: string, input: SteerReservationInput): Promise<ReservedSteer> {
+    return this.#reserveSteer(chatId, input, reservePendingSteer);
+  }
+
+  #reserveSteer(
     chatId: string,
-    input: {
-      entryId: string;
-      expectedRevision: number;
-      expectedReorderRevision: number;
-    },
-  ): Promise<{ entry: StoredQueueEntry; control: StoredChatExecutionControlState }> {
+    input: SteerReservationInput,
+    reserve: typeof reserveQueueSteer,
+  ): Promise<ReservedSteer> {
     return this.host.runExclusive(chatId, async () => {
       this.#assertChatExists(chatId);
       const current = await this.#load(chatId);
       const committed = await this.#commitTransition(
         chatId,
         current,
-        reserveQueueSteer(current, input, transitionContext()),
+        reserve(current, input, transitionContext()),
       );
       const entry = committed.control.entries.find((candidate) => candidate.id === input.entryId)!;
       this.#logMutation('steer-reserve', chatId, entry.id, committed.control, entry.revision);

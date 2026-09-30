@@ -18,6 +18,7 @@ import {
   releaseQueueSteer,
   replaceQueueEntry,
   requeueAndPause,
+  reservePendingSteer,
   reserveQueueSteer,
   resumeQueue,
   enqueueControlInput,
@@ -175,6 +176,19 @@ describe('chat execution control transitions', () => {
     const consumed = consumeQueueSteer(reservedAgain.next, firstId, context(8));
     expect(consumed.next.entries.map((entry) => entry.id)).toEqual([secondId]);
     expect(consumed.next.recentlyDispatched.at(-1)?.entryId).toBe(firstId);
+  });
+
+  it('reserves a steer for automatic delivery only while the queue is unpaused', () => {
+    const steer = createQueuedSteer(initial(), {
+      content: 'guidance',
+      submission: { clientMessageId: 'message-steer', transcriptViewId: 'view-1' },
+    }, context(1));
+    const paused = pauseQueue(steer.next, context(2));
+    const input = { entryId: value(steer).entryId, expectedRevision: 1, expectedReorderRevision: 0 };
+
+    expect(rejection(reservePendingSteer(paused.next, input, context(3))).code).toBe('QUEUE_PAUSE_CHANGED');
+    expect(value(reserveQueueSteer(paused.next, input, context(4))).entry.status).toBe('steering');
+    expect(value(reservePendingSteer(steer.next, input, context(5))).entry.status).toBe('steering');
   });
 
   it('queues steers in order ahead of queued turns and behind an entry being steered', () => {

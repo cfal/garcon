@@ -70,6 +70,7 @@ import { AcceptedInputHandler } from './accepted-input-handler.ts';
 import { AcceptedInputTranscript } from './accepted-input-transcript.ts';
 import type { AcceptedInputTranscriptPort } from './accepted-input-transcript.ts';
 import { SteerInputDelivery } from './steer-input-delivery.ts';
+import { QueuedSteerDelivery, type QueuedSteerDeliveryOptions } from './queued-steer-delivery.ts';
 import { ControlInputDelivery } from './control-input-delivery.ts';
 import { ControlSteerDelivery } from './control-steer-delivery.ts';
 
@@ -95,6 +96,7 @@ interface ChatExecutionCoordinatorOptions {
   unsettledQueueReceiptKeys?: (chatId: string) => ReadonlySet<string>;
   appendControlReceipt?: (chatId: string, entry: StoredControlInputEntry) => void;
   selectionAdmissionLock?: KeyedPromiseLock;
+  resolveSteerContent?: QueuedSteerDeliveryOptions['resolveContent'];
 }
 
 export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordinatorEvents> implements ChatExecutionService {
@@ -113,6 +115,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
   #acceptedInputHandler: AcceptedInputHandler;
   #acceptedInputTranscript: AcceptedInputTranscript;
   #steerInputDelivery: SteerInputDelivery;
+  #queuedSteers: QueuedSteerDelivery;
   #controlInputDelivery: ControlInputDelivery;
   #controlSteerDelivery: ControlSteerDelivery;
 
@@ -150,6 +153,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       chatExists: (chatId) => this.#chatExists(chatId),
       unsettledQueueReceiptKeys,
       publish: (chatId, control) => {
+        this.#queuedSteers.observe(chatId, control);
         this.emit('execution-control-updated', chatId, control);
       },
     }, options.projectAdmission);
@@ -168,6 +172,14 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     this.#steerInputDelivery = new SteerInputDelivery({
       ...inputDeliveryOptions,
       isShuttingDown: () => this.#shuttingDown,
+    });
+    this.#queuedSteers = new QueuedSteerDelivery({
+      controls: this.#controlOperations,
+      steerInput: this.#steerInputDelivery,
+      resolveContent: options.resolveSteerContent ?? (async ({ content }) => content),
+      canDeliver: (chatId) => !this.#shuttingDown && this.#chatExists(chatId),
+      requestDrain: (chatId, context) => { this.#requestDrain(chatId, context); },
+      trackTask: (task) => { this.#trackDispatch(task); },
     });
     const deliverControlSteer = (
       chatId: string,
@@ -350,6 +362,9 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       this.emit('chat-idle', chatId);
     }
   }
+
+  // Server wiring calls this once the chat's active run can take steering input.
+  retryQueuedSteers(chatId: string): void { this.#queuedSteers.retry(chatId); }
 
   async readChatExecutionControl(chatId: string): Promise<StoredChatExecutionControlState> {
     return this.#controlOperations.read(chatId);
@@ -673,6 +688,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
         chatId,
         new Error('Turn interrupted because the chat was deleted'),
       );
+      this.#queuedSteers.forget(chatId);
       await this.#controlOperations.deleteStored(chatId);
     });
   }

@@ -577,6 +577,17 @@ export function reserveQueueSteer(
   }, true);
 }
 
+// Automatic delivery holds back while the queue is paused, although the Steer action on a
+// queued message reserves through `reserveQueueSteer` regardless of the pause.
+export function reservePendingSteer(
+  current: StoredChatExecutionControlState,
+  input: Parameters<typeof reserveQueueSteer>[1],
+  context: TransitionContext,
+): ControlTransition<ReservedQueueSteer> {
+  if (current.pause) return rejected(current, { code: 'QUEUE_PAUSE_CHANGED' });
+  return reserveQueueSteer(current, input, context);
+}
+
 // Turns the head entry into a steer, so it reaches the active turn once the turn can take it.
 export function markQueueEntrySteer(
   current: StoredChatExecutionControlState,

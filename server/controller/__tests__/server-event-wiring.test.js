@@ -127,6 +127,8 @@ it.each(['empty', 'user', 'control'])('readiness wakes only pending inputs: %s',
   fixture.executor.availability('local', 'ready');
   await Promise.resolve();
   expect(fixture.queueService.triggerDrain).toHaveBeenCalledTimes(kind === 'empty' ? 0 : 1);
+  // An active turn owns execution, so only a steer retry reaches it with pending steers.
+  expect(fixture.queueService.retryQueuedSteers).toHaveBeenCalledTimes(kind === 'empty' ? 0 : 1);
 });
 
 it('observes genuine source readiness before the rest of the server is wired', async () => {
@@ -172,6 +174,7 @@ function createFixture(overrides = {}) {
     onTranscriptCommitted: mock((callback) => { agent.transcript = callback; }),
     onPermissionRetired: mock((callback) => { agent.permissionRetired = callback; }),
     onSessionCreated: mock((callback) => { agent.session = callback; }),
+    onRunSteerable: mock((callback) => { agent.steerable = callback; }),
     onFinished: mock((callback) => { agent.finished = callback; }),
     onFailed: mock((callback) => { agent.failed = callback; }),
     resendCandidates: mock(() => []),
@@ -192,6 +195,7 @@ function createFixture(overrides = {}) {
     onAgentTurnTerminal: mock(async () => undefined),
     checkChatIdle: mock(async () => undefined),
     triggerDrain: mock(async () => undefined),
+    retryQueuedSteers: mock(() => undefined),
     readChatExecutionControl: mock(async () => ({
       ...emptyStoredChatExecutionControl('test'), entries: [{ id: 'pending-input' }],
     })),
@@ -1104,6 +1108,17 @@ describe('server event wiring', () => {
     fixture.agent.failed('chat-1', 'Synthetic second failure', 'INTERNAL_ERROR');
     await fixture.wiring.waitForIdle();
     expect(fixture.published.filter(message => message.type === 'agent-run-failed')).toHaveLength(2);
+  });
+
+  it('offers queued steers to a run once it can take steering input', async () => {
+    const fixture = createFixture();
+
+    fixture.agent.transcript(providerCommit());
+    await fixture.wiring.waitForIdle();
+    expect(fixture.queueService.retryQueuedSteers).not.toHaveBeenCalled();
+
+    fixture.agent.steerable('chat-1');
+    expect(fixture.queueService.retryQueuedSteers.mock.calls).toEqual([['chat-1']]);
   });
 
   it('updates preview without scheduling a duplicate search rebuild for transcript commits', async () => {
