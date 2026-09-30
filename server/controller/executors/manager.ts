@@ -257,6 +257,9 @@ export class ExecutorManager {
       };
       const reportError = (message: string) => { if (recordError(message)) this.#changed(); };
       const noticeLinkFailure = throttledNotice(LINK_FAILURE_NOTICE_MS, () => { if (this.#current(entry)) this.#changed(); });
+      const showLinkFailure = (message: string, reason?: string) => {
+        if (recordError(reason ? `${message}: ${reason}` : message)) noticeLinkFailure();
+      };
       const link = new WebSocketLink({ role: 'controller', executorId: config.id, secret: config.secret,
         allowInsecureDevelopment: config.allowInsecureDevelopment, allowUnverifiedTls: config.allowUnverifiedTls });
       entry.link = link;
@@ -264,14 +267,14 @@ export class ExecutorManager {
         if (shouldLogLinkFailure(failure)) this.logger.warn('Executor link failed', { executorId: config.id, ...failure });
         // Another connection failing leaves an established session unaffected, even while a
         // configuration change or the session's preparation keeps the executor from ready.
-        if (entry.executor?.availability !== 'ready' && recordError(failure.message)) noticeLinkFailure();
+        if (entry.executor?.availability !== 'ready') showLinkFailure(failure.message, failure.reason);
       });
       link.onClosure((closure) => {
         this.logger.warn('Executor link closed', { executorId: config.id, ...closure });
         // Only the connection carrying the session reports a closure, so this is the
         // executor's own loss, unless setup retired the session after reporting why.
         if (closure.cause === 'local-close' || (closure.cause === 'session-retired' && entry.error !== null)) return;
-        if (recordError(closure.reason ? `Executor connection lost: ${closure.reason}` : 'Executor connection lost')) noticeLinkFailure();
+        showLinkFailure('Executor connection lost', closure.reason);
       });
       entry.executor = new RemoteExecutorClient(config.id, link, (rpc) => rpc.handle(async (call, signal, guardReply) => {
         if (call.method === 'controllerCli.describe' || call.method === 'controllerCli.request') {

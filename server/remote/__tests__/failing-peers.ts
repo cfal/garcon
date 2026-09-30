@@ -28,3 +28,17 @@ export async function sendMalformedRecord(url: string): Promise<void> {
   socket.addEventListener('open', () => socket.send(new Uint8Array(8)));
   await closed;
 }
+
+// Unlike the peers above, holds the secret: it answers the endpoint's hello by
+// claiming the endpoint's own role, and resolves once authentication rejects it.
+export async function connectWithOwnRole(url: string, secret: string): Promise<void> {
+  const socket = connectNoiseWebSocket(url, {
+    psk: Buffer.from(secret, 'base64url'), context: EXECUTOR_NOISE_CONTEXT,
+    onMessage(socket, data) {
+      if (typeof data !== 'string') return;
+      const hello = JSON.parse(data);
+      if (hello.type === 'hello') socket.send(JSON.stringify({ ...hello, runtimeId: crypto.randomUUID(), nonce: crypto.randomUUID() }));
+    },
+  });
+  await socket.closed;
+}

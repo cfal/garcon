@@ -6,7 +6,7 @@ import { EXECUTOR_PROTOCOL_REVISION } from '../rpc-protocol.ts';
 import { version as packageVersion } from '../../../../package.json';
 import { tcpLinkProxy } from '../../__tests__/tcp-link-proxy.ts';
 import { faultyNoiseListener } from '../../__tests__/noise-socket-faults.ts';
-import { connectWithWrongKey, openSilentSocket, sendMalformedRecord } from '../../__tests__/failing-peers.ts';
+import { connectWithOwnRole, connectWithWrongKey, openSilentSocket, sendMalformedRecord } from '../../__tests__/failing-peers.ts';
 
 const secret = Buffer.alloc(32, 42).toString('base64url');
 const linkVersion = `${packageVersion}+protocol.${EXECUTOR_PROTOCOL_REVISION}`;
@@ -116,8 +116,7 @@ test('counts a failure from one again when its reason changes', async () => {
   try {
     await malformedHandshake(address).closed;
     await malformedHandshake(address).closed;
-    // A peer that claims the link's own role.
-    await peerOfBuild(address, 'worker', linkVersion).socket.closed;
+    await connectWithOwnRole(address, secret);
     expect(failures).toEqual([
       { message: 'Executor authentication failed', count: 1, reason: 'Malformed executor handshake frame' },
       { message: 'Executor authentication failed', count: 2, reason: 'Malformed executor handshake frame' },

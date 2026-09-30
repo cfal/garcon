@@ -15,7 +15,7 @@ import { createServerSocketHandlers, type WsConnectionData } from '../../ws/serv
 import { PrimarySocketDelivery } from '../../ws/primary-delivery.js';
 import { WebSocketAdmissionController } from '../../../common/websocket-capacity.js';
 import { ControllerCliDispatcher, type CliDispatchAccess } from '../cli-dispatcher.js';
-import { connectWithWrongKey, sendMalformedRecord } from '../../../remote/__tests__/failing-peers.js';
+import { connectWithOwnRole, connectWithWrongKey, sendMalformedRecord } from '../../../remote/__tests__/failing-peers.js';
 import { tcpLinkProxy } from '../../../remote/__tests__/tcp-link-proxy.js';
 import type { Logger } from '../../../common/log.js';
 
@@ -486,6 +486,17 @@ test('keeps a connection failure off an executor whose disruptive update fails t
     release.resolve();
     write.mockRestore();
   }
+});
+
+test('shows a link failure with its reason', async () => {
+  const { manager } = await fixture();
+  const config = await manager.create({ label: 'Mistaken', direction: 'executor-connects' });
+  const { url } = sharedListener(manager);
+  await connectWithOwnRole(url(config.id), config.secret);
+
+  expect(manager.list().find((item) => item.id === config.id)?.lastError).toEqual({
+    code: 'EXECUTOR_UNAVAILABLE', message: 'Executor authentication failed: Executor handshake mismatch',
+  });
 });
 
 test('shows why a ready executor lost its own session', async () => {
