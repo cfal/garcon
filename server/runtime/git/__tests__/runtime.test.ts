@@ -77,13 +77,26 @@ test('admits normal query bursts while bounding active reads across serving inst
     if (++arrivals === GIT_MAX_CONCURRENT_QUERIES) entered.resolve();
     return gate.promise;
   });
+  const warn = spyOn(console, 'warn').mockImplementation(() => undefined);
   const pending = Array.from({ length: GIT_MAX_CONCURRENT_QUERIES }, () => git.getRepoInfo({ projectPath }));
   try {
     await entered.promise;
     expect(arrivals).toBe(8);
     await expect(git.getRepoInfo({ projectPath })).rejects.toMatchObject({ code: 'GIT_SERVICE_BUSY' });
     await expect(replacement.git.getRepoInfo({ projectPath })).rejects.toMatchObject({ code: 'GIT_SERVICE_BUSY' });
+    expect(warn.mock.calls.filter(([, message]) => message === 'Git operation capacity is exhausted')).toEqual([[
+      '[git:runtime]',
+      'Git operation capacity is exhausted',
+      {
+        method: 'getRepoInfo',
+        reads: GIT_MAX_CONCURRENT_QUERIES,
+        mutations: 0,
+        admitted: Array.from({ length: GIT_MAX_CONCURRENT_QUERIES }, () =>
+          ({ method: 'getRepoInfo', ageMs: expect.any(Number), aborted: false })),
+      },
+    ]]);
   } finally {
+    warn.mockRestore();
     stat.mockRestore();
     gate.resolve(stats);
     await Promise.all(pending);

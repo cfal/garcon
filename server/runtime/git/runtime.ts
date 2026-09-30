@@ -9,6 +9,7 @@ import { validateGitRequest, validateGhRequest } from '../../../common/git-reque
 import { validateGitResult, validateGhResult } from '../../../common/git-result-validation.js';
 import { isRecord } from '../../../common/json.js';
 import { hasNodeErrorCode } from '../../common/errors.js';
+import { createLogger } from '../../common/log.js';
 import { assertRealWithinBase, resolveRealWithinBase } from '../../common/path-boundary.js';
 import { toNativePath, toExecutorPath } from '../../common/executor-path.js';
 import { createGitOperations } from './git-service.js';
@@ -29,7 +30,38 @@ interface GitExecutorOptions extends GitExecutorScope {
   assertAvailable(options?: ExecutorCallOptions): void;
 }
 
+const logger = createLogger('git:runtime');
 const processAdmission = { reads: 0, mutations: 0 };
+
+interface AdmittedGitOperation {
+  readonly id: number;
+  readonly method: string;
+  readonly startedAt: number;
+  readonly signal: AbortSignal;
+}
+
+// Admitted operations are tracked process-wide so a refusal can report what holds the capacity.
+const admittedOperations = new Set<AdmittedGitOperation>();
+let admissionSequence = 0;
+let lastRefusalHolders = new Set<number>();
+
+function reportAdmissionRefusal(method: string): void {
+  const holders = [...admittedOperations];
+  // Repeated refusals against the same holders are reported once.
+  if (holders.length === lastRefusalHolders.size && holders.every(({ id }) => lastRefusalHolders.has(id))) return;
+  lastRefusalHolders = new Set(holders.map(({ id }) => id));
+  const now = performance.now();
+  logger.warn('Git operation capacity is exhausted', {
+    method,
+    reads: processAdmission.reads,
+    mutations: processAdmission.mutations,
+    admitted: holders.map((operation) => ({
+      method: operation.method,
+      ageMs: Math.round(now - operation.startedAt),
+      aborted: operation.signal.aborted,
+    })),
+  });
+}
 
 export class GitRuntime {
   readonly git: ExecutionGitService;
@@ -98,15 +130,21 @@ export class GitRuntime {
     return project;
   }
 
-  async #admit<T>(mutation: boolean, options: ExecutorCallOptions | undefined, operation: (options: ExecutorCallOptions) => Promise<T>): Promise<T> {
+  async #admit<T>(method: string, mutation: boolean, options: ExecutorCallOptions | undefined, operation: (options: ExecutorCallOptions) => Promise<T>): Promise<T> {
     this.#available(options);
-    if (mutation ? this.#mutations >= 8 || processAdmission.mutations >= 16 : this.#reads >= GIT_MAX_CONCURRENT_QUERIES || processAdmission.reads >= GIT_MAX_CONCURRENT_QUERIES) throw new GitServiceError('GIT_SERVICE_BUSY', 'Git operation capacity is exhausted');
+    if (mutation ? this.#mutations >= 8 || processAdmission.mutations >= 16 : this.#reads >= GIT_MAX_CONCURRENT_QUERIES || processAdmission.reads >= GIT_MAX_CONCURRENT_QUERIES) {
+      reportAdmissionRefusal(method);
+      throw new GitServiceError('GIT_SERVICE_BUSY', 'Git operation capacity is exhausted');
+    }
     if (mutation) { this.#mutations++; processAdmission.mutations++; } else { this.#reads++; processAdmission.reads++; }
     const signal = options?.signal ? AbortSignal.any([options.signal, this.#abort.signal]) : this.#abort.signal;
+    const admitted = { id: ++admissionSequence, method, startedAt: performance.now(), signal };
+    admittedOperations.add(admitted);
     try {
       const callOptions = { ...options, signal };
       return await withGitOperation(toNativePath(this.configuration.projectBasePath), { ...callOptions, mutation }, (signal) => operation({ ...callOptions, signal }));
     } finally {
+      admittedOperations.delete(admitted);
       if (mutation) { this.#mutations--; processAdmission.mutations--; } else { this.#reads--; processAdmission.reads--; }
     }
   }
@@ -114,7 +152,7 @@ export class GitRuntime {
   async #run<K extends GitMethod>(method: K, request: ExecutionGitRequests[K], options?: ExecutorCallOptions): Promise<ExecutionGitResults[K]> {
     validateGitRequest(method, request);
     try {
-      return await this.#admit(isGitMutation(method), options, async (callOptions) => {
+      return await this.#admit(method, isGitMutation(method), options, async (callOptions) => {
         const projectPath = await this.#repository(request.projectPath, callOptions);
         const execute = async () => {
           this.#available(callOptions);
@@ -190,7 +228,7 @@ export class GitRuntime {
   async #ghCall<K extends keyof ExecutionGhResults>(method: K, request: { projectPath?: string; number?: number }, options?: ExecutorCallOptions): Promise<ExecutionGhResults[K]> {
     validateGhRequest(method, request);
     try {
-      const payload = await this.#admit(false, options, async (callOptions) => {
+      const payload = await this.#admit(`gh.${method}`, false, options, async (callOptions) => {
         if (method === 'getStatus') return this.#gh.getStatus(callOptions.signal);
         if (typeof request.projectPath !== 'string' || !request.projectPath || request.projectPath.length > 4096 || request.projectPath.includes('\0')) throw new GitServiceError('GIT_INVALID_INPUT', 'Invalid GitHub project');
         const projectPath = await this.#repository(request.projectPath, callOptions);
