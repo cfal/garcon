@@ -286,6 +286,7 @@ function createRouteAgent(sessionOverrides = {}) {
     }),
     captureSteerTarget: mock(() => ({
       attempt: {},
+      providerTarget: {},
       identity: { turnId: 'turn-active' },
     })),
     deliverAcceptedSteer: mock(async (input) => {
@@ -302,6 +303,14 @@ function createRouteAgent(sessionOverrides = {}) {
       };
     }),
     recoverQueueEntrySteer: mock((chatId) => queue.readChatExecutionControl(chatId)),
+    enqueueAcceptedSteer: mock(async (input) => {
+      await input.settlement.settleQueueMutation(input.command, input.command.entryId);
+      return {
+        entryId: input.command.entryId,
+        control: storedQueue([{ ...queueEntry(input.command.entryId, input.content), kind: 'steer' }]),
+        duplicate: false,
+      };
+    }),
     deleteChatQueueFile: mock(() => Promise.resolve(undefined)),
     submit: mock(() => Promise.resolve(undefined)),
     registerPendingUserInput: mock(() => Promise.resolve(undefined)),
@@ -1157,6 +1166,31 @@ describe('REST chat command routes', () => {
 	    expect(agent.queue.deliverAcceptedSteer).toHaveBeenCalledOnce();
 	    expect(agent.routes['/api/v1/chats/active-input']).toBeUndefined();
 	  });
+
+  it('POST /steer queues a steer the active turn cannot take yet', async () => {
+    const agent = createRouteAgent();
+    agent.queue.captureSteerTarget.mockImplementation(() => ({
+      attempt: {},
+      providerTarget: null,
+      identity: { turnId: 'turn-active' },
+    }));
+    const result = await callJson(agent.routes['/api/v1/chats/steer'].POST, {
+      clientRequestId: 'req-steer-queued',
+      clientMessageId: 'message-steer-queued',
+      chatId: CHAT_ID,
+      content: 'focus here once started',
+      whenTurnUnavailable: 'queue',
+    });
+
+    expect(result.response.status).toBe(202);
+    expect(result.body).toMatchObject({
+      commandType: 'steer',
+      chatId: CHAT_ID,
+      delivery: 'queued',
+      control: { queue: { entries: [{ content: 'focus here once started', kind: 'steer' }] } },
+    });
+    expect(agent.queue.deliverAcceptedSteer).not.toHaveBeenCalled();
+  });
 
   it('POST /queue/entries/steer consumes the authoritative queue head idempotently', async () => {
     const agent = createRouteAgent();

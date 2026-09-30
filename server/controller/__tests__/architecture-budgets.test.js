@@ -21,8 +21,9 @@ const MAX_LINES = 1000;
 // progress observation and rendering remain outside command/execution ownership.
 // Remote execution adds an availability gate and retains uncertain dispatch attempts.
 // Queued steers add one delivery pass per chat that steers the queue head into the active
-// turn once the turn can take it.
-const EXECUTION_FOOTPRINT_BUDGET = 8885;
+// turn once the turn can take it, and the steer commands' choice to queue a steer the turn
+// cannot take yet instead of refusing it.
+const EXECUTION_FOOTPRINT_BUDGET = 9039;
 
 const GRANDFATHER = {
   'server/runtime/git/diff-engine.ts': 1575,

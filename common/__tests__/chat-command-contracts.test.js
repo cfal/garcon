@@ -309,6 +309,28 @@ describe('chat command request parsers', () => {
     })).toThrow(CommandRequestValidationError);
   });
 
+  it('parses what a steer does when the turn cannot take it', () => {
+    const steer = {
+      clientRequestId: 'request-steer-policy',
+      clientMessageId: 'message-steer-policy',
+      chatId: CHAT_ID,
+      transcriptViewId: TRANSCRIPT_VIEW_ID,
+      content: 'focus here',
+    };
+    expect(parseSteerCommandRequest({ ...steer, whenTurnUnavailable: 'queue' }).whenTurnUnavailable)
+      .toBe('queue');
+    expect(parseSteerCommandRequest({ ...steer, whenTurnUnavailable: 'reject' }).whenTurnUnavailable)
+      .toBe('reject');
+    expect(parseSteerCommandRequest(steer)).not.toHaveProperty('whenTurnUnavailable');
+    expect(() => parseSteerCommandRequest({ ...steer, whenTurnUnavailable: 'wait' }))
+      .toThrow('whenTurnUnavailable must be reject or queue');
+    expect(() => parseSteerCommandRequest({
+      ...steer,
+      whenTurnUnavailable: 'queue',
+      userMessagePresentation: { origin: 'cli', style: 'info' },
+    })).toThrow('cannot set userMessagePresentation');
+  });
+
   it('validates presentation on run and steer requests', () => {
     const run = parseAgentRunCommandRequest({
       clientRequestId: 'request-presentation',

@@ -1,5 +1,9 @@
+import crypto from 'node:crypto';
 import type {
+  CommandAcceptedResponse,
   CommandErrorCode,
+  QueuedQueueEntrySteerCommandResponse,
+  QueuedSteerCommandResponse,
   QueueEntrySteerCommandRequest,
   QueueEntrySteerCommandResponse,
   SteerDeliveryOutcome,
@@ -47,7 +51,7 @@ export class SteerCommands {
     return this.support.deps;
   }
 
-  async submit(input: SteerCommandRequest): Promise<SteerCommandResponse> {
+  async submit(input: SteerCommandRequest): Promise<SteerCommandResponse | QueuedSteerCommandResponse> {
     this.support.assertContent(input.content);
     const clientRequestId = this.support.requireClientRequestId(input.clientRequestId);
     const clientMessageId = this.support.requireClientRequestId(
@@ -70,6 +74,7 @@ export class SteerCommands {
       },
     };
     let outcomeTurnId = observedTarget?.identity.turnId;
+    const queueWhenUnavailable = input.whenTurnUnavailable === 'queue';
 
     try {
       let providerContent = input.content;
@@ -125,12 +130,17 @@ export class SteerCommands {
         }
         let target: CapturedSteerTarget | null;
         try {
-          target = await this.#currentTarget(input.chatId, observedTarget);
+          target = queueWhenUnavailable
+            ? await this.#targetUnlessSteersQueued(input.chatId, observedTarget)
+            : await this.#currentTarget(input.chatId, observedTarget);
         } catch (error) {
           await this.support.settlement.settleSteerFailure(command, error);
           throw error;
         }
         outcomeTurnId = target?.identity.turnId;
+        if (queueWhenUnavailable && !target?.providerTarget) {
+          return this.#queueSteer(input, clientMessageId, ledger.record);
+        }
         if (!target) {
           const error = new DomainError(
             'STEER_TURN_UNAVAILABLE',
@@ -159,13 +169,16 @@ export class SteerCommands {
         };
       });
       const scheduled = await this.#preparationLocks.runExclusive(`chat:${input.chatId}`, async () => {
-        providerContent = await this.#fileContext.resolve({
+        const preparation = {
           chatId: input.chatId,
           clientRequestId,
           content: input.content,
           projectPath: initialChat?.projectPath,
           executorId: initialChat?.executorId,
-        });
+        };
+        providerContent = await (queueWhenUnavailable
+          ? this.#fileContext.resolveOrTyped(preparation)
+          : this.#fileContext.resolve(preparation));
         // Enqueues the command lock before releasing steering preparation order.
         return { response: scheduleResponse() };
       });
@@ -175,7 +188,8 @@ export class SteerCommands {
         clientRequestId,
         integrationId,
         turnId: response.turnId,
-      }, { kind: 'accepted', status: response.status });
+        ...(response.delivery === 'queued' ? { entryId: response.entryId } : {}),
+      }, { kind: response.delivery === 'queued' ? 'queued' : 'accepted', status: response.status });
       return response;
     } catch (error) {
       logSteerOutcome(logger, {
@@ -190,7 +204,7 @@ export class SteerCommands {
 
   async submitQueueEntry(
     input: QueueEntrySteerCommandRequest,
-  ): Promise<QueueEntrySteerCommandResponse> {
+  ): Promise<QueueEntrySteerCommandResponse | QueuedQueueEntrySteerCommandResponse> {
     const clientRequestId = this.support.requireClientRequestId(input.clientRequestId);
     const entryId = this.support.requireQueueEntryId(input.entryId);
     if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 1) {
@@ -318,7 +332,7 @@ export class SteerCommands {
         }
         let target: CapturedSteerTarget | null;
         try {
-          target = await this.#currentTarget(input.chatId, observedTarget);
+          target = await this.#queueableTarget(input.chatId, observedTarget);
         } catch (failure) {
           const error = queueSteerCaptureError(
             failure,
@@ -328,17 +342,17 @@ export class SteerCommands {
           throw error;
         }
         outcomeTurnId = target?.identity.turnId;
-        if (!target) {
-          const control = await this.deps.queue.readChatExecutionControl(input.chatId);
-          const error = new QueueEntrySteerError(
-            'STEER_TURN_UNAVAILABLE',
-            'There is no active turn to steer',
-            409,
-            'not-sent',
-            control,
-          );
-          await this.#settleQueueFailure(command, error, 'not-sent');
-          throw error;
+        // The message waits as a steer while the turn cannot take it, or behind a steer in flight.
+        const inFlight = (await this.deps.queue.readChatExecutionControl(input.chatId)).entries
+          .some((entry) => entry.status === 'steering');
+        if (!target?.providerTarget || inFlight) {
+          const control = await this.deps.queue.markAcceptedQueueEntrySteer({
+            command,
+            expectedRevision: input.expectedRevision,
+            expectedReorderRevision: input.expectedReorderRevision,
+            settlement: this.support.settlement,
+          });
+          return queuedQueueEntrySteerResponse(ledger.record, input.chatId, entryId, control);
         }
 
         const outcome = await this.deps.queue.deliverAcceptedQueueEntrySteer({
@@ -363,7 +377,7 @@ export class SteerCommands {
       });
       const scheduled = await this.#preparationLocks.runExclusive(`chat:${input.chatId}`, async () => {
         if (observedEntry) {
-          providerContent = await this.#fileContext.resolve({
+          providerContent = await this.#fileContext.resolveOrTyped({
             chatId: input.chatId,
             clientRequestId,
             content: observedEntry.content,
@@ -381,7 +395,7 @@ export class SteerCommands {
         turnId: response.turnId,
         source: 'queue-entry',
         entryId,
-      }, { kind: 'accepted', status: response.status });
+      }, { kind: response.delivery === 'queued' ? 'queued' : 'accepted', status: response.status });
       return response;
     } catch (error) {
       logSteerOutcome(logger, {
@@ -394,6 +408,56 @@ export class SteerCommands {
       }, { kind: 'failed', error });
       throw error;
     }
+  }
+
+  // Earlier queued steers go first, so a steer waits behind them even for a steerable turn.
+  async #targetUnlessSteersQueued(
+    chatId: string,
+    observed: CapturedSteerTarget | null,
+  ): Promise<CapturedSteerTarget | null> {
+    const control = await this.deps.queue.readChatExecutionControl(chatId);
+    if (control.entries.some((entry) => entry.kind === 'steer')) return null;
+    return this.#queueableTarget(chatId, observed);
+  }
+
+  // A steer that can wait in the queue waits when its target cannot be captured, unless the
+  // agent cannot be steered at all.
+  async #queueableTarget(
+    chatId: string,
+    observed: CapturedSteerTarget | null,
+  ): Promise<CapturedSteerTarget | null> {
+    try {
+      return await this.#currentTarget(chatId, observed);
+    } catch (error) {
+      if (error instanceof DomainError && error.code === 'OPERATION_UNSUPPORTED') throw error;
+      return null;
+    }
+  }
+
+  async #queueSteer(
+    input: SteerCommandRequest,
+    clientMessageId: string,
+    record: CommandLedgerRecord,
+  ): Promise<QueuedSteerCommandResponse> {
+    const result = await this.deps.queue.enqueueAcceptedSteer({
+      command: {
+        key: record.key,
+        chatId: input.chatId,
+        clientRequestId: record.clientRequestId,
+        entryId: crypto.randomUUID(),
+      },
+      content: input.content,
+      clientMessageId,
+      transcriptViewId: input.transcriptViewId,
+      settlement: this.support.settlement,
+    });
+    return queuedSteerResponse(
+      record,
+      input.chatId,
+      result.entryId,
+      result.control,
+      result.duplicate ? 'duplicate' : 'accepted',
+    );
   }
 
   // Captures before the chat lock, so a steer does not hold the lock for the capture.
@@ -421,7 +485,9 @@ export class SteerCommands {
     }
   }
 
-  async #duplicateResponse(record: CommandLedgerRecord): Promise<SteerCommandResponse> {
+  async #duplicateResponse(
+    record: CommandLedgerRecord,
+  ): Promise<SteerCommandResponse | QueuedSteerCommandResponse> {
     if (record.status === 'finished' && record.turnId) {
       return {
         ...commandResultFromRecord(record, 'duplicate'),
@@ -429,6 +495,10 @@ export class SteerCommands {
         chatId: record.chatId,
         turnId: record.turnId,
       };
+    }
+    if (record.status === 'finished' && record.entryId) {
+      const control = await this.deps.queue.readChatExecutionControl(record.chatId);
+      return queuedSteerResponse(record, record.chatId, record.entryId, control, 'duplicate');
     }
     if (record.status === 'failed' || record.status === 'rejected') {
       throw recordedSteerError(record);
@@ -448,7 +518,7 @@ export class SteerCommands {
 
   async #duplicateQueueResponse(
     record: CommandLedgerRecord,
-  ): Promise<QueueEntrySteerCommandResponse> {
+  ): Promise<QueueEntrySteerCommandResponse | QueuedQueueEntrySteerCommandResponse> {
     const chatExists = Boolean(this.deps.chats.getChat(record.chatId));
     const currentControl = await this.deps.queue.readChatExecutionControl(record.chatId);
     const control = chatExists ? currentControl : undefined;
@@ -461,6 +531,11 @@ export class SteerCommands {
         serverInstanceId: currentControl.serverInstanceId,
         ...(control ? { control: toClientChatExecutionControlState(control) } : {}),
       };
+    }
+    // A finished record without a turn kept its message as a steer entry; a duplicate
+    // input, the only other way to finish without one, leaves nothing to deliver either.
+    if (record.status === 'finished' && record.entryId) {
+      return queuedQueueEntrySteerResponse(record, record.chatId, record.entryId, currentControl, 'duplicate');
     }
     if (record.status === 'failed' || record.status === 'rejected') {
       const code = queueSteerErrorCode(record.errorCode);
@@ -531,7 +606,7 @@ interface SteerLogContext {
 }
 
 type SteerLogOutcome =
-  | { kind: 'accepted'; status: SteerCommandResponse['status'] }
+  | { kind: 'accepted' | 'queued'; status: SteerCommandResponse['status'] }
   | { kind: 'failed'; error: unknown };
 
 export function logSteerOutcome(
@@ -547,8 +622,8 @@ export function logSteerOutcome(
     source: context.source ?? 'inline',
     ...(context.entryId ? { entryId: context.entryId } : {}),
   };
-  if (outcome.kind === 'accepted') {
-    outcomeLogger.info('steer accepted', { ...details, status: outcome.status });
+  if (outcome.kind !== 'failed') {
+    outcomeLogger.info(`steer ${outcome.kind}`, { ...details, status: outcome.status });
     return;
   }
 
@@ -599,6 +674,29 @@ function queueSteerCaptureError(
   return new QueueEntrySteerError(code, error.message, error.status, 'not-sent', control, {
     cause: error,
   });
+}
+
+function queuedSteerResponse(
+  record: CommandLedgerRecord,
+  chatId: string,
+  entryId: string,
+  control: StoredChatExecutionControlState,
+  status: CommandAcceptedResponse['status'] = 'accepted',
+): QueuedSteerCommandResponse {
+  return {
+    ...commandResultFromRecord(record, status),
+    commandType: 'steer',
+    chatId,
+    delivery: 'queued',
+    entryId,
+    control: toClientChatExecutionControlState(control),
+  };
+}
+
+function queuedQueueEntrySteerResponse(
+  ...args: Parameters<typeof queuedSteerResponse>
+): QueuedQueueEntrySteerCommandResponse {
+  return { ...queuedSteerResponse(...args), serverInstanceId: args[3].serverInstanceId };
 }
 
 function recordedSteerError(record: CommandLedgerRecord): CommandValidationError {

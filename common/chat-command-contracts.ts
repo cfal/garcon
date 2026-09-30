@@ -346,6 +346,12 @@ export interface QueueEntryDeleteResponse extends CommandAcceptedResponse {
   control: ChatExecutionControlState;
 }
 
+// What a steer does when the active turn cannot take it now: `reject` answers
+// STEER_TURN_UNAVAILABLE, and `queue` holds it at the front of the queue until the turn can
+// take it, or runs it as the next turn if no turn does. `queue` keeps earlier queued steers
+// first even when the turn could take a steer now.
+export type SteerUnavailableTurnPolicy = 'reject' | 'queue';
+
 export interface SteerCommandRequest {
   clientRequestId: string;
   clientMessageId: string;
@@ -353,6 +359,7 @@ export interface SteerCommandRequest {
   transcriptViewId: string;
   content: string;
   userMessagePresentation?: UserMessagePresentation;
+  whenTurnUnavailable?: SteerUnavailableTurnPolicy;
 }
 
 export interface SteerCommandResponse extends CommandAcceptedResponse {
@@ -360,6 +367,15 @@ export interface SteerCommandResponse extends CommandAcceptedResponse {
   chatId: string;
   turnId: string;
   parentChat?: ParentChatRef | null;
+  delivery?: never;
+}
+
+export interface QueuedSteerCommandResponse extends CommandAcceptedResponse {
+  commandType: 'steer';
+  chatId: string;
+  delivery: 'queued';
+  entryId: string;
+  control: ChatExecutionControlState;
 }
 
 export interface QueueEntrySteerCommandRequest {
@@ -374,6 +390,16 @@ export interface QueueEntrySteerCommandRequest {
 export interface QueueEntrySteerCommandResponse extends SteerCommandResponse {
   serverInstanceId: string;
   control?: ChatExecutionControlState;
+}
+
+// The queued message became a steer entry because the active turn could not take it yet.
+export interface QueuedQueueEntrySteerCommandResponse extends CommandAcceptedResponse {
+  commandType: 'steer';
+  chatId: string;
+  delivery: 'queued';
+  entryId: string;
+  serverInstanceId: string;
+  control: ChatExecutionControlState;
 }
 
 export type SteerDeliveryOutcome = 'not-sent' | 'unknown' | 'accepted';
@@ -774,6 +800,17 @@ export function parseQueueEntryMoveCommandRequest(value: unknown): QueueEntryMov
 export function parseSteerCommandRequest(value: unknown): SteerCommandRequest {
   const body = requestRecord(value);
   const userMessagePresentation = parseCommandUserMessagePresentation(body.userMessagePresentation);
+  if (
+    body.whenTurnUnavailable !== undefined
+    && body.whenTurnUnavailable !== 'reject'
+    && body.whenTurnUnavailable !== 'queue'
+  ) {
+    throw new CommandRequestValidationError('whenTurnUnavailable must be reject or queue');
+  }
+  // Queued inputs carry no presentation, so a steer that may be queued cannot have one.
+  if (body.whenTurnUnavailable === 'queue' && userMessagePresentation !== undefined) {
+    throw new CommandRequestValidationError('A steer that may be queued cannot set userMessagePresentation');
+  }
   return {
     clientRequestId: requiredCommandCorrelationId(body, 'clientRequestId'),
     clientMessageId: requiredCommandCorrelationId(body, 'clientMessageId'),
@@ -781,6 +818,7 @@ export function parseSteerCommandRequest(value: unknown): SteerCommandRequest {
     transcriptViewId: requiredString(body, 'transcriptViewId'),
     content: requiredContent(body, 'content'),
     ...(userMessagePresentation === undefined ? {} : { userMessagePresentation }),
+    ...(body.whenTurnUnavailable === undefined ? {} : { whenTurnUnavailable: body.whenTurnUnavailable }),
   };
 }
 

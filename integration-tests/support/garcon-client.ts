@@ -29,6 +29,8 @@ import type {
   QueueEntryReplaceCommandRequest,
   QueueEntrySteerCommandRequest,
   QueueEntrySteerCommandResponse,
+  QueuedQueueEntrySteerCommandResponse,
+  QueuedSteerCommandResponse,
   QueueMutationResponse,
   SteerCommandRequest,
   SteerCommandResponse,
@@ -824,8 +826,8 @@ export class GarconTestClient {
 
   async steer(
     request: Omit<SteerCommandRequest, 'transcriptViewId'> & { transcriptViewId?: string },
-  ): Promise<SteerCommandResponse> {
-    return this.post<SteerCommandResponse>('/api/v1/chats/steer', {
+  ): Promise<SteerCommandResponse | QueuedSteerCommandResponse> {
+    return this.post<SteerCommandResponse | QueuedSteerCommandResponse>('/api/v1/chats/steer', {
       ...request,
       transcriptViewId: request.transcriptViewId ?? await this.#currentTranscriptViewId(request.chatId),
     });
@@ -834,9 +836,9 @@ export class GarconTestClient {
   async steerQueued(
     request: Omit<QueueEntrySteerCommandRequest, 'transcriptViewId'>
       & { transcriptViewId?: string; clientMessageId?: string },
-  ): Promise<QueueEntrySteerCommandResponse> {
+  ): Promise<QueueEntrySteerCommandResponse | QueuedQueueEntrySteerCommandResponse> {
     const { clientMessageId: _legacyClientMessageId, ...command } = request;
-    return this.post<QueueEntrySteerCommandResponse>('/api/v1/chats/queue/entries/steer', {
+    return this.post<QueueEntrySteerCommandResponse | QueuedQueueEntrySteerCommandResponse>('/api/v1/chats/queue/entries/steer', {
       ...command,
       transcriptViewId: request.transcriptViewId ?? await this.#currentTranscriptViewId(request.chatId),
     });

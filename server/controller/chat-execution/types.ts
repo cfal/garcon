@@ -211,6 +211,23 @@ export interface AcceptedQueueEntrySteerOutcome extends AcceptedSteerOutcome {
   control: StoredChatExecutionControlState;
 }
 
+// A steer the active turn cannot take now, queued ahead of queued turns.
+export interface AcceptedQueueSteerCreate {
+  command: AcceptedExecutionCommand & { entryId: string };
+  content: string;
+  clientMessageId: string;
+  transcriptViewId: string;
+  settlement: CommandSettlementPort;
+}
+
+// A queued message whose Steer the active turn cannot take now, kept as a steer entry.
+export interface AcceptedQueueEntrySteerMark {
+  command: AcceptedExecutionCommand & { entryId: string };
+  expectedRevision: number;
+  expectedReorderRevision: number;
+  settlement: CommandSettlementPort;
+}
+
 export interface AcceptedSteerOutcome {
   turnId: string;
   duplicate: boolean;
@@ -297,6 +314,8 @@ export interface ChatExecutionCommands {
   deliverAcceptedQueueEntrySteer(
     input: AcceptedQueueEntrySteer,
   ): Promise<AcceptedQueueEntrySteerOutcome>;
+  enqueueAcceptedSteer(input: AcceptedQueueSteerCreate): Promise<QueueCommandMutationResult>;
+  markAcceptedQueueEntrySteer(input: AcceptedQueueEntrySteerMark): Promise<StoredChatExecutionControlState>;
   recoverQueueEntrySteer(chatId: string, entryId: string): Promise<StoredChatExecutionControlState>;
   stopActiveTurn(chatId: string): Promise<StopActiveTurnResult>;
   interruptActiveTurn(chatId: string): Promise<ChatStopOutcome>;

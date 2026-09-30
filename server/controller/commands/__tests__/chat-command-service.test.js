@@ -94,10 +94,11 @@ function directReservation(chatId) {
   };
 }
 
-function queueEntry(id, content = 'queued', status = 'queued', revision = 1) {
+function queueEntry(id, content = 'queued', status = 'queued', revision = 1, kind = 'turn') {
   return {
     id,
     content,
+    kind,
     status,
     revision,
     createdAt: '2026-02-27T00:00:00.000Z',
@@ -444,6 +445,20 @@ function makeService(overrides = {}) {
       };
     }),
     recoverQueueEntrySteer: mock((chatId) => queue.readChatExecutionControl(chatId)),
+    enqueueAcceptedSteer: mock(async (input) => {
+      await input.settlement.settleQueueMutation(input.command, input.command.entryId);
+      return {
+        entryId: input.command.entryId,
+        control: storedQueue([queueEntry(input.command.entryId, input.content, 'queued', 1, 'steer')]),
+        duplicate: false,
+      };
+    }),
+    markAcceptedQueueEntrySteer: mock(async (input) => {
+      await input.settlement.settleQueueMutation(input.command, input.command.entryId);
+      return storedQueue([
+        queueEntry(input.command.entryId, 'queued guidance', 'queued', input.expectedRevision, 'steer'),
+      ], { reorderRevision: input.expectedReorderRevision });
+    }),
     admitUserInput: mock(() => Promise.resolve(undefined)),
     reserveTranscriptSnapshot: mock((chatId) => {
       const source = sessions.get(chatId);
@@ -5488,6 +5503,248 @@ describe('ChatCommandService', () => {
     expect(queue.deliverAcceptedSteer).toHaveBeenCalledWith(expect.objectContaining({
       target: initialTarget,
     }));
+  });
+
+  it('queues a steer the active turn cannot take yet and replays it as queued', async () => {
+    const startingTarget = { attempt: {}, providerTarget: null, identity: { turnId: 'turn-active' } };
+    const { service, queue, ledger } = makeService({
+      queue: { captureSteerTarget: mock(() => startingTarget) },
+    });
+    const input = {
+      chatId: SOURCE_CHAT_ID,
+      content: 'steer once the turn starts',
+      clientRequestId: 'request-steer-queued',
+      clientMessageId: 'message-steer-queued',
+      whenTurnUnavailable: 'queue',
+    };
+
+    const queued = await service.submitSteer(input);
+    expect(queued).toMatchObject({
+      commandType: 'steer',
+      status: 'accepted',
+      delivery: 'queued',
+      control: { queue: { entries: [{ content: 'steer once the turn starts', kind: 'steer' }] } },
+    });
+    expect(queue.enqueueAcceptedSteer).toHaveBeenCalledWith(expect.objectContaining({
+      content: 'steer once the turn starts',
+      clientMessageId: 'message-steer-queued',
+      transcriptViewId: 'view-1',
+    }));
+    expect(queue.deliverAcceptedSteer).not.toHaveBeenCalled();
+    expect(await readLedgerRecord(ledger, 'steer', input.clientRequestId)).toMatchObject({
+      status: 'finished',
+      entryId: queued.entryId,
+      turnId: undefined,
+    });
+
+    await expect(service.submitSteer(input)).resolves.toMatchObject({
+      status: 'duplicate',
+      delivery: 'queued',
+      entryId: queued.entryId,
+    });
+    expect(queue.enqueueAcceptedSteer).toHaveBeenCalledTimes(1);
+  });
+
+  it('queues a steer behind earlier queued steers even when the turn could take it', async () => {
+    const target = { attempt: {}, providerTarget: {}, identity: { turnId: 'turn-active' } };
+    const waiting = storedQueue([queueEntry('steer-earlier', 'earlier guidance', 'queued', 1, 'steer')]);
+    const { service, queue } = makeService({
+      queue: {
+        captureSteerTarget: mock(() => target),
+        readChatExecutionControl: mock(async () => waiting),
+      },
+    });
+
+    await expect(service.submitSteer({
+      chatId: SOURCE_CHAT_ID,
+      content: 'later guidance',
+      clientRequestId: 'request-steer-behind',
+      clientMessageId: 'message-steer-behind',
+      whenTurnUnavailable: 'queue',
+    })).resolves.toMatchObject({ delivery: 'queued' });
+    expect(queue.deliverAcceptedSteer).not.toHaveBeenCalled();
+    expect(queue.enqueueAcceptedSteer).toHaveBeenCalledTimes(1);
+  });
+
+  it('delivers a queue-mode steer at once when the turn can take it and no steer waits', async () => {
+    const target = { attempt: {}, providerTarget: {}, identity: { turnId: 'turn-active' } };
+    const { service, queue } = makeService({
+      queue: { captureSteerTarget: mock(() => target) },
+    });
+
+    await expect(service.submitSteer({
+      chatId: SOURCE_CHAT_ID,
+      content: 'immediate guidance',
+      clientRequestId: 'request-steer-immediate',
+      clientMessageId: 'message-steer-immediate',
+      whenTurnUnavailable: 'queue',
+    })).resolves.toMatchObject({ status: 'accepted', turnId: 'turn-active' });
+    expect(queue.deliverAcceptedSteer).toHaveBeenCalledTimes(1);
+    expect(queue.enqueueAcceptedSteer).not.toHaveBeenCalled();
+  });
+
+  it('queues a queue-mode steer whose target could not be captured', async () => {
+    const { service, queue } = makeService({
+      queue: {
+        captureSteerTarget: mock(async () => {
+          throw new DomainError('EXECUTOR_UNAVAILABLE', 'Executor is unavailable', 503, true);
+        }),
+      },
+    });
+
+    await expect(service.submitSteer({
+      chatId: SOURCE_CHAT_ID,
+      content: 'guidance while reconnecting',
+      clientRequestId: 'request-steer-reconnecting',
+      clientMessageId: 'message-steer-reconnecting',
+      whenTurnUnavailable: 'queue',
+    })).resolves.toMatchObject({ delivery: 'queued' });
+    expect(queue.enqueueAcceptedSteer).toHaveBeenCalledTimes(1);
+  });
+
+  it('queues a queue-mode steer as typed when its executor cannot prepare file context', async () => {
+    const executorUnavailable = () => new DomainError(
+      'EXECUTOR_UNAVAILABLE',
+      'Executor is unavailable',
+      503,
+      true,
+    );
+    const { service, queue, ledger } = makeService({
+      fileMentions: { resolve: mock(async () => { throw executorUnavailable(); }) },
+      queue: { captureSteerTarget: mock(async () => { throw executorUnavailable(); }) },
+    });
+    const input = {
+      chatId: SOURCE_CHAT_ID,
+      content: 'check @notes.txt while offline',
+      clientRequestId: 'request-steer-offline',
+      clientMessageId: 'message-steer-offline',
+    };
+
+    await expect(service.submitSteer({ ...input, whenTurnUnavailable: 'queue' }))
+      .resolves.toMatchObject({ delivery: 'queued' });
+    expect(queue.enqueueAcceptedSteer).toHaveBeenCalledWith(expect.objectContaining({
+      content: 'check @notes.txt while offline',
+    }));
+
+    await expect(service.submitSteer({
+      ...input,
+      clientRequestId: 'request-steer-offline-reject',
+      clientMessageId: 'message-steer-offline-reject',
+    })).rejects.toMatchObject({ code: 'EXECUTOR_UNAVAILABLE' });
+    expect(await readLedgerRecord(ledger, 'steer', 'request-steer-offline-reject')).toBeNull();
+    expect(queue.enqueueAcceptedSteer).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a queued message as a steer when its executor cannot prepare file context', async () => {
+    const executorUnavailable = () => new DomainError(
+      'EXECUTOR_UNAVAILABLE',
+      'Executor is unavailable',
+      503,
+      true,
+    );
+    const queued = storedQueue([queueEntry('entry-head', 'check @notes.txt', 'queued', 2)]);
+    const { service, queue } = makeService({
+      fileMentions: { resolve: mock(async () => { throw executorUnavailable(); }) },
+      queue: {
+        captureSteerTarget: mock(async () => { throw executorUnavailable(); }),
+        readChatExecutionControl: mock(async () => queued),
+      },
+    });
+
+    await expect(service.submitQueueEntrySteer({
+      chatId: SOURCE_CHAT_ID,
+      clientRequestId: 'request-queue-steer-offline',
+      entryId: 'entry-head',
+      expectedRevision: 2,
+      expectedReorderRevision: 0,
+    })).resolves.toMatchObject({ delivery: 'queued', entryId: 'entry-head' });
+    expect(queue.markAcceptedQueueEntrySteer).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a queue-mode steer for an agent that cannot be steered', async () => {
+    const { service, queue } = makeService({
+      queue: {
+        captureSteerTarget: mock(async () => {
+          throw new DomainError('OPERATION_UNSUPPORTED', 'This agent does not support steering', 422);
+        }),
+      },
+    });
+
+    await expect(service.submitSteer({
+      chatId: SOURCE_CHAT_ID,
+      content: 'guidance',
+      clientRequestId: 'request-steer-unsupported',
+      clientMessageId: 'message-steer-unsupported',
+      whenTurnUnavailable: 'queue',
+    })).rejects.toMatchObject({ code: 'OPERATION_UNSUPPORTED' });
+    expect(queue.enqueueAcceptedSteer).not.toHaveBeenCalled();
+  });
+
+  it('keeps a queued message as a steer when the turn cannot take it and replays that', async () => {
+    const startingTarget = { attempt: {}, providerTarget: null, identity: { turnId: 'turn-active' } };
+    const queued = storedQueue([queueEntry('entry-head', 'queued guidance', 'queued', 2)], {
+      reorderRevision: 3,
+    });
+    const { service, queue, ledger } = makeService({
+      queue: {
+        captureSteerTarget: mock(() => startingTarget),
+        readChatExecutionControl: mock(async () => queued),
+      },
+    });
+    const input = {
+      chatId: SOURCE_CHAT_ID,
+      clientRequestId: 'request-queue-steer-kept',
+      entryId: 'entry-head',
+      expectedRevision: 2,
+      expectedReorderRevision: 3,
+    };
+
+    await expect(service.submitQueueEntrySteer(input)).resolves.toMatchObject({
+      status: 'accepted',
+      delivery: 'queued',
+      entryId: 'entry-head',
+      serverInstanceId: 'server-instance-test',
+      control: { queue: { entries: [{ id: 'entry-head', kind: 'steer' }] } },
+    });
+    expect(queue.markAcceptedQueueEntrySteer).toHaveBeenCalledWith(expect.objectContaining({
+      expectedRevision: 2,
+      expectedReorderRevision: 3,
+    }));
+    expect(queue.deliverAcceptedQueueEntrySteer).not.toHaveBeenCalled();
+    expect(await readLedgerRecord(ledger, 'steer', input.clientRequestId)).toMatchObject({
+      status: 'finished',
+      entryId: 'entry-head',
+      turnId: undefined,
+    });
+    await expect(service.submitQueueEntrySteer(input)).resolves.toMatchObject({
+      status: 'duplicate',
+      delivery: 'queued',
+      entryId: 'entry-head',
+    });
+    expect(queue.markAcceptedQueueEntrySteer).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a queued message as a steer behind a steer in flight', async () => {
+    const target = { attempt: {}, providerTarget: {}, identity: { turnId: 'turn-active' } };
+    const queued = storedQueue([
+      queueEntry('entry-steering', 'earlier guidance', 'steering', 1, 'steer'),
+      queueEntry('entry-head', 'queued guidance', 'queued', 2),
+    ], { reorderRevision: 3 });
+    const { service, queue } = makeService({
+      queue: {
+        captureSteerTarget: mock(() => target),
+        readChatExecutionControl: mock(async () => queued),
+      },
+    });
+
+    await expect(service.submitQueueEntrySteer({
+      chatId: SOURCE_CHAT_ID,
+      clientRequestId: 'request-queue-steer-behind',
+      entryId: 'entry-head',
+      expectedRevision: 2,
+      expectedReorderRevision: 3,
+    })).resolves.toMatchObject({ delivery: 'queued' });
+    expect(queue.deliverAcceptedQueueEntrySteer).not.toHaveBeenCalled();
   });
 
   it('captures the steering target again when its turn could not be steered before the lock', async () => {

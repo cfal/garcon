@@ -994,6 +994,68 @@ describe('ChatExecutionCoordinator', () => {
     expect(coordinator.ownsExecution('chat-1')).toBe(false);
   });
 
+  it('runs a queued steer as the next turn when no turn is running', async () => {
+    const fixture = createFixture();
+    coordinator = fixture.coordinator;
+    const settlement = {
+      settleQueueMutation: mock(async () => undefined),
+      settleSteerFailure: mock(async () => undefined),
+    };
+
+    await coordinator.enqueueAcceptedSteer({
+      command: { key: 'steer-command', chatId: 'chat-1', clientRequestId: 'steer-request', entryId: 'steer-1' },
+      content: 'guidance after the turn',
+      clientMessageId: 'message-steer',
+      transcriptViewId: 'view-1',
+      settlement,
+    });
+    await waitFor(() => fixture.turnRunner.runAgentTurn.mock.calls.length === 1);
+
+    expect(fixture.turnRunner.runAgentTurn.mock.calls[0][1]).toBe('guidance after the turn');
+    expect(fixture.turnRunner.runAgentTurn.mock.calls[0][2]).toMatchObject({
+      clientMessageId: 'message-steer',
+      transcriptViewId: 'view-1',
+    });
+    expect(fixture.turnRunner.steerInput).not.toHaveBeenCalled();
+  });
+
+  it('steers a queued steer into the active turn once its run reports that it can take it', async () => {
+    let providerTarget = null;
+    const fixture = createFixture({
+      turnRunner: {
+        captureSteerTarget: mock(async () => providerTarget),
+        steerInput: mock(async (_chatId, _content, _options, _target, prepareDelivery) => {
+          await prepareDelivery();
+          return { kind: 'accepted' };
+        }),
+      },
+    });
+    coordinator = fixture.coordinator;
+    coordinator.reserveDirectTurn('chat-1', { turnId: 'turn-1' });
+    const settlement = {
+      settleQueueMutation: mock(async () => undefined),
+      settleSteerFailure: mock(async () => undefined),
+    };
+
+    await coordinator.enqueueAcceptedSteer({
+      command: { key: 'steer-command', chatId: 'chat-1', clientRequestId: 'steer-request', entryId: 'steer-1' },
+      content: 'early guidance',
+      clientMessageId: 'message-steer',
+      transcriptViewId: 'view-1',
+      settlement,
+    });
+    await coordinator.waitForDispatches();
+    expect(fixture.turnRunner.steerInput).not.toHaveBeenCalled();
+
+    providerTarget = {};
+    coordinator.retryQueuedSteers('chat-1');
+    await coordinator.waitForDispatches();
+
+    expect(fixture.turnRunner.steerInput.mock.calls[0][1]).toBe('early guidance');
+    expect((await coordinator.readChatExecutionControl('chat-1')).entries).toEqual([]);
+    expect(fixture.turnRunner.runAgentTurn).not.toHaveBeenCalled();
+  });
+
   it('treats an accepted queued steer without preparation as an unknown outcome', async () => {
     const fixture = createFixture({
       turnRunner: {

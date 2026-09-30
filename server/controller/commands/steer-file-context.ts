@@ -6,6 +6,14 @@ const logger = createLogger('commands:steer');
 const STEER_FILE_CONTEXT_TIMEOUT_MS = 2_000;
 const STEER_FILE_CONTEXT_IN_FLIGHT_LIMIT = 8;
 
+interface SteerFileContextInput {
+  chatId: string;
+  clientRequestId: string;
+  content: string;
+  projectPath?: string;
+  executorId?: string | null;
+}
+
 // Resolves the file mentions in steering input. A steer goes to a turn that is already
 // running, so a slow resolution, a chat that already has one in flight, or a full budget
 // sends the input as typed.
@@ -14,13 +22,22 @@ export class SteerFileContext {
 
   constructor(private readonly fileMentions: FileMentionResolverDep) {}
 
-  async resolve(input: {
-    chatId: string;
-    clientRequestId: string;
-    content: string;
-    projectPath?: string;
-    executorId?: string | null;
-  }): Promise<string> {
+  // A steer that can wait in the queue is kept even when resolution fails, as while its
+  // executor is unavailable, because queued delivery resolves its file context again.
+  async resolveOrTyped(input: SteerFileContextInput): Promise<string> {
+    try {
+      return await this.resolve(input);
+    } catch (error) {
+      logger.warn('steer file context failed', {
+        chatId: input.chatId,
+        clientRequestId: input.clientRequestId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return input.content;
+    }
+  }
+
+  async resolve(input: SteerFileContextInput): Promise<string> {
     if (!input.projectPath) return input.content;
     if (
       this.#resolutions.has(input.chatId)

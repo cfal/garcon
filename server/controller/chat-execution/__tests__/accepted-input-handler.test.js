@@ -90,6 +90,8 @@ function scaffold(overrides = {}) {
     releaseSteer: mock(async () => control({
       entries: [{ id: 'entry-1', content: 'queued guidance', revision: 2, status: 'queued' }],
     })),
+    createSteer: mock(async () => ({ entryId: 'steer-1', control: control(), duplicate: false })),
+    markSteer: mock(async () => control()),
     consumeSteer: mock(async () => control({ recentlyDispatched: [{
       entryId: 'entry-1',
       revision: 2,
@@ -122,6 +124,8 @@ function scaffold(overrides = {}) {
       reserveSteer: m.reserveSteer,
       releaseSteer: m.releaseSteer,
       consumeSteer: m.consumeSteer,
+      createSteer: m.createSteer,
+      markSteer: m.markSteer,
       requeueAndPause: m.requeueAndPause,
       read: m.read,
     },
@@ -166,6 +170,71 @@ describe('AcceptedInputHandler', () => {
 
     expect(events).toEqual(['created', 'settled', 'drain']);
     expect(m.create).toHaveBeenCalled();
+  });
+
+  test('queues a steer under its submission identity before requesting dispatch', async () => {
+    const events = [];
+    const settle = settlement({
+      settleQueueMutation: mock(async () => { events.push('settled'); }),
+    });
+    const { handler, m } = scaffold({
+      createSteer: mock(async () => {
+        events.push('created');
+        return { entryId: 'steer-1', control: control(), duplicate: false };
+      }),
+      requestDrain: mock(() => { events.push('drain'); }),
+    });
+
+    await handler.enqueueSteer({
+      command: { ...command(), entryId: 'steer-1' },
+      content: 'guidance',
+      clientMessageId: 'message-steer',
+      transcriptViewId: 'view-1',
+      settlement: settle,
+    });
+
+    expect(events).toEqual(['created', 'settled', 'drain']);
+    expect(m.createSteer).toHaveBeenCalledWith(
+      'chat-1',
+      'guidance',
+      { key: command().key, entryId: 'steer-1' },
+      { clientMessageId: 'message-steer', transcriptViewId: 'view-1' },
+    );
+  });
+
+  test('records a queued steer that could not be created as a failed steer', async () => {
+    const settle = settlement();
+    const failure = new Error('control store unavailable');
+    const { handler } = scaffold({ createSteer: mock(async () => { throw failure; }) });
+
+    await expect(handler.enqueueSteer({
+      command: { ...command(), entryId: 'steer-1' },
+      content: 'guidance',
+      clientMessageId: 'message-steer',
+      transcriptViewId: 'view-1',
+      settlement: settle,
+    })).rejects.toBe(failure);
+    expect(settle.settleSteerFailure).toHaveBeenCalledWith(expect.anything(), failure);
+  });
+
+  test('keeps a queued message as a steer and settles it', async () => {
+    const settle = settlement();
+    const { handler, m } = scaffold();
+
+    await handler.markQueueEntrySteer({
+      command: { ...command(), entryId: 'entry-1' },
+      expectedRevision: 2,
+      expectedReorderRevision: 4,
+      settlement: settle,
+    });
+
+    expect(m.markSteer).toHaveBeenCalledWith('chat-1', {
+      entryId: 'entry-1',
+      expectedRevision: 2,
+      expectedReorderRevision: 4,
+    });
+    expect(settle.settleQueueMutation).toHaveBeenCalledWith(expect.anything(), 'entry-1');
+    expect(m.requestDrain).toHaveBeenCalled();
   });
 
   test('settles a queue move with every concurrency precondition', async () => {

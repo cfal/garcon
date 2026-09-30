@@ -39,7 +39,9 @@ import {
   type AcceptedSteerInput,
   type AcceptedSteerOutcome,
   type AcceptedQueueEntrySteer,
+  type AcceptedQueueEntrySteerMark,
   type AcceptedQueueEntrySteerOutcome,
+  type AcceptedQueueSteerCreate,
   type AgentTurnRunnerPort,
   type ChatExecutionService,
   type ChatExecutionCoordinatorEvents,
@@ -499,6 +501,10 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
   async deliverAcceptedQueueEntrySteer(input: AcceptedQueueEntrySteer): Promise<AcceptedQueueEntrySteerOutcome> {
     return this.#acceptedInputHandler.steerQueueEntry(input);
   }
+
+  enqueueAcceptedSteer(input: AcceptedQueueSteerCreate) { return this.#acceptedInputHandler.enqueueSteer(input); }
+
+  markAcceptedQueueEntrySteer(input: AcceptedQueueEntrySteerMark) { return this.#acceptedInputHandler.markQueueEntrySteer(input); }
 
   async recoverQueueEntrySteer(chatId: string, entryId: string): Promise<StoredChatExecutionControlState> {
     return this.#acceptedInputHandler.recoverQueueEntrySteer(chatId, entryId);

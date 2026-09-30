@@ -21,7 +21,9 @@ import type {
   AcceptedSteerInput,
   AcceptedSteerOutcome,
   AcceptedQueueEntrySteer,
+  AcceptedQueueEntrySteerMark,
   AcceptedQueueEntrySteerOutcome,
+  AcceptedQueueSteerCreate,
   CapturedSteerTarget,
   DirectInputScheduleOutcome,
   DirectTurnReservation,
@@ -279,6 +281,41 @@ export class AcceptedInputHandler {
     }
   }
 
+  async enqueueSteer(input: AcceptedQueueSteerCreate): Promise<QueueCommandMutationResult> {
+    try {
+      const result = await this.#controls.createSteer(
+        input.command.chatId,
+        input.content,
+        { key: input.command.key, entryId: input.command.entryId },
+        { clientMessageId: input.clientMessageId, transcriptViewId: input.transcriptViewId },
+      );
+      await input.settlement.settleQueueMutation(input.command, result.entryId);
+      this.#coordinator.requestDrain(input.command.chatId, 'accepted steer queued');
+      return result;
+    } catch (error) {
+      await input.settlement.settleSteerFailure(input.command, error);
+      throw error;
+    }
+  }
+
+  async markQueueEntrySteer(input: AcceptedQueueEntrySteerMark): Promise<StoredChatExecutionControlState> {
+    let control: StoredChatExecutionControlState;
+    try {
+      control = await this.#controls.markSteer(input.command.chatId, {
+        entryId: input.command.entryId,
+        expectedRevision: input.expectedRevision,
+        expectedReorderRevision: input.expectedReorderRevision,
+      });
+    } catch (error) {
+      const wrapped = this.#queueSteerError(error, 'not-sent');
+      await this.#settleQueueSteerFailure(input, wrapped, 'not-sent');
+      throw wrapped;
+    }
+    await input.settlement.settleQueueMutation(input.command, input.command.entryId);
+    this.#coordinator.requestDrain(input.command.chatId, 'queued message kept as a steer');
+    return control;
+  }
+
   async steerQueueEntry(input: AcceptedQueueEntrySteer): Promise<AcceptedQueueEntrySteerOutcome> {
     let reservation: Awaited<ReturnType<ChatExecutionControlOperations['reserveSteer']>>;
     try {
@@ -460,7 +497,7 @@ export class AcceptedInputHandler {
   }
 
   async #settleQueueSteerFailure(
-    input: AcceptedQueueEntrySteer,
+    input: Pick<AcceptedQueueEntrySteer, 'command' | 'settlement'>,
     error: unknown,
     deliveryOutcome: 'not-sent' | 'unknown' | 'accepted',
   ): Promise<void> {
