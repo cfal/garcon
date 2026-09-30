@@ -930,7 +930,7 @@ describe('SidebarVirtualSortableChatList', () => {
 		const firstVirtualItem = () =>
 			document.querySelector<HTMLElement>('[data-sidebar-virtual-item="chat"]');
 
-		expect(firstVirtualItem()?.style.height).toBe('84px');
+		expect(firstVirtualItem()?.style.height).toBe('76px');
 
 		await view.rerender({
 			rows: makeRows(20),
@@ -978,8 +978,8 @@ describe('SidebarVirtualSortableChatList', () => {
 		});
 
 		await waitFor(() => {
-			// Preserves the fractional offset within chat-23 as rows shrink from 84px to 40px.
-			expect(viewport.scrollTop).toBe(952);
+			// Preserves the fractional offset within chat-26 as rows shrink from 76px to 40px.
+			expect(viewport.scrollTop).toBe(1053);
 		});
 
 		// happy-dom does not emit a scroll event for programmatic writes, which
@@ -987,11 +987,11 @@ describe('SidebarVirtualSortableChatList', () => {
 		viewport.dispatchEvent(new Event('scroll'));
 		await tick();
 
-		const anchoredRow = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="chat-23"]');
+		const anchoredRow = document.querySelector<HTMLElement>('[data-sidebar-virtual-row="chat-26"]');
 		if (!anchoredRow) throw new Error('expected anchored row to stay mounted');
 		// happy-dom bounding rects ignore transforms, so verify the rendered
 		// position arithmetically instead.
-		expect(anchoredRow.parentElement?.style.transform).toContain('translateY(920px)');
+		expect(anchoredRow.parentElement?.style.transform).toContain('translateY(1040px)');
 	});
 
 	it('leaves the scroll offset untouched for explicit row heights', async () => {
@@ -1095,7 +1095,7 @@ describe('SidebarVirtualSortableChatList', () => {
 		);
 		if (!viewport) throw new Error('expected viewport');
 
-		// The two 32px headers and first 84px chat precede this fractional offset.
+		// The two 32px headers and first 76px chat precede this fractional offset.
 		viewport.scrollTop = 160.5;
 		viewport.dispatchEvent(new Event('scroll'));
 		await tick();
@@ -1139,7 +1139,7 @@ describe('SidebarVirtualSortableChatList', () => {
 		);
 		if (!viewport) throw new Error('expected viewport');
 
-		viewport.scrollTop = 4400;
+		viewport.scrollTop = 3920;
 		viewport.dispatchEvent(new Event('scroll'));
 		await tick();
 

@@ -141,8 +141,8 @@ describe('shared sidebar chat row', () => {
 		expect(metadataProjectLabel.parentElement?.className).toContain('text-[12px]');
 		expect(metadataProjectLabel.parentElement?.className).toContain('gap-1');
 		const sidebarPreview = screen.getByText('Latest preview text');
-		expect(sidebarPreview.className).toContain('mt-0.5');
-		expect(sidebarPreview.className).toContain('mb-1');
+		expect(sidebarPreview.className).not.toContain('mt-');
+		expect(sidebarPreview.className).not.toContain('mb-');
 		expect(sidebarPreview.className).toContain('font-semibold');
 		expect(screen.getByText('Claude')).toBeTruthy();
 		expect(screen.getByText('ops')).toBeTruthy();
@@ -724,8 +724,8 @@ describe('shared sidebar chat row', () => {
 		expect(screen.getByTitle('/very/long/workspace/projects/feature-branch/app')).toBeTruthy();
 		expect(screen.queryByText('3h ago')).toBeNull();
 		const searchPreview = screen.getByText('Latest preview text');
-		expect(searchPreview.className).toContain('mt-0.5');
-		expect(searchPreview.className).toContain('mb-1');
+		expect(searchPreview.className).not.toContain('mt-');
+		expect(searchPreview.className).not.toContain('mb-');
 		expect(searchPreview.className).toContain('font-semibold');
 		expect(screen.getByText('Claude')).toBeTruthy();
 		expect(screen.getByText('ops')).toBeTruthy();

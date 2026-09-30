@@ -83,8 +83,8 @@
 {#snippet preview()}
 	<div
 		class={cn(
-			'mb-1 mt-0.5 text-[13px] italic',
-			isSidebar ? 'truncate' : 'line-clamp-2 min-h-[2.4em] whitespace-pre-wrap break-words',
+			'text-[13px] italic',
+			isSidebar ? 'truncate' : 'mb-1 mt-0.5 line-clamp-2 min-h-[2.4em] whitespace-pre-wrap break-words',
 			isUnread ? 'font-semibold' : 'font-normal',
 			selectedForeground ? 'text-sidebar-chat-item-selected-foreground/90' : 'text-foreground/80',
 		)}
@@ -95,7 +95,7 @@
 {/snippet}
 
 <div
-	class="relative w-full min-w-0"
+	class={cn('relative w-full min-w-0', isSidebar && 'flex flex-col gap-1')}
 	data-slot={isSidebar ? 'sidebar-chat-summary' : 'chat-summary'}
 	data-variant={variant}
 	data-layout={chatItemLayout}
@@ -152,7 +152,7 @@
 	{#if isSidebar && projectPath}
 		<div
 			class={cn(
-				'mt-0.5 flex min-w-0 items-baseline gap-1 overflow-hidden text-[12px] leading-[1.3]',
+				'flex min-w-0 items-baseline gap-1 overflow-hidden text-[12px] leading-[1.3]',
 				selectedForeground
 					? 'text-sidebar-chat-item-selected-foreground/80'
 					: 'text-muted-foreground',
@@ -177,7 +177,10 @@
 	{/if}
 
 	{#if !isSingleLine}
-		<div class="mt-1 flex min-w-0 items-center gap-1" data-slot="chat-summary-pills">
+		<div
+			class={cn('flex min-w-0 items-center gap-1', !isSidebar && 'mt-1')}
+			data-slot="chat-summary-pills"
+		>
 			{#if executorLabel}
 				<span
 					class="inline-flex min-w-0 max-w-[45%] shrink-0 items-center gap-1 rounded-full border border-border bg-muted px-1.5 py-0.5 text-[10px] font-semibold leading-none text-foreground"

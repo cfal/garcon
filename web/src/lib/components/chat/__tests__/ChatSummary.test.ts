@@ -45,6 +45,7 @@ describe('ChatSummary', () => {
 				currentTime: new Date('2026-09-07T12:00:00.000Z'),
 			});
 			const summary = view.container.querySelector('[data-slot="sidebar-chat-summary"]')!;
+			expect(summary.className).toContain('flex-col gap-1');
 			const header = summary.firstElementChild!;
 			expect(header.getAttribute('data-slot')).toBe('chat-summary-header');
 			expect(header.querySelector('[data-slot="sidebar-chat-timestamp-badge"]')).toBeTruthy();

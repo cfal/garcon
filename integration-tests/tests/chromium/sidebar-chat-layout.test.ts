@@ -34,15 +34,28 @@ async function expectRowGeometry(row: Locator, showProjectPath: boolean): Promis
     const path = summary.querySelector('[data-slot="chat-project-path"]');
     const executor = summary.querySelector('[data-slot="chat-executor-pill"]');
     const agent = summary.querySelector('[data-slot="chat-agent-tags"]')?.firstElementChild;
+    const topPadding = lines[0]!.top - bounds.top;
+    const bottomPadding = bounds.bottom - lines.at(-1)!.bottom;
     return {
       hasPath: Boolean(path),
       linesFit: lines.every(line => line.left >= bounds.left && line.right <= bounds.right + 1
         && line.top >= bounds.top && line.bottom <= bounds.bottom + 1),
       linesStack: lines.every((line, index) => index === 0 || line.top >= lines[index - 1]!.bottom - 1),
+      consistentLineSpacing: lines.every((line, index) => index === 0
+        || Math.abs(line.top - lines[index - 1]!.bottom - 4) < 1),
+      compactDetailedPadding: summary.getAttribute('data-layout') !== 'detailed'
+        || (topPadding >= 4 && topPadding <= 9 && bottomPadding >= 4 && bottomPadding <= 9),
       matchingPillHeight: !executor || Boolean(agent
         && Math.abs(executor.getBoundingClientRect().height - agent.getBoundingClientRect().height) < 1),
     };
-  })).toEqual({ hasPath: showProjectPath, linesFit: true, linesStack: true, matchingPillHeight: true });
+  })).toEqual({
+    hasPath: showProjectPath,
+    linesFit: true,
+    linesStack: true,
+    consistentLineSpacing: true,
+    compactDetailedPadding: true,
+    matchingPillHeight: true,
+  });
 }
 
 for (const executionBackend of ['in-process', 'remote-controller-dials'] as const) {
