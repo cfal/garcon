@@ -1,8 +1,18 @@
-import { describe, expect, it, mock } from 'bun:test';
+import { afterAll, describe, expect, it, mock } from 'bun:test';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { UserMessage } from '../../../../common/chat-types.ts';
 import createShareRoutes from '../shares.ts';
 import { DomainError } from '../../../common/domain-error.ts';
+import { renderSharedChatText } from '../../chats/share-transcript.ts';
+import { decodeStoredLedgerRow } from '../../ledger/codec.ts';
 import { LedgerFencedError } from '../../ledger/errors.ts';
+import { storedProviderRows, storedSnapshotReader } from '../../ledger/__tests__/stored-rows.ts';
 import { TranscriptViewReader } from '../../ledger/view-reader.ts';
+
+const textDirectory = mkdtempSync(path.join(os.tmpdir(), 'garcon-share-routes-'));
+afterAll(() => rmSync(textDirectory, { recursive: true, force: true }));
 
 function createSnapshot(overrides = {}) {
   return {
@@ -45,35 +55,46 @@ function createSnapshot(overrides = {}) {
 
 function createCapture(overrides = {}) {
   return {
-    messages: [
-      {
-        type: 'user-message',
-        timestamp: '2025-01-02T03:04:05.000Z',
-        content: 'durable prompt',
-      },
-    ],
+    rows: storedProviderRows([new UserMessage('2025-01-02T03:04:05.000Z', 'durable prompt')]),
     transcriptViewId: 'view-1',
     lastOrdinal: 1,
     ...overrides,
   };
 }
 
-function createRoutes(snapshot = createSnapshot(), appTitle = null, overrides = {}) {
-  const shareStore = {
-    getShare: mock((token) =>
-      token === snapshot.shareToken ? snapshot : null,
-    ),
-    getShareByChatId: mock(() => null),
-    createShare: mock(() => Promise.resolve(snapshot)),
-    updateShare: mock(() => Promise.resolve(snapshot)),
+// Serves the test's snapshot the way ShareStore does: messages as stored JSON lines and the
+// plain text from a file, read from the snapshot object on each call so tests can replace it.
+function snapshotStore(snapshot) {
+  const matches = (token) => token === snapshot.shareToken;
+  const header = () => {
+    const { messages, ...fields } = snapshot;
+    return { ...fields, messageCount: messages.length };
+  };
+  return {
+    getHeader: mock(async (token) => (matches(token) ? header() : null)),
+    getMessages: mock(async (token) => (matches(token)
+      ? { header: header(), messages: snapshot.messages.map((message) => JSON.stringify(message)) }
+      : null)),
+    getTextPath: mock(async (token) => {
+      if (!matches(token)) return null;
+      const textPath = path.join(textDirectory, `${token}-${Math.random()}.txt`);
+      writeFileSync(textPath, renderSharedChatText(snapshot));
+      return textPath;
+    }),
+    getEntryByChatId: mock(() => null),
+    publish: mock(() => Promise.resolve(snapshot)),
     revokeShareByChatId: mock(() => Promise.resolve(true)),
     init: mock(() => Promise.resolve(undefined)),
+  };
+}
+
+function createRoutes(snapshot = createSnapshot(), appTitle = null, overrides = {}) {
+  const shareStore = {
+    ...snapshotStore(snapshot),
     ...overrides.shareStore,
   };
-  const transcripts = {
-    renderingSnapshot: mock(() => Promise.resolve(createCapture())),
-    ...overrides.transcripts,
-  };
+  const capture = overrides.capture ?? mock(() => Promise.resolve(createCapture()));
+  const transcripts = overrides.transcripts ?? storedSnapshotReader(capture);
   const routes = createShareRoutes(
     shareStore,
     { getChat: mock(() => overrides.session ?? null) },
@@ -87,18 +108,18 @@ function createRoutes(snapshot = createSnapshot(), appTitle = null, overrides = 
     { getChatMetadata: mock(() => null) },
     transcripts,
   );
-  return { routes, shareStore, transcripts };
+  return { routes, shareStore, capture };
 }
 
 describe('share creation route', () => {
   it('[TLV5-L01.03-CORE-UNIT-01] creates the share from one pinned durable snapshot and records its origin', async () => {
     const created = [];
-    const { routes, transcripts } = createRoutes(createSnapshot(), null, {
+    const { routes, capture } = createRoutes(createSnapshot(), null, {
       session: { agentId: 'codex', model: 'gpt-5', projectPath: '/workspace/garcon' },
       shareStore: {
-        createShare: mock((chatId, partial) => {
-          created.push(partial);
-          return Promise.resolve({ ...partial, shareToken: 'new-token' });
+        publish: mock((chatId, publication, rows) => {
+          created.push({ publication, rows });
+          return Promise.resolve({ ...publication, shareToken: 'new-token' });
         }),
       },
     });
@@ -119,10 +140,10 @@ describe('share creation route', () => {
       shareToken: 'new-token',
       shareUrl: '/shared/new-token',
     });
-    expect(transcripts.renderingSnapshot).toHaveBeenCalledWith('123');
+    expect(capture).toHaveBeenCalledWith('123');
     expect(created).toHaveLength(1);
-    expect(created[0].messages.map((message) => message.content)).toEqual(['durable prompt']);
-    expect(created[0].origin).toEqual({
+    expect(created[0].rows.map((row) => decodeStoredLedgerRow(row).message.content)).toEqual(['durable prompt']);
+    expect(created[0].publication.origin).toEqual({
       transcriptViewId: 'view-1',
       lastOrdinal: 1,
     });
@@ -131,11 +152,9 @@ describe('share creation route', () => {
   it('maps a still-racing capture to its domain status instead of 500', async () => {
     const { routes } = createRoutes(createSnapshot(), null, {
       session: { agentId: 'codex', model: 'gpt-5', projectPath: '/workspace/garcon' },
-      transcripts: {
-        renderingSnapshot: mock(() => Promise.reject(
-          new DomainError('SOURCE_REVISION_CHANGED', 'Chat ownership changed.', 409, true),
-        )),
-      },
+      capture: mock(() => Promise.reject(
+        new DomainError('SOURCE_REVISION_CHANGED', 'Chat ownership changed.', 409, true),
+      )),
     });
 
     const response = await routes['/api/v1/chats/share'].POST(
@@ -160,9 +179,7 @@ describe('share creation route', () => {
     });
     const { routes } = createRoutes(createSnapshot(), null, {
       session: { agentId: 'codex', model: 'gpt-5', projectPath: '/workspace/garcon' },
-      transcripts: {
-        renderingSnapshot: (chatId) => reader.renderingSnapshot(chatId),
-      },
+      transcripts: reader,
     });
 
     const response = await routes['/api/v1/chats/share'].POST(

@@ -1,21 +1,26 @@
 import { Database } from 'bun:sqlite';
 import crypto from 'node:crypto';
-import { chmodSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { chmodSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs';
+import { lstat, readdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { yieldToEventLoop } from '@garcon/server-agent-common/shared/event-loop';
+import { trackActivity } from '../../common/event-loop-stalls.js';
 import {
   encodeDrafts,
   insertEncodedRows,
   materializeRows,
   promoteStagingView,
   readBoundedPage,
+  readBoundedStoredPage,
   StagingViews,
+  type BoundedPage,
 } from './staging-views.js';
 import {
   parseChatRowContent,
   parseChatRowTitle,
 } from '../../../common/chat-row-contracts.js';
 import { createLogger } from '../../common/log.js';
+import { hasNodeErrorCode } from '../../common/errors.js';
 import {
   decodeStoredLedgerRow,
   cliRowFingerprint,
@@ -59,6 +64,7 @@ import {
   StaleTranscriptViewError,
   SubmissionConflictError,
   TranscriptViewNotInitializedError,
+  UNDECODABLE_LEDGER_ROW,
 } from './errors.js';
 import { LedgerFailureFences } from './failure-fences.js';
 import type { ConnectionEntry } from './connection-entry.js';
@@ -94,6 +100,9 @@ const DEFAULT_CONNECTION_CACHE_SIZE = 10;
 const PREVIEW_EDGE_ROWS = 32;
 const PREVIEW_ROW_BYTES = 64 * 1024;
 const CHAT_DIRECTORY_PATTERN = /^[A-Za-z0-9_-]+$/;
+// Deleted chat directories wait here for asynchronous removal. The leading dot keeps it
+// outside CHAT_DIRECTORY_PATTERN.
+const TRASH_DIRECTORY = '.trash';
 const logger = createLogger('ledger:store');
 
 
@@ -113,6 +122,8 @@ export interface InitializeViewInput {
 export interface StageViewInput extends InitializeViewInput {
   readonly viewId: TranscriptViewId;
 }
+
+export type StoredRowsWork<T> = (rows: readonly StoredLedgerRow[]) => Promise<T>;
 export class TranscriptLedgerStore {
   readonly #rootDirectory: string;
   readonly #cacheSize: number;
@@ -494,21 +505,42 @@ export class TranscriptLedgerStore {
     });
   }
 
+  rowsThrough(chatId: string, watermark: TranscriptWatermark): Promise<readonly LedgerRow[]> {
+    return this.#pagesThrough(chatId, watermark, readBoundedPage);
+  }
+
+  // Reads stored rows for work that decodes them after the read, such as on a Worker. A row
+  // that fails to decode there fences the chat while its view is current, as a read that
+  // decodes rows does.
+  async withStoredRowsThrough<T>(chatId: string, watermark: TranscriptWatermark, work: StoredRowsWork<T>): Promise<T> {
+    const rows = await this.#pagesThrough(chatId, watermark, readBoundedStoredPage);
+    try {
+      return await work(rows);
+    } catch (error) {
+      if (!hasNodeErrorCode(error, UNDECODABLE_LEDGER_ROW)) throw error;
+      return this.#read(chatId, (entry) => {
+        this.#assertCurrent(entry, watermark.viewId);
+        throw error;
+      });
+    }
+  }
+
   // Reads in bounded pages. Rows at or below a watermark never change, so pages taken across
   // event-loop turns form one consistent prefix; a replaced view fails as stale.
-  async rowsThrough(
+  async #pagesThrough<Row extends { readonly ordinal: number }>(
     chatId: string,
     watermark: TranscriptWatermark,
-  ): Promise<readonly LedgerRow[]> {
+    readPage: (db: Database, viewId: TranscriptViewId, after: number, through: number) => BoundedPage<Row>,
+  ): Promise<readonly Row[]> {
     if (!Number.isSafeInteger(watermark.ordinal) || watermark.ordinal < 0) {
       throw new TypeError('Transcript watermark ordinal is invalid');
     }
-    const rows: LedgerRow[] = [];
+    const rows: Row[] = [];
     let after = 0;
     for (;;) {
       const page = this.#read(chatId, (entry) => {
         this.#assertCurrent(entry, watermark.viewId);
-        return readBoundedPage(entry.db, watermark.viewId, after, watermark.ordinal);
+        return readPage(entry.db, watermark.viewId, after, watermark.ordinal);
       });
       for (const row of page.rows) rows.push(row);
       if (page.exhausted) return rows;
@@ -697,12 +729,14 @@ export class TranscriptLedgerStore {
     this.closeChat(chatId);
     this.#openFailures.delete(chatId);
     this.#failureFences.delete(chatId);
-    rmSync(path.join(this.#rootDirectory, chatId), { recursive: true, force: true });
+    this.#discardDirectory(chatId);
   }
 
+  // Also removes chat directories whose deletion a restart interrupted.
   removeUnregisteredChatDirectories(registeredChatIds: ReadonlySet<string>): readonly string[] {
     const removed: string[] = [];
     if (statSizeIfExists(this.#rootDirectory) === null) return removed;
+    void this.#sweepTrash();
     for (const name of readdirSync(this.#rootDirectory)) {
       if (!CHAT_DIRECTORY_PATTERN.test(name) || registeredChatIds.has(name)) continue;
       const directory = path.join(this.#rootDirectory, name);
@@ -714,8 +748,10 @@ export class TranscriptLedgerStore {
         this.closeChat(name);
         this.#openFailures.delete(name);
         this.#failureFences.delete(name);
+        this.#discardDirectory(name);
+      } else {
+        rmSync(directory, { force: true });
       }
-      rmSync(directory, { recursive: isDirectory, force: true });
       removed.push(name);
     }
     return removed;
@@ -736,6 +772,48 @@ export class TranscriptLedgerStore {
       this.#failureFences.clear();
     }
     if (firstFailure) throw firstFailure;
+  }
+
+  // A rename within the ledger root is constant-time, so the chat's files disappear at
+  // once, while unlinking a large ledger can take the filesystem a noticeable time, so the
+  // removal runs off the event loop.
+  #discardDirectory(name: string): void {
+    const target = path.join(this.#trashDirectory(), `${name}-${crypto.randomUUID()}`);
+    try {
+      renameSync(path.join(this.#rootDirectory, name), target);
+    } catch (error) {
+      if (hasNodeErrorCode(error, 'ENOENT')) return;
+      throw error;
+    }
+    void this.#removeDeleted(target);
+  }
+
+  // Replaces anything but a real directory at the trash path, so removal never follows a link
+  // out of the ledger root.
+  #trashDirectory(): string {
+    const trash = path.join(this.#rootDirectory, TRASH_DIRECTORY);
+    const stats = lstatIfExists(trash);
+    if (stats?.isDirectory()) return trash;
+    if (stats) rmSync(trash, { force: true });
+    mkdirSync(trash, { mode: 0o700 });
+    return trash;
+  }
+
+  // Empties the trash entry by entry; removing the directory itself could race a rename into it.
+  async #sweepTrash(): Promise<void> {
+    const trash = path.join(this.#rootDirectory, TRASH_DIRECTORY);
+    const stats = await lstat(trash).catch(() => null);
+    if (!stats?.isDirectory()) return;
+    const entries = await readdir(trash).catch(() => []);
+    for (const entry of entries) await this.#removeDeleted(path.join(trash, entry));
+  }
+
+  async #removeDeleted(target: string): Promise<void> {
+    try {
+      await rm(target, { recursive: true, force: true });
+    } catch (error) {
+      logger.warn('Deleted transcript ledger removal failed; it is retried on the next start', error);
+    }
   }
 
   #composePrompt(
@@ -795,12 +873,19 @@ export class TranscriptLedgerStore {
       this.#connections.set(chatId, cached);
       return cached;
     }
-    const opened = openConnection(
-      this.#rootDirectory,
-      chatId,
-      this.#synchronous,
-      this.#staging.retained(chatId),
-    );
+    // Opening can migrate the schema or delete a leftover view, both proportional to the ledger.
+    const finishActivity = trackActivity('ledger open');
+    let opened: ConnectionEntry;
+    try {
+      opened = openConnection(
+        this.#rootDirectory,
+        chatId,
+        this.#synchronous,
+        this.#staging.retained(chatId),
+      );
+    } finally {
+      finishActivity();
+    }
     this.#connections.set(chatId, opened);
     while (this.#connections.size > this.#cacheSize) {
       const oldest = this.#connections.entries().next().value as [string, ConnectionEntry] | undefined;

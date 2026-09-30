@@ -4,6 +4,7 @@ import type {
   AgentSteerResult,
   AgentSteerTarget,
   AgentTranscriptSourceLocation,
+  ExecutorCallOptions,
 } from '@garcon/server-agent-interface';
 import type { PermissionDecisionPayload } from '../../../common/chat-command-contracts.js';
 import type { ChatMessage } from '@garcon/common/chat-types';
@@ -213,7 +214,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     hasPendingOwnershipTransfer(chatId: string): boolean;
     preambles: Pick<PreambleService, 'snapshot'>;
     selectionAdmissionLock: KeyedPromiseLock;
-    resolveFileMentions(command: string, projectPath: string, executorId?: string | null): Promise<string>;
+    resolveFileMentions(command: string, projectPath: string, executorId?: string | null, options?: ExecutorCallOptions): Promise<string>;
   }) {
     this.#registry = args.registry;
     this.#getCarryOverRevision = args.getCarryOverRevision;

@@ -160,6 +160,59 @@ describe('metadata-store', () => {
 
   });
 
+  describe('preview bounds', () => {
+    const longFirst = `Refactor the controller\n${'first body '.repeat(1_000)}`;
+    const longLast = `Done with the refactor\n${'last body '.repeat(1_000)}`;
+
+    it('caps stored previews while keeping their first lines', () => {
+      metadata.replaceFromTranscriptView(chatId, [
+        { type: 'user-message', timestamp: '2026-01-01T00:00:00Z', content: longFirst },
+        { type: 'assistant-message', timestamp: '2026-01-01T00:01:00Z', content: longLast },
+      ]);
+
+      const meta = metadata.getChatMetadata(chatId);
+      expect(meta.firstMessage).toHaveLength(4097);
+      expect(meta.firstMessage.endsWith('\u2026')).toBe(true);
+      expect(meta.firstMessage.split('\n')[0]).toBe('Refactor the controller');
+      expect(meta.lastMessage).toHaveLength(513);
+      expect(meta.lastMessage.split('\n')[0]).toBe('Done with the refactor');
+    });
+
+    it('caps live appends and new chats the same way', () => {
+      metadata.updateFromAppendedMessages(chatId, [
+        { type: 'assistant-message', timestamp: '2026-01-02T00:00:00Z', content: longLast },
+      ]);
+      metadata.addNewChatMetadata('long-first-chat', longFirst);
+
+      expect(metadata.getChatMetadata(chatId).lastMessage).toHaveLength(513);
+      expect(metadata.getChatMetadata('long-first-chat').firstMessage).toHaveLength(4097);
+      expect(metadata.getChatMetadata('long-first-chat').lastMessage).toHaveLength(513);
+    });
+
+    it('does not split a surrogate pair at the cut', () => {
+      metadata.updateFromAppendedMessages(chatId, [
+        { type: 'assistant-message', timestamp: '2026-01-02T00:00:00Z', content: `${'x'.repeat(511)}\u{1F600}tail` },
+      ]);
+
+      expect(metadata.getChatMetadata(chatId).lastMessage).toBe(`${'x'.repeat(511)}\u2026`);
+    });
+
+    it('shrinks previews persisted before they were capped on the next save', async () => {
+      const metadataPath = path.join(tmpDir, 'chat-metadata.json');
+      await fs.writeFile(metadataPath, JSON.stringify(makeSnapshot({
+        'persisted-chat': { firstMessage: longFirst, lastMessage: longLast, createdAt: '2026-01-01T00:00:00Z' },
+      })), { mode: 0o600 });
+      const index = new MetadataIndex(makeRegistry({ 'persisted-chat': session() }), mockAgents, mockCarryOver, { metadataPath });
+
+      await index.init();
+      await index.flush();
+
+      const saved = JSON.parse(await fs.readFile(metadataPath, 'utf8'));
+      expect(saved.chats['persisted-chat'].firstMessage).toHaveLength(4097);
+      expect(saved.chats['persisted-chat'].lastMessage).toHaveLength(513);
+    });
+  });
+
   describe('identity invalidation', () => {
     const identity = (overrides = {}) => ({
       carryOverRevision: 'carry-v1:0',

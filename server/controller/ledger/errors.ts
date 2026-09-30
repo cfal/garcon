@@ -17,6 +17,19 @@ export class LedgerFencedError extends LedgerError {
   }
 }
 
+export const UNDECODABLE_LEDGER_ROW = 'UNDECODABLE_LEDGER_ROW';
+
+// Not a LedgerError: a stored row that fails to decode fences its chat like a failed query.
+// The code identifies the failure after it crosses from a Worker.
+export class UndecodableLedgerRowError extends Error {
+  override readonly name = 'UndecodableLedgerRowError';
+  readonly code = UNDECODABLE_LEDGER_ROW;
+
+  constructor(options?: ErrorOptions) {
+    super('Stored transcript row is invalid', options);
+  }
+}
+
 export interface SafeFenceDiagnostic {
   readonly causeName: string;
   readonly causeCode: string;

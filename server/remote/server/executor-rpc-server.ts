@@ -7,7 +7,7 @@ import {
   type ExecutorInfo,
 } from '@garcon/server-agent-interface';
 import { AgentResourceTable } from '@garcon/server-agent-common/execution/resource-table';
-import { NULLABLE_AGENT_FACETS, type ExecutorRpcRequest, type IntegrationManifest } from '../transport/rpc-protocol.js';
+import { NULLABLE_AGENT_FACETS, rpcContinuity, type ExecutorRpcRequest, type IntegrationManifest } from '../transport/rpc-protocol.js';
 import type { ExecutorRpc } from '../transport/rpc.js';
 import { decodeFileText, validateFileRpcRequest, invalidFileData } from '../transport/file-protocol.js';
 import { TerminalRpcServer } from './terminal-rpc-server.js';
@@ -90,7 +90,10 @@ export function serveExecutionRuntime(
   });
   rpc.handle(async (call, signal, _guardReply, onUndeliveredReply) => {
     await ready;
-    if (disposed || signal.aborted) throw new AgentCallError('not-dispatched', 'Worker session retired or request cancelled');
+    // A journaled call runs to completion even if its session retired first.
+    if (signal.aborted || (disposed && rpcContinuity(call.method) !== 'journaled')) {
+      throw new AgentCallError('not-dispatched', 'Worker session retired or request cancelled');
+    }
     if (call.method === 'executor.describe') return { info, integrations: [...integrations.values()].map(manifest) };
     if (call.method === 'controllerCli.describe' || call.method === 'controllerCli.request') {
       throw new AgentCallError('rejected', 'CLI dispatch is controller-owned');
@@ -140,9 +143,20 @@ export function serveExecutionRuntime(
         return;
       }
       case 'producers.close': {
-        if (!relay.owns(producerSession, integration, call.request)) throw new AgentCallError('rejected', 'Producer binding belongs to a retired session', 'STALE_RESOURCE');
+        // No session owns a suspended binding, so the controller may close it from a
+        // replacement session without resuming it first.
+        if (!relay.owns(producerSession, integration, call.request) && !relay.suspended(integration, call.request)) {
+          throw new AgentCallError('rejected', 'Producer binding belongs to a retired session', 'STALE_RESOURCE');
+        }
         await integration.producers.close(call.request, options);
         relay.close(call.request);
+        return;
+      }
+      case 'producers.cancelLaunch': {
+        if (typeof call.request?.binding?.id !== 'string' || typeof call.request.runId !== 'string') {
+          throw new AgentCallError('rejected', 'Invalid launch cancellation request');
+        }
+        relay.cancelLaunch(integration, call.request.binding, call.request.runId);
         return;
       }
       case 'producers.resume': {
@@ -154,9 +168,13 @@ export function serveExecutionRuntime(
       }
       case 'permissions.respond': return integration.permissions.respond(call.request, options);
       case 'execution.start':
-        return relay.launch(producerSession, integration, call.request, onUndeliveredReply, () => integration.execution.start(call.request, options));
+        return relay.launch(producerSession, integration, call.request, signal, onUndeliveredReply, (launchSignal) => (
+          integration.execution.start(call.request, { signal: launchSignal })
+        ));
       case 'execution.resume':
-        return relay.launch(producerSession, integration, call.request, onUndeliveredReply, () => integration.execution.resume(call.request, options));
+        return relay.launch(producerSession, integration, call.request, signal, onUndeliveredReply, (launchSignal) => (
+          integration.execution.resume(call.request, { signal: launchSignal })
+        ));
       case 'execution.abort': return integration.execution.abort(call.request, options);
       case 'execution.runningSessions': return integration.execution.runningSessions(options);
       case 'catalog.snapshot': return integration.catalog.snapshot({ ...call.request, signal });
@@ -174,7 +192,9 @@ export function serveExecutionRuntime(
       case 'commands.discover': return required(integration.commands).discover(call.request.projectPath, signal);
       case 'compaction.compact': {
         const compaction = required(integration.compaction);
-        return relay.launch(producerSession, integration, call.request, onUndeliveredReply, () => compaction.compact(call.request, options));
+        return relay.launch(producerSession, integration, call.request, signal, onUndeliveredReply, (launchSignal) => (
+          compaction.compact(call.request, { signal: launchSignal })
+        ));
       }
       case 'forking.fork': return required(integration.forking).fork({ ...call.request, signal });
       case 'forking.discard': return required(integration.forking).discard(call.request, signal);
@@ -251,6 +271,7 @@ export function serveExecutionRuntime(
       case 'projectPathUpdates.commit': return required(integration.projectPathUpdates).commit(call.request, options);
       case 'projectPathUpdates.rollback': return required(integration.projectPathUpdates).rollback(call.request, options);
       case 'credentials.resolve': throw new AgentCallError('rejected', 'Credential resolution is controller-owned');
+      case 'calls.reconcile': throw new AgentCallError('rejected', 'Call reconciliation belongs to the RPC layer');
       default: return unknownMethod(call);
     }
   });

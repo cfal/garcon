@@ -134,6 +134,9 @@ describe('Pi single-query and spawn helpers', () => {
     process.env.PI_CODING_AGENT = '1';
     process.env.PI_SESSION_FILE = '/home/someone/session.jsonl';
     process.env.PI_SESSION_ID = 'outer-session';
+    process.env.PI_SESSION_WORKER_CONTROL_ADDRESS = 'outer-control';
+    process.env.PI_SESSION_WORKER_CONTROL_TOKEN = 'synthetic-token';
+    process.env.PI_SESSION_WORKER_SESSION_KEY_BASE64 = 'synthetic-key';
     process.env.PI_PROVIDER = 'outer-provider';
     process.env.PI_MODEL = 'outer-model';
     process.env.PI_REASONING_LEVEL = 'high';
@@ -155,6 +158,9 @@ describe('Pi single-query and spawn helpers', () => {
       'PI_CODING_AGENT',
       'PI_SESSION_FILE',
       'PI_SESSION_ID',
+      'PI_SESSION_WORKER_CONTROL_ADDRESS',
+      'PI_SESSION_WORKER_CONTROL_TOKEN',
+      'PI_SESSION_WORKER_SESSION_KEY_BASE64',
       'PI_PROVIDER',
       'PI_MODEL',
       'PI_REASONING_LEVEL',

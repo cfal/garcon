@@ -1,5 +1,6 @@
 import type { Database } from 'bun:sqlite';
 import { yieldToEventLoop } from '@garcon/server-agent-common/shared/event-loop';
+import { trackActivity } from '../../common/event-loop-stalls.js';
 import { createLogger } from '../../common/log.js';
 import {
   decodeLedgerRow,
@@ -123,21 +124,7 @@ export class StagingViews {
     try {
       for (;;) {
         this.#assertGeneration(chatId, generation);
-        const finished = this.write(chatId, (entry) => {
-          if (!viewRecord(entry.db, viewId, 'staging')) return true;
-          return runTransaction(entry.db, () => {
-            const deleted = entry.db.query(`
-              DELETE FROM transcript_rows
-              WHERE view_id = ? AND ordinal IN (
-                SELECT ordinal FROM transcript_rows WHERE view_id = ? ORDER BY ordinal LIMIT ?
-              )
-            `).run(viewId, viewId, BULK_DELETE_ROWS).changes;
-            if (deleted >= BULK_DELETE_ROWS) return false;
-            entry.db.query("DELETE FROM transcript_views WHERE status = 'staging' AND view_id = ?").run(viewId);
-            return true;
-          });
-        });
-        if (finished) return;
+        if (this.#deleteBatch(chatId, viewId)) return;
         await yieldToEventLoop();
       }
     } catch (error) {
@@ -146,6 +133,29 @@ export class StagingViews {
       }
     } finally {
       if (this.generation(chatId) === generation) this.release(chatId, viewId);
+    }
+  }
+
+  // Deletes the next batch of a staging view's rows, and the view once none remain.
+  #deleteBatch(chatId: string, viewId: TranscriptViewId): boolean {
+    const finishActivity = trackActivity('ledger view discard');
+    try {
+      return this.write(chatId, (entry) => {
+        if (!viewRecord(entry.db, viewId, 'staging')) return true;
+        return runTransaction(entry.db, () => {
+          const deleted = entry.db.query(`
+            DELETE FROM transcript_rows
+            WHERE view_id = ? AND ordinal IN (
+              SELECT ordinal FROM transcript_rows WHERE view_id = ? ORDER BY ordinal LIMIT ?
+            )
+          `).run(viewId, viewId, BULK_DELETE_ROWS).changes;
+          if (deleted >= BULK_DELETE_ROWS) return false;
+          entry.db.query("DELETE FROM transcript_views WHERE status = 'staging' AND view_id = ?").run(viewId);
+          return true;
+        });
+      });
+    } finally {
+      finishActivity();
     }
   }
 
@@ -216,12 +226,28 @@ export function insertEncodedRows(
   });
 }
 
+export interface BoundedPage<Row> {
+  readonly rows: readonly Row[];
+  readonly exhausted: boolean;
+}
+
 export function readBoundedPage(
   db: Database,
   viewId: TranscriptViewId,
   afterOrdinal: number,
   throughOrdinal: number,
-): { readonly rows: readonly LedgerRow[]; readonly exhausted: boolean } {
+): BoundedPage<LedgerRow> {
+  const page = readBoundedStoredPage(db, viewId, afterOrdinal, throughOrdinal);
+  return { rows: page.rows.map(decodeStoredLedgerRow), exhausted: page.exhausted };
+}
+
+// Reads rows as stored, for consumers that decode them elsewhere, such as on a Worker.
+export function readBoundedStoredPage(
+  db: Database,
+  viewId: TranscriptViewId,
+  afterOrdinal: number,
+  throughOrdinal: number,
+): BoundedPage<StoredLedgerRow> {
   const statement = db.prepare<StoredLedgerRow, [string, number, number]>(`
     SELECT view_id, ordinal, kind, at, client_message_id, payload_json
     FROM transcript_rows
@@ -229,10 +255,10 @@ export function readBoundedPage(
     ORDER BY ordinal
   `);
   try {
-    const rows: LedgerRow[] = [];
+    const rows: StoredLedgerRow[] = [];
     let bytes = 0;
     for (const stored of statement.iterate(viewId, afterOrdinal, throughOrdinal)) {
-      rows.push(decodeStoredLedgerRow(stored));
+      rows.push(stored);
       bytes += stored.payload_json.length;
       if (rows.length >= BULK_READ_ROWS || bytes >= BULK_READ_BYTES) return { rows, exhausted: false };
     }

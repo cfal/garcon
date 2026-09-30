@@ -14,6 +14,7 @@
 		chatGrouping?: SidebarChatGrouping;
 		groupNestedProjectPaths?: boolean;
 		chatItemLayout?: ChatItemLayout;
+		showProjectPath?: boolean;
 		sortMode?: SidebarSortMode;
 		chatListAutohide?: boolean;
 		chatListAutohideAvailable?: boolean;
@@ -27,6 +28,7 @@
 		onSetChatGrouping?: (grouping: SidebarChatGrouping) => void;
 		onToggleGroupNestedProjectPaths?: () => void;
 		onSetChatItemLayout?: (layout: ChatItemLayout) => void;
+		onToggleShowProjectPath?: () => void;
 		onSetSortMode?: (mode: SidebarSortMode) => void;
 		onToggleChatListAutohide?: () => void;
 		onSetDockOnRight?: (enabled: boolean) => void;
@@ -44,7 +46,8 @@
 		visibleUnreadCount,
 		chatGrouping = 'project',
 		groupNestedProjectPaths = false,
-		chatItemLayout = 'detailed',
+		chatItemLayout = 'single-line',
+		showProjectPath = false,
 		sortMode = 'manual',
 		chatListAutohide = false,
 		chatListAutohideAvailable = false,
@@ -58,6 +61,7 @@
 		onSetChatGrouping,
 		onToggleGroupNestedProjectPaths,
 		onSetChatItemLayout,
+		onToggleShowProjectPath,
 		onSetSortMode,
 		onToggleChatListAutohide,
 		onSetDockOnRight,
@@ -83,6 +87,7 @@
 		{chatGrouping}
 		{groupNestedProjectPaths}
 		{chatItemLayout}
+		{showProjectPath}
 		{sortMode}
 		{chatListAutohide}
 		{chatListAutohideAvailable}
@@ -95,6 +100,7 @@
 		{onSetChatGrouping}
 		{onToggleGroupNestedProjectPaths}
 		{onSetChatItemLayout}
+		{onToggleShowProjectPath}
 		{onSetSortMode}
 		{onToggleChatListAutohide}
 		{onSetDockOnRight}

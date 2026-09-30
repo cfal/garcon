@@ -4,20 +4,20 @@ import type {
   TranscriptReplayResult,
 } from '../../../common/chat-view.js';
 import { CHAT_MESSAGES_MAX_LIMIT } from '../../../common/chat-view.js';
-import type { ChatMessage } from '../../../common/chat-types.js';
 import type { TicketSource } from '../../../common/tickets.js';
 import type { TicketSourceResolution } from '../../../common/ticket-source-navigation.js';
 import { TranscriptHistoryUnavailableError } from '../chats/errors.js';
 import { DomainError } from '../../common/domain-error.js';
 import type { TranscriptAdoptionService } from './adoption.js';
-import type { LedgerRow, TranscriptViewId } from './contracts.js';
+import type { TranscriptViewId } from './contracts.js';
 import {
   InvalidTranscriptReplayRequestError,
   LedgerFencedError,
   StaleTranscriptViewError,
 } from './errors.js';
-import { ledgerRowsToMessages, ledgerRowsToTranscriptMessages } from './presentation.js';
+import { ledgerRowsToTranscriptMessages } from './presentation.js';
 import type { TranscriptLedgerService } from './service.js';
+import type { StoredLedgerRow } from './codec.js';
 
 export class TranscriptViewReader {
   readonly #ledger: TranscriptLedgerService;
@@ -160,70 +160,39 @@ export class TranscriptViewReader {
     };
   }
 
-  async renderingSnapshot(
+  // Captures the whole current view as stored rows for work that decodes them on a Worker
+  // rather than on the controller's event loop, such as export, share, and handoff
+  // rendering. A row that fails to decode there fences the chat, as it would here.
+  async withStoredSnapshot<T>(
     chatId: string,
+    work: (snapshot: StoredTranscriptSnapshot) => Promise<T>,
     signal: AbortSignal = new AbortController().signal,
-  ): Promise<{
-    readonly transcriptViewId: TranscriptViewId;
-    readonly lastOrdinal: number;
-    readonly messages: readonly ChatMessage[];
-  }> {
-    return readWithFenceTranslation(() => this.#renderingSnapshot(chatId, signal));
+  ): Promise<T> {
+    return readWithFenceTranslation(async () => {
+      const view = await this.#adoption.ensure(chatId, signal);
+      signal.throwIfAborted();
+      const watermark = this.#ledger.highWatermark(chatId);
+      if (watermark.viewId !== view.viewId) {
+        throw new DomainError(
+          'SOURCE_REVISION_CHANGED',
+          'Transcript view changed while capturing the snapshot',
+          409,
+          true,
+        );
+      }
+      return this.#ledger.withStoredRowsThrough(chatId, watermark, (rows) => work({
+        transcriptViewId: view.viewId,
+        lastOrdinal: watermark.ordinal,
+        rows,
+      }));
+    });
   }
+}
 
-  async exportSnapshot(
-    chatId: string,
-    signal: AbortSignal = new AbortController().signal,
-  ): Promise<{
-    readonly transcriptViewId: TranscriptViewId;
-    readonly lastOrdinal: number;
-    readonly rows: readonly LedgerRow[];
-  }> {
-    return readWithFenceTranslation(() => this.#exportSnapshot(chatId, signal));
-  }
-
-  async #renderingSnapshot(
-    chatId: string,
-    signal: AbortSignal,
-  ): Promise<{
-    readonly transcriptViewId: TranscriptViewId;
-    readonly lastOrdinal: number;
-    readonly messages: readonly ChatMessage[];
-  }> {
-    const snapshot = await this.#exportSnapshot(chatId, signal);
-    return {
-      transcriptViewId: snapshot.transcriptViewId,
-      lastOrdinal: snapshot.lastOrdinal,
-      messages: ledgerRowsToMessages(snapshot.rows),
-    };
-  }
-
-  async #exportSnapshot(
-    chatId: string,
-    signal: AbortSignal,
-  ): Promise<{
-    readonly transcriptViewId: TranscriptViewId;
-    readonly lastOrdinal: number;
-    readonly rows: readonly LedgerRow[];
-  }> {
-    const view = await this.#adoption.ensure(chatId, signal);
-    signal.throwIfAborted();
-    const watermark = this.#ledger.highWatermark(chatId);
-    if (watermark.viewId !== view.viewId) {
-      throw new DomainError(
-        'SOURCE_REVISION_CHANGED',
-        'Transcript view changed while capturing the snapshot',
-        409,
-        true,
-      );
-    }
-    const rows = await this.#ledger.rowsThrough(chatId, watermark);
-    return {
-      transcriptViewId: view.viewId,
-      lastOrdinal: watermark.ordinal,
-      rows,
-    };
-  }
+export interface StoredTranscriptSnapshot {
+  readonly transcriptViewId: TranscriptViewId;
+  readonly lastOrdinal: number;
+  readonly rows: readonly StoredLedgerRow[];
 }
 
 async function readWithFenceTranslation<T>(read: () => Promise<T>): Promise<T> {

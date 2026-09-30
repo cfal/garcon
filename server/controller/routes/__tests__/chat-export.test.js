@@ -24,6 +24,7 @@ describe('chat export routes', () => {
       format: 'xml',
       exclusions: ['tool-calls', 'handoffs'],
     }, expect.any(AbortSignal));
+    expect(result.headers.get('Content-Type')).toBe('application/json;charset=utf-8');
     expect(await result.json()).toMatchObject({ success: true, format: 'xml' });
   });
 
@@ -89,8 +90,9 @@ describe('chat export routes', () => {
   });
 });
 
+// The service returns the encoded response body, as the rendering Worker builds it.
 function response(request) {
-  return {
+  return new TextEncoder().encode(JSON.stringify({
     success: true,
     chatId: request.chatId ?? CHAT_ID,
     format: request.format ?? 'markdown',
@@ -102,5 +104,5 @@ function response(request) {
     exclusions: request.exclusions ?? [],
     omitted: [],
     document: '# Empty\n',
-  };
+  }));
 }

@@ -64,14 +64,14 @@
 		hint: () => string;
 	}> = [
 		{
-			value: 'compact',
-			label: m.onboarding_layout_compact,
-			hint: m.onboarding_layout_compact_hint,
-		},
-		{
 			value: 'single-line',
 			label: m.onboarding_layout_single_line,
 			hint: m.onboarding_layout_single_line_hint,
+		},
+		{
+			value: 'compact',
+			label: m.onboarding_layout_compact,
+			hint: m.onboarding_layout_compact_hint,
 		},
 		{
 			value: 'detailed',

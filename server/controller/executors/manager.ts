@@ -89,8 +89,13 @@ export class ExecutorManager {
     return !this.#disposed && this.#remotes.get(executorId)?.executor?.availability === 'reconnecting';
   }
 
+  // Also returns a remote executor that is reconnecting to a worker whose
+  // integrations are known; its calls wait for the replacement session within
+  // their own deadlines.
   requireExecutor(executorId: string): ExecutionRuntimeApi {
-    if (!this.isReady(executorId)) throw new DomainError('EXECUTOR_UNAVAILABLE', 'Executor is unavailable', 503, true);
+    if (!this.isReady(executorId) && !this.#holdsCalls(executorId)) {
+      throw new DomainError('EXECUTOR_UNAVAILABLE', 'Executor is unavailable', 503, true);
+    }
     return executorId === LOCAL_EXECUTOR_ID ? this.local : this.#remotes.get(executorId)!.executor!;
   }
 
@@ -319,6 +324,14 @@ export class ExecutorManager {
     entry.preparation = null;
     this.#publishAvailability(entry.config.id, 'ready');
     this.#changed();
+  }
+
+  // A reconnected session is being prepared while the client reports ready.
+  #holdsCalls(executorId: string): boolean {
+    if (this.#disposed || this.#changing.has(executorId)) return false;
+    const entry = this.#remotes.get(executorId);
+    const availability = entry?.executor?.availability;
+    return Boolean(entry?.config.enabled && entry.integrations && (availability === 'reconnecting' || availability === 'ready'));
   }
 
   #current(entry: ManagedRemote): boolean { return !this.#disposed && this.#remotes.get(entry.config.id) === entry; }

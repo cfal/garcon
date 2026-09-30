@@ -77,4 +77,35 @@ describe('convertPiToolUse', () => {
       input: { answer: 42 },
     });
   });
+
+  it('keeps truncated MCP names canonical without inventing a server identity', () => {
+    const tool = `mcp__${'s'.repeat(50)}_01234567`;
+    expect(tool).toHaveLength(64);
+    expect(convertPiToolUse(ts, 'truncated', tool, { query: 'issues' })).toMatchObject({
+      type: 'mcp-tool-use', server: '', tool, input: { query: 'issues' },
+    });
+  });
+
+  it('normalizes codemode, tool discovery, PowerShell, and MCP tools on the server', () => {
+    expect(convertPiToolUse(ts, 'code', 'codemode', { code: 'return 1;' })).toMatchObject({
+      type: 'exec-tool-use', code: 'return 1;', language: 'javascript',
+    });
+    expect(convertPiToolUse(ts, 'shell', 'powershell', { command: 'Get-Location' })).toMatchObject({
+      type: 'exec-tool-use', code: 'Get-Location', language: 'powershell',
+    });
+    expect(convertPiToolUse(ts, 'search', 'tool_search', { query: 'issues', limit: 3 })).toMatchObject({
+      type: 'pi-tool-search-tool-use', query: 'issues', limit: 3,
+    });
+    expect(convertPiToolUse(ts, 'mcp', 'mcp__tracker__list_issues', { label: 'bug' })).toMatchObject({
+      type: 'mcp-tool-use', server: 'tracker', tool: 'list_issues', input: { label: 'bug' },
+    });
+    for (const tool of ['list_mcp_resources', 'list_mcp_resource_templates', 'read_mcp_resource']) {
+      expect(convertPiToolUse(ts, tool, tool, { server: 'docs', uri: 'resource://intro' })).toMatchObject({
+        type: 'mcp-tool-use', server: 'docs', tool, input: { server: 'docs', uri: 'resource://intro' },
+      });
+    }
+    expect(convertPiToolUse(ts, 'all', 'list_mcp_resources', {})).toMatchObject({
+      type: 'mcp-tool-use', server: '', tool: 'list_mcp_resources',
+    });
+  });
 });

@@ -44,7 +44,7 @@ for (const role of ['controller', 'worker']) {
 
 for (const dialer of ['controller', 'worker']) {
   test(`authenticated reconnect replaces the socket session (${dialer} dials)`, async () => {
-    const common = { executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true, reconnectDelayMs: 20 };
+    const common = { executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true, redialDelaysMs: [20] };
     const controller = new WebSocketLink({ ...common, role: 'controller' });
     const worker = new WebSocketLink({ ...common, role: 'worker' });
     const events = [];
@@ -145,7 +145,7 @@ async function eventually(condition, timeoutMs = 5000) {
 
 for (const dialer of ['controller', 'worker']) {
   test(`counts session closures by cause on both ends (${dialer} dials)`, async () => {
-    const common = { executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true, reconnectDelayMs: 20 };
+    const common = { executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true, redialDelaysMs: [20] };
     const controller = new WebSocketLink({ ...common, role: 'controller' });
     const worker = new WebSocketLink({ ...common, role: 'worker' });
     const [dialing, listening] = dialer === 'controller' ? [controller, worker] : [worker, controller];
@@ -169,8 +169,39 @@ for (const dialer of ['controller', 'worker']) {
 }
 
 for (const dialer of ['controller', 'worker']) {
+  test(`redials at once after a stable session and backs off after a short one (${dialer} dials)`, async () => {
+    const common = {
+      executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true, redialDelaysMs: [0, 60_000], stableSessionMs: 100,
+    };
+    const controller = new WebSocketLink({ ...common, role: 'controller' });
+    const worker = new WebSocketLink({ ...common, role: 'worker' });
+    const [dialing, listening] = dialer === 'controller' ? [controller, worker] : [worker, controller];
+    let sessions = 0;
+    listening.onSession(() => { sessions += 1; });
+    try {
+      dialing.dial(listening.listen());
+      await eventually(() => sessions === 1 && dialing.current?.connected && listening.current?.connected);
+      await Bun.sleep(150);
+      listening.disconnect();
+      await eventually(() => sessions === 2 && dialing.current?.connected && listening.current?.connected, 1_000);
+      listening.disconnect();
+      await Bun.sleep(300);
+
+      expect(sessions).toBe(2);
+      expect(dialing.current).toBeNull();
+    } finally { await controller.dispose(); await worker.dispose(); }
+  });
+}
+
+test('rejects invalid redial delays', () => {
+  for (const redialDelaysMs of [[], [-1], [1.5]]) {
+    expect(() => new WebSocketLink({ role: 'worker', secret, redialDelaysMs })).toThrow('Executor redial delays must be non-negative integers');
+  }
+});
+
+for (const dialer of ['controller', 'worker']) {
   test(`attributes closures started by the session layer and by disposal (${dialer} dials)`, async () => {
-    const common = { executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true, reconnectDelayMs: 20 };
+    const common = { executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true, redialDelaysMs: [20] };
     const controller = new WebSocketLink({ ...common, role: 'controller' });
     const worker = new WebSocketLink({ ...common, role: 'worker' });
     const [dialing, listening] = dialer === 'controller' ? [controller, worker] : [worker, controller];
@@ -198,7 +229,7 @@ for (const dialer of ['controller', 'worker']) {
 
 for (const dialer of ['controller', 'worker']) {
   test(`counts a corrupted encrypted record as a protocol error where it arrives (${dialer} dials)`, async () => {
-    const common = { executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true, reconnectDelayMs: 20 };
+    const common = { executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true, redialDelaysMs: [20] };
     const controller = new WebSocketLink({ ...common, role: 'controller' });
     const worker = new WebSocketLink({ ...common, role: 'worker' });
     const [dialing, listening] = dialer === 'controller' ? [controller, worker] : [worker, controller];
@@ -223,7 +254,7 @@ for (const dialer of ['controller', 'worker']) {
   });
 
   test(`reports a dropped network path with its Noise error code on both ends (${dialer} dials)`, async () => {
-    const common = { executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true, reconnectDelayMs: 60_000 };
+    const common = { executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true, redialDelaysMs: [60_000] };
     const controller = new WebSocketLink({ ...common, role: 'controller' });
     const worker = new WebSocketLink({ ...common, role: 'worker' });
     const [dialing, listening] = dialer === 'controller' ? [controller, worker] : [worker, controller];

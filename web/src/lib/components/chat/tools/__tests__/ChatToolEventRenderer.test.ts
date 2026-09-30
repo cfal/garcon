@@ -14,6 +14,7 @@ import {
 	ExitPlanModeToolUseMessage,
 	GlobToolUseMessage,
 	GrepToolUseMessage,
+	PiToolSearchToolUseMessage,
 	UnknownToolUseMessage,
 	WebFetchToolUseMessage,
 	WriteStdinToolUseMessage,
@@ -25,6 +26,15 @@ beforeAll(async () => {
 });
 
 describe('ChatToolEventRenderer', () => {
+	it('renders Pi tool discovery through its explicit message contract', () => {
+		render(ChatToolEventRenderer, {
+			toolMessage: new PiToolSearchToolUseMessage('', 'search', 'issue tools', 3),
+			mode: 'input',
+		});
+		expect(screen.getByText('ToolSearch')).toBeTruthy();
+		expect(screen.getByText('issue tools')).toBeTruthy();
+	});
+
 	it('keeps Edit collapsed when autoExpandTools is disabled and defaultOpen is false', () => {
 		render(ChatToolEventRenderer, {
 			toolMessage: new EditToolUseMessage(

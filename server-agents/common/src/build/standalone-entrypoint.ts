@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 
 // Every Worker that ships in a compiled executable. The build bundles each one separately
 // and publishes its embedded location under the same name.
-export const GARCON_WORKER_NAMES = ['search-indexer', 'search-reader', 'token-fitting'] as const;
+export const GARCON_WORKER_NAMES = ['search-indexer', 'search-reader', 'token-fitting', 'transcript-rendering'] as const;
 export type GarconWorkerName = typeof GARCON_WORKER_NAMES[number];
 
 export interface GarconEmbeddedWorkerManifestV1 {

@@ -10,6 +10,9 @@ import {
   UserMessage,
 } from '../../../../../common/chat-types.ts';
 import { transcriptViewId } from '../../../ledger/contracts.ts';
+import { storedRow, storedSnapshotReader } from '../../../ledger/__tests__/stored-rows.ts';
+import { TranscriptRenderingWorker } from '../../transcript-rendering/client.ts';
+import { inlineTranscriptRendering } from '../../transcript-rendering/__tests__/inline-transcript-rendering.ts';
 import { TranscriptExportService } from '../service.ts';
 
 const AT = '2026-08-23T00:00:00.000Z';
@@ -50,7 +53,7 @@ describe('TranscriptExportService', () => {
       'handoffs',
     ];
 
-    const response = await service.export({ chatId: CHAT_ID, format: 'xml', exclusions }, signal());
+    const response = await exported(service, { chatId: CHAT_ID, format: 'xml', exclusions }, signal());
 
     expect(response.entryCount).toBe(3);
     expect(response.totalEntryCount).toBe(9);
@@ -84,7 +87,7 @@ describe('TranscriptExportService', () => {
     const service = createService(rows);
 
     for (const format of ['markdown', 'xml']) {
-      const response = await service.export({
+      const response = await exported(service, {
         chatId: CHAT_ID,
         format,
         exclusions: [],
@@ -100,7 +103,8 @@ describe('TranscriptExportService', () => {
     let read = false;
     const service = new TranscriptExportService({
       summaries: { buildSummary: () => null },
-      transcripts: { exportSnapshot: async () => { read = true; throw new Error('unexpected'); } },
+      transcripts: storedSnapshotReader(async () => { read = true; throw new Error('unexpected'); }),
+      rendering: inlineTranscriptRendering,
       now: () => AT,
     });
 
@@ -115,9 +119,63 @@ describe('TranscriptExportService', () => {
     });
     expect(read).toBe(false);
   });
+
+  it('renders a long transcript on the Worker without holding the event loop', async () => {
+    const rows = Array.from({ length: 20_000 }, (_, index) => providerRow(
+      index + 1,
+      index % 2
+        ? new AssistantMessage(AT, `answer ${index} ${'synthetic words '.repeat(200)}`)
+        : new ToolResultMessage(AT, `tool-${index}`, { output: `output ${index} ${'synthetic lines\n'.repeat(150)}` }, false),
+    ));
+    const rendering = new TranscriptRenderingWorker();
+    try {
+      const service = createService(rows, rendering);
+      let body;
+      const gap = await maxEventLoopGap(async () => {
+        body = await service.export({ chatId: CHAT_ID, format: 'markdown', exclusions: [] }, signal());
+      });
+
+      const response = JSON.parse(new TextDecoder().decode(body));
+      expect(response).toEqual(await exported(createService(rows), {
+        chatId: CHAT_ID,
+        format: 'markdown',
+        exclusions: [],
+      }, signal()));
+      expect(response.document.length).toBeGreaterThan(50_000_000);
+      expect(gap).toBeLessThan(MAX_EVENT_LOOP_GAP_MS);
+    } finally {
+      rendering.close();
+    }
+  }, 60_000);
 });
 
-function createService(rows) {
+// A main-thread render and JSON encoding of the long transcript holds the loop for hundreds
+// of milliseconds.
+const MAX_EVENT_LOOP_GAP_MS = 100;
+
+async function exported(service, request, abortSignal) {
+  return JSON.parse(new TextDecoder().decode(await service.export(request, abortSignal)));
+}
+
+async function maxEventLoopGap(work) {
+  let last = performance.now();
+  let max = 0;
+  const probe = setInterval(() => {
+    const now = performance.now();
+    max = Math.max(max, now - last);
+    last = now;
+  }, 1);
+  try {
+    await work();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  } finally {
+    clearInterval(probe);
+  }
+  return max;
+}
+
+function createService(rows, rendering = inlineTranscriptRendering) {
+  const stored = rows.map(storedRow);
   return new TranscriptExportService({
     summaries: {
       buildSummary: () => ({
@@ -140,13 +198,12 @@ function createService(rows) {
         },
       }),
     },
-    transcripts: {
-      exportSnapshot: async () => ({
-        transcriptViewId: VIEW_ID,
-        lastOrdinal: rows.at(-1)?.ordinal ?? 0,
-        rows,
-      }),
-    },
+    transcripts: storedSnapshotReader(async () => ({
+      transcriptViewId: VIEW_ID,
+      lastOrdinal: rows.at(-1)?.ordinal ?? 0,
+      rows: stored,
+    })),
+    rendering,
     now: () => AT,
   });
 }

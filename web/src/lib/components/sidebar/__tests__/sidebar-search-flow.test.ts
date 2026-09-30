@@ -342,7 +342,7 @@ describe('sidebar search dialog flow', () => {
 			).toBeNull();
 		});
 		expect(document.querySelector('[data-sidebar-project-header="/tmp/project"]')).toBeTruthy();
-		expect(screen.getByTitle('/tmp/project/packages/app')).toBeTruthy();
+		expect(screen.queryByTitle('/tmp/project/packages/app')).toBeNull();
 	});
 
 	it('updates chat sidebar autohide and docking from the sidebar actions menu', async () => {
@@ -430,6 +430,29 @@ describe('sidebar search dialog flow', () => {
 		expect(screen.queryByText('First chat preview')).toBeNull();
 		expect(screen.getByText('First chat')).toBeTruthy();
 	});
+
+	it.each(['none', 'project', 'project-and-activity', 'activity', 'status'] as const)(
+		'toggles the project line without changing layout or %s grouping',
+		async (sidebarGrouping) => {
+			render(SidebarHost, {
+				chats: [createChat('chat-1', 'First chat')],
+				sidebarGrouping,
+				sidebarChatItemLayout: 'single-line',
+				autoLoadSavedSearches: false,
+			});
+
+			const summary = document.querySelector('[data-slot="sidebar-chat-summary"]');
+			expect(summary?.querySelector('[data-slot="chat-project-path"]')).toBeNull();
+			for (const enabled of [true, false]) {
+				await fireEvent.click(screen.getAllByRole('button', { name: 'More actions' })[0]);
+				await fireEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'Show project path' }));
+				await waitFor(() => {
+					expect(Boolean(summary?.querySelector('[data-slot="chat-project-path"]'))).toBe(enabled);
+				});
+				expect(summary?.getAttribute('data-layout')).toBe('single-line');
+			}
+		},
+	);
 
 	it('marks the sidebar to suppress activity animation when motion is reduced', () => {
 		render(SidebarHost, {

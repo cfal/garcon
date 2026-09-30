@@ -23,15 +23,13 @@ export const PI_PLAN_PREFIX = [
 // storage, so the whole set is scrubbed at spawn.
 const PI_NESTED_SESSION_ENV = [
   'PI_CODING_AGENT',
-  'PI_SESSION_ID',
-  'PI_SESSION_FILE',
   'PI_PROVIDER',
   'PI_MODEL',
   'PI_REASONING_LEVEL',
   'PI_CODING_AGENT_SESSION_DIR',
 ] as const;
 
-// Pi --thinking tops out at xhigh, so Garcon's larger modes clamp down.
+// Preserves Garcon's xhigh ceiling even when Pi supports model-specific max effort.
 export function mapThinkingMode(mode: ThinkingMode): ModelThinkingLevel | undefined {
   switch (mode) {
     case 'none':
@@ -74,6 +72,9 @@ export function buildPiCliEnv(
 ): Record<string, string | undefined> {
   const env = { ...process.env, ...envOverrides };
   for (const name of PI_NESTED_SESSION_ENV) delete env[name];
+  for (const name of Object.keys(env)) {
+    if (name.startsWith('PI_SESSION_')) delete env[name];
+  }
   // Disables Pi startup network operations, including package update work.
   env[PI_OFFLINE_ENV] = '1';
   env[PI_SKIP_VERSION_CHECK_ENV] = '1';

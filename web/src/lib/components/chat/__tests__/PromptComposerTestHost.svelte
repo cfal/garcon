@@ -2,6 +2,9 @@
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
 	import type { ExecutorSnapshot } from '$shared/executors';
 	import PromptComposer from '../PromptComposer.svelte';
+	import ComposerAvailabilityNotice from '../ComposerAvailabilityNotice.svelte';
+	import type { ComposerAvailabilityNoticePresentation } from '$lib/chat/composer/composer-availability.js';
+	import { chatDockFrameClass } from '$lib/chat/conversation/chat-max-width.js';
 	import ConversationPanelStatusDock from '../ConversationPanelStatusDock.svelte';
 	import { onDestroy, untrack } from 'svelte';
 	import {
@@ -89,7 +92,7 @@
 		onAbort?: () => void;
 		onQuickCommit?: () => void;
 		onChooseProjectFolder?: (chatId: string) => void;
-		onAvailabilityNoticeChange?: (shown: boolean) => void;
+		onAvailabilityNoticeChange?: (notice: ComposerAvailabilityNoticePresentation | null) => void;
 	}
 
 	let {
@@ -130,6 +133,7 @@
 		onAvailabilityNoticeChange,
 	}: Props = $props();
 
+	let composerNotice = $state.raw<ComposerAvailabilityNoticePresentation | null>(null);
 	const chatDrafts = new ChatDraftStore();
 	const composer = new ComposerState(chatDrafts, {
 		get activeChatId() {
@@ -472,6 +476,11 @@
 </script>
 
 <KeyboardShortcuts />
+{#if composerNotice}
+	<div class={chatDockFrameClass(chatMaxWidth)}>
+		<ComposerAvailabilityNotice {...composerNotice} />
+	</div>
+{/if}
 <ConversationPanelStatusDock
 	{chatMaxWidth}
 	isProcessing={selectedIsProcessing}
@@ -498,7 +507,10 @@
 	{directAdmissionPending}
 	{requiresQueuedSubmission}
 	{onChooseProjectFolder}
-	{onAvailabilityNoticeChange}
+	onAvailabilityNoticeChange={(notice) => {
+		composerNotice = notice;
+		onAvailabilityNoticeChange?.(notice);
+	}}
 	resendCandidates={transcript.resendCandidates}
 	onExcludeResendCandidate={(ordinal) => transcript.excludeResendCandidate(ordinal)}
 />

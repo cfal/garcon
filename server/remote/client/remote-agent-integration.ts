@@ -6,20 +6,25 @@ import {
   type AgentIntegration,
   type AgentImportedTranscriptRow,
   type AgentProducerBinding,
+  type AgentExecutionHandle,
   type AgentProducerNotification,
   type AgentResourceScope,
   type ExecutorCallOptions,
 } from '@garcon/server-agent-interface';
+import { failureDetail } from '@garcon/server-agent-common/execution/producer-adapter';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
 import type {
   ExecutorRpcMethods, IntegrationManifest, ProducerAcknowledgement, ProducerResumeState,
 } from '../transport/rpc-protocol.js';
-import type { RemoteSessionBacking } from './executor-client.js';
+import type { RemoteSessionBacking, RemoteSessions } from './executor-client.js';
 import { failureReason } from '../transport/failure-reason.js';
 import { createLogger, type Logger } from '../../common/log.js';
 import { EXECUTOR_DISCONNECTED_BEFORE_START, EXECUTOR_DISCONNECTED_MID_TURN } from '../../common/executor-disconnect.js';
 
 const SINGLE_QUERY_RPC_GRACE_MS = 30_000;
+// Answers the browser, whose requests time out after 30 s, even while the
+// executor reconnects; an answer that could not be sent stays actionable.
+const PERMISSION_RESPONSE_TIMEOUT_MS = 20_000;
 const PRODUCER_ACK_DELAY_MS = 250;
 // Each page carries at most 1 MiB, so a reader holds at most 4 MiB of replies.
 const HISTORY_PAGES_IN_FLIGHT = 4;
@@ -28,6 +33,14 @@ const UNREADABLE_EVENT_FAILURE = {
   message: 'An event from the executor could not be read, so this turn\'s outcome is unknown. Native history may contain additional output.',
 } as const;
 
+// A start, resume, or compaction whose outcome never reached the controller.
+interface UnsettledLaunch {
+  // Sends the same request on a replacement session, at most once.
+  send: ((backing: RemoteSessionBacking) => Promise<AgentExecutionHandle>) | null;
+  // Stops relaying the caller's cancellation once the launch settles.
+  readonly release: () => void;
+}
+
 interface RemoteProducerBinding {
   readonly ref: AgentProducerBinding;
   // The session whose frames this binding accepts; a lost session stays here
@@ -35,8 +48,8 @@ interface RemoteProducerBinding {
   backing: RemoteSessionBacking;
   receivedSeq: number;
   acknowledgedSeq: number;
-  // Runs whose start, resume, or compaction outcome never reached the controller.
-  readonly unsettledLaunches: Set<string>;
+  // Keyed by run ID.
+  readonly unsettledLaunches: Map<string, UnsettledLaunch>;
   // The worker's view at resume, applied once the replay reaches it to the
   // runs already unsettled when resume was requested. The report cannot
   // describe a launch dispatched later, which settles through its own reply.
@@ -83,29 +96,46 @@ export class RemoteAgentIntegration implements AgentIntegration {
 
   constructor(
     readonly manifest: IntegrationManifest,
-    current: () => RemoteSessionBacking,
+    sessions: RemoteSessions,
     log: Logger = createLogger('executors'),
   ) {
     this.#log = log;
     this.descriptor = manifest.descriptor;
     this.attachments = manifest.attachments;
     const call = async <K extends keyof ExecutorRpcMethods>(method: K, request: ExecutorRpcMethods[K]['request'], options?: ExecutorCallOptions) => (
-      current().rpc.call(this.descriptor.id, method, request, options)
+      sessions.call(this.descriptor.id, method, request, options)
     );
     const launch = async <K extends 'execution.start' | 'execution.resume' | 'compaction.compact'>(
       method: K, request: ExecutorRpcMethods[K]['request'], options?: ExecutorCallOptions,
     ) => {
-      const { rpc } = current();
+      // Native admission may outlive the default RPC deadline; Stop still cancels it.
+      const { backing, timeoutMs } = await sessions.acquire({ signal: options?.signal, timeoutMs: options?.timeoutMs ?? null });
+      const send = ({ rpc }: RemoteSessionBacking, deadline: number | null) => rpc.call(this.descriptor.id, method, request, {
+        ...options,
+        timeoutMs: deadline,
+        onLateResult: (handle) => rpc.call(this.descriptor.id, 'execution.abort', handle),
+      });
       const state = this.#bindings.get(request.producerBinding.id);
       try {
-        return await rpc.call(this.descriptor.id, method, request, {
-          ...options,
-          // Native admission may outlive the default RPC deadline; Stop and session loss still cancel it.
-          timeoutMs: options?.timeoutMs ?? null,
-          onLateResult: (handle) => rpc.call(this.descriptor.id, 'execution.abort', handle),
-        });
+        return await send(backing, timeoutMs);
       } catch (error) {
-        if (error instanceof AgentCallError && error.outcome === 'unknown') state?.unsettledLaunches.add(request.runId);
+        const signal = options?.signal;
+        // A binding closed or failed meanwhile has no run left to settle or cancel.
+        if (state && this.#bindings.get(state.ref.id) === state
+          && error instanceof AgentCallError && error.outcome === 'unknown' && !signal?.aborted) {
+          // A lost call no longer carries the caller's cancellation, so a later
+          // Stop cancels the launch through the worker's relay instead.
+          const cancel = () => {
+            if (state.unsettledLaunches.get(request.runId) !== lost) return;
+            void call('producers.cancelLaunch', { binding: state.ref, runId: request.runId }).catch(() => undefined);
+          };
+          const lost: UnsettledLaunch = {
+            send: (replacement) => send(replacement, null),
+            release: () => signal?.removeEventListener('abort', cancel),
+          };
+          signal?.addEventListener('abort', cancel, { once: true });
+          state.unsettledLaunches.set(request.runId, lost);
+        }
         throw error;
       }
     };
@@ -116,34 +146,39 @@ export class RemoteAgentIntegration implements AgentIntegration {
       runningSessions: (options) => call('execution.runningSessions', null, options),
     };
     this.producers = {
-      detach: (binding) => { this.#bindings.delete(binding.id); },
-      get scope() { return current().manifests.get(manifest.descriptor.id)!.scope; },
+      detach: (binding) => { this.#forgetBinding(binding.id); },
+      get scope() { return sessions.latest().manifests.get(manifest.descriptor.id)!.scope; },
       bind: async (request, options) => {
-        const backing = current();
+        const { backing, timeoutMs } = await sessions.acquire(options);
         if (!isAgentResourceRef(request.binding, 'producer', backing.manifests.get(this.descriptor.id)!.scope)) throw new AgentCallError('rejected', 'Producer scope mismatch', 'STALE_RESOURCE');
         const state: RemoteProducerBinding = {
-          ref: request.binding, backing, receivedSeq: 0, acknowledgedSeq: 0, unsettledLaunches: new Set(), resumeReport: null,
+          ref: request.binding, backing, receivedSeq: 0, acknowledgedSeq: 0, unsettledLaunches: new Map(), resumeReport: null,
           lostOutputReported: false,
         };
         this.#bindings.set(request.binding.id, state);
-        try { await backing.rpc.call(this.descriptor.id, 'producers.bind', request, options); }
+        try { await backing.rpc.call(this.descriptor.id, 'producers.bind', request, { ...options, timeoutMs }); }
         catch (error) {
           if (this.#bindings.get(request.binding.id) === state) this.#bindings.delete(request.binding.id);
           throw error;
         }
       },
       close: async (binding, options) => {
-        const { rpc } = this.#bindings.get(binding.id)?.backing ?? this.#failedBindings.get(binding.id) ?? current();
-        this.#bindings.delete(binding.id);
+        const holder = this.#bindings.get(binding.id)?.backing ?? this.#failedBindings.get(binding.id);
+        this.#forgetBinding(binding.id);
         this.#failedBindings.delete(binding.id);
-        await rpc.call(this.descriptor.id, 'producers.close', binding, options);
+        // The worker suspends a lost session's bindings, and the replacement session
+        // closes this one without resuming it.
+        if (!holder?.rpc.transport.connected) return call('producers.close', binding, options);
+        await holder.rpc.call(this.descriptor.id, 'producers.close', binding, options);
       },
       subscribe: (listener) => {
         this.#listeners.add(listener);
         return () => { this.#listeners.delete(listener); };
       },
     };
-    this.permissions = { respond: (request, options) => call('permissions.respond', request, options) };
+    this.permissions = {
+      respond: (request, options) => call('permissions.respond', request, { timeoutMs: PERMISSION_RESPONSE_TIMEOUT_MS, ...options }),
+    };
     this.catalog = { snapshot: ({ signal, ...request }) => call('catalog.snapshot', request, { signal }) };
     this.settings = {
       ...createVersionedSettings({
@@ -173,9 +208,10 @@ export class RemoteAgentIntegration implements AgentIntegration {
     this.compaction = cap.compaction ? { compact: (request, options) => launch('compaction.compact', request, options) } : null;
     this.forking = cap.forking ? {
       fork: async ({ signal, ...request }) => {
-        const { rpc } = current();
+        const { backing: { rpc }, timeoutMs } = await sessions.acquire({ signal });
         return rpc.call(this.descriptor.id, 'forking.fork', request, {
           signal,
+          timeoutMs,
           onLateResult: (outcome) => {
             if (outcome.kind === 'materialized') return rpc.call(this.descriptor.id, 'forking.discard', outcome.session);
           },
@@ -187,7 +223,7 @@ export class RemoteAgentIntegration implements AgentIntegration {
       captureTarget: (request, options) => call('steering.captureTarget', request, options),
       steer: (request, options) => call('steering.steer', request, options),
     } : null;
-    this.endpoints = cap.endpoints ? { validate: (request) => call('endpoints.validate', request) } : null;
+    this.endpoints = cap.endpoints ? { validate: (request, options) => call('endpoints.validate', request, options) } : null;
     this.singleQuery = cap.singleQuery ? {
       run: async ({ signal, ...request }) => {
         const timeoutMs = request.timeoutMs;
@@ -201,10 +237,11 @@ export class RemoteAgentIntegration implements AgentIntegration {
     } : null;
     const history = (source: 'legacyHistoryImport' | 'nativeHistoryImport'): AgentHistoryImport => ({
       async *load({ signal, ...request }) {
-        const { rpc } = current();
+        // A reader belongs to the session that opened it.
+        const { backing: { rpc }, timeoutMs } = await sessions.acquire({ signal });
         const close = (ref: ExecutorRpcMethods['history.open']['result']) =>
           rpc.call(manifest.descriptor.id, 'history.close', ref, { timeoutMs: 2000 });
-        const ref = await rpc.call(manifest.descriptor.id, 'history.open', { source, request }, { signal, onLateResult: close });
+        const ref = await rpc.call(manifest.descriptor.id, 'history.open', { source, request }, { signal, timeoutMs, onLateResult: close });
         // Keeping several pages in flight hides link latency behind the worker's
         // reading and the controller's ledger writes.
         const inFlight: Promise<ExecutorRpcMethods['history.next']['result']>[] = [];
@@ -237,9 +274,10 @@ export class RemoteAgentIntegration implements AgentIntegration {
     this.sessionConfiguration = cap.sessionConfiguration ? { apply: (...args) => call('sessionConfiguration.apply', { args }) } : null;
     this.projectPathUpdates = cap.projectPathUpdates ? {
       prepare: async (request, options) => {
-        const { rpc } = current();
+        const { backing: { rpc }, timeoutMs } = await sessions.acquire(options);
         return rpc.call(this.descriptor.id, 'projectPathUpdates.prepare', request, {
           ...options,
+          timeoutMs,
           onLateResult: (prepared) => {
             if (prepared) return rpc.call(this.descriptor.id, 'projectPathUpdates.rollback', prepared.preparation);
           },
@@ -257,7 +295,7 @@ export class RemoteAgentIntegration implements AgentIntegration {
   }
 
   retire(): void {
-    this.#bindings.clear();
+    for (const id of [...this.#bindings.keys()]) this.#forgetBinding(id);
     this.#failedBindings.clear();
     if (this.#ackTimer) clearTimeout(this.#ackTimer);
     this.#ackTimer = null;
@@ -270,8 +308,13 @@ export class RemoteAgentIntegration implements AgentIntegration {
   async resume(backing: RemoteSessionBacking): Promise<void> {
     const suspended = [...this.#bindings.values()].filter((state) => state.backing !== backing);
     if (suspended.length === 0) return;
-    const lostRunIds = new Map(suspended.map((state) => [state, [...state.unsettledLaunches]]));
-    for (const state of suspended) state.backing = backing;
+    const lostRunIds = new Map(suspended.map((state) => [state, [...state.unsettledLaunches.keys()]]));
+    // A report from an earlier session describes a replay this session does
+    // not deliver, so only this session's report may settle lost launches.
+    for (const state of suspended) {
+      state.backing = backing;
+      state.resumeReport = null;
+    }
     const { resumed } = await backing.rpc.call(this.descriptor.id, 'producers.resume', {
       bindings: suspended.map((state) => ({ binding: state.ref, acknowledgedSeq: state.receivedSeq })),
     });
@@ -327,7 +370,7 @@ export class RemoteAgentIntegration implements AgentIntegration {
     else {
       state.lostOutputReported = false;
       if (event.type === 'publication-failed') this.#retireFailed(state);
-      if (event.type === 'launch-settled' || event.type === 'run-ended') state.unsettledLaunches.delete(event.runId);
+      if (event.type === 'launch-settled' || event.type === 'run-ended') this.#forgetLaunch(state, event.runId);
       this.#emit({ binding, event });
     }
     if (this.#bindings.get(binding.id) === state) this.#settleLostLaunches(state);
@@ -340,7 +383,7 @@ export class RemoteAgentIntegration implements AgentIntegration {
   }
 
   #retireFailed(state: RemoteProducerBinding): void {
-    this.#bindings.delete(state.ref.id);
+    this.#forgetBinding(state.ref.id);
     this.#failedBindings.set(state.ref.id, state.backing);
   }
 
@@ -371,20 +414,59 @@ export class RemoteAgentIntegration implements AgentIntegration {
   // Settles launches whose replies were lost once the replay reaches the
   // worker's resume report, so every event it published earlier, such as a
   // run's end, is applied first. A launch the worker has not finished reports
-  // its own outcome on the binding later.
+  // its own outcome on the binding later. A launch the worker never received
+  // is sent again once on the replacement session; one it received that left
+  // no record failed before its reply was lost, so it is not repeated.
   #settleLostLaunches(state: RemoteProducerBinding): void {
     const pending = state.resumeReport;
     if (!pending || state.receivedSeq < pending.report.replayThroughSeq) return;
     state.resumeReport = null;
     for (const runId of pending.runIds) {
-      if (!state.unsettledLaunches.has(runId)) continue;
+      const lost = state.unsettledLaunches.get(runId);
+      if (!lost) continue;
       const launch = pending.report.launch?.runId === runId ? pending.report.launch : null;
       if (launch && !launch.handle) continue;
-      state.unsettledLaunches.delete(runId);
+      if (!launch && lost.send && !pending.report.receivedRunIds.includes(runId)) {
+        this.#relaunch(state, runId, lost, lost.send);
+        continue;
+      }
+      this.#forgetLaunch(state, runId);
       this.#emit({ binding: state.ref, event: launch?.handle
         ? { type: 'launch-settled', runId, handle: launch.handle }
         : { type: 'launch-settled', runId, error: EXECUTOR_DISCONNECTED_BEFORE_START } });
     }
+  }
+
+  // Its outcome settles the run like a lost launch's. If this reply is lost too,
+  // the next resume report settles the run without sending it again.
+  #relaunch(
+    state: RemoteProducerBinding, runId: string, lost: UnsettledLaunch,
+    send: (backing: RemoteSessionBacking) => Promise<AgentExecutionHandle>,
+  ): void {
+    lost.send = null;
+    const settle = (event: Extract<AgentProducerNotification['event'], { readonly type: 'launch-settled' }>) => {
+      if (state.unsettledLaunches.get(runId) !== lost) return;
+      this.#forgetLaunch(state, runId);
+      this.#emit({ binding: state.ref, event });
+    };
+    void send(state.backing).then(
+      (handle) => settle({ type: 'launch-settled', runId, handle }),
+      (error: unknown) => {
+        if (!(error instanceof AgentCallError && error.outcome === 'unknown')) settle({ type: 'launch-settled', runId, error: failureDetail(error) });
+      },
+    );
+  }
+
+  #forgetLaunch(state: RemoteProducerBinding, runId: string): void {
+    state.unsettledLaunches.get(runId)?.release();
+    state.unsettledLaunches.delete(runId);
+  }
+
+  #forgetBinding(id: string): void {
+    const state = this.#bindings.get(id);
+    if (!state) return;
+    for (const lost of state.unsettledLaunches.values()) lost.release();
+    this.#bindings.delete(id);
   }
 
   // A listener that throws would otherwise retire the session delivering the event,
@@ -432,7 +514,8 @@ function isResumeState(value: unknown, scope: AgentResourceScope): value is Prod
   const launch = report?.launch;
   return typeof report?.bindingId === 'string' && Number.isSafeInteger(report.replayThroughSeq) && report.replayThroughSeq! >= 0
     && (launch === null || (typeof launch?.runId === 'string'
-      && (launch.handle === null || isAgentResourceRef(launch.handle, 'execution', scope))));
+      && (launch.handle === null || isAgentResourceRef(launch.handle, 'execution', scope))))
+    && Array.isArray(report.receivedRunIds) && report.receivedRunIds.every((runId) => typeof runId === 'string');
 }
 
 // Rebuilds a producer event received from the worker; throws when it is malformed.

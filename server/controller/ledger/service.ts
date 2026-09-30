@@ -53,7 +53,7 @@ import { PermissionNotActionableError, TranscriptSinkClosedError } from './error
 import { permissionRowKind, validatePermissionDecision } from './permission-rows.js';
 import { ProducerLease } from './producer-lease.js';
 import { projectFinalResponse } from './final-response.js';
-import { TranscriptLedgerStore } from './store.js';
+import { TranscriptLedgerStore, type StoredRowsWork } from './store.js';
 import { messageForConversationRow, previewMessages } from './projection.js';
 
 export interface TranscriptProducerLease {
@@ -615,6 +615,10 @@ export class TranscriptLedgerService {
 
   rowsThrough(chatId: string, watermark: TranscriptWatermark): Promise<readonly LedgerRow[]> {
     return this.#store.rowsThrough(chatId, watermark);
+  }
+
+  withStoredRowsThrough<T>(chatId: string, watermark: TranscriptWatermark, work: StoredRowsWork<T>): Promise<T> {
+    return this.#store.withStoredRowsThrough(chatId, watermark, work);
   }
 
   async conversationRows(chatId: string): Promise<readonly LedgerConversationRow[]> {

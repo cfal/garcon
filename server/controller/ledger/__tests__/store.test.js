@@ -1717,6 +1717,51 @@ describe('TranscriptLedgerStore', () => {
     expect(await fs.stat(path.join(root, 'orphan-chat')).catch(() => null)).toBeNull();
   });
 
+  it('moves a deleted chat out of the ledger root at once and removes it afterwards', async () => {
+    store.initializeCurrentView('chat-one', {
+      viewId: transcriptViewId('view-one'),
+      contentStartOrdinal: 1,
+    });
+
+    store.deleteChat('chat-one');
+
+    expect(await fs.stat(path.join(root, 'chat-one')).catch(() => null)).toBeNull();
+    await waitFor(async () => (await fs.readdir(path.join(root, '.trash'))).length === 0);
+    store.deleteChat('never-created-chat');
+  });
+
+  it('empties deletions a restart interrupted during startup cleanup', async () => {
+    const interrupted = path.join(root, '.trash', 'chat-one-00000000-0000-4000-8000-000000000000');
+    await fs.mkdir(interrupted, { recursive: true });
+    await fs.writeFile(path.join(interrupted, 'ledger.sqlite'), 'synthetic ledger');
+
+    expect(store.removeUnregisteredChatDirectories(new Set())).toEqual([]);
+
+    await waitFor(async () => (await fs.readdir(path.join(root, '.trash'))).length === 0);
+  });
+
+  it('replaces a redirected trash directory without touching its target', async () => {
+    const outsideDirectory = `${root}-trash-target`;
+    await fs.mkdir(outsideDirectory);
+    await fs.writeFile(path.join(outsideDirectory, 'keep.txt'), 'outside the ledger root');
+    await fs.symlink(outsideDirectory, path.join(root, '.trash'), 'dir');
+    store.initializeCurrentView('chat-one', {
+      viewId: transcriptViewId('view-one'),
+      contentStartOrdinal: 1,
+    });
+
+    try {
+      expect(store.removeUnregisteredChatDirectories(new Set(['chat-one']))).toEqual([]);
+      store.deleteChat('chat-one');
+
+      expect((await fs.lstat(path.join(root, '.trash'))).isDirectory()).toBe(true);
+      await waitFor(async () => (await fs.readdir(path.join(root, '.trash'))).length === 0);
+      expect(await fs.readdir(outsideDirectory)).toEqual(['keep.txt']);
+    } finally {
+      await fs.rm(outsideDirectory, { recursive: true, force: true });
+    }
+  });
+
   it('removes unregistered symlinks without touching their targets', async () => {
     const outsideDirectory = `${root}-orphan-target`;
     await fs.mkdir(outsideDirectory);
@@ -1884,5 +1929,13 @@ function closeStoreAfterInjectedRollbackFailure() {
   } finally {
     Database.prototype.exec = exec;
     store = null;
+  }
+}
+
+async function waitFor(condition) {
+  const deadline = Date.now() + 5_000;
+  while (!(await condition())) {
+    if (Date.now() > deadline) throw new Error('Condition not reached');
+    await new Promise((resolve) => setTimeout(resolve, 5));
   }
 }

@@ -257,7 +257,7 @@ The stable gateway credential removes a protection present in direct HTTP: contr
 
 Use explicit bridge outcomes in the standard error envelope, with names such as `CLI_CONTROLLER_UNAVAILABLE`, `CLI_CONTROLLER_CHANGED`, `CLI_ACCESS_DENIED`, `CLI_SERVICE_BUSY`, `CLI_REQUEST_TOO_LARGE`, `CLI_RESULT_TOO_LARGE`, and `CLI_OUTCOME_UNKNOWN`. Final names belong in the shared error-code contract. The CLI must recognize definite admission/restart rejections instead of treating every 5xx bridge error as an ambiguous mutation.
 
-Status/classification: CHANGED is 409, ACCESS_DENIED 403, size failures 413, UNAVAILABLE/BUSY 503 retryable without mutation dispatch, and OUTCOME_UNKNOWN 503 with possible dispatch. Classify unknown outcomes like transport loss before operation-specific rules, including steer. A later definitive rejection must not erase uncertainty from an earlier attempt. Controller changes and access loss stop recovery; ticket retries remain explicit. The five-second redial may outlast existing CLI retries, which must fail honestly rather than silently expand.
+Status/classification: CHANGED is 409, ACCESS_DENIED 403, size failures 413, UNAVAILABLE/BUSY 503 retryable without mutation dispatch, and OUTCOME_UNKNOWN 503 with possible dispatch. Classify unknown outcomes like transport loss before operation-specific rules, including steer. A later definitive rejection must not erase uncertainty from an earlier attempt. Controller changes and access loss stop recovery; ticket retries remain explicit. Redial backoff, up to 30 seconds between attempts, may outlast existing CLI retries, which must fail honestly rather than silently expand.
 
 | Observation | Required handling |
 | --- | --- |

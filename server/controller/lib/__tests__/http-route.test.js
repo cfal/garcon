@@ -41,6 +41,7 @@ mock.module('../../config.js', () => ({
 
 import { markRouteNoAuth, markRouteNoStore, isNoAuthHandler, wrapRoute, wrapRoutes } from '../http-route.js';
 import { withJsonBody } from '../json-route.js';
+import { monitorEventLoopStalls } from '../../../common/event-loop-stalls.js';
 
 function resetConfigMocks() {
   isAuthDisabled.mockReset();
@@ -107,6 +108,27 @@ describe('http route wrapping', () => {
 
   afterEach(() => {
     resetConfigMocks();
+  });
+
+  it('names the route pattern, not the URL, when its handler holds the event loop', async () => {
+    const stalls = [];
+    const stop = monitorEventLoopStalls((stall) => stalls.push(stall), { intervalMs: 20, thresholdMs: 150 });
+    try {
+      const handler = markRouteNoAuth(() => {
+        const until = performance.now() + 300;
+        while (performance.now() < until) { /* Holds the event loop. */ }
+        return new Response('ok');
+      });
+      await Bun.sleep(60);
+      await wrapRoute(handler, '/shared/:token', 'GET')(new Request('http://localhost/shared/synthetic-token'));
+      await Bun.sleep(60);
+
+      expect(stalls).toHaveLength(1);
+      expect(stalls[0].activities).toContain('GET /shared/:token');
+      expect(stalls[0].activities.join(' ')).not.toContain('synthetic-token');
+    } finally {
+      stop();
+    }
   });
 
   it('requires auth for unmarked handlers', async () => {

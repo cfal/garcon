@@ -196,6 +196,7 @@ function messageText(message: ChatMessage, budget: ExtractionBudget): string {
     case 'glob-tool-use':
       return joinTool(message.pattern, message.path);
     case 'web-search-tool-use':
+    case 'pi-tool-search-tool-use':
     case 'amp-finder-tool-use':
     case 'amp-librarian-tool-use':
     case 'amp-find-thread-tool-use':

@@ -6,7 +6,6 @@ import {
   admissionFault, integrationFixture, isExecutionHandleReply, isProducerResumeReply, linkOptions, outgoingFault, outgoingHold,
   remoteFixture, requestFor,
 } from '../../__tests__/integration-fixture.js';
-import { EXECUTOR_DISCONNECTED_BEFORE_START } from '../../../common/executor-disconnect.js';
 import { connectRemoteExecutor } from '../../__tests__/runtime-adapter.js';
 import { serveExecutionRuntime } from '../../server/executor-rpc-server.js';
 import { ProducerRelay } from '../../server/producer-relay.js';
@@ -196,18 +195,19 @@ for (const dialer of ['controller', 'worker'] as const) {
     } finally { release.resolve(); await fixture.dispose(); }
   });
 
-  test(`a start cancelled by a disconnect reports that it did not start (${dialer} dials)`, async () => {
+  test(`a start in flight when the link drops keeps running and reports its handle (${dialer} dials)`, async () => {
     const fixture = await remoteFixture(dialer);
+    const release = Promise.withResolvers<void>();
     try {
       const integration = await fixture.executor.getAgentIntegration('test');
       const request = await requestFor(integration);
       const entered = Promise.withResolvers<void>();
       const worker = fixture.generations[0]!;
+      let cancelled = false;
       worker.hooks.start = async ({ admission }) => {
+        admission.signal.addEventListener('abort', () => { cancelled = true; }, { once: true });
         entered.resolve();
-        await new Promise<never>((_, reject) => admission.signal.addEventListener('abort', () => {
-          reject(new Error('Synthetic cancelled admission'));
-        }, { once: true }));
+        await release.promise;
       };
       const outcomes = launchOutcomes(integration);
       const call = integration.execution.start(request).catch((error: unknown) => error);
@@ -216,12 +216,43 @@ for (const dialer of ['controller', 'worker'] as const) {
       fixture.controller.disconnect(); fixture.worker.disconnect();
       expect(await call).toMatchObject({ outcome: 'unknown' });
       await ready;
-      await integration.execution.runningSessions();
-      expect(outcomes).toEqual([{ type: 'launch-settled', runId: request.runId, error: EXECUTOR_DISCONNECTED_BEFORE_START }]);
-      worker.hooks.start = async () => {};
-      await integration.execution.start(await requestFor(integration));
-      expect(worker.calls.start).toBe(2);
-    } finally { await fixture.dispose(); }
+      release.resolve();
+      const deadline = performance.now() + 10_000;
+      while (outcomes.length === 0 && performance.now() < deadline) await Bun.sleep(5);
+
+      expect(cancelled).toBe(false);
+      expect(outcomes).toEqual([{ type: 'launch-settled', runId: request.runId, handle: expect.objectContaining({ kind: 'execution' }) }]);
+      expect(worker.calls.start).toBe(1);
+    } finally { release.resolve(); await fixture.dispose(); }
+  });
+
+  test(`a start that fails after its session was lost reports its own failure (${dialer} dials)`, async () => {
+    const fixture = await remoteFixture(dialer);
+    const fail = Promise.withResolvers<void>();
+    try {
+      const integration = await fixture.executor.getAgentIntegration('test');
+      const request = await requestFor(integration);
+      const entered = Promise.withResolvers<void>();
+      fixture.generations[0]!.hooks.start = async () => {
+        entered.resolve();
+        await fail.promise;
+        throw new AgentIntegrationError('AUTH_REQUIRED', 'Synthetic sign-in required', false);
+      };
+      const outcomes = launchOutcomes(integration);
+      const call = integration.execution.start(request).catch((error: unknown) => error);
+      await entered.promise;
+      const ready = nextAvailability(fixture.executor, 'ready');
+      fixture.controller.disconnect(); fixture.worker.disconnect();
+      expect(await call).toMatchObject({ outcome: 'unknown' });
+      await ready;
+      fail.resolve();
+      const deadline = performance.now() + 10_000;
+      while (outcomes.length === 0 && performance.now() < deadline) await Bun.sleep(5);
+
+      expect(outcomes).toEqual([{
+        type: 'launch-settled', runId: request.runId, error: { code: 'AUTH_REQUIRED', message: 'Synthetic sign-in required' },
+      }]);
+    } finally { fail.resolve(); await fixture.dispose(); }
   });
 
   test(`a start whose reply was lost reports its handle once the binding resumes (${dialer} dials)`, async () => {
@@ -320,7 +351,36 @@ for (const dialer of ['controller', 'worker'] as const) {
     } finally { await fixture.dispose(); }
   });
 
-  test(`a start request lost before the worker reports that it did not start (${dialer} dials)`, async () => {
+  test(`a start lost after its binding closed leaves no cancellation for Stop to send (${dialer} dials)`, async () => {
+    let fault!: ReturnType<typeof outgoingFault>;
+    const fixture = await remoteFixture(dialer, (controller) => { fault = outgoingFault(controller); });
+    const release = Promise.withResolvers<void>();
+    try {
+      const integration = await fixture.executor.getAgentIntegration('test');
+      const request = await requestFor(integration);
+      const entered = Promise.withResolvers<void>();
+      fixture.generations[0]!.hooks.start = async () => { entered.resolve(); await release.promise; };
+      const admission = new AbortController();
+      const launch = integration.execution.start(request, { signal: admission.signal }).catch((error: unknown) => error);
+      await entered.promise;
+      await integration.producers.close(request.producerBinding);
+      const cancellations: string[] = [];
+      fault.inject = (encoded) => {
+        if (encoded.includes('"method":"producers.cancelLaunch"')) cancellations.push(encoded);
+        return null;
+      };
+      const ready = nextAvailability(fixture.executor, 'ready');
+      fixture.controller.disconnect(); fixture.worker.disconnect();
+      expect(await launch).toMatchObject({ outcome: 'unknown' });
+      await ready;
+      admission.abort();
+      await integration.execution.runningSessions();
+
+      expect(cancellations).toEqual([]);
+    } finally { release.resolve(); await fixture.dispose(); }
+  });
+
+  test(`a start request the worker never received is sent once more on the replacement session (${dialer} dials)`, async () => {
     let fault!: ReturnType<typeof outgoingFault>;
     const fixture = await remoteFixture(dialer, (controller) => { fault = outgoingFault(controller); });
     try {
@@ -331,9 +391,53 @@ for (const dialer of ['controller', 'worker'] as const) {
       const ready = nextAvailability(fixture.executor, 'ready');
       expect(await integration.execution.start(request).catch((error: unknown) => error)).toMatchObject({ outcome: 'unknown' });
       await ready;
+      const deadline = performance.now() + 10_000;
+      while (outcomes.length === 0 && performance.now() < deadline) await Bun.sleep(5);
+
+      expect(outcomes).toEqual([{ type: 'launch-settled', runId: request.runId, handle: expect.objectContaining({ kind: 'execution' }) }]);
+      expect(fixture.generations[0]!.calls.start).toBe(1);
+    } finally { await fixture.dispose(); }
+  });
+
+  test(`a relaunch settles on its own session when an earlier session's report is still waiting for its replay (${dialer} dials)`, async () => {
+    let fault!: ReturnType<typeof outgoingFault>;
+    let holdReplay = false;
+    const fixture = await remoteFixture(dialer, (controller, worker) => {
+      fault = outgoingFault(controller);
+      // A refused producer frame stays retained, so the replay waits.
+      worker.onSession((session) => {
+        const offer = session.channel.offer.bind(session.channel);
+        session.channel.offer = (payload) => !holdReplay && offer(payload);
+      });
+    });
+    try {
+      const integration = await fixture.executor.getAgentIntegration('test');
+      const worker = fixture.generations[0]!;
+      const request = await requestFor(integration);
+      await integration.execution.start(request);
+      worker.nativePublishers[0]!({ type: 'run-ended', runId: request.runId, outcome: 'finished' });
       await integration.execution.runningSessions();
-      expect(outcomes).toEqual([{ type: 'launch-settled', runId: request.runId, error: EXECUTOR_DISCONNECTED_BEFORE_START }]);
-      expect(fixture.generations[0]!.calls.start).toBe(0);
+      holdReplay = true;
+      worker.nativePublishers[0]!({ type: 'session', session: { agentSessionId: 'test-session', nativeSession: null, nativeSeedReceipt: null } });
+      const runId = crypto.randomUUID();
+      const outcomes = launchOutcomes(integration);
+      disconnectOn(fault, (encoded) => encoded.includes('"method":"execution.start"'));
+      const secondReady = nextAvailability(fixture.executor, 'ready');
+      await integration.execution.start({ ...request, runId }).catch(() => undefined);
+      await secondReady;
+      expect(outcomes).toEqual([]);
+      expect(worker.calls.start).toBe(1);
+
+      holdReplay = false;
+      const thirdReady = nextAvailability(fixture.executor, 'ready');
+      fixture.controller.disconnect(); fixture.worker.disconnect();
+      await thirdReady;
+      const deadline = performance.now() + 10_000;
+      while (outcomes.length === 0 && performance.now() < deadline) await Bun.sleep(5);
+      await integration.execution.runningSessions();
+
+      expect(outcomes).toEqual([{ type: 'launch-settled', runId, handle: expect.objectContaining({ kind: 'execution' }) }]);
+      expect(worker.calls.start).toBe(2);
     } finally { await fixture.dispose(); }
   });
 
@@ -520,6 +624,10 @@ for (const dialer of ['controller', 'worker'] as const) {
       await integration.execution.start(request);
       const events = record(integration);
       const availability = availabilityLog(fixture.executor);
+      const native = fixture.generations[0]!.integration.producers;
+      const detached = Promise.withResolvers<void>();
+      const detach = native.detach.bind(native);
+      native.detach = (binding) => { detach(binding); detached.resolve(); };
       const ready = nextAvailability(fixture.executor, 'ready');
       fixture.controller.disconnect(); fixture.worker.disconnect();
       await ready;
@@ -530,6 +638,8 @@ for (const dialer of ['controller', 'worker'] as const) {
 
       expect(availability).toEqual(['reconnecting', 'offline', 'ready']);
       expect(events).toEqual([]);
+      // Once the worker's own grace expires too, it no longer holds the binding.
+      await detached.promise;
       await expect(integration.producers.close(request.producerBinding)).rejects.toMatchObject({ code: 'STALE_RESOURCE' });
     } finally { await fixture.dispose(); }
   });

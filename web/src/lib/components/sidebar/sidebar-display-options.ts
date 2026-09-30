@@ -11,6 +11,7 @@ export interface SidebarDisplayOptions {
 	inactivityDuration: SidebarInactivityDuration;
 	groupNestedProjectPaths: boolean;
 	chatItemLayout: ChatItemLayout;
+	showProjectPath: boolean;
 	sortMode: SidebarSortMode;
 	pinnedInsertPosition: PinnedInsertPosition;
 }
@@ -19,7 +20,8 @@ export const DEFAULT_SIDEBAR_DISPLAY_OPTIONS: SidebarDisplayOptions = {
 	grouping: 'project-and-activity',
 	inactivityDuration: '3-days',
 	groupNestedProjectPaths: false,
-	chatItemLayout: 'compact',
+	chatItemLayout: 'single-line',
+	showProjectPath: false,
 	sortMode: 'manual',
 	pinnedInsertPosition: 'top',
 };

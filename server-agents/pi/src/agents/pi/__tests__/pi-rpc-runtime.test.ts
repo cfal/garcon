@@ -49,8 +49,11 @@ function createFakePiProcess(options = {}) {
   const behavior = {
     getState: options.getStateBehavior ?? 'accept',
     prompt: options.promptBehavior ?? 'accept',
+    promptDisposition: options.promptDisposition ?? 'started',
     setSteeringMode: options.setSteeringModeBehavior ?? 'accept',
     steer: options.steerBehavior ?? 'accept',
+    steerDisposition: options.steerDisposition ?? 'queued',
+    steerText: options.steerText,
     steerResponseDelayMs: options.steerResponseDelayMs ?? 0,
   };
   const signals = [];
@@ -159,7 +162,8 @@ function createFakePiProcess(options = {}) {
           });
           return;
         }
-        respond(command.id, { type: 'response', command: 'prompt', success: true });
+        respond(command.id, { type: 'response', command: 'prompt', success: true,
+          data: { disposition: behavior.promptDisposition } });
         return;
       case 'steer':
         if (behavior.steer === 'reject') {
@@ -171,7 +175,7 @@ function createFakePiProcess(options = {}) {
           });
           return;
         }
-        state.steering.push(command.message);
+        if (behavior.steerDisposition !== 'handled') state.steering.push(behavior.steerText ?? command.message);
         stdoutController.enqueue(encoder.encode(`${JSON.stringify({
           type: 'queue_update',
           steering: [...state.steering],
@@ -184,7 +188,8 @@ function createFakePiProcess(options = {}) {
         if (behavior.steer === 'hold') return;
         respond(
           command.id,
-          { type: 'response', command: 'steer', success: true },
+          { type: 'response', command: 'steer', success: true,
+            data: { disposition: behavior.steerDisposition } },
           behavior.steerResponseDelayMs,
         );
         return;
@@ -282,6 +287,15 @@ async function waitForCommand(fake, type) {
   throw new Error(`Pi command ${type} was not written`);
 }
 
+async function waitForSpawn() {
+  const deadline = Date.now() + 1_000;
+  while (Date.now() < deadline) {
+    if (fakes[0]) return fakes[0];
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+  throw new Error('Pi process was not spawned');
+}
+
 describe('PiRpcRuntime', () => {
   beforeEach(async () => {
     tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-pi-rpc-'));
@@ -336,6 +350,7 @@ describe('PiRpcRuntime', () => {
     const prompt = fake.commands.find((command) => command.type === 'prompt');
     expect(prompt.message).toBe('hello');
 
+    await waitForActive(runtime);
     fake.pushEvent({ type: 'agent_settled' });
     await settleIo();
     expect(published.events).toEqual([{
@@ -448,6 +463,118 @@ describe('PiRpcRuntime', () => {
         message: expect.stringContaining('scripted prompt rejection'),
       },
     }]);
+    expect(fakes[0].proc.killed).toBe(true);
+    await runtime.shutdown();
+  });
+
+  it('binds a fast prompt in wire order without consuming an earlier settlement', async () => {
+    await fs.writeFile(baseResumeRequest().nativePath, '');
+    spawnOptions.push({ promptBehavior: 'hold' });
+    const runtime = createRuntime();
+    const published = collectOperation('fast-prompt');
+    const turn = runtime.runTurn(baseResumeRequest({ operation: published.operation }));
+    const command = await waitForCommand(await waitForSpawn(), 'prompt');
+    fakes[0].pushEvent({ type: 'agent_settled' });
+    await settleIo();
+    expect(published.events).toEqual([]);
+    fakes[0].pushRaw([
+      { type: 'response', command: 'prompt', id: command.id, success: true, data: { disposition: 'started' } },
+      { type: 'agent_start' },
+      { type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: 'final' }], stopReason: 'stop' } },
+      { type: 'message_end', message: { role: 'system', content: [] } },
+      { type: 'agent_settled' },
+    ].map((event) => JSON.stringify(event)).join('\n'));
+    await turn;
+    expect(published.events.at(-1)).toMatchObject({ type: 'run-ended', outcome: 'finished', finalResponse: { text: 'final' } });
+    expect(fakes[0].proc.killed).toBe(false);
+    await runtime.shutdown();
+  });
+
+  for (const independent of ['none', 'running', 'settled']) {
+    it(`settles a handled prompt with independent work ${independent}`, async () => {
+      await fs.writeFile(baseResumeRequest().nativePath, '');
+      spawnOptions.push({ promptBehavior: 'hold' });
+      const runtime = createRuntime();
+      const published = collectOperation('handled-prompt');
+      const turn = runtime.runTurn(baseResumeRequest({ operation: published.operation }));
+      const command = await waitForCommand(await waitForSpawn(), 'prompt');
+      if (independent !== 'none') fakes[0].pushEvent({ type: 'agent_start' });
+      if (independent === 'settled') fakes[0].pushEvent({ type: 'agent_settled' });
+      await settleIo();
+      expect(published.events).toEqual([]);
+      fakes[0].pushEvent({ type: 'response', command: 'prompt', id: command.id,
+        success: true, data: { disposition: 'handled' } });
+      await settleIo();
+      if (independent === 'running') {
+        expect(published.events).toEqual([]);
+        expect(runtime.isRunning('pi-session-1')).toBe(true);
+        fakes[0].pushEvent({ type: 'agent_settled' });
+      }
+      await turn;
+      expect(published.events).toEqual([{ type: 'run-ended', runId: 'handled-prompt', outcome: 'finished' }]);
+      expect(fakes[0].proc.killed).toBe(false);
+      await runtime.shutdown();
+    });
+  }
+
+  it('reuses a handled-only initial session before Pi writes its first conversation', async () => {
+    spawnOptions.push({ promptDisposition: 'handled' });
+    const runtime = createRuntime();
+    const started = await runtime.startSession(baseStartRequest());
+    await settleIo();
+    expect(runtime.isRunning(started.agentSessionId)).toBe(false);
+    fakes[0].behavior.promptDisposition = 'started';
+    const next = runtime.runTurn(baseResumeRequest({ agentSessionId: started.agentSessionId }));
+    await waitForActive(runtime);
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    fakes[0].pushEvent({ type: 'agent_settled' });
+    await next;
+    await runtime.shutdown();
+  });
+
+  it('retires unowned extension work that starts after a handled prompt completes', async () => {
+    await fs.writeFile(baseResumeRequest().nativePath, '');
+    spawnOptions.push({ promptDisposition: 'handled' });
+    const runtime = createRuntime();
+    await runtime.runTurn(baseResumeRequest());
+    fakes[0].pushEvent({ type: 'agent_start' });
+    await settleIo();
+    expect(fakes[0].proc.killed).toBe(true);
+    const next = runtime.runTurn(baseResumeRequest());
+    await waitForActive(runtime);
+    expect(spawnMock).toHaveBeenCalledTimes(2);
+    fakes[1].pushEvent({ type: 'agent_settled' });
+    await next;
+    await runtime.shutdown();
+  });
+
+  it.each(['steering', 'followUp'])('retires %s input queued after a handled prompt completes', async (queue) => {
+    await fs.writeFile(baseResumeRequest().nativePath, '');
+    spawnOptions.push({ promptDisposition: 'handled' });
+    const runtime = createRuntime();
+    await runtime.runTurn(baseResumeRequest());
+    fakes[0].pushEvent({ type: 'queue_update', steering: [], followUp: [], [queue]: ['unowned input'] });
+    await settleIo();
+    expect(fakes[0].proc.killed).toBe(true);
+    await runtime.shutdown();
+  });
+
+  it.each(['queued', 'invalid', undefined, 'concurrent-started'])('fails and retires an invalid prompt acceptance: %s', async (disposition) => {
+    await fs.writeFile(baseResumeRequest().nativePath, '');
+    spawnOptions.push({ promptBehavior: 'hold' });
+    const runtime = createRuntime();
+    const published = collectOperation('invalid-prompt');
+    const turn = runtime.runTurn(baseResumeRequest({ operation: published.operation }));
+    const failure = turn.catch((error) => error);
+    const command = await waitForCommand(await waitForSpawn(), 'prompt');
+    if (disposition === 'concurrent-started') fakes[0].pushEvent({ type: 'agent_start' });
+    fakes[0].pushRaw([
+      { type: 'response', command: 'prompt', id: command.id, success: true,
+        data: { disposition: disposition === 'concurrent-started' ? 'started' : disposition } },
+      { type: 'agent_settled' },
+    ].map((event) => JSON.stringify(event)).join('\n'));
+    expect(await failure).toBeInstanceOf(Error);
+    expect(published.events).toEqual([expect.objectContaining({ type: 'run-ended', outcome: 'failed' })]);
     expect(fakes[0].proc.killed).toBe(true);
     await runtime.shutdown();
   });
@@ -913,6 +1040,7 @@ describe('PiRpcRuntime', () => {
     const runtime = createRuntime();
     const first = collectOperation('run-a');
     const started = await runtime.startSession(baseStartRequest({ operation: first.operation }));
+    await waitForActive(runtime);
     const fake = fakes[0];
     await fs.writeFile(started.nativePath, '');
 
@@ -966,6 +1094,7 @@ describe('PiRpcRuntime', () => {
       operation: first.operation,
     }));
     const colliding = collectOperation('run-b');
+    await waitForActive(runtime);
 
     await expect(runtime.runTurn(baseResumeRequest({
       agentSessionId: started.agentSessionId,
@@ -1003,6 +1132,7 @@ describe('PiRpcRuntime', () => {
     });
     const operation = collectOperation('run-a');
     await runtime.startSession(baseStartRequest({ operation: operation.operation }));
+    await waitForActive(runtime);
     fakes[0].pushEvent({ type: 'agent_settled' });
     await settleIo();
     fakes[0].pushEvent({
@@ -1064,6 +1194,7 @@ describe('PiRpcRuntime', () => {
         },
       },
     }));
+    await waitForActive(runtime);
     const fake = fakes[0];
 
     fake.pushEvent({
@@ -1335,13 +1466,12 @@ describe('PiRpcRuntime', () => {
     await runtime.shutdown();
   });
 
-  it('accepts steering on a live turn and tracks delivery through queue updates', async () => {
+  it('accepts steering on a live turn and reuses it only after the queue drains', async () => {
     await fs.writeFile(baseResumeRequest().nativePath, '');
     const runtime = createRuntime();
     const turn = runtime.runTurn(baseResumeRequest());
     await waitForActive(runtime);
-    // The prompt echo surfaces as a user message; with nothing accepted it must not
-    // disturb the delivery ledger.
+    // User echoes do not establish steering identity.
     fakes[0].state.steering = [];
     fakes[0].pushEvent({ type: 'queue_update', steering: [], followUp: [] });
     fakes[0].pushEvent({
@@ -1384,7 +1514,7 @@ describe('PiRpcRuntime', () => {
     await runtime.shutdown();
   });
 
-  it('accepts steering delivered before its response even when the turn settles first', async () => {
+  it('does not attribute a matching user message to a late queued acknowledgement', async () => {
     await fs.writeFile(baseResumeRequest().nativePath, '');
     spawnOptions.push({ steerResponseDelayMs: 30 });
     const runtime = createRuntime();
@@ -1414,13 +1544,13 @@ describe('PiRpcRuntime', () => {
     });
     fakes[0].pushEvent({ type: 'agent_settled' });
 
-    await expect(steer).resolves.toEqual({ kind: 'accepted' });
+    await expect(steer).resolves.toMatchObject({ kind: 'failed', outcome: 'unknown' });
     await turn;
-    expect(fakes[0].proc.killed).toBe(false);
+    expect(fakes[0].proc.killed).toBe(true);
     await runtime.shutdown();
   });
 
-  it('tracks duplicate steering text by occurrence through delivery and persistence', async () => {
+  it('keeps duplicate steering text in FIFO order without using text as identity', async () => {
     await fs.writeFile(baseResumeRequest().nativePath, '');
     const runtime = createRuntime();
     const turn = runtime.runTurn(baseResumeRequest());
@@ -1499,7 +1629,7 @@ describe('PiRpcRuntime', () => {
     await runtime.shutdown();
   });
 
-  it('retires the process when dequeued steering lacks persistence evidence at settle', async () => {
+  it('does not require a persisted text match when an acknowledged queue is empty at settle', async () => {
     await fs.writeFile(baseResumeRequest().nativePath, '');
     const runtime = createRuntime();
     const turn = runtime.runTurn(baseResumeRequest());
@@ -1517,18 +1647,18 @@ describe('PiRpcRuntime', () => {
     });
     expect(result).toEqual({ kind: 'accepted' });
 
-    // Queue removal happens before Pi emits and persists the matching user message.
+    // An extension can clear a queue; acceptance does not promise persistence.
     fakes[0].state.steering = [];
     fakes[0].pushEvent({ type: 'queue_update', steering: [], followUp: [] });
     fakes[0].pushEvent({ type: 'agent_settled' });
     await turn;
     await settleIo();
-    expect(fakes[0].proc.killed).toBe(true);
+    expect(fakes[0].proc.killed).toBe(false);
 
     const nextTurn = runtime.runTurn(baseResumeRequest());
     await waitForActive(runtime);
-    expect(spawnMock).toHaveBeenCalledTimes(2);
-    fakes[1].pushEvent({ type: 'agent_settled' });
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    fakes[0].pushEvent({ type: 'agent_settled' });
     await nextTurn;
     await runtime.shutdown();
   });
@@ -1557,7 +1687,7 @@ describe('PiRpcRuntime', () => {
     await runtime.shutdown();
   });
 
-  it('rejects a steer that missed the run and retires the process', async () => {
+  it('reports an acknowledged steer that missed the run as unknown, never retryable rejection', async () => {
     await fs.writeFile(baseResumeRequest().nativePath, '');
     const runtime = createRuntime();
     const turn = runtime.runTurn(baseResumeRequest());
@@ -1578,10 +1708,147 @@ describe('PiRpcRuntime', () => {
     });
     fakes[0].pushEvent({ type: 'agent_settled' });
     const result = await steerPromise;
-    expect(result.kind).toBe('rejected');
-    expect(result.reason).toBe('turn-changed');
+    expect(result.kind).toBe('failed');
+    expect(result.outcome).toBe('unknown');
     await turn;
     await settleIo();
+    expect(fakes[0].proc.killed).toBe(true);
+    await runtime.shutdown();
+  });
+
+  for (const independentSettled of [false, true]) {
+    it(`fences an independent run during reserved settlement, settled=${independentSettled}`, async () => {
+      await fs.writeFile(baseResumeRequest().nativePath, '');
+      spawnOptions.push({ steerBehavior: 'hold', steerDisposition: 'handled' });
+      const runtime = createRuntime();
+      try {
+        const published = collectOperation('reserved-settle');
+        const turn = runtime.runTurn(baseResumeRequest({ operation: published.operation }));
+        await waitForActive(runtime);
+        const steering = runtime.steer({
+          chatId: 'chat-2', projectPath: baseResumeRequest().projectPath,
+          agentSessionId: 'pi-session-1', nativeSession: null,
+          target: runtime.captureSteerTarget('pi-session-1'), input: 'handled input',
+          clientMessageId: 'handled', prepareDelivery: () => Promise.resolve(),
+        });
+        const command = await waitForCommand(fakes[0], 'steer');
+        fakes[0].pushEvent({ type: 'message_end', message: {
+          role: 'assistant', content: [{ type: 'text', text: 'original reply' }], stopReason: 'stop', timestamp: 0,
+        } });
+        fakes[0].pushEvent({ type: 'agent_settled' });
+        fakes[0].pushEvent({ type: 'agent_start' });
+        fakes[0].pushEvent({ type: 'message_end', message: {
+          role: 'assistant', content: [{ type: 'text', text: 'orphan reply' }], stopReason: 'stop', timestamp: 0,
+        } });
+        fakes[0].pushEvent({ type: 'compaction_end', reason: 'threshold', aborted: false,
+          result: { summary: 'orphan compaction', firstKeptEntryId: 'entry-1', tokensBefore: 50 } });
+        if (independentSettled) fakes[0].pushEvent({ type: 'agent_settled' });
+        await settleIo();
+        expect(published.events.filter((event) => event.type === 'run-ended')).toEqual([]);
+        fakes[0].pushEvent({ type: 'response', command: 'steer', id: command.id, success: true,
+          data: { disposition: 'handled' } });
+        expect(await steering).toEqual({ kind: 'accepted' });
+        await turn;
+        expect(published.events.filter((event) => event.type === 'run-ended')).toEqual([{
+          type: 'run-ended', runId: 'reserved-settle', outcome: 'finished',
+          finalResponse: { type: 'text', text: 'original reply' },
+        }]);
+        expect(JSON.stringify(published.events)).not.toContain('orphan');
+        expect(fakes[0].proc.killed).toBe(true);
+
+        const next = runtime.runTurn(baseResumeRequest());
+        await waitForActive(runtime);
+        expect(spawnMock).toHaveBeenCalledTimes(2);
+        fakes.at(-1).pushEvent({ type: 'agent_settled' });
+        await next;
+      } finally {
+        await runtime.shutdown();
+      }
+    });
+  }
+
+  for (const settleBeforeResponse of [false, true]) {
+    for (const queue of ['empty', 'steering', 'followUp']) {
+      it(`settles handled steering with late=${settleBeforeResponse}, independent=${queue}`, async () => {
+        await fs.writeFile(baseResumeRequest().nativePath, '');
+        spawnOptions.push({ steerBehavior: 'hold', steerDisposition: 'handled' });
+        const runtime = createRuntime();
+        const published = collectOperation('handled-steer');
+        const turn = runtime.runTurn(baseResumeRequest({ operation: published.operation }));
+        await waitForActive(runtime);
+        const steering = runtime.steer({
+          chatId: 'chat-2', projectPath: baseResumeRequest().projectPath,
+          agentSessionId: 'pi-session-1', nativeSession: null,
+          target: runtime.captureSteerTarget('pi-session-1'), input: 'handled input',
+          clientMessageId: 'handled', prepareDelivery: () => Promise.resolve(),
+        });
+        const command = await waitForCommand(fakes[0], 'steer');
+        fakes[0].pushEvent({ type: 'queue_update',
+          steering: queue === 'steering' ? ['independent input'] : [],
+          followUp: queue === 'followUp' ? ['independent input'] : [] });
+        if (settleBeforeResponse) fakes[0].pushEvent({ type: 'agent_settled' });
+        fakes[0].pushEvent({ type: 'response', command: 'steer', id: command.id, success: true,
+          data: { disposition: 'handled' } });
+        expect(await steering).toEqual({ kind: 'accepted' });
+        if (!settleBeforeResponse) {
+          expect(runtime.isRunning('pi-session-1')).toBe(true);
+          expect(published.events).toEqual([]);
+          fakes[0].pushEvent({ type: 'agent_settled' });
+        }
+        await turn;
+        await settleIo();
+        expect(fakes[0].proc.killed).toBe(queue !== 'empty');
+        expect(published.events).toEqual([{ type: 'run-ended', runId: 'handled-steer', outcome: 'finished' }]);
+        await runtime.shutdown();
+      });
+    }
+
+    it(`does not infer delivery of transformed queued steering, late=${settleBeforeResponse}`, async () => {
+      await fs.writeFile(baseResumeRequest().nativePath, '');
+      spawnOptions.push({ steerBehavior: 'hold', steerText: 'transformed' });
+      const runtime = createRuntime();
+      const turn = runtime.runTurn(baseResumeRequest());
+      await waitForActive(runtime);
+      const steering = runtime.steer({
+        chatId: 'chat-2', projectPath: baseResumeRequest().projectPath,
+        agentSessionId: 'pi-session-1', nativeSession: null,
+        target: runtime.captureSteerTarget('pi-session-1'), input: 'original',
+        clientMessageId: 'transformed', prepareDelivery: () => Promise.resolve(),
+      });
+      const command = await waitForCommand(fakes[0], 'steer');
+      fakes[0].pushEvent({ type: 'queue_update', steering: [], followUp: [] });
+      fakes[0].pushEvent({ type: 'message_end', message: { role: 'user', content: 'transformed' } });
+      if (settleBeforeResponse) fakes[0].pushEvent({ type: 'agent_settled' });
+      fakes[0].pushEvent({ type: 'response', command: 'steer', id: command.id, success: true,
+        data: { disposition: 'queued' } });
+      expect(await steering).toMatchObject(settleBeforeResponse
+        ? { kind: 'failed', outcome: 'unknown' }
+        : { kind: 'accepted' });
+      if (!settleBeforeResponse) fakes[0].pushEvent({ type: 'agent_settled' });
+      await turn;
+      await settleIo();
+      expect(fakes[0].proc.killed).toBe(settleBeforeResponse);
+      await runtime.shutdown();
+    });
+  }
+
+  it.each(['started', 'invalid', undefined])('retires on a malformed steer disposition: %s', async (disposition) => {
+    await fs.writeFile(baseResumeRequest().nativePath, '');
+    spawnOptions.push({ steerBehavior: 'hold' });
+    const runtime = createRuntime();
+    const turn = runtime.runTurn(baseResumeRequest());
+    await waitForActive(runtime);
+    const steering = runtime.steer({
+      chatId: 'chat-2', projectPath: baseResumeRequest().projectPath,
+      agentSessionId: 'pi-session-1', nativeSession: null,
+      target: runtime.captureSteerTarget('pi-session-1'), input: 'input',
+      clientMessageId: 'malformed', prepareDelivery: () => Promise.resolve(),
+    });
+    const command = await waitForCommand(fakes[0], 'steer');
+    fakes[0].pushEvent({ type: 'response', command: 'steer', id: command.id,
+      success: true, data: { disposition } });
+    expect(await steering).toMatchObject({ kind: 'failed', outcome: 'unknown' });
+    await turn;
     expect(fakes[0].proc.killed).toBe(true);
     await runtime.shutdown();
   });

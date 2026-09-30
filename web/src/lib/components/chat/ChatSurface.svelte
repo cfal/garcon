@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { ComposerAvailabilityNoticePresentation } from '$lib/chat/composer/composer-availability.js';
 	import { untrack } from 'svelte';
 	import {
 		getChatSessions,
@@ -60,7 +61,7 @@
 		onRegisterAppendToDraft?: (fn: ChatDraftAppend) => void;
 		onRegisterPanelActions?: (actions: ConversationPanelActions | null) => void;
 		onComposerHeightChange?: (height: number) => void;
-		onComposerNoticeChange?: (shown: boolean) => void;
+		onComposerNoticeChange?: (notice: ComposerAvailabilityNoticePresentation | null) => void;
 		subagentToolbar: SubagentToolbarState;
 		chatActions?: WorkspaceChatActions;
 		transcriptCache?: ChatTranscriptCache;

@@ -241,7 +241,7 @@ test('new and scheduled chats retain input and require Retry after cached remote
   }, { executionBackend: 'remote-controller-dials' });
 }, 90_000);
 
-test('a failed model catalog replaces the Git tray with a retryable notice beside an unchanged composer', async () => {
+test('a failed model catalog shows a retryable notice above the Git tray and unchanged composer', async () => {
   await withE2eFixture('catalog-failure-notice', async (fixture) => {
     const { client, directAgents, dirs } = fixture.integration;
     const projectPath = join(dirs.project, 'catalog-failure-repository');
@@ -265,14 +265,15 @@ test('a failed model catalog replaces the Git tray with a retryable notice besid
     await app.setViewport(1_440, 900);
     await app.openChat(chatId);
     await fixture.waitForSpaWebSocket();
-    const notice = '[data-composer-shell] [data-composer-availability-notice="catalog-failed"]';
+    const notice = '[data-conversation-panel-composer-anchor="true"] [data-composer-availability-notice="catalog-failed"]';
     const trayChildren = () => fixture.page.evaluate(() => document.querySelector('[data-conversation-panel-status-anchor]')?.children.length ?? -1);
     const composerHeight = () => fixture.page.$eval('[data-composer]', (element) => element.getBoundingClientRect().height);
 
     await fixture.page.waitForSelector(notice, { timeout: 20_000 });
     expect(await fixture.page.$eval(notice, (element) => element.textContent)).toContain('Failed to load model catalog');
     expect(await fixture.page.$eval('[data-composer]', (element, selector) => element.querySelector(selector) === null, notice)).toBe(true);
-    expect(await trayChildren()).toBe(0);
+    await fixture.page.waitForFunction(() => (document.querySelector('[data-conversation-panel-status-anchor]')?.children.length ?? 0) > 0, { timeout: 20_000 });
+    expect(await trayChildren()).toBeGreaterThan(0);
     const failedHeight = await composerHeight();
 
     await fixture.page.evaluate(() => { document.documentElement.dataset.repairCatalog = 'true'; });

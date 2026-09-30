@@ -6,6 +6,7 @@ import SidebarChatItemHost from './SidebarChatItemHost.svelte';
 import SidebarSearchDialogHost from './SidebarSearchDialogHost.svelte';
 
 import type { ChatSessionRecord } from '$lib/types/chat-session';
+import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 import {
 	deniedWorkspaceSplits,
 	workspaceSplitAdmissions,
@@ -44,6 +45,34 @@ function createChat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionReco
 }
 
 describe('shared sidebar chat row', () => {
+	it.each(['single-line', 'compact', 'detailed'] as const)(
+		'shows an executor pill before the agent only with multiple executors in %s layout',
+		async (chatItemLayout) => {
+			const view = render(SidebarChatItemHost, {
+				session: createChat(),
+				displayOptions: { chatItemLayout },
+				executors: [localExecutor],
+			});
+			const pill = () => view.container.querySelector('[data-slot="chat-executor-pill"]');
+			expect(pill()).toBeNull();
+			await view.rerender({ executors: [localExecutor, remoteExecutor] });
+			if (chatItemLayout === 'single-line') {
+				expect(pill()).toBeNull();
+				return;
+			}
+			expect(pill()?.textContent?.trim()).toBe('Local');
+			expect(pill()?.nextElementSibling?.getAttribute('data-slot')).toBe('chat-agent-tags');
+			expect(pill()?.querySelector('svg')?.getAttribute('class')).toContain('size-2.5');
+			await view.rerender({
+				session: createChat({ executorId: remoteExecutor.id }),
+				executors: [localExecutor, { ...remoteExecutor, label: 'Long worker label', availability: 'offline' }],
+			});
+			expect(pill()?.getAttribute('title')).toBe('Long worker label');
+			await view.rerender({ executors: [localExecutor] });
+			expect(pill()).toBeNull();
+		},
+	);
+
 	it.each([false, true])('exposes the current chat on %s mobile rows', (isMobile) => {
 		render(SidebarChatItemHost, {
 			session: createChat(),
@@ -84,7 +113,7 @@ describe('shared sidebar chat row', () => {
 		render(SidebarChatItemHost, {
 			session: createChat(),
 			isPinned: true,
-			displayOptions: { chatItemLayout: 'detailed' },
+			displayOptions: { chatItemLayout: 'detailed', showProjectPath: true },
 			onTagClick,
 			onManageTags,
 		});
@@ -102,9 +131,8 @@ describe('shared sidebar chat row', () => {
 		expect(document.querySelector('[data-slot="sidebar-chat-processing-indicator"]')).toBeNull();
 		expect(screen.getByText('3h ago')).toBeTruthy();
 		expect(title.parentElement?.className).toContain('leading-[1.3]');
-		expect(screen.getByText('3h ago').className).toContain('font-normal');
-		expect(screen.getByText('3h ago').className).not.toContain('ml-auto');
-		expect(screen.getByText('3h ago').className).not.toContain('group-hover:opacity-0');
+		expect(screen.getByText('3h ago').className).toContain('ml-auto');
+		expect(screen.getByText('3h ago').className).toContain('group-hover:opacity-0');
 		expect(screen.queryByText('Jan 1')).toBeNull();
 		expect(screen.queryByText('12:00 AM')).toBeNull();
 		expect(screen.getByTitle('/very/long/workspace/projects/feature-branch/app')).toBeTruthy();
@@ -113,8 +141,8 @@ describe('shared sidebar chat row', () => {
 		expect(metadataProjectLabel.parentElement?.className).toContain('text-[12px]');
 		expect(metadataProjectLabel.parentElement?.className).toContain('gap-1');
 		const sidebarPreview = screen.getByText('Latest preview text');
-		expect(sidebarPreview.className).toContain('mt-0.5');
-		expect(sidebarPreview.className).toContain('mb-1');
+		expect(sidebarPreview.className).not.toContain('mt-');
+		expect(sidebarPreview.className).not.toContain('mb-');
 		expect(sidebarPreview.className).toContain('font-semibold');
 		expect(screen.getByText('Claude')).toBeTruthy();
 		expect(screen.getByText('ops')).toBeTruthy();
@@ -126,13 +154,12 @@ describe('shared sidebar chat row', () => {
 		expect(desktopMenuTrigger?.className).toContain('border-sidebar-border/70');
 		expect(desktopMenuTrigger?.className).toContain('bg-background');
 		for (const badge of pinnedBadges) {
-			expect(badge.className).toContain('bottom-0');
-			expect(badge.className).toContain('right-0');
+			expect(badge.className).not.toContain('absolute');
 			expect(badge.className).toContain('h-4');
 			expect(badge.className).toContain('w-4');
 			expect(badge.querySelector('svg')?.getAttribute('class')).toContain('size-2.5');
 			expect(badge.closest('button')).not.toBe(desktopMenuTrigger);
-			expect(badge.parentElement?.className).toContain('relative flex-1 min-w-0');
+			expect(badge.parentElement).toBe(title.parentElement);
 			expect(badge.parentElement?.className).not.toContain('pr-8');
 		}
 
@@ -161,7 +188,7 @@ describe('shared sidebar chat row', () => {
 		expect(screen.getByText('Unread').className).toContain('sr-only');
 		expect(screen.getByText('Chat is processing').className).toContain('sr-only');
 		expect(processingIndicator?.className).toContain('shrink-0');
-		expect(processingIndicator?.parentElement).toBe(title.parentElement);
+		expect(processingIndicator?.parentElement?.parentElement).toBe(title.parentElement);
 		expect(document.querySelector('[data-slot="sidebar-chat-processing-slot"]')).toBeNull();
 		expect(title.closest('button')?.className).not.toContain('border-l-status-processing');
 
@@ -206,8 +233,7 @@ describe('shared sidebar chat row', () => {
 
 		const archivedBadge = document.querySelector('.border-sidebar-badge-archived-border');
 
-		expect(archivedBadge?.className).toContain('bottom-0');
-		expect(archivedBadge?.className).toContain('right-0');
+		expect(archivedBadge?.className).not.toContain('absolute');
 		expect(archivedBadge?.className).toContain('h-4');
 		expect(archivedBadge?.className).toContain('w-4');
 		expect(archivedBadge?.querySelector('svg')?.getAttribute('class')).toContain('size-2.5');
@@ -692,14 +718,14 @@ describe('shared sidebar chat row', () => {
 		expect(processingIndicator?.closest('.sidebar-reduce-motion')).toBeTruthy();
 		const searchTitle = screen.getByText('Shared row chat');
 		expect(searchTitle.className).toContain('font-bold');
-		expect(processingIndicator?.parentElement).toBe(searchTitle.parentElement);
+		expect(processingIndicator?.parentElement?.parentElement).toBe(searchTitle.parentElement);
 		expect(screen.queryByText('Jan 1')).toBeNull();
 		expect(screen.queryByText('12:00 AM')).toBeNull();
-		expect(screen.getByText('3h ago')).toBeTruthy();
 		expect(screen.getByTitle('/very/long/workspace/projects/feature-branch/app')).toBeTruthy();
+		expect(screen.queryByText('3h ago')).toBeNull();
 		const searchPreview = screen.getByText('Latest preview text');
-		expect(searchPreview.className).toContain('mt-0.5');
-		expect(searchPreview.className).toContain('mb-1');
+		expect(searchPreview.className).not.toContain('mt-');
+		expect(searchPreview.className).not.toContain('mb-');
 		expect(searchPreview.className).toContain('font-semibold');
 		expect(screen.getByText('Claude')).toBeTruthy();
 		expect(screen.getByText('ops')).toBeTruthy();

@@ -5,10 +5,12 @@ import { join } from 'node:path';
 import type { E2eFixture } from '../../support/e2e-fixture.js';
 import { withE2eFixture } from '../../support/e2e-fixture.js';
 import { waitForExecutorReconnect } from '../../support/executor-link.js';
-import { initializeFixtureRepository, runFixtureGit } from '../../support/git-fixture.js';
+import { initializeFixtureRepository, runFixtureGit, runFixtureGitAt } from '../../support/git-fixture.js';
 import { SpaDriver } from '../../support/spa-driver.js';
 
 const GIT_PANEL = '[role="tabpanel"][data-workspace-surface-id="singleton:git"][aria-hidden="false"]';
+// Stashes pushed at one timestamp share a reflog second, which once gave their rows one key.
+const SAME_SECOND = '2026-01-01T00:00:00Z';
 
 async function openGit(fixture: E2eFixture): Promise<void> {
   await fixture.page.evaluate(() => {
@@ -43,6 +45,35 @@ async function waitForGitExecutorOutage(fixture: E2eFixture): Promise<void> {
   await fixture.page.waitForFunction(() => [...document.querySelectorAll(
     '[data-workspace-surface-id^="singleton:git"] [data-executor-service-notice="executor-unavailable"]',
   )].some(notice => notice.textContent?.includes('Integration worker is unavailable.')));
+}
+
+async function waitForStashes(fixture: E2eFixture, messages: readonly string[]): Promise<void> {
+  await fixture.page.waitForFunction((selector, expected) => {
+    const panel = document.querySelector(selector);
+    if (!panel || panel.textContent?.includes('could not be displayed')) return false;
+    const rows = [...panel.querySelectorAll<HTMLButtonElement>('button')]
+      .filter(button => button.textContent?.trim() === 'Drop')
+      .map(button => button.parentElement?.textContent ?? '');
+    return rows.length === expected.length
+      && expected.every((message, index) => rows[index]?.includes(`stash@{${index}}`) && rows[index]?.includes(message));
+  }, { timeout: 20_000 }, GIT_PANEL, messages);
+}
+
+async function clickStashAction(fixture: E2eFixture, message: string, action: 'Apply' | 'Pop' | 'Drop'): Promise<void> {
+  await fixture.page.$eval(GIT_PANEL, (panel, input) => {
+    const button = [...panel.querySelectorAll<HTMLButtonElement>('button')].find(candidate =>
+      candidate.textContent?.trim() === input.action && candidate.parentElement?.textContent?.includes(input.message));
+    if (!button) throw new Error(`Missing ${input.action} for ${input.message}`);
+    button.click();
+  }, { message, action });
+}
+
+async function waitForFile(file: string, content: string): Promise<void> {
+  const deadline = Date.now() + 20_000;
+  while (await readFile(file, 'utf8') !== content) {
+    if (Date.now() > deadline) throw new Error(`${file} did not become ${JSON.stringify(content)}`);
+    await Bun.sleep(50);
+  }
 }
 
 async function waitForDiff(fixture: E2eFixture, text: string): Promise<void> {
@@ -115,7 +146,7 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
       const project = executionDirs.project;
       await initializeFixtureRepository(project);
       await writeFile(join(project, 'example.txt'), 'Original stash content\n');
-      await runFixtureGit(project, 'stash', 'push', '-m', 'Original synthetic stash');
+      await runFixtureGitAt(project, SAME_SECOND, 'stash', 'push', '-m', 'Original synthetic stash');
       await writeFile(join(project, 'example.txt'), 'Pending discard content\n');
       const chatId = fixture.integration.newChatId();
       const accepted = await client.startDirectChat({ chatId, projectPath: project, content: 'Synthetic confirmation chat', agent: directAgents.openAi });
@@ -144,12 +175,13 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
       const dropReconnectCursor = client.events().length;
       await client.patch(`/api/v1/executors/${client.executorId}`, { enabled: false });
       await waitForGitExecutorOutage(fixture);
-      await runFixtureGit(project, 'stash', 'push', '-m', 'Replacement synthetic stash');
+      await runFixtureGitAt(project, SAME_SECOND, 'stash', 'push', '-m', 'Replacement synthetic stash');
       await writeFile(join(project, 'example.txt'), 'Replacement working content\n');
       await client.patch(`/api/v1/executors/${client.executorId}`, { enabled: true });
       await waitForExecutorReconnect(fixture.integration, dropReconnectCursor);
       await app.selectWorkspaceWindowSurfaceById('singleton:git', gitWindow);
       await waitForDiff(fixture, 'Replacement working content');
+      await waitForStashes(fixture, ['Replacement synthetic stash', 'Original synthetic stash']);
       expect(await fixture.page.$eval(GIT_PANEL, panel => [...panel.querySelectorAll('button')]
         .some(button => button.textContent?.trim() === 'Confirm'))).toBe(false);
       expect(await runFixtureGit(project, 'stash', 'list', '--format=%s')).toContain('Replacement synthetic stash');
@@ -450,3 +482,46 @@ test('Git views reload and stage on the worker after its process restarts', asyn
     expect(fixture.browserErrors.filter(message => message.startsWith('pageerror:'))).toEqual([]);
   }, { executionBackend: 'remote-controller-dials', projectRoots: 'separate' });
 }, 90_000);
+
+for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote-executor-dials'] as const) {
+  test(`stash actions apply, pop, and drop the listed stash (${executionBackend})`, async () => {
+    await withE2eFixture(`executor-git-stash-actions-${executionBackend}`, async fixture => {
+      const { client, executionDirs, directAgents } = fixture.integration;
+      const project = executionDirs.project;
+      await initializeFixtureRepository(project);
+      for (const file of ['notes.txt', 'other.txt']) await writeFile(join(project, file), 'Committed content\n');
+      await runFixtureGit(project, 'add', 'notes.txt', 'other.txt');
+      await runFixtureGit(project, 'commit', '-m', 'Synthetic files');
+      for (const [file, name] of [['example.txt', 'Apply'], ['other.txt', 'Pop'], ['example.txt', 'Drop']] as const) {
+        await writeFile(join(project, file), `${name} stash content\n`);
+        await runFixtureGitAt(project, SAME_SECOND, 'stash', 'push', '-m', `${name} synthetic stash`);
+      }
+      await writeFile(join(project, 'notes.txt'), 'Pending notes change\n');
+      const chatId = fixture.integration.newChatId();
+      const accepted = await client.startDirectChat({ chatId, projectPath: project, content: 'Synthetic stash actions', agent: directAgents.openAi });
+      await client.waitForTurnTerminal(chatId, accepted.turnId);
+      const app = new SpaDriver(fixture.page, fixture.integration);
+      await app.setViewport(1_600, 900);
+      await app.openChat(chatId);
+      await fixture.waitForSpaWebSocket();
+      await openGit(fixture);
+      await showGitDiff(fixture);
+      await waitForDiff(fixture, 'Pending notes change');
+      await app.clickButton('Stash');
+      await waitForStashes(fixture, ['Drop synthetic stash', 'Pop synthetic stash', 'Apply synthetic stash']);
+
+      await clickStashAction(fixture, 'Drop synthetic stash', 'Drop');
+      await app.clickButton('Confirm');
+      await waitForStashes(fixture, ['Pop synthetic stash', 'Apply synthetic stash']);
+
+      await clickStashAction(fixture, 'Apply synthetic stash', 'Apply');
+      await waitForFile(join(project, 'example.txt'), 'Apply stash content\n');
+
+      await clickStashAction(fixture, 'Pop synthetic stash', 'Pop');
+      await waitForFile(join(project, 'other.txt'), 'Pop stash content\n');
+      await waitForStashes(fixture, ['Apply synthetic stash']);
+      expect(await runFixtureGit(project, 'stash', 'list', '--format=%s')).toBe('On main: Apply synthetic stash\n');
+      fixture.assertNoBrowserErrors();
+    }, { executionBackend, projectRoots: 'separate' });
+  }, 90_000);
+}

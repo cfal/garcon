@@ -5,7 +5,9 @@ import {
   ToolResultMessage,
   UserMessage,
 } from '../../../../../common/chat-types.ts';
-import { transcriptEntryCategoryForMessage } from '../../../../../common/transcript-entry-categories.ts';
+import { decodeStoredLedgerRow } from '../../../ledger/codec.ts';
+import { storedProviderRows } from '../../../ledger/__tests__/stored-rows.ts';
+import { foldRowsForExport } from '../../../ledger/export-fold.ts';
 import { foldHandoffArtifactEntries } from '../../handoff-artifact/projection.ts';
 import { renderFittedHandoffArtifact } from '../../handoff-artifact/xml.ts';
 import { assessCarryover, fitCompactionPrompt } from '../carryover.ts';
@@ -42,7 +44,7 @@ describe('TokenFittingWorker', () => {
       transcriptViewId: 'view-1',
       lastOrdinal: messages.length,
       contextWindowTokens: 32_768,
-      entries: exportEntries(messages),
+      rows: storedProviderRows(messages),
     };
 
     expect(await fitting.assessCarryover(messages)).toEqual(assessCarryover(messages));
@@ -56,7 +58,7 @@ describe('TokenFittingWorker', () => {
       transcriptViewId: artifact.transcriptViewId,
       lastOrdinal: artifact.lastOrdinal,
       contextWindowTokens: artifact.contextWindowTokens,
-      sourceFold: foldHandoffArtifactEntries(artifact.entries),
+      sourceFold: foldHandoffArtifactEntries(foldRowsForExport(artifact.rows.map(decodeStoredLedgerRow))),
     }));
   });
 
@@ -80,6 +82,18 @@ describe('TokenFittingWorker', () => {
     expect(fitted.kind).toBe('fitted');
     expect(gap).toBeLessThan(MAX_EVENT_LOOP_GAP_MS);
   });
+
+  it('bounds each transfer by the text it carries, not only by message count', async () => {
+    fitting = new TokenFittingWorker();
+    // One batch of these would clone 256 MB in a single main-thread step.
+    const messages = Array.from({ length: 256 }, (_, index) => new AssistantMessage(AT, `${index} ${'x'.repeat(1_000_000)}`));
+
+    const gap = await maxEventLoopGap(async () => {
+      expect(await fitting.assessCarryover(messages)).toMatchObject({ kind: expect.any(String) });
+    });
+
+    expect(gap).toBeLessThan(MAX_EVENT_LOOP_GAP_MS);
+  }, 60_000);
 
   it('abandons an aborted running task and serves the next task from a fresh Worker', async () => {
     fitting = new TokenFittingWorker();
@@ -113,6 +127,19 @@ describe('TokenFittingWorker', () => {
     expect(await fitting.assessCarryover(transcript(2, 5))).toMatchObject({ kind: 'complete' });
   });
 
+  it('reports the code of a stored row that fails to decode', async () => {
+    fitting = new TokenFittingWorker();
+    const [row] = storedProviderRows(transcript(1, 5));
+
+    await expect(fitting.renderHandoffArtifact({
+      chat: CHAT,
+      transcriptViewId: 'view-1',
+      lastOrdinal: 1,
+      contextWindowTokens: 32_768,
+      rows: [{ ...row, payload_json: 'not json' }],
+    })).rejects.toMatchObject({ message: 'Stored transcript row is invalid', code: 'UNDECODABLE_LEDGER_ROW' });
+  });
+
   it('rejects running, queued, and later tasks once closed', async () => {
     fitting = new TokenFittingWorker();
     const running = fitting.assessCarryover(transcript(LONG_TURNS, LONG_WORDS));
@@ -135,15 +162,6 @@ function transcript(turns, words) {
     messages.push(new AssistantMessage(AT, `Result ${turn}: ${body}`));
   }
   return messages;
-}
-
-function exportEntries(messages) {
-  return messages.map((message, index) => ({
-    kind: 'message',
-    ordinal: index + 1,
-    category: transcriptEntryCategoryForMessage(message),
-    message,
-  }));
 }
 
 async function maxEventLoopGap(work) {

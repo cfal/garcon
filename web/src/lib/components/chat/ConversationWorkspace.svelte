@@ -3,6 +3,7 @@
 	// rendered panels own transcript presentation and scrolling.
 
 	import { onDestroy, onMount } from 'svelte';
+	import type { ComposerAvailabilityNoticePresentation } from '$lib/chat/composer/composer-availability.js';
 	import PromptComposer from './PromptComposer.svelte';
 	import QueuedInputsDialog from './QueuedInputsDialog.svelte';
 	import HandoffForkDialog from './HandoffForkDialog.svelte';
@@ -87,7 +88,7 @@
 		onRegisterPrepareHide?: (prepare: (() => void) | null) => void;
 		onRegisterPanelActions?: (actions: ConversationPanelActions | null) => void;
 		onComposerHeightChange?: (height: number) => void;
-		onComposerNoticeChange?: (shown: boolean) => void;
+		onComposerNoticeChange?: (notice: ComposerAvailabilityNoticePresentation | null) => void;
 		onChooseProjectFolder?: (chatId: string) => void;
 		subagentToolbar: SubagentToolbarState;
 		transcriptCache?: ChatTranscriptCache;

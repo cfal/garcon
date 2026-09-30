@@ -1,14 +1,18 @@
 import { describe, expect, it } from 'bun:test';
+import { Database } from 'bun:sqlite';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { AssistantMessage, UserMessage } from '../../../../common/chat-types.ts';
 import { TranscriptHistoryUnavailableError } from '../../chats/errors.ts';
+import { TranscriptRenderingWorker } from '../../chats/transcript-rendering/client.ts';
 import { transcriptViewId } from '../contracts.ts';
 import { LedgerFencedError, safeFenceDiagnostic, StaleTranscriptViewError } from '../errors.ts';
 import { TranscriptLedgerService } from '../service.ts';
 import { TranscriptLedgerStore } from '../store.ts';
 import { TranscriptViewReader } from '../view-reader.ts';
+import { decodeStoredLedgerRow } from '../codec.ts';
+import { ledgerRowsToMessages } from '../presentation.ts';
 
 const TS = '2026-08-12T00:00:00.000Z';
 
@@ -311,7 +315,7 @@ describe('TranscriptViewReader', () => {
     });
   });
 
-  it('captures the rendering fold as a self-contained view snapshot', async () => {
+  it('captures stored rows that render as a self-contained view snapshot', async () => {
     await withReader(async ({ ledger, reader, viewId }) => {
       ledger.appendInputAndCompose({
         chatId: 'chat-1',
@@ -331,13 +335,14 @@ describe('TranscriptViewReader', () => {
         rows: [{ message: new AssistantMessage(TS, 'answer') }],
       });
 
-      const snapshot = await reader.renderingSnapshot('chat-1');
+      const snapshot = await reader.withStoredSnapshot('chat-1', captured);
 
       expect(snapshot).toMatchObject({
         transcriptViewId: viewId,
         lastOrdinal: 3,
       });
-      expect(snapshot.messages.map((message) => message.content)).toEqual(['prompt', 'answer']);
+      expect(ledgerRowsToMessages(snapshot.rows.map(decodeStoredLedgerRow)).map((message) => message.content))
+        .toEqual(['prompt', 'answer']);
     });
   });
 
@@ -359,7 +364,7 @@ describe('TranscriptViewReader', () => {
       ledger.beginRun('chat-1', 'run-1');
       producer.sink.publish({ type: 'run-ended', runId: 'run-1', outcome: 'finished' });
 
-      const snapshot = await reader.exportSnapshot('chat-1');
+      const snapshot = await reader.withStoredSnapshot('chat-1', captured);
 
       expect(snapshot).toMatchObject({
         transcriptViewId: viewId,
@@ -397,11 +402,57 @@ describe('TranscriptViewReader', () => {
         },
       });
 
-      await expect(reader.renderingSnapshot('chat-1')).rejects.toMatchObject({
+      await expect(reader.withStoredSnapshot('chat-1', captured)).rejects.toMatchObject({
         code: 'SOURCE_REVISION_CHANGED',
         status: 409,
         retryable: true,
       });
+    });
+  });
+
+  it('fences a chat whose stored rows fail to decode on a rendering Worker', async () => {
+    await withReader(async ({ ledger, reader, viewId, root }) => {
+      appendPrompt(ledger, viewId, 'message-1');
+      const database = new Database(path.join(root, 'chat-1', 'ledger.sqlite'));
+      database.query("UPDATE transcript_rows SET payload_json = 'not json' WHERE ordinal = 1").run();
+      database.close();
+      const rendering = new TranscriptRenderingWorker();
+
+      try {
+        await expect(reader.withStoredSnapshot('chat-1', (snapshot) => rendering.renderTranscriptExport({
+          chat: { id: 'chat-1', title: 'Synthetic chat', agentId: 'codex', model: 'gpt-test' },
+          transcriptViewId: snapshot.transcriptViewId,
+          lastOrdinal: snapshot.lastOrdinal,
+          generatedAt: TS,
+          format: 'markdown',
+          exclusions: [],
+          rows: snapshot.rows,
+        }))).rejects.toMatchObject({
+          code: 'TRANSCRIPT_UNAVAILABLE',
+          historyState: { kind: 'degraded', errorCode: 'LEDGER_FENCED', retryable: false },
+        });
+      } finally {
+        rendering.close();
+      }
+      expect(() => appendPrompt(ledger, viewId, 'message-2')).toThrow(LedgerFencedError);
+    });
+  });
+
+  it('leaves a chat unfenced when its view was replaced before its rows failed to decode', async () => {
+    await withReader(async ({ ledger, reader, viewId }) => {
+      appendPrompt(ledger, viewId, 'message-1');
+      const replacementViewId = transcriptViewId('view-2');
+
+      await expect(reader.withStoredSnapshot('chat-1', async () => {
+        await ledger.stageView('chat-1', [{
+          kind: 'provider-row',
+          at: TS,
+          message: new AssistantMessage(TS, 'replacement view'),
+        }], 1, replacementViewId);
+        ledger.replaceCurrentView('chat-1', viewId, replacementViewId);
+        throw Object.assign(new Error('Stored transcript row is invalid'), { code: 'UNDECODABLE_LEDGER_ROW' });
+      })).rejects.toBeInstanceOf(StaleTranscriptViewError);
+      expect(ledger.currentRows('chat-1').map((row) => row.message?.content)).toEqual(['replacement view']);
     });
   });
 
@@ -421,8 +472,7 @@ describe('TranscriptViewReader', () => {
       for (const read of [
         () => reader.page('chat-1', 20),
         () => reader.replay('chat-1', transcriptViewId('view-1'), 0),
-        () => reader.renderingSnapshot('chat-1'),
-        () => reader.exportSnapshot('chat-1'),
+        () => reader.withStoredSnapshot('chat-1', captured),
       ]) {
         let failure;
         try {
@@ -483,9 +533,24 @@ async function withReader(run) {
     ensure: async () => ledger.currentView('chat-1'),
   });
   try {
-    await run({ ledger, reader, viewId });
+    await run({ ledger, reader, viewId, root });
   } finally {
     ledger.close();
     await rm(root, { recursive: true, force: true });
   }
+}
+
+async function captured(snapshot) {
+  return snapshot;
+}
+
+function appendPrompt(ledger, viewId, clientMessageId) {
+  ledger.appendInputAndCompose({
+    chatId: 'chat-1',
+    viewId,
+    message: new UserMessage(TS, 'prompt'),
+    attachments: [],
+    clientMessageId,
+    steer: false,
+  });
 }

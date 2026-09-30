@@ -39,7 +39,7 @@ for (const role of ['controller', 'worker'] as const) {
       { secret },
       { secret: Buffer.alloc(32, 9).toString('base64url'), allowUnverifiedTls: true },
     ]) {
-      const rejected = new WebSocketLink({ role, executorId: 'synthetic-executor', ...config, reconnectDelayMs: 60_000 });
+      const rejected = new WebSocketLink({ role, executorId: 'synthetic-executor', ...config, redialDelaysMs: [60_000] });
       cleanups.push(() => rejected.dispose());
       const failure = Promise.withResolvers<void>();
       rejected.onError(() => failure.resolve());

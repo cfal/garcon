@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { GitConflictDetails } from '$lib/api/git.js';
+import { ApiError } from '$lib/api/client.js';
+import type { GitConflictDetails, GitStashEntry } from '$lib/api/git.js';
 import {
 	GitPorcelainState,
 	type GitPorcelainDeps,
@@ -10,6 +11,9 @@ vi.mock('$lib/api/git.js', async (importOriginal) => ({
 	getGitConflictDetails: vi.fn(),
 	getGitStashes: vi.fn(),
 	gitCreateStash: vi.fn(),
+	gitApplyStash: vi.fn(),
+	gitPopStash: vi.fn(),
+	gitDropStash: vi.fn(),
 }));
 
 const gitApi = await import('$lib/api/git.js');
@@ -40,7 +44,7 @@ function makeConflictDetails(path: string): GitConflictDetails {
 	};
 }
 
-function createState(): GitPorcelainState {
+function createState(overrides: Partial<GitPorcelainDeps> = {}): GitPorcelainState {
 	return new GitPorcelainState({
 		selectedFile: () => null,
 		refreshAfterMutation: async () => {},
@@ -48,8 +52,69 @@ function createState(): GitPorcelainState {
 		ensureFreshForGitMutation: () => true,
 		isCurrentTarget: () => true,
 		runGitMutation: async (_project, action) => action(),
+		...overrides,
 	} satisfies GitPorcelainDeps);
 }
+
+function makeStash(index: number, hash: string, message: string): GitStashEntry {
+	return { index, ref: `stash@{${index}}`, hash, message, date: '2026-01-01 00:00:00 +0000' };
+}
+
+const stashActions = [
+	['applyStash', 'gitApplyStash', 'apply'],
+	['popStash', 'gitPopStash', 'pop'],
+	['dropStash', 'gitDropStash', 'drop'],
+] as const;
+
+describe('GitPorcelainState stash actions', () => {
+	const project = { executorId: 'remote', projectPath: '/project' };
+
+	beforeEach(() => {
+		vi.resetAllMocks();
+	});
+
+	it.each(stashActions)(
+		'%s submits the selector and commit chosen when the action started',
+		async (method, request) => {
+			const gate = deferred<void>();
+			vi.mocked(gitApi[request]).mockResolvedValueOnce({ success: true });
+			vi.mocked(gitApi.getGitStashes).mockResolvedValue({ stashes: [] });
+			const porcelain = createState({
+				runGitMutation: async (_project, action) => {
+					await gate.promise;
+					return action();
+				},
+			});
+			const stash = makeStash(1, 'b'.repeat(40), 'Chosen stash');
+			const acting = porcelain[method](project, stash);
+			Object.assign(stash, makeStash(1, 'c'.repeat(40), 'Stash now at the same selector'));
+			gate.resolve();
+			await acting;
+			expect(gitApi[request]).toHaveBeenCalledWith(project, {
+				ref: 'stash@{1}',
+				hash: 'b'.repeat(40),
+			});
+		},
+	);
+
+	it.each(stashActions)(
+		'%s reloads the list after a stale selection without retrying',
+		async (method, request, verb) => {
+			const current = makeStash(0, 'd'.repeat(40), 'Current stash');
+			const message = 'The stash list changed since it was loaded. Select the stash again from the current list.';
+			vi.mocked(gitApi[request]).mockRejectedValueOnce(new ApiError(409, message, 'GIT_STALE_STASH'));
+			vi.mocked(gitApi.getGitStashes).mockResolvedValueOnce({ stashes: [current] });
+			const surfaceError = vi.fn();
+			const porcelain = createState({ surfaceError });
+			await porcelain[method](project, makeStash(0, 'b'.repeat(40), 'Listed stash'));
+			expect(gitApi[request]).toHaveBeenCalledTimes(1);
+			expect(gitApi.getGitStashes).toHaveBeenCalledTimes(1);
+			expect(porcelain.stashes).toEqual([current]);
+			expect(surfaceError).toHaveBeenCalledWith(`Failed to ${verb} stash: ${message}`);
+			expect(porcelain.isLoading).toBe(false);
+		},
+	);
+});
 
 describe('GitPorcelainState conflict details', () => {
 	beforeEach(() => {

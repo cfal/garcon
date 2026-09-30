@@ -53,7 +53,7 @@ function waitReady(manager: ExecutorManager, id: string): Promise<void> {
 }
 
 function worker(secret: string, projectPath: string, configure: (fixture: ReturnType<typeof integrationFixture>) => void = () => {}) {
-  const link = new WebSocketLink({ role: 'worker', secret, allowInsecureDevelopment: true, reconnectDelayMs: 20 });
+  const link = new WebSocketLink({ role: 'worker', secret, allowInsecureDevelopment: true, redialDelaysMs: [20] });
   cleanups.push(() => link.dispose());
   link.onSession((transport) => {
     const provider = integrationFixture(projectPath, transport.executorId);
@@ -263,6 +263,38 @@ test('manager readiness waits for replacement metadata publication', async () =>
     await ready;
     expect(manager.list().find((item) => item.id === config.id)?.projectBasePath).toBe('/');
   } finally { release.resolve(); pending.mockRestore(); }
+});
+
+test('a reconnecting executor holds calls instead of reporting itself unavailable', async () => {
+  const { manager, root } = await fixture();
+  const config = await manager.create({ label: 'Reconnecting', direction: 'executor-connects' });
+  const { url } = sharedListener(manager);
+  const link = new WebSocketLink({ role: 'worker', secret: config.secret, allowInsecureDevelopment: true, redialDelaysMs: [20] });
+  cleanups.push(() => link.dispose());
+  const relay = new ProducerRelay();
+  let provider: ReturnType<typeof integrationFixture> | null = null;
+  link.onSession((transport) => {
+    // One worker process keeps its instance across sessions.
+    provider ??= integrationFixture(root, transport.executorId);
+    const serving = serveExecutionRuntime(provider.executor, new ExecutorRpc(transport), relay);
+    cleanups.push(() => serving.dispose());
+  });
+  link.dial(url(config.id));
+  await waitReady(manager, config.id);
+  const executor = manager.requireExecutor(config.id);
+  const reconnecting = new Promise<void>((resolve) => {
+    const off = manager.onAvailabilityChanged((executorId, value) => {
+      if (executorId === config.id && value === 'reconnecting') { off(); resolve(); }
+    });
+  });
+  link.disconnect();
+  await reconnecting;
+
+  expect(manager.isReady(config.id)).toBe(false);
+  expect(manager.requireExecutor(config.id)).toBe(executor);
+  expect(manager.integrationsFor(config.id).get('test')).not.toBeNull();
+  expect((await manager.inspectProject(root, config.id)).kind).toBe('available');
+  expect(manager.isReady(config.id)).toBe(true);
 });
 
 test('two inbound workers share one listener and keep distinct integration/resource scopes', async () => {

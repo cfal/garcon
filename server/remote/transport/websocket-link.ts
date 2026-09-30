@@ -29,7 +29,10 @@ export interface WebSocketLinkOptions {
   readonly allowUnverifiedTls?: boolean;
   readonly maxQueuedBytes?: number;
   readonly maxQueuedFrames?: number;
-  readonly reconnectDelayMs?: number;
+  // Delays before successive redials; the last one repeats.
+  readonly redialDelaysMs?: readonly number[];
+  // How long a session must stay up before losing it restarts the redial delays.
+  readonly stableSessionMs?: number;
 }
 
 export const EXECUTOR_NOISE_CONTEXT = 'garcon-executor/v1';
@@ -37,6 +40,13 @@ const LISTENER_STOP_SETTLE_MS = 25;
 
 // Peers must share both the release and the wire protocol revision.
 const LINK_VERSION = `${packageVersion}+protocol.${EXECUTOR_PROTOCOL_REVISION}`;
+
+// VS Code's reconnection delays: one immediate attempt, then backing off to 30 s.
+// https://github.com/microsoft/vscode/blob/815dd9c54b76316974aa8fe7d485375e2bc3b194/src/vs/platform/remote/common/remoteAgentConnection.ts#L649-L663
+const REDIAL_DELAYS_MS = [0, 5_000, 5_000, 10_000, 10_000, 10_000, 10_000, 10_000, 30_000];
+// A lost session that lasted this long is redialed at once. A peer that drops each
+// session right after it opens, such as one failing initialization, is backed off.
+const STABLE_SESSION_MS = 10_000;
 
 // Why a connection carrying a session closed; each closure retires its session.
 export type LinkClosureCause =
@@ -71,6 +81,7 @@ interface Connection {
   frames: SessionSocketFrames | null;
   closeCause: LinkClosureCause | null;
   closeReason: string | null;
+  sessionStartedAt: number | null;
 }
 
 export class WebSocketLink {
@@ -90,10 +101,16 @@ export class WebSocketLink {
   #server: ReturnType<typeof Bun.serve<NoiseSocketData>> | null = null;
   #listenerNoise: ReturnType<typeof createNoiseServer> | null = null;
   #dialing = false;
+  // Redials since the last stable session, which index the redial delays.
+  #redials = 0;
 
   constructor(private readonly options: WebSocketLinkOptions) {
     if (!isExecutorSecret(options.secret)) throw new Error('Executor shared secret must be a canonical base64url 32-byte key');
     if (options.role === 'controller' && !options.executorId) throw new Error('Controller executor ID is required');
+    if (options.redialDelaysMs && (options.redialDelaysMs.length === 0
+      || options.redialDelaysMs.some((delay) => !Number.isSafeInteger(delay) || delay < 0))) {
+      throw new Error('Executor redial delays must be non-negative integers');
+    }
     this.runtimeId = options.runtimeId ?? crypto.randomUUID();
     this.ready = this.#ready.promise;
     void this.ready.catch(() => undefined);
@@ -173,9 +190,9 @@ export class WebSocketLink {
       } finally { options.psk.fill(0); }
       if (socket.readyState !== 'closed') this.#sockets.add(socket);
       void socket.closed.then(() => {
-        if (!this.#disposed && !this.#quiescing) {
-          this.#dialTimer = setTimeout(connect, this.options.reconnectDelayMs ?? 5000);
-        }
+        if (this.#disposed || this.#quiescing) return;
+        const delays = this.options.redialDelaysMs ?? REDIAL_DELAYS_MS;
+        this.#dialTimer = setTimeout(connect, delays[Math.min(this.#redials++, delays.length - 1)]);
       });
     };
     connect();
@@ -248,7 +265,7 @@ export class WebSocketLink {
     };
     const connection: Connection = {
       socket, hello, peer: null, session: null, hooks: null, heartbeat: null,
-      closed: false, authenticated: false, frames: null, lastReceivedAt: Date.now(), closeCause: null, closeReason: null,
+      closed: false, authenticated: false, frames: null, lastReceivedAt: Date.now(), closeCause: null, closeReason: null, sessionStartedAt: null,
       timeout: setTimeout(() => {
         this.#reportError('Executor authentication timed out');
         this.#close(connection, 'protocol-error');
@@ -340,6 +357,7 @@ export class WebSocketLink {
       throw error;
     }
     if (connection.closed) { connection.hooks.disconnected(); return; }
+    connection.sessionStartedAt = performance.now();
     this.#ready.resolve(session);
     connection.heartbeat = setInterval(() => {
       try {
@@ -386,6 +404,10 @@ export class WebSocketLink {
     if (connection.heartbeat) clearInterval(connection.heartbeat);
     connection.frames?.dispose();
     this.#connections.delete(connection);
+    if (connection.sessionStartedAt !== null
+      && performance.now() - connection.sessionStartedAt >= (this.options.stableSessionMs ?? STABLE_SESSION_MS)) {
+      this.#redials = 0;
+    }
     if (connection.hooks) this.#reportClosure(connection.closeCause ?? 'socket-closed', connection.closeReason);
     connection.hooks?.disconnected();
   }

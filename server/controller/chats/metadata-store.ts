@@ -12,9 +12,16 @@ import { isRecord } from '../../../common/json.js';
 
 const logger = createLogger('chats:metadata-store');
 
-const DEFAULT_SAVE_DELAY_MS = 100;
+// Coalesces the saves of chats that stream at the same time; like chats.json, the file
+// is rewritten whole.
+const DEFAULT_SAVE_DELAY_MS = 1000;
 const METADATA_VERSION = 1;
 const DEFAULT_REPAIR_DEADLINE_MS = 30_000;
+// Titles and list previews show only a first line, but the whole preview is kept for every
+// chat and rewritten on each save, so both are capped. The first message keeps enough for
+// the chat details dialog.
+const FIRST_MESSAGE_PREVIEW_CHARS = 4096;
+const LAST_MESSAGE_PREVIEW_CHARS = 512;
 
 type MetadataSource = 'live' | 'agent-preview' | 'startup';
 
@@ -130,8 +137,8 @@ export class MetadataIndex {
     const key = String(chatId);
     const current = this.#metadataByChatId.get(key);
     const createdAt = current?.createdAt ?? firstTimestamp(appendedMessages) ?? new Date().toISOString();
-    const firstMessage = current?.firstMessage || firstUserText(appendedMessages) || 'New Session';
-    const lastMessage = latestPreviewText(appendedMessages) ?? current?.lastMessage ?? firstMessage;
+    const firstMessage = current?.firstMessage || firstMessagePreview(firstUserText(appendedMessages)) || 'New Session';
+    const lastMessage = lastMessagePreview(latestPreviewText(appendedMessages) ?? current?.lastMessage ?? firstMessage);
     const lastActivity = latestTimestamp(appendedMessages) ?? current?.lastActivity ?? createdAt;
 
     this.#metadataByChatId.set(key, {
@@ -155,9 +162,9 @@ export class MetadataIndex {
   ): void {
     const key = String(chatId);
     const current = this.#metadataByChatId.get(key);
-    const firstMessage = firstUserText(messages) || current?.firstMessage || 'New Session';
+    const firstMessage = firstMessagePreview(firstUserText(messages)) || current?.firstMessage || 'New Session';
     const createdAt = current?.createdAt ?? firstTimestamp(messages) ?? new Date().toISOString();
-    const lastMessage = latestPreviewText(messages) ?? firstMessage;
+    const lastMessage = lastMessagePreview(latestPreviewText(messages) ?? firstMessage);
     const lastActivity = latestTimestamp(messages) ?? createdAt;
     this.#metadataByChatId.set(key, {
       chatId: key,
@@ -181,8 +188,8 @@ export class MetadataIndex {
       chatId: key,
       createdAt,
       lastActivity: createdAt,
-      lastMessage: firstMessage,
-      firstMessage,
+      lastMessage: lastMessagePreview(firstMessage),
+      firstMessage: firstMessagePreview(firstMessage),
       source: 'startup',
     });
     this.#scheduleSave();
@@ -241,7 +248,7 @@ export class MetadataIndex {
     if (!result) return null;
     const preview = result && isAgentPreviewMetadata(result.preview) ? result.preview : null;
     const refs = session.carryOverSegments ?? [];
-    const firstMessage = preview?.firstMessage || '';
+    const firstMessage = firstMessagePreview(preview?.firstMessage);
     if (!firstMessage) {
       throw new Error(`Failed to build preview for chat: ${chatId}`);
     }
@@ -250,7 +257,7 @@ export class MetadataIndex {
       chatId,
       createdAt,
       lastActivity: preview?.lastActivity || createdAt,
-      lastMessage: preview?.lastMessage || firstMessage,
+      lastMessage: lastMessagePreview(preview?.lastMessage || firstMessage),
       firstMessage,
       source: 'agent-preview',
       identity: {
@@ -332,16 +339,17 @@ function normalizePersistedIdentity(value: unknown): ChatMetadataIdentity | unde
   };
 }
 
+// Caps previews written before they were bounded, so the next save shrinks the file.
 function normalizePersistedMetadata(chatId: string, value: unknown): ChatMetadata | null {
   if (!isRecord(value)) return null;
-  const firstMessage = typeof value.firstMessage === 'string' ? value.firstMessage : '';
+  const firstMessage = firstMessagePreview(typeof value.firstMessage === 'string' ? value.firstMessage : '');
   if (!firstMessage) return null;
   const identity = normalizePersistedIdentity(value.identity);
   return {
     chatId,
     createdAt: typeof value.createdAt === 'string' ? value.createdAt : null,
     lastActivity: typeof value.lastActivity === 'string' ? value.lastActivity : null,
-    lastMessage: typeof value.lastMessage === 'string' ? value.lastMessage : firstMessage,
+    lastMessage: lastMessagePreview(typeof value.lastMessage === 'string' ? value.lastMessage : firstMessage),
     firstMessage,
     source: isMetadataSource(value.source)
       ? value.source
@@ -352,6 +360,21 @@ function normalizePersistedMetadata(chatId: string, value: unknown): ChatMetadat
 
 function isMetadataSource(value: unknown): value is MetadataSource {
   return value === 'live' || value === 'agent-preview' || value === 'startup';
+}
+
+function firstMessagePreview(text: string | null | undefined): string {
+  return boundedPreview(text ?? '', FIRST_MESSAGE_PREVIEW_CHARS);
+}
+
+function lastMessagePreview(text: string): string {
+  return boundedPreview(text, LAST_MESSAGE_PREVIEW_CHARS);
+}
+
+// Keeps a surrogate pair whole and marks the cut with an ellipsis.
+function boundedPreview(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  const end = /[\uD800-\uDBFF]/.test(text[maxChars - 1]!) ? maxChars - 1 : maxChars;
+  return `${text.slice(0, end)}\u2026`;
 }
 
 function extractPreviewText(msg: ChatMessage | null | undefined): string {

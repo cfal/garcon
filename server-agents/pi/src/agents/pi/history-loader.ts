@@ -1,6 +1,5 @@
 import {
-  buildContextEntries,
-  sessionEntryToContextMessages,
+  buildSessionProjection,
   type FileEntry,
   type SessionEntry,
 } from '@earendil-works/pi-coding-agent';
@@ -45,23 +44,20 @@ async function readPiSessionFile(sessionPath: string): Promise<ChatMessage[]> {
     if (isSessionEntry(entry)) sessionEntries.push(entry);
     if (steps.due) await steps.next();
   }
-  // Built the way the SDK indexes entries, and handed to it so its walk along
-  // the active path is the only whole-session pass it makes.
+  // Reuses the bounded index while the SDK projects the active path.
   const byId = new Map<string, SessionEntry>();
   await steps.forEach(sessionEntries, (entry) => {
     byId.set(entry.id, entry);
   });
   await assertAcyclicActivePath(sessionEntries, byId, steps);
-  const contextEntries = buildContextEntries(sessionEntries, undefined, byId);
+  const projection = buildSessionProjection(sessionEntries, undefined, byId);
   await steps.next();
-  // buildContextEntries plus sessionEntryToContextMessages is exactly the
-  // decomposition buildSessionContext performs, kept explicit here so each
-  // rendered row retains its session entry identity through to providerMeta.
+  // Keeps context edits and compaction checkpoints aligned with Pi while
+  // retaining the original entry identity, not the editing entry's identity.
   const messages: ChatMessage[] = [];
-  await steps.forEach(contextEntries, (entry) => {
+  await steps.forEach(projection.entries, ({ sourceEntry: entry, messages: projected }) => {
     const entryId = typeof entry.id === 'string' && entry.id.length > 0 ? entry.id : null;
-    const converted = sessionEntryToContextMessages(entry)
-      .flatMap((message) => convertPiMessage(message));
+    const converted = projected.flatMap((message) => convertPiMessage(message));
     if (entryId === null) {
       messages.push(...converted);
       return;

@@ -100,7 +100,7 @@ for (const dialer of ['controller', 'worker'] as const) {
       const integration = await fixture.executor.getAgentIntegration('test');
       const projects = await fixture.executor.getProjectService();
       const binding = createAgentResourceRef(integration.producers.scope, 'producer');
-      fixture.controller.disconnect(); fixture.worker.disconnect();
+      await fixture.executor.dispose();
       for (const operation of [
         () => integration.execution.runningSessions(),
         () => integration.producers.close(binding),

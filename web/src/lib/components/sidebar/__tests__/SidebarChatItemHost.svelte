@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
-	setExecutorsTestContext();
+	import type { ExecutorSnapshot } from '$shared/executors';
 	import SidebarChatItem from '../SidebarChatItem.svelte';
 	import { setAppShell, setModelCatalog } from '$lib/context';
 	import { setWorkspaceWindowDndTestContext } from './workspace-window-dnd-test-context.js';
@@ -17,6 +17,7 @@
 
 	interface SidebarChatItemHostProps {
 		session: ChatSessionRecord;
+		executors?: readonly ExecutorSnapshot[];
 		selectedChatId?: string | null;
 		currentTime?: Date;
 		isPinned?: boolean;
@@ -46,6 +47,7 @@
 
 	let {
 		session,
+		executors,
 		selectedChatId = null,
 		currentTime = new Date('2025-01-01T03:00:00.000Z'),
 		isPinned = false,
@@ -72,6 +74,11 @@
 		supportsFork = true,
 		supportsForkWhileRunning = false,
 	}: SidebarChatItemHostProps = $props();
+
+	const executorStore = untrack(() => setExecutorsTestContext(executors));
+	$effect(() => {
+		if (executors) executorStore.applySnapshot(executors);
+	});
 
 	let displayOptions = $derived({
 		...DEFAULT_SIDEBAR_DISPLAY_OPTIONS,
