@@ -16,7 +16,7 @@ async function chooseMenuOption(page: Page, name: string): Promise<void> {
   await page.getByRole('menuitemradio', { name, exact: true }).click();
 }
 
-async function setProjectPath(page: Page, enabled: boolean): Promise<void> {
+async function setProjectPathVisibility(page: Page, enabled: boolean): Promise<void> {
   await page.getByRole('button', { name: 'More actions', exact: true }).click();
   const toggle = page.getByRole('menuitemcheckbox', { name: 'Show project path', exact: true });
   if ((await toggle.getAttribute('aria-checked')) !== String(enabled)) {
@@ -28,21 +28,20 @@ async function setProjectPath(page: Page, enabled: boolean): Promise<void> {
 
 async function expectRowGeometry(row: Locator, showProjectPath: boolean): Promise<void> {
   await browserExpect.poll(() => row.evaluate((element) => {
-    const bounds = element.getBoundingClientRect();
+    const rowBounds = element.getBoundingClientRect();
     const summary = element.querySelector('[data-slot="sidebar-chat-summary"]')!;
-    const lines = [...summary.children].map(line => line.getBoundingClientRect());
+    const lineBounds = [...summary.children].map(line => line.getBoundingClientRect());
+    const lineGaps = lineBounds.slice(1).map((line, index) => line.top - lineBounds[index]!.bottom);
     const path = summary.querySelector('[data-slot="chat-project-path"]');
     const executor = summary.querySelector('[data-slot="chat-executor-pill"]');
     const agent = summary.querySelector('[data-slot="chat-agent-tags"]')?.firstElementChild;
-    const topPadding = lines[0]!.top - bounds.top;
-    const bottomPadding = bounds.bottom - lines.at(-1)!.bottom;
+    const topPadding = lineBounds[0]!.top - rowBounds.top;
+    const bottomPadding = rowBounds.bottom - lineBounds.at(-1)!.bottom;
     return {
       hasPath: Boolean(path),
-      linesFit: lines.every(line => line.left >= bounds.left && line.right <= bounds.right + 1
-        && line.top >= bounds.top && line.bottom <= bounds.bottom + 1),
-      linesStack: lines.every((line, index) => index === 0 || line.top >= lines[index - 1]!.bottom - 1),
-      consistentLineSpacing: lines.every((line, index) => index === 0
-        || Math.abs(line.top - lines[index - 1]!.bottom - 4) < 1),
+      linesFit: lineBounds.every(line => line.left >= rowBounds.left && line.right <= rowBounds.right + 1
+        && line.top >= rowBounds.top && line.bottom <= rowBounds.bottom + 1),
+      consistentLineSpacing: lineGaps.every(gap => Math.abs(gap - 4) < 1),
       compactDetailedPadding: summary.getAttribute('data-layout') !== 'detailed'
         || (topPadding >= 4 && topPadding <= 9 && bottomPadding >= 4 && bottomPadding <= 9),
       matchingPillHeight: !executor || Boolean(agent
@@ -51,7 +50,6 @@ async function expectRowGeometry(row: Locator, showProjectPath: boolean): Promis
   })).toEqual({
     hasPath: showProjectPath,
     linesFit: true,
-    linesStack: true,
     consistentLineSpacing: true,
     compactDetailedPadding: true,
     matchingPillHeight: true,
@@ -90,7 +88,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials'] as cons
           await chooseMenuOption(page, label);
           await browserExpect(summary).toHaveAttribute('data-layout', layout);
           for (const showPath of [false, true]) {
-            await setProjectPath(page, showPath);
+            await setProjectPathVisibility(page, showPath);
             await expectRowGeometry(row, showPath);
             const header = row.locator('[data-slot="chat-summary-header"]');
             await browserExpect(header.locator('[data-slot="sidebar-chat-timestamp-badge"]')).toHaveCount(1);

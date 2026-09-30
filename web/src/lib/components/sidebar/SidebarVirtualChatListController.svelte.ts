@@ -58,7 +58,7 @@ export class SidebarVirtualChatListController {
 	}
 
 	update(input: SidebarVirtualGeometryUpdate): void {
-		const layoutChanged =
+		const sizingOptionsChanged =
 			this.#lastEstimatedLayout !== undefined &&
 			(this.#lastEstimatedLayout !== input.chatItemLayout ||
 				this.#lastShowProjectPath !== input.showProjectPath);
@@ -66,7 +66,7 @@ export class SidebarVirtualChatListController {
 		this.#lastShowProjectPath = input.showProjectPath;
 		this.#overscan = input.overscan;
 		const normalizedAnchor =
-			layoutChanged && input.rowHeight === undefined ? this.#normalizedAnchor() : null;
+			sizingOptionsChanged && input.rowHeight === undefined ? this.#normalizedAnchor() : null;
 		const result = this.#virt.apply({
 			kind: 'update',
 			keys: input.rows.map((row) => row.key),
