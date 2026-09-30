@@ -13,9 +13,12 @@ async function expectNoticeAboveCap(notice: Locator, cap: Locator, composer: Loc
   await browserExpect(notice).toBeVisible();
   await browserExpect(cap).toBeVisible();
   await browserExpect.poll(async () => {
-    const noticeBox = (await notice.boundingBox())!;
-    const capBox = (await cap.boundingBox())!;
-    const composerBox = (await composer.boundingBox())!;
+    // Layout changes remount the notice, so a box can be briefly absent; a thrown error would end
+    // the poll where a missing measurement retries it.
+    const noticeBox = await notice.boundingBox();
+    const capBox = await cap.boundingBox();
+    const composerBox = await composer.boundingBox();
+    if (!noticeBox || !capBox || !composerBox) return null;
     const noticeGap = capBox.y - (noticeBox.y + noticeBox.height);
     return {
       compactNoticeGap: noticeGap >= 7 && noticeGap <= 8,
@@ -157,8 +160,9 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         for (const width of [1440, 390]) {
           await page.setViewportSize({ width, height: 900 });
           await browserExpect.poll(async () => {
-            const noticeBox = (await notice.boundingBox())!;
-            const composerBox = (await composer.boundingBox())!;
+            const noticeBox = await notice.boundingBox();
+            const composerBox = await composer.boundingBox();
+            if (!noticeBox || !composerBox) return null;
             return composerBox.y - (noticeBox.y + noticeBox.height);
           }).toBeCloseTo(8, 0);
         }
