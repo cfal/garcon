@@ -1,10 +1,11 @@
-import { afterEach, expect, mock, test } from 'bun:test';
+import { afterEach, expect, mock, spyOn, test } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { startCliGateway } from '../server/cli-gateway.js';
 import { acquireWorkspaceLease } from '../../common/workspace-lease.js';
 import { discoverRuntime } from '../../../cli/discovery.js';
+import { connectWithWrongKey } from './failing-peers.js';
 
 let gatewayFailure: 'startup' | 'cleanup' = 'startup';
 const fakeGateway: typeof startCliGateway = async ({ dataDir }) => {
@@ -79,4 +80,31 @@ test('gateway cleanup errors do not skip listener shutdown or lease release on s
   await replacement.stop(true);
   const lease = await acquireWorkspaceLease(f.dataDir, { retries: 0 });
   await lease.release();
+});
+
+test('logs failed connections to a listening worker at powers of two per kind', async () => {
+  gatewayFailure = 'startup';
+  const f = await fixture();
+  const lines: unknown[] = [];
+  const warn = spyOn(console, 'warn').mockImplementation((line: unknown) => { lines.push(line); });
+  let checked: Promise<void> | undefined;
+  try {
+    await runExecutorWorker(f.options, (url) => {
+      checked = (async () => {
+        try {
+          const target = new URL(url);
+          target.hostname = '127.0.0.1';
+          for (let attempt = 0; attempt < 3; attempt++) await connectWithWrongKey(target.href);
+        } finally { process.emit('SIGTERM'); }
+      })();
+    });
+    await checked;
+  } finally { warn.mockRestore(); }
+
+  const unavailable = lines.flatMap((line) => (
+    typeof line === 'string' && line.startsWith('{"type":"executor-unavailable"') ? [JSON.parse(line)] : []
+  ));
+  expect(unavailable).toEqual([1, 2].map((count) => ({
+    type: 'executor-unavailable', message: 'Executor encrypted connection failed (AUTHENTICATION_FAILED)', count,
+  })));
 });
