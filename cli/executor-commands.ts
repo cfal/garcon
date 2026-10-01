@@ -1,6 +1,6 @@
 import type { ExecutorSnapshot } from '@garcon/common/executors';
 import type { ExecutorCliCommand } from './executor-args.js';
-import { GarconTransportError, type GarconClient } from './garcon-client.js';
+import { GarconHttpError, type GarconClient } from './garcon-client.js';
 import { CliError } from './errors.js';
 import type { CliOutput } from './output.js';
 import { terminalLine } from './terminal-output.js';
@@ -17,8 +17,12 @@ function requireExecutor(executors: readonly ExecutorSnapshot[], id: string): Ex
   return executor;
 }
 
-export function isExecutorMutation(command: ExecutorCliCommand): boolean {
-  return ['create', 'update', 'enable', 'disable', 'delete', 'assign-provider', 'unassign-provider'].includes(command.operation.action);
+function isDefinitiveMutationRejection(error: unknown): boolean {
+  if (!(error instanceof GarconHttpError) || error.errorCode === null) return false;
+  if (error.status >= 400 && error.status < 500) return true;
+  return error.errorCode === 'CLI_CONTROLLER_UNAVAILABLE'
+    || error.errorCode === 'CLI_SERVICE_BUSY'
+    || error.errorCode === 'SERVER_SHUTTING_DOWN';
 }
 
 async function waitReady(client: ExecutorCommandClient, id: string, timeoutMs: number, signal?: AbortSignal): Promise<ExecutorSnapshot> {
@@ -44,6 +48,7 @@ async function waitReady(client: ExecutorCommandClient, id: string, timeoutMs: n
 export async function runExecutorCommand(command: ExecutorCliCommand, client: ExecutorCommandClient, output: CliOutput,
   signal?: AbortSignal, onSubmission: () => void = () => {}): Promise<void> {
   const operation = command.operation;
+  let submitted = false;
   const result = (value: unknown, human?: string) => output.result(command.json
     ? terminalLine(JSON.stringify(value)) : human ?? terminalLine(JSON.stringify(value)));
   try {
@@ -70,6 +75,7 @@ export async function runExecutorCommand(command: ExecutorCliCommand, client: Ex
     } else {
       signal?.throwIfAborted();
       onSubmission();
+      submitted = true;
       if (operation.action === 'create') {
         const created = await client.createExecutor(operation.request, signal);
         result(created, created.id);
@@ -91,8 +97,8 @@ export async function runExecutorCommand(command: ExecutorCliCommand, client: Ex
       }
     }
   } catch (error) {
-    if (isExecutorMutation(command) && error instanceof GarconTransportError) {
-      throw new CliError('executors', 'executor configuration outcome is unknown; inspect executors and provider assignments before retrying. No automatic retry was made.', 3);
+    if (submitted && !isDefinitiveMutationRejection(error)) {
+      throw new CliError('executors', 'executor configuration outcome is unknown; inspect executors and provider assignments before retrying. No automatic retry was made.', 3, { cause: error });
     }
     throw error;
   }

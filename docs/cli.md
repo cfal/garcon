@@ -134,8 +134,10 @@ provider assignment list. A caller may rename its own executor, but must use the
 controller or another authorized executor to change its own grants/connection,
 disable it, or delete it. New workers cannot bootstrap their own grants.
 
-Mutation requests are not retried automatically. A timeout, interrupted CLI, or
-lost reply can mean the save succeeded. Inspect executors/provider assignments
+Mutation requests are not retried automatically. A timeout, interrupted CLI,
+invalid reply, or server error after dispatch can mean the save succeeded.
+Definitive validation and pre-dispatch rejections retain their original errors.
+Inspect executors/provider assignments
 before retrying, especially creation, which generates a new UUID for each request.
 `--json` emits one JSON result; diagnostics go to stderr. Ctrl-C exits 130 without
 claiming rollback. An offline target remains configurable through a healthy origin.

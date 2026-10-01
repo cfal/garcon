@@ -7,7 +7,7 @@ import { parseCliArgs } from '../args.js';
 import { applyExecutorConnectionStdin, readExecutorConnectionStdin } from '../executor-args.js';
 import { runExecutorCommand, type ExecutorCommandClient } from '../executor-commands.js';
 import { executorProviders } from '../executor-responses.js';
-import { GarconTransportError } from '../garcon-client.js';
+import { GarconClient, GarconHttpError, GarconTransportError } from '../garcon-client.js';
 import { createCliOutput } from '../output.js';
 
 const id = '11111111-1111-4111-8111-111111111111';
@@ -96,6 +96,50 @@ test('unknown mutation outcomes are reported without retries and controls cannot
   await runExecutorCommand(command(['list']), f.client, f.output);
   expect(f.stdout()).not.toContain('\x1b');
   expect(f.stdout()).not.toContain('\u202e');
+});
+
+test.each([
+  [500, 'INTERNAL_ERROR'], [503, 'API_PROVIDER_STORE_UNAVAILABLE'], [502, null], [408, null],
+] as const)('mutation HTTP failures without proof of rejection stay unknown: %s %s', async (status, code) => {
+  const f = fixture();
+  f.client.createExecutor.mockRejectedValueOnce(new GarconHttpError('executors', 'Synthetic error', status, code, true));
+  await expect(runExecutorCommand(command(['create', '--label', 'Worker', '--direction', 'controller-connects', '--connection-url', connection.connectionUrl]), f.client, f.output))
+    .rejects.toThrow('outcome is unknown');
+  expect(f.client.createExecutor).toHaveBeenCalledTimes(1);
+});
+
+test.each([
+  [400, 'VALIDATION_FAILED'], [403, 'CLI_ACCESS_DENIED'], [409, 'EXECUTOR_IN_USE'],
+  [409, 'CLI_CONTROLLER_CHANGED'], [503, 'CLI_CONTROLLER_UNAVAILABLE'], [503, 'CLI_SERVICE_BUSY'], [503, 'SERVER_SHUTTING_DOWN'],
+] as const)('definitive mutation rejections retain their diagnostics: %s %s', async (status, code) => {
+  const f = fixture();
+  const failure = new GarconHttpError('executors', 'Synthetic rejection', status, code, false);
+  f.client.createExecutor.mockRejectedValueOnce(failure);
+  await expect(runExecutorCommand(command(['create', '--label', 'Worker', '--direction', 'controller-connects', '--connection-url', connection.connectionUrl]), f.client, f.output))
+    .rejects.toBe(failure);
+  expect(f.client.createExecutor).toHaveBeenCalledTimes(1);
+});
+
+test.each(['{', '{}'])('invalid mutation replies stay unknown without retries: %s', async (body) => {
+  const request = mock(async () => new Response(body));
+  const client = new GarconClient({ baseUrl: 'http://127.0.0.1:1', instanceId: 'synthetic', endpointInstanceId: 'synthetic',
+    defaultExecutorId: 'local', localCapability: 'synthetic', workspaceDir: null, workspaceName: null, fetch: request });
+  const f = fixture();
+  await expect(runExecutorCommand(command(['create', '--label', 'Worker', '--direction', 'controller-connects', '--connection-url', connection.connectionUrl]), client, f.output))
+    .rejects.toThrow('outcome is unknown');
+  expect(request).toHaveBeenCalledTimes(1);
+  expect(f.stdout()).toBe('');
+});
+
+test('read failures and cancellation before submission do not claim mutation uncertainty', async () => {
+  const f = fixture();
+  const failure = new GarconHttpError('executors', 'Synthetic read failure', 500, 'INTERNAL_ERROR', true);
+  f.client.listExecutors.mockRejectedValueOnce(failure);
+  await expect(runExecutorCommand(command(['list']), f.client, f.output)).rejects.toBe(failure);
+  const abort = new AbortController();
+  abort.abort(new Error('Cancelled before submission'));
+  await expect(runExecutorCommand(command(['delete', id]), f.client, f.output, abort.signal)).rejects.toBe(abort.signal.reason);
+  expect(f.client.deleteExecutor).not.toHaveBeenCalled();
 });
 
 test('readiness waits reject disabled, missing, cancelled and timed-out executors', async () => {
