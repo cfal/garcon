@@ -1,5 +1,5 @@
 import { projectChatBoard } from '../src/lib/chat-board/projection/chat-board-projection.js';
-import type { ChatSessionRecord } from '../src/lib/types/chat-session.js';
+import type { ChatSessionRecord } from '../src/lib/chat/sessions/chat-session-types.js';
 import type { ChatBoard } from '../../common/chat-boards.js';
 
 const CHAT_COUNT = 5_000;
