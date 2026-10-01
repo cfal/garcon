@@ -421,7 +421,7 @@
 	}
 </script>
 
-<!-- The container delegates bubbled Escape handling for the sidebar subtree. Covered by __tests__/sidebar-search-interactions.test.ts. -->
+<!-- The container delegates bubbled Escape handling for multi-select. Covered by __tests__/sidebar-multi-select.test.ts. -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
 	data-slot="sidebar"
