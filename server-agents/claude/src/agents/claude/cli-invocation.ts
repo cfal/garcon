@@ -18,6 +18,14 @@ const NOOP_LOGGER: AgentLogger = {
   error() {},
 };
 
+// Claude Code 2.1.284 and later raise this check even under --dangerously-skip-permissions, and
+// only a person may approve it, so each unguarded removal stalls the turn on a user prompt.
+export const CLAUDE_REMOVAL_TARGET_GUIDANCE = 'Claude Code asks a person to approve an rm or rmdir'
+  + ' whose target could expand to the filesystem root or another top-level directory, even when'
+  + ' permissions are bypassed, and the turn waits for that answer. Write removal targets as'
+  + ' literal paths, or guard every variable in them with ${VAR:?}, for example'
+  + ' rm -rf "${build_dir:?}"/*.';
+
 interface ClaudeCLIArgOptions {
   model?: string;
   permissionMode?: PermissionMode;
@@ -104,6 +112,7 @@ export function buildClaudeCLIArgs({
 
   if (streamJson) {
     args.push('--permission-prompt-tool', 'stdio');
+    args.push('--append-system-prompt', CLAUDE_REMOVAL_TARGET_GUIDANCE);
   }
 
   const effort = mapThinkingModeToClaudeEffort(thinkingMode);

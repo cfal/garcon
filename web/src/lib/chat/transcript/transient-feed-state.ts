@@ -86,6 +86,7 @@ export function pendingPermissionsFromTransientFeed(
     return [{
       permissionOccurrenceId: row.message.permissionOccurrenceId,
       requestedTool: row.message.requestedTool,
+      reason: row.message.reason,
       chatId: snapshot.chatId,
       receivedAt: new Date(row.message.timestamp),
       control,

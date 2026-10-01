@@ -51,6 +51,7 @@ export interface ClaudeCLIMessage {
     tool_name?: string;
     input?: Record<string, unknown>;
     tool_use_id?: string;
+    decision_reason?: string;
   };
   response?: {
     subtype?: string;

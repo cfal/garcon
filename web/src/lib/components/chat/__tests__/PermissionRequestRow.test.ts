@@ -4,6 +4,7 @@ import {
 	AskUserQuestionToolUseMessage,
 	BashToolUseMessage,
 	CursorAskQuestionToolUseMessage,
+	CursorCreatePlanToolUseMessage,
 	ExitPlanModeToolUseMessage,
 	PermissionRequestMessage,
 } from '$shared/chat-types';
@@ -265,6 +266,67 @@ describe('PermissionRequestRow', () => {
 		).toBeTruthy();
 		await fireEvent.click(allow);
 		expect(onDecision).not.toHaveBeenCalled();
+	});
+
+	it("shows the agent's reason for a tool permission request", () => {
+		const reason =
+			'Dangerous rm operation on possibly-empty variable path: $D/* in `rm -rf $D/*` (rewrite it as "${D:?}"/* or use a literal path)';
+		render(PermissionRequestRowTestHost, {
+			request: new PermissionRequestMessage(
+				TS,
+				'permission-bash',
+				new BashToolUseMessage(TS, 'tool-bash', 'rm -rf $D/*'),
+				reason,
+			),
+			onDecision: vi.fn(),
+		});
+
+		const shown = document.querySelector('[data-permission-reason]');
+		expect(shown?.textContent).toContain("Agent's reason:");
+		expect(shown?.textContent).toContain(reason);
+		expect(screen.getByRole('button', { name: /allow once/i })).toBeTruthy();
+	});
+
+	it.each([
+		new ExitPlanModeToolUseMessage(TS, 'tool-plan', 'Proposed plan'),
+		askUserQuestionRequest().requestedTool,
+		cursorAskQuestionRequest().requestedTool,
+		new CursorCreatePlanToolUseMessage(TS, 'tool-cursor-plan', 'Proposed plan'),
+	])('shows the reason in pending and resolved $type cards as plain text', async (requestedTool) => {
+		const reason = 'Review <b>the proposed action</b> before continuing.';
+		const request = new PermissionRequestMessage(TS, 'permission-specialized', requestedTool, reason);
+		const { container, rerender } = render(PermissionRequestRowTestHost, {
+			request,
+			onDecision: vi.fn(),
+		});
+
+		const pendingReason = container.querySelector('[data-permission-reason]');
+		expect(pendingReason?.textContent).toContain(reason);
+		expect(pendingReason?.querySelector('b')).toBeNull();
+
+		await rerender({
+			terminal: {
+				permissionOccurrenceId: request.permissionOccurrenceId,
+				state: 'resolved',
+				allowed: true,
+			},
+		});
+		const historicalReason = container.querySelector('[data-permission-reason]');
+		expect(historicalReason?.textContent).toContain(reason);
+		expect(historicalReason?.querySelector('b')).toBeNull();
+	});
+
+	it('omits the reason line when the agent gives none', () => {
+		render(PermissionRequestRowTestHost, {
+			request: new PermissionRequestMessage(
+				TS,
+				'permission-bash',
+				new BashToolUseMessage(TS, 'tool-bash', 'pwd'),
+			),
+			onDecision: vi.fn(),
+		});
+
+		expect(document.querySelector('[data-permission-reason]')).toBeNull();
 	});
 
 	it('accepts answers before the executor list has loaded', () => {

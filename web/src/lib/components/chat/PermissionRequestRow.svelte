@@ -349,6 +349,15 @@
 	}
 </script>
 
+{#snippet permissionReason()}
+	{#if request.reason}
+		<p class="mt-1 text-xs whitespace-pre-wrap break-words" data-permission-reason>
+			<span class="font-medium">{m.chat_permission_agent_reason()}</span>
+			{request.reason}
+		</p>
+	{/if}
+{/snippet}
+
 {#snippet executorWaitNotice()}
 	{#if !canAnswer}
 		<div class="basis-full text-xs text-muted-foreground" role="status">
@@ -373,6 +382,7 @@
 		{/snippet}
 
 		{#snippet body()}
+			{@render permissionReason()}
 			{#if plan}
 				<div class="rounded-lg border border-border/60 overflow-hidden mb-2">
 					<div
@@ -495,6 +505,7 @@
 		{/snippet}
 
 		{#snippet body()}
+			{@render permissionReason()}
 			{#if askUserQuestionRequest && askUserQuestionRequest.questions.length > 0}
 				<div class="space-y-3">
 					{#each askUserQuestionRequest.questions as question (question.id)}
@@ -594,6 +605,7 @@
 		{/snippet}
 
 		{#snippet body()}
+			{@render permissionReason()}
 			{#if cursorAskQuestionRequest && cursorAskQuestionRequest.questions.length > 0}
 				<div class="space-y-3">
 					{#each cursorAskQuestionRequest.questions as question (question.id)}
@@ -673,6 +685,7 @@
 		{/snippet}
 
 		{#snippet body()}
+			{@render permissionReason()}
 			{#if cursorCreatePlanRequest}
 				<div class="space-y-2">
 					{#if cursorCreatePlanRequest.name || cursorCreatePlanRequest.overview}
@@ -802,6 +815,7 @@
 		{/snippet}
 
 		{#snippet body()}
+			{@render permissionReason()}
 			{#if rawInput}
 				<details
 					class="mt-1"

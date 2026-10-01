@@ -64,6 +64,48 @@ describe('permission ledger codec', () => {
         });
         expect(row.lifecycle).not.toHaveProperty('requestId');
         expect(row.lifecycle).not.toHaveProperty('incarnation');
+        expect(row.lifecycle).not.toHaveProperty('reason');
+      } finally {
+        reopened.close();
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('stores the provider reason for a permission request and rejects an empty one', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'garcon-permission-reason-'));
+    const reason = 'Dangerous rm operation on possibly-empty variable path: $D/*';
+    const requested = (permissionOccurrenceId, detail) => ({
+      kind: 'permission-requested',
+      at: AT,
+      providerMeta: null,
+      lifecycle: {
+        kind: 'requested',
+        permissionOccurrenceId,
+        requestedTool: new BashToolUseMessage(AT, 'tool-1', 'rm -rf $D/*'),
+        options: [],
+        ...detail,
+      },
+    });
+    try {
+      const store = new TranscriptLedgerStore(root, {
+        createViewId: () => 'view-1',
+        now: () => AT,
+      });
+      const view = store.initializeCurrentView('chat-1', { contentStartOrdinal: 1 });
+      const [appended] = store.append('chat-1', view.viewId, [requested(OCCURRENCE_ID, { reason })]);
+      expect(appended.lifecycle.reason).toBe(reason);
+      expect(() => store.append('chat-1', view.viewId, [
+        requested('22222222-2222-4222-8222-222222222222', { reason: '' }),
+      ])).toThrow('permission request reason must be a non-empty string');
+      store.close();
+
+      const reopened = new TranscriptLedgerStore(root);
+      try {
+        expect(reopened.currentRows('chat-1').map((row) => row.lifecycle)).toEqual([
+          expect.objectContaining({ permissionOccurrenceId: OCCURRENCE_ID, reason }),
+        ]);
       } finally {
         reopened.close();
       }

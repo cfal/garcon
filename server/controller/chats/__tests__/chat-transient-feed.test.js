@@ -14,6 +14,7 @@ function permissionEvent({
   runId = 'run-1',
   ordinal = 3,
   viewId = 'view-1',
+  reason,
 } = {}) {
   const lifecycle = kind === 'requested'
     ? {
@@ -25,6 +26,7 @@ function permissionEvent({
           'bun test',
         ),
         options: [],
+        ...(reason === undefined ? {} : { reason }),
       }
     : kind === 'cancelled'
       ? { kind, permissionOccurrenceId, reason: null }
@@ -99,6 +101,18 @@ describe('ChatTransientFeedStore', () => {
       value: { transientRevision: 2, mutation: { kind: 'remove' } },
     });
     expect(() => feed.validateAction(action())).toThrow(TransientControlActionError);
+  });
+
+  it('carries the provider reason into the pending permission control', () => {
+    const feed = new ChatTransientFeedStore('server-1');
+    const reason = 'Dangerous rm operation on possibly-empty variable path: $D/*';
+    feed.apply(permissionEvent({ reason }));
+    feed.apply(permissionEvent({ permissionOccurrenceId: 'occurrence-two', ordinal: 4 }));
+
+    expect(feed.currentSnapshot(CHAT_ID)?.rows.map((row) => row.message.reason)).toEqual([
+      reason,
+      undefined,
+    ]);
   });
 
   it('clears only controls correlated with the run that ended', () => {

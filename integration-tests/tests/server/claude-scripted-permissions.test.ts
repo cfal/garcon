@@ -1,5 +1,6 @@
 import { cliConnectionArguments } from '../../support/cli-fixture.js';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { messagesOfType } from '../../support/chat-assertions.js';
@@ -16,7 +17,8 @@ import {
   LIVE_TURN_TIMEOUT_MS,
   waitForVisibleResponse,
 } from '../../support/live-agent.js';
-import { liveClaudeStartRequest } from '../../support/live-claude.js';
+import { liveClaudeRunRequest, liveClaudeStartRequest } from '../../support/live-claude.js';
+import { waitForPersistedNativeSession } from '../../support/persisted-chat.js';
 import {
   startScriptedClaudeTestEnvironment,
   type ScriptedClaudeTestEnvironment,
@@ -414,6 +416,112 @@ describe('scripted Claude permissions', () => {
       serverEnvironment: testEnvironment.serverEnvironment,
     });
   }, 60_000);
+
+  test('keeps bypass after a restart and explains the removal check Claude Code still raises', async () => {
+    if (!environment) throw new Error('Scripted Claude environment was not initialized.');
+    const testEnvironment = environment;
+    const firstReply = marker('BYPASS_REMOVAL_FIRST_REPLY');
+    const output = marker('BYPASS_REMOVAL_OUTPUT');
+    const reply = marker('BYPASS_REMOVAL_REPLY');
+    const outputName = '.claude-scripted-bypass-ordinary';
+    const guardedRoot = '.claude-scripted-guarded-removal';
+    const ordinary = `printf %s ${output} > ${outputName}`;
+    const guarded = `GUARDED_ROOT=${guardedRoot}; mkdir -p "$GUARDED_ROOT/child" && rmdir "\${GUARDED_ROOT:?}"/*`;
+    // Both variables are unset, so even an approved run is `rmdir /`, which always fails.
+    const unguarded = 'rmdir $GARCON_SCRIPTED_UNSET_ROOT/$GARCON_SCRIPTED_UNSET_CHILD';
+    testEnvironment.model.scriptTurn([claudeText(firstReply)]);
+    testEnvironment.model.scriptTurn([claudeToolUse('toolu_bypass_ordinary', 'Bash', { command: ordinary })]);
+    testEnvironment.model.scriptTurn([claudeToolUse('toolu_bypass_guarded', 'Bash', { command: guarded })]);
+    testEnvironment.model.scriptTurn([claudeToolUse('toolu_bypass_unguarded', 'Bash', { command: unguarded })]);
+    testEnvironment.model.scriptTurn([claudeText(reply)]);
+
+    await withCliFixture('claude-scripted-bypass-removal', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const firstCursor = fixture.client.markEvents();
+      const first = await fixture.client.startChat(liveClaudeStartRequest({
+        chatId,
+        projectPath: fixture.executionDirs.project,
+        command: marker('BYPASS_REMOVAL_FIRST_PROMPT'),
+        permissionMode: 'bypassPermissions',
+      }));
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: first.turnId,
+        marker: firstReply,
+        afterIndex: firstCursor,
+      });
+
+      const persisted = await waitForPersistedNativeSession({
+        directories: fixture.dirs,
+        chatId,
+        agentId: 'claude',
+      });
+      expect(persisted.permissionMode).toBe('bypassPermissions');
+      if (fixture.client.executorId === 'local') {
+        await fixture.restartGarcon();
+      } else {
+        const workerPids = [...fixture.executionProcessIds];
+        await fixture.crashAndRestartGarcon({ preserveExecutorWorker: true });
+        expect([...fixture.executionProcessIds]).toEqual(workerPids);
+      }
+      expect((await fixture.client.getChatSnapshot(chatId, 0)).chat.permissionMode)
+        .toBe('bypassPermissions');
+
+      const cursor = fixture.client.markEvents();
+      const turn = await fixture.client.runChat(liveClaudeRunRequest({
+        chatId,
+        command: marker('BYPASS_REMOVAL_PROMPT'),
+        permissionMode: 'bypassPermissions',
+      }));
+      const permission = await fixture.client.waitForTransientPermission(
+        chatId,
+        (row) => row.message.type === 'permission-request'
+          && row.message.requestedTool.type === 'bash-tool-use'
+          && row.message.requestedTool.command === unguarded,
+        { afterIndex: cursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+      );
+      if (permission.message.type !== 'permission-request') {
+        throw new Error('Scripted removal permission request was not found.');
+      }
+      const reason = permission.message.reason;
+      expect(reason).toContain('Dangerous rmdir operation');
+      expect(reason).toContain('$GARCON_SCRIPTED_UNSET_ROOT');
+
+      const status = await runCli(fixture, ['status', chatId, '--messages', '0']);
+      expect(status).toMatchObject({ exitCode: 0, stderr: '' });
+      expect(status.stdout).toContain(`permission reason: ${reason}`);
+
+      expect((await fixture.client.sendPermissionDecision({
+        clientRequestId: crypto.randomUUID(),
+        chatId,
+        permissionOccurrenceId: permission.permissionOccurrenceId,
+        allow: false,
+        alwaysAllow: false,
+      })).status).toBe('accepted');
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: turn.turnId,
+        marker: reply,
+        afterIndex: cursor,
+      });
+
+      const transcript = await fixture.client.getMessages(chatId);
+      expect(messagesOfType(transcript.messages, 'permission-request').map((request) => ({
+        command: request.requestedTool.type === 'bash-tool-use' ? request.requestedTool.command : null,
+        reason: request.reason,
+      }))).toEqual([{ command: unguarded, reason }]);
+      expect(await Bun.file(join(fixture.executionDirs.project, outputName)).text()).toBe(output);
+      expect(existsSync(join(fixture.executionDirs.project, guardedRoot))).toBe(true);
+      expect(existsSync(join(fixture.executionDirs.project, guardedRoot, 'child'))).toBe(false);
+      const resumedRequest = testEnvironment.model.requests().at(-1);
+      expect(JSON.stringify(resumedRequest?.body.system)).toContain('${VAR:?}');
+      testEnvironment.model.assertSettled();
+    }, {
+      serverEnvironment: testEnvironment.serverEnvironment,
+    });
+  }, 90_000);
 
   test('[TLV5-PERM.07-CLAUDE-SCRIPTED-01] keeps permission history inert after a server restart', async () => {
     if (!environment) throw new Error('Scripted Claude environment was not initialized.');

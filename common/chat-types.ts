@@ -688,6 +688,8 @@ export class PermissionRequestMessage {
     public timestamp: string,
     public permissionOccurrenceId: string,
     public requestedTool: ToolUseChatMessage,
+    // The provider's own explanation of why the tool call needs approval.
+    public reason?: string,
   ) {}
 }
 
@@ -1215,6 +1217,7 @@ export function parseChatMessage(data: Record<string, unknown>): ChatMessage | n
         str(data.timestamp),
         permissionOccurrenceId,
         requestedTool,
+        typeof data.reason === 'string' && data.reason ? data.reason : undefined,
       );
     }
     case 'permission-resolved': {

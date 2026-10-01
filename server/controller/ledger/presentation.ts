@@ -107,6 +107,7 @@ export function ledgerRowToMessage(row: LedgerRow): ChatMessage | null {
           row.at,
           row.lifecycle.permissionOccurrenceId,
           row.lifecycle.requestedTool,
+          row.lifecycle.reason,
         )
         : null;
     case 'permission-resolved':

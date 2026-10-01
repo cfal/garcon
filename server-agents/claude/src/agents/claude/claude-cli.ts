@@ -3,7 +3,7 @@ import { AssistantMessage, CompactionMessage, ErrorMessage } from '@garcon/commo
 import type { PermissionDecisionPayload } from '@garcon/common/chat-command-contracts';
 import { extractCompactionSummary, isCompactionSummaryText, parseCompactMetadata } from "./compaction.js";
 import { attachNativeMessageSource } from '@garcon/server-agent-common/shared/native-message-source';
-import { convertClaudePermissionTool } from "./permission-tool-converter.js";
+import { convertClaudePermissionRequest } from "./permission-tool-converter.js";
 import { buildClaudeCLIEnvironment } from './cli-environment.js';
 import { resolveClaudeModel } from './model-context.js';
 import { configureClaudeSessionModel } from './session-model.js';
@@ -580,22 +580,14 @@ class ClaudeCliRuntime {
     };
     this.#pendingPermissions.add(pending);
 
-    const now = new Date().toISOString();
-    const requestedTool = convertClaudePermissionTool(
-      now,
-      toolUseId ?? permissionOccurrenceId,
-      toolName,
-      request.input,
-    );
     this.#turnPublisher.event(session, activeTurn, {
       type: 'permission',
       runId: activeTurn.operation.runId,
-      lifecycle: {
-        kind: 'requested',
+      lifecycle: convertClaudePermissionRequest(
+        new Date().toISOString(),
         permissionOccurrenceId,
-        requestedTool,
-        options: [],
-      },
+        request,
+      ),
       decision: Object.freeze({
         permissionOccurrenceId,
         respond: (decision: PermissionDecisionPayload) => (

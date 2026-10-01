@@ -109,6 +109,23 @@ describe('transient feed browser reducer', () => {
 			transcriptViewId: 'view-1',
 			afterOrdinal: 3,
 		});
+		expect(permissions[0]?.reason).toBeUndefined();
+	});
+
+	it("projects the agent's reason onto the pending permission", () => {
+		const reason = 'Dangerous rm operation on possibly-empty variable path: $D/*';
+		const withReason = row({
+			message: new PermissionRequestMessage(
+				'2026-08-11T00:00:00.000Z',
+				'incarnation-1',
+				new BashToolUseMessage('2026-08-11T00:00:00.000Z', 'tool-1', 'rm -rf $D/*'),
+				reason,
+			),
+		});
+
+		expect(pendingPermissionsFromTransientFeed(snapshot({ rows: [withReason] }))[0]?.reason).toBe(
+			reason,
+		);
 	});
 
 	it('clears only rows belonging to the ended run', () => {

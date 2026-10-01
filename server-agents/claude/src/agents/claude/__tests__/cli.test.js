@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import { buildClaudeCLIArgs, buildClaudePermissionApprovalResponse, convertCLIMessageToChatMessages } from '../claude-cli.js';
+import { CLAUDE_REMOVAL_TARGET_GUIDANCE } from '../cli-invocation.js';
 import { getNativeMessageRevisionSource } from '@garcon/server-agent-common/shared/native-message-source';
 import {
   ClaudeTurnState,
@@ -7,7 +8,7 @@ import {
   claudeProviderSessionState,
   claudeResultFailureMessage,
 } from '../cli-protocol.js';
-import { convertClaudePermissionTool } from '../permission-tool-converter.js';
+import { convertClaudePermissionRequest } from '../permission-tool-converter.js';
 import { AskUserQuestionToolUseMessage, BashToolUseMessage, ExitPlanModeToolUseMessage } from '@garcon/common/chat-types';
 import {
   CLAUDE_STEERING_PROMPT_PREFIX,
@@ -298,6 +299,7 @@ describe('buildClaudeCLIArgs', () => {
       '--model', 'sonnet',
       '--permission-mode', 'acceptEdits',
       '--permission-prompt-tool', 'stdio',
+      '--append-system-prompt', CLAUDE_REMOVAL_TARGET_GUIDANCE,
       '--effort', 'medium',
       '--session-id=session-1',
       '-p', '',
@@ -339,6 +341,15 @@ describe('buildClaudeCLIArgs', () => {
     expect(args).toContain('--dangerously-skip-permissions');
     expect(args).toContain('--permission-prompt-tool');
     expect(args).toContain('stdio');
+  });
+
+  it('steers sessions toward removal targets that Claude Code can resolve', () => {
+    const args = buildClaudeCLIArgs({ prompt: '', streamJson: true });
+    const guidance = args[args.indexOf('--append-system-prompt') + 1];
+
+    expect(guidance).toBe(CLAUDE_REMOVAL_TARGET_GUIDANCE);
+    expect(guidance).toContain('${VAR:?}');
+    expect(buildClaudeCLIArgs({ prompt: 'title' })).not.toContain('--append-system-prompt');
   });
 });
 
@@ -733,39 +744,50 @@ describe('Claude provider run boundaries', () => {
   });
 });
 
-describe('convertClaudePermissionTool', () => {
+describe('convertClaudePermissionRequest', () => {
   it('converts bash permission requests into canonical requested tools', () => {
-    const msg = convertClaudePermissionTool('2026-01-01T00:00:00.000Z', 'perm-tool-1', 'Bash', {
-      command: 'ls -la',
+    const lifecycle = convertClaudePermissionRequest('2026-01-01T00:00:00.000Z', 'permission-1', {
+      tool_use_id: 'perm-tool-1',
+      tool_name: 'Bash',
+      input: { command: 'ls -la' },
     });
 
-    expect(msg).toBeInstanceOf(BashToolUseMessage);
-    expect(msg.command).toBe('ls -la');
+    expect(lifecycle.kind).toBe('requested');
+    expect(lifecycle.permissionOccurrenceId).toBe('permission-1');
+    expect(lifecycle.options).toEqual([]);
+    expect(lifecycle.requestedTool).toBeInstanceOf(BashToolUseMessage);
+    expect(lifecycle.requestedTool.toolId).toBe('perm-tool-1');
+    expect(lifecycle.requestedTool.command).toBe('ls -la');
   });
 
   it('converts exit_plan_mode permission requests into canonical requested tools', () => {
-    const msg = convertClaudePermissionTool('2026-01-01T00:00:00.000Z', 'perm-tool-2', 'exit_plan_mode', {
-      plan: 'Do X',
-      allowedPrompts: [],
+    const lifecycle = convertClaudePermissionRequest('2026-01-01T00:00:00.000Z', 'permission-2', {
+      tool_name: 'exit_plan_mode',
+      input: { plan: 'Do X', allowedPrompts: [] },
     });
 
-    expect(msg).toBeInstanceOf(ExitPlanModeToolUseMessage);
-    expect(msg.plan).toBe('Do X');
+    expect(lifecycle.requestedTool).toBeInstanceOf(ExitPlanModeToolUseMessage);
+    expect(lifecycle.requestedTool.toolId).toBe('permission-2');
+    expect(lifecycle.requestedTool.plan).toBe('Do X');
   });
 
   it('converts AskUserQuestion permission requests into generic question tools', () => {
-    const msg = convertClaudePermissionTool('2026-01-01T00:00:00.000Z', 'tool-question', 'AskUserQuestion', {
-      questions: [{
-        question: 'Which mode?',
-        header: 'Mode',
-        options: [{ label: 'Fast', description: 'Quick path.' }],
-        multiSelect: false,
-      }],
+    const lifecycle = convertClaudePermissionRequest('2026-01-01T00:00:00.000Z', 'permission-3', {
+      tool_use_id: 'tool-question',
+      tool_name: 'AskUserQuestion',
+      input: {
+        questions: [{
+          question: 'Which mode?',
+          header: 'Mode',
+          options: [{ label: 'Fast', description: 'Quick path.' }],
+          multiSelect: false,
+        }],
+      },
     });
 
-    expect(msg).toBeInstanceOf(AskUserQuestionToolUseMessage);
-    expect(msg.toolId).toBe('tool-question');
-    expect(msg.questions[0].header).toBe('Mode');
+    expect(lifecycle.requestedTool).toBeInstanceOf(AskUserQuestionToolUseMessage);
+    expect(lifecycle.requestedTool.toolId).toBe('tool-question');
+    expect(lifecycle.requestedTool.questions[0].header).toBe('Mode');
   });
 });
 
