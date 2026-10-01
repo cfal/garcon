@@ -783,7 +783,10 @@ describe("selected-file commits", () => {
       const response = git.toHttpError(rejection);
       expect(response.status).toBe(400);
       expect(await response.json()).toEqual({
+        success: false,
         error: "Pathspecs must resolve inside the project root.",
+        errorCode: "VALIDATION_FAILED",
+        retryable: false,
       });
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
@@ -6243,6 +6246,7 @@ describe("toHttpError", () => {
     const response = git.toHttpError(err);
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({
+      success: false,
       error: "Try again shortly",
       errorCode: "SERVICE_BUSY",
       retryable: true,
