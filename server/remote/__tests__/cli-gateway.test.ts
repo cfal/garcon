@@ -91,7 +91,7 @@ test('gateway authentication, grant, method allowlist, generation and JSON fence
   const path = '/api/v1/chats/run';
   expect((await f.call(path, { method: 'POST', headers: { Authorization: 'Bearer invalid' } })).status).toBe(403);
   expect((await f.call(path, { method: 'POST', headers: { Origin: 'http://browser.invalid' } })).status).toBe(403);
-  expect((await f.call('/api/v1/executors')).status).toBe(403);
+  expect((await f.call('/api/v1/api-providers')).status).toBe(403);
   expect((await f.call(path, { method: 'POST', headers: { 'X-Garcon-Server-Instance': 'old' } })).status).toBe(409);
   expect((await f.call(path, { method: 'POST', body: '{', headers: { 'Content-Type': 'application/json' } })).status).toBe(400);
   expect((await f.call(path, { method: 'POST', body: '{}', headers: { 'Content-Type': 'text/plain' } })).status).toBe(415);

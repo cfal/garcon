@@ -60,6 +60,24 @@ test('explicit grants include Local, inherit all endpoints, and persist independ
   expect(reopened.allows('local', provider.id)).toBe(true);
 });
 
+test('queued assignment changes recheck remote management authority at admission', async () => {
+  const { store, assignments, access, provider } = await fixture();
+  const gate = Promise.withResolvers<void>();
+  const entered = Promise.withResolvers<void>();
+  const blocking = store.withLock(async () => { entered.resolve(); await gate.promise; });
+  await entered.promise;
+  let allowed = true;
+  const pending = access.assign(remote, provider.id, () => {
+    if (!allowed) throw new DomainError('CLI_ACCESS_DENIED', 'Revoked', 403);
+  });
+  const outcome = pending.catch((error: unknown) => error);
+  allowed = false;
+  gate.resolve();
+  await blocking;
+  expect(await outcome).toMatchObject({ code: 'CLI_ACCESS_DENIED' });
+  expect(assignments.allows(remote, provider.id)).toBe(false);
+});
+
 test('metadata revision, assignment and provider/endpoint identity are checked at credential release', async () => {
   const { access, store, provider, reference, assignments } = await fixture();
   await access.assign(remote, provider.id);

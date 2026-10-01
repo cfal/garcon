@@ -12,6 +12,7 @@ export const LOCAL_SERVER_PRINCIPAL: ServerPrincipal = Object.freeze({
 
 export interface HttpRouteContext {
   principal: ServerPrincipal | null;
+  readonly assertCurrent?: () => void;
 }
 
 export type RouteHandler = (

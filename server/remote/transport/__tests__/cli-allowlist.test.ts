@@ -1,13 +1,13 @@
 import { expect, test } from 'bun:test';
 import { GarconClient } from '../../../../cli/garcon-client.js';
-import { CLI_OPERATIONS } from '../cli-protocol.js';
+import { CLI_OPERATIONS, cliRoute } from '../cli-protocol.js';
 
 test('the reverse CLI allowlist accounts for every client HTTP operation and nothing else', async () => {
   const operations = new Set<string>();
   const chatId = '1234567890123456';
   const fetcher = Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = new URL(input instanceof Request ? input.url : String(input)).pathname;
-    operations.add(`${init?.method} ${path}`);
+    operations.add(cliRoute(init?.method ?? 'GET', path).operation);
     if (path === '/api/v1/chats/tags' && init?.method === 'GET') return Response.json({ success: true, chatId, tags: [] });
     return Response.json({ error: 'Synthetic boundary rejection', errorCode: 'VALIDATION_FAILED', retryable: false }, { status: 400 });
   }, { preconnect() {} }) satisfies typeof fetch;
@@ -29,6 +29,9 @@ test('the reverse CLI allowlist accounts for every client HTTP operation and not
     getTurnReceipt: [chatId, 'synthetic'], getTicketBootstrap: [], getTicketProjectDefault: ['/synthetic'],
     listTickets: [{}], readTicket: [{ ticketId: 'synthetic' }], getTicketHistory: [{ ticketId: 'synthetic' }],
     mutateTicket: [{}],
+    listExecutors: [], createExecutor: [{}], updateExecutor: ['11111111-1111-4111-8111-111111111111', {}],
+    deleteExecutor: ['11111111-1111-4111-8111-111111111111'], getExecutorConnection: ['11111111-1111-4111-8111-111111111111'],
+    getExecutorProviders: [], assignExecutorProvider: ['local', 'synthetic'], unassignExecutorProvider: ['local', 'synthetic'],
   } satisfies Record<Operation, unknown[]>;
   expect(Object.entries(Object.getOwnPropertyDescriptors(GarconClient.prototype))
     .filter(([name, descriptor]) => typeof descriptor.value === 'function' && name !== 'constructor' && name !== 'verifyRuntime')

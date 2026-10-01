@@ -1,7 +1,7 @@
 // API provider routes manage persisted compatible endpoint configuration.
 
 import { withJsonBody } from '../lib/json-route.js';
-import type { RouteMap } from '../lib/http-route-types.js';
+import type { HttpRouteContext, RouteMap } from '../lib/http-route-types.js';
 import type { ApiProviderService } from '../api-providers/service.js';
 import { isApiProviderId, type ApiProviderInput, type ApiProviderModelDiscoveryRequest } from '../../../common/api-providers.js';
 import type { ModelCatalogResponseCache } from './model-catalog-cache.js';
@@ -83,14 +83,14 @@ export default function createApiProviderRoutes(
     }
   }
 
-  async function changeAssignment(request: Request, url: URL): Promise<Response> {
+  async function changeAssignment(request: Request, url: URL, _server?: unknown, context?: HttpRouteContext): Promise<Response> {
     try {
       const id = url.searchParams.get('apiProviderId');
       if (!isApiProviderId(id)) throw new ValidationDomainError('Invalid provider ID');
       const executorId = executorIdFromUrl(url);
       const result = request.method === 'PUT'
-        ? await apiProviders.assign(executorId, id)
-        : await apiProviders.unassign(executorId, id);
+        ? await apiProviders.assign(executorId, id, context?.assertCurrent)
+        : await apiProviders.unassign(executorId, id, context?.assertCurrent);
       responseCache.clear();
       return Response.json(result);
     } catch (error) {

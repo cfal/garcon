@@ -76,6 +76,70 @@ WSS certificate verification is enabled by default. **Allow unverified TLS certi
 
 Connection URLs are credentials. Their `#secret` fragment is removed before dialing the execution endpoint, never sent in the upgrade's HTTP headers, query, or WebSocket subprotocol. The authenticated management API still carries full descriptors; protect browser-to-controller access with HTTPS or a trusted private network. Keep the URL private: clipboard contents, shell history, process arguments, and captured onboarding output can expose it locally. Stored listener credentials and controller executor configuration require private file permissions. Use an independent random 32-byte secret for every executor; human-chosen passwords are not supported. Disable a compromised executor immediately, replace its credential on both endpoints, then re-enable it. Routine connection diagnostics and executor-list responses omit credentials.
 
+## Executor Management
+
+`garcon-cli executor` configures the running controller. It does not install or
+start worker processes; `garcon executor --connect` / `--listen` still does that.
+Every command works through direct controller HTTP and an authorized executor
+gateway. Keep the same explicit `--config-dir` and `--runtime` selectors when
+following up on a mutation.
+
+```bash
+bun cli/main.ts executor list --json
+bun cli/main.ts executor create --label 'Build machine' --direction executor-connects \
+  --advertise-url 'wss://controller.example.com/executor/{executorId}' --json
+bun cli/main.ts executor connection <executor-id> --output ./worker-connection.txt
+bun cli/main.ts executor create --label 'Listening worker' --direction controller-connects \
+  --connection-url - < ./listener-connection.txt
+bun cli/main.ts executor update <executor-id> --allow-controller-cli true --allow-executor-management true
+bun cli/main.ts executor wait <executor-id> --ready --timeout 60 --json
+bun cli/main.ts executor providers --json
+bun cli/main.ts executor assign-provider <executor-id> --provider existing-profile
+bun cli/main.ts executor unassign-provider <executor-id> --provider existing-profile
+bun cli/main.ts executor disable <executor-id>
+bun cli/main.ts executor enable <executor-id>
+bun cli/main.ts executor delete <executor-id>
+```
+
+Executor IDs are UUIDs; labels are not selectors. `show`, `wait`, and provider
+assignments also accept `local`. Provider assignment uses an exact existing
+profile ID; it does not create profiles, accept API keys, or change native login.
+The `providers` management listing shows all existing profiles and their assigned
+executor IDs, unlike the executor-scoped execution catalog from `list providers`.
+
+Inbound creation requires an explicit reachable, secret-free advertised URL. The
+literal `{executorId}` is expanded atomically before saving; arbitrary proxy paths
+and query strings are preserved. The CLI never derives an external address from
+its discovered loopback endpoint. Outbound creation takes the listening worker's
+full credential URL. Creation returns only the new ID. Saving configuration does
+not claim the worker is ready; use the bounded readiness wait separately.
+
+`update` accepts a label or either access grant. Connection edits require a full
+`--connection-url`, `--direction`, and explicit `--allow-insecure-development
+true|false`. `--allow-unverified-tls true|false` applies only to outbound TLS.
+Neither TLS opt-out disables Noise authentication. Changing an active executor's
+connector or deleting it can fail with an in-use conflict; no command force-stops
+work. Deletion leaves saved references unavailable and does not delete worker data.
+
+Connection URLs are secrets. `connection` explicitly reveals one; `--output`
+writes a new private file atomically and refuses overwrite. `--connection-url -`
+accepts one bounded UTF-8 URL from stdin so it need not appear in process arguments.
+Avoid recording reveal output in agent transcripts. Ordinary list/create/update
+output omits credentials. Provider assignment may disclose a profile's credentials
+to subsequent execution on the target; removing it does not recall disclosed keys.
+
+Remote callers need ordinary workspace CLI access for redacted executor listing,
+and the separate management grant for administrative operations and the global
+provider assignment list. A caller may rename its own executor, but must use the
+controller or another authorized executor to change its own grants/connection,
+disable it, or delete it. New workers cannot bootstrap their own grants.
+
+Mutation requests are not retried automatically. A timeout, interrupted CLI, or
+lost reply can mean the save succeeded. Inspect executors/provider assignments
+before retrying, especially creation, which generates a new UUID for each request.
+`--json` emits one JSON result; diagnostics go to stderr. Ctrl-C exits 130 without
+claiming rollback. An offline target remains configurable through a healthy origin.
+
 ## Tickets
 
 Tickets belong to the selected Garcon workspace, independently of chats and Git. All commands use the authenticated server API; the CLI never opens the ticket database or starts an agent.

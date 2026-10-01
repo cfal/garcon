@@ -54,7 +54,7 @@ export type CreateExecutorRequest = {
   readonly allowInsecureDevelopment?: boolean;
   readonly allowUnverifiedTls?: boolean;
 } & (
-  | { readonly direction: 'executor-connects' }
+  | { readonly direction: 'executor-connects'; readonly advertisedUrl?: string }
   | { readonly direction: 'controller-connects'; readonly connectionUrl: string }
 );
 
@@ -100,8 +100,10 @@ export function parseCreateExecutorRequest(value: unknown): CreateExecutorReques
     ...(value.allowControllerCli === undefined ? {} : { allowControllerCli: value.allowControllerCli }),
     allowInsecureDevelopment: value.allowInsecureDevelopment, allowUnverifiedTls: value.allowUnverifiedTls };
   if (value.direction === 'executor-connects' && value.allowUnverifiedTls !== true
-    && hasOnlyKeys(value, ['label', 'direction', 'allowInsecureDevelopment', 'allowUnverifiedTls', 'allowControllerCli', 'allowExecutorManagement'])) {
-    return { ...common, direction: 'executor-connects' };
+    && (value.advertisedUrl === undefined || isConnectionUrl(value.advertisedUrl))
+    && hasOnlyKeys(value, ['label', 'direction', 'advertisedUrl', 'allowInsecureDevelopment', 'allowUnverifiedTls', 'allowControllerCli', 'allowExecutorManagement'])) {
+    return { ...common, direction: 'executor-connects',
+      ...(value.advertisedUrl === undefined ? {} : { advertisedUrl: value.advertisedUrl as string }) };
   }
   if (value.direction === 'controller-connects' && isConnectionUrl(value.connectionUrl)
     && hasOnlyKeys(value, ['label', 'direction', 'connectionUrl', 'allowInsecureDevelopment', 'allowUnverifiedTls', 'allowControllerCli', 'allowExecutorManagement'])) {
@@ -163,4 +165,10 @@ export function parseExecutors(value: unknown): readonly ExecutorSnapshot[] | nu
     executors.push(executor);
   }
   return executors;
+}
+
+export function parseExecutorConnection(value: unknown): ExecutorConnection | null {
+  if (!isRecord(value) || !isConnectionUrl(value.connectionUrl)
+    || typeof value.allowInsecureDevelopment !== 'boolean' || typeof value.allowUnverifiedTls !== 'boolean') return null;
+  return { connectionUrl: value.connectionUrl, allowInsecureDevelopment: value.allowInsecureDevelopment, allowUnverifiedTls: value.allowUnverifiedTls };
 }

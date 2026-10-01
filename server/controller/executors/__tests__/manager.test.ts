@@ -49,6 +49,27 @@ test('grant-only updates do not require idle or replace the connector', async ()
   expect(assertIdle).not.toHaveBeenCalled();
 });
 
+test('management admission is checked after waiting for a preceding configuration mutation', async () => {
+  const { manager } = await fixture();
+  const gate = Promise.withResolvers<void>();
+  const entered = Promise.withResolvers<void>();
+  const original = manager.config.create.bind(manager.config);
+  const held = spyOn(manager.config, 'create').mockImplementationOnce(async (request) => {
+    entered.resolve(); await gate.promise; return original(request);
+  });
+  const first = manager.create({ label: 'First', direction: 'executor-connects' });
+  await entered.promise;
+  let allowed = true;
+  const pending = manager.create({ label: 'Denied', direction: 'executor-connects' }, () => {
+    if (!allowed) throw new DomainError('CLI_ACCESS_DENIED', 'Revoked', 403);
+  });
+  const outcome = pending.catch((error: unknown) => error);
+  allowed = false;
+  gate.resolve();
+  try { await first; expect(await outcome).toMatchObject({ code: 'CLI_ACCESS_DENIED' }); expect(manager.config.list().map((entry) => entry.label)).toEqual(['First']); }
+  finally { gate.resolve(); held.mockRestore(); }
+});
+
 function waitReady(manager: ExecutorManager, id: string): Promise<void> {
   if (manager.isReady(id)) return Promise.resolve();
   return new Promise((resolve) => {

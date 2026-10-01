@@ -9,6 +9,7 @@ export type CliErrorPhase =
   | 'chat search'
   | 'chat read'
   | 'tickets'
+  | 'executors'
   | 'chat status'
   | 'export'
   | 'handoff artifact'

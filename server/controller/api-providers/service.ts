@@ -274,13 +274,13 @@ export class ApiProviderService {
     return { providers: this.deps.store.redactedList(), assignments: this.deps.access.assignments.snapshot() };
   }
 
-  async assign(executorId: string, providerId: string): Promise<ApiProviderManagement> {
-    await this.deps.access.assign(executorId, providerId);
+  async assign(executorId: string, providerId: string, assertCurrent?: () => void): Promise<ApiProviderManagement> {
+    await this.deps.access.assign(executorId, providerId, assertCurrent);
     return this.management();
   }
 
-  async unassign(executorId: string, providerId: string): Promise<ApiProviderManagement> {
-    await this.deps.access.unassign(executorId, providerId);
+  async unassign(executorId: string, providerId: string, assertCurrent?: () => void): Promise<ApiProviderManagement> {
+    await this.deps.access.unassign(executorId, providerId, assertCurrent);
     return this.management();
   }
 

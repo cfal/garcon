@@ -77,6 +77,7 @@ import {
 } from '@garcon/common/native-session-lookup';
 import { argumentError } from './errors.js';
 import { TICKET_PARSE_OPTIONS, TICKET_STRING_OPTIONS, parseTicketCliCommand, type TicketCliCommand } from './ticket-args.js';
+import { EXECUTOR_PARSE_OPTIONS, EXECUTOR_STRING_OPTIONS, parseExecutorCliCommand, type ExecutorCliCommand } from './executor-args.js';
 
 const ADD_ROW_PRESENTATION_REQUIREMENT = [
   ...CLI_PRESET_PRESENTATION_STYLES.map((style) => `--type ${style}`),
@@ -84,6 +85,7 @@ const ADD_ROW_PRESENTATION_REQUIREMENT = [
 ].join(' or ');
 
 export const CLI_HELP = `Usage:
+  garcon-cli [connection options] executor <list|show|create|update|enable|disable|delete|connection|wait|providers|assign-provider|unassign-provider> [executor-id] [options]
   garcon-cli [connection options] ticket <create|list|read|update|claim|release|close|reopen|comment|comment-edit|comment-delete|link|unlink|history> [ticket-id] [options]
   garcon-cli [options] start [--parent <chat-id>] [--no-preamble | --preamble <id>...] [--json] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>
   garcon-cli [options] start-async [--parent <chat-id>] [--no-preamble | --preamble <id>...] [--json] [--message-title <title>] [--message-style <info|notice|error|custom>] [--collapsible] <prompt>
@@ -129,6 +131,24 @@ uses notice; a style without a title displays its CLI label. --color selects cus
 --collapsible starts the CLI-authored body collapsed without requiring a style.
 Ordinary restart, replay, shares, and frozen forks preserve it. Native-history
 Reload and provider-native fork segments may drop Garcon-only presentation.
+
+Executor management:
+  list|show <id> [--json]        Redacted configuration and readiness (list takes no ID)
+  create --label <text> --direction executor-connects --advertise-url <public-ws-url> [--json]
+  create --label <text> --direction controller-connects --connection-url <url|-> [--json]
+  update <id> [--label <text>] [access flags] [connection flags] [--json]
+  enable|disable|delete <id> [--json]
+  connection <id> [--output <new-file> | --json]  Explicit credential reveal
+  wait <id> --ready [--timeout <1..3600 seconds>] [--json]
+  providers [--json]            Existing provider IDs and assigned executors
+  assign-provider|unassign-provider <id> --provider <profile-id> [--json]
+  Access flags: --allow-controller-cli true|false, --allow-executor-management true|false.
+  Connection updates require --direction, --connection-url and --allow-insecure-development true|false;
+  --allow-unverified-tls true|false applies only to outbound TLS connections.
+  --advertise-url may contain {executorId}; the controller replaces it with the new UUID.
+  --connection-url - reads the credential from stdin. Ordinary output never reveals credentials.
+  Remote administration requires both CLI grants. Self-disruptive changes require another origin.
+  No automatic mutation retries. After an uncertain result, inspect configuration before retrying.
 
 Ticket management:
   create --title <text> [--description <text> | --stdin] [--project <text>]
@@ -496,11 +516,13 @@ export type ParsedCliCommand =
   | SearchCliCommand
   | ReadCliCommand
   | TicketCliCommand
+  | ExecutorCliCommand
   | StartAsyncCliInvocation
   | CliInvocation;
 
 const SINGLE_STRING_OPTIONS = [
   ...TICKET_STRING_OPTIONS,
+  ...EXECUTOR_STRING_OPTIONS,
   'config-dir',
   'runtime',
   'server',
@@ -1478,6 +1500,7 @@ export function parseCliArgs(
       strict: true,
       options: {
         ...TICKET_PARSE_OPTIONS,
+        ...EXECUTOR_PARSE_OPTIONS,
         'config-dir': { type: 'string' },
         runtime: { type: 'string' },
         server: { type: 'string' },
@@ -1578,6 +1601,7 @@ export function parseCliArgs(
   const commandName = parsed.positionals[0];
   if (commandName === undefined) throw argumentError('a command is required');
   if (commandName === 'ticket') return parseTicketCliCommand(parsed.positionals, values, connection, currentDirectory);
+  if (commandName === 'executor') return parseExecutorCliCommand(parsed.positionals, values, connection, currentDirectory);
   if (commandName === 'resume-async') return parseResumeAsync(parsed, values, connection);
   if (commandName === 'fork' || commandName === 'fork-async') {
     return parseFork(commandName, parsed, values, connection);

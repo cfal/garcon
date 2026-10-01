@@ -80,6 +80,29 @@ test('URL updates preserve identity and configuration objects are not mutable ca
   expect(store.list()).toEqual([]);
 });
 
+test('inbound creation atomically expands and validates a public address without storing a caller secret', async () => {
+  const { root, store } = await fixture();
+  const created = await store.create({ direction: 'executor-connects', label: 'Proxied', advertisedUrl: 'wss://controller.test/proxy/{executorId}?route={executorId}&tag=a&tag=b' });
+  expect(created.connection).toEqual({ kind: 'executor-connects', advertisedUrl: `wss://controller.test/proxy/${created.id}?route=${created.id}&tag=a&tag=b` });
+  for (const advertisedUrl of ['ws://controller.test', 'wss://0.0.0.0/executor', 'wss://controller.test/#secret=secret', 'https://controller.test',
+    `wss://controller.test/${'{executorId}'.repeat(150)}`]) {
+    await expect(store.create({ direction: 'executor-connects', label: 'Invalid', advertisedUrl })).rejects.toThrow();
+  }
+  expect(store.list()).toHaveLength(1);
+  const restarted = new ExecutorConfigStore(root);
+  await restarted.initialize();
+  expect(restarted.connection(created.id)).toEqual(store.connection(created.id));
+});
+
+test('normalized connection addresses remain usable within request and response limits', async () => {
+  const { store } = await fixture();
+  const created = await store.create({ direction: 'executor-connects', label: 'Synthetic worker' });
+  const connectionUrl = `wss://worker.test/${' '.repeat(1500)}/#secret=${createExecutorSecret()}`;
+  await expect(store.create({ direction: 'controller-connects', label: 'Oversized', connectionUrl })).rejects.toThrow('exceeds 4096');
+  await expect(store.update(created.id, { connection: { direction: 'controller-connects', connectionUrl, allowInsecureDevelopment: false } })).rejects.toThrow('exceeds 4096');
+  expect(store.list()).toEqual([created]);
+});
+
 test('pasted worker credentials are unique and concurrent creates do not overwrite each other', async () => {
   const { store } = await fixture();
   const connectionUrl = executorConnectionUrl('wss://worker.example.com/executor', createExecutorSecret());

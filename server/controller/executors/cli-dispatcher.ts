@@ -14,6 +14,7 @@ export interface CliDispatchAccess {
   readonly rpc: ExecutorRpc;
   readonly signal: AbortSignal;
   readonly assertCurrent: () => void;
+  readonly assertManagement: () => void;
 }
 
 export class ControllerCliDispatcher {
@@ -42,6 +43,11 @@ export class ControllerCliDispatcher {
       throw new DomainError('CLI_CONTROLLER_CHANGED', 'Garcon restarted; start a new CLI invocation', 409);
     }
     const policy = cliPolicy(request.http);
+    const assertAdmission = () => {
+      this.#assertAdmission(access);
+      if (policy.management) access.assertManagement();
+    };
+    assertAdmission();
     const release = this.#admission.acquire(access.executorId, policy.pool);
     const signal = policy.timeoutMs === null ? access.signal : AbortSignal.any([access.signal, AbortSignal.timeout(policy.timeoutMs)]);
     const interrupted = () => policy.mutation
@@ -51,7 +57,7 @@ export class ControllerCliDispatcher {
       : new DomainError('CLI_RESULT_TOO_LARGE', 'CLI result exceeds 8 MiB; narrow the requested result', 413);
     const assertPublication = () => {
       if (signal.aborted) throw interrupted();
-      try { this.#assertAdmission(access); }
+      try { assertAdmission(); }
       catch (error) { throw policy.mutation ? interrupted() : error; }
     };
     guardReply((bytes) => {
@@ -67,14 +73,17 @@ export class ControllerCliDispatcher {
       const [method, pathname] = request.http.operation.split(' ') as [string, string];
       const handler = this.options.routes[pathname]?.[method];
       if (!handler) throw new DomainError('CLI_CONTROLLER_UNAVAILABLE', 'Controller CLI services are not initialized', 503, true);
-      const url = new URL(pathname, 'http://controller.invalid');
+      const url = new URL(pathname.replace(':executorId', request.http.executorId ?? ''), 'http://controller.invalid');
       for (const [key, value] of request.http.query) url.searchParams.append(key, value);
       const body = request.http.body === null ? undefined : JSON.stringify(request.http.body);
       const req = new Request(url, { method, signal, headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body });
       let response: Response;
       const finishActivity = trackActivity(`cli ${request.http.operation}`);
       try {
-        response = await invokeRawRouteHandler(handler, req, undefined, { principal: {
+        response = await invokeRawRouteHandler(handler, req, undefined, { assertCurrent: () => {
+          assertAdmission();
+          signal.throwIfAborted();
+        }, principal: {
           mode: 'executor', key: access.executorId, executorId: access.executorId, expiresAtMs: null,
         } });
       } catch (error) { response = unhandledRouteErrorResponse(error); }

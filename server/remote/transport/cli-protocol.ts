@@ -1,5 +1,6 @@
 import type { CliContext } from '../../../common/server-runtime.js';
-import { isExecutorId } from '../../../common/executors.js';
+import { isExecutorId, isRemoteExecutorId } from '../../../common/executors.js';
+import { isApiProviderId } from '../../../common/api-providers.js';
 import { isRecord, type JsonValue } from '../../../common/json.js';
 import { DomainError } from '../../common/domain-error.js';
 
@@ -8,12 +9,20 @@ export const CLI_REPLY_BYTES = 8 * 1024 * 1024;
 export const CLI_SMALL_REPLY_BYTES = 64 * 1024;
 export const CLI_ENVELOPE_BYTES = 1024;
 
-const read = { mutation: false, timeoutMs: 30_000, pool: 'short' } as const;
-const write = { mutation: true, timeoutMs: 30_000, pool: 'short' } as const;
-const document = { mutation: false, timeoutMs: 120_000, pool: 'long' } as const;
-const maintenance = { mutation: true, timeoutMs: null, pool: 'long' } as const;
+const read = { mutation: false, management: false, timeoutMs: 30_000, pool: 'short' } as const;
+const write = { mutation: true, management: false, timeoutMs: 30_000, pool: 'short' } as const;
+const document = { mutation: false, management: false, timeoutMs: 120_000, pool: 'long' } as const;
+const maintenance = { mutation: true, management: false, timeoutMs: null, pool: 'long' } as const;
 
 export const CLI_OPERATIONS = {
+  'GET /api/v1/executors': read,
+  'POST /api/v1/executors': { ...write, management: true },
+  'PATCH /api/v1/executors/:executorId': { ...write, management: true },
+  'DELETE /api/v1/executors/:executorId': { ...write, management: true },
+  'GET /api/v1/executors/:executorId/connection': { ...read, management: true },
+  'GET /api/v1/api-provider-assignments': { ...read, management: true },
+  'PUT /api/v1/api-provider-assignments': { ...write, management: true },
+  'DELETE /api/v1/api-provider-assignments': { ...write, management: true },
   'GET /api/v1/models': read,
   'GET /api/v1/app/settings': read,
   'GET /api/v1/preambles': read,
@@ -54,6 +63,7 @@ export type CliOperation = keyof typeof CLI_OPERATIONS;
 export type CliPool = 'short' | 'long';
 export interface CliHttpRequest {
   readonly operation: CliOperation;
+  readonly executorId?: string;
   readonly query: readonly (readonly [string, string])[];
   readonly body: JsonValue | null;
 }
@@ -77,9 +87,17 @@ export function cliOperation(method: string, pathname: string): CliOperation {
   return key as CliOperation;
 }
 
-export function cliPolicy(http: CliHttpRequest): { mutation: boolean; timeoutMs: number | null; pool: CliPool } {
+export function cliRoute(method: string, pathname: string): Pick<CliHttpRequest, 'operation' | 'executorId'> {
+  const match = /^\/api\/v1\/executors\/([0-9a-f-]+)(\/connection)?$/u.exec(pathname);
+  if (match && isRemoteExecutorId(match[1])) {
+    return { operation: cliOperation(method, `/api/v1/executors/:executorId${match[2] ?? ''}`), executorId: match[1] };
+  }
+  return { operation: cliOperation(method, pathname) };
+}
+
+export function cliPolicy(http: CliHttpRequest): { mutation: boolean; management: boolean; timeoutMs: number | null; pool: CliPool } {
   if (http.operation === 'POST /api/v1/chats/run' && isRecord(http.body) && http.body.handoff) {
-    return { mutation: true, timeoutMs: 600_000, pool: 'long' };
+    return { mutation: true, management: false, timeoutMs: 600_000, pool: 'long' };
   }
   return CLI_OPERATIONS[http.operation];
 }
@@ -94,8 +112,11 @@ export function parseControllerCliRequest(value: unknown): ControllerCliRequest 
   if (!exact(value, ['expectedServerInstanceId', 'http']) || typeof value.expectedServerInstanceId !== 'string'
     || !value.expectedServerInstanceId || value.expectedServerInstanceId.length > 128) invalid();
   const http = value.http;
-  if (!exact(http, ['operation', 'query', 'body']) || typeof http.operation !== 'string') invalid();
+  if (!isRecord(http) || typeof http.operation !== 'string') invalid();
   if (!Object.hasOwn(CLI_OPERATIONS, http.operation)) throw new DomainError('CLI_ACCESS_DENIED', 'CLI operation is not permitted', 403);
+  const parameterized = http.operation.includes(':executorId');
+  if (!exact(http, parameterized ? ['operation', 'executorId', 'query', 'body'] : ['operation', 'query', 'body'])
+    || parameterized && !isRemoteExecutorId(http.executorId)) invalid();
   if (!Array.isArray(http.query) || http.query.length > 128 || !http.query.every((pair: unknown) =>
     Array.isArray(pair) && pair.length === 2 && pair.every((part) => typeof part === 'string' && part.length <= 8192))) invalid();
   if (http.operation.startsWith('GET ') ? http.body !== null : !(http.body === null || isRecord(http.body))) invalid();
@@ -114,6 +135,16 @@ export function parseControllerCliRequest(value: unknown): ControllerCliRequest 
   }
   if (['POST /api/v1/chats/start', 'POST /api/v1/chats/lookup-native-session', 'POST /api/v1/tickets/project-default'].includes(http.operation)) {
     if (!isRecord(http.body) || !isExecutorId(http.body.executorId)) invalid();
+  }
+  if (http.operation.includes('/api/v1/executors') && http.query.length !== 0) invalid();
+  if (http.operation === 'DELETE /api/v1/executors/:executorId' && http.body !== null) invalid();
+  if (http.operation.includes('/api/v1/api-provider-assignments')) {
+    const query = new URLSearchParams(http.query);
+    if (http.body !== null) invalid();
+    if (http.operation.startsWith('GET ')) {
+      if (query.size !== 0) invalid();
+    } else if (query.size !== 2 || query.getAll('executorId').length !== 1 || query.getAll('apiProviderId').length !== 1
+      || !isExecutorId(query.get('executorId')) || !isApiProviderId(query.get('apiProviderId'))) invalid();
   }
   // The raw HTTP handlers own application DTO validation; the relay validates its narrower authority envelope.
   return value as unknown as ControllerCliRequest;

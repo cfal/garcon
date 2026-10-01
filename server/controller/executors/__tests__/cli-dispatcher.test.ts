@@ -1,7 +1,7 @@
 import { expect, spyOn, test } from 'bun:test';
 import { ControllerCliDispatcher, type CliDispatchAccess } from '../cli-dispatcher.js';
 import type { GuardRpcReply } from '../../../remote/transport/rpc.js';
-import { CLI_REPLY_BYTES, CLI_OPERATIONS, cliPolicy, parseControllerCliRequest, type CliOperation, type ControllerCliRequest } from '../../../remote/transport/cli-protocol.js';
+import { CLI_REPLY_BYTES, CLI_OPERATIONS, cliPolicy, cliRoute, parseControllerCliRequest, type CliOperation, type ControllerCliRequest } from '../../../remote/transport/cli-protocol.js';
 import { DomainError } from '../../../common/domain-error.js';
 import { cliPair, CLI_EXECUTOR_ID } from '../../../remote/__tests__/cli-fixture.js';
 import type { JsonValue } from '../../../../common/json.js';
@@ -48,6 +48,51 @@ test('raw route parity preserves query multiplicity, JSON errors, executor autho
       .rejects.toMatchObject({ code: 'CLI_CONTROLLER_CHANGED' });
     expect(calls).toBe(1);
   } finally { pair.close(); }
+});
+
+test('executor route parameters and provider assignment envelopes are narrowly validated', () => {
+  const route = cliRoute('PATCH', `/api/v1/executors/${CLI_EXECUTOR_ID}`);
+  const input = { ...request(), http: { ...route, query: [], body: { label: 'Worker' } } };
+  expect(parseControllerCliRequest(input).http).toEqual(input.http);
+  for (const path of ['/api/v1/executors/local', '/api/v1/executors/not-a-uuid', `/api/v1/executors/${CLI_EXECUTOR_ID}/private`]) {
+    expect(() => cliRoute('PATCH', path)).toThrow();
+  }
+  for (const http of [{ ...input.http, executorId: '../settings' }, { ...input.http, executorId: 'local' },
+    { ...input.http, query: [['principal', 'local']] }, { operation: 'GET /api/v1/executors', executorId: CLI_EXECUTOR_ID, query: [], body: null },
+    { operation: 'POST /api/v1/api-providers', query: [], body: {} },
+    { operation: 'PUT /api/v1/api-provider-assignments', query: [['apiProviderId', 'synthetic']], body: null },
+    { operation: 'PUT /api/v1/api-provider-assignments', query: [['executorId', 'local'], ['executorId', CLI_EXECUTOR_ID], ['apiProviderId', 'synthetic']], body: null },
+    { operation: 'PUT /api/v1/api-provider-assignments', query: [['executorId', 'local'], ['apiProviderId', 'synthetic']], body: { apiKey: 'secret' } },
+  ]) expect(() => parseControllerCliRequest({ ...request(), http })).toThrow();
+});
+
+test('management grants protect dispatch and secret reply publication without blocking redacted listing', async () => {
+  let allowed = false;
+  let calls = 0;
+  const gate = Promise.withResolvers<void>();
+  const entered = Promise.withResolvers<void>();
+  const pair = cliPair(dispatcher({
+    '/api/v1/executors': { GET: () => Response.json({ executors: [] }) },
+    '/api/v1/executors/:executorId/connection': { GET: async (_req, url, _server, context) => {
+      expect(url.pathname).toBe(`/api/v1/executors/${CLI_EXECUTOR_ID}/connection`);
+      context?.assertCurrent?.();
+      calls++; entered.resolve(); await gate.promise;
+      return Response.json({ connectionUrl: 'secret' });
+    } },
+  }), () => {}, () => {}, () => { if (!allowed) throw new DomainError('CLI_ACCESS_DENIED', 'Management denied', 403); });
+  const input: ControllerCliRequest = { ...request(), http: { ...cliRoute('GET', `/api/v1/executors/${CLI_EXECUTOR_ID}/connection`), query: [], body: null } };
+  try {
+    expect((await pair.worker.call('', 'controllerCli.request', request('GET /api/v1/executors'))).status).toBe(200);
+    await expect(pair.worker.call('', 'controllerCli.request', input)).rejects.toMatchObject({ code: 'CLI_ACCESS_DENIED' });
+    expect(calls).toBe(0);
+    allowed = true;
+    const pending = pair.worker.call('', 'controllerCli.request', input);
+    await entered.promise;
+    allowed = false;
+    gate.resolve();
+    await expect(pending).rejects.toMatchObject({ code: 'CLI_ACCESS_DENIED' });
+    expect(calls).toBe(1);
+  } finally { gate.resolve(); pair.close(); }
 });
 
 test('nested controller-to-worker calls can finish while the reverse request is pending', async () => {

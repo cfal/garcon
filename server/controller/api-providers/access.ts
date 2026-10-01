@@ -64,13 +64,13 @@ export class ApiProviderAccess {
     }
   }
 
-  async assign(executorId: string, providerId: string): Promise<void> {
+  async assign(executorId: string, providerId: string, assertCurrent?: () => void): Promise<void> {
     await this.store.withLock(async () => {
       this.assertExecutor(executorId);
       if (!isApiProviderId(providerId) || !this.store.getApiProvider(providerId)) {
         throw new DomainError('API_PROVIDER_UNAVAILABLE', 'Provider not found', 404);
       }
-      await this.assignments.assign(executorId, providerId);
+      await this.assignments.assign(executorId, providerId, assertCurrent);
     });
   }
 
@@ -86,10 +86,10 @@ export class ApiProviderAccess {
     });
   }
 
-  async unassign(executorId: string, providerId: string): Promise<void> {
+  async unassign(executorId: string, providerId: string, assertCurrent?: () => void): Promise<void> {
     await this.store.withLock(async () => {
       this.assertExecutor(executorId);
-      await this.assignments.unassign(executorId, providerId);
+      await this.assignments.unassign(executorId, providerId, assertCurrent);
     });
   }
 }

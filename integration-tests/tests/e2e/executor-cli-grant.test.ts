@@ -37,6 +37,14 @@ test('executor editor grants and revokes workspace CLI access without replacing 
       if (enabled) expect(await discover()).toMatchObject({ defaultExecutorId: executorId });
       else await expect(discover()).rejects.toThrow('HTTP 403');
     }
+    const management = 'input[aria-describedby="executor-management-warning"]';
+    await fixture.page.$eval(management, (element) => (element as HTMLInputElement).click());
+    const saved = fixture.page.waitForResponse((response) => response.request().method() === 'PATCH'
+      && new URL(response.url()).pathname === `/api/v1/executors/${executorId}`);
+    await app.clickDialogButton('Save');
+    expect((await saved).status()).toBe(200);
+    expect(await snapshot()).toMatchObject({ allowControllerCli: false, allowExecutorManagement: true, instanceId: before.instanceId, availability: 'ready' });
+    await expect(discover()).rejects.toThrow('HTTP 403');
     fixture.assertNoBrowserErrors();
   }, { executionBackend: 'remote-executor-dials', projectRoots: 'separate' });
 }, 60_000);

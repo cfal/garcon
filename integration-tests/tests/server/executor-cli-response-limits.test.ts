@@ -36,7 +36,7 @@ for (const dialer of ['controller', 'worker'] as const) {
     controller.onSession(session => {
       const rpc = new ExecutorRpc(session);
       rpc.handle(async (call, signal, guard) => {
-        const access = { executorId: CLI_EXECUTOR_ID, rpc, signal, assertCurrent() {} };
+        const access = { executorId: CLI_EXECUTOR_ID, rpc, signal, assertCurrent() {}, assertManagement() {} };
         if (call.method === 'controllerCli.describe') return dispatcher.describe(access, guard);
         if (call.method === 'controllerCli.request') return dispatcher.request(call.request, access, guard);
         throw new Error('Unexpected reverse request');

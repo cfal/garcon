@@ -40,6 +40,8 @@ import { createCliOutput, type CliOutput } from './output.js';
 import { applyTicketStdin, runTicketCommand } from './ticket-commands.js';
 import { ticketLineOutput } from './ticket-output.js';
 import { readTicketStdin } from './ticket-stdin.js';
+import { applyExecutorConnectionStdin, readExecutorConnectionStdin } from './executor-args.js';
+import { runExecutorCommand } from './executor-commands.js';
 import { requireCompletedTurnReceipt, writeTerminalResult } from './terminal-receipt.js';
 
 export interface MainOptions {
@@ -218,6 +220,7 @@ export async function main(
   const output = options.output ?? createCliOutput();
   let command: ParsedCliCommand | undefined;
   let ticketSubmissionStarted = false;
+  let executorSubmissionStarted = false;
   let forkTargetChatId: string | undefined;
   try {
     command = parseCliArgs(argv);
@@ -227,6 +230,14 @@ export async function main(
     }
     if (command.kind === 'version') {
       process.stdout.write(`${packageJson.version}\n`);
+      return 0;
+    }
+    if (command.kind === 'executor') {
+      const executorCommand = command.readsConnectionFromStdin
+        ? applyExecutorConnectionStdin(command, await readConfiguredStdin(options,
+          (signal) => readExecutorConnectionStdin(Bun.stdin.stream(), signal))) : command;
+      const { client, command: connected } = await connectedClient(executorCommand, options);
+      await runExecutorCommand(connected, client, output, options.signal, () => { executorSubmissionStarted = true; });
       return 0;
     }
     if (command.kind === 'ticket') {
@@ -489,7 +500,9 @@ export async function main(
     return 0;
   } catch (error) {
     if (options.signal?.aborted) {
-      output.diagnostic(command?.kind === 'ticket'
+      output.diagnostic(command?.kind === 'executor'
+        ? executorSubmissionStarted ? 'terminal interrupted; executor configuration may have committed. Inspect before retrying.' : 'terminal interrupted; no executor mutation was submitted'
+        : command?.kind === 'ticket'
         ? ticketSubmissionStarted
           ? 'terminal interrupted; the ticket save is not confirmed. Retry with the printed identity and identical body.'
           : 'terminal interrupted; no ticket mutation was submitted'
@@ -500,7 +513,7 @@ export async function main(
       ? error
       : new CliError('submission', error instanceof Error ? error.message : String(error), 3);
     const diagnostic = `${cliError.phase}: ${cliError.message}`;
-    output.diagnostic(command?.kind === 'ticket' || argv.includes('ticket') ? ticketLineOutput(diagnostic) : diagnostic);
+    output.diagnostic(command?.kind === 'ticket' || command?.kind === 'executor' || argv.includes('ticket') || argv.includes('executor') ? ticketLineOutput(diagnostic) : diagnostic);
     return cliError.exitCode;
   }
 }

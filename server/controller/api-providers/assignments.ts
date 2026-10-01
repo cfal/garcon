@@ -99,20 +99,20 @@ export class ApiProviderAssignmentStore {
     return () => this.#listeners.delete(listener);
   }
 
-  assign(executorId: string, providerId: string): Promise<void> {
+  assign(executorId: string, providerId: string, assertCurrent?: () => void): Promise<void> {
     return this.#change(executorId, (snapshot) => {
       const providerIds = snapshot.assignments[executorId] ?? [];
       if (!providerIds.includes(providerId)) {
         snapshot.assignments[executorId] = [...providerIds, providerId];
       }
-    });
+    }, assertCurrent);
   }
 
-  unassign(executorId: string, providerId: string): Promise<void> {
+  unassign(executorId: string, providerId: string, assertCurrent?: () => void): Promise<void> {
     if (!isApiProviderId(providerId)) throw new ValidationDomainError('Invalid provider ID');
     return this.#change(executorId, (snapshot) => {
       snapshot.assignments[executorId] = (snapshot.assignments[executorId] ?? []).filter((id) => id !== providerId);
-    });
+    }, assertCurrent);
   }
 
   removeProvider(providerId: string): Promise<void> {
@@ -160,9 +160,10 @@ export class ApiProviderAssignmentStore {
     });
   }
 
-  #change(executorId: string, mutate: (snapshot: AssignmentFile) => void): Promise<void> {
+  #change(executorId: string, mutate: (snapshot: AssignmentFile) => void, assertCurrent?: () => void): Promise<void> {
     if (!isExecutorId(executorId)) throw new ValidationDomainError('Invalid executor');
     return this.#lock.runExclusive('assignments', async () => {
+      assertCurrent?.();
       const release = this.retain([executorId]);
       try {
         const snapshot = structuredClone(this.#current());

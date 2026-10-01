@@ -12,7 +12,7 @@ import { jsonError } from '../../common/http-error.js';
 import { createServerRuntimeState, publishRuntimeDescriptor, removeServerRuntime } from '../../common/server-runtime.js';
 import { runtimeProofResponse } from '../../common/runtime-proof.js';
 import { CliAdmission } from '../transport/cli-admission.js';
-import { CLI_REQUEST_BYTES, cliOperation, cliPolicy, parseCliHttpResponse, parseControllerCliRequest } from '../transport/cli-protocol.js';
+import { CLI_REQUEST_BYTES, cliRoute, cliPolicy, parseCliHttpResponse, parseControllerCliRequest } from '../transport/cli-protocol.js';
 import type { ExecutorRpc } from '../transport/rpc.js';
 
 function gatewayError(error: unknown): Response {
@@ -106,13 +106,13 @@ export async function startCliGateway(options: {
               response = Response.json(context);
             } finally { release(); }
           } else {
-            const operation = cliOperation(request.method, url.pathname);
+            const route = cliRoute(request.method, url.pathname);
             if (expectedServerInstanceId === null) throw new DomainError('VALIDATION_FAILED', 'Expected controller instance is required', 400);
             const contentLength = incoming.headers['content-length'];
             const hasBody = incoming.headers['transfer-encoding'] !== undefined
               || contentLength !== undefined && contentLength !== '0';
             const body = hasBody ? await readBody(incoming) : null;
-            const call = parseControllerCliRequest({ expectedServerInstanceId, http: { operation, query: [...url.searchParams], body } });
+            const call = parseControllerCliRequest({ expectedServerInstanceId, http: { ...route, query: [...url.searchParams], body } });
             const policy = cliPolicy(call.http);
             const release = admission.acquire('gateway', policy.pool);
             // Native HTTP idle timeouts do not bound maintenance work; restore the drain deadline before replying.

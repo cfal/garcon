@@ -4,23 +4,15 @@ import type { Ticket, TicketActor, TicketActivity, TicketDetail, TicketOwner, Ti
 import type { CliConnectionOptions } from './args.js';
 import { connectionOptionEntries } from './connection-options.js';
 
-const unsafeControls = /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028-\u202e\u2066-\u2069]/gu;
-const escapedControl = (character: string) => `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`;
-
-export function ticketLineOutput(text: string): string {
-  return text.replace(unsafeControls, escapedControl);
-}
-
-export function ticketBodyOutput(text: string): string {
-  return text.replace(unsafeControls, (character) => character === '\n' || character === '\t' ? character : escapedControl(character));
-}
+import { terminalLine as ticketLineOutput, terminalBody as ticketBodyOutput } from './terminal-output.js';
+export { ticketLineOutput, ticketBodyOutput };
 
 export function ticketJsonOutput(value: unknown): string {
   return ticketLineOutput(JSON.stringify(value));
 }
 
 export function ticketShellArgument(value: string): string {
-  const quoted = value.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(unsafeControls, escapedControl);
+  const quoted = ticketLineOutput(value.replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
   return `$'${quoted}'`;
 }
 

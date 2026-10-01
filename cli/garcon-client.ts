@@ -1,4 +1,7 @@
 import type { AgentTurnReceipt } from '@garcon/common/agent-turn-receipt';
+import { isRemoteExecutorId, parseExecutorConnection, type CreateExecutorRequest, type UpdateExecutorRequest,
+  type ExecutorSnapshot, type ExecutorConnection } from '@garcon/common/executors';
+import { executorSnapshots, executorProviders, executorResponseError, type ExecutorProvider } from './executor-responses.js';
 import { parseAgentTurnReceipt } from '@garcon/common/agent-turn-receipt';
 import type {
   AgentRunCommandRequest,
@@ -1170,9 +1173,49 @@ export class GarconClient {
     catch (error) { throw new CliError('tickets', 'server returned an invalid ticket response', 3, { cause: error }); }
   }
 
+  async listExecutors(signal?: AbortSignal): Promise<readonly ExecutorSnapshot[]> {
+    return executorSnapshots(await this.#request('executors', 'GET', '/api/v1/executors', undefined, signal));
+  }
+
+  async createExecutor(request: CreateExecutorRequest, signal?: AbortSignal): Promise<{ id: string }> {
+    const value = record(await this.#request('executors', 'POST', '/api/v1/executors', request, signal));
+    if (!value || !isRemoteExecutorId(value.id) || !parseExecutorConnection(value)) executorResponseError();
+    return { id: value.id };
+  }
+
+  async updateExecutor(id: string, request: UpdateExecutorRequest, signal?: AbortSignal): Promise<readonly ExecutorSnapshot[]> {
+    return executorSnapshots(await this.#request('executors', 'PATCH', `/api/v1/executors/${encodeURIComponent(id)}`, request, signal));
+  }
+
+  async deleteExecutor(id: string, signal?: AbortSignal): Promise<readonly ExecutorSnapshot[]> {
+    return executorSnapshots(await this.#request('executors', 'DELETE', `/api/v1/executors/${encodeURIComponent(id)}`, undefined, signal));
+  }
+
+  async getExecutorConnection(id: string, signal?: AbortSignal): Promise<ExecutorConnection> {
+    return parseExecutorConnection(await this.#request('executors', 'GET', `/api/v1/executors/${encodeURIComponent(id)}/connection`, undefined, signal))
+      ?? executorResponseError();
+  }
+
+  async getExecutorProviders(signal?: AbortSignal): Promise<readonly ExecutorProvider[]> {
+    return executorProviders(await this.#request('executors', 'GET', '/api/v1/api-provider-assignments', undefined, signal));
+  }
+
+  async assignExecutorProvider(id: string, providerId: string, signal?: AbortSignal): Promise<readonly ExecutorProvider[]> {
+    return this.#executorProviderAssignment('PUT', id, providerId, signal);
+  }
+
+  async unassignExecutorProvider(id: string, providerId: string, signal?: AbortSignal): Promise<readonly ExecutorProvider[]> {
+    return this.#executorProviderAssignment('DELETE', id, providerId, signal);
+  }
+
+  async #executorProviderAssignment(method: 'PUT' | 'DELETE', id: string, providerId: string, signal?: AbortSignal): Promise<readonly ExecutorProvider[]> {
+    const query = new URLSearchParams({ executorId: id, apiProviderId: providerId });
+    return executorProviders(await this.#request('executors', method, `/api/v1/api-provider-assignments?${query}`, undefined, signal));
+  }
+
   async #request(
     phase: CliErrorPhase,
-    method: 'GET' | 'POST' | 'PUT' | 'PATCH',
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
     route: string,
     body: unknown,
     signal?: AbortSignal,

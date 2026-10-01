@@ -84,8 +84,13 @@ export class ExecutorConfigStore {
         secret: parsed?.secret ?? createExecutorSecret(),
         connection: parsed
           ? { kind: 'controller-connects', targetUrl: validateExecutorSocketUrl(parsed.socketUrl, { allowInsecureDevelopment }) }
-          : { kind: 'executor-connects', advertisedUrl: `wss://example.com/executor/${id}` },
+          : { kind: 'executor-connects', advertisedUrl: validateExecutorSocketUrl(
+            request.direction === 'executor-connects' && request.advertisedUrl !== undefined
+              ? request.advertisedUrl.replaceAll('{executorId}', id) : `wss://example.com/executor/${id}`,
+            { allowInsecureDevelopment },
+          ) },
       };
+      assertConnectionLength(executor);
       await this.#save([...this.#executors, executor]);
       return structuredClone(executor);
     });
@@ -115,6 +120,7 @@ export class ExecutorConfigStore {
           allowUnverifiedTls: direction === 'controller-connects' && socketUrl.startsWith('wss:') && request.connection.allowUnverifiedTls === true,
           connection: direction === 'executor-connects' ? { kind: direction, advertisedUrl: socketUrl } : { kind: direction, targetUrl: socketUrl },
         };
+        assertConnectionLength(executor);
       }
       assertUpdateAllowed?.(previous, executor);
       await this.#save(this.#executors.map((entry) => entry.id === id ? executor : entry));
@@ -167,6 +173,13 @@ function parseStoredExecutor(value: unknown): RemoteExecutorConfig {
     allowExecutorManagement: value.allowExecutorManagement === true,
     allowInsecureDevelopment: value.allowInsecureDevelopment,
     allowUnverifiedTls: connection.kind === 'controller-connects' && connection.targetUrl.startsWith('wss:') && value.allowUnverifiedTls === true };
+}
+
+function assertConnectionLength(executor: RemoteExecutorConfig): void {
+  const address = executor.connection.kind === 'executor-connects' ? executor.connection.advertisedUrl : executor.connection.targetUrl;
+  if (executorConnectionUrl(address, executor.secret).length > 4096) {
+    throw new ValidationDomainError('Executor connection URL exceeds 4096 characters after address expansion');
+  }
 }
 
 function assertUniqueExecutors(executors: readonly RemoteExecutorConfig[]): void {

@@ -163,23 +163,23 @@ export class ExecutorManager {
     return () => { this.#availability.delete(listener); };
   }
 
-  create(request: CreateExecutorRequest): Promise<RemoteExecutorConfig> {
-    return this.#mutate(async () => this.config.create(request));
+  create(request: CreateExecutorRequest, assertCurrent?: () => void): Promise<RemoteExecutorConfig> {
+    return this.#mutate(async () => this.config.create(request), assertCurrent);
   }
 
-  update(id: string, request: UpdateExecutorRequest): Promise<RemoteExecutorConfig> {
+  update(id: string, request: UpdateExecutorRequest, assertCurrent?: () => void): Promise<RemoteExecutorConfig> {
     return this.#mutate((requireIdle) => this.config.update(id, request, (previous, next) => {
       if (!sameConnector(previous, next)) requireIdle(id);
-    }));
+    }), assertCurrent);
   }
 
-  remove(id: string): Promise<void> {
+  remove(id: string, assertCurrent?: () => void): Promise<void> {
     return this.#mutate(async (requireIdle) => {
       requireIdle(id);
       this.#referenceWrites.assertNoWrites(id);
       this.#guards.assertRemovable(id);
       await this.config.remove(id);
-    });
+    }, assertCurrent);
   }
 
   async dispose(): Promise<void> {
@@ -199,9 +199,10 @@ export class ExecutorManager {
     for (const entry of this.#remotes.values()) { entry.cliLease.abort(); entry.link?.quiesce(); }
   }
 
-  #mutate<T>(operation: (requireIdle: (executorId: string) => void) => Promise<T>): Promise<T> {
+  #mutate<T>(operation: (requireIdle: (executorId: string) => void) => Promise<T>, assertCurrent?: () => void): Promise<T> {
     const result = this.#mutations.then(async () => {
       if (this.#disposed || this.#quiescing) throw new DomainError('SERVER_SHUTTING_DOWN', 'Executors are stopping', 503);
+      assertCurrent?.();
       let executorId: string | null = null;
       const requireIdle = (id: string) => {
         this.config.require(id);
@@ -292,7 +293,13 @@ export class ExecutorManager {
           };
           assertCurrent();
           if (!this.#cliDispatcher) throw new DomainError('CLI_CONTROLLER_UNAVAILABLE', 'Controller CLI is initializing', 503, true);
-          const access = { executorId: config.id, rpc, signal: AbortSignal.any([signal, lease.signal]), assertCurrent };
+          const assertManagement = () => {
+            assertCurrent();
+            if (!entry.config.allowExecutorManagement) {
+              throw new DomainError('CLI_ACCESS_DENIED', 'Executor management is not enabled for this executor', 403);
+            }
+          };
+          const access = { executorId: config.id, rpc, signal: AbortSignal.any([signal, lease.signal]), assertCurrent, assertManagement };
           if (call.method === 'controllerCli.describe') {
             if (call.request !== null) throw new DomainError('VALIDATION_FAILED', 'Invalid CLI context request', 400);
             return this.#cliDispatcher.describe(access, guardReply);

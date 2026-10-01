@@ -8,6 +8,7 @@ export function cliPair(
   dispatcher: ControllerCliDispatcher,
   assertCurrent: () => void = () => {},
   onReplyAdmission: () => void = () => {},
+  assertManagement: () => void = () => {},
 ) {
   const left = new SessionTransport(crypto.randomUUID(), 'worker', () => {}, {}, CLI_EXECUTOR_ID);
   const right = new SessionTransport(crypto.randomUUID(), 'controller', () => {}, {}, CLI_EXECUTOR_ID);
@@ -17,7 +18,7 @@ export function cliPair(
   const controller = new ExecutorRpc(left);
   const worker = new ExecutorRpc(right);
   controller.handle(async (call, signal, guardReply) => {
-    const access = { executorId: CLI_EXECUTOR_ID, rpc: controller, signal, assertCurrent };
+    const access = { executorId: CLI_EXECUTOR_ID, rpc: controller, signal, assertCurrent, assertManagement };
     const observeReply: typeof guardReply = (guard) => guardReply((bytes) => {
       try { guard(bytes); }
       finally { onReplyAdmission(); }
