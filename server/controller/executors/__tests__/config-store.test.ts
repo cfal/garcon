@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { ExecutorConfigStore } from '../config-store.js';
 import { createExecutorSecret, executorConnectionUrl } from '../../../remote/transport/connection-url.js';
+import { CorruptStateFileError } from '../../../common/json-file-store.js';
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
@@ -214,6 +215,30 @@ test('insecurely readable persisted secrets reject startup', async () => {
   await store.create({ direction: 'executor-connects', label: 'Private' });
   await chmod(join(root, 'executors.json'), 0o644);
   await expect(new ExecutorConfigStore(root).initialize()).rejects.toThrow('OS account');
+});
+
+test('retired executor schema rejects startup with explicit upgrade and restore instructions', async () => {
+  const { root, store } = await fixture();
+  const executor = await store.create({ direction: 'executor-connects', label: 'Upgrade' });
+  const file = join(root, 'executors.json');
+  const stored = JSON.parse(await readFile(file, 'utf8'));
+  stored.executors[0].allowInsecureDevelopment = stored.executors[0].noTls;
+  delete stored.executors[0].noTls;
+  const legacy = JSON.stringify(stored);
+  await writeFile(file, legacy);
+  const error = await new ExecutorConfigStore(root).initialize().then(() => null, error => error);
+  expect(error.message).toContain('rename it to noTls, preserving its boolean value');
+  expect(error.message).toContain('restore it to');
+  expect(error.cause).toBeInstanceOf(CorruptStateFileError);
+  expect(error.message).toContain(error.cause.quarantinePath);
+  expect(error.message).not.toContain(executor.secret);
+  expect(await readFile(error.cause.quarantinePath, 'utf8')).toBe(legacy);
+  stored.executors[0].noTls = stored.executors[0].allowInsecureDevelopment;
+  delete stored.executors[0].allowInsecureDevelopment;
+  await writeFile(file, JSON.stringify(stored), { mode: 0o600 });
+  const upgraded = new ExecutorConfigStore(root);
+  await upgraded.initialize();
+  expect(upgraded.require(executor.id).secret).toBe(executor.secret);
 });
 
 test('TLS verification defaults on and explicit opt-out survives restart and rename', async () => {

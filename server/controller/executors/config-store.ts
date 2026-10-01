@@ -7,9 +7,11 @@ import {
 } from '../../../common/executors.js';
 import { isRecord } from '../../../common/json.js';
 import { DomainError, ValidationDomainError } from '../../common/domain-error.js';
-import { AtomicJsonWriteError, readJsonStateFile, writeJsonFileAtomic } from '../../common/json-file-store.js';
+import { AtomicJsonWriteError, CorruptStateFileError, readJsonStateFile, writeJsonFileAtomic } from '../../common/json-file-store.js';
 import { createExecutorSecret, isExecutorSecret, executorConnectionUrl, parseConnectionUrl, validateExecutorSocketUrl } from '../../remote/transport/connection-url.js';
 import { executorPublicUrl } from './public-url.js';
+
+class ExecutorConfigUpgradeError extends Error {}
 
 export interface RemoteExecutorConfig {
   readonly id: string;
@@ -45,6 +47,11 @@ export class ExecutorConfigStore {
         assertUniqueExecutors(executors);
         return executors;
       },
+    }).catch((error: unknown) => {
+      if (error instanceof CorruptStateFileError && error.cause instanceof ExecutorConfigUpgradeError) {
+        throw new ExecutorConfigUpgradeError(`${error.cause.message} Update a copy of ${error.quarantinePath ?? this.#path} and restore it to ${this.#path} before restarting; keep the original backup.`, { cause: error });
+      }
+      throw error;
     });
   }
 
@@ -174,6 +181,9 @@ export class ExecutorConfigStore {
 }
 
 function parseStoredExecutor(value: unknown): RemoteExecutorConfig {
+  if (isRecord(value) && 'allowInsecureDevelopment' in value) {
+    throw new ExecutorConfigUpgradeError('Executor configuration uses retired allowInsecureDevelopment; rename it to noTls, preserving its boolean value.');
+  }
   if (!isRecord(value) || !isRemoteExecutorId(value.id) || typeof value.label !== 'string'
     || !value.label.trim() || value.label.length > 100 || typeof value.enabled !== 'boolean'
     || !isExecutorSecret(value.secret) || typeof value.noTls !== 'boolean'
