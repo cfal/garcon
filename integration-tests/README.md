@@ -138,11 +138,14 @@ From the repository root:
 bun run typecheck
 bun run test:integration:server
 
-DEEPSEEK_TESTING_KEY=... \
+CLAUDE_TESTING_KEY=... \
 CLAUDE_TESTING_BASE_URL=... \
 CLAUDE_TESTING_MODEL=... \
 bun run test:live:claude
-OPENAI_TESTING_KEY=... bun run test:live:codex
+CODEX_TESTING_KEY=... \
+CODEX_TESTING_BASE_URL=... \
+CODEX_TESTING_MODEL=... \
+bun run test:live:codex
 DEEPSEEK_TESTING_KEY=... bun run test:live:opencode
 
 bun run build
@@ -153,7 +156,7 @@ bun run check
 bun run test
 ```
 
-`bun run test:integration` runs the deterministic server integration lane but not the credential-backed live-provider or Lightpanda lanes. The root `bun run test` command runs the server and web unit suites, so run the integration commands explicitly while developing cross-boundary changes. Credential-backed suites use the separate `test:live` and `test:live:<provider>` commands; do not run them locally unless actively changing those tests, and rely on the PR CI live-provider gate otherwise. Testing credentials are named for the model provider whose quota they spend, so one secret drives every agent lane that bills that provider. The live Claude lane requires `DEEPSEEK_TESTING_KEY` plus `CLAUDE_TESTING_BASE_URL` and `CLAUDE_TESTING_MODEL` (DeepSeek's Anthropic-compatible endpoint and a model it serves), and uses the pinned test-only Claude CLI with low effort. The live Codex lane requires `OPENAI_TESTING_KEY` and uses the pinned test-only Codex CLI, `gpt-5.4-nano`, and low effort. The live OpenCode lane requires `DEEPSEEK_TESTING_KEY` and defaults to the pinned test-only OpenCode binary with `deepseek/deepseek-v4-flash`; `OPENCODE_TESTING_PROVIDER=openai` (with `OPENAI_TESTING_KEY`) and `OPENCODE_TESTING_MODEL` select another supported provider or model. All live lanes use a temporary provider home without changing the user's CLI login and redact failure diagnostics that omit provider content and server logs. The E2E fixture requires a current production build at `web/build/index.html` and an executable `LIGHTPANDA_BIN`. CI pins and verifies the Lightpanda binary in `.github/workflows/integration-tests.yml`.
+`bun run test:integration` runs the deterministic server integration lane but not the credential-backed live-provider or Lightpanda lanes. The root `bun run test` command runs the server and web unit suites, so run the integration commands explicitly while developing cross-boundary changes. Credential-backed suites use the separate `test:live` and `test:live:<provider>` commands; do not run them locally unless actively changing those tests, and rely on the PR CI live-provider gate otherwise. The live Claude and Codex lanes use agent-specific secrets, low effort, and their pinned test-only CLIs. Claude requires `CLAUDE_TESTING_KEY`, `CLAUDE_TESTING_BASE_URL`, and `CLAUDE_TESTING_MODEL`; Codex requires `CODEX_TESTING_KEY`, `CODEX_TESTING_BASE_URL`, and `CODEX_TESTING_MODEL`. Store these values as repository secrets, not public workflow literals, variables, or documentation. Codex appends `/responses` to its configured API base URL through the pinned CLI's credential proxy, which receives the key only on stdin and keeps it out of Codex's environment and files. CI masks all configuration values and blocks diagnostic uploads that contain them. Scripted-model tests inject synthetic configuration and require no live secrets. The live OpenCode lane requires `DEEPSEEK_TESTING_KEY` and defaults to the pinned test-only OpenCode binary with `deepseek/deepseek-v4-flash`; `OPENCODE_TESTING_PROVIDER=openai` (with `OPENAI_TESTING_KEY`) and `OPENCODE_TESTING_MODEL` select another supported provider or model. All live lanes use a temporary provider home without changing the user's CLI login and redact failure diagnostics that omit provider content and server logs. The E2E fixture requires a current production build at `web/build/index.html` and an executable `LIGHTPANDA_BIN`. CI pins and verifies the Lightpanda binary in `.github/workflows/integration-tests.yml`.
 
 Focused runs are useful while iterating:
 

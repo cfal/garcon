@@ -1,10 +1,11 @@
 // Runs the real pinned Codex binary with its model swapped for a script. The topology is the
 // live one -- Codex talks to the credential proxy, the proxy forwards upstream -- with the
-// upstream pointed at FakeCodexModel instead of OpenAI, so provider behavior stays real while
+// upstream pointed at FakeCodexModel, so provider behavior stays real while
 // every model choice is deterministic and no credential is required.
 
 import { FakeCodexModel } from './fake-codex-model.js';
 import {
+  codexRequestModel,
   startLiveCodexTestEnvironment,
   type CodexTestToolMode,
   type LiveCodexTestEnvironment,
@@ -25,7 +26,7 @@ export async function startScriptedCodexTestEnvironment(options: {
       upstreamUrl: model.responsesUrl,
       testingKey: `garcon-scripted-codex-${crypto.randomUUID()}`,
       toolMode: options.toolMode,
-      model: options.model,
+      model: options.model ?? codexRequestModel(),
     });
   } catch (error) {
     model.stop();
