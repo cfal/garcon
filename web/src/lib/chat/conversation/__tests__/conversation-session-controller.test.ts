@@ -4635,6 +4635,7 @@ describe('ConversationSessionController', () => {
 					id: 'entry-steer',
 					content: 'Keep the current turn',
 					kind: 'steer',
+					attachments: [],
 					revision: 1,
 					createdAt: '2026-09-30T00:00:00.000Z',
 					updatedAt: '2026-09-30T00:00:00.000Z',

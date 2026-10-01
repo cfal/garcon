@@ -28,7 +28,7 @@ function scaffold(overrides = {}) {
     publish: (chatId, control) => {
       if (overrides.observePublications) delivery.observe(chatId, control);
     },
-  }, { assertAvailable: mock(async () => undefined) });
+  }, { assertAvailable: mock(async () => undefined) }, { assertSupported: mock(() => undefined) });
   const ownership = new ExecutionOwnership();
   const attempt = new QueueExecutionAttempt({ turnId: 'turn-1', clientRequestId: 'request-1' });
   ownership.installAttempt(CHAT_ID, attempt);
@@ -76,9 +76,12 @@ function scaffold(overrides = {}) {
 }
 
 describe('QueuedSteerDelivery', () => {
-  it('delivers queued steers in order into the active turn and stops at a queued turn', async () => {
+  it.each([
+    { images: [] },
+    { images: [{ data: 'data:image/png;base64,AAAA', name: 'screen.png', mimeType: 'image/png' }] },
+  ])('delivers queued steers in order and preserves the queued turn attachments: %j', async ({ images }) => {
     const f = scaffold();
-    await f.controls.create(CHAT_ID, 'future turn');
+    await f.controls.create(CHAT_ID, { content: 'future turn', images });
     await f.addSteer('first guidance');
     await f.addSteer('second guidance');
 
@@ -96,6 +99,7 @@ describe('QueuedSteerDelivery', () => {
     });
     const control = await f.controls.read(CHAT_ID);
     expect(control.entries.map(({ content, kind }) => [content, kind])).toEqual([['future turn', 'turn']]);
+    expect(control.entries[0].images).toEqual(images);
     expect(control.recentlyDispatched.map((entry) => entry.entryId)).toEqual(['steer-1', 'steer-2']);
     expect(f.requestDrain).toHaveBeenCalledWith(CHAT_ID, 'queued steer consumed');
   });

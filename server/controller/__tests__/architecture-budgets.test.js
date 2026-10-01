@@ -23,7 +23,8 @@ const MAX_LINES = 1000;
 // Queued steers add one delivery pass per chat that steers the queue head into the active
 // turn once the turn can take it, and the steer commands' choice to queue a steer the turn
 // cannot take yet instead of refusing it.
-const EXECUTION_FOOTPRINT_BUDGET = 9043;
+// Queued attachments add bounded payload storage and capability checks at admission.
+const EXECUTION_FOOTPRINT_BUDGET = 9144;
 
 const GRANDFATHER = {
   'server/runtime/git/diff-engine.ts': 1575,

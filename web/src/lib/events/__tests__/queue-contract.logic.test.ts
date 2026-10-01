@@ -81,6 +81,7 @@ describe('chat execution-control WS contract', () => {
 								id: 1,
 								content: 'bad',
 								kind: 'turn',
+								attachments: [],
 								revision: 1,
 								createdAt: installedAt,
 								updatedAt: installedAt,
@@ -110,6 +111,7 @@ describe('chat execution-control WS contract', () => {
 						{
 							id: 'entry-1',
 							content: '',
+							kind: 'turn',
 							attachments,
 							revision: 1,
 							createdAt: installedAt,
@@ -144,6 +146,7 @@ describe('chat execution-control WS contract', () => {
 							{
 								id: 'entry-1',
 								content: 'hello',
+								kind: 'turn',
 								attachments,
 								revision: 1,
 								createdAt: installedAt,

@@ -8,10 +8,7 @@ import { getConfigDir, initializeServerConfig } from './config.js';
 import { wrapRoutes, serverShuttingDownResponse, unhandledRouteErrorResponse } from './lib/http-route.js';
 import { ControllerCliDispatcher } from './executors/cli-dispatcher.js';
 import { verifyAuthTokenClaims } from './auth/token.js';
-import {
-  getWebSocketAuthToken,
-  webSocketUpgradeHeaders,
-} from './lib/websocket-auth.js';
+import { getWebSocketAuthToken, webSocketUpgradeHeaders } from './lib/websocket-auth.js';
 import { init as initAuthStore } from './auth/store.js';
 import { forkChatFileCopy } from './chats/fork-chat.js';
 import { wireSearchSourceAvailability, wireServerEvents, type ServerEventWiring } from './server-event-wiring.js';

@@ -7,27 +7,20 @@ import {
   type ChatStopIntent,
   type ChatStopOutcome,
 } from '../../../common/chat-types.ts';
-import {
-  type AgentExecutionAdmission,
-  type RunAgentTurnOptions,
-} from '../agents/session-types.js';
+import type { AgentExecutionAdmission, RunAgentTurnOptions } from '../agents/session-types.js';
 import { KeyedPromiseLock } from '../../common/keyed-lock.js';
 import { createLogger } from '../../common/log.js';
 import { DomainError } from '../../common/domain-error.js';
 import type { TurnIdentity } from '../lib/turn-identity.js';
 import { QueueExecutionAttempt } from './execution-attempt.ts';
-import {
-  type QueuedTurnFinalizationOutcome,
-} from './turn-finalization-tracker.js';
+import type { QueuedTurnFinalizationOutcome } from './turn-finalization-tracker.js';
 import {
   hasPendingTurnInput,
   type StoredControlInputEntry,
   type StoredChatExecutionControlState,
 } from './control-state.ts';
 import type { ChatExecutionControlRepository } from './chat-execution-control-repository.ts';
-import {
-  type QueueCommandIdentity,
-} from './chat-execution-control-transitions.ts';
+import type { QueueCommandIdentity } from './chat-execution-control-transitions.ts';
 import {
   executionTurnIdentity,
   type AcceptedDirectInput,
@@ -70,8 +63,7 @@ import { QueueDrainer } from './queue-drainer.ts';
 import { ChatExecutionControlOperations } from './chat-execution-control-operations.ts';
 import { ExecutionOwnership } from './execution-ownership.ts';
 import { AcceptedInputHandler } from './accepted-input-handler.ts';
-import { AcceptedInputTranscript } from './accepted-input-transcript.ts';
-import type { AcceptedInputTranscriptPort } from './accepted-input-transcript.ts';
+import { AcceptedInputTranscript, type AcceptedInputTranscriptPort } from './accepted-input-transcript.ts';
 import { SteerInputDelivery } from './steer-input-delivery.ts';
 import { QueuedSteerDelivery, type QueuedSteerDeliveryOptions } from './queued-steer-delivery.ts';
 import { ControlInputDelivery } from './control-input-delivery.ts';

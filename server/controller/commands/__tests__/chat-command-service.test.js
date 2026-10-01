@@ -5439,6 +5439,7 @@ describe('ChatCommandService', () => {
     });
 
     expect(queue.deliverAcceptedQueueEntrySteer).not.toHaveBeenCalled();
+    expect(queue.markAcceptedQueueEntrySteer).not.toHaveBeenCalled();
   });
 
   it('does not mask a queued-steer observation rejection when ledger settlement fails', async () => {

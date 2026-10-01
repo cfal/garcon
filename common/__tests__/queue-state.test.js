@@ -44,7 +44,7 @@ describe('queue state', () => {
 
   it('requires each entry to say whether it starts a turn or steers the active one', () => {
     const at = '2026-07-22T00:00:00.000Z';
-    const entry = { id: 'entry-1', content: 'guidance', revision: 1, createdAt: at, updatedAt: at };
+    const entry = { id: 'entry-1', content: 'guidance', attachments: [], revision: 1, createdAt: at, updatedAt: at };
     expect(parseChatQueueState({
       ...BASE_QUEUE,
       entries: [{ ...entry, kind: 'turn' }, { ...entry, id: 'entry-2', kind: 'steer' }],
