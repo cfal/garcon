@@ -37,11 +37,7 @@ describe('project resolution API', () => {
 		expect(fetchMock.mock.calls[0]?.[0]).toContain(
 			`chatId=${CHAT_ID}&expectedProjectPath=%2Fworkspace%2Fproject+a`,
 		);
-		expect(fetchMock.mock.calls[0]?.[1]).toEqual(
-			expect.objectContaining({
-				headers: expect.objectContaining({ Authorization: 'Bearer test-token' }),
-			}),
-		);
+		expect(new Headers(fetchMock.mock.calls[0]?.[1].headers).get('Authorization')).toBe('Bearer test-token');
 	});
 
 	it('rejects a valid response for a different target', async () => {
