@@ -27,7 +27,7 @@ import type {
   StashRefOptions,
 } from './types.js';
 import { GitDomainError } from './git-types.js';
-import { UNMERGED_STATUSES } from './porcelain-status.js';
+import { parsePorcelainV1Z, UNMERGED_STATUSES } from './porcelain-status.js';
 
 const MAX_HISTORY_LIMIT = 200;
 const MAX_BLAME_LINES = 2_000;
@@ -44,24 +44,6 @@ function assertSafeStashRef(stashRef: string): void {
   if (!/^stash@\{\d+\}$/.test(stashRef)) {
     throw new GitDomainError('INVALID_INPUT', 'Invalid stash ref.');
   }
-}
-
-function parsePorcelainStatus(output: string): Array<{ path: string; status: string }> {
-  const tokens = output.split('\0').filter(Boolean);
-  const entries: Array<{ path: string; status: string }> = [];
-  for (let index = 0; index < tokens.length; index += 1) {
-    const token = tokens[index];
-    const status = `${token[0] || ' '}${token[1] || ' '}`;
-    const filePath = token.slice(3);
-    entries.push({ path: filePath, status });
-    // Either column can carry the rename/copy marker; both forms append the
-    // original path as a second token that must be consumed.
-    if (
-      status[0] === 'R' || status[0] === 'C' ||
-      status[1] === 'R' || status[1] === 'C'
-    ) index += 1;
-  }
-  return entries;
 }
 
 function emptyConflictContent(): GitConflictContent {
@@ -183,12 +165,13 @@ async function getConflicts({
   ]);
   const stagesByPath = parseUnmergedIndexStages(unmergedResult.stdout);
   const conflicts: GitConflictFile[] = [];
-  for (const entry of parsePorcelainStatus(statusResult.stdout)) {
-    if (!UNMERGED_STATUSES.has(entry.status as GitConflictStatus)) continue;
+  for (const entry of parsePorcelainV1Z(statusResult.stdout)) {
+    const status = `${entry.indexStatus}${entry.workTreeStatus}`;
+    if (!UNMERGED_STATUSES.has(status)) continue;
     const stages = stagesByPath.get(entry.path) ?? new Set<1 | 2 | 3>();
     conflicts.push({
       path: entry.path,
-      status: entry.status as GitConflictStatus,
+      status: status as GitConflictStatus,
       baseAvailable: stages.has(1),
       oursAvailable: stages.has(2),
       theirsAvailable: stages.has(3),
