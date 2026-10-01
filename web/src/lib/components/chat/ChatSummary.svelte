@@ -8,7 +8,7 @@
 	import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
 	import { cn } from '$lib/utils/cn';
 	import { formatRelativeTimestamp } from '$lib/utils/relative-timestamp.js';
-	import { formatCompactProjectPath } from '$lib/chat/project-paths/compact-project-path';
+	import { formatCompactProjectPath } from '$lib/project-paths/compact-project-path';
 
 	interface ChatSummaryProps {
 		session: ChatSessionRecord;

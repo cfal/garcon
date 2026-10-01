@@ -47,24 +47,19 @@
 		return raw;
 	});
 
-	// Split the typed path into a browsable parent directory and a filter
-	// prefix. If the path ends with '/' or is a known directory (from the
-	// last fetch), browse it directly. Otherwise treat the last segment as
-	// a partial name filter on the parent directory.
-	let resolvedDir = $state('');
-	let filterPrefix = $state('');
-
-	$effect(() => {
+	const typedPath = $derived.by(() => {
 		const raw = clampedStart;
 		if (raw.endsWith('/') || raw === basePath) {
-			resolvedDir = raw;
-			filterPrefix = '';
-		} else {
-			const lastSlash = raw.lastIndexOf('/');
-			resolvedDir = lastSlash >= 0 ? raw.slice(0, lastSlash) || '/' : '/';
-			filterPrefix = lastSlash >= 0 ? raw.slice(lastSlash + 1).toLowerCase() : '';
+			return { directory: raw, prefix: '' };
 		}
+		const lastSlash = raw.lastIndexOf('/');
+		return {
+			directory: lastSlash >= 0 ? raw.slice(0, lastSlash) || '/' : '/',
+			prefix: lastSlash >= 0 ? raw.slice(lastSlash + 1).toLowerCase() : '',
+		};
 	});
+	const resolvedDir = $derived(typedPath.directory);
+	const filterPrefix = $derived(typedPath.prefix);
 
 	let browsePath = $state('');
 	let allEntries = $state<DirectoryEntry[]>([]);

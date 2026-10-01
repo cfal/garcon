@@ -3,8 +3,8 @@
 	import AgentSettingsControls from '$lib/components/chat/AgentSettingsControls.svelte';
 	import ChatTagEditor from '$lib/components/chat/ChatTagEditor.svelte';
 	import ChatTagToggleButton from '$lib/components/chat/ChatTagToggleButton.svelte';
-	import ProjectPathField from '$lib/components/chat/ProjectPathField.svelte';
-	import ProjectPinnedPathList from '$lib/components/chat/ProjectPinnedPathList.svelte';
+	import ProjectPathField from '$lib/components/project-paths/ProjectPathField.svelte';
+	import ProjectPinnedPathList from '$lib/components/project-paths/ProjectPinnedPathList.svelte';
 	import GitWorktreePickerModal from '$lib/components/git/GitWorktreePickerModal.svelte';
 	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
 	import ExecutorSelector from '$lib/components/shared/ExecutorSelector.svelte';

@@ -2,8 +2,8 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { tick, type ComponentProps } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { browseDirectory } from '$lib/api/files';
-import ProjectPathField from '../ProjectPathField.svelte';
-import ProjectPathFieldTestHost from './ProjectPathFieldTestHost.svelte';
+import ProjectPathField from '$lib/components/project-paths/ProjectPathField.svelte';
+import ProjectPathFieldTestHost from '$lib/components/project-paths/__tests__/ProjectPathFieldTestHost.svelte';
 
 vi.mock('$lib/api/files', () => ({ browseDirectory: vi.fn() }));
 

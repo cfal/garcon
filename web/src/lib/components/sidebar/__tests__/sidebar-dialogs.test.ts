@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/sve
 import { describe, expect, it, vi } from 'vitest';
 
 import SidebarTagDialog from '../SidebarTagDialog.svelte';
-import SidebarProjectPathDialog from './SidebarProjectPathDialogTestHost.svelte';
+import ChatProjectPathDialog from '$lib/components/chat/__tests__/ChatProjectPathDialogTestHost.svelte';
 import { ApiError } from '$lib/api/client';
 import * as chatsApi from '$lib/api/chats';
 import * as gitApi from '$lib/api/git';
@@ -73,7 +73,7 @@ describe('Sidebar dialogs', () => {
 			agentOwnershipEpoch: 'epoch-1',
 			currentProjectPath: '/worker/project',
 		};
-		const rendered = render(SidebarProjectPathDialog, {
+		const rendered = render(ChatProjectPathDialog, {
 			executors,
 			projectPathDialog,
 			projectBasePath: '/local',
@@ -130,7 +130,7 @@ describe('Sidebar dialogs', () => {
 
 	it('constrains long chat titles in the project path dialog header', async () => {
 		const longTitle = 'A'.repeat(500);
-		const rendered = render(SidebarProjectPathDialog, {
+		const rendered = render(ChatProjectPathDialog, {
 			projectPathDialog: {
 				chatId: 'chat-1',
 				chatTitle: longTitle,
@@ -169,7 +169,7 @@ describe('Sidebar dialogs', () => {
 			.mockRejectedValueOnce(new ApiError(409, 'busy', 'CHAT_NOT_IDLE'))
 			.mockResolvedValueOnce(undefined);
 
-		const rendered = render(SidebarProjectPathDialog, {
+		const rendered = render(ChatProjectPathDialog, {
 			projectPathDialog: {
 				chatId: 'chat-1',
 				chatTitle: 'Feature chat',
@@ -221,7 +221,7 @@ describe('Sidebar dialogs', () => {
 		const pinnedPath = '/workspace/pinned-repo';
 		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: true });
 
-		const rendered = render(SidebarProjectPathDialog, {
+		const rendered = render(ChatProjectPathDialog, {
 			projectPathDialog: {
 				chatId: 'chat-1',
 				chatTitle: 'Feature chat',
@@ -269,7 +269,7 @@ describe('Sidebar dialogs', () => {
 		});
 		const onConfirm = vi.fn();
 
-		const rendered = render(SidebarProjectPathDialog, {
+		const rendered = render(ChatProjectPathDialog, {
 			projectPathDialog: {
 				chatId: 'chat-1',
 				chatTitle: 'Feature chat',
@@ -328,7 +328,7 @@ describe('Sidebar dialogs', () => {
 		const request = deferred<Awaited<ReturnType<typeof gitApi.getGitWorktrees>>>();
 		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: true });
 		vi.mocked(gitApi.getGitWorktrees).mockImplementationOnce(() => request.promise);
-		const rendered = render(SidebarProjectPathDialog, {
+		const rendered = render(ChatProjectPathDialog, {
 			projectPathDialog: {
 				chatId: 'chat-1',
 				chatTitle: 'Feature chat',
@@ -366,7 +366,7 @@ describe('Sidebar dialogs', () => {
 		vi.useFakeTimers();
 		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
 
-		const rendered = render(SidebarProjectPathDialog, {
+		const rendered = render(ChatProjectPathDialog, {
 			projectPathDialog: {
 				chatId: 'chat-1',
 				chatTitle: 'Feature chat',
@@ -400,7 +400,7 @@ describe('Sidebar dialogs', () => {
 		vi.useFakeTimers();
 		const onTogglePinnedProjectPath = vi.fn();
 
-		const rendered = render(SidebarProjectPathDialog, {
+		const rendered = render(ChatProjectPathDialog, {
 			projectPathDialog: {
 				chatId: 'chat-1',
 				chatTitle: 'Feature chat',
@@ -435,7 +435,7 @@ describe('Sidebar dialogs', () => {
 		const pending = deferred<void>();
 		const onTogglePinnedProjectPath = vi.fn(() => pending.promise);
 
-		const rendered = render(SidebarProjectPathDialog, {
+		const rendered = render(ChatProjectPathDialog, {
 			projectPathDialog: {
 				chatId: 'chat-1',
 				chatTitle: 'Feature chat',
@@ -489,7 +489,7 @@ describe('Sidebar dialogs', () => {
 		vi.useFakeTimers();
 		const onTogglePinnedProjectPath = vi.fn();
 
-		const rendered = render(SidebarProjectPathDialog, {
+		const rendered = render(ChatProjectPathDialog, {
 			projectPathDialog: {
 				chatId: 'chat-1',
 				chatTitle: 'Feature chat',

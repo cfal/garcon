@@ -1,8 +1,8 @@
-import { render, screen, waitFor } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import { expect, it, vi } from 'vitest';
 import { browseDirectory } from '$lib/api/files';
-import DirectoryBrowserTestHost from './DirectoryBrowserTestHost.svelte';
+import DirectoryBrowserTestHost from '$lib/components/project-paths/__tests__/DirectoryBrowserTestHost.svelte';
 
 vi.mock('$lib/api/files', () => ({ browseDirectory: vi.fn() }));
 
@@ -23,4 +23,22 @@ it('reloads a directory after a same-path serving-instance change and rejects la
 	stale.resolve([{ name: 'stale', path: '/repo/stale', type: 'directory' }]);
 	await tick();
 	expect(screen.queryByRole('button', { name: 'stale' })).toBeNull();
+});
+
+it('derives typed prefixes without refetching or clearing the mobile filter for the same parent', async () => {
+	vi.mocked(browseDirectory).mockReset().mockResolvedValue([
+		{ name: 'alpha-one', path: '/repo/alpha-one', type: 'directory' },
+		{ name: 'alpha-two', path: '/repo/alpha-two', type: 'directory' },
+	]);
+	const view = render(DirectoryBrowserTestHost, {
+		executorId: 'local', currentPath: '/repo/a', basePath: '/repo', isMobile: true, onSelect: vi.fn(), onClose: vi.fn(),
+	});
+	await screen.findByRole('button', { name: 'alpha-one' });
+	const filter = screen.getByRole('textbox');
+	await fireEvent.input(filter, { target: { value: 'one' } });
+	expect(filter).toHaveProperty('value', 'one');
+	await view.rerender({ currentPath: '/repo/alpha' });
+	expect(filter).toHaveProperty('value', 'one');
+	expect(screen.queryByRole('button', { name: 'alpha-two' })).toBeNull();
+	expect(browseDirectory).toHaveBeenCalledOnce();
 });

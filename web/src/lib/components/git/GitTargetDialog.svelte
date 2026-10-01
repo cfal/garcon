@@ -5,11 +5,11 @@
 	import { onDestroy, untrack } from 'svelte';
 	import { getExecutors, getNotifications } from '$lib/context';
 	import * as Dialog from '$lib/components/ui/dialog';
-	import ProjectPathField from '$lib/components/chat/ProjectPathField.svelte';
-	import ProjectPinnedPathList from '$lib/components/chat/ProjectPinnedPathList.svelte';
+	import ProjectPathField from '$lib/components/project-paths/ProjectPathField.svelte';
+	import ProjectPinnedPathList from '$lib/components/project-paths/ProjectPinnedPathList.svelte';
 	import GitWorktreePickerModal from './GitWorktreePickerModal.svelte';
 	import { GitTargetDialogState } from '$lib/git/targets/git-target-dialog.svelte.js';
-	import { isPinnedProjectPath } from '$lib/chat/project-paths/project-pinned-paths.js';
+	import { isPinnedProjectPath } from '$lib/project-paths/project-pinned-paths.js';
 	import type { GitTargetCandidate } from '$lib/api/git.js';
 	import Folder from '@lucide/svelte/icons/folder';
 	import X from '@lucide/svelte/icons/x';

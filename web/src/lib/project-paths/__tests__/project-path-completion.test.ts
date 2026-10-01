@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { browseDirectory } from '$lib/api/files.js';
-import { ProjectPathCompletionController } from '../project-path-completion.js';
+import { ProjectPathCompletionController } from '$lib/project-paths/project-path-completion.js';
 
 vi.mock('$lib/api/files.js', () => ({ browseDirectory: vi.fn() }));
 

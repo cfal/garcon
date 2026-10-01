@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatCompactProjectPath } from '../compact-project-path';
+import { formatCompactProjectPath } from '$lib/project-paths/compact-project-path';
 
 describe('formatCompactProjectPath', () => {
 	it('keeps paths that fit within the display limit', () => {

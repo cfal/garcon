@@ -13,15 +13,15 @@
 	import { effectiveExecutorId } from '$shared/executors';
 	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
 	import GitWorktreePickerModal from '$lib/components/git/GitWorktreePickerModal.svelte';
-	import ProjectPathField from './ProjectPathField.svelte';
-	import ProjectPinnedPathList from './ProjectPinnedPathList.svelte';
+	import ProjectPathField from '$lib/components/project-paths/ProjectPathField.svelte';
+	import ProjectPinnedPathList from '$lib/components/project-paths/ProjectPinnedPathList.svelte';
 	import { isDirectAgentId, nonDirectAgentIds } from '$lib/agents/direct-agents';
-	import { ProjectPathDialogState } from '$lib/chat/project-paths/project-path-dialog-state.svelte.js';
-	import { isPinnedProjectPath } from '$lib/chat/project-paths/project-pinned-paths.js';
+	import { ProjectPathDialogState } from '$lib/project-paths/project-path-dialog-state.svelte.js';
+	import { isPinnedProjectPath } from '$lib/project-paths/project-pinned-paths.js';
 	import {
 		executorPinnedProjectPaths,
 		togglePinnedProjectPathOptimistically,
-	} from '$lib/chat/project-paths/pinned-project-path-settings.js';
+	} from '$lib/project-paths/pinned-project-path-settings.js';
 	import type { ExecutorHandoffProjectState } from '$lib/chat/conversation/executor-handoff-project.svelte.js';
 	import type { ModelSelectorChange } from '$lib/components/model-selector/model-selector-types';
 	import * as m from '$lib/paraglide/messages.js';

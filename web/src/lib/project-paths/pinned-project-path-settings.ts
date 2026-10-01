@@ -4,7 +4,7 @@ import { effectiveExecutorId } from '$shared/executors';
 import {
 	nextPinnedProjectPaths,
 	sortedPinnedProjectPaths,
-} from '$lib/chat/project-paths/project-pinned-paths.js';
+} from '$lib/project-paths/project-pinned-paths.js';
 
 interface PinnedProjectPathUpdateOptions {
 	executorId?: string;

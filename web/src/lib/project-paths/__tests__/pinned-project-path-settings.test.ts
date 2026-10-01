@@ -3,7 +3,7 @@ import { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
 import {
 	executorPinnedProjectPaths,
 	togglePinnedProjectPathOptimistically,
-} from '$lib/chat/project-paths/pinned-project-path-settings.js';
+} from '$lib/project-paths/pinned-project-path-settings.js';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
 
 vi.mock('$lib/api/settings.js', () => ({

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import CircleAlert from '@lucide/svelte/icons/circle-alert';
-	import { formatCompactProjectPath } from '$lib/chat/project-paths/compact-project-path';
+	import { formatCompactProjectPath } from '$lib/project-paths/compact-project-path';
 	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn';
 	import { formatRelativeTimestamp } from '$lib/utils/relative-timestamp';

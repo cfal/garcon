@@ -5,7 +5,7 @@ import * as gitApi from '$lib/api/git';
 import type { GitWorktreeItem } from '$lib/api/git';
 import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 import { ExecutorsStore } from '$lib/executors/executors-store.svelte';
-import { ProjectPathDialogState } from '../project-path-dialog-state.svelte.js';
+import { ProjectPathDialogState } from '$lib/project-paths/project-path-dialog-state.svelte.js';
 
 vi.mock('$lib/api/chats', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('$lib/api/chats')>();

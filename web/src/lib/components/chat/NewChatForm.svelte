@@ -50,8 +50,8 @@
 		getWorkspaceLayout,
 	} from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
-	import ProjectPathField from './ProjectPathField.svelte';
-	import ProjectPinnedPathList from './ProjectPinnedPathList.svelte';
+	import ProjectPathField from '$lib/components/project-paths/ProjectPathField.svelte';
+	import ProjectPinnedPathList from '$lib/components/project-paths/ProjectPinnedPathList.svelte';
 	import GitWorktreePickerModal from '$lib/components/git/GitWorktreePickerModal.svelte';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
 	import FileText from '@lucide/svelte/icons/file-text';

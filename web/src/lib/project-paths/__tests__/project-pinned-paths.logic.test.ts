@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	nextPinnedProjectPaths,
 	sortedPinnedProjectPaths,
-} from '$lib/chat/project-paths/project-pinned-paths.js';
+} from '$lib/project-paths/project-pinned-paths.js';
 
 describe('project pinned paths', () => {
 	it('sorts, trims, and dedupes pinned project paths', () => {

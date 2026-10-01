@@ -1,9 +1,9 @@
 <script lang="ts">
 	import type { ComponentProps } from 'svelte';
-	import SidebarProjectPathDialog from '../SidebarProjectPathDialog.svelte';
+	import ChatProjectPathDialog from '$lib/components/chat/ChatProjectPathDialog.svelte';
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
 	import type { ExecutorSnapshot } from '$shared/executors';
-	let { executors: executorSnapshots, ...props }: ComponentProps<typeof SidebarProjectPathDialog> & {
+	let { executors: executorSnapshots, ...props }: ComponentProps<typeof ChatProjectPathDialog> & {
 		executors?: readonly ExecutorSnapshot[];
 	} = $props();
 	const executors = setExecutorsTestContext();
@@ -12,4 +12,4 @@
 	});
 </script>
 
-<SidebarProjectPathDialog {...props} />
+<ChatProjectPathDialog {...props} />

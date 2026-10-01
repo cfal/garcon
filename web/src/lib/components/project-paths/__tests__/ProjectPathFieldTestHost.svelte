@@ -3,7 +3,7 @@
 	import { setTransientLayers } from '$lib/context';
 	import { WorkspaceInteractionGate } from '$lib/workspace/workspace-interaction-gate.svelte';
 	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte';
-	import ProjectPathField from '../ProjectPathField.svelte';
+	import ProjectPathField from '$lib/components/project-paths/ProjectPathField.svelte';
 
 	let {
 		value = $bindable(''),

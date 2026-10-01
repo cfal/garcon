@@ -260,10 +260,9 @@ Rules:
 
 ### Chat Domain
 
-`web/src/lib/chat/` is the canonical home for reusable Chat behavior and state. Its approved concerns are `actions`, `composer`, `conversation`, `file-links`, `new-chat`, `project-paths`, `sessions`, `split`, `tools`, and `transcript`.
+`web/src/lib/chat/` is the canonical home for reusable Chat behavior and state. Its approved concerns are `actions`, `composer`, `conversation`, `file-links`, `new-chat`, `sessions`, `tools`, and `transcript`.
 
 - `sessions` owns the root Chat session registry and read-receipt outbox.
-- `split` owns durable Chat split state; DOM drag interaction remains beside `ChatSurface`.
 - `conversation` owns the active conversation lifecycle and orchestration.
 - `composer` owns input, attachments, controls, and command parsing.
 - `transcript` owns transcript cache, active transcript state, feed models, scrolling, and transcript-derived presentation.
@@ -286,6 +285,7 @@ Rules:
 ### Supporting Domains
 
 - `web/src/lib/files/` owns File sessions, editor controllers, and tree state.
+- `web/src/lib/project-paths/` owns shared executor-qualified path selection, completion, validation, and pinned-path preferences. Its renderers live in `components/project-paths`; chat mutation dialogs remain under Chat.
 - `web/src/lib/terminal/` owns Terminal runtimes, input controls, theme, and sessions.
 - `web/src/lib/sidebar/` owns reusable Sidebar search parsing/state and the project-collapse store.
 - `web/src/lib/chat-map/` owns chat-lineage normalization and retained Chat Map surface state.
