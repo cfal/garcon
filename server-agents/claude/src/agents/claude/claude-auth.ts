@@ -19,6 +19,7 @@ async function responseText(stream: ReadableStream<Uint8Array> | null): Promise<
 async function runClaudeAuthStatus(config: ClaudeConfig): Promise<{ exitCode: number; output: string }> {
   // Uses the CLI itself so Garcon follows CLAUDE_CONFIG_DIR and other auth storage rules.
   const proc = Bun.spawn([config.binary(), 'auth', 'status'], {
+    env: { ...process.env },
     stdin: 'ignore',
     stdout: 'pipe',
     stderr: 'pipe',

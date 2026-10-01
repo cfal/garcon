@@ -21,6 +21,7 @@ const GIT_TERMINATION_GRACE_MS = 250;
 async function terminateGitProcess(proc: Bun.Subprocess): Promise<void> {
   if (process.platform === 'win32') {
     const killer = Bun.spawn(['taskkill', '/PID', String(proc.pid), '/T', '/F'], {
+      env: { ...process.env },
       stdin: 'ignore',
       stdout: 'ignore',
       stderr: 'ignore',

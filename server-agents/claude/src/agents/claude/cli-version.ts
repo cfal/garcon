@@ -60,6 +60,7 @@ async function readProbeOutput(
 
 async function probeClaudeCliVersion(claudeBinary: string): Promise<CliVersion> {
   const process = Bun.spawn([claudeBinary, '--version'], {
+    env: { ...globalThis.process.env },
     stdin: 'ignore',
     stdout: 'pipe',
     stderr: 'pipe',

@@ -51,6 +51,7 @@ export async function readWorkerCliOptions(
   args: readonly string[], environment: NodeJS.ProcessEnv = process.env,
 ): Promise<ExecutorWorkerOptions> {
   // Consumption precedes validation and dynamic runtime imports, including failure paths.
+  // Bun children need explicit JS environment snapshots; implicit inheritance retains the native value.
   const controllerUrl = environment.GARCON_CONTROLLER_URL;
   delete environment.GARCON_CONTROLLER_URL;
   if (args.some(argument => argument === '--workspace-dir' || argument.startsWith('--workspace-dir='))) {

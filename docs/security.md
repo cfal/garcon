@@ -90,7 +90,9 @@ Dialing workers read the full connection URL from `GARCON_CONTROLLER_URL`, not
 argv. Inject it through a private service environment file or secret manager.
 Avoid literal secrets in shell history. The worker consumes the variable before
 runtime initialization so provider and PTY children do not inherit the credential.
-PTY environments explicitly override the variable with an empty value, preventing
+Subprocesses receive an explicit snapshot of the consumed JavaScript environment;
+Bun's implicit inheritance can retain the original native value. Terminal and
+provider-login PTY environments override the variable with an empty value, preventing
 their native launcher from restoring the initial value. This does not hide the
 process's initial environment from privileged inspection, service configuration,
 crash dumps, or diagnostics.

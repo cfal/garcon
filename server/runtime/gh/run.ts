@@ -75,7 +75,7 @@ async function runGhProcess(cwd: string, args: string[], options: GhCommandOptio
       stdout: 'pipe',
       stderr: 'pipe',
       signal,
-      env: options.env ? { ...process.env, ...options.env } : undefined,
+      env: { ...process.env, ...options.env },
     });
   } catch (error) {
     // Bun throws synchronously when the executable is missing.

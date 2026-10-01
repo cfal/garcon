@@ -2,6 +2,7 @@ import type { CursorConfig } from '../../config.js';
 
 async function runCursorStatus(config: CursorConfig): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
   const proc = Bun.spawn([config.binary(), 'status', '--format', 'json'], {
+    env: { ...process.env },
     stdin: 'ignore',
     stdout: 'pipe',
     stderr: 'pipe',

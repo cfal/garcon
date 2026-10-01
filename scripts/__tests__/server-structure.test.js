@@ -32,6 +32,23 @@ function imports(filename) {
 }
 
 describe('server ownership boundaries', () => {
+  test('worker and provider Bun subprocesses supply explicit environments', () => {
+    for (const directory of [join(server, 'runtime'), join(server, 'remote'), join(root, 'server-agents')]) {
+      for (const filename of sources(directory)) {
+        const tree = ts.createSourceFile(filename, readFileSync(filename, 'utf8'), ts.ScriptTarget.Latest, true);
+        function visit(node) {
+          if (ts.isCallExpression(node) && ['Bun.spawn', 'Bun.spawnSync'].includes(node.expression.getText(tree))) {
+            const options = node.arguments[1];
+            expect(options && ts.isObjectLiteralExpression(options)
+              && options.properties.some(property => property.name?.getText(tree) === 'env'), relative(root, filename)).toBe(true);
+          }
+          ts.forEachChild(node, visit);
+        }
+        visit(tree);
+      }
+    }
+  });
+
   test('keeps only the public entrypoint and package metadata at the server root', () => {
     expect(readdirSync(server).filter((entry) => entry !== 'node_modules').sort()).toEqual([
       'common', 'controller', 'main.ts', 'package.json', 'remote', 'runtime', 'tsconfig.json',

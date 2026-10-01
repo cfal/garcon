@@ -409,7 +409,7 @@ async function spawnCodexLoginPty(
     cols: 80,
     rows: 24,
     cwd: options.cwd,
-    env: options.env,
+    env: { ...options.env, GARCON_CONTROLLER_URL: '' },
   });
 }
 

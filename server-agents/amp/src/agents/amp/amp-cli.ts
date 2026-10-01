@@ -100,6 +100,7 @@ async function runAmpCommand(
 ): Promise<string> {
   const ampBinary = config.binary();
   const proc = Bun.spawn([ampBinary, ...args], {
+    env: { ...process.env },
     cwd: cwd || process.cwd(),
     stdin: input == null ? 'ignore' : 'pipe',
     stdout: 'pipe',
@@ -178,6 +179,7 @@ async function runAmpCommandToTempFile(
 
   try {
     const proc = Bun.spawn([ampBinary, ...args], {
+      env: { ...process.env },
       cwd: cwd || process.cwd(),
       stdin: 'ignore',
       stdout: handle.fd,
@@ -574,6 +576,7 @@ class AmpCliRuntime {
     this.#logger.info('Spawning Amp.', { binary: ampBinary, arguments: args });
 
     const proc = Bun.spawn([ampBinary, ...args], {
+      env: { ...process.env },
       cwd: cwd || process.cwd(),
       stdin: 'pipe',
       stdout: 'pipe',

@@ -47,6 +47,7 @@ export function parseCursorModelsOutput(output: string): CursorModelOption[] {
 
 async function runCursorModels(config: CursorConfig): Promise<string> {
   const proc = Bun.spawn([config.binary(), 'models'], {
+    env: { ...process.env },
     stdin: 'ignore',
     stdout: 'pipe',
     stderr: 'pipe',

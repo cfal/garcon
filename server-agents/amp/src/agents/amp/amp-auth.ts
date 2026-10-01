@@ -4,6 +4,7 @@ export async function getAmpAuthStatus(config: AmpConfig) {
   try {
     const ampBinary = config.binary();
     const proc = Bun.spawn([ampBinary, 'usage'], {
+      env: { ...process.env },
       stdin: 'ignore',
       stdout: 'pipe',
       stderr: 'pipe',

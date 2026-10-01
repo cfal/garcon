@@ -40,7 +40,7 @@ async function runCodexExec(
     stdin: new Blob([input]),
     stdout: 'pipe',
     stderr: 'pipe',
-    ...(env ? { env } : {}),
+    env,
     signal,
   });
   const [stdout, stderr, exitCode] = await Promise.all([
@@ -124,9 +124,8 @@ export async function runSingleQuery(prompt: string, options: CodexSingleQueryOp
 function buildCodexExecEnv(
   envOverrides?: Record<string, string>,
   codexConfig?: CodexProviderConfig,
-): Record<string, string> | undefined {
+): Record<string, string> {
   const overrides = buildCodexEnv(envOverrides, codexConfig);
-  if (!overrides) return undefined;
 
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
