@@ -77,6 +77,7 @@ test('URL updates preserve identity and configuration objects are not mutable ca
   expect(updated.id).toBe(original.id);
   expect(updated.secret).toBe(original.secret);
   expect(store.connection(original.id).connectionUrl).toBe(connectionUrl);
+  expect(store.connection(original.id, 'not a public URL').connectionUrl).toBe(connectionUrl);
   const copy = store.list() as { label: string }[];
   copy[0].label = 'Corrupted';
   expect(store.require(original.id).label).toBe('Renamed');
@@ -239,6 +240,25 @@ test('retired executor schema rejects startup with explicit upgrade and restore 
   const upgraded = new ExecutorConfigStore(root);
   await upgraded.initialize();
   expect(upgraded.require(executor.id).secret).toBe(executor.secret);
+});
+
+test.each([
+  { kind: 'executor-connects' },
+  { kind: 'executor-connects', advertisedUrl: 1 },
+  { kind: 'controller-connects' },
+  { kind: 'controller-connects', targetUrl: null },
+  { kind: 'controller-connects', targetUrl: 1 },
+  { kind: 'unknown', targetUrl: 'wss://worker.test/executor' },
+])('malformed stored connections retain their validation failure: %j', async connection => {
+  const { root, store } = await fixture();
+  await store.create({ direction: 'executor-connects', label: 'Malformed' });
+  const file = join(root, 'executors.json');
+  const stored = JSON.parse(await readFile(file, 'utf8'));
+  stored.executors[0].connection = connection;
+  await writeFile(file, JSON.stringify(stored));
+  await expect(new ExecutorConfigStore(root).initialize()).rejects.toMatchObject({
+    cause: { message: 'Invalid executor connection configuration' },
+  });
 });
 
 test('TLS verification defaults on and explicit opt-out survives restart and rename', async () => {

@@ -70,8 +70,9 @@ export class ExecutorConfigStore {
 
   connection(id: string, publicBase?: string) {
     const executor = this.require(id);
-    const socketUrl = executor.connection.kind === 'controller-connects' ? executor.connection.targetUrl
-      : executor.connection.advertisedUrl ?? (publicBase ? executorPublicUrl(publicBase, id) : null);
+    const { connection } = executor;
+    let socketUrl = connection.kind === 'controller-connects' ? connection.targetUrl : connection.advertisedUrl;
+    if (socketUrl === null && publicBase) socketUrl = executorPublicUrl(publicBase, id);
     return {
       connectionUrl: socketUrl ? executorConnectionUrl(socketUrl, executor.secret) : '',
       noTls: executor.noTls,
@@ -129,8 +130,9 @@ export class ExecutorConfigStore {
           throw new ValidationDomainError('Changing connection direction requires a connection URL');
         }
         const parsed = connectionUrl === undefined ? null : parseConnectionUrl(connectionUrl);
-        const socketUrl = parsed?.socketUrl ?? (previous.connection.kind === 'controller-connects'
-          ? previous.connection.targetUrl : previous.connection.advertisedUrl);
+        const previousSocketUrl = previous.connection.kind === 'controller-connects'
+          ? previous.connection.targetUrl : previous.connection.advertisedUrl;
+        const socketUrl = parsed?.socketUrl ?? previousSocketUrl;
         const address = socketUrl === null ? null : validateExecutorSocketUrl(socketUrl, { noTls });
         executor = {
           ...executor, secret: parsed?.secret ?? previous.secret, noTls,
@@ -192,12 +194,19 @@ function parseStoredExecutor(value: unknown): RemoteExecutorConfig {
     || value.allowUnverifiedTls !== undefined && typeof value.allowUnverifiedTls !== 'boolean'
     || !isRecord(value.connection)) throw new Error('Invalid executor configuration');
   const options = { noTls: value.noTls };
-  const connection = value.connection.kind === 'executor-connects' && (value.connection.advertisedUrl === null || typeof value.connection.advertisedUrl === 'string')
-    ? { kind: 'executor-connects' as const, advertisedUrl: value.connection.advertisedUrl === null ? null : validateExecutorSocketUrl(value.connection.advertisedUrl, options) }
-    : value.connection.kind === 'controller-connects' && typeof value.connection.targetUrl === 'string'
-      ? { kind: 'controller-connects' as const, targetUrl: validateExecutorSocketUrl(value.connection.targetUrl, options) }
-      : null;
-  if (!connection || connection.kind === 'executor-connects' && value.allowUnverifiedTls === true) throw new Error('Invalid executor connection configuration');
+  const stored = value.connection;
+  let connection: RemoteExecutorConfig['connection'];
+  if (stored.kind === 'executor-connects' && (stored.advertisedUrl === null || typeof stored.advertisedUrl === 'string')) {
+    connection = {
+      kind: 'executor-connects',
+      advertisedUrl: stored.advertisedUrl === null ? null : validateExecutorSocketUrl(stored.advertisedUrl, options),
+    };
+  } else if (stored.kind === 'controller-connects' && typeof stored.targetUrl === 'string') {
+    connection = { kind: 'controller-connects', targetUrl: validateExecutorSocketUrl(stored.targetUrl, options) };
+  } else {
+    throw new Error('Invalid executor connection configuration');
+  }
+  if (connection.kind === 'executor-connects' && value.allowUnverifiedTls === true) throw new Error('Invalid executor connection configuration');
   return { id: value.id, label: value.label, enabled: value.enabled, secret: value.secret, connection,
     allowControllerCli: value.allowControllerCli === true,
     allowExecutorManagement: value.allowExecutorManagement === true,

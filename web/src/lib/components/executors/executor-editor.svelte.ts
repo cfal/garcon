@@ -1,6 +1,6 @@
 import * as api from '$lib/api/executors.js';
 import type { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
-import { isExecutorSecret, type ExecutorDirection, type ExecutorSnapshot } from '$shared/executors';
+import { isExecutorSecret, type ExecutorDirection, type ExecutorSnapshot, type UpdateExecutorRequest } from '$shared/executors';
 
 export class ExecutorEditor {
 	id = $state<string | null>(null);
@@ -18,7 +18,7 @@ export class ExecutorEditor {
 	#version = 0;
 	#originalUrl = '';
 	#originalDirection: ExecutorDirection = 'executor-connects';
-	#originalInsecure = false;
+	#originalNoTls = false;
 	#originalUnverifiedTls = false;
 	#originalEnabled = true;
 	#originalControllerCli = false;
@@ -74,7 +74,7 @@ export class ExecutorEditor {
 			if (version !== this.#version) return;
 			this.connectionUrl = this.#originalUrl = connection.connectionUrl;
 			this.#originalDirection = this.direction;
-			this.noTls = this.#originalInsecure = connection.noTls;
+			this.noTls = this.#originalNoTls = connection.noTls;
 			this.allowUnverifiedTls = this.#originalUnverifiedTls = connection.allowUnverifiedTls;
 		} catch (error) {
 			if (version === this.#version) this.error = error instanceof Error ? error.message : 'Unable to load connection';
@@ -94,14 +94,22 @@ export class ExecutorEditor {
 			if (this.id) {
 				const addressChanged = this.connectionUrl.trim() !== this.#originalUrl.trim() || this.direction !== this.#originalDirection;
 				const connectionChanged = addressChanged
-					|| this.noTls !== this.#originalInsecure || allowUnverifiedTls !== this.#originalUnverifiedTls;
+					|| this.noTls !== this.#originalNoTls || allowUnverifiedTls !== this.#originalUnverifiedTls;
+				let connection: UpdateExecutorRequest['connection'];
+				if (connectionChanged) {
+					connection = {
+						direction: this.direction,
+						...(addressChanged ? { connectionUrl: this.connectionUrl.trim() } : {}),
+						noTls: this.noTls,
+						allowUnverifiedTls,
+					};
+				}
 				const executors = await this.transport.updateExecutor(this.id, {
 					label: this.label.trim(),
 					...(this.enabled !== this.#originalEnabled ? { enabled: this.enabled } : {}),
 					...(this.allowControllerCli !== this.#originalControllerCli ? { allowControllerCli: this.allowControllerCli } : {}),
 					...(this.allowExecutorManagement !== this.#originalExecutorManagement ? { allowExecutorManagement: this.allowExecutorManagement } : {}),
-					...(connectionChanged ? { connection: { direction: this.direction,
-						...(addressChanged ? { connectionUrl: this.connectionUrl.trim() } : {}), noTls: this.noTls, allowUnverifiedTls } } : {}),
+					...(connection ? { connection } : {}),
 				});
 				if (this.executors.executors === previousExecutors) this.executors.applySnapshot(executors);
 				else await this.executors.refreshAfterMutation();
@@ -121,7 +129,7 @@ export class ExecutorEditor {
 			}
 			this.#originalUrl = this.connectionUrl;
 			this.#originalDirection = this.direction;
-			this.#originalInsecure = this.noTls;
+			this.#originalNoTls = this.noTls;
 			this.allowUnverifiedTls = this.#originalUnverifiedTls = allowUnverifiedTls;
 			this.#originalEnabled = this.enabled;
 			this.#originalControllerCli = this.allowControllerCli;
