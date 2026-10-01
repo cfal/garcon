@@ -42,3 +42,28 @@ test('CI runs the shared server inventory and SACS on all three backends', async
     } } },
   } });
 });
+
+test('live CI lanes use agent-specific secrets and audit all private configuration', async () => {
+  const source = await readFile(`${root}/../.github/workflows/integration-tests.yml`, 'utf8');
+  const workflow = Bun.YAML.parse(source);
+  for (const agent of ['claude', 'codex']) {
+    const key = `${agent.toUpperCase()}_TESTING_KEY`;
+    const baseUrl = `${agent.toUpperCase()}_TESTING_BASE_URL`;
+    const model = `${agent.toUpperCase()}_TESTING_MODEL`;
+    const environment = {
+      [key]: '${{ secrets.' + key + ' }}',
+      [baseUrl]: '${{ secrets.' + baseUrl + ' }}',
+      [model]: '${{ secrets.' + model + ' }}',
+    };
+    expect(workflow).toMatchObject({ jobs: {
+      [`${agent}-live`]: { steps: expect.arrayContaining([
+        expect.objectContaining({ id: agent === 'claude' ? 'claude-config' : 'codex-key', env: environment }),
+        expect.objectContaining({ run: `bun run test:live:${agent}`, env: environment }),
+        expect.objectContaining({
+          id: `${agent}-diagnostics-audit`, env: environment,
+          run: expect.stringContaining(`for value in "$${key}" "$${baseUrl}" "$${model}"; do`),
+        }),
+      ]) },
+    } });
+  }
+});

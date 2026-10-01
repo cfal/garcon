@@ -1,8 +1,47 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createLiveClaudeProtocolProbe } from '../../support/live-claude-protocol-probe.js';
+import { liveClaudeServerEnvironment } from '../../support/live-claude.js';
+
+describe('live Claude testing configuration', () => {
+  const environment = {
+    CLAUDE_TESTING_KEY: 'synthetic-claude-key',
+    CODEX_TESTING_KEY: 'synthetic-unused-codex-key',
+    CLAUDE_TESTING_BASE_URL: 'https://model.invalid/anthropic',
+    CLAUDE_TESTING_MODEL: 'integration-live-model',
+  };
+  const savedEnvironment = Object.fromEntries(Object.keys(environment).map(name => [name, process.env[name]]));
+
+  beforeEach(() => { Object.assign(process.env, environment); });
+  afterEach(() => {
+    for (const [name, value] of Object.entries(savedEnvironment)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  });
+
+  test.each(['CLAUDE_TESTING_KEY', 'CLAUDE_TESTING_BASE_URL', 'CLAUDE_TESTING_MODEL'])(
+    'requires explicit %s without falling back to another lane', async name => {
+      delete process.env[name];
+      await expect(liveClaudeServerEnvironment()).rejects.toThrow(
+        `${name} is required for live Claude integration tests.`,
+      );
+    },
+  );
+
+  test('passes only its configured credential to the isolated Claude process', async () => {
+    const serverEnvironment = await liveClaudeServerEnvironment();
+    expect(serverEnvironment).toMatchObject({
+      ANTHROPIC_API_KEY: environment.CLAUDE_TESTING_KEY,
+      ANTHROPIC_AUTH_TOKEN: '',
+      ANTHROPIC_BASE_URL: environment.CLAUDE_TESTING_BASE_URL,
+      ANTHROPIC_MODEL: environment.CLAUDE_TESTING_MODEL,
+    });
+    expect(JSON.stringify(serverEnvironment)).not.toContain(environment.CODEX_TESTING_KEY);
+  });
+});
 
 describe('live Claude protocol probe', () => {
   test.each([false, true])('observes controls without retaining private values (invalidate context: %j)', async invalidateContextUsage => {
