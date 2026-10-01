@@ -30,9 +30,6 @@
 	import LocalSettingsSection from './LocalSettingsSection.svelte';
 	import KeyboardShortcutsSection from './KeyboardShortcutsSection.svelte';
 
-	const lazyPreambles = () => import('../preambles/PreamblesSection.svelte');
-	const lazyScheduledPrompts = () => import('./ScheduledPromptsSection.svelte');
-	const lazySnippets = () => import('../snippets/SnippetsSection.svelte');
 	const appShell = getAppShell();
 	const remoteSettings = getRemoteSettings();
 	const executors = getExecutors();
@@ -208,7 +205,7 @@
 
 				<Tabs.Content value="preambles" class="mt-0 space-y-4">
 					{#if appShell.settingsTab === 'preambles'}
-						{#await lazyPreambles() then { default: PreamblesSection }}
+						{#await import('../preambles/PreamblesSection.svelte') then { default: PreamblesSection }}
 							<PreamblesSection active={true} />
 						{/await}
 					{/if}
@@ -216,7 +213,7 @@
 
 				<Tabs.Content value="scheduled-prompts" class="mt-0 space-y-4">
 					{#if appShell.settingsTab === 'scheduled-prompts' || appShell.scheduledPromptSuspended}
-						{#await lazyScheduledPrompts() then { default: ScheduledPromptsSection }}
+						{#await import('./ScheduledPromptsSection.svelte') then { default: ScheduledPromptsSection }}
 							<ScheduledPromptsSection
 								active={appShell.settingsTab === 'scheduled-prompts'}
 								suspended={appShell.scheduledPromptSuspended}
@@ -227,7 +224,7 @@
 
 				<Tabs.Content value="snippets" class="mt-0 space-y-4">
 					{#if appShell.settingsTab === 'snippets'}
-						{#await lazySnippets() then { default: SnippetsSection }}
+						{#await import('../snippets/SnippetsSection.svelte') then { default: SnippetsSection }}
 							<SnippetsSection active={true} />
 						{/await}
 					{/if}

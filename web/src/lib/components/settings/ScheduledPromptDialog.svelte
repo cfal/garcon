@@ -161,6 +161,11 @@
 		void save();
 	}
 
+	function handleOpenChange(nextOpen: boolean): void {
+		if (nextOpen || suspended || form.saving) return;
+		onClose();
+	}
+
 	function handleCloseAutoFocus(event: Event): void {
 		// Catalog visits reopen the focus scope, but must not replace the original opener.
 		event.preventDefault();
@@ -171,10 +176,7 @@
 </script>
 
 <!-- Preserves the composer and picker drafts during catalog management. -->
-<Dialog.Root
-	open={open && !suspended}
-	onOpenChange={(value) => !value && !suspended && !form.saving && onClose()}
->
+<Dialog.Root open={open && !suspended} onOpenChange={handleOpenChange}>
 	<Dialog.Content
 		forceMount={open}
 		style={suspended ? 'display: none' : undefined}
