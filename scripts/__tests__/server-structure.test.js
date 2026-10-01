@@ -32,7 +32,7 @@ function imports(filename) {
 }
 
 describe('server ownership boundaries', () => {
-  test('keeps the server value-import graph acyclic', () => {
+  test('keeps the server static value-import graph acyclic', () => {
     const files = new Set(sources(server));
     const dependencies = new Map();
     for (const filename of files) {
