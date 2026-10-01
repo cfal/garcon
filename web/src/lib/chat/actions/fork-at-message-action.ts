@@ -9,8 +9,7 @@ interface ForkActionInput {
 export interface ForkAtMessageSelection {
 	ordinal: number;
 	transcriptViewId: string;
-	messageKey: string;
-	occurrence: number;
+	clientMessageId: string | null;
 }
 
 interface ForkAtMessageActionInput {
@@ -45,14 +44,13 @@ export function selectForkAtMessage(
 	transcriptViewId: string,
 	ordinal: number,
 ): ForkAtMessageSelection | null {
-	const selectedIndex = entries.findIndex((entry) => entry.ordinal === ordinal);
-	if (selectedIndex < 0 || !transcriptViewId) return null;
-	const messageKey = forkMessageKey(entries[selectedIndex]!.message);
-	const occurrence = entries
-		.slice(0, selectedIndex + 1)
-		.filter((entry) => forkMessageKey(entry.message) === messageKey)
-		.length;
-	return { ordinal, transcriptViewId, messageKey, occurrence };
+	const selected = entries.find((entry) => entry.ordinal === ordinal);
+	if (!selected || !transcriptViewId) return null;
+	const clientMessageId = forkClientMessageId(selected);
+	const unique = clientMessageId && entries.filter(
+		(entry) => forkClientMessageId(entry) === clientMessageId,
+	).length === 1;
+	return { ordinal, transcriptViewId, clientMessageId: unique ? clientMessageId : null };
 }
 
 export function remapForkAtMessage(
@@ -60,35 +58,15 @@ export function remapForkAtMessage(
 	transcriptViewId: string,
 	selection: ForkAtMessageSelection,
 ): ForkAtMessageSelection | null {
-	let occurrence = 0;
-	for (const entry of entries) {
-		if (forkMessageKey(entry.message) !== selection.messageKey) continue;
-		occurrence += 1;
-		if (occurrence === selection.occurrence) {
-			return {
-				ordinal: entry.ordinal,
-				transcriptViewId,
-				messageKey: selection.messageKey,
-				occurrence,
-			};
-		}
-	}
-	return null;
+	// Content and tool IDs cannot identify a row across replaced, bounded history windows.
+	if (!selection.clientMessageId || !transcriptViewId) return null;
+	const matches = entries.filter(
+		(entry) => forkClientMessageId(entry) === selection.clientMessageId,
+	);
+	if (matches.length !== 1) return null;
+	return { ...selection, ordinal: matches[0]!.ordinal, transcriptViewId };
 }
 
-function forkMessageKey(message: TranscriptMessage['message']): string {
-	const record = message as unknown as Record<string, unknown>;
-	const metadata = isRecord(record.metadata) ? record.metadata : null;
-	if (message.type === 'user-message' && typeof metadata?.clientMessageId === 'string') {
-		return `${message.type}:message:${metadata.clientMessageId}`;
-	}
-	if (typeof record.toolId === 'string') {
-		return `${message.type}:tool:${record.toolId}`;
-	}
-	const { timestamp: _timestamp, metadata: _metadata, ...identity } = record;
-	return `${message.type}:${JSON.stringify(identity)}`;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return value !== null && typeof value === 'object' && !Array.isArray(value);
+function forkClientMessageId({ message }: TranscriptMessage): string | null {
+	return message.type === 'user-message' ? message.metadata?.clientMessageId ?? null : null;
 }
