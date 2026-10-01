@@ -6,7 +6,7 @@
 	import Loader2 from '@lucide/svelte/icons/loader-2';
 	import X from '@lucide/svelte/icons/x';
 	import DirectoryBrowser from '$lib/components/project-paths/DirectoryBrowser.svelte';
-	import ProjectPinnedPathToggleButton from '$lib/components/chat/ProjectPinnedPathToggleButton.svelte';
+	import ProjectPinnedPathToggleButton from './ProjectPinnedPathToggleButton.svelte';
 	import { cn } from '$lib/utils/cn.js';
 	import * as m from '$lib/paraglide/messages.js';
 
