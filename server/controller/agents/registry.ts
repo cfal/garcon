@@ -70,6 +70,10 @@ import {
 
 const logger = createLogger('agents:registry');
 
+// Whether an agent can be steered. It is unknown while the agent's executor has not reported the
+// integration, as before a remote executor first connects after the controller starts.
+export type SteeringSupport = 'supported' | 'unsupported' | 'unknown';
+
 export interface AgentRegistryServiceContract {
   hasAgent(agentId: string, executorId?: string | null): boolean;
   assertExecutorReady(executorId?: string | null): void;
@@ -80,6 +84,7 @@ export interface AgentRegistryServiceContract {
   singleQueryRunsToolsWithoutPermission(agentId: string, executorId?: string | null): boolean;
   supportsForkAtMessage(agentId: string, executorId?: string | null): boolean;
   supportsForkWhileRunning(agentId: string, executorId?: string | null): boolean;
+  steeringSupport(agentId: string, executorId?: string | null): SteeringSupport;
   supportsUpdateProjectPath(agentId: string, executorId?: string | null): boolean;
   requiresNativePathForProjectPathUpdate(agentId: string, executorId?: string | null): boolean;
   supportsImages(agentId: string, executorId?: string | null): boolean;
@@ -307,6 +312,11 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   }
   supportsForkAtMessage(agentId: string, executorId?: string | null): boolean { return this.#directory.has(agentId, executorId); }
   supportsForkWhileRunning(agentId: string, executorId?: string | null): boolean { return this.#directory.has(agentId, executorId); }
+  steeringSupport(agentId: string, executorId?: string | null): SteeringSupport {
+    const integration = this.#directory.get(agentId, executorId);
+    if (!integration) return 'unknown';
+    return integration.steering ? 'supported' : 'unsupported';
+  }
   supportsUpdateProjectPath(agentId: string, executorId?: string | null): boolean { return this.#directory.get(agentId, executorId)?.descriptor.supportsProjectPathUpdate ?? false; }
   requiresNativePathForProjectPathUpdate(agentId: string, executorId?: string | null): boolean {
     return this.#directory.get(agentId, executorId)?.descriptor.requiresNativePathForProjectPathUpdate ?? false;

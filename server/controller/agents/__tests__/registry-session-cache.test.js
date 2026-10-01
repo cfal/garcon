@@ -89,6 +89,21 @@ describe('AgentRegistry session cache', () => {
     });
   }
 
+  it('reports steering support only for integrations the executor has reported', () => {
+    const known = { steerable: { steering: {} }, plain: { steering: null } };
+    const registry = createRegistry(undefined, undefined, {
+      has: (agentId) => agentId in known,
+      get: (agentId) => known[agentId] ?? null,
+      require: () => { throw new Error('unused'); },
+      list: () => [],
+    });
+
+    expect(registry.steeringSupport('steerable')).toBe('supported');
+    expect(registry.steeringSupport('plain')).toBe('unsupported');
+    expect(registry.steeringSupport('missing')).toBe('unknown');
+    expect(registry.steeringSupport('steerable', '22222222-2222-4222-8222-222222222222')).toBe('unknown');
+  });
+
   it('previews existing ledgers without resolving a provider or adopting history', async () => {
     const adoption = { ensure: mock(() => { throw new Error('Unexpected adoption'); }) };
     const registry = createRegistry(adoption);

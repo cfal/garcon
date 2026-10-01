@@ -562,6 +562,7 @@ function makeService(overrides = {}) {
     supportsFork: mock(() => true),
     supportsForkAtMessage: mock(() => true),
     supportsForkWhileRunning: mock(() => false),
+    steeringSupport: mock(() => 'supported'),
     supportsUpdateProjectPath: mock(() => true),
     requiresNativePathForProjectPathUpdate: mock((agentId) => agentId === 'pi'),
     isAgentSessionRunning: mock(() => false),
@@ -5695,6 +5696,70 @@ describe('ChatCommandService', () => {
       whenTurnUnavailable: 'queue',
     })).rejects.toMatchObject({ code: 'OPERATION_UNSUPPORTED' });
     expect(queue.enqueueAcceptedSteer).not.toHaveBeenCalled();
+  });
+
+  it('rejects a queue-mode steer for an idle agent that cannot be steered', async () => {
+    const { service, queue, agents } = makeService({
+      queue: { captureSteerTarget: mock(async () => null) },
+    });
+    agents.steeringSupport.mockImplementation(() => 'unsupported');
+
+    await expect(service.submitSteer({
+      chatId: SOURCE_CHAT_ID,
+      content: 'guidance for an idle chat',
+      clientRequestId: 'request-steer-idle-unsupported',
+      clientMessageId: 'message-steer-idle-unsupported',
+      whenTurnUnavailable: 'queue',
+    })).rejects.toMatchObject({ code: 'OPERATION_UNSUPPORTED', status: 422 });
+    expect(queue.enqueueAcceptedSteer).not.toHaveBeenCalled();
+  });
+
+  it('keeps a queued message as a turn for an idle agent that cannot be steered', async () => {
+    const queued = storedQueue([queueEntry('entry-head', 'queued guidance', 'queued', 2)]);
+    const { service, queue, agents } = makeService({
+      queue: {
+        captureSteerTarget: mock(async () => null),
+        readChatExecutionControl: mock(async () => queued),
+      },
+    });
+    agents.steeringSupport.mockImplementation(() => 'unsupported');
+
+    await expect(service.submitQueueEntrySteer({
+      chatId: SOURCE_CHAT_ID,
+      clientRequestId: 'request-queue-steer-idle-unsupported',
+      entryId: 'entry-head',
+      expectedRevision: 2,
+      expectedReorderRevision: 0,
+    })).rejects.toMatchObject({ code: 'OPERATION_UNSUPPORTED', deliveryOutcome: 'not-sent' });
+    expect(queue.markAcceptedQueueEntrySteer).not.toHaveBeenCalled();
+  });
+
+  it('lets steers wait for an agent its executor has not reported yet', async () => {
+    const queued = storedQueue([queueEntry('entry-head', 'queued guidance', 'queued', 2)]);
+    const { service, queue, agents } = makeService({
+      queue: {
+        captureSteerTarget: mock(async () => null),
+        readChatExecutionControl: mock(async () => queued),
+      },
+    });
+    agents.steeringSupport.mockImplementation(() => 'unknown');
+
+    await expect(service.submitSteer({
+      chatId: SOURCE_CHAT_ID,
+      content: 'guidance before the executor reports',
+      clientRequestId: 'request-steer-unreported-agent',
+      clientMessageId: 'message-steer-unreported-agent',
+      whenTurnUnavailable: 'queue',
+    })).resolves.toMatchObject({ delivery: 'queued' });
+    await expect(service.submitQueueEntrySteer({
+      chatId: SOURCE_CHAT_ID,
+      clientRequestId: 'request-queue-steer-unreported-agent',
+      entryId: 'entry-head',
+      expectedRevision: 2,
+      expectedReorderRevision: 0,
+    })).resolves.toMatchObject({ delivery: 'queued' });
+    expect(queue.enqueueAcceptedSteer).toHaveBeenCalledTimes(1);
+    expect(queue.markAcceptedQueueEntrySteer).toHaveBeenCalledTimes(1);
   });
 
   it('keeps a queued message as a steer when the turn cannot take it and replays that', async () => {

@@ -14,6 +14,7 @@ import {
   DomainError,
   STEER_NOT_DELIVERED_MESSAGE,
   SteerDeliveryError,
+  steeringUnsupportedError,
 } from '../../common/domain-error.js';
 import { QueueEntrySteerError } from '../chat-execution/queue-steer-error.js';
 import { toClientChatExecutionControlState } from '../chat-execution/control-state.ts';
@@ -410,8 +411,11 @@ export class SteerCommands {
     observed: CapturedSteerTarget | null,
   ): Promise<CapturedSteerTarget | null> {
     const control = await this.deps.queue.readChatExecutionControl(chatId);
-    if (control.entries.some((entry) => entry.kind === 'steer')) return null;
-    return this.#queueableTarget(chatId, observed);
+    if (!control.entries.some((entry) => entry.kind === 'steer')) {
+      return this.#queueableTarget(chatId, observed);
+    }
+    this.#assertSteerable(chatId);
+    return null;
   }
 
   // A steer that can wait in the queue waits when its target cannot be captured, unless the
@@ -420,11 +424,23 @@ export class SteerCommands {
     chatId: string,
     observed: CapturedSteerTarget | null,
   ): Promise<CapturedSteerTarget | null> {
+    this.#assertSteerable(chatId);
     try {
       return await this.#currentTarget(chatId, observed);
     } catch (error) {
       if (error instanceof DomainError && error.code === 'OPERATION_UNSUPPORTED') throw error;
       return null;
+    }
+  }
+
+  // Capture reports an agent that cannot be steered only while a turn runs, so a steer that
+  // would wait for one is checked against the agent itself. An agent its executor has not
+  // reported yet may still be steerable, so its steer waits like any other, and runs as the
+  // next turn if the agent turns out to lack steering.
+  #assertSteerable(chatId: string): void {
+    const chat = this.deps.chats.getChat(chatId);
+    if (chat && this.deps.agents.steeringSupport(chat.agentId, chat.executorId) === 'unsupported') {
+      throw steeringUnsupportedError();
     }
   }
 

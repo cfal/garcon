@@ -418,6 +418,7 @@ function createRouteAgent(sessionOverrides = {}) {
     supportsFork: mock(() => true),
     supportsForkAtMessage: mock(() => true),
     supportsForkWhileRunning: mock(() => false),
+    steeringSupport: mock(() => 'supported'),
     supportsUpdateProjectPath: mock(() => true),
     supportsImages: mock(() => true),
     isAgentSessionRunning: mock(() => false),

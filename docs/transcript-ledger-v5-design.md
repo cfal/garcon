@@ -1502,8 +1502,11 @@ The guarantee is durable before provider dispatch, not durable at send:
   steering input, and is appended then like any steer. With no turn running,
   the drain dequeues it as the next turn's ordinary input. A queued message's
   Steer action keeps the message as a pending steer when the turn cannot take
-  it yet. Like the rest of the queue, pending steers are not rows, and restart
-  loses them.
+  it yet. An agent known to lack steering refuses a pending steer. While the
+  chat's executor has not reported the agent, as before a remote executor
+  first connects, the steer waits instead, and it runs as the next turn if the
+  agent turns out to lack steering. Like the rest of the queue, pending steers
+  are not rows, and restart loses them.
 - A **chat-ID discovery control input** is server-originated rather than a user
   submission. It creates no `user-input` row and does not participate in resend,
   queueing, or command idempotency. Core captures a steering target once and

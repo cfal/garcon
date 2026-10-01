@@ -106,6 +106,7 @@ export type AgentRegistryDep = Pick<
   | 'supportsFork'
   | 'supportsForkAtMessage'
   | 'supportsForkWhileRunning'
+  | 'steeringSupport'
   | 'supportsUpdateProjectPath'
   | 'requiresNativePathForProjectPathUpdate'
   | 'isAgentSessionRunning'

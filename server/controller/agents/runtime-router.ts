@@ -24,7 +24,11 @@ import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-reso
 import { assertSameApiProviderBoundary } from '../api-providers/endpoint-resolver.js';
 import { getMaxSessions } from '../config.js';
 import { createLogger } from '../../common/log.js';
-import { DomainError, transcriptUnavailableMessage } from '../../common/domain-error.js';
+import {
+  DomainError,
+  steeringUnsupportedError,
+  transcriptUnavailableMessage,
+} from '../../common/domain-error.js';
 import { ownershipTransferPendingError } from './ownership-transfer-fence.js';
 import type { AgentDirectory } from './directory.js';
 import type { AgentEventBus, TurnEventMetadata } from './event-bus.js';
@@ -985,10 +989,6 @@ function attachments(images: RunAgentTurnOptions['images'] = []) {
 
 function supportedValue<T extends string>(values: readonly string[], value: T, fallback: T): T {
   return values.includes(value) ? value : fallback;
-}
-
-function steeringUnsupportedError(): DomainError {
-  return new DomainError('OPERATION_UNSUPPORTED', 'This agent does not support steering', 422);
 }
 
 function runKey(chatId: string, runId: string): string {
