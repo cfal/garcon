@@ -42,6 +42,13 @@ before a legitimate peer's first handshake message can still close its socket,
 and a peer that knows sixteen executor IDs can fill the controller's 64
 sockets.
 
+Executor configuration grants become active only after a confirmed durable write.
+If a configuration write is renamed but its directory sync fails, the affected
+executor is taken offline, its CLI authority is revoked, and further executor
+configuration mutations are blocked until controller restart. The candidate
+remains on disk and enumerable for reference accounting; it is not authorization.
+Unchanged executors and Local remain available.
+
 One channel describes the current implementation, not a final topology decision.
 Channel splitting remains separate work. Correctness and resource bounds must
 stand independently; do not add scheduling, retry, or lifecycle machinery solely

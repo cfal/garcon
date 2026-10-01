@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { ExecutorConfigStore } from '../config-store.js';
 import { createExecutorSecret, executorConnectionUrl } from '../../../remote/transport/connection-url.js';
 import { CorruptStateFileError } from '../../../common/json-file-store.js';
+import { withFailingDirectorySync } from '../../../common/__tests__/atomic-write-failure.js';
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
@@ -18,6 +19,45 @@ async function fixture() {
   await store.initialize();
   return { root, store };
 }
+
+test.each(['grant', 'revoke', 'enable', 'connector', 'remove'] as const)(
+  'uncertain %s writes fence the affected executor and all further configuration mutations', async operation => {
+    const { root, store } = await fixture();
+    const executor = await store.create({ direction: 'executor-connects', label: 'Affected', allowControllerCli: operation === 'revoke' });
+    const healthy = await store.create({ direction: 'executor-connects', label: 'Healthy' });
+    if (operation === 'enable') await store.update(executor.id, { enabled: false });
+    const update = () => {
+      switch (operation) {
+        case 'grant': return store.update(executor.id, { allowControllerCli: true, allowExecutorManagement: true });
+        case 'revoke': return store.update(executor.id, { allowControllerCli: false });
+        case 'enable': return store.update(executor.id, { enabled: true });
+        case 'connector': return store.update(executor.id, { connection: { direction: 'executor-connects', noTls: true } });
+        case 'remove': return store.remove(executor.id);
+      }
+    };
+    await expect(withFailingDirectorySync(root, update)).rejects.toMatchObject({ renamed: true });
+    const persisted = await readFile(join(root, 'executors.json'), 'utf8');
+    expect(store.isDurable(executor.id)).toBe(false);
+    expect(() => store.require(executor.id)).toThrow('durability is unknown');
+    expect(store.require(healthy.id)).toEqual(healthy);
+    await expect(store.update(healthy.id, { label: 'Changed' })).rejects.toMatchObject({ code: 'EXECUTOR_UNAVAILABLE' });
+    await expect(store.create({ direction: 'executor-connects', label: 'New' })).rejects.toMatchObject({ code: 'EXECUTOR_UNAVAILABLE' });
+    expect(await readFile(join(root, 'executors.json'), 'utf8')).toBe(persisted);
+    const restarted = new ExecutorConfigStore(root);
+    await restarted.initialize();
+    expect(restarted.isDurable(executor.id)).toBe(true);
+    expect(restarted.list()).toEqual(JSON.parse(persisted).executors);
+  },
+);
+
+test('an uncertain creation remains enumerable but cannot disclose a connection or publish authority', async () => {
+  const { root, store } = await fixture();
+  await expect(withFailingDirectorySync(root, () => store.create({ direction: 'executor-connects', label: 'Candidate', allowControllerCli: true })))
+    .rejects.toMatchObject({ renamed: true });
+  const [candidate] = store.list();
+  expect(store.isDurable(candidate.id)).toBe(false);
+  expect(() => store.connection(candidate.id, 'https://controller.test')).toThrow('durability is unknown');
+});
 
 test('CLI access defaults off, persists separately, and older stored executors remain denied', async () => {
   const { root, store } = await fixture();
