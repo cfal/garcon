@@ -5908,6 +5908,45 @@ describe('ChatCommandService', () => {
     }));
   });
 
+  it('does not carry a steer to a turn that replaced the one it saw before the lock', async () => {
+    const lock = new KeyedPromiseLock();
+    const entered = deferred();
+    const release = deferred();
+    const startingTarget = { attempt: {}, providerTarget: null, identity: { turnId: 'turn-first' } };
+    const replacingTarget = { attempt: {}, providerTarget: {}, identity: { turnId: 'turn-second' } };
+    let currentTarget = startingTarget;
+    const held = lock.runExclusive(`chat:${SOURCE_CHAT_ID}`, async () => {
+      entered.resolve();
+      await release.promise;
+    });
+    await entered.promise;
+    const { service, queue } = makeService({
+      chatMutationLock: lock,
+      queue: { captureSteerTarget: mock(() => currentTarget) },
+    });
+
+    const strict = service.submitSteer({
+      chatId: SOURCE_CHAT_ID,
+      content: 'steer the first turn',
+      clientRequestId: 'request-steer-replaced-turn',
+      clientMessageId: 'message-steer-replaced-turn',
+    });
+    const waiting = service.submitSteer({
+      chatId: SOURCE_CHAT_ID,
+      content: 'steer the first turn or wait',
+      clientRequestId: 'request-steer-replaced-turn-queued',
+      clientMessageId: 'message-steer-replaced-turn-queued',
+      whenTurnUnavailable: 'queue',
+    });
+    currentTarget = replacingTarget;
+    release.resolve();
+
+    await expect(strict).rejects.toMatchObject({ code: 'STEER_TURN_CHANGED', status: 409 });
+    await expect(waiting).resolves.toMatchObject({ delivery: 'queued' });
+    await held;
+    expect(queue.deliverAcceptedSteer).not.toHaveBeenCalled();
+  });
+
   it('reports a failed steering target capture as a steer that was not delivered', async () => {
     const { service, queue, ledger } = makeService({
       queue: { captureSteerTarget: mock(async () => { throw new Error('Executor link closed'); }) },

@@ -15,6 +15,7 @@ import {
   STEER_NOT_DELIVERED_MESSAGE,
   SteerDeliveryError,
   steeringUnsupportedError,
+  steerTurnChangedError,
 } from '../../common/domain-error.js';
 import { QueueEntrySteerError } from '../chat-execution/queue-steer-error.js';
 import { toClientChatExecutionControlState } from '../chat-execution/control-state.ts';
@@ -482,17 +483,23 @@ export class SteerCommands {
 
   // A steer can wait for the chat lock longer than its turn takes to become steerable,
   // for example behind a new chat's start, so a capture without a provider target is
-  // repeated. Capture precedes admission, so a failure means nothing was sent.
+  // repeated. The steer stays with the turn it saw: a turn that replaced it meanwhile is a
+  // changed turn. Capture precedes admission, so a failure means nothing was sent.
   async #currentTarget(
     chatId: string,
     observed: CapturedSteerTarget | null,
   ): Promise<CapturedSteerTarget | null> {
     if (observed?.providerTarget) return observed;
+    let current: CapturedSteerTarget | null;
     try {
-      return await this.deps.queue.captureSteerTarget(chatId);
+      current = await this.deps.queue.captureSteerTarget(chatId);
     } catch (error) {
       throw error instanceof DomainError ? error : new SteerDeliveryError(error, 'not-sent');
     }
+    if (observed && current && current.identity.turnId !== observed.identity.turnId) {
+      throw steerTurnChangedError();
+    }
+    return current;
   }
 
   async #duplicateResponse(
