@@ -4,6 +4,68 @@ import type { PullRequestListResult } from '../../../server/runtime/gh/gh-types.
 import type { GitExecutorScope } from '../../../common/git-execution.js';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 
+test('keeps the mobile shell full height across non-keyboard viewport discrepancies and resume', async () => {
+  await withChromiumFixture('mobile-viewport-resume', async (fixture) => {
+    const { page, context, integration } = fixture;
+    await page.setViewportSize({ width: 390, height: 800 });
+    await context.addInitScript(() => {
+      Object.defineProperties(window.visualViewport!, {
+        height: { configurable: true, value: 756 },
+        offsetTop: { configurable: true, value: 0 },
+      });
+    });
+    await page.goto(integration.garcon.baseUrl, { waitUntil: 'domcontentloaded' });
+    const shell = page.locator('.mobile-shell');
+    const navigation = page.getByRole('navigation', { name: 'Workspace navigation' });
+    const menu = page.locator('[data-mobile-current-chat-menu]').getByRole('button');
+
+    async function assertFullHeight() {
+      await navigation.waitFor({ state: 'visible' });
+      await page.waitForFunction(() =>
+        document.querySelector('.mobile-shell')?.getBoundingClientRect().height === 800,
+      );
+      const bounds = await shell.boundingBox();
+      expect(bounds!.y).toBe(0);
+      expect(bounds!.height).toBe(800);
+      const tabs = await navigation.boundingBox();
+      expect(tabs!.y + tabs!.height).toBe(800);
+      const headerControl = await menu.boundingBox();
+      expect(headerControl!.y).toBeGreaterThanOrEqual(0);
+      expect(headerControl!.y + headerControl!.height).toBeLessThan(tabs!.y);
+      await menu.click();
+      await page.getByRole('menuitem', { name: 'Open Chat Map', exact: true }).click();
+      await page.locator('[data-chat-map-panel]').waitFor({ state: 'visible' });
+      await page.getByRole('button', { name: 'Close view', exact: true }).click();
+      await navigation.waitFor({ state: 'visible' });
+    }
+
+    await assertFullHeight();
+    await page.evaluate(() => {
+      Object.defineProperties(window.visualViewport!, {
+        height: { configurable: true, value: 500 },
+        offsetTop: { configurable: true, value: 120 },
+      });
+      window.visualViewport!.dispatchEvent(new Event('resize'));
+    });
+    await navigation.waitFor({ state: 'detached' });
+    const keyboardBounds = await shell.boundingBox();
+    expect(keyboardBounds!.y).toBe(120);
+    expect(keyboardBounds!.height).toBe(500);
+
+    await page.evaluate(() => {
+      Object.defineProperties(window.visualViewport!, {
+        height: { configurable: true, value: 756 },
+        offsetTop: { configurable: true, value: 0 },
+      });
+      window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+    });
+    await assertFullHeight();
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await assertFullHeight();
+    fixture.assertNoBrowserErrors();
+  });
+}, 120_000);
+
 test('keeps primary mobile tabs compact and opens secondary views from the chat menu', async () => {
   await withChromiumFixture('mobile-workspace-navigation', async (fixture, markPhase) => {
     const { page, integration } = fixture;

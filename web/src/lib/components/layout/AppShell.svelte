@@ -365,6 +365,12 @@
 		const vv = window.visualViewport;
 		let frameId: number | null = null;
 
+		function clearViewportOverrides() {
+			document.documentElement.style.removeProperty('--app-height');
+			document.documentElement.style.removeProperty('--app-viewport-offset-top');
+			document.documentElement.style.removeProperty('--app-viewport-center-y');
+		}
+
 		function applyViewportMetrics() {
 			frameId = null;
 			const metrics = computeMobileViewportMetrics({
@@ -376,10 +382,13 @@
 			});
 			mobileAppHeight = metrics.appHeight;
 			mobileKeyboardVisible = metrics.keyboardVisible;
+			appShell.keyboardHeight = metrics.keyboardHeight;
 			if (!metrics.keyboardVisible) {
 				mobileViewportBaselineHeight = metrics.appHeight;
+				// Leaves safe-area geometry to CSS unless the keyboard occludes the viewport.
+				clearViewportOverrides();
+				return;
 			}
-			appShell.keyboardHeight = metrics.keyboardHeight;
 			document.documentElement.style.setProperty('--app-height', `${metrics.appHeight}px`);
 			document.documentElement.style.setProperty(
 				'--app-viewport-offset-top',
@@ -396,13 +405,25 @@
 			frameId = requestAnimationFrame(applyViewportMetrics);
 		}
 
+		function handleVisibilityChange() {
+			if (document.visibilityState === 'visible') scheduleViewportMetrics();
+		}
+
 		scheduleViewportMetrics();
 		vv.addEventListener('resize', scheduleViewportMetrics);
 		vv.addEventListener('scroll', scheduleViewportMetrics);
+		window.addEventListener('resize', scheduleViewportMetrics);
+		window.addEventListener('pageshow', scheduleViewportMetrics);
+		document.addEventListener('visibilitychange', handleVisibilityChange);
 		return () => {
 			if (frameId !== null) cancelAnimationFrame(frameId);
 			vv.removeEventListener('resize', scheduleViewportMetrics);
 			vv.removeEventListener('scroll', scheduleViewportMetrics);
+			window.removeEventListener('resize', scheduleViewportMetrics);
+			window.removeEventListener('pageshow', scheduleViewportMetrics);
+			document.removeEventListener('visibilitychange', handleVisibilityChange);
+			clearViewportOverrides();
+			appShell.keyboardHeight = 0;
 		};
 	});
 
