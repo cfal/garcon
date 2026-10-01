@@ -8,7 +8,7 @@ import {
   type ScheduledPrompt,
 } from '../../../common/scheduled-prompts.js';
 import { hasNodeErrorCode } from '../../common/errors.js';
-import { syncDirectory, writeJsonFileAtomic } from '../../common/json-file-store.js';
+import { AtomicJsonWriteError, syncDirectory, writeJsonFileAtomic } from '../../common/json-file-store.js';
 import { parseStoredJson } from '../../common/stored-json.js';
 import { effectiveExecutorId } from '../../../common/executors.js';
 import type { RetainExecutorReferences } from '../executors/reference-writes.js';
@@ -267,6 +267,7 @@ export class ScheduledPromptStore {
   readonly #filePath: string;
   readonly #lock = new KeyedPromiseLock();
   #file: ScheduledPromptsFile = emptyFile();
+  #durabilityUnknown = false;
 
   readonly #providerReferences: ApiProviderDurableReferences;
 
@@ -303,6 +304,7 @@ export class ScheduledPromptStore {
       );
     }
     this.#file = loaded.file;
+    this.#durabilityUnknown = false;
   }
 
   get revision(): number {
@@ -469,6 +471,7 @@ export class ScheduledPromptStore {
 
   async #mutate<T>(expectedRevision: number, change: (draft: ScheduledPromptsFile) => T): Promise<T> {
     return this.#lock.runExclusive('scheduled-prompts', async () => {
+      this.#assertWritable();
       if (expectedRevision !== this.#file.revision) {
         throw new ScheduledPromptDomainError(
           'SCHEDULED_PROMPT_REVISION_CONFLICT',
@@ -492,6 +495,7 @@ export class ScheduledPromptStore {
     inheritedProviders: readonly (string | null | undefined)[] = [],
   ): Promise<T> {
     return this.#lock.runExclusive('scheduled-prompts', async () => {
+      this.#assertWritable();
       const draft = structuredClone(this.#file);
       const result = change(draft);
       if (result === false) return structuredClone(unchanged);
@@ -517,7 +521,22 @@ export class ScheduledPromptStore {
   }
 
   async #write(file: ScheduledPromptsFile): Promise<void> {
-    await writeJsonFileAtomic(this.#filePath, file, { mode: 0o600 });
+    try {
+      await writeJsonFileAtomic(this.#filePath, file, { mode: 0o600 });
+    } catch (error) {
+      if (error instanceof AtomicJsonWriteError && error.renamed) this.#durabilityUnknown = true;
+      throw error;
+    }
+  }
+
+  #assertWritable(): void {
+    if (this.#durabilityUnknown) {
+      throw new ScheduledPromptDomainError(
+        'SCHEDULED_PROMPT_STORAGE_UNAVAILABLE',
+        'Scheduled prompt durability is unknown. Restart the controller before changing or dispatching schedules.',
+        503,
+      );
+    }
   }
 
   #notFound(): ScheduledPromptDomainError {
