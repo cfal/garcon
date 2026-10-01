@@ -575,10 +575,12 @@ export class AcceptedInputHandler {
           signal: reservation.executionAdmission.signal,
           assertAdmissionActive: () => this.#checkpoint(reservation),
         })));
-      // A preparation, such as a native fork or a carryover compaction, may outlast
-      // the operation's interactive deadline, so the admission check after it
-      // starts a deadline of its own.
-      const admissionDeadline = input.preparation && input.admissionDeadline !== null
+      // A fork run's native fork and a handoff's carryover compaction run outside
+      // the interactive budget and may use it up, so the admission check after
+      // them starts a deadline of its own. A new chat's preparation is quick, so
+      // its start keeps one deadline throughout.
+      const exempt = input.preparation?.operation === 'fork-run' || input.preparation?.operation === 'agent-handoff';
+      const admissionDeadline = exempt && input.admissionDeadline !== null
         ? interactiveDeadline()
         : input.admissionDeadline;
       await this.#checkpointAfter(

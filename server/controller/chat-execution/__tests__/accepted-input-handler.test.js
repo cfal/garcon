@@ -329,49 +329,57 @@ describe('AcceptedInputHandler', () => {
     expect(m.admitInput).not.toHaveBeenCalled();
   });
 
-  test('starts a new interactive deadline for the admission check after a preparation', async () => {
+  for (const operation of ['fork-run', 'agent-handoff']) {
+    test(`starts a new interactive deadline for the admission check after a ${operation} preparation`, async () => {
+      let now = 1_000;
+      const clock = spyOn(performance, 'now').mockImplementation(() => now);
+      try {
+        const { handler, m } = scaffold();
+
+        await handler.schedule({
+          command: command(),
+          content: 'prepared work',
+          options: { clientRequestId: 'request-1', clientMessageId: 'message-1', turnId: 'turn-1' },
+          settlement: settlement(),
+          admissionDeadline: now + INTERACTIVE_EXECUTOR_WAIT_MS,
+          preparation: {
+            operation,
+            // Stands in for a native fork or carryover compaction that outlasts the operation's deadline.
+            prepare: mock(async () => { now = 90_000; }),
+            compensate: mock(async () => undefined),
+          },
+        });
+
+        expect(m.assertProjectAvailable).toHaveBeenCalledWith('chat-1', 90_000 + INTERACTIVE_EXECUTOR_WAIT_MS);
+      } finally {
+        clock.mockRestore();
+      }
+    });
+  }
+
+  test('checks admission within the given deadline after a new chat preparation, without one, and for background input', async () => {
     let now = 1_000;
     const clock = spyOn(performance, 'now').mockImplementation(() => now);
     try {
       const { handler, m } = scaffold();
-
-      await handler.schedule({
+      const input = {
         command: command(),
-        content: 'forked work',
+        content: 'new work',
         options: { clientRequestId: 'request-1', clientMessageId: 'message-1', turnId: 'turn-1' },
         settlement: settlement(),
-        admissionDeadline: now + INTERACTIVE_EXECUTOR_WAIT_MS,
-        preparation: {
-          operation: 'fork-run',
-          // Stands in for a native fork that outlasts the operation's deadline.
-          prepare: mock(async () => { now = 90_000; }),
-          compensate: mock(async () => undefined),
-        },
+      };
+      const preparation = (operation) => ({
+        operation, prepare: mock(async () => { now += 1_000; }), compensate: mock(async () => undefined),
       });
 
-      expect(m.assertProjectAvailable).toHaveBeenCalledWith('chat-1', 90_000 + INTERACTIVE_EXECUTOR_WAIT_MS);
+      await handler.schedule({ ...input, admissionDeadline: 21_000, preparation: preparation('chat-start') });
+      await handler.schedule({ ...input, admissionDeadline: 21_000 });
+      await handler.schedule({ ...input, admissionDeadline: null, preparation: preparation('fork-run') });
+
+      expect(m.assertProjectAvailable.mock.calls).toEqual([['chat-1', 21_000], ['chat-1', 21_000], ['chat-1', null]]);
     } finally {
       clock.mockRestore();
     }
-  });
-
-  test('checks admission within the given deadline without a preparation, and without one for background input', async () => {
-    const { handler, m } = scaffold();
-    const input = {
-      command: command(),
-      content: 'new work',
-      options: { clientRequestId: 'request-1', clientMessageId: 'message-1', turnId: 'turn-1' },
-      settlement: settlement(),
-    };
-
-    await handler.schedule({ ...input, admissionDeadline: 21_000 });
-    await handler.schedule({
-      ...input,
-      admissionDeadline: null,
-      preparation: { operation: 'fork-run', prepare: mock(async () => undefined), compensate: mock(async () => undefined) },
-    });
-
-    expect(m.assertProjectAvailable.mock.calls).toEqual([['chat-1', 21_000], ['chat-1', null]]);
   });
 
   test('compensates preparation when the project is unavailable before transcript admission', async () => {

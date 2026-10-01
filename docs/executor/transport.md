@@ -343,8 +343,8 @@ and, where the route passes one, the request's signal: forks and fork runs'
 native forks, project-path updates, Reload, handoff carryover compaction, and
 adopting a chat created before the transcript ledger. A new chat adopts without
 calling its executor. Because such a step can use up the operation's deadline,
-a turn's admission check after a preparation, such as a fork run's native fork
-or a handoff's carryover compaction, starts a deadline of its own.
+a turn's admission check after a fork run's native fork or a handoff's carryover
+compaction starts a deadline of its own.
 
 Each method has a continuity class, `rpcContinuity` in `rpc-protocol.ts`:
 
