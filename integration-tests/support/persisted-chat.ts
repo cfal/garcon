@@ -1,7 +1,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { IntegrationDirectories, IntegrationFixture } from './integration-fixture.js';
-import type { ChatRegistryEntry, ChatRegistrySnapshot } from '../../server/controller/chats/store.js';
+import type { ChatRegistryEntry, ChatRegistrySnapshot } from '../../server/controller/chats/registry-contracts.js';
 
 export async function restartWithSeededChat(
   fixture: IntegrationFixture,

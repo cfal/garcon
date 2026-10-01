@@ -29,14 +29,7 @@ import type { AgentName } from '../agents/session-types.js';
 import { isExecutorId } from '../../../common/executors.js';
 import { createLogger } from '../../common/log.js';
 import { isCarryOverSegmentId } from './carryover-segment-types.js';
-import {
-  CHAT_REGISTRY_VERSION,
-  type CarryOverHandoffTarget,
-  type CarryOverMigrationQuarantine,
-  type CarryOverSegmentRef,
-  type ChatRegistryEntry,
-  type ChatRegistrySnapshot,
-} from './store.js';
+import { CHAT_REGISTRY_VERSION, type CarryOverHandoffTarget, type CarryOverMigrationQuarantine, type CarryOverSegmentRef, type ChatRegistryEntry, type ChatRegistrySnapshot } from './registry-contracts.js';
 
 const logger = createLogger('chats:store');
 

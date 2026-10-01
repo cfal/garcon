@@ -3,13 +3,50 @@ import { isPermissionMode, isThinkingMode } from '@garcon/common/chat-modes';
 import { parseExecutorId } from '../../../common/executors.js';
 import type { AgentChatReference } from '@garcon/server-agent-interface';
 import type { ResolvedAgentHandoffTarget } from '../agents/agent-handoff-types.js';
-import {
-  AGENT_OWNERSHIP_JOURNAL_VERSION,
-  type AgentHandoffIntent,
-  type AgentOwnershipJournalFileV5,
-  type DeleteIntentV2,
-} from './agent-ownership-journal.js';
+import type { TranscriptWatermark } from '../ledger/contracts.js';
 
+export const AGENT_OWNERSHIP_JOURNAL_VERSION = 5 as const;
+
+export interface AgentHandoffIntent {
+  readonly version: 5;
+  readonly operationId: string;
+  readonly clientRequestId: string;
+  readonly submittedTargetHash: string;
+  readonly kind: 'handoff';
+  readonly chatId: string;
+  readonly phase: 'commit-decided' | 'registry-committed';
+  readonly source: {
+    readonly executorId?: string | null;
+    readonly agentId: string;
+    readonly agentOwnershipEpoch: string;
+  };
+  readonly target: {
+    readonly execution: ResolvedAgentHandoffTarget;
+    readonly agentOwnershipEpoch: string;
+  };
+  readonly watermark: TranscriptWatermark;
+  readonly createdAt: string;
+}
+
+export interface DeleteIntentV2 {
+  readonly version: 2;
+  readonly operationId: string;
+  readonly kind: 'delete';
+  readonly chatId: string;
+  readonly phase: 'prepared' | 'registry-removed';
+  readonly sourceEpoch: string | null;
+  readonly releaseReferences: readonly (AgentChatReference & { readonly executorId?: string | null })[];
+  readonly createdAt: string;
+}
+
+export interface AgentOwnershipJournalFileV5 {
+  readonly version: typeof AGENT_OWNERSHIP_JOURNAL_VERSION;
+  readonly ownershipIntents: readonly (AgentHandoffIntent | DeleteIntentV2)[];
+}
+
+export function emptyOwnershipJournalV5(): AgentOwnershipJournalFileV5 {
+  return { version: AGENT_OWNERSHIP_JOURNAL_VERSION, ownershipIntents: [] };
+}
 // The journal is rewritten on mutation, not on version bumps, so a workspace that never
 // handed off or deleted a chat keeps whatever version it was created with. An empty one
 // holds nothing a format change could have reshaped; anything else fails closed below.

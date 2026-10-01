@@ -6,11 +6,7 @@ import { parseNativeSeedReceipt } from '../../../common/transcript-seed.js';
 import { isRecord } from '../../../common/json.js';
 import { parseStoredJson } from '../../common/stored-json.js';
 import type { AgentChatReference } from '@garcon/server-agent-interface';
-import {
-  emptyOwnershipJournalV5,
-  type AgentOwnershipJournalFileV5,
-  type DeleteIntentV2,
-} from './agent-ownership-journal.js';
+import { emptyOwnershipJournalV5, type AgentOwnershipJournalFileV5, type DeleteIntentV2 } from './agent-ownership-journal-format.js';
 import type { CarryOverTranscriptStore } from './carryover-transcript-store.js';
 import { decodeCarryOverPage } from './carryover-page-codec.js';
 import {
@@ -18,7 +14,7 @@ import {
   type CarryOverNode,
   type MaterializedCarryOverNode,
 } from './legacy-carryover-node-types.js';
-import type { CarryOverSegmentRef } from './store.js';
+import type { CarryOverSegmentRef } from './registry-contracts.js';
 
 export interface LegacyCarryOverSegment {
   readonly agentId: string;

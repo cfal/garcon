@@ -11,7 +11,7 @@ import {
 import { isRecord } from '../../../common/json.js';
 import { syncDirectory, writeJsonFileAtomic } from '../../common/json-file-store.js';
 import { parseStoredJson } from '../../common/stored-json.js';
-import type { AgentOwnershipJournalFileV5 } from './agent-ownership-journal.js';
+import type { AgentOwnershipJournalFileV5 } from './agent-ownership-journal-format.js';
 import { assertMigrationCapacity } from './carryover-migration-budget.js';
 import { CarryOverTranscriptStore } from './carryover-transcript-store.js';
 import { readChatRegistryVersion, readLegacyChatRegistryV3 } from './legacy-chat-registry-v3.js';
@@ -25,7 +25,8 @@ import {
   migrateV4Receipt,
   parseLegacyCarryOverFile,
 } from './legacy-carryover-import.js';
-import { parseCarryOverSegmentRefs, type CarryOverSegmentRef } from './store.js';
+import { parseCarryOverSegmentRefs } from './store.js';
+import { type CarryOverSegmentRef } from './registry-contracts.js';
 import {
   LEGACY_CARRYOVER_FILE,
   MIGRATION_BACKUP_DIR,

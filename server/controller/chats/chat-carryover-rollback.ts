@@ -22,7 +22,7 @@ import {
   type CarryOverMigrationMarker,
 } from './carryover-migration-files.js';
 import { readChatRegistryVersion } from './legacy-chat-registry-v3.js';
-import { CHAT_REGISTRY_VERSION } from './store.js';
+import { CHAT_REGISTRY_VERSION } from './registry-contracts.js';
 
 export async function rollbackLegacyCarryOverMigration(
   workspaceDir: string,
