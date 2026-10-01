@@ -291,6 +291,29 @@ describe('GitWorkbenchStore', () => {
 	});
 
 	describe('snapshot loading', () => {
+		it('keeps the newest of three refreshes busy after obsolete requests complete', async () => {
+			await wb.setTarget(makeTarget());
+			const requests = Array.from({ length: 3 }, () => deferred<GitWorkbenchSnapshotResponse>());
+			for (const request of requests) mockedApi.getGitWorkbenchSnapshot.mockReturnValueOnce(request.promise);
+			const refreshes = requests.map(() => wb.refresh({ reason: 'manual' }));
+			expect(mockedApi.getGitWorkbenchSnapshot).toHaveBeenCalledTimes(4);
+			requests[1].resolve(makeWorkbenchSnapshot({ workbenchFingerprint: 'obsolete-2' }));
+			await refreshes[1];
+			requests[0].resolve(makeWorkbenchSnapshot({ workbenchFingerprint: 'obsolete-1' }));
+			await refreshes[0];
+
+			await wb.checkFreshness(makeTarget());
+			expect(mockedApi.getGitWorkingTreeFingerprint).not.toHaveBeenCalled();
+			expect(wb.loadedWorkbenchFingerprint).toBe('v1:baseline');
+			expect(wb.files.isLoadingTree).toBe(true);
+
+			requests[2].resolve(makeWorkbenchSnapshot({ workbenchFingerprint: 'latest' }));
+			await refreshes[2];
+			expect(wb.loadedWorkbenchFingerprint).toBe('latest');
+			await wb.checkFreshness(makeTarget());
+			expect(mockedApi.getGitWorkingTreeFingerprint).toHaveBeenCalledTimes(1);
+		});
+
 		it('cancels a scheduled refresh when the workbench resets', async () => {
 			await wb.setTarget(makeTarget('/project'));
 			mockedApi.getGitWorkbenchSnapshot.mockClear();
@@ -386,6 +409,8 @@ describe('GitWorkbenchStore', () => {
 
 			expect(staleOptions.signal).toBeInstanceOf(AbortSignal);
 			expect(staleOptions.signal?.aborted).toBe(true);
+			await currentTarget;
+			expect(wb.files.tree).toEqual(currentTree);
 			staleSnapshot.resolve(
 				makeWorkbenchSnapshot({
 					project: '/project-a',
