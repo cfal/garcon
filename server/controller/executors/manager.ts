@@ -131,12 +131,14 @@ export class ExecutorManager {
     return [{
       id: LOCAL_EXECUTOR_ID, label: 'Local', kind: 'local', enabled: true, direction: null,
       allowControllerCli: true,
+      allowExecutorManagement: true,
       availability: this.#disposed ? 'offline' : 'ready', projectBasePath: this.localInfo.projectBasePath,
       instanceId: this.localInfo.instanceId,
       lastError: null, machineServices: { files: true, git: true, gh: true, terminals: true },
     }, ...[...this.#remotes.values()].map((entry): ExecutorSnapshot => ({
       id: entry.config.id, label: entry.config.label, kind: 'remote', enabled: entry.config.enabled,
       allowControllerCli: entry.config.allowControllerCli,
+      allowExecutorManagement: entry.config.allowExecutorManagement,
       direction: entry.config.connection.kind,
       availability: this.#snapshotAvailability(entry.config.id),
       projectBasePath: entry.info?.projectBasePath ?? null, lastError: entry.error,
@@ -229,7 +231,8 @@ export class ExecutorManager {
     for (const [id, entry] of this.#remotes) {
       const next = executors.find((executor) => executor.id === id);
       if (next && sameConnector(entry.config, next)) {
-        if (next.allowControllerCli !== entry.config.allowControllerCli) {
+        if (next.allowControllerCli !== entry.config.allowControllerCli
+          || next.allowExecutorManagement !== entry.config.allowExecutorManagement) {
           entry.cliLease.abort();
           entry.cliLease = new AbortController();
         }

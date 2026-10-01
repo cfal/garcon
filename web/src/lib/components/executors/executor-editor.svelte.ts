@@ -11,6 +11,7 @@ export class ExecutorEditor {
 	allowUnverifiedTls = $state(false);
 	enabled = $state(true);
 	allowControllerCli = $state(false);
+	allowExecutorManagement = $state(false);
 	busy = $state(false);
 	error = $state<string | null>(null);
 	confirmDelete = $state(false);
@@ -21,6 +22,7 @@ export class ExecutorEditor {
 	#originalUnverifiedTls = false;
 	#originalEnabled = true;
 	#originalControllerCli = false;
+	#originalExecutorManagement = false;
 
 	constructor(private readonly executors: ExecutorsStore, private readonly transport = api) {}
 
@@ -40,6 +42,7 @@ export class ExecutorEditor {
 		this.allowUnverifiedTls = false;
 		this.enabled = true;
 		this.allowControllerCli = false;
+		this.allowExecutorManagement = false;
 		this.busy = false;
 		this.error = null;
 		this.confirmDelete = false;
@@ -52,6 +55,7 @@ export class ExecutorEditor {
 		this.direction = executor.direction ?? 'executor-connects';
 		this.enabled = this.#originalEnabled = executor.enabled;
 		this.allowControllerCli = this.#originalControllerCli = executor.allowControllerCli;
+		this.allowExecutorManagement = this.#originalExecutorManagement = executor.allowExecutorManagement;
 		const version = this.#version;
 		this.busy = true;
 		try {
@@ -83,6 +87,7 @@ export class ExecutorEditor {
 					label: this.label.trim(),
 					...(this.enabled !== this.#originalEnabled ? { enabled: this.enabled } : {}),
 					...(this.allowControllerCli !== this.#originalControllerCli ? { allowControllerCli: this.allowControllerCli } : {}),
+					...(this.allowExecutorManagement !== this.#originalExecutorManagement ? { allowExecutorManagement: this.allowExecutorManagement } : {}),
 					...(connectionChanged ? { connection: { direction: this.direction, connectionUrl: this.connectionUrl.trim(), allowInsecureDevelopment: this.allowInsecureDevelopment, allowUnverifiedTls } } : {}),
 				});
 				if (this.executors.executors === previousExecutors) this.executors.applySnapshot(executors);
@@ -92,6 +97,7 @@ export class ExecutorEditor {
 				const result = await this.transport.createExecutor({
 					label: this.label.trim(), allowInsecureDevelopment: this.allowInsecureDevelopment, allowUnverifiedTls,
 					allowControllerCli: this.allowControllerCli,
+					allowExecutorManagement: this.allowExecutorManagement,
 					...(this.direction === 'executor-connects' ? { direction: 'executor-connects' } : { direction: 'controller-connects', connectionUrl: this.connectionUrl.trim() }),
 				});
 				await this.executors.refreshAfterMutation();
@@ -106,6 +112,7 @@ export class ExecutorEditor {
 			this.allowUnverifiedTls = this.#originalUnverifiedTls = allowUnverifiedTls;
 			this.#originalEnabled = this.enabled;
 			this.#originalControllerCli = this.allowControllerCli;
+			this.#originalExecutorManagement = this.allowExecutorManagement;
 			return true;
 		} catch (error) {
 			if (version === this.#version) this.error = error instanceof Error ? error.message : 'Unable to save executor';

@@ -36,12 +36,24 @@ test('certificate verification opt-out is explicit and only applies to the diali
   expect(parseUpdateExecutorRequest({ connection: { ...connection, allowUnverifiedTls: 1 } })).toBeNull();
 });
 
+test('management grants are explicit booleans independent of workspace CLI access', () => {
+  const request = { label: 'Worker', direction: 'executor-connects' };
+  for (const allowExecutorManagement of [true, false]) {
+    expect(parseCreateExecutorRequest({ ...request, allowExecutorManagement })?.allowExecutorManagement).toBe(allowExecutorManagement);
+    expect(parseUpdateExecutorRequest({ allowExecutorManagement })).toEqual({ allowExecutorManagement });
+  }
+  for (const allowExecutorManagement of [null, 'true', 1, {}]) {
+    expect(parseCreateExecutorRequest({ ...request, allowExecutorManagement })).toBeNull();
+    expect(parseUpdateExecutorRequest({ allowExecutorManagement })).toBeNull();
+  }
+});
+
 test('public snapshots exclude credentials and preserve unavailable remote targets', () => {
   const remote = {
     id: remoteId, label: 'Worker', enabled: true, kind: 'remote', direction: 'executor-connects',
     availability: 'offline', instanceId: null, projectBasePath: null, lastError: null,
     machineServices: { files: false, git: false, gh: false, terminals: false },
-    allowControllerCli: false,
+    allowControllerCli: false, allowExecutorManagement: false,
   };
   expect(parseExecutors([remote])).toEqual([remote]);
   const ready = { ...remote, availability: 'ready', instanceId: 'synthetic-instance', projectBasePath: '/' };

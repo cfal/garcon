@@ -48,7 +48,7 @@ describe('ExecutorsDialog', () => {
 		const url = await screen.findByLabelText('Connection URL') as HTMLInputElement;
 		expect(url.value).toBe(connection.connectionUrl);
 		expect(url.type).toBe('text');
-		expect(api.createExecutor).toHaveBeenCalledWith({ label: 'Build Machine', direction: 'executor-connects', allowInsecureDevelopment: false, allowUnverifiedTls: false, allowControllerCli: false });
+		expect(api.createExecutor).toHaveBeenCalledWith({ label: 'Build Machine', direction: 'executor-connects', allowInsecureDevelopment: false, allowUnverifiedTls: false, allowControllerCli: false, allowExecutorManagement: false });
 		await fireEvent.click(screen.getByRole('button', { name: 'Copy connection URL' }));
 		expect(copyToClipboard).toHaveBeenCalledWith(connection.connectionUrl, expect.any(HTMLElement), expect.any(Function));
 		await fireEvent.keyDown(url, { key: 'Escape' });
@@ -79,7 +79,7 @@ describe('ExecutorsDialog', () => {
 		vi.mocked(api.createExecutor).mockRejectedValueOnce(new Error('Invalid connection address'));
 		await fireEvent.submit(url.closest('form')!);
 		expect((await screen.findByText('Invalid connection address')).getAttribute('role')).toBe('alert');
-		expect(api.createExecutor).toHaveBeenCalledWith({ label: 'Worker', direction: 'controller-connects', connectionUrl: descriptor, allowInsecureDevelopment: true, allowUnverifiedTls: false, allowControllerCli: false });
+		expect(api.createExecutor).toHaveBeenCalledWith({ label: 'Worker', direction: 'controller-connects', connectionUrl: descriptor, allowInsecureDevelopment: true, allowUnverifiedTls: false, allowControllerCli: false, allowExecutorManagement: false });
 		expect((url as HTMLInputElement).value).toBe(descriptor);
 	});
 
@@ -95,6 +95,22 @@ describe('ExecutorsDialog', () => {
 		expect(screen.queryByLabelText('Allow unverified TLS certificates')).toBeNull();
 		await fireEvent.click(screen.getByRole('button', { name: 'Back to executors' }));
 		expect(screen.queryByLabelText('Connection URL')).toBeNull();
+	});
+
+	it('keeps the management grant separate from ordinary CLI access', async () => {
+		vi.mocked(api.getExecutors).mockResolvedValue([localExecutor, remoteExecutor]);
+		vi.mocked(api.updateExecutor).mockResolvedValue([localExecutor, remoteExecutor]);
+		await openDialog();
+		await fireEvent.click(screen.getByRole('button', { name: 'Edit Worker' }));
+		await waitFor(() => expect(screen.getByRole('button', { name: 'Save' }).hasAttribute('disabled')).toBe(false));
+		const grant = screen.getByLabelText('Allow executor management via CLI') as HTMLInputElement;
+		expect(grant.checked).toBe(false);
+		await fireEvent.click(grant);
+		expect((screen.getByLabelText('Allow workspace CLI access') as HTMLInputElement).checked).toBe(false);
+		await fireEvent.submit(grant.closest('form')!);
+		await waitFor(() => expect(api.updateExecutor).toHaveBeenCalledWith(remoteExecutor.id, {
+			label: remoteExecutor.label, allowExecutorManagement: true,
+		}));
 	});
 
 	it('confirms deletion without saving edits, retains conflicts, then returns to the executor list', async () => {

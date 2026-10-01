@@ -33,6 +33,7 @@ export interface ExecutorSnapshot {
   readonly kind: 'local' | 'remote';
   readonly enabled: boolean;
   readonly allowControllerCli: boolean;
+  readonly allowExecutorManagement: boolean;
   readonly direction: ExecutorDirection | null;
   readonly availability: ExecutorSnapshotAvailability;
   readonly instanceId: string | null;
@@ -49,6 +50,7 @@ export interface ExecutorSnapshot {
 export type CreateExecutorRequest = {
   readonly label: string;
   readonly allowControllerCli?: boolean;
+  readonly allowExecutorManagement?: boolean;
   readonly allowInsecureDevelopment?: boolean;
   readonly allowUnverifiedTls?: boolean;
 } & (
@@ -60,6 +62,7 @@ export interface UpdateExecutorRequest {
   readonly label?: string;
   readonly enabled?: boolean;
   readonly allowControllerCli?: boolean;
+  readonly allowExecutorManagement?: boolean;
   readonly connection?: {
     readonly direction: ExecutorDirection;
     readonly connectionUrl: string;
@@ -88,25 +91,28 @@ function isConnectionUrl(value: unknown): value is string {
 
 export function parseCreateExecutorRequest(value: unknown): CreateExecutorRequest | null {
   if (!isRecord(value) || !isLabel(value.label)
+    || value.allowExecutorManagement !== undefined && typeof value.allowExecutorManagement !== 'boolean'
     || value.allowControllerCli !== undefined && typeof value.allowControllerCli !== 'boolean'
     || value.allowInsecureDevelopment !== undefined && typeof value.allowInsecureDevelopment !== 'boolean'
     || value.allowUnverifiedTls !== undefined && typeof value.allowUnverifiedTls !== 'boolean') return null;
   const common = { label: value.label.trim(),
+    ...(value.allowExecutorManagement === undefined ? {} : { allowExecutorManagement: value.allowExecutorManagement }),
     ...(value.allowControllerCli === undefined ? {} : { allowControllerCli: value.allowControllerCli }),
     allowInsecureDevelopment: value.allowInsecureDevelopment, allowUnverifiedTls: value.allowUnverifiedTls };
   if (value.direction === 'executor-connects' && value.allowUnverifiedTls !== true
-    && hasOnlyKeys(value, ['label', 'direction', 'allowInsecureDevelopment', 'allowUnverifiedTls', 'allowControllerCli'])) {
+    && hasOnlyKeys(value, ['label', 'direction', 'allowInsecureDevelopment', 'allowUnverifiedTls', 'allowControllerCli', 'allowExecutorManagement'])) {
     return { ...common, direction: 'executor-connects' };
   }
   if (value.direction === 'controller-connects' && isConnectionUrl(value.connectionUrl)
-    && hasOnlyKeys(value, ['label', 'direction', 'connectionUrl', 'allowInsecureDevelopment', 'allowUnverifiedTls', 'allowControllerCli'])) {
+    && hasOnlyKeys(value, ['label', 'direction', 'connectionUrl', 'allowInsecureDevelopment', 'allowUnverifiedTls', 'allowControllerCli', 'allowExecutorManagement'])) {
     return { ...common, direction: 'controller-connects', connectionUrl: value.connectionUrl };
   }
   return null;
 }
 
 export function parseUpdateExecutorRequest(value: unknown): UpdateExecutorRequest | null {
-  if (!isRecord(value) || Object.keys(value).length === 0 || !hasOnlyKeys(value, ['label', 'enabled', 'connection', 'allowControllerCli'])
+  if (!isRecord(value) || Object.keys(value).length === 0 || !hasOnlyKeys(value, ['label', 'enabled', 'connection', 'allowControllerCli', 'allowExecutorManagement'])
+    || value.allowExecutorManagement !== undefined && typeof value.allowExecutorManagement !== 'boolean'
     || value.allowControllerCli !== undefined && typeof value.allowControllerCli !== 'boolean'
     || value.label !== undefined && !isLabel(value.label)
     || value.enabled !== undefined && typeof value.enabled !== 'boolean') return null;
@@ -118,6 +124,7 @@ export function parseUpdateExecutorRequest(value: unknown): UpdateExecutorReques
     || connection.direction === 'executor-connects' && connection.allowUnverifiedTls === true
     || !isConnectionUrl(connection.connectionUrl) || typeof connection.allowInsecureDevelopment !== 'boolean')) return null;
   return {
+    ...(value.allowExecutorManagement === undefined ? {} : { allowExecutorManagement: value.allowExecutorManagement as boolean }),
     ...(value.label === undefined ? {} : { label: (value.label as string).trim() }),
     ...(value.enabled === undefined ? {} : { enabled: value.enabled as boolean }),
     ...(value.allowControllerCli === undefined ? {} : { allowControllerCli: value.allowControllerCli as boolean }),
@@ -126,7 +133,8 @@ export function parseUpdateExecutorRequest(value: unknown): UpdateExecutorReques
 }
 
 export function parseExecutorSnapshot(value: unknown): ExecutorSnapshot | null {
-  if (!isRecord(value) || !hasOnlyKeys(value, ['id', 'label', 'kind', 'enabled', 'direction', 'availability', 'instanceId', 'projectBasePath', 'lastError', 'machineServices', 'allowControllerCli'])
+  if (!isRecord(value) || !hasOnlyKeys(value, ['id', 'label', 'kind', 'enabled', 'direction', 'availability', 'instanceId', 'projectBasePath', 'lastError', 'machineServices', 'allowControllerCli', 'allowExecutorManagement'])
+    || typeof value.allowExecutorManagement !== 'boolean'
     || typeof value.allowControllerCli !== 'boolean'
     || !isExecutorId(value.id) || !isLabel(value.label) || typeof value.enabled !== 'boolean'
     || (value.availability !== 'ready' && value.availability !== 'reconnecting' && value.availability !== 'offline')

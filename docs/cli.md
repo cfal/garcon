@@ -60,6 +60,14 @@ GARCON_CONFIG_DIR="$HOME/.garcon" bun cli/main.ts list agents
 bun cli/main.ts --config-dir "$HOME/.garcon" --runtime executor list agents
 ```
 
+**Allow executor management via CLI** is a separate, default-off grant. It is
+effective only while workspace CLI access is also enabled. It trusts the worker
+OS account with executor configuration, connection credentials, access grants,
+and assignment of existing provider profiles to Local or other executors.
+Disabling either grant cancels the old CLI authorization lease without stopping
+the worker or its running agents. Provider credentials already disclosed to a
+worker cannot be recalled by revoking an assignment.
+
 Worker-launched terminals and provider subprocesses inherit the config root and `GARCON_RUNTIME=executor`. Ordinary shells default to automatic selection, described below. Access grants are workspace-wide, including permission decisions and agent execution on other hosts. Provider sandboxes may independently block loopback HTTP.
 
 Every executor connection requires [Noise NNpsk0 encryption](https://github.com/cfal/noise-ws/tree/536eb503e81a1f9d90436006d3821e2080630488), on both `ws:` and `wss:`. Each physical reconnect negotiates fresh keys before the existing authenticated Garcon session resumes. There is no plaintext fallback. Upgrade the controller and all workers together. The pinned library is new and unaudited; vector, interoperability, and integration tests are not a security audit. Bun 1.4.2 or later is required.

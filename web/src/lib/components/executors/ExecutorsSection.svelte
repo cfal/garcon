@@ -215,6 +215,14 @@
 				Trusts every process using this executor's OS account to manage workspace chats and tickets,
 				run agents on Local and other executors, and approve permission requests, including bypass execution.
 			</p>
+			<label class="flex items-center gap-2 text-sm">
+				<input type="checkbox" bind:checked={editor.allowExecutorManagement} disabled={editor.busy} aria-describedby="executor-management-warning" />
+				Allow executor management via CLI
+			</label>
+			<p id="executor-management-warning" class="text-xs text-muted-foreground">
+				Requires workspace CLI access. Grants executor administration, connection secrets, access
+				grants, and provider assignments, including disclosure of provider credentials to other hosts.
+			</p>
 			{#if editor.error}<p role="alert" class="break-words text-sm text-destructive">
 					{editor.error}
 				</p>{/if}

@@ -48,6 +48,22 @@ test('executor configuration is private, durable, and never persists a Local exe
   await expect(store.remove('local')).rejects.toMatchObject({ code: 'EXECUTOR_NOT_FOUND' });
 });
 
+test('management access defaults off and persists independently of ordinary CLI access', async () => {
+  const { root, store } = await fixture();
+  const executor = await store.create({ direction: 'executor-connects', label: 'Worker', allowControllerCli: true });
+  expect(executor.allowExecutorManagement).toBe(false);
+  await store.update(executor.id, { allowExecutorManagement: true, allowControllerCli: false });
+  const restarted = new ExecutorConfigStore(root);
+  await restarted.initialize();
+  expect(restarted.require(executor.id)).toMatchObject({ allowControllerCli: false, allowExecutorManagement: true });
+  const file = join(root, 'executors.json');
+  const stored = JSON.parse(await readFile(file, 'utf8'));
+  delete stored.executors[0].allowExecutorManagement;
+  await writeFile(file, JSON.stringify(stored));
+  await restarted.initialize();
+  expect(restarted.require(executor.id).allowExecutorManagement).toBe(false);
+});
+
 test('URL updates preserve identity and configuration objects are not mutable capabilities', async () => {
   const { store } = await fixture();
   const original = await store.create({ direction: 'executor-connects', label: 'Original' });

@@ -11,7 +11,7 @@ const localFallback: readonly ExecutorSnapshot[] = [
 		label: 'Local',
 		kind: 'local',
 		enabled: true,
-		allowControllerCli: true,
+		allowControllerCli: true, allowExecutorManagement: true,
 		direction: null,
 		availability: 'ready',
 		instanceId: null,

@@ -43,6 +43,9 @@ test('grant-only updates do not require idle or replace the connector', async ()
   await manager.update(executor.id, { allowControllerCli: true });
   expect(manager.inboundLink(executor.id)).toBe(original);
   expect(manager.list().find((value) => value.id === executor.id)?.allowControllerCli).toBe(true);
+  await manager.update(executor.id, { allowExecutorManagement: true });
+  expect(manager.inboundLink(executor.id)).toBe(original);
+  expect(manager.list().find((value) => value.id === executor.id)?.allowExecutorManagement).toBe(true);
   expect(assertIdle).not.toHaveBeenCalled();
 });
 

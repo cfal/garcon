@@ -42,7 +42,7 @@ function executor(
 		projectBasePath: '/project',
 		lastError: null,
 		machineServices: { terminals: true, files: true, git: false, gh: false },
-		allowControllerCli: false,
+		allowControllerCli: false, allowExecutorManagement: false,
 	};
 }
 function terminal(executorId: string, sequence = 1, runtime = runtimeId): TerminalMetadata {

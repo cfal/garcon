@@ -15,6 +15,7 @@ export interface RemoteExecutorConfig {
   readonly label: string;
   readonly enabled: boolean;
   readonly allowControllerCli: boolean;
+  readonly allowExecutorManagement: boolean;
   readonly secret: string;
   readonly connection:
     | { readonly kind: 'executor-connects'; readonly advertisedUrl: string }
@@ -78,6 +79,7 @@ export class ExecutorConfigStore {
       const executor: RemoteExecutorConfig = {
         id, label: request.label, enabled: true, allowInsecureDevelopment,
         allowControllerCli: request.allowControllerCli ?? false,
+        allowExecutorManagement: request.allowExecutorManagement ?? false,
         allowUnverifiedTls: parsed?.socketUrl.startsWith('wss:') === true && request.allowUnverifiedTls === true,
         secret: parsed?.secret ?? createExecutorSecret(),
         connection: parsed
@@ -102,6 +104,7 @@ export class ExecutorConfigStore {
         ...(request.label === undefined ? {} : { label: request.label }),
         ...(request.enabled === undefined ? {} : { enabled: request.enabled }),
         ...(request.allowControllerCli === undefined ? {} : { allowControllerCli: request.allowControllerCli }),
+        ...(request.allowExecutorManagement === undefined ? {} : { allowExecutorManagement: request.allowExecutorManagement }),
       };
       if (request.connection) {
         const { direction, connectionUrl, allowInsecureDevelopment } = request.connection;
@@ -149,6 +152,7 @@ function parseStoredExecutor(value: unknown): RemoteExecutorConfig {
     || !value.label.trim() || value.label.length > 100 || typeof value.enabled !== 'boolean'
     || !isExecutorSecret(value.secret) || typeof value.allowInsecureDevelopment !== 'boolean'
     || value.allowControllerCli !== undefined && typeof value.allowControllerCli !== 'boolean'
+    || value.allowExecutorManagement !== undefined && typeof value.allowExecutorManagement !== 'boolean'
     || value.allowUnverifiedTls !== undefined && typeof value.allowUnverifiedTls !== 'boolean'
     || !isRecord(value.connection)) throw new Error('Invalid executor configuration');
   const options = { allowInsecureDevelopment: value.allowInsecureDevelopment };
@@ -160,6 +164,7 @@ function parseStoredExecutor(value: unknown): RemoteExecutorConfig {
   if (!connection || connection.kind === 'executor-connects' && value.allowUnverifiedTls === true) throw new Error('Invalid executor connection configuration');
   return { id: value.id, label: value.label, enabled: value.enabled, secret: value.secret, connection,
     allowControllerCli: value.allowControllerCli === true,
+    allowExecutorManagement: value.allowExecutorManagement === true,
     allowInsecureDevelopment: value.allowInsecureDevelopment,
     allowUnverifiedTls: connection.kind === 'controller-connects' && connection.targetUrl.startsWith('wss:') && value.allowUnverifiedTls === true };
 }

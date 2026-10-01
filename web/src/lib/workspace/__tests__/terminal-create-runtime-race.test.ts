@@ -55,7 +55,7 @@ it.each(['tab', 'new window', 'replacement', 'launcher'])(
 				projectBasePath: '/project',
 				lastError: null,
 				machineServices: { terminals: true, files: true, git: false, gh: false },
-				allowControllerCli: false,
+				allowControllerCli: false, allowExecutorManagement: false,
 			},
 		]);
 		const creation = Promise.withResolvers<TerminalCreateResponse>();

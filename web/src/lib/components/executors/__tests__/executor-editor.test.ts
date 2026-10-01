@@ -26,6 +26,18 @@ function fixture() {
 }
 
 describe('ExecutorEditor', () => {
+	it('saves the management grant independently and clears it on close', async () => {
+		const { editor, transport } = fixture();
+		await editor.edit(remoteExecutor);
+		expect(editor.allowExecutorManagement).toBe(false);
+		editor.allowExecutorManagement = true;
+		await editor.save();
+		expect(transport.updateExecutor).toHaveBeenLastCalledWith(remoteExecutor.id, { label: remoteExecutor.label, allowExecutorManagement: true });
+		await editor.save();
+		expect(transport.updateExecutor).toHaveBeenLastCalledWith(remoteExecutor.id, { label: remoteExecutor.label });
+		editor.clear();
+		expect(editor.allowExecutorManagement).toBe(false);
+	});
 	it('changes the CLI grant without rewriting enable or connection state', async () => {
 		const { editor, transport } = fixture();
 		await editor.edit(remoteExecutor);
@@ -58,7 +70,7 @@ describe('ExecutorEditor', () => {
 		expect(await editor.save()).toBe(true);
 		expect(transport.createExecutor).toHaveBeenCalledWith({
 			label: 'Build Machine', direction: 'executor-connects', allowInsecureDevelopment: false, allowUnverifiedTls: false,
-			allowControllerCli: false,
+			allowControllerCli: false, allowExecutorManagement: false,
 		});
 		expect(editor.id).toBe(remoteExecutor.id);
 		expect(editor.connectionUrl).toBe(connection.connectionUrl);
@@ -76,7 +88,7 @@ describe('ExecutorEditor', () => {
 		await editor.save();
 		expect(transport.createExecutor).toHaveBeenCalledWith({
 			label: 'Worker', direction: 'controller-connects', allowInsecureDevelopment: true, allowUnverifiedTls: false,
-			allowControllerCli: false,
+			allowControllerCli: false, allowExecutorManagement: false,
 			connectionUrl: 'ws://worker.test:1234/executor#secret=synthetic',
 		});
 	});
