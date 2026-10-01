@@ -27,7 +27,7 @@ import type { ChatBoardService } from './chat-boards/service.js';
 import { createLogger } from '../common/log.js';
 import { errorMessage } from '../common/errors.js';
 import { withActivity } from '../common/event-loop-stalls.js';
-import { buildRemoteSettingsSnapshot } from './routes/workspace.js';
+import { buildRemoteSettingsSnapshot } from './settings/remote-snapshot.js';
 import {
   AgentRunFinishedMessage,
   AgentRunFailedMessage,

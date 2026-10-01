@@ -1,12 +1,8 @@
 // Serves the GET /api/v1/models endpoint using the live agent catalog from
 // the registry.
 
-import {
-  catalogResponseFromSnapshot,
-  type ModelCatalog,
-  type ModelCatalogResponseCache,
-  type ModelCatalogResponseBody,
-} from './model-catalog-cache.js';
+import { catalogResponseFromSnapshot } from './model-catalog-response.js';
+import { type ModelCatalog, type ModelCatalogResponseCache, type ModelCatalogResponseBody } from '../agents/model-catalog-cache.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { AgentCatalogEntry, AgentModelOption } from '../../../common/agents.js';
 import { executorIdFromUrl } from './executor-target.js';

@@ -116,7 +116,7 @@ import {
 } from './ledger/index.js';
 
 import createAllRoutes from './routes/index.js';
-import { ModelCatalogResponseCache } from './routes/model-catalog-cache.js';
+import { ModelCatalogResponseCache } from './agents/model-catalog-cache.js';
 import { createLogger } from '../common/log.js';
 import { errorMessage } from '../common/errors.js';
 import type { WorkspaceLease } from '../common/workspace-lease.js';

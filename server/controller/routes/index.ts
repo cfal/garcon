@@ -48,7 +48,7 @@ import type { IShareStore } from '../chats/share-store.js';
 import type { ApiProviderService } from '../api-providers/service.js';
 import type { ChatCommandService } from '../commands/chat-command-service.js';
 import type { SnippetService } from '../snippets/service.js';
-import type { ModelCatalogResponseCache } from './model-catalog-cache.js';
+import type { ModelCatalogResponseCache } from '../agents/model-catalog-cache.js';
 import type { LastSelectedChatState } from '../chats/last-selected-chat-state.js';
 import type { ScheduledPromptScheduler } from '../scheduled-prompts/scheduler.js';
 import type { ChatListProjector } from '../chats/chat-list-projector.js';
