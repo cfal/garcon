@@ -38,7 +38,7 @@ describe('root catalog routers', () => {
 			{ type: 'chat-boards-invalidated', revision: 7, reason: 'reordered' },
 			{ type: 'executors-changed', executors: [localExecutor] },
 			{ type: 'preambles-invalidated', reason: 'updated' },
-			{ type: 'chat-preambles-invalidated', chatId: '1790876801129600', revision: 3 },
+			{ type: 'chat-preambles-invalidated', chatId: '1700000000000001', revision: 3 },
 			{ type: 'scheduled-prompts-invalidated', reason: 'executed' },
 			{ type: 'snippets-invalidated', reason: 'updated' },
 			{ type: 'tickets-invalidated', revision: 4 },
@@ -49,7 +49,7 @@ describe('root catalog routers', () => {
 		try {
 			for (const router of routers) router.start();
 			ws.messages.push(...[
-				{ type: 'chat-messages', chatId: '1790876801129600', messages: [] },
+				{ type: 'chat-messages', chatId: '1700000000000001', messages: [] },
 				...owned,
 				{ type: 'unknown-event' },
 			].map((data) => ({ data, timestamp: 0 })));
@@ -60,7 +60,7 @@ describe('root catalog routers', () => {
 			expect(boards.publish).toHaveBeenCalledExactlyOnceWith({ kind: 'catalog', revision: 7, reason: 'reordered' });
 			expect(executors.applySnapshot).toHaveBeenCalledExactlyOnceWith([localExecutor]);
 			expect(preambles.refreshIfLoaded).toHaveBeenCalledOnce();
-			expect(selections.publish).toHaveBeenCalledExactlyOnceWith({ kind: 'selection', chatId: '1790876801129600', revision: 3 });
+			expect(selections.publish).toHaveBeenCalledExactlyOnceWith({ kind: 'selection', chatId: '1700000000000001', revision: 3 });
 			expect(prompts.refreshIfLoaded).toHaveBeenCalledOnce();
 			expect(snippets.refreshIfLoaded).toHaveBeenCalledOnce();
 			expect(tickets.publish).toHaveBeenCalledExactlyOnceWith({ kind: 'collection', revision: 4 });
