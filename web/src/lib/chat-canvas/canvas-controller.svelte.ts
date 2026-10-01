@@ -291,8 +291,10 @@ export class CanvasController implements PortableSingletonController {
 			];
 		} catch {
 			// Storage failures must not prevent opening server documents; the session reports recovery availability.
+			return;
 		}
-		for (const id of this.#viewports.keys()) if (!ids.has(id)) this.#viewports.delete(id);
+		const visibleIds = new Set(this.canvases.map((entry) => entry.id));
+		for (const id of this.#viewports.keys()) if (!visibleIds.has(id)) this.#viewports.delete(id);
 	}
 
 	#failure(error: unknown): void {
