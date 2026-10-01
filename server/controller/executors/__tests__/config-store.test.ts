@@ -153,10 +153,14 @@ test('existing duplicate labels stay readable and configurable while a rename re
   const first = await store.create({ direction: 'executor-connects', label: 'First' });
   const second = await store.create({ direction: 'executor-connects', label: 'Second' });
   const file = join(root, 'executors.json');
-  await writeFile(file, JSON.stringify({ version: 1, executors: store.list().map((entry) => ({ ...entry, label: 'Duplicate' })) }));
+  await writeFile(file, JSON.stringify({ version: 1, executors: store.list().map((entry) => ({
+    ...entry, label: entry.id === second.id ? ' Duplicate ' : 'Duplicate',
+  })) }));
   await store.initialize();
   expect(store.list()).toHaveLength(2);
   await store.update(first.id, { enabled: false, label: 'Duplicate' });
+  await store.update(second.id, { label: 'Duplicate', allowExecutorManagement: true });
+  expect(store.require(second.id)).toMatchObject({ label: 'Duplicate', allowExecutorManagement: true });
   await expect(store.create({ direction: 'executor-connects', label: 'DUPLICATE' })).rejects.toThrow('already exists');
   await store.update(second.id, { label: 'Repaired' });
   expect(store.list().map((entry) => entry.label)).toEqual(['Duplicate', 'Repaired']);

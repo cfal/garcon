@@ -105,7 +105,7 @@ export class ExecutorConfigStore {
       const request = parseUpdateExecutorRequest(input);
       if (!request) throw new ValidationDomainError('Invalid executor update');
       const previous = this.require(id);
-      if (request.label !== undefined && request.label !== previous.label) this.#assertLabelAvailable(request.label, id);
+      if (request.label !== undefined && request.label !== previous.label.trim()) this.#assertLabelAvailable(request.label, id);
       let executor: RemoteExecutorConfig = {
         ...previous,
         ...(request.label === undefined ? {} : { label: request.label }),
