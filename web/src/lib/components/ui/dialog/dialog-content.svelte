@@ -3,7 +3,7 @@
 	import DialogPortal from './dialog-portal.svelte';
 	import XIcon from '@lucide/svelte/icons/x';
 	import type { Snippet } from 'svelte';
-	import * as Dialog from './index.js';
+	import DialogOverlay from './dialog-overlay.svelte';
 	import { cn, type WithoutChildrenOrChild } from '$lib/utils/cn.js';
 	import type { ComponentProps } from 'svelte';
 	import { getOptionalTransientLayers } from '$lib/context';
@@ -57,7 +57,7 @@
 </script>
 
 <DialogPortal {...portalProps}>
-	<Dialog.Overlay />
+	<DialogOverlay />
 	<DialogPrimitive.Content
 		bind:ref
 		data-slot="dialog-content"
