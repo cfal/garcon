@@ -15,6 +15,7 @@ Common options and environment variables:
 
 - `GARCON_PORT` / `--port`: listen port. Use `0` for a random port.
 - `GARCON_BIND_ADDRESS` / `--bind-address`: server bind address.
+- `GARCON_PUBLIC_URL` / `--public-url`: external HTTP(S) base URL for executor onboarding, including any proxy path prefix.
 - `GARCON_CONFIG_DIR` / `--config-dir`: base config directory. Defaults to `~/.garcon`.
 - `GARCON_WORKSPACE` / `--workspace`: named workspace under the config directory.
 - `GARCON_WORKSPACE_DIR` / `--workspace-dir`: explicit workspace directory.
@@ -32,6 +33,16 @@ Run `bun run help` for the complete server option list.
 Explicit flags take precedence over environment variables; nonempty environment values take precedence over defaults. The controller, executor, and CLI share `--config-dir` / `GARCON_CONFIG_DIR`, defaulting to `~/.garcon`. Relative roots are resolved from the process's working directory. Workspace options configure controller storage only, not CLI discovery or executor storage.
 
 ## Executor Connections
+
+Set `--public-url https://controller.example.com/garcon/` or `GARCON_PUBLIC_URL`
+on a proxied controller. The flag wins; the base path is retained when generating
+`wss://controller.example.com/garcon/executor/<id>`. Without configuration, the
+authenticated management request's validated `Host` and actual HTTP(S) scheme
+provide a best-effort suggestion. Forwarded headers are not used. This cannot
+infer external TLS termination or proxy path rewriting: configure those explicitly.
+An executor's manually saved full URL overrides the generated default. No example
+URL is generated, and Copy is disabled for unusable addresses or WS without the
+explicit no-TLS opt-in. Changing the public base does not rotate executor secrets.
 
 Add executors from the Executors dialog or the CLI management commands below.
 For an executor that connects to the

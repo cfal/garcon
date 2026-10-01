@@ -38,7 +38,10 @@ test('executor configuration is private, durable, and never persists a Local exe
   const { root, store } = await fixture();
   expect(store.list()).toEqual([]);
   const executor = await store.create({ direction: 'executor-connects', label: 'Build machine' });
-  expect(store.connection(executor.id).connectionUrl).toBe(`wss://example.com/executor/${executor.id}#secret=${executor.secret}`);
+  expect(executor.connection).toEqual({ kind: 'executor-connects', advertisedUrl: null });
+  expect(store.connection(executor.id).connectionUrl).toBe('');
+  expect(store.connection(executor.id, 'https://controller.test/base/').connectionUrl)
+    .toBe(`wss://controller.test/base/executor/${executor.id}#secret=${executor.secret}`);
   const filePath = join(root, 'executors.json');
   if (process.platform !== 'win32') expect((await stat(filePath)).mode & 0o777).toBe(0o600);
   expect(JSON.parse(await readFile(filePath, 'utf8')).executors).toEqual([executor]);

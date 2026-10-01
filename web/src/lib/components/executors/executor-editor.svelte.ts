@@ -31,6 +31,17 @@ export class ExecutorEditor {
 		catch { return false; }
 	}
 
+	get canCopyConnection(): boolean {
+		if (this.busy) return false;
+		try {
+			const url = new URL(this.connectionUrl.trim());
+			const fragment = new URLSearchParams(url.hash.slice(1));
+			return (url.protocol === 'wss:' || url.protocol === 'ws:' && this.noTls)
+				&& !url.username && !url.password && !['0.0.0.0', '[::]', 'example.com'].includes(url.hostname)
+				&& fragment.size === 1 && /^[A-Za-z0-9_-]{43}$/u.test(fragment.get('secret') ?? '');
+		} catch { return false; }
+	}
+
 	clear(): void {
 		this.#version += 1;
 		this.id = null;

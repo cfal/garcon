@@ -6,6 +6,7 @@ import path from 'path';
 import os from 'os';
 import { resolveConfigDirectory } from '@garcon/common/config-dir';
 import { defaultUserShell } from '../common/user-shell.js';
+import { parsePublicUrl } from './executors/public-url.js';
 
 const CLI_VALUE_FLAGS = {
   '--config-dir': '<directory>',
@@ -14,6 +15,7 @@ const CLI_VALUE_FLAGS = {
   '--port': '<number>',
   '--bind-address': '<hostname-or-ip>',
   '--project-base-dir': '<directory>',
+  '--public-url': '<url>',
 } as const;
 
 type CliValueFlag = keyof typeof CLI_VALUE_FLAGS;
@@ -24,6 +26,7 @@ export interface ServerConfig {
   workspaceName: string | null;
   port: number;
   bindAddress: string;
+  publicUrl: string | null;
   jwtTokenExpiry: string;
   testEnvironment: boolean;
   projectBasePath: string;
@@ -108,6 +111,7 @@ function parseServerConfig(): ServerConfig {
   const configDir = parseConfigDir();
   const workspace = parseWorkspace(configDir);
   const maxWsClients = envInt('MAX_WS_CLIENTS', 128);
+  const publicUrl = cliValue('--public-url') ?? envValue('GARCON_PUBLIC_URL');
   if (maxWsClients < 1) {
     throw new Error('Invalid GARCON_MAX_WS_CLIENTS value: must be at least 1.');
   }
@@ -117,6 +121,7 @@ function parseServerConfig(): ServerConfig {
     workspaceName: workspace.workspaceName,
     port: parsePortConfig(),
     bindAddress: parseBindAddress(),
+    publicUrl: publicUrl === null ? null : parsePublicUrl(publicUrl),
     jwtTokenExpiry: envValue('GARCON_JWT_TOKEN_EXPIRY') ?? '30d',
     testEnvironment: envValue('NODE_ENV') === 'test',
     projectBasePath: parseProjectBasePath(),
@@ -219,6 +224,10 @@ export function getPort(): number {
 
 export function getBindAddress(): string {
   return currentConfig().bindAddress;
+}
+
+export function getPublicUrl(): string | null {
+  return currentConfig().publicUrl;
 }
 
 // JWT token expiry (secret is managed by auth/store).

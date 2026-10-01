@@ -10,6 +10,28 @@ import { ExecutorsChangedMessage } from '../../../common/ws-events.js';
 import { ExecutorProcess } from '../../support/execution-backend.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 
+for (const configured of [false, true]) {
+  test(`executor onboarding uses ${configured ? 'configured public base' : 'request Host'} without persisting a placeholder`, async () => {
+    await withIntegrationFixture('executor-public-url', async fixture => {
+      const response = await fixture.client.fetch('/api/v1/executors', {
+        method: 'POST', headers: { 'content-type': 'application/json', host: 'visible.test:8080',
+          'x-forwarded-host': 'untrusted.test', 'x-forwarded-proto': 'https' },
+        body: JSON.stringify({ direction: 'executor-connects', label: 'Synthetic public worker', noTls: !configured }),
+      });
+      expect(response.status).toBe(200);
+      const created = await response.json() as ExecutorConnection & { id: string };
+      const endpoint = new URL(created.connectionUrl);
+      expect(`${endpoint.protocol}//${endpoint.host}${endpoint.pathname}`).toBe(configured
+        ? `wss://public.test/garcon/executor/${created.id}` : `ws://visible.test:8080/executor/${created.id}`);
+      expect(endpoint.hash).toMatch(/^#secret=[A-Za-z0-9_-]{43}$/u);
+      expect(JSON.stringify(await fixture.client.get('/api/v1/executors'))).not.toContain(endpoint.hash.slice(8));
+      await fixture.restartGarcon();
+      const read = await fixture.client.fetch(`/api/v1/executors/${created.id}/connection`, { headers: { host: 'visible.test:8080' } });
+      expect((await read.json()).connectionUrl).toBe(created.connectionUrl);
+    }, { executionBackend: 'in-process', serverEnvironment: { GARCON_PUBLIC_URL: configured ? 'https://public.test/garcon' : '' } });
+  }, 45_000);
+}
+
 async function startProxy(target: URL) {
   const publicPath = '/any-prefix?route=worker&tag=a&tag=b';
   const requests: string[] = [];

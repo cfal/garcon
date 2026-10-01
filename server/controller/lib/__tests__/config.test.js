@@ -15,7 +15,7 @@ const originalMaxWsClients = process.env.GARCON_MAX_WS_CLIENTS;
 const originalHttpCompression = process.env.GARCON_HTTP_COMPRESSION;
 const originalDisableAuth = process.env.GARCON_DISABLE_AUTH;
 const originalHome = process.env.HOME;
-const configEnvironment = Object.fromEntries(['GARCON_CONFIG_DIR', 'GARCON_WORKSPACE', 'GARCON_WORKSPACE_DIR', 'GARCON_PROJECT_BASE_DIR', 'GARCON_BIND_ADDRESS'].map((key) => [key, process.env[key]]));
+const configEnvironment = Object.fromEntries(['GARCON_CONFIG_DIR', 'GARCON_WORKSPACE', 'GARCON_WORKSPACE_DIR', 'GARCON_PROJECT_BASE_DIR', 'GARCON_BIND_ADDRESS', 'GARCON_PUBLIC_URL'].map((key) => [key, process.env[key]]));
 
 afterEach(() => {
   for (const [key, value] of Object.entries(configEnvironment)) {
@@ -52,6 +52,16 @@ afterEach(() => {
 });
 
 describe('getPort', () => {
+  it('public URL flags override environment, preserve base paths, and reject invalid configuration', () => {
+    process.env.GARCON_PUBLIC_URL = 'https://public.test/base';
+    expect(initializeServerConfig().publicUrl).toBe('https://public.test/base/');
+    process.argv = [...originalArgv, '--public-url', 'https://override.test/prefix/'];
+    expect(initializeServerConfig().publicUrl).toBe('https://override.test/prefix/');
+    process.argv = [...originalArgv, '--public-url', 'https://user:secret@host/'];
+    expect(() => initializeServerConfig()).toThrow('no credentials');
+    process.argv = [...originalArgv, '--public-url', ''];
+    expect(() => initializeServerConfig()).toThrow('absolute HTTP(S)');
+  });
   it('rejects duplicate value flags and conflicting explicit workspace selectors', () => {
     process.argv = [...originalArgv, '--config-dir', '/first', '--config-dir=/second'];
     expect(() => initializeServerConfig()).toThrow('Option may be specified only once: --config-dir');

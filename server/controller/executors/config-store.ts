@@ -9,6 +9,7 @@ import { isRecord } from '../../../common/json.js';
 import { DomainError, ValidationDomainError } from '../../common/domain-error.js';
 import { AtomicJsonWriteError, readJsonStateFile, writeJsonFileAtomic } from '../../common/json-file-store.js';
 import { createExecutorSecret, isExecutorSecret, executorConnectionUrl, parseConnectionUrl, validateExecutorSocketUrl } from '../../remote/transport/connection-url.js';
+import { executorPublicUrl } from './public-url.js';
 
 export interface RemoteExecutorConfig {
   readonly id: string;
@@ -18,7 +19,7 @@ export interface RemoteExecutorConfig {
   readonly allowExecutorManagement: boolean;
   readonly secret: string;
   readonly connection:
-    | { readonly kind: 'executor-connects'; readonly advertisedUrl: string }
+    | { readonly kind: 'executor-connects'; readonly advertisedUrl: string | null }
     | { readonly kind: 'controller-connects'; readonly targetUrl: string };
   readonly noTls: boolean;
   readonly allowUnverifiedTls: boolean;
@@ -60,10 +61,12 @@ export class ExecutorConfigStore {
     return executor;
   }
 
-  connection(id: string) {
+  connection(id: string, publicBase?: string) {
     const executor = this.require(id);
+    const socketUrl = executor.connection.kind === 'controller-connects' ? executor.connection.targetUrl
+      : executor.connection.advertisedUrl ?? (publicBase ? executorPublicUrl(publicBase, id) : null);
     return {
-      connectionUrl: executorConnectionUrl(executor.connection.kind === 'executor-connects' ? executor.connection.advertisedUrl : executor.connection.targetUrl, executor.secret),
+      connectionUrl: socketUrl ? executorConnectionUrl(socketUrl, executor.secret) : '',
       noTls: executor.noTls,
       allowUnverifiedTls: executor.allowUnverifiedTls,
     };
@@ -77,6 +80,10 @@ export class ExecutorConfigStore {
       const id = randomUUID();
       const noTls = request.noTls ?? false;
       const parsed = request.direction === 'controller-connects' ? parseConnectionUrl(request.connectionUrl) : null;
+      let advertisedUrl: string | null = null;
+      if (request.direction === 'executor-connects' && request.advertisedUrl !== undefined) {
+        advertisedUrl = validateExecutorSocketUrl(request.advertisedUrl.replaceAll('{executorId}', id), { noTls });
+      }
       const executor: RemoteExecutorConfig = {
         id, label: request.label, enabled: true, noTls,
         allowControllerCli: request.allowControllerCli ?? false,
@@ -85,11 +92,7 @@ export class ExecutorConfigStore {
         secret: parsed?.secret ?? createExecutorSecret(),
         connection: parsed
           ? { kind: 'controller-connects', targetUrl: validateExecutorSocketUrl(parsed.socketUrl, { noTls }) }
-          : { kind: 'executor-connects', advertisedUrl: validateExecutorSocketUrl(
-            request.direction === 'executor-connects' && request.advertisedUrl !== undefined
-              ? request.advertisedUrl.replaceAll('{executorId}', id) : `wss://example.com/executor/${id}`,
-            { noTls },
-          ) },
+          : { kind: 'executor-connects', advertisedUrl },
       };
       assertConnectionLength(executor);
       await this.#save([...this.#executors, executor]);
@@ -174,8 +177,8 @@ function parseStoredExecutor(value: unknown): RemoteExecutorConfig {
     || value.allowUnverifiedTls !== undefined && typeof value.allowUnverifiedTls !== 'boolean'
     || !isRecord(value.connection)) throw new Error('Invalid executor configuration');
   const options = { noTls: value.noTls };
-  const connection = value.connection.kind === 'executor-connects' && typeof value.connection.advertisedUrl === 'string'
-    ? { kind: 'executor-connects' as const, advertisedUrl: validateExecutorSocketUrl(value.connection.advertisedUrl, options) }
+  const connection = value.connection.kind === 'executor-connects' && (value.connection.advertisedUrl === null || typeof value.connection.advertisedUrl === 'string')
+    ? { kind: 'executor-connects' as const, advertisedUrl: value.connection.advertisedUrl === null ? null : validateExecutorSocketUrl(value.connection.advertisedUrl, options) }
     : value.connection.kind === 'controller-connects' && typeof value.connection.targetUrl === 'string'
       ? { kind: 'controller-connects' as const, targetUrl: validateExecutorSocketUrl(value.connection.targetUrl, options) }
       : null;
@@ -189,7 +192,7 @@ function parseStoredExecutor(value: unknown): RemoteExecutorConfig {
 
 function assertConnectionLength(executor: RemoteExecutorConfig): void {
   const address = executor.connection.kind === 'executor-connects' ? executor.connection.advertisedUrl : executor.connection.targetUrl;
-  if (executorConnectionUrl(address, executor.secret).length > 4096) {
+  if (address !== null && executorConnectionUrl(address, executor.secret).length > 4096) {
     throw new ValidationDomainError('Executor connection URL exceeds 4096 characters after address expansion');
   }
 }

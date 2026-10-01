@@ -2,10 +2,18 @@ import { parseCreateExecutorRequest, parseUpdateExecutorRequest } from '../../..
 import type { ExecutorManager } from '../executors/manager.js';
 import { DomainError, ValidationDomainError } from '../../common/domain-error.js';
 import { jsonErrorFromUnknown } from '../../common/http-error.js';
-import type { RouteMap } from '../lib/http-route-types.js';
+import type { HttpRouteContext, RouteMap } from '../lib/http-route-types.js';
 import { withJsonBody } from '../lib/json-route.js';
+import { getPublicUrl } from '../config.js';
+import { requestPublicUrl } from '../executors/public-url.js';
 
-export function createExecutorRoutes(executors: ExecutorManager): RouteMap {
+export function createExecutorRoutes(executors: ExecutorManager, publicUrl: string | null = getPublicUrl()): RouteMap {
+  const resolvePublicBase = (request: Request, context?: HttpRouteContext): string => {
+    if (context?.principal?.mode === 'executor' && publicUrl === null) {
+      throw new ValidationDomainError('Executor CLI requests have no public Host; configure GARCON_PUBLIC_URL / --public-url on the controller or set an explicit executor advertised URL');
+    }
+    return requestPublicUrl(request, publicUrl);
+  };
   const noStore = (response: Response) => {
     response.headers.set('Cache-Control', 'no-store');
     return response;
@@ -17,11 +25,13 @@ export function createExecutorRoutes(executors: ExecutorManager): RouteMap {
   return {
     '/api/v1/executors': {
       GET: () => handle(() => ({ executors: executors.list() })),
-      POST: withJsonBody((body, _request, _url, _server, context) => handle(async () => {
+      POST: withJsonBody((body, incoming, _url, _server, context) => handle(async () => {
         const request = parseCreateExecutorRequest(body);
         if (!request) throw new ValidationDomainError('Invalid executor configuration');
+        const publicBase = request.direction === 'executor-connects' && request.advertisedUrl === undefined
+          ? resolvePublicBase(incoming, context) : undefined;
         const created = await executors.create(request, context?.assertCurrent);
-        return { id: created.id, ...executors.config.connection(created.id) };
+        return { id: created.id, ...executors.config.connection(created.id, publicBase) };
       })),
     },
     '/api/v1/executors/:executorId': {
@@ -46,7 +56,13 @@ export function createExecutorRoutes(executors: ExecutorManager): RouteMap {
       }),
     },
     '/api/v1/executors/:executorId/connection': {
-      GET: (_request, url) => handle(() => executors.config.connection(executorIdFromUrl(url))),
+      GET: (request, url, _server, context) => handle(() => {
+        const id = executorIdFromUrl(url);
+        const config = executors.config.require(id);
+        const base = config.connection.kind === 'executor-connects' && config.connection.advertisedUrl === null
+          ? resolvePublicBase(request, context) : undefined;
+        return executors.config.connection(id, base);
+      }),
     },
   };
 }

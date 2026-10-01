@@ -12,6 +12,7 @@ Options:
   --help, -h                     Show this help screen and exit.
   --port <number>                Listen port (0..65535). Use 0 for a random port.
   --bind-address <host-or-ip>    Bind hostname/address for Bun server.
+  --public-url <url>             Public HTTP(S) base URL for executor onboarding.
   --disable-auth                 Disable all HTTP/WebSocket authentication checks.
   --config-dir <directory>       Override Garcon config directory.
   --workspace-dir <directory>    Use an explicit workspace directory path.
@@ -22,6 +23,7 @@ Options:
 Environment Variables:
   GARCON_PORT                      Listen port (0..65535). If 0, picks a random port.
   GARCON_BIND_ADDRESS              Bind hostname/address. Default: 127.0.0.1
+  GARCON_PUBLIC_URL                Public HTTP(S) base URL; otherwise uses request Host.
   GARCON_DISABLE_AUTH              Disable all HTTP/WebSocket authentication checks.
   GARCON_CONFIG_DIR                Base config directory. Default: ~/.garcon
   GARCON_WORKSPACE_DIR             Explicit workspace directory path.

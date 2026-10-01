@@ -50,6 +50,7 @@
 	}
 
 	async function copyConnectionUrl(): Promise<void> {
+		if (!editor.canCopyConnection) return;
 		const url = editor.connectionUrl;
 		copied = await copyToClipboard(url, content ?? undefined, () => editor.connectionUrl === url);
 		if (!copied) editor.error = 'Unable to copy connection URL';
@@ -167,7 +168,7 @@
 						size="icon-sm"
 						title="Copy connection URL"
 						aria-label="Copy connection URL"
-						disabled={!editor.connectionUrl}
+						disabled={!editor.canCopyConnection}
 						onclick={copyConnectionUrl}><Copy class="size-4" /></Button
 					>
 					{#if copied}<span role="status" class="text-xs text-muted-foreground">Copied</span>{/if}

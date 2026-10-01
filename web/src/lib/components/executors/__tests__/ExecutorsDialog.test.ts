@@ -83,6 +83,26 @@ describe('ExecutorsDialog', () => {
 		expect((url as HTMLInputElement).value).toBe(descriptor);
 	});
 
+	it('gates copying unusable addresses and requires explicit opt-in for WS', async () => {
+		vi.mocked(api.getExecutors).mockResolvedValue([localExecutor, remoteExecutor]);
+		await openDialog();
+		await fireEvent.click(screen.getByRole('button', { name: 'Edit Worker' }));
+		const url = screen.getByLabelText('Connection URL') as HTMLInputElement;
+		const copy = screen.getByRole('button', { name: 'Copy connection URL' }) as HTMLButtonElement;
+		await waitFor(() => expect(copy.disabled).toBe(false));
+		for (const value of ['', 'not a URL', connection.connectionUrl.replace('example.test', 'example.com'),
+			connection.connectionUrl.replace('example.test', '0.0.0.0'), connection.connectionUrl.replace('wss:', 'ws:')]) {
+			await fireEvent.input(url, { target: { value } });
+			expect(copy.disabled).toBe(true);
+			await fireEvent.click(copy);
+			expect(copyToClipboard).not.toHaveBeenCalled();
+		}
+		await fireEvent.click(screen.getByLabelText('Allow connection without TLS (ws://)'));
+		expect(copy.disabled).toBe(false);
+		await fireEvent.click(copy);
+		expect(copyToClipboard).toHaveBeenCalledTimes(1);
+	});
+
 	it('keeps saved credentials readable without a reveal control', async () => {
 		vi.mocked(api.getExecutors).mockResolvedValue([localExecutor, remoteExecutor]);
 		await openDialog();
