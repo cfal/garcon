@@ -1,4 +1,5 @@
 import { effectiveExecutorId, LOCAL_EXECUTOR_ID } from '../../../common/executors.js';
+import type { CreateCarriedContextInput } from '../chats/carried-context.js';
 import {
   AgentIntegrationError,
   AgentCallError,
@@ -73,17 +74,6 @@ export interface AgentRuntimeRouterOptions {
   adoption: TranscriptAdoptionService;
   hasPendingOwnershipTransfer(chatId: string): boolean;
   resolveFileMentions(command: string, projectPath: string, executorId?: string | null, options?: ExecutorCallOptions): Promise<string>;
-}
-
-export interface CreateCarriedContextInput {
-  readonly onCompactionStarted?: () => void;
-  readonly chatId: string;
-  readonly entry: AgentChatEntry;
-  readonly messages: readonly ChatMessage[];
-  readonly transcriptViewId: TranscriptViewId;
-  readonly destinationPrompt: string;
-  readonly clientRequestId: string | null;
-  readonly signal?: AbortSignal;
 }
 
 export interface RunSingleQueryOptions {

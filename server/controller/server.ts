@@ -101,7 +101,8 @@ import {
 } from './chats/chat-carryover-rollback.js';
 import { AgentHandoffService } from './agents/agent-handoff-service.js';
 import { initializeSnippetAndPreambleServices } from './snippets/setup.js';
-import { initializeChatPreambleSelectionService } from './preambles/setup.js';
+import { ChatPreambleSelectionService } from './preambles/chat-selection-service.js';
+import { createCarriedContext } from './chats/carried-context.js';
 import { initializeChatBoardRuntime } from './chat-boards/setup.js';
 import { initializeTickets } from './tickets/setup.js';
 import { createTicketProjectResolver } from './tickets/project-default.js';
@@ -401,7 +402,7 @@ export async function startServer(): Promise<void> {
       },
       onInvalidated: (revision) => eventWiring?.broadcastTicketsInvalidated(revision),
     });
-    const chatPreambleSelection = initializeChatPreambleSelectionService({
+    const chatPreambleSelection = new ChatPreambleSelectionService({
       preambles,
       registry: chatRegistry,
       adoption: transcriptAdoption,
@@ -423,30 +424,7 @@ export async function startServer(): Promise<void> {
         entry.carryOverSegments ?? [],
         entry.carryOverMigrationQuarantine ?? null,
       ),
-      async createCarriedContext(input) {
-        const prepared = preparedCarryover.take({
-          chatId: input.chatId,
-          transcriptViewId: input.transcriptViewId,
-          targetAgentId: input.entry.agentId,
-          targetExecutorId: effectiveExecutorId(input.entry.executorId),
-          targetOwnershipEpoch: input.entry.agentOwnershipEpoch,
-          clientRequestId: input.clientRequestId,
-        });
-        if (prepared) return prepared;
-        if (!carryOverCompaction) throw new Error('Carryover compaction is not initialized');
-        return carryOverCompaction.planFor({
-          operation: 'fresh-start',
-          onCompactionStarted: input.onCompactionStarted,
-          chatId: input.chatId,
-          messages: input.messages,
-          destination: {
-            agentId: input.entry.agentId,
-            model: input.entry.model ?? '',
-            prompt: input.destinationPrompt,
-          },
-          signal: input.signal,
-        });
-      },
+      createCarriedContext: (input) => createCarriedContext(input, preparedCarryover, carryOverCompaction),
       onCarryOverChanged(chatId) {
         eventWiring?.notifyTranscriptCompositionChanged(chatId);
       },

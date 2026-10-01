@@ -36,11 +36,8 @@ import type {
 import { AgentCatalogService, type AgentModelQuery } from './catalog-service.js';
 import { AgentDirectory, type ExecutionIntegrationDirectory } from './directory.js';
 import { AgentEventBus, type TurnEventMetadata } from './event-bus.js';
-import {
-  AgentRuntimeRouter,
-  type CreateCarriedContextInput,
-  type RunSingleQueryOptions,
-} from './runtime-router.js';
+import { AgentRuntimeRouter, type RunSingleQueryOptions } from './runtime-router.js';
+import { type CreateCarriedContextInput } from '../chats/carried-context.js';
 import { AgentSessionSettingsService, type AgentConfigurationInput } from './session-settings-service.js';
 import { toAgentChatReference } from './integration-chat-reference.js';
 import { createLogger } from '../../common/log.js';
