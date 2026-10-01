@@ -421,7 +421,7 @@
 	}
 </script>
 
-<!-- The container delegates bubbled Escape handling for the sidebar subtree. Follow-up: CLEANUP_ROUND_TWO.md#a11y-suppression-register. -->
+<!-- The container delegates bubbled Escape handling for the sidebar subtree. Covered by __tests__/sidebar-search-interactions.test.ts. -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
 	data-slot="sidebar"

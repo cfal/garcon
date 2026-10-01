@@ -474,7 +474,7 @@ A bug or flake first observed in a live suite or in production may only be close
 - Interactive behavior must be keyboard reachable.
 - Avoid non-semantic clickable containers when a button can be used.
 - Use `focus-visible` instead of `focus` for focus ring styles. Keyboard users see the ring; mouse/touch users do not.
-- Every `svelte-ignore` for a11y must include rationale and follow-up issue.
+- Every `svelte-ignore` for a11y must include a rationale and a durable reference: a follow-up issue for unresolved defects, or a regression test for an intentional accessible interaction pattern.
 - Do not add suppressions casually to silence lint noise.
 
 ## Performance and Bundle Discipline
@@ -483,7 +483,7 @@ A bug or flake first observed in a live suite or in production may only be close
 - Split heavy features (editor/tooling/renderers) when practical.
 - Prefer lazy initialization for expensive integrations.
 - Avoid reactive churn from broad effects and unnecessary object recreation.
-- Lazy-load heavy vendor modules (e.g., CodeMirror language packs) via dynamic `import()` rather than static imports. See `web/src/lib/files/editor/language-loader.ts` for the established pattern.
+- Lazy-load heavy vendor modules (e.g., CodeMirror language packs) via dynamic `import()` rather than static imports. See `web/src/lib/highlighting/codemirror-language-registry.ts` for the established pattern.
 - Vendor chunk boundaries are defined in `vite.config.ts` (`codeSplitting.groups`). When adding a new heavy dependency, add a corresponding vendor chunk entry.
 - Gate expensive fetches behind user intent -- defer API calls until the UI that needs the data is actually visible or activated.
 

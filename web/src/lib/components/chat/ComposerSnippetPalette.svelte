@@ -173,7 +173,7 @@
 				<div class="space-y-1">
 					{#each palette.filteredSnippets as snippet (snippet.key)}
 						<svelte:boundary>
-							<!-- The combobox keeps focus in the search input, tracks this option with aria-activedescendant, and handles keyboard selection through the input. Follow-up: CLEANUP_ROUND_TWO.md#a11y-suppression-register. -->
+							<!-- The combobox keeps focus in the search input and selects options through aria-activedescendant. Covered by __tests__/ComposerSnippetPalette.test.ts. -->
 							<!-- eslint-disable-next-line svelte/no-unused-svelte-ignore -- The ESLint rule misses the compiler warnings reported by svelte-check for this option. -->
 							<!-- svelte-ignore a11y_no_noninteractive_element_interactions, a11y_interactive_supports_focus, a11y_click_events_have_key_events -->
 							<div
@@ -246,7 +246,7 @@
 
 		{#if palette.highlightedSnippet && !mobileKeyboardVisible}
 			<div class="snippet-template-preview-shell shrink-0 border-t border-border px-4 py-3">
-				<!-- The overflow preview is keyboard-scrollable and exposes the complete template. Follow-up: INLINE_SNIPPET_EXPANSION.md#a11y-suppression-register. -->
+				<!-- The overflow preview is keyboard-scrollable and exposes the complete template. Covered by __tests__/ComposerSnippetPalette.test.ts. -->
 				<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 				<pre
 					role="region"
