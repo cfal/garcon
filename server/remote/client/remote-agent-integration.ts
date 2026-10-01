@@ -196,7 +196,11 @@ export class RemoteAgentIntegration implements AgentIntegration {
       },
     };
     this.permissions = {
-      respond: (request, options) => call('permissions.respond', request, { timeoutMs: PERMISSION_RESPONSE_TIMEOUT_MS, ...options }),
+      respond: async (request, options) => {
+        const timeoutMs = options?.timeoutMs ?? PERMISSION_RESPONSE_TIMEOUT_MS;
+        if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) throw new TypeError('Permission timeout must be a positive safe integer');
+        return call('permissions.respond', request, { ...options, timeoutMs: Math.min(timeoutMs, PERMISSION_RESPONSE_TIMEOUT_MS) });
+      },
     };
     this.catalog = {
       snapshot: ({ signal, timeoutMs, dispatchDeadline, ...request }) => call('catalog.snapshot', request, { signal, timeoutMs, dispatchDeadline }),

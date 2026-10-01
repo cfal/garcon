@@ -11,12 +11,9 @@ import { MALFORMED_DATA } from '../transport/failure-reason.js';
 import type { ObserveUndeliveredReply } from '../transport/rpc.js';
 import type { AgentProducerFrame, ProducerAcknowledgement, ProducerResumeState } from '../transport/rpc-protocol.js';
 import { SESSION_MESSAGE_BYTES } from '../transport/session-socket.js';
+import { EXECUTOR_RECONNECT_GRACE_MS } from '../transport/limits.js';
 import { EXECUTOR_DISCONNECTED_BEFORE_START } from '../../common/executor-disconnect.js';
 
-// Matches the controller's reconnect grace and VS Code Remote's reconnection
-// grace; after it, the controller fails the run and this worker detaches the
-// binding. https://github.com/microsoft/vscode/blob/f39c7109bf651845855cbef5af2e91b2c9bd0a74/src/vs/base/parts/ipc/common/ipc.net.ts#L301-L308
-const PRODUCER_RESUME_GRACE_MS = 3 * 60 * 60 * 1000;
 // A controller resumes every binding it still holds while installing a new
 // session, so bindings still suspended this long after one starts belong to a
 // controller that restarted or gave up. VS Code shortens its grace the same way
@@ -113,7 +110,7 @@ export class ProducerRelay {
   #pumpRetry: ReturnType<typeof setTimeout> | null = null;
 
   constructor(options: ProducerRelayOptions = {}) {
-    this.#graceMs = options.graceMs ?? PRODUCER_RESUME_GRACE_MS;
+    this.#graceMs = options.graceMs ?? EXECUTOR_RECONNECT_GRACE_MS;
     this.#supersededGraceMs = options.supersededGraceMs ?? PRODUCER_SUPERSEDED_GRACE_MS;
     this.#retainedLimit = options.retainedBytes ?? RETAINED_BYTES;
   }

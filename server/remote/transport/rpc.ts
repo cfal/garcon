@@ -1,5 +1,5 @@
 import {
-  AgentCallError, AgentIntegrationError,
+  AgentCallError, AgentIntegrationError, isAgentIntegrationErrorCode,
   type AgentIntegrationErrorCode, type AgentDeliveryOutcome, type ExecutorCallOptions,
 } from '@garcon/server-agent-interface';
 import type { JsonObject } from '@garcon/common/json';
@@ -633,9 +633,10 @@ function decodeFailure(error: Failure): Error {
       || !Number.isInteger(error.status) || error.status! < 400 || error.status! > 599) throw new Error('Invalid terminal RPC error');
     return new TerminalError(error.code as TerminalErrorCode, error.message, error.status);
   }
+  if (error.domain !== undefined || !isAgentIntegrationErrorCode(error.code)) throw new Error('Invalid provider RPC error');
   return error.outcome
-    ? new AgentCallError(error.outcome, error.message, error.code as AgentIntegrationErrorCode)
-    : new AgentIntegrationError(error.code as AgentIntegrationErrorCode, error.message, error.retryable, error.details);
+    ? new AgentCallError(error.outcome, error.message, error.code)
+    : new AgentIntegrationError(error.code, error.message, error.retryable, error.details);
 }
 
 // Names the handled method in stall reports when it looks like an RPC method name.

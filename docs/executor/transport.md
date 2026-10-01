@@ -9,7 +9,7 @@ one bidirectional Noise-encrypted WebSocket, regardless of which side dials.
 The shared secret authenticates Noise and the application handshake binding
 executor, runtime, version, and the fresh connection. The version is the
 package version followed by the executor protocol revision, as in
-`0.3.4+protocol.5`. The revision changes with anything either side sends or
+`0.3.4+protocol.8`. The revision changes with anything either side sends or
 accepts, so builds that disagree fail the handshake with "Executor version
 mismatch" instead of failing mid-session. TLS is required outside explicit
 development mode; Noise remains mandatory when outer TLS certificate
@@ -145,7 +145,9 @@ so once a newer session starts, bindings it has not resumed expire within
 Meanwhile the controller reports the executor, and the processing phase of its
 running chats, as `reconnecting`. Active runs stay active. Calls made meanwhile
 wait for the replacement session; see Calls Across Reconnects. A permission
-answer waits at most 20 seconds, so the browser gets a reply, and one that could
+answer waits at most 20 seconds, even if a caller requests a longer timeout;
+shorter caller timeouts are preserved. Both peers use the shared reconnect grace
+in `server/remote/transport/limits.ts`. The browser gets a reply, and one that could
 not be sent stays actionable. Admitting a new turn still requires a ready
 executor, and queued turns wait for it. A turn admitted before the loss
 continues its setup on the replacement session. A setup step that is safe to
@@ -353,6 +355,10 @@ the check does not wait for a reconnecting executor, and a read it sends still
 gets its 5 seconds.
 
 Each method has a continuity class, `rpcContinuity` in `rpc-protocol.ts`:
+
+RPC errors validate their domain and error code before entering application
+code. Unknown domains and unknown provider error codes retire the malformed
+session rather than introducing values outside the typed error contract.
 
 - `session` calls belong to their session: history readers, terminal
   attachments, binding and resuming producer bindings, forks, path-update

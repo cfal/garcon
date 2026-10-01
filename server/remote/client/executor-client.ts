@@ -14,6 +14,7 @@ import type { ExecutorRpcMethods, IntegrationManifest } from '../transport/rpc-p
 import type { SessionTransport } from '../transport/session-transport.js';
 import type { WebSocketLink } from '../transport/websocket-link.js';
 import { failureReason } from '../transport/failure-reason.js';
+import { EXECUTOR_RECONNECT_GRACE_MS } from '../transport/limits.js';
 import { createLogger, type Logger } from '../../common/log.js';
 import { ExecutorSessionLostError, reconnectTimedOut } from '../../common/executor-disconnect.js';
 import { unavailableService } from '../../common/unavailable-service.js';
@@ -78,9 +79,6 @@ interface SessionWaiter {
 
 class ExecutorConfigurationError extends Error {}
 
-// Matches the worker relay's grace. Within it, a replacement session resumes
-// transcript bindings; after it, active runs fail as disconnected.
-const EXECUTOR_RECONNECT_GRACE_MS = 3 * 60 * 60 * 1000;
 // A held call keeps up to this much of its deadline for the call itself, so it is
 // not dispatched just before timing out with an unknown outcome.
 const HELD_CALL_BUDGET_MS = 1_000;
