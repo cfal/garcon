@@ -322,8 +322,9 @@ starts when it asks for the lock, so operations queued behind a long wait give
 up in turn, and all of the operation's calls share it. A call passes it as
 `dispatchDeadline`: a call not yet sent fails as not dispatched at the
 deadline, and a sent journaled call whose session is lost stops waiting for a
-replacement session to reconcile it then, with an unknown outcome, and is never
-sent again after it. A read-only call, such as a
+replacement session to reconcile it then, with an unknown outcome, or as not
+dispatched if the reconciliation shows that the worker never received it; it is
+never sent again after the deadline. A read-only call, such as a
 validation, a project inspection, or a catalog read, may run until 5 seconds
 past the deadline once sent, so a read sent late still gets time to answer, and
 all of the operation's reads end by then. A sent mutation or launch otherwise
@@ -338,7 +339,7 @@ command requests takes its deadline when it asks for the requesting chat's
 lock, and a delegated start dispatches after releasing it. A scheduled prompt
 sends through the same locked paths after claiming its occurrence, so an
 occurrence that cannot reach a reconnecting executor in time fails, is recorded
-in the prompt log, and is not retried. Queued turns, the
+in the run log, and is not retried. Queued turns, the
 queue drain's admission check, chat-ID disclosures, and replies to agent
 commands run without one, so they keep waiting within their own deadlines. Some
 lock holders do not follow the rule yet and wait within their own deadlines
@@ -380,7 +381,11 @@ the same worker instance, the controller adopts every parked call into the new
 session and, ahead of producer resumption, sends `calls.reconcile` with each
 call's ID and the session and sequence number it was last sent with. The worker
 answers per call: `pending`, whose reply follows on the new session;
-`not-received`, which the controller sends again; or `unknown`. Calls of lost
+`not-received`, which the controller sends again; or `unknown`. A call whose
+dispatch deadline passes while it is reconciled is not sent again: it stops
+waiting with an unknown outcome and is cancelled on the worker, or, when the
+worker's late answer already shows that it never received the call, fails as
+not dispatched. Calls of lost
 sessions that a reconcile does not name belong to callers that gave up, so the
 worker cancels them as those callers' lost cancels would have. Retained replies
 are bounded at 64 MiB, dropping the oldest delivered ones first. A dropped reply
