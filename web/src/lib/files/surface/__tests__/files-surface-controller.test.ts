@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { FileTreeResponse } from '$shared/file-contracts';
 import { getTree } from '$lib/api/files.js';
 import { ApiError } from '$lib/api/client.js';
-import { SingletonSurfaceRegistry } from '../singleton-surfaces.svelte.js';
+import { SingletonSurfaceRegistry } from '$lib/workspace/singleton-surfaces.svelte.js';
 import { CommitController } from '$lib/git/commit/commit-controller.svelte.js';
 import { PullRequestsStore } from '$lib/git/pull-requests/pull-requests-store.svelte.js';
 import { createGitSurfaceTestDeps } from '$lib/git/__tests__/git-surface-test-deps.js';
