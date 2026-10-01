@@ -2,7 +2,7 @@ import { ensureSyntaxTree } from '@codemirror/language';
 import { Compartment, EditorState } from '@codemirror/state';
 import { describe, expect, it } from 'vitest';
 
-import { loadLanguageExtension } from '$lib/files/editor/language-loader.js';
+import { loadLanguageExtension } from '$lib/highlighting/codemirror-language-registry.js';
 
 async function loadIntoState(
 	filePath: string,
