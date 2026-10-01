@@ -67,6 +67,8 @@ export class TranscriptSearchController {
   readonly #deps: TranscriptSearchControllerDeps;
   readonly #lifecycleAbort = new AbortController();
   readonly #chatTails = new Map<string, Promise<void>>();
+  readonly #dirtyChats = new Set<string>();
+  readonly #commitJobs = new Set<string>();
   readonly #ingestPacer = new IngestPacer();
   readonly #indexedViews = new Map<
     string,
@@ -309,6 +311,7 @@ export class TranscriptSearchController {
     await this.#resyncTail.catch(() => undefined);
     await Promise.allSettled(this.#chatTails.values());
     this.#chatTails.clear();
+    this.#dirtyChats.clear();
     this.#indexedViews.clear();
     this.#ledgerSnapshots.clear();
     this.#adoptionFailedChatIds.clear();
@@ -328,6 +331,7 @@ export class TranscriptSearchController {
     await this.#resyncTail.catch(() => undefined);
     await Promise.allSettled(this.#chatTails.values());
     this.#chatTails.clear();
+    this.#dirtyChats.clear();
     this.#indexedViews.clear();
     this.#ledgerSnapshots.clear();
     this.#adoptionFailedChatIds.clear();
@@ -594,7 +598,7 @@ export class TranscriptSearchController {
       this.#ledgerSnapshots.delete(event.chatId);
       this.#adoptionFailedChatIds.delete(event.chatId);
       this.#fencedChatIds.delete(event.chatId);
-      this.#schedule(event.chatId, 'view-replacement', () => this.#syncCurrentChat(event.chatId));
+      this.#scheduleCommit(event.chatId);
       return;
     }
     const rows = rowsForCommit(event);
@@ -605,35 +609,49 @@ export class TranscriptSearchController {
     });
     this.#adoptionFailedChatIds.delete(event.chatId);
     this.#fencedChatIds.delete(event.chatId);
-    this.#schedule(event.chatId, 'append', async () => {
-      if (!this.#deps.hasChat(event.chatId)) {
-        this.#forgetChat(event.chatId);
-        return;
-      }
-      const first = rows[0]!.ordinal;
-      const last = rows.at(-1)!.ordinal;
+    this.#scheduleCommit(event.chatId);
+  }
+
+  #scheduleCommit(chatId: string): void {
+    this.#dirtyChats.add(chatId);
+    if (this.#commitJobs.has(chatId)) return;
+    this.#commitJobs.add(chatId);
+    this.#schedule(chatId, 'commit', async () => {
       try {
-        await this.#deps.service.syncChat({
-          mode: 'append',
-          chatId: event.chatId,
-          transcriptViewId: event.viewId,
-          expectedAfterOrdinal: first - 1,
-          targetThrough: last,
-          source: async function* (afterOrdinal) {
-            const fresh = rows.filter((row) => row.ordinal > afterOrdinal);
-            yield { rows: searchableRows(fresh), advanceTo: last };
-          },
-        });
-        if (!this.#deps.hasChat(event.chatId)) {
-          this.#forgetChat(event.chatId);
-          return;
+        while (this.#enabled && !this.#closed && this.#dirtyChats.delete(chatId)) {
+          try {
+            await this.#syncCommittedChat(chatId);
+          } catch (error) {
+            this.#warnIndexFailure(chatId, 'append', error);
+          }
         }
-        this.#indexedViews.set(event.chatId, { viewId: event.viewId, through: last });
-      } catch (error) {
-        if (!isIndexPositionMismatch(error)) throw error;
-        await this.#syncCurrentChat(event.chatId);
+      } finally {
+        this.#commitJobs.delete(chatId);
       }
     });
+  }
+
+  async #syncCommittedChat(chatId: string): Promise<void> {
+    if (!this.#deps.hasChat(chatId)) {
+      this.#forgetChat(chatId);
+      return;
+    }
+    const target = this.#ledgerSnapshots.get(chatId);
+    const indexed = this.#indexedViews.get(chatId);
+    if (!target || !indexed || target.viewId !== indexed.viewId) return this.#syncCurrentChat(chatId);
+    if (indexed.through >= target.through) return;
+    try {
+      await this.#deps.service.syncChat({
+        mode: 'append', chatId, transcriptViewId: target.viewId,
+        expectedAfterOrdinal: indexed.through, targetThrough: target.through,
+        source: afterOrdinal => this.#ledgerFrames(chatId, target.viewId, afterOrdinal, target.through),
+      });
+      if (!this.#deps.hasChat(chatId)) this.#forgetChat(chatId);
+      else this.#indexedViews.set(chatId, target);
+    } catch (error) {
+      if (!isIndexPositionMismatch(error)) throw error;
+      await this.#syncCurrentChat(chatId);
+    }
   }
 
   #schedule(chatId: string, operation: string, work: () => Promise<void>): void {
@@ -669,6 +687,7 @@ export class TranscriptSearchController {
   }
 
   #forgetChat(chatId: string): void {
+    this.#dirtyChats.delete(chatId);
     this.#indexedViews.delete(chatId);
     this.#ledgerSnapshots.delete(chatId);
     this.#adoptionFailedChatIds.delete(chatId);
