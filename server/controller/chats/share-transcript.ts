@@ -253,10 +253,12 @@ function formatMessage(message: ChatMessage, raw: unknown): TranscriptEntry {
   }
   if (message instanceof PermissionRequestMessage) {
     const requested = formatToolUseMessage(message.requestedTool);
+    let content = `Requested access for ${requested.role.toLowerCase()}.\n${requested.content}`.trim();
+    if (message.reason) content += `\nAgent's reason: ${message.reason}`;
     return {
       role: 'Permission Request',
       timestamp: message.timestamp,
-      content: `Requested access for ${requested.role.toLowerCase()}.\n${requested.content}`.trim(),
+      content,
     };
   }
   if (message instanceof PermissionResolvedMessage) {

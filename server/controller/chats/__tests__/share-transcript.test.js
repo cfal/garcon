@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  BashToolUseMessage,
   CliRowMessage,
   ErrorMessage,
+  PermissionRequestMessage,
   TranscriptNoticeMessage,
   UserMessage,
 } from '../../../../common/chat-types.ts';
@@ -10,6 +12,34 @@ import { renderSharedChatText } from '../share-transcript.ts';
 const AT = '2026-08-18T12:00:00.000Z';
 
 describe('shared transcript chat rows', () => {
+  it.each([undefined, 'Review the removal target.\nThe target is ambiguous.'])(
+    'preserves optional permission reasons in shared text: %s',
+    (reason) => {
+      const rendered = renderSharedChatText({
+        shareToken: 'synthetic-share-token',
+        chatId: 'synthetic-chat',
+        title: 'Synthetic permission',
+        agentId: 'synthetic-agent',
+        model: 'synthetic-model',
+        projectPath: '/synthetic/workspace',
+        sharedAt: AT,
+        messages: [new PermissionRequestMessage(
+          AT,
+          'synthetic-permission',
+          new BashToolUseMessage(AT, 'synthetic-tool', 'rmdir "$TARGET"'),
+          reason,
+        )],
+      });
+
+      expect(rendered).toContain(`[Permission Request] ${AT}\nRequested access for tool call.\nrmdir "$TARGET"`);
+      if (reason) {
+        expect(rendered).toContain(`Agent's reason: ${reason}`);
+      } else {
+        expect(rendered).not.toContain("Agent's reason:");
+      }
+    },
+  );
+
   it('[TLV5-CHAT-ROW.07-SHARE-UNIT-01] formats notice and error rows without losing content', () => {
     const rendered = renderSharedChatText({
       shareToken: 'synthetic-share-token',
