@@ -83,7 +83,8 @@
     "@xyflow/svelte@1.6.6": "patches/@xyflow%2Fsvelte@1.6.6.patch",
     "@replit/codemirror-vim@6.4.0": "patches/@replit%2Fcodemirror-vim@6.4.0.patch",
     "@replit/codemirror-vim-core@0.1.0": "patches/@replit%2Fcodemirror-vim-core@0.1.0.patch",
-    "bits-ui@2.19.2": "patches/bits-ui@2.19.2.patch"
+    "bits-ui@2.19.2": "patches/bits-ui@2.19.2.patch",
+    "svelte@5.57.1": "patches/svelte@5.57.1.patch"
   },
   "devDependencies": {
     "@xyflow/system": "0.0.82",
