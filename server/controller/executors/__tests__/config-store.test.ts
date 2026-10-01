@@ -106,6 +106,30 @@ test('normalized connection addresses remain usable within request and response 
   expect(store.list()).toEqual([created]);
 });
 
+test('policy-only updates preserve inherited public URLs across restart and public-base changes', async () => {
+  const { root, store } = await fixture();
+  const executor = await store.create({ direction: 'executor-connects', label: 'Inherited' });
+  await store.update(executor.id, { connection: { direction: 'executor-connects', noTls: true } });
+  const reloaded = new ExecutorConfigStore(root);
+  await reloaded.initialize();
+  expect(reloaded.require(executor.id).connection).toEqual({ kind: 'executor-connects', advertisedUrl: null });
+  expect(reloaded.connection(executor.id, 'https://new-controller.test/base').connectionUrl)
+    .toBe(`wss://new-controller.test/base/executor/${executor.id}#secret=${executor.secret}`);
+  await expect(reloaded.update(executor.id, { connection: { direction: 'controller-connects', noTls: true } }))
+    .rejects.toThrow('Changing connection direction requires a connection URL');
+});
+
+test.each(['executor-connects', 'controller-connects'] as const)('policy-only updates validate the retained explicit URL (%s)', async direction => {
+  const { store } = await fixture();
+  const executor = await store.create({ direction: 'executor-connects', label: 'Explicit' });
+  const connectionUrl = executorConnectionUrl('ws://worker.test/executor', executor.secret);
+  await store.update(executor.id, { connection: { direction, connectionUrl, noTls: true } });
+  await store.update(executor.id, { connection: { direction, noTls: true } });
+  expect(store.connection(executor.id).connectionUrl).toBe(connectionUrl);
+  await expect(store.update(executor.id, { connection: { direction, noTls: false } })).rejects.toThrow('require TLS');
+  expect(store.connection(executor.id).noTls).toBe(true);
+});
+
 test('pasted worker credentials are unique and concurrent creates do not overwrite each other', async () => {
   const { store } = await fixture();
   const connectionUrl = executorConnectionUrl('wss://worker.example.com/executor', createExecutorSecret());

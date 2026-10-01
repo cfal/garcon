@@ -112,6 +112,17 @@ describe('ExecutorEditor', () => {
 		expect(transport.updateExecutor).toHaveBeenLastCalledWith(remoteExecutor.id, { label: 'Renamed', enabled: false });
 	});
 
+	it('omits an unchanged URL from policy-only edits, preserving inherited public addresses', async () => {
+		const { editor, transport } = fixture();
+		await editor.edit(remoteExecutor);
+		editor.noTls = true;
+		expect(await editor.save()).toBe(true);
+		expect(transport.updateExecutor).toHaveBeenLastCalledWith(remoteExecutor.id, {
+			label: remoteExecutor.label,
+			connection: { direction: 'executor-connects', noTls: true, allowUnverifiedTls: false },
+		});
+	});
+
 	it('persists certificate opt-out only for outbound connections and clears it with the editor', async () => {
 		const { editor, transport } = fixture();
 		await editor.edit({ ...remoteExecutor, direction: 'controller-connects' });
@@ -120,7 +131,7 @@ describe('ExecutorEditor', () => {
 		await editor.save();
 		expect(transport.updateExecutor).toHaveBeenLastCalledWith(remoteExecutor.id, {
 			label: remoteExecutor.label,
-			connection: { direction: 'controller-connects', connectionUrl: editor.connectionUrl, noTls: false, allowUnverifiedTls: true },
+			connection: { direction: 'controller-connects', noTls: false, allowUnverifiedTls: true },
 		});
 		editor.direction = 'executor-connects';
 		await editor.save();

@@ -172,7 +172,7 @@ describe('ExecutorsDialog', () => {
 		await fireEvent.submit(url.closest('form')!);
 		await waitFor(() => expect(api.updateExecutor).toHaveBeenCalledWith(remoteExecutor.id, {
 			label: 'Worker',
-			connection: { direction: 'controller-connects', connectionUrl: connection.connectionUrl, noTls: false, allowUnverifiedTls: true },
+			connection: { direction: 'controller-connects', noTls: false, allowUnverifiedTls: true },
 		}));
 	});
 });

@@ -44,7 +44,8 @@ test('executor onboarding is available offline and keeps credentials out of publ
       label: 'Waiting worker', direction: 'executor-connects',
     });
     const descriptor = new URL(created.connectionUrl);
-    expect(descriptor.hostname).toBe('example.com');
+    expect(descriptor.host).toBe(new URL(fixture.garcon.baseUrl).host);
+    expect(descriptor.protocol).toBe('ws:');
     expect(descriptor.pathname).toBe(`/executor/${created.id}`);
     const secret = new URLSearchParams(descriptor.hash.slice(1)).get('secret')!;
     expect(secret).toHaveLength(43);
@@ -54,6 +55,11 @@ test('executor onboarding is available offline and keeps credentials out of publ
     const reveal = await fixture.client.fetch(`/api/v1/executors/${created.id}/connection`);
     expect(reveal.headers.get('cache-control')).toBe('no-store');
     expect(await reveal.json()).toEqual({ connectionUrl: created.connectionUrl, noTls: false, allowUnverifiedTls: false });
+    await client.patch(`/api/v1/executors/${created.id}`, { connection: { direction: 'executor-connects', noTls: true } });
+    const inherited = await client.fetch(`/api/v1/executors/${created.id}/connection`, { headers: { host: 'next-controller.test' } });
+    expect(new URL((await inherited.json()).connectionUrl).host).toBe('next-controller.test');
+    const stored = JSON.parse(await readFile(join(fixture.dirs.workspace, 'executors.json'), 'utf8'));
+    expect(stored.executors[0].connection).toEqual({ kind: 'executor-connects', advertisedUrl: null });
     await expect(client.get(`/api/v1/models?executorId=${created.id}`)).rejects.toMatchObject({ status: 503 });
     await expect(client.delete('/api/v1/executors/local')).rejects.toMatchObject({
       status: 404, body: { errorCode: 'EXECUTOR_NOT_FOUND' },

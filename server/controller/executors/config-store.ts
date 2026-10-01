@@ -118,12 +118,17 @@ export class ExecutorConfigStore {
       };
       if (request.connection) {
         const { direction, connectionUrl, noTls } = request.connection;
-        const parsed = parseConnectionUrl(connectionUrl);
-        const socketUrl = validateExecutorSocketUrl(parsed.socketUrl, { noTls });
+        if (connectionUrl === undefined && direction !== previous.connection.kind) {
+          throw new ValidationDomainError('Changing connection direction requires a connection URL');
+        }
+        const parsed = connectionUrl === undefined ? null : parseConnectionUrl(connectionUrl);
+        const socketUrl = parsed?.socketUrl ?? (previous.connection.kind === 'controller-connects'
+          ? previous.connection.targetUrl : previous.connection.advertisedUrl);
+        const address = socketUrl === null ? null : validateExecutorSocketUrl(socketUrl, { noTls });
         executor = {
-          ...executor, secret: parsed.secret, noTls,
-          allowUnverifiedTls: direction === 'controller-connects' && socketUrl.startsWith('wss:') && request.connection.allowUnverifiedTls === true,
-          connection: direction === 'executor-connects' ? { kind: direction, advertisedUrl: socketUrl } : { kind: direction, targetUrl: socketUrl },
+          ...executor, secret: parsed?.secret ?? previous.secret, noTls,
+          allowUnverifiedTls: direction === 'controller-connects' && address?.startsWith('wss:') === true && request.connection.allowUnverifiedTls === true,
+          connection: direction === 'executor-connects' ? { kind: direction, advertisedUrl: address } : { kind: direction, targetUrl: address! },
         };
         assertConnectionLength(executor);
       }

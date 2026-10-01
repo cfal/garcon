@@ -66,7 +66,7 @@ export interface UpdateExecutorRequest {
   readonly allowExecutorManagement?: boolean;
   readonly connection?: {
     readonly direction: ExecutorDirection;
-    readonly connectionUrl: string;
+    readonly connectionUrl?: string;
     readonly noTls: boolean;
     readonly allowUnverifiedTls?: boolean;
   };
@@ -125,7 +125,8 @@ export function parseUpdateExecutorRequest(value: unknown): UpdateExecutorReques
     || (connection.direction !== 'executor-connects' && connection.direction !== 'controller-connects')
     || connection.allowUnverifiedTls !== undefined && typeof connection.allowUnverifiedTls !== 'boolean'
     || connection.direction === 'executor-connects' && connection.allowUnverifiedTls === true
-    || !isConnectionUrl(connection.connectionUrl) || typeof connection.noTls !== 'boolean')) return null;
+    || connection.connectionUrl !== undefined && !isConnectionUrl(connection.connectionUrl)
+    || typeof connection.noTls !== 'boolean')) return null;
   return {
     ...(value.allowExecutorManagement === undefined ? {} : { allowExecutorManagement: value.allowExecutorManagement as boolean }),
     ...(value.label === undefined ? {} : { label: (value.label as string).trim() }),

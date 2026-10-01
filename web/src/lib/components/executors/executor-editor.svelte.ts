@@ -92,14 +92,16 @@ export class ExecutorEditor {
 		const allowUnverifiedTls = this.direction === 'controller-connects' && !this.withoutTls && this.allowUnverifiedTls;
 		try {
 			if (this.id) {
-				const connectionChanged = this.connectionUrl !== this.#originalUrl || this.direction !== this.#originalDirection
+				const addressChanged = this.connectionUrl.trim() !== this.#originalUrl.trim() || this.direction !== this.#originalDirection;
+				const connectionChanged = addressChanged
 					|| this.noTls !== this.#originalInsecure || allowUnverifiedTls !== this.#originalUnverifiedTls;
 				const executors = await this.transport.updateExecutor(this.id, {
 					label: this.label.trim(),
 					...(this.enabled !== this.#originalEnabled ? { enabled: this.enabled } : {}),
 					...(this.allowControllerCli !== this.#originalControllerCli ? { allowControllerCli: this.allowControllerCli } : {}),
 					...(this.allowExecutorManagement !== this.#originalExecutorManagement ? { allowExecutorManagement: this.allowExecutorManagement } : {}),
-					...(connectionChanged ? { connection: { direction: this.direction, connectionUrl: this.connectionUrl.trim(), noTls: this.noTls, allowUnverifiedTls } } : {}),
+					...(connectionChanged ? { connection: { direction: this.direction,
+						...(addressChanged ? { connectionUrl: this.connectionUrl.trim() } : {}), noTls: this.noTls, allowUnverifiedTls } } : {}),
 				});
 				if (this.executors.executors === previousExecutors) this.executors.applySnapshot(executors);
 				else await this.executors.refreshAfterMutation();

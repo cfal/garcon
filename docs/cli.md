@@ -43,6 +43,9 @@ infer external TLS termination or proxy path rewriting: configure those explicit
 An executor's manually saved full URL overrides the generated default. No example
 URL is generated, and Copy is disabled for unusable addresses or WS without the
 explicit no-TLS opt-in. Changing the public base does not rotate executor secrets.
+TLS-policy edits preserve the inherited public URL. In connection PATCH requests,
+omit `connectionUrl` to retain the current address and secret; an explicit URL
+sets an override. Changing direction requires an explicit URL.
 
 Add executors from the Executors dialog or the CLI management commands below.
 For an executor that connects to the

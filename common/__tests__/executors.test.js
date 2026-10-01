@@ -48,6 +48,16 @@ test('management grants are explicit booleans independent of workspace CLI acces
   }
 });
 
+test('connection updates permit an omitted URL but reject empty or malformed URL fields', () => {
+  for (const direction of ['executor-connects', 'controller-connects']) {
+    const connection = { direction, noTls: true };
+    expect(parseUpdateExecutorRequest({ connection })).toEqual({ connection });
+    for (const connectionUrl of ['', null, 3]) {
+      expect(parseUpdateExecutorRequest({ connection: { ...connection, connectionUrl } })).toBeNull();
+    }
+  }
+});
+
 test('public snapshots exclude credentials and preserve unavailable remote targets', () => {
   const remote = {
     id: remoteId, label: 'Worker', enabled: true, kind: 'remote', direction: 'executor-connects',
