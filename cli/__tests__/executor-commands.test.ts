@@ -79,11 +79,25 @@ test('all administration verbs call their typed operation and ordinary output st
     ['update', id, '--label', 'Worker'], ['enable', id], ['disable', id], ['delete', id],
     ['assign-provider', id, '--provider', 'synthetic-profile'], ['unassign-provider', id, '--provider', 'synthetic-profile']]) {
     const f = fixture();
-    await runExecutorCommand(command([...args, '--json']), f.client, f.output);
+    const onSubmission = mock(() => {});
+    await runExecutorCommand(command([...args, '--json']), f.client, f.output, undefined, onSubmission);
     expect(JSON.parse(f.stdout())).toBeDefined();
     expect(f.stdout()).not.toContain('secret');
     expect(f.stderr()).toBe('');
+    const isRead = ['list', 'show', 'providers', 'wait'].includes(args[0]!);
+    expect(onSubmission).toHaveBeenCalledTimes(isRead ? 0 : 1);
   }
+});
+
+test('a submission callback failure remains definitive and prevents mutation dispatch', async () => {
+  const f = fixture();
+  const failure = new Error('Synthetic submission failure');
+  const onSubmission = mock(() => { throw failure; });
+  await expect(runExecutorCommand(command(['delete', id]), f.client, f.output, undefined, onSubmission))
+    .rejects.toBe(failure);
+  expect(onSubmission).toHaveBeenCalledTimes(1);
+  expect(f.client.deleteExecutor).not.toHaveBeenCalled();
+  expect(f.stdout()).toBe('');
 });
 
 test('unknown mutation outcomes are reported without retries and controls cannot inject terminal escapes', async () => {

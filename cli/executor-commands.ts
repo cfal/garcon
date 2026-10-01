@@ -25,7 +25,12 @@ function isDefinitiveMutationRejection(error: unknown): boolean {
     || error.errorCode === 'SERVER_SHUTTING_DOWN';
 }
 
-async function waitReady(client: ExecutorCommandClient, id: string, timeoutMs: number, signal?: AbortSignal): Promise<ExecutorSnapshot> {
+async function waitReady(
+  client: ExecutorCommandClient,
+  id: string,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<ExecutorSnapshot> {
   const timeout = AbortSignal.timeout(timeoutMs);
   const waiting = signal ? AbortSignal.any([signal, timeout]) : timeout;
   let last: ExecutorSnapshot | undefined;
@@ -40,60 +45,114 @@ async function waitReady(client: ExecutorCommandClient, id: string, timeoutMs: n
     }
   } catch (error) {
     signal?.throwIfAborted();
-    if (timeout.aborted) throw new CliError('executors', `timed out waiting for executor readiness${last?.lastError ? `: ${last.lastError.message}` : ''}`, 3);
+    if (timeout.aborted) {
+      const detail = last?.lastError ? `: ${last.lastError.message}` : '';
+      throw new CliError('executors', `timed out waiting for executor readiness${detail}`, 3);
+    }
     throw error;
   }
 }
 
-export async function runExecutorCommand(command: ExecutorCliCommand, client: ExecutorCommandClient, output: CliOutput,
-  signal?: AbortSignal, onSubmission: () => void = () => {}): Promise<void> {
+export async function runExecutorCommand(
+  command: ExecutorCliCommand,
+  client: ExecutorCommandClient,
+  output: CliOutput,
+  signal?: AbortSignal,
+  onSubmission: () => void = () => {},
+): Promise<void> {
   const operation = command.operation;
   let submitted = false;
-  const result = (value: unknown, human?: string) => output.result(command.json
-    ? terminalLine(JSON.stringify(value)) : human ?? terminalLine(JSON.stringify(value)));
-  try {
-    if (operation.action === 'list') {
-      const executors = await client.listExecutors(signal);
-      result({ executors }, formatTextTable(['ID', 'LABEL', 'STATUS', 'CLI', 'MANAGEMENT'], executors.map((entry) =>
-        [entry.id, terminalLine(entry.label), entry.enabled ? entry.availability : 'disabled', String(entry.allowControllerCli), String(entry.allowExecutorManagement)])));
-    } else if (operation.action === 'show') {
-      result(requireExecutor(await client.listExecutors(signal), operation.id));
-    } else if (operation.action === 'providers') {
-      const providers = await client.getExecutorProviders(signal);
-      result({ providers }, formatTextTable(['ID', 'LABEL', 'EXECUTORS'], providers.map((entry) =>
-        [entry.id, terminalLine(entry.label), entry.executorIds.join(', ')])));
-    } else if (operation.action === 'wait') {
-      result(await waitReady(client, operation.id, operation.timeoutMs, signal));
-    } else if (operation.action === 'connection') {
-      if (operation.outputPath) await refuseExistingDocumentOutput({ outputPath: operation.outputPath, phase: 'executors', noun: 'connection' });
-      const connection = await client.getExecutorConnection(operation.id, signal);
-      if (operation.outputPath) {
-        await publishAtomicDocument({ outputPath: operation.outputPath, document: `${connection.connectionUrl}\n`, force: false,
-          phase: 'executors', noun: 'connection', temporarySuffix: 'connection', signal });
-        output.diagnostic(`Connection credential written to ${terminalLine(operation.outputPath)}`);
-      } else result(connection, terminalLine(connection.connectionUrl));
+  const writeResult = (value: unknown, human?: string) => {
+    if (!command.json && human != null) {
+      output.result(human);
     } else {
-      signal?.throwIfAborted();
-      onSubmission();
-      submitted = true;
-      if (operation.action === 'create') {
+      output.result(terminalLine(JSON.stringify(value)));
+    }
+  };
+  try {
+    switch (operation.action) {
+      case 'list': {
+        const executors = await client.listExecutors(signal);
+        const rows = executors.map((entry) => [
+          entry.id,
+          terminalLine(entry.label),
+          entry.enabled ? entry.availability : 'disabled',
+          String(entry.allowControllerCli),
+          String(entry.allowExecutorManagement),
+        ]);
+        writeResult({ executors }, formatTextTable(['ID', 'LABEL', 'STATUS', 'CLI', 'MANAGEMENT'], rows));
+        return;
+      }
+      case 'show':
+        writeResult(requireExecutor(await client.listExecutors(signal), operation.id));
+        return;
+      case 'providers': {
+        const providers = await client.getExecutorProviders(signal);
+        const rows = providers.map((entry) => [entry.id, terminalLine(entry.label), entry.executorIds.join(', ')]);
+        writeResult({ providers }, formatTextTable(['ID', 'LABEL', 'EXECUTORS'], rows));
+        return;
+      }
+      case 'wait':
+        writeResult(await waitReady(client, operation.id, operation.timeoutMs, signal));
+        return;
+      case 'connection': {
+        if (operation.outputPath) {
+          await refuseExistingDocumentOutput({ outputPath: operation.outputPath, phase: 'executors', noun: 'connection' });
+        }
+        const connection = await client.getExecutorConnection(operation.id, signal);
+        if (operation.outputPath) {
+          await publishAtomicDocument({
+            outputPath: operation.outputPath,
+            document: `${connection.connectionUrl}\n`,
+            force: false,
+            phase: 'executors',
+            noun: 'connection',
+            temporarySuffix: 'connection',
+            signal,
+          });
+          output.diagnostic(`Connection credential written to ${terminalLine(operation.outputPath)}`);
+        } else {
+          writeResult(connection, terminalLine(connection.connectionUrl));
+        }
+        return;
+      }
+    }
+
+    signal?.throwIfAborted();
+    onSubmission();
+    submitted = true;
+    switch (operation.action) {
+      case 'create': {
         const created = await client.createExecutor(operation.request, signal);
-        result(created, created.id);
-      } else if (operation.action === 'delete') {
+        writeResult(created, created.id);
+        return;
+      }
+      case 'delete': {
         const remaining = await client.deleteExecutor(operation.id, signal);
-        if (remaining.some((entry) => entry.id === operation.id)) throw new CliError('executors', 'executor deletion was not confirmed', 3);
-        result({ id: operation.id, deleted: true });
-      } else if (operation.action === 'assign-provider' || operation.action === 'unassign-provider') {
+        if (remaining.some((entry) => entry.id === operation.id)) {
+          throw new CliError('executors', 'executor deletion was not confirmed', 3);
+        }
+        writeResult({ id: operation.id, deleted: true });
+        return;
+      }
+      case 'assign-provider':
+      case 'unassign-provider': {
         const assigned = operation.action === 'assign-provider';
         const providers = assigned
           ? await client.assignExecutorProvider(operation.id, operation.providerId, signal)
           : await client.unassignExecutorProvider(operation.id, operation.providerId, signal);
-        const membership = providers.find((provider) => provider.id === operation.providerId)?.executorIds.includes(operation.id) === true;
-        if (membership !== assigned) throw new CliError('executors', 'provider assignment was not confirmed', 3);
-        result({ executorId: operation.id, providerId: operation.providerId, assigned });
-      } else {
+        const provider = providers.find((entry) => entry.id === operation.providerId);
+        const isAssigned = provider?.executorIds.includes(operation.id) === true;
+        if (isAssigned !== assigned) throw new CliError('executors', 'provider assignment was not confirmed', 3);
+        writeResult({ executorId: operation.id, providerId: operation.providerId, assigned });
+        return;
+      }
+      case 'update':
+      case 'enable':
+      case 'disable': {
         const request = operation.action === 'update' ? operation.request : { enabled: operation.action === 'enable' };
-        result(requireExecutor(await client.updateExecutor(operation.id, request, signal), operation.id));
+        writeResult(requireExecutor(await client.updateExecutor(operation.id, request, signal), operation.id));
+        return;
       }
     }
   } catch (error) {

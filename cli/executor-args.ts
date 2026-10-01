@@ -47,8 +47,10 @@ export function parseExecutorCliCommand(positionals: readonly string[], values: 
   const needsId = action !== 'create' && action !== 'list' && action !== 'providers';
   if (positionals.length !== (needsId ? 3 : 2)) throw argumentError(`executor ${action} ${needsId ? 'requires exactly one executor ID' : 'takes no executor ID'}`);
   const id = positionals[2] ?? '';
-  if (needsId && !(action === 'show' || action === 'wait' || action.endsWith('provider') ? isExecutorId(id) : isRemoteExecutorId(id))) {
-    throw argumentError(`executor ${action} requires ${action === 'show' || action === 'wait' || action.endsWith('provider') ? 'local or ' : ''}a remote executor UUID`);
+  const allowsLocal = action === 'show' || action === 'wait' || action === 'assign-provider' || action === 'unassign-provider';
+  if (needsId) {
+    const validId = allowsLocal ? isExecutorId(id) : isRemoteExecutorId(id);
+    if (!validId) throw argumentError(`executor ${action} requires ${allowsLocal ? 'local or ' : ''}a remote executor UUID`);
   }
   const text = (key: string): string | undefined => {
     const value = values[key];
