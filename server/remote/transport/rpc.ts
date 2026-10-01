@@ -335,13 +335,17 @@ export class ExecutorRpc {
     for (const call of calls) {
       if (this.#pending.get(call.id) !== call) continue;
       const state = states.get(call.id);
+      // The reply can be read after the call's dispatch deadline, before its expiry has run.
+      const overdue = call.dispatchDeadline !== undefined && performance.now() >= call.dispatchDeadline;
       if (state === 'pending') {
-        disarmExpiry(call);
+        // A call still running on the worker stops waiting as its expiry would have stopped it.
+        if (overdue) call.expire();
+        else disarmExpiry(call);
         continue;
       }
       if (state === 'not-received') {
-        // Its expiry may not have run yet; a call past its dispatch deadline is never sent.
-        if (call.dispatchDeadline !== undefined && performance.now() >= call.dispatchDeadline) {
+        // A call the worker never received is not sent after its deadline.
+        if (overdue) {
           this.#pending.delete(call.id);
           call.cleanup();
           call.reject(reconnectTimedOut());
