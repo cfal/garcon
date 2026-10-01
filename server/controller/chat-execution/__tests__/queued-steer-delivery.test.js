@@ -262,6 +262,31 @@ describe('QueuedSteerDelivery', () => {
     expect((await f.controls.read(CHAT_ID)).entries).toEqual([]);
   });
 
+  it('runs a pass requested during a failed one', async () => {
+    const resolving = deferred();
+    const failing = deferred();
+    let resolutions = 0;
+    const f = scaffold({
+      resolveContent: mock(async ({ content }) => {
+        resolutions += 1;
+        if (resolutions > 1) return content;
+        resolving.resolve();
+        await failing.promise;
+        throw new DomainError('EXECUTOR_UNAVAILABLE', 'Executor is unavailable', 503, true);
+      }),
+    });
+    await f.addSteer('guidance');
+
+    f.delivery.request(CHAT_ID);
+    await resolving.promise;
+    f.delivery.request(CHAT_ID);
+    failing.resolve();
+    while (f.tasks.length > 0) await f.tasks.shift();
+
+    expect(f.admitInput).toHaveBeenCalledTimes(1);
+    expect((await f.controls.read(CHAT_ID)).entries).toEqual([]);
+  });
+
   it('stops without delivering when target capture fails', async () => {
     const f = scaffold();
     f.turnRunner.captureSteerTarget.mockImplementation(async () => {

@@ -58,22 +58,29 @@ export class QueuedSteerDelivery {
     }
     const pass = { rerun: false };
     this.#passes.set(chatId, pass);
-    this.options.trackTask(this.#run(chatId, pass).catch((error: unknown) => {
-      logger.warn('queued steer delivery failed', {
-        chatId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }));
+    this.options.trackTask(this.#run(chatId, pass));
   }
 
   async #run(chatId: string, pass: { rerun: boolean }): Promise<void> {
     try {
       do {
         pass.rerun = false;
-        while (await this.#deliverHead(chatId)) { /* The next head may be a steer as well. */ }
+        await this.#deliverHeads(chatId);
       } while (pass.rerun);
     } finally {
       this.#passes.delete(chatId);
+    }
+  }
+
+  // A failure ends this attempt without retrying it, but a request made meanwhile still runs.
+  async #deliverHeads(chatId: string): Promise<void> {
+    try {
+      while (await this.#deliverHead(chatId)) { /* The next head may be a steer as well. */ }
+    } catch (error) {
+      logger.warn('queued steer delivery failed', {
+        chatId,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
