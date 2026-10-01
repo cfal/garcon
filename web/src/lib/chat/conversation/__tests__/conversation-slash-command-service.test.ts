@@ -4,6 +4,7 @@ import { compactChat, forkChat, forkRunChat, selfHandoffRunChat } from '$lib/api
 import { scheduleChatPrompt } from '$lib/api/scheduled-prompts.js';
 import { ApiError } from '$lib/api/client.js';
 import { AssistantMessage, UserMessage } from '$shared/chat-types';
+import type { TranscriptMessage } from '$shared/chat-view';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
 import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
 import type { ChatTagReconciliationKind } from '$lib/chat/sessions/chat-sessions-contract.js';
@@ -216,7 +217,7 @@ function createDeps(chat = createChat()) {
 					ordinal: 9,
 					message: new AssistantMessage('2026-07-29T00:00:00.000Z', 'selected reply'),
 				},
-			],
+			] as TranscriptMessage[],
 			isUserScrolledUp: true,
 			getCursor: vi.fn(() => cursor),
 			appendLocalNotice,
