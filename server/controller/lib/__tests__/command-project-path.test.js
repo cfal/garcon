@@ -8,6 +8,20 @@ import {
 const PROJECT_PATH = '/workspace/project';
 
 describe('command project path resolution', () => {
+  it('preserves nonblank paths before inspection', async () => {
+    for (const resolve of [resolveStartProjectPath, resolveUpdatedProjectPath]) {
+      const seen = [];
+      const inspect = async (projectPath, executorId) => {
+        seen.push([projectPath, executorId]);
+        return { kind: 'available', effectiveProjectKey: projectPath };
+      };
+      await expect(resolve(`${PROJECT_PATH} `, inspect, 'local')).resolves.toBe(`${PROJECT_PATH} `);
+      expect(seen).toEqual([[`${PROJECT_PATH} `, 'local']]);
+      await expect(resolve(' \t ', inspect, 'local')).rejects.toThrow('projectPath is required');
+      expect(seen).toHaveLength(1);
+    }
+  });
+
   it('returns the canonical path from a successful inspection', async () => {
     const inspect = async () => ({
       kind: 'available',

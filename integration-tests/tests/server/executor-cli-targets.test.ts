@@ -1,4 +1,6 @@
 import { expect, test } from 'bun:test';
+import { mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
 import { effectiveExecutorId } from '../../../common/executors.js';
 import { withCliFixture, runCli } from '../../support/cli-fixture.js';
 import { GarconTestClient } from '../../support/garcon-client.js';
@@ -9,6 +11,9 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
     await withCliFixture(`executor-cli-targets-${executionBackend}`, async fixture => {
       const remoteId = fixture.client.executorId;
       const agent = fixture.directAgents.openAi;
+      const projectPath = join(fixture.dirs.project, 'synthetic-project ');
+      await mkdir(projectPath.trimEnd());
+      await mkdir(projectPath);
       const local = await GarconTestClient.connect(fixture.garcon.baseUrl, { authToken: fixture.garcon.authToken, executorId: 'local' });
       try {
         const localProvider = await local.createOpenAiProvider(fixture.fakeProviders.openAi.baseUrl);
@@ -30,13 +35,13 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
             expect(denied.stderr).toContain('explicit absolute --cwd');
           }
           // Identical path strings must not collapse distinct executor identities.
-          const started = await runCli(fixture, [...args, '--cwd', fixture.dirs.project], runtime);
+          const started = await runCli(fixture, [...args, '--cwd', projectPath], runtime);
           expect(started, started.stderr).toMatchObject({ exitCode: 0, stderr: '' });
           const receipt = JSON.parse(started.stdout).receipt;
           await fixture.client.waitForTurnTerminal(receipt.chatId, receipt.turnId);
           const snapshot = await fixture.client.getChatSnapshot(receipt.chatId);
           expect(effectiveExecutorId(snapshot.chat.executorId)).toBe(executorId);
-          expect(snapshot.chat.projectPath).toBe(fixture.dirs.project);
+          expect(snapshot.chat.projectPath).toBe(projectPath);
           const binding = await waitForPersistedNativeSession({ directories: fixture.dirs, chatId: receipt.chatId, agentId: agent.agentId });
           const lookup = await runCli(fixture, ['lookup-native-session', binding.agentSessionId!, '--executor', executorId], runtime);
           expect(lookup).toEqual({ exitCode: 0, stdout: `${receipt.chatId}\n`, stderr: '' });

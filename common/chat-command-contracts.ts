@@ -563,7 +563,7 @@ export function parseStartChatCommandRequest(value: unknown): StartChatCommandRe
     chatId,
     ...(parentChatId === undefined ? {} : { parentChatId }),
     agentId,
-    projectPath: requiredString(body, 'projectPath'),
+    projectPath: requiredContent(body, 'projectPath'),
     ...(executorId === undefined ? {} : { executorId }),
     model: requiredString(body, 'model'),
     apiProviderId: optionalNullableString(body, 'apiProviderId'),

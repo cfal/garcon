@@ -88,7 +88,7 @@ describe('chat command request parsers', () => {
     expect(parsed).toMatchObject({
       clientRequestId: 'request-1',
       clientMessageId: 'message-1',
-      projectPath: '/repo',
+      projectPath: ' /repo ',
       model: 'opus',
       permissionMode: 'default',
       thinkingMode: 'none',
@@ -97,6 +97,18 @@ describe('chat command request parsers', () => {
       origin: 'interactive',
       parentChatId: SOURCE_CHAT_ID,
     });
+  });
+
+  it('rejects blank start project paths without normalizing valid paths', () => {
+    const input = {
+      origin: 'cli', clientRequestId: 'request-path', clientMessageId: 'message-path',
+      chatId: CHAT_ID, agentId: 'claude', projectPath: '/repo ', model: 'opus',
+      agentSettings: agentSettings(), command: 'hello',
+    };
+    expect(parseStartChatCommandRequest(input).projectPath).toBe('/repo ');
+    for (const projectPath of [undefined, null, '', ' \t ', 42]) {
+      expect(() => parseStartChatCommandRequest({ ...input, projectPath })).toThrow('projectPath is required');
+    }
   });
 
   it('rejects storage-shaped parentage on start requests', () => {

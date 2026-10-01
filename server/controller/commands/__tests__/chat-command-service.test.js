@@ -2180,6 +2180,24 @@ describe('ChatCommandService', () => {
     expect(queue.runInitialInput).toHaveBeenCalledTimes(2);
   });
 
+  it.each(['', ' '])('distinguishes exact start project paths in admission and replay: %j', async (suffix) => {
+    const directory = path.join(projectBaseDir, 'synthetic-project');
+    await fs.mkdir(directory);
+    await fs.mkdir(`${directory} `);
+    const { service, sessions, queue } = makeService({ session: null });
+    const input = {
+      origin: 'cli', chatId: TARGET_CHAT_ID, agentId: 'claude',
+      projectPath: `${directory}${suffix}`, command: 'Synthetic task', model: 'opus',
+      agentSettings: agentSettings(), clientRequestId: 'req-start-path', clientMessageId: 'msg-start-path',
+    };
+    const first = await service.submitStart(input);
+    expect(sessions.get(TARGET_CHAT_ID).projectPath).toBe(input.projectPath);
+    await expect(service.submitStart(input)).resolves.toMatchObject({ status: 'duplicate', turnId: first.turnId });
+    await expect(service.submitStart({ ...input, projectPath: `${directory}${suffix ? '' : ' '}` }))
+      .rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
+    expect(queue.runInitialInput).toHaveBeenCalledTimes(1);
+  });
+
   it('replays an accepted start before revalidating a removed project path', async () => {
     const { service, queue } = makeService({ session: null });
     const input = {

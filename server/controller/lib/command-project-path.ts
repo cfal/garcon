@@ -34,8 +34,8 @@ export async function resolveUpdatedProjectPath(
 }
 
 function requiredProjectPath(projectPath: string | undefined): string {
-  const requestedPath = String(projectPath || '').trim();
-  if (!requestedPath) {
+  const requestedPath = String(projectPath || '');
+  if (!requestedPath.trim()) {
     throw new CommandValidationError('VALIDATION_FAILED', 'projectPath is required');
   }
   return requestedPath;

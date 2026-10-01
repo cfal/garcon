@@ -126,7 +126,7 @@ export class StartCommands {
     deadline: number,
   ): Promise<NormalizedChatStart> {
     const images = input.images ?? [];
-    const idempotencyProjectPath = String(input.projectPath || '').trim();
+    const idempotencyProjectPath = String(input.projectPath || '');
     const executorId = parseExecutorId(input.executorId);
     if (!executorId) throw new CommandValidationError('VALIDATION_FAILED', 'Invalid executor ID');
 
@@ -491,7 +491,7 @@ function startReplayPayload(
     parentChatId: input.parentChatId ?? null,
     clientMessageId: input.clientMessageId,
     agentId: input.agentId,
-    projectPath: String(input.projectPath || '').trim(),
+    projectPath: String(input.projectPath || ''),
     command: input.command,
     model: input.model,
     images: input.images ?? [],
