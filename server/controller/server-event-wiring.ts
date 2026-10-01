@@ -4,7 +4,8 @@ import { effectiveExecutorId } from '../../common/executors.js';
 import type { TranscriptSearchStatusV1 } from '../../common/chat-search.js';
 import { isChatListInvalidationReason } from '../../common/ws-events.ts';
 import { isErrorCode } from '../../common/error-codes.ts';
-import { hasPendingTurnInput, toClientChatExecutionControlState } from './chat-execution/control-state.ts';
+import { toClientChatExecutionControlState } from './chat-execution/control-state.ts';
+import { wireExecutorAvailability } from './executors/availability-wiring.js';
 import { createTranscriptEventFanout } from './ledger/event-fanout.js';
 import { isLedgerPreambleSelectionChangedNoticeDetail } from './ledger/contracts.js';
 import type { TurnEventMetadata } from './agents/event-bus.js';
@@ -656,25 +657,6 @@ export function wireServerEvents({
   queue.onTurnSettled((chatId, turn) => {
     if (turn) agentRegistry.settleTurn(chatId, turn);
   });
-  const retryProviderCleanup = (executorId: string) => {
-    void ownershipJournal.retryProviderCleanup(executorId).catch((error) => {
-      logger.warn('Executor native cleanup failed', { executorId, error });
-    });
-  };
-  const executorReady = (executorId: string) => {
-    retryProviderCleanup(executorId);
-    for (const chatId of chatRegistry.listChatIds()) {
-      if (effectiveExecutorId(chatRegistry.getChat(chatId)?.executorId) !== executorId) continue;
-      void queue.readChatExecutionControl(chatId).then(async (control) => {
-        const chat = chatRegistry.getChat(chatId);
-        if (chat && effectiveExecutorId(chat.executorId) === executorId && hasPendingTurnInput(control)) {
-          // A run's one steerable report may have arrived while its steer target was unreachable.
-          queue.retryQueuedSteers(chatId);
-          await queue.triggerDrain(chatId);
-        }
-      }).catch((error) => logger.warn('Executor queue drain failed', error));
-    }
-  };
   executors.onChanged(() => broadcast(new ExecutorsChangedMessage(executors.list())));
   // Running turns on an executor show whether its link is reconnecting.
   const publishExecutorProcessing = (executorId: string) => {
@@ -682,18 +664,10 @@ export function wireServerEvents({
       if (effectiveExecutorId(chatRegistry.getChat(chatId)?.executorId) === executorId) publishProcessing(chatId);
     }
   };
-  executors.onAvailabilityChanged((executorId, availability) => {
-    if (availability === 'reconnecting' || availability === 'ready') publishExecutorProcessing(executorId);
-    if (availability === 'offline') agentRegistry.executionSessionLost(executorId);
-    if (availability === 'ready') {
-      logger.info('Executor ready', { executorId });
-      agentRegistry.executionSessionResumed(executorId);
-      executorReady(executorId);
-    }
+  wireExecutorAvailability({
+    executors, agentRegistry, chatRegistry, ownershipJournal, queue,
+    publishProcessing: publishExecutorProcessing,
   });
-  for (const executor of executors.list()) {
-    if (executor.availability === 'ready') retryProviderCleanup(executor.id);
-  }
 
   return {
     notifyAgentHandoff,
