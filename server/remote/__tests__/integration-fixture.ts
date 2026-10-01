@@ -24,7 +24,7 @@ import type { RemoteExecutorClientOptions } from '../client/executor-client.js';
 import { ProjectService } from '../../runtime/projects/project-service.js';
 import { discoverApiProviderModels } from '../../runtime/providers/discovery.js';
 
-export const linkOptions = { executorId: 'test-executor', secret: Buffer.alloc(32, 42).toString('base64url'), allowInsecureDevelopment: true, redialDelaysMs: [20] };
+export const linkOptions = { executorId: 'test-executor', secret: Buffer.alloc(32, 42).toString('base64url'), noTls: true, redialDelaysMs: [20] };
 
 export function integrationFixture(projectBasePath = '/test-project', executorId = 'test-executor') {
   const scope: AgentResourceScope = { executorId, instanceId: crypto.randomUUID(), integrationId: 'test' };

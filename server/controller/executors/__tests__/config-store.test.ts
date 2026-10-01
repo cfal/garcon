@@ -68,7 +68,7 @@ test('URL updates preserve identity and configuration objects are not mutable ca
   const { store } = await fixture();
   const original = await store.create({ direction: 'executor-connects', label: 'Original' });
   const connectionUrl = `ws://127.0.0.1:8080/executor/${original.id}#secret=${original.secret}`;
-  await store.update(original.id, { connection: { direction: 'executor-connects', connectionUrl, allowInsecureDevelopment: true } });
+  await store.update(original.id, { connection: { direction: 'executor-connects', connectionUrl, noTls: true } });
   const updated = await store.update(original.id, { label: 'Renamed', enabled: false });
   expect(updated.id).toBe(original.id);
   expect(updated.secret).toBe(original.secret);
@@ -99,7 +99,7 @@ test('normalized connection addresses remain usable within request and response 
   const created = await store.create({ direction: 'executor-connects', label: 'Synthetic worker' });
   const connectionUrl = `wss://worker.test/${' '.repeat(1500)}/#secret=${createExecutorSecret()}`;
   await expect(store.create({ direction: 'controller-connects', label: 'Oversized', connectionUrl })).rejects.toThrow('exceeds 4096');
-  await expect(store.update(created.id, { connection: { direction: 'controller-connects', connectionUrl, allowInsecureDevelopment: false } })).rejects.toThrow('exceeds 4096');
+  await expect(store.update(created.id, { connection: { direction: 'controller-connects', connectionUrl, noTls: false } })).rejects.toThrow('exceeds 4096');
   expect(store.list()).toEqual([created]);
 });
 
@@ -173,7 +173,7 @@ test.each(['executor-connects', 'controller-connects'] as const)(
     const executor = await store.create(direction === 'executor-connects'
       ? { direction, label: 'Proxied worker' }
       : { direction, label: 'Proxied worker', connectionUrl });
-    await store.update(executor.id, { connection: { direction, connectionUrl, allowInsecureDevelopment: false } });
+    await store.update(executor.id, { connection: { direction, connectionUrl, noTls: false } });
     const reloaded = new ExecutorConfigStore(root);
     await reloaded.initialize();
     expect(reloaded.connection(executor.id).connectionUrl).toBe(connectionUrl);
@@ -195,17 +195,17 @@ test('TLS verification defaults on and explicit opt-out survives restart and ren
   const executor = await store.create({ direction: 'controller-connects', label: 'Worker', connectionUrl });
   expect(store.connection(executor.id).allowUnverifiedTls).toBe(false);
   await store.update(executor.id, { connection: {
-    direction: 'controller-connects', connectionUrl, allowInsecureDevelopment: false, allowUnverifiedTls: true,
+    direction: 'controller-connects', connectionUrl, noTls: false, allowUnverifiedTls: true,
   } });
   await store.update(executor.id, { label: 'Renamed' });
   const reloaded = new ExecutorConfigStore(root);
   await reloaded.initialize();
-  expect(reloaded.connection(executor.id)).toEqual({ connectionUrl, allowInsecureDevelopment: false, allowUnverifiedTls: true });
-  await reloaded.update(executor.id, { connection: { direction: 'controller-connects', connectionUrl, allowInsecureDevelopment: false } });
+  expect(reloaded.connection(executor.id)).toEqual({ connectionUrl, noTls: false, allowUnverifiedTls: true });
+  await reloaded.update(executor.id, { connection: { direction: 'controller-connects', connectionUrl, noTls: false } });
   expect(reloaded.connection(executor.id).allowUnverifiedTls).toBe(false);
   await reloaded.update(executor.id, { connection: {
     direction: 'controller-connects', connectionUrl: connectionUrl.replace('wss:', 'ws:'),
-    allowInsecureDevelopment: true, allowUnverifiedTls: true,
+    noTls: true, allowUnverifiedTls: true,
   } });
   expect(reloaded.connection(executor.id).allowUnverifiedTls).toBe(false);
 });

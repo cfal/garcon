@@ -17,10 +17,10 @@ function executorsResponse(value: unknown): readonly ExecutorSnapshot[] {
 
 function connectionResponse(value: unknown): ExecutorConnection {
 	if (!isRecord(value) || typeof value.connectionUrl !== 'string'
-		|| typeof value.allowInsecureDevelopment !== 'boolean' || typeof value.allowUnverifiedTls !== 'boolean') {
+		|| typeof value.noTls !== 'boolean' || typeof value.allowUnverifiedTls !== 'boolean') {
 		throw new Error('Invalid executor connection response');
 	}
-	return { connectionUrl: value.connectionUrl, allowInsecureDevelopment: value.allowInsecureDevelopment, allowUnverifiedTls: value.allowUnverifiedTls };
+	return { connectionUrl: value.connectionUrl, noTls: value.noTls, allowUnverifiedTls: value.allowUnverifiedTls };
 }
 
 export async function getExecutors(): Promise<readonly ExecutorSnapshot[]> {

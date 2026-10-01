@@ -29,7 +29,7 @@ for (const ending of ['shutdown', 'intentional crash', 'unexpected exit'] as con
       const connection = parseConnectionUrl(await worker.connectionUrl());
       const url = new URL(connection.socketUrl);
       url.hostname = '127.0.0.1';
-      controller = new WebSocketLink({ role: 'controller', executorId: '22222222-2222-4222-8222-222222222222', secret: connection.secret, allowInsecureDevelopment: true });
+      controller = new WebSocketLink({ role: 'controller', executorId: '22222222-2222-4222-8222-222222222222', secret: connection.secret, noTls: true });
       controller.dial(url.href);
       await worker.connected();
       expect(worker.logs.join('\n')).not.toContain('executor-ready');
@@ -68,7 +68,7 @@ test('re-adding a running worker under a new executor identity requires restarti
     const url = new URL(connection.socketUrl);
     url.hostname = '127.0.0.1';
     for (const executorId of ['22222222-2222-4222-8222-222222222222', '33333333-3333-4333-8333-333333333333']) {
-      const controller = new WebSocketLink({ role: 'controller', executorId, secret: connection.secret, allowInsecureDevelopment: true });
+      const controller = new WebSocketLink({ role: 'controller', executorId, secret: connection.secret, noTls: true });
       controllers.push(controller);
       if (controllers.length === 1) {
         const connected = connectRemoteExecutor(controller);

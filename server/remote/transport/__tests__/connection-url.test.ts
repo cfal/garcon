@@ -40,17 +40,17 @@ test('public WebSocket addresses may use arbitrary paths and query strings', () 
     'wss://example.com/not-an-executor-id?route=worker&tag=a&tag=b',
     'wss://example.com/a%2Fb?route=a%2Fb',
   ]) {
-    expect(validateExecutorSocketUrl(address, { allowInsecureDevelopment: false })).toBe(address);
+    expect(validateExecutorSocketUrl(address, { noTls: false })).toBe(address);
   }
 });
 
 test('placeholders and TLS are validated independently of public paths', () => {
-  const options = { allowInsecureDevelopment: false };
+  const options = { noTls: false };
   for (const address of [
     'not a url', 'https://example.com/any-prefix', 'ws://example.com/any-prefix',
     'wss://user:password@example.com/any-prefix', 'wss://example.com/any-prefix#fragment',
   ]) expect(() => validateExecutorSocketUrl(address, options)).toThrow();
-  const listener = { allowInsecureDevelopment: true };
+  const listener = { noTls: true };
   expect(() => validateExecutorSocketUrl('ws://0.0.0.0:19781/executor', listener)).toThrow('reachable');
   expect(validateExecutorSocketUrl('ws://0.0.0.0:19781/executor', { ...listener, allowPlaceholder: true })).toContain('0.0.0.0');
   expect(validateExecutorSocketUrl('ws://127.0.0.1:19781/executor', listener)).toContain('127.0.0.1');

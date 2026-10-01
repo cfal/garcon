@@ -144,7 +144,7 @@ Executor management:
   providers [--json]            Existing provider IDs and assigned executors
   assign-provider|unassign-provider <id> --provider <profile-id> [--json]
   Access flags: --allow-controller-cli true|false, --allow-executor-management true|false.
-  Connection updates require --direction, --connection-url and --allow-insecure-development true|false;
+  Connection updates require --direction, --connection-url and --no-tls true|false;
   --allow-unverified-tls true|false applies only to outbound TLS connections.
   --advertise-url may contain {executorId}; the controller replaces it with the new UUID.
   --connection-url - reads the credential from stdin. Ordinary output never reveals credentials.

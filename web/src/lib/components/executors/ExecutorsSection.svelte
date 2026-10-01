@@ -180,7 +180,7 @@
 				><input
 					id="executor-insecure"
 					type="checkbox"
-					bind:checked={editor.allowInsecureDevelopment}
+					bind:checked={editor.noTls}
 					disabled={editor.busy}
 				/>Allow connection without TLS (ws://)</label
 			>

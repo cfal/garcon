@@ -28,7 +28,7 @@ export interface WebSocketLinkOptions {
   readonly executorId?: string;
   readonly secret: string;
   readonly runtimeId?: string;
-  readonly allowInsecureDevelopment?: boolean;
+  readonly noTls?: boolean;
   readonly allowUnverifiedTls?: boolean;
   readonly maxQueuedBytes?: number;
   readonly maxQueuedFrames?: number;
@@ -38,6 +38,11 @@ export interface WebSocketLinkOptions {
   readonly stableSessionMs?: number;
   // Noise's timeouts, buffer, and per-key record budget, when not its defaults.
   readonly noiseLimits?: NoiseLimits;
+}
+
+export interface ExecutorListenerTls {
+  readonly cert: string;
+  readonly key: string;
 }
 
 export const EXECUTOR_NOISE_CONTEXT = 'garcon-executor/v1';
@@ -188,13 +193,14 @@ export class WebSocketLink {
     return () => { this.#sessions.delete(listener); };
   }
 
-  listen(port = 0, hostname = '0.0.0.0'): string {
-    if (!this.options.allowInsecureDevelopment) throw new Error('A listener without TLS requires explicit development mode; use a TLS terminator otherwise');
+  listen(port = 0, hostname = '0.0.0.0', tls?: ExecutorListenerTls): string {
+    if (tls && this.options.noTls) throw new Error('TLS credentials and no-TLS mode are mutually exclusive');
+    if (!tls && !this.options.noTls) throw new Error('A listener requires TLS credentials or explicit no-TLS mode');
     if (this.#server || this.#disposed) throw new Error('Executor listener cannot start');
     const noise = createNoiseServer({ maxConnections: MAX_SOCKETS, maxPendingHandshakes: MAX_SOCKETS });
     this.#listenerNoise = noise;
     this.#server = Bun.serve<NoiseSocketData>({
-      hostname, port,
+      hostname, port, tls,
       fetch: (request, server) => {
         if (new URL(request.url).pathname !== '/executor') return new Response(null, { status: 404 });
         return this.upgrade(request, server, noise);
@@ -202,7 +208,7 @@ export class WebSocketLink {
       websocket: noise.websocket,
     });
     const address = new URL(this.#server.url);
-    address.protocol = 'ws:';
+    address.protocol = tls ? 'wss:' : 'ws:';
     address.pathname = '/executor';
     if (address.hostname === '0.0.0.0') address.hostname = '127.0.0.1';
     return address.href;
@@ -211,8 +217,8 @@ export class WebSocketLink {
   dial(url: string): void {
     if (this.#dialing || this.#disposed || this.#quiescing) throw new Error('Executor dial loop cannot start');
     const target = new URL(url);
-    if (target.protocol !== 'wss:' && !(target.protocol === 'ws:' && this.options.allowInsecureDevelopment)) {
-      throw new Error('Executor connections require TLS outside explicit development mode');
+    if (target.protocol !== 'wss:' && !(target.protocol === 'ws:' && this.options.noTls)) {
+      throw new Error('Executor connections require TLS unless no-TLS mode is explicit');
     }
     if (target.hash || target.username || target.password) throw new Error('Executor network URL must not contain userinfo or a fragment');
     this.#dialing = true;

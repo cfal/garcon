@@ -31,7 +31,7 @@ async function fixture() {
   roots.push(root);
   const dataDir = join(root, 'executor');
   await mkdir(dataDir);
-  return { root, dataDir, options: { configDir: root, projectBasePath: root, allowInsecureDevelopment: true,
+  return { root, dataDir, options: { configDir: root, projectBasePath: root, noTls: true,
     connection: { kind: 'listen' as const, port: 0, bindAddress: '0.0.0.0' } } };
 }
 

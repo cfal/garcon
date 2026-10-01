@@ -52,7 +52,7 @@ export type CreateExecutorRequest = {
   readonly label: string;
   readonly allowControllerCli?: boolean;
   readonly allowExecutorManagement?: boolean;
-  readonly allowInsecureDevelopment?: boolean;
+  readonly noTls?: boolean;
   readonly allowUnverifiedTls?: boolean;
 } & (
   | { readonly direction: 'executor-connects'; readonly advertisedUrl?: string }
@@ -67,14 +67,14 @@ export interface UpdateExecutorRequest {
   readonly connection?: {
     readonly direction: ExecutorDirection;
     readonly connectionUrl: string;
-    readonly allowInsecureDevelopment: boolean;
+    readonly noTls: boolean;
     readonly allowUnverifiedTls?: boolean;
   };
 }
 
 export interface ExecutorConnection {
   readonly connectionUrl: string;
-  readonly allowInsecureDevelopment: boolean;
+  readonly noTls: boolean;
   readonly allowUnverifiedTls: boolean;
 }
 
@@ -94,20 +94,20 @@ export function parseCreateExecutorRequest(value: unknown): CreateExecutorReques
   if (!isRecord(value) || !isLabel(value.label)
     || value.allowExecutorManagement !== undefined && typeof value.allowExecutorManagement !== 'boolean'
     || value.allowControllerCli !== undefined && typeof value.allowControllerCli !== 'boolean'
-    || value.allowInsecureDevelopment !== undefined && typeof value.allowInsecureDevelopment !== 'boolean'
+    || value.noTls !== undefined && typeof value.noTls !== 'boolean'
     || value.allowUnverifiedTls !== undefined && typeof value.allowUnverifiedTls !== 'boolean') return null;
   const common = { label: value.label.trim(),
     ...(value.allowExecutorManagement === undefined ? {} : { allowExecutorManagement: value.allowExecutorManagement }),
     ...(value.allowControllerCli === undefined ? {} : { allowControllerCli: value.allowControllerCli }),
-    allowInsecureDevelopment: value.allowInsecureDevelopment, allowUnverifiedTls: value.allowUnverifiedTls };
+    noTls: value.noTls, allowUnverifiedTls: value.allowUnverifiedTls };
   if (value.direction === 'executor-connects' && value.allowUnverifiedTls !== true
     && (value.advertisedUrl === undefined || isConnectionUrl(value.advertisedUrl))
-    && hasOnlyKeys(value, ['label', 'direction', 'advertisedUrl', 'allowInsecureDevelopment', 'allowUnverifiedTls', 'allowControllerCli', 'allowExecutorManagement'])) {
+    && hasOnlyKeys(value, ['label', 'direction', 'advertisedUrl', 'noTls', 'allowUnverifiedTls', 'allowControllerCli', 'allowExecutorManagement'])) {
     return { ...common, direction: 'executor-connects',
       ...(value.advertisedUrl === undefined ? {} : { advertisedUrl: value.advertisedUrl as string }) };
   }
   if (value.direction === 'controller-connects' && isConnectionUrl(value.connectionUrl)
-    && hasOnlyKeys(value, ['label', 'direction', 'connectionUrl', 'allowInsecureDevelopment', 'allowUnverifiedTls', 'allowControllerCli', 'allowExecutorManagement'])) {
+    && hasOnlyKeys(value, ['label', 'direction', 'connectionUrl', 'noTls', 'allowUnverifiedTls', 'allowControllerCli', 'allowExecutorManagement'])) {
     return { ...common, direction: 'controller-connects', connectionUrl: value.connectionUrl };
   }
   return null;
@@ -121,11 +121,11 @@ export function parseUpdateExecutorRequest(value: unknown): UpdateExecutorReques
     || value.enabled !== undefined && typeof value.enabled !== 'boolean') return null;
   const connection = value.connection;
   if (connection !== undefined && (!isRecord(connection)
-    || !hasOnlyKeys(connection, ['direction', 'connectionUrl', 'allowInsecureDevelopment', 'allowUnverifiedTls'])
+    || !hasOnlyKeys(connection, ['direction', 'connectionUrl', 'noTls', 'allowUnverifiedTls'])
     || (connection.direction !== 'executor-connects' && connection.direction !== 'controller-connects')
     || connection.allowUnverifiedTls !== undefined && typeof connection.allowUnverifiedTls !== 'boolean'
     || connection.direction === 'executor-connects' && connection.allowUnverifiedTls === true
-    || !isConnectionUrl(connection.connectionUrl) || typeof connection.allowInsecureDevelopment !== 'boolean')) return null;
+    || !isConnectionUrl(connection.connectionUrl) || typeof connection.noTls !== 'boolean')) return null;
   return {
     ...(value.allowExecutorManagement === undefined ? {} : { allowExecutorManagement: value.allowExecutorManagement as boolean }),
     ...(value.label === undefined ? {} : { label: (value.label as string).trim() }),
@@ -170,6 +170,6 @@ export function parseExecutors(value: unknown): readonly ExecutorSnapshot[] | nu
 
 export function parseExecutorConnection(value: unknown): ExecutorConnection | null {
   if (!isRecord(value) || !isConnectionUrl(value.connectionUrl)
-    || typeof value.allowInsecureDevelopment !== 'boolean' || typeof value.allowUnverifiedTls !== 'boolean') return null;
-  return { connectionUrl: value.connectionUrl, allowInsecureDevelopment: value.allowInsecureDevelopment, allowUnverifiedTls: value.allowUnverifiedTls };
+    || typeof value.noTls !== 'boolean' || typeof value.allowUnverifiedTls !== 'boolean') return null;
+  return { connectionUrl: value.connectionUrl, noTls: value.noTls, allowUnverifiedTls: value.allowUnverifiedTls };
 }

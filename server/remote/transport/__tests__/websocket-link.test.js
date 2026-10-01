@@ -65,7 +65,7 @@ function invalidProof(address, role) {
 for (const role of ['controller', 'worker']) {
   for (const [peerBuild, peerVersion] of incompatiblePeers) {
     test(`reports a version mismatch with ${peerBuild} separately from authentication (${role})`, async () => {
-      const link = new WebSocketLink({ role, executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true });
+      const link = new WebSocketLink({ role, executorId: 'synthetic-executor', secret, noTls: true });
       const failures = [];
       link.onError(failure => failures.push(failure));
       const peer = peerOfBuild(link.listen(), role, peerVersion);
@@ -81,7 +81,7 @@ for (const role of ['controller', 'worker']) {
 
 for (const role of ['controller', 'worker']) {
   test(`reports why a peer failed to authenticate without echoing a frame that fails to parse (${role})`, async () => {
-    const link = new WebSocketLink({ role, executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true });
+    const link = new WebSocketLink({ role, executorId: 'synthetic-executor', secret, noTls: true });
     const failures = [];
     link.onError(failure => failures.push(failure));
     const socket = malformedHandshake(link.listen());
@@ -94,7 +94,7 @@ for (const role of ['controller', 'worker']) {
   });
 
   test(`reports a peer whose proof does not match the handshake (${role})`, async () => {
-    const link = new WebSocketLink({ role, executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true });
+    const link = new WebSocketLink({ role, executorId: 'synthetic-executor', secret, noTls: true });
     const failures = [];
     link.onError(failure => failures.push(failure));
     const socket = invalidProof(link.listen(), role);
@@ -109,7 +109,7 @@ for (const role of ['controller', 'worker']) {
 }
 
 test('counts a failure from one again when its reason changes', async () => {
-  const link = new WebSocketLink({ role: 'controller', executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true });
+  const link = new WebSocketLink({ role: 'controller', executorId: 'synthetic-executor', secret, noTls: true });
   const failures = [];
   link.onError(failure => failures.push(failure));
   const address = link.listen();
@@ -126,7 +126,7 @@ test('counts a failure from one again when its reason changes', async () => {
 });
 
 test('makes room for a peer by closing the oldest socket that has not finished its encrypted handshake', async () => {
-  const common = { executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true, redialDelaysMs: [20] };
+  const common = { executorId: 'synthetic-executor', secret, noTls: true, redialDelaysMs: [20] };
   const controller = new WebSocketLink({ ...common, role: 'controller', noiseLimits: { handshakeTimeoutMs: 60_000 } });
   const worker = new WebSocketLink({ ...common, role: 'worker' });
   const failures = [];
@@ -149,7 +149,7 @@ test('makes room for a peer by closing the oldest socket that has not finished i
 });
 
 test('refuses a plain request or an invalid upgrade to a full listener without closing a socket', async () => {
-  const link = new WebSocketLink({ role: 'worker', secret, allowInsecureDevelopment: true, noiseLimits: { handshakeTimeoutMs: 60_000 } });
+  const link = new WebSocketLink({ role: 'worker', secret, noTls: true, noiseLimits: { handshakeTimeoutMs: 60_000 } });
   const address = link.listen();
   const silent = [];
   try {
@@ -171,7 +171,7 @@ test('refuses a plain request or an invalid upgrade to a full listener without c
 
 test('makes room by closing a socket whose peer has not proven the secret before one whose peer has', async () => {
   const link = new WebSocketLink({
-    role: 'controller', executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true, noiseLimits: { handshakeTimeoutMs: 60_000 },
+    role: 'controller', executorId: 'synthetic-executor', secret, noTls: true, noiseLimits: { handshakeTimeoutMs: 60_000 },
   });
   const listener = faultyNoiseListener(link);
   // Delivers the peer's first handshake message, which proves the secret, but not the record that opens it.
@@ -195,7 +195,7 @@ test('makes room by closing a socket whose peer has not proven the secret before
 
 test('closes a socket whose peer has proven the secret when no other is still in the handshake', async () => {
   const link = new WebSocketLink({
-    role: 'controller', executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true, noiseLimits: { handshakeTimeoutMs: 60_000 },
+    role: 'controller', executorId: 'synthetic-executor', secret, noTls: true, noiseLimits: { handshakeTimeoutMs: 60_000 },
   });
   const listener = faultyNoiseListener(link);
   const noise = { psk: Buffer.from(secret, 'base64url'), context: EXECUTOR_NOISE_CONTEXT, onMessage() {} };
@@ -225,7 +225,7 @@ test('closes a socket whose peer has proven the secret when no other is still in
 });
 
 test('counts each kind of connection failure until a session starts, however failures alternate', async () => {
-  const common = { executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true, redialDelaysMs: [20] };
+  const common = { executorId: 'synthetic-executor', secret, noTls: true, redialDelaysMs: [20] };
   const controller = new WebSocketLink({ ...common, role: 'controller' });
   const worker = new WebSocketLink({ ...common, role: 'worker' });
   const failures = [];
@@ -248,7 +248,7 @@ test('counts each kind of connection failure until a session starts, however fai
 });
 
 test('counts version mismatches from one again when the peer build changes', async () => {
-  const link = new WebSocketLink({ role: 'controller', executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true });
+  const link = new WebSocketLink({ role: 'controller', executorId: 'synthetic-executor', secret, noTls: true });
   const failures = [];
   link.onError(failure => failures.push(failure));
   const address = link.listen();
@@ -271,7 +271,7 @@ test('logs a kind of link failure at its 1st, 2nd, 4th, 8th, ... occurrence', ()
 
 for (const dialer of ['controller', 'worker']) {
   test(`authenticated reconnect replaces the socket session (${dialer} dials)`, async () => {
-    const common = { executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true, redialDelaysMs: [20] };
+    const common = { executorId: 'synthetic-executor', secret, noTls: true, redialDelaysMs: [20] };
     const controller = new WebSocketLink({ ...common, role: 'controller' });
     const worker = new WebSocketLink({ ...common, role: 'worker' });
     const events = [];
@@ -305,7 +305,7 @@ for (const dialer of ['controller', 'worker']) {
 test('disposing an authenticated listener releases its port for replacement', async () => {
   const common = {
     executorId: 'synthetic-executor', secret,
-    allowInsecureDevelopment: true, reconnectDelayMs: 60_000,
+    noTls: true, reconnectDelayMs: 60_000,
   };
   const controller = new WebSocketLink({ ...common, role: 'controller' });
   const worker = new WebSocketLink({ ...common, role: 'worker' });
@@ -331,7 +331,7 @@ for (const role of ['controller', 'worker']) {
     test(`rejects ${attack} when authenticating a ${role} peer`, async () => {
       const link = new WebSocketLink({
         role, executorId: 'synthetic-executor', secret,
-        allowInsecureDevelopment: true,
+        noTls: true,
       });
       let accepted = 0;
       link.onSession(() => { accepted++; });
@@ -372,7 +372,7 @@ async function eventually(condition, timeoutMs = 5000) {
 
 for (const dialer of ['controller', 'worker']) {
   test(`counts session closures by cause on both ends (${dialer} dials)`, async () => {
-    const common = { executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true, redialDelaysMs: [20] };
+    const common = { executorId: 'synthetic-executor', secret, noTls: true, redialDelaysMs: [20] };
     const controller = new WebSocketLink({ ...common, role: 'controller' });
     const worker = new WebSocketLink({ ...common, role: 'worker' });
     const [dialing, listening] = dialer === 'controller' ? [controller, worker] : [worker, controller];
@@ -398,7 +398,7 @@ for (const dialer of ['controller', 'worker']) {
 for (const dialer of ['controller', 'worker']) {
   test(`redials at once after a stable session and backs off after a short one (${dialer} dials)`, async () => {
     const common = {
-      executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true, redialDelaysMs: [0, 60_000], stableSessionMs: 100,
+      executorId: 'synthetic-executor', secret, noTls: true, redialDelaysMs: [0, 60_000], stableSessionMs: 100,
     };
     const controller = new WebSocketLink({ ...common, role: 'controller' });
     const worker = new WebSocketLink({ ...common, role: 'worker' });
@@ -428,7 +428,7 @@ test('rejects invalid redial delays', () => {
 
 for (const dialer of ['controller', 'worker']) {
   test(`attributes closures started by the session layer and by disposal (${dialer} dials)`, async () => {
-    const common = { executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true, redialDelaysMs: [20] };
+    const common = { executorId: 'synthetic-executor', secret, noTls: true, redialDelaysMs: [20] };
     const controller = new WebSocketLink({ ...common, role: 'controller' });
     const worker = new WebSocketLink({ ...common, role: 'worker' });
     const [dialing, listening] = dialer === 'controller' ? [controller, worker] : [worker, controller];
@@ -456,7 +456,7 @@ for (const dialer of ['controller', 'worker']) {
 
 for (const dialer of ['controller', 'worker']) {
   test(`counts a corrupted encrypted record as a protocol error where it arrives (${dialer} dials)`, async () => {
-    const common = { executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true, redialDelaysMs: [20] };
+    const common = { executorId: 'synthetic-executor', secret, noTls: true, redialDelaysMs: [20] };
     const controller = new WebSocketLink({ ...common, role: 'controller' });
     const worker = new WebSocketLink({ ...common, role: 'worker' });
     const [dialing, listening] = dialer === 'controller' ? [controller, worker] : [worker, controller];
@@ -481,7 +481,7 @@ for (const dialer of ['controller', 'worker']) {
   });
 
   test(`reports a dropped network path with its Noise error code on both ends (${dialer} dials)`, async () => {
-    const common = { executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true, redialDelaysMs: [60_000] };
+    const common = { executorId: 'synthetic-executor', secret, noTls: true, redialDelaysMs: [60_000] };
     const controller = new WebSocketLink({ ...common, role: 'controller' });
     const worker = new WebSocketLink({ ...common, role: 'worker' });
     const [dialing, listening] = dialer === 'controller' ? [controller, worker] : [worker, controller];
@@ -509,7 +509,7 @@ for (const dialer of ['controller', 'worker']) {
 
   test(`reconnects with fresh keys when a busy link uses up its record budget (${dialer} dials)`, async () => {
     const common = {
-      executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true, redialDelaysMs: [20],
+      executorId: 'synthetic-executor', secret, noTls: true, redialDelaysMs: [20],
       noiseLimits: { maxRecordsPerDirection: 32 },
     };
     const controller = new WebSocketLink({ ...common, role: 'controller' });
@@ -534,7 +534,7 @@ for (const dialer of ['controller', 'worker']) {
   });
 
   test(`counts a message over the receiver's size limit as a protocol error (${dialer} dials)`, async () => {
-    const common = { executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true, redialDelaysMs: [60_000] };
+    const common = { executorId: 'synthetic-executor', secret, noTls: true, redialDelaysMs: [60_000] };
     const controller = new WebSocketLink({ ...common, role: 'controller', noiseLimits: { maxMessageBytes: 1024 } });
     const worker = new WebSocketLink({ ...common, role: 'worker' });
     const [dialing, listening] = dialer === 'controller' ? [controller, worker] : [worker, controller];
@@ -557,7 +557,7 @@ for (const dialer of ['controller', 'worker']) {
 
 test('reports a peer that never starts the encrypted handshake', async () => {
   const link = new WebSocketLink({
-    role: 'controller', executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true, noiseLimits: { handshakeTimeoutMs: 50 },
+    role: 'controller', executorId: 'synthetic-executor', secret, noTls: true, noiseLimits: { handshakeTimeoutMs: 50 },
   });
   const failures = [];
   link.onError(failure => failures.push(failure));
@@ -570,9 +570,9 @@ test('reports a peer that never starts the encrypted handshake', async () => {
 });
 
 test('reports a dial whose encrypted handshake never completes', async () => {
-  const listening = new WebSocketLink({ role: 'worker', secret, allowInsecureDevelopment: true });
+  const listening = new WebSocketLink({ role: 'worker', secret, noTls: true });
   const dialing = new WebSocketLink({
-    role: 'controller', executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true,
+    role: 'controller', executorId: 'synthetic-executor', secret, noTls: true,
     redialDelaysMs: [60_000], noiseLimits: { handshakeTimeoutMs: 50 },
   });
   const path = await tcpLinkProxy(new URL(listening.listen(0, '127.0.0.1')));
@@ -588,7 +588,7 @@ test('reports a dial whose encrypted handshake never completes', async () => {
 
 // A controller link whose connection to its worker can be faulted beneath the encryption.
 async function faultyLinkPair() {
-  const common = { executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true, redialDelaysMs: [60_000] };
+  const common = { executorId: 'synthetic-executor', secret, noTls: true, redialDelaysMs: [60_000] };
   const controller = new WebSocketLink({ ...common, role: 'controller' });
   const worker = new WebSocketLink({ ...common, role: 'worker' });
   const listener = faultyNoiseListener(controller);
@@ -652,7 +652,7 @@ function workerOutsideSessionLayer(address) {
 
 test('counts an encrypted message that never completes as a liveness timeout', async () => {
   const link = new WebSocketLink({
-    role: 'controller', executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true, noiseLimits: { messageTimeoutMs: 20 },
+    role: 'controller', executorId: 'synthetic-executor', secret, noTls: true, noiseLimits: { messageTimeoutMs: 20 },
   });
   const listener = faultyNoiseListener(link);
   const closure = Promise.withResolvers();
@@ -667,7 +667,7 @@ test('counts an encrypted message that never completes as a liveness timeout', a
 });
 
 test('reports a lost connection while its session is current, before its closure', async () => {
-  const link = new WebSocketLink({ role: 'controller', executorId: 'synthetic-executor', secret, allowInsecureDevelopment: true });
+  const link = new WebSocketLink({ role: 'controller', executorId: 'synthetic-executor', secret, noTls: true });
   const events = [];
   link.onError(failure => events.push({ failure: failure.message, reason: failure.reason, sessionCurrent: link.current !== null }));
   link.onClosure(closure => events.push({ closure: closure.cause }));

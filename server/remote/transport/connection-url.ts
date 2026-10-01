@@ -27,14 +27,14 @@ export function parseConnectionUrl(value: string): { socketUrl: string; secret: 
 }
 
 export function validateExecutorSocketUrl(value: string, options: {
-  allowInsecureDevelopment: boolean;
+  noTls: boolean;
   allowPlaceholder?: boolean;
 }): string {
   let url: URL;
   try { url = new URL(value); } catch { throw new ValidationDomainError('Invalid executor address'); }
   if (url.hash || url.username || url.password
-    || !(url.protocol === 'wss:' || url.protocol === 'ws:' && options.allowInsecureDevelopment)) {
-    throw new ValidationDomainError('Executor connections require TLS outside explicit development mode');
+    || !(url.protocol === 'wss:' || url.protocol === 'ws:' && options.noTls)) {
+    throw new ValidationDomainError('Executor connections require TLS unless no-TLS mode is explicit');
   }
   if (!options.allowPlaceholder && (url.hostname === '0.0.0.0' || url.hostname === '[::]')) {
     throw new ValidationDomainError('Replace the unspecified address with a reachable hostname or IP');

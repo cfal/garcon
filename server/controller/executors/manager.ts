@@ -265,7 +265,7 @@ export class ExecutorManager {
         if (recordError(reason ? `${message}: ${reason}` : message)) noticeLinkFailure();
       };
       const link = new WebSocketLink({ role: 'controller', executorId: config.id, secret: config.secret,
-        allowInsecureDevelopment: config.allowInsecureDevelopment, allowUnverifiedTls: config.allowUnverifiedTls });
+        noTls: config.noTls, allowUnverifiedTls: config.allowUnverifiedTls });
       entry.link = link;
       link.onError((failure) => {
         if (shouldLogLinkFailure(failure)) this.logger.warn('Executor link failed', { executorId: config.id, ...failure });
@@ -388,7 +388,7 @@ function throttledNotice(intervalMs: number, notify: () => void): () => void {
 }
 
 function sameConnector(left: RemoteExecutorConfig, right: RemoteExecutorConfig): boolean {
-  if (left.enabled !== right.enabled || left.secret !== right.secret || left.allowInsecureDevelopment !== right.allowInsecureDevelopment
+  if (left.enabled !== right.enabled || left.secret !== right.secret || left.noTls !== right.noTls
     || left.allowUnverifiedTls !== right.allowUnverifiedTls
     || left.connection.kind !== right.connection.kind) return false;
   return left.connection.kind !== 'controller-connects' || right.connection.kind !== 'controller-connects'

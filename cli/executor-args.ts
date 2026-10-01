@@ -6,7 +6,7 @@ import type { CliConnectionOptions } from './args.js';
 import { argumentError } from './errors.js';
 
 export const EXECUTOR_STRING_OPTIONS = ['direction', 'connection-url', 'advertise-url',
-  'allow-controller-cli', 'allow-executor-management', 'allow-insecure-development', 'allow-unverified-tls', 'timeout'] as const;
+  'allow-controller-cli', 'allow-executor-management', 'no-tls', 'allow-unverified-tls', 'timeout'] as const;
 export const EXECUTOR_PARSE_OPTIONS = Object.fromEntries(EXECUTOR_STRING_OPTIONS.map((key) => [key, { type: 'string' as const }]));
 
 type ExecutorOperation =
@@ -27,7 +27,7 @@ export interface ExecutorCliCommand extends CliConnectionOptions {
 }
 
 const grants = ['allow-controller-cli', 'allow-executor-management'];
-const connectionFlags = ['direction', 'connection-url', 'allow-insecure-development', 'allow-unverified-tls'];
+const connectionFlags = ['direction', 'connection-url', 'no-tls', 'allow-unverified-tls'];
 const actionOptions: Record<ExecutorOperation['action'], readonly string[]> = {
   list: [], show: [], providers: [], enable: [], disable: [], delete: [],
   create: ['label', 'advertise-url', ...grants, ...connectionFlags],
@@ -76,7 +76,7 @@ export function parseExecutorCliCommand(positionals: readonly string[], values: 
     const direction = text('direction');
     if (direction === 'executor-connects' && !text('advertise-url')) throw argumentError('inbound creation requires --advertise-url with a reachable public WebSocket URL');
     const request = parseCreateExecutorRequest({ label: text('label'), direction, ...access,
-      allowInsecureDevelopment: boolean('allow-insecure-development'), allowUnverifiedTls: boolean('allow-unverified-tls'),
+      noTls: boolean('no-tls'), allowUnverifiedTls: boolean('allow-unverified-tls'),
       ...(text('advertise-url') === undefined ? {} : { advertisedUrl: text('advertise-url') }),
       ...(text('connection-url') === undefined ? {} : { connectionUrl: text('connection-url') }),
     });
@@ -88,10 +88,10 @@ export function parseExecutorCliCommand(positionals: readonly string[], values: 
       ...(text('label') === undefined ? {} : { label: text('label') }),
       ...(changingConnection ? { connection: {
         direction: text('direction'), connectionUrl: text('connection-url'),
-        allowInsecureDevelopment: boolean('allow-insecure-development'), allowUnverifiedTls: boolean('allow-unverified-tls'),
+        noTls: boolean('no-tls'), allowUnverifiedTls: boolean('allow-unverified-tls'),
       } } : {}),
     });
-    if (!request) throw argumentError('invalid executor update; connection changes require --direction, --connection-url, and --allow-insecure-development true|false');
+    if (!request) throw argumentError('invalid executor update; connection changes require --direction, --connection-url, and --no-tls true|false');
     operation = { action, id, request };
   } else if (action === 'connection') {
     const output = text('output');

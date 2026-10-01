@@ -6,7 +6,7 @@ for (const dialer of ['controller', 'worker'] as const) {
   for (const failingPeer of ['controller', 'worker'] as const) {
     for (const phase of ['listener', 'attachment'] as const) {
       test(`reconnect survives a ${failingPeer} ${phase} exception (${dialer} dials)`, async () => {
-        const options = { secret: Buffer.alloc(32, 42).toString('base64url'), allowInsecureDevelopment: true, redialDelaysMs: [20] };
+        const options = { secret: Buffer.alloc(32, 42).toString('base64url'), noTls: true, redialDelaysMs: [20] };
         const controller = new WebSocketLink({ ...options, role: 'controller', executorId: '22222222-2222-4222-8222-222222222222' });
         const worker = new WebSocketLink({ ...options, role: 'worker' });
         const failing = failingPeer === 'controller' ? controller : worker;

@@ -18,7 +18,7 @@ async function until(predicate) {
 }
 
 for (const dialer of ['controller', 'worker']) test(`terminal RPC preserves process lifetime with ${dialer} dialing`, async () => {
-  const options = { executorId: crypto.randomUUID(), secret: Buffer.alloc(32, 42).toString('base64url'), allowInsecureDevelopment: true, redialDelaysMs: [10] };
+  const options = { executorId: crypto.randomUUID(), secret: Buffer.alloc(32, 42).toString('base64url'), noTls: true, redialDelaysMs: [10] };
   const ptys = [];
   const runtime = new TerminalRuntime({ projectBasePath: homedir(), spawnPty: () => {
     const pty = { killed: false, writes: [], resizes: [], onData(fn) { this.data = fn; }, onExit(fn) { this.exit = fn; },

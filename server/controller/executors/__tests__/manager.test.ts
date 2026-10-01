@@ -80,7 +80,7 @@ function waitReady(manager: ExecutorManager, id: string): Promise<void> {
 }
 
 function worker(secret: string, projectPath: string, configure: (fixture: ReturnType<typeof integrationFixture>) => void = () => {}) {
-  const link = new WebSocketLink({ role: 'worker', secret, allowInsecureDevelopment: true, redialDelaysMs: [20] });
+  const link = new WebSocketLink({ role: 'worker', secret, noTls: true, redialDelaysMs: [20] });
   cleanups.push(() => link.dispose());
   link.onSession((transport) => {
     const provider = integrationFixture(projectPath, transport.executorId);
@@ -95,7 +95,7 @@ test('reverse CLI dispatch checks initialization, executor grant, revocation lea
   const { manager, root } = await fixture();
   const config = await manager.create({ label: 'CLI worker', direction: 'executor-connects' });
   const { url } = sharedListener(manager);
-  const link = new WebSocketLink({ role: 'worker', secret: config.secret, allowInsecureDevelopment: true });
+  const link = new WebSocketLink({ role: 'worker', secret: config.secret, noTls: true });
   cleanups.push(() => link.dispose());
   const connected = Promise.withResolvers<ExecutorRpc>();
   link.onSession((transport) => {
@@ -140,7 +140,7 @@ test.each(['context', 'read', 'mutation'] as const)('quiescence after handler se
   const { manager, root } = await fixture();
   const config = await manager.create({ label: 'CLI worker', direction: 'executor-connects', allowControllerCli: true });
   const { url } = sharedListener(manager);
-  const link = new WebSocketLink({ role: 'worker', secret: config.secret, allowInsecureDevelopment: true });
+  const link = new WebSocketLink({ role: 'worker', secret: config.secret, noTls: true });
   cleanups.push(() => link.dispose());
   const connected = Promise.withResolvers<ExecutorRpc>();
   link.onSession((transport) => {
@@ -298,7 +298,7 @@ test('a reconnecting executor holds calls instead of reporting itself unavailabl
   const { manager, root } = await fixture();
   const config = await manager.create({ label: 'Reconnecting', direction: 'executor-connects' });
   const { url } = sharedListener(manager);
-  const link = new WebSocketLink({ role: 'worker', secret: config.secret, allowInsecureDevelopment: true, redialDelaysMs: [20] });
+  const link = new WebSocketLink({ role: 'worker', secret: config.secret, noTls: true, redialDelaysMs: [20] });
   cleanups.push(() => link.dispose());
   const relay = new ProducerRelay();
   let provider: ReturnType<typeof integrationFixture> | null = null;
@@ -394,7 +394,7 @@ test('key rotation closes established and pending old-key sockets without affect
   expect(noise.size).toBe(2);
   const replacementSecret = Buffer.alloc(32, 19).toString('base64url');
   await manager.update(executor.id, { connection: {
-    direction: 'executor-connects', connectionUrl: executorConnectionUrl(url(executor.id), replacementSecret), allowInsecureDevelopment: true,
+    direction: 'executor-connects', connectionUrl: executorConnectionUrl(url(executor.id), replacementSecret), noTls: true,
   } });
   await pending.closed;
   await original.dispose();
@@ -627,7 +627,7 @@ test('outbound executor initializes independently and mutation guards retain con
   const secret = Buffer.alloc(32, 5).toString('base64url');
   const remote = worker(secret, root);
   const connectionUrl = executorConnectionUrl(remote.listen(), secret);
-  const configured = await manager.create({ direction: 'controller-connects', label: 'Outbound', connectionUrl, allowInsecureDevelopment: true });
+  const configured = await manager.create({ direction: 'controller-connects', label: 'Outbound', connectionUrl, noTls: true });
   await waitReady(manager, configured.id);
   expect((await manager.inspectProject(root, configured.id)).kind).toBe('available');
   manager.setGuards({
@@ -648,7 +648,7 @@ test('retained connections publish ready after a disruptive update fails to pers
   const remote = worker(secret, root);
   const configured = await manager.create({
     direction: 'controller-connects', label: 'Retained',
-    connectionUrl: executorConnectionUrl(remote.listen(), secret), allowInsecureDevelopment: true,
+    connectionUrl: executorConnectionUrl(remote.listen(), secret), noTls: true,
   });
   await waitReady(manager, configured.id);
   const integration = manager.requireIntegration({ executorId: configured.id, agentId: 'test' });
@@ -699,7 +699,7 @@ test('advertised URL and unchanged connector edits stay available while busy', a
     const connection = {
       direction: 'executor-connects' as const,
       connectionUrl: executorConnectionUrl(`wss://controller.example/executor/${config.id}`, config.secret),
-      allowInsecureDevelopment: false,
+      noTls: false,
     };
     await manager.update(config.id, { connection });
     await manager.update(config.id, { connection, enabled: true });
@@ -710,7 +710,7 @@ test('advertised URL and unchanged connector edits stay available while busy', a
       kind: 'executor-connects', advertisedUrl: `wss://controller.example/executor/${config.id}`,
     });
     expect(assertIdle).not.toHaveBeenCalled();
-    await expect(manager.update(config.id, { connection: { ...connection, allowInsecureDevelopment: true } }))
+    await expect(manager.update(config.id, { connection: { ...connection, noTls: true } }))
       .rejects.toMatchObject({ code: 'EXECUTOR_IN_USE' });
     expect(manager.isReady(config.id)).toBe(true);
   } finally { write.mockRestore(); }

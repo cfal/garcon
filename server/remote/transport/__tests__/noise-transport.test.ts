@@ -4,7 +4,7 @@ import type { ServerWebSocket } from 'bun';
 import { WebSocketLink, EXECUTOR_NOISE_CONTEXT } from '../websocket-link.js';
 
 const secret = Buffer.alloc(32, 42).toString('base64url');
-const options = { secret, executorId: 'synthetic-executor', allowInsecureDevelopment: true, redialDelaysMs: [20] };
+const options = { secret, executorId: 'synthetic-executor', noTls: true, redialDelaysMs: [20] };
 const cleanups: (() => unknown | Promise<unknown>)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 

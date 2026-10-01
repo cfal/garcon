@@ -13,7 +13,7 @@ vi.mock('$lib/utils/clipboard', () => ({ copyToClipboard: vi.fn(async () => true
 
 const connection = {
 	connectionUrl: `wss://example.test/executor/${remoteExecutor.id}#secret=${'A'.repeat(43)}`,
-	allowInsecureDevelopment: false,
+	noTls: false,
 	allowUnverifiedTls: false,
 };
 
@@ -48,7 +48,7 @@ describe('ExecutorsDialog', () => {
 		const url = await screen.findByLabelText('Connection URL') as HTMLInputElement;
 		expect(url.value).toBe(connection.connectionUrl);
 		expect(url.type).toBe('text');
-		expect(api.createExecutor).toHaveBeenCalledWith({ label: 'Build Machine', direction: 'executor-connects', allowInsecureDevelopment: false, allowUnverifiedTls: false, allowControllerCli: false, allowExecutorManagement: false });
+		expect(api.createExecutor).toHaveBeenCalledWith({ label: 'Build Machine', direction: 'executor-connects', noTls: false, allowUnverifiedTls: false, allowControllerCli: false, allowExecutorManagement: false });
 		await fireEvent.click(screen.getByRole('button', { name: 'Copy connection URL' }));
 		expect(copyToClipboard).toHaveBeenCalledWith(connection.connectionUrl, expect.any(HTMLElement), expect.any(Function));
 		await fireEvent.keyDown(url, { key: 'Escape' });
@@ -79,7 +79,7 @@ describe('ExecutorsDialog', () => {
 		vi.mocked(api.createExecutor).mockRejectedValueOnce(new Error('Invalid connection address'));
 		await fireEvent.submit(url.closest('form')!);
 		expect((await screen.findByText('Invalid connection address')).getAttribute('role')).toBe('alert');
-		expect(api.createExecutor).toHaveBeenCalledWith({ label: 'Worker', direction: 'controller-connects', connectionUrl: descriptor, allowInsecureDevelopment: true, allowUnverifiedTls: false, allowControllerCli: false, allowExecutorManagement: false });
+		expect(api.createExecutor).toHaveBeenCalledWith({ label: 'Worker', direction: 'controller-connects', connectionUrl: descriptor, noTls: true, allowUnverifiedTls: false, allowControllerCli: false, allowExecutorManagement: false });
 		expect((url as HTMLInputElement).value).toBe(descriptor);
 	});
 
@@ -152,7 +152,7 @@ describe('ExecutorsDialog', () => {
 		await fireEvent.submit(url.closest('form')!);
 		await waitFor(() => expect(api.updateExecutor).toHaveBeenCalledWith(remoteExecutor.id, {
 			label: 'Worker',
-			connection: { direction: 'controller-connects', connectionUrl: connection.connectionUrl, allowInsecureDevelopment: false, allowUnverifiedTls: true },
+			connection: { direction: 'controller-connects', connectionUrl: connection.connectionUrl, noTls: false, allowUnverifiedTls: true },
 		}));
 	});
 });

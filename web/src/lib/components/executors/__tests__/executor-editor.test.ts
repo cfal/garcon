@@ -7,7 +7,7 @@ import { ExecutorEditor } from '../executor-editor.svelte.ts';
 
 const connection = {
 	connectionUrl: `wss://example.test/executor/${remoteExecutor.id}#secret=synthetic`,
-	allowInsecureDevelopment: false,
+	noTls: false,
 	allowUnverifiedTls: false,
 } satisfies ExecutorConnection;
 
@@ -69,7 +69,7 @@ describe('ExecutorEditor', () => {
 		editor.label = ' Build Machine ';
 		expect(await editor.save()).toBe(true);
 		expect(transport.createExecutor).toHaveBeenCalledWith({
-			label: 'Build Machine', direction: 'executor-connects', allowInsecureDevelopment: false, allowUnverifiedTls: false,
+			label: 'Build Machine', direction: 'executor-connects', noTls: false, allowUnverifiedTls: false,
 			allowControllerCli: false, allowExecutorManagement: false,
 		});
 		expect(editor.id).toBe(remoteExecutor.id);
@@ -84,10 +84,10 @@ describe('ExecutorEditor', () => {
 		editor.label = 'Worker';
 		editor.direction = 'controller-connects';
 		editor.connectionUrl = 'ws://worker.test:1234/executor#secret=synthetic';
-		editor.allowInsecureDevelopment = true;
+		editor.noTls = true;
 		await editor.save();
 		expect(transport.createExecutor).toHaveBeenCalledWith({
-			label: 'Worker', direction: 'controller-connects', allowInsecureDevelopment: true, allowUnverifiedTls: false,
+			label: 'Worker', direction: 'controller-connects', noTls: true, allowUnverifiedTls: false,
 			allowControllerCli: false, allowExecutorManagement: false,
 			connectionUrl: 'ws://worker.test:1234/executor#secret=synthetic',
 		});
@@ -105,7 +105,7 @@ describe('ExecutorEditor', () => {
 		await editor.save();
 		expect(transport.updateExecutor).toHaveBeenLastCalledWith(remoteExecutor.id, {
 			label: 'Renamed',
-			connection: { direction: 'executor-connects', connectionUrl: editor.connectionUrl, allowInsecureDevelopment: false, allowUnverifiedTls: false },
+			connection: { direction: 'executor-connects', connectionUrl: editor.connectionUrl, noTls: false, allowUnverifiedTls: false },
 		});
 		editor.enabled = false;
 		await editor.save();
@@ -120,7 +120,7 @@ describe('ExecutorEditor', () => {
 		await editor.save();
 		expect(transport.updateExecutor).toHaveBeenLastCalledWith(remoteExecutor.id, {
 			label: remoteExecutor.label,
-			connection: { direction: 'controller-connects', connectionUrl: editor.connectionUrl, allowInsecureDevelopment: false, allowUnverifiedTls: true },
+			connection: { direction: 'controller-connects', connectionUrl: editor.connectionUrl, noTls: false, allowUnverifiedTls: true },
 		});
 		editor.direction = 'executor-connects';
 		await editor.save();

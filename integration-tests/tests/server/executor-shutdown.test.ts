@@ -40,7 +40,7 @@ test('shutdown rejects browser work while the remote abort reply is held', async
       target.port = String((proxy.address() as AddressInfo).port);
       const executor = await fixture.client.post<{ id: string }>('/api/v1/executors', {
         label: 'Shutdown worker', direction: 'controller-connects', connectionUrl: target.href,
-        allowInsecureDevelopment: true,
+        noTls: true,
       });
       const deadline = Date.now() + 20_000;
       while (true) {

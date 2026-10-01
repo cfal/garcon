@@ -38,7 +38,7 @@ test('admits a restarted worker while other executors fill their endpoints with 
     try {
       for (let index = 0; index < 4; index++) {
         const crowded = await fixture.client.post<{ id: string }>('/api/v1/executors', {
-          label: `Synthetic crowded executor ${index}`, direction: 'executor-connects', allowInsecureDevelopment: true,
+          label: `Synthetic crowded executor ${index}`, direction: 'executor-connects', noTls: true,
         });
         holders.push(holdUnfinishedHandshakes(executorEndpoint(fixture.garcon.baseUrl, crowded.id), 4));
       }

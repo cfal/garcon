@@ -38,7 +38,7 @@ export const RUNTIME_BACKENDS = ['local', 'controller', 'worker'] as const;
 export async function runtimeAdapter(runtime: ExecutionRuntimeApi, backend: RuntimeBackend) {
   if (backend === 'local') return { executor: runtime, dispose: async () => {} };
   const info = await runtime.getInfo();
-  const options = { executorId: info.executorId, secret: Buffer.alloc(32, 42).toString('base64url'), allowInsecureDevelopment: true };
+  const options = { executorId: info.executorId, secret: Buffer.alloc(32, 42).toString('base64url'), noTls: true };
   const controller = new WebSocketLink({ ...options, role: 'controller' });
   const worker = new WebSocketLink({ ...options, role: 'worker' });
   const scopes: ReturnType<typeof serveExecutionRuntime>[] = [];

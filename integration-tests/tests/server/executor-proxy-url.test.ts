@@ -75,21 +75,21 @@ for (const direction of ['executor-connects', 'controller-connects'] as const) {
         let executor: { id: string };
         if (direction === 'executor-connects') {
           const created = await client.post<ExecutorConnection & { id: string }>('/api/v1/executors', {
-            label: 'Proxied worker', direction, allowInsecureDevelopment: true,
+            label: 'Proxied worker', direction, noTls: true,
           });
           executor = created;
           const internal = new URL(created.connectionUrl);
           internal.host = new URL(fixture.garcon.baseUrl).host;
           proxy = await startProxy(internal);
           await client.patch(`/api/v1/executors/${executor.id}`, { connection: {
-            direction, connectionUrl: proxy.url, allowInsecureDevelopment: true,
+            direction, connectionUrl: proxy.url, noTls: true,
           } });
           worker = await ExecutorProcess.start({ ...workerOptions, connection: { kind: 'dial', url: proxy.url } });
         } else {
           worker = await ExecutorProcess.start({ ...workerOptions, connection: { kind: 'listen', port: 0 } });
           proxy = await startProxy(new URL(await worker.connectionUrl()));
           executor = await client.post<{ id: string }>('/api/v1/executors', {
-            label: 'Proxied worker', direction, connectionUrl: proxy.url, allowInsecureDevelopment: true,
+            label: 'Proxied worker', direction, connectionUrl: proxy.url, noTls: true,
           });
         }
         const afterIndex = client.markEvents();

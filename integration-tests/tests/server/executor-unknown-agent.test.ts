@@ -31,7 +31,7 @@ test('starts on never-connected or unknown executors report executor unavailabil
     const secret = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url');
     const neverConnected = await client.post<{ id: string }>('/api/v1/executors', {
       label: 'Synthetic unreachable worker', direction: 'controller-connects',
-      connectionUrl: `ws://127.0.0.1:9/executor#secret=${secret}`, allowInsecureDevelopment: true,
+      connectionUrl: `ws://127.0.0.1:9/executor#secret=${secret}`, noTls: true,
     });
     for (const executorId of [neverConnected.id, crypto.randomUUID()]) {
       await expect(client.startChat(client.directStartRequest({

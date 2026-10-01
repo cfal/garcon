@@ -50,15 +50,13 @@ export class ExecutorProcess {
   readonly #logs = new BoundedLog<string>(2000);
   readonly #connected = Promise.withResolvers<void>();
   readonly #listening = Promise.withResolvers<string>();
-  readonly #connection = Promise.withResolvers<string>();
   readonly #pumps: Promise<void>[];
   #stopping = false;
   #unexpectedExit: Error | null = null;
 
-  private constructor(readonly child: Bun.Subprocess<'ignore', 'pipe', 'pipe'>) {
+  private constructor(readonly child: Bun.Subprocess<'ignore', 'pipe', 'pipe'>, private readonly launch: { repoRoot: string; configDir: string }) {
     void this.#connected.promise.catch(() => undefined);
     void this.#listening.promise.catch(() => undefined);
-    void this.#connection.promise.catch(() => undefined);
     const capture = (line: string) => {
       const raw = line.replace(/^\[(stdout|stderr)\] /, '');
       if (!raw.startsWith('{')) { this.#logs.push(line); return; }
@@ -66,7 +64,6 @@ export class ExecutorProcess {
         const frame = JSON.parse(raw);
         if (frame.type === 'executor-listening') {
           this.#listening.resolve(frame.url);
-          this.#connection.resolve(frame.connectionUrl);
           this.#logs.push(JSON.stringify({ type: frame.type, url: frame.url }));
           return;
         }
@@ -79,7 +76,7 @@ export class ExecutorProcess {
       if (this.#stopping) return;
       const error = new Error(`Execution worker exited (${code})\n${this.logs.join('\n')}`);
       this.#unexpectedExit = error;
-      this.#connected.reject(error); this.#listening.reject(error); this.#connection.reject(error);
+      this.#connected.reject(error); this.#listening.reject(error);
     });
   }
 
@@ -93,18 +90,28 @@ export class ExecutorProcess {
     await mkdir(env.TMPDIR, { recursive: true });
     const child = Bun.spawn({
       cmd: [process.execPath, 'server/main.ts', 'executor',
-        ...(input.connection.kind === 'listen' ? ['--listen', String(input.connection.port)] : ['--connect', input.connection.url]),
+        ...(input.connection.kind === 'listen' ? ['--listen', String(input.connection.port)] : []),
         ...(input.connection.kind === 'listen' && input.connection.bindAddress ? ['--bind-address', input.connection.bindAddress] : []),
-        '--allow-insecure-development', '--config-dir', input.directories.config,
+        '--no-tls', '--config-dir', input.directories.config,
         '--project-base-dir', input.directories.project],
-      cwd: input.repoRoot, env, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe',
+      cwd: input.repoRoot, env: { ...env, GARCON_CONTROLLER_URL: input.connection.kind === 'dial' ? input.connection.url : '' },
+      stdin: 'ignore', stdout: 'pipe', stderr: 'pipe',
     });
-    return new ExecutorProcess(child);
+    return new ExecutorProcess(child, { repoRoot: input.repoRoot, configDir: input.directories.config });
   }
 
   get logs(): readonly string[] { return this.#logs.values(); }
   listening(): Promise<string> { return withTimeout(this.#listening.promise, 20_000, () => `Worker did not listen\n${this.logs.join('\n')}`); }
-  connectionUrl(): Promise<string> { return withTimeout(this.#connection.promise, 20_000, () => 'Worker did not print its connection URL'); }
+  async connectionUrl(): Promise<string> {
+    const address = new URL(await this.listening());
+    if (address.hostname === '0.0.0.0' || address.hostname === '[::]') address.hostname = '127.0.0.1';
+    const reveal = Bun.spawn([process.execPath, 'server/main.ts', 'executor', 'connection-url',
+      '--config-dir', this.launch.configDir, '--advertise-url', address.href, '--no-tls'],
+    { cwd: this.launch.repoRoot, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' });
+    const result = (await new Response(reveal.stdout).text()).trim();
+    if (await reveal.exited !== 0) throw new Error('Worker credential reveal failed');
+    return result;
+  }
   connected(): Promise<void> { return withTimeout(this.#connected.promise, 20_000, () => `Worker did not connect\n${this.logs.join('\n')}`); }
 
   async stop(): Promise<void> {
@@ -194,14 +201,14 @@ export class ExecutionBackendFixture {
           url.hostname = '127.0.0.1';
           const created = await this.#request<{ id: string }>('/api/v1/executors', 'POST', {
             label: 'Integration worker', direction: 'controller-connects',
-            connectionUrl: await this.interceptConnection?.(url) ?? url.href, allowInsecureDevelopment: true,
+            connectionUrl: await this.interceptConnection?.(url) ?? url.href, noTls: true,
           });
           this.#executorId = created.id;
         }
       } else {
         if (!this.#executorId) {
           const created = await this.#request<{ id: string } & ExecutorConnection>('/api/v1/executors', 'POST', {
-            label: 'Integration worker', direction: 'executor-connects', allowInsecureDevelopment: true,
+            label: 'Integration worker', direction: 'executor-connects', noTls: true,
           });
           this.#executorId = created.id;
           const url = new URL(created.connectionUrl);
@@ -210,7 +217,7 @@ export class ExecutionBackendFixture {
           url.host = controllerUrl.host;
           const connectionUrl = await this.interceptConnection?.(url) ?? url.href;
           await this.#request(`/api/v1/executors/${this.#executorId}`, 'PATCH', {
-            connection: { direction: 'executor-connects', connectionUrl, allowInsecureDevelopment: true },
+            connection: { direction: 'executor-connects', connectionUrl, noTls: true },
           });
           this.#workerLaunch = { repoRoot: options.repoRoot, directories: this.directories, environment: this.environment,
             connection: { kind: 'dial', url: connectionUrl } };

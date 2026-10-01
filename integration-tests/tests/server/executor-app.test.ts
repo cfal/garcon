@@ -53,7 +53,7 @@ test('executor onboarding is available offline and keeps credentials out of publ
     expect(JSON.stringify(executors)).not.toContain(secret);
     const reveal = await fixture.client.fetch(`/api/v1/executors/${created.id}/connection`);
     expect(reveal.headers.get('cache-control')).toBe('no-store');
-    expect(await reveal.json()).toEqual({ connectionUrl: created.connectionUrl, allowInsecureDevelopment: false, allowUnverifiedTls: false });
+    expect(await reveal.json()).toEqual({ connectionUrl: created.connectionUrl, noTls: false, allowUnverifiedTls: false });
     await expect(client.get(`/api/v1/models?executorId=${created.id}`)).rejects.toMatchObject({ status: 503 });
     await expect(client.delete('/api/v1/executors/local')).rejects.toMatchObject({
       status: 404, body: { errorCode: 'EXECUTOR_NOT_FOUND' },
@@ -73,7 +73,7 @@ test('Local and two public workers coexist and retain chats and settings for del
       const a = await directories(join(fixture.dirs.root, 'worker-a'));
       const b = await directories(join(fixture.dirs.root, 'worker-b'));
       const inbound = await client.post<ExecutorConnection & { id: string }>('/api/v1/executors', {
-        label: 'Inbound', direction: 'executor-connects', allowInsecureDevelopment: true,
+        label: 'Inbound', direction: 'executor-connects', noTls: true,
       });
       const inboundUrl = new URL(inbound.connectionUrl);
       inboundUrl.protocol = 'ws:';
@@ -91,7 +91,7 @@ test('Local and two public workers coexist and retain chats and settings for del
       const outboundUrl = new URL(await workerB.connectionUrl());
       outboundUrl.hostname = '127.0.0.1';
       const outbound = await client.post<ExecutorConnection & { id: string }>('/api/v1/executors', {
-        label: 'Outbound', direction: 'controller-connects', connectionUrl: outboundUrl.href, allowInsecureDevelopment: true,
+        label: 'Outbound', direction: 'controller-connects', connectionUrl: outboundUrl.href, noTls: true,
       });
       await waitReady(client, outbound.id);
       expect((await executorSnapshots(client)).map((executor) => executor.availability)).toEqual(['ready', 'ready', 'ready']);

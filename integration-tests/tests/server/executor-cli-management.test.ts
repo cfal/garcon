@@ -49,7 +49,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       expect((await invoke(['providers'])).providers.find((entry: { id: string }) => entry.id === provider).executorIds).toContain(id);
       expect(await invoke(['unassign-provider', id, '--provider', provider])).toEqual({ executorId: id, providerId: provider, assigned: false });
       const { id: outbound } = await invoke(['create', '--label', 'Synthetic listener', '--direction', 'controller-connects',
-        '--connection-url', `ws://127.0.0.1:9/executor#secret=${'A'.repeat(43)}`, '--allow-insecure-development', 'true']);
+        '--connection-url', `ws://127.0.0.1:9/executor#secret=${'A'.repeat(43)}`, '--no-tls', 'true']);
       const duplicateRename = await runCli(fixture, ['executor', 'update', outbound, '--label', 'SYNTHETIC RENAMED WORKER']);
       expect(duplicateRename).toMatchObject({ exitCode: 3, stdout: '' });
       expect(duplicateRename.stderr).toContain('VALIDATION_FAILED');

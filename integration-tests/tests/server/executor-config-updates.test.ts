@@ -52,7 +52,7 @@ test('advertised URL edits preserve a busy executor and its running turn', async
     const afterIndex = client.markEvents();
     await client.patch(route, { enabled: true, connection: {
       direction: 'executor-connects', connectionUrl: advertised.href,
-      allowInsecureDevelopment: connection.allowInsecureDevelopment,
+      noTls: connection.noTls,
     } });
     const after = await client.get<{ executors: ExecutorSnapshot[] }>('/api/v1/executors');
     expect(after.executors.find((executor) => executor.id === id)).toEqual(before.executors.find((executor) => executor.id === id));

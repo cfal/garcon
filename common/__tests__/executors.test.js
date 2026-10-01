@@ -16,7 +16,7 @@ test('only absent or null executor identity defaults to Local', () => {
 
 test('executor mutation contracts reject incomplete and extraneous fields', () => {
   expect(parseCreateExecutorRequest({ label: ' Worker ', direction: 'executor-connects' }))
-    .toEqual({ label: 'Worker', direction: 'executor-connects', allowInsecureDevelopment: undefined, allowUnverifiedTls: undefined });
+    .toEqual({ label: 'Worker', direction: 'executor-connects', noTls: undefined, allowUnverifiedTls: undefined });
   expect(parseCreateExecutorRequest({ label: 'Worker', direction: 'controller-connects' })).toBeNull();
   expect(parseCreateExecutorRequest({ label: 'Worker', direction: 'executor-connects', secret: 'hidden' })).toBeNull();
   expect(parseUpdateExecutorRequest({})).toBeNull();
@@ -30,7 +30,7 @@ test('certificate verification opt-out is explicit and only applies to the diali
   expect(parseCreateExecutorRequest({ ...request, allowUnverifiedTls: true })?.allowUnverifiedTls).toBe(true);
   expect(parseCreateExecutorRequest({ ...request, allowUnverifiedTls: 'true' })).toBeNull();
   expect(parseCreateExecutorRequest({ label: 'Worker', direction: 'executor-connects', allowUnverifiedTls: true })).toBeNull();
-  const connection = { direction: 'controller-connects', connectionUrl: request.connectionUrl, allowInsecureDevelopment: false, allowUnverifiedTls: true };
+  const connection = { direction: 'controller-connects', connectionUrl: request.connectionUrl, noTls: false, allowUnverifiedTls: true };
   expect(parseUpdateExecutorRequest({ connection })).toEqual({ connection });
   expect(parseUpdateExecutorRequest({ connection: { ...connection, direction: 'executor-connects' } })).toBeNull();
   expect(parseUpdateExecutorRequest({ connection: { ...connection, allowUnverifiedTls: 1 } })).toBeNull();

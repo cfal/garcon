@@ -160,7 +160,7 @@ async function assertCompiledExecutor(url, executablePath, workspaceDir, apiFetc
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
-      label: 'Compiled Worker', direction: 'executor-connects', allowInsecureDevelopment: true,
+      label: 'Compiled Worker', direction: 'executor-connects', noTls: true,
     }),
   });
   if (!response.ok) throw new Error(`Unable to configure compiled worker: ${response.status}`);
@@ -171,11 +171,11 @@ async function assertCompiledExecutor(url, executablePath, workspaceDir, apiFetc
   connection.hostname = '127.0.0.1';
   const worker = Bun.spawn({
     cmd: [
-      executablePath, 'executor', '--connect', connection.href,
-      '--allow-insecure-development', '--config-dir', path.join(workspaceDir, 'worker'),
+      executablePath, 'executor',
+      '--no-tls', '--config-dir', path.join(workspaceDir, 'worker'),
       '--project-base-dir', workspaceDir,
     ],
-    env: isolatedServerEnvironment(piAgentDir),
+    env: { ...isolatedServerEnvironment(piAgentDir), GARCON_CONTROLLER_URL: connection.href },
     stdout: 'ignore',
     stderr: 'pipe',
   });

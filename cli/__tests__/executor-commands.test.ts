@@ -15,7 +15,7 @@ const snapshot: ExecutorSnapshot = { id, label: 'Worker', kind: 'remote', enable
   allowControllerCli: true, allowExecutorManagement: false, direction: 'executor-connects', availability: 'ready',
   instanceId: 'synthetic', projectBasePath: '/workspace', lastError: null,
   machineServices: { files: true, git: true, gh: true, terminals: true } };
-const connection = { connectionUrl: `wss://worker.test/executor#secret=${'A'.repeat(43)}`, allowInsecureDevelopment: false, allowUnverifiedTls: false };
+const connection = { connectionUrl: `wss://worker.test/executor#secret=${'A'.repeat(43)}`, noTls: false, allowUnverifiedTls: false };
 const providers = [{ id: 'synthetic-profile', label: 'Profile', executorIds: [id] }];
 
 function command(args: string[]) {
@@ -43,7 +43,7 @@ test('executor parser handles independent grants, both directions, and strict up
       label: 'Worker', allowControllerCli: true, allowExecutorManagement: false, advertisedUrl: 'wss://controller.test/executor/{executorId}',
     } });
   expect(command(['update', id, '--allow-executor-management', 'false']).operation).toEqual({ action: 'update', id, request: { allowExecutorManagement: false } });
-  expect(command(['update', id, '--direction', 'controller-connects', '--connection-url', '-', '--allow-insecure-development', 'false']).readsConnectionFromStdin).toBe(true);
+  expect(command(['update', id, '--direction', 'controller-connects', '--connection-url', '-', '--no-tls', 'false']).readsConnectionFromStdin).toBe(true);
   expect(command(['assign-provider', 'local', '--provider', 'synthetic-profile']).operation).toEqual({ action: 'assign-provider', id: 'local', providerId: 'synthetic-profile' });
 });
 

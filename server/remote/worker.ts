@@ -6,7 +6,7 @@ import { RpcReplyJournal } from './transport/rpc-journal.js';
 import { serveExecutionRuntime } from './server/executor-rpc-server.js';
 import { ProducerRelay } from './server/producer-relay.js';
 import { ExecutionRuntime } from '../runtime/execution-runtime.js';
-import { shouldLogLinkFailure, WebSocketLink } from './transport/websocket-link.js';
+import { shouldLogLinkFailure, WebSocketLink, type ExecutorListenerTls } from './transport/websocket-link.js';
 import { TerminalRuntime } from '../runtime/terminals/runtime.js';
 import { startCliGateway } from './server/cli-gateway.js';
 import { cliGatewayRuntimeFile, executorDataDirectory } from '../../common/cli-runtime-paths.js';
@@ -18,10 +18,10 @@ import { reportSlowSteps } from '@garcon/server-agent-common/shared/event-loop';
 export interface ExecutorWorkerOptions {
   readonly configDir: string;
   readonly projectBasePath: string;
-  readonly allowInsecureDevelopment: boolean;
+  readonly noTls: boolean;
   readonly allowUnverifiedTls?: boolean;
   readonly connection: { readonly kind: 'dial'; readonly url: string; readonly secret: string }
-    | { readonly kind: 'listen'; readonly port: number; readonly bindAddress?: string };
+    | { readonly kind: 'listen'; readonly port: number; readonly bindAddress?: string; readonly tls?: ExecutorListenerTls };
   readonly advertisedUrl?: string;
 }
 
@@ -29,6 +29,7 @@ export async function runExecutorWorker(
   options: ExecutorWorkerOptions,
   onListening: (url: string, secret: string) => void = (url) => console.log(JSON.stringify({ type: 'executor-listening', url })),
 ): Promise<void> {
+  delete process.env.GARCON_CONTROLLER_URL;
   const dataDir = executorDataDirectory(options.configDir);
   await mkdir(dataDir, { recursive: true, mode: 0o700 });
   const lease = await acquireWorkspaceLease(dataDir, { onCompromised(error) {
@@ -51,7 +52,7 @@ async function serveExecutorWorker(options: ExecutorWorkerOptions, dataDir: stri
   process.env.GARCON_RUNTIME = 'executor';
   const secret = options.connection.kind === 'dial' ? options.connection.secret : await loadListenerSecret(dataDir);
   const link = new WebSocketLink({ role: 'worker', secret,
-    allowInsecureDevelopment: options.allowInsecureDevelopment, allowUnverifiedTls: options.allowUnverifiedTls });
+    noTls: options.noTls, allowUnverifiedTls: options.allowUnverifiedTls });
   let serving: ReturnType<typeof serveExecutionRuntime> | null = null;
   let runtime: ExecutionRuntime | null = null;
   const relay = new ProducerRelay();
@@ -128,7 +129,7 @@ async function serveExecutorWorker(options: ExecutorWorkerOptions, dataDir: stri
     });
     if (options.connection.kind === 'listen') {
       const bindAddress = options.connection.bindAddress ?? '0.0.0.0';
-      const address = new URL(link.listen(options.connection.port, bindAddress));
+      const address = new URL(link.listen(options.connection.port, bindAddress, options.connection.tls));
       if (bindAddress === '0.0.0.0') address.hostname = bindAddress;
       onListening(address.href, secret);
     } else {

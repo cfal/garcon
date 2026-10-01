@@ -11,8 +11,10 @@ executor, runtime, version, and the fresh connection. The version is the
 package version followed by the executor protocol revision, as in
 `0.3.4+protocol.8`. The revision changes with anything either side sends or
 accepts, so builds that disagree fail the handshake with "Executor version
-mismatch" instead of failing mid-session. TLS is required outside explicit
-development mode; Noise remains mandatory when outer TLS certificate
+mismatch" instead of failing mid-session. TLS is required unless explicitly
+disabled with `noTls` (`--no-tls` for workers). Worker listeners require a PEM
+`--tls-cert` and `--tls-private-key` pair or `--no-tls`; see the
+[operator guide](../cli.md#executor-connections). Noise remains mandatory when outer TLS certificate
 verification is disabled. After losing a session, the dialing side redials at
 once, then after 5 and 5 seconds, five times after 10 seconds, and every 30
 seconds after that, VS Code Remote's reconnection delays. A session that stayed
