@@ -44,12 +44,12 @@ describe('sidebar multi-select', () => {
 		});
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Chat actions' }));
-		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Select', exact: true }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Select' }));
 		await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
 
 		const checkbox = screen.getByRole('checkbox', { name: 'Select First chat' });
 		expect(checkbox.getAttribute('aria-checked')).toBe('true');
-		expect(screen.getByRole('button', { name: 'Done', exact: true })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Done' })).toBeTruthy();
 		checkbox.focus();
 		expect(document.activeElement).toBe(checkbox);
 
@@ -64,7 +64,7 @@ describe('sidebar multi-select', () => {
 
 		expect(escape.defaultPrevented).toBe(true);
 		expect(screen.queryByRole('checkbox', { name: 'Select First chat' })).toBeNull();
-		expect(screen.queryByRole('button', { name: 'Done', exact: true })).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Done' })).toBeNull();
 		expect(screen.getByRole('button', { name: 'Chat actions' })).toBeTruthy();
 		expect(onChatSelect).not.toHaveBeenCalled();
 	});
