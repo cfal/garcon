@@ -76,6 +76,7 @@ import { AttentionTracker } from './notifications/attention-tracker.js';
 import {
   abortRunningSessionsWithTimeout,
   shutdownExitCode,
+  settleShutdownCleanups,
   waitForShutdownPhasesWithTimeout,
 } from './lib/shutdown.js';
 import { WebSocketAdmissionController } from '../common/websocket-capacity.js';
@@ -881,22 +882,33 @@ export async function startServer(): Promise<void> {
     const shutdown = async () => {
       if (shuttingDown) return;
       shuttingDown = true;
-      stopStallMonitor();
-      stopSlowStepReports();
-      primaryDelivery.close();
-      agentCommands.shutdown();
-      carryOverGarbageCollector.shutdown();
-      const metadataClosed = metadata.close();
       logger.info('server: shutting down...');
-      const reservedChatIds = queue.beginShutdown();
-      executors.quiesce();
-      stopObservingProviders();
-      handoffs.shutdown();
-      transcriptReader.close();
       let abortTimedOut = false;
       let cleanupFailed = false;
+      const reportCleanupError = (error: unknown) => {
+        cleanupFailed = true;
+        logger.warn('server: shutdown cleanup error:', errorMessage(error));
+      };
+      let metadataClosed: Promise<void> = Promise.resolve();
+      let reservedChatIds: string[] = [];
+      // Quiescing stays synchronous so no producer can enter between admission fences.
+      for (const prepare of [
+        stopStallMonitor,
+        stopSlowStepReports,
+        () => primaryDelivery.close(),
+        () => agentCommands.shutdown(),
+        () => carryOverGarbageCollector.shutdown(),
+        () => { metadataClosed = metadata.close().catch(reportCleanupError); },
+        () => { reservedChatIds = queue.beginShutdown(); },
+        () => executors.quiesce(),
+        stopObservingProviders,
+        () => handoffs.shutdown(),
+        () => transcriptReader.close(),
+        () => scheduledPrompts.stop(),
+      ]) {
+        try { prepare(); } catch (error) { reportCleanupError(error); }
+      }
       try {
-        scheduledPrompts.stop();
         const abortResult = await abortRunningSessionsWithTimeout({
           runningSessions: agentRegistry.getRunningSessions(),
           additionalChatIds: reservedChatIds,
@@ -927,35 +939,29 @@ export async function startServer(): Promise<void> {
           cleanupFailed = true;
           logger.warn('server: shutdown background-task error:', errorMessage(backgroundError));
         }
-        unsubscribeSearchStatus();
-        unsubscribeSearchAvailability();
-        await chatSearch.close();
-        tokenFitting.close();
-        transcriptRendering.close();
-        await executors.dispose();
-        transcriptLedger.close();
-        terminalManager.shutdown();
-        await metadataClosed;
-        await metadata.flush();
-        await chatRegistry.flush();
       } catch (err) {
-        cleanupFailed = true;
-        logger.warn('server: shutdown cleanup error:', errorMessage(err));
+        reportCleanupError(err);
       } finally {
-        executionSockets.close();
-        await server.stop(true);
-        tickets.close();
-        try {
-          await removeServerRuntime(runtimeFilePath, runtimeState.identity.instanceId);
-        } catch (err) {
-          cleanupFailed = true;
-          logger.warn('server: runtime descriptor cleanup error:', errorMessage(err));
-        }
-        try {
-          await workspaceLease?.release();
-        } catch (err) {
-          cleanupFailed = true;
-          logger.warn('server: workspace lease release error:', errorMessage(err));
+        const cleanupErrors = await settleShutdownCleanups([
+          unsubscribeSearchStatus,
+          unsubscribeSearchAvailability,
+          () => chatSearch.close(),
+          () => tokenFitting.close(),
+          () => transcriptRendering.close(),
+          () => executors.dispose(),
+          () => transcriptLedger.close(),
+          () => terminalManager.shutdown(),
+          () => metadataClosed,
+          () => metadata.flush(),
+          () => chatRegistry.flush(),
+          () => executionSockets.close(),
+          () => server.stop(true),
+          () => tickets.close(),
+          () => removeServerRuntime(runtimeFilePath, runtimeState.identity.instanceId),
+          () => workspaceLease?.release(),
+        ]);
+        for (const err of cleanupErrors) {
+          reportCleanupError(err);
         }
         workspaceLease = null;
       }
