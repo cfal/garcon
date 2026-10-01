@@ -115,6 +115,7 @@ describe('ControlInputDelivery', () => {
     'STEER_TURN_UNAVAILABLE',
     'STEER_TURN_NOT_STEERABLE',
     'OPERATION_UNSUPPORTED',
+    'EXECUTOR_UNAVAILABLE',
     'STEER_NOT_DELIVERED',
   ]) {
     it(`uses one direct fallback after ${code}`, async () => {
@@ -141,6 +142,29 @@ describe('ControlInputDelivery', () => {
     expect(harness.scheduleRun).not.toHaveBeenCalled();
   });
 
+  it('waits for an unsteerable emitting attempt before one direct fallback', async () => {
+    const settled = deferred();
+    const waiting = deferred();
+    const harness = createHarness({
+      captureTarget: mock(() => ({
+        ...capturedTarget('turn-1', () => {
+          waiting.resolve();
+          return settled.promise;
+        }),
+        providerTarget: null,
+      })),
+    });
+
+    const result = deliver(harness);
+    await waiting.promise;
+    expect(harness.deliverSteer).not.toHaveBeenCalled();
+    expect(harness.scheduleRun).not.toHaveBeenCalled();
+
+    settled.resolve();
+    await result;
+    expect(harness.scheduleRun).toHaveBeenCalledTimes(1);
+  });
+
   it('does not retry a failed direct reservation', async () => {
     const failure = domainError('SESSION_BUSY');
     const harness = createHarness({
@@ -154,12 +178,17 @@ describe('ControlInputDelivery', () => {
   });
 
   it('aborts while waiting for the emitting attempt to settle', async () => {
+    const waiting = deferred();
     const harness = createHarness({
-      captureTarget: mock(() => capturedTarget('turn-1', () => new Promise(() => undefined))),
+      captureTarget: mock(() => capturedTarget('turn-1', () => {
+        waiting.resolve();
+        return new Promise(() => undefined);
+      })),
       deliverSteer: mock(async () => { throw domainError('STEER_TURN_CHANGED'); }),
     });
 
     const result = deliver(harness);
+    await waiting.promise;
     harness.controller.abort(new Error('chat deleted'));
 
     await expect(result).rejects.toThrow('chat deleted');

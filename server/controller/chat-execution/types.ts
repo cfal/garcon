@@ -205,9 +205,11 @@ export type ServerControlDisposition = 'delivered' | 'queued';
 
 // Server control input steered into the running turn or queued, or the running
 // turn that provably did not receive it and must settle before it is queued.
-export type ServerControlOffer =
-  | { readonly kind: ServerControlDisposition }
+export type CapturedControlOffer =
+  | { readonly kind: 'delivered' }
   | { readonly kind: 'after-turn'; readonly turnSettled: Promise<void> };
+
+export type ServerControlOffer = CapturedControlOffer | { readonly kind: 'queued' };
 
 export interface AcceptedSteerInput {
   command: AcceptedExecutionCommand;

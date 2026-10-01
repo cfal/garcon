@@ -69,7 +69,6 @@ import { AcceptedInputTranscript, type AcceptedInputTranscriptPort } from './acc
 import { SteerInputDelivery } from './steer-input-delivery.ts';
 import { QueuedSteerDelivery, type QueuedSteerDeliveryOptions } from './queued-steer-delivery.ts';
 import { ControlInputDelivery } from './control-input-delivery.ts';
-import { ControlSteerDelivery } from './control-steer-delivery.ts';
 
 export type { QueueCommandIdentity } from './chat-execution-control-transitions.ts';
 export {
@@ -115,7 +114,6 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
   #steerInputDelivery: SteerInputDelivery;
   #queuedSteers: QueuedSteerDelivery;
   #controlInputDelivery: ControlInputDelivery;
-  #controlSteerDelivery: ControlSteerDelivery;
 
   constructor(
     _workspaceDir: string,
@@ -182,17 +180,10 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       requestDrain: (chatId, context) => { this.#requestDrain(chatId, context); },
       trackTask: (task) => { this.#trackDispatch(task); },
     });
-    const deliverControlSteer = (
-      chatId: string,
-      content: string,
-      viewId: string,
-      target: CapturedSteerTarget,
-    ) => this.#steerInputDelivery.deliverControl(chatId, content, viewId, target);
-    this.#controlSteerDelivery = new ControlSteerDelivery(deliverControlSteer);
     this.#controlInputDelivery = new ControlInputDelivery({
       // Chat ID disclosures hold no chat lock, so their steers keep their own deadlines.
       captureTarget: (chatId) => this.#steerInputDelivery.captureControlTarget(chatId, null),
-      deliverSteer: deliverControlSteer,
+      deliverSteer: (chatId, content, viewId, target) => this.#steerInputDelivery.deliverControl(chatId, content, viewId, target),
       scheduleRun: (chatId, content, viewId, onReserved) => (
         this.#scheduleControlRun(chatId, content, viewId, onReserved)
       ),
@@ -460,9 +451,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     signal: AbortSignal,
     onControlRun: (turnId: string) => void,
   ): Promise<void> {
-    return this.#controlInputDelivery.deliver(
-      chatId, content, transcriptViewId, emittingRunId, signal, onControlRun,
-    );
+    return this.#controlInputDelivery.deliver(chatId, content, transcriptViewId, emittingRunId, signal, onControlRun);
   }
 
   // For callers that hold no chat lock, such as agent command replies, whose
@@ -500,15 +489,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
 
     const target = await this.#steerInputDelivery.captureControlTarget(chatId, deadline);
     if (!target) return { kind: await this.queueServerControlInput(chatId, input, signal) };
-    const outcome = await this.#controlSteerDelivery.offerToCapturedTarget(
-      chatId,
-      input.content,
-      input.transcriptViewId,
-      target,
-      signal,
-    );
-    if (outcome === 'delivered') return { kind: 'delivered' };
-    return { kind: 'after-turn', turnSettled: target.attempt.waitUntilSettled() };
+    return this.#controlInputDelivery.offerToCapturedTarget(chatId, input.content, input.transcriptViewId, target, signal);
   }
 
   async queueServerControlInput(

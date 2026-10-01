@@ -164,6 +164,24 @@ export type RunAgentTurnOptions = Omit<RunAgentTurnRequest, 'chatId' | 'command'
   integrationEndpoint?: AgentEndpointSelection | null;
 };
 
+export interface StartSessionOptions {
+  onContextPreparation?: (phase: 'compacting-context' | 'starting-agent') => void;
+  images?: AgentCommandImage[];
+  model?: string;
+  permissionMode?: PermissionMode;
+  thinkingMode?: ThinkingMode;
+  agentSettings?: AgentSettingsEnvelope;
+  projectPath?: string;
+  clientRequestId?: string;
+  clientMessageId?: string;
+  turnId?: string;
+  commandType?: AgentExecutionCommandType;
+  executionAdmission?: AgentExecutionAdmission;
+  apiProviderId?: string | null;
+  modelEndpointId?: string | null;
+  dispatchDeadline?: number;
+}
+
 export interface AgentSteerOptions {
   readonly clientRequestId: string;
   readonly clientMessageId: string;

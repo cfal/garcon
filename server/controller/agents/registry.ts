@@ -10,7 +10,6 @@ import type { PermissionDecisionPayload } from '../../../common/chat-command-con
 import type { ChatMessage } from '@garcon/common/chat-types';
 import type { ChatTransientControlAction } from '../../../common/chat-transient-feed.js';
 import type { PermissionMode, ThinkingMode } from '../../../common/chat-modes.js';
-import type { AgentCommandImage } from '../../../common/ws-requests.js';
 import type { AgentCatalogEntry, AgentModelOption } from '../../../common/agents.js';
 import type { SlashCommand } from '../../../common/slash-commands.js';
 import type {
@@ -26,13 +25,13 @@ import type { IntegrationRegistry } from '../../runtime/agents/integration-regis
 import type {
   AgentChatEntry,
   AgentExecutionAdmission,
-  AgentExecutionCommandType,
   ForkedAgentSessionOutcome,
   AgentSessionSettingsPatch,
   AgentSteerOptions,
   PrepareProjectPathUpdateRequest,
   RunAgentTurnOptions,
   StartedAgentSession,
+  StartSessionOptions,
 } from './session-types.js';
 import { AgentCatalogService, type AgentModelQuery } from './catalog-service.js';
 import { AgentDirectory, type ExecutionIntegrationDirectory } from './directory.js';
@@ -163,22 +162,6 @@ export interface AgentRegistryServiceContract {
   updateSessionSettings(
     chatId: string, patch: AgentSessionSettingsPatch, expectedAgentOwnershipEpoch?: string, signal?: AbortSignal,
   ): Promise<AgentChatEntry>;
-}
-
-interface StartSessionOptions {
-  onContextPreparation?: (phase: 'compacting-context' | 'starting-agent') => void;
-  images?: AgentCommandImage[];
-  model?: string;
-  permissionMode?: PermissionMode;
-  thinkingMode?: ThinkingMode;
-  agentSettings?: RunAgentTurnOptions['agentSettings'];
-  projectPath?: string;
-  clientRequestId?: string;
-  clientMessageId?: string;
-  turnId?: string;
-  commandType?: AgentExecutionCommandType;
-  executionAdmission?: AgentExecutionAdmission;
-  dispatchDeadline?: number;
 }
 
 interface CompactSessionOptions {

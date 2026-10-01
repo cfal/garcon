@@ -35,7 +35,7 @@ import type { AgentEventBus, TurnEventMetadata } from './event-bus.js';
 import type {
   AgentChatEntry,
   AgentExecutionAdmission,
-  AgentExecutionCommandType,
+  StartSessionOptions,
   AgentSteerOptions,
   ForkedAgentSessionOutcome,
   PrepareProjectPathUpdateRequest,
@@ -185,23 +185,7 @@ export class AgentRuntimeRouter {
       }
     });
   }
-  async startSession(chatId: string, prompt: string, opts: {
-    onContextPreparation?: (phase: 'compacting-context' | 'starting-agent') => void;
-    images?: RunAgentTurnOptions['images'];
-    model?: string;
-    permissionMode?: RunAgentTurnOptions['permissionMode'];
-    thinkingMode?: RunAgentTurnOptions['thinkingMode'];
-    agentSettings?: AgentSettingsEnvelope;
-    projectPath?: string;
-    clientRequestId?: string;
-    clientMessageId?: string;
-    turnId?: string;
-    commandType?: AgentExecutionCommandType;
-    executionAdmission?: AgentExecutionAdmission;
-    apiProviderId?: string | null;
-    modelEndpointId?: string | null;
-    dispatchDeadline?: number;
-  } = {}): Promise<void> {
+  async startSession(chatId: string, prompt: string, opts: StartSessionOptions = {}): Promise<void> {
     let runId: string | null = null;
     let executionInvoked = false;
     try {
