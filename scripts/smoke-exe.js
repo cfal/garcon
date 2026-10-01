@@ -25,6 +25,9 @@ const SMOKE_ISOLATION_ENV_KEYS = new Set([
   'GARCON_WORKSPACE',
   'GARCON_PORT',
   'GARCON_BIND_ADDRESS',
+  'GARCON_PUBLIC_URL',
+  'GARCON_CONTROLLER_URL',
+  'GARCON_EXECUTOR_ADVERTISE_URL',
   'GARCON_PROJECT_BASE_DIR',
   'GARCON_DISABLE_AUTH',
   'GARCON_AGENT_EXECUTOR_CONFIG',
@@ -100,10 +103,11 @@ async function waitForServerUrl(processHandle) {
     throw new Error(`Executable exited early with code ${code}. Captured output:\n${output}`);
   });
 
-  const url = await Promise.race([startedPromise, timeoutPromise, exitPromise]);
+  const url = new URL(await Promise.race([startedPromise, timeoutPromise, exitPromise]));
+  url.hostname = '127.0.0.1';
   await Promise.race([stdoutPump, delay(50)]);
   await Promise.race([stderrPump, delay(50)]);
-  return { url, getOutput: () => output };
+  return { url: url.origin, getOutput: () => output };
 }
 
 async function stopProcess(processHandle) {
