@@ -90,7 +90,7 @@ describe('ExecutorsDialog', () => {
 		const url = screen.getByLabelText('Connection URL') as HTMLInputElement;
 		const copy = screen.getByRole('button', { name: 'Copy connection URL' }) as HTMLButtonElement;
 		await waitFor(() => expect(copy.disabled).toBe(false));
-		for (const value of ['', 'not a URL', connection.connectionUrl.replace('example.test', 'example.com'),
+		for (const value of ['', 'not a URL', connection.connectionUrl.replace(/A$/u, 'B'), connection.connectionUrl.replace('example.test', 'example.com'),
 			connection.connectionUrl.replace('example.test', '0.0.0.0'), connection.connectionUrl.replace('wss:', 'ws:')]) {
 			await fireEvent.input(url, { target: { value } });
 			expect(copy.disabled).toBe(true);

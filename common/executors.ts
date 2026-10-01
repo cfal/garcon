@@ -18,6 +18,11 @@ export function isRemoteExecutorId(value: unknown): value is string {
   return typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(value);
 }
 
+export function isExecutorSecret(value: unknown): value is string {
+  // A canonical 32-byte base64url value ends with two zero padding bits.
+  return typeof value === 'string' && /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/u.test(value);
+}
+
 export function isExecutorId(value: unknown): value is string {
   return value === LOCAL_EXECUTOR_ID || isRemoteExecutorId(value);
 }

@@ -1,6 +1,6 @@
 import * as api from '$lib/api/executors.js';
 import type { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
-import type { ExecutorDirection, ExecutorSnapshot } from '$shared/executors';
+import { isExecutorSecret, type ExecutorDirection, type ExecutorSnapshot } from '$shared/executors';
 
 export class ExecutorEditor {
 	id = $state<string | null>(null);
@@ -38,7 +38,7 @@ export class ExecutorEditor {
 			const fragment = new URLSearchParams(url.hash.slice(1));
 			return (url.protocol === 'wss:' || url.protocol === 'ws:' && this.noTls)
 				&& !url.username && !url.password && !['0.0.0.0', '[::]', 'example.com'].includes(url.hostname)
-				&& fragment.size === 1 && /^[A-Za-z0-9_-]{43}$/u.test(fragment.get('secret') ?? '');
+				&& fragment.size === 1 && isExecutorSecret(fragment.get('secret'));
 		} catch { return false; }
 	}
 

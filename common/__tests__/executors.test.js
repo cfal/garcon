@@ -2,10 +2,22 @@ import { expect, test } from 'bun:test';
 import { ExecutorsChangedMessage, parseServerWsMessage } from '../ws-events.ts';
 import {
   effectiveExecutorId, parseExecutorId, parseCreateExecutorRequest, parseUpdateExecutorRequest,
-  parseExecutors,
+  parseExecutors, isExecutorSecret,
 } from '../executors.ts';
 
 const remoteId = '22222222-2222-4222-8222-222222222222';
+
+test('executor secrets match canonical 32-byte base64url encoding in browser and worker', () => {
+  for (const suffix of 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_') {
+    const secret = 'A'.repeat(42) + suffix;
+    const bytes = Buffer.from(secret, 'base64url');
+    expect(isExecutorSecret(secret)).toBe(bytes.length === 32 && bytes.toString('base64url') === secret);
+  }
+  for (let byte = 0; byte <= 255; byte++) expect(isExecutorSecret(Buffer.alloc(32, byte).toString('base64url'))).toBe(true);
+  for (const value of [null, undefined, 3, '', 'A'.repeat(42), 'A'.repeat(44), '+'.repeat(43), '/'.repeat(43), 'A'.repeat(43) + '=']) {
+    expect(isExecutorSecret(value)).toBe(false);
+  }
+});
 
 test('only absent or null executor identity defaults to Local', () => {
   for (const value of [undefined, null, 'local']) expect(parseExecutorId(value)).toBe('local');

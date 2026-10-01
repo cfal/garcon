@@ -1,14 +1,11 @@
 import { randomBytes } from 'node:crypto';
 import { ValidationDomainError } from '../../common/domain-error.js';
+import { isExecutorSecret } from '../../../common/executors.js';
+
+export { isExecutorSecret };
 
 export function createExecutorSecret(): string {
   return randomBytes(32).toString('base64url');
-}
-
-export function isExecutorSecret(value: unknown): value is string {
-  if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{43}$/u.test(value)) return false;
-  const bytes = Buffer.from(value, 'base64url');
-  return bytes.length === 32 && bytes.toString('base64url') === value;
 }
 
 export function parseConnectionUrl(value: string): { socketUrl: string; secret: string } {
