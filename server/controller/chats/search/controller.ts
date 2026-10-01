@@ -363,18 +363,21 @@ export class TranscriptSearchController {
           this.#adoptingChatIds.delete(chatId);
         }
       }
+      const viewId = view.viewId;
       const watermark = await this.#ingestPacer.pay('watermark', () => {
         if (!this.#deps.hasChat(chatId)) throw new Error('SEARCH_VIEW_MISMATCH');
-        return this.#deps.ledger.highWatermark(chatId);
+        const watermark = this.#deps.ledger.highWatermark(chatId);
+        if (watermark.viewId !== viewId) throw new Error('SEARCH_VIEW_MISMATCH');
+        // Publishes before pacing yields so a newer commit cannot be overwritten.
+        this.#ledgerSnapshots.set(chatId, { viewId, through: watermark.ordinal });
+        this.#adoptionFailedChatIds.delete(chatId);
+        this.#fencedChatIds.delete(chatId);
+        return watermark;
       });
-      if (watermark.viewId !== view.viewId) throw new Error('SEARCH_VIEW_MISMATCH');
       if (!this.#deps.hasChat(chatId)) {
         this.#forgetChat(chatId);
         return null;
       }
-      this.#ledgerSnapshots.set(chatId, { viewId: view.viewId, through: watermark.ordinal });
-      this.#adoptionFailedChatIds.delete(chatId);
-      this.#fencedChatIds.delete(chatId);
       return { view, through: watermark.ordinal };
     } catch (error) {
       this.#adoptingChatIds.delete(chatId);

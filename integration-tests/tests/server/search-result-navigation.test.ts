@@ -3,6 +3,25 @@ import type { ChatSearchNavigateResponse } from '../../../common/chat-search.js'
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { createSearchNavigationTarget } from '../../support/search-navigation-fixture.js';
 
+test('search keeps new response addresses visible after indexing is already enabled', async () => {
+  await withIntegrationFixture('search-new-chat-watermark', async (fixture) => {
+    const first = await createSearchNavigationTarget(fixture, 'syntheticfirstanchor');
+    const second = await createSearchNavigationTarget(fixture, 'syntheticsecondanchor');
+    await fixture.client.waitForSearchPhase(['ready'], { timeoutMs: 10_000 });
+    for (const { chatId, marker, target } of [first, second]) {
+      const found = await fixture.client.searchChats({ query: marker, chatIds: [chatId] });
+      expect(found.index).toMatchObject({ indexedChatCount: 1, pendingChatCount: 0 });
+      expect(found.results).toEqual([
+        expect.objectContaining({
+          chatId,
+          transcriptViewId: target.transcriptViewId,
+          snippets: [expect.objectContaining({ ordinal: target.ordinal })],
+        }),
+      ]);
+    }
+  });
+}, 60_000);
+
 test('search addresses load old rows across restart and reject replacement views', async () => {
   await withIntegrationFixture('search-result-navigation', async (fixture) => {
     const { chatId, target, marker } = await createSearchNavigationTarget(fixture);

@@ -279,6 +279,45 @@ describe('TranscriptSearchController v9', () => {
     await fixture.controller.close();
   });
 
+  for (const refresh of ['catalog', 'resync']) {
+    test(`${refresh} watermark pacing cannot hide a newer commit from search`, async () => {
+      const fixture = harness({ states: [{
+        chatId: 'chat-0001', transcriptViewId: 'view-0001', status: 'indexed',
+        indexedThrough: 2, targetThrough: 2, lastErrorCode: null,
+      }] });
+      await fixture.controller.start();
+      try {
+        await waitFor(() => fixture.resyncScopes[0]?.completed === 1);
+        const committed = deferred();
+        fixture.ledger.highWatermark.mockImplementationOnce(() => {
+          const watermark = { viewId: transcriptViewId('view-0001'), ordinal: 2 };
+          queueMicrotask(() => {
+            const appended = row(3, 'syntheticlatestmarker');
+            fixture.chats.get('chat-0001').rows.push(appended);
+            fixture.listener({
+              type: 'rows', chatId: 'chat-0001', viewId: watermark.viewId, rows: [appended],
+            });
+            committed.resolve();
+          });
+          return watermark;
+        });
+        if (refresh === 'catalog') fixture.controller.catalogMayHaveChanged('chat-0001');
+        else void fixture.service.resyncHandler();
+        await committed.promise;
+        await fixture.controller.sourceAvailable('chat-0001');
+
+        await fixture.controller.search({
+          query: 'syntheticlatestmarker', allowedChatIds: ['chat-0001'],
+        });
+        expect(fixture.service.search.mock.calls.at(-1)[0].allowedChats).toEqual([
+          { chatId: 'chat-0001', transcriptViewId: 'view-0001', throughOrdinal: 3 },
+        ]);
+      } finally {
+        await fixture.controller.close();
+      }
+    });
+  }
+
   test('maps public sort and paging while preserving a worker cursor after stale-view filtering', async () => {
     const fixture = harness({ states: [{
       chatId: 'chat-0001', transcriptViewId: 'view-0001', status: 'indexed',
