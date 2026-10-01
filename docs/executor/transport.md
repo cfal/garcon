@@ -335,7 +335,10 @@ which holds its chat's lock through dispatch: if the executor has not
 reconnected by the deadline, the start fails as not dispatched, its chat is
 rolled back, and the user sends it again. A start or resume that an agent
 command requests takes its deadline when it asks for the requesting chat's
-lock, and a delegated start dispatches after releasing it. Queued turns, the
+lock, and a delegated start dispatches after releasing it. A scheduled prompt
+sends through the same locked paths after claiming its occurrence, so an
+occurrence that cannot reach a reconnecting executor in time fails, is recorded
+in the prompt log, and is not retried. Queued turns, the
 queue drain's admission check, chat-ID disclosures, and replies to agent
 commands run without one, so they keep waiting within their own deadlines. Some
 lock holders do not follow the rule yet and wait within their own deadlines
