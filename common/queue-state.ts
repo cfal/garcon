@@ -2,10 +2,18 @@
 // delivered once the turn can take it; with no turn running it starts the next turn.
 export type QueueEntryKind = 'turn' | 'steer';
 
+// Attachment payloads stay on the server; queue state only describes them so
+// every control update stays small enough to broadcast.
+export interface QueueEntryAttachment {
+  name: string;
+  mimeType: string;
+}
+
 export interface QueueEntry {
   id: string;
   content: string;
   kind: QueueEntryKind;
+  attachments: QueueEntryAttachment[];
   revision: number;
   createdAt: string;
   updatedAt: string;
@@ -48,6 +56,15 @@ export function emptyChatQueueState(): ChatQueueState {
   };
 }
 
+function parseQueueEntryAttachment(value: unknown): QueueEntryAttachment | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const item = value as Record<string, unknown>;
+  if (typeof item.name !== 'string' || typeof item.mimeType !== 'string' || !item.mimeType) {
+    return null;
+  }
+  return { name: item.name, mimeType: item.mimeType };
+}
+
 function parseQueueEntry(value: unknown): QueueEntry | null {
   if (!value || typeof value !== 'object') return null;
   const item = value as Record<string, unknown>;
@@ -60,11 +77,15 @@ function parseQueueEntry(value: unknown): QueueEntry | null {
     : null;
   const updatedAt = typeof item.updatedAt === 'string' ? item.updatedAt : '';
   if (!id || content === null || kind === null || !createdAt || revision === null || !updatedAt) return null;
+  if (!Array.isArray(item.attachments)) return null;
+  const attachments = item.attachments.map(parseQueueEntryAttachment);
+  if (attachments.some((attachment) => attachment === null)) return null;
 
   return {
     id,
     content,
     kind,
+    attachments: attachments as QueueEntryAttachment[],
     revision,
     createdAt,
     updatedAt,

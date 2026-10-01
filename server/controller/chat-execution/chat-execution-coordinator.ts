@@ -59,6 +59,7 @@ import {
   type ProjectUnavailableCallback,
   type QueueCommandMutationResult,
   type QueueDrainOptionsResolver,
+  type QueuedAttachmentAdmissionPort,
   type SessionStoppedCallback,
   type StopActiveTurnResult,
   type TranscriptSnapshotReservation,
@@ -93,6 +94,7 @@ const logger = createLogger('queue');
 
 interface ChatExecutionCoordinatorOptions {
   projectAdmission: ProjectAdmissionPort;
+  attachmentAdmission: QueuedAttachmentAdmissionPort;
   canDispatch?: (chatId: string) => boolean;
   isControlInputViewCurrent: (chatId: string, viewId: string) => boolean;
   unsettledQueueReceiptKeys?: (chatId: string) => ReadonlySet<string>;
@@ -141,6 +143,9 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     if (!options?.projectAdmission) {
       throw new Error('ChatExecutionCoordinator requires project admission');
     }
+    if (!options.attachmentAdmission) {
+      throw new Error('ChatExecutionCoordinator requires attachment admission');
+    }
     const unsettledQueueReceiptKeys = options.unsettledQueueReceiptKeys ?? (() => new Set());
     const appendControlReceipt = options.appendControlReceipt ?? (() => undefined);
     const selectionAdmissionLock = options.selectionAdmissionLock ?? new KeyedPromiseLock();
@@ -158,7 +163,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
         this.#queuedSteers.observe(chatId, control);
         this.emit('execution-control-updated', chatId, control);
       },
-    }, options.projectAdmission);
+    }, options.projectAdmission, options.attachmentAdmission);
     const inputDeliveryOptions = {
       turnRunner: this.#turnRunner,
       ownership: this.#ownership,
@@ -232,6 +237,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       runSelectionAdmissionExclusive: (chatId, operation) =>
         selectionAdmissionLock.runExclusive(`chat:${chatId}`, operation),
       projectAdmission: options.projectAdmission,
+      attachmentAdmission: options.attachmentAdmission,
       callbacks: {
         canDispatch: this.#canDispatch,
         isShuttingDown: () => this.#shuttingDown,
@@ -377,7 +383,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     content: string,
     command?: QueueCommandIdentity,
   ): Promise<QueueCommandMutationResult & { entry: QueueEntry | null }> {
-    return this.#controlOperations.create(chatId, content, command);
+    return this.#controlOperations.create(chatId, { content, images: [], command });
   }
 
   async replaceChatQueueEntry(

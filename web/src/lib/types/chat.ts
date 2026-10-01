@@ -67,7 +67,12 @@ export type {
 	PermissionCancelledMessage,
 	ChatMessage,
 } from '$shared/chat-types';
-export type { ChatQueueState, QueueEntry, QueuePause } from '$shared/queue-state';
+export type {
+	ChatQueueState,
+	QueueEntry,
+	QueueEntryAttachment,
+	QueuePause,
+} from '$shared/queue-state';
 export type {
 	ChatExecutionControlState,
 } from '$shared/chat-execution-control';

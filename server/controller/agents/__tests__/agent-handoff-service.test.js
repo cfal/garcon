@@ -105,6 +105,7 @@ describe('AgentHandoffService', () => {
       captureSteerTarget: () => null, isChatRunning: () => false,
     }, {}, () => ({}), () => true, repository, {
       projectAdmission: { assertAvailable: async () => {} },
+      attachmentAdmission: { assertSupported: () => {} },
       isControlInputViewCurrent: () => true,
     });
     const snapshot = coordinator.reserveTranscriptSnapshot('chat');

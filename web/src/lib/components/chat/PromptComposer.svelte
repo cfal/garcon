@@ -275,20 +275,15 @@
 	const attachmentController = new PromptComposerAttachmentController({
 		composer: composerState,
 		get attachmentInputBlocked() {
-			return promptRefinement.pending || requiresQueuedSubmission;
+			return promptRefinement.pending;
 		},
 		get attachmentPickerBlocked() {
-			return promptTransformPending || requiresQueuedSubmission;
+			return promptTransformPending;
 		},
 		get attachmentSupport() {
 			return attachmentSupport;
 		},
 		onAttachmentInput: () => snippetExpansion.cancel(),
-		onBlockedAttachmentInput: () => {
-			if (requiresQueuedSubmission) {
-				notifications.error(m.chat_notice_queue_attachments_unavailable());
-			}
-		},
 	});
 	ui.previousChatId = sessions.selectedChatId;
 	let previousSnippetProjectPath = sessions.selectedChat?.projectPath ?? null;
@@ -665,7 +660,6 @@
 		directAdmissionPending && sessions.selectedChat?.status === 'draft',
 	);
 	const isQueueMode = $derived(requiresQueuedSubmission);
-	const hasQueuedAttachmentConflict = $derived(isQueueMode && composerState.images.length > 0);
 	const isDisabled = $derived(isDraftStartupSubmitting);
 	const controllerCommand = $derived(
 		sessions.selectedChat?.status === 'running' &&
@@ -676,7 +670,6 @@
 		executors.isReady(agentState.executorId) && !modelCatalog.isValidated && !modelCatalog.error,
 	);
 	const sendTitle = $derived.by(() => {
-		if (hasQueuedAttachmentConflict) return m.chat_notice_queue_attachments_unavailable();
 		if (modelsLoading && !controllerCommand) return m.chat_composer_loading_models();
 		return isQueueMode ? m.chat_composer_queue_message() : m.chat_composer_send_message();
 	});
@@ -692,7 +685,7 @@
 						!providerAvailable)),
 			composerState.inputText,
 			composerState.images.length,
-		) && !hasQueuedAttachmentConflict,
+		),
 	);
 	const promptTransformStatus = $derived(
 		promptRefinement.pending ? m.chat_composer_refining_prompt() : m.snippets_expanding(),
@@ -837,7 +830,7 @@
 				type="file"
 				accept={attachmentAccept}
 				multiple
-				disabled={promptTransformPending || requiresQueuedSubmission}
+				disabled={promptTransformPending}
 				class="hidden"
 				onchange={(event) => attachmentController.handleFileChange(event)}
 			/>
@@ -867,10 +860,8 @@
 			</div>
 
 			<ComposerBottomBar
-				canAttachImages={canAttachAttachments && !requiresQueuedSubmission}
-				attachImagesTooltip={requiresQueuedSubmission
-					? m.chat_notice_queue_attachments_unavailable()
-					: m.chat_composer_image_attachments_unavailable()}
+				canAttachImages={canAttachAttachments}
+				attachImagesTooltip={m.chat_composer_image_attachments_unavailable()}
 				onAddImage={() => attachmentController.pick()}
 				onOpenSnippetPalette={() => ui.snippetPalette.openFromMenu()}
 				onOpenExpandedEditor={() => expandedEditor?.open()}

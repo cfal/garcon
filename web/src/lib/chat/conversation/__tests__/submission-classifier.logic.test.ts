@@ -13,7 +13,6 @@ function input(
 		isDraft: false,
 		isProcessing: false,
 		control: emptyChatExecutionControlState('server-instance-test'),
-		hasAttachments: false,
 		...overrides,
 	};
 }
@@ -35,6 +34,7 @@ describe('classifySubmission', () => {
 								id: 'entry-1',
 								content: 'first',
 								kind: 'turn',
+								attachments: [],
 								revision: 1,
 								createdAt: '2026-07-19T00:00:00.000Z',
 								updatedAt: '2026-07-19T00:00:00.000Z',
@@ -63,11 +63,6 @@ describe('classifySubmission', () => {
 			'queue',
 		],
 		[
-			'attachments requiring queue',
-			input({ isProcessing: true, hasAttachments: true }),
-			'queue-attachments-unsupported',
-		],
-		[
 			'queued input before direct submission',
 			input({
 				control: {
@@ -79,6 +74,7 @@ describe('classifySubmission', () => {
 								id: 'entry-1',
 								content: 'first',
 								kind: 'turn',
+								attachments: [],
 								revision: 1,
 								createdAt: '2026-07-19T00:00:00.000Z',
 								updatedAt: '2026-07-19T00:00:00.000Z',
@@ -109,6 +105,7 @@ describe('requiresQueuedSubmission', () => {
 								id: 'entry-1',
 								content: 'first',
 								kind: 'turn',
+								attachments: [],
 								revision: 1,
 								createdAt: '2026-07-19T00:00:00.000Z',
 								updatedAt: '2026-07-19T00:00:00.000Z',

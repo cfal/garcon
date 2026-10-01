@@ -54,6 +54,7 @@ function fixture(overrides = {}) {
           id: 'queued-1',
           content: 'Queued work',
           kind: 'turn',
+          images: [],
           createdAt: TIMESTAMP,
           updatedAt: TIMESTAMP,
           revision: 1,

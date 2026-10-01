@@ -27,6 +27,7 @@ function executionControl(serverInstanceId: string, version: number, content: st
 					id: `entry-${serverInstanceId}`,
 					content,
 					kind: 'turn' as const,
+					attachments: [],
 					revision: 1,
 					createdAt: TS,
 					updatedAt: TS,

@@ -65,6 +65,9 @@ function createFixture(overrides = {}) {
   const projectAdmission = overrides.projectAdmission ?? {
     assertAvailable: mock(async () => undefined),
   };
+  const attachmentAdmission = overrides.attachmentAdmission ?? {
+    assertSupported: mock(() => undefined),
+  };
   const coordinator = new ChatExecutionCoordinator(
     '/unused',
     turnRunner,
@@ -79,12 +82,21 @@ function createFixture(overrides = {}) {
       ?? new InMemoryChatExecutionControlRepository('server-instance-test'),
     {
       projectAdmission,
+      attachmentAdmission,
       unsettledQueueReceiptKeys: () => new Set(),
       appendControlReceipt,
       isControlInputViewCurrent: overrides.isControlInputViewCurrent ?? (() => true),
     },
   );
-  return { coordinator, events, projection, turnRunner, appendControlReceipt, projectAdmission };
+  return {
+    coordinator,
+    events,
+    projection,
+    turnRunner,
+    appendControlReceipt,
+    projectAdmission,
+    attachmentAdmission,
+  };
 }
 
 describe('ChatExecutionCoordinator', () => {

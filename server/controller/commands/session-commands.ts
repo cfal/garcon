@@ -187,7 +187,7 @@ export class SessionCommands {
         service: this.deps.handoffs,
         execution: this.deps.queue,
       });
-      await this.support.assertAttachmentsSupported({
+      this.support.assertAttachmentsSupported({
         ...handoffCommand.target, attachments: input.images ?? [],
       });
       normalizedInput.options = {
@@ -209,7 +209,7 @@ export class SessionCommands {
         422,
       );
     }
-    await this.support.assertAttachmentsSupported({
+    this.support.assertAttachmentsSupported({
       executorId: chat.executorId,
       agentId: chat.agentId,
       model: input.model ?? chat.model!,

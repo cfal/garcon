@@ -15,6 +15,7 @@ function entry(index: number, revision = 1, content = `Queued message ${index}`)
 		id: `entry-${index}`,
 		content,
 		kind: 'turn',
+		attachments: [],
 		revision,
 		createdAt: '2026-07-16T00:00:00.000Z',
 		updatedAt: '2026-07-16T00:00:00.000Z',
@@ -133,6 +134,23 @@ describe('QueuedInputsDialog', () => {
 		expect(recoveryTextarea).not.toBe(textarea);
 		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_queue_draft_as_new() }));
 		expect(onCreate).toHaveBeenCalledWith('Recovered local draft');
+	});
+
+	it('says a departed attachment draft queues as new without its attachments', async () => {
+		const attachments = [{ name: 'screen.png', mimeType: 'image/png' }];
+		const { component, onCreate } = renderDialog(queue([{ ...entry(0), attachments }]));
+		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_edit_message() }));
+		const textarea = screen.getByRole('textbox', { name: m.chat_queue_edit_message() });
+		await fireEvent.input(textarea, { target: { value: 'Recovered caption' } });
+		expect(screen.queryByText(m.chat_queue_draft_attachments_omitted())).toBeNull();
+
+		component.setQueue(queue([]));
+
+		await waitFor(() => expect(screen.getByText(m.chat_queue_no_longer_queued())).toBeTruthy());
+		expect(screen.getByText(m.chat_queue_draft_attachments_omitted())).toBeTruthy();
+		expect(screen.queryByRole('list', { name: m.chat_queue_attachments({ count: 1 }) })).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_queue_draft_as_new() }));
+		expect(onCreate).toHaveBeenCalledWith('Recovered caption');
 	});
 
 	it('locks a departed draft while queue-as-new is pending', async () => {
@@ -374,6 +392,34 @@ describe('QueuedInputsDialog', () => {
 			expect(document.activeElement).toBe(
 				screen.getByRole('button', { name: m.chat_queue_edit_message() }),
 			);
+		});
+	});
+
+	it('shows queued attachments and saves an attachment entry with empty text', async () => {
+		const attachments = [
+			{ name: 'screen.png', mimeType: 'image/png' },
+			{ name: 'trace.pdf', mimeType: 'application/pdf' },
+		];
+		const { onReplace } = renderDialog(queue([{ ...entry(0), attachments }]));
+		const dialog = screen.getByRole('dialog');
+		const list = within(dialog).getByRole('list', {
+			name: m.chat_queue_attachments({ count: 2 }),
+		});
+		expect(within(list).getByText('screen.png')).toBeTruthy();
+		expect(within(list).getByText('trace.pdf')).toBeTruthy();
+
+		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_edit_message() }));
+		const textarea = screen.getByRole('textbox', { name: m.chat_queue_edit_message() });
+		const save = screen.getByRole('button', { name: m.chat_queue_save_edit() });
+		expect(
+			within(dialog).getAllByRole('list', { name: m.chat_queue_attachments({ count: 2 }) }),
+		).toHaveLength(1);
+
+		await fireEvent.input(textarea, { target: { value: '' } });
+		expect((save as HTMLButtonElement).disabled).toBe(false);
+		await fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
+		await waitFor(() => {
+			expect(onReplace).toHaveBeenCalledWith('entry-0', '', 1);
 		});
 	});
 

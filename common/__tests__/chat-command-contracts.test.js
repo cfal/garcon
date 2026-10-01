@@ -11,6 +11,7 @@ import {
   parseForkChatCommandRequest,
   parseForkRunCommandRequest,
   parsePermissionDecisionCommandRequest,
+  parseQueueEntryCreateCommandRequest,
   parseQueueEntryMoveCommandRequest,
   parseQueueEntrySteerCommandRequest,
   parseQueueEntryReplaceCommandRequest,
@@ -498,6 +499,46 @@ describe('chat command request parsers', () => {
       .toThrow('clientRequestId is required');
     expect(() => parseForkChatCommandRequest({ ...fork, clientRequestId: 'x'.repeat(257) }))
       .toThrow('clientRequestId must be at most 256 bytes');
+  });
+
+  it('accepts queued attachments with or without text and requires one of them', () => {
+    const base = {
+      clientRequestId: 'request-queue-image',
+      clientMessageId: 'message-queue-image',
+      chatId: CHAT_ID,
+      transcriptViewId: TRANSCRIPT_VIEW_ID,
+    };
+    const images = [{ data: 'data:image/png;base64,AAAA', name: 'screen.png', mimeType: 'image/png' }];
+
+    expect(parseQueueEntryCreateCommandRequest({ ...base, content: '', images })).toEqual({
+      ...base,
+      content: '',
+      images,
+    });
+    expect(parseQueueEntryCreateCommandRequest({ ...base, content: 'caption', images }).images)
+      .toEqual(images);
+    expect(parseQueueEntryCreateCommandRequest({ ...base, content: 'text only' }))
+      .not.toHaveProperty('images');
+    expect(() => parseQueueEntryCreateCommandRequest({ ...base, content: '  ' }))
+      .toThrow('content or images are required');
+    expect(() => parseQueueEntryCreateCommandRequest({ ...base, content: '', images: [{}] }))
+      .toThrow('attachment data is required');
+    expect(() => parseQueueEntryCreateCommandRequest({ ...base, images }))
+      .toThrow('content must be a string');
+    expect(() => parseQueueEntryCreateCommandRequest({ ...base, content: 42, images }))
+      .toThrow('content must be a string');
+  });
+
+  it('defers empty replacement text to the queued entry it edits', () => {
+    const base = {
+      clientRequestId: 'request-replace',
+      chatId: CHAT_ID,
+      entryId: 'entry-1',
+      expectedRevision: 1,
+    };
+
+    expect(parseQueueEntryReplaceCommandRequest({ ...base, content: '' }).content).toBe('');
+    expect(() => parseQueueEntryReplaceCommandRequest({ ...base })).toThrow('content must be a string');
   });
 
   it('rejects malformed structured command fields', () => {

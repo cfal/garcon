@@ -1542,6 +1542,15 @@ The guarantee is durable before provider dispatch, not durable at send:
   a still-queued entry only removes it from the queue. Restart
   intentionally loses queued entries and does not reconstruct them or
   mark them.
+- A queued input may carry attachments. Their payloads stay with the
+  process-ephemeral entry and become the `user-input` row's attachments
+  at dequeue; public queue state carries only their names and MIME
+  types. Replacement edits text only, and a queued entry with
+  attachments cannot steer. Enqueue checks attachment support against
+  the chat's current selection, and dequeue checks it again inside the
+  admission block. A rejected check aborts the dequeue uncommitted and
+  pauses the queue on that entry, so the attachments are never dropped
+  or sent to a selection that cannot accept them.
 
 Direct admission and queued dequeue share the selection/admission lock with
 selection Save. A direct input observes either the old selection before Save or

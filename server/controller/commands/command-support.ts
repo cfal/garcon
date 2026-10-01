@@ -40,7 +40,10 @@ import type {
   StartedAgentSession,
 } from '../agents/session-types.js';
 import type { ChatExecutionCommands } from '../chat-execution/chat-execution-coordinator.js';
-import { assertAttachmentsSupported } from '../attachments/support.js';
+import {
+  assertAttachmentsSupported,
+  type AttachmentSupportInput,
+} from '../attachments/support.js';
 import type { DirectInputPreparation } from '../chat-execution/types.js';
 import { agentHandoffReplayDisposition, withHandoffChatProjection } from '../agents/agent-handoff-command.js';
 import { agentRunCommandPayload } from '../agents/agent-run-command-input.js';
@@ -413,15 +416,8 @@ export class CommandSupport {
     }
   }
 
-  async assertAttachmentsSupported(input: {
-    executorId?: string | null;
-    agentId: string;
-    model: string;
-    apiProviderId?: string | null;
-    modelEndpointId?: string | null;
-    attachments: NonNullable<RunAgentTurnOptions['images']>;
-  }): Promise<void> {
-    await assertAttachmentsSupported(this.deps.agents, input);
+  assertAttachmentsSupported(input: AttachmentSupportInput): void {
+    assertAttachmentsSupported(this.deps.agents, input);
   }
 
   optionsWithoutAttachments(options: RunAgentTurnOptions | undefined): RunAgentTurnOptions {

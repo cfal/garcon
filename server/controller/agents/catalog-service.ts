@@ -42,13 +42,14 @@ export class AgentCatalogService {
     return [...(await this.#snapshot(agentId, query)).models];
   }
 
-  async modelSupportsImages(input: {
+  // Synchronous so queued dequeue can recheck support inside its admission block.
+  modelSupportsImages(input: {
     executorId?: string | null;
     agentId: string;
     model: string;
     apiProviderId?: string | null;
     modelEndpointId?: string | null;
-  }): Promise<boolean> {
+  }): boolean {
     const integration = this.deps.directory.get(input.agentId, input.executorId);
     if (!integration) return false;
     if (!input.apiProviderId || !input.modelEndpointId)

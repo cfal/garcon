@@ -154,7 +154,7 @@ export class StartCommands {
       }
     }
     this.support.assertContent(input.command, images);
-    await this.support.assertAttachmentsSupported({
+    this.support.assertAttachmentsSupported({
       executorId,
       agentId: input.agentId,
       model: input.model,

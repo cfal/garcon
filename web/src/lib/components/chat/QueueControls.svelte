@@ -94,6 +94,8 @@
 		previewIndex === 0 && canSteer && previewEntry?.kind !== 'steer',
 	);
 	const showSteerAction = $derived((canSteerPreview || previewSteering) && Boolean(onSteer));
+	// Steering delivers text only, so an entry with attachments runs as its own turn.
+	const previewSteerBlocked = $derived((previewEntry?.attachments.length ?? 0) > 0);
 	const showInterruptAction = $derived(
 		previewIndex === 0 && !queue?.pause && !queueSteering && canInterrupt && Boolean(onInterrupt),
 	);
@@ -109,22 +111,25 @@
 			const observedEntry = previewEntry;
 			const expectedReorderRevision = queue.reorderRevision;
 			const steerBusy = previewSteering;
+			const steerBlocked = previewSteerBlocked && !steerBusy;
 			actions.push({
 				id: 'steer',
 				renderKey: `steer:${chatId ?? ''}:${observedEntry.id}`,
 				label: m.chat_queue_steer(),
-				title: m.chat_queue_steer_queue(),
+				title: steerBlocked
+					? m.chat_queue_steer_attachments_unavailable()
+					: m.chat_queue_steer_queue(),
 				icon: steerBusy ? Loader2 : Route,
 				iconClass: steerBusy ? 'animate-spin' : undefined,
 				onclick: () => {
-					if (previewSteering) return;
+					if (previewSteering || steerBlocked) return;
 					void mutateDispatch(
 						'steering',
 						() => onSteer(observedEntry, expectedReorderRevision),
 						observedEntry.id,
 					);
 				},
-				disabled: queueActionPending && !steerBusy,
+				disabled: (queueActionPending && !steerBusy) || steerBlocked,
 				busy: steerBusy,
 				priority: 1,
 				showLabel: true,

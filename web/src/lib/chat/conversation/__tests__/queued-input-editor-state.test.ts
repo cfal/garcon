@@ -7,6 +7,7 @@ function entry(revision = 1, content = 'Original message'): QueueEntry {
 		id: 'entry-1',
 		content,
 		kind: 'turn',
+		attachments: [],
 		revision,
 		createdAt: '2026-07-16T00:00:00.000Z',
 		updatedAt: '2026-07-16T00:00:00.000Z',
@@ -36,6 +37,23 @@ describe('QueuedInputEditorState', () => {
 		expect(editor.phase).toBe('conflict');
 		expect(editor.draft).toBe('My unsaved draft');
 		expect(editor.liveEntry?.content).toBe('Edited elsewhere');
+	});
+
+	it('allows empty replacement text only while the live entry keeps attachments', () => {
+		const withAttachment = { ...entry(), attachments: [{ name: 'screen.png', mimeType: 'image/png' }] };
+		const host = new QueuedInputEditorTestHost(queue([withAttachment]));
+		const editor = host.editor;
+		editor.begin(withAttachment);
+		editor.draft = '  ';
+
+		expect(editor.hasReplacementContent).toBe(true);
+		expect(editor.canSave).toBe(true);
+
+		host.queue = queue([entry()]);
+		editor.begin(host.queue.entries[0]);
+		editor.draft = '  ';
+		expect(editor.hasReplacementContent).toBe(false);
+		expect(editor.canSave).toBe(false);
 	});
 
 	it('reloads or rebases explicitly after a revision conflict', () => {

@@ -1,9 +1,12 @@
 import type { ChatExecutionControlState } from '../../../common/chat-execution-control.ts';
 import type {
   QueueEntry,
+  QueueEntryAttachment,
   QueuePause,
   RecentlyDispatchedQueueEntry,
 } from '../../../common/queue-state.ts';
+import type { AgentCommandImage } from '../../../common/ws-requests.ts';
+import { MAX_CHAT_ATTACHMENT_TOTAL_BYTES } from '../../../common/attachments.ts';
 import { MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES } from '../../../common/queue-state.ts';
 import type { ServerControlReceiptDetail } from '../../../common/transcript-notice-details.ts';
 
@@ -15,9 +18,53 @@ export interface StoredQueueSubmissionIdentity {
   excludedResendOrdinals?: readonly number[];
 }
 
-export interface StoredQueueEntry extends QueueEntry {
+// Payloads are immutable for an entry's lifetime: replacement edits only text.
+export interface StoredQueueEntry extends Omit<QueueEntry, 'attachments'> {
   status: 'queued' | 'steering';
+  images: readonly AgentCommandImage[];
   submission?: StoredQueueSubmissionIdentity;
+}
+
+// Queued payloads stay in controller memory until dispatch, so each chat may
+// hold at most two maximum-size messages' worth of attachments.
+export const MAX_QUEUED_ATTACHMENT_BYTES = 2 * MAX_CHAT_ATTACHMENT_TOTAL_BYTES;
+
+export function queuedAttachmentBytes(images: readonly AgentCommandImage[]): number {
+  return images.reduce((total, image) => {
+    const base64 = image.data.slice(image.data.indexOf(',') + 1);
+    const padding = base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0;
+    return total + Math.floor((base64.length * 3) / 4) - padding;
+  }, 0);
+}
+
+// Names match the transcript row the entry becomes at dequeue.
+export function queueEntryAttachments(
+  images: readonly AgentCommandImage[],
+): QueueEntryAttachment[] {
+  return images.map((image, index) => ({
+    name: image.name || `image-${index + 1}`,
+    mimeType: image.mimeType || 'application/octet-stream',
+  }));
+}
+
+export function toClientQueueEntry(entry: StoredQueueEntry): QueueEntry {
+  const { status: _status, submission: _submission, images, ...clientEntry } = entry;
+  return { ...clientEntry, attachments: queueEntryAttachments(images) };
+}
+
+export function cloneStoredQueueEntry(entry: StoredQueueEntry): StoredQueueEntry {
+  return {
+    ...entry,
+    images: entry.images.map((image) => ({ ...image })),
+    ...(entry.submission ? {
+      submission: {
+        ...entry.submission,
+        ...(entry.submission.excludedResendOrdinals
+          ? { excludedResendOrdinals: [...entry.submission.excludedResendOrdinals] }
+          : {}),
+      },
+    } : {}),
+  };
 }
 
 export const MAX_CONTROL_INPUT_ENTRIES = 64;
@@ -79,17 +126,7 @@ export function cloneStoredChatExecutionControl(
 ): StoredChatExecutionControlState {
   const clone = {
     ...control,
-    entries: control.entries.map((entry) => ({
-      ...entry,
-      ...(entry.submission ? {
-        submission: {
-          ...entry.submission,
-          ...(entry.submission.excludedResendOrdinals
-            ? { excludedResendOrdinals: [...entry.submission.excludedResendOrdinals] }
-            : {}),
-        },
-      } : {}),
-    })),
+    entries: control.entries.map(cloneStoredQueueEntry),
     controlEntries: control.controlEntries.map((entry) => ({
       ...entry,
       receipt: entry.receipt === null ? null : {
@@ -119,8 +156,7 @@ export function toClientChatExecutionControlState(
   return {
     serverInstanceId: control.serverInstanceId,
     queue: {
-      entries: control.entries
-        .map(({ status: _status, submission: _submission, ...entry }) => ({ ...entry })),
+      entries: control.entries.map(toClientQueueEntry),
       steeringEntryId: control.entries.find((entry) => entry.status === 'steering')?.id ?? null,
       recentlyDispatched: control.recentlyDispatched
         .slice(-MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES)

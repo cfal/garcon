@@ -1657,6 +1657,7 @@ describe('ConversationSessionController', () => {
 						id: 'entry-1',
 						content: 'queued',
 						kind: 'turn',
+						attachments: [],
 						revision: 1,
 						createdAt: '2026-07-17T00:00:00.000Z',
 						updatedAt: '2026-07-17T00:00:00.000Z',
@@ -3642,6 +3643,7 @@ describe('ConversationSessionController', () => {
 							id: 'entry-1',
 							content: 'queue this',
 							kind: 'turn',
+							attachments: [],
 							revision: 1,
 							createdAt: '2026-05-14T00:00:00.000Z',
 							updatedAt: '2026-05-14T00:00:00.000Z',
@@ -3933,6 +3935,7 @@ describe('ConversationSessionController', () => {
 							id: 'entry-1',
 							content: 'first queued message',
 							kind: 'turn',
+							attachments: [],
 							revision: 1,
 							createdAt: '2026-05-14T00:00:00.000Z',
 							updatedAt: '2026-05-14T00:00:00.000Z',
@@ -3962,6 +3965,7 @@ describe('ConversationSessionController', () => {
 							id: 'entry-1',
 							content: 'first queued message',
 							kind: 'turn',
+							attachments: [],
 							revision: 1,
 							createdAt: '2026-05-14T00:00:00.000Z',
 							updatedAt: '2026-05-14T00:00:00.000Z',
@@ -3970,6 +3974,7 @@ describe('ConversationSessionController', () => {
 							id: 'entry-2',
 							content: 'second queued message',
 							kind: 'turn',
+							attachments: [],
 							revision: 1,
 							createdAt: '2026-05-14T00:00:01.000Z',
 							updatedAt: '2026-05-14T00:00:01.000Z',
@@ -3998,44 +4003,95 @@ describe('ConversationSessionController', () => {
 		expect(mockRunChat).not.toHaveBeenCalled();
 	});
 
-	it('explains that attachments are unsupported when an idle chat has queued input', async () => {
+	it('queues attachments behind existing queued input', async () => {
 		const chat = createRunningChat({ isProcessing: false, status: 'running' });
 		const { deps } = createDeps(chat);
-		deps.sessions.selectedChatId = 'chat-2';
 		deps.composerState.inputText = 'queue with attachment';
 		deps.composerState.images = [new File(['image'], 'test.png', { type: 'image/png' })];
+		const queuedEntry: QueueEntry = {
+			id: 'entry-1',
+			content: 'first queued message',
+			kind: 'turn',
+			attachments: [],
+			revision: 1,
+			createdAt: '2026-05-14T00:00:00.000Z',
+			updatedAt: '2026-05-14T00:00:00.000Z',
+		};
 		deps.conversationUi.getExecutionControl.mockReturnValue(
 			controlWithQueue(
 				{
+					entries: [queuedEntry],
+					recentlyDispatched: [],
+					pause: { id: 'pause-1', kind: 'manual', pausedAt: '2026-05-14T00:00:00.000Z' },
+				},
+				{ version: 1, updatedAt: '2026-05-14T00:00:00.000Z' },
+			),
+		);
+		mockCreateQueuedInput.mockResolvedValueOnce({
+			success: true,
+			commandType: 'queue-entry-create',
+			clientRequestId: 'req-queue-image',
+			chatId: 'chat-1',
+			status: 'accepted',
+			acceptedAt: '2026-05-14T00:00:01.000Z',
+			entryId: 'entry-2',
+			control: controlWithQueue(
+				{
 					entries: [
+						queuedEntry,
 						{
-							id: 'entry-1',
-							content: 'first queued message',
-							kind: 'turn',
-							revision: 1,
-							createdAt: '2026-05-14T00:00:00.000Z',
-							updatedAt: '2026-05-14T00:00:00.000Z',
+							...queuedEntry,
+							id: 'entry-2',
+							content: 'queue with attachment',
+							attachments: [{ name: 'test.png', mimeType: 'image/png' }],
 						},
 					],
 					recentlyDispatched: [],
 					pause: { id: 'pause-1', kind: 'manual', pausedAt: '2026-05-14T00:00:00.000Z' },
 				},
-				{
-					version: 1,
-					updatedAt: '2026-05-14T00:00:00.000Z',
-				},
+				{ version: 2, updatedAt: '2026-05-14T00:00:01.000Z' },
 			),
+		});
+
+		const outcome = await new ConversationSessionController(deps).submitForChat('chat-1');
+
+		expect(outcome).toBe('accepted');
+		expect(mockCreateQueuedInput).toHaveBeenCalledWith(
+			expect.objectContaining({
+				chatId: 'chat-1',
+				content: 'queue with attachment',
+				images: [
+					{
+						data: 'data:image/png;base64,aW1hZ2U=',
+						name: 'test.png',
+						mimeType: 'image/png',
+					},
+				],
+			}),
+		);
+		expect(mockRunChat).not.toHaveBeenCalled();
+		expect(deps.chatState.appendLocalNoticeForChat).not.toHaveBeenCalled();
+		expect(deps.composerState.images).toEqual([]);
+	});
+
+	it('restores queued attachments to the composer when the queue rejects them', async () => {
+		const chat = createRunningChat({ isProcessing: true, status: 'running' });
+		const { deps } = createDeps(chat);
+		const image = new File(['image'], 'test.png', { type: 'image/png' });
+		deps.composerState.inputText = 'queue with attachment';
+		deps.composerState.images = [image];
+		mockCreateQueuedInput.mockRejectedValueOnce(
+			new ApiError(422, 'Attachments unsupported for agent: claude', 'UNSUPPORTED_AGENT'),
 		);
 
-		await new ConversationSessionController(deps).submitForChat('chat-1');
+		const outcome = await new ConversationSessionController(deps).submitForChat('chat-1');
 
-		expect(deps.chatState.localNoticesByChatId['chat-1']?.[0]).toMatchObject({
-			noticeType: 'error',
-			content: 'Attachments are not supported in queued messages.',
-		});
-		expect(deps.chatState.localNoticesByChatId['chat-2']).toBeUndefined();
-		expect(mockCreateQueuedInput).not.toHaveBeenCalled();
-		expect(mockRunChat).not.toHaveBeenCalled();
+		expect(outcome).toBe('rejected');
+		expect(mockCreateQueuedInput).toHaveBeenCalledWith(
+			expect.objectContaining({ images: [expect.objectContaining({ name: 'test.png' })] }),
+		);
+		expect(deps.composerState.inputText).toBe('queue with attachment');
+		expect(deps.composerState.images).toEqual([image]);
 	});
 
 	it('starts directly once a dequeued entry has left the visible queue', async () => {
@@ -4088,6 +4144,7 @@ describe('ConversationSessionController', () => {
 						id: 'entry-1',
 						content: 'first',
 						kind: 'turn',
+						attachments: [],
 						revision: 1,
 						createdAt: '2026-05-14T00:00:00.000Z',
 						updatedAt: '2026-05-14T00:00:00.000Z',
@@ -4297,6 +4354,7 @@ describe('ConversationSessionController', () => {
 						id: 'entry-1',
 						content: 'edited elsewhere',
 						kind: 'turn',
+						attachments: [],
 						revision: 2,
 						createdAt: '2026-05-14T00:00:00.000Z',
 						updatedAt: '2026-05-14T00:00:01.000Z',
@@ -4416,6 +4474,7 @@ describe('ConversationSessionController', () => {
 			id: 'entry-1',
 			content: 'queued guidance',
 			kind: 'turn',
+			attachments: [],
 			revision: 3,
 			createdAt: '2026-08-02T00:00:00.000Z',
 			updatedAt: '2026-08-02T00:00:00.000Z',
@@ -4524,6 +4583,7 @@ describe('ConversationSessionController', () => {
 						id: 'future-entry',
 						content: 'Run this later',
 						kind: 'turn',
+						attachments: [],
 						revision: 1,
 						createdAt: '2026-07-11T00:00:00.000Z',
 						updatedAt: '2026-07-11T00:00:00.000Z',

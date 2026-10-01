@@ -494,7 +494,10 @@ export class GarconTestClient {
     };
   }
 
-  async createAnthropicProvider(providerBaseUrl: string): Promise<ConfiguredTestProvider> {
+  async createAnthropicProvider(
+    providerBaseUrl: string,
+    { supportsImages = true }: { supportsImages?: boolean } = {},
+  ): Promise<ConfiguredTestProvider> {
     const model = 'integration-anthropic-echo';
     const created = await this.post<ApiProviderCatalogEntry>(`/api/v1/api-providers?executorId=${encodeURIComponent(this.executorId)}`, {
       templateId: 'custom',
@@ -505,7 +508,7 @@ export class GarconTestClient {
         apiKey: INTEGRATION_ANTHROPIC_API_KEY,
         defaultModel: model,
         models: [{ value: model, label: 'Integration Anthropic Echo' }],
-        supportsImages: true,
+        supportsImages,
         modelDiscovery: 'anthropic-models',
       },
     });

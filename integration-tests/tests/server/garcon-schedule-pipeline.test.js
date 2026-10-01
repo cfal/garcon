@@ -80,6 +80,7 @@ async function withPipeline(run) {
     () => ({ model: registry.getChat(CHAT).model, permissionMode: registry.getChat(CHAT).permissionMode, thinkingMode: 'none' }),
     (id) => registry.hasChat(id), new InMemoryChatExecutionControlRepository('synthetic-server'), {
       projectAdmission: { assertAvailable: async () => {} },
+      attachmentAdmission: { assertSupported: () => {} },
       appendControlReceipt: () => {},
       isControlInputViewCurrent: (chatId, viewId) => ledger.existingCurrentView(chatId)?.viewId === viewId,
     });

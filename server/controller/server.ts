@@ -26,7 +26,7 @@ import { ShareStore } from './chats/share-store.js';
 import { SettingsStore } from './settings/store.js';
 import { ChatExecutionCoordinator } from './chat-execution/chat-execution-coordinator.js';
 import { InMemoryChatExecutionControlRepository } from './chat-execution/chat-execution-control-repository.js';
-import { queueDrainOptions } from './chats/chat-execution-options.js';
+import { queueDrainOptions, queuedAttachmentAdmission } from './chats/chat-execution-options.js';
 import { TerminalController } from './terminals/controller.js';
 import { TerminalStreamHandler } from './ws/terminal-stream.js';
 import { PrimaryWsHandler } from './ws/primary.js';
@@ -550,6 +550,7 @@ export async function startServer(): Promise<void> {
       new InMemoryChatExecutionControlRepository(runtimeState.identity.instanceId),
       {
         projectAdmission,
+        attachmentAdmission: queuedAttachmentAdmission(chatRegistry, agentRegistry),
         canDispatch: (chatId) => executors.isReady(effectiveExecutorId(chatRegistry.getChat(chatId)?.executorId)),
         unsettledQueueReceiptKeys: (chatId) => commandLedger.unsettledQueueReceiptKeys(chatId),
         appendControlReceipt: agentCommands.appendControlReceipt,

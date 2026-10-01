@@ -104,6 +104,7 @@ export async function submitQueueRoute(
 		chatId: context.chatId,
 		transcriptViewId: requireTranscriptView(deps, context.chatId),
 		content: context.content,
+		images: context.images.length > 0 ? context.images : undefined,
 		excludedResendOrdinals: [...deps.chatState.excludedResendOrdinals],
 	});
 	try {
@@ -112,7 +113,8 @@ export async function submitQueueRoute(
 		deps.chatState.clearResendExclusions();
 		return 'accepted';
 	} catch (error) {
-		return settleSubmissionFailure(deps, context, error, {
+		// Awaited so the failure is recorded before finishSubmission decides on restoration.
+		return await settleSubmissionFailure(deps, context, error, {
 			unknownNotice: m.chat_notice_queue_outcome_unconfirmed(),
 			rejectedNotice: (failure) =>
 				m.chat_notice_failed_queue_message({

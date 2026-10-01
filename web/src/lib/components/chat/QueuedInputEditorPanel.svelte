@@ -2,6 +2,7 @@
 	import { tick } from 'svelte';
 	import type { QueuedInputEditorState } from '$lib/chat/conversation/queued-input-editor-state.svelte.js';
 	import PromptTextField from '$lib/components/prompt-editor/PromptTextField.svelte';
+	import QueuedInputAttachments from './QueuedInputAttachments.svelte';
 	import { errorMessage } from '$lib/utils/error-message.js';
 	import { CommandOutcomeUnknownError } from '$lib/chat/conversation/idempotent-command.js';
 	import * as m from '$lib/paraglide/messages.js';
@@ -89,7 +90,7 @@
 			isPromptRefinementPending ||
 			!editor.liveEntry ||
 			!editor.entryId ||
-			!editor.draft.trim()
+			!editor.hasReplacementContent
 		)
 			return;
 		editor.rebaseOnLatest();
@@ -184,6 +185,14 @@
 		{onRefinePrompt}
 	/>
 
+	{#if editor.liveEntry}
+		<QueuedInputAttachments attachments={editor.liveEntry.attachments} />
+	{:else if canQueueDraftAsNew && editor.attachments.length > 0}
+		<p class="text-xs text-muted-foreground" data-queue-draft-attachments-omitted>
+			{m.chat_queue_draft_attachments_omitted()}
+		</p>
+	{/if}
+
 	{#if editor.error && editor.queueDraftOutcomeUnknown}
 		<p id="queued-input-error" class="text-sm text-status-warning-muted-foreground" role="status">
 			{editor.error}
@@ -220,7 +229,7 @@
 			<button
 				type="button"
 				onclick={() => void replaceLatest()}
-				disabled={!editor.draft.trim() || editor.mutation !== 'idle' || editor.mutationBlocked || isPromptRefinementPending}
+				disabled={!editor.hasReplacementContent || editor.mutation !== 'idle' || editor.mutationBlocked || isPromptRefinementPending}
 				class="inline-flex min-h-9 items-center gap-2 rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
 			>
 				<Undo2 class="h-4 w-4" />

@@ -86,6 +86,15 @@ export function requiredContent(body: Record<string, unknown>, field: string): s
   return value;
 }
 
+// Accepts empty content whose validity depends on state the parser cannot see.
+export function requiredStringContent(body: Record<string, unknown>, field: string): string {
+  const value = body[field];
+  if (typeof value !== 'string') {
+    throw new CommandRequestValidationError(`${field} must be a string`);
+  }
+  return value;
+}
+
 export function optionalString(
   body: Record<string, unknown>,
   field: string,

@@ -32,7 +32,7 @@ export class QueueCommands {
 
   async submitQueueEntryCreate(input: QueueEntryCreateCommandRequest): Promise<QueueEntryCommandResponse> {
     this.support.requireChat(input.chatId);
-    this.support.assertContent(input.content);
+    this.support.assertContent(input.content, input.images);
     return this.support.withChatMutationLock(input.chatId, async () => {
       await this.support.assertCurrentTranscriptView(input.chatId, input.transcriptViewId);
       return this.submitQueueEntryCreateLocked(input);
@@ -41,12 +41,12 @@ export class QueueCommands {
 
   async submitQueueEntryReplace(input: QueueEntryReplaceCommandRequest): Promise<QueueEntryCommandResponse> {
     this.support.requireChat(input.chatId);
-    this.support.assertContent(input.content);
     const entryId = this.support.requireQueueEntryId(input.entryId);
     if (!Number.isInteger(input.expectedRevision) || input.expectedRevision < 1) {
       throw new CommandValidationError('VALIDATION_FAILED', 'expectedRevision must be a positive integer');
     }
     return this.support.withChatMutationLock(input.chatId, async () => {
+      await this.assertReplacementContent(input.chatId, entryId, input.content);
       const content = input.content;
       const ledger = await this.deps.ledger.accept({
         commandType: 'queue-entry-replace',
@@ -281,6 +281,7 @@ export class QueueCommands {
         clientMessageId: input.clientMessageId,
         excludedResendOrdinals: input.excludedResendOrdinals,
         content,
+        images: input.images,
       },
       entryId: preparedEntryId,
     });
@@ -304,6 +305,7 @@ export class QueueCommands {
         entryId: ledger.record.entryId ?? preparedEntryId,
       },
       content,
+      images: input.images ?? [],
       clientMessageId: input.clientMessageId,
       transcriptViewId: input.transcriptViewId,
       excludedResendOrdinals: input.excludedResendOrdinals,
@@ -336,6 +338,21 @@ export class QueueCommands {
       chatId: input.chatId,
       control: toClientChatExecutionControlState(queue),
     };
+  }
+
+  // Attachments never change after creation, so an entry observed with them
+  // keeps them for as long as a replacement can still apply.
+  private async assertReplacementContent(
+    chatId: string,
+    entryId: string,
+    content: string,
+  ): Promise<void> {
+    if (content.trim()) return;
+    const control = await this.deps.queue.readChatExecutionControl(chatId);
+    const entry = control.entries.find((candidate) => candidate.id === entryId);
+    if (entry && entry.images.length === 0) {
+      throw new CommandValidationError('VALIDATION_FAILED', 'content or attachments are required');
+    }
   }
 
   private async throwRecordedQueueMutationFailure(record: CommandLedgerRecord): Promise<void> {

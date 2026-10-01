@@ -4,6 +4,7 @@
 	import { CHAT_DOCK_SURFACE_CLASS } from '$lib/chat/conversation/chat-max-width.js';
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
+	import Paperclip from '@lucide/svelte/icons/paperclip';
 
 	interface Props {
 		queue: ChatQueueState;
@@ -19,6 +20,9 @@
 	const entryCount = $derived(queue.entries.length);
 	const currentPosition = $derived(Math.min(Math.max(position, 1), entryCount));
 	const pendingSteer = $derived(entry.kind === 'steer' && queue.steeringEntryId !== entry.id);
+	const attachmentCount = $derived(entry.attachments.length);
+	const attachmentNames = $derived(entry.attachments.map((attachment) => attachment.name).join(', '));
+	const attachmentOnly = $derived(!entry.content.trim() && attachmentCount > 0);
 </script>
 
 <section
@@ -28,10 +32,25 @@
 >
 	<div class="flex items-start gap-2 px-4 py-3">
 		<div class="min-w-0 flex-1 border-l-2 border-queue-entry-border pl-3">
-			<p data-queue-preview class="line-clamp-2 h-10 whitespace-pre-wrap break-words text-sm leading-5">
-				{entry.content}
+			<p
+				data-queue-preview
+				class="line-clamp-2 h-10 whitespace-pre-wrap break-words text-sm leading-5"
+				class:text-muted-foreground={attachmentOnly}
+			>
+				{attachmentOnly ? attachmentNames : entry.content}
 			</p>
 		</div>
+		{#if attachmentCount > 0}
+			<span
+				class="flex h-8 shrink-0 items-center gap-1 text-xs text-muted-foreground"
+				title={attachmentNames}
+				data-queue-preview-attachments
+			>
+				<span class="sr-only">{m.chat_queue_attachments({ count: attachmentCount })}</span>
+				<Paperclip class="size-3.5" aria-hidden="true" />
+				<span aria-hidden="true">{attachmentCount}</span>
+			</span>
+		{/if}
 		{#if entryActions}
 			{@render entryActions()}
 		{/if}

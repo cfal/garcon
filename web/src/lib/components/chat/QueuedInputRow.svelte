@@ -15,6 +15,7 @@
 		placementFromEdge,
 		queuedInputDragData,
 	} from './queued-input-dnd.js';
+	import QueuedInputAttachments from './QueuedInputAttachments.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import ChevronUp from '@lucide/svelte/icons/chevron-up';
@@ -159,7 +160,13 @@
 		{position}
 	</span>
 	<div class="min-w-0 flex-1">
-		<p class="whitespace-pre-wrap break-words text-sm leading-5">{entry.content}</p>
+		{#if entry.content.trim() || entry.attachments.length === 0}
+			<p class="whitespace-pre-wrap break-words text-sm leading-5">{entry.content}</p>
+		{/if}
+		<QueuedInputAttachments
+			attachments={entry.attachments}
+			class={entry.content.trim() ? 'mt-2' : undefined}
+		/>
 		{#if steering}
 			<p
 				class="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground"

@@ -2,6 +2,11 @@ import {
   requireChatExecutionConfig,
   type RunAgentTurnOptions,
 } from '../agents/session-types.js';
+import {
+  assertChatAttachmentsSupported,
+  type AttachmentAgentCapabilities,
+} from '../attachments/support.js';
+import type { QueuedAttachmentAdmissionPort } from '../chat-execution/types.js';
 import type { IChatRegistry } from './store.js';
 
 export function queueDrainOptions(
@@ -18,5 +23,19 @@ export function queueDrainOptions(
     apiProviderId: chat?.apiProviderId,
     modelEndpointId: chat?.modelEndpointId,
     modelProtocol: chat?.modelProtocol,
+  };
+}
+
+// Reads the same chat selection queueDrainOptions dispatches with.
+export function queuedAttachmentAdmission(
+  registry: IChatRegistry,
+  agents: AttachmentAgentCapabilities,
+): QueuedAttachmentAdmissionPort {
+  return {
+    assertSupported(chatId, attachments) {
+      const chat = registry.getChat(chatId);
+      if (!chat) throw new Error(`Session not initialized: ${chatId}`);
+      assertChatAttachmentsSupported(agents, chat, attachments);
+    },
   };
 }

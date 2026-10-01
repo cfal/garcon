@@ -32,6 +32,7 @@ function controlState(
 							id: 'queued-1',
 							content: 'queued',
 							kind: 'turn',
+							attachments: [],
 							revision: 1,
 							createdAt: TS,
 							updatedAt: TS,

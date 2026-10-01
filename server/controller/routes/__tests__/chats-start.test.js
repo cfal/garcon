@@ -127,7 +127,7 @@ const agents = {
   validateConfiguration: mock(async () => undefined),
   supportsFork: mock(() => true),
   supportsImages: mock(() => false),
-  modelSupportsImages: mock(() => Promise.resolve(false)),
+  modelSupportsImages: mock(() => false),
 };
 
 const commandLedger = createRouteCommandLedger('chats-start');

@@ -16,6 +16,7 @@ describe('InMemoryChatExecutionControlRepository', () => {
     stored.entries.push({
       id: 'entry-1',
       content: 'queued',
+      images: [],
       revision: 1,
       status: 'queued',
       createdAt: stored.updatedAt,

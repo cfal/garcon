@@ -23,6 +23,7 @@ function makeEntry(index: number): QueueEntry {
 		id: `q${index}`,
 		content: `queued ${index}`,
 		kind: 'turn',
+		attachments: [],
 		revision: 1,
 		createdAt: '2026-02-27T00:00:00.000Z',
 		updatedAt: '2026-02-27T00:00:00.000Z',
@@ -513,6 +514,42 @@ describe('QueueControls', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_edit_queue() }));
 		expect(onOpenManager).toHaveBeenCalledOnce();
+	});
+
+	it('disables Steer for a FIFO head with attachments and explains why', async () => {
+		const onSteer = vi.fn().mockResolvedValue(undefined);
+		const queue = makeQueue(2);
+		queue.entries[0] = {
+			...queue.entries[0],
+			attachments: [{ name: 'screen.png', mimeType: 'image/png' }],
+		};
+		renderControls(queue, { canSteer: true, onSteer });
+
+		const steer = screen.getByRole('button', { name: m.chat_queue_steer() }) as HTMLButtonElement;
+		expect(steer.disabled).toBe(true);
+		expect(steer.getAttribute('title')).toBe(m.chat_queue_steer_attachments_unavailable());
+		await fireEvent.click(steer);
+		expect(onSteer).not.toHaveBeenCalled();
+	});
+
+	it('summarizes attachments without changing the fixed preview height', () => {
+		const queue = makeQueue(1);
+		queue.entries[0] = {
+			...queue.entries[0],
+			content: '',
+			attachments: [
+				{ name: 'screen.png', mimeType: 'image/png' },
+				{ name: 'trace.pdf', mimeType: 'application/pdf' },
+			],
+		};
+		const { container } = renderControls(queue);
+		const preview = container.querySelector('[data-queue-preview]');
+		const indicator = container.querySelector('[data-queue-preview-attachments]');
+
+		expect(preview?.textContent?.trim()).toBe('screen.png, trace.pdf');
+		expect(preview?.classList.contains('h-10')).toBe(true);
+		expect(indicator?.getAttribute('title')).toBe('screen.png, trace.pdf');
+		expect(indicator?.textContent).toContain(m.chat_queue_attachments({ count: 2 }));
 	});
 
 	it('keeps complete content in a fixed two-line CSS clamp', () => {

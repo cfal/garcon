@@ -1,4 +1,4 @@
-import type { ChatQueueState, QueueEntry } from '$lib/types/chat';
+import type { ChatQueueState, QueueEntry, QueueEntryAttachment } from '$lib/types/chat';
 
 export type QueuedInputEditPhase =
 	| 'closed'
@@ -17,6 +17,8 @@ interface QueuedInputEditorOptions {
 export class QueuedInputEditorState {
 	entryId = $state<string | null>(null);
 	draft = $state('');
+	// Kept after the entry departs so a recovered draft can say what it no longer carries.
+	attachments = $state<readonly QueueEntryAttachment[]>([]);
 	baseRevision = $state<number | null>(null);
 	mutation = $state<QueuedInputMutation>('idle');
 	error = $state<string | null>(null);
@@ -40,12 +42,16 @@ export class QueuedInputEditorState {
 		return 'removed';
 	});
 	mutationBlocked = $derived.by(() => this.options.queue?.steeringEntryId != null);
+	// A replacement edits text only; a live entry keeps its attachments.
+	hasReplacementContent = $derived(
+		this.draft.trim().length > 0 || (this.liveEntry?.attachments.length ?? 0) > 0,
+	);
 
 	canSave = $derived(
 		this.phase === 'editable' &&
 			!this.mutationBlocked &&
 			this.mutation === 'idle' &&
-			this.draft.trim().length > 0,
+			this.hasReplacementContent,
 	);
 
 	constructor(private readonly options: QueuedInputEditorOptions) {}
@@ -54,6 +60,7 @@ export class QueuedInputEditorState {
 		this.sessionRevision += 1;
 		this.entryId = entry.id;
 		this.draft = entry.content;
+		this.attachments = entry.attachments;
 		this.baseRevision = entry.revision;
 		this.mutation = 'idle';
 		this.error = null;
@@ -86,6 +93,7 @@ export class QueuedInputEditorState {
 		this.sessionRevision += 1;
 		this.entryId = null;
 		this.draft = '';
+		this.attachments = [];
 		this.baseRevision = null;
 		this.mutation = 'idle';
 		this.error = null;

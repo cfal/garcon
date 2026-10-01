@@ -68,10 +68,11 @@ import {
 const CHAT_ID = '1783725900000700';
 const TARGET_CHAT_ID = '1783725900000701';
 
-function queueEntry(id, content = 'queued', status = 'queued', revision = 1) {
+function queueEntry(id, content = 'queued', status = 'queued', revision = 1, images = []) {
   return {
     id,
     content,
+    images,
     status,
     revision,
     createdAt: '2026-05-14T00:00:00.000Z',
@@ -425,7 +426,7 @@ function createRouteAgent(sessionOverrides = {}) {
     currentTranscriptViewId: mock(() => Promise.resolve('view-current')),
     getRunningSessions: mock(() => ({ claude: [{ id: CHAT_ID }] })),
     startSession: mock(() => Promise.resolve(undefined)),
-    modelSupportsImages: mock(() => Promise.resolve(true)),
+    modelSupportsImages: mock(() => true),
     getAgentCatalogEntry: mock(() => Promise.resolve({
       supportedPermissionModes: ['default', 'acceptEdits', 'manualBypass', 'bypassPermissions', 'plan'],
       supportedThinkingModes: ['none', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
@@ -998,6 +999,33 @@ describe('REST chat command routes', () => {
         key: `queue-entry-create:${CHAT_ID}:req-queue-1`,
       }),
     );
+  });
+
+  it('POST /queue/entries validates attachments with the direct-send rules', async () => {
+    const agent = createRouteAgent();
+    const handler = agent.routes['/api/v1/chats/queue/entries'].POST;
+
+    const invalid = await callJson(handler, {
+      clientRequestId: 'req-queue-invalid-image',
+      chatId: CHAT_ID,
+      content: '',
+      images: [{ data: 'not-a-data-url', name: 'screen.png', mimeType: 'image/png' }],
+    });
+    expect(invalid.response.status).toBe(400);
+    expect(invalid.body.errorCode).toBe('VALIDATION_FAILED');
+    expect(agent.queue.enqueueAccepted).not.toHaveBeenCalled();
+
+    const accepted = await callJson(handler, {
+      clientRequestId: 'req-queue-image',
+      chatId: CHAT_ID,
+      content: '',
+      images: [{ data: 'data:image/png;base64,iVBORw0K', name: 'screen.png' }],
+    });
+    expect(accepted.response.status).toBe(202);
+    expect(agent.queue.enqueueAccepted).toHaveBeenCalledWith(expect.objectContaining({
+      content: '',
+      images: [{ data: 'data:image/png;base64,iVBORw0K', name: 'screen.png', mimeType: 'image/png' }],
+    }));
   });
 
   it('PUT and DELETE /queue/entries mutate the entry by stable ID', async () => {

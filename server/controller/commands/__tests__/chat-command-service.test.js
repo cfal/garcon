@@ -94,11 +94,12 @@ function directReservation(chatId) {
   };
 }
 
-function queueEntry(id, content = 'queued', status = 'queued', revision = 1, kind = 'turn') {
+function queueEntry(id, content = 'queued', status = 'queued', revision = 1, images = [], kind = 'turn') {
   return {
     id,
     content,
     kind,
+    images,
     status,
     revision,
     createdAt: '2026-02-27T00:00:00.000Z',
@@ -449,14 +450,14 @@ function makeService(overrides = {}) {
       await input.settlement.settleQueueMutation(input.command, input.command.entryId);
       return {
         entryId: input.command.entryId,
-        control: storedQueue([queueEntry(input.command.entryId, input.content, 'queued', 1, 'steer')]),
+        control: storedQueue([queueEntry(input.command.entryId, input.content, 'queued', 1, [], 'steer')]),
         duplicate: false,
       };
     }),
     markAcceptedQueueEntrySteer: mock(async (input) => {
       await input.settlement.settleQueueMutation(input.command, input.command.entryId);
       return storedQueue([
-        queueEntry(input.command.entryId, 'queued guidance', 'queued', input.expectedRevision, 'steer'),
+        queueEntry(input.command.entryId, 'queued guidance', 'queued', input.expectedRevision, [], 'steer'),
       ], { reorderRevision: input.expectedReorderRevision });
     }),
     admitUserInput: mock(() => Promise.resolve(undefined)),
@@ -556,7 +557,7 @@ function makeService(overrides = {}) {
     supportsFileAttachmentMimeType: mock(
       (_agentId, mimeType) => mimeType === 'video/mp4',
     ),
-    modelSupportsImages: mock(() => Promise.resolve(true)),
+    modelSupportsImages: mock(() => true),
     startSession: mock(() => Promise.resolve(undefined)),
     resolvePermission: mock(() => undefined),
     supportsFork: mock(() => true),
@@ -795,6 +796,7 @@ function makeRealQueue(
     controlRepository,
     {
       projectAdmission,
+      attachmentAdmission: { assertSupported: () => undefined },
       isControlInputViewCurrent: () => true,
     },
   );
@@ -1607,7 +1609,7 @@ describe('ChatCommandService', () => {
   });
 
   it('rejects handoff attachments unsupported by the target before preparation', async () => {
-    const modelSupportsImages = mock(async () => false);
+    const modelSupportsImages = mock(() => false);
     const { service, agents, handoffPreparations } = makeService({
       agents: {
         modelSupportsImages,
@@ -4810,6 +4812,70 @@ describe('ChatCommandService', () => {
     expect(queue.triggerDrain).toHaveBeenCalledTimes(1);
   });
 
+  it('passes queued attachments through and keys create retries by their content', async () => {
+    const { service, queue } = makeService();
+    const images = [{ data: 'data:image/png;base64,AAAA', name: 'screen.png', mimeType: 'image/png' }];
+    const input = {
+      chatId: SOURCE_CHAT_ID,
+      content: '',
+      images,
+      clientRequestId: 'request-queued-image',
+    };
+
+    const first = await service.submitQueueEntryCreate(input);
+    const retry = await service.submitQueueEntryCreate({
+      ...input,
+      images: images.map((image) => ({ ...image })),
+    });
+
+    expect(first.status).toBe('accepted');
+    expect(retry.status).toBe('duplicate');
+    expect(queue.enqueueAccepted).toHaveBeenCalledTimes(1);
+    expect(queue.enqueueAccepted).toHaveBeenCalledWith(
+      expect.objectContaining({ content: '', images }),
+    );
+    await expect(service.submitQueueEntryCreate({
+      ...input,
+      images: [{ ...images[0], data: 'data:image/png;base64,BBBB' }],
+    })).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
+    await expect(service.submitQueueEntryCreate({
+      chatId: SOURCE_CHAT_ID,
+      content: '  ',
+      clientRequestId: 'request-queued-empty',
+    })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+  });
+
+  it('allows empty replacement text only for a queued entry with attachments', async () => {
+    const withImage = queueEntry('entry-image', 'caption', 'queued', 1, [
+      { data: 'data:image/png;base64,AAAA', name: 'screen.png', mimeType: 'image/png' },
+    ]);
+    const textOnly = queueEntry('entry-text', 'words', 'queued', 1);
+    const { service, queue } = makeService({
+      queue: { readChatExecutionControl: mock(async () => storedQueue([withImage, textOnly])) },
+    });
+
+    await expect(service.submitQueueEntryReplace({
+      chatId: SOURCE_CHAT_ID,
+      entryId: 'entry-text',
+      content: ' ',
+      expectedRevision: 1,
+      clientRequestId: 'request-replace-text',
+    })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+    const replaced = await service.submitQueueEntryReplace({
+      chatId: SOURCE_CHAT_ID,
+      entryId: 'entry-image',
+      content: '',
+      expectedRevision: 1,
+      clientRequestId: 'request-replace-image',
+    });
+
+    expect(replaced.status).toBe('accepted');
+    expect(queue.replaceAccepted).toHaveBeenCalledTimes(1);
+    expect(queue.replaceAccepted).toHaveBeenCalledWith(
+      expect.objectContaining({ content: '', command: expect.objectContaining({ entryId: 'entry-image' }) }),
+    );
+  });
+
   it('recovers an accepted queue create from its in-process queue receipt', async () => {
     const { service, queue, ledger } = makeService();
     const clientRequestId = 'request-ambiguous-retry';
@@ -5341,6 +5407,35 @@ describe('ChatCommandService', () => {
     expect(queue.deliverAcceptedQueueEntrySteer).not.toHaveBeenCalled();
   });
 
+  it('rejects steering a queued entry with attachments before provider delivery', async () => {
+    const current = storedQueue([
+      queueEntry('entry-image', 'look at this', 'queued', 3, [
+        { data: 'data:image/png;base64,AAAA', name: 'screen.png', mimeType: 'image/png' },
+      ]),
+    ], { reorderRevision: 7, version: 5 });
+    const { service, queue } = makeService({
+      queue: {
+        captureSteerTarget: mock(() => ({ attempt: {}, identity: { turnId: 'turn-active' } })),
+        readChatExecutionControl: mock(async () => current),
+      },
+    });
+
+    await expect(service.submitQueueEntrySteer({
+      chatId: SOURCE_CHAT_ID,
+      clientRequestId: 'request-queue-steer-image',
+      clientMessageId: 'message-queue-steer-image',
+      entryId: 'entry-image',
+      expectedRevision: 3,
+      expectedReorderRevision: 7,
+    })).rejects.toMatchObject({
+      code: 'OPERATION_UNSUPPORTED',
+      deliveryOutcome: 'not-sent',
+      control: current,
+    });
+
+    expect(queue.deliverAcceptedQueueEntrySteer).not.toHaveBeenCalled();
+  });
+
   it('does not mask a queued-steer observation rejection when ledger settlement fails', async () => {
     const ledger = new CommandLedger(workspaceDir);
     ledger.update = mock(async () => {
@@ -5565,7 +5660,7 @@ describe('ChatCommandService', () => {
 
   it('queues a steer behind earlier queued steers even when the turn could take it', async () => {
     const target = { attempt: {}, providerTarget: {}, identity: { turnId: 'turn-active' } };
-    const waiting = storedQueue([queueEntry('steer-earlier', 'earlier guidance', 'queued', 1, 'steer')]);
+    const waiting = storedQueue([queueEntry('steer-earlier', 'earlier guidance', 'queued', 1, [], 'steer')]);
     const { service, queue } = makeService({
       queue: {
         captureSteerTarget: mock(() => target),
@@ -5853,7 +5948,7 @@ describe('ChatCommandService', () => {
   it('keeps a queued message as a steer behind a steer in flight', async () => {
     const target = { attempt: {}, providerTarget: {}, identity: { turnId: 'turn-active' } };
     const queued = storedQueue([
-      queueEntry('entry-steering', 'earlier guidance', 'steering', 1, 'steer'),
+      queueEntry('entry-steering', 'earlier guidance', 'steering', 1, [], 'steer'),
       queueEntry('entry-head', 'queued guidance', 'queued', 2),
     ], { reorderRevision: 3 });
     const { service, queue } = makeService({

@@ -69,7 +69,7 @@ describe('QueueDrainer', () => {
       runExclusive: (_chatId, operation) => operation(), chatExists: () => true,
       unsettledQueueReceiptKeys: () => new Set(), publish() {},
     }, availableProjectAdmission());
-    await controls.create('chat-1', 'queued input');
+    await controls.create('chat-1', { content: 'queued input', images: [] });
     let available = true;
     const entered = Promise.withResolvers();
     const release = Promise.withResolvers();
@@ -100,6 +100,7 @@ describe('QueueDrainer', () => {
     const entry = {
       id: 'entry-1',
       content: 'queued input',
+      images: [],
       revision: 1,
       createdAt: TS,
       updatedAt: TS,
@@ -152,6 +153,7 @@ describe('QueueDrainer', () => {
     const entry = {
       id: 'entry-1',
       content: 'queued input',
+      images: [],
       revision: 1,
       createdAt: TS,
       updatedAt: TS,
@@ -214,6 +216,7 @@ describe('QueueDrainer', () => {
       {
         id: 'entry-1',
         content: '/provider-command',
+        images: [],
         revision: 1,
         createdAt: TS,
         updatedAt: TS,
@@ -223,6 +226,7 @@ describe('QueueDrainer', () => {
       {
         id: 'entry-2',
         content: 'regular input',
+        images: [],
         revision: 1,
         createdAt: TS,
         updatedAt: TS,
@@ -294,6 +298,7 @@ describe('QueueDrainer', () => {
     const entry = {
       id: 'entry-1',
       content: 'queued input',
+      images: [],
       revision: 1,
       createdAt: TS,
       updatedAt: TS,
@@ -371,6 +376,7 @@ describe('QueueDrainer', () => {
             kind: 'user',
             entry: {
               id: 'entry-1',
+              images: [],
               createdAt: TS,
               updatedAt: TS,
               status: 'queued',
@@ -383,6 +389,7 @@ describe('QueueDrainer', () => {
         read: mock(async () => control([{
           id: 'entry-1',
           content: 'queued input',
+          images: [],
           revision: 1,
           createdAt: TS,
           updatedAt: TS,
@@ -425,6 +432,7 @@ describe('QueueDrainer', () => {
     const entry = {
       id: 'entry-1',
       content: 'queued input',
+      images: [],
       revision: 1,
       createdAt: TS,
       updatedAt: TS,
@@ -516,7 +524,7 @@ describe('QueueDrainer', () => {
         },
         availableProjectAdmission(),
       );
-      const created = await controls.create('chat-1', 'queued input');
+      const created = await controls.create('chat-1', { content: 'queued input', images: [] });
       const { id: _id, ...controlInput } = privateControlEntry();
       await controls.enqueueControl('chat-1', controlInput);
       const resolution = Promise.withResolvers();
@@ -566,6 +574,7 @@ describe('QueueDrainer', () => {
     const queued = {
       id: 'entry-1',
       content: 'queued input',
+      images: [],
       revision: 1,
       createdAt: TS,
       updatedAt: TS,
@@ -604,6 +613,7 @@ describe('QueueDrainer', () => {
     const entry = {
       id: 'entry-1',
       content: 'queued input',
+      images: [],
       revision: 1,
       createdAt: TS,
       updatedAt: TS,
@@ -645,5 +655,108 @@ describe('QueueDrainer', () => {
     await drain;
 
     expect(dequeueNextTurn).not.toHaveBeenCalled();
+  });
+});
+
+describe('QueueDrainer queued attachments', () => {
+  const images = [{ data: 'data:image/png;base64,AAAA', name: 'screen.png', mimeType: 'image/png' }];
+
+  function fixture() {
+    const attachmentAdmission = { assertSupported: mock(() => undefined) };
+    const controls = new ChatExecutionControlOperations(
+      new InMemoryChatExecutionControlRepository('server-1'),
+      {
+        runExclusive: (_chatId, operation) => operation(),
+        chatExists: () => true,
+        unsettledQueueReceiptKeys: () => new Set(),
+        publish: () => undefined,
+      },
+      availableProjectAdmission(),
+      attachmentAdmission,
+    );
+    const callbacks = queueCallbacks();
+    const runAgentTurn = mock(async () => undefined);
+    const drainer = new QueueDrainer({
+      ownership: idleOwnership({
+        installAttempt: () => ({ signal: new AbortController().signal }),
+        beginFinalization: () => ({ settle: mock(() => undefined) }),
+        setActiveDrainEntry: mock(() => undefined),
+      }),
+      controls,
+      turnRunner: { isChatRunning: () => false, runAgentTurn },
+      getDrainOptions: () => ({ model: 'test-model' }),
+      projectAdmission: availableProjectAdmission(),
+      attachmentAdmission,
+      runSelectionAdmissionExclusive: (_chatId, operation) => operation(),
+      callbacks,
+    });
+    return { attachmentAdmission, controls, callbacks, runAgentTurn, drainer };
+  }
+
+  it('admits and dispatches a queued entry with its attachments', async () => {
+    const { attachmentAdmission, controls, callbacks, runAgentTurn, drainer } = fixture();
+    await controls.create('chat-1', { content: 'look at this', images });
+    await controls.create('chat-1', { content: 'text only', images: [] });
+    attachmentAdmission.assertSupported.mockClear();
+
+    await drainer.run('chat-1');
+
+    expect(attachmentAdmission.assertSupported).toHaveBeenCalledTimes(1);
+    expect(attachmentAdmission.assertSupported).toHaveBeenCalledWith('chat-1', images);
+    expect(callbacks.registerQueued).toHaveBeenNthCalledWith(
+      1,
+      'chat-1',
+      'look at this',
+      expect.objectContaining({ images }),
+    );
+    expect(runAgentTurn).toHaveBeenNthCalledWith(
+      1,
+      'chat-1',
+      'look at this',
+      expect.objectContaining({ images, model: 'test-model' }),
+    );
+    expect(runAgentTurn.mock.calls[1][2]).not.toHaveProperty('images');
+    expect((await controls.read('chat-1')).entries).toEqual([]);
+  });
+
+  it('pauses on an attachment entry the current selection rejects without consuming it', async () => {
+    const { attachmentAdmission, controls, callbacks, runAgentTurn, drainer } = fixture();
+    const created = await controls.create('chat-1', { content: 'look at this', images });
+    await controls.create('chat-1', { content: 'later', images: [] });
+    attachmentAdmission.assertSupported.mockImplementation(() => {
+      throw new DomainError('UNSUPPORTED_AGENT', 'Attachments unsupported for agent: claude', 422);
+    });
+
+    await drainer.run('chat-1');
+
+    const final = await controls.read('chat-1');
+    expect(final.entries.map((entry) => entry.content)).toEqual(['look at this', 'later']);
+    expect(final.entries[0].images).toEqual(images);
+    expect(final.recentlyDispatched).toEqual([]);
+    expect(final.pause).toMatchObject({ kind: 'queued-turn-failed', entryId: created.entryId });
+    expect(callbacks.registerQueued).not.toHaveBeenCalled();
+    expect(callbacks.discardPreparedInput).not.toHaveBeenCalled();
+    expect(runAgentTurn).not.toHaveBeenCalled();
+    expect(callbacks.publishTurnFailed).toHaveBeenCalledWith(
+      'chat-1',
+      'Attachments unsupported for agent: claude',
+      expect.objectContaining({ images }),
+    );
+  });
+  it('waits for readiness instead of pausing when attachment admission is retryable', async () => {
+    const { attachmentAdmission, controls, callbacks, runAgentTurn, drainer } = fixture();
+    await controls.create('chat-1', { content: 'look at this', images });
+    attachmentAdmission.assertSupported.mockImplementation(() => {
+      throw new DomainError('EXECUTOR_UNAVAILABLE', 'Executor is unavailable', 503, true);
+    });
+
+    await drainer.run('chat-1');
+
+    const final = await controls.read('chat-1');
+    expect(final.entries.map((entry) => entry.content)).toEqual(['look at this']);
+    expect(final.pause).toBeNull();
+    expect(callbacks.publishTurnFailed).not.toHaveBeenCalled();
+    expect(callbacks.registerQueued).not.toHaveBeenCalled();
+    expect(runAgentTurn).not.toHaveBeenCalled();
   });
 });

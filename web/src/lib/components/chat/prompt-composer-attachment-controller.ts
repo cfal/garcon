@@ -10,7 +10,6 @@ interface PromptComposerAttachmentOptions {
 	get attachmentPickerBlocked(): boolean;
 	get attachmentSupport(): ChatAttachmentSupport;
 	onAttachmentInput(): void;
-	onBlockedAttachmentInput(): void;
 }
 
 export class PromptComposerAttachmentController {
@@ -26,9 +25,7 @@ export class PromptComposerAttachmentController {
 		const input = event.target as HTMLInputElement;
 		if (!input.files) return;
 		const attachments = this.#supportedAttachments(input.files);
-		if (attachments.length > 0 && this.options.attachmentPickerBlocked) {
-			this.options.onBlockedAttachmentInput();
-		} else if (attachments.length > 0) {
+		if (attachments.length > 0 && !this.options.attachmentPickerBlocked) {
 			this.options.composer.addImages(attachments, this.options.attachmentSupport);
 		}
 		input.value = '';
@@ -53,11 +50,7 @@ export class PromptComposerAttachmentController {
 		const files = event.dataTransfer?.files;
 		if (!files) return;
 		const attachments = this.#supportedAttachments(files);
-		if (attachments.length === 0) return;
-		if (this.options.attachmentInputBlocked) {
-			this.options.onBlockedAttachmentInput();
-			return;
-		}
+		if (attachments.length === 0 || this.options.attachmentInputBlocked) return;
 		this.options.onAttachmentInput();
 		this.options.composer.addImages(attachments, this.options.attachmentSupport);
 	}
@@ -73,11 +66,7 @@ export class PromptComposerAttachmentController {
 				images.push(file);
 			}
 		}
-		if (images.length === 0) return;
-		if (this.options.attachmentInputBlocked) {
-			this.options.onBlockedAttachmentInput();
-			return;
-		}
+		if (images.length === 0 || this.options.attachmentInputBlocked) return;
 		this.options.onAttachmentInput();
 		this.options.composer.addImages(images, this.options.attachmentSupport);
 	}

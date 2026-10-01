@@ -1,11 +1,16 @@
 import type { AutomaticQueuePauseKind, QueueEntry, QueueEntryKind } from '../../../common/queue-state.ts';
 import type { QueueEntryPlacement } from '../../../common/chat-command-contracts.ts';
+import type { AgentCommandImage } from '../../../common/ws-requests.ts';
 import {
+  MAX_QUEUED_ATTACHMENT_BYTES,
   MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES,
   MAX_CONTROL_INPUT_ENTRIES,
   MAX_STORED_APPLIED_QUEUE_COMMANDS,
   cloneStoredChatExecutionControl,
+  cloneStoredQueueEntry,
   hasPendingTurnInput,
+  queuedAttachmentBytes,
+  toClientQueueEntry,
   type StoredControlInputEntry,
   type StoredAppliedQueueCommand,
   type StoredChatExecutionControlState,
@@ -32,7 +37,8 @@ export type TransitionRejection =
   | { code: 'QUEUE_ENTRY_REVISION_CONFLICT'; entryId: string; actualRevision: number }
   | { code: 'QUEUE_ENTRY_REORDER_CONFLICT' }
   | { code: 'QUEUE_PAUSE_CHANGED' }
-  | { code: 'CONTROL_INPUT_QUEUE_FULL' };
+  | { code: 'CONTROL_INPUT_QUEUE_FULL' }
+  | { code: 'QUEUE_ATTACHMENTS_FULL' };
 
 export type TransitionOutcome<T> =
   | { status: 'ok'; value: T }
@@ -106,9 +112,15 @@ function bump(control: StoredChatExecutionControlState, now: string): void {
   control.updatedAt = now;
 }
 
-function toQueueEntry(entry: StoredQueueEntry): QueueEntry {
-  const { status: _status, submission: _submission, ...clientEntry } = entry;
-  return { ...clientEntry };
+function sameImages(
+  left: readonly AgentCommandImage[],
+  right: readonly AgentCommandImage[],
+): boolean {
+  return left.length === right.length && left.every((image, index) => (
+    image.data === right[index].data
+    && image.name === right[index].name
+    && image.mimeType === right[index].mimeType
+  ));
 }
 
 function findAppliedCommand(
@@ -162,6 +174,7 @@ function missingEntryRejection(
 
 interface QueueEntryInput {
   content: string;
+  images: readonly AgentCommandImage[];
   command?: QueueCommandIdentity;
   submission?: StoredQueueSubmissionIdentity;
 }
@@ -178,10 +191,10 @@ export function createQueueEntry(
 // before any queued turn starts.
 export function createQueuedSteer(
   current: StoredChatExecutionControlState,
-  input: QueueEntryInput,
+  input: Omit<QueueEntryInput, 'images'>,
   context: TransitionContext,
 ): ControlTransition<QueueMutationValue> {
-  return insertQueueEntry(current, input, 'steer', context);
+  return insertQueueEntry(current, { ...input, images: [] }, 'steer', context);
 }
 
 function insertQueueEntry(
@@ -197,7 +210,7 @@ function insertQueueEntry(
       && entry.submission.transcriptViewId === input.submission!.transcriptViewId
     ));
     if (submitted) {
-      if (submitted.content !== input.content) {
+      if (submitted.content !== input.content || !sameImages(submitted.images, input.images)) {
         return rejected(current, {
           code: 'IDEMPOTENCY_CONFLICT',
           clientMessageId: input.submission.clientMessageId,
@@ -205,7 +218,7 @@ function insertQueueEntry(
       }
       return accepted(next, {
         entryId: submitted.id,
-        entry: toQueueEntry(submitted),
+        entry: toClientQueueEntry(submitted),
         duplicate: true,
       }, false);
     }
@@ -216,16 +229,25 @@ function insertQueueEntry(
       const entry = next.entries.find((candidate) => candidate.id === applied.entryId);
       return accepted(next, {
         entryId: applied.entryId,
-        entry: entry ? toQueueEntry(entry) : null,
+        entry: entry ? toClientQueueEntry(entry) : null,
         duplicate: true,
       }, false);
     }
+  }
+
+  if (
+    input.images.length > 0
+    && queuedAttachmentBytes(next.entries.flatMap((queued) => queued.images))
+      + queuedAttachmentBytes(input.images) > MAX_QUEUED_ATTACHMENT_BYTES
+  ) {
+    return rejected(current, { code: 'QUEUE_ATTACHMENTS_FULL' });
   }
 
   const entry: StoredQueueEntry = {
     id: input.command?.entryId ?? context.newId(),
     content: input.content,
     kind,
+    images: input.images.map((image) => ({ ...image })),
     revision: 1,
     status: 'queued',
     createdAt: context.now,
@@ -239,7 +261,7 @@ function insertQueueEntry(
   else next.entries.push(entry);
   if (input.command) recordAppliedCommand(next, input.command, 'create', context);
   bump(next, context.now);
-  return accepted(next, { entryId: entry.id, entry: toQueueEntry(entry), duplicate: false }, true);
+  return accepted(next, { entryId: entry.id, entry: toClientQueueEntry(entry), duplicate: false }, true);
 }
 
 export function enqueueControlInput(
@@ -280,7 +302,7 @@ export function replaceQueueEntry(
       const entry = next.entries.find((candidate) => candidate.id === applied.entryId);
       return accepted(next, {
         entryId: applied.entryId,
-        entry: entry ? toQueueEntry(entry) : null,
+        entry: entry ? toClientQueueEntry(entry) : null,
         duplicate: true,
       }, false);
     }
@@ -307,7 +329,7 @@ export function replaceQueueEntry(
   entry.updatedAt = context.now;
   if (input.command) recordAppliedCommand(next, input.command, 'replace', context);
   bump(next, context.now);
-  return accepted(next, { entryId: entry.id, entry: toQueueEntry(entry), duplicate: false }, true);
+  return accepted(next, { entryId: entry.id, entry: toClientQueueEntry(entry), duplicate: false }, true);
 }
 
 export function deleteQueueEntry(
@@ -368,7 +390,7 @@ export function moveQueueEntry(
       const entry = next.entries.find((candidate) => candidate.id === applied.entryId);
       return accepted(next, {
         entryId: applied.entryId,
-        entry: entry ? toQueueEntry(entry) : null,
+        entry: entry ? toClientQueueEntry(entry) : null,
         duplicate: true,
         rebased: null,
       }, false);
@@ -448,7 +470,7 @@ export function moveQueueEntry(
   if (changed) bump(next, context.now);
   return accepted(next, {
     entryId: source.id,
-    entry: toQueueEntry(source),
+    entry: toClientQueueEntry(source),
     duplicate: false,
     rebased: targetWasDispatched,
   }, changed);
@@ -543,7 +565,7 @@ export function dequeueNextTurn(
   bump(next, context.now);
   return accepted(next, {
     kind: 'user',
-    entry: cloneQueueEntry(entry),
+    entry: cloneStoredQueueEntry(entry),
   }, true);
 }
 
@@ -576,7 +598,7 @@ export function reserveQueueSteer(
   entry.status = 'steering';
   bump(next, context.now);
   return accepted(next, {
-    entry: cloneQueueEntry(entry),
+    entry: cloneStoredQueueEntry(entry),
   }, true);
 }
 
@@ -703,13 +725,6 @@ export function pauseAfterDispatchFailure(
   };
   bump(next, context.now);
   return accepted(next, undefined, true);
-}
-
-function cloneQueueEntry(entry: StoredQueueEntry): StoredQueueEntry {
-  return {
-    ...entry,
-    ...(entry.submission ? { submission: { ...entry.submission } } : {}),
-  };
 }
 
 function cloneControlInputEntry(entry: StoredControlInputEntry): StoredControlInputEntry {

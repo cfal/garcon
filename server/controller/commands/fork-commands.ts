@@ -140,7 +140,7 @@ export class ForkCommands {
       thinkingMode: input.options.thinkingMode,
     });
     const source = forkContext.sourceSession;
-    await this.support.assertAttachmentsSupported({
+    this.support.assertAttachmentsSupported({
       agentId: source.agentId,
       executorId: source.executorId,
       model: input.options?.model ?? source.model,

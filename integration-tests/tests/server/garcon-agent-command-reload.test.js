@@ -61,6 +61,7 @@ async function withReload(run) {
     admitQueuedInput: () => ({ inserted: true }), discardPreparedInput: () => {},
   }, () => ({}), (id) => registry.hasChat(id), new InMemoryChatExecutionControlRepository('test-server'), {
     projectAdmission: { assertAvailable: async () => {} },
+    attachmentAdmission: { assertSupported: () => {} },
     appendControlReceipt: appendReceipt,
     isControlInputViewCurrent: (chatId, viewId) => registry.getChat(chatId) !== null && ledger.existingCurrentView(chatId)?.viewId === viewId,
   });

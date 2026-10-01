@@ -4,10 +4,11 @@ import {
   toClientChatExecutionControlState,
 } from '../control-state.js';
 
-function entry(id, status, revision = 1) {
+function entry(id, status, revision = 1, images = []) {
   return {
     id,
     content: `c-${id}`,
+    images,
     status,
     revision,
     createdAt: '2026-02-27T00:00:00.000Z',
@@ -50,6 +51,22 @@ describe('chat execution-control projection', () => {
     expect(result.queue.entries.map((item) => item.id)).toEqual(['steering', 'queued']);
     expect(result.queue.steeringEntryId).toBe('steering');
     expect(result.queue.entries[0]).not.toHaveProperty('status');
+  });
+
+  it('projects attachment metadata without attachment payloads', () => {
+    const result = toClientChatExecutionControlState(control([
+      entry('q1', 'queued', 1, [
+        { data: 'data:image/png;base64,AAAA', name: 'screen.png', mimeType: 'image/png' },
+        { data: 'data:application/pdf;base64,AAAA' },
+      ]),
+    ]));
+
+    expect(result.queue.entries[0].attachments).toEqual([
+      { name: 'screen.png', mimeType: 'image/png' },
+      { name: 'image-2', mimeType: 'application/octet-stream' },
+    ]);
+    expect(result.queue.entries[0]).not.toHaveProperty('images');
+    expect(JSON.stringify(result)).not.toContain('base64');
   });
 
   it('retains bounded recently-dispatched markers after dequeue', () => {

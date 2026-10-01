@@ -49,6 +49,7 @@ describe('delegated startup admission interleavings', () => {
       discardPreparedInput: (chatId, messageId) => transcripts.discardPreparedInput(chatId, messageId),
     }, () => ({}), () => true, new InMemoryChatExecutionControlRepository('synthetic-server'), {
       projectAdmission: { assertAvailable: async () => {} }, isControlInputViewCurrent: () => true,
+      attachmentAdmission: { assertSupported: () => {} },
     });
   });
   afterEach(async () => {

@@ -139,7 +139,7 @@ export interface AgentRegistryServiceContract {
     model: string;
     apiProviderId?: string | null;
     modelEndpointId?: string | null;
-  }): Promise<boolean>;
+  }): boolean;
   runSingleQuery(prompt: string, options: RunSingleQueryOptions): Promise<string>;
   getSlashCommands(agentId: string, projectPath: string, executorId?: string | null): Promise<SlashCommand[]>;
   resolvePermission(
@@ -424,7 +424,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   getModels(agentId: string, query: AgentModelQuery = {}): Promise<AgentModelOption[]> {
     return this.#catalog.getModels(agentId, query);
   }
-  modelSupportsImages(input: Parameters<AgentCatalogService['modelSupportsImages']>[0]): Promise<boolean> {
+  modelSupportsImages(input: Parameters<AgentCatalogService['modelSupportsImages']>[0]): boolean {
     return this.#catalog.modelSupportsImages(input);
   }
 

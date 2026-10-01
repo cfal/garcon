@@ -414,6 +414,7 @@ function createExecutionFixture(directory, ensureAdopted, beforeWiringCommitList
     admitQueuedInput: () => ({ inserted: true }), discardPreparedInput() {},
   }, () => ({}), () => true, new InMemoryChatExecutionControlRepository('synthetic-server'), {
     projectAdmission: { assertAvailable: async () => undefined }, isControlInputViewCurrent: () => true,
+    attachmentAdmission: { assertSupported: () => undefined },
     ...options.coordinator,
   });
   const ledger = new CommandLedger();
@@ -819,6 +820,7 @@ describe('server event wiring', () => {
       admitQueuedInput: () => ({ inserted: true }), discardPreparedInput() {},
     }, () => ({}), () => true, new InMemoryChatExecutionControlRepository('synthetic-server'), {
       projectAdmission: { assertAvailable: async () => undefined },
+      attachmentAdmission: { assertSupported: () => undefined },
       isControlInputViewCurrent: () => true,
     });
     const fixture = createFixture({ queueService: execution, commandLedgerInstance: ledger });

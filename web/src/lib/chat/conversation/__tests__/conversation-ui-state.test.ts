@@ -44,6 +44,7 @@ function makeEntry(id: string, content: string, revision = 1): QueueEntry {
 		id,
 		content,
 		kind: 'turn',
+		attachments: [],
 		revision,
 		createdAt: '2026-01-01T00:00:00.000Z',
 		updatedAt: '2026-01-01T00:00:00.000Z',

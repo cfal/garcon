@@ -84,11 +84,11 @@ function scaffold(overrides = {}) {
         status: 'steering',
       },
       control: control({
-        entries: [{ id: 'entry-1', content: 'queued guidance', revision: 2, status: 'steering' }],
+        entries: [{ id: 'entry-1', content: 'queued guidance', images: [], revision: 2, status: 'steering' }],
       }),
     })),
     releaseSteer: mock(async () => control({
-      entries: [{ id: 'entry-1', content: 'queued guidance', revision: 2, status: 'queued' }],
+      entries: [{ id: 'entry-1', content: 'queued guidance', images: [], revision: 2, status: 'queued' }],
     })),
     createSteer: mock(async () => ({ entryId: 'steer-1', control: control(), duplicate: false })),
     markSteer: mock(async () => control()),
@@ -98,7 +98,7 @@ function scaffold(overrides = {}) {
       dispatchedAt: '2026-08-02T00:00:01.000Z',
     }] })),
     requeueAndPause: mock(async () => control({
-      entries: [{ id: 'entry-1', content: 'queued guidance', revision: 2, status: 'queued' }],
+      entries: [{ id: 'entry-1', content: 'queued guidance', images: [], revision: 2, status: 'queued' }],
       pause: { kind: 'completion-uncertain', entryId: 'entry-1' },
     })),
     read: mock(async () => control()),
@@ -631,7 +631,7 @@ describe('AcceptedInputHandler', () => {
     const deliveryError = new SteerDeliveryError(new Error('provider unavailable'), 'not-sent');
     const settle = settlement();
     const released = control({
-      entries: [{ id: 'entry-1', content: 'queued guidance', revision: 2, status: 'queued' }],
+      entries: [{ id: 'entry-1', content: 'queued guidance', images: [], revision: 2, status: 'queued' }],
     });
     const { handler, m } = scaffold({
       steer: mock(async () => { throw deliveryError; }),
@@ -683,7 +683,7 @@ describe('AcceptedInputHandler', () => {
   test('pauses the source when accepted steering cannot be consumed', async () => {
     const consumeError = new Error('consume failed');
     const paused = control({
-      entries: [{ id: 'entry-1', content: 'queued guidance', revision: 2, status: 'queued' }],
+      entries: [{ id: 'entry-1', content: 'queued guidance', images: [], revision: 2, status: 'queued' }],
       pause: { kind: 'completion-uncertain', entryId: 'entry-1' },
     });
     const settle = settlement();

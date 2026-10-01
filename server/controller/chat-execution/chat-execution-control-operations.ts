@@ -1,5 +1,6 @@
 import type { AutomaticQueuePauseKind, QueueEntry } from '../../../common/queue-state.ts';
 import type { QueueEntryPlacement } from '../../../common/chat-command-contracts.ts';
+import type { AgentCommandImage } from '../../../common/ws-requests.ts';
 import {
   cloneStoredChatExecutionControl,
   type StoredChatExecutionControlState,
@@ -39,6 +40,7 @@ import {
   transitionError,
   type ProjectAdmissionPort,
   type QueueCommandMutationResult,
+  type QueuedAttachmentAdmissionPort,
 } from './types.ts';
 
 const logger = createLogger('chat-execution-control');
@@ -58,6 +60,7 @@ export class ChatExecutionControlOperations {
     private readonly repository: ChatExecutionControlRepository,
     private readonly host: ChatExecutionControlOperationsHost,
     private readonly projectAdmission: ProjectAdmissionPort,
+    private readonly attachmentAdmission: QueuedAttachmentAdmissionPort,
   ) {}
 
   async read(chatId: string): Promise<StoredChatExecutionControlState> {
@@ -72,19 +75,25 @@ export class ChatExecutionControlOperations {
 
   async create(
     chatId: string,
-    content: string,
-    command?: QueueCommandIdentity,
-    submission?: StoredQueueSubmissionIdentity,
+    input: {
+      content: string;
+      images: readonly AgentCommandImage[];
+      command?: QueueCommandIdentity;
+      submission?: StoredQueueSubmissionIdentity;
+    },
   ): Promise<QueueCommandMutationResult & { entry: QueueEntry | null }> {
     return this.host.runExclusive(chatId, async () => {
       const current = await this.#load(chatId);
       const transition = createQueueEntry(
         current,
-        { content, command, submission },
+        input,
         this.#transitionContext(chatId),
       );
       if (transition.outcome.status === 'ok' && !transition.outcome.value.duplicate) {
         await this.projectAdmission.assertAvailable(chatId);
+        if (input.images.length > 0) {
+          this.attachmentAdmission.assertSupported(chatId, input.images);
+        }
       }
       const committed = await this.#commitTransition(chatId, current, transition);
       const result = committed.value;

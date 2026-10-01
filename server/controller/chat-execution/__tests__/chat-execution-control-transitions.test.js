@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'bun:test';
 import {
   MAX_CONTROL_INPUT_ENTRIES,
+  MAX_QUEUED_ATTACHMENT_BYTES,
   emptyStoredChatExecutionControl,
+  queuedAttachmentBytes,
 } from '../control-state.ts';
 import {
   clearQueue,
@@ -47,7 +49,7 @@ function rejection(transition) {
 }
 
 function add(control, content, tick, input = {}) {
-  return createQueueEntry(control, { content, ...input }, context(tick));
+  return createQueueEntry(control, { content, images: [], ...input }, context(tick));
 }
 
 function controlInput(content, createdAt = context(1).now) {
@@ -110,6 +112,67 @@ describe('chat execution control transitions', () => {
       clientMessageId: 'message-1',
     });
     expect(conflict.next).toEqual(created.next);
+  });
+
+  it('keeps queued attachments server-side and through dequeue', () => {
+    const images = [{ data: 'data:image/png;base64,AAAA', name: 'screen.png', mimeType: 'image/png' }];
+    const created = add(initial(), '', 1, { images });
+
+    expect(value(created).entry).toEqual(expect.objectContaining({
+      content: '',
+      attachments: [{ name: 'screen.png', mimeType: 'image/png' }],
+    }));
+    expect(value(created).entry).not.toHaveProperty('images');
+    expect(created.next.entries[0].images).toEqual(images);
+    expect(created.next.entries[0].images).not.toBe(images);
+
+    const replaced = replaceQueueEntry(created.next, {
+      entryId: value(created).entryId,
+      content: 'now with text',
+      expectedRevision: 1,
+    }, context(2));
+    expect(replaced.next.entries[0]).toMatchObject({ content: 'now with text', images });
+
+    const dequeued = dequeueNextTurn(replaced.next, context(3));
+    expect(value(dequeued)).toMatchObject({ kind: 'user', entry: { images } });
+  });
+
+  it('bounds the attachment bytes a chat may hold in its queue', () => {
+    const large = [{ data: `data:image/png;base64,${'A'.repeat(35_000_000)}`, name: 'large.png', mimeType: 'image/png' }];
+    const small = [{ data: 'data:image/png;base64,AAAA', name: 'small.png', mimeType: 'image/png' }];
+    const first = add(initial(), 'first', 1, { images: large });
+    expect(queuedAttachmentBytes(large)).toBe(26_250_000);
+
+    const full = add(first.next, 'second', 2, { images: large });
+    expect(rejection(full)).toEqual({ code: 'QUEUE_ATTACHMENTS_FULL' });
+    expect(full.next).toEqual(first.next);
+    expect(value(add(first.next, 'small', 3, { images: small })).duplicate).toBe(false);
+    expect(value(add(first.next, 'text only', 4)).duplicate).toBe(false);
+    expect(2 * queuedAttachmentBytes(large)).toBeGreaterThan(MAX_QUEUED_ATTACHMENT_BYTES);
+  });
+
+  it('rejects a queued submission retry whose attachments differ', () => {
+    const submission = { clientMessageId: 'message-1', transcriptViewId: 'view-1' };
+    const images = [{ data: 'data:image/png;base64,AAAA', name: 'screen.png', mimeType: 'image/png' }];
+    const created = add(initial(), 'same', 1, { submission, images });
+
+    const duplicate = add(created.next, 'same', 2, {
+      submission,
+      images: images.map((image) => ({ ...image })),
+    });
+    expect(value(duplicate)).toMatchObject({ entryId: value(created).entryId, duplicate: true });
+
+    const conflict = add(created.next, 'same', 3, {
+      submission,
+      images: [{ ...images[0], data: 'data:image/png;base64,BBBB' }],
+    });
+    expect(rejection(conflict)).toEqual({
+      code: 'IDEMPOTENCY_CONFLICT',
+      clientMessageId: 'message-1',
+    });
+    expect(rejection(add(created.next, 'same', 4, { submission }))).toMatchObject({
+      code: 'IDEMPOTENCY_CONFLICT',
+    });
   });
 
   it('removes a dequeued entry immediately and records its former identity', () => {

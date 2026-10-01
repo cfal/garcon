@@ -988,7 +988,11 @@ export default function createChatRoutes({
   async function postQueueEntryCreate(body: unknown): Promise<Response> {
     try {
       const input = parseCommandRequest(parseQueueEntryCreateCommandRequest, body);
-      const result = await commands.submitQueueEntryCreate(input);
+      const images = validatedCommandAttachments(input.images);
+      const result = await commands.submitQueueEntryCreate({
+        ...input,
+        ...(images === undefined ? {} : { images }),
+      });
       return Response.json(result, { status: 202 });
     } catch (error: unknown) {
       if (error instanceof CommandValidationError) {

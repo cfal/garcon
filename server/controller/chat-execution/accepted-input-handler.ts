@@ -94,18 +94,18 @@ export class AcceptedInputHandler {
 
   async enqueue(input: AcceptedQueueCreate): Promise<QueueCommandMutationResult> {
     try {
-      const result = await this.#controls.create(
-        input.command.chatId,
-        input.content,
-        { key: input.command.key, entryId: input.command.entryId },
-        {
+      const result = await this.#controls.create(input.command.chatId, {
+        content: input.content,
+        images: input.images,
+        command: { key: input.command.key, entryId: input.command.entryId },
+        submission: {
           clientMessageId: input.clientMessageId,
           transcriptViewId: input.transcriptViewId,
           ...(input.excludedResendOrdinals?.length
             ? { excludedResendOrdinals: [...input.excludedResendOrdinals] }
             : {}),
         },
-      );
+      });
       await input.settlement.settleQueueMutation(input.command, result.entryId);
       this.#coordinator.requestDrain(input.command.chatId, 'accepted enqueue');
       return result;

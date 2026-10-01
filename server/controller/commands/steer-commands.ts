@@ -326,6 +326,18 @@ export class SteerCommands {
           await this.#settleQueueFailure(command, error, 'not-sent');
           throw error;
         }
+        // Steering delivers text only; attachments never change for an entry.
+        if (observedEntry.images.length > 0) {
+          const error = new QueueEntrySteerError(
+            'OPERATION_UNSUPPORTED',
+            'Queued messages with attachments cannot steer the active turn',
+            409,
+            'not-sent',
+            await this.deps.queue.readChatExecutionControl(input.chatId),
+          );
+          await this.#settleQueueFailure(command, error, 'not-sent');
+          throw error;
+        }
         let target: CapturedSteerTarget | null;
         try {
           target = await this.#queueableTarget(input.chatId, observedTarget);

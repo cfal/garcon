@@ -100,7 +100,7 @@ export class SelfHandoffCommands {
     const replaying = targetExists && priorRecord !== undefined && !retryingPreScheduleFailure;
     const source = replaying ? null : this.#requireSource(input.sourceChatId);
     if (source) {
-      await this.support.assertAttachmentsSupported({
+      this.support.assertAttachmentsSupported({
         agentId: source.agentId,
         executorId: source.executorId,
         model: source.model,

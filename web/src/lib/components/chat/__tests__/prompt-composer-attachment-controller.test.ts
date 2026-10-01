@@ -14,7 +14,6 @@ describe('PromptComposerAttachmentController', () => {
 		let pickerBlocked = true;
 		const addImages = vi.fn<ComposerState['addImages']>();
 		const onAttachmentInput = vi.fn();
-		const onBlockedAttachmentInput = vi.fn();
 		const support: ChatAttachmentSupport = { allowImages: true, fileMimeTypes: [] };
 		const controller = new PromptComposerAttachmentController({
 			composer: { addImages, isDragActive: false },
@@ -28,7 +27,6 @@ describe('PromptComposerAttachmentController', () => {
 				return support;
 			},
 			onAttachmentInput,
-			onBlockedAttachmentInput,
 		});
 		const input = document.createElement('input');
 		input.type = 'file';
@@ -50,14 +48,12 @@ describe('PromptComposerAttachmentController', () => {
 		expect(click).toHaveBeenCalledOnce();
 		expect(addImages).toHaveBeenCalledWith([image], support);
 		expect(onAttachmentInput).not.toHaveBeenCalled();
-		expect(onBlockedAttachmentInput).toHaveBeenCalledOnce();
 	});
 
 	it('cancels expansion only when a pasted image is supported', () => {
 		let support: ChatAttachmentSupport = { allowImages: false, fileMimeTypes: [] };
 		const addImages = vi.fn<ComposerState['addImages']>();
 		const onAttachmentInput = vi.fn();
-		const onBlockedAttachmentInput = vi.fn();
 		const controller = new PromptComposerAttachmentController({
 			composer: { addImages, isDragActive: false },
 			get attachmentInputBlocked() {
@@ -70,7 +66,6 @@ describe('PromptComposerAttachmentController', () => {
 				return support;
 			},
 			onAttachmentInput,
-			onBlockedAttachmentInput,
 		});
 		const image = new File(['image'], 'pasted.png', { type: 'image/png' });
 
@@ -84,10 +79,9 @@ describe('PromptComposerAttachmentController', () => {
 		expect(addImages).toHaveBeenCalledWith([image], support);
 	});
 
-	it('rejects supported picker, paste, and drop input while attachment admission is blocked', () => {
+	it('ignores supported picker, paste, and drop input while attachment input is blocked', () => {
 		const addImages = vi.fn<ComposerState['addImages']>();
 		const onAttachmentInput = vi.fn();
-		const onBlockedAttachmentInput = vi.fn();
 		const support: ChatAttachmentSupport = { allowImages: true, fileMimeTypes: [] };
 		const composer = { addImages, isDragActive: true };
 		const controller = new PromptComposerAttachmentController({
@@ -102,7 +96,6 @@ describe('PromptComposerAttachmentController', () => {
 				return support;
 			},
 			onAttachmentInput,
-			onBlockedAttachmentInput,
 		});
 		const image = new File(['image'], 'blocked.png', { type: 'image/png' });
 		const input = document.createElement('input');
@@ -116,7 +109,6 @@ describe('PromptComposerAttachmentController', () => {
 			dataTransfer: fileTransfer(image),
 		} as unknown as DragEvent);
 
-		expect(onBlockedAttachmentInput).toHaveBeenCalledTimes(3);
 		expect(onAttachmentInput).not.toHaveBeenCalled();
 		expect(addImages).not.toHaveBeenCalled();
 		expect(composer.isDragActive).toBe(false);

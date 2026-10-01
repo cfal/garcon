@@ -617,22 +617,7 @@ export class ConversationSessionController {
 				isDraft,
 				isProcessing: activeTurn,
 				control: deps.conversationUi.getExecutionControl(chatId),
-				hasAttachments: submissionImages.length > 0,
 			});
-			if (route === 'queue-attachments-unsupported') {
-				this.#restorePreflightSubmission(
-					chatId,
-					previousText,
-					previousImages,
-					composerRevisionAfterClear,
-				);
-				deps.chatState.appendLocalNoticeForChat(
-					chatId,
-					'error',
-					m.chat_notice_queue_attachments_unavailable(),
-				);
-				return 'rejected';
-			}
 			if (route !== 'direct' && route !== 'draft' && directAdmission) {
 				this.#releaseDirectAdmission(chatId, directAdmission);
 				directAdmission = null;

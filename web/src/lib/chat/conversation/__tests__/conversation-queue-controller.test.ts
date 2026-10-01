@@ -26,6 +26,7 @@ function queueEntry(id: string, revision: number): QueueEntry {
 		id,
 		content: id,
 		kind: 'turn',
+		attachments: [],
 		revision,
 		createdAt: '2026-07-22T00:00:00.000Z',
 		updatedAt: '2026-07-22T00:00:00.000Z',

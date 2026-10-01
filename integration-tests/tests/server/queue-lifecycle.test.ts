@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { describe, expect, test } from 'bun:test';
 import type {
+  AgentRunFailedMessage,
   ChatMessagesMessage,
   ChatSessionStoppedMessage,
 } from '../../../common/ws-events.js';
@@ -11,6 +12,7 @@ import {
   assistantContents,
   countUserContent,
   userContents,
+  userMessages,
 } from '../../support/chat-assertions.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 
@@ -924,6 +926,173 @@ describe('queue lifecycle', () => {
       const transcript = await fixture.client.getMessages(chatId);
       expect(countUserContent(transcript.messages, 'interrupt-b')).toBe(1);
       expect(transcript.resendCandidates).toEqual([]);
+    });
+  });
+});
+
+describe('queued attachments', () => {
+  const image = {
+    data: 'data:image/png;base64,iVBORw0KGgo=',
+    name: 'queued-diagram.png',
+    mimeType: 'image/png',
+  };
+  const imageBlock = {
+    type: 'image',
+    source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' },
+  };
+
+  function lastUserContent(request: { body: { messages: readonly { role: string; content: unknown }[] } }) {
+    return request.body.messages.filter((message) => message.role === 'user').at(-1)?.content;
+  }
+
+  test('dispatches queued attachments with their own turn and keeps payloads out of queue state', async () => {
+    await withIntegrationFixture('queue-attachments', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const agent = fixture.directAgents.anthropic;
+      const heldFirst = fixture.fakeProviders.anthropic.holdNext({ lastUserText: 'attachment-first' });
+      const heldQueued = fixture.fakeProviders.anthropic.holdNext({ lastUserText: 'attachment-queued' });
+      const first = await fixture.client.startDirectChat({
+        chatId,
+        content: 'attachment-first',
+        projectPath: fixture.dirs.project,
+        agent,
+      });
+      await heldFirst.received;
+
+      const queueRequest = {
+        chatId,
+        content: 'attachment-queued',
+        images: [image],
+        clientRequestId: crypto.randomUUID(),
+        clientMessageId: crypto.randomUUID(),
+      };
+      const queued = await fixture.client.enqueue(queueRequest);
+      expect(queued.control.queue.entries).toEqual([
+        expect.objectContaining({
+          id: queued.entryId,
+          content: 'attachment-queued',
+          attachments: [{ name: image.name, mimeType: image.mimeType }],
+        }),
+      ]);
+      expect(await fixture.client.enqueue(queueRequest)).toMatchObject({
+        status: 'duplicate',
+        entryId: queued.entryId,
+      });
+      await expect(fixture.client.enqueue({
+        ...queueRequest,
+        images: [{ ...image, data: 'data:image/png;base64,Yg==' }],
+      })).rejects.toMatchObject({ status: 409, body: { errorCode: 'IDEMPOTENCY_CONFLICT' } });
+      expect(JSON.stringify(await fixture.client.getExecutionControl(chatId))).not.toContain('iVBORw0KGgo');
+
+      heldFirst.releaseEcho();
+      expect((await fixture.client.waitForTurnTerminal(chatId, first.turnId)).type).toBe('agent-run-finished');
+      const dispatched = await heldQueued.received;
+      expect(lastUserContent(dispatched)).toEqual(expect.arrayContaining([imageBlock]));
+      const finalCursor = fixture.client.markEvents();
+      heldQueued.releaseEcho();
+      expect((await fixture.client.waitForTurnTerminal(chatId, undefined, { afterIndex: finalCursor })).type)
+        .toBe('agent-run-finished');
+
+      const transcript = await fixture.client.getMessages(chatId);
+      expect(userMessages(transcript.messages).map((message) => [message.content, message.images ?? []]))
+        .toEqual([
+          ['attachment-first', []],
+          ['attachment-queued', [image]],
+        ]);
+      expect((await fixture.client.getExecutionControl(chatId)).queue.entries).toEqual([]);
+    });
+  });
+
+  test('rejects queued attachments the chat selection cannot accept', async () => {
+    await withIntegrationFixture('queue-attachments-unsupported', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const held = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'text-only-first' });
+      const first = await fixture.client.startDirectChat({
+        chatId,
+        content: 'text-only-first',
+        projectPath: fixture.dirs.project,
+        agent: fixture.directAgents.openAi,
+      });
+      await held.received;
+
+      await expect(fixture.client.enqueue({
+        chatId,
+        content: 'unsupported attachment',
+        images: [image],
+        clientRequestId: crypto.randomUUID(),
+      })).rejects.toMatchObject({ status: 422, body: { errorCode: 'UNSUPPORTED_AGENT' } });
+      expect((await fixture.client.getExecutionControl(chatId)).queue.entries).toEqual([]);
+
+      held.releaseEcho();
+      await fixture.client.waitForTurnTerminal(chatId, first.turnId);
+    });
+  });
+
+  test('pauses on a queued attachment when the model changes to one without image support', async () => {
+    await withIntegrationFixture('queue-attachments-dequeue-recheck', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const agent = fixture.directAgents.anthropic;
+      const textOnly = await fixture.client.createAnthropicProvider(
+        fixture.fakeProviders.anthropic.baseUrl,
+        { supportsImages: false },
+      );
+      const heldFirst = fixture.fakeProviders.anthropic.holdNext({ lastUserText: 'recheck-first' });
+      const first = await fixture.client.startDirectChat({
+        chatId,
+        content: 'recheck-first',
+        projectPath: fixture.dirs.project,
+        agent,
+      });
+      await heldFirst.received;
+      const queued = await fixture.client.enqueue({
+        chatId,
+        content: 'recheck-queued',
+        images: [image],
+        clientRequestId: crypto.randomUUID(),
+      });
+      await fixture.client.patch('/api/v1/chats/model', {
+        chatId,
+        model: textOnly.model,
+        apiProviderId: textOnly.providerId,
+        modelEndpointId: textOnly.endpointId,
+        modelProtocol: textOnly.protocol,
+      });
+
+      const rejectionCursor = fixture.client.markEvents();
+      heldFirst.releaseEcho();
+      expect((await fixture.client.waitForTurnTerminal(chatId, first.turnId)).type).toBe('agent-run-finished');
+      const rejected = await fixture.client.waitForEvent(
+        (message): message is AgentRunFailedMessage =>
+          message.type === 'agent-run-failed' && message.chatId === chatId,
+        'queued attachment rejection',
+        { afterIndex: rejectionCursor },
+      );
+      expect(rejected.error).toContain('Attachments unsupported');
+      await fixture.client.waitForProcessing(chatId, false);
+      const paused = await fixture.client.getExecutionControl(chatId);
+      expect(paused.queue.pause).toMatchObject({ kind: 'queued-turn-failed', entryId: queued.entryId });
+      expect(paused.queue.entries).toEqual([
+        expect.objectContaining({ id: queued.entryId, attachments: [{ name: image.name, mimeType: image.mimeType }] }),
+      ]);
+      expect(fixture.fakeProviders.anthropic.requests().map((request) => request.lastUserText))
+        .toEqual(['recheck-first']);
+      expect(userContents((await fixture.client.getMessages(chatId)).messages)).toEqual(['recheck-first']);
+
+      await fixture.client.patch('/api/v1/chats/model', {
+        chatId,
+        model: agent.provider.model,
+        apiProviderId: agent.provider.providerId,
+        modelEndpointId: agent.provider.endpointId,
+        modelProtocol: agent.provider.protocol,
+      });
+      const resumeCursor = fixture.client.markEvents();
+      await fixture.client.resumeQueue(chatId, paused.queue.pause!.id);
+      expect((await fixture.client.waitForTurnTerminal(chatId, undefined, { afterIndex: resumeCursor })).type)
+        .toBe('agent-run-finished');
+      const resumed = fixture.fakeProviders.anthropic.requests().at(-1)!;
+      expect(resumed.lastUserText).toBe('recheck-queued');
+      expect(lastUserContent(resumed)).toEqual(expect.arrayContaining([imageBlock]));
+      expect((await fixture.client.getExecutionControl(chatId)).queue).toMatchObject({ entries: [], pause: null });
     });
   });
 });

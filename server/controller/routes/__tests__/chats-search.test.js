@@ -106,7 +106,7 @@ function createRoutesFixture({
     isAgentSessionRunning: mock(() => false),
     getRunningSessions: mock(() => ({ claude: [] })),
     startSession: mock(async () => undefined),
-    modelSupportsImages: mock(async () => true),
+    modelSupportsImages: mock(() => true),
     runSingleQuery: mock(async () => 'title'),
     resolvePermission: mock(() => undefined),
     updateSessionSettings: mock(async () => undefined),

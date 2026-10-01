@@ -50,6 +50,7 @@ describe('chat execution-control WS contract', () => {
 							id: 'ok',
 							content: 'hello',
 							kind: 'turn',
+							attachments: [],
 							revision: 1,
 							createdAt: installedAt,
 							updatedAt: installedAt,
@@ -80,6 +81,70 @@ describe('chat execution-control WS contract', () => {
 								id: 1,
 								content: 'bad',
 								kind: 'turn',
+								revision: 1,
+								createdAt: installedAt,
+								updatedAt: installedAt,
+							},
+						],
+						steeringEntryId: null,
+						recentlyDispatched: [],
+						pause: null,
+						reorderRevision: 0,
+					},
+				}),
+			}),
+		).toBeNull();
+	});
+
+	it('round-trips queued attachment metadata', () => {
+		const attachments = [
+			{ name: 'screen.png', mimeType: 'image/png' },
+			{ name: 'notes.pdf', mimeType: 'application/pdf' },
+		];
+		const parsed = parseServerWsMessage({
+			type: 'chat-execution-control-updated',
+			chatId: '123',
+			control: control({
+				queue: {
+					entries: [
+						{
+							id: 'entry-1',
+							content: '',
+							attachments,
+							revision: 1,
+							createdAt: installedAt,
+							updatedAt: installedAt,
+						},
+					],
+					steeringEntryId: null,
+					recentlyDispatched: [],
+					pause: null,
+					reorderRevision: 0,
+				},
+			}),
+		});
+
+		expect(parsed).toBeInstanceOf(ChatExecutionControlUpdatedMessage);
+		if (!(parsed instanceof ChatExecutionControlUpdatedMessage)) return;
+		expect(parsed.control.queue.entries[0].attachments).toEqual(attachments);
+	});
+
+	it.each([
+		['missing attachments', undefined],
+		['attachment without a MIME type', [{ name: 'screen.png' }]],
+		['attachment payload instead of metadata', ['data:image/png;base64,AAAA']],
+	])('rejects a queue entry with %s', (_name, attachments) => {
+		expect(
+			parseServerWsMessage({
+				type: 'chat-execution-control-updated',
+				chatId: '123',
+				control: control({
+					queue: {
+						entries: [
+							{
+								id: 'entry-1',
+								content: 'hello',
+								attachments,
 								revision: 1,
 								createdAt: installedAt,
 								updatedAt: installedAt,
