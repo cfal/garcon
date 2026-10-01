@@ -16,7 +16,7 @@ import type {
   SettingsStoreContext,
 } from './types.js';
 
-const logger = createLogger('settings:domain-stores');
+const logger = createLogger('settings:startup-defaults');
 
 export class StartupDefaultsStore {
   #context: SettingsStoreContext;

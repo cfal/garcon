@@ -18,7 +18,7 @@ import type {
   SettingsStoreContext,
 } from './types.js';
 
-const logger = createLogger('settings:domain-stores');
+const logger = createLogger('settings:chat-order');
 
 const ORDER_LIST_KEYS = ['pinnedChatIds', 'normalChatIds', 'archivedChatIds'] as const;
 
