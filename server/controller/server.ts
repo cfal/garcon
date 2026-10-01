@@ -915,6 +915,7 @@ export async function startServer(): Promise<void> {
       executors.quiesce();
       stopObservingProviders();
       handoffs.shutdown();
+      transcriptReader.close();
       let abortTimedOut = false;
       let cleanupFailed = false;
       try {

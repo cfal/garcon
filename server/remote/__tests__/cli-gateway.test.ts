@@ -11,6 +11,7 @@ import { cliPair, CLI_EXECUTOR_ID } from './cli-fixture.js';
 import { DomainError } from '../../common/domain-error.js';
 import { parseJsonBody } from '../../common/http-body.js';
 import type { RouteMap } from '../../controller/lib/http-route-types.js';
+import { jsonErrorFromUnknown } from '../../common/http-error.js';
 
 const cleanups: (() => Promise<unknown> | void)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
@@ -60,6 +61,14 @@ test('private role descriptors prove a live endpoint and never expose the contro
   await expect(f.discover()).resolves.toMatchObject({ instanceId: 'controller' });
   await f.gateway.dispose();
   await expect(stat(f.gateway.runtimeFile)).rejects.toMatchObject({ code: 'ENOENT' });
+});
+
+test('preserves transcript overload responses through the executor gateway', async () => {
+  const overload = () => jsonErrorFromUnknown(new DomainError('TRANSCRIPT_WORK_BUSY', 'Transcript capacity is full', 503, true));
+  const f = await fixture({ '/api/v1/chats/export': { GET: overload } });
+  const response = await f.call('/api/v1/chats/export?chatId=1234567890123456&format=xml');
+  expect(response.status).toBe(503);
+  expect(await response.json()).toEqual(await overload().json());
 });
 
 test('existing shared-readable directories retain their modes while runtime files stay private', async () => {

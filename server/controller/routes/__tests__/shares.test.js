@@ -115,6 +115,20 @@ function createRoutes(snapshot = createSnapshot(), appTitle = null, overrides = 
 }
 
 describe('share creation route', () => {
+  it('reports snapshot overload without starting publication', async () => {
+    const { routes, shareStore } = createRoutes(undefined, null, {
+      session: { agentId: 'codex', model: 'test', projectPath: '/synthetic' },
+      transcripts: { withStoredSnapshot: async () => { throw new DomainError('TRANSCRIPT_WORK_BUSY', 'Transcript capacity is full', 503, true); } },
+    });
+    const url = new URL('http://localhost/api/v1/chats/share');
+    const response = await routes[url.pathname].POST(new Request(url, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chatId: '123' }),
+    }), url);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ success: false, errorCode: 'TRANSCRIPT_WORK_BUSY', retryable: true });
+    expect(shareStore.publish).not.toHaveBeenCalled();
+  });
+
   it('[TLV5-L01.03-CORE-UNIT-01] creates the share from one pinned durable snapshot and records its origin', async () => {
     const created = [];
     const { routes, capture } = createRoutes(createSnapshot(), null, {

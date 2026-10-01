@@ -516,8 +516,9 @@ export class TranscriptLedgerStore {
   // Reads stored rows for work that decodes them after the read, such as on a Worker. A row
   // that fails to decode there fences the chat while its view is current, as a read that
   // decodes rows does.
-  async withStoredRowsThrough<T>(chatId: string, watermark: TranscriptWatermark, work: StoredRowsWork<T>): Promise<T> {
-    const rows = await this.#pagesThrough(chatId, watermark, readBoundedStoredPage);
+  async withStoredRowsThrough<T>(chatId: string, watermark: TranscriptWatermark, work: StoredRowsWork<T>, signal?: AbortSignal): Promise<T> {
+    const rows = await this.#pagesThrough(chatId, watermark, readBoundedStoredPage, signal);
+    signal?.throwIfAborted();
     try {
       return await work(rows);
     } catch (error) {
@@ -535,9 +536,10 @@ export class TranscriptLedgerStore {
     chatId: string,
     watermark: TranscriptWatermark,
     readPage: (db: Database, viewId: TranscriptViewId, after: number, through: number) => BoundedPage<Row>,
+    signal?: AbortSignal,
   ): Promise<readonly Row[]> {
     const rows: Row[] = [];
-    for await (const page of this.#streamPages(chatId, watermark, readPage)) rows.push(...page);
+    for await (const page of this.#streamPages(chatId, watermark, readPage, signal)) rows.push(...page);
     return rows;
   }
 
@@ -545,17 +547,20 @@ export class TranscriptLedgerStore {
     chatId: string,
     watermark: TranscriptWatermark,
     readPage: (db: Database, viewId: TranscriptViewId, after: number, through: number) => BoundedPage<Row>,
+    signal?: AbortSignal,
   ): AsyncGenerator<readonly Row[]> {
     if (!Number.isSafeInteger(watermark.ordinal) || watermark.ordinal < 0) {
       throw new TypeError('Transcript watermark ordinal is invalid');
     }
     let after = 0;
     for (;;) {
+      signal?.throwIfAborted();
       const page = this.#read(chatId, (entry) => {
         this.#assertCurrent(entry, watermark.viewId);
         return readPage(entry.db, watermark.viewId, after, watermark.ordinal);
       });
       yield page.rows;
+      signal?.throwIfAborted();
       if (page.exhausted) {
         this.#read(chatId, entry => this.#assertCurrent(entry, watermark.viewId));
         return;

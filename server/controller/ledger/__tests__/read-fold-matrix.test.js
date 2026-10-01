@@ -91,16 +91,12 @@ describe('transcript ledger read-fold matrix', () => {
         },
       ]);
 
-      const conversation = await ledger.conversationRows(CHAT_ID);
-      expect(conversation.map((row) => [
-        row.ordinal,
-        conversationalText(row.kind === 'user-input' ? row.detail.message : row.message),
-      ])).toEqual([
-        [1, 'repeated payload'],
-        [2, 'repeated payload'],
-        [13, 'late provider output'],
-        [14, 'repeated payload'],
-        [15, 'repeated payload'],
+      expect((await ledger.conversationMessages(CHAT_ID)).map(conversationalText)).toEqual([
+        'repeated payload',
+        'repeated payload',
+        'late provider output',
+        'repeated payload',
+        'repeated payload',
       ]);
       expect((await ledger.conversationMessages(CHAT_ID, new Set([14]))).map(conversationalText)).toEqual([
         'repeated payload',

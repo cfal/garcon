@@ -22,6 +22,7 @@ import { extractFirstLine } from '../lib/text.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { ChatMetadata } from '../chats/metadata-store.js';
 import { isDomainError } from '../../common/domain-error.js';
+import { jsonErrorFromUnknown } from '../../common/http-error.js';
 import {
   injectAppTitleIntoShell,
   resolvePublicAppTitle,
@@ -213,6 +214,7 @@ export default function createShareRoutes(
   // POST /api/v1/chats/share - Creates or returns existing share.
   async function postShareChat(
     body: Record<string, unknown>,
+    request: Request,
   ): Promise<Response> {
     try {
       const chatId = String(body.chatId || '').trim();
@@ -250,8 +252,8 @@ export default function createShareRoutes(
             transcriptViewId: capture.transcriptViewId,
             lastOrdinal: capture.lastOrdinal,
           },
-        }, capture.rows);
-      });
+        }, capture.rows, request.signal);
+      }, request.signal);
 
       const resp: ShareChatResponse = {
         success: true,
@@ -261,6 +263,7 @@ export default function createShareRoutes(
       return Response.json(resp);
     } catch (error: unknown) {
       if (isDomainError(error)) {
+        if (error.code === 'TRANSCRIPT_WORK_BUSY') return jsonErrorFromUnknown(error);
         return Response.json(
           { success: false, error: error.message },
           { status: error.status },
