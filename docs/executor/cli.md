@@ -89,6 +89,14 @@ Content-Type: application/json
 
 Against the controller, the existing HTTP boundary invokes the start handler. Against the gateway, local authentication is consumed at the gateway and the request is carried by `controllerCli.request`; the controller dispatcher invokes that same start handler with a derived delegated-executor principal. The gateway returns the controller's application response to the CLI.
 
+Forwarded requests use an internal synthetic URL, not a public controller Host.
+Executor onboarding and connection reveal therefore use an explicit saved
+advertised URL or the controller's `GARCON_PUBLIC_URL` / `--public-url`; without
+either they return a configuration error. Host-derived suggestions remain
+available only to direct HTTP callers and are never persisted. Executor creation
+without an advertised override fails before saving when the gateway cannot
+resolve a public base.
+
 The HTTP capability is endpoint-local. A gateway capability is never forwarded as controller authentication, and the controller's local capability is never copied to the worker. The executor secret remains private to the connector.
 
 Application status codes, JSON bodies, and applicable `Retry-After` information survive the relay. Do not wrap successful application responses in a gateway-specific JSON object or translate typed domain errors to generic success/failure strings. Gateway and relay failures use explicit shared error codes in the ordinary HTTP error shape.

@@ -38,6 +38,9 @@ function fixture() {
 }
 
 test('executor parser handles independent grants, both directions, and strict update flags', () => {
+  const inherited = command(['create', '--label', 'Worker', '--direction', 'executor-connects']).operation;
+  expect(inherited).toMatchObject({ action: 'create', request: { label: 'Worker', direction: 'executor-connects' } });
+  expect(inherited).not.toHaveProperty('request.advertisedUrl');
   expect(command(['create', '--label', ' Worker ', '--direction', 'executor-connects', '--advertise-url', 'wss://controller.test/executor/{executorId}',
     '--allow-controller-cli', 'true', '--allow-executor-management', 'false']).operation).toMatchObject({ action: 'create', request: {
       label: 'Worker', allowControllerCli: true, allowExecutorManagement: false, advertisedUrl: 'wss://controller.test/executor/{executorId}',
@@ -52,7 +55,9 @@ test('executor parser rejects irrelevant, ambiguous, unsafe, and incomplete opti
     [], ['missing'], ['list', id], ['list', '--provider', 'synthetic'], ['show'], ['show', 'unknown'], ['delete', 'local'],
     ['update', id], ['update', id, '--allow-controller-cli', 'yes'], ['update', id, '--connection-url', connection.connectionUrl],
     ['update', id, '--allow-executor-management', 'true', '--allow-executor-management', 'false'],
-    ['create', '--label', 'Worker', '--direction', 'executor-connects'],
+    ['update', id, '--direction', 'executor-connects', '--no-tls', 'true'],
+    ['create', '--label', 'Worker', '--direction', 'executor-connects', '--advertise-url', ''],
+    ['create', '--label', 'Worker', '--direction', 'executor-connects', '--allow-insecure-development', 'true'],
     ['create', '--label', 'Worker', '--label', 'Other', '--direction', 'executor-connects', '--advertise-url', 'wss://worker.test'],
     ['create', '--label', 'Worker', '--direction', 'controller-connects', '--connection-url', connection.connectionUrl, '--advertise-url', 'wss://worker.test'],
     ['wait', id], ['wait', id, '--ready', '--timeout', '0'], ['wait', id, '--ready', '--timeout', 'Infinity'],

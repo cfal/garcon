@@ -74,7 +74,6 @@ export function parseExecutorCliCommand(positionals: readonly string[], values: 
   let operation: ExecutorOperation;
   if (action === 'create') {
     const direction = text('direction');
-    if (direction === 'executor-connects' && !text('advertise-url')) throw argumentError('inbound creation requires --advertise-url with a reachable public WebSocket URL');
     const request = parseCreateExecutorRequest({ label: text('label'), direction, ...access,
       noTls: boolean('no-tls'), allowUnverifiedTls: boolean('allow-unverified-tls'),
       ...(text('advertise-url') === undefined ? {} : { advertisedUrl: text('advertise-url') }),
@@ -84,6 +83,9 @@ export function parseExecutorCliCommand(positionals: readonly string[], values: 
     operation = { action, request };
   } else if (action === 'update') {
     const changingConnection = connectionFlags.some((flag) => values[flag] !== undefined);
+    if (changingConnection && !text('connection-url')) {
+      throw argumentError('connection changes require --connection-url');
+    }
     const request = parseUpdateExecutorRequest({ ...access,
       ...(text('label') === undefined ? {} : { label: text('label') }),
       ...(changingConnection ? { connection: {

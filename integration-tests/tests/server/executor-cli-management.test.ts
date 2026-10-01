@@ -1,4 +1,6 @@
 import { expect, test } from 'bun:test';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { ExecutorConnection, ExecutorSnapshot } from '../../../common/executors.js';
 import { discoverRuntime } from '../../../cli/discovery.js';
 import { GarconClient } from '../../../cli/garcon-client.js';
@@ -19,6 +21,20 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         expect(denied).toMatchObject({ exitCode: 3, stdout: '' });
         expect(denied.stderr).toContain('CLI_ACCESS_DENIED');
         await fixture.client.patch(`/api/v1/executors/${origin}`, { allowExecutorManagement: true });
+        const inherited = await fixture.client.post<{ id: string }>('/api/v1/executors', {
+          label: 'Synthetic inherited address', direction: 'executor-connects',
+        });
+        const reveal = await runCli(fixture, ['executor', 'connection', inherited.id, '--json']);
+        expect(reveal).toMatchObject({ exitCode: 3, stdout: '' });
+        expect(reveal.stderr).toContain('GARCON_PUBLIC_URL');
+        expect(reveal.stderr).not.toContain('controller.invalid');
+        const missing = await runCli(fixture, ['executor', 'create', '--label', 'Synthetic missing address',
+          '--direction', 'executor-connects', '--json']);
+        expect(missing).toMatchObject({ exitCode: 3, stdout: '' });
+        expect(missing.stderr).toContain('GARCON_PUBLIC_URL');
+        expect(missing.stderr).not.toContain('outcome is unknown');
+        expect((await invoke(['list'])).executors.some((entry: ExecutorSnapshot) => entry.label === 'Synthetic missing address')).toBe(false);
+        await invoke(['delete', inherited.id]);
       }
       const { id } = await invoke(['create', '--label', 'Synthetic worker', '--direction', 'executor-connects',
         '--advertise-url', 'wss://controller.test/proxy/{executorId}?route=synthetic']);
@@ -71,6 +87,23 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       }
       expect(await invoke(['delete', id])).toEqual({ id, deleted: true });
     }, { executionBackend });
+  }, 60_000);
+
+  test(`CLI onboarding inherits the controller public URL (${executionBackend})`, async () => {
+    await withCliFixture(`executor-cli-public-url-${executionBackend}`, async fixture => {
+      const origin = fixture.client.executorId;
+      if (origin !== 'local') await fixture.client.patch(`/api/v1/executors/${origin}`, { allowExecutorManagement: true });
+      const created = await runCli(fixture, ['executor', 'create', '--label', 'Synthetic inherited worker', '--direction', 'executor-connects', '--json']);
+      expect(created, created.stderr).toMatchObject({ exitCode: 0, stderr: '' });
+      const { id } = JSON.parse(created.stdout);
+      const reveal = await runCli(fixture, ['executor', 'connection', id, '--json']);
+      expect(reveal, reveal.stderr).toMatchObject({ exitCode: 0, stderr: '' });
+      const connection = JSON.parse(reveal.stdout) as ExecutorConnection;
+      expect(connection.connectionUrl).toStartWith(`wss://controller.test/garcon/executor/${id}#secret=`);
+      const stored = JSON.parse(await readFile(join(fixture.dirs.workspace, 'executors.json'), 'utf8'));
+      expect(stored.executors.find((entry: { id: string }) => entry.id === id).connection)
+        .toEqual({ kind: 'executor-connects', advertisedUrl: null });
+    }, { executionBackend, serverEnvironment: { GARCON_PUBLIC_URL: 'https://controller.test/garcon/' } });
   }, 60_000);
 }
 

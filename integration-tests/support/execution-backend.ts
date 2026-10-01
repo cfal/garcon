@@ -215,6 +215,7 @@ export class ExecutionBackendFixture {
           const controllerUrl = new URL(controller.baseUrl);
           url.protocol = 'ws:';
           url.host = controllerUrl.host;
+          url.pathname = `/executor/${created.id}`;
           const connectionUrl = await this.interceptConnection?.(url) ?? url.href;
           await this.#request(`/api/v1/executors/${this.#executorId}`, 'PATCH', {
             connection: { direction: 'executor-connects', connectionUrl, noTls: true },

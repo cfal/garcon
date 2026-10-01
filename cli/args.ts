@@ -135,7 +135,7 @@ Reload and provider-native fork segments may drop Garcon-only presentation.
 
 Executor management:
   list|show <id> [--json]        Redacted configuration and readiness (list takes no ID)
-  create --label <text> --direction executor-connects --advertise-url <public-ws-url> [--json]
+  create --label <text> --direction executor-connects [--advertise-url <public-ws-url>] [--json]
   create --label <text> --direction controller-connects --connection-url <url|-> [--json]
   update <id> [--label <text>] [access flags] [connection flags] [--json]
   enable|disable|delete <id> [--json]
@@ -146,7 +146,8 @@ Executor management:
   Access flags: --allow-controller-cli true|false, --allow-executor-management true|false.
   Connection updates require --direction, --connection-url and --no-tls true|false;
   --allow-unverified-tls true|false applies only to outbound TLS connections.
-  --advertise-url may contain {executorId}; the controller replaces it with the new UUID.
+  --advertise-url overrides the controller public URL and may contain {executorId}.
+  Gateway requests without an override require GARCON_PUBLIC_URL / --public-url on the controller.
   --connection-url - reads the credential from stdin. Ordinary output never reveals credentials.
   Remote administration requires both CLI grants. Self-disruptive changes require another origin.
   No automatic mutation retries. After an uncertain result, inspect configuration before retrying.

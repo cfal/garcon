@@ -161,10 +161,15 @@ profile ID; it does not create profiles, accept API keys, or change native login
 The `providers` management listing shows all existing profiles and their assigned
 executor IDs, unlike the executor-scoped execution catalog from `list providers`.
 
-Inbound creation requires an explicit reachable, secret-free advertised URL. The
-literal `{executorId}` is expanded atomically before saving; arbitrary proxy paths
-and query strings are preserved. The CLI never derives an external address from
-its discovered loopback endpoint. Outbound creation takes the listening worker's
+Inbound creation inherits the controller's public URL by default. An optional
+`--advertise-url` supplies a reachable, secret-free per-executor override; the
+literal `{executorId}` is expanded atomically before saving, preserving arbitrary
+proxy paths and query strings. Generated URLs are not saved. Direct HTTP requests
+can fall back to their Host as a suggestion, which may be loopback for a local CLI.
+Forwarded CLI requests have no public Host: without an explicit override they
+require `GARCON_PUBLIC_URL` / `--public-url` on the controller, for both creation
+and `connection` reveal. Otherwise they fail with a configuration error rather
+than returning a synthetic address. Outbound creation takes the listening worker's
 full credential URL. Creation returns only the new ID. Saving configuration does
 not claim the worker is ready; use the bounded readiness wait separately.
 
