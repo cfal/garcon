@@ -24,8 +24,8 @@ export interface SingletonSurfaceRegistryDeps extends GitSurfaceControllerDeps {
 	createCommit(): CommitController;
 	createPullRequests(): PullRequestsStore;
 	comparisonPreferences: GitComparisonPreferences;
-	createChatBoard?(): ChatBoardController;
-	createTickets?(): TicketsController;
+	createChatBoard(): ChatBoardController;
+	createTickets(): TicketsController;
 	executors?: FilesExecutorsPort;
 }
 
@@ -78,10 +78,7 @@ export class SingletonSurfaceRegistry {
 	constructor(private readonly deps: SingletonSurfaceRegistryDeps) {
 		this.#canvasExitGuard.activate();
 		this.#factories = {
-			tickets: () => {
-				if (!this.deps.createTickets) throw new Error('Tickets factory is unavailable');
-				return this.deps.createTickets();
-			},
+			tickets: () => this.deps.createTickets(),
 			git: () => new GitWorkbenchSurfaceController(this.deps),
 			'git-history': () => new GitHistorySurfaceController(this.deps),
 			'git-compare': () => new GitCompareSurfaceController(this.deps),
@@ -89,10 +86,7 @@ export class SingletonSurfaceRegistry {
 			commit: () => this.deps.createCommit(),
 			'chat-map': () => new ChatMapController(),
 			'chat-canvas': () => new CanvasController(),
-			'chat-board': () => {
-				if (!this.deps.createChatBoard) throw new Error('Chat Board factory is unavailable');
-				return this.deps.createChatBoard();
-			},
+			'chat-board': () => this.deps.createChatBoard(),
 			'pull-requests': () => this.deps.createPullRequests(),
 		};
 	}

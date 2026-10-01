@@ -1,3 +1,4 @@
+import { unusedSingletonFactories } from '$lib/workspace/__tests__/unused-singleton-factories';
 import { flushSync } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { FileTreeResponse } from '$shared/file-contracts';
@@ -35,6 +36,7 @@ function response(directoryPath = '/workspace'): FileTreeResponse {
 function createController(executors?: ExecutorsStore) {
 	const deps = createGitSurfaceTestDeps();
 	const registry = new SingletonSurfaceRegistry({
+		...unusedSingletonFactories,
 		...deps,
 		executors,
 		createCommit: () => new CommitController(deps),

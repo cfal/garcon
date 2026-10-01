@@ -1,3 +1,4 @@
+import { unusedSingletonFactories } from '$lib/workspace/__tests__/unused-singleton-factories';
 import { cleanup, render, screen } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { FileTreeResponse } from '$shared/file-contracts';
@@ -67,6 +68,7 @@ function createRegistry() {
 	}> = [];
 	const gitSurfaceDeps = createGitSurfaceTestDeps();
 	const registry = new SingletonSurfaceRegistry({
+		...unusedSingletonFactories,
 		...gitSurfaceDeps,
 		createCommit: () => {
 			const controller = new CommitController(gitSurfaceDeps);
@@ -140,6 +142,7 @@ describe('SingletonSurfaceRegistry', () => {
 		const createTickets = vi.fn(() => harness.controller);
 		const gitDeps = createGitSurfaceTestDeps();
 		const registry = new SingletonSurfaceRegistry({
+		...unusedSingletonFactories,
 			...gitDeps,
 			createTickets,
 			createCommit: () => new CommitController(gitDeps),
@@ -164,6 +167,7 @@ describe('SingletonSurfaceRegistry', () => {
 		const harness = ticketTestHarness();
 		const gitDeps = createGitSurfaceTestDeps();
 		const registry = new SingletonSurfaceRegistry({
+		...unusedSingletonFactories,
 			...gitDeps,
 			createTickets: () => harness.controller,
 			createCommit: () => new CommitController(gitDeps),

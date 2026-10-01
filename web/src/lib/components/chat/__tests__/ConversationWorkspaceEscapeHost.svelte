@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { unusedSingletonFactories } from '$lib/workspace/__tests__/unused-singleton-factories';
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
 	setExecutorsTestContext();
 	import { onDestroy, tick, untrack } from 'svelte';
@@ -103,6 +104,7 @@
 	setChatDrafts(new ChatDraftStore());
 	const gitDeps = createGitSurfaceTestDeps();
 	const singletonSurfaces = new SingletonSurfaceRegistry({
+		...unusedSingletonFactories,
 		...gitDeps,
 		createCommit: () => commit ?? new CommitController(gitDeps),
 		createPullRequests: () => new PullRequestsStore(),

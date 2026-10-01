@@ -92,7 +92,7 @@ export function resolveConfiguredFilePlacement(
 }
 
 export interface WorkspaceRootDependencies {
-	executors?: import('$lib/executors/executors-store.svelte.js').ExecutorsStore;
+	executors: import('$lib/executors/executors-store.svelte.js').ExecutorsStore;
 	appShell: AppShellStore;
 	chatSessions: ChatSessionsStore;
 	ghCapability: GhCapabilityStore;
@@ -277,13 +277,13 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		},
 		onMutationError: (error, executorId, projectPath) => {
 			deps.notifications.error(
-				`${deps.executors?.label(executorId) ?? executorId}: ${projectPath}: ${error instanceof Error ? error.message : String(error)}`,
+				`${deps.executors.label(executorId)}: ${projectPath}: ${error instanceof Error ? error.message : String(error)}`,
 			);
 		},
 		onInvalidationError: (error, executorId, _effectiveProjectKey, projectPath) => {
 			deps.notifications.error(
 				m.git_related_refresh_failed({
-					projectPath: `${deps.executors?.label(executorId) ?? executorId}: ${projectPath}`,
+					projectPath: `${deps.executors.label(executorId)}: ${projectPath}`,
 					detail: error instanceof Error ? error.message : String(error),
 				}),
 			);
@@ -308,7 +308,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		projectResolution,
 		executors: deps.executors,
 		projectBasePath: (executorId: string) =>
-			deps.executors?.get(executorId)?.projectBasePath ??
+			deps.executors.get(executorId)?.projectBasePath ??
 			(executorId === 'local' ? deps.localProjectBasePath() : null),
 	};
 	const singletonSurfaces = new SingletonSurfaceRegistry({
@@ -393,7 +393,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 				}
 			}
 		},
-		isExecutorAvailable: (executorId) => deps.executors?.filesAvailable(executorId) ?? executorId === 'local',
+		isExecutorAvailable: (executorId) => deps.executors.filesAvailable(executorId),
 		getIsMobile: () => deps.appShell.isMobile,
 		getDefaultPlacement: (mode, origin) =>
 			resolveConfiguredFilePlacement(
@@ -505,8 +505,8 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		commands,
 		localSettings: deps.localSettings,
 	});
-	const stopGitExecutorBinding = deps.executors?.onChanged(() => {
-		const ids = new Set(deps.executors!.executors.map((executor) => executor.id));
+	const stopGitExecutorBinding = deps.executors.onChanged(() => {
+		const ids = new Set(deps.executors.executors.map((executor) => executor.id));
 		gitProjectInvalidations.pruneExecutors(ids);
 		gitQuickSummary.pruneExecutors(ids);
 		singletonSurfaces.pruneGitExecutors(ids);
@@ -534,7 +534,7 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		shortcuts,
 		commands,
 		destroy() {
-			stopGitExecutorBinding?.();
+			stopGitExecutorBinding();
 			windowDnd.endDrag();
 			unregisterWorkspaceInteraction();
 			domainBindings.destroy();
