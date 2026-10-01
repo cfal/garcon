@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 
 import { jsonError, jsonErrorFromUnknown } from '../http-error.ts';
-import {
-  STEER_NOT_DELIVERED_MESSAGE,
-  STEER_OUTCOME_UNKNOWN_MESSAGE,
-  SteerDeliveryError,
-} from '../domain-error.ts';
+import { STEER_NOT_DELIVERED_MESSAGE, STEER_OUTCOME_UNKNOWN_MESSAGE, SteerDeliveryError } from '../../controller/chat-execution/steering-errors.js';
 
 describe('jsonError', () => {
   it('emits the shared HTTP error envelope', async () => {

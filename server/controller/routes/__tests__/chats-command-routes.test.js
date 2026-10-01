@@ -53,7 +53,8 @@ import { parseJsonBody } from '../../../common/http-body.js';
 import { forkChatFileCopy } from '../../chats/fork-chat.js';
 import { CommandValidationError } from '../../lib/command-validation-error.js';
 import { ModelSelectionError } from '../../api-providers/endpoint-resolver.js';
-import { DomainError, SteerDeliveryError, TRANSCRIPT_TEMPORARILY_UNAVAILABLE_MESSAGE } from '../../../common/domain-error.js';
+import { DomainError, TRANSCRIPT_TEMPORARILY_UNAVAILABLE_MESSAGE } from '../../../common/domain-error.js';
+import { SteerDeliveryError } from '../../chat-execution/steering-errors.js';
 import { QueueEntrySteerError } from '../../chat-execution/queue-steer-error.js';
 import {
   QueueEntryMutationError,

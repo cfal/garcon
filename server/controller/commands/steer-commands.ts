@@ -10,13 +10,8 @@ import type {
   SteerCommandRequest,
   SteerCommandResponse,
 } from '../../../common/chat-command-contracts.ts';
-import {
-  DomainError,
-  STEER_NOT_DELIVERED_MESSAGE,
-  SteerDeliveryError,
-  steeringUnsupportedError,
-  steerTurnChangedError,
-} from '../../common/domain-error.js';
+import { DomainError } from '../../common/domain-error.js';
+import { STEER_NOT_DELIVERED_MESSAGE, SteerDeliveryError, steeringUnsupportedError, steerTurnChangedError } from '../chat-execution/steering-errors.js';
 import { QueueEntrySteerError } from '../chat-execution/queue-steer-error.js';
 import { toClientChatExecutionControlState } from '../chat-execution/control-state.ts';
 import type { StoredChatExecutionControlState } from '../chat-execution/control-state.ts';

@@ -21,11 +21,8 @@ import { TranscriptLedgerStore } from '../../ledger/store.ts';
 import { TranscriptLedgerService } from '../../ledger/service.ts';
 import { TranscriptAdoptionService } from '../../ledger/adoption.ts';
 import { frozenConversationDrafts } from '../../ledger/projection.ts';
-import {
-  SteerDeliveryError,
-  DomainError,
-  ProjectUnavailableError,
-} from '../../../common/domain-error.js';
+import { DomainError, ProjectUnavailableError } from '../../../common/domain-error.js';
+import { SteerDeliveryError } from '../../chat-execution/steering-errors.js';
 import {
   QueueEntryMutationError,
   ChatExecutionCoordinator,
