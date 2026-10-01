@@ -96,8 +96,11 @@ export async function runExecutorCommand(
         writeResult(await waitReady(client, operation.id, operation.timeoutMs, signal));
         return;
       case 'connection': {
+        const noOverwriteHint = 'choose a new output path';
         if (operation.outputPath) {
-          await refuseExistingDocumentOutput({ outputPath: operation.outputPath, phase: 'executors', noun: 'connection' });
+          await refuseExistingDocumentOutput({
+            outputPath: operation.outputPath, phase: 'executors', noun: 'connection', noOverwriteHint,
+          });
         }
         const connection = await client.getExecutorConnection(operation.id, signal);
         if (operation.outputPath) {
@@ -107,6 +110,7 @@ export async function runExecutorCommand(
             force: false,
             phase: 'executors',
             noun: 'connection',
+            noOverwriteHint,
             temporarySuffix: 'connection',
             signal,
           });

@@ -1,5 +1,5 @@
-import { expect, mock, test } from 'bun:test';
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { expect, mock, spyOn, test } from 'bun:test';
+import fs, { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ExecutorSnapshot } from '@garcon/common/executors';
@@ -192,9 +192,30 @@ test('connection reveal uses exclusive private output and does not echo credenti
     if (process.platform !== 'win32') expect((await stat(target)).mode & 0o777).toBe(0o600);
     expect(f.stdout()).toBe('');
     expect(f.stderr()).not.toContain('secret');
-    await expect(runExecutorCommand(command(['connection', id, '--output', target]), f.client, f.output)).rejects.toThrow('already exists');
+    await expect(runExecutorCommand(command(['connection', id, '--output', target]), f.client, f.output))
+      .rejects.toThrow('output already exists; choose a new output path:');
     expect(f.client.getExecutorConnection).toHaveBeenCalledTimes(1);
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test.each(['EEXIST', 'ENOTSUP'])('connection publication errors never recommend force: %s', async (code) => {
+  const root = await mkdtemp(join(tmpdir(), 'executor-cli-publication-'));
+  const link = spyOn(fs, 'link').mockRejectedValue(Object.assign(new Error('Synthetic publication failure'), { code }));
+  try {
+    const f = fixture();
+    const target = join(root, 'connection');
+    const prefix = code === 'EEXIST'
+      ? 'output already exists'
+      : 'output filesystem does not support atomic no-overwrite publication';
+    await expect(runExecutorCommand(command(['connection', id, '--output', target]), f.client, f.output))
+      .rejects.toMatchObject({ message: `${prefix}; choose a new output path: ${target}` });
+    expect(f.client.getExecutorConnection).toHaveBeenCalledTimes(1);
+    expect(f.stdout()).toBe('');
+    expect(await readdir(root)).toEqual([]);
+  } finally {
+    link.mockRestore();
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test('provider projection validates identities and discards irrelevant endpoint metadata', () => {

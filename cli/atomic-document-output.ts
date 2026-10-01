@@ -29,6 +29,7 @@ export async function refuseExistingDocumentOutput(input: {
   readonly outputPath: string;
   readonly phase: CliErrorPhase;
   readonly noun: string;
+  readonly noOverwriteHint?: string;
   readonly fileSystem?: AtomicDocumentFileSystem;
 }): Promise<void> {
   const fileSystem = input.fileSystem ?? defaultFileSystem;
@@ -44,7 +45,7 @@ export async function refuseExistingDocumentOutput(input: {
     );
   }
   throw argumentError(
-    `output already exists; use --force to replace it: ${input.outputPath}`,
+    `output already exists; ${input.noOverwriteHint ?? 'use --force to replace it'}: ${input.outputPath}`,
   );
 }
 
@@ -54,6 +55,7 @@ export async function publishAtomicDocument(input: {
   readonly force: boolean;
   readonly phase: CliErrorPhase;
   readonly noun: string;
+  readonly noOverwriteHint?: string;
   readonly temporarySuffix: string;
   readonly signal?: AbortSignal;
   readonly fileSystem?: AtomicDocumentFileSystem;
@@ -78,13 +80,13 @@ export async function publishAtomicDocument(input: {
       } catch (error) {
         if (isNodeError(error, 'EEXIST')) {
           throw argumentError(
-            `output already exists; use --force to replace it: ${input.outputPath}`,
+            `output already exists; ${input.noOverwriteHint ?? 'use --force to replace it'}: ${input.outputPath}`,
           );
         }
         if (isNodeError(error, 'EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS', 'EMLINK')) {
           throw new CliError(
             input.phase,
-            `output filesystem does not support atomic no-overwrite publication; use --force or choose a different destination: ${input.outputPath}`,
+            `output filesystem does not support atomic no-overwrite publication; ${input.noOverwriteHint ?? 'use --force or choose a different destination'}: ${input.outputPath}`,
             3,
             { cause: error },
           );
