@@ -24,7 +24,6 @@ import { ModelSelectionError } from '../api-providers/endpoint-resolver.js';
 import type { AgentSessionSettingsPatch } from '../agents/session-types.js';
 import {
   CommandExecutionControlError,
-  CommandValidationError,
 } from '../commands/chat-command-service.js';
 import type { ChatCommandService } from '../commands/chat-command-service.js';
 import type { RecentTitleIconSource } from '../chats/recent-title-icons.js';
@@ -43,6 +42,7 @@ import type {
 import type { ParentChatRef } from '../../../common/chat-parentage.js';
 import { CHAT_MESSAGES_MAX_LIMIT } from '../lib/pagination.js';
 import { jsonError, jsonErrorFromUnknown } from '../../common/http-error.js';
+import { commandHttpError } from '../lib/command-http-error.js';
 import { DomainError, ValidationDomainError } from '../../common/domain-error.js';
 import { QueueEntrySteerError } from '../chat-execution/queue-steer-error.js';
 import { AttachmentValidationError, validateCommandAttachments } from '../attachments/validation.js';
@@ -437,13 +437,10 @@ export default function createChatRoutes({
       const result = await commands.submitStart({ ...input, images });
       return acceptedTurnResponse(result, registry.getChat(input.chatId)?.parentChat ?? null);
     } catch (error: unknown) {
-      if (error instanceof CommandValidationError) {
-        return jsonError(error.message, error.status, error.code, error.retryable);
-      }
       if (error instanceof ModelSelectionError) {
         return jsonError((error as Error).message, 422);
       }
-      return jsonErrorFromUnknown(error);
+      return commandHttpError(error);
     }
   }
 
@@ -457,10 +454,7 @@ export default function createChatRoutes({
       lastSelectedChat.clearIf(chatId);
       return Response.json({ success: true });
     } catch (error: unknown) {
-      if (error instanceof CommandValidationError) {
-        return jsonError(error.message, error.status, error.code, error.retryable);
-      }
-      return jsonErrorFromUnknown(error);
+      return commandHttpError(error);
     }
   }
 
@@ -836,10 +830,7 @@ export default function createChatRoutes({
 
       return Response.json(result);
     } catch (error: unknown) {
-      if (error instanceof CommandValidationError) {
-        return jsonError(error.message, error.status, error.code, error.retryable);
-      }
-      return jsonErrorFromUnknown(error);
+      return commandHttpError(error);
     }
   }
 
@@ -881,8 +872,7 @@ export default function createChatRoutes({
       };
       return Response.json(body, { status: error.status });
     }
-    if (error instanceof CommandValidationError) return jsonError(error.message, error.status, error.code, error.retryable);
-    return jsonErrorFromUnknown(error);
+    return commandHttpError(error);
   }
 
   async function postGenerateChatTitle(
@@ -934,10 +924,7 @@ export default function createChatRoutes({
 
       return Response.json(result, { status: 202 });
     } catch (error: unknown) {
-      if (error instanceof CommandValidationError) {
-        return jsonError(error.message, error.status, error.code, error.retryable);
-      }
-      return jsonErrorFromUnknown(error);
+      return commandHttpError(error);
     }
   }
 
@@ -949,10 +936,7 @@ export default function createChatRoutes({
 
       return Response.json(result, { status: 202 });
     } catch (error: unknown) {
-      if (error instanceof CommandValidationError) {
-        return jsonError(error.message, error.status, error.code, error.retryable);
-      }
-      return jsonErrorFromUnknown(error);
+      return commandHttpError(error);
     }
   }
 
@@ -971,10 +955,10 @@ export default function createChatRoutes({
     return Response.json({ success: true, chatId, control });
   }
 
-  function queueControlErrorResponse(
-    error: QueueEntryMutationError
-      | QueuePauseChangedError,
-  ): Response {
+  function queueControlErrorResponse(error: unknown): Response {
+    if (!(error instanceof QueueEntryMutationError) && !(error instanceof QueuePauseChangedError)) {
+      return commandHttpError(error);
+    }
     const body: QueueCommandErrorResponse = {
       success: false,
       error: error.message,
@@ -995,11 +979,7 @@ export default function createChatRoutes({
       });
       return Response.json(result, { status: 202 });
     } catch (error: unknown) {
-      if (error instanceof CommandValidationError) {
-        return jsonError(error.message, error.status, error.code, error.retryable);
-      }
-      if (error instanceof QueueEntryMutationError) return queueControlErrorResponse(error);
-      return jsonErrorFromUnknown(error);
+      return queueControlErrorResponse(error);
     }
   }
 
@@ -1009,11 +989,7 @@ export default function createChatRoutes({
       const result = await commands.submitQueueEntryReplace(input);
       return Response.json(result);
     } catch (error: unknown) {
-      if (error instanceof CommandValidationError) {
-        return jsonError(error.message, error.status, error.code, error.retryable);
-      }
-      if (error instanceof QueueEntryMutationError) return queueControlErrorResponse(error);
-      return jsonErrorFromUnknown(error);
+      return queueControlErrorResponse(error);
     }
   }
 
@@ -1023,11 +999,7 @@ export default function createChatRoutes({
       const result = await commands.submitQueueEntryDelete(input);
       return Response.json(result);
     } catch (error: unknown) {
-      if (error instanceof CommandValidationError) {
-        return jsonError(error.message, error.status, error.code, error.retryable);
-      }
-      if (error instanceof QueueEntryMutationError) return queueControlErrorResponse(error);
-      return jsonErrorFromUnknown(error);
+      return queueControlErrorResponse(error);
     }
   }
 
@@ -1037,11 +1009,7 @@ export default function createChatRoutes({
       const result = await commands.submitQueueEntryMove(input);
       return Response.json(result);
     } catch (error: unknown) {
-      if (error instanceof CommandValidationError) {
-        return jsonError(error.message, error.status, error.code, error.retryable);
-      }
-      if (error instanceof QueueEntryMutationError) return queueControlErrorResponse(error);
-      return jsonErrorFromUnknown(error);
+      return queueControlErrorResponse(error);
     }
   }
 
@@ -1054,10 +1022,7 @@ export default function createChatRoutes({
         parentChat: registry.getChat(input.chatId)?.parentChat ?? null,
       }, { status: 202 });
     } catch (error: unknown) {
-      if (error instanceof CommandValidationError) {
-        return jsonError(error.message, error.status, error.code, error.retryable);
-      }
-      return jsonErrorFromUnknown(error);
+      return commandHttpError(error);
     }
   }
 
@@ -1086,10 +1051,7 @@ export default function createChatRoutes({
         };
         return Response.json(response, { status: error.status });
       }
-      if (error instanceof CommandValidationError) {
-        return jsonError(error.message, error.status, error.code, error.retryable);
-      }
-      return jsonErrorFromUnknown(error);
+      return commandHttpError(error);
     }
   }
 
@@ -1101,11 +1063,7 @@ export default function createChatRoutes({
       const result = await commands.mutateQueue({ ...input, action });
       return Response.json(result);
     } catch (error: unknown) {
-      if (error instanceof CommandValidationError) {
-        return jsonError(error.message, error.status, error.code, error.retryable);
-      }
-      if (error instanceof QueuePauseChangedError) return queueControlErrorResponse(error);
-      return jsonErrorFromUnknown(error);
+      return queueControlErrorResponse(error);
     }
   }
 
@@ -1115,10 +1073,7 @@ export default function createChatRoutes({
       const result = await commands.submitPermissionDecision(input);
       return Response.json(result);
     } catch (error: unknown) {
-      if (error instanceof CommandValidationError) {
-        return jsonError(error.message, error.status, error.code, error.retryable);
-      }
-      return jsonErrorFromUnknown(error);
+      return commandHttpError(error);
     }
   }
 
@@ -1131,10 +1086,7 @@ export default function createChatRoutes({
         parentChat: registry.getChat(input.chatId)?.parentChat ?? null,
       });
     } catch (error: unknown) {
-      if (error instanceof CommandValidationError) {
-        return jsonError(error.message, error.status, error.code, error.retryable);
-      }
-      return jsonErrorFromUnknown(error);
+      return commandHttpError(error);
     }
   }
 
@@ -1144,10 +1096,7 @@ export default function createChatRoutes({
       const result = await commands.submitInterruptAndSend(input);
       return Response.json(result);
     } catch (error: unknown) {
-      if (error instanceof CommandValidationError) {
-        return jsonError(error.message, error.status, error.code, error.retryable);
-      }
-      return jsonErrorFromUnknown(error);
+      return commandHttpError(error);
     }
   }
 
@@ -1157,10 +1106,7 @@ export default function createChatRoutes({
       const result = await commands.submitCompact(input);
       return Response.json(result, { status: 202 });
     } catch (error: unknown) {
-      if (error instanceof CommandValidationError) {
-        return jsonError(error.message, error.status, error.code, error.retryable);
-      }
-      return jsonErrorFromUnknown(error);
+      return commandHttpError(error);
     }
   }
 
@@ -1231,10 +1177,7 @@ export default function createChatRoutes({
       const result = await commands.updateProjectPath(input);
       return Response.json(result);
     } catch (error: unknown) {
-      if (error instanceof CommandValidationError) {
-        return jsonError(error.message, error.status, error.code, error.retryable);
-      }
-      return jsonErrorFromUnknown(error);
+      return commandHttpError(error);
     }
   }
 
