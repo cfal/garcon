@@ -5,7 +5,7 @@ import { errorDetail } from '$lib/chat/conversation/conversation-submission-help
 import { HandoffForkConfirmationState } from '$lib/chat/conversation/handoff-fork-confirmation.svelte.js';
 import { createClientChatId } from '$shared/client-chat-id';
 import type { ChatArchiveMutation } from '$lib/chat/sessions/chat-sessions-contract';
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import type {
 	ChatActionDialogsState,
 	ChatProjectPathDialog,

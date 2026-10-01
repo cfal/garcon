@@ -4,7 +4,7 @@
 
 import { chatActivityTimeMs } from '$shared/chat-order-sort';
 import type { PinnedInsertPosition } from '$shared/settings';
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 
 /** Comparator ordering chats newest-first by activity, then creation time. */
 export function compareChatsByRecencyDesc(a: ChatSessionRecord, b: ChatSessionRecord): number {

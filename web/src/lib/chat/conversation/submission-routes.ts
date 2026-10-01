@@ -1,5 +1,5 @@
 import type { ChatImage } from '$shared/chat-types';
-import type { ChatSessionRecord, ChatStartupConfig } from '$lib/types/chat-session';
+import type { ChatSessionRecord, ChatStartupConfig } from '$lib/chat/sessions/chat-session-types';
 import type { SessionControllerDeps } from './conversation-session-controller.svelte.js';
 import type { AcceptedInputSubmissionService } from './accepted-input-submission-service.js';
 import type { ConversationQueueController } from './conversation-queue-controller.svelte.js';

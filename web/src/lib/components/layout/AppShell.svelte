@@ -11,7 +11,7 @@
 	import WorkspaceRoot from '$lib/components/workspace/WorkspaceRoot.svelte';
 	import NotificationHost from '$lib/components/shared/NotificationHost.svelte';
 	import type { MobileWorkspaceTabId } from '$lib/components/workspace/mobile-workspace-tabs';
-	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import {
 		chatListDividerEdge,
 		HOVER_CAPABLE_MEDIA_QUERY,

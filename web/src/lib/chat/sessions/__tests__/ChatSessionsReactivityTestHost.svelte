@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { ChatSessionRecord } from '$lib/types/chat-session.js';
+	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types.js';
 	import { buildSidebarDisplayChatIds } from '$lib/components/sidebar/sidebar-row-model.js';
 	import { ChatSessionsStore } from '../chat-sessions.svelte.js';
 

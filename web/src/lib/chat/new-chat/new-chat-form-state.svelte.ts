@@ -12,7 +12,7 @@ import {
 } from '$lib/chat/composer/image-attachment.svelte.js';
 import { getGitWorktrees, gitCreateWorktree } from '$lib/api/git.js';
 import type { GitWorktreeItem } from '$lib/api/git.js';
-import type { NewChatConfig, SessionAgentId } from '$lib/types/app.js';
+import type { NewChatConfig, SessionAgentId } from '$lib/chat/sessions/chat-session-types.js';
 import type { PermissionMode, ThinkingMode } from '$lib/types/chat.js';
 import type { AgentSettingDescriptor, AgentSettingsEnvelope } from '$shared/agent-integration';
 import type { JsonValue } from '$shared/json';

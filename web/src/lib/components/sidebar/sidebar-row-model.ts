@@ -5,7 +5,7 @@ import type {
 	SidebarInactivityDuration,
 	SidebarSortMode,
 } from '$lib/stores/local-settings.svelte';
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import { isSidebarChatInactive } from './chat-inactivity';
 import { prioritizeOptimisticArchives, sortSidebarChatsByRecency } from './chat-recency-sort';
 import type { PinnedInsertPosition } from '$shared/settings';

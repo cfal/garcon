@@ -4,7 +4,7 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import ChatAgentTags from '../shared/ChatAgentTags.svelte';
 	import ChatProcessingIndicator from './ChatProcessingIndicator.svelte';
-	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import type { ChatItemLayout } from '$lib/layout/chat-item-layout.js';
 	import { cn } from '$lib/utils/cn';
 	import { formatRelativeTimestamp } from '$lib/utils/relative-timestamp.js';

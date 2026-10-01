@@ -9,7 +9,7 @@ import {
 	sortChatOrder,
 } from '$lib/api/chats.js';
 import { resolveArchiveReplacementChatId } from '$lib/chat/actions/archive-navigation';
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import type {
 	RelativeChatOrderPlacement,
 	SortChatOrderResponse,

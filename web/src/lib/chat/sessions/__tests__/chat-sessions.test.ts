@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ChatSessionsStore } from '../chat-sessions.svelte';
-import type { ChatSession } from '$lib/types/session';
+import type { ChatListEntry } from '$shared/chat-list';
 
-function makeServerSession(overrides: Partial<ChatSession> = {}): ChatSession {
+function makeServerSession(overrides: Partial<ChatListEntry> = {}): ChatListEntry {
 	const processingPhase =
 		overrides.processingPhase ?? (overrides.isProcessing || overrides.isActive ? 'running' : null);
 	return {
@@ -1108,11 +1108,11 @@ describe('ChatSessionsStore', () => {
 	it('toRecord defaults missing integration settings for partial persisted sessions', () => {
 		const store = new ChatSessionsStore();
 
-		const partial = makeServerSession({ id: 'a' }) as Partial<ChatSession> & {
-			agentSettings?: ChatSession['agentSettings'];
+		const partial = makeServerSession({ id: 'a' }) as Partial<ChatListEntry> & {
+			agentSettings?: ChatListEntry['agentSettings'];
 		};
 		delete partial.agentSettings;
-		store.upsertFromServer([partial as ChatSession]);
+		store.upsertFromServer([partial as ChatListEntry]);
 
 		expect(store.byId['a']?.permissionMode).toBe('default');
 		expect(store.byId['a']?.thinkingMode).toBe('none');

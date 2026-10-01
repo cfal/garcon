@@ -11,7 +11,7 @@ import {
 	apiPut,
 	type ApiFetchOptions,
 } from './client.js';
-import type { SessionAgentId } from '$lib/types/app.js';
+import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types.js';
 import {
 	normalizePermissionMode,
 	normalizeThinkingMode,

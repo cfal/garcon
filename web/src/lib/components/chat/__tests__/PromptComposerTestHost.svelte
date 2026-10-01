@@ -29,8 +29,7 @@
 	import { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
 	import { AppShellStore } from '$lib/stores/app-shell.svelte';
 	import { ConversationLifecycleState } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
-	import type { ChatSessionRecord, ChatStatus } from '$lib/types/chat-session';
-	import type { SessionAgentId } from '$lib/types/app';
+	import type { ChatSessionRecord, ChatStatus, SessionAgentId } from '$lib/chat/sessions/chat-session-types';
 	import type { ModelCatalogStore, ModelOption } from '$lib/agents/model-catalog-store.svelte';
 	import type { GitQuickSummaryReady } from '$lib/api/git.js';
 	import type { RecentAgentSetting, RemoteSettingsSnapshot } from '$shared/settings';

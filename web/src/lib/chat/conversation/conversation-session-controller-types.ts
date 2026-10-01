@@ -9,7 +9,7 @@ import type { ConversationLifecycleState } from '$lib/chat/conversation/conversa
 import type { ConversationUiPort } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 import type { ConversationSessionsPort } from './conversation-sessions-port.js';
 import type { StartupCoordinator } from '$lib/chat/conversation/startup-coordinator.js';
-import type { SessionAgentId } from '$lib/types/app';
+import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
 import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte.js';
 import type { ProjectTarget } from '$shared/project-resolution';
 import type { ConversationExecutionSelection } from './conversation-execution-selection.js';

@@ -6,7 +6,7 @@
 		CANVAS_LABEL_MAX_LENGTH,
 		type CanvasNode,
 	} from '$shared/chat-canvas';
-	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import * as m from '$lib/paraglide/messages.js';
 	let {
 		visible = true,

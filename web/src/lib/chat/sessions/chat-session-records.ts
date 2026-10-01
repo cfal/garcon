@@ -3,8 +3,8 @@ import { createEmptyAgentSettings, normalizeAgentSettings } from '$shared/agent-
 import type { ChatOrderGroup } from '$shared/chat-list';
 import { normalizePermissionMode, normalizeThinkingMode } from '$shared/chat-modes';
 import { stableJsonStringify } from '$shared/json';
-import type { ChatSessionRecord, ChatStartupConfig } from '$lib/types/chat-session';
-import type { ChatSession } from '$lib/types/session';
+import type { ChatSessionRecord, ChatStartupConfig } from '$lib/chat/sessions/chat-session-types';
+import type { ChatListEntry } from '$shared/chat-list';
 
 export function normalizeExecutionFields<
 	T extends {
@@ -25,7 +25,7 @@ export function normalizeExecutionFields<
 	};
 }
 
-export function toRecord(session: ChatSession): ChatSessionRecord {
+export function toRecord(session: ChatListEntry): ChatSessionRecord {
 	if (session.isProcessing !== (session.processingPhase !== null)) {
 		throw new Error(`Invalid processing projection for chat ${session.id}`);
 	}

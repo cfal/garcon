@@ -4,7 +4,7 @@ import {
 	parseChatSearch,
 	type ChatFilterSpec,
 } from '$shared/chat-filter-query';
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import type { ChatSearchResult } from '$shared/chat-search';
 
 export function facetFilteredChats(

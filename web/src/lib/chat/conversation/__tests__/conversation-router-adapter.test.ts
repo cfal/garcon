@@ -8,7 +8,7 @@ import { AgentState } from '../agent-state.svelte';
 import { ConversationLifecycleState } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
 import { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 import { StartupCoordinator } from '$lib/chat/conversation/startup-coordinator.js';
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import type { TranscriptMessage } from '$shared/chat-view';
 import { UserMessage } from '$shared/chat-types';
 import { ConversationPanelRegistry } from '../conversation-panel-registry.svelte.js';

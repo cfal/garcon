@@ -7,7 +7,7 @@ import {
 	removeLocalStorageItem,
 	setLocalStorageItem,
 } from '$lib/utils/local-persistence';
-import type { SessionAgentId } from '$lib/types/app';
+import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
 import type { ModelCatalogResponse } from '$shared/model-catalog';
 import type { ResolvedModelSelection } from '$shared/start-selection';
 import {

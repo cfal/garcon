@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { CanvasController } from '$lib/chat-canvas/canvas-controller.svelte.js';
-	import type { ChatSessionRecord } from '$lib/types/chat-session.js';
+	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types.js';
 	import type { PresentationHostId } from '$lib/workspace/surface-types.js';
 	import CanvasPanel from './CanvasPanel.svelte';
 

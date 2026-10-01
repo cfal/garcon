@@ -9,7 +9,7 @@ import {
 import { ConversationUiState } from '../conversation-ui-state.svelte.js';
 import { submitIdempotentCommand } from '../idempotent-command.js';
 import * as m from '$lib/paraglide/messages.js';
-import type { ChatSessionRecord } from '$lib/types/chat-session.js';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types.js';
 import type { QueueEntry } from '$lib/types/chat';
 
 vi.mock('$lib/api/chats.js', () => ({

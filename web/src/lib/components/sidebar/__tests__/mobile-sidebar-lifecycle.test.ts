@@ -4,7 +4,7 @@ import MobileSidebarLifecycleHost from './MobileSidebarLifecycleHost.svelte';
 
 import { getSavedSearches, type SavedChatSearch } from '$lib/api/settings';
 import { createSidebarSearchStore } from '$lib/sidebar/search/sidebar-search-store.svelte.js';
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 
 vi.mock('$lib/api/settings', async () => {
 	const actual = await vi.importActual<typeof import('$lib/api/settings')>('$lib/api/settings');

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import type { ProjectTarget } from '$shared/project-resolution';
 import { ProjectResolutionStore } from '$lib/workspace/project-resolution-store.svelte.js';
 import { PromptComposerProjectState } from '../prompt-composer-project-state.svelte.js';

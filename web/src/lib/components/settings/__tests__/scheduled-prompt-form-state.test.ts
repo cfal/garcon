@@ -6,7 +6,7 @@ import {
 	SCHEDULED_PROMPT_MAX_LENGTH,
 	type ScheduledPrompt,
 } from '$shared/scheduled-prompts';
-import type { SessionAgentId } from '$lib/types/app';
+import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
 import type { ModelCatalogStore, ModelOption } from '$lib/agents/model-catalog-store.svelte';
 import {
 	findModelForSelection,

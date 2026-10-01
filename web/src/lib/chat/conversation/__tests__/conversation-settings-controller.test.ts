@@ -3,7 +3,7 @@ import { updateChatModel, updateExecutionSettings } from '$lib/api/chats.js';
 import type { AgentSettingDescriptor, AgentSettingsEnvelope } from '$shared/agent-integration';
 import type { ExecutionSettingsPatchResponse } from '$shared/chat-command-contracts';
 import type { ResolvedModelSelection } from '$shared/start-selection';
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import type { ChatListEntry, ChatListResponse } from '$shared/chat-list';
 import { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte';
 import {

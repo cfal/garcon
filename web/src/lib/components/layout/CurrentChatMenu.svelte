@@ -10,7 +10,7 @@
 		FLOATING_TOOLBAR_RAIL_CLASS,
 	} from '$lib/components/shared/floating-toolbar-styles.js';
 	import { cn } from '$lib/utils/cn';
-	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import CurrentChatMenuItems from './CurrentChatMenuItems.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 

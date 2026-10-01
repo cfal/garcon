@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
-	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import type { CanvasBox } from '$shared/chat-canvas';
 	import * as m from '$lib/paraglide/messages.js';
 	let {

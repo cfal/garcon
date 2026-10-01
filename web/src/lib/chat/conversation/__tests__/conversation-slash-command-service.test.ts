@@ -5,7 +5,7 @@ import { scheduleChatPrompt } from '$lib/api/scheduled-prompts.js';
 import { ApiError } from '$lib/api/client.js';
 import { AssistantMessage, UserMessage } from '$shared/chat-types';
 import type { TranscriptMessage } from '$shared/chat-view';
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
 import type { ChatTagReconciliationKind } from '$lib/chat/sessions/chat-sessions-contract.js';
 import { ChatTagMutationBlockedError } from '$lib/chat/sessions/chat-tag-mutation-result.js';

@@ -4,7 +4,7 @@ import {
 	parseChatSearch,
 } from '$shared/chat-filter-query';
 import { captureChatSearchTimeOrder } from '$lib/sidebar/search/search-result-order.js';
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import type { ChatSearchSort } from '$shared/chat-search';
 
 export interface TranscriptSearchInvalidationProjection {

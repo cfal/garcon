@@ -21,7 +21,7 @@
 		ModelSelectorMode,
 	} from '$lib/components/model-selector/model-selector-types';
 	import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
-	import type { SessionAgentId } from '$lib/types/app';
+	import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
 	import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import { getAppShell, getExecutors } from '$lib/context';

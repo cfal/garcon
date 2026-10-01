@@ -2,7 +2,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import ChatAgentTags from '$lib/components/shared/ChatAgentTags.svelte';
 	import { formatCompactTimeUntil, formatScheduledInstant } from '$lib/scheduling/local-schedule';
-	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import type { ScheduledPrompt } from '$shared/scheduled-prompts';
 	import { parseGarconScheduleAction } from '$shared/garcon-schedule';
 	import ArrowDown from '@lucide/svelte/icons/arrow-down';

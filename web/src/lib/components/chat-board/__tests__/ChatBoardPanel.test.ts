@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ChatBoard, ChatBoardCatalog } from '$shared/chat-boards';
 import type { ChatBoardApi } from '$lib/api/chat-boards';
 import { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte';
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import { ChatBoardController } from '$lib/chat-board/catalog/chat-board-controller.svelte';
 import { ChatBoardInvalidationHub } from '$lib/chat-board/catalog/chat-board-invalidation-hub';
 import { ApiError } from '$lib/api/client';

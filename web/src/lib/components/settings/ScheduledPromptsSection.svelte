@@ -2,7 +2,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { getChatSessions, getExecutors, getScheduledPrompts } from '$lib/context';
 	import { scheduledPromptExecutorId } from '$lib/scheduling/scheduled-prompt-executor.js';
-	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import type { ScheduledPrompt, ScheduledPromptDefinitionInput } from '$shared/scheduled-prompts';
 	import ScheduledPromptDialog from './ScheduledPromptDialog.svelte';
 	import ScheduledPromptRemoveDialog from './ScheduledPromptRemoveDialog.svelte';

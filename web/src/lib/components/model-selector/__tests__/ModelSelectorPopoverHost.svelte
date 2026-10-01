@@ -6,7 +6,7 @@
 	import { setModelCatalog } from '$lib/context';
 	import type { ModelCatalogStore, ModelOption } from '$lib/agents/model-catalog-store.svelte';
 	import { agentLabelFor } from '$lib/agents/agent-labels.js';
-	import type { SessionAgentId } from '$lib/types/app.js';
+	import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types.js';
 	import {
 		DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
 		DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,

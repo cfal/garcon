@@ -18,7 +18,7 @@
 		dropdownMenuPrimitives,
 		type MenuPrimitives,
 	} from '$lib/components/ui/menu-primitives.js';
-	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import * as m from '$lib/paraglide/messages.js';
 
 	let {

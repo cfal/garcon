@@ -14,7 +14,7 @@
 		getRemoteSettings,
 	} from '$lib/context';
 	import type { ChatArchiveMutation } from '$lib/chat/sessions/chat-sessions-contract';
-	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import type {
 		PersistedChatOrderGroup,
 		RelativeChatOrderPlacement,

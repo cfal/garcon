@@ -11,7 +11,7 @@ import SidebarSearchDialogHost from './SidebarSearchDialogHost.svelte';
 import { SEARCH_RESULT_ROW_HEIGHT } from '../sidebar-search-results';
 
 import type { SavedChatSearch } from '$lib/api/settings';
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 
 function createChat(id: string, title: string): ChatSessionRecord {
 	return {

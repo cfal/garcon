@@ -18,8 +18,7 @@ import {
 } from '$lib/api/chats.js';
 import { ApiError } from '$lib/api/client.js';
 import { updateSessionName } from '$lib/api/settings.js';
-import type { ChatSession } from '$lib/types/session';
-import type { ChatSessionRecord, ChatStartupConfig } from '$lib/types/chat-session';
+import type { ChatSessionRecord, ChatStartupConfig } from '$lib/chat/sessions/chat-session-types';
 import * as m from '$lib/paraglide/messages.js';
 import type { ChatListEntry } from '$shared/chat-list';
 import type { ChatProcessingEntry, ChatProcessingPhase } from '$shared/chat-types';
@@ -640,12 +639,12 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	/** Merges server-fetched sessions into the store. Preserves object identity
 	 *  for unchanged records to avoid unnecessary re-renders. Drafts that the
 	 *  server now owns get their startup config cleaned up. */
-	upsertFromServer(sessions: ChatSession[]): void {
+	upsertFromServer(sessions: ChatListEntry[]): void {
 		this.#upsertFromServer(sessions);
 	}
 
 	#upsertFromServer(
-		sessions: ChatSession[],
+		sessions: ChatListEntry[],
 		requestProjectPathRevisions?: ReadonlyMap<string, number>,
 		fetchGeneration?: number,
 	): void {

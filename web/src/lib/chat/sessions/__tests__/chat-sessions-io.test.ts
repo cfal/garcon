@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatSessionsStore } from '../chat-sessions.svelte';
-import type { ChatSession } from '$lib/types/session';
+import type { ChatListEntry } from '$shared/chat-list';
 import { ApiError, ApiMutationOutcomeUnknownError } from '$lib/api/client';
 import { ChatTagMutationBlockedError } from '../chat-tag-mutation-result.js';
 
@@ -58,7 +58,7 @@ async function flushMicrotasks(): Promise<void> {
 	}
 }
 
-function makeServerSession(overrides: Partial<ChatSession> = {}): ChatSession {
+function makeServerSession(overrides: Partial<ChatListEntry> = {}): ChatListEntry {
 	return {
 		id: 'chat-1',
 		agentId: 'claude',
@@ -120,7 +120,7 @@ describe('ChatSessionsStore IO', () => {
 	it('runs a follow-up fetch when refresh is requested during an in-flight fetch', async () => {
 		const store = new ChatSessionsStore();
 		const first = deferred<{
-			sessions: ChatSession[];
+			sessions: ChatListEntry[];
 			total: number;
 			lastSelectedChatId: string | null;
 		}>();
@@ -181,7 +181,7 @@ describe('ChatSessionsStore IO', () => {
 		const store = new ChatSessionsStore();
 		store.upsertFromServer([makeServerSession({ projectPath: '/workspace/a' })]);
 		const stale = deferred<{
-			sessions: ChatSession[];
+			sessions: ChatListEntry[];
 			total: number;
 			lastSelectedChatId: string | null;
 		}>();
@@ -203,7 +203,7 @@ describe('ChatSessionsStore IO', () => {
 		const store = new ChatSessionsStore();
 		store.upsertFromServer([makeServerSession({ projectPath: '/workspace/a' })]);
 		const stale = deferred<{
-			sessions: ChatSession[];
+			sessions: ChatListEntry[];
 			total: number;
 			lastSelectedChatId: string | null;
 		}>();
@@ -225,7 +225,7 @@ describe('ChatSessionsStore IO', () => {
 	it('projects an archive at the front of the archived list until refresh reconciles it', async () => {
 		const archive = deferred<{ success: boolean; isArchived: boolean }>();
 		const refresh = deferred<{
-			sessions: ChatSession[];
+			sessions: ChatListEntry[];
 			total: number;
 			lastSelectedChatId: string | null;
 		}>();
@@ -338,7 +338,7 @@ describe('ChatSessionsStore IO', () => {
 		vi.spyOn(console, 'error').mockImplementation(() => undefined);
 		const archive = deferred<{ success: boolean; isArchived: boolean }>();
 		const refresh = deferred<{
-			sessions: ChatSession[];
+			sessions: ChatListEntry[];
 			total: number;
 			lastSelectedChatId: string | null;
 		}>();
@@ -379,7 +379,7 @@ describe('ChatSessionsStore IO', () => {
 	it('uses the final failed follow-up refresh when preserving an acknowledged archive', async () => {
 		vi.spyOn(console, 'error').mockImplementation(() => undefined);
 		const staleRefresh = deferred<{
-			sessions: ChatSession[];
+			sessions: ChatListEntry[];
 			total: number;
 			lastSelectedChatId: string | null;
 		}>();
@@ -408,7 +408,7 @@ describe('ChatSessionsStore IO', () => {
 	it('preserves newer server truth when a later coalesced refresh fails', async () => {
 		vi.spyOn(console, 'error').mockImplementation(() => undefined);
 		const firstRefresh = deferred<{
-			sessions: ChatSession[];
+			sessions: ChatListEntry[];
 			total: number;
 			lastSelectedChatId: string | null;
 		}>();
@@ -799,7 +799,7 @@ describe('ChatSessionsStore IO', () => {
 		const store = new ChatSessionsStore();
 		store.upsertFromServer([makeServerSession({ id: 'chat-1', tags: ['existing'] })]);
 		const staleFetch = deferred<{
-			sessions: ChatSession[];
+			sessions: ChatListEntry[];
 			total: number;
 			lastSelectedChatId: string | null;
 		}>();
@@ -839,7 +839,7 @@ describe('ChatSessionsStore IO', () => {
 
 	it('retains a reconciliation fence until a post-settlement chat-list read succeeds', async () => {
 		const staleFetch = deferred<{
-			sessions: ChatSession[];
+			sessions: ChatListEntry[];
 			total: number;
 			lastSelectedChatId: string | null;
 		}>();
@@ -923,7 +923,7 @@ describe('ChatSessionsStore IO', () => {
 
 	it('does not let a pre-settlement list response replace acknowledged tags', async () => {
 		const staleFetch = deferred<{
-			sessions: ChatSession[];
+			sessions: ChatListEntry[];
 			total: number;
 			lastSelectedChatId: string | null;
 		}>();
@@ -962,7 +962,7 @@ describe('ChatSessionsStore IO', () => {
 
 	it('does not let a pre-recovery list response replace confirmed tags', async () => {
 		const staleFetch = deferred<{
-			sessions: ChatSession[];
+			sessions: ChatListEntry[];
 			total: number;
 			lastSelectedChatId: string | null;
 		}>();
@@ -1140,7 +1140,7 @@ describe('ChatSessionsStore IO', () => {
 		const firstRecovery = deferred<{ success: true; chatId: string; tags: string[] }>();
 		const secondRecovery = deferred<{ success: true; chatId: string; tags: string[] }>();
 		const listRefresh = deferred<{
-			sessions: ChatSession[];
+			sessions: ChatListEntry[];
 			total: number;
 			lastSelectedChatId: string | null;
 		}>();

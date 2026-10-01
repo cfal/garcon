@@ -1,6 +1,5 @@
 // Canonical chat session types used by the ChatSessionsStore.
 
-import type { SessionAgentId } from '$lib/types/app';
 import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 import type { AgentSettingsEnvelope } from '$shared/agent-integration';
 import type { ApiProtocol } from '$shared/api-providers';
@@ -9,6 +8,7 @@ import type { ParentChatRef } from '$shared/chat-parentage';
 import type { ChatProcessingPhase } from '$shared/chat-types';
 
 export type ChatStatus = 'draft' | 'running';
+export type SessionAgentId = string;
 
 export interface ChatStartupConfig {
 	executorId?: string;
@@ -24,6 +24,10 @@ export interface ChatStartupConfig {
 	initialImages?: File[];
 	tags?: string[];
 	orderedPreambleIds?: readonly string[];
+}
+
+export interface NewChatConfig extends ChatStartupConfig {
+	projectPath: string;
 }
 
 export interface ChatSessionRecord {
