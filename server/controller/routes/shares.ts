@@ -19,7 +19,7 @@ import {
 } from '../chats/share-page.ts';
 import { loadStaticText } from './static.js';
 import { extractFirstLine } from '../lib/text.js';
-import type { RouteMap } from '../lib/http-route-types.js';
+import type { RouteHandler, RouteMap } from '../lib/http-route-types.js';
 import type { ChatMetadata } from '../chats/metadata-store.js';
 import { isDomainError } from '../../common/domain-error.js';
 import { jsonErrorFromUnknown } from '../../common/http-error.js';
@@ -189,6 +189,19 @@ function publicJsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+function withShareStorageErrors(handler: RouteHandler): RouteHandler {
+  return async (...args) => {
+    try {
+      return await handler(...args);
+    } catch (error) {
+      if (!isDomainError(error)) throw error;
+      const response = jsonErrorFromUnknown(error);
+      response.headers.set('Cache-Control', NO_STORE);
+      return response;
+    }
+  };
+}
+
 // Builds a GetSharedChatResponse around the page's messages as stored, so serving a page
 // never parses or re-encodes them.
 function sharedChatPageResponse(
@@ -263,7 +276,7 @@ export default function createShareRoutes(
       return Response.json(resp);
     } catch (error: unknown) {
       if (isDomainError(error)) {
-        if (error.code === 'TRANSCRIPT_WORK_BUSY') return jsonErrorFromUnknown(error);
+        if (error.code === 'TRANSCRIPT_WORK_BUSY' || error.code === 'SHARE_STORAGE_UNAVAILABLE') return jsonErrorFromUnknown(error);
         return Response.json(
           { success: false, error: error.message },
           { status: error.status },
@@ -294,6 +307,7 @@ export default function createShareRoutes(
       const resp: RevokeShareResponse = { success: revoked };
       return Response.json(resp, { status: revoked ? 200 : 404 });
     } catch (error: unknown) {
+      if (isDomainError(error)) return jsonErrorFromUnknown(error);
       return Response.json(
         { success: false, error: (error as Error).message },
         { status: 500 },
@@ -327,7 +341,7 @@ export default function createShareRoutes(
   }
 
   // GET /api/v1/shared - Public endpoint, returns snapshot by token.
-  const getSharedChat = markRouteNoAuth(async function getSharedChat(
+  const getSharedChat: RouteHandler = async function getSharedChat(
     _request: Request,
     url: URL,
   ): Promise<Response> {
@@ -364,10 +378,10 @@ export default function createShareRoutes(
     }
 
     return sharedChatPageResponse(shared, page!);
-  });
+  };
 
   // Serves a plain text transcript at /shared/llm/:token for LLM consumption.
-  const getLlmTranscript = markRouteNoAuth(async function getLlmTranscript(
+  const getLlmTranscript: RouteHandler = async function getLlmTranscript(
     _request: Request,
     url: URL,
   ): Promise<Response> {
@@ -382,11 +396,11 @@ export default function createShareRoutes(
     }
 
     return plainTextResponse(textPath);
-  });
+  };
 
   // Serves the shared chat page at /shared/:token. Enriches the SPA shell with
   // share metadata and bounded transcript discovery so large chats stay fast.
-  const getSharedChatPage = markRouteNoAuth(async function getSharedChatPage(
+  const getSharedChatPage: RouteHandler = async function getSharedChatPage(
     request: Request,
     url: URL,
   ): Promise<Response> {
@@ -424,16 +438,16 @@ export default function createShareRoutes(
       ? injectSharedChatContext(shell, snapshot, token, canonicalUrl, appTitle)
       : renderStandaloneSharedHtml(snapshot, token, canonicalUrl, appTitle);
     return htmlResponse(html, llmPath);
-  });
+  };
 
   return {
     '/api/v1/chats/share': {
       POST: withJsonBody(postShareChat),
       DELETE: deleteShareChat,
     },
-    '/api/v1/chats/share/status': { GET: getShareStatus },
-    '/api/v1/shared': { GET: getSharedChat },
-    '/shared/:token': { GET: getSharedChatPage },
-    '/shared/llm/:token': { GET: getLlmTranscript },
+    '/api/v1/chats/share/status': { GET: withShareStorageErrors(getShareStatus) },
+    '/api/v1/shared': { GET: markRouteNoAuth(withShareStorageErrors(getSharedChat)) },
+    '/shared/:token': { GET: markRouteNoAuth(withShareStorageErrors(getSharedChatPage)) },
+    '/shared/llm/:token': { GET: markRouteNoAuth(withShareStorageErrors(getLlmTranscript)) },
   };
 }

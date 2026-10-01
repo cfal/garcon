@@ -225,7 +225,7 @@ export class ShareStore implements IShareStore {
 
   #assertAvailable(): void {
     if (this.#durabilityUnknown) {
-      throw new DomainError('INTERNAL_ERROR', 'Share index durability is unknown. Restart the controller before accessing shares.', 503);
+      throw new DomainError('SHARE_STORAGE_UNAVAILABLE', 'Share index durability is unknown. Restart the controller before accessing shares.', 503);
     }
   }
 
