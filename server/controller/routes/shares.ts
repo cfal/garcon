@@ -196,7 +196,7 @@ function sharedChatPageResponse(
 ): Response {
   const { messageCount: _messageCount, ...snapshot } = shared.header;
   const snapshotFields = JSON.stringify(snapshot).slice(0, -1);
-  const messages = shared.messages.slice(page.start, page.end).join(',');
+  const messages = shared.messages.join(',');
   return new Response(
     `{"snapshot":${snapshotFields},"messages":[${messages}]},"page":${JSON.stringify(page)}}`,
     { headers: { 'Content-Type': 'application/json;charset=utf-8', 'Cache-Control': NO_STORE } },
@@ -336,35 +336,31 @@ export default function createShareRoutes(
       );
     }
 
-    const shared = await shareStore.getMessages(token);
+    let page: SharedChatMessagePage | undefined;
+    const shared = await shareStore.getMessages(token, header => {
+      const totalMessages = header.messageCount;
+      const requestedBefore = url.searchParams.get('before');
+      const requestedVersion = url.searchParams.get('version');
+      const cursorIsStale = requestedBefore !== null && requestedVersion !== null
+        && requestedVersion !== header.sharedAt;
+      const end = parseMessageCursor(cursorIsStale ? null : requestedBefore, totalMessages);
+      const pageSize = parsePageSize(url.searchParams.get('limit'), totalMessages);
+      const start = Math.max(0, end - pageSize);
+      page = {
+        snapshotVersion: header.sharedAt,
+        totalMessages,
+        start,
+        end,
+        nextBefore: start > 0 ? start : null,
+        ...(cursorIsStale ? { reset: true } : {}),
+      };
+      return { start, end };
+    });
     if (!shared) {
       return publicJsonResponse({ error: 'Share not found' }, 404);
     }
 
-    const totalMessages = shared.header.messageCount;
-    const requestedBefore = url.searchParams.get('before');
-    const requestedVersion = url.searchParams.get('version');
-    const cursorIsStale =
-      requestedBefore !== null &&
-      requestedVersion !== null &&
-      requestedVersion !== shared.header.sharedAt;
-    const end = parseMessageCursor(
-      cursorIsStale ? null : requestedBefore,
-      totalMessages,
-    );
-    const pageSize = parsePageSize(
-      url.searchParams.get('limit'),
-      totalMessages,
-    );
-    const start = Math.max(0, end - pageSize);
-    return sharedChatPageResponse(shared, {
-      snapshotVersion: shared.header.sharedAt,
-      totalMessages,
-      start,
-      end,
-      nextBefore: start > 0 ? start : null,
-      ...(cursorIsStale ? { reset: true } : {}),
-    });
+    return sharedChatPageResponse(shared, page!);
   });
 
   // Serves a plain text transcript at /shared/llm/:token for LLM consumption.

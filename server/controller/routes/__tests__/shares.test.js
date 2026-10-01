@@ -72,9 +72,12 @@ function snapshotStore(snapshot) {
   };
   return {
     getHeader: mock(async (token) => (matches(token) ? header() : null)),
-    getMessages: mock(async (token) => (matches(token)
-      ? { header: header(), messages: snapshot.messages.map((message) => JSON.stringify(message)) }
-      : null)),
+    getMessages: mock(async (token, select) => {
+      if (!matches(token)) return null;
+      const current = header();
+      const range = select?.(current) ?? { start: 0, end: current.messageCount };
+      return { header: current, messages: snapshot.messages.slice(range.start, range.end).map(message => JSON.stringify(message)) };
+    }),
     getTextPath: mock(async (token) => {
       if (!matches(token)) return null;
       const textPath = path.join(textDirectory, `${token}-${Math.random()}.txt`);

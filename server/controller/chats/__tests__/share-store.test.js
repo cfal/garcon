@@ -126,6 +126,74 @@ afterEach(async () => {
 });
 
 describe('ShareStore', () => {
+  it('reads overlapping pages without loading or caching a whole snapshot', async () => {
+    const store = createStore();
+    await store.init();
+    const created = await store.publish('chat-1', publication(), rows(
+      'x'.repeat(200_000), 'first selected', 'second selected', 'y'.repeat(200_000),
+    ));
+    const readFile = spyOn(fs, 'readFile').mockRejectedValue(new Error('whole-file read forbidden'));
+    try {
+      const pages = await Promise.all([
+        store.getMessages(created.shareToken, () => ({ start: 1, end: 3 })),
+        store.getMessages(created.shareToken, () => ({ start: 2, end: 3 })),
+      ]);
+      expect(pages[0].header.messageCount).toBe(4);
+      expect(pages.map(page => page.messages.map(line => JSON.parse(line).content)))
+        .toEqual([['first selected', 'second selected'], ['second selected']]);
+      expect(readFile).not.toHaveBeenCalled();
+      await expect(store.getMessages(created.shareToken)).rejects.toThrow('whole-file read forbidden');
+    } finally { readFile.mockRestore(); }
+  });
+
+  it('pages cached and legacy snapshots using the same header-qualified range', async () => {
+    await writeDocumentSnapshot('legacy-page');
+    const store = createStore();
+    await store.init();
+    const select = header => ({ start: 0, end: header.messageCount });
+    expect((await store.getMessages('legacy-page', select)).messages).toHaveLength(1);
+    await store.getMessages('legacy-page');
+    expect((await store.getMessages('legacy-page', () => ({ start: 0, end: 0 }))).messages).toEqual([]);
+  });
+
+  it('does not cache snapshots exceeding the byte budget', async () => {
+    const store = new ShareStore(workspaceDir, { rendering: inlineTranscriptRendering, cacheBytes: 1 });
+    await store.init();
+    const created = await store.publish('chat-1', publication(), rows('uncached'));
+    await store.getMessages(created.shareToken);
+    const readFile = spyOn(fs, 'readFile');
+    try {
+      await store.getMessages(created.shareToken);
+      expect(readFile).toHaveBeenCalledTimes(1);
+    } finally { readFile.mockRestore(); }
+  });
+
+  it('evicts least recently read snapshots when their combined bytes exceed the budget', async () => {
+    let now = 0;
+    const store = new ShareStore(workspaceDir, { rendering: inlineTranscriptRendering, cacheBytes: 1_500, now: () => now++ });
+    await store.init();
+    const a = await store.publish('chat-1', publication(), rows('a'.repeat(100)));
+    const b = await store.publish('chat-2', publication({ chatId: 'chat-2' }), rows('b'.repeat(100)));
+    await store.getMessages(a.shareToken);
+    await store.getMessages(b.shareToken);
+    const readFile = spyOn(fs, 'readFile');
+    try {
+      await store.getMessages(b.shareToken);
+      expect(readFile).not.toHaveBeenCalled();
+      await store.getMessages(a.shareToken);
+      expect(readFile).toHaveBeenCalledTimes(1);
+    } finally { readFile.mockRestore(); }
+  });
+
+  it('rejects paged snapshots with a truncated message count', async () => {
+    const fixture = await writePersistedShareFixture();
+    const store = createStore();
+    await store.init();
+    const original = await fs.readFile(fixture.snapshotPath, 'utf8');
+    await fs.writeFile(fixture.snapshotPath, original + '\n{}');
+    expect(await store.getMessages(fixture.token, () => ({ start: 0, end: 1 }))).toBeNull();
+  });
+
   it('stores one message per line and the plain text per token, and keeps only metadata in the index', async () => {
     const store = createStore();
     await store.init();

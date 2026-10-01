@@ -24,11 +24,13 @@ import {
 } from './share-snapshot-format.js';
 import type { RenderedShareSnapshot } from './transcript-rendering/tasks.js';
 import type { TranscriptRendering } from './transcript-rendering/client.js';
+import { readShareSnapshotRange, type SelectShareMessageRange } from './share-snapshot-reader.js';
 
 const logger = createLogger('chats:share-store');
 
 const SHARE_INDEX_VERSION = 2;
 const SHARE_SNAPSHOT_CACHE_LIMIT = 50;
+const SHARE_SNAPSHOT_CACHE_BYTES = 16 * 1024 * 1024;
 const SHARE_SNAPSHOT_CACHE_TTL_MS = 10 * 60 * 1000;
 // A snapshot's header is its first line; a read this long holds it.
 const HEADER_READ_BYTES = 64 * 1024;
@@ -53,6 +55,7 @@ interface ShareStoreOptions {
   readonly rendering: Pick<TranscriptRendering, 'renderShareSnapshot' | 'convertShareSnapshot'>;
   readonly now?: () => number;
   readonly cacheLimit?: number;
+  readonly cacheBytes?: number;
   readonly cacheTtlMs?: number;
 }
 
@@ -66,6 +69,7 @@ export type SharePublication = Omit<ShareSnapshotHeader, 'shareToken' | 'message
 
 interface CachedShareMessages {
   readonly shared: SharedChatMessages;
+  readonly bytes: number;
   lastAccessAt: number;
 }
 
@@ -80,7 +84,7 @@ export interface IShareStore {
   ): Promise<ShareIndexEntry>;
   getEntryByChatId(chatId: string): ShareIndexEntry | null;
   getHeader(token: string): Promise<ShareSnapshotHeader | null>;
-  getMessages(token: string): Promise<SharedChatMessages | null>;
+  getMessages(token: string, select?: SelectShareMessageRange): Promise<SharedChatMessages | null>;
   getTextPath(token: string): Promise<string | null>;
   revokeShareByChatId(chatId: string): Promise<boolean>;
 }
@@ -114,6 +118,7 @@ export class ShareStore implements IShareStore {
   #rendering: ShareStoreOptions['rendering'];
   #now: () => number;
   #cacheLimit: number;
+  #cacheBytes: number;
   #cacheTtlMs: number;
 
   constructor(workspaceDir: string, options: ShareStoreOptions) {
@@ -121,6 +126,7 @@ export class ShareStore implements IShareStore {
     this.#rendering = options.rendering;
     this.#now = options.now ?? (() => Date.now());
     this.#cacheLimit = options.cacheLimit ?? SHARE_SNAPSHOT_CACHE_LIMIT;
+    this.#cacheBytes = options.cacheBytes ?? SHARE_SNAPSHOT_CACHE_BYTES;
     this.#cacheTtlMs = options.cacheTtlMs ?? SHARE_SNAPSHOT_CACHE_TTL_MS;
   }
 
@@ -268,14 +274,29 @@ export class ShareStore implements IShareStore {
     return header ?? (await this.getMessages(token))?.header ?? null;
   }
 
-  async getMessages(token: string): Promise<SharedChatMessages | null> {
+  async getMessages(token: string, select?: SelectShareMessageRange): Promise<SharedChatMessages | null> {
     const entry = this.#shareEntry(token);
     if (!entry) return null;
     const cached = this.#cachedMessages(token);
-    if (cached) return cached;
+    if (cached) return selectMessages(cached, select);
     return this.#chatLocks.runExclusive(entry.chatId, async () => {
       if (this.#shareEntry(token)?.chatId !== entry.chatId) return null;
-      const loaded = this.#cachedMessages(token) ?? await this.#loadSnapshot(token);
+      const cached = this.#cachedMessages(token);
+      if (cached) return selectMessages(cached, select);
+      if (select) {
+        try {
+          const page = await readShareSnapshotRange(this.#shareFilePath(token, 'ndjson'), token, select);
+          await repairSharePermissions(this.#shareFilePath(token, 'ndjson'), 0o600, 'share snapshot');
+          this.#assertAvailable();
+          return page;
+        } catch (error) {
+          if (!hasNodeErrorCode(error, 'ENOENT')) throw error;
+          const converted = await this.#convertLegacySnapshot(token);
+          this.#assertAvailable();
+          return converted ? selectMessages(converted, select) : null;
+        }
+      }
+      const loaded = await this.#loadSnapshot(token);
       return loaded ? this.#cacheMessages(token, loaded) : null;
     });
   }
@@ -386,7 +407,10 @@ export class ShareStore implements IShareStore {
 
   #cacheMessages(token: string, shared: SharedChatMessages): SharedChatMessages {
     this.#assertAvailable();
-    this.#snapshotCache.set(token, { shared, lastAccessAt: this.#now() });
+    const bytes = 2 * JSON.stringify(shared.header).length
+      + shared.messages.reduce((total, message) => total + 2 * message.length + 32, 0);
+    if (bytes > this.#cacheBytes) return shared;
+    this.#snapshotCache.set(token, { shared, bytes, lastAccessAt: this.#now() });
     this.#pruneSnapshotCache();
     return shared;
   }
@@ -399,12 +423,19 @@ export class ShareStore implements IShareStore {
       }
     }
 
-    if (this.#snapshotCache.size <= this.#cacheLimit) return;
     const entries = [...this.#snapshotCache.entries()]
       .sort((a, b) => a[1].lastAccessAt - b[1].lastAccessAt);
-    for (const [token] of entries) {
-      if (this.#snapshotCache.size <= this.#cacheLimit) break;
+    let bytes = entries.reduce((total, [, cached]) => total + cached.bytes, 0);
+    for (const [token, cached] of entries) {
+      if (this.#snapshotCache.size <= this.#cacheLimit && bytes <= this.#cacheBytes) break;
       this.#snapshotCache.delete(token);
+      bytes -= cached.bytes;
     }
   }
+}
+
+function selectMessages(shared: SharedChatMessages, select?: SelectShareMessageRange): SharedChatMessages {
+  if (!select) return shared;
+  const { start, end } = select(shared.header);
+  return { header: shared.header, messages: shared.messages.slice(start, end) };
 }
