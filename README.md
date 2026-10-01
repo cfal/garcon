@@ -179,6 +179,23 @@ Comment removal retains previous text in activity history; it is not redaction. 
 
 Activity's **Open source** opens the originating chat at the visible ticket-command result, including older rows outside the loaded transcript. If the transcript was reloaded or the exact result is missing, it opens the chat with a notification instead. Deleted chats cannot be opened. Source addresses remain immutable; navigation never substitutes a row from a replacement transcript.
 
+## Remote Executors
+
+Garcon can run agents, files, Git, and terminals on Local and on trusted remote
+workers. Either side may initiate the connection; both directions use an
+authenticated Noise-encrypted WebSocket. Worker listeners support native TLS
+or explicit `--no-tls` behind a protected TLS proxy.
+
+Add a target in the Executors dialog. Dialing workers receive their full
+connection credential through `GARCON_CONTROLLER_URL`, never `--connect`.
+Configure the controller's external address with `--public-url` or
+`GARCON_PUBLIC_URL`; proxy deployments should not rely on Host fallback.
+Workspace-wide CLI access is a separate default-off grant.
+
+See [executor deployment and onboarding](docs/cli.md#executor-connections) and
+[executor trust, credentials, and revocation](docs/security.md#executor-trust-boundary)
+before enabling remote access.
+
 ## Trusted Local Use
 
 To disable authentication for a trusted single-user environment:
