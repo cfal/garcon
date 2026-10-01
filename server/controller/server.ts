@@ -5,10 +5,9 @@ import path from 'path';
 import { rm } from 'node:fs/promises';
 import { cliRuntimeFile } from '@garcon/common/cli-runtime-paths';
 import { getConfigDir, initializeServerConfig } from './config.js';
-import { wrapRoutes, serverShuttingDownResponse, unhandledRouteErrorResponse } from './lib/http-route.js';
+import { wrapRoutes, unhandledRouteErrorResponse } from './lib/http-route.js';
 import { ControllerCliDispatcher } from './executors/cli-dispatcher.js';
-import { verifyAuthTokenClaims } from './auth/token.js';
-import { getWebSocketAuthToken, webSocketUpgradeHeaders } from './lib/websocket-auth.js';
+import { createWebSocketUpgradeHandler } from './ws/upgrade.js';
 import { init as initAuthStore } from './auth/store.js';
 import { forkChatFileCopy } from './chats/fork-chat.js';
 import { wireSearchSourceAvailability, wireServerEvents, type ServerEventWiring } from './server-event-wiring.js';
@@ -136,10 +135,6 @@ import {
 } from './migrations/index.js';
 import { runCarryOverMigrationAtStartup } from './migrations/startup-progress.js';
 import { removeLegacyForkOrdinals } from './migrations/fork-ordinal-migration.js';
-import {
-  LOCAL_SERVER_PRINCIPAL,
-  type ServerPrincipal,
-} from './lib/http-route-types.js';
 
 const logger = createLogger('server');
 type ServeOptionsWithConnectionLimit = Parameters<
@@ -785,74 +780,7 @@ export async function startServer(): Promise<void> {
       maxRequestBodySize: config.maxRequestBodySize,
       routes: wrapRoutes(routes, { localCapability: runtimeState.localCapability, serverInstanceId: runtimeState.identity.instanceId, isShuttingDown: () => shuttingDown }),
       error: unhandledRouteErrorResponse,
-      async fetch(request, server) {
-        if (shuttingDown) return serverShuttingDownResponse();
-        const url = new URL(request.url);
-
-        if (request.headers.get('upgrade')?.toLowerCase() === 'websocket') {
-          const executorMatch = /^\/executor\/([0-9a-f-]+)$/u.exec(url.pathname);
-          if (executorMatch) {
-            const link = executors.inboundLink(executorMatch[1]!);
-            if (!link) return new Response('Executor is unavailable', { status: 404 });
-            return link.upgrade(request, server, executionSockets);
-          }
-          if (url.pathname !== '/ws') {
-            return new Response('Not found', { status: 404 });
-          }
-
-          const token = getWebSocketAuthToken(request);
-          const claims = authDisabled
-            ? null
-            : await verifyAuthTokenClaims(token);
-          if (shuttingDown) return serverShuttingDownResponse();
-          const principal: ServerPrincipal | null = authDisabled
-            ? LOCAL_SERVER_PRINCIPAL
-            : claims
-              ? {
-                  mode: 'authenticated',
-                  key: claims.username,
-                  username: claims.username,
-                  expiresAtMs: claims.expiresAtMs,
-                }
-              : null;
-          if (!principal) {
-            return new Response('Unauthorized', { status: 401 });
-          }
-
-          const connectionId = crypto.randomUUID();
-          const admission = wsAdmission.tryReserve(connectionId);
-          if (!admission.ok)
-            return new Response(admission.reason, { status: 503 });
-
-          const upgradeOptions: {
-            data: WsConnectionData;
-            headers?: HeadersInit;
-          } = {
-            data: {
-              kind: 'primary',
-              connectionId,
-              principal,
-            },
-          };
-          const headers = webSocketUpgradeHeaders(request);
-          if (headers) upgradeOptions.headers = headers;
-
-          let upgraded: boolean;
-          try {
-            upgraded = server.upgrade(request, upgradeOptions);
-          } catch (error) {
-            wsAdmission.release(connectionId);
-            throw error;
-          }
-          if (!upgraded) {
-            wsAdmission.release(connectionId);
-            return new Response('WebSocket upgrade failed', { status: 400 });
-          }
-          return;
-        }
-
-        return new Response('Not found', { status: 404 });
-      },
+      fetch: createWebSocketUpgradeHandler({ executors, executionSockets, wsAdmission, authDisabled, isShuttingDown: () => shuttingDown }),
       websocket: createServerSocketHandlers({ primary: primaryWs, admission: wsAdmission, config, logger, execution: executionSockets.websocket, delivery: primaryDelivery }),
     } satisfies ServeOptionsWithConnectionLimit;
 
