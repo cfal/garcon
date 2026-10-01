@@ -84,8 +84,9 @@ async function openPreambles(
     await page.getByRole('button', { name: 'Menu', exact: true }).click();
   }
   await trigger.click();
-  await page.getByRole('menuitem', { name: 'Preambles', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Preambles', exact: true });
+  await page.getByRole('menuitem', { name: 'Settings', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Settings', exact: true });
+  await dialog.getByRole('tab', { name: 'Preambles', exact: true }).click();
   await dialog.waitFor();
   await waitForDialogAnimations(dialog);
   return { trigger, dialog };
@@ -94,7 +95,8 @@ async function openPreambles(
 async function dialogLayout(dialog: Locator, fieldNames: readonly string[] = []) {
   return dialog.evaluate((element, names) => {
     const root = element as HTMLElement;
-    const body = root.querySelector<HTMLElement>('[data-slot="preambles-scroll-body"]');
+    const body = root.querySelector<HTMLElement>('[data-slot="preambles-scroll-body"]')
+      ?? root.querySelector<HTMLElement>('[role="tabpanel"]')?.parentElement;
     if (!body) throw new Error('Missing scrollable dialog body.');
     const rect = root.getBoundingClientRect();
     const fieldFontSizes = Object.fromEntries(
@@ -374,13 +376,8 @@ describe('Chromium preambles', () => {
         await expectFocusWithin(fixture.page, manager);
         await fixture.page.keyboard.press('Shift+Tab');
         await expectFocusWithin(fixture.page, manager);
-        if (scenario.touch) {
-          expect(managerLayout.rect.width).toBeGreaterThanOrEqual(scenario.width - 1);
-          expect(managerLayout.rect.height).toBeGreaterThanOrEqual(scenario.height - 1);
-        } else {
-          expect(managerLayout.rect.width).toBeLessThanOrEqual(768);
-          expect(managerLayout.rect.height).toBeLessThanOrEqual(704);
-        }
+        expect(managerLayout.rect.width).toBeLessThanOrEqual(Math.min(scenario.width, 1024));
+        expect(managerLayout.rect.height).toBeLessThanOrEqual(Math.min(scenario.height, 800));
 
         const addPreamble = manager.getByRole('button', {
           name: 'Add preamble',

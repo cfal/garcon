@@ -531,7 +531,7 @@ describe('NewChatPreamblePicker', () => {
 			defaultsIds: [ID_ELIGIBLE, ID_SCOPED],
 			projection: resolvedProjection([ID_ELIGIBLE, ID_SCOPED]),
 		});
-		appShell.closePreambles();
+		appShell.closeSettings();
 
 		await waitFor(() => {
 			const scopedRow = slots('chat-preamble-selection-row').find((row) =>
@@ -643,13 +643,15 @@ describe('NewChatPreamblePicker', () => {
 		)!;
 		await fireEvent.click(within(eligibleRow).getByRole('switch', { name: /Remove/ }));
 		await fireEvent.click(slot('new-chat-preamble-manage-catalog'));
-		expect(appShell.showPreambles).toBe(true);
+		expect(appShell.showSettings).toBe(true);
+		expect(appShell.settingsTab).toBe('preambles');
+		appShell.setSettingsTab('snippets');
 		await waitFor(() => {
 			expect(document.querySelector('[data-slot="new-chat-preamble-selection-dialog"]')).toBeNull();
 		});
 		expect(close).not.toHaveBeenCalled();
 
-		appShell.closePreambles();
+		appShell.closeSettings();
 		await waitFor(() => {
 			expect(slot('new-chat-preamble-selection-dialog')).toBeTruthy();
 			const returnedEligibleRow = slots('chat-preamble-selection-row').find((row) =>
@@ -696,7 +698,7 @@ describe('NewChatPreamblePicker', () => {
 		await fireEvent.click(slot('new-chat-preamble-manage-catalog'));
 		preambles.applySnapshot({ ...snapshot(), revision: 5 });
 		await waitFor(() => expect(loadAutomaticPreview).toHaveBeenCalledTimes(2));
-		appShell.closePreambles();
+		appShell.closeSettings();
 
 		await waitFor(() => {
 			expect(document.activeElement).toBe(slot('new-chat-preamble-manage-catalog'));

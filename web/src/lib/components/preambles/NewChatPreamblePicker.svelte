@@ -28,6 +28,7 @@
 		onRefreshPreview: () => void | Promise<void>;
 		description?: string;
 		onOpenCatalog?: (returnFocus: () => void) => void;
+		catalogOpen?: boolean;
 	}
 
 	type AutomaticPreviewState =
@@ -51,9 +52,11 @@
 		onRefreshPreview,
 		description,
 		onOpenCatalog,
+		catalogOpen,
 	}: Props = $props();
 
 	const appShell = getAppShell();
+	const suspended = $derived(catalogOpen ?? appShell.showSettings);
 	const preamblesCatalog = getPreambles();
 	let draftIds = $state<PreambleId[]>([]);
 	let draftMode = $state<PreambleSelectionChoice['mode']>('defaults');
@@ -63,6 +66,7 @@
 	let observedPreambleCatalogRevision: number | null = null;
 	let refreshedAutomaticDraftCatalogRevision: number | null = null;
 	let wasOpen = false;
+	let openerElement: HTMLElement | null = null;
 	let manageCatalogButton: HTMLButtonElement | null = $state(null);
 
 	function initialDraftIds(
@@ -82,6 +86,7 @@
 			return;
 		}
 		if (!wasOpen) {
+			openerElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 			draftIds = initialDraftIds(choice, defaultsIds);
 			draftMode = choice.mode;
 			hasManualChanges = false;
@@ -189,7 +194,15 @@
 	}
 
 	function handleOpenChange(nextOpen: boolean): void {
-		if (!nextOpen && !appShell.showPreambles) onClose();
+		if (!nextOpen && !suspended) onClose();
+	}
+
+	function handleCloseAutoFocus(event: Event): void {
+		// Catalog visits reopen the focus scope, but must not replace the original opener.
+		event.preventDefault();
+		if (open) return;
+		if (openerElement?.isConnected) openerElement.focus({ preventScroll: true });
+		openerElement = null;
 	}
 
 	function openCatalog(): void {
@@ -197,7 +210,7 @@
 			void restorePickerAfterCatalog();
 		};
 		if (onOpenCatalog) onOpenCatalog(returnFocus);
-		else appShell.openPreambles(returnFocus);
+		else appShell.openSettings('preambles', returnFocus);
 	}
 
 	async function restorePickerAfterCatalog(): Promise<void> {
@@ -247,9 +260,10 @@
 	}
 </script>
 
-<Dialog.Root open={open && !appShell.showPreambles} onOpenChange={handleOpenChange}>
+<Dialog.Root open={open && !suspended} onOpenChange={handleOpenChange}>
 	<Dialog.Content
 		data-slot="new-chat-preamble-selection-dialog"
+		onCloseAutoFocus={handleCloseAutoFocus}
 		class="top-[var(--app-viewport-center-y)] flex h-[var(--app-height)] max-h-[var(--app-height)] w-screen max-w-none flex-col gap-0 overflow-hidden rounded-none border-0 p-0 sm:w-screen sm:max-w-none sm:pointer-fine:top-[50%] sm:pointer-fine:h-[min(38rem,calc(var(--app-height)-2rem))] sm:pointer-fine:max-h-[38rem] sm:pointer-fine:w-[calc(100vw-2rem)] sm:pointer-fine:max-w-xl sm:pointer-fine:rounded-lg sm:pointer-fine:border"
 		showCloseButton={true}
 		onkeydown={handleKeydown}

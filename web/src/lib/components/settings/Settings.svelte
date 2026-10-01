@@ -14,6 +14,11 @@
 	import Sparkles from '@lucide/svelte/icons/sparkles';
 	import Palette from '@lucide/svelte/icons/palette';
 	import Keyboard from '@lucide/svelte/icons/keyboard';
+	import FileText from '@lucide/svelte/icons/file-text';
+	import CalendarClock from '@lucide/svelte/icons/calendar-clock';
+	import Braces from '@lucide/svelte/icons/braces';
+	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
+	import { Button } from '$lib/components/ui/button';
 	import ApiProvidersSection from './ApiProvidersSection.svelte';
 	import AutomationSettingsSection from './AutomationSettingsSection.svelte';
 	import ExecutorAgentSettings from './ExecutorAgentSettings.svelte';
@@ -25,10 +30,14 @@
 	import LocalSettingsSection from './LocalSettingsSection.svelte';
 	import KeyboardShortcutsSection from './KeyboardShortcutsSection.svelte';
 
+	const lazyPreambles = () => import('../preambles/PreamblesSection.svelte');
+	const lazyScheduledPrompts = () => import('./ScheduledPromptsSection.svelte');
+	const lazySnippets = () => import('../snippets/SnippetsSection.svelte');
 	const appShell = getAppShell();
 	const remoteSettings = getRemoteSettings();
 	const executors = getExecutors();
 	let scrollContainer = $state<HTMLDivElement | null>(null);
+	let dialogContent = $state<HTMLDivElement | null>(null);
 	// App tabs are stored in this browser; server tabs are shared by every client.
 	const tabGroups = $derived([
 		{
@@ -48,6 +57,9 @@
 				{ value: 'general', label: m.settings_tab_general(), icon: SlidersHorizontal },
 				{ value: 'automation', label: m.settings_tab_automation(), icon: Sparkles },
 				{ value: 'notifications', label: m.settings_tab_notifications(), icon: Bell },
+				{ value: 'preambles', label: m.preambles_title(), icon: FileText },
+				{ value: 'scheduled-prompts', label: m.scheduled_prompts_title(), icon: CalendarClock },
+				{ value: 'snippets', label: m.snippets_title(), icon: Braces },
 				{ value: 'github', label: m.settings_tab_github(), icon: GitPullRequest },
 				{ value: 'executors', label: m.settings_tab_executors(), icon: Network },
 			],
@@ -66,31 +78,49 @@
 		});
 	});
 
-	function handleOpenChange(open: boolean) {
-		if (!open) appShell.closeSettings();
-	}
-
-	function handleTabChange(value: string) {
-		appShell.setSettingsTab(value);
-		requestAnimationFrame(() => {
+	$effect(() => {
+		void appShell.settingsTab;
+		const frame = requestAnimationFrame(() => {
 			scrollContainer?.scrollTo({ top: 0 });
 		});
-	}
+		return () => cancelAnimationFrame(frame);
+	});
+
+	// Returns keyboard focus to Settings when its child editor is suspended.
+	$effect(() => {
+		if (!appShell.scheduledPromptSuspended) return;
+		const frame = requestAnimationFrame(() => {
+			dialogContent?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus();
+		});
+		return () => cancelAnimationFrame(frame);
+	});
 </script>
 
-<Dialog.Root open={appShell.showSettings} onOpenChange={handleOpenChange}>
+<Dialog.Root open={appShell.showSettings} requestClose={() => appShell.closeSettings()}>
 	<Dialog.Content
+		bind:ref={dialogContent}
 		class="safe-viewport-dialog h-[85dvh] max-h-[50rem] max-w-[calc(100%-1rem)] sm:max-w-5xl flex flex-col gap-0 p-0 overflow-hidden"
 		showCloseButton={true}
 	>
-		<Dialog.Header class="px-6 py-3 border-b border-border">
+		<Dialog.Header class="flex-row items-center gap-2 px-6 py-3 pr-12 border-b border-border">
+			{#if appShell.scheduledPromptSuspended}
+				<Button
+					variant="ghost"
+					size="icon-sm"
+					title={m.settings_return_to_scheduled_prompt()}
+					aria-label={m.settings_return_to_scheduled_prompt()}
+					onclick={() => appShell.returnToScheduledPrompt()}
+				>
+					<ArrowLeft class="size-4" />
+				</Button>
+			{/if}
 			<Dialog.Title class="text-lg font-semibold">{m.settings_title()}</Dialog.Title>
 			<Dialog.Description class="sr-only">{m.settings_title()}</Dialog.Description>
 		</Dialog.Header>
 
 		<Tabs.Root
 			value={appShell.settingsTab}
-			onValueChange={handleTabChange}
+			onValueChange={(value) => appShell.setSettingsTab(value)}
 			orientation="vertical"
 			class="min-h-0 flex-1 flex-row gap-0"
 		>
@@ -173,6 +203,33 @@
 				<Tabs.Content value="notifications" class="mt-0 space-y-6">
 					{#if appShell.settingsTab === 'notifications'}
 						<NotificationsSettingsSection />
+					{/if}
+				</Tabs.Content>
+
+				<Tabs.Content value="preambles" class="mt-0 space-y-4">
+					{#if appShell.settingsTab === 'preambles'}
+						{#await lazyPreambles() then { default: PreamblesSection }}
+							<PreamblesSection active={true} />
+						{/await}
+					{/if}
+				</Tabs.Content>
+
+				<Tabs.Content value="scheduled-prompts" class="mt-0 space-y-4">
+					{#if appShell.settingsTab === 'scheduled-prompts' || appShell.scheduledPromptSuspended}
+						{#await lazyScheduledPrompts() then { default: ScheduledPromptsSection }}
+							<ScheduledPromptsSection
+								active={appShell.settingsTab === 'scheduled-prompts'}
+								suspended={appShell.scheduledPromptSuspended}
+							/>
+						{/await}
+					{/if}
+				</Tabs.Content>
+
+				<Tabs.Content value="snippets" class="mt-0 space-y-4">
+					{#if appShell.settingsTab === 'snippets'}
+						{#await lazySnippets() then { default: SnippetsSection }}
+							<SnippetsSection active={true} />
+						{/await}
 					{/if}
 				</Tabs.Content>
 

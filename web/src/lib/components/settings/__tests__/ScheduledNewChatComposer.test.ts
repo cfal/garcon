@@ -161,7 +161,7 @@ describe('ScheduledNewChatComposer', () => {
 	it('opens the shared picker and preserves the scheduled editor while managing the catalog', async () => {
 		let appShell!: AppShellStore;
 		renderComposer({ onAppShell: (value) => (appShell = value) });
-		appShell.openScheduledPrompts();
+		appShell.openSettings('scheduled-prompts');
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Edit preambles' }));
 		expect(screen.getByRole('dialog', { name: 'Chat preambles' })).toBeTruthy();
@@ -172,8 +172,9 @@ describe('ScheduledNewChatComposer', () => {
 		).toBeTruthy();
 		await fireEvent.click(screen.getByRole('button', { name: 'Manage preambles' }));
 
-		expect(appShell.showScheduledPrompts).toBe(true);
-		expect(appShell.showPreambles).toBe(true);
+		expect(appShell.showSettings).toBe(true);
+		expect(appShell.settingsTab).toBe('preambles');
+		expect(appShell.scheduledPromptSuspended).toBe(true);
 	});
 
 	it('forwards prompt input and keyboard events and renders validation feedback', async () => {

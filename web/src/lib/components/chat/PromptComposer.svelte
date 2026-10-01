@@ -576,7 +576,7 @@
 	}
 
 	function editSnippets(): void {
-		appShell.openSnippets(() => appShell.requestComposerFocus());
+		appShell.openSettings('snippets', () => appShell.requestComposerFocus());
 	}
 
 	function handleCompletionKeyDown(event: KeyboardEvent): boolean {

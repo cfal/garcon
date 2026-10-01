@@ -295,9 +295,6 @@
 	onShareChat={() => {}}
 	onManageTags={() => {}}
 	{chatListAutohideAvailable}
-	onShowScheduledPrompts={() => {}}
-	onShowPreambles={() => {}}
-	onShowSnippets={() => {}}
 	onShowSettings={() => {}}
 	newWindowEdges={workspaceSplitAdmissions()}
 />

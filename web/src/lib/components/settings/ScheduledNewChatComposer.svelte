@@ -206,7 +206,8 @@
 			pickerDescription={m.scheduled_prompts_preamble_selection_description()}
 			summaryReadyLabel={m.scheduled_prompts_preamble_preview_label()}
 			summaryEmptyLabel={m.scheduled_prompts_preamble_none_current()}
-			onOpenCatalog={(returnFocus) => appShell.openPreamblesOverScheduledPrompts(returnFocus)}
+			catalogOpen={appShell.scheduledPromptSuspended}
+			onOpenCatalog={(returnFocus) => appShell.openScheduledPromptPreambles(returnFocus)}
 		/>
 		<p class="px-1 text-xs text-muted-foreground" data-slot="scheduled-new-chat-preamble-hint">
 			{startup.preambles.choice.mode === 'defaults'

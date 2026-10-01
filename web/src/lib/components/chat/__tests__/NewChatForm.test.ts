@@ -12,6 +12,7 @@ import { parseChatId } from '$shared/chat-id';
 import { DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID } from '$shared/agents';
 import type { PreamblesSnapshot } from '$shared/preambles';
 import type { PreamblesStore } from '$lib/preambles/preambles-store.svelte.js';
+import { AppShellStore } from '$lib/stores/app-shell.svelte';
 
 const PROSPECTIVE_CHAT_ID = parseChatId('1787471053739199');
 const RESEEDED_CHAT_ID = parseChatId('1787471053739200');
@@ -986,6 +987,20 @@ describe('NewChatForm', () => {
 		const listbox = await screen.findByRole('listbox', { name: 'Model' });
 		expect(listbox).toBeTruthy();
 		expect(screen.queryByText('Recent models')).toBeNull();
+	});
+
+	it('forwards snippet management to Settings and returns focus to the new-chat prompt', async ({ onTestFinished }) => {
+		const openSettings = vi.spyOn(AppShellStore.prototype, 'openSettings');
+		onTestFinished(() => openSettings.mockRestore());
+		const input = await renderSubmittableForm(vi.fn());
+		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /Snippets/ }));
+		await fireEvent.click(await screen.findByRole('button', { name: 'Edit snippets' }));
+		expect(openSettings).toHaveBeenCalledWith('snippets', expect.any(Function));
+		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Insert Snippet' })).toBeNull());
+		input.blur();
+		openSettings.mock.calls[0][1]?.();
+		await waitFor(() => expect(document.activeElement).toBe(input));
 	});
 
 	it('expands /snippet for review before starting a new chat', async () => {

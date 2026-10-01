@@ -154,7 +154,7 @@ describe('snippet default argument layouts', () => {
 
         const palette = await openSnippetPalette(fixture.page, newChat);
         await palette.getByRole('button', { name: 'Edit snippets' }).click();
-        const manager = fixture.page.getByRole('dialog', { name: 'Snippets' });
+        const manager = fixture.page.getByRole('dialog', { name: 'Settings', exact: true });
         await manager.waitFor();
         const rowLayout = await manager
           .locator('article')

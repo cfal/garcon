@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { AppShellStore } from '../app-shell.svelte';
+import { AppShellStore, SETTINGS_TABS, isServerSettingsTab } from '../app-shell.svelte';
 
 describe('AppShellStore', () => {
 	describe('new chat dialog', () => {
@@ -141,246 +141,161 @@ describe('AppShellStore', () => {
 		});
 	});
 
-	describe('settings tabs', () => {
-		it('defaults unknown sections to interface', () => {
+	describe('settings navigation', () => {
+		it('normalizes unknown sections and keeps all sections in one dialog', () => {
 			const store = new AppShellStore();
-
 			store.openSettings('display');
 			expect(store.settingsTab).toBe('interface');
-
-			store.openSettings('shortcuts');
-			expect(store.settingsTab).toBe('shortcuts');
-
-			store.openSettings('general');
-			expect(store.settingsTab).toBe('general');
-
-			store.setSettingsTab('other-agents');
-			expect(store.settingsTab).toBe('other-agents');
-
-			store.setSettingsTab('automation');
-			expect(store.settingsTab).toBe('automation');
-
-			store.setSettingsTab('notifications');
-			expect(store.settingsTab).toBe('notifications');
-		});
-
-		it('opens app and server tabs in one settings dialog', () => {
-			const store = new AppShellStore();
-			store.openSettings('github');
-			expect(store.showSettings).toBe(true);
-			expect(store.settingsTab).toBe('github');
-			store.setSettingsTab('shortcuts');
-			expect(store.settingsTab).toBe('shortcuts');
-			store.openSettings();
+			for (const tab of SETTINGS_TABS) {
+				store.openSettings(tab);
+				expect(store.showSettings).toBe(true);
+				expect(store.settingsTab).toBe(tab);
+			}
+			store.setSettingsTab('unknown');
 			expect(store.settingsTab).toBe('interface');
 			store.closeSettings();
 			expect(store.showSettings).toBe(false);
 		});
 
-		it.each([
-			'openScheduledPrompts',
-			'openOnboardingWizard',
-			'openPreambles',
-			'openSnippets',
-		] as const)('%s closes settings', (open) => {
+		it.each(['preambles', 'scheduled-prompts', 'snippets'] as const)(
+			'places %s in server settings and closes onboarding',
+			(tab) => {
+				const store = new AppShellStore();
+				store.openOnboardingWizard();
+				store.openSettings(tab);
+				expect(store.showOnboardingWizard).toBe(false);
+				expect(store.settingsTab).toBe(tab);
+				expect(isServerSettingsTab(tab)).toBe(true);
+			},
+		);
+
+		it('retains the opener across tab changes and restores focus once on close', async () => {
 			const store = new AppShellStore();
-			store.openSettings();
-			store[open]();
-			expect(store.showSettings).toBe(false);
-			store.openSettings();
-			expect(store.showScheduledPrompts).toBe(false);
-			expect(store.showOnboardingWizard).toBe(false);
-			expect(store.showPreambles).toBe(false);
-			expect(store.showSnippets).toBe(false);
-		});
-	});
-
-	describe('scheduled prompts dialog', () => {
-		it('opens independently and closes settings', () => {
-			const store = new AppShellStore();
-			store.openSettings('general');
-
-			store.openScheduledPrompts();
-
-			expect(store.showScheduledPrompts).toBe(true);
-			expect(store.showSettings).toBe(false);
-
-			store.openSettings();
-			expect(store.showScheduledPrompts).toBe(false);
-			expect(store.showSettings).toBe(true);
-		});
-
-		it('closes without changing settings tab state', () => {
-			const store = new AppShellStore();
-			store.setSettingsTab('general');
-			store.openScheduledPrompts();
-
-			store.closeScheduledPrompts();
-
-			expect(store.showScheduledPrompts).toBe(false);
-			expect(store.settingsTab).toBe('general');
-		});
-	});
-
-	describe('snippets dialog', () => {
-		it('opens exclusively and returns focus after a user close', async () => {
-			const store = new AppShellStore();
-			const returnFocus = vi.fn();
-			store.openSettings('general');
-
-			store.openSnippets(returnFocus);
-
-			expect(store.showSnippets).toBe(true);
-			expect(store.showSettings).toBe(false);
-			expect(store.showScheduledPrompts).toBe(false);
-
-			store.closeSnippets();
-			expect(store.showSnippets).toBe(false);
-			expect(returnFocus).not.toHaveBeenCalled();
+			const restore = vi.fn();
+			store.openSettings('snippets', restore);
+			store.setSettingsTab('preambles');
+			store.closeSettings();
+			expect(restore).not.toHaveBeenCalled();
 			await Promise.resolve();
-			expect(returnFocus).toHaveBeenCalledTimes(1);
-		});
-
-		it('dismisses without restoring focus when another shell dialog opens', async () => {
-			const store = new AppShellStore();
-			const returnFocus = vi.fn();
-			store.openSnippets(returnFocus);
-
-			store.openScheduledPrompts();
+			expect(restore).toHaveBeenCalledOnce();
+			store.closeSettings();
 			await Promise.resolve();
-
-			expect(store.showSnippets).toBe(false);
-			expect(store.showScheduledPrompts).toBe(true);
-			expect(returnFocus).not.toHaveBeenCalled();
-		});
-	});
-
-	describe('onboarding wizard dialog', () => {
-		it('opens exclusively and closes other shell dialogs', async () => {
-			const store = new AppShellStore();
-			const returnFocus = vi.fn();
-			store.openSettings('general');
-			store.openSnippets(returnFocus);
-
-			store.openOnboardingWizard();
-			await Promise.resolve();
-
-			expect(store.showOnboardingWizard).toBe(true);
-			expect(store.showSettings).toBe(false);
-			expect(store.showScheduledPrompts).toBe(false);
-			expect(store.showSnippets).toBe(false);
-			expect(returnFocus).not.toHaveBeenCalled();
+			expect(restore).toHaveBeenCalledOnce();
 		});
 
-		it('closes when settings open', () => {
+		it('drops an old opener when settings are explicitly reopened', async () => {
 			const store = new AppShellStore();
-			store.openOnboardingWizard();
-
+			const restore = vi.fn();
+			store.openSettings('snippets', restore);
 			store.openSettings();
-
-			expect(store.showOnboardingWizard).toBe(false);
-			expect(store.showSettings).toBe(true);
+			store.closeSettings();
+			await Promise.resolve();
+			expect(restore).not.toHaveBeenCalled();
 		});
 
-		it('closes when scheduled prompts or snippets open', () => {
+		it('does not restore stale focus over a newly opened dialog', async () => {
 			const store = new AppShellStore();
-			store.openOnboardingWizard();
-
-			store.openScheduledPrompts();
-
-			expect(store.showOnboardingWizard).toBe(false);
-			expect(store.showScheduledPrompts).toBe(true);
-
-			store.openOnboardingWizard();
-			store.openSnippets();
-
-			expect(store.showOnboardingWizard).toBe(false);
-			expect(store.showSnippets).toBe(true);
+			const restore = vi.fn();
+			store.openSettings('preambles', restore);
+			store.closeSettings();
+			store.openSettings('general');
+			await Promise.resolve();
+			expect(restore).not.toHaveBeenCalled();
 		});
 
-		it('closes without touching settings tab state', () => {
+		it('opens onboarding exclusively without restoring focus', async () => {
 			const store = new AppShellStore();
-			store.setSettingsTab('general');
+			const restore = vi.fn();
+			store.openSettings('snippets', restore);
 			store.openOnboardingWizard();
-
 			store.closeOnboardingWizard();
-
+			await Promise.resolve();
+			expect(store.showSettings).toBe(false);
 			expect(store.showOnboardingWizard).toBe(false);
-			expect(store.settingsTab).toBe('general');
+			expect(store.settingsTab).toBe('snippets');
+			expect(restore).not.toHaveBeenCalled();
 		});
 	});
 
-	describe('preambles dialog', () => {
-		it('opens exclusively with the other shell dialogs', () => {
+	describe('scheduled prompt catalog visit', () => {
+		it.each(['close', 'back', 'tab'] as const)(
+			'resumes the scheduled editor through %s without closing settings',
+			async (action) => {
+				const store = new AppShellStore();
+				const restore = vi.fn();
+				store.openSettings('scheduled-prompts');
+				store.openScheduledPromptPreambles(restore);
+				expect(store.scheduledPromptSuspended).toBe(true);
+				expect(store.settingsTab).toBe('preambles');
+				expect(store.showSettings).toBe(true);
+				if (action === 'close') store.closeSettings();
+				else if (action === 'back') store.returnToScheduledPrompt();
+				else store.setSettingsTab('scheduled-prompts');
+				expect(store.scheduledPromptSuspended).toBe(false);
+				expect(store.settingsTab).toBe('scheduled-prompts');
+				expect(store.showSettings).toBe(true);
+				await Promise.resolve();
+				expect(restore).toHaveBeenCalledOnce();
+				store.closeSettings();
+				await Promise.resolve();
+				expect(store.showSettings).toBe(false);
+				expect(restore).toHaveBeenCalledOnce();
+			},
+		);
+
+		it('keeps the draft and outer opener while visiting other settings sections', async () => {
 			const store = new AppShellStore();
-			store.openSettings('general');
+			const outerRestore = vi.fn();
+			const pickerRestore = vi.fn();
+			store.openSettings('preambles', outerRestore);
+			store.setSettingsTab('scheduled-prompts');
+			store.openScheduledPromptPreambles(pickerRestore);
+			store.setSettingsTab('snippets');
+			expect(store.scheduledPromptSuspended).toBe(true);
+			store.closeSettings();
+			await Promise.resolve();
+			expect(store.settingsTab).toBe('scheduled-prompts');
+			expect(pickerRestore).toHaveBeenCalledOnce();
+			expect(outerRestore).not.toHaveBeenCalled();
+			store.closeSettings();
+			await Promise.resolve();
+			expect(outerRestore).toHaveBeenCalledOnce();
+		});
 
-			store.openPreambles();
+		it.each(['settings', 'onboarding'] as const)(
+			'discards the suspended editor when %s is explicitly opened',
+			async (destination) => {
+				const store = new AppShellStore();
+				const restore = vi.fn();
+				store.openSettings('scheduled-prompts');
+				store.openScheduledPromptPreambles(restore);
+				if (destination === 'settings') store.openSettings();
+				else store.openOnboardingWizard();
+				expect(store.scheduledPromptSuspended).toBe(false);
+				store.closeSettings();
+				await Promise.resolve();
+				expect(restore).not.toHaveBeenCalled();
+			},
+		);
 
-			expect(store.showPreambles).toBe(true);
-			expect(store.showOnboardingWizard).toBe(false);
+		it('ignores catalog visits without an active scheduled section', () => {
+			const store = new AppShellStore();
+			store.openScheduledPromptPreambles(vi.fn());
 			expect(store.showSettings).toBe(false);
-			expect(store.showScheduledPrompts).toBe(false);
-			expect(store.showSnippets).toBe(false);
-
-			store.openSnippets();
-			expect(store.showPreambles).toBe(false);
-			expect(store.showSnippets).toBe(true);
-
-			store.openOnboardingWizard();
-			store.openPreambles();
-			expect(store.showOnboardingWizard).toBe(false);
-			expect(store.showPreambles).toBe(true);
-
-			store.openScheduledPrompts();
-			expect(store.showPreambles).toBe(false);
-			expect(store.showScheduledPrompts).toBe(true);
+			expect(store.scheduledPromptSuspended).toBe(false);
+			store.openSettings('snippets');
+			store.openScheduledPromptPreambles(vi.fn());
+			expect(store.settingsTab).toBe('snippets');
+			expect(store.scheduledPromptSuspended).toBe(false);
 		});
+	});
 
-		it('closes without changing settings tab state', () => {
-			const store = new AppShellStore();
-			store.setSettingsTab('general');
-			store.openPreambles();
-
-			store.closePreambles();
-
-			expect(store.showPreambles).toBe(false);
-			expect(store.settingsTab).toBe('general');
-		});
-
-		it('restores the captured opener after catalog management closes', async () => {
-			const store = new AppShellStore();
-			const restore = vi.fn();
-			store.openPreambles(restore);
-
-			store.closePreambles();
-			await Promise.resolve();
-
-			expect(restore).toHaveBeenCalledOnce();
-		});
-
-		it('keeps the scheduled editor mounted during nested catalog management', async () => {
-			const store = new AppShellStore();
-			const restore = vi.fn();
-			store.openScheduledPrompts();
-
-			store.openPreamblesOverScheduledPrompts(restore);
-
-			expect(store.showScheduledPrompts).toBe(true);
-			expect(store.showPreambles).toBe(true);
-			store.closePreambles();
-			await Promise.resolve();
-			expect(store.showScheduledPrompts).toBe(true);
-			expect(restore).toHaveBeenCalledOnce();
-		});
-
-		it('captures both chat and transcript view for selection editing', () => {
-			const store = new AppShellStore();
-			store.openChatPreambleSelection('1783725900000200', '12345678-1234-4123-8123-123456789abc');
-			expect(store.chatPreambleSelectionTarget).toEqual({
-				chatId: '1783725900000200',
-				transcriptViewId: '12345678-1234-4123-8123-123456789abc',
-			});
+	it('captures both chat and transcript view for selection editing', () => {
+		const store = new AppShellStore();
+		store.openChatPreambleSelection('1783725900000200', '12345678-1234-4123-8123-123456789abc');
+		expect(store.chatPreambleSelectionTarget).toEqual({
+			chatId: '1783725900000200',
+			transcriptViewId: '12345678-1234-4123-8123-123456789abc',
 		});
 	});
 });

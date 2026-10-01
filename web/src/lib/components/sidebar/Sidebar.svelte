@@ -78,9 +78,6 @@
 		onOpenChatInNewWindow?: (chatId: string, edge?: WorkspaceWindowEdge) => void;
 		chatListAutohideAvailable?: boolean;
 		onChatListAutohideChange?: (enabled: boolean) => void;
-		onShowScheduledPrompts: () => void;
-		onShowPreambles: () => void;
-		onShowSnippets: () => void;
 		onShowSettings: () => void;
 		newWindowEdges: WorkspaceSplitAdmissions;
 	}
@@ -109,9 +106,6 @@
 		onOpenChatInNewWindow,
 		chatListAutohideAvailable = false,
 		onChatListAutohideChange,
-		onShowScheduledPrompts,
-		onShowPreambles,
-		onShowSnippets,
 		onShowSettings,
 		newWindowEdges,
 	}: SidebarProps = $props();
@@ -461,9 +455,6 @@
 			onApplySidebarMenuSearch={handleApplySidebarMenuSearch}
 			onApplyPillSearch={handleApplySidebarPillSearch}
 			onClearActiveQuery={handleClearActiveQuery}
-			{onShowScheduledPrompts}
-			{onShowPreambles}
-			{onShowSnippets}
 			{onShowSettings}
 		/>
 	</div>

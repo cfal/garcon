@@ -50,8 +50,10 @@ describe('Lightpanda minute scheduling', () => {
       const app = new SpaDriver(fixture.page, integration);
       const openSchedules = async () => {
         await app.clickButton('More actions');
-        await app.waitForMenuItemEnabled('Scheduled prompts');
-        await app.clickMenuItem('Scheduled prompts');
+        await app.waitForMenuItemEnabled('Settings');
+        await app.clickMenuItem('Settings');
+        await app.waitForDialogButtonEnabled('Scheduled Prompts');
+        await app.clickButton('Scheduled Prompts');
         await app.waitForText('Review A & B');
       };
       await app.open();
@@ -148,8 +150,10 @@ describe('Lightpanda minute scheduling', () => {
       await app.open();
       await fixture.waitForSpaWebSocket();
       await app.clickButton('More actions');
-      await app.waitForMenuItemEnabled('Scheduled prompts');
-      await app.clickMenuItem('Scheduled prompts');
+      await app.waitForMenuItemEnabled('Settings');
+      await app.clickMenuItem('Settings');
+      await app.waitForDialogButtonEnabled('Scheduled Prompts');
+      await app.clickButton('Scheduled Prompts');
       await app.waitForButtonEnabled('Add Prompt');
       await app.clickButton('Add Prompt');
       await fixture.page.waitForFunction(
@@ -218,7 +222,7 @@ describe('Lightpanda minute scheduling', () => {
       );
 
       await app.clickButton('Manage preambles');
-      await fixture.page.waitForSelector('[data-slot="preambles-scroll-body"]');
+      await app.waitForButtonEnabled('Add preamble');
       expect(await fixture.page.$('[data-slot="scheduled-prompt-field"] textarea')).not.toBeNull();
       await app.clickButton('Close', { last: true });
       await fixture.page.waitForFunction(

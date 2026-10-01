@@ -112,6 +112,9 @@ describe('Settings', () => {
 				'General',
 				'Automation',
 				'Notifications',
+				'Preambles',
+				'Scheduled Prompts',
+				'Snippets',
 				'GitHub',
 				'Executors',
 			]);
@@ -382,6 +385,9 @@ describe('Settings', () => {
 				'General',
 				'Automation',
 				'Notifications',
+				'Preambles',
+				'Scheduled Prompts',
+				'Snippets',
 				'GitHub',
 				'Executors',
 			]) {

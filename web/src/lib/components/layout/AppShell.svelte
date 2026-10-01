@@ -19,10 +19,7 @@
 	} from '$lib/layout/desktop-layout.js';
 
 	const lazySettings = () => import('../settings/Settings.svelte');
-	const lazyScheduledPrompts = () => import('../settings/ScheduledPromptsDialog.svelte');
-	const lazyPreambles = () => import('../preambles/PreamblesDialog.svelte');
 	const lazyChatPreambleSelection = () => import('../preambles/ChatPreambleSelectionDialog.svelte');
-	const lazySnippets = () => import('../snippets/SnippetsDialog.svelte');
 	const lazyOnboardingWizard = () => import('../onboarding/OnboardingWizard.svelte');
 	import {
 		getNavigation,
@@ -718,9 +715,6 @@
 		onOpenChatInNewWindow={isMobile ? undefined : handleOpenChatInNewWindow}
 		chatListAutohideAvailable={hoverCapability.current}
 		onChatListAutohideChange={handleChatListAutohideChange}
-		onShowScheduledPrompts={() => appShell.openScheduledPrompts()}
-		onShowPreambles={() => appShell.openPreambles()}
-		onShowSnippets={() => appShell.openSnippets()}
 		onShowSettings={() => appShell.openSettings()}
 		{newWindowEdges}
 	/>
@@ -918,27 +912,9 @@
 	{/await}
 {/if}
 
-{#if appShell.showScheduledPrompts}
-	{#await lazyScheduledPrompts() then { default: ScheduledPromptsDialog }}
-		<ScheduledPromptsDialog />
-	{/await}
-{/if}
-
-{#if appShell.showPreambles}
-	{#await lazyPreambles() then { default: PreamblesDialog }}
-		<PreamblesDialog />
-	{/await}
-{/if}
-
 {#if appShell.chatPreambleSelectionTarget}
 	{#await lazyChatPreambleSelection() then { default: ChatPreambleSelectionDialog }}
 		<ChatPreambleSelectionDialog />
-	{/await}
-{/if}
-
-{#if appShell.showSnippets}
-	{#await lazySnippets() then { default: SnippetsDialog }}
-		<SnippetsDialog />
 	{/await}
 {/if}
 

@@ -17,10 +17,17 @@ test('settings navigation and host sections fit desktop and mobile dialogs', asy
     for (const width of [1440, 768, 390, 320]) {
       phase(`settings at ${width}px`);
       await page.setViewportSize({ width, height: 900 });
-      for (const name of ['Interface', 'Shortcuts', 'Providers', 'Other Agents', 'General', 'Automation', 'Notifications', 'GitHub', 'Executors']) {
+      for (const name of ['Interface', 'Shortcuts', 'Providers', 'Other Agents', 'General', 'Automation', 'Notifications', 'Preambles', 'Scheduled Prompts', 'Snippets', 'GitHub', 'Executors']) {
         await dialog.getByRole('tab', { name, exact: true }).click();
         const panel = dialog.getByRole('tabpanel');
         await browserExpect(panel).toBeVisible();
+        const catalogActions: Record<string, string> = {
+          Preambles: 'Add preamble',
+          'Scheduled Prompts': 'Add Prompt',
+          Snippets: 'Add snippet',
+        };
+        const catalogAction = catalogActions[name];
+        if (catalogAction) await browserExpect(panel.getByRole('button', { name: catalogAction, exact: true })).toBeVisible();
         await browserExpect(panel.getByRole('heading', { name, exact: true })).toHaveCount(0);
         const navRect = (await dialog.getByRole('tablist').boundingBox())!;
         const panelRect = (await panel.boundingBox())!;
@@ -78,7 +85,8 @@ test('scheduled-chat executor and path fields align for mouse and touch input', 
     await initializeFixtureRepository(integration.dirs.project);
     await page.goto(integration.garcon.baseUrl);
     await page.getByRole('button', { name: 'More actions', exact: true }).click();
-    await page.getByRole('menuitem', { name: 'Scheduled prompts', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Settings', exact: true }).click();
+    await page.getByRole('tab', { name: 'Scheduled Prompts', exact: true }).click();
     await page.getByRole('button', { name: 'Add Prompt', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: 'Add Scheduled Prompt', exact: true });
     const picker = dialog.locator('[data-executor-picker]');

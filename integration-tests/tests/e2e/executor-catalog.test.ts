@@ -93,8 +93,10 @@ test('editing a remote schedule preserves its saved endpoint across failed disco
     await app.open();
     await fixture.waitForSpaWebSocket();
     await app.clickButton('More actions');
-    await app.waitForMenuItemEnabled('Scheduled prompts');
-    await app.clickMenuItem('Scheduled prompts');
+    await app.waitForMenuItemEnabled('Settings');
+    await app.clickMenuItem('Settings');
+    await app.waitForDialogButtonEnabled('Scheduled Prompts');
+    await app.clickButton('Scheduled Prompts');
     await app.waitForButtonEnabled('Edit prompt');
     await app.clickButton('Edit prompt');
     await app.waitForText('Failed to fetch model catalog: 503');
@@ -148,8 +150,10 @@ test('late remote catalog discovery preserves a schedule retargeted to Local', a
     await app.open();
     await fixture.waitForSpaWebSocket();
     await app.clickButton('More actions');
-    await app.waitForMenuItemEnabled('Scheduled prompts');
-    await app.clickMenuItem('Scheduled prompts');
+    await app.waitForMenuItemEnabled('Settings');
+    await app.clickMenuItem('Settings');
+    await app.waitForDialogButtonEnabled('Scheduled Prompts');
+    await app.clickButton('Scheduled Prompts');
     await app.waitForButtonEnabled('Edit prompt');
     await app.clickButton('Edit prompt');
     await fixture.page.waitForFunction(() => document.documentElement.dataset.remoteCatalogPending === 'true');
@@ -196,8 +200,10 @@ test('new and scheduled chats retain input and require Retry after cached remote
       if (kind === 'new') await app.clickButton('New Chat');
       else {
         await app.clickButton('More actions');
-        await app.waitForMenuItemEnabled('Scheduled prompts');
-        await app.clickMenuItem('Scheduled prompts');
+        await app.waitForMenuItemEnabled('Settings');
+        await app.clickMenuItem('Settings');
+        await app.waitForDialogButtonEnabled('Scheduled Prompts');
+        await app.clickButton('Scheduled Prompts');
         await app.waitForButtonEnabled('Add Prompt');
         await app.clickButton('Add Prompt');
       }

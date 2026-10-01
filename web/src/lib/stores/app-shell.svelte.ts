@@ -13,6 +13,9 @@ export const SETTINGS_TABS = [
 	'general',
 	'automation',
 	'notifications',
+	'preambles',
+	'scheduled-prompts',
+	'snippets',
 	'github',
 	'executors',
 ] as const;
@@ -40,9 +43,6 @@ export interface ChatPreambleSelectionTarget {
 
 export class AppShellStore {
 	showSettings = $state(false);
-	showScheduledPrompts = $state(false);
-	showPreambles = $state(false);
-	showSnippets = $state(false);
 	showOnboardingWizard = $state(false);
 	chatPreambleSelectionTarget = $state<ChatPreambleSelectionTarget | null>(null);
 	settingsTab = $state<SettingsTab>('interface');
@@ -65,27 +65,35 @@ export class AppShellStore {
 	#deleteSelected = createActionSignal();
 	#newChatDialogSeed = createActionSignal();
 	#sidebarSearch = createActionSignal();
-	#snippetsReturnFocus: (() => void) | null = null;
-	#preamblesReturnFocus: (() => void) | null = null;
+	#settingsReturnFocus: (() => void) | null = null;
+	#scheduledPromptReturnFocus = $state<(() => void) | null>(null);
+	#focusReturnVersion = 0;
 
-	openSettings(section: string = 'interface'): void {
-		this.dismissSnippets();
-		this.showScheduledPrompts = false;
+	openSettings(section: string = 'interface', returnFocus?: () => void): void {
+		this.#focusReturnVersion += 1;
+		this.#settingsReturnFocus = returnFocus ?? null;
+		this.#scheduledPromptReturnFocus = null;
 		this.showOnboardingWizard = false;
-		this.dismissPreambles();
 		this.showSettings = true;
 		this.settingsTab = normalizeSettingsTab(section);
 	}
 
 	closeSettings(): void {
+		if (this.scheduledPromptSuspended) {
+			this.returnToScheduledPrompt();
+			return;
+		}
 		this.showSettings = false;
+		const returnFocus = this.#settingsReturnFocus;
+		this.#settingsReturnFocus = null;
+		this.#restoreFocus(returnFocus);
 	}
 
 	openOnboardingWizard(): void {
-		this.dismissSnippets();
+		this.#focusReturnVersion += 1;
+		this.#settingsReturnFocus = null;
+		this.#scheduledPromptReturnFocus = null;
 		this.showSettings = false;
-		this.showScheduledPrompts = false;
-		this.dismissPreambles();
 		this.showOnboardingWizard = true;
 	}
 
@@ -93,45 +101,23 @@ export class AppShellStore {
 		this.showOnboardingWizard = false;
 	}
 
-	openScheduledPrompts(): void {
-		this.dismissSnippets();
-		this.showSettings = false;
-		this.showOnboardingWizard = false;
-		this.dismissPreambles();
-		this.showScheduledPrompts = true;
+	get scheduledPromptSuspended(): boolean {
+		return this.#scheduledPromptReturnFocus !== null;
 	}
 
-	closeScheduledPrompts(): void {
-		this.showScheduledPrompts = false;
+	openScheduledPromptPreambles(returnFocus: () => void): void {
+		if (!this.showSettings || this.settingsTab !== 'scheduled-prompts') return;
+		this.#focusReturnVersion += 1;
+		this.#scheduledPromptReturnFocus = returnFocus;
+		this.settingsTab = 'preambles';
 	}
 
-	openPreambles(returnFocus?: () => void): void {
-		this.dismissSnippets();
-		this.showSettings = false;
-		this.showScheduledPrompts = false;
-		this.showOnboardingWizard = false;
-		this.#preamblesReturnFocus = returnFocus ?? null;
-		this.showPreambles = true;
-	}
-
-	openPreamblesOverScheduledPrompts(returnFocus?: () => void): void {
-		this.dismissSnippets();
-		this.showSettings = false;
-		this.showOnboardingWizard = false;
-		this.#preamblesReturnFocus = returnFocus ?? null;
-		this.showPreambles = true;
-	}
-
-	closePreambles(): void {
-		this.showPreambles = false;
-		const returnFocus = this.#preamblesReturnFocus;
-		this.#preamblesReturnFocus = null;
-		if (returnFocus) queueMicrotask(returnFocus);
-	}
-
-	dismissPreambles(): void {
-		this.showPreambles = false;
-		this.#preamblesReturnFocus = null;
+	returnToScheduledPrompt(): void {
+		if (!this.scheduledPromptSuspended) return;
+		const returnFocus = this.#scheduledPromptReturnFocus;
+		this.#scheduledPromptReturnFocus = null;
+		this.settingsTab = 'scheduled-prompts';
+		this.#restoreFocus(returnFocus);
 	}
 
 	openChatPreambleSelection(chatId: string, transcriptViewId: string): void {
@@ -142,29 +128,20 @@ export class AppShellStore {
 		this.chatPreambleSelectionTarget = null;
 	}
 
-	openSnippets(returnFocus?: () => void): void {
-		this.showSettings = false;
-		this.showScheduledPrompts = false;
-		this.showOnboardingWizard = false;
-		this.dismissPreambles();
-		this.#snippetsReturnFocus = returnFocus ?? null;
-		this.showSnippets = true;
-	}
-
-	closeSnippets(): void {
-		this.showSnippets = false;
-		const returnFocus = this.#snippetsReturnFocus;
-		this.#snippetsReturnFocus = null;
-		if (returnFocus) queueMicrotask(returnFocus);
-	}
-
-	dismissSnippets(): void {
-		this.showSnippets = false;
-		this.#snippetsReturnFocus = null;
-	}
-
 	setSettingsTab(tab: string): void {
+		if (tab === 'scheduled-prompts' && this.scheduledPromptSuspended) {
+			this.returnToScheduledPrompt();
+			return;
+		}
 		this.settingsTab = normalizeSettingsTab(tab);
+	}
+
+	#restoreFocus(returnFocus: (() => void) | null): void {
+		if (!returnFocus) return;
+		const version = ++this.#focusReturnVersion;
+		queueMicrotask(() => {
+			if (version === this.#focusReturnVersion) returnFocus();
+		});
 	}
 
 	setSidebarOpen(open: boolean): void {

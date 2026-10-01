@@ -20,9 +20,10 @@
 
 	interface Props {
 		active: boolean;
+		suspended?: boolean;
 	}
 
-	let { active }: Props = $props();
+	let { active, suspended = false }: Props = $props();
 	const prompts = getScheduledPrompts();
 	const sessions = getChatSessions();
 	const executors = getExecutors();
@@ -127,7 +128,7 @@
 
 <div class="space-y-4">
 	<div class="flex flex-wrap items-center justify-between gap-2">
-		<div class="flex items-center gap-2">
+		<div class="flex flex-wrap items-center gap-2">
 			<Button onclick={openCreate} disabled={!prompts.hasLoaded}>
 				<Plus class="mr-2 h-4 w-4" />
 				{m.scheduled_prompts_add_prompt()}
@@ -222,6 +223,7 @@
 
 <ScheduledPromptDialog
 	open={formOpen}
+	{suspended}
 	scheduledPrompt={editingPrompt}
 	onSave={save}
 	onClose={() => (formOpen = false)}

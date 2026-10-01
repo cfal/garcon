@@ -15,6 +15,7 @@
 		setTransientLayers,
 	} from '$lib/context';
 	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
+	import { AppShellStore } from '$lib/stores/app-shell.svelte';
 	import type { NewChatConfig } from '$lib/types/app.js';
 	import type { PreamblesSnapshot } from '$shared/preambles';
 	import type { ChatId } from '$shared/chat-id';
@@ -101,16 +102,8 @@
 	setPreambles(preambles);
 	setCanonicalWorkspaceLayout();
 
-	let seedListener = () => {};
-	const appShell = {
-		projectBasePath: '/workspace',
-		isMobile: false,
-		openSnippets() {},
-		onNewChatDialogSeed(callback: () => void) {
-			seedListener = callback;
-			return () => {};
-		},
-	} as never;
+	const appShell = new AppShellStore();
+	appShell.projectBasePath = '/workspace';
 	setAppShell(appShell);
 	const transientLayers = new TransientLayerRegistry(new WorkspaceInteractionGate());
 	setTransientLayers(transientLayers);
@@ -294,7 +287,7 @@
 <svelte:window onkeydowncapture={(event) => transientLayers.handleEscape(event)} />
 <NewChatForm {onStartChat} />
 
-<button type="button" data-testid="reseed-new-chat" onclick={() => seedListener()}>Reseed</button>
+<button type="button" data-testid="reseed-new-chat" onclick={() => appShell.openNewChatDialog()}>Reseed</button>
 
 <div data-testid="snippet-load-count">{snippetLoadCount}</div>
 {#each notifications.items as notification (notification.id)}

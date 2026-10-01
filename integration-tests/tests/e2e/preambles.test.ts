@@ -113,8 +113,10 @@ describe('Lightpanda preambles', () => {
       );
 
       await app.clickButton('More actions');
-      await app.waitForMenuItemEnabled('Preambles');
-      await app.clickMenuItem('Preambles');
+      await app.waitForMenuItemEnabled('Settings');
+      await app.clickMenuItem('Settings');
+      await app.waitForDialogButtonEnabled('Preambles');
+      await app.clickButton('Preambles');
       await app.waitForButtonEnabled('Add preamble');
 
       await app.clickButton('Add preamble');
@@ -269,8 +271,10 @@ describe('Lightpanda preambles', () => {
       });
 
       await app.clickButton('More actions');
-      await app.waitForMenuItemEnabled('Preambles');
-      await app.clickMenuItem('Preambles');
+      await app.waitForMenuItemEnabled('Settings');
+      await app.clickMenuItem('Settings');
+      await app.waitForDialogButtonEnabled('Preambles');
+      await app.clickButton('Preambles');
       await app.waitForText('Global UI rules');
       await clickPreambleRowAction(fixture, 'Global UI rules', 'Edit Global UI rules');
       await app.fill('#preamble-title', 'Global UI rules renamed');

@@ -16,7 +16,9 @@ test('scheduled chat and preamble directory pickers browse the selected worker',
     await app.open();
     await fixture.waitForSpaWebSocket();
     await app.clickButton('More actions');
-    await app.clickMenuItem('Scheduled prompts');
+    await app.clickMenuItem('Settings');
+    await app.waitForDialogButtonEnabled('Scheduled Prompts');
+    await app.clickButton('Scheduled Prompts');
     await app.waitForButtonEnabled('Add Prompt');
     await app.clickButton('Add Prompt');
     await selectExecutor(fixture.page, '[role="dialog"] [data-executor-picker]', 'Integration worker');
@@ -32,7 +34,9 @@ test('scheduled chat and preamble directory pickers browse the selected worker',
     await app.clickButton('Close');
 
     await app.clickButton('More actions');
-    await app.clickMenuItem('Preambles');
+    await app.clickMenuItem('Settings');
+    await app.waitForDialogButtonEnabled('Preambles');
+    await app.clickButton('Preambles');
     await app.waitForButtonEnabled('Add preamble');
     await app.clickButton('Add preamble');
     await app.fill('#preamble-title', 'Synthetic worker rules');

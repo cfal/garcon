@@ -15,6 +15,7 @@
 		summaryEmptyLabel?: string;
 		onClear?: () => void;
 		onOpenCatalog?: (returnFocus: () => void) => void;
+		catalogOpen?: boolean;
 	}
 
 	let {
@@ -26,6 +27,7 @@
 		summaryEmptyLabel,
 		onClear,
 		onOpenCatalog,
+		catalogOpen,
 	}: Props = $props();
 	const preamblesCatalog = getPreambles();
 	let pickerOpen = $state(false);
@@ -105,6 +107,7 @@
 		projection={selection.preview}
 		description={pickerDescription}
 		{onOpenCatalog}
+		{catalogOpen}
 		onClose={() => (pickerOpen = false)}
 		onApplyExplicit={(ids) => selection.setExplicit(ids)}
 		onApplyDefaults={() => selection.resetToDefaults()}

@@ -500,7 +500,7 @@
 	}
 
 	function editSnippets(): void {
-		appShell.openSnippets(() => {
+		appShell.openSettings('snippets', () => {
 			void tick().then(() => textareaRef?.focus());
 		});
 	}

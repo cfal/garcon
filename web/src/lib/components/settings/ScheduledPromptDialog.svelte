@@ -25,12 +25,13 @@
 
 	interface Props {
 		open: boolean;
+		suspended?: boolean;
 		scheduledPrompt: ScheduledPrompt | null;
 		onSave: (definition: ScheduledPromptDefinitionInput) => Promise<void>;
 		onClose: () => void;
 	}
 
-	let { open, scheduledPrompt, onSave, onClose }: Props = $props();
+	let { open, suspended = false, scheduledPrompt, onSave, onClose }: Props = $props();
 	const rootModelCatalog = getModelCatalog();
 	const executors = getExecutors();
 	const localSettings = getLocalSettings();
@@ -60,6 +61,8 @@
 	let pickerOpen = $state(false);
 	let isMobile = $state(false);
 	let initialization = 0;
+	let wasOpen = false;
+	let openerElement: HTMLElement | null = null;
 
 	const selectedChat = $derived(
 		form.existingChatId ? sessions.byId[form.existingChatId] : undefined,
@@ -68,7 +71,14 @@
 	const timezone = $derived(browserTimeZoneLabel());
 
 	$effect(() => {
-		if (!open) return;
+		if (!open) {
+			wasOpen = false;
+			return;
+		}
+		if (!wasOpen) {
+			wasOpen = true;
+			openerElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+		}
 		const currentPrompt = scheduledPrompt;
 		const token = ++initialization;
 		untrack(() => {
@@ -150,10 +160,25 @@
 		event.preventDefault();
 		void save();
 	}
+
+	function handleCloseAutoFocus(event: Event): void {
+		// Catalog visits reopen the focus scope, but must not replace the original opener.
+		event.preventDefault();
+		if (open) return;
+		if (openerElement?.isConnected) openerElement.focus({ preventScroll: true });
+		openerElement = null;
+	}
 </script>
 
-<Dialog.Root {open} onOpenChange={(value) => !value && !form.saving && onClose()}>
+<!-- Preserves the composer and picker drafts during catalog management. -->
+<Dialog.Root
+	open={open && !suspended}
+	onOpenChange={(value) => !value && !suspended && !form.saving && onClose()}
+>
 	<Dialog.Content
+		forceMount={open}
+		style={suspended ? 'display: none' : undefined}
+		onCloseAutoFocus={handleCloseAutoFocus}
 		class="flex h-dvh max-h-dvh w-screen max-w-none flex-col gap-0 overflow-hidden rounded-none border-0 p-0 sm:h-[calc(100dvh-2rem)] sm:max-h-[48rem] sm:max-w-3xl sm:rounded-lg sm:border"
 		showCloseButton={false}
 	>

@@ -22,7 +22,7 @@
 	onDestroy(() => controller.close());
 
 	function handleOpenChange(nextOpen: boolean): void {
-		if (!nextOpen && !appShell.showPreambles) appShell.closeChatPreambleSelection();
+		if (!nextOpen && !appShell.showSettings) appShell.closeChatPreambleSelection();
 	}
 
 	function handleSaveSubmit(event: SubmitEvent): void {
@@ -37,7 +37,7 @@
 	}
 
 	function openCatalog(): void {
-		appShell.openPreambles(() => {
+		appShell.openSettings('preambles', () => {
 			void tick().then(() => {
 				const opener = document.querySelector<HTMLElement>(
 					'[data-slot="chat-preamble-selection-manage-catalog"]',
@@ -48,7 +48,7 @@
 	}
 </script>
 
-<Dialog.Root open={target !== null && !appShell.showPreambles} onOpenChange={handleOpenChange}>
+<Dialog.Root open={target !== null && !appShell.showSettings} onOpenChange={handleOpenChange}>
 	<Dialog.Content
 		data-slot="chat-preamble-selection-dialog"
 		class="top-[var(--app-viewport-center-y)] flex h-[var(--app-height)] max-h-[var(--app-height)] w-screen max-w-none flex-col gap-0 overflow-hidden rounded-none border-0 p-0 sm:w-screen sm:max-w-none sm:pointer-fine:top-[50%] sm:pointer-fine:h-[min(40rem,calc(var(--app-height)-2rem))] sm:pointer-fine:max-h-[40rem] sm:pointer-fine:w-[calc(100vw-2rem)] sm:pointer-fine:max-w-2xl sm:pointer-fine:rounded-lg sm:pointer-fine:border"

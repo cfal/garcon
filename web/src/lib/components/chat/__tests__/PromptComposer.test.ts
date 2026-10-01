@@ -16,6 +16,7 @@ import type { ProjectResolutionResponse, ProjectTarget } from '$shared/project-r
 import { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
 import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 import type { ComposerAvailabilityNoticePresentation } from '$lib/chat/composer/composer-availability.js';
+import { AppShellStore } from '$lib/stores/app-shell.svelte';
 
 const appCss = readFileSync('src/app.css', 'utf8');
 
@@ -2270,6 +2271,21 @@ describe('PromptComposer focus', () => {
 		await screen.findByText('Project folder unavailable');
 		rendered.unmount();
 		expect(onAvailabilityNoticeChange).toHaveBeenLastCalledWith(null);
+	});
+
+	it('forwards snippet management to Settings and restores composer focus', async ({ onTestFinished }) => {
+		const openSettings = vi.spyOn(AppShellStore.prototype, 'openSettings');
+		onTestFinished(() => openSettings.mockRestore());
+		render(PromptComposerTestHost, { selectedChatId: 'chat-snippet-settings', projectPath: '/workspace/project' });
+		const input = screen.getByRole('textbox');
+		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
+		await fireEvent.click(await screen.findByRole('menuitem', { name: /Snippets/ }));
+		await fireEvent.click(await screen.findByRole('button', { name: 'Edit snippets' }));
+		expect(openSettings).toHaveBeenCalledWith('snippets', expect.any(Function));
+		await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Insert Snippet' })).toBeNull());
+		input.blur();
+		openSettings.mock.calls[0][1]?.();
+		await expectComposerFocus(input);
 	});
 
 	it('reports a missing project path instead of swallowing a snippet command', async () => {

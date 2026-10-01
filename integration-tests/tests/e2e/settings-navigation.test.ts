@@ -89,7 +89,7 @@ test('one settings dialog holds app and server tabs and executor-owned sections 
     await app.clickMenuItem('Settings');
     await app.waitForText('Max chat width');
     expect(await fixture.page.$eval('[role="dialog"] [role="tablist"]', element => element.getAttribute('aria-orientation'))).toBe('vertical');
-    expect(await fixture.page.$$eval('[role="dialog"] [role="tab"]', tabs => tabs.map(tab => tab.getAttribute('aria-label')))).toEqual(['Interface', 'Shortcuts', 'Providers', 'Other Agents', 'General', 'Automation', 'Notifications', 'GitHub', 'Executors']);
+    expect(await fixture.page.$$eval('[role="dialog"] [role="tab"]', tabs => tabs.map(tab => tab.getAttribute('aria-label')))).toEqual(['Interface', 'Shortcuts', 'Providers', 'Other Agents', 'General', 'Automation', 'Notifications', 'Preambles', 'Scheduled Prompts', 'Snippets', 'GitHub', 'Executors']);
     await app.clickButton('Shortcuts');
     await app.waitForText('Send by Shift+Enter');
     await app.clickButton('Executors');

@@ -232,9 +232,6 @@
 		onForkChat={() => {}}
 		onShareChat={() => {}}
 		onManageTags={() => {}}
-		onShowScheduledPrompts={() => {}}
-		onShowPreambles={() => {}}
-		onShowSnippets={() => {}}
 		onShowSettings={() => {}}
 		newWindowEdges={workspaceSplitAdmissions()}
 	/>
