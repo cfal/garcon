@@ -16,7 +16,7 @@ import { startExecutionControlPlane } from './execution-control-plane.js';
 
 import { ChatRegistry } from './chats/store.js';
 import { ChatIdAllocator } from './chats/chat-id-allocator.js';
-import { migrateWorkspaceChatIds } from './chats/chat-id-migration.js';
+import { migrateWorkspaceChatIds } from './migrations/chat-id-migration.js';
 import { InMemoryLastSelectedChatState } from './chats/last-selected-chat-state.js';
 import { RecentTitleIconStore } from './chats/recent-title-icons.js';
 import { ShareStore } from './chats/share-store.js';
@@ -58,7 +58,7 @@ import {
   migrateAgentIntegrationCoreRecords,
   refreshAgentExecutionModeCoreRecords,
   refreshAgentIntegrationCoreRecords,
-} from './agents/core-record-migration.js';
+} from './migrations/core-record-migration.js';
 import { ApiProviderStore } from './api-providers/store.js';
 import { ApiProviderAssignmentStore } from './api-providers/assignments.js';
 import { ApiProviderEndpointResolver } from './api-providers/endpoint-resolver.js';
@@ -95,11 +95,11 @@ import { CarryOverTranscriptStore } from './chats/carryover-transcript-store.js'
 import {
   finalizeCarryOverMigrationValidation,
   migrateLegacyCarryOverWorkspace,
-} from './chats/chat-carryover-migration.js';
+} from './migrations/carryover/chat-carryover-migration.js';
 import {
   resumeInterruptedCarryOverRollback,
   rollbackLegacyCarryOverMigration,
-} from './chats/chat-carryover-rollback.js';
+} from './migrations/carryover/chat-carryover-rollback.js';
 import { AgentHandoffService } from './agents/agent-handoff-service.js';
 import { initializeSnippetAndPreambleServices } from './snippets/setup.js';
 import { ChatPreambleSelectionService } from './preambles/chat-selection-service.js';
@@ -135,7 +135,7 @@ import {
   WorkspaceMigrationRunner,
 } from './migrations/index.js';
 import { runCarryOverMigrationAtStartup } from './migrations/startup-progress.js';
-import { removeLegacyForkOrdinals } from './chats/fork-ordinal-migration.js';
+import { removeLegacyForkOrdinals } from './migrations/fork-ordinal-migration.js';
 import {
   LOCAL_SERVER_PRINCIPAL,
   type ServerPrincipal,

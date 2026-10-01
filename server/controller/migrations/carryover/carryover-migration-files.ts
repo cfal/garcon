@@ -4,9 +4,9 @@
 import crypto from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { isRecord } from '../../../common/json.js';
-import { syncDirectory, writeJsonFileAtomic } from '../../common/json-file-store.js';
-import { parseStoredJson } from '../../common/stored-json.js';
+import { isRecord } from '../../../../common/json.js';
+import { syncDirectory, writeJsonFileAtomic } from '../../../common/json-file-store.js';
+import { parseStoredJson } from '../../../common/stored-json.js';
 
 export const MIGRATION_MARKER_VERSION = 2 as const;
 export const MIGRATION_MARKER_FILE = 'carryover-transcripts/migration-v2.json';

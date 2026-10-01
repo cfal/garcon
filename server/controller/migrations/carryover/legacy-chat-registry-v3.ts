@@ -1,8 +1,8 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { parseChatId } from '../../../common/chat-id.js';
-import { isRecord } from '../../../common/json.js';
-import { parseStoredJson } from '../../common/stored-json.js';
+import { parseChatId } from '../../../../common/chat-id.js';
+import { isRecord } from '../../../../common/json.js';
+import { parseStoredJson } from '../../../common/stored-json.js';
 
 export interface LegacyChatRegistryV3Snapshot {
   readonly version: 3;
