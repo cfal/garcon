@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { gitHttpError } from '../http-error.js';
-import { GitDomainError } from '../../../runtime/git/git-types.js';
+import { GitDomainError } from '../../../runtime/git/git-domain-error.js';
 import { classifyGitError } from '../../../runtime/git/git-error-classifier.js';
 import { COMMIT_MESSAGE_ERROR_MAP } from '../commit-message.js';
 

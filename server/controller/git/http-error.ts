@@ -1,4 +1,4 @@
-import { GitDomainError } from '../../runtime/git/git-types.js';
+import { GitDomainError } from '../../runtime/git/git-domain-error.js';
 import { COMMIT_MESSAGE_ERROR_MAP, isCommitMessageErrorCode } from './commit-message.js';
 import type { ClassifiedGitError } from '../../runtime/git/git-error-classifier.js';
 import { createLogger } from '../../common/log.js';

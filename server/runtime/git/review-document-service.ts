@@ -1,5 +1,5 @@
 import { AsyncResource } from 'node:async_hooks';
-import { GitDomainError } from './git-types.js';
+import { GitDomainError } from './git-domain-error.js';
 import {
   isGitReviewCollectionLimitBody,
   limitGitReviewResponseBodies,

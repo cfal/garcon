@@ -7,7 +7,7 @@ import {
   GIT_REVIEW_DOCUMENT_LIMITS,
   GIT_WORKING_TREE_FINGERPRINT_VERSION,
 } from './types.js';
-import { GitDomainError } from './git-types.js';
+import { GitDomainError } from './git-domain-error.js';
 import { createReviewDocumentOperations } from './review-document-service.js';
 import type {
   ChangeEntry,

@@ -1,7 +1,9 @@
 import { createDiffEngine } from './diff-engine.js';
 import { createCommitHistoryOperations } from './commit-history.js';
 import { createComparisonOperations } from './comparison.js';
-import { createPorcelainOperations } from './porcelain.js';
+import { createConflictOperations } from './conflicts.js';
+import { createStashOperations } from './stashes.js';
+import { createFileHistoryOperations } from './file-history.js';
 import { createStatusOperations } from './status.js';
 import { createWorktreeOperations } from './worktrees.js';
 import { createQuickSummaryOperations } from './quick-summary.js';
@@ -19,7 +21,9 @@ export function createGitOperations({ assertProjectPathAllowed, reviewRegistry =
   const commitHistory = createCommitHistoryOperations(reviewRegistry);
   const comparison = createComparisonOperations(reviewRegistry, assertProjectPathAllowed);
   const reviewDocuments = createReviewDocumentOperations(reviewRegistry);
-  const porcelain = createPorcelainOperations();
+  const conflicts = createConflictOperations();
+  const stashes = createStashOperations();
+  const fileHistory = createFileHistoryOperations();
   const worktrees = createWorktreeOperations({ assertProjectPathAllowed });
   const quickSummary = createQuickSummaryOperations();
 
@@ -29,7 +33,9 @@ export function createGitOperations({ assertProjectPathAllowed, reviewRegistry =
     ...commitHistory,
     ...comparison,
     ...reviewDocuments,
-    ...porcelain,
+    ...conflicts,
+    ...stashes,
+    ...fileHistory,
     ...worktrees,
     ...quickSummary,
   };

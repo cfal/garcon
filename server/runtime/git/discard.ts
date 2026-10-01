@@ -1,7 +1,7 @@
 import { assertGitWorkingPath, markGitMutationDispatched } from './operation-context.js';
 import type { GitMutationResult } from '../../../common/git.js';
 import { promises as fs } from 'fs';
-import { GitDomainError } from './git-types.js';
+import { GitDomainError } from './git-domain-error.js';
 import { resolveRealWithinBase } from '../../common/path-boundary.js';
 import { literalGitPathspec } from './pathspecs.js';
 import { parsePorcelainV1Z, UNMERGED_STATUSES } from './porcelain-status.js';

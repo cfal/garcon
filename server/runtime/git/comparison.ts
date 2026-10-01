@@ -10,7 +10,7 @@ import {
   needsRevisionFailureDiagnostics,
 } from './comparison-errors.js';
 import { parseNameStatusZ, parseNumstatZ, parseUnmergedPaths } from './diff-file-list.js';
-import { GitDomainError } from './git-types.js';
+import { GitDomainError } from './git-domain-error.js';
 import { parsePorcelainV1Z } from './porcelain-status.js';
 import { categoryForPath } from './rendered-diff.js';
 import { assertGitRepository, readOnlyGitOptions, runGitTraced } from './run.js';

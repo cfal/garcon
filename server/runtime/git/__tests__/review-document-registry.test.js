@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { GitDomainError } from '../git-types.js';
+import { GitDomainError } from '../git-domain-error.js';
 import { GitReviewDocumentRegistry } from '../review-document-registry.js';
 
 function reviewFile(path, bodyFingerprint = `fingerprint:${path}`) {
