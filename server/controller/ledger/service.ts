@@ -637,6 +637,13 @@ export class TranscriptLedgerService {
     return messages;
   }
 
+  async *conversationMessagePages(chatId: string): AsyncGenerator<readonly ChatMessage[]> {
+    const watermark = this.#store.highWatermark(chatId);
+    for await (const page of this.#store.rowPagesThrough(chatId, watermark)) {
+      yield page.filter(isConversationalLedgerRow).map(messageForConversationRow);
+    }
+  }
+
   existingPreview(chatId: string): { first: ChatMessage; last: ChatMessage } | null {
     const view = this.#store.existingCurrentView(chatId);
     return view ? previewMessages(this.#store.previewEdges(chatId, view.viewId)) : null;

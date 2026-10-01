@@ -509,6 +509,10 @@ export class TranscriptLedgerStore {
     return this.#pagesThrough(chatId, watermark, readBoundedPage);
   }
 
+  rowPagesThrough(chatId: string, watermark: TranscriptWatermark): AsyncIterable<readonly LedgerRow[]> {
+    return this.#streamPages(chatId, watermark, readBoundedPage);
+  }
+
   // Reads stored rows for work that decodes them after the read, such as on a Worker. A row
   // that fails to decode there fences the chat while its view is current, as a read that
   // decodes rows does.
@@ -532,18 +536,30 @@ export class TranscriptLedgerStore {
     watermark: TranscriptWatermark,
     readPage: (db: Database, viewId: TranscriptViewId, after: number, through: number) => BoundedPage<Row>,
   ): Promise<readonly Row[]> {
+    const rows: Row[] = [];
+    for await (const page of this.#streamPages(chatId, watermark, readPage)) rows.push(...page);
+    return rows;
+  }
+
+  async *#streamPages<Row extends { readonly ordinal: number }>(
+    chatId: string,
+    watermark: TranscriptWatermark,
+    readPage: (db: Database, viewId: TranscriptViewId, after: number, through: number) => BoundedPage<Row>,
+  ): AsyncGenerator<readonly Row[]> {
     if (!Number.isSafeInteger(watermark.ordinal) || watermark.ordinal < 0) {
       throw new TypeError('Transcript watermark ordinal is invalid');
     }
-    const rows: Row[] = [];
     let after = 0;
     for (;;) {
       const page = this.#read(chatId, (entry) => {
         this.#assertCurrent(entry, watermark.viewId);
         return readPage(entry.db, watermark.viewId, after, watermark.ordinal);
       });
-      for (const row of page.rows) rows.push(row);
-      if (page.exhausted) return rows;
+      yield page.rows;
+      if (page.exhausted) {
+        this.#read(chatId, entry => this.#assertCurrent(entry, watermark.viewId));
+        return;
+      }
       after = page.rows[page.rows.length - 1]!.ordinal;
       await yieldToEventLoop();
     }

@@ -94,7 +94,7 @@ export interface ServerEventWiringDeps {
   queue: ChatExecutionCoordinator;
   processing: ChatProcessingActivity;
   metadata: MetadataIndex;
-  currentTranscriptMessages(chatId: string): Promise<readonly ChatMessage[]>;
+  currentTranscriptMessagePages(chatId: string): AsyncIterable<readonly ChatMessage[]>;
   transientFeeds: ChatTransientFeedStore;
   commandLedger: CommandLedger;
   shareStore: ShareStore;
@@ -137,7 +137,7 @@ export function wireServerEvents({
   queue,
   processing,
   metadata,
-  currentTranscriptMessages,
+  currentTranscriptMessagePages,
   transientFeeds,
   commandLedger,
   shareStore,
@@ -383,7 +383,7 @@ export function wireServerEvents({
       metadata.updateFromAppendedMessages(chatId, [...messages]);
     },
     replaceMetadata: async (chatId) => {
-      metadata.replaceFromTranscriptView(chatId, await currentTranscriptMessages(chatId));
+      await metadata.replaceFromTranscriptView(chatId, currentTranscriptMessagePages(chatId));
     },
     resendCandidates: (chatId) => processing.phase(chatId) === null
       ? agentRegistry.resendCandidates(chatId)

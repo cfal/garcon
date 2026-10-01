@@ -695,7 +695,7 @@ export async function startServer(): Promise<void> {
         queue,
         processing: chatProcessingActivity,
         metadata,
-        currentTranscriptMessages: (chatId) => transcriptLedger.conversationMessages(chatId),
+        currentTranscriptMessagePages: (chatId) => transcriptLedger.conversationMessagePages(chatId),
         transientFeeds,
         commandLedger,
         shareStore,

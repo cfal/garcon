@@ -23,6 +23,10 @@ function previewResult(preview) {
   return { preview };
 }
 
+async function* messagePages(messages) {
+  for (let offset = 0; offset < messages.length; offset += 2) yield messages.slice(offset, offset + 2);
+}
+
 function session(overrides = {}) {
   return {
     agentId: 'codex',
@@ -161,14 +165,47 @@ describe('metadata-store', () => {
   });
 
   describe('preview bounds', () => {
+    it('folds long pages with a late first user and nonmonotonic timestamps', async () => {
+      async function* pages() {
+        yield [{ type: 'bash-tool-use', timestamp: '2026-01-01T00:00:00Z' }];
+        for (let i = 0; i < 1_000; i++) {
+          yield [{ type: 'assistant-message', timestamp: '2026-01-03T00:00:00Z', content: 'earlier preview' }];
+        }
+        yield [{ type: 'user-message', timestamp: '2026-01-02T00:00:00Z', content: 'first user' }];
+        yield [{ type: 'assistant-message', timestamp: '2026-01-02T00:00:00Z', content: 'last preview' }];
+      }
+      await metadata.replaceFromTranscriptView('uncached', pages());
+      expect(metadata.getChatMetadata('uncached')).toMatchObject({
+        createdAt: '2026-01-01T00:00:00Z', lastActivity: '2026-01-03T00:00:00Z',
+        firstMessage: 'first user', lastMessage: 'last preview',
+      });
+    });
+
+    it('retains replacement fallback rules and does not publish a failed fold', async () => {
+      metadata.addNewChatMetadata('fallback', 'original title');
+      const current = metadata.getChatMetadata('fallback');
+      await metadata.replaceFromTranscriptView('fallback', messagePages([]));
+      expect(metadata.getChatMetadata('fallback')).toMatchObject({
+        createdAt: current.createdAt, lastActivity: current.createdAt,
+        firstMessage: 'original title', lastMessage: 'original title',
+      });
+      const before = metadata.getChatMetadata('fallback');
+      async function* failed() {
+        yield [{ type: 'user-message', content: 'unpublished' }];
+        throw new Error('view replaced');
+      }
+      await expect(metadata.replaceFromTranscriptView('fallback', failed())).rejects.toThrow('view replaced');
+      expect(metadata.getChatMetadata('fallback')).toBe(before);
+    });
+
     const longFirst = `Refactor the controller\n${'first body '.repeat(1_000)}`;
     const longLast = `Done with the refactor\n${'last body '.repeat(1_000)}`;
 
-    it('caps stored previews while keeping their first lines', () => {
-      metadata.replaceFromTranscriptView(chatId, [
+    it('caps stored previews while keeping their first lines', async () => {
+      await metadata.replaceFromTranscriptView(chatId, messagePages([
         { type: 'user-message', timestamp: '2026-01-01T00:00:00Z', content: longFirst },
         { type: 'assistant-message', timestamp: '2026-01-01T00:01:00Z', content: longLast },
-      ]);
+      ]));
 
       const meta = metadata.getChatMetadata(chatId);
       expect(meta.firstMessage).toHaveLength(4097);
@@ -228,16 +265,16 @@ describe('metadata-store', () => {
       expect(metadata.getChatMetadata(chatId).identity).toEqual(identity());
     });
 
-    it('rebuilds preview text from a replacement transcript view', () => {
+    it('rebuilds preview text from a replacement transcript view', async () => {
       metadata.updateFromAppendedMessages(chatId, [
         { type: 'assistant-message', timestamp: '2026-01-02T00:00:00Z', content: 'pre-reset tail' },
       ], identity());
 
-      metadata.replaceFromTranscriptView(chatId, [
+      await metadata.replaceFromTranscriptView(chatId, messagePages([
         { type: 'user-message', timestamp: '2026-01-01T00:00:00Z', content: 'surviving prompt' },
         { type: 'assistant-message', timestamp: '2026-01-01T00:01:00Z', content: 'surviving reply' },
         { type: 'bash-tool-use', timestamp: '2026-01-01T00:02:00Z', toolId: 'tool-1', command: 'pwd' },
-      ]);
+      ]));
 
       const meta = metadata.getChatMetadata(chatId);
       expect(meta.lastMessage).toBe('surviving reply');
@@ -389,7 +426,7 @@ describe('metadata-store', () => {
       const repair = index.repair();
       await firstRead.promise;
       if (change === 'append') index.updateFromAppendedMessages('second', [{ type: 'user-message', content: 'live' }]);
-      if (change === 'replace') index.replaceFromTranscriptView('second', [{ type: 'user-message', content: 'replacement' }]);
+      if (change === 'replace') await index.replaceFromTranscriptView('second', messagePages([{ type: 'user-message', content: 'replacement' }]));
       if (change === 'delete') delete sessions.second;
       if (change === 'ownership') sessions.second = session({ agentOwnershipEpoch: 'new-owner' });
       await repair;
