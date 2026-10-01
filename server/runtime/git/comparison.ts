@@ -1,9 +1,6 @@
 import { createHash } from 'crypto';
 import { mapWithConcurrency } from '../../common/concurrency.js';
-import {
-  captureWorkingTreeObservation,
-  isWorkingTreeObservationCurrent,
-} from './diff-engine.js';
+import { captureWorkingTreeObservation, isWorkingTreeObservationCurrent } from './working-tree-observation.js';
 import {
   isExpectedMissingGitResult,
   isUnresolvedRevision,
