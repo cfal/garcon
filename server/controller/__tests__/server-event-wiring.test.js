@@ -22,7 +22,7 @@ import { AttentionTracker } from '../notifications/attention-tracker.js';
 import {
   attachNativeMessageSource,
   getNativeMessageRevisionSource,
-} from '../../common/native-message-source.ts';
+} from '@garcon/server-agent-interface';
 
 const at = '2026-08-12T00:00:00.000Z';
 

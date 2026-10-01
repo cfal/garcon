@@ -1,7 +1,7 @@
 import { constants, promises as fs, type Stats } from 'fs';
 import type { FileHandle } from 'node:fs/promises';
 import path from 'path';
-import { FILE_CONTEXT_SEPARATOR, stripResolvedFileMentionContext } from '../../common/file-mention-context.js';
+import { FILE_CONTEXT_SEPARATOR, stripResolvedFileMentionContext } from '@garcon/common/file-mention-context';
 
 export interface FileMentionToken {
 	path: string;
