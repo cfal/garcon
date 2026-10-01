@@ -719,6 +719,7 @@ function steerErrorCode(value: string | undefined): CommandErrorCode {
     case 'IDEMPOTENCY_CONFLICT':
     case 'OPERATION_UNSUPPORTED':
     case 'SERVER_SHUTTING_DOWN':
+    case 'EXECUTOR_UNAVAILABLE':
     case 'STEER_NOT_DELIVERED':
     case 'STEER_OUTCOME_UNKNOWN':
     case 'STEER_PROVIDER_REJECTED':
@@ -743,6 +744,7 @@ function steerErrorStatus(code: CommandErrorCode): number {
     case 'STEER_TURN_NOT_STEERABLE': return 409;
     case 'OPERATION_UNSUPPORTED': return 422;
     case 'SERVER_SHUTTING_DOWN': return 503;
+    case 'EXECUTOR_UNAVAILABLE': return 503;
     case 'STEER_CAPACITY_EXHAUSTED': return 503;
     default: return 500;
   }

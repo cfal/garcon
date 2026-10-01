@@ -5875,12 +5875,17 @@ describe('ChatCommandService', () => {
       },
     });
 
-    await expect(service.submitSteer({
+    const input = {
       chatId: SOURCE_CHAT_ID,
       content: 'steer an offline executor',
       clientRequestId: 'request-steer-executor-offline',
       clientMessageId: 'message-steer-executor-offline',
-    })).rejects.toMatchObject({ code: 'EXECUTOR_UNAVAILABLE', status: 503 });
+    };
+
+    await expect(service.submitSteer(input))
+      .rejects.toMatchObject({ code: 'EXECUTOR_UNAVAILABLE', status: 503 });
+    await expect(service.submitSteer(input))
+      .rejects.toMatchObject({ code: 'EXECUTOR_UNAVAILABLE', status: 503 });
     expect(queue.deliverAcceptedSteer).not.toHaveBeenCalled();
   });
 

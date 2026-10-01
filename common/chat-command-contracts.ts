@@ -136,6 +136,7 @@ export type CommandErrorCode = Extract<
   | 'SESSION_BUSY'
   | 'REQUEST_NOT_FOUND'
   | 'SERVER_SHUTTING_DOWN'
+  | 'EXECUTOR_UNAVAILABLE'
   | 'INTERNAL_ERROR'
 >;
 
