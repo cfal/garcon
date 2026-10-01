@@ -113,12 +113,12 @@ jobs:
         id: claude-config
         shell: bash
         env:
-          DEEPSEEK_TESTING_KEY: ${{ secrets.DEEPSEEK_TESTING_KEY }}
+          CLAUDE_TESTING_KEY: ${{ secrets.CLAUDE_TESTING_KEY }}
           CLAUDE_TESTING_BASE_URL: ${{ secrets.CLAUDE_TESTING_BASE_URL }}
           CLAUDE_TESTING_MODEL: ${{ secrets.CLAUDE_TESTING_MODEL }}
         run: |
-          if [ -n "$DEEPSEEK_TESTING_KEY" ] && [ -n "$CLAUDE_TESTING_BASE_URL" ] && [ -n "$CLAUDE_TESTING_MODEL" ]; then
-            echo "::add-mask::$DEEPSEEK_TESTING_KEY"
+          if [ -n "$CLAUDE_TESTING_KEY" ] && [ -n "$CLAUDE_TESTING_BASE_URL" ] && [ -n "$CLAUDE_TESTING_MODEL" ]; then
+            echo "::add-mask::$CLAUDE_TESTING_KEY"
             echo "::add-mask::$CLAUDE_TESTING_BASE_URL"
             echo "::add-mask::$CLAUDE_TESTING_MODEL"
             echo "available=true" >> "$GITHUB_OUTPUT"
@@ -149,7 +149,7 @@ jobs:
       - name: Run live Claude conformance tests
         if: steps.claude-config.outputs.available == 'true'
         env:
-          DEEPSEEK_TESTING_KEY: ${{ secrets.DEEPSEEK_TESTING_KEY }}
+          CLAUDE_TESTING_KEY: ${{ secrets.CLAUDE_TESTING_KEY }}
           CLAUDE_TESTING_BASE_URL: ${{ secrets.CLAUDE_TESTING_BASE_URL }}
           CLAUDE_TESTING_MODEL: ${{ secrets.CLAUDE_TESTING_MODEL }}
         run: bun run test:live:claude
@@ -159,14 +159,12 @@ jobs:
         if: always() && steps.claude-config.outputs.available == 'true'
         shell: bash
         env:
-          DEEPSEEK_TESTING_KEY: ${{ secrets.DEEPSEEK_TESTING_KEY }}
+          CLAUDE_TESTING_KEY: ${{ secrets.CLAUDE_TESTING_KEY }}
           CLAUDE_TESTING_BASE_URL: ${{ secrets.CLAUDE_TESTING_BASE_URL }}
           CLAUDE_TESTING_MODEL: ${{ secrets.CLAUDE_TESTING_MODEL }}
         run: |
           if [ -d integration-tests/artifacts/server ]; then
-            # Only the credential is audited: the base URL and model are public
-            # lane configuration that legitimately appears in diagnostics.
-            for value in "$DEEPSEEK_TESTING_KEY"; do
+            for value in "$CLAUDE_TESTING_KEY" "$CLAUDE_TESTING_BASE_URL" "$CLAUDE_TESTING_MODEL"; do
               echo "::add-mask::$value"
               set +e
               grep --recursive --fixed-strings --files-with-matches \
@@ -202,17 +200,21 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      - name: Check for Codex testing key
+      - name: Check for Codex testing configuration
         id: codex-key
         shell: bash
         env:
-          OPENAI_TESTING_KEY: ${{ secrets.OPENAI_TESTING_KEY }}
+          CODEX_TESTING_KEY: ${{ secrets.CODEX_TESTING_KEY }}
+          CODEX_TESTING_BASE_URL: ${{ secrets.CODEX_TESTING_BASE_URL }}
+          CODEX_TESTING_MODEL: ${{ secrets.CODEX_TESTING_MODEL }}
         run: |
-          if [ -n "$OPENAI_TESTING_KEY" ]; then
-            echo "::add-mask::$OPENAI_TESTING_KEY"
+          if [ -n "$CODEX_TESTING_KEY" ] && [ -n "$CODEX_TESTING_BASE_URL" ] && [ -n "$CODEX_TESTING_MODEL" ]; then
+            echo "::add-mask::$CODEX_TESTING_KEY"
+            echo "::add-mask::$CODEX_TESTING_BASE_URL"
+            echo "::add-mask::$CODEX_TESTING_MODEL"
             echo "available=true" >> "$GITHUB_OUTPUT"
           else
-            echo "OPENAI_TESTING_KEY is unavailable; skipping live Codex tests."
+            echo "Codex testing configuration is unavailable; skipping live Codex tests."
           fi
 
       - name: Check out repository
@@ -238,33 +240,39 @@ jobs:
       - name: Run live Codex conformance tests
         if: steps.codex-key.outputs.available == 'true'
         env:
-          OPENAI_TESTING_KEY: ${{ secrets.OPENAI_TESTING_KEY }}
+          CODEX_TESTING_KEY: ${{ secrets.CODEX_TESTING_KEY }}
+          CODEX_TESTING_BASE_URL: ${{ secrets.CODEX_TESTING_BASE_URL }}
+          CODEX_TESTING_MODEL: ${{ secrets.CODEX_TESTING_MODEL }}
         run: bun run test:live:codex
 
-      - name: Verify Codex diagnostics contain no testing credential
+      - name: Verify Codex diagnostics contain no testing configuration
         id: codex-diagnostics-audit
         if: always() && steps.codex-key.outputs.available == 'true'
         shell: bash
         env:
-          OPENAI_TESTING_KEY: ${{ secrets.OPENAI_TESTING_KEY }}
+          CODEX_TESTING_KEY: ${{ secrets.CODEX_TESTING_KEY }}
+          CODEX_TESTING_BASE_URL: ${{ secrets.CODEX_TESTING_BASE_URL }}
+          CODEX_TESTING_MODEL: ${{ secrets.CODEX_TESTING_MODEL }}
         run: |
-          echo "::add-mask::$OPENAI_TESTING_KEY"
           if [ -d integration-tests/artifacts/server ]; then
-            set +e
-            grep --recursive --fixed-strings --files-with-matches \
-              -- "$OPENAI_TESTING_KEY" integration-tests/artifacts/server >/dev/null 2>&1
-            audit_status=$?
-            set -e
-            if [ "$audit_status" -eq 0 ]; then
-              echo "safe=false" >> "$GITHUB_OUTPUT"
-              echo "::error::Live Codex diagnostics contain the testing credential and will not be uploaded."
-              exit 1
-            fi
-            if [ "$audit_status" -ne 1 ]; then
-              echo "safe=false" >> "$GITHUB_OUTPUT"
-              echo "::error::Live Codex diagnostics could not be audited and will not be uploaded."
-              exit 1
-            fi
+            for value in "$CODEX_TESTING_KEY" "$CODEX_TESTING_BASE_URL" "$CODEX_TESTING_MODEL"; do
+              echo "::add-mask::$value"
+              set +e
+              grep --recursive --fixed-strings --files-with-matches \
+                -- "$value" integration-tests/artifacts/server >/dev/null 2>&1
+              audit_status=$?
+              set -e
+              if [ "$audit_status" -eq 0 ]; then
+                echo "safe=false" >> "$GITHUB_OUTPUT"
+                echo "::error::Live Codex diagnostics contain testing configuration and will not be uploaded."
+                exit 1
+              fi
+              if [ "$audit_status" -ne 1 ]; then
+                echo "safe=false" >> "$GITHUB_OUTPUT"
+                echo "::error::Live Codex diagnostics could not be audited and will not be uploaded."
+                exit 1
+              fi
+            done
           fi
           echo "safe=true" >> "$GITHUB_OUTPUT"
 

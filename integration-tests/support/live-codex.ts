@@ -15,7 +15,7 @@ import {
 } from './integration-fixture.js';
 import { withTimeout } from './deferred.js';
 
-export const LIVE_CODEX_MODEL = 'gpt-5.4-nano';
+const SCRIPTED_CODEX_MODEL = 'integration-codex-model';
 export const LIVE_CODEX_THINKING_MODE = 'low';
 export type CodexTestToolMode = 'direct' | 'code_mode' | 'code_mode_only';
 
@@ -32,7 +32,7 @@ const PROXY_START_TIMEOUT_MS = 10_000;
 const PROXY_STOP_TIMEOUT_MS = 5_000;
 const LIVE_MODEL_CATALOG = {
   models: [{
-    slug: LIVE_CODEX_MODEL,
+    slug: SCRIPTED_CODEX_MODEL,
     prefer_websockets: false,
     support_verbosity: false,
     default_verbosity: null,
@@ -53,7 +53,7 @@ const LIVE_MODEL_CATALOG = {
     comp_hash: null,
     reasoning_summary_format: 'experimental',
     default_reasoning_summary: 'none',
-    display_name: 'GPT-5.4 Nano',
+    display_name: 'Integration test model',
     description: 'Low-cost model used by Garcon live integration tests.',
     default_reasoning_level: LIVE_CODEX_THINKING_MODE,
     supported_reasoning_levels: [{
@@ -72,7 +72,7 @@ const LIVE_MODEL_CATALOG = {
     default_service_tier: null,
     service_tiers: [],
     additional_speed_tiers: [],
-    supports_reasoning_summaries: true,
+    supports_reasoning_summaries: false,
     base_instructions: 'You are Codex, a coding agent. Follow the user request exactly.',
   }],
 };
@@ -98,6 +98,25 @@ interface LiveCodexTestEnvironmentOptions {
 }
 
 type CodexProxyProcess = Bun.Subprocess<'pipe', 'ignore', 'ignore'>;
+
+function requiredTestingEnvironment(name: string): string {
+  const value = process.env[name]?.trim();
+  if (!value) throw new Error(`${name} is required for live Codex integration tests.`);
+  return value;
+}
+
+export function codexRequestModel(): string {
+  return process.env.CODEX_TESTING_MODEL?.trim() || SCRIPTED_CODEX_MODEL;
+}
+
+function testingResponsesUrl(): string {
+  const baseUrl = requiredTestingEnvironment('CODEX_TESTING_BASE_URL');
+  try {
+    const url = new URL('responses', baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`);
+    if (url.protocol === 'http:' || url.protocol === 'https:') return url.href;
+  } catch { /* Invalid configuration must not expose the private URL. */ }
+  throw new Error('CODEX_TESTING_BASE_URL must be an HTTP(S) API base URL.');
+}
 
 function proxyEnvironment(root: string): Record<string, string> {
   return {
@@ -173,10 +192,9 @@ async function removeProxyRoot(root: string, testingKey: string): Promise<void> 
 export async function startLiveCodexTestEnvironment(
   options: LiveCodexTestEnvironmentOptions = {},
 ): Promise<LiveCodexTestEnvironment> {
-  const testingKey = options.testingKey ?? process.env.OPENAI_TESTING_KEY?.trim();
-  if (!testingKey) {
-    throw new Error('OPENAI_TESTING_KEY is required for live Codex integration tests.');
-  }
+  const testingKey = options.testingKey ?? requiredTestingEnvironment('CODEX_TESTING_KEY');
+  const upstreamUrl = options.upstreamUrl ?? testingResponsesUrl();
+  const testingModel = options.model ?? requiredTestingEnvironment('CODEX_TESTING_MODEL');
   await access(CODEX_BINARY, constants.X_OK);
   const nodeBinary = Bun.which('node');
   if (!nodeBinary) {
@@ -191,7 +209,8 @@ export async function startLiveCodexTestEnvironment(
     '--http-shutdown',
     '--server-info',
     serverInfoPath,
-    ...(options.upstreamUrl ? ['--upstream-url', options.upstreamUrl] : []),
+    '--upstream-url',
+    upstreamUrl,
   ];
   let child: CodexProxyProcess | undefined;
   let proxyBaseUrl: string;
@@ -241,20 +260,21 @@ export async function startLiveCodexTestEnvironment(
           ...LIVE_MODEL_CATALOG,
           models: LIVE_MODEL_CATALOG.models.map((model) => ({
             ...model,
-            slug: options.model ?? model.slug,
+            slug: testingModel,
             tool_mode: options.toolMode ?? model.tool_mode,
           })),
         };
         await writeFile(catalogPath, JSON.stringify(modelCatalog), { mode: 0o600 });
       }
       await writeFile(join(codexHome, 'config.toml'), [
-        'model_provider = "garcon-live-openai"',
+        'model_provider = "garcon-live-testing"',
+        'web_search = "disabled"',
         ...(useFixtureModelCatalog
           ? [`model_catalog_json = ${JSON.stringify(catalogPath)}`]
           : []),
         '',
-        '[model_providers.garcon-live-openai]',
-        'name = "Garcon Live OpenAI"',
+        '[model_providers.garcon-live-testing]',
+        'name = "Garcon Live Testing"',
         `base_url = ${JSON.stringify(`${proxyBaseUrl}/v1`)}`,
         'wire_api = "responses"',
         '',
@@ -292,7 +312,7 @@ export function liveCodexStartRequest(input: {
     chatId: input.chatId,
     agentId: 'codex',
     projectPath: input.projectPath,
-    model: LIVE_CODEX_MODEL,
+    model: codexRequestModel(),
     permissionMode: input.permissionMode ?? 'default',
     thinkingMode: LIVE_CODEX_THINKING_MODE,
     agentSettings: CODEX_AGENT_SETTINGS,
@@ -313,7 +333,7 @@ export function liveCodexRunRequest(input: {
     permissionMode: input.permissionMode ?? 'default',
     thinkingMode: LIVE_CODEX_THINKING_MODE,
     agentSettings: CODEX_AGENT_SETTINGS,
-    model: LIVE_CODEX_MODEL,
+    model: codexRequestModel(),
   };
 }
 
@@ -332,6 +352,6 @@ export function liveCodexForkRunRequest(input: {
     permissionMode: input.permissionMode ?? 'default',
     thinkingMode: LIVE_CODEX_THINKING_MODE,
     agentSettings: CODEX_AGENT_SETTINGS,
-    model: LIVE_CODEX_MODEL,
+    model: codexRequestModel(),
   };
 }

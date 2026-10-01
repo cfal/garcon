@@ -25,6 +25,7 @@ import {
   waitForVisibleResponse,
 } from '../../support/live-agent.js';
 import {
+  codexRequestModel,
   liveCodexRunRequest,
   liveCodexStartRequest,
 } from '../../support/live-codex.js';
@@ -195,7 +196,7 @@ describe('scripted Codex fork lifecycle matrix', () => {
 
     await withIntegrationFixture('codex-scripted-fork-empty', async (fixture) => {
       await restartWithSeededChat(fixture, sourceChatId, {
-        agentId: 'codex', model: 'gpt-5.4-nano', permissionMode: 'bypassPermissions', thinkingMode: 'low',
+        agentId: 'codex', model: codexRequestModel(), permissionMode: 'bypassPermissions', thinkingMode: 'low',
       });
       const forkChatId = fixture.newChatId();
       await fixture.client.forkChat({ sourceChatId, chatId: forkChatId });
