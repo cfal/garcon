@@ -70,6 +70,7 @@ export class SteerCommands {
         content: input.content,
         clientMessageId,
         userMessagePresentation: input.userMessagePresentation ?? null,
+        whenTurnUnavailable: input.whenTurnUnavailable ?? 'reject',
       },
     };
     let outcomeTurnId = observedTarget?.identity.turnId;

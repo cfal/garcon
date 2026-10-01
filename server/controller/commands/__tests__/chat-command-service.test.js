@@ -5544,6 +5544,24 @@ describe('ChatCommandService', () => {
     expect(queue.enqueueAcceptedSteer).toHaveBeenCalledTimes(1);
   });
 
+  it('treats a steer identity reused with another unavailable-turn policy as a conflict', async () => {
+    const startingTarget = { attempt: {}, providerTarget: null, identity: { turnId: 'turn-active' } };
+    const { service, queue } = makeService({
+      queue: { captureSteerTarget: mock(() => startingTarget) },
+    });
+    const input = {
+      chatId: SOURCE_CHAT_ID,
+      content: 'steer once the turn starts',
+      clientRequestId: 'request-steer-policy',
+      clientMessageId: 'message-steer-policy',
+    };
+
+    await expect(service.submitSteer({ ...input, whenTurnUnavailable: 'queue' }))
+      .resolves.toMatchObject({ delivery: 'queued' });
+    await expect(service.submitSteer(input)).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
+    expect(queue.enqueueAcceptedSteer).toHaveBeenCalledTimes(1);
+  });
+
   it('queues a steer behind earlier queued steers even when the turn could take it', async () => {
     const target = { attempt: {}, providerTarget: {}, identity: { turnId: 'turn-active' } };
     const waiting = storedQueue([queueEntry('steer-earlier', 'earlier guidance', 'queued', 1, 'steer')]);
@@ -6298,6 +6316,7 @@ describe('ChatCommandService', () => {
         content: input.content,
         clientMessageId: input.clientMessageId,
         userMessagePresentation: null,
+        whenTurnUnavailable: 'reject',
       },
     });
     await ledger.settleTerminal(accepted.record.key, 'finished', { turnId: 'turn-compact' });
