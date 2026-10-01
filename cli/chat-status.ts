@@ -91,6 +91,7 @@ export function formatChatStatus(
         `requested tool: ${message.requestedTool.type}`,
         `requested tool details:\n${formatPermissionRequestedTool(message.requestedTool)}`,
       );
+      if (message.reason) lines.push(`permission reason: ${message.reason}`);
       if (structured) {
         lines.push(
           'action: use permission-answer with the exact question and option IDs above',

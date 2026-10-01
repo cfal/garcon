@@ -47,6 +47,7 @@ export function handlePermissionLifecycleFromBatch(
 					{
 						permissionOccurrenceId: entry.permissionOccurrenceId,
 						requestedTool: entry.requestedTool,
+						reason: entry.reason,
 						chatId,
 						receivedAt: new Date(),
 					},

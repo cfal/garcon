@@ -411,6 +411,7 @@
 	"chat_permission_revise_plan": "Revise plan",
 	"chat_permission_todos": "Todos",
 	"chat_permission_view_tool_input": "View tool input",
+	"chat_permission_agent_reason": "Agent's reason:",
 	"chat_permission_yes_approve_edits": "Yes, approve edits",
 	"chat_permission_yes_bypass": "Yes, bypass permissions",
 	"chat_permission_yes_new_session_bypass": "Yes, new session + bypass",

@@ -380,7 +380,15 @@ function parsePermissionLifecycle(value: unknown): AgentPermissionLifecycle {
         nonEmptyString(parsed.label, 'permission option label');
         return parsed;
       });
-      return { kind: 'requested', permissionOccurrenceId, requestedTool, options };
+      return {
+        kind: 'requested',
+        permissionOccurrenceId,
+        requestedTool,
+        options,
+        ...(lifecycle.reason === undefined
+          ? {}
+          : { reason: nonEmptyString(lifecycle.reason, 'permission request reason') }),
+      };
     }
     case 'resolved': {
       const decision = record(lifecycle.decision, 'permission decision');

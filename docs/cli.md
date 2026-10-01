@@ -432,6 +432,13 @@ transcript. `--messages` accepts 0 through 200; zero skips transcript loading.
 JSON is the stable machine-readable interface; plain text redacts image bodies
 and truncates long messages.
 
+When the provider supplies an explanation, status includes `permission reason:`;
+the browser permission card and transcript also retain it. Claude Code can
+request human approval for ambiguous destructive `rm` or `rmdir` targets even
+in `bypassPermissions`. Garcon preserves that safety check rather than
+automatically approving it. A prompt alone does not imply that the saved
+permission mode changed after a restart.
+
 Status is a one-shot, non-transactional observation. Use `wait` with the exact accepted chat and turn IDs when completion identity matters.
 
 Submit an exact pending permission decision using every fence shown by status:

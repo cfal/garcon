@@ -71,6 +71,25 @@ describe('permissions handler (message-batch lifecycle)', () => {
 		expect((pending[0].requestedTool as BashToolUseMessage).command).toBe('ls');
 	});
 
+	it("keeps the agent's reason on the pending request", () => {
+		const { ctx, read } = makeContext();
+		const reason = 'Dangerous rm operation on possibly-empty variable path: $D/*';
+
+		handlePermissionLifecycleFromBatch(
+			makeBatch('chat-1', [
+				new PermissionRequestMessage(
+					new Date().toISOString(),
+					PERMISSION_OCCURRENCE,
+					new BashToolUseMessage(new Date().toISOString(), 'tool-1', 'rm -rf $D/*'),
+					reason,
+				),
+			]),
+			ctx,
+		);
+
+		expect(read()[0].reason).toBe(reason);
+	});
+
 	it('pushes WAITING_FOR_PERMISSION status on permission request', () => {
 		const { ctx, markTurnRunning, pushLoadingStatus } = makeContext();
 

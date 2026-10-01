@@ -1792,6 +1792,61 @@ describe('ClaudeCliRuntime stdout protocol handling', () => {
     }
   });
 
+  it('publishes the reason Claude Code gives for a permission it raises in bypass mode', async () => {
+    const originalSpawn = Bun.spawn;
+    const fake = createFakeClaudeProcess();
+    Bun.spawn = mock(() => fake.proc);
+
+    try {
+      const runtime = createRuntime();
+      const published = collectOperation('run-permission-reason');
+      const start = runtime.startClaudeCliSession(startOptions({
+        permissionMode: 'bypassPermissions',
+        operation: published.operation,
+      }));
+      await enqueueInputStarted(fake);
+      const request = (requestId, decisionReason) => fake.stdout.enqueue(encoder.encode(`${JSON.stringify({
+        type: 'control_request',
+        request_id: requestId,
+        request: {
+          subtype: 'can_use_tool',
+          tool_name: 'Bash',
+          input: { command: 'rm -rf $D/*' },
+          tool_use_id: `tool-${requestId}`,
+          ...(decisionReason === undefined ? {} : { decision_reason: decisionReason }),
+        },
+      })}\n`));
+
+      request('with-reason', '  Dangerous rm operation on possibly-empty variable path: $D/*  ');
+      request('blank-reason', '   ');
+      request('non-string-reason', { reason: 'not text' });
+      request('no-reason', undefined);
+      for (let attempt = 0; attempt < 100 && permissionEvents(published.events).length < 4; attempt += 1) {
+        await Promise.resolve();
+      }
+      const lifecycles = permissionEvents(published.events).map((event) => event.lifecycle);
+      expect(lifecycles.map((lifecycle) => lifecycle.kind)).toEqual([
+        'requested', 'requested', 'requested', 'requested',
+      ]);
+      expect(lifecycles[0].reason).toBe('Dangerous rm operation on possibly-empty variable path: $D/*');
+      for (const lifecycle of lifecycles.slice(1)) expect('reason' in lifecycle).toBe(false);
+
+      for (const event of permissionEvents(published.events)) {
+        await event.decision.respond({ allow: false });
+      }
+      fake.stdout.enqueue(encoder.encode(`${JSON.stringify({
+        type: 'result',
+        is_error: false,
+        result: 'done',
+      })}\n`));
+      enqueueProviderState(fake, 'idle');
+      await start;
+      await runtime.shutdown();
+    } finally {
+      Bun.spawn = originalSpawn;
+    }
+  });
+
   it('[TLV5-PERM.01-CLAUDE-UNIT-01] [TLV5-PERM.04-CLAUDE-UNIT-01] keeps reused CLI permission ids bound to separate decision capabilities', async () => {
     const originalSpawn = Bun.spawn;
     const fake = createFakeClaudeProcess();

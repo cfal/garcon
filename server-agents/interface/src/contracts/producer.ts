@@ -33,6 +33,8 @@ export type AgentPermissionLifecycle =
       readonly permissionOccurrenceId: string;
       readonly requestedTool: ToolUseChatMessage;
       readonly options: readonly AgentPermissionOption[];
+      // The provider's own explanation of why this tool call needs a person's approval.
+      readonly reason?: string;
     }
   | {
       readonly kind: 'resolved';

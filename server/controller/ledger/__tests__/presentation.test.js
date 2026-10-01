@@ -16,7 +16,7 @@ import {
 const AT = '2026-08-15T00:00:00.000Z';
 
 describe('transcript ledger presentation', () => {
-  it('preserves the permission occurrence UUID through presentation', () => {
+  it('preserves the permission occurrence UUID and provider reason through presentation', () => {
     const messages = ledgerRowsToMessages([
       permissionRow(1, {
         kind: 'requested',
@@ -29,6 +29,7 @@ describe('transcript ledger presentation', () => {
         permissionOccurrenceId: 'second-occurrence',
         requestedTool: new BashToolUseMessage(AT, 'tool-2', 'second command'),
         options: [],
+        reason: 'Dangerous rm operation on possibly-empty variable path: $D/*',
       }),
       permissionRow(3, {
         kind: 'cancelled',
@@ -40,14 +41,17 @@ describe('transcript ledger presentation', () => {
     expect(messages.map((message) => ({
       type: message.type,
       permissionOccurrenceId: message.permissionOccurrenceId,
+      ...(message.type === 'permission-request' ? { reason: message.reason } : {}),
     }))).toEqual([
       {
         type: 'permission-request',
         permissionOccurrenceId: 'first-occurrence',
+        reason: undefined,
       },
       {
         type: 'permission-request',
         permissionOccurrenceId: 'second-occurrence',
+        reason: 'Dangerous rm operation on possibly-empty variable path: $D/*',
       },
       {
         type: 'permission-cancelled',

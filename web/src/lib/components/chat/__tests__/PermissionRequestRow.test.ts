@@ -267,6 +267,38 @@ describe('PermissionRequestRow', () => {
 		expect(onDecision).not.toHaveBeenCalled();
 	});
 
+	it("shows the agent's reason for a tool permission request", () => {
+		const reason =
+			'Dangerous rm operation on possibly-empty variable path: $D/* in `rm -rf $D/*` (rewrite it as "${D:?}"/* or use a literal path)';
+		render(PermissionRequestRowTestHost, {
+			request: new PermissionRequestMessage(
+				TS,
+				'permission-bash',
+				new BashToolUseMessage(TS, 'tool-bash', 'rm -rf $D/*'),
+				reason,
+			),
+			onDecision: vi.fn(),
+		});
+
+		const shown = document.querySelector('[data-permission-reason]');
+		expect(shown?.textContent).toContain("Agent's reason:");
+		expect(shown?.textContent).toContain(reason);
+		expect(screen.getByRole('button', { name: /allow once/i })).toBeTruthy();
+	});
+
+	it('omits the reason line when the agent gives none', () => {
+		render(PermissionRequestRowTestHost, {
+			request: new PermissionRequestMessage(
+				TS,
+				'permission-bash',
+				new BashToolUseMessage(TS, 'tool-bash', 'pwd'),
+			),
+			onDecision: vi.fn(),
+		});
+
+		expect(document.querySelector('[data-permission-reason]')).toBeNull();
+	});
+
 	it('accepts answers before the executor list has loaded', () => {
 		render(PermissionRequestRowTestHost, {
 			request: new PermissionRequestMessage(

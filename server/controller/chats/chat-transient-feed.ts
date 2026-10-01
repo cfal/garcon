@@ -62,6 +62,7 @@ export class ChatTransientFeedStore {
           event.row.at,
           lifecycle.permissionOccurrenceId,
           lifecycle.requestedTool,
+          lifecycle.reason,
         ),
       };
       record.rows.set(row.permissionOccurrenceId, row);

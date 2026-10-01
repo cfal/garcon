@@ -45,6 +45,25 @@ describe('permission message contracts', () => {
     expect(messages.map((message) => JSON.parse(JSON.stringify(parseChatMessage(message))))).toEqual(messages);
   });
 
+  it('round-trips the provider reason on a permission request', () => {
+    const request = {
+      type: 'permission-request',
+      timestamp: AT,
+      permissionOccurrenceId: 'requested-occurrence',
+      requestedTool: {
+        type: 'bash-tool-use',
+        timestamp: AT,
+        toolId: 'tool-1',
+        command: 'rm -rf $D/*',
+      },
+      reason: 'Dangerous rm operation on possibly-empty variable path: $D/*',
+    };
+
+    expect(JSON.parse(JSON.stringify(parseChatMessage(request)))).toEqual(request);
+    expect(parseChatMessage({ ...request, reason: '' })?.reason).toBeUndefined();
+    expect(parseChatMessage({ ...request, reason: 42 })?.reason).toBeUndefined();
+  });
+
   it('rejects a permission lifecycle message without occurrence identity', () => {
     expect(parseChatMessage({
       type: 'permission-cancelled',

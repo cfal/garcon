@@ -75,6 +75,7 @@
 			timestamp,
 			request.permissionOccurrenceId,
 			request.requestedTool,
+			request.reason,
 		);
 	}
 </script>

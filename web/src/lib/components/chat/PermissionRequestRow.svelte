@@ -802,6 +802,12 @@
 		{/snippet}
 
 		{#snippet body()}
+			{#if request.reason}
+				<p class="mt-1 text-xs whitespace-pre-wrap break-words" data-permission-reason>
+					<span class="font-medium">{m.chat_permission_agent_reason()}</span>
+					{request.reason}
+				</p>
+			{/if}
 			{#if rawInput}
 				<details
 					class="mt-1"
