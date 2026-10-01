@@ -78,18 +78,40 @@ test('deadline cancellation cleans up a late result', async () => {
   } finally { transport.close(); }
 });
 
-test('retirement drops late cleanup, including a result queued immediately before retirement', async () => {
+test('retirement reports lost cleanup, including a result queued immediately before retirement', async () => {
   const { rpc, connection, sent, transport } = fixture();
   const onLateResult = mock(() => {});
+  const onLateResultLost = mock(() => {});
   const cancelled = new AbortController();
   const calls = Array.from({ length: 2 }, () => rpc.call('test', 'execution.runningSessions', null, {
-    signal: cancelled.signal, onLateResult,
+    signal: cancelled.signal, onLateResult, onLateResultLost,
   }).catch((error: unknown) => error));
   cancelled.abort();
   await Promise.all(calls);
+  connection.receive(JSON.stringify({ type: 'result', id: sent[0]!.id, value: [] }));
   connection.receive(JSON.stringify({ type: 'result', id: sent[0]!.id, value: [] }));
   transport.close();
   connection.receive(JSON.stringify({ type: 'result', id: sent[1]!.id, value: [] }));
   await Promise.resolve();
   expect(onLateResult).not.toHaveBeenCalled();
+  expect(onLateResultLost).toHaveBeenCalledTimes(2);
+});
+
+test.each(['result', 'error'] as const)('a late %s settled before retirement does not report a lost result', async (type) => {
+  const { rpc, connection, sent, transport } = fixture();
+  const onLateResult = mock(() => {});
+  const onLateResultLost = mock(() => {});
+  const cancelled = new AbortController();
+  const call = rpc.call('test', 'execution.runningSessions', null, {
+    signal: cancelled.signal, onLateResult, onLateResultLost,
+  }).catch((error: unknown) => error);
+  cancelled.abort();
+  await call;
+  connection.receive(JSON.stringify(type === 'result'
+    ? { type, id: sent[0]!.id, value: [] }
+    : { type, id: sent[0]!.id, error: { code: 'PROVIDER_FAILURE', message: 'Synthetic failure', retryable: false } }));
+  await Promise.resolve();
+  transport.close();
+  expect(onLateResult).toHaveBeenCalledTimes(type === 'result' ? 1 : 0);
+  expect(onLateResultLost).not.toHaveBeenCalled();
 });

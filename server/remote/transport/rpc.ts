@@ -43,7 +43,7 @@ type RpcFrame = ExecutorRpcRequest | AgentProducerFrame | ProducerAckFrame | Rep
 export interface RpcCallOptions<Result = unknown> extends Omit<ExecutorCallOptions, 'timeoutMs'> {
   readonly timeoutMs?: number | null;
   readonly onLateResult?: (value: Result) => void | Promise<unknown>;
-  // Runs when the session is lost before a cancelled call's late result arrives.
+  // Runs when the session is lost before a cancelled call's late cleanup begins.
   readonly onLateResultLost?: () => void;
 }
 
@@ -431,8 +431,9 @@ export class ExecutorRpc {
         const late = this.#lateResults.get(frame.id);
         this.#lateResults.delete(frame.id);
         if (frame.type === 'result' && late) {
+          // The deferred callback owns cleanup after the map releases the budget slot.
           void Promise.resolve().then(() => {
-            if (!this.#retired) return late.receive(frame.value);
+            return this.#retired ? late.lost?.() : late.receive(frame.value);
           }).catch((error) => log.warn('Failed to clean up a cancelled executor call', error));
         }
         return;
