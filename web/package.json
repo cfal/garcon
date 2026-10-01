@@ -35,7 +35,6 @@
 		"@inlang/paraglide-js": "^2.25.4",
 		"@internationalized/date": "^3.12.4",
 		"@playwright/test": "^1.63.0",
-		"@sveltejs/adapter-auto": "^7.0.1",
 		"@sveltejs/adapter-static": "^3.0.10",
 		"@sveltejs/kit": "^2.70.3",
 		"@sveltejs/vite-plugin-svelte": "^7.3.0",
@@ -54,7 +53,6 @@
 		"typescript": "^6.0.3",
 		"typescript-eslint": "^8.70.0",
 		"vite": "^8.3.0",
-		"vite-bundle-analyzer": "^1.3.9",
 		"vitest": "^5.0.1"
 	},
 	"dependencies": {
