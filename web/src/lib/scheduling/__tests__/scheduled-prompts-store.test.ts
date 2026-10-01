@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ScheduledPromptsStore } from '../scheduled-prompts-store.svelte';
-import type { ScheduledPromptsSnapshot } from '$shared/scheduled-prompts';
+import type { ScheduledPromptsMutationResponse, ScheduledPromptsSnapshot } from '$shared/scheduled-prompts';
 
 function scheduledPrompt(id: string) {
 	return {
@@ -81,15 +81,15 @@ describe('ScheduledPromptsStore', () => {
 	});
 
 	it('optimistically reorders prompts and applies the server revision', async () => {
-		let resolveMutation!: (value: unknown) => void;
-		const reorder = vi.fn(() => new Promise((resolve) => (resolveMutation = resolve)));
-		const store = new ScheduledPromptsStore({ reorder: reorder as never });
+		const mutation = Promise.withResolvers<ScheduledPromptsMutationResponse>();
+		const reorder = vi.fn(() => mutation.promise);
+		const store = new ScheduledPromptsStore({ reorder });
 		store.applySnapshot(snapshot(2, ['a', 'b']));
 
 		const moving = store.move('b', 'up');
 		await vi.waitFor(() => expect(reorder).toHaveBeenCalledTimes(1));
 		expect(store.prompts.map((entry) => entry.id)).toEqual(['b', 'a']);
-		resolveMutation({ success: true, snapshot: snapshot(3, ['b', 'a']) });
+		mutation.resolve({ success: true, snapshot: snapshot(3, ['b', 'a']) });
 		await moving;
 
 		expect(reorder).toHaveBeenCalledWith({ expectedRevision: 2, orderedPromptIds: ['b', 'a'] });
