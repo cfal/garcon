@@ -3,6 +3,7 @@ import { createLogger } from '../../common/log.ts';
 import type { ChatExecutionControlOperations } from './chat-execution-control-operations.ts';
 import type { StoredChatExecutionControlState } from './control-state.ts';
 import type { SteerInputDelivery } from './steer-input-delivery.ts';
+import type { CapturedSteerTarget } from './types.ts';
 
 const logger = createLogger('queued-steer');
 
@@ -89,15 +90,8 @@ export class QueuedSteerDelivery {
       || !head.submission
       || control.entries.some((entry) => entry.status === 'steering')
     ) return false;
-    let target: Awaited<ReturnType<SteerInputDelivery['captureTarget']>>;
-    try {
-      target = await this.options.steerInput.captureTarget(chatId);
-    } catch {
-      return false;
-    }
-    if (!target?.providerTarget || this.#refusingTurnIds.get(chatId) === target.identity.turnId) {
-      return false;
-    }
+    const target = await this.#steerableTarget(chatId);
+    if (!target) return false;
 
     const clientRequestId = crypto.randomUUID();
     const providerContent = await this.options.resolveContent({
@@ -105,17 +99,14 @@ export class QueuedSteerDelivery {
       clientRequestId,
       content: head.content,
     });
-    let entry: Awaited<ReturnType<ChatExecutionControlOperations['reservePendingSteer']>>['entry'];
-    try {
-      // A pause or edit since the read rejects the reservation, and the next read sees it.
-      ({ entry } = await this.options.controls.reservePendingSteer(chatId, {
-        entryId: head.id,
-        expectedRevision: head.revision,
-        expectedReorderRevision: control.reorderRevision,
-      }));
-    } catch {
-      return true;
-    }
+    // A pause or edit since the read rejects the reservation, and the next read sees it.
+    const reservation = await this.options.controls.reservePendingSteer(chatId, {
+      entryId: head.id,
+      expectedRevision: head.revision,
+      expectedReorderRevision: control.reorderRevision,
+    }).catch(() => null);
+    if (!reservation) return true;
+    const { entry } = reservation;
 
     let admitted = false;
     try {
@@ -149,5 +140,13 @@ export class QueuedSteerDelivery {
     await this.options.controls.consumeSteer(chatId, entry.id);
     this.options.requestDrain(chatId, 'queued steer consumed');
     return true;
+  }
+
+  // The active turn's steering target, when that turn can take the chat's queued steers now.
+  async #steerableTarget(chatId: string): Promise<CapturedSteerTarget | null> {
+    const target = await this.options.steerInput.captureTarget(chatId).catch(() => null);
+    if (!target?.providerTarget) return null;
+    if (this.#refusingTurnIds.get(chatId) === target.identity.turnId) return null;
+    return target;
   }
 }

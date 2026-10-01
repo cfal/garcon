@@ -152,7 +152,8 @@ export class AgentRuntimeRouter {
       if (this.#producerLeases.get(chatId)?.lease === lease) this.#settleLostLaunch(chatId, agentId, event);
     },
     (chatId, lease, runId) => {
-      if (this.#producerLeases.get(chatId)?.lease !== lease || this.#ledger.activeRunId(chatId) !== runId) return;
+      if (this.#producerLeases.get(chatId)?.lease !== lease) return;
+      if (this.#ledger.activeRunId(chatId) !== runId) return;
       void this.#events.publishRunSteerable(chatId);
     },
   );

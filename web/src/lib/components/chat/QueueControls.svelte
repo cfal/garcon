@@ -90,10 +90,10 @@
 		queue?.steeringEntryId === previewEntry?.id || localSteeringEntryId === previewEntry?.id,
 	);
 	// A steer entry is delivered automatically, so only its delivery in flight shows the action.
-	const showSteerAction = $derived(
-		((previewIndex === 0 && canSteer && previewEntry?.kind !== 'steer') || previewSteering) &&
-			Boolean(onSteer),
+	const canSteerPreview = $derived(
+		previewIndex === 0 && canSteer && previewEntry?.kind !== 'steer',
 	);
+	const showSteerAction = $derived((canSteerPreview || previewSteering) && Boolean(onSteer));
 	const showInterruptAction = $derived(
 		previewIndex === 0 && !queue?.pause && !queueSteering && canInterrupt && Boolean(onInterrupt),
 	);

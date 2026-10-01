@@ -63,6 +63,13 @@ export interface ReservedQueueSteer {
   entry: StoredQueueEntry;
 }
 
+// The queue head a steer operation observed; the operation is rejected once it changed.
+export interface ObservedQueueHead {
+  entryId: string;
+  expectedRevision: number;
+  expectedReorderRevision: number;
+}
+
 function isPendingQueueEntry(entry: StoredQueueEntry): boolean {
   return entry.status === 'queued' || entry.status === 'steering';
 }
@@ -542,11 +549,7 @@ export function dequeueNextTurn(
 
 export function reserveQueueSteer(
   current: StoredChatExecutionControlState,
-  input: {
-    entryId: string;
-    expectedRevision: number;
-    expectedReorderRevision: number;
-  },
+  input: ObservedQueueHead,
   context: TransitionContext,
 ): ControlTransition<ReservedQueueSteer> {
   const next = cloneStoredChatExecutionControl(current);
@@ -581,7 +584,7 @@ export function reserveQueueSteer(
 // queued message reserves through `reserveQueueSteer` regardless of the pause.
 export function reservePendingSteer(
   current: StoredChatExecutionControlState,
-  input: Parameters<typeof reserveQueueSteer>[1],
+  input: ObservedQueueHead,
   context: TransitionContext,
 ): ControlTransition<ReservedQueueSteer> {
   if (current.pause) return rejected(current, { code: 'QUEUE_PAUSE_CHANGED' });
@@ -591,11 +594,7 @@ export function reservePendingSteer(
 // Turns the head entry into a steer, so it reaches the active turn once the turn can take it.
 export function markQueueEntrySteer(
   current: StoredChatExecutionControlState,
-  input: {
-    entryId: string;
-    expectedRevision: number;
-    expectedReorderRevision: number;
-  },
+  input: ObservedQueueHead,
   context: TransitionContext,
 ): ControlTransition<void> {
   const next = cloneStoredChatExecutionControl(current);

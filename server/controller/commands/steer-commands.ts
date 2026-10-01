@@ -653,20 +653,22 @@ function queueSteerCaptureError(
   error: unknown,
   control: StoredChatExecutionControlState,
 ): QueueEntrySteerError {
-  const code = error instanceof DomainError ? queueSteerErrorCode(error.code) : 'INTERNAL_ERROR';
-  if (!(error instanceof DomainError) || code === 'INTERNAL_ERROR') {
-    return new QueueEntrySteerError(
-      'STEER_NOT_DELIVERED',
-      STEER_NOT_DELIVERED_MESSAGE,
-      500,
-      'not-sent',
-      control,
-      { cause: error },
-    );
+  if (error instanceof DomainError) {
+    const code = queueSteerErrorCode(error.code);
+    if (code !== 'INTERNAL_ERROR') {
+      return new QueueEntrySteerError(code, error.message, error.status, 'not-sent', control, {
+        cause: error,
+      });
+    }
   }
-  return new QueueEntrySteerError(code, error.message, error.status, 'not-sent', control, {
-    cause: error,
-  });
+  return new QueueEntrySteerError(
+    'STEER_NOT_DELIVERED',
+    STEER_NOT_DELIVERED_MESSAGE,
+    500,
+    'not-sent',
+    control,
+    { cause: error },
+  );
 }
 
 function queuedSteerResponse(
@@ -687,9 +689,16 @@ function queuedSteerResponse(
 }
 
 function queuedQueueEntrySteerResponse(
-  ...args: Parameters<typeof queuedSteerResponse>
+  record: CommandLedgerRecord,
+  chatId: string,
+  entryId: string,
+  control: StoredChatExecutionControlState,
+  status: CommandAcceptedResponse['status'] = 'accepted',
 ): QueuedQueueEntrySteerCommandResponse {
-  return { ...queuedSteerResponse(...args), serverInstanceId: args[3].serverInstanceId };
+  return {
+    ...queuedSteerResponse(record, chatId, entryId, control, status),
+    serverInstanceId: control.serverInstanceId,
+  };
 }
 
 function recordedSteerError(record: CommandLedgerRecord): CommandValidationError {
