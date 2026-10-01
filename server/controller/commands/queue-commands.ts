@@ -46,7 +46,6 @@ export class QueueCommands {
       throw new CommandValidationError('VALIDATION_FAILED', 'expectedRevision must be a positive integer');
     }
     return this.support.withChatMutationLock(input.chatId, async () => {
-      await this.assertReplacementContent(input.chatId, entryId, input.content);
       const content = input.content;
       const ledger = await this.deps.ledger.accept({
         commandType: 'queue-entry-replace',
@@ -338,21 +337,6 @@ export class QueueCommands {
       chatId: input.chatId,
       control: toClientChatExecutionControlState(queue),
     };
-  }
-
-  // Attachments never change after creation, so an entry observed with them
-  // keeps them for as long as a replacement can still apply.
-  private async assertReplacementContent(
-    chatId: string,
-    entryId: string,
-    content: string,
-  ): Promise<void> {
-    if (content.trim()) return;
-    const control = await this.deps.queue.readChatExecutionControl(chatId);
-    const entry = control.entries.find((candidate) => candidate.id === entryId);
-    if (entry && entry.images.length === 0) {
-      throw new CommandValidationError('VALIDATION_FAILED', 'content or attachments are required');
-    }
   }
 
   private async throwRecordedQueueMutationFailure(record: CommandLedgerRecord): Promise<void> {

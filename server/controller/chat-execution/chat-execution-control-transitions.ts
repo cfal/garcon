@@ -30,6 +30,7 @@ export interface QueueCommandIdentity {
 }
 
 export type TransitionRejection =
+  | { code: 'VALIDATION_FAILED' }
   | { code: 'IDEMPOTENCY_CONFLICT'; clientMessageId: string }
   | { code: 'QUEUE_ENTRY_NOT_FOUND'; entryId: string }
   | { code: 'QUEUE_ENTRY_ALREADY_SENT'; entryId: string }
@@ -322,6 +323,10 @@ export function replaceQueueEntry(
       entryId: input.entryId,
       actualRevision: entry.revision,
     });
+  }
+
+  if (!input.content.trim() && entry.images.length === 0) {
+    return rejected(current, { code: 'VALIDATION_FAILED' });
   }
 
   entry.content = input.content;

@@ -448,6 +448,8 @@ export function transitionError(
   control: StoredChatExecutionControlState,
 ): DomainError {
   switch (rejection.code) {
+    case 'VALIDATION_FAILED':
+      return new DomainError('VALIDATION_FAILED', 'content or attachments are required', 400);
     case 'IDEMPOTENCY_CONFLICT':
       return new DomainError(
         'IDEMPOTENCY_CONFLICT',

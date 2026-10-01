@@ -4850,17 +4850,22 @@ describe('ChatCommandService', () => {
       { data: 'data:image/png;base64,AAAA', name: 'screen.png', mimeType: 'image/png' },
     ]);
     const textOnly = queueEntry('entry-text', 'words', 'queued', 1);
-    const { service, queue } = makeService({
-      queue: { readChatExecutionControl: mock(async () => storedQueue([withImage, textOnly])) },
-    });
+    const repository = new InMemoryChatExecutionControlRepository('server-instance-test');
+    repository.save(SOURCE_CHAT_ID, storedQueue([withImage, textOnly]));
+    const queue = makeRealQueue(makeInputProjection(), {}, undefined, repository);
+    const { service } = makeService({ queueService: queue });
 
-    await expect(service.submitQueueEntryReplace({
+    const emptyTextReplacement = {
       chatId: SOURCE_CHAT_ID,
       entryId: 'entry-text',
       content: ' ',
       expectedRevision: 1,
       clientRequestId: 'request-replace-text',
-    })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+    };
+    await expect(service.submitQueueEntryReplace(emptyTextReplacement))
+      .rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+    await expect(service.submitQueueEntryReplace(emptyTextReplacement))
+      .rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
     const replaced = await service.submitQueueEntryReplace({
       chatId: SOURCE_CHAT_ID,
       entryId: 'entry-image',
@@ -4870,10 +4875,10 @@ describe('ChatCommandService', () => {
     });
 
     expect(replaced.status).toBe('accepted');
-    expect(queue.replaceAccepted).toHaveBeenCalledTimes(1);
-    expect(queue.replaceAccepted).toHaveBeenCalledWith(
-      expect.objectContaining({ content: '', command: expect.objectContaining({ entryId: 'entry-image' }) }),
-    );
+    expect((await queue.readChatExecutionControl(SOURCE_CHAT_ID)).entries).toEqual([
+      expect.objectContaining({ id: 'entry-image', content: '', images: withImage.images, revision: 2 }),
+      textOnly,
+    ]);
   });
 
   it('recovers an accepted queue create from its in-process queue receipt', async () => {

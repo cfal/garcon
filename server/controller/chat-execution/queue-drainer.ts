@@ -90,7 +90,6 @@ export class QueueDrainer {
   async run(chatId: string): Promise<void> {
     const { ownership, controls, callbacks } = this.deps;
     const halted = new Error('Queue dispatch halted before admission');
-    const attachmentsRejected = new Error('Queued attachments rejected before admission');
     while (!this.#shouldHalt(chatId)) {
       const lingering = ownership.attempt(chatId);
       if (lingering) {
@@ -125,8 +124,10 @@ export class QueueDrainer {
 
       let options: RunAgentTurnOptions | undefined;
       let inputInserted = false;
-      const admission = { failure: null as DomainError | null };
-      const unsupported = { entryId: null as string | null, message: '' };
+      const admission = {
+        failure: null as DomainError | null,
+        attachmentEntryId: null as string | null,
+      };
       let result: Awaited<ReturnType<ChatExecutionControlOperations['dequeueNextTurn']>>;
       try {
         // The dequeue transition and its synchronous registerQueued() callback
@@ -153,16 +154,9 @@ export class QueueDrainer {
             // The selection may have changed since enqueue. Throwing aborts the
             // dequeue uncommitted, so the entry and its attachments stay queued.
             if (input.entry.images.length > 0) {
-              try {
-                this.deps.attachmentAdmission.assertSupported(chatId, input.entry.images);
-              } catch (error) {
-                // A retryable failure, such as an unavailable executor, waits for the
-                // readiness drain instead of pausing on a selection that may still accept it.
-                if (error instanceof DomainError && error.retryable) throw halted;
-                unsupported.entryId = input.entry.id;
-                unsupported.message = error instanceof Error ? error.message : String(error);
-                throw attachmentsRejected;
-              }
+              admission.attachmentEntryId = input.entry.id;
+              this.deps.attachmentAdmission.assertSupported(chatId, input.entry.images);
+              admission.attachmentEntryId = null;
             }
             try {
               inputInserted = callbacks.registerQueued(chatId, input.entry.content, options);
@@ -176,14 +170,17 @@ export class QueueDrainer {
         );
       } catch (error) {
         if (error === halted) return;
-        if (error === attachmentsRejected && unsupported.entryId && options) {
+        if (admission.attachmentEntryId && options) {
+          // Readiness triggers a new drain after a retryable admission failure.
+          if (error instanceof DomainError && error.retryable) return;
+          const message = error instanceof Error ? error.message : String(error);
           logger.warn('queue: queued attachments unsupported by the current selection', {
             chatId,
-            entryId: unsupported.entryId,
-            message: unsupported.message,
+            entryId: admission.attachmentEntryId,
+            message,
           });
-          await controls.pauseAfterDispatchFailure(chatId, unsupported.entryId);
-          callbacks.publishTurnFailed(chatId, unsupported.message, options);
+          await controls.pauseAfterDispatchFailure(chatId, admission.attachmentEntryId);
+          callbacks.publishTurnFailed(chatId, message, options);
           return;
         }
         if (inputInserted) callbacks.discardPreparedInput(chatId, options?.clientMessageId);

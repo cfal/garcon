@@ -1,8 +1,5 @@
 import { describe, expect, it, mock } from 'bun:test';
-import {
-  assertAttachmentsSupported,
-  assertChatAttachmentsSupported,
-} from '../support.ts';
+import { assertAttachmentsSupported } from '../support.ts';
 
 const IMAGE = { data: 'data:image/png;base64,AAAA', name: 'screen.png', mimeType: 'image/png' };
 
@@ -56,13 +53,14 @@ describe('attachment support', () => {
 
   it('checks a chat against its current selection', () => {
     const capabilities = agents();
-    assertChatAttachmentsSupported(capabilities, {
+    assertAttachmentsSupported(capabilities, {
       executorId: 'local',
       agentId: 'codex',
       model: 'gpt-5.4-nano',
       apiProviderId: null,
       modelEndpointId: null,
-    }, [IMAGE]);
+      attachments: [IMAGE],
+    });
 
     expect(capabilities.modelSupportsImages).toHaveBeenCalledWith({
       executorId: 'local',
@@ -78,8 +76,8 @@ describe('attachment support', () => {
     const capabilities = agents();
     const chat = { agentId: 'claude', model: null };
 
-    expect(assertChatAttachmentsSupported(capabilities, chat, [])).toBeUndefined();
-    expect(() => assertChatAttachmentsSupported(capabilities, chat, [IMAGE]))
+    expect(assertAttachmentsSupported(capabilities, { ...chat, attachments: [] })).toBeUndefined();
+    expect(() => assertAttachmentsSupported(capabilities, { ...chat, attachments: [IMAGE] }))
       .toThrow('The chat has no model to receive attachments');
     expect(capabilities.assertExecutorReady).not.toHaveBeenCalled();
   });

@@ -3,7 +3,7 @@ import {
   type RunAgentTurnOptions,
 } from '../agents/session-types.js';
 import {
-  assertChatAttachmentsSupported,
+  assertAttachmentsSupported,
   type AttachmentAgentCapabilities,
 } from '../attachments/support.js';
 import type { QueuedAttachmentAdmissionPort } from '../chat-execution/types.js';
@@ -35,7 +35,7 @@ export function queuedAttachmentAdmission(
     assertSupported(chatId, attachments) {
       const chat = registry.getChat(chatId);
       if (!chat) throw new Error(`Session not initialized: ${chatId}`);
-      assertChatAttachmentsSupported(agents, chat, attachments);
+      assertAttachmentsSupported(agents, { ...chat, attachments });
     },
   };
 }

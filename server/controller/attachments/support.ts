@@ -12,18 +12,10 @@ type Attachments = NonNullable<RunAgentTurnOptions['images']>;
 export interface AttachmentSupportInput {
   executorId?: string | null;
   agentId: string;
-  model: string;
-  apiProviderId?: string | null;
-  modelEndpointId?: string | null;
-  attachments: Readonly<Attachments>;
-}
-
-export interface AttachmentChatSelection {
-  executorId?: string | null;
-  agentId: string;
   model?: string | null;
   apiProviderId?: string | null;
   modelEndpointId?: string | null;
+  attachments: Readonly<Attachments>;
 }
 
 // Synchronous so queued dequeue can revalidate inside its admission block,
@@ -33,6 +25,13 @@ export function assertAttachmentsSupported(
   input: AttachmentSupportInput,
 ): void {
   if (input.attachments.length === 0) return;
+  if (!input.model) {
+    throw new CommandValidationError(
+      'INCOMPLETE_EXECUTION_CONFIG',
+      'The chat has no model to receive attachments',
+      422,
+    );
+  }
   agents.assertExecutorReady(input.executorId);
   const mimeTypes = input.attachments.map((attachment) => {
     const mimeType = attachment.mimeType?.trim().toLowerCase();
@@ -80,27 +79,4 @@ export function assertAttachmentsSupported(
       );
     }
   }
-}
-
-export function assertChatAttachmentsSupported(
-  agents: AttachmentAgentCapabilities,
-  chat: AttachmentChatSelection,
-  attachments: Readonly<Attachments>,
-): void {
-  if (attachments.length === 0) return;
-  if (!chat.model) {
-    throw new CommandValidationError(
-      'INCOMPLETE_EXECUTION_CONFIG',
-      'The chat has no model to receive attachments',
-      422,
-    );
-  }
-  assertAttachmentsSupported(agents, {
-    executorId: chat.executorId,
-    agentId: chat.agentId,
-    model: chat.model,
-    apiProviderId: chat.apiProviderId,
-    modelEndpointId: chat.modelEndpointId,
-    attachments,
-  });
 }
