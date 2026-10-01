@@ -70,17 +70,14 @@ export class ExecutorConfigStore {
 
   connection(id: string, publicBase?: string) {
     const executor = this.require(id);
-    const { connection } = executor;
-    let socketUrl = connection.kind === 'controller-connects' ? connection.targetUrl : connection.advertisedUrl;
-    if (socketUrl === null && publicBase) socketUrl = executorPublicUrl(publicBase, id);
     return {
-      connectionUrl: socketUrl ? executorConnectionUrl(socketUrl, executor.secret) : '',
+      connectionUrl: resolveConnectionUrl(executor, publicBase),
       noTls: executor.noTls,
       allowUnverifiedTls: executor.allowUnverifiedTls,
     };
   }
 
-  create(input: CreateExecutorRequest): Promise<RemoteExecutorConfig> {
+  create(input: CreateExecutorRequest, publicBase?: string): Promise<RemoteExecutorConfig> {
     return this.#serialize(async () => {
       const request = parseCreateExecutorRequest(input);
       if (!request) throw new ValidationDomainError('Invalid executor configuration');
@@ -102,7 +99,7 @@ export class ExecutorConfigStore {
           ? { kind: 'controller-connects', targetUrl: validateExecutorSocketUrl(parsed.socketUrl, { noTls }) }
           : { kind: 'executor-connects', advertisedUrl },
       };
-      assertConnectionLength(executor);
+      resolveConnectionUrl(executor, publicBase);
       await this.#save([...this.#executors, executor]);
       return structuredClone(executor);
     });
@@ -139,7 +136,7 @@ export class ExecutorConfigStore {
           allowUnverifiedTls: direction === 'controller-connects' && address?.startsWith('wss:') === true && request.connection.allowUnverifiedTls === true,
           connection: direction === 'executor-connects' ? { kind: direction, advertisedUrl: address } : { kind: direction, targetUrl: address! },
         };
-        assertConnectionLength(executor);
+        resolveConnectionUrl(executor);
       }
       assertUpdateAllowed?.(previous, executor);
       await this.#save(this.#executors.map((entry) => entry.id === id ? executor : entry));
@@ -214,11 +211,16 @@ function parseStoredExecutor(value: unknown): RemoteExecutorConfig {
     allowUnverifiedTls: connection.kind === 'controller-connects' && connection.targetUrl.startsWith('wss:') && value.allowUnverifiedTls === true };
 }
 
-function assertConnectionLength(executor: RemoteExecutorConfig): void {
-  const address = executor.connection.kind === 'executor-connects' ? executor.connection.advertisedUrl : executor.connection.targetUrl;
-  if (address !== null && executorConnectionUrl(address, executor.secret).length > 4096) {
+function resolveConnectionUrl(executor: RemoteExecutorConfig, publicBase?: string): string {
+  const { connection } = executor;
+  let address = connection.kind === 'executor-connects' ? connection.advertisedUrl : connection.targetUrl;
+  if (address === null && publicBase) address = executorPublicUrl(publicBase, executor.id);
+  if (address === null) return '';
+  const url = executorConnectionUrl(address, executor.secret);
+  if (url.length > 4096) {
     throw new ValidationDomainError('Executor connection URL exceeds 4096 characters after address expansion');
   }
+  return url;
 }
 
 function assertUniqueExecutors(executors: readonly RemoteExecutorConfig[]): void {

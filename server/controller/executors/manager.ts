@@ -163,8 +163,8 @@ export class ExecutorManager {
     return () => { this.#availability.delete(listener); };
   }
 
-  create(request: CreateExecutorRequest, assertCurrent?: () => void): Promise<RemoteExecutorConfig> {
-    return this.#mutate(async () => this.config.create(request), assertCurrent);
+  create(request: CreateExecutorRequest, options: { publicBase?: string; assertCurrent?: () => void } = {}): Promise<RemoteExecutorConfig> {
+    return this.#mutate(async () => this.config.create(request, options.publicBase), options.assertCurrent);
   }
 
   update(id: string, request: UpdateExecutorRequest, assertCurrent?: () => void): Promise<RemoteExecutorConfig> {

@@ -60,9 +60,9 @@ test('management admission is checked after waiting for a preceding configuratio
   const first = manager.create({ label: 'First', direction: 'executor-connects' });
   await entered.promise;
   let allowed = true;
-  const pending = manager.create({ label: 'Denied', direction: 'executor-connects' }, () => {
+  const pending = manager.create({ label: 'Denied', direction: 'executor-connects' }, { assertCurrent: () => {
     if (!allowed) throw new DomainError('CLI_ACCESS_DENIED', 'Revoked', 403);
-  });
+  } });
   const outcome = pending.catch((error: unknown) => error);
   allowed = false;
   gate.resolve();

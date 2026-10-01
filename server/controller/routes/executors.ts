@@ -30,7 +30,7 @@ export function createExecutorRoutes(executors: ExecutorManager, publicUrl: stri
         if (!request) throw new ValidationDomainError('Invalid executor configuration');
         const publicBase = request.direction === 'executor-connects' && request.advertisedUrl === undefined
           ? resolvePublicBase(incoming, context) : undefined;
-        const created = await executors.create(request, context?.assertCurrent);
+        const created = await executors.create(request, { publicBase, assertCurrent: context?.assertCurrent });
         return { id: created.id, ...executors.config.connection(created.id, publicBase) };
       })),
     },

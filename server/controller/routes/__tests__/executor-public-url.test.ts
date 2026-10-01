@@ -2,11 +2,13 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import type { CreateExecutorRequest } from '../../../../common/executors.js';
+import { parseExecutorConnection, type CreateExecutorRequest } from '../../../../common/executors.js';
 import { DomainError } from '../../../common/domain-error.js';
 import { ExecutorManager } from '../../executors/manager.js';
 import type { HttpRouteContext } from '../../lib/http-route-types.js';
 import { createExecutorRoutes } from '../executors.js';
+import { executorPublicUrl } from '../../executors/public-url.js';
+import { executorConnectionUrl } from '../../../remote/transport/connection-url.js';
 
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
@@ -50,6 +52,37 @@ test('direct onboarding suggests the request Host without saving it', async () =
   expect((await reveal.json()).connectionUrl).toStartWith(`wss://another-browser.test/executor/${created.id}#secret=`);
   await manager.config.initialize();
   expect(manager.config.require(created.id).connection).toEqual({ kind: 'executor-connects', advertisedUrl: null });
+});
+
+test('inherited connection URLs enforce the complete URL limit before saving and on reveal', async () => {
+  const { manager, routes } = await fixture();
+  const base = 'https://controller.test/';
+  const example = executorConnectionUrl(executorPublicUrl(base, '11111111-1111-4111-8111-111111111111'), Buffer.alloc(32).toString('base64url'));
+  const maximumBase = `${base}${'a'.repeat(4096 - example.length - 1)}/`;
+  const oversizedBase = `${maximumBase.slice(0, -1)}a/`;
+
+  for (const context of [undefined, delegated]) {
+    const rejected = await routes(oversizedBase, context).create({ label: 'Too long', direction: 'executor-connects' });
+    expect(rejected.status).toBe(400);
+    expect(await rejected.json()).toMatchObject({ errorCode: 'VALIDATION_FAILED', error: expect.stringContaining('4096') });
+    await manager.config.initialize();
+    expect(manager.config.list()).toEqual([]);
+  }
+
+  const accepted = await routes(maximumBase, delegated).create({ label: 'At limit', direction: 'executor-connects' });
+  expect(accepted.status).toBe(200);
+  const created = await accepted.json();
+  expect(created.connectionUrl).toHaveLength(4096);
+  expect(parseExecutorConnection(created)).not.toBeNull();
+  await manager.config.initialize();
+  expect(manager.config.require(created.id).connection).toEqual({ kind: 'executor-connects', advertisedUrl: null });
+
+  const reveal = await routes(oversizedBase, delegated).connection(created.id);
+  expect(reveal.status).toBe(400);
+  expect(reveal.headers.get('cache-control')).toBe('no-store');
+  expect(await reveal.json()).toMatchObject({ errorCode: 'VALIDATION_FAILED', error: expect.stringContaining('4096') });
+  const restored = await routes(maximumBase, delegated).connection(created.id);
+  expect(await restored.json()).toMatchObject({ connectionUrl: created.connectionUrl });
 });
 
 test('forwarded onboarding rejects missing public configuration before saving', async () => {
