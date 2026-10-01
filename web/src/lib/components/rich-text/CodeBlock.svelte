@@ -12,7 +12,7 @@ language packages are fetched.
 	import { onDestroy } from 'svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import { copyToClipboard } from '$lib/utils/clipboard';
-	import HighlightedCodeText from './HighlightedCodeText.svelte';
+	import HighlightedCodeText from '$lib/components/rich-text/HighlightedCodeText.svelte';
 
 	interface Props {
 		lang?: string;

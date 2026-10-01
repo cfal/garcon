@@ -12,8 +12,8 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 	} from '@humanspeak/svelte-markdown';
 	import { markedKatex } from '@humanspeak/svelte-markdown/extensions/katex';
 	import { createChatReferenceMarkdownExtension } from '$lib/chat/transcript/chat-reference-markdown.js';
-	import MathRenderer from './MathRenderer.svelte';
-	import { createLiteralHtmlMarkdownExtension } from './markdown-html-policy';
+	import MathRenderer from '$lib/components/rich-text/MathRenderer.svelte';
+	import { createLiteralHtmlMarkdownExtension } from '$lib/components/rich-text/markdown-html-policy';
 
 	interface MathRenderers extends Renderers {
 		inlineKatex: RendererComponent;
@@ -38,9 +38,9 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 
 <script lang="ts">
 	import SvelteMarkdown from '@humanspeak/svelte-markdown';
-	import CodeBlock from './CodeBlock.svelte';
-	import ChatReference from './ChatReference.svelte';
-	import MermaidBlock from './MermaidBlock.svelte';
+	import CodeBlock from '$lib/components/rich-text/CodeBlock.svelte';
+	import ChatReference from '$lib/components/chat/ChatReference.svelte';
+	import MermaidBlock from '$lib/components/rich-text/MermaidBlock.svelte';
 	import { parseFileLink } from '$lib/chat/file-links/file-link-parser.js';
 	import {
 		parseChatReferenceHref,

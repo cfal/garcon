@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { copyToClipboard } from '$lib/utils/clipboard';
 
-import CodeBlock from '../CodeBlock.svelte';
+import CodeBlock from '$lib/components/rich-text/CodeBlock.svelte';
 
 const appCss = readFileSync('src/app.css', 'utf8');
 

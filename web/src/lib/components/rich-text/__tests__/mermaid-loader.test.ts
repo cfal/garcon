@@ -16,7 +16,7 @@ describe('mermaid-loader', () => {
 	});
 
 	it('keys completed and in-flight renders by source and renderer theme', async () => {
-		const { renderMermaid } = await import('../mermaid-loader.js');
+		const { renderMermaid } = await import('$lib/components/rich-text/mermaid-loader.js');
 		const source = 'flowchart LR\nA --> B';
 
 		await Promise.all([
@@ -40,7 +40,7 @@ describe('mermaid-loader', () => {
 				() => new Promise<{ svg: string }>((resolve) => (resolveFirst = resolve)),
 			)
 			.mockResolvedValueOnce({ svg: '<svg data-theme="dark"></svg>' });
-		const { renderMermaid } = await import('../mermaid-loader.js');
+		const { renderMermaid } = await import('$lib/components/rich-text/mermaid-loader.js');
 
 		const first = renderMermaid('flowchart LR\nA --> B', 'standard-light');
 		await vi.waitFor(() => expect(mermaid.render).toHaveBeenCalledOnce());
@@ -58,7 +58,7 @@ describe('mermaid-loader', () => {
 	});
 
 	it('supplies explicit contrast-corrected configuration for every renderer theme', async () => {
-		const { renderMermaid } = await import('../mermaid-loader.js');
+		const { renderMermaid } = await import('$lib/components/rich-text/mermaid-loader.js');
 		for (const themeId of [
 			'standard-light',
 			'standard-dark',

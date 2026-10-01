@@ -1,6 +1,6 @@
 <script lang="ts">
 	// Renders plain text, JSON, or code content for tool output.
-	import HighlightedCodeText from '../../HighlightedCodeText.svelte';
+	import HighlightedCodeText from '$lib/components/rich-text/HighlightedCodeText.svelte';
 
 	interface TextContentProps {
 		content: string;

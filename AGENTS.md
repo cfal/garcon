@@ -286,6 +286,7 @@ Rules:
 
 - `web/src/lib/files/` owns File sessions, editor controllers, and tree state.
 - `web/src/lib/project-paths/` owns shared executor-qualified path selection, completion, validation, and pinned-path preferences. Its renderers live in `components/project-paths`; chat mutation dialogs remain under Chat.
+- `web/src/lib/components/rich-text/` owns shared Markdown, code, math, and diagram presentation. Chat-reference policy and file-navigation callbacks remain explicit caller contracts.
 - `web/src/lib/terminal/` owns Terminal runtimes, input controls, theme, and sessions.
 - `web/src/lib/sidebar/` owns reusable Sidebar search parsing/state and the project-collapse store.
 - `web/src/lib/chat-map/` owns chat-lineage normalization and retained Chat Map surface state.

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { setThemeRuntime } from '$lib/context';
 	import { getThemeProfile, type ThemeId } from '$lib/theme/themes.js';
-	import MermaidBlock from '../MermaidBlock.svelte';
+	import MermaidBlock from '$lib/components/rich-text/MermaidBlock.svelte';
 	import { untrack } from 'svelte';
 
 	interface MermaidBlockTestHostProps {

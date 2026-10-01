@@ -2,10 +2,10 @@ import { cleanup, render, waitFor } from '@testing-library/svelte';
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { renderMath } from '../katex-loader';
-import MathRenderer from '../MathRenderer.svelte';
+import { renderMath } from '$lib/components/rich-text/katex-loader';
+import MathRenderer from '$lib/components/rich-text/MathRenderer.svelte';
 
-vi.mock('../katex-loader', () => ({
+vi.mock('$lib/components/rich-text/katex-loader', () => ({
 	renderMath: vi.fn(),
 }));
 

@@ -25,8 +25,8 @@
 	import ShieldAlert from '@lucide/svelte/icons/shield-alert';
 	import X from '@lucide/svelte/icons/x';
 	import ChatEventCard from './rows/ChatEventCard.svelte';
-	import Markdown from './Markdown.svelte';
-	import type { MarkdownLinkNavigateEvent } from './Markdown.svelte';
+	import Markdown from '$lib/components/rich-text/Markdown.svelte';
+	import type { MarkdownLinkNavigateEvent } from '$lib/components/rich-text/Markdown.svelte';
 	import { resolveFileLinkTarget } from '$lib/chat/file-links/file-link-resolver.js';
 	import {
 		resolveChatReferenceTarget,

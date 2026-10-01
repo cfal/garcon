@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { MAX_MATH_SOURCE_LENGTH, renderMath } from '../katex-loader';
+import { MAX_MATH_SOURCE_LENGTH, renderMath } from '$lib/components/rich-text/katex-loader';
 
 function parseRenderedMath(html: string): HTMLDivElement {
 	const container = document.createElement('div');

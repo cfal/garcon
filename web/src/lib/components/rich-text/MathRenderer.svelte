@@ -5,7 +5,7 @@ Preserves escaped source while loading or when rendering fails.
 -->
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages.js';
-	import { renderMath } from './katex-loader';
+	import { renderMath } from '$lib/components/rich-text/katex-loader';
 
 	interface Props {
 		text?: string;

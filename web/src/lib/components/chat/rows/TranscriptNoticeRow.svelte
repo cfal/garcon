@@ -19,8 +19,8 @@
 	import PreambleApplicationRow from './PreambleApplicationRow.svelte';
 	import PreambleSelectionChangedRow from './PreambleSelectionChangedRow.svelte';
 	import TicketCommandOutcomeRow from './TicketCommandOutcomeRow.svelte';
-	import Markdown from '../Markdown.svelte';
-	import type { MarkdownLinkNavigateEvent } from '../Markdown.svelte';
+	import Markdown from '$lib/components/rich-text/Markdown.svelte';
+	import type { MarkdownLinkNavigateEvent } from '$lib/components/rich-text/Markdown.svelte';
 	import type { ConversationDisclosureStatePort } from '../ConversationFeedItemState.svelte.js';
 	import type { ResolveChatReference } from '$lib/chat/transcript/chat-reference.js';
 

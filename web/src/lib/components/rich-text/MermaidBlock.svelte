@@ -8,8 +8,8 @@ Lazy-loads the mermaid library on first render via mermaid-loader.
 	import * as m from '$lib/paraglide/messages.js';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import Maximize2 from '@lucide/svelte/icons/maximize-2';
-	import MermaidViewerDialog from './MermaidViewerDialog.svelte';
-	import { renderMermaid, resolveMermaidThemeId } from './mermaid-loader';
+	import MermaidViewerDialog from '$lib/components/rich-text/MermaidViewerDialog.svelte';
+	import { renderMermaid, resolveMermaidThemeId } from '$lib/components/rich-text/mermaid-loader';
 	import { getThemeRuntime } from '$lib/context';
 
 	interface Props {

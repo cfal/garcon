@@ -1,7 +1,7 @@
 import { markedKatex } from '@humanspeak/svelte-markdown/extensions/katex';
 import { Lexer, Marked, type Token, type TokensList } from 'marked';
 import { describe, expect, it } from 'vitest';
-import { createLiteralHtmlMarkdownExtension } from '../markdown-html-policy';
+import { createLiteralHtmlMarkdownExtension } from '$lib/components/rich-text/markdown-html-policy';
 
 function lex(source: string): { marked: Marked; tokens: TokensList } {
 	const marked = new Marked(

@@ -13,7 +13,7 @@
 		CliRowMessage,
 		isToolUseMessage,
 	} from '$shared/chat-types';
-	import Markdown from '$lib/components/chat/Markdown.svelte';
+	import Markdown from '$lib/components/rich-text/Markdown.svelte';
 	import MessageRenderFallback from '$lib/components/chat/MessageRenderFallback.svelte';
 	import ChatToolEventRenderer from '$lib/components/chat/tools/ChatToolEventRenderer.svelte';
 	import ChatEventCard from '$lib/components/chat/rows/ChatEventCard.svelte';

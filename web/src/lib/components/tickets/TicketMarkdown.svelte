@@ -1,6 +1,6 @@
 <script module lang="ts">
 	import { lazyRenderer } from '$lib/utils/lazy-renderer.js';
-	const markdown = lazyRenderer(() => import('$lib/components/chat/Markdown.svelte'));
+	const markdown = lazyRenderer(() => import('$lib/components/rich-text/Markdown.svelte'));
 </script>
 
 <script lang="ts">

@@ -1,7 +1,7 @@
 import { markedKatex } from '@humanspeak/svelte-markdown/extensions/katex';
 import { Lexer, Marked, type Token, type TokensList } from 'marked';
 import { describe, expect, it } from 'vitest';
-import { createLiteralHtmlMarkdownExtension } from '$lib/components/chat/markdown-html-policy.js';
+import { createLiteralHtmlMarkdownExtension } from '$lib/components/rich-text/markdown-html-policy.js';
 import { createChatReferenceMarkdownExtension } from '../chat-reference-markdown.js';
 
 const CHAT_ID = '1788592720180699';

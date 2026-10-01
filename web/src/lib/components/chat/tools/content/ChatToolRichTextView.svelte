@@ -1,6 +1,6 @@
 <script lang="ts">
-	import Markdown from '$lib/components/chat/Markdown.svelte';
-	import type { MarkdownLinkNavigateEvent } from '$lib/components/chat/Markdown.svelte';
+	import Markdown from '$lib/components/rich-text/Markdown.svelte';
+	import type { MarkdownLinkNavigateEvent } from '$lib/components/rich-text/Markdown.svelte';
 	import type { ResolveChatReference } from '$lib/chat/transcript/chat-reference.js';
 
 	interface MarkdownContentProps {

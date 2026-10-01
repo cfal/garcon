@@ -4,7 +4,7 @@
 	// Renders as a card surface instead of a rail/border-l treatment.
 
 	import ChatEventCard from '../rows/ChatEventCard.svelte';
-	import HighlightedCodeText from '../HighlightedCodeText.svelte';
+	import HighlightedCodeText from '$lib/components/rich-text/HighlightedCodeText.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import type { ToolInlineAction } from '$lib/chat/tools/tool-display-contract.js';

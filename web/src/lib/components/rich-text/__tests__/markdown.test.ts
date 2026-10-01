@@ -2,8 +2,8 @@ import { render, screen } from '@testing-library/svelte';
 import { fireEvent } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import { describe, it, expect, vi } from 'vitest';
-import Markdown from '../Markdown.svelte';
-import { whenMathRendererReady } from '../katex-loader';
+import Markdown from '$lib/components/rich-text/Markdown.svelte';
+import { whenMathRendererReady } from '$lib/components/rich-text/katex-loader';
 
 describe('Markdown', () => {
 	it('renders inline code with assistant variant styling', () => {

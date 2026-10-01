@@ -15,7 +15,7 @@
 		prStateBadge,
 		reviewDecisionBadge,
 	} from './pr-display';
-	import Markdown from '$lib/components/chat/Markdown.svelte';
+	import Markdown from '$lib/components/rich-text/Markdown.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import * as Popover from '$lib/components/ui/popover';
 

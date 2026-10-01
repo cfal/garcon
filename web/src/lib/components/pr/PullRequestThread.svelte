@@ -3,7 +3,7 @@
 	import History from '@lucide/svelte/icons/history';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
-	import Markdown from '$lib/components/chat/Markdown.svelte';
+	import Markdown from '$lib/components/rich-text/Markdown.svelte';
 	import type { PullRequestThread } from '$lib/api/pull-requests';
 
 	interface PullRequestThreadProps {

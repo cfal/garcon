@@ -2,10 +2,10 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RendererPalette } from '$lib/theme/themes.js';
-import MermaidBlock from './MermaidBlockTestHost.svelte';
-import { renderMermaid } from '../mermaid-loader';
+import MermaidBlock from '$lib/components/rich-text/__tests__/MermaidBlockTestHost.svelte';
+import { renderMermaid } from '$lib/components/rich-text/mermaid-loader';
 
-vi.mock('../mermaid-loader', () => ({
+vi.mock('$lib/components/rich-text/mermaid-loader', () => ({
 	renderMermaid: vi.fn(),
 	resolveMermaidThemeId: ({
 		colorScheme,
