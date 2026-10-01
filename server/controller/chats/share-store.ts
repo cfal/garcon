@@ -6,7 +6,8 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { isRecord } from '../../../common/json.js';
-import { writeFileAtomic, writeJsonFileAtomic } from '../../common/json-file-store.js';
+import { AtomicJsonWriteError, writeFileAtomic, writeJsonFileAtomic } from '../../common/json-file-store.js';
+import { DomainError } from '../../common/domain-error.js';
 import { parseStoredJson } from '../../common/stored-json.js';
 import { createLogger } from '../../common/log.js';
 import { hasNodeErrorCode } from '../../common/errors.js';
@@ -107,6 +108,8 @@ export class ShareStore implements IShareStore {
   // Serializes each chat's publications, revocations, and snapshot loads, which await
   // rendering and file writes between reading and updating the index.
   #chatLocks = new KeyedPromiseLock();
+  #indexLock = new KeyedPromiseLock();
+  #durabilityUnknown = false;
   #workspaceDir: string;
   #rendering: ShareStoreOptions['rendering'];
   #now: () => number;
@@ -195,12 +198,33 @@ export class ShareStore implements IShareStore {
     }
   }
 
-  async #persist(): Promise<void> {
-    if (!this.#index) return;
-    await writeJsonFileAtomic(this.#filePath(), this.#index, { mode: 0o600 });
+  async #commit(change: (shares: ShareStoreIndex['shares']) => void): Promise<void> {
+    await this.#indexLock.runExclusive('index', async () => {
+      const current = this.#requireIndex();
+      const candidate: ShareStoreIndex = { version: SHARE_INDEX_VERSION, shares: { ...current.shares } };
+      change(candidate.shares);
+      try {
+        await writeJsonFileAtomic(this.#filePath(), candidate, { mode: 0o600 });
+      } catch (error) {
+        if (error instanceof AtomicJsonWriteError && error.renamed) {
+          this.#durabilityUnknown = true;
+          this.#snapshotCache.clear();
+        }
+        throw error;
+      }
+      this.#index = candidate;
+      this.#rebuildIndex();
+    });
+  }
+
+  #assertAvailable(): void {
+    if (this.#durabilityUnknown) {
+      throw new DomainError('INTERNAL_ERROR', 'Share index durability is unknown. Restart the controller before accessing shares.', 503);
+    }
   }
 
   #requireIndex(): ShareStoreIndex {
+    this.#assertAvailable();
     if (!this.#index) throw new Error('ShareStore not initialized');
     return this.#index;
   }
@@ -211,24 +235,25 @@ export class ShareStore implements IShareStore {
     rows: readonly StoredLedgerRow[],
     signal?: AbortSignal,
   ): Promise<ShareIndexEntry> {
-    const index = this.#requireIndex();
+    this.#requireIndex();
     return this.#chatLocks.runExclusive(chatId, async () => {
+      this.#assertAvailable();
       const token = this.#chatIdIndex.get(chatId) ?? crypto.randomBytes(24).toString('base64url');
       const rendered = await this.#rendering.renderShareSnapshot(
         { header: { ...publication, shareToken: token }, rows },
         signal,
       );
+      this.#assertAvailable();
       await this.#writeRendered(token, rendered);
       const entry = indexEntryFromHeader(rendered.header);
-      index.shares[token] = entry;
-      this.#chatIdIndex.set(chatId, token);
       this.#snapshotCache.delete(token);
-      await this.#persist();
+      await this.#commit(shares => { shares[token] = entry; });
       return entry;
     }, signal);
   }
 
   getEntryByChatId(chatId: string): ShareIndexEntry | null {
+    this.#assertAvailable();
     const token = this.#chatIdIndex.get(chatId);
     return token ? this.#index?.shares[token] ?? null : null;
   }
@@ -239,6 +264,7 @@ export class ShareStore implements IShareStore {
     const cached = this.#cachedMessages(token);
     if (cached) return cached.header;
     const header = await this.#readHeader(token);
+    this.#assertAvailable();
     return header ?? (await this.getMessages(token))?.header ?? null;
   }
 
@@ -264,19 +290,18 @@ export class ShareStore implements IShareStore {
   }
 
   async revokeShareByChatId(chatId: string): Promise<boolean> {
-    const index = this.#index;
-    if (!index) return false;
+    this.#assertAvailable();
+    if (!this.#index) return false;
     return this.#chatLocks.runExclusive(chatId, async () => {
+      this.#assertAvailable();
       const token = this.#chatIdIndex.get(chatId);
       if (!token) return false;
 
-      delete index.shares[token];
-      this.#chatIdIndex.delete(chatId);
+      await this.#commit(shares => { delete shares[token]; });
       this.#snapshotCache.delete(token);
       for (const extension of ['ndjson', 'txt', 'json'] as const) {
         await this.#removeFile(this.#shareFilePath(token, extension));
       }
-      await this.#persist();
       return true;
     });
   }
@@ -286,6 +311,7 @@ export class ShareStore implements IShareStore {
   }
 
   #shareEntry(token: string): ShareIndexEntry | null {
+    this.#assertAvailable();
     if (!this.#index || !isValidShareToken(token) || !Object.hasOwn(this.#index.shares, token)) return null;
     return this.#index.shares[token] ?? null;
   }
@@ -332,10 +358,7 @@ export class ShareStore implements IShareStore {
       json = await fs.readFile(this.#shareFilePath(token, 'json'), 'utf8');
     } catch (error: unknown) {
       if (!hasNodeErrorCode(error, 'ENOENT')) throw error;
-      const entry = this.#index?.shares[token];
-      if (this.#index) delete this.#index.shares[token];
-      if (entry) this.#chatIdIndex.delete(entry.chatId);
-      await this.#persist();
+      await this.#commit(shares => { delete shares[token]; });
       return null;
     }
     const rendered = await this.#rendering.convertShareSnapshot(token, json);
@@ -362,6 +385,7 @@ export class ShareStore implements IShareStore {
   }
 
   #cacheMessages(token: string, shared: SharedChatMessages): SharedChatMessages {
+    this.#assertAvailable();
     this.#snapshotCache.set(token, { shared, lastAccessAt: this.#now() });
     this.#pruneSnapshotCache();
     return shared;

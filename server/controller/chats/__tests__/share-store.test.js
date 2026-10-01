@@ -9,6 +9,7 @@ import { storedProviderRows } from '../../ledger/__tests__/stored-rows.ts';
 import { ShareStore } from '../share-store.js';
 import { TranscriptRenderingWorker } from '../transcript-rendering/client.ts';
 import { inlineTranscriptRendering } from '../transcript-rendering/__tests__/inline-transcript-rendering.ts';
+import { withFailingDirectorySync } from '../../../common/__tests__/atomic-write-failure.ts';
 
 const AT = '2026-01-01T00:00:00.000Z';
 let workspaceDir;
@@ -270,6 +271,95 @@ describe('ShareStore', () => {
     const indexRaw = JSON.parse(await fs.readFile(path.join(workspaceDir, 'shared-chats.json'), 'utf8'));
     expect(Object.keys(indexRaw.shares)).toEqual([firstEntry.shareToken]);
     expect((await store.getMessages(firstEntry.shareToken)).header.title).toBe('Second title');
+  });
+
+  it('serializes different-chat index commits without exposing uncommitted publications', async () => {
+    const store = createStore();
+    await store.init();
+    const entered = Promise.withResolvers();
+    const release = Promise.withResolvers();
+    const originalRename = fs.rename;
+    let indexWrites = 0;
+    const rename = spyOn(fs, 'rename').mockImplementation(async (source, target) => {
+      if (target === path.join(workspaceDir, 'shared-chats.json') && ++indexWrites === 1) {
+        entered.resolve(); await release.promise;
+      }
+      return originalRename(source, target);
+    });
+    const first = store.publish('chat-1', publication(), rows('first'));
+    let second;
+    try {
+      await entered.promise;
+      expect(store.getEntryByChatId('chat-1')).toBeNull();
+      second = store.publish('chat-2', publication({ chatId: 'chat-2' }), rows('second'));
+      release.resolve();
+      await Promise.all([first, second]);
+    } finally { release.resolve(); await Promise.allSettled([first, second]); rename.mockRestore(); }
+    const restarted = createStore();
+    await restarted.init();
+    expect(restarted.getEntryByChatId('chat-1')).not.toBeNull();
+    expect(restarted.getEntryByChatId('chat-2')).not.toBeNull();
+  });
+
+  it.each(['publish', 'revoke'])('leaves confirmed index visibility and files intact after a failed %s commit', async operation => {
+    const store = createStore();
+    await store.init();
+    const existing = await store.publish('chat-1', publication(), rows('original'));
+    const originalRename = fs.rename;
+    const rename = spyOn(fs, 'rename').mockImplementation(async (source, target) => {
+      if (target === path.join(workspaceDir, 'shared-chats.json')) throw new Error('Synthetic index failure');
+      return originalRename(source, target);
+    });
+    try {
+      const writing = operation === 'publish'
+        ? store.publish('chat-2', publication({ chatId: 'chat-2' }), rows('new'))
+        : store.revokeShareByChatId('chat-1');
+      await expect(writing).rejects.toMatchObject({ renamed: false });
+    } finally { rename.mockRestore(); }
+    expect(store.getEntryByChatId('chat-2')).toBeNull();
+    expect(store.getEntryByChatId('chat-1')).toEqual(existing);
+    expect((await store.getMessages(existing.shareToken)).messages).toHaveLength(1);
+    const restarted = createStore();
+    await restarted.init();
+    expect(restarted.getEntryByChatId('chat-2')).toBeNull();
+    expect(restarted.getEntryByChatId('chat-1')).toEqual(existing);
+  });
+
+  it.each(['publish', 'revoke'])('fences reads and writes after an uncertain %s index commit', async operation => {
+    const store = createStore();
+    await store.init();
+    const existing = await store.publish('chat-1', publication(), rows('original'));
+    await expect(withFailingDirectorySync(workspaceDir, () => operation === 'publish'
+      ? store.publish('chat-2', publication({ chatId: 'chat-2' }), rows('new'))
+      : store.revokeShareByChatId('chat-1'))).rejects.toMatchObject({ renamed: true });
+    const candidate = await fs.readFile(path.join(workspaceDir, 'shared-chats.json'), 'utf8');
+    expect(() => store.getEntryByChatId('chat-1')).toThrow('durability is unknown');
+    await expect(store.getMessages(existing.shareToken)).rejects.toThrow('durability is unknown');
+    await expect(store.getHeader(existing.shareToken)).rejects.toThrow('durability is unknown');
+    await expect(store.getTextPath(existing.shareToken)).rejects.toThrow('durability is unknown');
+    await expect(store.publish('chat-3', publication({ chatId: 'chat-3' }), [])).rejects.toThrow('durability is unknown');
+    await expect(store.revokeShareByChatId('chat-1')).rejects.toThrow('durability is unknown');
+    expect(await fs.readFile(path.join(workspaceDir, 'shared-chats.json'), 'utf8')).toBe(candidate);
+    const restarted = createStore();
+    await restarted.init();
+    expect(restarted.getEntryByChatId(operation === 'publish' ? 'chat-2' : 'chat-1') === null).toBe(operation === 'revoke');
+  });
+
+  it('persists revocation before snapshot cleanup can fail', async () => {
+    const store = createStore();
+    await store.init();
+    const entry = await store.publish('chat-1', publication(), rows('original'));
+    const originalUnlink = fs.unlink;
+    const unlink = spyOn(fs, 'unlink').mockImplementation(async target => {
+      if (target === snapshotPath(entry.shareToken)) throw new Error('Synthetic cleanup failure');
+      return originalUnlink(target);
+    });
+    try { await expect(store.revokeShareByChatId('chat-1')).rejects.toThrow('Synthetic cleanup failure'); }
+    finally { unlink.mockRestore(); }
+    expect(await store.getHeader(entry.shareToken)).toBeNull();
+    const restarted = createStore();
+    await restarted.init();
+    expect(await restarted.getHeader(entry.shareToken)).toBeNull();
   });
 
   it('keeps a republication that lands while an older snapshot converts', async () => {
