@@ -124,6 +124,8 @@ describe('PullRequestDetailPanel handoff', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Review this PR' }));
 
 		await waitFor(() => expect(onAfterSend).toHaveBeenCalledTimes(1));
+		expect(screen.getByText('0 files changed')).toBeTruthy();
+		expect(screen.getByText('0/0 viewed')).toBeTruthy();
 		expect(onSendToChat.mock.calls[0]?.[0]).toContain('Review pull request #257');
 	});
 
@@ -156,6 +158,8 @@ describe('PullRequestDetailPanel handoff', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Address with agent' }));
 
 		await waitFor(() => expect(onSendToChat).toHaveBeenCalledTimes(1));
+		expect(screen.getByText('1 file changed')).toBeTruthy();
+		expect(screen.getByText('0/1 viewed')).toBeTruthy();
 		expect(onSendToChat.mock.calls[0]?.[0]).toContain('Please handle the submit result.');
 		expect(onAfterSend).not.toHaveBeenCalled();
 	});

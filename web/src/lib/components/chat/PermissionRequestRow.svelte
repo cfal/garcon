@@ -808,7 +808,7 @@
 						{permTitle}
 					</div>
 					<div class="text-xs opacity-80">
-						Tool: <span class="font-mono">{toolLabel}</span>
+						{m.chat_permission_tool_label()} <span class="font-mono">{toolLabel}</span>
 					</div>
 				</div>
 			</div>

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages.js';
 	import { onDestroy, tick, untrack, type Snippet } from 'svelte';
 	import type {
 		GitVirtualFileHeaderRow,
@@ -458,7 +459,7 @@
 			<div
 				class="border border-status-error-border bg-status-error/10 px-3 py-2 text-xs text-status-error-foreground"
 			>
-				Failed to render diff row: {error instanceof Error ? error.message : String(error)}
+				{m.git_diff_row_failed({ error: error instanceof Error ? error.message : String(error) })}
 			</div>
 		{/snippet}
 	</svelte:boundary>

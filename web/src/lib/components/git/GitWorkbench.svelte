@@ -275,8 +275,8 @@
 			type="button"
 			onclick={() => handleInspectorView('conflicts')}
 			class="rounded p-1 {inspectorButtonClass('conflicts')}"
-			title="Conflicts"
-			aria-label="Conflicts"
+			title={m.git_conflicts_title()}
+			aria-label={m.git_conflicts_title()}
 		>
 			<AlertTriangle class="h-3.5 w-3.5" />
 		</button>
@@ -284,8 +284,8 @@
 			type="button"
 			onclick={() => handleInspectorView('stash')}
 			class="rounded p-1 {inspectorButtonClass('stash')}"
-			title="Stash"
-			aria-label="Stash"
+			title={m.git_stash_title()}
+			aria-label={m.git_stash_title()}
 		>
 			<Archive class="h-3.5 w-3.5" />
 		</button>
@@ -293,8 +293,8 @@
 			type="button"
 			onclick={() => handleInspectorView('history')}
 			class="rounded p-1 {inspectorButtonClass('history')}"
-			title="History and blame"
-			aria-label="History and blame"
+			title={m.git_history_and_blame()}
+			aria-label={m.git_history_and_blame()}
 		>
 			<HistoryIcon class="h-3.5 w-3.5" />
 		</button>
@@ -302,8 +302,8 @@
 			type="button"
 			onclick={() => handleInspectorView('graph')}
 			class="rounded p-1 {inspectorButtonClass('graph')}"
-			title="Graph and compare"
-			aria-label="Graph and compare"
+			title={m.git_graph_and_compare()}
+			aria-label={m.git_graph_and_compare()}
 		>
 			<GitGraph class="h-3.5 w-3.5" />
 		</button>
@@ -369,8 +369,8 @@
 			onclick={handlePreviousFile}
 			disabled={!files.previousVisibleFile() || files.previousVisibleFile() === files.selectedFile}
 			class="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
-			title="Previous file"
-			aria-label="Previous file"
+			title={m.git_previous_file()}
+			aria-label={m.git_previous_file()}
 		>
 			<ChevronUp class="h-3.5 w-3.5" />
 		</button>
@@ -379,8 +379,8 @@
 			onclick={handleNextFile}
 			disabled={!files.nextVisibleFile() || files.nextVisibleFile() === files.selectedFile}
 			class="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
-			title="Next file"
-			aria-label="Next file"
+			title={m.git_next_file()}
+			aria-label={m.git_next_file()}
 		>
 			<ChevronDown class="h-3.5 w-3.5" />
 		</button>
@@ -462,7 +462,7 @@
 					class="flex-1 rounded bg-git-added/20 px-2 py-1.5 text-xs text-git-added transition-colors hover:bg-git-added/30 disabled:opacity-50"
 				>
 					<Plus class="mr-1 inline h-3.5 w-3.5" />
-					Stage ({selection.selectedLineKeys.size})
+					{m.git_stage_selected({ count: selection.selectedLineKeys.size })}
 				</button>
 			{:else}
 				<button
@@ -474,7 +474,7 @@
 					class="flex-1 rounded bg-git-deleted/20 px-2 py-1.5 text-xs text-git-deleted transition-colors hover:bg-git-deleted/30 disabled:opacity-50"
 				>
 					<Minus class="mr-1 inline h-3.5 w-3.5" />
-					Unstage ({selection.selectedLineKeys.size})
+					{m.git_unstage_selected({ count: selection.selectedLineKeys.size })}
 				</button>
 			{/if}
 			<button
@@ -482,7 +482,7 @@
 				onclick={() => selection.clearSelection()}
 				class="rounded bg-muted px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
 			>
-				Clear
+				{m.common_clear()}
 			</button>
 		</div>
 	{/if}
@@ -490,7 +490,7 @@
 
 {#if !activeProjectPath}
 	<div class="h-full flex items-center justify-center text-muted-foreground">
-		<p class="text-sm">Select a project to view changes</p>
+		<p class="text-sm">{m.git_workbench_select_project()}</p>
 	</div>
 {:else}
 	<div
@@ -532,13 +532,13 @@
 				class="flex-1 flex flex-col items-center justify-center gap-3 px-6 py-12 text-muted-foreground"
 			>
 				<LoaderCircle class="h-6 w-6 animate-spin text-interactive-accent" />
-				<p class="text-sm">Loading Git changes...</p>
+				<p class="text-sm">{m.git_workbench_loading()}</p>
 			</div>
 		{:else}
 			{#if !files.hasCommits}
 				<div class="px-3 py-2 border-b border-border bg-status-info/10">
 					<div class="text-xs text-status-info-foreground mb-1.5">
-						No commits yet. Create an initial commit to get started.
+						{m.git_workbench_no_commits()}
 					</div>
 					<button
 						onclick={handleInitialCommit}
@@ -548,7 +548,7 @@
 						{#if initialCommit.isCreating}
 							<LoaderCircle class="w-3 h-3 inline animate-spin mr-1" />
 						{/if}
-						Create initial commit
+						{m.git_workbench_initial_commit()}
 					</button>
 				</div>
 			{/if}

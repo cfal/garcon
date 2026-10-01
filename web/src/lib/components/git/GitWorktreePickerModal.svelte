@@ -155,7 +155,7 @@
 		<div class="flex h-full min-h-0 min-w-0 flex-col">
 			<div class="flex shrink-0 items-center gap-3 border-b border-border px-4 py-3">
 				<TreePine class="h-4 w-4 shrink-0 text-muted-foreground" />
-				<h2 class="min-w-0 flex-1 truncate text-sm font-medium text-foreground">Select worktree</h2>
+				<h2 class="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{m.git_worktree_select()}</h2>
 				<div class="flex items-center gap-1">
 					<button
 						type="button"
@@ -190,7 +190,7 @@
 						disabled={isLoading || isCreating}
 						class="shrink-0 rounded-md bg-muted px-2 py-1 text-[10px] font-medium text-foreground transition-colors hover:bg-accent"
 					>
-						Retry
+						{m.common_retry()}
 					</button>
 				</div>
 			{/if}
@@ -269,7 +269,7 @@
 				>
 					<div class="flex items-center gap-2">
 						<Plus class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-						<span class="text-xs font-medium text-muted-foreground">New worktree</span>
+						<span class="text-xs font-medium text-muted-foreground">{m.git_worktree_new()}</span>
 					</div>
 
 					<input
@@ -301,7 +301,7 @@
 									{:else}
 										<ChevronRight class="h-3 w-3" />
 									{/if}
-									Advanced
+									{m.git_worktree_advanced()}
 								</span>
 							</button>
 						</div>
@@ -330,7 +330,7 @@
 							onclick={() => picker.resetCreateForm()}
 							class="rounded-md bg-muted px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
 						>
-							Cancel
+							{m.common_cancel()}
 						</button>
 						<button
 							type="button"
@@ -344,10 +344,10 @@
 							{#if isCreating}
 								<span class="flex items-center gap-1.5">
 									<LoaderCircle class="h-3 w-3 animate-spin" />
-									Creating...
+									{m.common_creating()}
 								</span>
 							{:else}
-								Create
+								{m.common_create()}
 							{/if}
 						</button>
 					</div>
@@ -364,7 +364,7 @@
 						class="flex items-center gap-1.5 rounded-md bg-interactive-accent px-3 py-1.5 text-xs font-medium text-interactive-accent-foreground shadow-sm transition-all hover:brightness-110"
 					>
 						<Plus class="h-3.5 w-3.5" />
-						New worktree
+						{m.git_worktree_new()}
 					</button>
 				{:else}
 					<div></div>
@@ -381,7 +381,7 @@
 						</span>
 					{:else if picker.totalCount > 0}
 						<span class="truncate">
-							{picker.totalCount} worktree{picker.totalCount === 1 ? '' : 's'}
+							{m.git_worktree_count({ count: picker.totalCount })}
 						</span>
 					{/if}
 					{#if picker.totalCount > 0 || picker.hasActiveFilter}

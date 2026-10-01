@@ -39,7 +39,7 @@
 			<h3 class="break-words text-sm font-medium text-foreground">{profile.label}</h3>
 			<div class="break-all text-xs text-muted-foreground">{endpoint.baseUrl}</div>
 			<div class="break-words text-xs text-muted-foreground">
-				{endpoint.models.length} models · {endpoint.defaultModel}
+				{m.settings_provider_model_summary({ count: endpoint.models.length, defaultModel: endpoint.defaultModel })}
 			</div>
 			<div class="text-xs text-muted-foreground">
 				{endpoint.hasApiKey
@@ -51,22 +51,22 @@
 			<Button
 				variant="ghost"
 				size="icon-sm"
-				title="Edit shared profile"
-				aria-label={`Edit ${profile.label}`}
+				title={m.settings_provider_edit_shared()}
+				aria-label={m.settings_provider_edit_named({ label: profile.label })}
 				onclick={onEdit}><PencilIcon class="size-4" /></Button
 			>
 			<Button
 				variant="ghost"
 				size="icon-sm"
-				title="Duplicate profile"
-				aria-label={`Duplicate ${profile.label}`}
+				title={m.settings_provider_duplicate()}
+				aria-label={m.settings_provider_duplicate_named({ label: profile.label })}
 				onclick={onDuplicate}><CopyIcon class="size-4" /></Button
 			>
 			<Button
 				variant="ghost"
 				size="icon-sm"
-				title="Delete shared profile"
-				aria-label={`Delete ${profile.label}`}
+				title={m.settings_provider_delete_shared()}
+				aria-label={m.settings_provider_delete_named({ label: profile.label })}
 				onclick={() => (confirmingDelete = true)}><TrashIcon class="size-4" /></Button
 			>
 		</div>
@@ -76,31 +76,30 @@
 			<span
 				class="flex w-fit min-w-0 max-w-full items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground"
 				data-slot="api-provider-executor"
-				title={`Executor: ${executor.label}`}
+				title={m.executors_named_label({ label: executor.label })}
 			>
 				<Network class="size-3 shrink-0 text-file-icon-folder" aria-hidden="true" />
-				<span class="sr-only">Executor: {executor.label}</span>
+				<span class="sr-only">{m.executors_named_label({ label: executor.label })}</span>
 				<span class="truncate" aria-hidden="true">{executor.label}</span>
 			</span>
 		{:else}
-			<span class="text-xs text-muted-foreground">No executors assigned</span>
+			<span class="text-xs text-muted-foreground">{m.settings_provider_unassigned()}</span>
 		{/each}
 	</div>
 	{#if confirmingDelete}
 		<div class="mt-3 space-y-2 text-sm">
 			<p class="text-destructive">
-				Delete this shared profile from all workspaces? Selections in other workspaces may stop
-				working.
+				{m.settings_provider_delete_warning()}
 			</p>
 			<div class="flex gap-2">
 				<Button
 					variant="destructive"
 					size="sm"
 					disabled={providers.mutating}
-					onclick={() => providers.deleteProfile(profile.id)}>Delete shared profile</Button
+					onclick={() => providers.deleteProfile(profile.id)}>{m.settings_provider_delete_shared()}</Button
 				>
 				<Button variant="outline" size="sm" onclick={() => (confirmingDelete = false)}
-					>Cancel</Button
+					>{m.common_cancel()}</Button
 				>
 			</div>
 		</div>

@@ -194,7 +194,7 @@
 				{/if}
 			</div>
 		{:else if startup.modelSelectionPending}
-			<p role="status" class="text-sm text-muted-foreground">Loading models...</p>
+			<p role="status" class="text-sm text-muted-foreground">{m.chat_composer_loading_models()}</p>
 		{/if}
 	</div>
 

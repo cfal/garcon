@@ -106,7 +106,7 @@
 			<fieldset class="contents" disabled={dialog.isSaving}>
 				{#if dialog.apiProviderId}
 					<p class="text-sm text-muted-foreground">
-						Changes affect every executor and workspace using this shared profile.
+						{m.settings_provider_shared_warning()}
 					</p>
 				{/if}
 				<div class="grid gap-2">
@@ -142,7 +142,7 @@
 				</div>
 
 				<fieldset class="min-w-0 space-y-2">
-					<legend class="mb-2 text-sm font-medium">Available on</legend>
+					<legend class="mb-2 text-sm font-medium">{m.settings_provider_available_on()}</legend>
 					<div class="grid min-w-0 gap-2 sm:grid-cols-2">
 						{#each executors.executors as executor (executor.id)}
 							<label
@@ -180,7 +180,7 @@
 				{/if}
 				{#if !dialog.canProbe}
 					<p class="text-sm text-muted-foreground">
-						Testing requires a ready executor with saved access, or a newly entered key.
+						{m.settings_provider_test_requirements()}
 					</p>
 				{/if}
 

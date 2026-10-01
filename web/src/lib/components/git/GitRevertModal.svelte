@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages.js';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 
@@ -22,9 +23,9 @@
 >
 	<Dialog.Content showCloseButton={false}>
 		<div class="space-y-2">
-			<div class="text-sm font-medium text-foreground">Revert commit</div>
+			<div class="text-sm font-medium text-foreground">{m.git_revert_title()}</div>
 			<div class="text-sm text-muted-foreground">
-				This creates a new commit that undoes
+				{m.git_revert_description_prefix()}
 				<span class="font-mono text-foreground">{commitShortHash}</span>.
 			</div>
 			<div class="rounded border border-border bg-muted/30 px-3 py-2 text-xs text-foreground">
@@ -39,7 +40,7 @@
 				disabled={isReverting}
 				class="rounded-md px-4 py-2 text-sm text-muted-foreground hover:bg-accent disabled:opacity-50"
 			>
-				Cancel
+				{m.common_cancel()}
 			</button>
 			<button
 				type="button"
@@ -50,7 +51,7 @@
 				{#if isReverting}
 					<LoaderCircle class="h-3.5 w-3.5 animate-spin" />
 				{/if}
-				Revert
+				{m.git_revert_action()}
 			</button>
 		</Dialog.Footer>
 	</Dialog.Content>

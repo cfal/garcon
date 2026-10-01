@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages.js';
 	import CircleCheck from '@lucide/svelte/icons/circle-check';
 	import CircleX from '@lucide/svelte/icons/circle-x';
 	import CircleDot from '@lucide/svelte/icons/circle-dot';
@@ -36,7 +37,7 @@
 		{#if pr.isDraft}
 			<span
 				class="flex-shrink-0 rounded bg-muted px-1 text-[9px] font-medium uppercase text-muted-foreground"
-				>Draft</span
+				>{m.pull_request_draft()}</span
 			>
 		{/if}
 	</span>

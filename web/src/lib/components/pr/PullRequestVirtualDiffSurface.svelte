@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages.js';
 	import type { GitVirtualReviewRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
 	import type { GitVirtualReviewRowSource } from '$lib/git/review/git-virtual-review-row-source.js';
 	import type { PullRequestThread as PullRequestThreadData } from '$lib/api/pull-requests.js';
@@ -53,7 +54,7 @@
 			<div class="border-y border-border bg-background px-2 py-1">
 				{#if row.showUnanchoredLabel}
 					<div class="px-1 py-1 text-[10px] font-medium uppercase text-muted-foreground">
-						Comments not on the current diff
+						{m.pull_request_other_comments()}
 					</div>
 				{/if}
 				<PullRequestThread {thread} onAddress={() => onAddressThread(thread)} />

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages.js';
 	// Push dialog that lets the user choose a remote and confirm pushing
 	// the current branch to the matching remote branch.
 
@@ -78,7 +79,7 @@
 	>
 		<!-- Header -->
 		<div class="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
-			<h2 class="text-sm font-medium text-foreground">Push to remote</h2>
+			<h2 class="text-sm font-medium text-foreground">{m.git_push_title()}</h2>
 			<button
 				onclick={onClose}
 				class="p-1 rounded hover:bg-muted transition-colors text-muted-foreground"
@@ -90,7 +91,7 @@
 		<!-- Remote list -->
 		<div class="px-4 py-3 space-y-3 shrink-0">
 			<div class="space-y-1.5">
-				<div class="text-xs font-medium text-muted-foreground uppercase tracking-wider">Remote</div>
+				<div class="text-xs font-medium text-muted-foreground uppercase tracking-wider">{m.git_push_remote()}</div>
 				<div class="space-y-1">
 					{#each remotes as remote (remote.name)}
 						<label
@@ -120,7 +121,7 @@
 
 			<div class="space-y-1.5">
 				<div class="text-xs text-muted-foreground px-1">
-					Pushing <span class="font-medium text-foreground">{currentBranch}</span>
+					{m.git_push_progress()} <span class="font-medium text-foreground">{currentBranch}</span>
 					&rarr;
 					<span class="font-medium text-foreground">{selectedRemote}/{currentBranch}</span>
 				</div>
@@ -140,7 +141,7 @@
 				{:else}
 					<Upload class="w-4 h-4" />
 				{/if}
-				Push
+				{m.git_push_action()}
 			</button>
 		</div>
 	</div>

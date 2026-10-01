@@ -58,7 +58,7 @@
 	<Popover.Content class="w-72 p-0" align="end" sideOffset={8}>
 		<div class="bg-card text-foreground rounded-md border border-border">
 			<div class="flex items-center justify-between px-4 py-2.5">
-				<div class="text-sm font-medium text-foreground">Font size</div>
+				<div class="text-sm font-medium text-foreground">{m.git_diff_font_size()}</div>
 				<Select.Root
 					type="single"
 					value={diffFontSize}
@@ -78,7 +78,7 @@
 			</div>
 
 			<div class="flex items-center justify-between px-4 py-2.5">
-				<div class="text-sm font-medium text-foreground">Diff mode</div>
+				<div class="text-sm font-medium text-foreground">{m.git_diff_mode()}</div>
 				<Select.Root
 					type="single"
 					value={diffMode}
@@ -87,28 +87,28 @@
 					}}
 				>
 					<Select.Trigger class="w-[100px]" size="sm">
-						{diffMode === 'unified' ? 'Unified' : 'Split'}
+						{diffMode === 'unified' ? m.git_diff_unified() : m.git_diff_split()}
 					</Select.Trigger>
 					<Select.Content>
-						<Select.Item value="unified" label="Unified">Unified</Select.Item>
-						<Select.Item value="split" label="Split">Split</Select.Item>
+						<Select.Item value="unified" label={m.git_diff_unified()}>{m.git_diff_unified()}</Select.Item>
+						<Select.Item value="split" label={m.git_diff_split()}>{m.git_diff_split()}</Select.Item>
 					</Select.Content>
 				</Select.Root>
 			</div>
 
 			<div class="flex items-center justify-between px-4 py-2.5">
-				<div class="text-sm font-medium text-foreground">Context lines</div>
+				<div class="text-sm font-medium text-foreground">{m.git_diff_context_lines()}</div>
 				<Select.Root
 					type="single"
 					value={String(contextLines)}
 					onValueChange={handleContextLines}
 				>
 					<Select.Trigger class="w-[80px]" size="sm">
-						{contextLines} lines
+						{m.git_diff_lines({ count: contextLines })}
 					</Select.Trigger>
 					<Select.Content>
 						{#each CONTEXT_OPTIONS as n (n)}
-							<Select.Item value={n} label="{n} lines">{n} lines</Select.Item>
+							<Select.Item value={n} label={m.git_diff_lines({ count: n })}>{m.git_diff_lines({ count: n })}</Select.Item>
 						{/each}
 					</Select.Content>
 				</Select.Root>

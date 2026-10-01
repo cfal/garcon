@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages.js';
 	import type { GitProjectTarget } from '$lib/api/git-client.js';
 	import History from '@lucide/svelte/icons/history';
 	import type { DiffMode } from '$lib/git/workbench/git-workbench-types.js';
@@ -64,7 +65,7 @@
 {#if !project}
 	<div class="flex flex-1 flex-col items-center justify-center text-muted-foreground">
 		<History class="mb-2 h-12 w-12 opacity-50" />
-		<p class="text-sm">No repository selected.</p>
+		<p class="text-sm">{m.git_history_no_repository()}</p>
 	</div>
 {:else if history.screen === 'list'}
 	<GitCommitListScreen

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages.js';
 	import { onDestroy, onMount } from 'svelte';
 	import Plus from '@lucide/svelte/icons/plus';
 	import Pencil from '@lucide/svelte/icons/pencil';
@@ -19,9 +20,9 @@
 	let content = $state<HTMLElement | null>(null);
 	const inputClass = 'h-10 w-full min-w-0 rounded-md border border-input bg-background px-3';
 	const saveButtonLabel = $derived.by(() => {
-		if (editor.busy) return 'Saving...';
-		if (editor.id) return 'Save';
-		return 'Add Executor';
+		if (editor.busy) return m.common_saving();
+		if (editor.id) return m.common_save();
+		return m.executors_add();
 	});
 
 	onMount(() => {
@@ -66,10 +67,10 @@
 <div bind:this={content} class="min-w-0 space-y-4">
 	{#if !editorOpen}
 		<div class="flex justify-end">
-			<Button onclick={beginCreate}><Plus class="size-4" />Add Executor</Button>
+			<Button onclick={beginCreate}><Plus class="size-4" />{m.executors_add()}</Button>
 		</div>
 		{#if executors.error}<p role="alert" class="text-sm text-destructive">{executors.error}</p>{/if}
-		{#if executors.loading && executors.executors.length === 0}<p role="status">Loading...</p>{/if}
+		{#if executors.loading && executors.executors.length === 0}<p role="status">{m.common_loading()}</p>{/if}
 		<ul class="divide-y divide-border border-y border-border">
 			{#each executors.executors as executor (executor.id)}
 				<svelte:boundary>
@@ -87,14 +88,14 @@
 							<Button
 								variant="ghost"
 								size="icon-sm"
-								aria-label={`Edit ${executor.label}`}
-								title={`Edit ${executor.label}`}
+								aria-label={m.executors_edit_named({ label: executor.label })}
+								title={m.executors_edit_named({ label: executor.label })}
 								onclick={() => beginEdit(executor)}><Pencil class="size-4" /></Button
 							>
 						{/if}
 					</li>
 					{#snippet failed()}<li class="py-3 text-sm text-destructive">
-							Unable to display executor
+							{m.executors_display_failed()}
 						</li>{/snippet}
 				</svelte:boundary>
 			{/each}
@@ -113,13 +114,13 @@
 					variant="ghost"
 					size="icon-sm"
 					onclick={closeEditor}
-					aria-label="Back to executors"
-					title="Back to executors"><ArrowLeft class="size-4" /></Button
+					aria-label={m.executors_back()}
+					title={m.executors_back()}><ArrowLeft class="size-4" /></Button
 				>
-				<h3 class="text-sm font-medium">{editor.id ? 'Edit Executor' : 'Add Executor'}</h3>
+				<h3 class="text-sm font-medium">{editor.id ? m.executors_edit() : m.executors_add()}</h3>
 			</div>
 			<label class="block space-y-1 text-sm"
-				>Label<input
+				>{m.executors_name()}<input
 					id="executor-label"
 					class={`${inputClass} text-base pointer-fine:text-sm`}
 					bind:value={editor.label}
@@ -129,20 +130,20 @@
 				/></label
 			>
 			<label class="block space-y-1 text-sm"
-				>Connection direction
+				>{m.executors_connection_direction()}
 				<select
 					id="executor-direction"
 					class={`${inputClass} text-base pointer-fine:text-sm`}
 					bind:value={editor.direction}
 					disabled={editor.busy}
 				>
-					<option value="executor-connects">Executor connects to controller</option>
-					<option value="controller-connects">Controller connects to executor</option>
+					<option value="executor-connects">{m.executors_worker_connects()}</option>
+					<option value="controller-connects">{m.executors_controller_connects()}</option>
 				</select>
 			</label>
 			{#if editor.id || editor.direction === 'controller-connects'}
 				<label class="block space-y-1 text-sm"
-					>Connection URL
+					>{m.executors_connection_url()}
 					<input
 						id="executor-url"
 						class={`${inputClass} text-base pointer-fine:text-sm`}
@@ -157,8 +158,7 @@
 				</label>
 				{#if editor.withoutTls}
 					<p id="executor-tls-warning" role="alert" class="text-sm text-destructive">
-						TLS is disabled. Noise encrypts execution traffic, but connection metadata remains
-						exposed. Use only on a private network you trust.
+						{m.executors_no_tls_warning()}
 					</p>
 				{/if}
 				<div class="flex items-center gap-2">
@@ -166,15 +166,15 @@
 						type="button"
 						variant="outline"
 						size="icon-sm"
-						title="Copy connection URL"
-						aria-label="Copy connection URL"
+						title={m.executors_copy_url()}
+						aria-label={m.executors_copy_url()}
 						disabled={!editor.canCopyConnection}
 						onclick={copyConnectionUrl}><Copy class="size-4" /></Button
 					>
-					{#if copied}<span role="status" class="text-xs text-muted-foreground">Copied</span>{/if}
+					{#if copied}<span role="status" class="text-xs text-muted-foreground">{m.common_copied()}</span>{/if}
 				</div>
 				<p class="text-xs text-muted-foreground">
-					This URL contains a secret. Shell history and startup logs may retain it.
+					{m.executors_secret_warning()}
 				</p>
 			{/if}
 			<label class="flex items-center gap-2 text-sm"
@@ -183,7 +183,7 @@
 					type="checkbox"
 					bind:checked={editor.noTls}
 					disabled={editor.busy}
-				/>Allow connection without TLS (ws://)</label
+				/>{m.executors_allow_no_tls()}</label
 			>
 			{#if editor.direction === 'controller-connects' && !editor.withoutTls}
 				<label class="flex items-center gap-2 text-sm"
@@ -192,12 +192,11 @@
 						type="checkbox"
 						bind:checked={editor.allowUnverifiedTls}
 						disabled={editor.busy}
-					/>Allow unverified TLS certificates</label
+					/>{m.executors_allow_unverified_tls()}</label
 				>
 				{#if editor.allowUnverifiedTls}
 					<p role="alert" class="text-sm text-destructive">
-						TLS certificate verification is disabled. Noise still authenticates the peer and
-						encrypts execution traffic, but the outer TLS endpoint is not verified.
+						{m.executors_unverified_tls_warning()}
 					</p>
 				{/if}
 			{/if}
@@ -206,31 +205,28 @@
 						type="checkbox"
 						bind:checked={editor.enabled}
 						disabled={editor.busy}
-					/>Enabled</label
+					/>{m.executors_enabled()}</label
 				>{/if}
 			<label class="flex items-center gap-2 text-sm">
 				<input type="checkbox" bind:checked={editor.allowControllerCli} disabled={editor.busy} aria-describedby="executor-cli-warning" />
-				Allow workspace CLI access
+				{m.executors_allow_cli()}
 			</label>
 			<p id="executor-cli-warning" class="text-xs text-muted-foreground">
-				Trusts every process using this executor's OS account to manage workspace chats and tickets,
-				run agents on Local and other executors, and approve permission requests, including bypass execution.
+				{m.executors_cli_warning()}
 			</p>
 			<label class="flex items-center gap-2 text-sm">
 				<input type="checkbox" bind:checked={editor.allowExecutorManagement} disabled={editor.busy} aria-describedby="executor-management-warning" />
-				Allow executor management via CLI
+				{m.executors_allow_management()}
 			</label>
 			<p id="executor-management-warning" class="text-xs text-muted-foreground">
-				Requires workspace CLI access. Grants executor administration, connection secrets, access
-				grants, and provider assignments, including disclosure of provider credentials to other hosts.
+				{m.executors_management_warning()}
 			</p>
 			{#if editor.error}<p role="alert" class="break-words text-sm text-destructive">
 					{editor.error}
 				</p>{/if}
 			{#if editor.confirmDelete}
 				<p id="executor-delete-warning" role="status" class="text-sm text-muted-foreground">
-					Chats and saved settings will remain, but this executor will be unavailable. Files and
-					terminal sessions on the executor will not be deleted.
+					{m.executors_delete_warning()}
 				</p>
 			{/if}
 			<div class="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-4">
@@ -241,13 +237,13 @@
 							variant="destructive"
 							disabled={editor.busy}
 							aria-describedby="executor-delete-warning"
-							onclick={removeExecutor}>{editor.busy ? 'Deleting...' : 'Delete Executor'}</Button
+							onclick={removeExecutor}>{editor.busy ? m.common_deleting() : m.executors_delete_confirm()}</Button
 						>
 						<Button
 							type="button"
 							variant="ghost"
 							disabled={editor.busy}
-							onclick={() => (editor.confirmDelete = false)}>Cancel</Button
+							onclick={() => (editor.confirmDelete = false)}>{m.common_cancel()}</Button
 						>
 					</div>
 				{:else if editor.id}
@@ -255,8 +251,8 @@
 						type="button"
 						variant="ghost"
 						size="icon-sm"
-						aria-label="Delete executor"
-						title="Delete executor"
+						aria-label={m.executors_delete()}
+						title={m.executors_delete()}
 						disabled={editor.busy}
 						onclick={() => (editor.confirmDelete = true)}><Trash2 class="size-4" /></Button
 					>

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages.js';
 	import Network from '@lucide/svelte/icons/network';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import {
@@ -74,7 +75,7 @@
 				{#if !executors.get(executorId)}
 					<DropdownMenuRadioItem value={executorId} disabled class="text-sm" title={executorId}>
 						<span class="min-w-0 max-w-64 break-words">{executorLabel}</span>
-						{#if !executors.hasSnapshot}<span class="text-muted-foreground">Unavailable</span>{/if}
+						{#if !executors.hasSnapshot}<span class="text-muted-foreground">{m.common_unavailable()}</span>{/if}
 					</DropdownMenuRadioItem>
 				{/if}
 				{#each executors.executors as executor (executor.id)}

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages.js';
 	// Renders a todo/plan list as a compact checklist.
 
 	import type { TodoItem } from '$lib/types/chat';
@@ -58,5 +59,5 @@
 		{/each}
 	</ul>
 {:else}
-	<div class="mt-1 text-xs text-muted-foreground italic">No items</div>
+	<div class="mt-1 text-xs text-muted-foreground italic">{m.chat_todo_no_items()}</div>
 {/if}
