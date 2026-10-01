@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { WsConnection } from '$lib/ws/connection.svelte';
-import { ApiProvidersRouter } from '../api-providers-router.svelte';
+import { ApiProvidersRouter } from '../api-providers-router';
 import { ApiProvidersInvalidatedMessage, parseServerWsMessage } from '$shared/ws-events';
 
 describe('ApiProvidersRouter', () => {

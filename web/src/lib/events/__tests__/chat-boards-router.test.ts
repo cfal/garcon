@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { DrainCursor, WsConnection } from '$lib/ws/connection.svelte';
+import type { DrainCursor } from '$lib/ws/connection.svelte';
+import type { WsMessageLog } from '$lib/ws/drain';
 import { ChatBoardInvalidationHub } from '$lib/chat-board/catalog/chat-board-invalidation-hub';
-import { ChatBoardsRouter } from '../chat-boards-router.svelte';
+import { ChatBoardsRouter } from '../chat-boards-router';
 
-function connection(messages: Array<Record<string, unknown>>): WsConnection {
+function connection(messages: Array<Record<string, unknown>>): WsMessageLog {
 	return {
 		messages: messages.map((data) => ({ data, timestamp: Date.now() })),
 		trimOffset: 0,
@@ -11,7 +12,7 @@ function connection(messages: Array<Record<string, unknown>>): WsConnection {
 			cursor.current = 0;
 			return vi.fn();
 		},
-	} as unknown as WsConnection;
+	} satisfies WsMessageLog;
 }
 
 describe('ChatBoardsRouter', () => {

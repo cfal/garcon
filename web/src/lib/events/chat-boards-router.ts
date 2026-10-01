@@ -1,13 +1,12 @@
 import type { ChatBoardInvalidationHub } from '$lib/chat-board/catalog/chat-board-invalidation-hub.js';
-import type { WsConnection } from '$lib/ws/connection.svelte.js';
-import { createDrainCursor, type DrainHandle } from '$lib/ws/drain';
+import { createDrainCursor, type DrainHandle, type WsMessageLog } from '$lib/ws/drain';
 import { ChatBoardsInvalidatedMessage, parseServerWsMessage } from '$shared/ws-events';
 
 export class ChatBoardsRouter {
 	#handle: DrainHandle | null = null;
 
 	constructor(
-		private readonly ws: WsConnection,
+		private readonly ws: WsMessageLog,
 		private readonly invalidations: Pick<ChatBoardInvalidationHub, 'publish'>,
 	) {}
 
@@ -17,6 +16,7 @@ export class ChatBoardsRouter {
 
 	tick(): void {
 		for (const message of this.#handle?.drain() ?? []) {
+			if (message.data.type !== 'chat-boards-invalidated') continue;
 			const parsed = parseServerWsMessage(message.data);
 			if (parsed instanceof ChatBoardsInvalidatedMessage) {
 				this.invalidations.publish({

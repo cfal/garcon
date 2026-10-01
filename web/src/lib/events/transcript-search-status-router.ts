@@ -1,14 +1,13 @@
 import type { TranscriptSearchStatusV1 } from '$shared/chat-search';
 import { parseServerWsMessage, TranscriptSearchStatusMessage } from '$shared/ws-events';
-import type { WsConnection } from '$lib/ws/connection.svelte';
-import { createDrainCursor, type DrainHandle } from '$lib/ws/drain';
+import { createDrainCursor, type DrainHandle, type WsMessageLog } from '$lib/ws/drain';
 
 export class TranscriptSearchStatusRouter {
-	readonly #ws: WsConnection;
+	readonly #ws: WsMessageLog;
 	readonly #onStatus: (status: TranscriptSearchStatusV1) => void;
 	#handle: DrainHandle | null = null;
 
-	constructor(ws: WsConnection, onStatus: (status: TranscriptSearchStatusV1) => void) {
+	constructor(ws: WsMessageLog, onStatus: (status: TranscriptSearchStatusV1) => void) {
 		this.#ws = ws;
 		this.#onStatus = onStatus;
 	}
@@ -22,6 +21,7 @@ export class TranscriptSearchStatusRouter {
 		if (!this.#handle) return;
 		let latest: TranscriptSearchStatusMessage | null = null;
 		for (const message of this.#handle.drain()) {
+			if (message.data.type !== 'transcript-search-status') continue;
 			const parsed = parseServerWsMessage(message.data);
 			if (parsed instanceof TranscriptSearchStatusMessage) latest = parsed;
 		}

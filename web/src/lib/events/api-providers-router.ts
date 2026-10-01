@@ -1,12 +1,11 @@
 import type { ApiProvidersStore } from '$lib/api-providers/api-providers-store.svelte.js';
-import type { WsConnection } from '$lib/ws/connection.svelte.js';
-import { createDrainCursor, type DrainHandle } from '$lib/ws/drain';
+import { createDrainCursor, type DrainHandle, type WsMessageLog } from '$lib/ws/drain';
 import { ApiProvidersInvalidatedMessage, parseServerWsMessage } from '$shared/ws-events';
 
 export class ApiProvidersRouter {
 	#handle: DrainHandle | null = null;
 	constructor(
-		private readonly ws: WsConnection,
+		private readonly ws: WsMessageLog,
 		private readonly providers: Pick<ApiProvidersStore, 'invalidate'>,
 	) {}
 	start(): void {
@@ -14,6 +13,7 @@ export class ApiProvidersRouter {
 	}
 	tick(): void {
 		for (const message of this.#handle?.drain() ?? []) {
+			if (message.data.type !== 'api-providers-invalidated') continue;
 			if (parseServerWsMessage(message.data) instanceof ApiProvidersInvalidatedMessage)
 				this.providers.invalidate();
 		}

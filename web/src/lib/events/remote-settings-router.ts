@@ -2,17 +2,16 @@
 // snapshot to the RemoteSettingsStore. Creates its own drain cursor
 // so it operates independently of the main event router.
 
-import type { WsConnection } from '$lib/ws/connection.svelte';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
-import { createDrainCursor, type DrainHandle } from '$lib/ws/drain';
+import { createDrainCursor, type DrainHandle, type WsMessageLog } from '$lib/ws/drain';
 import { parseServerWsMessage, SettingsChangedMessage } from '$shared/ws-events';
 
 export class RemoteSettingsRouter {
-	readonly #remoteSettings: RemoteSettingsStore;
-	readonly #ws: WsConnection;
+	readonly #remoteSettings: Pick<RemoteSettingsStore, 'applySnapshot'>;
+	readonly #ws: WsMessageLog;
 	#handle: DrainHandle | null = null;
 
-	constructor(ws: WsConnection, remoteSettings: RemoteSettingsStore) {
+	constructor(ws: WsMessageLog, remoteSettings: Pick<RemoteSettingsStore, 'applySnapshot'>) {
 		this.#ws = ws;
 		this.#remoteSettings = remoteSettings;
 	}
@@ -28,6 +27,7 @@ export class RemoteSettingsRouter {
 		if (!this.#handle) return;
 		const messages = this.#handle.drain();
 		for (const msg of messages) {
+			if (msg.data.type !== 'settings-changed') continue;
 			const parsed = parseServerWsMessage(msg.data);
 			if (parsed instanceof SettingsChangedMessage) {
 				this.#remoteSettings.applySnapshot(parsed.settings);
