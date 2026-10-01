@@ -25,7 +25,7 @@ async function until(predicate) {
 }
 
 function fixture(mode) {
-  const turns = new CommandLedger(undefined, { recordLimit: 1 });
+  const turns = new CommandLedger({ recordLimit: 1 });
   const chats = new Map([[PARENT, { permissionMode: 'default', projectPath: '/synthetic' }],
     [CHILD, { parentChat: { chatId: PARENT, relation: 'delegation' } }]]);
   const notices = [];

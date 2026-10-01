@@ -244,7 +244,7 @@ describe('CommandLedger', () => {
   });
 
   it('discards an oversized result instead of retaining a truncated prefix', async () => {
-    const ledger = new CommandLedger(undefined, { turnResultByteLimit: 5 });
+    const ledger = new CommandLedger({ turnResultByteLimit: 5 });
     await ledger.accept(acceptedInput({ turnId: 'turn-large' }));
 
     await ledger.setTurnResult('chat-1', 'turn-large', { type: 'text', text: '123456' });
@@ -268,7 +268,7 @@ describe('CommandLedger', () => {
   );
 
   it.each(['failed', 'rejected', 'interrupted'])('discards retained final text after %s and releases its budget', async (outcome) => {
-    const ledger = new CommandLedger(undefined, { totalTurnResultByteLimit: 4 });
+    const ledger = new CommandLedger({ totalTurnResultByteLimit: 4 });
     const first = await ledger.accept(acceptedInput({ turnId: 'turn-first' }));
     await ledger.setTurnResult('chat-1', 'turn-first', { type: 'text', text: '1234' });
     if (outcome === 'interrupted') await ledger.markPublicTerminal('chat-1', 'turn-first', 'user-stop');
@@ -284,7 +284,7 @@ describe('CommandLedger', () => {
   });
 
   it('expires the oldest public result under aggregate pressure', async () => {
-    const ledger = new CommandLedger(undefined, {
+    const ledger = new CommandLedger({
       turnResultByteLimit: 10,
       totalTurnResultByteLimit: 5,
     });
@@ -306,7 +306,7 @@ describe('CommandLedger', () => {
   });
 
   it('bounds aggregate result memory while every retained turn is still pending', async () => {
-    const ledger = new CommandLedger(undefined, {
+    const ledger = new CommandLedger({
       turnResultByteLimit: 10,
       totalTurnResultByteLimit: 5,
     });
@@ -339,7 +339,7 @@ describe('CommandLedger', () => {
   });
 
   it('bounds private pre-schedule failures and releases their request payloads', async () => {
-    const ledger = new CommandLedger(undefined, { recordLimit: 1 });
+    const ledger = new CommandLedger({ recordLimit: 1 });
     const settlement = new ChatCommandSettlement(ledger);
 
     for (let index = 0; index < 3; index += 1) {
@@ -394,7 +394,7 @@ describe('CommandLedger', () => {
   });
 
   it('counts only public terminal records toward the retention limit', async () => {
-    const ledger = new CommandLedger(undefined, { recordLimit: 1 });
+    const ledger = new CommandLedger({ recordLimit: 1 });
     const first = await ledger.accept(acceptedInput({
       clientRequestId: 'first',
       turnId: 'turn-first',
@@ -425,7 +425,7 @@ describe('CommandLedger', () => {
   });
 
   it('evicts public terminal records by publication order', async () => {
-    const ledger = new CommandLedger(undefined, { recordLimit: 1 });
+    const ledger = new CommandLedger({ recordLimit: 1 });
     const first = await ledger.accept(acceptedInput({
       clientRequestId: 'first',
       turnId: 'turn-first',
@@ -445,7 +445,7 @@ describe('CommandLedger', () => {
   });
 
   it('expires aggregate results by publication order', async () => {
-    const ledger = new CommandLedger(undefined, { totalTurnResultByteLimit: 8 });
+    const ledger = new CommandLedger({ totalTurnResultByteLimit: 8 });
     const first = await ledger.accept(acceptedInput({
       clientRequestId: 'first',
       turnId: 'turn-first',
@@ -583,7 +583,7 @@ describe('CommandLedger', () => {
   });
 
   it('bounds retained steering identities without evicting known outcomes', async () => {
-    const ledger = new CommandLedger(undefined, { steerIdentityLimit: 2 });
+    const ledger = new CommandLedger({ steerIdentityLimit: 2 });
     const first = acceptedInput({ commandType: 'steer', clientRequestId: 'steer-1' });
     const second = acceptedInput({ commandType: 'steer', clientRequestId: 'steer-2' });
     const firstResult = await ledger.accept(first);
@@ -642,10 +642,10 @@ describe('CommandLedger', () => {
   });
 
   it('does not share records between process-lifetime ledger instances', async () => {
-    const first = new CommandLedger('/tmp/workspace');
+    const first = new CommandLedger();
     await first.accept(acceptedInput());
 
-    const restarted = new CommandLedger('/tmp/workspace');
+    const restarted = new CommandLedger();
 
     expect(await restarted.getRecord(commandLedgerKey('agent-run', 'chat-1', 'request-1'))).toBeNull();
   });

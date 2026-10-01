@@ -2,6 +2,7 @@ import { describe, expect, it, mock } from 'bun:test';
 import {
   abortRunningSessionsWithTimeout,
   shutdownExitCode,
+  settleShutdownCleanups,
   waitForShutdownPhasesWithTimeout,
   waitForShutdownTaskWithTimeout,
 } from '../shutdown.js';
@@ -13,6 +14,25 @@ function deferred() {
   });
   return { promise, resolve };
 }
+
+describe('settleShutdownCleanups', () => {
+  it('awaits each disposal and continues after synchronous and asynchronous failures', async () => {
+    const closed = deferred();
+    const calls = [];
+    const failure = new Error('synthetic close failure');
+    const pending = settleShutdownCleanups([
+      () => { calls.push('search'); return closed.promise; },
+      () => { calls.push('worker'); throw failure; },
+      async () => { calls.push('executor'); throw undefined; },
+      () => { calls.push('ledger'); },
+      () => { calls.push('lease'); },
+    ]);
+    expect(calls).toEqual(['search']);
+    closed.resolve();
+    expect(await pending).toEqual([failure, undefined]);
+    expect(calls).toEqual(['search', 'worker', 'executor', 'ledger', 'lease']);
+  });
+});
 
 describe('abortRunningSessionsWithTimeout', () => {
   it('awaits all running session aborts before completing', async () => {

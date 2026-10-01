@@ -9,7 +9,7 @@ one bidirectional Noise-encrypted WebSocket, regardless of which side dials.
 The shared secret authenticates Noise and the application handshake binding
 executor, runtime, version, and the fresh connection. The version is the
 package version followed by the executor protocol revision, as in
-`0.3.4+protocol.8`. The revision changes with anything either side sends or
+`0.3.4+protocol.9`. The revision changes with anything either side sends or
 accepts, so builds that disagree fail the handshake with "Executor version
 mismatch" instead of failing mid-session. TLS is required unless explicitly
 disabled with `noTls` (`--no-tls` for workers). Worker listeners require a PEM
@@ -41,6 +41,13 @@ still be in the handshake. Two limits remain: four new connections arriving
 before a legitimate peer's first handshake message can still close its socket,
 and a peer that knows sixteen executor IDs can fill the controller's 64
 sockets.
+
+Executor configuration grants become active only after a confirmed durable write.
+If a configuration write is renamed but its directory sync fails, the affected
+executor is taken offline, its CLI authority is revoked, and further executor
+configuration mutations are blocked until controller restart. The candidate
+remains on disk and enumerable for reference accounting; it is not authorization.
+Unchanged executors and Local remain available.
 
 One channel describes the current implementation, not a final topology decision.
 Channel splitting remains separate work. Correctness and resource bounds must

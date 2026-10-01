@@ -693,6 +693,12 @@ User and assistant messages, compaction summaries, and carryover-quarantine disc
 
 Export reads Garcon's authoritative ledger through the running authenticated server. Session-native references and provider-private metadata do not enter the normalized fold. Sharing remains separate: Share publishes a persisted public snapshot, while export reads the current private ledger without changing a share.
 
+Exports, shares, and handoff artifacts share a limit of four in-flight transcript
+snapshots per controller. Admission happens before reading the snapshot and is
+held through rendering. Excess requests fail with retryable HTTP 503
+`TRANSCRIPT_WORK_BUSY`; they are not queued or retried automatically. Each
+transcript Worker also admits at most eight waiting jobs behind its active job.
+
 ## Handoff Artifacts
 
 Create a bounded XML projection for whole-chat summarization:

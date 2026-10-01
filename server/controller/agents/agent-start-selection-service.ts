@@ -5,7 +5,7 @@ import type { ModelCatalogResponse } from '../../../common/model-catalog.js';
 import type { RemoteExecutionDefaults } from '../../../common/settings.js';
 import { requireCatalogAgent, resolveStartSelection, StartSelectionError } from '../../../common/start-selection.js';
 import type { ApiProviderService } from '../api-providers/service.js';
-import type { ChatRegistryEntry } from '../chats/store.js';
+import type { ChatRegistryEntry } from '../chats/registry-contracts.js';
 import type { AgentRegistryServiceContract } from './registry.js';
 
 type ParentSelection = Pick<ChatRegistryEntry,

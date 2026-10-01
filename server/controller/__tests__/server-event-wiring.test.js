@@ -22,7 +22,7 @@ import { AttentionTracker } from '../notifications/attention-tracker.js';
 import {
   attachNativeMessageSource,
   getNativeMessageRevisionSource,
-} from '../../common/native-message-source.ts';
+} from '@garcon/server-agent-interface';
 
 const at = '2026-08-12T00:00:00.000Z';
 
@@ -276,7 +276,7 @@ function createFixture(overrides = {}) {
     queue: queueService,
     processing,
     metadata,
-    currentTranscriptMessages: overrides.currentTranscriptMessages ?? (() => []),
+    currentTranscriptMessagePages: overrides.currentTranscriptMessagePages ?? (async function* () {}),
     transientFeeds,
     commandLedger,
     shareStore,
@@ -409,7 +409,7 @@ function createExecutionFixture(directory, ensureAdopted, beforeWiringCommitList
     ledger: transcripts, adoption: { ensure: ensureAdopted ?? (async () => view) },
     hasPendingOwnershipTransfer: () => false, preambles: {}, selectionAdmissionLock: new KeyedPromiseLock(),
   });
-  const execution = new ChatExecutionCoordinator(directory, agents, options.inputTranscript?.(agents) ?? {
+  const execution = new ChatExecutionCoordinator(agents, options.inputTranscript?.(agents) ?? {
     admitInput: async () => ({ inserted: true }), hasMatchingInput: async () => false,
     admitQueuedInput: () => ({ inserted: true }), discardPreparedInput() {},
   }, () => ({}), () => true, new InMemoryChatExecutionControlRepository('synthetic-server'), {
@@ -811,7 +811,7 @@ describe('server event wiring', () => {
     const prepared = Promise.withResolvers();
     const release = Promise.withResolvers();
     const delivered = mock();
-    const execution = new ChatExecutionCoordinator(directory, {
+    const execution = new ChatExecutionCoordinator({
       runAgentTurn: mock(), captureSteerTarget: () => null,
       abortSession: async () => false, isChatRunning: () => false,
     }, {
@@ -1156,8 +1156,8 @@ describe('server event wiring', () => {
   });
 
   it('rebuilds preview metadata from the complete replacement view', async () => {
-    const replacement = [new AssistantMessage(at, 'reloaded answer')];
-    const fixture = createFixture({ currentTranscriptMessages: () => replacement });
+    const replacement = (async function* () { yield [new AssistantMessage(at, 'reloaded answer')]; })();
+    const fixture = createFixture({ currentTranscriptMessagePages: () => replacement });
 
     fixture.agent.transcript({
       type: 'view-replaced',
@@ -1183,7 +1183,11 @@ describe('server event wiring', () => {
   });
 
   it('broadcasts a view replacement before rows from the replacement producer', async () => {
-    const fixture = createFixture();
+    const held = Promise.withResolvers();
+    const entered = Promise.withResolvers();
+    const fixture = createFixture({ metadata: {
+      replaceFromTranscriptView: mock(async () => { entered.resolve(); await held.promise; }),
+    } });
 
     fixture.agent.transcript({
       type: 'view-replaced',
@@ -1196,6 +1200,7 @@ describe('server event wiring', () => {
         contentStartOrdinal: 1,
       },
     });
+    await entered.promise;
     fixture.agent.transcript({
       ...providerCommit('replacement live row'),
       viewId: 'view-2',
@@ -1207,6 +1212,8 @@ describe('server event wiring', () => {
         message: new AssistantMessage(at, 'replacement live row'),
       }],
     });
+    expect(fixture.published).toEqual([]);
+    held.resolve();
     await fixture.wiring.waitForIdle();
 
     expect(fixture.published).toEqual([

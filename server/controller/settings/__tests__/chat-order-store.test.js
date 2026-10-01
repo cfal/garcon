@@ -1,5 +1,5 @@
 import { describe, expect, it, mock } from 'bun:test';
-import { ChatOrderStore } from '../domain-stores.js';
+import { ChatOrderStore } from '../chat-order-store.js';
 
 function projectSettings(overrides = {}) {
   return {

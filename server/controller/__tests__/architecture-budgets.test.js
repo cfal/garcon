@@ -28,7 +28,6 @@ const EXECUTION_FOOTPRINT_BUDGET = 9144;
 
 const GRANDFATHER = {
   'server/runtime/git/diff-engine.ts': 1575,
-  'server/controller/routes/chats.ts': 1350,
   'common/chat-types.ts': 1325,
   'server-agents/codex/src/agents/codex/app-server/runtime.ts': 1750,
   // Includes manual compaction orchestration, death-resilient instance

@@ -1,7 +1,7 @@
 import type { ExecutorManager } from '../executors/manager.js';
 import type { WorkspaceMigrationRunner } from '../migrations/index.js';
 import type { ServerEventWiring } from '../server-event-wiring.js';
-import type { ModelCatalogResponseCache } from '../routes/model-catalog-cache.js';
+import type { ModelCatalogResponseCache } from '../agents/model-catalog-cache.js';
 import { ApiProviderAssignmentStore } from './assignments.js';
 import { ApiProviderAccess } from './access.js';
 import type { ApiProviderStore } from './store.js';

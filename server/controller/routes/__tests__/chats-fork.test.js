@@ -90,7 +90,7 @@ const agents = {
   discardForkedAgentSession: mock(() => Promise.resolve(undefined)),
 };
 
-const commandLedger = createRouteCommandLedger('chats-fork');
+const commandLedger = createRouteCommandLedger();
 const chatListProjector = createRouteChatListProjector({ registry, settings, metadata, agents });
 
 const chatsRoutes = createChatRoutes({

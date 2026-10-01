@@ -3,8 +3,8 @@ import path from 'node:path';
 import { parseChatId } from '../../../common/chat-id.js';
 import { writeJsonFileAtomic } from '../../common/json-file-store.js';
 import { parseStoredJson } from '../../common/stored-json.js';
-import { isObjectRecord, normalizeChatRegistryEntry } from './registry-entry-codec.js';
-import { CHAT_REGISTRY_VERSION } from './store.js';
+import { isObjectRecord, normalizeChatRegistryEntry } from '../chats/registry-entry-codec.js';
+import { CHAT_REGISTRY_VERSION } from '../chats/registry-contracts.js';
 
 export async function removeLegacyForkOrdinals(workspaceDir: string): Promise<void> {
   const registryPath = path.join(workspaceDir, 'chats.json');

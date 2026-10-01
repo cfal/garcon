@@ -74,7 +74,6 @@ function createFixture(overrides = {}) {
     assertSupported: mock(() => undefined),
   };
   const coordinator = new ChatExecutionCoordinator(
-    '/unused',
     turnRunner,
     projection,
     overrides.getDrainOptions ?? (() => ({

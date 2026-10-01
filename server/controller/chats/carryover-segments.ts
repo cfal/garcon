@@ -1,11 +1,7 @@
 import crypto from 'node:crypto';
 import type { AgentName } from '../agents/session-types.js';
 import type { CarryOverSegmentIndex } from './carryover-segment-types.js';
-import type {
-  CarryOverHandoffTarget,
-  CarryOverMigrationQuarantine,
-  CarryOverSegmentRef,
-} from './store.js';
+import type { CarryOverHandoffTarget, CarryOverMigrationQuarantine, CarryOverSegmentRef } from './registry-contracts.js';
 
 export interface CarryOverSegmentLayoutItem {
   readonly ref: CarryOverSegmentRef;

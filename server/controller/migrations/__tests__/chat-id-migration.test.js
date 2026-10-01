@@ -5,7 +5,7 @@ import path from 'path';
 import { randomUUID } from 'crypto';
 
 import { migrateWorkspaceChatIds } from '../chat-id-migration.ts';
-import { ChatRegistry } from '../store.ts';
+import { ChatRegistry } from '../../chats/store.ts';
 import { commandLedgerKey, commandPayloadHash } from '../../commands/command-ledger.ts';
 
 const SECONDS_ID = '1772710502';

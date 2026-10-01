@@ -1,7 +1,7 @@
 import { assertGitWorkingPath, markGitMutationDispatched } from './operation-context.js';
 import { promises as fs } from 'fs';
 import path from 'path';
-import { GitDomainError } from './git-types.js';
+import { GitDomainError } from './git-domain-error.js';
 import { createLogger } from '../../common/log.js';
 import { errorMessage, hasNodeErrorCode } from '../../common/errors.js';
 import { chunkGitPathspecs, literalGitPathspec } from './pathspecs.js';

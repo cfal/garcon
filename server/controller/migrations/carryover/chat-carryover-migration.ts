@@ -2,18 +2,18 @@ import crypto from 'node:crypto';
 import { createReadStream, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
-import type { ChatMessage } from '../../../common/chat-types.js';
-import { AgentSwitchMessage, UserMessage } from '../../../common/chat-types.js';
+import type { ChatMessage } from '../../../../common/chat-types.js';
+import { AgentSwitchMessage, UserMessage } from '../../../../common/chat-types.js';
 import {
   createNativeSeedReceipt,
   renderTranscriptSeed,
-} from '../../../common/transcript-seed.js';
-import { isRecord } from '../../../common/json.js';
-import { syncDirectory, writeJsonFileAtomic } from '../../common/json-file-store.js';
-import { parseStoredJson } from '../../common/stored-json.js';
-import type { AgentOwnershipJournalFileV5 } from './agent-ownership-journal.js';
+} from '../../../../common/transcript-seed.js';
+import { isRecord } from '../../../../common/json.js';
+import { syncDirectory, writeJsonFileAtomic } from '../../../common/json-file-store.js';
+import { parseStoredJson } from '../../../common/stored-json.js';
+import type { AgentOwnershipJournalFileV5 } from '../../chats/agent-ownership-journal-format.js';
 import { assertMigrationCapacity } from './carryover-migration-budget.js';
-import { CarryOverTranscriptStore } from './carryover-transcript-store.js';
+import { CarryOverTranscriptStore } from '../../chats/carryover-transcript-store.js';
 import { readChatRegistryVersion, readLegacyChatRegistryV3 } from './legacy-chat-registry-v3.js';
 import {
   LegacyCarryOverDataError,
@@ -25,7 +25,8 @@ import {
   migrateV4Receipt,
   parseLegacyCarryOverFile,
 } from './legacy-carryover-import.js';
-import { parseCarryOverSegmentRefs, type CarryOverSegmentRef } from './store.js';
+import { parseCarryOverSegmentRefs } from '../../chats/store.js';
+import { type CarryOverSegmentRef } from '../../chats/registry-contracts.js';
 import {
   LEGACY_CARRYOVER_FILE,
   MIGRATION_BACKUP_DIR,

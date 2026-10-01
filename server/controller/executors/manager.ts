@@ -227,7 +227,9 @@ export class ExecutorManager {
   }
 
   async #applyConfig(): Promise<void> {
-    const executors = this.config.list();
+    const executors = this.config.list().map((config) => this.config.isDurable(config.id) ? config : {
+      ...config, enabled: false, allowControllerCli: false, allowExecutorManagement: false,
+    });
     const previous = new Map(this.#remotes);
     for (const [id, entry] of this.#remotes) {
       const next = executors.find((executor) => executor.id === id);
@@ -252,6 +254,9 @@ export class ExecutorManager {
         knownIntegrations: known?.knownIntegrations ?? null, inventory: known?.inventory ?? null,
         info: known?.info ?? null, error: null, preparation: null, cliLease: new AbortController() };
       this.#remotes.set(config.id, entry);
+      if (!this.config.isDurable(config.id)) {
+        entry.error = { code: 'EXECUTOR_UNAVAILABLE', message: 'Executor configuration durability is unknown. Restart the controller.' };
+      }
       if (!config.enabled) continue;
       // Returns whether the executor's error changed.
       const recordError = (message: string): boolean => {

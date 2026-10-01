@@ -1,4 +1,4 @@
-import { isRecord } from '../../../common/json.js';
+import { isRecord } from '../../../../common/json.js';
 
 export const CARRYOVER_NODE_VERSION = 1 as const;
 

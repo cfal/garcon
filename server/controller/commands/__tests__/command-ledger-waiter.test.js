@@ -12,7 +12,7 @@ const CHILD = '1111111111111111';
 
 describe('CommandLedger terminal observation', () => {
   it('captures public output before eviction and serves fast completions', async () => {
-    const ledger = new CommandLedger(undefined, { recordLimit: 1 });
+    const ledger = new CommandLedger({ recordLimit: 1 });
     const record = await accept(ledger);
     const signal = new AbortController().signal;
     const remove = spyOn(signal, 'removeEventListener');
@@ -87,7 +87,7 @@ describe('CommandLedger terminal observation', () => {
   });
 
   it('uses only the immutable receipt owner, including steer tombstones', async () => {
-    const ledger = new CommandLedger(undefined, { recordLimit: 0 });
+    const ledger = new CommandLedger({ recordLimit: 0 });
     const record = await accept(ledger);
     const pending = ledger.waitForTurnTerminal(CHILD, record.turnId, new AbortController().signal);
     const steer = (await ledger.accept({ commandType: 'steer', chatId: CHILD,
@@ -101,7 +101,7 @@ describe('CommandLedger terminal observation', () => {
   });
 
   it('captures output before later result retention pressure expires it', async () => {
-    const ledger = new CommandLedger(undefined, { totalTurnResultByteLimit: 4 });
+    const ledger = new CommandLedger({ totalTurnResultByteLimit: 4 });
     const record = await accept(ledger);
     const signal = new AbortController().signal;
     const pending = ledger.waitForTurnTerminal(CHILD, record.turnId, signal);

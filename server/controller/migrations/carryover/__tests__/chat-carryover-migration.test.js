@@ -3,9 +3,9 @@ import crypto from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { AssistantMessage, UserMessage } from '../../../../common/chat-types.js';
-import { CarryOverTranscriptStore } from '../carryover-transcript-store.ts';
-import { encodeCarryOverPages } from '../carryover-page-codec.ts';
+import { AssistantMessage, UserMessage } from '../../../../../common/chat-types.js';
+import { CarryOverTranscriptStore } from '../../../chats/carryover-transcript-store.ts';
+import { encodeCarryOverPages } from '../../../chats/carryover-page-codec.ts';
 import { assertMigrationBudget } from '../carryover-migration-budget.ts';
 import {
   finalizeCarryOverMigrationValidation,
@@ -13,7 +13,7 @@ import {
 } from '../chat-carryover-migration.ts';
 import { rollbackLegacyCarryOverMigration } from '../chat-carryover-rollback.ts';
 import { migratedTranscriptMatches } from '../legacy-carryover-import.ts';
-import { ChatRegistry } from '../store.ts';
+import { ChatRegistry } from '../../../chats/store.ts';
 
 const CHAT_ID = '1786077000000001';
 const POST_MIGRATION_CHAT_ID = '1786077000000002';

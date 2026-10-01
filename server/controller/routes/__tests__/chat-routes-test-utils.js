@@ -1,14 +1,11 @@
-import os from 'os';
-import path from 'path';
-import { randomUUID } from 'crypto';
 import { CommandLedger } from '../../commands/command-ledger.js';
 import { ChatCommandService } from '../../commands/chat-command-service.js';
 import { forkChatFileCopy } from '../../chats/fork-chat.js';
 import { ChatListProjector } from '../../chats/chat-list-projector.js';
 import { inspectProjectDirectory } from '../../__tests__/project-inspector.ts';
 
-export function createRouteCommandLedger(label = 'chat-routes') {
-  return new CommandLedger(path.join(os.tmpdir(), `garcon-${label}-ledger-${randomUUID()}`));
+export function createRouteCommandLedger() {
+  return new CommandLedger();
 }
 
 export function createRouteChatListProjector({ registry, settings, metadata, agents }) {

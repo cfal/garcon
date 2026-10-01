@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { DeleteIntentV2 } from '../../../server/controller/chats/agent-ownership-journal.js';
+import type { DeleteIntentV2 } from '../../../server/controller/chats/agent-ownership-journal-format.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 
 for (const executionBackend of ['remote-controller-dials', 'remote-executor-dials'] as const) {

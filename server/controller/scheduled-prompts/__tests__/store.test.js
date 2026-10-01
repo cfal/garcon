@@ -5,6 +5,7 @@ import path from 'path';
 import crypto, { randomUUID } from 'crypto';
 import { ScheduledPromptRunLog } from '../run-log.ts';
 import { ScheduledPromptStore } from '../store.ts';
+import { withFailingDirectorySync } from '../../../common/__tests__/atomic-write-failure.ts';
 
 const createdDirs = [];
 
@@ -39,6 +40,42 @@ async function scheduledPromptBackupPaths(dir, version = 1) {
 }
 
 describe('scheduled prompt persistence', () => {
+  it.each(['create', 'update', 'remove', 'claim', 'reorder'])('fences later mutations and occurrence claims after an uncertain %s', async operation => {
+    const dir = await fs.mkdtemp(path.join(os.homedir(), 'scheduled-durability-'));
+    createdDirs.push(dir);
+    const store = new ScheduledPromptStore(dir);
+    await store.init();
+    const first = scheduledPrompt('a', { type: 'once', nextRunAt: '2030-01-01T09:00:00.000Z' });
+    const second = scheduledPrompt('b', { type: 'once', nextRunAt: '2030-01-01T10:00:00.000Z' });
+    await store.create(first, 0);
+    await store.create(second, 1);
+    const mutate = () => {
+      switch (operation) {
+        case 'create': return store.create({ ...first, id: 'c' }, store.revision);
+        case 'update': return store.replace({ ...first, prompt: 'Updated synthetic prompt' }, store.revision);
+        case 'remove': return store.remove(first.id, store.revision);
+        case 'claim': return store.claimOccurrence(first.id, first.schedule.nextRunAt);
+        case 'reorder': return store.reorder(['b', 'a'], store.revision);
+      }
+    };
+    await expect(withFailingDirectorySync(dir, mutate)).rejects.toMatchObject({ renamed: true });
+    const filePath = path.join(dir, 'scheduled-prompts.json');
+    const candidate = await fs.readFile(filePath, 'utf8');
+    const unavailable = { code: 'SCHEDULED_PROMPT_STORAGE_UNAVAILABLE', status: 503 };
+    await expect(store.create({ ...first, id: 'd' }, store.revision)).rejects.toMatchObject(unavailable);
+    await expect(store.replace(first, store.revision)).rejects.toMatchObject(unavailable);
+    await expect(store.remove(second.id, store.revision)).rejects.toMatchObject(unavailable);
+    await expect(store.claimOccurrence(second.id, second.schedule.nextRunAt)).rejects.toMatchObject(unavailable);
+    await expect(store.restore(first)).rejects.toMatchObject(unavailable);
+    await expect(store.reconcileMissed(new Date('2040-01-01'))).rejects.toMatchObject(unavailable);
+    expect(await fs.readFile(filePath, 'utf8')).toBe(candidate);
+    const restarted = new ScheduledPromptStore(dir);
+    await restarted.init();
+    expect(restarted.revision).toBe(3);
+    expect(restarted.list()).toEqual(JSON.parse(candidate).prompts);
+    await restarted.create({ ...first, id: 'd' }, restarted.revision);
+  });
+
   afterEach(async () => {
     for (const dir of createdDirs.splice(0)) {
       await fs.rm(dir, { recursive: true, force: true });

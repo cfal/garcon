@@ -4,7 +4,7 @@ import type {
   ForkChatResponse,
   ForkRunCommandResponse,
 } from '../../../common/chat-command-contracts.js';
-import type { ChatRegistryEntry } from '../chats/store.js';
+import type { ChatRegistryEntry } from '../chats/registry-contracts.js';
 import { rollbackForkTarget, type ForkChatFileCopyResult } from '../chats/fork-chat.js';
 import { commandLedgerKey, PRE_SCHEDULE_FAILURE_ERROR_CODE } from './command-ledger.js';
 import {

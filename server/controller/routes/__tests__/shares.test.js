@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { UserMessage } from '../../../../common/chat-types.ts';
 import createShareRoutes from '../shares.ts';
+import { isNoAuthHandler } from '../../lib/http-route.ts';
 import { DomainError } from '../../../common/domain-error.ts';
 import { renderSharedChatText } from '../../chats/share-transcript.ts';
 import { decodeStoredLedgerRow } from '../../ledger/codec.ts';
@@ -72,9 +73,12 @@ function snapshotStore(snapshot) {
   };
   return {
     getHeader: mock(async (token) => (matches(token) ? header() : null)),
-    getMessages: mock(async (token) => (matches(token)
-      ? { header: header(), messages: snapshot.messages.map((message) => JSON.stringify(message)) }
-      : null)),
+    getMessages: mock(async (token, select) => {
+      if (!matches(token)) return null;
+      const current = header();
+      const range = select?.(current) ?? { start: 0, end: current.messageCount };
+      return { header: current, messages: snapshot.messages.slice(range.start, range.end).map(message => JSON.stringify(message)) };
+    }),
     getTextPath: mock(async (token) => {
       if (!matches(token)) return null;
       const textPath = path.join(textDirectory, `${token}-${Math.random()}.txt`);
@@ -111,7 +115,51 @@ function createRoutes(snapshot = createSnapshot(), appTitle = null, overrides = 
   return { routes, shareStore, capture };
 }
 
+describe('share storage error boundaries', () => {
+  it.each([
+    ['/api/v1/chats/share', 'POST', '', 'publish', false],
+    ['/api/v1/chats/share', 'DELETE', '?chatId=123', 'revokeShareByChatId', false],
+    ['/api/v1/chats/share/status', 'GET', '?chatId=123', 'getEntryByChatId', false],
+    ['/api/v1/shared', 'GET', '?token=share-token&limit=10', 'getMessages', true],
+    ['/shared/:token', 'GET', '', 'getHeader', true],
+    ['/shared/llm/:token', 'GET', '', 'getTextPath', true],
+  ])('preserves unavailable status for %s %s', async (route, method, query, operation, publicRoute) => {
+    const error = new DomainError('SHARE_STORAGE_UNAVAILABLE', 'Restart the controller before accessing shares.', 503);
+    const { routes } = createRoutes(undefined, null, {
+      session: { agentId: 'codex', model: 'test', projectPath: '/synthetic' },
+      shareStore: { [operation]: () => { throw error; } },
+    });
+    const handler = routes[route][method];
+    const url = new URL(`http://localhost${route.replace(':token', 'share-token')}${query}`);
+    const response = await handler(new Request(url, {
+      method,
+      headers: { Accept: 'text/html', 'Content-Type': 'application/json' },
+      body: method === 'POST' ? JSON.stringify({ chatId: '123' }) : undefined,
+    }), url);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      success: false, error: error.message, errorCode: 'SHARE_STORAGE_UNAVAILABLE', retryable: false,
+    });
+    expect(isNoAuthHandler(handler)).toBe(publicRoute);
+    if (method === 'GET') expect(response.headers.get('Cache-Control')).toContain('no-store');
+  });
+});
+
 describe('share creation route', () => {
+  it('reports snapshot overload without starting publication', async () => {
+    const { routes, shareStore } = createRoutes(undefined, null, {
+      session: { agentId: 'codex', model: 'test', projectPath: '/synthetic' },
+      transcripts: { withStoredSnapshot: async () => { throw new DomainError('TRANSCRIPT_WORK_BUSY', 'Transcript capacity is full', 503, true); } },
+    });
+    const url = new URL('http://localhost/api/v1/chats/share');
+    const response = await routes[url.pathname].POST(new Request(url, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chatId: '123' }),
+    }), url);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ success: false, errorCode: 'TRANSCRIPT_WORK_BUSY', retryable: true });
+    expect(shareStore.publish).not.toHaveBeenCalled();
+  });
+
   it('[TLV5-L01.03-CORE-UNIT-01] creates the share from one pinned durable snapshot and records its origin', async () => {
     const created = [];
     const { routes, capture } = createRoutes(createSnapshot(), null, {

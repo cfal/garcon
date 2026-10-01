@@ -102,7 +102,7 @@ describe('AgentHandoffService', () => {
     const decisionReached = Promise.withResolvers();
     const release = Promise.withResolvers();
     const repository = new InMemoryChatExecutionControlRepository('test-instance');
-    const coordinator = new ChatExecutionCoordinator('/unused', {
+    const coordinator = new ChatExecutionCoordinator({
       captureSteerTarget: () => null, isChatRunning: () => false,
     }, {}, () => ({}), () => true, repository, {
       projectAdmission: { assertAvailable: async () => {} },

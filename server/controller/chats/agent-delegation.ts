@@ -1,4 +1,4 @@
-import type { ChatRegistryEntry } from './store.js';
+import type { ChatRegistryEntry } from './registry-contracts.js';
 
 export function isDirectDelegatedChild(
   sourceChatId: string,

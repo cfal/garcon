@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { parseChatId } from '../../../common/chat-id.js';
 import { AgentStartController } from '../../../server/controller/chats/agent-start-controller.js';
 import { AgentStartProgress } from '../../../server/controller/chats/agent-start-progress.js';
-import type { ChatRegistryEntry } from '../../../server/controller/chats/store.js';
+import type { ChatRegistryEntry } from '../../../server/controller/chats/registry-contracts.js';
 import { ChatExecutionCoordinator } from '../../../server/controller/chat-execution/chat-execution-coordinator.js';
 import { InMemoryChatExecutionControlRepository } from '../../../server/controller/chat-execution/chat-execution-control-repository.js';
 import { CommandLedger } from '../../../server/controller/commands/command-ledger.js';
@@ -31,7 +31,7 @@ describe('delegated startup admission interleavings', () => {
     transcripts = new TranscriptLedgerService(store);
     transcripts.initializeChat(PARENT);
     transcripts.initializeChat(CHILD);
-    execution = new ChatExecutionCoordinator(directory, {
+    execution = new ChatExecutionCoordinator({
       runAgentTurn: async (chatId, _command, options) => { transcripts.beginRun(chatId, options.turnId); },
       captureSteerTarget: async () => null,
       steerInput: async () => { throw new Error('Unexpected steer'); },

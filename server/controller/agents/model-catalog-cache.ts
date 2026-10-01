@@ -1,15 +1,13 @@
 import crypto from 'crypto';
 import type { AgentCatalogEntry } from '../../../common/agents.js';
 import type { ApiProviderCatalogEntry } from '../../../common/api-providers.js';
-import { isRecord } from '../../../common/json.js';
 import { effectiveExecutorId } from '../../../common/executors.js';
-import type { AgentRegistryServiceContract } from '../agents/registry.js';
+import { isRecord } from '../../../common/json.js';
 import type { ApiProviderService } from '../api-providers/service.js';
+import type { AgentRegistryServiceContract } from './registry.js';
+
 
 const MODEL_CATALOG_RESPONSE_CACHE_TTL_MS = 60_000;
-const CATALOG_RESPONSE_HEADERS = {
-  'Cache-Control': 'private, no-cache',
-};
 
 export interface ModelCatalog {
   agents: AgentRegistryServiceContract;
@@ -87,15 +85,6 @@ export function createCatalogEtag(body: ModelCatalogResponseBody): string {
   return `W/"model-catalog:${hash}"`;
 }
 
-function etagMatches(request: Request, etag: string): boolean {
-  const header = request?.headers?.get?.('if-none-match');
-  if (!header) return false;
-  return header
-    .split(',')
-    .map((part) => part.trim())
-    .some((candidate) => candidate === etag || candidate === '*');
-}
-
 function isFresh(snapshot: ModelCatalogSnapshot): boolean {
   return Date.now() - snapshot.createdAt < MODEL_CATALOG_RESPONSE_CACHE_TTL_MS;
 }
@@ -147,17 +136,4 @@ export class ModelCatalogResponseCache {
     if (executorId === undefined) this.#executors.clear();
     else this.#executors.delete(executorId);
   }
-}
-
-export function catalogResponseFromSnapshot(request: Request, snapshot: ModelCatalogSnapshot): Response {
-  const headers = {
-    ...CATALOG_RESPONSE_HEADERS,
-    ETag: snapshot.etag,
-  };
-
-  if (etagMatches(request, snapshot.etag)) {
-    return new Response(null, { status: 304, headers });
-  }
-
-  return Response.json(snapshot.body, { headers });
 }

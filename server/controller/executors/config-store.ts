@@ -31,6 +31,7 @@ export class ExecutorConfigStore {
   readonly #path: string;
   #executors: readonly RemoteExecutorConfig[] = [];
   #pending: Promise<unknown> = Promise.resolve();
+  #uncertainExecutorId: string | null = null;
 
   constructor(workspaceDir: string) { this.#path = join(workspaceDir, 'executors.json'); }
 
@@ -53,9 +54,12 @@ export class ExecutorConfigStore {
       }
       throw error;
     });
+    this.#uncertainExecutorId = null;
   }
 
   list(): readonly RemoteExecutorConfig[] { return structuredClone(this.#executors); }
+
+  isDurable(id: string): boolean { return this.#uncertainExecutorId !== id; }
 
   get(id: string): RemoteExecutorConfig | null {
     const executor = this.#executors.find((entry) => entry.id === id);
@@ -63,6 +67,7 @@ export class ExecutorConfigStore {
   }
 
   require(id: string): RemoteExecutorConfig {
+    if (!this.isDurable(id)) throw this.#unavailable();
     const executor = this.get(id);
     if (!executor) throw new DomainError('EXECUTOR_NOT_FOUND', 'Executor not found', 404);
     return executor;
@@ -100,7 +105,7 @@ export class ExecutorConfigStore {
           : { kind: 'executor-connects', advertisedUrl },
       };
       resolveConnectionUrl(executor, publicBase);
-      await this.#save([...this.#executors, executor]);
+      await this.#save([...this.#executors, executor], id);
       return structuredClone(executor);
     });
   }
@@ -139,7 +144,7 @@ export class ExecutorConfigStore {
         resolveConnectionUrl(executor);
       }
       assertUpdateAllowed?.(previous, executor);
-      await this.#save(this.#executors.map((entry) => entry.id === id ? executor : entry));
+      await this.#save(this.#executors.map((entry) => entry.id === id ? executor : entry), id);
       return structuredClone(executor);
     });
   }
@@ -147,12 +152,15 @@ export class ExecutorConfigStore {
   remove(id: string): Promise<void> {
     return this.#serialize(async () => {
       this.require(id);
-      await this.#save(this.#executors.filter((entry) => entry.id !== id));
+      await this.#save(this.#executors.filter((entry) => entry.id !== id), id);
     });
   }
 
   #serialize<T>(operation: () => Promise<T>): Promise<T> {
-    const result = this.#pending.then(operation);
+    const result = this.#pending.then(() => {
+      if (this.#uncertainExecutorId !== null) throw this.#unavailable();
+      return operation();
+    });
     this.#pending = result.catch(() => undefined);
     return result;
   }
@@ -167,12 +175,20 @@ export class ExecutorConfigStore {
     }
   }
 
-  async #save(executors: readonly RemoteExecutorConfig[]): Promise<void> {
+  #unavailable(): DomainError {
+    return new DomainError('EXECUTOR_UNAVAILABLE', 'Executor configuration durability is unknown. Restart the controller before changing executors.', 503);
+  }
+
+  async #save(executors: readonly RemoteExecutorConfig[], executorId: string): Promise<void> {
     assertUniqueExecutors(executors);
     try {
       await writeJsonFileAtomic(this.#path, { version: 1, executors }, { mode: 0o600 });
     } catch (error) {
-      if (error instanceof AtomicJsonWriteError && error.renamed) this.#executors = executors;
+      if (error instanceof AtomicJsonWriteError && error.renamed) {
+        // Retains the file's candidate for references without publishing its authority.
+        this.#executors = executors;
+        this.#uncertainExecutorId = executorId;
+      }
       throw error;
     }
     this.#executors = executors;

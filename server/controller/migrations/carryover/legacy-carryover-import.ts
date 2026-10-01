@@ -1,24 +1,20 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import type { ChatMessage } from '../../../common/chat-types.js';
-import { AgentSwitchMessage, parseChatMessages } from '../../../common/chat-types.js';
-import { parseNativeSeedReceipt } from '../../../common/transcript-seed.js';
-import { isRecord } from '../../../common/json.js';
-import { parseStoredJson } from '../../common/stored-json.js';
+import type { ChatMessage } from '../../../../common/chat-types.js';
+import { AgentSwitchMessage, parseChatMessages } from '../../../../common/chat-types.js';
+import { parseNativeSeedReceipt } from '../../../../common/transcript-seed.js';
+import { isRecord } from '../../../../common/json.js';
+import { parseStoredJson } from '../../../common/stored-json.js';
 import type { AgentChatReference } from '@garcon/server-agent-interface';
-import {
-  emptyOwnershipJournalV5,
-  type AgentOwnershipJournalFileV5,
-  type DeleteIntentV2,
-} from './agent-ownership-journal.js';
-import type { CarryOverTranscriptStore } from './carryover-transcript-store.js';
-import { decodeCarryOverPage } from './carryover-page-codec.js';
+import { emptyOwnershipJournalV5, type AgentOwnershipJournalFileV5, type DeleteIntentV2 } from '../../chats/agent-ownership-journal-format.js';
+import type { CarryOverTranscriptStore } from '../../chats/carryover-transcript-store.js';
+import { decodeCarryOverPage } from '../../chats/carryover-page-codec.js';
 import {
   parseCarryOverNode,
   type CarryOverNode,
   type MaterializedCarryOverNode,
 } from './legacy-carryover-node-types.js';
-import type { CarryOverSegmentRef } from './store.js';
+import type { CarryOverSegmentRef } from '../../chats/registry-contracts.js';
 
 export interface LegacyCarryOverSegment {
   readonly agentId: string;

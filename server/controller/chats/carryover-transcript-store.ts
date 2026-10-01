@@ -27,10 +27,7 @@ import {
   carryOverLayout,
   carryOverRevision,
 } from './carryover-segments.js';
-import type {
-  CarryOverMigrationQuarantine,
-  CarryOverSegmentRef,
-} from './store.js';
+import type { CarryOverMigrationQuarantine, CarryOverSegmentRef } from './registry-contracts.js';
 
 const DEFAULT_INDEX_CACHE_SIZE = 256;
 

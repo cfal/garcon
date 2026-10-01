@@ -186,7 +186,7 @@ function createRoutesFixture({
         }]),
     )),
   };
-  const commandLedger = createRouteCommandLedger('chats-search');
+  const commandLedger = createRouteCommandLedger();
   const routes = createChatRoutes({
     registry,
     settings,

@@ -1,7 +1,7 @@
 import { GitServiceError, isGitServiceErrorCode } from '../../../common/git-error.js';
 import { AgentCallError } from '@garcon/server-agent-interface';
 import { isProjectBoundaryError } from '../../common/path-boundary.js';
-import { GitDomainError } from './git-types.js';
+import { GitDomainError } from './git-domain-error.js';
 import { GhDomainError } from '../gh/gh-types.js';
 import { classifyGitError } from './git-error-classifier.js';
 import { classifyGhError } from '../gh/gh-error-classifier.js';

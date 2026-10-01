@@ -1,6 +1,6 @@
 import { describe, expect, it, mock } from 'bun:test';
 import { QueueEntrySteerError } from '../../chat-execution/queue-steer-error.js';
-import { SteerDeliveryError } from '../../../common/domain-error.js';
+import { SteerDeliveryError } from '../../chat-execution/steering-errors.js';
 import { CommandValidationError } from '../../lib/command-validation-error.ts';
 import { logSteerOutcome } from '../steer-commands.ts';
 

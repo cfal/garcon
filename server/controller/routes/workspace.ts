@@ -1,28 +1,21 @@
-import { resolveGenerationContextsForSelections } from '../settings/generation-config-source.ts';
-import { isRecord } from '../../../common/json.js';
-import { parseExecutorId } from '../../../common/executors.js';
-import { resolveEffectiveGenerationUiConfig, resolveGenerationUiSnapshot } from '../settings/generation-effective.js';
-import { normalizeUiSettings, sanitizeFolderFilter } from '../settings/settings-shared.js';
-import { sortedPinnedProjectPaths } from '../settings/startup-recents.js';
-import { withJsonBody } from '../lib/json-route.js';
-import type { RouteMap } from '../lib/http-route-types.js';
-import type { SettingsStore } from '../settings/store.js';
-import type { AgentRegistryServiceContract } from '../agents/registry.js';
-import type { IChatRegistry } from '../chats/store.js';
-import type { TelegramNotifier } from '../notifications/telegram.js';
-import type { TelegramSettingsStore, TelegramPublicStatus } from '../notifications/telegram-settings-store.js';
-import type { ChatFolder, SavedChatSearch } from '../settings/types.js';
 import {
-  asJsonBody,
-  errorMessage,
-  jsonErrorFromCorruptStateFile,
-  type JsonBody,
-} from './route-helpers.js';
-import { jsonError, jsonErrorFromUnknown } from '../../common/http-error.js';
-import { disableRequestIdleTimeout } from '../lib/http-route.js';
+  parseUpdateChatTitleRequest,
+  type UpdateChatTitleResponse,
+} from '../../../common/chat-title-contracts.js';
+import { parseExecutorId } from '../../../common/executors.js';
+import {
+  GENERATION_PROMPT_TEMPLATE_MAX_LENGTH,
+  PROMPT_REFINEMENT_USER_PROMPT_TOKEN,
+} from '../../../common/generation-prompts.js';
+import { isGenerationTestTarget } from '../../../common/generation-test-contracts.js';
+import {
+  HIDDEN_BASH_COMMAND_PATTERN_MAX_COUNT,
+  HIDDEN_BASH_COMMAND_PATTERN_MAX_LENGTH,
+  parseHiddenBashCommandPatterns,
+} from '../../../common/hidden-bash-command-patterns.js';
+import { isRecord } from '../../../common/json.js';
 import {
   AGENT_COMMAND_SETTING_KEYS,
-  DEFAULT_REMOTE_FEATURE_SETTINGS,
   GENERATION_UI_SETTING_KEYS,
   generationSelectionExecutorError,
   normalizeAgentSwitchCompactionUiSettings,
@@ -30,50 +23,36 @@ import {
   normalizeCommitMessageUiSettings,
   normalizePromptRefinementUiSettings,
   normalizeTicketChatUiSettings,
-  parseExecutorProjectPreferences,
   parseExecutorProjectPreferencesPatch,
   type AgentCommandsFeatureSettings,
-  type RemoteSettingsSnapshot,
-  type RemoteFeatureSettings,
-  type RemoteUiEffectiveSettings,
+  type RemoteFeatureSettings
 } from '../../../common/settings.js';
-import {
-  GENERATION_PROMPT_TEMPLATE_MAX_LENGTH,
-  PROMPT_REFINEMENT_USER_PROMPT_TOKEN,
-} from '../../../common/generation-prompts.js';
 import { TICKET_CHAT_TOKENS, ticketChatPromptError } from '../../../common/ticket-chat.js';
+import { jsonError, jsonErrorFromUnknown } from '../../common/http-error.js';
+import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import { AppTitleValidationError, sanitizeAppIdentityPatch } from '../app-title-settings.js';
 import { TranscriptSearchSettingsError } from '../chats/search/settings-coordinator.js';
-import { isGenerationTestTarget } from '../../../common/generation-test-contracts.js';
-import {
-  parseUpdateChatTitleRequest,
-  type UpdateChatTitleResponse,
-} from '../../../common/chat-title-contracts.js';
+import type { IChatRegistry } from '../chats/store.js';
+import type { RouteMap } from '../lib/http-route-types.js';
+import { disableRequestIdleTimeout } from '../lib/http-route.js';
+import { withJsonBody } from '../lib/json-route.js';
+import type { TelegramSettingsStore } from '../notifications/telegram-settings-store.js';
+import type { TelegramNotifier } from '../notifications/telegram.js';
+import { resolveGenerationContextsForSelections } from '../settings/generation-config-source.ts';
+import { resolveEffectiveGenerationUiConfig } from '../settings/generation-effective.js';
 import { testGenerationModel } from '../settings/generation-model-test.js';
+import { buildRemoteSettingsSnapshot } from '../settings/remote-snapshot.js';
+import { sanitizeFolderFilter } from '../settings/settings-shared.js';
+import type { SettingsStore } from '../settings/store.js';
+import type { ChatFolder, SavedChatSearch } from '../settings/types.js';
 import {
-  DEFAULT_HANDOFF_CONTEXT_WINDOW_TOKENS,
-  parseAgentSwitchContextWindowTokens,
-} from '../../../common/handoff-sizing.js';
-import {
-  HIDDEN_BASH_COMMAND_PATTERN_MAX_COUNT,
-  HIDDEN_BASH_COMMAND_PATTERN_MAX_LENGTH,
-  parseHiddenBashCommandPatterns,
-} from '../../../common/hidden-bash-command-patterns.js';
+  asJsonBody,
+  errorMessage,
+  jsonErrorFromCorruptStateFile,
+  type JsonBody,
+} from './route-helpers.js';
 
-// Builds the canonical remote settings snapshot used by GET, PUT, and
-// WebSocket broadcast paths. Single source of truth for the shape.
 const TELEGRAM_LINK_POLL_SECONDS = 20;
-
-const emptyTelegramStatus: TelegramPublicStatus = {
-  botTokenAvailable: false,
-  botUsername: null,
-  botFirstName: null,
-  recipientUsername: null,
-  recipientDisplayName: null,
-  recipientLinked: false,
-  pendingLink: false,
-  linkUrl: null,
-};
 
 function telegramTokenTestFailedResponse(error: unknown): Response {
   return Response.json({
@@ -90,91 +69,6 @@ function asPlainObject(value: unknown): Record<string, unknown> {
 
 function isEmptyObject(value: unknown): boolean {
   return isRecord(value) && Object.keys(value).length === 0;
-}
-
-function resolveUntoggledGenerationUiConfig<
-  T extends 'commitMessage' | 'promptRefinement',
->(
-  input: Parameters<typeof resolveEffectiveGenerationUiConfig>[0],
-): RemoteUiEffectiveSettings[T] {
-  const effective = resolveGenerationUiSnapshot(input);
-  if (!effective) return undefined;
-  const config = { ...effective };
-  delete (config as { enabled?: boolean }).enabled;
-  return config as NonNullable<RemoteUiEffectiveSettings[T]>;
-}
-
-export async function buildRemoteSettingsSnapshot({
-  settings,
-  agents,
-  telegramSettings,
-  projectBasePath,
-}: {
-  settings: SettingsStore;
-  agents: Pick<AgentRegistryServiceContract, 'getAgentAuthStatusMap' | 'getAgentReadinessMap' | 'getAgentCatalogEntries'>;
-  telegramSettings?: TelegramSettingsStore | null;
-  projectBasePath: string;
-}): Promise<RemoteSettingsSnapshot> {
-  const settingsSource = settings.getRemoteSettingsSnapshotSource();
-  const version = settingsSource.version;
-  const features = settingsSource.features ?? structuredClone(DEFAULT_REMOTE_FEATURE_SETTINGS);
-  const ui = normalizeUiSettings(settingsSource.ui);
-  const paths = settingsSource.paths;
-  const pinnedChatIds = settingsSource.pinnedChatIds;
-  const recentAgentSettings = settingsSource.recentAgentSettings;
-  const executionDefaults = settingsSource.executionDefaults;
-  const [chatTitleContext, compactionContext, commitMessageContext, promptRefinementContext] =
-    await resolveGenerationContextsForSelections(
-      agents,
-      [ui?.chatTitle, ui?.agentSwitchCompaction, ui?.commitMessage, ui?.promptRefinement],
-    );
-
-  const persistedCompaction = asPlainObject(ui?.agentSwitchCompaction);
-  const effectiveCompaction = resolveGenerationUiSnapshot({
-    persisted: persistedCompaction,
-    ...compactionContext,
-  });
-  const uiEffective = {
-    chatTitle: resolveGenerationUiSnapshot({
-      persisted: asPlainObject(ui?.chatTitle),
-      ...chatTitleContext,
-    }),
-    agentSwitchCompaction: effectiveCompaction ? {
-      ...effectiveCompaction,
-      enabled: persistedCompaction.enabled === true,
-      contextWindowTokens:
-        parseAgentSwitchContextWindowTokens(effectiveCompaction.contextWindowTokens)
-        ?? DEFAULT_HANDOFF_CONTEXT_WINDOW_TOKENS,
-    } : undefined,
-    commitMessage: resolveUntoggledGenerationUiConfig<'commitMessage'>({
-      persisted: asPlainObject(ui?.commitMessage),
-      ...commitMessageContext,
-    }),
-    promptRefinement: resolveUntoggledGenerationUiConfig<'promptRefinement'>({
-      persisted: asPlainObject(ui?.promptRefinement),
-      ...promptRefinementContext,
-    }),
-  };
-
-  return {
-    version,
-    features,
-    ui: asPlainObject(ui),
-    uiEffective,
-    paths: {
-      pinnedProjectPaths: sortedPinnedProjectPaths(paths?.pinnedProjectPaths),
-      browseStartPath: typeof paths?.browseStartPath === 'string' ? paths.browseStartPath : '',
-      recentProjectPaths: Array.isArray(paths?.recentProjectPaths)
-        ? paths.recentProjectPaths.filter((entry): entry is string => typeof entry === 'string')
-        : [],
-      ...(paths?.byExecutor === undefined ? {} : { byExecutor: parseExecutorProjectPreferences(paths.byExecutor) ?? {} }),
-    },
-    pinnedChatIds: Array.isArray(pinnedChatIds) ? pinnedChatIds : [],
-    recentAgentSettings,
-    executionDefaults,
-    projectBasePath,
-    telegram: telegramSettings?.getPublicStatus?.() ?? emptyTelegramStatus,
-  };
 }
 
 interface SavedSearchInput {

@@ -4,8 +4,8 @@
 // carryover-migration-files.ts.
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { isRecord } from '../../../common/json.js';
-import { syncDirectory, writeJsonFileAtomic } from '../../common/json-file-store.js';
+import { isRecord } from '../../../../common/json.js';
+import { syncDirectory, writeJsonFileAtomic } from '../../../common/json-file-store.js';
 import {
   LEGACY_CARRYOVER_FILE,
   MIGRATION_MARKER_FILE,
@@ -22,7 +22,7 @@ import {
   type CarryOverMigrationMarker,
 } from './carryover-migration-files.js';
 import { readChatRegistryVersion } from './legacy-chat-registry-v3.js';
-import { CHAT_REGISTRY_VERSION } from './store.js';
+import { CHAT_REGISTRY_VERSION } from '../../chats/registry-contracts.js';
 
 export async function rollbackLegacyCarryOverMigration(
   workspaceDir: string,

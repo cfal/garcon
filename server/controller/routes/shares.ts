@@ -19,9 +19,10 @@ import {
 } from '../chats/share-page.ts';
 import { loadStaticText } from './static.js';
 import { extractFirstLine } from '../lib/text.js';
-import type { RouteMap } from '../lib/http-route-types.js';
+import type { RouteHandler, RouteMap } from '../lib/http-route-types.js';
 import type { ChatMetadata } from '../chats/metadata-store.js';
 import { isDomainError } from '../../common/domain-error.js';
+import { jsonErrorFromUnknown } from '../../common/http-error.js';
 import {
   injectAppTitleIntoShell,
   resolvePublicAppTitle,
@@ -188,6 +189,19 @@ function publicJsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+function withShareStorageErrors(handler: RouteHandler): RouteHandler {
+  return async (...args) => {
+    try {
+      return await handler(...args);
+    } catch (error) {
+      if (!isDomainError(error)) throw error;
+      const response = jsonErrorFromUnknown(error);
+      response.headers.set('Cache-Control', NO_STORE);
+      return response;
+    }
+  };
+}
+
 // Builds a GetSharedChatResponse around the page's messages as stored, so serving a page
 // never parses or re-encodes them.
 function sharedChatPageResponse(
@@ -196,7 +210,7 @@ function sharedChatPageResponse(
 ): Response {
   const { messageCount: _messageCount, ...snapshot } = shared.header;
   const snapshotFields = JSON.stringify(snapshot).slice(0, -1);
-  const messages = shared.messages.slice(page.start, page.end).join(',');
+  const messages = shared.messages.join(',');
   return new Response(
     `{"snapshot":${snapshotFields},"messages":[${messages}]},"page":${JSON.stringify(page)}}`,
     { headers: { 'Content-Type': 'application/json;charset=utf-8', 'Cache-Control': NO_STORE } },
@@ -213,6 +227,7 @@ export default function createShareRoutes(
   // POST /api/v1/chats/share - Creates or returns existing share.
   async function postShareChat(
     body: Record<string, unknown>,
+    request: Request,
   ): Promise<Response> {
     try {
       const chatId = String(body.chatId || '').trim();
@@ -250,8 +265,8 @@ export default function createShareRoutes(
             transcriptViewId: capture.transcriptViewId,
             lastOrdinal: capture.lastOrdinal,
           },
-        }, capture.rows);
-      });
+        }, capture.rows, request.signal);
+      }, request.signal);
 
       const resp: ShareChatResponse = {
         success: true,
@@ -261,6 +276,7 @@ export default function createShareRoutes(
       return Response.json(resp);
     } catch (error: unknown) {
       if (isDomainError(error)) {
+        if (error.code === 'TRANSCRIPT_WORK_BUSY' || error.code === 'SHARE_STORAGE_UNAVAILABLE') return jsonErrorFromUnknown(error);
         return Response.json(
           { success: false, error: error.message },
           { status: error.status },
@@ -291,6 +307,7 @@ export default function createShareRoutes(
       const resp: RevokeShareResponse = { success: revoked };
       return Response.json(resp, { status: revoked ? 200 : 404 });
     } catch (error: unknown) {
+      if (isDomainError(error)) return jsonErrorFromUnknown(error);
       return Response.json(
         { success: false, error: (error as Error).message },
         { status: 500 },
@@ -324,7 +341,7 @@ export default function createShareRoutes(
   }
 
   // GET /api/v1/shared - Public endpoint, returns snapshot by token.
-  const getSharedChat = markRouteNoAuth(async function getSharedChat(
+  const getSharedChat: RouteHandler = async function getSharedChat(
     _request: Request,
     url: URL,
   ): Promise<Response> {
@@ -336,39 +353,35 @@ export default function createShareRoutes(
       );
     }
 
-    const shared = await shareStore.getMessages(token);
+    let page: SharedChatMessagePage | undefined;
+    const shared = await shareStore.getMessages(token, header => {
+      const totalMessages = header.messageCount;
+      const requestedBefore = url.searchParams.get('before');
+      const requestedVersion = url.searchParams.get('version');
+      const cursorIsStale = requestedBefore !== null && requestedVersion !== null
+        && requestedVersion !== header.sharedAt;
+      const end = parseMessageCursor(cursorIsStale ? null : requestedBefore, totalMessages);
+      const pageSize = parsePageSize(url.searchParams.get('limit'), totalMessages);
+      const start = Math.max(0, end - pageSize);
+      page = {
+        snapshotVersion: header.sharedAt,
+        totalMessages,
+        start,
+        end,
+        nextBefore: start > 0 ? start : null,
+        ...(cursorIsStale ? { reset: true } : {}),
+      };
+      return { start, end };
+    });
     if (!shared) {
       return publicJsonResponse({ error: 'Share not found' }, 404);
     }
 
-    const totalMessages = shared.header.messageCount;
-    const requestedBefore = url.searchParams.get('before');
-    const requestedVersion = url.searchParams.get('version');
-    const cursorIsStale =
-      requestedBefore !== null &&
-      requestedVersion !== null &&
-      requestedVersion !== shared.header.sharedAt;
-    const end = parseMessageCursor(
-      cursorIsStale ? null : requestedBefore,
-      totalMessages,
-    );
-    const pageSize = parsePageSize(
-      url.searchParams.get('limit'),
-      totalMessages,
-    );
-    const start = Math.max(0, end - pageSize);
-    return sharedChatPageResponse(shared, {
-      snapshotVersion: shared.header.sharedAt,
-      totalMessages,
-      start,
-      end,
-      nextBefore: start > 0 ? start : null,
-      ...(cursorIsStale ? { reset: true } : {}),
-    });
-  });
+    return sharedChatPageResponse(shared, page!);
+  };
 
   // Serves a plain text transcript at /shared/llm/:token for LLM consumption.
-  const getLlmTranscript = markRouteNoAuth(async function getLlmTranscript(
+  const getLlmTranscript: RouteHandler = async function getLlmTranscript(
     _request: Request,
     url: URL,
   ): Promise<Response> {
@@ -383,11 +396,11 @@ export default function createShareRoutes(
     }
 
     return plainTextResponse(textPath);
-  });
+  };
 
   // Serves the shared chat page at /shared/:token. Enriches the SPA shell with
   // share metadata and bounded transcript discovery so large chats stay fast.
-  const getSharedChatPage = markRouteNoAuth(async function getSharedChatPage(
+  const getSharedChatPage: RouteHandler = async function getSharedChatPage(
     request: Request,
     url: URL,
   ): Promise<Response> {
@@ -425,16 +438,16 @@ export default function createShareRoutes(
       ? injectSharedChatContext(shell, snapshot, token, canonicalUrl, appTitle)
       : renderStandaloneSharedHtml(snapshot, token, canonicalUrl, appTitle);
     return htmlResponse(html, llmPath);
-  });
+  };
 
   return {
     '/api/v1/chats/share': {
       POST: withJsonBody(postShareChat),
       DELETE: deleteShareChat,
     },
-    '/api/v1/chats/share/status': { GET: getShareStatus },
-    '/api/v1/shared': { GET: getSharedChat },
-    '/shared/:token': { GET: getSharedChatPage },
-    '/shared/llm/:token': { GET: getLlmTranscript },
+    '/api/v1/chats/share/status': { GET: withShareStorageErrors(getShareStatus) },
+    '/api/v1/shared': { GET: markRouteNoAuth(withShareStorageErrors(getSharedChat)) },
+    '/shared/:token': { GET: markRouteNoAuth(withShareStorageErrors(getSharedChatPage)) },
+    '/shared/llm/:token': { GET: markRouteNoAuth(withShareStorageErrors(getLlmTranscript)) },
   };
 }

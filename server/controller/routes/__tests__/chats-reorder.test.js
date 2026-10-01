@@ -71,7 +71,7 @@ const agents = {
   isAgentSessionRunning: mock(() => false),
 };
 
-const commandLedger = createRouteCommandLedger('chats-reorder');
+const commandLedger = createRouteCommandLedger();
 const chatListProjector = createRouteChatListProjector({
   registry,
   settings,

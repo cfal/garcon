@@ -1,7 +1,8 @@
 import crypto from 'node:crypto';
 import { AgentCallError, type AgentSteerRejectionReason } from '@garcon/server-agent-interface';
 import type { AgentSteerOptions } from '../agents/session-types.ts';
-import { DomainError, SteerDeliveryError, steerTurnChangedError } from '../../common/domain-error.ts';
+import { DomainError } from '../../common/domain-error.ts';
+import { SteerDeliveryError, steerTurnChangedError } from './steering-errors.js';
 import type { ExecutionOwnership } from './execution-ownership.ts';
 import type {
   AcceptedSteerOutcome,

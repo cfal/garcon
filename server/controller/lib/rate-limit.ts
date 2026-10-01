@@ -41,6 +41,9 @@ function getClientIp(request: Request, server?: RequestIpServer | null): string 
 }
 
 export function createRateLimiter({ windowMs = 60_000, maxRequests = 10 }: RateLimiterOptions = {}): RateLimiter {
+  if (!Number.isSafeInteger(maxRequests) || maxRequests < 0 || !Number.isFinite(windowMs) || windowMs <= 0) {
+    throw new RangeError('Rate limits require a nonnegative integer threshold and a positive finite window');
+  }
   const hits = new Map<string, number[]>();
 
   // Purge stale entries every 2 minutes to avoid unbounded growth.
@@ -64,10 +67,13 @@ export function createRateLimiter({ windowMs = 60_000, maxRequests = 10 }: RateL
       const now = Date.now();
       const cutoff = now - windowMs;
       const timestamps = (hits.get(ip) || []).filter((t) => t > cutoff);
+      const exceeded = timestamps.length >= maxRequests;
       timestamps.push(now);
+      // Rejected attempts still extend the cooldown; older hits cannot change admission.
+      if (timestamps.length > maxRequests) timestamps.splice(0, timestamps.length - maxRequests);
       hits.set(ip, timestamps);
 
-      if (timestamps.length > maxRequests) {
+      if (exceeded) {
         return jsonError('Too many requests. Please try again later.', 429, 'RATE_LIMITED', true);
       }
       return null;

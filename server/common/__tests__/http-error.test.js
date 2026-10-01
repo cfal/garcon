@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 
 import { jsonError, jsonErrorFromUnknown } from '../http-error.ts';
-import {
-  STEER_NOT_DELIVERED_MESSAGE,
-  STEER_OUTCOME_UNKNOWN_MESSAGE,
-  SteerDeliveryError,
-} from '../domain-error.ts';
+import { DomainError } from '../domain-error.js';
 
 describe('jsonError', () => {
   it('emits the shared HTTP error envelope', async () => {
@@ -48,25 +44,18 @@ describe('jsonErrorFromUnknown', () => {
     expect(body.errorCode).toBe('VALIDATION_FAILED');
   });
 
-  it('sanitizes strict steering delivery failures without making them retryable', async () => {
-    const notSent = new SteerDeliveryError(new Error('/secret/pre-send failure'), 'not-sent');
-    const unknown = new SteerDeliveryError(new Error('turn/steer transport closed'), 'unknown');
-    const [notSentBody, unknownBody] = await Promise.all([
-      jsonErrorFromUnknown(notSent).json(),
-      jsonErrorFromUnknown(unknown).json(),
-    ]);
+  it('preserves explicit domain policy without exposing its cause', async () => {
+    const error = new DomainError('INTERNAL_ERROR', 'Operation failed.', 500, false, {
+      cause: new Error('/secret/internal failure'),
+    });
+    const response = jsonErrorFromUnknown(error);
 
-    expect(notSentBody).toMatchObject({
-      error: STEER_NOT_DELIVERED_MESSAGE,
-      errorCode: 'STEER_NOT_DELIVERED',
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({
+      success: false,
+      error: 'Operation failed.',
+      errorCode: 'INTERNAL_ERROR',
       retryable: false,
     });
-    expect(unknownBody).toMatchObject({
-      error: STEER_OUTCOME_UNKNOWN_MESSAGE,
-      errorCode: 'STEER_OUTCOME_UNKNOWN',
-      retryable: false,
-    });
-    expect(JSON.stringify([notSentBody, unknownBody])).not.toContain('/secret');
-    expect(JSON.stringify([notSentBody, unknownBody])).not.toContain('turn/steer');
   });
 });

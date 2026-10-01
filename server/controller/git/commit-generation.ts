@@ -1,4 +1,4 @@
-import { GitDomainError } from '../../runtime/git/git-types.js';
+import { GitDomainError } from '../../runtime/git/git-domain-error.js';
 import type { ExecutorCallOptions } from '@garcon/server-agent-interface';
 import { generateCommitMessage } from './commit-message.js';
 import { createGenerationRequestSignal } from '../settings/generation-limits.js';
