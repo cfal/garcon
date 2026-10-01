@@ -362,13 +362,6 @@ describe('Chromium preambles', () => {
           fixture.page,
           fixture.integration.garcon.baseUrl,
         );
-        await fixture.page.waitForFunction(
-          (height) =>
-            document.documentElement.style.getPropertyValue('--app-height') ===
-            `${String(height)}px`,
-          scenario.height,
-        );
-
         const managerLayout = await dialogLayout(manager);
         expectContainedDialog(managerLayout, scenario);
         await expectFocusWithin(fixture.page, manager);
@@ -679,9 +672,6 @@ describe('Chromium preambles', () => {
           height: 568,
           touch: true,
         });
-        await fixture.page.waitForFunction(
-          () => document.documentElement.style.getPropertyValue('--app-height') === '568px',
-        );
         const noticeLayout = await notice.evaluate((element) => {
           const root = element as HTMLElement;
           const rootRect = root.getBoundingClientRect();

@@ -136,7 +136,7 @@ export class TicketCommandController {
     });
     if (!deliver || signal.aborted) return;
     try {
-      await this.options.execution.deliverServerControlInput(source.chatId, {
+      await this.options.execution.queueServerControlInput(source.chatId, {
         content, transcriptViewId: source.viewId, createdAt: new Date().toISOString(), receipt: null,
       }, signal);
     } catch (error) {

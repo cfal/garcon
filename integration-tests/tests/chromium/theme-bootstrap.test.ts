@@ -120,6 +120,25 @@ const scenarios: ThemeScenario[] = [
 ];
 
 describe("theme bootstrap", () => {
+  test("defines browser-managed safe areas before scripts run", async () => {
+    const appTemplate = await readFile(
+      new URL("../../../web/src/app.html", import.meta.url),
+      "utf8",
+    );
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const context = await browser.newContext({ javaScriptEnabled: false });
+      const page = await context.newPage();
+      await page.setContent(appTemplate);
+      expect(await page.locator('meta[name="viewport"]').getAttribute("content"))
+        .toContain("viewport-fit=auto");
+      expect(await page.locator('meta[name="apple-mobile-web-app-status-bar-style"]').getAttribute("content"))
+        .toBe("default");
+    } finally {
+      await browser.close();
+    }
+  });
+
   test("applies the validated concrete profile before application startup", async () => {
     const appTemplate = await readFile(
       new URL("../../../web/src/app.html", import.meta.url),
@@ -193,10 +212,7 @@ describe("theme bootstrap", () => {
           dark: expectedProfile.colorScheme === "dark",
           colorScheme: expectedProfile.colorScheme,
           themeColor: expectedProfile.browserThemeColor,
-          appleStatusBarStyle:
-            expectedProfile.colorScheme === "dark"
-              ? "black"
-              : "default",
+          appleStatusBarStyle: "default",
         });
 
         await context.close();

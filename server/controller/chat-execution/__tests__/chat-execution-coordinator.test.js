@@ -3,6 +3,10 @@ import { ChatExecutionCoordinator } from '../chat-execution-coordinator.js';
 import { InMemoryChatExecutionControlRepository } from '../chat-execution-control-repository.ts';
 import { DomainError, ProjectUnavailableError } from '../../../common/domain-error.ts';
 import { INTERACTIVE_EXECUTOR_WAIT_MS } from '../../../common/interactive-deadline.ts';
+import { KeyedPromiseLock } from '../../../common/keyed-lock.js';
+import { AgentCommandReplies } from '../../chats/agent-command-replies.js';
+import { TicketCommandController } from '../../tickets/command-controller.js';
+import { CHAT_ID, VIEW_ID, ticketFixture } from '../../tickets/__tests__/fixture.js';
 
 function deferred() {
   let resolve;
@@ -589,6 +593,82 @@ describe('ChatExecutionCoordinator', () => {
 
     expect(fixture.turnRunner.runAgentTurn).not.toHaveBeenCalled();
     await coordinator.releaseDirectTurn(reservation);
+  });
+
+  it.each(['rejection', 'result'])('queues ticket %s even when the active turn would acknowledge but not sample a steer', async (kind) => {
+    const tickets = ticketFixture();
+    const sourceTurn = deferred();
+    const controlTurn = deferred();
+    const repository = new InMemoryChatExecutionControlRepository('server-instance-test');
+    const fixture = createFixture({
+      controlRepository: repository,
+      turnRunner: {
+        runAgentTurn: mock((_chatId, content) => content === 'original input' ? sourceTurn.promise : controlTurn.promise),
+        captureSteerTarget: mock(() => ({ providerTurnId: 'provider-turn-1' })),
+        steerInput: mock(async (_chatId, _content, _options, _target, prepare) => {
+          await prepare();
+          return { kind: 'accepted' };
+        }),
+      },
+    });
+    coordinator = fixture.coordinator;
+    const context = {
+      execution: coordinator,
+      registry: { getChat: () => ({}) },
+      notices: { existingCurrentView: () => ({ viewId: VIEW_ID }), appendNotice: mock(() => {}) },
+      chatMutationLock: new KeyedPromiseLock(),
+      isEnabled: () => true,
+    };
+    const replies = new AgentCommandReplies(context);
+    const commands = new TicketCommandController({
+      ...context, tickets,
+      resolveProject: async () => ({ project: 'Synthetic project', kind: 'folder' }),
+    });
+    try {
+      const reservation = coordinator.reserveDirectTurn(CHAT_ID, { turnId: 'source-turn' });
+      const running = coordinator.runReservedTurn(reservation, 'original input', { turnId: 'source-turn' });
+      if (kind === 'rejection') {
+        replies.reject({ chatId: CHAT_ID, viewId: VIEW_ID, noticeOrdinal: 2 },
+          [{ command: 'ticket-create', reason: 'malformed', edge: 'leading' }]);
+      } else {
+        commands.request({ chatId: CHAT_ID, viewId: VIEW_ID, requestOrdinal: 1,
+          runId: 'source-turn', at: '2026-01-01T00:00:00.000Z' }, { payload: { action: 'list', query: {} } });
+      }
+      await waitFor(() => repository.load(CHAT_ID).controlEntries.length > 0
+        || fixture.turnRunner.steerInput.mock.calls.length > 0);
+      expect(fixture.turnRunner.steerInput).not.toHaveBeenCalled();
+      const pending = repository.load(CHAT_ID).controlEntries;
+      expect(pending).toHaveLength(1);
+      expect(pending[0]).toMatchObject({ transcriptViewId: VIEW_ID, receipt: null });
+      expect(pending[0].content).toContain(kind === 'rejection' ? '<garcon-command-rejected' : '<garcon-ticket-list-result');
+      expect(fixture.turnRunner.runAgentTurn).toHaveBeenCalledTimes(1);
+
+      sourceTurn.resolve();
+      await running;
+      await coordinator.onAgentTurnTerminal(CHAT_ID, { turnId: 'source-turn' });
+      const drain = coordinator.checkChatIdle(CHAT_ID);
+      await waitFor(() => fixture.turnRunner.runAgentTurn.mock.calls.length === 2);
+      const [chatId, content, options] = fixture.turnRunner.runAgentTurn.mock.calls[1];
+      expect(chatId).toBe(CHAT_ID);
+      expect(content).toBe(pending[0].content);
+      expect(options.transcriptViewId).toBe(VIEW_ID);
+      expect(fixture.projection.admitInput).not.toHaveBeenCalled();
+      expect(fixture.projection.admitQueuedInput).not.toHaveBeenCalled();
+      expect(repository.load(CHAT_ID).controlEntries).toEqual([]);
+      expect(repository.load(CHAT_ID).entries).toEqual([]);
+      await coordinator.onAgentTurnTerminal(CHAT_ID, { turnId: options.turnId });
+      controlTurn.resolve();
+      await drain;
+      await coordinator.waitForDispatches();
+      expect(fixture.turnRunner.runAgentTurn).toHaveBeenCalledTimes(2);
+    } finally {
+      replies.shutdown();
+      commands.shutdown();
+      sourceTurn.resolve();
+      controlTurn.resolve();
+      coordinator.beginShutdown();
+      tickets.cleanup();
+    }
   });
 
   it('steers inter-agent control input to the active target before queue admission', async () => {

@@ -82,7 +82,10 @@ describe('delegated startup admission interleavings', () => {
     };
     const controller = new AgentStartController({
       registry: { getChat: () => parent }, notices: transcripts,
-      execution: { deliverServerControlInput: deliver }, turns,
+      execution: {
+        deliverServerControlInput: deliver,
+        queueServerControlInput: async () => { throw new Error('Unexpected queued agent reply'); },
+      }, turns,
       chatMutationLock: lock, isEnabled: () => true, chatIds: { allocate: () => CHILD },
       settings: { getExecutionDefaults: () => ({ global: {
         permissionMode: 'default', thinkingMode: 'none', agentSettingsById: {},

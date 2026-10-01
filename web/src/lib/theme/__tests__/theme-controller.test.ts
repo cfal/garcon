@@ -87,7 +87,7 @@ describe('ThemeController', () => {
 			document
 				.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]')
 				?.getAttribute('content'),
-		).toBe('black');
+		).toBe('default');
 
 		media.setDark(false);
 		await waitFor(() => expect(document.documentElement.dataset.theme).toBe('classic-light'));
@@ -101,7 +101,7 @@ describe('ThemeController', () => {
 		await waitFor(() => expect(media.listeners).toHaveLength(0));
 	});
 
-	it.each(THEME_PROFILES)('keeps the iOS status bar opaque for $id', async (profile) => {
+	it.each(THEME_PROFILES)('preserves the static iOS status bar for $id', async (profile) => {
 		installMatchMedia();
 		renderController({ mode: 'fixed', themeId: profile.id });
 		await waitFor(() => expect(document.documentElement.dataset.theme).toBe(profile.id));
@@ -110,7 +110,7 @@ describe('ThemeController', () => {
 			document
 				.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]')
 				?.getAttribute('content'),
-		).toBe(profile.colorScheme === 'dark' ? 'black' : 'default');
+		).toBe('default');
 	});
 
 	it('projects root state and metadata before resolving the terminal background', async () => {

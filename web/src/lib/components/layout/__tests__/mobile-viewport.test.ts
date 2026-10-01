@@ -53,4 +53,16 @@ describe('computeMobileViewportMetrics', () => {
 		expect(metrics.keyboardHeight).toBe(0);
 		expect(metrics.keyboardVisible).toBe(false);
 	});
+
+	it('does not report a status-bar-sized discrepancy as keyboard height', () => {
+		const metrics = computeMobileViewportMetrics({
+			visualViewportHeight: 756,
+			visualViewportOffsetTop: 0,
+			windowInnerHeight: 800,
+			baselineAppHeight: 800,
+		});
+
+		expect(metrics.keyboardVisible).toBe(false);
+		expect(metrics.keyboardHeight).toBe(0);
+	});
 });

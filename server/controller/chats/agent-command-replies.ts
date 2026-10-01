@@ -25,7 +25,7 @@ function sourceAddress(source: ReplySource) {
 export interface AgentCommandContext {
   readonly registry: Pick<IChatRegistry, 'getChat'>;
   readonly notices: Pick<TranscriptLedgerService, 'existingCurrentView' | 'appendNotice'>;
-  readonly execution: Pick<ChatExecutionCoordinator, 'deliverServerControlInput'>;
+  readonly execution: Pick<ChatExecutionCoordinator, 'deliverServerControlInput' | 'queueServerControlInput'>;
   readonly chatMutationLock: KeyedPromiseLock;
   readonly isEnabled: () => boolean;
 }
@@ -56,22 +56,10 @@ export class AgentCommandReplies {
   }
 
   async deliver(source: AgentCommandSource, detail: AgentCommandOutcomeNoticeDetail, signal: AbortSignal): Promise<void> {
-    return this.#deliverContent(source, () => garconCommandResultContent(detail), signal, detail);
-  }
-
-  reject(source: GarconCommandRejectionSource, issues: readonly GarconCommandIssue[]): void {
-    this.launch(source, async (signal) => {
-      if (!this.context.isEnabled() || !this.current(source, signal)) return;
-      await this.#deliverContent(source,
-        () => garconCommandRejectionContent({ issues, message: TICKET_COMMAND_REJECTION_GUIDANCE }), signal);
-    });
-  }
-
-  async #deliverContent(source: ReplySource, formatContent: () => string, signal: AbortSignal, detail?: AgentCommandOutcomeNoticeDetail): Promise<void> {
     if (signal.aborted) return;
     try {
       const disposition = await this.context.execution.deliverServerControlInput(source.chatId, {
-        content: formatContent(),
+        content: garconCommandResultContent(detail),
         transcriptViewId: source.viewId,
         createdAt: new Date().toISOString(),
         receipt: null,
@@ -82,6 +70,24 @@ export class AgentCommandReplies {
     } catch (error) {
       if (!signal.aborted) this.report(source, 'result-delivery', error, detail);
     }
+  }
+
+  reject(source: GarconCommandRejectionSource, issues: readonly GarconCommandIssue[]): void {
+    this.launch(source, async (signal) => {
+      if (!this.context.isEnabled() || !this.current(source, signal)) return;
+      try {
+        // A provider may acknowledge a late steer without sampling it before the turn ends.
+        const disposition = await this.context.execution.queueServerControlInput(source.chatId, {
+          content: garconCommandRejectionContent({ issues, message: TICKET_COMMAND_REJECTION_GUIDANCE }),
+          transcriptViewId: source.viewId,
+          createdAt: new Date().toISOString(),
+          receipt: null,
+        }, signal);
+        logger.debug('Agent command result disposition', { ...sourceAddress(source), disposition });
+      } catch (error) {
+        if (!signal.aborted) this.report(source, 'result-delivery', error);
+      }
+    });
   }
 
   current(source: ReplySource, signal: AbortSignal): boolean {

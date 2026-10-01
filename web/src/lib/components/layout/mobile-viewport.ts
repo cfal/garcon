@@ -47,12 +47,13 @@ export function computeMobileViewportMetrics(
 		Math.round((baselineAppHeight ?? appHeight) - keyboardReferenceHeight),
 		Math.round(visualViewportOffsetTop),
 	);
+	const keyboardVisible = keyboardHeight >= keyboardVisibleThreshold;
 
 	return {
 		appHeight,
 		viewportOffsetTop: Math.round(visualViewportOffsetTop),
 		viewportCenterY: Math.round(visualViewportOffsetTop + appHeight / 2),
-		keyboardHeight,
-		keyboardVisible: keyboardHeight >= keyboardVisibleThreshold,
+		keyboardHeight: keyboardVisible ? keyboardHeight : 0,
+		keyboardVisible,
 	};
 }

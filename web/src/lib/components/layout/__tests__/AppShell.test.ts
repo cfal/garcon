@@ -254,6 +254,64 @@ describe('AppShell responsive workspace binding', () => {
 		searchNavigationPort.cancel.mockClear();
 	});
 
+	it.each(['pageshow', 'visibilitychange', 'resize'])(
+		'restores CSS viewport sizing on %s without a visual viewport event',
+		async (resumeEvent) => {
+			setViewportWidth(390, false);
+			vi.stubGlobal('innerHeight', 800);
+			const viewport = Object.assign(new EventTarget(), {
+				height: 756,
+				offsetTop: 0,
+			}) satisfies Pick<
+				VisualViewport,
+				'height' | 'offsetTop' | 'addEventListener' | 'removeEventListener'
+			>;
+			vi.stubGlobal('visualViewport', viewport);
+			const removeListener = vi.spyOn(viewport, 'removeEventListener');
+			installContext();
+			const appShell = testContext.current!.appShell as AppShellStore;
+			appShell.keyboardHeight = 123;
+			const view = render(AppShell);
+			const style = document.documentElement.style;
+
+			await waitFor(() => expect(appShell.keyboardHeight).toBe(0));
+			expect(style.getPropertyValue('--app-height')).toBe('');
+			expect(style.getPropertyValue('--app-viewport-offset-top')).toBe('');
+			expect(style.getPropertyValue('--app-viewport-center-y')).toBe('');
+
+			viewport.height = 500;
+			viewport.offsetTop = 120;
+			viewport.dispatchEvent(new Event('resize'));
+			await waitFor(() => expect(style.getPropertyValue('--app-height')).toBe('500px'));
+			expect(style.getPropertyValue('--app-viewport-offset-top')).toBe('120px');
+			expect(style.getPropertyValue('--app-viewport-center-y')).toBe('370px');
+			expect(appShell.keyboardHeight).toBe(300);
+
+			vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+			document.dispatchEvent(new Event('visibilitychange'));
+			viewport.height = 756;
+			viewport.offsetTop = 0;
+			vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+			const eventTarget = resumeEvent === 'visibilitychange' ? document : window;
+			eventTarget.dispatchEvent(new Event(resumeEvent));
+			await waitFor(() => expect(style.getPropertyValue('--app-height')).toBe(''));
+			expect(style.getPropertyValue('--app-viewport-offset-top')).toBe('');
+			expect(style.getPropertyValue('--app-viewport-center-y')).toBe('');
+			expect(appShell.keyboardHeight).toBe(0);
+
+			viewport.height = 500;
+			viewport.dispatchEvent(new Event('scroll'));
+			await waitFor(() => expect(style.getPropertyValue('--app-height')).toBe('500px'));
+			view.unmount();
+			expect(removeListener).toHaveBeenCalledWith('resize', expect.any(Function));
+			expect(removeListener).toHaveBeenCalledWith('scroll', expect.any(Function));
+			expect(style.getPropertyValue('--app-height')).toBe('');
+			expect(style.getPropertyValue('--app-viewport-offset-top')).toBe('');
+			expect(style.getPropertyValue('--app-viewport-center-y')).toBe('');
+			expect(appShell.keyboardHeight).toBe(0);
+		},
+	);
+
 	it('waits for the dialog close update and only opens the newest selection', async () => {
 		installContext();
 		render(AppShell);
