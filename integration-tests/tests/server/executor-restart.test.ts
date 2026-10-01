@@ -86,7 +86,9 @@ for (const backend of ['remote-controller-dials', 'remote-executor-dials'] as co
       expect(await fixture.client.waitForTurnTerminal(chatId, blocked.turnId)).toMatchObject({
         type: 'agent-run-failed', error: expect.stringContaining('earlier turn is still running'),
       });
-      await expect(fixture.client.reloadChat(chatId)).rejects.toMatchObject({ response: {
+      // Pending Bun matchers can drop subprocess pipe events (oven-sh/bun#33261).
+      const reloadError = await fixture.client.reloadChat(chatId).then(() => null, (error: unknown) => error);
+      expect(reloadError).toMatchObject({ response: {
         code: 'HISTORY_LOAD_FAILED', message: expect.stringContaining('turn is still running'),
       } });
       expect(fixture.fakeProviders.openAi.requests()).toHaveLength(requestCount);

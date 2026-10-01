@@ -342,6 +342,61 @@ describe('TranscriptSearchController with v9 Workers', () => {
     }
   });
 
+  test('a commit during catalog watermark pacing remains searchable through the Workers', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'search-v9-controller-service-'));
+    workspaces.push(workspace);
+    const chatId = 'chat-watermark';
+    const viewId = transcriptViewId('view-watermark');
+    const marker = 'syntheticlatestmarker';
+    const rows = chatRows(viewId, 1, 'synthetic initial content');
+    const chats = new Map([[chatId, { viewId, rows }]]);
+    const ledger = multiChatLedger(chats);
+    let onCommit;
+    ledger.subscribe = (listener) => {
+      onCommit = listener;
+      return () => {};
+    };
+    const service = new TranscriptSearchService({ workspaceDirectory: workspace, logger: logger() });
+    const controller = new TranscriptSearchController({
+      listChatIds: () => [...chats.keys()],
+      hasChat: (id) => chats.has(id),
+      ledger,
+      adoption: adoptionFor(ledger),
+      service,
+      logger: logger(),
+    });
+    await controller.start();
+    try {
+      await waitFor(() => controller.status().phase === 'ready');
+      const committed = deferred();
+      const highWatermark = ledger.highWatermark;
+      ledger.highWatermark = (id) => {
+        ledger.highWatermark = highWatermark;
+        const watermark = highWatermark(id);
+        queueMicrotask(() => {
+          const appended = { ...chatRows(viewId, 1, marker)[0], ordinal: 2 };
+          rows.push(appended);
+          onCommit({ type: 'rows', chatId, viewId, rows: [appended] });
+          committed.resolve();
+        });
+        return watermark;
+      };
+      controller.catalogMayHaveChanged(chatId);
+      await committed.promise;
+      await controller.sourceAvailable(chatId);
+      expect(await service.chatStates()).toEqual([
+        expect.objectContaining({ chatId, status: 'indexed', indexedThrough: 2 }),
+      ]);
+      const found = await controller.search({ query: marker, allowedChatIds: [chatId] });
+      expect(found.index).toMatchObject({ indexedChatCount: 1, pendingChatCount: 0 });
+      expect(found.results).toEqual([
+        expect.objectContaining({ chatId, snippets: [expect.objectContaining({ ordinal: 2 })] }),
+      ]);
+    } finally {
+      await controller.close();
+    }
+  });
+
   test('[TLV5-L01.02-SEARCH-CATALOG-PRUNE-SERVICE-01] retains a chat adopted during resync pruning', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'search-v9-controller-service-'));
     workspaces.push(workspace);
