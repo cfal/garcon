@@ -1,5 +1,22 @@
 # Dependency Patches
 
+## Svelte derived reconnection
+
+`svelte@5.57.1` registers a previously evaluated, disconnected derived twice
+when a reactive read discovers new dependencies: once during recalculation and
+again during reconnection. Teardown removes only one registration. In Garcon,
+switching chats retains old conversation views through the shared composer inset
+signal, with growing detached DOM, listeners, and heap even after garbage collection.
+
+The patch prevents reconnection from adding a derived already registered with
+that dependency. It preserves Svelte's evaluation, effect, and error-handling
+order. The membership check runs only during reconnection, not ordinary updates.
+Svelte is pinned until an upstream release passes
+`scripts/__tests__/svelte-derived-reconnect.test.js` and
+`integration-tests/tests/chromium/chat-view-lifetime.test.ts` without the patch.
+
+Reference: [Svelte derived reads and reconnection](https://github.com/sveltejs/svelte/blob/636eaaaa6f064b55072e7d192bb76dc9d8c4516e/packages/svelte/src/internal/client/runtime.js#L683-L738).
+
 ## Bits UI deferred autofocus
 
 `bits-ui@2.19.0` must not run a menu's queued initial autofocus after a nested
