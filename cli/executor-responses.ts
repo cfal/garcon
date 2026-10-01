@@ -10,7 +10,7 @@ export interface ExecutorProvider {
 }
 
 export function executorResponseError(): never {
-  throw new CliError('executors', 'server returned an invalid executor management response; a submitted mutation may have committed', 3);
+  throw new CliError('executors', 'server returned an invalid executor management response', 3);
 }
 
 export function executorSnapshots(value: unknown): readonly ExecutorSnapshot[] {

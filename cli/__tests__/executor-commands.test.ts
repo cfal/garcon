@@ -142,6 +142,18 @@ test('read failures and cancellation before submission do not claim mutation unc
   expect(f.client.deleteExecutor).not.toHaveBeenCalled();
 });
 
+test.each(['list', 'providers'])('malformed %s replies report only a read failure', async (action) => {
+  const request = mock(async () => new Response('{}'));
+  const client = new GarconClient({ baseUrl: 'http://127.0.0.1:1', instanceId: 'synthetic', endpointInstanceId: 'synthetic',
+    defaultExecutorId: 'local', localCapability: 'synthetic', workspaceDir: null, workspaceName: null, fetch: request });
+  const f = fixture();
+  await expect(runExecutorCommand(command([action]), client, f.output)).rejects.toMatchObject({
+    message: 'server returned an invalid executor management response',
+  });
+  expect(request).toHaveBeenCalledTimes(1);
+  expect(f.stdout()).toBe('');
+});
+
 test('readiness waits reject disabled, missing, cancelled and timed-out executors', async () => {
   const f = fixture();
   f.client.listExecutors.mockResolvedValueOnce([{ ...snapshot, enabled: false, availability: 'offline' }]);
