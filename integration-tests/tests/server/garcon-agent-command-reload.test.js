@@ -56,7 +56,7 @@ async function withReload(run) {
   const appendReceipt = mock((chatId, entry) => {
     if (entry.receipt !== null) ledger.appendNotice(chatId, entry.transcriptViewId, { ...entry.receipt, at: entry.createdAt });
   });
-  const execution = new ChatExecutionCoordinator(root, turnRunner, {
+  const execution = new ChatExecutionCoordinator(turnRunner, {
     admitInput: async () => ({ inserted: true }), hasMatchingInput: async () => false,
     admitQueuedInput: () => ({ inserted: true }), discardPreparedInput: () => {},
   }, () => ({}), (id) => registry.hasChat(id), new InMemoryChatExecutionControlRepository('test-server'), {

@@ -76,7 +76,7 @@ async function withPipeline(run) {
     steerInput: async () => { throw new Error('Scheduled actions must not steer'); },
     abortSession: async () => false,
   };
-  const execution = new ChatExecutionCoordinator(root, runner, admission,
+  const execution = new ChatExecutionCoordinator(runner, admission,
     () => ({ model: registry.getChat(CHAT).model, permissionMode: registry.getChat(CHAT).permissionMode, thinkingMode: 'none' }),
     (id) => registry.hasChat(id), new InMemoryChatExecutionControlRepository('synthetic-server'), {
       projectAdmission: { assertAvailable: async () => {} },
@@ -85,7 +85,7 @@ async function withPipeline(run) {
       isControlInputViewCurrent: (chatId, viewId) => ledger.existingCurrentView(chatId)?.viewId === viewId,
     });
   const commands = new QueueCommands(new CommandSupport({ chats: registry, queue: execution,
-    ledger: new CommandLedger(root), chatMutationLock: lock,
+    ledger: new CommandLedger(), chatMutationLock: lock,
     agents: { currentTranscriptViewId: async (chatId) => ledger.currentView(chatId).viewId },
   }));
   const scheduler = new ScheduledPromptScheduler({ store: schedules, cron, chats: registry,

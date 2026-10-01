@@ -31,7 +31,7 @@ describe('delegated startup admission interleavings', () => {
     transcripts = new TranscriptLedgerService(store);
     transcripts.initializeChat(PARENT);
     transcripts.initializeChat(CHILD);
-    execution = new ChatExecutionCoordinator(directory, {
+    execution = new ChatExecutionCoordinator({
       runAgentTurn: async (chatId, _command, options) => { transcripts.beginRun(chatId, options.turnId); },
       captureSteerTarget: async () => null,
       steerInput: async () => { throw new Error('Unexpected steer'); },

@@ -409,7 +409,7 @@ function createExecutionFixture(directory, ensureAdopted, beforeWiringCommitList
     ledger: transcripts, adoption: { ensure: ensureAdopted ?? (async () => view) },
     hasPendingOwnershipTransfer: () => false, preambles: {}, selectionAdmissionLock: new KeyedPromiseLock(),
   });
-  const execution = new ChatExecutionCoordinator(directory, agents, options.inputTranscript?.(agents) ?? {
+  const execution = new ChatExecutionCoordinator(agents, options.inputTranscript?.(agents) ?? {
     admitInput: async () => ({ inserted: true }), hasMatchingInput: async () => false,
     admitQueuedInput: () => ({ inserted: true }), discardPreparedInput() {},
   }, () => ({}), () => true, new InMemoryChatExecutionControlRepository('synthetic-server'), {
@@ -811,7 +811,7 @@ describe('server event wiring', () => {
     const prepared = Promise.withResolvers();
     const release = Promise.withResolvers();
     const delivered = mock();
-    const execution = new ChatExecutionCoordinator(directory, {
+    const execution = new ChatExecutionCoordinator({
       runAgentTurn: mock(), captureSteerTarget: () => null,
       abortSession: async () => false, isChatRunning: () => false,
     }, {

@@ -536,10 +536,9 @@ export async function startServer(): Promise<void> {
     const shareStore = new ShareStore(workspaceDir, { rendering: transcriptRendering });
     await shareStore.init();
 
-    const commandLedger = new CommandLedger(workspaceDir);
+    const commandLedger = new CommandLedger();
     const projectAdmission = new ProjectAdmission(chatRegistry, inspectProject);
     queue = new ChatExecutionCoordinator(
-      workspaceDir,
       agentRegistry,
       agentRegistry,
       (chatId) => queueDrainOptions(chatId, chatRegistry),

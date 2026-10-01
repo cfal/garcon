@@ -445,7 +445,7 @@ function createRouteAgent(sessionOverrides = {}) {
     publishSessionFact: mock(() => undefined),
     updateSessionSettings: mock((chatId, patch) => Promise.resolve(registry.updateChat(chatId, patch))),
   };
-  const commandLedger = createRouteCommandLedger('chats-command-routes');
+  const commandLedger = createRouteCommandLedger();
   const chatListProjector = createRouteChatListProjector({
     registry,
     settings,

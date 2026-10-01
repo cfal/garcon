@@ -38,7 +38,7 @@ describe('agent turn receipt route', () => {
   });
 
   it('distinguishes missing and expired turn results', async () => {
-    const ledger = new CommandLedger(undefined, {
+    const ledger = new CommandLedger({
       turnResultByteLimit: 10,
       totalTurnResultByteLimit: 5,
     });
