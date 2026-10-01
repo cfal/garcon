@@ -54,7 +54,7 @@ Use a private service environment file or secret manager, not a literal assignme
 in shell history. For example, read a mode-0600 file into the environment:
 
 ```bash
-export GARCON_CONTROLLER_URL="$(cat /private/controller-connection-url)"
+GARCON_CONTROLLER_URL="$(cat /private/controller-connection-url)" \
 bun server/main.ts executor \
   --config-dir "$HOME/.garcon" --project-base-dir /path/to/repos
 ```
