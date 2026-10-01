@@ -7,7 +7,6 @@ import {
 	deleteChat,
 	reorderChat,
 	sortChatOrder,
-	getChatDetails,
 } from '$lib/api/chats.js';
 import { resolveArchiveReplacementChatId } from '$lib/chat/actions/archive-navigation';
 import type { ChatSessionRecord } from '$lib/types/chat-session';
@@ -51,11 +50,6 @@ export class SidebarController {
 		this.deps = deps;
 	}
 
-	async togglePinned(chatId: string): Promise<void> {
-		await togglePinned(chatId);
-		await this.deps.onQuietRefresh();
-	}
-
 	async reorderChat(chatId: string, placement: RelativeChatOrderPlacement): Promise<void> {
 		await reorderChat({ chatId, placement });
 		await this.deps.onQuietRefresh();
@@ -65,10 +59,6 @@ export class SidebarController {
 		const response = await sortChatOrder({ sortKey });
 		await this.deps.onQuietRefresh();
 		return response;
-	}
-
-	async loadDetails(chatId: string) {
-		return getChatDetails(chatId);
 	}
 
 	async bulkDelete(chatIds: string[]): Promise<void> {
