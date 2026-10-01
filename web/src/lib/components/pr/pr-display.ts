@@ -3,7 +3,6 @@
 
 import type {
 	PullRequestCheck,
-	PullRequestCheckState,
 	PullRequestChecksState,
 	PullRequestReviewDecision,
 	PullRequestState,
@@ -66,19 +65,6 @@ export function checksStateClass(state: PullRequestChecksState): string {
 		case 'passing':
 			return 'text-git-added';
 		case 'failing':
-			return 'text-git-deleted';
-		case 'pending':
-			return 'text-diff-modified-foreground';
-		default:
-			return 'text-muted-foreground';
-	}
-}
-
-export function checkStateClass(state: PullRequestCheckState): string {
-	switch (state) {
-		case 'success':
-			return 'text-git-added';
-		case 'failure':
 			return 'text-git-deleted';
 		case 'pending':
 			return 'text-diff-modified-foreground';

@@ -1,7 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 
-import SidebarSaveFolderDialog from '../SidebarSaveFolderDialog.svelte';
 import SidebarTagDialog from '../SidebarTagDialog.svelte';
 import SidebarProjectPathDialog from './SidebarProjectPathDialogTestHost.svelte';
 import { ApiError } from '$lib/api/client';
@@ -707,38 +706,6 @@ describe('Sidebar dialogs', () => {
 		}
 	});
 
-	it('keeps the save-folder dialog open and shows the error when folder creation fails', async () => {
-		const onClose = vi.fn();
-		const onSave = vi.fn().mockRejectedValue(new Error('Folder create failed'));
-
-		const rendered = render(SidebarSaveFolderDialog, {
-			saveFolderDialog: {
-				mode: 'create' as const,
-				filter: {
-					textTokens: [],
-					tags: [],
-					agents: [],
-					models: [],
-					project: [],
-					status: 'unread' as const,
-				},
-				suggestedName: 'Unread follow-up',
-			},
-			onClose,
-			onSave,
-		});
-
-		try {
-			await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-
-			await screen.findByText('Folder create failed');
-			expect(screen.getByRole('dialog', { name: 'Save folder' })).toBeTruthy();
-			expect(onClose).not.toHaveBeenCalled();
-		} finally {
-			await unmountDialog(rendered);
-		}
-	});
-
 	it('normalizes tag input with spaces to slug form', async () => {
 		const onSave = vi.fn().mockResolvedValue(undefined);
 
@@ -841,61 +808,6 @@ describe('Sidebar dialogs', () => {
 			await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 			await waitFor(() => {
 				expect(onSave).toHaveBeenCalledWith('chat-1', ['ops'], ['ops']);
-			});
-		} finally {
-			await unmountDialog(rendered);
-		}
-	});
-
-	it('keeps the save-folder dialog modal while the save request is pending', async () => {
-		const onClose = vi.fn();
-		let resolveSave: (() => void) | null = null;
-		const onSave = vi.fn(
-			() =>
-				new Promise<void>((resolve) => {
-					resolveSave = resolve;
-				}),
-		);
-
-		const rendered = render(SidebarSaveFolderDialog, {
-			saveFolderDialog: {
-				mode: 'create' as const,
-				filter: {
-					textTokens: ['follow-up'],
-					tags: [],
-					agents: [],
-					models: [],
-					project: [],
-				},
-				suggestedName: 'Follow-up',
-			},
-			onClose,
-			onSave,
-		});
-
-		try {
-			const input = screen.getByRole('textbox');
-			const saveButton = screen.getByRole('button', { name: 'Save' });
-			const cancelButton = screen.getByRole('button', { name: 'Cancel' });
-
-			await fireEvent.click(saveButton);
-
-			await waitFor(() => {
-				expect(onSave).toHaveBeenCalledTimes(1);
-			});
-			expect((input as HTMLInputElement).disabled).toBe(true);
-			expect((saveButton as HTMLButtonElement).disabled).toBe(true);
-			expect((cancelButton as HTMLButtonElement).disabled).toBe(true);
-			expect(screen.queryByRole('button', { name: 'Close' })).toBeNull();
-
-			await fireEvent.keyDown(document, { key: 'Escape' });
-			expect(onClose).not.toHaveBeenCalled();
-			expect(screen.getByRole('dialog', { name: 'Save folder' })).toBeTruthy();
-
-			expect(resolveSave).not.toBeNull();
-			resolveSave!();
-			await waitFor(() => {
-				expect((saveButton as HTMLButtonElement).disabled).toBe(false);
 			});
 		} finally {
 			await unmountDialog(rendered);

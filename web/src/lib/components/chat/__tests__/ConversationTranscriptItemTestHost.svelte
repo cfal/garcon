@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
 	import { onDestroy } from 'svelte';
-	import ConversationTranscript from '../ConversationTranscript.svelte';
+	import ConversationTranscriptItem from '../ConversationTranscriptItem.svelte';
+	import { buildConversationFeedRenderModel } from '$lib/chat/transcript/conversation-feed-items';
 	import { setAppShell, setChatSessions, setFileSessions, setLocalSettings, setNotifications } from '$lib/context';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 	import type { ChatDisplayRow } from '$lib/chat/transcript/active-transcript-state.svelte.js';
@@ -23,6 +24,7 @@
 	}
 
 	let { rows, pendingPermissionRequests = [], onPermissionDecision }: Props = $props();
+	const renderModel = $derived(buildConversationFeedRenderModel(rows));
 	setCanonicalWorkspaceLayout();
 	setNotifications(createNotificationsStore());
 	setExecutorsTestContext();
@@ -66,8 +68,11 @@
 	onDestroy(() => localSettings.destroy());
 </script>
 
-<ConversationTranscript
-	{rows}
-	{pendingPermissionRequests}
-	{onPermissionDecision}
-/>
+{#each renderModel.items as item (item.id)}
+	<ConversationTranscriptItem
+		{item}
+		{renderModel}
+		{pendingPermissionRequests}
+		{onPermissionDecision}
+	/>
+{/each}

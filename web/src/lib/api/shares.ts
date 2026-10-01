@@ -1,9 +1,8 @@
 // API client for chat sharing endpoints.
 
-import { apiGet, apiPost, apiDelete, parseApiResponse, publicApiFetch } from './client.js';
+import { apiPost, apiDelete, parseApiResponse, publicApiFetch } from './client.js';
 import type {
 	ShareChatResponse,
-	ShareStatusResponse,
 	GetSharedChatResponse,
 	RevokeShareResponse,
 } from '$shared/share-types';
@@ -11,13 +10,6 @@ import type {
 /** Creates or returns an existing share for a chat. */
 export async function shareChat(chatId: string): Promise<ShareChatResponse> {
 	return apiPost<ShareChatResponse>('/api/v1/chats/share', { chatId });
-}
-
-/** Checks the share status of a chat. */
-export async function getShareStatus(chatId: string): Promise<ShareStatusResponse> {
-	return apiGet<ShareStatusResponse>(
-		`/api/v1/chats/share/status?chatId=${encodeURIComponent(chatId)}`,
-	);
 }
 
 /** Revokes a shared chat link. */

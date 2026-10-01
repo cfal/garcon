@@ -56,6 +56,14 @@ describe('LocalSettingsStore', () => {
 		restored.destroy();
 	});
 
+	it('ignores the unused language key in saved settings', () => {
+		localStorage.setItem(LOCAL_STORAGE_KEYS.localSettings, JSON.stringify({ language: 'fr', codeEditorVimMode: true }));
+		const store = createLocalSettingsStore();
+		expect(store.codeEditorVimMode).toBe(true);
+		expect(store.snapshot()).not.toHaveProperty('language');
+		store.destroy();
+	});
+
 	it('defaults, clamps, and restores the workspace titlebar adjustment', () => {
 		const store = createLocalSettingsStore();
 		expect(store.workspaceWindowTitlebarHeightDeltaPx).toBe(0);

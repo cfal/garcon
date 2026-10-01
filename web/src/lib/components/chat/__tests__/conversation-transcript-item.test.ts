@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatDisplayRow } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 import type { PendingPermissionRequest } from '$lib/types/chat';
 import { BashToolUseMessage, PermissionRequestMessage, UserMessage } from '$shared/chat-types';
-import ConversationTranscriptTestHost from './ConversationTranscriptTestHost.svelte';
+import ConversationTranscriptItemTestHost from './ConversationTranscriptItemTestHost.svelte';
 
 const PERMISSION_TIMESTAMP = '2026-07-22T00:00:02.000Z';
 
@@ -42,7 +42,7 @@ function pendingPermission(
 	};
 }
 
-describe('ConversationTranscript', () => {
+describe('ConversationTranscriptItem', () => {
 	beforeEach(() => {
 		localStorage.clear();
 	});
@@ -66,7 +66,7 @@ describe('ConversationTranscript', () => {
 			},
 		];
 
-		const { container } = render(ConversationTranscriptTestHost, { rows });
+		const { container } = render(ConversationTranscriptItemTestHost, { rows });
 
 		expect(
 			Array.from(
@@ -83,7 +83,7 @@ describe('ConversationTranscript', () => {
 	});
 
 	it('keeps historical permission occurrences non-actionable without an exact transient match', () => {
-		render(ConversationTranscriptTestHost, {
+		render(ConversationTranscriptItemTestHost, {
 			rows: [permissionRow('historical-incarnation')],
 			pendingPermissionRequests: [
 				pendingPermission('historical-incarnation', false),
@@ -98,7 +98,7 @@ describe('ConversationTranscript', () => {
 
 	it('makes a durable permission occurrence actionable only through its transient capability', async () => {
 		const onPermissionDecision = vi.fn();
-		render(ConversationTranscriptTestHost, {
+		render(ConversationTranscriptItemTestHost, {
 			rows: [permissionRow('active-incarnation')],
 			pendingPermissionRequests: [pendingPermission('active-incarnation', true)],
 			onPermissionDecision,

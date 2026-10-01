@@ -6,7 +6,6 @@ import type { ChatSessionRecord } from '$lib/types/chat-session';
 export const SINGLE_LINE_CHAT_ROW_HEIGHT = 40;
 export const COMPACT_CHAT_ROW_HEIGHT = 62;
 export const DESKTOP_CHAT_ROW_HEIGHT = 76;
-export const MOBILE_CHAT_ROW_HEIGHT = DESKTOP_CHAT_ROW_HEIGHT;
 export const PROJECT_PATH_LINE_HEIGHT = 18;
 export const PROJECT_HEADER_ROW_HEIGHT = 32;
 export const DEFAULT_CHAT_ROW_OVERSCAN = 8;

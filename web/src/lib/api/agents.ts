@@ -2,7 +2,7 @@
 
 import { apiGet, apiPost } from './client.js';
 import { effectiveExecutorId } from '$shared/executors';
-import type { AgentCatalog, AgentId } from '$shared/agents';
+import type { AgentId } from '$shared/agents';
 import type {
 	AgentAuthLoginCompleteResult,
 	AgentAuthLoginLaunchResult,
@@ -40,10 +40,6 @@ export async function getAgentAuthStatus(agent: AgentName, executorId?: string):
 
 export async function getAgentReadiness(executorId?: string): Promise<Record<string, AgentReadiness>> {
 	return apiGet<Record<string, AgentReadiness>>(`/api/v1/agents/readiness?executorId=${encodeURIComponent(effectiveExecutorId(executorId))}`);
-}
-
-export async function getAgentCatalog(executorId?: string): Promise<AgentCatalog> {
-	return apiGet<AgentCatalog>(`/api/v1/agents?executorId=${encodeURIComponent(effectiveExecutorId(executorId))}`);
 }
 
 export async function launchAgentAuthLogin(agent: AgentName, executorId?: string): Promise<AgentAuthLoginResult> {

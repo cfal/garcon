@@ -110,7 +110,3 @@ export class AgentState {
 		this.modelProtocol = selection.modelProtocol ?? null;
 	}
 }
-
-export function createAgentState(): AgentState {
-	return new AgentState();
-}

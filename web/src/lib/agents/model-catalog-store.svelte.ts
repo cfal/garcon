@@ -526,12 +526,8 @@ export class ModelCatalogStore {
 		removeLocalStorageItem(LOCAL_STORAGE_KEYS.modelCatalogExecutors);
 	}
 
-	getAgents(): SessionAgentId[] {
-		return Object.keys(this.agentMetadata).filter(isAgentId) as SessionAgentId[];
-	}
-
 	getSelectableAgents(): SessionAgentId[] {
-		return this.getAgents();
+		return Object.keys(this.agentMetadata).filter(isAgentId) as SessionAgentId[];
 	}
 
 	getAgentMetadataList(): AgentMetadata[] {
@@ -570,13 +566,6 @@ export class ModelCatalogStore {
 
 	getThinkingModes(agentId: SessionAgentId): readonly ThinkingMode[] {
 		return this.agentMetadata[agentId]?.supportedThinkingModes ?? [];
-	}
-
-	getModel(agentId: SessionAgentId, model: string): ModelOption | null {
-		return (
-			this.getModels(agentId).find((entry) => entry.value === model || entry.rawModel === model) ??
-			null
-		);
 	}
 
 	// Catalog values identify explicit endpoint choices. Raw persisted names

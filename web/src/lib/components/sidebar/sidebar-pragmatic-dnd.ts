@@ -113,15 +113,6 @@ export function sidebarDragCanReorder(
 	);
 }
 
-export function findSidebarDropTarget(
-	dropTargets: DropTargetRecord[],
-): SidebarChatDropTargetData | null {
-	for (const target of dropTargets) {
-		if (isSidebarChatDropTargetData(target.data)) return target.data;
-	}
-	return null;
-}
-
 export function resolveSidebarDropInstructionForTarget(input: {
 	source: SidebarChatDragData;
 	target: SidebarChatDropTargetData;

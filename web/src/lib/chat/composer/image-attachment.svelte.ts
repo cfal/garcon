@@ -34,8 +34,6 @@ export function chatAttachmentAccept(
 	return [...new Set(tokens)].join(',');
 }
 
-export const CHAT_ATTACHMENT_ACCEPT = chatAttachmentAccept();
-
 export function mimeTypeForChatAttachment(file: Pick<File, 'name' | 'type'>): string {
 	return chatAttachmentMimeType(file);
 }
