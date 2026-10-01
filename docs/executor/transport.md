@@ -345,9 +345,11 @@ lock holders do not follow the rule yet and wait within their own deadlines
 and, where the route passes one, the request's signal: forks and fork runs'
 native forks, project-path updates, Reload, handoff carryover compaction, and
 adopting a chat created before the transcript ledger. A new chat adopts without
-calling its executor. Because such a step can use up the operation's deadline,
-a turn's admission check after a fork run's native fork or a handoff's carryover
-compaction starts a deadline of its own.
+calling its executor. A turn's preparation, such as a fork run's native fork or
+a handoff's carryover compaction, does not count against the deadline of the
+admission check after it; if the deadline ran out before the preparation began,
+the check does not wait for a reconnecting executor, and a read it sends still
+gets its 5 seconds.
 
 Each method has a continuity class, `rpcContinuity` in `rpc-protocol.ts`:
 

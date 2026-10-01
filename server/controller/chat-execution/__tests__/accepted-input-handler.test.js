@@ -3,7 +3,6 @@ import { AgentCallError } from '@garcon/server-agent-interface';
 import { AcceptedInputHandler } from '../accepted-input-handler.ts';
 import { DomainError, ProjectUnavailableError, SteerDeliveryError } from '../../../common/domain-error.js';
 import { reconnectTimedOut } from '../../../common/executor-disconnect.js';
-import { INTERACTIVE_EXECUTOR_WAIT_MS } from '../../../common/interactive-deadline.ts';
 import { QueueEntrySteerError } from '../queue-steer-error.js';
 
 function command(overrides = {}) {
@@ -329,57 +328,59 @@ describe('AcceptedInputHandler', () => {
     expect(m.admitInput).not.toHaveBeenCalled();
   });
 
-  for (const operation of ['fork-run', 'agent-handoff']) {
-    test(`starts a new interactive deadline for the admission check after a ${operation} preparation`, async () => {
-      let now = 1_000;
+  describe('admission deadline after a preparation', () => {
+    // The operation asked for its chat lock at 1 s, so its deadline is 21 s.
+    async function admissionDeadlineAfter({ startsAt, lasts, operation = 'fork-run', admissionDeadline = 21_000 }) {
+      let now = startsAt;
       const clock = spyOn(performance, 'now').mockImplementation(() => now);
       try {
         const { handler, m } = scaffold();
-
         await handler.schedule({
           command: command(),
           content: 'prepared work',
           options: { clientRequestId: 'request-1', clientMessageId: 'message-1', turnId: 'turn-1' },
           settlement: settlement(),
-          admissionDeadline: now + INTERACTIVE_EXECUTOR_WAIT_MS,
-          preparation: {
-            operation,
-            // Stands in for a native fork or carryover compaction that outlasts the operation's deadline.
-            prepare: mock(async () => { now = 90_000; }),
-            compensate: mock(async () => undefined),
-          },
+          admissionDeadline,
+          preparation: { operation, prepare: mock(async () => { now += lasts; }), compensate: mock(async () => undefined) },
         });
-
-        expect(m.assertProjectAvailable).toHaveBeenCalledWith('chat-1', 90_000 + INTERACTIVE_EXECUTOR_WAIT_MS);
+        return m.assertProjectAvailable.mock.calls[0][1];
       } finally {
         clock.mockRestore();
       }
-    });
-  }
-
-  test('checks admission within the given deadline after a new chat preparation, without one, and for background input', async () => {
-    let now = 1_000;
-    const clock = spyOn(performance, 'now').mockImplementation(() => now);
-    try {
-      const { handler, m } = scaffold();
-      const input = {
-        command: command(),
-        content: 'new work',
-        options: { clientRequestId: 'request-1', clientMessageId: 'message-1', turnId: 'turn-1' },
-        settlement: settlement(),
-      };
-      const preparation = (operation) => ({
-        operation, prepare: mock(async () => { now += 1_000; }), compensate: mock(async () => undefined),
-      });
-
-      await handler.schedule({ ...input, admissionDeadline: 21_000, preparation: preparation('chat-start') });
-      await handler.schedule({ ...input, admissionDeadline: 21_000 });
-      await handler.schedule({ ...input, admissionDeadline: null, preparation: preparation('fork-run') });
-
-      expect(m.assertProjectAvailable.mock.calls).toEqual([['chat-1', 21_000], ['chat-1', 21_000], ['chat-1', null]]);
-    } finally {
-      clock.mockRestore();
     }
+
+    test('does not count a slow preparation, such as a native fork, against the deadline', async () => {
+      // 2 s of the budget were left when a 60 s fork began.
+      expect(await admissionDeadlineAfter({ startsAt: 19_000, lasts: 60_000 })).toBe(81_000);
+    });
+
+    test('leaves the deadline in place after a quick preparation of any kind', async () => {
+      for (const operation of ['chat-start', 'fork-run', 'agent-handoff']) {
+        expect(await admissionDeadlineAfter({ operation, startsAt: 19_000, lasts: 5 })).toBe(21_005);
+      }
+    });
+
+    test('ends a budget spent before the preparation began at once', async () => {
+      expect(await admissionDeadlineAfter({ startsAt: 30_000, lasts: 1_000 })).toBe(31_000);
+    });
+
+    test('keeps background admission without a deadline', async () => {
+      expect(await admissionDeadlineAfter({ startsAt: 1_000, lasts: 1_000, admissionDeadline: null })).toBeNull();
+    });
+  });
+
+  test('checks admission within the given deadline without a preparation', async () => {
+    const { handler, m } = scaffold();
+
+    await handler.schedule({
+      command: command(),
+      content: 'new work',
+      options: { clientRequestId: 'request-1', clientMessageId: 'message-1', turnId: 'turn-1' },
+      settlement: settlement(),
+      admissionDeadline: 21_000,
+    });
+
+    expect(m.assertProjectAvailable).toHaveBeenCalledWith('chat-1', 21_000);
   });
 
   test('compensates preparation when the project is unavailable before transcript admission', async () => {

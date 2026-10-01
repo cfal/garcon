@@ -9,7 +9,6 @@ import type {
 import { DomainError, QUEUE_STEER_FINALIZATION_FAILED_MESSAGE, QUEUE_STEER_RECOVERY_FAILED_MESSAGE, STEER_NOT_DELIVERED_MESSAGE, STEER_OUTCOME_UNKNOWN_MESSAGE, SteerDeliveryError } from '../../common/domain-error.js';
 import { QueueEntrySteerError } from './queue-steer-error.js';
 import { createLogger } from '../../common/log.ts';
-import { interactiveDeadline } from '../../common/interactive-deadline.ts';
 import type { TurnIdentity } from '../lib/turn-identity.ts';
 import type { ChatExecutionControlOperations } from './chat-execution-control-operations.ts';
 import type {
@@ -571,17 +570,18 @@ export class AcceptedInputHandler {
       }
       const control = await this.#checkpointAfter(reservation, this.#controls.read(input.command.chatId));
       assertDirectControlAvailable(control);
+      const preparing = performance.now();
       await this.#checkpointAfter(reservation, Promise.resolve(input.preparation?.prepare({
           signal: reservation.executionAdmission.signal,
           assertAdmissionActive: () => this.#checkpoint(reservation),
         })));
-      // A fork run's native fork and a handoff's carryover compaction run outside
-      // the interactive budget and may use it up, so the admission check after
-      // them starts a deadline of its own. A new chat's preparation is quick, so
-      // its start keeps one deadline throughout.
-      const exempt = input.preparation?.operation === 'fork-run' || input.preparation?.operation === 'agent-handoff';
-      const admissionDeadline = exempt && input.admissionDeadline !== null
-        ? interactiveDeadline()
+      // A preparation, such as a fork run's native fork or a handoff's carryover
+      // compaction, runs outside the interactive budget, so its own duration does
+      // not count against the admission check's deadline. A budget spent before the
+      // preparation began ends at once, and a read sent then still gets its grace.
+      const prepared = performance.now();
+      const admissionDeadline = input.preparation && input.admissionDeadline !== null
+        ? Math.max(prepared, input.admissionDeadline + prepared - preparing)
         : input.admissionDeadline;
       await this.#checkpointAfter(
         reservation,
