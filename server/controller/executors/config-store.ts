@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { assertPrivateFile } from '../../common/private-file.js';
 import { join } from 'node:path';
 import {
-  isRemoteExecutorId, parseCreateExecutorRequest, parseUpdateExecutorRequest,
+  isRemoteExecutorId, LOCAL_EXECUTOR_LABEL, parseCreateExecutorRequest, parseUpdateExecutorRequest,
   type CreateExecutorRequest, type UpdateExecutorRequest,
 } from '../../../common/executors.js';
 import { isRecord } from '../../../common/json.js';
@@ -73,6 +73,7 @@ export class ExecutorConfigStore {
     return this.#serialize(async () => {
       const request = parseCreateExecutorRequest(input);
       if (!request) throw new ValidationDomainError('Invalid executor configuration');
+      this.#assertLabelAvailable(request.label);
       const id = randomUUID();
       const allowInsecureDevelopment = request.allowInsecureDevelopment ?? false;
       const parsed = request.direction === 'controller-connects' ? parseConnectionUrl(request.connectionUrl) : null;
@@ -104,6 +105,7 @@ export class ExecutorConfigStore {
       const request = parseUpdateExecutorRequest(input);
       if (!request) throw new ValidationDomainError('Invalid executor update');
       const previous = this.require(id);
+      if (request.label !== undefined && request.label !== previous.label) this.#assertLabelAvailable(request.label, id);
       let executor: RemoteExecutorConfig = {
         ...previous,
         ...(request.label === undefined ? {} : { label: request.label }),
@@ -139,6 +141,16 @@ export class ExecutorConfigStore {
     const result = this.#pending.then(operation);
     this.#pending = result.catch(() => undefined);
     return result;
+  }
+
+  #assertLabelAvailable(label: string, executorId?: string): void {
+    const normalized = label.trim().toLowerCase();
+    if (normalized === LOCAL_EXECUTOR_LABEL.toLowerCase()) {
+      throw new ValidationDomainError('The label "Local" is reserved for the local executor');
+    }
+    if (this.#executors.some((entry) => entry.id !== executorId && entry.label.trim().toLowerCase() === normalized)) {
+      throw new ValidationDomainError('An executor with this label already exists (case-insensitive)');
+    }
   }
 
   async #save(executors: readonly RemoteExecutorConfig[]): Promise<void> {

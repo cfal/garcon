@@ -1,6 +1,7 @@
 import { isRecord } from './json.js';
 
 export const LOCAL_EXECUTOR_ID = 'local';
+export const LOCAL_EXECUTOR_LABEL = 'Local';
 export type ExecutorId = string;
 export type ExecutorDirection = 'executor-connects' | 'controller-connects';
 

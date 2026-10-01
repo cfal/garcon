@@ -116,6 +116,52 @@ test('pasted worker credentials are unique and concurrent creates do not overwri
   expect(store.list()).toHaveLength(2);
 });
 
+test('executor labels are case-insensitively unique across serialized creates and reserve Local', async () => {
+  const { root, store } = await fixture();
+  const results = await Promise.allSettled([' Build Machine ', 'BUILD MACHINE'].map((label) =>
+    store.create({ direction: 'executor-connects', label })));
+  expect(results.map((result) => result.status)).toEqual(['fulfilled', 'rejected']);
+  expect(results[1]).toMatchObject({ reason: { code: 'VALIDATION_FAILED', message: expect.stringContaining('already exists') } });
+  for (const label of ['Local', 'local', ' LOCAL ']) {
+    await expect(store.create({ direction: 'executor-connects', label })).rejects.toThrow('reserved');
+  }
+  expect(store.list().map((entry) => entry.label)).toEqual(['Build Machine']);
+  const restarted = new ExecutorConfigStore(root);
+  await restarted.initialize();
+  await expect(restarted.create({ direction: 'executor-connects', label: 'build machine' })).rejects.toThrow('already exists');
+});
+
+test('renames reject collisions with disabled executors but allow changing their own capitalization', async () => {
+  const { root, store } = await fixture();
+  const first = await store.create({ direction: 'executor-connects', label: 'First' });
+  const second = await store.create({ direction: 'executor-connects', label: 'Second' });
+  await store.update(first.id, { enabled: false });
+  const before = await readFile(join(root, 'executors.json'), 'utf8');
+  await expect(store.update(second.id, { label: ' FIRST ', allowControllerCli: true })).rejects.toThrow('already exists');
+  await expect(store.update(second.id, { label: 'LOCAL' })).rejects.toThrow('reserved');
+  expect(await readFile(join(root, 'executors.json'), 'utf8')).toBe(before);
+  expect(store.require(second.id)).toEqual(second);
+  expect((await store.update(second.id, { label: 'SECOND' })).label).toBe('SECOND');
+  const results = await Promise.allSettled([store.update(first.id, { label: 'Shared' }), store.update(second.id, { label: 'SHARED' })]);
+  expect(results.map((result) => result.status)).toEqual(['fulfilled', 'rejected']);
+  await store.remove(first.id);
+  expect((await store.update(second.id, { label: 'shared' })).label).toBe('shared');
+});
+
+test('existing duplicate labels stay readable and configurable while a rename repairs them', async () => {
+  const { root, store } = await fixture();
+  const first = await store.create({ direction: 'executor-connects', label: 'First' });
+  const second = await store.create({ direction: 'executor-connects', label: 'Second' });
+  const file = join(root, 'executors.json');
+  await writeFile(file, JSON.stringify({ version: 1, executors: store.list().map((entry) => ({ ...entry, label: 'Duplicate' })) }));
+  await store.initialize();
+  expect(store.list()).toHaveLength(2);
+  await store.update(first.id, { enabled: false, label: 'Duplicate' });
+  await expect(store.create({ direction: 'executor-connects', label: 'DUPLICATE' })).rejects.toThrow('already exists');
+  await store.update(second.id, { label: 'Repaired' });
+  expect(store.list().map((entry) => entry.label)).toEqual(['Duplicate', 'Repaired']);
+});
+
 test.each(['executor-connects', 'controller-connects'] as const)(
   'arbitrary public URLs survive updates and restart (%s)', async (direction) => {
     const { root, store } = await fixture();

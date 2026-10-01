@@ -22,6 +22,14 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       }
       const { id } = await invoke(['create', '--label', 'Synthetic worker', '--direction', 'executor-connects',
         '--advertise-url', 'wss://controller.test/proxy/{executorId}?route=synthetic']);
+      for (const label of ['SYNTHETIC WORKER', 'local']) {
+        const duplicate = await runCli(fixture, ['executor', 'create', '--label', label, '--direction', 'executor-connects',
+          '--advertise-url', 'wss://controller.test/executor/{executorId}']);
+        expect(duplicate).toMatchObject({ exitCode: 3, stdout: '' });
+        expect(duplicate.stderr).toContain('VALIDATION_FAILED');
+        expect(duplicate.stderr).not.toContain('outcome is unknown');
+      }
+      expect((await invoke(['list'])).executors.filter((entry: ExecutorSnapshot) => entry.label.toLowerCase() === 'synthetic worker')).toHaveLength(1);
       const oversized = await runCli(fixture, ['executor', 'create', '--label', 'Synthetic oversized address', '--direction', 'executor-connects',
         '--advertise-url', `wss://controller.test/${'{executorId}'.repeat(150)}`]);
       expect(oversized).toMatchObject({ exitCode: 3, stdout: '' });
@@ -42,6 +50,10 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       expect(await invoke(['unassign-provider', id, '--provider', provider])).toEqual({ executorId: id, providerId: provider, assigned: false });
       const { id: outbound } = await invoke(['create', '--label', 'Synthetic listener', '--direction', 'controller-connects',
         '--connection-url', `ws://127.0.0.1:9/executor#secret=${'A'.repeat(43)}`, '--allow-insecure-development', 'true']);
+      const duplicateRename = await runCli(fixture, ['executor', 'update', outbound, '--label', 'SYNTHETIC RENAMED WORKER']);
+      expect(duplicateRename).toMatchObject({ exitCode: 3, stdout: '' });
+      expect(duplicateRename.stderr).toContain('VALIDATION_FAILED');
+      expect(await invoke(['show', outbound])).toMatchObject({ label: 'Synthetic listener' });
       expect(await invoke(['show', outbound])).toMatchObject({ direction: 'controller-connects' });
       await invoke(['delete', outbound]);
       if (origin !== 'local') {

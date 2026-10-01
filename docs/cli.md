@@ -101,7 +101,10 @@ bun cli/main.ts executor enable <executor-id>
 bun cli/main.ts executor delete <executor-id>
 ```
 
-Executor IDs are UUIDs; labels are not selectors. `show`, `wait`, and provider
+Executor IDs are UUIDs; labels are not selectors. New labels and renames must be
+unique, ignoring case and surrounding whitespace, including disabled executors;
+`Local` is reserved. Existing duplicates remain readable and can be renamed.
+`show`, `wait`, and provider
 assignments also accept `local`. Provider assignment uses an exact existing
 profile ID; it does not create profiles, accept API keys, or change native login.
 The `providers` management listing shows all existing profiles and their assigned

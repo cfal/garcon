@@ -3,7 +3,7 @@ import {
   type ExecutionProjectService, type ExecutorAvailability, type ExecutorCallOptions,
 } from '@garcon/server-agent-interface';
 import {
-  effectiveExecutorId, LOCAL_EXECUTOR_ID, type AgentExecutionTarget,
+  effectiveExecutorId, LOCAL_EXECUTOR_ID, LOCAL_EXECUTOR_LABEL, type AgentExecutionTarget,
   type CreateExecutorRequest, type ExecutorSnapshot, type ExecutorSnapshotAvailability, type UpdateExecutorRequest,
 } from '../../../common/executors.js';
 import { IntegrationRegistry } from '../../runtime/agents/integration-registry.js';
@@ -129,7 +129,7 @@ export class ExecutorManager {
 
   list(): readonly ExecutorSnapshot[] {
     return [{
-      id: LOCAL_EXECUTOR_ID, label: 'Local', kind: 'local', enabled: true, direction: null,
+      id: LOCAL_EXECUTOR_ID, label: LOCAL_EXECUTOR_LABEL, kind: 'local', enabled: true, direction: null,
       allowControllerCli: true,
       allowExecutorManagement: true,
       availability: this.#disposed ? 'offline' : 'ready', projectBasePath: this.localInfo.projectBasePath,
