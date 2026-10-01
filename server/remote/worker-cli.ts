@@ -29,7 +29,7 @@ Options:
   --help                      Show this help.
 
 GARCON_CONTROLLER_URL contains the full controller URL, including its Noise secret.
-It is consumed before runtime startup and is not inherited by provider/PTY children.
+Its credential is consumed before runtime startup; PTY children receive an empty variable.
 Do not place credentials in argv or shell history. Environment values remain visible
 to privileged processes and some diagnostics. Routine startup output omits secrets;
 connection-url explicitly reveals an existing listener credential on stdout.

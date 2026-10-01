@@ -81,6 +81,32 @@ afterEach(async () => {
 });
 
 describe("TerminalManager", () => {
+  it.each([undefined, "", "synthetic-connection-credential"])("blanks the controller credential in PTY environments (%s)", async (inherited) => {
+    const previous = process.env.GARCON_CONTROLLER_URL;
+    const environments = [];
+    const manager = new TerminalManager({
+      projectBasePath: projectPath,
+      spawnPty: (_shell, _args, options) => {
+        environments.push(options.env);
+        return new FakePty();
+      },
+    });
+    try {
+      if (inherited === undefined) delete process.env.GARCON_CONTROLLER_URL;
+      else process.env.GARCON_CONTROLLER_URL = inherited;
+      await manager.create(principal("alice"), {
+        requestId: "credential-isolation", requestedInitialWorkingDirectory: null,
+      });
+      expect(environments).toHaveLength(1);
+      expect(environments[0].GARCON_CONTROLLER_URL).toBe("");
+      expect(environments[0].TERM).toBe("xterm-256color");
+    } finally {
+      manager.shutdown();
+      if (previous === undefined) delete process.env.GARCON_CONTROLLER_URL;
+      else process.env.GARCON_CONTROLLER_URL = previous;
+    }
+  });
+
   it("uses the injected runtime base and shell without controller configuration", async () => {
     const calls = [];
     const manager = new TerminalManager({

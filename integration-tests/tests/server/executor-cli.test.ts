@@ -115,7 +115,7 @@ for (const backend of ['remote-controller-dials', 'remote-executor-dials'] as co
       let attachment = await attach(client, terminal.terminalId, inventory);
       client.sendTerminal({ type: 'terminal-input', terminalId: terminal.terminalId, attachmentId: attachment, data: 'stty -echo\r' });
       expect(await shellCommand(client, terminal.terminalId, attachment,
-        'if [ "${GARCON_CONTROLLER_URL+x}" = x ]; then printf credential-present; else printf credential-absent; fi')).toContain('credential-absent');
+        'printf "credential-length:%s" "${#GARCON_CONTROLLER_URL}"')).toContain('credential-length:0');
       const command = `${shellQuote(process.execPath)} ${shellQuote(CLI)} status ${chatId} --messages 0 --json`;
       expect(await shellCommand(client, terminal.terminalId, attachment, command)).toContain(`"id": "${chatId}"`);
       await fixture.crashAndRestartGarcon({ preserveExecutorWorker: true });

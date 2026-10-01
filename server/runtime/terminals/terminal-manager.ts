@@ -100,6 +100,8 @@ function ptyEnvironment(): Record<string, string> {
   }
   return {
     ...env,
+    // The native PTY launcher inherits OS values even after deletion from process.env.
+    GARCON_CONTROLLER_URL: "",
     TERM: "xterm-256color",
     COLORTERM: "truecolor",
     FORCE_COLOR: "3",

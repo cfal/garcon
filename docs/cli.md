@@ -60,9 +60,11 @@ bun server/main.ts executor \
 ```
 
 The value is a `wss://...#secret=...` URL. `--connect` is no longer accepted.
-The worker consumes the variable before runtime startup and excludes it from
-provider and PTY child environments. Environment values can still be inspected
-by privileged processes or retained by diagnostics.
+The worker consumes the variable before runtime startup and excludes its value
+from provider and PTY child environments. PTYs explicitly receive an empty
+variable because their native launcher inherits variables omitted from its
+environment overrides. The initial environment can still be inspected by
+privileged processes or retained by diagnostics.
 
 For a controller that connects to a worker, start a TLS listener:
 
