@@ -6,17 +6,18 @@ export async function mapWithConcurrency<T>(
   if (!Number.isInteger(limit) || limit < 1) {
     throw new RangeError('Concurrency limit must be a positive integer');
   }
-  const executing = new Set<Promise<void>>();
-  for (const item of items) {
-    const promise = Promise.resolve().then(() => worker(item));
-    executing.add(promise);
-    void promise.then(
-      () => executing.delete(promise),
-      () => executing.delete(promise),
-    );
-    if (executing.size >= limit) await Promise.race(executing);
-  }
-  await Promise.all(executing);
+  let next = 0;
+  let failure: { error: unknown } | undefined;
+  const run = async () => {
+    while (!failure && next < items.length) {
+      const item = items[next++]!;
+      try { await worker(item); }
+      catch (error) { failure ??= { error }; }
+    }
+  };
+  // Settles admitted siblings before releasing the caller's resource ownership.
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, () => Promise.resolve().then(run)));
+  if (failure) throw failure.error;
 }
 
 export async function mapWithConcurrencyResult<T, R>(
