@@ -706,6 +706,78 @@ describe('main', () => {
     }
   });
 
+  test.each(['/remote-only/../project', 'C:\\Remote\\project', '\\\\server\\share\\project'])('cross-executor starts preserve the target path: %s', async (cwd) => {
+    const executorId = '11111111-1111-4111-8111-111111111111';
+    const capture = capturedOutput();
+    let submitted: Record<string, unknown> | undefined;
+    let catalogTarget: string | null = null;
+    const exitCode = await main(['start-async', '--executor', executorId, '--cwd', cwd,
+      '--agent', 'codex', '--model', 'gpt-5.4', 'Synthetic'], {
+      discoverRuntime: stubDiscovery, output: capture.output,
+      fetch: async (input, init) => {
+        const url = new URL(String(input));
+        if (url.pathname === '/api/v1/models') {
+          catalogTarget = url.searchParams.get('executorId');
+          return startModelCatalogResponse();
+        }
+        if (url.pathname === '/api/v1/app/settings') return remoteSettingsResponse();
+        if (url.pathname === '/api/v1/chats/start') {
+          submitted = JSON.parse(String(init?.body)) as Record<string, unknown>;
+          return Response.json({ success: true, commandType: 'chat-start', clientRequestId: submitted.clientRequestId,
+            chatId: submitted.chatId, turnId: 'synthetic-turn', status: 'accepted', acceptedAt: TS, parentChat: null, chat: null });
+        }
+        throw new Error(`Unexpected request: ${url.pathname}`);
+      },
+    });
+    expect(exitCode, capture.diagnostics.join('\n')).toBe(0);
+    expect(catalogTarget).toBe(executorId);
+    expect(submitted).toMatchObject({ executorId, projectPath: cwd });
+  });
+
+  test.each([undefined, '.', '../project', '~/project', 'C:relative', '\\relative'])('cross-executor starts reject missing or relative cwd before submission: %s', async (cwd) => {
+    const capture = capturedOutput();
+    let requests = 0;
+    const exitCode = await main(['start', '--executor', '11111111-1111-4111-8111-111111111111',
+      ...(cwd === undefined ? [] : ['--cwd', cwd]), '--agent', 'codex', '--model', 'gpt-5.4', 'Synthetic'], {
+      discoverRuntime: stubDiscovery, output: capture.output,
+      fetch: async () => { requests++; throw new Error('Unexpected request'); },
+    });
+    expect(exitCode).toBe(2);
+    expect(requests).toBe(0);
+    expect(capture.diagnostics[0]).toContain('explicit absolute --cwd');
+  });
+
+  test('same-origin explicit starts retain local directory validation', async () => {
+    const capture = capturedOutput();
+    const exitCode = await main(['start', '--executor', 'local', '--cwd', import.meta.filename,
+      '--agent', 'codex', '--model', 'gpt-5.4', 'Synthetic'], { discoverRuntime: stubDiscovery, output: capture.output });
+    expect(exitCode).toBe(2);
+    expect(capture.diagnostics[0]).toContain('existing directory');
+  });
+
+  test('explicit catalogs and native lookups select a target without changing their origin', async () => {
+    const executorId = '11111111-1111-4111-8111-111111111111';
+    for (const args of [['list', 'agents', '--json'], ['lookup-native-session', 'synthetic-session']]) {
+      const capture = capturedOutput();
+      let target: unknown;
+      const exitCode = await main([...args, '--executor', executorId], {
+        discoverRuntime: stubDiscovery, output: capture.output,
+        fetch: async (input, init) => {
+          const url = new URL(String(input));
+          expect(url.origin).toBe('http://127.0.0.1:8080');
+          if (args[0] === 'list') {
+            target = url.searchParams.get('executorId');
+            return startModelCatalogResponse();
+          }
+          target = JSON.parse(String(init?.body)).executorId;
+          return Response.json({ chatId: CHAT_ID });
+        },
+      });
+      expect(exitCode, capture.diagnostics.join('\n')).toBe(0);
+      expect(target).toBe(executorId);
+    }
+  });
+
   test('prints one complete start-async JSON acceptance envelope', async () => {
     const capture = capturedStreams();
     let startRequest: Record<string, unknown> | undefined;

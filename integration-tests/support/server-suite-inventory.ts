@@ -4,7 +4,7 @@ import type { ExecutionBackend } from './execution-backend.js';
 export const SINGLE_RUN_SUITES: Readonly<Record<string, string>> = Object.freeze({
   ...Object.fromEntries([
     'api-provider-assignments', 'cross-executor-handoff', 'execution-worker-process', 'executor-admission', 'executor-app',
-    'executor-cli-response-limits', 'executor-cli', 'executor-cli-management', 'executor-config-updates',
+    'executor-cli-response-limits', 'executor-cli', 'executor-cli-management', 'executor-cli-targets', 'executor-config-updates',
     'executor-delete-cleanup', 'executor-files', 'executor-generation-settings',
     'executor-gh', 'executor-git-admission', 'executor-git-cancellation',
     'executor-git-generation', 'executor-git-normalization', 'executor-git-output-limits',

@@ -105,8 +105,9 @@ async function submitStart(
   createId: () => string,
   createChatId: () => string,
 ): Promise<StartChatCommandResponse> {
+  const executorId = invocation.executorId ?? client.defaultExecutorId;
   const [catalog, settings] = await Promise.all([
-    client.getModelCatalog(invocation.agentId, signal),
+    client.getModelCatalog(invocation.agentId, signal, executorId),
     client.getSettings(signal),
   ]);
   const selection = resolveStartSelection(catalog, settings, {
@@ -128,7 +129,7 @@ async function submitStart(
         ? {}
         : { parentChatId: invocation.parentChatId }),
       agentId: invocation.agentId,
-      executorId: client.defaultExecutorId,
+      executorId,
       projectPath: invocation.cwd,
       ...selection,
       command: prompt,

@@ -27,7 +27,7 @@ import { CliError } from './errors.js';
 import type { CliOutput } from './output.js';
 
 export interface CatalogQueryClient {
-  getModelCatalog(agentId?: string, signal?: AbortSignal): Promise<ModelCatalogResponse>;
+  getModelCatalog(agentId?: string, signal?: AbortSignal, executorId?: string): Promise<ModelCatalogResponse>;
   getPreambles(signal?: AbortSignal): Promise<PreamblesSnapshot>;
   getSettings(signal?: AbortSignal): Promise<RemoteSettingsSnapshot>;
 }
@@ -308,7 +308,7 @@ export async function runCatalogQuery(
   const needsSettings = command.resource === 'permissions'
     || command.resource === 'reasoning-efforts';
   const [catalog, settings] = await Promise.all([
-    client.getModelCatalog(command.resource === 'models' ? command.agentId : undefined, signal),
+    client.getModelCatalog(command.resource === 'models' ? command.agentId : undefined, signal, command.executorId),
     needsSettings ? client.getSettings(signal) : Promise.resolve(null),
   ]);
   const agent = command.agentId === undefined

@@ -1208,6 +1208,23 @@ describe('native session lookup arguments', () => {
     expect(() => parseCliArgs(args, ENV)).toThrow(message);
   });
 
+  test('explicit executor targets are limited to new chats and executor-scoped queries', () => {
+    const executorId = '11111111-1111-4111-8111-111111111111';
+    for (const kind of ['start', 'start-async']) {
+      expect(parseCliArgs([kind, '--executor', executorId, '--cwd', '/remote/../project', '--agent', 'codex', '--model', 'gpt', 'Synthetic'], ENV))
+        .toMatchObject({ kind, executorId, requestedCwd: '/remote/../project' });
+    }
+    expect(parseCliArgs(['list', 'agents', '--executor', executorId], ENV)).toMatchObject({ executorId });
+    expect(parseCliArgs(['lookup-native-session', 'synthetic-session', '--executor', 'local'], ENV)).toMatchObject({ executorId: 'local' });
+    for (const args of [
+      ['resume', CHAT_ID, 'Synthetic'], ['resume-async', CHAT_ID, 'Synthetic'], ['fork', CHAT_ID],
+      ['fork-async', CHAT_ID, 'Synthetic'], ['status', CHAT_ID], ['list', 'preambles'],
+      ['executor', 'list'], ['ticket', 'list'],
+    ]) expect(() => parseCliArgs([...args, '--executor', executorId], ENV)).toThrow('--executor cannot be used');
+    expect(() => parseCliArgs(['list', 'agents', '--executor', 'unknown'], ENV)).toThrow('local or a remote executor UUID');
+    expect(() => parseCliArgs(['list', 'agents', '--executor', 'local', '--executor', executorId], ENV)).toThrow('only once');
+  });
+
   test('accepts an option-terminated lookup prompt after start', () => {
     expect(parseCliArgs([
       'start',

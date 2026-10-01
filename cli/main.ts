@@ -1,5 +1,6 @@
 import packageJson from '../package.json' with { type: 'json' };
 import fs from 'node:fs/promises';
+import path from 'node:path';
 import { CLI_HELP, parseCliArgs, type CliConnectionOptions, type ParsedCliCommand } from './args.js';
 import { runCatalogQuery } from './catalog-query.js';
 import { resumeChatAsync, stopChat } from './chat-control.js';
@@ -135,6 +136,14 @@ async function canonicalProjectDirectory(cwd: string): Promise<string> {
       cause: error,
     });
   }
+}
+
+function remoteProjectDirectory(cwd: string | undefined): string {
+  if (cwd === undefined || cwd.includes('\0') || !(path.posix.isAbsolute(cwd)
+    || /^[a-z]:[\\/]/iu.test(cwd) || /^\\\\[^\\]+\\[^\\]+(?:\\|$)/u.test(cwd))) {
+    throw new CliError('arguments', 'cross-executor starts require an explicit absolute --cwd on the selected executor', 2);
+  }
+  return cwd;
 }
 
 async function connectedClient<T extends CliConnectionOptions>(
@@ -297,6 +306,7 @@ export async function main(
       const { client } = await connectedClient(command, options);
       const chatId = await client.lookupNativeSession({
         nativeSessionId: command.nativeSessionId,
+        ...(command.executorId === undefined ? {} : { executorId: command.executorId }),
         ...(command.agentId === undefined ? {} : { agent: command.agentId }),
       }, options.signal);
       output.result(chatId);
@@ -458,10 +468,15 @@ export async function main(
     if (prompt.trim().length === 0) {
       throw new CliError('arguments', 'the prompt read from stdin must not be empty', 2);
     }
-    const invocation = command.kind === 'start' || command.kind === 'start-async'
+    let invocation = (command.kind === 'start' || command.kind === 'start-async') && command.executorId === undefined
       ? { ...command, cwd: await canonicalProjectDirectory(command.cwd) }
       : command;
     const { client } = await connectedClient(invocation, options);
+    if ((invocation.kind === 'start' || invocation.kind === 'start-async') && invocation.executorId !== undefined) {
+      invocation = { ...invocation, cwd: invocation.executorId === client.defaultExecutorId
+        ? await canonicalProjectDirectory(invocation.cwd)
+        : remoteProjectDirectory(invocation.requestedCwd) };
+    }
     if (invocation.kind === 'start-async') {
       const result = await startConsultationAsync(invocation, prompt, client, options.signal);
       if (invocation.json) {

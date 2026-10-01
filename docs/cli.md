@@ -33,7 +33,7 @@ Explicit flags take precedence over environment variables; nonempty environment 
 
 ## Executor Connections
 
-Add executors from the Executors dialog. For an executor that connects to the controller, pass the complete generated URL as one quoted argument:
+Add executors from the Executors dialog or the CLI management commands below. For an executor that connects to the controller, pass the complete generated URL as one quoted argument:
 
 ```bash
 bun server/main.ts executor --connect 'wss://controller.example.com/executor/NODE_ID#secret=SECRET' \
@@ -139,6 +139,38 @@ lost reply can mean the save succeeded. Inspect executors/provider assignments
 before retrying, especially creation, which generates a new UUID for each request.
 `--json` emits one JSON result; diagnostics go to stderr. Ctrl-C exits 130 without
 claiming rollback. An offline target remains configurable through a healthy origin.
+
+## Execution Targets
+
+`--executor local|<uuid>` selects where a new chat runs. It also scopes `list`
+catalogs (except workspace-wide preambles) and `lookup-native-session`. Omission
+preserves the authenticated origin's default: Local through the controller,
+or the originating executor through its gateway. Selection requires ordinary
+workspace CLI access, not the administrative management grant.
+
+```bash
+bun cli/main.ts executor list --json
+bun cli/main.ts list models --executor <executor-id> --agent codex --json
+bun cli/main.ts start-async --executor <executor-id> --cwd /srv/project \
+  --agent codex --model <model-id> 'Review the changes'
+bun cli/main.ts --runtime executor start --executor local --cwd /srv/controller-project \
+  --agent codex --model <model-id> 'Review the controller project'
+bun cli/main.ts lookup-native-session <native-session-id> --executor <executor-id>
+```
+
+`--runtime` selects the authenticated origin; `--executor` never changes that
+connection or its authority. Model/provider resolution and chat creation use the
+same selected target. Unknown or unavailable targets fail without falling back
+to another executor.
+
+Cross-executor starts require an explicit absolute `--cwd` on the target machine.
+The CLI sends it unchanged, including Windows drive/UNC paths; it does not expand
+`~`, normalize remote paths, or check them against the CLI machine's filesystem.
+The target validates its own filesystem boundary. Same-origin starts retain local
+directory validation and canonicalization, including when `--executor` is explicit.
+
+`resume`, `resume-async`, `fork`, and all other existing-chat commands retain the
+chat's saved executor and reject `--executor`. Target selection does not move chats.
 
 ## Tickets
 
