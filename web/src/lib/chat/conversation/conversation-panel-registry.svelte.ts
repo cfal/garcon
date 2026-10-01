@@ -427,6 +427,10 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	#reconnectReplays = new Map<string, ActivePanelReconnectReplay>();
 	// Reconciliation updates this reactive revision after mutating the plain panel map.
 	#visible = $state.raw<readonly ConversationPanelDescriptor[]>([]);
+	// Parked transcripts must not retain the reconciliation scope and its retired panels.
+	#onSnapshotResendCandidates = (chatId: string, candidates: readonly ResendCandidate[]): void => {
+		this.replaceResendCandidates(chatId, candidates);
+	};
 
 	constructor(
 		private readonly options: {
@@ -547,9 +551,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 				this.options.cache,
 				this.options.lifecycle,
 				this.options.overlays,
-				(snapshotChatId, candidates) => {
-					this.replaceResendCandidates(snapshotChatId, candidates);
-				},
+				this.#onSnapshotResendCandidates,
 				{
 					load: (options) => this.loadChatSnapshot(item.chatId, options),
 					wait: (signal) => this.#waitForChatSnapshot(item.chatId, signal),

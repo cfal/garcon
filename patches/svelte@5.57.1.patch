@@ -1,0 +1,16 @@
+diff --git a/src/internal/client/runtime.js b/src/internal/client/runtime.js
+index 27def053008cc438af3186a5d939668c786e871d..75634a2a90cf5d67d7693e7ef49fdd6b9244a50f 100644
+--- a/src/internal/client/runtime.js
++++ b/src/internal/client/runtime.js
+@@ -728,7 +728,10 @@ function reconnect(derived) {
+ 	if (derived.deps === null) return;
+ 
+ 	for (const dep of derived.deps) {
+-		(dep.reactions ??= []).push(derived);
++		// Recalculation may have already subscribed newly discovered dependencies.
++		if (dep.reactions === null || !includes.call(dep.reactions, derived)) {
++			(dep.reactions ??= []).push(derived);
++		}
+ 
+ 		if ((dep.f & DERIVED) !== 0 && (dep.f & CONNECTED) === 0) {
+ 			unfreeze_derived_effects(/** @type {Derived} */ (dep));
