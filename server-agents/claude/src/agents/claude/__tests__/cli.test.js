@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import { buildClaudeCLIArgs, buildClaudePermissionApprovalResponse, convertCLIMessageToChatMessages } from '../claude-cli.js';
+import { CLAUDE_REMOVAL_TARGET_GUIDANCE } from '../cli-invocation.js';
 import { getNativeMessageRevisionSource } from '@garcon/server-agent-common/shared/native-message-source';
 import {
   ClaudeTurnState,
@@ -298,6 +299,7 @@ describe('buildClaudeCLIArgs', () => {
       '--model', 'sonnet',
       '--permission-mode', 'acceptEdits',
       '--permission-prompt-tool', 'stdio',
+      '--append-system-prompt', CLAUDE_REMOVAL_TARGET_GUIDANCE,
       '--effort', 'medium',
       '--session-id=session-1',
       '-p', '',
@@ -339,6 +341,15 @@ describe('buildClaudeCLIArgs', () => {
     expect(args).toContain('--dangerously-skip-permissions');
     expect(args).toContain('--permission-prompt-tool');
     expect(args).toContain('stdio');
+  });
+
+  it('steers sessions toward removal targets that Claude Code can resolve', () => {
+    const args = buildClaudeCLIArgs({ prompt: '', streamJson: true });
+    const guidance = args[args.indexOf('--append-system-prompt') + 1];
+
+    expect(guidance).toBe(CLAUDE_REMOVAL_TARGET_GUIDANCE);
+    expect(guidance).toContain('${VAR:?}');
+    expect(buildClaudeCLIArgs({ prompt: 'title' })).not.toContain('--append-system-prompt');
   });
 });
 
