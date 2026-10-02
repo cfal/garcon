@@ -41,7 +41,7 @@ test.each(['missing', 'null', '[]', '{"version":5,"sessions":null}'])('startup p
     expect(await errors).toContain('chats.json');
     await output;
     expect(await readFile(ledgerPath)).toEqual(before);
-    if (raw === 'missing') await expect(stat(registryPath)).rejects.toMatchObject({ code: 'ENOENT' });
+    if (raw === 'missing') expect(await rejectionOf(stat(registryPath))).toMatchObject({ code: 'ENOENT' });
     else expect(await readFile(registryPath, 'utf8')).toBe(raw);
   } finally {
     if (child.exitCode === null) child.kill('SIGTERM');

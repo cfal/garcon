@@ -17,7 +17,7 @@ describe('ChatActionDialogs', () => {
 			onCancelRename: vi.fn(), onConfirmRename, chatDetailsDialog: null, onCloseDetails: vi.fn(),
 		});
 		const input = await screen.findByRole('textbox');
-		const save = screen.getByRole('button', { name: 'Save', exact: true });
+		const save = screen.getByRole('button', { name: 'Save' });
 		await fireEvent.input(input, { target: { value: '\u{1f600}'.repeat(1025) } });
 		expect(save.hasAttribute('disabled')).toBe(true);
 		expect(screen.getByRole('alert').textContent).toContain('4096 UTF-8 bytes');

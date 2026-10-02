@@ -8,6 +8,7 @@ import { TranscriptLedgerStore } from '../../../server/controller/ledger/store.j
 import { TranscriptLedgerService } from '../../../server/controller/ledger/service.js';
 import { TranscriptAdoptionService } from '../../../server/controller/ledger/adoption.js';
 import { transcriptViewId } from '../../../server/controller/ledger/contracts.js';
+import { rejectionOf, throwingRejectionOf } from '../../support/promise-assertions.js';
 
 test.each(['success', 'before-commit', 'after-commit'] as const)(
   'relocation preserves authoritative native history across %s publication', async (failure) => {
@@ -23,6 +24,7 @@ test.each(['success', 'before-commit', 'after-commit'] as const)(
     try {
       await registry.init();
       registry.addChat({ id: chatId, agentId: 'test', projectPath: '/source', model: 'synthetic-model',
+        preambleSelection: { revision: 0, orderedPreambleIds: [] },
         agentSettingsById: { test: { ownerId: 'test', schemaVersion: 1, values: {} } }, parentChat: null });
       registry.updateChat(chatId, session(source));
       await registry.flush();
@@ -50,7 +52,7 @@ test.each(['success', 'before-commit', 'after-commit'] as const)(
         logger: { info() {}, warn() {}, error() {}, debug() {} },
       });
       if (failure === 'success') await operation;
-      else await expect(operation).rejects.toThrow('Synthetic publication failure');
+      else expect(await throwingRejectionOf(operation)).toThrow('Synthetic publication failure');
       const reopened = new ChatRegistry(root);
       await reopened.init();
       await new TranscriptAdoptionService({ registry: reopened, ledger,
@@ -63,7 +65,7 @@ test.each(['success', 'before-commit', 'after-commit'] as const)(
       await access(authoritative);
       await access(destination);
       if (failure !== 'success') await access(source);
-      else await expect(access(source)).rejects.toMatchObject({ code: 'ENOENT' });
+      else expect(await rejectionOf(access(source))).toMatchObject({ code: 'ENOENT' });
     } finally {
       await registry.flush();
       store.close();
