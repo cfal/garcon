@@ -12,7 +12,7 @@ import type { IChatRegistry } from './store.js';
 import type { ChatRegistryEntry } from './registry-contracts.js';
 import { extractFirstLine } from '../lib/text.js';
 import { resolveChatTitle } from './chat-title.js';
-import { carryOverRevision } from './carryover-segments.js';
+import { carryOverRevision } from './carryover/segments.js';
 
 interface ChatListProjectorSettings {
   getPinnedChatIds(): string[];

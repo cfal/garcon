@@ -1,4 +1,4 @@
-import { parseMultiFileDiffPatches } from '../git/diff-engine.js';
+import { parseMultiFileDiffPatches } from './pull-request-diff.js';
 import { createLogger } from '../../common/log.js';
 import type { GhStatusResponse } from '../../../common/gh.js';
 import { classifyGhError } from './gh-error-classifier.js';

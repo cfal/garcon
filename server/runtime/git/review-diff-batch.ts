@@ -8,12 +8,12 @@ import type {
   RegisteredGitReviewFile,
 } from './review-document-registry.js';
 import {
-  compactRenderedPatch,
+  createReviewPatchBody,
   errorPatchFileBody,
   limitedPatchFileBody,
   splitPatchesFromRawDiff,
   type SplitRawDiffPatch,
-} from './rendered-diff.js';
+} from './review-patch.js';
 import {
   GitOutputLimitError,
   readOnlyGitOptions,
@@ -274,7 +274,7 @@ async function runDiffBatch(
       bodies.push(measureGitReviewPhaseSync(
         routeMetrics,
         'patch-scan',
-        () => compactRenderedPatch(
+        () => createReviewPatchBody(
           file.path,
           file.bodyFingerprint,
           entry.patch,

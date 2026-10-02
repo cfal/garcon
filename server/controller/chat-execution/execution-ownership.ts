@@ -334,10 +334,6 @@ export class ExecutionOwnership {
     return true;
   }
 
-  isAttemptRetired(chatId: string, attempt: QueueExecutionAttempt | undefined): boolean {
-    return !attempt || (attempt.isSettled && !this.isCurrentAttempt(chatId, attempt));
-  }
-
   requestDrain(chatId: string): void {
     this.#state(chatId).pending.drainRequested = true;
   }

@@ -51,16 +51,6 @@ export interface AgentSessionSettingsPatch {
   modelProtocol?: ApiProtocol | null;
 }
 
-export class UnsupportedAgentSettingError extends Error {
-  constructor(
-    readonly agentId: string,
-    readonly setting: keyof AgentSessionSettingsPatch,
-  ) {
-    super(`${agentId} does not support live setting: ${setting}`);
-    this.name = 'UnsupportedAgentSettingError';
-  }
-}
-
 export interface StartedAgentSession {
   agentSessionId: string;
   nativeSession: AgentNativeSessionRef | null;

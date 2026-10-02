@@ -18,7 +18,7 @@ import type {
   AgentAuthLoginStatus,
 } from '../../../common/agent-auth.js';
 import type { IChatRegistry } from '../chats/store.js';
-import type { CarryOverOutcome } from '../chats/carryover-outcome.js';
+import type { CarryOverOutcome } from '../chats/carryover/outcome.js';
 import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-resolver.js';
 import type { KeyedPromiseLock } from '../../common/keyed-lock.js';
 import type { IntegrationRegistry } from '../../runtime/agents/integration-registry.js';
@@ -37,7 +37,7 @@ import { AgentCatalogService, type AgentModelQuery } from './catalog-service.js'
 import { AgentDirectory, type ExecutionIntegrationDirectory } from './directory.js';
 import { AgentEventBus, type TurnEventMetadata } from './event-bus.js';
 import { AgentRuntimeRouter, type RunSingleQueryOptions } from './runtime-router.js';
-import { type CreateCarriedContextInput } from '../chats/carried-context.js';
+import { type CreateCarriedContextInput } from '../chats/carryover/context.js';
 import { AgentSessionSettingsService, type AgentConfigurationInput } from './session-settings-service.js';
 import { toAgentChatReference } from './integration-chat-reference.js';
 import { createLogger } from '../../common/log.js';

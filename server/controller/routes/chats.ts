@@ -44,7 +44,7 @@ import {
 import {
   archivedLogicalCount,
   carryOverRevision,
-} from '../chats/carryover-segments.js';
+} from '../chats/carryover/segments.js';
 import type { TranscriptPageReader } from '../chats/chat-message-reader.js';
 import { buildChatOrderComparator } from '../chats/chat-order-ranking.js';
 import type { ChatProcessingActivity } from '../chats/chat-processing-activity.js';
@@ -63,7 +63,7 @@ import { commandHttpError, parseCommandRequest } from '../lib/command-http-error
 import { composeRoutes } from '../lib/compose-routes.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import { withJsonBody } from '../lib/json-route.js';
-import { CHAT_MESSAGES_MAX_LIMIT } from '../lib/pagination.js';
+import { CHAT_MESSAGES_MAX_LIMIT } from '../../../common/chat-view.js';
 import type {
   ChatOrderComparatorOverrides,
   ChatOrderStateMutationResult,

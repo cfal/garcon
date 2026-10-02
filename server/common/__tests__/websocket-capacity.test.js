@@ -26,8 +26,11 @@ describe('WebSocketAdmissionController', () => {
       reason: 'unknown-reservation',
     });
     expect(admission.confirm('socket-1')).toEqual({ ok: true });
+    expect(admission.confirm('socket-1')).toEqual({ ok: true });
+    expect(admission.tryReserve('socket-1')).toEqual({ ok: false, reason: 'duplicate-connection' });
     expect(admission.size).toBe(1);
     expect(admission.release('socket-1')).toBe(true);
+    expect(admission.confirm('socket-1')).toEqual({ ok: false, reason: 'unknown-reservation' });
   });
 
   it('releases failed upgrades so later reservations can proceed', () => {

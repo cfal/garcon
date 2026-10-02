@@ -161,7 +161,7 @@ describe('json file store', () => {
       'server/controller/auth/store.ts',
       'server/controller/chats/store.ts',
       'server/controller/settings/store.ts',
-      'server/controller/chats/share-store.ts',
+      'server/controller/chats/shares/store.ts',
       'server/controller/chats/metadata-store.ts',
       'server/controller/api-providers/store.ts',
     ]) {

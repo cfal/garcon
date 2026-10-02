@@ -44,7 +44,7 @@ import type { ShareTranscriptSnapshotPort } from './shares.js';
 import type { AgentRegistry } from '../agents/registry.js';
 import type { TelegramNotifier } from '../notifications/telegram.js';
 import type { TelegramSettingsStore } from '../notifications/telegram-settings-store.js';
-import type { IShareStore } from '../chats/share-store.js';
+import type { IShareStore } from '../chats/shares/store.js';
 import type { ApiProviderService } from '../api-providers/service.js';
 import type { ChatCommandService } from '../commands/chat-command-service.js';
 import type { SnippetService } from '../snippets/service.js';

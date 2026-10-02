@@ -1,7 +1,7 @@
 // Pure transforms from raw `gh` JSON output into the typed PR contract. Kept
 // free of subprocess IO so they can be unit-tested directly.
 
-import type { GitDiffPatchFile } from '../git/diff-engine.js';
+import type { GitDiffPatchFile } from './pull-request-diff.js';
 import type { GitReviewFilePatchBody, GitReviewFileSummary } from '../git/types.js';
 import type {
   PullRequestCheck,

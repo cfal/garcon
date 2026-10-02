@@ -1,6 +1,6 @@
 import type { StoredLedgerRow } from '../../ledger/codec.js';
 import { TaskWorker } from '../../lib/task-worker.js';
-import type { ShareSnapshotHeader } from '../share-snapshot-format.js';
+import type { ShareSnapshotHeader } from '../shares/snapshot-format.js';
 import type { TranscriptExportDocumentRequest } from '../transcript-export/document.js';
 import type {
   RenderedShareSnapshot,

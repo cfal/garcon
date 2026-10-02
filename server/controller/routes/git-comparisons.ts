@@ -1,8 +1,7 @@
 import { isRecord } from '../../../common/json.js';
 import type { GitRouteService } from './git-executor-service.js';
-import { gitJsonBody } from './git-request-fields.js';
+import { gitJsonBody, validContextLines, validPositiveLimit } from './git-request-fields.js';
 import {
-  GIT_DIFF_LIMITS,
   GIT_REVIEW_DOCUMENT_LIMITS,
   type GitCommandTrace,
   type GitComparisonFreshnessToExpectation,
@@ -15,22 +14,10 @@ import {
 import type { RouteMap } from '../lib/http-route-types.js';
 import { jsonError } from '../../common/http-error.js';
 import { asJsonBody, type JsonBody } from './route-helpers.js';
-import { measureGitRoutePhase, traceGitJsonResponse } from './git-route-response.js';
+import { gitJson, measureGitRoutePhase, traceGitJsonResponse } from './git-route-response.js';
 
 function nonEmptyString(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
-}
-
-function validContextLines(value: unknown): number | null {
-  const context = typeof value === 'number' ? value : Number(value ?? 5);
-  if (!Number.isInteger(context) || context < 0 || context > GIT_DIFF_LIMITS.maxContextLines) return null;
-  return context;
-}
-
-function validPositiveLimit(value: unknown, fallback: number, max: number): number | null {
-  const limit = value === null || value === undefined ? fallback : Number(value);
-  if (!Number.isInteger(limit) || limit <= 0 || limit > max) return null;
-  return limit;
 }
 
 function validComparisonMode(value: unknown): GitComparisonMode | null {
@@ -72,15 +59,6 @@ function validComparisonFreshnessTo(value: unknown): GitComparisonFreshnessToExp
 
 function routeError(error: string): Response {
   return jsonError(error, 400);
-}
-
-async function gitJson(git: GitRouteService, action: () => Promise<Response | unknown>): Promise<Response> {
-  try {
-    const result = await action();
-    return result instanceof Response ? result : Response.json(result);
-  } catch (error) {
-    return git.toHttpError(error);
-  }
 }
 
 export function createGitComparisonRoutes(git: GitRouteService): RouteMap {

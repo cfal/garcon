@@ -582,7 +582,7 @@ function makeService(overrides = {}) {
     runSingleQuery: mock(() => Promise.resolve('')),
     ...overrides.agents,
   };
-  const forkChatFileCopy = overrides.forkChatFileCopy ?? mock(() => Promise.resolve({
+  const createForkedChat = overrides.createForkedChat ?? mock(() => Promise.resolve({
     sourceChatId: SOURCE_CHAT_ID,
     chatId: TARGET_CHAT_ID,
     agentId: 'claude',
@@ -728,7 +728,7 @@ function makeService(overrides = {}) {
     fileMentions,
     inspectProject: overrides.inspectProject ?? inspectProjectDirectory,
     chatListProjector,
-    forkChatFileCopy,
+    createForkedChat,
     transcripts,
     ownership,
     handoffs,
@@ -750,7 +750,7 @@ function makeService(overrides = {}) {
     settings,
     agents,
     fileMentions,
-    forkChatFileCopy,
+    createForkedChat,
     ledger,
     sessions,
     chatListProjector,
@@ -1651,12 +1651,12 @@ describe('ChatCommandService', () => {
       clientMessageId: 'msg-fork-video-unsupported',
     })).rejects.toMatchObject({ code: 'UNSUPPORTED_AGENT', status: 422 });
 
-    expect(unsupported.forkChatFileCopy).not.toHaveBeenCalled();
+    expect(unsupported.createForkedChat).not.toHaveBeenCalled();
     expect(unsupported.queue.runReservedTurn).not.toHaveBeenCalled();
   });
 
   it('rejects an unsupported fork-run thinking override before persistence', async () => {
-    const { service, forkChatFileCopy, ledger } = makeService({
+    const { service, createForkedChat, ledger } = makeService({
       session: {
         agentId: 'amp',
         model: 'medium',
@@ -1677,7 +1677,7 @@ describe('ChatCommandService', () => {
       clientMessageId: 'msg-fork-unsupported-thinking',
     })).rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 422 });
 
-    expect(forkChatFileCopy).not.toHaveBeenCalled();
+    expect(createForkedChat).not.toHaveBeenCalled();
     expect(await readLedgerRecord(
       ledger,
       'fork-run',
@@ -1687,7 +1687,7 @@ describe('ChatCommandService', () => {
   });
 
   it('canonicalizes inherited fork thinking mode without changing routing', async () => {
-    const { service, forkChatFileCopy } = makeService({
+    const { service, createForkedChat } = makeService({
       session: {
         agentId: 'amp',
         model: 'medium',
@@ -1704,7 +1704,7 @@ describe('ChatCommandService', () => {
 
     await service.forkChat({ sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID });
 
-    expect(forkChatFileCopy).toHaveBeenCalledWith(expect.objectContaining({
+    expect(createForkedChat).toHaveBeenCalledWith(expect.objectContaining({
       sourceSession: expect.objectContaining({
         agentId: 'amp',
         model: 'medium',
@@ -2583,7 +2583,7 @@ describe('ChatCommandService', () => {
       await enqueueAllowed.promise;
       return enqueueAccepted(input);
     });
-    const { service, forkChatFileCopy } = makeService({
+    const { service, createForkedChat } = makeService({
       queueService,
     });
 
@@ -2646,7 +2646,7 @@ describe('ChatCommandService', () => {
       pause: null,
     });
     expect(fork.success).toBe(true);
-    expect(forkChatFileCopy).toHaveBeenCalledTimes(1);
+    expect(createForkedChat).toHaveBeenCalledTimes(1);
     expect(runAgentTurn.mock.calls.filter(([, content]) => content === 'send now successor')).toHaveLength(1);
   });
 
@@ -3613,7 +3613,7 @@ describe('ChatCommandService', () => {
 
   it('rolls back a fork target before admitting a pre-schedule retry', async () => {
     const rollbacks = [];
-    const forkChatFileCopy = mock(async () => {
+    const createForkedChat = mock(async () => {
       const rollback = mock(async () => undefined);
       rollbacks.push(rollback);
       return {
@@ -3624,7 +3624,7 @@ describe('ChatCommandService', () => {
         rollback,
       };
     });
-    const { service, queue } = makeService({ forkChatFileCopy });
+    const { service, queue } = makeService({ createForkedChat });
     const input = {
       sourceChatId: SOURCE_CHAT_ID,
       chatId: TARGET_CHAT_ID,
@@ -3640,7 +3640,7 @@ describe('ChatCommandService', () => {
     const retry = await service.submitForkRun(input);
 
     expect(retry.status).toBe('accepted');
-    expect(forkChatFileCopy).toHaveBeenCalledTimes(2);
+    expect(createForkedChat).toHaveBeenCalledTimes(2);
     expect(rollbacks[0]).toHaveBeenCalledOnce();
     expect(rollbacks[1]).not.toHaveBeenCalled();
     expect(queue.admitUserInput).toHaveBeenCalledTimes(2);
@@ -3648,7 +3648,7 @@ describe('ChatCommandService', () => {
   });
 
   it('retries a refused fork run with consent under the same command identity', async () => {
-    const forkChatFileCopy = mock(async (input) => {
+    const createForkedChat = mock(async (input) => {
       if (!input.allowHandoffFork) {
         throw new DomainError(
           'TRANSCRIPT_NOT_YET_PERSISTED',
@@ -3665,7 +3665,7 @@ describe('ChatCommandService', () => {
         rollback: mock(async () => undefined),
       };
     });
-    const { service, queue } = makeService({ forkChatFileCopy });
+    const { service, queue } = makeService({ createForkedChat });
     const request = {
       sourceChatId: SOURCE_CHAT_ID,
       chatId: TARGET_CHAT_ID,
@@ -3681,15 +3681,15 @@ describe('ChatCommandService', () => {
     const retry = await service.submitForkRun({ ...request, allowHandoffFork: true });
 
     expect(retry.status).toBe('accepted');
-    expect(forkChatFileCopy).toHaveBeenCalledTimes(2);
-    expect(forkChatFileCopy.mock.calls[0][0]).not.toHaveProperty('allowHandoffFork');
-    expect(forkChatFileCopy.mock.calls[1][0]).toMatchObject({ allowHandoffFork: true });
+    expect(createForkedChat).toHaveBeenCalledTimes(2);
+    expect(createForkedChat.mock.calls[0][0]).not.toHaveProperty('allowHandoffFork');
+    expect(createForkedChat.mock.calls[1][0]).toMatchObject({ allowHandoffFork: true });
     expect(queue.admitUserInput).toHaveBeenCalledOnce();
     expect(queue.runReservedTurn).toHaveBeenCalledOnce();
   });
 
   it('cleans a fork target when preparation fails before returning its result', async () => {
-    const forkChatFileCopy = mock(async ({ registry }) => {
+    const createForkedChat = mock(async ({ registry }) => {
       registry.addChat({
         id: TARGET_CHAT_ID,
         agentId: 'claude',
@@ -3703,7 +3703,7 @@ describe('ChatCommandService', () => {
       });
       throw new Error('fork setup failed');
     });
-    const { service, ownership, sessions, settings } = makeService({ forkChatFileCopy });
+    const { service, ownership, sessions, settings } = makeService({ createForkedChat });
 
     await expect(service.submitForkRun({
       sourceChatId: SOURCE_CHAT_ID,
@@ -3724,14 +3724,14 @@ describe('ChatCommandService', () => {
     const rollback = mock(async () => {
       throw new Error('rollback failed');
     });
-    const forkChatFileCopy = mock(async () => ({
+    const createForkedChat = mock(async () => ({
       sourceChatId: SOURCE_CHAT_ID,
       chatId: TARGET_CHAT_ID,
       agentId: 'claude',
       agentSessionId: 'agent-2',
       rollback,
     }));
-    const { service, queue, ledger } = makeService({ forkChatFileCopy });
+    const { service, queue, ledger } = makeService({ createForkedChat });
     queue.admitUserInput.mockRejectedValueOnce(new Error('append failed'));
 
     await expect(service.submitForkRun({
@@ -3798,7 +3798,7 @@ describe('ChatCommandService', () => {
   });
 
   it('copies from the serving ledger while the native source is running', async () => {
-    const { service, agents, forkChatFileCopy } = makeService();
+    const { service, agents, createForkedChat } = makeService();
     agents.isAgentSessionRunning.mockReturnValue(true);
 
     await service.forkChat({
@@ -3806,7 +3806,7 @@ describe('ChatCommandService', () => {
       chatId: TARGET_CHAT_ID,
     });
 
-    expect(forkChatFileCopy).toHaveBeenCalledOnce();
+    expect(createForkedChat).toHaveBeenCalledOnce();
   });
 
   it('admits a fork run without consulting provider-native settlement state', async () => {
@@ -3831,7 +3831,7 @@ describe('ChatCommandService', () => {
 
   it('admits the fork target immediately after its ledger is built', async () => {
     const order = [];
-    const forkChatFileCopy = mock(async () => {
+    const createForkedChat = mock(async () => {
       order.push('target-created');
       return {
         sourceChatId: SOURCE_CHAT_ID,
@@ -3841,7 +3841,7 @@ describe('ChatCommandService', () => {
         rollback: mock(() => Promise.resolve(undefined)),
       };
     });
-    const { service, queue } = makeService({ forkChatFileCopy });
+    const { service, queue } = makeService({ createForkedChat });
     queue.releaseTranscriptSnapshot.mockImplementation(async () => {
       order.push('source-released');
     });
@@ -3862,7 +3862,7 @@ describe('ChatCommandService', () => {
   });
 
   it('copies a point fork from committed rows while a lazy source materializes', async () => {
-    const { service, queue, forkChatFileCopy } = makeService({
+    const { service, queue, createForkedChat } = makeService({
       session: { agentSessionId: null, nativeSession: null },
     });
     queue.ownsExecution.mockReturnValue(true);
@@ -3873,7 +3873,7 @@ describe('ChatCommandService', () => {
       upToOrdinal: 1,
       transcriptViewId: 'view-1',
     });
-    expect(forkChatFileCopy).toHaveBeenCalledOnce();
+    expect(createForkedChat).toHaveBeenCalledOnce();
   });
 
   it('serializes source chat submissions behind an in-progress fork snapshot', async () => {
@@ -3885,7 +3885,7 @@ describe('ChatCommandService', () => {
     const holdFork = new Promise((resolve) => {
       releaseFork = resolve;
     });
-    const forkChatFileCopy = mock(async () => {
+    const createForkedChat = mock(async () => {
       markForkStarted();
       await holdFork;
       return {
@@ -3896,7 +3896,7 @@ describe('ChatCommandService', () => {
         rollback: mock(() => Promise.resolve(undefined)),
       };
     });
-    const { service, queue } = makeService({ forkChatFileCopy });
+    const { service, queue } = makeService({ createForkedChat });
 
     const fork = service.forkChat({ sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID });
     await forkStarted;
@@ -4131,7 +4131,7 @@ describe('ChatCommandService', () => {
   });
 
   it('rejects malformed message-point fork sequence values at the request boundary', async () => {
-    const { forkChatFileCopy } = makeService();
+    const { createForkedChat } = makeService();
 
     expect(() =>
       parseForkChatCommandRequest({
@@ -4142,7 +4142,7 @@ describe('ChatCommandService', () => {
       }),
     ).toThrow('upToOrdinal must be a positive integer');
 
-    expect(forkChatFileCopy).not.toHaveBeenCalled();
+    expect(createForkedChat).not.toHaveBeenCalled();
   });
 
   it('parses a view-qualified fork point and rejects an empty view', () => {
@@ -4174,7 +4174,7 @@ describe('ChatCommandService', () => {
     const nativeMessages = {
       loadNativeMessages: mock(() => Promise.resolve([])),
     };
-    const { service, agents, forkChatFileCopy } = makeService({
+    const { service, agents, createForkedChat } = makeService({
       nativeMessages,
     });
     agents.supportsForkAtMessage.mockReturnValue(false);
@@ -4192,11 +4192,11 @@ describe('ChatCommandService', () => {
     });
 
     expect(nativeMessages.loadNativeMessages).not.toHaveBeenCalled();
-    expect(forkChatFileCopy).not.toHaveBeenCalled();
+    expect(createForkedChat).not.toHaveBeenCalled();
   });
 
   it('copies a whole-head fork from the ledger regardless of native fork support', async () => {
-    const { service, agents, forkChatFileCopy } = makeService();
+    const { service, agents, createForkedChat } = makeService();
     agents.isAgentSessionRunning.mockReturnValue(true);
     agents.supportsForkWhileRunning.mockReturnValue(false);
 
@@ -4205,14 +4205,14 @@ describe('ChatCommandService', () => {
       chatId: TARGET_CHAT_ID,
     });
 
-    expect(forkChatFileCopy).toHaveBeenCalledOnce();
+    expect(createForkedChat).toHaveBeenCalledOnce();
   });
 
   describe('repeated fork requests', () => {
     function registeringForkCopy(failures = 0) {
       let registry;
       let remainingFailures = failures;
-      const forkChatFileCopy = mock(async ({ sourceChatId, targetChatId }) => {
+      const createForkedChat = mock(async ({ sourceChatId, targetChatId }) => {
         registry.set(targetChatId, {
           ...registry.get(sourceChatId),
           id: targetChatId,
@@ -4230,24 +4230,24 @@ describe('ChatCommandService', () => {
           rollback: mock(async () => undefined),
         };
       });
-      const fixture = makeService({ forkChatFileCopy });
+      const fixture = makeService({ createForkedChat });
       registry = fixture.sessions;
       return fixture;
     }
 
     it('returns the completed fork for a repeated request ID', async () => {
-      const { service, forkChatFileCopy } = registeringForkCopy();
+      const { service, createForkedChat } = registeringForkCopy();
       const request = { sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID, clientRequestId: 'fork-request-1' };
 
       const first = await service.forkChat(request);
       const repeated = await service.forkChat(request);
 
       expect(repeated).toEqual(first);
-      expect(forkChatFileCopy).toHaveBeenCalledOnce();
+      expect(createForkedChat).toHaveBeenCalledOnce();
     });
 
     it('refuses a repeated request ID that names a different fork point', async () => {
-      const { service, forkChatFileCopy } = registeringForkCopy();
+      const { service, createForkedChat } = registeringForkCopy();
       await service.forkChat({ sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID, clientRequestId: 'fork-request-1' });
 
       await expect(service.forkChat({
@@ -4261,11 +4261,11 @@ describe('ChatCommandService', () => {
         status: 409,
         message: 'clientRequestId was reused with different payload',
       });
-      expect(forkChatFileCopy).toHaveBeenCalledOnce();
+      expect(createForkedChat).toHaveBeenCalledOnce();
     });
 
     it('does not report a fork that failed after registering its target as created', async () => {
-      const { service, forkChatFileCopy } = registeringForkCopy(1);
+      const { service, createForkedChat } = registeringForkCopy(1);
       const request = { sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID, clientRequestId: 'fork-request-1' };
 
       await expect(service.forkChat(request)).rejects.toThrow('Synthetic fork settings failure');
@@ -4273,22 +4273,22 @@ describe('ChatCommandService', () => {
         code: 'IDEMPOTENCY_CONFLICT',
         message: `Session already exists: ${TARGET_CHAT_ID}`,
       });
-      expect(forkChatFileCopy).toHaveBeenCalledOnce();
+      expect(createForkedChat).toHaveBeenCalledOnce();
     });
 
     it('runs a fork that failed without leaving a target again under the same request ID', async () => {
-      const { service, forkChatFileCopy } = makeService();
-      forkChatFileCopy.mockImplementationOnce(async () => { throw new Error('Synthetic provider fork failure'); });
+      const { service, createForkedChat } = makeService();
+      createForkedChat.mockImplementationOnce(async () => { throw new Error('Synthetic provider fork failure'); });
       const request = { sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID, clientRequestId: 'fork-request-1' };
 
       await expect(service.forkChat(request)).rejects.toThrow('Synthetic provider fork failure');
       await service.forkChat(request);
 
-      expect(forkChatFileCopy).toHaveBeenCalledTimes(2);
+      expect(createForkedChat).toHaveBeenCalledTimes(2);
     });
 
     it('refuses an existing target when the request has no ID', async () => {
-      const { service, forkChatFileCopy } = registeringForkCopy();
+      const { service, createForkedChat } = registeringForkCopy();
       const request = { sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID };
       await service.forkChat(request);
 
@@ -4297,12 +4297,12 @@ describe('ChatCommandService', () => {
         status: 409,
         message: `Session already exists: ${TARGET_CHAT_ID}`,
       });
-      expect(forkChatFileCopy).toHaveBeenCalledOnce();
+      expect(createForkedChat).toHaveBeenCalledOnce();
     });
   });
 
   it('captures the authoritative source binding after first-use fork adoption', async () => {
-    const { service, agents, sessions, forkChatFileCopy } = makeService();
+    const { service, agents, sessions, createForkedChat } = makeService();
     sessions.get(SOURCE_CHAT_ID).agentSessionId = null;
     const nativeSession = { ownerId: 'test', schemaVersion: 1, value: { id: 'current' } };
     agents.currentTranscriptViewId.mockImplementation(async () => {
@@ -4313,26 +4313,26 @@ describe('ChatCommandService', () => {
     });
     await service.forkChat({ sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID });
     expect(agents.currentTranscriptViewId).toHaveBeenCalledTimes(1);
-    expect(forkChatFileCopy.mock.calls[0][0].sourceSession).toMatchObject({
+    expect(createForkedChat.mock.calls[0][0].sourceSession).toMatchObject({
       agentSessionId: 'current', nativeSession,
     });
   });
 
   it('copies the transcript for a whole-head fork while the source is running', async () => {
-    const { service, agents, queue, forkChatFileCopy } = makeService();
+    const { service, agents, queue, createForkedChat } = makeService();
     queue.ownsExecution.mockReturnValue(true);
     agents.isAgentSessionRunning.mockReturnValue(true);
     agents.supportsForkWhileRunning.mockReturnValue(true);
 
     await service.forkChat({ sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID });
 
-    expect(forkChatFileCopy).toHaveBeenCalledWith(
+    expect(createForkedChat).toHaveBeenCalledWith(
       expect.objectContaining({ sourceChatId: SOURCE_CHAT_ID, targetChatId: TARGET_CHAT_ID }),
     );
   });
 
   it('copies committed rows while a whole-head source session materializes', async () => {
-    const { service, queue, forkChatFileCopy } = makeService({
+    const { service, queue, createForkedChat } = makeService({
       session: { agentSessionId: null, nativeSession: null },
     });
     queue.ownsExecution.mockReturnValue(true);
@@ -4342,11 +4342,11 @@ describe('ChatCommandService', () => {
       chatId: TARGET_CHAT_ID,
     });
 
-    expect(forkChatFileCopy).toHaveBeenCalledOnce();
+    expect(createForkedChat).toHaveBeenCalledOnce();
   });
 
   it('forks a committed ledger point without consulting native coverage', async () => {
-    const { service, agents, queue, forkChatFileCopy } = makeService();
+    const { service, agents, queue, createForkedChat } = makeService();
     queue.ownsExecution.mockReturnValue(true);
     agents.isAgentSessionRunning.mockReturnValue(true);
     agents.supportsForkWhileRunning.mockReturnValue(true);
@@ -4358,11 +4358,11 @@ describe('ChatCommandService', () => {
       transcriptViewId: 'view-1',
     });
 
-    expect(forkChatFileCopy).toHaveBeenCalledOnce();
+    expect(createForkedChat).toHaveBeenCalledOnce();
   });
 
   it('resolves a fork point against the ledger view boundary', async () => {
-    const { service, forkChatFileCopy } = makeService();
+    const { service, createForkedChat } = makeService();
 
     await service.forkChat({
       sourceChatId: SOURCE_CHAT_ID,
@@ -4371,13 +4371,13 @@ describe('ChatCommandService', () => {
       transcriptViewId: 'view-1',
     });
 
-    expect(forkChatFileCopy).toHaveBeenCalledWith(
+    expect(createForkedChat).toHaveBeenCalledWith(
       expect.objectContaining({ upToOrdinal: 2 }),
     );
   });
 
   it('refuses a fork point bound to a stale transcript view', async () => {
-    const { service, agents, forkChatFileCopy } = makeService();
+    const { service, agents, createForkedChat } = makeService();
     agents.currentTranscriptViewId.mockResolvedValue('view-2');
 
     await expect(service.forkChat({
@@ -4391,11 +4391,11 @@ describe('ChatCommandService', () => {
       retryable: true,
     });
 
-    expect(forkChatFileCopy).not.toHaveBeenCalled();
+    expect(createForkedChat).not.toHaveBeenCalled();
   });
 
   it('rejects a transcript-view binding without a message cutoff', async () => {
-    const { service, forkChatFileCopy } = makeService();
+    const { service, createForkedChat } = makeService();
 
     await expect(service.forkChat({
       sourceChatId: SOURCE_CHAT_ID,
@@ -4406,11 +4406,11 @@ describe('ChatCommandService', () => {
       status: 400,
     });
 
-    expect(forkChatFileCopy).not.toHaveBeenCalled();
+    expect(createForkedChat).not.toHaveBeenCalled();
   });
 
   it('allows an idle ledger point without native coverage', async () => {
-    const { service, forkChatFileCopy } = makeService();
+    const { service, createForkedChat } = makeService();
 
     await service.forkChat({
       sourceChatId: SOURCE_CHAT_ID,
@@ -4419,11 +4419,11 @@ describe('ChatCommandService', () => {
       transcriptViewId: 'view-1',
     });
 
-    expect(forkChatFileCopy).toHaveBeenCalledOnce();
+    expect(createForkedChat).toHaveBeenCalledOnce();
   });
 
   it('allows a fork point that native history already covers', async () => {
-    const { service, agents, queue, forkChatFileCopy } = makeService();
+    const { service, agents, queue, createForkedChat } = makeService();
     queue.ownsExecution.mockReturnValue(true);
     agents.isAgentSessionRunning.mockReturnValue(true);
     agents.supportsForkWhileRunning.mockReturnValue(true);
@@ -4434,13 +4434,13 @@ describe('ChatCommandService', () => {
       transcriptViewId: 'view-1',
     });
 
-    expect(forkChatFileCopy).toHaveBeenCalledWith(
+    expect(createForkedChat).toHaveBeenCalledWith(
       expect.objectContaining({ upToOrdinal: 2 }),
     );
   });
 
   it('passes the canonical message cutoff to the owning integration', async () => {
-    const { service, forkChatFileCopy } = makeService();
+    const { service, createForkedChat } = makeService();
 
     await service.forkChat({
       sourceChatId: SOURCE_CHAT_ID,
@@ -4449,7 +4449,7 @@ describe('ChatCommandService', () => {
       transcriptViewId: 'view-1',
     });
 
-    expect(forkChatFileCopy).toHaveBeenCalledWith(
+    expect(createForkedChat).toHaveBeenCalledWith(
       expect.objectContaining({
         sourceChatId: SOURCE_CHAT_ID,
         targetChatId: TARGET_CHAT_ID,
@@ -4459,7 +4459,7 @@ describe('ChatCommandService', () => {
   });
 
   it('allows message-point forks while the source is processing when the agent supports running forks', async () => {
-    const { service, agents, forkChatFileCopy } = makeService();
+    const { service, agents, createForkedChat } = makeService();
     agents.isAgentSessionRunning.mockReturnValue(true);
     agents.supportsForkWhileRunning.mockReturnValue(true);
 
@@ -4470,7 +4470,7 @@ describe('ChatCommandService', () => {
       transcriptViewId: 'view-1',
     });
 
-    expect(forkChatFileCopy).toHaveBeenCalledWith(
+    expect(createForkedChat).toHaveBeenCalledWith(
       expect.objectContaining({
         sourceChatId: SOURCE_CHAT_ID,
         targetChatId: TARGET_CHAT_ID,

@@ -6,7 +6,8 @@ mock.module('../utils.js', () => ({
 
 import { ChatHandler } from '../chat.js';
 import { sendWebSocketJson } from '../utils.js';
-import { ChatRunningError, TranscriptHistoryUnavailableError } from '../../chats/errors.js';
+import { TranscriptHistoryUnavailableError } from '../../chats/errors.js';
+import { DomainError } from '../../../common/domain-error.js';
 import { StaleTranscriptViewError } from '../../ledger/errors.js';
 
 const chatViewMessage = {
@@ -789,7 +790,7 @@ describe('chat WebSocket handler', () => {
 
   it('returns retryable CHAT_RUNNING for running-chat reload failures', async () => {
     mockTranscriptReload.mockRejectedValueOnce(
-      new ChatRunningError('123'),
+      new DomainError('CHAT_RUNNING', 'Cannot reload running chat: 123', 409, true),
     );
 
     await chatHandler.message(ws, {

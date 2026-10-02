@@ -21,9 +21,9 @@ import type { ResolvedAgentHandoffTarget } from './agent-handoff-types.js';
 import type { TranscriptLedgerService } from '../ledger/service.js';
 import type { LedgerAgentSwitchRow, TranscriptWatermark } from '../ledger/contracts.js';
 import { frozenConversationDrafts } from '../ledger/projection.js';
-import type { CarryOverCompactionInput } from '../chats/carryover-compaction.js';
-import type { CarryOverOutcome } from '../chats/carryover-outcome.js';
-import type { PreparedCarryover } from '../chats/prepared-carryover.js';
+import type { CarryOverCompactionInput } from '../chats/carryover/compaction.js';
+import type { CarryOverOutcome } from '../chats/carryover/outcome.js';
+import type { PreparedCarryover } from '../chats/carryover/prepared-store.js';
 import { OwnershipTransferPendingError } from './ownership-transfer-fence.js';
 import { isThinkingModeSupported } from '../../../common/execution-defaults.js';
 

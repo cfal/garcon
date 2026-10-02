@@ -16,7 +16,6 @@ const mockAgents = {
   getAgentReadinessMap: getAgentReadinessMapMock,
   getAgentCatalogEntries: getAgentCatalogEntriesMock,
   getModels: getModelsMock,
-  getAgentCatalog: mock(() => Promise.resolve({ agents: [], apiProviders: [] })),
 };
 
 const setSessionNameMock = mock(() => Promise.resolve(undefined));
@@ -38,7 +37,7 @@ const recentTitleIcons = {
 const allMocks = [
   runSingleQueryMock, setSessionNameMock, setSessionNameIfAbsentMock,
   getChatNameMock, getUiSettingsMock, getAgentAuthStatusMapMock,
-  getAgentReadinessMapMock, getAgentCatalogEntriesMock, getModelsMock, mockAgents.getAgentCatalog,
+  getAgentReadinessMapMock, getAgentCatalogEntriesMock, getModelsMock,
 ];
 
 describe('maybeGenerateChatTitle', () => {

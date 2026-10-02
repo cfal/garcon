@@ -53,7 +53,7 @@ import {
   parseNativeSeedReceipt,
   type NativeSeedReceipt,
 } from '../../../common/transcript-seed.js';
-import { isCarryOverSegmentId } from './carryover-segment-types.js';
+import { isCarryOverSegmentId } from './carryover/segment-types.js';
 import {
   CHAT_REGISTRY_VERSION,
   type CarryOverMigrationQuarantine,

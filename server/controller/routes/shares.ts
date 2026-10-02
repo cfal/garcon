@@ -3,7 +3,7 @@
 
 import { markRouteNoAuth } from '../lib/http-route.js';
 import { withJsonBody } from '../lib/json-route.js';
-import type { IShareStore } from '../chats/share-store.js';
+import type { IShareStore } from '../chats/shares/store.js';
 import type { IChatRegistry } from '../chats/store.js';
 import type {
   RevokeShareResponse,
@@ -11,12 +11,12 @@ import type {
   SharedChatMessagePage,
   ShareStatusResponse,
 } from '../../../common/share-types.ts';
-import type { SharedChatMessages } from '../chats/share-store.js';
+import type { SharedChatMessages } from '../chats/shares/store.js';
 import type { TranscriptViewReader } from '../ledger/view-reader.js';
 import {
   injectSharedChatContext,
   renderStandaloneSharedHtml,
-} from '../chats/share-page.ts';
+} from '../chats/shares/page.ts';
 import { loadStaticText } from './static.js';
 import { extractFirstLine } from '../lib/text.js';
 import type { RouteHandler, RouteMap } from '../lib/http-route-types.js';

@@ -1,7 +1,7 @@
 import { AssistantMessage, UserMessage } from '../common/chat-types.js';
 import {
   estimateHandoffTokens,
-} from '../server/controller/chats/handoff-token-budget.js';
+} from '../server/controller/chats/token-fitting/budget.js';
 import {
   foldHandoffArtifactEntries,
   renderHandoffArtifactEntry,

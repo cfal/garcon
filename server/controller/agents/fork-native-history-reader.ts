@@ -1,5 +1,5 @@
 import type { ForkedNativeHistoryReaderDep } from '../commands/command-support.js';
-import type { CarryOverTranscriptStore } from '../chats/carryover-transcript-store.js';
+import type { CarryOverTranscriptStore } from '../chats/carryover/transcript-store.js';
 import { importNativeHistoryDrafts } from '../ledger/native-history-seed.js';
 import type { AgentDirectory } from './directory.js';
 
