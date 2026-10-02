@@ -3823,7 +3823,13 @@ describe('ChatCommandService', () => {
     expect(f.sessions.has(TARGET_CHAT_ID)).toBe(false);
     const record = await readLedgerRecord(f.ledger, 'fork-run', input.clientRequestId, TARGET_CHAT_ID);
     if (failure === 'persistent') {
+      expect(record.status).toBe('failed');
       expect(record.forkPreparation).toEqual({ phase: 'creating', sourceChatId: SOURCE_CHAT_ID, nativeCleanup: cleanup });
+      await expect(f.service.submitForkRun(input)).rejects.toMatchObject({ code: 'INTERNAL_ERROR', status: 409 });
+      expect(f.agents.forkAgentSession).toHaveBeenCalledTimes(1);
+      expect(discards).toBe(2);
+      expect((await readLedgerRecord(f.ledger, 'fork-run', input.clientRequestId, TARGET_CHAT_ID)).forkPreparation)
+        .toEqual(record.forkPreparation);
     } else {
       expect(record.forkPreparation).toBeUndefined();
       expect(record.errorCode).toBe('PRE_SCHEDULE_FAILED');

@@ -137,8 +137,9 @@ rejects queued or late pages, without tearing down primary runtime service.
 History never silently restarts on a replacement. Native fork creation and
 discard remain primary; admission, bulk seed import, and compensation retain
 the originating runtime instance in ephemeral context, including fork-run retries.
-Fork-run preparation retains unresolved native cleanup even when target creation
-throws before returning; successful discard is not repeated by its rollback.
+Fork-run preparation retains unresolved native cleanup when creation fails after
+target registration; successful discard is not repeated by its rollback.
+Pre-registration cleanup remains best effort.
 A replacement primary may clean up only on that same worker instance.
 Oversized producer output retires only its captured binding and
 fails any active run on that binding; subsequent output cannot turn it into a
