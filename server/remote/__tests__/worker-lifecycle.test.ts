@@ -82,7 +82,7 @@ test('gateway cleanup errors do not skip listener shutdown or lease release on s
   await lease.release();
 });
 
-test('logs failed connections to a listening worker at powers of two per kind', async () => {
+test('logs unidentified connections without a lane at powers of two per kind', async () => {
   gatewayFailure = 'startup';
   const f = await fixture();
   const lines: unknown[] = [];
@@ -105,6 +105,6 @@ test('logs failed connections to a listening worker at powers of two per kind', 
     typeof line === 'string' && line.startsWith('{"type":"executor-unavailable"') ? [JSON.parse(line)] : []
   ));
   expect(unavailable).toEqual([1, 2].map((count) => ({
-    type: 'executor-unavailable', lane: 'primary', message: 'Executor encrypted connection failed (AUTHENTICATION_FAILED)', count,
+    type: 'executor-unavailable', message: 'Executor encrypted connection failed (AUTHENTICATION_FAILED)', count,
   })));
 });
