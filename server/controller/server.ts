@@ -277,7 +277,7 @@ export async function startServer(): Promise<void> {
       path.join(workspaceDir, 'transcript-ledgers'),
     );
     transcriptStore.removeUnregisteredChatDirectories(
-      new Set(chatRegistry.listChatIds()),
+      chatRegistry.loadedFromDisk ? new Set(chatRegistry.listChatIds()) : null,
     );
     const transcriptLedger = new TranscriptLedgerService(transcriptStore, {
       serverInstanceId: runtimeState.identity.instanceId,

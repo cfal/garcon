@@ -218,6 +218,7 @@ export interface IChatRegistry {
 
 export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IChatRegistry {
   #registry: ChatRegistrySnapshot | null = null;
+  #loadedFromDisk = false;
   #pendingSaveTimer: ReturnType<typeof setTimeout> | null = null;
   #registryWriteLock = new KeyedPromiseLock();
   #chatMutationRevisions = new Map<string, number>();
@@ -264,6 +265,8 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     return path.join(this.#workspaceDir, 'chats.json');
   }
 
+  get loadedFromDisk(): boolean { return this.#loadedFromDisk; }
+
   async init(): Promise<ChatRegistrySnapshot> {
     if (this.#registry) return this.#registry;
     try {
@@ -276,15 +279,13 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
       }
       const parsed: unknown = parseStoredJson(raw, 'chats.json');
       if (!isObjectRecord(parsed)) {
-        this.#registry = createEmptyRegistry();
-        return this.#registry;
+        throw new Error('Invalid chats.json: registry must be an object');
       }
       if (parsed.version !== CHAT_REGISTRY_VERSION) {
         throw new Error(`Unsupported chat registry version: ${String(parsed.version)}`);
       }
       if (!isObjectRecord(parsed.sessions)) {
-        this.#registry = createEmptyRegistry();
-        return this.#registry;
+        throw new Error('Invalid chats.json: sessions must be an object');
       }
       const sessions: Record<string, ChatRegistryEntry> = {};
       for (const [rawChatId, rawEntry] of Object.entries(parsed.sessions)) {
@@ -299,6 +300,7 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
         sessions,
       };
       this.#providerReferences.initialize(registryProviders(this.#registry));
+      this.#loadedFromDisk = true;
       return this.#registry;
     } catch (error: unknown) {
       const errno = error as NodeJS.ErrnoException;
