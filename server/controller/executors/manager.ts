@@ -13,6 +13,7 @@ import { ExecutorConfigStore, type RemoteExecutorConfig } from './config-store.j
 import { ExecutionRuntime } from '../../runtime/execution-runtime.js';
 import { RemoteExecutorClient, type RemoteExecutorInventory } from '../../remote/client/executor-client.js';
 import { shouldLogLinkFailure, WebSocketLink } from '../../remote/transport/websocket-link.js';
+import { ExecutorSocketAdmission } from '../../remote/transport/socket-admission.js';
 import { ExecutorReferenceWrites } from './reference-writes.js';
 import type { ControllerCliDispatcher } from './cli-dispatcher.js';
 
@@ -37,6 +38,7 @@ interface ManagedRemote {
 
 export class ExecutorManager {
   readonly #remotes = new Map<string, ManagedRemote>();
+  readonly #socketAdmission = new ExecutorSocketAdmission();
   readonly #changes = new Set<() => void>();
   readonly #availability = new Set<(executorId: string, value: ExecutorAvailability) => void>();
   readonly #changing = new Set<string>();
@@ -270,19 +272,19 @@ export class ExecutorManager {
         if (recordError(reason ? `${message}: ${reason}` : message)) noticeLinkFailure();
       };
       const link = new WebSocketLink({ role: 'controller', executorId: config.id, secret: config.secret,
-        noTls: config.noTls, allowUnverifiedTls: config.allowUnverifiedTls });
+        noTls: config.noTls, allowUnverifiedTls: config.allowUnverifiedTls, socketAdmission: this.#socketAdmission });
       entry.link = link;
       link.onError((failure) => {
         if (shouldLogLinkFailure(failure)) this.logger.warn('Executor link failed', { executorId: config.id, ...failure });
         // Another connection failing leaves an established session unaffected, even while a
         // configuration change or the session's preparation keeps the executor from ready.
-        if (entry.executor?.availability !== 'ready') showLinkFailure(failure.message, failure.reason);
+        if (failure.lane !== 'bulk' && entry.executor?.availability !== 'ready') showLinkFailure(failure.message, failure.reason);
       });
       link.onClosure((closure) => {
         this.logger.warn('Executor link closed', { executorId: config.id, ...closure });
         // Only the connection carrying the session reports a closure, so this is the
         // executor's own loss, unless setup retired the session after reporting why.
-        if (closure.cause === 'local-close' || (closure.cause === 'session-retired' && entry.error !== null)) return;
+        if (closure.lane === 'bulk' || closure.cause === 'local-close' || (closure.cause === 'session-retired' && entry.error !== null)) return;
         showLinkFailure('Executor connection lost', closure.reason);
       });
       entry.executor = new RemoteExecutorClient(config.id, link, (rpc) => rpc.handle(async (call, signal, guardReply) => {

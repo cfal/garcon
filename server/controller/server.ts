@@ -48,6 +48,7 @@ import { AgentStartSelectionService } from './agents/agent-start-selection-servi
 import { defaultAgentIntegrations } from '../runtime/agents/default-agent-integrations.js';
 import { ExecutorManager } from './executors/manager.js';
 import { createNoiseServer } from '@cfal/noise-ws';
+import { EXECUTOR_PENDING_SOCKET_LIMIT, EXECUTOR_SOCKET_LIMIT } from '../remote/transport/socket-admission.js';
 import { createServerSocketHandlers, type WsConnectionData } from './ws/server-sockets.js';
 import { PrimarySocketDelivery } from './ws/primary-delivery.js';
 import { AgentDirectory } from './agents/directory.js';
@@ -767,7 +768,7 @@ export async function startServer(): Promise<void> {
     // Each executor's link holds a few sockets and makes room by closing its oldest
     // unfinished handshake, so a pending limit below the total would let unfinished
     // handshakes on some executors' endpoints turn away every other executor.
-    const executionSockets = createNoiseServer({ maxConnections: 64, maxPendingHandshakes: 64 });
+    const executionSockets = createNoiseServer({ maxConnections: EXECUTOR_SOCKET_LIMIT, maxPendingHandshakes: EXECUTOR_PENDING_SOCKET_LIMIT });
     let shuttingDown = false;
     executors.setCliDispatcher(new ControllerCliDispatcher({ routes, serverInstanceId: runtimeState.identity.instanceId,
       workspaceName: config.workspaceName, isShuttingDown: () => shuttingDown }));

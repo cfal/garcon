@@ -10,21 +10,13 @@ import { SESSION_SOCKET_BUFFER_BYTES, SessionSocketFrames } from './session-sock
 import { SessionTransport } from './session-transport.js';
 import { EXECUTOR_PROTOCOL_REVISION } from './rpc-protocol.js';
 import { version as packageVersion } from '../../../package.json';
-
-type Role = 'controller' | 'worker';
-interface HelloFields {
-  readonly type: 'hello';
-  readonly version: string;
-  readonly runtimeId: string;
-  readonly nonce: string;
-}
-type Hello = HelloFields & (
-  | { readonly role: 'controller'; readonly executorId: string }
-  | { readonly role: 'worker' }
-);
+import { isLinkHello, type LinkHello, type LinkDialTarget, type LinkRole } from './link-handshake.js';
+import { isSessionId, type RpcLane } from './rpc-lane.js';
+import { MessageQueueBudget } from './message-queue-budget.js';
+import type { ExecutorSocketAdmission, SocketAdmissionLease } from './socket-admission.js';
 
 export interface WebSocketLinkOptions {
-  readonly role: Role;
+  readonly role: LinkRole;
   readonly executorId?: string;
   readonly secret: string;
   readonly runtimeId?: string;
@@ -38,6 +30,7 @@ export interface WebSocketLinkOptions {
   readonly stableSessionMs?: number;
   // Noise's timeouts, buffer, and per-key record budget, when not its defaults.
   readonly noiseLimits?: NoiseLimits;
+  readonly socketAdmission?: ExecutorSocketAdmission;
 }
 
 export interface ExecutorListenerTls {
@@ -53,7 +46,7 @@ const LINK_VERSION = `${packageVersion}+protocol.${EXECUTOR_PROTOCOL_REVISION}`;
 
 // VS Code's reconnection delays: one immediate attempt, then backing off to 30 s.
 // https://github.com/microsoft/vscode/blob/815dd9c54b76316974aa8fe7d485375e2bc3b194/src/vs/platform/remote/common/remoteAgentConnection.ts#L649-L663
-const REDIAL_DELAYS_MS = [0, 5_000, 5_000, 10_000, 10_000, 10_000, 10_000, 10_000, 30_000];
+export const REDIAL_DELAYS_MS = [0, 5_000, 5_000, 10_000, 10_000, 10_000, 10_000, 10_000, 30_000];
 // A lost session that lasted this long is redialed at once. A peer that drops each
 // session right after it opens, such as one failing initialization, is backed off.
 const STABLE_SESSION_MS = 10_000;
@@ -71,6 +64,9 @@ export type LinkClosureCause =
   | 'local-close';
 
 export interface LinkClosure {
+  readonly lane: RpcLane;
+  readonly sessionId: string;
+  readonly primarySessionId: string;
   readonly cause: LinkClosureCause;
   // Closures with this cause over the link's lifetime, including this one.
   readonly count: number;
@@ -81,6 +77,7 @@ export interface LinkClosure {
 
 // A connection that failed to open, to authenticate, or to keep its session.
 export interface LinkFailure {
+  readonly lane?: RpcLane;
   readonly message: string;
   // Failures of this kind since the last session started, including this one.
   // A kind whose message or reason changes, such as a mismatch with another
@@ -102,9 +99,9 @@ export function shouldLogLinkFailure(failure: LinkFailure): boolean {
 
 interface Connection {
   readonly socket: NoiseWebSocket;
-  readonly hello: Hello;
+  hello: LinkHello | null;
   readonly timeout: ReturnType<typeof setTimeout>;
-  peer: Hello | null;
+  peer: LinkHello | null;
   session: SessionTransport | null;
   hooks: ReturnType<SessionTransport['attach']> | null;
   heartbeat: ReturnType<typeof setInterval> | null;
@@ -122,13 +119,21 @@ export class WebSocketLink {
   readonly ready: Promise<SessionTransport>;
   readonly #ready = Promise.withResolvers<SessionTransport>();
   readonly #sessions = new Set<(session: SessionTransport) => void>();
+  readonly #bulkSessions = new Set<(session: SessionTransport) => void>();
+  readonly #quiesceListeners = new Set<() => void>();
+  readonly #queueBudget = new MessageQueueBudget();
+  readonly #socketLeases = new Map<NoiseWebSocket, SocketAdmissionLease>();
   readonly #connections = new Set<Connection>();
   readonly #sockets = new Set<NoiseWebSocket>();
   readonly #errors = new Set<(failure: LinkFailure) => void>();
-  readonly #failures = new Map<LinkFailureKind, LinkFailure>();
+  readonly #failures = new Map<string, LinkFailure>();
   readonly #closures = new Set<(closure: LinkClosure) => void>();
-  readonly #closureCounts = new Map<LinkClosureCause, number>();
+  readonly #closureCounts = new Map<string, number>();
   #current: SessionTransport | null = null;
+  #bulk: SessionTransport | null = null;
+  #bulkGrant: { primary: SessionTransport; id: string } | null = null;
+  #bulkDial: NoiseWebSocket | null = null;
+  #dialUrl: string | null = null;
   #disposed = false;
   #quiescing = false;
   #dialTimer: ReturnType<typeof setTimeout> | null = null;
@@ -151,6 +156,10 @@ export class WebSocketLink {
   }
 
   get current(): SessionTransport | null { return this.#current; }
+  get bulk(): SessionTransport | null { return this.#bulk; }
+  get role(): LinkRole { return this.options.role; }
+  get isDialer(): boolean { return this.#dialing; }
+  get quiescing(): boolean { return this.#quiescing || this.#disposed; }
   get executorId(): string | null { return this.options.role === 'controller' ? this.options.executorId! : this.#current?.executorId ?? null; }
   get acceptsSocket(): boolean {
     return !this.#disposed && !this.#quiescing && (this.#sockets.size < MAX_SOCKETS || this.#displaceableSocket() !== null);
@@ -168,29 +177,79 @@ export class WebSocketLink {
 
   upgrade(request: Request, server: Pick<Bun.Server<NoiseSocketData>, 'upgrade'>, noise: ReturnType<typeof createNoiseServer>): Response | undefined {
     if (!this.acceptsSocket) return new Response(null, { status: 503 });
+    const lease = this.options.socketAdmission?.acquire();
+    if (this.options.socketAdmission && !lease) return new Response(null, { status: 503 });
     // A peer without the secret never finishes the encrypted handshake, so a full
     // link makes room by closing a socket still in that handshake. Only an upgrade
     // the server will accept may do so, so a refused request cannot close a socket.
     if (this.#sockets.size >= MAX_SOCKETS) {
-      if (!isWebSocketUpgrade(request)) return new Response(null, { status: 400 });
+      if (!isWebSocketUpgrade(request)) { lease?.release(); return new Response(null, { status: 400 }); }
       this.#displaceableSocket()?.close();
     }
     const options = this.#noiseOptions();
+    let upgraded = false;
     try {
       return noise.upgrade(request, {
         upgrade: (request, upgradeOptions) => {
           // Reserves ownership before the native upgrade, including unauthenticated sockets.
           this.#sockets.add(upgradeOptions!.data!.connection);
-          return server.upgrade(request, upgradeOptions);
+          const socket = upgradeOptions!.data!.connection;
+          if (lease) this.#socketLeases.set(socket, lease);
+          upgraded = server.upgrade(request, upgradeOptions);
+          if (!upgraded) { this.#sockets.delete(socket); this.#socketLeases.delete(socket); }
+          return upgraded;
         },
       }, options);
-    } finally { options.psk.fill(0); }
+    } finally { options.psk.fill(0); if (!upgraded) lease?.release(); }
   }
 
   onSession(listener: (session: SessionTransport) => void): () => void {
     this.#sessions.add(listener);
     if (this.#current) listener(this.#current);
     return () => { this.#sessions.delete(listener); };
+  }
+
+  onBulkSession(listener: (session: SessionTransport) => void): () => void {
+    this.#bulkSessions.add(listener);
+    if (this.#bulk) listener(this.#bulk);
+    return () => { this.#bulkSessions.delete(listener); };
+  }
+
+  onQuiesce(listener: () => void): () => void {
+    this.#quiesceListeners.add(listener);
+    return () => { this.#quiesceListeners.delete(listener); };
+  }
+
+  prepareBulk(primary: SessionTransport, id: string): void {
+    if (this.quiescing || this.#current !== primary || !primary.connected || !isSessionId(id)) throw new Error('Bulk parent is unavailable');
+    this.fenceBulk();
+    this.#bulkGrant = { primary, id };
+  }
+
+  fenceBulk(): void {
+    this.#bulkGrant = null;
+    const socket = this.#bulkDial;
+    this.#bulkDial = null;
+    const bulk = this.#bulk;
+    this.#bulk = null;
+    bulk?.close();
+    socket?.close();
+    for (const connection of this.#connections) {
+      if (connection.hello?.lane === 'bulk' || connection.peer?.lane === 'bulk') this.#close(connection, 'local-close');
+    }
+  }
+
+  dialBulk(primary: SessionTransport, id: string): void {
+    if (this.quiescing || !this.#dialUrl || this.#bulkDial || this.#bulk
+      || this.#bulkGrant?.primary !== primary || this.#bulkGrant.id !== id) throw new Error('Bulk dial is not authorized');
+    const options = this.#noiseOptions({ lane: 'bulk', sessionId: id, primarySessionId: primary.id });
+    try {
+      const socket = connectNoiseWebSocket(this.#dialUrl, { ...options, allowUnverifiedTls: this.options.allowUnverifiedTls });
+      if (socket.readyState !== 'closed') {
+        this.#bulkDial = socket;
+        this.#sockets.add(socket);
+      }
+    } finally { options.psk.fill(0); }
   }
 
   listen(port = 0, hostname = '0.0.0.0', tls?: ExecutorListenerTls): string {
@@ -222,12 +281,13 @@ export class WebSocketLink {
     }
     if (target.hash || target.username || target.password) throw new Error('Executor network URL must not contain userinfo or a fragment');
     this.#dialing = true;
+    this.#dialUrl = url;
     const connect = () => {
       this.#dialTimer = null;
       if (this.#disposed || this.#quiescing) return;
       // Noise remains mandatory when outer TLS is unverified. Optional certificate pinning
       // awaits https://github.com/oven-sh/bun/issues/43635.
-      const options = this.#noiseOptions();
+      const options = this.#noiseOptions({ lane: 'primary', sessionId: null, primarySessionId: null });
       let socket: NoiseWebSocket;
       try {
         socket = connectNoiseWebSocket(url, { ...options, allowUnverifiedTls: this.options.allowUnverifiedTls });
@@ -251,6 +311,7 @@ export class WebSocketLink {
     this.#quiescing = true;
     if (this.#dialTimer) clearTimeout(this.#dialTimer);
     this.#dialTimer = null;
+    for (const listener of this.#quiesceListeners) listener();
     for (const socket of this.#sockets) if (socket.readyState !== 'open') socket.close();
     for (const connection of this.#connections) if (!connection.hooks) this.#close(connection, 'local-close');
   }
@@ -261,8 +322,11 @@ export class WebSocketLink {
     if (this.#dialTimer) clearTimeout(this.#dialTimer);
     this.#ready.reject(new Error('Executor connector disposed'));
     this.#current?.close();
+    this.fenceBulk();
     this.disconnect();
     this.#sessions.clear();
+    this.#bulkSessions.clear();
+    this.#quiesceListeners.clear();
     this.#errors.clear();
     this.#closures.clear();
     this.#listenerNoise?.close();
@@ -275,13 +339,13 @@ export class WebSocketLink {
     if (stopped) await Promise.race([stopped, Bun.sleep(LISTENER_STOP_SETTLE_MS)]);
   }
 
-  #noiseOptions(): NoiseOptions {
+  #noiseOptions(target?: LinkDialTarget): NoiseOptions {
     let connection: Connection | null = null;
     return {
       psk: Buffer.from(this.options.secret, 'base64url'), context: EXECUTOR_NOISE_CONTEXT, limits: this.options.noiseLimits,
       onOpen: (socket) => {
         if (this.#disposed || this.#quiescing) { socket.close(); return; }
-        connection = this.#open(socket);
+        connection = this.#open(socket, target);
       },
       onMessage: (socket, message) => {
         if (connection) this.#receive(connection, message);
@@ -293,33 +357,43 @@ export class WebSocketLink {
           connection.closeReason ??= `Encrypted connection failed (${error.code})`;
         }
         // Noise reports a socket this link closed before it opened as CLOSED, which is not the peer failing.
-        if (error.code !== 'CLOSED') this.#reportFailure(error.code, `Executor encrypted connection failed (${error.code})`);
+        if (error.code !== 'CLOSED') this.#reportFailure(error.code, `Executor encrypted connection failed (${error.code})`, undefined, connection?.hello?.lane ?? target?.lane);
       },
       onClose: (socket) => {
         this.#sockets.delete(socket);
+        this.#socketLeases.get(socket)?.release();
+        this.#socketLeases.delete(socket);
+        if (this.#bulkDial === socket) this.#bulkDial = null;
         if (connection) this.#closed(connection);
       },
     };
   }
 
-  #open(socket: NoiseWebSocket): Connection {
-    const hello: Hello = {
-      type: 'hello', version: LINK_VERSION,
-      ...(this.options.role === 'controller' ? { role: 'controller' as const, executorId: this.options.executorId! } : { role: 'worker' as const }),
-      runtimeId: this.runtimeId, nonce: randomBytes(32).toString('hex'),
-    };
+  #open(socket: NoiseWebSocket, target?: LinkDialTarget): Connection {
+    const hello = target ? this.#hello(target) : null;
     const connection: Connection = {
       socket, hello, peer: null, session: null, hooks: null, heartbeat: null,
       closed: false, authenticated: false, frames: null, lastReceivedAt: Date.now(), closeCause: null, closeReason: null, sessionStartedAt: null,
       timeout: setTimeout(() => {
-        this.#reportFailure('authentication-timeout', 'Executor authentication timed out');
+        this.#reportFailure('authentication-timeout', 'Executor authentication timed out', undefined, connection.hello?.lane);
         this.#close(connection, 'protocol-error');
       }, 5000),
     };
     connection.timeout.unref();
     this.#connections.add(connection);
-    try { socket.send(JSON.stringify(hello)); } catch (error) { this.#close(connection, 'socket-error', error); }
+    try { if (hello) socket.send(JSON.stringify(hello)); } catch (error) { this.#close(connection, 'socket-error', error); }
     return connection;
+  }
+
+  #hello(target: LinkDialTarget, peer?: LinkHello): LinkHello {
+    let sessionId = target.sessionId;
+    if (target.lane === 'primary' && this.options.role === 'controller') sessionId = crypto.randomUUID();
+    return {
+      type: 'hello', version: LINK_VERSION, role: this.options.role,
+      executorId: this.options.executorId ?? this.#current?.executorId ?? peer?.executorId ?? null,
+      runtimeId: this.runtimeId, nonce: randomBytes(32).toString('hex'),
+      lane: target.lane, sessionId, primarySessionId: target.primarySessionId,
+    };
   }
 
   #receive(connection: Connection, message: string | Uint8Array): void {
@@ -343,9 +417,9 @@ export class WebSocketLink {
       }
       if (Buffer.byteLength(encoded) > 8192) throw new Error('Handshake exceeds budget');
       const frame = parseHandshakeFrame(encoded);
-      if (isHello(frame) && !connection.peer) {
+      if (isLinkHello(frame) && !connection.peer) {
         if (frame.version !== LINK_VERSION) {
-          this.#reportFailure('version-mismatch', `Executor version mismatch: local ${LINK_VERSION}, peer ${JSON.stringify(frame.version.slice(0, 80))}. Use matching builds.`);
+          this.#reportFailure('version-mismatch', `Executor version mismatch: local ${LINK_VERSION}, peer ${JSON.stringify(frame.version.slice(0, 80))}. Use matching builds.`, undefined, frame.lane);
           this.#close(connection, 'protocol-error');
           return;
         }
@@ -353,6 +427,11 @@ export class WebSocketLink {
           throw new Error('Executor handshake mismatch');
         }
         connection.peer = frame;
+        if (!connection.hello) {
+          connection.hello = this.#hello(frame, frame);
+          connection.socket.send(JSON.stringify(connection.hello));
+        }
+        this.#validateIdentity(connection);
         connection.socket.send(JSON.stringify({ type: 'proof', signature: this.#signature(connection, this.options.role) }));
         return;
       }
@@ -369,8 +448,8 @@ export class WebSocketLink {
       connection.closeCause ??= 'protocol-error';
       connection.closeReason ??= reason;
       // Reported while the session is still current, so listeners learn of the loss before its closure.
-      if (connection.authenticated) this.#reportFailure('connection-lost', 'Executor connection lost', reason);
-      else this.#reportFailure('authentication-failed', 'Executor authentication failed', reason);
+      if (connection.authenticated) this.#reportFailure('connection-lost', 'Executor connection lost', reason, connection.hello?.lane);
+      else this.#reportFailure('authentication-failed', 'Executor authentication failed', reason, connection.hello?.lane);
       if (error instanceof MessageContinuityError) connection.session?.close(error);
       this.#close(connection, 'protocol-error');
     }
@@ -378,20 +457,35 @@ export class WebSocketLink {
 
   #accept(connection: Connection): void {
     clearTimeout(connection.timeout);
+    this.#validateIdentity(connection);
     const peer = connection.peer!;
-    const executorId = connection.hello.role === 'controller' ? connection.hello.executorId
-      : peer.role === 'controller' ? peer.executorId : '';
-    if (this.#current) throw new Error('Executor session already attached');
-    const session = new SessionTransport(this.#signature(connection, 'session'), peer.runtimeId, (error) => {
+    const hello = connection.hello!;
+    const controller = hello.role === 'controller' ? hello : peer;
+    const lane = hello.lane;
+    const executorId = controller.executorId!;
+    const sessionId = controller.sessionId!;
+    if (lane === 'primary' ? this.#current : this.#bulk) throw new Error('Executor session already attached');
+    const lease = this.#socketLeases.get(connection.socket);
+    if (lease && !lease.promote(lane)) throw new Error('Executor socket role capacity exhausted');
+    const session = new SessionTransport(sessionId, peer.runtimeId, (error) => {
       if (this.#current === session) this.#current = null;
+      if (this.#bulk === session) this.#bulk = null;
       for (const attached of this.#connections) {
         if (attached.session === session) this.#retire(attached, error);
       }
-    }, this.options, executorId);
-    this.#current = session;
+    }, { ...this.options, budget: this.#queueBudget }, executorId, lane, hello.primarySessionId ?? sessionId);
+    if (lane === 'primary') {
+      this.#current = session;
+      session.onAvailability((connected) => {
+        if (!connected && this.#current === session) {
+          this.#current = null;
+          this.fenceBulk();
+        }
+      });
+    } else this.#bulk = session;
+    connection.session = session;
     try {
-      for (const listener of this.#sessions) listener(session);
-      connection.session = session;
+      for (const listener of lane === 'primary' ? this.#sessions : this.#bulkSessions) listener(session);
       // The session layer records why it retired before closing its socket, so a close
       // through the frames is a retirement for that reason unless a write failed.
       connection.frames = new SessionSocketFrames(
@@ -406,8 +500,8 @@ export class WebSocketLink {
     }
     if (connection.closed) { connection.hooks.disconnected(); return; }
     connection.sessionStartedAt = performance.now();
-    this.#failures.clear();
-    this.#ready.resolve(session);
+    for (const key of this.#failures.keys()) if (key.startsWith(`${lane}:`)) this.#failures.delete(key);
+    if (lane === 'primary') this.#ready.resolve(session);
     connection.heartbeat = setInterval(() => {
       try {
         if (Date.now() - connection.lastReceivedAt > 15_000) this.#close(connection, 'liveness-timeout');
@@ -421,8 +515,26 @@ export class WebSocketLink {
     if (connection.socket.bufferedAmount < SESSION_SOCKET_BUFFER_BYTES) connection.socket.send(JSON.stringify({ type }));
   }
 
-  #signature(connection: Connection, purpose: Role | 'session'): string {
-    const hello = connection.hello;
+  #validateIdentity(connection: Connection): void {
+    const hello = connection.hello!;
+    const peer = connection.peer!;
+    const controller = hello.role === 'controller' ? hello : peer;
+    const worker = hello.role === 'worker' ? hello : peer;
+    if (hello.lane !== peer.lane || !isSessionId(controller.sessionId)
+      || worker.sessionId !== null && worker.sessionId !== controller.sessionId
+      || worker.executorId !== null && worker.executorId !== controller.executorId
+      || hello.primarySessionId !== peer.primarySessionId) throw new Error('Executor lane identity mismatch');
+    if (hello.lane === 'primary') return;
+    const grant = this.#bulkGrant;
+    if (!grant || this.#current !== grant.primary || !grant.primary.connected
+      || controller.sessionId !== grant.id || hello.primarySessionId !== grant.primary.id
+      || controller.executorId !== grant.primary.executorId || peer.runtimeId !== grant.primary.peerRuntimeId) {
+      throw new Error('Bulk connection is not authorized by the current primary');
+    }
+  }
+
+  #signature(connection: Connection, purpose: LinkRole): string {
+    const hello = connection.hello!;
     const peer = connection.peer!;
     const transcript = hello.role === 'controller' ? [hello, peer] : [peer, hello];
     return createHmac('sha256', this.options.secret).update(JSON.stringify(['garcon-executor', purpose, transcript])).digest('hex');
@@ -441,12 +553,13 @@ export class WebSocketLink {
     return confirming;
   }
 
-  #reportFailure(kind: LinkFailureKind, message: string, reason?: string): void {
+  #reportFailure(kind: LinkFailureKind, message: string, reason?: string, lane: RpcLane = 'primary'): void {
     if (this.#disposed) return;
-    const previous = this.#failures.get(kind);
+    const key = `${lane}:${kind}`;
+    const previous = this.#failures.get(key);
     const count = previous?.message === message && previous.reason === reason ? previous.count + 1 : 1;
-    const failure: LinkFailure = reason === undefined ? { message, count } : { message, count, reason };
-    this.#failures.set(kind, failure);
+    const failure: LinkFailure = { lane, message, count, ...(reason === undefined ? {} : { reason }) };
+    this.#failures.set(key, failure);
     for (const listener of this.#errors) listener(failure);
   }
 
@@ -471,18 +584,20 @@ export class WebSocketLink {
     if (connection.heartbeat) clearInterval(connection.heartbeat);
     connection.frames?.dispose();
     this.#connections.delete(connection);
-    if (connection.sessionStartedAt !== null
+    if (connection.hello?.lane === 'primary' && connection.sessionStartedAt !== null
       && performance.now() - connection.sessionStartedAt >= (this.options.stableSessionMs ?? STABLE_SESSION_MS)) {
       this.#redials = 0;
     }
-    if (connection.hooks) this.#reportClosure(connection.closeCause ?? 'socket-closed', connection.closeReason);
+    if (connection.hooks && connection.session) this.#reportClosure(connection.session, connection.closeCause ?? 'socket-closed', connection.closeReason);
     connection.hooks?.disconnected();
   }
 
-  #reportClosure(cause: LinkClosureCause, reason: string | null): void {
-    const count = (this.#closureCounts.get(cause) ?? 0) + 1;
-    this.#closureCounts.set(cause, count);
-    const closure: LinkClosure = reason === null ? { cause, count } : { cause, count, reason };
+  #reportClosure(session: SessionTransport, cause: LinkClosureCause, reason: string | null): void {
+    const key = `${session.lane}:${cause}`;
+    const count = (this.#closureCounts.get(key) ?? 0) + 1;
+    this.#closureCounts.set(key, count);
+    const closure: LinkClosure = { cause, count, lane: session.lane, sessionId: session.id,
+      primarySessionId: session.primarySessionId, ...(reason === null ? {} : { reason }) };
     for (const listener of this.#closures) listener(closure);
   }
 }
@@ -521,12 +636,4 @@ function isWebSocketUpgrade(request: Request): boolean {
     && (headers.get('connection') ?? '').split(',').some((token) => token.trim().toLowerCase() === 'upgrade')
     && headers.get('sec-websocket-version') === '13'
     && /^[A-Za-z0-9+/]{22}==$/.test(headers.get('sec-websocket-key') ?? '');
-}
-
-function isHello(value: unknown): value is Hello {
-  if (!value || typeof value !== 'object') return false;
-  const frame = value as Record<string, unknown>;
-  return frame.type === 'hello' && (frame.role === 'controller' || frame.role === 'worker')
-    && ['version', 'runtimeId', 'nonce'].every((key) => typeof frame[key] === 'string' && frame[key].length > 0)
-    && (frame.role === 'controller' ? typeof frame.executorId === 'string' && frame.executorId.length > 0 : !('executorId' in frame));
 }

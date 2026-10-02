@@ -1,5 +1,6 @@
 import { connectNoiseWebSocket } from '@cfal/noise-ws';
 import { EXECUTOR_NOISE_CONTEXT } from '../transport/websocket-link.js';
+import { primaryHello } from './link-hello.js';
 
 // Peers that fail before the encrypted handshake completes, as anyone who can
 // reach an executor endpoint without its secret can.
@@ -29,16 +30,12 @@ export async function sendMalformedRecord(url: string): Promise<void> {
   await closed;
 }
 
-// Unlike the peers above, holds the secret: it answers the endpoint's hello by
-// claiming the endpoint's own role, and resolves once authentication rejects it.
+// Holds the secret but initiates a hello with the controller endpoint's own role.
 export async function connectWithOwnRole(url: string, secret: string): Promise<void> {
   const socket = connectNoiseWebSocket(url, {
     psk: Buffer.from(secret, 'base64url'), context: EXECUTOR_NOISE_CONTEXT,
-    onMessage(socket, data) {
-      if (typeof data !== 'string') return;
-      const hello = JSON.parse(data);
-      if (hello.type === 'hello') socket.send(JSON.stringify({ ...hello, runtimeId: crypto.randomUUID(), nonce: crypto.randomUUID() }));
-    },
+    onOpen(socket) { socket.send(JSON.stringify(primaryHello('controller'))); },
+    onMessage() {},
   });
   await socket.closed;
 }

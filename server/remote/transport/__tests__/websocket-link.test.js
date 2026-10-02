@@ -7,9 +7,22 @@ import { version as packageVersion } from '../../../../package.json';
 import { tcpLinkProxy } from '../../__tests__/tcp-link-proxy.ts';
 import { faultyNoiseListener } from '../../__tests__/noise-socket-faults.ts';
 import { connectWithOwnRole, connectWithWrongKey, openSilentSocket, sendMalformedRecord } from '../../__tests__/failing-peers.ts';
+import { primaryHello } from '../../__tests__/link-hello.ts';
 
 const secret = Buffer.alloc(32, 42).toString('base64url');
 const linkVersion = `${packageVersion}+protocol.${EXECUTOR_PROTOCOL_REVISION}`;
+
+function primaryFailure({ lane, ...failure }) {
+  expect(lane).toBe('primary');
+  return failure;
+}
+
+function primaryClosure({ lane, sessionId, primarySessionId, ...closure }) {
+  expect(lane).toBe('primary');
+  expect(primarySessionId).toBe(sessionId);
+  expect(sessionId).toMatch(/^[0-9a-f-]{36}$/);
+  return closure;
+}
 
 // Builds of one release share a package version, so only the protocol revision tells them apart.
 const incompatiblePeers = [
@@ -18,32 +31,26 @@ const incompatiblePeers = [
   ['this release at another protocol revision', `${packageVersion}+protocol.${EXECUTOR_PROTOCOL_REVISION + 1}`],
 ];
 
-// Answers a link's hello as the peer of a role would, reporting the given build.
+// Initiates authentication with a different build.
 function peerOfBuild(address, role, version) {
-  const hello = Promise.withResolvers();
   const socket = connectNoiseWebSocket(address, {
     psk: Buffer.from(secret, 'base64url'), context: EXECUTOR_NOISE_CONTEXT,
-    onMessage(socket, data) {
-      const local = JSON.parse(data);
-      hello.resolve(local);
-      const peer = { ...local, version, role: role === 'controller' ? 'worker' : 'controller' };
-      if (peer.role === 'worker') delete peer.executorId;
-      else peer.executorId = 'synthetic-executor';
-      socket.send(JSON.stringify(peer));
-    },
+    onOpen(socket) { socket.send(JSON.stringify({ ...primaryHello(role === 'controller' ? 'worker' : 'controller'), version })); },
+    onMessage() {},
   });
-  return { socket, hello: hello.promise };
+  return { socket };
 }
 
 function versionMismatch(peerVersion) {
   return `Executor version mismatch: local ${linkVersion}, peer ${JSON.stringify(peerVersion)}. Use matching builds.`;
 }
 
-// Answers a link's hello with a frame that is not JSON.
+// Initiates authentication with a frame that is not JSON.
 function malformedHandshake(address) {
   return connectNoiseWebSocket(address, {
     psk: Buffer.from(secret, 'base64url'), context: EXECUTOR_NOISE_CONTEXT,
-    onMessage(socket) { socket.send('{"type": SYNTHETIC_SENTINEL}'); },
+    onOpen(socket) { socket.send('{"type": SYNTHETIC_SENTINEL}'); },
+    onMessage() {},
   });
 }
 
@@ -51,13 +58,10 @@ function malformedHandshake(address) {
 function invalidProof(address, role) {
   return connectNoiseWebSocket(address, {
     psk: Buffer.from(secret, 'base64url'), context: EXECUTOR_NOISE_CONTEXT,
+    onOpen(socket) { socket.send(JSON.stringify(primaryHello(role === 'controller' ? 'worker' : 'controller'))); },
     onMessage(socket, data) {
       const local = JSON.parse(data);
       if (local.type === 'proof') { socket.send(JSON.stringify({ type: 'proof', signature: '0'.repeat(64) })); return; }
-      const peer = { ...local, role: role === 'controller' ? 'worker' : 'controller', runtimeId: crypto.randomUUID(), nonce: crypto.randomUUID() };
-      if (peer.role === 'worker') delete peer.executorId;
-      else peer.executorId = 'synthetic-executor';
-      socket.send(JSON.stringify(peer));
     },
   });
 }
@@ -67,12 +71,11 @@ for (const role of ['controller', 'worker']) {
     test(`reports a version mismatch with ${peerBuild} separately from authentication (${role})`, async () => {
       const link = new WebSocketLink({ role, executorId: 'synthetic-executor', secret, noTls: true });
       const failures = [];
-      link.onError(failure => failures.push(failure));
+      link.onError(failure => failures.push(primaryFailure(failure)));
       const peer = peerOfBuild(link.listen(), role, peerVersion);
       try {
         await peer.socket.closed;
         expect(link.current).toBeNull();
-        expect((await peer.hello).version).toBe(linkVersion);
         expect(failures).toEqual([{ message: versionMismatch(peerVersion), count: 1 }]);
       } finally { peer.socket.close(); await link.dispose(); }
     });
@@ -83,7 +86,7 @@ for (const role of ['controller', 'worker']) {
   test(`reports why a peer failed to authenticate without echoing a frame that fails to parse (${role})`, async () => {
     const link = new WebSocketLink({ role, executorId: 'synthetic-executor', secret, noTls: true });
     const failures = [];
-    link.onError(failure => failures.push(failure));
+    link.onError(failure => failures.push(primaryFailure(failure)));
     const socket = malformedHandshake(link.listen());
     try {
       await socket.closed;
@@ -96,7 +99,7 @@ for (const role of ['controller', 'worker']) {
   test(`reports a peer whose proof does not match the handshake (${role})`, async () => {
     const link = new WebSocketLink({ role, executorId: 'synthetic-executor', secret, noTls: true });
     const failures = [];
-    link.onError(failure => failures.push(failure));
+    link.onError(failure => failures.push(primaryFailure(failure)));
     const socket = invalidProof(link.listen(), role);
     try {
       await socket.closed;
@@ -111,7 +114,7 @@ for (const role of ['controller', 'worker']) {
 test('counts a failure from one again when its reason changes', async () => {
   const link = new WebSocketLink({ role: 'controller', executorId: 'synthetic-executor', secret, noTls: true });
   const failures = [];
-  link.onError(failure => failures.push(failure));
+  link.onError(failure => failures.push(primaryFailure(failure)));
   const address = link.listen();
   try {
     await malformedHandshake(address).closed;
@@ -130,7 +133,7 @@ test('makes room for a peer by closing the oldest socket that has not finished i
   const controller = new WebSocketLink({ ...common, role: 'controller', noiseLimits: { handshakeTimeoutMs: 60_000 } });
   const worker = new WebSocketLink({ ...common, role: 'worker' });
   const failures = [];
-  controller.onError(failure => failures.push(failure));
+  controller.onError(failure => failures.push(primaryFailure(failure)));
   const address = controller.listen();
   const silent = [];
   try {
@@ -229,7 +232,7 @@ test('counts each kind of connection failure until a session starts, however fai
   const controller = new WebSocketLink({ ...common, role: 'controller' });
   const worker = new WebSocketLink({ ...common, role: 'worker' });
   const failures = [];
-  controller.onError(failure => failures.push(failure));
+  controller.onError(failure => failures.push(primaryFailure(failure)));
   const address = controller.listen();
   const wrongKey = 'Executor encrypted connection failed (AUTHENTICATION_FAILED)';
   const malformed = 'Executor encrypted connection failed (PROTOCOL_ERROR)';
@@ -250,7 +253,7 @@ test('counts each kind of connection failure until a session starts, however fai
 test('counts version mismatches from one again when the peer build changes', async () => {
   const link = new WebSocketLink({ role: 'controller', executorId: 'synthetic-executor', secret, noTls: true });
   const failures = [];
-  link.onError(failure => failures.push(failure));
+  link.onError(failure => failures.push(primaryFailure(failure)));
   const address = link.listen();
   try {
     for (const version of ['synthetic-old', 'synthetic-old', 'synthetic-other']) {
@@ -337,19 +340,12 @@ for (const role of ['controller', 'worker']) {
       link.onSession(() => { accepted++; });
       const socket = connectNoiseWebSocket(link.listen(), {
         psk: Buffer.from(secret, 'base64url'), context: EXECUTOR_NOISE_CONTEXT,
+        onOpen(socket) { socket.send(JSON.stringify(primaryHello(role === 'controller' ? 'worker' : 'controller'))); },
         onMessage: (socket, data) => {
         const frame = JSON.parse(data);
-        if (frame.type === 'hello') {
-          const peer = {
-            ...frame, role: role === 'controller' ? 'worker' : 'controller',
-            runtimeId: crypto.randomUUID(), nonce: crypto.randomUUID(),
-          };
-          if (peer.role === 'controller') peer.executorId = 'synthetic-executor';
-          else delete peer.executorId;
-          socket.send(JSON.stringify(peer));
-        } else if (frame.type === 'proof') {
+        if (frame.type === 'proof') {
           socket.send(JSON.stringify({ ...frame, signature: attack === 'reflected proof' ? frame.signature : '0'.repeat(64) }));
-        } else {
+        } else if (frame.type !== 'hello') {
           socket.close();
         }
         },
@@ -377,8 +373,8 @@ for (const dialer of ['controller', 'worker']) {
     const worker = new WebSocketLink({ ...common, role: 'worker' });
     const [dialing, listening] = dialer === 'controller' ? [controller, worker] : [worker, controller];
     const closures = { dialing: [], listening: [] };
-    dialing.onClosure(closure => closures.dialing.push(closure));
-    listening.onClosure(closure => closures.listening.push(closure));
+    dialing.onClosure(closure => closures.dialing.push(primaryClosure(closure)));
+    listening.onClosure(closure => closures.listening.push(primaryClosure(closure)));
     let sessions = 0;
     listening.onSession(() => { sessions += 1; });
     try {
@@ -433,8 +429,8 @@ for (const dialer of ['controller', 'worker']) {
     const worker = new WebSocketLink({ ...common, role: 'worker' });
     const [dialing, listening] = dialer === 'controller' ? [controller, worker] : [worker, controller];
     const closures = { dialing: [], listening: [] };
-    dialing.onClosure(closure => closures.dialing.push(closure));
-    listening.onClosure(closure => closures.listening.push(closure));
+    dialing.onClosure(closure => closures.dialing.push(primaryClosure(closure)));
+    listening.onClosure(closure => closures.listening.push(primaryClosure(closure)));
     let sessions = 0;
     listening.onSession(() => { sessions += 1; });
     try {
@@ -462,8 +458,8 @@ for (const dialer of ['controller', 'worker']) {
     const [dialing, listening] = dialer === 'controller' ? [controller, worker] : [worker, controller];
     const proxy = await tcpLinkProxy(new URL(listening.listen()));
     const closures = { dialing: [], listening: [] };
-    dialing.onClosure(closure => closures.dialing.push(closure));
-    listening.onClosure(closure => closures.listening.push(closure));
+    dialing.onClosure(closure => closures.dialing.push(primaryClosure(closure)));
+    listening.onClosure(closure => closures.listening.push(primaryClosure(closure)));
     try {
       dialing.dial(proxy.url);
       const [session] = await Promise.all([dialing.ready, listening.ready]);
@@ -487,8 +483,8 @@ for (const dialer of ['controller', 'worker']) {
     const [dialing, listening] = dialer === 'controller' ? [controller, worker] : [worker, controller];
     const reports = { dialing: { failures: [], closures: [] }, listening: { failures: [], closures: [] } };
     for (const [end, link] of [['dialing', dialing], ['listening', listening]]) {
-      link.onError(failure => reports[end].failures.push(failure));
-      link.onClosure(closure => reports[end].closures.push(closure));
+      link.onError(failure => reports[end].failures.push(primaryFailure(failure)));
+      link.onClosure(closure => reports[end].closures.push(primaryClosure(closure)));
     }
     // The proxy stands in for a tunnel that drops the TCP connection without a WebSocket or encrypted close.
     const path = await tcpLinkProxy(new URL(listening.listen(0, '127.0.0.1')));
@@ -516,8 +512,8 @@ for (const dialer of ['controller', 'worker']) {
     const worker = new WebSocketLink({ ...common, role: 'worker' });
     const [dialing, listening] = dialer === 'controller' ? [controller, worker] : [worker, controller];
     const closures = { controller: [], worker: [] };
-    controller.onClosure(closure => closures.controller.push(closure));
-    worker.onClosure(closure => closures.worker.push(closure));
+    controller.onClosure(closure => closures.controller.push(primaryClosure(closure)));
+    worker.onClosure(closure => closures.worker.push(primaryClosure(closure)));
     let sessions = 0;
     controller.onSession(() => { sessions += 1; });
     try {
@@ -539,8 +535,8 @@ for (const dialer of ['controller', 'worker']) {
     const worker = new WebSocketLink({ ...common, role: 'worker' });
     const [dialing, listening] = dialer === 'controller' ? [controller, worker] : [worker, controller];
     const closures = { controller: [], worker: [] };
-    controller.onClosure(closure => closures.controller.push(closure));
-    worker.onClosure(closure => closures.worker.push(closure));
+    controller.onClosure(closure => closures.controller.push(primaryClosure(closure)));
+    worker.onClosure(closure => closures.worker.push(primaryClosure(closure)));
     try {
       dialing.dial(listening.listen());
       const [session] = await Promise.all([worker.ready, controller.ready]);
@@ -560,7 +556,7 @@ test('reports a peer that never starts the encrypted handshake', async () => {
     role: 'controller', executorId: 'synthetic-executor', secret, noTls: true, noiseLimits: { handshakeTimeoutMs: 50 },
   });
   const failures = [];
-  link.onError(failure => failures.push(failure));
+  link.onError(failure => failures.push(primaryFailure(failure)));
   const socket = new WebSocket(link.listen());
   const closed = new Promise(resolve => socket.addEventListener('close', resolve));
   try {
@@ -577,7 +573,7 @@ test('reports a dial whose encrypted handshake never completes', async () => {
   });
   const path = await tcpLinkProxy(new URL(listening.listen(0, '127.0.0.1')));
   const failures = [];
-  dialing.onError(failure => failures.push(failure));
+  dialing.onError(failure => failures.push(primaryFailure(failure)));
   try {
     path.blackhole();
     dialing.dial(path.url);
@@ -595,7 +591,7 @@ async function faultyLinkPair() {
   worker.dial(listener.url);
   await Promise.all([controller.ready, worker.ready]);
   const closure = Promise.withResolvers();
-  controller.onClosure(closure.resolve);
+  controller.onClosure(value => closure.resolve(primaryClosure(value)));
   return {
     controller, listener, closure: closure.promise,
     async dispose() { await worker.dispose(); await controller.dispose(); await listener.stop(); },
@@ -632,16 +628,15 @@ test('counts a frame too short to be an encrypted record as a protocol error', a
 // whose fragments each fit one encrypted record.
 function workerOutsideSessionLayer(address) {
   let controllerHello;
-  let workerHello;
+  const workerHello = primaryHello('worker');
   return connectNoiseWebSocket(address, {
     psk: Buffer.from(secret, 'base64url'), context: EXECUTOR_NOISE_CONTEXT,
+    onOpen(socket) { socket.send(JSON.stringify(workerHello)); },
     onMessage(socket, data) {
       if (typeof data !== 'string') return;
       const frame = JSON.parse(data);
       if (frame.type === 'hello') {
         controllerHello = frame;
-        workerHello = { type: 'hello', version: frame.version, role: 'worker', runtimeId: crypto.randomUUID(), nonce: crypto.randomUUID() };
-        socket.send(JSON.stringify(workerHello));
       } else if (frame.type === 'proof') {
         const transcript = JSON.stringify(['garcon-executor', 'worker', [controllerHello, workerHello]]);
         socket.send(JSON.stringify({ type: 'proof', signature: createHmac('sha256', secret).update(transcript).digest('hex') }));
@@ -656,7 +651,7 @@ test('counts an encrypted message that never completes as a liveness timeout', a
   });
   const listener = faultyNoiseListener(link);
   const closure = Promise.withResolvers();
-  link.onClosure(closure.resolve);
+  link.onClosure(value => closure.resolve(primaryClosure(value)));
   const worker = workerOutsideSessionLayer(listener.url);
   try {
     await link.ready;

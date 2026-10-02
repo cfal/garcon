@@ -463,7 +463,7 @@ test('logs failed executor connections at powers of two per kind but shows every
   }
   await connectWithWrongKey(url(config.id));
 
-  const logged = (message: string, count: number) => ({ executorId: config.id, message, count });
+  const logged = (message: string, count: number) => ({ executorId: config.id, lane: 'primary', message, count });
   expect(failures()).toEqual([logged(wrongKey, 1), logged(malformed, 1), logged(wrongKey, 2), logged(malformed, 2)]);
   // The third wrong key was not logged, but it is the latest failure.
   expect(manager.list().find((item) => item.id === config.id)?.lastError).toEqual({ code: 'EXECUTOR_UNAVAILABLE', message: wrongKey });
@@ -494,7 +494,8 @@ test('logs each closed executor session with its cause and reason', async () => 
   manager.inboundLink(config.id)!.current!.close(new Error('Synthetic session retirement'));
   await closed.promise;
 
-  expect(closures).toEqual([{ executorId: config.id, cause: 'session-retired', count: 1, reason: 'Synthetic session retirement' }]);
+  expect(closures).toEqual([{ executorId: config.id, lane: 'primary', sessionId: expect.any(String),
+    primarySessionId: expect.any(String), cause: 'session-retired', count: 1, reason: 'Synthetic session retirement' }]);
 });
 
 test('logs failed connections alongside a ready executor without showing them as its error', async () => {
