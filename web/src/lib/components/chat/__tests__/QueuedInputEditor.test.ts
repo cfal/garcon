@@ -48,15 +48,15 @@ function deferredRefinement() {
 const noopAction = () => Promise.resolve();
 
 function renderHost(initialQueue: ChatQueueState) {
-	return render(QueuedInputsDialogTestHost, {
-		initialQueue,
+	const actions = {
 		onCreate: vi.fn(noopAction),
 		onReplace: vi.fn(noopAction),
 		onDelete: vi.fn(noopAction),
 		onMove: vi.fn(noopAction),
 		onPause: vi.fn(noopAction),
 		onResume: vi.fn(noopAction),
-	});
+	};
+	return { ...render(QueuedInputsDialogTestHost, { initialQueue, ...actions }), actions };
 }
 
 async function beginEditing(index = 0): Promise<HTMLTextAreaElement> {
@@ -78,6 +78,42 @@ afterEach(() => {
 });
 
 describe('QueuedInputEditor composer affordances', () => {
+	it.each(['apply', 'cancel', 'close'] as const)(
+		'preserves pending refinement across draft relocation (%s)',
+		async (action) => {
+			const pending = deferredRefinement();
+			vi.mocked(refinementApi.refinePrompt).mockReturnValueOnce(pending.promise);
+			const { component, actions } = renderHost(queue([entry(0), entry(1)]));
+			const original = await beginEditing(0);
+			await fireEvent.click(screen.getByRole('button', { name: m.prompt_refinement_refine() }));
+			await screen.findByRole('button', { name: m.prompt_refinement_cancel() });
+			const signal = vi.mocked(refinementApi.refinePrompt).mock.calls[0][1]?.signal;
+			component.setQueue(queue([entry(1)]));
+			await screen.findByText(m.chat_queue_no_longer_queued());
+			const recovery = screen.getByRole<HTMLTextAreaElement>('textbox', {
+				name: m.chat_queue_edit_message(),
+			});
+			expect(recovery).not.toBe(original);
+			expect(signal?.aborted).toBe(false);
+			if (action === 'cancel') {
+				await fireEvent.click(screen.getByRole('button', { name: m.prompt_refinement_cancel() }));
+			} else if (action === 'close') {
+				await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_discard() }));
+			}
+			pending.resolve({ success: true, refinedPrompt: 'Refined recovered draft' });
+			await pending.promise;
+			if (action === 'apply') {
+				await waitFor(() => expect(recovery.value).toBe('Refined recovered draft'));
+				await waitFor(() => expect(document.activeElement).toBe(recovery));
+			} else {
+				expect(signal?.aborted).toBe(true);
+				expect(recovery.value).toBe('Queued message 0');
+				if (action === 'close') expect(screen.queryByRole('textbox')).toBeNull();
+			}
+			for (const callback of Object.values(actions)) expect(callback).not.toHaveBeenCalled();
+		},
+	);
+
 	it('edits inline in place of the row without duplicating its content', async () => {
 		renderHost(queue([entry(0), entry(1)]));
 		const textarea = await beginEditing(0);
