@@ -4,7 +4,7 @@
 
 import type { ProjectInspector, ProjectUnavailableReason } from '../../../common/project-resolution.js';
 import { jsonError } from '../../common/http-error.js';
-import { projectBoundaryErrorResponse } from '../lib/path-boundary.ts';
+import { PROJECT_BOUNDARY_ERROR_CODE, PROJECT_BOUNDARY_ERROR_MESSAGE } from '../../common/path-boundary.js';
 import type { IChatRegistry } from '../chats/store.js';
 import { executorIdFromUrl } from './executor-target.js';
 import { effectiveExecutorId } from '../../../common/executors.js';
@@ -34,7 +34,9 @@ function projectPathNotFoundResponse(projectPath: string): Response {
 
 function unavailableResponse(projectPath: string, reason: ProjectUnavailableReason): Response {
   if (reason === 'not-found') return projectPathNotFoundResponse(projectPath);
-  if (reason === 'outside-base') return projectBoundaryErrorResponse();
+  if (reason === 'outside-base') {
+    return jsonError(PROJECT_BOUNDARY_ERROR_MESSAGE, 403, PROJECT_BOUNDARY_ERROR_CODE);
+  }
   if (reason === 'not-a-directory') {
     return jsonError(
       `Project path is not a directory: ${projectPath}`,
