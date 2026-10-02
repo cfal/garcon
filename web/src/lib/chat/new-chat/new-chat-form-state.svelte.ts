@@ -22,11 +22,7 @@ import type {
 	RemoteExecutionDefaults,
 	RemoteSettingsSnapshot,
 } from '$shared/settings';
-import {
-	cloneAgentSettings,
-	normalizeAgentSettings,
-	withAgentSetting,
-} from '$shared/agent-settings';
+import { NewChatAgentSettingsState } from './new-chat-agent-settings-state.svelte';
 import type { ModelCatalogStore, ModelOption } from '$lib/agents/model-catalog-store.svelte.js';
 import { firstSelectableExecutorRecent, newChatExecutorPreferences } from './new-chat-executor-preferences';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
@@ -62,6 +58,7 @@ export class NewChatFormState {
 	#selectedModelTargetsByAgent = $state<Record<string, ResolvedModelSelection>>({});
 	#catalogRefreshCompleted = $state(false);
 	#executorModelCandidate: ResolvedModelSelection | null = null;
+	#executorSelectionExplicit = false;
 
 	// Path
 	projectPath = $state('');
@@ -80,12 +77,13 @@ export class NewChatFormState {
 	// Modes
 	permissionMode = $state<PermissionMode>('default');
 	thinkingMode = $state<ThinkingMode>('none');
-	agentSettingsById = $state<Record<string, AgentSettingsEnvelope>>({});
-	readonly #configuredAgentSettings = new Set<string>();
-	#modesTouched = false;
+	readonly #agentSettings = new NewChatAgentSettingsState();
+	#permissionModeTouched = false;
+	#thinkingModeTouched = false;
 	#executionDefaults: RemoteExecutionDefaults | null = null;
 	#startupRecents: RecentAgentSetting[] = [];
-	#startupSelectionAutomatic = false;
+	#startupSelectionAutomatic = true;
+	#startupSelectionPending = true;
 
 	// Tags
 	chatTags = $state<string[]>([]);
@@ -157,6 +155,7 @@ export class NewChatFormState {
 
 	selectExecutor(value?: string | null): void {
 		const executorId = effectiveExecutorId(value);
+		this.#executorSelectionExplicit = true;
 		if (executorId === this.executorId) return;
 		this.#executorModelCandidate ??= this.resolvedModelSelection;
 		this.executorId = executorId;
@@ -273,11 +272,15 @@ export class NewChatFormState {
 	}
 
 	get agentSettings(): AgentSettingsEnvelope {
-		return normalizeAgentSettings(
-			this.agentId,
-			this.agentSettingsById[this.agentId],
-			this.#modelCatalog.getDefaultAgentSettings(this.agentId),
-		);
+		return this.#agentSettings.forAgent(this.agentId, this.#modelCatalog);
+	}
+
+	get agentSettingsById(): Record<string, AgentSettingsEnvelope> {
+		return this.#agentSettings.byId;
+	}
+
+	set agentSettingsById(value: Record<string, AgentSettingsEnvelope>) {
+		this.#agentSettings.byId = value;
 	}
 
 	get agentSettingDescriptors(): readonly AgentSettingDescriptor[] {
@@ -296,9 +299,8 @@ export class NewChatFormState {
 	#applyAgent(next: SessionAgentId): void {
 		const changed = this.agentId !== next;
 		this.agentId = next;
-		if (changed && !this.#modesTouched) {
+		if (changed) {
 			this.#applyExecutionDefaultsForAgent(next);
-		} else if (changed) {
 			this.permissionMode = normalizeSupportedPermissionMode(
 				this.permissionMode,
 				this.#modelCatalog.getPermissionModes(next),
@@ -308,25 +310,26 @@ export class NewChatFormState {
 				this.#modelCatalog.getThinkingModes(next),
 			);
 		}
-		this.#ensureAgentSettings(next);
+		this.#agentSettings.ensure(next, this.#modelCatalog);
 		if (changed) this.preambles.automaticFiltersChanged();
 	}
 
 	setPermissionMode(mode: PermissionMode): void {
 		this.#startupSelectionAutomatic = false;
 		this.permissionMode = normalizeSupportedPermissionMode(mode, this.permissionModes);
-		this.#modesTouched = true;
+		this.#permissionModeTouched = true;
 	}
 
 	setThinkingMode(mode: ThinkingMode): void {
 		this.#startupSelectionAutomatic = false;
 		this.thinkingMode = normalizeSupportedThinkingMode(mode, this.thinkingModes);
-		this.#modesTouched = true;
+		this.#thinkingModeTouched = true;
 	}
 
 	restoreExecutionModes(permissionMode: PermissionMode, thinkingMode: ThinkingMode): void {
 		this.#startupSelectionAutomatic = false;
-		this.#modesTouched = true;
+		this.#permissionModeTouched = true;
+		this.#thinkingModeTouched = true;
 		// Saved modes must survive an empty catalog while executor discovery is pending.
 		this.permissionMode = permissionMode;
 		this.thinkingMode = thinkingMode;
@@ -334,29 +337,11 @@ export class NewChatFormState {
 
 	setAgentSetting(descriptor: AgentSettingDescriptor, value: JsonValue): void {
 		this.#startupSelectionAutomatic = false;
-		this.#configuredAgentSettings.add(this.agentId);
-		this.agentSettingsById = {
-			...this.agentSettingsById,
-			[this.agentId]: withAgentSetting(this.agentSettings, descriptor, value),
-		};
+		this.#agentSettings.setSetting(this.agentId, descriptor, value, this.#modelCatalog);
 	}
 
 	replaceAgentSettingsById(settingsById: Record<string, AgentSettingsEnvelope>): void {
-		const next: Record<string, AgentSettingsEnvelope> = {};
-		this.#configuredAgentSettings.clear();
-		for (const [agentId, settings] of Object.entries(settingsById)) {
-			if (settings.ownerId !== agentId) continue;
-			next[agentId] = cloneAgentSettings(settings);
-			this.#configuredAgentSettings.add(agentId);
-		}
-		for (const agentId of this.#selectableAgentIds) {
-			next[agentId] = normalizeAgentSettings(
-				agentId,
-				next[agentId],
-				this.#modelCatalog.getDefaultAgentSettings(agentId),
-			);
-		}
-		this.agentSettingsById = next;
+		this.#agentSettings.restore(settingsById, this.#selectableAgentIds, this.#modelCatalog);
 	}
 
 	// Model
@@ -392,6 +377,7 @@ export class NewChatFormState {
 
 	validateAllModelsAgainstLive(): void {
 		if (!this.#modelCatalog.isValidated) return;
+		if (this.settingsLoaded && this.#startupSelectionPending) this.#reconcileStartupSelection();
 		const candidate = this.#executorModelCandidate;
 		this.#executorModelCandidate = null;
 		if (candidate && this.#modelCatalog.getModelForSelection(this.agentId, candidate.model, candidate.modelEndpointId)) {
@@ -829,7 +815,8 @@ export class NewChatFormState {
 		this.worktreeError = null;
 		this.chatTags = [];
 		this.showTagInput = false;
-		this.#modesTouched = false;
+		this.#permissionModeTouched = false;
+		this.#thinkingModeTouched = false;
 		this.preambles.reset();
 	}
 
@@ -837,7 +824,6 @@ export class NewChatFormState {
 
 	/** Loads server settings without blocking the form on live model discovery. */
 	async loadSettingsAndModels(): Promise<void> {
-		this.#startupSelectionAutomatic = true;
 		this.#catalogRefreshCompleted = false;
 		try {
 			const settingsData = await this.#remoteSettings.ensureLoaded();
@@ -845,8 +831,10 @@ export class NewChatFormState {
 			this.validateAllModelsAgainstLive();
 		} catch (err) {
 			console.warn('[NewChatFormState] Failed to load settings', err);
-			for (const agentId of this.#selectableAgentIds) {
-				this.applyResolvedModel(agentId, this.#modelCatalog.getDefaultModel(agentId));
+			if (this.#startupSelectionAutomatic) {
+				for (const agentId of this.#selectableAgentIds) {
+					this.applyResolvedModel(agentId, this.#modelCatalog.getDefaultModel(agentId));
+				}
 			}
 			if (!this.projectPath) {
 				this.projectPath = this.projectBasePath;
@@ -863,38 +851,61 @@ export class NewChatFormState {
 			await catalog.refreshIfStale();
 			if (catalog !== this.#modelCatalog) return;
 			this.#catalogRefreshCompleted = true;
-			this.#reconcileAgentSettingsWithCatalog();
-			const previousAgentId = this.agentId;
-			if (this.#startupSelectionAutomatic) {
-				const recent = this.#firstSelectableRecent(this.#startupRecents);
-				if (recent) {
-					this.agentId = recent.agentId as SessionAgentId;
-					this.applyResolvedModel(this.agentId, recent.model, recent.modelEndpointId);
-				} else if (!this.selectedModelsByAgent[this.agentId]) {
-					// Keeps an already-shown selection untouched so a vanished recent surfaces
-					// as modelSelectionError instead of silently swapping to the default model.
-					this.agentId = this.#resolveStartupAgent(DEFAULT_AGENT_ID);
-					this.applyResolvedModel(this.agentId, this.#modelCatalog.getDefaultModel(this.agentId));
-				}
-				this.#applyExecutionDefaultsForAgent(this.agentId);
-			}
-			if (this.agentId !== previousAgentId) this.preambles.automaticFiltersChanged();
+			this.#agentSettings.reconcileCatalog(this.#selectableAgentIds, catalog);
+			this.#reconcileStartupSelection();
 			this.validateAllModelsAgainstLive();
 		} catch (err) {
 			console.warn('[NewChatFormState] Failed to refresh models', err);
 		}
 	}
 
+	#reconcileStartupSelection(): void {
+		if (!this.#startupSelectionAutomatic || !this.#modelCatalog.isValidated) return;
+		this.#startupSelectionPending = false;
+		const previousAgentId = this.agentId;
+		const recent = this.#firstSelectableRecent(this.#startupRecents);
+		if (recent) {
+			this.agentId = recent.agentId as SessionAgentId;
+			this.applyResolvedModel(this.agentId, recent.model, recent.modelEndpointId);
+		} else if (!this.selectedModelsByAgent[this.agentId]) {
+			// Keeps a vanished shown selection unavailable rather than silently replacing it.
+			this.agentId = this.#resolveStartupAgent(DEFAULT_AGENT_ID);
+			this.applyResolvedModel(this.agentId, this.#modelCatalog.getDefaultModel(this.agentId));
+		}
+		this.#applyExecutionDefaultsForAgent(this.agentId);
+		if (this.agentId !== previousAgentId) this.preambles.automaticFiltersChanged();
+	}
+
 	#applySettings(snap: RemoteSettingsSnapshot): void {
 		this.#localProjectBasePath = snap.projectBasePath;
 		this.#executionDefaults = snap.executionDefaults;
 		this.#startupRecents = snap.recentAgentSettings;
-		this.#seedAgentSettings(snap.executionDefaults);
+
+		// A path already entered on the provisional host must not move to another machine.
+		if (
+			!this.settingsLoaded &&
+			this.#startupSelectionAutomatic &&
+			!this.#executorSelectionExplicit &&
+			!this.projectPath
+		) {
+			const executorId = effectiveExecutorId(snap.recentAgentSettings[0]?.executorId);
+			if (executorId !== this.executorId) {
+				this.executorId = executorId;
+				this.selectedModelsByAgent = {};
+				this.#selectedModelTargetsByAgent = {};
+			}
+		}
 
 		const preferences = newChatExecutorPreferences(snap, this.executorId, this.projectBasePath);
 		this.pinnedProjectPaths = preferences.pinnedProjectPaths;
 		this.browseStartPath = preferences.browseStartPath;
 		if (!this.projectPath) this.projectPath = preferences.projectPath;
+
+		this.#agentSettings.hydrate(snap.executionDefaults, this.#selectableAgentIds, this.#modelCatalog);
+		if (!this.#startupSelectionAutomatic) {
+			this.#applyExecutionDefaultsForAgent(this.agentId);
+			return;
+		}
 
 		const recent = this.#firstSelectableRecent(snap.recentAgentSettings);
 		if (recent) {
@@ -920,62 +931,19 @@ export class NewChatFormState {
 
 	#applyExecutionDefaultsForAgent(agentId: SessionAgentId): void {
 		const modes = executionDefaultsForAgent(this.#executionDefaults, agentId);
-		this.permissionMode = normalizeSupportedPermissionMode(
-			modes.permissionMode,
-			this.#modelCatalog.getPermissionModes(agentId),
-		);
-		this.thinkingMode = normalizeSupportedThinkingMode(
-			modes.thinkingMode,
-			this.#modelCatalog.getThinkingModes(agentId),
-		);
-		this.#ensureAgentSettings(agentId, modes.agentSettingsById[agentId]);
-	}
-
-	#seedAgentSettings(defaults: RemoteExecutionDefaults): void {
-		const next: Record<string, AgentSettingsEnvelope> = {};
-		for (const [agentId, settings] of Object.entries(defaults.global.agentSettingsById)) {
-			if (settings.ownerId !== agentId) continue;
-			next[agentId] = cloneAgentSettings(settings);
-			this.#configuredAgentSettings.add(agentId);
-		}
-		for (const agentId of this.#selectableAgentIds) {
-			const agentDefaults = defaults.byAgent[agentId];
-			const configured =
-				agentDefaults?.agentSettingsById?.[agentId] ?? defaults.global.agentSettingsById[agentId];
-			if (configured) this.#configuredAgentSettings.add(agentId);
-			next[agentId] = normalizeAgentSettings(
-				agentId,
-				configured ?? next[agentId],
-				this.#modelCatalog.getDefaultAgentSettings(agentId),
+		if (!this.#permissionModeTouched) {
+			this.permissionMode = normalizeSupportedPermissionMode(
+				modes.permissionMode,
+				this.#modelCatalog.getPermissionModes(agentId),
 			);
 		}
-		this.agentSettingsById = next;
-	}
-
-	#ensureAgentSettings(agentId: SessionAgentId, configured?: AgentSettingsEnvelope): void {
-		if (configured) this.#configuredAgentSettings.add(agentId);
-		const current = configured ?? this.agentSettingsById[agentId];
-		this.agentSettingsById = {
-			...this.agentSettingsById,
-			[agentId]: normalizeAgentSettings(
-				agentId,
-				current,
-				this.#modelCatalog.getDefaultAgentSettings(agentId),
-			),
-		};
-	}
-
-	#reconcileAgentSettingsWithCatalog(): void {
-		const next = { ...this.agentSettingsById };
-		for (const agentId of this.#selectableAgentIds) {
-			if (this.#configuredAgentSettings.has(agentId)) continue;
-			next[agentId] = normalizeAgentSettings(
-				agentId,
-				this.#modelCatalog.getDefaultAgentSettings(agentId),
-				this.#modelCatalog.getDefaultAgentSettings(agentId),
+		if (!this.#thinkingModeTouched) {
+			this.thinkingMode = normalizeSupportedThinkingMode(
+				modes.thinkingMode,
+				this.#modelCatalog.getThinkingModes(agentId),
 			);
 		}
-		this.agentSettingsById = next;
+		this.#agentSettings.applyDefault(agentId, modes.agentSettingsById[agentId], this.#modelCatalog);
 	}
 
 	// Auto-open browser on first path focus
