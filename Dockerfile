@@ -143,6 +143,8 @@ COPY --from=build /app/server/ server/
 COPY --from=build /app/common/ common/
 COPY --from=build /app/server-agents/ server-agents/
 COPY --from=build /app/web/build/ web/build/
+COPY cli/ cli/
+COPY --chmod=755 docker/garcon-cli /usr/local/bin/garcon-cli
 
 RUN test -x /app/server-agents/codex/node_modules/.bin/codex && \
     test -x /app/server-agents/pi/node_modules/.bin/pi && \

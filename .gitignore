@@ -6,4 +6,5 @@ out
 .DS_Store
 .claude
 .env
+executor.env
 .screenshot-fixtures/
