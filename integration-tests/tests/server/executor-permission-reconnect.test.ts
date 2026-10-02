@@ -11,11 +11,9 @@ import { AgentEventBus } from '../../../server/controller/agents/event-bus.js';
 import { IntegrationRegistry } from '../../../server/runtime/agents/integration-registry.js';
 import { AgentRuntimeRouter } from '../../../server/controller/agents/runtime-router.js';
 import { integrationFixture, linkOptions } from '../../../server/remote/__tests__/integration-fixture.js';
-import { serveExecutionRuntime } from '../../../server/remote/server/executor-rpc-server.js';
 import { ProducerRelay, type ProducerRelayOptions } from '../../../server/remote/server/producer-relay.js';
 import type { RemoteExecutorClientOptions } from '../../../server/remote/client/executor-client.js';
-import { ExecutorRpc } from '../../../server/remote/transport/rpc.js';
-import { connectRemoteExecutor } from '../../../server/remote/__tests__/runtime-adapter.js';
+import { connectRemoteExecutor, servePairedRuntime } from '../../../server/remote/__tests__/runtime-adapter.js';
 import { WebSocketLink } from '../../../server/remote/transport/websocket-link.js';
 import { TranscriptAdoptionService } from '../../../server/controller/ledger/adoption.js';
 import { TranscriptLedgerService } from '../../../server/controller/ledger/service.js';
@@ -44,8 +42,8 @@ async function withPendingPermission(
   const worker = new WebSocketLink({ ...linkOptions, executorId: EXECUTOR, role: 'worker' });
   const native = integrationFixture(root, EXECUTOR);
   const relay = new ProducerRelay(resumption.relay);
-  const serving: ReturnType<typeof serveExecutionRuntime>[] = [];
-  worker.onSession(session => serving.push(serveExecutionRuntime(native.executor, new ExecutorRpc(session), relay)));
+  const serving: ReturnType<typeof servePairedRuntime>[] = [];
+  worker.onSession(session => serving.push(servePairedRuntime(worker, session, native.executor, relay)));
   const connected = connectRemoteExecutor(controller, undefined, resumption.client);
   if (dialer === 'controller') controller.dial(worker.listen());
   else worker.dial(controller.listen());
@@ -71,7 +69,7 @@ async function pendingPermission({ root, chats, ledger, controller, native, remo
   readonly controller: WebSocketLink;
   readonly native: ReturnType<typeof integrationFixture>;
   readonly remote: Awaited<ReturnType<typeof connectRemoteExecutor>>;
-  readonly serving: readonly ReturnType<typeof serveExecutionRuntime>[];
+  readonly serving: readonly ReturnType<typeof servePairedRuntime>[];
   readonly respond: (decision: { readonly allow: boolean }) => Promise<void>;
 }) {
   const feed = new ChatTransientFeedStore('synthetic-server');

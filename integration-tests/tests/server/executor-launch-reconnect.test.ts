@@ -19,11 +19,10 @@ import { AgentRuntimeRouter } from '../../../server/controller/agents/runtime-ro
 import {
   admissionFault, integrationFixture, isExecutionHandleReply, isProducerResumeReply, linkOptions, outgoingFault, outgoingHold,
 } from '../../../server/remote/__tests__/integration-fixture.js';
-import { serveExecutionRuntime } from '../../../server/remote/server/executor-rpc-server.js';
 import { ProducerRelay } from '../../../server/remote/server/producer-relay.js';
 import { RpcReplyJournal } from '../../../server/remote/transport/rpc-journal.js';
-import { ExecutorRpc } from '../../../server/remote/transport/rpc.js';
-import { connectRemoteExecutor } from '../../../server/remote/__tests__/runtime-adapter.js';
+import type { ExecutorRpc } from '../../../server/remote/transport/rpc.js';
+import { connectRemoteExecutor, servePairedRuntime } from '../../../server/remote/__tests__/runtime-adapter.js';
 import { WebSocketLink } from '../../../server/remote/transport/websocket-link.js';
 import { TranscriptAdoptionService } from '../../../server/controller/ledger/adoption.js';
 import { TranscriptLedgerService } from '../../../server/controller/ledger/service.js';
@@ -83,11 +82,12 @@ async function withRemoteRouter(
   const native = integrationFixture(root, EXECUTOR);
   const relay = new ProducerRelay();
   const journal = new RpcReplyJournal();
-  const serving: ReturnType<typeof serveExecutionRuntime>[] = [];
+  const serving: ReturnType<typeof servePairedRuntime>[] = [];
   let workerRpc: ExecutorRpc | null = null;
   worker.onSession(session => {
-    workerRpc = new ExecutorRpc(session, { journal });
-    serving.push(serveExecutionRuntime(native.executor, workerRpc, relay));
+    const scope = servePairedRuntime(worker, session, native.executor, relay, journal);
+    workerRpc = scope.connection.primary;
+    serving.push(scope);
   });
   // Reads credentials from the controller over the current session, as the worker process does.
   const credentialHost = new IntegrationHostFactory({
@@ -717,4 +717,3 @@ for (const dialer of ['controller', 'worker'] as const) {
     });
   }, 30_000);
 }
-
