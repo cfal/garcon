@@ -181,8 +181,12 @@ Forwarded CLI requests have no public Host: without an explicit override they
 require `GARCON_PUBLIC_URL` / `--public-url` on the controller, for both creation
 and `connection` reveal. Otherwise they fail with a configuration error rather
 than returning a synthetic address. Outbound creation takes the listening worker's
-full credential URL. Creation returns only the new ID. Saving configuration does
-not claim the worker is ready; use the bounded readiness wait separately.
+full credential URL. The CLI prints only the new ID; the authenticated create
+API response also contains the sensitive connection descriptor used by browser
+onboarding. Saving configuration does not claim the worker is ready; use the
+bounded readiness wait separately. That wait retries transient read failures
+within its original timeout, but stops on lost authority, a changed controller,
+malformed replies, or a missing or disabled executor.
 
 `update` accepts a label or either access grant. Connection edits require a full
 `--connection-url`, `--direction`, and explicit `--no-tls
@@ -477,7 +481,7 @@ Restart, replay, shares, and frozen forks preserve CLI presentation. Explicit na
 
 ## Search And Chat History
 
-List the complete chat metadata snapshot, optionally using the same filter language as the sidebar:
+List the complete chat metadata snapshot, optionally using the same filter language as the sidebar.
 
 Chat and search summaries include an explicit `executorId` (`local` for legacy
 Local bindings). Human lists, search hits, and status show the executor separately
