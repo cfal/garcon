@@ -9,7 +9,7 @@ import {
 import { parseNameStatusZ, parseNumstatZ, parseUnmergedPaths } from './diff-file-list.js';
 import { GitDomainError } from './git-domain-error.js';
 import { parsePorcelainV1Z } from './porcelain-status.js';
-import { categoryForPath } from './rendered-diff.js';
+import { categoryForPath } from './review-patch.js';
 import { assertGitRepository, readOnlyGitOptions, runGitTraced } from './run.js';
 import { assertSafeRef } from './ref-validation.js';
 import {

@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { loadUntrackedPatches } from '../untracked-patch.js';
-import { compactRenderedPatch, splitPatchesFromRawDiff } from '../rendered-diff.js';
+import { createReviewPatchBody, splitPatchesFromRawDiff } from '../review-patch.js';
 import { initRepoWithCommit, runGitCommand } from './repository-fixture.js';
 
 const directories = [];
@@ -28,7 +28,7 @@ describe('untracked addition patches', () => {
     const raw = await loadUntrackedPatches(projectPath, ['added.txt'], 3);
     const selected = splitPatchesFromRawDiff(raw).get('added.txt');
     expect(selected).toBeDefined();
-    const body = compactRenderedPatch('added.txt', 'synthetic-fingerprint', selected.patch);
+    const body = createReviewPatchBody('added.txt', 'synthetic-fingerprint', selected.patch);
     expect(body.bodyState).toBe('loaded');
     expect(body.renderedRowCount).toBe(lines === 0 ? 0 : lines + 1);
     expect(body.patch.includes('\\ No newline at end of file')).toBe(content.length > 0 && !content.endsWith('\n'));

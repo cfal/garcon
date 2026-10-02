@@ -206,7 +206,7 @@ export function errorPatchFileBody(
   };
 }
 
-export function compactRenderedPatch(
+export function createReviewPatchBody(
   path: string,
   bodyFingerprint: string,
   patchText: string,

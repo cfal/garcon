@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { compactRenderedPatch } from '../git/rendered-diff.js';
+import { createReviewPatchBody } from '../git/review-patch.js';
 import { stripDiffHeaders } from '../git/run.js';
 import type { GitReviewFilePatchBody } from '../git/types.js';
 
@@ -60,7 +60,7 @@ function parseDiffFilePatch(segment: string): GitDiffPatchFile | null {
 
   const patchBody = stripDiffHeaders(segment);
   const fingerprint = createHash('sha1').update(segment).digest('hex').slice(0, 16);
-  const body = compactRenderedPatch(path, fingerprint, patchBody);
+  const body = createReviewPatchBody(path, fingerprint, patchBody);
 
   let additions = 0;
   let deletions = 0;

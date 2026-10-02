@@ -13,7 +13,7 @@ import {
   hasWorkTreeChange,
   parsePorcelainV1Z,
 } from './porcelain-status.js';
-import { categoryForPath } from './rendered-diff.js';
+import { categoryForPath } from './review-patch.js';
 import {
   GitReviewDocumentRegistry,
   registeredWorkbenchFile,

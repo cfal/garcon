@@ -3,7 +3,7 @@ import { GitDomainError } from './git-domain-error.js';
 import { assertGitRepository, readOnlyGitOptions, runGitTraced } from './run.js';
 import { parseNameStatusZ, parseNumstatZ } from './diff-file-list.js';
 import { assertExistingCommitRef, assertSafeRef } from './ref-validation.js';
-import { categoryForPath } from './rendered-diff.js';
+import { categoryForPath } from './review-patch.js';
 import {
   GIT_REVIEW_DOCUMENT_LIMITS,
   type GitCommandTrace,

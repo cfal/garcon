@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 import {
-  compactRenderedPatch,
+  createReviewPatchBody,
   splitPatchesFromRawDiff,
-} from '../rendered-diff.js';
+} from '../review-patch.js';
 import { parseUnifiedPatchToRenderedRows } from './rendered-patch-fixture.js';
 
-describe('compactRenderedPatch', () => {
+describe('createReviewPatchBody', () => {
   it('does not mix a second file into a single-file body', () => {
     const patch = `diff --git a/bin/tool b/bin/tool
 deleted file mode 100644
@@ -26,7 +26,7 @@ new file mode 100644
     expect(parsed.rows).toContainEqual(expect.objectContaining({ kind: 'del', text: 'old' }));
     expect(parsed.rows).not.toContainEqual(expect.objectContaining({ kind: 'add', text: 'new' }));
     expect(parsed.rows.some((row) => row.text.startsWith('++') || row.text.startsWith('--'))).toBe(false);
-    expect(compactRenderedPatch('bin/tool', 'fingerprint', patch).renderedRowCount).toBe(parsed.rows.length);
+    expect(createReviewPatchBody('bin/tool', 'fingerprint', patch).renderedRowCount).toBe(parsed.rows.length);
   });
 });
 
@@ -72,7 +72,7 @@ describe('raw diff file selection', () => {
     expect(body.rows.map((row) => row.text)).not.toContain('-- /dev/null');
     expect(body.rows.map((row) => row.text)).not.toContain('++ b/link');
     expect(body.rows.every((row) => row.kind !== 'add' || row.afterLine > 0)).toBe(true);
-    expect(compactRenderedPatch('link', 'fingerprint', selected, {
+    expect(createReviewPatchBody('link', 'fingerprint', selected, {
       allowMultipleFileSections: true,
     }).renderedRowCount).toBe(body.rows.length);
   });
@@ -110,7 +110,7 @@ describe('compact patch bounds', () => {
   it.each([['x', 450], ['\t', 250]])('limits encoded bodies below the raw patch budget (%p)', (character, rows) => {
     const patch = `diff --git a/example.txt b/example.txt\n@@ -0,0 +1,${rows} @@\n${`+${character.repeat(9999)}\n`.repeat(rows)}`;
     expect(Buffer.byteLength(patch)).toBeLessThan(5_000_000);
-    expect(compactRenderedPatch('example.txt', 'synthetic-fingerprint', patch)).toMatchObject({
+    expect(createReviewPatchBody('example.txt', 'synthetic-fingerprint', patch)).toMatchObject({
       bodyState: 'too-large',
       limitReason: 'file-too-many-bytes',
       patch: null,
@@ -128,7 +128,7 @@ describe('compact patch bounds', () => {
 +added
 `;
     const legacy = parseUnifiedPatchToRenderedRows(patch);
-    const compact = compactRenderedPatch('src/file.ts', 'fingerprint', patch);
+    const compact = createReviewPatchBody('src/file.ts', 'fingerprint', patch);
 
     expect(compact.patch).toBe(patch);
     expect(compact.renderedRowCount).toBe(legacy.rows.length);
