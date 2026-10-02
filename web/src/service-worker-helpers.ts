@@ -22,7 +22,7 @@ export function shouldCacheNavigationResponse(response: Response): boolean {
 }
 
 export async function precacheAppShell(
-	cache: Cache,
+	cache: Pick<Cache, 'addAll' | 'add'>,
 	manifest: ServiceWorkerPrecacheManifest,
 ): Promise<void> {
 	// Keeps the offline navigation fallback strict while allowing optional static files to drift.
@@ -32,44 +32,22 @@ export async function precacheAppShell(
 	);
 }
 
-export function fetchWithTimeout(
-	request: Request,
-	options: {
-		timeoutMs?: number;
-		fetchImpl?: typeof fetch;
-		onResponse?: (response: Response) => Promise<void> | void;
-	} = {},
+export function withNavigationTimeout(
+	network: Promise<Response>,
+	timeoutMs = NAVIGATION_TIMEOUT_MS,
 ): Promise<Response> {
-	const timeoutMs = options.timeoutMs ?? NAVIGATION_TIMEOUT_MS;
-	const fetchImpl = options.fetchImpl ?? fetch;
-	let timer: ReturnType<typeof setTimeout> | null = null;
-
-	const network = fetchImpl(request).then((response) => {
-		if (options.onResponse) {
-			void Promise.resolve(options.onResponse(response)).catch(() => {
-				// Caching is best-effort and should not change navigation outcome.
-			});
-		}
-		return response;
-	});
-
 	return new Promise((resolve, reject) => {
-		timer = setTimeout(() => {
-			timer = null;
+		const timer = setTimeout(() => {
 			reject(new Error('navigation timeout'));
 		}, timeoutMs);
 
 		network.then(
 			(response) => {
-				if (timer === null) return;
 				clearTimeout(timer);
-				timer = null;
 				resolve(response);
 			},
 			(error) => {
-				if (timer === null) return;
 				clearTimeout(timer);
-				timer = null;
 				reject(error);
 			},
 		);
