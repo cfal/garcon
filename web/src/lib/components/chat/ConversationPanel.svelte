@@ -3,7 +3,7 @@
 	import ConversationFeed from './ConversationFeed.svelte';
 	import ConversationPanelScrollControls from './ConversationPanelScrollControls.svelte';
 	import ConversationPanelStatusDock from './ConversationPanelStatusDock.svelte';
-	import ComposerAvailabilityNotice from './ComposerAvailabilityNotice.svelte';
+	import ComposerAvailabilityNotice from './composer/ComposerAvailabilityNotice.svelte';
 	import type { ComposerAvailabilityNoticePresentation } from '$lib/chat/composer/composer-availability.js';
 	import MessageRenderFallback from './MessageRenderFallback.svelte';
 	import QueueControls from './QueueControls.svelte';

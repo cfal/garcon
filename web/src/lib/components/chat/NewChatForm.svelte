@@ -27,12 +27,12 @@
 		restorePromptEditorSelection,
 		type PromptEditorSelection,
 	} from '$lib/prompt-editor/prompt-editor-selection.js';
-	import ComposerBottomBar from './ComposerBottomBar.svelte';
+	import ComposerBottomBar from './composer/ComposerBottomBar.svelte';
 	import PromptEditorDialog from '$lib/components/prompt-editor/PromptEditorDialog.svelte';
-	import ComposerAttachmentBadge from './ComposerAttachmentBadge.svelte';
+	import ComposerAttachmentBadge from './composer/ComposerAttachmentBadge.svelte';
 	import { chatViewSurfaceId } from '$lib/workspace/surface-types.js';
-	import ComposerSnippetPalette from './ComposerSnippetPalette.svelte';
-	import AgentSettingsControls from './AgentSettingsControls.svelte';
+	import ComposerSnippetPalette from './composer/ComposerSnippetPalette.svelte';
+	import AgentSettingsControls from './composer/AgentSettingsControls.svelte';
 	import NewChatPreambleControls from '../preambles/NewChatPreambleControls.svelte';
 	import ChatTagEditor from './ChatTagEditor.svelte';
 	import ChatTagToggleButton from './ChatTagToggleButton.svelte';

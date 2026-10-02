@@ -71,8 +71,8 @@ vi.mock('$lib/components/chat/ConversationFeed.svelte', async () => ({
 	default: (await import('./ConversationFeedStub.svelte')).default,
 }));
 
-vi.mock('$lib/components/chat/PromptComposer.svelte', async () => ({
-	default: (await import('./PromptComposerStub.svelte')).default,
+vi.mock('$lib/components/chat/composer/PromptComposer.svelte', async () => ({
+	default: (await import('../composer/__tests__/PromptComposerStub.svelte')).default,
 }));
 
 vi.mock('$lib/components/git/NewBranchModal.svelte', async () => ({

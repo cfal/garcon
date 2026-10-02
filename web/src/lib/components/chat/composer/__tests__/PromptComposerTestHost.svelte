@@ -5,7 +5,7 @@
 	import ComposerAvailabilityNotice from '../ComposerAvailabilityNotice.svelte';
 	import type { ComposerAvailabilityNoticePresentation } from '$lib/chat/composer/composer-availability.js';
 	import { chatDockFrameClass } from '$lib/chat/conversation/chat-max-width.js';
-	import ConversationPanelStatusDock from '../ConversationPanelStatusDock.svelte';
+	import ConversationPanelStatusDock from '../../ConversationPanelStatusDock.svelte';
 	import { onDestroy, untrack } from 'svelte';
 	import {
 		setAgentState,
@@ -52,7 +52,7 @@
 		type WorkspaceShortcutDeps,
 	} from '$lib/workspace/workspace-shortcuts.js';
 	import { CANONICAL_CHAT_SURFACE_ID } from '$lib/workspace/canonical-layout.js';
-	import { setCanonicalWorkspaceLayout } from './workspace-layout-test-context.js';
+	import { setCanonicalWorkspaceLayout } from '../../__tests__/workspace-layout-test-context.js';
 	import { ProjectResolutionStore } from '$lib/workspace/project-resolution-store.svelte.js';
 	import type { ProjectTarget } from '$shared/project-resolution';
 
