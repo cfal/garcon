@@ -1,13 +1,14 @@
 import { expect, test } from 'bun:test';
 import { RpcReplyJournal, type RpcJournalOwner } from '../rpc-journal.js';
+import type { RpcLane } from '../rpc-lane.js';
 
 const UNKNOWN = 'unknown-outcome';
 
-function owner(session: string, accepting = true) {
+function owner(session: string, accepting = true, lane: RpcLane = 'primary') {
   const offered: string[] = [];
   const state = { accepting };
   const value: RpcJournalOwner & { offered: string[]; state: typeof state } = {
-    session, offered, state,
+    session, lane, offered, state,
     offer(payload) {
       if (!state.accepting) return false;
       offered.push(payload);
@@ -26,18 +27,18 @@ test('delivers a reply to the owning session and releases it once acknowledged',
 
   expect(first.offered).toEqual(['reply-1']);
   expect(journal.running).toBe(0);
-  journal.acknowledge(['call-1']);
+  journal.acknowledge(first, ['call-1']);
   expect(journal.has('call-1')).toBe(false);
 });
 
 test('reconciles running, completed, never-received, and forgotten calls of a lost session', () => {
   const journal = new RpcReplyJournal();
   const first = owner('session-1');
-  journal.received('session-1', 1);
+  journal.received(first, 1);
   const running = journal.begin(first, 'running');
-  journal.received('session-1', 2);
+  journal.received(first, 2);
   const completed = journal.begin(first, 'completed');
-  journal.received('session-1', 3);
+  journal.received(first, 3);
   const abandoned = journal.begin(first, 'abandoned');
   journal.complete(completed, 'completed-reply', UNKNOWN);
   journal.ownerLost(first);
@@ -90,7 +91,7 @@ test('offers a refused reply again and redelivers one sent to a lost session', a
 test('drops the oldest delivered replies first under pressure, which then reconcile as unknown', () => {
   const journal = new RpcReplyJournal({ retainedBytes: 20 });
   const first = owner('session-1');
-  journal.received('session-1', 3);
+  journal.received(first, 3);
   const delivered = journal.begin(first, 'delivered');
   journal.complete(delivered, 'x'.repeat(10), UNKNOWN);
   first.state.accepting = false;
@@ -112,7 +113,7 @@ test('a cancelled call is aborted and its reply dropped', () => {
   const journal = new RpcReplyJournal();
   const first = owner('session-1');
   const call = journal.begin(first, 'call-1');
-  journal.cancel('call-1');
+  journal.cancel(first, 'call-1');
   expect(call.signal.aborted).toBe(true);
   journal.complete(call, 'reply-1', UNKNOWN);
   expect(first.offered).toEqual([]);
@@ -137,7 +138,7 @@ test('answers a waiting session with an unknown outcome when pressure drops its 
 test('forgets an undelivered reply of a lost session under pressure, which then reconciles as unknown', () => {
   const journal = new RpcReplyJournal({ retainedBytes: 30 });
   const first = owner('session-1', false);
-  journal.received('session-1', 2);
+  journal.received(first, 2);
   const lost = journal.begin(first, 'lost');
   journal.complete(lost, 'y'.repeat(20), UNKNOWN);
   journal.ownerLost(first);
@@ -147,5 +148,50 @@ test('forgets an undelivered reply of a lost session under pressure, which then 
 
   expect(journal.reconcile(second, [{ id: 'lost', session: 'session-1', seq: 1 }])).toEqual([{ id: 'lost', state: 'unknown' }]);
   expect(second.offered).toEqual(['z'.repeat(20)]);
+  journal.dispose();
+});
+
+test('bulk recovery neither cancels nor claims primary work', () => {
+  const journal = new RpcReplyJournal();
+  const primary = owner('primary');
+  const bulk = owner('bulk', true, 'bulk');
+  journal.received(primary, 1);
+  journal.received(bulk, 1);
+  const control = journal.begin(primary, 'control');
+  const transfer = journal.begin(bulk, 'transfer');
+  journal.ownerLost(primary);
+  journal.ownerLost(bulk);
+  const replacement = owner('new-bulk', true, 'bulk');
+  expect(journal.reconcile(replacement, [{ id: 'transfer', session: 'bulk', seq: 1 }])).toEqual([{ id: 'transfer', state: 'pending' }]);
+  expect(control.signal.aborted).toBe(false);
+  expect(() => journal.reconcile(replacement, [{ id: 'control', session: 'primary', seq: 1 }])).toThrow('ownership mismatch');
+  expect(() => journal.reconcile(replacement, [{ id: 'absent', session: 'primary', seq: 2 }])).toThrow('ownership mismatch');
+  journal.cancel(primary, 'transfer');
+  expect(transfer.signal.aborted).toBe(false);
+  journal.complete(transfer, 'reply', UNKNOWN);
+  journal.acknowledge(primary, ['transfer']);
+  expect(journal.has('transfer')).toBe(true);
+  journal.acknowledge(replacement, ['transfer']);
+  expect(journal.has('transfer')).toBe(false);
+  journal.dispose();
+});
+
+test('blocked bulk delivery and retention cannot consume primary reservations', () => {
+  const journal = new RpcReplyJournal({ retainedBytes: 100, bulkRetainedBytes: 75 });
+  const bulk = owner('bulk', false, 'bulk');
+  const primary = owner('primary');
+  journal.complete(journal.begin(bulk, 'bulk-1'), 'b'.repeat(70), UNKNOWN);
+  journal.complete(journal.begin(primary, 'primary-1'), 'p'.repeat(25), UNKNOWN);
+  expect(primary.offered).toEqual(['p'.repeat(25)]);
+  journal.complete(journal.begin(bulk, 'bulk-2'), 'c'.repeat(70), UNKNOWN);
+  expect(journal.has('primary-1')).toBe(true);
+  journal.dispose();
+});
+
+test('bulk flaps do not evict primary receipt history', () => {
+  const journal = new RpcReplyJournal();
+  journal.received(owner('primary'), 1);
+  for (let i = 0; i < 32; i++) journal.received(owner(`bulk-${i}`, true, 'bulk'), 1);
+  expect(journal.reconcile(owner('new-primary'), [{ id: 'not-sent', session: 'primary', seq: 2 }])).toEqual([{ id: 'not-sent', state: 'not-received' }]);
   journal.dispose();
 });

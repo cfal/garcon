@@ -21,6 +21,7 @@ import { TerminalError } from '../../../common/terminal-error.js';
 import { GitServiceError, isGitServiceErrorCode, type GitServiceErrorCode } from '../../../common/git-error.js';
 import { parseTerminalStreamServerMessage, type TerminalErrorCode } from '../../../common/terminal.js';
 import { parseTerminalNotification, type TerminalNotification } from './terminal-protocol.js';
+import { RpcAdmission, type RpcAdmissionBudgets } from './rpc-admission.js';
 
 interface Failure {
   readonly code: AgentIntegrationErrorCode | ErrorCode | TerminalErrorCode | GitServiceErrorCode;
@@ -48,6 +49,7 @@ export interface RpcCallOptions<Result = unknown> extends Omit<ExecutorCallOptio
 }
 
 interface LateResult {
+  readonly release: () => void;
   readonly receive: (value: unknown) => void | Promise<unknown>;
   readonly lost: (() => void) | undefined;
 }
@@ -55,7 +57,6 @@ interface LateResult {
 const log = createLogger('executor-rpc');
 
 export const DEFAULT_RPC_TIMEOUT_MS = 120_000;
-const RPC_BUDGET = 256;
 const REPLY_ACK_DELAY_MS = 250;
 const REPLY_ACK_BATCH = 1024;
 
@@ -109,6 +110,7 @@ interface IncomingCall {
 // signals keep running meanwhile, and a call's dispatch deadline ends its wait
 // for the replacement, including the reconciliation, with an unknown outcome.
 export class ParkedRpcCalls {
+  readonly admission = new RpcAdmission();
   readonly #calls = new Map<string, OutgoingCall>();
   #closed = false;
 
@@ -156,6 +158,7 @@ export interface ExecutorRpcContinuity {
   readonly parked?: ParkedRpcCalls;
   // A worker runs journaled calls beyond their session and keeps their replies.
   readonly journal?: RpcReplyJournal;
+  readonly admission?: RpcAdmissionBudgets;
 }
 
 export class ExecutorRpc {
@@ -165,6 +168,8 @@ export class ExecutorRpc {
   readonly #parked: ParkedRpcCalls | null;
   readonly #journal: RpcReplyJournal | null;
   readonly #journalOwner: RpcJournalOwner;
+  readonly #outgoingAdmission: RpcAdmission;
+  readonly #incomingAdmission: RpcAdmission;
   #sent = 0;
   #received = 0;
   #replyAcks: string[] = [];
@@ -180,7 +185,10 @@ export class ExecutorRpc {
   constructor(readonly transport: SessionTransport, continuity: ExecutorRpcContinuity = {}) {
     this.#parked = continuity.parked ?? null;
     this.#journal = continuity.journal ?? null;
+    this.#outgoingAdmission = continuity.admission?.outgoing ?? this.#parked?.admission ?? new RpcAdmission();
+    this.#incomingAdmission = continuity.admission?.incoming ?? this.#journal?.admission ?? new RpcAdmission();
     this.#journalOwner = {
+      lane: transport.lane,
       session: transport.id,
       offer: (payload) => {
         if (this.#retired || !this.transport.channel.canAdmit(payload)) return false;
@@ -220,7 +228,8 @@ export class ExecutorRpc {
     }
     this.#incoming.clear();
     this.#journal?.ownerLost(this.#journalOwner);
-    for (const { lost } of lostLateResults) {
+    for (const { lost, release } of lostLateResults) {
+      release();
       try { lost?.(); } catch (error) { log.warn('Failed to record a cancelled executor call whose late result was lost', error); }
     }
   }
@@ -264,9 +273,8 @@ export class ExecutorRpc {
     }
     if (options?.signal?.aborted) throw new AgentCallError('not-dispatched', 'Executor is unavailable');
     if (this.#retired || !this.transport.connected) throw new ExecutorSessionLostError('not-dispatched', 'Executor is unavailable');
-    if (!SESSION_INSTALLATION_METHODS.has(method) && this.#pending.size + this.#lateResults.size >= RPC_BUDGET) {
-      throw new AgentCallError('not-dispatched', 'The executor is handling too many requests. Try again shortly.');
-    }
+    const release = SESSION_INSTALLATION_METHODS.has(method) ? () => {} : this.#outgoingAdmission.acquire(this.transport.lane);
+    let retainedForLateResult = false;
     const result = Promise.withResolvers<unknown>();
     const call: OutgoingCall = {
       id: crypto.randomUUID(), integrationId, method, request,
@@ -282,7 +290,9 @@ export class ExecutorRpc {
       // Resource-producing calls retain their budget until settlement or session loss.
       const onLateResult = options?.onLateResult;
       if (holder && onLateResult) {
+        retainedForLateResult = true;
         holder.#lateResults.set(call.id, {
+          release,
           receive: (value) => onLateResult(value as ExecutorRpcMethods[K]['result']),
           lost: options?.onLateResultLost,
         });
@@ -302,6 +312,7 @@ export class ExecutorRpc {
       if (timer) clearTimeout(timer);
       options?.signal?.removeEventListener('abort', abort);
       disarmExpiry(call);
+      if (!retainedForLateResult) release();
     };
     call.expire = () => cancel('The executor did not reconnect in time, so the outcome is unknown.');
     try {
@@ -421,7 +432,7 @@ export class ExecutorRpc {
     }
     if (frame.type === 'reply-ack') {
       if (!Array.isArray(frame.ids) || frame.ids.some((id) => typeof id !== 'string')) throw new Error('Invalid reply acknowledgement');
-      this.#journal?.acknowledge(frame.ids);
+      this.#journal?.acknowledge(this.#journalOwner, frame.ids);
       return;
     }
     if (!('id' in frame) || typeof frame.id !== 'string') throw new Error('RPC request ID is required');
@@ -430,6 +441,7 @@ export class ExecutorRpc {
       if (!call) {
         const late = this.#lateResults.get(frame.id);
         this.#lateResults.delete(frame.id);
+        late?.release();
         if (frame.type === 'result' && late) {
           // The deferred callback owns cleanup after the map releases the budget slot.
           void Promise.resolve().then(() => {
@@ -449,7 +461,7 @@ export class ExecutorRpc {
     if (frame.type === 'cancel') {
       const incoming = this.#incoming.get(frame.id);
       if (incoming) incoming.controller.abort();
-      else this.#journal?.cancel(frame.id);
+      else this.#journal?.cancel(this.#journalOwner, frame.id);
       return;
     }
     if (frame.type !== 'request' || typeof frame.integrationId !== 'string' || typeof frame.method !== 'string') {
@@ -459,21 +471,22 @@ export class ExecutorRpc {
     // Tracking the highest sequence stays safe if another sender numbers the
     // same session: a request received is never reported as not received.
     this.#received = Math.max(this.#received, frame.seq);
-    this.#journal?.received(this.transport.id, this.#received);
+    this.#journal?.received(this.#journalOwner, this.#received);
     if (this.#incoming.has(frame.id) || this.#journal?.has(frame.id)) throw new Error('Duplicate RPC request ID');
     if (frame.method === 'calls.reconcile') {
       this.#reconcile(frame);
       return;
     }
-    if (!SESSION_INSTALLATION_METHODS.has(frame.method) && this.#incoming.size + (this.#journal?.running ?? 0) >= RPC_BUDGET) {
-      this.#reply({ type: 'error', id: frame.id, error: encodeFailure(new AgentCallError(
-        'not-dispatched', 'The executor is handling too many requests. Try again shortly.',
-      )) });
+    let release: () => void;
+    try {
+      release = SESSION_INSTALLATION_METHODS.has(frame.method) ? () => {} : this.#incomingAdmission.acquire(this.transport.lane);
+    } catch (error) {
+      this.#reply({ type: 'error', id: frame.id, error: encodeFailure(error) });
       return;
     }
     const continuity = rpcContinuity(frame.method);
     if (continuity === 'journaled' && this.#journal) {
-      this.#runJournaled(frame, this.#journal.begin(this.#journalOwner, frame.id), this.#journal);
+      this.#runJournaled(frame, this.#journal.begin(this.#journalOwner, frame.id), this.#journal, release);
       return;
     }
     const controller = new AbortController();
@@ -491,12 +504,15 @@ export class ExecutorRpc {
     }, (error) => {
       logRedactedFailure(frame, error);
       if (current() && !this.#reply({ type: 'error', id: frame.id, error: encodeFailure(error) })) undelivered?.();
-    }).catch(() => undefined).finally(() => { if (current()) this.#incoming.delete(frame.id); });
+    }).catch(() => undefined).finally(() => {
+      if (current()) this.#incoming.delete(frame.id);
+      release();
+    });
   }
 
   // Runs a journaled call to completion even if its session is lost; the
   // journal delivers the reply to whichever session owns the call by then.
-  #runJournaled(frame: ExecutorRpcRequest, call: JournaledCall, journal: RpcReplyJournal): void {
+  #runJournaled(frame: ExecutorRpcRequest, call: JournaledCall, journal: RpcReplyJournal, release: () => void): void {
     const handler = this.#handler;
     let replyGuard: RpcReplyGuard | undefined;
     void Promise.resolve().then(() => {
@@ -511,7 +527,7 @@ export class ExecutorRpc {
         return this.#encodeReply({ type: 'error', id: frame.id, error: encodeFailure(error) }) ?? undeliverableReply(frame.id);
       },
     ).catch((error) => JSON.stringify({ type: 'error', id: frame.id, error: encodeFailure(error) } satisfies RpcFrame))
-      .then((reply) => journal.complete(call, reply, undeliverableReply(frame.id)));
+      .then((reply) => journal.complete(call, reply, undeliverableReply(frame.id))).finally(release);
   }
 
   #reconcile(frame: Extract<ExecutorRpcRequest, { readonly method: 'calls.reconcile' }>): void {
