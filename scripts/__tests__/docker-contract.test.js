@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, test } from 'bun:test';
-import { readFile, readdir } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 
 const repositoryRoot = path.resolve(import.meta.dir, '../..');
@@ -29,6 +30,7 @@ const persistedPaths = [
 
 let dockerfile;
 let composeFile;
+let executorComposeFile;
 let dockerGuide;
 let dockerignore;
 let dockerPublishWorkflow;
@@ -41,6 +43,7 @@ beforeAll(async () => {
   [
     dockerfile,
     composeFile,
+    executorComposeFile,
     dockerGuide,
     dockerignore,
     dockerPublishWorkflow,
@@ -51,6 +54,7 @@ beforeAll(async () => {
   ] = await Promise.all([
     readFile(path.join(repositoryRoot, 'Dockerfile'), 'utf8'),
     readFile(path.join(repositoryRoot, 'docker-compose.yml'), 'utf8'),
+    readFile(path.join(repositoryRoot, 'docker-compose.executor.yml'), 'utf8'),
     readFile(path.join(repositoryRoot, 'docs/docker.md'), 'utf8'),
     readFile(path.join(repositoryRoot, '.dockerignore'), 'utf8'),
     readFile(path.join(repositoryRoot, '.github/workflows/docker-publish.yml'), 'utf8'),
@@ -62,6 +66,57 @@ beforeAll(async () => {
 });
 
 describe('Docker contract', () => {
+  test('installs the HTTP CLI independently of container working directory', async () => {
+    expect(dockerfile).toContain('COPY cli/ cli/');
+    expect(dockerfile).toContain('COPY --from=build /app/cli/ cli/');
+    expect(dockerfile).toContain('COPY --chmod=755 docker/garcon-cli /usr/local/bin/garcon-cli');
+    expect(dockerfile).toContain('RUN garcon-cli --help > /dev/null');
+    expect(dockerfile).not.toContain('ENTRYPOINT');
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'garcon-docker-cli-'));
+    try {
+      const fakeBun = path.join(directory, 'bun');
+      await writeFile(fakeBun, '#!/bin/sh\nprintf \'%s\\n\' "$PWD" "$GARCON_CONFIG_DIR" "$GARCON_RUNTIME" "$@"\nexit 23\n');
+      await chmod(fakeBun, 0o755);
+      const result = Bun.spawnSync(['sh', path.join(repositoryRoot, 'docker/garcon-cli'),
+        '--cwd', '/projects/with spaces', 'literal $value'], {
+        cwd: directory,
+        env: { PATH: `${directory}:/usr/bin:/bin`, GARCON_CONFIG_DIR: '/private config', GARCON_RUNTIME: 'executor' },
+      });
+      expect(result.exitCode).toBe(23);
+      expect(result.stderr.toString()).toBe('');
+      expect(result.stdout.toString().trimEnd().split('\n')).toEqual([
+        directory, '/private config', 'executor', '/app/cli/main.ts',
+        '--cwd', '/projects/with spaces', 'literal $value',
+      ]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test('provides a standalone worker with independent persistent state and no public listener', () => {
+    const controller = Bun.YAML.parse(composeFile);
+    const worker = Bun.YAML.parse(executorComposeFile);
+    expect(Object.keys(worker.services)).toEqual(['executor']);
+    const service = worker.services.executor;
+    expect(service.command).toEqual(['bun', 'server/main.ts', 'executor', '--project-base-dir', '/projects']);
+    expect(service.image).toBe(controller.services.garcon.image);
+    expect(service.build).toEqual(controller.services.garcon.build);
+    expect(service.init).toBe(true);
+    expect(service.restart).toBe('unless-stopped');
+    expect(service.ports).toBeUndefined();
+    expect(service.environment).toEqual({ GARCON_RUNTIME: 'executor' });
+    expect(service.env_file).toEqual([{ path: '${GARCON_EXECUTOR_ENV_FILE:-./executor.env}', format: 'raw' }]);
+    const workerMounts = service.volumes.filter(value => value.includes(':/home/garcon/'));
+    expect(workerMounts.map(value => value.slice(value.indexOf(':') + 1)).sort()).toEqual([...persistedPaths].sort());
+    for (const mount of workerMounts) {
+      const volume = mount.split(':')[0];
+      expect(Object.keys(worker.volumes)).toContain(volume);
+      expect(Object.keys(controller.volumes)).not.toContain(volume);
+    }
+    expect(service.volumes.at(-1)).toBe(controller.services.garcon.volumes.at(-1));
+    expect(controller.services.garcon.environment.GARCON_PUBLIC_URL).toBe('${GARCON_PUBLIC_URL:-}');
+  });
+
   test('provisions every CLI-backed agent integration', async () => {
     const directories = await readdir(path.join(repositoryRoot, 'server-agents'), { withFileTypes: true });
     const agentIds = directories
@@ -105,7 +160,8 @@ describe('Docker contract', () => {
     expect(dockerfile).toContain('ARG GARCON_GID=1000');
     expect(dockerfile).toContain('GARCON_UID must identify a non-root user');
     expect(dockerfile).toContain('GARCON_GID must identify a non-root group');
-    expect(dockerfile.trimEnd()).toMatch(/USER garcon\nCMD \["bun", "server\/main\.ts"\]$/);
+    expect([...dockerfile.matchAll(/^USER (.+)$/gm)].at(-1)?.[1]).toBe('garcon');
+    expect(dockerfile.trimEnd()).toEndWith('CMD ["bun", "server/main.ts"]');
   });
 
   test('persists state without overlaying agent binaries or OpenCode cache', () => {
@@ -150,13 +206,45 @@ describe('Docker contract', () => {
     }
   });
 
+  test('keeps documented listener credentials outside the checkout', () => {
+    const credentialPath = '"$HOME/.config/garcon-onboarding/listener-connection.txt"';
+    expect(dockerGuide).toContain('umask 077\n  mkdir -p "$HOME/.config/garcon-onboarding"');
+    expect(dockerGuide).toContain(`> ${credentialPath}`);
+    expect(dockerGuide).toContain(`--connection-url - < ${credentialPath}`);
+    expect(dockerGuide).not.toMatch(/[<>]\s+listener-connection\.txt/);
+  });
+
+  test('uses credential-free output in documented enrollment commands', () => {
+    const enrollmentBlocks = [...dockerGuide.matchAll(/```bash\n([\s\S]*?)```/g)]
+      .map(([, command]) => command)
+      .filter((command) => command.includes('garcon-cli executor create'));
+    expect(enrollmentBlocks).toHaveLength(2);
+    for (const command of enrollmentBlocks) {
+      expect(command).not.toContain('--json');
+    }
+  });
+
   test('publishes main commits for both Linux architectures', () => {
     expect(dockerPublishWorkflow).toContain('branches:\n      - main');
-    expect(dockerPublishWorkflow).not.toContain('pull_request:');
+    const workflow = Bun.YAML.parse(dockerPublishWorkflow);
+    expect(workflow.jobs.publish_sha.if).toBe("github.event_name == 'push'");
     expect(dockerPublishWorkflow).not.toContain('release:');
     expect(dockerPublishWorkflow).toContain('packages: write');
     expect(dockerPublishWorkflow).toContain('tags: type=sha,format=long,prefix=sha-');
     expect(dockerPublishWorkflow).toContain('platforms: linux/amd64,linux/arm64');
+  });
+
+  test('smokes the candidate Docker image before merging packaging changes', () => {
+    const workflow = Bun.YAML.parse(dockerPublishWorkflow);
+    expect(workflow.on.pull_request.paths).toContain('Dockerfile');
+    expect(workflow.on.pull_request.paths).toContain('cli/**');
+    const verify = workflow.jobs.verify_pr;
+    expect(verify.if).toBe("github.event_name == 'pull_request'");
+    expect(verify.permissions).toEqual({ contents: 'read' });
+    const build = verify.steps.find(step => step.name === 'Build candidate image');
+    expect(build.with.load).toBe(true);
+    expect(build.with.push).toBeUndefined();
+    expect(verify.steps.at(-1).run).toBe('bun run docker:smoke garcon-pr:smoke');
   });
 
   test('preserves commit images and serializes main promotion', () => {
@@ -168,6 +256,11 @@ describe('Docker contract', () => {
     );
     expect(dockerPublishWorkflow).toContain('needs: publish_sha');
     expect(dockerPublishWorkflow).toContain('"${IMAGE}:main"');
+    const workflow = Bun.YAML.parse(dockerPublishWorkflow);
+    expect(workflow.jobs.promote_main.needs).toEqual(['publish_sha', 'smoke']);
+    expect(workflow.jobs.smoke.needs).toBe('publish_sha');
+    expect(workflow.jobs.smoke.steps.at(-1).run).toContain('bun run docker:smoke "${IMAGE}@${DIGEST}"');
+    expect(rootPackage.scripts['docker:smoke']).toBe('bun scripts/smoke-docker.js');
   });
 
   test('supports published images without changing the local Compose default', () => {
@@ -194,6 +287,7 @@ describe('Docker contract', () => {
       '.pi',
       '.ssh',
       '.env',
+      'executor.env',
     ]) {
       expect(ignoredPaths).toContain(requiredPath);
     }

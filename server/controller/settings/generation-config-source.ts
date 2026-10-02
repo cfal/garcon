@@ -11,11 +11,10 @@ export interface GenerationContext {
   generationByAgent: Record<string, { priority: number; model: string }>;
 }
 
-interface GenerationContextAgentSource {
+export interface GenerationDiscoveryAgents {
   getAgentAuthStatusMap(): Promise<Record<string, unknown>>;
   getAgentReadinessMap(authByAgent?: Record<string, unknown>): Promise<Record<string, unknown>>;
-  getAgentCatalogEntries?(): Promise<AgentCatalogEntry[]>;
-  getAgentCatalog?(): Promise<{ agents?: AgentCatalogEntry[] }>;
+  getAgentCatalogEntries(): Promise<AgentCatalogEntry[]>;
 }
 
 function emptyGenerationContext(): GenerationContext {
@@ -57,15 +56,8 @@ function asObject(value: unknown): Record<string, unknown> {
     : {};
 }
 
-async function getAgentCatalogEntries(source: GenerationContextAgentSource): Promise<AgentCatalogEntry[]> {
-  if (typeof source.getAgentCatalogEntries === 'function') {
-    return source.getAgentCatalogEntries();
-  }
-  if (typeof source.getAgentCatalog === 'function') {
-    const catalog = await source.getAgentCatalog();
-    return Array.isArray(catalog?.agents) ? catalog.agents : [];
-  }
-  return [];
+async function getAgentCatalogEntries(source: GenerationDiscoveryAgents): Promise<AgentCatalogEntry[]> {
+  return source.getAgentCatalogEntries();
 }
 
 function modelsByAgentFromCatalog(entries: AgentCatalogEntry[]): Record<string, AgentModelOption[]> {
@@ -103,7 +95,7 @@ function readinessByAgentFromRaw(raw: Record<string, unknown>): Record<string, {
   );
 }
 
-export async function resolveGenerationContext(source: GenerationContextAgentSource): Promise<GenerationContext> {
+export async function resolveGenerationContext(source: GenerationDiscoveryAgents): Promise<GenerationContext> {
   const catalogPromise = getAgentCatalogEntries(source);
   const [authResult, catalogResult] = await Promise.allSettled([
     source.getAgentAuthStatusMap(),
@@ -145,7 +137,7 @@ export function hasExplicitGenerationSelection(persisted: unknown): boolean {
 }
 
 export async function resolveGenerationContextForSelection(
-  source: GenerationContextAgentSource,
+  source: GenerationDiscoveryAgents,
   persisted: unknown,
   signal?: AbortSignal,
 ): Promise<GenerationContext> {
@@ -154,7 +146,7 @@ export async function resolveGenerationContextForSelection(
 }
 
 export async function resolveGenerationContextsForSelections(
-  source: GenerationContextAgentSource,
+  source: GenerationDiscoveryAgents,
   persistedSelections: readonly unknown[],
   signal?: AbortSignal,
 ): Promise<GenerationContext[]> {

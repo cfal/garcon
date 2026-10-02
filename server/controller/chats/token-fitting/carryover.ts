@@ -11,7 +11,7 @@ import {
   createCarryoverTranscriptWithinCost,
   isProjectableMessage,
 } from '../../../../common/transcript-seed.js';
-import { estimateHandoffTokens, fitEstimatedTokenDocument } from '../handoff-token-budget.js';
+import { estimateHandoffTokens, fitEstimatedTokenDocument } from './budget.js';
 
 export interface CompactionDestination {
   readonly agentId: string;

@@ -30,6 +30,7 @@ import { TranscriptLedgerService } from '../../../server/controller/ledger/servi
 import { TranscriptLedgerStore } from '../../../server/controller/ledger/store.js';
 import { DomainError } from '../../../server/common/domain-error.js';
 import { EXECUTOR_DISCONNECTED_BEFORE_START } from '../../../server/common/executor-disconnect.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 const EXECUTOR = '33333333-3333-4333-8333-333333333333';
 const CHAT = '1783725900000500';
@@ -347,7 +348,7 @@ for (const dialer of ['controller', 'worker'] as const) {
       native.hooks.start = async () => {
         throw new AgentCallError('unknown', 'Synthetic nested call outcome is unknown');
       };
-      await expect(router.startSession(CHAT, 'Synthetic input')).rejects.toMatchObject({ outcome: 'rejected' });
+      expect(await rejectionOf(router.startSession(CHAT, 'Synthetic input'))).toMatchObject({ outcome: 'rejected' });
 
       expect(router.isChatRunning(CHAT)).toBe(false);
       expect(runEnd(ledger)).toMatchObject({
@@ -363,7 +364,7 @@ for (const dialer of ['controller', 'worker'] as const) {
       };
       const unreadable = 'Provider credential could not be read from the controller. Try again.';
       controllerAdmission.refuseNext(encoded => encoded.includes('"type":"result"') && encoded.includes(SYNTHETIC_CREDENTIAL.value));
-      await expect(router.startSession(CHAT, 'Synthetic input')).rejects.toMatchObject({ outcome: 'rejected', message: unreadable });
+      expect(await rejectionOf(router.startSession(CHAT, 'Synthetic input'))).toMatchObject({ outcome: 'rejected', message: unreadable });
 
       expect(router.isChatRunning(CHAT)).toBe(false);
       expect(runEnd(ledger)).toMatchObject({ outcome: 'failed', origin: 'core', error: { message: unreadable } });

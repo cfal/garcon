@@ -43,6 +43,7 @@ import {
   type OpenCodeProcessIdentity,
   type OpenCodeProcessState,
 } from '../../support/opencode-process-supervisor.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 // Stop flows through the real binary: Garcon's abort reaches OpenCode's session.abort, the
 // active model request or shell tool dies, and no provider failure is fabricated for a
@@ -213,8 +214,7 @@ describeOnLinux('scripted OpenCode interrupt lifecycle', () => {
         { afterIndex: stopCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
       );
       // Both the command shell and its active child died before the completion marker.
-      await expect(access(join(fixture.dirs.project, 'stop-completed.marker')))
-        .rejects.toMatchObject({ code: 'ENOENT' });
+      expect(await rejectionOf(access(join(fixture.dirs.project, 'stop-completed.marker')))).toMatchObject({ code: 'ENOENT' });
 
       // OpenCode publishes the aborted tool occurrence after the run terminal but before its
       // source retires, so the ledger retains those named rows without fabricating a failure.
@@ -311,8 +311,7 @@ describeOnLinux('scripted OpenCode interrupt lifecycle', () => {
           expect(processIdentities.every((identity) =>
             !processIdentityAlive(identity.pid, identity.startTimeTicks)
           )).toBe(true);
-          await expect(access(join(fixture.dirs.project, 'crash-completed.marker')))
-            .rejects.toMatchObject({ code: 'ENOENT' });
+          expect(await rejectionOf(access(join(fixture.dirs.project, 'crash-completed.marker')))).toMatchObject({ code: 'ENOENT' });
         },
       });
 

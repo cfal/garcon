@@ -209,10 +209,10 @@ describe('Codex scripted default effort model switching', () => {
 
       const requestIndex = testEnvironment.model.requests().length;
       testEnvironment.model.scriptTurn([codexAssistantMessage(title)]);
-      await expect(fixture.client.generateChatTitle({
+      expect(await fixture.client.generateChatTitle({
         chatId,
         message: 'A conversation about one-shot Codex metadata.',
-      })).resolves.toMatchObject({ success: true, title });
+      })).toMatchObject({ success: true, title });
 
       const request = testEnvironment.model.requests()[requestIndex]?.body;
       expect(readReasoningEffort(request)).toBe('max');

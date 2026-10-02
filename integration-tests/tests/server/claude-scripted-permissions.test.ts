@@ -23,6 +23,7 @@ import {
   startScriptedClaudeTestEnvironment,
   type ScriptedClaudeTestEnvironment,
 } from '../../support/scripted-claude.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 const PERMISSION_OCCURRENCE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const REPO_ROOT = fileURLToPath(new URL('../../..', import.meta.url));
@@ -115,7 +116,7 @@ describe('scripted Claude permissions', () => {
         runId: permission.runId,
         permissionOccurrenceId: permission.permissionOccurrenceId,
       };
-      await expect(fixture.client.sendPermissionDecision({
+      expect(await rejectionOf(fixture.client.sendPermissionDecision({
         clientRequestId: crypto.randomUUID(),
         chatId,
         permissionOccurrenceId,
@@ -130,7 +131,7 @@ describe('scripted Claude permissions', () => {
             selectedOptionIds: ['SQLite'],
           }],
         },
-      })).rejects.toMatchObject({
+      }))).toMatchObject({
         status: 409,
         body: {
           errorCode: 'PERMISSION_NOT_ACTIONABLE',
@@ -579,14 +580,14 @@ describe('scripted Claude permissions', () => {
         }),
       ]);
 
-      await expect(fixture.client.sendPermissionDecision({
+      expect(await rejectionOf(fixture.client.sendPermissionDecision({
         clientRequestId: crypto.randomUUID(),
         chatId,
         permissionOccurrenceId: permission.message.permissionOccurrenceId,
         allow: false,
         alwaysAllow: false,
         control: staleControl,
-      })).rejects.toMatchObject({
+      }))).toMatchObject({
         status: 409,
         body: {
           errorCode: 'PERMISSION_NOT_ACTIONABLE',

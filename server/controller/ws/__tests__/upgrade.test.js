@@ -51,9 +51,31 @@ test('keeps executor upgrades separate from browser authentication and admission
   expect(wsAdmission.tryReserve).not.toHaveBeenCalled();
 });
 
-test('rejects shutdown, unauthorized clients, unknown executors, and unrelated routes', async () => {
+test.each([false, true])('rejects upgrades during shutdown before admission with auth disabled=%s', async authDisabled => {
+  const { handler, wsAdmission } = fixture({ authDisabled, isShuttingDown: () => true });
   const server = { upgrade: mock(() => true) };
-  expect((await fixture({ isShuttingDown: () => true }).handler(request(), server)).status).toBe(503);
+  const response = await handler(request(), server);
+  expect(response.status).toBe(503);
+  expect(await response.json()).toMatchObject({ errorCode: 'SERVER_SHUTTING_DOWN', retryable: true });
+  expect(wsAdmission.tryReserve).not.toHaveBeenCalled();
+  expect(server.upgrade).not.toHaveBeenCalled();
+});
+
+test('rechecks shutdown after asynchronous browser authentication before admission', async () => {
+  let shuttingDown = false;
+  const { handler, wsAdmission } = fixture({ authDisabled: false, isShuttingDown: () => shuttingDown });
+  const server = { upgrade: mock(() => true) };
+  const pending = handler(request(), server);
+  shuttingDown = true;
+  const response = await pending;
+  expect(response.status).toBe(503);
+  expect(await response.json()).toMatchObject({ errorCode: 'SERVER_SHUTTING_DOWN', retryable: true });
+  expect(wsAdmission.tryReserve).not.toHaveBeenCalled();
+  expect(server.upgrade).not.toHaveBeenCalled();
+});
+
+test('rejects unauthorized clients, unknown executors, and unrelated routes', async () => {
+  const server = { upgrade: mock(() => true) };
   expect((await fixture({ authDisabled: false }).handler(request(), server)).status).toBe(401);
   expect((await fixture().handler(request('/executor/123'), server)).status).toBe(404);
   expect((await fixture().handler(request('/unrelated'), server)).status).toBe(404);

@@ -1,6 +1,6 @@
 import { CommandLedger } from '../../commands/command-ledger.js';
 import { ChatCommandService } from '../../commands/chat-command-service.js';
-import { forkChatFileCopy } from '../../chats/fork-chat.js';
+import { createForkedChat } from '../../chats/fork-chat.js';
 import { ChatListProjector } from '../../chats/chat-list-projector.js';
 import { inspectProjectDirectory } from '../../__tests__/project-inspector.ts';
 
@@ -35,7 +35,7 @@ export function createRouteCommandService({
 	commandLedger,
 	handoffs,
 	chatListProjector,
-  forkChatFileCopy: forkChatFileCopyOverride,
+  createForkedChat: createForkedChatOverride,
   ownership,
   transientFeeds,
 }) {
@@ -123,7 +123,7 @@ export function createRouteCommandService({
 			};
 		},
 	},
-    forkChatFileCopy: forkChatFileCopyOverride ?? forkChatFileCopy,
+    createForkedChat: createForkedChatOverride ?? createForkedChat,
     transcripts,
   });
 }

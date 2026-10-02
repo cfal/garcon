@@ -1,6 +1,6 @@
 import { describe, expect, it, mock } from 'bun:test';
 import { UserMessage, AssistantMessage, ErrorMessage } from '../../../../common/chat-types.js';
-import { forkChatFileCopy } from '../fork-chat.js';
+import { createForkedChat } from '../fork-chat.js';
 import { transcriptViewId } from '../../ledger/contracts.js';
 import { createPreamblePrefix } from '../../../../common/preamble-prefix.js';
 
@@ -120,7 +120,7 @@ function makeDeps(overrides = {}) {
   };
 }
 
-describe('forkChatFileCopy', () => {
+describe('createForkedChat', () => {
   it('[TLV5-FORK.05-CORE-UNIT-01] builds the frozen target ledger before registering the chat', async () => {
     const deps = makeDeps({ source: sourceSession({ agentSessionId: null, nativeSession: null }) });
     const order = [];
@@ -134,7 +134,7 @@ describe('forkChatFileCopy', () => {
       return true;
     });
 
-    await forkChatFileCopy({
+    await createForkedChat({
       sourceSession: deps.sessions.get('source-chat'),
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',
@@ -173,7 +173,7 @@ describe('forkChatFileCopy', () => {
       flushEntered.resolve();
       await releaseFlush.promise;
     });
-    const outcome = forkChatFileCopy({
+    const outcome = createForkedChat({
       sourceSession: deps.sessions.get('source-chat'),
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',
@@ -198,7 +198,7 @@ describe('forkChatFileCopy', () => {
   it('copies only rows through the selected ordinal', async () => {
     const deps = makeDeps({ source: sourceSession({ agentSessionId: null, nativeSession: null }) });
 
-    await forkChatFileCopy({
+    await createForkedChat({
       sourceSession: deps.sessions.get('source-chat'),
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',
@@ -228,7 +228,7 @@ describe('forkChatFileCopy', () => {
       },
     });
 
-    await forkChatFileCopy({
+    await createForkedChat({
       sourceSession: deps.sessions.get('source-chat'),
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',
@@ -243,7 +243,7 @@ describe('forkChatFileCopy', () => {
   it('resolves a core-authored row to the provider row before it', async () => {
     const deps = makeDeps();
 
-    await forkChatFileCopy({
+    await createForkedChat({
       sourceSession: deps.sessions.get('source-chat'),
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',
@@ -273,7 +273,7 @@ describe('forkChatFileCopy', () => {
       ],
     });
 
-    await forkChatFileCopy({
+    await createForkedChat({
       sourceSession: deps.sessions.get('source-chat'),
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',
@@ -298,7 +298,7 @@ describe('forkChatFileCopy', () => {
   it('materializes a native session while retaining the ledger prefix', async () => {
     const deps = makeDeps();
 
-    const result = await forkChatFileCopy({
+    const result = await createForkedChat({
       sourceSession: deps.sessions.get('source-chat'),
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',
@@ -337,7 +337,7 @@ describe('forkChatFileCopy', () => {
     const discardForkedAgentSession = mock(async () => undefined);
     const deps = makeDeps({ forkAgentSession, discardForkedAgentSession });
 
-    await expect(forkChatFileCopy({
+    await expect(createForkedChat({
       sourceSession: deps.sessions.get('source-chat'),
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',
@@ -362,7 +362,7 @@ describe('forkChatFileCopy', () => {
       }),
     });
 
-    await expect(forkChatFileCopy({
+    await expect(createForkedChat({
       sourceSession: deps.sessions.get('source-chat'),
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',
@@ -384,7 +384,7 @@ describe('forkChatFileCopy', () => {
       }),
     });
 
-    await expect(forkChatFileCopy({
+    await expect(createForkedChat({
       sourceSession: deps.sessions.get('source-chat'),
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',
@@ -401,7 +401,7 @@ describe('forkChatFileCopy', () => {
     const streamed = { ...providerRow(3, 'streaming'), providerMeta: null };
     const deps = makeDeps({ rows: [userRow(1, 'first'), providerRow(2, 'answer'), streamed] });
 
-    await forkChatFileCopy({
+    await createForkedChat({
       sourceSession: deps.sessions.get('source-chat'),
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',
@@ -422,7 +422,7 @@ describe('forkChatFileCopy', () => {
       forkAgentSession: mock(async () => ({ kind: 'unmaterialized' })),
     });
 
-    await expect(forkChatFileCopy({
+    await expect(createForkedChat({
       sourceSession: deps.sessions.get('source-chat'),
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',
@@ -443,7 +443,7 @@ describe('forkChatFileCopy', () => {
       forkAgentSession: mock(async () => ({ kind: 'unmaterialized' })),
     });
 
-    const result = await forkChatFileCopy({
+    const result = await createForkedChat({
       sourceSession: deps.sessions.get('source-chat'),
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',
@@ -474,7 +474,7 @@ describe('forkChatFileCopy', () => {
       }),
     });
 
-    await forkChatFileCopy({
+    await createForkedChat({
       sourceSession: deps.sessions.get('source-chat'),
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',
@@ -512,14 +512,14 @@ describe('forkChatFileCopy', () => {
       ...deps,
     };
 
-    await expect(forkChatFileCopy(request)).rejects.toMatchObject({
+    await expect(createForkedChat(request)).rejects.toMatchObject({
       code: 'TRANSCRIPT_NOT_YET_PERSISTED',
       status: 409,
       retryable: true,
     });
     expect(deps.registry.addChat).not.toHaveBeenCalled();
 
-    const result = await forkChatFileCopy(request);
+    const result = await createForkedChat(request);
 
     expect(result.agentSessionId).toBe('target-native-after-retry');
     expect(deps.forkAgentSession).toHaveBeenCalledTimes(2);
@@ -534,7 +534,7 @@ describe('forkChatFileCopy', () => {
     ];
     const deps = makeDeps({ readForkedNativeHistory: mock(async () => imported) });
 
-    await forkChatFileCopy({
+    await createForkedChat({
       sourceSession: deps.sessions.get('source-chat'),
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',
@@ -579,7 +579,7 @@ describe('forkChatFileCopy', () => {
     const readForkedNativeHistory = mock(async () => []);
     const deps = makeDeps({ rows: [notice, input], readForkedNativeHistory });
 
-    await forkChatFileCopy({
+    await createForkedChat({
       sourceSession: deps.sessions.get('source-chat'),
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',
@@ -627,7 +627,7 @@ describe('forkChatFileCopy', () => {
           : { source: sourceSession({ agentSessionId: null, nativeSession: null }) }),
       });
 
-      await expect(forkChatFileCopy({
+      await expect(createForkedChat({
         sourceSession: deps.sessions.get('source-chat'),
         sourceChatId: 'source-chat',
         targetChatId: 'target-chat',
@@ -657,7 +657,7 @@ describe('forkChatFileCopy', () => {
       },
     });
 
-    await forkChatFileCopy({
+    await createForkedChat({
       sourceSession: deps.sessions.get('source-chat'),
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',
@@ -678,7 +678,7 @@ describe('forkChatFileCopy', () => {
       readForkedNativeHistory: mock(async () => { throw new Error('history unreadable'); }),
     });
 
-    await expect(forkChatFileCopy({
+    await expect(createForkedChat({
       sourceSession: deps.sessions.get('source-chat'),
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',
@@ -704,7 +704,7 @@ describe('forkChatFileCopy', () => {
       }),
     });
 
-    await expect(forkChatFileCopy({
+    await expect(createForkedChat({
       sourceSession: deps.sessions.get('source-chat'),
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',
@@ -721,7 +721,7 @@ describe('forkChatFileCopy', () => {
   it('rejects a point beyond the ledger watermark before creating artifacts', async () => {
     const deps = makeDeps();
 
-    await expect(forkChatFileCopy({
+    await expect(createForkedChat({
       sourceSession: deps.sessions.get('source-chat'),
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',
@@ -737,7 +737,7 @@ describe('forkChatFileCopy', () => {
     const deps = makeDeps();
     deps.registry.addChat.mockReturnValue(false);
 
-    await expect(forkChatFileCopy({
+    await expect(createForkedChat({
       sourceSession: deps.sessions.get('source-chat'),
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',
@@ -751,7 +751,7 @@ describe('forkChatFileCopy', () => {
   it('rolls back registry, ledger, presentation, and native artifacts once', async () => {
     const deps = makeDeps();
     const sourceBefore = structuredClone(deps.sessions.get('source-chat'));
-    const result = await forkChatFileCopy({
+    const result = await createForkedChat({
       sourceSession: deps.sessions.get('source-chat'),
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',
@@ -778,7 +778,7 @@ describe('forkChatFileCopy', () => {
       throw new Error('registry flush failed');
     });
 
-    await expect(forkChatFileCopy({
+    await expect(createForkedChat({
       sourceSession: deps.sessions.get('source-chat'),
       sourceChatId: 'source-chat',
       targetChatId: 'target-chat',

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { assistantContents, userContents } from '../../support/chat-assertions.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 describe('Anthropic chat lifecycle', () => {
   test('starts, resumes, persists, and rehydrates direct Anthropic history', async () => {
@@ -84,10 +85,10 @@ describe('Anthropic chat lifecycle', () => {
         { model: 'integration-anthropic-echo', stream: true },
         'Anthropic Stream Title',
       );
-      await expect(fixture.client.generateChatTitle({
+      expect(await fixture.client.generateChatTitle({
         chatId,
         message: 'anthropic-title-source',
-      })).resolves.toEqual({
+      })).toEqual({
         success: true,
         chatId,
         title: 'Anthropic Stream Title',
@@ -106,10 +107,10 @@ describe('Anthropic chat lifecycle', () => {
         model: 'integration-anthropic-echo',
         stream: true,
       });
-      await expect(fixture.client.generateChatTitle({
+      expect(await rejectionOf(fixture.client.generateChatTitle({
         chatId,
         message: 'anthropic-truncated-title',
-      })).rejects.toMatchObject({ status: 502 });
+      }))).toMatchObject({ status: 502 });
 
       const chats = await fixture.client.listChats();
       expect(chats.sessions.find((chat) => chat.id === chatId)?.title).toBe(

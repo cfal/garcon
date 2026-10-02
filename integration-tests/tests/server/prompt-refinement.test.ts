@@ -7,6 +7,7 @@ import {
   assertSensitiveValuesNotPersisted,
   withIntegrationFixture,
 } from '../../support/integration-fixture.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 describe('prompt refinement', () => {
   test.each(['prompt', 'ticket-description', 'ticket-comment'] as const)('refines %s using the saved target and complete template', async (refinementTarget) => {
@@ -100,7 +101,7 @@ describe('prompt refinement', () => {
 
       expect((await held.received).lastUserText).toBe(expectedModelPrompt);
       expect(held.releaseText('Review {{chat_id}} in {{project_path}}.')).toBe(true);
-      await expect(response).rejects.toMatchObject({
+      expect(await rejectionOf(response)).toMatchObject({
         status: 502,
         body: { errorCode: 'PROMPT_REFINEMENT_TOKEN_SIGNATURE_CHANGED' },
       });

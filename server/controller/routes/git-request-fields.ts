@@ -1,3 +1,4 @@
+import { GIT_DIFF_LIMITS } from '../../runtime/git/types.js';
 import { GIT_MAX_REQUEST_BYTES } from '../../../common/git-execution.js';
 import { GIT_REQUEST_FIELDS } from '../../../common/git-request-validation.js';
 import { GitServiceError } from '../../../common/git-error.js';
@@ -9,6 +10,20 @@ import { withJsonBody } from '../lib/json-route.js';
 import { executorIdFromValue } from './executor-target.js';
 import { gitRouteFailure } from './git-executor-service.js';
 import type { JsonBody } from './route-helpers.js';
+
+export function validContextLines(value: unknown): number | null {
+  const context = typeof value === 'number' ? value : Number(value ?? 5);
+  if (!Number.isInteger(context) || context < 0 || context > GIT_DIFF_LIMITS.maxContextLines) {
+    return null;
+  }
+  return context;
+}
+
+export function validPositiveLimit(value: unknown, fallback: number, max: number): number | null {
+  const limit = value === null || value === undefined ? fallback : Number(value);
+  if (!Number.isInteger(limit) || limit <= 0 || limit > max) return null;
+  return limit;
+}
 
 export function validateGitHttpFields(method: GitMethod, input: unknown, extra: readonly string[] = []): void {
   const fields: readonly string[] = ['executorId', 'project', ...GIT_REQUEST_FIELDS[method], ...extra,

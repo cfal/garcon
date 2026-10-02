@@ -5,7 +5,7 @@ import type {
   ForkRunCommandResponse,
 } from '../../../common/chat-command-contracts.js';
 import type { ChatRegistryEntry } from '../chats/registry-contracts.js';
-import { rollbackForkTarget, type ForkChatFileCopyResult } from '../chats/fork-chat.js';
+import { rollbackForkTarget, type ForkedChatResult } from '../chats/fork-chat.js';
 import { commandLedgerKey, PRE_SCHEDULE_FAILURE_ERROR_CODE } from './command-ledger.js';
 import {
   CommandSupport,
@@ -169,7 +169,7 @@ export class ForkCommands {
         };
       }
 
-      let forkResult: ForkChatFileCopyResult | null = null;
+      let forkResult: ForkedChatResult | null = null;
       const result = await this.support.scheduleAcceptedHttpRun(ledger, input, {
         clientRequestId,
         clientMessageId,
@@ -240,7 +240,7 @@ export class ForkCommands {
     if (sourceChatId === targetChatId) {
       throw new CommandValidationError('VALIDATION_FAILED', 'sourceChatId and chatId must differ');
     }
-    if (!this.deps.forkChatFileCopy) {
+    if (!this.deps.createForkedChat) {
       throw new CommandValidationError('UNSUPPORTED_AGENT', 'Forking is not configured on this server', 503, true);
     }
 
@@ -334,12 +334,12 @@ export class ForkCommands {
   private async forkChatFromContext(
     context: ForkContext,
     signal: AbortSignal,
-  ): Promise<ForkChatFileCopyResult> {
-    if (!this.deps.forkChatFileCopy) {
+  ): Promise<ForkedChatResult> {
+    if (!this.deps.createForkedChat) {
       throw new CommandValidationError('UNSUPPORTED_AGENT', 'Forking is not configured on this server', 503, true);
     }
 
-    return this.deps.forkChatFileCopy({
+    return this.deps.createForkedChat({
       sourceSession: context.sourceSession,
       sourceChatId: context.sourceChatId,
       targetChatId: context.targetChatId,

@@ -18,5 +18,6 @@ out
 .ssh
 .config
 .env
+executor.env
 CLAUDE.md
 AGENTS.md

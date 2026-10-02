@@ -11,6 +11,7 @@ import type {
   SnippetsSnapshot,
 } from '../../../common/snippets.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 describe('preamble snippet short names', () => {
   test('expands named preambles with preamble semantics and enforces one namespace', async () => {
@@ -63,14 +64,14 @@ describe('preamble snippet short names', () => {
       });
 
       const snippets = await fixture.client.get<SnippetsSnapshot>('/api/v1/snippets');
-      await expect(fixture.client.post('/api/v1/snippets', {
+      expect(await rejectionOf(fixture.client.post('/api/v1/snippets', {
         expectedRevision: snippets.revision,
         snippet: {
           shortName: 'manual_context',
           template: 'Conflicting snippet',
           defaultArguments: '',
         },
-      })).rejects.toMatchObject({
+      }))).toMatchObject({
         status: 409,
         body: { errorCode: 'SNIPPET_NAME_CONFLICT' },
       });
@@ -79,7 +80,7 @@ describe('preamble snippet short names', () => {
         expectedRevision: snippets.revision,
         snippet: { shortName: 'saved', template: 'Saved snippet', defaultArguments: '' },
       });
-      await expect(fixture.client.post('/api/v1/preambles', {
+      expect(await rejectionOf(fixture.client.post('/api/v1/preambles', {
         expectedRevision: created.snapshot.revision,
         preamble: {
           enabled: true,
@@ -88,18 +89,18 @@ describe('preamble snippet short names', () => {
           content: 'Conflicting preamble',
           scope: { type: 'global' },
         },
-      })).rejects.toMatchObject({
+      }))).toMatchObject({
         status: 409,
         body: { errorCode: 'PREAMBLE_SNIPPET_NAME_CONFLICT' },
       });
       expect(saved.snapshot.snippets).toHaveLength(1);
 
       await fixture.restartGarcon();
-      await expect(fixture.client.post<ExpandSnippetResponse>('/api/v1/snippets/expand', {
+      expect(await fixture.client.post<ExpandSnippetResponse>('/api/v1/snippets/expand', {
         shortName: 'manual_context',
         arguments: { type: 'default' },
         context: { type: 'new-chat', executorId: fixture.client.executorId, chatId, projectPath: unmatchedProject },
-      })).resolves.toMatchObject({
+      })).toMatchObject({
         source: 'preamble',
         sourceId: preamble.id,
         expandedText: `Chat ${chatId} / {{arguments}} / {{project_path}} / {{chat_id}}`,

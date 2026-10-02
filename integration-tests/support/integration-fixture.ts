@@ -689,11 +689,7 @@ export async function withIntegrationFixture<T>(
   options: IntegrationFixtureOptions = {},
 ): Promise<T> {
   const fixture = await createIntegrationFixture(options);
-  let failure: unknown;
-  try {
-    return await run(fixture);
-  } catch (error) {
-    failure = error;
+  const reportFailure = async (error: unknown): Promise<never> => {
     const artifact = await fixture.writeDiagnostics(testName, error).catch(() => null);
     if (options.redactSensitiveDiagnostics) {
       throw redactedFailure(error, artifact, fixture.describe());
@@ -702,11 +698,18 @@ export async function withIntegrationFixture<T>(
       error.message = `${error.message}\nIntegration diagnostics: ${artifact}\n${fixture.describe()}`;
     }
     throw error;
+  };
+  let scenarioFailed = false;
+  try {
+    return await run(fixture);
+  } catch (error) {
+    scenarioFailed = true;
+    return await reportFailure(error);
   } finally {
     try {
       await fixture.dispose();
     } catch (disposeError) {
-      if (failure === undefined) throw disposeError;
+      if (!scenarioFailed) await reportFailure(disposeError);
       console.error(disposeError);
     }
   }

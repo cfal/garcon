@@ -1,4 +1,4 @@
-import { CarryOverTranscriptStore } from '../../server/controller/chats/carryover-transcript-store.js';
+import { CarryOverTranscriptStore } from '../../server/controller/chats/carryover/transcript-store.js';
 
 const initialize = CarryOverTranscriptStore.prototype.initialize;
 CarryOverTranscriptStore.prototype.initialize = async function () {

@@ -20,6 +20,7 @@ import {
   withIntegrationFixture,
 } from '../../support/integration-fixture.js';
 import { waitForPersistedNativeSession } from '../../support/persisted-chat.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 const SUMMARY = 'Objective: ship the fix\n\n    Preserve the current verification plan.';
 const SMALL_TURNS = Array.from({ length: 5 }, (_, index) => `turn-${index}`);
@@ -214,11 +215,11 @@ describe('agent switch compaction', () => {
       const beforeControl = await fixture.client.getExecutionControl(chatId);
       const targetRequestCount = fixture.fakeProviders.anthropic.requests().length;
 
-      await expect(fixture.client.handoffDirectChat({
+      expect(await rejectionOf(fixture.client.handoffDirectChat({
         chatId,
         content: 'compaction required',
         agent: target,
-      })).rejects.toMatchObject({
+      }))).toMatchObject({
         status: 422,
         body: {
           errorCode: 'CARRYOVER_COMPACTION_REQUIRED',
@@ -273,11 +274,11 @@ describe('agent switch compaction', () => {
         'synthetic second compaction failure',
       );
 
-      await expect(fixture.client.handoffDirectChat({
+      expect(await rejectionOf(fixture.client.handoffDirectChat({
         chatId,
         content: 'must fail closed',
         agent: target,
-      })).rejects.toMatchObject({
+      }))).toMatchObject({
         status: 502,
         body: {
           errorCode: 'CARRYOVER_COMPACTION_FAILED',

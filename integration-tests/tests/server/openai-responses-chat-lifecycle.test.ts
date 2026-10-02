@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { AgentRunFailedMessage } from '../../../common/ws-events.js';
 import { assistantContents, userContents } from '../../support/chat-assertions.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 describe('OpenAI Responses chat lifecycle', () => {
   test('starts, resumes, persists, and rehydrates direct Responses history', async () => {
@@ -179,10 +180,10 @@ describe('OpenAI Responses chat lifecycle', () => {
         { lastUserTextIncludes: 'responses-title-source' },
         'Responses Stream Title',
       );
-      await expect(fixture.client.generateChatTitle({
+      expect(await fixture.client.generateChatTitle({
         chatId,
         message: 'responses-title-source',
-      })).resolves.toEqual({
+      })).toEqual({
         success: true,
         chatId,
         title: 'Responses Stream Title',
@@ -201,10 +202,10 @@ describe('OpenAI Responses chat lifecycle', () => {
         { lastUserTextIncludes: 'responses-failed-title' },
         'title generation failed',
       );
-      await expect(fixture.client.generateChatTitle({
+      expect(await rejectionOf(fixture.client.generateChatTitle({
         chatId,
         message: 'responses-failed-title',
-      })).rejects.toMatchObject({
+      }))).toMatchObject({
         status: 502,
         body: { errorCode: 'TITLE_GENERATION_FAILED' },
       });
@@ -213,10 +214,10 @@ describe('OpenAI Responses chat lifecycle', () => {
         { lastUserTextIncludes: 'responses-incomplete-title' },
         'max_output_tokens',
       );
-      await expect(fixture.client.generateChatTitle({
+      expect(await rejectionOf(fixture.client.generateChatTitle({
         chatId,
         message: 'responses-incomplete-title',
-      })).rejects.toMatchObject({
+      }))).toMatchObject({
         status: 502,
         body: { errorCode: 'TITLE_GENERATION_FAILED' },
       });
@@ -224,10 +225,10 @@ describe('OpenAI Responses chat lifecycle', () => {
       fixture.fakeProviders.openAiResponses.respondEmptyNext({
         lastUserTextIncludes: 'responses-empty-title',
       });
-      await expect(fixture.client.generateChatTitle({
+      expect(await rejectionOf(fixture.client.generateChatTitle({
         chatId,
         message: 'responses-empty-title',
-      })).rejects.toMatchObject({
+      }))).toMatchObject({
         status: 422,
         body: { errorCode: 'TITLE_GENERATION_EMPTY' },
       });
@@ -235,10 +236,10 @@ describe('OpenAI Responses chat lifecycle', () => {
       fixture.fakeProviders.openAiResponses.truncateNextStream({
         lastUserTextIncludes: 'responses-truncated-title',
       });
-      await expect(fixture.client.generateChatTitle({
+      expect(await rejectionOf(fixture.client.generateChatTitle({
         chatId,
         message: 'responses-truncated-title',
-      })).rejects.toMatchObject({ status: 502 });
+      }))).toMatchObject({ status: 502 });
 
       const chats = await fixture.client.listChats();
       expect(chats.sessions.find((chat) => chat.id === chatId)?.title).toBe(

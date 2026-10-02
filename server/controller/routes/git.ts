@@ -1,6 +1,6 @@
-import { createGitRouteService, type GitRouteService, type GitServiceResolver } from './git-executor-service.js';
+import { createGitRouteService, type GitServiceResolver } from './git-executor-service.js';
 import { createGitGenerationRoute } from './git-generation.js';
-import { gitJsonBody, gitQuery } from './git-request-fields.js';
+import { gitJsonBody, gitQuery, validContextLines, validPositiveLimit } from './git-request-fields.js';
 import { isGitDocumentRef } from '../../../common/git-request-validation.js';
 import { GIT_OPERATION_TIMEOUT_MS } from '../../../common/git-execution.js';
 import {
@@ -19,7 +19,7 @@ import { isGitRefKind, parseGitRefSort } from '../../../common/git-refs.js';
 import { jsonError, jsonErrorFromUnknown } from '../../common/http-error.js';
 import { asJsonBody, type JsonBody } from './route-helpers.js';
 import { createGitComparisonRoutes } from './git-comparisons.js';
-import { measureGitRoutePhase, traceGitJsonResponse } from './git-route-response.js';
+import { gitJson, measureGitRoutePhase, traceGitJsonResponse } from './git-route-response.js';
 
 type GitMode = 'working' | 'staged';
 type StageMode = 'stage' | 'unstage';
@@ -76,35 +76,10 @@ function validSelection(value: unknown): StageSelectionInput | null {
   return { lineIndices: value.lineIndices };
 }
 
-function validContextLines(value: unknown): number | null {
-  const context = typeof value === 'number' ? value : Number(value ?? 5);
-  if (!Number.isInteger(context) || context < 0 || context > GIT_DIFF_LIMITS.maxContextLines) {
-    return null;
-  }
-  return context;
-}
-
-function validPositiveLimit(value: unknown, fallback: number, max: number): number | null {
-  const limit = value === null || value === undefined ? fallback : Number(value);
-  if (!Number.isInteger(limit) || limit <= 0 || limit > max) return null;
-  return limit;
-}
-
 function validNonNegativeInteger(value: unknown, fallback: number, max: number): number | null {
   const next = value === null || value === undefined ? fallback : Number(value);
   if (!Number.isInteger(next) || next < 0 || next > max) return null;
   return next;
-}
-
-type GitRouteResult = Response | unknown;
-
-async function gitJson(git: GitRouteService, action: () => Promise<GitRouteResult> | GitRouteResult): Promise<Response> {
-  try {
-    const result = await action();
-    return result instanceof Response ? result : Response.json(result);
-  } catch (error) {
-    return git.toHttpError(error);
-  }
 }
 
 function requiredQueryStrings(url: URL, names: string[], message: string): Record<string, string> | Response {
@@ -483,7 +458,6 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
         return gitRouteError('selection.lineIndices must be an array of non-negative integers.', 400);
       }
 
-
       if (!isGitDocumentRef(input.document) || typeof input.bodyFingerprint !== 'string' || typeof input.patchDigest !== 'string') {
         return gitRouteError('A current review document and patch identity are required.', 400);
       }
@@ -518,7 +492,6 @@ export default function createGitRoutes(agents: AgentRegistryServiceContract, se
       if (!isNonNegativeInteger(hunkIndex)) {
         return gitRouteError('hunkIndex must be a non-negative integer.', 400);
       }
-
 
       if (!isGitDocumentRef(input.document) || typeof input.bodyFingerprint !== 'string' || typeof input.patchDigest !== 'string') {
         return gitRouteError('A current review document and patch identity are required.', 400);

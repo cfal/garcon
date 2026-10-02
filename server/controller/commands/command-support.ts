@@ -50,7 +50,7 @@ import { agentRunCommandPayload } from '../agents/agent-run-command-input.js';
 import type { AgentOwnershipJournal } from '../chats/agent-ownership-journal.js';
 import type { AgentHandoffService } from '../agents/agent-handoff-service.js';
 import type { ChatListProjector } from '../chats/chat-list-projector.js';
-import type { ForkChatFileCopyResult } from '../chats/fork-chat.js';
+import type { ForkedChatResult } from '../chats/fork-chat.js';
 import type { RecentTitleIconSource } from '../chats/recent-title-icons.js';
 import type { IChatRegistry } from '../chats/store.js';
 import type { ChatRegistryEntry } from '../chats/registry-contracts.js';
@@ -132,7 +132,7 @@ export type ForkedNativeHistoryReaderDep = (args: {
   preambleEvidence: readonly PreambleHistoryEvidence[];
 }) => Promise<LedgerRowDraft[] | null>;
 
-export type ForkChatFileCopyDep = (args: {
+export type CreateForkedChat = (args: {
   sourceSession: ChatRegistryEntry;
   sourceChatId: string;
   targetChatId: string;
@@ -154,7 +154,7 @@ export type ForkChatFileCopyDep = (args: {
   }) => Promise<ForkedAgentSessionOutcome | null>;
   discardForkedAgentSession: (agentId: string, session: StartedAgentSession) => Promise<void>;
   readForkedNativeHistory: ForkedNativeHistoryReaderDep;
-}) => Promise<ForkChatFileCopyResult>;
+}) => Promise<ForkedChatResult>;
 
 export interface FileMentionResolverDep {
   resolve(command: string, projectPath: string, executorId?: string | null, options?: { readonly signal?: AbortSignal }): Promise<string>;
@@ -170,7 +170,7 @@ export interface ChatCommandServiceDeps {
   agents: AgentRegistryDep;
   fileMentions: FileMentionResolverDep;
   inspectProject: ProjectInspector;
-  forkChatFileCopy: ForkChatFileCopyDep;
+  createForkedChat: CreateForkedChat;
   readForkedNativeHistory: ForkedNativeHistoryReaderDep;
   transcripts: TranscriptLedgerService;
   chatListProjector: Pick<ChatListProjector, 'buildOne'>;

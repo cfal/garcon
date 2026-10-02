@@ -7,12 +7,8 @@ export type WebSocketAdmissionResult =
   | { ok: true }
   | { ok: false; reason: WebSocketAdmissionRejection };
 
-interface Reservation {
-  status: 'pending' | 'active';
-}
-
 export class WebSocketAdmissionController {
-  readonly #reservations = new Map<string, Reservation>();
+  readonly #reservations = new Set<string>();
 
   constructor(readonly maxConnections: number) {
     if (!Number.isInteger(maxConnections) || maxConnections < 1) {
@@ -27,14 +23,12 @@ export class WebSocketAdmissionController {
   tryReserve(connectionId: string): WebSocketAdmissionResult {
     if (this.#reservations.has(connectionId)) return { ok: false, reason: 'duplicate-connection' };
     if (this.#reservations.size >= this.maxConnections) return { ok: false, reason: 'hard-capacity' };
-    this.#reservations.set(connectionId, { status: 'pending' });
+    this.#reservations.add(connectionId);
     return { ok: true };
   }
 
   confirm(connectionId: string): WebSocketAdmissionResult {
-    const reservation = this.#reservations.get(connectionId);
-    if (!reservation) return { ok: false, reason: 'unknown-reservation' };
-    reservation.status = 'active';
+    if (!this.#reservations.has(connectionId)) return { ok: false, reason: 'unknown-reservation' };
     return { ok: true };
   }
 

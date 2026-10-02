@@ -6,7 +6,7 @@ import { UserMessage } from '../../../../common/chat-types.ts';
 import createShareRoutes from '../shares.ts';
 import { isNoAuthHandler } from '../../lib/http-route.ts';
 import { DomainError } from '../../../common/domain-error.ts';
-import { renderSharedChatText } from '../../chats/share-transcript.ts';
+import { renderSharedChatText } from '../../chats/shares/transcript.ts';
 import { decodeStoredLedgerRow } from '../../ledger/codec.ts';
 import { LedgerFencedError } from '../../ledger/errors.ts';
 import { storedProviderRows, storedSnapshotReader } from '../../ledger/__tests__/stored-rows.ts';

@@ -3,6 +3,7 @@ import type { ChatCanvas, CanvasListResponse, CanvasContent } from '../../../com
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { writeFile, readFile, mkdir, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 describe('chat canvas API', () => {
   test('keeps healthy boards available beside unreadable filesystem entries', async () => {
@@ -16,8 +17,8 @@ describe('chat canvas API', () => {
       expect(catalog.canvases.map((entry) => entry.id)).toEqual(['healthy']);
       expect(catalog.unavailableIds).toEqual(['directory', 'loop']);
       for (const id of catalog.unavailableIds) {
-        await expect(fixture.client.get(`${endpoint}?id=${id}`)).rejects.toMatchObject({ status: 500 });
-        await expect(fixture.client.post(endpoint, { id, content })).rejects.toMatchObject({ status: 500 });
+        expect(await rejectionOf(fixture.client.get(`${endpoint}?id=${id}`))).toMatchObject({ status: 500 });
+        expect(await rejectionOf(fixture.client.post(endpoint, { id, content }))).toMatchObject({ status: 500 });
       }
       expect((await fixture.client.get<CanvasListResponse>(endpoint)).unavailableIds).toEqual(['directory', 'loop']);
     });
@@ -34,15 +35,15 @@ describe('chat canvas API', () => {
       expect(created.revision).toBe(1);
       const changed = { ...content, title: 'Revised work' };
       const updated = await fixture.client.put<ChatCanvas>(endpoint, { id: created.id, expectedRevision: 1, content: changed });
-      await expect(fixture.client.put(endpoint, { id: created.id, expectedRevision: 1, content })).rejects.toMatchObject({ status: 409 });
-      await expect(fixture.client.put(endpoint, { id: created.id, expectedRevision: 2, content: { ...changed, nodes: [content.nodes[1]] } })).rejects.toMatchObject({ status: 400 });
-      await expect(fixture.client.get(`${endpoint}?id=..%2Foutside`)).rejects.toMatchObject({ status: 400 });
+      expect(await rejectionOf(fixture.client.put(endpoint, { id: created.id, expectedRevision: 1, content }))).toMatchObject({ status: 409 });
+      expect(await rejectionOf(fixture.client.put(endpoint, { id: created.id, expectedRevision: 2, content: { ...changed, nodes: [content.nodes[1]] } }))).toMatchObject({ status: 400 });
+      expect(await rejectionOf(fixture.client.get(`${endpoint}?id=..%2Foutside`))).toMatchObject({ status: 400 });
       await fixture.restartGarcon();
       expect(await fixture.client.get<ChatCanvas>(`${endpoint}?id=${created.id}`)).toEqual(updated);
       expect((await fixture.client.get<CanvasListResponse>(endpoint)).canvases).toEqual([
         { id: created.id, title: changed.title, revision: 2, updatedAt: updated.updatedAt },
       ]);
-      await expect(fixture.client.delete(endpoint, { id: created.id, expectedRevision: 1 })).rejects.toMatchObject({ status: 409 });
+      expect(await rejectionOf(fixture.client.delete(endpoint, { id: created.id, expectedRevision: 1 }))).toMatchObject({ status: 409 });
       await fixture.client.delete(endpoint, { id: created.id, expectedRevision: 2 });
       expect((await fixture.client.get<CanvasListResponse>(endpoint)).canvases).toEqual([]);
 
@@ -52,7 +53,7 @@ describe('chat canvas API', () => {
       expect(await fixture.client.get<CanvasListResponse>(endpoint)).toEqual({ canvases: [], unavailableIds: ['damaged'] });
       const healthy = await fixture.client.post<ChatCanvas>(endpoint, { id: 'healthy', content });
       expect((await fixture.client.get<CanvasListResponse>(endpoint)).canvases[0].id).toBe(healthy.id);
-      await expect(fixture.client.put(endpoint, { id: 'damaged', expectedRevision: 1, content })).rejects.toMatchObject({ status: 500 });
+      expect(await rejectionOf(fixture.client.put(endpoint, { id: 'damaged', expectedRevision: 1, content }))).toMatchObject({ status: 500 });
       expect(await readFile(damaged, 'utf8')).toBe('{broken');
     });
   });

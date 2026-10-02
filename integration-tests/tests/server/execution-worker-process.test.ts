@@ -10,6 +10,7 @@ import { connectRemoteExecutor } from '../../../server/remote/__tests__/runtime-
 import { ExecutorRpc } from '../../../server/remote/transport/rpc.js';
 import { discoverRuntime } from '../../../cli/discovery.js';
 import { withTimeout } from '../../support/deferred.js';
+import { rejectionOf, throwingRejectionOf } from '../../support/promise-assertions.js';
 
 for (const ending of ['shutdown', 'intentional crash', 'unexpected exit'] as const) {
   test(`worker harness retains exit classification after connection: ${ending}`, async () => {
@@ -37,10 +38,10 @@ for (const ending of ['shutdown', 'intentional crash', 'unexpected exit'] as con
       if (ending === 'unexpected exit') {
         worker.child.kill('SIGKILL');
         await worker.child.exited;
-        await expect(worker.stop()).rejects.toThrow('Execution worker exited');
+        expect(await throwingRejectionOf(worker.stop())).toThrow('Execution worker exited');
       } else {
         if (ending === 'intentional crash') await worker.crash();
-        await expect(worker.stop()).resolves.toBeUndefined();
+        expect(await worker.stop()).toBeUndefined();
       }
     } finally {
       await controller?.dispose();
@@ -85,13 +86,11 @@ test('re-adding a running worker under a new executor identity requires restarti
           reverseCalls.push(call.method);
           return { serverInstanceId: 'synthetic-controller', defaultExecutorId: executorId, workspaceName: null };
         });
-        await expect(discoverRuntime({ configDir: directories.config, runtime: 'executor' }))
-          .rejects.toThrow('HTTP 503');
+        expect(await throwingRejectionOf(discoverRuntime({ configDir: directories.config, runtime: 'executor' }))).toThrow('HTTP 503');
         expect(reverseCalls).toEqual([]);
         const description = await rpc.call('', 'executor.describe', null);
         expect(description.info.executorId).toBe('22222222-2222-4222-8222-222222222222');
-        await expect(rpc.call('', 'projects.inspect', { projectPath: directories.project }))
-          .rejects.toMatchObject({ outcome: 'not-dispatched' });
+        expect(await rejectionOf(rpc.call('', 'projects.inspect', { projectPath: directories.project }))).toMatchObject({ outcome: 'not-dispatched' });
         rpc.retireUnknown();
         unsubscribe();
         const failure = Promise.withResolvers<string>();

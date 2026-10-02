@@ -498,7 +498,7 @@ export async function runOpenCodeProcessSupervisor(argv: string[]): Promise<numb
     state.status = 'stopping';
     state.reason = reason;
     shutdownPromise = (async () => {
-      await writeState().catch(() => undefined);
+      // Diagnostics IO must not consume Garcon's wrapper SIGKILL budget before child cleanup.
       if (provider) {
         exitCode = await stopProviderProcesses({
           provider,

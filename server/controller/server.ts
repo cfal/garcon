@@ -9,7 +9,7 @@ import { wrapRoutes, unhandledRouteErrorResponse } from './lib/http-route.js';
 import { ControllerCliDispatcher } from './executors/cli-dispatcher.js';
 import { createWebSocketUpgradeHandler } from './ws/upgrade.js';
 import { init as initAuthStore } from './auth/store.js';
-import { forkChatFileCopy } from './chats/fork-chat.js';
+import { createForkedChat } from './chats/fork-chat.js';
 import { wireSearchSourceAvailability, wireServerEvents, type ServerEventWiring } from './server-event-wiring.js';
 import { startExecutionControlPlane } from './execution-control-plane.js';
 
@@ -18,7 +18,7 @@ import { ChatIdAllocator } from './chats/chat-id-allocator.js';
 import { migrateWorkspaceChatIds } from './migrations/chat-id-migration.js';
 import { InMemoryLastSelectedChatState } from './chats/last-selected-chat-state.js';
 import { RecentTitleIconStore } from './chats/recent-title-icons.js';
-import { ShareStore } from './chats/share-store.js';
+import { ShareStore } from './chats/shares/store.js';
 import { SettingsStore } from './settings/store.js';
 import { ChatExecutionCoordinator } from './chat-execution/chat-execution-coordinator.js';
 import { InMemoryChatExecutionControlRepository } from './chat-execution/chat-execution-control-repository.js';
@@ -41,8 +41,8 @@ import { AgentRegistry, createForkNativeHistoryReader } from './agents/index.js'
 import {
   CARRYOVER_COMPACTION_STARTED_NOTICE,
   CarryOverCompactionService,
-} from './chats/carryover-compaction.js';
-import { PreparedCarryoverStore } from './chats/prepared-carryover.js';
+} from './chats/carryover/compaction.js';
+import { PreparedCarryoverStore } from './chats/carryover/prepared-store.js';
 import { AgentCommandComposition } from './chats/agent-command-composition.js';
 import { AgentStartSelectionService } from './agents/agent-start-selection-service.js';
 import { defaultAgentIntegrations } from '../runtime/agents/default-agent-integrations.js';
@@ -89,8 +89,8 @@ import { ScheduledPromptScheduler } from './scheduled-prompts/scheduler.js';
 import { ChatListProjector } from './chats/chat-list-projector.js';
 import { ProjectAdmission } from './projects/project-admission.js';
 import { AgentOwnershipJournal } from './chats/agent-ownership-journal.js';
-import { CarryOverGarbageCollector } from './chats/carryover-garbage-collector.js';
-import { CarryOverTranscriptStore } from './chats/carryover-transcript-store.js';
+import { CarryOverGarbageCollector } from './chats/carryover/garbage-collector.js';
+import { CarryOverTranscriptStore } from './chats/carryover/transcript-store.js';
 import {
   finalizeCarryOverMigrationValidation,
   migrateLegacyCarryOverWorkspace,
@@ -102,7 +102,7 @@ import {
 import { AgentHandoffService } from './agents/agent-handoff-service.js';
 import { initializeSnippetAndPreambleServices } from './snippets/setup.js';
 import { ChatPreambleSelectionService } from './preambles/chat-selection-service.js';
-import { createCarriedContext } from './chats/carried-context.js';
+import { createCarriedContext } from './chats/carryover/context.js';
 import { initializeChatBoardRuntime } from './chat-boards/setup.js';
 import { initializeTickets } from './tickets/setup.js';
 import { createTicketProjectResolver } from './tickets/project-default.js';
@@ -592,7 +592,7 @@ export async function startServer(): Promise<void> {
       agents: agentRegistry,
       fileMentions: { resolve: resolveFileMentions },
       inspectProject,
-      forkChatFileCopy,
+      createForkedChat,
       readForkedNativeHistory: createForkNativeHistoryReader({
         integrations: directory,
         carryOver,

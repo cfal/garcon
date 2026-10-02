@@ -16,6 +16,7 @@ import { liveClaudeStartRequest } from '../../support/live-claude.js';
 import { claudeText, claudeToolUse } from '../../support/fake-claude-model.js';
 import { cliRuntimeFile, type RuntimeSelection } from '../../../common/cli-runtime-paths.js';
 import { cliEnvironment } from '../../support/cli-environment.js';
+import { throwingRejectionOf } from '../../support/promise-assertions.js';
 
 const CLI = fileURLToPath(new URL('../../../cli/main.ts', import.meta.url));
 
@@ -69,7 +70,7 @@ for (const backend of ['remote-controller-dials', 'remote-executor-dials'] as co
       const executorId = client.executorId;
       await runtimeFile(fixture);
       const discover = () => discoverRuntime({ configDir: fixture.executionDirs.config });
-      await expect(discover()).rejects.toThrow('HTTP 403');
+      expect(await throwingRejectionOf(discover())).toThrow('HTTP 403');
       await client.patch(`/api/v1/executors/${executorId}`, { allowControllerCli: true });
       const connection = await discover();
       expect(connection).toMatchObject({ defaultExecutorId: executorId, workspaceName: 'cli-executor-integration' });
@@ -121,7 +122,7 @@ for (const backend of ['remote-controller-dials', 'remote-executor-dials'] as co
       await fixture.crashAndRestartGarcon({ preserveExecutorWorker: true });
       client = fixture.client;
       expect(await oldInvocation.verifyRuntime()).toBe(false);
-      await expect(oldInvocation.listChats()).rejects.toThrow('restarted');
+      expect(await throwingRejectionOf(oldInvocation.listChats())).toThrow('restarted');
       const restarted = await discover();
       expect(restarted.endpointInstanceId).toBe(connection.endpointInstanceId);
       expect(restarted.instanceId).not.toBe(connection.instanceId);

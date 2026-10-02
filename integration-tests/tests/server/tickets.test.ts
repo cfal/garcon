@@ -7,6 +7,7 @@ import { parseTicketBootstrap, parseTicketCommentsPage, parseTicketDetail, parse
   parseTicketProjectDefault } from '../../../common/ticket-responses.js';
 import type { TicketsInvalidatedMessage } from '../../../common/ws-events.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 describe('persistent Tickets integration', () => {
   test('shares attributed mutations, invalidates after commit, and retries across restart and chat deletion', async () => {
@@ -50,9 +51,9 @@ describe('persistent Tickets integration', () => {
       const claimed = parseTicketWriteResult(await fixture.client.post('/api/v1/tickets/mutate', claimRequest));
       expect(claimed.ticket.assignee).toEqual({ kind: 'chat', chatId });
       expect(claimed.ticket.status).toBe('in-progress');
-      await expect(fixture.client.post('/api/v1/tickets/mutate', request({
+      expect(await rejectionOf(fixture.client.post('/api/v1/tickets/mutate', request({
         action: 'claim', ticketId: first.ticket.id, expectedRevision: linked.ticket.revision,
-      }))).rejects.toMatchObject({ status: 409, body: { errorCode: 'TICKET_REVISION_CONFLICT' } });
+      })))).toMatchObject({ status: 409, body: { errorCode: 'TICKET_REVISION_CONFLICT' } });
       const commentRequest = request({ action: 'comment', ticketId: first.ticket.id, body: 'Synthetic discussion' }, chatId);
       const comment = parseTicketWriteResult(await fixture.client.post('/api/v1/tickets/mutate', commentRequest));
       expect(comment.comment?.author).toMatchObject({ kind: 'user', declaredChatId: chatId });
@@ -92,8 +93,7 @@ describe('persistent Tickets integration', () => {
       expect(second.ticket.id).toBe(first.ticket.id);
       const stale: HttpTicketMutationRequest = { requestId: crypto.randomUUID(), expectedStoreId: bootstrap.storeId,
         payload: { action: 'update', ticketId: first.ticket.id, expectedRevision: 1, patch: { title: 'Wrong store' } } };
-      await expect(fixture.client.post('/api/v1/tickets/mutate', stale))
-        .rejects.toMatchObject({ status: 409, body: { errorCode: 'TICKET_STORE_CHANGED' } });
+      expect(await rejectionOf(fixture.client.post('/api/v1/tickets/mutate', stale))).toMatchObject({ status: 409, body: { errorCode: 'TICKET_STORE_CHANGED' } });
       expect(parseTicketPage(await fixture.client.get('/api/v1/tickets')).items[0]?.title).toBe('Synthetic ticket');
     });
   });

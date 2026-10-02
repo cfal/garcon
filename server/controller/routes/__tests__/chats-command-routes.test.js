@@ -45,12 +45,12 @@ mock.module('../../chats/title-generator.js', () => ({
 }));
 
 mock.module('../../chats/fork-chat.js', () => ({
-  forkChatFileCopy: mock(() => Promise.resolve({})),
+  createForkedChat: mock(() => Promise.resolve({})),
 }));
 
 import createChatRoutes from '../chats.js';
 import { parseJsonBody } from '../../../common/http-body.js';
-import { forkChatFileCopy } from '../../chats/fork-chat.js';
+import { createForkedChat } from '../../chats/fork-chat.js';
 import { CommandValidationError } from '../../lib/command-validation-error.js';
 import { ModelSelectionError } from '../../api-providers/endpoint-resolver.js';
 import { DomainError, TRANSCRIPT_TEMPORARILY_UNAVAILABLE_MESSAGE } from '../../../common/domain-error.js';
@@ -470,8 +470,8 @@ function createRouteAgent(sessionOverrides = {}) {
       agents,
       commandLedger,
       chatListProjector,
-      forkChatFileCopy: async (args) => {
-        await forkChatFileCopy(args);
+      createForkedChat: async (args) => {
+        await createForkedChat(args);
         const { sourceSession, targetChatId } = args;
         registry.addChat({
           ...sourceSession,
@@ -554,7 +554,7 @@ describe('REST chat command routes', () => {
     await fs.mkdir(testBasePath, { recursive: true });
     await fs.mkdir(workspaceDir, { recursive: true });
     parseJsonBody.mockClear();
-    forkChatFileCopy.mockClear();
+    createForkedChat.mockClear();
     routeLogger.debug.mockClear();
     routeLogger.info.mockClear();
     routeLogger.warn.mockClear();
@@ -861,8 +861,8 @@ describe('REST chat command routes', () => {
       id: TARGET_CHAT_ID,
       orderGroup: 'normal',
     });
-    expect(forkChatFileCopy).toHaveBeenCalledTimes(1);
-    expect(forkChatFileCopy.mock.calls[0][0].signal).toBeInstanceOf(AbortSignal);
+    expect(createForkedChat).toHaveBeenCalledTimes(1);
+    expect(createForkedChat.mock.calls[0][0].signal).toBeInstanceOf(AbortSignal);
     expect(server.timeout).toHaveBeenCalledWith(request, 0);
     expect(agent.queue.registerPendingUserInput).toHaveBeenCalledWith(
       TARGET_CHAT_ID,
@@ -890,7 +890,7 @@ describe('REST chat command routes', () => {
 
     expect(response.status).toBe(202);
     expect(body.chatId).toBe(TARGET_CHAT_ID);
-    expect(forkChatFileCopy).toHaveBeenCalledOnce();
+    expect(createForkedChat).toHaveBeenCalledOnce();
     expect(agent.queue.registerPendingUserInput).toHaveBeenCalledOnce();
   });
 
@@ -910,7 +910,7 @@ describe('REST chat command routes', () => {
     });
 
     expect(accepted.response.status).toBe(202);
-    expect(forkChatFileCopy).toHaveBeenCalledWith(
+    expect(createForkedChat).toHaveBeenCalledWith(
       expect.objectContaining({ allowHandoffFork: true }),
     );
 
@@ -926,7 +926,7 @@ describe('REST chat command routes', () => {
   it('POST /fork disables the Bun idle timeout and preserves retryable refusals', async () => {
     const agent = createRouteAgent();
     const server = { timeout: mock(() => undefined) };
-    forkChatFileCopy.mockRejectedValueOnce(new CommandValidationError(
+    createForkedChat.mockRejectedValueOnce(new CommandValidationError(
       'TRANSCRIPT_NOT_YET_PERSISTED',
       "This chat's transcript hasn't been written yet. Try the fork again in a moment.",
       409,
@@ -945,7 +945,7 @@ describe('REST chat command routes', () => {
       errorCode: 'TRANSCRIPT_NOT_YET_PERSISTED',
       retryable: true,
     });
-    expect(forkChatFileCopy.mock.calls.at(-1)[0].signal).toBe(request.signal);
+    expect(createForkedChat.mock.calls.at(-1)[0].signal).toBe(request.signal);
     expect(server.timeout).toHaveBeenCalledWith(request, 0);
   });
 
@@ -959,7 +959,7 @@ describe('REST chat command routes', () => {
     });
 
     expect(accepted.response.status).toBe(200);
-    expect(forkChatFileCopy.mock.calls.at(-1)[0]).toMatchObject({ allowHandoffFork: true });
+    expect(createForkedChat.mock.calls.at(-1)[0]).toMatchObject({ allowHandoffFork: true });
 
     const rejected = await callJson(agent.routes['/api/v1/chats/fork'].POST, {
       sourceChatId: CHAT_ID,

@@ -5,6 +5,7 @@ import type { ChatMessagesMessage, ServerWsMessage } from '../../../common/ws-ev
 import { messagesOfType, userContents } from '../../support/chat-assertions.js';
 import { cliEnvironment } from '../../support/cli-environment.js';
 import { withCliFixture, type IntegrationFixture } from '../../support/cli-fixture.js';
+import { throwingRejectionOf } from '../../support/promise-assertions.js';
 
 const WORKSPACE = 'stop-agent';
 
@@ -79,7 +80,7 @@ for (const creation of ['markup', 'cli'] as const) for (const remove of [false, 
         await fixture.client.waitForEvent((event): event is ServerWsMessage => event.type === 'chat-session-deleted' && event.chatId === child,
           'delegated child deleted', { afterIndex: stopCursor });
         expect((await fixture.client.listChats()).sessions.some((chat) => chat.id === child)).toBe(false);
-        await expect(fixture.client.getMessages(child)).rejects.toThrow();
+        expect(await throwingRejectionOf(fixture.client.getMessages(child))).toThrow();
       } else {
         await fixture.client.waitForSessionStopped(child, { afterIndex: stopCursor });
         expect(userContents((await fixture.client.getMessages(child)).messages)).toEqual(['Synthetic child task.']);

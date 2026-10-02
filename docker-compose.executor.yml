@@ -1,0 +1,44 @@
+services:
+  executor:
+    image: "${GARCON_IMAGE:-garcon:local}"
+    build:
+      context: .
+      args:
+        GARCON_UID: "${GARCON_UID:-1000}"
+        GARCON_GID: "${GARCON_GID:-1000}"
+    init: true
+    restart: unless-stopped
+    command: ["bun", "server/main.ts", "executor", "--project-base-dir", "/projects"]
+    env_file:
+      - path: "${GARCON_EXECUTOR_ENV_FILE:-./executor.env}"
+        format: raw
+    environment:
+      GARCON_RUNTIME: executor
+    volumes:
+      - executor-data:/home/garcon/.garcon
+      - executor-agent-config:/home/garcon/.config
+      - executor-agents-home:/home/garcon/.agents
+      - executor-claude-home:/home/garcon/.claude
+      - executor-codex-home:/home/garcon/.codex
+      - executor-cursor-home:/home/garcon/.cursor
+      - executor-factory-home:/home/garcon/.factory
+      - executor-pi-home:/home/garcon/.pi
+      - executor-opencode-data:/home/garcon/.local/share/opencode
+      - executor-opencode-state:/home/garcon/.local/state/opencode
+      - executor-amp-data:/home/garcon/.local/share/amp
+      - executor-ssh-home:/home/garcon/.ssh
+      - "${GARCON_PROJECT_DIR:?Set GARCON_PROJECT_DIR to the directory containing your repositories}:/projects"
+
+volumes:
+  executor-data:
+  executor-agent-config:
+  executor-agents-home:
+  executor-claude-home:
+  executor-codex-home:
+  executor-cursor-home:
+  executor-factory-home:
+  executor-pi-home:
+  executor-opencode-data:
+  executor-opencode-state:
+  executor-amp-data:
+  executor-ssh-home:

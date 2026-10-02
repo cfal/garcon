@@ -10,7 +10,7 @@ import {
   type ChatMessage,
   UserMessage,
 } from '../../../common/chat-types.js';
-import { encodeCarryOverPages } from '../../../server/controller/chats/carryover-page-codec.js';
+import { encodeCarryOverPages } from '../../../server/controller/chats/carryover/page-codec.js';
 import { rollbackLegacyCarryOverMigration } from '../../../server/controller/migrations/carryover/chat-carryover-rollback.js';
 import { ChatRegistry } from '../../../server/controller/chats/store.js';
 import { transcriptViewId } from '../../../server/controller/ledger/contracts.js';
@@ -21,6 +21,7 @@ import {
   type IntegrationFixture,
   withIntegrationFixture,
 } from '../../support/integration-fixture.js';
+import { throwingRejectionOf } from '../../support/promise-assertions.js';
 
 const CHAT_ID = '1786120000000001';
 const POST_MIGRATION_CHAT_ID = '1786120000000002';
@@ -157,8 +158,7 @@ describe('carryover bootstrap migration', () => {
             });
             await registry.flush();
 
-            await expect(rollbackLegacyCarryOverMigration(fixture.dirs.workspace))
-              .rejects.toThrow('unsafe after the registry changed');
+            expect(await throwingRejectionOf(rollbackLegacyCarryOverMigration(fixture.dirs.workspace))).toThrow('unsafe after the registry changed');
           },
         });
 

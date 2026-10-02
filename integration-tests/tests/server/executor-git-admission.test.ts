@@ -5,6 +5,7 @@ import { GIT_MAX_CONCURRENT_QUERIES, type ExecutionGitResults } from '../../../c
 import { withTimeout } from '../../support/deferred.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { initializeFixtureRepository } from '../../support/git-fixture.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote-executor-dials'] as const) {
   test(`Git admits a bounded burst of concurrent metadata reads (${executionBackend})`, async () => {
@@ -37,7 +38,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         try {
           await withTimeout(entered.promise, 10_000, () => 'Concurrent Git reads did not reach their native probes');
           expect(arrivals).toBe(8);
-          await expect(client.get(endpoint)).rejects.toMatchObject({ status: 503, body: { errorCode: 'GIT_SERVICE_BUSY' } });
+          expect(await rejectionOf(client.get(endpoint))).toMatchObject({ status: 503, body: { errorCode: 'GIT_SERVICE_BUSY' } });
           expect(arrivals).toBe(8);
         } finally {
           holding = false;

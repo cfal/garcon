@@ -32,6 +32,7 @@ import {
   reloadUntilNativeContains,
 } from '../../support/live-agent.js';
 import { waitForPersistedNativeSession } from '../../support/persisted-chat.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 const HELD_PROMPT = 'native-reload-held-turn';
 
@@ -262,11 +263,11 @@ describe('native transcript reload', () => {
       expect(sharedAfterReload).toEqual(sharedBeforeReload);
       expect(JSON.stringify(sharedAfterReload.snapshot.messages)).not.toContain(externalContent);
       for (const replaced of [beforeDrift, reloaded]) {
-        await expect(fixture.client.subscribe(
+        expect(await rejectionOf(fixture.client.subscribe(
           chatId,
           replaced.transcriptViewId,
           replaced.lastOrdinal,
-        )).rejects.toMatchObject({
+        ))).toMatchObject({
           response: {
             requestType: 'chat-subscribe',
             code: 'STALE_TRANSCRIPT_VIEW',
@@ -427,12 +428,12 @@ describe('native transcript reload', () => {
       expect(reloadEvents.indexOf(progress.at(-1)!)).toBeLessThan(reloadEvents.indexOf(result!));
       const reloaded = await fixture.client.getMessages(chatId);
       expect(reloaded.transcriptViewId).not.toBe(beforeInjection.transcriptViewId);
-      await expect(fixture.client.subscribe(
+      expect(await rejectionOf(fixture.client.subscribe(
         chatId,
         beforeInjection.transcriptViewId,
         replay.nextAfterOrdinal,
         replay.throughOrdinal,
-      )).rejects.toMatchObject({
+      ))).toMatchObject({
         response: {
           requestType: 'chat-subscribe',
           code: 'STALE_TRANSCRIPT_VIEW',

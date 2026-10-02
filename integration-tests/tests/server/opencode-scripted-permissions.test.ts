@@ -23,6 +23,7 @@ import {
   startScriptedOpenCodeTestEnvironment,
   type ScriptedOpenCodeTestEnvironment,
 } from '../../support/scripted-opencode.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 // Permission flows through the real binary: Garcon answers OpenCode's permission and question
 // blockers while manualBypass remains automatic only for ordinary tool approval.
@@ -143,8 +144,7 @@ describeOnLinux('scripted OpenCode permissions', () => {
         marker: reply,
         afterIndex: cursor,
       });
-      await expect(access(join(fixture.dirs.project, 'rejected-marker.txt')))
-        .rejects.toMatchObject({ code: 'ENOENT' });
+      expect(await rejectionOf(access(join(fixture.dirs.project, 'rejected-marker.txt')))).toMatchObject({ code: 'ENOENT' });
 
       const transcript = await fixture.client.getMessages(chatId);
       expect(transcript.messages.some((entry) =>
@@ -533,7 +533,7 @@ describeOnLinux('scripted OpenCode permissions', () => {
       expect(durableRequests[0]?.requestedTool.type).toBe('ask-user-question-tool-use');
       expect(messagesOfType(transcript.messages, 'permission-resolved')).toEqual([]);
 
-      await expect(fixture.client.sendPermissionDecision({
+      expect(await rejectionOf(fixture.client.sendPermissionDecision({
         clientRequestId: crypto.randomUUID(),
         chatId,
         permissionOccurrenceId: permission.message.permissionOccurrenceId,
@@ -545,7 +545,7 @@ describeOnLinux('scripted OpenCode permissions', () => {
           outcome: 'skipped',
           reason: 'The server restarted',
         },
-      })).rejects.toMatchObject({
+      }))).toMatchObject({
         status: 409,
         body: {
           errorCode: 'PERMISSION_NOT_ACTIONABLE',

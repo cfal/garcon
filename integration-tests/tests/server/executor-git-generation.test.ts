@@ -3,6 +3,7 @@ import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { initializeFixtureRepository, runFixtureGit } from '../../support/git-fixture.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 for (const executionBackend of ['remote-controller-dials', 'remote-executor-dials'] as const) {
   test(`commit generation keeps repository and model executors independent (${executionBackend})`, async () => {
@@ -41,13 +42,13 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
         label: 'Synthetic offline generator', direction: 'executor-connects',
       });
       const requestsBefore = fixture.fakeProviders.openAi.requests().length;
-      await expect(client.post('/api/v1/git/generate-commit-message', {
+      expect(await rejectionOf(client.post('/api/v1/git/generate-commit-message', {
         executorId: 'local', project: dirs.project, generationExecutorId: client.executorId,
         agentId: 'synthetic-unsupported-agent', model: 'synthetic-model', files: ['example.txt'],
-      })).rejects.toMatchObject({ status: 422, body: { errorCode: 'UNSUPPORTED_AGENT' } });
-      await expect(client.post('/api/v1/git/generate-commit-message', {
+      }))).toMatchObject({ status: 422, body: { errorCode: 'UNSUPPORTED_AGENT' } });
+      expect(await rejectionOf(client.post('/api/v1/git/generate-commit-message', {
         ...generation, executorId: 'local', project: dirs.project, generationExecutorId: offline.id, files: ['example.txt'],
-      })).rejects.toMatchObject({ status: 503 });
+      }))).toMatchObject({ status: 503 });
       expect(fixture.fakeProviders.openAi.requests()).toHaveLength(requestsBefore);
     }, { executionBackend, projectRoots: 'separate' });
   }, 60_000);

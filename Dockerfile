@@ -51,6 +51,7 @@ COPY server-agents/pi/package.json server-agents/pi/
 RUN bun install --frozen-lockfile
 
 COPY common/ common/
+COPY cli/ cli/
 COPY server/ server/
 COPY server-agents/ server-agents/
 COPY scripts/ scripts/
@@ -143,6 +144,8 @@ COPY --from=build /app/server/ server/
 COPY --from=build /app/common/ common/
 COPY --from=build /app/server-agents/ server-agents/
 COPY --from=build /app/web/build/ web/build/
+COPY --from=build /app/cli/ cli/
+COPY --chmod=755 docker/garcon-cli /usr/local/bin/garcon-cli
 
 RUN test -x /app/server-agents/codex/node_modules/.bin/codex && \
     test -x /app/server-agents/pi/node_modules/.bin/pi && \
@@ -163,4 +166,5 @@ ENV SHELL=/bin/bash
 EXPOSE 8080
 
 USER garcon
+RUN garcon-cli --help > /dev/null
 CMD ["bun", "server/main.ts"]

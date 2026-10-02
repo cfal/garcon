@@ -36,6 +36,7 @@ import {
   writeOpenCodePluginSeed,
 } from '../../support/scripted-opencode.js';
 import { startScriptedPiTestEnvironment } from '../../support/scripted-pi.js';
+import { waitForProxyBaseUrl } from '../../support/live-codex.js';
 import {
   linuxProcessStartTimeTicks,
   processIdentityAlive,
@@ -47,6 +48,7 @@ import {
   type BackendReadinessProcess,
   type OpenCodeProcessState,
 } from '../../support/opencode-process-supervisor.js';
+import { rejectionOf, throwingRejectionOf } from '../../support/promise-assertions.js';
 
 class ControlledWebSocket extends EventTarget {
   readyState = 0;
@@ -88,6 +90,63 @@ function anthropicStreamText(body: string): string {
 }
 
 describe('integration support contracts', () => {
+  test('waits for the complete Codex proxy startup record after file creation', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'garcon-codex-proxy-startup-'));
+    const serverInfoPath = join(root, 'server-info.json');
+    let observed = new Deferred<void>();
+    let exitCode: number | null = null;
+    const child = {
+      get exitCode() {
+        observed.resolve();
+        return exitCode;
+      },
+    } satisfies Parameters<typeof waitForProxyBaseUrl>[0];
+    let startup: Promise<string> | undefined;
+    try {
+      startup = waitForProxyBaseUrl(child, serverInfoPath);
+      const settledEarly = startup.then(() => {
+        throw new Error('Proxy startup accepted an incomplete record.');
+      });
+      // The exit check acknowledges a poll of each incomplete file version.
+      for (const next of ['', '{"port":', '{"port":43210}', '{"port":43210}\n']) {
+        await Promise.race([observed.promise, settledEarly]);
+        await writeFile(serverInfoPath, next);
+        observed = new Deferred<void>();
+      }
+      expect(await startup).toBe('http://127.0.0.1:43210');
+      await settledEarly.catch(() => undefined);
+    } finally {
+      exitCode = 1;
+      await startup?.catch(() => undefined);
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects completed invalid Codex proxy metadata and exited partial writers', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'garcon-codex-proxy-invalid-'));
+    const serverInfoPath = join(root, 'server-info.json');
+    try {
+      for (const record of ['{\n', 'null\n', '{}\n', '{"port":0}\n', '{"port":65536}\n', '{"port":"43210"}\n']) {
+        await writeFile(serverInfoPath, record);
+        const error = await waitForProxyBaseUrl({ exitCode: null }, serverInfoPath)
+          .catch((error: unknown) => error);
+        expect(error).toBeInstanceOf(Error);
+        if (record === '{\n') {
+          expect(error).toBeInstanceOf(SyntaxError);
+        } else {
+          expect(error).toMatchObject({ message: 'Live Codex credential proxy wrote invalid startup metadata.' });
+        }
+      }
+      await writeFile(serverInfoPath, '{"port":');
+      const error = await waitForProxyBaseUrl({ exitCode: 1 }, serverInfoPath)
+        .catch((error: unknown) => error);
+      expect(error).toBeInstanceOf(Error);
+      expect(error).toMatchObject({ message: 'Live Codex credential proxy exited before startup.' });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test('adds only the fixture Node shim to scripted Pi system paths', async () => {
     const root = await mkdtemp(join(tmpdir(), 'garcon-scripted-pi-path-'));
     const environment = startScriptedPiTestEnvironment();
@@ -170,11 +229,11 @@ describe('integration support contracts', () => {
       const nested = join(root, 'nested');
       await mkdir(nested);
       await writeFile(join(nested, 'safe.txt'), 'ordinary diagnostic content');
-      await expect(assertSensitiveValuesNotPersisted({
+      expect(await assertSensitiveValuesNotPersisted({
         directory: root,
         diagnostics: { status: 'safe' },
         values: [sensitiveValue],
-      })).resolves.toBeUndefined();
+      })).toBeUndefined();
 
       let diagnosticError: unknown;
       try {
@@ -255,7 +314,7 @@ describe('integration support contracts', () => {
     const root = fixture.dirs.root;
     await fixture.dispose();
     expect(observations).toEqual([{ rootExisted: true, garconRunning: false }]);
-    await expect(access(root)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await rejectionOf(access(root))).toMatchObject({ code: 'ENOENT' });
 
     const hookCalls: string[] = [];
     let creationError: unknown;
@@ -280,7 +339,7 @@ describe('integration support contracts', () => {
   test('cleans fixture resources when the environment resolver throws', async () => {
     let root = '';
     const cleanupRoots: string[] = [];
-    await expect(createIntegrationFixture({
+    expect(await throwingRejectionOf(createIntegrationFixture({
       resolveServerEnvironment: (directories) => {
         root = directories.root;
         throw new Error('deliberate resolver failure');
@@ -288,10 +347,10 @@ describe('integration support contracts', () => {
       afterGarconStop: async (directories) => {
         cleanupRoots.push(directories.root);
       },
-    })).rejects.toThrow('deliberate resolver failure');
+    }))).toThrow('deliberate resolver failure');
 
     expect(cleanupRoots).toEqual([root]);
-    await expect(access(root)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await rejectionOf(access(root))).toMatchObject({ code: 'ENOENT' });
   });
 
   test('includes diagnostic extensions in failure artifacts', async () => {
@@ -313,6 +372,41 @@ describe('integration support contracts', () => {
     };
     expect(artifact.extensions?.marker).toBe('extension-value');
     await rm(artifactMatch![1], { force: true });
+  }, 120_000);
+
+  test.each([false, true])('writes teardown-only diagnostics with redaction=%s', async (redact) => {
+    let root = '';
+    let artifactPath = '';
+    const marker = 'synthetic-private-cleanup-detail';
+    try {
+      const failure = await rejectionOf(withIntegrationFixture('support-contract-teardown', async (fixture) => {
+        root = fixture.dirs.root;
+      }, {
+        redactSensitiveDiagnostics: redact,
+        afterGarconStop: async () => { throw new Error(marker); },
+        extraDiagnostics: () => ({ marker }),
+      }));
+      expect(failure).toBeInstanceOf(Error);
+      const message = (failure as Error).message;
+      const match = /Integration diagnostics: (\S+)/.exec(message);
+      expect(match).not.toBeNull();
+      artifactPath = match![1];
+      const contents = await readFile(artifactPath, 'utf8');
+      const artifact = JSON.parse(contents);
+      expect(artifact.testName).toBe('support-contract-teardown');
+      if (redact) {
+        expect(contents).not.toContain(marker);
+        expect(contents).not.toContain(root);
+        expect(message).not.toContain(marker);
+        expect(await rejectionOf(access(root))).toMatchObject({ code: 'ENOENT' });
+      } else {
+        expect(artifact.extensions.marker).toBe(marker);
+        expect((failure as AggregateError).errors[0].message).toBe(marker);
+      }
+    } finally {
+      if (artifactPath) await rm(artifactPath, { force: true });
+      if (root) await rm(root, { recursive: true, force: true });
+    }
   }, 120_000);
 
   test('escalates a stuck supervised child from SIGTERM to SIGKILL', async () => {
@@ -339,7 +433,7 @@ describe('integration support contracts', () => {
       const snapshot = await readJsonFile<{ index: number; payload: string }>(path);
       expect(snapshot?.payload).toHaveLength(2_000);
       await writeFile(path, '{"torn":');
-      await expect(readJsonFile(path)).rejects.toThrow();
+      expect(await throwingRejectionOf(readJsonFile(path))).toThrow();
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -375,13 +469,11 @@ describe('integration support contracts', () => {
     try {
       const good = join(root, 'good-opencode');
       await writeFile(good, `#!/bin/sh\necho ${OPENCODE_VERSION}\n`, { mode: 0o755 });
-      await expect(verifyPinnedBinaryVersion({ binary: good, env: {} }))
-        .resolves.toBe(OPENCODE_VERSION);
+      expect(await verifyPinnedBinaryVersion({ binary: good, env: {} })).toBe(OPENCODE_VERSION);
 
       const bad = join(root, 'bad-opencode');
       await writeFile(bad, '#!/bin/sh\necho 0.0.0\n', { mode: 0o755 });
-      await expect(verifyPinnedBinaryVersion({ binary: bad, env: {} }))
-        .rejects.toThrow(OPENCODE_VERSION);
+      expect(await throwingRejectionOf(verifyPinnedBinaryVersion({ binary: bad, env: {} }))).toThrow(OPENCODE_VERSION);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -401,8 +493,7 @@ describe('integration support contracts', () => {
       exited: new Promise<number>(() => undefined),
     } satisfies BackendReadinessProcess;
 
-    await expect(waitForBackendReady(backend, 43123))
-      .resolves.toBe('http://127.0.0.1:43123');
+    expect(await waitForBackendReady(backend, 43123)).toBe('http://127.0.0.1:43123');
   });
 
   test('does not spawn a provider when shutdown lands inside startup', async () => {
@@ -470,7 +561,7 @@ describe('integration support contracts', () => {
         Bun.sleep(5_000).then(() => -1),
       ]);
       expect(exitCode).toBe(0);
-      await expect(access(spawnMarker)).rejects.toMatchObject({ code: 'ENOENT' });
+      expect(await rejectionOf(access(spawnMarker))).toMatchObject({ code: 'ENOENT' });
       const state = await readJsonFile<OpenCodeProcessState>(statePath);
       expect(state).toMatchObject({ status: 'stopped', providerPid: 0, reason: 'signal' });
     } finally {
@@ -641,7 +732,7 @@ describe('integration support contracts', () => {
 
       const expired = await post('third', secondId);
       expect(expired.status).toBe(404);
-      await expect(expired.json()).resolves.toMatchObject({
+      expect(await expired.json()).toMatchObject({
         error: {
           code: 'previous_response_not_found',
           param: 'previous_response_id',
@@ -912,9 +1003,9 @@ describe('integration support contracts', () => {
     let client: GarconTestClient | null = null;
     try {
       client = await GarconTestClient.connect(`http://${server.hostname}:${server.port}`);
-      await expect(client.ping()).rejects.toThrow('Unknown or malformed WebSocket payload');
-      await expect(client.reconnect()).rejects.toThrow('Unknown or malformed WebSocket payload');
-      await expect(client.close()).rejects.toThrow('Unknown or malformed WebSocket payload');
+      expect(await throwingRejectionOf(client.ping())).toThrow('Unknown or malformed WebSocket payload');
+      expect(await throwingRejectionOf(client.reconnect())).toThrow('Unknown or malformed WebSocket payload');
+      expect(await throwingRejectionOf(client.close())).toThrow('Unknown or malformed WebSocket payload');
     } finally {
       await client?.disconnect().catch(() => undefined);
       server.stop(true);
@@ -934,7 +1025,7 @@ describe('integration support contracts', () => {
     socket!.receive(JSON.stringify({ type: 'not-a-garcon-message' }));
     socket!.finishClose();
 
-    await expect(close).rejects.toThrow('Unknown or malformed WebSocket payload');
+    expect(await throwingRejectionOf(close)).toThrow('Unknown or malformed WebSocket payload');
   });
 
   test('fails a request the controller never answers with its method and path', async () => {
@@ -952,7 +1043,7 @@ describe('integration support contracts', () => {
       requestTimeoutMs: 50,
     });
     try {
-      await expect(client.get('/api/v1/chats')).rejects.toThrow('GET /api/v1/chats did not respond within 50 ms');
+      expect(await throwingRejectionOf(client.get('/api/v1/chats'))).toThrow('GET /api/v1/chats did not respond within 50 ms');
     } finally {
       const close = client.close();
       socket!.finishClose();

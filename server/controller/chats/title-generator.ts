@@ -1,10 +1,9 @@
 // Automatic chat title generation. Runs a one-shot LLM query to
 // produce a concise title from the first user prompt, then persists
 // via setSessionName (which emits 'session-name-changed' for broadcast).
-import { resolveGenerationContextForSelection } from '../settings/generation-config-source.ts';
+import { resolveGenerationContextForSelection, type GenerationDiscoveryAgents } from '../settings/generation-config-source.ts';
 import { resolveEffectiveGenerationConfig } from '../settings/generation-effective.js';
 import type { ApiProtocol } from '../../../common/api-providers.js';
-import type { AgentCatalogEntry } from '../../../common/agents.js';
 import { createLogger } from '../../common/log.js';
 import { errorMessage } from '../../common/errors.js';
 import { DomainError } from '../../common/domain-error.js';
@@ -19,11 +18,7 @@ import type { RecentTitleIconSource } from './recent-title-icons.js';
 const logger = createLogger('chats:title-generator');
 const TITLE_GENERATION_SOURCE_MAX_CHARS = 32_000;
 
-interface TitleGenerationAgents {
-  getAgentAuthStatusMap(): Promise<Record<string, unknown>>;
-  getAgentReadinessMap(authByAgent?: Record<string, unknown>): Promise<Record<string, unknown>>;
-  getAgentCatalogEntries?(): Promise<AgentCatalogEntry[]>;
-  getAgentCatalog?(): Promise<{ agents?: AgentCatalogEntry[] }>;
+interface TitleGenerationAgents extends GenerationDiscoveryAgents {
   runSingleQuery(prompt: string, options: {
     executorId?: string | null;
     agentId: string;

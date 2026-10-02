@@ -5,6 +5,7 @@ import type { ExecutorConnection, ExecutorSnapshot } from '../../../common/execu
 import { discoverRuntime } from '../../../cli/discovery.js';
 import { GarconClient } from '../../../cli/garcon-client.js';
 import { withCliFixture, runCli } from '../../support/cli-fixture.js';
+import { throwingRejectionOf } from '../../support/promise-assertions.js';
 
 for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote-executor-dials'] as const) {
   test(`executor administration and provider assignments work through the CLI (${executionBackend})`, async () => {
@@ -126,7 +127,7 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
         await fixture.client.waitForTurnTerminal(chatId, turn.turnId);
       } finally { held.releaseText('Synthetic cleanup'); }
       await fixture.crashAndRestartGarcon({ preserveExecutorWorker: true });
-      await expect(old.createExecutor({ label: 'Stale', direction: 'executor-connects' })).rejects.toThrow('restarted');
+      expect(await throwingRejectionOf(old.createExecutor({ label: 'Stale', direction: 'executor-connects' }))).toThrow('restarted');
       const current = await runCli(fixture, ['executor', 'show', origin, '--json']);
       expect(current, current.stderr).toMatchObject({ exitCode: 0 });
       expect(JSON.parse(current.stdout)).toMatchObject({ allowExecutorManagement: true, allowControllerCli: true });

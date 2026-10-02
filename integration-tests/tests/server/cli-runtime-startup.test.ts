@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { acquireControllerLease } from '../../../server/controller/lib/workspace-lease.js';
 import { isolatedEnvironment } from '../../support/garcon-process.js';
 import { withTimeout } from '../../support/deferred.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 const REPO = fileURLToPath(new URL('../../..', import.meta.url));
 
@@ -40,10 +41,10 @@ test.each(['occupied-port', 'unclearable-runtime'] as const)('controller runtime
     expect(await errors).toContain('Failed to start server');
     expect(await output).not.toContain('Published controller runtime');
     if (failure === 'occupied-port') {
-      await expect(stat(runtimeFile)).rejects.toMatchObject({ code: 'ENOENT' });
+      expect(await rejectionOf(stat(runtimeFile))).toMatchObject({ code: 'ENOENT' });
     } else {
       expect(await readFile(join(runtimeFile, 'blocker'), 'utf8')).toBe('Synthetic blocker');
-      await expect(stat(join(workspaceDir, 'workspace-version.json'))).rejects.toMatchObject({ code: 'ENOENT' });
+      expect(await rejectionOf(stat(join(workspaceDir, 'workspace-version.json')))).toMatchObject({ code: 'ENOENT' });
     }
     const lease = await acquireControllerLease(configDir, workspaceDir, { retries: 0 });
     await lease.release();

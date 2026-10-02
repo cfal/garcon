@@ -16,6 +16,7 @@ import {
   withIntegrationFixture,
 } from '../../support/integration-fixture.js';
 import { waitForPersistedNativeSession } from '../../support/persisted-chat.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 interface PersistedClaudeChat {
   projectPath: string;
@@ -218,5 +219,5 @@ function supportPath(nativePath: string, sessionId: string): string {
 }
 
 async function expectMissing(path: string): Promise<void> {
-  await expect(access(path)).rejects.toMatchObject({ code: 'ENOENT' });
+  expect(await rejectionOf(access(path))).toMatchObject({ code: 'ENOENT' });
 }

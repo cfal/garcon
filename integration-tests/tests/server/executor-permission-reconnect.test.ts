@@ -23,6 +23,7 @@ import { TranscriptLedgerStore } from '../../../server/controller/ledger/store.j
 import { PermissionNotActionableError } from '../../../server/controller/ledger/errors.js';
 import { DomainError } from '../../../server/common/domain-error.js';
 import { interactiveDeadline } from '../../../server/common/interactive-deadline.js';
+import { rejectionOf, throwingRejectionOf } from '../../support/promise-assertions.js';
 
 const EXECUTOR = '22222222-2222-4222-8222-222222222222';
 const CHAT = '1783725900000400';
@@ -137,14 +138,12 @@ for (const dialer of ['controller', 'worker'] as const) {
       throw new Error('Synthetic uncertain permission response');
     }, async ({ router, control, remote, controller, ledger, feed, runId, native, integration }) => {
       const original = controller.current;
-      await expect(router.resolvePermission(CHAT, OCCURRENCE, { allow: true }, control, interactiveDeadline()))
-        .rejects.toThrow('Synthetic uncertain permission response');
+      expect(await throwingRejectionOf(router.resolvePermission(CHAT, OCCURRENCE, { allow: true }, control, interactiveDeadline()))).toThrow('Synthetic uncertain permission response');
       expect(controller.current).toBe(original);
       expect(remote.availability).toBe('ready');
       expect(ledger.isRunActive(CHAT, runId)).toBe(true);
       expect(feed.currentSnapshot(CHAT)?.rows).toEqual([]);
-      await expect(router.resolvePermission(CHAT, OCCURRENCE, { allow: true }, control, interactiveDeadline()))
-        .rejects.toBeInstanceOf(PermissionNotActionableError);
+      expect(await rejectionOf(router.resolvePermission(CHAT, OCCURRENCE, { allow: true }, control, interactiveDeadline()))).toBeInstanceOf(PermissionNotActionableError);
       expect(decisions).toEqual([true]);
       expect(permissionRows(ledger)).toEqual(['permission-requested']);
       native.nativePublishers[0]!({ type: 'permission', runId,
@@ -165,8 +164,7 @@ for (const dialer of ['controller', 'worker'] as const) {
       disconnect();
       expect(remote.availability).toBe('reconnecting');
       // A decision cannot reach the worker yet; it stays actionable instead of being consumed.
-      await expect(router.resolvePermission(CHAT, OCCURRENCE, { allow: true }, control, interactiveDeadline()))
-        .rejects.toMatchObject({ code: 'EXECUTOR_UNAVAILABLE' });
+      expect(await rejectionOf(router.resolvePermission(CHAT, OCCURRENCE, { allow: true }, control, interactiveDeadline()))).toMatchObject({ code: 'EXECUTOR_UNAVAILABLE' });
       expect(feed.validateAction(control).permissionOccurrenceId).toBe(OCCURRENCE);
       await reconnected;
       expect(controller.current).not.toBe(original);
@@ -176,8 +174,7 @@ for (const dialer of ['controller', 'worker'] as const) {
       await router.resolvePermission(CHAT, OCCURRENCE, { allow: true }, control, interactiveDeadline());
       expect(decisions).toEqual([true]);
       expect(permissionRows(ledger)).toEqual(['permission-requested', 'permission-resolved']);
-      await expect(router.resolvePermission(CHAT, OCCURRENCE, { allow: true }, control, interactiveDeadline()))
-        .rejects.toBeInstanceOf(PermissionNotActionableError);
+      expect(await rejectionOf(router.resolvePermission(CHAT, OCCURRENCE, { allow: true }, control, interactiveDeadline()))).toBeInstanceOf(PermissionNotActionableError);
       expect(decisions).toEqual([true]);
     });
   }, 30_000);
@@ -236,8 +233,7 @@ for (const dialer of ['controller', 'worker'] as const) {
       await reconnected;
       await Bun.sleep(10);
 
-      await expect(router.resolvePermission(CHAT, OCCURRENCE, { allow: true }, control, interactiveDeadline()))
-        .rejects.toBeInstanceOf(PermissionNotActionableError);
+      expect(await rejectionOf(router.resolvePermission(CHAT, OCCURRENCE, { allow: true }, control, interactiveDeadline()))).toBeInstanceOf(PermissionNotActionableError);
       expect(decisions).toEqual([false]);
       expect(ledger.currentRows(CHAT).filter(row => row.kind === 'permission-resolved')).toHaveLength(0);
       expect(ledger.currentRows(CHAT).find(row => row.kind === 'run-ended')).toMatchObject({

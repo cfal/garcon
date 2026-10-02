@@ -5,6 +5,7 @@ import type { ApiProviderCatalogEntry, ApiProviderCreateResult, ApiProviderManag
 import type { RemoteSettingsSnapshot } from '../../../common/settings.js';
 import { ApiProvidersInvalidatedMessage } from '../../../common/ws-events.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 test.each(['remote-controller-dials', 'remote-executor-dials'] as const)('provider grants survive restart and fence every new admission (%s)', async (executionBackend) => {
   await withIntegrationFixture(`provider-assignments-${executionBackend}`, async (fixture) => {
@@ -34,15 +35,13 @@ test.each(['remote-controller-dials', 'remote-executor-dials'] as const)('provid
     expect((await catalog(client.executorId)).some((entry) => entry.id === providerId)).toBe(false);
     expect((await client.get<ApiProviderManagement>('/api/v1/api-providers')).providers.some((entry) => entry.id === providerId)).toBe(true);
     const before = fixture.fakeProviders.openAi.requests().length;
-    await expect(client.startDirectChat({ chatId: fixture.newChatId(), projectPath: fixture.dirs.project, agent, content: 'Synthetic blocked start' }))
-      .rejects.toMatchObject({ status: 409, body: { errorCode: 'API_PROVIDER_UNAVAILABLE' } });
+    expect(await rejectionOf(client.startDirectChat({ chatId: fixture.newChatId(), projectPath: fixture.dirs.project, agent, content: 'Synthetic blocked start' }))).toMatchObject({ status: 409, body: { errorCode: 'API_PROVIDER_UNAVAILABLE' } });
     const denied = await client.runDirectChat({ chatId, agent, content: 'Synthetic blocked resume' });
     expect(await client.waitForTurnTerminal(chatId, denied.turnId)).toMatchObject({ type: 'agent-run-failed', error: expect.stringContaining('unavailable') });
     await client.waitForProcessing(chatId, false);
-    await expect(client.refinePrompt({ draft: 'Synthetic blocked generation', target: 'prompt' }))
-      .rejects.toMatchObject({ status: 502, body: { errorCode: 'PROMPT_REFINEMENT_FAILED' } });
+    expect(await rejectionOf(client.refinePrompt({ draft: 'Synthetic blocked generation', target: 'prompt' }))).toMatchObject({ status: 502, body: { errorCode: 'PROMPT_REFINEMENT_FAILED' } });
     expect(fixture.fakeProviders.openAi.requests()).toHaveLength(before);
-    await expect(client.delete(`/api/v1/api-providers?id=${providerId}&acknowledgeSharedImpact=true`)).rejects.toMatchObject({ status: 409, body: { errorCode: 'API_PROVIDER_IN_USE' } });
+    expect(await rejectionOf(client.delete(`/api/v1/api-providers?id=${providerId}&acknowledgeSharedImpact=true`))).toMatchObject({ status: 409, body: { errorCode: 'API_PROVIDER_IN_USE' } });
     await fixture.restartGarcon();
     client = fixture.client;
     expect((await catalog(client.executorId)).some((entry) => entry.id === providerId)).toBe(false);
@@ -100,13 +99,13 @@ test.each(['in-process', 'remote-controller-dials', 'remote-executor-dials'] as 
     const revoked = await client.put<ApiProviderUpdateResult>(url, { revision: saved.revision, executorIds: [] });
     expect(revoked).toMatchObject({ revision: saved.revision, updatedAt: saved.updatedAt, assignment: { status: 'assigned', executorIds: [] } });
     for (const ids of Object.values((await management()).assignments.assignments)) expect(ids).not.toContain(saved.id);
-    await expect(client.post(`/api/v1/api-providers/models?executorId=${client.executorId}`, {
+    expect(await rejectionOf(client.post(`/api/v1/api-providers/models?executorId=${client.executorId}`, {
       protocol: 'openai-compatible', baseUrl: fakeProviders.openAi.baseUrl, apiProviderId: saved.id,
       endpointId, revision: saved.revision, modelDiscovery: 'openai-models',
-    })).rejects.toMatchObject({ status: 409, body: { errorCode: 'API_PROVIDER_UNAVAILABLE' } });
+    }))).toMatchObject({ status: 409, body: { errorCode: 'API_PROVIDER_UNAVAILABLE' } });
     const repaired = await client.put<ApiProviderUpdateResult>(url, { revision: saved.revision, label: 'Synthetic renamed account', executorIds });
     expect(repaired).toMatchObject({ id: saved.id, revision: saved.revision + 1, assignment: { status: 'assigned' } });
-    await expect(client.put(url, { revision: saved.revision, executorIds: [] })).rejects.toMatchObject({ status: 409 });
+    expect(await rejectionOf(client.put(url, { revision: saved.revision, executorIds: [] }))).toMatchObject({ status: 409 });
     for (const id of executorIds) expect((await management()).assignments.assignments[id]).toContain(saved.id);
     expect((await management()).providers.filter((entry) => entry.id === saved.id)).toHaveLength(1);
   }, { executionBackend });
