@@ -8,29 +8,38 @@ type SettingsCatalog = Pick<ModelCatalogStore, 'getDefaultAgentSettings'>;
 
 export class NewChatAgentSettingsState {
 	byId = $state<Record<string, AgentSettingsEnvelope>>({});
-	readonly #configured = new Set<string>();
-	#restored = false;
+	readonly #configuredAgentIds = new Set<string>();
+	#hasRestoredSettings = false;
 
 	forAgent(agentId: string, catalog: SettingsCatalog): AgentSettingsEnvelope {
 		return normalizeAgentSettings(agentId, this.byId[agentId], catalog.getDefaultAgentSettings(agentId));
 	}
 
-	setSetting(agentId: string, descriptor: AgentSettingDescriptor, value: JsonValue, catalog: SettingsCatalog): void {
-		this.#configured.add(agentId);
+	setSetting(
+		agentId: string,
+		descriptor: AgentSettingDescriptor,
+		value: JsonValue,
+		catalog: SettingsCatalog,
+	): void {
+		this.#configuredAgentIds.add(agentId);
 		this.byId = {
 			...this.byId,
 			[agentId]: withAgentSetting(this.forAgent(agentId, catalog), descriptor, value),
 		};
 	}
 
-	restore(settingsById: Record<string, AgentSettingsEnvelope>, agentIds: readonly string[], catalog: SettingsCatalog): void {
-		this.#restored = true;
-		this.#configured.clear();
+	restore(
+		settingsById: Record<string, AgentSettingsEnvelope>,
+		agentIds: readonly string[],
+		catalog: SettingsCatalog,
+	): void {
+		this.#hasRestoredSettings = true;
+		this.#configuredAgentIds.clear();
 		const next: Record<string, AgentSettingsEnvelope> = {};
 		for (const [agentId, settings] of Object.entries(settingsById)) {
 			if (settings.ownerId !== agentId) continue;
 			next[agentId] = cloneAgentSettings(settings);
-			this.#configured.add(agentId);
+			this.#configuredAgentIds.add(agentId);
 		}
 		for (const agentId of agentIds) {
 			next[agentId] = normalizeAgentSettings(agentId, next[agentId], catalog.getDefaultAgentSettings(agentId));
@@ -38,8 +47,12 @@ export class NewChatAgentSettingsState {
 		this.byId = next;
 	}
 
-	hydrate(defaults: RemoteExecutionDefaults, selectableAgentIds: readonly string[], catalog: SettingsCatalog): void {
-		if (this.#restored) return;
+	hydrate(
+		defaults: RemoteExecutionDefaults,
+		selectableAgentIds: readonly string[],
+		catalog: SettingsCatalog,
+	): void {
+		if (this.#hasRestoredSettings) return;
 		const next = { ...this.byId };
 		const agentIds = new Set([
 			...Object.keys(defaults.global.agentSettingsById),
@@ -47,20 +60,28 @@ export class NewChatAgentSettingsState {
 			...selectableAgentIds,
 		]);
 		for (const agentId of agentIds) {
-			if (this.#configured.has(agentId)) continue;
-			const configured = defaults.byAgent[agentId]?.agentSettingsById?.[agentId]
+			if (this.#configuredAgentIds.has(agentId)) continue;
+			const configuredSettings = defaults.byAgent[agentId]?.agentSettingsById?.[agentId]
 				?? defaults.global.agentSettingsById[agentId];
-			if (configured) this.#configured.add(agentId);
-			next[agentId] = normalizeAgentSettings(agentId, configured ?? next[agentId], catalog.getDefaultAgentSettings(agentId));
+			if (configuredSettings) this.#configuredAgentIds.add(agentId);
+			next[agentId] = normalizeAgentSettings(
+				agentId,
+				configuredSettings ?? next[agentId],
+				catalog.getDefaultAgentSettings(agentId),
+			);
 		}
 		this.byId = next;
 	}
 
-	applyDefault(agentId: string, configured: AgentSettingsEnvelope | undefined, catalog: SettingsCatalog): void {
+	applyDefault(
+		agentId: string,
+		defaultSettings: AgentSettingsEnvelope | undefined,
+		catalog: SettingsCatalog,
+	): void {
 		let current = this.byId[agentId];
-		if (configured && !this.#restored && !this.#configured.has(agentId)) {
-			this.#configured.add(agentId);
-			current = configured;
+		if (defaultSettings && !this.#hasRestoredSettings && !this.#configuredAgentIds.has(agentId)) {
+			this.#configuredAgentIds.add(agentId);
+			current = defaultSettings;
 		}
 		this.byId = {
 			...this.byId,
@@ -75,7 +96,7 @@ export class NewChatAgentSettingsState {
 	reconcileCatalog(agentIds: readonly string[], catalog: SettingsCatalog): void {
 		const next = { ...this.byId };
 		for (const agentId of agentIds) {
-			if (this.#configured.has(agentId)) continue;
+			if (this.#configuredAgentIds.has(agentId)) continue;
 			// Omitted schedule entries use catalog defaults; explicit empty envelopes stay empty.
 			next[agentId] = cloneAgentSettings(catalog.getDefaultAgentSettings(agentId));
 		}
