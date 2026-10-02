@@ -5,6 +5,7 @@ import { assistantContents } from '../../support/chat-assertions.js';
 import { withTimeout } from '../../support/deferred.js';
 import { executionBackend } from '../../support/execution-backend.js';
 import { waitForExecutorReconnect } from '../../support/executor-link.js';
+import { waitForBulk } from '../../support/executor-bulk-fixture.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { sacsScriptedDriverFactories } from './drivers.js';
 
@@ -16,6 +17,7 @@ for (const factory of sacsScriptedDriverFactories) {
     let proxy: Awaited<ReturnType<typeof tcpLinkProxy>> | undefined;
     try {
       await withIntegrationFixture(`sacs-link-loss-${factory.id}-${backend}`, async (fixture) => {
+        await waitForBulk(fixture);
         const chatId = fixture.newChatId();
         driver.scriptAssistant(fixture, 'Synthetic initial reply');
         const initial = await fixture.client.startChat(driver.startRequest(fixture, {
@@ -63,7 +65,8 @@ for (const factory of sacsScriptedDriverFactories) {
           expect(await fixture.client.waitForTurnTerminal(chatId, followup.turnId)).toMatchObject({ type: 'agent-run-finished' });
           expect(driver.requestCountSince(fixture, cursor)).toBe(2);
           for (const { turnId } of [initial, running, followup]) expect(terminals(turnId)).toHaveLength(1);
-          expect(proxy!.connections).toBe(2);
+          await waitForBulk(fixture);
+          expect(proxy!.connections).toBe(4);
           driver.assertSettled(fixture);
         } finally { held.release(); }
       }, {
