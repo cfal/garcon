@@ -374,6 +374,41 @@ describe('integration support contracts', () => {
     await rm(artifactMatch![1], { force: true });
   }, 120_000);
 
+  test.each([false, true])('writes teardown-only diagnostics with redaction=%s', async (redact) => {
+    let root = '';
+    let artifactPath = '';
+    const marker = 'synthetic-private-cleanup-detail';
+    try {
+      const failure = await rejectionOf(withIntegrationFixture('support-contract-teardown', async (fixture) => {
+        root = fixture.dirs.root;
+      }, {
+        redactSensitiveDiagnostics: redact,
+        afterGarconStop: async () => { throw new Error(marker); },
+        extraDiagnostics: () => ({ marker }),
+      }));
+      expect(failure).toBeInstanceOf(Error);
+      const message = (failure as Error).message;
+      const match = /Integration diagnostics: (\S+)/.exec(message);
+      expect(match).not.toBeNull();
+      artifactPath = match![1];
+      const contents = await readFile(artifactPath, 'utf8');
+      const artifact = JSON.parse(contents);
+      expect(artifact.testName).toBe('support-contract-teardown');
+      if (redact) {
+        expect(contents).not.toContain(marker);
+        expect(contents).not.toContain(root);
+        expect(message).not.toContain(marker);
+        expect(await rejectionOf(access(root))).toMatchObject({ code: 'ENOENT' });
+      } else {
+        expect(artifact.extensions.marker).toBe(marker);
+        expect((failure as AggregateError).errors[0].message).toBe(marker);
+      }
+    } finally {
+      if (artifactPath) await rm(artifactPath, { force: true });
+      if (root) await rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   test('escalates a stuck supervised child from SIGTERM to SIGKILL', async () => {
     const child = Bun.spawn(
       ['sh', '-c', 'trap "" TERM; sleep 30'],
