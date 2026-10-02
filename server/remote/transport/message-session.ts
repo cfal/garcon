@@ -27,6 +27,7 @@ export class MessageSession {
   #failure: Error | null = null;
   #flushing = false;
   #retry: ReturnType<typeof setTimeout> | null = null;
+  #closedQueues: MessageQueueSnapshot | null = null;
 
   constructor(private readonly options: MessageSessionOptions) {
     this.#limits = {
@@ -44,6 +45,7 @@ export class MessageSession {
   get failure(): Error | null { return this.#failure; }
   get queuedBytes(): number { return this.#bytes; }
   get queuedFrames(): number { return this.#pending.length; }
+  get queueSnapshot(): MessageQueueSnapshot | null { return this.#closedQueues ?? this.options.budget?.snapshot() ?? null; }
 
   fitsFrame(body: string): boolean { return Buffer.byteLength(body) <= this.#limits.frame; }
 
@@ -129,6 +131,7 @@ export class MessageSession {
 
   close(error: Error = new MessageContinuityError('Message session closed')): void {
     if (this.#failure) return;
+    this.#closedQueues = this.options.budget?.snapshot() ?? null;
     this.#failure = error;
     const socket = this.#socket;
     this.#socket = null;
@@ -164,6 +167,6 @@ export class MessageSession {
     finally { this.#flushing = false; }
   }
 }
-import type { MessageQueueBudget } from './message-queue-budget.js';
+import type { MessageQueueBudget, MessageQueueSnapshot } from './message-queue-budget.js';
 import type { BulkConnectionControl, RpcLane } from './rpc-lane.js';
 import { BULK_CONTROL_BYTES } from './limits.js';

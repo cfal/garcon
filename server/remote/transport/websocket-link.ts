@@ -12,7 +12,7 @@ import { EXECUTOR_PROTOCOL_REVISION } from './rpc-protocol.js';
 import { version as packageVersion } from '../../../package.json';
 import { isLinkHello, type LinkHello, type LinkDialTarget, type LinkRole } from './link-handshake.js';
 import { isSessionId, type RpcLane } from './rpc-lane.js';
-import { MessageQueueBudget } from './message-queue-budget.js';
+import { MessageQueueBudget, type MessageQueueSnapshot } from './message-queue-budget.js';
 import type { ExecutorSocketAdmission, SocketAdmissionLease } from './socket-admission.js';
 
 export interface WebSocketLinkOptions {
@@ -68,6 +68,8 @@ export interface LinkClosure {
   readonly sessionId: string;
   readonly primarySessionId: string;
   readonly cause: LinkClosureCause;
+  readonly queues: MessageQueueSnapshot | null;
+  readonly primaryRedials: number;
   // Closures with this cause over the link's lifetime, including this one.
   readonly count: number;
   // Why the connection or its session failed, when known: the Noise error
@@ -597,7 +599,8 @@ export class WebSocketLink {
     const count = (this.#closureCounts.get(key) ?? 0) + 1;
     this.#closureCounts.set(key, count);
     const closure: LinkClosure = { cause, count, lane: session.lane, sessionId: session.id,
-      primarySessionId: session.primarySessionId, ...(reason === null ? {} : { reason }) };
+      primarySessionId: session.primarySessionId, queues: session.channel.queueSnapshot, primaryRedials: this.#redials,
+      ...(reason === null ? {} : { reason }) };
     for (const listener of this.#closures) listener(closure);
   }
 }

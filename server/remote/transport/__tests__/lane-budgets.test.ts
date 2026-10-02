@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import { MessageQueueBudget } from '../message-queue-budget.js';
 import { MessageSession } from '../message-session.js';
 import { RpcAdmission } from '../rpc-admission.js';
@@ -9,6 +9,7 @@ test('shared admission reserves primary capacity and releases exactly once', () 
   expect(() => admission.acquire('bulk')).toThrow('too many requests');
   const primary = admission.acquire('primary');
   expect(admission.size).toBe(4);
+  expect(admission.snapshot()).toEqual({ total: 4, primary: 1, bulk: 3 });
   expect(() => admission.acquire('primary')).toThrow();
   bulk[0]!();
   bulk[0]!();
@@ -16,6 +17,32 @@ test('shared admission reserves primary capacity and releases exactly once', () 
   primary();
   for (const release of bulk) release();
   expect(admission.size).toBe(0);
+  expect(admission.snapshot()).toEqual({ total: 0, primary: 0, bulk: 0 });
+});
+
+test('queue diagnostics retain pre-close pressure and ages without retaining payloads', () => {
+  let now = 100;
+  const clock = spyOn(performance, 'now').mockImplementation(() => now);
+  const budget = new MessageQueueBudget();
+  const primary = new MessageSession({ deliver() {}, failed() {}, budget, lane: 'primary' });
+  const bulk = new MessageSession({ deliver() {}, failed() {}, budget, lane: 'bulk' });
+  for (const channel of [primary, bulk]) channel.attach({ send() {}, close() {}, canSend: () => false });
+  try {
+    primary.send('synthetic-primary');
+    now = 120;
+    bulk.send('synthetic-bulk');
+    now = 150;
+    const queues = { total: { bytes: 31, messages: 2, oldestAgeMs: 50 },
+      primary: { bytes: 17, messages: 1, oldestAgeMs: 50 }, bulk: { bytes: 14, messages: 1, oldestAgeMs: 30 } };
+    expect(primary.queueSnapshot).toEqual(queues);
+    primary.close();
+    now = 200;
+    expect(primary.queueSnapshot).toEqual(queues);
+    expect(bulk.queueSnapshot?.total).toEqual({ bytes: 14, messages: 1, oldestAgeMs: 80 });
+    bulk.close();
+    expect(budget.snapshot().total).toEqual({ bytes: 0, messages: 0, oldestAgeMs: 0 });
+    expect(JSON.stringify(primary.queueSnapshot)).not.toContain('synthetic');
+  } finally { primary.close(); bulk.close(); clock.mockRestore(); }
 });
 
 test('full ordinary queues cannot retire primary through bulk controls', async () => {

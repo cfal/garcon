@@ -283,7 +283,7 @@ export class ExecutorManager {
         if (failure.lane !== 'bulk' && entry.executor?.availability !== 'ready') showLinkFailure(failure.message, failure.reason);
       });
       link.onClosure((closure) => {
-        this.logger.warn('Executor link closed', { executorId: config.id, ...closure });
+        this.logger.warn('Executor link closed', { executorId: config.id, ...closure, ...entry.executor?.diagnostics });
         // Only the connection carrying the session reports a closure, so this is the
         // executor's own loss, unless setup retired the session after reporting why.
         if (closure.lane === 'bulk' || closure.cause === 'local-close' || (closure.cause === 'session-retired' && entry.error !== null)) return;

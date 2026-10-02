@@ -505,8 +505,10 @@ test('logs each closed executor session with its cause and reason', async () => 
   manager.inboundLink(config.id)!.current!.close(new Error('Synthetic session retirement'));
   await closed.promise;
 
-  expect(closures).toEqual([{ executorId: config.id, lane: 'primary', sessionId: expect.any(String),
+  expect(closures).toMatchObject([{ executorId: config.id, lane: 'primary', sessionId: expect.any(String),
     primarySessionId: expect.any(String), cause: 'session-retired', count: 1, reason: 'Synthetic session retirement' }]);
+  expect(closures[0]).toMatchObject({ queues: { total: { bytes: expect.any(Number), oldestAgeMs: expect.any(Number) } },
+    calls: { outgoing: { total: expect.any(Number) }, incoming: { total: expect.any(Number) } }, bulkPhase: expect.any(String) });
 });
 
 test('logs failed connections alongside a ready executor without showing them as its error', async () => {

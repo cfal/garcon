@@ -4,6 +4,8 @@ import type { BulkConnectionControl } from './rpc-lane.js';
 import { DEFAULT_RPC_TIMEOUT_MS, type ExecutorRpc } from './rpc.js';
 import type { SessionTransport } from './session-transport.js';
 import { REDIAL_DELAYS_MS, type WebSocketLink } from './websocket-link.js';
+import { failureReason } from './failure-reason.js';
+import type { MessageQueueSnapshot } from './message-queue-budget.js';
 
 export type BulkPhase = 'offline' | 'preparing' | 'connecting' | 'reconciling' | 'activating' | 'ready' | 'reconnecting';
 
@@ -31,9 +33,21 @@ interface PendingControl {
 export interface BulkConnectionOptions {
   install(transport: SessionTransport): ExecutorRpc;
   changed(status: BulkConnectionStatus): void;
+  failed?(failure: BulkAttemptFailure): void;
   readonly setupTimeoutMs?: number;
   readonly redialDelaysMs?: readonly number[];
   readonly stableSessionMs?: number;
+}
+
+export interface BulkAttemptFailure {
+  readonly lane: 'bulk';
+  readonly primarySessionId: string;
+  readonly sessionId: string;
+  readonly phase: BulkPhase;
+  readonly reason: string;
+  readonly retries: number;
+  readonly setupTimeoutMs: number;
+  readonly queues: MessageQueueSnapshot | null;
 }
 
 // One retry owner per primary generation, regardless of which peer dials.
@@ -216,10 +230,15 @@ export class BulkConnection {
     if (!attempt || !this.#isCurrent(attempt)) return;
     if (attempt.readyAt !== null && performance.now() - attempt.readyAt >= (this.options.stableSessionMs ?? 10_000)) this.#retries = 0;
     this.#error = failure instanceof Error ? failure : new Error('Bulk connection failed');
+    this.options.failed?.({ lane: 'bulk', primarySessionId: this.primary.transport.id, sessionId: attempt.id,
+      phase: attempt.phase, reason: failureReason(this.#error), retries: this.#retries,
+      setupTimeoutMs: this.options.setupTimeoutMs ?? BULK_SETUP_TIMEOUT_MS,
+      queues: attempt.rpc?.transport.channel.queueSnapshot ?? this.primary.transport.channel.queueSnapshot });
     this.#clearAttempt();
     this.#publish('reconnecting');
     if (this.link.role === 'worker') {
       this.#send({ type: 'bulk-lost', sessionId: attempt.id });
+      this.#retries++;
     } else {
       const delays = this.options.redialDelaysMs ?? REDIAL_DELAYS_MS;
       this.#retry = setTimeout(() => { this.#retry = null; this.#prepare(); }, delays[Math.min(this.#retries++, delays.length - 1)]);

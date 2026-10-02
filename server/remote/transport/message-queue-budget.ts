@@ -13,6 +13,18 @@ export interface MessageQueueLimits {
   readonly controlMessages: number;
 }
 
+interface LaneQueueSnapshot {
+  readonly bytes: number;
+  readonly messages: number;
+  readonly oldestAgeMs: number;
+}
+
+export interface MessageQueueSnapshot {
+  readonly total: LaneQueueSnapshot;
+  readonly primary: LaneQueueSnapshot;
+  readonly bulk: LaneQueueSnapshot;
+}
+
 const DEFAULT_LIMITS: MessageQueueLimits = {
   bytes: RPC_QUEUE_BYTES, messages: RPC_QUEUE_MESSAGES,
   bulkBytes: BULK_QUEUE_BYTES, bulkMessages: BULK_QUEUE_MESSAGES,
@@ -28,11 +40,20 @@ export class MessageQueueBudget {
   #controlMessages = 0;
   #notifying = false;
   readonly #listeners = new Set<() => void>();
+  readonly #queued = { primary: new Set<{ at: number }>(), bulk: new Set<{ at: number }>() };
 
   constructor(private readonly limits: MessageQueueLimits = DEFAULT_LIMITS) {}
 
   get queuedBytes(): number { return this.#bytes; }
   get queuedMessages(): number { return this.#messages; }
+
+  snapshot(): MessageQueueSnapshot {
+    const now = performance.now();
+    const age = (lane: RpcLane) => Math.max(0, Math.round(now - (this.#queued[lane].values().next().value?.at ?? now)));
+    const primary = { bytes: this.#bytes - this.#bulkBytes, messages: this.#messages - this.#bulkMessages, oldestAgeMs: age('primary') };
+    const bulk = { bytes: this.#bulkBytes, messages: this.#bulkMessages, oldestAgeMs: age('bulk') };
+    return { total: { bytes: this.#bytes, messages: this.#messages, oldestAgeMs: Math.max(primary.oldestAgeMs, bulk.oldestAgeMs) }, primary, bulk };
+  }
 
   canAdmit(lane: RpcLane, bytes: number): boolean {
     return this.#bytes + bytes <= this.limits.bytes - this.limits.controlBytes
@@ -63,6 +84,8 @@ export class MessageQueueBudget {
   }
 
   #reserve(lane: RpcLane, bytes: number, control: boolean): () => void {
+    const queued = { at: performance.now() };
+    this.#queued[lane].add(queued);
     this.#bytes += bytes;
     this.#messages++;
     if (lane === 'bulk') { this.#bulkBytes += bytes; this.#bulkMessages++; }
@@ -71,6 +94,7 @@ export class MessageQueueBudget {
     return () => {
       if (released) return;
       released = true;
+      this.#queued[lane].delete(queued);
       this.#bytes -= bytes;
       this.#messages--;
       if (lane === 'bulk') { this.#bulkBytes -= bytes; this.#bulkMessages--; }

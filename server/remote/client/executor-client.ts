@@ -149,7 +149,12 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
     this.#log = options.logger ?? createLogger('executors');
     this.#unsubscribe = link.onSession((transport) => {
       this.#candidate = transport;
-      const connection = new ExecutorRpcConnection(link, transport, { parked: this.#parked, admission: this.#admission });
+      const connection = new ExecutorRpcConnection(link, transport, {
+        parked: this.#parked, admission: this.#admission,
+        bulkFailed: (failure) => {
+          if (Number.isInteger(Math.log2(failure.retries + 1))) this.#log.warn('Executor bulk setup or recovery failed', { executorId: this.id, ...failure });
+        },
+      });
       this.#connection = connection;
       const rpc = connection.primary;
       rpc.onTerminal((frame) => this.#terminals.receive(frame, rpc));
@@ -173,6 +178,8 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
           // so the session's own reason is the one worth reporting.
           this.#log.warn('Executor session setup failed', {
             executorId: this.id, stage: setup.stage, reason: failureReason(transport.channel.failure ?? error),
+            lane: 'primary', primarySessionId: transport.id, sessionId: transport.id,
+            queues: transport.channel.queueSnapshot, ...connection.diagnostics,
           });
           this.reportError(error instanceof ExecutorConfigurationError ? error.message
             : 'Executor initialization failed; check worker configuration and matching builds');
@@ -184,6 +191,7 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
 
   get availability(): ExecutorAvailability { return this.#availability; }
   get bulkStatus(): ExecutorBulkStatus { return this.#bulkStatus; }
+  get diagnostics() { return this.#connection?.diagnostics ?? null; }
 
   onBulkChanged(listener: (status: ExecutorBulkStatus) => void): () => void {
     this.#bulkListeners.add(listener);

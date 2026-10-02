@@ -17,10 +17,12 @@ function primaryFailure({ lane, ...failure }) {
   return failure;
 }
 
-function primaryClosure({ lane, sessionId, primarySessionId, ...closure }) {
+function primaryClosure({ lane, sessionId, primarySessionId, queues, primaryRedials, ...closure }) {
   expect(lane).toBe('primary');
   expect(primarySessionId).toBe(sessionId);
   expect(sessionId).toMatch(/^[0-9a-f-]{36}$/);
+  expect(queues.total.bytes).toBeGreaterThanOrEqual(0);
+  expect(primaryRedials).toBeGreaterThanOrEqual(0);
   return closure;
 }
 

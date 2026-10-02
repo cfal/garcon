@@ -7,8 +7,12 @@ for (const dialer of ['controller', 'worker'] as const) {
     const closed = Promise.withResolvers<LinkClosure>();
     const fixture = await remoteFixture(dialer, (controller) => { controller.onClosure(closed.resolve); });
     try {
+      const sessionId = fixture.controller.current!.id;
       fixture.worker.current!.send('{"type": SYNTHETIC_SENTINEL}');
-      expect(await closed.promise).toEqual({ cause: 'session-retired', count: 1, reason: 'Malformed executor RPC frame' });
+      const closure = await closed.promise;
+      expect(closure).toMatchObject({ lane: 'primary', sessionId, primarySessionId: sessionId,
+        cause: 'session-retired', count: 1, reason: 'Malformed executor RPC frame' });
+      expect(JSON.stringify(closure)).not.toContain('SYNTHETIC_SENTINEL');
     } finally { await fixture.dispose(); }
   });
 

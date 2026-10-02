@@ -1,7 +1,7 @@
 import type { SessionTransport } from './session-transport.js';
 import type { WebSocketLink } from './websocket-link.js';
 import { ExecutorRpc, ParkedRpcCalls } from './rpc.js';
-import { BulkConnection, type BulkConnectionOptions, type BulkConnectionStatus } from './bulk-connection.js';
+import { BulkConnection, type BulkConnectionOptions, type BulkConnectionStatus, type BulkAttemptFailure } from './bulk-connection.js';
 import type { RpcReplyJournal } from './rpc-journal.js';
 import type { RpcAdmissionBudgets } from './rpc-admission.js';
 import type { RpcLane } from './rpc-lane.js';
@@ -13,6 +13,9 @@ export interface RpcConnectionOptions {
   readonly parked?: Readonly<Record<RpcLane, ParkedRpcCalls>>;
   readonly journal?: RpcReplyJournal;
   readonly bulkTiming?: Pick<BulkConnectionOptions, 'setupTimeoutMs' | 'redialDelaysMs' | 'stableSessionMs'>;
+  readonly bulkFailed?: (failure: BulkAttemptFailure & {
+    calls: ReturnType<RpcAdmissionBudgets['snapshot']>;
+  }) => void;
 }
 
 // A generation owns endpoints, never native processes or retained call budgets.
@@ -30,6 +33,7 @@ export class ExecutorRpcConnection {
     });
     this.bulk = new BulkConnection(link, this.primary, {
       ...options.bulkTiming,
+      failed: (failure) => options.bulkFailed?.({ ...failure, calls: options.admission.snapshot() }),
       install: (session) => {
         const rpc = new ExecutorRpc(session, {
           admission: options.admission, journal: options.journal, parked: options.parked?.bulk, recovering: true,
@@ -48,6 +52,9 @@ export class ExecutorRpcConnection {
   }
 
   get status(): BulkConnectionStatus { return this.#status; }
+  get diagnostics() {
+    return { bulkPhase: this.#status.phase, bulkRetries: this.#status.retries, calls: this.options.admission.snapshot() };
+  }
 
   async acquire(lane: RpcLane, options: { signal: AbortSignal; timeoutMs: number | null }): Promise<{ rpc: ExecutorRpc; timeoutMs: number | null }> {
     const unavailable = () => new AgentCallError('not-dispatched', 'The captured executor connection is unavailable');

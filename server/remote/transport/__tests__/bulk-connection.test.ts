@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { ExecutorRpcConnection } from '../rpc-connection.js';
+import { ExecutorRpcConnection, type RpcConnectionOptions } from '../rpc-connection.js';
 import { RpcAdmissionBudgets } from '../rpc-admission.js';
 import { ParkedRpcCalls, type ExecutorRpc } from '../rpc.js';
 import { RpcReplyJournal } from '../rpc-journal.js';
@@ -38,13 +38,15 @@ async function pair(dialer: 'controller' | 'worker', configure?: (controller: Re
   const controllerAdmission = new RpcAdmissionBudgets();
   const workerAdmission = new RpcAdmissionBudgets();
   const journal = new RpcReplyJournal();
+  const failures: Parameters<NonNullable<RpcConnectionOptions['bulkFailed']>>[0][] = [];
   const connections = {} as Record<'controller' | 'worker', ExecutorRpcConnection>;
   const endpoints = {} as Record<'controller' | 'worker', ExecutorRpc[]>;
   const hooks = { read: async () => ['synthetic-file'], reverse: async () => ({ status: 200, body: [] }) };
   let executions = 0;
   const bulkTiming = { redialDelaysMs: [0, 10, 20], setupTimeoutMs: 300, stableSessionMs: 100 };
   controller.onSession((transport) => {
-    connections.controller = new ExecutorRpcConnection(controller, transport, { parked, admission: controllerAdmission, bulkTiming });
+    connections.controller = new ExecutorRpcConnection(controller, transport, { parked, admission: controllerAdmission, bulkTiming,
+      bulkFailed: failure => failures.push(failure) });
     endpoints.controller = [];
     connections.controller.onEndpoint((rpc) => {
       endpoints.controller.push(rpc);
@@ -66,7 +68,7 @@ async function pair(dialer: 'controller' | 'worker', configure?: (controller: Re
   else worker.dial(controller.listen());
   await Promise.all([controller.ready, worker.ready]);
   return {
-    controller, worker, connections, endpoints, gates, hooks, journal, controllerAdmission, workerAdmission,
+    controller, worker, connections, endpoints, gates, hooks, journal, controllerAdmission, workerAdmission, failures,
     get executions() { return executions; },
     start() { connections.controller.activate(); },
     async ready() { await until(() => Boolean(connections.controller.bulk.current && connections.worker.bulk.current)); },
@@ -208,6 +210,21 @@ test('bulk wait cancellation and quiescence do not retire a live primary', async
     expect(fixture.connections.controller.primary.transport.connected).toBe(true);
     fixture.start();
     expect(fixture.controller.bulk).toBeNull();
+  } finally { await fixture.dispose(); }
+});
+
+test('bulk setup timeout captures phase, identities, retry and pressure without closing primary', async () => {
+  const fixture = await pair('controller');
+  try {
+    fixture.gates.controller.primary = true;
+    fixture.start();
+    await until(() => fixture.failures.length > 0);
+    expect(fixture.failures[0]).toMatchObject({ lane: 'bulk', phase: 'preparing', retries: 0, setupTimeoutMs: 300,
+      primarySessionId: fixture.controller.current!.id, sessionId: expect.any(String), reason: 'Bulk preparing timed out',
+      calls: { incoming: { total: 0, primary: 0, bulk: 0 }, outgoing: { total: 0, primary: 0, bulk: 0 } },
+      queues: { total: { messages: 1 }, primary: { messages: 1 }, bulk: { messages: 0 } } });
+    expect(fixture.failures[0]!.queues!.primary.oldestAgeMs).toBeGreaterThanOrEqual(250);
+    expect(fixture.controller.current!.connected).toBe(true);
   } finally { await fixture.dispose(); }
 });
 

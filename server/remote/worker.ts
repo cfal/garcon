@@ -93,7 +93,7 @@ async function serveExecutorWorker(options: ExecutorWorkerOptions, dataDir: stri
     process.on('SIGTERM', onSignal);
     process.on('SIGINT', onSignal);
     link.onClosure((closure) => {
-      console.warn(JSON.stringify({ type: 'executor-link-closed', ...closure }));
+      console.warn(JSON.stringify({ type: 'executor-link-closed', ...closure, ...currentConnection?.diagnostics }));
     });
     link.onError((failure) => {
       if (shouldLogLinkFailure(failure)) console.warn(JSON.stringify({ type: 'executor-unavailable', ...failure }));
@@ -112,7 +112,11 @@ async function serveExecutorWorker(options: ExecutorWorkerOptions, dataDir: stri
         return;
       }
       // Replies outlive sessions only for the controller of the executor this worker serves.
-      const connection = new ExecutorRpcConnection(link, transport, { journal, admission });
+      const connection = new ExecutorRpcConnection(link, transport, { journal, admission,
+        bulkFailed: (failure) => {
+          if (Number.isInteger(Math.log2(failure.retries + 1))) console.warn(JSON.stringify({ type: 'executor-bulk-failed', ...failure }));
+        },
+      });
       const rpc = connection.primary;
       currentConnection = connection;
       transport.onFailure(() => { if (currentConnection === connection) currentConnection = null; });
