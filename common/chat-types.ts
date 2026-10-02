@@ -2,6 +2,7 @@
 // and frontend -- the server converts provider-specific formats into
 // these shapes, and the frontend renders them directly.
 
+import { isRecord } from './json.js';
 import {
   asAllowedPrompts,
   asAskUserQuestions,
@@ -1142,9 +1143,9 @@ const TOOL_USE_MESSAGE_TYPES = new Set<ToolUseMessageType>(
 
 function parseToolUseMessage(data: Record<string, unknown>): ToolUseChatMessage | null {
   const type = data.type;
-  if (typeof type !== 'string') return null;
+  if (typeof type !== 'string' || !TOOL_USE_MESSAGE_TYPES.has(type as ToolUseMessageType)) return null;
   const parser = TOOL_USE_MESSAGE_PARSERS[type as ToolUseMessageType];
-  return parser?.(data) ?? null;
+  return parser(data);
 }
 
 // Runtime guard for tool-use messages. The parser table is the source of
@@ -1166,7 +1167,8 @@ function parseDurableCliRow(data: Record<string, unknown>): CliRowMessage {
 
 // Constructs a typed ChatMessage class instance from raw data.
 // Returns null for unrecognized message types.
-export function parseChatMessage(data: Record<string, unknown>): ChatMessage | null {
+export function parseChatMessage(data: unknown): ChatMessage | null {
+  if (!isRecord(data)) return null;
   const toolUseMessage = parseToolUseMessage(data);
   if (toolUseMessage) return toolUseMessage;
 
