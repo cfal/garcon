@@ -8,7 +8,7 @@ import type { IChatRegistry } from '../chats/store.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import type { SlashCommandsResponse } from '../../../common/slash-commands.js';
 import type { ProjectInspector } from '../../../common/project-resolution.js';
-import { jsonErrorFromUnknown } from '../../common/http-error.js';
+import { jsonError, jsonErrorFromUnknown } from '../../common/http-error.js';
 
 interface CommandsRouteDeps {
   registry: IChatRegistry;
@@ -24,7 +24,7 @@ export default function createCommandsRoutes({ registry, agents, inspectProject 
       request.signal.throwIfAborted();
 
       const agent = url.searchParams.get('agent')?.trim();
-      if (!agent) return Response.json({ error: 'agent is required' }, { status: 400 });
+      if (!agent) return jsonError('agent is required', 400);
       const commands = await agents.getSlashCommands(agent, resolved.projectPath, resolved.executorId);
 
       return Response.json({ commands } satisfies SlashCommandsResponse);

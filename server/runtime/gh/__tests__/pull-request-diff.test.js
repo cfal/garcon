@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'bun:test';
 import { parseMultiFileDiffPatches } from '../pull-request-diff.js';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { initRepoWithCommit, runGitCommand } from '../../git/__tests__/repository-fixture.js';
 
 const SAMPLE_DIFF = `diff --git a/src/added.ts b/src/added.ts
 new file mode 100644
@@ -29,6 +33,52 @@ index 3333333..0000000
 `;
 
 describe('parseMultiFileDiffPatches', () => {
+  it('never interprets modified hunk content as path metadata', () => {
+    const [file] = parseMultiFileDiffPatches('diff --git a/src/counter.ts b/src/counter.ts\n--- a/src/counter.ts\n+++ b/src/counter.ts\n@@ -1 +1 @@\n--- i;\n+++ i;\n');
+    expect(file.path).toBe('src/counter.ts');
+    expect(file.body.path).toBe('src/counter.ts');
+    expect(file.body.patch).toContain('+++ i;');
+    expect(file.additions).toBe(1);
+    expect(file.deletions).toBe(1);
+  });
+
+  it('decodes real Git text, binary, rename and mode-only paths', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-gh-paths-'));
+    try {
+      await initRepoWithCommit(root);
+      const names = ['a b.txt', 'a\tb.txt', 'caf\u00e9.txt', 'a"b.txt', 'a\\b.txt', 'space b/inside.txt'];
+      for (const name of names) {
+        await fs.mkdir(path.dirname(path.join(root, name)), { recursive: true });
+        await fs.writeFile(path.join(root, name), 'old\n');
+        await fs.writeFile(path.join(root, `${name}.bin`), Buffer.from([0, 1]));
+        await fs.writeFile(path.join(root, `${name}.rename`), 'rename\n');
+        await fs.writeFile(path.join(root, `${name}.mode`), 'mode\n');
+      }
+      await runGitCommand(root, ['add', '.']);
+      await runGitCommand(root, ['commit', '-m', 'synthetic path fixtures']);
+      for (const name of names) {
+        await fs.writeFile(path.join(root, name), 'new\n');
+        await fs.writeFile(path.join(root, `${name}.bin`), Buffer.from([0, 2]));
+        await fs.rename(path.join(root, `${name}.rename`), path.join(root, `${name}.renamed`));
+        await fs.chmod(path.join(root, `${name}.mode`), 0o755);
+      }
+      await runGitCommand(root, ['add', '.']);
+      for (const quotePath of ['true', 'false']) {
+        const { stdout } = await runGitCommand(root, ['-c', `core.quotePath=${quotePath}`, 'diff', '--cached']);
+        const files = parseMultiFileDiffPatches(stdout);
+        expect(files).toHaveLength(names.length * 4);
+        for (const name of names) {
+          expect(files.find(file => file.path === name)).toMatchObject({ status: 'M', body: { path: name, bodyState: 'loaded' } });
+          expect(files.find(file => file.path === `${name}.bin`)).toMatchObject({ isBinary: true });
+          expect(files.find(file => file.path === `${name}.renamed`)).toMatchObject({ status: 'R', originalPath: `${name}.rename` });
+          expect(files.find(file => file.path === `${name}.mode`)).toMatchObject({ status: 'M' });
+        }
+      }
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('splits a multi-file diff into compact per-file bodies', () => {
     const files = parseMultiFileDiffPatches(SAMPLE_DIFF);
     expect(files.map((file) => file.path)).toEqual([

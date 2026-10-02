@@ -26,10 +26,7 @@ export async function resolveAccessibleProjectPath(
 }
 
 function projectPathNotFoundResponse(projectPath: string): Response {
-  return Response.json(
-    { error: `Project path not found: ${projectPath}` },
-    { status: 404 },
-  );
+  return jsonError(`Project path not found: ${projectPath}`, 404);
 }
 
 function unavailableResponse(projectPath: string, reason: ProjectUnavailableReason): Response {
@@ -66,7 +63,7 @@ export async function resolveProjectPathFromUrl(
     const chat = registry.getChat(chatId);
     if (!chat?.projectPath) {
       return {
-        error: Response.json({ error: 'Chat not found or missing projectPath' }, { status: 404 }),
+        error: jsonError('Chat not found or missing projectPath', 404),
       };
     }
     const projectPath = chat.projectPath;
@@ -80,7 +77,7 @@ export async function resolveProjectPathFromUrl(
 
   const projectPath = url.searchParams.get('projectPath');
   if (!projectPath) {
-    return { error: Response.json({ error: 'chatId or projectPath is required' }, { status: 400 }) };
+    return { error: jsonError('chatId or projectPath is required', 400) };
   }
   return resolveAccessibleProjectPath(projectPath, inspect, executorId, options);
 }

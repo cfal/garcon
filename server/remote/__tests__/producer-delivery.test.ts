@@ -78,6 +78,21 @@ async function runningTurn(dialer: 'controller' | 'worker') {
 }
 
 for (const dialer of ['controller', 'worker'] as const) {
+  test(`malformed and inherited message types remain publication gaps (${dialer} dials)`, async () => {
+    const { fixture, integration, publish } = await runningTurn(dialer);
+    try {
+      const delivered = deliveries(integration);
+      const messages = [null, 42, [], ...['constructor', 'toString', '__proto__', 'unknown-type'].map(type => ({ type }))];
+      for (const [index, message] of messages.entries()) {
+        publish({ type: 'rows', rows: [{ message }] } as unknown as AgentRuntimeEvent);
+        publish(row(`valid-${index}`));
+      }
+      await integration.execution.runningSessions();
+      expect(delivered).toEqual(messages.flatMap((_message, index) => ['publication-gap', `rows:valid-${index}`]));
+      expect(fixture.executor.availability).toBe('ready');
+    } finally { await fixture.dispose(); }
+  });
+
   test(`a steerable run reaches the controller with its run ID (${dialer} dials)`, async () => {
     const { fixture, integration, request, publish } = await runningTurn(dialer);
     try {

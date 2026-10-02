@@ -2,6 +2,10 @@ import { describe, it, expect, beforeEach, mock } from 'bun:test';
 import { makeRequest, createWorkspaceFixture, remoteSettingsSource } from './workspace-route-fixture.js';
 import createWorkspaceRoutes from '../workspace.js';
 import { CorruptStateFileError } from '../../../common/json-file-store.ts';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { TelegramSettingsStore } from '../../notifications/telegram-settings-store.js';
 
 let ctx;
 beforeEach(() => {
@@ -40,8 +44,7 @@ describe('Telegram token settings API', () => {
     const telegramSettings = {
       getBotToken: mock(() => 'secret-token'),
       getRecipientChatId: mock(() => publicStatus.recipientLinked ? '99999' : ''),
-      getPendingLinkCode: mock(() => 'abc123'),
-      getUpdateOffset: mock(() => null),
+      getPendingRecipientLink: mock(() => ({ botToken: 'secret-token', botId: 123, linkCode: 'abc123', offset: null })),
       getPublicStatus: mock(() => publicStatus),
       setBotToken: mock((botToken, identity) => {
         publicStatus.botTokenAvailable = Boolean(botToken);
@@ -65,14 +68,13 @@ describe('Telegram token settings API', () => {
         publicStatus.linkUrl = 'https://t.me/garcon_bot?start=abc123';
         return Promise.resolve(publicStatus.linkUrl);
       }),
-      setUpdateOffset: mock(() => Promise.resolve(undefined)),
-      completeRecipientLink: mock((recipient) => {
+      applyRecipientLinkResult: mock((_expected, { recipient }) => {
         publicStatus.recipientLinked = true;
         publicStatus.recipientUsername = recipient.username;
         publicStatus.recipientDisplayName = recipient.displayName;
         publicStatus.pendingLink = false;
         publicStatus.linkUrl = null;
-        return Promise.resolve(undefined);
+        return Promise.resolve(true);
       }),
       clearRecipient: mock(() => {
         publicStatus.recipientLinked = false;
@@ -190,7 +192,10 @@ describe('Telegram token settings API', () => {
     expect(resolveResponse.status).toBe(200);
     expect(resolveBody.settings.telegram.recipientLinked).toBe(true);
     expect(telegramNotifier.resolveRecipientLink).toHaveBeenCalledWith('abc123', null, 20);
-    expect(telegramSettings.completeRecipientLink).toHaveBeenCalled();
+    expect(telegramSettings.applyRecipientLinkResult).toHaveBeenCalledWith(
+      { botToken: 'secret-token', botId: 123, linkCode: 'abc123', offset: null },
+      { recipient: { chatId: '99999', username: 'alice', displayName: 'Alice', nextOffset: 12 }, nextOffset: 12 },
+    );
   });
 
   it('reports corrupt Telegram state as an opaque server error', async () => {
@@ -263,4 +268,63 @@ describe('Telegram token settings API', () => {
       'Garcon: test notification. Your Telegram integration is working.',
     );
   });
+
+  it.each(['delivery', 'unexpected'])('returns a coded %s notification failure', async (failure) => {
+    const { routes, publicStatus, telegramNotifier } = createTelegramRoutes();
+    telegramNotifier.isConfigured = true;
+    publicStatus.recipientLinked = true;
+    if (failure === 'delivery') telegramNotifier.send.mockResolvedValueOnce(false);
+    else telegramNotifier.send.mockRejectedValueOnce(new Error('/private/synthetic-secret'));
+    const response = await routes['/api/v1/app/telegram/test'].POST();
+    expect(response.status).toBe(failure === 'delivery' ? 502 : 500);
+    const body = await response.json();
+    expect(body).toEqual(failure === 'delivery' ? {
+      success: false, error: 'Telegram delivery failed. Check your bot token and linked recipient.',
+      errorCode: 'telegram_delivery_failed', retryable: false,
+    } : {
+      success: false, error: 'Internal server error', errorCode: 'INTERNAL_ERROR', retryable: true,
+    });
+  });
+});
+
+describe('Telegram recipient publication fences', () => {
+  for (const mutation of ['clear recipient', 'replace link', 'rotate token', 'clear token']) {
+    it(`rejects a deferred poll after ${mutation}`, async () => {
+      const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-telegram-race-'));
+      try {
+        const filePath = path.join(directory, 'notifications.json');
+        const store = new TelegramSettingsStore(filePath);
+        await store.init();
+        const identity = { id: 123, username: 'garcon_bot', firstName: 'Garcon' };
+        await store.setBotToken('initial-token', identity);
+        await store.beginRecipientLink();
+        const poll = Promise.withResolvers();
+        const started = Promise.withResolvers();
+        const notifier = { resolveRecipientLink: () => { started.resolve(); return poll.promise; } };
+        const routes = createWorkspaceRoutes(ctx.settings, ctx.agents, notifier, store, '/worker/projects');
+        const resolving = routes['/api/v1/app/telegram/recipient/resolve'].POST();
+        await started.promise;
+        if (mutation === 'clear recipient') await store.clearRecipient();
+        else if (mutation === 'replace link') await store.beginRecipientLink();
+        else if (mutation === 'rotate token') await store.setBotToken('new-token', identity);
+        else await store.clearBotToken();
+        const persisted = await fs.readFile(filePath, 'utf8');
+        poll.resolve({ nextOffset: 100, recipient: { chatId: 'stale', username: 'stale', displayName: 'Stale', nextOffset: 100 } });
+        const response = await resolving;
+        expect(response.status).toBe(409);
+        expect(await response.json()).toMatchObject({ success: false, errorCode: 'telegram_link_changed', retryable: false });
+        expect(store.getPublicStatus().recipientLinked).toBe(false);
+        expect(await fs.readFile(filePath, 'utf8')).toBe(persisted);
+        if (mutation === 'clear recipient') {
+          await store.beginRecipientLink();
+          expect(await store.applyRecipientLinkResult(store.getPendingRecipientLink(), {
+            nextOffset: 101, recipient: { chatId: 'fresh', username: null, displayName: null, nextOffset: 101 },
+          })).toBe(true);
+          expect(store.getRecipientChatId()).toBe('fresh');
+        }
+      } finally {
+        await fs.rm(directory, { recursive: true, force: true });
+      }
+    });
+  }
 });

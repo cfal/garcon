@@ -107,10 +107,6 @@ function parseRecentlyDispatched(value: unknown): RecentlyDispatchedQueueEntry |
     : null;
 }
 
-export function normalizeChatQueueState(value: unknown): ChatQueueState {
-  return parseChatQueueState(value) ?? emptyChatQueueState();
-}
-
 function isIsoTimestamp(value: unknown): value is string {
   if (typeof value !== 'string' || !value.endsWith('Z')) return false;
   const parsed = Date.parse(value);

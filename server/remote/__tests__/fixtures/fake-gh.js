@@ -6,12 +6,14 @@ if (config.wait) {
   await new Promise(resolve => setTimeout(resolve, 60_000));
 }
 const pr = { number: 1, title: config.label, body: 'x'.repeat(config.bodyBytes ?? 0), state: 'OPEN',
-  author: { login: config.label }, headRefName: 'feature', baseRefName: 'main', files: [{ path: 'example.txt', additions: 1, deletions: 1 }] };
+  author: { login: config.label }, headRefName: 'feature', baseRefName: 'main', files: config.files ?? [{ path: 'example.txt', additions: 1, deletions: 1 }] };
 if (command === 'auth') console.log(JSON.stringify({ hosts: { 'git.example.invalid': [{ active: true, state: 'success', login: config.label }] } }));
 else if (command === 'repo') console.log(JSON.stringify({ nameWithOwner: `${config.label}/repository` }));
 else if (command === 'api') {
   if (config.commentsFail) { console.error('HTTP 403: forbidden'); process.exit(1); }
-  console.log(JSON.stringify([{ id: 1, path: 'example.txt', line: 1, side: 'RIGHT', body: 'synthetic comment' }]));
+  const pages = config.commentPages ?? [[{ id: 1, path: 'example.txt', line: 1, side: 'RIGHT', body: 'synthetic comment' }]];
+  if (process.argv.includes('--slurp')) console.log(JSON.stringify(pages));
+  else for (const page of pages) console.log(JSON.stringify(page));
 } else if (action === 'list') console.log(JSON.stringify([pr]));
 else if (action === 'view') console.log(JSON.stringify(pr));
 else if (action === 'diff') console.log(config.diff ?? 'diff --git a/example.txt b/example.txt\n--- a/example.txt\n+++ b/example.txt\n@@ -1 +1 @@\n-initial\n+changed');

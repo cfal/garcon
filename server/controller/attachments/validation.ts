@@ -9,7 +9,6 @@ import {
   isVideoAttachmentMimeType,
 } from '../../../common/attachments.js';
 
-export const MAX_ATTACHMENT_UPLOAD_BODY_BYTES = 30 * 1024 * 1024;
 export const MAX_ATTACHMENT_TOTAL_BYTES = MAX_CHAT_ATTACHMENT_TOTAL_BYTES;
 export const MAX_ATTACHMENT_FILE_BYTES = MAX_CHAT_ATTACHMENT_FILE_BYTES;
 export const MAX_VIDEO_ATTACHMENT_FILE_BYTES = MAX_CHAT_VIDEO_ATTACHMENT_FILE_BYTES;
@@ -28,61 +27,11 @@ export const ALLOWED_ATTACHMENT_MIMES = new Set([
 const DATA_URL_RE = /^data:([^;,]*);base64,([A-Za-z0-9+/]*={0,2})$/;
 const BASE64_CHARS_RE = /^[A-Za-z0-9+/]*={0,2}$/;
 
-interface UploadAttachmentFile {
-  name: string;
-  size: number;
-  type: string;
-  arrayBuffer(): Promise<ArrayBuffer>;
-}
-
-export interface UploadedAttachment {
-  name: string;
-  data: string;
-  size: number;
-  mimeType: string;
-}
-
 export class AttachmentValidationError extends Error {
   constructor(message: string, readonly status = 400) {
     super(message);
     this.name = 'AttachmentValidationError';
   }
-}
-
-export function attachmentMimeTypeForUpload(file: Pick<UploadAttachmentFile, 'name' | 'type'>): string {
-  return chatAttachmentMimeType(file);
-}
-
-export function validateAttachmentUploadBatch(
-  files: readonly Pick<UploadAttachmentFile, 'name' | 'size' | 'type'>[],
-): void {
-  if (files.length > MAX_ATTACHMENT_COUNT) {
-    throw new AttachmentValidationError('Maximum 5 files allowed');
-  }
-
-  const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
-  if (totalBytes > MAX_ATTACHMENT_TOTAL_BYTES) {
-    throw new AttachmentValidationError('Total upload too large. Maximum combined size is 25MB.', 413);
-  }
-
-  for (const file of files) {
-    const mimeType = attachmentMimeTypeForUpload(file);
-    assertAllowedAttachmentMime(mimeType);
-    assertAttachmentSize(file.size, mimeType);
-  }
-}
-
-export async function uploadedAttachmentFromFile(file: UploadAttachmentFile): Promise<UploadedAttachment> {
-  const mimeType = attachmentMimeTypeForUpload(file);
-  assertAllowedAttachmentMime(mimeType);
-  assertAttachmentSize(file.size, mimeType);
-  const buffer = Buffer.from(await file.arrayBuffer());
-  return {
-    name: file.name,
-    data: `data:${mimeType};base64,${buffer.toString('base64')}`,
-    size: file.size,
-    mimeType,
-  };
 }
 
 export function validateCommandAttachments(value: unknown): AgentCommandImage[] | undefined {

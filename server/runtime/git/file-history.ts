@@ -1,4 +1,5 @@
 import { nulRecords } from './log-records.js';
+import { literalGitPathspec } from './pathspecs.js';
 import { assertExistingCommitRef } from './ref-validation.js';
 import {
   assertGitRepository,
@@ -38,7 +39,7 @@ async function getFileHistory({
   const safeLimit = clampLimit(limit, 50, MAX_HISTORY_LIMIT);
   const { stdout } = await runGit(
     projectPath,
-    ['log', '--follow', '-z', `-n${safeLimit}`, '--format=%H%x00%an%x00%ae%x00%ai%x00%s', '--', file],
+    ['log', '--follow', '-z', `-n${safeLimit}`, '--format=%H%x00%an%x00%ae%x00%ai%x00%s', '--', literalGitPathspec(file)],
     readOnlyGitOptions({ signal }),
   );
   return { commits: parseFileHistory(stdout) };

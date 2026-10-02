@@ -441,33 +441,6 @@ export function renderTranscriptSeed(
   ].join('\n');
 }
 
-export function stripTranscriptSeed(userText: string): string {
-  const openIndex = userText.indexOf(SEED_CONTEXT_OPEN);
-  if (openIndex === -1) return userText;
-  const prefix = userText.slice(0, openIndex);
-  if (prefix.trim().length > 0 && !prefix.trimEnd().endsWith('Continue it.')) return userText;
-  const closeIndex = userText.indexOf(SEED_CONTEXT_CLOSE, openIndex);
-  if (closeIndex === -1) return userText;
-  return userText.slice(closeIndex + SEED_CONTEXT_CLOSE.length).replace(/^\s+/, '');
-}
-
-export function stripFirstUserSeed(messages: ChatMessage[]): ChatMessage[] {
-  const index = messages.findIndex((message) => message.type === 'user-message');
-  if (index === -1) return messages;
-  const original = messages[index] as UserMessage;
-  const stripped = stripTranscriptSeed(original.content);
-  if (stripped === original.content) return messages;
-  const next = messages.slice();
-  next[index] = new UserMessage(
-    original.timestamp,
-    stripped,
-    original.images,
-    original.metadata,
-    original.presentation,
-  );
-  return next;
-}
-
 // Tool results are never projected. They are reproducible by the agent that
 // inherits the work, and often should be reproduced rather than trusted, since a
 // file's contents at handoff time may already be stale. Their durable meaning is

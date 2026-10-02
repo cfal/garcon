@@ -22,7 +22,7 @@ import { extractFirstLine } from '../lib/text.js';
 import type { RouteHandler, RouteMap } from '../lib/http-route-types.js';
 import type { ChatMetadata } from '../chats/metadata-store.js';
 import { isDomainError } from '../../common/domain-error.js';
-import { jsonErrorFromUnknown } from '../../common/http-error.js';
+import { jsonError, jsonErrorFromUnknown } from '../../common/http-error.js';
 import {
   injectAppTitleIntoShell,
   resolvePublicAppTitle,
@@ -182,11 +182,10 @@ function plainTextResponse(textPath: string): Response {
   });
 }
 
-function publicJsonResponse(body: unknown, status = 200): Response {
-  return Response.json(body, {
-    status,
-    headers: { 'Cache-Control': NO_STORE },
-  });
+function publicJsonError(message: string, status: number): Response {
+  const response = jsonError(message, status);
+  response.headers.set('Cache-Control', NO_STORE);
+  return response;
 }
 
 function withShareStorageErrors(handler: RouteHandler): RouteHandler {
@@ -232,18 +231,12 @@ export default function createShareRoutes(
     try {
       const chatId = String(body.chatId || '').trim();
       if (!chatId) {
-        return Response.json(
-          { success: false, error: 'chatId is required' },
-          { status: 400 },
-        );
+        return jsonError('chatId is required', 400);
       }
 
       const session = registry.getChat(chatId);
       if (!session) {
-        return Response.json(
-          { success: false, error: 'Session not found' },
-          { status: 404 },
-        );
+        return jsonError('Session not found', 404);
       }
 
       const snapshot = await transcripts.withStoredSnapshot(chatId, (capture) => {
@@ -275,17 +268,7 @@ export default function createShareRoutes(
       };
       return Response.json(resp);
     } catch (error: unknown) {
-      if (isDomainError(error)) {
-        if (error.code === 'TRANSCRIPT_WORK_BUSY' || error.code === 'SHARE_STORAGE_UNAVAILABLE') return jsonErrorFromUnknown(error);
-        return Response.json(
-          { success: false, error: error.message },
-          { status: error.status },
-        );
-      }
-      return Response.json(
-        { success: false, error: (error as Error).message },
-        { status: 500 },
-      );
+      return jsonErrorFromUnknown(error);
     }
   }
 
@@ -296,22 +279,16 @@ export default function createShareRoutes(
   ): Promise<Response> {
     const chatId = url.searchParams.get('chatId');
     if (!chatId) {
-      return Response.json(
-        { success: false, error: 'chatId query parameter is required' },
-        { status: 400 },
-      );
+      return jsonError('chatId query parameter is required', 400);
     }
 
     try {
       const revoked = await shareStore.revokeShareByChatId(chatId);
-      const resp: RevokeShareResponse = { success: revoked };
-      return Response.json(resp, { status: revoked ? 200 : 404 });
+      if (!revoked) return jsonError('Share not found', 404);
+      const resp: RevokeShareResponse = { success: true };
+      return Response.json(resp);
     } catch (error: unknown) {
-      if (isDomainError(error)) return jsonErrorFromUnknown(error);
-      return Response.json(
-        { success: false, error: (error as Error).message },
-        { status: 500 },
-      );
+      return jsonErrorFromUnknown(error);
     }
   }
 
@@ -322,10 +299,7 @@ export default function createShareRoutes(
   ): Promise<Response> {
     const chatId = url.searchParams.get('chatId');
     if (!chatId) {
-      return Response.json(
-        { success: false, error: 'chatId query parameter is required' },
-        { status: 400 },
-      );
+      return jsonError('chatId query parameter is required', 400);
     }
 
     const existing = shareStore.getEntryByChatId(chatId);
@@ -347,10 +321,7 @@ export default function createShareRoutes(
   ): Promise<Response> {
     const token = url.searchParams.get('token');
     if (!token) {
-      return publicJsonResponse(
-        { error: 'token query parameter is required' },
-        400,
-      );
+      return publicJsonError('token query parameter is required', 400);
     }
 
     let page: SharedChatMessagePage | undefined;
@@ -374,7 +345,7 @@ export default function createShareRoutes(
       return { start, end };
     });
     if (!shared) {
-      return publicJsonResponse({ error: 'Share not found' }, 404);
+      return publicJsonError('Share not found', 404);
     }
 
     return sharedChatPageResponse(shared, page!);
@@ -387,12 +358,12 @@ export default function createShareRoutes(
   ): Promise<Response> {
     const token = extractLlmTokenFromPath(url.pathname);
     if (!token) {
-      return publicJsonResponse({ error: 'Share token is required' }, 400);
+      return publicJsonError('Share token is required', 400);
     }
 
     const textPath = await shareStore.getTextPath(token);
     if (!textPath) {
-      return publicJsonResponse({ error: 'Share not found' }, 404);
+      return publicJsonError('Share not found', 404);
     }
 
     return plainTextResponse(textPath);

@@ -5,29 +5,26 @@ import type { HttpRouteContext, RouteMap } from '../lib/http-route-types.js';
 import type { ApiProviderService } from '../api-providers/service.js';
 import { isApiProviderId, type ApiProviderInput, type ApiProviderModelDiscoveryRequest } from '../../../common/api-providers.js';
 import type { ModelCatalogResponseCache } from '../agents/model-catalog-cache.js';
-import { errorMessage, jsonErrorFromCorruptStateFile } from './route-helpers.js';
+import { jsonErrorFromCorruptStateFile } from './route-helpers.js';
 import { executorIdFromUrl } from './executor-target.js';
 import { DomainError, ValidationDomainError } from '../../common/domain-error.js';
 import { AgentCallError } from '@garcon/server-agent-interface';
-import { jsonErrorFromUnknown } from '../../common/http-error.js';
+import { jsonError, jsonErrorFromUnknown } from '../../common/http-error.js';
 import { AtomicJsonWriteError } from '../../common/json-file-store.js';
 
-function apiProviderError(error: unknown): Response {
+function apiProviderStorageError(error: unknown): Response {
   if (error instanceof AtomicJsonWriteError && error.renamed) {
     return jsonErrorFromUnknown(new DomainError('API_PROVIDER_STORAGE_UNAVAILABLE',
       'Provider save durability is unknown. Reload after checking controller configuration.', 503));
   }
-  if (error instanceof DomainError || error instanceof AgentCallError) return jsonErrorFromUnknown(error);
-  const corruptStateResponse = jsonErrorFromCorruptStateFile(error);
-  if (corruptStateResponse) return corruptStateResponse;
-  return Response.json({ error: errorMessage(error) }, { status: 400 });
+  return apiProviderError(error);
 }
 
-function apiProviderDiscoveryError(error: unknown): Response {
+function apiProviderError(error: unknown): Response {
   if (error instanceof DomainError || error instanceof AgentCallError) return jsonErrorFromUnknown(error);
   const corruptStateResponse = jsonErrorFromCorruptStateFile(error);
   if (corruptStateResponse) return corruptStateResponse;
-  return Response.json({ success: false, error: errorMessage(error) }, { status: 400 });
+  return jsonErrorFromUnknown(error, 400);
 }
 
 export default function createApiProviderRoutes(
@@ -40,28 +37,28 @@ export default function createApiProviderRoutes(
       responseCache.clear();
       return Response.json(result, { status: 201 });
     } catch (error) {
-      return apiProviderError(error);
+      return apiProviderStorageError(error);
     }
   }
 
   async function putApiProvider(body: Partial<ApiProviderInput>, _request: Request, url: URL): Promise<Response> {
     const id = url.searchParams.get('id');
     if (!id) {
-      return Response.json({ error: 'id query parameter is required' }, { status: 400 });
+      return jsonError('id query parameter is required', 400);
     }
     try {
       const result = await apiProviders.update(id, body);
       responseCache.clear();
       return Response.json(result);
     } catch (error) {
-      return apiProviderError(error);
+      return apiProviderStorageError(error);
     }
   }
 
   async function deleteApiProvider(_request: Request, url: URL): Promise<Response> {
     const id = url.searchParams.get('id');
     if (!id) {
-      return Response.json({ error: 'id query parameter is required' }, { status: 400 });
+      return jsonError('id query parameter is required', 400);
     }
     try {
       if (url.searchParams.get('acknowledgeSharedImpact') !== 'true') {
@@ -71,7 +68,7 @@ export default function createApiProviderRoutes(
       responseCache.clear();
       return Response.json({ success: true });
     } catch (error) {
-      return apiProviderError(error);
+      return apiProviderStorageError(error);
     }
   }
 
@@ -79,7 +76,7 @@ export default function createApiProviderRoutes(
     try {
       return Response.json(apiProviders.management());
     } catch (error) {
-      return apiProviderError(error);
+      return apiProviderStorageError(error);
     }
   }
 
@@ -94,7 +91,7 @@ export default function createApiProviderRoutes(
       responseCache.clear();
       return Response.json(result);
     } catch (error) {
-      return apiProviderError(error);
+      return apiProviderStorageError(error);
     }
   }
 
@@ -102,7 +99,7 @@ export default function createApiProviderRoutes(
     try {
       return Response.json(await apiProviders.test(body, executorIdFromUrl(url)));
     } catch (error) {
-      return apiProviderError(error);
+      return apiProviderStorageError(error);
     }
   }
 
@@ -110,7 +107,7 @@ export default function createApiProviderRoutes(
     try {
       return Response.json(await apiProviders.discoverModels(body, executorIdFromUrl(url)));
     } catch (error) {
-      return apiProviderDiscoveryError(error);
+      return apiProviderError(error);
     }
   }
 

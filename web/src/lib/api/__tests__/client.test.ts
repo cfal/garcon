@@ -6,6 +6,7 @@ import {
 	apiDelete,
 	apiPostForm,
 	ApiError,
+	isIntermediaryResponse,
 	publicApiFetch,
 	getAuthToken,
 	setAuthToken,
@@ -185,6 +186,21 @@ describe('API client helpers', () => {
 			expect(apiErr.details).toBe('upstream timeout');
 			expect(apiErr.retryable).toBe(true);
 			expect(apiErr.payload).toMatchObject({ queue: { version: 7 } });
+		}
+	});
+
+	it.each([true, false])('distinguishes a coded share failure from an intermediary: %s', async (coded) => {
+		fetchMock.mockResolvedValue(jsonResponse({
+			success: false, error: 'Internal server error',
+			...(coded ? { errorCode: 'INTERNAL_ERROR', retryable: true } : {}),
+		}, 500));
+		try {
+			await apiPost('/api/v1/chats/share', { chatId: '123' });
+			expect.unreachable('should have thrown');
+		} catch (error) {
+			expect(error).toBeInstanceOf(ApiError);
+			expect(isIntermediaryResponse(error as ApiError)).toBe(!coded);
+			expect((error as ApiError).message).toBe('Internal server error');
 		}
 	});
 

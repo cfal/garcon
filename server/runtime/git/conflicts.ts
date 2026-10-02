@@ -1,6 +1,8 @@
-import { promises as fs } from 'fs';
+import { constants, promises as fs } from 'fs';
+import { StringDecoder } from 'node:string_decoder';
 import { GitDomainError } from './git-domain-error.js';
-import { assertGitWorkingPath } from './operation-context.js';
+import { assertGitWorkingPath, gitOperationSignal } from './operation-context.js';
+import { literalGitPathspec } from './pathspecs.js';
 import { parsePorcelainV1Z, UNMERGED_STATUSES } from './porcelain-status.js';
 import {
   assertGitRepository,
@@ -101,23 +103,61 @@ async function readStageBlob(
   }
 }
 
-async function readWorkingConflictContent(projectPath: string, file: string): Promise<GitConflictContent> {
+async function openWorkingConflictFile(projectPath: string, file: string, signal?: AbortSignal) {
+  signal?.throwIfAborted();
+  const workingPath = resolvePathWithinProject(projectPath, file);
+  await assertGitWorkingPath(workingPath);
+  const realPath = await fs.realpath(workingPath);
+  await assertGitWorkingPath(realPath);
+  const handle = await fs.open(realPath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
-    const workingPath = resolvePathWithinProject(projectPath, file);
+    const stats = await handle.stat();
+    if (!stats.isFile()) throw new GitDomainError('INVALID_INPUT', 'Conflict content must be a regular file.');
     await assertGitWorkingPath(workingPath);
-    const stats = await fs.stat(workingPath);
-    if (stats.size > MAX_CONFLICT_CONTENT_BYTES) {
+    const current = await fs.stat(workingPath);
+    if (stats.dev !== current.dev || stats.ino !== current.ino) {
+      throw new GitDomainError('INVALID_INPUT', 'Conflict file changed while opening it.');
+    }
+    signal?.throwIfAborted();
+    return { handle, stats };
+  } catch (error) {
+    await handle.close();
+    throw error;
+  }
+}
+
+async function readWorkingConflictContent(projectPath: string, file: string, signal?: AbortSignal): Promise<GitConflictContent> {
+  try {
+    const { handle, stats } = await openWorkingConflictFile(projectPath, file, signal);
+    try {
+      let byteLength = stats.size;
+      if (byteLength <= MAX_CONFLICT_CONTENT_BYTES) {
+        const buffer = Buffer.allocUnsafe(MAX_CONFLICT_CONTENT_BYTES + 1);
+        let size = 0;
+        while (size < buffer.length) {
+          signal?.throwIfAborted();
+          const { bytesRead } = await handle.read(buffer, size, Math.min(64 * 1024, buffer.length - size));
+          signal?.throwIfAborted();
+          if (bytesRead === 0) break;
+          size += bytesRead;
+        }
+        if (size <= MAX_CONFLICT_CONTENT_BYTES) {
+          return limitConflictContent(buffer.subarray(0, size).toString('utf8'), size);
+        }
+        byteLength = Math.max(size, (await handle.stat()).size);
+      }
       return {
         content: null,
         truncated: true,
-        byteLength: stats.size,
+        byteLength,
         lineCount: 0,
         limitReason: 'content-too-large',
       };
+    } finally {
+      await handle.close();
     }
-    const content = await fs.readFile(workingPath, 'utf-8');
-    return limitConflictContent(content, Buffer.byteLength(content));
   } catch {
+    signal?.throwIfAborted();
     return emptyConflictContent();
   }
 }
@@ -166,7 +206,7 @@ async function getConflictDetails({
     readStageBlob(projectPath, 1, file, signal),
     readStageBlob(projectPath, 2, file, signal),
     readStageBlob(projectPath, 3, file, signal),
-    readWorkingConflictContent(projectPath, file),
+    readWorkingConflictContent(projectPath, file, gitOperationSignal() ?? signal),
   ]);
   return {
     path: file,
@@ -185,8 +225,8 @@ async function acceptConflictSide({
   signal,
 }: ConflictAcceptOptions): Promise<{ success: boolean }> {
   await assertGitRepository(projectPath);
-  await runGit(projectPath, ['checkout', side === 'ours' ? '--ours' : '--theirs', '--', file], { signal });
-  await runGit(projectPath, ['add', '--', file], { signal });
+  await runGit(projectPath, ['checkout', side === 'ours' ? '--ours' : '--theirs', '--', literalGitPathspec(file)], { signal });
+  await runGit(projectPath, ['add', '--', literalGitPathspec(file)], { signal });
   return { success: true };
 }
 
@@ -196,16 +236,32 @@ async function markConflictResolved({
   signal,
 }: FileOptions): Promise<{ success: boolean }> {
   await assertGitRepository(projectPath);
-  const workingPath = resolvePathWithinProject(projectPath, file);
-  await assertGitWorkingPath(workingPath);
-  const working = await fs.readFile(workingPath, 'utf-8');
-  if (/^(<<<<<<<|=======|>>>>>>>)/m.test(working)) {
-    throw new GitDomainError(
-      'INVALID_INPUT',
-      'Conflict markers remain in this file. Remove them before marking it resolved.',
-    );
+  const readSignal = gitOperationSignal() ?? signal;
+  const { handle } = await openWorkingConflictFile(projectPath, file, readSignal);
+  try {
+    const buffer = Buffer.allocUnsafe(64 * 1024);
+    const decoder = new StringDecoder('utf8');
+    // Retains only enough text to recognize a line boundary plus a split marker.
+    let tail = '\n';
+    while (true) {
+      readSignal?.throwIfAborted();
+      const { bytesRead } = await handle.read(buffer);
+      readSignal?.throwIfAborted();
+      const text = tail + (bytesRead === 0 ? decoder.end() : decoder.write(buffer.subarray(0, bytesRead)));
+      if (/[\r\n\u2028\u2029](<<<<<<<|=======|>>>>>>>)/.test(text)) {
+        throw new GitDomainError(
+          'INVALID_INPUT',
+          'Conflict markers remain in this file. Remove them before marking it resolved.',
+        );
+      }
+      if (bytesRead === 0) break;
+      tail = text.slice(-7);
+    }
+  } finally {
+    await handle.close();
   }
-  await runGit(projectPath, ['add', '--', file], { signal });
+  readSignal?.throwIfAborted();
+  await runGit(projectPath, ['add', '--', literalGitPathspec(file)], { signal });
   return { success: true };
 }
 
