@@ -9,6 +9,7 @@ import { runExecutorCommand, type ExecutorCommandClient } from '../executor-comm
 import { executorProviders } from '../executor-responses.js';
 import { GarconClient, GarconHttpError, GarconTransportError } from '../garcon-client.js';
 import { createCliOutput } from '../output.js';
+import { CliError } from '../errors.js';
 
 const id = '11111111-1111-4111-8111-111111111111';
 const snapshot: ExecutorSnapshot = { id, label: 'Worker', kind: 'remote', enabled: true,
@@ -194,6 +195,42 @@ test('readiness waits reject disabled, missing, cancelled and timed-out executor
   const abort = new AbortController();
   abort.abort(new Error('Synthetic cancellation'));
   await expect(runExecutorCommand(waiting, f.client, f.output, abort.signal)).rejects.toThrow('Synthetic cancellation');
+});
+
+test('readiness waits survive transient bridge and transport failures', async () => {
+  const f = fixture();
+  f.client.listExecutors
+    .mockRejectedValueOnce(new GarconHttpError('executors', 'Connecting', 503, 'CLI_CONTROLLER_UNAVAILABLE', true))
+    .mockRejectedValueOnce(new GarconTransportError('executors', 'Synthetic connection reset'));
+  await runExecutorCommand(command(['wait', id, '--ready']), f.client, f.output);
+  expect(f.client.listExecutors).toHaveBeenCalledTimes(3);
+  expect(JSON.parse(f.stdout()).availability).toBe('ready');
+});
+
+test('readiness waits stop on fatal reads even with retry metadata', async () => {
+  for (const error of [
+    new GarconHttpError('authentication', 'Denied', 403, 'CLI_ACCESS_DENIED', true),
+    new GarconHttpError('executors', 'Changed', 409, 'CLI_CONTROLLER_CHANGED', true),
+    new CliError('executors', 'Malformed reply', 3),
+  ]) {
+    const f = fixture();
+    f.client.listExecutors.mockRejectedValueOnce(error);
+    await expect(runExecutorCommand(command(['wait', id, '--ready']), f.client, f.output)).rejects.toBe(error);
+    expect(f.client.listExecutors).toHaveBeenCalledTimes(1);
+  }
+});
+
+test('transient readiness failures use the overall deadline and preserve caller cancellation', async () => {
+  const f = fixture();
+  f.client.listExecutors.mockRejectedValue(new GarconTransportError('executors', 'Synthetic connection reset'));
+  const waiting = { ...command(['wait', id, '--ready']), operation: { action: 'wait' as const, id, timeoutMs: 10 } };
+  await expect(runExecutorCommand(waiting, f.client, f.output)).rejects.toThrow('timed out waiting for executor readiness: Synthetic connection reset');
+  const abort = new AbortController();
+  f.client.listExecutors.mockImplementationOnce(async () => {
+    abort.abort(new Error('Synthetic caller cancellation'));
+    throw new GarconTransportError('executors', 'Lost connection');
+  });
+  await expect(runExecutorCommand(waiting, f.client, f.output, abort.signal)).rejects.toBe(abort.signal.reason);
 });
 
 test('connection reveal uses exclusive private output and does not echo credentials when writing a file', async () => {

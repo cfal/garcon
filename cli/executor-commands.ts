@@ -1,6 +1,6 @@
 import type { ExecutorSnapshot } from '@garcon/common/executors';
 import type { ExecutorCliCommand } from './executor-args.js';
-import { isDefinitiveMutationRejection, type GarconClient } from './garcon-client.js';
+import { GarconHttpError, GarconTransportError, isDefinitiveMutationRejection, type GarconClient } from './garcon-client.js';
 import { CliError } from './errors.js';
 import type { CliOutput } from './output.js';
 import { terminalLine } from './terminal-output.js';
@@ -26,19 +26,32 @@ async function waitReady(
   const timeout = AbortSignal.timeout(timeoutMs);
   const waiting = signal ? AbortSignal.any([signal, timeout]) : timeout;
   let last: ExecutorSnapshot | undefined;
+  let lastReadError: Error | undefined;
   try {
     while (true) {
       waiting.throwIfAborted();
-      last = requireExecutor(await client.listExecutors(waiting), id);
-      waiting.throwIfAborted();
-      if (last.availability === 'ready') return last;
-      if (!last.enabled) throw new CliError('executors', 'executor is disabled', 3);
+      try {
+        last = requireExecutor(await client.listExecutors(waiting), id);
+        lastReadError = undefined;
+        waiting.throwIfAborted();
+        if (!last.enabled) throw new CliError('executors', 'executor is disabled', 3);
+        if (last.availability === 'ready') return last;
+      } catch (error) {
+        waiting.throwIfAborted();
+        const retryable = error instanceof GarconTransportError
+          || error instanceof GarconHttpError && error.retryable
+            && error.status !== 401 && error.status !== 403 && error.status !== 404
+            && error.errorCode !== 'CLI_CONTROLLER_CHANGED';
+        if (!retryable) throw error;
+        lastReadError = error;
+      }
       await abortableDelay(500, waiting);
     }
   } catch (error) {
     signal?.throwIfAborted();
     if (timeout.aborted) {
-      const detail = last?.lastError ? `: ${last.lastError.message}` : '';
+      const message = lastReadError?.message ?? last?.lastError?.message;
+      const detail = message ? `: ${message}` : '';
       throw new CliError('executors', `timed out waiting for executor readiness${detail}`, 3);
     }
     throw error;
