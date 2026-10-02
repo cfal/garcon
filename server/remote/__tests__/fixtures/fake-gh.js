@@ -6,7 +6,7 @@ if (config.wait) {
   await new Promise(resolve => setTimeout(resolve, 60_000));
 }
 const pr = { number: 1, title: config.label, body: 'x'.repeat(config.bodyBytes ?? 0), state: 'OPEN',
-  author: { login: config.label }, headRefName: 'feature', baseRefName: 'main', files: [{ path: 'example.txt', additions: 1, deletions: 1 }] };
+  author: { login: config.label }, headRefName: 'feature', baseRefName: 'main', files: config.files ?? [{ path: 'example.txt', additions: 1, deletions: 1 }] };
 if (command === 'auth') console.log(JSON.stringify({ hosts: { 'git.example.invalid': [{ active: true, state: 'success', login: config.label }] } }));
 else if (command === 'repo') console.log(JSON.stringify({ nameWithOwner: `${config.label}/repository` }));
 else if (command === 'api') {
