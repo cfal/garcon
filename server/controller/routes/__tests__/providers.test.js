@@ -74,6 +74,20 @@ describe('agent auth login routes', () => {
     expect(agents.launchAgentAuthLogin).toHaveBeenCalledWith('claude', 'local');
   });
 
+  it.each([
+    ['/api/v1/api-providers', 'create'],
+    ['/api/v1/api-providers/models', 'discoverModels'],
+  ])('codes existing provider input failures at %s', async (route, operation) => {
+    parseJsonBody.mockResolvedValueOnce({});
+    apiProviders[operation].mockRejectedValueOnce(new Error('endpoint.baseUrl is required'));
+    const url = new URL(`http://localhost${route}`);
+    const response = await routes[route].POST(new Request(url, { method: 'POST' }), url);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      success: false, error: 'endpoint.baseUrl is required', errorCode: 'VALIDATION_FAILED', retryable: false,
+    });
+  });
+
   it('returns executor unavailability when auth completion disconnects', async () => {
     parseJsonBody.mockResolvedValueOnce({ agentId: 'claude', sessionId: 'session-a', code: 'synthetic-code', executorId: '22222222-2222-4222-8222-222222222222' });
     agents.completeAgentAuthLogin.mockRejectedValueOnce(new AgentCallError('unknown', 'Executor disconnected'));
@@ -124,6 +138,7 @@ describe('agent auth login routes', () => {
 
     expect(response.status).toBe(400);
     expect(body.error).toBe('agent is required');
+    expect(body).toMatchObject({ success: false, errorCode: 'VALIDATION_FAILED', retryable: false });
     expect(agents.getAgentAuthLoginStatus).not.toHaveBeenCalled();
   });
 
@@ -191,6 +206,7 @@ describe('agent auth login routes', () => {
 
     expect(response.status).toBe(409);
     expect(body.error).toBe('No matching pending auth login for agent: claude');
+    expect(body).toMatchObject({ success: false, errorCode: 'AUTH_LOGIN_SESSION_MISMATCH', retryable: false });
   });
 
   it('returns a client error when the agent does not support auth completion', async () => {

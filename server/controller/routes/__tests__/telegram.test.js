@@ -268,6 +268,23 @@ describe('Telegram token settings API', () => {
       'Garcon: test notification. Your Telegram integration is working.',
     );
   });
+
+  it.each(['delivery', 'unexpected'])('returns a coded %s notification failure', async (failure) => {
+    const { routes, publicStatus, telegramNotifier } = createTelegramRoutes();
+    telegramNotifier.isConfigured = true;
+    publicStatus.recipientLinked = true;
+    if (failure === 'delivery') telegramNotifier.send.mockResolvedValueOnce(false);
+    else telegramNotifier.send.mockRejectedValueOnce(new Error('/private/synthetic-secret'));
+    const response = await routes['/api/v1/app/telegram/test'].POST();
+    expect(response.status).toBe(failure === 'delivery' ? 502 : 500);
+    const body = await response.json();
+    expect(body).toEqual(failure === 'delivery' ? {
+      success: false, error: 'Telegram delivery failed. Check your bot token and linked recipient.',
+      errorCode: 'telegram_delivery_failed', retryable: false,
+    } : {
+      success: false, error: 'Internal server error', errorCode: 'INTERNAL_ERROR', retryable: true,
+    });
+  });
 });
 
 describe('Telegram recipient publication fences', () => {

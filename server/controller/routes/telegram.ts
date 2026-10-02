@@ -11,12 +11,8 @@ import { asJsonBody, errorMessage, jsonErrorFromCorruptStateFile, type JsonBody 
 const TELEGRAM_LINK_POLL_SECONDS = 20;
 
 function telegramTokenTestFailedResponse(error: unknown): Response {
-  return Response.json({
-    success: false,
-    error: 'Telegram token test failed',
-    errorCode: 'telegram_token_test_failed',
-    details: error instanceof Error ? error.message : String(error),
-  }, { status: 400 });
+  return jsonError('Telegram token test failed', 400, 'telegram_token_test_failed', false,
+    error instanceof Error ? error.message : String(error));
 }
 
 export function createTelegramRoutes(
@@ -29,37 +25,33 @@ export function createTelegramRoutes(
   async function postTelegramTest(_request: Request): Promise<Response> {
     try {
       if (!telegramNotifier?.isConfigured) {
-        return Response.json({ success: false, error: 'Telegram bot token is not configured' }, { status: 400 });
+        return jsonError('Telegram bot token is not configured', 400);
       }
       const chatId = telegramSettings?.getRecipientChatId?.() ?? '';
       if (!chatId) {
-        return Response.json({ success: false, error: 'Telegram recipient is not linked' }, { status: 400 });
+        return jsonError('Telegram recipient is not linked', 400);
       }
       const ok = await telegramNotifier.send(chatId, 'Garcon: test notification. Your Telegram integration is working.');
       if (!ok) {
-        return Response.json({ success: false, error: 'Telegram delivery failed. Check your bot token and linked recipient.' }, { status: 502 });
+        return jsonError('Telegram delivery failed. Check your bot token and linked recipient.', 502, 'telegram_delivery_failed', false);
       }
       return Response.json({ success: true });
     } catch (error) {
       const message = errorMessage(error);
       const status = message.startsWith('Telegram ') || message.includes('bot token') ? 400 : 500;
-      return Response.json({ success: false, error: message }, { status });
+      return jsonErrorFromUnknown(error, status);
     }
   }
 
   async function putTelegramToken(body: JsonBody): Promise<Response> {
     try {
       if (!telegramSettings) {
-        return Response.json({ success: false, error: 'Telegram settings store is not configured' }, { status: 500 });
+        return jsonError('Telegram settings store is not configured', 500);
       }
       const input = asJsonBody(body);
       const botToken = typeof input.botToken === 'string' ? input.botToken.trim() : '';
       if (!botToken) {
-        return Response.json({
-          success: false,
-          error: 'botToken is required',
-          errorCode: 'telegram_bot_token_required',
-        }, { status: 400 });
+        return jsonError('botToken is required', 400, 'telegram_bot_token_required', false);
       }
       let identity;
       try {
@@ -80,7 +72,7 @@ export function createTelegramRoutes(
   async function deleteTelegramToken(): Promise<Response> {
     try {
       if (!telegramSettings) {
-        return Response.json({ success: false, error: 'Telegram settings store is not configured' }, { status: 500 });
+        return jsonError('Telegram settings store is not configured', 500);
       }
       await telegramSettings.clearBotToken();
       telegramNotifier?.setBotToken?.('');
@@ -95,7 +87,7 @@ export function createTelegramRoutes(
   async function postTelegramTokenTest(body: JsonBody): Promise<Response> {
     try {
       if (!telegramSettings) {
-        return Response.json({ success: false, error: 'Telegram settings store is not configured' }, { status: 500 });
+        return jsonError('Telegram settings store is not configured', 500);
       }
       const input = asJsonBody(body);
       const botToken = typeof input.botToken === 'string' ? input.botToken.trim() : '';
@@ -110,7 +102,7 @@ export function createTelegramRoutes(
   async function postTelegramRecipientLink(): Promise<Response> {
     try {
       if (!telegramSettings) {
-        return Response.json({ success: false, error: 'Telegram settings store is not configured' }, { status: 500 });
+        return jsonError('Telegram settings store is not configured', 500);
       }
       const linkUrl = await telegramSettings.beginRecipientLink();
       const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings, projectBasePath });
@@ -123,7 +115,7 @@ export function createTelegramRoutes(
   async function postTelegramRecipientResolve(): Promise<Response> {
     try {
       if (!telegramSettings) {
-        return Response.json({ success: false, error: 'Telegram settings store is not configured' }, { status: 500 });
+        return jsonError('Telegram settings store is not configured', 500);
       }
       const pendingLink = telegramSettings.getPendingRecipientLink();
       if (!pendingLink) {
@@ -151,7 +143,7 @@ export function createTelegramRoutes(
   async function deleteTelegramRecipient(): Promise<Response> {
     try {
       if (!telegramSettings) {
-        return Response.json({ success: false, error: 'Telegram settings store is not configured' }, { status: 500 });
+        return jsonError('Telegram settings store is not configured', 500);
       }
       await telegramSettings.clearRecipient();
       const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings, projectBasePath });
