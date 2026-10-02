@@ -48,7 +48,7 @@
 	import NewChatDialog from '../chat/new-chat/NewChatDialog.svelte';
 	import FileDirtyUnloadGuard from '../files/FileDirtyUnloadGuard.svelte';
 	import WorkspaceCloseGuard from '$lib/components/workspace/WorkspaceCloseGuard.svelte';
-	import { computeMobileViewportMetrics } from './mobile-viewport';
+	import { bindMobileViewport } from './mobile-viewport-binding';
 	import { ChatActionController } from '$lib/components/chat/chat-action-controller.svelte';
 	import { ChatActionDialogsState } from '$lib/components/chat/chat-action-dialogs-state.svelte';
 	import ChatActionDialogs from '$lib/components/chat/ChatActionDialogs.svelte';
@@ -165,8 +165,6 @@
 	const mobileBreakpointMatches = $derived(
 		viewportWidth === undefined ? undefined : viewportWidth <= 768,
 	);
-	let mobileAppHeight = $state<number | null>(null);
-	let mobileViewportBaselineHeight = $state<number | null>(null);
 	let mobileKeyboardVisible = $state(false);
 	let reloadSelectedChatFn = $state<((chatId: string) => Promise<void>) | null>(null);
 	let searchResultNavigation: SearchResultNavigationPort | null = null;
@@ -360,70 +358,14 @@
 		if (isMobile && !appShell.sidebarOpen) sidebarSearch.resetDialogs();
 	});
 
-	// Tracks virtual keyboard height via visualViewport for mobile layout.
 	$effect(() => {
-		if (typeof window === 'undefined' || !window.visualViewport) return;
-		const vv = window.visualViewport;
-		let frameId: number | null = null;
-
-		function clearViewportOverrides() {
-			document.documentElement.style.removeProperty('--app-height');
-			document.documentElement.style.removeProperty('--app-viewport-offset-top');
-			document.documentElement.style.removeProperty('--app-viewport-center-y');
-		}
-
-		function applyViewportMetrics() {
-			frameId = null;
-			const metrics = computeMobileViewportMetrics({
-				visualViewportHeight: vv.height,
-				visualViewportOffsetTop: vv.offsetTop,
-				windowInnerHeight: window.innerHeight,
-				baselineAppHeight: mobileViewportBaselineHeight,
-				previousAppHeight: mobileAppHeight,
-			});
-			mobileAppHeight = metrics.appHeight;
+		const unbindViewport = bindMobileViewport((metrics) => {
 			mobileKeyboardVisible = metrics.keyboardVisible;
 			appShell.keyboardHeight = metrics.keyboardHeight;
-			if (!metrics.keyboardVisible) {
-				mobileViewportBaselineHeight = metrics.appHeight;
-				// Leaves safe-area geometry to CSS unless the keyboard occludes the viewport.
-				clearViewportOverrides();
-				return;
-			}
-			document.documentElement.style.setProperty('--app-height', `${metrics.appHeight}px`);
-			document.documentElement.style.setProperty(
-				'--app-viewport-offset-top',
-				`${metrics.viewportOffsetTop}px`,
-			);
-			document.documentElement.style.setProperty(
-				'--app-viewport-center-y',
-				`${metrics.viewportCenterY}px`,
-			);
-		}
-
-		function scheduleViewportMetrics() {
-			if (frameId !== null) return;
-			frameId = requestAnimationFrame(applyViewportMetrics);
-		}
-
-		function handleVisibilityChange() {
-			if (document.visibilityState === 'visible') scheduleViewportMetrics();
-		}
-
-		scheduleViewportMetrics();
-		vv.addEventListener('resize', scheduleViewportMetrics);
-		vv.addEventListener('scroll', scheduleViewportMetrics);
-		window.addEventListener('resize', scheduleViewportMetrics);
-		window.addEventListener('pageshow', scheduleViewportMetrics);
-		document.addEventListener('visibilitychange', handleVisibilityChange);
+		});
+		if (!unbindViewport) return;
 		return () => {
-			if (frameId !== null) cancelAnimationFrame(frameId);
-			vv.removeEventListener('resize', scheduleViewportMetrics);
-			vv.removeEventListener('scroll', scheduleViewportMetrics);
-			window.removeEventListener('resize', scheduleViewportMetrics);
-			window.removeEventListener('pageshow', scheduleViewportMetrics);
-			document.removeEventListener('visibilitychange', handleVisibilityChange);
-			clearViewportOverrides();
+			unbindViewport();
 			appShell.keyboardHeight = 0;
 		};
 	});
