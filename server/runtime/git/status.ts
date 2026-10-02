@@ -706,6 +706,10 @@ export function createStatusOperations() {
 
   async function deleteUntracked({ projectPath, file }: FileOptions): Promise<GitMutationResult> {
     await assertGitRepository(projectPath);
+    const filePath = resolvePathWithinProject(projectPath, file);
+    if (filePath === path.resolve(projectPath)) {
+      throw new GitDomainError('INVALID_INPUT', 'The project directory cannot be deleted as an untracked file.');
+    }
 
     const pathspec = literalGitPathspec(file);
     // Clean tracked descendants do not appear in porcelain status.
@@ -732,7 +736,6 @@ export function createStatusOperations() {
       throw new GitDomainError('INVALID_INPUT', 'The file is tracked by Git. Use discard for tracked files.');
     }
 
-    const filePath = resolvePathWithinProject(projectPath, file);
     await assertGitWorkingPath(filePath);
     const stats = await fs.lstat(filePath);
     markGitMutationDispatched();

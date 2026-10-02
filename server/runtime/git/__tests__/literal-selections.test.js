@@ -31,6 +31,16 @@ describe('literal Git selections', () => {
     expect(await fs.readFile(path.join(projectPath, 'a.txt'), 'utf8')).toBe('one\n');
   });
 
+  it('does not delete the root of an empty repository', async () => {
+    await runGitCommand(projectPath, ['rm', 'a.txt']);
+    await fs.writeFile(path.join(projectPath, 'new.txt'), 'untracked\n');
+    for (const file of ['.', '', './']) {
+      await expect(git.deleteUntracked({ projectPath, file })).rejects.toThrow('project directory');
+    }
+    expect((await runGitCommand(projectPath, ['rev-parse', '--is-inside-work-tree'])).stdout.trim()).toBe('true');
+    expect(await fs.readFile(path.join(projectPath, 'new.txt'), 'utf8')).toBe('untracked\n');
+  });
+
   for (const [file, sibling] of [['*.txt', 'other.txt'], ['[ab].txt', 'b.txt'], [':(glob)*.txt', 'other.txt']]) {
     it(`refuses deleting a tracked literal ${file}`, async () => {
       await fs.writeFile(path.join(projectPath, file), 'tracked\n');
@@ -42,14 +52,14 @@ describe('literal Git selections', () => {
       expect(await fs.readFile(path.join(projectPath, sibling), 'utf8')).toBe('untracked\n');
     });
 
-    it(`accepts only the requested conflict side for ${file}`, async () => {
+    for (const side of ['ours', 'theirs']) it(`accepts only ${side} for ${file}`, async () => {
       for (const name of [file, sibling]) {
         await plantUnmergedStages(projectPath, name, [[1, 'base\n'], [2, 'ours\n'], [3, 'theirs\n']]);
         await fs.writeFile(path.join(projectPath, name), '<<<<<<< ours\n=======\n>>>>>>> theirs\n');
       }
       const unmerged = (await runGitCommand(projectPath, ['ls-files', '-u', '-z', '--', literalGitPathspec(sibling)])).stdout;
-      await git.acceptConflictSide({ projectPath, file, side: 'theirs' });
-      expect(await fs.readFile(path.join(projectPath, file), 'utf8')).toBe('theirs\n');
+      await git.acceptConflictSide({ projectPath, file, side });
+      expect(await fs.readFile(path.join(projectPath, file), 'utf8')).toBe(`${side}\n`);
       expect((await runGitCommand(projectPath, ['ls-files', '-u', '-z', '--', literalGitPathspec(file)])).stdout).toBe('');
       expect((await runGitCommand(projectPath, ['ls-files', '-u', '-z', '--', literalGitPathspec(sibling)])).stdout).toBe(unmerged);
       expect(await fs.readFile(path.join(projectPath, sibling), 'utf8')).toContain('<<<<<<<');
