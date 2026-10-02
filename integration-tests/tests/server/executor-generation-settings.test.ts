@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { GENERATION_UI_SETTING_KEYS, normalizeRemoteSettingsSnapshot, type RemoteSettingsSnapshot } from '../../../common/settings.js';
 import { SettingsChangedMessage } from '../../../common/ws-events.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 test('malformed generation updates preserve durable selections and readable settings', async () => {
   await withIntegrationFixture('executor-generation-settings', async (fixture) => {
@@ -21,8 +22,7 @@ test('malformed generation updates preserve durable selections and readable sett
     const saved = await readFile(join(fixture.dirs.workspace, 'project-settings.json'), 'utf8');
 
     for (const key of GENERATION_UI_SETTING_KEYS) {
-      await expect(client.put('/api/v1/app/settings', { ui: { [key]: { ...selection, agentId: '!' } } }))
-        .rejects.toMatchObject({ status: 400, body: { errorCode: 'INVALID_REMOTE_SETTINGS' } });
+      expect(await rejectionOf(client.put('/api/v1/app/settings', { ui: { [key]: { ...selection, agentId: '!' } } }))).toMatchObject({ status: 400, body: { errorCode: 'INVALID_REMOTE_SETTINGS' } });
       for (const malformed of [null, [], '', 0, false]) {
         await client.put('/api/v1/app/settings', { ui: { [key]: malformed } });
       }
@@ -78,10 +78,8 @@ test('malformed persisted generation targets remain repairable through settings 
     check(changed.settings);
     const requestsBefore = fixture.fakeProviders.openAi.requests().length;
     for (const key of GENERATION_UI_SETTING_KEYS) {
-      await expect(client.put('/api/v1/app/settings', { ui: { [key]: selections[key] } }))
-        .rejects.toMatchObject({ status: 400, body: { errorCode: 'INVALID_REMOTE_SETTINGS' } });
-      await expect(client.post('/api/v1/app/generation/test', { target: key, configurationKey: 'unavailable' }))
-        .rejects.toMatchObject({ body: { errorCode: 'GENERATION_TEST_FAILED' } });
+      expect(await rejectionOf(client.put('/api/v1/app/settings', { ui: { [key]: selections[key] } }))).toMatchObject({ status: 400, body: { errorCode: 'INVALID_REMOTE_SETTINGS' } });
+      expect(await rejectionOf(client.post('/api/v1/app/generation/test', { target: key, configurationKey: 'unavailable' }))).toMatchObject({ body: { errorCode: 'GENERATION_TEST_FAILED' } });
     }
     expect(fixture.fakeProviders.openAi.requests()).toHaveLength(requestsBefore);
     await client.updateSettings({ ui: Object.fromEntries(GENERATION_UI_SETTING_KEYS.map((key) => [key, {}])) });

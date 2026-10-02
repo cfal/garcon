@@ -7,6 +7,7 @@ import { waitForVisibleResponse } from '../../support/live-agent.js';
 import { liveClaudeRunRequest, liveClaudeStartRequest } from '../../support/live-claude.js';
 import { waitForPersistedNativeSession } from '../../support/persisted-chat.js';
 import { startScriptedClaudeTestEnvironment } from '../../support/scripted-claude.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 test('retries a refused project-path change after restoring native history without restarting', async () => {
   const environment = await startScriptedClaudeTestEnvironment();
@@ -35,8 +36,7 @@ test('retries a refused project-path change after restoring native history witho
 
       const nextProjectPath = join(fixture.dirs.project, 'destination');
       await mkdir(nextProjectPath);
-      await expect(fixture.client.updateProjectPath({ chatId, projectPath: nextProjectPath }))
-        .rejects.toMatchObject({
+      expect(await rejectionOf(fixture.client.updateProjectPath({ chatId, projectPath: nextProjectPath }))).toMatchObject({
           status: 409,
           body: { errorCode: 'PROJECT_PATH_NATIVE_PATH_UNRESOLVED' },
         });
@@ -44,8 +44,7 @@ test('retries a refused project-path change after restoring native history witho
         .toMatchObject({ projectPath: fixture.dirs.project });
 
       await rename(backup, nativePath);
-      await expect(fixture.client.updateProjectPath({ chatId, projectPath: nextProjectPath }))
-        .resolves.toMatchObject({ success: true, projectPath: nextProjectPath });
+      expect(await fixture.client.updateProjectPath({ chatId, projectPath: nextProjectPath })).toMatchObject({ success: true, projectPath: nextProjectPath });
       const resumedCursor = fixture.client.markEvents();
       const resumed = await fixture.client.runChat(liveClaudeRunRequest({
         chatId,

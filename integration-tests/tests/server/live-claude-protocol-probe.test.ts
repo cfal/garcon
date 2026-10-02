@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createLiveClaudeProtocolProbe } from '../../support/live-claude-protocol-probe.js';
 import { liveClaudeServerEnvironment } from '../../support/live-claude.js';
+import { throwingRejectionOf } from '../../support/promise-assertions.js';
 
 describe('live Claude testing configuration', () => {
   const environment = {
@@ -25,7 +26,7 @@ describe('live Claude testing configuration', () => {
   test.each(['CLAUDE_TESTING_KEY', 'CLAUDE_TESTING_BASE_URL', 'CLAUDE_TESTING_MODEL'])(
     'requires explicit %s without falling back to another lane', async name => {
       delete process.env[name];
-      await expect(liveClaudeServerEnvironment()).rejects.toThrow(
+      expect(await throwingRejectionOf(liveClaudeServerEnvironment())).toThrow(
         `${name} is required for live Claude integration tests.`,
       );
     },

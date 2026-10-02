@@ -10,6 +10,7 @@ import type { GarconTestClient } from '../../support/garcon-client.js';
 import { userContents } from '../../support/chat-assertions.js';
 import type { RemoteSettingsSnapshot } from '../../../common/settings.js';
 import type { PreamblesSnapshot } from '../../../common/preambles.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 const repoRoot = fileURLToPath(new URL('../../..', import.meta.url));
 
@@ -60,8 +61,8 @@ test('executor onboarding is available offline and keeps credentials out of publ
     expect(new URL((await inherited.json()).connectionUrl).host).toBe('next-controller.test');
     const stored = JSON.parse(await readFile(join(fixture.dirs.workspace, 'executors.json'), 'utf8'));
     expect(stored.executors[0].connection).toEqual({ kind: 'executor-connects', advertisedUrl: null });
-    await expect(client.get(`/api/v1/models?executorId=${created.id}`)).rejects.toMatchObject({ status: 503 });
-    await expect(client.delete('/api/v1/executors/local')).rejects.toMatchObject({
+    expect(await rejectionOf(client.get(`/api/v1/models?executorId=${created.id}`))).toMatchObject({ status: 503 });
+    expect(await rejectionOf(client.delete('/api/v1/executors/local'))).toMatchObject({
       status: 404, body: { errorCode: 'EXECUTOR_NOT_FOUND' },
     });
     await client.patch(`/api/v1/executors/${created.id}`, { label: 'Renamed', enabled: false });
@@ -136,8 +137,8 @@ test('Local and two public workers coexist and retain chats and settings for del
       const held = fixture.fakeProviders.openAi.holdNext({ model: agent.provider.model });
       const startedB = await client.startDirectChat({ executorId: outbound.id, chatId: chatB, projectPath: b.project, agent, content: 'Synthetic input B' });
       await held.received;
-      await expect(client.patch(`/api/v1/executors/${outbound.id}`, { enabled: false })).rejects.toMatchObject({ status: 409 });
-      await expect(client.delete(`/api/v1/executors/${outbound.id}`)).rejects.toMatchObject({ status: 409 });
+      expect(await rejectionOf(client.patch(`/api/v1/executors/${outbound.id}`, { enabled: false }))).toMatchObject({ status: 409 });
+      expect(await rejectionOf(client.delete(`/api/v1/executors/${outbound.id}`))).toMatchObject({ status: 409 });
       await client.patch(`/api/v1/executors/${outbound.id}`, { label: 'Running worker' });
       await client.patch(`/api/v1/executors/${inbound.id}`, { enabled: false });
       expect((await executorSnapshots(client)).find((executor) => executor.id === outbound.id)?.availability).toBe('ready');
@@ -161,10 +162,9 @@ test('Local and two public workers coexist and retain chats and settings for del
         modelProtocol: agent.provider.protocol, thinkingMode: 'none',
       } } });
       await client.delete(`/api/v1/executors/${inbound.id}`);
-      await expect(client.get(`/api/v1/models?executorId=${inbound.id}`)).rejects.toMatchObject({ status: 503 });
+      expect(await rejectionOf(client.get(`/api/v1/models?executorId=${inbound.id}`))).toMatchObject({ status: 503 });
       const requestCount = fixture.fakeProviders.openAi.requests().length;
-      await expect(client.refinePrompt({ draft: 'Synthetic draft', target: 'prompt' }))
-        .rejects.toMatchObject({ status: 502, body: { errorCode: 'PROMPT_REFINEMENT_FAILED' } });
+      expect(await rejectionOf(client.refinePrompt({ draft: 'Synthetic draft', target: 'prompt' }))).toMatchObject({ status: 502, body: { errorCode: 'PROMPT_REFINEMENT_FAILED' } });
       expect(fixture.fakeProviders.openAi.requests()).toHaveLength(requestCount);
 
       for (const worker of workers) await worker.stop();

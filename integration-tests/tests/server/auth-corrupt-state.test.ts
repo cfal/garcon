@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GarconProcess } from '../../support/garcon-process.js';
 import { prepareFixtureAuth } from '../../support/fixture-auth.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 const REPO_ROOT = fileURLToPath(new URL('../../..', import.meta.url));
 
@@ -53,7 +54,7 @@ describe('corrupt auth state', () => {
       const [quarantineName] = (await readdir(directories.config)).filter((entry) =>
         entry.startsWith('auth.json.corrupt-'));
       expect(await readFile(join(directories.config, quarantineName), 'utf8')).toBe(corruptBytes);
-      await expect(readFile(authPath)).rejects.toMatchObject({ code: 'ENOENT' });
+      expect(await rejectionOf(readFile(authPath))).toMatchObject({ code: 'ENOENT' });
     } finally {
       await garcon?.stop();
       await rm(directories.root, { recursive: true, force: true });
@@ -83,7 +84,7 @@ describe('corrupt auth state', () => {
       const [quarantineName] = (await readdir(directories.config)).filter((entry) =>
         entry.startsWith('auth.json.corrupt-'));
       expect(await readFile(join(directories.config, quarantineName), 'utf8')).toBe(corruptBytes);
-      await expect(readFile(authPath)).rejects.toMatchObject({ code: 'ENOENT' });
+      expect(await rejectionOf(readFile(authPath))).toMatchObject({ code: 'ENOENT' });
     } finally {
       await garcon?.stop();
       await rm(directories.root, { recursive: true, force: true });

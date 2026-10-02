@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { ExecutionGitResults } from '../../../common/git-execution.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { initializeFixtureRepository, runFixtureGit } from '../../support/git-fixture.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote-executor-dials'] as const) {
   test(`Git link entries and historical reads do not dereference current links (${executionBackend})`, async () => {
@@ -38,8 +39,8 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       expect(bodies.files['dir/file.txt'].patch).toContain('+historical bytes');
       const query = new URLSearchParams({ ...target, file: 'dir/file.txt', ref: 'HEAD', limit: '1' });
       expect(await client.get(`/api/v1/git/blame?${query}`)).toMatchObject({ lines: [{ content: 'historical bytes' }] });
-      await expect(client.post('/api/v1/git/stage-paths', { ...target, paths: ['dir/file.txt'], mode: 'stage' })).rejects.toMatchObject({ status: 403, body: { errorCode: 'GIT_OUTSIDE_BASE' } });
-      await expect(client.get(`/api/v1/git/conflict-details?${new URLSearchParams({ ...target, file: 'dir/file.txt' })}`)).rejects.toMatchObject({ status: 403, body: { errorCode: 'GIT_OUTSIDE_BASE' } });
+      expect(await rejectionOf(client.post('/api/v1/git/stage-paths', { ...target, paths: ['dir/file.txt'], mode: 'stage' }))).toMatchObject({ status: 403, body: { errorCode: 'GIT_OUTSIDE_BASE' } });
+      expect(await rejectionOf(client.get(`/api/v1/git/conflict-details?${new URLSearchParams({ ...target, file: 'dir/file.txt' })}`))).toMatchObject({ status: 403, body: { errorCode: 'GIT_OUTSIDE_BASE' } });
       for (const destination of [outside, join(outside, 'missing')]) {
         await rm(join(project, 'dir'));
         await symlink(destination, join(project, 'dir'));

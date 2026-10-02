@@ -48,6 +48,7 @@ import {
   type BackendReadinessProcess,
   type OpenCodeProcessState,
 } from '../../support/opencode-process-supervisor.js';
+import { rejectionOf, throwingRejectionOf } from '../../support/promise-assertions.js';
 
 class ControlledWebSocket extends EventTarget {
   readyState = 0;
@@ -228,11 +229,11 @@ describe('integration support contracts', () => {
       const nested = join(root, 'nested');
       await mkdir(nested);
       await writeFile(join(nested, 'safe.txt'), 'ordinary diagnostic content');
-      await expect(assertSensitiveValuesNotPersisted({
+      expect(await assertSensitiveValuesNotPersisted({
         directory: root,
         diagnostics: { status: 'safe' },
         values: [sensitiveValue],
-      })).resolves.toBeUndefined();
+      })).toBeUndefined();
 
       let diagnosticError: unknown;
       try {
@@ -313,7 +314,7 @@ describe('integration support contracts', () => {
     const root = fixture.dirs.root;
     await fixture.dispose();
     expect(observations).toEqual([{ rootExisted: true, garconRunning: false }]);
-    await expect(access(root)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await rejectionOf(access(root))).toMatchObject({ code: 'ENOENT' });
 
     const hookCalls: string[] = [];
     let creationError: unknown;
@@ -338,7 +339,7 @@ describe('integration support contracts', () => {
   test('cleans fixture resources when the environment resolver throws', async () => {
     let root = '';
     const cleanupRoots: string[] = [];
-    await expect(createIntegrationFixture({
+    expect(await throwingRejectionOf(createIntegrationFixture({
       resolveServerEnvironment: (directories) => {
         root = directories.root;
         throw new Error('deliberate resolver failure');
@@ -346,10 +347,10 @@ describe('integration support contracts', () => {
       afterGarconStop: async (directories) => {
         cleanupRoots.push(directories.root);
       },
-    })).rejects.toThrow('deliberate resolver failure');
+    }))).toThrow('deliberate resolver failure');
 
     expect(cleanupRoots).toEqual([root]);
-    await expect(access(root)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await rejectionOf(access(root))).toMatchObject({ code: 'ENOENT' });
   });
 
   test('includes diagnostic extensions in failure artifacts', async () => {
@@ -397,7 +398,7 @@ describe('integration support contracts', () => {
       const snapshot = await readJsonFile<{ index: number; payload: string }>(path);
       expect(snapshot?.payload).toHaveLength(2_000);
       await writeFile(path, '{"torn":');
-      await expect(readJsonFile(path)).rejects.toThrow();
+      expect(await throwingRejectionOf(readJsonFile(path))).toThrow();
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -433,13 +434,11 @@ describe('integration support contracts', () => {
     try {
       const good = join(root, 'good-opencode');
       await writeFile(good, `#!/bin/sh\necho ${OPENCODE_VERSION}\n`, { mode: 0o755 });
-      await expect(verifyPinnedBinaryVersion({ binary: good, env: {} }))
-        .resolves.toBe(OPENCODE_VERSION);
+      expect(await verifyPinnedBinaryVersion({ binary: good, env: {} })).toBe(OPENCODE_VERSION);
 
       const bad = join(root, 'bad-opencode');
       await writeFile(bad, '#!/bin/sh\necho 0.0.0\n', { mode: 0o755 });
-      await expect(verifyPinnedBinaryVersion({ binary: bad, env: {} }))
-        .rejects.toThrow(OPENCODE_VERSION);
+      expect(await throwingRejectionOf(verifyPinnedBinaryVersion({ binary: bad, env: {} }))).toThrow(OPENCODE_VERSION);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -459,8 +458,7 @@ describe('integration support contracts', () => {
       exited: new Promise<number>(() => undefined),
     } satisfies BackendReadinessProcess;
 
-    await expect(waitForBackendReady(backend, 43123))
-      .resolves.toBe('http://127.0.0.1:43123');
+    expect(await waitForBackendReady(backend, 43123)).toBe('http://127.0.0.1:43123');
   });
 
   test('does not spawn a provider when shutdown lands inside startup', async () => {
@@ -528,7 +526,7 @@ describe('integration support contracts', () => {
         Bun.sleep(5_000).then(() => -1),
       ]);
       expect(exitCode).toBe(0);
-      await expect(access(spawnMarker)).rejects.toMatchObject({ code: 'ENOENT' });
+      expect(await rejectionOf(access(spawnMarker))).toMatchObject({ code: 'ENOENT' });
       const state = await readJsonFile<OpenCodeProcessState>(statePath);
       expect(state).toMatchObject({ status: 'stopped', providerPid: 0, reason: 'signal' });
     } finally {
@@ -699,7 +697,7 @@ describe('integration support contracts', () => {
 
       const expired = await post('third', secondId);
       expect(expired.status).toBe(404);
-      await expect(expired.json()).resolves.toMatchObject({
+      expect(await expired.json()).toMatchObject({
         error: {
           code: 'previous_response_not_found',
           param: 'previous_response_id',
@@ -970,9 +968,9 @@ describe('integration support contracts', () => {
     let client: GarconTestClient | null = null;
     try {
       client = await GarconTestClient.connect(`http://${server.hostname}:${server.port}`);
-      await expect(client.ping()).rejects.toThrow('Unknown or malformed WebSocket payload');
-      await expect(client.reconnect()).rejects.toThrow('Unknown or malformed WebSocket payload');
-      await expect(client.close()).rejects.toThrow('Unknown or malformed WebSocket payload');
+      expect(await throwingRejectionOf(client.ping())).toThrow('Unknown or malformed WebSocket payload');
+      expect(await throwingRejectionOf(client.reconnect())).toThrow('Unknown or malformed WebSocket payload');
+      expect(await throwingRejectionOf(client.close())).toThrow('Unknown or malformed WebSocket payload');
     } finally {
       await client?.disconnect().catch(() => undefined);
       server.stop(true);
@@ -992,7 +990,7 @@ describe('integration support contracts', () => {
     socket!.receive(JSON.stringify({ type: 'not-a-garcon-message' }));
     socket!.finishClose();
 
-    await expect(close).rejects.toThrow('Unknown or malformed WebSocket payload');
+    expect(await throwingRejectionOf(close)).toThrow('Unknown or malformed WebSocket payload');
   });
 
   test('fails a request the controller never answers with its method and path', async () => {
@@ -1010,7 +1008,7 @@ describe('integration support contracts', () => {
       requestTimeoutMs: 50,
     });
     try {
-      await expect(client.get('/api/v1/chats')).rejects.toThrow('GET /api/v1/chats did not respond within 50 ms');
+      expect(await throwingRejectionOf(client.get('/api/v1/chats'))).toThrow('GET /api/v1/chats did not respond within 50 ms');
     } finally {
       const close = client.close();
       socket!.finishClose();

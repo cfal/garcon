@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { withIntegrationFixture } from "../../support/integration-fixture.js";
+import { throwingRejectionOf } from '../../support/promise-assertions.js';
 
 const HOUR_MS = 3_600_000;
 const MINUTE_MS = 60_000;
@@ -63,10 +64,10 @@ describe("scheduled prompt minute recurrence", () => {
       const edited = await fixture.client.getScheduledPrompts();
       expect(edited.prompts[0]?.schedule).toMatchObject({ intervalMinutes: intervalMinutes + 1 });
       for (const key of ['intervalHours', 'intervalDays']) {
-        await expect(fixture.client.post('/api/v1/scheduled-prompts', {
+        expect(await throwingRejectionOf(fixture.client.post('/api/v1/scheduled-prompts', {
           expectedRevision: edited.revision,
           scheduledPrompt: { ...definition, schedule: { ...definition.schedule, [key]: 1 } },
-        })).rejects.toThrow();
+        }))).toThrow();
       }
       await fixture.restartGarcon();
       expect(await fixture.client.getScheduledPrompts()).toEqual(edited);

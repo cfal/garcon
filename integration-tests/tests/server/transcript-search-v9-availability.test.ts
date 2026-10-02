@@ -10,6 +10,7 @@ import {
   readDerivedIndexSnapshot,
 } from '../../support/search-corpus-fixture.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 const INDEX_DIRECTORY = 'transcript-search';
 
@@ -73,11 +74,11 @@ describe('transcript search v9 availability', () => {
       } finally {
         db.close();
       }
-      await expect(stat(join(
+      expect(await rejectionOf(stat(join(
         fixture.dirs.workspace,
         'transcript-ledgers',
         deletedChatId,
-      ))).rejects.toMatchObject({ code: 'ENOENT' });
+      )))).toMatchObject({ code: 'ENOENT' });
     });
   }, 120_000);
 

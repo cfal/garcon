@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { GIT_MAX_RESULT_BYTES, type ExecutionGitResults } from '../../../common/git-execution.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { initializeFixtureRepository, runFixtureGit } from '../../support/git-fixture.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote-executor-dials'] as const) {
   test.skipIf(process.platform === 'win32')(`bounded Git results survive large internal status reads (${executionBackend})`, async () => {
@@ -29,7 +30,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await client.post('/api/v1/git/discard', { ...target, file: 'example.txt' });
       expect(await readFile(join(project, 'example.txt'), 'utf8')).toBe('initial\n');
       // Unbounded status inventory still fails at the serialized response boundary.
-      await expect(client.get(`/api/v1/git/status?${query}`)).rejects.toMatchObject({
+      expect(await rejectionOf(client.get(`/api/v1/git/status?${query}`))).toMatchObject({
         body: { errorCode: 'GIT_RESULT_TOO_LARGE' },
       });
     }, { executionBackend, projectRoots: 'separate' });

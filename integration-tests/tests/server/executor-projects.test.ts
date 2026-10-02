@@ -8,6 +8,7 @@ import { assertRealWithinBase } from '../../../server/common/path-boundary.js';
 import { userContents } from '../../support/chat-assertions.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { webSocketProtocolsForAuth } from '../../../common/ws-auth.js';
+import { rejectionOf, throwingRejectionOf } from '../../support/promise-assertions.js';
 
 async function terminalResponse(baseUrl: string, authToken: string | null) {
   const received = Promise.withResolvers<unknown>();
@@ -32,7 +33,7 @@ for (const backend of ['remote-controller-dials', 'remote-executor-dials'] as co
     await withIntegrationFixture(`remote-projects-${backend}`, async (fixture) => {
       const projectPath = fixture.executionDirs.project;
       const client = fixture.client;
-      await expect(assertRealWithinBase(fixture.dirs.project, projectPath)).rejects.toThrow();
+      expect(await throwingRejectionOf(assertRealWithinBase(fixture.dirs.project, projectPath))).toThrow();
       const executorId = client.executorId;
       expect(await client.get('/api/v1/app/settings')).toMatchObject({ projectBasePath: fixture.dirs.project });
       expect(await client.get(`/api/v1/chats/validate-start?executorId=${executorId}&path=${encodeURIComponent(projectPath)}`))
@@ -79,8 +80,7 @@ for (const backend of ['remote-controller-dials', 'remote-executor-dials'] as co
       expect(await terminalResponse(fixture.garcon.baseUrl, fixture.garcon.authToken)).toMatchObject({
         type: 'terminal-error', code: 'terminal-validation', message: 'Terminal attachment identity is required.',
       });
-      await expect(client.post('/api/v1/tickets/project-default', { executorId, directory: fixture.dirs.project }))
-        .rejects.toMatchObject({ body: { errorCode: 'TICKET_PROJECT_UNAVAILABLE' } });
+      expect(await rejectionOf(client.post('/api/v1/tickets/project-default', { executorId, directory: fixture.dirs.project }))).toMatchObject({ body: { errorCode: 'TICKET_PROJECT_UNAVAILABLE' } });
 
       await fixture.crashAndRestartGarcon({ preserveExecutorWorker: true });
       expect(await fixture.client.get<PreamblesSnapshot>('/api/v1/preambles')).toEqual(created.snapshot);

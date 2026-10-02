@@ -5,6 +5,7 @@ import type { ReadTextResponse, SaveTextResponse, FileIdentityResponse } from '.
 import { MAX_FILE_VIEW_BYTES } from '../../../common/file-contracts.js';
 import type { ExecutorSnapshot } from '../../../common/executors.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 for (const backend of ['remote-controller-dials', 'remote-executor-dials'] as const) {
   test(`oversized save revisions leave the shared executor connection and running chat intact (${backend})`, async () => {
@@ -23,9 +24,9 @@ for (const backend of ['remote-controller-dials', 'remote-executor-dials'] as co
       });
       await held.received;
       const eventIndex = client.eventRecords().length;
-      await expect(client.put(route, {
+      expect(await rejectionOf(client.put(route, {
         content: 'x', expectedRevision: `v1:${'a'.repeat(17 * 1024 * 1024)}`, conflictResolution: 'overwrite',
-      })).rejects.toMatchObject({ status: 400, body: { errorCode: 'VALIDATION_FAILED' } });
+      }))).toMatchObject({ status: 400, body: { errorCode: 'VALIDATION_FAILED' } });
       expect(await readFile(file, 'utf8')).toBe('original');
       const { executors } = await client.get<{ executors: ExecutorSnapshot[] }>('/api/v1/executors');
       expect(executors.find((executor) => executor.id === executorId)?.availability).toBe('ready');
@@ -67,24 +68,21 @@ for (const backend of ['remote-controller-dials', 'remote-executor-dials'] as co
       expect(saved.revision).not.toBe(result.revision);
       expect((await readFile(join(projectPath, 'file.txt'), 'utf8')) === `${content}saved`).toBe(true);
       expect(await readFile(join(fixture.dirs.project, 'file.txt'), 'utf8')).toBe('controller file');
-      await expect(client.put(`/api/v1/files/text?${query}`, { content: 'stale', expectedRevision: result.revision, conflictResolution: 'reject' })).rejects.toMatchObject({ status: 409, body: { errorCode: 'FILE_REVISION_CONFLICT' } });
-      await expect(client.put(`/api/v1/files/text?${query}`, { content: 'x'.repeat(MAX_FILE_VIEW_BYTES + 1), expectedRevision: saved.revision, conflictResolution: 'reject' }))
-        .rejects.toMatchObject({ status: 413, body: { errorCode: 'FILE_TOO_LARGE' } });
+      expect(await rejectionOf(client.put(`/api/v1/files/text?${query}`, { content: 'stale', expectedRevision: result.revision, conflictResolution: 'reject' }))).toMatchObject({ status: 409, body: { errorCode: 'FILE_REVISION_CONFLICT' } });
+      expect(await rejectionOf(client.put(`/api/v1/files/text?${query}`, { content: 'x'.repeat(MAX_FILE_VIEW_BYTES + 1), expectedRevision: saved.revision, conflictResolution: 'reject' }))).toMatchObject({ status: 413, body: { errorCode: 'FILE_TOO_LARGE' } });
       expect(await readFile(join(projectPath, 'file.txt'), 'utf8')).toBe(`${content}saved`);
       await writeFile(join(projectPath, 'large.txt'), 'x'.repeat(MAX_FILE_VIEW_BYTES + 1));
       const oversized = new URLSearchParams({ executorId, projectPath, path: 'large.txt' });
-      await expect(client.get(`/api/v1/files/text?${oversized}`))
-        .rejects.toMatchObject({ status: 413, body: { errorCode: 'FILE_TOO_LARGE' } });
+      expect(await rejectionOf(client.get(`/api/v1/files/text?${oversized}`))).toMatchObject({ status: 413, body: { errorCode: 'FILE_TOO_LARGE' } });
       const wrongRoot = new URLSearchParams({ executorId, projectPath: fixture.dirs.project, path: 'file.txt' });
-      await expect(client.get(`/api/v1/files/text?${wrongRoot}`)).rejects.toMatchObject({ status: 403 });
+      expect(await rejectionOf(client.get(`/api/v1/files/text?${wrongRoot}`))).toMatchObject({ status: 403 });
       await fixture.crashAndRestartGarcon({ preserveExecutorWorker: true });
       const restarted = await fixture.client.get<ReadTextResponse>(`/api/v1/files/text?${query}`);
       expect(restarted.content === `${content}saved`).toBe(true);
       const crowded = join(projectPath, 'crowded');
       await mkdir(join(crowded, 'selectable-project'), { recursive: true });
       for (let i = 0; i < 1800; i++) await writeFile(join(crowded, `${i}-${'x'.repeat(220)}`), '');
-      await expect(fixture.client.get(`/api/v1/files/tree?executorId=${executorId}&path=${encodeURIComponent(crowded)}`))
-        .rejects.toMatchObject({ status: 413, body: { errorCode: 'FILE_LIST_TOO_LARGE' } });
+      expect(await rejectionOf(fixture.client.get(`/api/v1/files/tree?executorId=${executorId}&path=${encodeURIComponent(crowded)}`))).toMatchObject({ status: 413, body: { errorCode: 'FILE_LIST_TOO_LARGE' } });
       expect(await fixture.client.get<Array<{ name: string; path: string; type: string }>>(`/api/v1/files/browse?executorId=${executorId}&path=${encodeURIComponent(crowded)}`)).toEqual([
         { name: 'selectable-project', path: join(crowded, 'selectable-project'), type: 'directory' },
       ]);

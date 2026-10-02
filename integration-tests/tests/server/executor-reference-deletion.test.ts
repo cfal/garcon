@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { GENERATION_UI_SETTING_KEYS, type RemoteSettingsSnapshot } from '../../../common/settings.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { userContents } from '../../support/chat-assertions.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 test('concurrent executor deletion fences publication while preserving already-saved selections', async () => {
   await withIntegrationFixture('executor-reference-deletion', async (fixture) => {
@@ -106,7 +107,7 @@ test('executor removal cannot abandon failed controller-ledger deletion', async 
       expect((JSON.parse(await readFile(journalPath, 'utf8'))).ownershipIntents).toMatchObject([
         { chatId, phase: 'prepared' },
       ]);
-      await expect(fixture.client.delete(`/api/v1/executors/${executor.id}`)).rejects.toMatchObject({ status: 409 });
+      expect(await rejectionOf(fixture.client.delete(`/api/v1/executors/${executor.id}`))).toMatchObject({ status: 409 });
       expect((await stat(join(heldRoot, chatId))).isDirectory()).toBe(true);
     } finally {
       await rm(ledgerRoot);

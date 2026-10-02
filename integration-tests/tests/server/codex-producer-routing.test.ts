@@ -10,6 +10,7 @@ import type { IntegrationFixture } from '../../support/integration-fixture.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { reloadFromNativeHistory } from '../../support/live-agent.js';
 import { waitForPersistedNativeSession } from '../../support/persisted-chat.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 const FAKE_CODEX = fileURLToPath(new URL(
   '../../support/fake-codex-app-server.ts',
@@ -191,14 +192,14 @@ describe('Codex producer routing', () => {
       expect(first.permissionOccurrenceId).not.toBe(String(nativeRequestId));
       expect(second.permissionOccurrenceId).not.toBe(first.permissionOccurrenceId);
 
-      await expect(fixture.client.sendPermissionDecision({
+      expect(await rejectionOf(fixture.client.sendPermissionDecision({
         clientRequestId: randomUUID(),
         chatId,
         permissionOccurrenceId: first.message.permissionOccurrenceId,
         allow: false,
         alwaysAllow: false,
         control: transientPermissionControl(serverInstanceId, chatId, first),
-      })).rejects.toMatchObject({
+      }))).toMatchObject({
         status: 409,
         body: {
           errorCode: 'PERMISSION_NOT_ACTIONABLE',

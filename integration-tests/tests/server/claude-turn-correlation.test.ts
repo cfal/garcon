@@ -651,10 +651,10 @@ describe('Claude turn correlation', () => {
       })).type).toBe('agent-run-finished');
 
       const forkChatId = fixture.newChatId();
-      await expect(fixture.client.forkChat({
+      expect(await fixture.client.forkChat({
         sourceChatId: chatId,
         chatId: forkChatId,
-      })).resolves.toMatchObject({ chat: { id: forkChatId } });
+      })).toMatchObject({ chat: { id: forkChatId } });
       const forked = await fixture.client.getMessages(forkChatId);
       expect(forked.messages.map((entry) => entry.message)).toEqual(expect.arrayContaining([
         expect.objectContaining({

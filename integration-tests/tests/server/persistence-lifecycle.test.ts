@@ -17,6 +17,7 @@ import {
 } from '../../support/chat-assertions.js';
 import { expectedCarriedInput } from '../../support/carried-context.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 async function getRuntimeInstanceId(baseUrl: string): Promise<string> {
   const challenge = randomBytes(32).toString('base64url');
@@ -215,11 +216,11 @@ describe('persistence lifecycle', () => {
         chats: [],
       });
 
-      await expect(fixture.client.runChat({
+      expect(await rejectionOf(fixture.client.runChat({
         ...request,
         clientRequestId: crypto.randomUUID(),
         command: 'idempotency-conflict',
-      })).rejects.toMatchObject({
+      }))).toMatchObject({
         status: 409,
         body: { errorCode: 'IDEMPOTENCY_CONFLICT' },
       });
@@ -371,7 +372,7 @@ describe('persistence lifecycle', () => {
       held.releaseEcho();
 
       expect((await fixture.client.listChats()).sessions.map((chat) => chat.id)).not.toContain(chatId);
-      await expect(fixture.client.getMessages(chatId)).rejects.toBeInstanceOf(GarconApiError);
+      expect(await rejectionOf(fixture.client.getMessages(chatId))).toBeInstanceOf(GarconApiError);
 
       await fixture.restartGarcon();
       expect((await fixture.client.listChats()).sessions.map((chat) => chat.id)).not.toContain(chatId);

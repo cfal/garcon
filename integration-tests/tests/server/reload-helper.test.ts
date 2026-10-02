@@ -2,6 +2,7 @@ import { afterEach, expect, mock, spyOn, test } from 'bun:test';
 import { ChatReloadedMessage, ClientRequestErrorMessage } from '../../../common/ws-events.js';
 import { GarconWsRequestError, type GarconTestClient } from '../../support/garcon-client.js';
 import { reloadFromNativeHistory } from '../../support/live-agent.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 afterEach(() => mock.restore());
 
@@ -24,7 +25,7 @@ test.each([
   const sleep = spyOn(Bun, 'sleep').mockResolvedValue(undefined);
   const refusal = new GarconWsRequestError(new ClientRequestErrorMessage('request', 'chat-reload', 'HISTORY_LOAD_FAILED', message, retryable, 'chat'));
   const client = { reloadChat: mock(async () => { throw refusal; }) } satisfies Pick<GarconTestClient, 'reloadChat'>;
-  await expect(reloadFromNativeHistory({ client }, 'chat')).rejects.toBe(refusal);
+  expect(await rejectionOf(reloadFromNativeHistory({ client }, 'chat'))).toBe(refusal);
   expect(client.reloadChat).toHaveBeenCalledTimes(1);
   expect(sleep).not.toHaveBeenCalled();
 });
@@ -34,7 +35,7 @@ test('Reload stops retrying remote busy admission at its deadline', async () => 
   spyOn(Date, 'now').mockReturnValue(30_000).mockReturnValueOnce(0);
   const refusal = new GarconWsRequestError(new ClientRequestErrorMessage('request', 'chat-reload', 'HISTORY_LOAD_FAILED', remoteBusy, true, 'chat'));
   const client = { reloadChat: mock(async () => { throw refusal; }) } satisfies Pick<GarconTestClient, 'reloadChat'>;
-  await expect(reloadFromNativeHistory({ client }, 'chat')).rejects.toBe(refusal);
+  expect(await rejectionOf(reloadFromNativeHistory({ client }, 'chat'))).toBe(refusal);
   expect(client.reloadChat).toHaveBeenCalledTimes(1);
   expect(sleep).not.toHaveBeenCalled();
 });

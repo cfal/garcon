@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { parseTicketHistoryPage } from '../../../common/ticket-responses.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { createTicketSource, resolveTicketSource } from '../../support/ticket-source-fixture.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 test('resolves the exact visible outcome across restart and refuses replaced, missing, or deleted sources', async () => {
   await withIntegrationFixture('ticket-source-navigation', async (fixture) => {
@@ -21,11 +22,11 @@ test('resolves the exact visible outcome across restart and refuses replaced, mi
     expect(await resolveTicketSource(fixture, source)).toEqual({ kind: 'found', target });
     await fixture.client.reloadChat(chatId);
     expect(await resolveTicketSource(fixture, source)).toEqual({ kind: 'transcript-reloaded', chatId });
-    await expect(fixture.client.getMessages(chatId, {
+    expect(await rejectionOf(fixture.client.getMessages(chatId, {
       transcriptViewId: target.transcriptViewId, beforeOrdinal: target.ordinal + 1, limit: 50,
-    })).rejects.toMatchObject({ status: 409, body: { errorCode: 'STALE_TRANSCRIPT_VIEW' } });
+    }))).toMatchObject({ status: 409, body: { errorCode: 'STALE_TRANSCRIPT_VIEW' } });
     expect(parseTicketHistoryPage(await fixture.client.get(`/api/v1/tickets/history?ticketId=${ticketId}`)).items[0]?.source).toEqual(source);
     await fixture.client.deleteChat(chatId);
-    await expect(resolveTicketSource(fixture, source)).rejects.toMatchObject({ status: 404, body: { errorCode: 'SESSION_NOT_FOUND' } });
+    expect(await rejectionOf(resolveTicketSource(fixture, source))).toMatchObject({ status: 404, body: { errorCode: 'SESSION_NOT_FOUND' } });
   });
 }, 60_000);

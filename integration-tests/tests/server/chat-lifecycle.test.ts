@@ -13,6 +13,7 @@ import {
   userMessages,
 } from '../../support/chat-assertions.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 function expectSuccessfulTurnContract(
   events: readonly ServerWsMessage[],
@@ -465,7 +466,7 @@ describe('chat lifecycle', () => {
       expect(await fixture.client.getMessages(chatId)).toEqual(beforeRetry);
       expect(fixture.fakeProviders.anthropic.requests()).toHaveLength(requestCount);
 
-      await expect(fixture.client.runChat({
+      expect(await rejectionOf(fixture.client.runChat({
         ...fixture.client.directRunRequest({
           chatId,
           content: 'same-text-with-attachment',
@@ -474,7 +475,7 @@ describe('chat lifecycle', () => {
           clientMessageId,
         }),
         images: [{ ...image, data: 'data:image/png;base64,Yg==' }],
-      })).rejects.toMatchObject({
+      }))).toMatchObject({
         status: 409,
         body: { errorCode: 'IDEMPOTENCY_CONFLICT' },
       });

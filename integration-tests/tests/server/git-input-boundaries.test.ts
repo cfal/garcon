@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { ExecutionGitResults } from '../../../common/git-execution.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { initializeFixtureRepository, runFixtureGit } from '../../support/git-fixture.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote-executor-dials'] as const) {
   test(`large selections and missing projects preserve Git HTTP contracts (${executionBackend})`, async () => {
@@ -21,8 +22,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       expect(await client.post('/api/v1/git/commit', { ...target, files, message: 'Selected synthetic files' })).toMatchObject({ success: true });
       expect((await runFixtureGit(project, 'diff-tree', '--no-commit-id', '--name-only', '-r', '-z', 'HEAD')).split('\0').filter(Boolean).sort()).toEqual([...files].sort());
       expect(await runFixtureGit(project, 'rev-list', '--count', 'HEAD')).toBe('2\n');
-      await expect(client.post('/api/v1/git/stage-paths', { ...target, paths: Array(2000).fill('x'.repeat(3000)), mode: 'stage' }))
-        .rejects.toMatchObject({ status: 413, body: { errorCode: 'GIT_REQUEST_TOO_LARGE' } });
+      expect(await rejectionOf(client.post('/api/v1/git/stage-paths', { ...target, paths: Array(2000).fill('x'.repeat(3000)), mode: 'stage' }))).toMatchObject({ status: 413, body: { errorCode: 'GIT_REQUEST_TOO_LARGE' } });
 
       const missingPaths = ['missing', 'example.txt/nested'];
       if (process.platform !== 'win32') {
@@ -34,8 +34,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         expect(await client.post<ExecutionGitResults['getQuickSummary']>('/api/v1/git/quick-summary', absent)).toMatchObject({ status: 'not-git-repository' });
         expect(await client.post<ExecutionGitResults['getWorkingTreeFingerprint']>('/api/v1/git/working-tree/fingerprint', absent)).toMatchObject({ status: 'not-git-repository' });
         expect(await client.post<ExecutionGitResults['getWorkbenchSnapshot']>('/api/v1/git/workbench/snapshot', { ...absent, mode: 'working', context: 2 })).toMatchObject({ status: 'not-git-repository' });
-        await expect(client.get(`/api/v1/git/status?${new URLSearchParams(absent)}`))
-          .rejects.toMatchObject({ status: 400, body: { errorCode: 'GIT_NOT_REPO', error: 'Git project directory is unavailable' } });
+        expect(await rejectionOf(client.get(`/api/v1/git/status?${new URLSearchParams(absent)}`))).toMatchObject({ status: 400, body: { errorCode: 'GIT_NOT_REPO', error: 'Git project directory is unavailable' } });
       }
 
       if (process.platform !== 'win32') {

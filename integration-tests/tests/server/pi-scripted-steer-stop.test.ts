@@ -67,12 +67,12 @@ describe('scripted Pi steering stop semantics', () => {
       if (!queuedTurn.turnId) throw new Error('Pi run response omitted its turn id.');
       await queuedHeld.requested;
 
-      await expect(fixture.client.steer({
+      expect(await fixture.client.steer({
         clientRequestId: crypto.randomUUID(),
         clientMessageId: crypto.randomUUID(),
         chatId: queuedChatId,
         content: queuedSteer,
-      })).resolves.toMatchObject({ status: 'accepted', turnId: queuedTurn.turnId });
+      })).toMatchObject({ status: 'accepted', turnId: queuedTurn.turnId });
 
       const queuedStopCursor = fixture.client.markEvents();
       const queuedStop = await fixture.client.stopChat({
@@ -133,12 +133,12 @@ describe('scripted Pi steering stop semantics', () => {
       if (!deliveredTurn.turnId) throw new Error('Pi start response omitted its turn id.');
       await waitForFile(join(fixture.dirs.project, startedFile));
 
-      await expect(fixture.client.steer({
+      expect(await fixture.client.steer({
         clientRequestId: crypto.randomUUID(),
         clientMessageId: crypto.randomUUID(),
         chatId: deliveredChatId,
         content: deliveredSteer,
-      })).resolves.toMatchObject({ status: 'accepted', turnId: deliveredTurn.turnId });
+      })).toMatchObject({ status: 'accepted', turnId: deliveredTurn.turnId });
       await writeFile(join(fixture.dirs.project, releaseFile), '');
       const deliveredModelRequest = await deliveredHeld.requested;
       expect(deliveredModelRequest.userTexts.at(-1)).toBe(deliveredSteer);

@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import type { RemoteSettingsSnapshot } from '../../../common/settings.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import { throwingRejectionOf } from '../../support/promise-assertions.js';
 
 test.each(['remote-controller-dials', 'remote-executor-dials'] as const)(
   'executor pin mutations preserve concurrent recents and unrelated preferences (%s)', async executionBackend => {
@@ -22,7 +23,7 @@ test.each(['remote-controller-dials', 'remote-executor-dials'] as const)(
       [otherExecutor]: { recentPaths: [], pinnedPaths: ['/other/pin'] },
     };
     expect((await client.get<RemoteSettingsSnapshot>('/api/v1/app/settings')).paths.byExecutor).toEqual(expected);
-    await expect(client.put('/api/v1/app/settings', { paths: { byExecutor: { [client.executorId]: { recentPaths: [] } } } })).rejects.toThrow();
+    expect(await throwingRejectionOf(client.put('/api/v1/app/settings', { paths: { byExecutor: { [client.executorId]: { recentPaths: [] } } } }))).toThrow();
     await fixture.restartGarcon();
     expect((await fixture.client.get<RemoteSettingsSnapshot>('/api/v1/app/settings')).paths.byExecutor).toEqual(expected);
   }, { executionBackend });

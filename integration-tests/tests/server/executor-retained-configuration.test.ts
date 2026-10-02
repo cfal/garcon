@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { PreambleDefinition, PreamblesMutationResponse, PreamblesSnapshot } from '../../../common/preambles.js';
 import { GENERATION_UI_SETTING_KEYS, type GenerationSelectionUiSettings, type RemoteSettingsSnapshot, type RemoteUiSettings } from '../../../common/settings.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 for (const executionBackend of ['remote-controller-dials', 'remote-executor-dials'] as const) {
   test(`unchanged preamble scopes remain editable after executor loss and deletion (${executionBackend})`, async () => {
@@ -28,12 +29,12 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
         id, expectedRevision: snapshot.revision, preamble: { ...definition, enabled: false },
       }));
       expect(snapshot.preambles.find(preamble => preamble.id === id)?.enabled).toBe(false);
-      await expect(client.put('/api/v1/preambles', {
+      expect(await rejectionOf(client.put('/api/v1/preambles', {
         id, expectedRevision: snapshot.revision,
         preamble: { ...definition, scope: { type: 'project-paths', rules: [
           { executorId, projectPath: fixture.executionDirs.project, includeNested: false },
         ] } },
-      })).rejects.toMatchObject({ status: 503, body: { errorCode: 'EXECUTOR_UNAVAILABLE' } });
+      }))).toMatchObject({ status: 503, body: { errorCode: 'EXECUTOR_UNAVAILABLE' } });
       await client.delete(`/api/v1/executors/${executorId}`);
       ({ snapshot } = await client.put<PreamblesMutationResponse>('/api/v1/preambles', {
         id, expectedRevision: snapshot.revision,
@@ -63,8 +64,7 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
         promptRefinement: { ...selection, customPrompt: 'Synthetic instructions: {{USER_PROMPT}}' },
       } satisfies Partial<RemoteUiSettings>;
       await client.updateSettings({ ui });
-      await expect(client.put('/api/v1/app/settings', { ui: { chatTitle: { ...ui.chatTitle, thinkingMode: 'high' } } }))
-        .rejects.toMatchObject({ status: 422, body: { errorCode: 'UNSUPPORTED_AGENT' } });
+      expect(await rejectionOf(client.put('/api/v1/app/settings', { ui: { chatTitle: { ...ui.chatTitle, thinkingMode: 'high' } } }))).toMatchObject({ status: 422, body: { errorCode: 'UNSUPPORTED_AGENT' } });
       const saved = await client.get<RemoteSettingsSnapshot>('/api/v1/app/settings');
       expect(saved.ui).toMatchObject(ui);
       expect(JSON.parse(await readFile(join(fixture.dirs.workspace, 'project-settings.json'), 'utf8'))).toMatchObject({ ui });

@@ -180,7 +180,7 @@ describe('snippet default argument layouts', () => {
           { width: 32, height: 32 },
         ]);
         const add = manager.getByRole('button', { name: 'Add snippet' });
-        await expect(add.isEnabled()).resolves.toBe(true);
+        expect(await add.isEnabled()).toBe(true);
         await add.click();
 
         const form = fixture.page.getByRole('dialog', { name: 'Add Snippet' });

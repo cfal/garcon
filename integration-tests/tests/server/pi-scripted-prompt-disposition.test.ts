@@ -5,6 +5,7 @@ import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { chatCompletionsText } from '../../support/fake-chat-completions-model.js';
 import { expectFinished, LIVE_TURN_TIMEOUT_MS, waitForVisibleResponse } from '../../support/live-agent.js';
 import { piNativeSession, scriptedPiRunRequest, scriptedPiStartRequest, startScriptedPiTestEnvironment } from '../../support/scripted-pi.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 for (const mode of ['new', 'established', 'adopt'] as const) {
   test(`completes a real handled prompt in a ${mode} session without losing the next turn`, async () => {
@@ -53,7 +54,7 @@ export default function (pi) {
         })).type);
         if (mode === 'new') {
           const native = await piNativeSession(fixture, chatId);
-          await expect(readFile(native.path)).rejects.toMatchObject({ code: 'ENOENT' });
+          expect(await rejectionOf(readFile(native.path))).toMatchObject({ code: 'ENOENT' });
         }
         environment.model.scriptTurn([chatCompletionsText('next reply')]);
         const nextCursor = fixture.client.markEvents();

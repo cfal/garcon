@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import type { ChatSearchNavigateResponse } from '../../../common/chat-search.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { createSearchNavigationTarget } from '../../support/search-navigation-fixture.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 test('search keeps new response addresses visible after indexing is already enabled', async () => {
   await withIntegrationFixture('search-new-chat-watermark', async (fixture) => {
@@ -51,20 +52,20 @@ test('search addresses load old rows across restart and reject replacement views
       ),
     ).toEqual({ chatId, ordinal: target.ordinal });
     await fixture.client.reloadChat(chatId);
-    await expect(
+    expect(await rejectionOf(
       fixture.client.post('/api/v1/chats/search/navigate', target),
-    ).rejects.toMatchObject({
+    )).toMatchObject({
       status: 409,
       body: { errorCode: 'SEARCH_RESULT_STALE' },
     });
-    await expect(fixture.client.getMessages(chatId, request)).rejects.toMatchObject({
+    expect(await rejectionOf(fixture.client.getMessages(chatId, request))).toMatchObject({
       status: 409,
       body: { errorCode: 'STALE_TRANSCRIPT_VIEW' },
     });
     await fixture.client.deleteChat(chatId);
-    await expect(
+    expect(await rejectionOf(
       fixture.client.post('/api/v1/chats/search/navigate', target),
-    ).rejects.toMatchObject({
+    )).toMatchObject({
       status: 404,
       body: { errorCode: 'SESSION_NOT_FOUND' },
     });

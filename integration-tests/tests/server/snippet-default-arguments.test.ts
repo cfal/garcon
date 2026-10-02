@@ -8,6 +8,7 @@ import type {
   SnippetsSnapshot,
 } from '../../../common/snippets.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 const createdAt = '2026-01-01T00:00:00.000Z';
 
@@ -41,7 +42,7 @@ describe('snippet default arguments', () => {
         const initial = await fixture.client.get<SnippetsSnapshot>('/api/v1/snippets');
         expect(initial).toEqual({ revision: 7, snippets: migrated.snippets });
 
-        await expect(
+        expect(await rejectionOf(
           fixture.client.post('/api/v1/snippets', {
             expectedRevision: 7,
             snippet: {
@@ -49,7 +50,7 @@ describe('snippet default arguments', () => {
               template: 'Missing default arguments',
             },
           }),
-        ).rejects.toMatchObject({
+        )).toMatchObject({
           status: 400,
           body: { errorCode: 'SNIPPET_VALIDATION_FAILED' },
         });
@@ -96,7 +97,7 @@ describe('snippet default arguments', () => {
         expect(explicitEmpty.expandedText).toBe(`Review  in ${fixture.executionDirs.project}`);
 
         for (const argumentsInput of ['', { type: 'unknown' }]) {
-          await expect(
+          expect(await rejectionOf(
             fixture.client.post('/api/v1/snippets/expand', {
               shortName: 'review',
               arguments: argumentsInput,
@@ -106,7 +107,7 @@ describe('snippet default arguments', () => {
                 projectPath: fixture.executionDirs.project,
               },
             }),
-          ).rejects.toMatchObject({
+          )).toMatchObject({
             status: 400,
             body: { errorCode: 'SNIPPET_VALIDATION_FAILED' },
           });
@@ -115,13 +116,13 @@ describe('snippet default arguments', () => {
         expect((await fixture.client.listChats()).sessions).not.toContainEqual(
           expect.objectContaining({ id: prospectiveChatId }),
         );
-        await expect(
+        expect(await rejectionOf(
           fixture.client.post('/api/v1/snippets/expand', {
             shortName: 'review',
             arguments: { type: 'default' },
             context: { type: 'project', projectPath: fixture.executionDirs.project },
           }),
-        ).rejects.toMatchObject({
+        )).toMatchObject({
           status: 400,
           body: { errorCode: 'SNIPPET_VALIDATION_FAILED' },
         });
@@ -130,8 +131,8 @@ describe('snippet default arguments', () => {
         const restarted = await fixture.client.get<SnippetsSnapshot>('/api/v1/snippets');
         expect(restarted.revision).toBe(8);
         expect(restarted.snippets[0]?.defaultArguments).toBe('staged\nchanges');
-        await expect(
-          fixture.client.post<ExpandSnippetResponse>('/api/v1/snippets/expand', {
+        expect(
+          await fixture.client.post<ExpandSnippetResponse>('/api/v1/snippets/expand', {
             shortName: 'review',
             arguments: { type: 'default' },
             context: {
@@ -140,7 +141,7 @@ describe('snippet default arguments', () => {
               projectPath: fixture.executionDirs.project,
             },
           }),
-        ).resolves.toMatchObject({
+        ).toMatchObject({
           expandedText: `Review staged\nchanges in ${fixture.executionDirs.project}`,
         });
       },

@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import type { ApiProviderCatalogEntry, ApiProviderModelDiscoveryResponse } from '../../../common/api-providers.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 test.each(['remote-controller-dials', 'remote-executor-dials'] as const)('endpoint probes use the selected %s executor without falling back when disabled', async (executionBackend) => {
   const calls: string[] = [];
@@ -33,11 +34,10 @@ test.each(['remote-controller-dials', 'remote-executor-dials'] as const)('endpoi
       expect(calls).toEqual(['/v1/models', '/v1/models']);
       await client.patch(`/api/v1/executors/${client.executorId}`, { enabled: false });
       for (const [path, body] of [['test', input], ['models', discovery]] as const) {
-        await expect(client.post(`/api/v1/api-providers/${path}?executorId=${client.executorId}`, body))
-          .rejects.toMatchObject({ status: 503, body: { errorCode: 'EXECUTOR_UNAVAILABLE' } });
+        expect(await rejectionOf(client.post(`/api/v1/api-providers/${path}?executorId=${client.executorId}`, body))).toMatchObject({ status: 503, body: { errorCode: 'EXECUTOR_UNAVAILABLE' } });
       }
       expect(calls).toHaveLength(2);
-      await expect(client.post('/api/v1/api-providers/models', discovery)).rejects.toMatchObject({ status: 409, body: { errorCode: 'API_PROVIDER_UNAVAILABLE' } });
+      expect(await rejectionOf(client.post('/api/v1/api-providers/models', discovery))).toMatchObject({ status: 409, body: { errorCode: 'API_PROVIDER_UNAVAILABLE' } });
       await client.put(`/api/v1/api-provider-assignments?executorId=local&apiProviderId=${saved.id}`, {});
       expect(await client.post<ApiProviderModelDiscoveryResponse>('/api/v1/api-providers/models', discovery)).toMatchObject({ success: true });
       expect(calls).toHaveLength(3);

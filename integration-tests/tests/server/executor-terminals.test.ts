@@ -4,6 +4,7 @@ import { parseTerminalReference } from '../../../common/terminal-identity.js';
 import type { PrimaryWsServerMessage as ServerWsMessage } from '../../../common/ws-protocol.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import type { GarconTestClient } from '../../support/garcon-client.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 const list = (client: GarconTestClient, executorId: string) => client.get<TerminalListResponse>(`/api/v1/terminals?executorId=${executorId}`);
 function event<K extends TerminalStreamServerMessage['type']>(type: K, attachmentId: string) {
@@ -66,10 +67,10 @@ for (const backend of ['in-process', 'remote-controller-dials', 'remote-executor
         const replacement = await list(client, executorId);
         expect(replacement.terminalRuntimeId).not.toBe(inventory.terminalRuntimeId);
         expect(replacement.terminals).toEqual([]);
-        await expect(client.post('/api/v1/terminals', request)).rejects.toMatchObject({
+        expect(await rejectionOf(client.post('/api/v1/terminals', request))).toMatchObject({
           status: 409, body: { errorCode: 'terminal-runtime-changed' },
         });
-        await expect(client.delete('/api/v1/terminals', { terminalId, requestId: 'stale-terminate' })).rejects.toMatchObject({
+        expect(await rejectionOf(client.delete('/api/v1/terminals', { terminalId, requestId: 'stale-terminate' }))).toMatchObject({
           status: 409, body: { errorCode: 'terminal-runtime-changed' },
         });
         expect((await list(client, executorId)).terminals).toEqual([]);
