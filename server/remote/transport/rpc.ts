@@ -22,6 +22,8 @@ import { GitServiceError, isGitServiceErrorCode, type GitServiceErrorCode } from
 import { parseTerminalStreamServerMessage, type TerminalErrorCode } from '../../../common/terminal.js';
 import { parseTerminalNotification, type TerminalNotification } from './terminal-protocol.js';
 import { RpcAdmission, type RpcAdmissionBudgets } from './rpc-admission.js';
+import { parseBulkControl, type BulkConnectionControl } from './rpc-lane.js';
+import { BULK_CONTROL_BYTES, RPC_CALL_LIMIT } from './limits.js';
 
 interface Failure {
   readonly code: AgentIntegrationErrorCode | ErrorCode | TerminalErrorCode | GitServiceErrorCode;
@@ -37,7 +39,7 @@ type ReplyFrame =
   | { readonly type: 'result'; readonly id: string; readonly value: unknown }
   | { readonly type: 'error'; readonly id: string; readonly error: Failure };
 
-type RpcFrame = ExecutorRpcRequest | AgentProducerFrame | ProducerAckFrame | ReplyAckFrame | TerminalNotification | ReplyFrame
+type RpcFrame = ExecutorRpcRequest | AgentProducerFrame | ProducerAckFrame | ReplyAckFrame | TerminalNotification | ReplyFrame | BulkConnectionControl
   | { readonly type: 'terminal-detach'; readonly request: ExecutorRpcMethods['terminals.detach']['request'] }
   | { readonly type: 'cancel'; readonly id: string };
 
@@ -159,6 +161,7 @@ export interface ExecutorRpcContinuity {
   // A worker runs journaled calls beyond their session and keeps their replies.
   readonly journal?: RpcReplyJournal;
   readonly admission?: RpcAdmissionBudgets;
+  readonly recovering?: boolean;
 }
 
 export class ExecutorRpc {
@@ -180,9 +183,17 @@ export class ExecutorRpc {
   #terminal: ((frame: TerminalNotification) => void) | null = null;
   #terminalDetach: ((request: ExecutorRpcMethods['terminals.detach']['request']) => Promise<unknown>) | null = null;
   #retired = false;
+  #incomingOpen: boolean;
+  #outgoingOpen: boolean;
+  #reconciled = false;
+  readonly #recoveryResends = new Set<string>();
+  #bulkControl: ((frame: BulkConnectionControl) => void) | null = null;
+  #reconciliationComplete: (() => void) | null = null;
   readonly #unsubscribe: () => void;
 
   constructor(readonly transport: SessionTransport, continuity: ExecutorRpcContinuity = {}) {
+    this.#incomingOpen = !continuity.recovering;
+    this.#outgoingOpen = !continuity.recovering;
     this.#parked = continuity.parked ?? null;
     this.#journal = continuity.journal ?? null;
     this.#outgoingAdmission = continuity.admission?.outgoing ?? this.#parked?.admission ?? new RpcAdmission();
@@ -202,6 +213,9 @@ export class ExecutorRpc {
   retireUnknown(): void {
     if (this.#retired) return;
     this.#retired = true;
+    this.#bulkControl = null;
+    this.#reconciliationComplete = null;
+    this.#recoveryResends.clear();
     this.#unsubscribe();
     this.#handler = null;
     this.#producer = null;
@@ -235,6 +249,12 @@ export class ExecutorRpc {
   }
 
   handle(handler: RpcHandler): void { this.#handler = handler; }
+  get reconciled(): boolean { return this.#reconciled; }
+  get active(): boolean { return !this.#retired && this.#outgoingOpen && this.transport.connected; }
+  onBulkControl(handler: (frame: BulkConnectionControl) => void): void { this.#bulkControl = handler; }
+  onReconciled(handler: () => void): void { this.#reconciliationComplete = handler; }
+  activateIncoming(): void { this.#incomingOpen = true; this.#recoveryResends.clear(); }
+  activate(): void { this.activateIncoming(); this.#outgoingOpen = true; }
   onProducer(handler: (frame: AgentProducerFrame) => void): void { this.#producer = handler; }
   onTerminal(handler: (frame: TerminalNotification) => void): void { this.#terminal = handler; }
   publishTerminal(frame: TerminalNotification): boolean {
@@ -273,6 +293,7 @@ export class ExecutorRpc {
     }
     if (options?.signal?.aborted) throw new AgentCallError('not-dispatched', 'Executor is unavailable');
     if (this.#retired || !this.transport.connected) throw new ExecutorSessionLostError('not-dispatched', 'Executor is unavailable');
+    if (!this.#outgoingOpen && method !== 'calls.reconcile') throw new AgentCallError('not-dispatched', 'Executor bulk connection is recovering');
     const release = SESSION_INSTALLATION_METHODS.has(method) ? () => {} : this.#outgoingAdmission.acquire(this.transport.lane);
     let retainedForLateResult = false;
     const result = Promise.withResolvers<unknown>();
@@ -330,13 +351,12 @@ export class ExecutorRpc {
   // yields.
   async reconcileParked(): Promise<void> {
     const parked = this.#parked;
-    if (!parked) return;
-    const calls = parked.take();
+    const calls = parked?.take() ?? [];
     const reconciling = this.call('', 'calls.reconcile', {
       calls: calls.map(({ id, session, seq }): OutstandingCall => ({ id, session, seq })),
     });
     for (const call of calls) {
-      if (this.#retired) parked.park(call);
+      if (this.#retired) parked?.park(call);
       else {
         call.rpc = this;
         this.#pending.set(call.id, call);
@@ -411,6 +431,16 @@ export class ExecutorRpc {
     if (this.#retired) return;
     const frame = parseFrame(payload);
     if (!frame || typeof frame !== 'object' || typeof frame.type !== 'string') throw new Error('Invalid executor RPC frame');
+    if (frame.type.startsWith('bulk-')) {
+      if (this.transport.lane !== 'primary' || Buffer.byteLength(payload) > BULK_CONTROL_BYTES || !this.#bulkControl) {
+        throw new Error('Unexpected bulk connection control');
+      }
+      this.#bulkControl(parseBulkControl(frame));
+      return;
+    }
+    if (this.transport.lane === 'bulk' && ['terminal', 'terminal-detach', 'producer', 'producer-ack'].includes(frame.type)) {
+      throw new Error('Primary notification on the bulk lane');
+    }
     if (frame.type === 'terminal') { this.#terminal?.(parseTerminalNotification(frame)); return; }
     if (frame.type === 'terminal-detach') {
       const handler = this.#terminalDetach;
@@ -477,6 +507,10 @@ export class ExecutorRpc {
       this.#reconcile(frame);
       return;
     }
+    if (!this.#incomingOpen && (!this.#recoveryResends.delete(frame.id) || rpcContinuity(frame.method) !== 'journaled')) {
+      this.#reply({ type: 'error', id: frame.id, error: encodeFailure(new AgentCallError('not-dispatched', 'Executor bulk connection is recovering')) });
+      return;
+    }
     let release: () => void;
     try {
       release = SESSION_INSTALLATION_METHODS.has(frame.method) ? () => {} : this.#incomingAdmission.acquire(this.transport.lane);
@@ -532,7 +566,7 @@ export class ExecutorRpc {
 
   #reconcile(frame: Extract<ExecutorRpcRequest, { readonly method: 'calls.reconcile' }>): void {
     const calls: unknown = frame.request?.calls;
-    if (!Array.isArray(calls) || calls.some((call) => (
+    if (this.#reconciled || !Array.isArray(calls) || calls.length > RPC_CALL_LIMIT || calls.some((call) => (
       !call || typeof call.id !== 'string' || typeof call.session !== 'string' || !Number.isSafeInteger(call.seq) || call.seq < 1
     ))) {
       this.#reply({ type: 'error', id: frame.id, error: encodeFailure(new AgentCallError('rejected', 'Invalid call reconciliation request')) });
@@ -542,7 +576,12 @@ export class ExecutorRpc {
     // Without a journal, no reply outlives its session.
     const states = this.#journal?.reconcile(this.#journalOwner, outstanding)
       ?? outstanding.map(({ id }): OutstandingCallState => ({ id, state: 'unknown' }));
+    if (!this.#incomingOpen) {
+      for (const { id, state } of states) if (state === 'not-received') this.#recoveryResends.add(id);
+    }
     this.#reply({ type: 'result', id: frame.id, value: { states } });
+    this.#reconciled = true;
+    this.#reconciliationComplete?.();
     this.#journal?.deliver();
   }
 
