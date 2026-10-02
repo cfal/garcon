@@ -17,6 +17,11 @@ function primaryFailure({ lane, ...failure }) {
   return failure;
 }
 
+function unclassifiedFailure({ lane, ...failure }) {
+  expect(lane).toBeUndefined();
+  return failure;
+}
+
 function primaryClosure({ lane, sessionId, primarySessionId, queues, primaryRedials, ...closure }) {
   expect(lane).toBe('primary');
   expect(primarySessionId).toBe(sessionId);
@@ -88,7 +93,7 @@ for (const role of ['controller', 'worker']) {
   test(`reports why a peer failed to authenticate without echoing a frame that fails to parse (${role})`, async () => {
     const link = new WebSocketLink({ role, executorId: 'synthetic-executor', secret, noTls: true });
     const failures = [];
-    link.onError(failure => failures.push(primaryFailure(failure)));
+    link.onError(failure => failures.push(unclassifiedFailure(failure)));
     const socket = malformedHandshake(link.listen());
     try {
       await socket.closed;
@@ -116,7 +121,7 @@ for (const role of ['controller', 'worker']) {
 test('counts a failure from one again when its reason changes', async () => {
   const link = new WebSocketLink({ role: 'controller', executorId: 'synthetic-executor', secret, noTls: true });
   const failures = [];
-  link.onError(failure => failures.push(primaryFailure(failure)));
+  link.onError(failure => failures.push(unclassifiedFailure(failure)));
   const address = link.listen();
   try {
     await malformedHandshake(address).closed;
@@ -234,7 +239,7 @@ test('counts each kind of connection failure until a session starts, however fai
   const controller = new WebSocketLink({ ...common, role: 'controller' });
   const worker = new WebSocketLink({ ...common, role: 'worker' });
   const failures = [];
-  controller.onError(failure => failures.push(primaryFailure(failure)));
+  controller.onError(failure => failures.push(unclassifiedFailure(failure)));
   const address = controller.listen();
   const wrongKey = 'Executor encrypted connection failed (AUTHENTICATION_FAILED)';
   const malformed = 'Executor encrypted connection failed (PROTOCOL_ERROR)';
@@ -558,7 +563,7 @@ test('reports a peer that never starts the encrypted handshake', async () => {
     role: 'controller', executorId: 'synthetic-executor', secret, noTls: true, noiseLimits: { handshakeTimeoutMs: 50 },
   });
   const failures = [];
-  link.onError(failure => failures.push(primaryFailure(failure)));
+  link.onError(failure => failures.push(unclassifiedFailure(failure)));
   const socket = new WebSocket(link.listen());
   const closed = new Promise(resolve => socket.addEventListener('close', resolve));
   try {

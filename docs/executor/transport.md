@@ -358,6 +358,9 @@ executor handshake frame`.
 Closure and setup diagnostics include lane and parent/session IDs, setup phase,
 retry counts, aggregate/per-lane queue bytes and oldest age, and incoming/outgoing
 ordinary call counts. Bulk failures are deduplicated independently of primary.
+Listener failures before a valid peer hello have no known lane. They remain
+logged and visible for offline onboarding, but cannot replace a primary
+reconnect error. A new primary resets their diagnostic counters; bulk does not.
 Diagnostics never include connection query strings, credentials, or payloads.
 Isolation does not remove CPU, disk, subprocess, or shared network contention;
 primary producer/prompt traffic can still delay primary controls.

@@ -474,7 +474,7 @@ test('logs failed executor connections at powers of two per kind but shows every
   }
   await connectWithWrongKey(url(config.id));
 
-  const logged = (message: string, count: number) => ({ executorId: config.id, lane: 'primary', message, count });
+  const logged = (message: string, count: number) => ({ executorId: config.id, message, count });
   expect(failures()).toEqual([logged(wrongKey, 1), logged(malformed, 1), logged(wrongKey, 2), logged(malformed, 2)]);
   // The third wrong key was not logged, but it is the latest failure.
   expect(manager.list().find((item) => item.id === config.id)?.lastError).toEqual({ code: 'EXECUTOR_UNAVAILABLE', message: wrongKey });
@@ -618,6 +618,29 @@ test('shows why a ready executor lost its own session', async () => {
   expect(manager.list().find((item) => item.id === config.id)).toMatchObject({
     availability: 'reconnecting',
     lastError: { code: 'EXECUTOR_UNAVAILABLE', message: 'Executor connection lost: Encrypted connection failed (TRANSPORT_CLOSED)' },
+  });
+});
+
+test('unidentified handshake failures preserve the primary reconnect error', async () => {
+  const { manager, root } = await fixture();
+  const config = await manager.create({ label: 'Reconnecting', direction: 'executor-connects' });
+  const { url } = sharedListener(manager);
+  const remote = worker(config.secret, root);
+  remote.dial(url(config.id));
+  await waitReady(manager, config.id);
+  await waitBulkReady(manager, config.id);
+  remote.quiesce();
+  manager.inboundLink(config.id)!.current!.close(new Error('Synthetic primary loss'));
+  const before = manager.list().find(item => item.id === config.id)!;
+  expect(before).toMatchObject({ availability: 'reconnecting', lastError: {
+    code: 'EXECUTOR_UNAVAILABLE', message: 'Executor connection lost: Synthetic primary loss',
+  } });
+
+  await connectWithWrongKey(url(config.id));
+  await sendMalformedRecord(url(config.id));
+
+  expect(manager.list().find(item => item.id === config.id)).toMatchObject({
+    availability: 'reconnecting', lastError: before.lastError,
   });
 });
 

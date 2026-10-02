@@ -79,6 +79,7 @@ export interface LinkClosure {
 
 // A connection that failed to open, to authenticate, or to keep its session.
 export interface LinkFailure {
+  // Listener failures before a valid peer hello have no known lane.
   readonly lane?: RpcLane;
   readonly message: string;
   // Failures of this kind since the last session started, including this one.
@@ -502,7 +503,9 @@ export class WebSocketLink {
     }
     if (connection.closed) { connection.hooks.disconnected(); return; }
     connection.sessionStartedAt = performance.now();
-    for (const key of this.#failures.keys()) if (key.startsWith(`${lane}:`)) this.#failures.delete(key);
+    for (const [key, failure] of this.#failures) {
+      if (failure.lane === lane || (lane === 'primary' && failure.lane === undefined)) this.#failures.delete(key);
+    }
     if (lane === 'primary') this.#ready.resolve(session);
     connection.heartbeat = setInterval(() => {
       try {
@@ -555,12 +558,12 @@ export class WebSocketLink {
     return confirming;
   }
 
-  #reportFailure(kind: LinkFailureKind, message: string, reason?: string, lane: RpcLane = 'primary'): void {
+  #reportFailure(kind: LinkFailureKind, message: string, reason?: string, lane?: RpcLane): void {
     if (this.#disposed) return;
-    const key = `${lane}:${kind}`;
+    const key = `${lane ?? 'unclassified'}:${kind}`;
     const previous = this.#failures.get(key);
     const count = previous?.message === message && previous.reason === reason ? previous.count + 1 : 1;
-    const failure: LinkFailure = { lane, message, count, ...(reason === undefined ? {} : { reason }) };
+    const failure: LinkFailure = { ...(lane === undefined ? {} : { lane }), message, count, ...(reason === undefined ? {} : { reason }) };
     this.#failures.set(key, failure);
     for (const listener of this.#errors) listener(failure);
   }

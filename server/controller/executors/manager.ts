@@ -278,9 +278,10 @@ export class ExecutorManager {
       entry.link = link;
       link.onError((failure) => {
         if (shouldLogLinkFailure(failure)) this.logger.warn('Executor link failed', { executorId: config.id, ...failure });
-        // Another connection failing leaves an established session unaffected, even while a
-        // configuration change or the session's preparation keeps the executor from ready.
-        if (failure.lane !== 'bulk' && entry.executor?.availability !== 'ready') showLinkFailure(failure.message, failure.reason);
+        // Unidentified inbound sockets cannot explain the loss of an established primary.
+        const availability = entry.executor?.availability;
+        const unclassifiedOffline = failure.lane === undefined && availability === 'offline' && link.current === null;
+        if (availability !== 'ready' && (failure.lane === 'primary' || unclassifiedOffline)) showLinkFailure(failure.message, failure.reason);
       });
       link.onClosure((closure) => {
         this.logger.warn('Executor link closed', { executorId: config.id, ...closure, ...entry.executor?.diagnostics });
