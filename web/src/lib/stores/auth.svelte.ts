@@ -19,8 +19,7 @@ function isAuthoritativeAuthRejection(err: unknown): boolean {
 
 function isRetryableAuthError(err: unknown): boolean {
 	if (!(err instanceof ApiError)) return true;
-	const apiError = err as ApiError;
-	return apiError.retryable || apiError.status === 429 || apiError.status >= 500;
+	return err.retryable || err.status === 429 || err.status >= 500;
 }
 
 async function retryAuthRequest<T>(request: () => Promise<T>): Promise<T> {
@@ -42,11 +41,9 @@ function describeAuthError(err: unknown): string {
 	if (err instanceof ApiError) {
 		if (err.status === 401) return m.auth_errors_invalid_credentials();
 		if (err.status === 403) return m.auth_errors_access_denied();
-		if (err.status === 409) return err.message;
 		if (err.status >= 500) return m.auth_errors_server();
 		return err.message;
 	}
-	if (err instanceof Error) return m.auth_errors_network();
 	return m.auth_errors_network();
 }
 

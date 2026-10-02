@@ -1,17 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { AuthStore } from '../auth.svelte';
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
-
-const store: Record<string, string> = {};
-vi.stubGlobal('localStorage', {
-	getItem: (k: string) => store[k] ?? null,
-	setItem: (k: string, v: string) => {
-		store[k] = v;
-	},
-	removeItem: (k: string) => {
-		delete store[k];
-	},
-});
 
 vi.mock('$lib/api/auth.js', () => ({
 	getAuthStatus: vi.fn(),
@@ -20,38 +9,28 @@ vi.mock('$lib/api/auth.js', () => ({
 	getUser: vi.fn(),
 }));
 
-vi.mock('$lib/api/client.js', () => ({
-	getAuthToken: () => localStorage.getItem(LOCAL_STORAGE_KEYS.authToken),
-	setAuthToken: vi.fn(),
-	clearAuthToken: vi.fn(),
-	ApiError: class extends Error {
-		status: number;
-		retryable = false;
-		constructor(status: number, message: string) {
-			super(message);
-			this.status = status;
-		}
-	},
-}));
-
 import {
 	getAuthStatus,
 	login as apiLogin,
 	register as apiRegister,
 	getUser,
 } from '$lib/api/auth.js';
-import { setAuthToken, clearAuthToken, ApiError } from '$lib/api/client.js';
+import { ApiError } from '$lib/api/client.js';
 
 describe('AuthStore', () => {
 	beforeEach(() => {
+		localStorage.clear();
+		vi.resetAllMocks();
+	});
+
+	afterEach(() => {
 		vi.useRealTimers();
-		for (const k of Object.keys(store)) delete store[k];
-		vi.clearAllMocks();
+		localStorage.clear();
 	});
 
 	describe('constructor', () => {
 		it('reads token from localStorage', () => {
-			store[LOCAL_STORAGE_KEYS.authToken] = 'saved-token';
+			localStorage.setItem(LOCAL_STORAGE_KEYS.authToken, 'saved-token');
 			const auth = new AuthStore();
 			expect(auth.token).toBe('saved-token');
 		});
@@ -64,6 +43,29 @@ describe('AuthStore', () => {
 	});
 
 	describe('checkAuthStatus', () => {
+		it.each([
+			{ status: 400, retryable: false, attempts: 1 },
+			{ status: 403, retryable: false, attempts: 1 },
+			{ status: 429, retryable: false, attempts: 5 },
+			{ status: 503, retryable: false, attempts: 5 },
+			{ status: 409, retryable: true, attempts: 5 },
+		])(
+			'makes $attempts attempts for HTTP $status (retryable: $retryable)',
+			async ({ status, retryable, attempts }) => {
+				vi.useFakeTimers();
+				vi.mocked(getAuthStatus).mockRejectedValue(
+					new ApiError(status, 'Unavailable', undefined, undefined, retryable),
+				);
+				const auth = new AuthStore();
+				const check = auth.checkAuthStatus();
+				await vi.runAllTimersAsync();
+				await check;
+				expect(getAuthStatus).toHaveBeenCalledTimes(attempts);
+				expect(auth.isLoading).toBe(false);
+				expect(auth.isUnavailable).toBe(true);
+			},
+		);
+
 		it('coalesces concurrent recovery checks', async () => {
 			let resolveStatus!: (status: {
 				needsSetup: boolean;
@@ -98,7 +100,7 @@ describe('AuthStore', () => {
 		});
 
 		it('validates stored token by fetching user', async () => {
-			store[LOCAL_STORAGE_KEYS.authToken] = 'valid-token';
+			localStorage.setItem(LOCAL_STORAGE_KEYS.authToken, 'valid-token');
 			vi.mocked(getAuthStatus).mockResolvedValue({
 				needsSetup: false,
 				isAuthenticated: true,
@@ -115,7 +117,7 @@ describe('AuthStore', () => {
 		it.each([401, 403])(
 			'clears an invalid token after an authoritative %i rejection',
 			async (status) => {
-				store[LOCAL_STORAGE_KEYS.authToken] = 'expired-token';
+				localStorage.setItem(LOCAL_STORAGE_KEYS.authToken, 'expired-token');
 				vi.mocked(getAuthStatus).mockResolvedValue({
 					needsSetup: false,
 					isAuthenticated: false,
@@ -125,13 +127,13 @@ describe('AuthStore', () => {
 				const auth = new AuthStore();
 				await auth.checkAuthStatus();
 				expect(auth.token).toBeNull();
-				expect(clearAuthToken).toHaveBeenCalled();
+				expect(localStorage.getItem(LOCAL_STORAGE_KEYS.authToken)).toBeNull();
 			},
 		);
 
 		it('keeps the token and retries when auth status is temporarily unreachable', async () => {
 			vi.useFakeTimers();
-			store[LOCAL_STORAGE_KEYS.authToken] = 'saved-token';
+			localStorage.setItem(LOCAL_STORAGE_KEYS.authToken, 'saved-token');
 			vi.mocked(getAuthStatus).mockRejectedValue(new TypeError('Failed to fetch'));
 			const auth = new AuthStore();
 
@@ -143,7 +145,7 @@ describe('AuthStore', () => {
 			expect(auth.token).toBe('saved-token');
 			expect(auth.isUnavailable).toBe(true);
 			expect(auth.error).toBe('Network error. Please check your connection.');
-			expect(clearAuthToken).not.toHaveBeenCalled();
+			expect(localStorage.getItem(LOCAL_STORAGE_KEYS.authToken)).toBe('saved-token');
 		});
 
 		it('recovers when auth status becomes reachable during retries', async () => {
@@ -168,7 +170,7 @@ describe('AuthStore', () => {
 
 		it('recovers from transient user validation without clearing the token', async () => {
 			vi.useFakeTimers();
-			store[LOCAL_STORAGE_KEYS.authToken] = 'saved-token';
+			localStorage.setItem(LOCAL_STORAGE_KEYS.authToken, 'saved-token');
 			vi.mocked(getAuthStatus).mockResolvedValue({
 				needsSetup: false,
 				isAuthenticated: true,
@@ -187,12 +189,12 @@ describe('AuthStore', () => {
 			expect(auth.token).toBe('saved-token');
 			expect(auth.user).toEqual({ id: '1', username: 'admin' });
 			expect(auth.isUnavailable).toBe(false);
-			expect(clearAuthToken).not.toHaveBeenCalled();
+			expect(localStorage.getItem(LOCAL_STORAGE_KEYS.authToken)).toBe('saved-token');
 		});
 
 		it('keeps the token when user validation exhausts its retries', async () => {
 			vi.useFakeTimers();
-			store[LOCAL_STORAGE_KEYS.authToken] = 'saved-token';
+			localStorage.setItem(LOCAL_STORAGE_KEYS.authToken, 'saved-token');
 			vi.mocked(getAuthStatus).mockResolvedValue({
 				needsSetup: false,
 				isAuthenticated: true,
@@ -209,7 +211,7 @@ describe('AuthStore', () => {
 			expect(auth.token).toBe('saved-token');
 			expect(auth.user).toBeNull();
 			expect(auth.isUnavailable).toBe(true);
-			expect(clearAuthToken).not.toHaveBeenCalled();
+			expect(localStorage.getItem(LOCAL_STORAGE_KEYS.authToken)).toBe('saved-token');
 		});
 
 		it('does not let a stale status response overwrite successful registration', async () => {
@@ -265,7 +267,7 @@ describe('AuthStore', () => {
 		});
 
 		it('enters app mode without token when auth is disabled by server config', async () => {
-			store[LOCAL_STORAGE_KEYS.authToken] = 'stale-token';
+			localStorage.setItem(LOCAL_STORAGE_KEYS.authToken, 'stale-token');
 			vi.mocked(getAuthStatus).mockResolvedValue({
 				needsSetup: false,
 				isAuthenticated: true,
@@ -277,11 +279,27 @@ describe('AuthStore', () => {
 			expect(auth.isAuthenticated).toBe(true);
 			expect(auth.user).toEqual({ id: 'local', username: 'local' });
 			expect(auth.token).toBeNull();
-			expect(clearAuthToken).toHaveBeenCalled();
+			expect(localStorage.getItem(LOCAL_STORAGE_KEYS.authToken)).toBeNull();
 		});
 	});
 
 	describe('login', () => {
+		it.each([
+			[new ApiError(401, 'Rejected'), 'Invalid credentials. Please try again.'],
+			[new ApiError(403, 'Rejected'), 'Access denied. You do not have permission.'],
+			[new ApiError(409, 'Already registered'), 'Already registered'],
+			[new ApiError(400, 'Invalid input'), 'Invalid input'],
+			[new ApiError(503, 'Unavailable'), 'Server error. Please try again later.'],
+			[null, 'Network error. Please check your connection.'],
+		])('maps %s without retrying a login mutation', async (error, message) => {
+			vi.mocked(apiLogin).mockRejectedValue(error);
+			const auth = new AuthStore();
+			expect(await auth.login('admin', 'pass')).toEqual({ success: false, error: message });
+			expect(auth.error).toBe(message);
+			expect(apiLogin).toHaveBeenCalledTimes(1);
+			expect(localStorage.getItem(LOCAL_STORAGE_KEYS.authToken)).toBeNull();
+		});
+
 		it('persists token on success', async () => {
 			vi.mocked(apiLogin).mockResolvedValue({
 				success: true,
@@ -292,7 +310,7 @@ describe('AuthStore', () => {
 			const result = await auth.login('admin', 'pass');
 			expect(result.success).toBe(true);
 			expect(auth.token).toBe('new-token');
-			expect(setAuthToken).toHaveBeenCalledWith('new-token');
+			expect(localStorage.getItem(LOCAL_STORAGE_KEYS.authToken)).toBe('new-token');
 		});
 
 		it('returns error on failure', async () => {
@@ -329,7 +347,7 @@ describe('AuthStore', () => {
 			expect(auth.needsSetup).toBe(false);
 			expect(auth.isUnavailable).toBe(false);
 			expect(auth.token).toBe('reg-token');
-			expect(setAuthToken).toHaveBeenCalledWith('reg-token');
+			expect(localStorage.getItem(LOCAL_STORAGE_KEYS.authToken)).toBe('reg-token');
 		});
 	});
 });
