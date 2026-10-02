@@ -33,6 +33,19 @@ function nameChild(chatId = 'target', sourceChatId = 'source') {
 }
 
 describe('derived chat names', () => {
+  it('fits and disambiguates titles whose source already reaches the byte limit', async () => {
+    await settings.setSessionName('source', '\u{1f600}'.repeat(1024));
+    chatIds.add('other-target');
+    const first = await nameChild();
+    const second = await nameChild('other-target');
+    expect(first.endsWith(' (1)')).toBe(true);
+    expect(second.endsWith(' (2)')).toBe(true);
+    for (const title of [first, second]) {
+      expect(title.isWellFormed()).toBe(true);
+      expect(Buffer.byteLength(title)).toBe(4096);
+    }
+  });
+
   it.each([
     ['Custom title', 'Original prompt', 'Custom title (1)'],
     [null, 'Original prompt\nMore context', 'Original prompt (1)'],

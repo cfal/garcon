@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { CHAT_TITLE_MAX_BYTES, isChatTitleWithinLimit } from '$shared/chat-title-contracts';
 	import * as m from '$lib/paraglide/messages.js';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
@@ -32,6 +33,8 @@
 	}: ChatActionDialogsProps = $props();
 
 	let renameValue = $state('');
+	let renameTooLong = $derived(!isChatTitleWithinLimit(renameValue.trim()));
+	let canRename = $derived(renameValue.trim().length > 0 && !renameTooLong);
 	let renameInputRef = $state<HTMLInputElement | null>(null);
 	let deleteButtonRef = $state<HTMLButtonElement | null>(null);
 
@@ -56,12 +59,16 @@
 
 	function handleRenameKeydown(e: KeyboardEvent) {
 		if (e.key === 'Enter') {
-			onConfirmRename(renameValue);
+			confirmRename();
 		} else if (e.key === 'Escape') {
 			e.preventDefault();
 			e.stopPropagation();
 			onCancelRename();
 		}
+	}
+
+	function confirmRename() {
+		if (canRename) onConfirmRename(renameValue);
 	}
 
 	function handleDeleteOpenChange(open: boolean) {
@@ -124,13 +131,21 @@
 				bind:this={renameInputRef}
 				type="text"
 				bind:value={renameValue}
+				maxlength={CHAT_TITLE_MAX_BYTES}
+				aria-invalid={renameTooLong}
+				aria-describedby={renameTooLong ? 'chat-title-size-error' : undefined}
 				onkeydown={handleRenameKeydown}
 				class="w-full px-3 py-2 text-base sm:pointer-fine:text-sm border border-border rounded-lg bg-background text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 focus-visible:border-primary"
 			/>
+			{#if renameTooLong}
+				<p id="chat-title-size-error" class="text-sm text-destructive" role="alert">
+					{m.chat_title_size_error({ max: CHAT_TITLE_MAX_BYTES })}
+				</p>
+			{/if}
 		</Dialog.Header>
 		<Dialog.Footer>
 			<Button variant="outline" onclick={onCancelRename}>{m.sidebar_actions_cancel()}</Button>
-			<Button onclick={() => onConfirmRename(renameValue)}>{m.sidebar_actions_save()}</Button>
+			<Button onclick={confirmRename} disabled={!canRename}>{m.sidebar_actions_save()}</Button>
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>

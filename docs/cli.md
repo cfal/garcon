@@ -361,6 +361,12 @@ then pass the returned chat and turn IDs to `wait --json`.
 
 New chats created through the CLI receive the `cli` tag. Add repeatable tags with `--tag review --tag delegated`. `--title` sets the chat title.
 
+New chat-title writes are limited to 4 KiB of UTF-8 after trimming, including
+renames and `--title`. Existing oversized stored titles are preserved until an
+explicit bounded rename; they can still cause oversized gateway reads until
+repaired. Fork-derived titles reserve room for their numeric suffix. Generated
+titles retain their stricter 120-character bound.
+
 Use `--parent <chat-id>` when the new chat is delegated from an existing chat,
 for example when one agent starts another for review. Garcon records an immutable
 `delegation` relationship and shows it in Chat Map. The parent must exist in the
