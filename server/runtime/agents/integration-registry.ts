@@ -14,12 +14,8 @@ export type IntegrationRegistryOptions = LocalIntegrationRegistryOptions | {
   readonly instances: readonly AgentIntegration[];
 };
 
-interface IntegrationRecord {
-  readonly integration: AgentIntegration;
-}
-
 export class IntegrationRegistry {
-  readonly #records = new Map<string, IntegrationRecord>();
+  readonly #integrations = new Map<string, AgentIntegration>();
   #startPromise: Promise<void> | null = null;
   #stopPromise: Promise<void> | null = null;
   #started = false;
@@ -28,15 +24,15 @@ export class IntegrationRegistry {
     if ('instances' in options) {
       for (const integration of options.instances) {
         const integrationId = integration.descriptor.id;
-        if (this.#records.has(integrationId)) throw new Error(`Duplicate agent integration ID: ${integrationId}`);
+        if (this.#integrations.has(integrationId)) throw new Error(`Duplicate agent integration ID: ${integrationId}`);
         validateAgentIntegration({ integrationClass: { integrationId, apiVersion: 5 }, integration });
         validateDescriptor(integration);
-        this.#records.set(integrationId, { integration });
+        this.#integrations.set(integrationId, integration);
       }
       return;
     }
     for (const integrationClass of options.integrations) {
-      validateClass(integrationClass, this.#records);
+      validateClass(integrationClass, this.#integrations);
       const host = options.hostFactory.forAgent(integrationClass.integrationId);
       const integration = new integrationClass(host);
       validateAgentIntegration({ integrationClass, integration });
@@ -45,16 +41,16 @@ export class IntegrationRegistry {
         integration.descriptor.id,
         integration.descriptor.configuration.map((entry) => entry.key),
       );
-      this.#records.set(integration.descriptor.id, { integration });
+      this.#integrations.set(integration.descriptor.id, integration);
     }
   }
 
   has(agentId: string): boolean {
-    return this.#records.has(agentId);
+    return this.#integrations.has(agentId);
   }
 
   get(agentId: string): AgentIntegration | null {
-    return this.#records.get(agentId)?.integration ?? null;
+    return this.#integrations.get(agentId) ?? null;
   }
 
   require(agentId: string): AgentIntegration {
@@ -64,7 +60,7 @@ export class IntegrationRegistry {
   }
 
   list(): readonly AgentIntegration[] {
-    return [...this.#records.values()].map((record) => record.integration);
+    return [...this.#integrations.values()];
   }
 
   start(): Promise<void> {
@@ -127,7 +123,7 @@ export class IntegrationRegistry {
 
 function validateClass(
   integrationClass: AgentIntegrationClass,
-  existing: ReadonlyMap<string, IntegrationRecord>,
+  existing: ReadonlyMap<string, AgentIntegration>,
 ): void {
   if (integrationClass.apiVersion !== 5) {
     throw new Error(
