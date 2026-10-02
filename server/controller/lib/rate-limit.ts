@@ -8,6 +8,7 @@ import { jsonError } from '../../common/http-error.js';
 interface RateLimiterOptions {
   windowMs?: number;
   maxRequests?: number;
+  maxTrackedIps?: number;
 }
 
 export interface RequestIpServer {
@@ -40,24 +41,26 @@ function getClientIp(request: Request, server?: RequestIpServer | null): string 
   return getSocketClientIp(request, server) || 'unknown';
 }
 
-export function createRateLimiter({ windowMs = 60_000, maxRequests = 10 }: RateLimiterOptions = {}): RateLimiter {
-  if (!Number.isSafeInteger(maxRequests) || maxRequests < 0 || !Number.isFinite(windowMs) || windowMs <= 0) {
-    throw new RangeError('Rate limits require a nonnegative integer threshold and a positive finite window');
+export function createRateLimiter({ windowMs = 60_000, maxRequests = 10, maxTrackedIps = 10_000 }: RateLimiterOptions = {}): RateLimiter {
+  if (!Number.isSafeInteger(maxRequests) || maxRequests < 0 || !Number.isFinite(windowMs) || windowMs <= 0
+    || !Number.isSafeInteger(maxTrackedIps) || maxTrackedIps <= 0) {
+    throw new RangeError('Rate limits require a nonnegative integer threshold, a positive finite window and a positive integer IP capacity');
   }
   const hits = new Map<string, number[]>();
 
-  // Purge stale entries every 2 minutes to avoid unbounded growth.
-  const sweepInterval = setInterval(() => {
-    const cutoff = Date.now() - windowMs;
+  function purgeExpired(cutoff: number): void {
+    // Entries are ordered by their most recent attempt, so active keys stop the scan.
     for (const [ip, timestamps] of hits) {
-      const filtered = timestamps.filter((t) => t > cutoff);
-      if (filtered.length === 0) {
-        hits.delete(ip);
-      } else {
-        hits.set(ip, filtered);
-      }
+      if (timestamps[timestamps.length - 1] > cutoff) break;
+      hits.delete(ip);
     }
-  }, 120_000);
+  }
+
+  function rejected(): Response {
+    return jsonError('Too many requests. Please try again later.', 429, 'RATE_LIMITED', true);
+  }
+
+  const sweepInterval = setInterval(() => purgeExpired(Date.now() - windowMs), 120_000);
   sweepInterval.unref?.();
 
   return {
@@ -66,15 +69,22 @@ export function createRateLimiter({ windowMs = 60_000, maxRequests = 10 }: RateL
       const ip = getClientIp(request, server);
       const now = Date.now();
       const cutoff = now - windowMs;
+      if (maxRequests === 0) return rejected();
+      if (!hits.has(ip) && hits.size >= maxTrackedIps) {
+        purgeExpired(cutoff);
+        // Evicting an active key would reset its quota and permit bypass.
+        if (hits.size >= maxTrackedIps) return rejected();
+      }
       const timestamps = (hits.get(ip) || []).filter((t) => t > cutoff);
       const exceeded = timestamps.length >= maxRequests;
       timestamps.push(now);
       // Rejected attempts still extend the cooldown; older hits cannot change admission.
       if (timestamps.length > maxRequests) timestamps.splice(0, timestamps.length - maxRequests);
+      hits.delete(ip);
       hits.set(ip, timestamps);
 
       if (exceeded) {
-        return jsonError('Too many requests. Please try again later.', 429, 'RATE_LIMITED', true);
+        return rejected();
       }
       return null;
     },
