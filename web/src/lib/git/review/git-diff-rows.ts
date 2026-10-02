@@ -234,16 +234,6 @@ export function buildSplitDiffRows(rows: RenderedDiffRow[]): SplitDiffRow[] {
 	return result;
 }
 
-export function getSelectableLineKeys(
-	rows: RenderedDiffRow[],
-	filePath: string,
-	activeTab: GitDiffTab,
-): string[] {
-	return rows
-		.map((row) => getUnifiedSelectionKey(row, filePath, activeTab))
-		.filter((key): key is string => key !== null);
-}
-
 export function buildUnifiedDiffRowViews(
 	options: BuildUnifiedRowViewsOptions,
 ): UnifiedDiffRowView[] {

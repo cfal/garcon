@@ -341,12 +341,6 @@ export async function getChatExecutionControl(
 	);
 }
 
-export async function clearChatQueue(chatId: string): Promise<QueueMutationResponse> {
-	return withParsedControl(
-		await apiPost<QueueMutationResponse>('/api/v1/chats/queue/clear', { chatId }),
-	);
-}
-
 export async function pauseChatQueue(chatId: string): Promise<QueueMutationResponse> {
 	const request: QueuePauseRequest = { chatId };
 	return withParsedControl(

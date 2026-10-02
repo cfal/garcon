@@ -170,11 +170,3 @@ export function parseFileLink(
 		col,
 	};
 }
-
-/** Returns true when the href looks like a file link. */
-export function isFileLink(
-	rawHref: string | undefined | null,
-	options?: ParseFileLinkOptions,
-): boolean {
-	return parseFileLink(rawHref, options).kind === 'file';
-}

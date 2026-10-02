@@ -2,10 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
 	getGitStatus,
 	gitCommit,
-	gitCheckout,
 	gitCheckoutRef,
 	gitCreateBranch,
-	getBranches,
 	getGitRefs,
 	getRemoteStatus,
 	gitFetch,
@@ -30,7 +28,6 @@ import {
 	generateCommitMessage,
 	getGitWorktrees,
 	gitCreateWorktree,
-	gitRemoveWorktree,
 	gitRevertCommit,
 } from '../git';
 import {
@@ -139,33 +136,20 @@ describe('git API contract', () => {
 		expect(body.refKind).toBe('remote-branch');
 	});
 
-	it('gitCheckout keeps the legacy helper as a ref checkout wrapper', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
-
-		await gitCheckout({ executorId: 'remote-executor', projectPath: '/project' }, 'feature');
-
-		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-		expect(body.ref).toBe('feature');
-	});
-
 	it('gitCreateBranch sends POST with project, branch, and optional baseRef', async () => {
 		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
 
-		await gitCreateBranch({ executorId: 'remote-executor', projectPath: '/project' }, 'new-branch', {
-			baseRef: 'refs/remotes/origin/main',
-		});
+		await gitCreateBranch(
+			{ executorId: 'remote-executor', projectPath: '/project' },
+			'new-branch',
+			{
+				baseRef: 'refs/remotes/origin/main',
+			},
+		);
 
 		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
 		expect(body.branch).toBe('new-branch');
 		expect(body.baseRef).toBe('refs/remotes/origin/main');
-	});
-
-	it('getBranches calls GET with project param', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ branches: ['main', 'dev'] }));
-
-		const result = await getBranches({ executorId: 'remote-executor', projectPath: '/project' });
-
-		expect(result.branches).toEqual(['main', 'dev']);
 	});
 
 	it('getGitRefs calls GET with project param', async () => {
@@ -569,16 +553,6 @@ describe('git API contract', () => {
 		expect(body.worktreePath).toBe('/tmp/wt');
 		expect(body.branch).toBe('feat');
 		expect(body.baseRef).toBe('main');
-	});
-
-	it('gitRemoveWorktree sends POST with worktreePath and force', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ success: true }));
-
-		await gitRemoveWorktree({ executorId: 'remote-executor', projectPath: '/project' }, '/tmp/wt', true);
-
-		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-		expect(body.worktreePath).toBe('/tmp/wt');
-		expect(body.force).toBe(true);
 	});
 
 	it('gitRevertCommit sends POST with commit hash', async () => {

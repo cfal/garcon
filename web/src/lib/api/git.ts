@@ -237,12 +237,6 @@ export async function gitInitialCommit(target: GitProjectTarget): Promise<Succes
 	});
 }
 
-export async function getBranches(
-	target: GitProjectTarget,
-): Promise<{ branches?: string[]; error?: string }> {
-	return gitApiGet(target, `/api/v1/git/branches?${projectParam(target)}`);
-}
-
 export type GetGitRefsOptions = ApiFetchOptions & {
 	query?: string;
 	limit?: number;
@@ -274,13 +268,6 @@ export async function gitCheckoutRef(
 		ref,
 		refKind,
 	});
-}
-
-export async function gitCheckout(
-	target: GitProjectTarget,
-	branch: string,
-): Promise<SuccessResponse> {
-	return gitCheckoutRef(target, branch);
 }
 
 export async function gitCreateBranch(
@@ -715,18 +702,6 @@ export async function gitCreateWorktree(
 		...gitProjectFields(target),
 		worktreePath,
 		...options,
-	});
-}
-
-export async function gitRemoveWorktree(
-	target: GitProjectTarget,
-	worktreePath: string,
-	force = false,
-): Promise<SuccessResponse> {
-	return gitApiMutation<SuccessResponse>(target, '/api/v1/git/worktrees/remove', {
-		...gitProjectFields(target),
-		worktreePath,
-		force,
 	});
 }
 
