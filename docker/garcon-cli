@@ -1,0 +1,2 @@
+#!/bin/sh
+exec bun /app/cli/main.ts "$@"

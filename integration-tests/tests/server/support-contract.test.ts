@@ -36,6 +36,7 @@ import {
   writeOpenCodePluginSeed,
 } from '../../support/scripted-opencode.js';
 import { startScriptedPiTestEnvironment } from '../../support/scripted-pi.js';
+import { waitForProxyBaseUrl } from '../../support/live-codex.js';
 import {
   linuxProcessStartTimeTicks,
   processIdentityAlive,
@@ -88,6 +89,63 @@ function anthropicStreamText(body: string): string {
 }
 
 describe('integration support contracts', () => {
+  test('waits for the complete Codex proxy startup record after file creation', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'garcon-codex-proxy-startup-'));
+    const serverInfoPath = join(root, 'server-info.json');
+    let observed = new Deferred<void>();
+    let exitCode: number | null = null;
+    const child = {
+      get exitCode() {
+        observed.resolve();
+        return exitCode;
+      },
+    } satisfies Parameters<typeof waitForProxyBaseUrl>[0];
+    let startup: Promise<string> | undefined;
+    try {
+      startup = waitForProxyBaseUrl(child, serverInfoPath);
+      const settledEarly = startup.then(() => {
+        throw new Error('Proxy startup accepted an incomplete record.');
+      });
+      // The exit check acknowledges a poll of each incomplete file version.
+      for (const next of ['', '{"port":', '{"port":43210}', '{"port":43210}\n']) {
+        await Promise.race([observed.promise, settledEarly]);
+        await writeFile(serverInfoPath, next);
+        observed = new Deferred<void>();
+      }
+      expect(await startup).toBe('http://127.0.0.1:43210');
+      await settledEarly.catch(() => undefined);
+    } finally {
+      exitCode = 1;
+      await startup?.catch(() => undefined);
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects completed invalid Codex proxy metadata and exited partial writers', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'garcon-codex-proxy-invalid-'));
+    const serverInfoPath = join(root, 'server-info.json');
+    try {
+      for (const record of ['{\n', 'null\n', '{}\n', '{"port":0}\n', '{"port":65536}\n', '{"port":"43210"}\n']) {
+        await writeFile(serverInfoPath, record);
+        const error = await waitForProxyBaseUrl({ exitCode: null }, serverInfoPath)
+          .catch((error: unknown) => error);
+        expect(error).toBeInstanceOf(Error);
+        if (record === '{\n') {
+          expect(error).toBeInstanceOf(SyntaxError);
+        } else {
+          expect(error).toMatchObject({ message: 'Live Codex credential proxy wrote invalid startup metadata.' });
+        }
+      }
+      await writeFile(serverInfoPath, '{"port":');
+      const error = await waitForProxyBaseUrl({ exitCode: 1 }, serverInfoPath)
+        .catch((error: unknown) => error);
+      expect(error).toBeInstanceOf(Error);
+      expect(error).toMatchObject({ message: 'Live Codex credential proxy exited before startup.' });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test('adds only the fixture Node shim to scripted Pi system paths', async () => {
     const root = await mkdtemp(join(tmpdir(), 'garcon-scripted-pi-path-'));
     const environment = startScriptedPiTestEnvironment();

@@ -118,8 +118,10 @@ export class ScheduledPromptFormState {
 		const defaultDate = new Date();
 		defaultDate.setDate(defaultDate.getDate() + 1);
 		this.date = localDateValue(defaultDate);
-		await this.startup.loadSettingsAndModels();
-		if (!scheduledPrompt) return;
+		if (!scheduledPrompt) {
+			await this.startup.loadSettingsAndModels();
+			return;
+		}
 
 		this.mode = 'edit';
 		this.scheduledPromptId = scheduledPrompt.id;
@@ -154,6 +156,7 @@ export class ScheduledPromptFormState {
 		if (scheduledPrompt.target.type === 'existing-chat') {
 			this.existingChatId = scheduledPrompt.target.chatId;
 			this.busyBehavior = scheduledPrompt.target.busyBehavior;
+			await this.startup.loadSettingsAndModels();
 			return;
 		}
 		this.startup.selectExecutor(scheduledPrompt.target.executorId);
@@ -169,6 +172,7 @@ export class ScheduledPromptFormState {
 		this.startup.chatTags = [...scheduledPrompt.target.tags];
 		this.startup.showTagInput = false;
 		this.startup.preambles.restoreChoice(scheduledPrompt.target.preambleChoice);
+		await this.startup.loadSettingsAndModels();
 		this.startup.validatePath();
 	}
 
