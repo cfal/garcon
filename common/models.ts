@@ -32,15 +32,6 @@ export function isCodexSolModel(model: string | undefined): boolean {
     || matchesModelValue(model, 'gpt-5.6-sol');
 }
 
-export function codexModelSupportsMaxEffort(model: string | undefined): boolean {
-  return matchesModelValue(model, GPT_6_ASTRA_MODEL)
-    || matchesModelValue(model, GPT_6_1_SOL_MODEL)
-    || matchesModelValue(model, GPT_6_SOL_MODEL)
-    || matchesModelValue(model, GPT_6_LUNA_MODEL)
-    || matchesModelValue(model, 'gpt-5.6')
-    || model?.startsWith('gpt-5.6-') === true;
-}
-
 export const CODEX_MODELS = {
   OPTIONS: [
     { value: 'gpt-5.5', label: 'GPT-5.5', supportsImages: true },
