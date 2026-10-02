@@ -4,7 +4,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 
-test('loads Markdown and HTML highlighting only when an editor needs it', async () => {
+test('loads Markdown, HTML and WAST highlighting only when an editor needs it', async () => {
   await withChromiumFixture('lazy-language-chunks', async ({ page, integration, assertNoBrowserErrors }) => {
     const manifest: Record<string, { name?: string; file: string }> = JSON.parse(await readFile(
       new URL('../../../web/.svelte-kit/output/client/.vite/manifest.json', import.meta.url), 'utf8',
@@ -17,6 +17,7 @@ test('loads Markdown and HTML highlighting only when an editor needs it', async 
     const samples = [
       { name: 'sample.md', content: '# Synthetic heading\n\n**Highlighted text**\n' },
       { name: 'sample.html', content: '<section class="example">Synthetic content</section>\n' },
+      { name: 'sample.wat', content: '(module (func (result i32) i32.const 42))\n' },
     ];
     for (const sample of samples) await writeFile(join(integration.dirs.project, sample.name), sample.content);
     const chatId = integration.newChatId();
@@ -38,7 +39,7 @@ test('loads Markdown and HTML highlighting only when an editor needs it', async 
       await browserExpect(source.locator('.cm-line')).toHaveText(sample.content.split('\n'));
       await browserExpect(source.locator('.cm-line span[class]').first()).toBeVisible();
     }
-    for (const name of ['vendor-cm-lang-template', 'vendor-cm-lang-markup']) {
+    for (const name of ['vendor-cm-lang-template', 'vendor-cm-lang-markup', 'vendor-cm-lang-programming']) {
       const chunk = implementations.find(entry => entry.name === name);
       expect(chunk).toBeDefined();
       expect(requested.has(`/${chunk!.file}`)).toBe(true);

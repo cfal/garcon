@@ -1,5 +1,17 @@
 import { expect, test } from 'bun:test';
 import { assertLazyLanguageAssets, collectEagerAssets } from '../../web/scripts/eager-assets.ts';
+import { codeMirrorLanguageChunk } from '../../web/codemirror-chunks.ts';
+import { CODEMIRROR_PACKAGES } from '../../web/codemirror-packages.ts';
+
+test('classifies every installed language package as a lazy implementation', () => {
+  for (const name of CODEMIRROR_PACKAGES.filter(name => name.startsWith('@codemirror/lang-'))) {
+    const chunk = codeMirrorLanguageChunk(`/node_modules/${name}/dist/index.js`);
+    expect(chunk).toMatch(/^vendor-cm-lang-/);
+    expect(chunk).not.toBe('vendor-cm-lang-metadata');
+  }
+  expect(codeMirrorLanguageChunk('/node_modules/@codemirror/language-data/dist/index.js')).toBe('vendor-cm-lang-metadata');
+  expect(codeMirrorLanguageChunk('/node_modules/@codemirror/language/dist/index.js')).toBeUndefined();
+});
 
 test('collects only static imports and their CSS, including cycles and shared output files', () => {
   const manifest = {
