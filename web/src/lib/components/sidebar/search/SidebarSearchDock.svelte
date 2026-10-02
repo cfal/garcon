@@ -1,5 +1,5 @@
 <script lang="ts">
-	import SidebarControlsRow from './SidebarControlsRow.svelte';
+	import SidebarControlsRow from '../SidebarControlsRow.svelte';
 	import type {
 		SidebarChatGrouping,
 		SidebarSortMode,

@@ -25,6 +25,11 @@ const componentConcerns = [
 		concern: 'composer',
 		filePrefixes: ['Composer', 'PromptComposer', 'composer-', 'prompt-composer-'],
 	},
+	{
+		owner: 'sidebar',
+		concern: 'search',
+		filePrefixes: ['SidebarSearch', 'SidebarTranscriptSearchStatus', 'SavedSearch', 'sidebar-search-'],
+	},
 ] as const;
 
 describe('domain layout', () => {

@@ -270,6 +270,7 @@ Rules:
 - Component-private Chat state remains in `components/chat`.
 - Cohesive Chat UI concerns keep components, private helpers, and tests together in `components/chat/<concern>`. The component root retains conversation composition and cross-concern controls; these UI concerns do not replace the reusable `lib/chat` owners.
 - Sidebar-only selection state remains in `components/sidebar`.
+- Sidebar search renderers and private helpers live in `components/sidebar/search`; reusable search policy remains in `lib/sidebar/search`.
 
 ### Git Domain
 

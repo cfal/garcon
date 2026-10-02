@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import SavedSearchEditorDialog from '../SavedSearchEditorDialog.svelte';
 import SavedSearchManagerDialog from '../SavedSearchManagerDialog.svelte';
-import SidebarControlsRow from '../SidebarControlsRow.svelte';
+import SidebarControlsRow from '../../SidebarControlsRow.svelte';
 import SidebarSearchDialog from '../SidebarSearchDialog.svelte';
 import SidebarSearchDock from '../SidebarSearchDock.svelte';
 import SidebarSearchContext from '../SidebarSearchContext.svelte';

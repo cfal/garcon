@@ -85,7 +85,7 @@ vi.mock('$lib/components/chat/ShareChatDialog.svelte', async () => ({
 vi.mock('$lib/components/sidebar/SidebarTagDialog.svelte', async () => ({
 	default: (await import('./AppShellGenericStub.svelte')).default,
 }));
-vi.mock('$lib/components/sidebar/SidebarSearchDialogs.svelte', async () => ({
+vi.mock('$lib/components/sidebar/search/SidebarSearchDialogs.svelte', async () => ({
 	default: (await import('./AppShellSearchDialogsStub.svelte')).default,
 }));
 

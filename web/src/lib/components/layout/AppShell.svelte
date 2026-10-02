@@ -60,7 +60,7 @@
 	} from '$lib/project-paths/pinned-project-path-settings.js';
 	import ShareChatDialog from '$lib/components/chat/ShareChatDialog.svelte';
 	import SidebarTagDialog from '$lib/components/sidebar/SidebarTagDialog.svelte';
-	import SidebarSearchDialogs from '$lib/components/sidebar/SidebarSearchDialogs.svelte';
+	import SidebarSearchDialogs from '$lib/components/sidebar/search/SidebarSearchDialogs.svelte';
 	import type {
 		SearchResultNavigationPort,
 		SearchResultSelection,
