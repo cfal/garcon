@@ -194,90 +194,100 @@ function shouldSkipHttpCompression(request: Request, response: Response): boolea
 
 function parseSingleByteRange(header: string | null, totalBytes: number): ByteRange | null {
   if (!header || !Number.isSafeInteger(totalBytes) || totalBytes < 0) return null;
-  const match = /^bytes=(?<range>[^,]+)$/iu.exec(header.trim());
-  if (!match?.groups?.range) return null;
-
-  const [rawStart, rawEnd] = match.groups.range.split('-', 2);
-  if (rawStart === undefined || rawEnd === undefined) return null;
-  const startText = rawStart.trim();
-  const endText = rawEnd.trim();
-
-  if (!startText && !endText) return { kind: 'invalid' };
+  const match = /^bytes=(\d*)-(\d*)$/iu.exec(header.trim());
+  if (!match) return null;
+  const [, startText, endText] = match;
+  if (!startText && !endText) return null;
 
   if (!startText) {
     const suffixLength = Number(endText);
-    if (!Number.isSafeInteger(suffixLength) || suffixLength <= 0) return { kind: 'invalid' };
+    if (!Number.isSafeInteger(suffixLength)) return null;
+    if (suffixLength === 0 || totalBytes === 0) return { kind: 'invalid' };
     const start = Math.max(totalBytes - suffixLength, 0);
-    return { kind: 'range', start, end: Math.max(totalBytes - 1, 0) };
+    return { kind: 'range', start, end: totalBytes - 1 };
   }
 
   const start = Number(startText);
   const end = endText ? Number(endText) : totalBytes - 1;
-  if (
-    !Number.isSafeInteger(start) ||
-    !Number.isSafeInteger(end) ||
-    start < 0 ||
-    end < start ||
-    start >= totalBytes
-  ) {
-    return { kind: 'invalid' };
-  }
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end)) return null;
+  if (endText && end < start) return null;
+  if (start >= totalBytes) return { kind: 'invalid' };
   return { kind: 'range', start, end: Math.min(end, totalBytes - 1) };
 }
 
 function sliceByteRangeStream(body: HttpBodyStream, range: { start: number; end: number }): HttpBodyStream {
-  return new ReadableStream<HttpBodyChunk>({
-    async start(controller) {
-      const reader = body.getReader();
-      let offset = 0;
+  const reader = body.getReader();
+  let offset = 0;
+  let finished = false;
 
+  async function cancel(reason?: unknown): Promise<void> {
+    if (finished) return;
+    finished = true;
+    try { await reader.cancel(reason); }
+    finally { reader.releaseLock(); }
+  }
+
+  return new ReadableStream<HttpBodyChunk>({
+    async pull(controller) {
       try {
         while (true) {
           const { done, value } = await reader.read();
-          if (done) break;
+          if (finished) return;
+          if (done) {
+            finished = true;
+            reader.releaseLock();
+            controller.close();
+            return;
+          }
 
           const chunkStart = offset;
           const chunkEnd = offset + value.byteLength - 1;
           offset += value.byteLength;
 
           if (chunkEnd < range.start) continue;
-          if (chunkStart > range.end) break;
-
           const start = Math.max(range.start - chunkStart, 0);
           const end = Math.min(range.end - chunkStart + 1, value.byteLength);
           controller.enqueue(value.subarray(start, end) as HttpBodyChunk);
 
           if (chunkEnd >= range.end) {
-            await reader.cancel();
-            break;
+            controller.close();
+            await cancel();
           }
+          return;
         }
-        controller.close();
       } catch (error) {
+        if (finished) return;
         controller.error(error);
-      } finally {
-        reader.releaseLock();
+        await cancel(error).catch(() => undefined);
       }
     },
-  });
+    cancel,
+  }, { highWaterMark: 0 });
 }
 
 async function maybeHandleRangeRequest(request: Request, response: Response): Promise<Response | null> {
-  if (request.method !== 'GET') return null;
+  if (request.method !== 'GET' || response.status !== 200) return null;
   const rangeHeader = request.headers.get('Range');
   if (!rangeHeader || response.body === null || response.bodyUsed) return null;
 
-  const contentLength = Number(response.headers.get('Content-Length'));
+  if (response.headers.has('Content-Encoding') || response.headers.has('Content-Range')) return null;
+  const lengthHeader = response.headers.get('Content-Length');
+  if (lengthHeader === null || !/^\d+$/.test(lengthHeader)) return null;
+  const contentLength = Number(lengthHeader);
   if (!Number.isSafeInteger(contentLength) || contentLength < 0) return null;
+
+  // Date and weak validators cannot establish strong representation identity here.
+  const ifRange = request.headers.get('If-Range');
+  if (ifRange !== null && (!/^"[^"\r\n]*"$/.test(ifRange) || ifRange !== response.headers.get('ETag'))) return null;
 
   const range = parseSingleByteRange(rangeHeader, contentLength);
   if (!range) return null;
 
   const headers = new Headers(response.headers);
   headers.set('Accept-Ranges', 'bytes');
-  headers.delete('Content-Encoding');
 
   if (range.kind === 'invalid') {
+    await response.body.cancel().catch(() => undefined);
     headers.set('Content-Range', `bytes */${contentLength}`);
     headers.delete('Content-Length');
     return new Response(null, {
@@ -343,6 +353,11 @@ export async function compressHttpResponse(
 ): Promise<Response> {
   const rangeResponse = await maybeHandleRangeRequest(request, response);
   if (rangeResponse) return rangeResponse;
+
+  // Bun otherwise applies its own Range slicing to file-backed full responses.
+  if (request.headers.has('Range') && response.status === 200 && response.body !== null && !response.bodyUsed) {
+    return new Response(response.body.pipeThrough(new TransformStream()), response);
+  }
 
   if (shouldSkipHttpCompression(request, response)) {
     return response;

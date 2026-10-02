@@ -31,9 +31,9 @@ function makeStaticRoute(dir) {
   const handler = markRouteNoAuth(async function noauthServeFile(req, url) {
     const stripped = url.pathname.startsWith('/') ? url.pathname.slice(1) : url.pathname;
     const file = Bun.file(`${dir}/${stripped}`);
-    if (!(await file.exists())) return new Response('Not found', { status: 404 });
+    if (!(await file.exists())) return new Response('Not found', { status: 404, headers: { 'Content-Length': '9' } });
     const range = /^bytes=(\d+)-(\d+)$/i.exec(req.headers.get('Range') ?? '');
-    if (range) {
+    if (range && url.searchParams.has('partial')) {
       const start = Number(range[1]);
       const end = Math.min(Number(range[2]), file.size - 1);
       const size = end - start + 1;
@@ -46,7 +46,7 @@ function makeStaticRoute(dir) {
         },
       });
     }
-    return new Response(file, { headers: { 'Content-Type': 'text/plain', 'Content-Length': String(file.size) } });
+    return new Response(file, { headers: { 'Content-Type': 'text/plain', 'Content-Length': String(file.size), ETag: '"current"' } });
   });
   return handler;
 }
@@ -61,6 +61,7 @@ describe('HTTP compression integration', () => {
     const wrapped = wrapRoute(makeStaticRoute(dir), '/sample.txt', 'GET');
     server = Bun.serve({
       port: 0,
+      hostname: '0.0.0.0',
       fetch: async (req) => wrapped(req),
     });
   });
@@ -122,11 +123,37 @@ describe('HTTP compression integration', () => {
     expect(await response.text()).toBe('hello '.repeat(2000));
   });
 
-  it('skips compression for Range requests and returns 206 with no Content-Encoding', async () => {
+  it('slices the requested nonzero range without compression', async () => {
     const response = await fetch(`http://127.0.0.1:${server.port}/sample.txt`, {
-      headers: { 'Accept-Encoding': 'gzip', Range: 'bytes=0-99' },
+      headers: { 'Accept-Encoding': 'gzip', Range: 'bytes=5-99' },
     });
     expect(response.status).toBe(206);
     expect(response.headers.get('Content-Encoding')).toBeNull();
+    expect(response.headers.get('Content-Range')).toBe('bytes 5-99/12000');
+    expect(response.headers.get('Content-Length')).toBe('95');
+    expect(await response.text()).toBe('hello '.repeat(2000).slice(5, 100));
+  });
+
+  it('does not slice a partial handler response a second time', async () => {
+    const response = await fetch(`http://127.0.0.1:${server.port}/sample.txt?partial`, {
+      headers: { Range: 'bytes=5-99' },
+    });
+    expect(response.status).toBe(206);
+    expect(response.headers.get('Content-Range')).toBe('bytes 5-99/12000');
+    expect(await response.text()).toBe('hello '.repeat(2000).slice(5, 100));
+  });
+
+  it('preserves missing-file errors despite a Range header', async () => {
+    const response = await fetch(`http://127.0.0.1:${server.port}/missing.txt`, { headers: { Range: 'bytes=0-2' } });
+    expect(response.status).toBe(404);
+    expect(await response.text()).toBe('Not found');
+  });
+
+  it('returns the full representation when If-Range does not match', async () => {
+    const response = await fetch(`http://127.0.0.1:${server.port}/sample.txt`, {
+      headers: { Range: 'bytes=5-99', 'If-Range': '"old"' },
+    });
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe('hello '.repeat(2000));
   });
 });
