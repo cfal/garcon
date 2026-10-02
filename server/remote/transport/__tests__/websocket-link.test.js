@@ -35,6 +35,7 @@ function primaryClosure({ lane, sessionId, primarySessionId, queues, primaryRedi
 const incompatiblePeers = [
   ['another release', 'synthetic-incompatible'],
   ['this release without a protocol revision', packageVersion],
+  ['this release at the previous protocol revision', `${packageVersion}+protocol.${EXECUTOR_PROTOCOL_REVISION - 1}`],
   ['this release at another protocol revision', `${packageVersion}+protocol.${EXECUTOR_PROTOCOL_REVISION + 1}`],
 ];
 
