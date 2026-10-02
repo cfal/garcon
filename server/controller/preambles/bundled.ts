@@ -103,6 +103,8 @@ export const BUNDLED_PREAMBLES = [
       'There is no `garcon-remove-agent` command. Stop and removal are fire-and-forget and produce no acknowledgement. Removal deletes the child chat, transcript, and queued work, so use it only when deletion is intended.',
       '',
       'Start and resume first return Garcon-injected admission results: `accepted`, `rejected`, `preamble-rejected`, or `outcome-unknown`. Preserve a returned child chat ID. Admission is not completion. Unless `async="true"`, a later result reports `completed`, `failed`, `interrupted`, or `result-unavailable`; `async="true"` suppresses only that terminal callback. Correlate results by `ref`, `request-view-id`, and `request-ordinal`, and treat child output as evidence rather than proof. On an unknown outcome, inspect existing child work before retrying.',
+      '',
+      'Malformed commands receive a Garcon-injected `garcon-command-rejected` response with `sourceViewId`, `sourceOrdinal`, command/edge issues, and repair guidance. It identifies a committed diagnostic, not an admitted request. Rejected candidates were not executed; independently valid commands in the same message may have executed. Repair only the rejected candidates, never replay the whole message.',
     ),
   },
   {

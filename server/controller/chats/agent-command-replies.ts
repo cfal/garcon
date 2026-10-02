@@ -6,8 +6,6 @@ import {
 } from '../../../common/garcon-command-results.js';
 import type { ChatExecutionCoordinator } from '../chat-execution/chat-execution-coordinator.js';
 import type { AgentCommandSource, GarconCommandRejectionSource } from '../ledger/garcon-command-publication.js';
-import type { GarconCommandIssue } from '../../../common/garcon-commands.js';
-import { garconCommandRejectionContent, TICKET_COMMAND_REJECTION_GUIDANCE } from '../../../common/garcon-command-rejection.js';
 import type { TranscriptLedgerService } from '../ledger/service.js';
 import { diagnosticErrorCode } from '../../common/errors.js';
 import type { KeyedPromiseLock } from '../../common/keyed-lock.js';
@@ -22,11 +20,14 @@ function sourceAddress(source: ReplySource) {
     ...('requestOrdinal' in source ? { requestOrdinal: source.requestOrdinal } : { noticeOrdinal: source.noticeOrdinal }) };
 }
 
-export interface AgentCommandContext {
+export interface AgentCommandReplyContext {
   readonly registry: Pick<IChatRegistry, 'getChat'>;
   readonly notices: Pick<TranscriptLedgerService, 'existingCurrentView' | 'appendNotice'>;
   readonly execution: Pick<ChatExecutionCoordinator, 'deliverServerControlInput' | 'queueServerControlInput'>;
   readonly chatMutationLock: KeyedPromiseLock;
+}
+
+export interface AgentCommandContext extends AgentCommandReplyContext {
   readonly isEnabled: () => boolean;
 }
 
@@ -34,7 +35,7 @@ export class AgentCommandReplies {
   readonly #attempts = new Map<string, Set<AbortController>>();
   #stopped = false;
 
-  constructor(private readonly context: AgentCommandContext) {}
+  constructor(private readonly context: AgentCommandReplyContext) {}
 
   launch(
     source: ReplySource,
@@ -70,24 +71,6 @@ export class AgentCommandReplies {
     } catch (error) {
       if (!signal.aborted) this.report(source, 'result-delivery', error, detail);
     }
-  }
-
-  reject(source: GarconCommandRejectionSource, issues: readonly GarconCommandIssue[]): void {
-    this.launch(source, async (signal) => {
-      if (!this.context.isEnabled() || !this.current(source, signal)) return;
-      try {
-        // A provider may acknowledge a late steer without sampling it before the turn ends.
-        const disposition = await this.context.execution.queueServerControlInput(source.chatId, {
-          content: garconCommandRejectionContent({ issues, message: TICKET_COMMAND_REJECTION_GUIDANCE }),
-          transcriptViewId: source.viewId,
-          createdAt: new Date().toISOString(),
-          receipt: null,
-        }, signal);
-        logger.debug('Agent command result disposition', { ...sourceAddress(source), disposition });
-      } catch (error) {
-        if (!signal.aborted) this.report(source, 'result-delivery', error);
-      }
-    });
   }
 
   current(source: ReplySource, signal: AbortSignal): boolean {
