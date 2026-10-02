@@ -77,6 +77,7 @@ import {
   parseNativeSessionId,
 } from '@garcon/common/native-session-lookup';
 import { argumentError } from './errors.js';
+import { SHARED_PARSE_OPTIONS } from './shared-options.js';
 import { TICKET_PARSE_OPTIONS, TICKET_STRING_OPTIONS, parseTicketCliCommand, type TicketCliCommand } from './ticket-args.js';
 import { EXECUTOR_PARSE_OPTIONS, EXECUTOR_STRING_OPTIONS, parseExecutorCliCommand, type ExecutorCliCommand } from './executor-args.js';
 
@@ -1513,13 +1514,13 @@ export function parseCliArgs(
       allowPositionals: true,
       strict: true,
       options: {
+        ...SHARED_PARSE_OPTIONS,
         ...TICKET_PARSE_OPTIONS,
         ...EXECUTOR_PARSE_OPTIONS,
         'config-dir': { type: 'string' },
         runtime: { type: 'string' },
         server: { type: 'string' },
         executor: { type: 'string' },
-        cwd: { type: 'string' },
         parent: { type: 'string' },
         preamble: { type: 'string', multiple: true },
         agent: { type: 'string' },
@@ -1528,7 +1529,6 @@ export function parseCliArgs(
         model: { type: 'string' },
         permissions: { type: 'string' },
         'reasoning-effort': { type: 'string' },
-        title: { type: 'string' },
         'message-title': { type: 'string' },
         'message-style': { type: 'string' },
         color: { type: 'string' },
