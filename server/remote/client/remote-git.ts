@@ -119,6 +119,6 @@ async function withDeadline<T>(options: ExecutorCallOptions | undefined, maximum
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   timer.unref();
   const signal = options?.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
-  try { return await operation({ timeoutMs, signal }); }
+  try { return await operation({ ...options, timeoutMs, signal }); }
   finally { clearTimeout(timer); }
 }
