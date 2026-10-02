@@ -211,6 +211,16 @@ describe('Docker contract', () => {
     expect(dockerGuide).not.toMatch(/[<>]\s+listener-connection\.txt/);
   });
 
+  test('uses credential-free output in documented enrollment commands', () => {
+    const enrollmentBlocks = [...dockerGuide.matchAll(/```bash\n([\s\S]*?)```/g)]
+      .map(([, command]) => command)
+      .filter((command) => command.includes('garcon-cli executor create'));
+    expect(enrollmentBlocks).toHaveLength(2);
+    for (const command of enrollmentBlocks) {
+      expect(command).not.toContain('--json');
+    }
+  });
+
   test('publishes main commits for both Linux architectures', () => {
     expect(dockerPublishWorkflow).toContain('branches:\n      - main');
     expect(dockerPublishWorkflow).not.toContain('pull_request:');

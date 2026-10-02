@@ -66,7 +66,7 @@ Register a worker from the controller container, retaining its returned UUID:
 
 ```bash
 docker compose exec garcon garcon-cli executor create \
-  --label 'Docker worker' --direction executor-connects --json
+  --label 'Docker worker' --direction executor-connects
 ```
 
 An explicit `--advertise-url 'wss://controller.example.com/executor/{executorId}'` can override the controller's public URL. Export the credential into a new private environment file without displaying it:
