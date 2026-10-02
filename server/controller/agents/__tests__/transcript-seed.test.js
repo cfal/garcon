@@ -22,8 +22,6 @@ import {
   renderTranscriptSeed,
   retargetNativeSeedReceiptIfPreserved,
   sanitizeRecordedCarriedContext,
-  stripFirstUserSeed,
-  stripTranscriptSeed,
 } from '@garcon/common/transcript-seed';
 
 const TIME = '2026-01-01T00:00:00.000Z';
@@ -383,11 +381,8 @@ describe('transcript seed contract', () => {
     )).toBeNull();
   });
 
-  test('retains exact legacy seed helpers for migration', () => {
+  test('sanitizes legacy migration seeds only with an exact receipt', () => {
     const seed = renderTranscriptSeed([new UserMessage(TIME, 'prior question')]);
-    expect(stripTranscriptSeed(`${seed}\n\nnew prompt`)).toBe('new prompt');
-    expect(stripFirstUserSeed([new UserMessage(TIME, `${seed}\n\nnew prompt`)])[0].content)
-      .toBe('new prompt');
     const prefix = `${seed}\n\n`;
     const receipt = createNativeSeedReceipt({
       agentSessionId: SESSION,
