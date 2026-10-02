@@ -32,6 +32,29 @@ test('executor-specific paths and recents survive restart without contaminating 
   expect(restarted.getPathSettings().byExecutor).toEqual({});
 });
 
+test('busy executor histories cannot evict other executors across recording, restart and deletion', async () => {
+  const root = await mkdtemp(join(homedir(), 'garcon-executor-recents-'));
+  roots.push(root);
+  const settings = new SettingsStore(root);
+  await settings.init();
+  for (let index = 0; index < 25; index += 1) {
+    for (const executorId of ['local', EXECUTOR]) {
+      await settings.recordChatStartup({ executorId, agentId: 'claude', model: `synthetic-${index}` });
+    }
+  }
+  await settings.recordChatStartup({ agentId: 'claude', model: 'synthetic-10' });
+  const expected = settings.getRecentAgentSettings();
+  expect(expected).toHaveLength(40);
+  expect(expected[0]?.model).toBe('synthetic-10');
+  expect(expected[0]?.executorId).toBeUndefined();
+  const restarted = new SettingsStore(root);
+  await restarted.init();
+  expect(restarted.getRecentAgentSettings()).toEqual(expected);
+  await restarted.forgetExecutor(EXECUTOR);
+  expect(restarted.getRecentAgentSettings()).toEqual(expected.filter(entry => !entry.executorId));
+  expect(restarted.getRecentAgentSettings()).toHaveLength(20);
+});
+
 test('all generation selections persist their explicit target and reject invalid identities', async () => {
   const root = await mkdtemp(join(homedir(), 'garcon-executor-generation-'));
   roots.push(root);

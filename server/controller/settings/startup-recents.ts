@@ -17,7 +17,7 @@ import type {
   RecentAgentSetting,
 } from './types.js';
 
-export const RECENT_AGENT_SETTINGS_LIMIT = 20;
+export const RECENT_AGENT_SETTINGS_PER_EXECUTOR_LIMIT = 20;
 export const RECENT_PROJECT_PATHS_LIMIT = 10;
 const EXECUTION_DEFAULT_KEYS = [
   'permissionMode',
@@ -202,12 +202,16 @@ export function sanitizeExecutionDefaultsSettings(raw: unknown): {
 export function dedupeRecentAgentSettings(entries: RecentAgentSetting[]): RecentAgentSetting[] {
   const result: RecentAgentSetting[] = [];
   const seen = new Set<string>();
+  const countsByExecutor = new Map<string, number>();
   for (const entry of entries) {
     const key = recentAgentSettingKey(entry);
     if (seen.has(key)) continue;
+    const executorId = effectiveExecutorId(entry.executorId);
+    const count = countsByExecutor.get(executorId) ?? 0;
+    if (count >= RECENT_AGENT_SETTINGS_PER_EXECUTOR_LIMIT) continue;
     seen.add(key);
+    countsByExecutor.set(executorId, count + 1);
     result.push(entry);
-    if (result.length >= RECENT_AGENT_SETTINGS_LIMIT) break;
   }
   return result;
 }
@@ -230,7 +234,7 @@ export function sanitizeRecentAgentSettings(raw: unknown): {
   }
 
   const deduped = dedupeRecentAgentSettings(valid);
-  if (deduped.length !== valid.length || raw.length > RECENT_AGENT_SETTINGS_LIMIT) {
+  if (deduped.length !== valid.length) {
     migrated = true;
   }
 
