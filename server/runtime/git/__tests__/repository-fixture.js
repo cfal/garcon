@@ -1,3 +1,4 @@
+import { runGitWithStdin } from "../run.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
@@ -40,4 +41,20 @@ export async function initRepoWithCommit(projectPath) {
   await fs.writeFile(path.join(projectPath, "a.txt"), "one\n", "utf-8");
   await runGitCommand(projectPath, ["add", "a.txt"]);
   await runGitCommand(projectPath, ["commit", "-m", "initial"]);
+}
+
+// Replaces the path's index entry with explicit unmerged stages, the layout
+// behind UU/UD/DU/DD porcelain statuses.
+export async function plantUnmergedStages(projectPath, file, stages) {
+  await runGitCommand(projectPath, ["update-index", "--force-remove", file]);
+  let entries = "";
+  for (const [stage, content] of stages) {
+    const { stdout: hash } = await runGitWithStdin(
+      projectPath,
+      ["hash-object", "-w", "--stdin"],
+      content,
+    );
+    entries += `100644 ${hash.trim()} ${stage}\t${file}\n`;
+  }
+  await runGitWithStdin(projectPath, ["update-index", "--index-info"], entries);
 }

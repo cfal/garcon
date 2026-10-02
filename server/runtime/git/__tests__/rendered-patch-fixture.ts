@@ -1,3 +1,4 @@
+import type { GitReviewDocumentFileBodiesResponse } from "../types.js";
 import type { GitRenderedDiffRow, GitRenderedHunk } from "../types.js";
 
 export interface ParsedRenderedPatch {
@@ -106,4 +107,21 @@ export function parseUnifiedPatchToRenderedRows(
   }
 
   return { rows, hunks };
+}
+
+export function materializeReviewResponse(response: GitReviewDocumentFileBodiesResponse) {
+  if (response.status !== "ready") return response;
+  return {
+    ...response,
+    files: Object.fromEntries(
+      Object.entries(response.files).map(([filePath, body]) => {
+        const rendered = body.patch
+          ? parseUnifiedPatchToRenderedRows(body.patch, {
+              allowMultipleFileSections: true,
+            })
+          : { rows: [], hunks: [] };
+        return [filePath, { ...body, ...rendered }];
+      }),
+    ),
+  };
 }
