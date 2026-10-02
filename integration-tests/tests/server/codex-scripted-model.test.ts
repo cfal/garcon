@@ -230,7 +230,10 @@ describe('Codex against a scripted model', () => {
         expect(failing.model.requests()).toHaveLength(1);
         expect(failing.model.issues()).toHaveLength(1);
         expect(() => failing.model.assertSettled()).toThrow('Synthetic callback failure');
-      }, failing);
+      }, {
+        ...failing,
+        extraDiagnostics: () => ({ codexModelIssues: failing.model.issues() }),
+      });
     } finally {
       await failing.dispose();
     }
