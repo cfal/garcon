@@ -325,6 +325,24 @@ describe('Garcon edge commands', () => {
     expect(extractGarconCommands(new UserMessage(AT, '<garcon-schedule in="1m" />'))).toBeNull();
   });
 
+  for (const newline of ['\n', '\r\n']) {
+    it(`honors open and mixed-line-ending fences with ${JSON.stringify(newline)} delimiters`, () => {
+      const schedule = '<garcon-schedule in="1m" />';
+      const open = `Summary.${newline}\`\`\`${newline}${schedule}`;
+      expect(extractGarconCommands(new AssistantMessage(AT, open))).toBeNull();
+      const prose = `\`\`\`${newline}Example\n\`\`\`\nSummary.`;
+      const closed = `${prose}\n${schedule}\n<garcon-schedule in="2m" />`;
+      const result = extractGarconCommands(new AssistantMessage(AT, closed));
+      expect(result.commands).toMatchObject([
+        { type: 'schedule', firstRun: { minutes: 1 } },
+        { type: 'schedule', firstRun: { minutes: 2 } },
+      ]);
+      expect(result.commands).toHaveLength(2);
+      expect(result.issues).toEqual([]);
+      expect(result.message.content).toBe(prose);
+    });
+  }
+
   for (const family of ['start-agent', 'resume-agent', 'schedule', 'send-message']) {
     for (const prefix of ['', 'Answer\n']) {
       it(`preserves Markdown fences in a retained ${prefix ? 'trailing' : 'leading'} ${family}`, () => {

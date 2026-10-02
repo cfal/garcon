@@ -169,6 +169,22 @@ describe('composed assistant schedule pipeline', () => {
     ['resume-agent', 'ref="task" chat-id="2222222222222222"', 'agent-resume-request'],
   ]) {
     for (const prefix of ['', 'Answer\n']) {
+      test(`orphan ${family} closers inside another prompt cannot expose schedule requests at the ${prefix ? 'trailing' : 'leading'} edge`, async () => {
+        await withPipeline(async ({ ledger, publisher, schedules, lock }) => {
+          const other = family === 'start-agent' ? 'resume-agent' : 'start-agent';
+          const otherAttributes = other === 'start-agent' ? 'ref="sibling"' : 'ref="sibling" chat-id="2222222222222222"';
+          const content = `${prefix}<garcon-${family} ${attributes}>Example.</garcon-${family}>\n`
+            + '<garcon-schedule in="1m" />\n'
+            + `<garcon-${other} ${otherAttributes}>Unintended work. </garcon-${family}></garcon-${other}>`;
+          publisher.sink.publish({ type: 'rows', rows: [{ message: new AssistantMessage(NOW, content) }] });
+          await lock.runExclusive(`chat:${CHAT}`, async () => {});
+          const rows = ledger.currentRows(CHAT);
+          expect(rows.filter((row) => row.kind === 'provider-row').map((row) => row.message.content)).toEqual([content]);
+          expect(rows.some((row) => row.detail?.type?.endsWith('-request'))).toBe(false);
+          expect(schedules.list()).toEqual([]);
+        });
+      });
+
       test(`literal ${family} markup shields nested schedules but permits an independent ${prefix ? 'trailing' : 'leading'} schedule`, async () => {
         await withPipeline(async ({ ledger, publisher, schedules, replied }) => {
           const prompt = '<example broken="\n<garcon-schedule in="1m" />';

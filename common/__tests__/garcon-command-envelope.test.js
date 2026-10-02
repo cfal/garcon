@@ -31,6 +31,18 @@ test('suffix memoization is independent of span lookup order after sheltered clo
   }
 });
 
+test('suffix and message scans require the same complete fence delimiter', () => {
+  const command = '<garcon-start-agent ref="task">Synthetic.</garcon-start-agent>';
+  for (const close of ['```\r\r', '```example']) {
+    const content = `${command}\n\`\`\`xml\n${command}\n${close}`;
+    expect(garconEnvelopeSpanAt(content, 0, content.length).end).toBeNull();
+  }
+  for (const close of ['```', '```\r', '``` \r']) {
+    const content = `${command}\n\`\`\`xml\n${command}\n${close}`;
+    expect(garconEnvelopeSpanAt(content, 0, content.length).end).toBe(command.length);
+  }
+});
+
 test('envelope recovery stays within the supplied parse boundary', () => {
   const opener = '<garcon-start-agent>';
   const content = `${opener}<garcon-schedule />body</garcon-start-agent>`;

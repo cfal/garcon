@@ -3,6 +3,7 @@ import { AssistantMessage } from '../chat-types.js';
 import { extractGarconCommands } from '../garcon-commands.js';
 import { parseGarconStartAgent } from '../garcon-start-agent.js';
 import { parseGarconResumeAgent } from '../garcon-resume-agent.js';
+import { GARCON_ENVELOPE_COMMANDS } from '../garcon-command-envelope.js';
 
 const AT = '2030-01-01T00:00:00.000Z';
 const CHILD = '1111111111111111';
@@ -48,6 +49,7 @@ describe('literal delegated prompts', () => {
         wrap(`<garcon-${family}\n</garcon-${family}>`),
         wrap('<garcon-schedule\n</garcon-schedule>'),
         wrap(`<garcon-schedule>Misnested </garcon-${family}> closer.</garcon-schedule>`),
+        ...GARCON_ENVELOPE_COMMANDS.map((nested) => wrap(`Unmatched </garcon-${nested}> closer.`)),
         wrap('Unclosed <!-- comment'), wrap('Unclosed <![CDATA[ section'), wrap('Unclosed <? instruction'),
         wrap('Malformed \ud800'), wrap('Invalid \u0001 control'),
         wrap('x'.repeat(48 * 1024 + 1)),
@@ -103,6 +105,18 @@ describe('literal delegated prompts', () => {
           expect(result.issues).toHaveLength(1);
           expect(result.message.content).toBe(content);
         }
+      }
+    });
+
+    test(`${family} rejects orphan closers hidden inside a different prompt family`, () => {
+      const [other, otherAttributes] = families.find(([candidate]) => candidate !== family);
+      for (const prefix of ['', 'Summary.\n']) {
+        const sibling = `<garcon-${other} ${otherAttributes}>Unintended work. </garcon-${family}></garcon-${other}>`;
+        const content = `${prefix}${wrap('Example.')}\n<garcon-stop-agent chat-id="${CHILD}" remove="true" />\n${sibling}`;
+        const result = extractGarconCommands(new AssistantMessage(AT, content));
+        expect(result.commands).toEqual([]);
+        expect(result.issues).toEqual([{ command: family, reason: 'malformed', edge: prefix ? 'trailing' : 'leading' }]);
+        expect(result.message.content).toBe(content);
       }
     });
 

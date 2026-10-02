@@ -110,7 +110,8 @@ function scanGarconEnvelopeSpanAt(content: string, start: number, end: number): 
       if (nesting.length === 0) return { command, start, end: cursor, completeOpeners };
       continue;
     }
-    if (literalPrompt && content.startsWith(`</garcon-${command}>`, next)) break;
+    if (literalPrompt && content.startsWith('</garcon-', next)
+      && GARCON_ENVELOPE_COMMANDS.some((name) => content.startsWith(`</garcon-${name}>`, next))) break;
     const nestedCommand = garconEnvelopeCommandAt(content, next);
     if (literalPrompt && !nestedCommand) {
       cursor = next + 1;
@@ -201,8 +202,8 @@ function markdownFenceEnd(content: string, start: number, end: number): number |
   while (cursor < end) {
     const nextLine = content.indexOf('\n', cursor);
     const nextEnd = nextLine < 0 ? end : Math.min(nextLine, end);
-    const closer = /^ {0,3}(`{3,}|~{3,})\s*$/.exec(content.slice(cursor, nextEnd));
-    if (closer && closer[1][0] === opener[1][0] && closer[1].length >= opener[1].length) {
+    const closer = MARKDOWN_FENCE.exec(content.slice(cursor, nextEnd));
+    if (closer && closer[1][0] === opener[1][0] && closer[1].length >= opener[1].length && !closer[2].trim()) {
       return Math.min(nextEnd + 1, end);
     }
     cursor = nextEnd + 1;
