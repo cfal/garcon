@@ -10,7 +10,7 @@ import { GitMutationCoordinator } from '$lib/git/surface/git-mutations.svelte.js
 import { GitBranchSelectorState } from '$lib/git/targets/git-branch-selector-state.svelte.js';
 import { GitReviewDisplaySettingsStore } from '$lib/git/review/git-review-display-settings.svelte.js';
 import { LocalGitComparisonPreferences } from '$lib/git/review/git-comparison-preferences.js';
-import { GitViewLauncher } from '$lib/git/surface/git-view-launcher.svelte.js';
+import { GitViewLauncher } from '$lib/git/surface/git-view-launcher.js';
 import type {
 	FileOpenPlacementPreference,
 	LocalSettingsStore,

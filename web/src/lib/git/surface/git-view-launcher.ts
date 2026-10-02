@@ -25,35 +25,26 @@ export class GitViewLauncher {
 		private readonly surfaces: GitViewSurfacePort,
 	) {}
 
-	async openHistory(origin: GitViewLaunchOrigin): Promise<void> {
-		const surfaceId = singletonSurfaceId('git-history');
-		const existed = Boolean(this.workspace.layout.surface(surfaceId));
-		try {
-			if (origin.presentation === 'mobile') {
-				await this.workspace.focusMobileSingleton('git-history');
-			} else {
-				await this.workspace.openSingletonAsTab('git-history', origin.presentation);
-			}
-		} catch (error) {
-			if (!existed && !this.workspace.layout.surface(surfaceId)) {
-				this.surfaces.disposeSurface('git-history');
-			}
-			throw error;
-		}
+	openHistory(origin: GitViewLaunchOrigin): Promise<void> {
+		return this.#open('git-history', origin);
 	}
 
-	async openCompare(origin: GitViewLaunchOrigin): Promise<void> {
-		const surfaceId = singletonSurfaceId('git-compare');
+	openCompare(origin: GitViewLaunchOrigin): Promise<void> {
+		return this.#open('git-compare', origin);
+	}
+
+	async #open(kind: 'git-history' | 'git-compare', origin: GitViewLaunchOrigin): Promise<void> {
+		const surfaceId = singletonSurfaceId(kind);
 		const existed = Boolean(this.workspace.layout.surface(surfaceId));
 		try {
 			if (origin.presentation === 'mobile') {
-				await this.workspace.focusMobileSingleton('git-compare');
+				await this.workspace.focusMobileSingleton(kind);
 			} else {
-				await this.workspace.openSingletonAsTab('git-compare', origin.presentation);
+				await this.workspace.openSingletonAsTab(kind, origin.presentation);
 			}
 		} catch (error) {
 			if (!existed && !this.workspace.layout.surface(surfaceId)) {
-				this.surfaces.disposeSurface('git-compare');
+				this.surfaces.disposeSurface(kind);
 			}
 			throw error;
 		}

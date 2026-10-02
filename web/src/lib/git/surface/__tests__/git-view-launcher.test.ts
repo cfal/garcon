@@ -3,23 +3,25 @@ import {
 	GitViewLauncher,
 	type GitViewSurfacePort,
 	type GitViewWorkspacePort,
-} from '$lib/git/surface/git-view-launcher.svelte.js';
+} from '$lib/git/surface/git-view-launcher.js';
 
 function harness(options: {
 	existing?: readonly string[];
-	open?: (kind: 'git-history' | 'git-compare', windowId: 'window-main') => Promise<void>;
-	mobile?: (kind: 'git-history' | 'git-compare') => Promise<void>;
+	open?: GitViewWorkspacePort['openSingletonAsTab'];
+	mobile?: GitViewWorkspacePort['focusMobileSingleton'];
 }) {
 	const existing = new Set(options.existing ?? []);
 	const workspace = {
 		layout: {
 			surface: (surfaceId: string) => (existing.has(surfaceId) ? { id: surfaceId } : null),
 		},
-		openSingletonAsTab: vi.fn(async (kind, windowId) => {
-			await options.open?.(kind as 'git-history' | 'git-compare', windowId as 'window-main');
-		}),
-		focusMobileSingleton: vi.fn(async (kind) => {
-			await options.mobile?.(kind as 'git-history' | 'git-compare');
+		openSingletonAsTab: vi.fn<GitViewWorkspacePort['openSingletonAsTab']>(
+			async (kind, windowId) => {
+				await options.open?.(kind, windowId);
+			},
+		),
+		focusMobileSingleton: vi.fn<GitViewWorkspacePort['focusMobileSingleton']>(async (kind) => {
+			await options.mobile?.(kind);
 		}),
 	} satisfies GitViewWorkspacePort;
 	const surfaces = {
@@ -33,16 +35,33 @@ function harness(options: {
 }
 
 describe('GitViewLauncher', () => {
-	it('opens desktop History as a tab in the origin window', async () => {
-		const { launcher, workspace } = harness({});
-		await launcher.openHistory({ presentation: 'window-main' });
-		expect(workspace.openSingletonAsTab).toHaveBeenCalledWith('git-history', 'window-main');
-	});
+	describe.each([
+		{ method: 'openHistory', kind: 'git-history' },
+		{ method: 'openCompare', kind: 'git-compare' },
+	] as const)('$method', ({ method, kind }) => {
+		it.each(['window-main', 'mobile'] as const)('opens in the %s origin', async (presentation) => {
+			const { launcher, workspace, surfaces } = harness({});
+			await launcher[method]({ presentation });
+			if (presentation === 'mobile') {
+				expect(workspace.focusMobileSingleton).toHaveBeenCalledExactlyOnceWith(kind);
+				expect(workspace.openSingletonAsTab).not.toHaveBeenCalled();
+			} else {
+				expect(workspace.openSingletonAsTab).toHaveBeenCalledExactlyOnceWith(kind, presentation);
+				expect(workspace.focusMobileSingleton).not.toHaveBeenCalled();
+			}
+			expect(surfaces.disposeSurface).not.toHaveBeenCalled();
+		});
 
-	it('opens mobile Compare without constructing contextual launch state', async () => {
-		const { launcher, workspace } = harness({});
-		await launcher.openCompare({ presentation: 'mobile' });
-		expect(workspace.focusMobileSingleton).toHaveBeenCalledWith('git-compare');
+		it('disposes an unregistered controller when mobile focus fails', async () => {
+			const error = new Error('mobile focus failed');
+			const { launcher, surfaces } = harness({
+				mobile: async () => {
+					throw error;
+				},
+			});
+			await expect(launcher[method]({ presentation: 'mobile' })).rejects.toBe(error);
+			expect(surfaces.disposeSurface).toHaveBeenCalledExactlyOnceWith(kind);
+		});
 	});
 
 	it('disposes a new controller only when registration leaves no descriptor', async () => {
