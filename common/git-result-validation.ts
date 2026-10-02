@@ -117,11 +117,22 @@ function gitResult(method: GitMethod, v: Record<string, unknown>): boolean {
     case 'getCommitSnapshot': return str(v.project) && (v.status === 'not-found' ? str(v.commit) && str(v.message)
       : v.status === 'ready' && commitDocument(v) && commit(v.commit) && shape(v.commit, { body: str }) && nullable(str)(v.selectedParent)
         && array(x => shape(x, { hash: str, shortHash: str, label: str }))(v.parentOptions));
-    case 'getComparisonSnapshot': return str(v.project) && (v.status === 'ready'
-      ? commitDocument(v) && str(v.repoRoot) && oneOf('direct', 'merge-base')(v.mode) && revision(v.from) && (revision(v.to) || workingTree(v.to)) && str(v.effectiveFromHash)
-      : v.status === 'not-found' ? oneOf('from', 'to')(v.endpoint) && str(v.revision) && str(v.message)
-        : v.status === 'no-merge-base' ? revision(v.from) && revision(v.to) && str(v.message)
-          : v.status === 'working-tree-changing' && str(v.message));
+    case 'getComparisonSnapshot': {
+      if (!str(v.project)) return false;
+      switch (v.status) {
+        case 'ready':
+          return commitDocument(v) && str(v.repoRoot) && oneOf('direct', 'merge-base')(v.mode)
+            && revision(v.from) && (revision(v.to) || workingTree(v.to)) && str(v.effectiveFromHash);
+        case 'not-found':
+          return oneOf('from', 'to')(v.endpoint) && str(v.revision) && str(v.message);
+        case 'no-merge-base':
+          return revision(v.from) && revision(v.to) && str(v.message);
+        case 'working-tree-changing':
+          return str(v.message);
+        default:
+          return false;
+      }
+    }
     case 'getComparisonFreshness': return str(v.project) && (v.status === 'not-found' ? oneOf('from', 'to')(v.endpoint) && str(v.revision) && str(v.message)
       : v.status === 'ready' && array(oneOf('from', 'to'), 2)(v.changedEndpoints) && str(v.fromHash)
         && (shape(v.to, { kind: oneOf('revision'), hash: str }) || shape(v.to, { kind: oneOf('working-tree'), fingerprint: str })));
@@ -136,11 +147,16 @@ export function validateGhResult<K extends keyof ExecutionGhResults>(method: K, 
   }
   const identity = { number: num, title: str, state: oneOf('open', 'closed', 'merged'), isDraft: bool, author: str, headRefName: str, baseRefName: str,
     additions: num, deletions: num, changedFiles: num, updatedAt: str, url: str, reviewDecision: oneOf('approved', 'changes_requested', 'review_required', null) };
-  const valid = method === 'getStatus' ? shape(value, { available: bool, authenticated: bool, reason: oneOf('authenticated', 'unauthenticated', 'gh_missing', 'auth_error', 'unknown'), login: optional(str), host: optional(str) })
-    : method === 'listPullRequests' ? shape(value, { pulls: array(x => shape(x, { ...identity, checksState: oneOf('passing', 'failing', 'pending', 'none') }), 100), repo: nullable(x => shape(x, { nameWithOwner: str })) })
-      : shape(value, { ...identity, body: str, createdAt: str, mergeable: oneOf('mergeable', 'conflicting', 'unknown'), files: array(reviewFile, 10_000), fileBodies: map(isGitPatchBody),
-        checks: array(x => shape(x, { name: str, state: oneOf('success', 'failure', 'pending', 'neutral', 'skipped'), url: optional(str) })),
-        threads: array(x => shape(x, { id: str, path: str, side: oneOf('before', 'after'), line: num, diffHunk: str, isOutdated: bool,
-          comments: array(c => shape(c, { id: num, author: str, body: str, createdAt: str })) })) });
+  let valid: boolean;
+  if (method === 'getStatus') {
+    valid = shape(value, { available: bool, authenticated: bool, reason: oneOf('authenticated', 'unauthenticated', 'gh_missing', 'auth_error', 'unknown'), login: optional(str), host: optional(str) });
+  } else if (method === 'listPullRequests') {
+    valid = shape(value, { pulls: array(x => shape(x, { ...identity, checksState: oneOf('passing', 'failing', 'pending', 'none') }), 100), repo: nullable(x => shape(x, { nameWithOwner: str })) });
+  } else {
+    valid = shape(value, { ...identity, body: str, createdAt: str, mergeable: oneOf('mergeable', 'conflicting', 'unknown'), files: array(reviewFile, 10_000), fileBodies: map(isGitPatchBody),
+      checks: array(x => shape(x, { name: str, state: oneOf('success', 'failure', 'pending', 'neutral', 'skipped'), url: optional(str) })),
+      threads: array(x => shape(x, { id: str, path: str, side: oneOf('before', 'after'), line: num, diffHunk: str, isOutdated: bool,
+        comments: array(c => shape(c, { id: num, author: str, body: str, createdAt: str })) })) });
+  }
   if (!valid) throw new GitServiceError('GIT_INVALID_RESULT', `Invalid GitHub ${method} response`);
 }

@@ -169,6 +169,10 @@ function requiredString(value: unknown): string | null {
   return trimmed || null;
 }
 
+function requiredPath(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value : null;
+}
+
 function isoTimestamp(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const parsed = new Date(value);
@@ -302,7 +306,7 @@ export function normalizeExpandSnippetRequest(value: unknown): ExpandSnippetRequ
     }
   }
   if (context.type === 'new-chat') {
-    const projectPath = typeof context.projectPath === 'string' && context.projectPath.trim() ? context.projectPath : null;
+    const projectPath = requiredPath(context.projectPath);
     const executorId = parseExecutorId(context.executorId);
     if (!executorId || !projectPath) return null;
     try {
@@ -327,7 +331,7 @@ export function normalizeExpandSnippetResponse(value: unknown): ExpandSnippetRes
   const raw = asRecord(value);
   const sourceId = requiredString(raw?.sourceId);
   const sourceUpdatedAt = isoTimestamp(raw?.sourceUpdatedAt);
-  const contextProjectPath = typeof raw?.contextProjectPath === 'string' && raw.contextProjectPath.trim() ? raw.contextProjectPath : null;
+  const contextProjectPath = requiredPath(raw?.contextProjectPath);
   const contextExecutorId = parseExecutorId(raw?.contextExecutorId);
   if (
     !raw ||

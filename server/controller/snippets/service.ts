@@ -29,8 +29,7 @@ export class SnippetProjectPathService {
   constructor(private readonly inspect: ProjectInspector) {}
 
   async resolve(projectPath: string, executorId?: string | null): Promise<string> {
-    const requestedPath = projectPath;
-    if (!requestedPath.trim()) {
+    if (!projectPath.trim()) {
       throw new SnippetDomainError(
         'SNIPPET_PROJECT_PATH_REQUIRED',
         'Project path is required',
@@ -38,17 +37,17 @@ export class SnippetProjectPathService {
       );
     }
 
-    const resolution = await this.inspect(requestedPath, executorId);
+    const resolution = await this.inspect(projectPath, executorId);
     if (resolution.kind === 'available') return resolution.effectiveProjectKey;
     switch (resolution.reason) {
       case 'not-found':
-        throw new SnippetDomainError('SNIPPET_PROJECT_PATH_NOT_FOUND', `Project path not found: ${requestedPath}`, 404);
+        throw new SnippetDomainError('SNIPPET_PROJECT_PATH_NOT_FOUND', `Project path not found: ${projectPath}`, 404);
       case 'outside-base':
         throw new SnippetDomainError('SNIPPET_PROJECT_PATH_OUTSIDE_BASE', 'Project path is outside the allowed base directory', 403);
       case 'not-a-directory':
-        throw new SnippetDomainError('SNIPPET_PROJECT_PATH_NOT_DIRECTORY', `Project path is not a directory: ${requestedPath}`, 400);
+        throw new SnippetDomainError('SNIPPET_PROJECT_PATH_NOT_DIRECTORY', `Project path is not a directory: ${projectPath}`, 400);
       case 'permission-denied':
-        throw new SnippetDomainError('SNIPPET_PROJECT_PATH_INACCESSIBLE', `Project path is not accessible: ${requestedPath}`, 403);
+        throw new SnippetDomainError('SNIPPET_PROJECT_PATH_INACCESSIBLE', `Project path is not accessible: ${projectPath}`, 403);
     }
   }
 }

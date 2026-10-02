@@ -15,6 +15,35 @@ const reviewFile = { ...baseFile, indexStatus: ' ', workTreeStatus: 'M' };
 const commitFile = { ...baseFile, status: 'modified', rawStatus: 'M' };
 const document = { ...scope, status: 'ready', project: '/repo', documentId: 'document-test', limits, firstBodyCandidates: [] };
 const revision = { kind: 'revision', requestedRevision: 'HEAD', label: 'HEAD', hash: 'a'.repeat(40), shortHash: 'aaaaaaa' };
+
+test('comparison failures validate only the fields required by their status', () => {
+  for (const result of [
+    { status: 'not-found', endpoint: 'from', revision: 'missing', message: 'Not found' },
+    { status: 'no-merge-base', from: revision, to: revision, message: 'No common ancestor' },
+    { status: 'working-tree-changing', message: 'Try again' },
+  ]) {
+    const value = { ...scope, project: '/repo', ...result };
+    expect(() => validateGitResult('getComparisonSnapshot', value, scope)).not.toThrow();
+    for (const field of ['project', ...Object.keys(result)]) {
+      expect(() => validateGitResult('getComparisonSnapshot', { ...value, [field]: undefined }, scope))
+        .toThrow(expect.objectContaining({ code: 'GIT_INVALID_RESULT' }));
+    }
+  }
+});
+
+test('GitHub status and list results do not require detail fields', () => {
+  for (const [method, result] of [
+    ['getStatus', { available: true, authenticated: false, reason: 'unauthenticated' }],
+    ['listPullRequests', { pulls: [], repo: null }],
+  ]) {
+    expect(() => validateGhResult(method, { ...scope, ...result }, scope)).not.toThrow();
+    for (const field of Object.keys(result)) {
+      expect(() => validateGhResult(method, { ...scope, ...result, [field]: undefined }, scope))
+        .toThrow(expect.objectContaining({ code: 'GIT_INVALID_RESULT' }));
+    }
+  }
+});
+
 const cases = [
   {
     method: 'getWorkbenchSnapshot', file: reviewFile, statusFields: ['indexStatus', 'workTreeStatus'],
