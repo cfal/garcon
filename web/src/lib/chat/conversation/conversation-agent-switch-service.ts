@@ -1,5 +1,4 @@
-import type { ChatSessionRecord, ChatStartupConfig } from '$lib/types/chat-session';
-import type { SessionAgentId } from '$lib/types/app';
+import type { ChatSessionRecord, ChatStartupConfig, SessionAgentId } from '$lib/chat/sessions/chat-session-types';
 import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 import type { AgentSettingsEnvelope } from '$shared/agent-integration';
 import type { ApiProtocol } from '$shared/api-providers';

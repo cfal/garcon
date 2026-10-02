@@ -21,11 +21,8 @@ import { TranscriptLedgerStore } from '../../ledger/store.ts';
 import { TranscriptLedgerService } from '../../ledger/service.ts';
 import { TranscriptAdoptionService } from '../../ledger/adoption.ts';
 import { frozenConversationDrafts } from '../../ledger/projection.ts';
-import {
-  SteerDeliveryError,
-  DomainError,
-  ProjectUnavailableError,
-} from '../../../common/domain-error.js';
+import { DomainError, ProjectUnavailableError } from '../../../common/domain-error.js';
+import { SteerDeliveryError } from '../../chat-execution/steering-errors.js';
 import {
   QueueEntryMutationError,
   ChatExecutionCoordinator,
@@ -676,7 +673,7 @@ function makeService(overrides = {}) {
     }),
   };
   const handoffs = { ...defaultHandoffs, ...overrides.handoffs };
-  const ledger = overrides.ledger ?? new CommandLedger(workspaceDir);
+  const ledger = overrides.ledger ?? new CommandLedger();
   const transcripts = overrides.transcripts ?? {
     subscribe: mock(() => () => undefined),
     appendNotice: mock(() => undefined),
@@ -783,7 +780,6 @@ function makeRealQueue(
   controlRepository = new InMemoryChatExecutionControlRepository('server-instance-test'),
 ) {
   return new ChatExecutionCoordinator(
-    workspaceDir,
     {
       runAgentTurn: mock(async () => undefined),
       captureSteerTarget: mock(() => null),
@@ -5548,7 +5544,7 @@ describe('ChatCommandService', () => {
   });
 
   it('does not mask a queued-steer observation rejection when ledger settlement fails', async () => {
-    const ledger = new CommandLedger(workspaceDir);
+    const ledger = new CommandLedger();
     ledger.update = mock(async () => {
       throw new Error('ledger unavailable');
     });
@@ -5585,7 +5581,7 @@ describe('ChatCommandService', () => {
       expectedRevision: 3,
       expectedReorderRevision: 7,
     };
-    const ledger = new CommandLedger(workspaceDir);
+    const ledger = new CommandLedger();
     await ledger.accept({
       commandType: 'steer',
       chatId: input.chatId,
@@ -6013,7 +6009,7 @@ describe('ChatCommandService', () => {
   });
 
   it('replays a queued-message steer after delivery consumed its entry and compaction dropped its payload', async () => {
-    const ledger = new CommandLedger(workspaceDir, { recordLimit: 1 });
+    const ledger = new CommandLedger({ recordLimit: 1 });
     let currentControl = storedQueue([{
       ...queueEntry('entry-head', 'queued guidance', 'queued', 2),
       submission: { clientMessageId: 'message-queued-guidance', transcriptViewId: 'view-1' },
@@ -6620,7 +6616,7 @@ describe('ChatCommandService', () => {
   });
 
   it('replays a compact steering tombstone after its chat is deleted', async () => {
-    const ledger = new CommandLedger(workspaceDir);
+    const ledger = new CommandLedger();
     const input = {
       chatId: SOURCE_CHAT_ID,
       content: 'retain compact evidence',
@@ -6688,7 +6684,7 @@ describe('ChatCommandService', () => {
   });
 
   it('rejects new steer identities after the process-lifetime capacity is exhausted', async () => {
-    const ledger = new CommandLedger(workspaceDir, { steerIdentityLimit: 1 });
+    const ledger = new CommandLedger({ steerIdentityLimit: 1 });
     const retained = await ledger.accept({
       commandType: 'steer',
       chatId: SOURCE_CHAT_ID,

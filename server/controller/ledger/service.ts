@@ -1,6 +1,5 @@
 import crypto from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { forEachInSteps } from '@garcon/server-agent-common/shared/event-loop';
 import type {
   AgentFinalResponse,
   AgentPermissionLifecycle,
@@ -25,7 +24,6 @@ import type {
   AppendSelectionChangeNoticeResult,
   InputComposition,
   LedgerAgentSwitchRow,
-  LedgerConversationRow,
   LedgerNoticeRow,
   LedgerPreambleSelectionChangedNoticeDetail,
   LedgerPermissionRow,
@@ -617,24 +615,22 @@ export class TranscriptLedgerService {
     return this.#store.rowsThrough(chatId, watermark);
   }
 
-  withStoredRowsThrough<T>(chatId: string, watermark: TranscriptWatermark, work: StoredRowsWork<T>): Promise<T> {
-    return this.#store.withStoredRowsThrough(chatId, watermark, work);
-  }
-
-  async conversationRows(chatId: string): Promise<readonly LedgerConversationRow[]> {
-    const rows: LedgerConversationRow[] = [];
-    await forEachInSteps('ledger-conversation-read', await this.#store.rowsThrough(chatId, this.#store.highWatermark(chatId)), (row) => {
-      if (isConversationalLedgerRow(row)) rows.push(row);
-    });
-    return rows;
+  withStoredRowsThrough<T>(chatId: string, watermark: TranscriptWatermark, work: StoredRowsWork<T>, signal?: AbortSignal): Promise<T> {
+    return this.#store.withStoredRowsThrough(chatId, watermark, work, signal);
   }
 
   async conversationMessages(chatId: string, excludedOrdinals: ReadonlySet<number> = new Set()): Promise<readonly ChatMessage[]> {
     const messages: ChatMessage[] = [];
-    await forEachInSteps('ledger-conversation-read', await this.conversationRows(chatId), (row) => {
-      if (!excludedOrdinals.has(row.ordinal)) messages.push(messageForConversationRow(row));
-    });
+    for await (const page of this.conversationMessagePages(chatId, excludedOrdinals)) messages.push(...page);
     return messages;
+  }
+
+  async *conversationMessagePages(chatId: string, excludedOrdinals: ReadonlySet<number> = new Set()): AsyncGenerator<readonly ChatMessage[]> {
+    const watermark = this.#store.highWatermark(chatId);
+    for await (const page of this.#store.rowPagesThrough(chatId, watermark)) {
+      yield page.filter(isConversationalLedgerRow)
+        .filter(row => !excludedOrdinals.has(row.ordinal)).map(messageForConversationRow);
+    }
   }
 
   existingPreview(chatId: string): { first: ChatMessage; last: ChatMessage } | null {

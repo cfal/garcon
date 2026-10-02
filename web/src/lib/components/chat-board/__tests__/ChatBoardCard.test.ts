@@ -1,7 +1,7 @@
 import { cleanup, render, screen } from '@testing-library/svelte';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ChatBoardOccurrence } from '$lib/chat-board/projection/chat-board-projection.js';
-import type { ChatSessionRecord } from '$lib/types/chat-session.js';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types.js';
 import ChatBoardCardTestHost from './ChatBoardCardTestHost.svelte';
 
 function occurrence(overrides: Partial<ChatSessionRecord> = {}): ChatBoardOccurrence {

@@ -1,7 +1,7 @@
 // Agent, model, and permission mode state for the active chat session.
 // Manages cycling through permission modes and models.
 
-import type { SessionAgentId } from '$lib/types/app';
+import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
 import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 import type { AgentSettingsEnvelope } from '$shared/agent-integration';
 import type { ApiProtocol } from '$shared/api-providers';
@@ -109,8 +109,4 @@ export class AgentState {
 		this.modelEndpointId = selection.modelEndpointId ?? null;
 		this.modelProtocol = selection.modelProtocol ?? null;
 	}
-}
-
-export function createAgentState(): AgentState {
-	return new AgentState();
 }

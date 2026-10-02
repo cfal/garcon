@@ -111,15 +111,14 @@
 	</div>
 
 	<p class="text-xs text-muted-foreground">
-		Assigned executors can receive this profile's credentials. Removing access does not revoke keys
-		already received.
+		{m.settings_provider_credential_warning()}
 	</p>
 	{#if providers.error}
 		<div
 			class="rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
 		>
 			{providers.error}
-			<Button variant="outline" size="sm" onclick={() => providers.refresh()}>Retry</Button>
+			<Button variant="outline" size="sm" onclick={() => providers.refresh()}>{m.common_retry()}</Button>
 		</div>
 	{/if}
 
@@ -133,7 +132,7 @@
 					onDuplicate={() => beginDuplicate(row.endpoint.id)}
 				/>
 				{#snippet failed()}<p class="text-sm text-destructive">
-						Unable to display provider.
+						{m.settings_provider_display_failed()}
 					</p>{/snippet}
 			</svelte:boundary>
 		{/each}

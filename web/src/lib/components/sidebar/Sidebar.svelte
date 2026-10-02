@@ -14,7 +14,7 @@
 		getRemoteSettings,
 	} from '$lib/context';
 	import type { ChatArchiveMutation } from '$lib/chat/sessions/chat-sessions-contract';
-	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import type {
 		PersistedChatOrderGroup,
 		RelativeChatOrderPlacement,
@@ -421,7 +421,7 @@
 	}
 </script>
 
-<!-- The container delegates bubbled Escape handling for the sidebar subtree. Follow-up: CLEANUP_ROUND_TWO.md#a11y-suppression-register. -->
+<!-- The container delegates bubbled Escape handling for multi-select. Covered by __tests__/sidebar-multi-select.test.ts. -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
 	data-slot="sidebar"

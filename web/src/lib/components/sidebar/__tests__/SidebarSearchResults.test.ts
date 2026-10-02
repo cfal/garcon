@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import SidebarSearchResults from '../SidebarSearchResults.svelte';
 import SidebarSearchDialogHost from './SidebarSearchDialogHost.svelte';
 import { SEARCH_RESULT_ROW_HEIGHT } from '../sidebar-search-results';
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import type { ChatSearchResult } from '$shared/chat-search';
 
 const currentTime = new Date('2025-01-01T03:00:00.000Z');

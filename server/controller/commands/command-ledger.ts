@@ -191,7 +191,7 @@ export class CommandLedger {
   #resultBytes = 0;
   #nextTerminalRetentionOrdinal = 0;
 
-  constructor(_workspaceDir?: string, options: CommandLedgerOptions = {}) {
+  constructor(options: CommandLedgerOptions = {}) {
     this.#steerIdentityLimit = options.steerIdentityLimit ?? STEER_IDENTITY_LIMIT;
     if (!Number.isSafeInteger(this.#steerIdentityLimit) || this.#steerIdentityLimit < 1) {
       throw new Error('steerIdentityLimit must be a positive safe integer');

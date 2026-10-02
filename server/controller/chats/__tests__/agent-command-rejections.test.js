@@ -7,7 +7,7 @@ const source = { chatId: '1000000000000001', viewId: '11111111-1111-4111-8111-11
 const issues = [{ command: 'ticket-create', reason: 'malformed', edge: 'leading' }];
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
-function fixture(deliver = async () => 'delivered') {
+function fixture(deliver = async () => 'queued') {
   const controls = { enabled: true, exists: true, viewId: source.viewId };
   const inputs = [];
   const notices = [];
@@ -17,7 +17,7 @@ function fixture(deliver = async () => 'delivered') {
     registry: { getChat: () => controls.exists ? {} : null },
     notices: { existingCurrentView: () => ({ viewId: controls.viewId }), appendNotice: (...args) => notices.push(args) },
     chatMutationLock: lock,
-    execution: { async deliverServerControlInput(chatId, input, signal) {
+    execution: { async queueServerControlInput(chatId, input, signal) {
       await lock.runExclusive(`chat:${chatId}`, async () => {});
       inputs.push({ chatId, input, signal });
       return deliver(signal);
@@ -27,7 +27,7 @@ function fixture(deliver = async () => 'delivered') {
 }
 
 describe('agent command parse rejection replies', () => {
-  test('delivers one grouped view-qualified control input without a user row, receipt, or extra notice', async () => {
+  test('queues one grouped view-qualified control input without a user row, receipt, or extra notice', async () => {
     const f = fixture();
     f.replies.reject(source, issues);
     await tick();

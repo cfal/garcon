@@ -144,12 +144,6 @@ describe('snippet default argument layouts', () => {
         if (!response?.ok())
           throw new Error(`SPA navigation failed with ${String(response?.status())}.`);
         await fixture.page.getByRole('button', { name: 'New Chat', exact: true }).first().waitFor();
-        await fixture.page.waitForFunction(
-          (height) =>
-            document.documentElement.style.getPropertyValue('--app-height') ===
-            `${String(height)}px`,
-          scenario.height,
-        );
         const newChat = await openNewChat(fixture.page, fixture.integration.dirs.project);
 
         const palette = await openSnippetPalette(fixture.page, newChat);

@@ -1,3 +1,4 @@
+import { unusedSingletonFactories } from '$lib/workspace/__tests__/unused-singleton-factories';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FileSessionRegistry } from '$lib/files/sessions/file-session-registry.svelte.js';
@@ -100,6 +101,7 @@ describe('FilesPanel', () => {
 			const exportDraft = vi.spyOn(fileSessions, 'exportDraft').mockReturnValue(undefined);
 			const gitSurfaceDeps = createGitSurfaceTestDeps();
 			const singletonSurfaces = new SingletonSurfaceRegistry({
+		...unusedSingletonFactories,
 				...gitSurfaceDeps,
 				createCommit: () => new CommitController(gitSurfaceDeps),
 				createPullRequests: () => new PullRequestsStore(),
@@ -204,6 +206,7 @@ describe('FilesPanel', () => {
 			const open = vi.spyOn(fileSessions, 'open');
 			const gitSurfaceDeps = createGitSurfaceTestDeps();
 			const singletonSurfaces = new SingletonSurfaceRegistry({
+		...unusedSingletonFactories,
 				...gitSurfaceDeps,
 				createCommit: () => new CommitController(gitSurfaceDeps),
 				createPullRequests: () => new PullRequestsStore(),

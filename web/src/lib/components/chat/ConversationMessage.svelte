@@ -30,8 +30,8 @@
 		getNotifications,
 		getWorkspaceCoordinator,
 	} from '$lib/context';
-	import Markdown from './Markdown.svelte';
-	import type { MarkdownLinkNavigateEvent } from './Markdown.svelte';
+	import Markdown from '$lib/components/rich-text/Markdown.svelte';
+	import type { MarkdownLinkNavigateEvent } from '$lib/components/rich-text/Markdown.svelte';
 	import { resolveFileOpenTarget } from '$lib/chat/file-links/file-open-target.js';
 	import { resolveFileLinkTarget } from '$lib/chat/file-links/file-link-resolver.js';
 	import {

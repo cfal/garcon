@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { SessionAgentId } from '$lib/types/app';
+	import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
 
 	let { getSelectableAgentIds }: { getSelectableAgentIds?: (executorId: string) => readonly SessionAgentId[] } = $props();
 </script>

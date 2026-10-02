@@ -5,7 +5,7 @@
 	import SidebarBackToTop from './SidebarBackToTop.svelte';
 	import { shouldShowSidebarBackToTop } from './sidebar-back-to-top';
 	import * as m from '$lib/paraglide/messages.js';
-	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import type {
 		PersistedChatOrderGroup,
 		RelativeChatOrderPlacement,

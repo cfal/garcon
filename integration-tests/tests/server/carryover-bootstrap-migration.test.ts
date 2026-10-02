@@ -11,7 +11,7 @@ import {
   UserMessage,
 } from '../../../common/chat-types.js';
 import { encodeCarryOverPages } from '../../../server/controller/chats/carryover-page-codec.js';
-import { rollbackLegacyCarryOverMigration } from '../../../server/controller/chats/chat-carryover-rollback.js';
+import { rollbackLegacyCarryOverMigration } from '../../../server/controller/migrations/carryover/chat-carryover-rollback.js';
 import { ChatRegistry } from '../../../server/controller/chats/store.js';
 import { transcriptViewId } from '../../../server/controller/ledger/contracts.js';
 import { TranscriptLedgerStore } from '../../../server/controller/ledger/store.js';

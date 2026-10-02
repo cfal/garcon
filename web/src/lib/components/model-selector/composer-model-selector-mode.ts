@@ -1,4 +1,4 @@
-import type { SessionAgentId } from '$lib/types/app';
+import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
 import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
 import { buildModelSources } from './model-selector-options';
 import type { ModelSelectorMode } from './model-selector-types';

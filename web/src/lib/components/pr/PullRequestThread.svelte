@@ -1,9 +1,10 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages.js';
 	import Sparkles from '@lucide/svelte/icons/sparkles';
 	import History from '@lucide/svelte/icons/history';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
-	import Markdown from '$lib/components/chat/Markdown.svelte';
+	import Markdown from '$lib/components/rich-text/Markdown.svelte';
 	import type { PullRequestThread } from '$lib/api/pull-requests';
 
 	interface PullRequestThreadProps {
@@ -44,12 +45,12 @@
 					class="inline-flex flex-shrink-0 items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium"
 				>
 					<History class="h-3 w-3" />
-					Outdated
+					{m.pull_request_outdated()}
 				</span>
 			{/if}
 			{#if collapsed}
 				<span class="flex-shrink-0 text-[10px]">
-					{commentCount} comment{commentCount === 1 ? '' : 's'}
+					{m.pull_request_comment_count({ count: commentCount })}
 				</span>
 			{/if}
 		</button>
@@ -57,10 +58,10 @@
 			type="button"
 			class="inline-flex flex-shrink-0 items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] font-medium text-foreground transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
 			onclick={onAddress}
-			title="Send this comment to the agent to fix"
+			title={m.pull_request_address_with_agent_hint()}
 		>
 			<Sparkles class="h-3 w-3" />
-			Address with agent
+			{m.pull_request_address_with_agent()}
 		</button>
 	</div>
 	{#if !collapsed}

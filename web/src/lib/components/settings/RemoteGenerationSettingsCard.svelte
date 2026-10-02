@@ -134,7 +134,7 @@
 					size="sm"
 					aria-pressed={cardState.isAuto}
 					disabled={cardState.isSaving}
-					onclick={() => cardState.persistAuto()}>Auto (Local)</Button
+					onclick={() => cardState.persistAuto()}>{m.settings_generation_auto_local()}</Button
 				>
 				<SettingsModelSelector
 					value={cardState.selectorValue}

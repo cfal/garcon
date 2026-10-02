@@ -7,7 +7,7 @@
 	import { getAppShell, getChatSessions, getWorkspaceCoordinator } from '$lib/context';
 	import type { ChatId } from '$shared/chat-id';
 	import { gotoChat } from '$lib/chat/actions/chat-navigation.js';
-	import type { NewChatConfig } from '$lib/types/app';
+	import type { NewChatConfig } from '$lib/chat/sessions/chat-session-types';
 	import NewChatForm from './NewChatForm.svelte';
 
 	const appShell = getAppShell();

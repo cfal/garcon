@@ -509,11 +509,16 @@ export class TranscriptLedgerStore {
     return this.#pagesThrough(chatId, watermark, readBoundedPage);
   }
 
+  rowPagesThrough(chatId: string, watermark: TranscriptWatermark): AsyncIterable<readonly LedgerRow[]> {
+    return this.#streamPages(chatId, watermark, readBoundedPage);
+  }
+
   // Reads stored rows for work that decodes them after the read, such as on a Worker. A row
   // that fails to decode there fences the chat while its view is current, as a read that
   // decodes rows does.
-  async withStoredRowsThrough<T>(chatId: string, watermark: TranscriptWatermark, work: StoredRowsWork<T>): Promise<T> {
-    const rows = await this.#pagesThrough(chatId, watermark, readBoundedStoredPage);
+  async withStoredRowsThrough<T>(chatId: string, watermark: TranscriptWatermark, work: StoredRowsWork<T>, signal?: AbortSignal): Promise<T> {
+    const rows = await this.#pagesThrough(chatId, watermark, readBoundedStoredPage, signal);
+    signal?.throwIfAborted();
     try {
       return await work(rows);
     } catch (error) {
@@ -531,19 +536,35 @@ export class TranscriptLedgerStore {
     chatId: string,
     watermark: TranscriptWatermark,
     readPage: (db: Database, viewId: TranscriptViewId, after: number, through: number) => BoundedPage<Row>,
+    signal?: AbortSignal,
   ): Promise<readonly Row[]> {
+    const rows: Row[] = [];
+    for await (const page of this.#streamPages(chatId, watermark, readPage, signal)) rows.push(...page);
+    return rows;
+  }
+
+  async *#streamPages<Row extends { readonly ordinal: number }>(
+    chatId: string,
+    watermark: TranscriptWatermark,
+    readPage: (db: Database, viewId: TranscriptViewId, after: number, through: number) => BoundedPage<Row>,
+    signal?: AbortSignal,
+  ): AsyncGenerator<readonly Row[]> {
     if (!Number.isSafeInteger(watermark.ordinal) || watermark.ordinal < 0) {
       throw new TypeError('Transcript watermark ordinal is invalid');
     }
-    const rows: Row[] = [];
     let after = 0;
     for (;;) {
+      signal?.throwIfAborted();
       const page = this.#read(chatId, (entry) => {
         this.#assertCurrent(entry, watermark.viewId);
         return readPage(entry.db, watermark.viewId, after, watermark.ordinal);
       });
-      for (const row of page.rows) rows.push(row);
-      if (page.exhausted) return rows;
+      yield page.rows;
+      signal?.throwIfAborted();
+      if (page.exhausted) {
+        this.#read(chatId, entry => this.#assertCurrent(entry, watermark.viewId));
+        return;
+      }
       after = page.rows[page.rows.length - 1]!.ordinal;
       await yieldToEventLoop();
     }

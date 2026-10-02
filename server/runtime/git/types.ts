@@ -89,12 +89,6 @@ export interface HunkHeaderResult {
   nextOffset: number;
 }
 
-export interface ClassifiedGitError {
-  status: number;
-  message: string;
-  details?: unknown;
-}
-
 export type LocalGitOptions<T> = T & { trace?: GitCommandTrace[]; metrics?: GitReviewRouteMetrics; signal?: AbortSignal };
 export type CommitMessageContextOptions = LocalGitOptions<SharedGit.CommitMessageContextOptions>;
 

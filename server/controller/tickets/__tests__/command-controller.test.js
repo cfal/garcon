@@ -32,14 +32,14 @@ function fixture(resolveProject) {
         notices.push(notice);
       },
     },
-    execution: { async deliverServerControlInput(_chatId, input) {
+    execution: { async queueServerControlInput(_chatId, input) {
       if (current.failDelivery) throw new Error('Synthetic delivery failure');
       await lock.runExclusive(`chat:${CHAT_ID}`, async () => {});
       const parsed = parseGarconTicketResult(input.content);
       expect(parsed).not.toBeNull();
       deliveries.push({ input, result: parsed });
       waiters.shift()?.resolve(parsed);
-      return { status: 'queued' };
+      return 'queued';
     } },
     chatMutationLock: lock, isEnabled: () => f.controls.enabled,
     resolveProject: resolveProject ?? (async () => ({ project: 'Resolved project', kind: 'repository' })),

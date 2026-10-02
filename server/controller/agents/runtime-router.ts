@@ -1,4 +1,5 @@
 import { effectiveExecutorId, LOCAL_EXECUTOR_ID } from '../../../common/executors.js';
+import type { CreateCarriedContextInput } from '../chats/carried-context.js';
 import {
   AgentIntegrationError,
   AgentCallError,
@@ -24,11 +25,8 @@ import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-reso
 import { assertSameApiProviderBoundary } from '../api-providers/endpoint-resolver.js';
 import { getMaxSessions } from '../config.js';
 import { createLogger } from '../../common/log.js';
-import {
-  DomainError,
-  steeringUnsupportedError,
-  transcriptUnavailableMessage,
-} from '../../common/domain-error.js';
+import { DomainError, transcriptUnavailableMessage } from '../../common/domain-error.js';
+import { steeringUnsupportedError } from '../chat-execution/steering-errors.js';
 import { ownershipTransferPendingError } from './ownership-transfer-fence.js';
 import type { AgentDirectory } from './directory.js';
 import type { AgentEventBus, TurnEventMetadata } from './event-bus.js';
@@ -76,17 +74,6 @@ export interface AgentRuntimeRouterOptions {
   adoption: TranscriptAdoptionService;
   hasPendingOwnershipTransfer(chatId: string): boolean;
   resolveFileMentions(command: string, projectPath: string, executorId?: string | null, options?: ExecutorCallOptions): Promise<string>;
-}
-
-export interface CreateCarriedContextInput {
-  readonly onCompactionStarted?: () => void;
-  readonly chatId: string;
-  readonly entry: AgentChatEntry;
-  readonly messages: readonly ChatMessage[];
-  readonly transcriptViewId: TranscriptViewId;
-  readonly destinationPrompt: string;
-  readonly clientRequestId: string | null;
-  readonly signal?: AbortSignal;
 }
 
 export interface RunSingleQueryOptions {

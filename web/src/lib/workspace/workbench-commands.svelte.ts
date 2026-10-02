@@ -13,7 +13,7 @@ import {
 } from '$lib/files/sessions/file-open-mode.js';
 import type { TerminalRegistry } from '$lib/terminal/sessions/terminal-registry.svelte.js';
 import type { FileLocation } from '$lib/files/navigation/file-navigation-store.svelte.js';
-import type { FilesSurfaceController } from './singleton-surfaces.svelte.js';
+import type { FilesSurfaceController } from '$lib/files/surface/files-surface-controller.svelte.js';
 import type { WorkspaceCoordinator } from './workspace-coordinator.svelte.js';
 import { windowIdOfSurface } from './window-tree.js';
 import { copyToClipboard } from '$lib/utils/clipboard.js';

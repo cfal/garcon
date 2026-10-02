@@ -1,8 +1,47 @@
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import { ProducerBindings } from '../producer-bindings.ts';
 import { ProducerLease } from '../../ledger/producer-lease.ts';
 import { LedgerFencedError } from '../../ledger/errors.ts';
 import { createProducerFixture } from './producer-fixture.ts';
+
+test('deduplicates subscriptions while live integrations outlast all of their bindings', async () => {
+  const producer = createProducerFixture();
+  const subscribe = spyOn(producer.producers, 'subscribe');
+  const integration = { producers: producer.producers };
+  const manager = new ProducerBindings(() => {}, () => {}, () => {}, () => {}, () => {});
+  try {
+    for (let index = 0; index < 3; index++) {
+      const lease = new ProducerLease(() => {}, () => {});
+      await manager.bind(integration, 'chat', lease);
+      lease.close();
+    }
+    expect(subscribe).toHaveBeenCalledTimes(1);
+  } finally { subscribe.mockRestore(); }
+});
+
+test('does not retain replaced integrations after their final binding closes', async () => {
+  const manager = new ProducerBindings(() => {}, () => {}, () => {}, () => {}, () => {});
+  async function retire() {
+    const producer = createProducerFixture();
+    const integration = { producers: producer.producers };
+    const lease = new ProducerLease(() => {}, () => {});
+    await manager.bind(integration, 'chat', lease);
+    lease.close();
+    return new WeakRef(integration);
+  }
+  const references = [];
+  for (let index = 0; index < 10; index++) references.push(await retire());
+  for (let index = 0; index < 3; index++) {
+    await new Promise(resolve => setImmediate(resolve));
+    Bun.gc(true);
+  }
+  expect(references.filter(reference => reference.deref())).toHaveLength(0);
+  // Uses the manager after collection so the test cannot discard its ownership root.
+  const replacement = createProducerFixture();
+  const lease = new ProducerLease(() => {}, () => {});
+  await manager.bind({ producers: replacement.producers }, 'chat', lease);
+  lease.close();
+});
 
 test('publication failure closes only its captured lease even if terminal persistence fails', async () => {
   const producer = createProducerFixture();

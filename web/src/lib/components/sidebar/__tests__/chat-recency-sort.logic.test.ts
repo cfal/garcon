@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { chatActivityTimeMs } from '$shared/chat-order-sort';
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import { isSidebarChatInactive } from '../chat-inactivity';
 import {
 	prioritizeOptimisticArchives,

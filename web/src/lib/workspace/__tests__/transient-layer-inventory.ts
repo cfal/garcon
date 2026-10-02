@@ -7,12 +7,11 @@ export const TRANSIENT_PRIMITIVE_CONTENT = [
 ] as const;
 
 export const CUSTOM_TRANSIENT_SOURCES = [
-	'components/chat/DirectoryBrowser.svelte',
+	'components/project-paths/DirectoryBrowser.svelte',
 	'components/chat/FileMentionMenu.svelte',
 	'components/chat/NewChatForm.svelte',
 	'components/chat/PromptComposer.svelte',
 	'components/chat/SlashCommandMenu.svelte',
-	'components/git/GitCommentPopover.svelte',
 	'components/layout/AppShell.svelte',
 	'components/shared/CommandMenu.svelte',
 ] as const;

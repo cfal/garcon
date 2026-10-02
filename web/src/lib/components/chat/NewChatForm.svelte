@@ -3,7 +3,7 @@
 	// to NewChatFormState and retains only DOM interactions and template logic.
 
 	import { onDestroy, onMount, tick, untrack } from 'svelte';
-	import type { NewChatConfig } from '$lib/types/app.js';
+	import type { NewChatConfig } from '$lib/chat/sessions/chat-session-types.js';
 	import { NewChatFormState } from '$lib/chat/new-chat/new-chat-form-state.svelte.js';
 	import {
 		chatAttachmentAccept,
@@ -50,8 +50,8 @@
 		getWorkspaceLayout,
 	} from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
-	import ProjectPathField from './ProjectPathField.svelte';
-	import ProjectPinnedPathList from './ProjectPinnedPathList.svelte';
+	import ProjectPathField from '$lib/components/project-paths/ProjectPathField.svelte';
+	import ProjectPinnedPathList from '$lib/components/project-paths/ProjectPinnedPathList.svelte';
 	import GitWorktreePickerModal from '$lib/components/git/GitWorktreePickerModal.svelte';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
 	import FileText from '@lucide/svelte/icons/file-text';
@@ -734,7 +734,7 @@
 						{/if}
 					</div>
 				{:else if form.modelSelectionPending}
-					<p role="status" class="text-sm text-muted-foreground">Loading models...</p>
+					<p role="status" class="text-sm text-muted-foreground">{m.chat_composer_loading_models()}</p>
 				{/if}
 			</div>
 

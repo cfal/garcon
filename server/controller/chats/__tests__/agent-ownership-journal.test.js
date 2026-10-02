@@ -2,10 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:te
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {
-  AgentOwnershipJournal,
-  emptyOwnershipJournalV5,
-} from '../agent-ownership-journal.js';
+import { AgentOwnershipJournal } from '../agent-ownership-journal.js';
+import { emptyOwnershipJournalV5 } from '../agent-ownership-journal-format.js';
 
 const timestamp = '2026-01-01T00:00:00.000Z';
 

@@ -6,7 +6,7 @@
 	import { getLocalSettings, getModelCatalog, getRemoteSettings } from '$lib/context';
 	import type { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 	import type { ConversationMessageChatContext } from '$lib/chat/transcript/conversation-message-context.js';
-	import type { SessionAgentId } from '$lib/types/app';
+	import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
 	import type { ConversationFeedPresentationPort } from '$lib/chat/transcript/conversation-feed-presentation-port.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import {

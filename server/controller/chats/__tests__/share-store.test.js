@@ -9,6 +9,7 @@ import { storedProviderRows } from '../../ledger/__tests__/stored-rows.ts';
 import { ShareStore } from '../share-store.js';
 import { TranscriptRenderingWorker } from '../transcript-rendering/client.ts';
 import { inlineTranscriptRendering } from '../transcript-rendering/__tests__/inline-transcript-rendering.ts';
+import { withFailingDirectorySync } from '../../../common/__tests__/atomic-write-failure.ts';
 
 const AT = '2026-01-01T00:00:00.000Z';
 let workspaceDir;
@@ -125,6 +126,74 @@ afterEach(async () => {
 });
 
 describe('ShareStore', () => {
+  it('reads overlapping pages without loading or caching a whole snapshot', async () => {
+    const store = createStore();
+    await store.init();
+    const created = await store.publish('chat-1', publication(), rows(
+      'x'.repeat(200_000), 'first selected', 'second selected', 'y'.repeat(200_000),
+    ));
+    const readFile = spyOn(fs, 'readFile').mockRejectedValue(new Error('whole-file read forbidden'));
+    try {
+      const pages = await Promise.all([
+        store.getMessages(created.shareToken, () => ({ start: 1, end: 3 })),
+        store.getMessages(created.shareToken, () => ({ start: 2, end: 3 })),
+      ]);
+      expect(pages[0].header.messageCount).toBe(4);
+      expect(pages.map(page => page.messages.map(line => JSON.parse(line).content)))
+        .toEqual([['first selected', 'second selected'], ['second selected']]);
+      expect(readFile).not.toHaveBeenCalled();
+      await expect(store.getMessages(created.shareToken)).rejects.toThrow('whole-file read forbidden');
+    } finally { readFile.mockRestore(); }
+  });
+
+  it('pages cached and legacy snapshots using the same header-qualified range', async () => {
+    await writeDocumentSnapshot('legacy-page');
+    const store = createStore();
+    await store.init();
+    const select = header => ({ start: 0, end: header.messageCount });
+    expect((await store.getMessages('legacy-page', select)).messages).toHaveLength(1);
+    await store.getMessages('legacy-page');
+    expect((await store.getMessages('legacy-page', () => ({ start: 0, end: 0 }))).messages).toEqual([]);
+  });
+
+  it('does not cache snapshots exceeding the byte budget', async () => {
+    const store = new ShareStore(workspaceDir, { rendering: inlineTranscriptRendering, cacheBytes: 1 });
+    await store.init();
+    const created = await store.publish('chat-1', publication(), rows('uncached'));
+    await store.getMessages(created.shareToken);
+    const readFile = spyOn(fs, 'readFile');
+    try {
+      await store.getMessages(created.shareToken);
+      expect(readFile).toHaveBeenCalledTimes(1);
+    } finally { readFile.mockRestore(); }
+  });
+
+  it('evicts least recently read snapshots when their combined bytes exceed the budget', async () => {
+    let now = 0;
+    const store = new ShareStore(workspaceDir, { rendering: inlineTranscriptRendering, cacheBytes: 1_500, now: () => now++ });
+    await store.init();
+    const a = await store.publish('chat-1', publication(), rows('a'.repeat(100)));
+    const b = await store.publish('chat-2', publication({ chatId: 'chat-2' }), rows('b'.repeat(100)));
+    await store.getMessages(a.shareToken);
+    await store.getMessages(b.shareToken);
+    const readFile = spyOn(fs, 'readFile');
+    try {
+      await store.getMessages(b.shareToken);
+      expect(readFile).not.toHaveBeenCalled();
+      await store.getMessages(a.shareToken);
+      expect(readFile).toHaveBeenCalledTimes(1);
+    } finally { readFile.mockRestore(); }
+  });
+
+  it('rejects paged snapshots with a truncated message count', async () => {
+    const fixture = await writePersistedShareFixture();
+    const store = createStore();
+    await store.init();
+    const original = await fs.readFile(fixture.snapshotPath, 'utf8');
+    await fs.writeFile(fixture.snapshotPath, original + '\n{}');
+    expect(await store.getMessages(fixture.token, () => ({ start: 0, end: 1 }))).toBeNull();
+  });
+
   it('stores one message per line and the plain text per token, and keeps only metadata in the index', async () => {
     const store = createStore();
     await store.init();
@@ -270,6 +339,95 @@ describe('ShareStore', () => {
     const indexRaw = JSON.parse(await fs.readFile(path.join(workspaceDir, 'shared-chats.json'), 'utf8'));
     expect(Object.keys(indexRaw.shares)).toEqual([firstEntry.shareToken]);
     expect((await store.getMessages(firstEntry.shareToken)).header.title).toBe('Second title');
+  });
+
+  it('serializes different-chat index commits without exposing uncommitted publications', async () => {
+    const store = createStore();
+    await store.init();
+    const entered = Promise.withResolvers();
+    const release = Promise.withResolvers();
+    const originalRename = fs.rename;
+    let indexWrites = 0;
+    const rename = spyOn(fs, 'rename').mockImplementation(async (source, target) => {
+      if (target === path.join(workspaceDir, 'shared-chats.json') && ++indexWrites === 1) {
+        entered.resolve(); await release.promise;
+      }
+      return originalRename(source, target);
+    });
+    const first = store.publish('chat-1', publication(), rows('first'));
+    let second;
+    try {
+      await entered.promise;
+      expect(store.getEntryByChatId('chat-1')).toBeNull();
+      second = store.publish('chat-2', publication({ chatId: 'chat-2' }), rows('second'));
+      release.resolve();
+      await Promise.all([first, second]);
+    } finally { release.resolve(); await Promise.allSettled([first, second]); rename.mockRestore(); }
+    const restarted = createStore();
+    await restarted.init();
+    expect(restarted.getEntryByChatId('chat-1')).not.toBeNull();
+    expect(restarted.getEntryByChatId('chat-2')).not.toBeNull();
+  });
+
+  it.each(['publish', 'revoke'])('leaves confirmed index visibility and files intact after a failed %s commit', async operation => {
+    const store = createStore();
+    await store.init();
+    const existing = await store.publish('chat-1', publication(), rows('original'));
+    const originalRename = fs.rename;
+    const rename = spyOn(fs, 'rename').mockImplementation(async (source, target) => {
+      if (target === path.join(workspaceDir, 'shared-chats.json')) throw new Error('Synthetic index failure');
+      return originalRename(source, target);
+    });
+    try {
+      const writing = operation === 'publish'
+        ? store.publish('chat-2', publication({ chatId: 'chat-2' }), rows('new'))
+        : store.revokeShareByChatId('chat-1');
+      await expect(writing).rejects.toMatchObject({ renamed: false });
+    } finally { rename.mockRestore(); }
+    expect(store.getEntryByChatId('chat-2')).toBeNull();
+    expect(store.getEntryByChatId('chat-1')).toEqual(existing);
+    expect((await store.getMessages(existing.shareToken)).messages).toHaveLength(1);
+    const restarted = createStore();
+    await restarted.init();
+    expect(restarted.getEntryByChatId('chat-2')).toBeNull();
+    expect(restarted.getEntryByChatId('chat-1')).toEqual(existing);
+  });
+
+  it.each(['publish', 'revoke'])('fences reads and writes after an uncertain %s index commit', async operation => {
+    const store = createStore();
+    await store.init();
+    const existing = await store.publish('chat-1', publication(), rows('original'));
+    await expect(withFailingDirectorySync(workspaceDir, () => operation === 'publish'
+      ? store.publish('chat-2', publication({ chatId: 'chat-2' }), rows('new'))
+      : store.revokeShareByChatId('chat-1'))).rejects.toMatchObject({ renamed: true });
+    const candidate = await fs.readFile(path.join(workspaceDir, 'shared-chats.json'), 'utf8');
+    expect(() => store.getEntryByChatId('chat-1')).toThrow('durability is unknown');
+    await expect(store.getMessages(existing.shareToken)).rejects.toThrow('durability is unknown');
+    await expect(store.getHeader(existing.shareToken)).rejects.toThrow('durability is unknown');
+    await expect(store.getTextPath(existing.shareToken)).rejects.toThrow('durability is unknown');
+    await expect(store.publish('chat-3', publication({ chatId: 'chat-3' }), [])).rejects.toThrow('durability is unknown');
+    await expect(store.revokeShareByChatId('chat-1')).rejects.toThrow('durability is unknown');
+    expect(await fs.readFile(path.join(workspaceDir, 'shared-chats.json'), 'utf8')).toBe(candidate);
+    const restarted = createStore();
+    await restarted.init();
+    expect(restarted.getEntryByChatId(operation === 'publish' ? 'chat-2' : 'chat-1') === null).toBe(operation === 'revoke');
+  });
+
+  it('persists revocation before snapshot cleanup can fail', async () => {
+    const store = createStore();
+    await store.init();
+    const entry = await store.publish('chat-1', publication(), rows('original'));
+    const originalUnlink = fs.unlink;
+    const unlink = spyOn(fs, 'unlink').mockImplementation(async target => {
+      if (target === snapshotPath(entry.shareToken)) throw new Error('Synthetic cleanup failure');
+      return originalUnlink(target);
+    });
+    try { await expect(store.revokeShareByChatId('chat-1')).rejects.toThrow('Synthetic cleanup failure'); }
+    finally { unlink.mockRestore(); }
+    expect(await store.getHeader(entry.shareToken)).toBeNull();
+    const restarted = createStore();
+    await restarted.init();
+    expect(await restarted.getHeader(entry.shareToken)).toBeNull();
   });
 
   it('keeps a republication that lands while an older snapshot converts', async () => {

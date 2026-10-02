@@ -12,6 +12,7 @@ import { parseGarconSchedule, garconScheduleActionContent } from '../../../../co
 import { AtomicJsonWriteError } from '../../../common/json-file-store.ts';
 import { ExecutorReferenceWrites } from '../../executors/reference-writes.js';
 import { withPromiseTimeout } from '../../../common/promise-timeout.js';
+import { withFailingDirectorySync } from '../../../common/__tests__/atomic-write-failure.ts';
 
 const createdDirs = [];
 
@@ -132,6 +133,33 @@ async function sameChatScheduler() {
   });
   return { store, cron, scheduler };
 }
+
+it('does not dispatch a registered occurrence after an uncertain schedule mutation', async () => {
+  const dir = await tempDir();
+  const store = new ScheduledPromptStore(dir);
+  await store.init();
+  const scheduledFor = '2030-01-01T09:00:00.000Z';
+  const prompt = recurringPrompt(scheduledFor);
+  await store.create(prompt, 0);
+  const cron = new FakeCron();
+  const dispatch = mock(async () => ({ message: 'Synthetic dispatch' }));
+  const scheduler = new ScheduledPromptScheduler({
+    inspectProject: inspectProjectDirectory, store, cron, runLog: new ScheduledPromptRunLog(),
+    agents: agentCapabilities(), preambles: preambleCatalog(),
+    chats: { getChat: () => ({}) }, dispatcher: { dispatch },
+  });
+  await scheduler.start(new Date('2029-12-31T00:00:00.000Z'));
+  const occurrence = cron.jobs.find(job => job.expression !== '@hourly');
+  try {
+    await expect(withFailingDirectorySync(dir, () => store.remove(prompt.id, store.revision)))
+      .rejects.toMatchObject({ renamed: true });
+    const now = spyOn(Date, 'now').mockReturnValue(Date.parse(scheduledFor));
+    try { await occurrence.fire(); }
+    finally { now.mockRestore(); }
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(JSON.parse(await fs.readFile(path.join(dir, 'scheduled-prompts.json'), 'utf8')).prompts).toEqual([]);
+  } finally { scheduler.stop(); }
+});
 
 function commandScheduleRequest(content) {
   const command = parseGarconSchedule(content);

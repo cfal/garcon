@@ -1,4 +1,4 @@
-import { GitDomainError } from './git-types.js';
+import { GitDomainError } from './git-domain-error.js';
 import { readOnlyGitOptions, runGit } from './run.js';
 
 export function assertSafeRef(ref: string, label: string): void {

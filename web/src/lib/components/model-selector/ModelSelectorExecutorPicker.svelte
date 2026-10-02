@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages.js';
 	import type { ModelSelectorState } from './model-selector-state.svelte.ts';
 	import { executorStatus } from '$lib/executors/executors-store.svelte.js';
 	import Network from '@lucide/svelte/icons/network';
@@ -22,11 +23,11 @@
 	class="h-full min-h-0 overflow-y-auto overscroll-contain p-1"
 >
 	<div class="flex items-center gap-2 px-2 py-1.5 text-xs font-medium text-muted-foreground">
-		<Network class="size-4 text-file-icon-folder" />Executor
+		<Network class="size-4 text-file-icon-folder" />{m.executors_label()}
 	</div>
 	{#if !selector.executors.some((executor) => executor.id === selector.executorId)}
 		<p class="break-words px-2 py-1.5 text-sm text-muted-foreground">
-			{selector.draftExecutorLabel} (Unavailable)
+			{selector.draftExecutorLabel} ({m.common_unavailable()})
 		</p>
 	{/if}
 	{#each selector.executors as executor (executor.id)}

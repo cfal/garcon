@@ -12,7 +12,7 @@
 import crypto from 'crypto';
 import type { ForkRunCommandResponse } from '../../../common/chat-command-contracts.js';
 import type { SelfHandoffRunCommandRequest } from '../../../common/self-handoff-contracts.js';
-import type { ChatRegistryEntry } from '../chats/store.js';
+import type { ChatRegistryEntry } from '../chats/registry-contracts.js';
 import { createLogger } from '../../common/log.js';
 import { createPreambleBoundaryBinding } from '../preambles/boundary.js';
 import { commandLedgerKey, PRE_SCHEDULE_FAILURE_ERROR_CODE } from './command-ledger.js';

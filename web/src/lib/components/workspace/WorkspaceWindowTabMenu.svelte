@@ -13,7 +13,7 @@
 		getNotifications,
 		getWorkspaceCoordinator,
 	} from '$lib/context';
-	import { formatCompactProjectPath } from '$lib/chat/project-paths/compact-project-path';
+	import { formatCompactProjectPath } from '$lib/project-paths/compact-project-path';
 	import type {
 		ActiveSurfaceKind,
 		WorkspaceWindowEdge,

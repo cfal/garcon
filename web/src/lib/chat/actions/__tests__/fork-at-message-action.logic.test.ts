@@ -105,7 +105,7 @@ describe('canUseForkAtMessageAction', () => {
 });
 
 describe('fork-at-message view recovery', () => {
-	it('remaps the selected message by identity and occurrence after renumbering', () => {
+	it('refuses to remap duplicate content when a bounded window shifts', () => {
 		const duplicate = new AssistantMessage('2026-07-29T00:00:00.000Z', 'same reply');
 		const selection = selectForkAtMessage([
 			{ ordinal: 4, message: duplicate },
@@ -116,11 +116,7 @@ describe('fork-at-message view recovery', () => {
 		expect(remapForkAtMessage([
 			{ ordinal: 8, message: new AssistantMessage('2026-07-29T01:00:00.000Z', 'same reply') },
 			{ ordinal: 9, message: new AssistantMessage('2026-07-29T01:00:01.000Z', 'same reply') },
-		], 'view-2', selection!)).toMatchObject({
-			ordinal: 9,
-			transcriptViewId: 'view-2',
-			occurrence: 2,
-		});
+		], 'view-2', selection!)).toBeNull();
 	});
 
 	it('uses user message identity when presentation fields change', () => {
@@ -140,5 +136,17 @@ describe('fork-at-message view recovery', () => {
 			ordinal: 7,
 			transcriptViewId: 'view-2',
 		});
+	});
+
+	it('refuses missing or duplicate client identities in either window', () => {
+		const message = new UserMessage('2026-07-29T00:00:00.000Z', 'prompt', undefined, {
+			clientMessageId: 'message-1',
+		});
+		const entries = [{ ordinal: 1, message }, { ordinal: 2, message }];
+		const selection = selectForkAtMessage(entries.slice(0, 1), 'view-1', 1)!;
+		expect(remapForkAtMessage([], 'view-2', selection)).toBeNull();
+		expect(remapForkAtMessage(entries, 'view-2', selection)).toBeNull();
+		const ambiguous = selectForkAtMessage(entries, 'view-1', 1)!;
+		expect(remapForkAtMessage(entries.slice(0, 1), 'view-2', ambiguous)).toBeNull();
 	});
 });

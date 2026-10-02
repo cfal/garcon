@@ -110,7 +110,7 @@
 				</span>
 				{#if commit.parents.length > 1}
 					<span class="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-						merge
+						{m.git_commit_merge()}
 					</span>
 				{/if}
 			</div>

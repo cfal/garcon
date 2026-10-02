@@ -1,9 +1,10 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages.js';
 	import { Dialog as DialogPrimitive } from 'bits-ui';
 	import DialogPortal from './dialog-portal.svelte';
 	import XIcon from '@lucide/svelte/icons/x';
 	import type { Snippet } from 'svelte';
-	import * as Dialog from './index.js';
+	import DialogOverlay from './dialog-overlay.svelte';
 	import { cn, type WithoutChildrenOrChild } from '$lib/utils/cn.js';
 	import type { ComponentProps } from 'svelte';
 	import { getOptionalTransientLayers } from '$lib/context';
@@ -57,7 +58,7 @@
 </script>
 
 <DialogPortal {...portalProps}>
-	<Dialog.Overlay />
+	<DialogOverlay />
 	<DialogPrimitive.Content
 		bind:ref
 		data-slot="dialog-content"
@@ -73,7 +74,7 @@
 				class="ring-offset-background focus-visible:ring-ring absolute end-4 top-4 rounded-(--dialog-close-radius) opacity-70 transition-opacity hover:opacity-100 focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-hidden disabled:pointer-events-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
 			>
 				<XIcon />
-				<span class="sr-only">Close</span>
+				<span class="sr-only">{m.common_close()}</span>
 			</DialogPrimitive.Close>
 		{/if}
 	</DialogPrimitive.Content>

@@ -10,8 +10,7 @@ import {
 	steerSubmissionRejection,
 	steerSubmissionRejectionNotice,
 } from './steer-submission-policy.js';
-import type { ChatSessionRecord } from '$lib/types/chat-session';
-import type { SessionAgentId } from '$lib/types/app';
+import type { ChatSessionRecord, SessionAgentId } from '$lib/chat/sessions/chat-session-types';
 import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
 import { parseForkCommand } from '$lib/chat/composer/fork-command.js';
 import { parseHandoffCommand } from '$lib/chat/composer/handoff-command.js';

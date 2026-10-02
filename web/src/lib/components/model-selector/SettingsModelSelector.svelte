@@ -1,6 +1,6 @@
 <script lang="ts">
 	import ModelSelectorPopover from './ModelSelectorPopover.svelte';
-	import type { SessionAgentId } from '$lib/types/app';
+	import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
 	import type {
 		ModelSelectorChange,
 		ModelSelectorMode,

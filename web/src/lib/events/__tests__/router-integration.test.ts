@@ -6,7 +6,7 @@ import type { WsConnection } from '$lib/ws/connection.svelte';
 import type { DrainHandle } from '$lib/ws/drain';
 import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
 import { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import { StartupCoordinator } from '$lib/chat/conversation/startup-coordinator.js';
 import { getChatSnapshot } from '$lib/api/chats.js';
 import type { ChatSnapshotResponse } from '$shared/chat-snapshot';

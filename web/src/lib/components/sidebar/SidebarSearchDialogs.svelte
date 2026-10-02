@@ -15,7 +15,7 @@
 		EMPTY_TRANSCRIPT_SEARCH_INVALIDATION,
 		transcriptSearchInvalidationProjection,
 	} from '$lib/sidebar/search/transcript-search-invalidation.js';
-	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import type { SavedChatSearch } from '$lib/api/settings';
 	import type { ChatSearchSort } from '$shared/chat-search';
 	import SavedSearchEditorDialog from './SavedSearchEditorDialog.svelte';

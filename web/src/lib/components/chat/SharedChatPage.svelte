@@ -13,7 +13,7 @@
 		CliRowMessage,
 		isToolUseMessage,
 	} from '$shared/chat-types';
-	import Markdown from '$lib/components/chat/Markdown.svelte';
+	import Markdown from '$lib/components/rich-text/Markdown.svelte';
 	import MessageRenderFallback from '$lib/components/chat/MessageRenderFallback.svelte';
 	import ChatToolEventRenderer from '$lib/components/chat/tools/ChatToolEventRenderer.svelte';
 	import ChatEventCard from '$lib/components/chat/rows/ChatEventCard.svelte';
@@ -380,7 +380,7 @@
 			class="max-w-4xl mx-auto px-4 sm:px-6 flex items-center justify-between text-xs text-muted-foreground"
 		>
 			<span>{m.shared_view_via_app()}</span>
-			<span>{messages.length} of {totalMessages} messages</span>
+			<span>{m.shared_view_message_count({ count: messages.length, total: totalMessages })}</span>
 		</div>
 	</footer>
 </div>

@@ -15,7 +15,7 @@
 		setTransientLayers,
 	} from '$lib/context';
 	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
-	import type { NewChatConfig } from '$lib/types/app.js';
+	import type { NewChatConfig } from '$lib/chat/sessions/chat-session-types.js';
 	import type { PreamblesSnapshot } from '$shared/preambles';
 	import type { ChatId } from '$shared/chat-id';
 	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';

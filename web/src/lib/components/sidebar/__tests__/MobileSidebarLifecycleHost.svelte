@@ -20,7 +20,7 @@
 		createSidebarSearchStore,
 		type SidebarSearchStore,
 	} from '$lib/sidebar/search/sidebar-search-store.svelte.js';
-	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import type {
 		SidebarChatGrouping,
 		SidebarInactivityDuration,

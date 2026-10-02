@@ -946,15 +946,13 @@ describe('TranscriptSearchController v9', () => {
       });
     }
 
-    await waitFor(() => fixture.syncCalls.length === 3);
+    await waitFor(() => fixture.syncCalls.length === 1);
     expect(fixture.syncCalls.map(({ request, frames }) => ({
       expectedAfterOrdinal: request.expectedAfterOrdinal,
       targetThrough: request.targetThrough,
       frames,
     }))).toEqual([
-      { expectedAfterOrdinal: 2, targetThrough: 3, frames: [{ rows: [], advanceTo: 3 }] },
-      { expectedAfterOrdinal: 3, targetThrough: 4, frames: [{ rows: [], advanceTo: 4 }] },
-      { expectedAfterOrdinal: 4, targetThrough: 5, frames: [{ rows: [], advanceTo: 5 }] },
+      { expectedAfterOrdinal: 2, targetThrough: 5, frames: [{ rows: [], advanceTo: 5 }] },
     ]);
     await fixture.controller.close();
   });
@@ -1213,11 +1211,14 @@ describe('TranscriptSearchController v9', () => {
     const a2 = row(2, 'a2', 'view-a');
     const a3 = row(3, 'a3', 'view-a');
     const b2 = row(2, 'b2', 'view-b');
-    chats[0][1].rows.push(a2, a3);
+    chats[0][1].rows.push(a2);
     chats[1][1].rows.push(b2);
     fixture.listener({ type: 'rows', chatId: 'chat-a', viewId: transcriptViewId('view-a'), rows: [a2] });
-    fixture.listener({ type: 'rows', chatId: 'chat-a', viewId: transcriptViewId('view-a'), rows: [a3] });
     fixture.listener({ type: 'rows', chatId: 'chat-b', viewId: transcriptViewId('view-b'), rows: [b2] });
+
+    await waitFor(() => fixture.logger.warn.mock.calls.length === 1);
+    chats[0][1].rows.push(a3);
+    fixture.listener({ type: 'rows', chatId: 'chat-a', viewId: transcriptViewId('view-a'), rows: [a3] });
 
     await waitFor(() => fixture.service.syncChat.mock.calls.length === 3);
     await waitFor(() => fixture.logger.warn.mock.calls.length === 1);
@@ -1255,16 +1256,68 @@ describe('TranscriptSearchController v9', () => {
         rows: [appended],
       });
     }
-    await waitFor(() => fixture.service.syncChat.mock.calls.length === appendCount);
-    await waitFor(() => fixture.syncCalls.length === appendCount);
-    expect(fixture.ledger.replayRows).not.toHaveBeenCalled();
+    await waitFor(() => fixture.syncCalls[0]?.frames.length === 1);
+    expect(fixture.service.syncChat).toHaveBeenCalledTimes(1);
+    expect(fixture.ledger.replayRows).toHaveBeenCalledTimes(1);
     expect(fixture.syncCalls.reduce((total, call) => (
       total + call.frames.reduce((frameTotal, frame) => frameTotal + frame.rows.length, 0)
     ), 0)).toBe(appendCount);
     expect(fixture.service.syncChat.mock.calls.at(-1)[0]).toMatchObject({
-      expectedAfterOrdinal: appendCount + 1,
+      expectedAfterOrdinal: 2,
       targetThrough: appendCount + 2,
     });
     await fixture.controller.close();
+  });
+
+  test.each(['append', 'replace', 'delete'])('coalesces a stalled indexer backlog and preserves %s fencing', async action => {
+    const held = deferred();
+    const entered = deferred();
+    let block = false;
+    const fixture = harness({
+      async syncChat(request, frames) {
+        if (block) {
+          block = false;
+          entered.resolve();
+          await held.promise;
+        }
+        for await (const frame of request.source(request.expectedAfterOrdinal)) frames.push(frame);
+      },
+    });
+    await fixture.controller.start();
+    await waitFor(() => fixture.resyncScopes[0]?.completed === 1);
+    fixture.service.syncChat.mockClear();
+    fixture.syncCalls.length = 0;
+    block = true;
+    const emit = ordinal => {
+      const appended = row(ordinal, `synthetic-${ordinal}`);
+      fixture.chats.get('chat-0001').rows.push(appended);
+      fixture.listener({ type: 'rows', chatId: 'chat-0001', viewId: transcriptViewId('view-0001'), rows: [appended] });
+    };
+    emit(3);
+    await entered.promise;
+    for (let ordinal = 4; ordinal <= 2_003; ordinal++) emit(ordinal);
+    expect(fixture.service.syncChat).toHaveBeenCalledTimes(1);
+    if (action === 'replace') {
+      fixture.chats.set('chat-0001', { viewId: transcriptViewId('view-0002'), rows: [row(1, 'replacement', 'view-0002')] });
+      fixture.listener({ type: 'view-replaced', chatId: 'chat-0001', viewId: transcriptViewId('view-0002') });
+    } else if (action === 'delete') {
+      fixture.chats.delete('chat-0001');
+      fixture.controller.deleteChat('chat-0001');
+    }
+    held.resolve();
+    try {
+      if (action === 'delete') {
+        await waitFor(() => fixture.service.deleteChat.mock.calls.length === 1);
+        expect(fixture.service.syncChat).toHaveBeenCalledTimes(1);
+      } else {
+        const through = action === 'replace' ? 1 : 2_003;
+        await waitFor(() => fixture.syncCalls.some(call => call.frames.at(-1)?.advanceTo === through));
+        expect(fixture.service.syncChat).toHaveBeenCalledTimes(2);
+        expect(fixture.service.syncChat.mock.calls.at(-1)[0]).toMatchObject({
+          transcriptViewId: action === 'replace' ? 'view-0002' : 'view-0001', targetThrough: through,
+        });
+        expect(fixture.syncCalls.flatMap(call => call.frames).every(frame => frame.rows.length <= 512)).toBe(true);
+      }
+    } finally { await fixture.controller.close(); }
   });
 });

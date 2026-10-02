@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { formatCompactProjectPath } from '$lib/chat/project-paths/compact-project-path';
+	import { formatCompactProjectPath } from '$lib/project-paths/compact-project-path';
 	import WorkspaceWindowCopyItem from './WorkspaceWindowCopyItem.svelte';
 	import {
 		dropdownMenuPrimitives,

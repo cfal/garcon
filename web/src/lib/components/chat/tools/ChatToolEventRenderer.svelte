@@ -18,7 +18,7 @@
 	import ChatToolFileListView from './content/ChatToolFileListView.svelte';
 	import ChatToolPlainTextView from './content/ChatToolPlainTextView.svelte';
 	import ChatToolTodoListView from './content/ChatToolTodoListView.svelte';
-	import CodeBlock from '../CodeBlock.svelte';
+	import CodeBlock from '$lib/components/rich-text/CodeBlock.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import type {
 		ConversationDisclosureKind,

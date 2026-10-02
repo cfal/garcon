@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { TranscriptSearchStatusRouter } from '../transcript-search-status-router.svelte';
+import { TranscriptSearchStatusRouter } from '../transcript-search-status-router';
+import { WsConnection } from '$lib/ws/connection.svelte';
 import type { TranscriptSearchStatusV1 } from '$shared/chat-search';
 
 const { drain, cleanup, createDrainCursor } = vi.hoisted(() => {
@@ -41,7 +42,7 @@ describe('TranscriptSearchStatusRouter', () => {
 			{ data: { type: 'settings-changed', settings: {} } },
 			{ data: { type: 'transcript-search-status', status: next } },
 		]);
-		const router = new TranscriptSearchStatusRouter({} as never, onStatus);
+		const router = new TranscriptSearchStatusRouter(new WsConnection(), onStatus);
 
 		router.start();
 		router.tick();
@@ -53,7 +54,7 @@ describe('TranscriptSearchStatusRouter', () => {
 	it('ignores unrelated frames and releases its drain cursor', () => {
 		const onStatus = vi.fn();
 		drain.mockReturnValue([{ data: { type: 'chat-session-created', chatId: 'chat-1' } }]);
-		const router = new TranscriptSearchStatusRouter({} as never, onStatus);
+		const router = new TranscriptSearchStatusRouter(new WsConnection(), onStatus);
 
 		router.start();
 		router.tick();

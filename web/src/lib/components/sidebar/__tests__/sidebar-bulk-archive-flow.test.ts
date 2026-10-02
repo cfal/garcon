@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as chatsApi from '$lib/api/chats';
 import { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte';
-import type { ChatSession } from '$lib/types/session';
+import type { ChatListEntry } from '$shared/chat-list';
 import SidebarHost from './SidebarHost.svelte';
 
 vi.mock('$lib/api/chats', async () => {
@@ -14,7 +14,7 @@ function makeServerChat(
 	id: string,
 	archived = false,
 	lastActivityAt: string | null = null,
-): ChatSession {
+): ChatListEntry {
 	return {
 		id,
 		projectPath: '/workspace/repo',

@@ -4,14 +4,13 @@ import { forkFailureNotice, requestChatFork } from '$lib/chat/actions/fork-chat-
 import { errorDetail } from '$lib/chat/conversation/conversation-submission-helpers.js';
 import { HandoffForkConfirmationState } from '$lib/chat/conversation/handoff-fork-confirmation.svelte.js';
 import { createClientChatId } from '$shared/client-chat-id';
-import { SidebarController } from '$lib/components/sidebar/sidebar-controller.svelte';
 import type { ChatArchiveMutation } from '$lib/chat/sessions/chat-sessions-contract';
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import type {
 	ChatActionDialogsState,
 	ChatProjectPathDialog,
 } from './chat-action-dialogs-state.svelte';
-import { updateChatProjectPath } from '$lib/api/chats.js';
+import { getChatDetails, togglePinned, updateChatProjectPath } from '$lib/api/chats.js';
 import { resolveProject } from '$lib/api/project-resolution.js';
 import { effectiveExecutorId } from '$shared/executors';
 import type { ChatListEntry } from '$shared/chat-list';
@@ -46,34 +45,19 @@ export interface ChatActionControllerDeps {
 }
 
 export class ChatActionController {
-	#sidebarController: SidebarController;
 	#projectPathRequestGeneration = new Map<string, symbol>();
 	readonly #pendingForks = new Set<string>();
 	readonly handoffForkConfirmation = new HandoffForkConfirmationState();
 
-	constructor(private readonly deps: ChatActionControllerDeps) {
-		this.#sidebarController = new SidebarController({
-			get onQuietRefresh() {
-				return deps.onQuietRefresh;
-			},
-			get isArchiveMutationPending() {
-				return deps.isArchiveMutationPending;
-			},
-			get startArchivingChats() {
-				return deps.startArchivingChats;
-			},
-			get startUnarchivingChats() {
-				return deps.startUnarchivingChats;
-			},
-		});
-	}
+	constructor(private readonly deps: ChatActionControllerDeps) {}
 
 	async togglePinned(chatId: string): Promise<void> {
 		if (this.deps.isArchiveMutationPending(chatId)) return;
 		const chat = this.deps.chats.find((entry) => entry.id === chatId);
 		const wasPinned = chat?.isPinned === true;
 		await this.run('Failed to toggle pinned:', (detail) => m.notifications_pin_chat_failed({ detail }), async () => {
-			await this.#sidebarController.togglePinned(chatId);
+			await togglePinned(chatId);
+			await this.deps.onQuietRefresh();
 			if (!wasPinned && this.deps.selectedChatId === chatId) {
 				this.deps.requestSidebarRecenter();
 			}
@@ -131,7 +115,7 @@ export class ChatActionController {
 
 	async loadDetails(chatId: string, dialogs: ChatActionDialogsState): Promise<void> {
 		try {
-			const details = await this.#sidebarController.loadDetails(chatId);
+			const details = await getChatDetails(chatId);
 			dialogs.completeDetails(chatId, {
 				firstMessage: details.firstMessage,
 				createdAt: details.createdAt,

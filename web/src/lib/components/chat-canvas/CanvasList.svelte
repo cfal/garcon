@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { CanvasContent } from '$shared/chat-canvas';
-	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import { boxChats } from '$lib/chat-canvas/canvas-layout';
 	import * as m from '$lib/paraglide/messages.js';
 	import CanvasChatCard from './CanvasChatCard.svelte';

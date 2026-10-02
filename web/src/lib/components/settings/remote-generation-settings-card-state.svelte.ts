@@ -7,7 +7,7 @@ import type {
 } from '$lib/components/model-selector/model-selector-types';
 import * as m from '$lib/paraglide/messages.js';
 import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
-import type { SessionAgentId } from '$lib/types/app';
+import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
 import type { ApiProtocol } from '$shared/api-providers';
 import { normalizeThinkingMode } from '$shared/chat-modes';
 import { generationModelTestConfigurationKey } from '$shared/generation-test-contracts';

@@ -34,7 +34,7 @@ export class ProducerBindings {
     readonly lease: TranscriptProducerLease;
     readonly binding: AgentProducerBinding;
   }>();
-  readonly #subscriptions = new Map<AgentIntegration, () => void>();
+  readonly #subscriptions = new WeakSet<AgentIntegration>();
   readonly #progress = new Map<string, () => Promise<void>>();
 
   constructor(
@@ -101,7 +101,7 @@ export class ProducerBindings {
 
   #subscribe(integration: AgentIntegration): void {
     if (!this.#subscriptions.has(integration)) {
-      const unsubscribe = integration.producers.subscribe(({ binding, event }) => {
+      integration.producers.subscribe(({ binding, event }) => {
         // Matches the route's own reference rather than the integration's live
         // scope, which a remote executor cannot report while a replacement
         // session installs and replays retained events.
@@ -141,7 +141,7 @@ export class ProducerBindings {
           }
         }
       });
-      this.#subscriptions.set(integration, unsubscribe);
+      this.#subscriptions.add(integration);
     }
   }
 }

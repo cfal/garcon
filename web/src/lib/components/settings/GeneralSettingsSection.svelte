@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { getRemoteSettings } from '$lib/context';
-	import type { PinnedInsertPosition } from '$lib/types/session.js';
+	import type { PinnedInsertPosition } from '$shared/settings.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import AgentCommandsSettingsCard from './AgentCommandsSettingsCard.svelte';
 	import AppTitleSettingsCard from './AppTitleSettingsCard.svelte';

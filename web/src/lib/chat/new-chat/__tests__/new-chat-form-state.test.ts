@@ -8,7 +8,7 @@ import { ExecutorsStore } from '$lib/executors/executors-store.svelte';
 import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 import type { GitWorktreeItem } from '$lib/api/git';
 import type { ModelOption } from '$lib/agents/model-catalog-store.svelte';
-import type { SessionAgentId } from '$lib/types/app';
+import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
 import {
 	findModelForSelection,

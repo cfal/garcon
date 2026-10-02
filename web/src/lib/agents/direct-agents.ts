@@ -1,5 +1,5 @@
 import * as m from '$lib/paraglide/messages.js';
-import type { SessionAgentId } from '$lib/types/app';
+import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
 import {
 	DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
 	DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,

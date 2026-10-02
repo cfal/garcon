@@ -53,7 +53,7 @@ const DIAGRAMS = [
 describe("Mermaid theme contrast", () => {
   test("keeps rendered flowchart and Gantt labels readable in every renderer theme", async () => {
     const javascript = await buildWebBrowserEntry(
-      "src/lib/components/chat/mermaid-loader.ts",
+      "src/lib/components/rich-text/mermaid-loader.ts",
     );
     const browser = await chromium.launch({ headless: true });
     const context = await browser.newContext();

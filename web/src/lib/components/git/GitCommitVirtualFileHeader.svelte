@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages.js';
 	import FileText from '@lucide/svelte/icons/file-text';
 	import type { GitVirtualFileHeaderRow } from '$lib/git/review/git-virtual-review-document.svelte.js';
 
@@ -46,7 +47,7 @@
 	>
 		{row.file.path}
 		{#if row.file.originalPath}
-			<span class="ml-1 text-muted-foreground">from {row.file.originalPath}</span>
+			<span class="ml-1 text-muted-foreground">{m.git_file_original_path({ path: row.file.originalPath })}</span>
 		{/if}
 	</button>
 	<span class="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">

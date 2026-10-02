@@ -11,7 +11,7 @@ import type { JsonObject } from '@garcon/common/json';
 import type { NativeSeedReceipt } from '@garcon/common/transcript-seed';
 import type { AgentCommandImage } from '@garcon/common/ws-requests';
 import type { AgentNativeSessionRef } from '@garcon/server-agent-interface';
-import type { CarryOverSegmentRef } from '../chats/store.js';
+import type { CarryOverSegmentRef } from '../chats/registry-contracts.js';
 import type { TurnCommandType } from '../lib/turn-identity.js';
 import type { ChatPreambleSelection, PendingPreambleBoundary } from '@garcon/common/preambles';
 

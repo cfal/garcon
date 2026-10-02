@@ -61,7 +61,7 @@ import {
 	ConversationLifecycleState,
 	type LoadingStatus,
 } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
-import type { ChatSessionRecord, ChatStartupConfig } from '$lib/types/chat-session.js';
+import type { ChatSessionRecord, ChatStartupConfig } from '$lib/chat/sessions/chat-session-types.js';
 import { ConversationUiState } from '../conversation-ui-state.svelte.js';
 import { ComposerState } from '$lib/chat/composer/composer.svelte.js';
 import { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';

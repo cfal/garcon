@@ -281,10 +281,3 @@ function descriptorsForSurfaces(
 		return surface ? [surface] : [];
 	});
 }
-
-export function workspaceWindowSurfaceIds(
-	snapshot: WorkspaceLayoutSnapshot,
-	windowId: WorkspaceWindowId,
-): readonly string[] {
-	return windowNodeById(snapshot.desktopRoot, windowId)?.tabs.order ?? [];
-}

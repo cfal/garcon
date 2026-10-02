@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages.js';
 	import Bot from '@lucide/svelte/icons/bot';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import CornerDownLeft from '@lucide/svelte/icons/corner-down-left';
@@ -89,7 +90,7 @@
 				style={triggerStyle}
 			>
 				<Users class="h-3.5 w-3.5 shrink-0" style={iconStyle} aria-hidden="true" />
-				<span class="min-w-0 truncate">Agents</span>
+				<span class="min-w-0 truncate">{m.chat_subagent_management_label()}</span>
 				<span
 					class={cn(
 						'flex shrink-0 items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] leading-none',

@@ -116,7 +116,6 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
   #controlInputDelivery: ControlInputDelivery;
 
   constructor(
-    _workspaceDir: string,
     turnRunner: AgentTurnRunnerPort,
     inputTranscript: AcceptedInputTranscriptPort,
     getDrainOptions: QueueDrainOptionsResolver,

@@ -8,7 +8,7 @@
 	import TicketProjectInput from './TicketProjectInput.svelte';
 	import TicketLabelsInput from './TicketLabelsInput.svelte';
 	import TicketTextEditor from './TicketTextEditor.svelte';
-	import ProjectPinnedPathList from '$lib/components/chat/ProjectPinnedPathList.svelte';
+	import ProjectPinnedPathList from '$lib/components/project-paths/ProjectPinnedPathList.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	let {
 		controller,

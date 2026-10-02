@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { WsConnection } from '$lib/ws/connection.svelte';
 import { ExecutorsStore } from '$lib/executors/executors-store.svelte';
 import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
-import { ExecutorsRouter } from '../executors-router.svelte.ts';
+import { ExecutorsRouter } from '../executors-router.ts';
 
 describe('ExecutorsRouter', () => {
 	it('delivers only valid snapshots, drains once, and unregisters on teardown', () => {

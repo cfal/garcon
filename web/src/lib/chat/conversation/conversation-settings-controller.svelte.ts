@@ -8,7 +8,7 @@ import {
 import type { AgentSettingDescriptor } from '$shared/agent-integration';
 import type { JsonObject, JsonValue } from '$shared/json';
 import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import type {
 	AgentSwitchSelection,
 	ConversationAgentSwitchService,

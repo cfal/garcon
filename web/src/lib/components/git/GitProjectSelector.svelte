@@ -5,7 +5,7 @@
 	import ExecutorSelector from '$lib/components/shared/ExecutorSelector.svelte';
 	import GitTargetDialog from './GitTargetDialog.svelte';
 	import { getRemoteSettings, getTransientLayers, getExecutors } from '$lib/context';
-	import { togglePinnedProjectPathOptimistically } from '$lib/chat/project-paths/pinned-project-path-settings.js';
+	import { togglePinnedProjectPathOptimistically } from '$lib/project-paths/pinned-project-path-settings.js';
 	import type { GitProjectSelectionController } from '$lib/git/targets/git-project-selection.svelte.js';
 	import type { GitTargetCandidate } from '$lib/api/git.js';
 	import * as m from '$lib/paraglide/messages.js';

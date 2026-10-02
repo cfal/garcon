@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages.js';
 	import { untrack } from 'svelte';
 	import { getModelCatalog, getExecutors } from '$lib/context';
 	import { nativeSourceLabelFor } from '$lib/agents/agent-labels';
@@ -26,7 +27,7 @@
 </script>
 
 {#if !ready}
-	<p class="text-sm text-muted-foreground">{executors.label(executorId)} is unavailable.</p>
+	<p class="text-sm text-muted-foreground">{m.executors_named_unavailable({ label: executors.label(executorId) })}</p>
 {:else if section === 'other-agents'}
 	<OtherAgentsSection {settingsAuth} />
 {:else}

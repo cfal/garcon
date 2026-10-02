@@ -20,7 +20,7 @@ import {
 	type WorkspaceWindowId,
 } from '$lib/workspace/surface-types.js';
 import { collectWindowNodes, windowIdOfSurface } from '$lib/workspace/window-tree.js';
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import type { TerminalClientSession } from '$lib/terminal/sessions/terminal-registry.svelte.js';
 import type { ChatSurfaceTransferPort } from '$lib/workspace/chat-surface-transfer.js';
 import type {

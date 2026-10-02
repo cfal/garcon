@@ -8,7 +8,8 @@ import {
 import { chatIdCreatedAt } from '../../../common/chat-id.js';
 import { normalizeTags } from '../../../common/tags.js';
 import type { ChatMetadata } from './metadata-store.js';
-import type { ChatRegistryEntry, IChatRegistry } from './store.js';
+import type { IChatRegistry } from './store.js';
+import type { ChatRegistryEntry } from './registry-contracts.js';
 import { extractFirstLine } from '../lib/text.js';
 import { resolveChatTitle } from './chat-title.js';
 import { carryOverRevision } from './carryover-segments.js';

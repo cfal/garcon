@@ -14,7 +14,7 @@
 	import type { ConversationViewportPort } from '$lib/chat/transcript/conversation-viewport-port.js';
 	import { observeConversationViewportScrollGestures } from '$lib/chat/transcript/conversation-scroll-gesture.js';
 	import { registerManagedWorkspaceScrollRegion } from '$lib/workspace/workspace-scroll-region.js';
-	import type { ChatSessionRecord } from '$lib/types/chat-session.js';
+	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types.js';
 	import type { ChatViewSurfaceId } from '$lib/workspace/surface-types.js';
 	import {
 		getAppShell,

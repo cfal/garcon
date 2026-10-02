@@ -96,7 +96,7 @@ const agents = {
   describeTranscriptSource: mock(async () => null),
 };
 
-const commandLedger = createRouteCommandLedger('chats-read');
+const commandLedger = createRouteCommandLedger();
 const chatListProjector = createRouteChatListProjector({
   registry,
   settings,

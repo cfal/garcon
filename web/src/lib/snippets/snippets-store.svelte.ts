@@ -71,7 +71,7 @@ export class SnippetsStore {
 				try {
 					await this.refresh();
 				} catch {
-					return;
+					if (!joinedExistingLoad && !this.#refreshRequested) return;
 				}
 				if (joinedExistingLoad) this.#refreshRequested = true;
 			} while (this.#refreshRequested);

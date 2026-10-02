@@ -12,7 +12,7 @@ mock.module('../../../common/http-body.js', () => ({
 
 import createAgentRoutes from '../agents.js';
 import createApiProviderRoutes from '../api-providers.js';
-import { ModelCatalogResponseCache } from '../model-catalog-cache.js';
+import { ModelCatalogResponseCache } from '../../agents/model-catalog-cache.js';
 import { AgentCallError, AgentIntegrationError } from '@garcon/server-agent-interface';
 import { AtomicJsonWriteError, CorruptStateFileError } from '../../../common/json-file-store.ts';
 import { DomainError } from '../../../common/domain-error.ts';

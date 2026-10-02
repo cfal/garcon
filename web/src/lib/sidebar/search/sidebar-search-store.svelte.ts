@@ -17,7 +17,7 @@ import {
 	parseChatSearch,
 	type ChatFilterSpec,
 } from '$shared/chat-filter-query';
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import type { TranscriptRowTarget } from '$lib/chat/transcript/transcript-row-navigation.js';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
 import * as m from '$lib/paraglide/messages.js';

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import ChatEventCard from '../rows/ChatEventCard.svelte';
-	import HighlightedCodeText from '../HighlightedCodeText.svelte';
+	import HighlightedCodeText from '$lib/components/rich-text/HighlightedCodeText.svelte';
 
 	interface Props {
 		command: string;

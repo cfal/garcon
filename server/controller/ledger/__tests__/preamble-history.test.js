@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { UserMessage } from '../../../../common/chat-types.ts';
 import { createPreamblePrefix } from '../../../../common/preamble-prefix.ts';
-import { stripResolvedFileMentionContext } from '../../../common/file-mention-context.ts';
+import { stripResolvedFileMentionContext } from '@garcon/common/file-mention-context';
 import {
   collectPreambleHistoryEvidence,
   sanitizeRecordedPreamblePrefixes,

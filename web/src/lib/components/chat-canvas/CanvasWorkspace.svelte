@@ -5,7 +5,7 @@
 	import { CANVAS_MAX_NODES, CANVAS_MAX_CONNECTIONS } from '$shared/chat-canvas';
 	import type { CanvasSession } from '$lib/chat-canvas/canvas-session.svelte';
 	import type { CanvasController } from '$lib/chat-canvas/canvas-controller.svelte';
-	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import { getWorkspaceShortcuts } from '$lib/context';
 	import { setCanvasView } from '$lib/context/canvas-context';
 	import * as m from '$lib/paraglide/messages.js';

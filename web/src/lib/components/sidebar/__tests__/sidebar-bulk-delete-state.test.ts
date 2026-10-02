@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import { SidebarBulkDeleteState } from '../sidebar-bulk-delete-state.svelte';
 
 function makeChat(overrides: Partial<ChatSessionRecord>): ChatSessionRecord {

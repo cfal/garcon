@@ -2,8 +2,8 @@
 	import type { CliRowMessage } from '$shared/chat-types';
 	import { cliPresentationSurfaceClass } from '$lib/chat/transcript/cli-presentation-style';
 	import { cn } from '$lib/utils/cn';
-	import Markdown from '../Markdown.svelte';
-	import type { MarkdownLinkNavigateEvent } from '../Markdown.svelte';
+	import Markdown from '$lib/components/rich-text/Markdown.svelte';
+	import type { MarkdownLinkNavigateEvent } from '$lib/components/rich-text/Markdown.svelte';
 	import type { ResolveChatReference } from '$lib/chat/transcript/chat-reference.js';
 	import ChatEventCard from './ChatEventCard.svelte';
 	import CliPresentationHeader from './CliPresentationHeader.svelte';

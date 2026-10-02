@@ -14,7 +14,7 @@ import {
 	sidebarSectionProjectKey,
 } from '../sidebar-virtual-chat-list';
 import type { SidebarInactivityDuration } from '$lib/stores/local-settings.svelte';
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 
 const TEST_NOW = new Date('2025-06-01T12:00:00.000Z');
 const TEST_INACTIVITY_DURATION: SidebarInactivityDuration = '3-days';

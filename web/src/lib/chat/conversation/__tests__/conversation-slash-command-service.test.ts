@@ -3,8 +3,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { compactChat, forkChat, forkRunChat, selfHandoffRunChat } from '$lib/api/chats.js';
 import { scheduleChatPrompt } from '$lib/api/scheduled-prompts.js';
 import { ApiError } from '$lib/api/client.js';
-import { AssistantMessage } from '$shared/chat-types';
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import { AssistantMessage, UserMessage } from '$shared/chat-types';
+import type { TranscriptMessage } from '$shared/chat-view';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
 import type { ChatTagReconciliationKind } from '$lib/chat/sessions/chat-sessions-contract.js';
 import { ChatTagMutationBlockedError } from '$lib/chat/sessions/chat-tag-mutation-result.js';
@@ -216,7 +217,7 @@ function createDeps(chat = createChat()) {
 					ordinal: 9,
 					message: new AssistantMessage('2026-07-29T00:00:00.000Z', 'selected reply'),
 				},
-			],
+			] as TranscriptMessage[],
 			isUserScrolledUp: true,
 			getCursor: vi.fn(() => cursor),
 			appendLocalNotice,
@@ -1491,6 +1492,12 @@ describe('ConversationSlashCommandService', () => {
 
 	it('refetches, remaps, and retries a stale fork point once', async () => {
 		const { deps, cursor, appendLocalNotice } = createDeps();
+		deps.chatState.entries = [{
+			ordinal: 9,
+			message: new UserMessage('2026-07-29T00:00:00.000Z', 'prompt', undefined, {
+				clientMessageId: 'message-1',
+			}),
+		}];
 		const forked = createServerEntry('chat-2');
 		mockForkChat
 			.mockRejectedValueOnce(
@@ -1503,7 +1510,9 @@ describe('ConversationSlashCommandService', () => {
 			deps.chatState.entries = [
 				{
 					ordinal: 12,
-					message: new AssistantMessage('2026-07-29T01:00:00.000Z', 'selected reply'),
+					message: new UserMessage('2026-07-29T01:00:00.000Z', 'prompt', undefined, {
+						clientMessageId: 'message-1',
+					}),
 				},
 			];
 		});
@@ -1527,6 +1536,26 @@ describe('ConversationSlashCommandService', () => {
 		expect(deps.refetchTranscript).toHaveBeenCalledWith('chat-1');
 		expect(appendLocalNotice).toHaveBeenCalledExactlyOnceWith('progress', 'Forking chat...');
 		expect(deps.sessions.setSelectedChatId).toHaveBeenCalledWith('chat-2');
+	});
+
+	it('does not retry a stale selection against a shifted duplicate window', async () => {
+		const { deps, cursor, appendLocalNotice } = createDeps();
+		const duplicate = new AssistantMessage('2026-07-29T00:00:00.000Z', 'same reply');
+		deps.chatState.entries = [{ ordinal: 8, message: duplicate }, { ordinal: 9, message: duplicate }];
+		mockForkChat.mockRejectedValueOnce(
+			new ApiError(409, 'The view changed', 'STALE_TRANSCRIPT_VIEW', undefined, true),
+		);
+		deps.refetchTranscript.mockImplementationOnce(async () => {
+			cursor.transcriptViewId = 'view-2';
+			deps.chatState.entries = [{ ordinal: 11, message: duplicate }, { ordinal: 12, message: duplicate }];
+		});
+
+		await new ConversationSlashCommandService(deps).forkChat('chat-1', 9);
+
+		expect(mockForkChat).toHaveBeenCalledTimes(1);
+		expect(deps.refetchTranscript).toHaveBeenCalledWith('chat-1');
+		expect(appendLocalNotice).toHaveBeenCalledWith('error', 'Failed to fork chat: The view changed');
+		expect(deps.sessions.setSelectedChatId).not.toHaveBeenCalled();
 	});
 
 	it('preserves the stale fork error when the view refetch fails', async () => {

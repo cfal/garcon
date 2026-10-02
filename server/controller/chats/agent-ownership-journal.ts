@@ -7,66 +7,28 @@ import type { ResolvedAgentHandoffTarget } from '../agents/agent-handoff-types.j
 import type { AgentDirectory } from '../agents/directory.js';
 import { effectiveExecutorId } from '../../../common/executors.js';
 import { toAgentChatReference } from '../agents/integration-chat-reference.js';
-import { isEmptyEarlierJournal, isJournalV5 } from './agent-ownership-journal-format.js';
+import {
+  emptyOwnershipJournalV5,
+  isEmptyEarlierJournal,
+  isJournalV5,
+  type AgentHandoffIntent,
+  type AgentOwnershipJournalFileV5,
+  type DeleteIntentV2,
+} from './agent-ownership-journal-format.js';
 import { AtomicJsonWriteError, writeJsonFileAtomic } from '../../common/json-file-store.js';
 import { parseStoredJson } from '../../common/stored-json.js';
 import type { RetainExecutorReferences } from '../executors/reference-writes.js';
 import { ApiProviderDurableReferences, type RetainProviderReferences } from '../api-providers/reference-writes.js';
 import { createLogger } from '../../common/log.js';
 import { DomainError } from '../../common/domain-error.js';
-import type {
-  ChatRegistryEntry,
-  ChatRegistryResolvedEntry,
-  IChatRegistry,
-} from './store.js';
+import type { ChatRegistryResolvedEntry, IChatRegistry } from './store.js';
+import type { ChatRegistryEntry } from './registry-contracts.js';
 import { carryOverRevision } from './carryover-segments.js';
 import type { TranscriptLedgerService } from '../ledger/service.js';
 import { createPreambleBoundaryBinding } from '../preambles/boundary.js';
 
 const logger = createLogger('chats:ownership-journal');
-export const AGENT_OWNERSHIP_JOURNAL_VERSION = 5 as const;
 const DEFAULT_RELEASE_TIMEOUT_MS = 30_000;
-
-export interface AgentHandoffIntent {
-  readonly version: 5;
-  readonly operationId: string;
-  readonly clientRequestId: string;
-  readonly submittedTargetHash: string;
-  readonly kind: 'handoff';
-  readonly chatId: string;
-  readonly phase: 'commit-decided' | 'registry-committed';
-  readonly source: {
-    readonly executorId?: string | null;
-    readonly agentId: string;
-    readonly agentOwnershipEpoch: string;
-  };
-  readonly target: {
-    readonly execution: ResolvedAgentHandoffTarget;
-    readonly agentOwnershipEpoch: string;
-  };
-  readonly watermark: TranscriptWatermark;
-  readonly createdAt: string;
-}
-
-export interface DeleteIntentV2 {
-  readonly version: 2;
-  readonly operationId: string;
-  readonly kind: 'delete';
-  readonly chatId: string;
-  readonly phase: 'prepared' | 'registry-removed';
-  readonly sourceEpoch: string | null;
-  readonly releaseReferences: readonly (AgentChatReference & { readonly executorId?: string | null })[];
-  readonly createdAt: string;
-}
-
-export interface AgentOwnershipJournalFileV5 {
-  readonly version: typeof AGENT_OWNERSHIP_JOURNAL_VERSION;
-  readonly ownershipIntents: readonly (AgentHandoffIntent | DeleteIntentV2)[];
-}
-
-export function emptyOwnershipJournalV5(): AgentOwnershipJournalFileV5 {
-  return { version: AGENT_OWNERSHIP_JOURNAL_VERSION, ownershipIntents: [] };
-}
 
 export class AgentOwnershipJournal {
   readonly #filePath: string;

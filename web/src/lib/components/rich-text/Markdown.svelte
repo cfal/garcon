@@ -1,0 +1,233 @@
+<!--
+@component
+Renders markdown content with syntax-highlighted code blocks.
+Supports visual variants for assistant, user, presented, and thinking contexts.
+-->
+<script module lang="ts">
+	import {
+		buildUnsupportedHTML,
+		defaultRenderers,
+		type RendererComponent,
+		type Renderers,
+	} from '@humanspeak/svelte-markdown';
+	import { markedKatex } from '@humanspeak/svelte-markdown/extensions/katex';
+	import { createChatReferenceMarkdownExtension } from '$lib/chat/transcript/chat-reference-markdown.js';
+	import MathRenderer from '$lib/components/rich-text/MathRenderer.svelte';
+	import { createLiteralHtmlMarkdownExtension } from '$lib/components/rich-text/markdown-html-policy';
+
+	interface MathRenderers extends Renderers {
+		inlineKatex: RendererComponent;
+		blockKatex: RendererComponent;
+	}
+
+	const baseMarkdownExtensions = [
+		markedKatex({ singleDollarInline: true }),
+		createLiteralHtmlMarkdownExtension(),
+	];
+	const bareChatIdMarkdownExtensions = [
+		...baseMarkdownExtensions,
+		createChatReferenceMarkdownExtension(),
+	];
+	const safeRenderers: Partial<MathRenderers> = {
+		...defaultRenderers,
+		html: buildUnsupportedHTML(),
+		inlineKatex: MathRenderer,
+		blockKatex: MathRenderer,
+	};
+</script>
+
+<script lang="ts">
+	import SvelteMarkdown from '@humanspeak/svelte-markdown';
+	import CodeBlock from '$lib/components/rich-text/CodeBlock.svelte';
+	import ChatReference from '$lib/components/chat/ChatReference.svelte';
+	import MermaidBlock from '$lib/components/rich-text/MermaidBlock.svelte';
+	import { parseFileLink } from '$lib/chat/file-links/file-link-parser.js';
+	import {
+		parseChatReferenceHref,
+		type ResolveChatReference,
+	} from '$lib/chat/transcript/chat-reference.js';
+
+	type MarkdownVariant = 'assistant' | 'user' | 'presented' | 'thinking';
+	type ChatReferencePolicy = 'disabled' | 'explicit' | 'explicit-and-bare';
+
+	export interface MarkdownLinkNavigateEvent {
+		rawHref: string;
+		kind: 'file' | 'ignored';
+	}
+
+	interface Props {
+		source?: string;
+		variant?: MarkdownVariant;
+		class?: string;
+		/** Base path for accepting absolute file links. */
+		fileLinkBasePath?: string;
+		/** Called when a link is clicked. Return true to prevent default navigation. */
+		onLinkNavigate?: (link: MarkdownLinkNavigateEvent) => boolean | void;
+		resolveChatReference?: ResolveChatReference;
+		chatReferencePolicy?: ChatReferencePolicy;
+		acquireTransientActivity?: (close: () => void) => () => void;
+	}
+
+	const VARIANT_STYLES: Record<
+		MarkdownVariant,
+		{
+			container: string;
+			link: string;
+			chatReferenceId: string;
+			code: string;
+			blockquote: string;
+		}
+	> = {
+		assistant: {
+			container:
+				'markdown-body prose prose-sm max-w-none min-w-0 max-w-full break-words prose-pre:bg-transparent prose-pre:text-inherit prose-pre:p-3 prose-pre:m-0 prose-pre:rounded-none text-foreground prose-headings:text-foreground prose-p:text-foreground prose-li:text-foreground prose-strong:text-foreground',
+			link: 'text-primary hover:underline',
+			chatReferenceId: 'text-muted-foreground/80',
+			code: 'rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-[0.9em] text-foreground',
+			blockquote: 'my-2 border-l-4 border-border pl-4 italic text-muted-foreground',
+		},
+		user: {
+			container:
+				'markdown-body prose prose-sm max-w-none min-w-0 max-w-full break-words prose-pre:bg-transparent prose-pre:text-inherit prose-pre:p-3 prose-pre:m-0 prose-pre:rounded-none text-inherit prose-headings:text-inherit prose-p:text-inherit prose-li:text-inherit prose-strong:text-inherit',
+			link: 'text-inherit underline opacity-90 hover:opacity-100',
+			chatReferenceId: 'text-current opacity-70',
+			code: 'rounded-md border border-current/30 bg-current/10 px-1.5 py-0.5 font-mono text-[0.9em] text-inherit',
+			blockquote: 'my-2 border-l-4 border-current/40 pl-4 italic text-inherit opacity-90',
+		},
+		presented: {
+			container:
+				'markdown-body prose prose-sm max-w-none min-w-0 max-w-full break-words prose-pre:bg-transparent prose-pre:text-inherit prose-pre:p-3 prose-pre:m-0 prose-pre:rounded-none text-inherit prose-headings:text-inherit prose-p:text-inherit prose-li:text-inherit prose-strong:text-inherit',
+			link: 'text-inherit underline opacity-90 hover:opacity-100',
+			chatReferenceId: 'text-current opacity-70',
+			code: 'rounded-md border border-current/30 bg-current/10 px-1.5 py-0.5 font-mono text-[0.9em] text-inherit',
+			blockquote: 'my-2 border-l-4 border-current/40 pl-4 italic text-inherit opacity-90',
+		},
+		thinking: {
+			container:
+				'markdown-body prose prose-sm max-w-none min-w-0 max-w-full break-words prose-pre:bg-transparent prose-pre:text-inherit prose-pre:p-3 prose-pre:m-0 prose-pre:rounded-none text-foreground prose-headings:text-foreground prose-p:text-foreground prose-li:text-foreground prose-strong:text-foreground',
+			link: 'text-primary hover:underline',
+			chatReferenceId: 'text-muted-foreground/80',
+			code: 'rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-[0.9em] text-foreground',
+			blockquote: 'my-2 border-l-4 border-border pl-4 italic text-muted-foreground',
+		},
+	};
+
+	let {
+		source = '',
+		variant = 'assistant',
+		class: className = '',
+		fileLinkBasePath,
+		onLinkNavigate,
+		resolveChatReference,
+		chatReferencePolicy = 'disabled',
+		acquireTransientActivity,
+	}: Props = $props();
+
+	const parserOptions = $derived(
+		fileLinkBasePath ? { projectBasePath: fileLinkBasePath } : undefined,
+	);
+
+	const styles = $derived(VARIANT_STYLES[variant]);
+	const containerClass = $derived(`${styles.container} ${className}`.trim());
+	const markdownExtensions = $derived(
+		chatReferencePolicy === 'explicit-and-bare'
+			? bareChatIdMarkdownExtensions
+			: baseMarkdownExtensions,
+	);
+	const markdownOptions = $derived(
+		variant === 'user' || variant === 'presented' ? { breaks: true } : undefined,
+	);
+
+	function stopParentContextTriggerGesture(event: PointerEvent | MouseEvent): void {
+		event.stopPropagation();
+	}
+</script>
+
+<div class={containerClass}>
+	<SvelteMarkdown
+		{source}
+		options={markdownOptions}
+		extensions={markdownExtensions}
+		renderers={safeRenderers}
+	>
+		{#snippet code({ lang, text })}
+			{#if lang === 'mermaid'}
+				<svelte:boundary>
+					<MermaidBlock {text} {acquireTransientActivity} />
+					{#snippet failed()}
+						<CodeBlock lang="mermaid" {text} />
+					{/snippet}
+				</svelte:boundary>
+			{:else}
+				<CodeBlock {lang} {text} />
+			{/if}
+		{/snippet}
+
+		{#snippet codespan({ text })}
+			<code class={styles.code}>{text}</code>
+		{/snippet}
+
+		{#snippet chatReference({ chatId }: { chatId: string })}
+			<ChatReference
+				{chatId}
+				resolution={resolveChatReference?.(chatId) ?? null}
+				linkClass={styles.link}
+				idClass={styles.chatReferenceId}
+			/>
+		{/snippet}
+
+		{#snippet link({ href, title, text, children })}
+			{@const chatId = chatReferencePolicy === 'disabled' ? null : parseChatReferenceHref(href)}
+			{#if chatId}
+				<ChatReference
+					{chatId}
+					resolution={resolveChatReference?.(chatId) ?? null}
+					authoredLabelText={text}
+					authoredTitle={title}
+					linkClass={styles.link}
+					idClass={styles.chatReferenceId}
+				>
+					{#snippet authoredLabel()}
+						{@render children?.()}
+					{/snippet}
+				</ChatReference>
+			{:else}
+				{@const parsed = parseFileLink(href, parserOptions)}
+				{@const isFile = parsed.kind === 'file'}
+				{@const isAbsPath = !isFile && /^(\/|[A-Za-z]:[/\\])/.test(href ?? '')}
+				{@const isExternal = !isFile && !isAbsPath}
+				<a
+					{href}
+					{title}
+					class={styles.link}
+					target={isExternal ? '_blank' : undefined}
+					rel={isExternal ? 'noopener noreferrer' : undefined}
+					onpointerdowncapture={stopParentContextTriggerGesture}
+					oncontextmenu={stopParentContextTriggerGesture}
+					onclick={isFile || isAbsPath
+						? (event: MouseEvent) => {
+								event.preventDefault();
+								if (isFile) {
+									onLinkNavigate?.({ rawHref: href ?? '', kind: parsed.kind });
+								}
+							}
+						: undefined}
+				>
+					{@render children?.()}
+				</a>
+			{/if}
+		{/snippet}
+
+		{#snippet blockquote({ children })}
+			<blockquote class={styles.blockquote}>
+				{@render children?.()}
+			</blockquote>
+		{/snippet}
+
+		{#snippet paragraph({ children })}
+			<div class="mb-1 last:mb-0 break-words">
+				{@render children?.()}
+			</div>
+		{/snippet}
+	</SvelteMarkdown>
+</div>

@@ -1,7 +1,8 @@
 import { describe, expect, mock, spyOn, test } from 'bun:test';
 import { AgentCallError } from '@garcon/server-agent-interface';
 import { AcceptedInputHandler } from '../accepted-input-handler.ts';
-import { DomainError, ProjectUnavailableError, SteerDeliveryError } from '../../../common/domain-error.js';
+import { DomainError, ProjectUnavailableError } from '../../../common/domain-error.js';
+import { SteerDeliveryError } from '../steering-errors.js';
 import { reconnectTimedOut } from '../../../common/executor-disconnect.js';
 import { QueueEntrySteerError } from '../queue-steer-error.js';
 

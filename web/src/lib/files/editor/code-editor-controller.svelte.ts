@@ -50,7 +50,7 @@ import {
 	searchKeymap,
 	selectNextOccurrence,
 } from '@codemirror/search';
-import { loadCodeMirrorLanguageForFile } from '$lib/files/editor/language-loader.js';
+import { loadCodeMirrorLanguageForFile } from '$lib/highlighting/codemirror-language-registry.js';
 import {
 	createFileSearchPanel,
 	fileSearchScope,

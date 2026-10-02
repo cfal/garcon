@@ -7,7 +7,6 @@ import type {
 	ChatTranscriptApplyResult,
 	ChatTranscriptCache,
 } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
-import type { ConversationFeedPresentationPort } from '$lib/chat/transcript/conversation-feed-presentation-port.js';
 import type { ConversationPanelRestoreTarget } from '$lib/chat/transcript/conversation-panel-restore-target.js';
 import type { ConversationViewportPort } from '$lib/chat/transcript/conversation-viewport-port.js';
 import { ConversationScrollController } from '$lib/chat/transcript/conversation-scroll-controller.svelte.js';
@@ -933,19 +932,4 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		}
 		return result.outcome.status === 'view-changed' ? 'view-changed' : 'gap-detected';
 	}
-}
-
-export function feedPresentationPort(
-	port: ConversationFeedPresentationPort,
-	options: {
-		getScrollContainer(): HTMLDivElement | null;
-		getViewport(): ConversationViewportPort | null;
-		getQueueContainer(): HTMLDivElement | undefined;
-	},
-): ConversationPanelPresentationPort {
-	return {
-		...options,
-		captureRestoreTarget: () => port.captureRestoreTarget(),
-		closeTransients: () => port.closeTransients(),
-	};
 }

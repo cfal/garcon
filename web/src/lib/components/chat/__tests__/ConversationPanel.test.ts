@@ -10,7 +10,7 @@ import type {
 } from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
 import type { ConversationPanelRestoreTarget } from '$lib/chat/transcript/conversation-panel-restore-target.js';
 import type { ConversationPanelActions } from '../conversation-panel-actions.js';
-import type { ChatSessionRecord } from '$lib/types/chat-session.js';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types.js';
 import type { ChatQueueState } from '$lib/types/chat.js';
 import type { GitQuickSummaryReady } from '$lib/api/git.js';
 import * as m from '$lib/paraglide/messages.js';

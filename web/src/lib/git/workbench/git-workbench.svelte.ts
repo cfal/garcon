@@ -268,13 +268,13 @@ export class GitWorkbenchStore {
 		if (this.refreshPromise) {
 			this.snapshotLoadAbort?.abort();
 			this.refreshGeneration++;
-			await this.refreshPromise;
 		}
-		this.refreshPromise = this.refreshNow(options);
+		const refresh = this.refreshNow(options);
+		this.refreshPromise = refresh;
 		try {
-			await this.refreshPromise;
+			await refresh;
 		} finally {
-			this.refreshPromise = null;
+			if (this.refreshPromise === refresh) this.refreshPromise = null;
 		}
 	}
 
@@ -419,7 +419,6 @@ export class GitWorkbenchStore {
 		this.treeState.activeTab = tab;
 		this.lineSelection.clearSelection();
 		this.reviewDrafts.closeCommentComposer();
-		this.lineSelection.clearSelection();
 		this.virtualReview.clearForDisplayChange();
 		this.selectFirstVisibleFileForActiveTab();
 		if (this.target)

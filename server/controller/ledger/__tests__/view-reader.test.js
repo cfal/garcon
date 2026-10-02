@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it, mock, spyOn } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
@@ -17,6 +17,49 @@ import { ledgerRowsToMessages } from '../presentation.ts';
 const TS = '2026-08-12T00:00:00.000Z';
 
 describe('TranscriptViewReader', () => {
+  it('rejects excess captures before reading rows and retains admission until the consumer settles', async () => {
+    await withReader(async ({ ledger, reader }) => {
+      const held = Promise.withResolvers();
+      const entered = Promise.withResolvers();
+      let consumers = 0;
+      const capture = () => reader.withStoredSnapshot('chat-1', async () => {
+        if (++consumers === 4) entered.resolve();
+        await held.promise;
+      });
+      const pending = Array.from({ length: 4 }, capture);
+      await entered.promise;
+      const read = spyOn(ledger, 'highWatermark');
+      try {
+        await expect(capture()).rejects.toMatchObject({ code: 'TRANSCRIPT_WORK_BUSY', status: 503, retryable: true });
+        expect(read).not.toHaveBeenCalled();
+      } finally {
+        read.mockRestore();
+        held.resolve();
+        await Promise.all(pending);
+      }
+      await capture();
+    });
+  });
+
+  it.each(['abort', 'close'])('stops snapshot capture on %s before entering the consumer', async action => {
+    await withReader(async ({ ledger, reader }) => {
+      ledger.openProducer('chat-1', 'test').sink.publish({
+        type: 'rows', rows: Array.from({ length: 2500 }, () => ({ message: new AssistantMessage(TS, 'synthetic') })),
+      });
+      const abort = new AbortController();
+      const consumer = mock(async () => undefined);
+      const pending = reader.withStoredSnapshot('chat-1', consumer, abort.signal);
+      setImmediate(() => {
+        if (action === 'close') reader.close();
+        else abort.abort(new Error('cancel capture'));
+      });
+      await expect(pending).rejects.toThrow(action === 'close' ? 'Server is shutting down' : 'cancel capture');
+      expect(consumer).not.toHaveBeenCalled();
+      if (action === 'close') await expect(reader.withStoredSnapshot('chat-1', consumer)).rejects.toMatchObject({ code: 'SERVER_SHUTTING_DOWN' });
+      else await reader.withStoredSnapshot('chat-1', consumer);
+    });
+  });
+
   it('[TLV5-PAGE.08-SERVER-UNIT-01] presents exactly one bounded raw page with its raw continuation', async () => {
     const pageCalls = [];
     const rawRows = Array.from({ length: 50 }, (_, index) => {

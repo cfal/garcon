@@ -5,7 +5,7 @@
 	import Waypoints from '@lucide/svelte/icons/waypoints';
 	import { untrack } from 'svelte';
 	import * as m from '$lib/paraglide/messages.js';
-	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import type { PresentationHostId } from '$lib/workspace/surface-types';
 	import type { ChatMapController } from '$lib/chat-map/chat-map-controller.svelte';
 	import { buildChatMapModel } from '$lib/chat-map/chat-map-model';

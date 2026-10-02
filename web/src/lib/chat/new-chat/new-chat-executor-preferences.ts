@@ -1,7 +1,7 @@
 import type { RecentAgentSetting, RemoteSettingsSnapshot } from '$shared/settings';
 import { effectiveExecutorId } from '$shared/executors';
 import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte.js';
-import type { SessionAgentId } from '$lib/types/app.js';
+import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types.js';
 
 export function firstSelectableExecutorRecent(
 	recents: readonly RecentAgentSetting[],

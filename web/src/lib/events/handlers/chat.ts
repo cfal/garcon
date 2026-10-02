@@ -6,7 +6,7 @@ import type {
 	WsFaultMessage,
 } from '$shared/ws-events';
 import type { LocalNoticeType } from '$lib/chat/transcript/local-notice.js';
-import type { ChatSessionRouterView } from '$lib/types/chat-session';
+import type { ChatSessionRouterView } from '$lib/chat/sessions/chat-session-types';
 import type { StartupCoordinator } from '$lib/chat/conversation/startup-coordinator.js';
 import type { ConversationUiPort } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 import * as m from '$lib/paraglide/messages.js';

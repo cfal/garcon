@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { GitDomainError } from './git-types.js';
+import { GitDomainError } from './git-domain-error.js';
 import { assertGitRepository, readOnlyGitOptions, runGitTraced } from './run.js';
 import { parseNameStatusZ, parseNumstatZ } from './diff-file-list.js';
 import { assertExistingCommitRef, assertSafeRef } from './ref-validation.js';

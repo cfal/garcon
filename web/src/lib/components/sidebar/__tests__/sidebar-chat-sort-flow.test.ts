@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/sv
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import SidebarHost from './SidebarHost.svelte';
 import { sortChatOrder } from '$lib/api/chats.js';
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 
 vi.mock('$lib/api/chats.js', async () => {
 	const actual = await vi.importActual<typeof import('$lib/api/chats.js')>('$lib/api/chats.js');

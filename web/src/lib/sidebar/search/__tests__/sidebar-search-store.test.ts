@@ -9,7 +9,7 @@ import {
 	transcriptSearchInvalidationProjection,
 } from '$lib/sidebar/search/transcript-search-invalidation.js';
 import type { SavedChatSearch } from '$lib/api/settings';
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import { ApiError } from '$lib/api/client';
 import type { TranscriptSearchStatusV1 } from '$shared/chat-search';
 import type { ChatSearchPage, ChatSearchResponse } from '$shared/chat-search';

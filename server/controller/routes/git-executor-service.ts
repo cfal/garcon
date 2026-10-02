@@ -6,7 +6,7 @@ import { GIT_OPERATION_TIMEOUT_MS, isGitMutation } from '../../../common/git-exe
 import { GitServiceError } from '../../../common/git-error.js';
 import { validateGitRequest } from '../../../common/git-request-validation.js';
 import type { GitCommandTrace, GitReviewRouteMetrics } from '../../runtime/git/types.js';
-import { GitDomainError } from '../../runtime/git/git-types.js';
+import { GitDomainError } from '../../runtime/git/git-domain-error.js';
 import { gitHttpError } from '../git/http-error.js';
 import { classifyGitError } from '../../runtime/git/git-error-classifier.js';
 import { jsonError, jsonErrorFromUnknown } from '../../common/http-error.js';

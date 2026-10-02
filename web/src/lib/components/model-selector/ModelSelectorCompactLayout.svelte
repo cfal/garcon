@@ -3,7 +3,7 @@
 	import Check from '@lucide/svelte/icons/check';
 	import { cn } from '$lib/utils/cn.js';
 	import * as m from '$lib/paraglide/messages.js';
-	import type { SessionAgentId } from '$lib/types/app';
+	import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
 	import ModelSelectorSearchInput from './ModelSelectorSearchInput.svelte';
 	import type { ModelSelectorState } from './model-selector-state.svelte';
 	import type { ModelSelectorRecentOption } from './model-selector-types';

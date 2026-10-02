@@ -257,7 +257,9 @@ Read the current revision before a field or workflow mutation. Comment append do
 
 Agent ticket commands produce one concise transcript notice per command, with clickable ticket IDs in the workspace. Relationship notices name both tickets and the link kind; list notices include supplied filters as literal values. Each notice keeps its own source address, including when an assistant message contains multiple commands. Native `garcon-ticket-*-result` envelopes carry JSON `{data, context?}` on success or `{errorCode, message, context?}` on failure. Optional context contains only list filters or relationship kind/target, so native history reload can reconstruct the same notices without copying ticket descriptions or comment bodies.
 
-Malformed ticket commands remain visible and are not executed. When agent ticket commands are enabled, Garcon also sends one best-effort `<garcon-command-rejected>` reply per affected assistant message, containing the detected edge failures and correction guidance. For JSON bodies, serialize JSON first, then XML-escape `&`, `<`, and `>` once, leaving the outer tags unchanged. Retry only rejected candidates: other valid commands in the same message may already have executed. Rejection feedback is server control, not a user message; native reload reconstructs notices without replaying commands or feedback.
+Malformed ticket commands remain visible and are not executed. When agent ticket commands are enabled, Garcon also sends one best-effort `<garcon-command-rejected>` reply per affected assistant message, containing the detected edge failures and correction guidance. For JSON bodies, serialize JSON first, then XML-escape `&`, `<`, and `>` once, leaving the outer tags unchanged. Retry only rejected candidates: other valid commands in the same message may already have executed.
+
+Ticket results and rejection feedback queue as hidden server control input for a subsequent turn, respecting queue pauses. They never steer the active turn: a provider can acknowledge a late steer without sampling it. Neither creates a user message. Pending feedback is process-ephemeral and is lost on server restart; native reload reconstructs notices without replaying commands or feedback.
 
 Additional mutations:
 
@@ -690,6 +692,12 @@ Markdown is intended for human and agent reading. XML uses explicit typed elemen
 User and assistant messages, compaction summaries, and carryover-quarantine disclosures cannot be excluded. Exclusions apply to top-level entries; excluding tool calls does not remove a requested tool embedded in a retained permission entry.
 
 Export reads Garcon's authoritative ledger through the running authenticated server. Session-native references and provider-private metadata do not enter the normalized fold. Sharing remains separate: Share publishes a persisted public snapshot, while export reads the current private ledger without changing a share.
+
+Exports, shares, and handoff artifacts share a limit of four in-flight transcript
+snapshots per controller. Admission happens before reading the snapshot and is
+held through rendering. Excess requests fail with retryable HTTP 503
+`TRANSCRIPT_WORK_BUSY`; they are not queued or retried automatically. Each
+transcript Worker also admits at most eight waiting jobs behind its active job.
 
 ## Handoff Artifacts
 

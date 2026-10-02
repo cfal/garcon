@@ -13,14 +13,12 @@ import {
 } from '../../common/json-file-store.ts';
 import { KeyedPromiseLock } from '../../common/keyed-lock.ts';
 import { ApiProviderDurableReferences, type RetainProviderReferences } from '../api-providers/reference-writes.js';
-import {
-  ChatNameStore,
-  ChatOrderStore,
-  FeatureSettingsStore,
-  FolderStore,
-  SavedSearchStore,
-  StartupDefaultsStore,
-} from './domain-stores.js';
+import { FolderStore } from './folder-store.js';
+import { SavedSearchStore } from './saved-search-store.js';
+import { FeatureSettingsStore } from './feature-settings-store.js';
+import { ChatNameStore } from './chat-name-store.js';
+import { StartupDefaultsStore } from './startup-defaults-store.js';
+import { ChatOrderStore } from './chat-order-store.js';
 import { UiSettingsStore } from './ui-settings-store.js';
 import {
   AGENT_COMMAND_SETTING_KEYS,

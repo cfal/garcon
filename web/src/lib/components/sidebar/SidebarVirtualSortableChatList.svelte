@@ -42,7 +42,7 @@
 	} from './sidebar-pragmatic-dnd';
 	import type { PersistedChatOrderGroup } from '$shared/chat-order-contracts';
 	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
-	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
 	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
 	import { SidebarVirtualChatListController } from './SidebarVirtualChatListController.svelte.js';

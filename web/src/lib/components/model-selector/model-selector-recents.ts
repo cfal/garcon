@@ -1,4 +1,4 @@
-import type { SessionAgentId } from '$lib/types/app';
+import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
 import { effectiveExecutorId } from '$shared/executors';
 import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
 import type { RecentAgentSetting } from '$shared/settings';

@@ -24,7 +24,7 @@
 		<div class="space-y-2 text-sm">
 			<div class="flex gap-3">
 				<code class="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 text-muted-foreground"
-					>Any text</code
+					>{m.sidebar_search_any_text()}</code
 				>
 				<span class="text-muted-foreground">{m.sidebar_search_legend_free_text_description()}</span>
 			</div>

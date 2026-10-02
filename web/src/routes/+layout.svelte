@@ -13,8 +13,8 @@
 	import { createPreamblesStore } from '$lib/preambles/preambles-store.svelte.js';
 	import { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
 	import { ExecutorInventoryChanges } from '$lib/executors/executor-inventory-changes.js';
-	import { ExecutorsRouter } from '$lib/events/executors-router.svelte.js';
-	import { ApiProvidersRouter } from '$lib/events/api-providers-router.svelte.js';
+	import { ExecutorsRouter } from '$lib/events/executors-router.js';
+	import { ApiProvidersRouter } from '$lib/events/api-providers-router.js';
 	import { ApiProvidersStore } from '$lib/api-providers/api-providers-store.svelte.js';
 	import { createChatPreambleSelectionInvalidationHub } from '$lib/preambles/chat-selection-invalidation-hub.js';
 	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
@@ -77,11 +77,11 @@
 		setSingletonSurfaces,
 		setThemeRuntime,
 	} from '$lib/context';
-	import { RemoteSettingsRouter } from '$lib/events/remote-settings-router.svelte.js';
-	import { TranscriptSearchStatusRouter } from '$lib/events/transcript-search-status-router.svelte.js';
-	import { ScheduledPromptsRouter } from '$lib/events/scheduled-prompts-router.svelte.js';
-	import { PreamblesRouter } from '$lib/events/preambles-router.svelte.js';
-	import { SnippetsRouter } from '$lib/events/snippets-router.svelte.js';
+	import { RemoteSettingsRouter } from '$lib/events/remote-settings-router.js';
+	import { TranscriptSearchStatusRouter } from '$lib/events/transcript-search-status-router.js';
+	import { ScheduledPromptsRouter } from '$lib/events/scheduled-prompts-router.js';
+	import { PreamblesRouter } from '$lib/events/preambles-router.js';
+	import { SnippetsRouter } from '$lib/events/snippets-router.js';
 	import AppShell from '$lib/components/layout/AppShell.svelte';
 	import CommandMenu from '$lib/components/shared/CommandMenu.svelte';
 	import KeyboardShortcuts from '$lib/components/shared/KeyboardShortcuts.svelte';
@@ -103,8 +103,8 @@
 	import { createWorkspaceServices } from '$lib/workspace/workspace-services.js';
 	import { ThemeController } from '$lib/theme/theme-controller.svelte.js';
 	import { createChatBoardInvalidationHub } from '$lib/chat-board/catalog/chat-board-invalidation-hub.js';
-	import { ChatBoardsRouter } from '$lib/events/chat-boards-router.svelte.js';
-	import { TicketsRouter } from '$lib/events/tickets-router.svelte.js';
+	import { ChatBoardsRouter } from '$lib/events/chat-boards-router.js';
+	import { TicketsRouter } from '$lib/events/tickets-router.js';
 	import { TicketsInvalidationHub } from '$lib/tickets/catalog/tickets-invalidation-hub.js';
 	import { setTicketChat, setTicketsInvalidations } from '$lib/context/tickets-context.js';
 	import { TicketChatController } from '$lib/tickets/chat/ticket-chat-controller.svelte.js';

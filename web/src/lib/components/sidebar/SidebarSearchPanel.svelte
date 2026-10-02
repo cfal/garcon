@@ -141,6 +141,7 @@
 	}
 </script>
 
+<!-- The container delegates shortcuts from focusable descendants. Covered by __tests__/sidebar-search-interactions.test.ts. -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
 	data-slot="search-dialog-panel"

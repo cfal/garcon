@@ -13,7 +13,7 @@ import {
 import { sidebarProjectKey } from '../sidebar-row-model';
 import type { SidebarChatReorderState } from '../sidebar-chat-reorder-state.svelte';
 import type { WorkspaceWindowDndController } from '$lib/workspace/window-dnd.svelte.js';
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 
 const rowHeight = 88;
 let originalElementsFromPoint: typeof document.elementsFromPoint | undefined;

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages.js';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import ChevronsDownUp from '@lucide/svelte/icons/chevrons-down-up';
@@ -148,7 +149,7 @@
 		/>
 		<div class="border-b border-border">
 			<div class="flex items-center justify-between px-3 py-1.5 text-xs text-muted-foreground">
-				<span>{detail.files.length} file{detail.files.length === 1 ? '' : 's'} changed</span>
+				<span>{m.pull_request_changed_files({ count: detail.files.length })}</span>
 				<div class="flex items-center gap-3">
 					{#if detail.files.length > 0}
 						<button
@@ -158,14 +159,14 @@
 						>
 							{#if allCollapsed}
 								<ChevronsUpDown class="h-3.5 w-3.5" />
-								Expand all
+								{m.common_expand_all()}
 							{:else}
 								<ChevronsDownUp class="h-3.5 w-3.5" />
-								Collapse all
+								{m.common_collapse_all()}
 							{/if}
 						</button>
 					{/if}
-					<span class="tabular-nums">{viewedCount}/{detail.files.length} viewed</span>
+					<span class="tabular-nums">{m.pull_request_viewed_count({ count: viewedCount, total: detail.files.length })}</span>
 				</div>
 			</div>
 			<div class="h-0.5 bg-muted">
@@ -177,7 +178,7 @@
 		</div>
 		{#if detail.files.length === 0}
 			<div class="flex min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground">
-				This pull request has no file changes.
+				{m.pull_request_no_changes()}
 			</div>
 		{:else if diffSource}
 			<PullRequestVirtualDiffSurface
@@ -205,7 +206,7 @@
 				class="rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
 				onclick={handleRefresh}
 			>
-				Retry
+				{m.common_retry()}
 			</button>
 		</div>
 	{/if}

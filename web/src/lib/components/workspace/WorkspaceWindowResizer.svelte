@@ -149,7 +149,7 @@
 	onDestroy(() => pointerCleanup?.());
 </script>
 
-<!-- The WAI-ARIA window partition is a focusable separator resized via arrow keys. Follow-up: CLEANUP_ROUND_TWO.md#a11y-suppression-register. -->
+<!-- The WAI-ARIA window partition is a focusable separator resized via arrow keys. Covered by __tests__/WorkspaceWindowResizer.test.ts. -->
 <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
 <div
 	bind:this={trackElement}

@@ -3,8 +3,8 @@
 	import AgentSettingsControls from '$lib/components/chat/AgentSettingsControls.svelte';
 	import ChatTagEditor from '$lib/components/chat/ChatTagEditor.svelte';
 	import ChatTagToggleButton from '$lib/components/chat/ChatTagToggleButton.svelte';
-	import ProjectPathField from '$lib/components/chat/ProjectPathField.svelte';
-	import ProjectPinnedPathList from '$lib/components/chat/ProjectPinnedPathList.svelte';
+	import ProjectPathField from '$lib/components/project-paths/ProjectPathField.svelte';
+	import ProjectPinnedPathList from '$lib/components/project-paths/ProjectPinnedPathList.svelte';
 	import GitWorktreePickerModal from '$lib/components/git/GitWorktreePickerModal.svelte';
 	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
 	import ExecutorSelector from '$lib/components/shared/ExecutorSelector.svelte';
@@ -21,7 +21,7 @@
 		ModelSelectorMode,
 	} from '$lib/components/model-selector/model-selector-types';
 	import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
-	import type { SessionAgentId } from '$lib/types/app';
+	import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
 	import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import { getAppShell, getExecutors } from '$lib/context';
@@ -194,7 +194,7 @@
 				{/if}
 			</div>
 		{:else if startup.modelSelectionPending}
-			<p role="status" class="text-sm text-muted-foreground">Loading models...</p>
+			<p role="status" class="text-sm text-muted-foreground">{m.chat_composer_loading_models()}</p>
 		{/if}
 	</div>
 

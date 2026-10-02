@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ScheduledPromptsRouter } from '../scheduled-prompts-router.svelte';
-import type { DrainCursor, WsConnection } from '$lib/ws/connection.svelte';
+import { ScheduledPromptsRouter } from '../scheduled-prompts-router';
+import type { DrainCursor } from '$lib/ws/connection.svelte';
 
-function connection(messages: Array<Record<string, unknown>>): WsConnection {
+import type { WsMessageLog } from '$lib/ws/drain';
+
+function connection(messages: Array<Record<string, unknown>>): WsMessageLog {
 	return {
 		messages: messages.map((data) => ({ data, timestamp: Date.now() })),
 		trimOffset: 0,
@@ -10,7 +12,7 @@ function connection(messages: Array<Record<string, unknown>>): WsConnection {
 			cursor.current = 0;
 			return vi.fn();
 		},
-	} as unknown as WsConnection;
+	} satisfies WsMessageLog;
 }
 
 describe('ScheduledPromptsRouter', () => {
@@ -21,7 +23,7 @@ describe('ScheduledPromptsRouter', () => {
 				{ type: 'chat-processing-updated', chatId: '123', isProcessing: true },
 				{ type: 'scheduled-prompts-invalidated', reason: 'executed' },
 			]),
-			prompts as never,
+			prompts,
 		);
 		router.start();
 		router.tick();

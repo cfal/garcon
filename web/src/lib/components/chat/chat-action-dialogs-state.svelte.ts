@@ -1,5 +1,4 @@
-import type { SessionAgentId } from '$lib/types/app';
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSessionRecord, SessionAgentId } from '$lib/chat/sessions/chat-session-types';
 import type { ChatCarryOverSegmentDto, ChatTranscriptSourceDto } from '$shared/chat-details';
 
 export interface ChatDeleteConfirmation {
