@@ -1,12 +1,82 @@
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, spyOn } from "bun:test";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createGitOperations } from "../git-service.js";
 import { runGitCommand, initRepoWithCommit } from "./repository-fixture.js";
 import { materializeReviewResponse } from "./rendered-patch-fixture.js";
+import { withGitOperation } from "../operation-context.js";
 
 describe("porcelain conflict and comparison robustness", () => {
+  it('rejects nonregular conflict files without waiting for a FIFO writer', async () => {
+    if (process.platform === 'win32') return;
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-conflict-fifo-'));
+    try {
+      await initRepoWithCommit(projectPath);
+      const fifo = path.join(projectPath, 'pipe');
+      expect(Bun.spawnSync(['mkfifo', fifo]).exitCode).toBe(0);
+      const git = createGitOperations();
+      const details = await withGitOperation(projectPath, { timeoutMs: 1000 }, () =>
+        git.getConflictDetails({ projectPath, file: 'pipe' }));
+      expect(details.working.content).toBeNull();
+      await expect(withGitOperation(projectPath, { timeoutMs: 1000 }, () =>
+        git.markConflictResolved({ projectPath, file: 'pipe' }))).rejects.toThrow('regular file');
+      expect((await runGitCommand(projectPath, ['ls-files', '--', 'pipe'])).stdout).toBe('');
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  }, 5000);
+
+  it('scans all resolution content, including split markers and markers near EOF', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-conflict-scan-'));
+    try {
+      await initRepoWithCommit(projectPath);
+      const git = createGitOperations();
+      for (const marker of ['<<<<<<<', '=======', '>>>>>>>']) {
+        for (const prefix of ['x'.repeat(65532) + '\n', 'x'.repeat(512 * 1024) + '\n', 'x'.repeat(65531) + '\u2028']) {
+          await fs.writeFile(path.join(projectPath, 'a.txt'), prefix + marker + ' unresolved\n');
+          await expect(git.markConflictResolved({ projectPath, file: 'a.txt' })).rejects.toThrow('Conflict markers remain');
+          expect((await runGitCommand(projectPath, ['show', ':a.txt'])).stdout).toBe('one\n');
+        }
+      }
+      const resolved = ('x'.repeat(65532) + '<<<<<<< embedded, not a line marker\n').repeat(10);
+      await fs.writeFile(path.join(projectPath, 'a.txt'), resolved);
+      await git.markConflictResolved({ projectPath, file: 'a.txt' });
+      expect((await runGitCommand(projectPath, ['show', ':a.txt'])).stdout).toBe(resolved);
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it('does not stage after cancellation during a conflict scan', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-conflict-abort-'));
+    let openSpy;
+    let readSpy;
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.writeFile(path.join(projectPath, 'a.txt'), 'resolved\n'.repeat(20_000));
+      const controller = new AbortController();
+      const open = fs.open.bind(fs);
+      openSpy = spyOn(fs, 'open').mockImplementation(async (...args) => {
+        const handle = await open(...args);
+        const read = handle.read.bind(handle);
+        readSpy = spyOn(handle, 'read').mockImplementation(async (...readArgs) => {
+          const result = await read(...readArgs);
+          controller.abort(new Error('scan cancelled'));
+          return result;
+        });
+        return handle;
+      });
+      await expect(createGitOperations().markConflictResolved({ projectPath, file: 'a.txt', signal: controller.signal }))
+        .rejects.toThrow('scan cancelled');
+      expect((await runGitCommand(projectPath, ['show', ':a.txt'])).stdout).toBe('one\n');
+    } finally {
+      readSpy?.mockRestore();
+      openSpy?.mockRestore();
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
   it("returns bounded conflict details for large conflicted files", async () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-conflict-limit-"),
