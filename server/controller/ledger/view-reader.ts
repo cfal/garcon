@@ -19,9 +19,14 @@ import { ledgerRowsToTranscriptMessages } from './presentation.js';
 import type { TranscriptLedgerService } from './service.js';
 import type { StoredLedgerRow } from './codec.js';
 
+// Admission precedes capture and remains held until its consumer releases the rows.
+const MAX_STORED_SNAPSHOTS = 4;
+
 export class TranscriptViewReader {
   readonly #ledger: TranscriptLedgerService;
   readonly #adoption: TranscriptAdoptionService;
+  readonly #snapshotShutdown = new AbortController();
+  #storedSnapshots = 0;
 
   constructor(
     ledger: TranscriptLedgerService,
@@ -29,6 +34,10 @@ export class TranscriptViewReader {
   ) {
     this.#ledger = ledger;
     this.#adoption = adoption;
+  }
+
+  close(): void {
+    this.#snapshotShutdown.abort(new DomainError('SERVER_SHUTTING_DOWN', 'Server is shutting down', 503, true));
   }
 
   async page(
@@ -168,24 +177,34 @@ export class TranscriptViewReader {
     work: (snapshot: StoredTranscriptSnapshot) => Promise<T>,
     signal: AbortSignal = new AbortController().signal,
   ): Promise<T> {
-    return readWithFenceTranslation(async () => {
-      const view = await this.#adoption.ensure(chatId, signal);
-      signal.throwIfAborted();
-      const watermark = this.#ledger.highWatermark(chatId);
-      if (watermark.viewId !== view.viewId) {
-        throw new DomainError(
-          'SOURCE_REVISION_CHANGED',
-          'Transcript view changed while capturing the snapshot',
-          409,
-          true,
-        );
-      }
-      return this.#ledger.withStoredRowsThrough(chatId, watermark, (rows) => work({
-        transcriptViewId: view.viewId,
-        lastOrdinal: watermark.ordinal,
-        rows,
-      }));
-    });
+    const captureSignal = AbortSignal.any([signal, this.#snapshotShutdown.signal]);
+    captureSignal.throwIfAborted();
+    if (this.#storedSnapshots >= MAX_STORED_SNAPSHOTS) {
+      throw new DomainError('TRANSCRIPT_WORK_BUSY', 'Transcript snapshot capacity is full. Try again later.', 503, true);
+    }
+    this.#storedSnapshots++;
+    try {
+      return await readWithFenceTranslation(async () => {
+        const view = await this.#adoption.ensure(chatId, captureSignal);
+        captureSignal.throwIfAborted();
+        const watermark = this.#ledger.highWatermark(chatId);
+        if (watermark.viewId !== view.viewId) {
+          throw new DomainError(
+            'SOURCE_REVISION_CHANGED',
+            'Transcript view changed while capturing the snapshot',
+            409,
+            true,
+          );
+        }
+        return this.#ledger.withStoredRowsThrough(chatId, watermark, (rows) => work({
+          transcriptViewId: view.viewId,
+          lastOrdinal: watermark.ordinal,
+          rows,
+        }), captureSignal);
+      });
+    } finally {
+      this.#storedSnapshots--;
+    }
   }
 }
 

@@ -67,6 +67,6 @@ export function parseTerminalNotification(value: TerminalNotification): Terminal
   return { type: 'terminal', attachmentId: value.attachmentId, message };
 }
 
-export function invalidTerminalRequest(): TerminalError {
+function invalidTerminalRequest(): TerminalError {
   return new TerminalError('terminal-validation', 'Invalid terminal RPC request.');
 }

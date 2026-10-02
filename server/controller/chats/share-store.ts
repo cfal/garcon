@@ -6,7 +6,8 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { isRecord } from '../../../common/json.js';
-import { writeFileAtomic, writeJsonFileAtomic } from '../../common/json-file-store.js';
+import { AtomicJsonWriteError, writeFileAtomic, writeJsonFileAtomic } from '../../common/json-file-store.js';
+import { DomainError } from '../../common/domain-error.js';
 import { parseStoredJson } from '../../common/stored-json.js';
 import { createLogger } from '../../common/log.js';
 import { hasNodeErrorCode } from '../../common/errors.js';
@@ -23,11 +24,13 @@ import {
 } from './share-snapshot-format.js';
 import type { RenderedShareSnapshot } from './transcript-rendering/tasks.js';
 import type { TranscriptRendering } from './transcript-rendering/client.js';
+import { readShareSnapshotRange, type SelectShareMessageRange } from './share-snapshot-reader.js';
 
 const logger = createLogger('chats:share-store');
 
 const SHARE_INDEX_VERSION = 2;
 const SHARE_SNAPSHOT_CACHE_LIMIT = 50;
+const SHARE_SNAPSHOT_CACHE_BYTES = 16 * 1024 * 1024;
 const SHARE_SNAPSHOT_CACHE_TTL_MS = 10 * 60 * 1000;
 // A snapshot's header is its first line; a read this long holds it.
 const HEADER_READ_BYTES = 64 * 1024;
@@ -52,6 +55,7 @@ interface ShareStoreOptions {
   readonly rendering: Pick<TranscriptRendering, 'renderShareSnapshot' | 'convertShareSnapshot'>;
   readonly now?: () => number;
   readonly cacheLimit?: number;
+  readonly cacheBytes?: number;
   readonly cacheTtlMs?: number;
 }
 
@@ -65,6 +69,7 @@ export type SharePublication = Omit<ShareSnapshotHeader, 'shareToken' | 'message
 
 interface CachedShareMessages {
   readonly shared: SharedChatMessages;
+  readonly bytes: number;
   lastAccessAt: number;
 }
 
@@ -79,7 +84,7 @@ export interface IShareStore {
   ): Promise<ShareIndexEntry>;
   getEntryByChatId(chatId: string): ShareIndexEntry | null;
   getHeader(token: string): Promise<ShareSnapshotHeader | null>;
-  getMessages(token: string): Promise<SharedChatMessages | null>;
+  getMessages(token: string, select?: SelectShareMessageRange): Promise<SharedChatMessages | null>;
   getTextPath(token: string): Promise<string | null>;
   revokeShareByChatId(chatId: string): Promise<boolean>;
 }
@@ -107,10 +112,13 @@ export class ShareStore implements IShareStore {
   // Serializes each chat's publications, revocations, and snapshot loads, which await
   // rendering and file writes between reading and updating the index.
   #chatLocks = new KeyedPromiseLock();
+  #indexLock = new KeyedPromiseLock();
+  #durabilityUnknown = false;
   #workspaceDir: string;
   #rendering: ShareStoreOptions['rendering'];
   #now: () => number;
   #cacheLimit: number;
+  #cacheBytes: number;
   #cacheTtlMs: number;
 
   constructor(workspaceDir: string, options: ShareStoreOptions) {
@@ -118,6 +126,7 @@ export class ShareStore implements IShareStore {
     this.#rendering = options.rendering;
     this.#now = options.now ?? (() => Date.now());
     this.#cacheLimit = options.cacheLimit ?? SHARE_SNAPSHOT_CACHE_LIMIT;
+    this.#cacheBytes = options.cacheBytes ?? SHARE_SNAPSHOT_CACHE_BYTES;
     this.#cacheTtlMs = options.cacheTtlMs ?? SHARE_SNAPSHOT_CACHE_TTL_MS;
   }
 
@@ -195,12 +204,33 @@ export class ShareStore implements IShareStore {
     }
   }
 
-  async #persist(): Promise<void> {
-    if (!this.#index) return;
-    await writeJsonFileAtomic(this.#filePath(), this.#index, { mode: 0o600 });
+  async #commit(change: (shares: ShareStoreIndex['shares']) => void): Promise<void> {
+    await this.#indexLock.runExclusive('index', async () => {
+      const current = this.#requireIndex();
+      const candidate: ShareStoreIndex = { version: SHARE_INDEX_VERSION, shares: { ...current.shares } };
+      change(candidate.shares);
+      try {
+        await writeJsonFileAtomic(this.#filePath(), candidate, { mode: 0o600 });
+      } catch (error) {
+        if (error instanceof AtomicJsonWriteError && error.renamed) {
+          this.#durabilityUnknown = true;
+          this.#snapshotCache.clear();
+        }
+        throw error;
+      }
+      this.#index = candidate;
+      this.#rebuildIndex();
+    });
+  }
+
+  #assertAvailable(): void {
+    if (this.#durabilityUnknown) {
+      throw new DomainError('SHARE_STORAGE_UNAVAILABLE', 'Share index durability is unknown. Restart the controller before accessing shares.', 503);
+    }
   }
 
   #requireIndex(): ShareStoreIndex {
+    this.#assertAvailable();
     if (!this.#index) throw new Error('ShareStore not initialized');
     return this.#index;
   }
@@ -211,24 +241,25 @@ export class ShareStore implements IShareStore {
     rows: readonly StoredLedgerRow[],
     signal?: AbortSignal,
   ): Promise<ShareIndexEntry> {
-    const index = this.#requireIndex();
+    this.#requireIndex();
     return this.#chatLocks.runExclusive(chatId, async () => {
+      this.#assertAvailable();
       const token = this.#chatIdIndex.get(chatId) ?? crypto.randomBytes(24).toString('base64url');
       const rendered = await this.#rendering.renderShareSnapshot(
         { header: { ...publication, shareToken: token }, rows },
         signal,
       );
+      this.#assertAvailable();
       await this.#writeRendered(token, rendered);
       const entry = indexEntryFromHeader(rendered.header);
-      index.shares[token] = entry;
-      this.#chatIdIndex.set(chatId, token);
       this.#snapshotCache.delete(token);
-      await this.#persist();
+      await this.#commit(shares => { shares[token] = entry; });
       return entry;
     }, signal);
   }
 
   getEntryByChatId(chatId: string): ShareIndexEntry | null {
+    this.#assertAvailable();
     const token = this.#chatIdIndex.get(chatId);
     return token ? this.#index?.shares[token] ?? null : null;
   }
@@ -239,17 +270,33 @@ export class ShareStore implements IShareStore {
     const cached = this.#cachedMessages(token);
     if (cached) return cached.header;
     const header = await this.#readHeader(token);
+    this.#assertAvailable();
     return header ?? (await this.getMessages(token))?.header ?? null;
   }
 
-  async getMessages(token: string): Promise<SharedChatMessages | null> {
+  async getMessages(token: string, select?: SelectShareMessageRange): Promise<SharedChatMessages | null> {
     const entry = this.#shareEntry(token);
     if (!entry) return null;
     const cached = this.#cachedMessages(token);
-    if (cached) return cached;
+    if (cached) return selectMessages(cached, select);
     return this.#chatLocks.runExclusive(entry.chatId, async () => {
       if (this.#shareEntry(token)?.chatId !== entry.chatId) return null;
-      const loaded = this.#cachedMessages(token) ?? await this.#loadSnapshot(token);
+      const cached = this.#cachedMessages(token);
+      if (cached) return selectMessages(cached, select);
+      if (select) {
+        try {
+          const page = await readShareSnapshotRange(this.#shareFilePath(token, 'ndjson'), token, select);
+          await repairSharePermissions(this.#shareFilePath(token, 'ndjson'), 0o600, 'share snapshot');
+          this.#assertAvailable();
+          return page;
+        } catch (error) {
+          if (!hasNodeErrorCode(error, 'ENOENT')) throw error;
+          const converted = await this.#convertLegacySnapshot(token);
+          this.#assertAvailable();
+          return converted ? selectMessages(converted, select) : null;
+        }
+      }
+      const loaded = await this.#loadSnapshot(token);
       return loaded ? this.#cacheMessages(token, loaded) : null;
     });
   }
@@ -264,19 +311,18 @@ export class ShareStore implements IShareStore {
   }
 
   async revokeShareByChatId(chatId: string): Promise<boolean> {
-    const index = this.#index;
-    if (!index) return false;
+    this.#assertAvailable();
+    if (!this.#index) return false;
     return this.#chatLocks.runExclusive(chatId, async () => {
+      this.#assertAvailable();
       const token = this.#chatIdIndex.get(chatId);
       if (!token) return false;
 
-      delete index.shares[token];
-      this.#chatIdIndex.delete(chatId);
+      await this.#commit(shares => { delete shares[token]; });
       this.#snapshotCache.delete(token);
       for (const extension of ['ndjson', 'txt', 'json'] as const) {
         await this.#removeFile(this.#shareFilePath(token, extension));
       }
-      await this.#persist();
       return true;
     });
   }
@@ -286,6 +332,7 @@ export class ShareStore implements IShareStore {
   }
 
   #shareEntry(token: string): ShareIndexEntry | null {
+    this.#assertAvailable();
     if (!this.#index || !isValidShareToken(token) || !Object.hasOwn(this.#index.shares, token)) return null;
     return this.#index.shares[token] ?? null;
   }
@@ -332,10 +379,7 @@ export class ShareStore implements IShareStore {
       json = await fs.readFile(this.#shareFilePath(token, 'json'), 'utf8');
     } catch (error: unknown) {
       if (!hasNodeErrorCode(error, 'ENOENT')) throw error;
-      const entry = this.#index?.shares[token];
-      if (this.#index) delete this.#index.shares[token];
-      if (entry) this.#chatIdIndex.delete(entry.chatId);
-      await this.#persist();
+      await this.#commit(shares => { delete shares[token]; });
       return null;
     }
     const rendered = await this.#rendering.convertShareSnapshot(token, json);
@@ -362,7 +406,11 @@ export class ShareStore implements IShareStore {
   }
 
   #cacheMessages(token: string, shared: SharedChatMessages): SharedChatMessages {
-    this.#snapshotCache.set(token, { shared, lastAccessAt: this.#now() });
+    this.#assertAvailable();
+    const bytes = 2 * JSON.stringify(shared.header).length
+      + shared.messages.reduce((total, message) => total + 2 * message.length + 32, 0);
+    if (bytes > this.#cacheBytes) return shared;
+    this.#snapshotCache.set(token, { shared, bytes, lastAccessAt: this.#now() });
     this.#pruneSnapshotCache();
     return shared;
   }
@@ -375,12 +423,19 @@ export class ShareStore implements IShareStore {
       }
     }
 
-    if (this.#snapshotCache.size <= this.#cacheLimit) return;
     const entries = [...this.#snapshotCache.entries()]
       .sort((a, b) => a[1].lastAccessAt - b[1].lastAccessAt);
-    for (const [token] of entries) {
-      if (this.#snapshotCache.size <= this.#cacheLimit) break;
+    let bytes = entries.reduce((total, [, cached]) => total + cached.bytes, 0);
+    for (const [token, cached] of entries) {
+      if (this.#snapshotCache.size <= this.#cacheLimit && bytes <= this.#cacheBytes) break;
       this.#snapshotCache.delete(token);
+      bytes -= cached.bytes;
     }
   }
+}
+
+function selectMessages(shared: SharedChatMessages, select?: SelectShareMessageRange): SharedChatMessages {
+  if (!select) return shared;
+  const { start, end } = select(shared.header);
+  return { header: shared.header, messages: shared.messages.slice(start, end) };
 }

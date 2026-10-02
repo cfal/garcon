@@ -24,7 +24,7 @@
 		DropdownMenuSubContent,
 		DropdownMenuSubTrigger,
 	} from '$lib/components/ui/dropdown-menu';
-	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import {
 		WORKSPACE_WINDOW_EDGES,
 		type WorkspaceWindowEdge,

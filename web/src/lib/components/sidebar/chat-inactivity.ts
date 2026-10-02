@@ -1,6 +1,6 @@
 import { chatActivityTimeMs } from '$shared/chat-order-sort';
 import type { SidebarInactivityDuration } from '$lib/stores/local-settings.svelte';
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 

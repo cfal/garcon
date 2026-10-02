@@ -8,8 +8,8 @@
 	import Layers from '@lucide/svelte/icons/layers';
 	import type { CompactionMessage } from '$shared/chat-types';
 	import ChatEventCard from './rows/ChatEventCard.svelte';
-	import Markdown from './Markdown.svelte';
-	import type { MarkdownLinkNavigateEvent } from './Markdown.svelte';
+	import Markdown from '$lib/components/rich-text/Markdown.svelte';
+	import type { MarkdownLinkNavigateEvent } from '$lib/components/rich-text/Markdown.svelte';
 	import type { ResolveChatReference } from '$lib/chat/transcript/chat-reference.js';
 	import * as m from '$lib/paraglide/messages.js';
 

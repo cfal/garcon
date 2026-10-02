@@ -1,5 +1,5 @@
 import type { SavedChatSearch } from '$lib/api/settings';
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import type {
 	ChatSearchIndexStatus,
 	ChatSearchResult,

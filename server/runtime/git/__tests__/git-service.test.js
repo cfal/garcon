@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
-import { GitDomainError } from "../git-types.js";
+import { GitDomainError } from "../git-domain-error.js";
 import { createGitService as createTestGitService } from "./git-service-fixture.js";
 import { runGitWithStdin } from "../run.js";
 import { generateCommitMessage } from "../../../controller/git/commit-message.js";
@@ -783,7 +783,10 @@ describe("selected-file commits", () => {
       const response = git.toHttpError(rejection);
       expect(response.status).toBe(400);
       expect(await response.json()).toEqual({
+        success: false,
         error: "Pathspecs must resolve inside the project root.",
+        errorCode: "VALIDATION_FAILED",
+        retryable: false,
       });
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
@@ -6243,6 +6246,7 @@ describe("toHttpError", () => {
     const response = git.toHttpError(err);
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({
+      success: false,
       error: "Try again shortly",
       errorCode: "SERVICE_BUSY",
       retryable: true,

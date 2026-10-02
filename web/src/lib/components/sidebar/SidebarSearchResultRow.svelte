@@ -1,7 +1,7 @@
 <script lang="ts">
 	import ChatSummary from '../chat/ChatSummary.svelte';
 	import { cn } from '$lib/utils/cn';
-	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import type { ChatSearchResult, ChatSearchSnippetRole } from '$shared/chat-search';
 	import { SEARCH_RESULT_ROW_HEIGHT } from './sidebar-search-results';
 

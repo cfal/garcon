@@ -176,7 +176,7 @@
 	{:else if totalWorktreeCount === 0 && !hasLoadError}
 		<div class="flex flex-col items-center justify-center gap-2 py-10">
 			<GitBranch class="h-5 w-5 text-muted-foreground/50" />
-			<span class="text-sm text-muted-foreground">No worktrees found</span>
+			<span class="text-sm text-muted-foreground">{m.git_worktree_none()}</span>
 		</div>
 	{:else if totalWorktreeCount > 0 && worktrees.length === 0}
 		<div class="flex flex-col items-center justify-center gap-2 py-10">

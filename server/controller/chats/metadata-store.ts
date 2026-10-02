@@ -5,11 +5,13 @@ import { promises as fs } from 'fs';
 import { writeJsonFileAtomic } from '../../common/json-file-store.ts';
 import { parseStoredJson } from '../../common/stored-json.js';
 import type { ChatMessage } from '../../../common/chat-types.js';
-import type { CarryOverSegmentRef } from './store.js';
-import type { ChatRegistryEntry, IChatRegistry } from './store.js';
+import type { CarryOverSegmentRef } from './registry-contracts.js';
+import type { IChatRegistry } from './store.js';
+import type { ChatRegistryEntry } from './registry-contracts.js';
 import { createLogger } from '../../common/log.js';
 import { errorMessage, hasNodeErrorCode } from '../../common/errors.js';
 import { isRecord } from '../../../common/json.js';
+import { EventLoopSteps } from '@garcon/server-agent-common/shared/event-loop';
 
 const logger = createLogger('chats:metadata-store');
 
@@ -157,16 +159,33 @@ export class MetadataIndex {
   }
 
   // Recomputes the cached preview from the complete replacement view.
-  replaceFromTranscriptView(
+  async replaceFromTranscriptView(
     chatId: string,
-    messages: readonly ChatMessage[],
-  ): void {
+    pages: AsyncIterable<readonly ChatMessage[]>,
+  ): Promise<void> {
+    let firstText = '';
+    let firstAt: string | null = null;
+    let lastText: string | null = null;
+    let lastAt: string | null = null;
+    const steps = new EventLoopSteps('replacement-metadata');
+    for await (const messages of pages) {
+      for (const message of messages) {
+        const text = extractPreviewText(message);
+        if (!firstText && message.type === 'user-message') firstText = firstMessagePreview(text);
+        if (text) lastText = lastMessagePreview(text);
+        if (typeof message.timestamp === 'string') {
+          firstAt ??= message.timestamp;
+          if (!lastAt || message.timestamp > lastAt) lastAt = message.timestamp;
+        }
+        if (steps.due) await steps.next();
+      }
+    }
     const key = String(chatId);
     const current = this.#metadataByChatId.get(key);
-    const firstMessage = firstMessagePreview(firstUserText(messages)) || current?.firstMessage || 'New Session';
-    const createdAt = current?.createdAt ?? firstTimestamp(messages) ?? new Date().toISOString();
-    const lastMessage = lastMessagePreview(latestPreviewText(messages) ?? firstMessage);
-    const lastActivity = latestTimestamp(messages) ?? createdAt;
+    const firstMessage = firstText || current?.firstMessage || 'New Session';
+    const createdAt = current?.createdAt ?? firstAt ?? new Date().toISOString();
+    const lastMessage = lastText ?? lastMessagePreview(firstMessage);
+    const lastActivity = lastAt ?? createdAt;
     this.#metadataByChatId.set(key, {
       chatId: key,
       createdAt,

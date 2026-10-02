@@ -74,8 +74,8 @@ describe('API client helpers', () => {
 		expect(result).toEqual({ items: [1, 2] });
 		const [url, opts] = fetchMock.mock.calls[0];
 		expect(url).toBe('/api/test');
-		expect(opts.headers['Authorization']).toBe('Bearer test-token');
-		expect(opts.headers['Content-Type']).toBe('application/json');
+		expect(opts.headers.get('Authorization')).toBe('Bearer test-token');
+		expect(opts.headers.get('Content-Type')).toBe('application/json');
 	});
 
 	it('apiPost sends POST with JSON body', async () => {
@@ -118,7 +118,7 @@ describe('API client helpers', () => {
 		expect(opts.body).toBeInstanceOf(FormData);
 		// FormData requests should NOT have Content-Type set
 		// (browser sets it with boundary automatically)
-		expect(opts.headers['Content-Type']).toBeUndefined();
+		expect(opts.headers.has('Content-Type')).toBe(false);
 	});
 
 	it('apiPostForm preserves caller headers', async () => {
@@ -128,8 +128,22 @@ describe('API client helpers', () => {
 		await apiPostForm('/api/upload', formData, { headers: { 'X-Upload-Token': 'token-1' } });
 
 		const [, opts] = fetchMock.mock.calls[0];
-		expect(opts.headers['X-Upload-Token']).toBe('token-1');
-		expect(opts.headers['Content-Type']).toBeUndefined();
+		expect(opts.headers.get('X-Upload-Token')).toBe('token-1');
+		expect(opts.headers.has('Content-Type')).toBe(false);
+	});
+
+	it.each<{ headers: HeadersInit }>([
+		{ headers: { authorization: 'Custom token', 'content-type': 'text/plain', 'X-Test': 'kept' } },
+		{ headers: new Headers({ authorization: 'Custom token', 'content-type': 'text/plain', 'X-Test': 'kept' }) },
+		{ headers: [['authorization', 'Custom token'], ['content-type', 'text/plain'], ['X-Test', 'kept']] },
+	])('preserves caller overrides in every HeadersInit form: %j', async ({ headers }) => {
+		fetchMock.mockResolvedValue(jsonResponse({ ok: true }));
+		await apiGet('/api/test', { headers });
+		const actual = new Headers(fetchMock.mock.calls[0][1].headers);
+		expect(actual.get('Authorization')).toBe('Custom token');
+		expect(actual.get('Content-Type')).toBe('text/plain');
+		expect(actual.get('X-Test')).toBe('kept');
+		expect([...actual]).toHaveLength(3);
 	});
 
 	it('throws ApiError on non-ok response with error body', async () => {
@@ -254,7 +268,7 @@ describe('API client helpers', () => {
 		await apiGet('/api/test');
 
 		const [, opts] = fetchMock.mock.calls[0];
-		expect(opts.headers['Authorization']).toBeUndefined();
+		expect(opts.headers.has('Authorization')).toBe(false);
 	});
 
 	it('accepts timeout options for PUT, DELETE, and form POST helpers', async () => {

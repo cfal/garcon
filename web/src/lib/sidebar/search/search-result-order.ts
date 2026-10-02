@@ -1,6 +1,6 @@
 import { chatActivityTimeMs, chatCreationTimeMs } from '$shared/chat-order-sort';
 import type { ChatSearchSort } from '$shared/chat-search';
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 
 export function sortChatSearchResults(
 	chats: readonly ChatSessionRecord[],

@@ -95,7 +95,7 @@ describe('ModelCatalogStore', () => {
 	it('starts empty instead of embedding integration-specific fallbacks', () => {
 		const store = createModelCatalogStore();
 
-		expect(store.getAgents()).toEqual([]);
+		expect(store.getSelectableAgents()).toEqual([]);
 		expect(store.getModels('claude')).toEqual([]);
 		expect(store.supportsFork('claude')).toBe(false);
 		expect(store.supportsSteering('claude')).toBe(false);
@@ -385,7 +385,7 @@ describe('ModelCatalogStore', () => {
 		const store = createModelCatalogStore();
 		await store.forceRefresh();
 
-		expect(store.getAgents()).toEqual(['sample-agent']);
+		expect(store.getSelectableAgents()).toEqual(['sample-agent']);
 		expect(store.getAgent('stale')).toBeNull();
 		expect(store.supportsFork('sample-agent')).toBe(true);
 		expect(store.supportsForkAtMessage('sample-agent')).toBe(true);
@@ -597,7 +597,7 @@ describe('ModelCatalogStore', () => {
 
 		const store = createModelCatalogStore();
 
-		expect(store.getAgents()).toEqual([]);
+		expect(store.getSelectableAgents()).toEqual([]);
 		expect(store.getModels('Bad Id')).toEqual([]);
 	});
 });

@@ -34,4 +34,13 @@ describe('parsePorcelainV1Z', () => {
       { path: 'other.txt', originalPath: 'src.txt', indexStatus: ' ', workTreeStatus: 'R' },
     ]);
   });
+
+  it('consumes copy sources in either column and preserves spaces and malformed trailing records', () => {
+    expect(parsePorcelainV1Z('C  with space\0UU not a conflict\0 C copy\0source\0UU real conflict\0R\0')).toEqual([
+      { path: 'with space', originalPath: 'UU not a conflict', indexStatus: 'C', workTreeStatus: ' ' },
+      { path: 'copy', originalPath: 'source', indexStatus: ' ', workTreeStatus: 'C' },
+      { path: 'real conflict', indexStatus: 'U', workTreeStatus: 'U' },
+      { path: '', originalPath: '', indexStatus: 'R', workTreeStatus: ' ' },
+    ]);
+  });
 });

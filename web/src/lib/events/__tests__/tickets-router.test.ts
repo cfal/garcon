@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { TicketsInvalidationHub } from '$lib/tickets/catalog/tickets-invalidation-hub';
 import { WsConnection } from '$lib/ws/connection.svelte';
-import { TicketsRouter } from '../tickets-router.svelte';
+import { TicketsRouter } from '../tickets-router';
 
 describe('Tickets invalidation routing', () => {
 	it('filters invalid messages, drains once, propagates reconnect and cleans subscriptions', () => {

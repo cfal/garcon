@@ -1,4 +1,4 @@
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 
 type ProcessingChat = Pick<ChatSessionRecord, 'status' | 'isProcessing'>;
 

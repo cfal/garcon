@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ChatBoard } from '$shared/chat-boards';
 import type { TransitionChatTagsRequest } from '$shared/chat-tag-mutations';
 import type { ChatBoardApi } from '$lib/api/chat-boards';
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte';
 import { ChatTagMutationBlockedError } from '$lib/chat/sessions/chat-tag-mutation-result.js';
 import { ChatBoardController } from '$lib/chat-board/catalog/chat-board-controller.svelte';

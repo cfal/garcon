@@ -18,7 +18,7 @@
 		type SidebarDisplayOptions,
 	} from './sidebar-display-options';
 	import { prioritizeOptimisticArchives, sortSidebarChatsByRecency } from './chat-recency-sort';
-	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import type { WorkspaceWindowEdge } from '$lib/workspace/surface-types.js';
 	import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy.js';
 	import type {

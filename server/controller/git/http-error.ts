@@ -1,7 +1,8 @@
-import { GitDomainError } from '../../runtime/git/git-types.js';
+import { GitDomainError } from '../../runtime/git/git-domain-error.js';
 import { COMMIT_MESSAGE_ERROR_MAP, isCommitMessageErrorCode } from './commit-message.js';
-import type { ClassifiedGitError } from '../../runtime/git/types.js';
+import type { ClassifiedGitError } from '../../runtime/git/git-error-classifier.js';
 import { createLogger } from '../../common/log.js';
+import { jsonError } from '../../common/http-error.js';
 
 const logger = createLogger('git:git-service');
 
@@ -9,29 +10,16 @@ function gitDomainErrorToResponse(error: GitDomainError): Response {
   const code = error.code;
   if (isCommitMessageErrorCode(code)) {
     const entry = COMMIT_MESSAGE_ERROR_MAP[code];
-    return Response.json(
-      { error: error.message, errorCode: entry.errorCode },
-      { status: entry.status },
-    );
+    return jsonError(error.message, entry.status, entry.errorCode);
   }
-  if (code === 'INVALID_INPUT') return Response.json({ error: error.message }, { status: 400 });
-  if (code === 'NOT_REPO') return Response.json({ error: error.message }, { status: 400 });
-  if (code === 'AUTH_FAILED') return Response.json({ error: error.message }, { status: 401 });
-  if (code === 'SERVICE_BUSY') {
-    return Response.json(
-      { error: error.message, errorCode: code, retryable: true },
-      { status: 503 },
-    );
-  }
-  return Response.json({ error: error.message }, { status: 500 });
+  if (code === 'INVALID_INPUT' || code === 'NOT_REPO') return jsonError(error.message, 400);
+  if (code === 'AUTH_FAILED') return jsonError(error.message, 401);
+  if (code === 'SERVICE_BUSY') return jsonError(error.message, 503, code, true);
+  return jsonError(error.message, 500);
 }
 
 function classifiedGitErrorToResponse(classified: ClassifiedGitError): Response {
-  const body: { error: string; details?: unknown } = {
-    error: classified.message,
-  };
-  if (classified.details) body.details = classified.details;
-  return Response.json(body, { status: classified.status });
+  return jsonError(classified.message, classified.status, undefined, undefined, classified.details || undefined);
 }
 
 export function gitHttpError(error: unknown, classifyGitError: (error: unknown) => ClassifiedGitError): Response {

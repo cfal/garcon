@@ -10,13 +10,8 @@ import type {
   SteerCommandRequest,
   SteerCommandResponse,
 } from '../../../common/chat-command-contracts.ts';
-import {
-  DomainError,
-  STEER_NOT_DELIVERED_MESSAGE,
-  SteerDeliveryError,
-  steeringUnsupportedError,
-  steerTurnChangedError,
-} from '../../common/domain-error.js';
+import { DomainError } from '../../common/domain-error.js';
+import { STEER_NOT_DELIVERED_MESSAGE, SteerDeliveryError, steeringUnsupportedError, steerTurnChangedError } from '../chat-execution/steering-errors.js';
 import { QueueEntrySteerError } from '../chat-execution/queue-steer-error.js';
 import { toClientChatExecutionControlState } from '../chat-execution/control-state.ts';
 import type { StoredChatExecutionControlState } from '../chat-execution/control-state.ts';
@@ -35,6 +30,7 @@ import {
   commandResultFromRecord,
 } from './command-support.ts';
 import { SteerFileContext } from './steer-file-context.ts';
+import { queueSteerErrorCode, steerErrorCode, steerErrorStatus } from './steer-error-codes.js';
 
 const logger = createLogger('commands:steer');
 const STEER_CAPACITY_EXHAUSTED_MESSAGE =
@@ -537,7 +533,13 @@ export class SteerCommands {
       return queuedSteerResponse(record, record.chatId, record.entryId, control, 'duplicate');
     }
     if (record.status === 'failed' || record.status === 'rejected') {
-      throw recordedSteerError(record);
+      const code = steerErrorCode(record.errorCode);
+      throw new CommandValidationError(
+        code,
+        record.error ?? 'The previous steering attempt did not complete',
+        steerErrorStatus(code),
+        false,
+      );
     }
 
     const error = new SteerDeliveryError(
@@ -578,7 +580,7 @@ export class SteerCommands {
       throw new QueueEntrySteerError(
         code,
         record.error ?? 'The previous queued steering attempt did not complete',
-        queueSteerErrorStatus(code),
+        steerErrorStatus(code),
         record.deliveryOutcome ?? (code === 'STEER_OUTCOME_UNKNOWN' ? 'unknown' : 'not-sent'),
         control,
       );
@@ -744,54 +746,6 @@ function queuedQueueEntrySteerResponse(
   };
 }
 
-function recordedSteerError(record: CommandLedgerRecord): CommandValidationError {
-  const code = steerErrorCode(record.errorCode);
-  return new CommandValidationError(
-    code,
-    record.error ?? 'The previous steering attempt did not complete',
-    steerErrorStatus(code),
-    false,
-  );
-}
-
-function steerErrorCode(value: string | undefined): CommandErrorCode {
-  switch (value) {
-    case 'VALIDATION_FAILED':
-    case 'SESSION_NOT_FOUND':
-    case 'IDEMPOTENCY_CONFLICT':
-    case 'OPERATION_UNSUPPORTED':
-    case 'SERVER_SHUTTING_DOWN':
-    case 'EXECUTOR_UNAVAILABLE':
-    case 'STEER_NOT_DELIVERED':
-    case 'STEER_OUTCOME_UNKNOWN':
-    case 'STEER_PROVIDER_REJECTED':
-    case 'STEER_TURN_UNAVAILABLE':
-    case 'STEER_TURN_CHANGED':
-    case 'STEER_TURN_NOT_STEERABLE':
-    case 'STEER_CAPACITY_EXHAUSTED':
-      return value;
-    default:
-      return 'INTERNAL_ERROR';
-  }
-}
-
-function steerErrorStatus(code: CommandErrorCode): number {
-  switch (code) {
-    case 'VALIDATION_FAILED': return 400;
-    case 'SESSION_NOT_FOUND': return 404;
-    case 'IDEMPOTENCY_CONFLICT':
-    case 'STEER_PROVIDER_REJECTED':
-    case 'STEER_TURN_UNAVAILABLE':
-    case 'STEER_TURN_CHANGED':
-    case 'STEER_TURN_NOT_STEERABLE': return 409;
-    case 'OPERATION_UNSUPPORTED': return 422;
-    case 'SERVER_SHUTTING_DOWN': return 503;
-    case 'EXECUTOR_UNAVAILABLE': return 503;
-    case 'STEER_CAPACITY_EXHAUSTED': return 503;
-    default: return 500;
-  }
-}
-
 function queueObservationErrorCode(
   control: StoredChatExecutionControlState,
   entryId: string,
@@ -802,32 +756,4 @@ function queueObservationErrorCode(
   }
   if (entry?.status === 'steering') return 'QUEUE_ENTRY_IN_FLIGHT';
   return 'QUEUE_ENTRY_NOT_FOUND';
-}
-
-function queueSteerErrorCode(value: string | undefined): CommandErrorCode {
-  switch (value) {
-    case 'QUEUE_ENTRY_NOT_FOUND':
-    case 'QUEUE_ENTRY_ALREADY_SENT':
-    case 'QUEUE_ENTRY_IN_FLIGHT':
-    case 'QUEUE_ENTRY_REVISION_CONFLICT':
-    case 'QUEUE_ENTRY_REORDER_CONFLICT':
-    case 'QUEUE_STEER_FINALIZATION_FAILED':
-    case 'QUEUE_STEER_RECOVERY_FAILED':
-      return value;
-    default:
-      return steerErrorCode(value);
-  }
-}
-
-function queueSteerErrorStatus(code: CommandErrorCode): number {
-  switch (code) {
-    case 'QUEUE_ENTRY_NOT_FOUND': return 404;
-    case 'QUEUE_ENTRY_ALREADY_SENT':
-    case 'QUEUE_ENTRY_IN_FLIGHT':
-    case 'QUEUE_ENTRY_REVISION_CONFLICT':
-    case 'QUEUE_ENTRY_REORDER_CONFLICT': return 409;
-    case 'QUEUE_STEER_FINALIZATION_FAILED':
-    case 'QUEUE_STEER_RECOVERY_FAILED': return 500;
-    default: return steerErrorStatus(code);
-  }
 }

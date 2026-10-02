@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SidebarController, type SidebarControllerDeps } from '../sidebar-controller.svelte';
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 
 vi.mock('$lib/api/chats.js', () => ({
 	togglePinned: vi.fn(),
@@ -17,14 +17,13 @@ import {
 	toggleArchive,
 	reorderChat,
 	sortChatOrder,
-	getChatDetails,
+
 } from '$lib/api/chats.js';
 
 const mockTogglePinned = vi.mocked(togglePinned);
 const mockToggleArchive = vi.mocked(toggleArchive);
 const mockReorderChat = vi.mocked(reorderChat);
 const mockSortChatOrder = vi.mocked(sortChatOrder);
-const mockGetChatDetails = vi.mocked(getChatDetails);
 
 function makeChat(overrides: Partial<ChatSessionRecord>): ChatSessionRecord {
 	return {
@@ -85,23 +84,6 @@ describe('SidebarController', () => {
 		controller = new SidebarController(deps);
 	});
 
-	describe('togglePinned', () => {
-		it('calls API then refreshes', async () => {
-			mockTogglePinned.mockResolvedValue({ success: true, isPinned: true });
-
-			await controller.togglePinned('c-1');
-
-			expect(mockTogglePinned).toHaveBeenCalledWith('c-1');
-			expect(quietRefresh).toHaveBeenCalledOnce();
-		});
-
-		it('propagates API errors', async () => {
-			mockTogglePinned.mockRejectedValue(new Error('fail'));
-
-			await expect(controller.togglePinned('c-1')).rejects.toThrow('fail');
-		});
-	});
-
 	describe('reorderChat', () => {
 		it('passes an after placement and refreshes', async () => {
 			mockReorderChat.mockResolvedValue({
@@ -160,30 +142,6 @@ describe('SidebarController', () => {
 			await expect(controller.sortChatOrder('activity')).rejects.toThrow('sort failed');
 
 			expect(quietRefresh).not.toHaveBeenCalled();
-		});
-	});
-
-	describe('loadDetails', () => {
-		it('returns chat details from API', async () => {
-			const details = {
-				chatId: 'c-1',
-				firstMessage: 'Hello',
-				createdAt: '2025-01-01',
-				lastActivityAt: '2025-01-02',
-				agentSessionId: 'agent-session-1',
-				transcriptSource: null,
-				carryOver: {
-					revision: 'carry-v1:0',
-					archivedMessageCount: 0,
-					segments: [],
-				},
-			};
-			mockGetChatDetails.mockResolvedValue(details);
-
-			const result = await controller.loadDetails('c-1');
-
-			expect(mockGetChatDetails).toHaveBeenCalledWith('c-1');
-			expect(result).toEqual(details);
 		});
 	});
 

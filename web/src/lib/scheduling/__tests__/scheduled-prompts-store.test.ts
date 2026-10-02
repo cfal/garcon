@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ScheduledPromptsStore } from '../scheduled-prompts-store.svelte';
-import type { ScheduledPromptsSnapshot } from '$shared/scheduled-prompts';
+import type { ScheduledPromptsMutationResponse, ScheduledPromptsSnapshot } from '$shared/scheduled-prompts';
 
 function scheduledPrompt(id: string) {
 	return {
@@ -18,6 +18,51 @@ function snapshot(revision: number, ids: string[]): ScheduledPromptsSnapshot {
 }
 
 describe('ScheduledPromptsStore', () => {
+	it('honors queued invalidation after a failed refresh', async () => {
+		let rejectRead!: (error: Error) => void;
+		const get = vi.fn()
+			.mockImplementationOnce(() => new Promise<ScheduledPromptsSnapshot>((_, reject) => { rejectRead = reject; }))
+			.mockResolvedValueOnce(snapshot(2, ['a', 'b']));
+		const store = new ScheduledPromptsStore({ get });
+		store.applySnapshot(snapshot(1, ['a']));
+
+		const first = store.refreshIfLoaded();
+		const second = store.refreshIfLoaded();
+		rejectRead(new Error('disconnected'));
+		await Promise.all([first, second]);
+
+		expect(get).toHaveBeenCalledTimes(2);
+		expect(store.snapshot).toEqual(snapshot(2, ['a', 'b']));
+		expect(store.error).toBeNull();
+	});
+
+	it('honors invalidation after a failed initial load', async () => {
+		let rejectRead!: (error: Error) => void;
+		const get = vi.fn()
+			.mockImplementationOnce(() => new Promise<ScheduledPromptsSnapshot>((_, reject) => { rejectRead = reject; }))
+			.mockResolvedValueOnce(snapshot(2, ['a']));
+		const store = new ScheduledPromptsStore({ get });
+		const failure = new Error('disconnected');
+		const initial = expect(store.ensureLoaded()).rejects.toBe(failure);
+		const invalidated = store.refreshIfLoaded();
+		rejectRead(failure);
+		await initial;
+		await invalidated;
+
+		expect(get).toHaveBeenCalledTimes(2);
+		expect(store.snapshot).toEqual(snapshot(2, ['a']));
+	});
+
+	it('does not retry failed reads without another invalidation', async () => {
+		const get = vi.fn().mockRejectedValue(new Error('disconnected'));
+		const store = new ScheduledPromptsStore({ get });
+		store.applySnapshot(snapshot(1, ['a']));
+		await store.refreshIfLoaded();
+		expect(get).toHaveBeenCalledTimes(1);
+		expect(store.snapshot).toEqual(snapshot(1, ['a']));
+		expect(store.error).toBe('disconnected');
+	});
+
 	it('loads lazily and applies canonical mutation snapshots', async () => {
 		const get = vi.fn().mockResolvedValue(snapshot(0, []));
 		const create = vi.fn().mockResolvedValue({ success: true, snapshot: snapshot(1, ['a']) });
@@ -36,15 +81,15 @@ describe('ScheduledPromptsStore', () => {
 	});
 
 	it('optimistically reorders prompts and applies the server revision', async () => {
-		let resolveMutation!: (value: unknown) => void;
-		const reorder = vi.fn(() => new Promise((resolve) => (resolveMutation = resolve)));
-		const store = new ScheduledPromptsStore({ reorder: reorder as never });
+		const mutation = Promise.withResolvers<ScheduledPromptsMutationResponse>();
+		const reorder = vi.fn(() => mutation.promise);
+		const store = new ScheduledPromptsStore({ reorder });
 		store.applySnapshot(snapshot(2, ['a', 'b']));
 
 		const moving = store.move('b', 'up');
 		await vi.waitFor(() => expect(reorder).toHaveBeenCalledTimes(1));
 		expect(store.prompts.map((entry) => entry.id)).toEqual(['b', 'a']);
-		resolveMutation({ success: true, snapshot: snapshot(3, ['b', 'a']) });
+		mutation.resolve({ success: true, snapshot: snapshot(3, ['b', 'a']) });
 		await moving;
 
 		expect(reorder).toHaveBeenCalledWith({ expectedRevision: 2, orderedPromptIds: ['b', 'a'] });

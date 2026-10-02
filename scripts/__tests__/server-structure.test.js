@@ -32,6 +32,40 @@ function imports(filename) {
 }
 
 describe('server ownership boundaries', () => {
+  test('keeps the server static value-import graph acyclic', () => {
+    const files = new Set(sources(server));
+    const dependencies = new Map();
+    for (const filename of files) {
+      const tree = ts.createSourceFile(filename, readFileSync(filename, 'utf8'), ts.ScriptTarget.Latest, true);
+      const targets = [];
+      for (const node of tree.statements) {
+        if (!ts.isImportDeclaration(node) && !ts.isExportDeclaration(node)) continue;
+        if (!node.moduleSpecifier || !ts.isStringLiteral(node.moduleSpecifier)) continue;
+        const clause = ts.isImportDeclaration(node) ? node.importClause : node;
+        if (clause?.isTypeOnly) continue;
+        const named = ts.isImportDeclaration(node) ? clause?.namedBindings : node.exportClause;
+        if (named && (ts.isNamedImports(named) || ts.isNamedExports(named))
+          && !clause?.name && named.elements.length > 0 && named.elements.every(item => item.isTypeOnly)) continue;
+        if (!node.moduleSpecifier.text.startsWith('.')) continue;
+        const target = resolve(dirname(filename), node.moduleSpecifier.text);
+        const resolved = [target, target.replace(/\.js$/, '.ts')].find(candidate => files.has(candidate));
+        if (resolved) targets.push(resolved);
+      }
+      dependencies.set(filename, targets);
+    }
+    const visited = new Set();
+    const visiting = new Set();
+    const visit = filename => {
+      if (visited.has(filename)) return;
+      expect(visiting.has(filename), [...visiting, filename].map(file => relative(server, file)).join(' -> ')).toBe(false);
+      visiting.add(filename);
+      for (const dependency of dependencies.get(filename)) visit(dependency);
+      visiting.delete(filename);
+      visited.add(filename);
+    };
+    for (const filename of files) visit(filename);
+  });
+
   test('worker and provider Bun subprocesses supply explicit environments', () => {
     for (const directory of [join(server, 'runtime'), join(server, 'remote'), join(root, 'server-agents')]) {
       for (const filename of sources(directory)) {

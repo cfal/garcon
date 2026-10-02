@@ -74,6 +74,25 @@ function viewRows(chatId) {
 }
 
 describe('bounded transcript bulk operations', () => {
+  it('streams a pinned prefix in bounded pages and rechecks the view after the final page', async () => {
+    const view = store.initializeCurrentView('paged', { contentStartOrdinal: 1, rows: rows(2500, 'row') });
+    const observer = observeTurns();
+    let count = 0;
+    for await (const page of store.rowPagesThrough('paged', { viewId: view.viewId, ordinal: 2100 })) {
+      expect(page.length).toBeLessThanOrEqual(1000);
+      expect(page[0].ordinal).toBe(count + 1);
+      count += page.length;
+    }
+    expect(count).toBe(2100);
+    expect(observer.stop().turns).toBeGreaterThan(1);
+
+    const stream = store.rowPagesThrough('paged', { viewId: view.viewId, ordinal: 1 });
+    expect((await stream.next()).value).toHaveLength(1);
+    const next = await store.stageView('paged', { viewId: transcriptViewId('replacement'), contentStartOrdinal: 1, rows: [] });
+    store.replaceCurrentView('paged', view.viewId, next.viewId);
+    await expect(stream.next()).rejects.toBeInstanceOf(StaleTranscriptViewError);
+  });
+
   it('seeds a long history across event-loop turns and exposes it only on promotion', async () => {
     const observer = observeTurns(() => store.currentView('seeded'));
     const view = await store.seedCurrentView('seeded', { contentStartOrdinal: 1, rows: rows(LARGE, 'seed') });

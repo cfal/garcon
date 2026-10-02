@@ -9,7 +9,7 @@
 		SEARCH_RESULTS_OVERSCAN,
 		SEARCH_RESULTS_VIRTUALIZATION_THRESHOLD,
 	} from './sidebar-search-results';
-	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import type { ChatSearchResult } from '$shared/chat-search';
 
 	interface SidebarSearchResultsProps {

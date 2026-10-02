@@ -4,7 +4,7 @@ import { withJsonBody } from '../lib/json-route.js';
 import type { HttpRouteContext, RouteMap } from '../lib/http-route-types.js';
 import type { ApiProviderService } from '../api-providers/service.js';
 import { isApiProviderId, type ApiProviderInput, type ApiProviderModelDiscoveryRequest } from '../../../common/api-providers.js';
-import type { ModelCatalogResponseCache } from './model-catalog-cache.js';
+import type { ModelCatalogResponseCache } from '../agents/model-catalog-cache.js';
 import { errorMessage, jsonErrorFromCorruptStateFile } from './route-helpers.js';
 import { executorIdFromUrl } from './executor-target.js';
 import { DomainError, ValidationDomainError } from '../../common/domain-error.js';

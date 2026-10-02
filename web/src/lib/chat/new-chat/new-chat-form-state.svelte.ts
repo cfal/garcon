@@ -2,7 +2,7 @@
 // model, permission/thinking mode, path validation, image attachments, and
 // the config payload used to start a session.
 
-import { ProjectPathCompletionController } from '$lib/chat/project-paths/project-path-completion.js';
+import { ProjectPathCompletionController } from '$lib/project-paths/project-path-completion.js';
 import { effectiveExecutorId } from '$shared/executors';
 import type { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
 import { validateStart, type ValidateStartErrorCode } from '$lib/api/chats.js';
@@ -12,7 +12,7 @@ import {
 } from '$lib/chat/composer/image-attachment.svelte.js';
 import { getGitWorktrees, gitCreateWorktree } from '$lib/api/git.js';
 import type { GitWorktreeItem } from '$lib/api/git.js';
-import type { NewChatConfig, SessionAgentId } from '$lib/types/app.js';
+import type { NewChatConfig, SessionAgentId } from '$lib/chat/sessions/chat-session-types.js';
 import type { PermissionMode, ThinkingMode } from '$lib/types/chat.js';
 import type { AgentSettingDescriptor, AgentSettingsEnvelope } from '$shared/agent-integration';
 import type { JsonValue } from '$shared/json';
@@ -41,8 +41,8 @@ import { NewChatPreambleSelectionState } from '$lib/preambles/new-chat-preamble-
 import {
 	isPinnedProjectPath,
 	nextPinnedProjectPaths,
-} from '$lib/chat/project-paths/project-pinned-paths.js';
-import { savePinnedProjectPathsOptimistically } from '$lib/chat/project-paths/pinned-project-path-settings.js';
+} from '$lib/project-paths/project-pinned-paths.js';
+import { savePinnedProjectPathsOptimistically } from '$lib/project-paths/pinned-project-path-settings.js';
 import { normalizeTagSlug } from '$lib/utils/tags.js';
 import { isAbortError } from '$lib/utils/is-abort-error.js';
 import * as m from '$lib/paraglide/messages.js';

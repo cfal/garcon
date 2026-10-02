@@ -1,4 +1,4 @@
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import { effectiveExecutorId } from '$shared/executors';
 
 export type ProjectPathChangedListener = (chatId: string, projectPath: string | null, executorId?: string | null) => void;

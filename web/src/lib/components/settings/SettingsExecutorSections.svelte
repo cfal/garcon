@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages.js';
 	import type { Snippet } from 'svelte';
 	import { getExecutors } from '$lib/context';
 
@@ -16,7 +17,7 @@
 				{@render children(executor.id)}
 			</section>
 			{#snippet failed()}
-				<p class="text-sm text-destructive">Unable to display settings for {executor.label}.</p>
+				<p class="text-sm text-destructive">{m.settings_executor_display_failed({ label: executor.label })}</p>
 			{/snippet}
 		</svelte:boundary>
 	{/each}

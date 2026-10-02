@@ -1,4 +1,5 @@
-import type { ChatRegistryEntry, IChatRegistry } from './store.js';
+import type { IChatRegistry } from './store.js';
+import type { ChatRegistryEntry } from './registry-contracts.js';
 import type {
   ForkedAgentSessionOutcome,
   StartedAgentSession,

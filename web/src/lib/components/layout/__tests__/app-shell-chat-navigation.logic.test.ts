@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import { buildSidebarDisplayChatIds } from '$lib/components/sidebar/sidebar-row-model';
 import { resolveAdjacentChatId, shouldSynchronizeFocusedChat } from '../app-shell-chat-navigation';
 

@@ -68,13 +68,13 @@
 				{#if worktree.isMain}
 					<span
 						class="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium leading-none text-muted-foreground"
-						>repo</span
+						>{m.git_worktree_repo()}</span
 					>
 				{/if}
 				{#if worktree.isPathMissing}
 					<span
 						class="shrink-0 rounded-md bg-destructive/15 px-1.5 py-0.5 text-[10px] font-medium leading-none text-destructive"
-						>missing</span
+						>{m.git_worktree_missing()}</span
 					>
 				{/if}
 			</div>

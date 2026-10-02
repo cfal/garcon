@@ -34,6 +34,7 @@ import type { TicketRuntime } from '../tickets/setup.js';
 import { createChatTagRoutes } from './chat-tags.js';
 import type { ServerRuntimeState } from '../../common/server-runtime.js';
 import type { RouteMap } from '../lib/http-route-types.js';
+import { composeRoutes } from '../lib/compose-routes.js';
 import type { IChatRegistry } from '../chats/store.js';
 import type { SettingsStore } from '../settings/store.js';
 import type { ChatExecutionService } from '../chat-execution/chat-execution-coordinator.js';
@@ -47,7 +48,7 @@ import type { IShareStore } from '../chats/share-store.js';
 import type { ApiProviderService } from '../api-providers/service.js';
 import type { ChatCommandService } from '../commands/chat-command-service.js';
 import type { SnippetService } from '../snippets/service.js';
-import type { ModelCatalogResponseCache } from './model-catalog-cache.js';
+import type { ModelCatalogResponseCache } from '../agents/model-catalog-cache.js';
 import type { LastSelectedChatState } from '../chats/last-selected-chat-state.js';
 import type { ScheduledPromptScheduler } from '../scheduled-prompts/scheduler.js';
 import type { ChatListProjector } from '../chats/chat-list-projector.js';
@@ -157,26 +158,26 @@ export default function createAllRoutes(workspaceDir: string, {
   const inspectProject = executors.inspectProject;
   const httpIdleSeconds = getHttpIdleTimeoutSeconds();
   const gitBudget = httpIdleSeconds > 0 ? Math.max(1000, httpIdleSeconds * 1000 - 2000) : GH_DETAIL_TIMEOUT_MS;
-  return {
-    ...createExecutorRoutes(executors),
-    ...createRuntimeRoutes(runtimeState, workspaceName),
-    ...createAgentTurnReceiptRoutes(commandLedger),
-    ...createChatSnapshotRoutes({
+  return composeRoutes(
+    createExecutorRoutes(executors),
+    createRuntimeRoutes(runtimeState, workspaceName),
+    createAgentTurnReceiptRoutes(commandLedger),
+    createChatSnapshotRoutes({
       summaries: chatListProjector,
       execution: queue,
       chatViews,
       transientFeeds,
     }),
-    ...createChatRowRoutes(chatRows),
-    ...createChatExportRoutes(transcriptExport),
-    ...createChatHandoffArtifactRoutes(handoffArtifact),
-    ...createNativeSessionLookupRoutes(registry, agents),
-    ...createProjectResolutionRoutes({ registry, inspect: inspectProject }),
-    ...createStaticRoutes(settings),
-    ...authRoutes,
-    ...createAgentRoutes({ agents, apiProviders }),
-    ...createApiProviderRoutes(apiProviders, modelCatalogResponseCache),
-    ...createChatRoutes({
+    createChatRowRoutes(chatRows),
+    createChatExportRoutes(transcriptExport),
+    createChatHandoffArtifactRoutes(handoffArtifact),
+    createNativeSessionLookupRoutes(registry, agents),
+    createProjectResolutionRoutes({ registry, inspect: inspectProject }),
+    createStaticRoutes(settings),
+    authRoutes,
+    createAgentRoutes({ agents, apiProviders }),
+    createApiProviderRoutes(apiProviders, modelCatalogResponseCache),
+    createChatRoutes({
       registry,
       settings,
       recentTitleIcons,
@@ -193,17 +194,17 @@ export default function createAllRoutes(workspaceDir: string, {
       chatMutationLock,
       projects: (executorId) => executors.projectService(executorId),
     }),
-    ...createChatTagRoutes(chatTags),
-    ...createChatBoardRoutes(chatBoards),
-    ...createTicketRoutes(tickets, resolveTicketProject),
-    ...createChatTicketSourceRoutes(registry, ticketSources),
-    ...createShareRoutes(shareStore, registry, settings, metadata, shareSnapshots),
-    ...createFilesRoutes(registry, { files: (executorId) => executors.requireExecutor(executorId).getFilesService(), inspectProject }),
-    ...createTerminalRoutes(terminals),
-    ...createGitRoutes(agents, settings, (executorId) => executors.requireExecutor(executorId).getGitService(), Math.min(GIT_OPERATION_TIMEOUT_MS, gitBudget)),
-    ...createGhRoutes((executorId) => executors.requireExecutor(executorId).getGhService(), Math.min(GH_DETAIL_TIMEOUT_MS, gitBudget)),
-    ...createCommandsRoutes({ registry, agents, inspectProject }),
-    ...createWorkspaceRoutes(
+    createChatTagRoutes(chatTags),
+    createChatBoardRoutes(chatBoards),
+    createTicketRoutes(tickets, resolveTicketProject),
+    createChatTicketSourceRoutes(registry, ticketSources),
+    createShareRoutes(shareStore, registry, settings, metadata, shareSnapshots),
+    createFilesRoutes(registry, { files: (executorId) => executors.requireExecutor(executorId).getFilesService(), inspectProject }),
+    createTerminalRoutes(terminals),
+    createGitRoutes(agents, settings, (executorId) => executors.requireExecutor(executorId).getGitService(), Math.min(GIT_OPERATION_TIMEOUT_MS, gitBudget)),
+    createGhRoutes((executorId) => executors.requireExecutor(executorId).getGhService(), Math.min(GH_DETAIL_TIMEOUT_MS, gitBudget)),
+    createCommandsRoutes({ registry, agents, inspectProject }),
+    createWorkspaceRoutes(
       settings,
       agents,
       telegramNotifier,
@@ -212,19 +213,19 @@ export default function createAllRoutes(workspaceDir: string, {
       registry,
       transcriptSearchSettings,
     ),
-    ...createModelsRoutes({
+    createModelsRoutes({
       modelCatalog: { agents, apiProviders },
       responseCache: modelCatalogResponseCache,
     }),
-    ...createScheduledPromptRoutes(scheduledPrompts),
-    ...createSnippetRoutes(snippets),
-    ...createCanvasRoutes(canvases),
-    ...createPreambleRoutes(preambles),
-    ...createChatPreambleRoutes({
+    createScheduledPromptRoutes(scheduledPrompts),
+    createSnippetRoutes(snippets),
+    createCanvasRoutes(canvases),
+    createPreambleRoutes(preambles),
+    createChatPreambleRoutes({
       selection: chatPreambleSelection,
       preambles,
       projectPaths: new PreambleProjectPathService(inspectProject),
     }),
-    ...createPromptRefinementRoutes({ settings, agents }),
-  };
+    createPromptRefinementRoutes({ settings, agents }),
+  );
 }

@@ -1,7 +1,7 @@
 import { beforeEach, describe, it, expect, mock } from "bun:test";
 
 import createModelsRoutes from "../models.js";
-import { ModelCatalogResponseCache } from "../model-catalog-cache.js";
+import { ModelCatalogResponseCache } from '../../agents/model-catalog-cache.js';
 import { DomainError } from '../../../common/domain-error.js';
 import { AgentCatalogService } from '../../agents/catalog-service.js';
 import { AgentDirectory } from '../../agents/directory.js';

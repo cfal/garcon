@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import type { ChatParentRelation, ParentChatRef } from '$shared/chat-parentage';
 import { buildChatMapModel, type ChatMapChatNode, type ChatMapNode } from '../chat-map-model';
 

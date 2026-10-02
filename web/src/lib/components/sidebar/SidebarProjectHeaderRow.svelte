@@ -2,7 +2,7 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import { cn } from '$lib/utils/cn';
 	import type { SidebarVirtualProjectHeaderRow } from './sidebar-virtual-chat-list';
-	import { formatCompactProjectPath } from '$lib/chat/project-paths/compact-project-path';
+	import { formatCompactProjectPath } from '$lib/project-paths/compact-project-path';
 	import SidebarGroupHeaderContent from './SidebarGroupHeaderContent.svelte';
 	import { getExecutors } from '$lib/context';
 

@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
 import ChatSummary from '../ChatSummary.svelte';
-import type { ChatSessionRecord } from '$lib/types/chat-session.js';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types.js';
 
 function chat(overrides: Partial<ChatSessionRecord> = {}): ChatSessionRecord {
 	return {

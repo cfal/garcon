@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages.js';
 	import { untrack } from 'svelte';
 	import type { Attachment } from 'svelte/attachments';
 	import type { GitProjectTarget } from '$lib/api/git-client.js';
@@ -131,8 +132,8 @@
 					type="button"
 					class="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
 					onclick={() => porcelain.loadCurrentView(project)}
-					title="Refresh"
-					aria-label="Refresh"
+					title={m.common_refresh()}
+					aria-label={m.common_refresh()}
 				>
 					<RefreshCw class="h-3.5 w-3.5" />
 				</button>
@@ -141,7 +142,7 @@
 			<div class="max-h-56 overflow-auto px-3 pb-3 text-xs" {@attach contextualScrollRegion}>
 				{#if porcelain.inspectorView === 'conflicts'}
 					{#if porcelain.conflicts.length === 0}
-						<p class="py-3 text-muted-foreground">No conflicts</p>
+						<p class="py-3 text-muted-foreground">{m.git_conflicts_none()}</p>
 					{:else}
 						<div class="grid gap-2 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
 							<div class="space-y-1">
@@ -169,21 +170,21 @@
 											class="rounded bg-muted px-2 py-1 text-muted-foreground hover:text-foreground"
 											onclick={() => requestAcceptConflict(detail.path, 'ours')}
 										>
-											Accept ours
+											{m.git_conflicts_accept_ours()}
 										</button>
 										<button
 											type="button"
 											class="rounded bg-muted px-2 py-1 text-muted-foreground hover:text-foreground"
 											onclick={() => requestAcceptConflict(detail.path, 'theirs')}
 										>
-											Accept theirs
+											{m.git_conflicts_accept_theirs()}
 										</button>
 										<button
 											type="button"
 											class="rounded bg-interactive-accent px-2 py-1 text-interactive-accent-foreground"
 											onclick={() => porcelain.markConflictResolved(project, detail.path)}
 										>
-											Mark resolved
+											{m.git_conflicts_mark_resolved()}
 										</button>
 									</div>
 									{#if activeConfirmation?.type === 'accept-conflict' && activeConfirmation.filePath === detail.path}
@@ -197,21 +198,21 @@
 													class="rounded bg-status-warning px-2 py-1 text-status-warning-foreground"
 													onclick={() => void confirmPendingAction()}
 												>
-													Confirm
+													{m.common_confirm()}
 												</button>
 												<button
 													type="button"
 													class="rounded bg-muted px-2 py-1 text-muted-foreground hover:text-foreground"
 													onclick={() => (pendingConfirmation = null)}
 												>
-													Cancel
+													{m.common_cancel()}
 												</button>
 											</div>
 										</div>
 									{/if}
 									{#if detail.truncated}
 										<div class="rounded border border-border bg-muted/40 p-2 text-muted-foreground">
-											One or more conflict versions were truncated because they exceed display limits.
+											{m.git_conflicts_truncated()}
 										</div>
 									{/if}
 									<pre
@@ -226,7 +227,7 @@
 						<input
 							type="text"
 							bind:value={porcelain.stashMessage}
-							placeholder="Stash message"
+							placeholder={m.git_stash_message()}
 							class="min-w-44 flex-1 rounded border border-border bg-muted px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
 						/>
 						<label class="inline-flex items-center gap-1.5 text-muted-foreground">
@@ -235,18 +236,18 @@
 								bind:checked={porcelain.stashIncludeUntracked}
 								class="size-3 accent-current"
 							/>
-							<span>Untracked</span>
+							<span>{m.git_changes_untracked()}</span>
 						</label>
 						<button
 							type="button"
 							class="rounded bg-interactive-accent px-2 py-1 text-interactive-accent-foreground"
 							onclick={() => porcelain.createStash(project)}
 						>
-							Create
+							{m.common_create()}
 						</button>
 					</div>
 					{#if porcelain.stashes.length === 0}
-						<p class="py-3 text-muted-foreground">No stashes</p>
+						<p class="py-3 text-muted-foreground">{m.git_stash_none()}</p>
 					{:else}
 						<div class="space-y-1">
 							{#each porcelain.stashes as stash (stash.ref)}
@@ -260,21 +261,21 @@
 										class="rounded bg-muted px-2 py-1 text-muted-foreground hover:text-foreground"
 										onclick={() => porcelain.applyStash(project, stash)}
 									>
-										Apply
+										{m.git_stash_apply()}
 									</button>
 									<button
 										type="button"
 										class="rounded bg-muted px-2 py-1 text-muted-foreground hover:text-foreground"
 										onclick={() => porcelain.popStash(project, stash)}
 									>
-										Pop
+										{m.git_stash_pop()}
 									</button>
 									<button
 										type="button"
 										class="rounded bg-muted px-2 py-1 text-muted-foreground hover:text-status-error-foreground"
 										onclick={() => requestDropStash(stash)}
 									>
-										Drop
+										{m.git_stash_drop()}
 									</button>
 								</div>
 								{#if isPendingDrop(stash)}
@@ -288,14 +289,14 @@
 												class="rounded bg-status-warning px-2 py-1 text-status-warning-foreground"
 												onclick={() => void confirmPendingAction()}
 											>
-												Confirm
+												{m.common_confirm()}
 											</button>
 											<button
 												type="button"
 												class="rounded bg-muted px-2 py-1 text-muted-foreground hover:text-foreground"
 												onclick={() => (pendingConfirmation = null)}
 											>
-												Cancel
+												{m.common_cancel()}
 											</button>
 										</div>
 									</div>
@@ -305,13 +306,13 @@
 					{/if}
 				{:else if porcelain.inspectorView === 'history'}
 					{#if !selectedFile}
-						<p class="py-3 text-muted-foreground">Select a file</p>
+						<p class="py-3 text-muted-foreground">{m.git_history_select_file()}</p>
 					{:else}
 						<div class="grid gap-3 md:grid-cols-2">
 							<div>
 								<div class="mb-1 truncate font-mono text-muted-foreground">{selectedFile}</div>
 								{#if porcelain.fileHistory.length === 0}
-									<p class="py-2 text-muted-foreground">No history</p>
+									<p class="py-2 text-muted-foreground">{m.git_history_none()}</p>
 								{:else}
 									<div class="space-y-1">
 										{#each porcelain.fileHistory.slice(0, 8) as commit (commit.hash)}
@@ -327,7 +328,7 @@
 							</div>
 							<div>
 								<div class="mb-1 text-muted-foreground">
-									Blame {porcelain.blameTruncated ? '(truncated)' : ''}
+									{m.git_history_blame()} {porcelain.blameTruncated ? '(truncated)' : ''}
 								</div>
 								<div class="space-y-1">
 									{#each porcelain.blameLines.slice(0, 12) as line (line.line)}
@@ -361,7 +362,7 @@
 				role="alert"
 				{@attach trackRenderReset(reset)}
 			>
-				<p class="text-status-error-foreground">{title} could not be displayed.</p>
+				<p class="text-status-error-foreground">{m.git_panel_failed({ title })}</p>
 				<div class="mt-2 flex gap-2">
 					<button
 						type="button"
@@ -369,14 +370,14 @@
 						disabled={recoveringRender}
 						onclick={() => void recoverRender()}
 					>
-						Refresh
+						{m.common_refresh()}
 					</button>
 					<button
 						type="button"
 						class="rounded bg-muted px-2 py-1 text-muted-foreground hover:text-foreground"
 						onclick={() => porcelain.closeInspector()}
 					>
-						Close
+						{m.common_close()}
 					</button>
 				</div>
 			</section>

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { ChatSessionRecord } from '$lib/types/chat-session.js';
+	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types.js';
 	import type { ConversationPanelActions } from '$lib/components/chat/conversation-panel-actions.js';
 	import type { ConversationPanelRegistration } from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
 	import type { ChatViewSurfaceId } from '$lib/workspace/surface-types.js';

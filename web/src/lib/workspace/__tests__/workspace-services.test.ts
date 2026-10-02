@@ -11,6 +11,8 @@ import {
 	type LocalSettingsStore,
 } from '$lib/stores/local-settings.svelte.js';
 import { createModelCatalogStore } from '$lib/agents/model-catalog-store.svelte.js';
+import { ExecutorsStore } from '$lib/executors/executors-store.svelte';
+import { localExecutor } from '$lib/executors/__tests__/fixtures';
 import { createNavigationStore } from '$lib/stores/navigation.svelte.js';
 import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 import type { PrimaryWsConnectionPort } from '$lib/ws/connection.svelte.js';
@@ -129,7 +131,10 @@ function assembleWorkspaceServices(
 		addMessageConsumer: () => () => undefined,
 		onConnectionChange: () => () => undefined,
 	} satisfies PrimaryWsConnectionPort;
+	const executors = new ExecutorsStore();
+	executors.applySnapshot([localExecutor]);
 	const services = createWorkspaceServices({
+		executors,
 		localProjectBasePath: () => '/workspace',
 		appShell: createAppShellStore(),
 		chatBoardInvalidations: createChatBoardInvalidationHub(),

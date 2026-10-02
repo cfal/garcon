@@ -4,11 +4,13 @@ import {
 } from '@garcon/server-agent-common/build/standalone-entrypoint';
 import { yieldToEventLoop } from '@garcon/server-agent-common/shared/event-loop';
 import { isTaskWorkerEvent, type TaskWorkerRequest } from './task-worker-protocol.js';
+import { DomainError } from '../../common/domain-error.js';
 
 // Bounds each structured clone by item count and by the text it carries, so a transcript
 // with very large messages still crosses to the Worker in short main-thread slices.
 const BATCH_ITEMS = 256;
 const BATCH_BYTES = 4 * 1024 * 1024;
+const MAX_QUEUED_TASKS = 8;
 
 export interface TaskWorkerOptions {
   readonly worker: GarconWorkerName;
@@ -57,6 +59,9 @@ export class TaskWorker<
   ): Promise<Results[K]> {
     if (this.#closed) return Promise.reject(this.#closedError());
     if (signal?.aborted) return Promise.reject(signal.reason);
+    if (this.#queue.length >= MAX_QUEUED_TASKS) {
+      return Promise.reject(new DomainError('TRANSCRIPT_WORK_BUSY', `${this.#options.label} capacity is full. Try again later.`, 503, true));
+    }
     return new Promise((resolve, reject) => {
       const onAbort = () => this.#abort(queued);
       const queued: QueuedTask<Task> = {

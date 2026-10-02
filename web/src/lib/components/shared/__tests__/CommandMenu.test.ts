@@ -5,7 +5,7 @@ import type { WorkspaceCoordinator } from '$lib/workspace/workspace-coordinator.
 import { WorkbenchCommandRegistry } from '$lib/workspace/workbench-commands.svelte.js';
 import type { WorkbenchCommandRegistryDeps } from '$lib/workspace/workbench-commands.svelte.js';
 import type { FileTreeStore } from '$lib/files/tree/file-tree.svelte.js';
-import type { FilesSurfaceController } from '$lib/workspace/singleton-surfaces.svelte.js';
+import type { FilesSurfaceController } from '$lib/files/surface/files-surface-controller.svelte.js';
 import { FileNavigationStore } from '$lib/files/navigation/file-navigation-store.svelte.js';
 import { createMemoryFileDraftRepository } from '$lib/files/persistence/file-draft-repository.js';
 import { fileIdentityKey } from '$lib/files/documents/file-identity.js';

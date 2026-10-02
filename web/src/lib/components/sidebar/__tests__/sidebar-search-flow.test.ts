@@ -4,7 +4,7 @@ import SidebarHost from './SidebarHost.svelte';
 
 import { getSavedSearches } from '$lib/api/settings';
 import { createSidebarSearchStore } from '$lib/sidebar/search/sidebar-search-store.svelte.js';
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import {
 	installResizeObserverHarness,
 	ResizeObserverHarness,

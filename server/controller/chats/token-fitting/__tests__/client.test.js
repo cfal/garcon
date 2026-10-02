@@ -30,6 +30,20 @@ afterEach(() => {
 });
 
 describe('TokenFittingWorker', () => {
+  it('bounds queued tasks and releases an aborted waiting slot', async () => {
+    fitting = new TokenFittingWorker();
+    const running = fitting.assessCarryover(transcript(1, 5));
+    const abort = new AbortController();
+    const cancelled = fitting.assessCarryover([], abort.signal);
+    const waiting = Array.from({ length: 7 }, () => fitting.assessCarryover([]));
+    const overflow = fitting.assessCarryover([]);
+    await expect(overflow).rejects.toMatchObject({ code: 'TRANSCRIPT_WORK_BUSY', status: 503, retryable: true });
+    abort.abort(new Error('cancel waiting'));
+    await expect(cancelled).rejects.toThrow('cancel waiting');
+    const replacement = fitting.assessCarryover([]);
+    await Promise.all([running, ...waiting, replacement]);
+  });
+
   it('matches in-process fitting across batched transfers', async () => {
     fitting = new TokenFittingWorker();
     const messages = transcript(150, 120);

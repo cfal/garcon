@@ -1,7 +1,7 @@
 import { createGitOperations } from '../git-service.js';
 import { gitHttpError } from '../../../controller/git/http-error.js';
 import { generateCommitMessageForFiles } from '../../../controller/git/commit-generation.js';
-import type { ClassifiedGitError } from '../types.js';
+import type { ClassifiedGitError } from '../git-error-classifier.js';
 import type { CommitMessageFileOptions, GitAgentRunner } from '../../../controller/git/commit-generation-types.js';
 
 export function createGitService({ agents, classifyGitError, assertProjectPathAllowed }: {

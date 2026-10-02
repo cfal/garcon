@@ -125,8 +125,8 @@ export class TerminalRegistry {
 			onReady: () => this.#restoreAttachments(),
 			onDisconnected: () => this.#markDisconnected(),
 		});
-		this.#stopExecutors = deps.executors?.onChanged(() => this.#nodesChanged()) ?? (() => {});
-		this.#nodesChanged();
+		this.#stopExecutors = deps.executors?.onChanged(() => this.#executorsChanged()) ?? (() => {});
+		this.#executorsChanged();
 	}
 
 	executorIdFor(terminalId: string): string {
@@ -908,7 +908,7 @@ export class TerminalRegistry {
 		session.runtimeError = 'Terminal output interrupted. Reattach to resume.';
 	}
 
-	#nodesChanged(): void {
+	#executorsChanged(): void {
 		const hosts = this.hosts;
 		const known = new Set((this.#deps.executors?.executors ?? hosts).map((executor) => executor.id));
 		for (const executorId of known) {

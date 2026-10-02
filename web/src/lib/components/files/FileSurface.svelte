@@ -168,7 +168,7 @@
 			class="border-b border-status-warning-border bg-status-warning px-3 py-2 text-xs text-status-warning-foreground"
 			role="status"
 		>
-			Files unavailable on {executorLabel}. Unsaved edits are retained.
+			{m.files_executor_unavailable({ label: executorLabel })}
 		</div>
 	{/if}
 

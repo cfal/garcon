@@ -12,7 +12,7 @@
 		PersistedChatOrderGroup,
 		RelativeChatOrderPlacement,
 	} from '$shared/chat-order-contracts';
-	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import type { ChatOrderSortKey } from '$shared/chat-order-sort';
 	import { workspaceSplitAdmissions } from '$lib/workspace/__tests__/workspace-geometry-test-fixtures.js';
 

@@ -1,4 +1,4 @@
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import type { ChatBoard, ChatBoardColumn } from '$shared/chat-boards';
 
 export interface ChatBoardOccurrence {

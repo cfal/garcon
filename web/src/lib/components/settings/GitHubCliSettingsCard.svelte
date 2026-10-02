@@ -88,7 +88,7 @@
 
 	<div class="space-y-2 border-t border-border px-4 py-3 text-xs text-muted-foreground">
 		{#if !executors.ghAvailable(executorId)}
-			<p>{executors.label(executorId)} is unavailable.</p>
+			<p>{m.executors_named_unavailable({ label: executors.label(executorId) })}</p>
 		{:else if !ghCapability.hasChecked || ghCapability.isLoading}
 			<p>{m.settings_gh_instructions_checking()}</p>
 		{:else if ghCapability.lastError}

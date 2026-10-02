@@ -3,7 +3,7 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import { Switch } from '$lib/components/ui/switch';
-	import DirectoryBrowser from '$lib/components/chat/DirectoryBrowser.svelte';
+	import DirectoryBrowser from '$lib/components/project-paths/DirectoryBrowser.svelte';
 	import ExecutorSelector from '$lib/components/shared/ExecutorSelector.svelte';
 	import PromptEditorDialog from '$lib/components/prompt-editor/PromptEditorDialog.svelte';
 	import PromptTextField from '$lib/components/prompt-editor/PromptTextField.svelte';

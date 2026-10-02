@@ -6,7 +6,7 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import type { ChatDetailsResponse } from '../../../common/chat-details.js';
-import type { AgentOwnershipJournalFileV5 } from '../../../server/controller/chats/agent-ownership-journal.js';
+import type { AgentOwnershipJournalFileV5 } from '../../../server/controller/chats/agent-ownership-journal-format.js';
 import { join } from 'node:path';
 import {
   assistantContents,

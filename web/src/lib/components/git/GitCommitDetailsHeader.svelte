@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages.js';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import Copy from '@lucide/svelte/icons/copy';
 	import GitBranch from '@lucide/svelte/icons/git-branch';
@@ -79,8 +80,8 @@
 		<button
 			type="button"
 			class="mt-0.5 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-			aria-label="Back to commit history"
-			title="Back to commit history"
+			aria-label={m.git_commit_history_back()}
+			title={m.git_commit_history_back()}
 			onclick={onBack}
 		>
 			<ArrowLeft class="h-4 w-4" />
@@ -96,8 +97,8 @@
 				<button
 					type="button"
 					class="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-					title={copied ? 'Copied commit hash' : 'Copy commit hash'}
-					aria-label={copied ? 'Copied commit hash' : 'Copy commit hash'}
+					title={copied ? m.git_commit_copied_hash() : m.git_commit_copy_hash()}
+					aria-label={copied ? m.git_commit_copied_hash() : m.git_commit_copy_hash()}
 					onclick={copyHash}
 				>
 					<Copy class="h-3.5 w-3.5" />
@@ -109,7 +110,7 @@
 				<span>{snapshot.commit.author}</span>
 				<span>{formatDate(snapshot.commit.authorDate)}</span>
 				{#if committerVisible}
-					<span>committed by {snapshot.commit.committer}</span>
+					<span>{m.git_commit_committer({ name: snapshot.commit.committer })}</span>
 				{/if}
 				{#if snapshot.commit.refs.length > 0}
 					<span class="inline-flex min-w-0 items-center gap-1 rounded bg-muted px-1.5 py-0.5">
@@ -120,7 +121,7 @@
 			</div>
 			{#if snapshot.commit.body.trim()}
 				<details class="mt-2 text-xs text-muted-foreground">
-					<summary class="cursor-pointer select-none text-foreground">Full message</summary>
+					<summary class="cursor-pointer select-none text-foreground">{m.git_commit_full_message()}</summary>
 					<pre class="mt-1 whitespace-pre-wrap break-words font-sans">{fullMessage}</pre>
 				</details>
 			{/if}
@@ -134,12 +135,12 @@
 
 	<div class="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
 		<div class="flex min-w-0 flex-wrap items-center gap-2">
-			<span>{snapshot.files.length} changed files</span>
+			<span>{m.git_commit_changed_files({ count: snapshot.files.length })}</span>
 			<span class="text-git-added">+{statsKnown ? additions : '?'}</span>
 			<span class="text-git-deleted">-{statsKnown ? deletions : '?'}</span>
 			{#if snapshot.parentOptions.length > 1}
 				<label class="inline-flex items-center gap-1">
-					<span>Diff against</span>
+					<span>{m.git_commit_diff_against()}</span>
 					<select
 						class="select-native select-native-surface select-native-compact text-base md:pointer-fine:text-xs"
 						value={snapshot.selectedParent ?? ''}
@@ -167,7 +168,7 @@
 				onclick={onRevertCommit}
 			>
 				<Undo2 class="h-3.5 w-3.5" />
-				Revert
+				{m.git_revert_action()}
 			</button>
 		</div>
 	</div>

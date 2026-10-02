@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import SidebarChatItemHost from './SidebarChatItemHost.svelte';
 import SidebarSearchDialogHost from './SidebarSearchDialogHost.svelte';
 
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 import {
 	deniedWorkspaceSplits,

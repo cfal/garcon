@@ -1,6 +1,6 @@
 <script lang="ts">
 	import ChatSummary from '../chat/ChatSummary.svelte';
-	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import * as m from '$lib/paraglide/messages.js';
 	let { chat, currentTime }: { chat: ChatSessionRecord | undefined; currentTime: Date } = $props();
 </script>

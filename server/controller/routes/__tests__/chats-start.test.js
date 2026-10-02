@@ -130,7 +130,7 @@ const agents = {
   modelSupportsImages: mock(() => false),
 };
 
-const commandLedger = createRouteCommandLedger('chats-start');
+const commandLedger = createRouteCommandLedger();
 const chatListProjector = createRouteChatListProjector({ registry, settings, metadata, agents });
 
 const routes = createChatRoutes({

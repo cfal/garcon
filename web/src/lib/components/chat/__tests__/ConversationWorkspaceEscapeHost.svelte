@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { unusedSingletonFactories } from '$lib/workspace/__tests__/unused-singleton-factories';
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
 	setExecutorsTestContext();
 	import { onDestroy, tick, untrack } from 'svelte';
@@ -33,7 +34,7 @@
 	import { PullRequestsStore } from '$lib/git/pull-requests/pull-requests-store.svelte.js';
 	import { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
-	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import type { ConversationPanelActions } from '../conversation-panel-actions.js';
 	import type { DrainCursor } from '$lib/ws/connection.svelte';
 	import type { ChatProcessingPresentationRegistry } from '$lib/ws/chat-processing-reconciler.svelte.js';
@@ -103,6 +104,7 @@
 	setChatDrafts(new ChatDraftStore());
 	const gitDeps = createGitSurfaceTestDeps();
 	const singletonSurfaces = new SingletonSurfaceRegistry({
+		...unusedSingletonFactories,
 		...gitDeps,
 		createCommit: () => commit ?? new CommitController(gitDeps),
 		createPullRequests: () => new PullRequestsStore(),

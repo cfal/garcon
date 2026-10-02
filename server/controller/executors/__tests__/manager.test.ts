@@ -18,6 +18,7 @@ import { ControllerCliDispatcher, type CliDispatchAccess } from '../cli-dispatch
 import { connectWithOwnRole, connectWithWrongKey, sendMalformedRecord } from '../../../remote/__tests__/failing-peers.js';
 import { tcpLinkProxy } from '../../../remote/__tests__/tcp-link-proxy.js';
 import type { Logger } from '../../../common/log.js';
+import { withFailingDirectorySync } from '../../../common/__tests__/atomic-write-failure.js';
 
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
@@ -33,6 +34,41 @@ async function fixture(logger?: Logger) {
   cleanups.push(() => manager.dispose());
   return { root, manager };
 }
+
+test.each(['executor-connects', 'controller-connects'] as const)(
+  'uncertain grants retire authority and prevent reconnection (%s)', async direction => {
+    const { root, manager } = await fixture();
+    let configured = direction === 'executor-connects'
+      ? await manager.create({ direction, label: 'Worker', noTls: true }) : null;
+    const secret = configured?.secret ?? Buffer.alloc(32, 9).toString('base64url');
+    const link = new WebSocketLink({ role: 'worker', secret, noTls: true });
+    cleanups.push(() => link.dispose());
+    const connected = Promise.withResolvers<ExecutorRpc>();
+    link.onSession(transport => {
+      const rpc = new ExecutorRpc(transport);
+      const serving = serveExecutionRuntime(integrationFixture(root, transport.executorId).executor, rpc, new ProducerRelay());
+      cleanups.push(() => serving.dispose());
+      connected.resolve(rpc);
+    });
+    if (configured) link.dial(sharedListener(manager).url(configured.id));
+    else configured = await manager.create({ direction, label: 'Worker', noTls: true, connectionUrl: executorConnectionUrl(link.listen(), secret) });
+    const rpc = await connected.promise;
+    await waitReady(manager, configured.id);
+    manager.setCliDispatcher(new ControllerCliDispatcher({ serverInstanceId: 'controller', workspaceName: null, routes: {}, isShuttingDown: () => false }));
+    await expect(rpc.call('', 'controllerCli.describe', null)).rejects.toMatchObject({ code: 'CLI_ACCESS_DENIED' });
+    const id = configured.id;
+    await expect(withFailingDirectorySync(root, () => manager.update(id, { allowControllerCli: true, allowExecutorManagement: true })))
+      .rejects.toMatchObject({ renamed: true });
+    expect(manager.list().find(value => value.id === id)).toMatchObject({
+      availability: 'offline', enabled: false, allowControllerCli: false, allowExecutorManagement: false,
+      lastError: { code: 'EXECUTOR_UNAVAILABLE' },
+    });
+    expect(manager.inboundLink(id)).toBeNull();
+    expect(() => manager.requireExecutor(id)).toThrow('Executor is unavailable');
+    await expect(rpc.call('', 'controllerCli.describe', null)).rejects.toThrow();
+    expect(manager.isReady('local')).toBe(true);
+  },
+);
 
 test('grant-only updates do not require idle or replace the connector', async () => {
   const { manager } = await fixture();

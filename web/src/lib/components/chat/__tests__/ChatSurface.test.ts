@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import { SubagentToolbarState } from '$lib/chat/transcript/subagent-toolbar-state.svelte.js';
 import type { SubagentManagementModel } from '$lib/chat/transcript/subagent-management.js';
 import * as m from '$lib/paraglide/messages.js';

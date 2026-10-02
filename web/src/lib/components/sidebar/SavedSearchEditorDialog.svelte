@@ -134,7 +134,7 @@
 			</label>
 
 			<div class="space-y-2">
-				<span class="text-sm font-medium text-foreground">Visibility</span>
+				<span class="text-sm font-medium text-foreground">{m.sidebar_saved_search_visibility()}</span>
 				<label class="flex items-center gap-2 text-sm">
 					<input
 						type="checkbox"
@@ -142,7 +142,7 @@
 						disabled={isSaving}
 						class="rounded border-border"
 					/>
-					Show as sidebar pill
+					{m.sidebar_saved_search_show_pill()}
 				</label>
 				<label class="flex items-center gap-2 text-sm">
 					<input
@@ -151,7 +151,7 @@
 						disabled={isSaving}
 						class="rounded border-border"
 					/>
-					Show in sidebar menu
+					{m.sidebar_saved_search_show_menu()}
 				</label>
 				<label class="flex items-center gap-2 text-sm">
 					<input
@@ -160,7 +160,7 @@
 						disabled={isSaving}
 						class="rounded border-border"
 					/>
-					Show in search dialog
+					{m.sidebar_saved_search_show_dialog()}
 				</label>
 			</div>
 

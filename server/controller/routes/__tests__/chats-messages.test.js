@@ -116,7 +116,7 @@ function createRoutesFixture(overrides = {}) {
     updateSessionSettings: mock(async () => undefined),
     resendCandidates: mock(() => [{ ordinal: 11, content: 'Try again', attachmentNames: [] }]),
   };
-  const commandLedger = createRouteCommandLedger('chats-messages');
+  const commandLedger = createRouteCommandLedger();
   const chatListProjector = createRouteChatListProjector({
     registry,
     settings,

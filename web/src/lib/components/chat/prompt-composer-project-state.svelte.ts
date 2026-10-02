@@ -1,5 +1,5 @@
 import { untrack } from 'svelte';
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import type { ExpandSnippetResponse, SnippetExpansionContext } from '$shared/snippets';
 import { projectTargetKey, type ProjectTarget } from '$shared/project-resolution';
 import type {

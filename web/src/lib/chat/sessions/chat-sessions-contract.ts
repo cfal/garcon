@@ -10,7 +10,7 @@ import type {
 	toggleArchive,
 } from '$lib/api/chats.js';
 import type { updateSessionName } from '$lib/api/settings.js';
-import type { ChatSessionRecord, ChatStartupConfig } from '$lib/types/chat-session';
+import type { ChatSessionRecord, ChatStartupConfig } from '$lib/chat/sessions/chat-session-types';
 import type { ChatListEntry } from '$shared/chat-list';
 import type { ChatOrderBoundary, ReorderChatResponse } from '$shared/chat-order-contracts';
 import type {

@@ -9,7 +9,6 @@ import {
 	type WorkspaceWindowEdge,
 	type WorkspaceWindowId,
 	type WorkspaceWindowNode,
-	type WorkspaceWindowTabState,
 } from './surface-types.js';
 
 export function clampPartitionRatio(ratio: number): number {
@@ -55,13 +54,6 @@ export function windowIdOfSurface(
 		if (workspaceWindow.tabs.order.includes(surfaceId)) return workspaceWindow.id;
 	}
 	return null;
-}
-
-export function tabsOfWindow(
-	root: DesktopWorkspaceNode,
-	windowId: WorkspaceWindowId,
-): WorkspaceWindowTabState | null {
-	return windowNodeById(root, windowId)?.tabs ?? null;
 }
 
 export function mapWindows(

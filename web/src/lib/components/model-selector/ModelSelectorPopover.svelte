@@ -6,7 +6,7 @@
 	import { getModelCatalog, getExecutors } from '$lib/context';
 	import { cn } from '$lib/utils/cn.js';
 	import * as m from '$lib/paraglide/messages.js';
-	import type { SessionAgentId } from '$lib/types/app';
+	import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
 	import { ModelSelectorState } from './model-selector-state.svelte';
 	import ModelSelectorColumnsLayout from './ModelSelectorColumnsLayout.svelte';
 	import ModelSelectorCompactLayout from './ModelSelectorCompactLayout.svelte';

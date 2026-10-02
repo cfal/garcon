@@ -11,7 +11,8 @@ import {
 } from '../../../common/preambles.js';
 import { stableJsonStringify } from '../../../common/json.js';
 import type { AgentOwnershipJournal } from '../chats/agent-ownership-journal.js';
-import type { ChatRegistryEntry, IChatRegistry } from '../chats/store.js';
+import type { IChatRegistry } from '../chats/store.js';
+import type { ChatRegistryEntry } from '../chats/registry-contracts.js';
 import {
   ChatRegistryDurabilityUnknownError,
 } from '../chats/store.js';

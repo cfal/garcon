@@ -12,7 +12,3 @@ export function canSubmitNewChat(
 		(Boolean(firstMessage.trim()) || attachmentCount > 0)
 	);
 }
-
-export function canComposeNewChat(path: string, validationStatus: PathValidationStatus): boolean {
-	return Boolean(path.trim()) && validationStatus === 'valid';
-}

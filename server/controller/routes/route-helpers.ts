@@ -1,5 +1,14 @@
+import { ValidationDomainError } from '../../common/domain-error.js';
 import { jsonErrorFromUnknown } from '../../common/http-error.js';
 import { CorruptStateFileError } from '../../common/json-file-store.js';
+
+export function requireStringField(body: Record<string, unknown>, field: string): string {
+  const value = body[field];
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new ValidationDomainError(`${field} is required`);
+  }
+  return value.trim();
+}
 
 export type JsonBody = Record<string, unknown>;
 

@@ -136,19 +136,19 @@
 								{#if search.showAsSidebarPill}
 									<span
 										class="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground"
-										>Pill</span
+										>{m.sidebar_saved_search_pill()}</span
 									>
 								{/if}
 								{#if search.showInSidebarMenu}
 									<span
 										class="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground"
-										>Menu</span
+										>{m.sidebar_saved_search_menu()}</span
 									>
 								{/if}
 								{#if search.showInSearchDialog}
 									<span
 										class="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground"
-										>Dialog</span
+										>{m.sidebar_saved_search_dialog()}</span
 									>
 								{/if}
 							</div>

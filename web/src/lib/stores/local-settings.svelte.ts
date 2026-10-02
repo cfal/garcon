@@ -129,9 +129,6 @@ export const HIDEABLE_TOOL_GROUPS = [
 	},
 ] as const;
 export type HideableToolType = (typeof HIDEABLE_TOOL_GROUPS)[number]['toolTypes'][number];
-export const HIDEABLE_TOOL_TYPE_VALUES: readonly HideableToolType[] = HIDEABLE_TOOL_GROUPS.flatMap(
-	(group) => group.toolTypes,
-);
 
 export interface LocalSettingsSnapshot {
 	themePreference: ThemePreference;
@@ -173,7 +170,6 @@ export interface LocalSettingsSnapshot {
 	textEditorOpenPlacement: FileOpenPlacementPreference;
 	imageViewerOpenPlacement: FileOpenPlacementPreference;
 	markdownViewerOpenPlacement: FileOpenPlacementPreference;
-	language: string;
 	hiddenToolTypes: HideableToolType[];
 	globalShortcuts: GlobalShortcutOverrides;
 	completionSoundMode: CompletionSoundMode;
@@ -242,7 +238,6 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	textEditorOpenPlacement: 'same-window',
 	imageViewerOpenPlacement: 'same-window',
 	markdownViewerOpenPlacement: 'same-window',
-	language: 'en',
 	hiddenToolTypes: [],
 	globalShortcuts: {},
 	completionSoundMode: 'off',
@@ -448,7 +443,6 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 			parsed.markdownViewerOpenPlacement,
 			DEFAULTS.markdownViewerOpenPlacement,
 		),
-		language: parseString(parsed.language, DEFAULTS.language),
 		hiddenToolTypes: normalizeHiddenToolTypes(parsed.hiddenToolTypes),
 		globalShortcuts: sanitizeGlobalShortcutOverrides(parsed.globalShortcuts),
 		completionSoundMode: parseCompletionSoundMode(parsed.completionSoundMode),
@@ -523,7 +517,6 @@ export class LocalSettingsStore {
 	markdownViewerOpenPlacement = $state<FileOpenPlacementPreference>(
 		DEFAULTS.markdownViewerOpenPlacement,
 	);
-	language = $state(DEFAULTS.language);
 	hiddenToolTypes = $state<HideableToolType[]>(DEFAULTS.hiddenToolTypes);
 	globalShortcuts = $state<GlobalShortcutOverrides>(DEFAULTS.globalShortcuts);
 	completionSoundMode = $state<CompletionSoundMode>(DEFAULTS.completionSoundMode);
@@ -646,7 +639,6 @@ export class LocalSettingsStore {
 			textEditorOpenPlacement: this.textEditorOpenPlacement,
 			imageViewerOpenPlacement: this.imageViewerOpenPlacement,
 			markdownViewerOpenPlacement: this.markdownViewerOpenPlacement,
-			language: this.language,
 			hiddenToolTypes: this.hiddenToolTypes,
 			globalShortcuts: { ...this.globalShortcuts },
 			completionSoundMode: this.completionSoundMode,
@@ -696,7 +688,6 @@ export class LocalSettingsStore {
 		this.textEditorOpenPlacement = snap.textEditorOpenPlacement;
 		this.imageViewerOpenPlacement = snap.imageViewerOpenPlacement;
 		this.markdownViewerOpenPlacement = snap.markdownViewerOpenPlacement;
-		this.language = snap.language;
 		this.hiddenToolTypes = snap.hiddenToolTypes;
 		this.globalShortcuts = { ...snap.globalShortcuts };
 		this.completionSoundMode = snap.completionSoundMode;

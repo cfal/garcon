@@ -4,7 +4,6 @@ import {
 	apiFetch,
 	apiGet,
 	apiPut,
-	apiPostForm,
 	parseApiResponse,
 	type ApiFetchOptions,
 } from './client.js';
@@ -60,24 +59,11 @@ export interface SaveTextParams {
 	conflictResolution: FileSaveConflictResolution;
 }
 
-export interface UploadImagesParams {
-	chatId?: string | null;
-	projectPath?: string | null;
-	formData: FormData;
-}
-
 export interface FileEntry {
 	name: string;
 	path: string;
 	relativePath?: string;
 	type?: 'file' | 'directory';
-}
-
-export interface UploadImagesResponse {
-	attachments?: Array<{ name: string; data: string; size: number; mimeType: string }>;
-	files?: Array<{ name: string; path: string }>;
-	images?: Array<{ name: string; data: string; size: number; mimeType: string }>;
-	[key: string]: unknown;
 }
 
 /** Builds query string from chatId/projectPath/filePath. */
@@ -211,20 +197,6 @@ export async function readContent(
 	const revision = response.headers.get(FILE_REVISION_HEADER);
 	if (!isFileRevision(revision)) throw new Error('Invalid file content revision');
 	return { blob: await response.blob(), revision };
-}
-
-/** Uploads images via FormData. */
-export async function uploadImages(params: UploadImagesParams): Promise<UploadImagesResponse> {
-	const qs = buildProjectQuery(params);
-	const url = `/api/v1/files/upload-images${qs ? `?${qs}` : ''}`;
-	return apiPostForm<UploadImagesResponse>(url, params.formData);
-}
-
-/** Uploads chat attachments via FormData. */
-export async function uploadAttachments(params: UploadImagesParams): Promise<UploadImagesResponse> {
-	const qs = buildProjectQuery(params);
-	const url = `/api/v1/files/upload-attachments${qs ? `?${qs}` : ''}`;
-	return apiPostForm<UploadImagesResponse>(url, params.formData);
 }
 
 export interface DirectoryEntry {

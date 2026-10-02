@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { SettingsStore } from '../store.js';
 import { GENERATION_UI_SETTING_KEYS, normalizeRemoteSettingsSnapshot, parseExecutorProjectPreferences } from '../../../../common/settings.js';
 import { resolveEffectiveGenerationConfig } from '../generation-effective.js';
-import { buildRemoteSettingsSnapshot } from '../../routes/workspace.js';
+import { buildRemoteSettingsSnapshot } from '../remote-snapshot.js';
 import type { AgentRegistryServiceContract } from '../../agents/registry.js';
 
 const EXECUTOR = '22222222-2222-4222-8222-222222222222';

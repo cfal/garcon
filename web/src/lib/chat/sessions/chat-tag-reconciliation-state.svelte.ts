@@ -1,4 +1,4 @@
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import type { ChatTagReconciliationKind } from './chat-sessions-contract.js';
 import { sameChatTags } from './chat-tag-mutation-result.js';
 

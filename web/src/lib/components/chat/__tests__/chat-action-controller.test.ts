@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as chatsApi from '$lib/api/chats';
 import { ApiError } from '$lib/api/client.js';
 import * as m from '$lib/paraglide/messages.js';
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import type { ChatListEntry } from '$shared/chat-list';
 import {
 	ChatActionController,
@@ -181,6 +181,19 @@ beforeEach(() => {
 });
 
 describe('ChatActionController', () => {
+	it('reports a failed pin without refreshing or recentering', async () => {
+		const { controller, callbacks } = createHarness();
+		vi.mocked(chatsApi.togglePinned).mockRejectedValueOnce(new Error('Pin failed'));
+		const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+		try {
+			await controller.togglePinned('chat-1');
+			expect(callbacks.notifyError).toHaveBeenCalledWith(expect.stringContaining('Pin failed'));
+			expect(callbacks.onQuietRefresh).not.toHaveBeenCalled();
+			expect(callbacks.requestSidebarRecenter).not.toHaveBeenCalled();
+		} finally {
+			log.mockRestore();
+		}
+	});
 	it('refreshes pin mutations and recenters only a newly pinned selected chat', async () => {
 		const selected = createHarness({ chats: [makeChat()], selectedChatId: 'chat-1' });
 		await selected.controller.togglePinned('chat-1');

@@ -42,12 +42,12 @@ export function apiFetch(url: string, options: ApiFetchOptions = {}): Promise<Re
 	const { timeoutMs, ...fetchOptions } = options;
 	const token = getAuthToken();
 
-	const defaultHeaders: Record<string, string> = {};
-	if (!(fetchOptions.body instanceof FormData)) {
-		defaultHeaders['Content-Type'] = 'application/json';
+	const headers = new Headers(fetchOptions.headers);
+	if (!(fetchOptions.body instanceof FormData) && !headers.has('Content-Type')) {
+		headers.set('Content-Type', 'application/json');
 	}
-	if (token) {
-		defaultHeaders['Authorization'] = `Bearer ${token}`;
+	if (token && !headers.has('Authorization')) {
+		headers.set('Authorization', `Bearer ${token}`);
 	}
 
 	return globalThis.fetch(
@@ -55,10 +55,7 @@ export function apiFetch(url: string, options: ApiFetchOptions = {}): Promise<Re
 		withTimeout(
 			{
 				...fetchOptions,
-				headers: {
-					...defaultHeaders,
-					...(fetchOptions.headers as Record<string, string>),
-				},
+				headers,
 			},
 			timeoutMs,
 		),

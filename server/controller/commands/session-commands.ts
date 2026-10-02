@@ -14,7 +14,7 @@ import {
   askUserQuestionDecisionValidationError,
   normalizeAskUserQuestionDecisionResponse,
 } from '../../../common/ask-user-question-response.js';
-import type { ChatRegistryEntry } from '../chats/store.js';
+import type { ChatRegistryEntry } from '../chats/registry-contracts.js';
 import { isDirectDelegatedChild } from '../chats/agent-delegation.js';
 import { applyPostAdmissionChatTags } from '../chats/post-admission-chat-tags.js';
 import { isStopSatisfied, type ChatStopOutcome } from '../../../common/chat-types.js';

@@ -1,4 +1,4 @@
-import type { ChatSessionRecord } from '$lib/types/chat-session.js';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types.js';
 
 export type ChatSurfacePresentation = 'conversation' | 'loading' | 'empty';
 

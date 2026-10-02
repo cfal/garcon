@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages.js';
 	import Check from '@lucide/svelte/icons/check';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
@@ -82,9 +83,9 @@
 		)}
 		onclick={() => onToggleViewed(row.filePath)}
 		aria-pressed={viewed}
-		title={viewed ? 'Mark as not viewed' : 'Mark as viewed'}
+		title={viewed ? m.pull_request_mark_unviewed() : m.pull_request_mark_viewed()}
 	>
 		<Check class="h-3 w-3" />
-		Viewed
+		{m.pull_request_viewed()}
 	</button>
 </div>

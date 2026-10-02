@@ -1,4 +1,4 @@
-import type { SessionAgentId } from '$lib/types/app';
+import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
 import type { ModelCatalogStore, ModelOption } from '$lib/agents/model-catalog-store.svelte';
 import { nativeSourceLabelFor } from '$lib/agents/agent-labels';
 import { DIRECT_AGENT_PRESENTATIONS, isDirectAgentId } from '$lib/agents/direct-agents.js';

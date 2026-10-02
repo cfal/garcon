@@ -6,7 +6,7 @@ import type { ChatListEntry } from '../../../common/chat-list.js';
 import type { ChatExecutionCommands } from '../chat-execution/chat-execution-coordinator.js';
 import { hasPendingTurnInput } from '../chat-execution/control-state.js';
 import type { StoredChatExecutionControlState } from '../chat-execution/control-state.js';
-import type { ChatRegistryEntry } from '../chats/store.js';
+import type { ChatRegistryEntry } from '../chats/registry-contracts.js';
 import { CommandExecutionControlError } from '../lib/command-execution-control-error.js';
 import type { ResolvedAgentHandoffTarget } from './agent-handoff-types.js';
 import {

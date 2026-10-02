@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages.js';
 	import X from '@lucide/svelte/icons/x';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
 	import Sparkles from '@lucide/svelte/icons/sparkles';
@@ -15,7 +16,7 @@
 		prStateBadge,
 		reviewDecisionBadge,
 	} from './pr-display';
-	import Markdown from '$lib/components/chat/Markdown.svelte';
+	import Markdown from '$lib/components/rich-text/Markdown.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import * as Popover from '$lib/components/ui/popover';
 
@@ -33,13 +34,11 @@
 	const decisionBadge = $derived(reviewDecisionBadge(pr.reviewDecision));
 	const checksState = $derived(overallChecksState(pr.checks));
 	const checksLabel = $derived(checksStateLabel(checksState));
-	const mergeableLabel = $derived(
-		pr.mergeable === 'conflicting'
-			? 'Conflicts'
-			: pr.mergeable === 'mergeable'
-				? 'No conflicts'
-				: '',
-	);
+	const mergeableLabel = $derived.by(() => {
+		if (pr.mergeable === 'conflicting') return m.git_conflicts_title();
+		if (pr.mergeable === 'mergeable') return m.git_conflicts_none();
+		return '';
+	});
 	const hasBody = $derived(pr.body.trim().length > 0);
 </script>
 
@@ -61,15 +60,15 @@
 						variant="ghost"
 						size="icon-sm"
 						class="flex-shrink-0 text-muted-foreground"
-						aria-label="Pull request description"
-						title="Description"
+						aria-label={m.pull_request_description_label()}
+						title={m.pull_request_description()}
 					>
 						<EllipsisVertical class="h-4 w-4" />
 					</Button>
 				</Popover.Trigger>
 				<Popover.Content class="w-96 max-w-[90vw] p-0" align="end" sideOffset={8}>
 					<div class="max-h-[24rem] overflow-y-auto px-3 py-2.5">
-						<div class="mb-1 text-[10px] font-medium uppercase text-muted-foreground">Description</div>
+						<div class="mb-1 text-[10px] font-medium uppercase text-muted-foreground">{m.pull_request_description()}</div>
 						<Markdown source={pr.body} class="markdown-body prose prose-sm max-w-none text-xs" />
 					</div>
 				</Popover.Content>
@@ -79,7 +78,7 @@
 			type="button"
 			class="flex-shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
 			onclick={onClose}
-			aria-label="Close pull request"
+			aria-label={m.pull_request_close()}
 		>
 			<X class="h-4 w-4" />
 		</button>
@@ -87,7 +86,7 @@
 
 	<div class="mt-1 truncate text-xs text-muted-foreground">
 		<span class="font-medium text-foreground">{pr.author}</span>
-		wants to merge
+		{m.pull_request_merge_description()}
 		<span class="font-mono">{pr.headRefName}</span>
 		→
 		<span class="font-mono">{pr.baseRefName}</span>
@@ -120,7 +119,7 @@
 		<span class="text-muted-foreground">
 			<span class="font-medium text-git-added">+{pr.additions}</span>
 			<span class="font-medium text-git-deleted">−{pr.deletions}</span>
-			· {pr.changedFiles} file{pr.changedFiles === 1 ? '' : 's'}
+			· {m.pull_request_file_count({ count: pr.changedFiles })}
 		</span>
 	</div>
 
@@ -132,7 +131,7 @@
 			disabled={isReviewing}
 		>
 			<Sparkles class="h-3.5 w-3.5" />
-			{isReviewing ? 'Sent to agent' : 'Review this PR'}
+			{isReviewing ? m.pull_request_sent_to_agent() : m.pull_request_review()}
 		</button>
 		<button
 			type="button"
@@ -140,7 +139,7 @@
 			onclick={onRefresh}
 		>
 			<RefreshCw class="h-3.5 w-3.5" />
-			Refresh
+			{m.common_refresh()}
 		</button>
 		<a
 			href={pr.url}

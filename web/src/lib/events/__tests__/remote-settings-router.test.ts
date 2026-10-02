@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { RemoteSettingsRouter } from '../remote-settings-router.svelte';
+import { RemoteSettingsRouter } from '../remote-settings-router';
+import { WsConnection } from '$lib/ws/connection.svelte';
 import type { RemoteSettingsSnapshot } from '$shared/settings';
 
 const { drain, cleanup, createDrainCursor } = vi.hoisted(() => {
@@ -76,7 +77,7 @@ describe('RemoteSettingsRouter', () => {
 			},
 		});
 		drain.mockReturnValue([{ data: { type: 'settings-changed', settings: snapshot } }]);
-		const router = new RemoteSettingsRouter({} as never, store as never);
+		const router = new RemoteSettingsRouter(new WsConnection(), store);
 
 		router.start();
 		router.tick();
@@ -87,7 +88,7 @@ describe('RemoteSettingsRouter', () => {
 	it('ignores non-settings websocket messages', () => {
 		const store = { applySnapshot: vi.fn() };
 		drain.mockReturnValue([{ data: { type: 'chat-session-created', chatId: 'chat-1' } }]);
-		const router = new RemoteSettingsRouter({} as never, store as never);
+		const router = new RemoteSettingsRouter(new WsConnection(), store);
 
 		router.start();
 		router.tick();

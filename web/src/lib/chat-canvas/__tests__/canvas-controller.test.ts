@@ -403,6 +403,33 @@ describe('CanvasController', () => {
 		await refresh;
 		expect(controller.canvases.length).toBe(1);
 	});
+
+	it('retains server and recovery-only viewports across catalog refreshes', async () => {
+		const { controller, memory } = setup();
+		memory.port.write({ ...canvas(), id: 'recovered' });
+		await controller.activate();
+		const viewport = { x: 15, y: 25, zoom: 0.5 };
+		controller.setViewport('board', viewport);
+		controller.setViewport('recovered', viewport);
+		await controller.refresh();
+		expect(controller.canvases.map((entry) => entry.id)).toContain('recovered');
+		expect(controller.viewport('board')).toEqual(viewport);
+		expect(controller.viewport('recovered')).toEqual(viewport);
+	});
+
+	it('does not prune viewports until recovery storage can confirm the catalog', async () => {
+		const { controller, memory } = setup();
+		await controller.activate();
+		const viewport = { x: 15, y: 25, zoom: 0.5 };
+		controller.setViewport('recovered', viewport);
+		const list = vi.spyOn(memory.port, 'list').mockImplementation(() => { throw new Error('Storage unavailable'); });
+		await controller.refresh();
+		expect(controller.canvases.map((entry) => entry.id)).toContain('board');
+		expect(controller.viewport('recovered')).toEqual(viewport);
+		list.mockRestore();
+		await controller.refresh();
+		expect(controller.viewport('recovered')).toBeUndefined();
+	});
 	it('does not let an old catalog response hide a newly created board', async () => {
 		const { controller, api } = setup();
 		await controller.activate();

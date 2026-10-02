@@ -5,12 +5,10 @@ import type {
 import type { AgentCatalogEntry } from '../../../common/agents.js';
 import type { ApiProviderEndpointResolver } from '../api-providers/endpoint-resolver.js';
 import type { DirectInputPreparationContext } from '../chat-execution/types.js';
-import {
-  type AgentHandoffIntent,
-  type AgentOwnershipJournal,
-  matchesHandoffTarget,
-} from '../chats/agent-ownership-journal.js';
-import type { ChatRegistryEntry, IChatRegistry } from '../chats/store.js';
+import { type AgentOwnershipJournal, matchesHandoffTarget } from '../chats/agent-ownership-journal.js';
+import { type AgentHandoffIntent } from '../chats/agent-ownership-journal-format.js';
+import type { IChatRegistry } from '../chats/store.js';
+import type { ChatRegistryEntry } from '../chats/registry-contracts.js';
 import { DomainError } from '../../common/domain-error.js';
 import { readBefore } from '../../common/interactive-deadline.js';
 import { createLogger } from '../../common/log.js';

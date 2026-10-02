@@ -11,7 +11,7 @@
 	import WorkspaceRoot from '$lib/components/workspace/WorkspaceRoot.svelte';
 	import NotificationHost from '$lib/components/shared/NotificationHost.svelte';
 	import type { MobileWorkspaceTabId } from '$lib/components/workspace/mobile-workspace-tabs';
-	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import {
 		chatListDividerEdge,
 		HOVER_CAPABLE_MEDIA_QUERY,
@@ -54,6 +54,10 @@
 	import ChatActionDialogs from '$lib/components/chat/ChatActionDialogs.svelte';
 	import HandoffForkDialog from '$lib/components/chat/HandoffForkDialog.svelte';
 	import ChatProjectPathDialog from '$lib/components/chat/ChatProjectPathDialog.svelte';
+	import {
+		executorPinnedProjectPaths,
+		togglePinnedProjectPathOptimistically,
+	} from '$lib/project-paths/pinned-project-path-settings.js';
 	import ShareChatDialog from '$lib/components/chat/ShareChatDialog.svelte';
 	import SidebarTagDialog from '$lib/components/sidebar/SidebarTagDialog.svelte';
 	import SidebarSearchDialogs from '$lib/components/sidebar/SidebarSearchDialogs.svelte';
@@ -904,6 +908,15 @@
 <ChatProjectPathDialog
 	projectPathDialog={chatActionDialogs.chatProjectPathDialog}
 	projectBasePath={appShell.projectBasePath}
+	pinnedProjectPaths={executorPinnedProjectPaths(
+		remoteSettings.snapshot,
+		chatActionDialogs.chatProjectPathDialog?.executorId ?? 'local',
+	)}
+	onTogglePinnedProjectPath={async (path) => {
+		await togglePinnedProjectPathOptimistically(remoteSettings, path, {
+			executorId: chatActionDialogs.chatProjectPathDialog?.executorId ?? 'local',
+		});
+	}}
 	{isMobile}
 	onClose={() => chatActionDialogs.closeProjectPathDialog()}
 	onConfirm={(target, projectPath) => chatActionController.updateProjectPath(target, projectPath)}

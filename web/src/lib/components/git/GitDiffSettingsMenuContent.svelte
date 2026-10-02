@@ -48,7 +48,7 @@
 <DropdownMenuSub>
 	<DropdownMenuSubTrigger>
 		<span class="flex min-w-0 flex-1 items-center justify-between gap-4">
-			<span>Font size</span>
+			<span>{m.git_diff_font_size()}</span>
 			<span class="text-xs text-muted-foreground">{diffFontSize}px</span>
 		</span>
 	</DropdownMenuSubTrigger>
@@ -66,16 +66,16 @@
 <DropdownMenuSub>
 	<DropdownMenuSubTrigger>
 		<span class="flex min-w-0 flex-1 items-center justify-between gap-4">
-			<span>Diff mode</span>
+			<span>{m.git_diff_mode()}</span>
 			<span class="text-xs text-muted-foreground">
-				{diffMode === 'unified' ? 'Unified' : 'Split'}
+				{diffMode === 'unified' ? m.git_diff_unified() : m.git_diff_split()}
 			</span>
 		</span>
 	</DropdownMenuSubTrigger>
 	<DropdownMenuSubContent class="w-36">
 		<DropdownMenuRadioGroup value={diffMode} onValueChange={setDiffMode}>
-			<DropdownMenuRadioItem value="unified" closeOnSelect={false}>Unified</DropdownMenuRadioItem>
-			<DropdownMenuRadioItem value="split" closeOnSelect={false}>Split</DropdownMenuRadioItem>
+			<DropdownMenuRadioItem value="unified" closeOnSelect={false}>{m.git_diff_unified()}</DropdownMenuRadioItem>
+			<DropdownMenuRadioItem value="split" closeOnSelect={false}>{m.git_diff_split()}</DropdownMenuRadioItem>
 		</DropdownMenuRadioGroup>
 	</DropdownMenuSubContent>
 </DropdownMenuSub>
@@ -83,7 +83,7 @@
 <DropdownMenuSub>
 	<DropdownMenuSubTrigger>
 		<span class="flex min-w-0 flex-1 items-center justify-between gap-4">
-			<span>Context lines</span>
+			<span>{m.git_diff_context_lines()}</span>
 			<span class="text-xs text-muted-foreground">{contextLines}</span>
 		</span>
 	</DropdownMenuSubTrigger>
@@ -91,7 +91,7 @@
 		<DropdownMenuRadioGroup bind:value={() => String(contextLines), setContextLines}>
 			{#each contextOptions as lines (lines)}
 				<DropdownMenuRadioItem value={String(lines)} closeOnSelect={false}>
-					{lines} lines
+					{m.git_diff_lines({ count: lines })}
 				</DropdownMenuRadioItem>
 			{/each}
 		</DropdownMenuRadioGroup>

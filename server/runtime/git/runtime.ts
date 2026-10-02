@@ -20,7 +20,8 @@ import { readOnlyGitOptions, resolvePathWithinProject, runGit } from './run.js';
 import { classifyGitError } from './git-error-classifier.js';
 import { gitServiceError } from './service-errors.js';
 import { notRepositoryQuickSummary } from './quick-summary.js';
-import { notRepositoryFingerprint, notRepositorySnapshot } from './diff-engine.js';
+import { notRepositorySnapshot } from './diff-engine.js';
+import { notRepositoryFingerprint } from './working-tree-observation.js';
 import type { GitCommandTrace, GitReviewRouteMetrics, GitOperationOptions } from './types.js';
 import type { GitReviewDocumentRegistry } from './review-document-registry.js';
 

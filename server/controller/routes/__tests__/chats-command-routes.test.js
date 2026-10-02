@@ -53,7 +53,8 @@ import { parseJsonBody } from '../../../common/http-body.js';
 import { forkChatFileCopy } from '../../chats/fork-chat.js';
 import { CommandValidationError } from '../../lib/command-validation-error.js';
 import { ModelSelectionError } from '../../api-providers/endpoint-resolver.js';
-import { DomainError, SteerDeliveryError, TRANSCRIPT_TEMPORARILY_UNAVAILABLE_MESSAGE } from '../../../common/domain-error.js';
+import { DomainError, TRANSCRIPT_TEMPORARILY_UNAVAILABLE_MESSAGE } from '../../../common/domain-error.js';
+import { SteerDeliveryError } from '../../chat-execution/steering-errors.js';
 import { QueueEntrySteerError } from '../../chat-execution/queue-steer-error.js';
 import {
   QueueEntryMutationError,
@@ -445,7 +446,7 @@ function createRouteAgent(sessionOverrides = {}) {
     publishSessionFact: mock(() => undefined),
     updateSessionSettings: mock((chatId, patch) => Promise.resolve(registry.updateChat(chatId, patch))),
   };
-  const commandLedger = createRouteCommandLedger('chats-command-routes');
+  const commandLedger = createRouteCommandLedger();
   const chatListProjector = createRouteChatListProjector({
     registry,
     settings,

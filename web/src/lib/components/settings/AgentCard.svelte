@@ -240,13 +240,13 @@
 				{:else if cliOnly}
 					<div class="text-xs text-muted-foreground">
 						{#if auth.authenticated}
-							Authenticated via CLI. To switch accounts, run <code
+							{m.settings_agent_cli_switch_prefix()} <code
 								class="rounded bg-muted px-1 py-0.5 font-mono text-foreground">{loginCommand}</code
-							> in your terminal.
+							> {m.settings_agent_cli_switch_suffix()}
 						{:else}
-							Run <code class="rounded bg-muted px-1 py-0.5 font-mono text-foreground"
+							{m.settings_agent_cli_login_prefix()} <code class="rounded bg-muted px-1 py-0.5 font-mono text-foreground"
 								>{loginCommand}</code
-							> in your terminal to authenticate.
+							> {m.settings_agent_cli_login_suffix()}
 						{/if}
 					</div>
 				{:else if auth.canReauth}

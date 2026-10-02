@@ -52,7 +52,7 @@ describe('scheduled prompts API contract', () => {
 		const [url, options] = fetchMock.mock.calls[0];
 		expect(url).toBe('/api/v1/scheduled-prompts/in');
 		expect(options.method).toBe('POST');
-		expect(options.headers.Authorization).toBe('Bearer test-token');
+		expect(new Headers(options.headers).get('Authorization')).toBe('Bearer test-token');
 		expect(JSON.parse(options.body)).toEqual({
 			chatId: '123',
 			duration: '2h30m',

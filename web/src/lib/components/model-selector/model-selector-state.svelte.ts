@@ -1,7 +1,7 @@
 import type { ModelCatalogStore, ModelOption } from '$lib/agents/model-catalog-store.svelte';
 import type { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
 import { effectiveExecutorId } from '$shared/executors';
-import type { SessionAgentId } from '$lib/types/app';
+import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
 import { getLocale } from '$lib/paraglide/runtime.js';
 import { buildThinkingModeOptions } from '$lib/agents/thinking-mode-options';
 import { normalizeThinkingMode, type ThinkingMode } from '$shared/chat-modes';

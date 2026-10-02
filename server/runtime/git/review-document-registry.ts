@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'crypto';
-import { GitDomainError } from './git-types.js';
+import { GitDomainError } from './git-domain-error.js';
 import type {
   GitCommitFileStatus,
   GitCommitFileSummary,

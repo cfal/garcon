@@ -60,7 +60,7 @@ const agents = {
   isAgentSessionRunning: mock(() => false),
 };
 
-const commandLedger = createRouteCommandLedger('chats-validate-start');
+const commandLedger = createRouteCommandLedger();
 const chatListProjector = createRouteChatListProjector({ registry, settings, metadata, agents });
 
 const routeDeps = {

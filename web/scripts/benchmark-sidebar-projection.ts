@@ -1,4 +1,4 @@
-import type { ChatSessionRecord } from '../src/lib/types/chat-session.js';
+import type { ChatSessionRecord } from '../src/lib/chat/sessions/chat-session-types.js';
 import {
 	buildSidebarChatOrderMap,
 	buildSidebarDisplayChatIds,

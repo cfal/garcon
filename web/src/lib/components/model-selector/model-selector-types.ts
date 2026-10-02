@@ -1,4 +1,4 @@
-import type { SessionAgentId } from '$lib/types/app';
+import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
 import type { ModelOption } from '$lib/agents/model-catalog-store.svelte';
 import type { ApiProtocol } from '$shared/api-providers';
 import type { ThinkingMode } from '$shared/chat-modes';

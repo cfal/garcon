@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import type { CanvasController } from '$lib/chat-canvas/canvas-controller.svelte';
-	import type { ChatSessionRecord } from '$lib/types/chat-session';
+	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 	import type { PresentationHostId } from '$lib/workspace/surface-types';
 	import { getWorkspaceCoordinator } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';

@@ -260,10 +260,9 @@ Rules:
 
 ### Chat Domain
 
-`web/src/lib/chat/` is the canonical home for reusable Chat behavior and state. Its approved concerns are `actions`, `composer`, `conversation`, `file-links`, `new-chat`, `project-paths`, `sessions`, `split`, `tools`, and `transcript`.
+`web/src/lib/chat/` is the canonical home for reusable Chat behavior and state. Its approved concerns are `actions`, `composer`, `conversation`, `file-links`, `new-chat`, `sessions`, `tools`, and `transcript`.
 
 - `sessions` owns the root Chat session registry and read-receipt outbox.
-- `split` owns durable Chat split state; DOM drag interaction remains beside `ChatSurface`.
 - `conversation` owns the active conversation lifecycle and orchestration.
 - `composer` owns input, attachments, controls, and command parsing.
 - `transcript` owns transcript cache, active transcript state, feed models, scrolling, and transcript-derived presentation.
@@ -286,6 +285,8 @@ Rules:
 ### Supporting Domains
 
 - `web/src/lib/files/` owns File sessions, editor controllers, and tree state.
+- `web/src/lib/project-paths/` owns shared executor-qualified path selection, completion, validation, and pinned-path preferences. Its renderers live in `components/project-paths`; chat mutation dialogs remain under Chat.
+- `web/src/lib/components/rich-text/` owns shared Markdown, code, math, and diagram presentation. Chat-reference policy and file-navigation callbacks remain explicit caller contracts.
 - `web/src/lib/terminal/` owns Terminal runtimes, input controls, theme, and sessions.
 - `web/src/lib/sidebar/` owns reusable Sidebar search parsing/state and the project-collapse store.
 - `web/src/lib/chat-map/` owns chat-lineage normalization and retained Chat Map surface state.
@@ -473,7 +474,7 @@ A bug or flake first observed in a live suite or in production may only be close
 - Interactive behavior must be keyboard reachable.
 - Avoid non-semantic clickable containers when a button can be used.
 - Use `focus-visible` instead of `focus` for focus ring styles. Keyboard users see the ring; mouse/touch users do not.
-- Every `svelte-ignore` for a11y must include rationale and follow-up issue.
+- Every `svelte-ignore` for a11y must include a rationale and a durable reference: a follow-up issue for unresolved defects, or a regression test for an intentional accessible interaction pattern.
 - Do not add suppressions casually to silence lint noise.
 
 ## Performance and Bundle Discipline
@@ -482,7 +483,7 @@ A bug or flake first observed in a live suite or in production may only be close
 - Split heavy features (editor/tooling/renderers) when practical.
 - Prefer lazy initialization for expensive integrations.
 - Avoid reactive churn from broad effects and unnecessary object recreation.
-- Lazy-load heavy vendor modules (e.g., CodeMirror language packs) via dynamic `import()` rather than static imports. See `web/src/lib/files/editor/language-loader.ts` for the established pattern.
+- Lazy-load heavy vendor modules (e.g., CodeMirror language packs) via dynamic `import()` rather than static imports. See `web/src/lib/highlighting/codemirror-language-registry.ts` for the established pattern.
 - Vendor chunk boundaries are defined in `vite.config.ts` (`codeSplitting.groups`). When adding a new heavy dependency, add a corresponding vendor chunk entry.
 - Gate expensive fetches behind user intent -- defer API calls until the UI that needs the data is actually visible or activated.
 

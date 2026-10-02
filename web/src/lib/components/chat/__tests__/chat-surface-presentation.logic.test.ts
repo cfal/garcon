@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { resolveChatSurfacePresentation } from '../chat-surface-presentation';
-import type { ChatSessionRecord } from '$lib/types/chat-session';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 
 function chat(status: ChatSessionRecord['status']): ChatSessionRecord {
 	return {

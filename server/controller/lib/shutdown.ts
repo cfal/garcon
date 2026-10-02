@@ -20,6 +20,20 @@ export interface AbortRunningSessionsResult {
 
 const DEFAULT_ABORT_TIMEOUT_MS = 3000;
 
+export async function settleShutdownCleanups(
+  cleanups: readonly (() => void | Promise<unknown>)[],
+): Promise<unknown[]> {
+  const errors: unknown[] = [];
+  for (const cleanup of cleanups) {
+    try {
+      await cleanup();
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  return errors;
+}
+
 export async function waitForShutdownTaskWithTimeout(
   task: Promise<unknown>,
   timeoutMs = DEFAULT_ABORT_TIMEOUT_MS,

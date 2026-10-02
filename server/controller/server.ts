@@ -5,10 +5,9 @@ import path from 'path';
 import { rm } from 'node:fs/promises';
 import { cliRuntimeFile } from '@garcon/common/cli-runtime-paths';
 import { getConfigDir, initializeServerConfig } from './config.js';
-import { wrapRoutes, serverShuttingDownResponse, unhandledRouteErrorResponse } from './lib/http-route.js';
+import { wrapRoutes, unhandledRouteErrorResponse } from './lib/http-route.js';
 import { ControllerCliDispatcher } from './executors/cli-dispatcher.js';
-import { verifyAuthTokenClaims } from './auth/token.js';
-import { getWebSocketAuthToken, webSocketUpgradeHeaders } from './lib/websocket-auth.js';
+import { createWebSocketUpgradeHandler } from './ws/upgrade.js';
 import { init as initAuthStore } from './auth/store.js';
 import { forkChatFileCopy } from './chats/fork-chat.js';
 import { wireSearchSourceAvailability, wireServerEvents, type ServerEventWiring } from './server-event-wiring.js';
@@ -16,7 +15,7 @@ import { startExecutionControlPlane } from './execution-control-plane.js';
 
 import { ChatRegistry } from './chats/store.js';
 import { ChatIdAllocator } from './chats/chat-id-allocator.js';
-import { migrateWorkspaceChatIds } from './chats/chat-id-migration.js';
+import { migrateWorkspaceChatIds } from './migrations/chat-id-migration.js';
 import { InMemoryLastSelectedChatState } from './chats/last-selected-chat-state.js';
 import { RecentTitleIconStore } from './chats/recent-title-icons.js';
 import { ShareStore } from './chats/share-store.js';
@@ -58,7 +57,7 @@ import {
   migrateAgentIntegrationCoreRecords,
   refreshAgentExecutionModeCoreRecords,
   refreshAgentIntegrationCoreRecords,
-} from './agents/core-record-migration.js';
+} from './migrations/core-record-migration.js';
 import { ApiProviderStore } from './api-providers/store.js';
 import { ApiProviderAssignmentStore } from './api-providers/assignments.js';
 import { ApiProviderEndpointResolver } from './api-providers/endpoint-resolver.js';
@@ -76,6 +75,7 @@ import { AttentionTracker } from './notifications/attention-tracker.js';
 import {
   abortRunningSessionsWithTimeout,
   shutdownExitCode,
+  settleShutdownCleanups,
   waitForShutdownPhasesWithTimeout,
 } from './lib/shutdown.js';
 import { WebSocketAdmissionController } from '../common/websocket-capacity.js';
@@ -94,14 +94,15 @@ import { CarryOverTranscriptStore } from './chats/carryover-transcript-store.js'
 import {
   finalizeCarryOverMigrationValidation,
   migrateLegacyCarryOverWorkspace,
-} from './chats/chat-carryover-migration.js';
+} from './migrations/carryover/chat-carryover-migration.js';
 import {
   resumeInterruptedCarryOverRollback,
   rollbackLegacyCarryOverMigration,
-} from './chats/chat-carryover-rollback.js';
+} from './migrations/carryover/chat-carryover-rollback.js';
 import { AgentHandoffService } from './agents/agent-handoff-service.js';
 import { initializeSnippetAndPreambleServices } from './snippets/setup.js';
-import { initializeChatPreambleSelectionService } from './preambles/setup.js';
+import { ChatPreambleSelectionService } from './preambles/chat-selection-service.js';
+import { createCarriedContext } from './chats/carried-context.js';
 import { initializeChatBoardRuntime } from './chat-boards/setup.js';
 import { initializeTickets } from './tickets/setup.js';
 import { createTicketProjectResolver } from './tickets/project-default.js';
@@ -116,7 +117,7 @@ import {
 } from './ledger/index.js';
 
 import createAllRoutes from './routes/index.js';
-import { ModelCatalogResponseCache } from './routes/model-catalog-cache.js';
+import { ModelCatalogResponseCache } from './agents/model-catalog-cache.js';
 import { createLogger } from '../common/log.js';
 import { errorMessage } from '../common/errors.js';
 import type { WorkspaceLease } from '../common/workspace-lease.js';
@@ -133,11 +134,7 @@ import {
   WorkspaceMigrationRunner,
 } from './migrations/index.js';
 import { runCarryOverMigrationAtStartup } from './migrations/startup-progress.js';
-import { removeLegacyForkOrdinals } from './chats/fork-ordinal-migration.js';
-import {
-  LOCAL_SERVER_PRINCIPAL,
-  type ServerPrincipal,
-} from './lib/http-route-types.js';
+import { removeLegacyForkOrdinals } from './migrations/fork-ordinal-migration.js';
 
 const logger = createLogger('server');
 type ServeOptionsWithConnectionLimit = Parameters<
@@ -401,7 +398,7 @@ export async function startServer(): Promise<void> {
       },
       onInvalidated: (revision) => eventWiring?.broadcastTicketsInvalidated(revision),
     });
-    const chatPreambleSelection = initializeChatPreambleSelectionService({
+    const chatPreambleSelection = new ChatPreambleSelectionService({
       preambles,
       registry: chatRegistry,
       adoption: transcriptAdoption,
@@ -423,30 +420,7 @@ export async function startServer(): Promise<void> {
         entry.carryOverSegments ?? [],
         entry.carryOverMigrationQuarantine ?? null,
       ),
-      async createCarriedContext(input) {
-        const prepared = preparedCarryover.take({
-          chatId: input.chatId,
-          transcriptViewId: input.transcriptViewId,
-          targetAgentId: input.entry.agentId,
-          targetExecutorId: effectiveExecutorId(input.entry.executorId),
-          targetOwnershipEpoch: input.entry.agentOwnershipEpoch,
-          clientRequestId: input.clientRequestId,
-        });
-        if (prepared) return prepared;
-        if (!carryOverCompaction) throw new Error('Carryover compaction is not initialized');
-        return carryOverCompaction.planFor({
-          operation: 'fresh-start',
-          onCompactionStarted: input.onCompactionStarted,
-          chatId: input.chatId,
-          messages: input.messages,
-          destination: {
-            agentId: input.entry.agentId,
-            model: input.entry.model ?? '',
-            prompt: input.destinationPrompt,
-          },
-          signal: input.signal,
-        });
-      },
+      createCarriedContext: (input) => createCarriedContext(input, preparedCarryover, carryOverCompaction),
       onCarryOverChanged(chatId) {
         eventWiring?.notifyTranscriptCompositionChanged(chatId);
       },
@@ -536,10 +510,9 @@ export async function startServer(): Promise<void> {
     const shareStore = new ShareStore(workspaceDir, { rendering: transcriptRendering });
     await shareStore.init();
 
-    const commandLedger = new CommandLedger(workspaceDir);
+    const commandLedger = new CommandLedger();
     const projectAdmission = new ProjectAdmission(chatRegistry, inspectProject);
     queue = new ChatExecutionCoordinator(
-      workspaceDir,
       agentRegistry,
       agentRegistry,
       (chatId) => queueDrainOptions(chatId, chatRegistry),
@@ -695,7 +668,7 @@ export async function startServer(): Promise<void> {
         queue,
         processing: chatProcessingActivity,
         metadata,
-        currentTranscriptMessages: (chatId) => transcriptLedger.conversationMessages(chatId),
+        currentTranscriptMessagePages: (chatId) => transcriptLedger.conversationMessagePages(chatId),
         transientFeeds,
         commandLedger,
         shareStore,
@@ -807,74 +780,7 @@ export async function startServer(): Promise<void> {
       maxRequestBodySize: config.maxRequestBodySize,
       routes: wrapRoutes(routes, { localCapability: runtimeState.localCapability, serverInstanceId: runtimeState.identity.instanceId, isShuttingDown: () => shuttingDown }),
       error: unhandledRouteErrorResponse,
-      async fetch(request, server) {
-        if (shuttingDown) return serverShuttingDownResponse();
-        const url = new URL(request.url);
-
-        if (request.headers.get('upgrade')?.toLowerCase() === 'websocket') {
-          const executorMatch = /^\/executor\/([0-9a-f-]+)$/u.exec(url.pathname);
-          if (executorMatch) {
-            const link = executors.inboundLink(executorMatch[1]!);
-            if (!link) return new Response('Executor is unavailable', { status: 404 });
-            return link.upgrade(request, server, executionSockets);
-          }
-          if (url.pathname !== '/ws') {
-            return new Response('Not found', { status: 404 });
-          }
-
-          const token = getWebSocketAuthToken(request);
-          const claims = authDisabled
-            ? null
-            : await verifyAuthTokenClaims(token);
-          if (shuttingDown) return serverShuttingDownResponse();
-          const principal: ServerPrincipal | null = authDisabled
-            ? LOCAL_SERVER_PRINCIPAL
-            : claims
-              ? {
-                  mode: 'authenticated',
-                  key: claims.username,
-                  username: claims.username,
-                  expiresAtMs: claims.expiresAtMs,
-                }
-              : null;
-          if (!principal) {
-            return new Response('Unauthorized', { status: 401 });
-          }
-
-          const connectionId = crypto.randomUUID();
-          const admission = wsAdmission.tryReserve(connectionId);
-          if (!admission.ok)
-            return new Response(admission.reason, { status: 503 });
-
-          const upgradeOptions: {
-            data: WsConnectionData;
-            headers?: HeadersInit;
-          } = {
-            data: {
-              kind: 'primary',
-              connectionId,
-              principal,
-            },
-          };
-          const headers = webSocketUpgradeHeaders(request);
-          if (headers) upgradeOptions.headers = headers;
-
-          let upgraded: boolean;
-          try {
-            upgraded = server.upgrade(request, upgradeOptions);
-          } catch (error) {
-            wsAdmission.release(connectionId);
-            throw error;
-          }
-          if (!upgraded) {
-            wsAdmission.release(connectionId);
-            return new Response('WebSocket upgrade failed', { status: 400 });
-          }
-          return;
-        }
-
-        return new Response('Not found', { status: 404 });
-      },
+      fetch: createWebSocketUpgradeHandler({ executors, executionSockets, wsAdmission, authDisabled, isShuttingDown: () => shuttingDown }),
       websocket: createServerSocketHandlers({ primary: primaryWs, admission: wsAdmission, config, logger, execution: executionSockets.websocket, delivery: primaryDelivery }),
     } satisfies ServeOptionsWithConnectionLimit;
 
@@ -904,21 +810,33 @@ export async function startServer(): Promise<void> {
     const shutdown = async () => {
       if (shuttingDown) return;
       shuttingDown = true;
-      stopStallMonitor();
-      stopSlowStepReports();
-      primaryDelivery.close();
-      agentCommands.shutdown();
-      carryOverGarbageCollector.shutdown();
-      const metadataClosed = metadata.close();
       logger.info('server: shutting down...');
-      const reservedChatIds = queue.beginShutdown();
-      executors.quiesce();
-      stopObservingProviders();
-      handoffs.shutdown();
       let abortTimedOut = false;
       let cleanupFailed = false;
+      const reportCleanupError = (error: unknown) => {
+        cleanupFailed = true;
+        logger.warn('server: shutdown cleanup error:', errorMessage(error));
+      };
+      let metadataClosed: Promise<void> = Promise.resolve();
+      let reservedChatIds: string[] = [];
+      // Quiescing stays synchronous so no producer can enter between admission fences.
+      for (const prepare of [
+        stopStallMonitor,
+        stopSlowStepReports,
+        () => primaryDelivery.close(),
+        () => agentCommands.shutdown(),
+        () => carryOverGarbageCollector.shutdown(),
+        () => { metadataClosed = metadata.close().catch(reportCleanupError); },
+        () => { reservedChatIds = queue.beginShutdown(); },
+        () => executors.quiesce(),
+        stopObservingProviders,
+        () => handoffs.shutdown(),
+        () => transcriptReader.close(),
+        () => scheduledPrompts.stop(),
+      ]) {
+        try { prepare(); } catch (error) { reportCleanupError(error); }
+      }
       try {
-        scheduledPrompts.stop();
         const abortResult = await abortRunningSessionsWithTimeout({
           runningSessions: agentRegistry.getRunningSessions(),
           additionalChatIds: reservedChatIds,
@@ -949,35 +867,29 @@ export async function startServer(): Promise<void> {
           cleanupFailed = true;
           logger.warn('server: shutdown background-task error:', errorMessage(backgroundError));
         }
-        unsubscribeSearchStatus();
-        unsubscribeSearchAvailability();
-        await chatSearch.close();
-        tokenFitting.close();
-        transcriptRendering.close();
-        await executors.dispose();
-        transcriptLedger.close();
-        terminalManager.shutdown();
-        await metadataClosed;
-        await metadata.flush();
-        await chatRegistry.flush();
       } catch (err) {
-        cleanupFailed = true;
-        logger.warn('server: shutdown cleanup error:', errorMessage(err));
+        reportCleanupError(err);
       } finally {
-        executionSockets.close();
-        await server.stop(true);
-        tickets.close();
-        try {
-          await removeServerRuntime(runtimeFilePath, runtimeState.identity.instanceId);
-        } catch (err) {
-          cleanupFailed = true;
-          logger.warn('server: runtime descriptor cleanup error:', errorMessage(err));
-        }
-        try {
-          await workspaceLease?.release();
-        } catch (err) {
-          cleanupFailed = true;
-          logger.warn('server: workspace lease release error:', errorMessage(err));
+        const cleanupErrors = await settleShutdownCleanups([
+          unsubscribeSearchStatus,
+          unsubscribeSearchAvailability,
+          () => chatSearch.close(),
+          () => tokenFitting.close(),
+          () => transcriptRendering.close(),
+          () => executors.dispose(),
+          () => transcriptLedger.close(),
+          () => terminalManager.shutdown(),
+          () => metadataClosed,
+          () => metadata.flush(),
+          () => chatRegistry.flush(),
+          () => executionSockets.close(),
+          () => server.stop(true),
+          () => tickets.close(),
+          () => removeServerRuntime(runtimeFilePath, runtimeState.identity.instanceId),
+          () => workspaceLease?.release(),
+        ]);
+        for (const err of cleanupErrors) {
+          reportCleanupError(err);
         }
         workspaceLease = null;
       }

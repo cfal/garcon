@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import Markdown, { type MarkdownLinkNavigateEvent } from '$lib/components/chat/Markdown.svelte';
+	import Markdown, { type MarkdownLinkNavigateEvent } from '$lib/components/rich-text/Markdown.svelte';
 	import { resolveFileLinkFromFile } from '$lib/chat/file-links/file-link-resolver.js';
 	import type { FileViewSession } from '$lib/files/sessions/file-view-session.svelte.js';
 	import {

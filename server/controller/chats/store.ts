@@ -55,6 +55,13 @@ import {
 } from '../../../common/transcript-seed.js';
 import { isCarryOverSegmentId } from './carryover-segment-types.js';
 import {
+  CHAT_REGISTRY_VERSION,
+  type CarryOverMigrationQuarantine,
+  type CarryOverSegmentRef,
+  type ChatRegistryEntry,
+  type ChatRegistrySnapshot,
+} from './registry-contracts.js';
+import {
   normalizeChatPreambleSelection,
   normalizePendingPreambleBoundary,
   type ChatPreambleSelection,
@@ -62,8 +69,6 @@ import {
 } from '../../../common/preambles.js';
 
 const logger = createLogger('chats:store');
-
-export const CHAT_REGISTRY_VERSION = 5;
 
 export { parseCarryOverSegmentRefs } from './registry-entry-codec.js';
 // Uses a fixed short debounce so registry mutations persist promptly while bursts coalesce.
@@ -94,56 +99,6 @@ const ALLOWED_PATCH_FIELDS = [
   'pendingPreambleBoundary',
   'preambleSelection',
 ] as const;
-
-export interface CarryOverMigrationQuarantine {
-  artifactId: string;
-  errorCode: string;
-}
-
-export interface CarryOverHandoffTarget {
-  readonly agentId: AgentName;
-  readonly model: string;
-}
-
-export interface CarryOverSegmentRef {
-  readonly id: string;
-  readonly agentId: AgentName;
-  readonly model: string;
-  readonly capturedAt: string;
-  readonly storedMessageCount: number;
-  readonly visibleMessageCount: number;
-  readonly trailingHandoff: CarryOverHandoffTarget | null;
-}
-
-export interface ChatRegistryEntry {
-  executorId?: string | null;
-  agentId: AgentName;
-  nativeSession: AgentNativeSessionRef | null;
-  agentOwnershipEpoch: string;
-  agentSettingsById: Record<string, AgentSettingsEnvelope>;
-  projectPath: string;
-  tags: string[];
-  agentSessionId: string | null;
-  model: string;
-  apiProviderId?: string | null;
-  modelEndpointId?: string | null;
-  modelProtocol?: ApiProtocol | null;
-  lastReadAt?: string | null;
-  permissionMode: PermissionMode;
-  thinkingMode: ThinkingMode;
-  carryOverSegments: readonly CarryOverSegmentRef[];
-  nativeSeedReceipt: NativeSeedReceipt | null;
-  carryOverMigrationQuarantine: CarryOverMigrationQuarantine | null;
-  pendingPreambleBoundary: PendingPreambleBoundary | null;
-  // Required normalized per-chat preamble selection; chats.json is authoritative.
-  preambleSelection: ChatPreambleSelection;
-  readonly parentChat: ParentChatRef | null;
-}
-
-export interface ChatRegistrySnapshot {
-  version: number;
-  sessions: Record<string, ChatRegistryEntry>;
-}
 
 export interface PhasedChatUpdateResult {
   readonly entry: ChatRegistryResolvedEntry;

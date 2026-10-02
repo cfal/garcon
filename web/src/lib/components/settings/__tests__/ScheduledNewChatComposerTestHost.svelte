@@ -4,7 +4,7 @@
 	import type { NewChatFormState } from '$lib/chat/new-chat/new-chat-form-state.svelte.js';
 	import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
 	import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
-	import type { SessionAgentId } from '$lib/types/app';
+	import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
 	import { setAppShell, setPreambles } from '$lib/context';
 	import { createAppShellStore, type AppShellStore } from '$lib/stores/app-shell.svelte';
 	import { PreamblesStore } from '$lib/preambles/preambles-store.svelte';
