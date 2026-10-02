@@ -8,7 +8,7 @@
 
 	interface Props {
 		selection: NewChatPreambleSelectionState;
-		trimmedPath: string;
+		nonblankPath: string;
 		validationStatus: PathValidationStatus;
 		pickerDescription?: string;
 		summaryReadyLabel?: string;
@@ -19,7 +19,7 @@
 
 	let {
 		selection,
-		trimmedPath,
+		nonblankPath,
 		validationStatus,
 		pickerDescription,
 		summaryReadyLabel,
@@ -35,7 +35,7 @@
 	let observedPreambleInvalidationVersion: number | null = null;
 
 	const summaryLoading = $derived(
-		trimmedPath.length > 0 &&
+		nonblankPath.length > 0 &&
 			(validationStatus === 'idle' || validationStatus === 'checking' || selection.previewLoading),
 	);
 
@@ -101,7 +101,7 @@
 		defaultsIds={(selection.preview?.eligiblePreambles ?? []).map((entry) => entry.id)}
 		previewLoading={selection.previewLoading}
 		canLoadAutomaticPreview={selection.canLoadAutomaticPreview}
-		canonicalProjectPath={selection.canonicalProjectPath || trimmedPath}
+		canonicalProjectPath={selection.canonicalProjectPath || nonblankPath}
 		projection={selection.preview}
 		description={pickerDescription}
 		{onOpenCatalog}

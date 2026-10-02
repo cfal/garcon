@@ -1506,6 +1506,22 @@ describe('NewChatFormState', () => {
 		expect(formState.error).toBe('Chat defaults are still loading.');
 	});
 
+	it('validates and submits exact paths without accepting whitespace-only input', async () => {
+		formState.settingsLoaded = true;
+		formState.projectPath = '/workspace/project ';
+		formState.firstMessage = 'Synthetic task';
+		formState.agentId = 'codex';
+		formState.selectModel('gpt-5.4');
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: true });
+		formState.validatePath();
+		await vi.advanceTimersByTimeAsync(300);
+		expect(chatsApi.validateStart).toHaveBeenLastCalledWith('/workspace/project ', { executorId: 'local' });
+		expect(formState.buildConfig()?.projectPath).toBe('/workspace/project ');
+		formState.projectPath = '   ';
+		expect(formState.nonblankPath).toBe('');
+		expect(formState.buildConfig()).toBeNull();
+	});
+
 	it('builds config without persisting startup defaults through app settings', () => {
 		formState.settingsLoaded = true;
 		formState.projectPath = '/valid/path';

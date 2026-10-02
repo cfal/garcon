@@ -502,6 +502,10 @@ function requiredStr(v: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function requiredPath(v: unknown): string | null {
+  return typeof v === 'string' && v.trim().length > 0 ? v : null;
+}
+
 function nonNegativeInt(v: unknown): number | null {
   return typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 ? v : null;
 }
@@ -772,9 +776,9 @@ export function parseServerWsMessage(
     }
     case 'chat-project-path-updated': {
       const chatId = requiredStr(data.chatId);
-      const projectPath = requiredStr(data.projectPath);
-      const effectiveProjectKey = requiredStr(data.effectiveProjectKey);
-      const previousProjectPath = requiredStr(data.previousProjectPath);
+      const projectPath = requiredPath(data.projectPath);
+      const effectiveProjectKey = requiredPath(data.effectiveProjectKey);
+      const previousProjectPath = requiredPath(data.previousProjectPath);
       return chatId && projectPath && effectiveProjectKey && previousProjectPath
         ? new ChatProjectPathUpdatedMessage(
             chatId,

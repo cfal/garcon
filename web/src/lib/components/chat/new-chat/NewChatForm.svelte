@@ -155,7 +155,7 @@
 	let expansionProjectPath = '';
 	let snippetInteractionGeneration = $state(0);
 	const snippetInteractionKey = $derived(
-		`${snippetInteractionGeneration}\u0000${form.executorId}\u0000${form.trimmedPath}`,
+		`${snippetInteractionGeneration}\u0000${form.executorId}\u0000${form.nonblankPath}`,
 	);
 
 	const snippetPalette = new SnippetPaletteTriggerState();
@@ -276,7 +276,7 @@
 	});
 
 	// Debounced path validation reacts to path changes.
-	const validationTargetKey = $derived(`${form.pathContextKey}\u0000${form.trimmedPath}`);
+	const validationTargetKey = $derived(`${form.pathContextKey}\u0000${form.nonblankPath}`);
 	$effect(() => {
 		const projectPath = validationTargetKey;
 		if (projectPath !== expansionProjectPath) {
@@ -396,7 +396,7 @@
 	}
 
 	function expansionContext() {
-		const projectPath = form.trimmedPath;
+		const projectPath = form.nonblankPath;
 		if (projectPath) {
 			return {
 				type: 'new-chat' as const,
@@ -439,7 +439,7 @@
 				return 'cancelled';
 			}
 			if (
-				form.trimmedPath !== projectPath ||
+				form.nonblankPath !== projectPath ||
 				result.response.contextProjectPath !== projectPath ||
 				result.response.contextExecutorId !== form.executorId ||
 				form.firstMessage !== sourceText
@@ -481,7 +481,7 @@
 			});
 			if (result.kind !== 'expanded') return;
 			if (
-				form.trimmedPath !== projectPath ||
+				form.nonblankPath !== projectPath ||
 				result.response.contextProjectPath !== projectPath ||
 				result.response.contextExecutorId !== form.executorId ||
 				form.firstMessage !== sourceText
@@ -641,7 +641,7 @@
 					}}
 					pin={{
 						isPinned: form.isPinnedPath,
-						disabled: !form.trimmedPath || form.isUpdatingPinnedPath,
+						disabled: !form.nonblankPath || form.isUpdatingPinnedPath,
 						loading: form.isUpdatingPinnedPath,
 						onToggle: () => form.togglePinnedPath(),
 					}}
@@ -649,7 +649,7 @@
 						open: form.filesAvailable && form.showBrowser && !form.isUpdatingPinnedPath,
 						executorId: form.executorId,
 						executorContextKey: form.pathContextKey,
-						currentPath: form.trimmedPath || form.browseStartPath || form.projectBasePath,
+						currentPath: form.nonblankPath || form.browseStartPath || form.projectBasePath,
 						basePath: form.projectBasePath,
 						isMobile,
 						onSelect: (path) => {
@@ -717,7 +717,7 @@
 
 				<NewChatPreambleControls
 					selection={form.preambles}
-					trimmedPath={form.trimmedPath}
+					nonblankPath={form.nonblankPath}
 					validationStatus={form.validationStatus}
 					onClear={() => form.preambles.setExplicit([])}
 				/>
@@ -819,7 +819,7 @@
 					}}
 					initialQuery={snippetPalette.initialQuery}
 					interactionKey={snippetInteractionKey}
-					contextHint={form.trimmedPath ? null : m.snippets_palette_context_hint()}
+					contextHint={form.nonblankPath ? null : m.snippets_palette_context_hint()}
 					onInsert={async (snippet, argumentsText) => {
 						const trigger = snippetPalette.trigger;
 						const result = await insertSnippet(snippet, argumentsText, trigger);

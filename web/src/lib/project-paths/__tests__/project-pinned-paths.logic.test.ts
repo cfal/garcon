@@ -5,16 +5,18 @@ import {
 } from '$lib/project-paths/project-pinned-paths.js';
 
 describe('project pinned paths', () => {
-	it('sorts, trims, and dedupes pinned project paths', () => {
+	it('sorts and dedupes exact nonblank pinned project paths', () => {
 		expect(
 			sortedPinnedProjectPaths([
 				'/workspace/zeta',
 				' /workspace/alpha ',
 				'/workspace/beta',
 				'/workspace/alpha',
+				'/workspace/alpha',
 				'',
+				'   ',
 			]),
-		).toEqual(['/workspace/alpha', '/workspace/beta', '/workspace/zeta']);
+		).toEqual([' /workspace/alpha ', '/workspace/alpha', '/workspace/beta', '/workspace/zeta']);
 	});
 
 	it('returns alphabetized paths after pinning or unpinning', () => {

@@ -14,6 +14,7 @@ import {
 	ChatReadUpdatedV1Message,
 	ChatProjectPathUpdatedMessage,
 	ChatListRefreshRequestedMessage,
+	parseServerWsMessage,
 } from '$shared/ws-events';
 
 interface SidebarContextMocks extends SidebarContext {
@@ -115,6 +116,19 @@ describe('handleChatReadUpdated', () => {
 });
 
 describe('handleChatProjectPathUpdated', () => {
+	it('preserves filesystem identity from the wire through sidebar publication', () => {
+		const ctx = createSidebarContext();
+		const original = new ChatProjectPathUpdatedMessage('chat-1', '/workspace/project ', '/workspace/project ', ' /workspace/previous ');
+		const message = parseServerWsMessage(JSON.parse(JSON.stringify(original)));
+		expect(message).toEqual(original);
+		if (message?.type !== 'chat-project-path-updated') throw new Error('Expected project update');
+		handleChatProjectPathUpdated(message, ctx);
+		expect(ctx.patchChatProjectPath).toHaveBeenCalledWith('chat-1', { projectPath: original.projectPath });
+		for (const field of ['projectPath', 'effectiveProjectKey', 'previousProjectPath']) {
+			expect(parseServerWsMessage({ ...original, [field]: '   ' })).toBeNull();
+		}
+	});
+
 	it('patches the project path for a valid message', () => {
 		const ctx = createSidebarContext();
 

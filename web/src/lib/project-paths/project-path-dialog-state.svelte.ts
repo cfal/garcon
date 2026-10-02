@@ -43,18 +43,18 @@ export class ProjectPathDialogState {
 		return this.executors?.gitAvailable(this.executorId) ?? this.executorId === 'local';
 	}
 
-	get trimmedPath(): string {
-		return this.candidatePath.trim();
+	get nonblankPath(): string {
+		return this.candidatePath.trim() ? this.candidatePath : '';
 	}
 
 	get isUnchanged(): boolean {
-		return this.trimmedPath === this.currentProjectPath;
+		return this.nonblankPath === this.currentProjectPath;
 	}
 
 	get canSubmit(): boolean {
 		return (
 			this.validationStatus === 'valid' &&
-			Boolean(this.trimmedPath) &&
+			Boolean(this.nonblankPath) &&
 			!this.isUnchanged &&
 			!this.isSubmitting
 		);
@@ -65,7 +65,7 @@ export class ProjectPathDialogState {
 			this.gitAvailable &&
 			this.validationStatus === 'valid' &&
 			this.gitRepoStatus === 'git' &&
-			Boolean(this.trimmedPath) &&
+			Boolean(this.nonblankPath) &&
 			!this.isSubmitting
 		);
 	}
@@ -114,7 +114,7 @@ export class ProjectPathDialogState {
 	}
 
 	scheduleValidation(executorContextKey = ''): void {
-		const path = this.trimmedPath;
+		const path = this.nonblankPath;
 		this.#clearPendingValidation();
 		if (this.#validationContextKey !== executorContextKey) {
 			this.#validationContextKey = executorContextKey;
@@ -175,7 +175,7 @@ export class ProjectPathDialogState {
 
 	async loadWorktrees(): Promise<void> {
 		if (!this.gitAvailable) return;
-		const path = this.trimmedPath;
+		const path = this.nonblankPath;
 		const executorId = this.executorId;
 		const contextKey = this.executors?.gitContextKey(executorId);
 		if (!path) return;
@@ -187,7 +187,7 @@ export class ProjectPathDialogState {
 		const current = () =>
 			this.#isCurrentWorktreeLoad(generation, abort.signal) &&
 			executorId === this.executorId &&
-			path === this.trimmedPath &&
+			path === this.nonblankPath &&
 			contextKey === this.executors?.gitContextKey(executorId);
 		this.isLoadingWorktrees = true;
 		this.worktreeError = null;
@@ -212,14 +212,14 @@ export class ProjectPathDialogState {
 
 	async createWorktree(worktreePath: string, branch?: string, baseRef?: string): Promise<void> {
 		if (!this.gitAvailable || this.isCreatingWorktree) return;
-		const projectPath = this.trimmedPath;
+		const projectPath = this.nonblankPath;
 		const executorId = this.executorId;
 		const contextKey = this.executors?.gitContextKey(executorId);
 		const generation = this.#worktreeGeneration;
 		const current = () =>
 			generation === this.#worktreeGeneration &&
 			executorId === this.executorId &&
-			projectPath === this.trimmedPath &&
+			projectPath === this.nonblankPath &&
 			contextKey === this.executors?.gitContextKey(executorId);
 		if (!projectPath) return;
 
@@ -307,7 +307,7 @@ export class ProjectPathDialogState {
 
 	#isCurrentValidation(path: string, generation: number, signal: AbortSignal): boolean {
 		return (
-			!signal.aborted && generation === this.#validationGeneration && path === this.trimmedPath
+			!signal.aborted && generation === this.#validationGeneration && path === this.nonblankPath
 		);
 	}
 

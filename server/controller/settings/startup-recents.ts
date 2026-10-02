@@ -35,12 +35,16 @@ function normalizeProtocol(value: unknown): ApiProtocol | null {
   return null;
 }
 
-function dedupeStrings(entries: unknown, limit: number): string[] {
+function optionalPath(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value : null;
+}
+
+function dedupePaths(entries: unknown, limit: number): string[] {
   if (!Array.isArray(entries)) return [];
   const result: string[] = [];
   const seen = new Set<string>();
   for (const entry of entries) {
-    const value = optionalString(entry);
+    const value = optionalPath(entry);
     if (!value || seen.has(value)) continue;
     seen.add(value);
     result.push(value);
@@ -55,7 +59,7 @@ function compareStringsAlphabetically(left: string, right: string): number {
 }
 
 export function sortedPinnedProjectPaths(entries: unknown): string[] {
-  return dedupeStrings(entries, Number.MAX_SAFE_INTEGER).sort(compareStringsAlphabetically);
+  return dedupePaths(entries, Number.MAX_SAFE_INTEGER).sort(compareStringsAlphabetically);
 }
 
 function sameStringArray(left: unknown[], right: string[]): boolean {
@@ -264,10 +268,10 @@ export function sanitizePathSettings(raw: Record<string, unknown>): {
   migrated: boolean;
 } {
   const rawPaths = isRecord(raw.paths) ? raw.paths : {};
-  const legacyProjectPath = optionalString(raw.lastProjectPath);
+  const legacyProjectPath = optionalPath(raw.lastProjectPath);
   const pinnedProjectPaths = sortedPinnedProjectPaths(rawPaths.pinnedProjectPaths);
-  const current = dedupeStrings(rawPaths.recentProjectPaths, RECENT_PROJECT_PATHS_LIMIT);
-  const recentProjectPaths = dedupeStrings(
+  const current = dedupePaths(rawPaths.recentProjectPaths, RECENT_PROJECT_PATHS_LIMIT);
+  const recentProjectPaths = dedupePaths(
     [...current, ...(legacyProjectPath ? [legacyProjectPath] : [])],
     RECENT_PROJECT_PATHS_LIMIT,
   );
@@ -290,7 +294,7 @@ export function sanitizePathSettings(raw: Record<string, unknown>): {
 
 export function recordRecentProjectPath(paths: PathSettings, projectPath: unknown, targetExecutor?: unknown): PathSettings {
   const normalizedPaths = normalizePathSettings(paths);
-  const value = optionalString(projectPath);
+  const value = optionalPath(projectPath);
   if (!value) return normalizedPaths;
   const executorId = parseExecutorId(targetExecutor);
   if (!executorId) throw new Error('Invalid executor ID');
@@ -298,12 +302,12 @@ export function recordRecentProjectPath(paths: PathSettings, projectPath: unknow
     const byExecutor = parseExecutorProjectPreferences(normalizedPaths.byExecutor ?? {})!;
     const previous = byExecutor[executorId] ?? { recentPaths: [], pinnedPaths: [] };
     return { ...normalizedPaths, byExecutor: { ...byExecutor, [executorId]: {
-      ...previous, recentPaths: dedupeStrings([value, ...previous.recentPaths], RECENT_PROJECT_PATHS_LIMIT),
+      ...previous, recentPaths: dedupePaths([value, ...previous.recentPaths], RECENT_PROJECT_PATHS_LIMIT),
     } } };
   }
-  const current = dedupeStrings(normalizedPaths.recentProjectPaths, RECENT_PROJECT_PATHS_LIMIT);
+  const current = dedupePaths(normalizedPaths.recentProjectPaths, RECENT_PROJECT_PATHS_LIMIT);
   return {
     ...normalizedPaths,
-    recentProjectPaths: dedupeStrings([value, ...current], RECENT_PROJECT_PATHS_LIMIT),
+    recentProjectPaths: dedupePaths([value, ...current], RECENT_PROJECT_PATHS_LIMIT),
   };
 }

@@ -6,6 +6,18 @@ import DirectoryBrowserTestHost from '$lib/components/project-paths/__tests__/Di
 
 vi.mock('$lib/api/files', () => ({ browseDirectory: vi.fn() }));
 
+it('keeps trailing spaces when filtering directory names', async () => {
+	vi.mocked(browseDirectory).mockReset().mockResolvedValue([
+		{ name: 'project', path: '/repo/project', type: 'directory' },
+		{ name: 'project ', path: '/repo/project ', type: 'directory' },
+	]);
+	const view = render(DirectoryBrowserTestHost, {
+		executorId: 'local', currentPath: '/repo/project ', basePath: '/repo', isMobile: false, onSelect: vi.fn(), onClose: vi.fn(),
+	});
+	await waitFor(() => expect(view.getAllByRole('button', { name: 'project' })).toHaveLength(1));
+	view.unmount();
+});
+
 it('reloads a directory after a same-path serving-instance change and rejects late results', async () => {
 	const stale = Promise.withResolvers<Awaited<ReturnType<typeof browseDirectory>>>();
 	vi.mocked(browseDirectory).mockReturnValueOnce(stale.promise).mockResolvedValueOnce([

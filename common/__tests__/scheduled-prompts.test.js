@@ -47,6 +47,22 @@ function newChatDefinition(preambleChoice) {
 }
 
 describe('scheduled new-chat preamble choices', () => {
+  it('preserves exact project paths and rejects blank paths', () => {
+    const value = newChatDefinition({ mode: 'defaults' });
+    for (const projectPath of ['/workspace/project ', ' /workspace/project', '/workspace/project']) {
+      value.target.projectPath = projectPath;
+      expect(normalizeScheduledPromptDefinitionInput(value)?.target.projectPath).toBe(projectPath);
+      expect(normalizeScheduledPrompt({
+        ...value, id: 'scheduled-path', schedule: { type: 'once', nextRunAt: '2030-01-01T09:00:00.000Z' },
+        createdAt: '2029-01-01T00:00:00.000Z', updatedAt: '2029-01-01T00:00:00.000Z',
+      })?.target.projectPath).toBe(projectPath);
+    }
+    for (const projectPath of ['', '   ', null, 123]) {
+      value.target.projectPath = projectPath;
+      expect(normalizeScheduledPromptDefinitionInput(value)).toBeNull();
+    }
+  });
+
   it('preserves defaults and explicit ordered selections, including explicit none', () => {
     for (const preambleChoice of [
       { mode: 'defaults' },

@@ -322,7 +322,7 @@ describe('GitTargetDialogState', () => {
 			projectPath: '/workspace/repo',
 			worktreePath: '/workspace/elsewhere',
 		});
-		const exactWorktree = makeTarget({ label: 'exact worktree' });
+		const exactWorktree = makeTarget({ label: 'exact worktree', projectPath: '/workspace/repo ', worktreePath: '/workspace/repo ' });
 		vi.mocked(gitApi.getGitTargetCandidates).mockResolvedValueOnce({
 			targets: [byProjectPath, exactWorktree],
 		});
@@ -330,14 +330,14 @@ describe('GitTargetDialogState', () => {
 			executorId: 'local',
 			executorContextKey: 'local-instance',
 			available: true,
-			initialPath: ' /workspace/repo ',
+			initialPath: '/workspace/repo ',
 		});
 		dialog.validationStatus = 'valid';
 
 		const target = await dialog.resolveConfirmedTarget();
 
 		expect(gitApi.getGitTargetCandidates).toHaveBeenCalledWith(
-			expect.objectContaining({ executorId: 'local', projectPath: '/workspace/repo' }),
+			expect.objectContaining({ executorId: 'local', projectPath: '/workspace/repo ' }),
 			expect.objectContaining({ signal: expect.any(AbortSignal) }),
 		);
 		expect(target).toBe(exactWorktree);

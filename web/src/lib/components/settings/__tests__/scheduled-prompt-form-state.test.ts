@@ -4,6 +4,7 @@ import { localDateValue, localTimeValue } from '$lib/scheduling/local-schedule';
 import {
 	SCHEDULED_PROMPT_CHAT_ID_TOKEN,
 	SCHEDULED_PROMPT_MAX_LENGTH,
+	normalizeScheduledPromptDefinitionInput,
 	type ScheduledPrompt,
 } from '$shared/scheduled-prompts';
 import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
@@ -198,13 +199,13 @@ describe('ScheduledPromptFormState', () => {
 		expect(form.buildDefinition(now)?.prompt).toBe('Synthetic scheduled prompt');
 	});
 
-	it('builds new schedules with execution-time preamble defaults', () => {
+	it('builds new schedules with execution-time preamble defaults and exact project paths', () => {
 		const form = createForm();
 		form.targetType = 'new-chat';
 		form.startup.settingsLoaded = true;
 		form.startup.validationStatus = 'valid';
 		form.startup.agentId = 'codex';
-		form.startup.projectPath = '/workspace/project';
+		form.startup.projectPath = '/workspace/project ';
 		form.startup.selectedModelsByAgent = { codex: 'gpt-5' };
 		form.date = '2030-01-02';
 		form.time = '09:00';
@@ -214,8 +215,10 @@ describe('ScheduledPromptFormState', () => {
 
 		expect(definition?.target).toMatchObject({
 			type: 'new-chat',
+			projectPath: '/workspace/project ',
 			preambleChoice: { mode: 'defaults' },
 		});
+		expect(normalizeScheduledPromptDefinitionInput(definition)?.target).toMatchObject({ projectPath: '/workspace/project ' });
 	});
 	it('rejects ineligible agents for new-chat targets', () => {
 		let selectableAgentIds: readonly SessionAgentId[] = ['claude', 'codex'];

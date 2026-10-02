@@ -60,9 +60,9 @@
 		},
 	});
 	let isUpdatingPinnedProjectPath = $state(false);
-	const isCandidatePinned = $derived(isPinnedProjectPath(pinnedProjectPaths, dialog.trimmedPath));
+	const isCandidatePinned = $derived(isPinnedProjectPath(pinnedProjectPaths, dialog.nonblankPath));
 	const canTogglePinnedProjectPath = $derived(
-		Boolean(dialog.trimmedPath) &&
+		Boolean(dialog.nonblankPath) &&
 			Boolean(onTogglePinnedProjectPath) &&
 			!isUpdatingPinnedProjectPath &&
 			!dialog.isConfirming,
@@ -92,7 +92,7 @@
 	}
 
 	async function togglePinnedProjectPath(): Promise<void> {
-		const path = dialog.trimmedPath;
+		const path = dialog.nonblankPath;
 		if (!path || !onTogglePinnedProjectPath || isUpdatingPinnedProjectPath) return;
 		isUpdatingPinnedProjectPath = true;
 		try {
@@ -187,7 +187,7 @@
 									executors.filesAvailable(executorId),
 								executorId,
 								executorContextKey: executors.pathContextKey(executorId),
-								currentPath: dialog.trimmedPath || projectBasePath,
+								currentPath: dialog.nonblankPath || projectBasePath,
 								basePath: projectBasePath,
 								isMobile,
 								onSelect: (path) => {

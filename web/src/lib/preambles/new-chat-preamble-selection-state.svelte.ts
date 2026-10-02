@@ -13,7 +13,7 @@ import type {
 
 interface NewChatPreambleSelectionStateOptions {
 	readonly executorId?: string;
-	readonly trimmedPath: string;
+	readonly nonblankPath: string;
 	readonly validationStatus: PathValidationStatus;
 	readonly agentId: AgentId;
 	readonly chatTags: readonly string[];
@@ -48,7 +48,7 @@ export class NewChatPreambleSelectionState {
 	}
 
 	get canLoadAutomaticPreview(): boolean {
-		return this.options.trimmedPath.length > 0 && this.options.validationStatus === 'valid';
+		return this.options.nonblankPath.length > 0 && this.options.validationStatus === 'valid';
 	}
 
 	get orderedIds(): readonly PreambleId[] | undefined {
@@ -183,7 +183,7 @@ export class NewChatPreambleSelectionState {
 		readonly tags: readonly string[];
 		readonly key: string;
 	} {
-		const projectPath = this.options.trimmedPath;
+		const projectPath = this.options.nonblankPath;
 		const agentId = this.options.agentId;
 		const tags = normalizeTags(this.options.chatTags);
 		let key = `${projectPath}\u0000explicit`;

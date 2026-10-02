@@ -33,7 +33,7 @@ function makeStartup(modelSelectionError: string | null = null, executorId = 'lo
 		gitRepoStatus: 'git',
 		isUpdatingPinnedPath: false,
 		isPinnedPath: false,
-		trimmedPath: '/workspace/project',
+		nonblankPath: '/workspace/project',
 		pinnedProjectPaths: [],
 		chatTags: [],
 		showTagInput: false,

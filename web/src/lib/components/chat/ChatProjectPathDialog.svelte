@@ -51,10 +51,10 @@
 	);
 	let isPathInvalid = $derived(Boolean(validationMessage));
 	let isCandidatePinned = $derived(
-		isPinnedProjectPath(pinnedProjectPaths, projectPathDialogState.trimmedPath),
+		isPinnedProjectPath(pinnedProjectPaths, projectPathDialogState.nonblankPath),
 	);
 	let canTogglePinnedProjectPath = $derived(
-		Boolean(projectPathDialogState.trimmedPath) &&
+		Boolean(projectPathDialogState.nonblankPath) &&
 			Boolean(onTogglePinnedProjectPath) &&
 			!projectPathDialogState.isSubmitting &&
 			!isUpdatingPinnedProjectPath,
@@ -90,7 +90,7 @@
 
 	$effect(() => {
 		if (!activeDialogKey) return;
-		void projectPathDialogState.trimmedPath;
+		void projectPathDialogState.nonblankPath;
 		const contextKey = pathContextKey;
 		untrack(() => projectPathDialogState.scheduleValidation(contextKey));
 	});
@@ -121,7 +121,7 @@
 	}
 
 	async function togglePinnedProjectPath(): Promise<void> {
-		const path = projectPathDialogState.trimmedPath;
+		const path = projectPathDialogState.nonblankPath;
 		if (!path || !onTogglePinnedProjectPath || isUpdatingPinnedProjectPath) return;
 		isUpdatingPinnedProjectPath = true;
 		try {
@@ -139,7 +139,7 @@
 		projectPathDialogState.isSubmitting = true;
 		projectPathDialogState.submitError = null;
 		try {
-			await onConfirm(projectPathDialog, projectPathDialogState.trimmedPath);
+			await onConfirm(projectPathDialog, projectPathDialogState.nonblankPath);
 			onClose();
 		} catch (error) {
 			projectPathDialogState.setSubmitFailure(error);
@@ -226,7 +226,7 @@
 									!isUpdatingPinnedProjectPath,
 								executorId: projectPathDialogState.executorId,
 								executorContextKey: pathContextKey,
-								currentPath: projectPathDialogState.trimmedPath || activeProjectBasePath,
+								currentPath: projectPathDialogState.nonblankPath || activeProjectBasePath,
 								basePath: activeProjectBasePath,
 								isMobile,
 								onSelect: (path) => {

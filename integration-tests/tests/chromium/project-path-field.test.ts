@@ -8,7 +8,9 @@ import { initializeFixtureRepository, runFixtureGit } from '../../support/git-fi
 for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote-executor-dials'] as const) {
   test(`project path field retains keyboard, pin and nested picker behavior (${executionBackend})`, async () => {
     await withChromiumFixture(`project-path-field-${executionBackend}`, async ({ page, context, integration, assertNoBrowserErrors }, phase) => {
-      const project = integration.executionDirs.project;
+      const project = join(integration.executionDirs.project, 'repository ');
+      await mkdir(project);
+      await mkdir(project.trimEnd());
       const worktree = join(project, 'feature');
       await initializeFixtureRepository(project);
       await runFixtureGit(project, 'worktree', 'add', '-b', 'feature', worktree);

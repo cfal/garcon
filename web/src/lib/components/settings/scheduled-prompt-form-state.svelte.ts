@@ -199,7 +199,7 @@ export class ScheduledPromptFormState {
 				type: 'new-chat',
 				...(this.startup.executorId === 'local' ? {} : { executorId: this.startup.executorId }),
 				agentId: this.startup.agentId,
-				projectPath: this.startup.trimmedPath,
+				projectPath: this.startup.nonblankPath,
 				model: selection.model,
 				apiProviderId: selection.apiProviderId,
 				modelEndpointId: selection.modelEndpointId,
