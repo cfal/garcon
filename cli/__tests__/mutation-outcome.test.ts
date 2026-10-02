@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import { GarconClient, GarconHttpError } from '../garcon-client.js';
 
 const chatId = '1785337200123456';
@@ -62,4 +62,19 @@ test('failed tag recovery is not described as a submitted mutation', async () =>
     fetch: Object.assign(async () => { throw new Error('Synthetic preflight failure'); }, { preconnect() {} }),
   });
   await expect(client.setChatTags({ chatId, tags: [] })).rejects.toThrow('no confirmed response');
+});
+
+test('a timed-out submitted write remains unknown rather than claiming non-delivery', async () => {
+  const timeout = new AbortController();
+  const timer = spyOn(AbortSignal, 'timeout').mockReturnValue(timeout.signal);
+  try {
+    const { client, submissions } = harness(() => {
+      timeout.abort(new DOMException('Synthetic timeout after commit', 'TimeoutError'));
+      throw timeout.signal.reason;
+    });
+    await expect(client.updateChatTitle({ chatId, title: 'Synthetic' })).rejects.toThrow('mutation outcome is unknown');
+    expect(submissions()).toBe(1);
+  } finally {
+    timer.mockRestore();
+  }
 });

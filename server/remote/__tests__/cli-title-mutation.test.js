@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import { promises as fs } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -46,6 +46,18 @@ test.each(['direct', 'gateway'])('title byte limits reject new writes before per
     const reopened = new SettingsStore(root);
     await reopened.init();
     expect(reopened.getChatName(chatId)).toBe(title);
+
+    const originalOpen = fs.open;
+    const open = spyOn(fs, 'open').mockImplementation(async (target, flags, ...rest) => {
+      if (target === root && flags === 'r') throw new Error('Synthetic post-rename sync failure');
+      return originalOpen(target, flags, ...rest);
+    });
+    cleanups.push(() => open.mockRestore());
+    await expect(client.updateChatTitle({ chatId, title: 'Committed without confirmation' }))
+      .rejects.toThrow('mutation outcome is unknown');
+    expect(context.settings.setSessionName).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(await fs.readFile(join(root, 'project-settings.json'), 'utf8')).chatNames[chatId])
+      .toBe('Committed without confirmation');
   } finally {
     for (const cleanup of cleanups.reverse()) await cleanup();
   }
