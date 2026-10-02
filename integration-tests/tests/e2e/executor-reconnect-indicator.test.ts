@@ -3,12 +3,14 @@ import { tcpLinkProxy } from '../../../server/remote/__tests__/tcp-link-proxy.js
 import { assistantContents } from '../../support/chat-assertions.js';
 import { withE2eFixture } from '../../support/e2e-fixture.js';
 import { waitForExecutorReconnect } from '../../support/executor-link.js';
+import { waitForBulk } from '../../support/executor-bulk-fixture.js';
 import { SpaDriver } from '../../support/spa-driver.js';
 
 test('a short executor blip keeps the running turn visible as reconnecting and completes it', async () => {
   let proxy: Awaited<ReturnType<typeof tcpLinkProxy>> | undefined;
   try {
     await withE2eFixture('executor-reconnect-indicator', async fixture => {
+      await waitForBulk(fixture.integration);
       const { client, executionDirs, directAgents, fakeProviders } = fixture.integration;
       const chatId = fixture.integration.newChatId();
       const prompt = 'Synthetic turn held across a link blip';
@@ -35,7 +37,8 @@ test('a short executor blip keeps the running turn visible as reconnecting and c
       await app.waitForText('Synthetic reply after the blip');
       expect(assistantContents((await client.getMessages(chatId)).messages))
         .toEqual(['Synthetic reply after the blip']);
-      expect(proxy!.connections).toBe(2);
+      await waitForBulk(fixture.integration);
+      expect(proxy!.connections).toBe(4);
     }, {
       executionBackend: 'remote-controller-dials',
       interceptExecutorConnection: async url => { proxy = await tcpLinkProxy(url); return proxy.url; },
