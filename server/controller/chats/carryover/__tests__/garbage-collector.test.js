@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { UserMessage } from '../../../../common/chat-types.js';
-import { CarryOverGarbageCollector } from '../carryover-garbage-collector.ts';
-import { CarryOverTranscriptStore } from '../carryover-transcript-store.ts';
+import { UserMessage } from '../../../../../common/chat-types.js';
+import { CarryOverGarbageCollector } from '../garbage-collector.ts';
+import { CarryOverTranscriptStore } from '../transcript-store.ts';
 
 const FIRST = '7f1bb17c-0cc5-4a0d-b762-2c14b04c5f2e';
 const SECOND = 'd5f2380b-6228-49f5-8484-b2d7e16380ab';

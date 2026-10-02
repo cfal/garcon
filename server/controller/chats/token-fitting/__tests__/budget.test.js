@@ -4,7 +4,7 @@ import {
   estimateHandoffTokens,
   fitEstimatedTokenDocument,
   reducedCompactionEntryBudget,
-} from '../handoff-token-budget.ts';
+} from '../budget.ts';
 
 describe('handoff token budget', () => {
   test('wraps deterministic tokenx estimation for representative text', () => {

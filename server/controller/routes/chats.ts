@@ -44,7 +44,7 @@ import {
 import {
   archivedLogicalCount,
   carryOverRevision,
-} from '../chats/carryover-segments.js';
+} from '../chats/carryover/segments.js';
 import type { TranscriptPageReader } from '../chats/chat-message-reader.js';
 import { buildChatOrderComparator } from '../chats/chat-order-ranking.js';
 import type { ChatProcessingActivity } from '../chats/chat-processing-activity.js';

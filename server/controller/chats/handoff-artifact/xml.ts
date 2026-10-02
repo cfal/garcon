@@ -8,7 +8,7 @@ import { usableHandoffTokenBudget } from '../../../../common/handoff-sizing.js';
 import {
   estimateHandoffTokens,
   fitEstimatedTokenDocument,
-} from '../handoff-token-budget.js';
+} from '../token-fitting/budget.js';
 import { xmlAttribute } from '../transcript-export/values.js';
 import { selectHandoffArtifactEntries } from './projection.js';
 import type {

@@ -1,4 +1,4 @@
-import { CarryOverGarbageCollector } from '../../carryover-garbage-collector.ts';
+import { CarryOverGarbageCollector } from '../../garbage-collector.ts';
 
 const collector = new CarryOverGarbageCollector({
   registry: { listAllChats: () => ({}) },

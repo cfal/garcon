@@ -1,7 +1,7 @@
-import { createLogger } from '../../common/log.js';
-import type { AgentOwnershipJournal } from './agent-ownership-journal.js';
-import type { CarryOverTranscriptStore } from './carryover-transcript-store.js';
-import type { IChatRegistry } from './store.js';
+import { createLogger } from '../../../common/log.js';
+import type { AgentOwnershipJournal } from '../agent-ownership-journal.js';
+import type { CarryOverTranscriptStore } from './transcript-store.js';
+import type { IChatRegistry } from '../store.js';
 
 const logger = createLogger('chats:carryover-gc');
 const CARRYOVER_GC_DELAY_MS = 1_000;

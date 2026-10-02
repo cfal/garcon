@@ -41,8 +41,8 @@ import { AgentRegistry, createForkNativeHistoryReader } from './agents/index.js'
 import {
   CARRYOVER_COMPACTION_STARTED_NOTICE,
   CarryOverCompactionService,
-} from './chats/carryover-compaction.js';
-import { PreparedCarryoverStore } from './chats/prepared-carryover.js';
+} from './chats/carryover/compaction.js';
+import { PreparedCarryoverStore } from './chats/carryover/prepared-store.js';
 import { AgentCommandComposition } from './chats/agent-command-composition.js';
 import { AgentStartSelectionService } from './agents/agent-start-selection-service.js';
 import { defaultAgentIntegrations } from '../runtime/agents/default-agent-integrations.js';
@@ -89,8 +89,8 @@ import { ScheduledPromptScheduler } from './scheduled-prompts/scheduler.js';
 import { ChatListProjector } from './chats/chat-list-projector.js';
 import { ProjectAdmission } from './projects/project-admission.js';
 import { AgentOwnershipJournal } from './chats/agent-ownership-journal.js';
-import { CarryOverGarbageCollector } from './chats/carryover-garbage-collector.js';
-import { CarryOverTranscriptStore } from './chats/carryover-transcript-store.js';
+import { CarryOverGarbageCollector } from './chats/carryover/garbage-collector.js';
+import { CarryOverTranscriptStore } from './chats/carryover/transcript-store.js';
 import {
   finalizeCarryOverMigrationValidation,
   migrateLegacyCarryOverWorkspace,
@@ -102,7 +102,7 @@ import {
 import { AgentHandoffService } from './agents/agent-handoff-service.js';
 import { initializeSnippetAndPreambleServices } from './snippets/setup.js';
 import { ChatPreambleSelectionService } from './preambles/chat-selection-service.js';
-import { createCarriedContext } from './chats/carried-context.js';
+import { createCarriedContext } from './chats/carryover/context.js';
 import { initializeChatBoardRuntime } from './chat-boards/setup.js';
 import { initializeTickets } from './tickets/setup.js';
 import { createTicketProjectResolver } from './tickets/project-default.js';

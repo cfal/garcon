@@ -4,8 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { brotliCompress, constants as zlibConstants } from 'node:zlib';
-import { UserMessage } from '../../../../../common/chat-types.js';
-import { decodeCarryOverPage } from '../../carryover-page-codec.ts';
+import { UserMessage } from '../../../../../../common/chat-types.js';
+import { decodeCarryOverPage } from '../../page-codec.ts';
 
 const compress = promisify(brotliCompress);
 const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-codec-abort-'));

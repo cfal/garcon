@@ -1,37 +1,37 @@
-import type { ApiProtocol } from '../../../common/api-providers.js';
-import type { ThinkingMode } from '../../../common/chat-modes.js';
-import { CHAT_ROW_CONTENT_MAX_BYTES } from '../../../common/chat-row-contracts.js';
-import type { ChatMessage } from '../../../common/chat-types.js';
+import type { ApiProtocol } from '../../../../common/api-providers.js';
+import type { ThinkingMode } from '../../../../common/chat-modes.js';
+import { CHAT_ROW_CONTENT_MAX_BYTES } from '../../../../common/chat-row-contracts.js';
+import type { ChatMessage } from '../../../../common/chat-types.js';
 import {
   DEFAULT_HANDOFF_CONTEXT_WINDOW_TOKENS,
   parseAgentSwitchContextWindowTokens,
-} from '../../../common/handoff-sizing.js';
-import type { CarriedContext } from '../../../common/transcript-seed.js';
+} from '../../../../common/handoff-sizing.js';
+import type { CarriedContext } from '../../../../common/transcript-seed.js';
 import {
   CARRYOVER_INJECTION_MAX_CHARS,
   createCarryoverTranscript,
-} from '../../../common/transcript-seed.js';
-import { isRecord } from '../../../common/json.js';
-import { resolveGenerationContextForSelection, type GenerationDiscoveryAgents } from '../settings/generation-config-source.js';
-import { resolveEffectiveGenerationConfig } from '../settings/generation-effective.js';
+} from '../../../../common/transcript-seed.js';
+import { isRecord } from '../../../../common/json.js';
+import { resolveGenerationContextForSelection, type GenerationDiscoveryAgents } from '../../settings/generation-config-source.js';
+import { resolveEffectiveGenerationConfig } from '../../settings/generation-effective.js';
 import {
   createGenerationRequestSignal,
-} from '../settings/generation-limits.js';
-import { DomainError } from '../../common/domain-error.js';
-import { errorMessage } from '../../common/errors.js';
-import { createLogger } from '../../common/log.js';
+} from '../../settings/generation-limits.js';
+import { DomainError } from '../../../common/domain-error.js';
+import { errorMessage } from '../../../common/errors.js';
+import { createLogger } from '../../../common/log.js';
 import {
   COMPACTION_QUERY_ATTEMPTS,
   reducedCompactionEntryBudget,
-} from './handoff-token-budget.js';
-import type { CarryOverOutcome } from './carryover-outcome.js';
-import { retryAfterSessionLoss } from '../agents/session-loss-retry.js';
+} from '../token-fitting/budget.js';
+import type { CarryOverOutcome } from './outcome.js';
+import { retryAfterSessionLoss } from '../../agents/session-loss-retry.js';
 import {
   spineStart,
   type CompactionDestination,
   type CompactionPromptUnavailableReason,
-} from './token-fitting/carryover.js';
-import type { TokenFitting } from './token-fitting/client.js';
+} from '../token-fitting/carryover.js';
+import type { TokenFitting } from '../token-fitting/client.js';
 
 const logger = createLogger('chats:carryover-compaction');
 const SUMMARY_OPEN = '<summary>';

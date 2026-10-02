@@ -13,7 +13,7 @@ import { createCarryoverTranscript } from '@garcon/common/transcript-seed';
 import {
   CarryOverHistoryUnavailableError,
   CarryOverTranscriptStore,
-} from '../carryover-transcript-store.js';
+} from '../transcript-store.js';
 
 const FIRST = '11111111-1111-4111-8111-111111111111';
 const SECOND = '22222222-2222-4222-8222-222222222222';

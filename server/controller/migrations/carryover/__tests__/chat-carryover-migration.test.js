@@ -4,8 +4,8 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { AssistantMessage, UserMessage } from '../../../../../common/chat-types.js';
-import { CarryOverTranscriptStore } from '../../../chats/carryover-transcript-store.ts';
-import { encodeCarryOverPages } from '../../../chats/carryover-page-codec.ts';
+import { CarryOverTranscriptStore } from '../../../chats/carryover/transcript-store.ts';
+import { encodeCarryOverPages } from '../../../chats/carryover/page-codec.ts';
 import { assertMigrationBudget } from '../carryover-migration-budget.ts';
 import {
   finalizeCarryOverMigrationValidation,

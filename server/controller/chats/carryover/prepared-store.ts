@@ -1,6 +1,6 @@
-import type { TranscriptViewId } from '../ledger/contracts.js';
-import { effectiveExecutorId } from '../../../common/executors.js';
-import type { CarryOverOutcome } from './carryover-outcome.js';
+import type { TranscriptViewId } from '../../ledger/contracts.js';
+import { effectiveExecutorId } from '../../../../common/executors.js';
+import type { CarryOverOutcome } from './outcome.js';
 
 export interface PreparedCarryover {
   readonly chatId: string;

@@ -1,12 +1,12 @@
 import type { ChatMessage } from '@garcon/common/chat-types';
-import { effectiveExecutorId } from '../../../common/executors.js';
+import { effectiveExecutorId } from '../../../../common/executors.js';
 import type {
   AgentChatEntry
-} from '../agents/session-types.js';
-import type { TranscriptViewId } from '../ledger/contracts.js';
-import type { CarryOverCompactionService } from './carryover-compaction.js';
-import { type CarryOverOutcome } from './carryover-outcome.js';
-import type { PreparedCarryoverStore } from './prepared-carryover.js';
+} from '../../agents/session-types.js';
+import type { TranscriptViewId } from '../../ledger/contracts.js';
+import type { CarryOverCompactionService } from './compaction.js';
+import { type CarryOverOutcome } from './outcome.js';
+import type { PreparedCarryoverStore } from './prepared-store.js';
 
 
 export interface CreateCarriedContextInput {

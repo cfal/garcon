@@ -7,7 +7,7 @@ import {
   TranscriptNoticeMessage,
   UserMessage,
 } from '../../../../../common/chat-types.ts';
-import { estimateHandoffTokens } from '../../handoff-token-budget.ts';
+import { estimateHandoffTokens } from '../../token-fitting/budget.ts';
 import { foldHandoffArtifactEntries } from '../projection.ts';
 import { renderFittedHandoffArtifact } from '../xml.ts';
 

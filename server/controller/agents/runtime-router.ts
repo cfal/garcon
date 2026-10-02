@@ -1,5 +1,5 @@
 import { effectiveExecutorId, LOCAL_EXECUTOR_ID } from '../../../common/executors.js';
-import type { CreateCarriedContextInput } from '../chats/carried-context.js';
+import type { CreateCarriedContextInput } from '../chats/carryover/context.js';
 import {
   AgentIntegrationError,
   AgentCallError,
@@ -44,7 +44,7 @@ import { assertExecutionAdmissionOpen } from './session-types.js';
 import { requireAgentChatEntry, toAgentEndpointSelection } from './execution-planning.js';
 import { toAgentChatReference } from './integration-chat-reference.js';
 import type { TranscriptAdoptionService } from '../ledger/adoption.js';
-import { resolveCarryOverOutcome, type CarryOverOutcome } from '../chats/carryover-outcome.js';
+import { resolveCarryOverOutcome, type CarryOverOutcome } from '../chats/carryover/outcome.js';
 import type {
   TranscriptLedgerService,
   TranscriptProducerLease,

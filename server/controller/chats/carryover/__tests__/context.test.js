@@ -1,6 +1,6 @@
 import { expect, test, mock } from 'bun:test';
-import { createCarriedContext } from '../carried-context.js';
-import { PreparedCarryoverStore } from '../prepared-carryover.js';
+import { createCarriedContext } from '../context.js';
+import { PreparedCarryoverStore } from '../prepared-store.js';
 
 function input() {
   return {

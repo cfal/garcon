@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { resolveCarryOverOutcome } from '../carryover-outcome.ts';
+import { resolveCarryOverOutcome } from '../outcome.ts';
 
 describe('carryover outcome', () => {
   it('resolves no history without context or a notice', () => {

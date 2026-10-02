@@ -7,23 +7,23 @@ import {
   BashToolUseMessage,
   TranscriptNoticeMessage,
   UserMessage,
-} from '../../../../common/chat-types.js';
+} from '../../../../../common/chat-types.js';
 import {
   CARRYOVER_INJECTION_MAX_CHARS,
   createCarryoverTranscript,
-} from '../../../../common/transcript-seed.js';
+} from '../../../../../common/transcript-seed.js';
 import {
   SMALL_HISTORY_NO_COMPACTION_MAX_ESTIMATED_TOKENS,
   usableHandoffTokenBudget,
-} from '../../../../common/handoff-sizing.js';
+} from '../../../../../common/handoff-sizing.js';
 import {
   CARRYOVER_COMPACTION_STARTED_NOTICE,
   CARRYOVER_COMPACTION_TIMEOUT_MS,
   CarryOverCompactionService,
-} from '../carryover-compaction.ts';
-import { estimateHandoffTokens } from '../handoff-token-budget.ts';
-import { ExecutorSessionLostError } from '../../../common/executor-disconnect.ts';
-import { inlineTokenFitting } from '../token-fitting/__tests__/inline-token-fitting.ts';
+} from '../compaction.ts';
+import { estimateHandoffTokens } from '../../token-fitting/budget.ts';
+import { ExecutorSessionLostError } from '../../../../common/executor-disconnect.ts';
+import { inlineTokenFitting } from '../../token-fitting/__tests__/inline-token-fitting.ts';
 
 const TIME = '2026-01-01T00:00:00.000Z';
 const DESTINATION = { agentId: 'claude', model: 'opus', prompt: 'keep going' };

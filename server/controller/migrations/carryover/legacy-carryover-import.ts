@@ -7,8 +7,8 @@ import { isRecord } from '../../../../common/json.js';
 import { parseStoredJson } from '../../../common/stored-json.js';
 import type { AgentChatReference } from '@garcon/server-agent-interface';
 import { emptyOwnershipJournalV5, type AgentOwnershipJournalFileV5, type DeleteIntentV2 } from '../../chats/agent-ownership-journal-format.js';
-import type { CarryOverTranscriptStore } from '../../chats/carryover-transcript-store.js';
-import { decodeCarryOverPage } from '../../chats/carryover-page-codec.js';
+import type { CarryOverTranscriptStore } from '../../chats/carryover/transcript-store.js';
+import { decodeCarryOverPage } from '../../chats/carryover/page-codec.js';
 import {
   parseCarryOverNode,
   type CarryOverNode,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { PreparedCarryoverStore } from '../prepared-carryover.ts';
+import { PreparedCarryoverStore } from '../prepared-store.ts';
 
 const RESULT = { kind: 'compacted', context: { prefix: 'prepared' }, summary: 'summary' };
 

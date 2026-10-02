@@ -1,5 +1,5 @@
-import type { TranscriptNoticeDetail } from '../../../common/transcript-notice-details.js';
-import type { CarriedContext } from '../../../common/transcript-seed.js';
+import type { TranscriptNoticeDetail } from '../../../../common/transcript-notice-details.js';
+import type { CarriedContext } from '../../../../common/transcript-seed.js';
 
 export type CarryOverOutcome =
   | { readonly kind: 'no-history' }

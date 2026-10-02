@@ -3,7 +3,7 @@ import {
   archivedLogicalCount,
   carryOverLayout,
   carryOverRevision,
-} from '../carryover-segments.js';
+} from '../segments.js';
 
 const capturedAt = '2026-08-07T00:00:00.000Z';
 

@@ -6,10 +6,10 @@ import {
   constants as zlibConstants,
   createBrotliDecompress,
 } from 'node:zlib';
-import type { ChatMessage } from '../../../common/chat-types.js';
-import { parseChatMessages } from '../../../common/chat-types.js';
-import { parseStoredJson } from '../../common/stored-json.js';
-import type { CarryOverPageDescriptor } from './carryover-segment-types.js';
+import type { ChatMessage } from '../../../../common/chat-types.js';
+import { parseChatMessages } from '../../../../common/chat-types.js';
+import { parseStoredJson } from '../../../common/stored-json.js';
+import type { CarryOverPageDescriptor } from './segment-types.js';
 
 export const CARRYOVER_PAGE_MAX_MESSAGES = 256;
 export const CARRYOVER_PAGE_TARGET_BYTES = 1024 * 1024;

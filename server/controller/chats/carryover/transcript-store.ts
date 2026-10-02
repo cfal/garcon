@@ -1,18 +1,18 @@
 import crypto from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import type { ChatMessage } from '../../../common/chat-types.js';
-import { boundProjectedMessage, isProjectableMessage } from '../../../common/transcript-seed.js';
-import { AgentSwitchMessage } from '../../../common/chat-types.js';
-import { DomainError } from '../../common/domain-error.js';
-import { writeJsonFileAtomic, syncDirectory } from '../../common/json-file-store.js';
-import { parseStoredJson } from '../../common/stored-json.js';
+import type { ChatMessage } from '../../../../common/chat-types.js';
+import { boundProjectedMessage, isProjectableMessage } from '../../../../common/transcript-seed.js';
+import { AgentSwitchMessage } from '../../../../common/chat-types.js';
+import { DomainError } from '../../../common/domain-error.js';
+import { writeJsonFileAtomic, syncDirectory } from '../../../common/json-file-store.js';
+import { parseStoredJson } from '../../../common/stored-json.js';
 import {
   CarryOverPageIntegrityError,
   decodeCarryOverPage,
   encodeCarryOverPages,
   writeEncodedCarryOverPage,
-} from './carryover-page-codec.js';
+} from './page-codec.js';
 import {
   CARRYOVER_MESSAGE_SCHEMA_VERSION,
   CARRYOVER_SEGMENT_VERSION,
@@ -20,14 +20,14 @@ import {
   parseCarryOverSegmentIndex,
   type CarryOverSegmentIndex,
   type SeedSanitationOutcome,
-} from './carryover-segment-types.js';
+} from './segment-types.js';
 import {
   archivedLogicalCount,
   assertSegmentBinding,
   carryOverLayout,
   carryOverRevision,
-} from './carryover-segments.js';
-import type { CarryOverMigrationQuarantine, CarryOverSegmentRef } from './registry-contracts.js';
+} from './segments.js';
+import type { CarryOverMigrationQuarantine, CarryOverSegmentRef } from '../registry-contracts.js';
 
 const DEFAULT_INDEX_CACHE_SIZE = 256;
 

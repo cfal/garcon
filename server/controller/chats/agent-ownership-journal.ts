@@ -23,7 +23,7 @@ import { createLogger } from '../../common/log.js';
 import { DomainError } from '../../common/domain-error.js';
 import type { ChatRegistryResolvedEntry, IChatRegistry } from './store.js';
 import type { ChatRegistryEntry } from './registry-contracts.js';
-import { carryOverRevision } from './carryover-segments.js';
+import { carryOverRevision } from './carryover/segments.js';
 import type { TranscriptLedgerService } from '../ledger/service.js';
 import { createPreambleBoundaryBinding } from '../preambles/boundary.js';
 

@@ -1,4 +1,4 @@
-import { isRecord } from '../../../common/json.js';
+import { isRecord } from '../../../../common/json.js';
 
 export const CARRYOVER_SEGMENT_VERSION = 1 as const;
 export const CARRYOVER_MESSAGE_SCHEMA_VERSION = 1 as const;

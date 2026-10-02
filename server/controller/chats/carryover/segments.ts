@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
-import type { CarryOverSegmentIndex } from './carryover-segment-types.js';
-import type { CarryOverMigrationQuarantine, CarryOverSegmentRef } from './registry-contracts.js';
+import type { CarryOverSegmentIndex } from './segment-types.js';
+import type { CarryOverMigrationQuarantine, CarryOverSegmentRef } from '../registry-contracts.js';
 
 export interface CarryOverSegmentLayoutItem {
   readonly ref: CarryOverSegmentRef;

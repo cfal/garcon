@@ -13,7 +13,7 @@ import { syncDirectory, writeJsonFileAtomic } from '../../../common/json-file-st
 import { parseStoredJson } from '../../../common/stored-json.js';
 import type { AgentOwnershipJournalFileV5 } from '../../chats/agent-ownership-journal-format.js';
 import { assertMigrationCapacity } from './carryover-migration-budget.js';
-import { CarryOverTranscriptStore } from '../../chats/carryover-transcript-store.js';
+import { CarryOverTranscriptStore } from '../../chats/carryover/transcript-store.js';
 import { readChatRegistryVersion, readLegacyChatRegistryV3 } from './legacy-chat-registry-v3.js';
 import {
   LegacyCarryOverDataError,
