@@ -4348,7 +4348,7 @@ describe('ChatCommandService', () => {
 
       await expect(service.forkChat(request)).rejects.toThrow('Synthetic fork settings failure');
       await expect(service.forkChat(request)).rejects.toMatchObject({
-        code: 'IDEMPOTENCY_CONFLICT',
+        code: 'CHAT_ID_COLLISION',
         message: `Session already exists: ${TARGET_CHAT_ID}`,
       });
       expect(createForkedChat).toHaveBeenCalledOnce();
@@ -4371,7 +4371,7 @@ describe('ChatCommandService', () => {
       await service.forkChat(request);
 
       await expect(service.forkChat(request)).rejects.toMatchObject({
-        code: 'IDEMPOTENCY_CONFLICT',
+        code: 'CHAT_ID_COLLISION',
         status: 409,
         message: `Session already exists: ${TARGET_CHAT_ID}`,
       });
