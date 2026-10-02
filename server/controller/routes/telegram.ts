@@ -1,4 +1,4 @@
-import { jsonErrorFromUnknown } from '../../common/http-error.js';
+import { jsonError, jsonErrorFromUnknown } from '../../common/http-error.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import { withJsonBody } from '../lib/json-route.js';
@@ -125,21 +125,22 @@ export function createTelegramRoutes(
       if (!telegramSettings) {
         return Response.json({ success: false, error: 'Telegram settings store is not configured' }, { status: 500 });
       }
-      const linkCode = telegramSettings.getPendingLinkCode();
-      const offset = telegramSettings.getUpdateOffset();
+      const pendingLink = telegramSettings.getPendingRecipientLink();
+      if (!pendingLink) {
+        return jsonError('Telegram link expired or changed. Start a new link.', 409, 'telegram_link_changed', false);
+      }
       const result = await telegramNotifier.resolveRecipientLink(
-        linkCode,
-        offset,
+        pendingLink.linkCode,
+        pendingLink.offset,
         TELEGRAM_LINK_POLL_SECONDS,
       );
-      if (result.nextOffset !== offset) {
-        await telegramSettings.setUpdateOffset(result.nextOffset);
+      if (!await telegramSettings.applyRecipientLinkResult(pendingLink, result)) {
+        return jsonError('Telegram link expired or changed. Start a new link.', 409, 'telegram_link_changed', false);
       }
       if (!result.recipient) {
         const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings, projectBasePath });
         return Response.json({ success: false, error: 'No matching Telegram /start message found yet', settings: snapshot });
       }
-      await telegramSettings.completeRecipientLink(result.recipient);
       const snapshot = await buildRemoteSettingsSnapshot({ settings, agents, telegramSettings, projectBasePath });
       return Response.json({ success: true, settings: snapshot });
     } catch (error) {

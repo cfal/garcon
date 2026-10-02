@@ -8,7 +8,7 @@ import { randomBytes } from 'crypto';
 import { getConfigDir } from '../config.js';
 import { readJsonStateFile, writeJsonFileAtomic } from '../../common/json-file-store.js';
 import { KeyedPromiseLock } from '../../common/keyed-lock.js';
-import type { TelegramBotIdentity, TelegramResolvedRecipient } from './telegram.js';
+import type { TelegramBotIdentity, TelegramLinkResolution } from './telegram.js';
 
 const TELEGRAM_LINK_TTL_MS = 10 * 60 * 1000;
 const TELEGRAM_SETTINGS_WRITE_LOCK_KEY = 'telegram-settings';
@@ -58,6 +58,13 @@ export interface TelegramPublicStatus {
   recipientLinked: boolean;
   pendingLink: boolean;
   linkUrl: string | null;
+}
+
+export interface TelegramPendingRecipientLink {
+  botToken: string;
+  botId: number | null;
+  linkCode: string;
+  offset: number | null;
 }
 
 function normalizeUsername(rawUsername: string): string {
@@ -146,13 +153,15 @@ export class TelegramSettingsStore extends EventEmitter<TelegramSettingsStoreEve
     return this.#snapshot.telegram.chatId;
   }
 
-  getUpdateOffset(): number | null {
-    return this.#snapshot.telegram.updateOffset;
-  }
-
-  getPendingLinkCode(): string {
-    if (!hasActivePendingLink(this.#snapshot.telegram)) return '';
-    return this.#snapshot.telegram.pendingLinkCode;
+  getPendingRecipientLink(): TelegramPendingRecipientLink | null {
+    const telegram = this.#snapshot.telegram;
+    if (!hasActivePendingLink(telegram)) return null;
+    return {
+      botToken: telegram.botToken,
+      botId: telegram.botId,
+      linkCode: telegram.pendingLinkCode,
+      offset: telegram.updateOffset,
+    };
   }
 
   getPublicStatus(): TelegramPublicStatus {
@@ -222,19 +231,34 @@ export class TelegramSettingsStore extends EventEmitter<TelegramSettingsStoreEve
     return url ?? '';
   }
 
-  async completeRecipientLink(recipient: TelegramResolvedRecipient): Promise<void> {
-    await this.#withLock(async () => {
+  async applyRecipientLinkResult(expected: TelegramPendingRecipientLink, result: TelegramLinkResolution): Promise<boolean> {
+    let changed = false;
+    const accepted = await this.#withLock(async () => {
       const snapshot = await this.#read();
-      snapshot.telegram.chatId = recipient.chatId;
-      snapshot.telegram.recipientUsername = normalizeUsername(recipient.username ?? '');
-      snapshot.telegram.recipientDisplayName = recipient.displayName ?? '';
-      snapshot.telegram.pendingLinkCode = '';
-      snapshot.telegram.pendingLinkCreatedAt = '';
-      snapshot.telegram.updateOffset = recipient.nextOffset;
+      const telegram = snapshot.telegram;
+      if (!hasActivePendingLink(telegram)
+        || telegram.pendingLinkCode !== expected.linkCode
+        || telegram.botToken !== expected.botToken
+        || telegram.botId !== expected.botId) return false;
+      const nextOffset = result.nextOffset === null
+        ? telegram.updateOffset
+        : Math.max(telegram.updateOffset ?? 0, result.nextOffset);
+      if (!result.recipient && nextOffset === telegram.updateOffset) return true;
+      telegram.updateOffset = nextOffset;
+      if (result.recipient) {
+        telegram.chatId = result.recipient.chatId;
+        telegram.recipientUsername = normalizeUsername(result.recipient.username ?? '');
+        telegram.recipientDisplayName = result.recipient.displayName ?? '';
+        telegram.pendingLinkCode = '';
+        telegram.pendingLinkCreatedAt = '';
+      }
       await this.#write(snapshot);
       this.#snapshot = snapshot;
+      changed = true;
+      return true;
     });
-    this.emit('changed');
+    if (changed) this.emit('changed');
+    return accepted;
   }
 
   async clearRecipient(): Promise<void> {
@@ -245,16 +269,6 @@ export class TelegramSettingsStore extends EventEmitter<TelegramSettingsStoreEve
       snapshot.telegram.chatId = '';
       snapshot.telegram.pendingLinkCode = '';
       snapshot.telegram.pendingLinkCreatedAt = '';
-      await this.#write(snapshot);
-      this.#snapshot = snapshot;
-    });
-    this.emit('changed');
-  }
-
-  async setUpdateOffset(updateOffset: number | null): Promise<void> {
-    await this.#withLock(async () => {
-      const snapshot = await this.#read();
-      snapshot.telegram.updateOffset = updateOffset;
       await this.#write(snapshot);
       this.#snapshot = snapshot;
     });
