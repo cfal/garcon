@@ -68,7 +68,9 @@ beforeAll(async () => {
 describe('Docker contract', () => {
   test('installs the HTTP CLI independently of container working directory', async () => {
     expect(dockerfile).toContain('COPY cli/ cli/');
+    expect(dockerfile).toContain('COPY --from=build /app/cli/ cli/');
     expect(dockerfile).toContain('COPY --chmod=755 docker/garcon-cli /usr/local/bin/garcon-cli');
+    expect(dockerfile).toContain('RUN garcon-cli --help > /dev/null');
     expect(dockerfile).not.toContain('ENTRYPOINT');
     const directory = await mkdtemp(path.join(os.tmpdir(), 'garcon-docker-cli-'));
     try {
@@ -158,7 +160,8 @@ describe('Docker contract', () => {
     expect(dockerfile).toContain('ARG GARCON_GID=1000');
     expect(dockerfile).toContain('GARCON_UID must identify a non-root user');
     expect(dockerfile).toContain('GARCON_GID must identify a non-root group');
-    expect(dockerfile.trimEnd()).toMatch(/USER garcon\nCMD \["bun", "server\/main\.ts"\]$/);
+    expect([...dockerfile.matchAll(/^USER (.+)$/gm)].at(-1)?.[1]).toBe('garcon');
+    expect(dockerfile.trimEnd()).toEndWith('CMD ["bun", "server/main.ts"]');
   });
 
   test('persists state without overlaying agent binaries or OpenCode cache', () => {
@@ -223,11 +226,25 @@ describe('Docker contract', () => {
 
   test('publishes main commits for both Linux architectures', () => {
     expect(dockerPublishWorkflow).toContain('branches:\n      - main');
-    expect(dockerPublishWorkflow).not.toContain('pull_request:');
+    const workflow = Bun.YAML.parse(dockerPublishWorkflow);
+    expect(workflow.jobs.publish_sha.if).toBe("github.event_name == 'push'");
     expect(dockerPublishWorkflow).not.toContain('release:');
     expect(dockerPublishWorkflow).toContain('packages: write');
     expect(dockerPublishWorkflow).toContain('tags: type=sha,format=long,prefix=sha-');
     expect(dockerPublishWorkflow).toContain('platforms: linux/amd64,linux/arm64');
+  });
+
+  test('smokes the candidate Docker image before merging packaging changes', () => {
+    const workflow = Bun.YAML.parse(dockerPublishWorkflow);
+    expect(workflow.on.pull_request.paths).toContain('Dockerfile');
+    expect(workflow.on.pull_request.paths).toContain('cli/**');
+    const verify = workflow.jobs.verify_pr;
+    expect(verify.if).toBe("github.event_name == 'pull_request'");
+    expect(verify.permissions).toEqual({ contents: 'read' });
+    const build = verify.steps.find(step => step.name === 'Build candidate image');
+    expect(build.with.load).toBe(true);
+    expect(build.with.push).toBeUndefined();
+    expect(verify.steps.at(-1).run).toBe('bun run docker:smoke garcon-pr:smoke');
   });
 
   test('preserves commit images and serializes main promotion', () => {
