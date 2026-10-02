@@ -5,7 +5,7 @@ import {
   coerceThinkingMode,
   isThinkingMode,
   normalizeThinkingMode,
-} from '../../../../common/chat-modes.js';
+} from '../chat-modes.js';
 
 describe('thinking mode normalization', () => {
   test('exposes effort-level values', () => {

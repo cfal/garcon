@@ -9,7 +9,7 @@ import {
   isWebBuildCurrent,
   productionWebBuildEnvironment,
   recordWebBuild,
-} from '../../../../scripts/web-build-cache.js';
+} from '../web-build-cache.js';
 
 const temporaryDirectories = [];
 

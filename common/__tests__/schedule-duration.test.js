@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { parseScheduleDuration, scheduleInRunAt } from '../../../../common/schedule-duration.ts';
+import { parseScheduleDuration, scheduleInRunAt } from '../schedule-duration.ts';
 
 describe('schedule duration', () => {
   it('parses single and ordered compound units case-insensitively', () => {
