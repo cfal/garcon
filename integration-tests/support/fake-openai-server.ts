@@ -426,6 +426,7 @@ export class FakeOpenAiServer {
     try {
       rawBody = await request.json();
     } catch {
+      if (request.signal.aborted) return new Response(null, { status: 499 });
       return this.#protocolViolation('Chat completion body is not valid JSON');
     }
     const body = parseCompletionBody(rawBody);
