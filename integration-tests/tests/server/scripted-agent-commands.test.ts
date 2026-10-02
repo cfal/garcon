@@ -37,7 +37,12 @@ async function environmentFor(
     const environment = await startScriptedCodexTestEnvironment({
       model, toolMode: codexCommandGate ? 'direct' : undefined,
     });
-    return { fixtureOptions: environment, startRequest: (input) => ({ ...liveCodexStartRequest(input), model }),
+    return {
+      fixtureOptions: {
+        ...environment,
+        extraDiagnostics: () => ({ codexModelIssues: environment.model.issues() }),
+      },
+      startRequest: (input) => ({ ...liveCodexStartRequest(input), model }),
       script: (reply) => environment.model.scriptTurn(async (request) => {
         const output = await reply(request.lastUserText);
         const gate = codexCommandGate?.(output);
@@ -48,7 +53,9 @@ async function environmentFor(
         ));
         return items;
       }),
-      settled: () => environment.model.assertSettled(), dispose: () => environment.dispose() };
+      settled: () => environment.model.assertSettled(),
+      dispose: () => environment.dispose(),
+    };
   }
   if (agent === 'claude') {
     const environment = await startScriptedClaudeTestEnvironment();

@@ -152,6 +152,21 @@ function failedEvents(message: string): Array<Record<string, unknown>> {
   ];
 }
 
+function scriptFailureMessage(error: unknown, request: RecordedCodexModelRequest): string {
+  const metadata = isRecord(request.body.client_metadata) ? request.body.client_metadata : {};
+  return JSON.stringify({
+    error: (error instanceof Error ? error.message : String(error)).slice(0, 1_000),
+    requestId: request.id,
+    threadId: typeof metadata.thread_id === 'string' ? metadata.thread_id.slice(0, 128) : null,
+    turnId: typeof metadata.turn_id === 'string' ? metadata.turn_id.slice(0, 128) : null,
+    lastUserText: request.lastUserText.slice(-1_000),
+    functionCallOutputCount: request.functionCallOutputs.length,
+    functionCallOutputs: request.functionCallOutputs.slice(-2).map(({ callId, output }) => ({
+      callId: callId.slice(0, 128), output: output.slice(0, 1_000),
+    })),
+  });
+}
+
 export class FakeCodexModel {
   readonly #server: Bun.Server<undefined>;
   readonly #turns: Array<CodexScriptedTurn | CodexScriptedFault> = [];
@@ -303,7 +318,14 @@ export class FakeCodexModel {
       }
       return sseResponse([{ type: 'response.created', response: {} }]);
     }
-    const items = typeof turn === 'function' ? await turn(recorded) : turn;
-    return sseResponse(turnEvents(items, `resp_fake_${recorded.id}`));
+    try {
+      const items = typeof turn === 'function' ? await turn(recorded) : turn;
+      return sseResponse(turnEvents(items, `resp_fake_${recorded.id}`));
+    } catch (error) {
+      const message = `Scripted Codex callback failed: ${scriptFailureMessage(error, recorded)}`;
+      this.#issues.push(message);
+      // HTTP 500 and unknown Responses error codes are retryable in the pinned Codex.
+      return Response.json({ error: { type: 'invalid_request_error', message } }, { status: 400 });
+    }
   }
 }

@@ -848,6 +848,44 @@ describe('integration support contracts', () => {
     }
   });
 
+  test.each(['sync', 'async'])('contains %s Codex script failures with bounded diagnostics', async (kind) => {
+    const fake = FakeCodexModel.start();
+    try {
+      const failure = new Error('Synthetic script failure');
+      fake.scriptTurn(kind === 'sync'
+        ? () => { throw failure; }
+        : async () => { throw failure; });
+      const response = await fetch(fake.responsesUrl, {
+        method: 'POST',
+        body: JSON.stringify({
+          model: 'scripted',
+          instructions: 'Excluded synthetic instructions',
+          client_metadata: { thread_id: 'synthetic-thread', turn_id: 'synthetic-turn' },
+          input: [
+            { type: 'message', role: 'user', content: 'Excluded prefix' + 'x'.repeat(1_100) },
+            { type: 'function_call_output', call_id: 'synthetic-gate', output: 'exit 23\n' + 'y'.repeat(1_100) },
+          ],
+        }),
+      });
+      expect(response.status).toBe(400);
+      const body = await response.json();
+      const issue = fake.issues()[0]!;
+      expect(body.error).toEqual({ type: 'invalid_request_error', message: issue });
+      expect(issue).toContain('Synthetic script failure');
+      expect(issue).toContain('synthetic-thread');
+      expect(issue).toContain('synthetic-turn');
+      expect(issue).toContain('synthetic-gate');
+      expect(issue).toContain('exit 23');
+      expect(issue).not.toContain('Excluded');
+      expect(issue.length).toBeLessThan(3_000);
+      expect(() => fake.assertSettled()).toThrow('Synthetic script failure');
+      fake.reset();
+      fake.assertSettled();
+    } finally {
+      fake.stop();
+    }
+  });
+
   test('holds and explicitly releases a matched request', async () => {
     const fake = FakeOpenAiServer.start({ defaultDelayMs: 0 });
     try {
