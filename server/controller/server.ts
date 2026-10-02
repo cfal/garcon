@@ -18,7 +18,7 @@ import { ChatIdAllocator } from './chats/chat-id-allocator.js';
 import { migrateWorkspaceChatIds } from './migrations/chat-id-migration.js';
 import { InMemoryLastSelectedChatState } from './chats/last-selected-chat-state.js';
 import { RecentTitleIconStore } from './chats/recent-title-icons.js';
-import { ShareStore } from './chats/share-store.js';
+import { ShareStore } from './chats/shares/store.js';
 import { SettingsStore } from './settings/store.js';
 import { ChatExecutionCoordinator } from './chat-execution/chat-execution-coordinator.js';
 import { InMemoryChatExecutionControlRepository } from './chat-execution/chat-execution-control-repository.js';

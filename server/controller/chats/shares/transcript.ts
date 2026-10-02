@@ -14,13 +14,13 @@ import {
   type ChatMessage,
   type TodoItem,
   type ToolUseChatMessage,
-} from '../../../common/chat-types.ts';
-import type { CliPresentationStyle } from '../../../common/cli-presentation.ts';
-import type { SharedChatSnapshot } from '../../../common/share-types.ts';
+} from '../../../../common/chat-types.ts';
+import type { CliPresentationStyle } from '../../../../common/cli-presentation.ts';
+import type { SharedChatSnapshot } from '../../../../common/share-types.ts';
 import {
   isPreambleApplicationNoticeDetail,
   isPreambleSelectionChangedNoticeDetail,
-} from '../../../common/transcript-notice-details.ts';
+} from '../../../../common/transcript-notice-details.ts';
 
 interface TranscriptEntry {
   role: string;

@@ -1,5 +1,5 @@
-import type { SharedChatOrigin, SharedChatSnapshot } from '../../../common/share-types.ts';
-import { isRecord } from '../../../common/json.js';
+import type { SharedChatOrigin, SharedChatSnapshot } from '../../../../common/share-types.ts';
+import { isRecord } from '../../../../common/json.js';
 
 // Everything a share snapshot records except its messages.
 export type ShareIndexEntry = Omit<SharedChatSnapshot, 'messages' | 'origin'>;

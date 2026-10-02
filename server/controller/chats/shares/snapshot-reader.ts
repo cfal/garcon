@@ -1,5 +1,5 @@
 import { open } from 'node:fs/promises';
-import { decodeShareSnapshotHeader, type ShareSnapshotHeader } from './share-snapshot-format.js';
+import { decodeShareSnapshotHeader, type ShareSnapshotHeader } from './snapshot-format.js';
 
 export interface ShareMessageRange {
   readonly start: number;

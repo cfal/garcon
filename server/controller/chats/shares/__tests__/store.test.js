@@ -4,12 +4,12 @@ import os from 'os';
 import path from 'path';
 import { randomUUID } from 'crypto';
 
-import { AssistantMessage, UserMessage } from '../../../../common/chat-types.ts';
-import { storedProviderRows } from '../../ledger/__tests__/stored-rows.ts';
-import { ShareStore } from '../share-store.js';
-import { TranscriptRenderingWorker } from '../transcript-rendering/client.ts';
-import { inlineTranscriptRendering } from '../transcript-rendering/__tests__/inline-transcript-rendering.ts';
-import { withFailingDirectorySync } from '../../../common/__tests__/atomic-write-failure.ts';
+import { AssistantMessage, UserMessage } from '../../../../../common/chat-types.ts';
+import { storedProviderRows } from '../../../ledger/__tests__/stored-rows.ts';
+import { ShareStore } from '../store.js';
+import { TranscriptRenderingWorker } from '../../transcript-rendering/client.ts';
+import { inlineTranscriptRendering } from '../../transcript-rendering/__tests__/inline-transcript-rendering.ts';
+import { withFailingDirectorySync } from '../../../../common/__tests__/atomic-write-failure.ts';
 
 const AT = '2026-01-01T00:00:00.000Z';
 let workspaceDir;

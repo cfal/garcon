@@ -14,7 +14,7 @@ import type { ChatRegistry } from './chats/store.js';
 import type { AgentOwnershipJournal } from './chats/agent-ownership-journal.js';
 import type { AppliedTransientFeedEvent, ChatTransientFeedStore } from './chats/chat-transient-feed.js';
 import type { MetadataIndex } from './chats/metadata-store.js';
-import type { ShareStore } from './chats/share-store.js';
+import type { ShareStore } from './chats/shares/store.js';
 import type { SettingsStore } from './settings/store.js';
 import type { ChatExecutionCoordinator } from './chat-execution/chat-execution-coordinator.js';
 import type { ChatProcessingActivity } from './chats/chat-processing-activity.js';

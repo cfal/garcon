@@ -1,12 +1,12 @@
 import { parseStoredJson } from '../../../common/stored-json.js';
 import { decodeClonedStoredRows } from '../../ledger/codec.js';
 import { ledgerRowsToMessages } from '../../ledger/presentation.js';
-import { renderSharedChatText } from '../share-transcript.ts';
+import { renderSharedChatText } from '../shares/transcript.ts';
 import {
   decodeLegacyShareSnapshot,
   encodeShareSnapshot,
   type ShareSnapshotHeader,
-} from '../share-snapshot-format.js';
+} from '../shares/snapshot-format.js';
 import {
   buildTranscriptExportResponse,
   type TranscriptExportDocumentRequest,

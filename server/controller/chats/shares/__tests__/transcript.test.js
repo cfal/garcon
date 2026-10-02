@@ -6,8 +6,8 @@ import {
   PermissionRequestMessage,
   TranscriptNoticeMessage,
   UserMessage,
-} from '../../../../common/chat-types.ts';
-import { renderSharedChatText } from '../share-transcript.ts';
+} from '../../../../../common/chat-types.ts';
+import { renderSharedChatText } from '../transcript.ts';
 
 const AT = '2026-08-18T12:00:00.000Z';
 

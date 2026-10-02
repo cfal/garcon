@@ -4,9 +4,9 @@
 // to the plain-text transcript. The small no-JavaScript fallback links to the
 // transcript instead of embedding it, keeping browser parse cost bounded.
 
-import type { ShareSnapshotHeader } from './share-snapshot-format.js';
-import type { PublicAppTitle } from '../app-title.js';
-import { appTitleBootstrapScript } from '../app-title.js';
+import type { ShareSnapshotHeader } from './snapshot-format.js';
+import type { PublicAppTitle } from '../../app-title.js';
+import { appTitleBootstrapScript } from '../../app-title.js';
 
 type SharePageSummary = Pick<ShareSnapshotHeader, 'title' | 'agentId' | 'messageCount'>;
 

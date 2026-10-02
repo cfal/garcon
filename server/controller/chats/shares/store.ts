@@ -5,14 +5,14 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import { isRecord } from '../../../common/json.js';
-import { AtomicJsonWriteError, writeFileAtomic, writeJsonFileAtomic } from '../../common/json-file-store.js';
-import { DomainError } from '../../common/domain-error.js';
-import { parseStoredJson } from '../../common/stored-json.js';
-import { createLogger } from '../../common/log.js';
-import { hasNodeErrorCode } from '../../common/errors.js';
-import { KeyedPromiseLock } from '../../common/keyed-lock.js';
-import type { StoredLedgerRow } from '../ledger/codec.js';
+import { isRecord } from '../../../../common/json.js';
+import { AtomicJsonWriteError, writeFileAtomic, writeJsonFileAtomic } from '../../../common/json-file-store.js';
+import { DomainError } from '../../../common/domain-error.js';
+import { parseStoredJson } from '../../../common/stored-json.js';
+import { createLogger } from '../../../common/log.js';
+import { hasNodeErrorCode } from '../../../common/errors.js';
+import { KeyedPromiseLock } from '../../../common/keyed-lock.js';
+import type { StoredLedgerRow } from '../../ledger/codec.js';
 import {
   decodeLegacyShareSnapshot,
   decodeShareSnapshot,
@@ -21,10 +21,10 @@ import {
   normalizeShareIndexEntry,
   type ShareIndexEntry,
   type ShareSnapshotHeader,
-} from './share-snapshot-format.js';
-import type { RenderedShareSnapshot } from './transcript-rendering/tasks.js';
-import type { TranscriptRendering } from './transcript-rendering/client.js';
-import { readShareSnapshotRange, type SelectShareMessageRange } from './share-snapshot-reader.js';
+} from './snapshot-format.js';
+import type { RenderedShareSnapshot } from '../transcript-rendering/tasks.js';
+import type { TranscriptRendering } from '../transcript-rendering/client.js';
+import { readShareSnapshotRange, type SelectShareMessageRange } from './snapshot-reader.js';
 
 const logger = createLogger('chats:share-store');
 
