@@ -37,7 +37,7 @@ import type {
 import type { GitMutationCoordinator } from '$lib/git/surface/git-mutations.svelte.js';
 import type { SingletonSurfaceRegistry } from './singleton-surfaces.svelte.js';
 import * as m from '$lib/paraglide/messages.js';
-import type { SurfaceFrameRegistry } from './surface-frame-registry.svelte.js';
+import type { SurfaceFrameRegistry } from './surface-frame-registry.js';
 import { FileDialogCoordinator } from './file-dialog-coordinator.js';
 import { TerminalPlacementService } from './terminal-placement-service.js';
 import type { WorkspaceCommitOptions } from './workspace-commit.js';

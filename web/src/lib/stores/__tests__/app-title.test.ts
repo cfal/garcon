@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { AppTitleStore } from '../app-title.svelte';
+import { AppTitleStore } from '../app-title';
 
 describe('AppTitleStore', () => {
 	afterEach(() => {

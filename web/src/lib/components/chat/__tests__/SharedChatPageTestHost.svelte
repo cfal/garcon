@@ -3,7 +3,7 @@
 	import SharedChatPage from '../SharedChatPage.svelte';
 	import { setAppTitle, setChatSessions, setThemeRuntime } from '$lib/context';
 	import { createChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
-	import { createAppTitleStore } from '$lib/stores/app-title.svelte';
+	import { createAppTitleStore } from '$lib/stores/app-title';
 	import { getThemeProfile } from '$lib/theme/themes.js';
 
 	interface Props {

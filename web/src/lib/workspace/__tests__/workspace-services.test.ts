@@ -13,7 +13,7 @@ import {
 import { createModelCatalogStore } from '$lib/agents/model-catalog-store.svelte.js';
 import { ExecutorsStore } from '$lib/executors/executors-store.svelte';
 import { localExecutor } from '$lib/executors/__tests__/fixtures';
-import { createNavigationStore } from '$lib/stores/navigation.svelte.js';
+import { createNavigationStore } from '$lib/stores/navigation.js';
 import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 import type { PrimaryWsConnectionPort } from '$lib/ws/connection.svelte.js';
 import type { ChatListEntry } from '$shared/chat-list';

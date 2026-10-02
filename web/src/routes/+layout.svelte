@@ -18,9 +18,9 @@
 	import { ApiProvidersStore } from '$lib/api-providers/api-providers-store.svelte.js';
 	import { createChatPreambleSelectionInvalidationHub } from '$lib/preambles/chat-selection-invalidation-hub.js';
 	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
-	import { createAppTitleStore } from '$lib/stores/app-title.svelte.js';
+	import { createAppTitleStore } from '$lib/stores/app-title.js';
 	import { createMinuteClockStore } from '$lib/stores/minute-clock.svelte.js';
-	import { createNavigationStore } from '$lib/stores/navigation.svelte.js';
+	import { createNavigationStore } from '$lib/stores/navigation.js';
 	import { createChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 	import { createAppShellStore } from '$lib/stores/app-shell.svelte.js';
 	import { createWsConnection } from '$lib/ws/connection.svelte.js';

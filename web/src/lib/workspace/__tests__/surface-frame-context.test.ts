@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SurfaceFrameBridge, SurfaceRendererActivationError } from '../surface-frame-context.js';
-import { FRAME_REGISTRATION_TIMEOUT_MS } from '../surface-frame-registry.svelte.js';
+import { FRAME_REGISTRATION_TIMEOUT_MS } from '../surface-frame-registry.js';
 
 function provider() {
 	return {

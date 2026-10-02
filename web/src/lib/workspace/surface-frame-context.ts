@@ -1,5 +1,5 @@
 import { createContext } from 'svelte';
-import { FRAME_REGISTRATION_TIMEOUT_MS } from './surface-frame-registry.svelte.js';
+import { FRAME_REGISTRATION_TIMEOUT_MS } from './surface-frame-registry.js';
 
 export interface RetainedRendererProvider {
 	attach(): void | Promise<void>;

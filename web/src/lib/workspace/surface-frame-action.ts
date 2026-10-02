@@ -1,5 +1,5 @@
 import type { PresentationHostId } from './surface-types.js';
-import type { SurfaceFrameRegistry } from './surface-frame-registry.svelte.js';
+import type { SurfaceFrameRegistry } from './surface-frame-registry.js';
 import type { SurfaceFrameBridge } from './surface-frame-context.js';
 
 export interface SurfaceFrameActionOptions {

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { NavigationStore, createNavigationStore } from '../navigation.svelte';
+import { NavigationStore, createNavigationStore } from '../navigation';
 
 function makeStore(): NavigationStore {
 	return new NavigationStore();
