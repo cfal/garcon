@@ -49,6 +49,18 @@ function setupFailureLog() {
   return { failures, logger };
 }
 
+function setupFailureDetails(sessionId: string, stage: string, reason: string) {
+  const emptyQueue = { bytes: 0, messages: 0, oldestAgeMs: 0 };
+  const emptyCalls = { primary: 0, bulk: 0, total: 0 };
+  return {
+    executorId: linkOptions.executorId, stage, reason,
+    lane: 'primary', primarySessionId: sessionId, sessionId,
+    bulkPhase: 'offline', bulkRetries: 0,
+    queues: { primary: emptyQueue, bulk: emptyQueue, total: emptyQueue },
+    calls: { incoming: emptyCalls, outgoing: emptyCalls },
+  };
+}
+
 function warnings() {
   const entries: { readonly message: unknown; readonly detail: unknown }[] = [];
   const logger = {
@@ -566,7 +578,9 @@ for (const dialer of ['controller', 'worker'] as const) {
       const fixture = await remoteFixture(dialer, undefined, undefined, undefined, { client: { logger: log.logger } });
       try {
         const worker = fixture.generations[0]!;
+        let failedSessionId = '';
         worker.hooks.initialize = async () => {
+          failedSessionId = fixture.controller.current!.id;
           worker.hooks.initialize = async () => {};
           throw thrown();
         };
@@ -575,7 +589,7 @@ for (const dialer of ['controller', 'worker'] as const) {
         await ready;
 
         expect(log.failures).toEqual([
-          { executorId: linkOptions.executorId, stage: 'start-integrations', reason },
+          setupFailureDetails(failedSessionId, 'start-integrations', reason),
         ]);
       } finally { await fixture.dispose(); }
     });
@@ -590,13 +604,18 @@ for (const dialer of ['controller', 'worker'] as const) {
     try {
       const integration = await fixture.executor.getAgentIntegration('test');
       await integration.execution.start(await requestFor(integration));
-      disconnectOn(fault, (encoded) => encoded.includes('"method":"producers.resume"'));
+      let failedSessionId = '';
+      disconnectOn(fault, (encoded) => {
+        if (!encoded.includes('"method":"producers.resume"')) return false;
+        failedSessionId = fixture.controller.current!.id;
+        return true;
+      });
       const ready = nextAvailability(fixture.executor, 'ready');
       fixture.controller.disconnect(); fixture.worker.disconnect();
       await ready;
 
       expect(log.failures).toEqual([
-        { executorId: linkOptions.executorId, stage: 'resume-bindings', reason: 'Executor connection lost' },
+        setupFailureDetails(failedSessionId, 'resume-bindings', 'Executor connection lost'),
       ]);
     } finally { await fixture.dispose(); }
   });
