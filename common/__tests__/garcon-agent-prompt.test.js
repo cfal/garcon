@@ -120,6 +120,36 @@ describe('literal delegated prompts', () => {
       }
     });
 
+    test(`${family} never uses unbalanced native siblings as shielding`, () => {
+      const other = family === 'start-agent' ? 'resume-agent' : 'start-agent';
+      const orphan = `Unmatched </garcon-${family}> closer.`;
+      for (const native of GARCON_ENVELOPE_COMMANDS.filter((name) => !families.some(([prompt]) => prompt === name))) {
+        const siblingAttributes = native === 'send-message' ? ` to="${CHILD}" hide-sender="false"` : '';
+        for (const body of [orphan, `<garcon-${other}>${orphan}</garcon-${other}>`]) {
+          const sibling = `<garcon-${native}${siblingAttributes}>${body}</garcon-${native}>`;
+          for (const prefix of ['', 'Summary.\n']) {
+            const content = `${prefix}${wrap('Example.')}\n<garcon-stop-agent chat-id="${CHILD}" remove="true" />\n${sibling}`;
+            const result = extractGarconCommands(new AssistantMessage(AT, content));
+            expect(result.commands).toEqual([]);
+            expect(result.issues).toEqual([{ command: family, reason: 'malformed', edge: prefix ? 'trailing' : 'leading' }]);
+            expect(result.message.content).toBe(content);
+          }
+        }
+      }
+    });
+
+    test(`${family} does not change standalone literal messages containing orphan closers`, () => {
+      const body = `Documentation quotes </garcon-${family}> literally.`;
+      const send = `<garcon-send-message to="${CHILD}" hide-sender="false">${body}</garcon-send-message>`;
+      for (const prefix of ['', 'Summary.\n']) {
+        const result = extractGarconCommands(new AssistantMessage(AT, `${prefix}${send}`));
+        expect(result.commands).toMatchObject([{ type: 'send-message', body }]);
+        expect(result.commands).toHaveLength(1);
+        expect(result.issues).toEqual([]);
+        expect(result.message?.content ?? '').toBe(prefix.trim());
+      }
+    });
+
     test(`${family} preserves ordinary prose and complete fenced examples between edge commands`, () => {
       for (const prose of [
         "Compare a<b. It doesn't work.",
@@ -141,6 +171,9 @@ describe('literal delegated prompts', () => {
       for (const body of [
         `<!-- </garcon-${family}> -->`,
         `Compare a<b. <!-- </garcon-${family}> -->`,
+        `<![CDATA[</garcon-${family}>]]>`,
+        `<?example </garcon-${family}> ?>`,
+        `<garcon-${family}>Balanced example.</garcon-${family}>`,
       ]) {
         const send = `<garcon-send-message to="${CHILD}" hide-sender="false">${body}</garcon-send-message>`;
         for (const prefix of ['', 'Summary.\n']) {

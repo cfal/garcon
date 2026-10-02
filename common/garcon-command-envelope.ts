@@ -79,19 +79,19 @@ function isPromptCommand(command: GarconEnvelopeCommand): boolean {
 }
 
 interface GarconEnvelopeBoundary extends GarconEnvelopeSpan {
-  readonly completeOpeners: boolean;
+  readonly completeFraming: boolean;
 }
 
 function scanGarconEnvelopeSpanAt(content: string, start: number, end: number): GarconEnvelopeBoundary | null {
   const command = garconEnvelopeCommandAt(content, start);
   if (!command) return null;
   const opener = scanGarconEnvelopeOpener(content, start, end);
-  if (!opener) return { command, start, end: null, completeOpeners: false };
-  if (opener.selfClosing) return { command, start, end: opener.end, completeOpeners: true };
+  if (!opener) return { command, start, end: null, completeFraming: false };
+  if (opener.selfClosing) return { command, start, end: opener.end, completeFraming: true };
 
   const literalPrompt = isPromptCommand(command);
   const nesting: GarconEnvelopeCommand[] = [command];
-  let completeOpeners = opener.complete;
+  let completeFraming = opener.complete;
   let cursor = opener.end;
   while (cursor < end) {
     const next = content.indexOf('<', cursor);
@@ -107,11 +107,15 @@ function scanGarconEnvelopeSpanAt(content: string, start: number, end: number): 
     if (next + closer.length <= end && content.startsWith(closer, next)) {
       nesting.pop();
       cursor = next + closer.length;
-      if (nesting.length === 0) return { command, start, end: cursor, completeOpeners };
+      if (nesting.length === 0) return { command, start, end: cursor, completeFraming };
       continue;
     }
-    if (literalPrompt && content.startsWith('</garcon-', next)
-      && GARCON_ENVELOPE_COMMANDS.some((name) => content.startsWith(`</garcon-${name}>`, next))) break;
+    if (content.startsWith('</garcon-', next)
+      && GARCON_ENVELOPE_COMMANDS.some((name) => content.startsWith(`</garcon-${name}>`, next))) {
+      if (literalPrompt) break;
+      // Standalone native bodies keep their boundaries but cannot shield a prompt's suffix.
+      completeFraming = false;
+    }
     const nestedCommand = garconEnvelopeCommandAt(content, next);
     if (literalPrompt && !nestedCommand) {
       cursor = next + 1;
@@ -120,12 +124,12 @@ function scanGarconEnvelopeSpanAt(content: string, start: number, end: number): 
     const nestedOpener = scanGarconEnvelopeOpener(content, next, end);
     if (!nestedOpener) break;
     if (nestedCommand) {
-      completeOpeners &&= nestedOpener.complete;
+      completeFraming &&= nestedOpener.complete;
       if (!nestedOpener.selfClosing) nesting.push(nestedCommand);
     }
     cursor = nestedOpener.end;
   }
-  return { command, start, end: null, completeOpeners };
+  return { command, start, end: null, completeFraming };
 }
 
 function hasUnmatchedPromptCloser(
@@ -178,7 +182,7 @@ function hasUnmatchedPromptCloser(
     if (content.startsWith(closer, next)) return finish(true);
     const sibling = scanGarconEnvelopeSpanAt(content, next, end);
     if (sibling) {
-      if (sibling.end === null || !sibling.completeOpeners) return finish(true);
+      if (sibling.end === null || !sibling.completeFraming) return finish(true);
       cursor = sibling.end;
       continue;
     }
@@ -341,7 +345,7 @@ export function parseGarconPromptEnvelope(
   const envelope = parseGarconEnvelopeFrame(content, name, allowedAttributes);
   if (!envelope || INVALID_TEXT_CONTROLS.test(envelope.body)) return null;
   const boundary = scanGarconEnvelopeSpanAt(content, 0, content.length);
-  if (!boundary?.completeOpeners || boundary.end !== content.length) return null;
+  if (!boundary?.completeFraming || boundary.end !== content.length) return null;
   return { ...envelope, body: normalizeGarconCommandBody(envelope.body) };
 }
 

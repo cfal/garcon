@@ -18,7 +18,8 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const PROMPT_GUIDANCE = 'Use a ref matching [A-Za-z0-9][A-Za-z0-9._-]{0,63}, lowercase true/false flags, '
   + 'and a nonblank literal prompt of at most 48 KiB in an envelope of at most 64 KiB. '
   + 'Do not XML-escape the prompt. Balance Garcon command tags and complete comments (<!-- -->), '
-  + 'CDATA (<![CDATA[ ]]>), and processing instructions (<? ?>). Do not embed an unmatched outer closing tag.';
+  + 'CDATA (<![CDATA[ ]]>), and processing instructions (<? ?>). Do not embed an unmatched outer closing tag. '
+  + 'Keep Garcon tags balanced in subsequent commands in the same message.';
 
 export function garconCommandIssueGuidance(command: GarconCommandIssue['command']): string {
   switch (command) {

@@ -203,6 +203,27 @@ describe('composed assistant schedule pipeline', () => {
             .toEqual(prefix ? ['Answer'] : []);
         });
       });
+
+      test(`unbalanced native siblings cannot expose schedules after a ${prefix ? 'trailing' : 'leading'} ${family}`, async () => {
+        await withPipeline(async ({ ledger, publisher, schedules, lock }) => {
+          const orphan = `Unmatched </garcon-${family}> closer.`;
+          const siblings = [
+            `<garcon-send-message to="2222222222222222" hide-sender="false">${orphan}</garcon-send-message>`,
+            `<garcon-schedule in="5m">${orphan}</garcon-schedule>`,
+            `<garcon-ticket-create ref="example">${orphan}</garcon-ticket-create>`,
+          ];
+          const contents = siblings.map((sibling) => `${prefix}<garcon-${family} ${attributes}>Example.</garcon-${family}>\n`
+            + `<garcon-schedule in="1m" />\n${sibling}`);
+          for (const content of contents) {
+            publisher.sink.publish({ type: 'rows', rows: [{ message: new AssistantMessage(NOW, content) }] });
+          }
+          await lock.runExclusive(`chat:${CHAT}`, async () => {});
+          const rows = ledger.currentRows(CHAT);
+          expect(rows.filter((row) => row.kind === 'provider-row').map((row) => row.message.content)).toEqual(contents);
+          expect(rows.some((row) => row.detail?.type?.endsWith('-request'))).toBe(false);
+          expect(schedules.list()).toEqual([]);
+        });
+      });
     }
   }
 

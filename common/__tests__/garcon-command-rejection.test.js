@@ -37,6 +37,9 @@ describe('Garcon command rejection feedback', () => {
       expect(expected.message).toContain('Do not XML-escape');
       expect(expected.message).not.toContain('serialize the JSON first');
     }
+    if (['start-agent', 'resume-agent'].includes(command)) {
+      expect(expected.message).toContain('Keep Garcon tags balanced in subsequent commands in the same message.');
+    }
   });
 
   test('bounds guidance for any pair of rejected command families', () => {
