@@ -7,15 +7,22 @@ import {
   resetServerConfigForTests,
   isAuthDisabled,
   isHttpCompressionEnabled,
-} from '../../config.js';
+} from '../config.js';
 
 const originalArgv = [...process.argv];
-const originalPort = process.env.GARCON_PORT;
-const originalMaxWsClients = process.env.GARCON_MAX_WS_CLIENTS;
-const originalHttpCompression = process.env.GARCON_HTTP_COMPRESSION;
-const originalDisableAuth = process.env.GARCON_DISABLE_AUTH;
-const originalHome = process.env.HOME;
-const configEnvironment = Object.fromEntries(['GARCON_CONFIG_DIR', 'GARCON_WORKSPACE', 'GARCON_WORKSPACE_DIR', 'GARCON_PROJECT_BASE_DIR', 'GARCON_BIND_ADDRESS', 'GARCON_PUBLIC_URL'].map((key) => [key, process.env[key]]));
+const configEnvironment = Object.fromEntries([
+  'GARCON_CONFIG_DIR',
+  'GARCON_WORKSPACE',
+  'GARCON_WORKSPACE_DIR',
+  'GARCON_PROJECT_BASE_DIR',
+  'GARCON_BIND_ADDRESS',
+  'GARCON_PUBLIC_URL',
+  'GARCON_PORT',
+  'GARCON_MAX_WS_CLIENTS',
+  'GARCON_HTTP_COMPRESSION',
+  'GARCON_DISABLE_AUTH',
+  'HOME',
+].map((key) => [key, process.env[key]]));
 
 afterEach(() => {
   for (const [key, value] of Object.entries(configEnvironment)) {
@@ -24,34 +31,9 @@ afterEach(() => {
   }
   resetServerConfigForTests();
   process.argv = [...originalArgv];
-  if (originalPort === undefined) {
-    delete process.env.GARCON_PORT;
-  } else {
-    process.env.GARCON_PORT = originalPort;
-  }
-  if (originalMaxWsClients === undefined) {
-    delete process.env.GARCON_MAX_WS_CLIENTS;
-  } else {
-    process.env.GARCON_MAX_WS_CLIENTS = originalMaxWsClients;
-  }
-  if (originalHttpCompression === undefined) {
-    delete process.env.GARCON_HTTP_COMPRESSION;
-  } else {
-    process.env.GARCON_HTTP_COMPRESSION = originalHttpCompression;
-  }
-  if (originalDisableAuth === undefined) {
-    delete process.env.GARCON_DISABLE_AUTH;
-  } else {
-    process.env.GARCON_DISABLE_AUTH = originalDisableAuth;
-  }
-  if (originalHome === undefined) {
-    delete process.env.HOME;
-  } else {
-    process.env.HOME = originalHome;
-  }
 });
 
-describe('getPort', () => {
+describe('server configuration', () => {
   it('public URL flags override environment, preserve base paths, and reject invalid configuration', () => {
     process.env.GARCON_PUBLIC_URL = 'https://public.test/base';
     expect(initializeServerConfig().publicUrl).toBe('https://public.test/base/');

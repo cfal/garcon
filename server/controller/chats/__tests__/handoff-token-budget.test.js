@@ -3,7 +3,6 @@ import {
   COMPACTION_QUERY_ATTEMPTS,
   estimateHandoffTokens,
   fitEstimatedTokenDocument,
-  handoffTokenBudget,
   reducedCompactionEntryBudget,
 } from '../handoff-token-budget.ts';
 
@@ -29,10 +28,6 @@ describe('handoff token budget', () => {
     expect(reducedCompactionEntryBudget(10)).toBe(7);
     expect(reducedCompactionEntryBudget(11)).toBe(7);
     expect(reducedCompactionEntryBudget(101)).toBe(70);
-    expect(handoffTokenBudget(500_000)).toEqual({
-      contextWindowTokens: 500_000,
-      usableTokens: 375_000,
-    });
   });
 
   test('corrects a complete document that exceeds the additive entry budget', () => {

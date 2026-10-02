@@ -491,15 +491,6 @@ export class CommandLedger {
     return cloneRecord(next);
   }
 
-  async updateCommand(
-    commandType: string,
-    chatId: string,
-    clientRequestId: string,
-    patch: Partial<Omit<CommandLedgerRecord, 'key'>>,
-  ): Promise<CommandLedgerRecord | null> {
-    return this.update(commandLedgerKey(commandType, chatId, clientRequestId), patch);
-  }
-
   async updateUnlessStatus(
     key: string,
     blockedStatuses: CommandLedgerStatus[],

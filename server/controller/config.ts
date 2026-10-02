@@ -222,10 +222,6 @@ export function getPort(): number {
   return currentConfig().port;
 }
 
-export function getBindAddress(): string {
-  return currentConfig().bindAddress;
-}
-
 export function getPublicUrl(): string | null {
   return currentConfig().publicUrl;
 }
@@ -246,31 +242,6 @@ export function getProjectBasePath(): string {
 
 export function getHomeDirectoryPath(): string {
   return currentConfig().homeDirectoryPath;
-}
-
-// HTTP / WebSocket server tuning
-export function getMaxRequestBodySize(): number {
-  return currentConfig().maxRequestBodySize;
-}
-
-export function getMaxConnections(): number {
-  return currentConfig().maxConnections;
-}
-
-export function getMaxWsClients(): number {
-  return currentConfig().maxWsClients;
-}
-
-export function getWsIdleTimeoutSeconds(): number {
-  return currentConfig().wsIdleTimeoutSeconds;
-}
-
-export function getWsBackpressureLimit(): number {
-  return currentConfig().wsBackpressureLimit;
-}
-
-export function getWsMaxPayloadLength(): number {
-  return currentConfig().wsMaxPayloadLength;
 }
 
 export function getHttpIdleTimeoutSeconds(): number {

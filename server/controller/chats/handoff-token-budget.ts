@@ -1,10 +1,4 @@
 import { estimateTokenCount } from 'tokenx';
-import { usableHandoffTokenBudget } from '../../../common/handoff-sizing.js';
-
-export interface EstimatedTokenBudget {
-  readonly contextWindowTokens: number;
-  readonly usableTokens: number;
-}
 
 export const COMPACTION_QUERY_ATTEMPTS = 2;
 const COMPACTION_RETRY_NUMERATOR = 7;
@@ -14,13 +8,6 @@ const FIT_CONVERGENCE_GUARD_TOKENS = 8;
 
 export function estimateHandoffTokens(text: string): number {
   return estimateTokenCount(text);
-}
-
-export function handoffTokenBudget(contextWindowTokens: number): EstimatedTokenBudget {
-  return {
-    contextWindowTokens,
-    usableTokens: usableHandoffTokenBudget(contextWindowTokens),
-  };
 }
 
 export function reducedCompactionEntryBudget(firstEntryBudgetTokens: number): number {

@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { BUNDLED_PREAMBLES } from '../bundled.ts';
-import { initializePreambleService } from '../setup.ts';
+import { createPreambleService, initializePreambleStore } from '../setup.ts';
 
 const createdDirectories = [];
 
@@ -25,7 +25,7 @@ afterEach(async () => {
 describe('preamble setup', () => {
   it('installs bundled preambles into a fresh workspace and leaves them unchanged on restart', async () => {
     const directory = await temporaryDirectory();
-    const service = await initializePreambleService(directory, inspectProjectDirectory);
+    const service = createPreambleService(await initializePreambleStore(directory), inspectProjectDirectory);
     const snapshot = service.snapshot();
 
     expect(snapshot.revision).toBe(1);
@@ -35,7 +35,7 @@ describe('preamble setup', () => {
     expect(snapshot.preambles.every((entry) => entry.createdAt === entry.updatedAt)).toBe(true);
     const firstFile = await fs.readFile(path.join(directory, 'preambles.json'), 'utf8');
 
-    const reopened = await initializePreambleService(directory, inspectProjectDirectory);
+    const reopened = createPreambleService(await initializePreambleStore(directory), inspectProjectDirectory);
     expect(reopened.snapshot()).toEqual(snapshot);
     expect(await fs.readFile(path.join(directory, 'preambles.json'), 'utf8')).toBe(firstFile);
   });

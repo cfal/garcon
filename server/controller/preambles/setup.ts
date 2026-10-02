@@ -30,7 +30,3 @@ export function createPreambleService(
     snippetShortNames,
   });
 }
-
-export async function initializePreambleService(workspaceDir: string, inspectProject: ProjectInspector): Promise<PreambleService> {
-  return createPreambleService(await initializePreambleStore(workspaceDir), inspectProject);
-}
