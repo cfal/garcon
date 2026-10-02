@@ -2,7 +2,6 @@ import path from 'path';
 import { promises as fs } from 'fs';
 import { readTextStreamPrefix, readTextStreamWithLimit } from '../../common/bounded-text-stream.js';
 import { ProjectBoundaryError } from '../../common/path-boundary.js';
-import { literalGitPathspec } from './pathspecs.js';
 import { assertGitWorkingPath, gitOperationOptions, isGitCancellation, markGitOutputTruncated, markGitMutationDispatched, trackGitProcess } from './operation-context.js';
 import type {
   GitCommandOptions,
@@ -389,20 +388,6 @@ export async function assertGitRepository(
 
   if (stdout.trim() !== 'true') {
     throw new Error('The target path exists but is not inside a Git working tree.');
-  }
-}
-
-// Checks whether a file is untracked (status `??`) via git status --porcelain.
-export async function isFileUntracked(projectPath: string, file: string): Promise<boolean> {
-  try {
-    const { stdout } = await runGit(
-      projectPath,
-      ['status', '--porcelain', '--', literalGitPathspec(file)],
-      readOnlyGitOptions(),
-    );
-    return stdout.trimStart().startsWith('??');
-  } catch {
-    return false;
   }
 }
 

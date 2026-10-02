@@ -1,13 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 import {
   compactRenderedPatch,
-  parseUnifiedPatchToRenderedRows,
-  scanUnifiedPatch,
-  selectFilePatchFromRawDiff,
   splitPatchesFromRawDiff,
 } from '../rendered-diff.js';
+import { parseUnifiedPatchToRenderedRows } from './rendered-patch-fixture.js';
 
-describe('parseUnifiedPatchToRenderedRows', () => {
+describe('compactRenderedPatch', () => {
   it('does not mix a second file into a single-file body', () => {
     const patch = `diff --git a/bin/tool b/bin/tool
 deleted file mode 100644
@@ -28,14 +26,13 @@ new file mode 100644
     expect(parsed.rows).toContainEqual(expect.objectContaining({ kind: 'del', text: 'old' }));
     expect(parsed.rows).not.toContainEqual(expect.objectContaining({ kind: 'add', text: 'new' }));
     expect(parsed.rows.some((row) => row.text.startsWith('++') || row.text.startsWith('--'))).toBe(false);
+    expect(compactRenderedPatch('bin/tool', 'fingerprint', patch).renderedRowCount).toBe(parsed.rows.length);
   });
 });
 
-describe('selectFilePatchFromRawDiff', () => {
-  it('rejects an empty result instead of presenting a silently empty body', () => {
-    expect(() => selectFilePatchFromRawDiff('', 'missing.ts')).toThrow(
-      'Git diff output omitted missing.ts.',
-    );
+describe('raw diff file selection', () => {
+  it('keeps absent files out of the result', () => {
+    expect(splitPatchesFromRawDiff('').has('missing.ts')).toBe(false);
   });
 
   it('selects the requested destination using NUL-delimited raw metadata', () => {
@@ -49,7 +46,7 @@ describe('selectFilePatchFromRawDiff', () => {
       'diff --git a/bin/tool/zzz.bin b/bin/tool/zzz.bin\nBinary files /dev/null and b/bin/tool/zzz.bin differ\n',
     ].join('');
 
-    const selected = selectFilePatchFromRawDiff(rawPatch, 'bin/tool/main.sh');
+    const selected = splitPatchesFromRawDiff(rawPatch).get('bin/tool/main.sh').patch;
 
     expect(selected).toContain('rename to bin/tool/main.sh');
     expect(selected).toContain('+new');
@@ -65,7 +62,7 @@ describe('selectFilePatchFromRawDiff', () => {
       'diff --git a/link b/link\nnew file mode 120000\n--- /dev/null\n+++ b/link\n@@ -0,0 +1 @@\n+target\n',
     ].join('');
 
-    const selected = selectFilePatchFromRawDiff(rawPatch, 'link');
+    const selected = splitPatchesFromRawDiff(rawPatch).get('link').patch;
     const body = parseUnifiedPatchToRenderedRows(selected, {
       allowMultipleFileSections: true,
     });
@@ -75,6 +72,9 @@ describe('selectFilePatchFromRawDiff', () => {
     expect(body.rows.map((row) => row.text)).not.toContain('-- /dev/null');
     expect(body.rows.map((row) => row.text)).not.toContain('++ b/link');
     expect(body.rows.every((row) => row.kind !== 'add' || row.afterLine > 0)).toBe(true);
+    expect(compactRenderedPatch('link', 'fingerprint', selected, {
+      allowMultipleFileSections: true,
+    }).renderedRowCount).toBe(body.rows.length);
   });
 });
 
@@ -106,7 +106,7 @@ describe('splitPatchesFromRawDiff', () => {
   });
 });
 
-describe('scanUnifiedPatch', () => {
+describe('compact patch bounds', () => {
   it.each([['x', 450], ['\t', 250]])('limits encoded bodies below the raw patch budget (%p)', (character, rows) => {
     const patch = `diff --git a/example.txt b/example.txt\n@@ -0,0 +1,${rows} @@\n${`+${character.repeat(9999)}\n`.repeat(rows)}`;
     expect(Buffer.byteLength(patch)).toBeLessThan(5_000_000);
@@ -128,11 +128,8 @@ describe('scanUnifiedPatch', () => {
 +added
 `;
     const legacy = parseUnifiedPatchToRenderedRows(patch);
-    const scanned = scanUnifiedPatch(patch);
     const compact = compactRenderedPatch('src/file.ts', 'fingerprint', patch);
 
-    expect(scanned.renderedRowCount).toBe(legacy.rows.length);
-    expect(scanned.hunkCount).toBe(legacy.hunks.length);
     expect(compact.patch).toBe(patch);
     expect(compact.renderedRowCount).toBe(legacy.rows.length);
   });

@@ -3,12 +3,11 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { GitDomainError } from "../git-domain-error.js";
-import { createGitService as createTestGitService } from "./git-service-fixture.js";
+import { createGitOperations } from "../git-service.js";
+import { runGitCommand, initRepoWithCommit } from "./repository-fixture.js";
 import { runGitWithStdin } from "../run.js";
-import { generateCommitMessage } from "../../../controller/git/commit-message.js";
-import { collectCommitMessageDiffContext } from "../status.js";
 import { runGitTraced } from "../run.js";
 import { GIT_EMPTY_TREE } from "../comparison.js";
 import {
@@ -16,33 +15,11 @@ import {
   needsRevisionFailureDiagnostics,
 } from "../comparison-errors.js";
 import { GIT_REVIEW_DOCUMENT_LIMITS } from "../types.js";
-import { parseUnifiedPatchToRenderedRows } from "../rendered-diff.js";
+import { parseUnifiedPatchToRenderedRows } from "./rendered-patch-fixture.js";
 import {
   createWorktreeOperations,
   serializeWorktreeMtime,
 } from "../worktrees.js";
-
-// Minimal classifier stub for toHttpError tests
-function mockClassifyGitError(error) {
-  const msg = error?.message || "";
-  if (msg.includes("hostname")) {
-    return {
-      code: "NETWORK",
-      status: 502,
-      message: "Could not reach the remote host.",
-      details: "Verify network access.",
-    };
-  }
-  return {
-    code: "UNKNOWN",
-    status: 500,
-    message: msg || "Git operation failed.",
-  };
-}
-
-const mockAgents = {
-  runSingleQuery: () => Promise.resolve("chore: stub"),
-};
 
 function materializeReviewResponse(response) {
   if (response.status !== "ready") return response;
@@ -51,7 +28,9 @@ function materializeReviewResponse(response) {
     files: Object.fromEntries(
       Object.entries(response.files).map(([filePath, body]) => {
         const rendered = body.patch
-          ? parseUnifiedPatchToRenderedRows(body.patch, { allowMultipleFileSections: true })
+          ? parseUnifiedPatchToRenderedRows(body.patch, {
+              allowMultipleFileSections: true,
+            })
           : { rows: [], hunks: [] };
         return [filePath, { ...body, ...rendered }];
       }),
@@ -59,91 +38,10 @@ function materializeReviewResponse(response) {
   };
 }
 
-function createGitService(options) {
-  const service = createTestGitService(options);
-  return {
-    ...service,
-    async getReviewFileBodies(request) {
-      let response = await service.getReviewDocumentFileBodies({
-        projectPath: request.projectPath,
-        documentId: request.documentId,
-        files: request.files,
-        purpose: "visible",
-        trace: request.trace,
-        signal: request.signal,
-      });
-      if (response.status === "document-expired") {
-        const snapshot = await service.getWorkbenchSnapshot({
-          projectPath: request.projectPath,
-          mode: request.mode,
-          context: request.context,
-          trace: request.trace,
-          signal: request.signal,
-        });
-        if (snapshot.status !== "ready") throw new Error(snapshot.message);
-        response = await service.getReviewDocumentFileBodies({
-          projectPath: request.projectPath,
-          documentId: snapshot.reviewSummary.documentId,
-          files: request.files,
-          purpose: "visible",
-          trace: request.trace,
-          signal: request.signal,
-        });
-      }
-      return materializeReviewResponse(response);
-    },
-    async getCommitFileBodies(request) {
-      return materializeReviewResponse(await service.getReviewDocumentFileBodies({
-        projectPath: request.projectPath,
-        documentId: request.documentId,
-        files: request.files.map((file) => file.path),
-        purpose: "visible",
-        trace: request.trace,
-        signal: request.signal,
-      }));
-    },
-    async getComparisonFileBodies(request) {
-      return materializeReviewResponse(await service.getReviewDocumentFileBodies({
-        projectPath: request.projectPath,
-        documentId: request.documentId,
-        files: request.files.map((file) => file.path),
-        purpose: "visible",
-        trace: request.trace,
-        signal: request.signal,
-      }));
-    },
-  };
-}
-
-async function runGitCommand(cwd, args, options = {}) {
-  return new Promise((resolve, reject) => {
-    const child = spawn("git", args, {
-      cwd,
-      stdio: ["ignore", "pipe", "pipe"],
-      ...(options.env ? { env: { ...process.env, ...options.env } } : {}),
-    });
-    let stdout = "";
-    let stderr = "";
-
-    child.stdout.on("data", (chunk) => {
-      stdout += String(chunk);
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += String(chunk);
-    });
-    child.on("error", reject);
-    child.on("close", (code) => {
-      if (code === 0) {
-        resolve({ stdout, stderr });
-        return;
-      }
-      reject(new Error(`git ${args.join(" ")} failed: ${stderr || stdout}`));
-    });
-  });
-}
-
 function detectReftableSupport() {
-  const probePath = mkdtempSync(path.join(os.tmpdir(), "garcon-reftable-probe-"));
+  const probePath = mkdtempSync(
+    path.join(os.tmpdir(), "garcon-reftable-probe-"),
+  );
   try {
     const result = spawnSync(
       "git",
@@ -181,19 +79,6 @@ function mutateDuringComparisonValidations(filePath, contents) {
     return length;
   };
   return { trace, validationCount: () => validationCount };
-}
-
-async function initRepoWithCommit(projectPath) {
-  await runGitCommand(projectPath, ["init"]);
-  await runGitCommand(projectPath, [
-    "config",
-    "user.email",
-    "test@example.com",
-  ]);
-  await runGitCommand(projectPath, ["config", "user.name", "Test User"]);
-  await fs.writeFile(path.join(projectPath, "a.txt"), "one\n", "utf-8");
-  await runGitCommand(projectPath, ["add", "a.txt"]);
-  await runGitCommand(projectPath, ["commit", "-m", "initial"]);
 }
 
 // Replaces the path's index entry with explicit unmerged stages, the layout
@@ -276,14 +161,13 @@ async function expectSummaryAndBodyFingerprintsMatch(
   );
   expect(summary).toBeDefined();
 
-  const body = (
-    await git.getReviewFileBodies({
+  const body = materializeReviewResponse(
+    await git.getReviewDocumentFileBodies({
       projectPath,
       documentId: snapshot.reviewSummary.documentId,
       files: [file],
-      mode,
-      context: 5,
-    })
+      purpose: "visible",
+    }),
   ).files[file];
 
   expect(body).toBeDefined();
@@ -300,11 +184,8 @@ describe("GitDomainError", () => {
   });
 });
 
-describe("createGitService", () => {
-  const git = createTestGitService({
-    agents: mockAgents,
-    classifyGitError: mockClassifyGitError,
-  });
+describe("createGitOperations", () => {
+  const git = createGitOperations();
 
   it("returns an object with all expected service methods", () => {
     const expectedMethods = [
@@ -318,7 +199,6 @@ describe("createGitService", () => {
       "getHistoryCommits",
       "getCommitSnapshot",
       "getComparisonSnapshot",
-      "generateCommitMessageForFiles",
       "getRemoteStatus",
       "getRemotes",
       "fetch",
@@ -351,7 +231,6 @@ describe("createGitService", () => {
       "getFileHistory",
       "getBlame",
       "getGraph",
-      "toHttpError",
     ];
     for (const method of expectedMethods) {
       expect(typeof git[method]).toBe("function");
@@ -365,10 +244,7 @@ describe("stage path operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-stage-paths-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -428,17 +304,26 @@ describe("selected-file commits", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-selected-commit-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
-      await fs.writeFile(path.join(projectPath, "a.txt"), "selected\n", "utf-8");
+      await fs.writeFile(
+        path.join(projectPath, "a.txt"),
+        "selected\n",
+        "utf-8",
+      );
       await fs.writeFile(path.join(projectPath, "new.txt"), "new\n", "utf-8");
-      await fs.writeFile(path.join(projectPath, "HEAD"), "untracked\n", "utf-8");
-      await fs.writeFile(path.join(projectPath, "unrelated.txt"), "staged\n", "utf-8");
+      await fs.writeFile(
+        path.join(projectPath, "HEAD"),
+        "untracked\n",
+        "utf-8",
+      );
+      await fs.writeFile(
+        path.join(projectPath, "unrelated.txt"),
+        "staged\n",
+        "utf-8",
+      );
       await runGitCommand(projectPath, ["add", "unrelated.txt"]);
 
       const result = await git.commit({
@@ -472,10 +357,7 @@ describe("selected-file commits", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-concurrent-selected-commit-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -490,17 +372,28 @@ describe("selected-file commits", () => {
         git.commit({ projectPath, message: "second change", files: ["b.txt"] }),
       ]);
 
-      const { stdout } = await runGitCommand(projectPath, ["log", "-2", "--format=%H"]);
-      const commits = await Promise.all(stdout.trim().split("\n").map(async (commit) => {
-        const result = await runGitCommand(projectPath, [
-          "show",
-          "--format=%s",
-          "--name-only",
-          commit,
-        ]);
-        return result.stdout.trim().split("\n").filter(Boolean);
-      }));
-      expect(commits.sort((left, right) => left[0].localeCompare(right[0]))).toEqual([
+      const { stdout } = await runGitCommand(projectPath, [
+        "log",
+        "-2",
+        "--format=%H",
+      ]);
+      const commits = await Promise.all(
+        stdout
+          .trim()
+          .split("\n")
+          .map(async (commit) => {
+            const result = await runGitCommand(projectPath, [
+              "show",
+              "--format=%s",
+              "--name-only",
+              commit,
+            ]);
+            return result.stdout.trim().split("\n").filter(Boolean);
+          }),
+      );
+      expect(
+        commits.sort((left, right) => left[0].localeCompare(right[0])),
+      ).toEqual([
         ["first change", "a.txt"],
         ["second change", "b.txt"],
       ]);
@@ -513,28 +406,34 @@ describe("selected-file commits", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-locked-index-commit-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
     const indexLockPath = path.join(projectPath, ".git", "index.lock");
 
     try {
       await initRepoWithCommit(projectPath);
-      await fs.writeFile(path.join(projectPath, "a.txt"), "selected\n", "utf-8");
+      await fs.writeFile(
+        path.join(projectPath, "a.txt"),
+        "selected\n",
+        "utf-8",
+      );
       await fs.writeFile(indexLockPath, "locked\n", "utf-8");
 
-      await expect(git.commit({
-        projectPath,
-        message: "selected change",
-        files: ["a.txt"],
-      })).resolves.toMatchObject({
+      await expect(
+        git.commit({
+          projectPath,
+          message: "selected change",
+          files: ["a.txt"],
+        }),
+      ).resolves.toMatchObject({
         success: true,
         commitScope: "selected-files",
         indexSynchronized: false,
       });
 
-      const committed = await runGitCommand(projectPath, ["show", "HEAD:a.txt"]);
+      const committed = await runGitCommand(projectPath, [
+        "show",
+        "HEAD:a.txt",
+      ]);
       expect(committed.stdout).toBe("selected\n");
     } finally {
       await fs.rm(indexLockPath, { force: true });
@@ -546,15 +445,20 @@ describe("selected-file commits", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-stale-index-commit-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
-      await fs.writeFile(path.join(projectPath, "a.txt"), "selected\n", "utf-8");
-      const staleIndexPath = path.join(projectPath, ".git", ".garcon-index-stale");
+      await fs.writeFile(
+        path.join(projectPath, "a.txt"),
+        "selected\n",
+        "utf-8",
+      );
+      const staleIndexPath = path.join(
+        projectPath,
+        ".git",
+        ".garcon-index-stale",
+      );
       const staleLockPath = `${staleIndexPath}.lock`;
       await fs.writeFile(staleIndexPath, "stale\n", "utf-8");
       await fs.writeFile(staleLockPath, "stale\n", "utf-8");
@@ -570,8 +474,12 @@ describe("selected-file commits", () => {
         files: ["a.txt"],
       });
 
-      await expect(fs.access(staleIndexPath)).rejects.toMatchObject({ code: "ENOENT" });
-      await expect(fs.access(staleLockPath)).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(fs.access(staleIndexPath)).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+      await expect(fs.access(staleLockPath)).rejects.toMatchObject({
+        code: "ENOENT",
+      });
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
@@ -581,25 +489,32 @@ describe("selected-file commits", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-failed-selected-commit-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
-      await fs.writeFile(path.join(projectPath, "a.txt"), "selected\n", "utf-8");
-      await fs.writeFile(path.join(projectPath, "unrelated.txt"), "staged\n", "utf-8");
+      await fs.writeFile(
+        path.join(projectPath, "a.txt"),
+        "selected\n",
+        "utf-8",
+      );
+      await fs.writeFile(
+        path.join(projectPath, "unrelated.txt"),
+        "staged\n",
+        "utf-8",
+      );
       await runGitCommand(projectPath, ["add", "unrelated.txt"]);
       const hookPath = path.join(projectPath, ".git", "hooks", "pre-commit");
       await fs.writeFile(hookPath, "#!/bin/sh\nexit 1\n", "utf-8");
       await fs.chmod(hookPath, 0o755);
 
-      await expect(git.commit({
-        projectPath,
-        message: "selected change",
-        files: ["a.txt"],
-      })).rejects.toThrow();
+      await expect(
+        git.commit({
+          projectPath,
+          message: "selected change",
+          files: ["a.txt"],
+        }),
+      ).rejects.toThrow();
 
       const staged = await runGitCommand(projectPath, [
         "diff",
@@ -616,15 +531,20 @@ describe("selected-file commits", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-hook-selected-commit-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
-      await fs.writeFile(path.join(projectPath, "a.txt"), "selected\n", "utf-8");
-      await fs.writeFile(path.join(projectPath, "unrelated.txt"), "staged\n", "utf-8");
+      await fs.writeFile(
+        path.join(projectPath, "a.txt"),
+        "selected\n",
+        "utf-8",
+      );
+      await fs.writeFile(
+        path.join(projectPath, "unrelated.txt"),
+        "staged\n",
+        "utf-8",
+      );
       await runGitCommand(projectPath, ["add", "unrelated.txt"]);
       const hookPath = path.join(projectPath, ".git", "hooks", "pre-commit");
       await fs.writeFile(
@@ -640,15 +560,19 @@ describe("selected-file commits", () => {
         files: ["a.txt"],
       });
 
-      const committed = await runGitCommand(projectPath, ["show", "HEAD:a.txt"]);
+      const committed = await runGitCommand(projectPath, [
+        "show",
+        "HEAD:a.txt",
+      ]);
       const staged = await runGitCommand(projectPath, [
         "diff",
         "--cached",
         "--name-only",
       ]);
       expect(committed.stdout).toBe("formatted\n");
-      expect(await fs.readFile(path.join(projectPath, "a.txt"), "utf-8"))
-        .toBe("formatted\n");
+      expect(await fs.readFile(path.join(projectPath, "a.txt"), "utf-8")).toBe(
+        "formatted\n",
+      );
       expect(staged.stdout.trim()).toBe("unrelated.txt");
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
@@ -659,17 +583,26 @@ describe("selected-file commits", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-hook-added-path-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
-      await fs.writeFile(path.join(projectPath, "a.txt"), "selected\n", "utf-8");
-      await fs.writeFile(path.join(projectPath, "extra.txt"), "hooked\n", "utf-8");
+      await fs.writeFile(
+        path.join(projectPath, "a.txt"),
+        "selected\n",
+        "utf-8",
+      );
+      await fs.writeFile(
+        path.join(projectPath, "extra.txt"),
+        "hooked\n",
+        "utf-8",
+      );
       const hookPath = path.join(projectPath, ".git", "hooks", "pre-commit");
-      await fs.writeFile(hookPath, "#!/bin/sh\ngit add -- extra.txt\n", "utf-8");
+      await fs.writeFile(
+        hookPath,
+        "#!/bin/sh\ngit add -- extra.txt\n",
+        "utf-8",
+      );
       await fs.chmod(hookPath, 0o755);
 
       const result = await git.commit({
@@ -684,9 +617,15 @@ describe("selected-file commits", () => {
         "--name-only",
         "HEAD",
       ]);
-      const status = await runGitCommand(projectPath, ["status", "--porcelain"]);
+      const status = await runGitCommand(projectPath, [
+        "status",
+        "--porcelain",
+      ]);
       expect(result.indexSynchronized).toBe(true);
-      expect(committed.stdout.trim().split("\n")).toEqual(["a.txt", "extra.txt"]);
+      expect(committed.stdout.trim().split("\n")).toEqual([
+        "a.txt",
+        "extra.txt",
+      ]);
       expect(status.stdout).toBe("");
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
@@ -697,10 +636,7 @@ describe("selected-file commits", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-serialized-index-commit-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
     const selectedHookPath = path.join(projectPath, ".selected-hook-entered");
     const realHookPath = path.join(projectPath, ".real-hook-entered");
     const releaseHookPath = path.join(projectPath, ".release-hook");
@@ -709,13 +645,17 @@ describe("selected-file commits", () => {
 
     try {
       await initRepoWithCommit(projectPath);
-      await fs.writeFile(path.join(projectPath, "a.txt"), "selected\n", "utf-8");
+      await fs.writeFile(
+        path.join(projectPath, "a.txt"),
+        "selected\n",
+        "utf-8",
+      );
       const hookPath = path.join(projectPath, ".git", "hooks", "post-commit");
       await fs.writeFile(
         hookPath,
         [
           "#!/bin/sh",
-          "case \"$GIT_INDEX_FILE\" in",
+          'case "$GIT_INDEX_FILE" in',
           "  *.garcon-index-*) touch .selected-hook-entered ;;",
           "  *) touch .real-hook-entered ;;",
           "esac",
@@ -732,16 +672,20 @@ describe("selected-file commits", () => {
         files: ["a.txt"],
       });
       await waitForPath(selectedHookPath);
-      indexCommitOutcome = git.commitIndex({
-        projectPath,
-        message: "stale index",
-      }).then(
-        (result) => ({ status: "fulfilled", result }),
-        (error) => ({ status: "rejected", error }),
-      );
+      indexCommitOutcome = git
+        .commitIndex({
+          projectPath,
+          message: "stale index",
+        })
+        .then(
+          (result) => ({ status: "fulfilled", result }),
+          (error) => ({ status: "rejected", error }),
+        );
 
       await Bun.sleep(500);
-      await expect(fs.access(realHookPath)).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(fs.access(realHookPath)).rejects.toMatchObject({
+        code: "ENOENT",
+      });
       await fs.writeFile(releaseHookPath, "released\n", "utf-8");
       await selectedCommit;
       const outcome = await indexCommitOutcome;
@@ -749,58 +693,26 @@ describe("selected-file commits", () => {
       expect(outcome.error?.message).toMatch(/nothing (?:added )?to commit/);
 
       const log = await runGitCommand(projectPath, ["log", "--format=%s"]);
-      expect(log.stdout.trim().split("\n")).toEqual(["selected change", "initial"]);
+      expect(log.stdout.trim().split("\n")).toEqual([
+        "selected change",
+        "initial",
+      ]);
     } finally {
-      await fs.writeFile(releaseHookPath, "released\n", "utf-8").catch(() => undefined);
-      await Promise.allSettled([selectedCommit, indexCommitOutcome].filter(Boolean));
+      await fs
+        .writeFile(releaseHookPath, "released\n", "utf-8")
+        .catch(() => undefined);
+      await Promise.allSettled(
+        [selectedCommit, indexCommitOutcome].filter(Boolean),
+      );
       await fs.rm(projectPath, { recursive: true, force: true });
     }
   }, 10_000);
-
-  it("rejects paths outside the project root as invalid input", async () => {
-    const projectPath = await fs.mkdtemp(
-      path.join(os.tmpdir(), "garcon-git-outside-commit-"),
-    );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
-
-    try {
-      await initRepoWithCommit(projectPath);
-      let rejection;
-      try {
-        await git.commit({
-          projectPath,
-          message: "outside change",
-          files: ["../outside.txt"],
-        });
-      } catch (error) {
-        rejection = error;
-      }
-
-      expect(rejection).toBeInstanceOf(GitDomainError);
-      const response = git.toHttpError(rejection);
-      expect(response.status).toBe(400);
-      expect(await response.json()).toEqual({
-        success: false,
-        error: "Pathspecs must resolve inside the project root.",
-        errorCode: "VALIDATION_FAILED",
-        retryable: false,
-      });
-    } finally {
-      await fs.rm(projectPath, { recursive: true, force: true });
-    }
-  });
 
   it("completes a conflicted merge with the resolved index", async () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-merge-commit-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -810,9 +722,14 @@ describe("selected-file commits", () => {
       await runGitCommand(projectPath, ["checkout", "master"]);
       await fs.writeFile(path.join(projectPath, "a.txt"), "main\n", "utf-8");
       await runGitCommand(projectPath, ["commit", "-am", "main"]);
-      await expect(runGitCommand(projectPath, ["merge", "feature"]))
-        .rejects.toThrow("CONFLICT");
-      await fs.writeFile(path.join(projectPath, "a.txt"), "resolved\n", "utf-8");
+      await expect(
+        runGitCommand(projectPath, ["merge", "feature"]),
+      ).rejects.toThrow("CONFLICT");
+      await fs.writeFile(
+        path.join(projectPath, "a.txt"),
+        "resolved\n",
+        "utf-8",
+      );
 
       const result = await git.commit({
         projectPath,
@@ -820,10 +737,18 @@ describe("selected-file commits", () => {
         files: ["a.txt"],
       });
 
-      const parents = await runGitCommand(projectPath, ["show", "-s", "--format=%P", "HEAD"]);
+      const parents = await runGitCommand(projectPath, [
+        "show",
+        "-s",
+        "--format=%P",
+        "HEAD",
+      ]);
       expect(result.commitScope).toBe("whole-index");
       expect(parents.stdout.trim().split(" ")).toHaveLength(2);
-      const status = await runGitCommand(projectPath, ["status", "--porcelain"]);
+      const status = await runGitCommand(projectPath, [
+        "status",
+        "--porcelain",
+      ]);
       expect(status.stdout).toBe("");
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
@@ -834,10 +759,7 @@ describe("selected-file commits", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-cherry-pick-commit-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -846,15 +768,25 @@ describe("selected-file commits", () => {
       await fs.writeFile(path.join(projectPath, "b.txt"), "feature\n", "utf-8");
       await runGitCommand(projectPath, ["add", "a.txt", "b.txt"]);
       await runGitCommand(projectPath, ["commit", "-m", "feature change"]);
-      const featureCommit = await runGitCommand(projectPath, ["rev-parse", "HEAD"]);
+      const featureCommit = await runGitCommand(projectPath, [
+        "rev-parse",
+        "HEAD",
+      ]);
 
       await runGitCommand(projectPath, ["checkout", "master"]);
       await fs.writeFile(path.join(projectPath, "a.txt"), "main\n", "utf-8");
       await runGitCommand(projectPath, ["commit", "-am", "main change"]);
       await expect(
-        runGitCommand(projectPath, ["cherry-pick", featureCommit.stdout.trim()]),
+        runGitCommand(projectPath, [
+          "cherry-pick",
+          featureCommit.stdout.trim(),
+        ]),
       ).rejects.toThrow();
-      await fs.writeFile(path.join(projectPath, "a.txt"), "resolved\n", "utf-8");
+      await fs.writeFile(
+        path.join(projectPath, "a.txt"),
+        "resolved\n",
+        "utf-8",
+      );
 
       await git.commit({
         projectPath,
@@ -869,7 +801,10 @@ describe("selected-file commits", () => {
         "HEAD",
       ]);
       expect(committed.stdout.trim().split("\n")).toEqual(["a.txt", "b.txt"]);
-      const status = await runGitCommand(projectPath, ["status", "--porcelain"]);
+      const status = await runGitCommand(projectPath, [
+        "status",
+        "--porcelain",
+      ]);
       expect(status.stdout).toBe("");
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
@@ -880,10 +815,7 @@ describe("selected-file commits", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-revert-commit-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -895,8 +827,9 @@ describe("selected-file commits", () => {
 
       await fs.writeFile(path.join(projectPath, "a.txt"), "later\n", "utf-8");
       await runGitCommand(projectPath, ["commit", "-am", "later change"]);
-      await expect(runGitCommand(projectPath, ["revert", reverted.stdout.trim()]))
-        .rejects.toThrow("could not revert");
+      await expect(
+        runGitCommand(projectPath, ["revert", reverted.stdout.trim()]),
+      ).rejects.toThrow("could not revert");
       await fs.writeFile(path.join(projectPath, "a.txt"), "one\n", "utf-8");
 
       await git.commit({
@@ -912,7 +845,10 @@ describe("selected-file commits", () => {
         "HEAD",
       ]);
       expect(committed.stdout.trim().split("\n")).toEqual(["a.txt", "b.txt"]);
-      const status = await runGitCommand(projectPath, ["status", "--porcelain"]);
+      const status = await runGitCommand(projectPath, [
+        "status",
+        "--porcelain",
+      ]);
       expect(status.stdout).toBe("");
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
@@ -923,10 +859,7 @@ describe("selected-file commits", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-rebase-commit-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -940,9 +873,14 @@ describe("selected-file commits", () => {
       await fs.writeFile(path.join(projectPath, "a.txt"), "main\n", "utf-8");
       await runGitCommand(projectPath, ["commit", "-am", "main change"]);
       await runGitCommand(projectPath, ["checkout", "feature"]);
-      await expect(runGitCommand(projectPath, ["rebase", "master"]))
-        .rejects.toThrow("could not apply");
-      await fs.writeFile(path.join(projectPath, "a.txt"), "resolved\n", "utf-8");
+      await expect(
+        runGitCommand(projectPath, ["rebase", "master"]),
+      ).rejects.toThrow("could not apply");
+      await fs.writeFile(
+        path.join(projectPath, "a.txt"),
+        "resolved\n",
+        "utf-8",
+      );
 
       await git.commit({
         projectPath,
@@ -958,7 +896,11 @@ describe("selected-file commits", () => {
       ]);
       expect(committed.stdout.trim().split("\n")).toEqual(["a.txt", "b.txt"]);
       await runGitCommand(projectPath, ["rebase", "--continue"]);
-      const commitCount = await runGitCommand(projectPath, ["rev-list", "--count", "HEAD"]);
+      const commitCount = await runGitCommand(projectPath, [
+        "rev-list",
+        "--count",
+        "HEAD",
+      ]);
       expect(commitCount.stdout.trim()).toBe("3");
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
@@ -969,10 +911,7 @@ describe("selected-file commits", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-rebase-apply-commit-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -990,7 +929,11 @@ describe("selected-file commits", () => {
         runGitCommand(projectPath, ["rebase", "--apply", "master"]),
       ).rejects.toThrow();
       await fs.access(path.join(projectPath, ".git", "rebase-apply"));
-      await fs.writeFile(path.join(projectPath, "a.txt"), "resolved\n", "utf-8");
+      await fs.writeFile(
+        path.join(projectPath, "a.txt"),
+        "resolved\n",
+        "utf-8",
+      );
 
       await git.commit({
         projectPath,
@@ -1005,7 +948,10 @@ describe("selected-file commits", () => {
         "HEAD",
       ]);
       expect(committed.stdout.trim().split("\n")).toEqual(["a.txt", "b.txt"]);
-      const status = await runGitCommand(projectPath, ["status", "--porcelain"]);
+      const status = await runGitCommand(projectPath, [
+        "status",
+        "--porcelain",
+      ]);
       expect(status.stdout).toBe("");
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
@@ -1016,15 +962,16 @@ describe("selected-file commits", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-rebase-edit-commit-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
       await runGitCommand(projectPath, ["checkout", "-b", "feature"]);
-      await fs.writeFile(path.join(projectPath, "feature.txt"), "feature\n", "utf-8");
+      await fs.writeFile(
+        path.join(projectPath, "feature.txt"),
+        "feature\n",
+        "utf-8",
+      );
       await runGitCommand(projectPath, ["add", "feature.txt"]);
       await runGitCommand(projectPath, ["commit", "-m", "feature change"]);
 
@@ -1034,7 +981,11 @@ describe("selected-file commits", () => {
       await runGitCommand(projectPath, ["commit", "-m", "main change"]);
       await runGitCommand(projectPath, ["checkout", "feature"]);
 
-      const sequenceEditorPath = path.join(projectPath, ".git", "sequence-editor.cjs");
+      const sequenceEditorPath = path.join(
+        projectPath,
+        ".git",
+        "sequence-editor.cjs",
+      );
       await fs.writeFile(
         sequenceEditorPath,
         [
@@ -1052,8 +1003,16 @@ describe("selected-file commits", () => {
       });
       await fs.access(path.join(projectPath, ".git", "rebase-merge", "amend"));
 
-      await fs.writeFile(path.join(projectPath, "a.txt"), "selected\n", "utf-8");
-      await fs.writeFile(path.join(projectPath, "unrelated.txt"), "unrelated\n", "utf-8");
+      await fs.writeFile(
+        path.join(projectPath, "a.txt"),
+        "selected\n",
+        "utf-8",
+      );
+      await fs.writeFile(
+        path.join(projectPath, "unrelated.txt"),
+        "unrelated\n",
+        "utf-8",
+      );
       await runGitCommand(projectPath, ["add", "unrelated.txt"]);
 
       await git.commit({
@@ -1069,7 +1028,10 @@ describe("selected-file commits", () => {
         "HEAD",
       ]);
       expect(committed.stdout.trim()).toBe("a.txt");
-      const status = await runGitCommand(projectPath, ["status", "--porcelain"]);
+      const status = await runGitCommand(projectPath, [
+        "status",
+        "--porcelain",
+      ]);
       expect(status.stdout.trim()).toBe("A  unrelated.txt");
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
@@ -1078,19 +1040,23 @@ describe("selected-file commits", () => {
 });
 
 describe("getStatus", () => {
-  const git = createTestGitService({
-    agents: mockAgents,
-    classifyGitError: mockClassifyGitError,
-  });
+  const git = createGitOperations();
 
-  it('preserves literal filenames rather than porcelain quoting or trimming', async () => {
-    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-status-literal-'));
+  it("preserves literal filenames rather than porcelain quoting or trimming", async () => {
+    const projectPath = await fs.mkdtemp(
+      path.join(os.tmpdir(), "garcon-git-status-literal-"),
+    );
     try {
       await initRepoWithCommit(projectPath);
-      const names = ['-literal [file].txt', ' line\nbreak ', 'quote".txt'];
-      for (const name of names) await fs.writeFile(path.join(projectPath, name), 'synthetic');
-      expect((await git.getStatus({ projectPath })).untracked.sort()).toEqual(names.sort());
-    } finally { await fs.rm(projectPath, { recursive: true, force: true }); }
+      const names = ["-literal [file].txt", " line\nbreak ", 'quote".txt'];
+      for (const name of names)
+        await fs.writeFile(path.join(projectPath, name), "synthetic");
+      expect((await git.getStatus({ projectPath })).untracked.sort()).toEqual(
+        names.sort(),
+      );
+    } finally {
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
   });
 
   it("classifies typechanged, unmerged, and mixed-status paths instead of dropping them", async () => {
@@ -1119,7 +1085,11 @@ describe("getStatus", () => {
         [2, "ours\n"],
         [3, "theirs\n"],
       ]);
-      await fs.writeFile(path.join(projectPath, "untracked.txt"), "new\n", "utf-8");
+      await fs.writeFile(
+        path.join(projectPath, "untracked.txt"),
+        "new\n",
+        "utf-8",
+      );
 
       const status = await git.getStatus({ projectPath });
 
@@ -1143,8 +1113,11 @@ describe("getStatus", () => {
       await runGitCommand(projectPath, ["config", "status.renames", "true"]);
       await runGitCommand(projectPath, ["mv", "a.txt", "moved.txt"]);
       await fs.writeFile(path.join(projectPath, "moved.txt"), "two\n", "utf-8");
-      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("RM a.txt -> moved.txt");
+      expect(
+        (
+          await runGitCommand(projectPath, ["status", "--porcelain"])
+        ).stdout.trim(),
+      ).toBe("RM a.txt -> moved.txt");
 
       const status = await git.getStatus({ projectPath });
 
@@ -1167,14 +1140,20 @@ describe("getStatus", () => {
       // Both files committed alike, then the destination is turned into an
       // intent-to-add entry and the source vanishes from the worktree: git
       // pairs that as an unstaged rename and reports R in the second column.
-      await fs.copyFile(path.join(projectPath, "a.txt"), path.join(projectPath, "dst.txt"));
+      await fs.copyFile(
+        path.join(projectPath, "a.txt"),
+        path.join(projectPath, "dst.txt"),
+      );
       await runGitCommand(projectPath, ["add", "dst.txt"]);
       await runGitCommand(projectPath, ["commit", "-m", "add dst"]);
       await runGitCommand(projectPath, ["rm", "--cached", "dst.txt"]);
       await runGitCommand(projectPath, ["add", "-N", "dst.txt"]);
       await fs.rm(path.join(projectPath, "a.txt"));
-      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("DR a.txt -> dst.txt");
+      expect(
+        (
+          await runGitCommand(projectPath, ["status", "--porcelain"])
+        ).stdout.trim(),
+      ).toBe("DR a.txt -> dst.txt");
 
       const status = await git.getStatus({ projectPath });
 
@@ -1189,28 +1168,40 @@ describe("getStatus", () => {
 });
 
 describe("discard", () => {
-  const git = createTestGitService({
-    agents: mockAgents,
-    classifyGitError: mockClassifyGitError,
-  });
+  const git = createGitOperations();
   it("discards only worktree edits for staged-added files, keeping the addition", async () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-discard-"),
     );
     try {
       await initRepoWithCommit(projectPath);
-      await fs.writeFile(path.join(projectPath, "added.txt"), "staged\n", "utf-8");
+      await fs.writeFile(
+        path.join(projectPath, "added.txt"),
+        "staged\n",
+        "utf-8",
+      );
       await runGitCommand(projectPath, ["add", "added.txt"]);
-      await fs.writeFile(path.join(projectPath, "added.txt"), "staged\nmodified\n", "utf-8");
-      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("AM added.txt");
+      await fs.writeFile(
+        path.join(projectPath, "added.txt"),
+        "staged\nmodified\n",
+        "utf-8",
+      );
+      expect(
+        (
+          await runGitCommand(projectPath, ["status", "--porcelain"])
+        ).stdout.trim(),
+      ).toBe("AM added.txt");
 
       await git.discard({ projectPath, file: "added.txt" });
 
-      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("A  added.txt");
-      expect(await fs.readFile(path.join(projectPath, "added.txt"), "utf-8"))
-        .toBe("staged\n");
+      expect(
+        (
+          await runGitCommand(projectPath, ["status", "--porcelain"])
+        ).stdout.trim(),
+      ).toBe("A  added.txt");
+      expect(
+        await fs.readFile(path.join(projectPath, "added.txt"), "utf-8"),
+      ).toBe("staged\n");
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
@@ -1222,18 +1213,29 @@ describe("discard", () => {
     );
     try {
       await initRepoWithCommit(projectPath);
-      await fs.writeFile(path.join(projectPath, "added.txt"), "staged\n", "utf-8");
+      await fs.writeFile(
+        path.join(projectPath, "added.txt"),
+        "staged\n",
+        "utf-8",
+      );
       await runGitCommand(projectPath, ["add", "added.txt"]);
       await fs.rm(path.join(projectPath, "added.txt"));
-      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("AD added.txt");
+      expect(
+        (
+          await runGitCommand(projectPath, ["status", "--porcelain"])
+        ).stdout.trim(),
+      ).toBe("AD added.txt");
 
       await git.discard({ projectPath, file: "added.txt" });
 
-      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("A  added.txt");
-      expect(await fs.readFile(path.join(projectPath, "added.txt"), "utf-8"))
-        .toBe("staged\n");
+      expect(
+        (
+          await runGitCommand(projectPath, ["status", "--porcelain"])
+        ).stdout.trim(),
+      ).toBe("A  added.txt");
+      expect(
+        await fs.readFile(path.join(projectPath, "added.txt"), "utf-8"),
+      ).toBe("staged\n");
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
@@ -1245,21 +1247,32 @@ describe("discard", () => {
     );
     try {
       await initRepoWithCommit(projectPath);
-      await fs.writeFile(path.join(projectPath, "added.txt"), "staged\n", "utf-8");
+      await fs.writeFile(
+        path.join(projectPath, "added.txt"),
+        "staged\n",
+        "utf-8",
+      );
       await runGitCommand(projectPath, ["add", "added.txt"]);
       await fs.rm(path.join(projectPath, "added.txt"));
       await fs.symlink("elsewhere.txt", path.join(projectPath, "added.txt"));
-      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("AT added.txt");
+      expect(
+        (
+          await runGitCommand(projectPath, ["status", "--porcelain"])
+        ).stdout.trim(),
+      ).toBe("AT added.txt");
 
       await git.discard({ projectPath, file: "added.txt" });
 
-      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("A  added.txt");
+      expect(
+        (
+          await runGitCommand(projectPath, ["status", "--porcelain"])
+        ).stdout.trim(),
+      ).toBe("A  added.txt");
       const stats = await fs.lstat(path.join(projectPath, "added.txt"));
       expect(stats.isSymbolicLink()).toBe(false);
-      expect(await fs.readFile(path.join(projectPath, "added.txt"), "utf-8"))
-        .toBe("staged\n");
+      expect(
+        await fs.readFile(path.join(projectPath, "added.txt"), "utf-8"),
+      ).toBe("staged\n");
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
@@ -1276,8 +1289,9 @@ describe("discard", () => {
       // Strips only the trailing newline: trim() would eat the leading space
       // that carries the unstaged half of the status.
       const porcelain = async () =>
-        (await runGitCommand(projectPath, ["status", "--porcelain"])).stdout
-          .replace(/\n$/, "");
+        (
+          await runGitCommand(projectPath, ["status", "--porcelain"])
+        ).stdout.replace(/\n$/, "");
       expect(await porcelain()).toBe(" T a.txt");
 
       await git.discard({ projectPath, file: "a.txt" });
@@ -1285,8 +1299,9 @@ describe("discard", () => {
       expect(await porcelain()).toBe("");
       const stats = await fs.lstat(path.join(projectPath, "a.txt"));
       expect(stats.isSymbolicLink()).toBe(false);
-      expect(await fs.readFile(path.join(projectPath, "a.txt"), "utf-8"))
-        .toBe("one\n");
+      expect(await fs.readFile(path.join(projectPath, "a.txt"), "utf-8")).toBe(
+        "one\n",
+      );
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
@@ -1298,17 +1313,28 @@ describe("discard", () => {
     );
     try {
       await initRepoWithCommit(projectPath);
-      await fs.writeFile(path.join(projectPath, "added.txt"), "staged\n", "utf-8");
+      await fs.writeFile(
+        path.join(projectPath, "added.txt"),
+        "staged\n",
+        "utf-8",
+      );
       await runGitCommand(projectPath, ["add", "added.txt"]);
-      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("A  added.txt");
+      expect(
+        (
+          await runGitCommand(projectPath, ["status", "--porcelain"])
+        ).stdout.trim(),
+      ).toBe("A  added.txt");
 
       await git.discard({ projectPath, file: "added.txt" });
 
-      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("?? added.txt");
-      expect(await fs.readFile(path.join(projectPath, "added.txt"), "utf-8"))
-        .toBe("staged\n");
+      expect(
+        (
+          await runGitCommand(projectPath, ["status", "--porcelain"])
+        ).stdout.trim(),
+      ).toBe("?? added.txt");
+      expect(
+        await fs.readFile(path.join(projectPath, "added.txt"), "utf-8"),
+      ).toBe("staged\n");
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
@@ -1321,25 +1347,33 @@ describe("discard", () => {
     try {
       await initRepoWithCommit(projectPath);
       await fs.writeFile(path.join(projectPath, "u.txt"), "theirs\n", "utf-8");
-      const { stdout: hash } = await runGitCommand(
-        projectPath,
-        ["hash-object", "-w", "u.txt"],
-      );
+      const { stdout: hash } = await runGitCommand(projectPath, [
+        "hash-object",
+        "-w",
+        "u.txt",
+      ]);
       // Plants a stage-3-only index entry, the layout behind UA status.
       await runGitWithStdin(
         projectPath,
         ["update-index", "--index-info"],
         `100644 ${hash.trim()} 3\tu.txt\n`,
       );
-      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("UA u.txt");
+      expect(
+        (
+          await runGitCommand(projectPath, ["status", "--porcelain"])
+        ).stdout.trim(),
+      ).toBe("UA u.txt");
 
       await git.discard({ projectPath, file: "u.txt" });
 
-      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("?? u.txt");
-      expect(await fs.readFile(path.join(projectPath, "u.txt"), "utf-8"))
-        .toBe("theirs\n");
+      expect(
+        (
+          await runGitCommand(projectPath, ["status", "--porcelain"])
+        ).stdout.trim(),
+      ).toBe("?? u.txt");
+      expect(await fs.readFile(path.join(projectPath, "u.txt"), "utf-8")).toBe(
+        "theirs\n",
+      );
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
@@ -1352,25 +1386,33 @@ describe("discard", () => {
     try {
       await initRepoWithCommit(projectPath);
       await fs.writeFile(path.join(projectPath, "ours.txt"), "ours\n", "utf-8");
-      const { stdout: hash } = await runGitCommand(
-        projectPath,
-        ["hash-object", "-w", "ours.txt"],
-      );
+      const { stdout: hash } = await runGitCommand(projectPath, [
+        "hash-object",
+        "-w",
+        "ours.txt",
+      ]);
       // Plants a stage-2-only index entry, the layout behind AU status.
       await runGitWithStdin(
         projectPath,
         ["update-index", "--index-info"],
         `100644 ${hash.trim()} 2\tours.txt\n`,
       );
-      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("AU ours.txt");
+      expect(
+        (
+          await runGitCommand(projectPath, ["status", "--porcelain"])
+        ).stdout.trim(),
+      ).toBe("AU ours.txt");
 
       await git.discard({ projectPath, file: "ours.txt" });
 
-      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("?? ours.txt");
-      expect(await fs.readFile(path.join(projectPath, "ours.txt"), "utf-8"))
-        .toBe("ours\n");
+      expect(
+        (
+          await runGitCommand(projectPath, ["status", "--porcelain"])
+        ).stdout.trim(),
+      ).toBe("?? ours.txt");
+      expect(
+        await fs.readFile(path.join(projectPath, "ours.txt"), "utf-8"),
+      ).toBe("ours\n");
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
@@ -1389,16 +1431,27 @@ describe("discard", () => {
       ]);
       // The merge leaves conflict markers in the worktree; without this,
       // reset alone would already match the assertions below.
-      await fs.writeFile(path.join(projectPath, "a.txt"), "<<<<<<< ours\n", "utf-8");
-      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("UU a.txt");
+      await fs.writeFile(
+        path.join(projectPath, "a.txt"),
+        "<<<<<<< ours\n",
+        "utf-8",
+      );
+      expect(
+        (
+          await runGitCommand(projectPath, ["status", "--porcelain"])
+        ).stdout.trim(),
+      ).toBe("UU a.txt");
 
       await git.discard({ projectPath, file: "a.txt" });
 
-      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("");
-      expect(await fs.readFile(path.join(projectPath, "a.txt"), "utf-8"))
-        .toBe("one\n");
+      expect(
+        (
+          await runGitCommand(projectPath, ["status", "--porcelain"])
+        ).stdout.trim(),
+      ).toBe("");
+      expect(await fs.readFile(path.join(projectPath, "a.txt"), "utf-8")).toBe(
+        "one\n",
+      );
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
@@ -1414,16 +1467,27 @@ describe("discard", () => {
         [1, "base\n"],
         [2, "ours\n"],
       ]);
-      await fs.writeFile(path.join(projectPath, "a.txt"), "<<<<<<< ours\n", "utf-8");
-      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("UD a.txt");
+      await fs.writeFile(
+        path.join(projectPath, "a.txt"),
+        "<<<<<<< ours\n",
+        "utf-8",
+      );
+      expect(
+        (
+          await runGitCommand(projectPath, ["status", "--porcelain"])
+        ).stdout.trim(),
+      ).toBe("UD a.txt");
 
       await git.discard({ projectPath, file: "a.txt" });
 
-      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("");
-      expect(await fs.readFile(path.join(projectPath, "a.txt"), "utf-8"))
-        .toBe("one\n");
+      expect(
+        (
+          await runGitCommand(projectPath, ["status", "--porcelain"])
+        ).stdout.trim(),
+      ).toBe("");
+      expect(await fs.readFile(path.join(projectPath, "a.txt"), "utf-8")).toBe(
+        "one\n",
+      );
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
@@ -1442,15 +1506,22 @@ describe("discard", () => {
       // The merge leaves their version in the worktree even though our side
       // deleted the path; discard keeps it as an untracked leftover.
       await fs.writeFile(path.join(projectPath, "u.txt"), "theirs\n", "utf-8");
-      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("DU u.txt");
+      expect(
+        (
+          await runGitCommand(projectPath, ["status", "--porcelain"])
+        ).stdout.trim(),
+      ).toBe("DU u.txt");
 
       await git.discard({ projectPath, file: "u.txt" });
 
-      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("?? u.txt");
-      expect(await fs.readFile(path.join(projectPath, "u.txt"), "utf-8"))
-        .toBe("theirs\n");
+      expect(
+        (
+          await runGitCommand(projectPath, ["status", "--porcelain"])
+        ).stdout.trim(),
+      ).toBe("?? u.txt");
+      expect(await fs.readFile(path.join(projectPath, "u.txt"), "utf-8")).toBe(
+        "theirs\n",
+      );
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
@@ -1463,13 +1534,19 @@ describe("discard", () => {
     try {
       await initRepoWithCommit(projectPath);
       await plantUnmergedStages(projectPath, "u.txt", [[1, "base\n"]]);
-      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("DD u.txt");
+      expect(
+        (
+          await runGitCommand(projectPath, ["status", "--porcelain"])
+        ).stdout.trim(),
+      ).toBe("DD u.txt");
 
       await git.discard({ projectPath, file: "u.txt" });
 
-      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("");
+      expect(
+        (
+          await runGitCommand(projectPath, ["status", "--porcelain"])
+        ).stdout.trim(),
+      ).toBe("");
       await expect(fs.stat(path.join(projectPath, "u.txt"))).rejects.toThrow();
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
@@ -1497,15 +1574,22 @@ describe("discard", () => {
       } catch {
         // Expected merge conflict.
       }
-      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("AA f.txt");
+      expect(
+        (
+          await runGitCommand(projectPath, ["status", "--porcelain"])
+        ).stdout.trim(),
+      ).toBe("AA f.txt");
 
       await git.discard({ projectPath, file: "f.txt" });
 
-      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("");
-      expect(await fs.readFile(path.join(projectPath, "f.txt"), "utf-8"))
-        .toBe("ours\n");
+      expect(
+        (
+          await runGitCommand(projectPath, ["status", "--porcelain"])
+        ).stdout.trim(),
+      ).toBe("");
+      expect(await fs.readFile(path.join(projectPath, "f.txt"), "utf-8")).toBe(
+        "ours\n",
+      );
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
@@ -1518,25 +1602,36 @@ describe("discard", () => {
     try {
       await initRepoWithCommit(projectPath);
       await runGitCommand(projectPath, ["config", "status.renames", "true"]);
-      await fs.copyFile(path.join(projectPath, "a.txt"), path.join(projectPath, "dst.txt"));
+      await fs.copyFile(
+        path.join(projectPath, "a.txt"),
+        path.join(projectPath, "dst.txt"),
+      );
       await runGitCommand(projectPath, ["add", "dst.txt"]);
       await runGitCommand(projectPath, ["commit", "-m", "add dst"]);
       await runGitCommand(projectPath, ["rm", "--cached", "dst.txt"]);
       await runGitCommand(projectPath, ["add", "-N", "dst.txt"]);
       await fs.rm(path.join(projectPath, "a.txt"));
-      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("DR a.txt -> dst.txt");
+      expect(
+        (
+          await runGitCommand(projectPath, ["status", "--porcelain"])
+        ).stdout.trim(),
+      ).toBe("DR a.txt -> dst.txt");
 
       await git.discard({ projectPath, file: "dst.txt" });
 
       // The source reappears at its index content and the destination returns
       // to its committed state, so the tree is fully clean.
-      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("");
-      expect(await fs.readFile(path.join(projectPath, "a.txt"), "utf-8"))
-        .toBe("one\n");
-      expect(await fs.readFile(path.join(projectPath, "dst.txt"), "utf-8"))
-        .toBe("one\n");
+      expect(
+        (
+          await runGitCommand(projectPath, ["status", "--porcelain"])
+        ).stdout.trim(),
+      ).toBe("");
+      expect(await fs.readFile(path.join(projectPath, "a.txt"), "utf-8")).toBe(
+        "one\n",
+      );
+      expect(
+        await fs.readFile(path.join(projectPath, "dst.txt"), "utf-8"),
+      ).toBe("one\n");
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
@@ -1549,7 +1644,11 @@ describe("discard", () => {
     try {
       await initRepoWithCommit(projectPath);
       await runGitCommand(projectPath, ["config", "status.renames", "true"]);
-      await fs.writeFile(path.join(projectPath, "a.txt"), "one\ntwo\nthree\nfour\n", "utf-8");
+      await fs.writeFile(
+        path.join(projectPath, "a.txt"),
+        "one\ntwo\nthree\nfour\n",
+        "utf-8",
+      );
       await runGitCommand(projectPath, ["commit", "-am", "longer source"]);
       // The destination is an edited copy well above the rename similarity
       // threshold, so git pairs it as an unstaged rename.
@@ -1560,20 +1659,28 @@ describe("discard", () => {
       );
       await runGitCommand(projectPath, ["add", "-N", "renamed.txt"]);
       await fs.rm(path.join(projectPath, "a.txt"));
-      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("R a.txt -> renamed.txt");
+      expect(
+        (
+          await runGitCommand(projectPath, ["status", "--porcelain"])
+        ).stdout.trim(),
+      ).toBe("R a.txt -> renamed.txt");
 
       await git.discard({ projectPath, file: "renamed.txt" });
 
       // The source restores to its index content; resetting the destination's
       // intent-to-add entry keeps the edited worktree copy as untracked
       // instead of truncating it to the empty index blob.
-      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("?? renamed.txt");
-      expect(await fs.readFile(path.join(projectPath, "a.txt"), "utf-8"))
-        .toBe("one\ntwo\nthree\nfour\n");
-      expect(await fs.readFile(path.join(projectPath, "renamed.txt"), "utf-8"))
-        .toBe("one\ntwo\nthree\nfour\nfive\n");
+      expect(
+        (
+          await runGitCommand(projectPath, ["status", "--porcelain"])
+        ).stdout.trim(),
+      ).toBe("?? renamed.txt");
+      expect(await fs.readFile(path.join(projectPath, "a.txt"), "utf-8")).toBe(
+        "one\ntwo\nthree\nfour\n",
+      );
+      expect(
+        await fs.readFile(path.join(projectPath, "renamed.txt"), "utf-8"),
+      ).toBe("one\ntwo\nthree\nfour\nfive\n");
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
@@ -1586,18 +1693,28 @@ describe("discard", () => {
     try {
       await initRepoWithCommit(projectPath);
       await runGitCommand(projectPath, ["config", "status.renames", "true"]);
-      await fs.copyFile(path.join(projectPath, "a.txt"), path.join(projectPath, "renamed.txt"));
+      await fs.copyFile(
+        path.join(projectPath, "a.txt"),
+        path.join(projectPath, "renamed.txt"),
+      );
       await runGitCommand(projectPath, ["add", "-N", "renamed.txt"]);
       await fs.rm(path.join(projectPath, "a.txt"));
-      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("R a.txt -> renamed.txt");
+      expect(
+        (
+          await runGitCommand(projectPath, ["status", "--porcelain"])
+        ).stdout.trim(),
+      ).toBe("R a.txt -> renamed.txt");
 
       await git.discard({ projectPath, file: "a.txt" });
 
-      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("?? renamed.txt");
-      expect(await fs.readFile(path.join(projectPath, "a.txt"), "utf-8"))
-        .toBe("one\n");
+      expect(
+        (
+          await runGitCommand(projectPath, ["status", "--porcelain"])
+        ).stdout.trim(),
+      ).toBe("?? renamed.txt");
+      expect(await fs.readFile(path.join(projectPath, "a.txt"), "utf-8")).toBe(
+        "one\n",
+      );
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
@@ -1609,17 +1726,28 @@ describe("discard", () => {
     );
     try {
       await initRepoWithCommit(projectPath);
-      await fs.writeFile(path.join(projectPath, "new.txt"), "content\n", "utf-8");
+      await fs.writeFile(
+        path.join(projectPath, "new.txt"),
+        "content\n",
+        "utf-8",
+      );
       await runGitCommand(projectPath, ["add", "-N", "new.txt"]);
-      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("A new.txt");
+      expect(
+        (
+          await runGitCommand(projectPath, ["status", "--porcelain"])
+        ).stdout.trim(),
+      ).toBe("A new.txt");
 
       await git.discard({ projectPath, file: "new.txt" });
 
-      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("?? new.txt");
-      expect(await fs.readFile(path.join(projectPath, "new.txt"), "utf-8"))
-        .toBe("content\n");
+      expect(
+        (
+          await runGitCommand(projectPath, ["status", "--porcelain"])
+        ).stdout.trim(),
+      ).toBe("?? new.txt");
+      expect(
+        await fs.readFile(path.join(projectPath, "new.txt"), "utf-8"),
+      ).toBe("content\n");
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
@@ -1632,17 +1760,32 @@ describe("discard", () => {
     try {
       await initRepoWithCommit(projectPath);
       await fs.mkdir(path.join(projectPath, "sub"));
-      await fs.writeFile(path.join(projectPath, "sub", "x.txt"), "sub content\n", "utf-8");
+      await fs.writeFile(
+        path.join(projectPath, "sub", "x.txt"),
+        "sub content\n",
+        "utf-8",
+      );
       await runGitCommand(projectPath, ["add", "sub/x.txt"]);
       await runGitCommand(projectPath, ["commit", "-m", "add sub"]);
-      await fs.writeFile(path.join(projectPath, "sub", "x.txt"), "edited\n", "utf-8");
+      await fs.writeFile(
+        path.join(projectPath, "sub", "x.txt"),
+        "edited\n",
+        "utf-8",
+      );
 
-      await git.discard({ projectPath: path.join(projectPath, "sub"), file: "x.txt" });
+      await git.discard({
+        projectPath: path.join(projectPath, "sub"),
+        file: "x.txt",
+      });
 
-      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("");
-      expect(await fs.readFile(path.join(projectPath, "sub", "x.txt"), "utf-8"))
-        .toBe("sub content\n");
+      expect(
+        (
+          await runGitCommand(projectPath, ["status", "--porcelain"])
+        ).stdout.trim(),
+      ).toBe("");
+      expect(
+        await fs.readFile(path.join(projectPath, "sub", "x.txt"), "utf-8"),
+      ).toBe("sub content\n");
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
@@ -1655,9 +1798,16 @@ describe("discard", () => {
     try {
       await initRepoWithCommit(projectPath);
       await runGitCommand(projectPath, ["config", "status.renames", "true"]);
-      await fs.writeFile(path.join(projectPath, "a.txt"), "one\ntwo\nthree\nfour\n", "utf-8");
+      await fs.writeFile(
+        path.join(projectPath, "a.txt"),
+        "one\ntwo\nthree\nfour\n",
+        "utf-8",
+      );
       await runGitCommand(projectPath, ["commit", "-am", "longer source"]);
-      await fs.copyFile(path.join(projectPath, "a.txt"), path.join(projectPath, "dst.txt"));
+      await fs.copyFile(
+        path.join(projectPath, "a.txt"),
+        path.join(projectPath, "dst.txt"),
+      );
       await runGitCommand(projectPath, ["add", "dst.txt"]);
       await runGitCommand(projectPath, ["commit", "-m", "add dst"]);
       await runGitCommand(projectPath, ["rm", "--cached", "dst.txt"]);
@@ -1670,19 +1820,27 @@ describe("discard", () => {
         "utf-8",
       );
       await fs.rm(path.join(projectPath, "a.txt"));
-      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("DR a.txt -> dst.txt");
+      expect(
+        (
+          await runGitCommand(projectPath, ["status", "--porcelain"])
+        ).stdout.trim(),
+      ).toBe("DR a.txt -> dst.txt");
 
       await git.discard({ projectPath, file: "dst.txt" });
 
       // Resetting the destination leaves the never-hashed edit as an unstaged
       // modification instead of truncating it to the committed content.
-      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("M dst.txt");
-      expect(await fs.readFile(path.join(projectPath, "a.txt"), "utf-8"))
-        .toBe("one\ntwo\nthree\nfour\n");
-      expect(await fs.readFile(path.join(projectPath, "dst.txt"), "utf-8"))
-        .toBe("one\ntwo\nthree\nfour\nedited\n");
+      expect(
+        (
+          await runGitCommand(projectPath, ["status", "--porcelain"])
+        ).stdout.trim(),
+      ).toBe("M dst.txt");
+      expect(await fs.readFile(path.join(projectPath, "a.txt"), "utf-8")).toBe(
+        "one\ntwo\nthree\nfour\n",
+      );
+      expect(
+        await fs.readFile(path.join(projectPath, "dst.txt"), "utf-8"),
+      ).toBe("one\ntwo\nthree\nfour\nedited\n");
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
@@ -1705,17 +1863,25 @@ describe("discard", () => {
         [3, "theirs\n"],
       ]);
       await fs.writeFile(path.join(projectPath, "a.txt"), "edited\n", "utf-8");
-      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("UU *\n M a.txt");
+      expect(
+        (
+          await runGitCommand(projectPath, ["status", "--porcelain"])
+        ).stdout.trim(),
+      ).toBe("UU *\n M a.txt");
 
       await git.discard({ projectPath, file: "*" });
 
-      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("M a.txt");
-      expect(await fs.readFile(path.join(projectPath, "*"), "utf-8"))
-        .toBe("head-star\n");
-      expect(await fs.readFile(path.join(projectPath, "a.txt"), "utf-8"))
-        .toBe("edited\n");
+      expect(
+        (
+          await runGitCommand(projectPath, ["status", "--porcelain"])
+        ).stdout.trim(),
+      ).toBe("M a.txt");
+      expect(await fs.readFile(path.join(projectPath, "*"), "utf-8")).toBe(
+        "head-star\n",
+      );
+      expect(await fs.readFile(path.join(projectPath, "a.txt"), "utf-8")).toBe(
+        "edited\n",
+      );
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
@@ -1737,10 +1903,19 @@ describe("discard", () => {
       // ever matching the source: this fixture pins a copy-source discard
       // reverting the source's own modification while the copy's index
       // entry stays untouched.
-      await fs.copyFile(path.join(projectPath, "z.txt"), path.join(projectPath, "a2.txt"));
+      await fs.copyFile(
+        path.join(projectPath, "z.txt"),
+        path.join(projectPath, "a2.txt"),
+      );
       await runGitCommand(projectPath, ["add", "-N", "a2.txt"]);
-      await fs.writeFile(path.join(projectPath, "z.txt"), "one\nedit\n", "utf-8");
-      const listed = (await runGitCommand(projectPath, ["status", "--porcelain"])).stdout;
+      await fs.writeFile(
+        path.join(projectPath, "z.txt"),
+        "one\nedit\n",
+        "utf-8",
+      );
+      const listed = (
+        await runGitCommand(projectPath, ["status", "--porcelain"])
+      ).stdout;
       expect(listed).toContain("C z.txt -> a2.txt");
       expect(listed).toContain("M z.txt");
 
@@ -1748,12 +1923,16 @@ describe("discard", () => {
 
       // The source's own modification entry governs: its edit reverts while
       // the copy destination keeps its intent-to-add entry untouched.
-      expect(await fs.readFile(path.join(projectPath, "z.txt"), "utf-8"))
-        .toBe("one\n");
-      expect((await runGitCommand(projectPath, ["ls-files", "--cached", "a2.txt"])).stdout)
-        .toContain("a2.txt");
-      expect(await fs.readFile(path.join(projectPath, "a2.txt"), "utf-8"))
-        .toBe("one\n");
+      expect(await fs.readFile(path.join(projectPath, "z.txt"), "utf-8")).toBe(
+        "one\n",
+      );
+      expect(
+        (await runGitCommand(projectPath, ["ls-files", "--cached", "a2.txt"]))
+          .stdout,
+      ).toContain("a2.txt");
+      expect(await fs.readFile(path.join(projectPath, "a2.txt"), "utf-8")).toBe(
+        "one\n",
+      );
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
@@ -1772,20 +1951,34 @@ describe("discard", () => {
       await runGitCommand(projectPath, ["commit", "-m", "add z"]);
       // The copy source carries its own unstaged edit, which the discard of
       // the copy destination must not touch.
-      await fs.copyFile(path.join(projectPath, "z.txt"), path.join(projectPath, "a2.txt"));
+      await fs.copyFile(
+        path.join(projectPath, "z.txt"),
+        path.join(projectPath, "a2.txt"),
+      );
       await runGitCommand(projectPath, ["add", "-N", "a2.txt"]);
-      await fs.writeFile(path.join(projectPath, "z.txt"), "one\nedit\n", "utf-8");
-      const listed = (await runGitCommand(projectPath, ["status", "--porcelain"])).stdout;
+      await fs.writeFile(
+        path.join(projectPath, "z.txt"),
+        "one\nedit\n",
+        "utf-8",
+      );
+      const listed = (
+        await runGitCommand(projectPath, ["status", "--porcelain"])
+      ).stdout;
       expect(listed).toContain("C z.txt -> a2.txt");
 
       await git.discard({ projectPath, file: "a2.txt" });
 
-      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("M z.txt\n?? a2.txt");
-      expect(await fs.readFile(path.join(projectPath, "z.txt"), "utf-8"))
-        .toBe("one\nedit\n");
-      expect(await fs.readFile(path.join(projectPath, "a2.txt"), "utf-8"))
-        .toBe("one\n");
+      expect(
+        (
+          await runGitCommand(projectPath, ["status", "--porcelain"])
+        ).stdout.trim(),
+      ).toBe("M z.txt\n?? a2.txt");
+      expect(await fs.readFile(path.join(projectPath, "z.txt"), "utf-8")).toBe(
+        "one\nedit\n",
+      );
+      expect(await fs.readFile(path.join(projectPath, "a2.txt"), "utf-8")).toBe(
+        "one\n",
+      );
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
@@ -1798,17 +1991,35 @@ describe("discard", () => {
     try {
       await initRepoWithCommit(projectPath);
       await fs.mkdir(path.join(projectPath, "sub\nline"), { recursive: true });
-      await fs.writeFile(path.join(projectPath, "sub\nline", "x.txt"), "sub content\n", "utf-8");
+      await fs.writeFile(
+        path.join(projectPath, "sub\nline", "x.txt"),
+        "sub content\n",
+        "utf-8",
+      );
       await runGitCommand(projectPath, ["add", "--", "sub\nline/x.txt"]);
       await runGitCommand(projectPath, ["commit", "-m", "add nested"]);
-      await fs.writeFile(path.join(projectPath, "sub\nline", "x.txt"), "edited\n", "utf-8");
+      await fs.writeFile(
+        path.join(projectPath, "sub\nline", "x.txt"),
+        "edited\n",
+        "utf-8",
+      );
 
-      await git.discard({ projectPath: path.join(projectPath, "sub\nline"), file: "x.txt" });
+      await git.discard({
+        projectPath: path.join(projectPath, "sub\nline"),
+        file: "x.txt",
+      });
 
-      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("");
-      expect(await fs.readFile(path.join(projectPath, "sub\nline", "x.txt"), "utf-8"))
-        .toBe("sub content\n");
+      expect(
+        (
+          await runGitCommand(projectPath, ["status", "--porcelain"])
+        ).stdout.trim(),
+      ).toBe("");
+      expect(
+        await fs.readFile(
+          path.join(projectPath, "sub\nline", "x.txt"),
+          "utf-8",
+        ),
+      ).toBe("sub content\n");
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
@@ -1821,21 +2032,35 @@ describe("discard", () => {
     try {
       await initRepoWithCommit(projectPath);
       await runGitCommand(projectPath, ["config", "status.renames", "true"]);
-      await fs.writeFile(path.join(projectPath, "b.txt"), "staged content\n", "utf-8");
+      await fs.writeFile(
+        path.join(projectPath, "b.txt"),
+        "staged content\n",
+        "utf-8",
+      );
       await runGitCommand(projectPath, ["add", "b.txt"]);
-      await fs.rename(path.join(projectPath, "b.txt"), path.join(projectPath, "c.txt"));
+      await fs.rename(
+        path.join(projectPath, "b.txt"),
+        path.join(projectPath, "c.txt"),
+      );
       await runGitCommand(projectPath, ["add", "-N", "c.txt"]);
       // The staged-only entry for the source shadows the worktree rename that
       // consumed it; the request names the rename's source side.
-      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("A  b.txt\n R b.txt -> c.txt");
+      expect(
+        (
+          await runGitCommand(projectPath, ["status", "--porcelain"])
+        ).stdout.trim(),
+      ).toBe("A  b.txt\n R b.txt -> c.txt");
 
       await git.discard({ projectPath, file: "b.txt" });
 
-      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("A  b.txt\n?? c.txt");
-      expect(await fs.readFile(path.join(projectPath, "b.txt"), "utf-8"))
-        .toBe("staged content\n");
+      expect(
+        (
+          await runGitCommand(projectPath, ["status", "--porcelain"])
+        ).stdout.trim(),
+      ).toBe("A  b.txt\n?? c.txt");
+      expect(await fs.readFile(path.join(projectPath, "b.txt"), "utf-8")).toBe(
+        "staged content\n",
+      );
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
@@ -1851,19 +2076,33 @@ describe("discard", () => {
       await fs.writeFile(path.join(projectPath, "s.txt"), "base\n", "utf-8");
       await runGitCommand(projectPath, ["add", "s.txt"]);
       await runGitCommand(projectPath, ["commit", "-m", "add s"]);
-      await fs.writeFile(path.join(projectPath, "s.txt"), "staged edit\n", "utf-8");
+      await fs.writeFile(
+        path.join(projectPath, "s.txt"),
+        "staged edit\n",
+        "utf-8",
+      );
       await runGitCommand(projectPath, ["add", "s.txt"]);
-      await fs.rename(path.join(projectPath, "s.txt"), path.join(projectPath, "t.txt"));
+      await fs.rename(
+        path.join(projectPath, "s.txt"),
+        path.join(projectPath, "t.txt"),
+      );
       await runGitCommand(projectPath, ["add", "-N", "t.txt"]);
-      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("M  s.txt\n R s.txt -> t.txt");
+      expect(
+        (
+          await runGitCommand(projectPath, ["status", "--porcelain"])
+        ).stdout.trim(),
+      ).toBe("M  s.txt\n R s.txt -> t.txt");
 
       await git.discard({ projectPath, file: "s.txt" });
 
-      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("M  s.txt\n?? t.txt");
-      expect(await fs.readFile(path.join(projectPath, "s.txt"), "utf-8"))
-        .toBe("staged edit\n");
+      expect(
+        (
+          await runGitCommand(projectPath, ["status", "--porcelain"])
+        ).stdout.trim(),
+      ).toBe("M  s.txt\n?? t.txt");
+      expect(await fs.readFile(path.join(projectPath, "s.txt"), "utf-8")).toBe(
+        "staged edit\n",
+      );
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
@@ -1877,263 +2116,19 @@ describe("discard", () => {
       await initRepoWithCommit(projectPath);
       await fs.rm(path.join(projectPath, "a.txt"));
       await runGitCommand(projectPath, ["rm", "--cached", "a.txt"]);
-      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("D  a.txt");
+      expect(
+        (
+          await runGitCommand(projectPath, ["status", "--porcelain"])
+        ).stdout.trim(),
+      ).toBe("D  a.txt");
 
       await git.discard({ projectPath, file: "a.txt" });
 
-      expect((await runGitCommand(projectPath, ["status", "--porcelain"])).stdout.trim())
-        .toBe("D  a.txt");
-    } finally {
-      await fs.rm(projectPath, { recursive: true, force: true });
-    }
-  });
-});
-
-describe("commit message generation", () => {
-  it("builds the staged diff with one batched pathspec command for normal selections", async () => {
-    const calls = [];
-    const diffContext = await collectCommitMessageDiffContext(
-      "/repo",
-      ["src/a.ts", "src/b.ts"],
-      async (cwd, args, options) => {
-        calls.push({ cwd, args, options });
-        return { stdout: "patch text" };
-      },
-    );
-
-    expect(diffContext).toBe("patch text");
-    expect(calls).toEqual([
-      {
-        cwd: "/repo",
-        args: [
-          "diff",
-          "--cached",
-          "--no-ext-diff",
-          "--no-color",
-          "-U10",
-          "--",
-          "src/a.ts",
-          "src/b.ts",
-        ],
-        options: { disableOptionalLocks: true, maxStdoutBytes: 320_000, truncateStdout: true },
-      },
-    ]);
-  });
-
-  it("keeps up to eighty thousand diff characters in generated commit message prompts", async () => {
-    let capturedPrompt = "";
-    const marker = "after-limit-marker";
-    const diffContext = `${"a".repeat(80_000)}${marker}`;
-
-    await generateCommitMessage(
-      ["a.txt"],
-      diffContext,
-      "claude",
-      (prompt) => {
-        capturedPrompt = prompt;
-        return Promise.resolve("chore: stub");
-      },
-    );
-
-    const diffStart =
-      capturedPrompt.indexOf("Diff excerpt:\n") + "Diff excerpt:\n".length;
-    const diffEnd = capturedPrompt.indexOf(
-      "\n\nReturn only the commit message now.",
-      diffStart,
-    );
-    const diffExcerpt = capturedPrompt.slice(diffStart, diffEnd);
-
-    expect(diffExcerpt).toHaveLength(80_000);
-    expect(diffExcerpt).not.toContain(marker);
-  });
-
-  it("preserves replacement metacharacters in commit context", async () => {
-    let capturedPrompt = "";
-
-    await generateCommitMessage(
-      ["src/$&-$1.ts"],
-      "diff with $& and $1 and $$",
-      "claude",
-      (prompt) => {
-        capturedPrompt = prompt;
-        return Promise.resolve("chore: stub");
-      },
-      { customPrompt: "Files:\n{{files}}\nDiff:\n{{diff}}" },
-    );
-
-    expect(capturedPrompt).toBe(
-      "Files:\n- src/$&-$1.ts\nDiff:\ndiff with $& and $1 and $$",
-    );
-  });
-
-  it("returns the server-applied directory prefix with generated messages", async () => {
-    const projectPath = await fs.mkdtemp(
-      path.join(os.tmpdir(), "garcon-git-commit-message-prefix-"),
-    );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
-
-    try {
-      await initRepoWithCommit(projectPath);
-      await fs.mkdir(path.join(projectPath, "feature", "auth"), {
-        recursive: true,
-      });
-      await fs.writeFile(
-        path.join(projectPath, "feature", "auth", "a.txt"),
-        "a\n",
-        "utf-8",
-      );
-      await fs.writeFile(
-        path.join(projectPath, "feature", "auth", "b.txt"),
-        "b\n",
-        "utf-8",
-      );
-      await runGitCommand(projectPath, [
-        "add",
-        "feature/auth/a.txt",
-        "feature/auth/b.txt",
-      ]);
-
-      const result = await git.generateCommitMessageForFiles({
-        projectPath,
-        files: ["feature/auth/a.txt", "feature/auth/b.txt"],
-        agentId: "claude",
-        useCommonDirPrefix: true,
-      });
-
-      expect(result).toEqual({
-        message: "feature/auth: chore: stub",
-        directoryPrefix: "feature/auth",
-      });
-    } finally {
-      await fs.rm(projectPath, { recursive: true, force: true });
-    }
-  });
-
-  it("captures selected multi-file staged diffs from a real repository", async () => {
-    const projectPath = await fs.mkdtemp(
-      path.join(os.tmpdir(), "garcon-git-commit-message-batched-"),
-    );
-    let capturedPrompt = "";
-    let capturedOptions;
-    const git = createGitService({
-      agents: {
-        runSingleQuery: (prompt, options) => {
-          capturedPrompt = prompt;
-          capturedOptions = options;
-          return Promise.resolve("chore: stub");
-        },
-      },
-      classifyGitError: mockClassifyGitError,
-    });
-
-    try {
-      await initRepoWithCommit(projectPath);
-      await fs.mkdir(path.join(projectPath, "feature"), { recursive: true });
-      await fs.writeFile(
-        path.join(projectPath, "feature", "a.txt"),
-        "alpha\n",
-        "utf-8",
-      );
-      await fs.writeFile(
-        path.join(projectPath, "feature", "name with space.txt"),
-        "space\n",
-        "utf-8",
-      );
-      await fs.writeFile(
-        path.join(projectPath, "unselected.txt"),
-        "skip\n",
-        "utf-8",
-      );
-      await runGitCommand(projectPath, [
-        "add",
-        "feature/a.txt",
-        "feature/name with space.txt",
-        "unselected.txt",
-      ]);
-
-      await git.generateCommitMessageForFiles({
-        projectPath,
-        files: ["feature/a.txt", "feature/name with space.txt"],
-        agentId: "claude",
-        thinkingMode: "max",
-      });
-
-      expect(capturedPrompt).toContain(
-        "diff --git a/feature/a.txt b/feature/a.txt",
-      );
-      expect(capturedPrompt).toContain("+alpha");
-      expect(capturedPrompt).toContain(
-        "diff --git a/feature/name with space.txt b/feature/name with space.txt",
-      );
-      expect(capturedPrompt).toContain("+space");
-      expect(capturedPrompt).not.toContain("unselected.txt");
-      expect(capturedPrompt).not.toContain("+skip");
-      expect(capturedOptions).toMatchObject({
-        agentId: "claude",
-        thinkingMode: "max",
-        timeoutMs: 110_000,
-      });
-      expect(capturedOptions).not.toHaveProperty("cwd");
-      expect(capturedOptions).not.toHaveProperty("projectPath");
-    } finally {
-      await fs.rm(projectPath, { recursive: true, force: true });
-    }
-  });
-
-  it("uses ten lines of hunk context for generated commit message prompts", async () => {
-    const projectPath = await fs.mkdtemp(
-      path.join(os.tmpdir(), "garcon-git-commit-message-context-"),
-    );
-    let capturedPrompt = "";
-    const git = createGitService({
-      agents: {
-        runSingleQuery: (prompt) => {
-          capturedPrompt = prompt;
-          return Promise.resolve("chore: stub");
-        },
-      },
-      classifyGitError: mockClassifyGitError,
-    });
-
-    try {
-      await initRepoWithCommit(projectPath);
-      const lines = Array.from(
-        { length: 25 },
-        (_, index) => `line ${index + 1}`,
-      );
-      await fs.writeFile(
-        path.join(projectPath, "a.txt"),
-        `${lines.join("\n")}\n`,
-        "utf-8",
-      );
-      await runGitCommand(projectPath, ["add", "a.txt"]);
-      await runGitCommand(projectPath, ["commit", "-m", "expand fixture"]);
-
-      lines[12] = "line 13 changed";
-      await fs.writeFile(
-        path.join(projectPath, "a.txt"),
-        `${lines.join("\n")}\n`,
-        "utf-8",
-      );
-      await runGitCommand(projectPath, ["add", "a.txt"]);
-
-      await git.generateCommitMessageForFiles({
-        projectPath,
-        files: ["a.txt"],
-        agentId: "claude",
-      });
-
-      expect(capturedPrompt).toContain("@@ -3,21 +3,21 @@");
-      expect(capturedPrompt).toContain("\n line 3\n");
-      expect(capturedPrompt).toContain("-line 13\n");
-      expect(capturedPrompt).toContain("+line 13 changed\n");
-      expect(capturedPrompt).toContain("\n line 23\n");
-      expect(capturedPrompt).not.toContain("\n line 2\n");
-      expect(capturedPrompt).not.toContain("\n line 24\n");
+      expect(
+        (
+          await runGitCommand(projectPath, ["status", "--porcelain"])
+        ).stdout.trim(),
+      ).toBe("D  a.txt");
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
@@ -2145,10 +2140,7 @@ describe("commit history operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-history-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -2192,14 +2184,14 @@ describe("commit history operations", () => {
       });
       expect(snapshot.firstBodyCandidates).toEqual(["a.txt"]);
 
-      const bodies = await git.getCommitFileBodies({
-        projectPath,
-        documentId: snapshot.documentId,
-        commit: snapshot.commit.hash,
-        parent: snapshot.selectedParent,
-        context: 5,
-        files: [{ path: "a.txt" }],
-      });
+      const bodies = materializeReviewResponse(
+        await git.getReviewDocumentFileBodies({
+          projectPath,
+          documentId: snapshot.documentId,
+          files: [{ path: "a.txt" }].map((file) => file.path),
+          purpose: "visible",
+        }),
+      );
       const body = bodies.files["a.txt"];
 
       expect(bodies.errors).toEqual({});
@@ -2216,10 +2208,7 @@ describe("commit history operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-history-root-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -2252,10 +2241,7 @@ describe("commit history operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-history-merge-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -2310,10 +2296,7 @@ describe("commit history operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-history-rename-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -2324,7 +2307,11 @@ describe("commit history operations", () => {
       );
       await runGitCommand(projectPath, ["commit", "-am", "expand file"]);
       await runGitCommand(projectPath, ["mv", "a.txt", "renamed file.txt"]);
-      await fs.appendFile(path.join(projectPath, "renamed file.txt"), "five\n", "utf-8");
+      await fs.appendFile(
+        path.join(projectPath, "renamed file.txt"),
+        "five\n",
+        "utf-8",
+      );
       await runGitCommand(projectPath, ["commit", "-am", "rename file"]);
 
       const snapshot = await git.getCommitSnapshot({
@@ -2343,16 +2330,22 @@ describe("commit history operations", () => {
         }),
       );
 
-      const renamedFile = snapshot.files.find((file) => file.path === "renamed file.txt");
-      const bodies = await git.getCommitFileBodies({
-        projectPath,
-        documentId: snapshot.documentId,
-        commit: snapshot.commit.hash,
-        parent: snapshot.selectedParent,
-        context: 5,
-        files: [{ path: renamedFile.path, originalPath: renamedFile.originalPath }],
-      });
-      const addedRows = bodies.files[renamedFile.path].rows.filter((row) => row.kind === "add");
+      const renamedFile = snapshot.files.find(
+        (file) => file.path === "renamed file.txt",
+      );
+      const bodies = materializeReviewResponse(
+        await git.getReviewDocumentFileBodies({
+          projectPath,
+          documentId: snapshot.documentId,
+          files: [
+            { path: renamedFile.path, originalPath: renamedFile.originalPath },
+          ].map((file) => file.path),
+          purpose: "visible",
+        }),
+      );
+      const addedRows = bodies.files[renamedFile.path].rows.filter(
+        (row) => row.kind === "add",
+      );
 
       expect(addedRows).toEqual([expect.objectContaining({ text: "five" })]);
     } finally {
@@ -2364,10 +2357,7 @@ describe("commit history operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-history-literal-path-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
     const filePath = "wild[slug].txt";
 
     try {
@@ -2376,7 +2366,11 @@ describe("commit history operations", () => {
       await runGitCommand(projectPath, ["add", filePath]);
       await runGitCommand(projectPath, ["commit", "-m", "add literal path"]);
       await fs.appendFile(path.join(projectPath, filePath), "two\n", "utf-8");
-      await runGitCommand(projectPath, ["commit", "-am", "change literal path"]);
+      await runGitCommand(projectPath, [
+        "commit",
+        "-am",
+        "change literal path",
+      ]);
 
       const snapshot = await git.getCommitSnapshot({
         projectPath,
@@ -2385,14 +2379,14 @@ describe("commit history operations", () => {
       });
       expect(snapshot.status).toBe("ready");
 
-      const bodies = await git.getCommitFileBodies({
-        projectPath,
-        documentId: snapshot.documentId,
-        commit: snapshot.commit.hash,
-        parent: snapshot.selectedParent,
-        context: 5,
-        files: [{ path: filePath }],
-      });
+      const bodies = materializeReviewResponse(
+        await git.getReviewDocumentFileBodies({
+          projectPath,
+          documentId: snapshot.documentId,
+          files: [{ path: filePath }].map((file) => file.path),
+          purpose: "visible",
+        }),
+      );
 
       expect(bodies.files[filePath].rows).toContainEqual(
         expect.objectContaining({ kind: "add", text: "two" }),
@@ -2406,27 +2400,32 @@ describe("commit history operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-history-normalized-diff-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
       await fs.appendFile(path.join(projectPath, "a.txt"), "two\n", "utf-8");
       await runGitCommand(projectPath, ["commit", "-am", "change file"]);
-      await runGitCommand(projectPath, ["config", "diff.external", "/bin/true"]);
+      await runGitCommand(projectPath, [
+        "config",
+        "diff.external",
+        "/bin/true",
+      ]);
       await runGitCommand(projectPath, ["config", "color.ui", "always"]);
 
-      const snapshot = await git.getCommitSnapshot({ projectPath, commit: "HEAD" });
-      expect(snapshot.status).toBe("ready");
-      const bodies = await git.getCommitFileBodies({
+      const snapshot = await git.getCommitSnapshot({
         projectPath,
-        documentId: snapshot.documentId,
-        commit: snapshot.commit.hash,
-        parent: snapshot.selectedParent,
-        files: [{ path: "a.txt" }],
+        commit: "HEAD",
       });
+      expect(snapshot.status).toBe("ready");
+      const bodies = materializeReviewResponse(
+        await git.getReviewDocumentFileBodies({
+          projectPath,
+          documentId: snapshot.documentId,
+          files: [{ path: "a.txt" }].map((file) => file.path),
+          purpose: "visible",
+        }),
+      );
       expect(bodies.files["a.txt"].bodyState).toBe("loaded");
       expect(bodies.files["a.txt"].rows).toContainEqual(
         expect.objectContaining({ kind: "add", text: "two" }),
@@ -2439,13 +2438,14 @@ describe("commit history operations", () => {
         mode: "direct",
       });
       expect(comparisonSnapshot.status).toBe("ready");
-      const comparisonBodies = await git.getComparisonFileBodies({
-        projectPath,
-        documentId: comparisonSnapshot.documentId,
-        effectiveFromHash: comparisonSnapshot.effectiveFromHash,
-        to: { kind: "revision", hash: comparisonSnapshot.to.hash },
-        files: [{ path: "a.txt" }],
-      });
+      const comparisonBodies = materializeReviewResponse(
+        await git.getReviewDocumentFileBodies({
+          projectPath,
+          documentId: comparisonSnapshot.documentId,
+          files: [{ path: "a.txt" }].map((file) => file.path),
+          purpose: "visible",
+        }),
+      );
       expect(comparisonBodies.files["a.txt"].bodyState).toBe("loaded");
       expect(comparisonBodies.files["a.txt"].rows).toContainEqual(
         expect.objectContaining({ kind: "add", text: "two" }),
@@ -2459,22 +2459,31 @@ describe("commit history operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-history-file-to-directory-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
       await fs.mkdir(path.join(projectPath, "bin"));
-      await fs.writeFile(path.join(projectPath, "bin", "tool"), "old\n", "utf-8");
+      await fs.writeFile(
+        path.join(projectPath, "bin", "tool"),
+        "old\n",
+        "utf-8",
+      );
       await runGitCommand(projectPath, ["add", "."]);
       await runGitCommand(projectPath, ["commit", "-m", "add tool file"]);
       await fs.rm(path.join(projectPath, "bin", "tool"));
       await fs.mkdir(path.join(projectPath, "bin", "tool"));
-      await fs.writeFile(path.join(projectPath, "bin", "tool", "main.sh"), "new\n", "utf-8");
+      await fs.writeFile(
+        path.join(projectPath, "bin", "tool", "main.sh"),
+        "new\n",
+        "utf-8",
+      );
       await runGitCommand(projectPath, ["add", "-A"]);
-      await runGitCommand(projectPath, ["commit", "-m", "replace tool with directory"]);
+      await runGitCommand(projectPath, [
+        "commit",
+        "-m",
+        "replace tool with directory",
+      ]);
 
       const snapshot = await git.getCommitSnapshot({
         projectPath,
@@ -2482,21 +2491,27 @@ describe("commit history operations", () => {
         context: 5,
       });
       expect(snapshot.status).toBe("ready");
-      const deletedFile = snapshot.files.find((file) => file.path === "bin/tool");
+      const deletedFile = snapshot.files.find(
+        (file) => file.path === "bin/tool",
+      );
       expect(deletedFile).toMatchObject({ status: "deleted" });
 
-      const bodies = await git.getCommitFileBodies({
-        projectPath,
-        documentId: snapshot.documentId,
-        commit: snapshot.commit.hash,
-        parent: snapshot.selectedParent,
-        context: 5,
-        files: [{ path: "bin/tool" }],
-      });
+      const bodies = materializeReviewResponse(
+        await git.getReviewDocumentFileBodies({
+          projectPath,
+          documentId: snapshot.documentId,
+          files: [{ path: "bin/tool" }].map((file) => file.path),
+          purpose: "visible",
+        }),
+      );
       const body = bodies.files["bin/tool"];
 
-      expect(body.rows).toContainEqual(expect.objectContaining({ kind: "del", text: "old" }));
-      expect(body.rows).not.toContainEqual(expect.objectContaining({ kind: "add", text: "new" }));
+      expect(body.rows).toContainEqual(
+        expect.objectContaining({ kind: "del", text: "old" }),
+      );
+      expect(body.rows).not.toContainEqual(
+        expect.objectContaining({ kind: "add", text: "new" }),
+      );
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
@@ -2506,17 +2521,19 @@ describe("commit history operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-history-prefix-rename-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
     const content = "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\n";
-    const renamedContent = "one\ntwo\nthree\nfour\nCHANGED\nsix\nseven\neight\n";
+    const renamedContent =
+      "one\ntwo\nthree\nfour\nCHANGED\nsix\nseven\neight\n";
 
     try {
       await initRepoWithCommit(projectPath);
       await fs.mkdir(path.join(projectPath, "bin"));
-      await fs.writeFile(path.join(projectPath, "bin", "tool"), content, "utf-8");
+      await fs.writeFile(
+        path.join(projectPath, "bin", "tool"),
+        content,
+        "utf-8",
+      );
       await runGitCommand(projectPath, ["add", "."]);
       await runGitCommand(projectPath, ["commit", "-m", "add tool file"]);
       await fs.rm(path.join(projectPath, "bin", "tool"));
@@ -2536,7 +2553,11 @@ describe("commit history operations", () => {
         Buffer.from([0, 1, 2, 3]),
       );
       await runGitCommand(projectPath, ["add", "-A"]);
-      await runGitCommand(projectPath, ["commit", "-m", "move tool below directory"]);
+      await runGitCommand(projectPath, [
+        "commit",
+        "-m",
+        "move tool below directory",
+      ]);
 
       const snapshot = await git.getCommitSnapshot({
         projectPath,
@@ -2544,7 +2565,9 @@ describe("commit history operations", () => {
         context: 5,
       });
       expect(snapshot.status).toBe("ready");
-      const renamedFile = snapshot.files.find((file) => file.path === "bin/tool/main.sh");
+      const renamedFile = snapshot.files.find(
+        (file) => file.path === "bin/tool/main.sh",
+      );
       expect(renamedFile).toMatchObject({
         status: "renamed",
         originalPath: "bin/tool",
@@ -2552,18 +2575,22 @@ describe("commit history operations", () => {
         deletions: 1,
       });
 
-      const bodies = await git.getCommitFileBodies({
-        projectPath,
-        documentId: snapshot.documentId,
-        commit: snapshot.commit.hash,
-        parent: snapshot.selectedParent,
-        context: 5,
-        files: [{ path: renamedFile.path, originalPath: renamedFile.originalPath }],
-      });
+      const bodies = materializeReviewResponse(
+        await git.getReviewDocumentFileBodies({
+          projectPath,
+          documentId: snapshot.documentId,
+          files: [
+            { path: renamedFile.path, originalPath: renamedFile.originalPath },
+          ].map((file) => file.path),
+          purpose: "visible",
+        }),
+      );
 
       const body = bodies.files[renamedFile.path];
       expect(body.bodyState).toBe("loaded");
-      expect(body.rows).toContainEqual(expect.objectContaining({ kind: "add", text: "CHANGED" }));
+      expect(body.rows).toContainEqual(
+        expect.objectContaining({ kind: "add", text: "CHANGED" }),
+      );
       expect(body.rows.some((row) => row.text === "sibling-alpha")).toBe(false);
 
       const comparisonSnapshot = await git.getComparisonSnapshot({
@@ -2576,19 +2603,27 @@ describe("commit history operations", () => {
       const comparisonRename = comparisonSnapshot.files.find(
         (file) => file.path === "bin/tool/main.sh",
       );
-      const comparisonBodies = await git.getComparisonFileBodies({
-        projectPath,
-        documentId: comparisonSnapshot.documentId,
-        effectiveFromHash: comparisonSnapshot.effectiveFromHash,
-        to: { kind: "revision", hash: comparisonSnapshot.to.hash },
-        files: [{ path: comparisonRename.path, originalPath: comparisonRename.originalPath }],
-      });
+      const comparisonBodies = materializeReviewResponse(
+        await git.getReviewDocumentFileBodies({
+          projectPath,
+          documentId: comparisonSnapshot.documentId,
+          files: [
+            {
+              path: comparisonRename.path,
+              originalPath: comparisonRename.originalPath,
+            },
+          ].map((file) => file.path),
+          purpose: "visible",
+        }),
+      );
       const comparisonBody = comparisonBodies.files[comparisonRename.path];
       expect(comparisonBody.bodyState).toBe("loaded");
       expect(comparisonBody.rows).toContainEqual(
         expect.objectContaining({ kind: "add", text: "CHANGED" }),
       );
-      expect(comparisonBody.rows.some((row) => row.text === "sibling-alpha")).toBe(false);
+      expect(
+        comparisonBody.rows.some((row) => row.text === "sibling-alpha"),
+      ).toBe(false);
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
@@ -2601,10 +2636,7 @@ describe("commit history operations", () => {
     const submoduleSource = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-history-submodule-source-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -2619,12 +2651,20 @@ describe("commit history operations", () => {
       ]);
       await runGitCommand(projectPath, ["commit", "-am", "add submodule"]);
 
-      await fs.appendFile(path.join(submoduleSource, "a.txt"), "two\n", "utf-8");
-      await runGitCommand(submoduleSource, ["commit", "-am", "update submodule"]);
-      const { stdout: submoduleHashOutput } = await runGitCommand(submoduleSource, [
-        "rev-parse",
-        "HEAD",
+      await fs.appendFile(
+        path.join(submoduleSource, "a.txt"),
+        "two\n",
+        "utf-8",
+      );
+      await runGitCommand(submoduleSource, [
+        "commit",
+        "-am",
+        "update submodule",
       ]);
+      const { stdout: submoduleHashOutput } = await runGitCommand(
+        submoduleSource,
+        ["rev-parse", "HEAD"],
+      );
       const submodulePath = path.join(projectPath, "vendor", "sub");
       await runGitCommand(submodulePath, [
         "-c",
@@ -2632,7 +2672,10 @@ describe("commit history operations", () => {
         "fetch",
         "origin",
       ]);
-      await runGitCommand(submodulePath, ["checkout", submoduleHashOutput.trim()]);
+      await runGitCommand(submodulePath, [
+        "checkout",
+        submoduleHashOutput.trim(),
+      ]);
       await runGitCommand(projectPath, ["add", "vendor/sub"]);
       await runGitCommand(projectPath, ["commit", "-m", "advance submodule"]);
       await runGitCommand(projectPath, ["config", "diff.submodule", "log"]);
@@ -2642,18 +2685,28 @@ describe("commit history operations", () => {
         commit: "HEAD",
       });
       expect(snapshot.status).toBe("ready");
-      const submoduleFile = snapshot.files.find((file) => file.path === "vendor/sub");
-      expect(submoduleFile).toMatchObject({ status: "modified", additions: 1, deletions: 1 });
-      const bodies = await git.getCommitFileBodies({
-        projectPath,
-        documentId: snapshot.documentId,
-        commit: snapshot.commit.hash,
-        parent: snapshot.selectedParent,
-        files: [{ path: "vendor/sub" }],
+      const submoduleFile = snapshot.files.find(
+        (file) => file.path === "vendor/sub",
+      );
+      expect(submoduleFile).toMatchObject({
+        status: "modified",
+        additions: 1,
+        deletions: 1,
       });
+      const bodies = materializeReviewResponse(
+        await git.getReviewDocumentFileBodies({
+          projectPath,
+          documentId: snapshot.documentId,
+          files: [{ path: "vendor/sub" }].map((file) => file.path),
+          purpose: "visible",
+        }),
+      );
       expect(bodies.files["vendor/sub"].bodyState).toBe("loaded");
       expect(bodies.files["vendor/sub"].rows).toContainEqual(
-        expect.objectContaining({ kind: "add", text: expect.stringContaining("Subproject commit") }),
+        expect.objectContaining({
+          kind: "add",
+          text: expect.stringContaining("Subproject commit"),
+        }),
       );
 
       const comparisonSnapshot = await git.getComparisonSnapshot({
@@ -2663,16 +2716,20 @@ describe("commit history operations", () => {
         mode: "direct",
       });
       expect(comparisonSnapshot.status).toBe("ready");
-      const comparisonBodies = await git.getComparisonFileBodies({
-        projectPath,
-        documentId: comparisonSnapshot.documentId,
-        effectiveFromHash: comparisonSnapshot.effectiveFromHash,
-        to: { kind: "revision", hash: comparisonSnapshot.to.hash },
-        files: [{ path: "vendor/sub" }],
-      });
+      const comparisonBodies = materializeReviewResponse(
+        await git.getReviewDocumentFileBodies({
+          projectPath,
+          documentId: comparisonSnapshot.documentId,
+          files: [{ path: "vendor/sub" }].map((file) => file.path),
+          purpose: "visible",
+        }),
+      );
       expect(comparisonBodies.files["vendor/sub"].bodyState).toBe("loaded");
       expect(comparisonBodies.files["vendor/sub"].rows).toContainEqual(
-        expect.objectContaining({ kind: "del", text: expect.stringContaining("Subproject commit") }),
+        expect.objectContaining({
+          kind: "del",
+          text: expect.stringContaining("Subproject commit"),
+        }),
       );
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
@@ -2684,30 +2741,37 @@ describe("commit history operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-history-type-change-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
       await fs.rm(path.join(projectPath, "a.txt"));
       await fs.symlink("target.txt", path.join(projectPath, "a.txt"));
       await runGitCommand(projectPath, ["add", "-A"]);
-      await runGitCommand(projectPath, ["commit", "-m", "replace file with link"]);
+      await runGitCommand(projectPath, [
+        "commit",
+        "-m",
+        "replace file with link",
+      ]);
 
-      const snapshot = await git.getCommitSnapshot({ projectPath, commit: "HEAD" });
+      const snapshot = await git.getCommitSnapshot({
+        projectPath,
+        commit: "HEAD",
+      });
       expect(snapshot.status).toBe("ready");
-      expect(snapshot.files.find((file) => file.path === "a.txt")).toMatchObject({
+      expect(
+        snapshot.files.find((file) => file.path === "a.txt"),
+      ).toMatchObject({
         status: "type-changed",
       });
-      const bodies = await git.getCommitFileBodies({
-        projectPath,
-        documentId: snapshot.documentId,
-        commit: snapshot.commit.hash,
-        parent: snapshot.selectedParent,
-        files: [{ path: "a.txt" }],
-      });
+      const bodies = materializeReviewResponse(
+        await git.getReviewDocumentFileBodies({
+          projectPath,
+          documentId: snapshot.documentId,
+          files: [{ path: "a.txt" }].map((file) => file.path),
+          purpose: "visible",
+        }),
+      );
       expect(bodies.files["a.txt"].bodyState).toBe("loaded");
       expect(bodies.files["a.txt"].rows).toContainEqual(
         expect.objectContaining({ kind: "del", text: "one" }),
@@ -2723,13 +2787,14 @@ describe("commit history operations", () => {
         mode: "direct",
       });
       expect(comparisonSnapshot.status).toBe("ready");
-      const comparisonBodies = await git.getComparisonFileBodies({
-        projectPath,
-        documentId: comparisonSnapshot.documentId,
-        effectiveFromHash: comparisonSnapshot.effectiveFromHash,
-        to: { kind: "revision", hash: comparisonSnapshot.to.hash },
-        files: [{ path: "a.txt" }],
-      });
+      const comparisonBodies = materializeReviewResponse(
+        await git.getReviewDocumentFileBodies({
+          projectPath,
+          documentId: comparisonSnapshot.documentId,
+          files: [{ path: "a.txt" }].map((file) => file.path),
+          purpose: "visible",
+        }),
+      );
       expect(comparisonBodies.files["a.txt"].rows).toContainEqual(
         expect.objectContaining({ kind: "add", text: "target.txt" }),
       );
@@ -2763,10 +2828,7 @@ describe("comparison operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-comparison-invalid-revision-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -2803,10 +2865,7 @@ describe("comparison operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-comparison-corrupt-ref-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -2842,10 +2901,7 @@ describe("comparison operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-comparison-revisions-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -2879,14 +2935,14 @@ describe("comparison operations", () => {
         }),
       );
 
-      const bodies = await git.getComparisonFileBodies({
-        projectPath,
-        documentId: snapshot.documentId,
-        effectiveFromHash: snapshot.effectiveFromHash,
-        to: { kind: "revision", hash: snapshot.to.hash },
-        context: 5,
-        files: [{ path: "a.txt" }],
-      });
+      const bodies = materializeReviewResponse(
+        await git.getReviewDocumentFileBodies({
+          projectPath,
+          documentId: snapshot.documentId,
+          files: [{ path: "a.txt" }].map((file) => file.path),
+          purpose: "visible",
+        }),
+      );
       expect(bodies.status).toBe("ready");
       expect(bodies.files["a.txt"].bodyFingerprint).toBe(
         snapshot.files[0].bodyFingerprint,
@@ -2905,10 +2961,7 @@ describe("comparison operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-comparison-revision-freshness-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -2953,7 +3006,11 @@ describe("comparison operations", () => {
         to: { kind: "revision", hash: snapshot.to.hash },
       });
 
-      await fs.writeFile(path.join(projectPath, "a.txt"), "rewritten\n", "utf-8");
+      await fs.writeFile(
+        path.join(projectPath, "a.txt"),
+        "rewritten\n",
+        "utf-8",
+      );
       await runGitCommand(projectPath, ["add", "a.txt"]);
       await runGitCommand(projectPath, ["commit", "--amend", "--no-edit"]);
       const { stdout: rewrittenOutput } = await runGitCommand(projectPath, [
@@ -3002,12 +3059,12 @@ describe("comparison operations", () => {
 
   it("detects a moved From revision in a Working Tree comparison", async () => {
     const projectPath = await fs.mkdtemp(
-      path.join(os.tmpdir(), "garcon-git-comparison-working-tree-base-freshness-"),
+      path.join(
+        os.tmpdir(),
+        "garcon-git-comparison-working-tree-base-freshness-",
+      ),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -3069,10 +3126,7 @@ describe("comparison operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-comparison-merge-base-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -3121,10 +3175,7 @@ describe("comparison operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-comparison-empty-tree-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -3149,10 +3200,7 @@ describe("comparison operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-comparison-working-tree-retry-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -3184,10 +3232,7 @@ describe("comparison operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-comparison-working-tree-changing-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -3220,10 +3265,7 @@ describe("comparison operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-comparison-conflict-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -3262,10 +3304,7 @@ describe("comparison operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-comparison-working-tree-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -3320,16 +3359,19 @@ describe("comparison operations", () => {
         snapshot.files.find((file) => file.path === "new.txt")?.additions,
       ).toBe(2);
 
-      const bodies = await git.getComparisonFileBodies({
-        projectPath,
-        documentId: snapshot.documentId,
-        effectiveFromHash: snapshot.effectiveFromHash,
-        to: { kind: "working-tree", fingerprint: snapshot.to.fingerprint },
-        files: snapshot.files.map((file) => ({
-          path: file.path,
-          originalPath: file.originalPath,
-        })),
-      });
+      const bodies = materializeReviewResponse(
+        await git.getReviewDocumentFileBodies({
+          projectPath,
+          documentId: snapshot.documentId,
+          files: snapshot.files
+            .map((file) => ({
+              path: file.path,
+              originalPath: file.originalPath,
+            }))
+            .map((file) => file.path),
+          purpose: "visible",
+        }),
+      );
       expect(bodies.status).toBe("ready");
       expect(bodies.files["a.txt"].rows).toContainEqual(
         expect.objectContaining({ kind: "add", text: "final" }),
@@ -3346,13 +3388,14 @@ describe("comparison operations", () => {
         "changed again\n",
         "utf-8",
       );
-      const stale = await git.getComparisonFileBodies({
-        projectPath,
-        documentId: snapshot.documentId,
-        effectiveFromHash: snapshot.effectiveFromHash,
-        to: { kind: "working-tree", fingerprint: snapshot.to.fingerprint },
-        files: [{ path: "a.txt" }],
-      });
+      const stale = materializeReviewResponse(
+        await git.getReviewDocumentFileBodies({
+          projectPath,
+          documentId: snapshot.documentId,
+          files: [{ path: "a.txt" }].map((file) => file.path),
+          purpose: "visible",
+        }),
+      );
       expect(stale.status).toBe("stale");
       expect(stale.actualFingerprint).not.toBe(snapshot.to.fingerprint);
     } finally {
@@ -3364,10 +3407,7 @@ describe("comparison operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-comparison-body-race-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -3394,14 +3434,15 @@ describe("comparison operations", () => {
         return length;
       };
 
-      const bodies = await git.getComparisonFileBodies({
-        projectPath,
-        documentId: snapshot.documentId,
-        effectiveFromHash: snapshot.effectiveFromHash,
-        to: { kind: "working-tree", fingerprint: snapshot.to.fingerprint },
-        files: [{ path: "a.txt" }],
-        trace,
-      });
+      const bodies = materializeReviewResponse(
+        await git.getReviewDocumentFileBodies({
+          projectPath,
+          documentId: snapshot.documentId,
+          files: [{ path: "a.txt" }].map((file) => file.path),
+          trace,
+          purpose: "visible",
+        }),
+      );
 
       expect(mutated).toBe(true);
       expect(bodies.status).toBe("stale");
@@ -3415,10 +3456,7 @@ describe("comparison operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-comparison-index-deleted-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -3434,13 +3472,14 @@ describe("comparison operations", () => {
       expect(snapshot.files).toEqual([
         expect.objectContaining({ path: "a.txt", status: "deleted" }),
       ]);
-      const bodies = await git.getComparisonFileBodies({
-        projectPath,
-        documentId: snapshot.documentId,
-        effectiveFromHash: snapshot.effectiveFromHash,
-        to: { kind: "working-tree", fingerprint: snapshot.to.fingerprint },
-        files: [{ path: "a.txt" }],
-      });
+      const bodies = materializeReviewResponse(
+        await git.getReviewDocumentFileBodies({
+          projectPath,
+          documentId: snapshot.documentId,
+          files: [{ path: "a.txt" }].map((file) => file.path),
+          purpose: "visible",
+        }),
+      );
 
       expect(bodies.status).toBe("ready");
       expect(bodies.files["a.txt"].rows).toContainEqual(
@@ -3458,14 +3497,14 @@ describe("comparison operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-comparison-historical-deletion-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
-      const { stdout: fromHash } = await runGitCommand(projectPath, ["rev-parse", "HEAD"]);
+      const { stdout: fromHash } = await runGitCommand(projectPath, [
+        "rev-parse",
+        "HEAD",
+      ]);
       await runGitCommand(projectPath, ["rm", "--cached", "a.txt"]);
       await runGitCommand(projectPath, ["commit", "-m", "stop tracking file"]);
       await fs.writeFile(path.join(projectPath, "a.txt"), "changed\n", "utf-8");
@@ -3481,19 +3520,22 @@ describe("comparison operations", () => {
         expect.objectContaining({ path: "a.txt", status: "deleted" }),
       ]);
 
-      const bodies = await git.getComparisonFileBodies({
-        projectPath,
-        documentId: snapshot.documentId,
-        effectiveFromHash: snapshot.effectiveFromHash,
-        to: { kind: "working-tree", fingerprint: snapshot.to.fingerprint },
-        files: [{ path: "a.txt" }],
-      });
+      const bodies = materializeReviewResponse(
+        await git.getReviewDocumentFileBodies({
+          projectPath,
+          documentId: snapshot.documentId,
+          files: [{ path: "a.txt" }].map((file) => file.path),
+          purpose: "visible",
+        }),
+      );
 
       expect(bodies.status).toBe("ready");
       expect(bodies.files["a.txt"].rows).toContainEqual(
         expect.objectContaining({ kind: "del", text: "one" }),
       );
-      expect(bodies.files["a.txt"].rows.some((row) => row.kind === "add")).toBe(false);
+      expect(bodies.files["a.txt"].rows.some((row) => row.kind === "add")).toBe(
+        false,
+      );
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
@@ -3503,10 +3545,7 @@ describe("comparison operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-comparison-unborn-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await runGitCommand(projectPath, ["init"]);
@@ -3535,10 +3574,7 @@ describe("comparison operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-comparison-equal-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -3563,10 +3599,7 @@ describe("comparison operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-comparison-unrelated-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -3600,10 +3633,7 @@ describe("comparison operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-comparison-untracked-limits-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -3652,10 +3682,7 @@ describe("comparison operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-comparison-untracked-budget-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -3693,10 +3720,7 @@ describe("commit revert operations", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-revert-commit-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -3739,10 +3763,7 @@ describe("getTargetCandidates", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-targets-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -3769,10 +3790,7 @@ describe("worktree listing metadata", () => {
     );
     const linkedPath = `${projectPath}-Zed`;
     const missingPath = `${projectPath}-apple`;
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -3895,18 +3913,11 @@ describe("worktree listing metadata", () => {
     );
     const projectPath = path.join(fixtureRoot, "project");
     const gitDir = path.join(fixtureRoot, "repository.git");
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await fs.mkdir(projectPath);
-      await runGitCommand(projectPath, [
-        "init",
-        "--separate-git-dir",
-        gitDir,
-      ]);
+      await runGitCommand(projectPath, ["init", "--separate-git-dir", gitDir]);
       const trace = [];
       const { worktrees } = await git.getWorktrees({ projectPath, trace });
 
@@ -3921,14 +3932,14 @@ describe("worktree listing metadata", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-worktree-invalid-admin-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
-      await fs.writeFile(path.join(projectPath, ".git", "worktrees"), "invalid");
+      await fs.writeFile(
+        path.join(projectPath, ".git", "worktrees"),
+        "invalid",
+      );
       const trace = [];
       const { worktrees } = await git.getWorktrees({ projectPath, trace });
 
@@ -3944,10 +3955,7 @@ describe("worktree listing metadata", () => {
       await fs.mkdtemp(path.join(os.tmpdir(), "garcon-worktree-symlink-head-")),
     );
     const linkedPath = `${projectPath}-linked`;
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithLinkedFeature(projectPath, linkedPath);
@@ -3982,10 +3990,7 @@ describe("worktree listing metadata", () => {
       await fs.mkdtemp(path.join(os.tmpdir(), "garcon-worktree-bare-main-")),
     );
     const linkedPath = `${projectPath}-linked`;
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithLinkedFeature(projectPath, linkedPath);
@@ -4015,10 +4020,7 @@ describe("worktree listing metadata", () => {
       const projectPath = await fs.mkdtemp(
         path.join(os.tmpdir(), "garcon-worktree-reftable-"),
       );
-      const git = createGitService({
-        agents: mockAgents,
-        classifyGitError: mockClassifyGitError,
-      });
+      const git = createGitOperations();
 
       try {
         await runGitCommand(projectPath, ["init", "--ref-format=reftable"]);
@@ -4027,11 +4029,7 @@ describe("worktree listing metadata", () => {
           "user.email",
           "test@example.com",
         ]);
-        await runGitCommand(projectPath, [
-          "config",
-          "user.name",
-          "Test User",
-        ]);
+        await runGitCommand(projectPath, ["config", "user.name", "Test User"]);
         await fs.writeFile(path.join(projectPath, "a.txt"), "one\n", "utf-8");
         await runGitCommand(projectPath, ["add", "a.txt"]);
         await runGitCommand(projectPath, ["commit", "-m", "initial"]);
@@ -4040,7 +4038,9 @@ describe("worktree listing metadata", () => {
         const { worktrees } = await git.getWorktrees({ projectPath, trace });
 
         expect(worktrees[0].branch).not.toBe(".invalid");
-        expect(trace.some((entry) => entry.args.includes("worktree"))).toBe(true);
+        expect(trace.some((entry) => entry.args.includes("worktree"))).toBe(
+          true,
+        );
       } finally {
         await fs.rm(projectPath, { recursive: true, force: true });
       }
@@ -4054,10 +4054,7 @@ describe("worktree creation", () => {
       await fs.mkdtemp(path.join(os.tmpdir(), "garcon-worktree-no-track-")),
     );
     const linkedPath = `${projectPath}-feature`;
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -4104,10 +4101,7 @@ describe("getQuickSummary", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-quick-summary-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -4156,10 +4150,7 @@ describe("getQuickSummary", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-quick-clean-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -4186,10 +4177,7 @@ describe("getQuickSummary", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-quick-unborn-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await runGitCommand(projectPath, ["init"]);
@@ -4212,10 +4200,7 @@ describe("getQuickSummary", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-quick-not-repo-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       const summary = await git.getQuickSummary({ projectPath });
@@ -4235,10 +4220,7 @@ describe("getQuickSummary", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-quick-untracked-count-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -4293,10 +4275,7 @@ describe("getWorkbenchSnapshot", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-snapshot-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -4339,10 +4318,7 @@ describe("getWorkbenchSnapshot", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-tree-dir-stats-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -4417,10 +4393,7 @@ describe("getWorkbenchSnapshot", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-not-repo-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       const snapshot = await git.getWorkbenchSnapshot({
@@ -4447,10 +4420,7 @@ describe("getWorkbenchSnapshot", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-tree-tab-path-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
     const fileName = "a\tb.txt";
 
     try {
@@ -4493,10 +4463,7 @@ describe("getWorkbenchSnapshot", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-tree-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await runGitCommand(projectPath, ["init"]);
@@ -4563,10 +4530,7 @@ describe("getWorkbenchSnapshot", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-mixed-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -4611,10 +4575,7 @@ describe("getWorkbenchSnapshot", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-staged-text-worktree-binary-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -4641,14 +4602,13 @@ describe("getWorkbenchSnapshot", () => {
       expect(summary.isBinary).toBe(false);
       expect(summary.bodyState).toBe("unloaded");
 
-      const body = (
-        await git.getReviewFileBodies({
+      const body = materializeReviewResponse(
+        await git.getReviewDocumentFileBodies({
           projectPath,
           documentId: snapshot.reviewSummary.documentId,
           files: ["a.txt"],
-          mode: "staged",
-          context: 5,
-        })
+          purpose: "visible",
+        }),
       ).files["a.txt"];
       expect(body.bodyState).toBe("loaded");
       expect(body.isBinary).toBe(false);
@@ -4663,10 +4623,7 @@ describe("getWorkbenchSnapshot", () => {
   });
 
   it("uses body-compatible fingerprints for common review states", async () => {
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
     const cases = [
       {
         name: "modified tracked path with spaces",
@@ -4756,10 +4713,7 @@ describe("getWorkingTreeFingerprint", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-freshness-baseline-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -4788,10 +4742,7 @@ describe("getWorkingTreeFingerprint", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-freshness-changes-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -4856,10 +4807,7 @@ describe("getWorkingTreeFingerprint", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-freshness-not-repo-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       const result = await git.getWorkingTreeFingerprint({ projectPath });
@@ -4879,10 +4827,7 @@ describe("review document file bodies", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-rendered-row-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -4892,13 +4837,20 @@ describe("review document file bodies", () => {
         "utf-8",
       );
 
-      const result = await git.getReviewFileBodies({
+      const workingSnapshot = await git.getWorkbenchSnapshot({
         projectPath,
-        documentId: "doc",
-        files: ["a.txt"],
         mode: "working",
         context: 3,
       });
+      expect(workingSnapshot.status).toBe("ready");
+      const result = materializeReviewResponse(
+        await git.getReviewDocumentFileBodies({
+          projectPath,
+          documentId: workingSnapshot.reviewSummary.documentId,
+          files: ["a.txt"],
+          purpose: "visible",
+        }),
+      );
       const review = result.files["a.txt"];
       const lastRow = review.rows[review.rows.length - 1];
 
@@ -4920,10 +4872,7 @@ describe("review document file bodies", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-binary-delete-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -4935,13 +4884,20 @@ describe("review document file bodies", () => {
       await runGitCommand(projectPath, ["commit", "-m", "add binary"]);
       await fs.rm(path.join(projectPath, "blob.bin"));
 
-      const result = await git.getReviewFileBodies({
+      const workingSnapshot = await git.getWorkbenchSnapshot({
         projectPath,
-        documentId: "doc",
-        files: ["blob.bin"],
         mode: "working",
         context: 3,
       });
+      expect(workingSnapshot.status).toBe("ready");
+      const result = materializeReviewResponse(
+        await git.getReviewDocumentFileBodies({
+          projectPath,
+          documentId: workingSnapshot.reviewSummary.documentId,
+          files: ["blob.bin"],
+          purpose: "visible",
+        }),
+      );
       const review = result.files["blob.bin"];
 
       expect(review.bodyState).toBe("binary");
@@ -4957,10 +4913,7 @@ describe("review document file bodies", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-batch-spaces-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -4969,13 +4922,20 @@ describe("review document file bodies", () => {
       await runGitCommand(projectPath, ["commit", "-m", "add spaced path"]);
       await fs.writeFile(path.join(projectPath, "a b.txt"), "new\n", "utf-8");
 
-      const batch = await git.getReviewFileBodies({
+      const workingSnapshot = await git.getWorkbenchSnapshot({
         projectPath,
-        documentId: "doc",
-        files: ["a b.txt"],
         mode: "working",
         context: 3,
       });
+      expect(workingSnapshot.status).toBe("ready");
+      const batch = materializeReviewResponse(
+        await git.getReviewDocumentFileBodies({
+          projectPath,
+          documentId: workingSnapshot.reviewSummary.documentId,
+          files: ["a b.txt"],
+          purpose: "visible",
+        }),
+      );
       const review = batch.files["a b.txt"];
 
       expect(batch.errors).toEqual({});
@@ -4994,10 +4954,7 @@ describe("review document file bodies", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-preview-long-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -5009,13 +4966,20 @@ describe("review document file bodies", () => {
         "utf-8",
       );
 
-      const batch = await git.getReviewFileBodies({
+      const workingSnapshot = await git.getWorkbenchSnapshot({
         projectPath,
-        documentId: "doc",
-        files: ["long.md"],
         mode: "working",
         context: 3,
       });
+      expect(workingSnapshot.status).toBe("ready");
+      const batch = materializeReviewResponse(
+        await git.getReviewDocumentFileBodies({
+          projectPath,
+          documentId: workingSnapshot.reviewSummary.documentId,
+          files: ["long.md"],
+          purpose: "visible",
+        }),
+      );
       const review = batch.files["long.md"];
 
       expect(batch.errors).toEqual({});
@@ -5033,10 +4997,7 @@ describe("review document file bodies", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-review-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -5048,23 +5009,33 @@ describe("review document file bodies", () => {
       await runGitCommand(projectPath, ["add", "a.txt"]);
       await fs.rm(path.join(projectPath, "a.txt"));
 
-      const staged = (
-        await git.getReviewFileBodies({
+      const stagedSnapshot = await git.getWorkbenchSnapshot({
+        projectPath,
+        mode: "staged",
+        context: 3,
+      });
+      expect(stagedSnapshot.status).toBe("ready");
+      const staged = materializeReviewResponse(
+        await git.getReviewDocumentFileBodies({
           projectPath,
-          documentId: "doc",
+          documentId: stagedSnapshot.reviewSummary.documentId,
           files: ["a.txt"],
-          mode: "staged",
-          context: 3,
-        })
+          purpose: "visible",
+        }),
       ).files["a.txt"];
-      const working = (
-        await git.getReviewFileBodies({
+      const workingSnapshot = await git.getWorkbenchSnapshot({
+        projectPath,
+        mode: "working",
+        context: 3,
+      });
+      expect(workingSnapshot.status).toBe("ready");
+      const working = materializeReviewResponse(
+        await git.getReviewDocumentFileBodies({
           projectPath,
-          documentId: "doc",
+          documentId: workingSnapshot.reviewSummary.documentId,
           files: ["a.txt"],
-          mode: "working",
-          context: 3,
-        })
+          purpose: "visible",
+        }),
       ).files["a.txt"];
 
       expect(staged.bodyState).toBe("loaded");
@@ -5091,10 +5062,7 @@ describe("review document file bodies", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-hard-limit-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -5107,13 +5075,20 @@ describe("review document file bodies", () => {
         "utf-8",
       );
 
-      const batch = await git.getReviewFileBodies({
+      const workingSnapshot = await git.getWorkbenchSnapshot({
         projectPath,
-        documentId: "doc",
-        files: ["huge.md"],
         mode: "working",
         context: 3,
       });
+      expect(workingSnapshot.status).toBe("ready");
+      const batch = materializeReviewResponse(
+        await git.getReviewDocumentFileBodies({
+          projectPath,
+          documentId: workingSnapshot.reviewSummary.documentId,
+          files: ["huge.md"],
+          purpose: "visible",
+        }),
+      );
       const review = batch.files["huge.md"];
 
       expect(review.bodyState).toBe("too-large");
@@ -5130,10 +5105,7 @@ describe("git ref checkout and branch creation", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-refs-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -5197,10 +5169,7 @@ describe("git ref checkout and branch creation", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-ref-search-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -5237,10 +5206,7 @@ describe("git ref checkout and branch creation", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-ref-sorting-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
     const oldTimestamp = "2024-01-01T00:00:00Z";
     const newTimestamp = "2024-03-01T00:00:00Z";
     const tagTimestamp = "2024-04-01T00:00:00Z";
@@ -5428,10 +5394,7 @@ describe("git ref checkout and branch creation", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-ref-unborn-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await runGitCommand(projectPath, ["init"]);
@@ -5466,10 +5429,7 @@ describe("git ref checkout and branch creation", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-ref-detached-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -5516,10 +5476,7 @@ describe("git ref checkout and branch creation", () => {
     const missingPath = path.join(fixtureRoot, "missing");
     const notRepositoryMessage =
       'Git is not initialized in this directory. Initialize a repository with "git init" before using source control actions.';
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await fs.mkdir(nonRepositoryPath);
@@ -5549,10 +5506,7 @@ describe("git ref checkout and branch creation", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-ref-abort-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -5570,10 +5524,7 @@ describe("git ref checkout and branch creation", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-ref-commands-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -5600,9 +5551,7 @@ describe("git ref checkout and branch creation", () => {
         };
         try {
           const { refs } = await git.getRefs({ projectPath, ...options });
-          const refCommand = commands.find(
-            ([name]) => name === "for-each-ref",
-          );
+          const refCommand = commands.find(([name]) => name === "for-each-ref");
           return { commands, refCommand, refs };
         } finally {
           Bun.spawn = originalSpawn;
@@ -5649,9 +5598,7 @@ describe("git ref checkout and branch creation", () => {
       });
       expect(descendingQuery.commands).toHaveLength(3);
       expect(descendingQuery.refCommand).toContain("--sort=refname");
-      expect(descendingQuery.refCommand).toContain(
-        "--sort=-refname:lstrip=2",
-      );
+      expect(descendingQuery.refCommand).toContain("--sort=-refname:lstrip=2");
       expect(descendingQuery.refs.map((ref) => ref.name)).toEqual([
         "zeta",
         "main",
@@ -5674,10 +5621,7 @@ describe("git ref checkout and branch creation", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-local-checkout-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -5701,10 +5645,7 @@ describe("git ref checkout and branch creation", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-remote-checkout-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -5741,10 +5682,7 @@ describe("git ref checkout and branch creation", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-tag-collision-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -5792,10 +5730,7 @@ describe("git ref checkout and branch creation", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-branch-base-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -5845,10 +5780,7 @@ describe("porcelain ref validation", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-ref-checkout-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -5874,10 +5806,7 @@ describe("porcelain ref validation", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-ref-create-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -5913,10 +5842,7 @@ describe("porcelain ref validation", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-ref-worktree-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -5951,10 +5877,7 @@ describe("porcelain ref validation", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-ref-push-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -5987,10 +5910,7 @@ describe("porcelain ref validation", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-ref-blame-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -6010,10 +5930,7 @@ describe("porcelain ref validation", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-ref-compare-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -6040,10 +5957,7 @@ describe("porcelain conflict and comparison robustness", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-conflict-limit-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -6114,10 +6028,7 @@ describe("porcelain conflict and comparison robustness", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-conflict-rename-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
 
     try {
       await initRepoWithCommit(projectPath);
@@ -6128,14 +6039,19 @@ describe("porcelain conflict and comparison robustness", () => {
       await fs.writeFile(path.join(projectPath, "UU a.txt"), "one\n", "utf-8");
       await runGitCommand(projectPath, ["add", "UU a.txt"]);
       await runGitCommand(projectPath, ["commit", "-m", "add named source"]);
-      await fs.copyFile(path.join(projectPath, "UU a.txt"), path.join(projectPath, "dst.txt"));
+      await fs.copyFile(
+        path.join(projectPath, "UU a.txt"),
+        path.join(projectPath, "dst.txt"),
+      );
       await runGitCommand(projectPath, ["add", "dst.txt"]);
       await runGitCommand(projectPath, ["commit", "-m", "add dst"]);
       await runGitCommand(projectPath, ["rm", "--cached", "dst.txt"]);
       await runGitCommand(projectPath, ["add", "-N", "dst.txt"]);
       await fs.rm(path.join(projectPath, "UU a.txt"));
-      expect((await runGitCommand(projectPath, ["status", "--porcelain", "-z"])).stdout)
-        .toBe("DR dst.txt\0UU a.txt\0");
+      expect(
+        (await runGitCommand(projectPath, ["status", "--porcelain", "-z"]))
+          .stdout,
+      ).toBe("DR dst.txt\0UU a.txt\0");
 
       const { conflicts } = await git.getConflicts({ projectPath });
 
@@ -6149,10 +6065,7 @@ describe("porcelain conflict and comparison robustness", () => {
     const projectPath = await fs.mkdtemp(
       path.join(os.tmpdir(), "garcon-git-compare-z-"),
     );
-    const git = createGitService({
-      agents: mockAgents,
-      classifyGitError: mockClassifyGitError,
-    });
+    const git = createGitOperations();
     const tabbedPath = "a\tb.txt";
     const renamedPath = "c\td.txt";
 
@@ -6195,13 +6108,16 @@ describe("porcelain conflict and comparison robustness", () => {
         }),
       );
 
-      const bodies = await git.getComparisonFileBodies({
-        projectPath,
-        documentId: compare.documentId,
-        effectiveFromHash: compare.effectiveFromHash,
-        to: { kind: "revision", hash: compare.to.hash },
-        files: [{ path: renamedPath, originalPath: tabbedPath }],
-      });
+      const bodies = materializeReviewResponse(
+        await git.getReviewDocumentFileBodies({
+          projectPath,
+          documentId: compare.documentId,
+          files: [{ path: renamedPath, originalPath: tabbedPath }].map(
+            (file) => file.path,
+          ),
+          purpose: "visible",
+        }),
+      );
       expect(bodies.files[renamedPath]).toMatchObject({
         path: renamedPath,
         bodyFingerprint: compare.files[0].bodyFingerprint,
@@ -6212,76 +6128,5 @@ describe("porcelain conflict and comparison robustness", () => {
     } finally {
       await fs.rm(projectPath, { recursive: true, force: true });
     }
-  });
-});
-
-describe("toHttpError", () => {
-  const git = createGitService({
-    agents: mockAgents,
-    classifyGitError: mockClassifyGitError,
-  });
-
-  it("maps INVALID_INPUT GitDomainError to 400", async () => {
-    const err = new GitDomainError("INVALID_INPUT", "Missing field");
-    const response = git.toHttpError(err);
-    expect(response.status).toBe(400);
-    const body = await response.json();
-    expect(body.error).toBe("Missing field");
-  });
-
-  it("maps NOT_REPO GitDomainError to 400", async () => {
-    const err = new GitDomainError("NOT_REPO", "Not a repo");
-    const response = git.toHttpError(err);
-    expect(response.status).toBe(400);
-  });
-
-  it("maps AUTH_FAILED GitDomainError to 401", async () => {
-    const err = new GitDomainError("AUTH_FAILED", "Auth failed");
-    const response = git.toHttpError(err);
-    expect(response.status).toBe(401);
-  });
-
-  it("maps SERVICE_BUSY GitDomainError to a retryable 503", async () => {
-    const err = new GitDomainError("SERVICE_BUSY", "Try again shortly");
-    const response = git.toHttpError(err);
-    expect(response.status).toBe(503);
-    expect(await response.json()).toEqual({
-      success: false,
-      error: "Try again shortly",
-      errorCode: "SERVICE_BUSY",
-      retryable: true,
-    });
-  });
-
-  it("maps unknown GitDomainError codes to 500", async () => {
-    const err = new GitDomainError("SOME_OTHER", "Other error");
-    const response = git.toHttpError(err);
-    expect(response.status).toBe(500);
-  });
-
-  it("maps commit message timeout domain code to 504 + typed errorCode", async () => {
-    const err = new GitDomainError("COMMIT_MESSAGE_TIMEOUT", "Timed out");
-    const response = git.toHttpError(err);
-    expect(response.status).toBe(504);
-    const body = await response.json();
-    expect(body.error).toBe("Timed out");
-    expect(body.errorCode).toBe("commit_message_timeout");
-  });
-
-  it("delegates non-GitDomainError to classifier", async () => {
-    const err = new Error("random failure");
-    const response = git.toHttpError(err);
-    expect(response.status).toBe(500);
-    const body = await response.json();
-    expect(body.error).toBe("random failure");
-  });
-
-  it("includes details from classifier when available", async () => {
-    const err = new Error("Could not resolve hostname github.com");
-    const response = git.toHttpError(err);
-    expect(response.status).toBe(502);
-    const body = await response.json();
-    expect(body.error).toBe("Could not reach the remote host.");
-    expect(body.details).toBe("Verify network access.");
   });
 });

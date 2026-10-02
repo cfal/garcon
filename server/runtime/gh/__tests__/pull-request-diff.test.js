@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { parseMultiFileDiffPatches } from '../diff-engine.js';
+import { parseMultiFileDiffPatches } from '../pull-request-diff.js';
 
 const SAMPLE_DIFF = `diff --git a/src/added.ts b/src/added.ts
 new file mode 100644
