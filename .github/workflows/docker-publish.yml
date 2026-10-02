@@ -111,9 +111,42 @@ jobs:
           fi
           echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
 
+  smoke:
+    name: Verify Controller And Executor Image
+    needs: publish_sha
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull and verify published image
+        env:
+          DIGEST: ${{ needs.publish_sha.outputs.digest }}
+        run: |
+          docker pull "${IMAGE}@${DIGEST}"
+          bun run docker:smoke "${IMAGE}@${DIGEST}"
+
   promote_main:
     name: Advance Main Tag
-    needs: publish_sha
+    needs: [publish_sha, smoke]
     runs-on: ubuntu-24.04
     concurrency:
       group: docker-publish-main-tag
