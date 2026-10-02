@@ -1,9 +1,24 @@
 import { connect, createServer, type AddressInfo, type Socket } from 'node:net';
 
+type ProxyDirection = 'toTarget' | 'fromTarget';
+
+export interface ProxyConnection {
+  readonly id: number;
+  readonly connected: boolean;
+  readonly received: Readonly<Record<ProxyDirection, number>>;
+  throttle(bytesPerSecond: number): void;
+  blackhole(): void;
+  hold(direction?: ProxyDirection): void;
+  restore(): void;
+  disconnect(): void;
+  waitForBytes(direction: ProxyDirection, minimum: number): Promise<void>;
+}
+
 /** Faults the encrypted byte stream without stopping either endpoint process. */
 export async function tcpLinkProxy(target: URL) {
   const sockets = new Set<Socket>();
   const timers = new Set<ReturnType<typeof setTimeout>>();
+  const paths = new Map<number, ProxyConnection>();
   let rate: number | null = null;
   let silent = false;
   let refusing = false;
@@ -11,13 +26,20 @@ export async function tcpLinkProxy(target: URL) {
   let connections = 0;
   const server = createServer(client => {
     if (refusing) { client.destroy(); return; }
-    connections++;
+    const id = ++connections;
     const upstream = connect(Number(target.port), target.hostname);
     sockets.add(client); sockets.add(upstream);
+    const mode: { rate: number | null; silent: boolean; holding: ProxyDirection | 'both' | null } = { rate, silent, holding: null };
+    const held = new Map<Socket, () => void>();
+    const received = { toTarget: 0, fromTarget: 0 };
+    const waiters = new Set<{ direction: ProxyDirection; minimum: number; resolve(): void; reject(error: Error): void }>();
     const payloadEnds = webSocketPayloadEnds();
     const forward = (source: Socket, destination: Socket) => {
+      const direction = destination === upstream ? 'toTarget' : 'fromTarget';
       source.on('data', (chunk: Buffer) => {
-        if (silent) return;
+        received[direction] += chunk.length;
+        for (const waiter of waiters) if (received[waiter.direction] >= waiter.minimum) waiter.resolve();
+        if (mode.silent) return;
         if (destination === upstream) {
           const [end] = payloadEnds(chunk);
           if (corrupting && end !== undefined) {
@@ -30,15 +52,16 @@ export async function tcpLinkProxy(target: URL) {
         let offset = 0;
         const flush = () => {
           if (source.destroyed || destination.destroyed) return;
-          if (silent) { source.resume(); return; }
-          const end = Math.min(chunk.length, offset + (rate === null ? chunk.length : Math.max(1, Math.floor(rate / 8))));
+          if (mode.holding === 'both' || mode.holding === direction) { held.set(source, flush); return; }
+          if (mode.silent) { source.resume(); return; }
+          const end = Math.min(chunk.length, offset + (mode.rate === null ? chunk.length : Math.max(1, Math.floor(mode.rate / 8))));
           const writable = destination.write(chunk.subarray(offset, end));
           offset = end;
           const next = () => {
             if (offset < chunk.length) flush();
             else source.resume();
           };
-          if (rate !== null) {
+          if (mode.rate !== null) {
             const timer = setTimeout(() => { timers.delete(timer); next(); }, 125);
             timers.add(timer);
           } else if (writable) next();
@@ -49,11 +72,39 @@ export async function tcpLinkProxy(target: URL) {
     };
     forward(client, upstream); forward(upstream, client);
     const close = () => {
+      paths.delete(id);
+      held.clear();
+      for (const waiter of waiters) waiter.reject(new Error('Captured proxy connection closed'));
       sockets.delete(client); sockets.delete(upstream);
       client.destroy(); upstream.destroy();
     };
     client.on('close', close); upstream.on('close', close);
     client.on('error', close); upstream.on('error', close);
+    paths.set(id, {
+      id,
+      get connected() { return !client.destroyed && !upstream.destroyed; },
+      get received() { return { ...received }; },
+      throttle(bytesPerSecond) { mode.rate = bytesPerSecond; },
+      blackhole() { mode.silent = true; },
+      hold(direction) { mode.holding = direction ?? 'both'; },
+      restore() {
+        mode.silent = false; mode.holding = null; mode.rate = null;
+        const pending = [...held.values()];
+        held.clear();
+        for (const flush of pending) flush();
+      },
+      disconnect: close,
+      waitForBytes(direction, minimum) {
+        if (received[direction] >= minimum) return Promise.resolve();
+        if (client.destroyed || upstream.destroyed) return Promise.reject(new Error('Captured proxy connection closed'));
+        return new Promise((resolve, reject) => {
+          const finish = () => { clearTimeout(timer); waiters.delete(waiter); };
+          const waiter = { direction, minimum, resolve() { finish(); resolve(); }, reject(error: Error) { finish(); reject(error); } };
+          const timer = setTimeout(() => waiter.reject(new Error('Proxy traffic was not observed')), 5_000);
+          waiters.add(waiter);
+        });
+      },
+    });
   });
   await new Promise<void>(resolve => server.listen(0, '0.0.0.0', resolve));
   const url = new URL(target.href);
@@ -62,12 +113,18 @@ export async function tcpLinkProxy(target: URL) {
   return {
     url: url.href,
     get connections() { return connections; },
-    throttle(bytesPerSecond: number) { rate = bytesPerSecond; },
-    blackhole() { silent = true; },
+    get activeConnectionIds() { return [...paths.keys()]; },
+    capture(id: number): ProxyConnection {
+      const connection = paths.get(id);
+      if (!connection) throw new Error(`Proxy connection ${id} is not active`);
+      return connection;
+    },
+    throttle(bytesPerSecond: number) { rate = bytesPerSecond; for (const path of paths.values()) path.throttle(bytesPerSecond); },
+    blackhole() { silent = true; for (const path of paths.values()) path.blackhole(); },
     // Flips the last payload byte of the next frame bound for the target, part of an
     // encrypted record's authentication tag, so the target fails that record.
     corruptNextToTarget() { corrupting = true; },
-    restore() { silent = false; rate = null; },
+    restore() { silent = false; rate = null; for (const path of paths.values()) path.restore(); },
     // Keeps a lost link down: redials are closed until connections are accepted again.
     refuseConnections() { refusing = true; },
     acceptConnections() { refusing = false; },

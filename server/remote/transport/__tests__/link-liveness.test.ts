@@ -6,6 +6,48 @@ import type { SessionTransport } from '../session-transport.js';
 import { WebSocketLink, type LinkClosure } from '../websocket-link.js';
 
 for (const dialer of ['controller', 'worker'] as const) {
+  test(`slow bulk stays live while silent bulk retires without primary loss (${dialer} dials)`, async () => {
+    const sender = new WebSocketLink({ ...linkOptions, role: dialer });
+    const receiver = new WebSocketLink({ ...linkOptions, role: dialer === 'controller' ? 'worker' : 'controller' });
+    const proxy = await tcpLinkProxy(new URL(receiver.listen()));
+    const closures: LinkClosure[] = [];
+    sender.onClosure(closure => closures.push(closure));
+    receiver.onClosure(closure => closures.push(closure));
+    try {
+      sender.dial(proxy.url);
+      const [parent, peer] = await Promise.all([sender.ready, receiver.ready]);
+      const id = crypto.randomUUID();
+      sender.prepareBulk(parent, id);
+      receiver.prepareBulk(peer, id);
+      const sending = Promise.withResolvers<SessionTransport>();
+      const receiving = Promise.withResolvers<SessionTransport>();
+      sender.onBulkSession(session => sending.resolve(session));
+      receiver.onBulkSession(session => receiving.resolve(session));
+      sender.dialBulk(parent, id);
+      const [bulk, opposite] = await Promise.all([sending.promise, receiving.promise]);
+      await Promise.all([bulk.ready, opposite.ready]);
+      const path = proxy.capture(2);
+      path.throttle(12 * 1024);
+      const done = Promise.withResolvers<string>();
+      opposite.onMessage(payload => done.resolve(payload));
+      const payload = 'x'.repeat(256 * 1024);
+      bulk.send(payload);
+      expect(await done.promise).toBe(payload);
+      expect(closures).toEqual([]);
+      path.restore();
+      path.blackhole();
+      const failed = [Promise.withResolvers<void>(), Promise.withResolvers<void>()];
+      bulk.onFailure(() => failed[0]!.resolve());
+      opposite.onFailure(() => failed[1]!.resolve());
+      await Promise.all(failed.map(result => result.promise));
+      expect(closures.some(closure => closure.cause === 'liveness-timeout')).toBe(true);
+      expect(closures.every(closure => closure.lane === 'bulk')).toBe(true);
+      expect(sender.current).toBe(parent);
+      expect(receiver.current).toBe(peer);
+      expect(parent.connected && peer.connected).toBe(true);
+    } finally { await sender.dispose(); await receiver.dispose(); await proxy.close(); }
+  }, 65_000);
+
   test(`authenticated fragments preserve liveness at 12 KiB/s (${dialer} dials)`, async () => {
     const sender = new WebSocketLink({ ...linkOptions, role: dialer });
     const receiver = new WebSocketLink({ ...linkOptions, role: dialer === 'controller' ? 'worker' : 'controller' });

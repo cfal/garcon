@@ -139,6 +139,49 @@ for (const dialer of ['controller', 'worker'] as const) {
       await until(() => fixture.workerAdmission.incoming.size === 0);
     } finally { release.resolve([]); await fixture.dispose(); }
   });
+
+  test(`bulk nonreceipt resends only after its predecessor is fenced (${dialer} dials)`, async () => {
+    const fixture = await pair(dialer);
+    try {
+      fixture.start(); await fixture.ready();
+      const old = fixture.connections.controller.bulk.current!;
+      const peer = fixture.connections.worker.bulk.current!;
+      fixture.gates.controller.bulk = true;
+      const answer = old.call('', 'files.list', { projectPath: '/project' });
+      expect(old.transport.channel.queuedFrames).toBe(1);
+      expect(fixture.executions).toBe(0);
+      old.transport.close();
+      fixture.gates.controller.bulk = false;
+      await fixture.ready();
+      await expect(answer).resolves.toEqual(['synthetic-file']);
+      expect(peer.transport.connected).toBe(false);
+      expect(fixture.executions).toBe(1);
+      expect(fixture.controllerAdmission.outgoing.size).toBe(0);
+    } finally { await fixture.dispose(); }
+  });
+
+  test(`bulk recovers a lost reply without canceling pending primary work (${dialer} dials)`, async () => {
+    const fixture = await pair(dialer);
+    const primaryResult = Promise.withResolvers<string[]>();
+    try {
+      fixture.start(); await fixture.ready();
+      fixture.connections.worker.primary.handle(async () => primaryResult.promise);
+      const primary = fixture.connections.controller.primary.call('test', 'execution.runningSessions', null);
+      await until(() => fixture.workerAdmission.incoming.size === 1);
+      fixture.gates.worker.bulk = true;
+      const answer = fixture.connections.controller.bulk.current!.call('', 'files.list', { projectPath: '/project' });
+      await until(() => fixture.executions === 1 && fixture.worker.bulk!.channel.queuedFrames > 0);
+      fixture.controller.bulk!.close();
+      fixture.gates.worker.bulk = false;
+      await fixture.ready();
+      await expect(answer).resolves.toEqual(['synthetic-file']);
+      expect(fixture.executions).toBe(1);
+      expect(fixture.workerAdmission.incoming.size).toBe(1);
+      primaryResult.resolve([]);
+      await expect(primary).resolves.toEqual([]);
+      await until(() => fixture.workerAdmission.incoming.size === 0);
+    } finally { primaryResult.resolve([]); await fixture.dispose(); }
+  });
 }
 
 test('full ordinary primary queue admits lifecycle controls and retries refusal without retirement', async () => {

@@ -116,11 +116,11 @@ for (const direction of ['executor-connects', 'controller-connects'] as const) {
         }
         const afterIndex = client.markEvents();
         const snapshot = await client.get<{ executors: ExecutorSnapshot[] }>('/api/v1/executors');
-        if (!snapshot.executors.some(entry => entry.id === executor.id && entry.availability === 'ready')) {
+        if (!snapshot.executors.some(entry => entry.id === executor.id && entry.bulk?.availability === 'ready')) {
           await client.waitForEvent(
             (message): message is ExecutorsChangedMessage => message instanceof ExecutorsChangedMessage
-              && message.executors.some(entry => entry.id === executor.id && entry.availability === 'ready'),
-            'Proxied executor ready', { afterIndex, timeoutMs: 20_000 },
+              && message.executors.some(entry => entry.id === executor.id && entry.bulk?.availability === 'ready'),
+            'Both proxied executor lanes ready', { afterIndex, timeoutMs: 20_000 },
           );
         }
         expect((await client.get<ExecutorConnection>(`/api/v1/executors/${executor.id}/connection`)).connectionUrl).toBe(proxy.url);
@@ -132,7 +132,7 @@ for (const direction of ['executor-connects', 'controller-connects'] as const) {
         });
         expect(await client.waitForTurnTerminal(chatId, started.turnId)).toMatchObject({ type: 'agent-run-finished' });
         expect(fixture.fakeProviders.openAi.requests()).toHaveLength(1);
-        expect(proxy.requests).toEqual([proxy.publicPath]);
+        expect(proxy.requests).toEqual([proxy.publicPath, proxy.publicPath]);
       } finally {
         try { await worker?.stop(); }
         finally { await proxy?.close(); }

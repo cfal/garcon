@@ -6,6 +6,7 @@ import { messagesOfType } from '../../support/chat-assertions.js';
 import { runCli } from '../../support/cli-fixture.js';
 import { withTimeout } from '../../support/deferred.js';
 import { waitForExecutorReconnect } from '../../support/executor-link.js';
+import { waitForBulk } from '../../support/executor-bulk-fixture.js';
 import { claudeText, claudeToolUse } from '../../support/fake-claude-model.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { liveClaudeStartRequest } from '../../support/live-claude.js';
@@ -21,6 +22,7 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
     const approved = environment.model.scriptHeldTurn([claudeText('Synthetic reply after approved permission')]);
     try {
       await withIntegrationFixture(`scripted-permission-reconnect-${executionBackend}`, async fixture => {
+        await waitForBulk(fixture);
         const chatId = fixture.newChatId();
         const started = await fixture.client.startChat(liveClaudeStartRequest({
           chatId, projectPath: fixture.dirs.project, command: 'Synthetic permission prompt',
@@ -85,7 +87,8 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
         expect(messagesOfType(messages, 'permission-resolved')).toHaveLength(1);
         expect(JSON.stringify(messages)).toContain('Synthetic reply after approved permission');
         expect(environment.model.requestsSince(0)).toHaveLength(2);
-        expect(proxy!.connections).toBe(2);
+        await waitForBulk(fixture);
+        expect(proxy!.connections).toBe(4);
         expect(terminals()).toHaveLength(1);
         environment.model.assertSettled();
       }, {

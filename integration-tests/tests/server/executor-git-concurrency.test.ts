@@ -9,8 +9,8 @@ import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { initializeFixtureRepository } from '../../support/git-fixture.js';
 
 for (const executionBackend of ['remote-controller-dials', 'remote-executor-dials'] as const) {
-  test(`Git bodies coexist with Files, PTY output and chat on the shared channel (${executionBackend})`, async () => {
-    await withIntegrationFixture(`git-shared-channel-${executionBackend}`, async fixture => {
+  test(`Git bodies coexist with Files, PTY output and chat on paired lanes (${executionBackend})`, async () => {
+    await withIntegrationFixture(`git-concurrency-${executionBackend}`, async fixture => {
       const { client, executionDirs, directAgents } = fixture;
       const executorId = client.executorId;
       const project = executionDirs.project;
@@ -71,7 +71,7 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
       expect(executors.find(executor => executor.id === executorId)).toMatchObject({ availability: 'ready', instanceId: snapshot.instanceId });
       expect(client.eventRecords().slice(eventsBefore).filter(({ parsed }) =>
         parsed.type === 'executors-changed' && parsed.executors.some(executor => executor.id === executorId && executor.availability !== 'ready'))).toEqual([]);
-      console.info('Shared-channel completion timings', { executionBackend, ...elapsed });
+      console.info('Paired-lane completion timings', { executionBackend, ...elapsed });
       await client.delete('/api/v1/terminals', { terminalId, requestId: 'synthetic-shared-channel-close' });
     }, { executionBackend, projectRoots: 'separate', serverEnvironment: { GARCON_TERMINAL_SHELL: '/bin/sh' } });
   }, 60_000);

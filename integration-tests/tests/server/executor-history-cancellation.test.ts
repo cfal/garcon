@@ -9,7 +9,7 @@ for (const dialer of ['controller', 'worker'] as const) {
     let closed: ReturnType<typeof Promise.withResolvers<void>>;
     let closeCount = 0;
     const fixture = await remoteFixture(dialer, (_controller, worker) => {
-      worker.onSession((session) => {
+      worker.onBulkSession((session) => {
         session.onMessage((encoded) => {
           const frame = JSON.parse(encoded);
           if (frame.type === 'request' && frame.method === 'history.open') openIds.add(frame.id);

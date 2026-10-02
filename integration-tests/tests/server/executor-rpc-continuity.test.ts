@@ -5,6 +5,7 @@ import type { ReadTextResponse, SaveTextResponse } from '../../../common/file-co
 import type { ExecutorsChangedMessage } from '../../../common/ws-events.js';
 import { tcpLinkProxy } from '../../../server/remote/__tests__/tcp-link-proxy.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import { waitForBulk } from '../../support/executor-bulk-fixture.js';
 
 // Matches the browser's request timeout, which the interactive budget answers within.
 const BROWSER_REQUEST_TIMEOUT_MS = 30_000;
@@ -37,7 +38,8 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
         expect(await readFile(file, 'utf8')).toBe('Synthetic content saved across a blip');
         expect(client.eventsSince(cursor).some((event) => event.type === 'executors-changed'
           && event.executors.some((executor) => executor.id === client.executorId && executor.availability === 'reconnecting'))).toBe(true);
-        expect(proxy!.connections).toBe(2);
+        await waitForBulk(fixture);
+        expect(proxy!.connections).toBe(4);
       }, {
         executionBackend,
         projectRoots: 'separate',
