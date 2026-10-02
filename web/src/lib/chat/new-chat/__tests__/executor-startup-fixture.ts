@@ -4,7 +4,7 @@ import { ExecutorsStore } from '$lib/executors/executors-store.svelte';
 import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 import { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 import { makeRemoteSettingsSnapshot } from '$lib/stores/__tests__/remote-settings-snapshot-fixture';
-import type { SessionAgentId } from '$lib/types/app';
+import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
 
 function metadata(id: SessionAgentId, defaultModel: string): AgentMetadata {
 	return {
