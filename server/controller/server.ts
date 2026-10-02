@@ -9,7 +9,7 @@ import { wrapRoutes, unhandledRouteErrorResponse } from './lib/http-route.js';
 import { ControllerCliDispatcher } from './executors/cli-dispatcher.js';
 import { createWebSocketUpgradeHandler } from './ws/upgrade.js';
 import { init as initAuthStore } from './auth/store.js';
-import { forkChatFileCopy } from './chats/fork-chat.js';
+import { createForkedChat } from './chats/fork-chat.js';
 import { wireSearchSourceAvailability, wireServerEvents, type ServerEventWiring } from './server-event-wiring.js';
 import { startExecutionControlPlane } from './execution-control-plane.js';
 
@@ -592,7 +592,7 @@ export async function startServer(): Promise<void> {
       agents: agentRegistry,
       fileMentions: { resolve: resolveFileMentions },
       inspectProject,
-      forkChatFileCopy,
+      createForkedChat,
       readForkedNativeHistory: createForkNativeHistoryReader({
         integrations: directory,
         carryOver,

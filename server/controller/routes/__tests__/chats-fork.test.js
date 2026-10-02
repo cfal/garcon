@@ -16,7 +16,7 @@ mock.module('../../chats/title-generator.js', () => ({
 }));
 
 mock.module('../../chats/fork-chat.js', () => ({
-  forkChatFileCopy: mock(() => undefined),
+  createForkedChat: mock(() => undefined),
 }));
 
 import createChatRoutes from '../chats.js';
@@ -26,7 +26,7 @@ import { DomainError } from '../../../common/domain-error.js';
 const SOURCE_CHAT_ID = '1783725900000300';
 const TARGET_CHAT_ID = '1783725900000301';
 import { parseJsonBody } from '../../../common/http-body.js';
-import { forkChatFileCopy } from '../../chats/fork-chat.js';
+import { createForkedChat } from '../../chats/fork-chat.js';
 
 const registry = {
   getChat: mock(() => undefined),
@@ -114,7 +114,7 @@ const chatsRoutes = createChatRoutes({
 });
 
 const allMocks = [
-  registry.getChat, parseJsonBody, forkChatFileCopy,
+  registry.getChat, parseJsonBody, createForkedChat,
 ];
 
 describe('POST /api/v1/chats/fork', () => {
@@ -250,7 +250,7 @@ describe('POST /api/v1/chats/fork', () => {
     registry.addChat.mockImplementation((chat) => {
       forkedChat = chat;
     });
-    forkChatFileCopy.mockImplementation(async ({ registry: forkRegistry }) => {
+    createForkedChat.mockImplementation(async ({ registry: forkRegistry }) => {
       forkRegistry.addChat({
         id: TARGET_CHAT_ID,
         agentId: 'test-agent',
@@ -322,7 +322,7 @@ describe('POST /api/v1/chats/fork', () => {
       if (id === SOURCE_CHAT_ID) return { agentId: 'test-agent', projectPath: '/proj' };
       return null;
     });
-    forkChatFileCopy.mockRejectedValue(new DomainError(
+    createForkedChat.mockRejectedValue(new DomainError(
       'TRANSCRIPT_UNAVAILABLE',
       'Fork message is outside the source transcript',
       422,
@@ -346,7 +346,7 @@ describe('POST /api/v1/chats/fork', () => {
       if (id === SOURCE_CHAT_ID) return { agentId: 'test-agent', projectPath: '/proj' };
       return null;
     });
-    forkChatFileCopy.mockRejectedValue(new Error('Disk full'));
+    createForkedChat.mockRejectedValue(new Error('Disk full'));
 
     const request = new Request('http://localhost/api/v1/chats/fork', { method: 'POST' });
     const response = await handler(request);

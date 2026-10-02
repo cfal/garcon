@@ -94,7 +94,7 @@ interface ForkChatInput {
   }) => Promise<LedgerRowDraft[] | null>;
 }
 
-export interface ForkChatFileCopyResult {
+export interface ForkedChatResult {
   sourceChatId: string;
   chatId: string;
   agentId: string;
@@ -120,7 +120,7 @@ export async function rollbackForkTarget({
   await ownership.delete(targetChatId);
 }
 
-export async function forkChatFileCopy({
+export async function createForkedChat({
   sourceSession,
   sourceChatId,
   targetChatId,
@@ -135,7 +135,7 @@ export async function forkChatFileCopy({
   forkAgentSession,
   discardForkedAgentSession,
   readForkedNativeHistory,
-}: ForkChatInput): Promise<ForkChatFileCopyResult> {
+}: ForkChatInput): Promise<ForkedChatResult> {
   signal.throwIfAborted();
   const startedAt = Date.now();
   const sourceAgentSessionId = sourceSession.agentSessionId;
