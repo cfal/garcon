@@ -1,6 +1,6 @@
 # Files On Executors
 
-Status: implemented architecture, updated 2026-09-27. Files use bounded inline RPC over the existing shared Noise WebSocket. No bulk transfer subsystem, scheduler, or second channel is included.
+Status: implemented architecture, updated 2026-10-02. Files use bounded inline RPC over the executor's paired Noise lanes. Content and directory listings use bulk; identity and revision use primary. There is no generic transfer-handle or byte-replay protocol.
 
 The historical [Executor Interfaces](./interface.md) and [Executors In The App](./app-integration.md) describe earlier stages. [Executor Transport](./transport.md) owns the current connection contract; this document describes the implemented file service.
 
@@ -23,7 +23,7 @@ This is not filesystem synchronization, cross-executor file copying, a general u
 - No worker REST listener or custom Noise-over-HTTP protocol. Both existing connection directions must remain usable, including workers that can only make outbound connections.
 - All operations use typed RPC. Content is limited to 4 MiB and carried inline as base64.
 - Writes decode the complete request before a revision-checked save. An uncertain save is not automatically retried.
-- File RPCs use the existing shared Noise WebSocket. Fragmentation only accommodates message size limits. Traffic scheduling versus a second channel remains a future decision, not implementation scope.
+- File RPCs use the selected lane under one executor authority. Fragmentation accommodates bounded messages; bulk loss neither retires primary nor reroutes file bodies onto it.
 
 The limits below describe the supported protocol.
 
@@ -143,9 +143,9 @@ Base64 keeps the complete file below 6 MiB even when its text contains control c
 
 A read uses the existing versioned-file snapshot and returns bytes with its revision. A save reaches the file service only after the complete request is decoded. Under the existing executor-owned save lock, re-resolve containment and target identity, then check the expected revision immediately before writing. Preserve in-place filesystem write semantics and explicit overwrite. External writers remain outside this lock.
 
-At most eight content reads or saves run concurrently per process; metadata and directory queries do not consume these slots. Reads and saves use a 30-second remote call deadline. Cancellation is best effort, not rollback. A lost save confirmation produces `FILE_SAVE_OUTCOME_UNKNOWN`; the editor keeps its buffer and reconciles the captured target before a deliberate next save. Nothing automatically resends a mutation.
+At most eight content reads or saves run concurrently per process; metadata and directory queries do not consume these slots. Reads and saves use a 30-second remote call deadline. Cancellation is best effort, not rollback. A save confirmation that cannot be recovered produces `FILE_SAVE_OUTCOME_UNKNOWN`; the editor keeps its buffer and reconciles the captured target before a deliberate next save. No mutation is retried without positive nonreceipt proof.
 
-File traffic shares the authenticated executor connection. Its bounded send queue provides backpressure, not latency isolation. No traffic scheduler or second connection is included. Larger files or stronger congestion isolation require a separate product decision.
+File content and directory traffic are isolated from primary's socket queue. Both lanes share bounded call and queue admission, reserving primary capacity. Bulk acquisition waits at most 20 seconds within the call's existing deadline. Journaled replies survive replacement on the same worker; only positive nonreceipt proof permits a resend. A missing reply alone never permits speculative save replay. CPU, disk, and network bandwidth remain shared.
 
 ## Failure And UI Behavior
 
@@ -156,7 +156,8 @@ When switching executors, try the current directory on the destination before de
 | Observation | Behavior |
 | --- | --- |
 | Executor unavailable before dispatch | Fail explicitly; do not fall back to controller-local files. Preserve open documents and unsaved buffers. |
-| Connection lost after possible dispatch | Report an uncertain save; never resend it automatically. Reads may be requested again. |
+| Connection lost after possible dispatch | Reconcile on the same worker within the call deadline. Without retained proof, report an uncertain save; never retry it speculatively. Reads may be requested again. |
+| Bulk unavailable with healthy primary | Preserve buffers and selection; primary identity/revision, Stop, and Git summary remain available. Content operations wait within their lane-acquisition budget. |
 | Missing, inaccessible, outside-root, or oversized file | Return the corresponding file error, not generic provider failure or empty successful content. |
 | Revision conflict | Preserve the buffer and use the existing conflict workflow. Accept Disk and Save Checked reject a comparison if its local buffer version changed. Overwrite remains an explicit user choice. |
 | Commit may have run but its result is lost | Surface uncertainty, retain the buffer, and require reconciliation before another save. Cancellation is not rollback. |
@@ -177,6 +178,6 @@ The implementation must demonstrate these boundaries:
 - Consistent read snapshots and revision-aware writes, including two concurrent saves, external changes, and conflict/overwrite behavior.
 - Deterministic disconnects before dispatch and after a save but before its reply. No blind retry or false-success UI.
 - Cancellation and session replacement with bounded memory/RPC usage and retained editor buffers.
-- Ordinary bounded file transfers coexist with chat traffic. No congestion isolation or latency guarantee under bulk load is implied.
+- Held bulk file transfers do not block primary controls; no CPU, disk, or whole-network latency guarantee is implied.
 
 Use unit/contract tests for parsers and size limits, isolated real-process controller/worker tests for IO and transport failure, and browser coverage for project selection, file identity, editor conflicts, and buffer preservation. No paid provider calls are needed to validate the file service.

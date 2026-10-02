@@ -1,15 +1,17 @@
 # Executor Transport
 
-Current implementation reference, 2026-09-30. This supersedes the transport
+Current implementation reference, 2026-10-02. This supersedes the transport
 descriptions in the historical [first-stage](./interface.md) and
 [second-stage](./app-integration.md) designs.
 
 Local remains available alongside configured remote executors. Each remote uses
-one bidirectional Noise-encrypted WebSocket, regardless of which side dials.
+two bidirectional Noise-encrypted WebSockets, regardless of which side dials:
+an authoritative primary and a subordinate bulk lane. One executor client,
+runtime, producer relay, and reply journal serve both lanes.
 The shared secret authenticates Noise and the application handshake binding
 executor, runtime, version, and the fresh connection. The version is the
 package version followed by the executor protocol revision, as in
-`0.3.4+protocol.9`. The revision changes with anything either side sends or
+`0.3.4+protocol.10`. The revision changes with anything either side sends or
 accepts, so builds that disagree fail the handshake with "Executor version
 mismatch" instead of failing mid-session. TLS is required unless explicitly
 disabled with `noTls` (`--no-tls` for workers). Worker listeners require a PEM
@@ -26,8 +28,9 @@ contain an executor ID or an `/executor` suffix. A reverse proxy must forward
 WebSocket upgrades to the internal controller route `/executor/<executor-uuid>`
 for executor-initiated connections, or the worker route `/executor` for
 controller-initiated connections. The `#secret=...` fragment is removed before
-connecting; paths and query strings are forwarded as configured. No additional
-controller HTTP routes need to be exposed for the executor connection.
+connecting; both lanes dial the identical configured path and query. Proxies
+must permit two concurrent upgrades to that endpoint. No extra public port,
+credential, URL role marker, or controller HTTP route is required.
 
 Each link admits at most four sockets, including those still in the encrypted
 handshake. When they are all taken, a new connection closes the oldest socket
@@ -36,11 +39,13 @@ every socket still in the handshake has proven it, the oldest of those. A peer
 without the secret cannot prove it, so its sockets are closed first, and it
 cannot keep an executor's endpoint full with sockets that never start the
 handshake. Only a valid WebSocket upgrade closes a socket this way. Across all
-executors, the controller admits at most 64 executor sockets, any of which may
-still be in the handshake. Two limits remain: four new connections arriving
-before a legitimate peer's first handshake message can still close its socket,
-and a peer that knows sixteen executor IDs can fill the controller's 64
-sockets.
+executors, the controller admits 64 established primary sockets, 64 established
+bulk sockets, and 64 pending handshakes, with a hard ceiling of 192. Pending
+includes the application proof, not just Noise establishment. An authenticated
+bulk socket cannot consume primary's quota. Finite handshake pressure can still
+deny new connections, and four arrivals before a legitimate peer's first
+handshake message can still close that pending socket. These limits are not
+general denial-of-service protection.
 
 Executor configuration grants become active only after a confirmed durable write.
 If a configuration write is renamed but its directory sync fails, the affected
@@ -49,16 +54,57 @@ configuration mutations are blocked until controller restart. The candidate
 remains on disk and enumerable for reference accounting; it is not authorization.
 Unchanged executors and Local remain available.
 
-One channel describes the current implementation, not a final topology decision.
-Channel splitting remains separate work. Correctness and resource bounds must
-stand independently; do not add scheduling, retry, or lifecycle machinery solely
-to compensate for sharing a channel.
+## Lanes And Authority
+
+The primary session ID is the connection generation. Both application proofs
+bind the lane, executor, peer runtime, protocol version, primary session ID, and
+the lane's own session ID. Bulk attaches only to its current authenticated
+primary. Possession of the same secret alone cannot attach an old bulk socket
+to a replacement primary.
+
+Primary carries launches, Stop/abort, permissions, credentials, producer and
+terminal frames, small file identity/revision calls, and `git.getQuickSummary`.
+Bulk carries every other Git/GitHub method, file bodies and directory lists,
+the complete history reader sequence, and large-capable reverse CLI operations.
+The exhaustive routing policy is checked before dispatch on both peers. There
+is no size-triggered fallback to primary. Primary CLI context, turn receipts,
+Stop, and permission decisions have a 64 KiB encoded request/reply cap, as does
+Git quick summary. Oversized reads fail with their domain's size error;
+potentially completed CLI mutations fail with `CLI_OUTCOME_UNKNOWN`.
+
+The controller alone coordinates bulk recovery. `bulk-prepare` and
+`bulk-prepared` on primary fence both old receivers before authorizing a fresh
+bulk session; `bulk-connect` instructs the worker dialer when applicable.
+Both new RPC receivers initially admit only recovery traffic. After bulk-scoped
+reconciliation, `bulk-activate` and `bulk-active` on primary open ordinary traffic
+in both directions. Activation does not wait for recovered handlers or retained
+reply bytes. Preparation, handshake, and activation each have a five-second
+timeout. Recovery has its own backoff with the primary redial schedule above.
+Only successful activation ends a recovery interval; failed attempts cannot
+reset its three-hour grace.
+
+Bulk loss leaves primary readiness, turns, permissions, and terminal attachments
+unchanged. New bulk calls wait at most 20 seconds for a lane, including when
+their execution timeout is null, and consume their existing deadline and signal.
+Already-sent journaled calls retain their original deadlines. Primary loss
+synchronously fences bulk, its readers, pending handshakes, and retry callbacks
+before primary continuity proceeds. A restarted worker cannot inherit either
+lane's old calls or resources.
+
+Remote executor snapshots expose secondary `bulk` availability and error fields;
+Local has `bulk: null`. Connecting/reconnecting bulk does not change executor
+capabilities or primary availability. Files buffers, Git drafts, and selected
+targets remain intact; bulk errors do not disable Stop or fall back to Local.
 
 ## Ordering And Bounds
 
 Each authenticated socket owns one session. `MessageSession` is a bounded send
-queue: 32 MiB or 4,096 unsent messages, with a 16 MiB encoded message limit.
-RPC traffic may fill the whole queue. Producer frames are admitted only while
+queue with a 16 MiB encoded message limit. Both lanes share 32 MiB / 4,096 unsent
+messages; bulk may use at most 24 MiB / 3,072. Ordinary traffic leaves 32 KiB /
+four messages for typed primary bulk-lifecycle controls. Refused lifecycle and
+producer/terminal offers do not close primary; the bounded lifecycle outbox
+retries on capacity progress. This is admission reservation, not packet preemption.
+Producer frames are admitted only while
 it holds under 4 MiB and 512 messages, and terminal output only while the
 socket is writable and it holds under 2 MiB and 256 messages, so neither can
 crowd out RPC replies. Successful socket writes leave the queue immediately.
@@ -73,24 +119,36 @@ as binary fragments containing one final-fragment byte followed by at most
 assembler exposes authenticated progress even at 12 KiB/s. Reassembly is capped
 at 16 MiB per connection. Only complete packets enter the ordered session;
 authenticated fragment arrivals
-refresh liveness during slow transfers. Small encrypted ping/pong messages can
-pass between fragments. This is bounded transport framing, not additional
-channels or application scheduling.
+refresh that lane's liveness during slow transfers. Activity on primary cannot
+keep silent bulk alive, or vice versa. Small encrypted ping/pong messages can
+pass between fragments. Queues exclude socket buffers, the two 16 MiB
+reassemblers, parsed values, and retained replies; they are not a total heap cap.
 
 RPC requests check both encoded size and remaining queue capacity before admission;
 rejection means `not-dispatched`. An oversized reply becomes a small typed
 uncertain-result error because its operation may already have executed. Native
-history is paged by encoded bytes, at most 1 MiB per page; an individual row
-that cannot fit rejects that reader. The controller keeps up to four numbered
+history is paged toward a 1 MiB target; an individual larger row travels alone
+within the 16 MiB packet ceiling. The controller keeps up to four numbered
 `history.next` requests in flight per reader so link latency overlaps reading,
 and the worker reads each reader's pages strictly in page order and rejects any
-other page. Oversized producer output retires only its captured binding and
+other page. A reader is scoped to its opening bulk session, with 16 readers per
+integration and a 120-second idle timeout. Bulk loss closes its iterators and
+rejects queued or late pages, without tearing down primary runtime service.
+History never silently restarts on a replacement. Native fork creation and
+discard remain primary; admission, bulk seed import, and compensation retain
+the originating runtime instance in ephemeral context, including fork-run retries.
+A replacement primary may clean up only on that same worker instance.
+Oversized producer output retires only its captured binding and
 fails any active run on that binding; subsequent output cannot turn it into a
 false success. Native abort is best effort and manual Reload remains explicit.
 Producer output is paced by the worker's relay (see Disconnected Turns), so it
 never overflows the shared session.
 
-Outgoing RPCs share a 256-request budget. Locally cancelled starts, resumes,
+Outgoing RPCs share a 256-request budget, of which bulk may use 192. Incoming
+work has an independent budget with the same reservation. Connection waiters,
+parked calls, and unsettled handlers retain their leases across lane and primary
+replacement. Cancellation does not release native admission before settlement.
+Locally cancelled starts, resumes,
 compactions, native forks, history opens, and project-path preparations retain
 their budget slot until a reply arrives or the session retires. A late successful
 reply releases the slot and triggers best-effort abort, fork discard, reader
@@ -297,6 +355,13 @@ data` with the nearest source location its stack kept, if any. A frame that
 fails to parse is named instead: `Malformed executor RPC frame` or `Malformed
 executor handshake frame`.
 
+Closure and setup diagnostics include lane and parent/session IDs, setup phase,
+retry counts, aggregate/per-lane queue bytes and oldest age, and incoming/outgoing
+ordinary call counts. Bulk failures are deduplicated independently of primary.
+Diagnostics never include connection query strings, credentials, or payloads.
+Isolation does not remove CPU, disk, subprocess, or shared network contention;
+primary producer/prompt traffic can still delay primary controls.
+
 Hung detached turns require worker restart. Controller crash leaves execution
 state empty on restart; graceful controller shutdown still requests native
 abort, best effort: an executor that is reconnecting when shutdown begins does
@@ -382,8 +447,9 @@ session rather than introducing values outside the typed error contract.
   keep running on the worker, and their replies survive the loss.
 
 Every request carries a per-session sequence number, and the worker records the
-highest it received from each recent session, so it can prove that a request
-never arrived. The worker's `RpcReplyJournal` outlives sessions: it registers a
+highest it received from each recent lane session, so it can prove that a request
+never arrived. Receipt histories retain 16 sessions per lane; equal sequence
+numbers across sockets are unrelated. The worker's `RpcReplyJournal` outlives sessions: it registers a
 journaled call before its handler runs, keeps the encoded reply until the
 controller acknowledges it with a batched `reply-ack`, and delivers each reply
 through the session that owns the call as that session's queue admits it. Like
@@ -393,7 +459,7 @@ only journaled replies are kept, and requests are resent only when proven lost.
 The controller parks a journaled call that was pending when its session retired;
 its deadline and signal keep running. While installing a replacement session of
 the same worker instance, the controller adopts every parked call into the new
-session and, ahead of producer resumption, sends `calls.reconcile` with each
+lane session and sends `calls.reconcile` with each
 call's ID and the session and sequence number it was last sent with. The worker
 answers per call: `pending`, whose reply follows on the new session;
 `not-received`, which the controller sends again; or `unknown`. A call whose
@@ -402,14 +468,21 @@ waiting with an unknown outcome and is cancelled on the worker, or, when the
 worker's late answer already shows that it never received the call, fails as
 not dispatched. Calls of lost
 sessions that a reconcile does not name belong to callers that gave up, so the
-worker cancels them as those callers' lost cancels would have. Retained replies
-are bounded at 64 MiB, dropping the oldest delivered ones first. A dropped reply
+worker cancels them as those callers' lost cancels would have, only within that
+lane. Primary reconciliation precedes producer resumption and does not wait for
+bulk. Bulk reconciliation follows explicit predecessor fencing. Cancellation,
+reply ACKs, receipt proofs, and journal adoption cannot cross lane ownership.
+Blocked bulk journal delivery does not block primary's delivery pass.
+Retained replies are bounded at 64 MiB, with bulk capped at 48 MiB, dropping the
+oldest delivered ones first within the affected budget. A dropped reply
 that its session still waits for is answered at once with an unknown outcome;
-one whose session was lost reconciles as unknown. The worker's 256-request budget
-covers running journaled calls of all sessions. Calls that install a session
+one whose session was lost reconciles as unknown. The worker's shared request budget
+covers running journaled calls of all sessions and both lanes. Calls that install a session
 (description, lifecycle initialization, producer resumption, and
-reconciliation) bypass both sides' request budgets, so the calls a session
-recovers cannot keep it from installing. A restarted worker, an expired grace,
+reconciliation) have a bounded admission exemption, so the calls a session
+recovers cannot keep it from installing. Only one reconciliation is allowed per
+lane session, with at most 64 distinct primary installation method/integration
+pairs exempted; setup never bypasses byte budgets. A restarted worker, an expired grace,
 or a disposed executor leaves parked calls with an unknown outcome.
 
 ## Shutdown And Browser Isolation
@@ -421,7 +494,7 @@ Browser payload and outbound-buffer limits are enforced independently of Noise
 on the shared listener. The listener's native frame ceiling is the larger of
 the configured browser limit and Noise's 65,535-byte frame limit.
 
-Implementation: `server/remote/transport/{websocket-link,session-socket,message-session,rpc,rpc-journal}.ts`,
+Implementation: `server/remote/transport/{websocket-link,bulk-connection,rpc-connection,session-socket,message-session,rpc,rpc-journal}.ts`,
 `server/remote/server/producer-relay.ts`,
 `server/remote/client/{executor-client,remote-agent-integration}.ts`,
 `server/controller/ws/{server-sockets,primary-delivery}.ts`, and `server/controller/server.ts`.

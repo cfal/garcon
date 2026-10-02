@@ -11,7 +11,7 @@ credential without opening a second worker or gateway.
 
 Status: implemented and reviewed, 2026-09-24. Opus and Astra reviewed the design against `e9a9cfcf5` and the implementation through `3279b49e0`; `ce725e1d5` adds the final requested regression coverage. The [current transport contract](./transport.md) supersedes older replay and chunk-transfer proposals. Source links below identify the original investigation baseline; the corrections in this document govern implementation.
 
-This extends [Executor Interfaces](./interface.md) and [Executors In The App](./app-integration.md), which deliberately excluded a spawned-CLI bridge. It reuses the current shared channel with [Files](./files.md), [Terminals](./terminal.md), and [Git](./git.md); channel splitting remains a separate pending decision. Existing CLI behavior is documented in [Garcon CLI And Server](../cli.md).
+This extends [Executor Interfaces](./interface.md) and [Executors In The App](./app-integration.md), which deliberately excluded a spawned-CLI bridge. It reuses the paired Noise lanes with [Files](./files.md), [Terminals](./terminal.md), and [Git](./git.md). Existing CLI behavior is documented in [Garcon CLI And Server](../cli.md).
 
 ## Decision
 
@@ -32,7 +32,7 @@ Authority policy: explicit controller-side, per-executor opt-in to workspace-lev
 - Keep argument parsing, stdin, cwd resolution, receipt polling, and output-file writes on the machine running the CLI.
 - Keep retained remote terminals usable after controller restart without changing their process-lifetime guarantee.
 
-No additional controller-worker channel, traffic scheduler, generic HTTP proxy, controller-side CLI subprocess, durable forwarding queue, new mutation ledger, result cache, or automatic agent recovery. Per-chat CLI capabilities and explicit cross-executor CLI selection flags are separate work. Existing executor-aware ticket project inference is reused. Controller-interpreted provider-output commands keep their existing path and authorization rules.
+No CLI-specific controller-worker channel, traffic scheduler, generic HTTP proxy, controller-side CLI subprocess, durable forwarding queue, new mutation ledger, result cache, or automatic agent recovery. Per-chat CLI capabilities are separate work. Existing executor-aware ticket project inference is reused. Controller-interpreted provider-output commands keep their existing path and authorization rules.
 
 ## Existing Behavior
 
@@ -56,7 +56,7 @@ CLI on the controller                  CLI on an executor
         v                                        v
 Controller HTTP boundary                 Worker CLI gateway
         |                                        |
-        |                        existing shared Noise WebSocket
+        |                        executor Noise lanes
         |                                        |
         |                                        v
         +------------------------ Controller CLI dispatcher
@@ -72,7 +72,32 @@ The worker gateway owns its local listener, descriptor, local capability, admiss
 
 The controller dispatcher owns the allowlist, delegated authority, controller-generation check, request validation, application dispatch, and bounded inline replies. It receives the originating executor from the authenticated link, not an HTTP header or a caller-supplied principal.
 
-The same shared socket carries agent, Files, Terminal, Git, credential-resolution, and CLI traffic. The loopback listener is local IPC, not an additional network connection between controller and worker. There is no new public worker API. Bind the gateway only to a numeric loopback address on a random port, never to `0.0.0.0`; the executor network listener remains a separate existing concern.
+The gateway shares the executor's primary/bulk authority, not a separate executor connection. The loopback listener is local IPC, not an additional network connection between controller and worker. There is no new public worker API. Bind the gateway only to a numeric loopback address on a random port, never to `0.0.0.0`; the executor network listener remains a separate existing concern.
+
+### Lane Admission
+
+`controllerCli.describe` and the exact turn-receipt, Stop, and permission-decision
+routes use primary. Every other forwarded operation uses bulk, regardless of
+its actual payload size. Both sides validate the route. Primary exchanges are
+capped at 64 KiB including RPC envelopes; bulk retains 1 MiB requests and 8 MiB
+replies. Oversized mutation replies report `CLI_OUTCOME_UNKNOWN`, not a retryable
+size rejection.
+
+The gateway captures primary before reading an upload or waiting for bulk. It
+never follows a replacement generation. Bulk acquisition consumes the call's
+deadline and waits at most 20 seconds even for no-deadline execution. Ordinary
+bulk traffic waits for reconciliation and activation on both peers; fresh primary
+context and controls remain usable meanwhile. Dispatch and reply publication
+check the captured primary, actual reply lane, grants, and controller instance.
+
+Of six short slots per executor, bulk may use four; of 32 globally, bulk may
+use 24. Long pools remain two per executor/eight globally. The gateway also
+reserves four of its 16 HTTP response slots for primary, classifying and reserving
+before body upload. Body-dependent handoff policy still chooses the long pool.
+Rejected bulk uploads receive a bounded busy response and close without waiting
+for the body. The 32-connection ceiling remains finite: headerless traffic can
+still exhaust it. Neither lane reservations nor a second socket isolate host CPU
+or network bandwidth.
 
 ## HTTP Transparency
 
@@ -293,10 +318,10 @@ Receipt polling remains in the CLI. Waiting for a turn does not reserve one reve
 
 Use one bounded inline reply, matching the current transport. Do not restore deleted Files/Git transfers or introduce CLI result handles. Starting limits, subject to resource-bounded tests:
 
-- One MiB encoded request including envelope; retain smaller domain limits.
-- Eight MiB encoded reply including envelope, below the 16 MiB application-frame ceiling.
+- One MiB encoded bulk request including envelope; primary uses 64 KiB. Retain smaller domain limits.
+- Eight MiB encoded bulk reply including envelope, below the 16 MiB application-frame ceiling; primary uses 64 KiB.
 - Refuse bulk CLI replies when queued bytes plus reply exceed eight MiB, leaving capacity for other traffic. Replies at or below 64 KiB use the ordinary shared queue budget so small mutation acknowledgments are not needlessly replaced with uncertainty. Return a small busy error for rejected bulk reads or unknown outcome for potentially committed mutations. Generic RPC reply admission also falls back to a small uncertain error instead of blindly overflowing the queue.
-- Separate per-executor admission pools: two long operations and six short operations, including discovery and polling, with controller-wide caps. Long forks must not occupy every polling slot. This is fail-fast admission, not priority scheduling.
+- Separate per-executor admission pools with primary reservations as specified above. Long forks must not occupy every polling slot. This is fail-fast admission, not priority scheduling.
 - Bound gateway HTTP concurrency and response-drain lifetimes, including slow readers.
 
 Keep reverse credential resolution and controller-to-worker callbacks independent of CLI admission. A canceled wait does not release the reservation for an unsettled handler/producer, including across session replacement. After confirmed acceptance, agent execution belongs to existing controller admission, not a bridge slot held for the whole turn.
@@ -311,7 +336,10 @@ The gateway owns real HTTP idle-timeout policy; synthetic controller requests ha
 
 Use explicit HTTP response-drain accounting, not Bun's `pendingRequests` counter: that counter can fall before a slow client has consumed a buffered response. The gateway uses Executor-compatible HTTP response close events, bounded writes with backpressure, a 16-response budget, a 32-connection ceiling, and a 30-second idle drain timeout. Bulk reply admission runs synchronously at RPC publication so simultaneous completions cannot each consume the same available queue capacity.
 
-The current shared channel permits head-of-line delay and shared failure. Noise fragments large replies; that is not traffic isolation. Chat/terminal latency under exports and polling is useful evidence for the pending channel-splitting decision, not a prerequisite or a decision to retain one channel.
+Large CLI replies cannot occupy primary's socket queue. A bulk disconnect leaves
+primary controls usable but ends sent session-class CLI calls without replay;
+mutations may have unknown outcomes. Same-lane cancellation cannot overtake a
+large frame already being sent. Primary loss fences both lanes.
 
 ## Implementation Boundaries
 
@@ -337,15 +365,15 @@ Documentation is not implementation verification. Required coverage includes:
 - Bounds: escaped JSON, oversized export/list, queue pressure, slow HTTP readers, separate long/short admission, and finite/no-deadline cancellation. Repeated cancellation/session replacement cannot admit unbounded unsettled work.
 - Public worker integration in both connection directions, with CLI processes actually spawned from a remote PTY and provider tool execution. Retain the shell across controller restart and long disconnects without retaining an old CLI request's authority.
 - Provider sandbox reachability: verify that the inherited descriptor and loopback endpoint are usable under supported provider policies. Do not disable sandboxes or broadly enable networking to make a gateway test pass; any required narrow provider integration needs explicit review.
-- Single-channel load: bounded CLI exports/polling together with Files, Git, noisy PTYs, and chat. Confirm explicit failures under pressure and measure latency without claiming isolation.
+- Paired-lane load: hold bulk exports, Files, Git, and history while primary controls, PTYs, and turns progress. Verify grants and publication across lane replacement, with explicit mutation uncertainty.
 
 Use synthetic fixtures, isolated roots, scripted providers, and held-promise/transport interleavings. No paid/live-provider calls. Run repository checks/tests, relevant real-process/browser gates, and a timed fresh server startup. Design documents must not be committed.
 
 ## Decision Boundaries
 
-The recommended initial design is a same-path HTTP gateway, one shared Noise connection, explicit workspace-level executor permission, and a context-aware but transport-agnostic CLI. A Unix-domain socket could replace only the local HTTP transport later; it is not required for controller reachability or privacy on the network hop.
+The same-path HTTP gateway uses paired executor Noise lanes, explicit workspace-level executor permission, and a context-aware but transport-agnostic CLI. A Unix-domain socket could replace only the local HTTP transport later; it is not required for controller reachability or privacy on the network hop.
 
-Workspace-wide permission is accepted as explicit opt-in. Inline caps and no replay follow the current transport design. Exact admission tuning can change with tests. Full unbounded exports, mutually untrusted per-chat workloads, cross-executor CLI flags, and a second channel require separate scope discussion. Network-restricted provider sandboxes may deny loopback just as they do for controller-local CLI; do not weaken their policies. Verify the support matrix before claiming sandboxed-provider parity.
+Workspace-wide permission is accepted as explicit opt-in. Inline caps and no CLI replay follow the current transport contract. Exact admission tuning can change with tests. Full unbounded exports and mutually untrusted per-chat workloads require separate scope discussion. Network-restricted provider sandboxes may deny loopback just as they do for controller-local CLI; do not weaken their policies. Verify the support matrix before claiming sandboxed-provider parity.
 
 ## Provider Reachability
 

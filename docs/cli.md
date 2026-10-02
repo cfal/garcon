@@ -117,6 +117,17 @@ Worker-launched terminals and provider subprocesses inherit the config root and 
 
 Every executor connection requires [Noise NNpsk0 encryption](https://github.com/cfal/noise-ws/tree/536eb503e81a1f9d90436006d3821e2080630488), on both `ws:` and `wss:`. Each physical reconnect negotiates fresh keys before the existing authenticated Garcon session resumes. There is no plaintext fallback. Upgrade the controller and all workers together. The pinned library is new and unaudited; vector, interoperability, and integration tests are not a security audit. Bun 1.4.2 or later is required.
 
+Remote executors use two sockets to the identical configured URL: primary control
+and subordinate bulk traffic. Proxies must allow both concurrent upgrades. Bulk
+loss does not stop native turns or mark a healthy primary offline. The executor
+list's `BULK` column and detail panel report bulk separately. Files content, most
+Git operations, history import, and large CLI operations wait up to 20 seconds
+for bulk within their existing deadline; they never fall back to Local or primary.
+CLI context, turn receipts, Stop, and permission decisions stay on primary with
+a 64 KiB encoded RPC cap. Other forwarded operations retain their 1 MiB request
+and 8 MiB reply limits. An undeliverable mutation reply remains an unknown
+outcome, not permission to retry. See [Executor Transport](./executor/transport.md).
+
 WSS certificate verification is enabled by default. **Allow unverified TLS certificates** in an outbound executor's editor, or `--allow-unverified-tls` on a dialing worker, explicitly disables only outer certificate verification. Noise still requires the shared secret. Optional certificate pinning is deferred pending [Bun issue 43635](https://github.com/oven-sh/bun/issues/43635). Non-TLS connections require the separate **Allow connection without TLS** checkbox or `--no-tls` flag. HTTP metadata and traffic timing remain visible without outer TLS; Noise protects the execution payload, not the browser UI or other HTTP routes.
 
 Upgrade controller and workers together. Executor configuration and management

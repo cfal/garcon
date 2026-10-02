@@ -2,7 +2,7 @@
 
 Status: implemented. This document records the design and current contract. The original behavior below was inspected at [68b14cedb20e6ec54ecff012c05db3dcb007a276](https://github.com/cfal/garcon/tree/68b14cedb20e6ec54ecff012c05db3dcb007a276) on 2026-09-22 and is historical, not the current service boundary.
 
-This follows [Executor Interfaces](./interface.md), [Executors In The App](./app-integration.md), [Files](./files.md), and [Terminals](./terminal.md). Typed Git and GitHub services now use the same [validating runtime](../../server/runtime/git/runtime.ts) for Local and remote executors. The [HTTP routes](../../server/controller/routes/git.ts) select the executor; [remote adapters](../../server/remote/client/remote-git.ts) carry requests over the shared session.
+This follows [Executor Interfaces](./interface.md), [Executors In The App](./app-integration.md), [Files](./files.md), and [Terminals](./terminal.md). Typed Git and GitHub services now use the same [validating runtime](../../server/runtime/git/runtime.ts) for Local and remote executors. The [HTTP routes](../../server/controller/routes/git.ts) select the executor; [remote adapters](../../server/remote/client/remote-git.ts) carry requests over their declared Noise lane.
 
 ## Scope And Decisions
 
@@ -14,7 +14,7 @@ Make the existing Git and read-only pull-request experience work on the reposito
 - Commit-message generation that reads the correct executor's repository while retaining independently selected one-shot generation settings.
 - Local uses the same service implementation and behavioral contract as remote executors.
 
-Reuse the current shared controller-to-executor Noise WebSocket; channel splitting remains a separate pending decision. Do not add priority scheduling, adaptive pacing, or other machinery solely to accommodate one channel. Bounded request/result sizes and ordinary resource admission remain necessary regardless of channel count. No generic Process service or raw shell-command RPC.
+Use the executor's paired Noise lanes: `git.getQuickSummary` stays on primary for the tray; all other Git and GitHub calls use bulk. Requests and replies never change lanes based on their eventual size. Quick summaries have a 64 KiB encoded RPC cap; other methods retain their domain limits. Both lanes share bounded admission and queues with primary reservations. This isolates socket traffic, not Git subprocess capacity: a quick summary can still return `GIT_SERVICE_BUSY`. No generic Process service or raw shell-command RPC.
 
 Reuse the existing Git implementation. Do not build a second Git engine or make the controller issue primitive subprocess commands to a worker. Multi-command operations, locks, direct filesystem reads, temporary indexes, and review documents all belong beside the repository.
 
@@ -188,15 +188,15 @@ Git and GitHub queries return ordinary typed results inline over the authenticat
 
 The browser loads one review file body per request, accepting more round trips instead of partial-batch continuation. Each body has a separate 3 MiB serialized limit, leaving room for the reply envelope. An oversized file uses the existing `file-too-many-bytes` display state without stopping other files. The document-wide 10 MB patch budget is unchanged. Other callers may still request batches, but the complete reply must fit the 4 MiB result limit.
 
-There are no retained results, transfer references, chunk readers, assembly pools, or expiry timers. Ordinary socket framing remains. The result cap leaves space for RPC envelopes and nested JSON escaping below the 16 MiB session-packet limit. Existing semantic body/row/file limits, subprocess output bounds, and eight-query admission limits remain independent safeguards.
+There are no application transfer references, chunk readers, or assembly pools. The RPC journal retains bounded replies for reconnect recovery. Ordinary socket framing remains. The result cap leaves space for RPC envelopes and nested JSON escaping below the 16 MiB session-packet limit. Existing semantic body/row/file limits, subprocess output bounds, and eight-query admission limits remain independent safeguards.
 
 Git requests are bounded to 4 MiB of encoded JSON and 100,000 paths. Oversized requests fail before mutation with HTTP 413 / `GIT_REQUEST_TOO_LARGE`; users must select fewer paths. Staging and selected-file commits each remain one request, with no client batching or partial-batch reconciliation.
 
 Mutation replies are also inline. A result that exceeds the size limit after a mutation produces `GIT_MUTATION_OUTCOME_UNKNOWN`, never a safe-to-repeat rejection. Diagnostic stdout/stderr retain their separate bounds and explicit truncation flags.
 
-Propagate the operation deadline through RPC, subprocesses, and lock waits. Cancellation stops undispatched work and requests interruption of dispatched subprocesses; it is not rollback. Temporary-index cleanup and repository locks remain executor-owned until native operations settle. Connection loss never automatically retries a mutation.
+Propagate the operation deadline through RPC, subprocesses, and lock waits. Cancellation stops undispatched work and requests interruption of dispatched subprocesses; it is not rollback. Temporary-index cleanup and repository locks remain executor-owned until native operations settle. Connection loss alone never permits mutation replay.
 
-One shared channel can delay chat and terminal traffic under load. Fixed size/admission bounds are not a traffic scheduler or a latency-isolation promise. Larger results require a separate product decision.
+Bulk Git traffic cannot occupy primary's socket queue, but host and network resources remain shared. Fixed size/admission bounds are not a traffic scheduler or an end-to-end latency promise. Larger results require a separate product decision.
 
 ## Mutation Ordering And Uncertain Results
 
@@ -321,7 +321,7 @@ Required scenarios:
 - Repository executor A with generation executor B, Auto Local, explicit generation failure without fallback, target switches during generation, and user edits during generation. No repository path is accidentally resolved on B.
 - Isolated fake `gh` executable with executor-specific cwd/environment and synthetic JSON/diffs: missing binary, per-executor auth/host status, PR detail, optional-comment failure, network errors, and cancellation. No real GitHub credentials or live PR mutations are required.
 - Browser multi-panel same-path Local/remote views, worktree selection in New Chat/sidebar, disabled keyboard/action parity, rapid chat switches, retained drafts, visibility-gated polling, and reconnect while primary browser `/ws` remains connected.
-- Mixed Git/Files/terminal/chat pressure acceptance is deferred pending the channel-splitting decision. Existing per-service bounds and uncertainty tests remain required; no latency or cross-service isolation guarantee is implied.
+- Held Git/Files/history/CLI bulk traffic leaves primary summary, Stop, terminal, and producer traffic usable. Bulk-only loss preserves primary availability and drafts. Journaled mutations recover retained replies without re-execution; only positive nonreceipt proof permits a resend. Per-service admission and host resource contention still apply.
 
 Use disposable repositories and bare local remotes for real Git mutation tests. Use deterministic hooks/fake runners or held transport delivery to place failures after side effects; do not depend on live network timing. Keep fixtures synthetic and tests resource-bounded. No paid model calls, external push, live GitHub account, or new provider SACS tier is needed for this boundary.
 
@@ -331,4 +331,4 @@ For implementation changes, run `bun run check`, `bun run test`, the focused int
 
 No blocking product decision is required for this scope. The design deliberately retains current Git/gh workflows, executor-owned credentials, request-scoped commands, and best-effort reconciliation rather than adding distributed transactions.
 
-Additional transport channels, persistent jobs/idempotency, stronger external-writer isolation, interactive credential setup, richer GitHub actions, and repository synchronization remain separate work. Exact internal result/admission tuning may change from the stated starting bounds based on tests, without changing identity or mutation safety. Channel topology is an independent decision.
+Persistent jobs/idempotency, stronger external-writer isolation, interactive credential setup, richer GitHub actions, and repository synchronization remain separate work. Exact internal result/admission tuning may change based on tests, without changing identity or mutation safety. The [transport contract](./transport.md) governs paired-lane topology and recovery.
