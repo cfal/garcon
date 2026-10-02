@@ -8,7 +8,7 @@ import { escapeGarconXmlText } from '../../../common/garcon-command-envelope.js'
 import { garconCommandResultContent } from '../../../common/garcon-command-results.js';
 import { CODEX_MODELS } from '../../../common/models.js';
 import { messagesOfType, userContents } from '../../support/chat-assertions.js';
-import { codexAssistantMessage } from '../../support/fake-codex-model.js';
+import { codexAssistantMessage, codexExecCommandCall } from '../../support/fake-codex-model.js';
 import { claudeText } from '../../support/fake-claude-model.js';
 import { chatCompletionsText, chatCompletionsToolUse } from '../../support/fake-chat-completions-model.js';
 import { withIntegrationFixture, type IntegrationFixture, type IntegrationFixtureOptions } from '../../support/integration-fixture.js';
@@ -28,12 +28,26 @@ interface ScriptedCommands {
   dispose(): void | Promise<void>;
 }
 
-async function environmentFor(agent: string): Promise<ScriptedCommands> {
+async function environmentFor(
+  agent: string,
+  codexCommandGate?: (output: string) => string | undefined,
+): Promise<ScriptedCommands> {
   if (agent === 'codex') {
     const model = CODEX_MODELS.DEFAULT;
-    const environment = await startScriptedCodexTestEnvironment({ model });
+    const environment = await startScriptedCodexTestEnvironment({
+      model, toolMode: codexCommandGate ? 'direct' : undefined,
+    });
     return { fixtureOptions: environment, startRequest: (input) => ({ ...liveCodexStartRequest(input), model }),
-      script: (reply) => environment.model.scriptTurn(async (request) => [codexAssistantMessage(await reply(request.lastUserText))]),
+      script: (reply) => environment.model.scriptTurn(async (request) => {
+        const output = await reply(request.lastUserText);
+        const gate = codexCommandGate?.(output);
+        const items = [codexAssistantMessage(output)];
+        if (gate) items.push(codexExecCommandCall(
+          `call_command_gate_${request.id}`,
+          `while [ ! -f "${gate}" ]; do sleep 0.05; done`,
+        ));
+        return items;
+      }),
       settled: () => environment.model.assertSettled(), dispose: () => environment.dispose() };
   }
   if (agent === 'claude') {
@@ -138,15 +152,21 @@ describe('scripted provider agent commands', () => {
 
   for (const agent of ['claude', 'codex']) {
     // Codex can acknowledge terminal-adjacent steering after its final pending-input check,
-    // then persist the input during finalization without sampling it. Holding each admission
-    // response through the matching completion gives both CLIs an active sampling boundary.
+    // then persist the input during finalization without sampling it. Command turns hold a tool
+    // until admission is delivered; admission responses wait for child completion.
     // Tracks https://github.com/openai/codex/issues/15842; candidate fix: https://github.com/openai/codex/pull/30341.
     test(`${agent} reports exact snapshot-child and resumed-turn results through its real binary`, async () => {
-      const environment = await environmentFor(agent);
+      const gates: string[] = [];
+      const environment = await environmentFor(agent, (output) => {
+        if (output.includes('<garcon-start-agent ')) return gates[0];
+        if (output.includes('<garcon-resume-agent ')) return gates[1];
+      });
       const admitted = Promise.withResolvers<void>();
       const resumed = Promise.withResolvers<void>();
       try {
         await withIntegrationFixture(`${agent}-scripted-child-results`, async (fixture) => {
+          gates.push(join(fixture.executionDirs.project, 'release-start-command'),
+            join(fixture.executionDirs.project, 'release-resume-command'));
           const source = fixture.newChatId();
           const start = environment.startRequest({ chatId: source, projectPath: fixture.dirs.project, command: 'Delegate the synthetic discussion.' });
           const childPrompt = 'Inspect the copied synthetic discussion.';
@@ -191,6 +211,12 @@ describe('scripted provider agent commands', () => {
           };
           for (let i = 0; i < 6; i++) environment.script(respond);
           await fixture.client.startChat(start);
+          if (agent === 'codex') {
+            await waitForCommandDeliveryCount(fixture, 1);
+            await writeFile(gates[0]!, 'release', 'utf8');
+            await waitForCommandDeliveryCount(fixture, 3);
+            await writeFile(gates[1]!, 'release', 'utf8');
+          }
           await fixture.client.waitForEvent(
             (event): event is ChatMessagesMessage => event.type === 'chat-messages' && event.chatId === source
               && event.messages.some(({ message }) => message.type === 'assistant-message' && message.content === 'Synthetic completion observed.'),
@@ -225,7 +251,10 @@ describe('scripted provider agent commands', () => {
             GARCON_LOG_LEVEL: 'debug',
           },
         });
-      } finally { admitted.resolve(); resumed.resolve(); await environment.dispose(); }
+      } finally {
+        for (const path of gates) await writeFile(path, 'release', 'utf8').catch(() => undefined);
+        admitted.resolve(); resumed.resolve(); await environment.dispose();
+      }
     }, 120_000);
   }
 
