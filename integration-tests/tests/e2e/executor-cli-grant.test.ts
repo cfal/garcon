@@ -3,6 +3,7 @@ import { discoverRuntime } from '../../../cli/discovery.js';
 import type { ExecutorSnapshot } from '../../../common/executors.js';
 import { withE2eFixture } from '../../support/e2e-fixture.js';
 import { SpaDriver } from '../../support/spa-driver.js';
+import { throwingRejectionOf } from '../../support/promise-assertions.js';
 
 test('executor editor grants and revokes workspace CLI access without replacing the worker', async () => {
   await withE2eFixture('execution-cli-grant', async (fixture) => {
@@ -11,7 +12,7 @@ test('executor editor grants and revokes workspace CLI access without replacing 
       .executors.find((executor) => executor.id === executorId)!;
     const before = await snapshot();
     const discover = () => discoverRuntime({ configDir: fixture.integration.executionDirs.config, runtime: 'executor' });
-    await expect(discover()).rejects.toThrow('HTTP 403');
+    expect(await throwingRejectionOf(discover())).toThrow('HTTP 403');
     const app = new SpaDriver(fixture.page, fixture.integration);
     await app.open();
     await fixture.waitForSpaWebSocket();
@@ -35,7 +36,7 @@ test('executor editor grants and revokes workspace CLI access without replacing 
       await app.waitForButtonEnabled('Save');
       expect(await snapshot()).toMatchObject({ allowControllerCli: enabled, instanceId: before.instanceId, availability: 'ready' });
       if (enabled) expect(await discover()).toMatchObject({ defaultExecutorId: executorId });
-      else await expect(discover()).rejects.toThrow('HTTP 403');
+      else expect(await throwingRejectionOf(discover())).toThrow('HTTP 403');
     }
     const management = 'input[aria-describedby="executor-management-warning"]';
     await fixture.page.$eval(management, (element) => (element as HTMLInputElement).click());
@@ -44,7 +45,7 @@ test('executor editor grants and revokes workspace CLI access without replacing 
     await app.clickDialogButton('Save');
     expect((await saved).status()).toBe(200);
     expect(await snapshot()).toMatchObject({ allowControllerCli: false, allowExecutorManagement: true, instanceId: before.instanceId, availability: 'ready' });
-    await expect(discover()).rejects.toThrow('HTTP 403');
+    expect(await throwingRejectionOf(discover())).toThrow('HTTP 403');
     fixture.assertNoBrowserErrors();
   }, { executionBackend: 'remote-executor-dials', projectRoots: 'separate' });
 }, 60_000);

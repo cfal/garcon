@@ -6,6 +6,7 @@ import type { ExecutionGitResults } from '../../../common/git-execution.js';
 import { gitRpcFixture } from '../../../server/remote/__tests__/git-rpc-fixture.js';
 import * as bodies from '../../../server/runtime/git/review-diff-batch.js';
 import { withTimeout } from '../../support/deferred.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 for (const dialer of ['controller', 'worker'] as const) {
   test(`cancelled remote prefetches release read admission while the first load remains active (${dialer} dials)`, async () => {
@@ -55,7 +56,7 @@ for (const dialer of ['controller', 'worker'] as const) {
         pending.push(git.getReviewDocumentFileBodies(request, { signal: controller.signal }).catch(error => error));
       }
       await withTimeout(queued.promise, 3000, () => 'Prefetches did not enter the queue');
-      await expect(git.getStatus(target)).rejects.toMatchObject({ code: 'GIT_SERVICE_BUSY' });
+      expect(await rejectionOf(git.getStatus(target))).toMatchObject({ code: 'GIT_SERVICE_BUSY' });
       controllers.forEach(controller => controller.abort());
       await withTimeout(cancelled.promise, 3000, () => 'Cancelled prefetches still hold read admission');
       expect((await git.getStatus(target)).branch).toBe('main');

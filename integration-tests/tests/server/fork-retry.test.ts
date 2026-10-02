@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 test('a repeated fork request ID returns the fork it created instead of a second chat', async () => {
   await withIntegrationFixture('fork-retry', async (fixture) => {
@@ -20,7 +21,7 @@ test('a repeated fork request ID returns the fork it created instead of a second
     expect(repeated.chat.id).toBe(chatId);
     expect(repeated.chat.parentChat).toEqual(first.chat.parentChat);
     // Without a request identity the target is simply taken.
-    await expect(fixture.client.forkChat({ sourceChatId, chatId })).rejects.toMatchObject({
+    expect(await rejectionOf(fixture.client.forkChat({ sourceChatId, chatId }))).toMatchObject({
       status: 409, body: { errorCode: 'IDEMPOTENCY_CONFLICT' },
     });
     const forks = (await fixture.client.listChats()).sessions

@@ -3,6 +3,7 @@ import { chmod, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises
 import { join } from 'node:path';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { initializeFixtureRepository, runFixtureGit } from '../../support/git-fixture.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 test('Git HTTP reports an expired upstream probe instead of clearing remote status', async () => {
   const realGit = Bun.which('git');
@@ -19,7 +20,7 @@ test('Git HTTP reports an expired upstream probe instead of clearing remote stat
 
     const hold = join(project, '.git', 'hold-upstream-probe');
     await writeFile(hold, 'hold');
-    await expect(fixture.client.get(endpoint)).rejects.toMatchObject({ status: 504, body: { errorCode: 'GIT_TIMEOUT' } });
+    expect(await rejectionOf(fixture.client.get(endpoint))).toMatchObject({ status: 504, body: { errorCode: 'GIT_TIMEOUT' } });
     expect(await readFile(join(project, '.git', 'upstream-probe-started'), 'utf8')).toBe('started');
     await rm(hold);
     expect(await fixture.client.get(endpoint)).toMatchObject(expected);

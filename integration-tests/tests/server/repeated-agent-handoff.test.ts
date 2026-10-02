@@ -17,6 +17,7 @@ import {
   withIntegrationFixture,
 } from '../../support/integration-fixture.js';
 import { waitForPersistedChat } from '../../support/persisted-chat.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 interface RecordedProviderRequest {
   readonly lastUserText: string;
@@ -116,11 +117,11 @@ describe('repeated agent handoff lifecycle', () => {
         targetAgent.agentId,
         recoverableTargetEpoch,
       );
-      await expect(fixture.client.runDirectChat({
+      expect(await rejectionOf(fixture.client.runDirectChat({
         chatId: blockedChatId,
         content: 'blocked-chat-must-stay-fenced',
         agent: sourceAgent,
-      })).rejects.toMatchObject({
+      }))).toMatchObject({
         status: 409,
         body: { errorCode: 'OWNERSHIP_TRANSFER_PENDING' },
       });
@@ -183,12 +184,12 @@ describe('repeated agent handoff lifecycle', () => {
       const transcript = await fixture.client.getMessages(chatId);
       const anthropicRequestCount = fixture.fakeProviders.anthropic.requests().length;
 
-      await expect(fixture.client.handoffDirectChat({
+      expect(await rejectionOf(fixture.client.handoffDirectChat({
         chatId,
         content: 'blocked-handoff-input',
         agent: fixture.directAgents.anthropic,
         expectedAgentOwnershipEpoch: before.agentOwnershipEpoch,
-      })).rejects.toMatchObject({
+      }))).toMatchObject({
         status: 409,
         body: { errorCode: 'AGENT_HANDOFF_REQUIRES_IDLE' },
       });

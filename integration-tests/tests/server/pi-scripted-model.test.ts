@@ -26,6 +26,7 @@ import {
   startScriptedPiTestEnvironment,
   type ScriptedPiTestEnvironment,
 } from '../../support/scripted-pi.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 // The real pinned Pi CLI runs the whole turn -- spawn, local tool execution, JSONL session
 // persistence -- while the model behind it is a deterministic script. This suite remains the
@@ -356,12 +357,12 @@ describe('Pi against a scripted model', () => {
       expect((pi as { supportsSteering?: boolean }).supportsSteering ?? false).toBe(true);
 
       testEnvironment.model.scriptTurn([chatCompletionsText(marker('UNUSED_DEFAULT_REPLY'))]);
-      await expect(fixture.client.startChat(scriptedPiStartRequest({
+      expect(await rejectionOf(fixture.client.startChat(scriptedPiStartRequest({
         chatId: fixture.newChatId(),
         projectPath: fixture.dirs.project,
         command: marker('DEFAULT_MODEL_PROMPT'),
         model: 'default',
-      }))).rejects.toBeDefined();
+      })))).toBeDefined();
       testEnvironment.model.reset();
     }, withScriptedPi());
   }, 120_000);

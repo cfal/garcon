@@ -21,6 +21,7 @@ import {
   type IntegrationFixture,
   withIntegrationFixture,
 } from '../../support/integration-fixture.js';
+import { throwingRejectionOf } from '../../support/promise-assertions.js';
 
 const CHAT_ID = '1786120000000001';
 const POST_MIGRATION_CHAT_ID = '1786120000000002';
@@ -157,8 +158,7 @@ describe('carryover bootstrap migration', () => {
             });
             await registry.flush();
 
-            await expect(rollbackLegacyCarryOverMigration(fixture.dirs.workspace))
-              .rejects.toThrow('unsafe after the registry changed');
+            expect(await throwingRejectionOf(rollbackLegacyCarryOverMigration(fixture.dirs.workspace))).toThrow('unsafe after the registry changed');
           },
         });
 

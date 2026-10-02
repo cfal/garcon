@@ -3,11 +3,7 @@ import type { Extension } from '@codemirror/state';
 import { oneDarkTheme } from '@codemirror/theme-one-dark';
 import { EditorView } from '@codemirror/view';
 import { tags } from '@lezer/highlight';
-import {
-	rendererThemeIdFor,
-	type RendererThemeId,
-	type ThemeRendererPresentation,
-} from '$lib/theme/themes.js';
+import type { RendererThemeId } from '$lib/theme/themes.js';
 
 export type EditorThemeId = RendererThemeId;
 
@@ -286,10 +282,6 @@ const EDITOR_THEME_EXTENSIONS: Record<EditorThemeId, Extension> = {
 	'neko-light': NEKO_LIGHT_THEME,
 	'neko-dark': NEKO_DARK_THEME,
 };
-
-export function resolveEditorThemeId(presentation: ThemeRendererPresentation): EditorThemeId {
-	return rendererThemeIdFor(presentation);
-}
 
 export function editorThemeExtension(themeId: EditorThemeId): Extension {
 	return EDITOR_THEME_EXTENSIONS[themeId];

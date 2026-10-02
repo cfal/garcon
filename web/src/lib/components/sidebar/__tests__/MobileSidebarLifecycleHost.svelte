@@ -3,7 +3,7 @@
 	setExecutorsTestContext();
 	import { untrack } from 'svelte';
 	import Sidebar from '../Sidebar.svelte';
-	import SidebarSearchDialogs from '../SidebarSearchDialogs.svelte';
+	import SidebarSearchDialogs from '../search/SidebarSearchDialogs.svelte';
 	import {
 		setAppShell,
 		setLocalSettings,

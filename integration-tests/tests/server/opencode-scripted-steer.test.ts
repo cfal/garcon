@@ -23,6 +23,7 @@ import {
   startScriptedOpenCodeTestEnvironment,
   type ScriptedOpenCodeTestEnvironment,
 } from '../../support/scripted-opencode.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 // Steering rides OpenCode's promptAsync delivery against the active session loop:
 // the steer lands as a committed user row before the provider consumes it, joins
@@ -112,12 +113,12 @@ describeOnLinux('scripted OpenCode steering', () => {
       expect(transcript.resendCandidates).toEqual([]);
       expect(await fixture.client.getExecutionControl(chatId)).toEqual(controlBeforeSteer);
 
-      await expect(fixture.client.steer({
+      expect(await rejectionOf(fixture.client.steer({
         clientRequestId: crypto.randomUUID(),
         clientMessageId: crypto.randomUUID(),
         chatId,
         content: marker('AFTER_SETTLE'),
-      })).rejects.toMatchObject({ status: 409 });
+      }))).toMatchObject({ status: 409 });
       testEnvironment.model.assertSettled();
     }, withScriptedOpenCode());
   }, 120_000);

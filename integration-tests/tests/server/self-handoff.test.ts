@@ -12,6 +12,7 @@ import { CURRENT_WORKSPACE_VERSION } from '../../../server/controller/migrations
 import { messagesOfType, userContents } from '../../support/chat-assertions.js';
 import { expectedCarriedInput } from '../../support/carried-context.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 describe('self handoff', () => {
   test('continues in a new chat carrying the source history', async () => {
@@ -209,13 +210,13 @@ describe('self handoff', () => {
       }
 
       // Targeting an existing unrelated chat must not submit the prompt into it.
-      await expect(client.post('/api/v1/chats/handoff-run', {
+      expect(await rejectionOf(client.post('/api/v1/chats/handoff-run', {
         clientRequestId: crypto.randomUUID(),
         clientMessageId: crypto.randomUUID(),
         sourceChatId,
         chatId: otherChatId,
         command: 'should not land here',
-      })).rejects.toMatchObject({ status: 409 });
+      }))).toMatchObject({ status: 409 });
 
       const history = await client.getMessages(otherChatId);
       expect(userContents(history.messages)).not.toContain('should not land here');

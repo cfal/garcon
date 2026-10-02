@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { AssistantMessage } from '../../../common/chat-types.js';
 import { createAgentResourceRef, type AgentProducerNotification } from '../../../server-agents/interface/src/index.js';
 import { remoteFixture, requestFor } from '../../../server/remote/__tests__/integration-fixture.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 for (const dialer of ['controller', 'worker'] as const) {
   test.each([false, true])(`closed pending startup keeps its typed error (${dialer} dials, session published: %s)`, async (published) => {
@@ -24,7 +25,7 @@ for (const dialer of ['controller', 'worker'] as const) {
       await started.promise;
       await integration.producers.close(request.producerBinding);
       release.resolve();
-      await expect(starting).rejects.toMatchObject({ outcome: 'rejected', code: 'STALE_RESOURCE' });
+      expect(await rejectionOf(starting)).toMatchObject({ outcome: 'rejected', code: 'STALE_RESOURCE' });
       expect(native.calls.abort).toBe(published ? 1 : 0);
       native.hooks.start = async () => {};
       const next = await requestFor(integration);

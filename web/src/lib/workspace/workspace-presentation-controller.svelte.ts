@@ -3,7 +3,7 @@ import { tick } from 'svelte';
 import type { FileSessionRegistry } from '$lib/files/sessions/file-session-registry.svelte.js';
 import type { TerminalRegistry } from '$lib/terminal/sessions/terminal-registry.svelte.js';
 import type { SingletonSurfaceRegistry } from './singleton-surfaces.svelte.js';
-import type { SurfaceFrameRegistry } from './surface-frame-registry.svelte.js';
+import type { SurfaceFrameRegistry } from './surface-frame-registry.js';
 import type { WorkspaceInteractionGate } from './workspace-interaction-gate.svelte.js';
 import type { TransientLayerRegistry } from './transient-layers.svelte.js';
 import type { WorkspaceContextStore } from './workspace-context.svelte.js';

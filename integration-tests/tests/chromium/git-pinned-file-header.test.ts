@@ -131,6 +131,8 @@ async function waitForPinnedPath(
 }
 
 async function diffGeometry(page: Page, panelSelector: string) {
+  // Modal menus release their body pointer lock after unmount, independently of diff layout.
+  await page.waitForFunction(() => getComputedStyle(document.body).pointerEvents !== 'none');
   return page.locator(panelSelector).evaluate((panel) => {
     const viewport = panel.querySelector<HTMLElement>('[data-git-virtual-diff-root]');
     const pinned = panel.querySelector<HTMLElement>('[data-git-pinned-file-header]');
@@ -165,7 +167,7 @@ async function diffGeometry(page: Page, panelSelector: string) {
       const top = Math.max(rect.top, pinnedRect.top);
       const bottom = Math.min(rect.bottom, pinnedRect.bottom);
       const hit = document.elementFromPoint((left + right) / 2, (top + bottom) / 2);
-      affordanceHitPinned = hit?.closest('[data-git-pinned-file-header]') !== null;
+      affordanceHitPinned = Boolean(hit?.closest('[data-git-pinned-file-header]'));
       affordanceLabel =
         affordance.getAttribute('aria-label') ??
         affordance.getAttribute('title') ??

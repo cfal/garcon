@@ -70,10 +70,10 @@ describeOnLinux('OpenCode project path relocation', () => {
       const native = await openCodeNativeSession(fixture, chatId);
       expect(readOpenCodeSessionDirectory(native)).toBe(repository.source);
 
-      await expect(fixture.client.updateProjectPath({
+      expect(await fixture.client.updateProjectPath({
         chatId,
         projectPath: repository.target,
-      })).resolves.toMatchObject({
+      })).toMatchObject({
         chatId,
         projectPath: repository.target,
         previousProjectPath: repository.source,
@@ -87,10 +87,10 @@ describeOnLinux('OpenCode project path relocation', () => {
       expect(existsSync(join(repository.source, rootMarker))).toBe(false);
       await expectDirtyTreesUnchanged(repository, sourceStatus, targetStatus);
 
-      await expect(fixture.client.updateProjectPath({
+      expect(await fixture.client.updateProjectPath({
         chatId,
         projectPath: repository.nested,
-      })).resolves.toMatchObject({
+      })).toMatchObject({
         chatId,
         projectPath: repository.nested,
         previousProjectPath: repository.target,
@@ -112,10 +112,10 @@ describeOnLinux('OpenCode project path relocation', () => {
 
       expect(await openCodeNativeSession(fixture, chatId)).toEqual(native);
       expect(readOpenCodeSessionDirectory(native)).toBe(repository.nested);
-      await expect(fixture.client.updateProjectPath({
+      expect(await fixture.client.updateProjectPath({
         chatId,
         projectPath: repository.target,
-      })).resolves.toMatchObject({
+      })).toMatchObject({
         chatId,
         projectPath: repository.target,
         previousProjectPath: repository.nested,

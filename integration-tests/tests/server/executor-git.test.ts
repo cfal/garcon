@@ -6,6 +6,7 @@ import { GIT_MAX_RESULT_BYTES } from '../../../common/git-execution.js';
 import type { GitStashEntry } from '../../../common/git.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { initializeFixtureRepository, runFixtureGit, runFixtureGitAt } from '../../support/git-fixture.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote-executor-dials'] as const) {
   test(`Git review loads bounded files independently without exhausting the document (${executionBackend})`, async () => {
@@ -45,8 +46,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       const message = join(project, '.git', 'oversized-message');
       await writeFile(message, 'x'.repeat(GIT_MAX_RESULT_BYTES));
       await runFixtureGit(project, 'commit', '--allow-empty', '-q', '-F', message);
-      await expect(client.post('/api/v1/git/history/commits', target))
-        .rejects.toMatchObject({ status: 413, body: { errorCode: 'GIT_RESULT_TOO_LARGE' } });
+      expect(await rejectionOf(client.post('/api/v1/git/history/commits', target))).toMatchObject({ status: 413, body: { errorCode: 'GIT_RESULT_TOO_LARGE' } });
       expect(await client.get(`/api/v1/git/status?${new URLSearchParams(target)}`))
         .toMatchObject({ executorId: client.executorId, branch: 'main' });
     }, { executionBackend, projectRoots: 'separate' });
@@ -74,7 +74,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       const body = bodies.files[file];
       expect(body.patch).toContain('\\ No newline at end of file');
       const stage = { ...target, file, document, bodyFingerprint: body.bodyFingerprint, patchDigest: body.patchDigest, mode: 'stage', hunkIndex: 0, contextLines: 5 };
-      await expect(client.post('/api/v1/git/stage-hunk', { ...stage, patchDigest: '0'.repeat(64) })).rejects.toMatchObject({ status: 409, body: { errorCode: 'GIT_STALE_DOCUMENT' } });
+      expect(await rejectionOf(client.post('/api/v1/git/stage-hunk', { ...stage, patchDigest: '0'.repeat(64) }))).toMatchObject({ status: 409, body: { errorCode: 'GIT_STALE_DOCUMENT' } });
       await client.post('/api/v1/git/stage-hunk', stage);
       expect(await runFixtureGit(project, 'show', `:${file}`)).toBe('no newline');
       await client.post('/api/v1/git/commit-index', { ...target, message: 'Commit exact displayed bytes' });
@@ -97,14 +97,14 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await client.post('/api/v1/git/worktrees/remove', { ...target, worktreePath });
       const outside = join(fixture.dirs.root, 'outside');
       await mkdir(outside);
-      await expect(client.post('/api/v1/git/worktrees/create', { ...target, worktreePath: join(outside, 'escape'), branch: 'escape' })).rejects.toMatchObject({ status: 403 });
-      await expect(client.get(`/api/v1/git/status?${query}&executorId=local`)).rejects.toMatchObject({ status: 400 });
-      await expect(client.post('/api/v1/git/commit-index', { ...target, message: 'not dispatched', shell: 'unexpected' })).rejects.toMatchObject({ status: 400 });
+      expect(await rejectionOf(client.post('/api/v1/git/worktrees/create', { ...target, worktreePath: join(outside, 'escape'), branch: 'escape' }))).toMatchObject({ status: 403 });
+      expect(await rejectionOf(client.get(`/api/v1/git/status?${query}&executorId=local`))).toMatchObject({ status: 400 });
+      expect(await rejectionOf(client.post('/api/v1/git/commit-index', { ...target, message: 'not dispatched', shell: 'unexpected' }))).toMatchObject({ status: 400 });
 
       if (executorId !== 'local') {
-        await expect(client.get(`/api/v1/git/status?${new URLSearchParams({ executorId, project: fixture.dirs.project })}`)).rejects.toMatchObject({ status: 403 });
+        expect(await rejectionOf(client.get(`/api/v1/git/status?${new URLSearchParams({ executorId, project: fixture.dirs.project })}`))).toMatchObject({ status: 403 });
         await fixture.crashAndRestartExecutorWorker();
-        await expect(client.post('/api/v1/git/review-documents/files', { ...target, document, files: [file], purpose: 'visible' })).rejects.toMatchObject({ status: 409, body: { errorCode: 'GIT_STALE_DOCUMENT' } });
+        expect(await rejectionOf(client.post('/api/v1/git/review-documents/files', { ...target, document, files: [file], purpose: 'visible' }))).toMatchObject({ status: 409, body: { errorCode: 'GIT_STALE_DOCUMENT' } });
         expect(await client.get(`/api/v1/git/status?${query}`)).toMatchObject({ executorId, branch: 'main' });
       }
     }, { executionBackend, projectRoots: 'separate' });
@@ -136,8 +136,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
 
       await writeFile(join(project, 'example.txt'), 'third\n');
       await runFixtureGit(project, 'stash', 'push', '-m', 'third');
-      await expect(client.post('/api/v1/git/stash/pop', action(second!)))
-        .rejects.toMatchObject({ status: 409, body: { errorCode: 'GIT_STALE_STASH' } });
+      expect(await rejectionOf(client.post('/api/v1/git/stash/pop', action(second!)))).toMatchObject({ status: 409, body: { errorCode: 'GIT_STALE_STASH' } });
       const current = await list();
       expect(current.map(stash => stash.message)).toEqual(['On main: third', 'On main: second']);
 

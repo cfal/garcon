@@ -3,7 +3,7 @@ import {
 	FRAME_REGISTRATION_TIMEOUT_MS,
 	SurfaceAttachmentError,
 	SurfaceFrameRegistry,
-} from '../surface-frame-registry.svelte.ts';
+} from '../surface-frame-registry.ts';
 
 function handle(label: string) {
 	const element = document.createElement('div');

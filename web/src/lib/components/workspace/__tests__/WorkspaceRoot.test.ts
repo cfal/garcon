@@ -7,7 +7,7 @@ import {
 	reduceWorkspaceLayout,
 } from '$lib/workspace/workspace-layout.svelte.js';
 import { WorkspaceWindowDndController } from '$lib/workspace/window-dnd.svelte.js';
-import { SurfaceFrameRegistry } from '$lib/workspace/surface-frame-registry.svelte.js';
+import { SurfaceFrameRegistry } from '$lib/workspace/surface-frame-registry.js';
 import { ProjectResolutionStore } from '$lib/workspace/project-resolution-store.svelte.js';
 import {
 	chatViewSurfaceId,

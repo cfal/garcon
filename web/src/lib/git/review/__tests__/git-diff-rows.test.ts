@@ -5,7 +5,6 @@ import {
 	buildSplitDiffRows,
 	buildSplitDiffRowViews,
 	buildUnifiedDiffRowViews,
-	getSelectableLineKeys,
 	renderUnifiedDiffRow,
 	type GitDiffComposerDraft,
 } from '$lib/git/review/git-diff-rows.js';
@@ -154,7 +153,15 @@ describe('git diff rows', () => {
 	it('exposes selectable keys in visual order', () => {
 		const rows = buildUnifiedDiffRows(makeReviewData());
 
-		expect(getSelectableLineKeys(rows, 'src/app.ts', 'unstaged')).toEqual([
+		const views = buildUnifiedDiffRowViews({
+			rows,
+			filePath: 'src/app.ts',
+			activeTab: 'unstaged',
+			readOnly: false,
+			selectedLineKeys: new Set(),
+			composerTarget: null,
+		});
+		expect(views.flatMap((row) => row.selectionKey ?? [])).toEqual([
 			makeLineSelectionKey('src/app.ts', 'unstaged', 'before', 1),
 			makeLineSelectionKey('src/app.ts', 'unstaged', 'after', 2),
 			makeLineSelectionKey('src/app.ts', 'unstaged', 'after', 3),

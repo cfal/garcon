@@ -62,6 +62,7 @@ export default defineConfig({
 			},
 		},
 		alias: {
+			'$service-worker': new URL('./src/lib/mocks/service-worker.ts', import.meta.url).pathname,
 			$lib: new URL('./src/lib', import.meta.url).pathname,
 			$app: new URL('./src/lib/mocks/app', import.meta.url).pathname,
 			$shared: new URL('../common', import.meta.url).pathname,

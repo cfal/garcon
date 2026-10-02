@@ -1,6 +1,6 @@
 <script lang="ts">
-	import ComposerBottomBar from '$lib/components/chat/ComposerBottomBar.svelte';
-	import AgentSettingsControls from '$lib/components/chat/AgentSettingsControls.svelte';
+	import ComposerBottomBar from '$lib/components/chat/composer/ComposerBottomBar.svelte';
+	import AgentSettingsControls from '$lib/components/chat/composer/AgentSettingsControls.svelte';
 	import ChatTagEditor from '$lib/components/chat/ChatTagEditor.svelte';
 	import ChatTagToggleButton from '$lib/components/chat/ChatTagToggleButton.svelte';
 	import ProjectPathField from '$lib/components/project-paths/ProjectPathField.svelte';

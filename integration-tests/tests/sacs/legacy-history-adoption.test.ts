@@ -27,6 +27,7 @@ import type {
   SacsLegacyTranscriptRow,
   SacsPreparedHistorySource,
 } from './driver.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 const SACS_TIMEOUT_MS = 120_000;
 const SOURCE_TIMESTAMP = '2026-08-16T00:00:00.000Z';
@@ -134,7 +135,7 @@ for (const driverFactory of sacsScriptedDriverFactories) {
                 ? { upToOrdinal: anchor.ordinal, transcriptViewId: before.transcriptViewId }
                 : {}),
             };
-            await expect(fixture.client.forkChat(request)).rejects.toMatchObject({
+            expect(await rejectionOf(fixture.client.forkChat(request))).toMatchObject({
               status: 409,
               body: { errorCode: 'TRANSCRIPT_NOT_YET_PERSISTED', retryable: true },
             });
@@ -286,7 +287,7 @@ for (const driverFactory of sacsScriptedDriverFactories) {
           source = await legacy.prepare(fixture, target.chatId, target.rows);
 
           await restartWithPreV5Chat(fixture, target.chatId);
-          await expect(fixture.client.ping()).resolves.toBeDefined();
+          expect(await fixture.client.ping()).toBeDefined();
           await source.corrupt();
 
           const healthyChatId = fixture.newChatId();

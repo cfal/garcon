@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 for (const executionBackend of ['remote-controller-dials', 'remote-executor-dials'] as const) {
   test(`ticket defaults use global repository names on the owning executor (${executionBackend})`, async () => {
@@ -29,8 +30,7 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
         await mkdir(folder);
         expect(await resolve(folder, executorId!)).toEqual({ project: 'plain', kind: 'folder' });
       }
-      await expect(resolve(f.dirs.project, f.client.executorId))
-        .rejects.toMatchObject({ status: 503, body: { errorCode: 'TICKET_PROJECT_UNAVAILABLE' } });
+      expect(await rejectionOf(resolve(f.dirs.project, f.client.executorId))).toMatchObject({ status: 503, body: { errorCode: 'TICKET_PROJECT_UNAVAILABLE' } });
       const bootstrap = await f.client.get<{ storeId: string }>('/api/v1/tickets/bootstrap');
       const request = { expectedStoreId: bootstrap.storeId, requestId: crypto.randomUUID(),
         payload: { action: 'create', input: { title: 'Synthetic ticket', project: '/old/explicit-label' } } };

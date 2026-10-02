@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { surfaceFrame } from '../surface-frame-action.js';
 import { SurfaceFrameBridge } from '../surface-frame-context.js';
-import { SurfaceFrameRegistry } from '../surface-frame-registry.svelte.js';
+import { SurfaceFrameRegistry } from '../surface-frame-registry.js';
 
 describe('surfaceFrame', () => {
 	afterEach(() => {

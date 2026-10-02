@@ -11,6 +11,7 @@ import type {
 import { userContents } from '../../support/chat-assertions.js';
 import type { GarconTestClient } from '../../support/garcon-client.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 describe('on-demand project resolution', () => {
   test('keeps unavailable chats readable and rejects new work until the folder returns', async () => {
@@ -66,21 +67,21 @@ describe('on-demand project resolution', () => {
         clientMessageId: 'message-project-restore',
       });
       for (let attempt = 0; attempt < 2; attempt += 1) {
-        await expect(fixture.client.runChat({
+        expect(await rejectionOf(fixture.client.runChat({
           ...retryRequest,
           transcriptViewId: before.transcriptViewId,
-        })).rejects.toMatchObject({
+        }))).toMatchObject({
           status: 409,
           body: { errorCode: 'PROJECT_UNAVAILABLE', retryable: false },
         });
       }
-      await expect(fixture.client.enqueue({
+      expect(await rejectionOf(fixture.client.enqueue({
         chatId,
         content: 'queue while unavailable',
         clientRequestId: 'request-queue-unavailable',
         clientMessageId: 'message-queue-unavailable',
         transcriptViewId: before.transcriptViewId,
-      })).rejects.toMatchObject({
+      }))).toMatchObject({
         status: 409,
         body: { errorCode: 'PROJECT_UNAVAILABLE', retryable: false },
       });

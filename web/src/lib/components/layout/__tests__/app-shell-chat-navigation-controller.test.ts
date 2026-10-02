@@ -93,6 +93,89 @@ function createHarness() {
 }
 
 describe('AppShellChatNavigationController', () => {
+	it.each(['resolve', 'reject'] as const)(
+		'ignores placement %s after teardown',
+		async (outcome) => {
+			const harness = createHarness();
+			const placement = Promise.withResolvers<unknown>();
+			harness.showChat.mockReturnValueOnce(placement.promise);
+			const selecting = harness.controller.showChatInCurrentWindow('chat-a', { navigate: true });
+			harness.setFocusedChatId('chat-a');
+			harness.controller.destroy();
+			if (outcome === 'resolve') placement.resolve(undefined);
+			else placement.reject(new Error('Placement failed'));
+			await selecting;
+			expect(harness.selectedChatId).toBe('chat-b');
+			expect(harness.navigateToChat).not.toHaveBeenCalled();
+			expect(harness.requestComposerFocus).not.toHaveBeenCalled();
+			expect(harness.requestSidebarRecenter).not.toHaveBeenCalled();
+			expect(harness.reportOpenError).not.toHaveBeenCalled();
+			expect(harness.controller.pendingChatTarget).toBeNull();
+			expect(harness.controller.pendingWindowId).toBeNull();
+		},
+	);
+
+	it('drops queued navigation and focus after teardown without cancelling an issued route', async () => {
+		const harness = createHarness();
+		const navigation = Promise.withResolvers<void>();
+		harness.navigateToChat.mockReturnValueOnce(navigation.promise);
+		const first = harness.controller.synchronizeFocusedChat('chat-a');
+		await Promise.resolve();
+		expect(harness.navigateToChat).toHaveBeenCalledExactlyOnceWith('chat-a');
+		const second = harness.controller.synchronizeFocusedChat('chat-c');
+		harness.controller.destroy();
+		navigation.resolve();
+		await Promise.all([first, second]);
+		expect(harness.navigateToChat).toHaveBeenCalledTimes(1);
+		expect(harness.requestSidebarRecenter).not.toHaveBeenCalled();
+	});
+
+	it.each(['resolve', 'reject'] as const)(
+		'ignores deletion cleanup %s after teardown',
+		async (outcome) => {
+			const harness = createHarness();
+			const cleanup = Promise.withResolvers<void>();
+			const deleting = harness.controller.reconcileDeletedChat({
+				chatId: 'chat-b',
+				wasSelected: true,
+				neighborId: 'chat-a',
+				removeLocal: () => harness.setSelectedChatId(null),
+				clearPresentation: () => cleanup.promise,
+			});
+			harness.controller.destroy();
+			if (outcome === 'resolve') cleanup.resolve();
+			else cleanup.reject(new Error('Cleanup failed'));
+			await deleting;
+			expect(harness.selectedChatId).toBeNull();
+			expect(harness.showChat).not.toHaveBeenCalled();
+			expect(harness.navigateToBareRoute).not.toHaveBeenCalled();
+			expect(harness.reportDeleteError).not.toHaveBeenCalled();
+		},
+	);
+
+	it('rejects further work after teardown', async () => {
+		const harness = createHarness();
+		harness.controller.destroy();
+		harness.controller.handleRouteChat(null);
+		harness.controller.handleRouteChat('chat-a');
+		await harness.controller.showChatInCurrentWindow('chat-a', { navigate: true });
+		await harness.controller.synchronizeFocusedChat('chat-c');
+		const removeLocal = vi.fn();
+		const clearPresentation = vi.fn(async () => {});
+		await harness.controller.reconcileDeletedChat({
+			chatId: 'chat-b',
+			wasSelected: true,
+			neighborId: null,
+			removeLocal,
+			clearPresentation,
+		});
+		expect(harness.selectedChatId).toBe('chat-b');
+		expect(harness.showChat).not.toHaveBeenCalled();
+		expect(harness.navigateToChat).not.toHaveBeenCalled();
+		expect(removeLocal).not.toHaveBeenCalled();
+		expect(clearPresentation).not.toHaveBeenCalled();
+	});
+
 	it('consumes a focused-window route echo without placing it into a newly focused window', async () => {
 		const harness = createHarness();
 		const navigation = deferred<void>();

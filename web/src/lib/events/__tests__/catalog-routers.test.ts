@@ -10,7 +10,7 @@ import { RemoteSettingsRouter } from '../remote-settings-router';
 import { ScheduledPromptsRouter } from '../scheduled-prompts-router';
 import { SnippetsRouter } from '../snippets-router';
 import { TicketsRouter } from '../tickets-router';
-import { TranscriptSearchStatusRouter } from '../transcript-search-status-router';
+import { TranscriptSearchStatusController } from '../transcript-search-status-controller';
 
 describe('root catalog routers', () => {
 	it('validates only owned frames while retaining independent cursors and handler delivery', () => {
@@ -27,11 +27,15 @@ describe('root catalog routers', () => {
 		const tickets = { publish: vi.fn() };
 		const onStatus = vi.fn();
 		const routers = [
-			new ApiProvidersRouter(ws, providers), new ChatBoardsRouter(ws, boards),
-			new ExecutorsRouter(ws, executors), new PreamblesRouter(ws, preambles, selections),
-			new RemoteSettingsRouter(ws, settings), new ScheduledPromptsRouter(ws, prompts),
-			new SnippetsRouter(ws, snippets), new TicketsRouter(ws, tickets),
-			new TranscriptSearchStatusRouter(ws, onStatus),
+			new ApiProvidersRouter(ws, providers),
+			new ChatBoardsRouter(ws, boards),
+			new ExecutorsRouter(ws, executors),
+			new PreamblesRouter(ws, preambles, selections),
+			new RemoteSettingsRouter(ws, settings),
+			new ScheduledPromptsRouter(ws, prompts),
+			new SnippetsRouter(ws, snippets),
+			new TicketsRouter(ws, tickets),
+			new TranscriptSearchStatusController(ws, onStatus),
 		];
 		const owned = [
 			{ type: 'api-providers-invalidated' },

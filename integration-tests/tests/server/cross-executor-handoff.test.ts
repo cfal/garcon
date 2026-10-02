@@ -6,6 +6,7 @@ import type { AgentHandoffCommandRequest, AgentHandoffCommandResponse } from '..
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { initializeFixtureRepository, runFixtureGit } from '../../support/git-fixture.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 for (const backend of ['remote-controller-dials', 'remote-executor-dials'] as const) {
   test(`promptless executor handoff persists and retargets project services before any send (${backend})`, async () => {
@@ -26,27 +27,27 @@ for (const backend of ['remote-controller-dials', 'remote-executor-dials'] as co
         target: { executorId: client.executorId, projectPath: executionDirs.project, agentId: agent.agentId,
           model: agent.provider.model, apiProviderId: agent.provider.providerId, modelEndpointId: agent.provider.endpointId },
       } };
-      await expect(client.post('/api/v1/chats/agent-handoff', { ...request, handoff: {
+      expect(await rejectionOf(client.post('/api/v1/chats/agent-handoff', { ...request, handoff: {
         ...request.handoff, target: { ...request.handoff.target, projectPath: join(executionDirs.project, 'missing') },
-      } })).rejects.toMatchObject({ status: 404, body: { errorCode: 'VALIDATION_FAILED' } });
+      } }))).toMatchObject({ status: 404, body: { errorCode: 'VALIDATION_FAILED' } });
       expect((await client.getChatSnapshot(chatId)).chat.agentOwnershipEpoch).toBe(before.chat.agentOwnershipEpoch);
       expect(messagesOfType((await client.getMessages(chatId)).messages, 'agent-switch')).toHaveLength(0);
       const moved = await client.post<AgentHandoffCommandResponse>('/api/v1/chats/agent-handoff', request);
       expect(moved.chat).toMatchObject({ executorId: client.executorId, projectPath: executionDirs.project, agentId: agent.agentId, model: agent.provider.model });
       expect(moved).not.toHaveProperty('turnId');
       expect(moved.chat.agentOwnershipEpoch).not.toBe(before.chat.agentOwnershipEpoch);
-      await expect(client.patch('/api/v1/chats/project-path', {
+      expect(await rejectionOf(client.patch('/api/v1/chats/project-path', {
         chatId, projectPath: executionDirs.project, expectedExecutorId: 'local',
         expectedAgentOwnershipEpoch: before.chat.agentOwnershipEpoch,
         expectedProjectPath: before.chat.projectPath,
-      })).rejects.toMatchObject({ status: 409, body: { errorCode: 'STALE_CHAT_OWNERSHIP' } });
+      }))).toMatchObject({ status: 409, body: { errorCode: 'STALE_CHAT_OWNERSHIP' } });
       for (const [route, patch] of [
         ['model', { model: agent.provider.model }],
         ['execution-settings', { permissionMode: 'default' }],
       ] as const) {
-        await expect(client.patch(`/api/v1/chats/${route}`, {
+        expect(await rejectionOf(client.patch(`/api/v1/chats/${route}`, {
           chatId, ...patch, expectedAgentOwnershipEpoch: before.chat.agentOwnershipEpoch,
-        })).rejects.toMatchObject({ status: 409, body: { errorCode: 'STALE_CHAT_OWNERSHIP' } });
+        }))).toMatchObject({ status: 409, body: { errorCode: 'STALE_CHAT_OWNERSHIP' } });
       }
       const persisted = await waitForPersistedChat({ directories: dirs, chatId, select: (chat) => chat,
         timeoutMessage: 'Handoff did not persist' });

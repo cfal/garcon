@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import SidebarContent from './SidebarContent.svelte';
-	import SidebarSearchDock from './SidebarSearchDock.svelte';
+	import SidebarSearchDock from './search/SidebarSearchDock.svelte';
 	import SidebarSelectionBar from './SidebarSelectionBar.svelte';
 	import {
 		getAppShell,

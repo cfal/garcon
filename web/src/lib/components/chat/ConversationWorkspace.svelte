@@ -4,12 +4,12 @@
 
 	import { onDestroy, onMount } from 'svelte';
 	import type { ComposerAvailabilityNoticePresentation } from '$lib/chat/composer/composer-availability.js';
-	import PromptComposer from './PromptComposer.svelte';
-	import QueuedInputsDialog from './QueuedInputsDialog.svelte';
+	import PromptComposer from './composer/PromptComposer.svelte';
+	import QueuedInputsDialog from './queue/QueuedInputsDialog.svelte';
 	import HandoffForkDialog from './HandoffForkDialog.svelte';
 	import ExecutorHandoffDialog from './ExecutorHandoffDialog.svelte';
 	import ReloadChatDialog from './ReloadChatDialog.svelte';
-	import UserMessageNavigatorDialog from './UserMessageNavigatorDialog.svelte';
+	import UserMessageNavigatorDialog from './transcript/UserMessageNavigatorDialog.svelte';
 	import {
 		StaleConversationSurfaceError,
 		type ConversationPanelActions,

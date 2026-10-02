@@ -74,7 +74,7 @@ Register provider holds or failure plans before sending the command. Mark the We
 
 Use `restartGarcon()` for graceful restart behavior and `crashAndRestartGarcon()` for abrupt-loss recovery. Make concurrency deterministic with provider holds and explicit release order, not timing guesses.
 
-Await WebSocket results before asserting on them. Bun 1.4.2's `.resolves`/`.rejects` matchers can synchronously re-enter its WebSocket parser from a message continuation, dropping adjacent frames and closing a healthy socket with code 1002. For an expected rejection, await `promise.then(() => null, (error: unknown) => error)` and assert the exact error synchronously; do not reconnect or relax the assertion.
+Await IO before asserting on it. Bun 1.4.2's pending `.resolves`/`.rejects` matchers synchronously re-enter its event loop, which can lose subprocess pipe events or WebSocket frames and close a healthy socket with code 1002. Use `expect(await operation())` for success, `expect(await rejectionOf(operation()))` for an exact rejection value, or `expect(await throwingRejectionOf(operation())).toThrow(...)` for a thrown-error matcher. The rejection helpers fail on unexpected success. A source guard rejects promise matchers throughout this package; do not reconnect, retry, or relax assertions to hide this runtime bug.
 
 ## Executor Parity
 

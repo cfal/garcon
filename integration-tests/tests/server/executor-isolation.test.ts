@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { parseExecutors } from '../../../common/executors.js';
 import { assistantContents } from '../../support/chat-assertions.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 for (const backend of ['remote-controller-dials', 'remote-executor-dials'] as const) {
   test(`oversized provider output fails its chat without disconnecting another (${backend})`, async () => {
@@ -92,13 +93,13 @@ for (const backend of ['remote-controller-dials', 'remote-executor-dials'] as co
       await held.received;
       const data = `data:image/png;base64,${Buffer.alloc(7 * 1024 * 1024).toString('base64')}`;
       const oversizedChat = fixture.newChatId();
-      await expect(client.startChat({
+      expect(await rejectionOf(client.startChat({
         ...client.directStartRequest({
           chatId: oversizedChat, content: 'Synthetic oversized input',
           projectPath: fixture.dirs.project, agent: directAgents.anthropic,
         }),
         images: [{ name: 'first.png', data }, { name: 'second.png', data }],
-      })).rejects.toMatchObject({
+      }))).toMatchObject({
         status: 503,
         body: { errorCode: 'UNAVAILABLE', error: 'The request is too large to send to the executor.' },
       });

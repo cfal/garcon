@@ -67,23 +67,23 @@ vi.mock('$lib/ws/reconnect-coordinator.svelte', () => ({
 	},
 }));
 
-vi.mock('$lib/components/chat/ConversationFeed.svelte', async () => ({
-	default: (await import('./ConversationFeedStub.svelte')).default,
+vi.mock('$lib/components/chat/transcript/ConversationFeed.svelte', async () => ({
+	default: (await import('../transcript/__tests__/ConversationFeedStub.svelte')).default,
 }));
 
-vi.mock('$lib/components/chat/PromptComposer.svelte', async () => ({
-	default: (await import('./PromptComposerStub.svelte')).default,
+vi.mock('$lib/components/chat/composer/PromptComposer.svelte', async () => ({
+	default: (await import('../composer/__tests__/PromptComposerStub.svelte')).default,
 }));
 
 vi.mock('$lib/components/git/NewBranchModal.svelte', async () => ({
 	default: (await import('./GenericStub.svelte')).default,
 }));
 
-vi.mock('$lib/components/chat/QueueControls.svelte', async () => ({
-	default: (await import('./QueueControlsCapabilityStub.svelte')).default,
+vi.mock('$lib/components/chat/queue/QueueControls.svelte', async () => ({
+	default: (await import('../queue/__tests__/QueueControlsCapabilityStub.svelte')).default,
 }));
 
-vi.mock('$lib/components/chat/QueuedInputsDialog.svelte', async () => ({
+vi.mock('$lib/components/chat/queue/QueuedInputsDialog.svelte', async () => ({
 	default: (await import('./GenericStub.svelte')).default,
 }));
 

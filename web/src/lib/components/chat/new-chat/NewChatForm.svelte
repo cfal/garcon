@@ -1,0 +1,946 @@
+<script lang="ts">
+	// New-chat form used inside the NewChatDialog. Delegates state management
+	// to NewChatFormState and retains only DOM interactions and template logic.
+
+	import { onDestroy, onMount, tick, untrack } from 'svelte';
+	import type { NewChatConfig } from '$lib/chat/sessions/chat-session-types.js';
+	import { NewChatFormState } from '$lib/chat/new-chat/new-chat-form-state.svelte.js';
+	import {
+		chatAttachmentAccept,
+		isImageAttachment,
+		isSupportedChatAttachment,
+		isVideoChatAttachment,
+	} from '$lib/chat/composer/image-attachment.svelte.js';
+	import { shouldSubmitOnEnter } from '$lib/chat/composer/composer-shortcuts.js';
+	import type { SnippetInsertionResult } from '$lib/chat/composer/snippet-insertion.js';
+	import {
+		applySnippetTriggerReplacement,
+		findSnippetTrigger,
+	} from '$lib/chat/composer/snippet-trigger.js';
+	import { SnippetPaletteTriggerState } from '$lib/chat/composer/snippet-palette-trigger-state.svelte.js';
+	import {
+		buildPermissionOptions,
+		buildThinkingOptions,
+	} from '$lib/chat/composer/composer-controls.js';
+	import {
+		promptEditorSelectionFromTextarea,
+		restorePromptEditorSelection,
+		type PromptEditorSelection,
+	} from '$lib/prompt-editor/prompt-editor-selection.js';
+	import ComposerBottomBar from '../composer/ComposerBottomBar.svelte';
+	import PromptEditorDialog from '$lib/components/prompt-editor/PromptEditorDialog.svelte';
+	import ComposerAttachmentBadge from '../composer/ComposerAttachmentBadge.svelte';
+	import { chatViewSurfaceId } from '$lib/workspace/surface-types.js';
+	import ComposerSnippetPalette from '../composer/ComposerSnippetPalette.svelte';
+	import AgentSettingsControls from '../composer/AgentSettingsControls.svelte';
+	import NewChatPreambleControls from '../../preambles/NewChatPreambleControls.svelte';
+	import ChatTagEditor from '../ChatTagEditor.svelte';
+	import ChatTagToggleButton from '../ChatTagToggleButton.svelte';
+	import {
+		getLocalSettings,
+		getAppShell,
+		getModelCatalog,
+		getExecutors,
+		getRemoteSettings,
+		getChatSessions,
+		getNotifications,
+		getPreambles,
+		getSnippets,
+		getTransientLayers,
+		getWorkspaceLayout,
+	} from '$lib/context';
+	import * as m from '$lib/paraglide/messages.js';
+	import ProjectPathField from '$lib/components/project-paths/ProjectPathField.svelte';
+	import ProjectPinnedPathList from '$lib/components/project-paths/ProjectPinnedPathList.svelte';
+	import GitWorktreePickerModal from '$lib/components/git/GitWorktreePickerModal.svelte';
+	import Loader2 from '@lucide/svelte/icons/loader-2';
+	import FileText from '@lucide/svelte/icons/file-text';
+	import FileVideo from '@lucide/svelte/icons/file-video';
+	import { CHAT_FILE_ATTACHMENT_MIME_TYPES } from '@garcon/common/attachments';
+	import X from '@lucide/svelte/icons/x';
+	import ComposerModelSelector from '$lib/components/model-selector/ComposerModelSelector.svelte';
+	import ExecutorSelector from '$lib/components/shared/ExecutorSelector.svelte';
+	import type {
+		ModelSelectorChange,
+		ModelSelectorMode,
+	} from '$lib/components/model-selector/model-selector-types';
+	import { buildModelSelectorRecents } from '$lib/components/model-selector/model-selector-recents';
+	import {
+		parseSnippetCommand,
+		type SnippetCommandParseResult,
+	} from '$lib/chat/composer/slash-commands.js';
+	import { SnippetExpansionController } from '$lib/snippets/snippet-expansion-controller.svelte.js';
+	import { ApiError } from '$lib/api/client.js';
+	import { snippetTemplateUsesArguments } from '$shared/snippets';
+	import {
+		matchesSelectableSnippetExpansion,
+		type SelectableSnippet,
+	} from '$lib/snippets/selectable-snippet.js';
+	import { createClientChatId } from '$shared/client-chat-id';
+	import type { ChatId } from '$shared/chat-id';
+	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
+	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
+	import { nonDirectAgentIds } from '$lib/agents/direct-agents.js';
+	import { NewChatComposerEditorState } from './new-chat-composer-editor-state.svelte.js';
+	import { NewChatPromptRefinementController } from './new-chat-prompt-refinement-controller.js';
+
+	interface Props {
+		prefill?: string;
+		onStartChat: (config: NewChatConfig, chatId: ChatId) => void;
+		onCancel?: () => void;
+	}
+
+	let { prefill = '', onStartChat, onCancel }: Props = $props();
+
+	const localSettings = getLocalSettings();
+	const appShell = getAppShell();
+	const rootModelCatalog = getModelCatalog();
+	const executors = getExecutors();
+	const remoteSettings = getRemoteSettings();
+	const sessions = getChatSessions();
+	const notifications = getNotifications();
+	const preambles = getPreambles();
+	const snippets = getSnippets();
+	const transientLayers = getTransientLayers();
+	const workspaceLayout = getWorkspaceLayout();
+	const newChatSurfaceId = $derived(chatViewSurfaceId(workspaceLayout.defaultWindowId));
+	const form: NewChatFormState = new NewChatFormState({
+		modelCatalog: rootModelCatalog,
+		executors,
+		remoteSettings,
+		get selectableAgentIds() {
+			return newChatAgentIds;
+		},
+	});
+	const modelCatalog = $derived(rootModelCatalog.forExecutor(form.executorId));
+	function selectableAgentsForExecutor(executorId: string) {
+		const allAgentIds = rootModelCatalog.forExecutor(executorId).getSelectableAgents();
+		return localSettings.allowDirectChats ? allAgentIds : nonDirectAgentIds(allAgentIds);
+	}
+	const newChatAgentIds = $derived(selectableAgentsForExecutor(form.executorId));
+	const canAttachImages = $derived(modelCatalog.supportsImages(form.agentId, form.modelValue));
+	const fileAttachmentMimeTypes = $derived(
+		modelCatalog.fileAttachmentMimeTypes?.(form.agentId) ?? CHAT_FILE_ATTACHMENT_MIME_TYPES,
+	);
+	const attachmentSupport = $derived({
+		allowImages: canAttachImages,
+		fileMimeTypes: fileAttachmentMimeTypes,
+	});
+	const canAttachAttachments = $derived(canAttachImages || fileAttachmentMimeTypes.length > 0);
+	const attachmentAccept = $derived(chatAttachmentAccept(attachmentSupport));
+	const snippetExpansion = new SnippetExpansionController();
+	const snippetExpansionLayer = transientLayerAttachment({
+		registry: transientLayers,
+		id: allocateTransientLayerId('snippet-expansion'),
+		kind: 'prompt-transform',
+		modality: 'nonmodal',
+		onEscape: () => {
+			snippetExpansion.cancel();
+			return true;
+		},
+		restoreFocus: returnTextareaFocus,
+	});
+
+	let isMobile = $state(false);
+	let pendingTextareaFocus = $state(true);
+	let prospectiveChatId = $state<ChatId | null>(null);
+	const initialContentReady = $derived(form.settingsLoaded);
+	const allKnownTags = $derived(
+		Array.from(new Set(sessions.orderedChats.flatMap((c) => c.tags))).sort(),
+	);
+
+	let textareaRef: HTMLTextAreaElement | undefined = $state();
+	let imageInputRef: HTMLInputElement | undefined = $state();
+	let textareaFocusTimer: ReturnType<typeof setTimeout> | null = null;
+	let expansionProjectPath = '';
+	let snippetInteractionGeneration = $state(0);
+	const snippetInteractionKey = $derived(
+		`${snippetInteractionGeneration}\u0000${form.executorId}\u0000${form.trimmedPath}`,
+	);
+
+	const snippetPalette = new SnippetPaletteTriggerState();
+	const composerEditor = new NewChatComposerEditorState();
+	const promptRefinement = new NewChatPromptRefinementController({
+		form,
+		notifications,
+		transientLayers,
+		editor: composerEditor,
+		get textarea() {
+			return textareaRef;
+		},
+		get startBlocked() {
+			return !initialContentReady || snippetExpansion.pending;
+		},
+		closePromptSurfaces: () => snippetPalette.dismiss(),
+		resizeTextarea: autoResizeTextarea,
+	});
+	const promptTransformPending = $derived(snippetExpansion.pending || promptRefinement.pending);
+	const promptTransformStatus = $derived(
+		promptRefinement.pending ? m.chat_composer_refining_prompt() : m.snippets_expanding(),
+	);
+
+	function canFocusTextarea(): boolean {
+		return (
+			!transientLayers.makesMainInert || transientLayers.ownsTopModalTarget(textareaRef ?? null)
+		);
+	}
+
+	function reseed(): void {
+		if (textareaFocusTimer) clearTimeout(textareaFocusTimer);
+		snippetExpansion.cancel();
+		promptRefinement.abort();
+		prospectiveChatId = null;
+		composerEditor.reset();
+		snippetInteractionGeneration += 1;
+		snippetPalette.reset();
+		form.reseed(prefill);
+		pendingTextareaFocus = true;
+		textareaFocusTimer = setTimeout(() => {
+			textareaFocusTimer = null;
+			if (textareaRef && initialContentReady) {
+				if (prefill) {
+					textareaRef.setSelectionRange(0, 0);
+					textareaRef.scrollTop = 0;
+				}
+				textareaRef.focus();
+				pendingTextareaFocus = false;
+			}
+		}, 50);
+	}
+
+	onMount(() => {
+		reseed();
+		form.loadSettingsAndModels();
+		const removeSeedListener = appShell.onNewChatDialogSeed(() => reseed());
+		const mql = window.matchMedia('(max-width: 768px)');
+		isMobile = mql.matches;
+		const handleMediaChange = (e: MediaQueryListEvent) => {
+			isMobile = e.matches;
+		};
+		mql.addEventListener('change', handleMediaChange);
+
+		return () => {
+			removeSeedListener();
+			mql.removeEventListener('change', handleMediaChange);
+		};
+	});
+
+	$effect(() => {
+		if (!form.executorReady) return;
+		const catalog = modelCatalog;
+		void catalog.version;
+		untrack(() => void catalog.refreshIfStale());
+	});
+
+	// Revalidates selected models whenever the shared model catalog updates.
+	$effect(() => {
+		void modelCatalog.version;
+		form.validateAllModelsAgainstLive();
+	});
+
+	$effect(() => {
+		const selectableAgentIds = newChatAgentIds;
+		untrack(() => form.reconcileAgentSelection(selectableAgentIds));
+	});
+
+	// Focus textarea when path validates successfully, but not while browsing.
+	$effect(() => {
+		if (
+			initialContentReady &&
+			form.validationStatus === 'valid' &&
+			!form.showBrowser &&
+			canFocusTextarea()
+		) {
+			textareaRef?.focus();
+		}
+	});
+
+	// Defers initial textarea focus until startup defaults have loaded and the
+	// input is visible.
+	$effect(() => {
+		if (!pendingTextareaFocus || !initialContentReady || form.showBrowser || !canFocusTextarea())
+			return;
+		if (!textareaRef) return;
+		if (prefill) {
+			textareaRef.setSelectionRange(0, 0);
+			textareaRef.scrollTop = 0;
+		}
+		textareaRef.focus();
+		pendingTextareaFocus = false;
+	});
+
+	// Reconcile image preview URLs when attached images change.
+	$effect(() => {
+		void form.attachedImages;
+		form.reconcileImageUrls();
+	});
+
+	// Debounced path validation reacts to path changes.
+	const validationTargetKey = $derived(`${form.pathContextKey}\u0000${form.trimmedPath}`);
+	$effect(() => {
+		const projectPath = validationTargetKey;
+		if (projectPath !== expansionProjectPath) {
+			expansionProjectPath = projectPath;
+			snippetExpansion.cancel();
+		}
+		untrack(() => form.validatePath());
+	});
+
+	onDestroy(() => {
+		if (textareaFocusTimer) clearTimeout(textareaFocusTimer);
+		snippetExpansion.cancel();
+		promptRefinement.destroy();
+		form.revokeAllImageUrls();
+		form.dispose();
+	});
+
+	function openImagePicker(): void {
+		if (promptTransformPending) return;
+		imageInputRef?.click();
+	}
+
+	function handleImageInputChange(event: Event): void {
+		const input = event.target as HTMLInputElement;
+		if (promptTransformPending) {
+			input.value = '';
+			return;
+		}
+		if (!input.files) return;
+		form.addImages(Array.from(input.files), attachmentSupport);
+		input.value = '';
+	}
+
+	function handleMessagePaste(event: ClipboardEvent): void {
+		if (promptRefinement.pending) return;
+		const items = event.clipboardData?.items;
+		if (!items) return;
+		const pastedImages: File[] = [];
+		for (const item of items) {
+			if (!item.type.startsWith('image/')) continue;
+			const file = item.getAsFile();
+			if (file && isSupportedChatAttachment(file, attachmentSupport)) pastedImages.push(file);
+		}
+		if (pastedImages.length > 0) {
+			snippetExpansion.cancel();
+			form.addImages(pastedImages, attachmentSupport);
+		}
+	}
+
+	function autoResizeTextarea(): void {
+		if (!textareaRef) return;
+		textareaRef.style.height = 'auto';
+		textareaRef.style.height = `${textareaRef.scrollHeight}px`;
+	}
+
+	function handleMessageInput(event: Event): void {
+		const input = event.currentTarget as HTMLTextAreaElement;
+		if (promptRefinement.pending) {
+			input.value = form.firstMessage;
+			return;
+		}
+		if (snippetExpansion.pending) snippetExpansion.cancel();
+		form.firstMessage = input.value;
+		autoResizeTextarea();
+		if ((event as InputEvent).isComposing) return;
+		snippetPalette.updateDetectedTrigger(
+			findSnippetTrigger(input.value, input.selectionStart, localSettings.snippetTrigger),
+			input.value,
+		);
+	}
+
+	function snippetErrorDetail(error: unknown): string {
+		if (error instanceof ApiError) return error.details || error.message;
+		return error instanceof Error ? error.message : String(error);
+	}
+
+	function returnTextareaFocus(): void {
+		textareaRef?.focus({ preventScroll: true });
+	}
+
+	async function settleTextareaAfterSnippet(caret?: number): Promise<void> {
+		await tick();
+		if (caret !== undefined) textareaRef?.setSelectionRange(caret, caret);
+		autoResizeTextarea();
+	}
+
+	function openExpandedEditor(): void {
+		if (promptTransformPending || !textareaRef) return;
+		snippetPalette.dismiss();
+		const selection = promptEditorSelectionFromTextarea(textareaRef);
+		textareaRef.focus({ preventScroll: true });
+		composerEditor.show(selection);
+	}
+
+	async function closeExpandedEditor(): Promise<void> {
+		const selection = composerEditor.selection;
+		composerEditor.close();
+		await tick();
+		if (!textareaRef) return;
+		restorePromptEditorSelection(textareaRef, selection);
+		autoResizeTextarea();
+		textareaRef.focus({ preventScroll: true });
+	}
+
+	function handleExpandedTextChange(text: string): void {
+		if (promptTransformPending || !composerEditor.open || form.firstMessage === text) return;
+		form.firstMessage = text;
+	}
+
+	function handleExpandedSelectionChange(selection: PromptEditorSelection): void {
+		composerEditor.updateSelection(selection);
+	}
+
+	function ensureProspectiveChatId(): ChatId {
+		if (!prospectiveChatId) prospectiveChatId = createClientChatId();
+		return prospectiveChatId;
+	}
+
+	function expansionContext() {
+		const projectPath = form.trimmedPath;
+		if (projectPath) {
+			return {
+				type: 'new-chat' as const,
+				chatId: ensureProspectiveChatId(),
+				projectPath,
+				executorId: form.executorId,
+			};
+		}
+		notifications.error(m.chat_new_chat_errors_project_path_required());
+		return null;
+	}
+
+	async function insertSnippet(
+		snippet: SelectableSnippet,
+		argumentsText: string,
+		range: { start: number; end: number } | null = null,
+	): Promise<SnippetInsertionResult> {
+		if (promptTransformPending || !textareaRef) return 'cancelled';
+		const context = expansionContext();
+		if (!context) {
+			await settleTextareaAfterSnippet();
+			return 'cancelled';
+		}
+		const sourceText = form.firstMessage;
+		const projectPath = context.projectPath;
+		const start = range?.start ?? textareaRef.selectionStart;
+		const end = range?.end ?? textareaRef.selectionEnd;
+		try {
+			const result = await snippetExpansion.run({
+				shortName: snippet.shortName,
+				arguments: { type: 'value', value: argumentsText },
+				context,
+			});
+			if (result.kind !== 'expanded') return 'cancelled';
+			if (!matchesSelectableSnippetExpansion(snippet, result.response)) {
+				if (snippet.source === 'snippet') void snippets.refreshIfLoaded();
+				else void preambles.refreshIfLoaded();
+				notifications.error(m.snippets_changed_before_expansion());
+				await settleTextareaAfterSnippet();
+				return 'cancelled';
+			}
+			if (
+				form.trimmedPath !== projectPath ||
+				result.response.contextProjectPath !== projectPath ||
+				result.response.contextExecutorId !== form.executorId ||
+				form.firstMessage !== sourceText
+			)
+				return 'cancelled';
+			const replacement = range
+				? applySnippetTriggerReplacement(sourceText, range, result.response.expandedText)
+				: {
+						text: sourceText.slice(0, start) + result.response.expandedText + sourceText.slice(end),
+						caret: start + result.response.expandedText.length,
+					};
+			form.firstMessage = replacement.text;
+			await settleTextareaAfterSnippet(replacement.caret);
+			return 'inserted';
+		} catch (error) {
+			if (error instanceof ApiError && error.status === 404) {
+				void snippets.refreshIfLoaded();
+				void preambles.refreshIfLoaded();
+			}
+			notifications.error(m.snippets_expand_error({ detail: snippetErrorDetail(error) }));
+			await settleTextareaAfterSnippet();
+			return 'failed';
+		}
+	}
+
+	async function expandSnippetInvocation(
+		command: Extract<SnippetCommandParseResult, { kind: 'valid' }>,
+	): Promise<void> {
+		if (promptTransformPending) return;
+		const context = expansionContext();
+		if (!context) return;
+		const sourceText = form.firstMessage;
+		const projectPath = context.projectPath;
+		try {
+			const result = await snippetExpansion.run({
+				shortName: command.shortName,
+				arguments: command.arguments,
+				context,
+			});
+			if (result.kind !== 'expanded') return;
+			if (
+				form.trimmedPath !== projectPath ||
+				result.response.contextProjectPath !== projectPath ||
+				result.response.contextExecutorId !== form.executorId ||
+				form.firstMessage !== sourceText
+			)
+				return;
+			form.firstMessage = result.response.expandedText;
+			await settleTextareaAfterSnippet(result.response.expandedText.length);
+		} catch (error) {
+			if (error instanceof ApiError && error.status === 404) {
+				void snippets.refreshIfLoaded();
+				void preambles.refreshIfLoaded();
+			}
+			notifications.error(m.snippets_expand_error({ detail: snippetErrorDetail(error) }));
+			await settleTextareaAfterSnippet();
+		}
+	}
+
+	function editSnippets(): void {
+		appShell.openSnippets(() => {
+			void tick().then(() => textareaRef?.focus());
+		});
+	}
+
+	function handleSubmit(): void {
+		if (!form.canSubmit || promptTransformPending) return;
+		const command = parseSnippetCommand(form.firstMessage);
+		if (command.kind === 'invalid') {
+			notifications.error(
+				command.error === 'short-name-required'
+					? m.snippets_command_name_required()
+					: m.snippets_command_name_invalid(),
+			);
+			return;
+		}
+		if (command.kind === 'valid') {
+			returnTextareaFocus();
+			void expandSnippetInvocation(command);
+			return;
+		}
+		const config = form.buildConfig();
+		if (config) onStartChat(config, ensureProspectiveChatId());
+	}
+
+	function shouldSubmitMessageOnEnter(event: KeyboardEvent): boolean {
+		return (
+			event.key === 'Enter' &&
+			shouldSubmitOnEnter({
+				sendByShiftEnter: localSettings.sendByShiftEnter,
+				shiftKey: event.shiftKey,
+				ctrlKey: event.ctrlKey,
+				metaKey: event.metaKey,
+				isComposing: event.isComposing,
+				isMobile,
+			})
+		);
+	}
+
+	function handleKeyDown(e: KeyboardEvent): void {
+		const submitOnEnter = shouldSubmitMessageOnEnter(e);
+		if (promptTransformPending) {
+			if (submitOnEnter) e.preventDefault();
+			return;
+		}
+		if (submitOnEnter) {
+			e.preventDefault();
+			handleSubmit();
+		}
+		if (e.key === 'Escape' && onCancel) {
+			e.preventDefault();
+			e.stopPropagation();
+			cancelForm();
+		}
+	}
+
+	function cancelForm(): void {
+		snippetExpansion.cancel();
+		promptRefinement.abort();
+		composerEditor.close();
+		onCancel?.();
+	}
+
+	const permissionOptions = $derived(buildPermissionOptions(form.permissionModes));
+	const thinkingOptions = $derived(buildThinkingOptions(form.thinkingModes, form.modelValue));
+	const modelSelectorMode: ModelSelectorMode = {
+		agent: 'select',
+		source: 'select',
+		surface: 'composer',
+	};
+	const modelSelectorValue = $derived({
+		executorId: form.executorId,
+		agentId: form.agentId,
+		model: form.modelValue,
+		...(form.modelSelectionTarget ?? {}),
+	});
+	function getRecents(executorId: string) {
+		return buildModelSelectorRecents(
+			rootModelCatalog.forExecutor(executorId),
+			remoteSettings.snapshot?.recentAgentSettings ?? [],
+		);
+	}
+	const displayedFormError = $derived(form.modelSelectionError ?? form.error);
+	const sendButtonClass =
+		'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:border-border disabled:cursor-not-allowed';
+
+	function handleModelSelectorChange(next: ModelSelectorChange): void {
+		if (!localSettings.allowDirectChats && nonDirectAgentIds([next.agentId]).length === 0) return;
+		if (next.executorId !== form.executorId) return;
+		if (!newChatAgentIds.includes(next.agentId)) return;
+		form.selectAgent(next.agentId);
+		form.selectModel(next.modelValue, next);
+	}
+</script>
+
+<div
+	class="min-w-0 p-2 sm:p-4"
+	{@attach snippetExpansion.pending && snippetExpansionLayer}
+	{@attach promptRefinement.pending && !composerEditor.open && promptRefinement.layerAttachment}
+>
+	<div class="relative">
+		<div
+			data-slot="new-chat-form-content"
+			class:invisible={!initialContentReady}
+			class:pointer-events-none={!initialContentReady}
+			inert={!initialContentReady}
+			aria-hidden={!initialContentReady}
+		>
+			<div class="space-y-2">
+				<ProjectPathField
+					id="project-path-input"
+					aria-label={m.chat_new_chat_project_path()}
+					bind:value={form.projectPath}
+					readonly={form.isUpdatingPinnedPath}
+					placeholder={form.projectBasePath}
+					class="h-[42px] sm:pointer-fine:h-[38px]"
+					validationStatus={form.validationStatus}
+					validationError={form.validationError}
+					onfocus={(event) => {
+						if (isMobile && form.filesAvailable) event.currentTarget.blur();
+						if (form.isUpdatingPinnedPath) return;
+						form.handlePathFocus();
+					}}
+					oninput={() => {
+						form.clearError();
+						form.resetTabCompletions();
+					}}
+					onkeydown={(event) => {
+						if (event.key === 'Tab' && form.filesAvailable) {
+							event.preventDefault();
+							if (form.isUpdatingPinnedPath) return;
+							void form.handleTabCompletion();
+						}
+						if (event.key === 'Enter') {
+							event.preventDefault();
+							form.showBrowser = false;
+							textareaRef?.focus();
+						}
+					}}
+					pin={{
+						isPinned: form.isPinnedPath,
+						disabled: !form.trimmedPath || form.isUpdatingPinnedPath,
+						loading: form.isUpdatingPinnedPath,
+						onToggle: () => form.togglePinnedPath(),
+					}}
+					browser={{
+						open: form.filesAvailable && form.showBrowser && !form.isUpdatingPinnedPath,
+						executorId: form.executorId,
+						executorContextKey: form.pathContextKey,
+						currentPath: form.trimmedPath || form.browseStartPath || form.projectBasePath,
+						basePath: form.projectBasePath,
+						isMobile,
+						onSelect: (path) => {
+							if (form.isUpdatingPinnedPath) return;
+							form.projectPath = path;
+							form.clearError();
+						},
+						onClose: () => (form.showBrowser = false),
+					}}
+					feedback={{
+						class: '-mt-1',
+						error: form.validationStatus === 'invalid' ? form.validationError : null,
+						worktree:
+							form.gitAvailable && form.gitRepoStatus === 'git'
+								? { disabled: form.isUpdatingPinnedPath, onOpen: () => form.openWorktreeModal() }
+								: undefined,
+					}}
+				>
+					{#snippet leading()}
+						<ExecutorSelector
+							{executors}
+							executorId={form.executorId}
+							service="agents"
+							presentation="field"
+							class="h-[42px] w-full sm:pointer-fine:h-[38px] @min-[32rem]/project-target:w-auto @min-[32rem]/project-target:max-w-44"
+							onSelect={(executorId) => form.selectExecutor(executorId)}
+						/>
+					{/snippet}
+					<ChatTagToggleButton
+						active={form.chatTags.length > 0}
+						onToggle={() => form.toggleTagInput()}
+					/>
+					{#if onCancel}
+						<button
+							type="button"
+							onclick={cancelForm}
+							class="px-3 py-2 text-sm border border-border rounded-lg hover:bg-muted/50 transition-colors"
+							title={m.editor_actions_close()}
+							aria-label={m.editor_actions_close()}
+						>
+							<X class="w-4 h-4 text-muted-foreground" aria-hidden="true" />
+						</button>
+					{/if}
+				</ProjectPathField>
+
+				<ProjectPinnedPathList
+					pinnedProjectPaths={form.pinnedProjectPaths}
+					selectedPath={form.projectPath}
+					emptyLabel={m.chat_new_chat_star_bookmark()}
+					disabled={form.isUpdatingPinnedPath}
+					onSelect={(pinnedPath) => {
+						form.projectPath = pinnedPath;
+						form.clearError();
+					}}
+				/>
+
+				<ChatTagEditor
+					tags={form.chatTags}
+					knownTags={allKnownTags}
+					open={form.showTagInput}
+					onAdd={(raw) => form.addTag(raw)}
+					onRemove={(tag) => form.removeTag(tag)}
+					onClose={() => (form.showTagInput = false)}
+				/>
+
+				<NewChatPreambleControls
+					selection={form.preambles}
+					trimmedPath={form.trimmedPath}
+					validationStatus={form.validationStatus}
+					onClear={() => form.preambles.setExplicit([])}
+				/>
+
+				{#if displayedFormError}
+					<div role="status" class="flex items-center gap-2 text-sm text-destructive">
+						<span>{displayedFormError}</span>
+						{#if form.executorReady && modelCatalog.error}
+							<button
+								type="button"
+								class="text-foreground underline focus-visible:ring-2 focus-visible:ring-ring"
+								onclick={() => void modelCatalog.forceRefresh()}>{m.common_retry()}</button
+							>
+						{/if}
+					</div>
+				{:else if form.modelSelectionPending}
+					<p role="status" class="text-sm text-muted-foreground">{m.chat_composer_loading_models()}</p>
+				{/if}
+			</div>
+
+			<div
+				data-slot="new-chat-composer"
+				class="relative mt-3 min-h-[120px] border border-border rounded-lg"
+				aria-busy={promptTransformPending}
+			>
+				<input
+					bind:this={imageInputRef}
+					type="file"
+					accept={attachmentAccept}
+					multiple
+					disabled={promptTransformPending}
+					class="hidden"
+					onchange={handleImageInputChange}
+				/>
+				<textarea
+					bind:this={textareaRef}
+					value={form.firstMessage}
+					onkeydown={handleKeyDown}
+					oninput={handleMessageInput}
+					onpaste={handleMessagePaste}
+					placeholder={form.placeholder}
+					readonly={promptRefinement.pending}
+					aria-busy={promptTransformPending}
+					class="chat-input-placeholder block w-full px-4 py-1.5 sm:py-3 bg-transparent outline-none text-foreground placeholder-muted-foreground resize-none min-h-[44px] max-h-[40vh] sm:max-h-[500px] overflow-y-auto text-base leading-6 transition-all duration-200"
+					rows="2"></textarea>
+
+				<ComposerBottomBar
+					canAttachImages={canAttachAttachments}
+					attachImagesTooltip={m.chat_composer_image_attachments_unavailable()}
+					onAddImage={openImagePicker}
+					onOpenSnippetPalette={() => snippetPalette.openFromMenu()}
+					onOpenExpandedEditor={openExpandedEditor}
+					onRefinePrompt={() => promptRefinement.handleAction()}
+					canRefinePrompt={promptRefinement.canStart}
+					isPromptRefinementPending={promptRefinement.pending}
+					isPromptTransformPending={promptTransformPending}
+					{promptTransformStatus}
+					{permissionOptions}
+					selectedPermission={form.permissionMode}
+					onPermissionSelect={(mode) => {
+						form.setPermissionMode(mode);
+					}}
+					{thinkingOptions}
+					selectedThinking={form.thinkingMode}
+					onThinkingSelect={(mode) => {
+						form.setThinkingMode(mode);
+					}}
+					canSend={form.canSubmit && !promptTransformPending}
+					onSend={handleSubmit}
+					sendTitle={m.chat_new_chat_start_session()}
+					{sendButtonClass}
+				>
+					{#snippet agentSettings()}
+						<AgentSettingsControls
+							descriptors={form.agentSettingDescriptors}
+							envelope={form.agentSettings}
+							onChange={(descriptor, value) => form.setAgentSetting(descriptor, value)}
+						/>
+					{/snippet}
+					{#snippet modelSelector()}
+						<ComposerModelSelector
+							value={modelSelectorValue}
+							mode={modelSelectorMode}
+							onChange={handleModelSelectorChange}
+							{getRecents}
+							preferRecentsOnOpen
+							getSelectableAgentIds={selectableAgentsForExecutor}
+							align="end"
+							side="bottom"
+						/>
+					{/snippet}
+				</ComposerBottomBar>
+
+				<ComposerSnippetPalette
+					open={snippetPalette.isOpen}
+					onOpenChange={(nextOpen) => {
+						// The hidden trigger remains available to the chained insertion.
+						if (!nextOpen) snippetPalette.hide();
+					}}
+					initialQuery={snippetPalette.initialQuery}
+					interactionKey={snippetInteractionKey}
+					contextHint={form.trimmedPath ? null : m.snippets_palette_context_hint()}
+					onInsert={async (snippet, argumentsText) => {
+						const trigger = snippetPalette.trigger;
+						const result = await insertSnippet(snippet, argumentsText, trigger);
+						if (result === 'inserted') snippetPalette.complete();
+						else if (
+							result !== 'failed' ||
+							snippet.source !== 'snippet' ||
+							!snippetTemplateUsesArguments(snippet.body)
+						) {
+							snippetPalette.dismiss();
+						}
+						return result;
+					}}
+					onCancelled={() => {
+						const caret = snippetPalette.trigger?.end;
+						snippetPalette.dismiss();
+						void settleTextareaAfterSnippet(caret);
+					}}
+					onReturnFocus={returnTextareaFocus}
+					onEditSnippets={() => {
+						snippetPalette.dismiss();
+						editSnippets();
+					}}
+				/>
+			</div>
+
+			{#if form.attachedImages.length > 0}
+				<div data-slot="new-chat-attachments" class="mt-6 p-2 bg-muted/40 rounded-lg">
+					<div class="flex flex-wrap gap-2">
+						{#each form.attachedImages as file, idx (file.name + idx)}
+							<div class="relative group">
+								<div class="w-16 h-16 rounded-lg overflow-hidden border border-border">
+									{#if isImageAttachment(file) && form.imageUrlFor(file, idx)}
+										<img
+											src={form.imageUrlFor(file, idx)}
+											alt={file.name}
+											class="w-full h-full object-cover"
+										/>
+									{:else}
+										<div
+											class="flex h-full w-full flex-col items-center justify-center gap-1 bg-background px-1 text-muted-foreground"
+										>
+											{#if isVideoChatAttachment(file)}
+												<FileVideo class="h-5 w-5" aria-hidden="true" />
+											{:else}
+												<FileText class="h-5 w-5" aria-hidden="true" />
+											{/if}
+											<span class="w-full truncate text-center text-[10px] leading-tight"
+												>{file.name}</span
+											>
+										</div>
+									{/if}
+								</div>
+								<button
+									type="button"
+									aria-label={m.chat_composer_remove_image({ name: file.name })}
+									title={m.chat_composer_remove_image({ name: file.name })}
+									class="absolute -top-1 -right-1 w-5 h-5 bg-destructive text-destructive-foreground rounded-full text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+									onclick={() => {
+										if (!promptTransformPending) form.removeImage(idx);
+									}}
+									disabled={promptTransformPending}
+								>
+									<X class="w-3 h-3" aria-hidden="true" />
+								</button>
+							</div>
+						{/each}
+					</div>
+				</div>
+			{/if}
+		</div>
+
+		{#if !initialContentReady}
+			<div class="absolute inset-0 flex items-center justify-center">
+				<div
+					role="status"
+					aria-label={m.chat_new_chat_loading_defaults()}
+					class="flex h-10 w-10 items-center justify-center rounded-full border border-border bg-muted/30 text-muted-foreground"
+				>
+					<Loader2 class="h-5 w-5 animate-spin" />
+				</div>
+			</div>
+		{/if}
+	</div>
+</div>
+
+{#if form.worktreeModalOpen}
+	<GitWorktreePickerModal
+		worktrees={form.worktreeItems}
+		isLoading={form.isLoadingWorktrees}
+		isCreating={form.isCreatingWorktree}
+		errorMessage={form.worktreeError}
+		onSelect={(path) => form.selectWorktree(path)}
+		onCreate={async (path, branch, baseRef) => {
+			await form.createWorktree(path, branch, baseRef);
+		}}
+		onRefresh={() => {
+			void form.loadWorktrees();
+		}}
+		onClose={() => form.closeWorktreeModal()}
+	/>
+{/if}
+
+{#if composerEditor.open}
+	{#snippet expandedEditorHeaderStatus()}
+		<ComposerAttachmentBadge count={form.attachedImages.length} />
+	{/snippet}
+	<PromptEditorDialog
+		title={m.chat_composer_expanded_editor_title()}
+		editorLabel={m.chat_composer_expanded_editor_label()}
+		text={form.firstMessage}
+		selection={composerEditor.selection}
+		focusRequestId={composerEditor.focusRequestId}
+		readOnly={promptTransformPending}
+		surfaceId={newChatSurfaceId}
+		headerStatus={expandedEditorHeaderStatus}
+		canRefinePrompt={promptRefinement.canStart}
+		isPromptRefinementPending={promptRefinement.pending}
+		onTextChange={handleExpandedTextChange}
+		onSelectionChange={handleExpandedSelectionChange}
+		onRefinePrompt={() => promptRefinement.handleAction()}
+		onClose={() => void closeExpandedEditor()}
+	/>
+{/if}

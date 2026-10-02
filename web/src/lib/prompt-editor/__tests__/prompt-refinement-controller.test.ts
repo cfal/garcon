@@ -8,7 +8,7 @@ const response: RefinePromptResponse = {
 };
 
 describe('PromptRefinementController', () => {
-	it('tracks one request and returns its generation', async () => {
+	it('tracks one request and returns its response', async () => {
 		let resolve!: (value: RefinePromptResponse) => void;
 		const refine = vi.fn(() => new Promise<RefinePromptResponse>((done) => (resolve = done)));
 		const controller = new PromptRefinementController({ refine });
@@ -21,7 +21,7 @@ describe('PromptRefinementController', () => {
 		expect(refine).toHaveBeenCalledTimes(1);
 		resolve(response);
 
-		expect(await running).toEqual({ kind: 'refined', response, generation: 1 });
+		expect(await running).toEqual({ kind: 'refined', response });
 		expect(controller.pending).toBe(false);
 	});
 
@@ -77,7 +77,6 @@ describe('PromptRefinementController', () => {
 		expect(await second).toEqual({
 			kind: 'refined',
 			response: laterResponse,
-			generation: 3,
 		});
 		expect(controller.pending).toBe(false);
 	});

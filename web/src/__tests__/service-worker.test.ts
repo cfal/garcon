@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-	fetchWithTimeout,
+	withNavigationTimeout,
 	isManifestPath,
 	precacheAppShell,
 	shouldCacheNavigationResponse,
@@ -27,7 +27,7 @@ describe('service worker helpers', () => {
 
 		await expect(
 			precacheAppShell(
-				{ addAll, add } as unknown as Cache,
+				{ addAll, add },
 				{ build: ['/build/app.js'], files: ['/favicon.png', '/missing-static-file.png'] },
 			),
 		).resolves.toBeUndefined();
@@ -42,7 +42,7 @@ describe('service worker helpers', () => {
 		const add = vi.fn<Cache['add']>().mockResolvedValue(undefined);
 
 		await precacheAppShell(
-			{ addAll, add } as unknown as Cache,
+			{ addAll, add },
 			{
 				build: ['/build/app.js'],
 				files: ['/site.webmanifest', '/icon.svg'],
@@ -73,32 +73,47 @@ describe('service worker helpers', () => {
 		expect(shouldCacheNavigationResponse(response('private, NO-STORE'))).toBe(false);
 	});
 
-	it('times out navigation fetches while preserving the late response hook', async () => {
-		vi.useFakeTimers();
-		let resolveFetch!: (response: Response) => void;
-		const fetchImpl = vi.fn<typeof fetch>(
-			() =>
-				new Promise<Response>((resolve) => {
-					resolveFetch = resolve;
-				}),
-		);
-		const onResponse = vi.fn();
-		const request = new Request('https://garcon.test/');
+	it.each(['resolve', 'reject'] as const)(
+		'keeps the navigation timeout result after a late network %s',
+		async (outcome) => {
+			vi.useFakeTimers();
+			const network = Promise.withResolvers<Response>();
+			const navigation = withNavigationTimeout(network.promise, 100);
+			const timeoutExpectation = expect(navigation).rejects.toThrow('navigation timeout');
 
-		const navigation = fetchWithTimeout(request, {
-			timeoutMs: 100,
-			fetchImpl,
-			onResponse,
-		});
-		const timeoutExpectation = expect(navigation).rejects.toThrow('navigation timeout');
+			await vi.advanceTimersByTimeAsync(100);
+			await timeoutExpectation;
 
-		await vi.advanceTimersByTimeAsync(100);
-		await timeoutExpectation;
+			if (outcome === 'resolve') {
+				const response = new Response('late');
+				network.resolve(response);
+				await expect(network.promise).resolves.toBe(response);
+			} else {
+				const error = new Error('late failure');
+				network.reject(error);
+				await expect(network.promise).rejects.toBe(error);
+			}
+			await expect(navigation).rejects.toThrow('navigation timeout');
+			expect(vi.getTimerCount()).toBe(0);
+		},
+	);
 
-		const lateResponse = new Response('late');
-		resolveFetch(lateResponse);
-		await Promise.resolve();
-
-		expect(onResponse).toHaveBeenCalledWith(lateResponse);
-	});
+	it.each(['resolve', 'reject'] as const)(
+		'clears the timeout after an early network %s',
+		async (outcome) => {
+			vi.useFakeTimers();
+			const network = Promise.withResolvers<Response>();
+			const navigation = withNavigationTimeout(network.promise);
+			if (outcome === 'resolve') {
+				const response = new Response('online');
+				network.resolve(response);
+				await expect(navigation).resolves.toBe(response);
+			} else {
+				const error = new Error('offline');
+				network.reject(error);
+				await expect(navigation).rejects.toBe(error);
+			}
+			expect(vi.getTimerCount()).toBe(0);
+		},
+	);
 });

@@ -115,7 +115,7 @@ describe('Codex native transcript path preservation', () => {
         }
 
         await fixture.restartGarcon();
-        await expect(readNativeSession(fixture.dirs.workspace, targetChatId)).resolves.toEqual(
+        expect(await readNativeSession(fixture.dirs.workspace, targetChatId)).toEqual(
           beforeRestart,
         );
         const twiceReloaded = await fixture.client.getMessages(targetChatId);

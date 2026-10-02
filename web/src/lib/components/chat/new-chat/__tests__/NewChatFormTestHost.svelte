@@ -1,0 +1,302 @@
+<script lang="ts">
+	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
+	setExecutorsTestContext();
+	import NewChatForm from '../NewChatForm.svelte';
+	import { setCanonicalWorkspaceLayout } from '../../__tests__/workspace-layout-test-context.js';
+	import {
+		setAppShell,
+		setModelCatalog,
+		setLocalSettings,
+		setRemoteSettings,
+		setChatSessions,
+		setNotifications,
+		setPreambles,
+		setSnippets,
+		setTransientLayers,
+	} from '$lib/context';
+	import { createRemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
+	import type { NewChatConfig } from '$lib/chat/sessions/chat-session-types.js';
+	import type { PreamblesSnapshot } from '$shared/preambles';
+	import type { ChatId } from '$shared/chat-id';
+	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
+	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
+	import { PreamblesStore } from '$lib/preambles/preambles-store.svelte.js';
+	import { WorkspaceInteractionGate } from '$lib/workspace/workspace-interaction-gate.svelte';
+	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte';
+	import { agentLabelFor } from '$lib/agents/agent-labels.js';
+	import {
+		DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
+		DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
+		DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
+	} from '$shared/agents';
+	import type { ModelOption } from '$lib/agents/model-catalog-store.svelte.js';
+	import {
+		findModelForSelection,
+		modelValueForSelection,
+		resolveModelSelection,
+	} from '../../../../../test/model-catalog';
+	import { untrack } from 'svelte';
+
+	interface Props {
+		allowDirectChats?: boolean;
+		catalogVersion?: number;
+		catalogValidated?: boolean;
+		catalogError?: string | null;
+		onRetryCatalog?: () => Promise<void>;
+		endpointBackedDirectModel?: boolean;
+		modelsAvailable?: boolean;
+		supportsImages?: boolean;
+		snippetTrigger?: string;
+		snippetTemplate?: string;
+		snippetDefaultArguments?: string;
+		onStartChat?: (config: NewChatConfig, chatId: ChatId) => void;
+		preambleSnapshot?: PreamblesSnapshot | null;
+		loadPreambles?: () => Promise<PreamblesSnapshot>;
+		onPreambles?: (store: PreamblesStore) => void;
+	}
+
+	let {
+		allowDirectChats = false,
+		catalogVersion = 0,
+		catalogValidated = true,
+		catalogError = null,
+		onRetryCatalog = async () => {},
+		endpointBackedDirectModel = false,
+		modelsAvailable = true,
+		supportsImages = true,
+		snippetTrigger = ';;',
+		snippetTemplate = 'Review {{arguments}} in {{project_path}}',
+		snippetDefaultArguments = '',
+		onStartChat = () => {},
+		preambleSnapshot = { revision: 0, preambles: [] },
+		loadPreambles,
+		onPreambles,
+	}: Props = $props();
+	const notifications = createNotificationsStore();
+	let snippetLoadCount = $state(0);
+
+	setLocalSettings({
+		sendByShiftEnter: false,
+		showQuickCommitTray: true,
+		get snippetTrigger() {
+			return snippetTrigger;
+		},
+		get allowDirectChats() {
+			return allowDirectChats;
+		},
+	} as never);
+
+	setRemoteSettings(createRemoteSettingsStore());
+
+	setChatSessions({
+		orderedChats: [],
+	} as never);
+
+	setNotifications(notifications);
+	const preambleDeps = untrack(() => (loadPreambles ? { get: loadPreambles } : {}));
+	const preambles = new PreamblesStore(preambleDeps);
+	const initialPreambleSnapshot = untrack(() => preambleSnapshot);
+	if (initialPreambleSnapshot) preambles.applySnapshot(initialPreambleSnapshot);
+	untrack(() => onPreambles?.(preambles));
+	setPreambles(preambles);
+	setCanonicalWorkspaceLayout();
+
+	let seedListener = () => {};
+	const appShell = {
+		projectBasePath: '/workspace',
+		isMobile: false,
+		openSnippets() {},
+		onNewChatDialogSeed(callback: () => void) {
+			seedListener = callback;
+			return () => {};
+		},
+	} as never;
+	setAppShell(appShell);
+	const transientLayers = new TransientLayerRegistry(new WorkspaceInteractionGate());
+	setTransientLayers(transientLayers);
+
+	const selectableAgentIds = [
+		DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID,
+		DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID,
+		DIRECT_ANTHROPIC_COMPATIBLE_AGENT_ID,
+		'claude',
+		'codex',
+	];
+
+	function modelForAgent(agentId: string): ModelOption {
+		if (agentId === 'claude') return { value: 'opus', label: 'Opus' };
+		if (agentId === 'codex') return { value: 'gpt-5.4', label: 'GPT-5.4' };
+		if (agentId === DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID) {
+			if (endpointBackedDirectModel) {
+				return {
+					value: 'test_openai:chat-model',
+					label: 'Test: Chat Model',
+					rawModel: 'chat-model',
+					apiProviderId: 'test-provider',
+					endpointId: 'test_openai',
+					protocol: 'openai-compatible',
+				};
+			}
+			return { value: 'chat-model', label: 'Chat Model' };
+		}
+		if (agentId === DIRECT_OPENAI_RESPONSES_COMPATIBLE_AGENT_ID) {
+			return { value: 'responses-model', label: 'Responses Model' };
+		}
+		return { value: 'anthropic-model', label: 'Anthropic Model' };
+	}
+
+	function modelsForAgent(agentId: string): ModelOption[] {
+		if (
+			agentId === DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID &&
+			endpointBackedDirectModel &&
+			!modelsAvailable
+		)
+			return [];
+		return [modelForAgent(agentId)];
+	}
+
+	function modelForSelection(
+		agentId: string,
+		model: string,
+		endpointId?: string | null,
+	): ModelOption | null {
+		return findModelForSelection(modelsForAgent(agentId), model, endpointId);
+	}
+
+	setSnippets(
+		createSnippetsStore({
+			get: async () => {
+				snippetLoadCount += 1;
+				return {
+					revision: 1,
+					snippets: [
+						{
+							id: 'snippet-review',
+							shortName: 'review',
+							template: snippetTemplate,
+							defaultArguments: snippetDefaultArguments,
+							createdAt: '2026-01-01T00:00:00.000Z',
+							updatedAt: '2026-01-01T00:00:00.000Z',
+						},
+					],
+				};
+			},
+		}),
+	);
+
+	setModelCatalog({
+		forExecutor() { return this; },
+		get isValidated() { return catalogValidated; },
+		get error() { return catalogError; },
+		get lastValidatedAt() { return catalogValidated ? 1 : null; },
+		isRefreshing: false,
+		get version() {
+			return catalogVersion;
+		},
+		agentMetadata: {
+			claude: { label: 'Claude' },
+			codex: { label: 'Codex' },
+		},
+		getAgents() {
+			return selectableAgentIds;
+		},
+		getSelectableAgents() {
+			return selectableAgentIds;
+		},
+		getAgent(agentId: string) {
+			return {
+				id: agentId,
+				label: agentLabelFor(agentId),
+				description: '',
+				supportsFork: true,
+				supportsUpdateProjectPath: true,
+				supportsImages,
+				acceptsApiProviderEndpoints: true,
+				supportedProtocols: agentId === 'codex' ? ['openai-compatible'] : ['anthropic-messages'],
+				defaultModel: modelForAgent(agentId).value,
+			};
+		},
+		getAgentLabel(agentId: string) {
+			return agentLabelFor(agentId);
+		},
+		getDefaultModel(agentId: string) {
+			return modelForAgent(agentId).value;
+		},
+		getPermissionModes(agentId: string) {
+			return agentId === 'claude'
+				? ['default', 'acceptEdits', 'manualBypass', 'bypassPermissions', 'plan']
+				: ['default', 'acceptEdits', 'manualBypass', 'bypassPermissions'];
+		},
+		getThinkingModes() {
+			return ['none', 'low', 'medium', 'high', 'xhigh', 'max'];
+		},
+		getAgentSettingsDescriptors() {
+			return [
+				{
+					key: 'thinking',
+					type: 'enum',
+					label: 'Thinking',
+					labelKey: 'thinking',
+					options: [
+						{
+							value: 'auto',
+							label: 'Auto',
+							labelKey: 'automatic',
+							description: 'Lets Claude decide when extended thinking is useful.',
+							descriptionKey: 'thinkingAutomatic',
+						},
+						{
+							value: 'on',
+							label: 'On',
+							labelKey: 'enabled',
+							description: 'Uses extended thinking for every response.',
+							descriptionKey: 'thinkingEnabled',
+						},
+						{
+							value: 'off',
+							label: 'Off',
+							labelKey: 'disabled',
+							description: 'Answers without extended thinking.',
+							descriptionKey: 'thinkingDisabled',
+						},
+					],
+				},
+			];
+		},
+		getDefaultAgentSettings(agentId: string) {
+			return { ownerId: agentId, schemaVersion: 1, values: { thinking: 'auto' } };
+		},
+		getModels(agentId: string) {
+			return modelsForAgent(agentId);
+		},
+		supportsImages() {
+			return supportsImages;
+		},
+		getModelForSelection(agentId: string, model: string, endpointId?: string | null) {
+			return modelForSelection(agentId, model, endpointId);
+		},
+		selectionFor(agentId: string, model: string, endpointId?: string | null) {
+			return resolveModelSelection(modelsForAgent(agentId), model, endpointId);
+		},
+		selectionValueFor(agentId: string, model: string, endpointId?: string | null) {
+			return modelValueForSelection(modelsForAgent(agentId), model, endpointId);
+		},
+		refreshIfStale() {
+			return Promise.resolve();
+		},
+		forceRefresh() { return onRetryCatalog(); },
+		findEndpoint() {
+			return null;
+		},
+	} as never);
+</script>
+
+<svelte:window onkeydowncapture={(event) => transientLayers.handleEscape(event)} />
+<NewChatForm {onStartChat} />
+
+<button type="button" data-testid="reseed-new-chat" onclick={() => seedListener()}>Reseed</button>
+
+<div data-testid="snippet-load-count">{snippetLoadCount}</div>
+{#each notifications.items as notification (notification.id)}
+	<div data-testid="notification">{notification.message}</div>
+{/each}

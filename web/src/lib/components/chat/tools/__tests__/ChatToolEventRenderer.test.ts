@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import ChatToolEventRenderer from '../ChatToolEventRenderer.svelte';
-import type { ConversationDisclosureStatePort } from '../../ConversationFeedItemState.svelte.js';
+import type { ConversationDisclosureStatePort } from '../../transcript/ConversationFeedItemState.svelte.js';
 import {
 	AmpFinderToolUseMessage,
 	AmpOracleToolUseMessage,

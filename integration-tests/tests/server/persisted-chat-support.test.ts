@@ -7,6 +7,7 @@ import {
   waitForPersistedChat,
   waitForPersistedNativeSession,
 } from '../../support/persisted-chat.js';
+import { rejectionOf, throwingRejectionOf } from '../../support/promise-assertions.js';
 
 describe('persisted chat polling', () => {
   let directories: IntegrationDirectories;
@@ -42,7 +43,7 @@ describe('persisted chat polling', () => {
       sessions: { 'chat-1': persistedChat({ ready: true }) },
     });
 
-    await expect(result).resolves.toBe('session-1');
+    expect(await result).toBe('session-1');
   });
 
   it('retries a valid registry until the chat appears', async () => {
@@ -60,7 +61,7 @@ describe('persisted chat polling', () => {
       sessions: { 'chat-1': persistedChat({ ready: true }) },
     });
 
-    await expect(result).resolves.toBe('session-1');
+    expect(await result).toBe('session-1');
   });
 
   it('retries while the selector reports a valid chat as not ready', async () => {
@@ -80,21 +81,21 @@ describe('persisted chat polling', () => {
       sessions: { 'chat-1': persistedChat({ ready: true }) },
     });
 
-    await expect(result).resolves.toBe('session-1');
+    expect(await result).toBe('session-1');
   });
 
   it('propagates malformed JSON and registry shapes', async () => {
     const registryPath = join(directories.workspace, 'chats.json');
     await writeFile(registryPath, '{', 'utf8');
-    await expect(waitForReadyChat(directories, 'chat-1')).rejects.toBeInstanceOf(SyntaxError);
+    expect(await rejectionOf(waitForReadyChat(directories, 'chat-1'))).toBeInstanceOf(SyntaxError);
 
     await writeFile(registryPath, JSON.stringify({ sessions: [] }), 'utf8');
-    await expect(waitForReadyChat(directories, 'chat-1')).rejects.toThrow(
+    expect(await throwingRejectionOf(waitForReadyChat(directories, 'chat-1'))).toThrow(
       'Persisted chat registry is invalid.',
     );
 
     await writeFile(registryPath, JSON.stringify({ sessions: { 'chat-1': 'invalid' } }), 'utf8');
-    await expect(waitForReadyChat(directories, 'chat-1')).rejects.toThrow(
+    expect(await throwingRejectionOf(waitForReadyChat(directories, 'chat-1'))).toThrow(
       'Persisted chat chat-1 is invalid.',
     );
   });
@@ -104,12 +105,12 @@ describe('persisted chat polling', () => {
       sessions: { 'chat-1': persistedChat({ agentId: 'pi', ready: true }) },
     });
 
-    await expect(waitForPersistedNativeSession({
+    expect(await throwingRejectionOf(waitForPersistedNativeSession({
       directories,
       chatId: 'chat-1',
       agentId: 'claude',
       timeoutMs: 1_000,
-    })).rejects.toThrow('Chat chat-1 is not a claude chat.');
+    }))).toThrow('Chat chat-1 is not a claude chat.');
   });
 
   it('propagates selector exceptions without polling to the deadline', async () => {
@@ -118,19 +119,19 @@ describe('persisted chat polling', () => {
     });
     const failure = new Error('selector failed');
 
-    await expect(waitForPersistedChat({
+    expect(await rejectionOf(waitForPersistedChat({
       directories,
       chatId: 'chat-1',
       timeoutMs: 1_000,
       timeoutMessage: 'unexpected polling timeout',
       select: () => { throw failure; },
-    })).rejects.toBe(failure);
+    }))).toBe(failure);
   });
 
   it('propagates non-ENOENT read failures without polling to the deadline', async () => {
     await mkdir(join(directories.workspace, 'chats.json'));
 
-    await expect(waitForReadyChat(directories, 'chat-1')).rejects.toMatchObject({
+    expect(await rejectionOf(waitForReadyChat(directories, 'chat-1'))).toMatchObject({
       code: 'EISDIR',
     });
   });

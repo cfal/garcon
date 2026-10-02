@@ -36,7 +36,7 @@ test.each(['touch', 'mouse'] as const)('reconnects a native %s through the Svelt
     const from = (await anchor.boundingBox())!;
     const to = (await page.locator('.svelte-flow__node[data-id="c"] .target').boundingBox())!;
     expect(await page.evaluate(({ x, y }) =>
-      document.elementFromPoint(x, y)?.closest('.svelte-flow__edgeupdater-target') !== null,
+      Boolean(document.elementFromPoint(x, y)?.closest('.svelte-flow__edgeupdater-target')),
     { x: from.x + 2, y: from.y + from.height / 2 })).toBe(true);
     const start = { x: from.x + 2, y: from.y + from.height / 2 };
     const target = { x: to.x + to.width / 2, y: to.y + to.height / 2 };

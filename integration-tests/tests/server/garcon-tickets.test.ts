@@ -11,6 +11,7 @@ import { messagesOfType } from '../../support/chat-assertions.js';
 import { parseGarconCommandRejection, garconCommandRejectionContent } from '../../../common/garcon-command-rejection.js';
 import { withTimeout } from '../../support/deferred.js';
 import { withIntegrationFixture, type IntegrationFixture } from '../../support/integration-fixture.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 function ticketCommands(fixture: IntegrationFixture, chatId: string) {
   let sequence = 0;
@@ -151,8 +152,7 @@ describe('Garcon ticket commands', () => {
         await mkdir(directory);
         await symlink(directory, alias);
         for (const path of [directory, alias]) {
-          await expect(fixture.client.post('/api/v1/tickets/project-default', { directory: path }))
-            .rejects.toMatchObject({ status: 503, body: { errorCode: 'TICKET_PROJECT_UNAVAILABLE' } });
+          expect(await rejectionOf(fixture.client.post('/api/v1/tickets/project-default', { directory: path }))).toMatchObject({ status: 503, body: { errorCode: 'TICKET_PROJECT_UNAVAILABLE' } });
         }
       }
     });
@@ -177,10 +177,9 @@ describe('Garcon ticket commands', () => {
       expect(discussion.items[0]?.author).toEqual({ kind: 'chat', chatId, provenance: 'observed' });
       expect(discussion.items[0]?.canEdit).toBe(false);
       const bootstrap = parseTicketBootstrap(await fixture.client.get('/api/v1/tickets/bootstrap'));
-      await expect(fixture.client.post('/api/v1/tickets/mutate', { expectedStoreId: bootstrap.storeId,
+      expect(await rejectionOf(fixture.client.post('/api/v1/tickets/mutate', { expectedStoreId: bootstrap.storeId,
         requestId: crypto.randomUUID(), fromChatId: chatId, payload: { action: 'comment-delete', ticketId: first.ticketId,
-          commentId: comment.comment!.id, expectedRevision: 1 } }))
-        .rejects.toMatchObject({ status: 403, body: { errorCode: 'TICKET_FORBIDDEN' } });
+          commentId: comment.comment!.id, expectedRevision: 1 } }))).toMatchObject({ status: 403, body: { errorCode: 'TICKET_FORBIDDEN' } });
       mutation(await emit(`<garcon-ticket-comment-edit ref="edit-comment" ticket-id="${first.ticketId}" comment-id="${comment.comment!.id}" expected-revision="1">Edited progress.</garcon-ticket-comment-edit>`));
       mutation(await emit(`<garcon-ticket-close ref="close" ticket-id="${first.ticketId}" expected-revision="${claimed.revision}" />`));
       await fixture.client.reloadChat(chatId);

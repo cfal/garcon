@@ -16,6 +16,7 @@ import {
   startScriptedPiTestEnvironment,
   type ScriptedPiTestEnvironment,
 } from '../../support/scripted-pi.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 let environment: ScriptedPiTestEnvironment | undefined;
 
@@ -59,12 +60,12 @@ describe('scripted Pi steering', () => {
       const controlBeforeSteer = await fixture.client.getExecutionControl(chatId);
       expect(paused.control.queue.pause?.kind).toBe('manual');
 
-      await expect(fixture.client.steer({
+      expect(await rejectionOf(fixture.client.steer({
         clientRequestId: crypto.randomUUID(),
         clientMessageId: crypto.randomUUID(),
         chatId,
         content: invalidSteer,
-      })).rejects.toMatchObject({ status: 400 });
+      }))).toMatchObject({ status: 400 });
 
       const pendingCursor = fixture.client.markEvents();
       const steerRequest = {
@@ -108,12 +109,12 @@ describe('scripted Pi steering', () => {
       expect(transcript.resendCandidates).toEqual([]);
       expect(await fixture.client.getExecutionControl(chatId)).toEqual(controlBeforeSteer);
 
-      await expect(fixture.client.steer({
+      expect(await rejectionOf(fixture.client.steer({
         clientRequestId: crypto.randomUUID(),
         clientMessageId: crypto.randomUUID(),
         chatId,
         content: marker('AFTER_SETTLE'),
-      })).rejects.toMatchObject({ status: 409 });
+      }))).toMatchObject({ status: 409 });
       testEnvironment.model.assertSettled();
     }, withScriptedPi());
   }, 120_000);

@@ -3,40 +3,18 @@ import type { GitRenderedDiffRow } from './git-rendered-diff-types.js';
 
 const NEARBY_ROW_COUNT = 2;
 
-export function buildGitReviewCommentContext(
-	rows: GitRenderedDiffRow[],
-	side: 'before' | 'after',
-	line: number,
-): string[] {
-	return buildCommentContext(rows.length, (index) => rows[index], side, line);
-}
-
 export function buildGitReviewBodyCommentContext(
 	body: GitReviewFileBody | undefined,
 	side: 'before' | 'after',
 	line: number,
 ): string[] {
 	if (!body?.patchIndex) return [];
-	const index = body.patchIndex;
-	return buildCommentContext(
-		index.rowCount,
-		(rowIndex) => index.rowAt(rowIndex),
-		side,
-		line,
-	);
-}
-
-function buildCommentContext(
-	rowCount: number,
-	rowAt: (index: number) => GitRenderedDiffRow | undefined,
-	side: 'before' | 'after',
-	line: number,
-): string[] {
+	const patch = body.patchIndex;
 	let hunkHeaderIndex = -1;
 	let hunkHeaderText: string | null = null;
 	let targetIndex = -1;
-	for (let index = 0; index < rowCount; index += 1) {
-		const row = rowAt(index);
+	for (let index = 0; index < patch.rowCount; index += 1) {
+		const row = patch.rowAt(index);
 		if (!row) continue;
 		if (row.kind === 'hunk') {
 			hunkHeaderIndex = index;
@@ -49,20 +27,17 @@ function buildCommentContext(
 		}
 	}
 	if (targetIndex < 0) return [];
-	const target = rowAt(targetIndex);
+	const target = patch.rowAt(targetIndex);
 	if (!target || target.kind === 'hunk') return [];
 	const nearby: GitRenderedDiffRow[] = [];
 	const start = Math.max(hunkHeaderIndex + 1, targetIndex - NEARBY_ROW_COUNT);
-	const end = Math.min(rowCount, targetIndex + NEARBY_ROW_COUNT + 1);
+	const end = Math.min(patch.rowCount, targetIndex + NEARBY_ROW_COUNT + 1);
 	for (let index = start; index < end; index += 1) {
-		const row = rowAt(index);
+		const row = patch.rowAt(index);
 		if (!row || row.kind === 'hunk' || row.hunkId !== target.hunkId) continue;
 		nearby.push(row);
 	}
-	return [
-		...(hunkHeaderText ? [hunkHeaderText] : []),
-		...nearby.map(formatContextRow),
-	];
+	return [...(hunkHeaderText ? [hunkHeaderText] : []), ...nearby.map(formatContextRow)];
 }
 
 export function formatGitReviewCommentContext(contextLines: string[]): string[] {

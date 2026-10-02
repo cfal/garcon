@@ -45,10 +45,10 @@
 	import { restoreChatIdForBareRoute, selectedChatIdFromRoute } from './app-shell-route';
 	import { selectedTicketFromUrl } from '$lib/tickets/catalog/ticket-deep-link.js';
 	import { resolveAdjacentChatId, shouldSynchronizeFocusedChat } from './app-shell-chat-navigation';
-	import NewChatDialog from '../chat/NewChatDialog.svelte';
+	import NewChatDialog from '../chat/new-chat/NewChatDialog.svelte';
 	import FileDirtyUnloadGuard from '../files/FileDirtyUnloadGuard.svelte';
 	import WorkspaceCloseGuard from '$lib/components/workspace/WorkspaceCloseGuard.svelte';
-	import { computeMobileViewportMetrics } from './mobile-viewport';
+	import { bindMobileViewport } from './mobile-viewport-binding';
 	import { ChatActionController } from '$lib/components/chat/chat-action-controller.svelte';
 	import { ChatActionDialogsState } from '$lib/components/chat/chat-action-dialogs-state.svelte';
 	import ChatActionDialogs from '$lib/components/chat/ChatActionDialogs.svelte';
@@ -60,7 +60,7 @@
 	} from '$lib/project-paths/pinned-project-path-settings.js';
 	import ShareChatDialog from '$lib/components/chat/ShareChatDialog.svelte';
 	import SidebarTagDialog from '$lib/components/sidebar/SidebarTagDialog.svelte';
-	import SidebarSearchDialogs from '$lib/components/sidebar/SidebarSearchDialogs.svelte';
+	import SidebarSearchDialogs from '$lib/components/sidebar/search/SidebarSearchDialogs.svelte';
 	import type {
 		SearchResultNavigationPort,
 		SearchResultSelection,
@@ -165,8 +165,6 @@
 	const mobileBreakpointMatches = $derived(
 		viewportWidth === undefined ? undefined : viewportWidth <= 768,
 	);
-	let mobileAppHeight = $state<number | null>(null);
-	let mobileViewportBaselineHeight = $state<number | null>(null);
 	let mobileKeyboardVisible = $state(false);
 	let reloadSelectedChatFn = $state<((chatId: string) => Promise<void>) | null>(null);
 	let searchResultNavigation: SearchResultNavigationPort | null = null;
@@ -177,9 +175,9 @@
 	const newWindowEdges = $derived<WorkspaceSplitAdmissions>(
 		workspace.resolveSplitAdmissions(workspace.currentWindowId),
 	);
-	const hideLeftSidebar = $derived(workspaceFullscreen);
+	const hideChatList = $derived(workspaceFullscreen);
 	const chatListAutohideActive = $derived(
-		!isMobile && !hideLeftSidebar && localSettings.chatListAutohide && hoverCapability.current,
+		!isMobile && !hideChatList && localSettings.chatListAutohide && hoverCapability.current,
 	);
 	const chatListAutohide = new ChatListAutohideState({
 		get active() {
@@ -215,10 +213,7 @@
 					mobileActiveDescriptor.kind === 'git-compare')),
 	);
 	let notificationDesktopInlineStartPx = $derived(
-		!isMobile &&
-			!hideLeftSidebar &&
-			!chatListAutohideActive &&
-			localSettings.chatListDock === 'left'
+		!isMobile && !hideChatList && !chatListAutohideActive && localSettings.chatListDock === 'left'
 			? localSettings.sidebarWidth + 16
 			: 16,
 	);
@@ -363,70 +358,14 @@
 		if (isMobile && !appShell.sidebarOpen) sidebarSearch.resetDialogs();
 	});
 
-	// Tracks virtual keyboard height via visualViewport for mobile layout.
 	$effect(() => {
-		if (typeof window === 'undefined' || !window.visualViewport) return;
-		const vv = window.visualViewport;
-		let frameId: number | null = null;
-
-		function clearViewportOverrides() {
-			document.documentElement.style.removeProperty('--app-height');
-			document.documentElement.style.removeProperty('--app-viewport-offset-top');
-			document.documentElement.style.removeProperty('--app-viewport-center-y');
-		}
-
-		function applyViewportMetrics() {
-			frameId = null;
-			const metrics = computeMobileViewportMetrics({
-				visualViewportHeight: vv.height,
-				visualViewportOffsetTop: vv.offsetTop,
-				windowInnerHeight: window.innerHeight,
-				baselineAppHeight: mobileViewportBaselineHeight,
-				previousAppHeight: mobileAppHeight,
-			});
-			mobileAppHeight = metrics.appHeight;
+		const unbindViewport = bindMobileViewport((metrics) => {
 			mobileKeyboardVisible = metrics.keyboardVisible;
 			appShell.keyboardHeight = metrics.keyboardHeight;
-			if (!metrics.keyboardVisible) {
-				mobileViewportBaselineHeight = metrics.appHeight;
-				// Leaves safe-area geometry to CSS unless the keyboard occludes the viewport.
-				clearViewportOverrides();
-				return;
-			}
-			document.documentElement.style.setProperty('--app-height', `${metrics.appHeight}px`);
-			document.documentElement.style.setProperty(
-				'--app-viewport-offset-top',
-				`${metrics.viewportOffsetTop}px`,
-			);
-			document.documentElement.style.setProperty(
-				'--app-viewport-center-y',
-				`${metrics.viewportCenterY}px`,
-			);
-		}
-
-		function scheduleViewportMetrics() {
-			if (frameId !== null) return;
-			frameId = requestAnimationFrame(applyViewportMetrics);
-		}
-
-		function handleVisibilityChange() {
-			if (document.visibilityState === 'visible') scheduleViewportMetrics();
-		}
-
-		scheduleViewportMetrics();
-		vv.addEventListener('resize', scheduleViewportMetrics);
-		vv.addEventListener('scroll', scheduleViewportMetrics);
-		window.addEventListener('resize', scheduleViewportMetrics);
-		window.addEventListener('pageshow', scheduleViewportMetrics);
-		document.addEventListener('visibilitychange', handleVisibilityChange);
+		});
+		if (!unbindViewport) return;
 		return () => {
-			if (frameId !== null) cancelAnimationFrame(frameId);
-			vv.removeEventListener('resize', scheduleViewportMetrics);
-			vv.removeEventListener('scroll', scheduleViewportMetrics);
-			window.removeEventListener('resize', scheduleViewportMetrics);
-			window.removeEventListener('pageshow', scheduleViewportMetrics);
-			document.removeEventListener('visibilitychange', handleVisibilityChange);
-			clearViewportOverrides();
+			unbindViewport();
 			appShell.keyboardHeight = 0;
 		};
 	});
@@ -549,18 +488,19 @@
 		await quietRefresh();
 	}
 
-	function handleMobileTabChange(tab: MobileWorkspaceTabId) {
-		if (tab === 'chat') {
-			void workspace.focusChat();
-			return;
+	async function handleMobileTabChange(tab: MobileWorkspaceTabId): Promise<void> {
+		try {
+			if (tab === 'chat') {
+				await workspace.focusChat();
+			} else if (tab === 'terminal') {
+				await workspace.focusMostRecentTerminalOrCreate();
+			} else {
+				await workspace.focusMobileSingleton(tab);
+			}
+		} catch (error) {
+			const fallback = tab === 'terminal' ? m.terminal_create_failed() : m.workspace_open_failed();
+			notifications.error(error instanceof Error ? error.message : fallback);
 		}
-		if (tab !== 'terminal') {
-			void workspace.focusMobileSingleton(tab);
-			return;
-		}
-		void workspace.focusMostRecentTerminalOrCreate().catch((error) => {
-			notifications.error(error instanceof Error ? error.message : m.terminal_create_failed());
-		});
 	}
 
 	function toggleMobileSidebar() {
@@ -671,7 +611,10 @@
 	});
 
 	onMount(() => chatDrafts.mountPersistenceLifecycle());
-	onDestroy(() => chatDrafts.destroy());
+	onDestroy(() => {
+		chatNavigation.destroy();
+		chatDrafts.destroy();
+	});
 
 	function handleChatListAutohideChange(enabled: boolean): void {
 		if (enabled) chatListAutohide.reveal();
@@ -753,7 +696,7 @@
 
 {#snippet desktopChatList(dock: ChatListDock)}
 	{@const dividerEdge = chatListDividerEdge(dock)}
-	{@const panelHidden = hideLeftSidebar || chatListAutohide.collapsed}
+	{@const panelHidden = hideChatList || chatListAutohide.collapsed}
 	<div
 		data-workspace-chat-list
 		onfocusin={handleDesktopChatListFocus}
@@ -762,16 +705,16 @@
 		onkeydown={handleDesktopChatListKeydown}
 		class={[
 			'relative z-50 h-full shrink-0',
-			chatListAutohide.active && !hideLeftSidebar ? 'overflow-visible' : 'overflow-hidden',
+			chatListAutohide.active && !hideChatList ? 'overflow-visible' : 'overflow-hidden',
 		]}
 		class:order-first={dock === 'left'}
 		class:order-last={dock === 'right'}
-		class:pointer-events-none={hideLeftSidebar}
-		style:width={hideLeftSidebar || chatListAutohide.active
+		class:pointer-events-none={hideChatList}
+		style:width={hideChatList || chatListAutohide.active
 			? '0px'
 			: `${localSettings.sidebarWidth}px`}
-		aria-hidden={hideLeftSidebar}
-		inert={hideLeftSidebar}
+		aria-hidden={hideChatList}
+		inert={hideChatList}
 	>
 		{#if chatListAutohide.active}
 			<button
@@ -801,15 +744,15 @@
 			]}
 			class:start-0={chatListAutohide.active && dock === 'left'}
 			class:end-0={chatListAutohide.active && dock === 'right'}
-			class:border-s={dividerEdge === 'start' && !hideLeftSidebar}
-			class:border-e={dividerEdge === 'end' && !hideLeftSidebar}
+			class:border-s={dividerEdge === 'start' && !hideChatList}
+			class:border-e={dividerEdge === 'end' && !hideChatList}
 			style:width={chatListAutohide.active ? `${localSettings.sidebarWidth}px` : undefined}
 			tabindex="-1"
 			aria-hidden={panelHidden}
 			inert={panelHidden}
 		>
 			{@render sidebarContent(false, handleChatSelect)}
-			{#if !hideLeftSidebar}
+			{#if !hideChatList}
 				<ResizeHandle
 					edge={dividerEdge}
 					width={localSettings.sidebarWidth}

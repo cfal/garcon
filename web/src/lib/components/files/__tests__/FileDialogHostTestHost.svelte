@@ -11,7 +11,7 @@
 		setWorkspaceCoordinator,
 		setWorkbenchCommands,
 	} from '$lib/context';
-	import { SurfaceFrameRegistry } from '$lib/workspace/surface-frame-registry.svelte';
+	import { SurfaceFrameRegistry } from '$lib/workspace/surface-frame-registry';
 	import { fileSurfaceId, type WorkspaceWindowId } from '$lib/workspace/surface-types';
 	import type { FileSessionRegistry } from '$lib/files/sessions/file-session-registry.svelte.js';
 	import { FileSession } from '$lib/files/sessions/__tests__/file-session-fixture.js';

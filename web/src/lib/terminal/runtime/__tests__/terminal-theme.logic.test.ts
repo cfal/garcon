@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { TerminalThemeStore, terminalThemeFor } from '../terminal-theme.svelte.js';
-import type { TerminalThemePresentation } from '../terminal-theme.svelte.js';
+import { TerminalThemeStore, terminalThemeFor } from '../terminal-theme.js';
+import type { TerminalThemePresentation } from '../terminal-theme.js';
 
 const DEFAULT_BACKGROUND_FOREGROUND_KEYS = [
 	'foreground',

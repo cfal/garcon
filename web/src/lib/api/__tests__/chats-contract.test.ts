@@ -23,7 +23,6 @@ import {
 	steerChat,
 	steerQueuedEntry,
 	getChatExecutionControl,
-	clearChatQueue,
 	pauseChatQueue,
 	resumeChatQueue,
 	updateExecutionSettings,
@@ -807,14 +806,12 @@ describe('chats API contract', () => {
 			content: 'steer now',
 		});
 
-		await clearChatQueue('c/1');
 		await pauseChatQueue('c/1');
 		await resumeChatQueue('c/1', 'pause/1');
 
-		expect(fetchMock.mock.calls[6][0]).toBe('/api/v1/chats/queue/clear');
-		expect(fetchMock.mock.calls[7][0]).toBe('/api/v1/chats/queue/pause');
-		expect(fetchMock.mock.calls[8][0]).toBe('/api/v1/chats/queue/resume');
-		expect(JSON.parse(fetchMock.mock.calls[8][1].body)).toEqual({
+		expect(fetchMock.mock.calls[6][0]).toBe('/api/v1/chats/queue/pause');
+		expect(fetchMock.mock.calls[7][0]).toBe('/api/v1/chats/queue/resume');
+		expect(JSON.parse(fetchMock.mock.calls[7][1].body)).toEqual({
 			chatId: 'c/1',
 			pauseId: 'pause/1',
 		});

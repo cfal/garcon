@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseFileLink, isFileLink } from '$lib/chat/file-links/file-link-parser.js';
+import { parseFileLink } from '$lib/chat/file-links/file-link-parser.js';
 
 describe('parseFileLink', () => {
 	describe('accepts relative file paths', () => {
@@ -252,23 +252,5 @@ describe('parseFileLink', () => {
 			const result = parseFileLink('./src/foo.ts');
 			expect(result.rawHref).toBe('./src/foo.ts');
 		});
-	});
-});
-
-describe('isFileLink', () => {
-	it('returns true for relative paths', () => {
-		expect(isFileLink('foo/bar.ts')).toBe(true);
-	});
-
-	it('returns false for URLs', () => {
-		expect(isFileLink('https://example.com')).toBe(false);
-	});
-
-	it('returns false for absolute paths', () => {
-		expect(isFileLink('/etc/hosts')).toBe(false);
-	});
-
-	it('returns false for null', () => {
-		expect(isFileLink(null)).toBe(false);
 	});
 });

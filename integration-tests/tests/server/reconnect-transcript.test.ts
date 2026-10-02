@@ -22,6 +22,7 @@ import {
 } from '../../support/chat-assertions.js';
 import type { GarconTestClient } from '../../support/garcon-client.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 function transcriptProjection(messages: readonly TranscriptMessage[]): Array<{
   ordinal: number;
@@ -541,8 +542,7 @@ describe('reconnect and transcript stability', () => {
       });
       await fixture.client.waitForTurnTerminal(chatId, accepted.turnId);
 
-      await expect(fixture.client.subscribe(chatId, crypto.randomUUID(), 99_999))
-        .rejects.toMatchObject({
+      expect(await rejectionOf(fixture.client.subscribe(chatId, crypto.randomUUID(), 99_999))).toMatchObject({
           response: {
             requestType: 'chat-subscribe',
             code: 'STALE_TRANSCRIPT_VIEW',

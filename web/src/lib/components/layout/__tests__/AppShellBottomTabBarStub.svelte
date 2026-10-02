@@ -14,6 +14,8 @@
 
 <div data-testid="bottom-tab-bar-stub" data-active-item={activeItem}>
 	<button type="button" onclick={onMenuClick}>Open chat drawer</button>
+	<button type="button" onclick={() => onTabChange('chat')}>Select Chat tab</button>
+	<button type="button" onclick={() => onTabChange('terminal')}>Select Terminal tab</button>
 	<button type="button" onclick={() => onTabChange('git')}>Select Git tab</button>
 	<button type="button" onclick={() => onTabChange('files')}>Select Files tab</button>
 </div>

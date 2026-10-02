@@ -8,6 +8,7 @@ import {
 } from '../../support/integration-fixture.js';
 import { waitForPersistedChat } from '../../support/persisted-chat.js';
 import { CURRENT_WORKSPACE_VERSION } from '../../../server/controller/migrations/index.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 const CHAT_ID = '1786120000000002';
 
@@ -33,7 +34,7 @@ describe('agent settings migration', () => {
           'utf8',
         ))).toEqual({ version: CURRENT_WORKSPACE_VERSION });
 
-        await expect(fixture.client.startChat({
+        expect(await rejectionOf(fixture.client.startChat({
           origin: 'interactive',
           clientRequestId: randomUUID(),
           clientMessageId: randomUUID(),
@@ -45,27 +46,27 @@ describe('agent settings migration', () => {
           thinkingMode: 'high',
           agentSettings: { ownerId: 'amp', schemaVersion: 2, values: {} },
           command: 'generic rejected start',
-        })).rejects.toMatchObject({
+        }))).toMatchObject({
           status: 422,
           body: { errorCode: 'VALIDATION_FAILED' },
         });
 
-        await expect(fixture.client.patch('/api/v1/chats/execution-settings', {
+        expect(await rejectionOf(fixture.client.patch('/api/v1/chats/execution-settings', {
           chatId: CHAT_ID,
           thinkingMode: 'high',
-        })).rejects.toMatchObject({
+        }))).toMatchObject({
           status: 422,
           body: { errorCode: 'VALIDATION_FAILED' },
         });
 
-        await expect(fixture.client.forkRunChat({
+        expect(await rejectionOf(fixture.client.forkRunChat({
           clientRequestId: randomUUID(),
           clientMessageId: randomUUID(),
           sourceChatId: CHAT_ID,
           chatId: fixture.newChatId(),
           command: 'generic rejected fork',
           thinkingMode: 'high',
-        })).rejects.toMatchObject({
+        }))).toMatchObject({
           status: 422,
           body: { errorCode: 'VALIDATION_FAILED' },
         });

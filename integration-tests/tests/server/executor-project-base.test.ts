@@ -5,6 +5,7 @@ import type { ExecutorSnapshot } from '../../../common/executors.js';
 import type { FileTreeResponse, ReadTextResponse } from '../../../common/file-contracts.js';
 import type { ServerWsMessage } from '../../../common/ws-events.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 for (const backend of ['remote-controller-dials', 'remote-executor-dials'] as const) {
   test(`worker base changes refresh metadata and enforce new boundaries without controller restart (${backend})`, async () => {
@@ -57,11 +58,10 @@ for (const backend of ['remote-controller-dials', 'remote-executor-dials'] as co
         } else {
           expect(await client.get(`/api/v1/projects/resolve?${new URLSearchParams({ executorId, projectPath: originalPath })}`))
             .toMatchObject({ resolution: { kind: 'unavailable', reason: 'outside-base' } });
-          await expect(client.get(route)).rejects.toMatchObject({ status: 403 });
-          await expect(client.put(route, { content: 'must not write', expectedRevision: original.revision, conflictResolution: 'overwrite' }))
-            .rejects.toMatchObject({ status: 403 });
+          expect(await rejectionOf(client.get(route))).toMatchObject({ status: 403 });
+          expect(await rejectionOf(client.put(route, { content: 'must not write', expectedRevision: original.revision, conflictResolution: 'overwrite' }))).toMatchObject({ status: 403 });
           const escape = `/api/v1/files/text?${new URLSearchParams({ executorId, projectPath: narrow, path: 'escape/file.txt' })}`;
-          await expect(client.get(escape)).rejects.toMatchObject({ status: 403 });
+          expect(await rejectionOf(client.get(escape))).toMatchObject({ status: 403 });
           const inner = `/api/v1/files/text?${new URLSearchParams({ executorId, projectPath: narrow, path: 'inner.txt' })}`;
           expect(await client.get(inner)).toMatchObject({ content: 'Synthetic inner file' });
           expect(await readFile(join(originalPath, 'file.txt'), 'utf8')).toBe(original.content);

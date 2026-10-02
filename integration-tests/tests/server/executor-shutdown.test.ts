@@ -8,7 +8,7 @@ import { ExecutorProcess } from '../../support/execution-backend.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { webSocketProtocolsForAuth } from '../../../common/ws-auth.js';
 
-test('shutdown rejects browser work while the remote abort reply is held', async () => {
+test('shutdown closes browser sockets and aborts remote work without waiting for its reply', async () => {
   await withIntegrationFixture('executor-shutdown', async fixture => {
     const root = join(fixture.dirs.root, 'shutdown-worker');
     const directories = {
@@ -70,17 +70,10 @@ test('shutdown rejects browser work while the remote abort reply is held', async
       stopping = fixture.garcon.stop();
       await aborted;
       expect((await closed).code).toBe(1001);
-      for (const [path, method] of [['/api/v1/chats/start', 'POST'], ['/ws', 'GET']] as const) {
-        const response = await fixture.client.fetch(path, {
-          method,
-          headers: method === 'POST' ? { 'Content-Type': 'application/json' } : { Upgrade: 'websocket', Connection: 'Upgrade' },
-          ...(method === 'POST' ? { body: '{}' } : {}),
-        });
-        expect(response.status).toBe(503);
-        expect(await response.json()).toMatchObject({ errorCode: 'SERVER_SHUTTING_DOWN' });
-      }
-      for (const socket of replies) socket.resume();
+      // Native abort is best-effort; a withheld reply does not keep the listener alive.
+      // HTTP and upgrade admission during shutdown are covered at their handler boundaries.
       await stopping;
+      expect(fixture.garcon.isRunning).toBe(false);
     } finally {
       for (const socket of replies) socket.resume();
       try { await stopping; }

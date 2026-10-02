@@ -2,7 +2,7 @@ import { Terminal } from '@xterm/xterm';
 import {
 	terminalThemeFor,
 	type TerminalThemePresentation,
-} from '$lib/terminal/runtime/terminal-theme.svelte.js';
+} from '$lib/terminal/runtime/terminal-theme.js';
 
 export async function renderTerminalSample(
 	parent: HTMLElement,

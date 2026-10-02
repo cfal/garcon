@@ -61,7 +61,7 @@ vi.mock('$lib/components/workspace/BottomTabBar.svelte', async () => ({
 vi.mock('$lib/components/shared/NotificationHost.svelte', async () => ({
 	default: (await import('./AppShellGenericStub.svelte')).default,
 }));
-vi.mock('../../chat/NewChatDialog.svelte', async () => ({
+vi.mock('../../chat/new-chat/NewChatDialog.svelte', async () => ({
 	default: (await import('./AppShellGenericStub.svelte')).default,
 }));
 vi.mock('../../files/FileDirtyUnloadGuard.svelte', async () => ({
@@ -85,7 +85,7 @@ vi.mock('$lib/components/chat/ShareChatDialog.svelte', async () => ({
 vi.mock('$lib/components/sidebar/SidebarTagDialog.svelte', async () => ({
 	default: (await import('./AppShellGenericStub.svelte')).default,
 }));
-vi.mock('$lib/components/sidebar/SidebarSearchDialogs.svelte', async () => ({
+vi.mock('$lib/components/sidebar/search/SidebarSearchDialogs.svelte', async () => ({
 	default: (await import('./AppShellSearchDialogsStub.svelte')).default,
 }));
 
@@ -636,6 +636,55 @@ describe('AppShell responsive workspace binding', () => {
 		await waitFor(() => expect(appShell.requestComposerFocus).toHaveBeenCalledOnce());
 		expect(appShell.requestSidebarRecenterToSelected).toHaveBeenCalledOnce();
 		expect(chatNavigation.gotoChat).toHaveBeenCalledOnce();
+	});
+
+	it.each(['resolve', 'reject'] as const)(
+		'ignores pending chat placement %s after unmount',
+		async (outcome) => {
+			const workspace = installContext();
+			const pending =
+				Promise.withResolvers<Awaited<ReturnType<typeof workspace.showChatInCurrentWindow>>>();
+			const place = workspace.showChatInCurrentWindow.bind(workspace);
+			vi.spyOn(workspace, 'showChatInCurrentWindow').mockReturnValue(pending.promise);
+			const appShell = testContext.current?.appShell as AppShellStore;
+			const focus = vi.spyOn(appShell, 'requestComposerFocus');
+			const sessions = testContext.current?.sessions as {
+				setSelectedChatId: ReturnType<typeof vi.fn>;
+			};
+			const notifications = testContext.current?.notifications as {
+				error: ReturnType<typeof vi.fn>;
+			};
+			const view = render(AppShell);
+			await fireEvent.click(screen.getByRole('button', { name: 'Select test chat' }));
+			view.unmount();
+			sessions.setSelectedChatId.mockClear();
+			if (outcome === 'resolve') pending.resolve(await place('chat-test'));
+			else pending.reject(new Error('Late placement failure'));
+			await pending.promise.catch(() => undefined);
+			await Promise.resolve();
+			expect(sessions.setSelectedChatId).not.toHaveBeenCalled();
+			expect(chatNavigation.gotoChat).not.toHaveBeenCalled();
+			expect(focus).not.toHaveBeenCalled();
+			expect(notifications.error).not.toHaveBeenCalled();
+		},
+	);
+
+	it.each([
+		{ label: 'Chat', method: 'focusChat' },
+		{ label: 'Files', method: 'focusMobileSingleton' },
+		{ label: 'Git', method: 'focusMobileSingleton' },
+		{ label: 'Terminal', method: 'focusMostRecentTerminalOrCreate' },
+	] as const)('reports failed mobile $label navigation', async ({ label, method }) => {
+		const workspace = installContext();
+		workspace.isMobile = true;
+		setViewportWidth(390, false);
+		vi.spyOn(workspace, method).mockRejectedValue(new Error('Unable to focus view'));
+		const notifications = testContext.current?.notifications as { error: ReturnType<typeof vi.fn> };
+		render(AppShell);
+		await fireEvent.click(screen.getByRole('button', { name: `Select ${label} tab` }));
+		await waitFor(() =>
+			expect(notifications.error).toHaveBeenCalledExactlyOnceWith('Unable to focus view'),
+		);
 	});
 
 	it('reorders one mounted desktop chat list when its dock side changes', async () => {

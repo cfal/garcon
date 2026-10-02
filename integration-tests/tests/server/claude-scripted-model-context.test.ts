@@ -10,6 +10,7 @@ import { liveClaudeRunRequest, liveClaudeStartRequest } from '../../support/live
 import { createLiveClaudeProtocolProbe } from '../../support/live-claude-protocol-probe.js';
 import { waitForPersistedNativeSession } from '../../support/persisted-chat.js';
 import { startScriptedClaudeTestEnvironment } from '../../support/scripted-claude.js';
+import { rejectionOf, throwingRejectionOf } from '../../support/promise-assertions.js';
 
 test('Claude rejects invalid initial models consistently before creating a chat', async () => {
   const environment = await startScriptedClaudeTestEnvironment();
@@ -21,12 +22,12 @@ test('Claude rejects invalid initial models consistently before creating a chat'
         model: 'custom[99k]',
       };
       for (let attempt = 0; attempt < 2; attempt += 1) {
-        await expect(fixture.client.startChat(request)).rejects.toMatchObject({
+        expect(await rejectionOf(fixture.client.startChat(request))).toMatchObject({
           status: 422,
           body: { errorCode: 'VALIDATION_FAILED', retryable: false },
         });
       }
-      await expect(fixture.client.getChatSnapshot(chatId)).rejects.toMatchObject({ status: 404 });
+      expect(await rejectionOf(fixture.client.getChatSnapshot(chatId))).toMatchObject({ status: 404 });
       expect(environment.model.requests()).toHaveLength(0);
       expect(fixture.executionLogs.filter(line => line.includes('Spawning Claude CLI'))).toHaveLength(0);
 
@@ -51,8 +52,7 @@ test('Claude validates unstarted chat settings before persistence and can start 
       await fixture.restartGarcon({ beforeStart: () => prepareUnstartedClaudeChat(
         { ...fixture.executionDirs, workspace: fixture.dirs.workspace }, chatId, fixture.client.executorId,
       ) });
-      await expect(fixture.client.patch('/api/v1/chats/model', { chatId, model: 'custom[99k]' }))
-        .rejects.toThrow(/returned 422:.*context suffix/);
+      expect(await throwingRejectionOf(fixture.client.patch('/api/v1/chats/model', { chatId, model: 'custom[99k]' }))).toThrow(/returned 422:.*context suffix/);
       const registry = JSON.parse(await readFile(join(fixture.dirs.workspace, 'chats.json'), 'utf8'));
       expect(registry.sessions[chatId]).toMatchObject({ model: 'custom[1m]', agentSessionId: null });
 
@@ -226,8 +226,7 @@ test('Claude updates numeric caps in place through the settings API and restarts
       }
       const transcript = await fixture.client.getMessages(chatId);
       expect(messagesOfType(transcript.messages, 'user-message')).toHaveLength(selections.length);
-      await expect(fixture.client.patch('/api/v1/chats/model', { chatId, model: 'third[99k]' }))
-        .rejects.toThrow(/returned 422:.*context suffix/);
+      expect(await throwingRejectionOf(fixture.client.patch('/api/v1/chats/model', { chatId, model: 'third[99k]' }))).toThrow(/returned 422:.*context suffix/);
       expect((await fixture.client.getChatSnapshot(chatId)).chat.model).toBe('third[800k]');
       expect(fixture.executionLogs.filter(line => line.includes('Claude context window updated without restarting')))
         .toHaveLength(3);

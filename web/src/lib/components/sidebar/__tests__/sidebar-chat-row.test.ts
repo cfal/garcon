@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 
 import SidebarChatItemHost from './SidebarChatItemHost.svelte';
-import SidebarSearchDialogHost from './SidebarSearchDialogHost.svelte';
+import SidebarSearchDialogHost from '../search/__tests__/SidebarSearchDialogHost.svelte';
 
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';

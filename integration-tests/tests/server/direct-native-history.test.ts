@@ -16,6 +16,7 @@ import {
   type IntegrationFixture,
   withIntegrationFixture,
 } from '../../support/integration-fixture.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 describe('Direct native history persistence', () => {
   test('restores provider-owned history and model context after restart', async () => {
@@ -134,7 +135,7 @@ describe('Direct native history persistence', () => {
       expect(await fixture.client.deleteChat(chatId)).toEqual({ success: true });
       await aborted;
       await waitForNativeCleanup(fixture, chatId);
-      await expect(stat(nativePath)).rejects.toMatchObject({ code: 'ENOENT' });
+      expect(await rejectionOf(stat(nativePath))).toMatchObject({ code: 'ENOENT' });
 
       await fixture.restartGarcon();
       expect((await fixture.client.listChats()).sessions.map((chat) => chat.id))
@@ -184,7 +185,7 @@ describe('Direct native history persistence', () => {
       expect(await fixture.client.deleteChat(chatId)).toEqual({ success: true });
       await waitForNativeCleanup(fixture, chatId);
       expect((await stat(outgoingPath)).isFile()).toBeTrue();
-      await expect(stat(currentPath)).rejects.toMatchObject({ code: 'ENOENT' });
+      expect(await rejectionOf(stat(currentPath))).toMatchObject({ code: 'ENOENT' });
     });
   }, 30_000);
 });

@@ -10,13 +10,13 @@ import { GitMutationCoordinator } from '$lib/git/surface/git-mutations.svelte.js
 import { GitBranchSelectorState } from '$lib/git/targets/git-branch-selector-state.svelte.js';
 import { GitReviewDisplaySettingsStore } from '$lib/git/review/git-review-display-settings.svelte.js';
 import { LocalGitComparisonPreferences } from '$lib/git/review/git-comparison-preferences.js';
-import { GitViewLauncher } from '$lib/git/surface/git-view-launcher.svelte.js';
+import { GitViewLauncher } from '$lib/git/surface/git-view-launcher.js';
 import type {
 	FileOpenPlacementPreference,
 	LocalSettingsStore,
 } from '$lib/stores/local-settings.svelte.js';
 import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte.js';
-import type { NavigationStore } from '$lib/stores/navigation.svelte.js';
+import type { NavigationStore } from '$lib/stores/navigation.js';
 import type { NotificationsStore } from '$lib/stores/notifications.svelte.js';
 import { createPullRequestsStore } from '$lib/git/pull-requests/pull-requests-store.svelte.js';
 import { CommitController } from '$lib/git/commit/commit-controller.svelte.js';
@@ -34,7 +34,7 @@ import { createWorkspaceLayoutStore } from './workspace-layout.svelte.js';
 import { getLocalStorageItem, LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence.js';
 import { WorkspaceInteractionGate } from './workspace-interaction-gate.svelte.js';
 import { parsePersistedWorkspaceLayout } from './layout-schema.js';
-import { SurfaceFrameRegistry } from './surface-frame-registry.svelte.js';
+import { SurfaceFrameRegistry } from './surface-frame-registry.js';
 import { TransientLayerRegistry } from './transient-layers.svelte.js';
 import { createWorkspaceContextStore } from './workspace-context.svelte.js';
 import { WorkspaceCoordinator } from './workspace-coordinator.svelte.js';

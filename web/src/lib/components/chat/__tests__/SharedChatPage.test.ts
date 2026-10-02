@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import SharedChatPageTestHost from './SharedChatPageTestHost.svelte';
-import { CollapsibleBodyLayoutHarness } from './collapsible-body-layout-harness.js';
+import { CollapsibleBodyLayoutHarness } from '../transcript/__tests__/collapsible-body-layout-harness.js';
 import * as sharesApi from '$lib/api/shares';
 import type { GetSharedChatResponse } from '$shared/share-types';
 import { ApiError } from '$lib/api/client';

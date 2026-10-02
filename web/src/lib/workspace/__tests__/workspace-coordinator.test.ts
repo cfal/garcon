@@ -23,7 +23,7 @@ import type {
 	TerminalAttachmentState,
 	TerminalRegistry,
 } from '$lib/terminal/sessions/terminal-registry.svelte.js';
-import { SurfaceFrameRegistry } from '../surface-frame-registry.svelte';
+import { SurfaceFrameRegistry } from '../surface-frame-registry';
 import { SurfaceFrameBridge } from '../surface-frame-context';
 import { WorkspaceShortcutDispatcher, type WorkspaceShortcutDeps } from '../workspace-shortcuts';
 import type { WorkspaceLayoutSnapshot } from '../surface-types';

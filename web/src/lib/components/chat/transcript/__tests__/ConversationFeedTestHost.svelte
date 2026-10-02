@@ -1,0 +1,304 @@
+<script lang="ts">
+	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
+	setExecutorsTestContext();
+	import { onDestroy, untrack } from 'svelte';
+	import ConversationFeed from '../ConversationFeed.svelte';
+	import { createModelCatalogStore } from '$lib/agents/model-catalog-store.svelte.js';
+	import { AgentState } from '$lib/chat/conversation/agent-state.svelte.js';
+	import { createChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
+	import { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
+	import type { ConversationViewportPort } from '$lib/chat/transcript/conversation-viewport-port.js';
+	import { FileSessionRegistry } from '$lib/files/sessions/file-session-registry.svelte.js';
+	import { createAppShellStore } from '$lib/stores/app-shell.svelte.js';
+	import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
+	import { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte.js';
+	import type { ConversationMessageChatContext } from '$lib/chat/transcript/conversation-message-context.js';
+	import type { PendingPermissionRequest } from '$lib/types/chat';
+	import {
+		AssistantMessage,
+		BashToolUseMessage,
+		ExitPlanModeToolUseMessage,
+		ToolResultMessage,
+		UserMessage,
+	} from '$shared/chat-types';
+	import {
+		setAgentState,
+		setAppShell,
+		setLocalSettings,
+		setModelCatalog,
+		setRemoteSettings,
+		setChatSessions,
+		setFileSessions,
+		setNotifications,
+	} from '$lib/context';
+	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
+	import { setCanonicalWorkspaceLayout } from '../../__tests__/workspace-layout-test-context.js';
+
+	interface Props {
+		chatContext?: ConversationMessageChatContext;
+		sessionsStore?: ReturnType<typeof createChatSessionsStore>;
+		onUserScrollIntent?: (direction: 'earlier' | 'later' | null) => void;
+		isPreparingInitialScroll?: boolean;
+		showAnnouncementTrigger?: boolean;
+		remoteSettingsStore?: RemoteSettingsStore;
+		transcriptScenario?:
+			| 'empty'
+			| 'file-links'
+			| 'local-truncation'
+			| 'loading-earlier'
+			| 'loading-later'
+			| 'error-earlier'
+			| 'row-ids'
+			| 'bash-filter'
+			| 'tool-run'
+			| 'large-tool-run'
+			| 'count-shrink'
+			| 'count-shrink-survivors'
+			| 'twenty-thousand';
+	}
+
+	const {
+		chatContext = { chatId: 'chat-1', executorId: 'local', projectPath: '/workspace' },
+		sessionsStore = createChatSessionsStore(),
+		onUserScrollIntent,
+		isPreparingInitialScroll = false,
+		showAnnouncementTrigger = false,
+		remoteSettingsStore = new RemoteSettingsStore(),
+		transcriptScenario = 'empty',
+	}: Props = $props();
+	const initialTranscriptScenario = untrack(() => transcriptScenario);
+	const initialChatContext = untrack(() => chatContext);
+	const pendingPermissions: PendingPermissionRequest[] = [];
+
+	const chatState = new ActiveTranscriptState();
+	let viewportPort: ConversationViewportPort | null = null;
+	let navigationResult = $state('idle');
+	async function navigateToTool(ordinal: number, presentation = false): Promise<void> {
+		navigationResult = await viewportPort?.scrollToTarget({
+			kind: presentation ? 'presentation-row' : 'row',
+			id: `generation-1:${ordinal}`,
+		}) ?? 'not-ready';
+	}
+	if (initialTranscriptScenario === 'file-links') {
+		chatState.replaceGeneration(initialChatContext.chatId, 'generation-1', [
+			{ ordinal: 1, message: new AssistantMessage('2026-07-01T00:00:00.000Z', '[Message file](./message.txt)') },
+		], { lastOrdinal: 1, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false });
+		pendingPermissions.push({
+			chatId: initialChatContext.chatId,
+			permissionOccurrenceId: 'synthetic-permission',
+			requestedTool: new ExitPlanModeToolUseMessage('2026-07-01T00:00:00.000Z', 'synthetic-tool', '[Permission file](./plan.txt)'),
+		});
+	} else if (initialTranscriptScenario === 'row-ids') {
+		chatState.replaceGeneration(
+			'chat-1',
+			'generation-1',
+			[
+				{
+					ordinal: 1,
+					message: new UserMessage('2026-07-01T00:00:00.000Z', 'Durable user message'),
+				},
+			],
+			{
+				lastOrdinal: 1,
+				pageOldestOrdinal: 1,
+				nextBeforeOrdinal: null,
+				hasMore: false,
+			},
+		);
+		chatState.upsertOptimisticUserInput({
+			chatId: 'chat-1',
+			clientMessageId: 'message-1',
+			content: 'Pending user message',
+			createdAt: '2026-07-01T00:00:01.000Z',
+			delivery: 'pending',
+		});
+	} else if (initialTranscriptScenario === 'tool-run' || initialTranscriptScenario === 'large-tool-run') {
+		const count = initialTranscriptScenario === 'large-tool-run' ? 2_000 : 3;
+		chatState.replaceGeneration(
+			'chat-1',
+			'generation-1',
+			Array.from({ length: count }, (_, index) => ({
+				ordinal: index + 1,
+				message: new BashToolUseMessage('2026-07-01T00:00:00.000Z', `tool-${index}`, 'pwd'),
+			})),
+			{ lastOrdinal: count, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false },
+		);
+		chatState.revealAllLoadedMessages();
+	} else if (initialTranscriptScenario === 'bash-filter') {
+		chatState.replaceGeneration(
+			'chat-1',
+			'generation-1',
+			[
+				{
+					ordinal: 1,
+					message: new BashToolUseMessage(
+						'2026-07-01T00:00:00.000Z',
+						'bash-filter-1',
+						'git status',
+					),
+				},
+				{
+					ordinal: 2,
+					message: new ToolResultMessage(
+						'2026-07-01T00:00:01.000Z',
+						'bash-filter-1',
+						{ raw: 'working tree clean' },
+						false,
+					),
+				},
+			],
+			{
+				lastOrdinal: 2,
+				pageOldestOrdinal: 1,
+				nextBeforeOrdinal: null,
+				hasMore: false,
+			},
+		);
+	} else if (initialTranscriptScenario !== 'empty') {
+		const messageCount =
+			initialTranscriptScenario === 'twenty-thousand'
+				? 20_000
+				: initialTranscriptScenario === 'loading-later'
+					? 5
+					: 120;
+		const messages = Array.from({ length: messageCount }, (_, index) => ({
+			ordinal: index + 1,
+			message: new AssistantMessage('2026-07-01T00:00:00.000Z', `message ${index + 1}`),
+		}));
+		chatState.replaceGeneration('chat-1', 'generation-1', messages, {
+			lastOrdinal: initialTranscriptScenario === 'loading-later' ? 100 : messageCount,
+			pageOldestOrdinal: 1,
+			nextBeforeOrdinal: null,
+			hasMore: false,
+		});
+		if (initialTranscriptScenario === 'loading-later') {
+			chatState.pageStates.later = { status: 'loading', error: null };
+		}
+		if (initialTranscriptScenario === 'loading-earlier') {
+			chatState.pageStates.earlier = { status: 'loading', error: null };
+		}
+		if (initialTranscriptScenario === 'error-earlier') {
+			chatState.pageStates.earlier = { status: 'error', error: 'Network unavailable' };
+		}
+		if (
+			initialTranscriptScenario === 'twenty-thousand' ||
+			initialTranscriptScenario === 'count-shrink' ||
+			initialTranscriptScenario === 'count-shrink-survivors'
+		) {
+			chatState.revealAllLoadedMessages();
+		}
+	}
+
+	function shrinkTranscript(): void {
+		const messages = Array.from({ length: 20 }, (_, index) => ({
+			ordinal: index + 1,
+			message: new AssistantMessage('2026-07-01T00:00:00.000Z', `message ${index + 1}`),
+		}));
+		chatState.replaceGeneration('chat-1', 'generation-1', messages, {
+			lastOrdinal: messages.length,
+			pageOldestOrdinal: 1,
+			nextBeforeOrdinal: null,
+			hasMore: false,
+		});
+		chatState.revealAllLoadedMessages();
+	}
+
+	function shrinkTranscriptKeepingTail(): void {
+		const messages = Array.from({ length: 20 }, (_, index) => ({
+			ordinal: index + 101,
+			message: new AssistantMessage('2026-07-01T00:00:00.000Z', `message ${index + 101}`),
+		}));
+		chatState.replaceGeneration('chat-1', 'generation-1', messages, {
+			lastOrdinal: 120,
+			pageOldestOrdinal: 101,
+			nextBeforeOrdinal: null,
+			hasMore: false,
+		});
+		chatState.revealAllLoadedMessages();
+	}
+
+	function showInterleavedEarlierError(): void {
+		chatState.pageStates.earlier = { status: 'error', error: 'Interleaved failure' };
+	}
+
+	function retryEarlierPage(): void {
+		chatState.pageStates.earlier = {
+			status: 'loading',
+			error: chatState.pageStates.earlier.error,
+		};
+	}
+	setCanonicalWorkspaceLayout();
+	setNotifications(createNotificationsStore());
+	setAgentState(new AgentState());
+	const localSettings = createLocalSettingsStore();
+	localSettings.chatMaxWidth = 'medium';
+	localSettings.showThinking = true;
+	localSettings.hiddenToolTypes = [];
+	localSettings.combineToolUseMessages = false;
+	setLocalSettings(localSettings);
+	setRemoteSettings(untrack(() => remoteSettingsStore));
+	const appShell = createAppShellStore();
+	appShell.projectBasePath = '/workspace';
+	let sidebarRecenterRequestCount = $state(0);
+	const unsubscribeSidebarRecenter = appShell.onSidebarRecenterRequested(() => {
+		sidebarRecenterRequestCount += 1;
+	});
+	setAppShell(appShell);
+	setModelCatalog(createModelCatalogStore());
+	setChatSessions(untrack(() => sessionsStore));
+	setFileSessions(
+		new FileSessionRegistry({
+			getIsMobile: () => false,
+			getDefaultPlacement: () => ({ type: 'window', windowId: 'window-main' }),
+			getEditorSettings: () => ({ wordWrap: false, showLineNumbers: true, fontSize: 12 }),
+			getPlacement: () => ({
+				async placeFileSession() {
+					return 'cancelled';
+				},
+				async focusFileSession() {},
+			}),
+		}),
+	);
+	onDestroy(() => {
+		unsubscribeSidebarRecenter();
+		localSettings.destroy();
+	});
+</script>
+
+	<ConversationFeed
+		{chatContext}
+		pendingPermissionRequests={pendingPermissions}
+		onPermissionDecision={() => {}}
+		transcript={chatState}
+		agentId="codex"
+		{onUserScrollIntent}
+	{isPreparingInitialScroll}
+	onLoadEarlier={retryEarlierPage}
+	isVisible={true}
+	pinnedToBottom={true}
+		surfaceIdentity={`${chatState.activeChatId ?? 'none'}:${chatState.transcriptViewId}`}
+		onViewportPortChange={(port) => (viewportPort = port)}
+/>
+{#if showAnnouncementTrigger}
+	<button onclick={() => chatState.appendLocalNotice('progress', 'Repeated update')}
+		>Announce</button
+	>
+{/if}
+{#if transcriptScenario === 'tool-run' || transcriptScenario === 'large-tool-run'}
+	<button onclick={() => localSettings.toggle('combineToolUseMessages')}>Toggle combination</button>
+{/if}
+{#if transcriptScenario === 'tool-run'}
+	<button onclick={() => navigateToTool(1)}>Navigate first tool</button>
+	<button onclick={() => navigateToTool(2)}>Navigate middle tool</button>
+	<button onclick={() => navigateToTool(3)}>Navigate last tool</button>
+	<button onclick={() => navigateToTool(2, true)}>Restore group summary</button>
+	<div data-testid="tool-navigation-result">{navigationResult}</div>
+{/if}
+{#if transcriptScenario === 'count-shrink'}
+	<button onclick={shrinkTranscript}>Shrink transcript</button>
+{/if}
+{#if transcriptScenario === 'count-shrink-survivors'}
+	<button onclick={shrinkTranscriptKeepingTail}>Shrink transcript keeping tail</button>
+	<button onclick={showInterleavedEarlierError}>Show earlier error</button>
+{/if}
+<div data-testid="sidebar-recenter-request-count">{sidebarRecenterRequestCount}</div>

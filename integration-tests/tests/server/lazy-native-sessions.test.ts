@@ -3,6 +3,7 @@ import { readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { TranscriptLedgerStore } from '../../../server/controller/ledger/store.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 for (const backend of ['in-process', 'remote-controller-dials', 'remote-executor-dials'] as const) {
   test(`startup and ledger reads do not require native history (${backend})`, async () => {
@@ -78,7 +79,7 @@ for (const backend of ['in-process', 'remote-controller-dials', 'remote-executor
         await fixture.crashAndRestartExecutorWorker();
       }
       const requestCount = fixture.fakeProviders.openAi.requests().length;
-      await expect(fixture.client.reloadChat(missingChat)).rejects.toMatchObject({
+      expect(await rejectionOf(fixture.client.reloadChat(missingChat))).toMatchObject({
         response: { code: 'HISTORY_LOAD_FAILED' },
       });
       const afterReload = await fixture.client.getMessages(missingChat);

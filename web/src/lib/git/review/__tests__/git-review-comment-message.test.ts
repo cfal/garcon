@@ -1,10 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { GitReviewFileBody } from '$lib/api/git.js';
 import { buildGitReviewCommentMessage } from '../git-review-comment-message.js';
-import {
-	buildGitReviewBodyCommentContext,
-	buildGitReviewCommentContext,
-} from '../git-review-comment-context.js';
+import { buildGitReviewBodyCommentContext } from '../git-review-comment-context.js';
 import { createGitPatchIndex } from '../git-patch-index.js';
 
 describe('buildGitReviewCommentMessage', () => {
@@ -54,40 +51,6 @@ describe('buildGitReviewCommentMessage', () => {
 		expect(message).toContain('Location: `parser.ts`:9 (old line)');
 		expect(message).toContain('Severity: warning');
 		expect(message).toContain('Comment:');
-	});
-
-	it('caps deterministic context to the hunk header and two nearby rows per side', () => {
-		const rows = [
-			{
-				key: 'h',
-				kind: 'hunk' as const,
-				hunkIndex: 0,
-				hunkId: 'h0',
-				beforeLine: null,
-				afterLine: null,
-				text: '@@ -1,5 +1,5 @@',
-				diffLineIndex: -1,
-			},
-			...Array.from({ length: 6 }, (_, index) => ({
-				key: `c${index}`,
-				kind: 'context' as const,
-				hunkIndex: 0,
-				hunkId: 'h0',
-				beforeLine: index + 1,
-				afterLine: index + 1,
-				text: `line ${index + 1}`,
-				diffLineIndex: index,
-			})),
-		];
-
-		expect(buildGitReviewCommentContext(rows, 'after', 4)).toEqual([
-			'@@ -1,5 +1,5 @@',
-			' line 2',
-			' line 3',
-			' line 4',
-			' line 5',
-			' line 6',
-		]);
 	});
 
 	it('reads comment context from the patch index without materializing legacy rows', () => {

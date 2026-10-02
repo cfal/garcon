@@ -18,9 +18,9 @@
 	import { ApiProvidersStore } from '$lib/api-providers/api-providers-store.svelte.js';
 	import { createChatPreambleSelectionInvalidationHub } from '$lib/preambles/chat-selection-invalidation-hub.js';
 	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
-	import { createAppTitleStore } from '$lib/stores/app-title.svelte.js';
+	import { createAppTitleStore } from '$lib/stores/app-title.js';
 	import { createMinuteClockStore } from '$lib/stores/minute-clock.svelte.js';
-	import { createNavigationStore } from '$lib/stores/navigation.svelte.js';
+	import { createNavigationStore } from '$lib/stores/navigation.js';
 	import { createChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 	import { createAppShellStore } from '$lib/stores/app-shell.svelte.js';
 	import { createWsConnection } from '$lib/ws/connection.svelte.js';
@@ -78,14 +78,14 @@
 		setThemeRuntime,
 	} from '$lib/context';
 	import { RemoteSettingsRouter } from '$lib/events/remote-settings-router.js';
-	import { TranscriptSearchStatusRouter } from '$lib/events/transcript-search-status-router.js';
+	import { TranscriptSearchStatusController } from '$lib/events/transcript-search-status-controller.js';
 	import { ScheduledPromptsRouter } from '$lib/events/scheduled-prompts-router.js';
 	import { PreamblesRouter } from '$lib/events/preambles-router.js';
 	import { SnippetsRouter } from '$lib/events/snippets-router.js';
 	import AppShell from '$lib/components/layout/AppShell.svelte';
 	import CommandMenu from '$lib/components/shared/CommandMenu.svelte';
 	import KeyboardShortcuts from '$lib/components/shared/KeyboardShortcuts.svelte';
-	import { getTranscriptSearchStatus, searchChatTranscripts } from '$lib/api/chats';
+	import { searchChatTranscripts } from '$lib/api/chats';
 	import * as m from '$lib/paraglide/messages.js';
 	import {
 		getLocalStorageItem,
@@ -319,7 +319,7 @@
 
 	// Pushes settings-changed WebSocket messages into the remote store.
 	const settingsRouter = new RemoteSettingsRouter(ws, remoteSettings);
-	const transcriptSearchStatusRouter = new TranscriptSearchStatusRouter(ws, (status) =>
+	const transcriptSearchStatus = new TranscriptSearchStatusController(ws, (status) =>
 		sidebarSearch.applyTranscriptSearchStatus(status),
 	);
 	const scheduledPromptsRouter = new ScheduledPromptsRouter(ws, scheduledPrompts);
@@ -332,7 +332,7 @@
 	const chatBoardsRouter = new ChatBoardsRouter(ws, chatBoardInvalidations);
 	const ticketsRouter = new TicketsRouter(ws, ticketsInvalidations);
 	settingsRouter.start();
-	transcriptSearchStatusRouter.start();
+	transcriptSearchStatus.start();
 	scheduledPromptsRouter.start();
 	preamblesRouter.start();
 	snippetsRouter.start();
@@ -343,7 +343,7 @@
 	$effect(() => {
 		ws.messageVersion;
 		settingsRouter.tick();
-		transcriptSearchStatusRouter.tick();
+		transcriptSearchStatus.tick();
 		scheduledPromptsRouter.tick();
 		preamblesRouter.tick();
 		snippetsRouter.tick();
@@ -356,11 +356,7 @@
 	$effect(() => {
 		const connectedAt = ws.connectionStatus.lastConnectedAt;
 		if (!connectedAt) return;
-		untrack(() => {
-			void getTranscriptSearchStatus()
-				.then((status) => sidebarSearch.applyTranscriptSearchStatus(status))
-				.catch(() => undefined);
-		});
+		untrack(() => void transcriptSearchStatus.refresh());
 		untrack(() => void scheduledPrompts.refreshIfLoaded());
 		untrack(() => void preambles.refreshIfLoaded());
 		untrack(() => void snippets.refreshIfLoaded());
@@ -371,6 +367,7 @@
 		untrack(() => chatPreambleSelectionInvalidationHub.publishReconnect());
 		untrack(() => chatBoardInvalidations.publishReconnect());
 		untrack(() => ticketsInvalidations.publishReconnect());
+		return () => transcriptSearchStatus.cancelRefresh();
 	});
 
 	onMount(() => {
@@ -450,7 +447,7 @@
 	onDestroy(() => {
 		window.removeEventListener('pagehide', handlePageHide);
 		settingsRouter.destroy();
-		transcriptSearchStatusRouter.destroy();
+		transcriptSearchStatus.destroy();
 		scheduledPromptsRouter.destroy();
 		preamblesRouter.destroy();
 		snippetsRouter.destroy();

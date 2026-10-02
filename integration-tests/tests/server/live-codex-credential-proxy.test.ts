@@ -9,6 +9,7 @@ import {
   liveCodexStartRequest,
   startLiveCodexTestEnvironment,
 } from '../../support/live-codex.js';
+import { throwingRejectionOf } from '../../support/promise-assertions.js';
 
 const environmentNames = ['CODEX_TESTING_KEY', 'CLAUDE_TESTING_KEY', 'CODEX_TESTING_BASE_URL', 'CODEX_TESTING_MODEL'];
 const savedEnvironment = Object.fromEntries(environmentNames.map((name) => [name, process.env[name]]));
@@ -32,7 +33,7 @@ describe('live Codex credential proxy', () => {
   test.each(['CODEX_TESTING_KEY', 'CODEX_TESTING_BASE_URL', 'CODEX_TESTING_MODEL'])(
     'requires explicit %s without falling back to another lane', async (name) => {
       delete process.env[name];
-      await expect(startLiveCodexTestEnvironment()).rejects.toThrow(
+      expect(await throwingRejectionOf(startLiveCodexTestEnvironment())).toThrow(
         `${name} is required for live Codex integration tests.`,
       );
     },
@@ -40,7 +41,7 @@ describe('live Codex credential proxy', () => {
 
   test('does not expose a malformed private endpoint in errors', async () => {
     process.env.CODEX_TESTING_BASE_URL = 'private-invalid-endpoint';
-    await expect(startLiveCodexTestEnvironment()).rejects.toThrow(
+    expect(await throwingRejectionOf(startLiveCodexTestEnvironment())).toThrow(
       'CODEX_TESTING_BASE_URL must be an HTTP(S) API base URL.',
     );
   });

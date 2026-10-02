@@ -6,7 +6,7 @@ declare const self: ServiceWorkerGlobalScope;
 
 import { build, files, version } from '$service-worker';
 import {
-	fetchWithTimeout,
+	withNavigationTimeout,
 	isManifestPath,
 	precacheAppShell,
 	shouldCacheNavigationResponse,
@@ -25,10 +25,11 @@ function isPassthrough(url: URL): boolean {
 	return PASSTHROUGH_PREFIXES.some((p) => url.pathname.startsWith(p));
 }
 
-function cacheSuccessfulNavigation(request: Request, response: Response): void {
+async function cacheSuccessfulNavigation(request: Request, response: Response): Promise<void> {
 	if (!shouldCacheNavigationResponse(response)) return;
 	const clone = response.clone();
-	void caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
+	const cache = await caches.open(CACHE_NAME);
+	await cache.put(request, clone);
 }
 
 self.addEventListener('install', (event) => {
@@ -70,26 +71,32 @@ self.addEventListener('fetch', (event) => {
 	// Navigation requests (HTML): network-first so the latest deploy is picked up,
 	// falling back to the cached app shell for offline/flaky-network scenarios.
 	if (event.request.mode === 'navigate') {
+		const network = fetch(event.request);
+		// Registers before the timeout settles so late responses can still populate the cache.
+		event.waitUntil(
+			network
+				.then((response) => cacheSuccessfulNavigation(event.request, response))
+				.catch(() => undefined),
+		);
 		event.respondWith(
-			fetchWithTimeout(event.request, {
-				onResponse: (response) => cacheSuccessfulNavigation(event.request, response),
-			})
-				.catch(() => caches.match('/').then((r) => r ?? Response.error())),
+			withNavigationTimeout(network).catch(() =>
+				caches.match('/').then((r) => r ?? Response.error()),
+			),
 		);
 		return;
 	}
 
 	// Static assets: cache-first (they are fingerprinted by Vite).
-	event.respondWith(
-		caches.open(CACHE_NAME).then((cache) => cache.match(event.request)).then((cached) => {
-			if (cached) return cached;
-			return fetch(event.request).then((response) => {
-				if (response.ok) {
-					const clone = response.clone();
-					caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
-				}
-				return response;
-			});
-		}),
+	const asset = caches.open(CACHE_NAME).then(async (cache) => {
+		const cached = await cache.match(event.request);
+		return { cache, cached, response: cached ?? (await fetch(event.request)) };
+	});
+	event.waitUntil(
+		asset
+			.then(({ cache, cached, response }) => {
+				if (!cached && response.ok) return cache.put(event.request, response.clone());
+			})
+			.catch(() => undefined),
 	);
+	event.respondWith(asset.then(({ response }) => response));
 });

@@ -14,13 +14,13 @@
 		isToolUseMessage,
 	} from '$shared/chat-types';
 	import Markdown from '$lib/components/rich-text/Markdown.svelte';
-	import MessageRenderFallback from '$lib/components/chat/MessageRenderFallback.svelte';
+	import MessageRenderFallback from '$lib/components/chat/transcript/MessageRenderFallback.svelte';
 	import ChatToolEventRenderer from '$lib/components/chat/tools/ChatToolEventRenderer.svelte';
-	import ChatEventCard from '$lib/components/chat/rows/ChatEventCard.svelte';
-	import CliRow from '$lib/components/chat/rows/CliRow.svelte';
-	import CliPresentationHeader from '$lib/components/chat/rows/CliPresentationHeader.svelte';
-	import CollapsibleBody from '$lib/components/chat/rows/CollapsibleBody.svelte';
-	import TranscriptNoticeRow from '$lib/components/chat/rows/TranscriptNoticeRow.svelte';
+	import ChatEventCard from '$lib/components/chat/transcript/rows/ChatEventCard.svelte';
+	import CliRow from '$lib/components/chat/transcript/rows/CliRow.svelte';
+	import CliPresentationHeader from '$lib/components/chat/transcript/rows/CliPresentationHeader.svelte';
+	import CollapsibleBody from '$lib/components/chat/transcript/rows/CollapsibleBody.svelte';
+	import TranscriptNoticeRow from '$lib/components/chat/transcript/rows/TranscriptNoticeRow.svelte';
 	import { cliPresentationSurfaceClass } from '$lib/chat/transcript/cli-presentation-style';
 	import { userMessageBodyDisclosure } from '$lib/chat/transcript/user-message-body-disclosure.js';
 	import { cn } from '$lib/utils/cn';

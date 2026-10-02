@@ -15,6 +15,7 @@ import {
   userMessages,
 } from '../../support/chat-assertions.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 async function waitForFile(filePath: string): Promise<void> {
   const deadline = Date.now() + 5_000;
@@ -978,10 +979,10 @@ describe('queued attachments', () => {
         status: 'duplicate',
         entryId: queued.entryId,
       });
-      await expect(fixture.client.enqueue({
+      expect(await rejectionOf(fixture.client.enqueue({
         ...queueRequest,
         images: [{ ...image, data: 'data:image/png;base64,Yg==' }],
-      })).rejects.toMatchObject({ status: 409, body: { errorCode: 'IDEMPOTENCY_CONFLICT' } });
+      }))).toMatchObject({ status: 409, body: { errorCode: 'IDEMPOTENCY_CONFLICT' } });
       expect(JSON.stringify(await fixture.client.getExecutionControl(chatId))).not.toContain('iVBORw0KGgo');
 
       heldFirst.releaseEcho();
@@ -1015,12 +1016,12 @@ describe('queued attachments', () => {
       });
       await held.received;
 
-      await expect(fixture.client.enqueue({
+      expect(await rejectionOf(fixture.client.enqueue({
         chatId,
         content: 'unsupported attachment',
         images: [image],
         clientRequestId: crypto.randomUUID(),
-      })).rejects.toMatchObject({ status: 422, body: { errorCode: 'UNSUPPORTED_AGENT' } });
+      }))).toMatchObject({ status: 422, body: { errorCode: 'UNSUPPORTED_AGENT' } });
       expect((await fixture.client.getExecutionControl(chatId)).queue.entries).toEqual([]);
 
       held.releaseEcho();
