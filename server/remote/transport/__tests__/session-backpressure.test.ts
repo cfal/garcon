@@ -12,7 +12,7 @@ test('failures after proof verification are not reported as authentication failu
   try {
     controller.dial(worker.listen());
     expect(await reported.promise).toEqual({
-      message: 'Executor connection lost', count: 1, reason: 'Synthetic post-authentication failure',
+      message: 'Executor connection lost', lane: 'primary', count: 1, reason: 'Synthetic post-authentication failure',
     });
   } finally { await controller.dispose(); await worker.dispose(); }
 });
