@@ -12,18 +12,15 @@ import { AgentCallError } from '@garcon/server-agent-interface';
 import { jsonError, jsonErrorFromUnknown } from '../../common/http-error.js';
 import { AtomicJsonWriteError } from '../../common/json-file-store.js';
 
-function apiProviderError(error: unknown): Response {
+function apiProviderStorageError(error: unknown): Response {
   if (error instanceof AtomicJsonWriteError && error.renamed) {
     return jsonErrorFromUnknown(new DomainError('API_PROVIDER_STORAGE_UNAVAILABLE',
       'Provider save durability is unknown. Reload after checking controller configuration.', 503));
   }
-  if (error instanceof DomainError || error instanceof AgentCallError) return jsonErrorFromUnknown(error);
-  const corruptStateResponse = jsonErrorFromCorruptStateFile(error);
-  if (corruptStateResponse) return corruptStateResponse;
-  return jsonErrorFromUnknown(error, 400);
+  return apiProviderError(error);
 }
 
-function apiProviderDiscoveryError(error: unknown): Response {
+function apiProviderError(error: unknown): Response {
   if (error instanceof DomainError || error instanceof AgentCallError) return jsonErrorFromUnknown(error);
   const corruptStateResponse = jsonErrorFromCorruptStateFile(error);
   if (corruptStateResponse) return corruptStateResponse;
@@ -40,7 +37,7 @@ export default function createApiProviderRoutes(
       responseCache.clear();
       return Response.json(result, { status: 201 });
     } catch (error) {
-      return apiProviderError(error);
+      return apiProviderStorageError(error);
     }
   }
 
@@ -54,7 +51,7 @@ export default function createApiProviderRoutes(
       responseCache.clear();
       return Response.json(result);
     } catch (error) {
-      return apiProviderError(error);
+      return apiProviderStorageError(error);
     }
   }
 
@@ -71,7 +68,7 @@ export default function createApiProviderRoutes(
       responseCache.clear();
       return Response.json({ success: true });
     } catch (error) {
-      return apiProviderError(error);
+      return apiProviderStorageError(error);
     }
   }
 
@@ -79,7 +76,7 @@ export default function createApiProviderRoutes(
     try {
       return Response.json(apiProviders.management());
     } catch (error) {
-      return apiProviderError(error);
+      return apiProviderStorageError(error);
     }
   }
 
@@ -94,7 +91,7 @@ export default function createApiProviderRoutes(
       responseCache.clear();
       return Response.json(result);
     } catch (error) {
-      return apiProviderError(error);
+      return apiProviderStorageError(error);
     }
   }
 
@@ -102,7 +99,7 @@ export default function createApiProviderRoutes(
     try {
       return Response.json(await apiProviders.test(body, executorIdFromUrl(url)));
     } catch (error) {
-      return apiProviderError(error);
+      return apiProviderStorageError(error);
     }
   }
 
@@ -110,7 +107,7 @@ export default function createApiProviderRoutes(
     try {
       return Response.json(await apiProviders.discoverModels(body, executorIdFromUrl(url)));
     } catch (error) {
-      return apiProviderDiscoveryError(error);
+      return apiProviderError(error);
     }
   }
 

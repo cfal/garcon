@@ -316,14 +316,17 @@ describe('agent auth login routes', () => {
     expect(body.id).toBe('custom_one');
   });
 
-  it('reports corrupt provider state as an opaque server error', async () => {
-    apiProviders.create.mockRejectedValueOnce(new CorruptStateFileError(
+  it.each([
+    ['/api/v1/api-providers', 'create'],
+    ['/api/v1/api-providers/models', 'discoverModels'],
+  ])('reports corrupt provider state as an opaque server error at %s', async (route, operation) => {
+    apiProviders[operation].mockRejectedValueOnce(new CorruptStateFileError(
       '/server/config/api-providers.json',
       '/server/config/api-providers.json.corrupt-test',
     ));
-    const handler = routes['/api/v1/api-providers'].POST;
+    const handler = routes[route].POST;
 
-    const url = new URL('http://localhost/api/v1/api-providers');
+    const url = new URL(`http://localhost${route}`);
     const response = await handler(new Request(url, { method: 'POST' }), url);
 
     expect(response.status).toBe(500);
