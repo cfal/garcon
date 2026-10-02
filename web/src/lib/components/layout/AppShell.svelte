@@ -177,9 +177,9 @@
 	const newWindowEdges = $derived<WorkspaceSplitAdmissions>(
 		workspace.resolveSplitAdmissions(workspace.currentWindowId),
 	);
-	const hideLeftSidebar = $derived(workspaceFullscreen);
+	const hideChatList = $derived(workspaceFullscreen);
 	const chatListAutohideActive = $derived(
-		!isMobile && !hideLeftSidebar && localSettings.chatListAutohide && hoverCapability.current,
+		!isMobile && !hideChatList && localSettings.chatListAutohide && hoverCapability.current,
 	);
 	const chatListAutohide = new ChatListAutohideState({
 		get active() {
@@ -215,10 +215,7 @@
 					mobileActiveDescriptor.kind === 'git-compare')),
 	);
 	let notificationDesktopInlineStartPx = $derived(
-		!isMobile &&
-			!hideLeftSidebar &&
-			!chatListAutohideActive &&
-			localSettings.chatListDock === 'left'
+		!isMobile && !hideChatList && !chatListAutohideActive && localSettings.chatListDock === 'left'
 			? localSettings.sidebarWidth + 16
 			: 16,
 	);
@@ -549,18 +546,19 @@
 		await quietRefresh();
 	}
 
-	function handleMobileTabChange(tab: MobileWorkspaceTabId) {
-		if (tab === 'chat') {
-			void workspace.focusChat();
-			return;
+	async function handleMobileTabChange(tab: MobileWorkspaceTabId): Promise<void> {
+		try {
+			if (tab === 'chat') {
+				await workspace.focusChat();
+			} else if (tab === 'terminal') {
+				await workspace.focusMostRecentTerminalOrCreate();
+			} else {
+				await workspace.focusMobileSingleton(tab);
+			}
+		} catch (error) {
+			const fallback = tab === 'terminal' ? m.terminal_create_failed() : m.workspace_open_failed();
+			notifications.error(error instanceof Error ? error.message : fallback);
 		}
-		if (tab !== 'terminal') {
-			void workspace.focusMobileSingleton(tab);
-			return;
-		}
-		void workspace.focusMostRecentTerminalOrCreate().catch((error) => {
-			notifications.error(error instanceof Error ? error.message : m.terminal_create_failed());
-		});
 	}
 
 	function toggleMobileSidebar() {
@@ -671,7 +669,10 @@
 	});
 
 	onMount(() => chatDrafts.mountPersistenceLifecycle());
-	onDestroy(() => chatDrafts.destroy());
+	onDestroy(() => {
+		chatNavigation.destroy();
+		chatDrafts.destroy();
+	});
 
 	function handleChatListAutohideChange(enabled: boolean): void {
 		if (enabled) chatListAutohide.reveal();
@@ -753,7 +754,7 @@
 
 {#snippet desktopChatList(dock: ChatListDock)}
 	{@const dividerEdge = chatListDividerEdge(dock)}
-	{@const panelHidden = hideLeftSidebar || chatListAutohide.collapsed}
+	{@const panelHidden = hideChatList || chatListAutohide.collapsed}
 	<div
 		data-workspace-chat-list
 		onfocusin={handleDesktopChatListFocus}
@@ -762,16 +763,16 @@
 		onkeydown={handleDesktopChatListKeydown}
 		class={[
 			'relative z-50 h-full shrink-0',
-			chatListAutohide.active && !hideLeftSidebar ? 'overflow-visible' : 'overflow-hidden',
+			chatListAutohide.active && !hideChatList ? 'overflow-visible' : 'overflow-hidden',
 		]}
 		class:order-first={dock === 'left'}
 		class:order-last={dock === 'right'}
-		class:pointer-events-none={hideLeftSidebar}
-		style:width={hideLeftSidebar || chatListAutohide.active
+		class:pointer-events-none={hideChatList}
+		style:width={hideChatList || chatListAutohide.active
 			? '0px'
 			: `${localSettings.sidebarWidth}px`}
-		aria-hidden={hideLeftSidebar}
-		inert={hideLeftSidebar}
+		aria-hidden={hideChatList}
+		inert={hideChatList}
 	>
 		{#if chatListAutohide.active}
 			<button
@@ -801,15 +802,15 @@
 			]}
 			class:start-0={chatListAutohide.active && dock === 'left'}
 			class:end-0={chatListAutohide.active && dock === 'right'}
-			class:border-s={dividerEdge === 'start' && !hideLeftSidebar}
-			class:border-e={dividerEdge === 'end' && !hideLeftSidebar}
+			class:border-s={dividerEdge === 'start' && !hideChatList}
+			class:border-e={dividerEdge === 'end' && !hideChatList}
 			style:width={chatListAutohide.active ? `${localSettings.sidebarWidth}px` : undefined}
 			tabindex="-1"
 			aria-hidden={panelHidden}
 			inert={panelHidden}
 		>
 			{@render sidebarContent(false, handleChatSelect)}
-			{#if !hideLeftSidebar}
+			{#if !hideChatList}
 				<ResizeHandle
 					edge={dividerEdge}
 					width={localSettings.sidebarWidth}

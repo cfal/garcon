@@ -16,6 +16,7 @@ import type {
 	SidebarChatGrouping,
 	SidebarInactivityDuration,
 } from '$lib/stores/local-settings.svelte';
+import type { WorkspaceCoordinator } from '$lib/workspace/workspace-coordinator.svelte';
 
 export class AppShellLocalSettingsState {
 	chatListAutohide = $state(false);
@@ -29,7 +30,10 @@ export class AppShellLocalSettingsState {
 	set(): void {}
 }
 
-export class AppShellBreakpointWorkspace {
+export class AppShellBreakpointWorkspace implements Pick<
+	WorkspaceCoordinator,
+	'focusChat' | 'focusMobileSingleton' | 'focusMostRecentTerminalOrCreate'
+> {
 	readonly layout = new WorkspaceLayoutStore(canonicalWorkspaceSnapshot());
 	isMobile = $state(false);
 	// Mirrors the app-shell drawer state reactively so tests can flip it.
@@ -98,9 +102,10 @@ export class AppShellBreakpointWorkspace {
 	clearDeletedChat(): Promise<void> {
 		return Promise.resolve();
 	}
-	focusMobileSingleton(kind: PortableSingletonKind): void {
+	async focusMobileSingleton(kind: PortableSingletonKind): Promise<void> {
 		this.focusedMobileSingletons.push(kind);
 	}
+	async focusChat(): Promise<void> {}
 	openSingletonInNewWindow(kind: PortableSingletonKind): Promise<string> {
 		this.openedSingletons.push(kind);
 		return Promise.resolve(`singleton:${kind}`);

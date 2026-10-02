@@ -37,6 +37,7 @@ export class AppShellChatNavigationController {
 
 	readonly #options: AppShellChatNavigationControllerOptions;
 	#generation = 0;
+	#disposed = false;
 	readonly #routeEchoes = new Set<RouteEcho>();
 	readonly #routeNavigationQueue = new SerialQueue();
 
@@ -45,6 +46,7 @@ export class AppShellChatNavigationController {
 	}
 
 	handleRouteChat(chatId: string | null): void {
+		if (this.#disposed) return;
 		if (chatId === null) {
 			this.#cancelPendingNavigation();
 			this.#options.setSelectedChatId(null);
@@ -55,6 +57,7 @@ export class AppShellChatNavigationController {
 	}
 
 	async showChatInCurrentWindow(chatId: string, options: { navigate: boolean }): Promise<void> {
+		if (this.#disposed) return;
 		const generation = this.#begin(chatId);
 		try {
 			await this.#options.showChatInCurrentWindow(chatId);
@@ -75,6 +78,7 @@ export class AppShellChatNavigationController {
 	}
 
 	async synchronizeFocusedChat(chatId: string): Promise<void> {
+		if (this.#disposed) return;
 		const generation = this.#begin(chatId);
 		try {
 			this.#options.setSelectedChatId(chatId);
@@ -88,12 +92,13 @@ export class AppShellChatNavigationController {
 	}
 
 	async reconcileDeletedChat(input: DeletedChatReconciliation): Promise<void> {
+		if (this.#disposed) return;
 		const deletionGeneration = this.#beginDeletion(input.chatId, input.wasSelected);
 		input.removeLocal();
 		try {
 			await input.clearPresentation();
 		} catch (error) {
-			this.#options.reportDeleteError(error);
+			if (!this.#disposed) this.#options.reportDeleteError(error);
 		}
 
 		if (!input.wasSelected || !this.#canApplyDeletionFallback(deletionGeneration)) return;
@@ -106,8 +111,14 @@ export class AppShellChatNavigationController {
 		try {
 			await this.#options.navigateToBareRoute();
 		} catch (error) {
-			this.#options.reportOpenError(error);
+			if (this.#isCurrent(deletionGeneration)) this.#options.reportOpenError(error);
 		}
+	}
+
+	destroy(): void {
+		this.#disposed = true;
+		this.#cancelPendingNavigation();
+		this.#routeEchoes.clear();
 	}
 
 	#begin(chatId: string): number {
@@ -135,7 +146,7 @@ export class AppShellChatNavigationController {
 	}
 
 	#isCurrent(generation: number): boolean {
-		return generation === this.#generation;
+		return !this.#disposed && generation === this.#generation;
 	}
 
 	#complete(generation: number): void {
