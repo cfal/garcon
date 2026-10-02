@@ -1,7 +1,5 @@
-import type {
-	FilePlacementResult,
-	FileSessionRegistry,
-} from '$lib/files/sessions/file-session-registry.svelte.js';
+import type { FilePlacementResult } from '$lib/files/sessions/file-session-registry.svelte.js';
+import type { WorkspaceFiles } from './workspace-resource-ports.js';
 import { SerialQueue } from '$lib/utils/serial-queue.js';
 import type { WorkspaceInteractionGate } from './workspace-interaction-gate.svelte.js';
 import {
@@ -20,7 +18,7 @@ interface SurfaceReservations {
 
 interface FileDialogCoordinatorDeps {
 	layout: WorkspaceLayoutReader;
-	files: FileSessionRegistry;
+	files: Pick<WorkspaceFiles, 'destroy' | 'prepareDestructiveViews'>;
 	workspaceInteractionGate: WorkspaceInteractionGate;
 	reservations: SurfaceReservations;
 	commit: WorkspaceCommit;

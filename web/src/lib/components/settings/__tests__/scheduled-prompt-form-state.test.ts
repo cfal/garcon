@@ -8,12 +8,9 @@ import {
 	type ScheduledPrompt,
 } from '$shared/scheduled-prompts';
 import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
-import type { ModelCatalogStore, ModelOption } from '$lib/agents/model-catalog-store.svelte';
-import {
-	findModelForSelection,
-	modelValueForSelection,
-	resolveModelSelection,
-} from '../../../../test/model-catalog';
+import { ModelCatalogStore, type ModelOption } from '$lib/agents/model-catalog-store.svelte';
+import { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
+import { findModelForSelection } from '../../../../test/model-catalog';
 
 interface CatalogOverrides {
 	getModels?(agentId: string): ModelOption[];
@@ -40,13 +37,13 @@ function createForm(
 		model: string,
 		endpointId?: string | null,
 	): ModelOption | null => findModelForSelection(getModels(agentId), model, endpointId);
-	const modelCatalog = {
-		forExecutor() { return this; },
-		get isValidated() { return catalogOverrides.isValidated ?? true; },
-		get error() { return catalogOverrides.error ?? null; },
-		isRefreshing: false,
+	const modelCatalog = new ModelCatalogStore();
+	vi.spyOn(modelCatalog, 'isValidated', 'get').mockImplementation(() => catalogOverrides.isValidated ?? true);
+	vi.spyOn(modelCatalog, 'error', 'get').mockImplementation(() => catalogOverrides.error ?? null);
+	Object.assign(modelCatalog, {
+		forExecutor: () => modelCatalog,
 		refreshIfStale: catalogOverrides.refreshIfStale ?? vi.fn(async () => {}),
-		getSelectableAgents: () => selectableAgentIds(),
+		getSelectableAgents: () => [...selectableAgentIds()],
 		getModels,
 		getDefaultModel: () => 'gpt-5',
 		getPermissionModes: catalogOverrides.getPermissionModes ?? (() => ['default', 'acceptEdits']),
@@ -58,14 +55,8 @@ function createForm(
 			values: {},
 		}),
 		getModelForSelection,
-		selectionValueFor(agentId: string, model: string, endpointId?: string | null) {
-			return modelValueForSelection(getModels(agentId), model, endpointId);
-		},
-		selectionFor(agentId: string, model: string, endpointId?: string | null) {
-			return resolveModelSelection(getModels(agentId), model, endpointId);
-		},
-	};
-	const form = new ScheduledPromptFormState(modelCatalog as never, {} as never, sessions as never, {
+	} satisfies Partial<ModelCatalogStore>);
+	const form = new ScheduledPromptFormState(modelCatalog, new RemoteSettingsStore(), sessions, {
 		get selectableAgentIds() {
 			return selectableAgentIds();
 		},

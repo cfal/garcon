@@ -1,6 +1,6 @@
 import type { AppShellStore } from '$lib/stores/app-shell.svelte.js';
 import { SvelteSet } from 'svelte/reactivity';
-import type { TerminalRegistry } from '$lib/terminal/sessions/terminal-registry.svelte.js';
+import type { WorkspaceFiles, WorkspaceSingletons, WorkspaceTerminals } from './workspace-resource-ports.js';
 import type { WorkspaceContextStore } from './workspace-context.svelte.js';
 import { resolveProjectPath, type ProjectResolver } from './workspace-project-path-resolution.js';
 import {
@@ -32,10 +32,8 @@ import type { TransientLayerRegistry } from './transient-layers.svelte.js';
 import type {
 	FilePlacementPort,
 	FilePlacementResult,
-	FileSessionRegistry,
 } from '$lib/files/sessions/file-session-registry.svelte.js';
 import type { GitMutationCoordinator } from '$lib/git/surface/git-mutations.svelte.js';
-import type { SingletonSurfaceRegistry } from './singleton-surfaces.svelte.js';
 import * as m from '$lib/paraglide/messages.js';
 import type { SurfaceFrameRegistry } from './surface-frame-registry.js';
 import { FileDialogCoordinator } from './file-dialog-coordinator.js';
@@ -61,17 +59,17 @@ import {
 	WorkspaceSplitBlockedError,
 } from './workspace-split-blocked-error.js';
 
-interface WorkspaceCoordinatorDeps {
+export interface WorkspaceCoordinatorDeps {
 	arbiter: WorkspaceTransitionArbiter;
-	terminals: TerminalRegistry;
-	workspaceContext: WorkspaceContextStore;
+	terminals: WorkspaceTerminals;
+	workspaceContext: Pick<WorkspaceContextStore, 'currentTarget' | 'current'>;
 	projectResolution: ProjectResolver;
-	appShell: AppShellStore;
+	appShell: Pick<AppShellStore, 'isMobile' | 'requestComposerFocus'>;
 	workspaceInteractionGate: WorkspaceInteractionGate;
 	transientLayers: TransientLayerRegistry;
-	files: FileSessionRegistry;
-	singletons: SingletonSurfaceRegistry;
-	gitMutations?: GitMutationCoordinator;
+	files: WorkspaceFiles;
+	singletons: WorkspaceSingletons;
+	gitMutations?: Pick<GitMutationCoordinator, 'pendingCount'>;
 	surfaceFrames?: SurfaceFrameRegistry;
 	resolveSplitAdmission: WorkspaceSplitAdmissionResolver;
 	resolvePartitionRatioBounds: WorkspacePartitionRatioBoundsResolver;
