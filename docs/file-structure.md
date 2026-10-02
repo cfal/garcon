@@ -59,3 +59,23 @@ runtime, remote, controller -> common  Backend primitives
 Runtime and transport/client/server adapters must not import controller modules. Remote proxies must not import concrete runtime implementations for incidental helpers. Common must not import runtime, remoting, or controller policy. Provider factory composition is shared at an explicit composition boundary, not hidden inside a controller dependency. `scripts/__tests__/server-structure.test.js` enforces these production import directions.
 
 The controller owns chats, ledgers, queues, schedules, provider configuration/credential policy, executor configuration, HTTP authentication, browser delivery, and reverse CLI command admission. The runtime owns integrations, filesystem/Git operations, PTYs, and machine-local discovery.
+
+## Domain Navigation
+
+- `controller/chats/carryover/` owns carried-context planning, prepared context,
+  segment readers/codecs, and artifact collection. Conversion and rollback stay
+  in `controller/migrations/carryover/`; the current transcript authority stays
+  in `controller/ledger/`.
+- `controller/chats/shares/` owns published snapshot storage, paging, and
+  presentation. HTTP adaptation remains in `controller/routes/shares.ts`.
+- `controller/chats/token-fitting/` owns bounded token estimation and fitting
+  shared by carryover and handoff artifacts. Transcript rendering and export
+  retain their existing concern directories and Worker boundaries.
+- `runtime/git/review-patch.ts` constructs compact patch bodies;
+  `runtime/gh/pull-request-diff.ts` projects GitHub pull-request diffs.
+- Git operation tests live in named suites under `runtime/git/__tests__/`;
+  `git-service.test.js` checks service assembly. Controller Git generation and
+  HTTP error tests live in `controller/git/__tests__/`.
+
+Use direct module imports. Keep tests and private fixtures beside their owning
+concern rather than introducing barrel modules or compatibility re-exports.
