@@ -104,6 +104,12 @@ export interface ForkedChatResult {
   rollback(): Promise<void>;
 }
 
+export class ForkCreationCleanupError extends AggregateError {
+  constructor(errors: readonly unknown[], message: string | undefined, readonly nativeCleanup: NativeForkCleanup) {
+    super(errors, message);
+  }
+}
+
 export interface ForkTargetRollbackInput {
   targetChatId: string;
   settings: ForkChatSettings;
@@ -346,6 +352,7 @@ export async function createForkedChat({
   }
 
   let rolledBack = false;
+  let pendingNativeCleanup = nativeCleanup;
   const rollback = async () => {
     if (rolledBack) return;
     const cleanupErrors: unknown[] = [];
@@ -358,9 +365,10 @@ export async function createForkedChat({
     } catch (error) {
       cleanupErrors.push(error);
     }
-    if (nativeCleanup) {
+    if (pendingNativeCleanup) {
       try {
-        await discardForkedAgentSession(nativeCleanup);
+        await discardForkedAgentSession(pendingNativeCleanup);
+        pendingNativeCleanup = null;
       } catch (error) {
         cleanupErrors.push(error);
       }
@@ -401,6 +409,7 @@ export async function createForkedChat({
       error,
       cleanupErrors,
       `Failed to create and roll back fork ${targetChatId}`,
+      pendingNativeCleanup,
     );
   }
 
@@ -458,6 +467,7 @@ function throwForkFailureAfterCleanup(
   error: unknown,
   cleanupErrors: readonly unknown[],
   aggregateMessage?: string,
+  nativeCleanup: NativeForkCleanup | null = null,
 ): never {
   let primary = error;
   try {
@@ -466,6 +476,9 @@ function throwForkFailureAfterCleanup(
     primary = cancellation;
   }
   if (cleanupErrors.length > 0) {
+    if (nativeCleanup) {
+      throw new ForkCreationCleanupError([primary, ...cleanupErrors], aggregateMessage, nativeCleanup);
+    }
     throw new AggregateError([primary, ...cleanupErrors], aggregateMessage);
   }
   throw primary;

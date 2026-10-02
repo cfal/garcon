@@ -5,7 +5,7 @@ import type {
   ForkRunCommandResponse,
 } from '../../../common/chat-command-contracts.js';
 import type { ChatRegistryEntry } from '../chats/registry-contracts.js';
-import { rollbackForkTarget, type ForkedChatResult } from '../chats/fork-chat.js';
+import { ForkCreationCleanupError, rollbackForkTarget, type ForkedChatResult } from '../chats/fork-chat.js';
 import { commandLedgerKey, PRE_SCHEDULE_FAILURE_ERROR_CODE } from './command-ledger.js';
 import {
   CommandSupport,
@@ -171,6 +171,7 @@ export class ForkCommands {
       }
 
       let forkResult: ForkedChatResult | null = null;
+      let nativeCleanup = preparedFork?.nativeCleanup ?? null;
       const result = await this.support.scheduleAcceptedHttpRun(ledger, input, {
         clientRequestId,
         clientMessageId,
@@ -185,7 +186,17 @@ export class ForkCommands {
               sourceChatId: forkContext.sourceChatId,
             },
           });
-          forkResult = await this.forkChatFromContext(forkContext, signal);
+          try {
+            forkResult = await this.forkChatFromContext(forkContext, signal);
+          } catch (error) {
+            if (error instanceof ForkCreationCleanupError) {
+              nativeCleanup = error.nativeCleanup;
+              await this.deps.ledger.update(ledger.record.key, {
+                forkPreparation: { phase: 'creating', sourceChatId: forkContext.sourceChatId, nativeCleanup },
+              });
+            }
+            throw error;
+          }
           await this.deps.ledger.update(ledger.record.key, {
             forkPreparation: {
               phase: 'created',
@@ -198,9 +209,10 @@ export class ForkCommands {
           if (forkResult) {
             await forkResult.rollback();
           } else {
-            await this.rollbackPreparedFork(forkContext, preparedFork?.nativeCleanup ?? null);
+            await this.rollbackPreparedFork(forkContext, nativeCleanup);
           }
           forkResult = null;
+          nativeCleanup = null;
         },
       });
       return { ...result, chat: await this.support.projectCommandChat(input.chatId) };
