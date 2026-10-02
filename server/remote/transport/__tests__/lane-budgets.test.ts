@@ -51,3 +51,19 @@ test('full ordinary queues cannot retire primary through bulk controls', async (
   expect(budget.queuedBytes).toBe(0);
   expect(budget.queuedMessages).toBe(0);
 });
+
+test('terminal offers refuse aggregate pressure without retiring their primary session', () => {
+  const budget = new MessageQueueBudget({
+    bytes: 1000, messages: 8, bulkBytes: 800, bulkMessages: 4, controlBytes: 200, controlMessages: 2,
+  });
+  let failures = 0;
+  const primary = new MessageSession({ deliver() {}, failed() { failures++; }, budget, lane: 'primary' });
+  primary.attach({ send() {}, close() {}, canSend: () => true });
+  const release = budget.reserve('bulk', 800);
+  expect(primary.trySend('terminal output')).toBe(false);
+  expect(failures).toBe(0);
+  expect(primary.connected).toBe(true);
+  release();
+  expect(primary.trySend('terminal output')).toBe(true);
+  primary.close();
+});

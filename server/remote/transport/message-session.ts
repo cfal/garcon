@@ -85,7 +85,7 @@ export class MessageSession {
   // Terminal output yields capacity to RPC and producer events before admission.
   trySend(body: string): boolean {
     const bytes = Buffer.byteLength(body);
-    if (!this.connected || bytes > this.#limits.frame
+    if (!this.canAdmit(body)
       || this.#bytes + bytes > Math.min(this.#limits.bytes / 2, 2 * 1024 * 1024)
       || this.#pending.length >= Math.min(this.#limits.count / 2, 256)
       || this.#socket?.canSend?.(bytes) === false) return false;
