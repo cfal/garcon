@@ -4,8 +4,11 @@ import type { Locator, Page } from 'playwright';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 
 async function openSidebar(page: Page): Promise<void> {
+  const mobile = page.viewportSize()!.width <= 768;
+  // Viewport resizing precedes the app's responsive presentation handoff.
+  await browserExpect(page.locator('.mobile-shell')).toHaveCount(mobile ? 1 : 0);
   const controls = page.locator('[data-slot="sidebar-controls-row"]');
-  if (page.viewportSize()!.width <= 768 && !(await controls.isVisible())) {
+  if (mobile && !(await controls.isVisible())) {
     await page.getByRole('button', { name: 'Menu', exact: true }).click();
   }
   await browserExpect(controls).toBeVisible();
@@ -110,6 +113,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials'] as cons
 
       phase('switching chats without remounting the composer');
       await page.setViewportSize({ width: 1440, height: 900 });
+      await openSidebar(page);
       const composer = page.locator('[data-composer] textarea');
       await browserExpect(composer).toBeVisible();
       await composer.evaluate(element => element.setAttribute('data-layout-test-editor', 'true'));

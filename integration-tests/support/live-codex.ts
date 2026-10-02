@@ -129,23 +129,28 @@ function proxyEnvironment(root: string): Record<string, string> {
   };
 }
 
-async function waitForProxyBaseUrl(
-  child: CodexProxyProcess,
+export async function waitForProxyBaseUrl(
+  child: Pick<CodexProxyProcess, 'exitCode'>,
   serverInfoPath: string,
 ): Promise<string> {
   const deadline = Date.now() + PROXY_START_TIMEOUT_MS;
   while (Date.now() < deadline) {
     try {
-      const parsed = JSON.parse(await readFile(serverInfoPath, 'utf8')) as { port?: unknown };
-      if (
-        typeof parsed.port === 'number'
-        && Number.isInteger(parsed.port)
-        && parsed.port > 0
-        && parsed.port <= 65_535
-      ) {
-        return `http://127.0.0.1:${parsed.port}`;
+      const record = await readFile(serverInfoPath, 'utf8');
+      // Codex creates the file before writing its newline-terminated record.
+      // https://github.com/openai/codex/blob/ff6aec96948b70d94983af2641a6b67c94faeff5/codex-rs/responses-api-proxy/src/lib.rs#L145-L160
+      if (record.endsWith('\n')) {
+        const parsed = JSON.parse(record) as { port?: unknown } | null;
+        if (
+          typeof parsed?.port === 'number'
+          && Number.isInteger(parsed.port)
+          && parsed.port > 0
+          && parsed.port <= 65_535
+        ) {
+          return `http://127.0.0.1:${parsed.port}`;
+        }
+        throw new Error('Live Codex credential proxy wrote invalid startup metadata.');
       }
-      throw new Error('Live Codex credential proxy wrote invalid startup metadata.');
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
