@@ -8,6 +8,7 @@ import {
 import type { AddRowCliCommand } from './args.js';
 import { CliError } from './errors.js';
 import type { CliOutput } from './output.js';
+import { terminalLine } from './terminal-output.js';
 
 export interface ChatRowClient {
   getChatRowTarget(chatId: string, signal?: AbortSignal): Promise<ChatRowTargetResponse>;
@@ -44,7 +45,7 @@ export async function runAddRow(
     `format: ${response.format}`,
     `disclosure: ${response.disclosure}`,
     `status: ${response.status}`,
-  ].join('\n'));
+  ].map(terminalLine).join('\n'));
 }
 
 export async function addRow(

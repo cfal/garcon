@@ -528,7 +528,7 @@ export async function main(
       ? error
       : new CliError('submission', error instanceof Error ? error.message : String(error), 3);
     const diagnostic = `${cliError.phase}: ${cliError.message}`;
-    output.diagnostic(command?.kind === 'ticket' || command?.kind === 'executor' || argv.includes('ticket') || argv.includes('executor') ? ticketLineOutput(diagnostic) : diagnostic);
+    output.diagnostic(ticketLineOutput(diagnostic));
     return cliError.exitCode;
   }
 }

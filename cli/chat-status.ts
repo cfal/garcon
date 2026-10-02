@@ -5,6 +5,7 @@ import { CliError } from './errors.js';
 import { GarconHttpError } from './garcon-client.js';
 import type { CliOutput } from './output.js';
 import { shellQuote } from './shell-quote.js';
+import { terminalBody, terminalLine } from './terminal-output.js';
 import {
   formatPermissionRequestedTool,
   formatTranscriptMessage,
@@ -51,7 +52,7 @@ export function formatChatStatus(
     `chat id: ${snapshot.chat.id}`,
     `status: ${snapshot.processingPhase ?? 'idle'}`,
     `observed at: ${snapshot.observedAt}`,
-    `title: ${snapshot.chat.title}`,
+    `title: ${terminalLine(snapshot.chat.title)}`,
     `agent: ${snapshot.chat.agentId}`,
     `ownership epoch: ${snapshot.chat.agentOwnershipEpoch}`,
     `carryover revision: ${snapshot.chat.carryOverRevision}`,
@@ -67,7 +68,7 @@ export function formatChatStatus(
     lines.push(`protocol: ${snapshot.chat.modelProtocol}`);
   }
   lines.push(
-    `project path: ${snapshot.chat.projectPath}`,
+    `project path: ${terminalLine(snapshot.chat.projectPath)}`,
     `tags: ${snapshot.chat.tags.length > 0 ? snapshot.chat.tags.join(', ') : 'none'}`,
     `queue: ${snapshot.control.queue.entries.length}`,
   );
@@ -91,7 +92,7 @@ export function formatChatStatus(
         `requested tool: ${message.requestedTool.type}`,
         `requested tool details:\n${formatPermissionRequestedTool(message.requestedTool)}`,
       );
-      if (message.reason) lines.push(`permission reason: ${message.reason}`);
+      if (message.reason) lines.push(`permission reason: ${terminalLine(message.reason)}`);
       if (structured) {
         lines.push(
           'action: use permission-answer with the exact question and option IDs above',
@@ -141,7 +142,7 @@ export function formatChatStatus(
       lines.push('', formatTranscriptMessage(entry));
     }
   }
-  return lines.join('\n');
+  return terminalBody(lines.join('\n'));
 }
 
 function permissionAnswerCommand(

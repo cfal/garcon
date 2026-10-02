@@ -15,6 +15,7 @@ import { CliError } from './errors.js';
 import { GarconHttpError } from './garcon-client.js';
 import type { CliOutput } from './output.js';
 import { formatTranscriptMessage } from './transcript-message-format.js';
+import { terminalBody } from './terminal-output.js';
 
 export interface CliChatReadResult {
   readonly chatId: string;
@@ -136,7 +137,7 @@ export function formatChatReadResult(result: CliChatReadResult, json: boolean): 
     `anchor ordinal: ${result.anchorOrdinal}`,
   ];
   for (const entry of result.messages) lines.push('', formatTranscriptMessage(entry));
-  return lines.join('\n');
+  return terminalBody(lines.join('\n'));
 }
 
 export async function runChatRead(

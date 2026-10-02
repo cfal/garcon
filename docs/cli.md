@@ -301,6 +301,11 @@ Every mutation prints its generated request ID, expected store ID, and resolved 
 
 ## Start And Resume
 
+Human metadata, transcript displays, and diagnostics render terminal control
+characters visibly. JSON and exported documents remain lossless. Final assistant
+responses escape controls when stdout is a terminal; piped final responses retain
+the original text.
+
 Start a visible chat and wait for its accepted turn:
 
 ```bash

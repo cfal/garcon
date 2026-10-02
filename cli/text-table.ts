@@ -1,5 +1,7 @@
+import { terminalLine } from './terminal-output.js';
+
 function cleanCell(value: string): string {
-  return value.replace(/\s+/g, ' ').trim() || '-';
+  return terminalLine(value.replace(/\s+/g, ' ').trim()) || '-';
 }
 
 export function formatTextTable(

@@ -24,6 +24,7 @@ import { GarconHttpError } from './garcon-client.js';
 import type { CliOutput } from './output.js';
 import { shellQuote } from './shell-quote.js';
 import { connectionCommandPrefix, connectionOptionEntries } from './connection-options.js';
+import { terminalLine } from './terminal-output.js';
 
 export interface CliChatSearchHit extends ChatSearchResult {
   readonly chat: CliChatSummary | null;
@@ -131,7 +132,7 @@ export function formatChatSearchResult(
       lines.push(`  read: ${formatReadCommand(connection, hit, anchor)}`);
     }
   }
-  return lines.join('\n');
+  return lines.map(terminalLine).join('\n');
 }
 
 export function searchDiagnostics(result: CliChatSearchResult): string[] {

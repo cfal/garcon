@@ -1,5 +1,6 @@
 import type { TranscriptMessage } from '@garcon/common/chat-view';
 import { CliRowMessage, type ToolUseChatMessage } from '@garcon/common/chat-types';
+import { terminalBody, terminalLine } from './terminal-output.js';
 
 const MESSAGE_TEXT_LIMIT = 4_000;
 const DATA_URL_OMISSION = '[data URL omitted from text output]';
@@ -34,13 +35,13 @@ export function formatTranscriptMessage(entry: TranscriptMessage): string {
   } else if (entry.message instanceof CliRowMessage) {
     cliLabel = ` (CLI ${entry.message.presentation.style})`;
   }
-  return `[${entry.ordinal}] ${timestamp} ${type}${cliLabel}${title}\n`
-    + truncateTranscriptText(content);
+  return terminalLine(`[${entry.ordinal}] ${timestamp} ${type}${cliLabel}${title}`) + '\n'
+    + terminalBody(truncateTranscriptText(content));
 }
 
 export function formatPermissionRequestedTool(requestedTool: ToolUseChatMessage): string {
   const { type: _type, timestamp: _timestamp, ...details } = requestedTool;
-  return truncateTranscriptText(JSON.stringify(details, redactDataUrls, 2) ?? '{}');
+  return terminalBody(truncateTranscriptText(JSON.stringify(details, redactDataUrls, 2) ?? '{}'));
 }
 
 function redactDataUrls(_key: string, value: unknown): unknown {
