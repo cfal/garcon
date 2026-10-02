@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import type { AgentFinalResponse } from '@garcon/server-agent-interface';
 import type { ChatStopOutcome } from '../../../common/chat-types.js';
 import type { SteerDeliveryOutcome } from '../../../common/chat-command-contracts.ts';
+import type { NativeForkCleanup } from '../agents/session-types.js';
 
 export type CommandLedgerStatus =
   | 'accepted'
@@ -14,6 +15,7 @@ export type CommandLedgerStatus =
 export interface ForkPreparationState {
   phase: 'creating' | 'created';
   sourceChatId: string;
+  nativeCleanup?: NativeForkCleanup | null;
 }
 
 export type CommandTurnResult =

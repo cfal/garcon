@@ -1,5 +1,6 @@
 import type { ChatMessage } from '@garcon/common/chat-types';
 import type { JsonObject } from '@garcon/common/json';
+import type { AgentInstanceCallOptions } from './resources.js';
 import type {
   AgentChatReference,
   AgentNativeSessionRef,
@@ -19,6 +20,7 @@ export interface AgentHistoryImportRequest {
 export interface AgentHistoryImport {
   load(
     request: AgentHistoryImportRequest,
+    options?: AgentInstanceCallOptions,
   ): AsyncIterable<readonly AgentImportedTranscriptRow[]>;
 }
 

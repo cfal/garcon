@@ -587,6 +587,7 @@ function makeService(overrides = {}) {
     chatId: TARGET_CHAT_ID,
     agentId: 'claude',
     agentSessionId: 'agent-2',
+    nativeCleanup: null,
     rollback: mock(() => Promise.resolve(undefined)),
   }));
   const carryOver = {
@@ -3756,6 +3757,35 @@ describe('ChatCommandService', () => {
         sourceChatId: SOURCE_CHAT_ID,
       },
     });
+  });
+
+  it('uses retained native cleanup rather than the current chat binding on fork-run retry', async () => {
+    const cleanup = { scope: { executorId: 'local', instanceId: 'original', integrationId: 'claude' },
+      session: { agentSessionId: 'original-native', nativeSession: null, nativeSeedReceipt: null } };
+    const createForkedChat = mock(async ({ registry }) => {
+      registry.addChat({ ...registry.getChat(SOURCE_CHAT_ID), id: TARGET_CHAT_ID, agentSessionId: 'rebound-native' });
+      return { sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID, agentId: 'claude',
+        agentSessionId: 'original-native', nativeCleanup: cleanup, rollback: async () => { throw new Error('rollback failed'); } };
+    });
+    const { service, queue, agents, ledger } = makeService({ createForkedChat });
+    const update = ledger.update.bind(ledger);
+    let failSettlement = true;
+    ledger.update = mock((key, patch) => {
+      if (failSettlement && patch.status === 'failed') {
+        failSettlement = false;
+        return Promise.reject(new Error('settlement unavailable'));
+      }
+      return update(key, patch);
+    });
+    queue.admitUserInput.mockRejectedValue(new Error('append failed'));
+    const input = { sourceChatId: SOURCE_CHAT_ID, chatId: TARGET_CHAT_ID, command: 'continue',
+      clientRequestId: 'fork-captured-cleanup', clientMessageId: 'fork-captured-cleanup-message' };
+    await expect(service.submitForkRun(input)).rejects.toThrow('settlement unavailable');
+    expect((await readLedgerRecord(ledger, 'fork-run', input.clientRequestId, TARGET_CHAT_ID)).forkPreparation.nativeCleanup).toEqual(cleanup);
+    await expect(service.submitForkRun(input)).rejects.toThrow('append failed');
+    expect(createForkedChat).toHaveBeenCalledOnce();
+    expect(agents.discardForkedAgentSession).toHaveBeenCalledWith(cleanup);
+    expect((await readLedgerRecord(ledger, 'fork-run', input.clientRequestId, TARGET_CHAT_ID)).forkPreparation).toBeUndefined();
   });
 
   it('recovers a duplicate accepted command instead of returning false success', async () => {

@@ -14,6 +14,17 @@ export interface AgentResourceScope {
   readonly integrationId: string;
 }
 
+export interface AgentInstanceCallOptions {
+  readonly expectedScope: AgentResourceScope;
+}
+
+export function assertAgentResourceScope(actual: AgentResourceScope, expected: AgentResourceScope): void {
+  if (actual.executorId !== expected.executorId || actual.instanceId !== expected.instanceId
+    || actual.integrationId !== expected.integrationId) {
+    throw new AgentCallError('not-dispatched', 'The agent resource belongs to a different executor instance', 'STALE_RESOURCE');
+  }
+}
+
 export interface AgentResourceRef<K extends string> extends AgentResourceScope {
   readonly kind: K;
   readonly id: string;
@@ -45,3 +56,4 @@ export function isAgentResourceRef<K extends string>(
       && ref.instanceId === scope.instanceId
       && ref.integrationId === scope.integrationId));
 }
+import { AgentCallError } from '../errors.js';

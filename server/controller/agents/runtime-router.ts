@@ -3,6 +3,7 @@ import type { CreateCarriedContextInput } from '../chats/carryover/context.js';
 import {
   AgentIntegrationError,
   AgentCallError,
+  assertAgentResourceScope,
   type AgentProjectPathUpdatePreparation,
   type AgentSteerResult,
   type AgentSteerTarget,
@@ -38,7 +39,7 @@ import type {
   ForkedAgentSessionOutcome,
   PrepareProjectPathUpdateRequest,
   RunAgentTurnOptions,
-  StartedAgentSession,
+  NativeForkCleanup,
 } from './session-types.js';
 import { assertExecutionAdmissionOpen } from './session-types.js';
 import { requireAgentChatEntry, toAgentEndpointSelection } from './execution-planning.js';
@@ -600,6 +601,7 @@ export class AgentRuntimeRouter {
       const source = requireAgentChatEntry(args.sourceChatId, args.sourceSession);
       const integration = this.#directory.require(source.agentId, source.executorId);
       if (!integration.forking) return null;
+      const scope = { ...integration.producers.scope };
       const selection = this.#endpointResolver.resolveSelection({
         executorId: source.executorId,
         agentId: source.agentId,
@@ -608,6 +610,7 @@ export class AgentRuntimeRouter {
         modelEndpointId: source.modelEndpointId,
       });
       await this.#validateEndpoint(integration, selection, args.signal);
+      assertAgentResourceScope(integration.producers.scope, scope);
       const operation = operationIdentity(source, {}, 'fork-run');
       const sourceReference = toAgentChatReference(
         integration,
@@ -636,10 +639,11 @@ export class AgentRuntimeRouter {
         // when the anchor row carries no provider identity: an empty object
         // reaches the facet's refusal path instead of forking the tip.
         providerMeta: args.messageOrdinal === undefined ? null : args.providerMeta ?? {},
-      });
+      }, { expectedScope: scope });
       if (result.kind === 'unmaterialized') return result;
       return {
         kind: 'materialized',
+        cleanup: { scope, session: result.session },
         session: {
           agentSessionId: result.session.agentSessionId,
           nativeSession: result.session.nativeSession,
@@ -681,10 +685,12 @@ export class AgentRuntimeRouter {
     }
   }
 
-  async discardForkedAgentSession(agentId: string, session: StartedAgentSession, executorId?: string | null): Promise<void> {
-    const forking = this.#directory.require(agentId, executorId).forking;
+  async discardForkedAgentSession(cleanup: NativeForkCleanup): Promise<void> {
+    const integration = this.#directory.require(cleanup.scope.integrationId, cleanup.scope.executorId);
+    assertAgentResourceScope(integration.producers.scope, cleanup.scope);
+    const forking = integration.forking;
     if (!forking) return;
-    await forking.discard(session, new AbortController().signal);
+    await forking.discard(cleanup.session, new AbortController().signal, { expectedScope: cleanup.scope });
   }
 
   async runSingleQuery(

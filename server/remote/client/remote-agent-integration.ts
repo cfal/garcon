@@ -1,6 +1,7 @@
 import { parseChatMessage, isToolUseMessage } from '@garcon/common/chat-types';
 import {
   AgentCallError,
+  assertAgentResourceScope,
   isAgentResourceRef,
   type AgentHistoryImport,
   type AgentIntegration,
@@ -233,8 +234,9 @@ export class RemoteAgentIntegration implements AgentIntegration {
     this.commands = cap.commands ? { discover: (projectPath, signal) => call('commands.discover', { projectPath }, { signal }) } : null;
     this.compaction = cap.compaction ? { compact: (request, options) => launch('compaction.compact', request, options) } : null;
     this.forking = cap.forking ? {
-      fork: async ({ signal, ...request }) => {
-        const { backing: { rpc }, timeoutMs } = await sessions.acquire('primary', { signal });
+      fork: async ({ signal, ...request }, options) => {
+        if (options) assertAgentResourceScope(this.producers.scope, options.expectedScope);
+        const { backing: { rpc }, timeoutMs } = await sessions.acquire('primary', { signal, instanceId: options?.expectedScope.instanceId });
         return rpc.call(this.descriptor.id, 'forking.fork', request, {
           signal,
           timeoutMs,
@@ -243,7 +245,10 @@ export class RemoteAgentIntegration implements AgentIntegration {
           },
         });
       },
-      discard: (request, signal) => call('forking.discard', request, { signal }),
+      discard: async (request, signal, options) => {
+        if (options) assertAgentResourceScope(this.producers.scope, options.expectedScope);
+        return sessions.call(this.descriptor.id, 'forking.discard', request, { signal, instanceId: options?.expectedScope.instanceId });
+      },
     } : null;
     this.steering = cap.steering ? {
       captureTarget: (request, options) => call('steering.captureTarget', request, options),
@@ -261,10 +266,12 @@ export class RemoteAgentIntegration implements AgentIntegration {
       },
       ...(manifest.singleQueryRunsToolsWithoutPermission ? { runsToolsWithoutPermission: true as const } : {}),
     } : null;
+    const integration = this;
     const history = (source: 'legacyHistoryImport' | 'nativeHistoryImport'): AgentHistoryImport => ({
-      async *load({ signal, ...request }) {
+      async *load({ signal, ...request }, options) {
+        if (options) assertAgentResourceScope(integration.producers.scope, options.expectedScope);
         // A reader belongs to the session that opened it.
-        const { backing: { rpc }, timeoutMs } = await sessions.acquire('bulk', { signal });
+        const { backing: { rpc }, timeoutMs } = await sessions.acquire('bulk', { signal, instanceId: options?.expectedScope.instanceId });
         const close = (ref: ExecutorRpcMethods['history.open']['result']) =>
           rpc.call(manifest.descriptor.id, 'history.close', ref, { timeoutMs: 2000 });
         const ref = await rpc.call(manifest.descriptor.id, 'history.open', { source, request }, { signal, timeoutMs, onLateResult: close });

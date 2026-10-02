@@ -6,6 +6,7 @@ import { AgentRuntimeRouter } from '../runtime-router.ts';
 import { createRuntimeTranscriptFixture } from './runtime-router-test-fixture.js';
 import { createProducerFixture } from './producer-fixture.ts';
 import { ProducerBindings } from '../producer-bindings.ts';
+import { createForkNativeHistoryReader } from '../fork-native-history-reader.ts';
 
 function makeRouter(fork) {
   const transcript = createRuntimeTranscriptFixture();
@@ -95,11 +96,42 @@ function makeRouter(fork) {
 }
 
 describe('AgentRuntimeRouter forks', () => {
+  it('carries the captured Local instance through native seed and rollback', async () => {
+    const session = { agentSessionId: 'forked', nativeSession: null, nativeSeedReceipt: null };
+    const f = makeRouter(mock(async () => ({ kind: 'materialized', session })));
+    const signal = new AbortController().signal;
+    const outcome = await f.router.forkAgentSession({ sourceSession: f.entry, sourceChatId: 'source-chat', targetChatId: 'target-chat', signal });
+    expect(outcome.cleanup).toEqual({ scope: f.integration.producers.scope, session });
+    await f.router.discardForkedAgentSession(outcome.cleanup);
+    expect(f.integration.forking.discard).toHaveBeenCalledWith(session, expect.any(AbortSignal), { expectedScope: outcome.cleanup.scope });
+
+    const load = mock(async function* () { yield []; });
+    f.integration.nativeHistoryImport = { load };
+    const read = createForkNativeHistoryReader({ integrations: { require: () => f.integration }, carryOver: { revision: () => '' } });
+    const input = { targetChatId: 'target-chat', sourceSession: f.entry, fork: outcome.cleanup, signal, preambleEvidence: [] };
+    expect(await read(input)).toEqual([]);
+    expect(load).toHaveBeenCalledWith(expect.anything(), { expectedScope: outcome.cleanup.scope });
+    f.integration.producers = { ...f.integration.producers, scope: { ...f.integration.producers.scope, instanceId: 'replacement' } };
+    await expect(read(input)).rejects.toMatchObject({ code: 'STALE_RESOURCE' });
+    await expect(f.router.discardForkedAgentSession(outcome.cleanup)).rejects.toMatchObject({ code: 'STALE_RESOURCE' });
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(f.integration.forking.discard).toHaveBeenCalledTimes(1);
+  });
+
+  it('captures scope before endpoint preparation yields', async () => {
+    const fork = mock(async () => ({ kind: 'unmaterialized' }));
+    const f = makeRouter(fork);
+    const pending = f.router.forkAgentSession({ sourceSession: f.entry, sourceChatId: 'source-chat', targetChatId: 'target-chat', signal: new AbortController().signal });
+    f.integration.producers.scope.instanceId = 'replacement';
+    await expect(pending).rejects.toMatchObject({ code: 'STALE_RESOURCE' });
+    expect(fork).not.toHaveBeenCalled();
+  });
+
   it('does not register execution progress for a fork', async () => {
     const progress = spyOn(ProducerBindings.prototype, 'onStarted');
     try {
       const fork = mock(async () => ({ kind: 'unmaterialized' }));
-      const { router, entry } = makeRouter(fork);
+      const { router, entry, integration } = makeRouter(fork);
       const signal = new AbortController().signal;
       await router.forkAgentSession({
         sourceSession: entry,
@@ -107,7 +139,7 @@ describe('AgentRuntimeRouter forks', () => {
         targetChatId: 'target-chat',
         signal,
       });
-      expect(fork).toHaveBeenCalledWith(expect.objectContaining({ signal }));
+      expect(fork).toHaveBeenCalledWith(expect.objectContaining({ signal }), { expectedScope: integration.producers.scope });
       expect(progress).not.toHaveBeenCalled();
     } finally {
       progress.mockRestore();
@@ -138,13 +170,13 @@ describe('AgentRuntimeRouter forks', () => {
       providerMeta: { entryId: 'native-entry-1', withinSourceOrdinal: 0 },
       signal: controller.signal,
       source: expect.objectContaining({ chatId: 'source-chat' }),
-    }));
+    }), { expectedScope: integration.producers.scope });
     expect(integration.forking).not.toHaveProperty('resolvePoint');
   });
 
   it('preserves a successful unmaterialized whole-session outcome', async () => {
     const fork = mock(async () => ({ kind: 'unmaterialized' }));
-    const { router, entry, entries, execution } = makeRouter(fork);
+    const { router, entry, entries, execution, integration } = makeRouter(fork);
 
     const outcome = await router.forkAgentSession({
       sourceSession: entry,
@@ -153,7 +185,7 @@ describe('AgentRuntimeRouter forks', () => {
     });
     expect(outcome).toEqual({ kind: 'unmaterialized' });
 
-    expect(fork).toHaveBeenCalledWith(expect.objectContaining({ providerMeta: null }));
+    expect(fork).toHaveBeenCalledWith(expect.objectContaining({ providerMeta: null }), { expectedScope: integration.producers.scope });
 
     entries.set('target-chat', {
       ...entry,

@@ -31,6 +31,7 @@ import type {
   PrepareProjectPathUpdateRequest,
   RunAgentTurnOptions,
   StartedAgentSession,
+  NativeForkCleanup,
   StartSessionOptions,
 } from './session-types.js';
 import { AgentCatalogService, type AgentModelQuery } from './catalog-service.js';
@@ -114,7 +115,7 @@ export interface AgentRegistryServiceContract {
     messageOrdinal?: number;
     signal: AbortSignal;
   }): Promise<ForkedAgentSessionOutcome | null>;
-  discardForkedAgentSession(agentId: string, session: StartedAgentSession, executorId?: string | null): Promise<void>;
+  discardForkedAgentSession(cleanup: NativeForkCleanup): Promise<void>;
   compactSession(chatId: string, opts?: CompactSessionOptions): Promise<void>;
   getAgentAuthStatusMap(executorId?: string | null): Promise<Record<string, unknown>>;
   getAgentReadinessMap(authByAgent?: Record<string, unknown>, executorId?: string | null): Promise<Record<string, unknown>>;
@@ -374,8 +375,8 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   }) {
     return this.#runtime.forkAgentSession(args);
   }
-  discardForkedAgentSession(agentId: string, session: StartedAgentSession, executorId?: string | null): Promise<void> {
-    return this.#runtime.discardForkedAgentSession(agentId, session, executorId);
+  discardForkedAgentSession(cleanup: NativeForkCleanup): Promise<void> {
+    return this.#runtime.discardForkedAgentSession(cleanup);
   }
   validateConfiguration(input: AgentConfigurationInput, options?: ExecutorCallOptions): Promise<void> {
     return this.#settings.validateConfiguration(input, options);

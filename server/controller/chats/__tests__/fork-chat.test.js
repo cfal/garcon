@@ -6,6 +6,8 @@ import { createPreamblePrefix } from '../../../../common/preamble-prefix.js';
 
 const envelope = (ownerId, values = {}) => ({ ownerId, schemaVersion: 1, values });
 const PREAMBLE_ID = '3502b645-222b-49d2-ac39-1c91f9fb1174';
+const forkScope = { executorId: 'local', instanceId: 'origin-instance', integrationId: 'test' };
+const materialized = (session) => ({ kind: 'materialized', session, cleanup: { scope: forkScope, session } });
 
 function deferred() {
   let resolve;
@@ -97,13 +99,10 @@ function makeDeps(overrides = {}) {
       ledger.deleteChat(chatId);
     }),
   };
-  const forkAgentSession = overrides.forkAgentSession ?? mock(async () => ({
-    kind: 'materialized',
-    session: {
+  const forkAgentSession = overrides.forkAgentSession ?? mock(async () => materialized({
       agentSessionId: 'target-native',
       nativeSession: { ownerId: 'test', schemaVersion: 1, value: { id: 'target-native' } },
       nativeSeedReceipt: null,
-    },
   }));
   return {
     signal: new AbortController().signal,
@@ -325,14 +324,11 @@ describe('createForkedChat', () => {
     const forkAgentSession = mock(async ({ signal }) => {
       expect(signal).toBe(controller.signal);
       controller.abort(reason);
-      return {
-        kind: 'materialized',
-        session: {
+      return materialized({
           agentSessionId: 'cancelled-native',
           nativeSession: { ownerId: 'test', schemaVersion: 1, value: { id: 'cancelled-native' } },
           nativeSeedReceipt: null,
-        },
-      };
+      });
     });
     const discardForkedAgentSession = mock(async () => undefined);
     const deps = makeDeps({ forkAgentSession, discardForkedAgentSession });
@@ -345,9 +341,9 @@ describe('createForkedChat', () => {
       signal: controller.signal,
     })).rejects.toBe(reason);
 
-    expect(discardForkedAgentSession).toHaveBeenCalledWith('test', expect.objectContaining({
-      agentSessionId: 'cancelled-native',
-    }));
+    expect(discardForkedAgentSession).toHaveBeenCalledWith({
+      scope: forkScope, session: expect.objectContaining({ agentSessionId: 'cancelled-native' }),
+    });
     expect(deps.ledger.seedChat).not.toHaveBeenCalled();
     expect(deps.registry.addChat).not.toHaveBeenCalled();
   });
@@ -490,9 +486,7 @@ describe('createForkedChat', () => {
       forkAgentSession: mock(async () => {
         attempt += 1;
         if (attempt === 1) return { kind: 'unmaterialized' };
-        return {
-          kind: 'materialized',
-          session: {
+        return materialized({
             agentSessionId: 'target-native-after-retry',
             nativeSession: {
               ownerId: 'test',
@@ -500,8 +494,7 @@ describe('createForkedChat', () => {
               value: { id: 'target-native-after-retry' },
             },
             nativeSeedReceipt: null,
-          },
-        };
+        });
       }),
     });
     const request = {
@@ -544,7 +537,7 @@ describe('createForkedChat', () => {
 
     expect(deps.readForkedNativeHistory).toHaveBeenCalledWith(expect.objectContaining({
       targetChatId: 'target-chat',
-      fork: expect.objectContaining({ agentSessionId: 'target-native' }),
+      fork: { scope: forkScope, session: expect.objectContaining({ agentSessionId: 'target-native' }) },
       signal: deps.signal,
     }));
     // Rows below the source content start are earlier-agent history no provider ever held,

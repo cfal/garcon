@@ -37,7 +37,7 @@ import type {
   AgentExecutionCommandType,
   ForkedAgentSessionOutcome,
   RunAgentTurnOptions,
-  StartedAgentSession,
+  NativeForkCleanup,
 } from '../agents/session-types.js';
 import type { ChatExecutionCommands } from '../chat-execution/chat-execution-coordinator.js';
 import {
@@ -127,7 +127,7 @@ export type AgentRegistryDep = Pick<
 export type ForkedNativeHistoryReaderDep = (args: {
   targetChatId: string;
   sourceSession: ChatRegistryEntry;
-  fork: StartedAgentSession;
+  fork: NativeForkCleanup;
   signal: AbortSignal;
   preambleEvidence: readonly PreambleHistoryEvidence[];
 }) => Promise<LedgerRowDraft[] | null>;
@@ -152,7 +152,7 @@ export type CreateForkedChat = (args: {
     providerMeta?: JsonObject | null;
     signal: AbortSignal;
   }) => Promise<ForkedAgentSessionOutcome | null>;
-  discardForkedAgentSession: (agentId: string, session: StartedAgentSession) => Promise<void>;
+  discardForkedAgentSession: (cleanup: NativeForkCleanup) => Promise<void>;
   readForkedNativeHistory: ForkedNativeHistoryReaderDep;
 }) => Promise<ForkedChatResult>;
 

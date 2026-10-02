@@ -16,6 +16,7 @@ import {
 } from './command-support.js';
 import { runOptionsForCommand } from '../agents/agent-run-command-input.js';
 import type { ThinkingMode } from '../../../common/chat-modes.js';
+import type { NativeForkCleanup } from '../agents/session-types.js';
 
 interface ForkContext {
   sourceChatId: string;
@@ -189,6 +190,7 @@ export class ForkCommands {
             forkPreparation: {
               phase: 'created',
               sourceChatId: forkContext.sourceChatId,
+              nativeCleanup: forkResult.nativeCleanup,
             },
           });
         },
@@ -196,7 +198,7 @@ export class ForkCommands {
           if (forkResult) {
             await forkResult.rollback();
           } else {
-            await this.rollbackPreparedFork(forkContext);
+            await this.rollbackPreparedFork(forkContext, preparedFork?.nativeCleanup ?? null);
           }
           forkResult = null;
         },
@@ -303,8 +305,7 @@ export class ForkCommands {
     };
   }
 
-  private async rollbackPreparedFork(context: ForkContext): Promise<void> {
-    const target = this.deps.chats.getChat(context.targetChatId);
+  private async rollbackPreparedFork(context: ForkContext, cleanup: NativeForkCleanup | null): Promise<void> {
     const failures: unknown[] = [];
     try {
       await rollbackForkTarget({
@@ -315,13 +316,9 @@ export class ForkCommands {
     } catch (error) {
       failures.push(error);
     }
-    if (target?.agentSessionId) {
+    if (cleanup) {
       try {
-        await this.deps.agents.discardForkedAgentSession(target.agentId, {
-          agentSessionId: target.agentSessionId,
-          nativeSession: target.nativeSession,
-          nativeSeedReceipt: target.nativeSeedReceipt,
-        }, target.executorId);
+        await this.deps.agents.discardForkedAgentSession(cleanup);
       } catch (error) {
         failures.push(error);
       }
@@ -352,9 +349,7 @@ export class ForkCommands {
       ledger: this.deps.transcripts,
       ownership: this.deps.ownership,
       forkAgentSession: this.deps.agents.forkAgentSession.bind(this.deps.agents),
-      discardForkedAgentSession: (agentId, session) => this.deps.agents.discardForkedAgentSession(
-        agentId, session, context.sourceSession.executorId,
-      ),
+      discardForkedAgentSession: this.deps.agents.discardForkedAgentSession.bind(this.deps.agents),
       readForkedNativeHistory: this.deps.readForkedNativeHistory,
     });
   }

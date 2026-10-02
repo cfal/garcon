@@ -4,6 +4,7 @@ import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
 import type { JsonObject } from '@garcon/common/json';
 import type { AgentEstablishedSession } from './producer.js';
 import type { AgentChatReference } from './transcript.js';
+import type { AgentInstanceCallOptions } from './resources.js';
 
 export interface AgentNativeForkRequest {
   readonly chatId: string;
@@ -23,6 +24,6 @@ export type AgentNativeForkOutcome =
   | { readonly kind: 'unmaterialized' };
 
 export interface AgentNativeFork {
-  fork(request: AgentNativeForkRequest): Promise<AgentNativeForkOutcome>;
-  discard(session: AgentEstablishedSession, signal: AbortSignal): Promise<void>;
+  fork(request: AgentNativeForkRequest, options?: AgentInstanceCallOptions): Promise<AgentNativeForkOutcome>;
+  discard(session: AgentEstablishedSession, signal: AbortSignal, options?: AgentInstanceCallOptions): Promise<void>;
 }

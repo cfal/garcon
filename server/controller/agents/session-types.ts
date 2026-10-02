@@ -10,7 +10,7 @@ import {
 import type { JsonObject } from '@garcon/common/json';
 import type { NativeSeedReceipt } from '@garcon/common/transcript-seed';
 import type { AgentCommandImage } from '@garcon/common/ws-requests';
-import type { AgentNativeSessionRef } from '@garcon/server-agent-interface';
+import type { AgentNativeSessionRef, AgentResourceScope } from '@garcon/server-agent-interface';
 import type { CarryOverSegmentRef } from '../chats/registry-contracts.js';
 import type { TurnCommandType } from '../lib/turn-identity.js';
 import type { ChatPreambleSelection, PendingPreambleBoundary } from '@garcon/common/preambles';
@@ -57,11 +57,13 @@ export interface StartedAgentSession {
   nativeSeedReceipt: NativeSeedReceipt | null;
 }
 
-// Deliberate mirror of AgentForkOutcome: server core types depend only on
-// common, never on the interface package; the runtime router is the sole
-// translation point between the two shapes.
+export interface NativeForkCleanup {
+  readonly scope: AgentResourceScope;
+  readonly session: StartedAgentSession;
+}
+
 export type ForkedAgentSessionOutcome =
-  | { readonly kind: 'materialized'; readonly session: StartedAgentSession }
+  | { readonly kind: 'materialized'; readonly session: StartedAgentSession; readonly cleanup: NativeForkCleanup }
   | { readonly kind: 'unmaterialized' };
 
 export interface PrepareProjectPathUpdateRequest {
