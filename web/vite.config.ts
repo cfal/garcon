@@ -54,12 +54,13 @@ function codeMirrorLanguageChunk(id: string): string | undefined {
 		id.includes('@codemirror/lang-angular') ||
 		id.includes('@codemirror/lang-jinja') ||
 		id.includes('@codemirror/lang-liquid') ||
+		id.includes('@codemirror/lang-markdown') ||
 		id.includes('@lezer/markdown')
 	) {
 		return 'vendor-cm-lang-template';
 	}
 
-	if (id.includes('@codemirror/language-data') || id.includes('@codemirror/lang-markdown')) {
+	if (id.includes('@codemirror/language-data')) {
 		return 'vendor-cm-lang-metadata';
 	}
 
@@ -106,6 +107,17 @@ export default defineConfig({
 							priority: 10,
 						},
 						{
+							name: 'vendor-codemirror-core',
+							test: (id) =>
+								id.includes('@codemirror/language/') ||
+								id.includes('@codemirror/state/') ||
+								id.includes('@lezer/highlight/') ||
+								id.includes('@lezer/common/') ||
+								id.includes('@lezer/lr/'),
+							// Metadata needs the shared runtime, not the language packs that import it.
+							priority: 15,
+						},
+						{
 							name(id) {
 								if (id.includes('@xterm/')) return 'vendor-xterm';
 								if (id.includes('node_modules/katex')) return 'vendor-katex';
@@ -122,15 +134,6 @@ export default defineConfig({
 									id.includes('@codemirror/theme-one-dark')
 								)
 									return 'vendor-codemirror-editor';
-
-								if (
-									id.includes('@codemirror/language') ||
-									id.includes('@codemirror/state') ||
-									id.includes('@lezer/highlight') ||
-									id.includes('@lezer/common') ||
-									id.includes('@lezer/lr')
-								)
-									return 'vendor-codemirror-core';
 
 								if (id.includes('@codemirror/') || id.includes('codemirror'))
 									return 'vendor-codemirror';
