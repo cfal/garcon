@@ -76,6 +76,23 @@ describe('POST /api/v1/auth/register', () => {
     expect(successIndex).not.toBe(-1);
     expect(conflictIndex).not.toBe(-1);
     expect(typeof bodies[successIndex].token).toBe('string');
-    expect(bodies[conflictIndex]).toEqual({ error: 'Account already configured' });
+    expect(bodies[conflictIndex]).toEqual({
+      success: false, error: 'Account already configured', errorCode: 'VALIDATION_FAILED', retryable: false,
+    });
+  });
+
+  it.each(['status', 'register', 'login'])('returns an opaque coded failure for %s storage errors', async (operation) => {
+    await fs.mkdir(path.join(configDir, 'auth.json'));
+    const url = new URL(`http://localhost/api/v1/auth/${operation}`);
+    const method = operation === 'status' ? 'GET' : 'POST';
+    const response = await authRoutes[url.pathname][method](new Request(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: method === 'POST' ? JSON.stringify({ username: 'synthetic', password: 'password-test' }) : undefined,
+    }), url, serverForAddress(`auth-failure-${operation}`));
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({
+      success: false, error: 'Internal server error', errorCode: 'INTERNAL_ERROR', retryable: true,
+    });
   });
 });

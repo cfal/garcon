@@ -26,33 +26,67 @@ function stripAbPrefix(candidate: string): string {
   return candidate.startsWith('a/') || candidate.startsWith('b/') ? candidate.slice(2) : candidate;
 }
 
+function decodeGitPath(value: string): string {
+  if (!value.startsWith('"') || !value.endsWith('"')) return value;
+  const quoted = value.slice(1, -1);
+  const escapes: Record<string, string> = { a: '\x07', b: '\b', f: '\f', n: '\n', r: '\r', t: '\t', v: '\v', '"': '"', '\\': '\\' };
+  const parts: Buffer[] = [];
+  let offset = 0;
+  for (const match of quoted.matchAll(/\\([0-7]{1,3}|[abfnrtv"\\])/g)) {
+    parts.push(Buffer.from(quoted.slice(offset, match.index)));
+    const escape = match[1];
+    parts.push(/^[0-7]/.test(escape) ? Buffer.from([parseInt(escape, 8)]) : Buffer.from(escapes[escape]));
+    offset = match.index + match[0].length;
+  }
+  parts.push(Buffer.from(quoted.slice(offset)));
+  return Buffer.concat(parts).toString('utf8');
+}
+
+function diffHeaderPaths(header: string): [string | undefined, string | undefined] {
+  const paths = header.slice('diff --git '.length);
+  // Unquoted spaces are legal; unchanged names disambiguate embedded " b/".
+  const middle = (paths.length - 1) / 2;
+  if (Number.isInteger(middle) && paths.startsWith('a/') && paths.slice(middle, middle + 3) === ' b/') {
+    const oldPath = paths.slice(2, middle);
+    const newPath = paths.slice(middle + 3);
+    if (oldPath === newPath) return [oldPath, newPath];
+  }
+  const match = /^("(?:[^"\\]|\\.)*"|a\/.*?) ("(?:[^"\\]|\\.)*"|b\/.*)$/.exec(paths);
+  if (!match) return [undefined, undefined];
+  return [stripAbPrefix(decodeGitPath(match[1])), stripAbPrefix(decodeGitPath(match[2]))];
+}
+
+function fileHeaderPath(value: string): string {
+  // Unquoted header paths may end with a tab delimiter, not part of the filename.
+  const path = value.startsWith('"') ? value : value.split('\t', 1)[0];
+  return stripAbPrefix(decodeGitPath(path));
+}
+
 // Parses a single `diff --git` segment into a compact review body.
 function parseDiffFilePatch(segment: string): GitDiffPatchFile | null {
   const lines = segment.split('\n');
-  const headerMatch = lines[0].match(/^diff --git a\/(.*) b\/(.*)$/);
-  let oldPath = headerMatch?.[1];
-  let newPath = headerMatch?.[2];
+  let [oldPath, newPath] = diffHeaderPaths(lines[0]);
   let status = 'M';
   let renameFrom: string | undefined;
   let renameTo: string | undefined;
 
   for (const line of lines) {
+    if (line.startsWith('@@')) break;
     if (line.startsWith('new file mode')) status = 'A';
     else if (line.startsWith('deleted file mode')) status = 'D';
     else if (line.startsWith('rename from ')) {
-      renameFrom = line.slice('rename from '.length);
+      renameFrom = decodeGitPath(line.slice('rename from '.length));
       status = 'R';
     } else if (line.startsWith('rename to ')) {
-      renameTo = line.slice('rename to '.length);
+      renameTo = decodeGitPath(line.slice('rename to '.length));
       status = 'R';
     } else if (line.startsWith('--- ')) {
       const value = line.slice(4);
-      if (value !== '/dev/null') oldPath = stripAbPrefix(value);
+      if (value !== '/dev/null') oldPath = fileHeaderPath(value);
     } else if (line.startsWith('+++ ')) {
       const value = line.slice(4);
-      if (value !== '/dev/null') newPath = stripAbPrefix(value);
+      if (value !== '/dev/null') newPath = fileHeaderPath(value);
     }
-    if (status !== 'M' && line.startsWith('@@')) break;
   }
 
   const path = status === 'D' ? oldPath ?? newPath : renameTo ?? newPath ?? oldPath;

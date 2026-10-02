@@ -403,14 +403,31 @@ describe('chat WebSocket handler', () => {
     expect(typeof lastSentPayload().serverTime).toBe('string');
   });
 
-  it('sends ws-fault for missing chatId', async () => {
-    await chatHandler.message(ws, {
-      type: 'chat-subscribe',
-      clientRequestId: 'req-missing-chat',
+  for (const type of ['chat-subscribe', 'chat-reload']) {
+    for (const chatId of [undefined, null, '', 123]) {
+      for (const cursor of [{}, { transcriptViewId: 'view-1', afterOrdinal: 0 }]) {
+        it(`correlates ${type} with invalid chatId ${chatId} and cursor ${JSON.stringify(cursor)}`, async () => {
+          await chatHandler.message(ws, {
+            type, chatId, clientRequestId: 'req-missing-chat', ...cursor,
+          });
+          expect(lastSentPayload()).toMatchObject({
+            type: 'client-request-error', clientRequestId: 'req-missing-chat',
+            requestType: type, code: 'MISSING_CHAT_ID', retryable: false,
+          });
+          expect(mockChatViews.readReplay).not.toHaveBeenCalled();
+        });
+      }
+    }
+    it(`retains a global fault for uncorrelatable ${type}`, async () => {
+      await chatHandler.message(ws, { type });
+      expect(lastSentPayload()).toMatchObject({ type: 'ws-fault' });
     });
+  }
 
+  it('does not use a reload cancellation target as request correlation', async () => {
+    await chatHandler.message(ws, { type: 'chat-reload-cancel', reloadRequestId: 'req-reload' });
     expect(lastSentPayload()).toMatchObject({ type: 'ws-fault' });
-    expect(lastSentPayload().error).toContain('Missing chatId');
+    expect(lastSentPayload().clientRequestId).toBeUndefined();
   });
 
   it('answers a malformed correlated subscribe instead of replaying or staying silent', async () => {

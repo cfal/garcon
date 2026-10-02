@@ -50,6 +50,10 @@ describe('sanitizeBranchForPath', () => {
 });
 
 describe('deriveWorktreePath', () => {
+	it('preserves whitespace in the repository root', () => {
+		expect(deriveWorktreePath('/workspace/repo ', 'feature')).toBe('/workspace/repo /.worktrees/feature');
+	});
+
 	it('derives a path inside the repository root', () => {
 		expect(deriveWorktreePath('/workspace/repo', 'fix/login-bug')).toBe(
 			'/workspace/repo/.worktrees/fix-login-bug',

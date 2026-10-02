@@ -5,6 +5,7 @@ import { ticketQueryParams, parseTicketHistoryQuery, parseTicketListQuery, parse
 import { ticketChatId, ticketUuid, parseTicketAssigneeQuery } from '@garcon/common/ticket-validation';
 import type { CliConnectionOptions } from './args.js';
 import { argumentError } from './errors.js';
+import { SHARED_PARSE_OPTIONS } from './shared-options.js';
 
 export const TICKET_STRING_OPTIONS = ['project', 'description', 'priority', 'assignee', 'parent-id',
   'patch', 'expected-revision', 'request-id', 'expected-store-id', 'from-chat', 'status', 'query',
@@ -13,10 +14,9 @@ export const TICKET_STRING_OPTIONS = ['project', 'description', 'priority', 'ass
   'link-kind', 'resolution', 'comment'] as const;
 
 export const TICKET_PARSE_OPTIONS = {
+  ...SHARED_PARSE_OPTIONS,
   ...Object.fromEntries(TICKET_STRING_OPTIONS.map((key) => [key, { type: 'string' as const }])),
-  label: { type: 'string' as const, multiple: true },
   stdin: { type: 'boolean' as const },
-  ready: { type: 'boolean' as const },
   'include-closed': { type: 'boolean' as const },
 };
 

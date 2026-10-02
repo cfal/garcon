@@ -4348,7 +4348,7 @@ describe('ChatCommandService', () => {
 
       await expect(service.forkChat(request)).rejects.toThrow('Synthetic fork settings failure');
       await expect(service.forkChat(request)).rejects.toMatchObject({
-        code: 'IDEMPOTENCY_CONFLICT',
+        code: 'CHAT_ID_COLLISION',
         message: `Session already exists: ${TARGET_CHAT_ID}`,
       });
       expect(createForkedChat).toHaveBeenCalledOnce();
@@ -4371,7 +4371,7 @@ describe('ChatCommandService', () => {
       await service.forkChat(request);
 
       await expect(service.forkChat(request)).rejects.toMatchObject({
-        code: 'IDEMPOTENCY_CONFLICT',
+        code: 'CHAT_ID_COLLISION',
         status: 409,
         message: `Session already exists: ${TARGET_CHAT_ID}`,
       });
@@ -7143,7 +7143,7 @@ describe('ChatCommandService', () => {
     expect(queue.discardPendingChatInput).not.toHaveBeenCalled();
   });
 
-  it('persists a prepared native session before provider cleanup', async () => {
+  it('persists and publishes a prepared native session before provider cleanup', async () => {
     const relocated = {
       ownerId: 'claude',
       schemaVersion: 1,
@@ -7155,6 +7155,8 @@ describe('ChatCommandService', () => {
     let sessions;
     const commit = mock(async () => {
       expect(sessions.get(SOURCE_CHAT_ID).nativeSession).toEqual(relocated);
+      expect(fixture.agents.publishSessionFact).toHaveBeenCalledTimes(1);
+      expect(fixture.queue.discardPendingChatInput).not.toHaveBeenCalled();
     });
     const rollback = mock(() => Promise.resolve());
     const fixture = makeService({
@@ -7575,7 +7577,7 @@ describe('ChatCommandService', () => {
     expect(queue.discardPendingChatInput).toHaveBeenCalledWith(SOURCE_CHAT_ID);
   });
 
-  it('discards pending input but propagates an authoritative session commit failure', async () => {
+  it('preserves both native copies and pending input on authoritative publication failure', async () => {
     const queueService = makeRealQueue(makeInputProjection());
     const publishSessionFact = mock(() => {
       throw new Error('publication failed');
@@ -7585,13 +7587,15 @@ describe('ChatCommandService', () => {
       schemaVersion: 1,
       value: { path: '/synthetic/relocated.jsonl', agentSessionId: 'agent-1' },
     };
+    const commit = mock(async () => undefined);
+    const rollback = mock(async () => undefined);
     const { service, chats } = makeService({
       queueService,
       agents: {
         prepareProjectPathUpdate: mock(async () => ({
           nativeSession: relocated,
-          commit: mock(async () => undefined),
-          rollback: mock(async () => undefined),
+          commit,
+          rollback,
         })),
         publishSessionFact,
       },
@@ -7617,11 +7621,10 @@ describe('ChatCommandService', () => {
     })).rejects.toThrow('publication failed');
 
     expect(chats.getChat(SOURCE_CHAT_ID).projectPath).toBe(nextPath);
-    expect(await queueService.readChatExecutionControl(SOURCE_CHAT_ID)).toMatchObject({
-      entries: [],
-      controlEntries: [],
-      pause: null,
-    });
+    expect((await queueService.readChatExecutionControl(SOURCE_CHAT_ID)).entries).toHaveLength(1);
+    expect((await queueService.readChatExecutionControl(SOURCE_CHAT_ID)).controlEntries).toHaveLength(1);
+    expect(commit).not.toHaveBeenCalled();
+    expect(rollback).not.toHaveBeenCalled();
     expect(publishSessionFact).toHaveBeenCalledTimes(1);
   });
 

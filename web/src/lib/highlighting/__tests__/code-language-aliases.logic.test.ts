@@ -7,6 +7,15 @@ import {
 } from '../code-language-aliases';
 
 describe('code fence language aliases', () => {
+	it.each(['constructor', '__proto__', 'toString', 'hasOwnProperty'])(
+		'keeps inherited property %s as an unsupported language name',
+		(language) => {
+			expect(normalizeCodeFenceLanguage(language)).toBe(language.toLowerCase());
+			expect(shouldAttemptCodeFenceHighlight(language)).toBe(true);
+			expect(shouldWrapCodeFenceLanguage(language)).toBe(false);
+		},
+	);
+
 	it('normalizes common aliases used by rendered Markdown fences', () => {
 		expect(normalizeCodeFenceLanguage('js')).toBe('javascript');
 		expect(normalizeCodeFenceLanguage('md')).toBe('markdown');

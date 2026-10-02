@@ -4,10 +4,15 @@ import { isExecutorId, isRemoteExecutorId, parseCreateExecutorRequest, parseUpda
   type CreateExecutorRequest, type UpdateExecutorRequest } from '@garcon/common/executors';
 import type { CliConnectionOptions } from './args.js';
 import { argumentError } from './errors.js';
+import { SHARED_PARSE_OPTIONS } from './shared-options.js';
 
 export const EXECUTOR_STRING_OPTIONS = ['direction', 'connection-url', 'advertise-url',
   'allow-controller-cli', 'allow-executor-management', 'no-tls', 'allow-unverified-tls', 'timeout'] as const;
-export const EXECUTOR_PARSE_OPTIONS = Object.fromEntries(EXECUTOR_STRING_OPTIONS.map((key) => [key, { type: 'string' as const }]));
+export const EXECUTOR_PARSE_OPTIONS = {
+  label: SHARED_PARSE_OPTIONS.label,
+  ready: SHARED_PARSE_OPTIONS.ready,
+  ...Object.fromEntries(EXECUTOR_STRING_OPTIONS.map((key) => [key, { type: 'string' as const }])),
+};
 
 type ExecutorOperation =
   | { action: 'list' }

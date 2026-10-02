@@ -23,10 +23,9 @@ import {
   parseChatExecutionControlState,
   parseExecutionControlServerInstanceId,
 } from './chat-execution-control';
-import type { RemoteSettingsSnapshot } from './settings';
 import { parseExecutors, type ExecutorSnapshot } from './executors';
 import type { ErrorCode } from './error-codes';
-import { normalizeRemoteSettingsSnapshot } from './settings';
+import { normalizeRemoteSettingsSnapshot, type RemoteSettingsSnapshot } from './settings';
 import {
   isScheduledPromptsInvalidationReason,
   type ScheduledPromptsInvalidationReason,
@@ -498,8 +497,11 @@ function str(v: unknown): string {
 
 function requiredStr(v: unknown): string | null {
   if (typeof v !== 'string') return null;
-  const trimmed = v.trim();
-  return trimmed.length > 0 ? trimmed : null;
+  return v.trim() || null;
+}
+
+function requiredPath(v: unknown): string | null {
+  return typeof v === 'string' && v.trim().length > 0 ? v : null;
 }
 
 function nonNegativeInt(v: unknown): number | null {
@@ -772,9 +774,9 @@ export function parseServerWsMessage(
     }
     case 'chat-project-path-updated': {
       const chatId = requiredStr(data.chatId);
-      const projectPath = requiredStr(data.projectPath);
-      const effectiveProjectKey = requiredStr(data.effectiveProjectKey);
-      const previousProjectPath = requiredStr(data.previousProjectPath);
+      const projectPath = requiredPath(data.projectPath);
+      const effectiveProjectKey = requiredPath(data.effectiveProjectKey);
+      const previousProjectPath = requiredPath(data.previousProjectPath);
       return chatId && projectPath && effectiveProjectKey && previousProjectPath
         ? new ChatProjectPathUpdatedMessage(
             chatId,

@@ -111,7 +111,7 @@ describe('preamble contracts', () => {
       scope: {
         type: 'project-paths',
         rules: [
-          { projectPath: '/workspace/one', includeNested: true },
+          { projectPath: ' /workspace/one ', includeNested: true },
           { projectPath: '/workspace/two', includeNested: false },
         ],
       },
@@ -168,7 +168,7 @@ describe('preamble contracts', () => {
         type: 'project-paths',
         rules: [
           { projectPath: '/workspace/one', includeNested: false },
-          { projectPath: ' /workspace/one ', includeNested: true },
+          { projectPath: '/workspace/one', includeNested: true },
         ],
       },
     }))).toBeNull();

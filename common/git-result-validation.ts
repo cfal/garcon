@@ -18,8 +18,17 @@ const bodyState = oneOf('unloaded', 'loading', 'loaded', 'binary', 'too-large', 
 const mode = oneOf('working', 'staged');
 const ref = (v: unknown) => shape(v, { name: str, ref: str, kind: oneOf('local-branch', 'remote-branch', 'tag', 'other'), updatedAt: nullable(str), isCurrent: optional(bool) });
 const limits = (v: unknown) => shape(v, Object.fromEntries(['maxSummaryFiles', 'maxBodyBatchFiles', 'maxLoadedRows', 'maxLoadedPatchBytes', 'maxFileRows', 'maxFilePatchBytes', 'maxLineBytes', 'maxContextLines', 'bodyConcurrency'].map(k => [k, num])));
-const file = (v: unknown) => shape(v, { path: str, originalPath: optional(str), category, additions: num, deletions: num, estimatedRows: num,
-  bodyState, bodyFingerprint: str, isBinary: bool, isTooLarge: bool });
+const limitReason = oneOf('collection-too-many-files', 'collection-too-many-rows', 'collection-too-many-bytes',
+  'file-too-many-rows', 'file-too-many-bytes', 'line-too-long', 'binary', 'unsupported-file-kind', 'git-timeout');
+const fileSummary = (v: unknown) => shape(v, {
+  path: str, originalPath: optional(str), category, additions: num, deletions: num, estimatedRows: num,
+  bodyState, bodyFingerprint: str, isGenerated: bool, isBinary: bool, isTooLarge: bool,
+  statsKnown: optional(bool), limitReason: optional(limitReason), limitMessage: optional(str),
+});
+const reviewFile = (v: unknown) => fileSummary(v) && shape(v, { indexStatus: str, workTreeStatus: str });
+const commitFile = (v: unknown) => fileSummary(v) && shape(v, {
+  status: oneOf('added', 'modified', 'deleted', 'renamed', 'copied', 'type-changed', 'unknown'), rawStatus: str,
+});
 const target = (v: unknown) => shape(v, { projectPath: str, repoRoot: str, worktreePath: str, label: str, branch: str, source: oneOf('chat-project', 'worktree') });
 const worktree = (v: unknown) => shape(v, { path: str, branch: str, name: str, isCurrent: bool, isMain: bool, isPathMissing: bool, lastModifiedAt: nullable(str) });
 const commit = (v: unknown) => shape(v, { hash: str, shortHash: str, parents: array(str), author: str, authorEmail: str, authorDate: str, committer: str, committerEmail: str, committerDate: str, subject: str, refs: array(str) });
@@ -44,8 +53,8 @@ function tree(v: unknown, depth = 0): boolean {
   return depth < 128 && shape(v, { path: str, name: str, kind: oneOf('file', 'directory'), children: optional(array(x => tree(x, depth + 1))) });
 }
 
-function snapshot(v: Record<string, unknown>): boolean {
-  return shape(v, { documentId: str, files: array(file, 10_000), limits, firstBodyCandidates: array(str, 24) });
+function commitDocument(v: Record<string, unknown>): boolean {
+  return shape(v, { documentId: str, files: array(commitFile, 10_000), limits, firstBodyCandidates: array(str, 24) });
 }
 
 function revision(v: unknown): boolean { return shape(v, { kind: oneOf('revision'), requestedRevision: str, label: str, hash: str, shortHash: str }); }
@@ -101,18 +110,29 @@ function gitResult(method: GitMethod, v: Record<string, unknown>): boolean {
       : oneOf('not-git-repository', 'unknown')(v.status) && v.fingerprint === null && str(v.message));
     case 'getWorkbenchSnapshot': return str(v.project) && (v.status === 'not-git-repository' ? v.target === null && v.tree === null && v.reviewSummary === null && str(v.message)
       : v.status === 'ready' && target(v.target) && shape(v.tree, { root: array(tree), hasCommits: bool, statsState: oneOf('loaded') })
-        && shape(v.reviewSummary, { documentId: str, project: str, mode, context: num, files: array(file, 10_000), limits })
+        && shape(v.reviewSummary, { documentId: str, project: str, mode, context: num, files: array(reviewFile, 10_000), limits })
         && shape(v, { selectedFile: nullable(str), firstBodyCandidates: array(str, 24), snapshotId: str, workbenchFingerprint: str }));
     case 'getReviewDocumentFileBodies': return str(v.documentId) && (v.status === 'ready' ? map(isGitPatchBody, 24)(v.files) && map(str, 24)(v.errors)
       : v.status === 'document-expired' ? str(v.message) : v.status === 'stale' && array(str)(v.changedPaths) && str(v.message));
     case 'getCommitSnapshot': return str(v.project) && (v.status === 'not-found' ? str(v.commit) && str(v.message)
-      : v.status === 'ready' && snapshot(v) && commit(v.commit) && shape(v.commit, { body: str }) && nullable(str)(v.selectedParent)
+      : v.status === 'ready' && commitDocument(v) && commit(v.commit) && shape(v.commit, { body: str }) && nullable(str)(v.selectedParent)
         && array(x => shape(x, { hash: str, shortHash: str, label: str }))(v.parentOptions));
-    case 'getComparisonSnapshot': return str(v.project) && (v.status === 'ready'
-      ? snapshot(v) && str(v.repoRoot) && oneOf('direct', 'merge-base')(v.mode) && revision(v.from) && (revision(v.to) || workingTree(v.to)) && str(v.effectiveFromHash)
-      : v.status === 'not-found' ? oneOf('from', 'to')(v.endpoint) && str(v.revision) && str(v.message)
-        : v.status === 'no-merge-base' ? revision(v.from) && revision(v.to) && str(v.message)
-          : v.status === 'working-tree-changing' && str(v.message));
+    case 'getComparisonSnapshot': {
+      if (!str(v.project)) return false;
+      switch (v.status) {
+        case 'ready':
+          return commitDocument(v) && str(v.repoRoot) && oneOf('direct', 'merge-base')(v.mode)
+            && revision(v.from) && (revision(v.to) || workingTree(v.to)) && str(v.effectiveFromHash);
+        case 'not-found':
+          return oneOf('from', 'to')(v.endpoint) && str(v.revision) && str(v.message);
+        case 'no-merge-base':
+          return revision(v.from) && revision(v.to) && str(v.message);
+        case 'working-tree-changing':
+          return str(v.message);
+        default:
+          return false;
+      }
+    }
     case 'getComparisonFreshness': return str(v.project) && (v.status === 'not-found' ? oneOf('from', 'to')(v.endpoint) && str(v.revision) && str(v.message)
       : v.status === 'ready' && array(oneOf('from', 'to'), 2)(v.changedEndpoints) && str(v.fromHash)
         && (shape(v.to, { kind: oneOf('revision'), hash: str }) || shape(v.to, { kind: oneOf('working-tree'), fingerprint: str })));
@@ -127,11 +147,16 @@ export function validateGhResult<K extends keyof ExecutionGhResults>(method: K, 
   }
   const identity = { number: num, title: str, state: oneOf('open', 'closed', 'merged'), isDraft: bool, author: str, headRefName: str, baseRefName: str,
     additions: num, deletions: num, changedFiles: num, updatedAt: str, url: str, reviewDecision: oneOf('approved', 'changes_requested', 'review_required', null) };
-  const valid = method === 'getStatus' ? shape(value, { available: bool, authenticated: bool, reason: oneOf('authenticated', 'unauthenticated', 'gh_missing', 'auth_error', 'unknown'), login: optional(str), host: optional(str) })
-    : method === 'listPullRequests' ? shape(value, { pulls: array(x => shape(x, { ...identity, checksState: oneOf('passing', 'failing', 'pending', 'none') }), 100), repo: nullable(x => shape(x, { nameWithOwner: str })) })
-      : shape(value, { ...identity, body: str, createdAt: str, mergeable: oneOf('mergeable', 'conflicting', 'unknown'), files: array(file, 10_000), fileBodies: map(isGitPatchBody),
-        checks: array(x => shape(x, { name: str, state: oneOf('success', 'failure', 'pending', 'neutral', 'skipped'), url: optional(str) })),
-        threads: array(x => shape(x, { id: str, path: str, side: oneOf('before', 'after'), line: num, diffHunk: str, isOutdated: bool,
-          comments: array(c => shape(c, { id: num, author: str, body: str, createdAt: str })) })) });
+  let valid: boolean;
+  if (method === 'getStatus') {
+    valid = shape(value, { available: bool, authenticated: bool, reason: oneOf('authenticated', 'unauthenticated', 'gh_missing', 'auth_error', 'unknown'), login: optional(str), host: optional(str) });
+  } else if (method === 'listPullRequests') {
+    valid = shape(value, { pulls: array(x => shape(x, { ...identity, checksState: oneOf('passing', 'failing', 'pending', 'none') }), 100), repo: nullable(x => shape(x, { nameWithOwner: str })) });
+  } else {
+    valid = shape(value, { ...identity, body: str, createdAt: str, mergeable: oneOf('mergeable', 'conflicting', 'unknown'), files: array(reviewFile, 10_000), fileBodies: map(isGitPatchBody),
+      checks: array(x => shape(x, { name: str, state: oneOf('success', 'failure', 'pending', 'neutral', 'skipped'), url: optional(str) })),
+      threads: array(x => shape(x, { id: str, path: str, side: oneOf('before', 'after'), line: num, diffHunk: str, isOutdated: bool,
+        comments: array(c => shape(c, { id: num, author: str, body: str, createdAt: str })) })) });
+  }
   if (!valid) throw new GitServiceError('GIT_INVALID_RESULT', `Invalid GitHub ${method} response`);
 }

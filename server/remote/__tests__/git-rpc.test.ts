@@ -8,6 +8,29 @@ import type { RemoteSessions } from '../client/executor-client.js';
 import { GIT_MAX_RESULT_BYTES } from '../../../common/git-execution.js';
 
 for (const dialer of ['controller', 'worker'] as const) {
+  test(`incomplete review summaries fail at the remote boundary with ${dialer} dialing`, async () => {
+    const fixture = await gitRpcFixture(dialer);
+    const local = await fixture.local.getGitService();
+    const request = { projectPath: fixture.projectPath, mode: 'working' as const, context: 3 };
+    await fs.writeFile(path.join(fixture.projectPath, 'example.txt'), 'changed\n');
+    const snapshot = await local.getWorkbenchSnapshot(request);
+    if (snapshot.status !== 'ready') throw new Error('Expected snapshot');
+    const queried = spyOn(local, 'getWorkbenchSnapshot');
+    try {
+      const git = await fixture.executor.getGitService();
+      for (const field of ['indexStatus', 'workTreeStatus', 'isGenerated']) {
+        const invalid = structuredClone(snapshot);
+        Reflect.deleteProperty(invalid.reviewSummary.files[0]!, field);
+        queried.mockResolvedValue(invalid);
+        await expect(git.getWorkbenchSnapshot(request)).rejects.toMatchObject({ code: 'GIT_INVALID_RESULT' });
+      }
+      expect(fixture.executor.availability).toBe('ready');
+    } finally {
+      queried.mockRestore();
+      await fixture.dispose();
+    }
+  });
+
   test(`Git and gh read deadlines stay typed while mutations remain uncertain with ${dialer} dialing`, async () => {
     const fixture = await gitRpcFixture(dialer);
     const localGit = await fixture.local.getGitService();

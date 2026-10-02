@@ -899,7 +899,8 @@ describe('garcon-cli', () => {
       expect(detached.stdout).toBe(
         `chat id: ${handle.chatId}\nturn id: ${handle.turnId}\n`,
       );
-      expect(detached.stderr).toContain('no Garcon agent was stopped');
+      expect(detached.stderr).toContain('any accepted work may continue without this CLI');
+      expect(detached.stderr).toContain('no Stop was sent');
 
       held.releaseEcho();
       const waited = await runCli(controlArguments(fixture, [

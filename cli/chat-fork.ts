@@ -50,7 +50,7 @@ async function submitWithUniqueTargetChatId<T>(
     try {
       return await submit(chatId);
     } catch (error) {
-      if (!isTargetChatIdCollision(error, chatId)) {
+      if (!isTargetChatIdCollision(error)) {
         throw error;
       }
       lastCollision = error;
@@ -64,11 +64,10 @@ async function submitWithUniqueTargetChatId<T>(
   );
 }
 
-function isTargetChatIdCollision(error: unknown, chatId: string): error is GarconHttpError {
+function isTargetChatIdCollision(error: unknown): error is GarconHttpError {
   return error instanceof GarconHttpError
     && error.status === 409
-    && error.errorCode === 'IDEMPOTENCY_CONFLICT'
-    && error.responseError === `Session already exists: ${chatId}`;
+    && error.errorCode === 'CHAT_ID_COLLISION';
 }
 
 export async function createFork(

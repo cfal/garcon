@@ -137,7 +137,9 @@ describe('AgentRegistry session cache', () => {
     const url = new URL('http://localhost/api/v1/agents/auth?agent=unknown-agent');
     const response = await routes['/api/v1/agents/auth'].GET(new Request(url), url);
     expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: 'Unknown agent: unknown-agent' });
+    expect(await response.json()).toEqual({
+      success: false, error: 'Unknown agent: unknown-agent', errorCode: 'VALIDATION_FAILED', retryable: false,
+    });
     await expect(registry.getSlashCommands('unknown-agent', '/repo')).resolves.toEqual([]);
   });
 

@@ -41,7 +41,7 @@ Requirements:
 
 - [Bun](https://bun.sh/), `git`, and a modern browser.
 - At least one working coding agent or API provider.
-- Optional pull request support: an authenticated GitHub CLI on the Garcon host.
+- Optional pull request support: an authenticated GitHub CLI on the selected executor, with support for `gh auth status --json hosts` and `gh api --paginate --slurp`.
 
 Garcon publishes an official multi-platform container image for every commit on `main`:
 

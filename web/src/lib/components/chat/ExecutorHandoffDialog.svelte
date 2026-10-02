@@ -51,11 +51,11 @@
 	const canConfirm = $derived(
 		handoff.canConfirm &&
 			destination.validationStatus === 'valid' &&
-			Boolean(destination.trimmedPath),
+			Boolean(destination.nonblankPath),
 	);
 	// A failed confirmation describes the path it checked, not later edits.
 	const confirmError = $derived(
-		handoff.error && destination.trimmedPath === confirmedPath ? handoff.error : null,
+		handoff.error && destination.nonblankPath === confirmedPath ? handoff.error : null,
 	);
 	const agents = $derived(
 		localSettings.allowDirectChats || isDirectAgentId(handoff.selection?.agentId ?? '')
@@ -73,7 +73,7 @@
 	});
 	$effect(() => {
 		if (!handoff.target) return;
-		void destination.trimmedPath;
+		void destination.nonblankPath;
 		const contextKey = executors.pathContextKey(executorId);
 		untrack(() => destination.scheduleValidation(contextKey));
 	});
@@ -97,7 +97,7 @@
 	}
 
 	async function togglePinnedPath(): Promise<void> {
-		const path = destination.trimmedPath;
+		const path = destination.nonblankPath;
 		if (!path || isUpdatingPinnedPath) return;
 		isUpdatingPinnedPath = true;
 		try {
@@ -112,7 +112,7 @@
 	function handleSubmit(event: SubmitEvent): void {
 		event.preventDefault();
 		if (!canConfirm) return;
-		confirmedPath = destination.trimmedPath;
+		confirmedPath = destination.nonblankPath;
 		destination.showBrowser = false;
 		void handoff.confirm(confirmedPath);
 	}
@@ -148,8 +148,8 @@
 					validationStatus={destination.validationStatus}
 					validationError={destination.validationError}
 					pin={{
-						isPinned: isPinnedProjectPath(pinnedProjectPaths, destination.trimmedPath),
-						disabled: !destination.trimmedPath || handoff.checking,
+						isPinned: isPinnedProjectPath(pinnedProjectPaths, destination.nonblankPath),
+						disabled: !destination.nonblankPath || handoff.checking,
 						loading: isUpdatingPinnedPath,
 						onToggle: togglePinnedPath,
 					}}
@@ -159,7 +159,7 @@
 						executorContextKey: executors.pathContextKey(executorId),
 						basePath,
 						isMobile: shell.isMobile,
-						currentPath: destination.trimmedPath || basePath,
+						currentPath: destination.nonblankPath || basePath,
 						onSelect: (path) => destination.setCandidatePath(path),
 						onClose: () => (destination.showBrowser = false),
 						button: {
@@ -179,7 +179,7 @@
 			</div>
 			<ProjectPinnedPathList
 				{pinnedProjectPaths}
-				selectedPath={destination.trimmedPath}
+				selectedPath={destination.nonblankPath}
 				disabled={pathLocked}
 				onSelect={selectPinnedPath}
 			/>

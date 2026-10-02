@@ -28,7 +28,7 @@ export const SINGLE_RUN_SUITES: Readonly<Record<string, string>> = Object.freeze
   ].map(name => [name, 'Seeds controller storage or tests process discovery/startup directly.'])),
   ...Object.fromEntries([
     'chat-boards', 'chat-canvases', 'chat-canvases-durability', 'chat-reorder', 'chat-sort',
-    'tickets', 'websocket-backpressure', 'websocket-payload-limit',
+    'tickets', 'websocket-backpressure', 'websocket-payload-limit', 'websocket-request-validation',
   ].map(name => [name, 'Controller persistence, ordering or browser delivery; no runtime contract under test.'])),
   ...Object.fromEntries([
     'fake-chat-completions-model', 'fixture-auth', 'git-fixture', 'support-contract',

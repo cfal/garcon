@@ -5,7 +5,7 @@ export class PreambleProjectPathService {
   constructor(private readonly inspect: ProjectInspector) {}
 
   async resolve(projectPath: string, executorId?: string | null): Promise<string> {
-    const resolution = await this.inspect(projectPath.trim(), executorId);
+    const resolution = await this.inspect(projectPath, executorId);
     if (resolution.kind === 'available') return resolution.effectiveProjectKey;
     switch (resolution.reason) {
       case 'not-found':

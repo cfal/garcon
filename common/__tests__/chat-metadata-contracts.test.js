@@ -60,6 +60,7 @@ describe('chat metadata contracts', () => {
     expect(parseSetChatTagsRequest({ chatId: 'chat-a' })).toBeNull();
     expect(parseSetChatTagsRequest({ chatId: 'chat-a', tags: 'ops' })).toBeNull();
     expect(parseSetChatTagsRequest({ chatId: 'chat-a', tags: [1] })).toBeNull();
+    expect(parseSetChatTagsRequest({ chatId: 'chat-a', tags: [], expectedTags: [] })).toBeNull();
     expect(parseSetChatTagsResponse({
       success: true,
       chatId: 'chat-a',

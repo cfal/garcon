@@ -1,10 +1,10 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
 import { access, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BoundedLog } from '../../support/bounded-log.js';
-import { Deferred } from '../../support/deferred.js';
+import { Deferred, withTimeout } from '../../support/deferred.js';
 import { FakeAnthropicServer } from '../../support/fake-anthropic-server.js';
 import { FakeClaudeModel } from '../../support/fake-claude-model.js';
 import { FakeCodexModel } from '../../support/fake-codex-model.js';
@@ -848,6 +848,44 @@ describe('integration support contracts', () => {
     }
   });
 
+  test.each(['sync', 'async'])('contains %s Codex script failures with bounded diagnostics', async (kind) => {
+    const fake = FakeCodexModel.start();
+    try {
+      const failure = new Error('Synthetic script failure');
+      fake.scriptTurn(kind === 'sync'
+        ? () => { throw failure; }
+        : async () => { throw failure; });
+      const response = await fetch(fake.responsesUrl, {
+        method: 'POST',
+        body: JSON.stringify({
+          model: 'scripted',
+          instructions: 'Excluded synthetic instructions',
+          client_metadata: { thread_id: 'synthetic-thread', turn_id: 'synthetic-turn' },
+          input: [
+            { type: 'message', role: 'user', content: 'Excluded prefix' + 'x'.repeat(1_100) },
+            { type: 'function_call_output', call_id: 'synthetic-gate', output: 'exit 23\n' + 'y'.repeat(1_100) },
+          ],
+        }),
+      });
+      expect(response.status).toBe(400);
+      const body = await response.json();
+      const issue = fake.issues()[0]!;
+      expect(body.error).toEqual({ type: 'invalid_request_error', message: issue });
+      expect(issue).toContain('Synthetic script failure');
+      expect(issue).toContain('synthetic-thread');
+      expect(issue).toContain('synthetic-turn');
+      expect(issue).toContain('synthetic-gate');
+      expect(issue).toContain('exit 23');
+      expect(issue).not.toContain('Excluded');
+      expect(issue.length).toBeLessThan(3_000);
+      expect(() => fake.assertSettled()).toThrow('Synthetic script failure');
+      fake.reset();
+      fake.assertSettled();
+    } finally {
+      fake.stop();
+    }
+  });
+
   test('holds and explicitly releases a matched request', async () => {
     const fake = FakeOpenAiServer.start({ defaultDelayMs: 0 });
     try {
@@ -911,6 +949,54 @@ describe('integration support contracts', () => {
       expect(response.status).toBe(400);
       expect(fake.protocolViolations()).toHaveLength(1);
       expect(() => fake.assertNoProtocolViolations()).toThrow('protocol violations');
+    } finally {
+      fake.stop();
+    }
+  });
+
+  test('does not report an interrupted upload as malformed JSON', async () => {
+    const fake = FakeOpenAiServer.start({ defaultDelayMs: 0 });
+    const entered = new Deferred<Request>();
+    const settled = new Deferred<void>();
+    const readJson = Request.prototype.json;
+    // Observes the real body read so cancellation cannot precede request admission.
+    const reading = spyOn(Request.prototype, 'json').mockImplementation(function (this: Request) {
+      entered.resolve(this);
+      return readJson.call(this).finally(() => { settled.resolve(); });
+    });
+    const abort = new AbortController();
+    try {
+      const response = fetch(`${fake.baseUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: fakeOpenAiRequestHeaders(),
+        signal: abort.signal,
+        body: new ReadableStream({
+          start(controller) { controller.enqueue(new TextEncoder().encode('{"model":')); },
+        }),
+      }).catch((error) => error);
+      const request = await withTimeout(entered.promise, 5_000, () => 'Body read did not start');
+      abort.abort();
+      await response;
+      await withTimeout(settled.promise, 5_000, () => 'Body read did not settle');
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(request.signal.aborted).toBe(true);
+      expect(fake.requests()).toHaveLength(0);
+      fake.assertNoProtocolViolations();
+    } finally {
+      abort.abort();
+      reading.mockRestore();
+      fake.stop();
+    }
+  });
+
+  test('still rejects a complete malformed JSON upload', async () => {
+    const fake = FakeOpenAiServer.start({ defaultDelayMs: 0 });
+    try {
+      const response = await fetch(`${fake.baseUrl}/v1/chat/completions`, {
+        method: 'POST', headers: fakeOpenAiRequestHeaders(), body: '{"model":',
+      });
+      expect(response.status).toBe(400);
+      expect(fake.protocolViolations()).toEqual(['Chat completion body is not valid JSON']);
     } finally {
       fake.stop();
     }

@@ -199,7 +199,7 @@ describe('self handoff commands', () => {
     support.deps.chats.addChat = mock(() => false);
 
     await expect(commands.submitSelfHandoffRun(request())).rejects.toMatchObject({
-      code: 'IDEMPOTENCY_CONFLICT',
+      code: 'CHAT_ID_COLLISION',
     });
     expect(support.deps.handoffs.deleteContinuationLedger).toHaveBeenCalledWith(TARGET_ID);
   });
@@ -240,7 +240,7 @@ describe('self handoff commands', () => {
     chats.set(TARGET_ID, sourceChat({ agentId: 'codex' }));
 
     await expect(commands.submitSelfHandoffRun(request())).rejects.toMatchObject({
-      code: 'IDEMPOTENCY_CONFLICT',
+      code: 'CHAT_ID_COLLISION',
     });
   });
 
@@ -320,7 +320,7 @@ describe('self handoff commands', () => {
 
     for (const attempt of [1, 2]) {
       await expect(commands.submitSelfHandoffRun(request()), `attempt ${attempt}`)
-        .rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
+        .rejects.toMatchObject({ code: 'CHAT_ID_COLLISION' });
     }
     expect(scheduled).toHaveLength(0);
     expect(support.deps.ledger.accept).not.toHaveBeenCalled();
@@ -340,7 +340,7 @@ describe('self handoff commands', () => {
     chats.set(TARGET_ID, sourceChat({ agentId: 'codex' }));
 
     await expect(commands.submitSelfHandoffRun(request()))
-      .rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
+      .rejects.toMatchObject({ code: 'CHAT_ID_COLLISION' });
 
     expect(scheduled).toHaveLength(0);
     expect(support.deps.ledger.accept).not.toHaveBeenCalled();

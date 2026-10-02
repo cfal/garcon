@@ -117,6 +117,35 @@ function createRoutes(snapshot = createSnapshot(), appTitle = null, overrides = 
 
 describe('share storage error boundaries', () => {
   it.each([
+    ['POST', 'publish'],
+    ['DELETE', 'revokeShareByChatId'],
+  ])('codes unexpected %s failures without exposing internal details', async (method, operation) => {
+    const { routes } = createRoutes(undefined, null, {
+      session: { agentId: 'codex', model: 'test', projectPath: '/synthetic' },
+      shareStore: { [operation]: () => { throw new Error('/private/synthetic-storage'); } },
+    });
+    const url = new URL('http://localhost/api/v1/chats/share?chatId=123');
+    const response = await routes[url.pathname][method](new Request(url, {
+      method, headers: { 'Content-Type': 'application/json' },
+      body: method === 'POST' ? JSON.stringify({ chatId: '123' }) : undefined,
+    }), url);
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({
+      success: false, error: 'Internal server error', errorCode: 'INTERNAL_ERROR', retryable: true,
+    });
+  });
+
+  it('codes a missing share on revocation', async () => {
+    const { routes } = createRoutes(undefined, null, { shareStore: { revokeShareByChatId: async () => false } });
+    const url = new URL('http://localhost/api/v1/chats/share?chatId=123');
+    const response = await routes[url.pathname].DELETE(new Request(url, { method: 'DELETE' }), url);
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({
+      success: false, error: 'Share not found', errorCode: 'VALIDATION_FAILED', retryable: false,
+    });
+  });
+
+  it.each([
     ['/api/v1/chats/share', 'POST', '', 'publish', false],
     ['/api/v1/chats/share', 'DELETE', '?chatId=123', 'revokeShareByChatId', false],
     ['/api/v1/chats/share/status', 'GET', '?chatId=123', 'getEntryByChatId', false],
@@ -241,7 +270,9 @@ describe('share creation route', () => {
     const body = await response.json();
 
     expect(response.status).toBe(422);
-    expect(body).toEqual({ success: false, error: 'The transcript ledger is unavailable' });
+    expect(body).toEqual({
+      success: false, error: 'The transcript ledger is unavailable', errorCode: 'TRANSCRIPT_UNAVAILABLE', retryable: false,
+    });
     expect(JSON.stringify(body)).not.toContain(sentinel);
   });
 });

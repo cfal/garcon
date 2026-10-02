@@ -9,6 +9,27 @@ const { copyToClipboard } = vi.hoisted(() => ({
 vi.mock('$lib/utils/clipboard', () => ({ copyToClipboard }));
 
 describe('ChatActionDialogs', () => {
+	it('uses the same title-size validation for Save and Enter', async () => {
+		const onConfirmRename = vi.fn();
+		render(ChatActionDialogs, {
+			chatDeleteConfirmation: null, onCancelDelete: vi.fn(), onConfirmDelete: vi.fn(),
+			chatRenameConfirmation: { chatId: 'chat-1', currentName: 'Synthetic' },
+			onCancelRename: vi.fn(), onConfirmRename, chatDetailsDialog: null, onCloseDetails: vi.fn(),
+		});
+		const input = await screen.findByRole('textbox');
+		const save = screen.getByRole('button', { name: 'Save' });
+		await fireEvent.input(input, { target: { value: '\u{1f600}'.repeat(1025) } });
+		expect(save.hasAttribute('disabled')).toBe(true);
+		expect(screen.getByRole('alert').textContent).toContain('4096 UTF-8 bytes');
+		await fireEvent.keyDown(input, { key: 'Enter' });
+		await fireEvent.click(save);
+		expect(onConfirmRename).not.toHaveBeenCalled();
+		await fireEvent.input(input, { target: { value: '\u{1f600}'.repeat(1024) } });
+		expect(save.hasAttribute('disabled')).toBe(false);
+		await fireEvent.keyDown(input, { key: 'Enter' });
+		expect(onConfirmRename).toHaveBeenCalledTimes(1);
+	});
+
 	afterEach(() => {
 		cleanup();
 		vi.clearAllMocks();

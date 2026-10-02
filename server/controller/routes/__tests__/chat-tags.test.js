@@ -24,6 +24,7 @@ async function call(handler, body, method = 'PATCH') {
 function service() {
   const result = { success: true, chatId: 'chat-1', tags: ['review'], addedTags: ['review'], removedTags: ['ready'] };
   return {
+    set: mock(async (input) => ({ success: true, ...input, changed: true })),
     replace: mock(async () => result),
     applyDelta: mock(async () => result),
     transition: mock(async () => result),
@@ -33,6 +34,16 @@ function service() {
 
 describe('chat tag routes', () => {
   beforeEach(() => parseJsonBody.mockClear());
+
+  it('accepts a desired set without weakening PATCH baseline validation', async () => {
+    const tags = service();
+    const routes = createChatTagRoutes(tags);
+    const input = { chatId: 'chat-1', tags: ['Review'] };
+    const result = await call(routes['/api/v1/chats/tags'].PUT, input, 'PUT');
+    expect(result.body).toEqual({ success: true, chatId: 'chat-1', tags: ['review'], changed: true });
+    expect((await call(routes['/api/v1/chats/tags'].PATCH, input)).response.status).toBe(400);
+    expect((await call(routes['/api/v1/chats/tags'].PUT, { ...input, expectedTags: [] }, 'PUT')).response.status).toBe(400);
+  });
 
   it('normalizes replacement and delta input at the boundary', async () => {
     const tags = service();

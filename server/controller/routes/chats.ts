@@ -238,8 +238,8 @@ export default function createChatRoutes({
   }
 
   async function validateStartPath(request: Request, url: URL): Promise<Response> {
-    const dirPath = String(url.searchParams.get('path') || '').trim();
-    if (!dirPath) {
+    const dirPath = url.searchParams.get('path') ?? '';
+    if (!dirPath.trim()) {
       return pathValidationError('path is required', 'path_required', 400);
     }
 

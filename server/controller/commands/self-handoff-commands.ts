@@ -87,7 +87,7 @@ export class SelfHandoffCommands {
     const targetExists = this.deps.chats.getChat(input.chatId) !== null;
     if (targetExists && (!priorRecord || retryingPreScheduleFailure)) {
       throw new CommandValidationError(
-        'IDEMPOTENCY_CONFLICT',
+        'CHAT_ID_COLLISION',
         `Session already exists: ${input.chatId}`,
         409,
       );
@@ -221,7 +221,7 @@ export class SelfHandoffCommands {
       });
       if (!added) {
         throw new CommandValidationError(
-          'IDEMPOTENCY_CONFLICT',
+          'CHAT_ID_COLLISION',
           `Session already exists: ${input.chatId}`,
           409,
         );

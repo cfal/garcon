@@ -37,7 +37,7 @@ function timestampValue(value: string | null | undefined): number | null {
 }
 
 export function findRepositoryWorktreePath(worktrees: readonly GitWorktreeItem[]): string {
-	return worktrees.find((worktree) => worktree.isMain)?.path.trim() ?? '';
+	return worktrees.find((worktree) => worktree.isMain)?.path ?? '';
 }
 
 export function filterAndSortWorktrees(
@@ -169,7 +169,7 @@ export class GitWorktreePickerState {
 	}
 
 	get effectivePath(): string {
-		return this.pathOverride.trim() || this.derivedPath;
+		return this.pathOverride.trim() ? this.pathOverride : this.derivedPath;
 	}
 
 	get canCreate(): boolean {

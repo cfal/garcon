@@ -913,6 +913,26 @@ describe('WsConnection', () => {
 		connection.disconnect();
 	});
 
+	it.each(['chat-subscribe', 'chat-reload'])('settles missing-chat errors for %s without waiting for timeout', async (type) => {
+		const connection = new WsConnection();
+		connection.connect('token');
+		const socket = mockSockets[0];
+		socket.open();
+		try {
+			const request = connection.sendRequest({ type });
+			const { clientRequestId } = lastSentPayload(socket);
+			socket.message({
+				type: 'client-request-error', clientRequestId, requestType: type,
+				code: 'MISSING_CHAT_ID', message: `Missing chatId for "${type}"`, retryable: false,
+			});
+			await expect(request).rejects.toMatchObject({
+				name: 'WsRequestError', code: 'MISSING_CHAT_ID', retryable: false,
+			});
+		} finally {
+			connection.disconnect();
+		}
+	});
+
 	it('abandons offline sockets and reconnects immediately when the browser returns online', () => {
 		const connection = new WsConnection();
 

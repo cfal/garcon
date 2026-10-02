@@ -33,6 +33,26 @@ function makeWorktree(path: string, branch: string): GitWorktreeItem {
 }
 
 describe('ProjectPathDialogState', () => {
+	it('distinguishes spaced paths from the current path and validates the exact candidate', async () => {
+		vi.useFakeTimers();
+		const dialog = new ProjectPathDialogState();
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: true });
+		try {
+			dialog.open('/workspace/project', 'local', '/workspace/project ');
+			expect(dialog.isUnchanged).toBe(false);
+			dialog.scheduleValidation();
+			await vi.advanceTimersByTimeAsync(250);
+			expect(chatsApi.validateStart).toHaveBeenLastCalledWith('/workspace/project ', expect.objectContaining({ executorId: 'local' }));
+			expect(dialog.nonblankPath).toBe('/workspace/project ');
+			expect(dialog.canSubmit).toBe(true);
+			dialog.setCandidatePath('   ');
+			expect(dialog.canSubmit).toBe(false);
+		} finally {
+			dialog.dispose();
+			vi.useRealTimers();
+		}
+	});
+
 	it('fences remote worktree list and creation across executor replacement and dialog retargeting', async () => {
 		const executors = new ExecutorsStore();
 		const remote = {

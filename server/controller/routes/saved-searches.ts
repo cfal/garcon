@@ -44,10 +44,10 @@ export function createSavedSearchRoutes(settings: Pick<SettingsStore,
     try {
       const input = sanitizeSavedSearchInput(body);
       if (!input || !input.query) {
-        return Response.json({ success: false, error: 'query is required' }, { status: 400 });
+        return jsonError('query is required', 400);
       }
       if (!hasAnySavedSearchVisibility(input)) {
-        return Response.json({ success: false, error: 'at least one visibility option is required' }, { status: 400 });
+        return jsonError('at least one visibility option is required', 400);
       }
       const now = new Date().toISOString();
       const savedSearch = {

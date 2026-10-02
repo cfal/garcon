@@ -35,6 +35,22 @@ test('catalog budgets do not combine project-specific text from different execut
   expect(preambleCatalogCompositionViolation([first, { ...second, scope: first.scope }])?.kind).toBe('combined-limit');
 });
 
+test('scope normalization and inspection preserve distinct spaced project paths', async () => {
+  const rules = [
+    { projectPath: '/project', includeNested: false },
+    { projectPath: '/project ', includeNested: false },
+  ];
+  const { id: _id, createdAt: _created, updatedAt: _updated, ...definition } = preamble();
+  expect(normalizePreambleDefinitionInput({ ...definition, scope: { type: 'project-paths', rules } })?.scope)
+    .toEqual({ type: 'project-paths', rules });
+  const paths = new PreambleProjectPathService(async (projectPath, executorId) => {
+    expect(projectPath).toBe('/project ');
+    expect(executorId).toBe(EXECUTOR_ID);
+    return { kind: 'available', effectiveProjectKey: projectPath };
+  });
+  expect(await paths.resolve('/project ', EXECUTOR_ID)).toBe('/project ');
+});
+
 test('scope mutation inspection reaches the selected executor and does not fall back', async () => {
   const seen: (string | null | undefined)[] = [];
   const paths = new PreambleProjectPathService(async (_path, executorId) => {

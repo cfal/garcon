@@ -9,6 +9,8 @@ import {
   isWebBuildCurrent,
   productionWebBuildEnvironment,
   recordWebBuild,
+  repoRoot,
+  webBuildInputs,
 } from '../web-build-cache.js';
 
 const temporaryDirectories = [];
@@ -41,6 +43,12 @@ async function createFixture() {
 }
 
 describe('web build cache', () => {
+  it('tracks language chunk configuration and the build-integrated eager asset guard', () => {
+    for (const input of ['codemirror-chunks.ts', 'codemirror-packages.ts', 'scripts/eager-assets.ts', 'scripts/report-eager-assets.ts']) {
+      expect(webBuildInputs).toContain(path.join(repoRoot, 'web', input));
+    }
+  });
+
   it('hashes file content and paths deterministically', async () => {
     const fixture = await createFixture();
     const first = await computeWebBuildHash([fixture.input]);

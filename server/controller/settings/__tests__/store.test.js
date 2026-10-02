@@ -208,6 +208,20 @@ describe('settings store', () => {
       expect(name).toBe('My Title');
     });
 
+    it('rejects oversized new titles without changing stored legacy titles', async () => {
+      const legacy = 'x'.repeat(4097);
+      await writeRaw({ ui: {}, paths: {}, chatNames: { abc: legacy } });
+      expect(store.getChatName('abc')).toBe(legacy);
+      await expect(store.setSessionName('abc', legacy)).rejects.toThrow('4096 UTF-8 bytes');
+      await expect(store.setSessionNameIfAbsent('new', legacy)).rejects.toThrow('4096 UTF-8 bytes');
+      const reopened = new SettingsStore(tmpDir);
+      await reopened.init();
+      expect(reopened.getChatName('abc')).toBe(legacy);
+      expect(reopened.getChatName('new')).toBeNull();
+      await reopened.setSessionName('abc', 'Repaired');
+      expect(reopened.getChatName('abc')).toBe('Repaired');
+    });
+
     it('setSessionName with empty string deletes the entry', async () => {
       await store.setSessionName('abc', 'My Title');
       await store.setSessionName('abc', '');
@@ -498,6 +512,7 @@ describe('settings store', () => {
 
       const paths = await store.getPathSettings();
       expect(paths.pinnedProjectPaths).toEqual([
+        ' /workspace/alpha ',
         '/workspace/alpha',
         '/workspace/beta',
         '/workspace/zeta',
@@ -518,6 +533,7 @@ describe('settings store', () => {
 
       const paths = await store.getPathSettings();
       expect(paths.pinnedProjectPaths).toEqual([
+        ' /workspace/alpha ',
         '/workspace/alpha',
         '/workspace/beta',
         '/workspace/zeta',

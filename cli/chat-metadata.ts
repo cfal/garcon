@@ -17,6 +17,7 @@ import type {
   SetTagsCliCommand,
 } from './args.js';
 import type { CliOutput } from './output.js';
+import { terminalLine } from './terminal-output.js';
 
 export interface ChatMetadataClient {
   setChatPinned(
@@ -43,7 +44,7 @@ function writeMetadataResult(
   response: unknown,
   plainLines: readonly string[],
 ): void {
-  output.result(json ? JSON.stringify(response, null, 2) : plainLines.join('\n'));
+  output.result(json ? JSON.stringify(response, null, 2) : plainLines.map(terminalLine).join('\n'));
 }
 
 export async function runChatOrderMutation(

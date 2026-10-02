@@ -28,6 +28,21 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       expect(detail.threads).toEqual([]);
 
       const configPath = join(project, 'gh-fixture.json');
+      const specialPath = 'a\tb.txt';
+      await writeFile(configPath, JSON.stringify({
+        label: 'synthetic-worker',
+        commentPages: [
+          [{ id: 1, path: specialPath, line: 1, side: 'RIGHT', body: 'first page' }],
+          [{ id: 2, path: specialPath, line: 2, side: 'RIGHT', body: 'second page' }],
+        ],
+        diff: 'diff --git "a/a\\tb.txt" "b/a\\tb.txt"\n--- "a/a\\tb.txt"\n+++ "b/a\\tb.txt"\n@@ -1 +1 @@\n--- i;\n+++ i;\n',
+        files: [{ path: specialPath, additions: 1, deletions: 1 }],
+      }));
+      const named = await fixture.client.get<ExecutionGhResults['getPullRequest']>(`/api/v1/gh/pull-request?${query}&number=1`);
+      expect(named.files).toMatchObject([{ path: specialPath }]);
+      expect(Object.keys(named.fileBodies)).toEqual([specialPath]);
+      expect(named.fileBodies[specialPath].patch).toContain('+++ i;');
+      expect(named.threads.flatMap(thread => thread.comments.map(comment => comment.body))).toEqual(['first page', 'second page']);
       await writeFile(configPath, JSON.stringify({ label: 'synthetic-worker', bodyBytes: 4 * 1024 * 1024 }));
       expect(await rejectionOf(fixture.client.get(`/api/v1/gh/pull-request?${query}&number=1`))).toMatchObject({ status: 413, body: { errorCode: 'GIT_RESULT_TOO_LARGE' } });
       const diff = `diff --git a/example.txt b/example.txt\n--- a/example.txt\n+++ b/example.txt\n@@ -0,0 +1,350 @@\n${`+${'\t'.repeat(9999)}\n`.repeat(350)}`

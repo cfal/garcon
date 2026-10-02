@@ -9,7 +9,7 @@ import type {
 	PreambleSelectionUnavailableReason,
 	PreamblesSnapshot,
 } from '$shared/preambles';
-import { isProjectPathAncestor, normalizeProjectPath } from '$lib/utils/project-path.js';
+import { isWithinExecutorPath } from '$shared/executor-path.js';
 
 export interface DraftSelectionRow {
 	readonly id: PreambleId;
@@ -23,11 +23,8 @@ export interface ProjectedDraftSelection {
 }
 
 function ruleMatches(rule: { projectPath: string; includeNested: boolean }, projectPath: string) {
-	const rulePath = normalizeProjectPath(rule.projectPath);
-	const chatPath = normalizeProjectPath(projectPath);
-	if (!rulePath || !chatPath) return false;
-	if (rulePath === chatPath) return true;
-	return rule.includeNested && isProjectPathAncestor(rulePath, chatPath);
+	return rule.projectPath === projectPath
+		|| (rule.includeNested && isWithinExecutorPath(rule.projectPath, projectPath));
 }
 
 function scopeMatches(preamble: Preamble, projectPath: string): boolean {

@@ -1236,3 +1236,11 @@ describe('native session lookup arguments', () => {
     });
   });
 });
+test('rejects oversized chat titles before creating or renaming chats', () => {
+  const title = 'x'.repeat(4097);
+  for (const args of [
+    ['rename', '1785337200123456', title],
+    ['start', '--agent', 'codex', '--model', 'synthetic', '--title', title, 'Synthetic task'],
+    ['resume', '1785337200123456', '--title', title, 'Synthetic task'],
+  ]) expect(() => parseCliArgs(args, {}, '/workspace')).toThrow('4096 UTF-8 bytes');
+});

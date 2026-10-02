@@ -78,7 +78,9 @@ describe('corrupt auth state', () => {
           body: JSON.stringify({ username: 'attacker', password: 'password123' }),
         });
         expect(response.status).toBe(500);
-        expect(await response.json()).toEqual({ error: 'Internal server error' });
+        expect(await response.json()).toEqual({
+          success: false, error: 'Internal server error', errorCode: 'INTERNAL_ERROR', retryable: true,
+        });
       }
 
       const [quarantineName] = (await readdir(directories.config)).filter((entry) =>

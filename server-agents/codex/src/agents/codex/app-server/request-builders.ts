@@ -4,7 +4,7 @@ import os from 'os';
 import path from 'path';
 import type { AgentAttachment } from '@garcon/common/agent-execution';
 import type { PermissionMode, ThinkingMode } from '@garcon/common/chat-modes';
-import { codexModelSupportsMaxEffort } from '@garcon/common/models';
+import { GPT_6_ASTRA_MODEL, GPT_6_1_SOL_MODEL, GPT_6_SOL_MODEL, GPT_6_LUNA_MODEL } from '@garcon/common/models';
 import type { CodexProviderConfig, CodexStartRequest } from '../runtime-types.js';
 import type { CodexSkillRef } from '../slash-command-discovery.js';
 import type {
@@ -198,6 +198,12 @@ function sandboxPolicyMatches(
   return (left.networkAccess ?? false) === (right.networkAccess ?? false)
     && (left.excludeTmpdirEnvVar ?? false) === (right.excludeTmpdirEnvVar ?? false)
     && (left.excludeSlashTmp ?? false) === (right.excludeSlashTmp ?? false);
+}
+
+function codexModelSupportsMaxEffort(model: string | undefined): boolean {
+  const maxEffortModels = [GPT_6_ASTRA_MODEL, GPT_6_1_SOL_MODEL, GPT_6_SOL_MODEL, GPT_6_LUNA_MODEL, 'gpt-5.6'];
+  return maxEffortModels.some(value => model === value || model?.endsWith(`:${value}`) === true)
+    || model?.startsWith('gpt-5.6-') === true;
 }
 
 // Preserves xhigh compatibility for older models while allowing models that

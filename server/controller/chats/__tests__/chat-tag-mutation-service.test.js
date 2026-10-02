@@ -76,6 +76,21 @@ afterEach(async () => {
 });
 
 describe('ChatTagMutationService', () => {
+  it('serializes desired sets and converges when another writer installed the same tags', async () => {
+    const current = registryDouble();
+    const service = serviceWith(current.registry);
+    const results = await Promise.all([
+      service.set({ chatId: CHAT_ID, tags: ['Other'] }),
+      service.set({ chatId: CHAT_ID, tags: ['Review'] }),
+      service.set({ chatId: CHAT_ID, tags: ['review'] }),
+    ]);
+    expect(results.map((result) => result.changed)).toEqual([true, true, false]);
+    expect(current.tags()).toEqual(['review']);
+    expect(current.registry.updateChatPhased).toHaveBeenCalledTimes(2);
+    await expect(service.set({ chatId: CHAT_ID, tags: [] })).resolves.toMatchObject({ tags: [], changed: true });
+    current.setDurability('unknown');
+    await expect(service.set({ chatId: CHAT_ID, tags: ['other'] })).rejects.toMatchObject({ code: 'CHAT_TAG_SAVE_UNKNOWN' });
+  });
   it('compares replacement baselines and applies serialized deltas without losing tags', async () => {
     const current = registryDouble();
     const service = serviceWith(current.registry);

@@ -11,7 +11,6 @@ import { jsonError, jsonErrorFromUnknown } from '../../common/http-error.js';
 import type { RouteHandler, RouteMap } from '../lib/http-route-types.js';
 import { resolveProjectPathFromUrl } from './project-path-resolver.js';
 import { executorIdFromUrl } from './executor-target.js';
-import { createFileAttachmentRoutes } from './file-attachments.js';
 
 interface FilesRouteDependencies {
   readonly files: (executorId: string) => Promise<ExecutionFilesService>;
@@ -67,7 +66,6 @@ export default function createFilesRoutes(registry: IChatRegistry, dependencies:
   };
 
   return {
-    ...createFileAttachmentRoutes(),
     '/api/v1/files/tree': { GET: guarded(async (request, url) => {
       const service = await files(executorIdFromUrl(url, registry));
       try { return Response.json(await service.tree({ directoryPath: url.searchParams.get('path') || undefined }, callOptions(request))); }

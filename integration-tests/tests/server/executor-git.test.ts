@@ -9,6 +9,55 @@ import { initializeFixtureRepository, runFixtureGit, runFixtureGitAt } from '../
 import { rejectionOf } from '../../support/promise-assertions.js';
 
 for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote-executor-dials'] as const) {
+  test(`Git destructive selections stay literal and preserve tracked descendants (${executionBackend})`, async () => {
+    await withIntegrationFixture(`git-literal-${executionBackend}`, async fixture => {
+      const { client } = fixture;
+      const project = fixture.executionDirs.project;
+      const target = { executorId: client.executorId, project };
+      await initializeFixtureRepository(project);
+      await mkdir(join(project, 'dir'));
+      await writeFile(join(project, 'dir/kept.txt'), 'tracked\n');
+      await writeFile(join(project, '*.txt'), 'base\n');
+      await runFixtureGit(project, 'add', '--', 'dir', ':(literal)*.txt');
+      await runFixtureGit(project, 'commit', '-m', 'Track literal and descendant');
+      await writeFile(join(project, 'other.txt'), 'base\n');
+      await runFixtureGit(project, 'add', '--', 'other.txt');
+      await runFixtureGit(project, 'commit', '-m', 'Unrelated sibling');
+      await writeFile(join(project, 'dir/new.txt'), 'untracked\n');
+      await writeFile(join(project, 'new.txt'), 'untracked sibling\n');
+      for (const file of ['dir', '*.txt']) {
+        expect(await rejectionOf(client.post('/api/v1/git/delete-untracked', { ...target, file })))
+          .toMatchObject({ status: 400 });
+      }
+      expect(await readFile(join(project, 'dir/kept.txt'), 'utf8')).toBe('tracked\n');
+      expect(await readFile(join(project, 'dir/new.txt'), 'utf8')).toBe('untracked\n');
+      expect(await readFile(join(project, '*.txt'), 'utf8')).toBe('base\n');
+      expect(await readFile(join(project, 'new.txt'), 'utf8')).toBe('untracked sibling\n');
+      const query = new URLSearchParams({ ...target, file: '*.txt' });
+      expect(await client.get(`/api/v1/git/file-history?${query}`))
+        .toMatchObject({ commits: [{ subject: 'Track literal and descendant' }] });
+      await client.post('/api/v1/git/delete-untracked', { ...target, file: 'dir/new.txt' });
+      expect(await readFile(join(project, 'dir/kept.txt'), 'utf8')).toBe('tracked\n');
+
+      await runFixtureGit(project, 'checkout', '-b', 'side');
+      for (const file of ['*.txt', 'other.txt']) await writeFile(join(project, file), 'theirs\n');
+      await runFixtureGit(project, 'commit', '-am', 'Side edits');
+      await runFixtureGit(project, 'checkout', 'main');
+      for (const file of ['*.txt', 'other.txt']) await writeFile(join(project, file), 'ours\n');
+      await runFixtureGit(project, 'commit', '-am', 'Main edits');
+      await rejectionOf(runFixtureGit(project, 'merge', 'side'));
+      const siblingIndex = await runFixtureGit(project, 'ls-files', '-u', '--', 'other.txt');
+      await client.post('/api/v1/git/conflict/accept', { ...target, file: '*.txt', side: 'theirs' });
+      expect(await readFile(join(project, '*.txt'), 'utf8')).toBe('theirs\n');
+      expect(await runFixtureGit(project, 'ls-files', '-u', '--', 'other.txt')).toBe(siblingIndex);
+      await writeFile(join(project, '*.txt'), 'resolved\n');
+      await client.post('/api/v1/git/conflict/resolve', { ...target, file: '*.txt' });
+      expect(await runFixtureGit(project, 'show', ':*.txt')).toBe('resolved\n');
+      expect(await runFixtureGit(project, 'ls-files', '-u', '--', 'other.txt')).toBe(siblingIndex);
+      expect(await readFile(join(project, 'other.txt'), 'utf8')).toContain('<<<<<<<');
+    }, { executionBackend, projectRoots: 'separate' });
+  }, 60_000);
+
   test(`Git review loads bounded files independently without exhausting the document (${executionBackend})`, async () => {
     await withIntegrationFixture(`git-body-limit-${executionBackend}`, async fixture => {
       const { client } = fixture;

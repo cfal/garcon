@@ -754,11 +754,18 @@ export class TranscriptLedgerStore {
   }
 
   // Also removes chat directories whose deletion a restart interrupted.
-  removeUnregisteredChatDirectories(registeredChatIds: ReadonlySet<string>): readonly string[] {
+  removeUnregisteredChatDirectories(registeredChatIds: ReadonlySet<string> | null): readonly string[] {
     const removed: string[] = [];
     if (statSizeIfExists(this.#rootDirectory) === null) return removed;
+    const names = readdirSync(this.#rootDirectory);
+    if (registeredChatIds === null) {
+      if (names.length > 0) {
+        throw new Error('Missing chats.json with existing transcript ledgers; restore the registry before starting Garcon');
+      }
+      return removed;
+    }
     void this.#sweepTrash();
-    for (const name of readdirSync(this.#rootDirectory)) {
+    for (const name of names) {
       if (!CHAT_DIRECTORY_PATTERN.test(name) || registeredChatIds.has(name)) continue;
       const directory = path.join(this.#rootDirectory, name);
       const stats = lstatIfExists(directory);

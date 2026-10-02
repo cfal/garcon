@@ -120,7 +120,7 @@
 			validationError={startup.validationError}
 			pin={{
 				isPinned: startup.isPinnedPath,
-				disabled: !startup.trimmedPath || startup.isUpdatingPinnedPath,
+				disabled: !startup.nonblankPath || startup.isUpdatingPinnedPath,
 				loading: startup.isUpdatingPinnedPath,
 				onToggle: () => startup.togglePinnedPath(),
 			}}
@@ -128,7 +128,7 @@
 				open: startup.filesAvailable && startup.showBrowser && !startup.isUpdatingPinnedPath,
 				executorId: startup.executorId,
 				executorContextKey: startup.pathContextKey,
-				currentPath: startup.trimmedPath || startup.browseStartPath || startup.projectBasePath,
+				currentPath: startup.nonblankPath || startup.browseStartPath || startup.projectBasePath,
 				basePath: startup.projectBasePath,
 				isMobile,
 				onSelect: (path) => {
@@ -201,7 +201,7 @@
 	<div class="space-y-1.5" data-slot="scheduled-new-chat-preambles">
 		<NewChatPreambleControls
 			selection={startup.preambles}
-			trimmedPath={startup.trimmedPath}
+			nonblankPath={startup.nonblankPath}
 			validationStatus={startup.validationStatus}
 			pickerDescription={m.scheduled_prompts_preamble_selection_description()}
 			summaryReadyLabel={m.scheduled_prompts_preamble_preview_label()}

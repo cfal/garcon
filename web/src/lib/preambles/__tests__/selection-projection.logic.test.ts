@@ -89,16 +89,18 @@ describe('projectDraftSelection', () => {
 		expect(sibling.rows.map((row) => row.reason)).toEqual(['out-of-scope', 'out-of-scope']);
 	});
 
-	it('matches normalized Windows paths without crossing drives or sibling prefixes', () => {
+	it('matches canonical executor paths without changing case or literal backslashes', () => {
 		const scoped = preamble(ID_A, {
 			scope: {
 				type: 'project-paths',
-				rules: [{ projectPath: 'C:\\work\\project\\', includeNested: true }],
+				rules: [{ projectPath: 'C:/work/project', includeNested: true }],
 			},
 		});
 		for (const [projectPath, reason] of [
-			['c:/work/project', null],
-			['C:\\work\\project\\child', null],
+			['C:/work/project', null],
+			['C:/work/project/child', null],
+			['c:/work/project', 'out-of-scope'],
+			['C:\\work\\project\\child', 'out-of-scope'],
 			['c:/work/project-other', 'out-of-scope'],
 			['d:/work/project/child', 'out-of-scope'],
 		] as const) {
@@ -109,6 +111,28 @@ describe('projectDraftSelection', () => {
 				canonicalProjectPath: projectPath,
 			});
 			expect(projected.rows[0]!.reason).toBe(reason);
+		}
+	});
+
+	it('keeps spaced siblings distinct in selected rows and candidate eligibility', () => {
+		const exact = preamble(ID_A, {
+			scope: { type: 'project-paths', rules: [{ projectPath: '/repo ', includeNested: false }] },
+		});
+		const nested = preamble(ID_B, {
+			scope: { type: 'project-paths', rules: [{ projectPath: '/repo ', includeNested: true }] },
+		});
+		for (const [projectPath, reasons] of [
+			['/repo ', [null, null]],
+			['/repo', ['out-of-scope', 'out-of-scope']],
+			['/repo /child', ['out-of-scope', null]],
+			['/repo/child', ['out-of-scope', 'out-of-scope']],
+		] as const) {
+			const projected = projectDraftSelection({
+				draftIds: [ID_A, ID_B], savedProjection: null,
+				catalog: { preambles: [exact, nested] }, canonicalProjectPath: projectPath,
+			});
+			expect(projected.rows.map(row => row.reason)).toEqual(reasons);
+			expect([exact, nested].map(entry => candidateUnavailableReason(entry, projectPath))).toEqual(reasons);
 		}
 	});
 

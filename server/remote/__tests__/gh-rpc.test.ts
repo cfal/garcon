@@ -29,6 +29,23 @@ for (const dialer of ['controller', 'worker'] as const) {
       expect(detail.body.length).toBe(config.bodyBytes);
       expect(detail.fileBodies['example.txt'].patch).toContain('+changed');
       expect(detail.threads).toEqual([]);
+      const specialPath = 'a\tb.txt';
+      const diff = 'diff --git "a/a\\tb.txt" "b/a\\tb.txt"\n--- "a/a\\tb.txt"\n+++ "b/a\\tb.txt"\n@@ -1 +1 @@\n--- i;\n+++ i;\n';
+      await fs.writeFile(path.join(fixture.projectPath, 'gh-fixture.json'), JSON.stringify({
+        ...config, diff, files: [{ path: specialPath, additions: 1, deletions: 1 }],
+      }));
+      const named = await gh.getPullRequest({ projectPath: fixture.projectPath, number: 1 });
+      expect(named.files).toMatchObject([{ path: specialPath }]);
+      expect(Object.keys(named.fileBodies)).toEqual([specialPath]);
+      expect(named.fileBodies[specialPath].patch).toContain('+++ i;');
+      await fs.writeFile(path.join(fixture.projectPath, 'gh-fixture.json'), JSON.stringify({
+        ...config, commentsFail: false, commentPages: [
+          [{ id: 1, path: 'example.txt', line: 1, side: 'RIGHT', body: 'first page' }],
+          [{ id: 2, path: 'example.txt', line: 2, side: 'RIGHT', body: 'second page' }],
+        ],
+      }));
+      const paginated = await gh.getPullRequest({ projectPath: fixture.projectPath, number: 1 });
+      expect(paginated.threads.flatMap(thread => thread.comments.map(comment => comment.body))).toEqual(['first page', 'second page']);
       await fs.writeFile(path.join(fixture.projectPath, 'gh-fixture.json'), JSON.stringify({ ...config, bodyBytes: 4 * 1024 * 1024 }));
       await expect(gh.getPullRequest({ projectPath: fixture.projectPath, number: 1 })).rejects.toMatchObject({ code: 'GIT_RESULT_TOO_LARGE' });
       expect(fixture.executor.availability).toBe('ready');

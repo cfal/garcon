@@ -1,6 +1,5 @@
-import type { FileSessionRegistry } from '$lib/files/sessions/file-session-registry.svelte.js';
+import type { WorkspaceFiles, WorkspaceSingletons } from './workspace-resource-ports.js';
 import type { GitMutationCoordinator } from '$lib/git/surface/git-mutations.svelte.js';
-import type { SingletonSurfaceRegistry } from './singleton-surfaces.svelte.js';
 import * as m from '$lib/paraglide/messages.js';
 import type {
 	SurfaceDescriptor,
@@ -27,9 +26,9 @@ interface CloseGuardRequest {
 
 interface WorkspaceWindowDestructionServiceDeps {
 	layout: WorkspaceLayoutReader;
-	files: FileSessionRegistry;
-	singletons: SingletonSurfaceRegistry;
-	gitMutations?: GitMutationCoordinator;
+	files: WorkspaceFiles;
+	singletons: WorkspaceSingletons;
+	gitMutations?: Pick<GitMutationCoordinator, 'pendingCount'>;
 	surfaceReservations: ReservationSet<string>;
 	windowReservations: ReservationSet<WorkspaceWindowId>;
 	commitDestroyedRemovals(

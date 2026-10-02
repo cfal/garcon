@@ -5,10 +5,7 @@ import type {
 	TerminalStreamClientMessage,
 	TerminalStreamServerMessage,
 } from '$shared/terminal';
-import type {
-	TerminalRuntime,
-	TerminalRuntimeOptions,
-} from '$lib/terminal/runtime/terminal-runtime.svelte.js';
+import type { TerminalRuntimeOptions } from '$lib/terminal/runtime/terminal-runtime.svelte.js';
 import type {
 	TerminalTransportOptions,
 	TerminalTransportStatus,
@@ -24,6 +21,7 @@ import {
 import { ModuleImportError } from '$lib/utils/module-import-error.js';
 import { SurfaceFrameBridge } from '$lib/workspace/surface-frame-context.js';
 import { shouldWaitForTerminalRenderer } from '$lib/components/terminal/terminal-renderer-frame.js';
+import type { TerminalSessionRuntime } from '../terminal-registry-types.js';
 
 const runtimeId = '00000000-0000-4000-8000-000000000001';
 const firstId = `local/${runtimeId}/00000000-0000-4000-8000-000000000002`;
@@ -109,9 +107,22 @@ class FakeTransport implements TerminalTransportPort {
 	}
 }
 
-class FakeRuntime {
+class FakeRuntime implements TerminalSessionRuntime {
 	writes: string[] = [];
 	resendSize = vi.fn();
+	prepareRendererTransfer = vi.fn<TerminalSessionRuntime['prepareRendererTransfer']>();
+	attach = vi.fn<TerminalSessionRuntime['attach']>().mockReturnValue({ lease: 1, ready: Promise.resolve() });
+	park = vi.fn<TerminalSessionRuntime['park']>();
+	scheduleFit = vi.fn<TerminalSessionRuntime['scheduleFit']>();
+	focus = vi.fn<TerminalSessionRuntime['focus']>();
+	pasteFromClipboard = vi.fn<TerminalSessionRuntime['pasteFromClipboard']>().mockResolvedValue(false);
+	applyFontSize = vi.fn<TerminalSessionRuntime['applyFontSize']>();
+	sendToolbarKey = vi.fn<TerminalSessionRuntime['sendToolbarKey']>();
+	clipboardMessage = '';
+	inputControls = {
+		ctrlMode: 'inactive', altMode: 'inactive',
+		toggleModifier: vi.fn<TerminalSessionRuntime['inputControls']['toggleModifier']>(),
+	} satisfies TerminalSessionRuntime['inputControls'];
 	disposeCount = 0;
 	themes: unknown[] = [];
 
@@ -147,10 +158,12 @@ describe('TerminalRegistry', () => {
 	let onSessionTerminated: ReturnType<typeof vi.fn>;
 	let onSuccessfulList: ReturnType<typeof vi.fn<(terminalIds: readonly string[]) => void>>;
 	let now: number;
+	let runtimes: WeakMap<TerminalSessionRuntime, FakeRuntime>;
 
 	beforeEach(() => {
 		vi.useFakeTimers();
 		now = 1_000;
+		runtimes = new WeakMap();
 		listTerminals = vi
 			.fn<() => Promise<{ success: true; terminals: TerminalMetadata[] }>>()
 			.mockResolvedValue({ success: true, terminals: [] });
@@ -211,7 +224,8 @@ describe('TerminalRegistry', () => {
 				overrides.createRuntime ??
 				((options) => {
 					const runtime = new FakeRuntime(options);
-					return runtime as unknown as TerminalRuntime;
+					runtimes.set(runtime, runtime);
+					return runtime;
 				});
 		}
 		if (overrides.loadRuntime) deps.loadRuntime = overrides.loadRuntime;
@@ -268,8 +282,7 @@ describe('TerminalRegistry', () => {
 			.fn<() => Promise<TerminalRuntimeModule>>()
 			.mockRejectedValueOnce(new Error('Terminal chunk unavailable'))
 			.mockResolvedValue({
-				createTerminalRuntime: async (options) =>
-					new FakeRuntime(options) as unknown as TerminalRuntime,
+				createTerminalRuntime: async (options) => new FakeRuntime(options),
 			});
 		const registry = createRegistry({ createRuntime: null, loadRuntime });
 		await registry.list();
@@ -315,7 +328,7 @@ describe('TerminalRegistry', () => {
 			success: true,
 			terminals: [metadata(firstId, 1)],
 		});
-		const runtimeCreation = deferred<TerminalRuntime>();
+		const runtimeCreation = deferred<TerminalSessionRuntime>();
 		let runtimeOptions: TerminalRuntimeOptions | null = null;
 		const createRuntime = vi.fn((options: TerminalRuntimeOptions) => {
 			runtimeOptions = options;
@@ -341,7 +354,7 @@ describe('TerminalRegistry', () => {
 			firstSequence: 5,
 		});
 		if (!runtimeOptions) throw new Error('Expected terminal runtime options');
-		const runtime = new FakeRuntime(runtimeOptions) as unknown as TerminalRuntime;
+		const runtime = new FakeRuntime(runtimeOptions);
 		runtimeCreation.resolve(runtime);
 
 		await Promise.all([restore, takeover]);
@@ -372,7 +385,7 @@ describe('TerminalRegistry', () => {
 		const registry = createRegistry({
 			createRuntime: async (options) => {
 				await runtimeCreation.promise;
-				return new FakeRuntime(options) as unknown as TerminalRuntime;
+				return new FakeRuntime(options);
 			},
 		});
 		await registry.list();
@@ -420,7 +433,7 @@ describe('TerminalRegistry', () => {
 		const registry = createRegistry({
 			createRuntime: async (options) => {
 				await runtimeCreation.promise;
-				return new FakeRuntime(options) as unknown as TerminalRuntime;
+				return new FakeRuntime(options);
 			},
 		});
 		await registry.list();
@@ -468,7 +481,7 @@ describe('TerminalRegistry', () => {
 		const createRuntime = vi.fn((options: TerminalRuntimeOptions) => {
 			attempt += 1;
 			if (attempt === 1) return Promise.reject(new Error('Terminal chunk unavailable'));
-			return new FakeRuntime(options) as unknown as TerminalRuntime;
+			return new FakeRuntime(options);
 		});
 		const registry = createRegistry({ createRuntime });
 		await registry.list();
@@ -504,7 +517,7 @@ describe('TerminalRegistry', () => {
 			success: true,
 			terminals: [metadata(firstId, 1)],
 		});
-		const runtimeCreation = deferred<TerminalRuntime>();
+		const runtimeCreation = deferred<TerminalSessionRuntime>();
 		let runtimeOptions: TerminalRuntimeOptions | null = null;
 		const registry = createRegistry({
 			createRuntime: (options) => {
@@ -519,7 +532,7 @@ describe('TerminalRegistry', () => {
 		const runtime = new FakeRuntime(runtimeOptions);
 
 		registry.disposeTerminatedSession(firstId);
-		runtimeCreation.resolve(runtime as unknown as TerminalRuntime);
+		runtimeCreation.resolve(runtime);
 		await attachment;
 
 		expect(runtime.disposeCount).toBe(1);
@@ -532,8 +545,8 @@ describe('TerminalRegistry', () => {
 			success: true,
 			terminals: [metadata(firstId, 1)],
 		});
-		const firstCreation = deferred<TerminalRuntime>();
-		const secondCreation = deferred<TerminalRuntime>();
+		const firstCreation = deferred<TerminalSessionRuntime>();
+		const secondCreation = deferred<TerminalSessionRuntime>();
 		const runtimeOptions: TerminalRuntimeOptions[] = [];
 		const createRuntime = vi.fn((options: TerminalRuntimeOptions) => {
 			runtimeOptions.push(options);
@@ -549,8 +562,8 @@ describe('TerminalRegistry', () => {
 		const secondRequest = registry.ensureRuntime(firstId);
 		const firstRuntime = new FakeRuntime(runtimeOptions[0]);
 		const secondRuntime = new FakeRuntime(runtimeOptions[1]);
-		firstCreation.resolve(firstRuntime as unknown as TerminalRuntime);
-		secondCreation.resolve(secondRuntime as unknown as TerminalRuntime);
+		firstCreation.resolve(firstRuntime);
+		secondCreation.resolve(secondRuntime);
 
 		await expect(firstRequest).rejects.toMatchObject({ name: 'AbortError' });
 		await expect(secondRequest).resolves.toBe(secondRuntime);
@@ -748,7 +761,7 @@ describe('TerminalRegistry', () => {
 			.mockImplementationOnce(() => pendingList.promise);
 		const registry = createRegistry();
 		await registry.list();
-		const runtime = (await registry.ensureRuntime(firstId)) as unknown as FakeRuntime;
+		const runtime = runtimes.get(await registry.ensureRuntime(firstId))!;
 
 		const reconciliation = registry.list();
 		registry.disposeTerminatedSession(firstId);
@@ -861,7 +874,7 @@ describe('TerminalRegistry', () => {
 		});
 		const registry = createRegistry();
 		await registry.list();
-		const runtime = (await registry.ensureRuntime(firstId)) as unknown as FakeRuntime;
+		const runtime = runtimes.get(await registry.ensureRuntime(firstId))!;
 		transport.status = 'connected';
 		await registry.attach(firstId, 'restore');
 
@@ -994,7 +1007,7 @@ describe('TerminalRegistry', () => {
 		});
 		const registry = createRegistry();
 		await registry.list();
-		const runtime = (await registry.ensureRuntime(firstId)) as unknown as FakeRuntime;
+		const runtime = runtimes.get(await registry.ensureRuntime(firstId))!;
 		transport.status = 'connected';
 		await registry.attach(firstId, 'restore');
 		transport.emit({
@@ -1067,7 +1080,7 @@ describe('TerminalRegistry', () => {
 		});
 		const registry = createRegistry();
 		await registry.list();
-		const runtime = (await registry.ensureRuntime(firstId)) as unknown as FakeRuntime;
+		const runtime = runtimes.get(await registry.ensureRuntime(firstId))!;
 		transport.status = 'connected';
 		await registry.attach(firstId, 'restore');
 		transport.emit({
@@ -1111,8 +1124,8 @@ describe('TerminalRegistry', () => {
 		});
 		const registry = createRegistry();
 		await registry.list();
-		const first = (await registry.ensureRuntime(firstId)) as unknown as FakeRuntime;
-		const second = (await registry.ensureRuntime(secondId)) as unknown as FakeRuntime;
+		const first = runtimes.get(await registry.ensureRuntime(firstId))!;
+		const second = runtimes.get(await registry.ensureRuntime(secondId))!;
 
 		await registry.requestTermination(firstId, 'terminate-1');
 		expect(terminateTerminal).toHaveBeenCalledWith({

@@ -84,6 +84,12 @@ for (const backend of ['remote-controller-dials', 'remote-executor-dials'] as co
       expect(started).toMatchObject({ exitCode: 0, stderr: '' });
       const chatId = /^chat id: (\d{16})/m.exec(started.stdout)?.[1];
       expect(chatId).toBeDefined();
+      const tagged = await runCli(fixture, ['set-tags', chatId!, '--tag', 'Review', '--json']);
+      expect(tagged, tagged.stderr).toMatchObject({ exitCode: 0 });
+      expect(JSON.parse(tagged.stdout)).toMatchObject({ tags: ['review'], changed: true });
+      const sameTags = await runCli(fixture, ['set-tags', chatId!, '--tag', 'review', '--json']);
+      expect(sameTags, sameTags.stderr).toMatchObject({ exitCode: 0 });
+      expect(JSON.parse(sameTags.stdout)).toMatchObject({ tags: ['review'], changed: false });
       expect((await client.getChatSnapshot(chatId!)).chat).toMatchObject({ executorId, projectPath: fixture.executionDirs.project });
       const resumed = await runCli(fixture, ['resume', chatId!, '--model', agent.provider.model, 'Synthetic CLI continuation.'], 'executor');
       expect(resumed).toMatchObject({ exitCode: 0, stderr: '' });

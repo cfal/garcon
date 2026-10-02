@@ -1,12 +1,6 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
-
-interface ManifestEntry {
-	file: string;
-	name?: string;
-	imports?: string[];
-	css?: string[];
-}
+import { assertLazyLanguageAssets, collectEagerAssets, type ManifestEntry } from './eager-assets.js';
 
 interface AssetReport {
 	file: string;
@@ -74,29 +68,10 @@ function packageVersion(packageName: string): string {
 
 const manifest = readJson<Record<string, ManifestEntry>>(manifestPath);
 const html = readFileSync(indexPath, 'utf8');
-const keysByFile = new Map<string, string[]>();
-for (const [key, entry] of Object.entries(manifest)) {
-	keysByFile.set(entry.file, [...(keysByFile.get(entry.file) ?? []), key]);
-}
-
 const preloadFiles = linkedAssets(html, 'modulepreload');
-const eagerFiles = new Set<string>();
-const eagerCssFiles = new Set(linkedAssets(html, 'stylesheet'));
-const queue = [...preloadFiles];
-
-while (queue.length > 0) {
-	const file = queue.pop();
-	if (!file || eagerFiles.has(file)) continue;
-	eagerFiles.add(file);
-	for (const key of keysByFile.get(file) ?? []) {
-		const entry = manifest[key];
-		for (const cssFile of entry.css ?? []) eagerCssFiles.add(cssFile);
-		for (const importedKey of entry.imports ?? []) {
-			const imported = manifest[importedKey];
-			if (imported) queue.push(imported.file);
-		}
-	}
-}
+const { files: eagerFiles, cssFiles: eagerCssFiles, keysByFile } = collectEagerAssets(
+	preloadFiles, linkedAssets(html, 'stylesheet'), manifest,
+);
 
 const preloadJs = reportAssets(
 	preloadFiles.filter((file) => file.endsWith('.js')),
@@ -109,6 +84,7 @@ const eagerJs = reportAssets(
 	manifest,
 );
 const eagerCss = reportAssets(eagerCssFiles, keysByFile, manifest);
+if (process.argv.includes('--check')) assertLazyLanguageAssets(eagerJs);
 const allJs = reportAssets(
 	collectFiles(buildRoot)
 		.filter((file) => file.endsWith('.js'))

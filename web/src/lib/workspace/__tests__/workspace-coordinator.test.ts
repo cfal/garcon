@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createWorkspaceLayoutStore, reduceWorkspaceLayout } from '../workspace-layout.svelte';
 import { WorkspaceInteractionGate } from '../workspace-interaction-gate.svelte';
 import { TransientLayerRegistry } from '../transient-layers.svelte';
-import { WorkspaceCoordinator } from '../workspace-coordinator.svelte';
+import { WorkspaceCoordinator, type WorkspaceCoordinatorDeps } from '../workspace-coordinator.svelte';
 import { WorkspaceSplitBlockedError } from '../workspace-split-blocked-error';
 import { WorkspaceTransitionArbiter } from '../workspace-transition-arbiter';
 import {
@@ -186,7 +186,10 @@ function createHarness(
 			};
 			return terminalId;
 		},
-		pendingCreates: {} as Record<string, unknown>,
+		pendingCreates: {} as Record<string, { requestedInitialWorkingDirectory: string | null; executorId: string }>,
+		executorInventories: {},
+		get orderedSessions() { return Object.values(this.sessions); },
+		list: vi.fn(async () => {}),
 		prepareRendererTransfer:
 			options.terminalPrepareRendererTransfer ?? vi.fn((_terminalId: string) => undefined),
 	};
@@ -226,29 +229,30 @@ function createHarness(
 		: layout;
 	const coordinator = new WorkspaceCoordinator({
 		arbiter: new WorkspaceTransitionArbiter(layout, commitPort),
-		terminals: terminals as never,
+		terminals,
 		workspaceContext: {
+			current: null,
 			get currentTarget() {
 				return options.currentProjectTarget ?? null;
 			},
-		} as never,
-		projectResolution: options.projectResolution ?? ({ retain: vi.fn() } as never),
-		appShell: appShell as never,
+		},
+		projectResolution: options.projectResolution ?? { retain: vi.fn(() => { throw new Error('Unexpected project resolution'); }) },
+		appShell,
 		workspaceInteractionGate,
 		transientLayers,
-		files: files as never,
-		singletons: singletons as never,
+		files,
+		singletons,
 		gitMutations: {
 			pendingCount: (surfaceId: string) =>
 				options.pendingGitSurfaceIds?.includes(surfaceId) ? 1 : 0,
-		} as never,
+		},
 		surfaceFrames: options.surfaceFrames,
 		resolveSplitAdmission: options.resolveSplitAdmission ?? resolveUnmeasuredWorkspaceSplit,
 		resolvePartitionRatioBounds: options.resolvePartitionRatioBounds ?? (() => null),
 		getRouteIdentity: () => '/',
 		onLayoutChanged: options.onLayoutChanged,
 		onTerminalLauncherDismissed: options.onTerminalLauncherDismissed,
-	});
+	} satisfies WorkspaceCoordinatorDeps);
 	return {
 		coordinator,
 		files,
@@ -2968,7 +2972,7 @@ describe('WorkspaceCoordinator', () => {
 		terminals.create
 			.mockImplementationOnce(async (_directory: string | null, requestId: string) => {
 				requestIds.push(requestId);
-				terminals.pendingCreates[requestId] = {};
+				terminals.pendingCreates[requestId] = { requestedInitialWorkingDirectory: _directory, executorId: 'local' };
 				throw new Error('network lost');
 			})
 			.mockImplementationOnce(async (_directory: string | null, requestId: string) => {
@@ -3176,7 +3180,7 @@ describe('WorkspaceCoordinator', () => {
 		terminals.create
 			.mockImplementationOnce(async (_directory: string | null, requestId: string) => {
 				requestIds.push(requestId);
-				terminals.pendingCreates[requestId] = {};
+				terminals.pendingCreates[requestId] = { requestedInitialWorkingDirectory: _directory, executorId: 'local' };
 				throw new Error('network lost');
 			})
 			.mockImplementationOnce(async (_directory: string | null, requestId: string) => {
@@ -3294,6 +3298,7 @@ describe('WorkspaceCoordinator', () => {
 				requests.push({ projectPath, requestId });
 				terminals.pendingCreates[requestId] = {
 					requestedInitialWorkingDirectory: projectPath,
+					executorId: 'local',
 				};
 				throw new TypeError('Lost terminal response');
 			})
@@ -3568,7 +3573,7 @@ describe('WorkspaceCoordinator', () => {
 		terminals.sessions[terminalId] = {
 			metadata: { ...terminalMetadata(terminalId), processStatus: 'exited' },
 			attachmentState: 'detached',
-		} as never;
+		};
 		await coordinator.openTerminalSession(terminalId, 'window-main');
 		const surfaceId = terminalSurfaceId(terminalId);
 
@@ -3586,7 +3591,7 @@ describe('WorkspaceCoordinator', () => {
 		terminals.sessions[terminalId] = {
 			metadata: terminalMetadata(terminalId),
 			attachmentState: 'attached',
-		} as never;
+		};
 		const surfaceId = terminalSurfaceId(terminalId);
 		await coordinator.openSingletonInNewWindow('git-history');
 		const historyWindowId = windowIdOfSurface(
@@ -3614,7 +3619,7 @@ describe('WorkspaceCoordinator', () => {
 		terminals.sessions[terminalId] = {
 			metadata: { ...terminalMetadata(terminalId), processStatus: 'exited' },
 			attachmentState: 'detached',
-		} as never;
+		};
 		const surfaceId = terminalSurfaceId(terminalId);
 		const opening = coordinator.openTerminalSession(terminalId, 'window-main');
 		await vi.waitFor(() =>
@@ -3641,7 +3646,7 @@ describe('WorkspaceCoordinator', () => {
 		terminals.sessions[terminalId] = {
 			metadata: { ...terminalMetadata(terminalId), processStatus: 'exited' },
 			attachmentState: 'detached',
-		} as never;
+		};
 		const surfaceId = terminalSurfaceId(terminalId);
 		await coordinator.openTerminalSession(terminalId, 'window-main');
 		onLayoutChanged.mockImplementation(() => {

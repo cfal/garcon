@@ -1,8 +1,6 @@
 import type { AppShellStore } from '$lib/stores/app-shell.svelte.js';
 import { tick } from 'svelte';
-import type { FileSessionRegistry } from '$lib/files/sessions/file-session-registry.svelte.js';
-import type { TerminalRegistry } from '$lib/terminal/sessions/terminal-registry.svelte.js';
-import type { SingletonSurfaceRegistry } from './singleton-surfaces.svelte.js';
+import type { WorkspaceFiles, WorkspaceSingletons, WorkspaceTerminals } from './workspace-resource-ports.js';
 import type { SurfaceFrameRegistry } from './surface-frame-registry.js';
 import type { WorkspaceInteractionGate } from './workspace-interaction-gate.svelte.js';
 import type { TransientLayerRegistry } from './transient-layers.svelte.js';
@@ -34,13 +32,13 @@ type PresentationMode = 'desktop' | 'mobile';
 
 interface WorkspacePresentationControllerDeps {
 	arbiter: WorkspaceTransitionArbiter;
-	terminals: TerminalRegistry;
-	workspaceContext: WorkspaceContextStore;
-	appShell: AppShellStore;
+	terminals: Pick<WorkspaceTerminals, 'prepareRendererTransfer'>;
+	workspaceContext: Pick<WorkspaceContextStore, 'current'>;
+	appShell: Pick<AppShellStore, 'isMobile' | 'requestComposerFocus'>;
 	workspaceInteractionGate: WorkspaceInteractionGate;
 	transientLayers: TransientLayerRegistry;
-	files: FileSessionRegistry;
-	singletons: SingletonSurfaceRegistry;
+	files: Pick<WorkspaceFiles, 'get'>;
+	singletons: Pick<WorkspaceSingletons, 'disposeSurface' | 'setPresentationVisible'>;
 	surfaceFrames?: SurfaceFrameRegistry;
 	onLayoutChanged?(snapshot: WorkspaceLayoutSnapshot): void;
 	getRouteIdentity(): string;

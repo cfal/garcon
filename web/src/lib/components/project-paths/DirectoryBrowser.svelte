@@ -42,7 +42,7 @@
 
 	// Clamp starting path to basePath constraint.
 	let clampedStart = $derived.by(() => {
-		const raw = currentPath.trim() || basePath;
+		const raw = currentPath.trim() ? currentPath : basePath;
 		if (!raw.startsWith(basePath)) return basePath;
 		return raw;
 	});

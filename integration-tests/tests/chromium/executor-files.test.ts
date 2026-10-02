@@ -6,7 +6,7 @@ import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import type { ServerWsMessage } from '../../../common/ws-events.js';
 
 test('edits remote files and retains offline buffers without touching controller files', async () => {
-  await withChromiumFixture('executor-files', async ({ page, integration, assertNoBrowserErrors }) => {
+  await withChromiumFixture('executor-files', async ({ page, integration, browserErrors }) => {
     const { client, executionDirs, dirs, directAgents } = integration;
     const remotePath = join(executionDirs.project, 'remote-file.txt');
     const localPath = join(dirs.project, 'remote-file.txt');
@@ -15,9 +15,10 @@ test('edits remote files and retains offline buffers without touching controller
     const chatId = integration.newChatId();
     const started = await client.startDirectChat({ chatId, content: 'Synthetic remote files fixture', projectPath: executionDirs.project, agent: directAgents.openAi });
     await client.waitForTurnTerminal(chatId, started.turnId);
-    const failedRequests: string[] = [];
+    let outage = false;
+    const failedRequests: Array<{ response: Response; duringOutage: boolean }> = [];
     page.on('response', (response) => {
-      if (response.status() >= 400) failedRequests.push(`${response.status()} ${response.url()}`);
+      if (response.status() >= 400) failedRequests.push({ response, duringOutage: outage });
     });
     await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
     const fileEntry = page.locator('[data-file-tree-entry-text]').filter({ hasText: 'remote-file.txt' });
@@ -39,8 +40,15 @@ test('edits remote files and retains offline buffers without touching controller
     expect(await readFile(remotePath, 'utf8')).toBe('Synthetic remote edit');
     expect(await readFile(localPath, 'utf8')).toBe('Synthetic controller content');
 
+    outage = true;
     await client.patch(`/api/v1/executors/${client.executorId}`, { enabled: false });
     await surface.getByRole('status').filter({ hasText: 'Files unavailable' }).waitFor();
+    const offlineProbe = new URL('/api/v1/files/text', integration.garcon.baseUrl);
+    offlineProbe.search = new URLSearchParams({ executorId: client.executorId, projectPath: executionDirs.project, path: 'remote-file.txt' }).toString();
+    expect(await page.evaluate(async (url) => {
+      const response = await fetch(url, { headers: { Authorization: `Bearer ${localStorage.getItem('bearer-token')}` } });
+      return { status: response.status, body: await response.json() };
+    }, offlineProbe.href)).toMatchObject({ status: 503, body: { success: false, errorCode: 'EXECUTOR_UNAVAILABLE' } });
     await source.press('Control+a');
     await page.keyboard.insertText('Synthetic offline edit');
     const writes: string[] = [];
@@ -61,6 +69,7 @@ test('edits remote files and retains offline buffers without touching controller
       { afterIndex: eventIndex },
     );
     await browserExpect(surface.getByRole('button', { name: 'Save', exact: true })).toBeEnabled();
+    outage = false;
     const reconnectedSave = page.waitForResponse((result) => result.request().method() === 'PUT' && new URL(result.url()).pathname === '/api/v1/files/text');
     await source.press('Control+s');
     expect((await reconnectedSave).status()).toBe(200);
@@ -70,8 +79,25 @@ test('edits remote files and retains offline buffers without touching controller
     await page.setViewportSize({ width: 390, height: 844 });
     await browserExpect(source).toHaveText('Synthetic offline edit');
     await page.screenshot({ path: join(dirs.root, 'remote-files-mobile.png') });
-    expect(failedRequests).toEqual([]);
-    assertNoBrowserErrors();
+    expect(failedRequests.length).toBeGreaterThanOrEqual(1);
+    for (const { response, duringOutage } of failedRequests) {
+      const url = new URL(response.url());
+      const request = response.request();
+      expect(duringOutage, `${response.status()} ${url}`).toBe(true);
+      expect(response.status()).toBe(503);
+      expect(await response.json()).toMatchObject({ success: false, errorCode: 'EXECUTOR_UNAVAILABLE' });
+      if (url.pathname === '/api/v1/git/quick-summary') {
+        expect(request.method()).toBe('POST');
+        expect(request.postDataJSON()).toMatchObject({ executorId: client.executorId });
+      } else {
+        expect(['/api/v1/files/text', '/api/v1/files/tree', '/api/v1/files/revision']).toContain(url.pathname);
+        expect(request.method()).toBe('GET');
+        expect(url.searchParams.get('executorId')).toBe(client.executorId);
+      }
+    }
+    expect(browserErrors).toEqual(failedRequests.map(() =>
+      'console.error: Failed to load resource: the server responded with a status of 503 (Service Unavailable)',
+    ));
   }, undefined, { executionBackend: 'remote-executor-dials', projectRoots: 'separate' });
 }, 180_000);
 

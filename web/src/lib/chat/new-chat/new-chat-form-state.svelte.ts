@@ -184,12 +184,12 @@ export class NewChatFormState {
 		return this.#options.selectableAgentIds;
 	}
 
-	get trimmedPath(): string {
-		return this.projectPath.trim();
+	get nonblankPath(): string {
+		return this.projectPath.trim() ? this.projectPath : '';
 	}
 
 	get isPinnedPath(): boolean {
-		return isPinnedProjectPath(this.pinnedProjectPaths, this.trimmedPath);
+		return isPinnedProjectPath(this.pinnedProjectPaths, this.nonblankPath);
 	}
 
 	get permissionModes(): PermissionMode[] {
@@ -209,7 +209,7 @@ export class NewChatFormState {
 			!this.modelSelectionPending &&
 			!this.modelSelectionError &&
 			canSubmitNewChat(
-				this.trimmedPath,
+				this.nonblankPath,
 				this.validationStatus,
 				this.firstMessage,
 				this.attachedImages.length,
@@ -508,7 +508,7 @@ export class NewChatFormState {
 
 	async loadWorktrees(): Promise<void> {
 		if (!this.gitAvailable) return;
-		const projectPath = this.trimmedPath;
+		const projectPath = this.nonblankPath;
 		const executorId = this.executorId;
 		const contextKey = this.pathContextKey;
 		if (!projectPath) return;
@@ -524,7 +524,7 @@ export class NewChatFormState {
 			const result = await getGitWorktrees({ executorId, projectPath }, { signal: abort.signal });
 			if (
 				executorId !== this.executorId ||
-				projectPath !== this.trimmedPath ||
+				projectPath !== this.nonblankPath ||
 				contextKey !== this.pathContextKey
 			)
 				return;
@@ -535,7 +535,7 @@ export class NewChatFormState {
 				isAbortError(error) ||
 				!this.#isCurrentWorktreeLoad(requestVersion, abort.signal) ||
 				executorId !== this.executorId ||
-				projectPath !== this.trimmedPath ||
+				projectPath !== this.nonblankPath ||
 				contextKey !== this.pathContextKey
 			) {
 				return;
@@ -572,7 +572,7 @@ export class NewChatFormState {
 
 	async createWorktree(worktreePath: string, branch?: string, baseRef?: string): Promise<boolean> {
 		if (!this.gitAvailable || this.isCreatingWorktree) return false;
-		const projectPath = this.trimmedPath;
+		const projectPath = this.nonblankPath;
 		const executorId = this.executorId;
 		const contextKey = this.pathContextKey;
 		if (!projectPath) return false;
@@ -580,7 +580,7 @@ export class NewChatFormState {
 		const current = () =>
 			generation === this.#worktreeRequestVersion &&
 			executorId === this.executorId &&
-			projectPath === this.trimmedPath &&
+			projectPath === this.nonblankPath &&
 			contextKey === this.pathContextKey;
 		this.isCreatingWorktree = true;
 		this.worktreeError = null;
@@ -612,7 +612,7 @@ export class NewChatFormState {
 
 	/** Debounced validation of the project path against the server. */
 	validatePath(): void {
-		const path = this.trimmedPath;
+		const path = this.nonblankPath;
 		const executorId = this.executorId;
 		const contextKey = this.pathContextKey;
 		if (!path) {
@@ -680,7 +680,7 @@ export class NewChatFormState {
 	// Pinned paths
 
 	async togglePinnedPath(): Promise<void> {
-		const path = this.trimmedPath;
+		const path = this.nonblankPath;
 		const executorId = this.executorId;
 		if (!path || this.isUpdatingPinnedPath) return;
 		const previous = this.pinnedProjectPaths;
@@ -761,7 +761,7 @@ export class NewChatFormState {
 		}
 		if (!this.modelCatalogValidated || this.modelSelectionPending || this.modelSelectionError)
 			return null;
-		if (!this.trimmedPath) {
+		if (!this.nonblankPath) {
 			this.error = m.chat_new_chat_errors_project_path_required();
 			return null;
 		}
@@ -784,7 +784,7 @@ export class NewChatFormState {
 		return {
 			agentId: this.agentId,
 			executorId: this.executorId,
-			projectPath: this.trimmedPath,
+			projectPath: this.nonblankPath,
 			model: selection.model,
 			apiProviderId: selection.apiProviderId,
 			modelEndpointId: selection.modelEndpointId,

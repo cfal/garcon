@@ -100,6 +100,18 @@ function deferred<T>() {
 	return { promise, resolve, reject };
 }
 
+it('resolves draft folder changes without rewriting filesystem identity', async () => {
+	const draft = makeChat({ status: 'draft', projectPath: '/previous ' });
+	const target = { kind: 'path' as const, executorId: 'local', projectPath: '/next ' };
+	vi.mocked(resolveProject).mockResolvedValueOnce({
+		target, resolution: { kind: 'available', effectiveProjectKey: target.projectPath },
+	});
+	const { controller, callbacks } = createHarness({ chats: [draft] });
+	await controller.updateProjectPath(projectDialog(draft), target.projectPath);
+	expect(resolveProject).toHaveBeenCalledWith(target, expect.anything());
+	expect(callbacks.onProjectPathUpdated).toHaveBeenCalledWith(draft.id, { projectPath: target.projectPath });
+});
+
 function createHarness(
 	options: {
 		chats?: ChatSessionRecord[];

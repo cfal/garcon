@@ -1,10 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import {
-  attachmentMimeTypeForUpload,
   MAX_ATTACHMENT_FILE_BYTES,
   MAX_ATTACHMENT_TOTAL_BYTES,
   MAX_VIDEO_ATTACHMENT_FILE_BYTES,
-  validateAttachmentUploadBatch,
   validateCommandAttachments,
 } from '../validation.ts';
 
@@ -14,28 +12,36 @@ function dataUrl(mimeType, content) {
 
 describe('attachment validation', () => {
   it('accepts common browser video formats and canonicalizes MIME aliases', () => {
-    expect(attachmentMimeTypeForUpload({ name: 'clip.mp4', type: 'video/mp4' })).toBe('video/mp4');
-    expect(attachmentMimeTypeForUpload({ name: 'clip.mov', type: '' })).toBe('video/quicktime');
-    expect(attachmentMimeTypeForUpload({ name: 'clip.webm', type: 'video/webm' })).toBe('video/webm');
-    expect(attachmentMimeTypeForUpload({ name: 'clip.mkv', type: 'video/matroska' })).toBe(
-      'video/x-matroska',
-    );
-    expect(attachmentMimeTypeForUpload({ name: 'clip.m4v', type: 'video/x-m4v' })).toBe(
-      'video/mp4',
-    );
+    for (const [name, type, mimeType] of [
+      ['clip.mp4', 'video/mp4', 'video/mp4'],
+      ['clip.mov', 'video/quicktime', 'video/quicktime'],
+      ['clip.webm', 'video/webm', 'video/webm'],
+      ['clip.mkv', 'video/matroska', 'video/x-matroska'],
+      ['clip.m4v', 'video/x-m4v', 'video/mp4'],
+    ]) {
+      expect(validateCommandAttachments([{ name, data: dataUrl(type, 'video') }])[0].mimeType).toBe(mimeType);
+    }
   });
 
   it('applies the 25MB video cap while retaining the 10MB document cap', () => {
-    expect(() => validateAttachmentUploadBatch([
-      { name: 'clip.mp4', size: MAX_VIDEO_ATTACHMENT_FILE_BYTES, type: 'video/mp4' },
+    expect(() => validateCommandAttachments([
+      { name: 'clip.mp4', data: dataUrl('video/mp4', Buffer.alloc(MAX_VIDEO_ATTACHMENT_FILE_BYTES)) },
     ])).not.toThrow();
-    expect(() => validateAttachmentUploadBatch([
-      { name: 'huge.txt', size: MAX_ATTACHMENT_FILE_BYTES + 1, type: 'text/plain' },
+    expect(() => validateCommandAttachments([
+      { name: 'huge.txt', data: dataUrl('text/plain', Buffer.alloc(MAX_ATTACHMENT_FILE_BYTES + 1)) },
     ])).toThrow('File too large. Maximum file size is 10MB.');
-    expect(() => validateAttachmentUploadBatch([
-      { name: 'huge.mp4', size: MAX_VIDEO_ATTACHMENT_FILE_BYTES + 1, type: 'video/mp4' },
-    ])).toThrow('Total upload too large. Maximum combined size is 25MB.');
+    expect(() => validateCommandAttachments([
+      { name: 'huge.mp4', data: dataUrl('video/mp4', Buffer.alloc(MAX_VIDEO_ATTACHMENT_FILE_BYTES + 1)) },
+    ])).toThrow('File too large. Maximum file size is 25MB.');
     expect(MAX_VIDEO_ATTACHMENT_FILE_BYTES).toBe(MAX_ATTACHMENT_TOTAL_BYTES);
+  });
+
+  it('enforces command attachment count and combined size', () => {
+    expect(() => validateCommandAttachments(Array(6).fill({ data: dataUrl('text/plain', 'x') })))
+      .toThrow('Maximum 5 files allowed');
+    const data = dataUrl('text/plain', Buffer.alloc(9 * 1024 * 1024));
+    expect(() => validateCommandAttachments(Array(3).fill({ data })))
+      .toThrow('Total upload too large. Maximum combined size is 25MB.');
   });
 
   it('normalizes browser data URLs that rely on a declared filename-derived MIME type', () => {

@@ -181,8 +181,12 @@ Forwarded CLI requests have no public Host: without an explicit override they
 require `GARCON_PUBLIC_URL` / `--public-url` on the controller, for both creation
 and `connection` reveal. Otherwise they fail with a configuration error rather
 than returning a synthetic address. Outbound creation takes the listening worker's
-full credential URL. Creation returns only the new ID. Saving configuration does
-not claim the worker is ready; use the bounded readiness wait separately.
+full credential URL. The CLI prints only the new ID; the authenticated create
+API response also contains the sensitive connection descriptor used by browser
+onboarding. Saving configuration does not claim the worker is ready; use the
+bounded readiness wait separately. That wait retries transient read failures
+within its original timeout, but stops on lost authority, a changed controller,
+malformed replies, or a missing or disabled executor.
 
 `update` accepts a label or either access grant. Connection edits require a full
 `--connection-url`, `--direction`, and explicit `--no-tls
@@ -301,6 +305,11 @@ Every mutation prints its generated request ID, expected store ID, and resolved 
 
 ## Start And Resume
 
+Human metadata, transcript displays, and diagnostics render terminal control
+characters visibly. JSON and exported documents remain lossless. Final assistant
+responses escape controls when stdout is a terminal; piped final responses retain
+the original text.
+
 Start a visible chat and wait for its accepted turn:
 
 ```bash
@@ -355,6 +364,12 @@ handle immediately should use `start-async --json` or `resume-async --json`,
 then pass the returned chat and turn IDs to `wait --json`.
 
 New chats created through the CLI receive the `cli` tag. Add repeatable tags with `--tag review --tag delegated`. `--title` sets the chat title.
+
+New chat-title writes are limited to 4 KiB of UTF-8 after trimming, including
+renames and `--title`. Existing oversized stored titles are preserved until an
+explicit bounded rename; they can still cause oversized gateway reads until
+repaired. Fork-derived titles reserve room for their numeric suffix. Generated
+titles retain their stricter 120-character bound.
 
 Use `--parent <chat-id>` when the new chat is delegated from an existing chat,
 for example when one agent starts another for review. Garcon records an immutable
@@ -466,7 +481,11 @@ Restart, replay, shares, and frozen forks preserve CLI presentation. Explicit na
 
 ## Search And Chat History
 
-List the complete chat metadata snapshot, optionally using the same filter language as the sidebar:
+List the complete chat metadata snapshot, optionally using the same filter language as the sidebar.
+
+Chat and search summaries include an explicit `executorId` (`local` for legacy
+Local bindings). Human lists, search hits, and status show the executor separately
+from the project path, since identical paths can refer to different hosts.
 
 ```bash
 bun cli/main.ts --runtime controller chats --json
@@ -674,6 +693,14 @@ archive are mutually exclusive order groups. `set-tags` replaces the complete
 normalized set, including the `cli` tag; `--clear` is the explicit empty set.
 Each command supports `--json` and reports whether authoritative state changed.
 Concurrent metadata writers use last-writer-wins semantics.
+Lost or malformed mutation confirmations and ambiguous server errors report an
+unknown outcome, not proof that the request never arrived. Inspect the current
+value before retrying; metadata and search-maintenance mutations are not retried
+automatically. Structured validation and pre-dispatch rejections remain definitive.
+The CLI reconciles any earlier uncertain tag save with `GET chats/tags`, then
+uses the atomic desired-set `PUT chats/tags`. Browser `PATCH chats/tags` retains
+its compare-and-set baseline. Upgrade controller and workers together for this
+forwarded API change (executor protocol revision 12).
 
 ## Export
 

@@ -1,6 +1,26 @@
 import type { HttpErrorResponse } from './http-error.js';
 import { isRecord } from './json.js';
 
+export const CHAT_TITLE_MAX_BYTES = 4 * 1024;
+const titleEncoder = new TextEncoder();
+
+export function isChatTitleWithinLimit(title: string): boolean {
+  return title.length <= CHAT_TITLE_MAX_BYTES && titleEncoder.encode(title).byteLength <= CHAT_TITLE_MAX_BYTES;
+}
+
+export function fitDerivedChatTitle(title: string, suffix: string): string {
+  const available = CHAT_TITLE_MAX_BYTES - titleEncoder.encode(suffix).byteLength;
+  let bytes = 0;
+  let prefix = '';
+  for (const character of title) {
+    const width = titleEncoder.encode(character).byteLength;
+    if (bytes + width > available) break;
+    prefix += character;
+    bytes += width;
+  }
+  return prefix + suffix;
+}
+
 export interface UpdateChatTitleRequest {
   chatId: string;
   title: string;
@@ -25,7 +45,7 @@ export function parseUpdateChatTitleRequest(value: unknown): UpdateChatTitleRequ
   if (typeof value.chatId !== 'string' || typeof value.title !== 'string') return null;
   const chatId = value.chatId.trim();
   const title = value.title.trim();
-  return chatId && title ? { chatId, title } : null;
+  return chatId && title && isChatTitleWithinLimit(title) ? { chatId, title } : null;
 }
 
 export function parseUpdateChatTitleResponse(value: unknown): UpdateChatTitleResponse | null {

@@ -406,7 +406,7 @@ export function normalizePreambleScope(value: unknown): PreambleScope | null {
     const rule = asRecord(valueRule);
     if (!rule || !hasOnlyKeys(rule, ['executorId', 'projectPath', 'includeNested'])) return null;
     const executorId = parseExecutorId(rule.executorId);
-    const projectPath = nonEmptyString(rule.projectPath);
+    const projectPath = typeof rule.projectPath === 'string' && rule.projectPath.trim() ? rule.projectPath : null;
     const key = JSON.stringify([effectiveExecutorId(executorId), projectPath]);
     if (!executorId || !projectPath || typeof rule.includeNested !== 'boolean' || paths.has(key)) {
       return null;

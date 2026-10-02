@@ -14,8 +14,8 @@ export function sanitizeBranchForPath(branch: string): string {
 /** Derives a worktree path inside the repository's .worktrees directory. */
 export function deriveWorktreePath(repositoryRoot: string, branch: string): string {
 	const dir = sanitizeBranchForPath(branch);
-	const root = repositoryRoot.trim();
-	if (!root || !dir) return '';
+	const root = repositoryRoot;
+	if (!root.trim() || !dir) return '';
 
 	const separator = root.includes('\\') ? '\\' : '/';
 	const rootWithoutTrailingSeparators = root.replace(/[\\/]+$/, '');

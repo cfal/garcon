@@ -25,9 +25,33 @@ describe('createRateLimiter', () => {
   it('rejects unbounded or fractional settings and permits an explicit zero threshold', () => {
     for (const maxRequests of [-1, 0.5, NaN, Infinity]) expect(() => createRateLimiter({ maxRequests })).toThrow(RangeError);
     for (const windowMs of [0, -1, NaN, Infinity]) expect(() => createRateLimiter({ windowMs })).toThrow(RangeError);
+    for (const maxTrackedIps of [0, -1, 0.5, NaN, Infinity]) expect(() => createRateLimiter({ maxTrackedIps })).toThrow(RangeError);
     const limiter = createRateLimiter({ maxRequests: 0 });
     try { expect(limiter.check(requestWithHeaders())?.status).toBe(429); }
     finally { limiter.dispose(); }
+  });
+
+  it('fails closed for new keys at capacity without resetting existing quotas', () => {
+    const now = spyOn(Date, 'now').mockReturnValue(0);
+    const limiter = createRateLimiter({ windowMs: 1_000, maxRequests: 2, maxTrackedIps: 2 });
+    const check = ip => limiter.check(requestWithHeaders(), serverForAddress(ip));
+    try {
+      expect(check('first')).toBeNull();
+      expect(check('second')).toBeNull();
+      for (let index = 0; index < 100; index++) expect(check(`unseen-${index}`)?.status).toBe(429);
+      expect(check('first')).toBeNull();
+      expect(check('first')?.status).toBe(429);
+      now.mockReturnValue(900);
+      expect(check('second')).toBeNull();
+      expect(check('new')?.status).toBe(429);
+      now.mockReturnValue(1_000);
+      expect(check('new')).toBeNull();
+      expect(check('first')?.status).toBe(429);
+      expect(check('second')).toBeNull();
+      expect(check('second')?.status).toBe(429);
+      now.mockReturnValue(2_000);
+      expect(check('first')).toBeNull();
+    } finally { now.mockRestore(); limiter.dispose(); }
   });
 
   it('retains only the threshold of recent attempts under a sustained rejected burst', () => {

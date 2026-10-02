@@ -13,6 +13,7 @@ import { isAuthDisabled } from '../config.js';
 import type { RouteMap } from '../lib/http-route-types.js';
 import { asJsonBody, type JsonBody } from './route-helpers.js';
 import { createLogger } from '../../common/log.js';
+import { jsonError } from '../../common/http-error.js';
 
 const logger = createLogger('routes:auth');
 
@@ -37,39 +38,39 @@ async function noauthGetStatus(): Promise<Response> {
     });
   } catch (error) {
     logger.error('Auth status error:', error);
-    return Response.json({ error: 'Internal server error' }, { status: 500 });
+    return jsonError('Internal server error', 500);
   }
 }
 
 async function noauthPostRegister(body: JsonBody): Promise<Response> {
   try {
     if (isAuthDisabled()) {
-      return Response.json({ error: 'Authentication is disabled by server configuration' }, { status: 403 });
+      return jsonError('Authentication is disabled by server configuration', 403);
     }
     const input = asJsonBody(body);
     const username = typeof input.username === 'string' ? input.username : '';
     const password = typeof input.password === 'string' ? input.password : '';
 
     if (!username || !password) {
-      return Response.json({ error: 'Both username and password are required' }, { status: 400 });
+      return jsonError('Both username and password are required', 400);
     }
     const trimmedUsername = username.trim();
     if (trimmedUsername.length < 1) {
-      return Response.json({ error: 'Username is required' }, { status: 400 });
+      return jsonError('Username is required', 400);
     }
     if (trimmedUsername.length > 64) {
-      return Response.json({ error: 'Username must be 64 characters or fewer' }, { status: 400 });
+      return jsonError('Username must be 64 characters or fewer', 400);
     }
     if (password.length < 8) {
-      return Response.json({ error: 'Password must be at least 8 characters' }, { status: 400 });
+      return jsonError('Password must be at least 8 characters', 400);
     }
     if (password.length > 128) {
-      return Response.json({ error: 'Password must be 128 characters or fewer' }, { status: 400 });
+      return jsonError('Password must be 128 characters or fewer', 400);
     }
 
     const setupNeeded = await needsSetup();
     if (!setupNeeded) {
-      return Response.json({ error: 'Account already configured' }, { status: 409 });
+      return jsonError('Account already configured', 409);
     }
 
     const passwordHash = await Bun.password.hash(password, { algorithm: 'bcrypt', cost: 12 });
@@ -83,33 +84,33 @@ async function noauthPostRegister(body: JsonBody): Promise<Response> {
     });
   } catch (error) {
     if (error instanceof AuthAccountAlreadyConfiguredError) {
-      return Response.json({ error: error.message }, { status: 409 });
+      return jsonError(error.message, 409);
     }
     logger.error('Registration error:', error);
-    return Response.json({ error: 'Internal server error' }, { status: 500 });
+    return jsonError('Internal server error', 500);
   }
 }
 
 async function noauthPostLogin(body: JsonBody): Promise<Response> {
   try {
     if (isAuthDisabled()) {
-      return Response.json({ error: 'Authentication is disabled by server configuration' }, { status: 403 });
+      return jsonError('Authentication is disabled by server configuration', 403);
     }
     const input = asJsonBody(body);
     const username = typeof input.username === 'string' ? input.username : '';
     const password = typeof input.password === 'string' ? input.password : '';
     if (!username || !password) {
-      return Response.json({ error: 'Both username and password are required' }, { status: 400 });
+      return jsonError('Both username and password are required', 400);
     }
 
     const user = await getUserByUsername(username);
     if (!user) {
-      return Response.json({ error: 'Invalid username or password' }, { status: 401 });
+      return jsonError('Invalid username or password', 401);
     }
 
     const isValidPassword = await Bun.password.verify(password, user.passwordHash);
     if (!isValidPassword) {
-      return Response.json({ error: 'Invalid username or password' }, { status: 401 });
+      return jsonError('Invalid username or password', 401);
     }
 
     const token = await generateAuthToken(user);
@@ -120,7 +121,7 @@ async function noauthPostLogin(body: JsonBody): Promise<Response> {
     });
   } catch (error) {
     logger.error('Login error:', error);
-    return Response.json({ error: 'Internal server error' }, { status: 500 });
+    return jsonError('Internal server error', 500);
   }
 }
 
@@ -150,7 +151,7 @@ async function getAuthUser(): Promise<Response> {
 
   const user = await getUser();
   if (!user) {
-    return Response.json({ error: 'No user found' }, { status: 404 });
+    return jsonError('No user found', 404);
   }
   return Response.json({ user: { id: user.username, username: user.username } });
 }

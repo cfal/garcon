@@ -362,11 +362,7 @@ export default function createWorkspaceRoutes(
         return jsonError(error.message, 500, error.code, false);
       }
       if (error instanceof AppTitleValidationError) {
-        return Response.json({
-          success: false,
-          error: error.message,
-          errorCode: error.errorCode,
-        }, { status: error.status });
+        return jsonError(error.message, error.status, error.errorCode, false);
       }
       return jsonErrorFromUnknown(error);
     }

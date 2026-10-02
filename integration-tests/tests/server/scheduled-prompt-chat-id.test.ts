@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import { mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { ScheduledPromptsInvalidatedMessage } from '../../../common/ws-events.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 
@@ -14,6 +16,13 @@ describe('scheduled prompt chat ID variables', () => {
   test('uses one allocated chat ID in the rendered prompt and created chat', async () => {
     await withIntegrationFixture('scheduled-prompt-chat-id', async (fixture) => {
       const agent = fixture.directAgents.openAi;
+      const projectPath = join(fixture.executionDirs.project, 'scheduled project ');
+      await mkdir(projectPath);
+      await mkdir(projectPath.trimEnd());
+      for (const candidate of [projectPath, projectPath.trimEnd()]) {
+        expect(await fixture.client.get(`/api/v1/projects/resolve?executorId=${fixture.client.executorId}&projectPath=${encodeURIComponent(candidate)}`))
+          .toMatchObject({ resolution: { kind: 'available', effectiveProjectKey: candidate } });
+      }
       const rawPrompt = 'Scheduled chat {{chat_id}}; literal \\{{chat_id}}';
       const before = await fixture.client.listChats();
       expect(before.sessions).toEqual([]);
@@ -26,7 +35,7 @@ describe('scheduled prompt chat ID variables', () => {
           target: {
             type: 'new-chat', executorId: fixture.client.executorId,
             agentId: agent.agentId,
-            projectPath: fixture.dirs.project,
+            projectPath,
             model: agent.provider.model,
             apiProviderId: agent.provider.providerId,
             modelEndpointId: agent.provider.endpointId,
@@ -42,6 +51,8 @@ describe('scheduled prompt chat ID variables', () => {
       });
       expect(created.snapshot.prompts).toHaveLength(1);
       expect(created.snapshot.prompts[0]?.prompt).toBe(rawPrompt);
+      expect(created.snapshot.prompts[0]?.target).toMatchObject({ projectPath });
+      expect((await fixture.client.getScheduledPrompts()).prompts[0]?.target).toMatchObject({ projectPath });
 
       const eventCursor = fixture.client.markEvents();
       const timeoutMs = 90_000;
@@ -68,6 +79,7 @@ describe('scheduled prompt chat ID variables', () => {
       const chats = await fixture.client.listChats();
       expect(chats.sessions.map((chat) => chat.id)).toEqual([renderedChatId]);
       expect(chats.sessions[0]?.tags).toEqual(['scheduled']);
+      expect(chats.sessions[0]?.projectPath).toBe(projectPath);
 
       const after = await fixture.client.getScheduledPrompts();
       expect(after.prompts).toEqual([]);

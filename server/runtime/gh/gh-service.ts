@@ -47,12 +47,12 @@ async function loadReviewThreads(
   signal?: AbortSignal,
 ): Promise<ReturnType<typeof buildThreads>> {
   try {
-    const comments = await runGhJson<GhRawReviewComment[]>(
+    const pages = await runGhJson<GhRawReviewComment[][]>(
       projectPath,
-      ['api', '--paginate', `repos/{owner}/{repo}/pulls/${number}/comments`],
+      ['api', '--paginate', '--slurp', `repos/{owner}/{repo}/pulls/${number}/comments`],
       { signal },
     );
-    return buildThreads(Array.isArray(comments) ? comments : []);
+    return buildThreads(Array.isArray(pages) ? pages.flat() : []);
   } catch (error) {
     signal?.throwIfAborted();
     // Review threads are best-effort; a comment fetch failure should not blank

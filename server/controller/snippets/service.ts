@@ -29,8 +29,7 @@ export class SnippetProjectPathService {
   constructor(private readonly inspect: ProjectInspector) {}
 
   async resolve(projectPath: string, executorId?: string | null): Promise<string> {
-    const requestedPath = projectPath.trim();
-    if (!requestedPath) {
+    if (!projectPath.trim()) {
       throw new SnippetDomainError(
         'SNIPPET_PROJECT_PATH_REQUIRED',
         'Project path is required',
@@ -38,17 +37,17 @@ export class SnippetProjectPathService {
       );
     }
 
-    const resolution = await this.inspect(requestedPath, executorId);
+    const resolution = await this.inspect(projectPath, executorId);
     if (resolution.kind === 'available') return resolution.effectiveProjectKey;
     switch (resolution.reason) {
       case 'not-found':
-        throw new SnippetDomainError('SNIPPET_PROJECT_PATH_NOT_FOUND', `Project path not found: ${requestedPath}`, 404);
+        throw new SnippetDomainError('SNIPPET_PROJECT_PATH_NOT_FOUND', `Project path not found: ${projectPath}`, 404);
       case 'outside-base':
         throw new SnippetDomainError('SNIPPET_PROJECT_PATH_OUTSIDE_BASE', 'Project path is outside the allowed base directory', 403);
       case 'not-a-directory':
-        throw new SnippetDomainError('SNIPPET_PROJECT_PATH_NOT_DIRECTORY', `Project path is not a directory: ${requestedPath}`, 400);
+        throw new SnippetDomainError('SNIPPET_PROJECT_PATH_NOT_DIRECTORY', `Project path is not a directory: ${projectPath}`, 400);
       case 'permission-denied':
-        throw new SnippetDomainError('SNIPPET_PROJECT_PATH_INACCESSIBLE', `Project path is not accessible: ${requestedPath}`, 403);
+        throw new SnippetDomainError('SNIPPET_PROJECT_PATH_INACCESSIBLE', `Project path is not accessible: ${projectPath}`, 403);
     }
   }
 }
@@ -241,8 +240,8 @@ export class SnippetService extends EventEmitter<SnippetServiceEvents> {
       };
     }
     const chat = this.deps.chats.getChat(context.chatId);
-    const contextProjectPath = chat?.projectPath.trim();
-    if (!contextProjectPath) {
+    const contextProjectPath = chat?.projectPath;
+    if (!contextProjectPath?.trim()) {
       throw new SnippetDomainError(
         'SNIPPET_CHAT_NOT_FOUND',
         'Chat not found or missing project path',
@@ -252,7 +251,7 @@ export class SnippetService extends EventEmitter<SnippetServiceEvents> {
     const contextExecutorId = chat?.executorId ?? 'local';
     const resolvedProjectPath = await this.deps.projectPaths.resolve(contextProjectPath, contextExecutorId);
     const current = this.deps.chats.getChat(context.chatId);
-    if (!current || current.projectPath.trim() !== contextProjectPath || (current.executorId ?? 'local') !== contextExecutorId) {
+    if (!current || current.projectPath !== contextProjectPath || (current.executorId ?? 'local') !== contextExecutorId) {
       throw new SnippetDomainError('SNIPPET_CONTEXT_CHANGED', 'Chat project target changed during expansion', 409);
     }
     return { contextProjectPath, contextExecutorId, resolvedProjectPath };

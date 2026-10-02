@@ -72,7 +72,7 @@ type WsRequestHandler = (
   writer: WebSocketWriter,
   ws: WS,
 ) => Promise<void> | void;
-type ChatIdRequest = { type: string; chatId?: string | null };
+type ChatIdRequest = ChatSubscribeRequest | ChatReloadRequest | ChatReloadCancelRequest;
 
 interface ChatHandlerDeps {
   serverInstanceId: string;
@@ -532,7 +532,9 @@ export class ChatHandler {
   ): Promise<void> {
     const chatId = typeof data.chatId === 'string' && data.chatId ? data.chatId : null;
     if (!chatId) {
-      this.#sendMissingSessionError(writer, data.type);
+      this.#sendMissingSessionError(
+        writer, data.type, data.type === 'chat-reload-cancel' ? null : data.clientRequestId,
+      );
       return;
     }
     await handler(chatId);
@@ -572,7 +574,7 @@ export class ChatHandler {
       return;
     }
     if (!chatId) {
-      this.#sendMissingSessionError(writer, 'chat-subscribe');
+      this.#sendMissingSessionError(writer, 'chat-subscribe', clientRequestId);
       return;
     }
     this.#sendRequestError(writer, {
@@ -585,8 +587,19 @@ export class ChatHandler {
     });
   }
 
-  #sendMissingSessionError(writer: WebSocketWriter, type: string): void {
-    writer.send(new WsFaultMessage(`Missing chatId for "${type}"`));
+  #sendMissingSessionError(
+    writer: WebSocketWriter,
+    type: ChatIdRequest['type'],
+    clientRequestId: string | null,
+  ): void {
+    const message = `Missing chatId for "${type}"`;
+    if (clientRequestId) {
+      this.#sendRequestError(writer, {
+        clientRequestId, requestType: type, code: 'MISSING_CHAT_ID', message, retryable: false,
+      });
+      return;
+    }
+    writer.send(new WsFaultMessage(message));
   }
 
   #handleClose(_ws: WS, code?: number, reason?: string): void {

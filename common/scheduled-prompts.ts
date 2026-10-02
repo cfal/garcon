@@ -233,7 +233,7 @@ function normalizeApiProtocol(value: unknown): ApiProtocol | null | undefined {
 function normalizeNewChatTarget(raw: Record<string, unknown>): NewChatScheduledPromptTarget | null {
   const executorId = parseExecutorId(raw.executorId);
   const agentId = requiredString(raw.agentId);
-  const projectPath = requiredString(raw.projectPath);
+  const projectPath = typeof raw.projectPath === 'string' && raw.projectPath.trim() ? raw.projectPath : null;
   const model = requiredString(raw.model);
   const apiProviderId = nullableString(raw.apiProviderId);
   const modelEndpointId = nullableString(raw.modelEndpointId);

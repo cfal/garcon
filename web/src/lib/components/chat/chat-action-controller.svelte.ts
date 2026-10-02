@@ -156,7 +156,7 @@ export class ChatActionController {
 		try {
 			if (target.status === 'draft') {
 				const result = await resolveProject(
-					{ kind: 'path', executorId, projectPath: projectPath.trim() },
+					{ kind: 'path', executorId, projectPath },
 					new AbortController().signal,
 				);
 				if (result.resolution.kind !== 'available')

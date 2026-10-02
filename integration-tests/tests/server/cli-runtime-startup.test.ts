@@ -7,8 +7,48 @@ import { acquireControllerLease } from '../../../server/controller/lib/workspace
 import { isolatedEnvironment } from '../../support/garcon-process.js';
 import { withTimeout } from '../../support/deferred.js';
 import { rejectionOf } from '../../support/promise-assertions.js';
+import { CURRENT_WORKSPACE_VERSION } from '../../../server/controller/migrations/index.js';
+import { TranscriptLedgerStore } from '../../../server/controller/ledger/store.js';
+import { transcriptViewId } from '../../../server/controller/ledger/contracts.js';
 
 const REPO = fileURLToPath(new URL('../../..', import.meta.url));
+
+test.each(['missing', 'null', '[]', '{"version":5,"sessions":null}'])('startup preserves ledgers with %s registry', async (raw) => {
+  const root = await mkdtemp(join(homedir(), 'registry-startup-'));
+  const workspaceDir = join(root, 'workspace');
+  const home = join(root, 'home');
+  await mkdir(workspaceDir);
+  await mkdir(join(home, 'tmp'), { recursive: true });
+  await writeFile(join(workspaceDir, 'workspace-version.json'), JSON.stringify({ version: CURRENT_WORKSPACE_VERSION }));
+  await writeFile(join(workspaceDir, 'api-provider-assignments.json'), JSON.stringify({ version: 1, revision: 0, assignments: {} }));
+  const registryPath = join(workspaceDir, 'chats.json');
+  if (raw !== 'missing') await writeFile(registryPath, raw);
+  const ledgerRoot = join(workspaceDir, 'transcript-ledgers');
+  const chatId = '1783725900000201';
+  const ledger = new TranscriptLedgerStore(ledgerRoot);
+  ledger.initializeCurrentView(chatId, { viewId: transcriptViewId('synthetic-view'), contentStartOrdinal: 1,
+    rows: [{ kind: 'notice', at: '2026-10-02T00:00:00.000Z', message: 'Synthetic history', detail: {} }] });
+  ledger.close();
+  const ledgerPath = join(ledgerRoot, chatId, 'ledger.sqlite');
+  const before = await readFile(ledgerPath);
+  const child = Bun.spawn([process.execPath, 'server/main.ts', '--config-dir', join(root, 'config'),
+    '--workspace-dir', workspaceDir, '--port', '0', '--bind-address', '0.0.0.0', '--project-base-dir', root],
+  { cwd: REPO, env: isolatedEnvironment(home), stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' });
+  const output = new Response(child.stdout).text();
+  const errors = new Response(child.stderr).text();
+  try {
+    expect(await withTimeout(child.exited, 15_000, () => 'registry startup failure')).toBe(1);
+    expect(await errors).toContain('chats.json');
+    await output;
+    expect(await readFile(ledgerPath)).toEqual(before);
+    if (raw === 'missing') expect(await rejectionOf(stat(registryPath))).toMatchObject({ code: 'ENOENT' });
+    else expect(await readFile(registryPath, 'utf8')).toBe(raw);
+  } finally {
+    if (child.exitCode === null) child.kill('SIGTERM');
+    await child.exited;
+    await rm(root, { recursive: true, force: true });
+  }
+}, 20_000);
 
 test.each(['occupied-port', 'unclearable-runtime'] as const)('controller runtime cleanup fails closed on %s', async (failure) => {
   const root = await mkdtemp(join(homedir(), 'cli-runtime-startup-'));

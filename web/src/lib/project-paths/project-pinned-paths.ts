@@ -1,5 +1,5 @@
 export function normalizedPinnedProjectPath(path: string): string {
-	return path.trim();
+	return path.trim() ? path : '';
 }
 
 function comparePinnedProjectPaths(left: string, right: string): number {

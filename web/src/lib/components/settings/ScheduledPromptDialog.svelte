@@ -87,7 +87,7 @@
 	$effect(() => {
 		const activeForm = form;
 		if (!open || activeForm.targetType !== 'new-chat') return;
-		void activeForm.startup.trimmedPath;
+		void activeForm.startup.nonblankPath;
 		void pathContextKey;
 		untrack(() => activeForm.startup.validatePath());
 	});

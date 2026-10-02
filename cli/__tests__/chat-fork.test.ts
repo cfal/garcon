@@ -84,8 +84,8 @@ function accepted(
 
 function targetExistsResponse(chatId: string): Response {
   return Response.json({
-    error: `Session already exists: ${chatId}`,
-    errorCode: 'IDEMPOTENCY_CONFLICT',
+    error: `Target ID is occupied: ${chatId}`,
+    errorCode: 'CHAT_ID_COLLISION',
     retryable: false,
   }, { status: 409 });
 }

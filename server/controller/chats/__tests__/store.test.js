@@ -148,6 +148,27 @@ describe('ChatRegistry', () => {
     await fs.rm(tempDir, { recursive: true, force: true });
   });
 
+  it.each([null, [], 1, { version: 5 }, { version: 5, sessions: null }, { version: 5, sessions: [] }].map((value) => [value]))(
+    'rejects malformed registry containers without modifying their bytes: %j', async (value) => {
+      const raw = JSON.stringify(value);
+      const file = path.join(tempDir, 'chats.json');
+      await fs.writeFile(file, raw);
+      registry = new ChatRegistry(tempDir);
+      await expect(registry.init()).rejects.toThrow('Invalid chats.json');
+      expect(registry.loadedFromDisk).toBe(false);
+      expect(await fs.readFile(file, 'utf8')).toBe(raw);
+    },
+  );
+
+  it('distinguishes a fresh registry from an authoritative empty registry', async () => {
+    expect(registry.loadedFromDisk).toBe(false);
+    await writeRegistry({});
+    registry = new ChatRegistry(tempDir);
+    await registry.init();
+    expect(registry.loadedFromDisk).toBe(true);
+    expect(registry.listChatIds()).toEqual([]);
+  });
+
   it('hands out deep copies that cannot mutate registry state', () => {
     registry.addChat(newChat({
       tags: ['source'],

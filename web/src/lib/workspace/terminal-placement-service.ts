@@ -1,5 +1,5 @@
 import * as m from '$lib/paraglide/messages.js';
-import type { TerminalRegistry } from '$lib/terminal/sessions/terminal-registry.svelte.js';
+import type { WorkspaceTerminals } from './workspace-resource-ports.js';
 import { createRandomId } from '$lib/utils/random-id.js';
 import {
 	TERMINAL_LAUNCHER_ID,
@@ -39,7 +39,7 @@ interface MobileReturnPlan {
 
 interface TerminalPlacementServiceDeps {
 	layout: WorkspaceLayoutReader;
-	terminals: TerminalRegistry;
+	terminals: WorkspaceTerminals;
 	reservations: SurfaceReservations;
 	isWindowReserved(windowId: WorkspaceWindowId): boolean;
 	commit: WorkspaceCommit;

@@ -215,6 +215,30 @@ describe('Codex against a scripted model', () => {
     });
   }, 120_000);
 
+  test('fails a throwing script without retrying or contaminating the next fixture', async () => {
+    const failing = await startScriptedCodexTestEnvironment();
+    try {
+      failing.model.scriptTurn(() => { throw new Error('Synthetic callback failure'); });
+      await withIntegrationFixture('codex-scripted-callback-failure', async (fixture) => {
+        const chatId = fixture.newChatId();
+        const cursor = fixture.client.markEvents();
+        const turn = await fixture.client.startChat(liveCodexStartRequest({
+          chatId, projectPath: fixture.dirs.project, command: 'Synthetic failing request.',
+        }));
+        const terminal = await fixture.client.waitForTurnTerminal(chatId, turn.turnId, { afterIndex: cursor });
+        expect(terminal.type).toBe('agent-run-failed');
+        expect(failing.model.requests()).toHaveLength(1);
+        expect(failing.model.issues()).toHaveLength(1);
+        expect(() => failing.model.assertSettled()).toThrow('Synthetic callback failure');
+      }, {
+        ...failing,
+        extraDiagnostics: () => ({ codexModelIssues: failing.model.issues() }),
+      });
+    } finally {
+      await failing.dispose();
+    }
+  }, 120_000);
+
   for (const fault of [
     { kind: 'http-error', status: 500, message: 'transient scripted HTTP failure' },
     { kind: 'stream-error', message: 'transient scripted SSE failure' },
