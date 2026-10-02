@@ -194,6 +194,9 @@ function interruptDiagnostic(
       ? 'terminal interrupted; the read-only operation was canceled'
       : 'terminal interrupted; the command may have reached Garcon; inspect transcript-search status before retrying';
   }
+  if (command?.kind === 'start' || command?.kind === 'resume') {
+    return 'terminal interrupted; the command may have reached Garcon; accepted work continues without this CLI. Inspect the chat before retrying; no Stop was sent.';
+  }
   if (
     command !== undefined
     && ['list', 'chats', 'search', 'read', 'status', 'wait', 'lookup-native-session']
