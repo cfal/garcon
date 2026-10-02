@@ -4,11 +4,24 @@ import { isApiProviderId } from '../../../common/api-providers.js';
 import { isRecord, type JsonValue } from '../../../common/json.js';
 import { DomainError } from '../../common/domain-error.js';
 import type { RpcLane } from './rpc-lane.js';
+import { PRIMARY_SMALL_RPC_BYTES } from './limits.js';
 
 export const CLI_REQUEST_BYTES = 1024 * 1024;
 export const CLI_REPLY_BYTES = 8 * 1024 * 1024;
 export const CLI_SMALL_REPLY_BYTES = 64 * 1024;
 export const CLI_ENVELOPE_BYTES = 1024;
+
+export function cliRequestBytes(lane: RpcLane): number {
+  return lane === 'primary' ? PRIMARY_SMALL_RPC_BYTES : CLI_REQUEST_BYTES;
+}
+
+export function cliReplyBytes(lane: RpcLane): number {
+  return lane === 'primary' ? PRIMARY_SMALL_RPC_BYTES : CLI_REPLY_BYTES;
+}
+
+export function cliRequestTooLarge(lane: RpcLane): DomainError {
+  return new DomainError('CLI_REQUEST_TOO_LARGE', `CLI request exceeds ${lane === 'primary' ? '64 KiB' : '1 MiB'}`, 413);
+}
 
 const read = { mutation: false, management: false, timeoutMs: 30_000, pool: 'short', lane: 'bulk' } as const;
 const write = { mutation: true, management: false, timeoutMs: 30_000, pool: 'short', lane: 'bulk' } as const;
@@ -122,7 +135,8 @@ export function parseControllerCliRequest(value: unknown): ControllerCliRequest 
     Array.isArray(pair) && pair.length === 2 && pair.every((part) => typeof part === 'string' && part.length <= 8192))) invalid();
   if (http.operation.startsWith('GET ') ? http.body !== null : !(http.body === null || isRecord(http.body))) invalid();
   const size = Buffer.byteLength(JSON.stringify(value)) + CLI_ENVELOPE_BYTES;
-  if (size > CLI_REQUEST_BYTES) throw new DomainError('CLI_REQUEST_TOO_LARGE', 'CLI request exceeds 1 MiB', 413);
+  const lane = CLI_OPERATIONS[http.operation as CliOperation].lane;
+  if (size > cliRequestBytes(lane)) throw cliRequestTooLarge(lane);
   if (http.operation === 'PUT /api/v1/app/settings') {
     if (!exact(http.body, ['features']) || !exact(http.body.features, ['transcriptSearch'])
       || !exact(http.body.features.transcriptSearch, ['enabled'])

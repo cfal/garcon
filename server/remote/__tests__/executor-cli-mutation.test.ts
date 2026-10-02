@@ -36,7 +36,7 @@ test.each(['direct', 'gateway'] as const)('executor creation reports a post-rena
       const pair = cliPair(new ControllerCliDispatcher({ routes, serverInstanceId: 'controller',
         workspaceName: null, isShuttingDown: () => false }));
       cleanups.push(() => pair.close());
-      const gateway = await startCliGateway({ dataDir: join(root, 'executor'), currentRpc: () => pair.worker });
+      const gateway = await startCliGateway({ dataDir: join(root, 'executor'), currentConnection: () => pair.connection });
       cleanups.push(() => gateway.dispose());
       client = new GarconClient(await discoverRuntime({ configDir: root, runtime: 'executor' }));
     }

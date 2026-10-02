@@ -210,3 +210,19 @@ test('bulk wait cancellation and quiescence do not retire a live primary', async
     expect(fixture.controller.bulk).toBeNull();
   } finally { await fixture.dispose(); }
 });
+
+test('reverse lane acquisition is budgeted and cannot follow a replacement primary', async () => {
+  const fixture = await pair('controller');
+  const abort = new AbortController();
+  try {
+    const captured = fixture.connections.worker;
+    const pending = captured.acquire('bulk', { signal: abort.signal, timeoutMs: null }).catch(error => error);
+    expect(fixture.workerAdmission.outgoing.size).toBe(1);
+    const context = await captured.acquire('primary', { signal: abort.signal, timeoutMs: 5000 });
+    expect(context.rpc).toBe(captured.primary);
+    captured.primary.transport.close();
+    expect(await pending).toMatchObject({ outcome: 'not-dispatched' });
+    expect(fixture.workerAdmission.outgoing.size).toBe(0);
+    await expect(captured.acquire('bulk', { signal: abort.signal, timeoutMs: null })).rejects.toMatchObject({ outcome: 'not-dispatched' });
+  } finally { await fixture.dispose(); }
+});

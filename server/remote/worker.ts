@@ -67,13 +67,13 @@ async function serveExecutorWorker(options: ExecutorWorkerOptions, dataDir: stri
   const stopSlowStepReports = reportSlowSteps((operation, stepMs) => {
     console.warn(JSON.stringify({ type: 'executor-slow-step', operation, stepMs: Math.round(stepMs) }));
   });
-  let currentRpc: ExecutorRpc | null = null;
+  let currentConnection: ExecutorRpcConnection | null = null;
   let gateway: Awaited<ReturnType<typeof startCliGateway>> | null = null;
   let terminals: TerminalRuntime | null = null;
   const stopped = Promise.withResolvers<void>();
   let stopping: Promise<void> | undefined;
   const stop = () => stopping ??= (async () => {
-    currentRpc = null;
+    currentConnection = null;
     let failure: unknown;
     try {
       for (const dispose of [stopStallMonitor, stopSlowStepReports, () => gateway?.dispose(), () => link.dispose(), () => serving?.dispose(), () => relay.dispose(), () => journal.dispose(), () => runtime?.dispose(), () => terminals?.shutdown()]) {
@@ -84,7 +84,7 @@ async function serveExecutorWorker(options: ExecutorWorkerOptions, dataDir: stri
   })();
   const onSignal = () => { void stop().catch((error: unknown) => { console.error('Executor cleanup failed:', error); }); };
   try {
-    gateway = await startCliGateway({ dataDir, currentRpc: () => currentRpc }).catch((error: unknown) => {
+    gateway = await startCliGateway({ dataDir, currentConnection: () => currentConnection }).catch((error: unknown) => {
       console.warn(JSON.stringify({ type: 'executor-cli-unavailable',
         message: error instanceof Error ? error.message : 'CLI gateway could not start' }));
       return null;
@@ -102,7 +102,7 @@ async function serveExecutorWorker(options: ExecutorWorkerOptions, dataDir: stri
       void serving?.dispose();
       if (runtime && transport.executorId !== runtime.id) {
         const rpc = new ExecutorRpc(transport);
-        currentRpc = null;
+        currentConnection = null;
         const retained = runtime;
         // Description lets the controller report the required restart without rebinding retained processes.
         rpc.handle(async (call) => {
@@ -114,15 +114,15 @@ async function serveExecutorWorker(options: ExecutorWorkerOptions, dataDir: stri
       // Replies outlive sessions only for the controller of the executor this worker serves.
       const connection = new ExecutorRpcConnection(link, transport, { journal, admission });
       const rpc = connection.primary;
-      currentRpc = rpc;
-      transport.onFailure(() => { if (currentRpc === rpc) currentRpc = null; });
+      currentConnection = connection;
+      transport.onFailure(() => { if (currentConnection === connection) currentConnection = null; });
       runtime ??= new ExecutionRuntime({
         id: transport.executorId, workspaceDir: dataDir, projectBasePath: options.projectBasePath,
         integrations: defaultAgentIntegrations,
         terminalRuntime: terminals!,
         resolveCredential: ({ agentId, reference, signal }) => {
-          if (!currentRpc) throw new AgentCallError('not-dispatched', 'Executor controller is disconnected');
-          return currentRpc.call(agentId, 'credentials.resolve', { reference }, { signal });
+          if (!currentConnection) throw new AgentCallError('not-dispatched', 'Executor controller is disconnected');
+          return currentConnection.primary.call(agentId, 'credentials.resolve', { reference }, { signal });
         },
       });
       serving = serveExecutionRuntime(runtime, rpc, relay);

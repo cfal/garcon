@@ -2,7 +2,8 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import { chmod, mkdir, mkdtemp, rm, stat, readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { ServerResponse } from 'node:http';
+import { request as httpRequest, ServerResponse, type ClientRequest } from 'node:http';
+import { once } from 'node:events';
 import { discoverRuntime } from '../../../cli/discovery.js';
 import { GarconClient } from '../../../cli/garcon-client.js';
 import { ControllerCliDispatcher } from '../../controller/executors/cli-dispatcher.js';
@@ -29,7 +30,7 @@ async function fixture(routes: RouteMap = {}, workspaceName: string | null = 'wo
   };
   replace('controller');
   const dataDir = join(root, 'executor');
-  const gateway = await startCliGateway({ dataDir, currentRpc: () => live?.worker ?? null });
+  const gateway = await startCliGateway({ dataDir, currentConnection: () => live?.connection ?? null });
   cleanups.push(() => gateway.dispose());
   const discover = () => discoverRuntime({ configDir: root, runtime: 'executor' });
   const call = (path: string, init: RequestInit = {}) => fetch(`${gateway.descriptor.baseUrl}${path}`, {
@@ -50,7 +51,7 @@ test('private role descriptors prove a live endpoint and never expose the contro
     expect((await stat(f.dataDir)).mode & 0o777).toBe(0o700);
   }
   const secondRoot = join(f.root, 'second');
-  const second = await startCliGateway({ dataDir: join(secondRoot, 'executor'), currentRpc: () => null });
+  const second = await startCliGateway({ dataDir: join(secondRoot, 'executor'), currentConnection: () => null });
   try {
     expect(second.runtimeFile).not.toBe(f.gateway.runtimeFile);
     expect(second.descriptor.localCapability).not.toBe(f.gateway.descriptor.localCapability);
@@ -77,7 +78,7 @@ test('existing shared-readable directories retain their modes while runtime file
   const dataDir = join(root, 'executor');
   await mkdir(dataDir);
   if (process.platform !== 'win32') await chmod(dataDir, 0o775);
-  const gateway = await startCliGateway({ dataDir, currentRpc: () => null });
+  const gateway = await startCliGateway({ dataDir, currentConnection: () => null });
   cleanups.push(() => gateway.dispose());
   expect(gateway.runtimeFile).toBe(join(dataDir, 'runtime.json'));
   if (process.platform !== 'win32') {
@@ -88,7 +89,7 @@ test('existing shared-readable directories retain their modes while runtime file
 
 test('old gateway cleanup cannot remove a replacement runtime file', async () => {
   const f = await fixture();
-  const replacement = await startCliGateway({ dataDir: f.dataDir, currentRpc: () => null });
+  const replacement = await startCliGateway({ dataDir: f.dataDir, currentConnection: () => null });
   cleanups.push(() => replacement.dispose());
   await f.gateway.dispose();
   expect(JSON.parse(await readFile(replacement.runtimeFile, 'utf8')).instanceId).toBe(replacement.descriptor.instanceId);
@@ -190,7 +191,7 @@ test('slow HTTP readers consume the response budget until their sockets close', 
     return originalWrite.apply(this, args);
   });
   try {
-    for (let i = 0; i < 16; i++) {
+    for (let i = 0; i < 12; i++) {
       entered = Promise.withResolvers<void>();
       pending.push(f.call('/api/v1/chats').then((response) => response.arrayBuffer()));
       await entered.promise;
@@ -199,6 +200,7 @@ test('slow HTTP readers consume the response budget until their sockets close', 
     expect(rejected.status).toBe(503);
     expect(await rejected.json()).toMatchObject({ errorCode: 'CLI_SERVICE_BUSY' });
     expect(rejected.headers.get('Retry-After')).toBe('1');
+    expect((await f.call('/api/v1/cli/context')).status).toBe(200);
   } finally {
     write.mockRestore();
     for (const { response, args } of blocked) {
@@ -209,3 +211,32 @@ test('slow HTTP readers consume the response budget until their sockets close', 
   }
   expect((await f.call('/api/v1/chats')).status).toBe(200);
 }, 15_000);
+
+test('slow authenticated bulk uploads cannot consume primary HTTP slots', async () => {
+  let mutations = 0;
+  const f = await fixture({
+    '/api/v1/chats/run': { POST: () => { mutations++; return Response.json({ ok: true }); } },
+    '/api/v1/chats/stop': { POST: () => Response.json({ stopped: true }) },
+    '/api/v1/chats/turn-receipt': { GET: () => Response.json({ status: 'running' }) },
+  });
+  const uploads: ClientRequest[] = [];
+  try {
+    for (let index = 0; index < 12; index++) {
+      const upload = httpRequest(`${f.gateway.descriptor.baseUrl}/api/v1/chats/run`, { method: 'POST', headers: {
+        Authorization: `Bearer ${f.gateway.descriptor.localCapability}`, 'X-Garcon-Server-Instance': 'controller',
+        'Content-Type': 'application/json', 'Content-Length': '100', Expect: '100-continue',
+      } });
+      upload.on('error', () => {});
+      uploads.push(upload);
+      const started = once(upload, 'continue');
+      upload.flushHeaders();
+      await started;
+    }
+    const rejected = await f.call('/api/v1/chats/run', { method: 'POST', body: '{}' });
+    expect(await rejected.json()).toMatchObject({ errorCode: 'CLI_SERVICE_BUSY' });
+    expect((await f.call('/api/v1/cli/context')).status).toBe(200);
+    expect((await f.call('/api/v1/chats/turn-receipt')).status).toBe(200);
+    expect(await (await f.call('/api/v1/chats/stop', { method: 'POST' })).json()).toEqual({ stopped: true });
+    expect(mutations).toBe(0);
+  } finally { for (const upload of uploads) upload.destroy(); }
+});

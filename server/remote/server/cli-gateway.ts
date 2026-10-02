@@ -12,8 +12,9 @@ import { jsonError } from '../../common/http-error.js';
 import { createServerRuntimeState, publishRuntimeDescriptor, removeServerRuntime } from '../../common/server-runtime.js';
 import { runtimeProofResponse } from '../../common/runtime-proof.js';
 import { CliAdmission } from '../transport/cli-admission.js';
-import { CLI_REQUEST_BYTES, cliRoute, cliPolicy, parseCliHttpResponse, parseControllerCliRequest } from '../transport/cli-protocol.js';
-import type { ExecutorRpc } from '../transport/rpc.js';
+import { CLI_OPERATIONS, cliRequestBytes, cliRequestTooLarge, cliRoute, cliPolicy, parseCliHttpResponse, parseControllerCliRequest } from '../transport/cli-protocol.js';
+import type { ExecutorRpcConnection } from '../transport/rpc-connection.js';
+import type { RpcLane } from '../transport/rpc-lane.js';
 
 function gatewayError(error: unknown): Response {
   if (error instanceof DomainError) {
@@ -27,10 +28,9 @@ function gatewayError(error: unknown): Response {
   return jsonError('The CLI request may have reached Garcon; its outcome could not be confirmed', 503, 'CLI_OUTCOME_UNKNOWN', false);
 }
 
-async function readBody(request: IncomingMessage): Promise<JsonValue | null> {
-  if (Number(request.headers['content-length']) > CLI_REQUEST_BYTES) {
-    throw new DomainError('CLI_REQUEST_TOO_LARGE', 'CLI request exceeds 1 MiB', 413);
-  }
+async function readBody(request: IncomingMessage, lane: RpcLane): Promise<JsonValue | null> {
+  const limit = cliRequestBytes(lane);
+  if (Number(request.headers['content-length']) > limit) throw cliRequestTooLarge(lane);
   const chunks: Uint8Array[] = [];
   let bytes = 0;
   await new Promise<void>((resolve, reject) => {
@@ -40,9 +40,9 @@ async function readBody(request: IncomingMessage): Promise<JsonValue | null> {
     const end = () => { cleanup(); resolve(); };
     const data = (chunk: Buffer) => {
       bytes += chunk.byteLength;
-      if (bytes > CLI_REQUEST_BYTES) {
+      if (bytes > limit) {
         request.pause();
-        error(new DomainError('CLI_REQUEST_TOO_LARGE', 'CLI request exceeds 1 MiB', 413));
+        error(cliRequestTooLarge(lane));
       } else chunks.push(chunk);
     };
     request.on('data', data).once('end', end).once('error', error).once('aborted', aborted);
@@ -57,24 +57,36 @@ async function readBody(request: IncomingMessage): Promise<JsonValue | null> {
 
 export async function startCliGateway(options: {
   readonly dataDir: string;
-  readonly currentRpc: () => ExecutorRpc | null;
+  readonly currentConnection: () => Pick<ExecutorRpcConnection, 'primary' | 'acquire'> | null;
 }): Promise<{ readonly runtimeFile: string; readonly descriptor: CliGatewayDescriptor; dispose(): Promise<void> }> {
   const runtime = createServerRuntimeState(options.dataDir);
   const admission = new CliAdmission();
   let stopped = false;
   let responses = 0;
+  let bulkResponses = 0;
   const server = createServer({ maxHeaderSize: 32 * 1024, requestTimeout: 30_000, headersTimeout: 10_000 }, (incoming, outgoing) => {
     const abort = new AbortController();
-    responses++;
+    let httpLane: RpcLane | null = null;
+    const reserveHttp = (lane: RpcLane) => {
+      if (responses >= 16 || lane === 'bulk' && bulkResponses >= 12) {
+        throw new DomainError('CLI_SERVICE_BUSY', 'CLI HTTP response budget exhausted', 503, true);
+      }
+      httpLane = lane;
+      responses++;
+      if (lane === 'bulk') bulkResponses++;
+    };
     incoming.once('aborted', () => abort.abort());
-    outgoing.once('close', () => { responses--; abort.abort(); });
+    outgoing.once('close', () => {
+      if (httpLane !== null) responses--;
+      if (httpLane === 'bulk') bulkResponses--;
+      abort.abort();
+    });
     outgoing.on('error', () => abort.abort());
     const timeout = (ms: number) => outgoing.setTimeout(ms, () => outgoing.destroy());
     timeout(30_000);
     const dispatch = async () => {
       let response: Response;
       try {
-        if (responses > 16) throw new DomainError('CLI_SERVICE_BUSY', 'CLI HTTP response budget exhausted', 503, true);
         const headers = new Headers();
         for (const [name, value] of Object.entries(incoming.headers)) {
           if (Array.isArray(value)) for (const item of value) headers.append(name, item);
@@ -85,6 +97,7 @@ export async function startCliGateway(options: {
         });
         const url = new URL(request.url);
         if (request.method === 'GET' && url.pathname === '/api/v1/runtime') {
+          reserveHttp('primary');
           response = runtimeProofResponse(runtime, url);
         } else {
           const token = Buffer.from(getTokenFromRequest(request) ?? '');
@@ -92,11 +105,13 @@ export async function startCliGateway(options: {
           if (token.length !== capability.length || !crypto.timingSafeEqual(token, capability) || request.headers.has('Origin')) {
             throw new DomainError('CLI_ACCESS_DENIED', 'A local CLI gateway capability is required', 403);
           }
-          const rpc = stopped ? null : options.currentRpc();
+          const connection = stopped ? null : options.currentConnection();
+          const rpc = connection?.primary;
           if (!rpc || !rpc.transport.connected) throw new AgentCallError('not-dispatched', 'Controller is disconnected');
           const expectedServerInstanceId = request.headers.get(CLI_SERVER_INSTANCE_HEADER);
           if (request.method === 'GET' && url.pathname === '/api/v1/cli/context') {
-            const release = admission.acquire('gateway', 'short');
+            reserveHttp('primary');
+            const release = admission.acquire('gateway', 'short', 'primary');
             try {
               const context = parseCliContext(await rpc.call('', 'controllerCli.describe', null, { signal: request.signal, timeoutMs: 5_000 }));
               if (context.defaultExecutorId !== rpc.transport.executorId) throw new Error('CLI context does not match the authenticated executor');
@@ -107,19 +122,22 @@ export async function startCliGateway(options: {
             } finally { release(); }
           } else {
             const route = cliRoute(request.method, url.pathname);
+            const lane = CLI_OPERATIONS[route.operation].lane;
+            reserveHttp(lane);
             if (expectedServerInstanceId === null) throw new DomainError('VALIDATION_FAILED', 'Expected controller instance is required', 400);
             const contentLength = incoming.headers['content-length'];
             const hasBody = incoming.headers['transfer-encoding'] !== undefined
               || contentLength !== undefined && contentLength !== '0';
-            const body = hasBody ? await readBody(incoming) : null;
+            const body = hasBody ? await readBody(incoming, lane) : null;
             const call = parseControllerCliRequest({ expectedServerInstanceId, http: { ...route, query: [...url.searchParams], body } });
             const policy = cliPolicy(call.http);
-            const release = admission.acquire('gateway', policy.pool);
+            const release = admission.acquire('gateway', policy.pool, lane);
             // Native HTTP idle timeouts do not bound maintenance work; restore the drain deadline before replying.
             timeout(0);
             try {
-              const result = parseCliHttpResponse(await rpc.call('', 'controllerCli.request', call, {
-                signal: request.signal, timeoutMs: policy.timeoutMs,
+              const held = await connection!.acquire(lane, { signal: request.signal, timeoutMs: policy.timeoutMs });
+              const result = parseCliHttpResponse(await held.rpc.call('', 'controllerCli.request', call, {
+                signal: request.signal, timeoutMs: held.timeoutMs,
               }));
               response = Response.json(result.body, { status: result.status,
                 headers: result.retryAfter ? { 'Retry-After': result.retryAfter } : {} });
@@ -132,6 +150,12 @@ export async function startCliGateway(options: {
       const body = Buffer.from(await response.arrayBuffer());
       if (abort.signal.aborted) { outgoing.end(); return; }
       outgoing.writeHead(response.status, Object.fromEntries(response.headers));
+      if (httpLane === null) {
+        // Rejected uploads never wait for their body or hold a reserved response slot.
+        timeout(1_000);
+        outgoing.end(body, () => incoming.destroy());
+        return;
+      }
       for (let offset = 0; offset < body.byteLength; offset += 64 * 1024) {
         if (!outgoing.write(body.subarray(offset, offset + 64 * 1024))) {
           await once(outgoing, 'drain', { signal: abort.signal });

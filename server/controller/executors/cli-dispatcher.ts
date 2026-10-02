@@ -7,7 +7,7 @@ import { invokeRawRouteHandler, unhandledRouteErrorResponse } from '../lib/http-
 import type { RouteMap } from '../lib/http-route-types.js';
 import type { ExecutorRpc, GuardRpcReply } from '../../remote/transport/rpc.js';
 import { CliAdmission } from '../../remote/transport/cli-admission.js';
-import { CLI_ENVELOPE_BYTES, CLI_REPLY_BYTES, CLI_SMALL_REPLY_BYTES, cliPolicy, parseControllerCliRequest, type CliHttpResponse } from '../../remote/transport/cli-protocol.js';
+import { CLI_ENVELOPE_BYTES, CLI_REPLY_BYTES, CLI_SMALL_REPLY_BYTES, cliPolicy, cliReplyBytes, parseControllerCliRequest, type CliHttpResponse } from '../../remote/transport/cli-protocol.js';
 
 export interface CliDispatchAccess {
   readonly executorId: string;
@@ -30,7 +30,7 @@ export class ControllerCliDispatcher {
   describe(access: CliDispatchAccess, guardReply: GuardRpcReply): CliContext {
     this.#assertAdmission(access);
     guardReply(() => this.#assertAdmission(access));
-    const release = this.#admission.acquire(access.executorId, 'short');
+    const release = this.#admission.acquire(access.executorId, 'short', 'primary');
     try {
       return { serverInstanceId: this.options.serverInstanceId, defaultExecutorId: access.executorId, workspaceName: this.options.workspaceName };
     } finally { release(); }
@@ -43,18 +43,20 @@ export class ControllerCliDispatcher {
       throw new DomainError('CLI_CONTROLLER_CHANGED', 'Garcon restarted; start a new CLI invocation', 409);
     }
     const policy = cliPolicy(request.http);
+    if (access.rpc.transport.lane !== policy.lane) throw new DomainError('CLI_ACCESS_DENIED', 'CLI operation arrived on the wrong lane', 403);
     const assertAdmission = () => {
       this.#assertAdmission(access);
       if (policy.management) access.assertManagement();
     };
     assertAdmission();
-    const release = this.#admission.acquire(access.executorId, policy.pool);
+    const release = this.#admission.acquire(access.executorId, policy.pool, policy.lane);
+    const replyLimit = cliReplyBytes(policy.lane);
     const signal = policy.timeoutMs === null ? access.signal : AbortSignal.any([access.signal, AbortSignal.timeout(policy.timeoutMs)]);
     const interrupted = () => policy.mutation
       ? new DomainError('CLI_OUTCOME_UNKNOWN', 'The CLI operation may have reached Garcon; its outcome is unknown', 503)
       : new DomainError('CLI_CONTROLLER_UNAVAILABLE', 'The controller CLI request was interrupted', 503, true);
     const oversized = () => policy.mutation ? interrupted()
-      : new DomainError('CLI_RESULT_TOO_LARGE', 'CLI result exceeds 8 MiB; narrow the requested result', 413);
+      : new DomainError('CLI_RESULT_TOO_LARGE', `CLI result exceeds ${policy.lane === 'primary' ? '64 KiB' : '8 MiB'}; narrow the requested result`, 413);
     const assertPublication = () => {
       if (signal.aborted) throw interrupted();
       try { assertAdmission(); }
@@ -62,6 +64,7 @@ export class ControllerCliDispatcher {
     };
     guardReply((bytes) => {
       assertPublication();
+      if (bytes > replyLimit) throw oversized();
       if (bytes <= CLI_SMALL_REPLY_BYTES || access.rpc.transport.channel.queuedBytes + bytes <= CLI_REPLY_BYTES) return;
       if (policy.mutation) throw interrupted();
       throw new DomainError('CLI_SERVICE_BUSY', 'Executor channel is busy; retry the read later', 503, true);
@@ -92,7 +95,7 @@ export class ControllerCliDispatcher {
       catch (error) { await response.body?.cancel().catch(() => {}); throw error; }
       let bodyValue: JsonValue;
       try {
-        bodyValue = JSON.parse(await readTextStreamWithLimit(response.body, CLI_REPLY_BYTES - CLI_ENVELOPE_BYTES, oversized)) as JsonValue;
+        bodyValue = JSON.parse(await readTextStreamWithLimit(response.body, replyLimit - CLI_ENVELOPE_BYTES, oversized)) as JsonValue;
       } catch (error) {
         await response.body?.cancel().catch(() => {});
         if (error instanceof DomainError && error.code === 'CLI_RESULT_TOO_LARGE') throw error;
@@ -103,7 +106,7 @@ export class ControllerCliDispatcher {
       const reply: CliHttpResponse = { status: response.status, body: bodyValue,
         ...(retryAfter && /^\d{1,5}$/.test(retryAfter) ? { retryAfter } : {}) };
       const bytes = Buffer.byteLength(JSON.stringify(reply)) + CLI_ENVELOPE_BYTES;
-      if (bytes > CLI_REPLY_BYTES) throw oversized();
+      if (bytes > replyLimit) throw oversized();
       return reply;
     })().finally(release);
     // Reservations follow actual handler settlement, not the lifetime of its cancelled waiter or RPC.

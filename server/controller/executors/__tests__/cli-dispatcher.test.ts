@@ -6,6 +6,35 @@ import { DomainError } from '../../../common/domain-error.js';
 import { cliPair, CLI_EXECUTOR_ID } from '../../../remote/__tests__/cli-fixture.js';
 import type { JsonValue } from '../../../../common/json.js';
 import type { RouteMap } from '../../lib/http-route-types.js';
+import { CliAdmission } from '../../../remote/transport/cli-admission.js';
+
+test('bulk short admission preserves per-executor and global primary reservations', () => {
+  const admission = new CliAdmission();
+  const releases: (() => void)[] = [];
+  try {
+    for (let executor = 0; executor < 6; executor++) {
+      for (let slot = 0; slot < 4; slot++) releases.push(admission.acquire(String(executor), 'short', 'bulk'));
+    }
+    expect(() => admission.acquire('0', 'short', 'bulk')).toThrow('CLI service is busy');
+    expect(() => admission.acquire('new', 'short', 'bulk')).toThrow('CLI service is busy');
+    for (let executor = 0; executor < 4; executor++) {
+      for (let slot = 0; slot < 2; slot++) releases.push(admission.acquire(String(executor), 'short', 'primary'));
+    }
+    expect(() => admission.acquire('new', 'short', 'primary')).toThrow('CLI service is busy');
+  } finally { for (const release of releases) { release(); release(); } }
+  admission.acquire('0', 'short', 'bulk')();
+});
+
+test.each([false, true])('primary CLI reply bounds preserve mutation uncertainty: mutation=%s', async (mutation) => {
+  const respond = () => Response.json({ data: 'x'.repeat(64 * 1024) });
+  const pair = cliPair(dispatcher({ '/api/v1/chats/stop': { POST: respond }, '/api/v1/chats/turn-receipt': { GET: respond } }));
+  try {
+    const operation = mutation ? 'POST /api/v1/chats/stop' : 'GET /api/v1/chats/turn-receipt';
+    await expect(pair.primary.worker.call('', 'controllerCli.request', request(operation, mutation ? {} : null)))
+      .rejects.toMatchObject({ code: mutation ? 'CLI_OUTCOME_UNKNOWN' : 'CLI_RESULT_TOO_LARGE' });
+    expect(pair.primary.worker.active).toBe(true);
+  } finally { pair.close(); }
+});
 
 function request(operation: CliOperation = 'GET /api/v1/chats', body: JsonValue | null = null): ControllerCliRequest {
   return { expectedServerInstanceId: 'controller', http: { operation, body, query: [] } };
@@ -97,9 +126,9 @@ test('management grants protect dispatch and secret reply publication without bl
 
 test('nested controller-to-worker calls can finish while the reverse request is pending', async () => {
   const pair = cliPair(dispatcher({ '/api/v1/chats': { GET: async () => Response.json(
-    await pair.controller.call('', 'projects.resolveFileMentions', { command: 'Synthetic', projectPath: '/worker' }),
+    await pair.primary.controller.call('', 'projects.resolveFileMentions', { command: 'Synthetic', projectPath: '/worker' }),
   ) } }));
-  pair.worker.handle(async () => 'worker result');
+  pair.primary.worker.handle(async () => 'worker result');
   try { expect((await pair.worker.call('', 'controllerCli.request', request())).body).toBe('worker result'); }
   finally { pair.close(); }
 });
@@ -126,7 +155,7 @@ test('cancelled and retired sessions cannot release unsettled producer reservati
     first.close();
     await expect(second.worker.call('', 'controllerCli.request', request('POST /api/v1/chats/fork', {})))
       .rejects.toMatchObject({ code: 'CLI_SERVICE_BUSY' });
-    expect(await second.worker.call('', 'controllerCli.describe', null)).toMatchObject({ defaultExecutorId: CLI_EXECUTOR_ID });
+    expect(await second.primary.worker.call('', 'controllerCli.describe', null)).toMatchObject({ defaultExecutorId: CLI_EXECUTOR_ID });
     expect((await second.worker.call('', 'controllerCli.request', request())).body).toEqual([]);
   } finally { settled.resolve(); first.close(); second.close(); }
 });

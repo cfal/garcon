@@ -5,6 +5,8 @@ import { BulkConnection, type BulkConnectionOptions, type BulkConnectionStatus }
 import type { RpcReplyJournal } from './rpc-journal.js';
 import type { RpcAdmissionBudgets } from './rpc-admission.js';
 import type { RpcLane } from './rpc-lane.js';
+import { AgentCallError } from '@garcon/server-agent-interface';
+import { BULK_ACQUIRE_TIMEOUT_MS } from './limits.js';
 
 export interface RpcConnectionOptions {
   readonly admission: RpcAdmissionBudgets;
@@ -22,7 +24,7 @@ export class ExecutorRpcConnection {
   #latestBulk: ExecutorRpc | null = null;
   #status: BulkConnectionStatus = { phase: 'offline', sessionId: null, error: null, retries: 0 };
 
-  constructor(link: WebSocketLink, transport: SessionTransport, options: RpcConnectionOptions) {
+  constructor(link: WebSocketLink, transport: SessionTransport, private readonly options: RpcConnectionOptions) {
     this.primary = new ExecutorRpc(transport, {
       admission: options.admission, journal: options.journal, parked: options.parked?.primary,
     });
@@ -46,6 +48,21 @@ export class ExecutorRpcConnection {
   }
 
   get status(): BulkConnectionStatus { return this.#status; }
+
+  async acquire(lane: RpcLane, options: { signal: AbortSignal; timeoutMs: number | null }): Promise<{ rpc: ExecutorRpc; timeoutMs: number | null }> {
+    const unavailable = () => new AgentCallError('not-dispatched', 'The captured executor connection is unavailable');
+    if (options.signal.aborted || !this.primary.active) throw unavailable();
+    const rpc = lane === 'primary' ? this.primary : this.bulk.current;
+    if (rpc?.active) return { rpc, timeoutMs: options.timeoutMs };
+    const started = performance.now();
+    const reserve = options.timeoutMs === null ? 0 : Math.min(1_000, Math.floor(options.timeoutMs / 2));
+    const waitMs = Math.min(BULK_ACQUIRE_TIMEOUT_MS, options.timeoutMs === null ? Infinity : options.timeoutMs - reserve);
+    const release = this.options.admission.outgoing.acquire(lane);
+    try {
+      const endpoint = await this.bulk.wait({ signal: options.signal, timeoutMs: waitMs });
+      return { rpc: endpoint, timeoutMs: options.timeoutMs === null ? null : Math.max(reserve, Math.ceil(options.timeoutMs - (performance.now() - started))) };
+    } finally { release(); }
+  }
 
   owns(rpc: ExecutorRpc): boolean {
     return this.primary.transport.connected && rpc.transport.connected

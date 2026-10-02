@@ -7,7 +7,8 @@ import { CLI_EXECUTOR_ID } from '../../../server/remote/__tests__/cli-fixture.js
 import { linkOptions } from '../../../server/remote/__tests__/integration-fixture.js';
 import { startCliGateway } from '../../../server/remote/server/cli-gateway.js';
 import { CLI_REPLY_BYTES } from '../../../server/remote/transport/cli-protocol.js';
-import { ExecutorRpc } from '../../../server/remote/transport/rpc.js';
+import { ExecutorRpcConnection } from '../../../server/remote/transport/rpc-connection.js';
+import { RpcAdmissionBudgets } from '../../../server/remote/transport/rpc-admission.js';
 import { WebSocketLink } from '../../../server/remote/transport/websocket-link.js';
 
 for (const dialer of ['controller', 'worker'] as const) {
@@ -15,7 +16,9 @@ for (const dialer of ['controller', 'worker'] as const) {
     const root = await mkdtemp(join(homedir(), 'cli-response-limits-'));
     const controller = new WebSocketLink({ ...linkOptions, executorId: CLI_EXECUTOR_ID, role: 'controller' });
     const worker = new WebSocketLink({ ...linkOptions, executorId: CLI_EXECUTOR_ID, role: 'worker' });
-    let workerRpc: ExecutorRpc | null = null;
+    let workerConnection: ExecutorRpcConnection | null = null;
+    const controllerAdmission = new RpcAdmissionBudgets();
+    const workerAdmission = new RpcAdmissionBudgets();
     let gateway: Awaited<ReturnType<typeof startCliGateway>> | undefined;
     let large = true;
     let pulls = 0;
@@ -34,20 +37,21 @@ for (const dialer of ['controller', 'worker'] as const) {
       routes: { '/api/v1/chats/export': { GET: respond }, '/api/v1/chats/run': { POST: respond } },
     });
     controller.onSession(session => {
-      const rpc = new ExecutorRpc(session);
-      rpc.handle(async (call, signal, guard) => {
+      const connection = new ExecutorRpcConnection(controller, session, { admission: controllerAdmission });
+      connection.onEndpoint(rpc => rpc.handle(async (call, signal, guard) => {
         const access = { executorId: CLI_EXECUTOR_ID, rpc, signal, assertCurrent() {}, assertManagement() {} };
         if (call.method === 'controllerCli.describe') return dispatcher.describe(access, guard);
         if (call.method === 'controllerCli.request') return dispatcher.request(call.request, access, guard);
         throw new Error('Unexpected reverse request');
-      });
+      }));
+      void session.ready.then(() => connection.activate());
     });
-    worker.onSession(session => { workerRpc = new ExecutorRpc(session); });
+    worker.onSession(session => { workerConnection = new ExecutorRpcConnection(worker, session, { admission: workerAdmission }); });
     try {
       if (dialer === 'controller') controller.dial(worker.listen());
       else worker.dial(controller.listen());
       await Promise.all([controller.ready, worker.ready]);
-      gateway = await startCliGateway({ dataDir: join(root, 'executor'), currentRpc: () => workerRpc });
+      gateway = await startCliGateway({ dataDir: join(root, 'executor'), currentConnection: () => workerConnection });
       const call = (mutation: boolean) => fetch(`${gateway!.descriptor.baseUrl}/api/v1/chats/${mutation ? 'run' : 'export'}`, {
         method: mutation ? 'POST' : 'GET', body: mutation ? '{}' : undefined,
         headers: { Authorization: `Bearer ${gateway!.descriptor.localCapability}`, 'X-Garcon-Server-Instance': 'controller', 'Content-Type': 'application/json' },
