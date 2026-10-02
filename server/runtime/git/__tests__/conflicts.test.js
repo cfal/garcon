@@ -8,6 +8,50 @@ import { materializeReviewResponse } from "./rendered-patch-fixture.js";
 import { withGitOperation } from "../operation-context.js";
 
 describe("porcelain conflict and comparison robustness", () => {
+  it('previews and resolves in-repository symlinks without staging their targets', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-conflict-link-'));
+    try {
+      await initRepoWithCommit(projectPath);
+      await fs.symlink('a.txt', path.join(projectPath, 'link'));
+      const git = createGitOperations();
+      const details = await withGitOperation(projectPath, {}, () => git.getConflictDetails({ projectPath, file: 'link' }));
+      expect(details.working.content).toBe('one\n');
+      await withGitOperation(projectPath, {}, () => git.markConflictResolved({ projectPath, file: 'link' }));
+      expect((await runGitCommand(projectPath, ['show', ':link'])).stdout).toBe('a.txt');
+      expect((await runGitCommand(projectPath, ['ls-files', '-s', 'link'])).stdout).toStartWith('120000 ');
+      expect(await fs.readFile(path.join(projectPath, 'a.txt'), 'utf8')).toBe('one\n');
+    } finally { await fs.rm(projectPath, { recursive: true, force: true }); }
+  });
+
+  it('bounds previews at the exact byte limit and when a file grows after stat', async () => {
+    const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-preview-bound-'));
+    let openSpy;
+    try {
+      await initRepoWithCommit(projectPath);
+      const filePath = path.join(projectPath, 'a.txt');
+      const git = createGitOperations();
+      await fs.writeFile(filePath, 'x'.repeat(256 * 1024));
+      expect((await git.getConflictDetails({ projectPath, file: 'a.txt' })).working)
+        .toMatchObject({ truncated: false, byteLength: 256 * 1024 });
+      const open = fs.open.bind(fs);
+      openSpy = spyOn(fs, 'open').mockImplementation(async (...args) => {
+        const handle = await open(...args);
+        const read = handle.read.bind(handle);
+        let grew = false;
+        handle.read = async (...readArgs) => {
+          if (!grew) { grew = true; await fs.appendFile(filePath, 'x'.repeat(256 * 1024)); }
+          return read(...readArgs);
+        };
+        return handle;
+      });
+      expect((await git.getConflictDetails({ projectPath, file: 'a.txt' })).working)
+        .toMatchObject({ content: null, truncated: true, byteLength: 512 * 1024, limitReason: 'content-too-large' });
+    } finally {
+      openSpy?.mockRestore();
+      await fs.rm(projectPath, { recursive: true, force: true });
+    }
+  });
+
   it('rejects nonregular conflict files without waiting for a FIFO writer', async () => {
     if (process.platform === 'win32') return;
     const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-conflict-fifo-'));
@@ -48,7 +92,7 @@ describe("porcelain conflict and comparison robustness", () => {
     }
   });
 
-  it('does not stage after cancellation during a conflict scan', async () => {
+  for (const operation of ['markConflictResolved', 'getConflictDetails']) it(`honors cancellation during ${operation} filesystem reads`, async () => {
     const projectPath = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-git-conflict-abort-'));
     let openSpy;
     let readSpy;
@@ -67,7 +111,7 @@ describe("porcelain conflict and comparison robustness", () => {
         });
         return handle;
       });
-      await expect(createGitOperations().markConflictResolved({ projectPath, file: 'a.txt', signal: controller.signal }))
+      await expect(createGitOperations()[operation]({ projectPath, file: 'a.txt', signal: controller.signal }))
         .rejects.toThrow('scan cancelled');
       expect((await runGitCommand(projectPath, ['show', ':a.txt'])).stdout).toBe('one\n');
     } finally {

@@ -107,12 +107,14 @@ async function openWorkingConflictFile(projectPath: string, file: string, signal
   signal?.throwIfAborted();
   const workingPath = resolvePathWithinProject(projectPath, file);
   await assertGitWorkingPath(workingPath);
-  const handle = await fs.open(workingPath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  const realPath = await fs.realpath(workingPath);
+  await assertGitWorkingPath(realPath);
+  const handle = await fs.open(realPath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const stats = await handle.stat();
     if (!stats.isFile()) throw new GitDomainError('INVALID_INPUT', 'Conflict content must be a regular file.');
     await assertGitWorkingPath(workingPath);
-    const current = await fs.lstat(workingPath);
+    const current = await fs.stat(workingPath);
     if (stats.dev !== current.dev || stats.ino !== current.ino) {
       throw new GitDomainError('INVALID_INPUT', 'Conflict file changed while opening it.');
     }
@@ -142,7 +144,7 @@ async function readWorkingConflictContent(projectPath: string, file: string, sig
         if (size <= MAX_CONFLICT_CONTENT_BYTES) {
           return limitConflictContent(buffer.subarray(0, size).toString('utf8'), size);
         }
-        byteLength = size;
+        byteLength = Math.max(size, (await handle.stat()).size);
       }
       return {
         content: null,
