@@ -11,7 +11,7 @@
 	import { stripLegacyInterAgentOutcomePrefix } from '$lib/chat/transcript/inter-agent-message-presentation';
 	import type { ResolveChatReference } from '$lib/chat/transcript/chat-reference.js';
 	import * as m from '$lib/paraglide/messages.js';
-	import ChatReference from '../ChatReference.svelte';
+	import ChatReference from '../../ChatReference.svelte';
 	import Markdown from '$lib/components/rich-text/Markdown.svelte';
 	import type { MarkdownLinkNavigateEvent } from '$lib/components/rich-text/Markdown.svelte';
 	import type { ConversationDisclosureStatePort } from '../ConversationFeedItemState.svelte.js';

@@ -3,7 +3,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import {
 	installResizeObserverHarness,
 	ResizeObserverHarness,
-} from '../../shared/__tests__/resize-observer-harness.js';
+} from '../../../shared/__tests__/resize-observer-harness.js';
 import { CollapsibleBodyLayoutHarness } from './collapsible-body-layout-harness.js';
 import CollapsibleBodyTestHost from './CollapsibleBodyTestHost.svelte';
 

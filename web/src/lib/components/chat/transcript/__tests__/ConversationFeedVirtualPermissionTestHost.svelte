@@ -11,7 +11,7 @@
 	import { ExitPlanModeToolUseMessage } from '$shared/chat-types';
 	import type { PendingPermissionRequest } from '$lib/types/chat';
 	import type { ConversationVirtualFeedItem } from '../conversation-feed-virtual-items.js';
-	import { setCanonicalWorkspaceLayout } from './workspace-layout-test-context.js';
+	import { setCanonicalWorkspaceLayout } from '../../__tests__/workspace-layout-test-context.js';
 
 	const SOURCE_CHAT_ID = '1788592720180699';
 	const TARGET_CHAT_ID = '1788592720180600';

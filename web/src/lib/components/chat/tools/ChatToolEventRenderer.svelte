@@ -23,7 +23,7 @@
 	import type {
 		ConversationDisclosureKind,
 		ConversationDisclosureStatePort,
-	} from '../ConversationFeedItemState.svelte.js';
+	} from '../transcript/ConversationFeedItemState.svelte.js';
 	import type { ResolveChatReference } from '$lib/chat/transcript/chat-reference.js';
 
 	interface ToolRendererProps {

@@ -1,11 +1,11 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import ConversationFeed from './ConversationFeed.svelte';
+	import ConversationFeed from './transcript/ConversationFeed.svelte';
 	import ConversationPanelScrollControls from './ConversationPanelScrollControls.svelte';
 	import ConversationPanelStatusDock from './ConversationPanelStatusDock.svelte';
 	import ComposerAvailabilityNotice from './composer/ComposerAvailabilityNotice.svelte';
 	import type { ComposerAvailabilityNoticePresentation } from '$lib/chat/composer/composer-availability.js';
-	import MessageRenderFallback from './MessageRenderFallback.svelte';
+	import MessageRenderFallback from './transcript/MessageRenderFallback.svelte';
 	import QueueControls from './queue/QueueControls.svelte';
 	import type { ConversationPanelActions } from './conversation-panel-actions.js';
 	import type { ConversationPanelRegistration } from '$lib/chat/conversation/conversation-panel-registry.svelte.js';

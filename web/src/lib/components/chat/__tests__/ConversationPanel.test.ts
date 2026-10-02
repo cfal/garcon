@@ -61,7 +61,7 @@ vi.mock('$lib/context', () => ({
 	getOptionalTransientLayers: () => null,
 }));
 
-vi.mock('$lib/components/chat/ConversationFeed.svelte', async () => ({
+vi.mock('$lib/components/chat/transcript/ConversationFeed.svelte', async () => ({
 	default: (await import('./ConversationPanelFeedStub.svelte')).default,
 }));
 

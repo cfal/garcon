@@ -36,6 +36,17 @@ const componentConcerns = [
 		filePrefixes: ['NewChat', 'new-chat-'],
 	},
 	{
+		owner: 'chat',
+		concern: 'transcript',
+		filePrefixes: [
+			'ConversationFeed',
+			'ConversationMessage',
+			'ConversationTranscript',
+			'ConversationToolGroup',
+			'conversation-feed-',
+		],
+	},
+	{
 		owner: 'sidebar',
 		concern: 'search',
 		filePrefixes: ['SidebarSearch', 'SidebarTranscriptSearchStatus', 'SavedSearch', 'sidebar-search-'],

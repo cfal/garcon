@@ -9,7 +9,7 @@
 	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
 	import { AskUserQuestionToolUseMessage, PermissionRequestMessage } from '$shared/chat-types';
 	import type { PendingPermissionRequest } from '$lib/types/chat';
-	import { setCanonicalWorkspaceLayout } from './workspace-layout-test-context.js';
+	import { setCanonicalWorkspaceLayout } from '../../__tests__/workspace-layout-test-context.js';
 
 	interface Props {
 		onDecision: (

@@ -4,7 +4,7 @@
 
 	import type { Snippet } from 'svelte';
 	import * as m from '$lib/paraglide/messages.js';
-	import ChatEventCard from '../rows/ChatEventCard.svelte';
+	import ChatEventCard from '../transcript/rows/ChatEventCard.svelte';
 
 	interface CollapsibleDisplayProps {
 		toolName: string;

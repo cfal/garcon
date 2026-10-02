@@ -32,7 +32,7 @@
 		setNotifications,
 	} from '$lib/context';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
-	import { setCanonicalWorkspaceLayout } from './workspace-layout-test-context.js';
+	import { setCanonicalWorkspaceLayout } from '../../__tests__/workspace-layout-test-context.js';
 
 	interface Props {
 		chatContext?: ConversationMessageChatContext;

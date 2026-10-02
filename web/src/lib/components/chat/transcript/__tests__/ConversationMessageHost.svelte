@@ -15,7 +15,7 @@
 	import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 	import { onDestroy, untrack } from 'svelte';
 	import type { ConversationDisclosureStatePort } from '../ConversationFeedItemState.svelte.js';
-	import { setCanonicalWorkspaceLayout } from './workspace-layout-test-context.js';
+	import { setCanonicalWorkspaceLayout } from '../../__tests__/workspace-layout-test-context.js';
 
 	type OpenAutoInput = FileOpenRequest;
 

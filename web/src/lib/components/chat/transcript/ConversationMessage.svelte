@@ -48,7 +48,7 @@
 	import TranscriptNoticeRow from './rows/TranscriptNoticeRow.svelte';
 	import { cliPresentationSurfaceClass } from '$lib/chat/transcript/cli-presentation-style';
 	import { userMessageBodyDisclosure } from '$lib/chat/transcript/user-message-body-disclosure.js';
-	import ChatToolEventRenderer from './tools/ChatToolEventRenderer.svelte';
+	import ChatToolEventRenderer from '../tools/ChatToolEventRenderer.svelte';
 	import {
 		ContextMenu,
 		ContextMenuTrigger,

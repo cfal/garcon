@@ -3,7 +3,7 @@
 	// Compact single-line tool display with action buttons.
 	// Renders as a card surface instead of a rail/border-l treatment.
 
-	import ChatEventCard from '../rows/ChatEventCard.svelte';
+	import ChatEventCard from '../transcript/rows/ChatEventCard.svelte';
 	import HighlightedCodeText from '$lib/components/rich-text/HighlightedCodeText.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import { copyToClipboard } from '$lib/utils/clipboard';

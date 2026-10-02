@@ -9,7 +9,7 @@
 	import HandoffForkDialog from './HandoffForkDialog.svelte';
 	import ExecutorHandoffDialog from './ExecutorHandoffDialog.svelte';
 	import ReloadChatDialog from './ReloadChatDialog.svelte';
-	import UserMessageNavigatorDialog from './UserMessageNavigatorDialog.svelte';
+	import UserMessageNavigatorDialog from './transcript/UserMessageNavigatorDialog.svelte';
 	import {
 		StaleConversationSurfaceError,
 		type ConversationPanelActions,

@@ -12,7 +12,7 @@
 		isPreambleSelectionChangedNoticeDetail,
 	} from '$shared/transcript-notice-details';
 	import ChatEventCard from './ChatEventCard.svelte';
-	import ChatReference from '../ChatReference.svelte';
+	import ChatReference from '../../ChatReference.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import CollapsibleBody from './CollapsibleBody.svelte';
 	import InterAgentMessageRow from './InterAgentMessageRow.svelte';

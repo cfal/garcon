@@ -11,7 +11,7 @@
 	import type { PermissionTerminalState } from '$lib/chat/transcript/conversation-feed-items.js';
 	import type { PermissionQuestionDraft } from '../ConversationFeedItemState.svelte.js';
 	import type { ConversationMessageChatContext } from '$lib/chat/transcript/conversation-message-context.js';
-	import { setCanonicalWorkspaceLayout } from './workspace-layout-test-context.js';
+	import { setCanonicalWorkspaceLayout } from '../../__tests__/workspace-layout-test-context.js';
 
 	interface Props {
 		executors?: readonly ExecutorSnapshot[] | null;

@@ -2,36 +2,32 @@
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
 	import { onDestroy } from 'svelte';
 	import ConversationTranscriptItem from '../ConversationTranscriptItem.svelte';
-	import { buildConversationFeedRenderModel } from '$lib/chat/transcript/conversation-feed-items.js';
+	import { buildConversationFeedRenderModel } from '$lib/chat/transcript/conversation-feed-items';
 	import { setAppShell, setChatSessions, setFileSessions, setLocalSettings, setNotifications } from '$lib/context';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
+	import type { ChatDisplayRow } from '$lib/chat/transcript/active-transcript-state.svelte.js';
+	import type { PendingPermissionRequest } from '$lib/types/chat';
+	import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
 	import { FileSessionRegistry } from '$lib/files/sessions/file-session-registry.svelte.js';
 	import { createAppShellStore } from '$lib/stores/app-shell.svelte.js';
 	import { createChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 	import { createLocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
-	import { ExitPlanModeToolUseMessage } from '$shared/chat-types';
-	import type { PendingPermissionRequest } from '$lib/types/chat';
-	import { setCanonicalWorkspaceLayout } from './workspace-layout-test-context.js';
+	import { setCanonicalWorkspaceLayout } from '../../__tests__/workspace-layout-test-context.js';
 
 	interface Props {
-		pendingPermissionRequests: PendingPermissionRequest[];
-		onExitPlanMode: (permissionOccurrenceId: string, choice: string, plan: string) => void;
+		rows: ChatDisplayRow[];
+		pendingPermissionRequests?: PendingPermissionRequest[];
+		onPermissionDecision?: (
+			permissionOccurrenceId: string,
+			decision: PermissionDecisionPayload,
+		) => void;
 	}
 
-	let { pendingPermissionRequests, onExitPlanMode }: Props = $props();
+	let { rows, pendingPermissionRequests = [], onPermissionDecision }: Props = $props();
+	const renderModel = $derived(buildConversationFeedRenderModel(rows));
 	setCanonicalWorkspaceLayout();
 	setNotifications(createNotificationsStore());
 	setExecutorsTestContext();
-
-	const message = new ExitPlanModeToolUseMessage(
-		'2026-08-15T00:00:00.000Z',
-		'plan-1',
-		'Historical plan.',
-	);
-	const renderModel = buildConversationFeedRenderModel([
-		{ kind: 'message', id: 'view-1:1', ordinal: 1, message },
-	]);
-	const item = renderModel.items[0]!;
 
 	const chatSessions = createChatSessionsStore();
 	chatSessions.createDraft({
@@ -72,9 +68,11 @@
 	onDestroy(() => localSettings.destroy());
 </script>
 
-<ConversationTranscriptItem
-	{item}
-	{renderModel}
-	{pendingPermissionRequests}
-	{onExitPlanMode}
-/>
+{#each renderModel.items as item (item.id)}
+	<ConversationTranscriptItem
+		{item}
+		{renderModel}
+		{pendingPermissionRequests}
+		{onPermissionDecision}
+	/>
+{/each}
