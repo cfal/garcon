@@ -69,10 +69,6 @@ export interface ModelSourceOption {
 	models: ModelOption[];
 }
 
-export interface FilteredModelResult {
-	items: ModelOption[];
-}
-
 export interface ModelSelectorRow {
 	value: string;
 	label: string;

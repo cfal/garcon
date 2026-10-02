@@ -10,19 +10,14 @@ import {
 	buildModelRows,
 	buildModelSelectorChange,
 	buildModelSources,
-	filterModelOptions,
+	currentModelValue,
 	filterModelRows,
 	modelDisplayLabel,
 	nativeSourceLabel,
-	selectedSourceKey,
 	shouldShowSourceLabelForAgent,
 	shouldShowSourcePickerForAgent,
 } from '../model-selector-options';
-import {
-	findModelForSelection,
-	modelValueForSelection,
-	resolveModelSelection,
-} from '../../../../test/model-catalog';
+import { modelValueForSelection, resolveModelSelection } from '../../../../test/model-catalog';
 
 const claudeModels: ModelOption[] = [
 	{ value: 'opus', label: 'Opus', supportsImages: true },
@@ -50,18 +45,15 @@ const codexModels: ModelOption[] = [
 	},
 ];
 
-function makeNativeOnlyCatalog(
-	agentId: string,
-	agentLabel: string,
-	models: ModelOption[],
-): ModelCatalogStore {
+function makeNativeOnlyCatalog(agentId: string, agentLabel: string, models: ModelOption[]) {
 	return {
 		getModels: (id: string) => (id === agentId ? models : []),
 		getAgentLabel: (id: string) => (id === agentId ? agentLabel : id),
-	} as unknown as ModelCatalogStore;
+		findEndpoint: () => null,
+	} satisfies Parameters<typeof buildModelSources>[0];
 }
 
-function makeCatalog(options: { multiEndpointProvider?: boolean } = {}): ModelCatalogStore {
+function makeCatalog(options: { multiEndpointProvider?: boolean } = {}) {
 	const modelsByAgent: Record<string, ModelOption[]> = {
 		claude: claudeModels,
 		codex: codexModels,
@@ -94,20 +86,31 @@ function makeCatalog(options: { multiEndpointProvider?: boolean } = {}): ModelCa
 			id,
 			label: id === 'codex' ? 'Cached Codex' : 'Cached Claude',
 			description: '',
+			supportsCompact: false,
 			supportsFork: true,
+			supportsForkAtMessage: false,
+			supportsForkWhileRunning: false,
 			supportsUpdateProjectPath: true,
+			supportsSteering: false,
 			supportsImages: true,
+			fileAttachmentMimeTypes: [],
 			acceptsApiProviderEndpoints: true,
 			supportedProtocols: id === 'codex' ? ['openai-compatible'] : ['anthropic-messages'],
+			authLoginSupported: false,
+			supportedPermissionModes: [],
+			supportedThinkingModes: [],
+			settings: [],
+			defaultSettings: { ownerId: id, schemaVersion: 1, values: {} },
 			defaultModel: id === 'codex' ? 'gpt-5.5' : 'opus',
 		}),
 		getAgentLabel: (id: string) => (id === 'codex' ? 'Codex' : 'Claude'),
 		getModels: (agentId: string) => modelsByAgent[agentId] ?? [],
 		getDefaultModel: (agentId: string) => modelsByAgent[agentId]?.[0]?.value ?? '',
-		getModelForSelection: (agentId: string, model: string, endpointId?: string | null) =>
-			findModelForSelection(modelsByAgent[agentId] ?? [], model, endpointId),
-		selectionFor: (agentId: string, model: string) =>
-			resolveModelSelection(modelsByAgent[agentId] ?? [], model),
+		selectionFor: (agentId: string, model: string) => {
+			const selection = resolveModelSelection(modelsByAgent[agentId] ?? [], model);
+			if (!selection) throw new Error('Missing model fixture');
+			return selection;
+		},
 		selectionValueFor: (agentId: string, model: string, endpointId?: string | null) =>
 			modelValueForSelection(modelsByAgent[agentId] ?? [], model, endpointId),
 		findEndpoint: (endpointId: string) => {
@@ -115,6 +118,7 @@ function makeCatalog(options: { multiEndpointProvider?: boolean } = {}): ModelCa
 				return {
 					apiProvider: {
 						id: 'acme',
+						revision: 1,
 						label: 'Acme',
 						createdAt: '',
 						updatedAt: '',
@@ -127,6 +131,7 @@ function makeCatalog(options: { multiEndpointProvider?: boolean } = {}): ModelCa
 				return {
 					apiProvider: {
 						id: 'acme',
+						revision: 1,
 						label: 'Acme',
 						createdAt: '',
 						updatedAt: '',
@@ -137,10 +142,20 @@ function makeCatalog(options: { multiEndpointProvider?: boolean } = {}): ModelCa
 			}
 			return null;
 		},
-	} as unknown as ModelCatalogStore;
+	} satisfies Pick<
+		ModelCatalogStore,
+		| 'getSelectableAgents'
+		| 'getAgent'
+		| 'getAgentLabel'
+		| 'getModels'
+		| 'getDefaultModel'
+		| 'selectionFor'
+		| 'selectionValueFor'
+		| 'findEndpoint'
+	>;
 }
 
-function makeLargeEndpointCatalog(count: number): ModelCatalogStore {
+function makeLargeEndpointCatalog(count: number) {
 	const models = Array.from({ length: count }, (_, index): ModelOption => ({
 		value: `acme-openai:model-${index}`,
 		label: `Acme: Model ${index}`,
@@ -156,6 +171,7 @@ function makeLargeEndpointCatalog(count: number): ModelCatalogStore {
 		findEndpoint: () => ({
 			apiProvider: {
 				id: 'acme',
+				revision: 1,
 				label: 'Acme',
 				createdAt: '',
 				updatedAt: '',
@@ -181,7 +197,7 @@ function makeLargeEndpointCatalog(count: number): ModelCatalogStore {
 				hasApiKey: true,
 			},
 		}),
-	} as unknown as ModelCatalogStore;
+	} satisfies Parameters<typeof buildModelSources>[0];
 }
 
 describe('model selector options', () => {
@@ -301,14 +317,14 @@ describe('model selector options', () => {
 		expect(buildModelRows([model], null)[0].label).toBe('Acme: Sonnet');
 	});
 
-	it('resolves the selected source from raw model and endpoint metadata', () => {
-		const sourceKey = selectedSourceKey(makeCatalog(), {
+	it('resolves the selected value from raw model and endpoint metadata', () => {
+		const modelValue = currentModelValue(makeCatalog(), {
 			agentId: 'claude',
 			model: 'acme-sonnet',
 			modelEndpointId: 'acme-anthropic',
 		});
 
-		expect(sourceKey).toBe('endpoint:acme-anthropic');
+		expect(modelValue).toBe('acme-anthropic:acme-sonnet');
 	});
 
 	it('preserves endpoint metadata when building selector changes', () => {
@@ -322,17 +338,6 @@ describe('model selector options', () => {
 			modelEndpointId: 'acme-openai',
 			modelProtocol: 'openai-compatible',
 		});
-	});
-
-	it('filters large model lists without capping matches', () => {
-		const models = Array.from({ length: 150 }, (_, index) => ({
-			value: `model-${index}`,
-			label: `Model ${index}`,
-		}));
-
-		const result = filterModelOptions(models, 'model');
-
-		expect(result.items).toHaveLength(150);
 	});
 
 	it('filters prepared model rows without capping matches', () => {
@@ -361,5 +366,36 @@ describe('model selector options', () => {
 		const result = filterModelRows(rows, 'raw-b');
 
 		expect(result.items.map((row) => row.value)).toEqual(['display-b']);
+	});
+
+	it('preserves row identity and ordering for an empty query', () => {
+		const rows = buildModelRows(claudeModels);
+		expect(filterModelRows(rows, '  ').items).toBe(rows);
+	});
+
+	it('ranks exact, prefix, substring, and compact matches with stable ties', () => {
+		const rows = buildModelRows([
+			{ value: 'compact', label: 'Son-net' },
+			{ value: 'substring', label: 'Acme Sonnet' },
+			{ value: 'prefix-first', label: 'Sonnet Large' },
+			{ value: 'exact', label: 'Sonnet' },
+			{ value: 'prefix-second', label: 'Sonnet Small' },
+		]);
+		expect(filterModelRows(rows, 'SONNET').items.map((row) => row.value)).toEqual([
+			'exact',
+			'prefix-first',
+			'prefix-second',
+			'substring',
+			'compact',
+		]);
+	});
+
+	it('requires every query token and searches stripped source labels', () => {
+		const source = buildModelSources(makeCatalog(), 'claude')[1];
+		const rows = buildModelRows(claudeModels, source);
+		expect(filterModelRows(rows, '  Acme   Sonnet  ').items.map((row) => row.value)).toEqual([
+			'acme-anthropic:acme-sonnet',
+		]);
+		expect(filterModelRows(rows, 'Acme missing').items).toEqual([]);
 	});
 });
