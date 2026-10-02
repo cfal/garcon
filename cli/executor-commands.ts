@@ -17,6 +17,13 @@ function requireExecutor(executors: readonly ExecutorSnapshot[], id: string): Ex
   return executor;
 }
 
+function isRetryableExecutorReadError(error: unknown): error is GarconTransportError | GarconHttpError {
+  if (error instanceof GarconTransportError) return true;
+  if (!(error instanceof GarconHttpError) || !error.retryable) return false;
+  if (error.errorCode === 'CLI_CONTROLLER_CHANGED') return false;
+  return error.status !== 401 && error.status !== 403 && error.status !== 404;
+}
+
 async function waitReady(
   client: ExecutorCommandClient,
   id: string,
@@ -24,33 +31,29 @@ async function waitReady(
   signal?: AbortSignal,
 ): Promise<ExecutorSnapshot> {
   const timeout = AbortSignal.timeout(timeoutMs);
-  const waiting = signal ? AbortSignal.any([signal, timeout]) : timeout;
-  let last: ExecutorSnapshot | undefined;
+  const waitSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
+  let lastSnapshot: ExecutorSnapshot | undefined;
   let lastReadError: Error | undefined;
   try {
     while (true) {
-      waiting.throwIfAborted();
+      waitSignal.throwIfAborted();
       try {
-        last = requireExecutor(await client.listExecutors(waiting), id);
+        lastSnapshot = requireExecutor(await client.listExecutors(waitSignal), id);
         lastReadError = undefined;
-        waiting.throwIfAborted();
-        if (!last.enabled) throw new CliError('executors', 'executor is disabled', 3);
-        if (last.availability === 'ready') return last;
+        waitSignal.throwIfAborted();
+        if (!lastSnapshot.enabled) throw new CliError('executors', 'executor is disabled', 3);
+        if (lastSnapshot.availability === 'ready') return lastSnapshot;
       } catch (error) {
-        waiting.throwIfAborted();
-        const retryable = error instanceof GarconTransportError
-          || error instanceof GarconHttpError && error.retryable
-            && error.status !== 401 && error.status !== 403 && error.status !== 404
-            && error.errorCode !== 'CLI_CONTROLLER_CHANGED';
-        if (!retryable) throw error;
+        waitSignal.throwIfAborted();
+        if (!isRetryableExecutorReadError(error)) throw error;
         lastReadError = error;
       }
-      await abortableDelay(500, waiting);
+      await abortableDelay(500, waitSignal);
     }
   } catch (error) {
     signal?.throwIfAborted();
     if (timeout.aborted) {
-      const message = lastReadError?.message ?? last?.lastError?.message;
+      const message = lastReadError?.message ?? lastSnapshot?.lastError?.message;
       const detail = message ? `: ${message}` : '';
       throw new CliError('executors', `timed out waiting for executor readiness${detail}`, 3);
     }

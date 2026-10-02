@@ -39,7 +39,7 @@ import { CliError } from './errors.js';
 import { GarconClient } from './garcon-client.js';
 import { createCliOutput, type CliOutput } from './output.js';
 import { applyTicketStdin, runTicketCommand } from './ticket-commands.js';
-import { ticketLineOutput } from './ticket-output.js';
+import { terminalLine } from './terminal-output.js';
 import { readTicketStdin } from './ticket-stdin.js';
 import { applyExecutorConnectionStdin, readExecutorConnectionStdin } from './executor-args.js';
 import { runExecutorCommand } from './executor-commands.js';
@@ -531,7 +531,7 @@ export async function main(
       ? error
       : new CliError('submission', error instanceof Error ? error.message : String(error), 3);
     const diagnostic = `${cliError.phase}: ${cliError.message}`;
-    output.diagnostic(ticketLineOutput(diagnostic));
+    output.diagnostic(terminalLine(diagnostic));
     return cliError.exitCode;
   }
 }

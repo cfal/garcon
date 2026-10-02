@@ -170,7 +170,12 @@ async function oneShotMutation<T>(
     return await submit();
   } catch (error) {
     if (isDefinitiveMutationRejection(error)) throw error;
-    throw new CliError(phase, 'mutation outcome is unknown; inspect the current value or operation status before retrying. No automatic retry was made.', 3, { cause: error });
+    throw new CliError(
+      phase,
+      'mutation outcome is unknown; inspect the current value or operation status before retrying. No automatic retry was made.',
+      3,
+      { cause: error },
+    );
   }
 }
 
@@ -984,9 +989,14 @@ export class GarconClient {
   ): Promise<SetChatTagsResponse> {
     // Reconciles a previous uncertain save; this snapshot is not a write precondition.
     const query = new URLSearchParams({ chatId: request.chatId });
-    const recovered = normalizeRecoverChatTagsResponse(await this.#request(
-      'submission', 'GET', `/api/v1/chats/tags?${query}`, undefined, signal,
-    ));
+    const recoveredValue = await this.#request(
+      'submission',
+      'GET',
+      `/api/v1/chats/tags?${query}`,
+      undefined,
+      signal,
+    );
+    const recovered = normalizeRecoverChatTagsResponse(recoveredValue);
     if (!recovered || recovered.chatId !== request.chatId) {
       throw new CliError('submission', 'server returned an invalid tag recovery response', 3);
     }
