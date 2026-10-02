@@ -23,10 +23,9 @@ import {
   parseChatExecutionControlState,
   parseExecutionControlServerInstanceId,
 } from './chat-execution-control';
-import type { RemoteSettingsSnapshot } from './settings';
 import { parseExecutors, type ExecutorSnapshot } from './executors';
 import type { ErrorCode } from './error-codes';
-import { normalizeRemoteSettingsSnapshot } from './settings';
+import { normalizeRemoteSettingsSnapshot, type RemoteSettingsSnapshot } from './settings';
 import {
   isScheduledPromptsInvalidationReason,
   type ScheduledPromptsInvalidationReason,
@@ -498,8 +497,7 @@ function str(v: unknown): string {
 
 function requiredStr(v: unknown): string | null {
   if (typeof v !== 'string') return null;
-  const trimmed = v.trim();
-  return trimmed.length > 0 ? trimmed : null;
+  return v.trim() || null;
 }
 
 function requiredPath(v: unknown): string | null {

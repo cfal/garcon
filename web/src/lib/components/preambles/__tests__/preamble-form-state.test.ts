@@ -111,13 +111,13 @@ describe('PreambleFormState', () => {
 		});
 	});
 
-	it('rejects duplicate trimmed paths and reserved file-context text', () => {
+	it('rejects duplicate paths and reserved file-context text', () => {
 		const form = new PreambleFormState();
 		form.title = 'Scoped instructions';
 		form.content = `Before${PREAMBLE_FILE_CONTEXT_SEPARATOR}after`;
 		form.scopeType = 'project-paths';
 		form.addPath('/workspace/project');
-		form.addPath(' /workspace/project ');
+		form.addPath('/workspace/project');
 
 		expect(form.contentError).toContain('reserved');
 		expect(form.scopeError).toContain('unique');
@@ -131,7 +131,7 @@ describe('PreambleFormState', () => {
 		const form = new PreambleFormState();
 		form.scopeType = 'project-paths';
 		const first = form.addPath('/workspace/project');
-		const duplicate = form.addPath(' /workspace/project ');
+		const duplicate = form.addPath('/workspace/project');
 		const blank = form.addPath(' ');
 		const valid = form.addPath('/workspace/other');
 		if (!first || !duplicate || !blank || !valid) throw new Error('Expected path rules');
@@ -151,6 +151,20 @@ describe('PreambleFormState', () => {
 		form.addPath('/workspace/a/b');
 
 		expect(form.scopeError).toBeNull();
+	});
+
+	it('preserves distinct spaced and unspaced scope paths', () => {
+		const form = new PreambleFormState();
+		form.title = 'Scoped instructions';
+		form.content = 'Synthetic instructions';
+		form.scopeType = 'project-paths';
+		form.addPath('/workspace/project');
+		form.addPath('/workspace/project ');
+		expect(form.scopeError).toBeNull();
+		expect(form.buildDefinition()?.scope).toEqual({ type: 'project-paths', rules: [
+			{ projectPath: '/workspace/project', includeNested: false },
+			{ projectPath: '/workspace/project ', includeNested: false },
+		] });
 	});
 
 	it('creates path-row identities without randomUUID', () => {

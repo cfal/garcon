@@ -78,7 +78,7 @@ export class PromptComposerProjectState {
 
 	matchesSnippetContext(operation: PromptComposerSnippetContext, response: Pick<ExpandSnippetResponse, 'contextExecutorId' | 'contextProjectPath'>): boolean {
 		return this.deps.selectedChat?.id === operation.chatId
-			&& this.target?.projectPath.trim() === operation.projectPath
+			&& this.target?.projectPath === operation.projectPath
 			&& (this.target?.executorId ?? 'local') === operation.executorId
 			&& response.contextExecutorId === operation.executorId
 			&& response.contextProjectPath === operation.projectPath;
@@ -87,9 +87,9 @@ export class PromptComposerProjectState {
 	async resolveSnippetContext(signal?: AbortSignal): Promise<PromptComposerSnippetContext> {
 		const chat = this.deps.selectedChat;
 		const target = this.target;
-		const projectPath = target?.projectPath.trim();
+		const projectPath = target?.projectPath;
 		const executorId = target?.executorId ?? 'local';
-		if (!chat || !target || !projectPath) throw new Error(m.chat_new_chat_errors_project_path_required());
+		if (!chat || !target || !projectPath?.trim()) throw new Error(m.chat_new_chat_errors_project_path_required());
 		signal?.throwIfAborted();
 		const lease = this.deps.projectResolution.retain(target);
 		let released = false;

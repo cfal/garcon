@@ -125,6 +125,17 @@ describe('filterAndSortWorktrees', () => {
 });
 
 describe('GitWorktreePickerState', () => {
+	it('preserves exact repository roots and explicit worktree destinations', () => {
+		const picker = pickerFor(() => [worktree('main', null, { isMain: true, path: '/repo ' })]);
+		picker.branchName = 'feature';
+		expect(picker.repositoryWorktreePath).toBe('/repo ');
+		expect(picker.effectivePath).toBe('/repo /.worktrees/feature');
+		picker.pathOverride = '/repo /.worktrees/explicit ';
+		expect(picker.effectivePath).toBe('/repo /.worktrees/explicit ');
+		picker.pathOverride = '   ';
+		expect(picker.effectivePath).toBe('/repo /.worktrees/feature');
+	});
+
 	it('defaults to recent order and navigates only visible selectable worktrees', () => {
 		const items = [
 			worktree('old', '2026-07-13T10:00:00.000Z'),

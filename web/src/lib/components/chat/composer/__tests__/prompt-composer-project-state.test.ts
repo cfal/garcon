@@ -41,6 +41,23 @@ function deferred<T>() {
 }
 
 describe('PromptComposerProjectState', () => {
+	it('preserves snippet path identity and rejects a response for the unspaced sibling', async () => {
+		const selectedChat = chat({ projectPath: '/project ' });
+		const projectResolution = new ProjectResolutionStore(async target => ({
+			target, resolution: { kind: 'available', effectiveProjectKey: target.projectPath },
+		}));
+		const projectState = new PromptComposerProjectState({ selectedChat, completionDemand: false, projectResolution });
+		try {
+			const operation = await projectState.resolveSnippetContext();
+			expect(operation.projectPath).toBe('/project ');
+			expect(projectState.matchesSnippetContext(operation, { contextExecutorId: 'local', contextProjectPath: '/project ' })).toBe(true);
+			expect(projectState.matchesSnippetContext(operation, { contextExecutorId: 'local', contextProjectPath: '/project' })).toBe(false);
+		} finally {
+			projectState.destroy();
+			projectResolution.destroy();
+		}
+	});
+
 	it.each([undefined, '11111111-1111-4111-8111-111111111111'])(
 		'uses the pending same-executor folder for completions and snippets on %s',
 		async (executorId) => {

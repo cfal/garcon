@@ -238,7 +238,7 @@ describe('snippet contracts', () => {
       context: {
         type: 'new-chat',
         chatId: prospectiveChatId,
-        projectPath: '/repo',
+        projectPath: ' /repo ',
       },
     });
     for (const context of [
@@ -321,7 +321,7 @@ describe('snippet contracts', () => {
       sourceId: 'snippet-a',
       sourceUpdatedAt: '2026-01-01T00:00:00.000Z',
       shortName: 'review_api',
-      contextProjectPath: '/repo',
+      contextProjectPath: ' /repo ',
       contextExecutorId: 'local',
       expandedText: 'Review the API',
     };

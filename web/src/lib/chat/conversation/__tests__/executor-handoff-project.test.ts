@@ -13,8 +13,8 @@ describe('ExecutorHandoffProjectState', () => {
 		const result = handoff.ask('chat', executorId, '/worker/project', selection);
 		expect(handoff.initialProjectPath).toBe('/worker/project');
 		await handoff.confirm(' /worker/worktree ');
-		expect(validateStart).toHaveBeenCalledWith('/worker/worktree', { executorId });
-		await expect(result).resolves.toEqual({ projectPath: '/worker/worktree', selection });
+		expect(validateStart).toHaveBeenCalledWith(' /worker/worktree ', { executorId });
+		await expect(result).resolves.toEqual({ projectPath: ' /worker/worktree ', selection });
 		expect(handoff.target).toBeNull();
 		expect(handoff.initialProjectPath).toBe('');
 	});

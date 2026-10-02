@@ -29,8 +29,8 @@ export class SnippetProjectPathService {
   constructor(private readonly inspect: ProjectInspector) {}
 
   async resolve(projectPath: string, executorId?: string | null): Promise<string> {
-    const requestedPath = projectPath.trim();
-    if (!requestedPath) {
+    const requestedPath = projectPath;
+    if (!requestedPath.trim()) {
       throw new SnippetDomainError(
         'SNIPPET_PROJECT_PATH_REQUIRED',
         'Project path is required',
@@ -241,8 +241,8 @@ export class SnippetService extends EventEmitter<SnippetServiceEvents> {
       };
     }
     const chat = this.deps.chats.getChat(context.chatId);
-    const contextProjectPath = chat?.projectPath.trim();
-    if (!contextProjectPath) {
+    const contextProjectPath = chat?.projectPath;
+    if (!contextProjectPath?.trim()) {
       throw new SnippetDomainError(
         'SNIPPET_CHAT_NOT_FOUND',
         'Chat not found or missing project path',
@@ -252,7 +252,7 @@ export class SnippetService extends EventEmitter<SnippetServiceEvents> {
     const contextExecutorId = chat?.executorId ?? 'local';
     const resolvedProjectPath = await this.deps.projectPaths.resolve(contextProjectPath, contextExecutorId);
     const current = this.deps.chats.getChat(context.chatId);
-    if (!current || current.projectPath.trim() !== contextProjectPath || (current.executorId ?? 'local') !== contextExecutorId) {
+    if (!current || current.projectPath !== contextProjectPath || (current.executorId ?? 'local') !== contextExecutorId) {
       throw new SnippetDomainError('SNIPPET_CONTEXT_CHANGED', 'Chat project target changed during expansion', 409);
     }
     return { contextProjectPath, contextExecutorId, resolvedProjectPath };

@@ -99,6 +99,21 @@ async function runGit(cwd, args) {
 }
 
 describe('GET /api/v1/chats/validate-start', () => {
+  it('inspects exact spaced paths rather than a missing or non-Git sibling', async () => {
+    const project = path.join(testBasePath, 'repository ');
+    await fs.mkdir(project);
+    await runGit(project, ['init']);
+    const validate = async (value) => {
+      const request = new Request(`http://localhost/api/v1/chats/validate-start?${new URLSearchParams({ path: value })}`);
+      return (await handler(request, new URL(request.url))).json();
+    };
+    expect(await validate(project)).toEqual({ valid: true, isGitRepo: true });
+    await fs.mkdir(project.trimEnd());
+    expect(await validate(project)).toEqual({ valid: true, isGitRepo: true });
+    expect(await validate(project.trimEnd())).toEqual({ valid: true, isGitRepo: false });
+    expect(await validate('   ')).toMatchObject({ valid: false, errorCode: 'path_required' });
+  });
+
   it('forwards the request signal to project and Git validation', async () => {
     const cancellation = new AbortController();
     let inspectedSignal;

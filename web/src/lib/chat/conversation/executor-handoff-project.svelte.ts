@@ -50,8 +50,8 @@ export class ExecutorHandoffProjectState {
 
 	// The caller keeps the path unchanged while checking.
 	async confirm(destinationPath: string): Promise<void> {
-		const projectPath = destinationPath.trim();
-		if (!projectPath || !this.canConfirm || !this.target || !this.selection) return;
+		const projectPath = destinationPath;
+		if (!projectPath.trim() || !this.canConfirm || !this.target || !this.selection) return;
 		const version = this.#version;
 		const selection = this.selection;
 		const executorId = this.target.executorId;

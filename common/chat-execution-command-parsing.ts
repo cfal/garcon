@@ -30,7 +30,7 @@ export function optionalAgentHandoffRequest(value: unknown): AgentHandoffRequest
   const target = requestRecord(handoff.target);
   const executorId = parseExecutorId(target.executorId);
   if (!executorId) throw new CommandRequestValidationError('handoff.target.executorId is invalid');
-  const projectPath = optionalString(target, 'projectPath');
+  const projectPath = optionalString(target, 'projectPath', false);
   const agentId = requiredString(target, 'agentId');
   const model = requiredString(target, 'model');
   const apiProviderId = optionalNullableString(target, 'apiProviderId');

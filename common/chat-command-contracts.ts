@@ -942,10 +942,10 @@ export function parseProjectPathPatchRequest(value: unknown): ProjectPathPatchRe
   if (!isExecutorId(expectedExecutorId)) throw new CommandRequestValidationError('expectedExecutorId is invalid');
   return {
     chatId: requiredChatId(body, 'chatId'),
-    projectPath: requiredString(body, 'projectPath'),
+    projectPath: requiredContent(body, 'projectPath'),
     expectedExecutorId,
     expectedAgentOwnershipEpoch: requiredString(body, 'expectedAgentOwnershipEpoch'),
-    expectedProjectPath: requiredString(body, 'expectedProjectPath'),
+    expectedProjectPath: requiredContent(body, 'expectedProjectPath'),
   };
 }
 

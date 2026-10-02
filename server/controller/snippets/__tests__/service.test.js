@@ -55,6 +55,26 @@ async function serviceFixture(overrides = {}) {
 }
 
 describe('snippet service', () => {
+  it('preserves exact paths through inspection, expansion and registered-chat context fencing', async () => {
+    const projectPath = '/project ';
+    const paths = new SnippetProjectPathService(async (requested) => {
+      expect(requested).toBe(projectPath);
+      return { kind: 'available', effectiveProjectKey: requested };
+    });
+    const { service } = await serviceFixture({
+      chats: { getChat: () => ({ projectPath }) }, projectPaths: paths,
+    });
+    await service.create({ expectedRevision: 0, snippet: { shortName: 'review', template: '{{project_path}}', defaultArguments: '' } });
+    for (const context of [
+      { type: 'new-chat', chatId: PROSPECTIVE_CHAT_ID, projectPath },
+      { type: 'chat', chatId: REGISTERED_CHAT_ID },
+    ]) {
+      expect(await service.expand({ shortName: 'review', arguments: { type: 'default' }, context }))
+        .toMatchObject({ contextProjectPath: projectPath, expandedText: projectPath });
+    }
+    await expect(paths.resolve('   ')).rejects.toMatchObject({ code: 'SNIPPET_PROJECT_PATH_REQUIRED' });
+  });
+
   it('fences expansion across a same-path executor handoff', async () => {
     const chat = { projectPath: '/project', executorId: 'local' };
     const { service } = await serviceFixture({

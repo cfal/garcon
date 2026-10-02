@@ -101,10 +101,10 @@ export class PreambleFormState {
 	pathRuleError(key: string): string | null {
 		if (this.scopeType !== 'project-paths') return null;
 		const rule = this.pathRules.find((candidate) => candidate.key === key);
-		const projectPath = rule?.projectPath.trim() ?? '';
-		if (!projectPath) return m.preambles_path_required();
+		const projectPath = rule?.projectPath ?? '';
+		if (!projectPath.trim()) return m.preambles_path_required();
 		const matchingPathCount = this.pathRules.filter(
-			(candidate) => candidate.projectPath.trim() === projectPath && effectiveExecutorId(candidate.executorId) === effectiveExecutorId(rule?.executorId),
+			(candidate) => candidate.projectPath === projectPath && effectiveExecutorId(candidate.executorId) === effectiveExecutorId(rule?.executorId),
 		).length;
 		if (matchingPathCount > 1) return m.preambles_duplicate_path();
 		return null;
@@ -188,7 +188,7 @@ export class PreambleFormState {
 			type: 'project-paths',
 			rules: this.pathRules.map((rule) => ({
 				...(effectiveExecutorId(rule.executorId) === 'local' ? {} : { executorId: rule.executorId }),
-				projectPath: rule.projectPath.trim(),
+				projectPath: rule.projectPath,
 				includeNested: rule.includeNested,
 			})),
 		};
