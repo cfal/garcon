@@ -6,6 +6,55 @@ import {
 } from '../generation-config-source.ts';
 
 describe('generation config source', () => {
+  it('isolates a synchronous catalog failure without skipping auth or readiness', async () => {
+    const source = {
+      getAgentAuthStatusMap: mock(async () => ({ synthetic: { authenticated: true } })),
+      getAgentReadinessMap: mock(async () => ({ synthetic: { ready: true } })),
+      getAgentCatalogEntries: () => { throw new Error('synthetic catalog failure'); },
+    };
+
+    expect(await resolveGenerationContext(source)).toEqual({
+      authByAgent: { synthetic: { authenticated: true } },
+      readinessByAgent: { synthetic: { ready: true } },
+      modelsByAgent: {},
+      generationByAgent: {},
+    });
+  });
+
+  it.each(['resolve', 'reject'])('settles shared discovery after the cancelled wait when auth later %ss', async (settle) => {
+    const auth = Promise.withResolvers();
+    const readinessStarted = Promise.withResolvers();
+    const source = {
+      getAgentAuthStatusMap: () => auth.promise,
+      getAgentReadinessMap: mock(async () => {
+        readinessStarted.resolve();
+        return {};
+      }),
+      getAgentCatalogEntries: async () => [],
+    };
+    const controller = new AbortController();
+    const result = resolveGenerationContextForSelection(source, undefined, controller.signal);
+    const cancelled = new Error('synthetic cancellation');
+    controller.abort(cancelled);
+    await expect(result).rejects.toBe(cancelled);
+
+    auth[settle](settle === 'resolve' ? {} : new Error('synthetic late failure'));
+    await readinessStarted.promise;
+    expect(source.getAgentReadinessMap).toHaveBeenCalledWith({});
+    await expect(result).rejects.toBe(cancelled);
+  });
+
+  it('rejects a pre-aborted request before discovery, including a null abort reason', async () => {
+    const source = {
+      getAgentAuthStatusMap: mock(async () => ({})),
+      getAgentReadinessMap: mock(async () => ({})),
+      getAgentCatalogEntries: mock(async () => []),
+    };
+    await expect(resolveGenerationContextForSelection(source, undefined, AbortSignal.abort(null)))
+      .rejects.toMatchObject({ name: 'AbortError' });
+    for (const operation of Object.values(source)) expect(operation).not.toHaveBeenCalled();
+  });
+
   it('skips all-agent discovery for a complete saved selection', async () => {
     const source = {
       getAgentAuthStatusMap: mock(() => Promise.reject(new Error('must not run'))),

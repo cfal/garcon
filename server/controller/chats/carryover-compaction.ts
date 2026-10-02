@@ -1,4 +1,3 @@
-import type { AgentCatalogEntry } from '../../../common/agents.js';
 import type { ApiProtocol } from '../../../common/api-providers.js';
 import type { ThinkingMode } from '../../../common/chat-modes.js';
 import { CHAT_ROW_CONTENT_MAX_BYTES } from '../../../common/chat-row-contracts.js';
@@ -13,7 +12,7 @@ import {
   createCarryoverTranscript,
 } from '../../../common/transcript-seed.js';
 import { isRecord } from '../../../common/json.js';
-import { resolveGenerationContextForSelection } from '../settings/generation-config-source.js';
+import { resolveGenerationContextForSelection, type GenerationDiscoveryAgents } from '../settings/generation-config-source.js';
 import { resolveEffectiveGenerationConfig } from '../settings/generation-effective.js';
 import {
   createGenerationRequestSignal,
@@ -44,11 +43,8 @@ export const CARRYOVER_COMPACTION_TIMEOUT_MS = 15 * 60_000;
 export const CARRYOVER_COMPACTION_STARTED_NOTICE =
   'Compacting earlier chat history. This could take a while depending on the agent and model.';
 
-export interface CarryOverCompactionAgents {
+export interface CarryOverCompactionAgents extends GenerationDiscoveryAgents {
   singleQueryRunsToolsWithoutPermission(agentId: string, executorId?: string | null): boolean;
-  getAgentAuthStatusMap(): Promise<Record<string, unknown>>;
-  getAgentReadinessMap(authByAgent?: Record<string, unknown>): Promise<Record<string, unknown>>;
-  getAgentCatalogEntries?(): Promise<AgentCatalogEntry[]>;
   runSingleQuery(prompt: string, options: {
     executorId?: string | null;
     agentId: string;
