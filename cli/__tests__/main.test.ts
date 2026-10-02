@@ -642,7 +642,7 @@ describe('main', () => {
 
     await expect(result).resolves.toBe(130);
     expect(capture.diagnostics).toEqual([
-      'terminal interrupted; the command may have reached Garcon; accepted work continues without this CLI. Inspect the chat before retrying; no Stop was sent.',
+      'terminal interrupted; the command may have reached Garcon; any accepted work may continue without this CLI. Inspect the chat before retrying; no Stop was sent.',
     ]);
   });
 
@@ -696,7 +696,7 @@ describe('main', () => {
         if (exitCode !== 130 && attempt < 3) continue;
         expect(exitCode).toBe(130);
         expect(await new Response(child.stderr).text()).toContain(
-          'accepted work continues without this CLI',
+          'any accepted work may continue without this CLI',
         );
         return;
       } finally {
@@ -867,7 +867,7 @@ describe('main', () => {
     });
     expect(exitCode).toBe(130);
     expect(mutations).toEqual([kind === 'start' ? '/api/v1/chats/start' : '/api/v1/chats/run']);
-    expect(capture.stderr.join('')).toContain('accepted work continues without this CLI');
+    expect(capture.stderr.join('')).toContain('any accepted work may continue without this CLI');
     expect(capture.stderr.join('')).toContain('no Stop was sent');
   });
 
