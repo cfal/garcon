@@ -26,6 +26,11 @@ const componentConcerns = [
 		filePrefixes: ['Composer', 'PromptComposer', 'composer-', 'prompt-composer-'],
 	},
 	{
+		owner: 'chat',
+		concern: 'queue',
+		filePrefixes: ['QueuedInput', 'QueueControls', 'QueueStatusSummary', 'queued-input-'],
+	},
+	{
 		owner: 'sidebar',
 		concern: 'search',
 		filePrefixes: ['SidebarSearch', 'SidebarTranscriptSearchStatus', 'SavedSearch', 'sidebar-search-'],

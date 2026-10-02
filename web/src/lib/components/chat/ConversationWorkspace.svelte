@@ -5,7 +5,7 @@
 	import { onDestroy, onMount } from 'svelte';
 	import type { ComposerAvailabilityNoticePresentation } from '$lib/chat/composer/composer-availability.js';
 	import PromptComposer from './composer/PromptComposer.svelte';
-	import QueuedInputsDialog from './QueuedInputsDialog.svelte';
+	import QueuedInputsDialog from './queue/QueuedInputsDialog.svelte';
 	import HandoffForkDialog from './HandoffForkDialog.svelte';
 	import ExecutorHandoffDialog from './ExecutorHandoffDialog.svelte';
 	import ReloadChatDialog from './ReloadChatDialog.svelte';

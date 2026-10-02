@@ -6,7 +6,7 @@ import * as m from '$lib/paraglide/messages.js';
 import {
 	installResizeObserverHarness,
 	ResizeObserverHarness,
-} from '../../shared/__tests__/resize-observer-harness.js';
+} from '../../../shared/__tests__/resize-observer-harness.js';
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
