@@ -22,13 +22,9 @@ export type LoadLanguageExtensionInput =
 			language?: string | null;
 	  };
 
-const editorFilenameLanguageFallbacks: Record<string, string> = {
-	containerfile: 'dockerfile',
-};
+const editorFilenameLanguageFallbacks = new Map([['containerfile', 'dockerfile']]);
 
-const editorExtensionLanguageFallbacks: Record<string, string> = {
-	svelte: 'html',
-};
+const editorExtensionLanguageFallbacks = new Map([['svelte', 'html']]);
 
 function basename(filePath: string): string {
 	return filePath.split(/[\\/]/).pop() ?? filePath;
@@ -54,7 +50,7 @@ function matchEditorExplicitLanguage(rawLanguage: string | null | undefined): La
 	if (directMatch) return directMatch;
 
 	const fallbackLanguage =
-		editorExtensionLanguageFallbacks[normalized] ?? editorFilenameLanguageFallbacks[normalized];
+		editorExtensionLanguageFallbacks.get(normalized) ?? editorFilenameLanguageFallbacks.get(normalized);
 	return fallbackLanguage ? matchLanguageName(fallbackLanguage) : null;
 }
 
@@ -70,7 +66,7 @@ function matchEditorFallback(filePath: string): LanguageDescription | null {
 	const name = basename(filePath).toLowerCase();
 	const ext = extension(filePath);
 	const fallbackLanguage =
-		editorFilenameLanguageFallbacks[name] ?? editorExtensionLanguageFallbacks[ext];
+		editorFilenameLanguageFallbacks.get(name) ?? editorExtensionLanguageFallbacks.get(ext);
 	return fallbackLanguage ? matchLanguageName(fallbackLanguage) : null;
 }
 

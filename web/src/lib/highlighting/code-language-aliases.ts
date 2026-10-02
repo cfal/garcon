@@ -40,7 +40,7 @@ export function normalizeCodeFenceLanguage(rawLanguage: string | null | undefine
 
 	const key = token.toLowerCase();
 	if (plaintextAliases.has(key)) return 'plaintext';
-	return codeFenceLanguageOverrides[key] ?? key;
+	return Object.hasOwn(codeFenceLanguageOverrides, key) ? codeFenceLanguageOverrides[key] : key;
 }
 
 export function isPlaintextCodeFenceLanguage(rawLanguage: string | null | undefined): boolean {

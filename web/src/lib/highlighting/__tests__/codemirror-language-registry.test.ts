@@ -107,6 +107,20 @@ describe('loadLanguageExtension', () => {
 });
 
 describe('loadCodeMirrorLanguageForFile', () => {
+	it.each(['constructor', '__proto__', 'toString', 'hasOwnProperty'])(
+		'treats %s as an unsupported filename, extension, and language',
+		async (name) => {
+			expect(canHighlightCodeFenceLanguage(name)).toBe(false);
+			await expect(loadCodeFenceLanguage(name)).resolves.toBeNull();
+			await expect(loadCodeMirrorLanguageForFile(name)).resolves.toBeNull();
+			await expect(loadCodeMirrorLanguageForFile(`notes.${name}`)).resolves.toBeNull();
+			await expect(
+				loadCodeMirrorLanguageForFile({ filePath: 'notes.txt', language: name }),
+			).resolves.toBeNull();
+			await expect(loadLanguageExtension(name)).resolves.toEqual([]);
+		},
+	);
+
 	it.each([
 		['src/main.ts', 'typescript'],
 		['src/main.py', 'python'],
