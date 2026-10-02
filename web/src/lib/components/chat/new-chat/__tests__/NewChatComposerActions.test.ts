@@ -13,7 +13,7 @@ import {
 import {
 	installResizeObserverHarness,
 	ResizeObserverHarness,
-} from '../../shared/__tests__/resize-observer-harness.js';
+} from '../../../shared/__tests__/resize-observer-harness.js';
 
 vi.mock('$lib/api/chats', () => ({
 	validateStart: vi.fn().mockResolvedValue({ valid: true, isGitRepo: false }),

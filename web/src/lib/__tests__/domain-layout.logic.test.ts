@@ -31,6 +31,11 @@ const componentConcerns = [
 		filePrefixes: ['QueuedInput', 'QueueControls', 'QueueStatusSummary', 'queued-input-'],
 	},
 	{
+		owner: 'chat',
+		concern: 'new-chat',
+		filePrefixes: ['NewChat', 'new-chat-'],
+	},
+	{
 		owner: 'sidebar',
 		concern: 'search',
 		filePrefixes: ['SidebarSearch', 'SidebarTranscriptSearchStatus', 'SavedSearch', 'sidebar-search-'],

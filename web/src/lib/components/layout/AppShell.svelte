@@ -45,7 +45,7 @@
 	import { restoreChatIdForBareRoute, selectedChatIdFromRoute } from './app-shell-route';
 	import { selectedTicketFromUrl } from '$lib/tickets/catalog/ticket-deep-link.js';
 	import { resolveAdjacentChatId, shouldSynchronizeFocusedChat } from './app-shell-chat-navigation';
-	import NewChatDialog from '../chat/NewChatDialog.svelte';
+	import NewChatDialog from '../chat/new-chat/NewChatDialog.svelte';
 	import FileDirtyUnloadGuard from '../files/FileDirtyUnloadGuard.svelte';
 	import WorkspaceCloseGuard from '$lib/components/workspace/WorkspaceCloseGuard.svelte';
 	import { computeMobileViewportMetrics } from './mobile-viewport';

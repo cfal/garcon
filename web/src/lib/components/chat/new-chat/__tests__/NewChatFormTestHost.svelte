@@ -2,7 +2,7 @@
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
 	setExecutorsTestContext();
 	import NewChatForm from '../NewChatForm.svelte';
-	import { setCanonicalWorkspaceLayout } from './workspace-layout-test-context.js';
+	import { setCanonicalWorkspaceLayout } from '../../__tests__/workspace-layout-test-context.js';
 	import {
 		setAppShell,
 		setModelCatalog,
@@ -34,7 +34,7 @@
 		findModelForSelection,
 		modelValueForSelection,
 		resolveModelSelection,
-	} from '../../../../test/model-catalog';
+	} from '../../../../../test/model-catalog';
 	import { untrack } from 'svelte';
 
 	interface Props {

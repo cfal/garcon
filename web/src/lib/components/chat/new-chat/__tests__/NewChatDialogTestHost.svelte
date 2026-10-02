@@ -21,7 +21,7 @@
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
 	import { PreamblesStore } from '$lib/preambles/preambles-store.svelte.js';
 	import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte.js';
-	import { setCanonicalWorkspaceLayout } from './workspace-layout-test-context.js';
+	import { setCanonicalWorkspaceLayout } from '../../__tests__/workspace-layout-test-context.js';
 
 	interface Props {
 		snippetTemplate?: string | null;
