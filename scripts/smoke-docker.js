@@ -34,15 +34,18 @@ async function docker(args, { input, allowFailure = false } = {}) {
 }
 
 function cli(container, args, options) {
-  return docker(['exec', ...(options?.input === undefined ? [] : ['-i']), '--workdir', '/projects',
-    container, 'garcon-cli', ...args], options);
+  const command = ['exec'];
+  if (options?.input !== undefined) command.push('-i');
+  command.push('--workdir', '/projects', container, 'garcon-cli', ...args);
+  return docker(command, options);
 }
 
 async function jsonCli(container, args, options) {
-  return JSON.parse((await cli(container, [...args, '--json'], options)).stdout);
+  const { stdout } = await cli(container, [...args, '--json'], options);
+  return JSON.parse(stdout);
 }
 
-async function start(container, command = [], options = []) {
+async function startContainer(container, command = [], options = []) {
   containers.add(container);
   const volume = `${container}-data`;
   volumes.add(volume);
@@ -64,7 +67,7 @@ async function waitForCli(container) {
   throw new Error(`CLI did not become ready: ${result.stderr}`);
 }
 
-async function assertExecutor(id, container) {
+async function verifyExecutorAccessAndRestart(id, container) {
   const ready = await jsonCli(controller, ['executor', 'wait', id, '--ready', '--timeout', '60']);
   assert.equal(ready.projectBasePath, '/projects');
   assert.equal(ready.allowControllerCli, false);
@@ -88,9 +91,8 @@ async function assertExecutor(id, container) {
   assert.notEqual(restarted.instanceId, ready.instanceId);
 }
 
-async function smoke() {
-  await docker(['network', 'create', '--internal', network]);
-  await start(controller);
+async function verifyControllerStartup() {
+  await startContainer(controller);
   await waitForCli(controller);
   const version = await cli(controller, ['--version']);
   assert.match(version.stdout.trim(), /^\d+\.\d+\.\d+/);
@@ -111,7 +113,9 @@ async function smoke() {
     }
   `]);
   console.log('Controller: default startup, web assets, authentication, and CLI passed.');
+}
 
+async function verifyExecutorConnects() {
   const created = await jsonCli(controller, ['executor', 'create', '--label', 'Docker dialing worker',
     '--direction', 'executor-connects', '--no-tls', 'true',
     '--advertise-url', `ws://${controller}:8080/executor/{executorId}`]);
@@ -121,15 +125,17 @@ async function smoke() {
   const connection = (await readFile(connectionFile, 'utf8')).trim();
   const envFile = path.join(directory, 'executor.env');
   await writeFile(envFile, `GARCON_CONTROLLER_URL=${connection}\n`, { mode: 0o600 });
-  await start(dialer, ['bun', 'server/main.ts', 'executor', '--project-base-dir', '/projects', '--no-tls'],
+  await startContainer(dialer, ['bun', 'server/main.ts', 'executor', '--project-base-dir', '/projects', '--no-tls'],
     ['--env-file', envFile, '--env', 'GARCON_RUNTIME=executor']);
-  await assertExecutor(created.id, dialer);
+  await verifyExecutorAccessAndRestart(created.id, dialer);
   console.log('Executor-connects: enrollment, CLI grant, target catalog, and restart passed.');
+}
 
+async function verifyControllerConnects() {
   const listenerCommand = ['bun', 'server/main.ts', 'executor', '--project-base-dir', '/projects',
     '--listen', '19781', '--bind-address', '0.0.0.0', '--no-tls'];
   const listenerOptions = ['--env', 'GARCON_RUNTIME=executor'];
-  await start(listener, listenerCommand, listenerOptions);
+  await startContainer(listener, listenerCommand, listenerOptions);
   const reveal = ['exec', listener, 'bun', '/app/server/main.ts', 'executor', 'connection-url',
     '--advertise-url', `ws://${listener}:19781/executor`, '--no-tls'];
   const deadline = Date.now() + 60_000;
@@ -142,12 +148,12 @@ async function smoke() {
   assert.equal(credential.exitCode, 0, 'Listener credential must be available after startup');
   const listening = await jsonCli(controller, ['executor', 'create', '--label', 'Docker listening worker',
     '--direction', 'controller-connects', '--no-tls', 'true', '--connection-url', '-'],
-  { input: credential.stdout });
-  await assertExecutor(listening.id, listener);
+    { input: credential.stdout });
+  await verifyExecutorAccessAndRestart(listening.id, listener);
   const previousContainer = await docker(['inspect', '--format', '{{.Id}}', listener]);
   await docker(['stop', '--time', '20', listener]);
   await docker(['rm', listener]);
-  await start(listener, listenerCommand, listenerOptions);
+  await startContainer(listener, listenerCommand, listenerOptions);
   const replacementContainer = await docker(['inspect', '--format', '{{.Id}}', listener]);
   assert.notEqual(replacementContainer.stdout, previousContainer.stdout);
   await waitForCli(listener);
@@ -155,7 +161,9 @@ async function smoke() {
   const retained = await docker(reveal);
   assert.ok(retained.stdout === credential.stdout, 'Listener credential must survive container recreation');
   console.log('Controller-connects: enrollment, CLI grant, target catalog, and credential persistence across recreation passed.');
+}
 
+async function verifyControllerRestartAndShutdown() {
   await docker(['restart', '--time', '20', controller]);
   await waitForCli(controller);
   for (const container of [dialer, listener]) await waitForCli(container);
@@ -170,7 +178,11 @@ async function smoke() {
 }
 
 try {
-  await smoke();
+  await docker(['network', 'create', '--internal', network]);
+  await verifyControllerStartup();
+  await verifyExecutorConnects();
+  await verifyControllerConnects();
+  await verifyControllerRestartAndShutdown();
   console.log(`Docker smoke passed: ${image}`);
 } finally {
   for (const container of [...containers].reverse()) {
