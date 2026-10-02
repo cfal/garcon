@@ -5,14 +5,14 @@ const start = (attributes = 'agent="codex" model="example-model"', body = 'Inspe
   `<garcon-start-agent ref="task" ${attributes}>\n${body}\n</garcon-start-agent>`;
 
 describe('single-child start grammar', () => {
-  it('preserves explicit target selection and decoded prompt text', () => {
+  it('preserves explicit target selection and literal prompt text', () => {
     expect(parseGarconStartAgent(start())).toEqual({
       type: 'start-agent', ref: 'task', async: false, fork: false, title: null, agentId: 'codex', model: 'example-model',
       providerId: null, reasoningEffort: null, prompt: 'Inspect the parser.',
     });
     expect(parseGarconStartAgent(start('model="example-model" reasoning-effort="low" provider="example" agent="codex"',
       '\n  A &amp; B &lt; C &gt; D &quot;quote&quot; &apos;x&apos; &amp;lt;  \n'))).toMatchObject({
-      providerId: 'example', reasoningEffort: 'low', prompt: '\n  A & B < C > D "quote" \'x\' &lt;  \n',
+      providerId: 'example', reasoningEffort: 'low', prompt: '\n  A &amp; B &lt; C &gt; D &quot;quote&quot; &apos;x&apos; &amp;lt;  \n',
     });
   });
 
@@ -51,20 +51,18 @@ describe('single-child start grammar', () => {
       .toMatchObject({ providerId: 'Example Proxy & Co' });
   });
 
-  it('rejects incomplete, duplicate, unquoted, nested, batch, and malformed text', () => {
+  it('rejects incomplete, duplicate, unquoted, batch, and malformed text', () => {
     for (const content of [
       start('agent="codex"'), start('agent="" model="example-model"'),
       start('agent="codex" model="x" model="y"'), start("agent='codex' model=\"x\""),
       start('agent="codex" model="x"suffix'), start('agent="codex" model="x"', ''),
-      start('agent="codex" model="x"', '<garcon-schedule in="1m" />'),
       '<garcon-start-agent>{"prompt":"x","params":[{}]}</garcon-start-agent>',
       '<garcon-start-agent ref="task" async="true" agent="codex" model="x" />',
-      start(undefined, 'bad &unknown;'), start(undefined, 'bad &#60;'), start(undefined, 'bad &'),
       start(undefined, '\ud800'), start(undefined, '\0'), start(undefined, 'x').slice(0, -1),
     ]) expect(parseGarconStartAgent(content)).toBeNull();
   });
 
-  it('bounds UTF-8 bytes before and after decoding', () => {
+  it('bounds literal prompt and envelope UTF-8 bytes', () => {
     expect(parseGarconStartAgent(start(undefined, 'x'.repeat(GARCON_START_PROMPT_MAX_BYTES)))).not.toBeNull();
     expect(parseGarconStartAgent(start(undefined, 'x'.repeat(GARCON_START_PROMPT_MAX_BYTES + 1)))).toBeNull();
     expect(parseGarconStartAgent(start(undefined, 'é'.repeat(GARCON_START_PROMPT_MAX_BYTES)))).toBeNull();

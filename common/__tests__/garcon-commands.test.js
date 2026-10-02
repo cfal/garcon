@@ -276,10 +276,12 @@ describe('Garcon edge commands', () => {
         }
       }
     }
-    const malformed = `${start}\n<garcon-schedule in="1m" />\n</garcon-start-agent>`;
-    const result = extractGarconCommands(new AssistantMessage(AT, `${malformed}\n${GARCON_GET_CHAT_ID}`));
-    expect(result.commands).toEqual([{ type: 'get-chat-id' }]);
-    expect(result.issues).toHaveLength(1);
+    const prompt = '<garcon-schedule in="1m" />';
+    const literal = `${start}\n${prompt}\n</garcon-start-agent>`;
+    const result = extractGarconCommands(new AssistantMessage(AT, `${literal}\n${GARCON_GET_CHAT_ID}`));
+    expect(result.commands).toMatchObject([{ type: 'start-agent', prompt }, { type: 'get-chat-id' }]);
+    expect(result.commands).toHaveLength(2);
+    expect(result.issues).toEqual([]);
   });
 
   it('keeps unsupported markup opaque while finding an outer envelope boundary', () => {
@@ -420,8 +422,10 @@ describe('Garcon edge commands', () => {
           `<garcon-${family} broken='`,
           `<garcon-${family}>\n<garcon-schedule broken="`,
           `<garcon-${family}>\n<garcon-schedule broken='`,
-          `<garcon-${family}>\n<example broken="`,
-          `<garcon-${family}>\n<garcon-start-agent-result broken='`,
+          ...(['start-agent', 'resume-agent'].includes(family) ? [] : [
+            `<garcon-${family}>\n<example broken="`,
+            `<garcon-${family}>\n<garcon-start-agent-result broken='`,
+          ]),
         ]) {
           const content = `${prefix}${opener}</garcon-${family}>\n<garcon-schedule in="1m" />`;
           expect(extractGarconCommands(new AssistantMessage(AT, content))).toEqual({

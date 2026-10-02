@@ -95,6 +95,7 @@ describe('bundled preambles', () => {
       providerId: null,
       model: null,
       reasoningEffort: null,
+      prompt: 'Inspect the requested code, including List<String> and checks && build, and report findings.',
     });
     expect(commands[3]).toMatchObject({ type: 'stop-agent', remove: true });
   });
