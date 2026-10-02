@@ -917,18 +917,13 @@ describe('GarconClient', () => {
           });
         }
         if (url.includes('/api/v1/chats/tags?')) {
-          return Response.json({
-            success: true,
-            chatId: runRequest.chatId,
-            tags: ['existing'],
-          });
+          return Response.json({ success: true, chatId: runRequest.chatId, tags: ['existing'] });
         }
         return Response.json({
           success: true,
           chatId: runRequest.chatId,
           tags: ['automation', 'review'],
-          addedTags: ['automation', 'review'],
-          removedTags: ['existing'],
+          changed: true,
         });
       },
     });
@@ -960,10 +955,9 @@ describe('GarconClient', () => {
       },
       {
         url: `${connection.baseUrl}/api/v1/chats/tags`,
-        method: 'PATCH',
+        method: 'PUT',
         body: JSON.stringify({
           chatId: runRequest.chatId,
-          expectedTags: ['existing'],
           tags: ['automation', 'review'],
         }),
       },

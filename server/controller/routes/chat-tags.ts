@@ -6,6 +6,7 @@ import type {
 } from '../../../common/chat-tag-mutations.js';
 import { isChatBoardId } from '../../../common/chat-boards.js';
 import { normalizeTags } from '../../../common/tags.js';
+import { parseSetChatTagsRequest } from '../../../common/chat-tags-contracts.js';
 import { ChatBoardDomainError } from '../chat-boards/errors.js';
 import type { ChatTagMutationService } from '../chats/chat-tag-mutation-service.js';
 import { jsonError, jsonErrorFromUnknown } from '../../common/http-error.js';
@@ -74,6 +75,15 @@ function validationError(message: string): Response {
 export function createChatTagRoutes(chatTags: ChatTagMutationService): RouteMap {
   return {
     '/api/v1/chats/tags': {
+      PUT: withJsonBody(async (value: unknown) => {
+        const input = parseSetChatTagsRequest(value);
+        if (!input) return validationError('chatId and tags are required');
+        try {
+          return Response.json(await chatTags.set(input));
+        } catch (error) {
+          return errorResponse(error);
+        }
+      }),
       GET: async (_request, url) => {
         const id = chatId(url.searchParams.get('chatId'));
         if (!id || [...url.searchParams.keys()].some((key) => key !== 'chatId')) {

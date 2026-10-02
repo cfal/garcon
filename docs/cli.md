@@ -674,6 +674,10 @@ archive are mutually exclusive order groups. `set-tags` replaces the complete
 normalized set, including the `cli` tag; `--clear` is the explicit empty set.
 Each command supports `--json` and reports whether authoritative state changed.
 Concurrent metadata writers use last-writer-wins semantics.
+The CLI reconciles any earlier uncertain tag save with `GET chats/tags`, then
+uses the atomic desired-set `PUT chats/tags`. Browser `PATCH chats/tags` retains
+its compare-and-set baseline. Upgrade controller and workers together for this
+forwarded API change (executor protocol revision 11).
 
 ## Export
 

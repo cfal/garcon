@@ -28,10 +28,8 @@ import {
 } from '@garcon/common/chat-row-contracts';
 import { parseChatExecutionControlState } from '@garcon/common/chat-execution-control';
 import {
-  normalizeChatTagsMutationResponse,
   normalizeCommandTagMutationOutcome,
   normalizeRecoverChatTagsResponse,
-  type ReplaceChatTagsRequest,
 } from '@garcon/common/chat-tag-mutations';
 import { CHAT_STOP_OUTCOMES, type ChatStopOutcome } from '@garcon/common/chat-types';
 import { parseChatListResponse, type ChatListResponse } from '@garcon/common/chat-list';
@@ -67,6 +65,7 @@ import {
   type SetChatPinnedRequest,
 } from '@garcon/common/chat-order-contracts';
 import {
+  parseSetChatTagsResponse,
   type SetChatTagsRequest,
   type SetChatTagsResponse,
 } from '@garcon/common/chat-tags-contracts';
@@ -951,32 +950,22 @@ export class GarconClient {
     request: SetChatTagsRequest,
     signal?: AbortSignal,
   ): Promise<SetChatTagsResponse> {
+    // Reconciles a previous uncertain save; this snapshot is not a write precondition.
     const query = new URLSearchParams({ chatId: request.chatId });
-    const recoveredValue = await this.#request(
-      'submission',
-      'GET',
-      `/api/v1/chats/tags?${query.toString()}`,
-      undefined,
-      signal,
-    );
-    const recovered = normalizeRecoverChatTagsResponse(recoveredValue);
+    const recovered = normalizeRecoverChatTagsResponse(await this.#request(
+      'submission', 'GET', `/api/v1/chats/tags?${query}`, undefined, signal,
+    ));
     if (!recovered || recovered.chatId !== request.chatId) {
       throw new CliError('submission', 'server returned an invalid tag recovery response', 3);
     }
-
-    const replacement = {
-      chatId: request.chatId,
-      expectedTags: recovered.tags,
-      tags: request.tags,
-    } satisfies ReplaceChatTagsRequest;
     const value = await this.#request(
       'submission',
-      'PATCH',
+      'PUT',
       '/api/v1/chats/tags',
-      replacement,
+      request,
       signal,
     );
-    const response = normalizeChatTagsMutationResponse(value);
+    const response = parseSetChatTagsResponse(value);
     if (
       !response
       || response.chatId !== request.chatId
@@ -984,12 +973,7 @@ export class GarconClient {
     ) {
       throw new CliError('submission', 'server returned an invalid tag-state response', 3);
     }
-    return {
-      success: true,
-      chatId: response.chatId,
-      tags: [...response.tags],
-      changed: response.addedTags.length > 0 || response.removedTags.length > 0,
-    };
+    return response;
   }
 
   async getTurnReceipt(chatId: string, turnId: string, signal?: AbortSignal): Promise<AgentTurnReceipt> {
