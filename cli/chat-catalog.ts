@@ -5,6 +5,7 @@ import {
 } from '@garcon/common/chat-filter-query';
 import type { ChatListEntry, ChatListResponse } from '@garcon/common/chat-list';
 import { chatActivityTimeMs } from '@garcon/common/chat-order-sort';
+import { effectiveExecutorId } from '@garcon/common/executors';
 import type { ChatsCliCommand } from './args.js';
 import { CliError } from './errors.js';
 import type { CliOutput } from './output.js';
@@ -12,6 +13,7 @@ import { formatTextTable } from './text-table.js';
 
 export interface CliChatSummary {
   readonly chatId: string;
+  readonly executorId: string;
   readonly parentChatId: string | null;
   readonly parentRelation: 'fork' | 'handoff' | 'delegation' | null;
   readonly title: string;
@@ -81,6 +83,7 @@ export function filterAndSortChats(
 export function projectCliChat(chat: ChatListEntry): CliChatSummary {
   return {
     chatId: chat.id,
+    executorId: effectiveExecutorId(chat.executorId),
     parentChatId: chat.parentChat?.chatId ?? null,
     parentRelation: chat.parentChat?.relation ?? null,
     title: chat.title,
@@ -125,10 +128,11 @@ export function buildChatCatalogResult(
 export function formatChatCatalogResult(result: CliChatCatalogResult, json: boolean): string {
   if (json) return JSON.stringify(result, null, 2);
   const table = formatTextTable(
-    ['ACTIVITY', 'CHAT', 'AGENT', 'PROJECT', 'TITLE'],
+    ['ACTIVITY', 'CHAT', 'EXECUTOR', 'AGENT', 'PROJECT', 'TITLE'],
     result.chats.map((chat) => [
       chat.lastActivityAt ?? chat.createdAt ?? '',
       chat.chatId,
+      chat.executorId,
       chat.agentId,
       chat.projectPath,
       chat.title,

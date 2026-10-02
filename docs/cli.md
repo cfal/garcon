@@ -473,6 +473,10 @@ Restart, replay, shares, and frozen forks preserve CLI presentation. Explicit na
 
 List the complete chat metadata snapshot, optionally using the same filter language as the sidebar:
 
+Chat and search summaries include an explicit `executorId` (`local` for legacy
+Local bindings). Human lists, search hits, and status show the executor separately
+from the project path, since identical paths can refer to different hosts.
+
 ```bash
 bun cli/main.ts --runtime controller chats --json
 bun cli/main.ts --runtime controller chats \

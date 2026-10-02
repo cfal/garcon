@@ -117,6 +117,7 @@ export function formatChatSearchResult(
     lines.push(
       '',
       `chat id: ${hit.chatId}`,
+      `executor: ${chat?.executorId ?? '[metadata unavailable]'}`,
       `title: ${chat?.title ?? '[metadata unavailable]'}`,
       `project path: ${chat?.projectPath ?? '[metadata unavailable]'}`,
       `agent: ${chat?.agentId ?? '[metadata unavailable]'}`,

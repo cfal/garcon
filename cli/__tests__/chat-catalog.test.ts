@@ -20,6 +20,18 @@ const command: ChatsCliCommand = {
 };
 
 describe('chat catalog', () => {
+  test('distinguishes identical project paths on Local and remote executors', () => {
+    const executorId = '11111111-1111-4111-8111-111111111111';
+    const result = buildChatCatalogResult({ filter: '', limit: 20, offset: 0 }, chatList([
+      chat({ executorId: undefined }), chat({ id: OTHER_CHAT_ID, executorId }),
+    ]));
+    expect(result.chats.map((entry) => entry.executorId).sort()).toEqual([executorId, 'local']);
+    expect(new Set(result.chats.map((entry) => entry.projectPath)).size).toBe(1);
+    expect(JSON.parse(formatChatCatalogResult(result, true)).chats).toEqual(result.chats);
+    expect(formatChatCatalogResult(result, false)).toContain('EXECUTOR');
+    expect(formatChatCatalogResult(result, false)).toContain(executorId);
+  });
+
   test('filters, activity-sorts, projects, and pages chats deterministically', () => {
     const older = chat({
       id: CHAT_ID,

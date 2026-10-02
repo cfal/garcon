@@ -6,6 +6,7 @@ import { GarconHttpError } from './garcon-client.js';
 import type { CliOutput } from './output.js';
 import { shellQuote } from './shell-quote.js';
 import { terminalBody, terminalLine } from './terminal-output.js';
+import { effectiveExecutorId } from '@garcon/common/executors';
 import {
   formatPermissionRequestedTool,
   formatTranscriptMessage,
@@ -50,6 +51,7 @@ export function formatChatStatus(
 ): string {
   const lines = [
     `chat id: ${snapshot.chat.id}`,
+    `executor: ${effectiveExecutorId(snapshot.chat.executorId)}`,
     `status: ${snapshot.processingPhase ?? 'idle'}`,
     `observed at: ${snapshot.observedAt}`,
     `title: ${terminalLine(snapshot.chat.title)}`,

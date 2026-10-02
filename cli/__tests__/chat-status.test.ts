@@ -113,6 +113,7 @@ describe('chat status', () => {
   test('formats provider-neutral running status and transcript metadata', () => {
     expect(formatChatStatus(snapshot())).toBe([
       `chat id: ${CHAT_ID}`,
+      'executor: local',
       'status: running',
       `observed at: ${TIMESTAMP}`,
       'title: Implement validation',
