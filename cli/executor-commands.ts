@@ -1,6 +1,6 @@
 import type { ExecutorSnapshot } from '@garcon/common/executors';
 import type { ExecutorCliCommand } from './executor-args.js';
-import { GarconHttpError, type GarconClient } from './garcon-client.js';
+import { isDefinitiveMutationRejection, type GarconClient } from './garcon-client.js';
 import { CliError } from './errors.js';
 import type { CliOutput } from './output.js';
 import { terminalLine } from './terminal-output.js';
@@ -15,14 +15,6 @@ function requireExecutor(executors: readonly ExecutorSnapshot[], id: string): Ex
   const executor = executors.find((entry) => entry.id === id);
   if (!executor) throw new CliError('executors', `executor not found: ${id}`, 3);
   return executor;
-}
-
-function isDefinitiveMutationRejection(error: unknown): boolean {
-  if (!(error instanceof GarconHttpError) || error.errorCode === null) return false;
-  if (error.status >= 400 && error.status < 500) return true;
-  return error.errorCode === 'CLI_CONTROLLER_UNAVAILABLE'
-    || error.errorCode === 'CLI_SERVICE_BUSY'
-    || error.errorCode === 'SERVER_SHUTTING_DOWN';
 }
 
 async function waitReady(

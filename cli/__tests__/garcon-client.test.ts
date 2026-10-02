@@ -516,7 +516,7 @@ describe('GarconClient', () => {
     }
   });
 
-  test('preserves caller cancellation for transcript search maintenance', async () => {
+  test('cancels submitted transcript maintenance without claiming rollback', async () => {
     const controller = new AbortController();
     const reason = new Error('maintenance cancelled');
     const client = new GarconClient({
@@ -534,7 +534,9 @@ describe('GarconClient', () => {
     await Promise.resolve();
     controller.abort(reason);
 
-    await expect(request).rejects.toBe(reason);
+    await expect(request).rejects.toMatchObject({
+      message: expect.stringContaining('mutation outcome is unknown'), cause: reason,
+    });
   });
 
   test('fetches and validates a correlated transcript export', async () => {

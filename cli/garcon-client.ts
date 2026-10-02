@@ -152,6 +152,28 @@ export class GarconTransportError extends CliError {
   }
 }
 
+export function isDefinitiveMutationRejection(error: unknown): boolean {
+  if (!(error instanceof GarconHttpError) || error.errorCode === null) return false;
+  if (error.status >= 400 && error.status < 500) return true;
+  return error.errorCode === 'CLI_CONTROLLER_UNAVAILABLE'
+    || error.errorCode === 'CLI_SERVICE_BUSY'
+    || error.errorCode === 'SERVER_SHUTTING_DOWN';
+}
+
+async function oneShotMutation<T>(
+  phase: CliErrorPhase,
+  submit: () => Promise<T>,
+  signal?: AbortSignal,
+): Promise<T> {
+  signal?.throwIfAborted();
+  try {
+    return await submit();
+  } catch (error) {
+    if (isDefinitiveMutationRejection(error)) throw error;
+    throw new CliError(phase, 'mutation outcome is unknown; inspect the current value or operation status before retrying. No automatic retry was made.', 3, { cause: error });
+  }
+}
+
 export interface GarconClientOptions extends RuntimeConnection {
   fetch?: typeof fetch;
   submissionDelay?: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
@@ -523,49 +545,53 @@ export class GarconClient {
   }
 
   async rebuildTranscriptSearch(signal?: AbortSignal): Promise<TranscriptSearchRebuildResponse> {
-    const value = await this.#request(
-      'chat search',
-      'POST',
-      '/api/v1/chats/search/rebuild',
-      undefined,
-      signal,
-      null,
-    );
-    try {
-      return parseTranscriptSearchRebuildResponse(value);
-    } catch (error) {
-      throw new CliError('chat search', 'server returned an invalid transcript search rebuild response', 3, {
-        cause: error,
-      });
-    }
+    return oneShotMutation('chat search', async () => {
+      const value = await this.#request(
+        'chat search',
+        'POST',
+        '/api/v1/chats/search/rebuild',
+        undefined,
+        signal,
+        null,
+      );
+      try {
+        return parseTranscriptSearchRebuildResponse(value);
+      } catch (error) {
+        throw new CliError('chat search', 'server returned an invalid transcript search rebuild response', 3, {
+          cause: error,
+        });
+      }
+    }, signal);
   }
 
   async setTranscriptSearchEnabled(
     enabled: boolean,
     signal?: AbortSignal,
   ): Promise<RemoteSettingsSnapshot> {
-    const value = await this.#request(
-      'chat search',
-      'PUT',
-      '/api/v1/app/settings',
-      { features: { transcriptSearch: { enabled } } },
-      signal,
-      null,
-    );
-    const response = record(value);
-    const rawSettings = record(response?.settings);
-    const rawFeatures = record(rawSettings?.features);
-    const rawTranscriptSearch = record(rawFeatures?.transcriptSearch);
-    const settings = normalizeRemoteSettingsSnapshot(rawSettings);
-    if (
-      response?.success !== true
-      || rawTranscriptSearch?.enabled !== enabled
-      || !settings
-      || settings.features.transcriptSearch.enabled !== enabled
-    ) {
-      throw new CliError('chat search', 'server returned an invalid transcript search setting', 3);
-    }
-    return settings;
+    return oneShotMutation('chat search', async () => {
+      const value = await this.#request(
+        'chat search',
+        'PUT',
+        '/api/v1/app/settings',
+        { features: { transcriptSearch: { enabled } } },
+        signal,
+        null,
+      );
+      const response = record(value);
+      const rawSettings = record(response?.settings);
+      const rawFeatures = record(rawSettings?.features);
+      const rawTranscriptSearch = record(rawFeatures?.transcriptSearch);
+      const settings = normalizeRemoteSettingsSnapshot(rawSettings);
+      if (
+        response?.success !== true
+        || rawTranscriptSearch?.enabled !== enabled
+        || !settings
+        || settings.features.transcriptSearch.enabled !== enabled
+      ) {
+        throw new CliError('chat search', 'server returned an invalid transcript search setting', 3);
+      }
+      return settings;
+    }, signal);
   }
 
   async getChatSnapshot(
@@ -896,54 +922,60 @@ export class GarconClient {
     request: UpdateChatTitleRequest,
     signal?: AbortSignal,
   ): Promise<UpdateChatTitleResponse> {
-    const value = await this.#request(
-      'title update',
-      'PUT',
-      '/api/v1/app/session-name',
-      request,
-      signal,
-    );
-    const response = parseUpdateChatTitleResponse(value);
-    if (!response || response.chatId !== request.chatId || response.title !== request.title.trim()) {
-      throw new CliError('title update', 'server returned an invalid title update response', 3);
-    }
-    return response;
+    return oneShotMutation('title update', async () => {
+      const value = await this.#request(
+        'title update',
+        'PUT',
+        '/api/v1/app/session-name',
+        request,
+        signal,
+      );
+      const response = parseUpdateChatTitleResponse(value);
+      if (!response || response.chatId !== request.chatId || response.title !== request.title.trim()) {
+        throw new CliError('title update', 'server returned an invalid title update response', 3);
+      }
+      return response;
+    }, signal);
   }
 
   async setChatPinned(
     request: SetChatPinnedRequest,
     signal?: AbortSignal,
   ): Promise<SetChatOrderStateResponse> {
-    const value = await this.#request(
-      'submission',
-      'PUT',
-      '/api/v1/chats/pin',
-      request,
-      signal,
-    );
-    const response = parseSetChatOrderStateResponse(value);
-    if (!response || response.chatId !== request.chatId || response.isPinned !== request.isPinned) {
-      throw new CliError('submission', 'server returned an invalid pinned-state response', 3);
-    }
-    return response;
+    return oneShotMutation('submission', async () => {
+      const value = await this.#request(
+        'submission',
+        'PUT',
+        '/api/v1/chats/pin',
+        request,
+        signal,
+      );
+      const response = parseSetChatOrderStateResponse(value);
+      if (!response || response.chatId !== request.chatId || response.isPinned !== request.isPinned) {
+        throw new CliError('submission', 'server returned an invalid pinned-state response', 3);
+      }
+      return response;
+    }, signal);
   }
 
   async setChatArchived(
     request: SetChatArchivedRequest,
     signal?: AbortSignal,
   ): Promise<SetChatOrderStateResponse> {
-    const value = await this.#request(
-      'submission',
-      'PUT',
-      '/api/v1/chats/archive',
-      request,
-      signal,
-    );
-    const response = parseSetChatOrderStateResponse(value);
-    if (!response || response.chatId !== request.chatId || response.isArchived !== request.isArchived) {
-      throw new CliError('submission', 'server returned an invalid archived-state response', 3);
-    }
-    return response;
+    return oneShotMutation('submission', async () => {
+      const value = await this.#request(
+        'submission',
+        'PUT',
+        '/api/v1/chats/archive',
+        request,
+        signal,
+      );
+      const response = parseSetChatOrderStateResponse(value);
+      if (!response || response.chatId !== request.chatId || response.isArchived !== request.isArchived) {
+        throw new CliError('submission', 'server returned an invalid archived-state response', 3);
+      }
+      return response;
+    }, signal);
   }
 
   async setChatTags(
@@ -958,22 +990,24 @@ export class GarconClient {
     if (!recovered || recovered.chatId !== request.chatId) {
       throw new CliError('submission', 'server returned an invalid tag recovery response', 3);
     }
-    const value = await this.#request(
-      'submission',
-      'PUT',
-      '/api/v1/chats/tags',
-      request,
-      signal,
-    );
-    const response = parseSetChatTagsResponse(value);
-    if (
-      !response
-      || response.chatId !== request.chatId
-      || stableJsonStringify(response.tags) !== stableJsonStringify(request.tags)
-    ) {
-      throw new CliError('submission', 'server returned an invalid tag-state response', 3);
-    }
-    return response;
+    return oneShotMutation('submission', async () => {
+      const value = await this.#request(
+        'submission',
+        'PUT',
+        '/api/v1/chats/tags',
+        request,
+        signal,
+      );
+      const response = parseSetChatTagsResponse(value);
+      if (
+        !response
+        || response.chatId !== request.chatId
+        || stableJsonStringify(response.tags) !== stableJsonStringify(request.tags)
+      ) {
+        throw new CliError('submission', 'server returned an invalid tag-state response', 3);
+      }
+      return response;
+    }, signal);
   }
 
   async getTurnReceipt(chatId: string, turnId: string, signal?: AbortSignal): Promise<AgentTurnReceipt> {
@@ -1227,7 +1261,7 @@ export class GarconClient {
       });
     } catch (error) {
       if (signal?.aborted) throw error;
-      throw new GarconTransportError(phase, 'request could not reach the Garcon server', {
+      throw new GarconTransportError(phase, 'no confirmed response from the Garcon server', {
         cause: error,
       });
     }

@@ -121,6 +121,15 @@ describe('ticket CLI execution', () => {
     expect(testCase.stderr.join('')).toContain(REQUEST);
   });
 
+  test.each([408, 425, 429, 500, 502, 503, 504])('preserves ticket retry identity after ambiguous HTTP %i', async (status) => {
+    const testCase = harness(() => new Response('Synthetic intermediary failure', { status }));
+    expect(await testCase.run(['comment', 'G-1', '--body', 'Synthetic', '--request-id', REQUEST, '--expected-store-id', STORE])).toBe(3);
+    expect(testCase.calls).toHaveLength(1);
+    expect(testCase.stdout).toEqual([]);
+    expect(testCase.stderr.join('')).toContain('Save not confirmed');
+    expect(testCase.stderr.join('')).toContain(REQUEST);
+  });
+
   test('rejects oversized encoded requests and invalid stdin without submitting', async () => {
     const testCase = harness(() => { throw new Error('No request expected'); });
     const flags = ['--request-id', REQUEST, '--expected-store-id', STORE];

@@ -679,6 +679,10 @@ archive are mutually exclusive order groups. `set-tags` replaces the complete
 normalized set, including the `cli` tag; `--clear` is the explicit empty set.
 Each command supports `--json` and reports whether authoritative state changed.
 Concurrent metadata writers use last-writer-wins semantics.
+Lost or malformed mutation confirmations and ambiguous server errors report an
+unknown outcome, not proof that the request never arrived. Inspect the current
+value before retrying; metadata and search-maintenance mutations are not retried
+automatically. Structured validation and pre-dispatch rejections remain definitive.
 The CLI reconciles any earlier uncertain tag save with `GET chats/tags`, then
 uses the atomic desired-set `PUT chats/tags`. Browser `PATCH chats/tags` retains
 its compare-and-set baseline. Upgrade controller and workers together for this

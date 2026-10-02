@@ -4,7 +4,7 @@ import { ticketBytes } from '@garcon/common/ticket-validation';
 import { TICKET_LIMITS } from '@garcon/common/tickets';
 import { isTicketRead, type TicketCliCommand } from './ticket-args.js';
 import { argumentError, CliError } from './errors.js';
-import { GarconHttpError, type GarconClient } from './garcon-client.js';
+import { isDefinitiveMutationRejection, type GarconClient } from './garcon-client.js';
 import { formatTicketDetail, formatTicketHistory, formatTicketList, formatTicketMutation,
   ticketJsonOutput, ticketRetryDiagnostic } from './ticket-output.js';
 import { validateTicketStdin } from './ticket-stdin.js';
@@ -69,7 +69,7 @@ export async function runTicketCommand(command: TicketCliCommand, client: Ticket
     const result = await client.mutateTicket(request, signal);
     output.result(command.json ? ticketJsonOutput(result) : formatTicketMutation(result));
   } catch (error) {
-    if (error instanceof GarconHttpError) throw error;
+    if (isDefinitiveMutationRejection(error)) throw error;
     throw new CliError('tickets', 'Save not confirmed. Inspect the ticket or retry the same request with the printed identity and identical body.', 3, { cause: error });
   }
 }
