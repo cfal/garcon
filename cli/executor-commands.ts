@@ -1,6 +1,6 @@
 import type { ExecutorSnapshot } from '@garcon/common/executors';
 import type { ExecutorCliCommand } from './executor-args.js';
-import { GarconHttpError, type GarconClient } from './garcon-client.js';
+import { GarconHttpError, GarconTransportError, isDefinitiveMutationRejection, type GarconClient } from './garcon-client.js';
 import { CliError } from './errors.js';
 import type { CliOutput } from './output.js';
 import { terminalLine } from './terminal-output.js';
@@ -17,12 +17,11 @@ function requireExecutor(executors: readonly ExecutorSnapshot[], id: string): Ex
   return executor;
 }
 
-function isDefinitiveMutationRejection(error: unknown): boolean {
-  if (!(error instanceof GarconHttpError) || error.errorCode === null) return false;
-  if (error.status >= 400 && error.status < 500) return true;
-  return error.errorCode === 'CLI_CONTROLLER_UNAVAILABLE'
-    || error.errorCode === 'CLI_SERVICE_BUSY'
-    || error.errorCode === 'SERVER_SHUTTING_DOWN';
+function isRetryableExecutorReadError(error: unknown): error is GarconTransportError | GarconHttpError {
+  if (error instanceof GarconTransportError) return true;
+  if (!(error instanceof GarconHttpError) || !error.retryable) return false;
+  if (error.errorCode === 'CLI_CONTROLLER_CHANGED') return false;
+  return error.status !== 401 && error.status !== 403 && error.status !== 404;
 }
 
 async function waitReady(
@@ -32,21 +31,30 @@ async function waitReady(
   signal?: AbortSignal,
 ): Promise<ExecutorSnapshot> {
   const timeout = AbortSignal.timeout(timeoutMs);
-  const waiting = signal ? AbortSignal.any([signal, timeout]) : timeout;
-  let last: ExecutorSnapshot | undefined;
+  const waitSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
+  let lastSnapshot: ExecutorSnapshot | undefined;
+  let lastReadError: Error | undefined;
   try {
     while (true) {
-      waiting.throwIfAborted();
-      last = requireExecutor(await client.listExecutors(waiting), id);
-      waiting.throwIfAborted();
-      if (last.availability === 'ready') return last;
-      if (!last.enabled) throw new CliError('executors', 'executor is disabled', 3);
-      await abortableDelay(500, waiting);
+      waitSignal.throwIfAborted();
+      try {
+        lastSnapshot = requireExecutor(await client.listExecutors(waitSignal), id);
+        lastReadError = undefined;
+        waitSignal.throwIfAborted();
+        if (!lastSnapshot.enabled) throw new CliError('executors', 'executor is disabled', 3);
+        if (lastSnapshot.availability === 'ready') return lastSnapshot;
+      } catch (error) {
+        waitSignal.throwIfAborted();
+        if (!isRetryableExecutorReadError(error)) throw error;
+        lastReadError = error;
+      }
+      await abortableDelay(500, waitSignal);
     }
   } catch (error) {
     signal?.throwIfAborted();
     if (timeout.aborted) {
-      const detail = last?.lastError ? `: ${last.lastError.message}` : '';
+      const message = lastReadError?.message ?? lastSnapshot?.lastError?.message;
+      const detail = message ? `: ${message}` : '';
       throw new CliError('executors', `timed out waiting for executor readiness${detail}`, 3);
     }
     throw error;

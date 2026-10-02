@@ -65,6 +65,17 @@ function response(overrides: Partial<ChatSearchResponse> = {}): ChatSearchRespon
 }
 
 describe('chat search', () => {
+  test('escapes human titles and snippets without changing JSON values', () => {
+    const unsafe = 'Synthetic\x1b]52;c;YWJj\x07\u009b\u202e';
+    const reply = response();
+    const result = buildChatSearchResult(command, chatList([chat({ title: unsafe })]), {
+      ...reply,
+      results: [{ ...reply.results[0]!, snippets: [{ ordinal: 1, role: 'assistant', timestamp: TS, text: unsafe }] }],
+    }, 0);
+    expect(formatChatSearchResult(result, false, command)).not.toMatch(/[\x1b\x07\u009b\u202e]/u);
+    expect(JSON.parse(formatChatSearchResult(result, true, command)).results[0].snippets[0].text).toBe(unsafe);
+  });
+
   test('omits chatIds without a metadata filter and restricts filtered searches', () => {
     const chats = chatList([
       chat(),

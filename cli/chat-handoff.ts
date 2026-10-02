@@ -8,6 +8,7 @@ import {
   type AtomicDocumentFileSystem,
 } from './atomic-document-output.js';
 import type { CliOutput } from './output.js';
+import { terminalLine } from './terminal-output.js';
 
 export interface ChatHandoffArtifactClient {
   getChatHandoffArtifact(
@@ -93,5 +94,5 @@ function renderHandoffReceipt(
     `code units: ${response.documentCodeUnits}`,
     `bytes: ${bytes.byteLength}`,
     `sha256: ${crypto.createHash('sha256').update(bytes).digest('hex')}`,
-  ].join('\n');
+  ].map(terminalLine).join('\n');
 }

@@ -39,7 +39,7 @@ import { CliError } from './errors.js';
 import { GarconClient } from './garcon-client.js';
 import { createCliOutput, type CliOutput } from './output.js';
 import { applyTicketStdin, runTicketCommand } from './ticket-commands.js';
-import { ticketLineOutput } from './ticket-output.js';
+import { terminalLine } from './terminal-output.js';
 import { readTicketStdin } from './ticket-stdin.js';
 import { applyExecutorConnectionStdin, readExecutorConnectionStdin } from './executor-args.js';
 import { runExecutorCommand } from './executor-commands.js';
@@ -193,6 +193,9 @@ function interruptDiagnostic(
     return command.action === 'status'
       ? 'terminal interrupted; the read-only operation was canceled'
       : 'terminal interrupted; the command may have reached Garcon; inspect transcript-search status before retrying';
+  }
+  if (command?.kind === 'start' || command?.kind === 'resume') {
+    return 'terminal interrupted; the command may have reached Garcon; any accepted work may continue without this CLI. Inspect the chat before retrying; no Stop was sent.';
   }
   if (
     command !== undefined
@@ -528,7 +531,7 @@ export async function main(
       ? error
       : new CliError('submission', error instanceof Error ? error.message : String(error), 3);
     const diagnostic = `${cliError.phase}: ${cliError.message}`;
-    output.diagnostic(command?.kind === 'ticket' || command?.kind === 'executor' || argv.includes('ticket') || argv.includes('executor') ? ticketLineOutput(diagnostic) : diagnostic);
+    output.diagnostic(terminalLine(diagnostic));
     return cliError.exitCode;
   }
 }

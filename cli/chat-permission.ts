@@ -10,6 +10,7 @@ import type {
 import { argumentError } from './errors.js';
 import { GarconHttpError } from './garcon-client.js';
 import type { CliOutput } from './output.js';
+import { terminalLine } from './terminal-output.js';
 
 export interface PermissionDecisionClient {
   decidePermission(
@@ -57,7 +58,7 @@ function formatPermissionReceipt(
     `permission occurrence: ${command.permissionOccurrenceId}`,
     detail,
     `status: ${response.status}`,
-  ].join('\n');
+  ].map(terminalLine).join('\n');
 }
 
 export async function runPermissionDecision(

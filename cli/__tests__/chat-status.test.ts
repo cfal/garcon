@@ -94,9 +94,26 @@ function output(): CliOutput & { results: string[] } {
 }
 
 describe('chat status', () => {
+  test('escapes terminal controls in metadata and transcript text', () => {
+    const unsafe = 'Synthetic\x1b]52;c;YWJj\x07\u009b\u202e';
+    const value = snapshot();
+    const rendered = formatChatStatus({
+      ...value,
+      chat: { ...value.chat, title: unsafe, projectPath: unsafe },
+      transcript: {
+        availability: 'available', transcriptViewId: 'view-1', lastOrdinal: 1,
+        pageOldestOrdinal: 1, pageNewestOrdinal: 1, hasMore: false,
+        messages: [{ ordinal: 1, message: new AssistantMessage(TIMESTAMP, unsafe) }],
+      },
+    });
+    expect(rendered).not.toMatch(/[\x1b\x07\u009b\u202e]/u);
+    expect(rendered).toContain('\\u001b]52;c;YWJj\\u0007\\u009b\\u202e');
+  });
+
   test('formats provider-neutral running status and transcript metadata', () => {
     expect(formatChatStatus(snapshot())).toBe([
       `chat id: ${CHAT_ID}`,
+      'executor: local',
       'status: running',
       `observed at: ${TIMESTAMP}`,
       'title: Implement validation',

@@ -231,22 +231,29 @@ Return finite JSON application responses, including confirmed domain failures. N
 
 Dispatch is concurrent and asynchronous. A start or catalog request can require a controller-to-worker RPC while its worker-to-controller request is pending. Do not hold a connection-wide mutex across either call, block the event loop waiting for a response, or serialize all CLI traffic behind a long-running command.
 
-## Initial Allowlist
+## Forwarding Allowlist
 
-The following is the current CLI surface, not permission to expose every route under these prefixes. All paths have the `/api/v1/` prefix. Register each exact method/path pair, with operation-specific validation; additions require explicit contract and authorization tests.
+`CLI_OPERATIONS` in `server/remote/transport/cli-protocol.ts` is the authoritative
+method/path registry. `server/remote/transport/__tests__/cli-allowlist.test.ts`
+checks it against the HTTP operations emitted by the client. Every entry declares
+its lane, mutation semantics, deadline, and management permission. Additions
+require explicit contract and authorization tests; a route prefix never grants
+access to all routes beneath it.
 
-| Family | Exact operations |
-| --- | --- |
-| Discovery | `GET runtime`, `GET cli/context` are local endpoint operations; only context requires reverse description. |
-| Selection | `GET models`, `GET app/settings`, `GET preambles`. |
-| Chat reads | `GET chats`, `GET chats/messages`, `GET chats/snapshot`, `GET chats/turn-receipt`, `GET chats/export`, `GET chats/handoff-artifact`; `POST chats/lookup-native-session`. |
-| Search | `POST chats/search`, `GET chats/search/status`, `POST chats/search/rebuild`. |
-| Search setting | `PUT app/settings`, restricted to the exact transcript-search-enabled boolean patch used by the CLI. No other settings fields. |
-| Execution | `POST chats/start`, `POST chats/run`, `POST chats/fork`, `POST chats/fork-run`, `POST chats/steer`, `POST chats/stop`, `POST chats/permissions/decision`. |
-| Rows and organization | `GET chats/rows`, `POST chats/rows`, `PUT app/session-name`, `PUT chats/pin`, `PUT chats/archive`, `GET chats/tags`, `PATCH chats/tags`. |
-| Tickets | `GET tickets/bootstrap`, `GET tickets`, `GET tickets/detail`, `GET tickets/history`, `POST tickets/project-default`, `POST tickets/mutate`. |
+Ordinary workspace CLI access covers chat commands, catalogs, search, metadata,
+tickets, and redacted executor listing. Executor administration, connection
+credential reveal, and provider assignment operations additionally require the
+separate default-off `allowExecutorManagement` grant. Provider credential
+administration, authentication/account routes, and Files/Git/Terminal APIs remain
+excluded. `PUT app/settings` accepts only the exact transcript-search-enabled
+boolean patch. Broad endpoint allowlisting never replaces nested payload validation.
 
-Exclude executor management and its credentials, provider credential administration, authentication/account routes, Files/Git/Terminal APIs, and any route not needed by the CLI. Restricting a broad endpoint requires validating nested payload fields, not only allowing its URL. In particular, forwarding an unrestricted settings patch would defeat the allowlist.
+CLI tag replacement uses `GET chats/tags` for durability recovery and
+`PUT chats/tags` for an atomic desired-state write. Browser optimistic PATCH is
+not forwarded. Title writes are bounded to 4 KiB UTF-8 at the common parser and
+persistence boundary; legacy oversized values remain readable but can still
+exceed reply bounds until renamed. Protocol revision 12 requires matched
+controller and worker builds for these forwarded-contract changes.
 
 Ticket project inference is implemented on the selected executor at current HEAD. Send the context default executor with the CLI directory and reuse that resolver. Do not expand commands merely because their browser APIs exist.
 
@@ -256,9 +263,9 @@ Origin and target are different identities. Origin is derived from the authentic
 
 | Operation | Target rule |
 | --- | --- |
-| New `start` / `start-async` | Explicitly send `context.defaultExecutorId`; resolve cwd on the CLI machine and validate it again through that executor's project service. |
-| Standalone agent/model catalog | Use the context default executor. Provider endpoint definitions remain controller-owned; discovery still executes on the selected executor. |
-| Native-session lookup | Include the context default executor to avoid same-native-ID ambiguity across hosts. |
+| New `start` / `start-async` | Use explicit `--executor` or `context.defaultExecutorId`. Cross-executor starts require an absolute target-local cwd; otherwise resolve cwd on the CLI machine. Validate through the target executor's project service. |
+| Standalone agent/model catalog | Use explicit `--executor` or the context default executor. Provider endpoint definitions remain controller-owned; discovery executes on the selected executor. |
+| Native-session lookup | Include explicit `--executor` or the context default executor to avoid same-native-ID ambiguity across hosts. |
 | Existing-chat resume/settings selection | Use the already-fetched snapshot's durable executor/agent/epoch and that executor's catalog. Do not fetch the full chat list or use the HTTP endpoint's default. |
 | Agent handoff without an executor override | Preserve the existing chat executor and use its destination-agent catalog. Do not move execution just because the CLI ran on another worker. |
 | Fork/fork-run | Keep the source-chat executor and existing fork/handoff semantics. |

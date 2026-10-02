@@ -496,6 +496,7 @@
 	"chat_notice_queue_steer_recovery_failed": "The queued message could not be restored safely. Refresh before continuing.",
 	"chat_notice_rename_attachments": "Rename commands are text-only. Remove the attachments and try again.",
 	"chat_notice_rename_title_required": "Enter a title after /rename.",
+	"chat_title_size_error": "Title must be at most {max} UTF-8 bytes.",
 	"chat_notice_move_arguments": "Use /move top or /move bottom.",
 	"chat_notice_move_attachments": "Move commands are text-only. Remove the attachments and try again.",
 	"chat_notice_move_draft": "Start this chat before changing its Manual order.",

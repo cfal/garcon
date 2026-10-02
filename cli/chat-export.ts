@@ -7,6 +7,7 @@ import {
   type AtomicDocumentFileSystem,
 } from './atomic-document-output.js';
 import type { CliOutput } from './output.js';
+import { terminalLine } from './terminal-output.js';
 
 export interface TranscriptExportClient {
   getTranscriptExport(
@@ -66,5 +67,5 @@ export async function runChatExport(
     `entries: ${response.entryCount}`,
     `omitted: ${omitted || 'none'}`,
     `bytes: ${new TextEncoder().encode(response.document).byteLength}`,
-  ].join('\n'));
+  ].map(terminalLine).join('\n'));
 }

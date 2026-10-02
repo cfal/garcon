@@ -284,7 +284,7 @@ export class ForkCommands {
       );
     }
     if (!options.allowExistingTarget && this.deps.chats.getChat(targetChatId)) {
-      throw new CommandValidationError('IDEMPOTENCY_CONFLICT', `Session already exists: ${targetChatId}`, 409);
+      throw new CommandValidationError('CHAT_ID_COLLISION', `Session already exists: ${targetChatId}`, 409);
     }
     const viewId = await this.deps.agents.currentTranscriptViewId(sourceChatId, options.signal);
     options.signal?.throwIfAborted();

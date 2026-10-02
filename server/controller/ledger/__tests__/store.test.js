@@ -1717,6 +1717,19 @@ describe('TranscriptLedgerStore', () => {
     expect(await fs.stat(path.join(root, 'orphan-chat')).catch(() => null)).toBeNull();
   });
 
+  it('preserves existing ledgers and trash when registry authority is missing', async () => {
+    store.initializeCurrentView('chat-one', { viewId: transcriptViewId('view-one'), contentStartOrdinal: 1 });
+    const trash = path.join(root, '.trash', 'keep');
+    await fs.mkdir(trash, { recursive: true });
+    expect(() => store.removeUnregisteredChatDirectories(null)).toThrow('Missing chats.json');
+    expect(store.currentView('chat-one')?.viewId).toBe('view-one');
+    expect((await fs.stat(trash)).isDirectory()).toBe(true);
+  });
+
+  it('allows absent registry authority only for a fresh ledger root', () => {
+    expect(store.removeUnregisteredChatDirectories(null)).toEqual([]);
+  });
+
   it('moves a deleted chat out of the ledger root at once and removes it afterwards', async () => {
     store.initializeCurrentView('chat-one', {
       viewId: transcriptViewId('view-one'),

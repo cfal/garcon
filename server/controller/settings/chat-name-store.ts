@@ -1,4 +1,5 @@
 import { resolveChatTitle, type DerivedChatNameInput } from '../chats/chat-title.js';
+import { CHAT_TITLE_MAX_BYTES, fitDerivedChatTitle, isChatTitleWithinLimit } from '@garcon/common/chat-title-contracts';
 import type {
   ProjectSettings,
   SettingsStoreContext
@@ -26,6 +27,9 @@ export class ChatNameStore {
   ): Promise<boolean> {
     if (!settings.chatNames) settings.chatNames = {};
     const trimmed = typeof title === 'string' ? title.trim() : '';
+    if (!isChatTitleWithinLimit(trimmed)) {
+      throw new Error(`Chat title must be at most ${CHAT_TITLE_MAX_BYTES} UTF-8 bytes`);
+    }
     const existing = settings.chatNames[String(chatId)] ?? '';
     if (existing === trimmed) return false;
     if (!trimmed) {
@@ -70,8 +74,11 @@ export class ChatNameStore {
         .filter((chatId) => chatId !== input.chatId)
         .map(titleFor));
       let suffix = 1;
-      while (occupiedTitles.has(`${sourceTitle} (${suffix})`)) suffix += 1;
-      const title = `${sourceTitle} (${suffix})`;
+      let title = fitDerivedChatTitle(sourceTitle, ` (${suffix})`);
+      while (occupiedTitles.has(title)) {
+        suffix += 1;
+        title = fitDerivedChatTitle(sourceTitle, ` (${suffix})`);
+      }
       await this.#persistSessionName(settings, input.chatId, title);
       return title;
     });

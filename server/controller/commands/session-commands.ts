@@ -669,15 +669,15 @@ export class SessionCommands {
           }
           return persisted;
         },
+        publish: () => {
+          if (relocatedSession) this.deps.agents.publishSessionFact(input.chatId, relocatedSession);
+        },
         logger,
       });
       if (!updated) {
         throw new CommandValidationError('SESSION_NOT_FOUND', 'Session not found', 404);
       }
       await this.deps.queue.discardPendingChatInput(input.chatId);
-      if (relocatedSession) {
-        this.deps.agents.publishSessionFact(input.chatId, relocatedSession);
-      }
       return {
         success: true,
         chatId: input.chatId,

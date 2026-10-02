@@ -64,7 +64,7 @@ export const CLI_OPERATIONS = {
   'PUT /api/v1/chats/pin': write,
   'PUT /api/v1/chats/archive': write,
   'GET /api/v1/chats/tags': read,
-  'PATCH /api/v1/chats/tags': write,
+  'PUT /api/v1/chats/tags': write,
   'GET /api/v1/tickets/bootstrap': read,
   'GET /api/v1/tickets': read,
   'GET /api/v1/tickets/detail': read,

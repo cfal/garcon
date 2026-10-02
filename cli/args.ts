@@ -77,6 +77,8 @@ import {
   parseNativeSessionId,
 } from '@garcon/common/native-session-lookup';
 import { argumentError } from './errors.js';
+import { CHAT_TITLE_MAX_BYTES, isChatTitleWithinLimit } from '@garcon/common/chat-title-contracts';
+import { SHARED_PARSE_OPTIONS } from './shared-options.js';
 import { TICKET_PARSE_OPTIONS, TICKET_STRING_OPTIONS, parseTicketCliCommand, type TicketCliCommand } from './ticket-args.js';
 import { EXECUTOR_PARSE_OPTIONS, EXECUTOR_STRING_OPTIONS, parseExecutorCliCommand, type ExecutorCliCommand } from './executor-args.js';
 
@@ -1016,6 +1018,7 @@ function parseRename(
   }
   const title = parsed.positionals.slice(2).join(' ').trim();
   if (!title) throw argumentError('rename title must not be empty');
+  if (!isChatTitleWithinLimit(title)) throw argumentError(`title must be at most ${CHAT_TITLE_MAX_BYTES} UTF-8 bytes`);
   return {
     kind: 'rename',
     ...connection,
@@ -1513,13 +1516,13 @@ export function parseCliArgs(
       allowPositionals: true,
       strict: true,
       options: {
+        ...SHARED_PARSE_OPTIONS,
         ...TICKET_PARSE_OPTIONS,
         ...EXECUTOR_PARSE_OPTIONS,
         'config-dir': { type: 'string' },
         runtime: { type: 'string' },
         server: { type: 'string' },
         executor: { type: 'string' },
-        cwd: { type: 'string' },
         parent: { type: 'string' },
         preamble: { type: 'string', multiple: true },
         agent: { type: 'string' },
@@ -1528,7 +1531,6 @@ export function parseCliArgs(
         model: { type: 'string' },
         permissions: { type: 'string' },
         'reasoning-effort': { type: 'string' },
-        title: { type: 'string' },
         'message-title': { type: 'string' },
         'message-style': { type: 'string' },
         color: { type: 'string' },
@@ -1716,6 +1718,9 @@ export function parseCliArgs(
   if (commandName === 'start-async') lifecycleOptions = START_ASYNC_OPTIONS;
   rejectOptionsExcept(values, lifecycleOptions, commandName);
   const title = nonEmptyOption(values.title as string | undefined, '--title')?.trim();
+  if (title !== undefined && !isChatTitleWithinLimit(title)) {
+    throw argumentError(`--title must be at most ${CHAT_TITLE_MAX_BYTES} UTF-8 bytes`);
+  }
   const userMessagePresentation = parseUserMessagePresentationOptions(values);
   const modes = parseModeOptions(values);
   const orderedPreambleIds = commandName === 'resume'

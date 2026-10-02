@@ -50,6 +50,7 @@ export async function runProjectPathUpdateTransaction<T>(input: {
   readonly persist: (
     nativeSession: AgentNativeSessionRef | null | undefined,
   ) => Promise<T | null>;
+  readonly publish: (updated: T) => void;
   readonly logger: AgentLogger;
 }): Promise<T | null> {
   let preparation: AgentProjectPathUpdatePreparation | void;
@@ -75,6 +76,8 @@ export async function runProjectPathUpdateTransaction<T>(input: {
     return null;
   }
 
+  // Publication can fail after committing; neither native copy is safe to remove then.
+  input.publish(updated);
   if (preparation) {
     await preparation.commit().catch((error) => {
       input.logger.warn('Project-path preparation cleanup failed', {

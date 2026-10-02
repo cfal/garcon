@@ -11,7 +11,7 @@ runtime, producer relay, and reply journal serve both lanes.
 The shared secret authenticates Noise and the application handshake binding
 executor, runtime, version, and the fresh connection. The version is the
 package version followed by the executor protocol revision, as in
-`0.3.4+protocol.10`. The revision changes with anything either side sends or
+`0.3.4+protocol.12`. The revision changes with anything either side sends or
 accepts, so builds that disagree fail the handshake with "Executor version
 mismatch" instead of failing mid-session. TLS is required unless explicitly
 disabled with `noTls` (`--no-tls` for workers). Worker listeners require a PEM

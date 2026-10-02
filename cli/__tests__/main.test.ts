@@ -417,7 +417,7 @@ describe('main', () => {
     expect(exitCode).toBe(3);
     expect(capture.stdout.join('')).toBe('');
     expect(capture.stderr.join('')).toContain(
-      'native session lookup: request could not reach the Garcon server',
+      'native session lookup: no confirmed response from the Garcon server',
     );
     expect(capture.stderr).toHaveLength(1);
   });
@@ -642,7 +642,7 @@ describe('main', () => {
 
     await expect(result).resolves.toBe(130);
     expect(capture.diagnostics).toEqual([
-      'terminal interrupted; no Garcon agent was stopped',
+      'terminal interrupted; the command may have reached Garcon; any accepted work may continue without this CLI. Inspect the chat before retrying; no Stop was sent.',
     ]);
   });
 
@@ -696,7 +696,7 @@ describe('main', () => {
         if (exitCode !== 130 && attempt < 3) continue;
         expect(exitCode).toBe(130);
         expect(await new Response(child.stderr).text()).toContain(
-          'terminal interrupted; no Garcon agent was stopped',
+          'any accepted work may continue without this CLI',
         );
         return;
       } finally {
@@ -839,6 +839,36 @@ describe('main', () => {
       parentChat: { chatId: '1785337200123455', relation: 'delegation' },
       titleUpdate: { status: 'succeeded', title: 'Async review', changed: true },
     }, null, 2)}\n`);
+  });
+
+  test.each(['start', 'resume'] as const)('interruption after %s acceptance detaches without Stop or resubmission', async (kind) => {
+    const capture = capturedStreams();
+    const abort = new AbortController();
+    const mutations: string[] = [];
+    const args = kind === 'start' ? ['start', '--agent', 'codex', '--model', 'gpt-5.4'] : ['resume', CHAT_ID];
+    const exitCode = await main([...args, 'Synthetic task'], {
+      discoverRuntime: stubDiscovery, output: capture.output, signal: abort.signal,
+      fetch: async (input, init) => {
+        const pathname = new URL(String(input)).pathname;
+        if (pathname === '/api/v1/models') return startModelCatalogResponse();
+        if (pathname === '/api/v1/app/settings') return remoteSettingsResponse();
+        if (pathname === '/api/v1/chats/snapshot') return controlSnapshotResponse();
+        if (pathname === '/api/v1/chats/turn-receipt') {
+          expect(capture.stdout.join('')).toContain('turn id: turn-accepted');
+          abort.abort(new Error('Synthetic interruption after acceptance'));
+          throw abort.signal.reason;
+        }
+        mutations.push(pathname);
+        const request = JSON.parse(String(init?.body));
+        return Response.json({ success: true, commandType: kind === 'start' ? 'chat-start' : 'agent-run',
+          clientRequestId: request.clientRequestId, chatId: request.chatId, turnId: 'turn-accepted',
+          status: 'accepted', acceptedAt: TS, parentChat: null, chat: null });
+      },
+    });
+    expect(exitCode).toBe(130);
+    expect(mutations).toEqual([kind === 'start' ? '/api/v1/chats/start' : '/api/v1/chats/run']);
+    expect(capture.stderr.join('')).toContain('any accepted work may continue without this CLI');
+    expect(capture.stderr.join('')).toContain('no Stop was sent');
   });
 
   test('prints synchronous start JSON as the async envelope plus its terminal receipt', async () => {

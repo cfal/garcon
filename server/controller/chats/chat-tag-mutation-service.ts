@@ -14,6 +14,7 @@ import type {
   TransitionChatTagsRequest,
 } from '../../../common/chat-tag-mutations.js';
 import { normalizeTags } from '../../../common/tags.js';
+import type { SetChatTagsRequest, SetChatTagsResponse } from '../../../common/chat-tags-contracts.js';
 import type { ChatBoardService } from '../chat-boards/service.js';
 import { ChatBoardDomainError } from '../chat-boards/errors.js';
 import type { KeyedPromiseLock } from '../../common/keyed-lock.js';
@@ -39,6 +40,15 @@ interface ChatTagMutationServiceDeps {
 
 export class ChatTagMutationService {
   constructor(private readonly deps: ChatTagMutationServiceDeps) {}
+
+  set(input: SetChatTagsRequest): Promise<SetChatTagsResponse> {
+    return this.deps.chatMutationLock.runExclusive(`chat:${input.chatId}`, async () => {
+      const current = this.#requireChat(input.chatId);
+      const result = await this.#persistLocked(input.chatId, current.tags, input.tags);
+      return { success: true, chatId: input.chatId, tags: [...result.tags],
+        changed: result.addedTags.length > 0 || result.removedTags.length > 0 };
+    });
+  }
 
   replace(input: ReplaceChatTagsRequest): Promise<ChatTagsMutationResponse> {
     return this.deps.chatMutationLock.runExclusive(`chat:${input.chatId}`, async () => {
