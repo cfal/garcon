@@ -50,6 +50,7 @@ it.each(['tab', 'new window', 'replacement', 'launcher'])(
 				kind: 'remote',
 				enabled: true,
 				direction: 'executor-connects',
+				bulk: { availability: 'ready', lastError: null },
 				availability: 'ready',
 				instanceId: null,
 				projectBasePath: '/project',

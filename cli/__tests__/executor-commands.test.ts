@@ -14,6 +14,7 @@ const id = '11111111-1111-4111-8111-111111111111';
 const snapshot: ExecutorSnapshot = { id, label: 'Worker', kind: 'remote', enabled: true,
   allowControllerCli: true, allowExecutorManagement: false, direction: 'executor-connects', availability: 'ready',
   instanceId: 'synthetic', projectBasePath: '/workspace', lastError: null,
+  bulk: { availability: 'ready', lastError: null },
   machineServices: { files: true, git: true, gh: true, terminals: true } };
 const connection = { connectionUrl: `wss://worker.test/executor#secret=${'A'.repeat(43)}`, noTls: false, allowUnverifiedTls: false };
 const providers = [{ id: 'synthetic-profile', label: 'Profile', executorIds: [id] }];
@@ -36,6 +37,14 @@ function fixture() {
   } satisfies ExecutorCommandClient;
   return { client, output, stdout: () => stdout, stderr: () => stderr };
 }
+
+test('executor list shows bulk availability separately without changing primary readiness', async () => {
+  const f = fixture();
+  f.client.listExecutors.mockResolvedValueOnce([{ ...snapshot, bulk: { availability: 'reconnecting', lastError: null } }]);
+  await runExecutorCommand(command(['list']), f.client, f.output);
+  expect(f.stdout()).toMatch(/STATUS\s+BULK/);
+  expect(f.stdout()).toMatch(/ready\s+reconnecting/);
+});
 
 test('executor parser handles independent grants, both directions, and strict update flags', () => {
   const inherited = command(['create', '--label', 'Worker', '--direction', 'executor-connects']).operation;

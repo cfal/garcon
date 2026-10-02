@@ -5,6 +5,7 @@ export const localExecutor = {
 	allowControllerCli: true, allowExecutorManagement: true,
 	availability: 'ready', projectBasePath: '/workspace', lastError: null,
 	instanceId: 'synthetic-local-instance',
+	bulk: null,
 	machineServices: { files: true, git: true, gh: true, terminals: true },
 } satisfies ExecutorSnapshot;
 
@@ -14,5 +15,6 @@ export const remoteExecutor = {
 	allowControllerCli: false, allowExecutorManagement: false,
 	projectBasePath: '/worker', lastError: null,
 	instanceId: 'synthetic-remote-instance',
+	bulk: { availability: 'ready', lastError: null },
 	machineServices: { files: false, git: false, gh: false, terminals: false },
 } satisfies ExecutorSnapshot;

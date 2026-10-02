@@ -136,6 +136,7 @@ export class ExecutorManager {
       allowExecutorManagement: true,
       availability: this.#disposed ? 'offline' : 'ready', projectBasePath: this.localInfo.projectBasePath,
       instanceId: this.localInfo.instanceId,
+      bulk: null,
       lastError: null, machineServices: { files: true, git: true, gh: true, terminals: true },
     }, ...[...this.#remotes.values()].map((entry): ExecutorSnapshot => ({
       id: entry.config.id, label: entry.config.label, kind: 'remote', enabled: entry.config.enabled,
@@ -145,6 +146,7 @@ export class ExecutorManager {
       availability: this.#snapshotAvailability(entry.config.id),
       projectBasePath: entry.info?.projectBasePath ?? null, lastError: entry.error,
       instanceId: entry.info?.instanceId ?? null,
+      bulk: entry.executor?.bulkStatus ?? { availability: 'offline', lastError: null },
       machineServices: { files: entry.info?.services.files === true, git: entry.info?.services.git === true, gh: entry.info?.services.gh === true, terminals: entry.info?.services.terminals === true },
     }))];
   }
@@ -321,6 +323,7 @@ export class ExecutorManager {
         }
         return this.options.resolveCredential({ executorId: config.id, agentId: call.integrationId, reference: call.request.reference, signal });
       }), reportError, entry.inventory, { logger: this.logger });
+      entry.executor.onBulkChanged(() => { if (this.#current(entry)) this.#changed(); });
       entry.executor.onAvailabilityChanged((value) => {
         if (!this.#current(entry)) return;
         if (value === 'ready') {

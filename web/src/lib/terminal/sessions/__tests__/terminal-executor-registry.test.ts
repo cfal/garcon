@@ -38,6 +38,7 @@ function executor(
 		enabled: true,
 		direction: id === 'local' ? null : 'executor-connects',
 		availability,
+		bulk: id === 'local' ? null : { availability: 'ready', lastError: null },
 		instanceId: null,
 		projectBasePath: '/project',
 		lastError: null,

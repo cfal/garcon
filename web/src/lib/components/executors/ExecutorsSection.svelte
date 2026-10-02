@@ -62,6 +62,15 @@
 		if (executor.direction === 'executor-connects') return 'Executor connects to controller';
 		return 'Controller connects to executor';
 	}
+
+	function bulkStatus(availability: NonNullable<ExecutorSnapshot['bulk']>['availability']): string {
+		switch (availability) {
+			case 'ready': return m.executors_bulk_ready();
+			case 'connecting': return m.executors_bulk_connecting();
+			case 'reconnecting': return m.executors_bulk_reconnecting();
+			case 'offline': return m.executors_bulk_offline();
+		}
+	}
 </script>
 
 <div bind:this={content} class="min-w-0 space-y-4">
@@ -80,6 +89,12 @@
 							<p class="text-xs text-muted-foreground">
 								{connectionLabel(executor)} / {executorStatus(executor)}
 							</p>
+							{#if executor.bulk}
+								<p class="text-xs text-muted-foreground">{bulkStatus(executor.bulk.availability)}</p>
+								{#if executor.bulk.lastError}<p class="mt-1 break-words text-xs text-destructive">
+									{executor.bulk.lastError.message}
+								</p>{/if}
+							{/if}
 							{#if executor.lastError}<p class="mt-1 break-words text-xs text-destructive">
 									{executor.lastError.message}
 								</p>{/if}

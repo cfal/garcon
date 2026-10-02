@@ -23,6 +23,7 @@ it.each(['local', remoteId])(
 				kind: id === 'local' ? 'local' : 'remote',
 				enabled: true,
 				direction: id === 'local' ? null : 'executor-connects',
+				bulk: id === 'local' ? null : { availability: 'ready', lastError: null },
 				availability: 'ready',
 				instanceId: null,
 				projectBasePath: '/project',

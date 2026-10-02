@@ -60,6 +60,18 @@ describe('ExecutorsDialog', () => {
 		expect(screen.queryByLabelText('Connection URL')).toBeNull();
 	});
 
+	it('shows bulk failure separately while the executor remains ready', async () => {
+		vi.mocked(api.getExecutors).mockResolvedValue([localExecutor, {
+			...remoteExecutor,
+			bulk: { availability: 'reconnecting', lastError: { code: 'EXECUTOR_BULK_UNAVAILABLE', message: 'Synthetic bulk failure' } },
+		}]);
+		await openDialog();
+		expect(await screen.findByText('Bulk connection: reconnecting')).toBeDefined();
+		expect(screen.getByText('Executor connects to controller / Ready')).toBeDefined();
+		expect(screen.getByText('Synthetic bulk failure')).toBeDefined();
+		expect(screen.getAllByText(/Bulk connection:/)).toHaveLength(1);
+	});
+
 	it('accepts a pasted outbound descriptor and presents configuration errors inline', async () => {
 		await openDialog();
 		await fireEvent.click(screen.getByRole('button', { name: 'Add Executor' }));

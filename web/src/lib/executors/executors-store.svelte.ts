@@ -14,6 +14,7 @@ const localFallback: readonly ExecutorSnapshot[] = [
 		allowControllerCli: true, allowExecutorManagement: true,
 		direction: null,
 		availability: 'ready',
+		bulk: null,
 		instanceId: null,
 		projectBasePath: null,
 		lastError: null,

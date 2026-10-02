@@ -28,6 +28,7 @@ import { RemoteFilesService } from './remote-files.js';
 import { RemoteGitServices } from './remote-git.js';
 import { RemoteTerminalService } from './remote-terminals.js';
 import { parseTicketProjectDefault } from '../../../common/ticket-responses.js';
+import type { ExecutorBulkStatus } from '../../../common/executors.js';
 
 export interface RemoteSessionBacking {
   readonly rpc: ExecutorRpc;
@@ -105,8 +106,9 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
   #current: RemoteSessionBacking | null = null;
   #bulkCurrent: RemoteSessionBacking | null = null;
   #connection: ExecutorRpcConnection | null = null;
-  #bulkStatus: BulkConnectionStatus = { phase: 'offline', error: null, sessionId: null, retries: 0 };
-  readonly #bulkListeners = new Set<(status: BulkConnectionStatus) => void>();
+  #bulkStatus: ExecutorBulkStatus = { availability: 'offline', lastError: null };
+  #bulkActivated = false;
+  readonly #bulkListeners = new Set<(status: ExecutorBulkStatus) => void>();
   #latest: RemoteSessionBacking | null = null;
   #candidate: SessionTransport | null = null;
   #initialized = false;
@@ -181,9 +183,9 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
   }
 
   get availability(): ExecutorAvailability { return this.#availability; }
-  get bulkStatus(): BulkConnectionStatus { return this.#bulkStatus; }
+  get bulkStatus(): ExecutorBulkStatus { return this.#bulkStatus; }
 
-  onBulkChanged(listener: (status: BulkConnectionStatus) => void): () => void {
+  onBulkChanged(listener: (status: ExecutorBulkStatus) => void): () => void {
     this.#bulkListeners.add(listener);
     return () => { this.#bulkListeners.delete(listener); };
   }
@@ -345,8 +347,19 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
       }, this.#reconnectGraceMs);
       this.#bulkReconnectTimer.unref?.();
     }
-    this.#bulkStatus = status;
-    for (const listener of this.#bulkListeners) listener(status);
+    let availability: ExecutorBulkStatus['availability'];
+    if (status.phase === 'ready') {
+      this.#bulkActivated = true;
+      availability = 'ready';
+    } else if (status.phase === 'offline') availability = 'offline';
+    else availability = this.#bulkActivated ? 'reconnecting' : 'connecting';
+    let lastError = this.#bulkStatus.lastError;
+    if (availability === 'ready') lastError = null;
+    else if (status.error) lastError = { code: 'EXECUTOR_BULK_UNAVAILABLE', message: failureReason(status.error) };
+    const snapshot = { availability, lastError };
+    if (isDeepStrictEqual(snapshot, this.#bulkStatus)) return;
+    this.#bulkStatus = snapshot;
+    for (const listener of this.#bulkListeners) listener(snapshot);
   }
 
   #resolveWaiters(lane: RpcLane, backing: RemoteSessionBacking): void {

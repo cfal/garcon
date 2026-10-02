@@ -4,6 +4,23 @@ import { ExecutorsStore, executorStatus } from '../executors-store.svelte.ts';
 import { localExecutor, remoteExecutor } from './fixtures';
 
 describe('ExecutorsStore', () => {
+	it('keeps primary readiness, capabilities, and context keys stable across bulk-only loss', () => {
+		const executors = new ExecutorsStore();
+		const remote = { ...remoteExecutor, machineServices: localExecutor.machineServices };
+		executors.applySnapshot([localExecutor, remote]);
+		const gitContext = executors.gitContextKey(remote.id);
+		const pathContext = executors.pathContextKey(remote.id);
+		for (const availability of ['connecting', 'reconnecting', 'offline', 'ready'] as const) {
+			executors.applySnapshot([localExecutor, { ...remote, bulk: { availability, lastError: null } }]);
+			expect(executors.isReady(remote.id)).toBe(true);
+			expect(executors.filesAvailable(remote.id)).toBe(true);
+			expect(executors.gitAvailable(remote.id)).toBe(true);
+			expect(executors.gitContextKey(remote.id)).toBe(gitContext);
+			expect(executors.pathContextKey(remote.id)).toBe(pathContext);
+			expect(executors.get('local')?.bulk).toBeNull();
+		}
+	});
+
 	it('changes path context only for the affected executor, including missed disconnects', () => {
 		const executors = new ExecutorsStore();
 		executors.applySnapshot([localExecutor, remoteExecutor]);

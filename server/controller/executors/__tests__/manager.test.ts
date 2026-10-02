@@ -117,6 +117,14 @@ function waitReady(manager: ExecutorManager, id: string): Promise<void> {
   });
 }
 
+function waitBulkReady(manager: ExecutorManager, id: string): Promise<void> {
+  const ready = () => manager.list().find(executor => executor.id === id)?.bulk?.availability === 'ready';
+  if (ready()) return Promise.resolve();
+  return new Promise(resolve => {
+    const off = manager.onChanged(() => { if (ready()) { off(); resolve(); } });
+  });
+}
+
 function worker(secret: string, projectPath: string, configure: (fixture: ReturnType<typeof integrationFixture>) => void = () => {}) {
   const link = new WebSocketLink({ role: 'worker', secret, noTls: true, redialDelaysMs: [20] });
   cleanups.push(() => link.dispose());
@@ -509,6 +517,7 @@ test('logs failed connections alongside a ready executor without showing them as
   const ready = waitReady(manager, config.id);
   worker(config.secret, root).dial(url(config.id));
   await ready;
+  await waitBulkReady(manager, config.id);
   let changes = 0;
   manager.onChanged(() => { changes++; });
   await connectWithWrongKey(url(config.id));
@@ -517,6 +526,28 @@ test('logs failed connections alongside a ready executor without showing them as
   expect(warnings.filter(([message]) => message === 'Executor link failed')).toHaveLength(2);
   expect(manager.list().find((item) => item.id === config.id)).toMatchObject({ availability: 'ready', lastError: null });
   expect(changes).toBe(0);
+});
+
+test('bulk loss publishes a separate snapshot without changing executor availability', async () => {
+  const { manager, root } = await fixture();
+  const config = await manager.create({ label: 'Paired', direction: 'executor-connects' });
+  expect(manager.list()[0]?.bulk).toBeNull();
+  expect(manager.list()[1]?.bulk).toEqual({ availability: 'offline', lastError: null });
+  worker(config.secret, root).dial(sharedListener(manager).url(config.id));
+  await waitReady(manager, config.id);
+  await waitBulkReady(manager, config.id);
+  const availability = mock(() => {});
+  const changed = mock(() => {});
+  manager.onAvailabilityChanged(availability);
+  manager.onChanged(changed);
+  manager.inboundLink(config.id)!.bulk!.close(new Error('Synthetic bulk loss'));
+  expect(manager.isReady(config.id)).toBe(true);
+  expect(manager.list()[1]).toMatchObject({ availability: 'ready', lastError: null,
+    bulk: { availability: 'reconnecting', lastError: { code: 'EXECUTOR_BULK_UNAVAILABLE', message: 'Synthetic bulk loss' } } });
+  expect(availability).not.toHaveBeenCalled();
+  expect(changed).toHaveBeenCalledTimes(1);
+  await manager.update(config.id, { enabled: false });
+  expect(manager.list()[1]?.bulk).toEqual({ availability: 'offline', lastError: null });
 });
 
 test('keeps a connection failure off an executor whose disruptive update fails to persist', async () => {

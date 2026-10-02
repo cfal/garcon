@@ -77,10 +77,11 @@ export async function runExecutorCommand(
           entry.id,
           terminalLine(entry.label),
           entry.enabled ? entry.availability : 'disabled',
+          entry.bulk?.availability ?? '-',
           String(entry.allowControllerCli),
           String(entry.allowExecutorManagement),
         ]);
-        writeResult({ executors }, formatTextTable(['ID', 'LABEL', 'STATUS', 'CLI', 'MANAGEMENT'], rows));
+        writeResult({ executors }, formatTextTable(['ID', 'LABEL', 'STATUS', 'BULK', 'CLI', 'MANAGEMENT'], rows));
         return;
       }
       case 'show':

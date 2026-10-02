@@ -33,6 +33,11 @@ export function parseExecutorId(value: unknown): ExecutorId | null {
 
 export type ExecutorSnapshotAvailability = 'ready' | 'reconnecting' | 'offline';
 
+export interface ExecutorBulkStatus {
+  readonly availability: 'connecting' | 'ready' | 'reconnecting' | 'offline';
+  readonly lastError: { readonly code: string; readonly message: string } | null;
+}
+
 export interface ExecutorSnapshot {
   readonly id: string;
   readonly label: string;
@@ -42,6 +47,7 @@ export interface ExecutorSnapshot {
   readonly allowExecutorManagement: boolean;
   readonly direction: ExecutorDirection | null;
   readonly availability: ExecutorSnapshotAvailability;
+  readonly bulk: ExecutorBulkStatus | null;
   readonly instanceId: string | null;
   readonly projectBasePath: string | null;
   readonly lastError: { readonly code: string; readonly message: string } | null;
@@ -142,7 +148,7 @@ export function parseUpdateExecutorRequest(value: unknown): UpdateExecutorReques
 }
 
 export function parseExecutorSnapshot(value: unknown): ExecutorSnapshot | null {
-  if (!isRecord(value) || !hasOnlyKeys(value, ['id', 'label', 'kind', 'enabled', 'direction', 'availability', 'instanceId', 'projectBasePath', 'lastError', 'machineServices', 'allowControllerCli', 'allowExecutorManagement'])
+  if (!isRecord(value) || !hasOnlyKeys(value, ['id', 'label', 'kind', 'enabled', 'direction', 'availability', 'bulk', 'instanceId', 'projectBasePath', 'lastError', 'machineServices', 'allowControllerCli', 'allowExecutorManagement'])
     || typeof value.allowExecutorManagement !== 'boolean'
     || typeof value.allowControllerCli !== 'boolean'
     || !isExecutorId(value.id) || !isLabel(value.label) || typeof value.enabled !== 'boolean'
@@ -155,10 +161,22 @@ export function parseExecutorSnapshot(value: unknown): ExecutorSnapshot | null {
   const services = value.machineServices;
   if (!isRecord(services) || !hasOnlyKeys(services, ['files', 'git', 'gh', 'terminals'])
     || typeof services.files !== 'boolean' || typeof services.git !== 'boolean' || typeof services.gh !== 'boolean' || typeof services.terminals !== 'boolean') return null;
-  const error = value.lastError;
-  if (error !== null && (!isRecord(error) || !hasOnlyKeys(error, ['code', 'message'])
-    || typeof error.code !== 'string' || typeof error.message !== 'string')) return null;
+  if (!isExecutorError(value.lastError)) return null;
+  if (value.kind === 'local') {
+    if (value.bulk !== null) return null;
+  } else {
+    const bulk = value.bulk;
+    if (!isRecord(bulk) || !hasOnlyKeys(bulk, ['availability', 'lastError'])
+      || (bulk.availability !== 'connecting' && bulk.availability !== 'ready'
+        && bulk.availability !== 'reconnecting' && bulk.availability !== 'offline')
+      || !isExecutorError(bulk.lastError)) return null;
+  }
   return value as unknown as ExecutorSnapshot;
+}
+
+function isExecutorError(value: unknown): boolean {
+  return value === null || isRecord(value) && hasOnlyKeys(value, ['code', 'message'])
+    && typeof value.code === 'string' && typeof value.message === 'string';
 }
 
 export function parseExecutors(value: unknown): readonly ExecutorSnapshot[] | null {

@@ -74,6 +74,7 @@ test('public snapshots exclude credentials and preserve unavailable remote targe
   const remote = {
     id: remoteId, label: 'Worker', enabled: true, kind: 'remote', direction: 'executor-connects',
     availability: 'offline', instanceId: null, projectBasePath: null, lastError: null,
+    bulk: { availability: 'offline', lastError: null },
     machineServices: { files: false, git: false, gh: false, terminals: false },
     allowControllerCli: false, allowExecutorManagement: false,
   };
@@ -95,4 +96,18 @@ test('public snapshots exclude credentials and preserve unavailable remote targe
   }
   expect(parseExecutors([remote, remote])).toBeNull();
   expect(parseExecutors([{ ...remote, id: 'local' }])).toBeNull();
+  for (const availability of ['connecting', 'ready', 'reconnecting', 'offline']) {
+    const partial = { ...ready, bulk: { availability, lastError: { code: 'EXECUTOR_BULK_UNAVAILABLE', message: 'Synthetic failure' } } };
+    expect(parseExecutors([partial])).toEqual([partial]);
+    const message = new ExecutorsChangedMessage([partial]);
+    expect(parseServerWsMessage(JSON.parse(JSON.stringify(message)))).toEqual(message);
+  }
+  for (const bulk of [null, undefined, {}, { availability: 'waiting', lastError: null },
+    { availability: 'ready', lastError: { code: 1, message: 'Invalid' } },
+    { availability: 'ready', lastError: null, secret: 'hidden' }]) {
+    expect(parseExecutors([{ ...remote, bulk }])).toBeNull();
+  }
+  const local = { ...ready, id: 'local', kind: 'local', direction: null, bulk: null };
+  expect(parseExecutors([local])).toEqual([local]);
+  expect(parseExecutors([{ ...local, bulk: ready.bulk }])).toBeNull();
 });
