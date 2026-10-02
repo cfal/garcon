@@ -1,3 +1,4 @@
+import type { GitRouteService } from './git-executor-service.js';
 import type {
   GitCommandTrace,
   GitReviewRouteMetrics,
@@ -6,6 +7,15 @@ import type {
 } from '../../runtime/git/types.js';
 import { measureGitReviewPhase } from '../../runtime/git/review-performance.js';
 import { createLogger } from '../../common/log.js';
+
+export async function gitJson(git: GitRouteService, action: () => unknown): Promise<Response> {
+  try {
+    const result = await action();
+    return result instanceof Response ? result : Response.json(result);
+  } catch (error) {
+    return git.toHttpError(error);
+  }
+}
 
 const logger = createLogger('routes:git');
 

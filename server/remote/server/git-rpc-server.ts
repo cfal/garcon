@@ -7,6 +7,12 @@ import { GitServiceError } from '../../../common/git-error.js';
 import { isRecord } from '../../../common/json.js';
 import type { GitRpcRequest } from '../transport/git-protocol.js';
 
+const GH_REQUEST_FIELDS = {
+  'gh.getStatus': [],
+  'gh.listPullRequests': ['projectPath'],
+  'gh.getPullRequest': ['projectPath', 'number'],
+};
+
 export class GitRpcServer {
   constructor(private readonly executor: ExecutionRuntimeApi) {}
 
@@ -20,12 +26,16 @@ export class GitRpcServer {
     switch (call.method) {
       case 'gh.getStatus': case 'gh.listPullRequests': case 'gh.getPullRequest': {
         const gh = await this.executor.getGhService(options);
-        const expected = call.method === 'gh.getStatus' ? [] : call.method === 'gh.listPullRequests' ? ['projectPath'] : ['projectPath', 'number'];
+        const expected: readonly string[] = GH_REQUEST_FIELDS[call.method];
         if (Object.keys(input).some(k => !expected.includes(k))) throw new GitServiceError('GIT_INVALID_INPUT', 'Invalid GitHub request');
-        const result = call.method === 'gh.getStatus' ? await gh.getStatus(options)
-          : call.method === 'gh.listPullRequests' ? await gh.listPullRequests(call.request.input, options)
-          : await gh.getPullRequest(call.request.input, options);
-        return result;
+        switch (call.method) {
+          case 'gh.getStatus':
+            return await gh.getStatus(options);
+          case 'gh.listPullRequests':
+            return await gh.listPullRequests(call.request.input, options);
+          case 'gh.getPullRequest':
+            return await gh.getPullRequest(call.request.input, options);
+        }
       }
     }
     const method = call.method.slice(4);
