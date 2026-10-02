@@ -252,7 +252,7 @@ CLI tag replacement uses `GET chats/tags` for durability recovery and
 `PUT chats/tags` for an atomic desired-state write. Browser optimistic PATCH is
 not forwarded. Title writes are bounded to 4 KiB UTF-8 at the common parser and
 persistence boundary; legacy oversized values remain readable but can still
-exceed reply bounds until renamed. Protocol revision 11 requires matched
+exceed reply bounds until renamed. Protocol revision 12 requires matched
 controller and worker builds for these forwarded-contract changes.
 
 Ticket project inference is implemented on the selected executor at current HEAD. Send the context default executor with the CLI directory and reuse that resolver. Do not expand commands merely because their browser APIs exist.

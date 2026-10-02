@@ -700,7 +700,7 @@ automatically. Structured validation and pre-dispatch rejections remain definiti
 The CLI reconciles any earlier uncertain tag save with `GET chats/tags`, then
 uses the atomic desired-set `PUT chats/tags`. Browser `PATCH chats/tags` retains
 its compare-and-set baseline. Upgrade controller and workers together for this
-forwarded API change (executor protocol revision 11).
+forwarded API change (executor protocol revision 12).
 
 ## Export
 
