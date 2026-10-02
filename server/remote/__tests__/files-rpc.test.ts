@@ -3,8 +3,7 @@ import * as fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { ExecutionRuntime } from '../../runtime/execution-runtime.js';
-import { connectRemoteExecutor } from './runtime-adapter.js';
-import { ExecutorRpc } from '../transport/rpc.js';
+import { connectRemoteExecutor, servePairedRuntime } from './runtime-adapter.js';
 import { serveExecutionRuntime } from '../server/executor-rpc-server.js';
 import { ProducerRelay } from '../server/producer-relay.js';
 import { WebSocketLink } from '../transport/websocket-link.js';
@@ -27,7 +26,7 @@ test.each([MAX_FILE_REVISION_LENGTH + 1, 17 * 1024 * 1024])('rejects a %d-charac
     backingCalls++;
     throw new Error('Save must not access the RPC session');
   };
-  const files = new RemoteFilesService({ latest: untouched, acquire: untouched, call: untouched } satisfies RemoteSessions);
+  const files = new RemoteFilesService({ latest: untouched, acquire: untouched, send: untouched, call: untouched } satisfies RemoteSessions);
   for (const conflictResolution of ['reject', 'overwrite'] as const) {
     await expect(files.save({
       projectPath: '/project', filePath: 'file.txt', content: 'x',
@@ -47,7 +46,7 @@ for (const dialer of ['controller', 'worker'] as const) {
     const worker = new WebSocketLink({ ...linkOptions, role: 'worker' });
     let serving: ReturnType<typeof serveExecutionRuntime> | undefined;
     const relay = new ProducerRelay();
-    worker.onSession((transport) => { serving = serveExecutionRuntime(local, new ExecutorRpc(transport), relay); });
+    worker.onSession((transport) => { serving = servePairedRuntime(worker, transport, local, relay); });
     const connecting = connectRemoteExecutor(controller);
     if (dialer === 'controller') controller.dial(worker.listen());
     else worker.dial(controller.listen());
@@ -89,7 +88,7 @@ for (const phase of ['before dispatch', 'after commit'] as const) {
     const worker = new WebSocketLink({ ...linkOptions, role: 'worker' });
     let serving: ReturnType<typeof serveExecutionRuntime> | undefined;
     const relay = new ProducerRelay();
-    worker.onSession((transport) => { serving = serveExecutionRuntime(local, new ExecutorRpc(transport), relay); });
+    worker.onSession((transport) => { serving = servePairedRuntime(worker, transport, local, relay); });
     const connecting = connectRemoteExecutor(controller);
     controller.dial(worker.listen());
     const service = await local.getFilesService();

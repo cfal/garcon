@@ -5,6 +5,7 @@ import { validateGitRequest, validateGhRequest } from '../../../common/git-reque
 import { validateGitResult, validateGhResult } from '../../../common/git-result-validation.js';
 import { GitServiceError } from '../../../common/git-error.js';
 import type { RemoteSessions } from './executor-client.js';
+import { rpcLane } from '../transport/rpc-routing.js';
 
 export class RemoteGitServices {
   readonly git: ExecutionGitService;
@@ -71,7 +72,7 @@ export class RemoteGitServices {
     const mutation = isGitMutation(method);
     try {
       return await withDeadline(options, GIT_OPERATION_TIMEOUT_MS, async (callOptions) => {
-        const { backing, timeoutMs } = await this.sessions.acquire(callOptions);
+        const { backing, timeoutMs } = await this.sessions.acquire(rpcLane(`git.${method}`, request), callOptions);
         const budgetMs = timeoutMs ?? callOptions.timeoutMs;
         const result = await backing.rpc.call('', `git.${method}`, { input: request, budgetMs }, { ...callOptions, timeoutMs: budgetMs })
           .catch(error => { throw mutation ? error : readFailure(error, callOptions.signal); });
@@ -91,7 +92,7 @@ export class RemoteGitServices {
     validateGhRequest(method, request);
     if (!this.sessions.latest().info.services.gh) throw new AgentCallError('not-dispatched', 'GitHub CLI is unavailable on this executor', 'OPERATION_UNSUPPORTED');
     return withDeadline(options, method === 'getPullRequest' ? GH_DETAIL_TIMEOUT_MS : GIT_OPERATION_TIMEOUT_MS, async (callOptions) => {
-      const { backing, timeoutMs } = await this.sessions.acquire(callOptions);
+      const { backing, timeoutMs } = await this.sessions.acquire('bulk', callOptions);
       const budgetMs = timeoutMs ?? callOptions.timeoutMs;
       const rpcOptions = { ...callOptions, timeoutMs: budgetMs };
       let result: unknown;

@@ -131,6 +131,7 @@ export class RemoteAgentIntegration implements AgentIntegration {
       });
       try {
         return await sessions.send(
+          'primary',
           { signal: options?.signal, timeoutMs: options?.timeoutMs ?? null, dispatchDeadline: options?.dispatchDeadline },
           ({ backing, timeoutMs }) => send(backing, timeoutMs),
         );
@@ -164,7 +165,7 @@ export class RemoteAgentIntegration implements AgentIntegration {
       detach: (binding) => { this.#forgetBinding(binding.id); },
       get scope() { return sessions.latest().manifests.get(manifest.descriptor.id)!.scope; },
       bind: async (request, options) => {
-        const { backing, timeoutMs } = await sessions.acquire(options);
+        const { backing, timeoutMs } = await sessions.acquire('primary', options);
         if (!isAgentResourceRef(request.binding, 'producer', backing.manifests.get(this.descriptor.id)!.scope)) throw new AgentCallError('rejected', 'Producer scope mismatch', 'STALE_RESOURCE');
         const state: RemoteProducerBinding = {
           ref: request.binding, backing, receivedSeq: 0, acknowledgedSeq: 0, unsettledLaunches: new Map(), resumeReport: null,
@@ -186,7 +187,7 @@ export class RemoteAgentIntegration implements AgentIntegration {
         // the same instance closes this one without resuming it.
         const closing = { ...options, timeoutMs: options?.timeoutMs ?? null, instanceId: holder?.info.instanceId };
         if (holder?.rpc.transport.connected) return holder.rpc.call(this.descriptor.id, 'producers.close', binding, closing);
-        await sessions.send(closing, ({ backing, timeoutMs }) => (
+        await sessions.send('primary', closing, ({ backing, timeoutMs }) => (
           backing.rpc.call(this.descriptor.id, 'producers.close', binding, { ...closing, timeoutMs })
         ));
       },
@@ -233,7 +234,7 @@ export class RemoteAgentIntegration implements AgentIntegration {
     this.compaction = cap.compaction ? { compact: (request, options) => launch('compaction.compact', request, options) } : null;
     this.forking = cap.forking ? {
       fork: async ({ signal, ...request }) => {
-        const { backing: { rpc }, timeoutMs } = await sessions.acquire({ signal });
+        const { backing: { rpc }, timeoutMs } = await sessions.acquire('primary', { signal });
         return rpc.call(this.descriptor.id, 'forking.fork', request, {
           signal,
           timeoutMs,
@@ -263,7 +264,7 @@ export class RemoteAgentIntegration implements AgentIntegration {
     const history = (source: 'legacyHistoryImport' | 'nativeHistoryImport'): AgentHistoryImport => ({
       async *load({ signal, ...request }) {
         // A reader belongs to the session that opened it.
-        const { backing: { rpc }, timeoutMs } = await sessions.acquire({ signal });
+        const { backing: { rpc }, timeoutMs } = await sessions.acquire('bulk', { signal });
         const close = (ref: ExecutorRpcMethods['history.open']['result']) =>
           rpc.call(manifest.descriptor.id, 'history.close', ref, { timeoutMs: 2000 });
         const ref = await rpc.call(manifest.descriptor.id, 'history.open', { source, request }, { signal, timeoutMs, onLateResult: close });
@@ -303,7 +304,7 @@ export class RemoteAgentIntegration implements AgentIntegration {
     } : null;
     this.projectPathUpdates = cap.projectPathUpdates ? {
       prepare: async (request, options) => {
-        const { backing: { rpc }, timeoutMs } = await sessions.acquire(options);
+        const { backing: { rpc }, timeoutMs } = await sessions.acquire('primary', options);
         return rpc.call(this.descriptor.id, 'projectPathUpdates.prepare', request, {
           ...options,
           timeoutMs,

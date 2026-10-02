@@ -6,6 +6,8 @@ import { join } from 'node:path';
 import { ExecutorManager } from '../manager.js';
 import { WebSocketLink, EXECUTOR_NOISE_CONTEXT } from '../../../remote/transport/websocket-link.js';
 import { ExecutorRpc, type GuardRpcReply } from '../../../remote/transport/rpc.js';
+import type { ExecutorRpcConnection } from '../../../remote/transport/rpc-connection.js';
+import { servePairedRuntime } from '../../../remote/__tests__/runtime-adapter.js';
 import { serveExecutionRuntime } from '../../../remote/server/executor-rpc-server.js';
 import { ProducerRelay } from '../../../remote/server/producer-relay.js';
 import { integrationFixture } from '../../../remote/__tests__/integration-fixture.js';
@@ -45,8 +47,8 @@ test.each(['executor-connects', 'controller-connects'] as const)(
     cleanups.push(() => link.dispose());
     const connected = Promise.withResolvers<ExecutorRpc>();
     link.onSession(transport => {
-      const rpc = new ExecutorRpc(transport);
-      const serving = serveExecutionRuntime(integrationFixture(root, transport.executorId).executor, rpc, new ProducerRelay());
+      const serving = servePairedRuntime(link, transport, integrationFixture(root, transport.executorId).executor, new ProducerRelay());
+      const rpc = serving.connection.primary;
       cleanups.push(() => serving.dispose());
       connected.resolve(rpc);
     });
@@ -121,7 +123,7 @@ function worker(secret: string, projectPath: string, configure: (fixture: Return
   link.onSession((transport) => {
     const provider = integrationFixture(projectPath, transport.executorId);
     configure(provider);
-    const serving = serveExecutionRuntime(provider.executor, new ExecutorRpc(transport), new ProducerRelay());
+    const serving = servePairedRuntime(link, transport, provider.executor, new ProducerRelay());
     cleanups.push(() => serving.dispose());
   });
   return link;
@@ -133,15 +135,15 @@ test('reverse CLI dispatch checks initialization, executor grant, revocation lea
   const { url } = sharedListener(manager);
   const link = new WebSocketLink({ role: 'worker', secret: config.secret, noTls: true });
   cleanups.push(() => link.dispose());
-  const connected = Promise.withResolvers<ExecutorRpc>();
+  const connected = Promise.withResolvers<ExecutorRpcConnection>();
   link.onSession((transport) => {
-    const rpc = new ExecutorRpc(transport);
-    const serving = serveExecutionRuntime(integrationFixture(root, transport.executorId).executor, rpc, new ProducerRelay());
+    const serving = servePairedRuntime(link, transport, integrationFixture(root, transport.executorId).executor, new ProducerRelay());
     cleanups.push(() => serving.dispose());
-    connected.resolve(rpc);
+    connected.resolve(serving.connection);
   });
   link.dial(url(config.id));
-  const rpc = await connected.promise;
+  const connection = await connected.promise;
+  const rpc = connection.primary;
   await waitReady(manager, config.id);
   await expect(rpc.call('', 'controllerCli.describe', null)).rejects.toMatchObject({ code: 'CLI_ACCESS_DENIED' });
   await manager.update(config.id, { allowControllerCli: true });
@@ -155,9 +157,10 @@ test('reverse CLI dispatch checks initialization, executor grant, revocation lea
     } } } }));
   const request = { expectedServerInstanceId: 'controller', http: { operation: 'POST /api/v1/chats/run' as const, query: [], body: {} } };
   try {
+    const bulk = await connection.bulk.wait();
     expect(await rpc.call('', 'controllerCli.describe', null)).toMatchObject({ defaultExecutorId: config.id });
-    await expect(rpc.call('forged-provider', 'controllerCli.request', request)).rejects.toMatchObject({ code: 'CLI_ACCESS_DENIED' });
-    const pending = rpc.call('', 'controllerCli.request', request);
+    await expect(bulk.call('forged-provider', 'controllerCli.request', request)).rejects.toMatchObject({ code: 'CLI_ACCESS_DENIED' });
+    const pending = bulk.call('', 'controllerCli.request', request);
     const result = Promise.allSettled([pending]);
     await entered.promise;
     await manager.update(config.id, { allowControllerCli: false });
@@ -178,15 +181,15 @@ test.each(['context', 'read', 'mutation'] as const)('quiescence after handler se
   const { url } = sharedListener(manager);
   const link = new WebSocketLink({ role: 'worker', secret: config.secret, noTls: true });
   cleanups.push(() => link.dispose());
-  const connected = Promise.withResolvers<ExecutorRpc>();
+  const connected = Promise.withResolvers<ExecutorRpcConnection>();
   link.onSession((transport) => {
-    const rpc = new ExecutorRpc(transport);
-    const serving = serveExecutionRuntime(integrationFixture(root, transport.executorId).executor, rpc, new ProducerRelay());
+    const serving = servePairedRuntime(link, transport, integrationFixture(root, transport.executorId).executor, new ProducerRelay());
     cleanups.push(() => serving.dispose());
-    connected.resolve(rpc);
+    connected.resolve(serving.connection);
   });
   link.dial(url(config.id));
-  const rpc = await connected.promise;
+  const connection = await connected.promise;
+  const rpc = operation === 'context' ? connection.primary : await connection.bulk.wait();
   await waitReady(manager, config.id);
   class QuiescingDispatcher extends ControllerCliDispatcher {
     override describe(access: CliDispatchAccess, guardReply: GuardRpcReply) {
@@ -341,7 +344,7 @@ test('a reconnecting executor holds calls instead of reporting itself unavailabl
   link.onSession((transport) => {
     // One worker process keeps its instance across sessions.
     provider ??= integrationFixture(root, transport.executorId);
-    const serving = serveExecutionRuntime(provider.executor, new ExecutorRpc(transport), relay);
+    const serving = servePairedRuntime(link, transport, provider.executor, relay);
     cleanups.push(() => serving.dispose());
   });
   link.dial(url(config.id));

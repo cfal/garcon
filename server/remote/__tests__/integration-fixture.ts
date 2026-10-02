@@ -13,9 +13,8 @@ import { createVersionedSettings } from '@garcon/server-agent-common/settings/ve
 import { createVersion1RecordMigration } from '@garcon/server-agent-common/migration/version-1-record-migration';
 import { createAgentProducerAdapter } from '@garcon/server-agent-common/execution/producer-adapter';
 import type { AgentRuntimeExecution, AgentRuntimePublisher, AgentRuntimeStartRequest } from '@garcon/server-agent-common/execution/runtime-events';
-import { ExecutorRpc } from '../transport/rpc.js';
 import type { SessionSocket } from '../transport/message-session.js';
-import { connectRemoteExecutor } from './runtime-adapter.js';
+import { connectRemoteExecutor, servePairedRuntime } from './runtime-adapter.js';
 import { WebSocketLink } from '../transport/websocket-link.js';
 import { serveExecutionRuntime } from '../server/executor-rpc-server.js';
 import { ProducerRelay, type ProducerRelayOptions } from '../server/producer-relay.js';
@@ -116,7 +115,7 @@ export async function remoteFixture(
   const journal = new RpcReplyJournal();
   configure(controller, worker, fixture);
   worker.onSession((session) => {
-    scopes.push(serveExecutionRuntime(fixture.executor, new ExecutorRpc(session, { journal }), relay));
+    scopes.push(servePairedRuntime(worker, session, fixture.executor, relay, journal));
   });
   const connected = connectRemoteExecutor(controller, undefined, resumption.client);
   if (dialer === 'controller') controller.dial(worker.listen());

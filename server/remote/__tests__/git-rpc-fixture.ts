@@ -2,8 +2,7 @@ import * as fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { ExecutionRuntime } from '../../runtime/execution-runtime.js';
-import { connectRemoteExecutor } from './runtime-adapter.js';
-import { ExecutorRpc } from '../transport/rpc.js';
+import { connectRemoteExecutor, servePairedRuntime } from './runtime-adapter.js';
 import { serveExecutionRuntime } from '../server/executor-rpc-server.js';
 import { ProducerRelay } from '../server/producer-relay.js';
 import { WebSocketLink } from '../transport/websocket-link.js';
@@ -27,7 +26,7 @@ export async function gitRpcFixture(dialer: 'controller' | 'worker' = 'controlle
   const worker = new WebSocketLink({ ...linkOptions, role: 'worker' });
   let serving: ReturnType<typeof serveExecutionRuntime> | undefined;
   const relay = new ProducerRelay();
-  worker.onSession(transport => { serving = serveExecutionRuntime(local, new ExecutorRpc(transport), relay); });
+  worker.onSession(transport => { serving = servePairedRuntime(worker, transport, local, relay); });
   const connecting = connectRemoteExecutor(controller);
   if (dialer === 'controller') controller.dial(worker.listen());
   else worker.dial(controller.listen());

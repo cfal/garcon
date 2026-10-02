@@ -2,6 +2,8 @@ import { AgentCallError } from '@garcon/server-agent-interface';
 import { mkdir, rm } from 'node:fs/promises';
 import { defaultAgentIntegrations } from '../runtime/agents/default-agent-integrations.js';
 import { ExecutorRpc } from './transport/rpc.js';
+import { ExecutorRpcConnection } from './transport/rpc-connection.js';
+import { RpcAdmissionBudgets } from './transport/rpc-admission.js';
 import { RpcReplyJournal } from './transport/rpc-journal.js';
 import { serveExecutionRuntime } from './server/executor-rpc-server.js';
 import { ProducerRelay } from './server/producer-relay.js';
@@ -57,6 +59,7 @@ async function serveExecutorWorker(options: ExecutorWorkerOptions, dataDir: stri
   let runtime: ExecutionRuntime | null = null;
   const relay = new ProducerRelay();
   const journal = new RpcReplyJournal();
+  const admission = new RpcAdmissionBudgets();
   // A stalled worker stops answering pings, and the controller retires its link after 15 s.
   const stopStallMonitor = monitorEventLoopStalls(({ stallMs, activities, heapUsedMb }) => {
     console.warn(JSON.stringify({ type: 'executor-event-loop-stalled', stallMs, heapUsedMb, activities }));
@@ -109,7 +112,8 @@ async function serveExecutorWorker(options: ExecutorWorkerOptions, dataDir: stri
         return;
       }
       // Replies outlive sessions only for the controller of the executor this worker serves.
-      const rpc = new ExecutorRpc(transport, { journal });
+      const connection = new ExecutorRpcConnection(link, transport, { journal, admission });
+      const rpc = connection.primary;
       currentRpc = rpc;
       transport.onFailure(() => { if (currentRpc === rpc) currentRpc = null; });
       runtime ??= new ExecutionRuntime({
@@ -122,6 +126,8 @@ async function serveExecutorWorker(options: ExecutorWorkerOptions, dataDir: stri
         },
       });
       serving = serveExecutionRuntime(runtime, rpc, relay);
+      const scope = serving;
+      connection.onEndpoint((endpoint) => { if (endpoint !== rpc) scope.attachBulk(endpoint); });
       transport.onAvailability((connected) => {
         if (!connected) return;
         console.log(JSON.stringify({ type: 'executor-connected', executorId: transport.executorId, runtimeId: link.runtimeId }));

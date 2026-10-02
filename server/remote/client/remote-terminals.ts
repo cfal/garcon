@@ -20,7 +20,7 @@ export class RemoteTerminalService implements ExecutionTerminalService {
   constructor(private readonly sessions: RemoteSessions) {}
 
   async list(authority: TerminalAuthority, options?: ExecutorCallOptions) {
-    const { backing, timeoutMs } = await this.sessions.acquire(options);
+    const { backing, timeoutMs } = await this.sessions.acquire('primary', options);
     const response = parseTerminalListResponse(await backing.rpc.call('', 'terminals.list', { authority }, { ...options, timeoutMs }));
     if (!response?.terminalRuntimeId || !response.attachmentEpoch || response.terminals.some(terminal => {
       const ref = parseTerminalReference(terminal.terminalId);
@@ -29,7 +29,7 @@ export class RemoteTerminalService implements ExecutionTerminalService {
     return response;
   }
   async create(authority: TerminalAuthority, request: TerminalCreateRequest, options?: ExecutorCallOptions) {
-    const { backing, timeoutMs } = await this.sessions.acquire(options);
+    const { backing, timeoutMs } = await this.sessions.acquire('primary', options);
     const result = parseTerminalCreateResponse(await backing.rpc.call('', 'terminals.create', { ...request, authority }, { ...options, timeoutMs }));
     const ref = result && parseTerminalReference(result.terminal.terminalId);
     if (!result || !ref || ref.terminalRuntimeId !== request.expectedTerminalRuntimeId || ref.executorId !== backing.info.executorId) throw new TerminalError('terminal-outcome-unknown', 'Invalid terminal create response. Refresh the terminal list.', 502);
@@ -53,7 +53,7 @@ export class RemoteTerminalService implements ExecutionTerminalService {
     // Registered before any wait so that a peer detaching meanwhile is never attached.
     this.#attachments.set(attachmentId, attachment);
     try {
-      const { backing, timeoutMs } = await this.sessions.acquire();
+      const { backing, timeoutMs } = await this.sessions.acquire('primary');
       if (this.#attachments.get(attachmentId) !== attachment) return;
       attachment.rpc = backing.rpc;
       await backing.rpc.call('', 'terminals.attach', { ...request, authority, attachmentId }, { timeoutMs });

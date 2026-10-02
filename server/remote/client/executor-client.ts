@@ -14,7 +14,12 @@ import type { ExecutorRpcMethods, IntegrationManifest } from '../transport/rpc-p
 import type { SessionTransport } from '../transport/session-transport.js';
 import type { WebSocketLink } from '../transport/websocket-link.js';
 import { failureReason } from '../transport/failure-reason.js';
-import { EXECUTOR_RECONNECT_GRACE_MS } from '../transport/limits.js';
+import { BULK_ACQUIRE_TIMEOUT_MS, EXECUTOR_RECONNECT_GRACE_MS } from '../transport/limits.js';
+import { ExecutorRpcConnection } from '../transport/rpc-connection.js';
+import { RpcAdmissionBudgets } from '../transport/rpc-admission.js';
+import { rpcLane } from '../transport/rpc-routing.js';
+import type { RpcLane } from '../transport/rpc-lane.js';
+import type { BulkConnectionStatus } from '../transport/bulk-connection.js';
 import { createLogger, type Logger } from '../../common/log.js';
 import { ExecutorSessionLostError, reconnectTimedOut } from '../../common/executor-disconnect.js';
 import { unavailableService } from '../../common/unavailable-service.js';
@@ -61,11 +66,11 @@ export interface RemoteSessions {
   // The last installed session. A reconnect to the same worker keeps its
   // identity, capabilities, and manifests.
   latest(): RemoteSessionBacking;
-  acquire(options?: HeldCallOptions): Promise<HeldSession>;
+  acquire(lane: RpcLane, options?: HeldCallOptions): Promise<HeldSession>;
   // Sends through a held session. A send that provably never left, because its
   // session retired first, is repeated on the next session of the same worker
   // within the caller's deadline.
-  send<T>(options: HeldCallOptions | undefined, send: (session: HeldSession) => Promise<T>): Promise<T>;
+  send<T>(lane: RpcLane, options: HeldCallOptions | undefined, send: (session: HeldSession) => Promise<T>): Promise<T>;
   call<K extends keyof ExecutorRpcMethods>(
     integrationId: string, method: K, request: ExecutorRpcMethods[K]['request'],
     options?: RpcCallOptions<ExecutorRpcMethods[K]['result']> & Pick<HeldCallOptions, 'dispatchDeadline' | 'instanceId'>,
@@ -73,6 +78,7 @@ export interface RemoteSessions {
 }
 
 interface SessionWaiter {
+  readonly lane: RpcLane;
   resolve(backing: RemoteSessionBacking): void;
   reject(error: Error): void;
 }
@@ -97,20 +103,26 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
   readonly #unsubscribe: () => void;
   #availability: ExecutorAvailability = 'offline';
   #current: RemoteSessionBacking | null = null;
+  #bulkCurrent: RemoteSessionBacking | null = null;
+  #connection: ExecutorRpcConnection | null = null;
+  #bulkStatus: BulkConnectionStatus = { phase: 'offline', error: null, sessionId: null, retries: 0 };
+  readonly #bulkListeners = new Set<(status: BulkConnectionStatus) => void>();
   #latest: RemoteSessionBacking | null = null;
   #candidate: SessionTransport | null = null;
   #initialized = false;
   #instanceId: string | null = null;
   #reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   readonly #waiters = new Set<SessionWaiter>();
-  readonly #parked = new ParkedRpcCalls();
+  readonly #parked = { primary: new ParkedRpcCalls(), bulk: new ParkedRpcCalls() };
+  readonly #admission = new RpcAdmissionBudgets();
+  #bulkReconnectTimer: ReturnType<typeof setTimeout> | null = null;
   readonly #reconnectGraceMs: number;
   readonly #log: Logger;
   readonly #sessions: RemoteSessions = {
     latest: () => this.#latestSession(),
-    acquire: (options) => this.#acquire(options),
-    send: (options, send) => this.#send(options, send),
-    call: (integrationId, method, request, options) => this.#send(options, ({ backing, timeoutMs }) => (
+    acquire: (lane, options) => this.#acquire(lane, options),
+    send: (lane, options, send) => this.#send(lane, options, send),
+    call: (integrationId, method, request, options) => this.#send(rpcLane(method, request), options, ({ backing, timeoutMs }) => (
       backing.rpc.call(integrationId, method, request, { ...options, timeoutMs })
     )),
   };
@@ -135,14 +147,20 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
     this.#log = options.logger ?? createLogger('executors');
     this.#unsubscribe = link.onSession((transport) => {
       this.#candidate = transport;
-      const rpc = new ExecutorRpc(transport, { parked: this.#parked });
+      const connection = new ExecutorRpcConnection(link, transport, { parked: this.#parked, admission: this.#admission });
+      this.#connection = connection;
+      const rpc = connection.primary;
       rpc.onTerminal((frame) => this.#terminals.receive(frame, rpc));
-      setupRpc(rpc);
+      connection.onEndpoint(setupRpc);
+      connection.onBulkChanged((status) => {
+        if (this.#connection === connection) this.#changeBulk(status);
+      });
       transport.onFailure(() => {
         rpc.retireUnknown();
         if (this.#availability === 'disposed' || this.#candidate !== transport) return;
         this.#terminals.disconnect();
         this.#current = null;
+        this.#bulkCurrent = null;
         // A candidate that fails while already reconnecting keeps the original deadline.
         if (this.#availability === 'ready') this.#beginReconnecting();
       });
@@ -163,6 +181,12 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
   }
 
   get availability(): ExecutorAvailability { return this.#availability; }
+  get bulkStatus(): BulkConnectionStatus { return this.#bulkStatus; }
+
+  onBulkChanged(listener: (status: BulkConnectionStatus) => void): () => void {
+    this.#bulkListeners.add(listener);
+    return () => { this.#bulkListeners.delete(listener); };
+  }
 
   get inventory(): RemoteExecutorInventory | null {
     return !this.#initialized ? null : {
@@ -226,10 +250,14 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
     this.#unsubscribe();
     this.#terminals.disconnect();
     this.#current = null;
-    this.#parked.close();
+    this.#bulkCurrent = null;
+    this.#clearBulkReconnectTimer();
+    this.#parked.primary.close();
+    this.#parked.bulk.close();
     for (const integration of this.#integrations.values()) integration.retire();
     await this.link.dispose();
     this.#listeners.clear();
+    this.#bulkListeners.clear();
   }
 
   async #install(transport: SessionTransport, rpc: ExecutorRpc, setup: { stage: SessionSetupStage }): Promise<void> {
@@ -298,7 +326,36 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
     this.#current = backing;
     this.#latest = backing;
     this.#setAvailability('ready');
-    for (const waiter of [...this.#waiters]) waiter.resolve(backing);
+    this.#resolveWaiters('primary', backing);
+    this.#connection!.activate();
+  }
+
+  #changeBulk(status: BulkConnectionStatus): void {
+    const previous = this.#bulkCurrent;
+    this.#bulkCurrent = null;
+    if (status.phase === 'ready' && this.#current && this.#connection?.bulk.current) {
+      this.#bulkCurrent = { ...this.#current, rpc: this.#connection.bulk.current };
+      this.#clearBulkReconnectTimer();
+      this.#resolveWaiters('bulk', this.#bulkCurrent);
+    } else if (previous && !this.#bulkReconnectTimer && this.#availability !== 'disposed') {
+      this.#bulkReconnectTimer = setTimeout(() => {
+        this.#bulkReconnectTimer = null;
+        this.link.fenceBulk();
+        this.#parked.bulk.rejectAll();
+      }, this.#reconnectGraceMs);
+      this.#bulkReconnectTimer.unref?.();
+    }
+    this.#bulkStatus = status;
+    for (const listener of this.#bulkListeners) listener(status);
+  }
+
+  #resolveWaiters(lane: RpcLane, backing: RemoteSessionBacking): void {
+    for (const waiter of [...this.#waiters]) if (waiter.lane === lane) waiter.resolve(backing);
+  }
+
+  #clearBulkReconnectTimer(): void {
+    if (this.#bulkReconnectTimer) clearTimeout(this.#bulkReconnectTimer);
+    this.#bulkReconnectTimer = null;
   }
 
   #candidateRetired(transport: SessionTransport): boolean {
@@ -318,7 +375,9 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
   #abandonBindings(): void {
     this.#clearReconnectTimer();
     for (const integration of this.#integrations.values()) integration.retire();
-    this.#parked.rejectAll();
+    this.#parked.primary.rejectAll();
+    this.#parked.bulk.rejectAll();
+    this.#clearBulkReconnectTimer();
     this.#setAvailability('offline');
   }
 
@@ -338,34 +397,42 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
     return this.#availability === 'ready' || this.#availability === 'reconnecting';
   }
 
-  async #acquire(options: HeldCallOptions = {}): Promise<HeldSession> {
-    const session = await this.#holdSession(options);
+  async #acquire(lane: RpcLane, options: HeldCallOptions = {}): Promise<HeldSession> {
+    const session = await this.#holdSession(lane, options);
     if (options.instanceId !== undefined && session.backing.info.instanceId !== options.instanceId) {
       throw new AgentCallError('not-dispatched', 'The executor restarted before the request was sent.');
     }
     return session;
   }
 
-  async #holdSession(options: HeldCallOptions): Promise<HeldSession> {
+  async #holdSession(lane: RpcLane, options: HeldCallOptions): Promise<HeldSession> {
     const timeoutMs = options.timeoutMs === undefined ? DEFAULT_RPC_TIMEOUT_MS : options.timeoutMs;
-    if (this.#current?.rpc.transport.connected) return { backing: this.#current, timeoutMs };
-    if (!this.#latest || !this.#holdsCalls()) throw new AgentCallError('not-dispatched', `Executor is ${this.#availability}`);
     if (options.signal?.aborted) throw heldCallCancelled();
+    const current = lane === 'primary' ? this.#current : this.#bulkCurrent;
+    if (current?.rpc.active) return { backing: current, timeoutMs };
+    if (!this.#latest || !this.#holdsCalls()) throw new AgentCallError('not-dispatched', `Executor is ${this.#availability}`);
     const dispatchWaitMs = options.dispatchDeadline === undefined ? null : options.dispatchDeadline - performance.now();
     if (dispatchWaitMs !== null && dispatchWaitMs <= 0) throw reconnectTimedOut();
-    if (timeoutMs === null) return { backing: await this.#nextSession(options.signal, dispatchWaitMs), timeoutMs };
-    const reserved = Math.min(HELD_CALL_BUDGET_MS, Math.floor(timeoutMs / 2));
+    const reserved = timeoutMs === null ? 0 : Math.min(HELD_CALL_BUDGET_MS, Math.floor(timeoutMs / 2));
+    const waitMs = Math.min(timeoutMs === null ? Infinity : timeoutMs - reserved,
+      dispatchWaitMs ?? Infinity, lane === 'bulk' ? BULK_ACQUIRE_TIMEOUT_MS : Infinity);
     const started = performance.now();
-    const backing = await this.#nextSession(options.signal, Math.min(timeoutMs - reserved, dispatchWaitMs ?? Infinity));
-    return { backing, timeoutMs: Math.max(reserved, Math.ceil(timeoutMs - (performance.now() - started))) };
+    const release = this.#admission.outgoing.acquire(lane);
+    try {
+      const backing = await this.#nextSession(lane, options.signal, Number.isFinite(waitMs) ? waitMs : null);
+      return { backing, timeoutMs: timeoutMs === null ? null : Math.max(reserved, Math.ceil(timeoutMs - (performance.now() - started))) };
+    } finally { release(); }
   }
 
-  async #send<T>(options: HeldCallOptions = {}, send: (session: HeldSession) => Promise<T>): Promise<T> {
+  async #send<T>(lane: RpcLane, options: HeldCallOptions = {}, send: (session: HeldSession) => Promise<T>): Promise<T> {
     const timeoutMs = options.timeoutMs === undefined ? DEFAULT_RPC_TIMEOUT_MS : options.timeoutMs;
     const started = performance.now();
-    let held = options;
+    const dispatchDeadline = lane === 'bulk'
+      ? Math.min(options.dispatchDeadline ?? Infinity, started + BULK_ACQUIRE_TIMEOUT_MS)
+      : options.dispatchDeadline;
+    let held = { ...options, dispatchDeadline };
     for (let previous: RemoteSessionBacking | null = null; ;) {
-      const session = await this.#acquire(held);
+      const session = await this.#acquire(lane, held);
       try {
         return await send(session);
       } catch (error) {
@@ -373,12 +440,12 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
         const unsent = error instanceof ExecutorSessionLostError && error.outcome === 'not-dispatched';
         if (!unsent || session.backing === previous || (remaining !== null && remaining < 1)) throw error;
         previous = session.backing;
-        held = { ...options, timeoutMs: remaining, instanceId: session.backing.info.instanceId };
+        held = { ...options, dispatchDeadline, timeoutMs: remaining, instanceId: session.backing.info.instanceId };
       }
     }
   }
 
-  #nextSession(signal: AbortSignal | undefined, timeoutMs: number | null): Promise<RemoteSessionBacking> {
+  #nextSession(lane: RpcLane, signal: AbortSignal | undefined, timeoutMs: number | null): Promise<RemoteSessionBacking> {
     const next = Promise.withResolvers<RemoteSessionBacking>();
     const finish = () => {
       this.#waiters.delete(waiter);
@@ -386,6 +453,7 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
       signal?.removeEventListener('abort', cancel);
     };
     const waiter: SessionWaiter = {
+      lane,
       resolve: (backing) => { finish(); next.resolve(backing); },
       reject: (error) => { finish(); next.reject(error); },
     };

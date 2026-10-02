@@ -2,10 +2,9 @@ import { expect, test } from 'bun:test';
 import type { AgentSingleQueryRequest, ExecutorAvailability } from '@garcon/server-agent-interface';
 import type { RemoteExecutorClient } from '../../client/executor-client.js';
 import { integrationFixture, linkOptions, outgoingFault, remoteFixture, requestFor } from '../../__tests__/integration-fixture.js';
-import { connectRemoteExecutor } from '../../__tests__/runtime-adapter.js';
+import { connectRemoteExecutor, servePairedRuntime } from '../../__tests__/runtime-adapter.js';
 import { serveExecutionRuntime } from '../../server/executor-rpc-server.js';
 import { ProducerRelay } from '../../server/producer-relay.js';
-import { ExecutorRpc } from '../rpc.js';
 import { RpcReplyJournal } from '../rpc-journal.js';
 import { WebSocketLink } from '../websocket-link.js';
 
@@ -235,7 +234,7 @@ for (const dialer of ['controller', 'worker'] as const) {
     // Each worker process has its own instance, relay, and journal.
     const startWorker = (native: ReturnType<typeof integrationFixture>) => {
       const worker = { link: new WebSocketLink({ ...linkOptions, role: 'worker' }), relay: new ProducerRelay(), journal: new RpcReplyJournal() };
-      worker.link.onSession((session) => serving.push(serveExecutionRuntime(native.executor, new ExecutorRpc(session, { journal: worker.journal }), worker.relay)));
+      worker.link.onSession((session) => serving.push(servePairedRuntime(worker.link, session, native.executor, worker.relay, worker.journal)));
       workers.push(worker);
       return worker.link;
     };
@@ -279,4 +278,3 @@ for (const dialer of ['controller', 'worker'] as const) {
     }
   }, 30_000);
 }
-

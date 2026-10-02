@@ -28,12 +28,12 @@ function holdWrites(link: WebSocketLink) {
   return gates;
 }
 
-async function pair(dialer: 'controller' | 'worker', configure?: (controller: ReturnType<typeof holdWrites>) => void) {
+async function pair(dialer: 'controller' | 'worker', configure?: (controller: ReturnType<typeof holdWrites>, worker: WebSocketLink) => void) {
   const common = { executorId: 'test-executor', secret: Buffer.alloc(32, 42).toString('base64url'), noTls: true, redialDelaysMs: [60_000] };
   const controller = new WebSocketLink({ ...common, role: 'controller' });
   const worker = new WebSocketLink({ ...common, role: 'worker' });
   const gates = { controller: holdWrites(controller), worker: holdWrites(worker) };
-  configure?.(gates.controller);
+  configure?.(gates.controller, worker);
   const parked = { primary: new ParkedRpcCalls(), bulk: new ParkedRpcCalls() };
   const controllerAdmission = new RpcAdmissionBudgets();
   const workerAdmission = new RpcAdmissionBudgets();
@@ -175,6 +175,24 @@ test('parent loss fences attempts and rejects bulk waiters, including delayed ac
     expect(generation.bulk.current).toBeNull();
     expect(generation.status.phase).toBe('offline');
   } finally { await fixture.dispose(); }
+});
+
+test('a delayed socket-ready continuation cannot undo reconciliation or activation', async () => {
+  const release = Promise.withResolvers<void>();
+  const fixture = await pair('controller', (_gates, worker) => {
+    worker.onBulkSession((session) => {
+      Object.defineProperty(session, 'ready', { value: session.ready.then(() => release.promise) });
+    });
+  });
+  try {
+    fixture.start();
+    await fixture.ready();
+    release.resolve();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(fixture.connections.worker.status.phase).toBe('ready');
+    await expect(fixture.connections.controller.bulk.current!.call('', 'files.list', { projectPath: '/project' }))
+      .resolves.toEqual(['synthetic-file']);
+  } finally { release.resolve(); await fixture.dispose(); }
 });
 
 test('bulk wait cancellation and quiescence do not retire a live primary', async () => {

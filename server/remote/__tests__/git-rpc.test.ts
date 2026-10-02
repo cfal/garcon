@@ -121,7 +121,7 @@ test('lost mutation confirmation never replays a completed commit', async () => 
 
 test('invalid Git requests never acquire a remote session', async () => {
   const untouched = () => { throw new Error('Unexpected session access'); };
-  const services = new RemoteGitServices({ latest: untouched, acquire: untouched, call: untouched } satisfies RemoteSessions);
+  const services = new RemoteGitServices({ latest: untouched, acquire: untouched, send: untouched, call: untouched } satisfies RemoteSessions);
   await expect(services.git.stagePaths({ projectPath: '/repo', paths: ['x'.repeat(300_000)], mode: 'stage' }))
     .rejects.toMatchObject({ code: 'GIT_INVALID_INPUT' });
   await expect(services.gh.getPullRequest({ projectPath: '/repo', number: -1 }))

@@ -1,32 +1,21 @@
 import {
   AgentCallError,
-  type AgentHistoryImport,
   type AgentIntegration,
-  type AgentImportedTranscriptRow,
   type ExecutionRuntimeApi,
   type ExecutorInfo,
 } from '@garcon/server-agent-interface';
-import { AgentResourceTable } from '@garcon/server-agent-common/execution/resource-table';
 import { NULLABLE_AGENT_FACETS, rpcContinuity, type ExecutorRpcRequest, type IntegrationManifest } from '../transport/rpc-protocol.js';
 import type { ExecutorRpc } from '../transport/rpc.js';
 import { decodeFileText, validateFileRpcRequest, invalidFileData } from '../transport/file-protocol.js';
 import { TerminalRpcServer } from './terminal-rpc-server.js';
 import { GitRpcServer } from './git-rpc-server.js';
 import { isGitRpcMethod, type GitRpcRequest } from '../transport/git-protocol.js';
-import { historyPages } from '../transport/history-pages.js';
+import { HistoryRpcServer } from './history-rpc-server.js';
 import type { ProducerRelay, ProducerRelaySession } from './producer-relay.js';
-
-interface HistoryReader {
-  readonly iterator: AsyncIterator<readonly AgentImportedTranscriptRow[]>;
-  readonly controller: AbortController;
-  timer: ReturnType<typeof setTimeout> | null;
-  // Pipelined page requests read the iterator one at a time in page order.
-  requestedPages: number;
-  tail: Promise<unknown>;
-}
 
 export interface ExecutorRpcServer {
   readonly ready: Promise<void>;
+  attachBulk(rpc: ExecutorRpc): void;
   dispose(): Promise<void>;
 }
 
@@ -45,8 +34,7 @@ export function serveExecutionRuntime(
   const integrations = new Map<string, AgentIntegration>();
   const producerSession: ProducerRelaySession = { offer: (payload) => rpc.offerProducer(payload) };
   relay.shortenSuspendedGrace();
-  const readers = new Map<string, AgentResourceTable<'history-reader', HistoryReader>>();
-  const readerResources = new Set<HistoryReader>();
+  const historyScopes = new Set<HistoryRpcServer>();
   const ready = (async () => {
     info = await runtime.getInfo();
     gitWorker = new GitRpcServer(runtime);
@@ -60,7 +48,6 @@ export function serveExecutionRuntime(
       const integration = await runtime.getAgentIntegration(id);
       if (disposed) throw new AgentCallError('not-dispatched', 'Worker session retired');
       integrations.set(id, integration);
-      readers.set(id, new AgentResourceTable(integration.producers.scope, 'history-reader', 16));
       relay.track(integration);
     }
   })();
@@ -72,12 +59,8 @@ export function serveExecutionRuntime(
     disconnectTerminals();
     unsubscribe();
     rpc.retireUnknown();
-    for (const resource of readerResources) {
-      if (resource.timer) clearTimeout(resource.timer);
-      resource.controller.abort();
-      void resource.iterator.return?.().catch(() => undefined);
-    }
-    readerResources.clear();
+    for (const scope of historyScopes) scope.dispose();
+    historyScopes.clear();
   };
   // Registration precedes readiness so an immediate describe cannot outrun dispatch installation.
   let unsubscribe = () => {};
@@ -88,7 +71,7 @@ export function serveExecutionRuntime(
     await ready;
     if (!disposed) await terminalWorker?.handle({ method: 'terminals.detach', request });
   });
-  rpc.handle(async (call, signal, _guardReply, onUndeliveredReply) => {
+  const install = (endpoint: ExecutorRpc, history: HistoryRpcServer | null) => endpoint.handle(async (call, signal, _guardReply, onUndeliveredReply) => {
     await ready;
     // A journaled call runs to completion even if its session retired first.
     if (signal.aborted || (disposed && rpcContinuity(call.method) !== 'journaled')) {
@@ -202,64 +185,8 @@ export function serveExecutionRuntime(
       case 'steering.steer': return required(integration.steering).steer(call.request, options);
       case 'endpoints.validate': return required(integration.endpoints).validate(call.request);
       case 'singleQuery.run': return required(integration.singleQuery).run({ ...call.request, signal });
-      case 'history.open': {
-        if (call.request.source !== 'nativeHistoryImport' && call.request.source !== 'legacyHistoryImport') {
-          throw new AgentCallError('rejected', 'Unknown history source');
-        }
-        if (call.request.source === 'nativeHistoryImport'
-          && (await integration.execution.runningSessions(options)).some((session) => session.agentSessionId === call.request.request.chat.agentSessionId)) {
-          throw new AgentCallError('rejected', 'The turn is still running on the executor. Reload from native history after it finishes.', 'SESSION_BUSY');
-        }
-        const history: AgentHistoryImport = required(integration[call.request.source]);
-        const controller = new AbortController();
-        const iterator = historyPages(history.load({ ...call.request.request, signal: controller.signal }));
-        const table = readers.get(call.integrationId)!;
-        const resource: HistoryReader = { iterator, controller, timer: null, requestedPages: 0, tail: Promise.resolve() };
-        let ref;
-        try {
-          ref = table.add(resource);
-        } catch (error) {
-          controller.abort();
-          await iterator.return?.();
-          throw error;
-        }
-        resource.timer = setTimeout(() => {
-          table.delete(ref); readerResources.delete(resource);
-          controller.abort();
-          void iterator.return?.().catch(() => undefined);
-        }, 120_000);
-        resource.timer.unref();
-        readerResources.add(resource);
-        return ref;
-      }
-      case 'history.next': {
-        const resource = readers.get(call.integrationId)!.get(call.request.reader);
-        if (call.request.page !== resource.requestedPages) {
-          throw new AgentCallError('rejected', 'History pages must be requested in order');
-        }
-        resource.requestedPages += 1;
-        resource.timer?.refresh();
-        const page = resource.tail.then(async () => {
-          const result = await resource.iterator.next();
-          return { done: result.done === true, rows: result.value ?? [] };
-        });
-        resource.tail = page.catch(() => undefined);
-        const abort = () => resource.controller.abort();
-        signal.addEventListener('abort', abort, { once: true });
-        try {
-          return await page;
-        } finally {
-          signal.removeEventListener('abort', abort);
-        }
-      }
-      case 'history.close': {
-        const resource = readers.get(call.integrationId)!.take(call.request);
-        readerResources.delete(resource);
-        if (resource.timer) clearTimeout(resource.timer);
-        resource.controller.abort();
-        await resource.iterator.return?.();
-        return;
-      }
+      case 'history.open': case 'history.next': case 'history.close':
+        return required(history).handle(call, signal);
       case 'nativeActivity.lastActivity': return required(integration.nativeActivity).lastActivity(call.request, signal);
       case 'nativeSessions.resolveNativeSession': return required(integration.nativeSessions).resolveNativeSession({ ...call.request, signal });
       case 'nativeSessions.describeSource': return required(integration.nativeSessions).describeSource({ ...call.request, signal });
@@ -275,7 +202,19 @@ export function serveExecutionRuntime(
       default: return unknownMethod(call);
     }
   });
-  return { ready, dispose };
+  install(rpc, null);
+  return {
+    ready, dispose,
+    attachBulk(endpoint) {
+      if (disposed || endpoint.transport.lane !== 'bulk' || endpoint.transport.primarySessionId !== rpc.transport.id) {
+        throw new AgentCallError('not-dispatched', 'Bulk endpoint does not belong to this runtime generation');
+      }
+      const history = new HistoryRpcServer(integrations);
+      historyScopes.add(history);
+      endpoint.transport.onFailure(() => { history.dispose(); historyScopes.delete(history); });
+      install(endpoint, history);
+    },
+  };
 }
 
 function manifest(integration: AgentIntegration): IntegrationManifest {

@@ -4,6 +4,9 @@ import { serveExecutionRuntime } from '../server/executor-rpc-server.js';
 import { ProducerRelay } from '../server/producer-relay.js';
 import { RpcReplyJournal } from '../transport/rpc-journal.js';
 import { ExecutorRpc } from '../transport/rpc.js';
+import { ExecutorRpcConnection } from '../transport/rpc-connection.js';
+import { RpcAdmissionBudgets } from '../transport/rpc-admission.js';
+import type { SessionTransport } from '../transport/session-transport.js';
 import { WebSocketLink } from '../transport/websocket-link.js';
 
 export async function connectRemoteExecutor(
@@ -35,6 +38,17 @@ export async function connectRemoteExecutor(
 export type RuntimeBackend = 'local' | 'controller' | 'worker';
 export const RUNTIME_BACKENDS = ['local', 'controller', 'worker'] as const;
 
+const workerBudgets = new WeakMap<WebSocketLink, RpcAdmissionBudgets>();
+
+export function servePairedRuntime(link: WebSocketLink, transport: SessionTransport, runtime: ExecutionRuntimeApi, relay: ProducerRelay, journal?: RpcReplyJournal) {
+  let admission = workerBudgets.get(link);
+  if (!admission) { admission = new RpcAdmissionBudgets(); workerBudgets.set(link, admission); }
+  const connection = new ExecutorRpcConnection(link, transport, { journal, admission });
+  const serving = serveExecutionRuntime(runtime, connection.primary, relay);
+  connection.onEndpoint((rpc) => { if (rpc !== connection.primary) serving.attachBulk(rpc); });
+  return { ...serving, connection };
+}
+
 export async function runtimeAdapter(runtime: ExecutionRuntimeApi, backend: RuntimeBackend) {
   if (backend === 'local') return { executor: runtime, dispose: async () => {} };
   const info = await runtime.getInfo();
@@ -44,7 +58,7 @@ export async function runtimeAdapter(runtime: ExecutionRuntimeApi, backend: Runt
   const scopes: ReturnType<typeof serveExecutionRuntime>[] = [];
   const relay = new ProducerRelay();
   const journal = new RpcReplyJournal();
-  worker.onSession(transport => scopes.push(serveExecutionRuntime(runtime, new ExecutorRpc(transport, { journal }), relay)));
+  worker.onSession(transport => scopes.push(servePairedRuntime(worker, transport, runtime, relay, journal)));
   const connected = connectRemoteExecutor(controller);
   if (backend === 'controller') controller.dial(worker.listen());
   else worker.dial(controller.listen());

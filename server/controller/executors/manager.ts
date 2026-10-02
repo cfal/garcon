@@ -291,7 +291,9 @@ export class ExecutorManager {
         if (call.method === 'controllerCli.describe' || call.method === 'controllerCli.request') {
           const lease = entry.cliLease;
           const assertCurrent = () => {
-            if (!this.#current(entry) || this.#quiescing || entry.link?.current !== rpc.transport || !this.isReady(config.id)) {
+            const currentLane = rpc.transport.lane === 'primary' ? entry.link?.current : entry.link?.bulk;
+            if (!this.#current(entry) || this.#quiescing || currentLane !== rpc.transport
+              || entry.link?.current?.id !== rpc.transport.primarySessionId || !this.isReady(config.id)) {
               throw new DomainError('CLI_CONTROLLER_UNAVAILABLE', 'Controller CLI connection is unavailable', 503, true);
             }
             if (call.integrationId !== '' || !entry.config.allowControllerCli || lease.signal.aborted || entry.cliLease !== lease) {

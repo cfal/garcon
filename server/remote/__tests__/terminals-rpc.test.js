@@ -2,11 +2,9 @@ import { expect, test } from 'bun:test';
 import { homedir } from 'node:os';
 import { ExecutionRuntime } from '../../runtime/execution-runtime.ts';
 import { TerminalRuntime } from '../../runtime/terminals/runtime.ts';
-import { connectRemoteExecutor } from './runtime-adapter.js';
+import { connectRemoteExecutor, servePairedRuntime } from './runtime-adapter.js';
 import { WebSocketLink } from '../transport/websocket-link.ts';
-import { serveExecutionRuntime } from '../server/executor-rpc-server.ts';
 import { ProducerRelay } from '../server/producer-relay.ts';
-import { ExecutorRpc } from '../transport/rpc.ts';
 
 const authority = { key: 'synthetic-user', expiresAtMs: null };
 function peer(id) {
@@ -28,9 +26,9 @@ for (const dialer of ['controller', 'worker']) test(`terminal RPC preserves proc
   const worker = new WebSocketLink({ ...options, role: 'worker' });
   const controller = new WebSocketLink({ ...options, role: 'controller' });
   const scopes = [];
-  worker.onSession(transport => scopes.push(serveExecutionRuntime(new ExecutionRuntime({
+  worker.onSession(transport => scopes.push(servePairedRuntime(worker, transport, new ExecutionRuntime({
     id: options.executorId, workspaceDir: homedir(), projectBasePath: homedir(), integrations: [], terminalRuntime: runtime, resolveCredential: async () => null,
-  }), new ExecutorRpc(transport), new ProducerRelay())));
+  }), new ProducerRelay())));
   const connected = connectRemoteExecutor(controller);
   if (dialer === 'controller') controller.dial(worker.listen()); else worker.dial(controller.listen());
   try {

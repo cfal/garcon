@@ -23,7 +23,8 @@ import { parseTerminalStreamServerMessage, type TerminalErrorCode } from '../../
 import { parseTerminalNotification, type TerminalNotification } from './terminal-protocol.js';
 import { RpcAdmission, type RpcAdmissionBudgets } from './rpc-admission.js';
 import { parseBulkControl, type BulkConnectionControl } from './rpc-lane.js';
-import { BULK_CONTROL_BYTES, RPC_CALL_LIMIT } from './limits.js';
+import { BULK_CONTROL_BYTES, RPC_CALL_LIMIT, RPC_INSTALLATION_CALL_LIMIT } from './limits.js';
+import { assertRpcLane, assertRpcReplySize, assertRpcRequestSize } from './rpc-routing.js';
 
 interface Failure {
   readonly code: AgentIntegrationErrorCode | ErrorCode | TerminalErrorCode | GitServiceErrorCode;
@@ -186,6 +187,9 @@ export class ExecutorRpc {
   #incomingOpen: boolean;
   #outgoingOpen: boolean;
   #reconciled = false;
+  #sentReconcile = false;
+  #installing = true;
+  readonly #installation = { incoming: new Set<string>(), outgoing: new Set<string>() };
   readonly #recoveryResends = new Set<string>();
   #bulkControl: ((frame: BulkConnectionControl) => void) | null = null;
   #reconciliationComplete: (() => void) | null = null;
@@ -254,7 +258,7 @@ export class ExecutorRpc {
   onBulkControl(handler: (frame: BulkConnectionControl) => void): void { this.#bulkControl = handler; }
   onReconciled(handler: () => void): void { this.#reconciliationComplete = handler; }
   activateIncoming(): void { this.#incomingOpen = true; this.#recoveryResends.clear(); }
-  activate(): void { this.activateIncoming(); this.#outgoingOpen = true; }
+  activate(): void { this.activateIncoming(); this.#outgoingOpen = true; this.#installing = false; }
   onProducer(handler: (frame: AgentProducerFrame) => void): void { this.#producer = handler; }
   onTerminal(handler: (frame: TerminalNotification) => void): void { this.#terminal = handler; }
   publishTerminal(frame: TerminalNotification): boolean {
@@ -293,8 +297,13 @@ export class ExecutorRpc {
     }
     if (options?.signal?.aborted) throw new AgentCallError('not-dispatched', 'Executor is unavailable');
     if (this.#retired || !this.transport.connected) throw new ExecutorSessionLostError('not-dispatched', 'Executor is unavailable');
+    assertRpcLane(method, request, this.transport.lane);
     if (!this.#outgoingOpen && method !== 'calls.reconcile') throw new AgentCallError('not-dispatched', 'Executor bulk connection is recovering');
-    const release = SESSION_INSTALLATION_METHODS.has(method) ? () => {} : this.#outgoingAdmission.acquire(this.transport.lane);
+    if (method === 'calls.reconcile') {
+      if (this.#sentReconcile) throw new AgentCallError('not-dispatched', 'Session reconciliation already started');
+      this.#sentReconcile = true;
+    }
+    const release = this.#installationCall('outgoing', method, integrationId) ? () => {} : this.#outgoingAdmission.acquire(this.transport.lane);
     let retainedForLateResult = false;
     const result = Promise.withResolvers<unknown>();
     const call: OutgoingCall = {
@@ -405,6 +414,7 @@ export class ExecutorRpc {
     const payload = JSON.stringify({
       type: 'request', id: call.id, seq, integrationId: call.integrationId, method: call.method, request: call.request,
     });
+    assertRpcRequestSize(call.method, this.transport.lane, Buffer.byteLength(payload));
     if (!this.transport.channel.fitsFrame(payload)) {
       throw new AgentCallError('not-dispatched', 'The request is too large to send to the executor.');
     }
@@ -480,12 +490,14 @@ export class ExecutorRpc {
         }
         return;
       }
-      const failure = frame.type === 'error' ? decodeFailure(frame.error) : null;
+      let failure = frame.type === 'error' ? decodeFailure(frame.error) : null;
+      try { assertRpcReplySize(call.method, call.request, this.transport.lane, Buffer.byteLength(payload)); }
+      catch (error) { failure = error instanceof Error ? error : new Error(String(error)); }
       this.#pending.delete(frame.id); call.cleanup();
       // A worker keeps every journaled reply until it is acknowledged.
       if (rpcContinuity(call.method) === 'journaled') this.#acknowledgeReply(frame.id);
-      if (frame.type === 'result') call.resolve(frame.value);
-      else call.reject(failure!);
+      if (failure) call.reject(failure);
+      else if (frame.type === 'result') call.resolve(frame.value);
       return;
     }
     if (frame.type === 'cancel') {
@@ -503,6 +515,13 @@ export class ExecutorRpc {
     this.#received = Math.max(this.#received, frame.seq);
     this.#journal?.received(this.#journalOwner, this.#received);
     if (this.#incoming.has(frame.id) || this.#journal?.has(frame.id)) throw new Error('Duplicate RPC request ID');
+    try {
+      assertRpcLane(frame.method, frame.request, this.transport.lane);
+      assertRpcRequestSize(frame.method, this.transport.lane, Buffer.byteLength(payload));
+    } catch (error) {
+      this.#reply({ type: 'error', id: frame.id, error: encodeFailure(error) });
+      return;
+    }
     if (frame.method === 'calls.reconcile') {
       this.#reconcile(frame);
       return;
@@ -513,7 +532,7 @@ export class ExecutorRpc {
     }
     let release: () => void;
     try {
-      release = SESSION_INSTALLATION_METHODS.has(frame.method) ? () => {} : this.#incomingAdmission.acquire(this.transport.lane);
+      release = this.#installationCall('incoming', frame.method, frame.integrationId) ? () => {} : this.#incomingAdmission.acquire(this.transport.lane);
     } catch (error) {
       this.#reply({ type: 'error', id: frame.id, error: encodeFailure(error) });
       return;
@@ -534,10 +553,10 @@ export class ExecutorRpc {
       if (!handler) throw new AgentCallError('not-dispatched', 'RPC receiver is not installed');
       return withActivity(rpcActivity(frame.method), () => handler(frame, controller.signal, (guard) => { replyGuard = guard; }, (listener) => { undelivered = listener; }));
     }).then((value) => {
-      if (current() && !this.#reply({ type: 'result', id: frame.id, value }, replyGuard)) undelivered?.();
+      if (current() && !this.#reply({ type: 'result', id: frame.id, value }, this.#guardReply(frame, replyGuard))) undelivered?.();
     }, (error) => {
       logRedactedFailure(frame, error);
-      if (current() && !this.#reply({ type: 'error', id: frame.id, error: encodeFailure(error) })) undelivered?.();
+      if (current() && !this.#reply({ type: 'error', id: frame.id, error: encodeFailure(error) }, this.#guardReply(frame))) undelivered?.();
     }).catch(() => undefined).finally(() => {
       if (current()) this.#incoming.delete(frame.id);
       release();
@@ -555,10 +574,10 @@ export class ExecutorRpc {
       // Only launches, which the journal does not carry, observe undelivered replies.
       return withActivity(rpcActivity(frame.method), () => handler(frame, call.signal, (guard) => { replyGuard = guard; }, () => {}));
     }).then(
-      (value) => this.#encodeReply({ type: 'result', id: frame.id, value }, replyGuard) ?? undeliverableReply(frame.id),
+      (value) => this.#encodeReply({ type: 'result', id: frame.id, value }, this.#guardReply(frame, replyGuard)) ?? undeliverableReply(frame.id),
       (error) => {
         logRedactedFailure(frame, error);
-        return this.#encodeReply({ type: 'error', id: frame.id, error: encodeFailure(error) }) ?? undeliverableReply(frame.id);
+        return this.#encodeReply({ type: 'error', id: frame.id, error: encodeFailure(error) }, this.#guardReply(frame)) ?? undeliverableReply(frame.id);
       },
     ).catch((error) => JSON.stringify({ type: 'error', id: frame.id, error: encodeFailure(error) } satisfies RpcFrame))
       .then((reply) => journal.complete(call, reply, undeliverableReply(frame.id))).finally(release);
@@ -583,6 +602,23 @@ export class ExecutorRpc {
     this.#reconciled = true;
     this.#reconciliationComplete?.();
     this.#journal?.deliver();
+  }
+
+  #installationCall(direction: 'incoming' | 'outgoing', method: string, integrationId: string): boolean {
+    if (method === 'calls.reconcile') return true;
+    if (!this.#installing || this.transport.lane !== 'primary' || !SESSION_INSTALLATION_METHODS.has(method)) return false;
+    const seen = this.#installation[direction];
+    const key = JSON.stringify([method, integrationId]);
+    if (seen.has(key) || seen.size >= RPC_INSTALLATION_CALL_LIMIT) return false;
+    seen.add(key);
+    return true;
+  }
+
+  #guardReply(call: ExecutorRpcRequest, guard?: RpcReplyGuard): RpcReplyGuard {
+    return (bytes) => {
+      guard?.(bytes);
+      assertRpcReplySize(call.method, call.request, this.transport.lane, bytes);
+    };
   }
 
   #acknowledgeReply(id: string): void {

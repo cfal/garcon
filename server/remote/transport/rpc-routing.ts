@@ -1,8 +1,11 @@
 import { AgentCallError } from '@garcon/server-agent-interface';
-import { CLI_OPERATIONS, parseControllerCliRequest } from './cli-protocol.js';
+import { CLI_OPERATIONS, cliPolicy, parseControllerCliRequest } from './cli-protocol.js';
 import { isGitRpcMethod, type GitRpcMethods } from './git-protocol.js';
 import type { ExecutorRpcMethods } from './rpc-protocol.js';
 import type { RpcLane } from './rpc-lane.js';
+import { PRIMARY_SMALL_RPC_BYTES } from './limits.js';
+import { GitServiceError } from '../../../common/git-error.js';
+import { DomainError } from '../../common/domain-error.js';
 
 type FixedMethod = Exclude<keyof ExecutorRpcMethods, keyof GitRpcMethods | 'controllerCli.request' | 'calls.reconcile'>;
 
@@ -78,4 +81,27 @@ export function rpcLane(method: string, request: unknown, callingLane: RpcLane =
   if (method === 'controllerCli.request') return CLI_OPERATIONS[parseControllerCliRequest(request).http.operation].lane;
   if (Object.hasOwn(METHOD_LANES, method)) return METHOD_LANES[method as FixedMethod];
   throw new AgentCallError('rejected', 'Unknown executor RPC method');
+}
+
+export function assertRpcLane(method: string, request: unknown, lane: RpcLane): void {
+  if (rpcLane(method, request, lane) !== lane) throw new AgentCallError('not-dispatched', 'Executor request arrived on the wrong lane');
+}
+
+export function assertRpcRequestSize(method: string, lane: RpcLane, bytes: number): void {
+  if (lane !== 'primary' || bytes <= PRIMARY_SMALL_RPC_BYTES) return;
+  if (method === 'git.getQuickSummary') throw new GitServiceError('GIT_REQUEST_TOO_LARGE', 'Git summary request exceeds 64 KiB');
+  if (method === 'controllerCli.request' || method === 'controllerCli.describe') {
+    throw new DomainError('CLI_REQUEST_TOO_LARGE', 'Primary CLI request exceeds 64 KiB', 413);
+  }
+}
+
+export function assertRpcReplySize(method: string, request: unknown, lane: RpcLane, bytes: number): void {
+  if (lane !== 'primary' || bytes <= PRIMARY_SMALL_RPC_BYTES) return;
+  if (method === 'git.getQuickSummary') throw new GitServiceError('GIT_RESULT_TOO_LARGE', 'Git summary result exceeds 64 KiB');
+  if (method === 'controllerCli.describe') throw new DomainError('CLI_RESULT_TOO_LARGE', 'Primary CLI result exceeds 64 KiB', 413);
+  if (method === 'controllerCli.request') {
+    const { mutation } = cliPolicy(parseControllerCliRequest(request).http);
+    if (mutation) throw new DomainError('CLI_OUTCOME_UNKNOWN', 'Primary CLI mutation reply exceeded 64 KiB; its outcome is unknown', 503);
+    throw new DomainError('CLI_RESULT_TOO_LARGE', 'Primary CLI result exceeds 64 KiB', 413);
+  }
 }

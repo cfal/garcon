@@ -86,7 +86,7 @@ for (const dialer of ['controller', 'worker'] as const) {
     let held: (() => void)[] | null = [];
     const windowFilled = Promise.withResolvers<void>();
     const fixture = await remoteFixture(dialer, (_controller, worker) => {
-      worker.onSession((session) => {
+      worker.onBulkSession((session) => {
         session.onMessage((encoded) => {
           const frame = JSON.parse(encoded);
           if (frame.type !== 'request' || frame.method !== 'history.next') return;

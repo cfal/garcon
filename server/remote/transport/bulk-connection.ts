@@ -137,6 +137,7 @@ export class BulkConnection {
     }
     if (frame.type === 'bulk-prepare') {
       if (this.#attempt?.id === frame.sessionId) return;
+      this.primary.activate();
       this.#clearAttempt();
       const attempt: Attempt = { id: frame.sessionId, rpc: null, phase: 'connecting', timer: null, readyAt: null, dialed: false };
       this.#attempt = attempt;
@@ -181,7 +182,8 @@ export class BulkConnection {
     transport.onFailure((error) => this.#fail(attempt, error));
     void transport.ready.then(async () => {
       if (!this.#isCurrent(attempt)) return;
-      this.#phase(attempt, 'reconciling', DEFAULT_RPC_TIMEOUT_MS);
+      // A peer can reconcile before this ready continuation gets its microtask.
+      if (attempt.phase === 'connecting') this.#phase(attempt, 'reconciling', DEFAULT_RPC_TIMEOUT_MS);
       if (this.link.role !== 'controller') return;
       await rpc.reconcileParked();
       if (!this.#isCurrent(attempt)) return;

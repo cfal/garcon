@@ -4,6 +4,7 @@ export const EXECUTOR_RECONNECT_GRACE_MS = 3 * 60 * 60 * 1000;
 // Bulk work leaves capacity for primary controls on each peer.
 export const RPC_CALL_LIMIT = 256;
 export const BULK_RPC_CALL_LIMIT = 192;
+export const RPC_INSTALLATION_CALL_LIMIT = 64;
 export const RPC_QUEUE_BYTES = 32 * 1024 * 1024;
 export const RPC_QUEUE_MESSAGES = 4096;
 export const BULK_QUEUE_BYTES = 24 * 1024 * 1024;

@@ -6,10 +6,9 @@ import {
   admissionFault, integrationFixture, isExecutionHandleReply, isProducerResumeReply, linkOptions, outgoingFault, outgoingHold,
   remoteFixture, requestFor,
 } from '../../__tests__/integration-fixture.js';
-import { connectRemoteExecutor } from '../../__tests__/runtime-adapter.js';
+import { connectRemoteExecutor, servePairedRuntime } from '../../__tests__/runtime-adapter.js';
 import { serveExecutionRuntime } from '../../server/executor-rpc-server.js';
 import { ProducerRelay } from '../../server/producer-relay.js';
-import { ExecutorRpc } from '../rpc.js';
 import { WebSocketLink } from '../websocket-link.js';
 import type { Logger } from '../../../common/log.js';
 
@@ -726,7 +725,7 @@ test('a restarted worker cannot resume bindings, so the controller reports them 
   worker.onSession((transport) => {
     const fixture = integrationFixture();
     generations.push(fixture);
-    scopes.push(serveExecutionRuntime(fixture.executor, new ExecutorRpc(transport), new ProducerRelay()));
+    scopes.push(servePairedRuntime(worker, transport, fixture.executor, new ProducerRelay()));
   });
   const connected = connectRemoteExecutor(controller);
   controller.dial(worker.listen());
@@ -768,7 +767,7 @@ for (const phase of ['held', 'parked'] as const) {
       }
       generations.push(fixture);
       closes.push(spyOn(fixture.integration.producers, 'close'));
-      scopes.push(serveExecutionRuntime(fixture.executor, new ExecutorRpc(transport), new ProducerRelay()));
+      scopes.push(servePairedRuntime(worker, transport, fixture.executor, new ProducerRelay()));
     });
     const connected = connectRemoteExecutor(controller);
     controller.dial(worker.listen());
@@ -810,7 +809,7 @@ test('bindings a restarted controller cannot resume expire after the short grace
   const relay = new ProducerRelay({ supersededGraceMs: 20 });
   const scopes: ReturnType<typeof serveExecutionRuntime>[] = [];
   worker.onSession((transport) => {
-    scopes.push(serveExecutionRuntime(fixture.executor, new ExecutorRpc(transport), relay));
+    scopes.push(servePairedRuntime(worker, transport, fixture.executor, relay));
   });
   const url = worker.listen();
   const crashed = new WebSocketLink({ ...linkOptions, role: 'controller' });
