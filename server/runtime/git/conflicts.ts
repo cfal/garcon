@@ -1,6 +1,7 @@
 import { promises as fs } from 'fs';
 import { GitDomainError } from './git-domain-error.js';
 import { assertGitWorkingPath } from './operation-context.js';
+import { literalGitPathspec } from './pathspecs.js';
 import { parsePorcelainV1Z, UNMERGED_STATUSES } from './porcelain-status.js';
 import {
   assertGitRepository,
@@ -185,8 +186,8 @@ async function acceptConflictSide({
   signal,
 }: ConflictAcceptOptions): Promise<{ success: boolean }> {
   await assertGitRepository(projectPath);
-  await runGit(projectPath, ['checkout', side === 'ours' ? '--ours' : '--theirs', '--', file], { signal });
-  await runGit(projectPath, ['add', '--', file], { signal });
+  await runGit(projectPath, ['checkout', side === 'ours' ? '--ours' : '--theirs', '--', literalGitPathspec(file)], { signal });
+  await runGit(projectPath, ['add', '--', literalGitPathspec(file)], { signal });
   return { success: true };
 }
 
@@ -205,7 +206,7 @@ async function markConflictResolved({
       'Conflict markers remain in this file. Remove them before marking it resolved.',
     );
   }
-  await runGit(projectPath, ['add', '--', file], { signal });
+  await runGit(projectPath, ['add', '--', literalGitPathspec(file)], { signal });
   return { success: true };
 }
 
