@@ -7,6 +7,7 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  renameSync,
   writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -921,8 +922,11 @@ function recordApprovalResponse(id: number, result: unknown, error: unknown): vo
   const control = answeredApprovalControls.get(id);
   if (!routingControlDirectory || !control) return;
   answeredApprovalControls.delete(id);
+  const responsePath = join(routingControlDirectory, `${control}.response.json`);
+  const temporaryPath = `${responsePath}.${process.pid}.tmp`;
   writeFileSync(
-    join(routingControlDirectory, `${control}.response.json`),
+    temporaryPath,
     JSON.stringify({ result: result ?? null, error: error ?? null }),
   );
+  renameSync(temporaryPath, responsePath);
 }
