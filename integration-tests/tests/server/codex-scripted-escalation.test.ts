@@ -76,12 +76,19 @@ describe('scripted Codex escalation', () => {
         expect(await protocolProbe.readApprovalRequests()).toEqual([
           'item/commandExecution/requestApproval',
         ]);
-        expectSuccessfulExecution(
-          await fixture.client.getMessages(chatId),
+        const streamed = await fixture.client.getMessages(chatId);
+        const executions = expectExecutions(
+          streamed,
           command,
           marker,
           1,
         );
+        expect(messagesOfType(streamed.messages, 'permission-request')).toEqual([]);
+        await fixture.restartGarcon();
+        const restored = await fixture.client.getMessages(chatId);
+        expect(expectExecutions(restored, command, marker, 1)).toEqual(executions);
+        expect(messagesOfType(restored.messages, 'permission-request')).toEqual([]);
+        expect(countUserContent(restored.messages, prompt)).toBe(1);
         testEnvironment.model.assertSettled();
       }, {
         serverEnvironment,
@@ -171,16 +178,6 @@ describe('scripted Codex escalation', () => {
     }
   });
 });
-
-function expectSuccessfulExecution(
-  transcript: Awaited<ReturnType<GarconTestClient['getMessages']>>,
-  command: string,
-  marker: string,
-  executionCount: number,
-): void {
-  expect(expectExecutions(transcript, command, marker, executionCount)
-    .filter((execution) => !execution.isError)).toHaveLength(1);
-}
 
 function expectExecutions(
   transcript: Awaited<ReturnType<GarconTestClient['getMessages']>>,

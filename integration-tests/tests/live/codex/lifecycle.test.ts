@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import type { ChatMessagesMessage } from '../../../../common/ws-events.js';
-import { readFile, rm, writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   assistantContents,
@@ -28,7 +28,6 @@ import {
   startLiveCodexTestEnvironment,
   type LiveCodexTestEnvironment,
 } from '../../../support/live-codex.js';
-import { createLiveCodexProtocolProbe } from '../../../support/live-codex-protocol-probe.js';
 
 describe('live Codex lifecycle', () => {
   let liveEnvironment: LiveCodexTestEnvironment | undefined;
@@ -241,69 +240,6 @@ describe('live Codex lifecycle', () => {
         await writeFile(join(directories.project, fixtureName), toolOutput, 'utf8');
       },
     });
-  });
-
-  test('auto-approves an escalated app-server command in manual bypass', async () => {
-    if (!liveEnvironment) throw new Error('Live Codex test environment was not initialized.');
-    const testEnvironment = liveEnvironment;
-    const serverEnvironment = { ...testEnvironment.serverEnvironment };
-    const protocolProbe = createLiveCodexProtocolProbe(serverEnvironment);
-    const output = liveMarker('CODEX_MANUAL_BYPASS');
-    const outsidePath = join(
-      process.cwd(),
-      `.live-codex-manual-bypass-${crypto.randomUUID()}`,
-    );
-    const command = `printf %s ${output} > ${outsidePath} && cat ${outsidePath}`;
-
-    try {
-      await withIntegrationFixture('live-codex-manual-bypass', async (fixture) => {
-        const chatId = fixture.newChatId();
-        const prompt = [
-          `Use the shell tool to run exactly \`${command}\`.`,
-          `After it succeeds, reply with exactly ${output}.`,
-          'Do not run any other command.',
-        ].join(' ');
-        const cursor = fixture.client.markEvents();
-        const turn = await fixture.client.startChat(liveCodexStartRequest({
-          chatId,
-          projectPath: fixture.dirs.project,
-          command: prompt,
-          permissionMode: 'manualBypass',
-        }));
-        await waitForVisibleResponse({
-          fixture,
-          chatId,
-          turnId: turn.turnId,
-          afterIndex: cursor,
-        });
-
-        expect((await readFile(outsidePath, 'utf8')).trim()).toBe(output);
-        expect(await protocolProbe.waitForApprovalRequest()).toBe(
-          'item/commandExecution/requestApproval',
-        );
-        expect(await protocolProbe.readApprovalRequests()).toEqual([
-          'item/commandExecution/requestApproval',
-        ]);
-        const transcript = await fixture.client.getMessages(chatId);
-        expectPersistedCommand(transcript, command, output);
-        expect(messagesOfType(transcript.messages, 'permission-request')).toEqual([]);
-
-        await fixture.restartGarcon();
-        const restored = await fixture.client.getMessages(chatId);
-        expectPersistedCommand(restored, command, output);
-        expect(countUserContent(restored.messages, prompt)).toBe(1);
-      }, {
-        forbiddenPersistedValues: testEnvironment.forbiddenPersistedValues,
-        redactSensitiveDiagnostics: true,
-        serverEnvironment,
-        prepareWorkspace: async (directories) => {
-          await testEnvironment.prepareWorkspace(directories);
-          await protocolProbe.prepareWorkspace(directories);
-        },
-      });
-    } finally {
-      await rm(outsidePath, { force: true });
-    }
   });
 
   test('interrupts and stops active tools while preserving later delivery', async () => {
