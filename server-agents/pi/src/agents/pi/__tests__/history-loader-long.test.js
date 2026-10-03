@@ -1,12 +1,10 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it, spyOn } from 'bun:test';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 import { loadPiChatMessages } from '../history-loader.js';
 
-// Long enough that reading it in one pass would hold the event loop well past the limit.
 const TURNS = 20_000;
-const MAX_GAP_MS = 50;
 
 function assistantMessage(text, timestamp) {
   return {
@@ -28,7 +26,7 @@ function assistantMessage(text, timestamp) {
   };
 }
 
-function syntheticSession() {
+function syntheticSession(compacted) {
   const entries = [{ type: 'session', version: 3, id: 'session-long', timestamp: '2026-01-01T00:00:00.000Z', cwd: '/tmp/project' }];
   let parentId = null;
   for (let turn = 0; turn < TURNS; turn += 1) {
@@ -49,32 +47,52 @@ function syntheticSession() {
     });
     parentId = `assistant-${turn}`;
   }
+  if (compacted) {
+    entries.push({ type: 'compaction', id: 'compaction', parentId, timestamp: '2026-01-02T00:00:00.000Z',
+      summary: 'Synthetic summary', firstKeptEntryId: `user-${TURNS / 2}`, tokensBefore: 100_000 });
+    entries.push({ type: 'context_edit', id: 'edit', parentId: 'compaction', timestamp: '2026-01-02T00:00:01.000Z',
+      targetId: `assistant-${TURNS - 1}`, replacement: { content: 'Synthetic edited answer' } });
+  }
   return entries;
 }
 
 describe('long Pi native history', () => {
-  it('loads every message on the active path without holding the event loop for the whole file', async () => {
+  it.each([false, true])('bounds active-path work between event-loop turns (compacted=%s)', async (compacted) => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'pi-long-history-'));
     const sessionPath = path.join(directory, 'session.jsonl');
-    await fs.writeFile(sessionPath, `${syntheticSession().map((entry) => JSON.stringify(entry)).join('\n')}\n`, 'utf8');
+    await fs.writeFile(sessionPath, `${syntheticSession(compacted).map((entry) => JSON.stringify(entry)).join('\n')}\n`, 'utf8');
+    let clock = 0;
+    let lastTurn = 0;
+    let longestStep = 0;
+    // Charges deterministic work per entry access, not runner scheduling or GC pauses.
+    const now = spyOn(performance, 'now').mockImplementation(() => clock);
+    const parse = JSON.parse;
+    const parsing = spyOn(JSON, 'parse').mockImplementation((text, reviver) => new Proxy(parse(text, reviver), {
+      get(target, key, receiver) {
+        clock += 1;
+        longestStep = Math.max(longestStep, clock - lastTurn);
+        return Reflect.get(target, key, receiver);
+      },
+    }));
+    let probe;
+    const tick = () => {
+      lastTurn = clock;
+      probe = setImmediate(tick);
+    };
+    probe = setImmediate(tick);
     try {
-      let last = performance.now();
-      let longestGap = 0;
-      const probe = setInterval(() => {
-        const now = performance.now();
-        longestGap = Math.max(longestGap, now - last);
-        last = now;
-      }, 1);
       const loaded = await loadPiChatMessages(sessionPath);
-      // A final synchronous stretch ends before the probe runs again, so it gets one more turn.
-      await new Promise((resolve) => setTimeout(resolve, 5));
-      clearInterval(probe);
 
-      expect(loaded).toHaveLength(TURNS * 2);
-      expect(loaded[0]).toMatchObject({ type: 'user-message', content: 'Synthetic request 0' });
-      expect(loaded.at(-1)).toMatchObject({ type: 'assistant-message', content: `Synthetic answer ${TURNS - 1}` });
-      expect(longestGap).toBeLessThan(MAX_GAP_MS);
+      expect(loaded).toHaveLength(compacted ? TURNS : TURNS * 2);
+      expect(loaded[0]).toMatchObject({ type: 'user-message', content: `Synthetic request ${compacted ? TURNS / 2 : 0}` });
+      expect(loaded.at(-1)).toMatchObject({ type: 'assistant-message',
+        content: compacted ? 'Synthetic edited answer' : `Synthetic answer ${TURNS - 1}` });
+      expect(clock).toBeGreaterThan(TURNS * 2);
+      expect(longestStep).toBeLessThan(50);
     } finally {
+      clearImmediate(probe);
+      parsing.mockRestore();
+      now.mockRestore();
       await fs.rm(directory, { recursive: true, force: true });
     }
   });

@@ -1,5 +1,4 @@
 import {
-  buildSessionProjection,
   type FileEntry,
   type SessionEntry,
 } from '@earendil-works/pi-coding-agent';
@@ -10,28 +9,10 @@ import {
   type ChatMessage,
 } from '@garcon/common/chat-types';
 import { convertPiMessage } from './message-converter.js';
+import { projectPiHistory } from './session-projection.js';
 
 function isSessionEntry(entry: FileEntry): entry is SessionEntry {
   return entry.type !== 'session';
-}
-
-// The SDK walks the active path with no cycle guard, so the walk is checked first.
-async function assertAcyclicActivePath(
-  entries: readonly SessionEntry[],
-  byId: ReadonlyMap<string, SessionEntry>,
-  steps: EventLoopSteps,
-): Promise<void> {
-  let current = entries.at(-1);
-  const visited = new Set<string>();
-  while (current && typeof current.id === 'string' && current.id) {
-    if (visited.has(current.id)) {
-      throw new Error('Pi transcript parent graph contains a cycle');
-    }
-    visited.add(current.id);
-    const parentId = typeof current.parentId === 'string' ? current.parentId : null;
-    current = parentId ? byId.get(parentId) : undefined;
-    if (steps.due) await steps.next();
-  }
 }
 
 // Every resumed turn, reload, and fork reads the whole session, so the file is
@@ -44,18 +25,11 @@ async function readPiSessionFile(sessionPath: string): Promise<ChatMessage[]> {
     if (isSessionEntry(entry)) sessionEntries.push(entry);
     if (steps.due) await steps.next();
   }
-  // Reuses the bounded index while the SDK projects the active path.
-  const byId = new Map<string, SessionEntry>();
-  await steps.forEach(sessionEntries, (entry) => {
-    byId.set(entry.id, entry);
-  });
-  await assertAcyclicActivePath(sessionEntries, byId, steps);
-  const projection = buildSessionProjection(sessionEntries, undefined, byId);
-  await steps.next();
+  const projection = await projectPiHistory(sessionEntries, steps);
   // Keeps context edits and compaction checkpoints aligned with Pi while
   // retaining the original entry identity, not the editing entry's identity.
   const messages: ChatMessage[] = [];
-  await steps.forEach(projection.entries, ({ sourceEntry: entry, messages: projected }) => {
+  await steps.forEach(projection, ({ sourceEntry: entry, messages: projected }) => {
     const entryId = typeof entry.id === 'string' && entry.id.length > 0 ? entry.id : null;
     const converted = projected.flatMap((message) => convertPiMessage(message));
     if (entryId === null) {
