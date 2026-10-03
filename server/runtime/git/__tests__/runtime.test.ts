@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test, spyOn } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test, spyOn } from 'bun:test';
 import * as fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -393,27 +393,51 @@ test('stash and file history subjects keep record separator bytes inside one ent
   expect(history.map((commit) => commit.subject)).toEqual([subject, 'initial']);
 });
 
-test('fetch, pull and push use a disposable bare remote without external credentials', async () => {
-  const { git, projectPath, root } = await fixture();
-  const remote = path.join(root, 'origin.git');
-  await runGit(root, ['init', '--bare', '-b', 'main', remote]);
-  await runGit(projectPath, ['remote', 'add', 'origin', remote]);
-  await runGit(projectPath, ['push', '--set-upstream', 'origin', 'main']);
-  const peer = path.join(root, 'peer');
-  await runGit(root, ['clone', remote, peer]);
-  await runGit(peer, ['config', 'user.name', 'Synthetic Peer']);
-  await runGit(peer, ['config', 'user.email', 'peer@example.invalid']);
-  await fs.writeFile(path.join(peer, 'incoming.txt'), 'incoming\n');
-  await runGit(peer, ['add', '.']);
-  await runGit(peer, ['commit', '-m', 'incoming']);
-  await runGit(peer, ['push']);
-  await git.fetch({ projectPath });
-  expect((await runGit(projectPath, ['rev-list', '--count', 'HEAD..origin/main'])).stdout.trim()).toBe('1');
-  await git.pull({ projectPath });
-  expect(await fs.readFile(path.join(projectPath, 'incoming.txt'), 'utf8')).toBe('incoming\n');
-  await fs.writeFile(path.join(projectPath, 'outgoing.txt'), 'outgoing\n');
-  await git.commit({ projectPath, message: 'outgoing', files: ['outgoing.txt'] });
-  await git.push({ projectPath });
-  expect((await runGit(remote, ['show', 'main:outgoing.txt'])).stdout).toBe('outgoing\n');
+describe('with a disposable bare remote', () => {
+  let repository: Awaited<ReturnType<typeof fixture>>;
+  let remote: string;
+
+  beforeEach(async () => {
+    repository = await fixture();
+    const { root, projectPath } = repository;
+    remote = path.join(root, 'origin.git');
+    await runGit(root, ['init', '--bare', '-b', 'main', remote]);
+    await runGit(projectPath, ['remote', 'add', 'origin', remote]);
+    await runGit(projectPath, ['push', '--set-upstream', 'origin', 'main']);
+  });
+
+  async function pushIncomingCommit() {
+    const peer = path.join(repository.root, 'peer');
+    await runGit(repository.root, ['clone', remote, peer]);
+    await runGit(peer, ['config', 'user.name', 'Synthetic Peer']);
+    await runGit(peer, ['config', 'user.email', 'peer@example.invalid']);
+    await fs.writeFile(path.join(peer, 'incoming.txt'), 'incoming\n');
+    await runGit(peer, ['add', '.']);
+    await runGit(peer, ['commit', '-m', 'incoming']);
+    await runGit(peer, ['push']);
+  }
+
+  test('fetch updates remote refs without changing the working tree', async () => {
+    const { git, projectPath } = repository;
+    await pushIncomingCommit();
+    await git.fetch({ projectPath });
+    expect((await runGit(projectPath, ['rev-list', '--count', 'HEAD..origin/main'])).stdout.trim()).toBe('1');
+    expect(await fs.exists(path.join(projectPath, 'incoming.txt'))).toBe(false);
+  });
+
+  test('pull applies incoming commits to the working tree', async () => {
+    const { git, projectPath } = repository;
+    await pushIncomingCommit();
+    await git.pull({ projectPath });
+    expect(await fs.readFile(path.join(projectPath, 'incoming.txt'), 'utf8')).toBe('incoming\n');
+  });
+
+  test('push publishes local commits to the remote', async () => {
+    const { git, projectPath } = repository;
+    await fs.writeFile(path.join(projectPath, 'outgoing.txt'), 'outgoing\n');
+    await git.commit({ projectPath, message: 'outgoing', files: ['outgoing.txt'] });
+    await git.push({ projectPath });
+    expect((await runGit(remote, ['show', 'main:outgoing.txt'])).stdout).toBe('outgoing\n');
+  });
 });
 });
