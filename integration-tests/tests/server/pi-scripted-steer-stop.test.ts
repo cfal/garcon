@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import {
   chatCompletionsText,
   chatCompletionsToolUse,
+  type RecordedChatCompletionsRequest,
 } from '../../support/fake-chat-completions-model.js';
 import {
   withIntegrationFixture,
@@ -65,7 +66,7 @@ describe('scripted Pi steering stop semantics', () => {
         command: queuedPrompt,
       }));
       if (!queuedTurn.turnId) throw new Error('Pi run response omitted its turn id.');
-      await queuedHeld.requested;
+      const queuedModelRequest = await queuedHeld.requested;
 
       expect(await fixture.client.steer({
         clientRequestId: crypto.randomUUID(),
@@ -84,6 +85,7 @@ describe('scripted Pi steering stop semantics', () => {
         afterIndex: queuedStopCursor,
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
       });
+      await waitForModelRequestAbort(queuedModelRequest);
       queuedHeld.release();
 
       expect(userContents((await fixture.client.getMessages(queuedChatId)).messages))
@@ -157,6 +159,7 @@ describe('scripted Pi steering stop semantics', () => {
         afterIndex: deliveredStopCursor,
         timeoutMs: LIVE_TURN_TIMEOUT_MS,
       });
+      await waitForModelRequestAbort(deliveredModelRequest);
       deliveredHeld.release();
 
       const deliveredNative = await piNativeSession(fixture, deliveredChatId);
@@ -213,6 +216,16 @@ async function waitForFile(path: string): Promise<void> {
     }
   }
   throw new Error(`Pi never created ${path}.`);
+}
+
+// Controller idle precedes native process exit; releasing earlier can deliver the queued steer.
+async function waitForModelRequestAbort(request: RecordedChatCompletionsRequest): Promise<void> {
+  const deadline = Date.now() + LIVE_TURN_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    if (request.abortedAt !== null) return;
+    await Bun.sleep(25);
+  }
+  throw new Error('Pi never closed the stopped turn model request.');
 }
 
 function marker(label: string): string {
