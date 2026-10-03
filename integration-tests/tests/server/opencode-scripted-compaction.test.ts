@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { TranscriptMessage } from '../../../common/chat-view.js';
-import type { ChatSessionStoppedMessage } from '../../../common/ws-events.js';
+import type { ChatMessagesMessage, ChatSessionStoppedMessage } from '../../../common/ws-events.js';
 import {
   assistantContents,
   messagesOfType,
@@ -577,45 +577,60 @@ async function exerciseInterruptedCompaction(
   }
 
   await withIntegrationFixture(`opencode-scripted-interrupt-${phase}`, async (fixture) => {
-    const chatId = fixture.newChatId();
-    const active = await fixture.client.startChat(scriptedOpenCodeStartRequest({
-      chatId,
-      projectPath: fixture.dirs.project,
-      command: prompt,
-    }));
-    await held.requested;
-
-    const native = await openCodeNativeSession(fixture, chatId);
-    const rowsAtInterrupt = readOpenCodeSessionRows(native);
-    expect(rowsAtInterrupt.parts.some((row) => (
-      row.data.type === 'compaction' && row.data.auto === true
-    ))).toBe(true);
-    expect(rowsAtInterrupt.parts.some((row) => (
-      asRecord(row.data.metadata)?.compaction_continue === true
-    ))).toBe(phase === 'continuation');
-
-    await stopChat(fixture, chatId);
-    const stopped = await fixture.client.getMessages(chatId);
-    expect(userContents(stopped.messages)).toEqual([prompt]);
-    expect(assistantContents(stopped.messages)).toEqual([]);
-    expect(messagesOfType(stopped.messages, 'error')).toEqual([]);
-    expect(messagesOfType(stopped.messages, 'compaction')).toEqual(
-      phase === 'continuation'
-        ? [expect.objectContaining({ trigger: 'auto' })]
-        : [],
-    );
-    expectCompactionInternalsHidden(stopped.messages, [overflow, summary, stoppedAnswer]);
-    await reloadFromNativeHistory(fixture, chatId);
-    const reloaded = await fixture.client.getMessages(chatId);
-    // Automatic boundaries are live-only and intentionally absent after native Reload.
-    expect(messagesOfType(reloaded.messages, 'compaction')).toEqual([]);
-    expectCompactionInternalsHidden(reloaded.messages, [overflow, summary, stoppedAnswer]);
-
-    if (phase === 'summary') {
-      testEnvironment.model.scriptTurn([chatCompletionsText(recoverySummary)]);
-    }
-    testEnvironment.model.scriptTurn([chatCompletionsText(recoveryAnswer)]);
     try {
+      const chatId = fixture.newChatId();
+      const eventCursor = fixture.client.markEvents();
+      await fixture.client.startChat(scriptedOpenCodeStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: prompt,
+      }));
+      await held.requested;
+
+      const native = await openCodeNativeSession(fixture, chatId);
+      const rowsAtInterrupt = readOpenCodeSessionRows(native);
+      expect(rowsAtInterrupt.parts.some((row) => (
+        row.data.type === 'compaction' && row.data.auto === true
+      ))).toBe(true);
+      expect(rowsAtInterrupt.parts.some((row) => (
+        asRecord(row.data.metadata)?.compaction_continue === true
+      ))).toBe(phase === 'continuation');
+
+      if (phase === 'continuation') {
+        // Native progress and Stop do not acknowledge in-flight provider publication.
+        await fixture.client.waitForEvent(
+          (event): event is ChatMessagesMessage =>
+            event.type === 'chat-messages'
+            && event.chatId === chatId
+            && event.messages.some(({ message }) => (
+              message.type === 'compaction' && message.trigger === 'auto'
+            )),
+          'committed OpenCode automatic compaction before Stop',
+          { afterIndex: eventCursor, timeoutMs: LIVE_TURN_TIMEOUT_MS },
+        );
+      }
+
+      await stopChat(fixture, chatId);
+      const stopped = await fixture.client.getMessages(chatId);
+      expect(userContents(stopped.messages)).toEqual([prompt]);
+      expect(assistantContents(stopped.messages)).toEqual([]);
+      expect(messagesOfType(stopped.messages, 'error')).toEqual([]);
+      expect(messagesOfType(stopped.messages, 'compaction')).toEqual(
+        phase === 'continuation'
+          ? [expect.objectContaining({ trigger: 'auto' })]
+          : [],
+      );
+      expectCompactionInternalsHidden(stopped.messages, [overflow, summary, stoppedAnswer]);
+      await reloadFromNativeHistory(fixture, chatId);
+      const reloaded = await fixture.client.getMessages(chatId);
+      // Automatic boundaries are live-only and intentionally absent after native Reload.
+      expect(messagesOfType(reloaded.messages, 'compaction')).toEqual([]);
+      expectCompactionInternalsHidden(reloaded.messages, [overflow, summary, stoppedAnswer]);
+
+      if (phase === 'summary') {
+        testEnvironment.model.scriptTurn([chatCompletionsText(recoverySummary)]);
+      }
+      testEnvironment.model.scriptTurn([chatCompletionsText(recoveryAnswer)]);
       const recoveryCursor = fixture.client.markEvents();
       const recovery = await fixture.client.runChat(scriptedOpenCodeRunRequest({
         chatId,
