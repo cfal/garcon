@@ -1017,6 +1017,57 @@ describe('WorkspaceWindowTitleBar', () => {
 		expect(screen.queryByRole('menuitem', { name: m.workspace_open_chat_board() })).toBeNull();
 	});
 
+	it.each(['chat views', 'saved terminals'] as const)(
+		'keeps %s layout focus ahead of an external pre-open target',
+		async (kind) => {
+			runtime.terminalSessions = [
+				{ metadata: { terminalId: 'terminal-seven', displaySequence: 7, title: 'Build logs' } },
+			];
+			const triggerName =
+				kind === 'chat views' ? m.workspace_chat_views() : m.workspace_terminal_actions();
+			const itemName = kind === 'chat views' ? m.workspace_open_chat_canvas() : 'Build logs';
+			const priorFocus = document.createElement('button');
+			priorFocus.textContent = 'Active surface control';
+			document.body.append(priorFocus);
+			try {
+				priorFocus.focus();
+				const executor = workspaceWindow([chatSurface.id]);
+				const props = { windowId: executor.id, tabs: executor.tabs };
+				const rendered = render(WorkspaceWindowAddMenu, {
+					...props,
+					measure: { naturalWidth: 100, viewportWidth: 1_000 },
+				});
+				await fireEvent.click(await screen.findByRole('button', { name: triggerName }));
+				const item = await screen.findByRole('menuitem', { name: itemName });
+				item.focus();
+				await rendered.rerender({
+					...props,
+					measure: { naturalWidth: 200, viewportWidth: 0 },
+				});
+				await waitFor(() =>
+					expect(document.activeElement).toBe(
+						screen.getByRole('button', { name: m.workspace_add_to_window() }),
+					),
+				);
+				expect(item.isConnected).toBe(false);
+
+				await rendered.rerender({
+					...props,
+					measure: { naturalWidth: 100, viewportWidth: 1_000 },
+				});
+				const trigger = await screen.findByRole('button', { name: triggerName });
+				trigger.focus();
+				await fireEvent.click(trigger);
+				const reopenedItem = await screen.findByRole('menuitem', { name: itemName });
+				reopenedItem.focus();
+				await fireEvent.keyDown(reopenedItem, { key: 'Escape' });
+				await waitFor(() => expect(document.activeElement).toBe(trigger));
+			} finally {
+				priorFocus.remove();
+			}
+		},
+	);
+
 	it('keeps tab titles full while moving add actions in and out of the toolbar', async () => {
 		const restoreResizeObserver = installResizeObserverHarness();
 		const rendered = renderTitleBar(workspaceWindow([chatSurface.id]));

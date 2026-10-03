@@ -18,6 +18,8 @@ export class WorkspaceWindowAddMenuState {
 	overflowMenuOpen = $state(false);
 	inlineActionCount = $state(0);
 	#pendingPromotedAction: HTMLElement | null = null;
+	// Stays non-reactive because Svelte teardown reads the previous reactive values.
+	#pendingLayoutFocusRestore: HTMLElement | null = null;
 
 	constructor(private readonly options: WorkspaceWindowAddMenuOptions) {
 		$effect.pre(() => {
@@ -44,6 +46,8 @@ export class WorkspaceWindowAddMenuState {
 				focusedActionId !== undefined &&
 				this.overflowMenuContent?.contains(focusedElement) &&
 				actionIds.slice(0, nextInlineCount).includes(focusedActionId);
+			if (focusedElement && nextInlineCount !== currentInlineCount)
+				this.#pendingLayoutFocusRestore = focusedElement;
 			if (focusedActionWasPromoted) this.#pendingPromotedAction = focusedElement;
 			if (focusedActionWasPromoted || nextInlineCount === actionIds.length) {
 				this.overflowMenuOpen = false;
@@ -98,6 +102,8 @@ export class WorkspaceWindowAddMenuState {
 			(matchingAction ?? trigger ?? fallbackControl)?.focus();
 		} finally {
 			if (this.#pendingPromotedAction === previouslyFocused) this.#pendingPromotedAction = null;
+			if (this.#pendingLayoutFocusRestore === previouslyFocused)
+				this.#pendingLayoutFocusRestore = null;
 		}
 	}
 
@@ -117,7 +123,8 @@ export class WorkspaceWindowAddMenuState {
 	}
 
 	handleCloseAutoFocus(event: Event): void {
-		// Focus-scope refreshes may emit close callbacks while the menu remains open.
-		if (this.overflowMenuOpen || this.#pendingPromotedAction) event.preventDefault();
+		// Layout handoff owns focus until the replacement controls have rendered.
+		if (this.overflowMenuOpen || this.#pendingPromotedAction || this.#pendingLayoutFocusRestore)
+			event.preventDefault();
 	}
 }

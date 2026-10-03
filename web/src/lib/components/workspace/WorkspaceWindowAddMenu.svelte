@@ -238,6 +238,7 @@
 					class="w-64"
 					data-workspace-window-add-menu={windowId}
 					data-workspace-window-chat-views-menu={windowId}
+					onCloseAutoFocus={(event) => menuState.handleCloseAutoFocus(event)}
 				>
 					{@render chatViewMenuItems()}
 				</DropdownMenuContent>
@@ -259,6 +260,7 @@
 					class="w-64"
 					data-workspace-window-add-menu={windowId}
 					data-workspace-window-add-terminal-menu={windowId}
+					onCloseAutoFocus={(event) => menuState.handleCloseAutoFocus(event)}
 				>
 					{@render addActionMenuItem(action)}
 					<DropdownMenuSeparator />

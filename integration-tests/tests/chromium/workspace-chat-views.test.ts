@@ -60,6 +60,7 @@ describe('Chromium Chat Views navigation', () => {
         }
 
         await setLayout(layout);
+        await page.locator('[data-composer] textarea').focus();
         await openViews();
         expect(
           (await viewsMenu.getByRole('menuitem').allTextContents()).map((label) => label.trim()),
