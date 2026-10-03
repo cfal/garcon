@@ -30,6 +30,10 @@ export async function projectPiHistory(
   let compactionIndex = -1;
   for (let index = reversePath.length - 1; index >= 0; index -= 1) {
     const entry = reversePath[index]!;
+    // The SDK inspects message containers before compaction discards entries.
+    if (entry.type === 'message' && entry.message == null) {
+      throw new Error('Pi transcript message entry has no message');
+    }
     if (entry.type === 'compaction') compactionIndex = path.length;
     path.push(entry);
     if (steps.due) await steps.next();

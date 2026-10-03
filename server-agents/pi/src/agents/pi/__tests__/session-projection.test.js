@@ -24,6 +24,7 @@ const base = [
 test.each([
   ['empty', []],
   ['ordinary', base],
+  ['malformed inactive branch', [entry('inactive', null, { type: 'message', message: null }), ...base]],
   ['sibling branches', [...base, message('sibling', 'user', 'assistant', []), message('leaf', 'custom', 'user', 'active')]],
   ['missing parent', [...base, message('orphan', 'missing', 'user', 'orphan')]],
   ['omitted parent', [...base, message('orphan', undefined, 'user', 'orphan')]],
@@ -59,3 +60,17 @@ test.each([
     expect(actual[index].sourceEntry).toBe(expected[index].sourceEntry);
   }
 });
+
+for (const container of [null, undefined]) {
+  for (const firstKeptEntryId of ['kept', 'missing']) {
+    test(`rejects a ${String(container)} message container before compaction retaining ${firstKeptEntryId}`, async () => {
+      const entries = [
+        entry('malformed', null, { type: 'message', message: container }),
+        message('kept', 'malformed', 'user', 'synthetic retained request'),
+        entry('compaction', 'kept', { type: 'compaction', firstKeptEntryId, summary: 'summary', tokensBefore: 100 }),
+      ];
+      expect(() => buildSessionProjection(entries)).toThrow();
+      await expect(projectPiHistory(entries, new EventLoopSteps('pi-projection-malformed'))).rejects.toThrow();
+    });
+  }
+}

@@ -57,7 +57,7 @@ function syntheticSession(compacted) {
 }
 
 describe('long Pi native history', () => {
-  it.each([false, true])('bounds active-path work between event-loop turns (compacted=%s)', async (compacted) => {
+  it.each([['plain', false], ['compacted', true]])('bounds active-path work between event-loop turns (%s)', async (_name, compacted) => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'pi-long-history-'));
     const sessionPath = path.join(directory, 'session.jsonl');
     await fs.writeFile(sessionPath, `${syntheticSession(compacted).map((entry) => JSON.stringify(entry)).join('\n')}\n`, 'utf8');

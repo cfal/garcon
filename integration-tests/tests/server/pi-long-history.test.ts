@@ -4,6 +4,7 @@ import { userContents } from '../../support/chat-assertions.js';
 import { chatCompletionsText } from '../../support/fake-chat-completions-model.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { reloadUntilNativeContains, waitForVisibleResponse } from '../../support/live-agent.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 import { piNativeSession, scriptedPiStartRequest, startScriptedPiTestEnvironment } from '../../support/scripted-pi.js';
 
 const ROWS = 30_000;
@@ -33,25 +34,27 @@ test('reloads a long Pi active path and retains compaction edits while serving o
         parentId = id;
       }
       await appendFile(native.path, `\n${lines.join('\n')}\n`);
-      let probing = true;
+      await fixture.client.ping();
+      let reloading = true;
       let replies = 0;
+      let maxRoundTripMs = 0;
+      const reload = fixture.client.reloadChat(chatId).finally(() => { reloading = false; });
       const probe = (async () => {
-        while (probing) {
+        while (reloading) {
+          const sentAt = performance.now();
           await fixture.client.ping();
-          replies += 1;
-          await Bun.sleep(10);
+          maxRoundTripMs = Math.max(maxRoundTripMs, performance.now() - sentAt);
+          if (reloading) replies += 1;
+          await Bun.sleep(25);
         }
       })();
-      try {
-        const reloaded = await fixture.client.reloadChat(chatId);
-        expect(reloaded.lastOrdinal).toBeGreaterThan(ROWS);
-        expect(userContents((await fixture.client.getMessages(chatId)).messages).at(-1))
-          .toBe(`Synthetic request ${ROWS - 1}`);
-      } finally {
-        probing = false;
-        await probe;
-      }
-      expect(replies).toBeGreaterThan(1);
+      const [reloaded] = await Promise.all([reload, probe]);
+      expect(reloaded.lastOrdinal).toBeGreaterThan(ROWS);
+      expect(replies).toBeGreaterThan(0);
+      // Matches the shared-runner allowance in long-chat-responsiveness.test.ts.
+      expect(maxRoundTripMs).toBeLessThan(500);
+      expect(userContents((await fixture.client.getMessages(chatId)).messages).at(-1))
+        .toBe(`Synthetic request ${ROWS - 1}`);
 
       const timestamp = '2026-01-02T00:00:00.000Z';
       await appendFile(native.path, [
@@ -62,9 +65,22 @@ test('reloads a long Pi active path and retains compaction edits while serving o
         '',
       ].join('\n'));
       await fixture.client.reloadChat(chatId);
-      expect(userContents((await fixture.client.getMessages(chatId)).messages)).toEqual([
+      const compacted = await fixture.client.getMessages(chatId);
+      expect(userContents(compacted.messages)).toEqual([
         `Synthetic request ${ROWS - 2}`, 'Synthetic edited request',
       ]);
+      await appendFile(native.path, [
+        JSON.stringify({ type: 'message', id: 'malformed', parentId: 'synthetic-edit', timestamp, message: null }),
+        JSON.stringify({ type: 'compaction', id: 'malformed-compaction', parentId: 'malformed', timestamp,
+          summary: 'Synthetic malformed summary', firstKeptEntryId: 'missing', tokensBefore: ROWS }),
+        '',
+      ].join('\n'));
+      expect(await rejectionOf(fixture.client.reloadChat(chatId))).toMatchObject({
+        response: { code: 'HISTORY_LOAD_FAILED' },
+      });
+      const preserved = await fixture.client.getMessages(chatId);
+      expect(preserved.transcriptViewId).toBe(compacted.transcriptViewId);
+      expect(preserved.messages).toEqual(compacted.messages);
       environment.model.assertSettled();
     }, { serverEnvironment: environment.serverEnvironment, prepareWorkspace: environment.prepareWorkspace });
   } finally {
