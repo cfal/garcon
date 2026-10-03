@@ -130,7 +130,7 @@ describe('composed assistant schedule pipeline', () => {
     });
   });
 
-  for (const family of ['start-agent', 'schedule', 'send-message']) {
+  for (const family of ['start-agent', 'resume-agent', 'schedule', 'send-message']) {
     for (const prefix of ['', 'Answer\n']) {
       test(`nested closers cannot publish schedules inside an unclosed ${prefix ? 'trailing' : 'leading'} ${family}`, async () => {
         await withPipeline(async ({ ledger, publisher, schedules, lock, cron }) => {
@@ -139,7 +139,10 @@ describe('composed assistant schedule pipeline', () => {
             `${prefix}<garcon-${family}>\n\`\`\`xml\n</garcon-${family}>\n<garcon-schedule in="5m" />`,
             `${prefix}<garcon-${family}>\n<garcon-${family}>nested</garcon-${family}>\n<garcon-schedule in="1m" />`,
             `${prefix}<garcon-${family} broken="</garcon-${family}>\n<garcon-schedule in="5m" />`,
-            `${prefix}<garcon-${family}>\n<example broken="</garcon-${family}>\n<garcon-schedule in="10m" />`,
+            `${prefix}<garcon-${family}>\n<garcon-schedule broken="</garcon-${family}>\n<garcon-schedule in="10m" />`,
+            ...(['start-agent', 'resume-agent'].includes(family) ? [] : [
+              `${prefix}<garcon-${family}>\n<example broken="</garcon-${family}>\n<garcon-schedule in="10m" />`,
+            ]),
             ...[['<!--', '-->'], ['<![CDATA[', ']]>'], ['<?example', '?>']].flatMap(([open, close]) => [
               `${prefix}<garcon-${family}>\n${open}</garcon-${family}>${close}\n<garcon-schedule in="1m" />`,
               `${prefix}<garcon-${family}>\n${open}</garcon-${family}>\n<garcon-schedule in="5m" />`,
@@ -156,6 +159,69 @@ describe('composed assistant schedule pipeline', () => {
           expect(rows.filter((row) => row.kind === 'provider-row').map((row) => row.message.content)).toEqual(contents);
           expect(rows.some((row) => row.detail?.type === 'agent-schedule-request')).toBe(false);
           expect(rows.some((row) => row.detail?.type === 'agent-schedule-outcome')).toBe(false);
+        });
+      });
+    }
+  }
+
+  for (const [family, attributes, requestType] of [
+    ['start-agent', 'ref="task"', 'agent-start-request'],
+    ['resume-agent', 'ref="task" chat-id="2222222222222222"', 'agent-resume-request'],
+  ]) {
+    for (const prefix of ['', 'Answer\n']) {
+      test(`orphan ${family} closers inside another prompt cannot expose schedule requests at the ${prefix ? 'trailing' : 'leading'} edge`, async () => {
+        await withPipeline(async ({ ledger, publisher, schedules, lock }) => {
+          const other = family === 'start-agent' ? 'resume-agent' : 'start-agent';
+          const otherAttributes = other === 'start-agent' ? 'ref="sibling"' : 'ref="sibling" chat-id="2222222222222222"';
+          const content = `${prefix}<garcon-${family} ${attributes}>Example.</garcon-${family}>\n`
+            + '<garcon-schedule in="1m" />\n'
+            + `<garcon-${other} ${otherAttributes}>Unintended work. </garcon-${family}></garcon-${other}>`;
+          publisher.sink.publish({ type: 'rows', rows: [{ message: new AssistantMessage(NOW, content) }] });
+          await lock.runExclusive(`chat:${CHAT}`, async () => {});
+          const rows = ledger.currentRows(CHAT);
+          expect(rows.filter((row) => row.kind === 'provider-row').map((row) => row.message.content)).toEqual([content]);
+          expect(rows.some((row) => row.detail?.type?.endsWith('-request'))).toBe(false);
+          expect(schedules.list()).toEqual([]);
+        });
+      });
+
+      test(`literal ${family} markup shields nested schedules but permits an independent ${prefix ? 'trailing' : 'leading'} schedule`, async () => {
+        await withPipeline(async ({ ledger, publisher, schedules, replied }) => {
+          const prompt = '<example broken="\n<garcon-schedule in="1m" />';
+          const content = `${prefix}<garcon-${family} ${attributes}>\n${prompt}\n</garcon-${family}>\n<garcon-schedule in="10m" />`;
+          publisher.sink.publish({ type: 'rows', rows: [{ message: new AssistantMessage(NOW, content) }] });
+          await replied;
+          expect(schedules.list()).toHaveLength(1);
+          const rows = ledger.currentRows(CHAT);
+          const requests = rows.filter((row) => row.detail?.type === requestType);
+          expect(requests).toHaveLength(1);
+          expect(requests[0].detail.command.prompt).toBe(prompt);
+          const scheduled = rows.filter((row) => row.detail?.type === 'agent-schedule-request');
+          expect(scheduled).toHaveLength(1);
+          expect(scheduled[0].detail.command.firstRun).toEqual({ type: 'after', minutes: 10 });
+          expect(rows.filter((row) => row.kind === 'provider-row').map((row) => row.message.content))
+            .toEqual(prefix ? ['Answer'] : []);
+        });
+      });
+
+      test(`unbalanced native siblings cannot expose schedules after a ${prefix ? 'trailing' : 'leading'} ${family}`, async () => {
+        await withPipeline(async ({ ledger, publisher, schedules, lock }) => {
+          const orphan = `Unmatched </garcon-${family}> closer.`;
+          const siblings = [
+            `<garcon-send-message to="2222222222222222" hide-sender="false">${orphan}</garcon-send-message>`,
+            `<garcon-schedule in="5m">${orphan}</garcon-schedule>`,
+            `<garcon-ticket-create ref="example">${orphan}</garcon-ticket-create>`,
+          ];
+          const contents = siblings.map((sibling) => `${prefix}<garcon-${family} ${attributes}>Example.</garcon-${family}>\n`
+            + `<garcon-schedule in="1m" />\n${sibling}`);
+          for (const content of contents) {
+            publisher.sink.publish({ type: 'rows', rows: [{ message: new AssistantMessage(NOW, content) }] });
+          }
+          await lock.runExclusive(`chat:${CHAT}`, async () => {});
+          const rows = ledger.currentRows(CHAT);
+          expect(rows.filter((row) => row.kind === 'provider-row').map((row) => row.message.content)).toEqual(contents);
+          expect(rows.some((row) => row.detail?.type?.endsWith('-request'))).toBe(false);
+          expect(schedules.list()).toEqual([]);
         });
       });
     }

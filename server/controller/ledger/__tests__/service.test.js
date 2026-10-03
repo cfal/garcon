@@ -198,7 +198,7 @@ describe('TranscriptLedgerService', () => {
           {
             kind: 'notice',
             at: TS,
-            message: 'Garcon could not parse an inter-agent message command.',
+            message: expect.stringContaining('Garcon could not parse a send-message command. Not executed.'),
             detail: { title: 'Inter-agent message' },
           },
         ]);

@@ -6,6 +6,7 @@ import type { AgentStartOutcomeNoticeDetail } from '../../../common/garcon-agent
 import type { ChatMessagesMessage } from '../../../common/ws-events.js';
 import { escapeGarconXmlText } from '../../../common/garcon-command-envelope.js';
 import { garconCommandResultContent } from '../../../common/garcon-command-results.js';
+import { parseGarconCommandRejection, type GarconCommandRejection } from '../../../common/garcon-command-rejection.js';
 import { CODEX_MODELS } from '../../../common/models.js';
 import { messagesOfType, userContents } from '../../support/chat-assertions.js';
 import { codexAssistantMessage, codexExecCommandCall } from '../../support/fake-codex-model.js';
@@ -162,22 +163,25 @@ describe('scripted provider agent commands', () => {
     // then persist the input during finalization without sampling it. Command turns hold a tool
     // until admission is delivered; admission responses wait for child completion.
     // Tracks https://github.com/openai/codex/issues/15842; candidate fix: https://github.com/openai/codex/pull/30341.
-    test(`${agent} reports exact snapshot-child and resumed-turn results through its real binary`, async () => {
+    test(`${agent} reports exact snapshot-child results and repairs a malformed resume with literal prompts through its real binary`, async () => {
       const gates: string[] = [];
       const environment = await environmentFor(agent, (output) => {
         if (output.includes('<garcon-start-agent ')) return gates[0];
-        if (output.includes('<garcon-resume-agent ')) return gates[1];
+        if (output.includes('<garcon-resume-agent ref="followup"')) return gates[1];
       });
       const admitted = Promise.withResolvers<void>();
       const resumed = Promise.withResolvers<void>();
       try {
         await withIntegrationFixture(`${agent}-scripted-child-results`, async (fixture) => {
+          await fixture.client.updateSettings({ features: { agentCommands: { tickets: false } } });
           gates.push(join(fixture.executionDirs.project, 'release-start-command'),
             join(fixture.executionDirs.project, 'release-resume-command'));
           const source = fixture.newChatId();
           const start = environment.startRequest({ chatId: source, projectPath: fixture.dirs.project, command: 'Delegate the synthetic discussion.' });
-          const childPrompt = 'Inspect the copied synthetic discussion.';
-          const followup = 'Inspect the synthetic follow-up.';
+          const childPrompt = 'Inspect the copied synthetic discussion: List<String> && recovery-<chatId>; preserve &amp;.';
+          const followup = 'Inspect the synthetic follow-up: List<String> && recovery-<chatId>; preserve &amp;.';
+          let rejected: GarconCommandRejection | null = null;
+          let childId: string | undefined;
           const received: string[] = [];
           const command = `<garcon-start-agent ref="snapshot" fork="true" title="Synthetic delegated review" agent="${agent}" model="${escapeGarconXmlText(start.model)}" reasoning-effort="${start.thinkingMode}">${childPrompt}</garcon-start-agent>`;
           environment.script(() => `Synthetic source context.\n${command}`);
@@ -209,14 +213,23 @@ describe('scripted provider agent commands', () => {
               return 'Synthetic admission observed.';
             }
             if (input.includes('<garcon-start-agent-result') && input.includes('status="completed"')) {
-              const childId = /chat-id="([0-9]{16})"/.exec(input)?.[1];
+              childId = /chat-id="([0-9]{16})"/.exec(input)?.[1];
               if (!childId) throw new Error('Missing admitted child ID');
+              return `<garcon-resume-agent chat-id="${childId}">${followup}</garcon-resume-agent>`;
+            }
+            if (input.includes('<garcon-command-rejected>')) {
+              rejected = parseGarconCommandRejection(input.slice(input.indexOf('<garcon-command-rejected>')));
+              expect(rejected?.issues).toEqual([{ command: 'resume-agent', reason: 'malformed', edge: 'leading' }]);
+              expect(rejected?.message).toContain('Only ref, a 16-digit chat-id');
+              expect(rejected?.message).toContain('Do not XML-escape the prompt');
+              expect(received.filter((text) => text.endsWith(followup))).toEqual([]);
+              if (!childId) throw new Error('Missing child ID for explicit repair');
               return `<garcon-resume-agent ref="followup" chat-id="${childId}">${followup}</garcon-resume-agent>`;
             }
             if (input.includes('<garcon-resume-agent-result') && input.includes('status="completed"')) return 'Synthetic completion observed.';
             throw new Error('Unexpected synthetic model input');
           };
-          for (let i = 0; i < 6; i++) environment.script(respond);
+          for (let i = 0; i < 7; i++) environment.script(respond);
           await fixture.client.startChat(start);
           if (agent === 'codex') {
             await waitForCommandDeliveryCount(fixture, 1);
@@ -230,6 +243,12 @@ describe('scripted provider agent commands', () => {
             'exact resumed result observed', { afterIndex: cursor, timeoutMs: 90_000 },
           );
           const history = await fixture.client.getMessages(source);
+          const rejection = rejected as GarconCommandRejection | null;
+          expect(rejection?.sourceViewId).toBe(history.transcriptViewId);
+          const rejectionNotice = history.messages.find((row) => row.ordinal === rejection?.sourceOrdinal)?.message;
+          expect(rejectionNotice?.type).toBe('transcript-notice');
+          expect(rejectionNotice && 'content' in rejectionNotice ? rejectionNotice.content : '').toContain('Not executed.');
+          expect(received.filter((input) => input.endsWith(followup))).toHaveLength(1);
           const outcomes = messagesOfType(history.messages, 'transcript-notice').flatMap((notice) =>
             notice.detail?.type === 'agent-start-outcome' || notice.detail?.type === 'agent-resume-outcome' ? [notice.detail] : []);
           expect(outcomes.map((detail) => [detail.type, detail.ref, detail.status])).toEqual([

@@ -24,13 +24,13 @@ describe('delegated child request options', () => {
       ...['fork', 'title', 'agent', 'provider', 'model', 'reasoning-effort', 'project-path', 'permissions', 'parent', 'preambles']
         .map((field) => `ref="r1" ${field}="x"`),
     ]) expect(parseGarconResumeAgent(resume(attrs))).toBeNull();
-    for (const body of ['', ' \n ', 'bad &', '<nested />', '\ud800', '\0', 'x'.repeat(48 * 1024 + 1)]) {
+    for (const body of ['', ' \n ', '\ud800', '\0', 'x'.repeat(48 * 1024 + 1)]) {
       expect(parseGarconResumeAgent(resume(undefined, body))).toBeNull();
     }
     expect(parseGarconResumeAgent(resume().replace(CHILD, '123'))).toBeNull();
     expect(parseGarconResumeAgent(`<garcon-resume-agent ref="r1" chat-id="${CHILD}" />`)).toBeNull();
     expect(parseGarconResumeAgent(resume(undefined, 'x'.repeat(48 * 1024)))).not.toBeNull();
-    expect(parseGarconResumeAgent(resume(undefined, 'A &amp; B &amp;lt;'))?.prompt).toBe('A & B &lt;');
+    expect(parseGarconResumeAgent(resume(undefined, 'A &amp; B &amp;lt;'))?.prompt).toBe('A &amp; B &amp;lt;');
   });
 
   it('keeps repeated refs as independent leading and trailing commands', () => {

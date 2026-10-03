@@ -4,7 +4,7 @@ import type { KeyedPromiseLock } from '../../common/keyed-lock.js';
 import { errorMessage } from '../../common/errors.js';
 import { createLogger } from '../../common/log.js';
 import type { ChatIdRequestSink, AgentStartRequestSink, AgentResumeRequestSink, AgentStopRequestSink, AgentScheduleRequestSink, TicketCommandRequestSink, GarconCommandRejectionSink } from '../ledger/garcon-command-publication.js';
-import { AgentCommandReplies } from './agent-command-replies.js';
+import { AgentCommandRejections } from './agent-command-rejections.js';
 import { TicketCommandController, type TicketCommandControllerOptions } from '../tickets/command-controller.js';
 import type { TicketRuntime } from '../tickets/setup.js';
 import { transcriptViewId } from '../ledger/contracts.js';
@@ -52,7 +52,7 @@ export class AgentCommandComposition {
   #stops: AgentStopController | null = null;
   #schedules: AgentScheduleController | null = null;
   #tickets: TicketCommandController | null = null;
-  #rejections: AgentCommandReplies | null = null;
+  #rejections: AgentCommandRejections | null = null;
 
   readonly commandRejections: GarconCommandRejectionSink = {
     reject: (source, issues) => {
@@ -117,9 +117,9 @@ export class AgentCommandComposition {
   initialize(options: AgentCommandCompositionOptions): void {
     if (this.#chatIdDiscovery) throw new Error('Agent command controllers are already initialized');
     this.#notices = options.notices;
-    this.#rejections = new AgentCommandReplies({
+    this.#rejections = new AgentCommandRejections({
       ...options,
-      isEnabled: () => commandEnabled(options.settings, 'tickets'),
+      getSettings: () => options.settings.getFeatureSettings().agentCommands,
     });
     this.#tickets = new TicketCommandController({
       ...options,

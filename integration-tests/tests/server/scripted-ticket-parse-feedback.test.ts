@@ -72,7 +72,7 @@ describe('scripted ticket parse feedback', () => {
           expect((await fixture.client.waitForTurnTerminal(chatId, undefined, { afterIndex: cursor, timeoutMs: 60_000 })).type).toBe('agent-run-finished');
           const transcript = await fixture.client.getMessages(chatId);
           expect(userContents(transcript.messages)).toEqual([start.command]);
-          expect(messagesOfType(transcript.messages, 'transcript-notice').filter((notice) => notice.content === 'Garcon could not parse a ticket-create command.')).toHaveLength(1);
+          expect(messagesOfType(transcript.messages, 'transcript-notice').filter((notice) => notice.content.startsWith('Garcon could not parse a ticket-create command.'))).toHaveLength(1);
           expect(messagesOfType(transcript.messages, 'assistant-message').map((message) => message.content)).toContain(markup(body));
           environment.settled();
         }, environment.fixtureOptions);

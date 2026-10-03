@@ -85,7 +85,7 @@ describe('Garcon ticket commands', () => {
         expect(messagesOfType(transcript.messages, 'user-message').map((message) => message.content)).toEqual([prompt]);
         expect(messagesOfType(transcript.messages, 'assistant-message').map((message) => message.content)).toContain(malformed);
         const notices = messagesOfType(transcript.messages, 'transcript-notice');
-        expect(notices.filter((message) => message.content === 'Garcon could not parse a ticket-create command.')).toHaveLength(1);
+        expect(notices.filter((message) => message.content.startsWith('Garcon could not parse a ticket-create command.'))).toHaveLength(1);
         expect(notices.filter((message) => message.detail?.type === 'ticket-command-outcome')).toHaveLength(1);
         expect(JSON.stringify(transcript.messages)).not.toContain('garcon-command-rejection-input');
         expect(parseTicketPage(await fixture.client.get('/api/v1/tickets')).items).toHaveLength(1);

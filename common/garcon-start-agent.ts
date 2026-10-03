@@ -1,4 +1,4 @@
-import { parseGarconCommandEnvelope } from './garcon-command-envelope.js';
+import { parseGarconPromptEnvelope } from './garcon-command-envelope.js';
 import { parseChatRowTitle } from './chat-row-contracts.js';
 import { parseExecutorId } from './executors.js';
 import { GARCON_AGENT_PROMPT_MAX_BYTES, parseGarconAgentRequestOptions, type GarconAgentRequestOptions } from './garcon-agent-request.js';
@@ -19,7 +19,7 @@ export interface GarconStartAgentCommand extends GarconAgentRequestOptions {
 }
 
 export function parseGarconStartAgent(content: string): GarconStartAgentCommand | null {
-  const envelope = parseGarconCommandEnvelope(content, GARCON_START_AGENT_NAME, [
+  const envelope = parseGarconPromptEnvelope(content, GARCON_START_AGENT_NAME, [
     'agent', 'executor', 'provider', 'model', 'reasoning-effort', 'ref', 'async', 'fork', 'title',
   ]);
   if (!envelope || !envelope.body.trim() || envelope.selfClosing) return null;

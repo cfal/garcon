@@ -11,7 +11,7 @@ import { ledgerRowsToTranscriptMessages } from '../presentation.js';
 import { importedDrafts, frozenDrafts } from '../imported-drafts.js';
 import { projectFinalResponse } from '../final-response.js';
 import { isLedgerPrivateGarconCommandRow } from '../garcon-command-request.js';
-import { garconCommandRejectionContent, TICKET_COMMAND_REJECTION_GUIDANCE } from '../../../../common/garcon-command-rejection.js';
+import { garconCommandRejectionContent, garconCommandRejectionNotice, TICKET_COMMAND_REJECTION_GUIDANCE } from '../../../../common/garcon-command-rejection.js';
 
 const CHAT = '1000000000000001';
 const AT = '2026-01-01T00:00:00.000Z';
@@ -91,7 +91,7 @@ describe('ticket command ledger evidence', () => {
     } finally { append.mockRestore(); }
   });
 
-  test('keeps valid dispatch independent of rejection and excludes other command families and examples', () => {
+  test('keeps valid dispatch independent of rejection and excludes fenced examples', () => {
     const calls = [];
     const { ledger } = fixture((source) => calls.push(['request', source.requestOrdinal]),
       (source, issues) => calls.push(['rejection', source.noticeOrdinal, issues]));
@@ -108,6 +108,7 @@ describe('ticket command ledger evidence', () => {
     expect(calls).toEqual([
       ['request', 2],
       ['rejection', 3, [{ command: 'ticket-read', reason: 'malformed', edge: 'leading' }]],
+      ['rejection', 5, [{ command: 'start-agent', reason: 'malformed', edge: 'leading' }]],
       ['rejection', 9, [{ command: 'ticket-read', reason: 'malformed', edge: 'leading' }]],
     ]);
   });
@@ -118,6 +119,7 @@ describe('ticket command ledger evidence', () => {
     const view = ledger.initializeChat(CHAT);
     const malformed = '<garcon-ticket-create>{}</garcon-ticket-create>';
     const feedback = garconCommandRejectionContent({
+      sourceViewId: view.viewId, sourceOrdinal: 2,
       issues: [{ command: 'ticket-create', reason: 'malformed', edge: 'leading' }],
       message: TICKET_COMMAND_REJECTION_GUIDANCE,
     });
@@ -133,7 +135,7 @@ describe('ticket command ledger evidence', () => {
     store.closeChat(CHAT);
     const rows = ledger.currentRows(CHAT);
     const rendered = ledgerRowsToTranscriptMessages(rows);
-    expect(rendered[1].message.content).toBe('Garcon could not parse a ticket-create command.');
+    expect(rendered[1].message.content).toBe(garconCommandRejectionNotice({ command: 'ticket-create', reason: 'malformed', edge: 'leading' }));
     expect(rendered[1].message.detail).toBeUndefined();
     expect(JSON.stringify(rendered)).not.toContain('garcon-command-rejection-input');
     expect(await ledger.conversationMessages(CHAT)).toEqual([new AssistantMessage(AT, malformed)]);

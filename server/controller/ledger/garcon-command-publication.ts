@@ -3,10 +3,10 @@ import type { ChatId } from '../../../common/chat-id.js';
 import {
   extractGarconCommands,
   INTER_AGENT_MESSAGE_NOTICE_TITLE,
-  MALFORMED_INTER_AGENT_MESSAGE_CONTENT,
   type GarconEdgeCommand,
   type GarconCommandIssue,
 } from '../../../common/garcon-commands.js';
+import { garconCommandRejectionNotice } from '../../../common/garcon-command-rejection.js';
 import type { LedgerRow, LedgerRowDraft, TranscriptViewId } from './contracts.js';
 import type { GarconStartAgentCommand } from '../../../common/garcon-start-agent.js';
 import type { GarconResumeAgentCommand } from '../../../common/garcon-resume-agent.js';
@@ -152,17 +152,14 @@ export function canonicalizeGarconProducerRows(rows: readonly AgentProducedRow[]
           break;
       }
     }
-    const ticketIssues = transformed.issues.filter((issue) => issue.command.startsWith('ticket-'));
-    if (ticketIssues.length > 0) {
-      rejections.push({ issues: ticketIssues,
-        noticeDraftIndex: drafts.length + transformed.issues.indexOf(ticketIssues[0]) });
+    if (transformed.issues.length > 0) {
+      rejections.push({ issues: transformed.issues, noticeDraftIndex: drafts.length });
     }
     for (const issue of transformed.issues) {
       drafts.push({
         kind: 'notice',
         at: row.message.timestamp,
-        message: issue.command === 'send-message' ? MALFORMED_INTER_AGENT_MESSAGE_CONTENT
-          : `Garcon could not parse a ${issue.command} command.`,
+        message: garconCommandRejectionNotice(issue),
         detail: { title: issue.command === 'send-message' ? INTER_AGENT_MESSAGE_NOTICE_TITLE : 'Agent command' },
         providerMeta: null,
       });

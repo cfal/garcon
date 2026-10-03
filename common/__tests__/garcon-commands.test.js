@@ -276,10 +276,12 @@ describe('Garcon edge commands', () => {
         }
       }
     }
-    const malformed = `${start}\n<garcon-schedule in="1m" />\n</garcon-start-agent>`;
-    const result = extractGarconCommands(new AssistantMessage(AT, `${malformed}\n${GARCON_GET_CHAT_ID}`));
-    expect(result.commands).toEqual([{ type: 'get-chat-id' }]);
-    expect(result.issues).toHaveLength(1);
+    const prompt = '<garcon-schedule in="1m" />';
+    const literal = `${start}\n${prompt}\n</garcon-start-agent>`;
+    const result = extractGarconCommands(new AssistantMessage(AT, `${literal}\n${GARCON_GET_CHAT_ID}`));
+    expect(result.commands).toMatchObject([{ type: 'start-agent', prompt }, { type: 'get-chat-id' }]);
+    expect(result.commands).toHaveLength(2);
+    expect(result.issues).toEqual([]);
   });
 
   it('keeps unsupported markup opaque while finding an outer envelope boundary', () => {
@@ -322,6 +324,24 @@ describe('Garcon edge commands', () => {
     ]) expect(extractGarconCommands(new AssistantMessage(AT, content))).toBeNull();
     expect(extractGarconCommands(new UserMessage(AT, '<garcon-schedule in="1m" />'))).toBeNull();
   });
+
+  for (const newline of ['\n', '\r\n']) {
+    it(`honors open and mixed-line-ending fences with ${JSON.stringify(newline)} delimiters`, () => {
+      const schedule = '<garcon-schedule in="1m" />';
+      const open = `Summary.${newline}\`\`\`${newline}${schedule}`;
+      expect(extractGarconCommands(new AssistantMessage(AT, open))).toBeNull();
+      const prose = `\`\`\`${newline}Example\n\`\`\`\nSummary.`;
+      const closed = `${prose}\n${schedule}\n<garcon-schedule in="2m" />`;
+      const result = extractGarconCommands(new AssistantMessage(AT, closed));
+      expect(result.commands).toMatchObject([
+        { type: 'schedule', firstRun: { minutes: 1 } },
+        { type: 'schedule', firstRun: { minutes: 2 } },
+      ]);
+      expect(result.commands).toHaveLength(2);
+      expect(result.issues).toEqual([]);
+      expect(result.message.content).toBe(prose);
+    });
+  }
 
   for (const family of ['start-agent', 'resume-agent', 'schedule', 'send-message']) {
     for (const prefix of ['', 'Answer\n']) {
@@ -420,8 +440,10 @@ describe('Garcon edge commands', () => {
           `<garcon-${family} broken='`,
           `<garcon-${family}>\n<garcon-schedule broken="`,
           `<garcon-${family}>\n<garcon-schedule broken='`,
-          `<garcon-${family}>\n<example broken="`,
-          `<garcon-${family}>\n<garcon-start-agent-result broken='`,
+          ...(['start-agent', 'resume-agent'].includes(family) ? [] : [
+            `<garcon-${family}>\n<example broken="`,
+            `<garcon-${family}>\n<garcon-start-agent-result broken='`,
+          ]),
         ]) {
           const content = `${prefix}${opener}</garcon-${family}>\n<garcon-schedule in="1m" />`;
           expect(extractGarconCommands(new AssistantMessage(AT, content))).toEqual({

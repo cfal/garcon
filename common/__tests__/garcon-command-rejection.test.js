@@ -2,10 +2,11 @@ import { describe, expect, test } from 'bun:test';
 import { AssistantMessage } from '../chat-types.js';
 import { extractGarconCommands } from '../garcon-commands.js';
 import { escapeGarconXmlText, GARCON_ENVELOPE_COMMANDS } from '../garcon-command-envelope.js';
-import { garconCommandRejectionContent, parseGarconCommandRejection, TICKET_COMMAND_REJECTION_GUIDANCE } from '../garcon-command-rejection.js';
+import { garconCommandRejectionContent, garconCommandRejectionGuidance, parseGarconCommandRejection } from '../garcon-command-rejection.js';
 
 const issue = { command: 'ticket-create', reason: 'malformed', edge: 'leading' };
-const rejection = { issues: [issue], message: TICKET_COMMAND_REJECTION_GUIDANCE };
+const rejection = { sourceViewId: '11111111-1111-4111-8111-111111111111', sourceOrdinal: 2,
+  issues: [issue], message: garconCommandRejectionGuidance([issue]) };
 const envelope = (body) => `<garcon-command-rejected>${escapeGarconXmlText(JSON.stringify(body))}</garcon-command-rejected>`;
 const validEnvelope = garconCommandRejectionContent(rejection);
 
@@ -27,8 +28,26 @@ describe('Garcon command rejection feedback', () => {
   });
 
   test.each(GARCON_ENVELOPE_COMMANDS)('recognizes the %s command without changing issue fields', (command) => {
-    const expected = { ...rejection, issues: [{ ...issue, command }] };
+    const issues = [{ ...issue, command }];
+    const expected = { ...rejection, issues, message: garconCommandRejectionGuidance(issues) };
     expect(parseGarconCommandRejection(envelope(expected))).toEqual(expected);
+    expect(expected.message).toContain('rejected before execution');
+    expect(expected.message).toContain('independently valid commands may already have executed');
+    if (['start-agent', 'resume-agent', 'send-message'].includes(command)) {
+      expect(expected.message).toContain('Do not XML-escape');
+      expect(expected.message).not.toContain('serialize the JSON first');
+    }
+    if (['start-agent', 'resume-agent'].includes(command)) {
+      expect(expected.message).toContain('Keep Garcon tags balanced in subsequent commands in the same message.');
+    }
+  });
+
+  test('bounds guidance for any pair of rejected command families', () => {
+    for (const first of GARCON_ENVELOPE_COMMANDS) for (const second of GARCON_ENVELOPE_COMMANDS) {
+      const issues = [{ ...issue, command: first }, { ...issue, command: second, edge: 'trailing' }];
+      const expected = { ...rejection, issues, message: garconCommandRejectionGuidance(issues) };
+      expect(parseGarconCommandRejection(envelope(expected))).toEqual(expected);
+    }
   });
 
   test.each([
@@ -44,6 +63,11 @@ describe('Garcon command rejection feedback', () => {
     ['null payload', null],
     ['array payload', []],
     ['missing fields', {}],
+    ['missing source view', { ...rejection, sourceViewId: undefined }],
+    ['invalid source view', { ...rejection, sourceViewId: 'not-a-view' }],
+    ['missing source ordinal', { ...rejection, sourceOrdinal: undefined }],
+    ...[0, -1, 1.5, '1', Number.MAX_SAFE_INTEGER + 1].map((sourceOrdinal) =>
+      [`invalid source ordinal ${sourceOrdinal}`, { ...rejection, sourceOrdinal }]),
     ['unknown payload field', { ...rejection, extra: true }],
     ['missing issues', { message: rejection.message }],
     ['non-array issues', { ...rejection, issues: issue }],

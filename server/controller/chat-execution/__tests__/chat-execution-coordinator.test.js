@@ -4,7 +4,8 @@ import { InMemoryChatExecutionControlRepository } from '../chat-execution-contro
 import { DomainError, ProjectUnavailableError } from '../../../common/domain-error.ts';
 import { INTERACTIVE_EXECUTOR_WAIT_MS } from '../../../common/interactive-deadline.ts';
 import { KeyedPromiseLock } from '../../../common/keyed-lock.js';
-import { AgentCommandReplies } from '../../chats/agent-command-replies.js';
+import { AgentCommandRejections } from '../../chats/agent-command-rejections.js';
+import { DEFAULT_REMOTE_FEATURE_SETTINGS } from '../../../../common/settings.js';
 import { TicketCommandController } from '../../tickets/command-controller.js';
 import { CHAT_ID, VIEW_ID, ticketFixture } from '../../tickets/__tests__/fixture.js';
 
@@ -618,7 +619,10 @@ describe('ChatExecutionCoordinator', () => {
       chatMutationLock: new KeyedPromiseLock(),
       isEnabled: () => true,
     };
-    const replies = new AgentCommandReplies(context);
+    const rejections = new AgentCommandRejections({
+      ...context,
+      getSettings: () => DEFAULT_REMOTE_FEATURE_SETTINGS.agentCommands,
+    });
     const commands = new TicketCommandController({
       ...context, tickets,
       resolveProject: async () => ({ project: 'Synthetic project', kind: 'folder' }),
@@ -627,7 +631,7 @@ describe('ChatExecutionCoordinator', () => {
       const reservation = coordinator.reserveDirectTurn(CHAT_ID, { turnId: 'source-turn' });
       const running = coordinator.runReservedTurn(reservation, 'original input', { turnId: 'source-turn' });
       if (kind === 'rejection') {
-        replies.reject({ chatId: CHAT_ID, viewId: VIEW_ID, noticeOrdinal: 2 },
+        rejections.reject({ chatId: CHAT_ID, viewId: VIEW_ID, noticeOrdinal: 2 },
           [{ command: 'ticket-create', reason: 'malformed', edge: 'leading' }]);
       } else {
         commands.request({ chatId: CHAT_ID, viewId: VIEW_ID, requestOrdinal: 1,
@@ -661,7 +665,7 @@ describe('ChatExecutionCoordinator', () => {
       await coordinator.waitForDispatches();
       expect(fixture.turnRunner.runAgentTurn).toHaveBeenCalledTimes(2);
     } finally {
-      replies.shutdown();
+      rejections.shutdown();
       commands.shutdown();
       sourceTurn.resolve();
       controlTurn.resolve();

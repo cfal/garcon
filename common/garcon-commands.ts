@@ -1,7 +1,7 @@
 import { parseChatId, type ChatId } from './chat-id.js';
 import { AssistantMessage, type ChatMessage } from './chat-types.js';
 import { normalizeGarconCommandBody } from './garcon-command-text.js';
-import { garconEnvelopeOpenerEnd, garconEnvelopeSpanAt, scanGarconEnvelopeSpans,
+import { garconEnvelopeOpenerEnd, GarconEnvelopeScanner,
   type GarconEnvelopeCommand, type GarconEnvelopeSpan } from './garcon-command-envelope.js';
 import { parseGarconTicketCommand, type GarconTicketCommand } from './garcon-ticket-command.js';
 import { parseGarconStartAgent, type GarconStartAgentCommand } from './garcon-start-agent.js';
@@ -15,8 +15,6 @@ export const GARCON_SEND_MESSAGE_CLOSE = '</garcon-send-message>';
 export const GARCON_MESSAGE_OPEN = '<garcon-message>';
 export const GARCON_MESSAGE_CLOSE = '</garcon-message>';
 export const INTER_AGENT_MESSAGE_NOTICE_TITLE = 'Inter-agent message';
-export const MALFORMED_INTER_AGENT_MESSAGE_CONTENT =
-  'Garcon could not parse an inter-agent message command.';
 export const MAX_GARCON_MESSAGE_RECIPIENTS = 16;
 export const GARCON_MESSAGE_BODY_MAX_BYTES = 60 * 1024;
 
@@ -55,8 +53,9 @@ export interface GarconReceivedMessage {
   readonly body: string;
 }
 
-type ParsedEdge =
-  | { readonly kind: 'none' }
+type ParsedEdge = { readonly kind: 'none' } | ParsedCommandEdge;
+
+type ParsedCommandEdge =
   | {
       readonly kind: 'valid';
       readonly command: GarconEdgeCommand;
@@ -75,19 +74,20 @@ export function extractGarconCommands(
   if (message.type !== 'assistant-message') return null;
 
   const content = message.content;
+  const scanner = new GarconEnvelopeScanner(content);
   let start = 0;
   let end = content.length;
   // Providers append trailing whitespace to standalone command messages, so
   // commands are recognized against the trimmed trailing edge while the
   // retained remainder keeps its original bytes.
-  let parseEnd = trimEndIndex(content, start, end);
+  const parseEnd = trimEndIndex(content, start, end);
   const leading: GarconEdgeCommand[] = [];
   const trailing: GarconEdgeCommand[] = [];
   const issues: GarconCommandIssue[] = [];
   const malformedStarts = new Set<number>();
 
   while (start < end) {
-    const parsed = parseLeadingCommand(content, start, parseEnd);
+    const parsed = parseLeadingCommand(scanner, start, parseEnd);
     if (parsed.kind === 'none') break;
     if (parsed.kind === 'malformed') {
       recordIssue(
@@ -103,9 +103,7 @@ export function extractGarconCommands(
     start = trimStartIndex(content, parsed.end, parseEnd);
   }
 
-  while (start < end) {
-    const parsed = parseTrailingCommand(content, start, parseEnd);
-    if (parsed.kind === 'none') break;
+  for (const parsed of parseTrailingCommands(scanner, start, parseEnd)) {
     if (parsed.kind === 'malformed') {
       recordIssue(
         issues,
@@ -118,7 +116,6 @@ export function extractGarconCommands(
     }
     trailing.push(parsed.command);
     end = trimEndIndex(content, start, parsed.start);
-    parseEnd = end;
   }
 
   if (leading.length === 0 && trailing.length === 0 && issues.length === 0) {
@@ -168,11 +165,12 @@ export function parseGarconMessage(content: string): GarconReceivedMessage | nul
   return { fromChatId, body };
 }
 
-function parseLeadingCommand(content: string, start: number, end: number): ParsedEdge {
+function parseLeadingCommand(scanner: GarconEnvelopeScanner, start: number, end: number): ParsedEdge {
+  const content = scanner.content;
   if (start + GARCON_GET_CHAT_ID.length <= end && content.startsWith(GARCON_GET_CHAT_ID, start)) {
     return { kind: 'valid', command: { type: 'get-chat-id' }, start, end: start + GARCON_GET_CHAT_ID.length };
   }
-  const span = garconEnvelopeSpanAt(content, start, end);
+  const span = scanner.spanAt(start, end);
   return span ? parseEnvelopeSpan(content, span) : { kind: 'none' };
 }
 
@@ -205,20 +203,35 @@ function parseEnvelopeSpan(content: string, span: GarconEnvelopeSpan): ParsedEdg
     : { kind: 'malformed', command: span.command, candidateStart: span.start };
 }
 
-function parseTrailingCommand(content: string, start: number, end: number): ParsedEdge {
+function parseTrailingCommands(scanner: GarconEnvelopeScanner, start: number, end: number): ParsedCommandEdge[] {
+  const content = scanner.content;
   const trailingChains = new Map<number, boolean>();
-  const { spans, openFence } = scanGarconEnvelopeSpans(content, start, end,
-    (span) => isTrailingCommandChain(content, span.start, end, trailingChains));
+  const { spans, openFence } = scanner.spans(start, end,
+    (span) => isTrailingCommandChain(scanner, span.start, end, trailingChains));
   const unclosed = spans.find((span) => span.end === null);
-  if (unclosed) return { kind: 'malformed', command: unclosed.command, candidateStart: unclosed.start };
-  if (openFence) return { kind: 'none' };
-  const last = spans.at(-1);
+  if (unclosed) return [{ kind: 'malformed', command: unclosed.command, candidateStart: unclosed.start }];
+  if (openFence) return [];
+
+  const trailing: ParsedCommandEdge[] = [];
+  let lastIndex = spans.length - 1;
+  while (start < end) {
+    while (lastIndex >= 0 && spans[lastIndex].start >= end) lastIndex -= 1;
+    const parsed = parseTrailingCommand(content, start, end, spans[lastIndex]);
+    if (parsed.kind === 'none') break;
+    trailing.push(parsed);
+    if (parsed.kind === 'malformed') break;
+    end = trimEndIndex(content, start, parsed.start);
+  }
+  return trailing;
+}
+
+function parseTrailingCommand(content: string, start: number, end: number, last: GarconEnvelopeSpan | undefined): ParsedEdge {
   if (last?.end === end) return parseEnvelopeSpan(content, last);
 
   const markerStart = end - GARCON_GET_CHAT_ID.length;
   if (markerStart >= start && (markerStart === start || content[markerStart - 1] === '\n')
     && content.startsWith(GARCON_GET_CHAT_ID, markerStart)
-    && !spans.some((span) => span.start <= markerStart && span.end! > markerStart)) {
+    && (!last || last.end! <= markerStart)) {
     return { kind: 'valid', command: { type: 'get-chat-id' }, start: markerStart, end };
   }
   if (last) {
@@ -232,7 +245,8 @@ function parseTrailingCommand(content: string, start: number, end: number): Pars
   return { kind: 'none' };
 }
 
-function isTrailingCommandChain(content: string, start: number, end: number, cache: Map<number, boolean>): boolean {
+function isTrailingCommandChain(scanner: GarconEnvelopeScanner, start: number, end: number, cache: Map<number, boolean>): boolean {
+  const content = scanner.content;
   const visited: number[] = [];
   let cursor = start;
   let removable = true;
@@ -240,7 +254,7 @@ function isTrailingCommandChain(content: string, start: number, end: number, cac
     const cached = cache.get(cursor);
     if (cached !== undefined) { removable = cached; break; }
     visited.push(cursor);
-    const parsed = parseLeadingCommand(content, cursor, end);
+    const parsed = parseLeadingCommand(scanner, cursor, end);
     if (parsed.kind !== 'valid') { removable = false; break; }
     cursor = trimStartIndex(content, parsed.end, end);
     if (cursor < end && content[cursor - 1] !== '\n') { removable = false; break; }

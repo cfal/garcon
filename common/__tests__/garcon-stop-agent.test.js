@@ -41,8 +41,14 @@ describe('stop agent command', () => {
 
   it.each([
     `Text\n${STOP}\nMore text`, `\`\`\`xml\n${STOP}\n\`\`\``,
-    `<garcon-resume-agent ref="nested" chat-id="${CHAT}">\n${STOP}\n</garcon-resume-agent>`,
   ])('does not execute nested or non-edge commands: %s', (text) => {
     expect(transform(text)?.commands ?? []).toEqual([]);
+  });
+
+  it('keeps a nested stop inside the literal resume prompt', () => {
+    const text = `<garcon-resume-agent ref="nested" chat-id="${CHAT}">\n${STOP}\n</garcon-resume-agent>`;
+    expect(transform(text)?.commands).toEqual([
+      { type: 'resume-agent', ref: 'nested', chatId: CHAT, async: false, prompt: STOP },
+    ]);
   });
 });
