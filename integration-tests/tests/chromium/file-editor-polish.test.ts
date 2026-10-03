@@ -322,6 +322,66 @@ describe('File editor controls', () => {
     });
   }, 180_000);
 
+  for (const viewport of [
+    { name: 'desktop', width: 1440, height: 900 },
+    { name: 'mobile', width: 390, height: 844 },
+  ]) {
+    test(`keeps early menu-item focus when the scope mounts again (${viewport.name})`, async () => {
+      await withChromiumFixture(`file-editor-menu-remount-${viewport.name}`, async (fixture) => {
+        const { page, integration } = fixture;
+        const filename = 'early-menu-focus.txt';
+        await writeFile(join(integration.dirs.project, filename), 'focus\n', 'utf8');
+        const chatId = integration.newChatId();
+        const started = await integration.client.startDirectChat({
+          chatId,
+          content: 'early menu focus fixture',
+          projectPath: integration.dirs.project,
+          agent: integration.directAgents.openAi,
+        });
+        await integration.client.waitForTurnTerminal(chatId, started.turnId);
+        await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
+        await page.locator('[data-file-tree-entry-text]').filter({ hasText: filename }).click();
+        await page.setViewportSize({ width: viewport.width, height: viewport.height });
+
+        // Focuses the mounted item before the scope's reactive remount can restore the trigger.
+        const earlyFocus = await page.evaluateHandle(() => {
+          let focused = false;
+          const focusItem = () => {
+            const item = document.querySelector<HTMLElement>('[data-dropdown-menu-sub-trigger]');
+            item?.focus();
+            focused = item !== null && document.activeElement === item;
+          };
+          document.addEventListener('pointerup', focusItem, { once: true });
+          return {
+            didFocus: () => focused,
+            dispose: () => document.removeEventListener('pointerup', focusItem),
+          };
+        });
+        try {
+          const settings = page.getByRole('button', { name: 'Editor settings' });
+          await settings.click();
+          expect(await earlyFocus.evaluate((control) => control.didFocus())).toBe(true);
+          await page.evaluate(() => new Promise<void>((resolve) => {
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+          }));
+          const item = page.getByRole('menuitem', { name: /Font size/ });
+          expect(await item.evaluate((element) => element === document.activeElement)).toBe(true);
+          await page.keyboard.press('ArrowRight');
+          const font = page.getByRole('menuitemradio', { name: '16px', exact: true });
+          await font.click();
+          expect(await font.getAttribute('aria-checked')).toBe('true');
+          await page.keyboard.press('Escape');
+          await page.locator('[data-slot="dropdown-menu-content"]').waitFor({ state: 'detached' });
+          expect(await settings.evaluate((element) => element === document.activeElement)).toBe(true);
+          fixture.assertNoBrowserErrors();
+        } finally {
+          await earlyFocus.evaluate((control) => control.dispose()).catch(() => undefined);
+          await earlyFocus.dispose();
+        }
+      });
+    }, 180_000);
+  }
+
   test('recovers a failed Vim chunk by reloading only after unsaved work is saved', async () => {
     await withChromiumFixture('file-editor-vim-reload', async (fixture, markPhase) => {
       const { page, integration } = fixture;
