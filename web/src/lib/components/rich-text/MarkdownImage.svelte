@@ -132,6 +132,16 @@
 		vertical-align: middle;
 	}
 
+	:global(html[data-inline-image-thumbnail-size='small']) .markdown-image {
+		--inline-image-max-width: 320px;
+		--inline-image-max-height: 180px;
+	}
+
+	:global(html[data-inline-image-thumbnail-size='large']) .markdown-image {
+		--inline-image-max-width: 960px;
+		--inline-image-max-height: 480px;
+	}
+
 	img {
 		display: block;
 		width: auto;

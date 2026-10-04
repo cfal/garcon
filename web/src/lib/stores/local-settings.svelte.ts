@@ -43,6 +43,8 @@ export const COMPLETION_SOUND_VISIBILITY_VALUES = ['always', 'unfocused'] as con
 export type CompletionSoundVisibility = (typeof COMPLETION_SOUND_VISIBILITY_VALUES)[number];
 export const CHAT_MAX_WIDTH_VALUES = ['none', 'large', 'medium', 'small'] as const;
 export type ChatMaxWidth = (typeof CHAT_MAX_WIDTH_VALUES)[number];
+export const INLINE_IMAGE_THUMBNAIL_SIZE_VALUES = ['small', 'medium', 'large'] as const;
+export type InlineImageThumbnailSize = (typeof INLINE_IMAGE_THUMBNAIL_SIZE_VALUES)[number];
 export const SIDEBAR_SORT_MODE_VALUES = ['manual', 'recent'] as const;
 export type SidebarSortMode = (typeof SIDEBAR_SORT_MODE_VALUES)[number];
 export const WORKSPACE_WINDOW_TITLEBAR_HEIGHT_DELTA_MIN_PX = -2;
@@ -145,6 +147,7 @@ export interface LocalSettingsSnapshot {
 	steerWithCtrlEnter: boolean;
 	snippetTrigger: string;
 	chatMaxWidth: ChatMaxWidth;
+	inlineImageThumbnailSize: InlineImageThumbnailSize;
 	workspaceWindowTitlebarHeightDeltaPx: number;
 	chatListAutohide: boolean;
 	chatListDock: ChatListDock;
@@ -213,6 +216,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	steerWithCtrlEnter: true,
 	snippetTrigger: DEFAULT_SNIPPET_TRIGGER,
 	chatMaxWidth: 'none',
+	inlineImageThumbnailSize: 'medium',
 	workspaceWindowTitlebarHeightDeltaPx: 0,
 	chatListAutohide: false,
 	chatListDock: DEFAULT_CHAT_LIST_DOCK,
@@ -280,6 +284,13 @@ export function isChatMaxWidth(value: unknown): value is ChatMaxWidth {
 
 function parseChatMaxWidth(value: unknown): ChatMaxWidth {
 	return isChatMaxWidth(value) ? value : DEFAULTS.chatMaxWidth;
+}
+
+export function isInlineImageThumbnailSize(value: unknown): value is InlineImageThumbnailSize {
+	return (
+		typeof value === 'string' &&
+		INLINE_IMAGE_THUMBNAIL_SIZE_VALUES.includes(value as InlineImageThumbnailSize)
+	);
 }
 
 function parseSidebarWidth(value: unknown): number {
@@ -391,6 +402,9 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 		steerWithCtrlEnter: parseBoolean(parsed.steerWithCtrlEnter, DEFAULTS.steerWithCtrlEnter),
 		snippetTrigger: normalizeSnippetTrigger(parsed.snippetTrigger),
 		chatMaxWidth: parseChatMaxWidth(parsed.chatMaxWidth),
+		inlineImageThumbnailSize: isInlineImageThumbnailSize(parsed.inlineImageThumbnailSize)
+			? parsed.inlineImageThumbnailSize
+			: DEFAULTS.inlineImageThumbnailSize,
 		workspaceWindowTitlebarHeightDeltaPx: parseWorkspaceWindowTitlebarHeightDeltaPx(
 			parsed.workspaceWindowTitlebarHeightDeltaPx,
 		),
@@ -490,6 +504,7 @@ export class LocalSettingsStore {
 	steerWithCtrlEnter = $state(DEFAULTS.steerWithCtrlEnter);
 	snippetTrigger = $state(DEFAULTS.snippetTrigger);
 	chatMaxWidth = $state<ChatMaxWidth>(DEFAULTS.chatMaxWidth);
+	inlineImageThumbnailSize = $state<InlineImageThumbnailSize>(DEFAULTS.inlineImageThumbnailSize);
 	workspaceWindowTitlebarHeightDeltaPx = $state(DEFAULTS.workspaceWindowTitlebarHeightDeltaPx);
 	chatListAutohide = $state(DEFAULTS.chatListAutohide);
 	chatListDock = $state<ChatListDock>(DEFAULTS.chatListDock);
@@ -614,6 +629,7 @@ export class LocalSettingsStore {
 			steerWithCtrlEnter: this.steerWithCtrlEnter,
 			snippetTrigger: this.snippetTrigger,
 			chatMaxWidth: this.chatMaxWidth,
+			inlineImageThumbnailSize: this.inlineImageThumbnailSize,
 			workspaceWindowTitlebarHeightDeltaPx: this.workspaceWindowTitlebarHeightDeltaPx,
 			chatListAutohide: this.chatListAutohide,
 			chatListDock: this.chatListDock,
@@ -663,6 +679,7 @@ export class LocalSettingsStore {
 		this.steerWithCtrlEnter = snap.steerWithCtrlEnter;
 		this.snippetTrigger = snap.snippetTrigger;
 		this.chatMaxWidth = snap.chatMaxWidth;
+		this.inlineImageThumbnailSize = snap.inlineImageThumbnailSize;
 		this.workspaceWindowTitlebarHeightDeltaPx = snap.workspaceWindowTitlebarHeightDeltaPx;
 		this.chatListAutohide = snap.chatListAutohide;
 		this.chatListDock = snap.chatListDock;

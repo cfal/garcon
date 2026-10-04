@@ -201,6 +201,20 @@ describe('Settings', () => {
 			expect(screen.queryByRole('heading', { name: 'Local Settings' })).toBeNull();
 			expect(screen.queryByRole('combobox', { name: 'Chat list position' })).toBeNull();
 			expect(screen.getByText('Max chat width')).toBeTruthy();
+			const thumbnailSize = screen.getByRole('combobox', {
+				name: 'Inline image thumbnail size (px)',
+			});
+			expect((thumbnailSize as HTMLSelectElement).value).toBe('medium');
+			for (const [value, label] of [
+				['small', 'Small 320x180'],
+				['medium', 'Medium 640x320'],
+				['large', 'Large 960x480'],
+			]) {
+				expect(within(thumbnailSize).getByRole('option', { name: label })).toBeTruthy();
+				await fireEvent.change(thumbnailSize, { target: { value } });
+				expect(onLocalSet).toHaveBeenCalledWith('inlineImageThumbnailSize', value);
+				expect((thumbnailSize as HTMLSelectElement).value).toBe(value);
+			}
 			const inactivityDuration = screen.getByRole('combobox', {
 				name: 'Inactivity duration',
 			});
