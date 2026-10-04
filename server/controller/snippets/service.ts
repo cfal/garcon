@@ -18,7 +18,11 @@ import { renderPreambleContent } from '../../../common/preambles.js';
 import type { IChatRegistry } from '../chats/store.js';
 import { SnippetDomainError } from './errors.js';
 import { SnippetCatalogCommittedUnknownError, SnippetStore } from './store.js';
-import { expandSnippetTemplate, SnippetExpansionError } from './template.js';
+import {
+  expandScheduledSnippetTemplate,
+  expandSnippetTemplate,
+  SnippetExpansionError,
+} from './template.js';
 import type { PreambleStore } from '../preambles/store.js';
 import type {
   AssertSnippetShortNameAvailable,
@@ -150,11 +154,16 @@ export class SnippetService extends EventEmitter<SnippetServiceEvents> {
       const argumentsText =
         input.arguments.type === 'default' ? snippet.defaultArguments : input.arguments.value;
       try {
-        expandedText = expandSnippetTemplate(snippet.template, {
-          arguments: argumentsText,
-          projectPath: resolvedProjectPath,
-          chatId: input.context.chatId,
-        });
+        expandedText = input.context.type === 'scheduled-prompt'
+          ? expandScheduledSnippetTemplate(snippet.template, {
+              arguments: argumentsText,
+              projectPath: resolvedProjectPath,
+            })
+          : expandSnippetTemplate(snippet.template, {
+              arguments: argumentsText,
+              projectPath: resolvedProjectPath,
+              chatId: input.context.chatId,
+            });
       } catch (error) {
         if (error instanceof SnippetExpansionError) {
           throw new SnippetDomainError(error.code, error.message, 422);
@@ -162,7 +171,9 @@ export class SnippetService extends EventEmitter<SnippetServiceEvents> {
         throw error;
       }
     } else {
-      expandedText = renderPreambleContent(preamble!.content, input.context.chatId);
+      expandedText = input.context.type === 'scheduled-prompt'
+        ? preamble!.content
+        : renderPreambleContent(preamble!.content, input.context.chatId);
     }
     return {
       success: true,
@@ -227,11 +238,12 @@ export class SnippetService extends EventEmitter<SnippetServiceEvents> {
     return definition;
   }
 
-  async #resolveProjectPath(context: SnippetExpansionContext): Promise<{
+  async #resolveProjectPath(input: SnippetExpansionContext): Promise<{
     contextProjectPath: string;
     contextExecutorId: string;
     resolvedProjectPath: string;
   }> {
+    const context = input.type === 'scheduled-prompt' ? input.target : input;
     if (context.type === 'new-chat') {
       return {
         contextProjectPath: context.projectPath,

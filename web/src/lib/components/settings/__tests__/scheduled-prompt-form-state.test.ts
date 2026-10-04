@@ -76,6 +76,16 @@ function existingPrompt(schedule: ScheduledPrompt['schedule']): ScheduledPrompt 
 	};
 }
 
+it('blocks saving while a snippet expansion is pending', async () => {
+	const form = createForm();
+	await form.initialize(existingPrompt({ type: 'once', nextRunAt: '2030-01-02T09:00:00.000Z' }));
+	expect(form.canSave).toBe(true);
+	form.promptTransformPending = true;
+	expect(form.canSave).toBe(false);
+	form.promptTransformPending = false;
+	expect(form.canSave).toBe(true);
+});
+
 function newChatPrompt(
 	target: Omit<Extract<ScheduledPrompt['target'], { type: 'new-chat' }>, 'preambleChoice'> &
 		Partial<Pick<Extract<ScheduledPrompt['target'], { type: 'new-chat' }>, 'preambleChoice'>>,

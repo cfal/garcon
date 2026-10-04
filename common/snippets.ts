@@ -122,9 +122,16 @@ export interface SnippetsMutationResponse {
   snapshot: SnippetsSnapshot;
 }
 
+export type ScheduledSnippetExpansionContext = {
+  type: 'scheduled-prompt';
+  target: { type: 'chat'; chatId: string } | { type: 'new-chat'; projectPath: string; executorId?: string | null };
+};
+
 export type SnippetExpansionContext =
+  | ScheduledSnippetExpansionContext
   // Registered chats resolve their authoritative project path from the server registry.
-  { type: 'chat'; chatId: string } | { type: 'new-chat'; chatId: string; projectPath: string; executorId?: string | null };
+  | { type: 'chat'; chatId: string }
+  | { type: 'new-chat'; chatId: string; projectPath: string; executorId?: string | null };
 
 export type SnippetArgumentsInput = { type: 'default' } | { type: 'value'; value: string };
 
@@ -292,6 +299,41 @@ export function normalizeExpandSnippetRequest(value: unknown): ExpandSnippetRequ
   const argumentsInput = normalizeSnippetArgumentsInput(raw?.arguments);
   const context = asRecord(raw?.context);
   if (!raw || !isSnippetShortName(raw.shortName) || !argumentsInput || !context) {
+    return null;
+  }
+  if (context.type === 'scheduled-prompt') {
+    const target = asRecord(context.target);
+    if (target?.type === 'chat') {
+      try {
+        return {
+          shortName: raw.shortName,
+          arguments: argumentsInput,
+          context: {
+            type: 'scheduled-prompt',
+            target: { type: 'chat', chatId: parseChatId(target.chatId) },
+          },
+        };
+      } catch {
+        return null;
+      }
+    }
+    if (target?.type === 'new-chat') {
+      const projectPath = requiredPath(target.projectPath);
+      const executorId = parseExecutorId(target.executorId);
+      if (!projectPath || !executorId) return null;
+      return {
+        shortName: raw.shortName,
+        arguments: argumentsInput,
+        context: {
+          type: 'scheduled-prompt',
+          target: {
+            type: 'new-chat',
+            projectPath,
+            ...(executorId === LOCAL_EXECUTOR_ID ? {} : { executorId }),
+          },
+        },
+      };
+    }
     return null;
   }
   if (context.type === 'chat') {

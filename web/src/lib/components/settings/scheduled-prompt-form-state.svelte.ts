@@ -44,6 +44,7 @@ export class ScheduledPromptFormState {
 	busyBehavior = $state<'queue' | 'skip'>('queue');
 	prompt = $state('');
 	saving = $state(false);
+	promptTransformPending = $state(false);
 	error = $state<string | null>(null);
 	#originalNextRunAt: string | null = null;
 	#originalLocalTime: string | null = null;
@@ -67,7 +68,13 @@ export class ScheduledPromptFormState {
 	}
 
 	get canSave(): boolean {
-		return !this.saving && this.promptError === null && this.scheduleValid && this.targetValid;
+		return (
+			!this.saving &&
+			!this.promptTransformPending &&
+			this.promptError === null &&
+			this.scheduleValid &&
+			this.targetValid
+		);
 	}
 
 	get intervalAmountMax(): number {
@@ -167,7 +174,10 @@ export class ScheduledPromptFormState {
 			modelProtocol: scheduledPrompt.target.modelProtocol,
 		});
 		this.startup.projectPath = scheduledPrompt.target.projectPath;
-		this.startup.restoreExecutionModes(scheduledPrompt.target.permissionMode, scheduledPrompt.target.thinkingMode);
+		this.startup.restoreExecutionModes(
+			scheduledPrompt.target.permissionMode,
+			scheduledPrompt.target.thinkingMode,
+		);
 		this.startup.replaceAgentSettingsById(scheduledPrompt.target.agentSettingsById);
 		this.startup.chatTags = [...scheduledPrompt.target.tags];
 		this.startup.showTagInput = false;

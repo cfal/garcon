@@ -5,6 +5,7 @@
 	import ScheduledChatPickerDialog from './ScheduledChatPickerDialog.svelte';
 	import ScheduledNewChatComposer from './ScheduledNewChatComposer.svelte';
 	import ScheduledPromptField from './ScheduledPromptField.svelte';
+	import ScheduledPromptOption from './ScheduledPromptOption.svelte';
 	import { ScheduledPromptFormState } from './scheduled-prompt-form-state.svelte';
 	import {
 		getChatSessions,
@@ -12,6 +13,7 @@
 		getModelCatalog,
 		getExecutors,
 		getRemoteSettings,
+		getAppShell,
 	} from '$lib/context';
 	import { nonDirectAgentIds } from '$lib/agents/direct-agents.js';
 	import { browserTimeZoneLabel, localDateValue } from '$lib/scheduling/local-schedule';
@@ -36,6 +38,27 @@
 	const localSettings = getLocalSettings();
 	const remoteSettings = getRemoteSettings();
 	const sessions = getChatSessions();
+	const appShell = getAppShell();
+	const snippetContext = $derived.by(() => {
+		if (form.targetType === 'existing-chat') {
+			return selectedChat
+				? {
+						type: 'scheduled-prompt' as const,
+						target: { type: 'chat' as const, chatId: selectedChat.id },
+					}
+				: null;
+		}
+		return form.startup.validationStatus === 'valid' && form.startup.executorReady
+			? {
+					type: 'scheduled-prompt' as const,
+					target: {
+						type: 'new-chat' as const,
+						projectPath: form.startup.nonblankPath,
+						executorId: form.startup.executorId,
+					},
+				}
+			: null;
+	});
 	const knownTags = $derived(
 		Array.from(new Set(sessions.orderedChats.flatMap((chat) => chat.tags))).sort(),
 	);
@@ -65,6 +88,11 @@
 		form.existingChatId ? sessions.byId[form.existingChatId] : undefined,
 	);
 	const minimumDate = $derived(localDateValue(new Date()));
+	const snippetContextKey = $derived(
+		form.targetType === 'new-chat'
+			? form.startup.pathContextKey
+			: `${selectedChat?.executorId ?? 'local'}\u0000${selectedChat?.projectPath ?? ''}`,
+	);
 	const timezone = $derived(browserTimeZoneLabel());
 
 	$effect(() => {
@@ -165,7 +193,10 @@
 		</Dialog.Header>
 
 		<div class="min-h-0 flex-1 space-y-6 overflow-y-auto px-5 py-5 sm:px-6">
-			<section class="space-y-3" aria-labelledby="scheduled-prompt-cadence">
+			<section
+				class="space-y-4 rounded-lg border border-border bg-card p-4"
+				aria-labelledby="scheduled-prompt-cadence"
+			>
 				<div>
 					<h3 id="scheduled-prompt-cadence" class="text-sm font-medium text-foreground">
 						{m.scheduled_prompts_cadence()}
@@ -174,36 +205,22 @@
 						{m.scheduled_prompts_browser_time({ timezone })}
 					</p>
 				</div>
-				<div class="grid gap-2 sm:grid-cols-2">
-					<label class="flex cursor-pointer gap-3 rounded-md border border-border p-3">
-						<input
-							type="radio"
-							name="schedule-cadence"
-							value="once"
-							bind:group={form.scheduleType}
-						/>
-						<span>
-							<span class="block text-sm font-medium">{m.scheduled_prompts_once()}</span>
-							<span class="block text-xs text-muted-foreground">
-								{m.scheduled_prompts_once_description()}
-							</span>
-						</span>
-					</label>
-					<label class="flex cursor-pointer gap-3 rounded-md border border-border p-3">
-						<input
-							type="radio"
-							name="schedule-cadence"
-							value="recurring"
-							bind:group={form.scheduleType}
-						/>
-						<span>
-							<span class="block text-sm font-medium">{m.scheduled_prompts_recurring()}</span>
-							<span class="block text-xs text-muted-foreground">
-								{m.scheduled_prompts_recurring_description()}
-							</span>
-						</span>
-					</label>
-				</div>
+				<fieldset class="grid gap-2 sm:grid-cols-2" aria-labelledby="scheduled-prompt-cadence">
+					<ScheduledPromptOption
+						name="schedule-cadence"
+						value="once"
+						bind:group={form.scheduleType}
+						label={m.scheduled_prompts_once()}
+						description={m.scheduled_prompts_once_description()}
+					/>
+					<ScheduledPromptOption
+						name="schedule-cadence"
+						value="recurring"
+						bind:group={form.scheduleType}
+						label={m.scheduled_prompts_recurring()}
+						description={m.scheduled_prompts_recurring_description()}
+					/>
+				</fieldset>
 
 				{#if form.scheduleType === 'once'}
 					<div class="grid gap-3 sm:grid-cols-2">
@@ -213,7 +230,7 @@
 								type="date"
 								min={minimumDate}
 								bind:value={form.date}
-								class="h-10 w-full rounded-md border border-border bg-background px-3 text-base sm:pointer-fine:text-sm"
+								class="h-11 w-full min-w-0 rounded-md border border-border bg-background px-3 text-base focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:text-sm"
 							/>
 						</label>
 						<label class="space-y-1 text-sm">
@@ -222,7 +239,7 @@
 								type="time"
 								step="60"
 								bind:value={form.time}
-								class="h-10 w-full rounded-md border border-border bg-background px-3 text-base sm:pointer-fine:text-sm"
+								class="h-11 w-full min-w-0 rounded-md border border-border bg-background px-3 text-base focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:text-sm"
 							/>
 						</label>
 					</div>
@@ -240,7 +257,7 @@
 									max={form.intervalAmountMax}
 									step="1"
 									bind:value={form.intervalAmount}
-									class="h-10 w-full rounded-md border border-border bg-background px-3 text-base sm:pointer-fine:text-sm"
+									class="h-11 w-full min-w-0 rounded-md border border-border bg-background px-3 text-base focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:text-sm"
 								/>
 								<select
 									aria-label={m.scheduled_prompts_interval_unit()}
@@ -259,32 +276,29 @@
 								type="time"
 								step="60"
 								bind:value={form.time}
-								class="h-10 w-full rounded-md border border-border bg-background px-3 text-base sm:pointer-fine:text-sm"
+								class="h-11 w-full min-w-0 rounded-md border border-border bg-background px-3 text-base focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:text-sm"
 							/>
 						</label>
 					</div>
 					<div class="space-y-2">
 						<p class="text-sm font-medium">{m.scheduled_prompts_lifecycle()}</p>
-						<div class="flex flex-wrap gap-4">
-							<label class="flex items-center gap-2 text-sm">
-								<input
-									type="radio"
-									name="recurrence-end"
-									value="forever"
-									bind:group={form.recurrenceEnd}
-								/>
-								{m.scheduled_prompts_forever()}
-							</label>
-							<label class="flex items-center gap-2 text-sm">
-								<input
-									type="radio"
-									name="recurrence-end"
-									value="until"
-									bind:group={form.recurrenceEnd}
-								/>
-								{m.scheduled_prompts_until_label()}
-							</label>
-						</div>
+						<fieldset
+							class="grid gap-2 sm:grid-cols-2"
+							aria-label={m.scheduled_prompts_lifecycle()}
+						>
+							<ScheduledPromptOption
+								name="recurrence-end"
+								value="forever"
+								bind:group={form.recurrenceEnd}
+								label={m.scheduled_prompts_forever()}
+							/>
+							<ScheduledPromptOption
+								name="recurrence-end"
+								value="until"
+								bind:group={form.recurrenceEnd}
+								label={m.scheduled_prompts_until_label()}
+							/>
+						</fieldset>
 						{#if form.recurrenceEnd === 'until'}
 							<label class="block max-w-xs space-y-1 text-sm">
 								<span class="font-medium">{m.scheduled_prompts_end_date()}</span>
@@ -292,7 +306,7 @@
 									type="date"
 									min={minimumDate}
 									bind:value={form.endDate}
-									class="h-10 w-full rounded-md border border-border bg-background px-3 text-base sm:pointer-fine:text-sm"
+									class="h-11 w-full min-w-0 rounded-md border border-border bg-background px-3 text-base focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:text-sm"
 								/>
 							</label>
 						{/if}
@@ -303,35 +317,29 @@
 				{/if}
 			</section>
 
-			<section class="space-y-3" aria-labelledby="scheduled-prompt-target">
+			<section
+				class="space-y-4 rounded-lg border border-border bg-card p-4"
+				aria-labelledby="scheduled-prompt-target"
+			>
 				<h3 id="scheduled-prompt-target" class="text-sm font-medium text-foreground">
 					{m.scheduled_prompts_chat_target()}
 				</h3>
-				<div class="grid gap-2 sm:grid-cols-2">
-					<label class="flex cursor-pointer gap-3 rounded-md border border-border p-3">
-						<input type="radio" name="chat-target" value="new-chat" bind:group={form.targetType} />
-						<span>
-							<span class="block text-sm font-medium">{m.scheduled_prompts_new_chat()}</span>
-							<span class="block text-xs text-muted-foreground">
-								{m.scheduled_prompts_new_chat_description()}
-							</span>
-						</span>
-					</label>
-					<label class="flex cursor-pointer gap-3 rounded-md border border-border p-3">
-						<input
-							type="radio"
-							name="chat-target"
-							value="existing-chat"
-							bind:group={form.targetType}
-						/>
-						<span>
-							<span class="block text-sm font-medium">{m.scheduled_prompts_existing_chat()}</span>
-							<span class="block text-xs text-muted-foreground">
-								{m.scheduled_prompts_existing_chat_description()}
-							</span>
-						</span>
-					</label>
-				</div>
+				<fieldset class="grid gap-2 sm:grid-cols-2" aria-labelledby="scheduled-prompt-target">
+					<ScheduledPromptOption
+						name="chat-target"
+						value="new-chat"
+						bind:group={form.targetType}
+						label={m.scheduled_prompts_new_chat()}
+						description={m.scheduled_prompts_new_chat_description()}
+					/>
+					<ScheduledPromptOption
+						name="chat-target"
+						value="existing-chat"
+						bind:group={form.targetType}
+						label={m.scheduled_prompts_existing_chat()}
+						description={m.scheduled_prompts_existing_chat_description()}
+					/>
+				</fieldset>
 
 				{#if form.targetType === 'new-chat'}
 					<ScheduledNewChatComposer
@@ -345,10 +353,14 @@
 						{isMobile}
 						onPromptChange={(value) => (form.prompt = value)}
 						onPromptKeydown={handlePromptKeydown}
+						{snippetContext}
+						{snippetContextKey}
+						snippetTrigger={localSettings.snippetTrigger}
+						onSnippetPendingChange={(pending) => (form.promptTransformPending = pending)}
 					/>
 				{:else}
 					<div class="space-y-3 rounded-md border border-border p-3">
-						<div class="flex min-w-0 items-center gap-3">
+						<div class="flex min-w-0 flex-wrap items-center gap-3">
 							<div class="min-w-0 flex-1">
 								<p class="truncate text-sm font-medium">
 									{selectedChat?.title ?? m.scheduled_prompts_no_chat_selected()}
@@ -366,36 +378,22 @@
 								{m.scheduled_prompts_select_chat()}
 							</Button>
 						</div>
-						<fieldset class="space-y-2">
-							<legend class="text-sm font-medium">{m.scheduled_prompts_when_busy()}</legend>
-							<label class="flex items-start gap-2 text-sm">
-								<input
-									type="radio"
-									name="busy-behavior"
-									value="queue"
-									bind:group={form.busyBehavior}
-								/>
-								<span>
-									<span class="block font-medium">{m.scheduled_prompts_queue_message()}</span>
-									<span class="block text-xs text-muted-foreground">
-										{m.scheduled_prompts_queue_message_description()}
-									</span>
-								</span>
-							</label>
-							<label class="flex items-start gap-2 text-sm">
-								<input
-									type="radio"
-									name="busy-behavior"
-									value="skip"
-									bind:group={form.busyBehavior}
-								/>
-								<span>
-									<span class="block font-medium">{m.scheduled_prompts_skip_sending()}</span>
-									<span class="block text-xs text-muted-foreground">
-										{m.scheduled_prompts_skip_sending_description()}
-									</span>
-								</span>
-							</label>
+						<fieldset class="grid gap-2 sm:grid-cols-2">
+							<legend class="mb-2 text-sm font-medium">{m.scheduled_prompts_when_busy()}</legend>
+							<ScheduledPromptOption
+								name="busy-behavior"
+								value="queue"
+								bind:group={form.busyBehavior}
+								label={m.scheduled_prompts_queue_message()}
+								description={m.scheduled_prompts_queue_message_description()}
+							/>
+							<ScheduledPromptOption
+								name="busy-behavior"
+								value="skip"
+								bind:group={form.busyBehavior}
+								label={m.scheduled_prompts_skip_sending()}
+								description={m.scheduled_prompts_skip_sending_description()}
+							/>
 						</fieldset>
 					</div>
 				{/if}
@@ -409,6 +407,11 @@
 					surface="standalone"
 					onPromptChange={(value) => (form.prompt = value)}
 					onPromptKeydown={handlePromptKeydown}
+					{snippetContext}
+					{snippetContextKey}
+					snippetTrigger={localSettings.snippetTrigger}
+					onSnippetPendingChange={(pending) => (form.promptTransformPending = pending)}
+					onEditSnippets={(returnFocus) => appShell.openSnippetsOverScheduledPrompts(returnFocus)}
 				/>
 			{/if}
 

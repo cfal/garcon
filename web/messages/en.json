@@ -2864,5 +2864,6 @@
 			"selectors": ["countPlural"],
 			"match": { "countPlural=one": "{count} worktree", "countPlural=other": "{count} worktrees" }
 		}
-	]
+	],
+	"scheduled_prompts_snippet_help": "Snippets insert editable text. Arguments and project path are filled now; {token} is filled when the prompt runs."
 }

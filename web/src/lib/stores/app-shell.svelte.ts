@@ -158,6 +158,14 @@ export class AppShellStore {
 		if (returnFocus) queueMicrotask(returnFocus);
 	}
 
+	openSnippetsOverScheduledPrompts(returnFocus?: () => void): void {
+		this.showSettings = false;
+		this.showOnboardingWizard = false;
+		this.dismissPreambles();
+		this.#snippetsReturnFocus = returnFocus ?? null;
+		this.showSnippets = true;
+	}
+
 	dismissSnippets(): void {
 		this.showSnippets = false;
 		this.#snippetsReturnFocus = null;
