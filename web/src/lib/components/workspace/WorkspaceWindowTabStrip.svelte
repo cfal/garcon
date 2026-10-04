@@ -84,6 +84,7 @@
 	});
 
 	$effect.pre(() => {
+		displayedSurfaceIds;
 		const menuSurfaceId = singleTabMenuSurfaceId;
 		if (!menuSurfaceId) singleTabMenuOpen = false;
 		const viewport = untrack(() => tabViewport);
@@ -123,6 +124,11 @@
 		const surface = workspace.layout.surface(surfaceId);
 		if (!surface) return 'file';
 		return surface.type === 'singleton' ? surface.kind : surface.type;
+	}
+
+	function labelModeFor(surfaceId: string): WindowTabLabelMode {
+		if (tabPresentation?.labelMode !== 'active-title') return tabPresentation?.labelMode ?? 'full';
+		return surfaceId === tabPresentation.activeTitleId ? 'truncated' : 'icon-only';
 	}
 
 	function tooltipFor(surfaceId: string): string {
@@ -188,6 +194,7 @@
 		tabPresentation = resolveWindowTabPresentation({
 			order: tabs.order,
 			activeId: tabs.activeId,
+			activeTitleId: surfaceKind(tabs.activeId) === 'chat' ? tabs.activeId : null,
 			availableWidth: capacity.contentWidth,
 			widths,
 			gap: tabGap,
@@ -397,7 +404,7 @@
 
 {#snippet tabButton(surfaceId: string, measurement: boolean, triggerProps: Record<string, unknown>)}
 	{@const dropPosition = measurement ? null : tabDropPosition(surfaceId)}
-	{@const renderedLabelMode: WindowTabLabelMode = measurement ? 'full' : labelMode}
+	{@const renderedLabelMode = measurement ? 'full' : labelModeFor(surfaceId)}
 	{@const composedTriggerProps = measurement
 		? triggerProps
 		: mergeProps(triggerProps, {
@@ -505,7 +512,7 @@
 {/snippet}
 
 {#snippet tab(surfaceId: string, measurement = false)}
-	{@const renderedLabelMode: WindowTabLabelMode = measurement ? 'full' : labelMode}
+	{@const renderedLabelMode = measurement ? 'full' : labelModeFor(surfaceId)}
 	{@const showInlineClose = supportsInlineClose(surfaceId) && renderedLabelMode !== 'icon-only'}
 	<div
 		class={tabFrameClass(renderedLabelMode)}

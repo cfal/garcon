@@ -297,6 +297,16 @@ function renderTitleBar(
 	});
 }
 
+function measureTabRail(container: HTMLElement, width: number): HTMLElement {
+	const viewport = container.querySelector<HTMLElement>('[data-workspace-window-tabs]')!;
+	Object.defineProperty(viewport, 'clientWidth', { configurable: true, value: width });
+	for (const tab of container.querySelectorAll<HTMLElement>('[data-window-tab-measure-id]')) {
+		tab.getBoundingClientRect = () => DOMRect.fromRect({ width: 160 });
+	}
+	ResizeObserverHarness.emit(viewport, width);
+	return viewport;
+}
+
 describe('WorkspaceWindowTitleBar', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
@@ -1113,6 +1123,98 @@ describe('WorkspaceWindowTitleBar', () => {
 		} finally {
 			rendered.unmount();
 			restoreResizeObserver();
+		}
+	});
+
+	it.each([
+		[true, 0],
+		[false, 0],
+		[true, 6],
+		[false, -2],
+	])('retains the selected Chat title with current=%s and size=%s', async (isCurrent, delta) => {
+		runtime.surfaces[fileSurface.id] = fileSurface;
+		const restore = installResizeObserverHarness();
+		const rendered = renderTitleBar(
+			workspaceWindow([chatSurface.id, gitSurface.id, fileSurface.id]),
+			isCurrent,
+			labelFor,
+			delta,
+		);
+		try {
+			const rail = measureTabRail(rendered.container, 176);
+			const chatTab = screen.getByRole('tab', { name: 'Chat A' });
+			await waitFor(() => expect(rail.dataset.workspaceTabLabelMode).toBe('active-title'));
+			expect(chatTab.dataset.workspaceTabLabelMode).toBe('truncated');
+			expect(chatTab.querySelector('span.truncate')?.textContent).toBe('Chat A');
+			expect(screen.getByRole('tab', { name: 'Git' }).dataset.workspaceTabLabelMode).toBe(
+				'icon-only',
+			);
+			expect(screen.getByRole('tab', { name: 'README.md' }).dataset.workspaceTabLabelMode).toBe(
+				'icon-only',
+			);
+			expect(rendered.container.querySelectorAll('[data-workspace-window-tab-close]')).toHaveLength(
+				1,
+			);
+			expect(rendered.container.querySelectorAll('[data-window-tab-measure-id]')).toHaveLength(3);
+			expect(rendered.container.querySelector('[data-window-tab-measure-id] .sr-only')).toBeNull();
+			expect(
+				rendered.container.querySelectorAll('[data-workspace-window-add-inline]'),
+			).toHaveLength(0);
+
+			measureTabRail(rendered.container, 94);
+			await waitFor(() => expect(screen.getAllByRole('tab')).toHaveLength(1));
+			expect(screen.getByRole('tab', { name: 'Chat A' })).toBe(chatTab);
+			await fireEvent.click(screen.getByRole('button', { name: m.workspace_window_actions() }));
+			expect(await screen.findByRole('menuitem', { name: 'Git' })).toBeTruthy();
+			expect(screen.getByRole('menuitem', { name: 'README.md' })).toBeTruthy();
+			await fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+
+			measureTabRail(rendered.container, 300);
+			await waitFor(() => expect(rail.dataset.workspaceTabLabelMode).toBe('truncated'));
+			expect(screen.getAllByRole('tab')).toHaveLength(3);
+			measureTabRail(rendered.container, 700);
+			await waitFor(() => expect(rail.dataset.workspaceTabLabelMode).toBe('full'));
+		} finally {
+			rendered.unmount();
+			restore();
+		}
+	});
+
+	it('recomputes title priority on tab selection without remounting or waiting for resize', async () => {
+		const restore = installResizeObserverHarness();
+		const order = [chatSurface.id, gitSurface.id];
+		const rendered = renderTitleBar(workspaceWindow(order));
+		try {
+			const rail = measureTabRail(rendered.container, 120);
+			const chatTab = screen.getByRole('tab', { name: 'Chat A' });
+			await waitFor(() => expect(rail.dataset.workspaceTabLabelMode).toBe('active-title'));
+			await rendered.rerender({ workspaceWindow: workspaceWindow(order, gitSurface.id) });
+			await waitFor(() => expect(rail.dataset.workspaceTabLabelMode).toBe('icon-only'));
+			expect(screen.getByRole('tab', { name: 'Chat A' })).toBe(chatTab);
+			await rendered.rerender({ workspaceWindow: workspaceWindow(order) });
+			await waitFor(() => expect(chatTab.dataset.workspaceTabLabelMode).toBe('truncated'));
+			expect(screen.getByRole('tab', { name: 'Chat A' })).toBe(chatTab);
+		} finally {
+			rendered.unmount();
+			restore();
+		}
+	});
+
+	it('restores focus to the selected Chat when the focused icon overflows', async () => {
+		const restore = installResizeObserverHarness();
+		const rendered = renderTitleBar(workspaceWindow([chatSurface.id, gitSurface.id]));
+		try {
+			const rail = measureTabRail(rendered.container, 120);
+			await waitFor(() => expect(rail.dataset.workspaceTabLabelMode).toBe('active-title'));
+			screen.getByRole('tab', { name: 'Git' }).focus();
+			measureTabRail(rendered.container, 88);
+			await waitFor(() =>
+				expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'Chat A' })),
+			);
+			expect(screen.queryByRole('tab', { name: 'Git' })).toBeNull();
+		} finally {
+			rendered.unmount();
+			restore();
 		}
 	});
 

@@ -111,6 +111,124 @@ describe('resolveWindowTabPresentation', () => {
 			}),
 		).toEqual({ visibleIds: [], labelMode: 'icon-only' });
 	});
+
+	describe('active title priority', () => {
+		const activeTitleId = order[0]!;
+		const input = {
+			order,
+			activeId: activeTitleId,
+			activeTitleId,
+			widths: new Map(order.map((id) => [id, 160])),
+			gap: 2,
+			trailingReservedWidths: new Map(
+				order.map((id) => [id, WINDOW_TAB_INLINE_CLOSE_RESERVED_WIDTH]),
+			),
+		};
+
+		it.each([
+			[700, 'full'],
+			[358, 'truncated'],
+		] as const)('preserves the existing %s px labeled stage', (availableWidth, labelMode) => {
+			expect(resolveWindowTabPresentation({ ...input, availableWidth })).toEqual({
+				visibleIds: order,
+				labelMode,
+			});
+		});
+
+		it.each([
+			[178, order],
+			[177, order.slice(0, 3)],
+			[118, order.slice(0, 2)],
+			[117, [activeTitleId]],
+			[88, [activeTitleId]],
+		])('retains the title and fitting icons at %s px', (availableWidth, visibleIds) => {
+			expect(resolveWindowTabPresentation({ ...input, availableWidth })).toEqual({
+				visibleIds,
+				labelMode: 'active-title',
+				activeTitleId,
+			});
+		});
+
+		it.each([
+			[87, order.slice(0, 2)],
+			[28, [activeTitleId]],
+			[27, []],
+		])('falls back to icons and the menu at %s px', (availableWidth, visibleIds) => {
+			expect(resolveWindowTabPresentation({ ...input, availableWidth })).toEqual({
+				visibleIds,
+				labelMode: 'icon-only',
+			});
+		});
+
+		it('preserves tab order when the active title is last', () => {
+			const reordered = [...order.slice(1), activeTitleId];
+			expect(
+				resolveWindowTabPresentation({ ...input, order: reordered, availableWidth: 148 }),
+			).toEqual({
+				visibleIds: [order[1], order[2], activeTitleId],
+				labelMode: 'active-title',
+				activeTitleId,
+			});
+		});
+
+		it('reserves scaled close controls and icon widths at the exact boundary', () => {
+			const scaled = {
+				...input,
+				iconWidth: 34,
+				trailingReservedWidths: new Map([[activeTitleId, 30]]),
+			};
+			expect(resolveWindowTabPresentation({ ...scaled, availableWidth: 166 })).toEqual({
+				visibleIds: order.slice(0, 3),
+				labelMode: 'active-title',
+				activeTitleId,
+			});
+			expect(resolveWindowTabPresentation({ ...scaled, availableWidth: 165 })).toEqual({
+				visibleIds: order.slice(0, 2),
+				labelMode: 'active-title',
+				activeTitleId,
+			});
+		});
+
+		it('does not reserve a close control when none is present', () => {
+			expect(
+				resolveWindowTabPresentation({
+					...input,
+					trailingReservedWidths: undefined,
+					availableWidth: 94,
+				}),
+			).toEqual({ visibleIds: order.slice(0, 2), labelMode: 'active-title', activeTitleId });
+		});
+
+		it.each([null, 'missing-tab', order[1]])('ignores an ineligible title %s', (candidate) => {
+			expect(
+				resolveWindowTabPresentation({
+					...input,
+					activeTitleId: candidate,
+					availableWidth: 178,
+				}),
+			).toEqual({ visibleIds: order, labelMode: 'icon-only' });
+		});
+
+		it('keeps a short active title without altering the full-label measurement', () => {
+			expect(
+				resolveWindowTabPresentation({
+					...input,
+					widths: new Map([...input.widths, [activeTitleId, 70]]),
+					availableWidth: 118,
+				}),
+			).toEqual({ visibleIds: order.slice(0, 2), labelMode: 'active-title', activeTitleId });
+		});
+
+		it('waits for complete measurements before applying title priority', () => {
+			expect(
+				resolveWindowTabPresentation({
+					...input,
+					widths: new Map([[activeTitleId, 160]]),
+					availableWidth: 118,
+				}),
+			).toEqual({ visibleIds: order, labelMode: 'full' });
+		});
+	});
 });
 
 describe('resolveWindowTabCapacity', () => {
