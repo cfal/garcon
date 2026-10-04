@@ -100,7 +100,6 @@ export class PromptComposerAttachmentController {
 	}
 
 	#isFileDrag(event: DragEvent): boolean {
-		const transfer = event.dataTransfer;
-		return Boolean(transfer && (transfer.types.includes('Files') || transfer.files.length > 0));
+		return event.dataTransfer?.types.includes('Files') ?? false;
 	}
 }

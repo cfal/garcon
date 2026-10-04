@@ -246,12 +246,10 @@ describe('PromptComposer focus', () => {
 		expect(container.querySelector('[data-composer-shell]')?.contains(notice)).toBe(false);
 		expect(surface.querySelector('[role="status"]')).toBeNull();
 		expect(surface.className).toBe(surfaceMarkup);
-		expect(onAvailabilityNoticeChange).toHaveBeenLastCalledWith(
-			expect.objectContaining({
-				notice: { kind: 'catalog-failed', message: 'Catalog unavailable' },
-				onRetryCatalog: expect.any(Function),
-			}),
-		);
+		expect(onAvailabilityNoticeChange).toHaveBeenLastCalledWith(expect.objectContaining({
+			notice: { kind: 'catalog-failed', message: 'Catalog unavailable' },
+			onRetryCatalog: expect.any(Function),
+		}));
 		expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Send message' }).disabled).toBe(
 			true,
 		);
@@ -2307,8 +2305,7 @@ describe('PromptComposer focus', () => {
 			target,
 			resolution: { kind: 'unavailable' as const, reason: 'not-found' as const },
 		}));
-		const onAvailabilityNoticeChange =
-			vi.fn<(notice: ComposerAvailabilityNoticePresentation | null) => void>();
+		const onAvailabilityNoticeChange = vi.fn<(notice: ComposerAvailabilityNoticePresentation | null) => void>();
 		const onChooseProjectFolder = vi.fn();
 		const props = {
 			selectedChatId: 'notice-chat-one',
@@ -2330,11 +2327,9 @@ describe('PromptComposer focus', () => {
 		expect(onChooseProjectFolder).toHaveBeenCalledWith('notice-chat-one');
 
 		await fireEvent.input(screen.getByRole('textbox'), { target: { value: '/' } });
-		await waitFor(() =>
-			expect(onAvailabilityNoticeChange).toHaveBeenLastCalledWith(
-				expect.objectContaining({ chatId: 'notice-chat-two' }),
-			),
-		);
+		await waitFor(() => expect(onAvailabilityNoticeChange).toHaveBeenLastCalledWith(
+			expect.objectContaining({ chatId: 'notice-chat-two' }),
+		));
 		await rendered.rerender({ ...props, selectedChatId: 'notice-chat-two', isVisible: false });
 		expect(onAvailabilityNoticeChange).toHaveBeenLastCalledWith(null);
 		await rendered.rerender({ ...props, selectedChatId: 'notice-chat-two', isVisible: true });

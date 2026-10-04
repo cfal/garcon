@@ -223,8 +223,7 @@
 					sessions.selectedChatId !== chatId ||
 					modelCatalog !== catalog ||
 					selectedProjectTarget?.projectPath !== projectPath
-				)
-					return;
+				) return;
 				projectState.retry();
 			},
 			onChooseProjectFolder: canChooseProjectFolder

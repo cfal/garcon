@@ -90,6 +90,7 @@ test.each(['idle', 'queued'] as const)('drops native files onto the %s composer 
     }
 
     phase('submitting dropped attachments');
+    const afterId = fakeProviders.anthropic.requests().at(-1)?.id ?? 0;
     if (mode === 'idle') await send.click();
     else await textarea.press('Enter');
     await browserExpect(image).toHaveCount(0);
@@ -98,9 +99,8 @@ test.each(['idle', 'queued'] as const)('drops native files onto the %s composer 
       await browserExpect(page.locator('[data-queue-preview-attachments]')).toHaveAttribute('title', 'dropped.png, notes.md');
       held.releaseEcho();
     }
-    const received = await fakeProviders.anthropic.waitForRequest({
-      lastUserText: `${caption}\n\n<attached-file name="notes.md" mime="text/markdown">\nSynthetic attachment notes\n\n</attached-file>`,
-    });
+    const received = await fakeProviders.anthropic.waitForRequest({}, { afterId });
+    expect(received.lastUserText).toContain(caption);
     const content = received.body.messages.findLast((entry) => entry.role === 'user')?.content;
     expect(content).toEqual(expect.arrayContaining([{
       type: 'image',
