@@ -2,6 +2,7 @@ import type { AgentDescriptor } from '@garcon/common/agent-integration';
 import type { AgentHost } from './host.js';
 import type {
   AgentAuth,
+  AgentInstallation,
   AgentAttachments,
   AgentCatalog,
   AgentCommands,
@@ -38,6 +39,7 @@ export interface AgentIntegration {
   readonly lifecycle: AgentLifecycle;
   readonly migration: AgentMigration;
   readonly auth: AgentAuth | null;
+  readonly installation: AgentInstallation | null;
   readonly commands: AgentCommands | null;
   readonly compaction: AgentCompaction | null;
   readonly forking: AgentNativeFork | null;

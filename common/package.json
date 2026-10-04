@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     "./agent-auth": "./agent-auth.ts",
+    "./agent-installation": "./agent-installation.ts",
     "./agent-execution": "./agent-execution.ts",
     "./agent-integration": "./agent-integration.ts",
     "./agent-settings": "./agent-settings.ts",

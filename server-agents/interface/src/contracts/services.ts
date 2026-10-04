@@ -12,6 +12,7 @@ import type {
   AgentSettingsEnvelope,
 } from '@garcon/common/agent-integration';
 import type { AgentModelOption } from '@garcon/common/agents';
+import type { AgentCliInstallationStatus, AgentCliUpdateResult } from '@garcon/common/agent-installation';
 import type { ThinkingMode } from '@garcon/common/chat-modes';
 import type { JsonObject } from '@garcon/common/json';
 import type { SlashCommand } from '@garcon/common/slash-commands';
@@ -20,7 +21,7 @@ import type {
   AgentResumeRequestV5,
 } from './execution-v5.js';
 import type { AgentNativeSessionRef } from './transcript.js';
-import type { AgentProducerBinding, AgentResourceRef, ExecutorCallOptions } from './resources.js';
+import type { AgentInstanceCallOptions, AgentProducerBinding, AgentResourceRef, ExecutorCallOptions } from './resources.js';
 
 export interface AgentCatalog {
   snapshot(request: {
@@ -58,6 +59,11 @@ export interface AgentAuth {
   launchLogin?(): Promise<AgentAuthLoginLaunchResult>;
   completeLogin?(sessionId: string, code: string): Promise<AgentAuthLoginCompleteResult>;
   loginStatus?(expectedSessionId?: string): Promise<AgentAuthLoginStatus>;
+}
+
+export interface AgentInstallation {
+  status(options?: ExecutorCallOptions): Promise<AgentCliInstallationStatus>;
+  update(options?: ExecutorCallOptions & AgentInstanceCallOptions): Promise<AgentCliUpdateResult>;
 }
 
 export interface AgentCommands {

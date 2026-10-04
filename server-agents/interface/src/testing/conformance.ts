@@ -16,6 +16,7 @@ const REQUIRED_FACET_METHODS = {
 
 const NULLABLE_FACET_METHODS = {
   auth: ['status'],
+  installation: ['status', 'update'],
   commands: ['discover'],
   compaction: ['compact'],
   forking: ['fork', 'discard'],

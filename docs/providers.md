@@ -26,6 +26,42 @@ Assignments in one workspace:
 
 `localhost`, DNS resolution, private IP reachability, TLS trust, and outbound IP belong to the executing executor. Assigning a profile does not rewrite its URL, change the executor's network, or make an unreachable endpoint reachable.
 
+## Native CLI Updates
+
+Settings → Providers → Native Providers → Claude exposes the installed Claude
+Code version, Garcon's minimum supported version, and an explicit Update Claude
+Code action for each ready executor. Expanding the provider card loads the
+version; Refresh version checks the configured launcher again.
+
+The nullable integration `installation` facet owns status and update operations.
+Claude implements it using its configured binary's `update` command and release
+channel. Other integrations declare it unavailable. The controller routes the
+action to the card's executor through the same typed facet for Local and remote
+workers, without requiring working chat execution or native authentication.
+The update request captures the displayed `instanceId`; controller admission and
+remote session acquisition reject a replacement worker instead of updating it.
+The new HTTP operations are browser settings operations, outside the executor
+CLI gateway allowlist.
+
+An update is bounded to 90 seconds and 16 KiB of output per stream. Concurrent
+requests on the same integration share one updater. A completed command is
+followed by a fresh version probe, and every attempt clears the execution
+compatibility cache. A package-manager no-op or pinned launcher that still runs
+an unsupported version remains visibly unsupported. Update output is available
+for manual package-manager guidance. Existing sessions continue on their
+current binary; newly launched processes use the updated installation.
+Successful and failed command output retains sanitized stdout and stderr.
+
+Remote updates wait up to 15 seconds to acquire a session of the captured worker.
+An admitted update receives a separate 105-second RPC budget for the updater and
+version probe. Its journaled result keeps that execution budget across reconnects;
+the acquisition deadline does not cancel it. Browser requests allow 135 seconds
+for both budgets and HTTP response delivery.
+
+Executor protocol revision 15 adds `installation.status`, `installation.update`,
+and the nullable facet capability. Both RPC operations retain journaled results
+across reconnects; they never retarget another executor or restart chats.
+
 ## Scope And Decisions
 
 - Keep custom provider profiles and API keys on the controller.

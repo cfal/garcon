@@ -96,6 +96,7 @@ export default class CodexAgentIntegration implements AgentIntegration {
   readonly lifecycle;
   readonly migration;
   readonly auth: NonNullable<AgentIntegration['auth']>;
+  readonly installation = null;
   readonly commands: NonNullable<AgentIntegration['commands']>;
   readonly compaction: NonNullable<AgentIntegration['compaction']>;
   readonly forking;

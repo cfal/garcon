@@ -69,7 +69,7 @@ export function integrationFixture(projectBasePath = '/test-project', executorId
     },
     nativeHistoryImport: { async *load({ signal }) { calls.import++; yield* hooks.history(signal); } },
     singleQuery: { async run(request: AgentSingleQueryRequest) { calls.query++; return hooks.query(request); } },
-    auth: null, commands: null, compaction: null, forking: null, steering: null, endpoints: null,
+    auth: null, installation: null, commands: null, compaction: null, forking: null, steering: null, endpoints: null,
     legacyHistoryImport: null, nativeActivity: null, nativeSessions: null, configurationValidation: null,
     sessionConfiguration: null, projectPathUpdates: null,
   } satisfies AgentIntegration;

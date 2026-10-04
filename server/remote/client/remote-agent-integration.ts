@@ -14,13 +14,14 @@ import {
 } from '@garcon/server-agent-interface';
 import { failureDetail } from '@garcon/server-agent-common/execution/producer-adapter';
 import { createVersionedSettings } from '@garcon/server-agent-common/settings/versioned-settings';
+import { AGENT_CLI_UPDATE_ACQUIRE_TIMEOUT_MS, AGENT_CLI_UPDATE_RPC_TIMEOUT_MS } from '@garcon/common/agent-installation';
 import type {
   ExecutorRpcMethods, IntegrationManifest, ProducerAcknowledgement, ProducerResumeState,
 } from '../transport/rpc-protocol.js';
 import type { RemoteSessionBacking, RemoteSessions } from './executor-client.js';
 import { failureReason } from '../transport/failure-reason.js';
 import { createLogger, type Logger } from '../../common/log.js';
-import { EXECUTOR_DISCONNECTED_BEFORE_START, EXECUTOR_DISCONNECTED_MID_TURN } from '../../common/executor-disconnect.js';
+import { EXECUTOR_DISCONNECTED_BEFORE_START, EXECUTOR_DISCONNECTED_MID_TURN, reconnectTimedOut } from '../../common/executor-disconnect.js';
 
 const SINGLE_QUERY_RPC_GRACE_MS = 30_000;
 // Answers the browser, whose requests time out after 30 s, even while the
@@ -71,6 +72,7 @@ export class RemoteAgentIntegration implements AgentIntegration {
   readonly lifecycle: AgentIntegration['lifecycle'];
   readonly migration: AgentIntegration['migration'];
   readonly auth: AgentIntegration['auth'];
+  readonly installation: AgentIntegration['installation'];
   readonly commands: AgentIntegration['commands'];
   readonly compaction: AgentIntegration['compaction'];
   readonly forking: AgentIntegration['forking'];
@@ -225,6 +227,27 @@ export class RemoteAgentIntegration implements AgentIntegration {
       translateLegacySettings: ({ signal, ...request }) => call('migration.translateLegacySettings', request, { signal }),
     };
     const cap = manifest.capabilities;
+    this.installation = cap.installation ? {
+      status: (options) => call('installation.status', null, options),
+      update: async (options) => {
+        const expectedScope = options?.expectedScope ?? this.producers.scope;
+        assertAgentResourceScope(this.producers.scope, expectedScope);
+        const dispatchDeadline = Math.min(options?.dispatchDeadline ?? Infinity, performance.now() + AGENT_CLI_UPDATE_ACQUIRE_TIMEOUT_MS);
+        return sessions.send('primary', {
+          signal: options?.signal,
+          timeoutMs: null,
+          dispatchDeadline,
+          instanceId: expectedScope.instanceId,
+        }, ({ backing: { rpc } }) => {
+          if (performance.now() >= dispatchDeadline) throw reconnectTimedOut();
+          // Acquisition bounds admission; an admitted update retains its full budget across reconnects.
+          return rpc.call(this.descriptor.id, 'installation.update', null, {
+            signal: options?.signal,
+            timeoutMs: options?.timeoutMs ?? AGENT_CLI_UPDATE_RPC_TIMEOUT_MS,
+          });
+        });
+      },
+    } : null;
     this.auth = cap.auth ? {
       status: (signal) => call('auth.status', null, { signal }),
       ...(manifest.authMethods.launchLogin ? { launchLogin: () => call('auth.launchLogin', null) } : {}),

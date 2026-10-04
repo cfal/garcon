@@ -65,6 +65,7 @@ export default class FactoryAgentIntegration implements AgentIntegration {
   readonly lifecycle;
   readonly migration;
   readonly auth: NonNullable<AgentIntegration['auth']>;
+  readonly installation = null;
   readonly commands = null;
   readonly compaction = null;
   readonly forking = null;

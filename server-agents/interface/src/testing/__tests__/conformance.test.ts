@@ -58,6 +58,7 @@ const integration = {
     translateLegacySettings: async () => null,
   },
   auth: null,
+  installation: null,
   commands: null,
   compaction: null,
   forking: null,

@@ -169,6 +169,8 @@ export function serveExecutionRuntime(
       case 'migration.translateLegacyNativeSession': return integration.migration.translateLegacyNativeSession({ ...call.request, signal });
       case 'migration.translateLegacySettings': return integration.migration.translateLegacySettings({ ...call.request, signal });
       case 'auth.status': return required(integration.auth).status(signal);
+      case 'installation.status': return required(integration.installation).status({ signal });
+      case 'installation.update': return required(integration.installation).update({ signal, expectedScope: integration.producers.scope });
       case 'auth.launchLogin': return required(required(integration.auth).launchLogin)();
       case 'auth.completeLogin': return required(required(integration.auth).completeLogin)(call.request.sessionId, call.request.code);
       case 'auth.loginStatus': return required(required(integration.auth).loginStatus)(call.request.expectedSessionId);

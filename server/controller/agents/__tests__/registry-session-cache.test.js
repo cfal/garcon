@@ -16,6 +16,7 @@ import { TranscriptLedgerService } from '../../ledger/service.ts';
 import { TranscriptLedgerStore } from '../../ledger/store.ts';
 import { AgentRegistry } from '../registry.ts';
 import createAgentRoutes from '../../routes/agents.ts';
+import { AGENT_CLI_UPDATE_RPC_TIMEOUT_MS } from '../../../../common/agent-installation.ts';
 
 const CHAT_ID = '1783725900000200';
 const AT = '2026-08-15T00:00:00.000Z';
@@ -102,6 +103,17 @@ describe('AgentRegistry session cache', () => {
     expect(registry.steeringSupport('plain')).toBe('unsupported');
     expect(registry.steeringSupport('missing')).toBe('unknown');
     expect(registry.steeringSupport('steerable', '22222222-2222-4222-8222-222222222222')).toBe('unknown');
+  });
+
+  it('rejects an installation update captured before the Local instance changed', async () => {
+    const update = mock(() => Promise.resolve({ installation: { version: '2.1.285', minimumVersion: '2.1.238', supported: true }, output: '' }));
+    const integration = { producers: { scope: { executorId: 'local', integrationId: 'test', instanceId: 'new-instance' } }, installation: { update } };
+    const registry = createRegistry(undefined, undefined, { require: () => integration });
+    await expect(registry.updateAgentInstallation({ agentId: 'test', executorId: 'local', instanceId: 'old-instance' }))
+      .rejects.toMatchObject({ code: 'STALE_RESOURCE', outcome: 'not-dispatched' });
+    expect(update).not.toHaveBeenCalled();
+    await registry.updateAgentInstallation({ agentId: 'test', executorId: 'local', instanceId: 'new-instance' });
+    expect(update).toHaveBeenCalledWith({ expectedScope: integration.producers.scope, timeoutMs: AGENT_CLI_UPDATE_RPC_TIMEOUT_MS });
   });
 
   it('previews existing ledgers without resolving a provider or adopting history', async () => {

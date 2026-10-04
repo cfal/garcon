@@ -1,16 +1,25 @@
-import type {
-  AgentNativeSessionRef,
-  AgentProjectPathUpdatePreparation,
-  AgentSteerResult,
-  AgentSteerTarget,
-  AgentTranscriptSourceLocation,
-  ExecutorCallOptions,
+import {
+  assertAgentResourceScope,
+  type AgentIntegration,
+  type AgentInstallation,
+  type AgentNativeSessionRef,
+  type AgentProjectPathUpdatePreparation,
+  type AgentSteerResult,
+  type AgentSteerTarget,
+  type AgentTranscriptSourceLocation,
+  type ExecutorCallOptions,
 } from '@garcon/server-agent-interface';
 import type { PermissionDecisionPayload } from '../../../common/chat-command-contracts.js';
 import type { ChatMessage } from '@garcon/common/chat-types';
 import type { ChatTransientControlAction } from '../../../common/chat-transient-feed.js';
 import type { PermissionMode, ThinkingMode } from '../../../common/chat-modes.js';
 import type { AgentCatalogEntry, AgentModelOption } from '../../../common/agents.js';
+import {
+  AGENT_CLI_UPDATE_RPC_TIMEOUT_MS,
+  type AgentCliInstallationStatus,
+  type AgentCliUpdateRequest,
+  type AgentCliUpdateResult,
+} from '../../../common/agent-installation.js';
 import type { SlashCommand } from '../../../common/slash-commands.js';
 import type {
   AgentAuthLoginCompleteResult,
@@ -120,6 +129,8 @@ export interface AgentRegistryServiceContract {
   getAgentAuthStatusMap(executorId?: string | null): Promise<Record<string, unknown>>;
   getAgentReadinessMap(authByAgent?: Record<string, unknown>, executorId?: string | null): Promise<Record<string, unknown>>;
   getAgentAuthStatus(agentId: string, executorId?: string | null): Promise<unknown | null>;
+  getAgentInstallationStatus(agentId: string, executorId: string): Promise<AgentCliInstallationStatus>;
+  updateAgentInstallation(request: AgentCliUpdateRequest): Promise<AgentCliUpdateResult>;
   getAgentCatalogEntries(executorId?: string | null): Promise<AgentCatalogEntry[]>;
   getAgentCatalogEntry(agentId: string, query?: AgentModelQuery): Promise<AgentCatalogEntry | null>;
   assertExecutionModeSelectionSupported(agentId: string, selection: {
@@ -465,6 +476,22 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     const auth = this.#directory.require(agentId, executorId).auth;
     if (!auth?.launchLogin) throw new Error(`Auth login is not supported for agent: ${agentId}`);
     return auth.launchLogin();
+  }
+  async getAgentInstallationStatus(agentId: string, executorId: string): Promise<AgentCliInstallationStatus> {
+    return this.#requireInstallation(agentId, executorId).installation.status();
+  }
+  async updateAgentInstallation({ agentId, executorId, instanceId }: AgentCliUpdateRequest): Promise<AgentCliUpdateResult> {
+    const { integration, installation } = this.#requireInstallation(agentId, executorId);
+    const expectedScope = { executorId, instanceId, integrationId: agentId };
+    assertAgentResourceScope(integration.producers.scope, expectedScope);
+    return installation.update({ expectedScope, timeoutMs: AGENT_CLI_UPDATE_RPC_TIMEOUT_MS });
+  }
+  #requireInstallation(agentId: string, executorId: string): { integration: AgentIntegration; installation: AgentInstallation } {
+    this.#directory.requireReady(executorId);
+    const integration = this.#directory.require(agentId, executorId);
+    const installation = integration.installation;
+    if (!installation) throw new DomainError('OPERATION_UNSUPPORTED', 'This agent does not support CLI updates.', 400);
+    return { integration, installation };
   }
   async completeAgentAuthLogin(agentId: string, sessionId: string, code: string, executorId?: string | null): Promise<AgentAuthLoginCompleteResult> {
     const complete = this.#directory.require(agentId, executorId).auth?.completeLogin;

@@ -78,6 +78,7 @@ export default class OpenCodeAgentIntegration implements AgentIntegration {
   readonly lifecycle;
   readonly migration;
   readonly auth: NonNullable<AgentIntegration['auth']>;
+  readonly installation = null;
   readonly commands = null;
   readonly compaction: NonNullable<AgentIntegration['compaction']>;
   readonly forking;

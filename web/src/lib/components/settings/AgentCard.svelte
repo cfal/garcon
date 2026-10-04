@@ -1,5 +1,6 @@
 <!-- Renders one agent auth/readiness card. -->
 <script lang="ts">
+	import type { Snippet } from 'svelte';
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import * as Collapsible from '$lib/components/ui/collapsible/index.js';
@@ -36,6 +37,7 @@
 		pending = false,
 		readiness = undefined,
 		noLogin = false,
+		children,
 	}: {
 		agentId: AgentId;
 		agentName: string;
@@ -50,6 +52,7 @@
 		pending?: boolean;
 		readiness?: AgentReadiness;
 		noLogin?: boolean;
+		children?: Snippet;
 	} = $props();
 
 	let codeCopied = $state(false);
@@ -107,7 +110,7 @@
 				: m.settings_agents_auth_status_disconnected(),
 	);
 	let expandable = $derived(
-		!auth.loading && !noLogin && !(auth.authenticated && !auth.canReauth && !cliOnly),
+		children !== undefined || (!auth.loading && !noLogin && !(auth.authenticated && !auth.canReauth && !cliOnly)),
 	);
 </script>
 
@@ -295,6 +298,9 @@
 					<div role="alert" class="text-sm text-destructive">
 						{m.settings_agents_error({ error: auth.error })}
 					</div>
+				{/if}
+				{#if open}
+					{@render children?.()}
 				{/if}
 			</div>
 		</Collapsible.Content>

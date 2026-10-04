@@ -98,6 +98,15 @@ async function probeClaudeCliVersion(claudeBinary: string): Promise<CliVersion> 
 export class ClaudeCliVersionProbe {
   readonly #versions = new Map<string, Promise<CliVersion>>();
 
+  invalidate(claudeBinary: string): void {
+    this.#versions.delete(claudeBinary);
+  }
+
+  refresh(claudeBinary: string): Promise<CliVersion> {
+    this.invalidate(claudeBinary);
+    return this.#version(claudeBinary);
+  }
+
   async assertCompatible(claudeBinary: string): Promise<CliVersion> {
     const version = await this.#version(claudeBinary);
     if (isVersionBefore(version, MINIMUM_CLAUDE_CLI_VERSION)) {

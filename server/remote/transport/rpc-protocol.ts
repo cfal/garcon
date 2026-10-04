@@ -32,10 +32,10 @@ type Call<Q, R> = { readonly request: Q; readonly result: R };
 // frames. Bump it with any change to what either side sends or accepts. Builds
 // of one release share a package version, so without the bump a mismatched
 // pair passes the handshake and fails mid-session instead.
-export const EXECUTOR_PROTOCOL_REVISION = 14;
+export const EXECUTOR_PROTOCOL_REVISION = 15;
 
 export const NULLABLE_AGENT_FACETS = [
-  'auth', 'commands', 'compaction', 'forking', 'steering', 'endpoints', 'singleQuery',
+  'auth', 'installation', 'commands', 'compaction', 'forking', 'steering', 'endpoints', 'singleQuery',
   'legacyHistoryImport', 'nativeHistoryImport', 'nativeActivity', 'nativeSessions',
   'configurationValidation', 'sessionConfiguration', 'projectPathUpdates',
 ] as const satisfies readonly (keyof AgentIntegration)[];
@@ -84,6 +84,8 @@ export interface ExecutorRpcMethods extends FileRpcMethods, TerminalRpcMethods, 
   'migration.translateLegacyNativeSession': Call<WithoutSignal<Request<'migration', 'translateLegacyNativeSession'>>, Result<'migration', 'translateLegacyNativeSession'>>;
   'migration.translateLegacySettings': Call<WithoutSignal<Request<'migration', 'translateLegacySettings'>>, Result<'migration', 'translateLegacySettings'>>;
   'auth.status': Call<null, Result<'auth', 'status'>>;
+  'installation.status': Call<null, Result<'installation', 'status'>>;
+  'installation.update': Call<null, Result<'installation', 'update'>>;
   'auth.launchLogin': Call<null, Awaited<ReturnType<NonNullable<Facet<'auth'>['launchLogin']>>>>;
   'auth.completeLogin': Call<{ readonly sessionId: string; readonly code: string }, Awaited<ReturnType<NonNullable<Facet<'auth'>['completeLogin']>>>>;
   'auth.loginStatus': Call<{ readonly expectedSessionId?: string }, Awaited<ReturnType<NonNullable<Facet<'auth'>['loginStatus']>>>>;
@@ -167,6 +169,8 @@ const CONTINUITY: Readonly<Record<ClassifiedMethod, RpcContinuity>> = {
   'migration.translateLegacyNativeSession': 'journaled',
   'migration.translateLegacySettings': 'journaled',
   'auth.status': 'journaled',
+  'installation.status': 'journaled',
+  'installation.update': 'journaled',
   'auth.launchLogin': 'journaled',
   'auth.completeLogin': 'journaled',
   'auth.loginStatus': 'journaled',

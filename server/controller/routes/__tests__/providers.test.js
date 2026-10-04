@@ -26,6 +26,10 @@ describe('agent auth login routes', () => {
     getAgentAuthStatus: mock(() => Promise.resolve(null)),
     getAgentAuthStatusMap: mock(() => Promise.resolve({})),
     getAgentReadinessMap: mock(() => Promise.resolve({})),
+    getAgentInstallationStatus: mock(() => Promise.resolve({ version: '2.1.207', minimumVersion: '2.1.238', supported: false })),
+    updateAgentInstallation: mock(() => Promise.resolve({
+      installation: { version: '2.1.285', minimumVersion: '2.1.238', supported: true }, output: 'Update complete',
+    })),
     getAgentCatalogEntries: mock(() => Promise.resolve([])),
     launchAgentAuthLogin: mock(() => Promise.resolve({
       launched: true,
@@ -73,6 +77,59 @@ describe('agent auth login routes', () => {
     expect(response.status).toBe(200);
     expect(body).toEqual({ launched: true, alreadyRunning: false, sessionId: 'session-a' });
     expect(agents.launchAgentAuthLogin).toHaveBeenCalledWith('claude', 'local');
+  });
+
+  it('reports the configured executor installation even when Claude cannot start', async () => {
+    const url = new URL('http://localhost/api/v1/agents/installation?agent=claude&executorId=22222222-2222-4222-8222-222222222222');
+    const response = await routes[url.pathname].GET(new Request(url), url);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ version: '2.1.207', supported: false });
+    expect(agents.getAgentInstallationStatus).toHaveBeenCalledWith('claude', '22222222-2222-4222-8222-222222222222');
+  });
+
+  it('updates only the selected executor installation', async () => {
+    parseJsonBody.mockResolvedValueOnce({ agentId: 'claude', executorId: '22222222-2222-4222-8222-222222222222', instanceId: 'instance-a' });
+    const response = await routes['/api/v1/agents/installation/update'].POST(new Request('http://localhost/api/v1/agents/installation/update', { method: 'POST' }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ installation: { version: '2.1.285', supported: true } });
+    expect(agents.updateAgentInstallation).toHaveBeenCalledWith({ agentId: 'claude', executorId: '22222222-2222-4222-8222-222222222222', instanceId: 'instance-a' });
+  });
+
+  it('exposes actionable update errors instead of claiming success', async () => {
+    parseJsonBody.mockResolvedValueOnce({ agentId: 'claude', instanceId: 'local-instance' });
+    agents.updateAgentInstallation.mockRejectedValueOnce(new AgentIntegrationError('PROVIDER_FAILURE', 'Run your package manager', true));
+    const response = await routes['/api/v1/agents/installation/update'].POST(new Request('http://localhost/api/v1/agents/installation/update', { method: 'POST' }));
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ error: 'Run your package manager', errorCode: 'PROVIDER_FAILURE' });
+  });
+
+  it.each([undefined, null, 42, '', '   ', 'x'.repeat(129)])('rejects a missing or malformed installation instance: %p', async (instanceId) => {
+    parseJsonBody.mockResolvedValueOnce({ agentId: 'claude', executorId: 'local', instanceId });
+    const response = await routes['/api/v1/agents/installation/update'].POST(new Request('http://localhost/api/v1/agents/installation/update', { method: 'POST' }));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ errorCode: 'VALIDATION_FAILED', error: expect.stringContaining('instanceId') });
+    expect(agents.updateAgentInstallation).not.toHaveBeenCalled();
+  });
+
+  it('surfaces a stale installation instance without reporting success', async () => {
+    parseJsonBody.mockResolvedValueOnce({ agentId: 'claude', executorId: 'local', instanceId: 'old-instance' });
+    agents.updateAgentInstallation.mockRejectedValueOnce(new AgentCallError('not-dispatched', 'The agent resource belongs to a different executor instance', 'STALE_RESOURCE'));
+    const response = await routes['/api/v1/agents/installation/update'].POST(new Request('http://localhost/api/v1/agents/installation/update', { method: 'POST' }));
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ errorCode: 'STALE_RESOURCE', retryable: false });
+  });
+
+  it('rejects missing or unknown agents and malformed executor IDs', async () => {
+    const url = new URL('http://localhost/api/v1/agents/installation');
+    expect((await routes[url.pathname].GET(new Request(url), url)).status).toBe(400);
+    parseJsonBody.mockResolvedValueOnce({ executorId: 'local' });
+    expect((await routes['/api/v1/agents/installation/update'].POST(new Request(url, { method: 'POST' }))).status).toBe(400);
+    parseJsonBody.mockResolvedValueOnce({ agentId: 'claude', executorId: 'invalid', instanceId: 'instance-a' });
+    expect((await routes['/api/v1/agents/installation/update'].POST(new Request(url, { method: 'POST' }))).status).toBe(400);
+    parseJsonBody.mockResolvedValueOnce({ agentId: 'unknown', instanceId: 'instance-a' });
+    agents.hasAgent.mockReturnValueOnce(false);
+    expect((await routes['/api/v1/agents/installation/update'].POST(new Request(url, { method: 'POST' }))).status).toBe(400);
+    expect(agents.updateAgentInstallation).not.toHaveBeenCalled();
   });
 
   it.each([
