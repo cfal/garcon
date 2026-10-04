@@ -223,7 +223,8 @@
 					sessions.selectedChatId !== chatId ||
 					modelCatalog !== catalog ||
 					selectedProjectTarget?.projectPath !== projectPath
-				) return;
+				)
+					return;
 				projectState.retry();
 			},
 			onChooseProjectFolder: canChooseProjectFolder
@@ -275,10 +276,10 @@
 	const attachmentController = new PromptComposerAttachmentController({
 		composer: composerState,
 		get attachmentInputBlocked() {
-			return promptRefinement.pending;
+			return !isPresented || isDisabled || promptRefinement.pending;
 		},
 		get attachmentPickerBlocked() {
-			return promptTransformPending;
+			return !isPresented || isDisabled || promptTransformPending;
 		},
 		get attachmentSupport() {
 			return attachmentSupport;
@@ -295,7 +296,7 @@
 		if (!changed) return;
 		snippetExpansion.cancel();
 		promptRefinement.abort();
-		composerState.isDragActive = false;
+		attachmentController.resetDrag();
 	});
 
 	// Cancels path-bound expansion when a selected chat moves to another project.
@@ -733,6 +734,12 @@
 		data-composer
 		class={composerSurfaceClass}
 		aria-busy={promptTransformPending}
+		role="region"
+		aria-label={m.chat_composer_message_input_area()}
+		ondragenter={(event) => attachmentController.handleDragEnter(event)}
+		ondragover={(event) => attachmentController.handleDragOver(event)}
+		ondragleave={(event) => attachmentController.handleDragLeave(event)}
+		ondrop={(event) => attachmentController.handleDrop(event)}
 		{@attach attachProcessingPulse}
 		{@attach snippetExpansion.pending && snippetExpansionLayer}
 		{@attach promptRefinement.pending &&
@@ -808,7 +815,8 @@
 			{/if}
 			{#if composerState.isDragActive}
 				<div
-					class="absolute inset-0 bg-primary/20 border-2 border-dashed border-primary flex items-center justify-center z-50 rounded-lg"
+					data-attachment-drop-overlay
+					class="pointer-events-none absolute inset-0 bg-primary/20 border-2 border-dashed border-primary flex items-center justify-center z-50 rounded-lg"
 				>
 					<div class="bg-card rounded-lg p-4 shadow-md">
 						<ImagePlus class="w-8 h-8 text-primary mx-auto mb-2" />
@@ -820,7 +828,7 @@
 			<ComposerAttachmentList
 				files={composerState.images}
 				previewUrls={imageAttachments.urls}
-				disabled={promptTransformPending}
+				disabled={isDisabled || promptTransformPending}
 				class={imageListClass}
 				onRemove={(index) => composerState.removeImage(index)}
 			/>
@@ -830,19 +838,12 @@
 				type="file"
 				accept={attachmentAccept}
 				multiple
-				disabled={promptTransformPending}
+				disabled={isDisabled || promptTransformPending}
 				class="hidden"
 				onchange={(event) => attachmentController.handleFileChange(event)}
 			/>
 
-			<div
-				class="relative overflow-hidden bg-transparent focus-within:ring-0"
-				ondragover={(event) => attachmentController.handleDragOver(event)}
-				ondragleave={() => attachmentController.handleDragLeave()}
-				ondrop={(event) => attachmentController.handleDrop(event)}
-				role="region"
-				aria-label={m.chat_composer_message_input_area()}
-			>
+			<div class="relative overflow-hidden bg-transparent focus-within:ring-0">
 				<div class="relative z-10">
 					<textarea
 						bind:this={textarea}

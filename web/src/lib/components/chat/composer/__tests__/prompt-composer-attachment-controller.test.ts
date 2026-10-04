@@ -9,6 +9,13 @@ function fileTransfer(file: File): DataTransfer {
 	return transfer;
 }
 
+function dragEvent(type: string, transfer: DataTransfer): DragEvent {
+	const event = new DragEvent(type, { cancelable: true });
+	// Happy DOM does not initialize DragEvent.dataTransfer from the constructor.
+	Object.defineProperty(event, 'dataTransfer', { value: transfer });
+	return event;
+}
+
 describe('PromptComposerAttachmentController', () => {
 	it('keeps the picker blocked during transforms without cancelling expansion', () => {
 		let pickerBlocked = true;
@@ -102,15 +109,55 @@ describe('PromptComposerAttachmentController', () => {
 		input.type = 'file';
 		input.files = fileTransfer(image).files;
 
-		controller.handleFileChange({ target: input } as unknown as Event);
+		input.addEventListener('change', (event) => controller.handleFileChange(event));
+		input.dispatchEvent(new Event('change'));
 		controller.handlePaste(new ClipboardEvent('paste', { clipboardData: fileTransfer(image) }));
-		controller.handleDrop({
-			preventDefault: vi.fn(),
-			dataTransfer: fileTransfer(image),
-		} as unknown as DragEvent);
+		controller.handleDragOver(dragEvent('dragover', fileTransfer(image)));
+		expect(composer.isDragActive).toBe(false);
+		const drop = dragEvent('drop', fileTransfer(image));
+		controller.handleDrop(drop);
+		expect(drop.defaultPrevented).toBe(true);
 
 		expect(onAttachmentInput).not.toHaveBeenCalled();
 		expect(addImages).not.toHaveBeenCalled();
 		expect(composer.isDragActive).toBe(false);
+	});
+
+	it('filters mixed drops using the current provider attachment support', () => {
+		const addImages = vi.fn<ComposerState['addImages']>();
+		const onAttachmentInput = vi.fn();
+		let support: ChatAttachmentSupport = {
+			allowImages: true,
+			fileMimeTypes: ['text/markdown', 'video/mp4'],
+		};
+		const composer = { addImages, isDragActive: false };
+		const controller = new PromptComposerAttachmentController({
+			composer,
+			attachmentInputBlocked: false,
+			attachmentPickerBlocked: false,
+			get attachmentSupport() {
+				return support;
+			},
+			onAttachmentInput,
+		});
+		const image = new File(['image'], 'image.png', { type: 'image/png' });
+		const notes = new File(['notes'], 'notes.md');
+		const video = new File(['video'], 'video.mp4', { type: 'video/mp4' });
+		const archive = new File(['archive'], 'archive.zip', { type: 'application/zip' });
+		const transfer = new DataTransfer();
+		for (const file of [image, notes, video, archive]) transfer.items.add(file);
+		controller.handleDragEnter(dragEvent('dragenter', transfer));
+		expect(transfer.dropEffect).toBe('copy');
+		expect(composer.isDragActive).toBe(true);
+
+		support = { allowImages: false, fileMimeTypes: ['text/markdown'] };
+		controller.handleDrop(dragEvent('drop', transfer));
+		expect(addImages).toHaveBeenCalledWith([notes], support);
+		expect(onAttachmentInput).toHaveBeenCalledOnce();
+		expect(composer.isDragActive).toBe(false);
+
+		controller.handleDrop(dragEvent('drop', fileTransfer(archive)));
+		expect(addImages).toHaveBeenCalledOnce();
+		expect(onAttachmentInput).toHaveBeenCalledOnce();
 	});
 });

@@ -14,6 +14,7 @@ interface PromptComposerAttachmentOptions {
 
 export class PromptComposerAttachmentController {
 	fileInput: HTMLInputElement | undefined;
+	#dragDepth = 0;
 
 	constructor(private readonly options: PromptComposerAttachmentOptions) {}
 
@@ -31,22 +32,43 @@ export class PromptComposerAttachmentController {
 		input.value = '';
 	}
 
-	handleDragOver(event: DragEvent): void {
-		event.preventDefault();
-		if (this.options.attachmentInputBlocked) {
-			this.options.composer.isDragActive = false;
-			return;
-		}
-		this.options.composer.isDragActive = true;
+	handleDragEnter(event: DragEvent): void {
+		if (!this.#isFileDrag(event)) return;
+		if (!this.options.composer.isDragActive) this.#dragDepth = 0;
+		this.#dragDepth += 1;
+		this.handleDragOver(event);
 	}
 
-	handleDragLeave(): void {
+	handleDragOver(event: DragEvent): void {
+		if (!this.#isFileDrag(event)) return;
+		event.preventDefault();
+		event.stopPropagation();
+		const support = this.options.attachmentSupport;
+		const allowed =
+			!this.options.attachmentInputBlocked &&
+			(support.allowImages || support.fileMimeTypes.length > 0);
+		if (event.dataTransfer) event.dataTransfer.dropEffect = allowed ? 'copy' : 'none';
+		this.options.composer.isDragActive = allowed;
+	}
+
+	handleDragLeave(event: DragEvent): void {
+		if (!this.#isFileDrag(event)) return;
+		event.stopPropagation();
+		// Native file drags can omit relatedTarget when crossing descendants.
+		this.#dragDepth = Math.max(0, this.#dragDepth - 1);
+		if (this.#dragDepth === 0) this.resetDrag();
+	}
+
+	resetDrag(): void {
+		this.#dragDepth = 0;
 		this.options.composer.isDragActive = false;
 	}
 
 	handleDrop(event: DragEvent): void {
+		if (!this.#isFileDrag(event)) return;
 		event.preventDefault();
-		this.options.composer.isDragActive = false;
+		event.stopPropagation();
+		this.resetDrag();
 		const files = event.dataTransfer?.files;
 		if (!files) return;
 		const attachments = this.#supportedAttachments(files);
@@ -75,5 +97,10 @@ export class PromptComposerAttachmentController {
 		return Array.from(files).filter((file) =>
 			isSupportedChatAttachment(file, this.options.attachmentSupport),
 		);
+	}
+
+	#isFileDrag(event: DragEvent): boolean {
+		const transfer = event.dataTransfer;
+		return Boolean(transfer && (transfer.types.includes('Files') || transfer.files.length > 0));
 	}
 }

@@ -246,10 +246,12 @@ describe('PromptComposer focus', () => {
 		expect(container.querySelector('[data-composer-shell]')?.contains(notice)).toBe(false);
 		expect(surface.querySelector('[role="status"]')).toBeNull();
 		expect(surface.className).toBe(surfaceMarkup);
-		expect(onAvailabilityNoticeChange).toHaveBeenLastCalledWith(expect.objectContaining({
-			notice: { kind: 'catalog-failed', message: 'Catalog unavailable' },
-			onRetryCatalog: expect.any(Function),
-		}));
+		expect(onAvailabilityNoticeChange).toHaveBeenLastCalledWith(
+			expect.objectContaining({
+				notice: { kind: 'catalog-failed', message: 'Catalog unavailable' },
+				onRetryCatalog: expect.any(Function),
+			}),
+		);
 		expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Send message' }).disabled).toBe(
 			true,
 		);
@@ -784,6 +786,70 @@ describe('PromptComposer focus', () => {
 		expect(queueButton.disabled).toBe(false);
 		await fireEvent.click(queueButton);
 		expect(onsubmit).toHaveBeenCalledOnce();
+	});
+
+	it('accepts multiple files across the composer and keeps the overlay out of hit testing', async () => {
+		const { container } = render(PromptComposerTestHost);
+		const composer = container.querySelector('[data-composer]');
+		if (!composer) throw new Error('Missing composer');
+		const transfer = new DataTransfer();
+		transfer.items.add(new File(['image'], 'dropped.png', { type: 'image/png' }));
+		transfer.items.add(new File(['notes'], 'notes.md', { type: '' }));
+		transfer.items.add(new File(['archive'], 'unsupported.zip', { type: 'application/zip' }));
+
+		await fireEvent.dragEnter(composer, { dataTransfer: transfer });
+		await fireEvent.dragOver(composer, { dataTransfer: transfer });
+		const overlay = screen.getByText('Drop files here').closest('[data-attachment-drop-overlay]');
+		expect(overlay?.classList.contains('pointer-events-none')).toBe(true);
+		await fireEvent.drop(screen.getByRole('button', { name: 'Add to prompt' }), {
+			dataTransfer: transfer,
+		});
+		expect(screen.getByTestId('composer-attachment-count').textContent).toBe('2');
+		expect(screen.queryByText('Drop files here')).toBeNull();
+	});
+
+	it('keeps the drop overlay while moving between composer descendants', async () => {
+		const { container } = render(PromptComposerTestHost);
+		const composer = container.querySelector('[data-composer]');
+		if (!composer) throw new Error('Missing composer');
+		const textarea = screen.getByRole('textbox');
+		const transfer = new DataTransfer();
+		transfer.items.add(new File(['image'], 'nested.png', { type: 'image/png' }));
+		await fireEvent.dragEnter(composer, { dataTransfer: transfer });
+		await fireEvent.dragEnter(textarea, { dataTransfer: transfer });
+		await fireEvent.dragLeave(textarea, { dataTransfer: transfer });
+		expect(screen.getByText('Drop files here')).toBeTruthy();
+		await fireEvent.dragLeave(composer, { dataTransfer: transfer });
+		expect(screen.queryByText('Drop files here')).toBeNull();
+	});
+
+	it('leaves text drags native without showing an attachment overlay', async () => {
+		render(PromptComposerTestHost);
+		const transfer = new DataTransfer();
+		transfer.setData('text/plain', 'Synthetic dragged text');
+		const event = new DragEvent('dragover', {
+			bubbles: true,
+			cancelable: true,
+		});
+		Object.defineProperty(event, 'dataTransfer', { value: transfer });
+		await fireEvent(screen.getByRole('textbox'), event);
+		expect(event.defaultPrevented).toBe(false);
+		expect(screen.queryByText('Drop files here')).toBeNull();
+	});
+
+	it('clears drag feedback on chat switch without remounting or moving the composer', async () => {
+		const { container, rerender } = render(PromptComposerTestHost, { selectedChatId: 'drop-a' });
+		const composer = container.querySelector('[data-composer]');
+		if (!composer) throw new Error('Missing composer');
+		const transfer = new DataTransfer();
+		transfer.items.add(new File(['image'], 'switch.png', { type: 'image/png' }));
+		await fireEvent.dragEnter(composer, { dataTransfer: transfer });
+		await fireEvent.dragOver(composer, { dataTransfer: transfer });
+		expect(screen.getByText('Drop files here')).toBeTruthy();
+		await rerender({ selectedChatId: 'drop-b' });
+		expect(container.querySelector('[data-composer]')).toBe(composer);
+		expect(screen.queryByText('Drop files here')).toBeNull();
+		expect(screen.getByTestId('composer-attachment-count').textContent).toBe('0');
 	});
 
 	it('admits picker, paste, and drop attachments when submission requires the queue', async () => {
@@ -1710,9 +1776,11 @@ describe('PromptComposer focus', () => {
 		await waitFor(() => expect(snippetsApi.expandSnippet).toHaveBeenCalledOnce());
 
 		const attachment = new File(['image'], 'dropped.png', { type: 'image/png' });
+		const transfer = new DataTransfer();
+		transfer.items.add(attachment);
 		const dropTarget = textarea.closest('[role="region"]');
 		if (!dropTarget) throw new Error('Missing composer drop target');
-		await fireEvent.drop(dropTarget, { dataTransfer: { files: [attachment] } });
+		await fireEvent.drop(dropTarget, { dataTransfer: transfer });
 
 		expect(screen.getByTestId('composer-attachment-count').textContent).toBe('1');
 		const expansionOptions = vi.mocked(snippetsApi.expandSnippet).mock.calls[0]?.[1];
@@ -2239,7 +2307,8 @@ describe('PromptComposer focus', () => {
 			target,
 			resolution: { kind: 'unavailable' as const, reason: 'not-found' as const },
 		}));
-		const onAvailabilityNoticeChange = vi.fn<(notice: ComposerAvailabilityNoticePresentation | null) => void>();
+		const onAvailabilityNoticeChange =
+			vi.fn<(notice: ComposerAvailabilityNoticePresentation | null) => void>();
 		const onChooseProjectFolder = vi.fn();
 		const props = {
 			selectedChatId: 'notice-chat-one',
@@ -2261,9 +2330,11 @@ describe('PromptComposer focus', () => {
 		expect(onChooseProjectFolder).toHaveBeenCalledWith('notice-chat-one');
 
 		await fireEvent.input(screen.getByRole('textbox'), { target: { value: '/' } });
-		await waitFor(() => expect(onAvailabilityNoticeChange).toHaveBeenLastCalledWith(
-			expect.objectContaining({ chatId: 'notice-chat-two' }),
-		));
+		await waitFor(() =>
+			expect(onAvailabilityNoticeChange).toHaveBeenLastCalledWith(
+				expect.objectContaining({ chatId: 'notice-chat-two' }),
+			),
+		);
 		await rendered.rerender({ ...props, selectedChatId: 'notice-chat-two', isVisible: false });
 		expect(onAvailabilityNoticeChange).toHaveBeenLastCalledWith(null);
 		await rendered.rerender({ ...props, selectedChatId: 'notice-chat-two', isVisible: true });
