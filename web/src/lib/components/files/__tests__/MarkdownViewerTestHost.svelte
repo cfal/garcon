@@ -19,15 +19,21 @@
 	import type { PresentationHostId, WorkspaceLayoutReader } from '$lib/workspace/surface-types.js';
 	import { createWorkspaceLayoutStore } from '$lib/workspace/workspace-layout.svelte.js';
 	import MarkdownViewer from '../MarkdownViewer.svelte';
+	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
+	import type { ExecutorSnapshot } from '$shared/executors';
 
 	let {
 		session,
+		executors,
+		executorUpdate,
 		presentation = 'window-main',
 		onOpen,
 		notifications = createNotificationsStore(),
 		workspaceLayout = createWorkspaceLayoutStore(),
 	}: {
 		session: FileViewSession;
+		executors?: readonly ExecutorSnapshot[];
+		executorUpdate?: readonly ExecutorSnapshot[];
 		presentation?: PresentationHostId;
 		onOpen: (
 			request: FileOpenRequest,
@@ -36,6 +42,7 @@
 		workspaceLayout?: WorkspaceLayoutReader;
 	} = $props();
 
+	const executorStore = setExecutorsTestContext(untrack(() => executors));
 	const localSettings = createLocalSettingsStore();
 	localSettings.markdownViewerFontSize = '14';
 	const fileSessions = new FileSessionRegistry({
@@ -74,3 +81,8 @@
 </script>
 
 <MarkdownViewer {session} {presentation} />
+{#if executorUpdate}
+	<button type="button" onclick={() => executorStore.applySnapshot(executorUpdate!)}>
+		Update executors
+	</button>
+{/if}

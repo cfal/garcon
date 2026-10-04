@@ -261,6 +261,15 @@
 	);
 
 	let commandMenu = $state<{ toggle: () => void } | null>(null);
+	// Projects presentation-only bounds without coupling Markdown loading to settings.
+	$effect(() => {
+		const root = document.documentElement;
+		root.dataset.inlineImageThumbnailSize = localSettings.inlineImageThumbnailSize;
+		return () => {
+			delete root.dataset.inlineImageThumbnailSize;
+		};
+	});
+
 	// Projects the browser-local backdrop preference to portal-rendered overlays.
 	$effect(() => {
 		return projectOverlayBackdropEffects(

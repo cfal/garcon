@@ -2,12 +2,106 @@ import { describe, expect, it } from 'vitest';
 import {
 	resolveFileLinkFromFile,
 	resolveFileLinkTarget,
+	resolveImageFileTarget,
+	resolveImageFileFromFile,
 } from '$lib/chat/file-links/file-link-resolver.js';
 
 const opts = {
 	fileRootPath: '/workspace',
 	sourceDirectoryPath: '/workspace/current',
 };
+
+describe('Markdown image file targets', () => {
+	const context = { executorId: 'worker', executorContextKey: 'synthetic-worker-context' };
+	it('resolves executor-qualified chat and file-relative images', () => {
+		expect(resolveImageFileTarget('../shared/capture%20one.PNG', { ...opts, ...context })).toEqual({
+			...context,
+			projectPath: '/workspace',
+			filePath: 'shared/capture one.PNG',
+		});
+		expect(
+			resolveImageFileFromFile('../images/capture.png', {
+				...context,
+				fileRootPath: '/workspace',
+				sourceFilePath: 'project/docs/guide.md',
+			}),
+		).toEqual({
+			...context,
+			projectPath: '/workspace',
+			filePath: 'project/images/capture.png',
+		});
+	});
+
+	it.each([
+		'../../outside.png',
+		'/outside.png',
+		'notes.txt',
+		'https://example.com/a.png',
+		'data:image/png;base64,x',
+		'%ZZ',
+	])('rejects %s', (href) => {
+		expect(resolveImageFileTarget(href, { ...opts, ...context })).toBeNull();
+	});
+
+	it('requires an explicit executor', () => {
+		expect(
+			resolveImageFileTarget('capture.png', { ...opts, ...context, executorId: '' }),
+		).toBeNull();
+	});
+
+	it.each(['//server/share/workspace', '\\\\server\\share\\workspace'])(
+		'preserves UNC root %s for chat and document images',
+		(fileRootPath) => {
+			expect(
+				resolveImageFileTarget('capture.png', {
+					...context,
+					fileRootPath,
+					sourceDirectoryPath: `${fileRootPath}/project`,
+				}),
+			).toEqual({
+				...context,
+				projectPath: '//server/share/workspace',
+				filePath: 'project/capture.png',
+			});
+			expect(
+				resolveImageFileFromFile('../images/capture.png', {
+					...context,
+					fileRootPath,
+					sourceFilePath: 'project/docs/guide.md',
+				}),
+			).toEqual({
+				...context,
+				projectPath: '//server/share/workspace',
+				filePath: 'project/images/capture.png',
+			});
+			expect(
+				resolveImageFileTarget('../../outside.png', {
+					...context,
+					fileRootPath,
+					sourceDirectoryPath: `${fileRootPath}/project`,
+				}),
+			).toBeNull();
+		},
+	);
+
+	it('preserves a UNC share root without crossing into another share', () => {
+		const fileRootPath = '//server/share/';
+		expect(
+			resolveImageFileTarget('../capture.png', {
+				...context,
+				fileRootPath,
+				sourceDirectoryPath: '//server/share/project',
+			}),
+		).toEqual({ ...context, projectPath: fileRootPath, filePath: 'capture.png' });
+		expect(
+			resolveImageFileTarget('capture.png', {
+				...context,
+				fileRootPath,
+				sourceDirectoryPath: '//server/other/project',
+			}),
+		).toBeNull();
+	});
+});
 
 describe('resolveFileLinkTarget', () => {
 	it('resolves absolute links under the configured base', () => {

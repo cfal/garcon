@@ -33,7 +33,11 @@
 	import Markdown from '$lib/components/rich-text/Markdown.svelte';
 	import type { MarkdownLinkNavigateEvent } from '$lib/components/rich-text/Markdown.svelte';
 	import { resolveFileOpenTarget } from '$lib/chat/file-links/file-open-target.js';
-	import { resolveFileLinkTarget } from '$lib/chat/file-links/file-link-resolver.js';
+	import {
+		resolveFileLinkTarget,
+		resolveImageFileTarget,
+		type ResolveMarkdownImageFile,
+	} from '$lib/chat/file-links/file-link-resolver.js';
 	import {
 		resolveChatReferenceTarget,
 		type ResolveChatReference,
@@ -157,6 +161,8 @@
 	const projectBasePath = $derived(
 		executorId === 'local' ? appShell.projectBasePath : (executors.get(executorId)?.projectBasePath ?? ''),
 	);
+	// Automatic reads wait for the confirmed executor root, not the shell's startup default.
+	const imageFileRootPath = $derived(executors.get(executorId)?.projectBasePath);
 	const chatProjectPath = $derived(
 		filesAvailable ? (activeChatContext?.projectPath ?? null) : null,
 	);
@@ -456,6 +462,16 @@
 		void releaseAfterPortalClose(release);
 	}
 
+	const resolveImageFile: ResolveMarkdownImageFile = (href) => {
+		if (!filesAvailable || !imageFileRootPath || !chatProjectPath) return null;
+		return resolveImageFileTarget(href, {
+			executorId,
+			executorContextKey: executors.pathContextKey(executorId),
+			fileRootPath: imageFileRootPath,
+			sourceDirectoryPath: chatProjectPath,
+		});
+	};
+
 	/** Routes a file-like markdown link to the viewer overlay. */
 	function handleLinkNavigate(link: MarkdownLinkNavigateEvent): boolean | void {
 		if (link.kind !== 'file') return;
@@ -586,6 +602,7 @@
 										variant={userMessagePresentation?.style ? 'presented' : 'user'}
 										fileLinkBasePath={projectBasePath}
 										onLinkNavigate={handleLinkNavigate}
+										{resolveImageFile}
 										{resolveChatReference}
 										chatReferencePolicy={userMessagePresentation ? 'explicit' : 'explicit-and-bare'}
 										{acquireTransientActivity}
@@ -706,6 +723,7 @@
 							resultAnchorId={toolResultRowId ? `tool-result-${toolResultRowId}` : undefined}
 							autoExpandTools={localSettings.autoExpandTools}
 							onFileOpen={filesAvailable ? handleToolFileOpen : undefined}
+							{resolveImageFile}
 							{projectBasePath}
 							{chatProjectPath}
 							{resolveChatReference}
@@ -720,6 +738,7 @@
 							resultAnchorId={rowId ? `tool-result-${rowId}` : undefined}
 							autoExpandTools={localSettings.autoExpandTools}
 							onFileOpen={filesAvailable ? handleToolFileOpen : undefined}
+							{resolveImageFile}
 							{projectBasePath}
 							{chatProjectPath}
 							{resolveChatReference}
@@ -749,6 +768,7 @@
 											variant="thinking"
 											fileLinkBasePath={projectBasePath}
 											onLinkNavigate={handleLinkNavigate}
+											{resolveImageFile}
 											{resolveChatReference}
 											chatReferencePolicy="explicit"
 											{acquireTransientActivity}
@@ -771,6 +791,7 @@
 											variant="assistant"
 											fileLinkBasePath={projectBasePath}
 											onLinkNavigate={handleLinkNavigate}
+											{resolveImageFile}
 											{resolveChatReference}
 											chatReferencePolicy="explicit-and-bare"
 											{acquireTransientActivity}
@@ -803,6 +824,7 @@
 							message={asCliRow}
 							fileLinkBasePath={projectBasePath}
 							onLinkNavigate={handleLinkNavigate}
+							{resolveImageFile}
 							{resolveChatReference}
 							{acquireTransientActivity}
 							alwaysExpanded={localSettings.alwaysExpandCliMessages}
@@ -814,6 +836,7 @@
 							onOpenTicket={(id) => workspace.openTicket(id)}
 							fileLinkBasePath={projectBasePath}
 							onLinkNavigate={handleLinkNavigate}
+							{resolveImageFile}
 							{acquireTransientActivity}
 							{disclosureState}
 							{resolveChatReference}
@@ -831,6 +854,7 @@
 							message={asCompaction}
 							{projectBasePath}
 							onLinkNavigate={handleLinkNavigate}
+							{resolveImageFile}
 							{resolveChatReference}
 							{acquireTransientActivity}
 							open={disclosureState?.open('compaction', 'compaction', false)}

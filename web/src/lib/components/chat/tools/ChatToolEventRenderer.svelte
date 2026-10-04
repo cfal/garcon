@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { ResolveMarkdownImageFile } from '$lib/chat/file-links/file-link-resolver.js';
 	import type { ToolUseChatMessage, TodoItem } from '$shared/chat-types';
 	import {
 		TOOL_DISPLAY_REGISTRY,
@@ -35,6 +36,7 @@
 		projectBasePath?: string | null;
 		chatProjectPath?: string | null;
 		resolveChatReference?: ResolveChatReference;
+		resolveImageFile?: ResolveMarkdownImageFile;
 		autoExpandTools?: boolean;
 		disclosureState?: ConversationDisclosureStatePort;
 		acquireTransientActivity?: (close: () => void) => () => void;
@@ -49,6 +51,7 @@
 		projectBasePath,
 		chatProjectPath,
 		resolveChatReference,
+		resolveImageFile,
 		autoExpandTools = false,
 		disclosureState,
 		acquireTransientActivity,
@@ -252,6 +255,7 @@
 							{chatProjectPath}
 							{onFileOpen}
 							{resolveChatReference}
+							{resolveImageFile}
 							{acquireTransientActivity}
 						/>
 					{:else if displayConfig.contentKind === 'fileList'}

@@ -6,14 +6,17 @@
 	import {
 		FILE_OPEN_PLACEMENT_VALUES,
 		HIDEABLE_TOOL_GROUPS,
+		INLINE_IMAGE_THUMBNAIL_SIZE_VALUES,
 		SIDEBAR_INACTIVITY_DURATION_VALUES,
 		WORKSPACE_WINDOW_TITLEBAR_HEIGHT_DELTA_MAX_PX,
 		WORKSPACE_WINDOW_TITLEBAR_HEIGHT_DELTA_MIN_PX,
 		isChatMaxWidth,
 		isFileOpenPlacement,
+		isInlineImageThumbnailSize,
 		isSidebarInactivityDuration,
 		type ChatMaxWidth,
 		type FileOpenPlacementPreference,
+		type InlineImageThumbnailSize,
 		type SidebarInactivityDuration,
 	} from '$lib/stores/local-settings.svelte.js';
 	import {
@@ -41,6 +44,11 @@
 		{ value: 'medium', label: m.settings_chat_max_width_medium },
 		{ value: 'small', label: m.settings_chat_max_width_small },
 	];
+	const inlineImageThumbnailSizeLabels: Record<InlineImageThumbnailSize, () => string> = {
+		small: m.settings_inline_image_thumbnail_size_small,
+		medium: m.settings_inline_image_thumbnail_size_medium,
+		large: m.settings_inline_image_thumbnail_size_large,
+	};
 	const hideableToolGroupLabels = {
 		bash: m.settings_chat_hidden_tool_bash,
 		exec: m.settings_chat_hidden_tool_exec,
@@ -76,6 +84,10 @@
 
 	function setFileOpenPlacement(key: FilePlacementSettingKey, value: string): void {
 		if (isFileOpenPlacement(value)) ls.set(key, value);
+	}
+
+	function setInlineImageThumbnailSize(value: string): void {
+		if (isInlineImageThumbnailSize(value)) ls.set('inlineImageThumbnailSize', value);
 	}
 
 	function setSidebarInactivityDuration(value: string): void {
@@ -223,6 +235,21 @@
 				>
 					{#each chatMaxWidthOptions as option (option.value)}
 						<option value={option.value}>{option.label()}</option>
+					{/each}
+				</select>
+			</div>
+			<div class="flex flex-col gap-2 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+				<label class="min-w-0 text-sm font-medium text-foreground" for="local-inline-image-size">
+					{m.settings_inline_image_thumbnail_size()}
+				</label>
+				<select
+					id="local-inline-image-size"
+					class="select-native w-full sm:w-auto sm:shrink-0"
+					value={ls.inlineImageThumbnailSize}
+					onchange={(event) => setInlineImageThumbnailSize(event.currentTarget.value)}
+				>
+					{#each INLINE_IMAGE_THUMBNAIL_SIZE_VALUES as size (size)}
+						<option value={size}>{inlineImageThumbnailSizeLabels[size]()}</option>
 					{/each}
 				</select>
 			</div>

@@ -1,9 +1,14 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import Markdown, { type MarkdownLinkNavigateEvent } from '$lib/components/rich-text/Markdown.svelte';
-	import { resolveFileLinkFromFile } from '$lib/chat/file-links/file-link-resolver.js';
+	import {
+		resolveFileLinkFromFile,
+		resolveImageFileFromFile,
+		type ResolveMarkdownImageFile,
+	} from '$lib/chat/file-links/file-link-resolver.js';
 	import type { FileViewSession } from '$lib/files/sessions/file-view-session.svelte.js';
 	import {
+		getExecutors,
 		getFileSessions,
 		getLocalSettings,
 		getNotifications,
@@ -16,6 +21,7 @@
 	let { session, presentation }: { session: FileViewSession; presentation: PresentationHostId } =
 		$props();
 	const files = getFileSessions();
+	const executors = getExecutors();
 	const localSettings = getLocalSettings();
 	const notifications = getNotifications();
 	const workspaceLayout = getWorkspaceLayout();
@@ -62,6 +68,16 @@
 		session.markdownScrollTop = element.scrollTop;
 	}
 
+	const resolveImageFile: ResolveMarkdownImageFile = (href) => {
+		if (!executors.filesAvailable(session.executorId)) return null;
+		return resolveImageFileFromFile(href, {
+			executorId: session.executorId,
+			executorContextKey: executors.pathContextKey(session.executorId),
+			fileRootPath: session.canonicalFileRootPath,
+			sourceFilePath: session.relativePath,
+		});
+	};
+
 	function navigateFileLink(link: MarkdownLinkNavigateEvent): boolean {
 		if (link.kind !== 'file') return false;
 		const target = resolveFileLinkFromFile(link.rawHref, {
@@ -105,6 +121,7 @@
 		variant="assistant"
 		fileLinkBasePath={session.canonicalFileRootPath}
 		onLinkNavigate={navigateFileLink}
+		{resolveImageFile}
 	/>
 </div>
 

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { ResolveMarkdownImageFile } from '$lib/chat/file-links/file-link-resolver.js';
 	import { TranscriptNoticeMessage } from '$shared/chat-types';
 	import type {
 		InterAgentMessageOutcomeNoticeDetail,
@@ -22,6 +23,7 @@
 		message: TranscriptNoticeMessage;
 		detail: InterAgentMessageOutcomeNoticeDetail | InterAgentMessageReceivedNoticeDetail;
 		resolveChatReference?: ResolveChatReference;
+		resolveImageFile?: ResolveMarkdownImageFile;
 		fileLinkBasePath?: string | null;
 		onLinkNavigate?: (link: MarkdownLinkNavigateEvent) => boolean | void;
 		acquireTransientActivity?: (close: () => void) => () => void;
@@ -32,6 +34,7 @@
 		message,
 		detail,
 		resolveChatReference,
+		resolveImageFile,
 		fileLinkBasePath,
 		onLinkNavigate,
 		acquireTransientActivity,
@@ -148,6 +151,7 @@
 							variant="presented"
 							fileLinkBasePath={isOutcome ? (fileLinkBasePath ?? undefined) : undefined}
 							onLinkNavigate={isOutcome ? onLinkNavigate : undefined}
+							resolveImageFile={isOutcome ? resolveImageFile : undefined}
 							{resolveChatReference}
 							chatReferencePolicy="explicit"
 							{acquireTransientActivity}

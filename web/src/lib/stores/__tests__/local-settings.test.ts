@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
 	createLocalSettingsStore,
 	HIDEABLE_TOOL_GROUPS,
+	INLINE_IMAGE_THUMBNAIL_SIZE_VALUES,
 	SIDEBAR_INACTIVITY_DURATION_VALUES,
 } from '../local-settings.svelte.ts';
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
@@ -20,6 +21,7 @@ describe('LocalSettingsStore', () => {
 		expect(store.chatListDock).toBe('left');
 		expect(store.chatListAutohide).toBe(false);
 		expect(store.chatMaxWidth).toBe('none');
+		expect(store.inlineImageThumbnailSize).toBe('medium');
 		expect(store.overlayBackdropEffects).toBe(true);
 		expect(store.alwaysExpandCliMessages).toBe(false);
 		expect(store.combineToolUseMessages).toBe(true);
@@ -46,6 +48,34 @@ describe('LocalSettingsStore', () => {
 
 		store.destroy();
 	});
+
+	it.each(INLINE_IMAGE_THUMBNAIL_SIZE_VALUES)(
+		'persists the %s inline image thumbnail limit',
+		(size) => {
+			const store = createLocalSettingsStore();
+			store.set('inlineImageThumbnailSize', size);
+			expect(
+				JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
+			).toMatchObject({ inlineImageThumbnailSize: size });
+			const restored = createLocalSettingsStore();
+			expect(restored.inlineImageThumbnailSize).toBe(size);
+			store.destroy();
+			restored.destroy();
+		},
+	);
+
+	it.each(['unbounded', '', null, 960, {}, ['large']])(
+		'rejects invalid stored thumbnail size %j',
+		(size) => {
+			localStorage.setItem(
+				LOCAL_STORAGE_KEYS.localSettings,
+				JSON.stringify({ inlineImageThumbnailSize: size }),
+			);
+			const store = createLocalSettingsStore();
+			expect(store.inlineImageThumbnailSize).toBe('medium');
+			store.destroy();
+		},
+	);
 
 	it('persists the Vim toggle', () => {
 		const store = createLocalSettingsStore();
@@ -867,6 +897,7 @@ describe('LocalSettingsStore', () => {
 			JSON.stringify({
 				...firstStore.snapshot(),
 				chatMaxWidth: 'small',
+				inlineImageThumbnailSize: 'large',
 				overlayBackdropEffects: false,
 				sidebarGrouping: 'project',
 				sidebarInactivityDuration: '1-month',
@@ -893,6 +924,7 @@ describe('LocalSettingsStore', () => {
 		);
 
 		expect(secondStore.chatMaxWidth).toBe('small');
+		expect(secondStore.inlineImageThumbnailSize).toBe('large');
 		expect(secondStore.overlayBackdropEffects).toBe(false);
 		expect(secondStore.sidebarGrouping).toBe('project');
 		expect(secondStore.sidebarInactivityDuration).toBe('1-month');
@@ -918,6 +950,7 @@ describe('LocalSettingsStore', () => {
 	it('restores defaults when the settings key is removed or local storage is cleared', () => {
 		const store = createLocalSettingsStore();
 		store.set('themePreference', { mode: 'fixed', themeId: 'classic-dark' });
+		store.set('inlineImageThumbnailSize', 'large');
 
 		localStorage.removeItem(LOCAL_STORAGE_KEYS.localSettings);
 		window.dispatchEvent(
@@ -928,13 +961,16 @@ describe('LocalSettingsStore', () => {
 			}),
 		);
 		expect(store.themePreference).toEqual(DEFAULT_THEME_PREFERENCE);
+		expect(store.inlineImageThumbnailSize).toBe('medium');
 
 		store.set('themePreference', { mode: 'fixed', themeId: 'classic-dark' });
+		store.set('inlineImageThumbnailSize', 'small');
 		localStorage.clear();
 		window.dispatchEvent(
 			new StorageEvent('storage', { key: null, newValue: null, storageArea: localStorage }),
 		);
 		expect(store.themePreference).toEqual(DEFAULT_THEME_PREFERENCE);
+		expect(store.inlineImageThumbnailSize).toBe('medium');
 		store.destroy();
 	});
 
