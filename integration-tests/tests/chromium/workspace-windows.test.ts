@@ -894,6 +894,144 @@ async function resizeFirstPartition(page: Page): Promise<{ value: string; persis
 }
 
 describe('Chromium workspace windows', () => {
+  test('retains selected Chat titles before overflowing other tabs', async () => {
+    await withChromiumFixture('workspace-active-chat-title', async (fixture, markPhase) => {
+      const { page } = fixture;
+      await createGitFixture(fixture.integration.dirs.project);
+      const chatIds = await Promise.all([
+        createChat(fixture, 'Synthetic first conversation with a long title for compact tabs'),
+        createChat(fixture, 'Synthetic second conversation with a long title for compact tabs'),
+      ]);
+      await openChat(fixture, chatIds[0]!);
+      const windowId = await page
+        .locator('[data-workspace-window-current="true"]')
+        .getAttribute('data-workspace-window-id');
+      if (!windowId) throw new Error('Missing Chat window.');
+      const filesWindowId = await canonicalFilesWindowId(page);
+      await openWindowTab(page, windowId, 'Open Chat Map');
+      await openWindowTab(page, windowId, 'Open Git Compare');
+      const chatSurfaceId = `chat-view:${windowId}`;
+      const chatTab = page.locator(`[id="${windowId}-tab-${chatSurfaceId}"]`);
+      const tabRail = page.locator(`[data-workspace-window-tabs="${windowId}"]`);
+      await chatTab.click();
+
+      markPhase('retaining a truncated Chat title beside two icons');
+      await setTabRailWidth(page, windowId, 148);
+      await page.waitForFunction((id) => {
+        const rail = document.querySelector(`[data-workspace-window-tabs="${id}"]`);
+        return (
+          rail
+            ?.querySelector('[aria-selected="true"]')
+            ?.getAttribute('data-workspace-tab-label-mode') === 'truncated' &&
+          rail.querySelectorAll('[data-workspace-tab-label-mode="icon-only"]').length === 2
+        );
+      }, windowId);
+      expect(await tabRail.locator('[role="tab"]').count()).toBe(3);
+      expect(
+        await tabRail.evaluate((element) => {
+          const bounds = element.getBoundingClientRect();
+          const tabs = Array.from(element.querySelectorAll('[role="tab"]'));
+          return tabs.every((tab, index) => {
+            const rect = tab.getBoundingClientRect();
+            const previous = tabs[index - 1]?.getBoundingClientRect();
+            return (
+              rect.left >= bounds.left &&
+              rect.right <= bounds.right + 1 &&
+              (!previous || previous.right <= rect.left)
+            );
+          });
+        }),
+      ).toBe(true);
+
+      const composer = page.locator('textarea[placeholder="Reply..."]');
+      await composer.fill('Synthetic retained draft');
+      const composerElement = await composer.elementHandle();
+      const composerBounds = await composer.boundingBox();
+      const chatTabElement = await chatTab.elementHandle();
+      markPhase('switching chats without remounting the composer or title tab');
+      for (const chatId of [...chatIds, ...chatIds, ...chatIds]) {
+        await page.locator(`[data-sidebar-virtual-row="${chatId}"]`).click();
+        await page.waitForFunction(
+          ({ id, selectedChat }) =>
+            document
+              .querySelector(`[id="${id}-tab-chat-view:${id}"]`)
+              ?.getAttribute('title')
+              ?.endsWith(selectedChat),
+          { id: windowId, selectedChat: chatId },
+        );
+        expect(await chatTab.getAttribute('data-workspace-tab-label-mode')).toBe('truncated');
+      }
+      await page.locator(`[data-sidebar-virtual-row="${chatIds[0]}"]`).click();
+      await page.waitForFunction(
+        ({ id, chatId }) =>
+          document
+            .querySelector(`[data-conversation-panel="chat-view:${id}"]`)
+            ?.getAttribute('data-conversation-panel-chat-id') === chatId,
+        { id: windowId, chatId: chatIds[0] },
+      );
+      const panelElement = await conversationPanel(page, windowId).elementHandle();
+      markPhase('retaining the selected Chat title and conversation across window activation');
+      await page
+        .locator(`[data-workspace-window-titlebar="${filesWindowId}"]`)
+        .click({ position: { x: 20, y: 3 } });
+      await waitForCurrentWorkspaceWindow(page, filesWindowId);
+      expect(await chatTab.getAttribute('data-workspace-tab-label-mode')).toBe('truncated');
+      await chatTab.click();
+      await waitForCurrentWorkspaceWindow(page, windowId);
+      expect(await composer.inputValue()).toBe('Synthetic retained draft');
+      expect(await composer.boundingBox()).toEqual(composerBounds);
+      expect(await composerElement!.evaluate((element) => element.isConnected)).toBe(true);
+      expect(await panelElement!.evaluate((element) => element.isConnected)).toBe(true);
+      expect(await chatTabElement!.evaluate((element) => element.isConnected)).toBe(true);
+
+      markPhase('overflowing other tabs before sacrificing the Chat title');
+      await setTabRailWidth(page, windowId, 88);
+      await page.waitForFunction(
+        (id) =>
+          document.querySelectorAll(`[data-workspace-window-tabs="${id}"] [role="tab"]`).length ===
+          1,
+        windowId,
+      );
+      expect(await chatTab.getAttribute('data-workspace-tab-label-mode')).toBe('truncated');
+      await page.locator(`[data-workspace-window-menu-trigger="${windowId}"]`).click();
+      const hiddenCompare = page.locator('[data-workspace-hidden-tab-id="singleton:git-compare"]');
+      await hiddenCompare.waitFor({ state: 'visible' });
+      expect(
+        await page.locator('[data-workspace-hidden-tab-id="singleton:chat-map"]').count(),
+      ).toBe(1);
+      await hiddenCompare.click();
+      await waitForTabLabelMode(page, windowId, 'icon-only');
+      expect(await tabRail.locator('[role="tab"]').count()).toBe(3);
+      await chatTab.focus();
+      await page.keyboard.press('Enter');
+      await page.waitForFunction(
+        (id) =>
+          document
+            .querySelector(`[id="${id}-tab-chat-view:${id}"]`)
+            ?.getAttribute('data-workspace-tab-label-mode') === 'truncated',
+        windowId,
+      );
+
+      markPhase('preserving both menu fallbacks at minimal width');
+      await page.locator(`[data-workspace-window-add-trigger="${windowId}"]`).click();
+      await page.getByRole('menuitem', { name: 'Open Git Workbench', exact: true }).waitFor();
+      await page.keyboard.press('Escape');
+      await setTabRailWidth(page, windowId, 20);
+      await page.waitForFunction(
+        (id) =>
+          document.querySelectorAll(`[data-workspace-window-tabs="${id}"] [role="tab"]`).length ===
+          0,
+        windowId,
+      );
+      await page.locator(`[data-workspace-window-menu-trigger="${windowId}"]`).click();
+      await page.locator(`[data-workspace-hidden-tab-id="${chatSurfaceId}"]`).waitFor();
+      await page.keyboard.press('Escape');
+      await setTabRailWidth(page, windowId, null);
+      await chatTab.waitFor({ state: 'visible' });
+      fixture.assertNoBrowserErrors();
+    });
+  });
+
   test('keeps full tab titles ahead of adaptive add actions', async () => {
     await withChromiumFixture('workspace-window-adaptive-add-actions', async (fixture) => {
       await fixture.page.setViewportSize({ width: 1440, height: 900 });
