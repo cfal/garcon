@@ -47,6 +47,7 @@ test.each(['idle', 'queued'] as const)('drops native files onto the %s composer 
     const send = page.getByRole('button', {
       name: mode === 'queued' ? 'Queue message' : 'Send message', exact: true,
     });
+    await browserExpect(send).toBeVisible({ timeout: 20_000 });
     await browserExpect(send).toBeEnabled();
     const target = page.getByRole('button', { name: 'Add to prompt', exact: true });
     const bounds = await target.boundingBox();
