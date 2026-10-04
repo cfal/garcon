@@ -9,6 +9,7 @@ import {
 } from '@garcon/server-agent-interface';
 import type { AgentNativeEvidenceSource } from '@garcon/server-agent-common/native-session/evidence-source';
 import { CliLoginController } from '@garcon/server-agent-common/auth/cli-login-controller';
+import { parseClaudeAuthLoginError, validateClaudeAuthCode } from './agents/claude/claude-auth-login.js';
 import { createModelCatalog } from '@garcon/server-agent-common/catalog/model-catalog';
 import { resolveAgentEndpoint } from '@garcon/server-agent-common/execution/resolve-endpoint';
 import { createJsonlNativeForking } from '@garcon/server-agent-common/forking/jsonl-forking';
@@ -111,6 +112,8 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
       versionProbe,
     });
     const login = new CliLoginController({
+      validateCode: validateClaudeAuthCode,
+      parseOutputError: parseClaudeAuthLoginError,
       command: () => [config.binary(), 'auth', 'login'],
       mode: 'browser-code',
       logger,

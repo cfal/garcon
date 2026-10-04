@@ -22,6 +22,7 @@
 	} from '$lib/components/model-selector/model-selector-types';
 	import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
 	import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
+	import type { ScheduledSnippetExpansionContext } from '$shared/snippets';
 	import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 	import { getAppShell, getExecutors } from '$lib/context';
@@ -37,6 +38,10 @@
 		isMobile: boolean;
 		onPromptChange: (value: string) => void;
 		onPromptKeydown: (event: KeyboardEvent) => void;
+		snippetContext?: ScheduledSnippetExpansionContext | null;
+		snippetContextKey?: string;
+		snippetTrigger?: string;
+		onSnippetPendingChange?: (pending: boolean) => void;
 	}
 
 	let {
@@ -50,6 +55,10 @@
 		isMobile,
 		onPromptChange,
 		onPromptKeydown,
+		snippetContext,
+		snippetContextKey,
+		snippetTrigger,
+		onSnippetPendingChange,
 	}: Props = $props();
 	let textarea: HTMLTextAreaElement | null = $state(null);
 	const appShell = getAppShell();
@@ -223,6 +232,11 @@
 		surface="composer"
 		{onPromptChange}
 		{onPromptKeydown}
+		{snippetContext}
+		{snippetContextKey}
+		{snippetTrigger}
+		{onSnippetPendingChange}
+		onEditSnippets={(returnFocus) => appShell.openSnippetsOverScheduledPrompts(returnFocus)}
 	>
 		{#snippet controls()}
 			<div data-slot="scheduled-new-chat-composer-controls">

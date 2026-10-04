@@ -89,6 +89,33 @@ describe('snippets API contract', () => {
 		vi.restoreAllMocks();
 	});
 
+	it('sends the scheduled target context and receives deferred chat tokens', async () => {
+		fetchMock.mockResolvedValueOnce(
+			Response.json({
+				success: true,
+				source: 'snippet',
+				sourceId: snippet.id,
+				sourceUpdatedAt: snippet.updatedAt,
+				shortName: snippet.shortName,
+				contextProjectPath: '/repo',
+				contextExecutorId: 'local',
+				expandedText: 'Review {{chat_id}}',
+			}),
+		);
+		const request = {
+			shortName: snippet.shortName,
+			arguments: { type: 'default' as const },
+			context: {
+				type: 'scheduled-prompt' as const,
+				target: { type: 'new-chat' as const, projectPath: '/repo' },
+			},
+		};
+		await expect(expandSnippet(request)).resolves.toMatchObject({
+			expandedText: 'Review {{chat_id}}',
+		});
+		expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual(request);
+	});
+
 	it('normalizes snapshots and sends typed create requests', async () => {
 		fetchMock.mockResolvedValueOnce(Response.json({ revision: 1, snippets: [snippet] }));
 		await expect(getSnippets()).resolves.toEqual({ revision: 1, snippets: [snippet] });

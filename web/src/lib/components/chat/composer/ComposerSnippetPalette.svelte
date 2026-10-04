@@ -30,6 +30,7 @@
 		initialQuery?: string;
 		interactionKey: string;
 		contextHint?: string | null;
+		insertionError?: string | null;
 		onInsert: SnippetInsertionHandler;
 		onCancelled?: () => void;
 		onReturnFocus: () => void;
@@ -42,6 +43,7 @@
 		initialQuery = '',
 		interactionKey,
 		contextHint = null,
+		insertionError = null,
 		onInsert,
 		onCancelled,
 		onReturnFocus,
@@ -284,6 +286,7 @@
 	snippet={palette.argumentsSnippet}
 	initialArguments={palette.argumentsDraft}
 	selectInitialArguments={palette.argumentsDraftIsFreshDefault}
+	{insertionError}
 	onClose={() => palette.closeArguments()}
 	onSubmit={(snippet, argumentsText) => palette.submitArguments(snippet, argumentsText)}
 	onCancelled={() => palette.settleArgumentsCancel()}

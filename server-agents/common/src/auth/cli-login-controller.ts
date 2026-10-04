@@ -13,6 +13,11 @@ import {
 
 export type CliLoginCommand = readonly [string, ...string[]];
 
+export type CliLoginOutputError = {
+  readonly retryable: boolean;
+  readonly message: string;
+};
+
 export interface CliLoginPty {
   onData(listener: (chunk: string) => void): void;
   onExit(listener: (event: {
@@ -38,6 +43,8 @@ export interface CliLoginControllerOptions {
   readonly command: () => CliLoginCommand;
   readonly mode: 'browser-code' | 'device-code';
   readonly logger: AgentLogger;
+  readonly validateCode?: (code: string) => string | null;
+  readonly parseOutputError?: (line: string) => CliLoginOutputError | null;
   readonly cwd?: string;
   readonly environment?: () => Record<string, string>;
   readonly spawnProcess?: (
@@ -59,6 +66,8 @@ interface LoginSession {
   process?: { kill(): void };
   browserProcess?: CliLoginProcess;
   deviceAuth?: AgentDeviceAuthInfo;
+  retryableError?: string;
+  failureError?: string;
   watchdog?: ReturnType<typeof setTimeout>;
 }
 
@@ -115,6 +124,8 @@ export class CliLoginController {
         state: 'running',
         running: true,
         sessionId: active.id,
+        completionPending: active.phase === 'completing',
+        ...(active.retryableError ? { retryableError: active.retryableError } : {}),
         deviceAuth: active.deviceAuth,
       };
     }
@@ -133,20 +144,28 @@ export class CliLoginController {
     if (!session || session.id !== sessionId || !proc) {
       throw new CliLoginSessionError('No matching pending auth login');
     }
-    if (!code.trim()) throw new Error('code is required');
+    const trimmedCode = code.trim();
+    if (!trimmedCode) throw new Error('code is required');
     if (!proc.stdin) throw new Error('Pending auth login cannot accept a code');
     if (session.phase !== 'running') {
       throw new CliLoginSessionError('Auth login completion is already pending');
     }
+    const validationError = this.options.validateCode?.(trimmedCode);
+    if (validationError) {
+      session.retryableError = validationError;
+      throw new AgentIntegrationError('AUTH_LOGIN_CODE_INVALID', validationError, true);
+    }
 
     session.phase = 'completing';
+    session.retryableError = undefined;
     try {
-      await proc.stdin.write(`${code.trim()}\n`);
+      await proc.stdin.write(`${trimmedCode}\n`);
       await proc.stdin.flush();
-      await proc.stdin.end();
-    } catch (error) {
-      if (this.#active === session) session.phase = 'running';
-      throw error;
+    } catch {
+      // A partial write cannot safely be retried against the same process.
+      this.#finish(session, { state: 'failed', error: SESSION_FAILED_ERROR });
+      try { proc.kill(); } catch { /* Process exit already owns cleanup. */ }
+      throw new Error(SESSION_FAILED_ERROR);
     }
     return { submitted: true, sessionId };
   }
@@ -157,10 +176,8 @@ export class CliLoginController {
     if (active?.watchdog) clearTimeout(active.watchdog);
     try {
       active?.process?.kill();
-    } catch (error) {
-      this.options.logger.debug('Auth login termination failed', {
-        error: error instanceof Error ? error.message : String(error),
-      });
+    } catch {
+      this.options.logger.debug('Auth login termination failed');
     }
     for (const entry of this.#terminal.values()) clearTimeout(entry.cleanup);
     this.#terminal.clear();
@@ -173,25 +190,36 @@ export class CliLoginController {
     );
     session.browserProcess = proc;
     session.process = proc;
-    const deviceAuth = await readBrowserAuth(
+    const output = readBrowserAuth(
       proc,
       this.options.initialResponseTimeoutMs ?? INITIAL_RESPONSE_TIMEOUT_MS,
       this.options.logger,
+      (line) => {
+        if (this.#active !== session) return;
+        const error = this.options.parseOutputError?.(line);
+        if (!error) return;
+        if (error.retryable && session.phase === 'completing') {
+          session.phase = 'running';
+          session.retryableError = error.message;
+        } else if (!error.retryable) {
+          session.failureError = error.message;
+        }
+      },
     );
+    void proc.exited.then(async (exitCode) => {
+      await output.drained;
+      this.#finishFromExit(session, exitCode);
+    }, () => {
+      this.options.logger.warn('Auth login process failed');
+      this.#finish(session, { state: 'failed', error: SESSION_FAILED_ERROR });
+    });
+    const deviceAuth = await output.initial;
+    if (this.#active !== session) throw new Error(SESSION_UNAVAILABLE_ERROR);
     if (!deviceAuth) {
       proc.kill();
       throw new Error('Auth login did not print a sign-in URL');
     }
     session.deviceAuth = deviceAuth;
-    void proc.exited.then(
-      (exitCode) => this.#finishFromExit(session, exitCode),
-      (error) => {
-        this.options.logger.warn('Auth login process failed', {
-          error: error instanceof Error ? error.message : String(error),
-        });
-        this.#finish(session, { state: 'failed', error: SESSION_FAILED_ERROR });
-      },
-    );
     return {
       launched: true,
       alreadyRunning: false,
@@ -247,10 +275,8 @@ export class CliLoginController {
       this.#finish(session, { state: 'failed', error: SESSION_EXPIRED_ERROR });
       try {
         session.process?.kill();
-      } catch (error) {
-        this.options.logger.debug('Expired auth login termination failed', {
-          error: error instanceof Error ? error.message : String(error),
-        });
+      } catch {
+        this.options.logger.debug('Expired auth login termination failed');
       }
     }, this.options.sessionTimeoutMs ?? SESSION_TIMEOUT_MS);
     session.watchdog.unref?.();
@@ -261,7 +287,7 @@ export class CliLoginController {
       session,
       exitCode === 0
         ? { state: 'succeeded' }
-        : { state: 'failed', error: SESSION_FAILED_ERROR },
+        : { state: 'failed', error: session.failureError ?? SESSION_FAILED_ERROR },
     );
   }
 
@@ -367,41 +393,70 @@ function readBrowserAuth(
   proc: CliLoginProcess,
   timeoutMs: number,
   logger: AgentLogger,
-): Promise<AgentDeviceAuthInfo | null> {
-  return new Promise((resolve) => {
-    let output = '';
-    let settled = false;
-    const finish = (value: AgentDeviceAuthInfo | null) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      resolve(value);
-    };
-    const timeout = setTimeout(() => finish(null), timeoutMs);
-    timeout.unref?.();
-    const read = async (stream: ReadableStream<Uint8Array> | null) => {
-      if (!stream) return;
-      const reader = stream.getReader();
-      const decoder = new TextDecoder();
-      try {
-        while (!settled) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          output += decoder.decode(value, { stream: true });
-          const parsed = parseBrowserAuth(output);
-          if (parsed) return finish(parsed);
-        }
-      } catch (error) {
-        logger.debug('Auth login output read failed', {
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    };
-    void read(proc.stdout);
-    void read(proc.stderr);
-    void proc.exited.then(
-      () => finish(null),
-      () => finish(null),
-    );
-  });
+  onLine: (line: string) => void,
+): {
+  readonly initial: Promise<AgentDeviceAuthInfo | null>;
+  readonly drained: Promise<void>;
+} {
+  let resolveInitial!: (value: AgentDeviceAuthInfo | null) => void;
+  const initial = new Promise<AgentDeviceAuthInfo | null>((resolve) => { resolveInitial = resolve; });
+  let settled = false;
+  const finish = (value: AgentDeviceAuthInfo | null) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timeout);
+    resolveInitial(value);
+  };
+  const timeout = setTimeout(() => finish(null), timeoutMs);
+  timeout.unref?.();
+  const lineReceived = (line: string) => {
+    if (!settled) {
+      const parsed = parseBrowserAuth(line);
+      if (parsed) finish(parsed);
+    }
+    onLine(stripAnsi(line));
+  };
+  // Both pipes remain drained after URL discovery so diagnostics cannot block the CLI.
+  const drained = Promise.all([
+    drainLoginOutput(proc.stdout, lineReceived, logger),
+    drainLoginOutput(proc.stderr, lineReceived, logger),
+  ]).then(() => { finish(null); });
+  return { initial, drained };
+}
+
+async function drainLoginOutput(
+  stream: ReadableStream<Uint8Array> | null,
+  onLine: (line: string) => void,
+  logger: AgentLogger,
+): Promise<void> {
+  if (!stream) return;
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  const maxLineLength = 16_384;
+  let pending = '';
+  const consume = (chunk: string) => {
+    let offset = 0;
+    while (offset < chunk.length) {
+      const newline = chunk.indexOf('\n', offset);
+      const end = newline === -1 ? chunk.length : newline;
+      pending = (pending + chunk.slice(offset, end)).slice(-maxLineLength);
+      if (newline === -1) return;
+      onLine(pending);
+      pending = '';
+      offset = newline + 1;
+    }
+  };
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      consume(decoder.decode(value, { stream: true }));
+    }
+    consume(decoder.decode());
+    if (pending) onLine(pending);
+  } catch {
+    logger.debug('Auth login output read failed');
+  } finally {
+    reader.releaseLock();
+  }
 }

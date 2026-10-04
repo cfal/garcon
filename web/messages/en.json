@@ -1504,9 +1504,10 @@
 	"settings_agents_device_auth_step1": "Open this link and sign in:",
 	"settings_agents_device_auth_step2": "Enter this code:",
 	"settings_agents_device_auth_waiting": "Waiting for authentication...",
-	"settings_agents_browser_auth_code_description": "After signing in, paste the authorization code shown by the provider.",
+	"settings_agents_browser_auth_code_description": "After signing in, paste the complete authorization code shown by the provider, including any # suffix.",
 	"settings_agents_browser_auth_code_placeholder": "Paste authorization code",
 	"settings_agents_browser_auth_submit_button": "Submit code",
+	"settings_agents_browser_auth_completing": "Completing sign-in…",
 	"settings_api_providers_add_alibaba_cloud": "Add Alibaba Cloud",
 	"settings_api_providers_add_anthropic_provider": "Add Anthropic-compatible provider",
 	"settings_api_providers_add_custom_provider": "Add custom provider..",
@@ -2867,5 +2868,6 @@
 			"selectors": ["countPlural"],
 			"match": { "countPlural=one": "{count} worktree", "countPlural=other": "{count} worktrees" }
 		}
-	]
+	],
+	"scheduled_prompts_snippet_help": "Snippets insert editable text. Arguments and project path are filled now; {token} is filled when the prompt runs."
 }

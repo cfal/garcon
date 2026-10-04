@@ -17,6 +17,8 @@ export type AgentAuthLoginStatus =
       state: 'running';
       running: true;
       sessionId: string;
+      completionPending: boolean;
+      retryableError?: string;
       deviceAuth?: AgentDeviceAuthInfo;
     }
   | {

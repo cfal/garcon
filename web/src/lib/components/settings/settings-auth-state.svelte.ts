@@ -6,6 +6,7 @@ import {
 	launchAgentAuthLogin,
 	type DeviceAuthInfo,
 	type AgentReadiness,
+	type AgentAuthLoginStatus,
 } from '$lib/api/agents.js';
 import type { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte.js';
 
@@ -122,7 +123,7 @@ export class SettingsAuthState {
 					window.open(result.deviceAuth.url, '_blank', 'noopener');
 				}
 			}
-			this.loginPending = { ...this.loginPending, [agentId]: false };
+			this.loginPending = { ...this.loginPending, [agentId]: result.alreadyRunning };
 			this.#startLoginSessionPolling(agentId, result.sessionId, operationGeneration, lifecycleId);
 		} catch (err) {
 			if (!this.#isCurrentLoginOperation(agentId, operationGeneration, lifecycleId)) return;
@@ -133,15 +134,11 @@ export class SettingsAuthState {
 				loading: false,
 				error: err instanceof Error ? err.message : String(err),
 			});
-		} finally {
-			if (this.#isCurrentLoginOperation(agentId, operationGeneration, lifecycleId)) {
-				this.loginPending = { ...this.loginPending, [agentId]: false };
-			}
 		}
 	}
 
 	async completeLogin(agentId: SettingsAgentId, code: string): Promise<void> {
-		if (!this.#active || !this.supportsAuthLogin(agentId)) return;
+		if (!this.#active || !this.supportsAuthLogin(agentId) || this.isLoginPending(agentId) || !code.trim()) return;
 		const lifecycleId = this.#lifecycleId;
 		const sessionId = this.#loginSessionIds[agentId];
 		if (!sessionId) return;
@@ -151,17 +148,17 @@ export class SettingsAuthState {
 
 		try {
 			await completeAgentAuthLogin(agentId, sessionId, code, this.executorId);
-			if (!this.#ownsSession(agentId, sessionId, operationGeneration, lifecycleId)) return;
-			this.#startLoginSessionPolling(agentId, sessionId, operationGeneration, lifecycleId);
 		} catch (err) {
 			if (!this.#ownsSession(agentId, sessionId, operationGeneration, lifecycleId)) return;
-			this.loginPending = { ...this.loginPending, [agentId]: false };
 			this.#setAuth(agentId, {
 				...this.authFor(agentId),
 				loading: false,
 				error: err instanceof Error ? err.message : String(err),
 			});
-			this.#startLoginSessionPolling(agentId, sessionId, operationGeneration, lifecycleId);
+		} finally {
+			if (this.#ownsSession(agentId, sessionId, operationGeneration, lifecycleId)) {
+				this.#startLoginSessionPolling(agentId, sessionId, operationGeneration, lifecycleId);
+			}
 		}
 	}
 
@@ -186,7 +183,7 @@ export class SettingsAuthState {
 				canReauth: data.canReauth,
 				label: data.label,
 				loading: false,
-				error: null,
+				error: this.#loginSessionIds[agentId] ? this.authFor(agentId).error : null,
 			});
 			return data.authenticated;
 		} catch (err) {
@@ -287,9 +284,7 @@ export class SettingsAuthState {
 		if (!this.#isCurrentPoll(agentId, pollRunId, operationGeneration, lifecycleId)) return;
 
 		if (status?.state === 'running' && status.sessionId === sessionId) {
-			if (status.deviceAuth) {
-				this.deviceAuthInfo = { ...this.deviceAuthInfo, [agentId]: status.deviceAuth };
-			}
+			this.#applyRunningLoginStatus(agentId, status);
 		} else if (status?.state === 'succeeded' && status.sessionId === sessionId) {
 			this.#stopAuthPolling(agentId);
 			this.#clearLoginState(agentId);
@@ -332,7 +327,6 @@ export class SettingsAuthState {
 		this.#stopAuthPolling(agentId);
 		const pollRunId = ++this.#nextAuthPollRunId;
 		this.#authPollRunIds[agentId] = pollRunId;
-		this.#authPollStartedAt[agentId] = Date.now();
 		void this.#pollLoginSessionUntilDone(
 			agentId,
 			sessionId,
@@ -353,12 +347,26 @@ export class SettingsAuthState {
 				return;
 			}
 			this.#loginSessionIds[agentId] = status.sessionId;
-			if (status.deviceAuth) {
-				this.deviceAuthInfo = { ...this.deviceAuthInfo, [agentId]: status.deviceAuth };
-			}
+			this.#applyRunningLoginStatus(agentId, status);
 			this.#startLoginSessionPolling(agentId, status.sessionId, operationGeneration, lifecycleId);
 		} catch {
 			// Auth status remains usable when login-session restoration is temporarily unavailable.
+		}
+	}
+
+	#applyRunningLoginStatus(
+		agentId: SettingsAgentId,
+		status: Extract<AgentAuthLoginStatus, { state: 'running' }>,
+	): void {
+		this.loginPending = { ...this.loginPending, [agentId]: status.completionPending };
+		if (status.deviceAuth) {
+			this.deviceAuthInfo = { ...this.deviceAuthInfo, [agentId]: status.deviceAuth };
+		}
+		if (status.retryableError) {
+			this.#setAuth(agentId, {
+				...this.authFor(agentId),
+				error: status.retryableError,
+			});
 		}
 	}
 

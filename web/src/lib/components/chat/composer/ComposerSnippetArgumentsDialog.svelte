@@ -14,6 +14,7 @@
 		snippet: Snippet | null;
 		initialArguments?: string;
 		selectInitialArguments?: boolean;
+		insertionError?: string | null;
 		onClose: () => void;
 		onSubmit: (snippet: Snippet, argumentsText: string) => void;
 		onCancelled: () => void;
@@ -25,6 +26,7 @@
 		snippet,
 		initialArguments = '',
 		selectInitialArguments = false,
+		insertionError = null,
 		onClose,
 		onSubmit,
 		onCancelled,
@@ -38,6 +40,9 @@
 	const argumentsId = `${uid}-arguments`;
 	const argumentsErrorId = `${uid}-arguments-error`;
 	const argumentsTooLong = $derived(argumentsText.length > SNIPPET_ARGUMENTS_MAX_LENGTH);
+	const visibleError = $derived(
+		argumentsTooLong ? m.snippets_arguments_too_long() : insertionError,
+	);
 
 	$effect(() => {
 		const nextOpen = open;
@@ -150,8 +155,12 @@
 						{m.snippets_arguments_clear()}
 					</Button>
 				</div>
-				<p id={argumentsErrorId} class="min-h-4 text-xs text-destructive">
-					{argumentsTooLong ? m.snippets_arguments_too_long() : ''}
+				<p
+					id={argumentsErrorId}
+					role={visibleError ? 'alert' : undefined}
+					class="min-h-4 text-xs text-destructive"
+				>
+					{visibleError ?? ''}
 				</p>
 			</div>
 

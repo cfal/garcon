@@ -128,6 +128,9 @@ export default function createAgentRoutes({ agents, apiProviders }: AgentRouteDe
       if (error instanceof AgentIntegrationError && error.code === 'AUTH_LOGIN_SESSION_MISMATCH') {
         return jsonError(error.message, 409, error.code, error.retryable);
       }
+      if (error instanceof AgentIntegrationError && error.code === 'AUTH_LOGIN_CODE_INVALID') {
+        return jsonError(error.message, 400, error.code, error.retryable);
+      }
       return jsonErrorFromUnknown(error);
     }
   }

@@ -146,6 +146,40 @@ describe('AgentCard', () => {
 
 		expect(input.hasAttribute('disabled')).toBe(true);
 		expect(screen.getByRole('button', { name: 'Submit code' }).hasAttribute('disabled')).toBe(true);
+		await fireEvent.click(screen.getByRole('button', { name: 'Submit code' }));
+		expect(screen.getByRole('status').textContent).toContain('Completing sign-in…');
+		expect(onCompleteLogin).not.toHaveBeenCalled();
+	});
+
+	it('keeps the entered code after retryable rejection and submits an edited retry by click', async () => {
+		const onCompleteLogin = vi.fn();
+		const auth = { authenticated: false, canReauth: true, label: '', loading: false, error: null };
+		const { rerender } = render(AgentCard, {
+			agentId: 'claude', agentName: 'Claude', open: true, auth,
+			deviceAuth: { url: 'https://example.test/login', needsCode: true }, onCompleteLogin,
+		});
+		const input = screen.getByRole('textbox', { name: 'Paste authorization code' }) as HTMLInputElement;
+		await fireEvent.input(input, { target: { value: 'partial-code' } });
+		await fireEvent.keyDown(input, { key: 'Enter' });
+		await rerender({ pending: true });
+		await rerender({ pending: false, auth: { ...auth, error: 'Paste the complete code.' } });
+		expect(input.value).toBe('partial-code');
+		expect(screen.getByRole('alert').textContent).toContain('Paste the complete code.');
+		await fireEvent.input(input, { target: { value: 'complete-code#suffix' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Submit code' }));
+		expect(onCompleteLogin).toHaveBeenNthCalledWith(1, 'partial-code');
+		expect(onCompleteLogin).toHaveBeenNthCalledWith(2, 'complete-code#suffix');
+	});
+
+	it('blocks empty code consistently for click and Enter', async () => {
+		const onCompleteLogin = vi.fn();
+		renderCard({ authenticated: false, canReauth: true, label: '', loading: false, error: null }, true, {
+			deviceAuth: { url: 'https://example.test/login', needsCode: true }, onCompleteLogin,
+		});
+		const input = screen.getByRole('textbox', { name: 'Paste authorization code' });
+		await fireEvent.input(input, { target: { value: '   ' } });
+		await fireEvent.keyDown(input, { key: 'Enter' });
+		await fireEvent.click(screen.getByRole('button', { name: 'Submit code' }));
 		expect(onCompleteLogin).not.toHaveBeenCalled();
 	});
 

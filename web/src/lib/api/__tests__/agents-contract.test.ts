@@ -29,7 +29,7 @@ describe('agent login API contract', () => {
 	it('gets the active login session with an encoded agent query', async () => {
 		const payload = {
 			state: 'running',
-			running: true,
+			running: true, completionPending: false,
 			sessionId: 'session-a',
 			deviceAuth: { url: 'https://example.test/device', code: 'AAAA-BBBBB' },
 		};
@@ -59,5 +59,13 @@ describe('agent login API contract', () => {
 			sessionId: 'session-a',
 			code: 'auth-code',
 		});
+	});
+
+	it('receives authoritative pending and retryable-error status without changing session ownership', async () => {
+		for (const fields of [{ completionPending: true }, { completionPending: false, retryableError: 'Copy the entire authorization code.' }]) {
+			const payload = { state: 'running', running: true, sessionId: 'session-a', deviceAuth: { url: 'https://example.test/login', needsCode: true }, ...fields };
+			fetchMock.mockResolvedValueOnce(jsonResponse(payload));
+			await expect(getAgentAuthLoginStatus('claude', 'session-a')).resolves.toEqual(payload);
+		}
 	});
 });

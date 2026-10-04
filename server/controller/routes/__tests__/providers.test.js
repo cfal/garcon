@@ -36,6 +36,7 @@ describe('agent auth login routes', () => {
     getAgentAuthLoginStatus: mock(() => Promise.resolve({
       state: 'running',
       running: true,
+      completionPending: false,
       sessionId: 'session-a',
       deviceAuth: { url: 'https://example.test/device', code: 'AAAA-BBBBB' },
     })),
@@ -123,10 +124,29 @@ describe('agent auth login routes', () => {
     expect(body).toEqual({
       state: 'running',
       running: true,
+      completionPending: false,
       sessionId: 'session-a',
       deviceAuth: { url: 'https://example.test/device', code: 'AAAA-BBBBB' },
     });
     expect(agents.getAgentAuthLoginStatus).toHaveBeenCalledWith('codex', 'session-a', 'local');
+  });
+
+  it('forwards pending completion and safe retry errors for the owned session', async () => {
+    for (const fields of [{ completionPending: true }, { completionPending: false, retryableError: 'Copy the complete code.' }]) {
+      const status = { state: 'running', running: true, sessionId: 'session-a', ...fields };
+      agents.getAgentAuthLoginStatus.mockResolvedValueOnce(status);
+      const request = new Request('http://localhost/api/v1/agents/auth/login?agent=claude&session=session-a');
+      const response = await routes['/api/v1/agents/auth/login'].GET(request, new URL(request.url));
+      expect(await response.json()).toEqual(status);
+    }
+  });
+
+  it('returns a retryable validation response for an incomplete authorization code', async () => {
+    parseJsonBody.mockResolvedValueOnce({ agentId: 'claude', sessionId: 'session-a', code: 'synthetic-incomplete-code' });
+    agents.completeAgentAuthLogin.mockRejectedValueOnce(new AgentIntegrationError('AUTH_LOGIN_CODE_INVALID', 'Copy the complete authorization code.', true));
+    const response = await routes['/api/v1/agents/auth/login/complete'].POST(new Request('http://localhost/api/v1/agents/auth/login/complete', { method: 'POST' }));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ success: false, error: 'Copy the complete authorization code.', errorCode: 'AUTH_LOGIN_CODE_INVALID', retryable: true });
   });
 
   it('validates the missing agent query for login status', async () => {

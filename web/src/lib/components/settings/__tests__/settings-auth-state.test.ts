@@ -52,7 +52,7 @@ describe('SettingsAuthState login lifecycle', () => {
 		});
 		vi.mocked(getAgentAuthLoginStatus).mockResolvedValue({
 			state: 'running',
-			running: true,
+			running: true, completionPending: false,
 			sessionId: SESSION_ID,
 			deviceAuth: DEVICE_AUTH,
 		});
@@ -101,7 +101,7 @@ describe('SettingsAuthState login lifecycle', () => {
 		vi.mocked(getAgentAuthLoginStatus)
 			.mockResolvedValueOnce({
 				state: 'running',
-				running: true,
+				running: true, completionPending: false,
 				sessionId: SESSION_ID,
 				deviceAuth: DEVICE_AUTH,
 			})
@@ -125,10 +125,10 @@ describe('SettingsAuthState login lifecycle', () => {
 			sessionId: SESSION_ID,
 		});
 		vi.mocked(getAgentAuthLoginStatus)
-			.mockResolvedValueOnce({ state: 'running', running: true, sessionId: SESSION_ID })
+			.mockResolvedValueOnce({ state: 'running', running: true, completionPending: false, sessionId: SESSION_ID })
 			.mockResolvedValue({
 				state: 'running',
-				running: true,
+				running: true, completionPending: false,
 				sessionId: SESSION_ID,
 				deviceAuth: DEVICE_AUTH,
 			});
@@ -177,7 +177,7 @@ describe('SettingsAuthState login lifecycle', () => {
 		expect(settingsAuth.isLoginPending('codex')).toBe(false);
 	});
 
-	it('keeps a newer login pending when an older completion settles', async () => {
+	it.each(['resolves', 'rejects'] as const)('preserves a newer login and its polling when an older completion %s', async (settlement) => {
 		const firstCompletion = deferred<Awaited<ReturnType<typeof completeAgentAuthLogin>>>();
 		const secondLaunch = deferred<Awaited<ReturnType<typeof launchAgentAuthLogin>>>();
 		const secondSessionAuth = { url: 'https://example.test/claude-next', needsCode: true };
@@ -190,33 +190,49 @@ describe('SettingsAuthState login lifecycle', () => {
 			})
 			.mockReturnValueOnce(secondLaunch.promise);
 		vi.mocked(completeAgentAuthLogin).mockReturnValueOnce(firstCompletion.promise);
-		vi.mocked(getAgentAuthLoginStatus).mockResolvedValue({
-			state: 'running',
-			running: true,
-			sessionId: 'session-b',
-			deviceAuth: secondSessionAuth,
-		});
+		vi.mocked(getAgentAuthLoginStatus)
+			.mockResolvedValueOnce({
+				state: 'running',
+				running: true, completionPending: false,
+				sessionId: SESSION_ID,
+				deviceAuth: CLAUDE_AUTH,
+			})
+			.mockResolvedValue({
+				state: 'running',
+				running: true, completionPending: true,
+				sessionId: 'session-b',
+				deviceAuth: secondSessionAuth,
+			});
 
 		const settingsAuth = new SettingsAuthState(createModelCatalog());
 		await settingsAuth.handleLogin('claude');
 		const completion = settingsAuth.completeLogin('claude', 'first-code');
 		const newerLogin = settingsAuth.handleLogin('claude');
 
-		firstCompletion.resolve({ submitted: true, sessionId: SESSION_ID });
-		await completion;
-
-		expect(settingsAuth.isLoginPending('claude')).toBe(true);
-
 		secondLaunch.resolve({
-			launched: true,
-			alreadyRunning: false,
+			launched: false,
+			alreadyRunning: true,
 			sessionId: 'session-b',
 			deviceAuth: secondSessionAuth,
 		});
 		await newerLogin;
+		expect(getAgentAuthLoginStatus).toHaveBeenCalledTimes(2);
+
+		if (settlement === 'resolves') {
+			firstCompletion.resolve({ submitted: true, sessionId: SESSION_ID });
+		} else {
+			firstCompletion.reject(new Error('stale completion failed'));
+		}
+		await completion;
 
 		expect(settingsAuth.deviceAuthFor('claude')).toEqual(secondSessionAuth);
-		expect(settingsAuth.isLoginPending('claude')).toBe(false);
+		expect(settingsAuth.isLoginPending('claude')).toBe(true);
+		expect(settingsAuth.authFor('claude').error).toBeNull();
+		expect(getAgentAuthLoginStatus).toHaveBeenCalledTimes(2);
+
+		await vi.advanceTimersByTimeAsync(POLL_TICK_MS);
+		expect(getAgentAuthLoginStatus).toHaveBeenCalledTimes(3);
+		expect(getAgentAuthLoginStatus).toHaveBeenLastCalledWith('claude', 'session-b', 'local');
 	});
 
 	it('ignores a stale restored session after a newer login launches', async () => {
@@ -224,7 +240,7 @@ describe('SettingsAuthState login lifecycle', () => {
 		const secondSessionAuth = { url: 'https://example.test/claude-next', needsCode: true };
 		vi.mocked(getAgentAuthLoginStatus).mockReturnValueOnce(staleRestore.promise).mockResolvedValue({
 			state: 'running',
-			running: true,
+			running: true, completionPending: false,
 			sessionId: 'session-b',
 			deviceAuth: secondSessionAuth,
 		});
@@ -241,7 +257,7 @@ describe('SettingsAuthState login lifecycle', () => {
 
 		staleRestore.resolve({
 			state: 'running',
-			running: true,
+			running: true, completionPending: false,
 			sessionId: SESSION_ID,
 			deviceAuth: CLAUDE_AUTH,
 		});
@@ -263,7 +279,7 @@ describe('SettingsAuthState login lifecycle', () => {
 		vi.mocked(getAgentAuthLoginStatus)
 			.mockResolvedValueOnce({
 				state: 'running',
-				running: true,
+				running: true, completionPending: false,
 				sessionId: SESSION_ID,
 				deviceAuth: CLAUDE_AUTH,
 			})
@@ -287,10 +303,15 @@ describe('SettingsAuthState login lifecycle', () => {
 			deviceAuth: CLAUDE_AUTH,
 		});
 		vi.mocked(completeAgentAuthLogin).mockRejectedValue(new Error('code rejected'));
+		vi.mocked(getAgentAuthLoginStatus).mockResolvedValue({
+			state: 'running', running: true, completionPending: false,
+			sessionId: SESSION_ID, deviceAuth: CLAUDE_AUTH,
+		});
 
 		const settingsAuth = new SettingsAuthState(createModelCatalog());
 		await settingsAuth.handleLogin('claude');
 		await settingsAuth.completeLogin('claude', 'bad-code');
+		await vi.waitFor(() => expect(settingsAuth.isLoginPending('claude')).toBe(false));
 
 		expect(completeAgentAuthLogin).toHaveBeenCalledWith('claude', SESSION_ID, 'bad-code', 'local');
 		expect(settingsAuth.deviceAuthFor('claude')).toEqual(CLAUDE_AUTH);
@@ -308,9 +329,13 @@ describe('SettingsAuthState login lifecycle', () => {
 		vi.mocked(getAgentAuthLoginStatus)
 			.mockResolvedValueOnce({
 				state: 'running',
-				running: true,
+				running: true, completionPending: false,
 				sessionId: SESSION_ID,
 				deviceAuth: CLAUDE_AUTH,
+			})
+			.mockResolvedValueOnce({
+				state: 'running', running: true, completionPending: true,
+				sessionId: SESSION_ID, deviceAuth: CLAUDE_AUTH,
 			})
 			.mockResolvedValue({ state: 'succeeded', running: false, sessionId: SESSION_ID });
 
@@ -417,5 +442,95 @@ describe('SettingsAuthState login lifecycle', () => {
 
 		expect(settingsAuth.authFor('codex').authenticated).toBe(true);
 		expect(settingsAuth.authFor('codex').label).toBe('new@example.com');
+	});
+
+	it('restores pending completion and blocks a programmatic duplicate after reopen', async () => {
+		vi.mocked(getAgentAuthLoginStatus).mockResolvedValue({
+			state: 'running', running: true, completionPending: true,
+			sessionId: SESSION_ID, deviceAuth: CLAUDE_AUTH,
+		});
+		const settingsAuth = new SettingsAuthState(createModelCatalog(['claude']));
+		const cleanup = settingsAuth.initialize();
+		await vi.waitFor(() => expect(settingsAuth.deviceAuthFor('claude')).toEqual(CLAUDE_AUTH));
+		expect(settingsAuth.isLoginPending('claude')).toBe(true);
+		await settingsAuth.completeLogin('claude', 'synthetic-code#suffix');
+		expect(completeAgentAuthLogin).not.toHaveBeenCalled();
+		cleanup();
+		settingsAuth.initialize();
+		await vi.waitFor(() => expect(settingsAuth.isLoginPending('claude')).toBe(true));
+		settingsAuth.destroy();
+	});
+
+	it('retains the same form after CLI rejection and allows a complete-code retry', async () => {
+		vi.mocked(launchAgentAuthLogin).mockResolvedValue({
+			launched: true, alreadyRunning: false, sessionId: SESSION_ID, deviceAuth: CLAUDE_AUTH,
+		});
+		vi.mocked(getAgentAuthLoginStatus)
+			.mockResolvedValueOnce({ state: 'running', running: true, completionPending: false, sessionId: SESSION_ID, deviceAuth: CLAUDE_AUTH })
+			.mockResolvedValueOnce({ state: 'running', running: true, completionPending: false, sessionId: SESSION_ID, deviceAuth: CLAUDE_AUTH, retryableError: 'Paste the full code, including its suffix.' })
+			.mockResolvedValue({ state: 'running', running: true, completionPending: true, sessionId: SESSION_ID, deviceAuth: CLAUDE_AUTH });
+		const settingsAuth = new SettingsAuthState(createModelCatalog());
+		await settingsAuth.handleLogin('claude');
+		await settingsAuth.completeLogin('claude', 'partial-code');
+		await Promise.resolve();
+		expect(settingsAuth.deviceAuthFor('claude')).toEqual(CLAUDE_AUTH);
+		expect(settingsAuth.isLoginPending('claude')).toBe(false);
+		expect(settingsAuth.authFor('claude').error).toBe('Paste the full code, including its suffix.');
+		await settingsAuth.completeLogin('claude', 'complete-code#suffix');
+		await Promise.resolve();
+		expect(completeAgentAuthLogin).toHaveBeenLastCalledWith('claude', SESSION_ID, 'complete-code#suffix', 'local');
+		expect(settingsAuth.authFor('claude').error).toBeNull();
+		expect(settingsAuth.isLoginPending('claude')).toBe(true);
+		settingsAuth.destroy();
+	});
+
+	it('guards duplicate completion while the first request is in flight', async () => {
+		const completion = deferred<Awaited<ReturnType<typeof completeAgentAuthLogin>>>();
+		vi.mocked(completeAgentAuthLogin).mockReturnValue(completion.promise);
+		const settingsAuth = new SettingsAuthState(createModelCatalog());
+		await settingsAuth.handleLogin('claude');
+		const first = settingsAuth.completeLogin('claude', 'synthetic-code#suffix');
+		await settingsAuth.completeLogin('claude', 'synthetic-code#suffix');
+		expect(completeAgentAuthLogin).toHaveBeenCalledTimes(1);
+		completion.resolve({ submitted: true, sessionId: SESSION_ID });
+		await first;
+		settingsAuth.destroy();
+	});
+
+	it('keeps an uncertain submission disabled until owned server status permits retry', async () => {
+		const reconciliation = deferred<Awaited<ReturnType<typeof getAgentAuthLoginStatus>>>();
+		vi.mocked(completeAgentAuthLogin).mockRejectedValue(new Error('Executor connection interrupted'));
+		const settingsAuth = new SettingsAuthState(createModelCatalog());
+		await settingsAuth.handleLogin('claude');
+		vi.mocked(getAgentAuthLoginStatus).mockReturnValue(reconciliation.promise);
+		await settingsAuth.completeLogin('claude', 'synthetic-code#suffix');
+		expect(settingsAuth.isLoginPending('claude')).toBe(true);
+		expect(settingsAuth.authFor('claude').error).toBe('Executor connection interrupted');
+		await settingsAuth.completeLogin('claude', 'synthetic-code#suffix');
+		expect(completeAgentAuthLogin).toHaveBeenCalledTimes(1);
+		reconciliation.resolve({
+			state: 'running', running: true, completionPending: false,
+			sessionId: SESSION_ID, deviceAuth: CLAUDE_AUTH,
+		});
+		await vi.waitFor(() => expect(settingsAuth.isLoginPending('claude')).toBe(false));
+		expect(settingsAuth.authFor('claude').error).toBe('Executor connection interrupted');
+		settingsAuth.destroy();
+	});
+
+	it('preserves a restored retry error when a concurrent auth-status response settles', async () => {
+		const initialAuth = deferred<Awaited<ReturnType<typeof getAgentAuthStatus>>>();
+		vi.mocked(getAgentAuthStatus).mockReturnValue(initialAuth.promise);
+		vi.mocked(getAgentAuthLoginStatus).mockResolvedValue({
+			state: 'running', running: true, completionPending: false,
+			sessionId: SESSION_ID, deviceAuth: CLAUDE_AUTH, retryableError: 'Copy the complete code.',
+		});
+		const settingsAuth = new SettingsAuthState(createModelCatalog(['claude']));
+		settingsAuth.initialize();
+		await vi.waitFor(() => expect(settingsAuth.authFor('claude').error).toBe('Copy the complete code.'));
+		initialAuth.resolve({ authenticated: false, canReauth: true, label: '' });
+		await initialAuth.promise;
+		await Promise.resolve();
+		expect(settingsAuth.authFor('claude').error).toBe('Copy the complete code.');
+		settingsAuth.destroy();
 	});
 });

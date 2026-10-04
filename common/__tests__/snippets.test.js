@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import {
   snippetTemplateUsesChatId,
   snippetTemplateUsesProjectPath,
+  normalizeExpandSnippetRequest,
 } from '../snippets.js';
 
 describe('snippetTemplateUsesProjectPath', () => {
@@ -21,6 +22,24 @@ describe('snippetTemplateUsesProjectPath', () => {
     expect(
       snippetTemplateUsesProjectPath('\\{{project_path}} and {{project_path}}'),
     ).toBe(true);
+  });
+});
+
+describe('scheduled snippet expansion requests', () => {
+  it('accepts a future new chat without inventing a chat ID and preserves executor identity', () => {
+    const request = { shortName: 'review', arguments: { type: 'default' }, context: {
+      type: 'scheduled-prompt', target: { type: 'new-chat', projectPath: '/repo', executorId: '11111111-1111-4111-8111-111111111111' },
+    } };
+    expect(normalizeExpandSnippetRequest(request)).toEqual(request);
+    expect(normalizeExpandSnippetRequest({ ...request, context: { type: 'scheduled-prompt', target: { type: 'chat', chatId: '1787471053739199' } } })).toMatchObject({ context: { target: { chatId: '1787471053739199' } } });
+  });
+
+  it('rejects missing targets, invalid chat IDs, blank paths, and malformed executor IDs', () => {
+    for (const target of [null, {}, { type: 'chat', chatId: 'invalid' },
+      { type: 'new-chat', projectPath: '' }, { type: 'new-chat', projectPath: '/repo', executorId: 'invalid' }]) {
+      expect(normalizeExpandSnippetRequest({ shortName: 'review', arguments: { type: 'default' },
+        context: { type: 'scheduled-prompt', target } })).toBeNull();
+    }
   });
 });
 

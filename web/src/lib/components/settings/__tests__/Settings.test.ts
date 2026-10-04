@@ -548,7 +548,7 @@ describe('Settings', () => {
 			await fireEvent.input(input, { target: { value: 'synthetic-oauth-code' } });
 			vi.mocked(providersApi.getAgentAuthLoginStatus).mockImplementation(async (agentId, _sessionId, executorId) => {
 				if (agentId === 'claude' && executorId === 'local') {
-					return { state: 'running', running: true, sessionId: 'synthetic-login', deviceAuth };
+					return { state: 'running', running: true, completionPending: false, sessionId: 'synthetic-login', deviceAuth };
 				}
 				return { state: 'idle', running: false };
 			});

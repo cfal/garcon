@@ -2,6 +2,18 @@ import { describe, it, expect, vi } from 'vitest';
 import { AppShellStore } from '../app-shell.svelte';
 
 describe('AppShellStore', () => {
+	it('keeps scheduled prompt drafts mounted while editing snippets and restores focus on return', async () => {
+		const store = new AppShellStore();
+		store.openScheduledPrompts();
+		const returnFocus = vi.fn();
+		store.openSnippetsOverScheduledPrompts(returnFocus);
+		expect(store.showScheduledPrompts).toBe(true);
+		expect(store.showSnippets).toBe(true);
+		store.closeSnippets();
+		await Promise.resolve();
+		expect(store.showScheduledPrompts).toBe(true);
+		expect(returnFocus).toHaveBeenCalledOnce();
+	});
 	describe('new chat dialog', () => {
 		it('starts with dialog closed', () => {
 			const store = new AppShellStore();

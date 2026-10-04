@@ -147,7 +147,7 @@ test('an unrelated executor update preserves a Local OAuth code', async () => {
               }
             } else if (localClaude) {
               const status = loggingIn
-                ? { state: 'running', running: true, sessionId, deviceAuth }
+                ? { state: 'running', running: true, completionPending: false, sessionId, deviceAuth }
                 : { state: 'idle', running: false };
               return Promise.resolve(Response.json(status));
             }

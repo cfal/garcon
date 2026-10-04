@@ -17,6 +17,32 @@ const REGISTERED_CHAT_ID = '1787471053739199';
 const PROSPECTIVE_CHAT_ID = '1787471053739200';
 const MISSING_CHAT_ID = '1787471053739201';
 
+describe('scheduled snippet expansion', () => {
+  it('resolves Local and remote paths without creating a prospective chat', async () => {
+    const { service, chatLookups } = await serviceFixture();
+    await service.create({ expectedRevision: 0, snippet: { shortName: 'review',
+      template: 'Review {{arguments}} in {{project_path}} for {{chat_id}}', defaultArguments: 'API' } });
+    for (const executorId of ['local', '11111111-1111-4111-8111-111111111111']) {
+      await expect(service.expand({ shortName: 'review', arguments: { type: 'default' }, context: {
+        type: 'scheduled-prompt', target: { type: 'new-chat', projectPath: '/repo', executorId },
+      } })).resolves.toMatchObject({ contextExecutorId: executorId, expandedText: 'Review API in /canonical/repo for {{chat_id}}' });
+    }
+    expect(chatLookups).toEqual([]);
+  });
+
+  it('resolves the existing chat authoritatively and rejects a missing chat', async () => {
+    const { service } = await serviceFixture();
+    await service.create({ expectedRevision: 0, snippet: { shortName: 'review',
+      template: '{{project_path}} {{chat_id}}', defaultArguments: '' } });
+    const request = { shortName: 'review', arguments: { type: 'default' }, context: {
+      type: 'scheduled-prompt', target: { type: 'chat', chatId: REGISTERED_CHAT_ID },
+    } };
+    await expect(service.expand(request)).resolves.toMatchObject({ expandedText: '/canonical/registered/repo {{chat_id}}' });
+    await expect(service.expand({ ...request, context: { ...request.context,
+      target: { type: 'chat', chatId: MISSING_CHAT_ID } } })).rejects.toMatchObject({ code: 'SNIPPET_CHAT_NOT_FOUND' });
+  });
+});
+
 async function serviceFixture(overrides = {}) {
   const dir = path.join(os.tmpdir(), `garcon-snippet-service-${randomUUID()}`);
   await fs.mkdir(dir, { recursive: true });
