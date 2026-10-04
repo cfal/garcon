@@ -1,4 +1,14 @@
 import { parseFileLink } from '$lib/chat/file-links/file-link-parser.js';
+import { isImageFilePath } from '$lib/utils/file-kind.js';
+
+export interface MarkdownImageFileTarget {
+	executorId: string;
+	executorContextKey: string;
+	projectPath: string;
+	filePath: string;
+}
+
+export type ResolveMarkdownImageFile = (href: string) => MarkdownImageFileTarget | null;
 
 export interface ResolveFileLinkTargetOptions {
 	fileRootPath: string;
@@ -18,6 +28,7 @@ export interface ResolvedFileLinkTarget {
 }
 
 const DRIVE_ROOT_RE = /^([A-Za-z]:)(?:\/(.*)|$)/;
+const UNC_ROOT_RE = /^(\/\/[^/]+\/[^/]+)(?:\/(.*)|$)/;
 
 function stripQueryAndHash(href: string): string {
 	const queryIdx = href.indexOf('?');
@@ -43,6 +54,10 @@ function normalizeSlashes(path: string): string {
 
 function splitRoot(path: string): { root: string; rest: string } | null {
 	const normalized = normalizeSlashes(path.trim());
+	if (normalized.startsWith('//')) {
+		const unc = normalized.match(UNC_ROOT_RE);
+		return unc ? { root: `${unc[1]}/`, rest: unc[2] ?? '' } : null;
+	}
 	if (normalized.startsWith('/')) return { root: '/', rest: normalized.slice(1) };
 	const drive = normalized.match(DRIVE_ROOT_RE);
 	if (drive) return { root: `${drive[1]}/`, rest: drive[2] ?? '' };
@@ -153,4 +168,33 @@ export function resolveFileLinkFromFile(
 		fileRootPath,
 		sourceDirectoryPath: joinUnderRoot(fileRootPath, directoryPath),
 	});
+}
+
+function imageFileTarget(
+	context: Pick<MarkdownImageFileTarget, 'executorId' | 'executorContextKey'>,
+	target: ResolvedFileLinkTarget | null,
+): MarkdownImageFileTarget | null {
+	if (!context.executorId || !target || !isImageFilePath(target.relativePath)) return null;
+	return {
+		executorId: context.executorId,
+		executorContextKey: context.executorContextKey,
+		projectPath: target.fileRootPath,
+		filePath: target.relativePath,
+	};
+}
+
+export function resolveImageFileTarget(
+	href: string,
+	options: ResolveFileLinkTargetOptions &
+		Pick<MarkdownImageFileTarget, 'executorId' | 'executorContextKey'>,
+): MarkdownImageFileTarget | null {
+	return imageFileTarget(options, resolveFileLinkTarget(href, options));
+}
+
+export function resolveImageFileFromFile(
+	href: string,
+	options: ResolveFileLinkFromFileOptions &
+		Pick<MarkdownImageFileTarget, 'executorId' | 'executorContextKey'>,
+): MarkdownImageFileTarget | null {
+	return imageFileTarget(options, resolveFileLinkFromFile(href, options));
 }

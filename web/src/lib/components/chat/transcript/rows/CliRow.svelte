@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { ResolveMarkdownImageFile } from '$lib/chat/file-links/file-link-resolver.js';
 	import type { CliRowMessage } from '$shared/chat-types';
 	import { cliPresentationSurfaceClass } from '$lib/chat/transcript/cli-presentation-style';
 	import { cn } from '$lib/utils/cn';
@@ -15,6 +16,7 @@
 		fileLinkBasePath?: string | null;
 		onLinkNavigate?: (link: MarkdownLinkNavigateEvent) => boolean | void;
 		resolveChatReference?: ResolveChatReference;
+		resolveImageFile?: ResolveMarkdownImageFile;
 		acquireTransientActivity?: (close: () => void) => () => void;
 		alwaysExpanded?: boolean;
 		disclosureState?: ConversationDisclosureStatePort;
@@ -25,6 +27,7 @@
 		fileLinkBasePath,
 		onLinkNavigate,
 		resolveChatReference,
+		resolveImageFile,
 		acquireTransientActivity,
 		alwaysExpanded = false,
 		disclosureState,
@@ -64,6 +67,7 @@
 							variant="presented"
 							fileLinkBasePath={fileLinkBasePath ?? undefined}
 							{onLinkNavigate}
+							{resolveImageFile}
 							{resolveChatReference}
 							chatReferencePolicy="explicit"
 							{acquireTransientActivity}

@@ -1,5 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { tick } from 'svelte';
+import * as filesApi from '$lib/api/files.js';
+import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FileSession } from '$lib/files/sessions/__tests__/file-session-fixture.js';
 import { FileDocumentIoCoordinator } from '$lib/files/persistence/file-document-io-coordinator.js';
@@ -16,6 +18,7 @@ import { emulateDetachedScrollReset } from '../../../../test/detached-scroll.js'
 
 afterEach(() => {
 	cleanup();
+	vi.restoreAllMocks();
 	vi.unstubAllGlobals();
 });
 
@@ -67,6 +70,90 @@ function workspaceLayoutWithDialog(dialogSession: FileSession, backgroundSession
 }
 
 describe('MarkdownViewer', () => {
+	it('loads images relative to the document on its owning executor', async () => {
+		vi.stubGlobal('IntersectionObserver', undefined);
+		vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:file-preview');
+		vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+		const read = vi.spyOn(filesApi, 'readContent').mockResolvedValue({
+			blob: new Blob(['synthetic'], { type: 'image/png' }),
+			revision: 'v1:synthetic',
+		});
+		const session = new FileSession(
+			{
+				executorId: remoteExecutor.id,
+				canonicalFileRootPath: '/workspace',
+				normalizedRelativePath: 'docs/guides/current.md',
+			},
+			'synthetic-markdown-session',
+		);
+		session.content = '![Capture](../images/capture.png)';
+		render(MarkdownViewerTestHost, {
+			session,
+			onOpen: vi.fn(),
+			executors: [
+				localExecutor,
+				{
+					...remoteExecutor,
+					projectBasePath: '/workspace',
+					machineServices: { ...remoteExecutor.machineServices, files: true },
+				},
+			],
+		});
+		await waitFor(() =>
+			expect(read).toHaveBeenCalledWith(
+				{
+					executorId: remoteExecutor.id,
+					projectPath: '/workspace',
+					filePath: 'docs/images/capture.png',
+				},
+				{ signal: expect.any(AbortSignal), cache: 'no-store' },
+			),
+		);
+		expect(screen.getByRole('img').getAttribute('src')).toBe('blob:file-preview');
+	});
+
+	it('invalidates images when the owning executor instance changes', async () => {
+		vi.stubGlobal('IntersectionObserver', undefined);
+		vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:replacement');
+		vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+		const result = {
+			blob: new Blob(['synthetic'], { type: 'image/png' }),
+			revision: 'v1:synthetic' as const,
+		};
+		let finish!: (value: typeof result) => void;
+		const read = vi
+			.spyOn(filesApi, 'readContent')
+			.mockResolvedValue(result)
+			.mockImplementationOnce(
+				() =>
+					new Promise((resolve) => {
+						finish = resolve;
+					}),
+			);
+		render(MarkdownViewerTestHost, {
+			session: markdownSession('![Capture](capture.png)'),
+			onOpen: vi.fn(),
+			executorUpdate: [{ ...localExecutor, instanceId: 'replacement-instance' }],
+		});
+		await waitFor(() => expect(read).toHaveBeenCalledOnce());
+		const oldSignal = read.mock.calls[0][1]?.signal;
+		await fireEvent.click(screen.getByRole('button', { name: 'Update executors' }));
+		await waitFor(() => expect(read).toHaveBeenCalledTimes(2));
+		expect(oldSignal?.aborted).toBe(true);
+		expect(read).toHaveBeenLastCalledWith(
+			{
+				executorId: 'local',
+				projectPath: '/workspace/project',
+				filePath: 'docs/guides/capture.png',
+			},
+			{ signal: expect.any(AbortSignal), cache: 'no-store' },
+		);
+		finish(result);
+		await tick();
+		expect(screen.getByRole('img').getAttribute('src')).toBe('blob:replacement');
+		expect(URL.createObjectURL).toHaveBeenCalledOnce();
+	});
+
 	it('updates a runtime-less preview when new disk content is committed', async () => {
 		const session = markdownSession('# Initial');
 		const io = new FileDocumentIoCoordinator({

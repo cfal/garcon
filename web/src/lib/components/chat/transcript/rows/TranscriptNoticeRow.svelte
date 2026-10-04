@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { ResolveMarkdownImageFile } from '$lib/chat/file-links/file-link-resolver.js';
 	// Renders a durable transcript notice. Handoff summaries collapse by default
 	// behind the shared clamp so very long summaries stay bounded, while the
 	// server-supplied title remains visible for orientation.
@@ -27,6 +28,7 @@
 	interface Props {
 		message: TranscriptNoticeMessage;
 		resolveChatReference?: ResolveChatReference;
+		resolveImageFile?: ResolveMarkdownImageFile;
 		fileLinkBasePath?: string | null;
 		onLinkNavigate?: (link: MarkdownLinkNavigateEvent) => boolean | void;
 		onOpenTicket?: (id: string) => Promise<void>;
@@ -37,6 +39,7 @@
 	let {
 		message,
 		resolveChatReference,
+		resolveImageFile,
 		fileLinkBasePath,
 		onLinkNavigate,
 		onOpenTicket,
@@ -96,6 +99,7 @@
 		{resolveChatReference}
 		{fileLinkBasePath}
 		{onLinkNavigate}
+		{resolveImageFile}
 		{acquireTransientActivity}
 		{disclosureState}
 	/>
@@ -119,6 +123,7 @@
 							variant="presented"
 							fileLinkBasePath={fileLinkBasePath ?? undefined}
 							{onLinkNavigate}
+							{resolveImageFile}
 							{resolveChatReference}
 							chatReferencePolicy="explicit"
 							{acquireTransientActivity}

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { ResolveMarkdownImageFile } from '$lib/chat/file-links/file-link-resolver.js';
 	// Renders a context-compaction boundary: a divider summarizing what the agent
 	// preserved when it summarized earlier history to free up context. Token
 	// counts are shown when the provider reports them, and the generated summary
@@ -18,6 +19,7 @@
 		projectBasePath?: string;
 		onLinkNavigate?: (link: MarkdownLinkNavigateEvent) => boolean | void;
 		resolveChatReference?: ResolveChatReference;
+		resolveImageFile?: ResolveMarkdownImageFile;
 		acquireTransientActivity?: (close: () => void) => () => void;
 		open?: boolean;
 		onOpenChange?: (open: boolean) => void;
@@ -28,6 +30,7 @@
 		projectBasePath,
 		onLinkNavigate,
 		resolveChatReference,
+		resolveImageFile,
 		acquireTransientActivity,
 		open: controlledOpen,
 		onOpenChange,
@@ -92,6 +95,7 @@
 						variant="thinking"
 						fileLinkBasePath={projectBasePath}
 						{onLinkNavigate}
+						{resolveImageFile}
 						{resolveChatReference}
 						chatReferencePolicy="explicit"
 						{acquireTransientActivity}

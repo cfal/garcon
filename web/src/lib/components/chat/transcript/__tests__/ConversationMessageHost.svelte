@@ -21,6 +21,7 @@
 
 	interface Props {
 		executors?: readonly ExecutorSnapshot[];
+		executorUpdate?: readonly ExecutorSnapshot[];
 		chatContext?: ConversationMessageChatContext;
 		message: ChatMessage;
 		rowId?: string;
@@ -43,6 +44,7 @@
 
 	let {
 		executors,
+		executorUpdate,
 		chatContext,
 		message,
 		rowId,
@@ -62,7 +64,7 @@
 		selectedChatId = 'chat-1',
 		removableChatId,
 	}: Props = $props();
-	setExecutorsTestContext(untrack(() => executors));
+	const executorStore = setExecutorsTestContext(untrack(() => executors));
 	setCanonicalWorkspaceLayout();
 	const notifications = setNotifications(createNotificationsStore());
 	const initialHost = untrack(() => ({
@@ -143,6 +145,11 @@
 />
 
 <output data-testid="draft-preview">{draftPreview}</output>
+{#if executorUpdate}
+	<button type="button" onclick={() => executorStore.applySnapshot(executorUpdate!)}>
+		Update executors
+	</button>
+{/if}
 {#each notifications.items as notification (notification.id)}
 	<output>{notification.message}</output>
 {/each}

@@ -27,7 +27,11 @@
 	import ChatEventCard from './rows/ChatEventCard.svelte';
 	import Markdown from '$lib/components/rich-text/Markdown.svelte';
 	import type { MarkdownLinkNavigateEvent } from '$lib/components/rich-text/Markdown.svelte';
-	import { resolveFileLinkTarget } from '$lib/chat/file-links/file-link-resolver.js';
+	import {
+		resolveFileLinkTarget,
+		resolveImageFileTarget,
+		type ResolveMarkdownImageFile,
+	} from '$lib/chat/file-links/file-link-resolver.js';
 	import {
 		resolveChatReferenceTarget,
 		type ResolveChatReference,
@@ -99,6 +103,7 @@
 	const projectBasePath = $derived(
 		executorId === 'local' ? appShell.projectBasePath : (executors.get(executorId)?.projectBasePath ?? ''),
 	);
+	const imageFileRootPath = $derived(executors.get(executorId)?.projectBasePath);
 	const resolveChatReference: ResolveChatReference = (chatId) =>
 		resolveChatReferenceTarget(chatId, activeChatContext?.chatId, sessions.byId[chatId]);
 	const isPending = $derived(!terminal && actionable);
@@ -127,6 +132,16 @@
 	});
 
 	const resolvedOpacity = $derived(!isPending ? 'opacity-75' : '');
+
+	const resolveImageFile: ResolveMarkdownImageFile = (href) => {
+		if (!filesAvailable || !imageFileRootPath || !activeChatContext?.projectPath) return null;
+		return resolveImageFileTarget(href, {
+			executorId,
+			executorContextKey: executors.pathContextKey(executorId),
+			fileRootPath: imageFileRootPath,
+			sourceDirectoryPath: activeChatContext.projectPath,
+		});
+	};
 
 	function handleLinkNavigate(link: MarkdownLinkNavigateEvent): boolean | void {
 		if (link.kind !== 'file') return;
@@ -395,6 +410,7 @@
 							source={plan}
 							fileLinkBasePath={projectBasePath}
 							onLinkNavigate={handleLinkNavigate}
+							{resolveImageFile}
 							{resolveChatReference}
 							chatReferencePolicy="explicit"
 							{acquireTransientActivity}
@@ -715,6 +731,7 @@
 									source={cursorCreatePlanRequest.plan}
 									fileLinkBasePath={projectBasePath}
 									onLinkNavigate={handleLinkNavigate}
+									{resolveImageFile}
 									{resolveChatReference}
 									chatReferencePolicy="explicit"
 									{acquireTransientActivity}

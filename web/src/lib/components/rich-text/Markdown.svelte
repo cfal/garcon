@@ -7,8 +7,10 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 	import {
 		buildUnsupportedHTML,
 		defaultRenderers,
+		defaultSanitizeUrl,
 		type RendererComponent,
 		type Renderers,
+		type SanitizeUrlFn,
 	} from '@humanspeak/svelte-markdown';
 	import { markedKatex } from '@humanspeak/svelte-markdown/extensions/katex';
 	import { createChatReferenceMarkdownExtension } from '$lib/chat/transcript/chat-reference-markdown.js';
@@ -34,10 +36,17 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 		inlineKatex: MathRenderer,
 		blockKatex: MathRenderer,
 	};
+	const sanitizeMarkdownUrl: SanitizeUrlFn = (url, context) => {
+		// Drive paths reach only the root-confined image resolver, never a native src.
+		if (context.type === 'image' && /^[A-Za-z]:[/\\]/.test(url)) return url;
+		return defaultSanitizeUrl(url, context);
+	};
 </script>
 
 <script lang="ts">
 	import SvelteMarkdown from '@humanspeak/svelte-markdown';
+	import MarkdownImage from './MarkdownImage.svelte';
+	import type { ResolveMarkdownImageFile } from '$lib/chat/file-links/file-link-resolver.js';
 	import CodeBlock from '$lib/components/rich-text/CodeBlock.svelte';
 	import ChatReference from '$lib/components/chat/ChatReference.svelte';
 	import MermaidBlock from '$lib/components/rich-text/MermaidBlock.svelte';
@@ -61,6 +70,7 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 		class?: string;
 		/** Base path for accepting absolute file links. */
 		fileLinkBasePath?: string;
+		resolveImageFile?: ResolveMarkdownImageFile;
 		/** Called when a link is clicked. Return true to prevent default navigation. */
 		onLinkNavigate?: (link: MarkdownLinkNavigateEvent) => boolean | void;
 		resolveChatReference?: ResolveChatReference;
@@ -117,6 +127,7 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 		variant = 'assistant',
 		class: className = '',
 		fileLinkBasePath,
+		resolveImageFile,
 		onLinkNavigate,
 		resolveChatReference,
 		chatReferencePolicy = 'disabled',
@@ -149,6 +160,7 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 		options={markdownOptions}
 		extensions={markdownExtensions}
 		renderers={safeRenderers}
+		sanitizeUrl={sanitizeMarkdownUrl}
 	>
 		{#snippet code({ lang, text })}
 			{#if lang === 'mermaid'}
@@ -165,6 +177,10 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 
 		{#snippet codespan({ text })}
 			<code class={styles.code}>{text}</code>
+		{/snippet}
+
+		{#snippet image({ href, title, text })}
+			<MarkdownImage {href} {title} {text} {resolveImageFile} />
 		{/snippet}
 
 		{#snippet chatReference({ chatId }: { chatId: string })}
