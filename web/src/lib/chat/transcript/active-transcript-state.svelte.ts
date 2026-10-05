@@ -136,11 +136,19 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 			onHistoryUnavailable: (chatId, historyState) => {
 				this.#setUnavailableHistory(chatId, historyState);
 			},
-			onPageApplied: (direction) => {
-				this.rememberVisibleWindowStart();
-				this.feedMutations.record(
-					direction === 'earlier' ? 'history-earlier' : 'history-later',
-				);
+			onPageApplied: (direction, entriesChanged) => {
+				if (direction === 'earlier' && entriesChanged) {
+					this.rememberVisibleWindowStart();
+				} else {
+					this.preserveVisibleWindowStart();
+				}
+				if (!entriesChanged) {
+					this.feedMutations.record('presentation-structure');
+				} else if (direction === 'earlier') {
+					this.feedMutations.record('history-earlier');
+				} else {
+					this.feedMutations.record('history-later');
+				}
 			},
 			onEarlierPageProgress: (chatId, requestBeforeOrdinal, page) => {
 				this.transcriptCache.applyEarlierPage(
@@ -334,8 +342,11 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 		}
 		const applied = applyTranscriptAppend(this.entries, append, appliedFrontierOrdinal);
 		let entriesChanged = applied.status === 'applied' && applied.changed;
+		const previouslyHadLaterMessages = this.hasLaterMessages;
 		if (applied.status === 'applied') {
-			if (entriesChanged) this.rememberVisibleWindowStart();
+			if (entriesChanged && this.visibleWindowStartOrdinal === null) {
+				this.rememberVisibleWindowStart();
+			}
 			this.transcriptViewId = transcriptViewId;
 			if (applied.messages !== this.entries) this.entries = applied.messages;
 			this.loadedThroughOrdinal = applied.lastOrdinal;
@@ -354,18 +365,20 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 			this.hasEarlierMessages = restored.nextBeforeOrdinal !== null;
 			this.hasLaterMessages = false;
 		}
+		const laterVisibilityChanged = this.hasLaterMessages !== previouslyHadLaterMessages;
 		if (entriesChanged) {
 			this.clearLocalNotices(noticeRevision);
 		}
-		if (entriesChanged) {
-			if (this.visibleWindowStartOrdinal === null) this.rememberVisibleWindowStart();
-			this.growVisibleWindow();
+		if (entriesChanged || laterVisibilityChanged) {
+			this.preserveVisibleWindowStart();
 		}
 		if (this.entries.length > 0 && this.loadStatus !== 'error') {
 			this.loadStatus = 'loaded';
 		}
 		if (entriesChanged) {
 			this.feedMutations.record('live-append', responseMessageTypes);
+		} else if (laterVisibilityChanged) {
+			this.feedMutations.record('presentation-structure');
 		}
 		if (!this.usesSharedOverlay) {
 			this.optimisticInputs.clearEchoed(echoedClientMessageOrdinals(messages));

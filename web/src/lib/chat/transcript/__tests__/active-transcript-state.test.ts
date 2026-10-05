@@ -16,6 +16,7 @@ import type { ResendCandidate, TranscriptMessage } from '$shared/chat-view';
 import { getChatMessages } from '$lib/api/chats.js';
 import type { ChatDisplayRow } from '../active-transcript-state.svelte.js';
 import type { OptimisticUserInput } from '../optimistic-user-input.js';
+import { ConversationTranscriptOverlayStore } from '../conversation-transcript-overlay-store.svelte.js';
 
 vi.mock('$lib/api/chats.js', () => ({
 	getChatMessages: vi.fn(),
@@ -316,7 +317,7 @@ describe('ActiveTranscriptState', () => {
 			nextBeforeOrdinal: null,
 			hasMore: false,
 		});
-		chat.visibleMessageCount = INITIAL_VISIBLE_MESSAGES + 50;
+		chat.revealAllLoadedMessages();
 		chat.isUserScrolledUp = false;
 
 		applyMessages(chat,
@@ -332,8 +333,8 @@ describe('ActiveTranscriptState', () => {
 
 		expect(chat.chatMessages).toHaveLength(ACTIVE_TRANSCRIPT_RETENTION_LIMIT + 50);
 		expect(contentOf(chat.chatMessages[0])).toBe('message-1');
-		expect(chat.visibleMessageCount).toBe(ACTIVE_TRANSCRIPT_RETENTION_LIMIT);
-		expect(chat.visibleRows[0]).toMatchObject({ id: 'generation-1:51', ordinal: 51 });
+		expect(chat.visibleMessageCount).toBe(ACTIVE_TRANSCRIPT_RETENTION_LIMIT + 50);
+		expect(chat.visibleRows[0]).toMatchObject({ id: 'generation-1:1', ordinal: 1 });
 		expect(chat.hasEarlierMessages).toBe(false);
 	});
 
@@ -626,6 +627,39 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.loadedThroughOrdinal).toBe(100);
 		expect(chat.hasLaterMessages).toBe(false);
 		expect(chat.feedMutationClock.dataRevision).toBe(revision + 1);
+	});
+
+	it('preserves the visible start when an empty later page reveals a notice', async () => {
+		const chat = new ActiveTranscriptState();
+		chat.replaceGeneration('chat-1', 'generation-1', assistantEntries(1, 50), {
+			lastOrdinal: 100,
+			pageOldestOrdinal: 1,
+			pageNewestOrdinal: 50,
+			nextBeforeOrdinal: null,
+			hasMore: false,
+		});
+		chat.appendLocalNotice('progress', 'pending status');
+		vi.mocked(getChatMessages).mockResolvedValueOnce({
+			chatId: 'chat-1',
+			limit: 50,
+			...page({
+				messages: [],
+				lastOrdinal: 100,
+				pageOldestOrdinal: 0,
+				pageNewestOrdinal: 100,
+				nextBeforeOrdinal: 51,
+				hasMore: true,
+			}),
+		});
+
+		await expect(chat.loadLaterPage('chat-1')).resolves.toBe('loaded');
+
+		expect(chat.visibleRows[0]).toMatchObject({ id: 'generation-1:1', ordinal: 1 });
+		expect(chat.visibleRows.at(-1)).toMatchObject({
+			kind: 'local-notice',
+			content: 'pending status',
+		});
+		expect(chat.canLoadEarlier).toBe(false);
 	});
 
 	it('discards a fetched page whose application gate is invalidated', async () => {
@@ -2905,6 +2939,27 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.canLoadEarlier).toBe(false);
 	});
 
+	it('preserves the visible start when hidden-only live progress reveals a notice', () => {
+		const chat = new ActiveTranscriptState();
+		chat.replaceGeneration('chat-1', 'generation-1', assistantEntries(1, 50), {
+			lastOrdinal: 100,
+			pageOldestOrdinal: 1,
+			pageNewestOrdinal: 50,
+			nextBeforeOrdinal: null,
+			hasMore: false,
+		});
+		chat.appendLocalNotice('progress', 'pending status');
+
+		expect(applyMessages(chat, 'chat-1', 'generation-1', [], 51, 100)).toBe('applied');
+
+		expect(chat.visibleRows[0]).toMatchObject({ id: 'generation-1:1', ordinal: 1 });
+		expect(chat.visibleRows.at(-1)).toMatchObject({
+			kind: 'local-notice',
+			content: 'pending status',
+		});
+		expect(chat.canLoadEarlier).toBe(false);
+	});
+
 	it('preserves a detached visible window after it is repinned', () => {
 		const chat = new ActiveTranscriptState();
 		chat.replaceGeneration('chat-1', 'generation-1', assistantEntries(1, 100), {
@@ -3022,6 +3077,59 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.optimisticUserInputs).toEqual([]);
 		expect(chat.visibleRows[0]).toMatchObject(expectedStart);
 		expect(chat.visibleRows.filter((row) => rowContentOf(row) === 'message-201')).toHaveLength(1);
+		expect(chat.visibleRows.at(-1)).toMatchObject({ id: 'generation-1:201', ordinal: 201 });
+	});
+
+	it('preserves the visible start through shared optimistic input settlement', () => {
+		const cache = new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES });
+		const overlays = new ConversationTranscriptOverlayStore();
+		const chat = new ActiveTranscriptState(cache, overlays.forChat('chat-1'));
+		chat.replaceGeneration('chat-1', 'generation-1', assistantEntries(1, 200), {
+			lastOrdinal: 200,
+			pageOldestOrdinal: 1,
+			nextBeforeOrdinal: null,
+			hasMore: false,
+		});
+		const expectedStart = { id: 'generation-1:101', ordinal: 101 };
+		const clientMessageId = 'message-201';
+		chat.applySharedOverlayMutation(
+			overlays.upsertOptimisticInput(
+				'chat-1',
+				optimisticInput({ clientMessageId, content: clientMessageId }),
+				200,
+			),
+		);
+		const messages = [entry(201, user(clientMessageId, { clientMessageId }))];
+		const outcome = cache.applyMessages('chat-1', 'generation-1', {
+			firstOrdinal: 201,
+			lastOrdinal: 201,
+			messages,
+		});
+		expect(outcome.status).toBe('applied');
+		if (outcome.status !== 'applied') throw new Error(outcome.status);
+		const overlayMutation = overlays.applyCommittedBatch({
+			chatId: 'chat-1',
+			messages,
+			resendCandidates: [],
+			noticeRevision: 0,
+		});
+
+		expect(
+			chat.applySharedCommit({
+				chatId: 'chat-1',
+				transcriptViewId: 'generation-1',
+				messages,
+				firstOrdinal: 201,
+				lastOrdinal: 201,
+				resendCandidates: [],
+				noticeRevision: 0,
+				outcome,
+				overlayMutation,
+			}),
+		).toBe('applied');
+		chat.applySharedOverlayMutation(overlayMutation);
+
+		expect(chat.visibleRows[0]).toMatchObject(expectedStart);
 		expect(chat.visibleRows.at(-1)).toMatchObject({ id: 'generation-1:201', ordinal: 201 });
 	});
 

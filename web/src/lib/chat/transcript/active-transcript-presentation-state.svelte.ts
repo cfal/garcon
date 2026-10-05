@@ -244,6 +244,14 @@ export class ActiveTranscriptPresentationState {
 		this.visibleWindowStartOrdinal = firstVisibleOrdinal;
 	}
 
+	protected preserveVisibleWindowStart(): void {
+		if (this.visibleWindowStartOrdinal === null) {
+			this.rememberVisibleWindowStart();
+			return;
+		}
+		this.growVisibleWindow();
+	}
+
 	protected growVisibleWindow(): void {
 		if (this.visibleWindowStartOrdinal === null) return;
 		const firstVisibleIndex = this.#displayRows.findIndex(

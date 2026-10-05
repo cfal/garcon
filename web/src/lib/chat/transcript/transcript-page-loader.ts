@@ -35,7 +35,7 @@ interface TranscriptPageLoaderOptions {
 		chatId: string,
 		historyState: Exclude<ChatHistoryState, { kind: 'complete' }>,
 	): void;
-	onPageApplied(direction: TranscriptPageDirection): void;
+	onPageApplied(direction: TranscriptPageDirection, entriesChanged: boolean): void;
 	onEarlierPageProgress(
 		chatId: string,
 		requestBeforeOrdinal: number,
@@ -193,13 +193,16 @@ export class TranscriptPageLoader {
 		}
 		const finalPage = demand.pages.at(-1);
 		if (!finalPage) return 'exhausted';
+		const previouslyHadLaterMessages = this.host.hasLaterMessages;
 		this.host.nextBeforeOrdinal = finalPage.nextBeforeOrdinal;
 		this.host.hasEarlierMessages = finalPage.nextBeforeOrdinal !== null;
 		this.host.lastOrdinal = Math.max(this.host.lastOrdinal, demand.lastOrdinal);
 		this.host.hasLaterMessages = this.host.loadedThroughOrdinal < this.host.lastOrdinal;
-		return demand.messages.length === 0
-			? 'exhausted'
-			: this.#applyEarlierMessages(demand.messages);
+		if (demand.messages.length > 0) return this.#applyEarlierMessages(demand.messages);
+		if (this.host.hasLaterMessages !== previouslyHadLaterMessages) {
+			this.options.onPageApplied('earlier', false);
+		}
+		return 'exhausted';
 	}
 
 	async #performLaterLoad(
@@ -248,7 +251,7 @@ export class TranscriptPageLoader {
 	#applyEarlierMessages(messages: TranscriptMessage[]): TranscriptPageLoadResult {
 		this.host.entries = [...messages, ...this.host.entries];
 		this.host.visibleMessageCount += messages.length;
-		this.options.onPageApplied('earlier');
+		this.options.onPageApplied('earlier', true);
 		return 'loaded';
 	}
 
@@ -258,10 +261,14 @@ export class TranscriptPageLoader {
 		lastOrdinal: number,
 	): TranscriptPageLoadResult {
 		const reachesLatest = pageNewestOrdinal >= lastOrdinal;
+		const previouslyHadLaterMessages = this.host.hasLaterMessages;
 		this.host.lastOrdinal = Math.max(this.host.lastOrdinal, lastOrdinal);
 		this.host.loadedThroughOrdinal = pageNewestOrdinal;
 		this.host.hasLaterMessages = !reachesLatest;
 		if (messages.length === 0) {
+			if (this.host.hasLaterMessages !== previouslyHadLaterMessages) {
+				this.options.onPageApplied('later', false);
+			}
 			return 'loaded';
 		}
 
@@ -273,7 +280,7 @@ export class TranscriptPageLoader {
 				this.host.displayMessageCount,
 			);
 		}
-		this.options.onPageApplied('later');
+		this.options.onPageApplied('later', true);
 		return 'loaded';
 	}
 
