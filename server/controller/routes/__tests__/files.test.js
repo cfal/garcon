@@ -11,6 +11,7 @@ import {
   FILE_REVISION_HEADER,
   MAX_FILE_VIEW_BYTES,
   isFileRevision,
+  parseDirectoryEntry,
   parseFileTreeResponse,
   parseReadTextResponse,
   parseSaveTextResponse,
@@ -1011,4 +1012,116 @@ describe('files route', () => {
     );
   });
 
+  function createDirectory(routes, parentPath, body, query = '') {
+    const url = new URL(`http://localhost/api/v1/files/directories?path=${encodeURIComponent(parentPath)}${query}`);
+    return routes['/api/v1/files/directories'].POST(
+      new Request(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
+      url,
+    );
+  }
+
+  it('creates one directory inside an existing parent and lists it', async () => {
+    const routes = createFilesRoutes({ getChat: () => null });
+    const parent = path.join(projectPath, 'src');
+    const response = await createDirectory(routes, parent, { name: 'new project' });
+
+    expect(response.status).toBe(201);
+    expect(parseDirectoryEntry(await response.json())).toEqual({
+      name: 'new project', path: path.join(parent, 'new project'), type: 'directory',
+    });
+    expect((await fs.stat(path.join(parent, 'new project'))).isDirectory()).toBe(true);
+    const browseUrl = new URL(`http://localhost/api/v1/files/browse?path=${encodeURIComponent(parent)}`);
+    const browsed = await routes['/api/v1/files/browse'].GET(new Request(browseUrl), browseUrl);
+    expect(await browsed.json()).toEqual([{ name: 'new project', path: path.join(parent, 'new project'), type: 'directory' }]);
+  });
+
+  it('tells a browsed path that names no directory apart from other failures', async () => {
+    const routes = createFilesRoutes({ getChat: () => null });
+    const cases = [
+      [path.join(projectPath, 'missing'), 404, 'FILE_NOT_FOUND'],
+      [path.join(projectPath, 'missing', 'deeper'), 404, 'FILE_NOT_FOUND'],
+      [path.join(projectPath, 'src/main.ts'), 400, 'FILE_DIRECTORY_REQUIRED'],
+      [outsidePath, 403, 'FILE_OUTSIDE_ROOT'],
+    ];
+    for (const [target, status, errorCode] of cases) {
+      const url = new URL(`http://localhost/api/v1/files/browse?path=${encodeURIComponent(target)}`);
+      const response = await routes['/api/v1/files/browse'].GET(new Request(url), url);
+      expect(response.status).toBe(status);
+      expect((await response.json()).errorCode).toBe(errorCode);
+    }
+  });
+
+  it('reports an existing name without replacing it', async () => {
+    const routes = createFilesRoutes({ getChat: () => null });
+    for (const name of ['src', 'file.txt', 'dangling']) {
+      await fs.writeFile(path.join(projectPath, 'file.txt'), 'kept');
+      await fs.symlink(path.join(projectPath, 'missing'), path.join(projectPath, 'dangling')).catch(() => undefined);
+      const response = await createDirectory(routes, projectPath, { name });
+      expect(response.status).toBe(409);
+      expect((await response.json()).errorCode).toBe('FILE_ALREADY_EXISTS');
+    }
+    expect(await fs.readFile(path.join(projectPath, 'file.txt'), 'utf8')).toBe('kept');
+    expect(await fs.readFile(path.join(projectPath, 'src/main.ts'), 'utf8')).toBe('hello\n');
+    await expect(fs.stat(path.join(projectPath, 'missing'))).rejects.toThrow();
+  });
+
+  it('rejects names that address anything but one new child', async () => {
+    const routes = createFilesRoutes({ getChat: () => null });
+    const names = ['', '.', '..', 'a/b', 'a\\b', '../escape', 'line\nbreak', 'nul\0byte', 'x'.repeat(256), 42, null];
+    for (const name of names) {
+      const response = await createDirectory(routes, projectPath, { name });
+      expect(response.status).toBe(400);
+      expect((await response.json()).errorCode).toBe('VALIDATION_FAILED');
+    }
+    expect(await fs.readdir(projectPath)).toEqual(['src']);
+    await expect(fs.stat(path.join(path.dirname(projectPath), 'escape'))).rejects.toThrow();
+  });
+
+  it('requires an existing parent directory inside the configured base', async () => {
+    const routes = createFilesRoutes({ getChat: () => null });
+    await fs.symlink(outsidePath, path.join(projectPath, 'outside-dir'), 'dir');
+    const cases = [
+      [outsidePath, 403, 'FILE_OUTSIDE_ROOT'],
+      [path.join(projectPath, 'outside-dir'), 403, 'FILE_OUTSIDE_ROOT'],
+      [path.join(projectPath, 'missing'), 404, 'FILE_NOT_FOUND'],
+      [path.join(projectPath, 'missing', 'deeper'), 404, 'FILE_NOT_FOUND'],
+      [path.join(projectPath, 'src/main.ts'), 400, 'FILE_DIRECTORY_REQUIRED'],
+    ];
+    for (const [parent, status, errorCode] of cases) {
+      const response = await createDirectory(routes, parent, { name: 'child' });
+      expect(response.status).toBe(status);
+      expect((await response.json()).errorCode).toBe(errorCode);
+    }
+    expect(await fs.readdir(outsidePath)).toEqual([]);
+    await expect(fs.stat(path.join(projectPath, 'missing'))).rejects.toThrow();
+  });
+
+  it('takes the directory target only from the URL', async () => {
+    const routes = createFilesRoutes({ getChat: () => null });
+    for (const body of [{ name: 'child', path: outsidePath }, { name: 'child', parentPath: outsidePath }, { name: 'child', executorId: 'local' }]) {
+      const response = await createDirectory(routes, projectPath, body);
+      expect(response.status).toBe(400);
+      expect((await response.json()).errorCode).toBe('VALIDATION_FAILED');
+    }
+    const missingParent = new URL('http://localhost/api/v1/files/directories');
+    const response = await routes['/api/v1/files/directories'].POST(
+      new Request(missingParent, { method: 'POST', body: JSON.stringify({ name: 'child' }) }), missingParent,
+    );
+    expect(response.status).toBe(400);
+    expect(await fs.readdir(projectPath)).toEqual(['src']);
+    expect(await fs.readdir(outsidePath)).toEqual([]);
+  });
+
+  it('maps a denied creation without reporting success', async () => {
+    const routes = createFilesRoutes({ getChat: () => null });
+    const mkdir = spyOn(fs, 'mkdir').mockRejectedValueOnce(Object.assign(new Error('denied'), { code: 'EACCES' }));
+    try {
+      const response = await createDirectory(routes, projectPath, { name: 'child' });
+      expect(response.status).toBe(403);
+      expect((await response.json()).errorCode).toBe('FILE_PERMISSION_DENIED');
+      expect(mkdir).toHaveBeenCalledOnce();
+      expect(path.basename(mkdir.mock.calls[0][0])).toBe('child');
+    } finally { mkdir.mockRestore(); }
+    await expect(fs.stat(path.join(projectPath, 'child'))).rejects.toThrow();
+  });
 });

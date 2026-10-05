@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
-import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { ReadTextResponse, SaveTextResponse, FileIdentityResponse } from '../../../common/file-contracts.js';
+import type { DirectoryEntry, ReadTextResponse, SaveTextResponse, FileIdentityResponse } from '../../../common/file-contracts.js';
 import { MAX_FILE_VIEW_BYTES } from '../../../common/file-contracts.js';
 import type { ExecutorSnapshot } from '../../../common/executors.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
@@ -86,6 +86,42 @@ for (const backend of ['remote-controller-dials', 'remote-executor-dials'] as co
       expect(await fixture.client.get<Array<{ name: string; path: string; type: string }>>(`/api/v1/files/browse?executorId=${executorId}&path=${encodeURIComponent(crowded)}`)).toEqual([
         { name: 'selectable-project', path: join(crowded, 'selectable-project'), type: 'directory' },
       ]);
+    }, { executionBackend: backend, projectRoots: 'separate' });
+  }, 60_000);
+
+  test(`directory creation runs on the selected executor and never falls back to Local (${backend})`, async () => {
+    await withIntegrationFixture(`files-create-directory-${backend}`, async (fixture) => {
+      const executorId = fixture.client.executorId;
+      const workerBase = fixture.executionDirs.project;
+      const controllerBase = fixture.dirs.project;
+      const route = (target: string, path: string) => `/api/v1/files/directories?${new URLSearchParams({ executorId: target, path })}`;
+      const create = (target: string, path: string, name: unknown) => fixture.client.post<DirectoryEntry>(route(target, path), { name });
+
+      expect(await create(executorId, workerBase, 'shared name')).toEqual({ name: 'shared name', path: join(workerBase, 'shared name'), type: 'directory' });
+      expect(await readdir(workerBase)).toEqual(['shared name']);
+      expect(await readdir(controllerBase)).toEqual([]);
+      expect(await create('local', controllerBase, 'shared name')).toEqual({ name: 'shared name', path: join(controllerBase, 'shared name'), type: 'directory' });
+      expect(await create(executorId, join(workerBase, 'shared name'), 'nested')).toMatchObject({ path: join(workerBase, 'shared name', 'nested') });
+      expect(await readdir(join(controllerBase, 'shared name'))).toEqual([]);
+      expect(await fixture.client.get<DirectoryEntry[]>(`/api/v1/files/browse?${new URLSearchParams({ executorId, path: join(workerBase, 'shared name') })}`))
+        .toEqual([{ name: 'nested', path: join(workerBase, 'shared name', 'nested'), type: 'directory' }]);
+
+      expect(await rejectionOf(create(executorId, workerBase, 'shared name'))).toMatchObject({ status: 409, body: { errorCode: 'FILE_ALREADY_EXISTS' } });
+      expect(await rejectionOf(create(executorId, workerBase, '../escape'))).toMatchObject({ status: 400, body: { errorCode: 'VALIDATION_FAILED' } });
+      expect(await rejectionOf(create(executorId, join(workerBase, 'absent'), 'child'))).toMatchObject({ status: 404, body: { errorCode: 'FILE_NOT_FOUND' } });
+      // Each base belongs to one executor, so the other rejects it instead of creating there.
+      expect(await rejectionOf(create(executorId, controllerBase, 'crossed'))).toMatchObject({ status: 403, body: { errorCode: 'FILE_OUTSIDE_ROOT' } });
+      expect(await rejectionOf(create('local', workerBase, 'crossed'))).toMatchObject({ status: 403, body: { errorCode: 'FILE_OUTSIDE_ROOT' } });
+      expect(await rejectionOf(create('99999999-9999-4999-8999-999999999999', controllerBase, 'unknown executor'))).toMatchObject({ status: 503, body: { errorCode: 'EXECUTOR_UNAVAILABLE' } });
+      expect(await readdir(controllerBase)).toEqual(['shared name']);
+
+      await fixture.crashAndRestartGarcon({ preserveExecutorWorker: true });
+      expect(await fixture.client.post<DirectoryEntry>(route(executorId, workerBase), { name: 'after restart' }))
+        .toEqual({ name: 'after restart', path: join(workerBase, 'after restart'), type: 'directory' });
+      expect((await readdir(workerBase)).sort()).toEqual(['after restart', 'shared name']);
+      expect(await readdir(controllerBase)).toEqual(['shared name']);
+      const { executors } = await fixture.client.get<{ executors: ExecutorSnapshot[] }>('/api/v1/executors');
+      expect(executors.find((executor) => executor.id === executorId)?.availability).toBe('ready');
     }, { executionBackend: backend, projectRoots: 'separate' });
   }, 60_000);
 }

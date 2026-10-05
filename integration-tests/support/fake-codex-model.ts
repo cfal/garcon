@@ -14,6 +14,15 @@ export type CodexScriptedTurn =
       request: RecordedCodexModelRequest,
     ) => CodexScriptedItem[] | Promise<CodexScriptedItem[]>);
 
+type CodexScriptedRequestMatcher = (request: RecordedCodexModelRequest) => boolean;
+
+interface RoutedCodexScriptedTurn {
+  readonly kind: 'routed';
+  readonly description: string;
+  readonly matches: CodexScriptedRequestMatcher;
+  readonly turn: CodexScriptedTurn;
+}
+
 export type CodexScriptedFault =
   | { readonly kind: 'http-error'; readonly status: number; readonly message: string }
   | { readonly kind: 'stream-error'; readonly message: string }
@@ -41,6 +50,10 @@ export function codexAssistantMessage(text: string): CodexScriptedItem {
   };
 }
 
+export function codexFinalAnswerMessage(text: string): CodexScriptedItem {
+  return { ...codexAssistantMessage(text), phase: 'final_answer' };
+}
+
 // The pinned Codex exposes the unified exec tool as `exec_command` with a string `cmd`.
 export function codexExecCommandCall(
   callId: string,
@@ -51,6 +64,33 @@ export function codexExecCommandCall(
     type: 'function_call',
     name: 'exec_command',
     arguments: JSON.stringify({ cmd, ...extraArguments }),
+    call_id: callId,
+  };
+}
+
+export function codexWriteStdinCall(
+  callId: string,
+  sessionId: number,
+  chars: string,
+): CodexScriptedItem {
+  return {
+    type: 'function_call',
+    name: 'write_stdin',
+    arguments: JSON.stringify({ session_id: sessionId, chars, yield_time_ms: 200 }),
+    call_id: callId,
+  };
+}
+
+export function codexCollaborationCall(
+  callId: string,
+  name: string,
+  argumentsValue: Record<string, unknown>,
+): CodexScriptedItem {
+  return {
+    type: 'function_call',
+    namespace: 'collaboration',
+    name,
+    arguments: JSON.stringify(argumentsValue),
     call_id: callId,
   };
 }
@@ -169,7 +209,7 @@ function scriptFailureMessage(error: unknown, request: RecordedCodexModelRequest
 
 export class FakeCodexModel {
   readonly #server: Bun.Server<undefined>;
-  readonly #turns: Array<CodexScriptedTurn | CodexScriptedFault> = [];
+  readonly #turns: Array<CodexScriptedTurn | CodexScriptedFault | RoutedCodexScriptedTurn> = [];
   readonly #requests: RecordedCodexModelRequest[] = [];
   readonly #issues: string[] = [];
   readonly #pendingReleases = new Set<() => void>();
@@ -201,9 +241,32 @@ export class FakeCodexModel {
     this.#turns.push(turn);
   }
 
+  scriptTurnMatching(
+    description: string,
+    matches: CodexScriptedRequestMatcher,
+    turn: CodexScriptedTurn,
+  ): void {
+    this.#turns.push({ kind: 'routed', description, matches, turn });
+  }
+
   // Holds the response before its first SSE event. Codex enforces a stream idle timeout, so
   // callers release the turn within tens of seconds.
   scriptHeldTurn(turn: CodexScriptedTurn): HeldCodexTurn {
+    return this.#scriptHeldTurn(turn);
+  }
+
+  scriptHeldTurnMatching(
+    description: string,
+    matches: CodexScriptedRequestMatcher,
+    turn: CodexScriptedTurn,
+  ): HeldCodexTurn {
+    return this.#scriptHeldTurn(turn, { description, matches });
+  }
+
+  #scriptHeldTurn(
+    turn: CodexScriptedTurn,
+    route?: { description: string; matches: CodexScriptedRequestMatcher },
+  ): HeldCodexTurn {
     let resolveRequested!: (request: RecordedCodexModelRequest) => void;
     const requested = new Promise<RecordedCodexModelRequest>((resolve) => {
       resolveRequested = resolve;
@@ -220,11 +283,16 @@ export class FakeCodexModel {
       releaseGate();
     };
     this.#pendingReleases.add(release);
-    this.#turns.push(async (request) => {
+    const heldTurn: CodexScriptedTurn = async (request) => {
       resolveRequested(request);
       await gate;
       return typeof turn === 'function' ? turn(request) : turn;
-    });
+    };
+    if (route) {
+      this.scriptTurnMatching(route.description, route.matches, heldTurn);
+    } else {
+      this.#turns.push(heldTurn);
+    }
     return { requested, release };
   }
 
@@ -260,7 +328,9 @@ export class FakeCodexModel {
     const problems = [
       ...this.#issues,
       ...(this.#turns.length > 0
-        ? [`${this.#turns.length} scripted turn(s) were never requested`]
+        ? [`${this.#turns.length} scripted turn(s) were never requested: ${this.#turns
+          .map((turn) => isRoutedTurn(turn) ? turn.description : 'ordered')
+          .join(', ')}`]
         : []),
     ];
     if (problems.length > 0) {
@@ -302,7 +372,26 @@ export class FakeCodexModel {
       receivedAt: Date.now(),
     };
     this.#requests.push(recorded);
-    const turn = this.#turns.shift();
+    let turn: CodexScriptedTurn | CodexScriptedFault | undefined;
+    try {
+      const orderedIndex = this.#turns.findIndex((entry) => !isRoutedTurn(entry));
+      const routedIndex = this.#turns.findIndex((entry, index) => (
+        (orderedIndex < 0 || index < orderedIndex)
+        && isRoutedTurn(entry)
+        && entry.matches(recorded)
+      ));
+      if (routedIndex >= 0) {
+        const [routed] = this.#turns.splice(routedIndex, 1);
+        turn = isRoutedTurn(routed) ? routed.turn : routed;
+      } else if (orderedIndex >= 0) {
+        const [ordered] = this.#turns.splice(orderedIndex, 1);
+        if (ordered && !isRoutedTurn(ordered)) turn = ordered;
+      }
+    } catch (error) {
+      const message = `Scripted Codex request matcher failed: ${scriptFailureMessage(error, recorded)}`;
+      this.#issues.push(message);
+      return Response.json({ error: { type: 'invalid_request_error', message } }, { status: 400 });
+    }
     if (!turn) {
       this.#issues.push(
         `Request ${recorded.id} arrived with no scripted turn (lastUserText: ${JSON.stringify(recorded.lastUserText)})`,
@@ -328,4 +417,14 @@ export class FakeCodexModel {
       return Response.json({ error: { type: 'invalid_request_error', message } }, { status: 400 });
     }
   }
+}
+
+function isRoutedTurn(
+  turn: CodexScriptedTurn | CodexScriptedFault | RoutedCodexScriptedTurn,
+): turn is RoutedCodexScriptedTurn {
+  return !Array.isArray(turn)
+    && typeof turn === 'object'
+    && turn !== null
+    && 'kind' in turn
+    && turn.kind === 'routed';
 }

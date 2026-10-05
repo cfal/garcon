@@ -114,6 +114,7 @@ export function serveExecutionRuntime(
         const { data, ...target } = call.request;
         return (await runtime.getFilesService()).save({ ...target, content: decodeFileText(data) }, { signal });
       }
+      case 'files.createDirectory': return (await runtime.getFilesService()).createDirectory(call.request, { signal });
     }
     const integration = integrations.get(call.integrationId);
     if (!integration) throw new AgentCallError('not-dispatched', 'Unknown integration', 'OPERATION_UNSUPPORTED');

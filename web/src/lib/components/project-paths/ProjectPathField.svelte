@@ -57,6 +57,15 @@
 	}: Props = $props();
 
 	const hasPath = $derived(value.trim().length > 0);
+	let directoryBrowser = $state<ReturnType<typeof DirectoryBrowser> | null>(null);
+
+	// ArrowDown enters the popover's list, because an owner may reserve Tab for completion.
+	const handleKeydown: NonNullable<HTMLInputAttributes['onkeydown']> = (event) => {
+		inputProps.onkeydown?.(event);
+		if (event.defaultPrevented || event.key !== 'ArrowDown') return;
+		if (directoryBrowser?.focusFirstRow()) event.preventDefault();
+	};
+
 	const validationTitle = $derived(
 		hasPath && validationStatus === 'invalid'
 			? validationError || m.chat_new_chat_errors_invalid_directory()
@@ -71,6 +80,7 @@
 			<input
 				title={validationTitle}
 				{...inputProps}
+				onkeydown={handleKeydown}
 				type="text"
 				bind:this={ref}
 				bind:value
@@ -116,6 +126,7 @@
 	</div>
 	{#if browser.open}
 		<DirectoryBrowser
+			bind:this={directoryBrowser}
 			executorId={browser.executorId}
 			executorContextKey={browser.executorContextKey}
 			currentPath={browser.currentPath}
@@ -123,6 +134,7 @@
 			isMobile={browser.isMobile}
 			onSelect={browser.onSelect}
 			onClose={browser.onClose}
+			onReturnFocus={() => ref?.focus()}
 		/>
 	{/if}
 </div>

@@ -456,7 +456,7 @@ describe('Chromium preambles', () => {
         await directoryBrowser.waitFor();
         if (scenario.touch) {
           await expectFocusWithin(fixture.page, directoryBrowser);
-          const directoryEntry = directoryBrowser.getByRole('listbox').locator('button').first();
+          const directoryEntry = directoryBrowser.getByRole('list').locator('button').first();
           const directoryEntryElement = await directoryEntry.elementHandle();
           if (!directoryEntryElement) throw new Error('Missing directory entry.');
           await directoryEntry.focus();

@@ -1,11 +1,11 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { tick, type ComponentProps } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { browseDirectory } from '$lib/api/files';
+import { browseDirectory, createDirectory } from '$lib/api/files';
 import ProjectPathField from '$lib/components/project-paths/ProjectPathField.svelte';
 import ProjectPathFieldTestHost from '$lib/components/project-paths/__tests__/ProjectPathFieldTestHost.svelte';
 
-vi.mock('$lib/api/files', () => ({ browseDirectory: vi.fn() }));
+vi.mock('$lib/api/files', () => ({ browseDirectory: vi.fn(), createDirectory: vi.fn() }));
 
 type Props = ComponentProps<typeof ProjectPathField>;
 
@@ -184,7 +184,7 @@ describe('ProjectPathField', () => {
 		await view.rerender({ browser: { ...first, open: true } });
 		await waitFor(() =>
 			expect(browseDirectory).toHaveBeenCalledWith(
-				'/workspace/',
+				'/workspace',
 				expect.any(AbortSignal),
 				first.executorId,
 			),
@@ -199,7 +199,7 @@ describe('ProjectPathField', () => {
 		const current = await screen.findByRole('button', { name: 'current' });
 		expect(signal?.aborted).toBe(true);
 		expect(browseDirectory).toHaveBeenLastCalledWith(
-			'/workspace/',
+			'/workspace',
 			expect.any(AbortSignal),
 			next.executorId,
 		);
@@ -213,5 +213,63 @@ describe('ProjectPathField', () => {
 		expect(next.onClose).toHaveBeenCalledOnce();
 		await view.rerender({ browser: { ...next, open: false } });
 		expect(screen.queryByRole('dialog')).toBeNull();
+	});
+
+	it('moves focus between the field and the popover list with the arrow keys', async () => {
+		vi.mocked(browseDirectory).mockResolvedValue([
+			{ name: 'existing', path: '/workspace/existing', type: 'directory' },
+		]);
+		const onkeydown = vi.fn();
+		const view = renderField({ onkeydown });
+		const input = screen.getByRole<HTMLInputElement>('textbox', { name: 'Project path' });
+		await fireEvent.click(screen.getByRole('button', { name: 'Focus path' }));
+		const closed = new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true });
+		await fireEvent(input, closed);
+		expect(closed.defaultPrevented).toBe(false);
+
+		await view.rerender({ browser: browser({ open: true }) });
+		const row = await screen.findByRole('button', { name: 'existing' });
+		const down = new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true });
+		await fireEvent(input, down);
+		expect(down.defaultPrevented).toBe(true);
+		expect(document.activeElement).toBe(row);
+		expect(onkeydown).toHaveBeenCalledTimes(2);
+		await fireEvent.keyDown(row, { key: 'ArrowUp' });
+		expect(document.activeElement).toBe(input);
+	});
+
+	it('creates a directory from the popover without submitting the surrounding form', async () => {
+		const onSubmit = vi.fn();
+		vi.mocked(browseDirectory).mockResolvedValue([
+			{ name: 'existing', path: '/workspace/existing', type: 'directory' },
+		]);
+		vi.mocked(createDirectory).mockResolvedValue({
+			name: 'fresh',
+			path: '/workspace/fresh',
+			type: 'directory',
+		});
+		const view = renderField({ onSubmit });
+		await fireEvent.click(screen.getByRole('button', { name: 'Focus path' }));
+		const opened = browser({ open: true });
+		await view.rerender({ browser: opened });
+		await screen.findByRole('button', { name: 'existing' });
+		await fireEvent.click(screen.getByRole('button', { name: 'New directory' }));
+		const name = screen.getByRole('textbox', { name: 'Directory name' });
+		await waitFor(() => expect(document.activeElement).toBe(name));
+		await fireEvent.input(name, { target: { value: ' fresh ' } });
+		const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+		await fireEvent(name, enter);
+		expect(enter.defaultPrevented).toBe(true);
+		await waitFor(() => expect(opened.onSelect).toHaveBeenCalledWith('/workspace/fresh'));
+		expect(createDirectory).toHaveBeenCalledExactlyOnceWith({
+			executorId: opened.executorId,
+			parentPath: '/workspace',
+			name: 'fresh',
+		});
+		expect(onSubmit).not.toHaveBeenCalled();
+		await waitFor(() =>
+			expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Project path' })),
+		);
+		expect(screen.queryByRole('textbox', { name: 'Directory name' })).toBeNull();
 	});
 });

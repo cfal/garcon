@@ -1,20 +1,26 @@
 // File operations API for reading, writing, browsing, and uploading files.
 
 import {
+	ApiError,
+	ApiMutationOutcomeUnknownError,
 	apiFetch,
 	apiGet,
+	apiPost,
 	apiPut,
+	isIntermediaryResponse,
 	parseApiResponse,
 	type ApiFetchOptions,
 } from './client.js';
 import {
 	FILE_REVISION_HEADER,
 	isFileRevision,
+	parseDirectoryEntry,
 	parseFileIdentityResponse,
 	parseFileRevisionResponse,
 	parseFileTreeResponse,
 	parseReadTextResponse,
 	parseSaveTextResponse,
+	type DirectoryEntry,
 	type FileRevision,
 	type FileRevisionResponse,
 	type FileSaveConflictResolution,
@@ -57,6 +63,12 @@ export interface SaveTextParams {
 	content: string;
 	expectedRevision: FileRevision;
 	conflictResolution: FileSaveConflictResolution;
+}
+
+export interface CreateDirectoryParams {
+	executorId?: string | null;
+	parentPath: string;
+	name: string;
 }
 
 export interface FileEntry {
@@ -199,14 +211,7 @@ export async function readContent(
 	return { blob: await response.blob(), revision };
 }
 
-export interface DirectoryEntry {
-	name: string;
-	path: string;
-	type: string;
-}
-
-/** Fetches directory entries for the directory browser. Returns the raw
- *  array the server sends, validated to be an Array. */
+/** Fetches the directories inside one directory for the directory browser. */
 export async function browseDirectory(
 	path: string,
 	signal?: AbortSignal,
@@ -219,8 +224,37 @@ export async function browseDirectory(
 	});
 	if (!response.ok) await parseApiResponse<never>(response);
 	const payload = await response.json();
-	if (!Array.isArray(payload)) {
+	const entries = Array.isArray(payload) ? payload.map(parseDirectoryEntry) : null;
+	if (!entries || entries.some((entry) => entry === null)) {
 		throw new Error('Invalid directory browse payload');
 	}
-	return payload;
+	return entries as DirectoryEntry[];
+}
+
+/** Creates one directory inside an existing parent on the selected executor.
+ *  Rejects with ApiMutationOutcomeUnknownError when the directory may exist. */
+export async function createDirectory(params: CreateDirectoryParams): Promise<DirectoryEntry> {
+	const query = new URLSearchParams({ path: params.parentPath });
+	if (params.executorId) query.set('executorId', params.executorId);
+	try {
+		const payload = await apiPost<unknown>(`/api/v1/files/directories?${query}`, {
+			name: params.name,
+		});
+		const created = parseDirectoryEntry(payload);
+		if (!created) throw new ApiMutationOutcomeUnknownError('Invalid directory creation response');
+		return created;
+	} catch (error) {
+		if (error instanceof ApiMutationOutcomeUnknownError) throw error;
+		if (
+			error instanceof ApiError &&
+			!isIntermediaryResponse(error) &&
+			error.errorCode !== 'FILE_CREATE_OUTCOME_UNKNOWN'
+		) {
+			throw error;
+		}
+		throw new ApiMutationOutcomeUnknownError(
+			'The directory creation outcome could not be confirmed.',
+			{ cause: error },
+		);
+	}
 }

@@ -1,5 +1,5 @@
 import { describe, expect, spyOn, test } from 'bun:test';
-import { access, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,7 +7,10 @@ import { BoundedLog } from '../../support/bounded-log.js';
 import { Deferred, withTimeout } from '../../support/deferred.js';
 import { FakeAnthropicServer } from '../../support/fake-anthropic-server.js';
 import { FakeClaudeModel } from '../../support/fake-claude-model.js';
-import { FakeCodexModel } from '../../support/fake-codex-model.js';
+import {
+  codexAssistantMessage,
+  FakeCodexModel,
+} from '../../support/fake-codex-model.js';
 import { FakeOpenAiServer } from '../../support/fake-openai-server.js';
 import { FakeOpenAiResponsesServer } from '../../support/fake-openai-responses-server.js';
 import { GarconTestClient } from '../../support/garcon-client.js';
@@ -30,13 +33,17 @@ import {
 } from '../../support/integration-fixture.js';
 import {
   assertScriptedOpenCodePlatform,
+  OPENCODE_BINARY,
   OPENCODE_PLUGIN_SEED_FILES,
+  OPENCODE_RIPGREP_VERSION,
   OPENCODE_VERSION,
   startScriptedOpenCodeTestEnvironment,
   writeOpenCodePluginSeed,
+  writeOpenCodeRipgrepSeed,
 } from '../../support/scripted-opencode.js';
 import { startScriptedPiTestEnvironment } from '../../support/scripted-pi.js';
 import { waitForProxyBaseUrl } from '../../support/live-codex.js';
+import { DEFAULT_LIVE_OPENCODE_MODEL } from '../../support/live-opencode.js';
 import {
   linuxProcessStartTimeTicks,
   processIdentityAlive,
@@ -461,6 +468,82 @@ describe('integration support contracts', () => {
     }
   });
 
+  test('seeds the pinned real ripgrep helper for hermetic OpenCode tools', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'garcon-ripgrep-seed-'));
+    try {
+      const bin = join(root, 'bin');
+      await mkdir(bin, { recursive: true });
+      await writeOpenCodeRipgrepSeed(bin);
+      const binary = join(bin, 'rg');
+      expect((await stat(binary)).mode & 0o111).not.toBe(0);
+      const child = Bun.spawn([binary, '--version'], {
+        stdin: 'ignore',
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      const [exitCode, stdout] = await Promise.all([
+        child.exited,
+        new Response(child.stdout).text(),
+      ]);
+      expect(exitCode).toBe(0);
+      expect(stdout.startsWith(`ripgrep ${OPENCODE_RIPGREP_VERSION} `)).toBe(true);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('includes the default live model in the pinned OpenCode catalog', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'garcon-opencode-model-catalog-'));
+    try {
+      const directories = {
+        config: join(root, 'config'),
+        data: join(root, 'data'),
+        state: join(root, 'state'),
+        cache: join(root, 'cache'),
+        temp: join(root, 'temp'),
+      };
+      await Promise.all(Object.values(directories).map((directory) =>
+        mkdir(directory, { recursive: true })));
+      const child = Bun.spawn([
+        OPENCODE_BINARY,
+        'models',
+        'deepseek',
+      ], {
+        cwd: root,
+        env: {
+          HOME: root,
+          XDG_CONFIG_HOME: directories.config,
+          XDG_DATA_HOME: directories.data,
+          XDG_STATE_HOME: directories.state,
+          XDG_CACHE_HOME: directories.cache,
+          TMPDIR: directories.temp,
+          DEEPSEEK_API_KEY: 'test-key',
+          OPENCODE_AUTH_CONTENT: '{}',
+          OPENCODE_CONFIG_CONTENT: JSON.stringify({ enabled_providers: ['deepseek'] }),
+          OPENCODE_DISABLE_MODELS_FETCH: '1',
+          OPENCODE_DISABLE_DEFAULT_PLUGINS: '1',
+          OPENCODE_DISABLE_PROJECT_CONFIG: '1',
+          PATH: process.env.PATH ?? '',
+        },
+        stdin: 'ignore',
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      const [exitCode, stdout, stderr] = await Promise.all([
+        child.exited,
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+      ]);
+      if (exitCode !== 0) {
+        throw new Error(`Pinned OpenCode model inventory failed: ${stderr.trim()}`);
+      }
+      expect(stdout.split('\n').map((line) => line.trim()))
+        .toContain(DEFAULT_LIVE_OPENCODE_MODEL);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test('refuses the scripted OpenCode tier off Linux and verifies pinned versions hermetically', async () => {
     expect(() => assertScriptedOpenCodePlatform('linux')).not.toThrow();
     expect(() => assertScriptedOpenCodePlatform('darwin')).toThrow('require Linux');
@@ -842,6 +925,34 @@ describe('integration support contracts', () => {
         userTexts: ['first', 'second\nthird'],
         lastUserText: 'second\nthird',
       });
+      fake.assertSettled();
+    } finally {
+      fake.stop();
+    }
+  });
+
+  test('keeps ordered Codex turns ahead of later routed turns', async () => {
+    const fake = FakeCodexModel.start();
+    try {
+      fake.scriptTurn([codexAssistantMessage('ordered response')]);
+      fake.scriptTurnMatching(
+        'later routed response',
+        (request) => request.lastUserText === 'matching request',
+        [codexAssistantMessage('routed response')],
+      );
+      const request = () => fetch(fake.responsesUrl, {
+        method: 'POST',
+        body: JSON.stringify({
+          model: 'scripted',
+          input: [{ type: 'message', role: 'user', content: 'matching request' }],
+        }),
+      }).then((response) => response.text());
+
+      const first = await request();
+      expect(first).toContain('ordered response');
+      expect(first).not.toContain('routed response');
+      const second = await request();
+      expect(second).toContain('routed response');
       fake.assertSettled();
     } finally {
       fake.stop();

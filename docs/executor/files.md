@@ -1,6 +1,6 @@
 # Files On Executors
 
-Status: implemented architecture, updated 2026-10-02. Files use bounded inline RPC over the executor's paired Noise lanes. Content and directory listings use bulk; identity and revision use primary. There is no generic transfer-handle or byte-replay protocol.
+Status: implemented architecture, updated 2026-10-05. Files use bounded inline RPC over the executor's paired Noise lanes. Content, directory listings, and directory creation use bulk; identity and revision use primary. There is no generic transfer-handle or byte-replay protocol.
 
 The historical [Executor Interfaces](./interface.md) and [Executors In The App](./app-integration.md) describe earlier stages. [Executor Transport](./transport.md) owns the current connection contract; this document describes the implemented file service.
 
@@ -9,12 +9,13 @@ The historical [Executor Interfaces](./interface.md) and [Executors In The App](
 Make the existing file experience work against the selected executor:
 
 - Browse directories and select a project path, including before a chat exists.
+- Create one directory inside a browsed directory while selecting a project path.
 - Resolve canonical file identities and populate file lists and autocomplete.
 - Read text and binary content within the existing viewer limits.
 - Check revisions and save edited text with conflict detection.
 - Keep Local available through the same service boundary.
 
-This is not filesystem synchronization, cross-executor file copying, a general upload/download service, or a distributed filesystem. Git, terminals, filesystem watches, directory mutations, and unrestricted large-file transfers remain outside this proposal. Chat attachment uploads are a separate controller-side ingress path, even though their current HTTP routes live in the files module.
+This is not filesystem synchronization, cross-executor file copying, a general upload/download service, or a distributed filesystem. Git, terminals, filesystem watches, and unrestricted large-file transfers remain outside this proposal, as do renaming, moving, and deleting files or directories and creating nested paths in one request. Chat attachment uploads are a separate controller-side ingress path, even though their current HTTP routes live in the files module.
 
 ## Working Decisions
 
@@ -32,9 +33,10 @@ The limits below describe the supported protocol.
 | Area | Current behavior |
 | --- | --- |
 | [ExecutionRuntimeApi](../../server-agents/interface/src/contracts/execution-runtime.ts) | Local and remote executors expose the typed `getFilesService()` and advertise file support. |
-| [File routes](../../server/controller/routes/files.ts) | Resolve executor-qualified targets and route browsing, identity, revisions, reads, and text saves through the selected service. |
+| [File routes](../../server/controller/routes/files.ts) | Resolve executor-qualified targets and route browsing, identity, revisions, reads, text saves, and directory creation through the selected service. |
 | [File contracts](../../common/file-contracts.ts) | Define executor-qualified canonical root/relative-path identity, opaque revisions, conflict policy, tree responses, and a 4 MiB content limit. |
 | [Revision operations](../../server/runtime/files/file-revision.ts) | Read bytes with before/after revision checks on an opened handle. Revisions derive from filesystem metadata, not a content hash. |
+| Directory creation | Creates one named child of an existing directory inside the executor's project base. Never creates intermediate directories or replaces an existing entry. |
 | Text saves | Serialize Garcon writes using a file lock, re-resolve the target, compare the expected revision, and return a revision from the opened write handle. The current implementation truncates/writes in place; it is not an atomic rename. |
 | [Browser file sessions](../../web/src/lib/files/sessions/file-session-registry.svelte.ts) | Own executor-qualified live documents, views, and save/conflict handling. |
 | [Executor RPC](../../server/remote/transport/rpc-protocol.ts) | Already carries executor-level methods such as project inspection alongside provider calls. A second generic RPC framework is unnecessary. |
@@ -110,6 +112,7 @@ The service exposes domain operations; bounded base64 encoding is an internal re
 | Check revision | Return an opaque revision or the existing missing-file result. |
 | Read text/content | Return bounded content and its revision. Raw-byte transport supports both text and binary viewers. |
 | Save text | Accept content, expected revision, and explicit conflict policy; return the written revision only after confirmed success. |
+| Create directory | Accept an existing parent inside the project base and one name; return the created directory's canonical path only after confirmed success. |
 
 Keep the existing browser HTTP shape, adding executor qualification and bounded-list metadata. The remote facade encodes complete bounded files without exposing transport details to editor code. In-process calls do not need serialization or base64.
 
@@ -131,6 +134,7 @@ Files reuse the typed request/result/error/cancel RPC envelope. Reads and text s
 ```text
 files.read(target) -> { data: base64, path, revision }
 files.save({ target, data: base64, expectedRevision, conflictResolution }) -> saved revision
+files.createDirectory({ parentPath, name }) -> { name, path, type: 'directory' }
 ```
 
 The method set is explicit. There are no application-level chunks, transfer handles, staged uploads, transfer expiry, or crash-staging cleanup.
@@ -144,6 +148,8 @@ Base64 keeps the complete file below 6 MiB even when its text contains control c
 A read uses the existing versioned-file snapshot and returns bytes with its revision. A save reaches the file service only after the complete request is decoded. Under the existing executor-owned save lock, re-resolve containment and target identity, then check the expected revision immediately before writing. Preserve in-place filesystem write semantics and explicit overwrite. External writers remain outside this lock.
 
 At most eight content reads or saves run concurrently per process; metadata and directory queries do not consume these slots. Reads and saves use a 30-second remote call deadline. Cancellation is best effort, not rollback. A save confirmation that cannot be recovered produces `FILE_SAVE_OUTCOME_UNKNOWN`; the editor keeps its buffer and reconciles the captured target before a deliberate next save. No mutation is retried without positive nonreceipt proof.
+
+`POST /api/v1/files/directories?executorId=...&path=<parent>` with `{ name }` creates a directory. The target comes only from the URL. A name is one path segment of at most 255 bytes: not empty, `.`, or `..`, and free of separators and control characters. The executor's file service is the authority for this rule on Local and remote executors alike; the RPC layer checks only the request's shape. The picker applies the same rule before sending, so the user sees the reason inline, and trims surrounding whitespace from a typed name. The service creates the name exactly as given. The executor resolves the parent to its canonical path inside the project base, requires it to be a directory, and creates the child with one non-recursive `mkdir`. On Linux it opens the parent, confirms through the descriptor that the opened directory is still the validated path, and creates the child through that descriptor, so replacing a path component with a link after validation cannot redirect the creation; a parent that changed fails with `FILE_REVISION_CONFLICT` or `FILE_NOT_FOUND` and nothing is created. macOS and Windows cannot create relative to a descriptor from this runtime; there the parent is resolved again immediately before creating, which narrows that window without closing it. An existing file, directory, or symbolic link of that name fails with `FILE_ALREADY_EXISTS`. Creation does not use a content slot or the save lock. Like a save, it is journaled and is sent again only with positive nonreceipt proof; a confirmation that cannot be recovered produces `FILE_CREATE_OUTCOME_UNKNOWN`, and the directory may exist.
 
 File content and directory traffic are isolated from primary's socket queue. Both lanes share bounded call and queue admission, reserving primary capacity. Bulk acquisition waits at most 20 seconds within the call's existing deadline. Journaled replies survive replacement on the same worker; only positive nonreceipt proof permits a resend. A missing reply alone never permits speculative save replay. CPU, disk, and network bandwidth remain shared.
 
@@ -162,8 +168,12 @@ When switching executors, try the current directory on the destination before de
 | Revision conflict | Preserve the buffer and use the existing conflict workflow. Accept Disk and Save Checked reject a comparison if its local buffer version changed. Overwrite remains an explicit user choice. |
 | Commit may have run but its result is lost | Surface uncertainty, retain the buffer, and require reconciliation before another save. Cancellation is not rollback. |
 | Chat/path/executor changes during an awaited UI request | Reject stale routing or discard stale presentation results; never attach them to a different executor's document. |
+| Directory creation may have run but its result is lost | Report that the creation is unconfirmed, keep the entered name, and read the listing again. Never resend it automatically. |
+| Directory creation settles after the picker moved elsewhere | Leave the picker where the user put it. A result for another directory or executor never navigates or selects. |
 
 File errors use typed serialization through both RPC and HTTP boundaries, preserving codes such as `FILE_TOO_LARGE`, `FILE_CHANGED_DURING_READ`, and `FILE_REVISION_CONFLICT`. The RPC adapter preserves domain errors and distinguishes definite rejection/non-dispatch from uncertain mutation outcomes.
+
+The project directory picker has two presentations over one state model. On mobile it is a full-screen sheet that opens on the field's directory, keeps navigation local, and changes the field only through "Select this directory"; a field path that names no directory opens its parent, filtered by the name when it is missing. Each ancestor tried costs one listing, so after three the sheet opens the base instead of walking a deep missing path. The picker relies on browse reporting `FILE_NOT_FOUND` and `FILE_DIRECTORY_REQUIRED` for those paths. Elsewhere it is a popover under the field: a typed path lists its parent filtered by the name under edit, and opening a directory writes that directory to the field and lists its children. Both create a directory in the listed directory and then enter it, and both offer to create a looked-for name that no listed directory has. A directory the user opened from a listing on the same executor can be selected while its own entries load; a typed, fallback, or failed directory cannot until it lists. In the popover, ArrowDown moves from the field into the list and ArrowUp returns, since a field may reserve Tab for completion. The creation form belongs to the directory it was opened in. A creation that settles after the picker closed changes nothing.
 
 Enable remote browsing, file links, and editor actions only after the corresponding executor service is available. Keep polling bounded to existing visible/user-demanded workflows; no filesystem watcher service is required. File unavailability must not clear live buffers or disable unrelated Local files, chats, Git, or terminals.
 
@@ -177,7 +187,8 @@ The implementation must demonstrate these boundaries:
 - Byte-boundary and over-limit cases: image bytes, UTF-8 text, malformed base64, escaped content, and large directory responses.
 - Consistent read snapshots and revision-aware writes, including two concurrent saves, external changes, and conflict/overwrite behavior.
 - Deterministic disconnects before dispatch and after a save but before its reply. No blind retry or false-success UI.
+- Directory creation on Local and both connection directions: identical names on different executors, existing names, names that would escape or nest, parents outside the base or reached through escaping links, a parent swapped for a link before it is opened and immediately before creation, and a reply lost after creation.
 - Cancellation and session replacement with bounded memory/RPC usage and retained editor buffers.
 - Held bulk file transfers do not block primary controls; no CPU, disk, or whole-network latency guarantee is implied.
 
-Use unit/contract tests for parsers and size limits, isolated real-process controller/worker tests for IO and transport failure, and browser coverage for project selection, file identity, editor conflicts, and buffer preservation. No paid provider calls are needed to validate the file service.
+Use unit/contract tests for parsers and size limits, isolated real-process controller/worker tests for IO and transport failure, and browser coverage for project selection and directory creation in both picker presentations, file identity, editor conflicts, and buffer preservation. No paid provider calls are needed to validate the file service.

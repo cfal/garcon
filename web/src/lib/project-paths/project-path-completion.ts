@@ -1,4 +1,5 @@
 import { browseDirectory } from '$lib/api/files.js';
+import { splitTypedDirectoryPath } from './directory-location.js';
 
 interface ProjectPathCompletionTarget {
 	readonly executorId: string;
@@ -35,9 +36,9 @@ export class ProjectPathCompletionController {
 			return;
 		}
 		const generation = this.#generation;
-		const lastSlash = raw.lastIndexOf('/');
-		const parentDir = lastSlash >= 0 ? raw.slice(0, lastSlash) || '/' : '/';
-		const partial = lastSlash >= 0 ? raw.slice(lastSlash + 1).toLowerCase() : '';
+		const typed = splitTypedDirectoryPath(raw);
+		const parentDir = typed.directory;
+		const partial = typed.partial.toLowerCase();
 
 		try {
 			const entries = await browseDirectory(parentDir, undefined, executorId);

@@ -19,13 +19,13 @@
     "typecheck": "bunx tsc -p tsconfig.json"
   },
   "devDependencies": {
-    "@anthropic-ai/claude-code": "2.1.285",
-    "@earendil-works/pi-coding-agent": "0.99.1",
-    "@openai/codex": "0.159.2",
+    "@anthropic-ai/claude-code": "2.1.289",
+    "@earendil-works/pi-coding-agent": "1.0.2",
+    "@openai/codex": "0.160.0",
     "@sveltejs/vite-plugin-svelte": "^7.3.0",
     "@types/bun": "1.4.2",
     "bun-pty": "0.4.10",
-    "opencode-ai": "1.18.31",
+    "opencode-ai": "1.18.34",
     "playwright": "1.63.0",
     "puppeteer-core": "25.11.0",
     "svelte": "5.57.1",

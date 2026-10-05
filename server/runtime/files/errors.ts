@@ -1,4 +1,4 @@
-import { DomainError } from '../../common/domain-error.js';
+import { DomainError, ValidationDomainError } from '../../common/domain-error.js';
 import { hasNodeErrorCode } from '../../common/errors.js';
 import { isProjectBoundaryError } from '../../common/path-boundary.js';
 
@@ -11,6 +11,18 @@ export function fileOperationError(error: unknown): unknown {
     return new DomainError('FILE_PERMISSION_DENIED', 'Permission denied', 403);
   }
   if (hasNodeErrorCode(error, 'ELOOP')) return fileRevisionConflict();
+  return error;
+}
+
+// Other failures keep their codes so the shared mapping reports missing parents and permissions.
+export function directoryCreationError(error: unknown): unknown {
+  if (hasNodeErrorCode(error, 'EEXIST')) {
+    return new DomainError('FILE_ALREADY_EXISTS', 'A file or directory with that name already exists', 409);
+  }
+  if (hasNodeErrorCode(error, 'ENAMETOOLONG') || hasNodeErrorCode(error, 'EINVAL')) {
+    return new ValidationDomainError('Directory name is not valid on this filesystem');
+  }
+  if (hasNodeErrorCode(error, 'EROFS')) return new DomainError('FILE_PERMISSION_DENIED', 'Permission denied', 403);
   return error;
 }
 

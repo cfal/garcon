@@ -44,6 +44,26 @@ export interface SaveTextResponse {
   revision: FileRevision;
 }
 
+// Longest single path segment the common filesystems accept.
+export const MAX_DIRECTORY_NAME_BYTES = 255;
+
+export type DirectoryNameProblem =
+  | 'empty'
+  | 'reserved'
+  | 'invalid-character'
+  | 'too-long';
+
+export interface CreateDirectoryRequest {
+  name: string;
+}
+
+// One directory as browsing lists it and as creation returns it.
+export interface DirectoryEntry {
+  name: string;
+  path: string;
+  type: 'directory';
+}
+
 export type FileTreeEntryType = 'file' | 'directory';
 
 export interface FileTreeEntry {
@@ -131,6 +151,35 @@ export function parseSaveTextRequest(value: unknown): SaveTextRequest | null {
     expectedRevision: value.expectedRevision,
     conflictResolution: value.conflictResolution,
   };
+}
+
+// Reports why a name cannot identify one new directory inside its parent.
+// Separators and dot segments would address another directory.
+export function directoryNameProblem(name: string): DirectoryNameProblem | null {
+  if (name.length === 0) return 'empty';
+  if (name === '.' || name === '..') return 'reserved';
+  if (/[\u0000-\u001f\u007f/\\]/.test(name)) return 'invalid-character';
+  if (new TextEncoder().encode(name).length > MAX_DIRECTORY_NAME_BYTES) return 'too-long';
+  return null;
+}
+
+export function parseCreateDirectoryRequest(
+  value: unknown,
+): CreateDirectoryRequest | null {
+  if (!isRecord(value) || typeof value.name !== 'string') return null;
+  return { name: value.name };
+}
+
+export function parseDirectoryEntry(value: unknown): DirectoryEntry | null {
+  if (
+    !isRecord(value) ||
+    !isNonEmptyString(value.name) ||
+    !isNonEmptyString(value.path) ||
+    value.type !== 'directory'
+  ) {
+    return null;
+  }
+  return { name: value.name, path: value.path, type: 'directory' };
 }
 
 export function parseSaveTextResponse(value: unknown): SaveTextResponse | null {

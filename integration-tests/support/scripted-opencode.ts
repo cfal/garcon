@@ -9,8 +9,9 @@
 
 import { Database } from 'bun:sqlite';
 import { readdirSync, readFileSync } from 'node:fs';
-import { chmod, mkdir, writeFile } from 'node:fs/promises';
-import { join, sep } from 'node:path';
+import { chmod, copyFile, mkdir, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
+import { dirname, join, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { AgentSettingsEnvelope } from '../../common/agent-integration.js';
 import type {
@@ -47,12 +48,13 @@ export const OPENCODE_TEST_PROVIDER = 'garcon-fake';
 export const OPENCODE_TEST_MODEL_ID = 'fake-model';
 export const OPENCODE_TEST_MODEL = `${OPENCODE_TEST_PROVIDER}/${OPENCODE_TEST_MODEL_ID}`;
 export const OPENCODE_TEST_THINKING_MODE = 'none';
+export const OPENCODE_RIPGREP_VERSION = '15.2.0';
 // Declared with reasoning: true so the server derives low/medium/high thinking
 // variants, letting scripted tests pin variant selection end to end.
 export const OPENCODE_TEST_REASONING_MODEL_ID = 'fake-reasoning';
 export const OPENCODE_TEST_REASONING_MODEL = `${OPENCODE_TEST_PROVIDER}/${OPENCODE_TEST_REASONING_MODEL_ID}`;
 
-// OpenCode 1.18.31 makes one initial request plus five retries for retryable failures.
+// OpenCode 1.18.34 makes one initial request plus five retries for retryable failures.
 // https://github.com/anomalyco/opencode/blob/2b72179c663cadcb54f54d9f19221b3fb3d11fb6/packages/opencode/src/session/retry.ts#L31-L31
 export const OPENCODE_RETRY_EXHAUSTION_REQUEST_COUNT = 6;
 
@@ -75,7 +77,7 @@ const OPENCODE_AGENT_SETTINGS: AgentSettingsEnvelope = {
   values: {},
 };
 
-// OpenCode 1.18.31 schedules an @opencode-ai/plugin install for every config directory and
+// OpenCode 1.18.34 schedules an @opencode-ai/plugin install for every config directory and
 // skips reification only when node_modules exists and package.json plus package-lock.json
 // already declare the pinned plugin. Seeding these bytes keeps provider runtime offline; the
 // loopback npm registry trap turns any future attempt into an otherRequests() violation.
@@ -92,6 +94,48 @@ export const OPENCODE_PLUGIN_SEED_FILES: Record<string, string> = {
   // https://github.com/anomalyco/opencode/blob/49c69c5ed3ccf706b61b3febb43c8aaff7f8325e/packages/opencode/src/config/config.ts#L295-L309
   '.gitignore': ['node_modules', 'package.json', 'package-lock.json', 'bun.lock', '.gitignore'].join('\n'),
 };
+
+const require = createRequire(import.meta.url);
+const CODEX_RIPGREP_TARGETS = {
+  x64: {
+    packageName: '@openai/codex-linux-x64',
+    triple: 'x86_64-unknown-linux-musl',
+  },
+  arm64: {
+    packageName: '@openai/codex-linux-arm64',
+    triple: 'aarch64-unknown-linux-musl',
+  },
+} as const;
+
+function pinnedRipgrepBinary(): string {
+  const target = CODEX_RIPGREP_TARGETS[process.arch as keyof typeof CODEX_RIPGREP_TARGETS];
+  if (process.platform !== 'linux' || !target) {
+    throw new Error(`No pinned ripgrep fixture is available for ${process.platform}/${process.arch}.`);
+  }
+  const packageRoot = dirname(require.resolve(`${target.packageName}/package.json`));
+  return join(packageRoot, 'vendor', target.triple, 'codex-path', 'rg');
+}
+
+export async function writeOpenCodeRipgrepSeed(binDir: string): Promise<void> {
+  const destination = join(binDir, 'rg');
+  await copyFile(pinnedRipgrepBinary(), destination);
+  await chmod(destination, 0o755);
+  const child = Bun.spawn([destination, '--version'], {
+    stdin: 'ignore',
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  const [exitCode, stdout, stderr] = await Promise.all([
+    child.exited,
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+  ]);
+  if (exitCode !== 0 || !stdout.startsWith(`ripgrep ${OPENCODE_RIPGREP_VERSION} `)) {
+    throw new Error(
+      `Pinned ripgrep verification failed with exit ${exitCode}: ${stderr.trim() || stdout.trim()}`,
+    );
+  }
+}
 
 export interface OpenCodePaths {
   root: string;
@@ -220,7 +264,7 @@ function assertFixtureOwnedPaths(paths: OpenCodePaths, fixtureRoot: string): voi
   }
 }
 
-// OpenCode 1.18.31 has no hermetic override for macOS managed-preference plist reads, so the
+// OpenCode 1.18.34 has no hermetic override for macOS managed-preference plist reads, so the
 // real-binary tier runs on Linux only; unit coverage remains cross-platform.
 export function assertScriptedOpenCodePlatform(platform: NodeJS.Platform = process.platform): void {
   if (platform !== 'linux') {
@@ -359,6 +403,7 @@ export function startScriptedOpenCodeTestEnvironment(options: {
         ].join('\n'), { mode: 0o600 });
       }
       await writeOpenCodePluginSeed(paths.globalConfig);
+      await writeOpenCodeRipgrepSeed(paths.bin);
       await writeOpenCodeSupervisorShim(paths.bin);
       const version = await verifyPinnedBinaryVersion({
         binary: OPENCODE_BINARY,

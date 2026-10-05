@@ -14,6 +14,7 @@ export interface FileRpcMethods {
   'files.revision': Method<'revision'>;
   'files.read': Call<ExecutionFileTarget, Omit<ExecutionFileRead, 'bytes'> & { readonly data: string }>;
   'files.save': Call<Omit<Parameters<ExecutionFilesService['save']>[0], 'content'> & { readonly data: string }, Awaited<ReturnType<ExecutionFilesService['save']>>>;
+  'files.createDirectory': Method<'createDirectory'>;
 }
 
 // Base64 keeps even control-heavy UTF-8 below the encoded session limit.
@@ -41,6 +42,9 @@ export function validateFileRpcRequest(method: string, request: unknown): void {
   const validPath = (value: unknown) => typeof value === 'string' && value.length > 0 && value.length <= 4096 && !value.includes('\0');
   if (method === 'files.tree' || method === 'files.browse') {
     if (request.directoryPath !== undefined && !validPath(request.directoryPath)) throw invalidFileData();
+  } else if (method === 'files.createDirectory') {
+    // The file service decides which names are acceptable; only the shape is checked here.
+    if (!validPath(request.parentPath) || typeof request.name !== 'string' || request.name.length > 4096) throw invalidFileData();
   } else {
     if (!validPath(request.projectPath) || method !== 'files.list' && !validPath(request.filePath)) throw invalidFileData();
   }

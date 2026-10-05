@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PI_DISCOVERY_MODELS, preparePiModelDiscoveryFixture } from './model-discovery-fixture.js';
 
-it('discovers physical and virtual extension models through the real installed SDK', async () => {
+it('discovers configured legacy, native, and virtual extension models through the real installed SDK', async () => {
   const home = await mkdtemp(join(tmpdir(), 'garcon-pi-discovery-'));
   try {
     const agentDir = await preparePiModelDiscoveryFixture(home);
@@ -24,6 +24,7 @@ it('discovers physical and virtual extension models through the real installed S
     const models = JSON.parse(await stdout);
     expect(models.map((model: { value: string }) => model.value).sort()).toEqual(PI_DISCOVERY_MODELS);
     expect(models).toContainEqual({ value: 'garcon-discovery/physical', label: 'garcon-discovery: physical', supportsImages: false });
+    expect(models).toContainEqual({ value: 'garcon-native/native', label: 'garcon-native: native', supportsImages: false });
     expect(models).toContainEqual({ value: 'garcon-router/auto', label: 'garcon-router: auto', supportsImages: true });
   } finally {
     await rm(home, { recursive: true, force: true });

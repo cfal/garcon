@@ -83,7 +83,10 @@ export interface LiveCodexTestEnvironment {
   readonly serverEnvironment: Record<string, string>;
   prepareWorkspace(
     directories: IntegrationDirectories,
-    options?: { useFixtureModelCatalog?: boolean },
+    options?: {
+      useFixtureModelCatalog?: boolean;
+      multiAgentVersion?: 'v2';
+    },
   ): Promise<void>;
   dispose(): Promise<void>;
 }
@@ -267,6 +270,7 @@ export async function startLiveCodexTestEnvironment(
             ...model,
             slug: testingModel,
             tool_mode: options.toolMode ?? model.tool_mode,
+            multi_agent_version: workspaceOptions.multiAgentVersion ?? model.multi_agent_version,
           })),
         };
         await writeFile(catalogPath, JSON.stringify(modelCatalog), { mode: 0o600 });

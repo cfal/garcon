@@ -9,6 +9,7 @@ import {
 	resolveFileIdentity,
 	saveText,
 	browseDirectory,
+	createDirectory,
 } from '../files';
 
 vi.stubGlobal('localStorage', {
@@ -396,10 +397,63 @@ describe('files API contract', () => {
 		expect(url).toContain('path=%2Fp');
 	});
 
-	it('browseDirectory rejects non-array payloads', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ entries: [] }));
+	it('browseDirectory rejects non-array payloads and malformed entries', async () => {
+		for (const payload of [
+			{ entries: [] },
+			[null],
+			[{ name: 'src', type: 'directory' }],
+			[{ name: '', path: '/p/src', type: 'directory' }],
+			[{ name: 'src', path: '/p/src' }],
+		]) {
+			fetchMock.mockResolvedValue(jsonResponse(payload));
+			await expect(browseDirectory('/p')).rejects.toThrow('Invalid directory browse payload');
+		}
+	});
 
-		await expect(browseDirectory('/p')).rejects.toThrow('Invalid directory browse payload');
+	it('createDirectory posts the name to the executor-qualified parent', async () => {
+		const executorId = '22222222-2222-4222-8222-222222222222';
+		const created = { name: 'new project', path: '/worker/new project', type: 'directory' };
+		fetchMock.mockResolvedValue(jsonResponse(created, 201));
+
+		await expect(
+			createDirectory({ executorId, parentPath: '/worker', name: 'new project' }),
+		).resolves.toEqual(created);
+		const [url, init] = fetchMock.mock.calls[0];
+		const target = new URL(url, 'http://controller');
+		expect(target.pathname).toBe('/api/v1/files/directories');
+		expect(Object.fromEntries(target.searchParams)).toEqual({ path: '/worker', executorId });
+		expect(init.method).toBe('POST');
+		expect(JSON.parse(init.body)).toEqual({ name: 'new project' });
+	});
+
+	it('createDirectory keeps definite rejections and reports every unconfirmed outcome as unknown', async () => {
+		const request = { parentPath: '/p', name: 'src' };
+		fetchMock.mockResolvedValue(
+			jsonResponse(
+				{ success: false, error: 'Exists', errorCode: 'FILE_ALREADY_EXISTS', retryable: false },
+				409,
+			),
+		);
+		await expect(createDirectory(request)).rejects.toMatchObject({
+			name: 'ApiError',
+			status: 409,
+			errorCode: 'FILE_ALREADY_EXISTS',
+		});
+
+		const unknown = { name: 'ApiMutationOutcomeUnknownError' };
+		fetchMock.mockResolvedValue(
+			jsonResponse(
+				{ success: false, error: 'Unconfirmed', errorCode: 'FILE_CREATE_OUTCOME_UNKNOWN' },
+				503,
+			),
+		);
+		await expect(createDirectory(request)).rejects.toMatchObject(unknown);
+		fetchMock.mockResolvedValue(new Response('Bad gateway', { status: 502 }));
+		await expect(createDirectory(request)).rejects.toMatchObject(unknown);
+		fetchMock.mockResolvedValue(jsonResponse({ name: 'src' }, 201));
+		await expect(createDirectory(request)).rejects.toMatchObject(unknown);
+		fetchMock.mockRejectedValue(new TypeError('Failed to fetch'));
+		await expect(createDirectory(request)).rejects.toMatchObject(unknown);
 	});
 
 	it('browseDirectory preserves structured API errors', async () => {

@@ -2,14 +2,15 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import type { ExecutionFilesService, ExecutionFileTarget, ExecutorCallOptions } from '@garcon/server-agent-interface';
-import { MAX_FILE_SAVE_BYTES, parseSaveTextRequest, type FileTreeHomeDirectory } from '../../../common/file-contracts.js';
+import { MAX_FILE_SAVE_BYTES, directoryNameProblem, parseSaveTextRequest, type DirectoryNameProblem, type FileTreeHomeDirectory } from '../../../common/file-contracts.js';
 import { assertRealWithinBase, resolveRealWithinBase } from '../../common/path-boundary.js';
 import { DomainError, ValidationDomainError } from '../../common/domain-error.js';
 import { KeyedPromiseLock } from '../../common/keyed-lock.js';
 import { toNativePath, toExecutorPath } from '../../common/executor-path.js';
 import { readVersionedFile, getFileRevisionOrMissing, getFileLockKey, writeVersionedTextFile, FileTooLargeError } from './file-revision.js';
 import { readDirectoryCandidates, fileBreadcrumbs, listProjectFiles, readFileDirectory, relativeFilePath } from './directory-reader.js';
-import { fileOperationError, fileRevisionConflict } from './errors.js';
+import { directoryCreationError, fileOperationError, fileRevisionConflict } from './errors.js';
+import { createChildDirectory } from './directory-creation.js';
 
 export interface FilesServiceOptions {
   readonly executorId: string;
@@ -18,6 +19,17 @@ export interface FilesServiceOptions {
   readonly assertAvailable?: (options?: ExecutorCallOptions) => void;
   readonly resolveSaveTarget?: typeof resolveRealWithinBase;
   readonly readDirectory?: typeof readFileDirectory;
+}
+
+const DIRECTORY_NAME_PROBLEMS: Readonly<Record<DirectoryNameProblem, string>> = {
+  empty: 'A directory name is required',
+  reserved: 'Directory name is reserved',
+  'invalid-character': 'Directory name cannot contain path separators or control characters',
+  'too-long': 'Directory name is too long',
+};
+
+function isPathInput(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= 4096 && !value.includes('\0');
 }
 
 // In-flight writes can outlive a serving session, so aliases share process-lifetime locks.
@@ -107,6 +119,19 @@ export class FilesService implements ExecutionFilesService {
     });
   }
 
+  async createDirectory(request: Parameters<ExecutionFilesService['createDirectory']>[0], options?: ExecutorCallOptions) {
+    return this.#run(options, async () => {
+      const problem = typeof request.name === 'string' ? directoryNameProblem(request.name) : 'empty';
+      if (problem) throw new ValidationDomainError(DIRECTORY_NAME_PROBLEMS[problem]);
+      if (!isPathInput(request.parentPath)) throw new ValidationDomainError('Invalid directory path');
+      const { root, directory } = await this.#directory(request.parentPath);
+      this.#available(options);
+      // The name is one segment, so the target stays inside its canonical parent.
+      const target = await createChildDirectory(root, directory, request.name).catch((error: unknown) => { throw directoryCreationError(error); });
+      return { name: request.name, path: toExecutorPath(target), type: 'directory' as const };
+    });
+  }
+
   async #directory(input?: string) {
     const root = await this.#root(this.options.projectBasePath);
     const directory = await assertRealWithinBase(root, toNativePath(input || root));
@@ -115,7 +140,7 @@ export class FilesService implements ExecutionFilesService {
   }
 
   async #root(input: string): Promise<string> {
-    if (typeof input !== 'string' || !input || input.length > 4096 || input.includes('\0')) throw new ValidationDomainError('Invalid project path');
+    if (!isPathInput(input)) throw new ValidationDomainError('Invalid project path');
     return assertRealWithinBase(toNativePath(this.options.projectBasePath), toNativePath(input));
   }
 
@@ -125,7 +150,7 @@ export class FilesService implements ExecutionFilesService {
   }
 
   #validateTarget(request: ExecutionFileTarget): void {
-    if (typeof request.filePath !== 'string' || !request.filePath || request.filePath.length > 4096 || request.filePath.includes('\0')) throw new ValidationDomainError('Invalid file path');
+    if (!isPathInput(request.filePath)) throw new ValidationDomainError('Invalid file path');
   }
 
   #available(options?: ExecutorCallOptions): void {

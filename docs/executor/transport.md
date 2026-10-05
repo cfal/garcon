@@ -64,8 +64,9 @@ to a replacement primary.
 
 Primary carries launches, Stop/abort, permissions, credentials, producer and
 terminal frames, small file identity/revision calls, and `git.getQuickSummary`.
-Bulk carries every other Git/GitHub method, file bodies and directory lists,
-the complete history reader sequence, and large-capable reverse CLI operations.
+Bulk carries every other Git/GitHub method, file bodies, directory lists and
+directory creation, the complete history reader sequence, and large-capable
+reverse CLI operations.
 The exhaustive routing policy is checked before dispatch on both peers. There
 is no size-triggered fallback to primary. Primary CLI context, turn receipts,
 Stop, and permission decisions have a 64 KiB encoded request/reply cap, as does
