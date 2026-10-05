@@ -1,5 +1,5 @@
 import { describe, expect, spyOn, test } from 'bun:test';
-import { access, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,9 +31,11 @@ import {
 import {
   assertScriptedOpenCodePlatform,
   OPENCODE_PLUGIN_SEED_FILES,
+  OPENCODE_RIPGREP_VERSION,
   OPENCODE_VERSION,
   startScriptedOpenCodeTestEnvironment,
   writeOpenCodePluginSeed,
+  writeOpenCodeRipgrepSeed,
 } from '../../support/scripted-opencode.js';
 import { startScriptedPiTestEnvironment } from '../../support/scripted-pi.js';
 import { waitForProxyBaseUrl } from '../../support/live-codex.js';
@@ -456,6 +458,30 @@ describe('integration support contracts', () => {
       for (const [name, contents] of Object.entries(OPENCODE_PLUGIN_SEED_FILES)) {
         expect(await readFile(join(globalConfig, name), 'utf8')).toBe(contents);
       }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('seeds the pinned real ripgrep helper for hermetic OpenCode tools', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'garcon-ripgrep-seed-'));
+    try {
+      const bin = join(root, 'bin');
+      await mkdir(bin, { recursive: true });
+      await writeOpenCodeRipgrepSeed(bin);
+      const binary = join(bin, 'rg');
+      expect((await stat(binary)).mode & 0o111).not.toBe(0);
+      const child = Bun.spawn([binary, '--version'], {
+        stdin: 'ignore',
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      const [exitCode, stdout] = await Promise.all([
+        child.exited,
+        new Response(child.stdout).text(),
+      ]);
+      expect(exitCode).toBe(0);
+      expect(stdout.startsWith(`ripgrep ${OPENCODE_RIPGREP_VERSION} `)).toBe(true);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

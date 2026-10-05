@@ -98,7 +98,7 @@ describeOnLinux('OpenCode against a scripted model', () => {
 
   test('executes the conditional apply_patch inventory through the real binary', async () => {
     environment?.dispose();
-    const modelId = 'gpt-5-scripted';
+    const modelId = 'gpt-6-sol';
     environment = startScriptedOpenCodeTestEnvironment({ modelId });
     const testEnvironment = requireEnvironment();
     const toolCallId = 'call_conditional_apply_patch';
@@ -403,6 +403,51 @@ describeOnLinux('OpenCode against a scripted model', () => {
         event.type === 'agent-run-finished' && event.chatId === chatId);
       if (!lastMessages) throw new Error('Turn delivered no chat-messages events.');
       expect(terminalIndex).toBeGreaterThan(lastMessages.index);
+      testEnvironment.model.assertSettled();
+    }, withScriptedOpenCode());
+  }, 120_000);
+
+  test('forwards root and child native session identity headers to model requests', async () => {
+    const testEnvironment = requireEnvironment();
+    const childReply = marker('SESSION_HEADER_CHILD_REPLY');
+    const finalReply = marker('SESSION_HEADER_FINAL_REPLY');
+    testEnvironment.model.scriptTurn([
+      chatCompletionsToolUse('call_session_header_task', 'task', {
+        subagent_type: 'general',
+        description: 'Return fixture marker',
+        prompt: `Reply exactly ${childReply}`,
+      }),
+    ]);
+    testEnvironment.model.scriptTurn([chatCompletionsText(childReply)]);
+    testEnvironment.model.scriptTurn([chatCompletionsText(finalReply)]);
+
+    await withIntegrationFixture('opencode-scripted-session-headers', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const cursor = fixture.client.markEvents();
+      const requestCursor = testEnvironment.model.markRequests();
+      const turn = await fixture.client.startChat(scriptedOpenCodeStartRequest({
+        chatId,
+        projectPath: fixture.dirs.project,
+        command: marker('SESSION_HEADER_PROMPT'),
+      }));
+      await waitForVisibleResponse({
+        fixture,
+        chatId,
+        turnId: turn.turnId,
+        marker: finalReply,
+        afterIndex: cursor,
+      });
+
+      const native = await openCodeNativeSession(fixture, chatId);
+      const requests = testEnvironment.model.requestsSince(requestCursor);
+      expect(requests).toHaveLength(3);
+      expect(requests[0]?.sessionIdHeader).toBe(native.agentSessionId);
+      expect(requests[0]?.parentSessionIdHeader).toBeNull();
+      expect(requests[1]?.sessionIdHeader).toBeTruthy();
+      expect(requests[1]?.sessionIdHeader).not.toBe(native.agentSessionId);
+      expect(requests[1]?.parentSessionIdHeader).toBe(native.agentSessionId);
+      expect(requests[2]?.sessionIdHeader).toBe(native.agentSessionId);
+      expect(requests[2]?.parentSessionIdHeader).toBeNull();
       testEnvironment.model.assertSettled();
     }, withScriptedOpenCode());
   }, 120_000);

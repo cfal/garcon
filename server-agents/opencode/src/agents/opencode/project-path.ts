@@ -8,8 +8,8 @@ import {
 import { OpenCodeTimeoutError } from './request-control.js';
 import { OpenCodeSdkResultError } from './sdk-result.js';
 
-// OpenCode 1.18.31 flattens mismatch and missing-session errors into fixed messages.
-// https://github.com/anomalyco/opencode/blob/47b6b6f5f4f9b42d2bce7af1c4e5bf6efaf22ba7/packages/opencode/src/server/routes/instance/httpapi/handlers/control-plane.ts#L30-L36
+// OpenCode 1.18.34 flattens mismatch and missing-session errors into fixed messages.
+// https://github.com/anomalyco/opencode/blob/aec0b9a6d8898f68f923aaf08b7306d931fd9d76/packages/opencode/src/server/routes/instance/httpapi/handlers/control-plane.ts#L30-L36
 const DESTINATION_PROJECT_MISMATCH = 'Destination directory belongs to another project';
 const SESSION_NOT_FOUND_PREFIX = 'Session not found:';
 const MISSING_ENDPOINT_STATUSES = new Set([404, 405, 501]);

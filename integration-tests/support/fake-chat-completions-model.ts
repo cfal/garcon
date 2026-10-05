@@ -49,6 +49,8 @@ export interface HeldChatCompletionsTurn {
 
 export interface RecordedChatCompletionsRequest {
   readonly id: number;
+  readonly sessionIdHeader: string | null;
+  readonly parentSessionIdHeader: string | null;
   readonly body: Record<string, unknown>;
   readonly userTexts: readonly string[];
   readonly lastUserText: string;
@@ -394,6 +396,8 @@ export class FakeChatCompletionsModel {
     const recordedUserTexts = userTexts(record);
     const recorded: RecordedChatCompletionsRequest = {
       id: ++this.#requestId,
+      sessionIdHeader: request.headers.get('x-opencode-session-id'),
+      parentSessionIdHeader: request.headers.get('x-opencode-parent-session-id'),
       body: record,
       userTexts: recordedUserTexts,
       lastUserText: recordedUserTexts.at(-1) ?? '',
