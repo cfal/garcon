@@ -318,14 +318,17 @@
 		workspaceWindowTitlebarMetrics(localSettings.workspaceWindowTitlebarHeightDeltaPx),
 	);
 	const WINDOW_EDGE_EPSILON = 1e-6;
-	const highlightedWindow = $derived(
-		localSettings.highlightActiveWindow &&
-			!isMobile &&
-			!projectedWindowId &&
-			geometry.windows.length > 1
-			? geometry.windows.find((entry) => entry.workspaceWindow.id === presentedCurrentWindowId)
-			: undefined,
-	);
+	const highlightedWindow = $derived.by(() => {
+		if (
+			!localSettings.highlightActiveWindow ||
+			isMobile ||
+			projectedWindowId ||
+			geometry.windows.length <= 1
+		) {
+			return undefined;
+		}
+		return geometry.windows.find((entry) => entry.workspaceWindow.id === presentedCurrentWindowId);
+	});
 
 	function hasLeftSeparator(rect: WorkspaceWindowRect): boolean {
 		return rect.left > WINDOW_EDGE_EPSILON;

@@ -52,14 +52,14 @@ async function activateWindow(page: Page, windowId: string): Promise<void> {
   );
 }
 
-async function screenshot(page: Page, name: string): Promise<void> {
+async function captureScreenshot(page: Page, name: string): Promise<void> {
   const directory = process.env.GARCON_SCREENSHOT_DIR;
   if (!directory) return;
   await mkdir(directory, { recursive: true });
   await page.screenshot({ path: join(directory, `${name}.png`) });
 }
 
-async function geometry(page: Page) {
+async function measureWorkspaceGeometry(page: Page) {
   return page
     .locator(
       "[data-workspace-window-id], [data-workspace-window-content], [data-composer]",
@@ -77,41 +77,40 @@ test("the local active-window border preserves geometry and only appears with mu
     "workspace-active-border-preference",
     async (fixture) => {
       const { page } = fixture;
+      const activeBorder = page.locator(BORDER);
       await openChat(fixture);
-      expect(await page.locator(BORDER).count()).toBe(0);
-      const before = await geometry(page);
+      expect(await activeBorder.count()).toBe(0);
+      const before = await measureWorkspaceGeometry(page);
       await toggleHighlight(page);
-      await page.locator(BORDER).waitFor();
-      expect(await geometry(page)).toEqual(before);
-      await screenshot(page, "active-window-desktop");
+      await activeBorder.waitFor();
+      expect(await measureWorkspaceGeometry(page)).toEqual(before);
+      await captureScreenshot(page, "active-window-desktop");
 
       await toggleHighlight(page);
-      expect(await page.locator(BORDER).count()).toBe(0);
-      expect(await geometry(page)).toEqual(before);
+      expect(await activeBorder.count()).toBe(0);
+      expect(await measureWorkspaceGeometry(page)).toEqual(before);
       await toggleHighlight(page);
       await page.reload();
-      await page.locator(BORDER).waitFor();
+      await activeBorder.waitFor();
       expect(
-        await page
-          .locator(BORDER)
-          .getAttribute("data-workspace-window-active-border"),
+        await activeBorder.getAttribute("data-workspace-window-active-border"),
       ).toBe("window-main");
 
       await page
         .locator('[data-workspace-window-fullscreen="window-main"]')
         .click();
-      await page.locator(BORDER).waitFor({ state: "detached" });
+      await activeBorder.waitFor({ state: "detached" });
       await page
         .locator('[data-workspace-window-fullscreen="window-main"]')
         .click();
-      await page.locator(BORDER).waitFor();
+      await activeBorder.waitFor();
       await page.setViewportSize({ width: 390, height: 844 });
-      await page.locator(BORDER).waitFor({ state: "detached" });
-      await screenshot(page, "active-window-mobile");
+      await activeBorder.waitFor({ state: "detached" });
+      await captureScreenshot(page, "active-window-mobile");
       await page.setViewportSize({ width: 1440, height: 900 });
-      await page.locator(BORDER).waitFor();
+      await activeBorder.waitFor();
       await collapseCanonicalFilesWindow(page);
-      await page.locator(BORDER).waitFor({ state: "detached" });
+      await activeBorder.waitFor({ state: "detached" });
       expect(
         await page.evaluate(
           () =>
@@ -130,14 +129,17 @@ async function expectSingleStroke(
   y: number,
   axis: "x" | "y",
 ): Promise<void> {
+  const clip = { x: Math.round(x), y: Math.round(y), width: 1, height: 1 };
+  if (axis === "x") {
+    clip.x -= 1;
+    clip.width = 3;
+  } else {
+    clip.y -= 1;
+    clip.height = 3;
+  }
   const png = await page.screenshot({
     animations: "disabled",
-    clip: {
-      x: Math.round(x) - (axis === "x" ? 1 : 0),
-      y: Math.round(y) - (axis === "y" ? 1 : 0),
-      width: axis === "x" ? 3 : 1,
-      height: axis === "y" ? 3 : 1,
-    },
+    clip,
   });
   const matches = await page.evaluate(
     async (source) => {
@@ -177,6 +179,7 @@ test("one-pixel active borders cover shared separators across themes, nested spl
     "workspace-active-border-pixels",
     async (fixture) => {
       const { page } = fixture;
+      const activeBorder = page.locator(BORDER);
       await page.setViewportSize({ width: 1440, height: 900 });
       await initializeFixtureRepository(fixture.integration.dirs.project);
       await openChat(fixture);
@@ -204,7 +207,7 @@ test("one-pixel active borders cover shared separators across themes, nested spl
           if (!line) throw new Error("Missing shared separator.");
           await expectSingleStroke(page, line.x, line.y + 100, "x");
         }
-        await screenshot(page, `active-window-${theme.id}`);
+        await captureScreenshot(page, `active-window-${theme.id}`);
       }
 
       await clickWorkspaceWindowAddAction(page, "Open Git History", "window-files");
@@ -221,9 +224,9 @@ test("one-pixel active borders cover shared separators across themes, nested spl
         () =>
           document.querySelectorAll("[data-workspace-window-id]").length === 3,
       );
-      const lowerId = await page
-        .locator(BORDER)
-        .getAttribute("data-workspace-window-active-border");
+      const lowerId = await activeBorder.getAttribute(
+        "data-workspace-window-active-border",
+      );
       if (!lowerId) throw new Error("Missing lower window.");
       const horizontal = page.locator(
         '[role="separator"][aria-orientation="horizontal"]',
@@ -245,13 +248,13 @@ test("one-pixel active borders cover shared separators across themes, nested spl
       const resizedLine = await horizontal
         .locator("[data-workspace-window-separator-line]")
         .boundingBox();
-      const border = await page.locator(BORDER).boundingBox();
+      const border = await activeBorder.boundingBox();
       if (!resizedLine || !border) throw new Error("Missing resized border.");
       expect(
         Math.abs(border.y + border.height - 1 - resizedLine.y),
       ).toBeLessThan(0.1);
       await expectSingleStroke(page, resizedLine.x + 100, resizedLine.y, "y");
-      await screenshot(page, "active-window-nested");
+      await captureScreenshot(page, "active-window-nested");
       fixture.assertNoBrowserErrors();
     },
   );
