@@ -9,7 +9,8 @@ import { KeyedPromiseLock } from '../../common/keyed-lock.js';
 import { toNativePath, toExecutorPath } from '../../common/executor-path.js';
 import { readVersionedFile, getFileRevisionOrMissing, getFileLockKey, writeVersionedTextFile, FileTooLargeError } from './file-revision.js';
 import { readDirectoryCandidates, fileBreadcrumbs, listProjectFiles, readFileDirectory, relativeFilePath } from './directory-reader.js';
-import { fileOperationError, fileRevisionConflict } from './errors.js';
+import { directoryCreationError, fileOperationError, fileRevisionConflict } from './errors.js';
+import { assertDirectoryName } from '../../common/directory-name.js';
 
 export interface FilesServiceOptions {
   readonly executorId: string;
@@ -104,6 +105,22 @@ export class FilesService implements ExecutionFilesService {
         const revision = await writeVersionedTextFile(target, request.content);
         return { success: true as const, path: toExecutorPath(target), message: 'File saved successfully', revision };
       });
+    });
+  }
+
+  async createDirectory(request: Parameters<ExecutionFilesService['createDirectory']>[0], options?: ExecutorCallOptions) {
+    return this.#run(options, async () => {
+      assertDirectoryName(request.name);
+      if (typeof request.parentPath !== 'string' || !request.parentPath || request.parentPath.length > 4096 || request.parentPath.includes('\0')) {
+        throw new ValidationDomainError('Invalid directory path');
+      }
+      const { directory } = await this.#directory(request.parentPath);
+      // The name is one segment, so the target stays inside its canonical parent.
+      const target = path.join(directory, request.name);
+      this.#available(options);
+      try { await fs.mkdir(target); }
+      catch (error) { throw directoryCreationError(error); }
+      return { name: request.name, path: toExecutorPath(target), type: 'directory' as const };
     });
   }
 

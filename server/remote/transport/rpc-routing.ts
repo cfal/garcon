@@ -73,6 +73,7 @@ const METHOD_LANES = {
   'files.list': 'bulk',
   'files.read': 'bulk',
   'files.save': 'bulk',
+  'files.createDirectory': 'bulk',
 } as const satisfies Record<FixedMethod, RpcLane>;
 
 export function rpcLane(method: string, request: unknown, callingLane: RpcLane = 'primary'): RpcLane {

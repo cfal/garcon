@@ -1,6 +1,7 @@
 import { AgentCallError, type ExecutionFilesService, type ExecutorCallOptions } from '@garcon/server-agent-interface';
-import { MAX_FILE_SAVE_BYTES, isFileRevision, parseSaveTextRequest, parseSaveTextResponse } from '../../../common/file-contracts.js';
+import { MAX_FILE_SAVE_BYTES, isFileRevision, parseCreatedDirectory, parseSaveTextRequest, parseSaveTextResponse } from '../../../common/file-contracts.js';
 import { DomainError, ValidationDomainError } from '../../common/domain-error.js';
+import { assertDirectoryName } from '../../common/directory-name.js';
 import type { RemoteSessions } from './executor-client.js';
 import { decodeFileData, invalidFileData } from '../transport/file-protocol.js';
 
@@ -32,6 +33,22 @@ export class RemoteFilesService implements ExecutionFilesService {
       throw error;
     }
   }
+
+  async createDirectory(request: Parameters<ExecutionFilesService['createDirectory']>[0], options?: ExecutorCallOptions) {
+    assertDirectoryName(request.name);
+    try {
+      const result = parseCreatedDirectory(await this.sessions.call('', 'files.createDirectory', request, { timeoutMs: 30_000, ...options }));
+      if (!result) throw unknownCreation();
+      return result;
+    } catch (error) {
+      if (error instanceof AgentCallError && error.outcome === 'unknown') throw unknownCreation();
+      throw error;
+    }
+  }
+}
+
+function unknownCreation(): DomainError {
+  return new DomainError('FILE_CREATE_OUTCOME_UNKNOWN', 'Directory creation could not be confirmed. Refresh the directory before trying again.', 503);
 }
 
 function unknownSave(): DomainError {

@@ -8,7 +8,7 @@ import { serveExecutionRuntime } from '../server/executor-rpc-server.js';
 import { ProducerRelay } from '../server/producer-relay.js';
 import { WebSocketLink } from '../transport/websocket-link.js';
 import { linkOptions } from './integration-fixture.js';
-import { decodeFileData, decodeFileText } from '../transport/file-protocol.js';
+import { decodeFileData, decodeFileText, validateFileRpcRequest } from '../transport/file-protocol.js';
 import { RemoteFilesService } from '../client/remote-files.js';
 import type { RemoteSessions } from '../client/executor-client.js';
 import { MAX_FILE_REVISION_LENGTH, MAX_FILE_VIEW_BYTES } from '../../../common/file-contracts.js';
@@ -35,6 +35,68 @@ test.each([MAX_FILE_REVISION_LENGTH + 1, 17 * 1024 * 1024])('rejects a %d-charac
   }
   expect(backingCalls).toBe(0);
 });
+
+test('rejects an invalid directory name before accessing the RPC session', async () => {
+  let backingCalls = 0;
+  const untouched = () => {
+    backingCalls++;
+    throw new Error('Creation must not access the RPC session');
+  };
+  const files = new RemoteFilesService({ latest: untouched, acquire: untouched, send: untouched, call: untouched } satisfies RemoteSessions);
+  for (const name of ['', '..', 'a/b', 'x'.repeat(256)]) {
+    await expect(files.createDirectory({ parentPath: '/project', name })).rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 400 });
+  }
+  expect(backingCalls).toBe(0);
+});
+
+test('directory creation requests are validated before they reach the file service', () => {
+  for (const request of [
+    { parentPath: '/project' }, { name: 'child' }, { parentPath: '', name: 'child' }, { parentPath: '/project', name: '..' },
+    { parentPath: '/project', name: 'a/b' }, { parentPath: `/${'x'.repeat(4096)}`, name: 'child' }, { parentPath: '/project', name: 7 }, null,
+  ]) expect(() => validateFileRpcRequest('files.createDirectory', request)).toThrow(expect.objectContaining({ code: 'FILE_INVALID_DATA' }));
+  expect(() => validateFileRpcRequest('files.createDirectory', { parentPath: '/project', name: 'child' })).not.toThrow();
+});
+
+for (const phase of ['before dispatch', 'after creation'] as const) {
+  test(`directory creation failure ${phase} never blindly retries or reports success`, async () => {
+    const directory = await fs.mkdtemp(path.join(os.homedir(), 'tmp', 'garcon-files-create-failure-'));
+    const local = new ExecutionRuntime({ id: linkOptions.executorId, workspaceDir: directory, projectBasePath: directory, integrations: [], resolveCredential: async () => null });
+    const controller = new WebSocketLink({ ...linkOptions, role: 'controller' });
+    const worker = new WebSocketLink({ ...linkOptions, role: 'worker' });
+    let serving: ReturnType<typeof serveExecutionRuntime> | undefined;
+    const relay = new ProducerRelay();
+    worker.onSession((transport) => { serving = servePairedRuntime(worker, transport, local, relay); });
+    const connecting = connectRemoteExecutor(controller);
+    controller.dial(worker.listen());
+    const service = await local.getFilesService();
+    const create = service.createDirectory.bind(service);
+    const created = spyOn(service, 'createDirectory').mockImplementation(async (request, options) => {
+      const result = await create(request, options);
+      await controller.dispose();
+      return result;
+    });
+    try {
+      const executor = await connecting;
+      const files = await executor.getFilesService();
+      expect(await files.browse({ directoryPath: directory })).toEqual([]);
+      if (phase === 'before dispatch') await controller.dispose();
+      // A disposed link never reconnects, so the call runs out its deadline either
+      // undispatched or waiting for the reply its session lost.
+      const result = files.createDirectory({ parentPath: directory, name: 'created' }, { timeoutMs: 1_000 });
+      if (phase === 'after creation') await expect(result).rejects.toMatchObject({ code: 'FILE_CREATE_OUTCOME_UNKNOWN', status: 503 });
+      else await expect(result).rejects.not.toMatchObject({ code: 'FILE_CREATE_OUTCOME_UNKNOWN' });
+      expect(created).toHaveBeenCalledTimes(phase === 'after creation' ? 1 : 0);
+      expect(await fs.readdir(directory)).toEqual(phase === 'after creation' ? ['created'] : []);
+    } finally {
+      created.mockRestore();
+      await controller.dispose();
+      await worker.dispose();
+      await serving?.dispose();
+      await local.dispose();
+      await fs.rm(directory, { recursive: true, force: true });
+    }
+  }, 30_000);
+}
 
 for (const dialer of ['controller', 'worker'] as const) {
   test(`bounded inline file reads and saves with ${dialer} dialing`, async () => {

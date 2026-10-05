@@ -204,4 +204,56 @@ const target = () => ({ projectPath: path.join(directory, 'project'), filePath: 
       await expect(service.save(request)).rejects.toMatchObject({ code: 'FILE_SAVE_OUTCOME_UNKNOWN' });
     } finally { intercepted.mockRestore(); }
   });
+
+  it('creates one directory in its canonical parent and makes it browsable', async () => {
+    const project = target().projectPath;
+    await fs.symlink(project, path.join(directory, 'alias'));
+    expect(await service.createDirectory({ parentPath: project, name: 'created' }))
+      .toEqual({ name: 'created', path: path.join(project, 'created'), type: 'directory' });
+    // Names are created exactly as given, including surrounding spaces.
+    expect(await service.createDirectory({ parentPath: path.join(directory, 'alias'), name: 'via alias ' }))
+      .toEqual({ name: 'via alias ', path: path.join(project, 'via alias '), type: 'directory' });
+    expect(await service.browse({ directoryPath: project })).toEqual([
+      { name: 'created', path: path.join(project, 'created'), type: 'directory' },
+      { name: 'via alias ', path: path.join(project, 'via alias '), type: 'directory' },
+    ]);
+    expect(await fs.readdir(path.join(project, 'created'))).toEqual([]);
+  });
+
+  it('rejects creation that would replace, escape, or nest, leaving the filesystem unchanged', async () => {
+    const project = target().projectPath;
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-files-outside-'));
+    try {
+      await fs.symlink(outside, path.join(project, 'escape'));
+      await fs.symlink(path.join(project, 'absent'), path.join(project, 'dangling'));
+      for (const name of ['file.txt', 'escape', 'dangling']) {
+        await expect(service.createDirectory({ parentPath: project, name })).rejects.toMatchObject({ code: 'FILE_ALREADY_EXISTS', status: 409 });
+      }
+      await expect(service.createDirectory({ parentPath: directory, name: 'project' })).rejects.toMatchObject({ code: 'FILE_ALREADY_EXISTS', status: 409 });
+      for (const parentPath of [path.join(project, 'escape'), outside]) {
+        await expect(service.createDirectory({ parentPath, name: 'child' })).rejects.toMatchObject({ code: 'FILE_OUTSIDE_ROOT', status: 403 });
+      }
+      await expect(service.createDirectory({ parentPath: path.join(project, 'absent'), name: 'child' })).rejects.toMatchObject({ code: 'FILE_NOT_FOUND', status: 404 });
+      await expect(service.createDirectory({ parentPath: path.join(project, 'file.txt'), name: 'child' })).rejects.toMatchObject({ code: 'FILE_DIRECTORY_REQUIRED' });
+      for (const name of ['', '.', '..', 'a/b', 'a\\b', '../child', 'tab\tname', 'x'.repeat(256)]) {
+        await expect(service.createDirectory({ parentPath: project, name })).rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 400 });
+      }
+      await expect(service.createDirectory({ parentPath: project, name: 'cancelled' }, { signal: AbortSignal.abort() })).rejects.toThrow();
+      expect((await fs.readdir(project)).sort()).toEqual(['dangling', 'escape', 'file.txt']);
+      expect(await fs.readdir(outside)).toEqual([]);
+      expect(await fs.readFile(path.join(project, 'file.txt'), 'utf8')).toBe('initial');
+    } finally { await fs.rm(outside, { recursive: true, force: true }); }
+  });
+
+  it('accepts the longest name and reports a denied creation as definite', async () => {
+    const project = target().projectPath;
+    const longest = 'é'.repeat(127) + 'x';
+    expect((await service.createDirectory({ parentPath: project, name: longest })).name).toBe(longest);
+    const mkdir = spyOn(fs, 'mkdir').mockRejectedValueOnce(Object.assign(new Error('denied'), { code: 'EACCES' }));
+    try {
+      await expect(service.createDirectory({ parentPath: project, name: 'denied' })).rejects.toMatchObject({ code: 'FILE_PERMISSION_DENIED', status: 403 });
+      expect(mkdir).toHaveBeenCalledTimes(1);
+    } finally { mkdir.mockRestore(); }
+    await expect(fs.stat(path.join(project, 'denied'))).rejects.toThrow();
+  });
 });

@@ -3,7 +3,7 @@ import type { ExecutionFilesService, ExecutorCallOptions } from '@garcon/server-
 import type { ProjectInspector } from '../../../common/project-resolution.js';
 import { effectiveExecutorId } from '../../../common/executors.js';
 import { isRecord } from '../../../common/json.js';
-import { FILE_REVISION_HEADER, parseSaveTextRequest, type ReadTextResponse } from '../../../common/file-contracts.js';
+import { FILE_REVISION_HEADER, parseCreateDirectoryRequest, parseSaveTextRequest, type ReadTextResponse } from '../../../common/file-contracts.js';
 import type { IChatRegistry } from '../chats/store.js';
 import { DomainError, ValidationDomainError } from '../../common/domain-error.js';
 import { withJsonBody } from '../lib/json-route.js';
@@ -80,6 +80,19 @@ export default function createFilesRoutes(registry: IChatRegistry, dependencies:
     '/api/v1/files/browse': { GET: guarded(async (request, url) => {
       const service = await files(executorIdFromUrl(url, registry));
       return Response.json(await service.browse({ directoryPath: url.searchParams.get('path') || undefined }, callOptions(request)));
+    }) },
+    '/api/v1/files/directories': { POST: guarded(async (request, url, server, context) => {
+      const executorId = executorIdFromUrl(url, registry);
+      const parentPath = filePath(url);
+      return withJsonBody(async (body: unknown) => {
+        if (isRecord(body) && ['executorId', 'path', 'parentPath'].some((key) => key in body)) {
+          throw new ValidationDomainError('Directory targets must be supplied in the URL, not the request body');
+        }
+        const creation = parseCreateDirectoryRequest(body);
+        if (!creation) throw new ValidationDomainError('A directory name is required');
+        const service = await files(executorId);
+        return Response.json(await service.createDirectory({ parentPath, name: creation.name }, callOptions(request)), { status: 201 });
+      })(request, url, server, context);
     }) },
     '/api/v1/files/list': { GET: guarded(async (request, url) => {
       const resolved = await project(url, request);

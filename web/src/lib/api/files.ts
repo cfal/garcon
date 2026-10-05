@@ -1,20 +1,26 @@
 // File operations API for reading, writing, browsing, and uploading files.
 
 import {
+	ApiError,
+	ApiMutationOutcomeUnknownError,
 	apiFetch,
 	apiGet,
+	apiPost,
 	apiPut,
+	isIntermediaryResponse,
 	parseApiResponse,
 	type ApiFetchOptions,
 } from './client.js';
 import {
 	FILE_REVISION_HEADER,
 	isFileRevision,
+	parseCreatedDirectory,
 	parseFileIdentityResponse,
 	parseFileRevisionResponse,
 	parseFileTreeResponse,
 	parseReadTextResponse,
 	parseSaveTextResponse,
+	type CreatedDirectory,
 	type FileRevision,
 	type FileRevisionResponse,
 	type FileSaveConflictResolution,
@@ -23,6 +29,7 @@ import {
 	type ReadTextResponse,
 	type SaveTextResponse,
 } from '$shared/file-contracts';
+import { isRecord } from '$shared/json';
 
 export interface FilePathParams {
 	executorId?: string | null;
@@ -57,6 +64,12 @@ export interface SaveTextParams {
 	content: string;
 	expectedRevision: FileRevision;
 	conflictResolution: FileSaveConflictResolution;
+}
+
+export interface CreateDirectoryParams {
+	executorId?: string | null;
+	parentPath: string;
+	name: string;
 }
 
 export interface FileEntry {
@@ -205,8 +218,18 @@ export interface DirectoryEntry {
 	type: string;
 }
 
-/** Fetches directory entries for the directory browser. Returns the raw
- *  array the server sends, validated to be an Array. */
+function isDirectoryEntry(value: unknown): value is DirectoryEntry {
+	return (
+		isRecord(value) &&
+		typeof value.name === 'string' &&
+		value.name.length > 0 &&
+		typeof value.path === 'string' &&
+		value.path.length > 0 &&
+		typeof value.type === 'string'
+	);
+}
+
+/** Fetches the directories inside one directory for the directory browser. */
 export async function browseDirectory(
 	path: string,
 	signal?: AbortSignal,
@@ -219,8 +242,36 @@ export async function browseDirectory(
 	});
 	if (!response.ok) await parseApiResponse<never>(response);
 	const payload = await response.json();
-	if (!Array.isArray(payload)) {
+	if (!Array.isArray(payload) || !payload.every(isDirectoryEntry)) {
 		throw new Error('Invalid directory browse payload');
 	}
 	return payload;
+}
+
+/** Creates one directory inside an existing parent on the selected executor.
+ *  Rejects with ApiMutationOutcomeUnknownError when the directory may exist. */
+export async function createDirectory(params: CreateDirectoryParams): Promise<CreatedDirectory> {
+	const query = new URLSearchParams({ path: params.parentPath });
+	if (params.executorId) query.set('executorId', params.executorId);
+	try {
+		const payload = await apiPost<unknown>(`/api/v1/files/directories?${query}`, {
+			name: params.name,
+		});
+		const created = parseCreatedDirectory(payload);
+		if (!created) throw new ApiMutationOutcomeUnknownError('Invalid directory creation response');
+		return created;
+	} catch (error) {
+		if (error instanceof ApiMutationOutcomeUnknownError) throw error;
+		if (
+			error instanceof ApiError &&
+			!isIntermediaryResponse(error) &&
+			error.errorCode !== 'FILE_CREATE_OUTCOME_UNKNOWN'
+		) {
+			throw error;
+		}
+		throw new ApiMutationOutcomeUnknownError(
+			'The directory creation outcome could not be confirmed.',
+			{ cause: error },
+		);
+	}
 }
