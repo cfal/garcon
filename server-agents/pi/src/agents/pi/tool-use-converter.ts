@@ -87,14 +87,27 @@ export function convertPiToolUse(
 ): PiToolUseResult {
   const input = asObject(args);
   const key = canonicalize(toolName || 'Unknown');
-  const mcpName = /^mcp__(.+?)__(.+)$/.exec(toolName);
-  if (mcpName) {
-    const [, server, tool] = mcpName;
-    return new McpToolUseMessage(timestamp, toolCallId, server, tool, input);
-  }
-  // Pi's 64-character cap can remove the server/tool separator; the encoded name remains opaque.
-  // https://github.com/earendil-works/pi/blob/d86654abb8862e201933517d6f1fce9f88dd117f/packages/coding-agent/src/extensions/mcp/tools.ts#L75-L89
-  if (toolName.startsWith('mcp__')) {
+  const mcpPrefix = 'mcp__';
+  if (toolName.startsWith(mcpPrefix)) {
+    const encodedName = toolName.slice(mcpPrefix.length);
+    const separator = encodedName.indexOf('__');
+    const cappedHashedName = toolName.length === 64 && /_[0-9a-f]{8}$/.test(toolName);
+    if (
+      !cappedHashedName
+      && separator > 0
+      && separator === encodedName.lastIndexOf('__')
+      && separator + 2 < encodedName.length
+    ) {
+      return new McpToolUseMessage(
+        timestamp,
+        toolCallId,
+        encodedName.slice(0, separator),
+        encodedName.slice(separator + 2),
+        input,
+      );
+    }
+    // Pi sanitization and the 64-character cap can make the server/tool boundary ambiguous or remove it.
+    // https://github.com/earendil-works/pi/blob/cd32f7725fdbddbaecdff5b1e68491563394e0ca/packages/coding-agent/src/extensions/mcp/tools.ts#L83-L96
     return new McpToolUseMessage(timestamp, toolCallId, '', toolName, input);
   }
 

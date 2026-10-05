@@ -86,6 +86,36 @@ describe('convertPiToolUse', () => {
     });
   });
 
+  it('accepts normalized and collision-hashed MCP names', () => {
+    expect(convertPiToolUse(ts, 'normalized', 'mcp__issue_tracker__list_issues', {})).toMatchObject({
+      type: 'mcp-tool-use', server: 'issue_tracker', tool: 'list_issues',
+    });
+    expect(convertPiToolUse(ts, 'collision', 'mcp__issue_tracker__list_issues_01234567', {})).toMatchObject({
+      type: 'mcp-tool-use', server: 'issue_tracker', tool: 'list_issues_01234567',
+    });
+  });
+
+  it('keeps delimiter-ambiguous normalized MCP names opaque', () => {
+    for (const tool of ['mcp__issue__tracker__list_issues', 'mcp__issue___list_issues']) {
+      expect(convertPiToolUse(ts, 'ambiguous', tool, {})).toMatchObject({
+        type: 'mcp-tool-use', server: '', tool,
+      });
+    }
+  });
+
+  it('keeps capped upstream-generated MCP names opaque', () => {
+    const tools = [
+      `mcp__${'a'.repeat(49)}__bb3dfcfc`,
+      `mcp__aa__${'s'.repeat(46)}_70565ba9`,
+    ];
+    for (const tool of tools) {
+      expect(tool).toHaveLength(64);
+      expect(convertPiToolUse(ts, 'capped', tool, {})).toMatchObject({
+        type: 'mcp-tool-use', server: '', tool,
+      });
+    }
+  });
+
   it('normalizes codemode, tool discovery, PowerShell, and MCP tools on the server', () => {
     expect(convertPiToolUse(ts, 'code', 'codemode', { code: 'return 1;' })).toMatchObject({
       type: 'exec-tool-use', code: 'return 1;', language: 'javascript',
