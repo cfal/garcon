@@ -30,6 +30,7 @@ import {
 } from '../../support/integration-fixture.js';
 import {
   assertScriptedOpenCodePlatform,
+  OPENCODE_BINARY,
   OPENCODE_PLUGIN_SEED_FILES,
   OPENCODE_RIPGREP_VERSION,
   OPENCODE_VERSION,
@@ -39,6 +40,7 @@ import {
 } from '../../support/scripted-opencode.js';
 import { startScriptedPiTestEnvironment } from '../../support/scripted-pi.js';
 import { waitForProxyBaseUrl } from '../../support/live-codex.js';
+import { DEFAULT_LIVE_OPENCODE_MODEL } from '../../support/live-opencode.js';
 import {
   linuxProcessStartTimeTicks,
   processIdentityAlive,
@@ -482,6 +484,58 @@ describe('integration support contracts', () => {
       ]);
       expect(exitCode).toBe(0);
       expect(stdout.startsWith(`ripgrep ${OPENCODE_RIPGREP_VERSION} `)).toBe(true);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('includes the default live model in the pinned OpenCode catalog', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'garcon-opencode-model-catalog-'));
+    try {
+      const directories = {
+        config: join(root, 'config'),
+        data: join(root, 'data'),
+        state: join(root, 'state'),
+        cache: join(root, 'cache'),
+        temp: join(root, 'temp'),
+      };
+      await Promise.all(Object.values(directories).map((directory) =>
+        mkdir(directory, { recursive: true })));
+      const child = Bun.spawn([
+        OPENCODE_BINARY,
+        'models',
+        'deepseek',
+      ], {
+        cwd: root,
+        env: {
+          HOME: root,
+          XDG_CONFIG_HOME: directories.config,
+          XDG_DATA_HOME: directories.data,
+          XDG_STATE_HOME: directories.state,
+          XDG_CACHE_HOME: directories.cache,
+          TMPDIR: directories.temp,
+          DEEPSEEK_API_KEY: 'test-key',
+          OPENCODE_AUTH_CONTENT: '{}',
+          OPENCODE_CONFIG_CONTENT: JSON.stringify({ enabled_providers: ['deepseek'] }),
+          OPENCODE_DISABLE_MODELS_FETCH: '1',
+          OPENCODE_DISABLE_DEFAULT_PLUGINS: '1',
+          OPENCODE_DISABLE_PROJECT_CONFIG: '1',
+          PATH: process.env.PATH ?? '',
+        },
+        stdin: 'ignore',
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      const [exitCode, stdout, stderr] = await Promise.all([
+        child.exited,
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+      ]);
+      if (exitCode !== 0) {
+        throw new Error(`Pinned OpenCode model inventory failed: ${stderr.trim()}`);
+      }
+      expect(stdout.split('\n').map((line) => line.trim()))
+        .toContain(DEFAULT_LIVE_OPENCODE_MODEL);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

@@ -21,6 +21,7 @@ import {
 } from './opencode-process-supervisor.js';
 
 export const LIVE_OPENCODE_THINKING_MODE = 'none';
+export const DEFAULT_LIVE_OPENCODE_MODEL = 'deepseek/deepseek-flash';
 
 // Testing credentials are named for the model provider whose quota they spend,
 // so the same secret drives every agent lane that bills that provider.
@@ -34,7 +35,7 @@ export interface LiveOpenCodeProvider {
 const LIVE_OPENCODE_PROVIDERS: Record<string, LiveOpenCodeProvider> = {
   deepseek: {
     providerId: 'deepseek',
-    model: 'deepseek/deepseek-v4-flash',
+    model: DEFAULT_LIVE_OPENCODE_MODEL,
     keyEnv: 'DEEPSEEK_API_KEY',
     testingKeyEnv: 'DEEPSEEK_TESTING_KEY',
   },
