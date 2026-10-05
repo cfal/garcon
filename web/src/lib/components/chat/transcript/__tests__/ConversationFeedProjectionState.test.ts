@@ -135,6 +135,64 @@ describe('ConversationFeedProjectionState', () => {
 		expect(off.model.items.some((item) => item.kind === 'tool-group')).toBe(false);
 		expect(off.model.indexByRowId.size).toBe(3);
 	});
+
+	it('keeps a grouped detached interval after repinning and appending', () => {
+		const transcript = new ActiveTranscriptState();
+		transcript.replaceGeneration(
+			'chat-1',
+			'generation-1',
+			[
+				{ ordinal: 1, message: new UserMessage(TS, 'prompt') },
+				...Array.from({ length: 99 }, (_, index) => ({
+					ordinal: index + 2,
+					message: new BashToolUseMessage(TS, `tool-${index + 2}`, 'pwd'),
+				})),
+			],
+			{ lastOrdinal: 100, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false },
+		);
+		transcript.isUserScrolledUp = true;
+		transcript.applyMessages(
+			'chat-1',
+			'generation-1',
+			Array.from({ length: 100 }, (_, index) => ({
+				ordinal: index + 101,
+				message: new BashToolUseMessage(TS, `tool-${index + 101}`, 'pwd'),
+			})),
+			101,
+			200,
+		);
+		const projections = new ConversationFeedProjectionState();
+		projections.reconcile(
+			input({
+				rows: transcript.visibleRows,
+				mutationClock: transcript.feedMutationClock,
+				combineToolUseMessages: true,
+			}),
+		);
+		transcript.isUserScrolledUp = false;
+
+		transcript.applyMessages(
+			'chat-1',
+			'generation-1',
+			[{ ordinal: 201, message: new AssistantMessage(TS, 'done') }],
+			201,
+			201,
+		);
+		const appended = projections.reconcile(
+			input({
+				rows: transcript.visibleRows,
+				mutationClock: transcript.feedMutationClock,
+				combineToolUseMessages: true,
+				earlierBoundary: transcript.canLoadEarlier ? 'when-collapsed' : 'hidden',
+			}),
+		);
+
+		expect(appended.model.items.some((item) => item.kind === 'earlier-boundary')).toBe(false);
+		expect(appended.model.indexByRowId.has('generation-1:1')).toBe(true);
+		expect(appended.model.indexByRowId.has('generation-1:201')).toBe(true);
+		expect(appended.geometry.endBehavior).toBe('restore-if-pinned');
+	});
+
 	it('namespaces virtual keys without changing semantic row targets', () => {
 		const projection = new ConversationFeedProjectionState().reconcile(input());
 

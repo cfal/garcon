@@ -5450,6 +5450,60 @@ describe('Chromium short transcript alignment', () => {
 });
 
 describe('Chromium combined tool-use presentation', () => {
+  test('keeps active context visible when a collapsed feed receives live rows', async () => {
+    await withChromiumFixture(
+      'combined-tool-live-append-window',
+      async (fixture) => {
+        await initializeCombineToolUses(fixture, true);
+        const prompt = 'combined-live-append-context';
+        const chatId = await seedTranscript(fixture.integration, 1, prompt);
+        const initial = await fixture.integration.client.getMessages(chatId, { limit: 200 });
+        const visibleMessageLimit = 100;
+        const toolRowCount = visibleMessageLimit - initial.messages.length;
+        expect(toolRowCount).toBeGreaterThan(0);
+        const timestamp = '2026-08-15T00:00:00.000Z';
+        await appendLedgerRows(
+          fixture,
+          chatId,
+          initial.transcriptViewId,
+          Array.from({ length: toolRowCount }, (_, index) => ({
+            kind: 'provider-row' as const,
+            at: timestamp,
+            message: new BashToolUseMessage(timestamp, `live-append-tool-${index}`, 'pwd'),
+            providerMeta: null,
+          })),
+        );
+
+        await prepareTranscript(fixture, chatId, 1);
+        const context = fixture.page
+          .locator(FEED_SELECTOR)
+          .getByText(`${prompt}-0`, { exact: true });
+        await context.waitFor({ state: 'visible' });
+        expect(await fixture.page.locator('[data-chat-tool-group]').count()).toBe(1);
+        expect(
+          await fixture.page.getByRole('button', { name: 'Load earlier messages' }).count(),
+        ).toBe(0);
+
+        await appendTurn(fixture.integration, chatId, 'combined-live-append');
+        await fixture.page
+          .getByText('echo:combined-live-append', { exact: true })
+          .waitFor({ state: 'visible' });
+        await waitForStablePinnedTranscriptLayout(fixture.page, 'combined-live-append');
+
+        await context.waitFor({ state: 'visible' });
+        expect(
+          await fixture.page.getByRole('button', { name: 'Load earlier messages' }).count(),
+        ).toBe(0);
+        expect((await transcriptGeometry(fixture.page)).overlaps).toEqual([]);
+        expect(
+          await fixture.page.locator(FEED_SELECTOR).getAttribute('data-chat-pinned-to-bottom'),
+        ).toBe('true');
+        fixture.assertNoBrowserErrors();
+      },
+      diagnostics,
+    );
+  }, 180_000);
+
   test('fills cold compressed history and restores the warm window without paging', async () => {
     await withChromiumFixture('combined-tool-history-refill', async (fixture) => {
       await initializeCombineToolUses(fixture, true);

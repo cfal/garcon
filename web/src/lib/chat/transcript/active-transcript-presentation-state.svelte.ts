@@ -47,11 +47,11 @@ export class ActiveTranscriptPresentationState {
 	protected readonly resend = new TranscriptResendCandidates();
 	protected readonly notices = new TranscriptNoticeFeed();
 	protected readonly optimisticInputs = new TranscriptOptimisticInputs(() => {
-		this.growExpandedVisibleWindow();
+		this.growVisibleWindow();
 		this.feedMutations.record('presentation-structure');
 	});
 	protected readonly feedMutations = new ConversationFeedMutationState();
-	protected expandedVisibleStartOrdinal: number | null = null;
+	protected visibleWindowStartOrdinal: number | null = null;
 
 	readonly #sharedOverlay: ConversationTranscriptOverlayView | null;
 	#echoedClientMessageIds = $derived(echoedClientMessageIds(this.entries));
@@ -171,7 +171,7 @@ export class ActiveTranscriptPresentationState {
 	appendLocalNotice(noticeType: LocalNoticeType, content: string): void {
 		if (this.#sharedOverlay) return;
 		this.notices.append(noticeType, content);
-		this.growExpandedVisibleWindow();
+		this.growVisibleWindow();
 		this.feedMutations.record('presentation-structure');
 	}
 
@@ -188,13 +188,13 @@ export class ActiveTranscriptPresentationState {
 
 	protected drainServerNotices(chatId: string): void {
 		if (this.#sharedOverlay || !this.notices.drain(chatId)) return;
-		this.growExpandedVisibleWindow();
+		this.growVisibleWindow();
 		this.feedMutations.record('presentation-structure');
 	}
 
 	clearLocalNotices(throughRevision?: number): void {
 		if (this.#sharedOverlay || !this.notices.clearThrough(throughRevision)) return;
-		this.growExpandedVisibleWindow();
+		this.growVisibleWindow();
 		this.feedMutations.record('presentation-structure');
 	}
 
@@ -221,7 +221,7 @@ export class ActiveTranscriptPresentationState {
 		if (nextCount <= previousCount) return false;
 		this.visibleMessageCount = nextCount;
 		this.pageStates.earlier = idlePageState();
-		this.rememberExpandedVisibleWindow();
+		this.rememberVisibleWindowStart();
 		this.feedMutations.record('history-earlier');
 		return true;
 	}
@@ -229,12 +229,11 @@ export class ActiveTranscriptPresentationState {
 	revealAllLoadedMessages(): void {
 		const changed = this.visibleMessageCount < this.displayMessageCount;
 		this.visibleMessageCount = Math.max(this.visibleMessageCount, this.displayMessageCount);
-		this.rememberExpandedVisibleWindow();
+		this.rememberVisibleWindowStart();
 		if (changed) this.feedMutations.record('initial');
 	}
 
-	protected rememberExpandedVisibleWindow(): void {
-		if (this.entries.length <= INITIAL_VISIBLE_MESSAGES) return;
+	protected rememberVisibleWindowStart(): void {
 		let firstVisibleOrdinal: number | undefined;
 		for (const row of this.#visibleRows) {
 			if (row.kind !== 'message' || row.ordinal === undefined) continue;
@@ -242,17 +241,16 @@ export class ActiveTranscriptPresentationState {
 			break;
 		}
 		if (firstVisibleOrdinal === undefined) return;
-		this.expandedVisibleStartOrdinal = firstVisibleOrdinal;
-		this.growExpandedVisibleWindow();
+		this.visibleWindowStartOrdinal = firstVisibleOrdinal;
 	}
 
-	protected growExpandedVisibleWindow(): void {
-		if (this.expandedVisibleStartOrdinal === null) return;
+	protected growVisibleWindow(): void {
+		if (this.visibleWindowStartOrdinal === null) return;
 		const firstVisibleIndex = this.#displayRows.findIndex(
-			(row) => row.kind === 'message' && row.ordinal === this.expandedVisibleStartOrdinal,
+			(row) => row.kind === 'message' && row.ordinal === this.visibleWindowStartOrdinal,
 		);
 		if (firstVisibleIndex === -1) {
-			this.expandedVisibleStartOrdinal = null;
+			this.visibleWindowStartOrdinal = null;
 			return;
 		}
 		this.visibleMessageCount = this.#displayRows.length - firstVisibleIndex;
