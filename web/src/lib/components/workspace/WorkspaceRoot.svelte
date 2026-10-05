@@ -318,6 +318,14 @@
 		workspaceWindowTitlebarMetrics(localSettings.workspaceWindowTitlebarHeightDeltaPx),
 	);
 	const WINDOW_EDGE_EPSILON = 1e-6;
+	const highlightedWindow = $derived(
+		localSettings.highlightActiveWindow &&
+			!isMobile &&
+			!projectedWindowId &&
+			geometry.windows.length > 1
+			? geometry.windows.find((entry) => entry.workspaceWindow.id === presentedCurrentWindowId)
+			: undefined,
+	);
 
 	function hasLeftSeparator(rect: WorkspaceWindowRect): boolean {
 		return rect.left > WINDOW_EDGE_EPSILON;
@@ -728,6 +736,19 @@
 		{#each renderedMobilePresentations as item (`${item.presentation}:${item.surfaceId}`)}
 			{@render portableSurface(item.surfaceId, item.presentation, item.visible)}
 		{/each}
+	{/if}
+	{#if highlightedWindow}
+		{@const rect = highlightedWindow.rect}
+		<!-- Covers the shared separators' pixels instead of drawing a second inset line. -->
+		<div
+			data-workspace-window-active-border={highlightedWindow.workspaceWindow.id}
+			aria-hidden="true"
+			class="pointer-events-none absolute z-40 border border-workspace-window-active-border"
+			style:left={`${rect.left * 100}%`}
+			style:top={`${rect.top * 100}%`}
+			style:width={`calc(${rect.width * 100}% + ${hasRightSeparator(rect) ? 1 : 0}px)`}
+			style:height={`calc(${rect.height * 100}% + ${rect.top + rect.height < 1 - WINDOW_EDGE_EPSILON ? 1 : 0}px)`}
+		></div>
 	{/if}
 </div>
 

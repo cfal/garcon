@@ -23,6 +23,7 @@ describe('LocalSettingsStore', () => {
 		expect(store.chatMaxWidth).toBe('none');
 		expect(store.inlineImageThumbnailSize).toBe('medium');
 		expect(store.overlayBackdropEffects).toBe(true);
+		expect(store.highlightActiveWindow).toBe(false);
 		expect(store.alwaysExpandCliMessages).toBe(false);
 		expect(store.combineToolUseMessages).toBe(true);
 		expect(store.allowDirectChats).toBe(false);
@@ -93,6 +94,32 @@ describe('LocalSettingsStore', () => {
 		expect(store.snapshot()).not.toHaveProperty('language');
 		store.destroy();
 	});
+
+	it('persists and restores the active-window highlight toggle', () => {
+		const store = createLocalSettingsStore();
+		for (const enabled of [true, false]) {
+			store.toggle('highlightActiveWindow');
+			expect(store.highlightActiveWindow).toBe(enabled);
+			expect(store.snapshot().highlightActiveWindow).toBe(enabled);
+			const restored = createLocalSettingsStore();
+			expect(restored.highlightActiveWindow).toBe(enabled);
+			restored.destroy();
+		}
+		store.destroy();
+	});
+
+	it.each(['true', 1, null, {}, []])(
+		'rejects invalid stored active-window highlight %j',
+		(value) => {
+			localStorage.setItem(
+				LOCAL_STORAGE_KEYS.localSettings,
+				JSON.stringify({ highlightActiveWindow: value }),
+			);
+			const store = createLocalSettingsStore();
+			expect(store.highlightActiveWindow).toBe(false);
+			store.destroy();
+		},
+	);
 
 	it('defaults, clamps, and restores the workspace titlebar adjustment', () => {
 		const store = createLocalSettingsStore();
@@ -899,6 +926,7 @@ describe('LocalSettingsStore', () => {
 				chatMaxWidth: 'small',
 				inlineImageThumbnailSize: 'large',
 				overlayBackdropEffects: false,
+				highlightActiveWindow: true,
 				sidebarGrouping: 'project',
 				sidebarInactivityDuration: '1-month',
 				sidebarGroupNestedProjectPaths: true,
@@ -926,6 +954,7 @@ describe('LocalSettingsStore', () => {
 		expect(secondStore.chatMaxWidth).toBe('small');
 		expect(secondStore.inlineImageThumbnailSize).toBe('large');
 		expect(secondStore.overlayBackdropEffects).toBe(false);
+		expect(secondStore.highlightActiveWindow).toBe(true);
 		expect(secondStore.sidebarGrouping).toBe('project');
 		expect(secondStore.sidebarInactivityDuration).toBe('1-month');
 		expect(secondStore.sidebarGroupNestedProjectPaths).toBe(true);
@@ -949,6 +978,7 @@ describe('LocalSettingsStore', () => {
 
 	it('restores defaults when the settings key is removed or local storage is cleared', () => {
 		const store = createLocalSettingsStore();
+		store.set('highlightActiveWindow', true);
 		store.set('themePreference', { mode: 'fixed', themeId: 'classic-dark' });
 		store.set('inlineImageThumbnailSize', 'large');
 
@@ -965,10 +995,12 @@ describe('LocalSettingsStore', () => {
 
 		store.set('themePreference', { mode: 'fixed', themeId: 'classic-dark' });
 		store.set('inlineImageThumbnailSize', 'small');
+		store.set('highlightActiveWindow', true);
 		localStorage.clear();
 		window.dispatchEvent(
 			new StorageEvent('storage', { key: null, newValue: null, storageArea: localStorage }),
 		);
+		expect(store.highlightActiveWindow).toBe(false);
 		expect(store.themePreference).toEqual(DEFAULT_THEME_PREFERENCE);
 		expect(store.inlineImageThumbnailSize).toBe('medium');
 		store.destroy();

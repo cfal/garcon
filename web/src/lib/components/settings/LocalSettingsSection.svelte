@@ -192,6 +192,11 @@
 		<ThemeSettingsCard />
 
 		<div class="px-4">
+			<div class="border-t border-border">
+				{@render settingRow(m.settings_highlight_active_window(), ls.highlightActiveWindow, () =>
+					ls.toggle('highlightActiveWindow'),
+				)}
+			</div>
 			<div
 				class="flex flex-col gap-2 border-t border-border py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
 			>

@@ -42,6 +42,13 @@ describe('workspace window theme tokens', () => {
 		expect(root).not.toContain('workspace-window-focus');
 	});
 
+	it('mixes the active border from opaque theme colors rather than a fixed palette', () => {
+		const theme = cssBlock(appCss, '@theme inline');
+		expect(theme).toMatch(
+			/--color-workspace-window-active-border: color-mix\(\s*in oklab,\s*hsl\(var\(--primary\)\) 50%,\s*hsl\(var\(--border\)\)\s*\);/,
+		);
+	});
+
 	it('uses distinct dark chrome and muted inactive-window tab selection', () => {
 		const dark = profileCss('classic-dark');
 

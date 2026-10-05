@@ -1691,6 +1691,7 @@
 	"settings_inline_image_thumbnail_size_medium": "Medium 640x320",
 	"settings_inline_image_thumbnail_size_large": "Large 960x480",
 	"settings_workspace_titlebar_size": "Titlebar size adjustment",
+	"settings_highlight_active_window": "Highlight active window",
 	"settings_workspace_titlebar_size_description": "Scales desktop window titlebars, labels, icons, and controls.",
 	"settings_sidebar_inactivity_duration": "Inactivity duration",
 	"settings_sidebar_inactivity_duration_description": "Used when grouping chat items by activity.",
