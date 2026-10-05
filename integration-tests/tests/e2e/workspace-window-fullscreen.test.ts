@@ -50,7 +50,7 @@ describe('Lightpanda workspace-window fullscreen', () => {
       await dispatchCycleWindowFocusShortcut(fixture.page);
       await waitForCurrentWorkspaceWindow(fixture.page, chatWindowId);
 
-      await clickWindowControl(fixture.page, 'fullscreen', chatWindowId);
+      await dispatchFullscreenShortcut(fixture.page);
       await app.waitForWorkspaceWindowCount(3);
       await waitForFullscreenState(fixture.page, chatWindowId, true);
       expect(
@@ -89,7 +89,7 @@ describe('Lightpanda workspace-window fullscreen', () => {
       ).toEqual({ hidden: true, inert: true });
       await waitForFullscreenState(fixture.page, chatWindowId, true);
 
-      await clickWindowControl(fixture.page, 'fullscreen', chatWindowId);
+      await dispatchFullscreenShortcut(fixture.page);
       await waitForFullscreenState(fixture.page, chatWindowId, false);
       await waitForCurrentWorkspaceWindow(fixture.page, chatWindowId);
       await waitForWorkspaceWindowVisible(fixture.page, terminalWindow.windowId);
@@ -214,6 +214,20 @@ async function clickWindowControl(
     },
     { expectedControl: control, expectedWindowId: windowId },
   );
+}
+
+async function dispatchFullscreenShortcut(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'F',
+        ctrlKey: true,
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  });
 }
 
 async function dispatchCycleWindowFocusShortcut(page: Page): Promise<void> {

@@ -451,6 +451,8 @@
 		focusPreviousTabInFocusedWindow: () => false,
 		focusNextTabInFocusedWindow: () => false,
 		cycleWindowFocus: () => undefined,
+		toggleWindowFullscreen: async () => undefined,
+		isMobile: false,
 		layout: {
 			surface: () => ({
 				id: CANONICAL_CHAT_SURFACE_ID,
@@ -470,6 +472,7 @@
 			},
 			commands: { execute: async () => false, isEnabled: () => false },
 			localSettings: { globalShortcuts: {} },
+			onError: () => undefined,
 		}),
 	);
 </script>

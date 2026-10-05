@@ -128,6 +128,38 @@ describe('KeyboardShortcutsSection', () => {
 		expect(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings)).toBeNull();
 	});
 
+	it('edits, restores, disables, and resets the fullscreen toggle', async () => {
+		const rendered = render(KeyboardShortcutsSectionTestHost);
+		let group = screen.getByRole('group', { name: 'Toggle active window fullscreen' });
+		const change = within(group).getByRole('button', {
+			name: 'Change shortcut for Toggle active window fullscreen',
+		});
+		expect(change.textContent).toContain('F');
+		await fireEvent.click(change);
+		await fireEvent.keyDown(change, { key: 'x', ctrlKey: true, shiftKey: true });
+		expect(
+			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}').globalShortcuts,
+		).toEqual({ 'toggle-window-fullscreen': { key: 'x', ctrl: true, shift: true } });
+		rendered.unmount();
+		render(KeyboardShortcutsSectionTestHost);
+		group = screen.getByRole('group', { name: 'Toggle active window fullscreen' });
+		expect(
+			within(group).getByRole('button', {
+				name: 'Change shortcut for Toggle active window fullscreen',
+			}).textContent,
+		).toContain('X');
+		await fireEvent.click(within(group).getByRole('button', { name: 'Remove' }));
+		expect(within(group).getByText('Unassigned')).toBeTruthy();
+		expect(
+			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}').globalShortcuts,
+		).toEqual({ 'toggle-window-fullscreen': null });
+		await fireEvent.click(within(group).getByRole('button', { name: 'Reset' }));
+		expect(within(group).getByText('System default')).toBeTruthy();
+		expect(
+			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}').globalShortcuts,
+		).toEqual({});
+	});
+
 	it('removes and resets a system shortcut', async () => {
 		render(KeyboardShortcutsSectionTestHost);
 		const deleteChat = screen.getByRole('group', { name: 'Delete selected chat' });

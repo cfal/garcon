@@ -249,6 +249,8 @@
 		focusPreviousTabInFocusedWindow: () => false,
 		focusNextTabInFocusedWindow: () => false,
 		cycleWindowFocus: () => undefined,
+		toggleWindowFullscreen: async () => undefined,
+		isMobile: false,
 		layout: {
 			surface: (surfaceId: string) =>
 				surfaceId === CANONICAL_CHAT_SURFACE_ID
@@ -276,6 +278,7 @@
 		navigation: {} as never,
 		commands: { execute: async () => false, isEnabled: () => false },
 		localSettings: { globalShortcuts: {} } as never,
+		onError: () => undefined,
 	});
 	setWorkspaceCoordinator(workspace as WorkspaceCoordinator);
 	setWorkspaceShortcuts(workspaceShortcuts);

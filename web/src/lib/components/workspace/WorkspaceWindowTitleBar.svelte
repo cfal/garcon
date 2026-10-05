@@ -84,10 +84,7 @@
 	}
 
 	function toggleFullscreen(): void {
-		const action = fullscreen
-			? workspace.exitWindowFullscreen(workspaceWindow.id)
-			: workspace.enterWindowFullscreen(workspaceWindow.id);
-		void action.catch(notifyFailure);
+		void workspace.toggleWindowFullscreen(workspaceWindow.id).catch(notifyFailure);
 	}
 
 	function closeWindow(): void {

@@ -34,8 +34,7 @@ const {
 	closeOtherWindows,
 	createTerminal,
 	activateWindow,
-	enterWindowFullscreen,
-	exitWindowFullscreen,
+	toggleWindowFullscreen,
 	focusSurface,
 	moveTabToWindow,
 	noteWindowChromeFocus,
@@ -51,8 +50,7 @@ const {
 	closeWindow: vi.fn(async () => true),
 	closeOtherWindows: vi.fn(async () => true),
 	createTerminal: vi.fn(async () => 'terminal-created'),
-	enterWindowFullscreen: vi.fn(async () => true),
-	exitWindowFullscreen: vi.fn(async () => undefined),
+	toggleWindowFullscreen: vi.fn(async () => undefined),
 	focusSurface: vi.fn(async () => undefined),
 	moveTabToWindow: vi.fn(async () => undefined),
 	noteWindowChromeFocus: vi.fn(),
@@ -119,8 +117,7 @@ vi.mock('$lib/context', () => ({
 		createTerminal,
 		openTerminalSession,
 		closeSurface,
-		enterWindowFullscreen,
-		exitWindowFullscreen,
+		toggleWindowFullscreen,
 		closeWindow,
 		closeOtherWindows,
 	}),
@@ -898,7 +895,7 @@ describe('WorkspaceWindowTitleBar', () => {
 		await fireEvent.click(screen.getByRole('button', { name: m.workspace_fullscreen() }));
 		await fireEvent.click(screen.getByRole('button', { name: m.workspace_close_window() }));
 
-		expect(enterWindowFullscreen).toHaveBeenCalledWith('window-main');
+		expect(toggleWindowFullscreen).toHaveBeenCalledWith('window-main');
 		expect(closeWindow).toHaveBeenCalledWith('window-main');
 	});
 
@@ -908,8 +905,7 @@ describe('WorkspaceWindowTitleBar', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: m.workspace_exit_fullscreen() }));
 
-		expect(exitWindowFullscreen).toHaveBeenCalledWith('window-main');
-		expect(enterWindowFullscreen).not.toHaveBeenCalled();
+		expect(toggleWindowFullscreen).toHaveBeenCalledWith('window-main');
 	});
 
 	it('opens plus-menu views as tabs in that window', async () => {

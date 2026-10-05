@@ -48,6 +48,8 @@ export interface WorkspaceShortcutDeps {
 		| 'focusPreviousTabInFocusedWindow'
 		| 'focusNextTabInFocusedWindow'
 		| 'cycleWindowFocus'
+		| 'toggleWindowFullscreen'
+		| 'isMobile'
 	> & { layout: Pick<WorkspaceCoordinator['layout'], 'surface'> };
 	transients: Pick<
 		TransientLayerRegistry,
@@ -64,6 +66,7 @@ export interface WorkspaceShortcutDeps {
 	navigation: Pick<NavigationStore, 'requestNavigateChatAbove' | 'requestNavigateChatBelow'>;
 	localSettings: Pick<LocalSettingsStore, 'globalShortcuts'>;
 	commands: Pick<WorkbenchCommandRegistry, 'execute' | 'isEnabled'>;
+	onError(error: unknown): void;
 }
 
 export class WorkspaceShortcutDispatcher {
@@ -203,6 +206,14 @@ export class WorkspaceShortcutDispatcher {
 				halfPageDirection,
 				this.deps.transients.makesMainInert,
 			);
+			return;
+		}
+		if (matches('toggle-window-fullscreen')) {
+			if (this.deps.workspace.isMobile || this.deps.transients.makesMainInert) return;
+			event.preventDefault();
+			event.stopPropagation();
+			if (event.repeat) return;
+			void this.deps.workspace.toggleWindowFullscreen().catch((error) => this.deps.onError(error));
 			return;
 		}
 		if (matches('cycle-window-focus')) {

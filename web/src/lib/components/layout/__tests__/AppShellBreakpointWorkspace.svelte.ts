@@ -75,6 +75,16 @@ export class AppShellBreakpointWorkspace implements Pick<
 		this.isMobile = false;
 	}
 
+	async toggleWindowFullscreen(
+		windowId: WorkspaceWindowId = this.layout.snapshot.fullscreenWindowId ?? this.currentWindowId,
+	): Promise<void> {
+		if (this.layout.snapshot.fullscreenWindowId === windowId) {
+			await this.exitWindowFullscreen(windowId);
+		} else {
+			await this.enterWindowFullscreen(windowId);
+		}
+	}
+
 	async enterWindowFullscreen(windowId: WorkspaceWindowId): Promise<void> {
 		const next = reduceWorkspaceLayout(this.layout.snapshot, [
 			{ type: 'set-fullscreen-window', windowId },

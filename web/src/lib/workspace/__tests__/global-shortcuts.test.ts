@@ -225,6 +225,30 @@ describe('global shortcuts', () => {
 		});
 	});
 
+	it('preserves existing custom chords when the fullscreen default is introduced', () => {
+		expect(
+			sanitizeGlobalShortcutOverrides({
+				'new-chat': { key: 'F', ctrl: true, shift: true },
+			}),
+		).toEqual({
+			'new-chat': { key: 'f', ctrl: true, shift: true },
+			'toggle-window-fullscreen': null,
+		});
+	});
+
+	it('resolves fullscreen conflicts across chat and file contexts', () => {
+		const assigned = assignGlobalShortcut({}, 'toggle-window-fullscreen', {
+			key: 's',
+			primary: true,
+		});
+		expect(assigned.unassignedIds).toEqual(['open-sidebar-search', 'file-save']);
+		expect(sanitizeGlobalShortcutOverrides(assigned.overrides)).toEqual(assigned.overrides);
+		expect(getEffectiveGlobalShortcut('toggle-window-fullscreen', assigned.overrides)).toEqual({
+			key: 's',
+			primary: true,
+		});
+	});
+
 	it('preserves custom chords that conflict with macOS-specific defaults', () => {
 		expect(
 			sanitizeGlobalShortcutOverrides(

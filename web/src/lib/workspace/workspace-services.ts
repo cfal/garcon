@@ -504,6 +504,8 @@ export function createWorkspaceServices(deps: WorkspaceRootDependencies): Worksp
 		navigation: deps.navigation,
 		commands,
 		localSettings: deps.localSettings,
+		onError: (error) =>
+			deps.notifications.error(error instanceof Error ? error.message : m.workspace_open_failed()),
 	});
 	const stopGitExecutorBinding = deps.executors.onChanged(() => {
 		const ids = new Set(deps.executors.executors.map((executor) => executor.id));

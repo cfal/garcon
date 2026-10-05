@@ -16,6 +16,7 @@ describe('keyboard shortcut entries', () => {
 		expect(shortcutKeys.get('Go to chat above')).toEqual(['Ctrl', 'Shift', 'P']);
 		expect(shortcutKeys.get('Go to chat below')).toEqual(['Ctrl', 'Shift', 'N']);
 		expect(shortcutKeys.get('Cycle window focus')).toEqual(['Ctrl', 'Shift', 'O']);
+		expect(shortcutKeys.get('Toggle active window fullscreen')).toEqual(['Ctrl', 'Shift', 'F']);
 		expect(shortcutKeys.get('New chat')).toEqual(['Ctrl', 'N']);
 		expect(shortcutKeys.get('Delete selected chat')).toEqual(['Ctrl', 'Shift', 'D']);
 		expect(shortcutKeys.get('Scroll up half a page')).toEqual(['Ctrl', 'U']);

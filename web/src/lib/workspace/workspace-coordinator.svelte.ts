@@ -702,6 +702,16 @@ export class WorkspaceCoordinator implements FilePlacementPort {
 		return this.#windowDestruction.closeOthers(windowId);
 	}
 
+	async toggleWindowFullscreen(
+		windowId: WorkspaceWindowId = this.layout.snapshot.fullscreenWindowId ?? this.currentWindowId,
+	): Promise<void> {
+		if (this.layout.snapshot.fullscreenWindowId === windowId) {
+			await this.exitWindowFullscreen(windowId);
+		} else {
+			await this.enterWindowFullscreen(windowId);
+		}
+	}
+
 	async enterWindowFullscreen(windowId: WorkspaceWindowId): Promise<boolean> {
 		if (this.isMobile) return false;
 		if (this.layout.snapshot.fullscreenWindowId === windowId) return true;

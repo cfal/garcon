@@ -284,6 +284,7 @@ function createShortcutDispatcher(
 		navigation: { requestNavigateChatAbove: vi.fn(), requestNavigateChatBelow: vi.fn() },
 		commands: { execute: vi.fn(async () => true), isEnabled: () => true },
 		localSettings: { globalShortcuts: {} },
+		onError: vi.fn(),
 		...overrides,
 	});
 }
@@ -567,6 +568,52 @@ describe('WorkspaceCoordinator', () => {
 		expect(layout.snapshot.fullscreenWindowId).toBeNull();
 		expect(layout.snapshot.desktopRoot).toBe(before.desktopRoot);
 		expect(layout.snapshot.surfaces).toBe(before.surfaces);
+	});
+
+	it('toggles the current window and restores its unchanged topology', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.openSingletonInNewWindow('git-history');
+		const windowId = coordinator.currentWindowId;
+		const before = layout.snapshot;
+		expect(windowId).not.toBe('window-main');
+
+		await coordinator.toggleWindowFullscreen();
+		expect(layout.snapshot.fullscreenWindowId).toBe(windowId);
+		await coordinator.toggleWindowFullscreen();
+		expect(layout.snapshot.fullscreenWindowId).toBeNull();
+		expect(coordinator.currentWindowId).toBe(windowId);
+		expect(layout.snapshot.desktopRoot).toBe(before.desktopRoot);
+		expect(layout.snapshot.surfaces).toBe(before.surfaces);
+	});
+
+	it('toggles the last active window while the chat list owns focus', async () => {
+		const { coordinator, layout } = createHarness();
+		coordinator.activateWindow('window-files');
+		coordinator.focusOwner = { kind: 'chat-list' };
+
+		await coordinator.toggleWindowFullscreen();
+		expect(layout.snapshot.fullscreenWindowId).toBe('window-files');
+		await coordinator.toggleWindowFullscreen();
+		expect(layout.snapshot.fullscreenWindowId).toBeNull();
+	});
+
+	it('uses an explicit button target instead of the current window', async () => {
+		const { coordinator, layout } = createHarness();
+		coordinator.activateWindow('window-files');
+
+		await coordinator.toggleWindowFullscreen('window-main');
+		expect(layout.snapshot.fullscreenWindowId).toBe('window-main');
+		await coordinator.toggleWindowFullscreen('window-main');
+		expect(layout.snapshot.fullscreenWindowId).toBeNull();
+	});
+
+	it('ignores fullscreen toggles on mobile or for a removed window', async () => {
+		const { coordinator, layout } = createHarness();
+		await coordinator.toggleWindowFullscreen('window-missing');
+		expect(layout.snapshot.fullscreenWindowId).toBeNull();
+		await coordinator.enterMobilePresentation();
+		await coordinator.toggleWindowFullscreen();
+		expect(layout.snapshot.fullscreenWindowId).toBeNull();
 	});
 
 	it('blocks new windows until fullscreen exits', async () => {

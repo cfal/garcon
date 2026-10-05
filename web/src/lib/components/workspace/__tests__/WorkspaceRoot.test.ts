@@ -275,6 +275,19 @@ function installContext({ showQuickCommitTray = false }: { showQuickCommitTray?:
 			runtime.currentWindowId = windowId;
 			return true;
 		}),
+		toggleWindowFullscreen: vi.fn(
+			async (
+				windowId: WorkspaceWindowId = layout.snapshot.fullscreenWindowId ?? runtime.currentWindowId,
+			) => {
+				commit([
+					{
+						type: 'set-fullscreen-window',
+						windowId: layout.snapshot.fullscreenWindowId === windowId ? null : windowId,
+					},
+				]);
+				runtime.currentWindowId = windowId;
+			},
+		),
 		exitWindowFullscreen: vi.fn(async () => {
 			commit([{ type: 'set-fullscreen-window', windowId: null }]);
 		}),

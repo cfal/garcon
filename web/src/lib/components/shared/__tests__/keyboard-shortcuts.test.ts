@@ -21,6 +21,17 @@ function createMockNavigation() {
 	};
 }
 
+function fullscreenKey(options: KeyboardEventInit = {}): KeyboardEvent {
+	return new KeyboardEvent('keydown', {
+		key: 'F',
+		ctrlKey: true,
+		shiftKey: true,
+		bubbles: true,
+		cancelable: true,
+		...options,
+	});
+}
+
 describe('KeyboardShortcuts', () => {
 	it('opens sidebar search on Ctrl-S while the chat list owns focus', async () => {
 		const appShell = createMockAppShell();
@@ -507,6 +518,131 @@ describe('KeyboardShortcuts', () => {
 
 		expect(onCycleWindowFocus).toHaveBeenCalledOnce();
 		expect(event.defaultPrevented).toBe(true);
+	});
+
+	it.each([
+		['chat-list', 'button', 'Surface toolbar'],
+		['chat', 'button', 'Surface toolbar'],
+		['file', 'textbox', 'File editor input'],
+		['terminal', 'textbox', 'Terminal input'],
+	] as const)(
+		'toggles fullscreen from %s without leaking the chord to focused content',
+		(focusOwner, role, accessibleName) => {
+			const onToggleWindowFullscreen = vi.fn(async () => undefined);
+			render(KeyboardShortcutsHost, {
+				appShell: createMockAppShell(),
+				navigation: createMockNavigation(),
+				focusOwner,
+				onToggleWindowFullscreen,
+				onPrimaryScroll: vi.fn(),
+			});
+			const target = screen.getByRole(role, { name: accessibleName });
+			const localHandler = vi.fn();
+			target.addEventListener('keydown', localHandler);
+			const event = fullscreenKey();
+			target.dispatchEvent(event);
+			expect(onToggleWindowFullscreen).toHaveBeenCalledOnce();
+			expect(event.defaultPrevented).toBe(true);
+			expect(localHandler).not.toHaveBeenCalled();
+			const repeated = fullscreenKey({ repeat: true });
+			target.dispatchEvent(repeated);
+			expect(onToggleWindowFullscreen).toHaveBeenCalledOnce();
+			expect(repeated.defaultPrevented).toBe(true);
+			expect(localHandler).not.toHaveBeenCalled();
+		},
+	);
+
+	it('updates fullscreen bindings immediately and honors disable', async () => {
+		const onToggleWindowFullscreen = vi.fn(async () => undefined);
+		const { rerender } = render(KeyboardShortcutsHost, {
+			appShell: createMockAppShell(),
+			navigation: createMockNavigation(),
+			onToggleWindowFullscreen,
+		});
+		await rerender({ globalShortcuts: { 'toggle-window-fullscreen': { key: 'x', meta: true } } });
+		const defaultShortcut = fullscreenKey();
+		window.dispatchEvent(defaultShortcut);
+		expect(defaultShortcut.defaultPrevented).toBe(false);
+		expect(onToggleWindowFullscreen).not.toHaveBeenCalled();
+		window.dispatchEvent(
+			fullscreenKey({ key: 'x', metaKey: true, ctrlKey: false, shiftKey: false }),
+		);
+		expect(onToggleWindowFullscreen).toHaveBeenCalledOnce();
+		await rerender({ globalShortcuts: { 'toggle-window-fullscreen': null } });
+		window.dispatchEvent(
+			fullscreenKey({ key: 'x', metaKey: true, ctrlKey: false, shiftKey: false }),
+		);
+		window.dispatchEvent(fullscreenKey());
+		expect(onToggleWindowFullscreen).toHaveBeenCalledOnce();
+	});
+
+	it.each(['confirmation', 'application-dialog', 'file-dialog'] as const)(
+		'does not toggle behind a surface-owned %s',
+		(transientKind) => {
+			const onToggleWindowFullscreen = vi.fn(async () => undefined);
+			render(KeyboardShortcutsHost, {
+				appShell: createMockAppShell(),
+				navigation: createMockNavigation(),
+				onToggleWindowFullscreen,
+				transientKind,
+				transientSurface: true,
+			});
+			const event = fullscreenKey();
+			screen.getByRole('textbox', { name: 'Transient input' }).dispatchEvent(event);
+			expect(event.defaultPrevented).toBe(false);
+			expect(onToggleWindowFullscreen).not.toHaveBeenCalled();
+		},
+	);
+
+	it('leaves fullscreen shortcuts alone on mobile and during composition', async () => {
+		const onToggleWindowFullscreen = vi.fn(async () => undefined);
+		const { rerender } = render(KeyboardShortcutsHost, {
+			appShell: createMockAppShell(),
+			navigation: createMockNavigation(),
+			onToggleWindowFullscreen,
+			isMobile: true,
+		});
+		const mobile = fullscreenKey();
+		window.dispatchEvent(mobile);
+		expect(mobile.defaultPrevented).toBe(false);
+		await rerender({ isMobile: false });
+		const composing = fullscreenKey({ isComposing: true });
+		window.dispatchEvent(composing);
+		expect(composing.defaultPrevented).toBe(false);
+		expect(onToggleWindowFullscreen).not.toHaveBeenCalled();
+	});
+
+	it('respects locally owned fullscreen chords', () => {
+		const onToggleWindowFullscreen = vi.fn(async () => undefined);
+		const onLocalKeydown = vi.fn();
+		render(KeyboardShortcutsHost, {
+			appShell: createMockAppShell(),
+			navigation: createMockNavigation(),
+			onToggleWindowFullscreen,
+			localShortcutOwner: () => true,
+			onLocalKeydown,
+		});
+		const event = fullscreenKey();
+		screen.getByRole('button', { name: 'Local shortcut target' }).dispatchEvent(event);
+		expect(event.defaultPrevented).toBe(false);
+		expect(onLocalKeydown).toHaveBeenCalledOnce();
+		expect(onToggleWindowFullscreen).not.toHaveBeenCalled();
+	});
+
+	it('reports rejected fullscreen transitions', async () => {
+		const error = new Error('Fullscreen transition failed');
+		const onShortcutError = vi.fn();
+		render(KeyboardShortcutsHost, {
+			appShell: createMockAppShell(),
+			navigation: createMockNavigation(),
+			onShortcutError,
+			onToggleWindowFullscreen: async () => {
+				throw error;
+			},
+		});
+		window.dispatchEvent(fullscreenKey());
+		await Promise.resolve();
+		expect(onShortcutError).toHaveBeenCalledWith(error);
 	});
 
 	it('navigates chat items on Ctrl-Shift-P and Ctrl-Shift-N while the chat list owns focus', () => {

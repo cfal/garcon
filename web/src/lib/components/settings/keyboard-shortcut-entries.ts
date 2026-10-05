@@ -33,6 +33,7 @@ export const GLOBAL_SHORTCUTS: readonly ShortcutEntry[] = [
 		id: 'cycle-window-focus',
 		label: m.settings_shortcut_cycle_window_focus,
 	},
+	{ id: 'toggle-window-fullscreen', label: m.settings_shortcut_toggle_window_fullscreen },
 	{ id: 'open-settings', label: m.settings_shortcut_open_settings },
 	{ id: 'scroll-half-page-up', label: m.settings_shortcut_scroll_half_page_up },
 	{ id: 'scroll-half-page-down', label: m.settings_shortcut_scroll_half_page_down },

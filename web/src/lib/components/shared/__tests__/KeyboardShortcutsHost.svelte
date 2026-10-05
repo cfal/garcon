@@ -43,6 +43,9 @@
 		onFocusPreviousTab?: () => boolean;
 		onFocusNextTab?: () => boolean;
 		onCycleWindowFocus?: () => void;
+		onToggleWindowFullscreen?: () => Promise<void>;
+		onShortcutError?: (error: unknown) => void;
+		isMobile?: boolean;
 		onTransientEscape?: () => void;
 		onSurfaceEscape?: () => void;
 		onPrimaryScroll?: (direction: WorkspaceHalfPageDirection) => void;
@@ -66,6 +69,9 @@
 		onFocusPreviousTab = () => true,
 		onFocusNextTab = () => true,
 		onCycleWindowFocus = () => undefined,
+		onToggleWindowFullscreen = async () => undefined,
+		onShortcutError = () => undefined,
+		isMobile = false,
 		onTransientEscape = () => undefined,
 		onSurfaceEscape = () => undefined,
 		onPrimaryScroll,
@@ -122,6 +128,10 @@
 		focusNextTabInFocusedWindow: (owner?: FocusOwner) =>
 			owner?.kind === 'chat-list' ? false : onFocusNextTab(),
 		cycleWindowFocus: () => onCycleWindowFocus(),
+		toggleWindowFullscreen: () => onToggleWindowFullscreen(),
+		get isMobile() {
+			return isMobile;
+		},
 		get focusOwner() {
 			if (focusOwner === 'chat-list') return { kind: 'chat-list' as const };
 			let surfaceId: string = CANONICAL_CHAT_SURFACE_ID;
@@ -161,6 +171,7 @@
 	const shortcuts = new WorkspaceShortcutDispatcher({
 		workspace,
 		transients,
+		onError: (error) => onShortcutError(error),
 		appShell: appShellPort,
 		navigation: navigationPort,
 		get commands() {
