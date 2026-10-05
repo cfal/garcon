@@ -33,7 +33,7 @@ import {
   resolveNewChatPreambleSelection,
 } from '../preambles/selection.js';
 import type { ScheduledPromptDispatcher } from './dispatcher.js';
-import { ScheduledPromptRunLog } from './run-log.js';
+import { ScheduledPromptRunLog, type ScheduledPromptRunRecord } from './run-log.js';
 import { ScheduledPromptDomainError, ScheduledPromptStore } from './store.js';
 
 const logger = createLogger('scheduled-prompts');
@@ -164,7 +164,11 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
           });
         } catch (error) {
           logger.error('hourly reconciliation failed:', errorMessage(error));
-          scheduler.#appendLog(`Prompt reconciliation failed: ${errorMessage(error)}.`);
+          scheduler.#appendLog({
+            scheduledPromptId: null,
+            outcome: 'failed',
+            message: `Prompt reconciliation failed: ${errorMessage(error)}.`,
+          });
         }
       });
     });
@@ -455,14 +459,22 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
         if (!claim) return;
         try {
           const outcome = await scheduler.deps.dispatcher.dispatch(claim.scheduledPrompt, expectedRunAt);
-          scheduler.#appendLog(outcome.message, false);
+          scheduler.#appendLog({ scheduledPromptId: scheduledPrompt.id, ...outcome }, false);
         } catch (error) {
-          scheduler.#appendLog(`Prompt failed: ${errorMessage(error)}.`, false);
+          scheduler.#appendLog({
+            scheduledPromptId: scheduledPrompt.id,
+            outcome: 'failed',
+            message: `Prompt failed: ${errorMessage(error)}.`,
+          }, false);
         }
         scheduler.#emitInvalidated('executed');
       } catch (error) {
         logger.error(`callback failed for prompt ${scheduledPrompt.id}:`, errorMessage(error));
-        scheduler.#appendLog(`Prompt scheduler failure: ${errorMessage(error)}.`);
+        scheduler.#appendLog({
+          scheduledPromptId: scheduledPrompt.id,
+          outcome: 'failed',
+          message: `Prompt scheduler failure: ${errorMessage(error)}.`,
+        });
       }
     });
     this.#jobs.set(scheduledPrompt.id, job);
@@ -473,7 +485,9 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
       includeCurrentMinute,
     });
     if (!result.changed) return;
-    for (const event of result.events) this.deps.runLog.append(event.message, now);
+    for (const event of result.events) {
+      this.deps.runLog.append({ scheduledPromptId: event.scheduledPromptId, outcome: 'missed', message: event.message }, now);
+    }
     this.#rebuildJobs();
     this.#emitInvalidated('missed');
   }
@@ -492,8 +506,8 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
     };
   }
 
-  #appendLog(message: string, invalidate = true): void {
-    this.deps.runLog.append(message);
+  #appendLog(record: ScheduledPromptRunRecord, invalidate = true): void {
+    this.deps.runLog.append(record);
     if (invalidate) this.#emitInvalidated('log-appended');
   }
 

@@ -129,7 +129,7 @@ async function sameChatScheduler() {
     store, cron, runLog: new ScheduledPromptRunLog(), agents: agentCapabilities(),
     preambles: preambleCatalog(),
     chats: { getChat: (chatId) => chatId === '123' ? {} : null },
-    dispatcher: { dispatch: async () => ({ message: 'sent' }) },
+    dispatcher: { dispatch: async () => ({ outcome: 'sent', chatId: '123', message: 'sent' }) },
   });
   return { store, cron, scheduler };
 }
@@ -197,7 +197,7 @@ describe('scheduled prompt scheduler', () => {
     const scheduler = new ScheduledPromptScheduler({
       store, cron, runLog: new ScheduledPromptRunLog(), agents: agentCapabilities(),
       preambles: preambleCatalog(), chats: { getChat: () => ({}) },
-      dispatcher: { dispatch: async (prompt) => { dispatched.push(prompt.id); return { message: 'sent' }; } },
+      dispatcher: { dispatch: async (prompt) => { dispatched.push(prompt.id); return { outcome: 'sent', chatId: '123', message: 'sent' }; } },
       inspectProject: async (projectPath) => {
         entered.resolve();
         await release.promise;
@@ -260,7 +260,7 @@ describe('scheduled prompt scheduler', () => {
         store, cron: new FakeCron(), runLog: new ScheduledPromptRunLog(),
         agents: { ...agentCapabilities(), hasAgent: () => available },
         preambles: preambleCatalog(), chats: { getChat: () => ({}) },
-        dispatcher: { dispatch: async () => ({ message: 'sent' }) },
+        dispatcher: { dispatch: async () => ({ outcome: 'sent', chatId: '123', message: 'sent' }) },
         inspectProject: async (projectPath) => {
           entered.resolve();
           await release.promise;
@@ -303,7 +303,7 @@ describe('scheduled prompt scheduler', () => {
         },
       },
       preambles: preambleCatalog(), chats: { getChat: () => ({}) },
-      dispatcher: { dispatch: async () => ({ message: 'sent' }) },
+      dispatcher: { dispatch: async () => ({ outcome: 'sent', chatId: '123', message: 'sent' }) },
       inspectProject,
     });
     const definition = newChatDefinition('2030-01-02T09:00:00.000Z');
@@ -339,7 +339,7 @@ describe('scheduled prompt scheduler', () => {
         async dispatch(prompt) {
           observations.push({ prompt, persisted: store.get(prompt.id) });
           expect(cron.jobs.some((job) => !job.stopped && job.expression === cronExpressionForUtcInstant(nextRunAt))).toBe(true);
-          return { message: 'Prompt sent to chat 123.' };
+          return { outcome: 'sent', chatId: '123', message: 'Prompt sent to chat 123.' };
         },
       },
       chats: {
@@ -365,7 +365,68 @@ describe('scheduled prompt scheduler', () => {
     expect(observations).toHaveLength(1);
     expect(observations[0].persisted.schedule.nextRunAt).toBe(nextRunAt);
     expect(occurrence.stopped).toBe(true);
-    expect(runLog.list().at(-1)).toContain('Prompt sent to chat 123.');
+    expect(runLog.list().at(-1)).toEqual({
+      at: expect.any(String),
+      scheduledPromptId: prompt.id,
+      outcome: 'sent',
+      chatId: '123',
+      message: 'Prompt sent to chat 123.',
+    });
+  });
+
+  it('attributes missed and failed occurrences to their prompt in the run log', async () => {
+    const dir = await tempDir();
+    const store = new ScheduledPromptStore(dir);
+    await store.init();
+    const missedPrompt = recurringPrompt('2030-01-01T06:15:00.000Z');
+    const failingPrompt = { ...recurringPrompt('2030-01-01T09:00:00.000Z'), id: 'failing-prompt' };
+    await store.create(missedPrompt, 0);
+    await store.create(failingPrompt, store.revision);
+    const cron = new FakeCron();
+    const runLog = new ScheduledPromptRunLog();
+    const scheduler = new ScheduledPromptScheduler({
+      inspectProject: inspectProjectDirectory,
+      store,
+      runLog,
+      dispatcher: {
+        async dispatch() {
+          throw new Error('Chat is unavailable');
+        },
+      },
+      chats: { getChat: () => ({}) },
+      agents: agentCapabilities(),
+      preambles: preambleCatalog(),
+      cron,
+    });
+    await scheduler.start(new Date('2030-01-01T08:30:00.000Z'));
+    const occurrence = cron.jobs.find(
+      (job) => !job.stopped && job.expression === cronExpressionForUtcInstant('2030-01-01T09:00:00.000Z'),
+    );
+    const originalNow = Date.now;
+    Date.now = () => Date.parse('2030-01-01T09:00:00.000Z');
+    try {
+      await occurrence.fire();
+    } finally {
+      Date.now = originalNow;
+      scheduler.stop();
+    }
+
+    expect(runLog.list()).toEqual([
+      {
+        at: '2030-01-01T08:30:00.000Z',
+        scheduledPromptId: missedPrompt.id,
+        outcome: 'missed',
+        chatId: null,
+        message: 'Skipped 3 missed occurrences; next run is 2030-01-01T09:15:00.000Z.',
+      },
+      {
+        at: expect.any(String),
+        scheduledPromptId: 'failing-prompt',
+        outcome: 'failed',
+        chatId: null,
+        message: 'Prompt failed: Chat is unavailable.',
+      },
+    ]);
   });
 
   it('persists an hourly recurring definition and registers its first run', async () => {
@@ -378,7 +439,7 @@ describe('scheduled prompt scheduler', () => {
       runLog: new ScheduledPromptRunLog(),
       dispatcher: {
         async dispatch() {
-          return { message: 'sent' };
+          return { outcome: 'sent', chatId: '123', message: 'sent' };
         },
       },
       chats: {
@@ -417,7 +478,7 @@ describe('scheduled prompt scheduler', () => {
       runLog: new ScheduledPromptRunLog(),
       dispatcher: {
         async dispatch() {
-          return { message: 'sent' };
+          return { outcome: 'sent', chatId: '123', message: 'sent' };
         },
       },
       chats: {
@@ -461,7 +522,7 @@ describe('scheduled prompt scheduler', () => {
       runLog: new ScheduledPromptRunLog(),
       dispatcher: {
         async dispatch() {
-          return { message: 'sent' };
+          return { outcome: 'sent', chatId: '123', message: 'sent' };
         },
       },
       chats: {
@@ -591,7 +652,7 @@ describe('scheduled prompt scheduler', () => {
     const scheduler = new ScheduledPromptScheduler({
       store, cron, runLog: new ScheduledPromptRunLog(), agents: agentCapabilities(),
       preambles: preambleCatalog(), chats: { getChat: () => null },
-      dispatcher: { dispatch: async () => ({ message: 'sent' }) },
+      dispatcher: { dispatch: async () => ({ outcome: 'sent', chatId: '123', message: 'sent' }) },
       inspectProject: async (projectPath) => ({ kind: 'available', effectiveProjectKey: projectPath }),
       retainExecutorReferences: references.retain,
     });
@@ -642,7 +703,7 @@ describe('scheduled prompt scheduler', () => {
       runLog: new ScheduledPromptRunLog(),
       dispatcher: {
         async dispatch() {
-          return { message: 'sent' };
+          return { outcome: 'sent', chatId: '123', message: 'sent' };
         },
       },
       chats: {
@@ -692,7 +753,7 @@ describe('scheduled prompt scheduler', () => {
       inspectProject: async (projectPath) => ({ kind: 'available', effectiveProjectKey: projectPath }),
       store,
       runLog: new ScheduledPromptRunLog(),
-      dispatcher: { dispatch: async () => ({ message: 'sent' }) },
+      dispatcher: { dispatch: async () => ({ outcome: 'sent', chatId: '123', message: 'sent' }) },
       chats: { getChat: () => null },
       agents: agentCapabilities(),
       preambles: preambleCatalog(ids.map((id, index) => ({
@@ -726,7 +787,7 @@ describe('scheduled prompt scheduler', () => {
       runLog: new ScheduledPromptRunLog(),
       dispatcher: {
         async dispatch() {
-          return { message: 'sent' };
+          return { outcome: 'sent', chatId: '123', message: 'sent' };
         },
       },
       chats: {
@@ -765,7 +826,7 @@ describe('scheduled prompt scheduler', () => {
       runLog: new ScheduledPromptRunLog(),
       dispatcher: {
         async dispatch() {
-          return { message: 'sent' };
+          return { outcome: 'sent', chatId: '123', message: 'sent' };
         },
       },
       chats: {

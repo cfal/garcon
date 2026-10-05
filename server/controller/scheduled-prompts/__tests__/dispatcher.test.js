@@ -91,6 +91,7 @@ describe('scheduled prompt dispatcher', () => {
     expect(calls[0].tags).toEqual(['qa', 'review-needed']);
     expect(calls[0].orderedPreambleIds).toEqual(target.preambleChoice.orderedPreambleIds);
     expect(calls[0]).not.toHaveProperty('images');
+    expect(outcome).toMatchObject({ outcome: 'created-chat', chatId: CREATED_CHAT_ID });
     expect(outcome.message).toContain(CREATED_CHAT_ID);
     expect(outcome.message).not.toContain('Review');
   });
@@ -158,6 +159,7 @@ describe('scheduled prompt dispatcher', () => {
         ),
         '2030-01-01T09:00:00.000Z',
       );
+      expect(outcome).toMatchObject({ outcome: type, chatId: '123' });
       expect(outcome.message).toContain(expected);
       expect(outcome.message).not.toContain('Review in');
       expect(outcome.message).not.toContain(SCHEDULED_PROMPT_CHAT_ID_TOKEN);

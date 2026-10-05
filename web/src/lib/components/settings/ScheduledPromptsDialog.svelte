@@ -1,5 +1,6 @@
 <script lang="ts">
 	import * as Dialog from '$lib/components/ui/dialog';
+	import { gotoChat } from '$lib/chat/actions/chat-navigation.js';
 	import { getAppShell } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import ScheduledPromptsSection from './ScheduledPromptsSection.svelte';
@@ -8,6 +9,11 @@
 
 	function handleOpenChange(open: boolean): void {
 		if (!open) appShell.closeScheduledPrompts();
+	}
+
+	function openChat(chatId: string): void {
+		appShell.closeScheduledPrompts();
+		void gotoChat(chatId);
 	}
 </script>
 
@@ -22,7 +28,7 @@
 		</Dialog.Header>
 
 		<div class="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6">
-			<ScheduledPromptsSection active={appShell.showScheduledPrompts} />
+			<ScheduledPromptsSection active={appShell.showScheduledPrompts} onOpenChat={openChat} />
 		</div>
 	</Dialog.Content>
 </Dialog.Root>

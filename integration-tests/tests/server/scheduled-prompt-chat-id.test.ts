@@ -83,7 +83,10 @@ describe('scheduled prompt chat ID variables', () => {
 
       const after = await fixture.client.getScheduledPrompts();
       expect(after.prompts).toEqual([]);
-      expect(after.runLog.some((entry) => entry.includes(`created chat ${renderedChatId}`))).toBe(true);
+      expect(after.runLog).toContainEqual(expect.objectContaining({
+        outcome: 'created-chat',
+        chatId: renderedChatId,
+      }));
     });
   }, 120_000);
 });

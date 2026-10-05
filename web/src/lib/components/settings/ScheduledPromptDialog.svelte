@@ -6,7 +6,11 @@
 	import ScheduledNewChatComposer from './ScheduledNewChatComposer.svelte';
 	import ScheduledPromptField from './ScheduledPromptField.svelte';
 	import ScheduledPromptOption from './ScheduledPromptOption.svelte';
-	import { ScheduledPromptFormState } from './scheduled-prompt-form-state.svelte';
+	import ScheduledPromptSchedulePreview from './ScheduledPromptSchedulePreview.svelte';
+	import {
+		SCHEDULE_INTERVAL_PRESET_MINUTES,
+		ScheduledPromptFormState,
+	} from './scheduled-prompt-form-state.svelte';
 	import {
 		getChatSessions,
 		getLocalSettings,
@@ -17,6 +21,8 @@
 	} from '$lib/context';
 	import { nonDirectAgentIds } from '$lib/agents/direct-agents.js';
 	import { browserTimeZoneLabel, localDateValue } from '$lib/scheduling/local-schedule';
+	import { recurringCadenceLabel } from '$lib/scheduling/schedule-labels';
+	import { cn } from '$lib/utils/cn.js';
 	import {
 		SCHEDULED_PROMPT_INTERVAL_MINUTES_MIN,
 		type ScheduledPrompt,
@@ -24,6 +30,8 @@
 	} from '$shared/scheduled-prompts';
 	import Search from '@lucide/svelte/icons/search';
 	import * as m from '$lib/paraglide/messages.js';
+
+	const PREVIEW_RUN_COUNT = 3;
 
 	interface Props {
 		open: boolean;
@@ -94,6 +102,21 @@
 			: `${selectedChat?.executorId ?? 'local'}\u0000${selectedChat?.projectPath ?? ''}`,
 	);
 	const timezone = $derived(browserTimeZoneLabel());
+	const schedulePreview = $derived(form.schedulePreview(PREVIEW_RUN_COUNT));
+	// A saved recurring prompt has already started, so its date and time are its next run.
+	const editingRecurrence = $derived(scheduledPrompt?.schedule.type === 'recurring');
+	const dateLabel = $derived.by(() => {
+		if (form.scheduleType === 'once') return m.scheduled_prompts_date();
+		return editingRecurrence
+			? m.scheduled_prompts_next_run_date()
+			: m.scheduled_prompts_first_run_date();
+	});
+	const timeLabel = $derived.by(() => {
+		if (form.scheduleType === 'once') return m.scheduled_prompts_time();
+		return editingRecurrence
+			? m.scheduled_prompts_next_run_time()
+			: m.scheduled_prompts_first_run_time();
+	});
 
 	$effect(() => {
 		if (!open) return;
@@ -173,6 +196,13 @@
 		}
 	}
 
+	// Keeps sub-hour presets short enough for the four chips to share one row on a phone.
+	function presetLabel(intervalMinutes: number): string {
+		return intervalMinutes < 60
+			? m.scheduled_prompts_preset_minutes({ count: intervalMinutes })
+			: recurringCadenceLabel(intervalMinutes);
+	}
+
 	function handlePromptKeydown(event: KeyboardEvent): void {
 		if (event.key !== 'Enter' || (!event.ctrlKey && !event.metaKey)) return;
 		event.preventDefault();
@@ -224,64 +254,79 @@
 					/>
 				</fieldset>
 
-				{#if form.scheduleType === 'once'}
-					<div class="grid gap-3 sm:grid-cols-2">
-						<label class="space-y-1 text-sm">
-							<span class="font-medium">{m.scheduled_prompts_date()}</span>
-							<input
-								type="date"
-								min={minimumDate}
-								bind:value={form.date}
-								class="h-11 w-full min-w-0 rounded-md border border-border bg-background px-3 text-base focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:text-sm"
-							/>
+				{#if form.scheduleType === 'recurring'}
+					<div class="space-y-2 text-sm">
+						<label for="scheduled-prompt-interval" class="block font-medium">
+							{m.scheduled_prompts_repeat_every()}
 						</label>
-						<label class="space-y-1 text-sm">
-							<span class="font-medium">{m.scheduled_prompts_time()}</span>
-							<input
-								type="time"
-								step="60"
-								bind:value={form.time}
-								class="h-11 w-full min-w-0 rounded-md border border-border bg-background px-3 text-base focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:text-sm"
-							/>
-						</label>
-					</div>
-				{:else}
-					<div class="grid gap-3 sm:grid-cols-2">
-						<div class="space-y-1 text-sm">
-							<label for="scheduled-prompt-interval" class="font-medium">
-								{m.scheduled_prompts_repeat_every()}
-							</label>
-							<div class="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
-								<input
-									id="scheduled-prompt-interval"
-									type="number"
-									min={SCHEDULED_PROMPT_INTERVAL_MINUTES_MIN}
-									max={form.intervalAmountMax}
-									step="1"
-									bind:value={form.intervalAmount}
-									class="h-11 w-full min-w-0 rounded-md border border-border bg-background px-3 text-base focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:text-sm"
-								/>
-								<select
-									aria-label={m.scheduled_prompts_interval_unit()}
-									bind:value={form.intervalUnit}
-									class="select-native select-native-surface h-10 pl-3 text-base sm:pointer-fine:text-sm"
+						<div
+							class="flex flex-wrap gap-2"
+							role="group"
+							aria-label={m.scheduled_prompts_interval_presets()}
+						>
+							{#each SCHEDULE_INTERVAL_PRESET_MINUTES as presetMinutes (presetMinutes)}
+								{@const selected = form.intervalMinutes === presetMinutes}
+								<button
+									type="button"
+									class={cn(
+										'min-h-9 rounded-full border px-3 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+										selected
+											? 'border-foreground bg-accent text-foreground'
+											: 'border-border text-muted-foreground hover:bg-muted',
+									)}
+									aria-pressed={selected}
+									title={recurringCadenceLabel(presetMinutes)}
+									onclick={() => form.setIntervalMinutes(presetMinutes)}
 								>
-									<option value="minutes">{m.scheduled_prompts_minutes()}</option>
-									<option value="hours">{m.scheduled_prompts_hours()}</option>
-									<option value="days">{m.scheduled_prompts_days()}</option>
-								</select>
-							</div>
+									{presetLabel(presetMinutes)}
+								</button>
+							{/each}
 						</div>
-						<label class="space-y-1 text-sm">
-							<span class="font-medium">{m.scheduled_prompts_first_run_time()}</span>
+						<div class="grid grid-cols-[minmax(0,1fr)_auto] gap-2 sm:max-w-xs">
 							<input
-								type="time"
-								step="60"
-								bind:value={form.time}
+								id="scheduled-prompt-interval"
+								type="number"
+								min={SCHEDULED_PROMPT_INTERVAL_MINUTES_MIN}
+								max={form.intervalAmountMax}
+								step="1"
+								bind:value={form.intervalAmount}
 								class="h-11 w-full min-w-0 rounded-md border border-border bg-background px-3 text-base focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:text-sm"
 							/>
-						</label>
+							<select
+								aria-label={m.scheduled_prompts_interval_unit()}
+								bind:value={form.intervalUnit}
+								class="select-native select-native-surface h-11 pl-3 text-base sm:pointer-fine:text-sm"
+							>
+								<option value="minutes">{m.scheduled_prompts_minutes()}</option>
+								<option value="hours">{m.scheduled_prompts_hours()}</option>
+								<option value="days">{m.scheduled_prompts_days()}</option>
+							</select>
+						</div>
 					</div>
+				{/if}
+
+				<div class="grid gap-3 sm:grid-cols-2">
+					<label class="space-y-1 text-sm">
+						<span class="font-medium">{dateLabel}</span>
+						<input
+							type="date"
+							min={minimumDate}
+							bind:value={form.date}
+							class="h-11 w-full min-w-0 rounded-md border border-border bg-background px-3 text-base focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:text-sm"
+						/>
+					</label>
+					<label class="space-y-1 text-sm">
+						<span class="font-medium">{timeLabel}</span>
+						<input
+							type="time"
+							step="60"
+							bind:value={form.time}
+							class="h-11 w-full min-w-0 rounded-md border border-border bg-background px-3 text-base focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:text-sm"
+						/>
+					</label>
+				</div>
+
+				{#if form.scheduleType === 'recurring'}
 					<div class="space-y-2">
 						<p class="text-sm font-medium">{m.scheduled_prompts_lifecycle()}</p>
 						<fieldset
@@ -316,9 +361,13 @@
 						{/if}
 					</div>
 				{/if}
-				{#if !form.scheduleValid}
-					<p class="text-xs text-destructive">{m.scheduled_prompts_schedule_error()}</p>
-				{/if}
+				<ScheduledPromptSchedulePreview
+					preview={schedulePreview}
+					recurring={form.scheduleType === 'recurring'}
+					cadence={form.scheduleType === 'recurring'
+						? recurringCadenceLabel(form.intervalMinutes)
+						: m.scheduled_prompts_once()}
+				/>
 			</section>
 
 			<section

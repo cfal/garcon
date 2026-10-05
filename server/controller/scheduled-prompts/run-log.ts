@@ -1,15 +1,33 @@
-import { SCHEDULED_PROMPT_RUN_LOG_LIMIT } from '../../../common/scheduled-prompts.js';
+import {
+  SCHEDULED_PROMPT_RUN_LOG_LIMIT,
+  type ScheduledPromptRunLogEntry,
+  type ScheduledPromptRunOutcome,
+} from '../../../common/scheduled-prompts.js';
+
+export interface ScheduledPromptRunRecord {
+  scheduledPromptId: string | null;
+  outcome: ScheduledPromptRunOutcome;
+  chatId?: string | null;
+  message: string;
+}
 
 export class ScheduledPromptRunLog {
-  #entries: string[] = [];
+  #entries: ScheduledPromptRunLogEntry[] = [];
 
-  append(message: string, now = new Date()): void {
-    const normalized = message.replace(/\s+/g, ' ').trim().slice(0, 1_000);
-    if (!normalized) return;
-    this.#entries = [...this.#entries, `[${now.toISOString()}] ${normalized}`].slice(-SCHEDULED_PROMPT_RUN_LOG_LIMIT);
+  append(record: ScheduledPromptRunRecord, now = new Date()): void {
+    const message = record.message.replace(/\s+/g, ' ').trim().slice(0, 1_000);
+    if (!message) return;
+    const entry: ScheduledPromptRunLogEntry = {
+      at: now.toISOString(),
+      scheduledPromptId: record.scheduledPromptId,
+      outcome: record.outcome,
+      chatId: record.chatId ?? null,
+      message,
+    };
+    this.#entries = [...this.#entries, entry].slice(-SCHEDULED_PROMPT_RUN_LOG_LIMIT);
   }
 
-  list(): string[] {
-    return [...this.#entries];
+  list(): ScheduledPromptRunLogEntry[] {
+    return this.#entries.map((entry) => ({ ...entry }));
   }
 }

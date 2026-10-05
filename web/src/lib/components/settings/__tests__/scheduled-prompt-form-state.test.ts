@@ -277,7 +277,7 @@ describe('ScheduledPromptFormState', () => {
 		expect(form.canSave).toBe(true);
 	});
 
-	it('reanchors a one-off scheduled prompt when it is changed to recurring', async () => {
+	it('starts a recurring schedule at the visible date and time of a converted one-off prompt', async () => {
 		const form = createForm();
 		const original = new Date(2030, 0, 20, 9, 0, 0, 0);
 		await form.initialize(existingPrompt({ type: 'once', nextRunAt: original.toISOString() }));
@@ -288,7 +288,101 @@ describe('ScheduledPromptFormState', () => {
 
 		expect(definition?.schedule.type).toBe('recurring');
 		if (definition?.schedule.type !== 'recurring') throw new Error('Expected recurring schedule');
-		expect(definition.schedule.firstRunAtUtc).toBe(new Date(2030, 0, 1, 9, 0, 0, 0).toISOString());
+		expect(definition.schedule.firstRunAtUtc).toBe(original.toISOString());
+	});
+
+	it('starts a new recurring schedule on the chosen date instead of the next matching time', () => {
+		const form = createForm();
+		form.scheduleType = 'recurring';
+		form.targetType = 'existing-chat';
+		form.existingChatId = '123';
+		form.prompt = 'Continue the work';
+		form.setIntervalMinutes(60);
+		form.date = '2030-01-05';
+		form.time = '14:30';
+		const now = new Date(2030, 0, 1, 8, 0, 0, 0);
+
+		expect(form.buildDefinition(now)?.schedule).toEqual({
+			type: 'recurring',
+			intervalMinutes: 60,
+			firstRunAtUtc: new Date(2030, 0, 5, 14, 30, 0, 0).toISOString(),
+			endAtUtc: null,
+		});
+	});
+
+	it('advances an untouched recurring anchor that passed while the form was open', async () => {
+		const form = createForm();
+		const nextRunAt = new Date(2030, 0, 1, 9, 0, 0, 0).toISOString();
+		await form.initialize(
+			existingPrompt({ type: 'recurring', intervalMinutes: 90, nextRunAt, endAt: null }),
+		);
+
+		const definition = form.buildDefinition(new Date(2030, 0, 1, 10, 0, 30, 0));
+
+		expect(definition?.schedule).toMatchObject({
+			type: 'recurring',
+			firstRunAtUtc: new Date(2030, 0, 1, 10, 30, 0, 0).toISOString(),
+		});
+	});
+
+	it('previews upcoming runs and names why a schedule cannot be saved', () => {
+		const form = createForm();
+		const now = new Date(2030, 0, 1, 8, 0, 0, 0);
+		expect(form.schedulePreview(3, now)).toEqual({
+			issue: 'incomplete',
+			upcomingRuns: [],
+			endAt: null,
+		});
+
+		form.date = '2030-01-01';
+		form.time = '07:00';
+		expect(form.scheduleIssue(now)).toBe('past');
+
+		form.time = '09:00';
+		expect(form.schedulePreview(3, now)).toEqual({
+			issue: null,
+			upcomingRuns: [new Date(2030, 0, 1, 9, 0, 0, 0).toISOString()],
+			endAt: null,
+		});
+
+		form.scheduleType = 'recurring';
+		form.setIntervalMinutes(60);
+		form.recurrenceEnd = 'until';
+		form.endDate = '2030-01-01';
+		form.time = '10:00';
+		expect(form.schedulePreview(3, now)).toEqual({
+			issue: null,
+			upcomingRuns: [new Date(2030, 0, 1, 10, 0, 0, 0).toISOString()],
+			endAt: new Date(2030, 0, 1, 10, 0, 0, 0).toISOString(),
+		});
+
+		form.recurrenceEnd = 'forever';
+		expect(form.schedulePreview(3, now).upcomingRuns).toEqual([
+			new Date(2030, 0, 1, 10, 0, 0, 0).toISOString(),
+			new Date(2030, 0, 1, 11, 0, 0, 0).toISOString(),
+			new Date(2030, 0, 1, 12, 0, 0, 0).toISOString(),
+		]);
+
+		form.recurrenceEnd = 'until';
+		form.endDate = '2029-12-31';
+		expect(form.scheduleIssue(now)).toBe('end-before-start');
+
+		form.intervalAmount = 0;
+		expect(form.scheduleIssue(now)).toBe('interval');
+	});
+
+	it.each([
+		[15, 'minutes', 15],
+		[60, 'hours', 1],
+		[1440, 'days', 1],
+		[10080, 'days', 7],
+	] as const)('expresses a %i-minute interval in its largest whole unit', (intervalMinutes, unit, amount) => {
+		const form = createForm();
+		form.setIntervalMinutes(intervalMinutes);
+
+		expect(form.intervalUnit).toBe(unit);
+		expect(form.intervalAmount).toBe(amount);
+		expect(form.intervalMinutes).toBe(intervalMinutes);
 	});
 
 	it('builds minute, hourly and daily intervals through one minute contract', () => {
@@ -299,6 +393,8 @@ describe('ScheduledPromptFormState', () => {
 		form.prompt = 'Continue the work';
 		form.intervalUnit = 'hours';
 		form.intervalAmount = 6;
+		form.date = '2030-01-01';
+		form.time = '09:00';
 		const now = new Date(2030, 0, 1, 8, 0, 0, 0);
 
 		const hourly = form.buildDefinition(now);

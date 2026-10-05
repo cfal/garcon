@@ -780,12 +780,24 @@ describe('scheduled prompt process-local helpers', () => {
   it('keeps a bounded, defensive run log', () => {
     const log = new ScheduledPromptRunLog();
     for (let index = 0; index < 205; index += 1) {
-      log.append(`entry\n${index}`, new Date('2030-01-01T00:00:00.000Z'));
+      log.append(
+        { scheduledPromptId: 'repeat', outcome: 'sent', chatId: '123', message: `entry\n${index}` },
+        new Date('2030-01-01T00:00:00.000Z'),
+      );
     }
+    log.append({ scheduledPromptId: null, outcome: 'failed', message: ' \n ' });
     const entries = log.list();
     expect(entries).toHaveLength(200);
-    expect(entries[0]).toContain('entry 5');
-    entries.push('mutated');
+    expect(entries[0]).toEqual({
+      at: '2030-01-01T00:00:00.000Z',
+      scheduledPromptId: 'repeat',
+      outcome: 'sent',
+      chatId: '123',
+      message: 'entry 5',
+    });
+    entries[0].message = 'mutated';
+    entries.push(entries[0]);
     expect(log.list()).toHaveLength(200);
+    expect(log.list()[0].message).toBe('entry 5');
   });
 });
