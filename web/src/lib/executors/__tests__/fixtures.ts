@@ -6,7 +6,7 @@ export const localExecutor = {
 	availability: 'ready', projectBasePath: '/workspace', lastError: null,
 	instanceId: 'synthetic-local-instance',
 	bulk: null,
-	machineServices: { files: true, git: true, gh: true, terminals: true },
+	machineServices: { files: true, git: true, gh: true, terminals: true, directoryCreation: true },
 } satisfies ExecutorSnapshot;
 
 export const remoteExecutor = {
@@ -16,5 +16,5 @@ export const remoteExecutor = {
 	projectBasePath: '/worker', lastError: null,
 	instanceId: 'synthetic-remote-instance',
 	bulk: { availability: 'ready', lastError: null },
-	machineServices: { files: false, git: false, gh: false, terminals: false },
+	machineServices: { files: false, git: false, gh: false, terminals: false, directoryCreation: false },
 } satisfies ExecutorSnapshot;

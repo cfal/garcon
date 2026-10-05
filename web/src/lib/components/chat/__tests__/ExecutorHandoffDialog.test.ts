@@ -24,7 +24,7 @@ vi.mock(
 const ExecutorHandoffDialogTestHost = (await import('./ExecutorHandoffDialogTestHost.svelte'))
 	.default;
 
-const machineServices = { files: true, git: true, gh: false, terminals: false };
+const machineServices = { files: true, git: true, gh: false, terminals: false, directoryCreation: true };
 const worker = { ...remoteExecutor, machineServices };
 const builder = {
 	...remoteExecutor,

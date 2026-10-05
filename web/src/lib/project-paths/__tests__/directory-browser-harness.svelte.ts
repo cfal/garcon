@@ -7,6 +7,7 @@ export interface DirectoryBrowserHarnessOptions {
 	currentPath?: string;
 	basePath?: string;
 	confirmsSelection?: boolean;
+	supportsCreation?: boolean;
 }
 
 /** Runs a browser against a path field that applies each published selection. */
@@ -33,6 +34,9 @@ export function openDirectoryBrowser(initial: DirectoryBrowserHarnessOptions = {
 		},
 		get confirmsSelection() {
 			return confirmsSelection;
+		},
+		get supportsCreation() {
+			return initial.supportsCreation ?? true;
 		},
 		onSelect(path) {
 			selections.push(path);

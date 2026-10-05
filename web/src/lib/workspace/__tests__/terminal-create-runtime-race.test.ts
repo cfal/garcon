@@ -55,7 +55,7 @@ it.each(['tab', 'new window', 'replacement', 'launcher'])(
 				instanceId: null,
 				projectBasePath: '/project',
 				lastError: null,
-				machineServices: { terminals: true, files: true, git: false, gh: false },
+				machineServices: { terminals: true, files: true, git: false, gh: false, directoryCreation: true },
 				allowControllerCli: false, allowExecutorManagement: false,
 			},
 		]);

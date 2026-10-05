@@ -3,7 +3,7 @@ import type { ExecutorSnapshot } from '$shared/executors';
 import { resolveExecutorServiceNotice } from '../executor-service-notice.js';
 import { remoteExecutor } from './fixtures.js';
 
-const filesAndGit = { files: true, git: true, gh: false, terminals: false };
+const filesAndGit = { files: true, git: true, gh: false, terminals: false, directoryCreation: true };
 
 function executors(snapshot: ExecutorSnapshot | null, hasSnapshot = true) {
 	const ready = () => snapshot?.enabled === true && snapshot.availability === 'ready';

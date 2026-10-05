@@ -17,7 +17,7 @@ function setup() {
 	const executors = new ExecutorsStore();
 	const remote = {
 		...remoteExecutor,
-		machineServices: { files: true, git: true, gh: true, terminals: true },
+		machineServices: { files: true, git: true, gh: true, terminals: true, directoryCreation: true },
 	};
 	executors.applySnapshot([localExecutor, remote]);
 	const read = vi.fn(

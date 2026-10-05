@@ -10,7 +10,7 @@ import { toNativePath, toExecutorPath } from '../../common/executor-path.js';
 import { readVersionedFile, getFileRevisionOrMissing, getFileLockKey, writeVersionedTextFile, FileTooLargeError } from './file-revision.js';
 import { readDirectoryCandidates, fileBreadcrumbs, listProjectFiles, readFileDirectory, relativeFilePath } from './directory-reader.js';
 import { directoryCreationError, fileOperationError, fileRevisionConflict } from './errors.js';
-import { createChildDirectory } from './directory-creation.js';
+import { createChildDirectory, descriptorPathsDirectory, directoryCreationUnsupported } from './directory-creation.js';
 
 export interface FilesServiceOptions {
   readonly executorId: string;
@@ -19,6 +19,8 @@ export interface FilesServiceOptions {
   readonly assertAvailable?: (options?: ExecutorCallOptions) => void;
   readonly resolveSaveTarget?: typeof resolveRealWithinBase;
   readonly readDirectory?: typeof readFileDirectory;
+  /** Overrides where this system names open descriptors; null stands for a system that cannot. */
+  readonly descriptorPaths?: string | null;
 }
 
 const DIRECTORY_NAME_PROBLEMS: Readonly<Record<DirectoryNameProblem, string>> = {
@@ -121,13 +123,15 @@ export class FilesService implements ExecutionFilesService {
 
   async createDirectory(request: Parameters<ExecutionFilesService['createDirectory']>[0], options?: ExecutorCallOptions) {
     return this.#run(options, async () => {
+      const descriptorPaths = this.options.descriptorPaths === undefined ? descriptorPathsDirectory() : this.options.descriptorPaths;
+      if (descriptorPaths === null) throw directoryCreationUnsupported();
       const problem = typeof request.name === 'string' ? directoryNameProblem(request.name) : 'empty';
       if (problem) throw new ValidationDomainError(DIRECTORY_NAME_PROBLEMS[problem]);
       if (!isPathInput(request.parentPath)) throw new ValidationDomainError('Invalid directory path');
-      const { root, directory } = await this.#directory(request.parentPath);
+      const { directory } = await this.#directory(request.parentPath);
       this.#available(options);
       // The name is one segment, so the target stays inside its canonical parent.
-      const target = await createChildDirectory(root, directory, request.name).catch((error: unknown) => { throw directoryCreationError(error); });
+      const target = await createChildDirectory(descriptorPaths, directory, request.name).catch((error: unknown) => { throw directoryCreationError(error); });
       return { name: request.name, path: toExecutorPath(target), type: 'directory' as const };
     });
   }

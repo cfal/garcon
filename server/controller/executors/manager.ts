@@ -137,7 +137,7 @@ export class ExecutorManager {
       availability: this.#disposed ? 'offline' : 'ready', projectBasePath: this.localInfo.projectBasePath,
       instanceId: this.localInfo.instanceId,
       bulk: null,
-      lastError: null, machineServices: { files: true, git: true, gh: true, terminals: true },
+      lastError: null, machineServices: { files: true, git: true, gh: true, terminals: true, directoryCreation: this.localInfo.services.directoryCreation },
     }, ...[...this.#remotes.values()].map((entry): ExecutorSnapshot => ({
       id: entry.config.id, label: entry.config.label, kind: 'remote', enabled: entry.config.enabled,
       allowControllerCli: entry.config.allowControllerCli,
@@ -147,7 +147,7 @@ export class ExecutorManager {
       projectBasePath: entry.info?.projectBasePath ?? null, lastError: entry.error,
       instanceId: entry.info?.instanceId ?? null,
       bulk: entry.executor?.bulkStatus ?? { availability: 'offline', lastError: null },
-      machineServices: { files: entry.info?.services.files === true, git: entry.info?.services.git === true, gh: entry.info?.services.gh === true, terminals: entry.info?.services.terminals === true },
+      machineServices: { files: entry.info?.services.files === true, git: entry.info?.services.git === true, gh: entry.info?.services.gh === true, terminals: entry.info?.services.terminals === true, directoryCreation: entry.info?.services.directoryCreation === true },
     }))];
   }
 

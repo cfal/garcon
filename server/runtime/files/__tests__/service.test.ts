@@ -324,3 +324,55 @@ const target = () => ({ projectPath: path.join(directory, 'project'), filePath: 
     await expect(fs.stat(path.join(project, 'denied'))).rejects.toThrow();
   });
 });
+
+// Stands in for macOS, Windows, and Linux without procfs, none of which can
+// create relative to an opened directory from this runtime.
+describe.each([
+  ['a platform without descriptor paths', null],
+  ['a system whose descriptor paths are missing', '/garcon-missing-descriptor-paths'],
+] as const)('directory creation on %s', (_label, descriptorPaths) => {
+  let base: string;
+  let outside: string;
+  let parent: string;
+  beforeEach(async () => {
+    base = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-files-unsupported-'));
+    outside = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-files-outside-'));
+    parent = path.join(base, 'a', 'b');
+    await fs.mkdir(parent, { recursive: true });
+    await fs.mkdir(path.join(outside, 'b'));
+  });
+  afterEach(async () => {
+    await fs.rm(base, { recursive: true, force: true });
+    await fs.rm(outside, { recursive: true, force: true });
+  });
+
+  it('creates nothing when the parent is swapped for an outside link after the last check', async () => {
+    const service = new FilesService({ executorId: 'synthetic-executor', projectBasePath: base, descriptorPaths });
+    const stat = fs.stat;
+    let swapped = false;
+    // The directory check on the validated parent is the last one before any creation could run.
+    const lastCheck = spyOn(fs, 'stat').mockImplementation(async (...args) => {
+      const result = await stat(...args);
+      if (!swapped && args[0] === parent) {
+        swapped = true;
+        await fs.rename(path.join(base, 'a'), path.join(base, 'a-moved'));
+        await fs.symlink(outside, path.join(base, 'a'));
+      }
+      return result;
+    });
+    const mkdir = spyOn(fs, 'mkdir');
+    try {
+      await expect(service.createDirectory({ parentPath: parent, name: 'child' })).rejects.toMatchObject({ code: 'OPERATION_UNSUPPORTED', status: 501 });
+      expect(mkdir).not.toHaveBeenCalled();
+    } finally { lastCheck.mockRestore(); mkdir.mockRestore(); }
+    // A platform known to lack descriptor paths refuses before it looks at the parent at all.
+    expect(swapped).toBe(descriptorPaths !== null);
+    expect(await fs.readdir(path.join(outside, 'b'))).toEqual([]);
+    expect(await fs.readdir(path.join(base, swapped ? 'a-moved' : 'a', 'b'))).toEqual([]);
+  });
+
+  it('still lists directories', async () => {
+    const service = new FilesService({ executorId: 'synthetic-executor', projectBasePath: base, descriptorPaths });
+    expect(await service.browse({ directoryPath: path.join(base, 'a') })).toEqual([{ name: 'b', path: parent, type: 'directory' }]);
+  });
+});

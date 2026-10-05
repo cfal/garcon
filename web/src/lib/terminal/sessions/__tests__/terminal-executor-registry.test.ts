@@ -42,7 +42,7 @@ function executor(
 		instanceId: null,
 		projectBasePath: '/project',
 		lastError: null,
-		machineServices: { terminals: true, files: true, git: false, gh: false },
+		machineServices: { terminals: true, files: true, git: false, gh: false, directoryCreation: true },
 		allowControllerCli: false, allowExecutorManagement: false,
 	};
 }
@@ -528,7 +528,7 @@ describe('executor-qualified terminal registry', () => {
 			executor('local'),
 			{
 				...executor(remoteId, 'offline'),
-				machineServices: { files: false, git: false, gh: false, terminals: false },
+				machineServices: { files: false, git: false, gh: false, terminals: false, directoryCreation: false },
 			},
 		]);
 		expect(registry.sessions[id].attachmentState).toBe('unavailable');

@@ -16,7 +16,7 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
-	import { getTransientLayers } from '$lib/context';
+	import { getExecutors, getTransientLayers } from '$lib/context';
 	import { DirectoryBrowserState } from '$lib/project-paths/directory-browser-state.svelte.js';
 	import { splitTypedDirectoryPath } from '$lib/project-paths/directory-location.js';
 	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
@@ -48,6 +48,9 @@
 		isMobile,
 	}: DirectoryBrowserProps = $props();
 	const transientLayers = getTransientLayers();
+	const executors = getExecutors();
+	// An executor that cannot create directories safely does not offer the controls.
+	const supportsCreation = $derived(executors.directoryCreationAvailable(executorId));
 	const openedFrom =
 		typeof document !== 'undefined' && document.activeElement instanceof HTMLElement
 			? document.activeElement
@@ -74,6 +77,9 @@
 		},
 		get confirmsSelection() {
 			return isMobile;
+		},
+		get supportsCreation() {
+			return supportsCreation;
 		},
 		onSelect: (path) => onSelect(path),
 		onClose: () => onClose(),
@@ -417,16 +423,18 @@
 						{selectedPath.parent}<span class="text-foreground">{selectedPath.leaf}</span>
 					</p>
 					<div class="flex gap-2">
-						<Button
-							bind:ref={newDirectoryButton}
-							variant="outline"
-							class="h-12 shrink-0 px-3 text-sm"
-							disabled={!browser.canCreate}
-							onclick={() => browser.startCreation()}
-						>
-							<FolderPlus aria-hidden="true" />
-							{m.chat_directory_browser_new_directory()}
-						</Button>
+						{#if supportsCreation}
+							<Button
+								bind:ref={newDirectoryButton}
+								variant="outline"
+								class="h-12 shrink-0 px-3 text-sm"
+								disabled={!browser.canCreate}
+								onclick={() => browser.startCreation()}
+							>
+								<FolderPlus aria-hidden="true" />
+								{m.chat_directory_browser_new_directory()}
+							</Button>
+						{/if}
 						<Button
 							bind:ref={confirmButton}
 							class="h-12 min-w-0 flex-1 px-3 text-sm"
@@ -466,16 +474,18 @@
 	>
 		<div class="flex shrink-0 items-center gap-2 border-b border-border py-1 pl-2 pr-1">
 			{@render breadcrumbTrail()}
-			<button
-				type="button"
-				disabled={!browser.canCreate}
-				onclick={() => browser.startCreation()}
-				title={m.chat_directory_browser_new_directory()}
-				aria-label={m.chat_directory_browser_new_directory()}
-				class="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-			>
-				<FolderPlus class="size-4" aria-hidden="true" />
-			</button>
+			{#if supportsCreation}
+				<button
+					type="button"
+					disabled={!browser.canCreate}
+					onclick={() => browser.startCreation()}
+					title={m.chat_directory_browser_new_directory()}
+					aria-label={m.chat_directory_browser_new_directory()}
+					class="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+				>
+					<FolderPlus class="size-4" aria-hidden="true" />
+				</button>
+			{/if}
 		</div>
 
 		{#if browser.creation}

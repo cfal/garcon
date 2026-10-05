@@ -447,7 +447,7 @@ describe('NewChatFormState', () => {
 			{
 				...remoteExecutor,
 				projectBasePath: '/same',
-				machineServices: { files: true, git: false, gh: false, terminals: false },
+				machineServices: { files: true, git: false, gh: false, terminals: false, directoryCreation: true },
 			},
 		]);
 		const local = deferred<Awaited<ReturnType<typeof browseDirectory>>>();

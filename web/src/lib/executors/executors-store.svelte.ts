@@ -18,7 +18,8 @@ const localFallback: readonly ExecutorSnapshot[] = [
 		instanceId: null,
 		projectBasePath: null,
 		lastError: null,
-		machineServices: { files: true, git: true, gh: true, terminals: true },
+		// Creation stays hidden until the controller reports what Local supports.
+		machineServices: { files: true, git: true, gh: true, terminals: true, directoryCreation: false },
 	},
 ];
 
@@ -57,6 +58,10 @@ export class ExecutorsStore {
 
 	filesAvailable(id?: string | null): boolean {
 		return this.isReady(id) && this.get(id)?.machineServices.files === true;
+	}
+
+	directoryCreationAvailable(id?: string | null): boolean {
+		return this.filesAvailable(id) && this.get(id)?.machineServices.directoryCreation === true;
 	}
 
 	gitAvailable(id?: string | null): boolean {

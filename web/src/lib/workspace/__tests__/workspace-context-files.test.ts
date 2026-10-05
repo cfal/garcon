@@ -25,7 +25,7 @@ describe('executor-owned workspace files', () => {
 		}
 		const remote = {
 			...remoteExecutor,
-			machineServices: { files: true, git: false, gh: false, terminals: false },
+			machineServices: { files: true, git: false, gh: false, terminals: false, directoryCreation: true },
 		};
 		const executors = new ExecutorsStore(async () => [localExecutor, remote]);
 		executors.applySnapshot([localExecutor, remote]);

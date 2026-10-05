@@ -16,7 +16,7 @@ const snapshot: ExecutorSnapshot = { id, label: 'Worker', kind: 'remote', enable
   allowControllerCli: true, allowExecutorManagement: false, direction: 'executor-connects', availability: 'ready',
   instanceId: 'synthetic', projectBasePath: '/workspace', lastError: null,
   bulk: { availability: 'ready', lastError: null },
-  machineServices: { files: true, git: true, gh: true, terminals: true } };
+  machineServices: { files: true, git: true, gh: true, terminals: true, directoryCreation: true } };
 const connection = { connectionUrl: `wss://worker.test/executor#secret=${'A'.repeat(43)}`, noTls: false, allowUnverifiedTls: false };
 const providers = [{ id: 'synthetic-profile', label: 'Profile', executorIds: [id] }];
 

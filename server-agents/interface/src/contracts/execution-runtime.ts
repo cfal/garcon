@@ -44,6 +44,8 @@ export interface ExecutorInfo {
     readonly git: boolean;
     readonly gh: boolean;
     readonly terminals: boolean;
+    /** Whether the file service can create directories without a path-based race. */
+    readonly directoryCreation: boolean;
   };
 }
 

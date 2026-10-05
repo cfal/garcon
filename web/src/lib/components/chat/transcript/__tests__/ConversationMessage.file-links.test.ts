@@ -34,7 +34,7 @@ describe('ConversationMessage file links', () => {
 				localExecutor,
 				{
 					...remoteExecutor,
-					machineServices: { files: true, git: false, gh: false, terminals: false },
+					machineServices: { files: true, git: false, gh: false, terminals: false, directoryCreation: true },
 				},
 			],
 		});
@@ -63,7 +63,7 @@ describe('ConversationMessage file links', () => {
 				{
 					...remoteExecutor,
 					availability: 'offline',
-					machineServices: { files: true, git: false, gh: false, terminals: false },
+					machineServices: { files: true, git: false, gh: false, terminals: false, directoryCreation: true },
 				},
 			],
 		});
@@ -350,7 +350,7 @@ describe('ConversationMessage local images', () => {
 					localExecutor,
 					{
 						...remoteExecutor,
-						machineServices: { files: true, git: false, gh: false, terminals: false },
+						machineServices: { files: true, git: false, gh: false, terminals: false, directoryCreation: true },
 					},
 				],
 			});

@@ -56,6 +56,8 @@ export interface ExecutorSnapshot {
     readonly git: boolean;
     readonly gh: boolean;
     readonly terminals: boolean;
+    /** Whether the executor's file service can create directories. */
+    readonly directoryCreation: boolean;
   };
 }
 
@@ -159,8 +161,9 @@ export function parseExecutorSnapshot(value: unknown): ExecutorSnapshot | null {
     ? value.kind !== 'local' || value.direction !== null || !value.enabled
     : value.kind !== 'remote' || (value.direction !== 'executor-connects' && value.direction !== 'controller-connects')) return null;
   const services = value.machineServices;
-  if (!isRecord(services) || !hasOnlyKeys(services, ['files', 'git', 'gh', 'terminals'])
-    || typeof services.files !== 'boolean' || typeof services.git !== 'boolean' || typeof services.gh !== 'boolean' || typeof services.terminals !== 'boolean') return null;
+  if (!isRecord(services) || !hasOnlyKeys(services, ['files', 'git', 'gh', 'terminals', 'directoryCreation'])
+    || typeof services.files !== 'boolean' || typeof services.git !== 'boolean' || typeof services.gh !== 'boolean' || typeof services.terminals !== 'boolean'
+    || typeof services.directoryCreation !== 'boolean') return null;
   if (!isExecutorError(value.lastError)) return null;
   if (value.kind === 'local') {
     if (value.bulk !== null) return null;

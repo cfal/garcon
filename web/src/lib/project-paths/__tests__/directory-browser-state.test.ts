@@ -521,6 +521,19 @@ describe('DirectoryBrowserState creating a directory', () => {
 		}
 	});
 
+	it('offers and starts no creation on an executor that cannot create directories', async () => {
+		const sheet = open({ currentPath: '/repo', confirmsSelection: true, supportsCreation: false });
+		await settle();
+		expect(sheet.browser.canConfirm).toBe(true);
+		expect(sheet.browser.canCreate).toBe(false);
+		sheet.browser.filter = 'fresh';
+		expect(sheet.browser.suggestedName).toBeNull();
+		sheet.browser.startCreation('fresh');
+		expect(sheet.browser.creation).toBeNull();
+		expect(await sheet.browser.submitCreation()).toBe(false);
+		expect(createDirectory).not.toHaveBeenCalled();
+	});
+
 	it('suggests only a creatable name that no listed directory has', async () => {
 		const sheet = open({ currentPath: '/repo', confirmsSelection: true });
 		expect(sheet.browser.suggestedName).toBeNull();

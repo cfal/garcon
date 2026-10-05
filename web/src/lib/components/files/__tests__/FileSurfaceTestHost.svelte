@@ -3,7 +3,7 @@
 	import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 	setExecutorsTestContext([
 		localExecutor,
-		{ ...remoteExecutor, machineServices: { files: true, git: false, gh: false, terminals: false } },
+		{ ...remoteExecutor, machineServices: { files: true, git: false, gh: false, terminals: false, directoryCreation: true } },
 	]);
 	import { onDestroy, onMount, untrack } from 'svelte';
 	import {

@@ -75,7 +75,7 @@ test('public snapshots exclude credentials and preserve unavailable remote targe
     id: remoteId, label: 'Worker', enabled: true, kind: 'remote', direction: 'executor-connects',
     availability: 'offline', instanceId: null, projectBasePath: null, lastError: null,
     bulk: { availability: 'offline', lastError: null },
-    machineServices: { files: false, git: false, gh: false, terminals: false },
+    machineServices: { files: false, git: false, gh: false, terminals: false, directoryCreation: false },
     allowControllerCli: false, allowExecutorManagement: false,
   };
   expect(parseExecutors([remote])).toEqual([remote]);
@@ -90,6 +90,11 @@ test('public snapshots exclude credentials and preserve unavailable remote targe
   }
   const message = new ExecutorsChangedMessage([remote]);
   expect(parseServerWsMessage(JSON.parse(JSON.stringify(message)))).toEqual(message);
+  const { directoryCreation, ...withoutDirectoryCreation } = remote.machineServices;
+  expect(directoryCreation).toBe(false);
+  for (const machineServices of [withoutDirectoryCreation, { ...remote.machineServices, directoryCreation: 'yes' }]) {
+    expect(parseExecutors([{ ...remote, machineServices }])).toBeNull();
+  }
   for (const extra of [{ secret: 'hidden' }, { connectionUrl: 'hidden' }]) {
     expect(parseExecutors([{ ...remote, ...extra }])).toBeNull();
     expect(parseServerWsMessage({ type: 'executors-changed', executors: [{ ...remote, ...extra }] })).toBeNull();

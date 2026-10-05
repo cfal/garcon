@@ -275,7 +275,7 @@ export class RemoteExecutorClient implements ExecutionRuntimeApi {
     const { info, integrations } = await rpc.call('', 'executor.describe', null);
     if (info.executorId !== this.id || transport.executorId !== this.id) throw new ExecutorConfigurationError(`Executor identity mismatch: worker serves ${info.executorId}; restart the worker to serve ${this.id}`);
     if (typeof info.projectBasePath !== 'string' || !info.projectBasePath) throw new ExecutorConfigurationError('Executor project base is missing');
-    if (!info.services || (['files', 'git', 'gh', 'terminals'] as const).some(key => typeof info.services[key] !== 'boolean')) throw new ExecutorConfigurationError('Executor machine capabilities are invalid');
+    if (!info.services || (['files', 'git', 'gh', 'terminals', 'directoryCreation'] as const).some(key => typeof info.services[key] !== 'boolean')) throw new ExecutorConfigurationError('Executor machine capabilities are invalid');
     const manifests = new Map<string, IntegrationManifest>();
     for (const manifest of integrations) {
       if (manifest.scope.executorId !== info.executorId || manifest.scope.instanceId !== info.instanceId

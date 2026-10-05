@@ -197,6 +197,27 @@ it('ignores a creation that settles after the popover closed', async () => {
 	opener.remove();
 });
 
+it.each([{ isMobile: false }, { isMobile: true }])(
+	'offers no creation on an executor that cannot create directories (mobile: $isMobile)',
+	async ({ isMobile }) => {
+		browseTree();
+		render(DirectoryBrowserTestHost, {
+			executorId: 'local',
+			executorContextKey: 'instance-1',
+			basePath: '/repo',
+			currentPath: isMobile ? '/repo/alpha/missing' : '/repo/alpha/missing-',
+			isMobile,
+			localDirectoryCreation: false,
+			onSelect: vi.fn(),
+			onClose: vi.fn(),
+		});
+		expect(await screen.findByText(/No directories match "missing/)).toBeTruthy();
+		expect(screen.queryByRole('button', { name: 'New directory' })).toBeNull();
+		expect(screen.queryByRole('button', { name: /Create directory/ })).toBeNull();
+		expect(createDirectory).not.toHaveBeenCalled();
+	},
+);
+
 describe('mobile directory sheet', () => {
 	it('opens on the field directory and selects only when confirmed', async () => {
 		browseTree();

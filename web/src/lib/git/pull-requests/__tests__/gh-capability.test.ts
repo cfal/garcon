@@ -114,7 +114,7 @@ describe('GhCapabilityStore', () => {
 		const executors = new ExecutorsStore();
 		const local = {
 			...localExecutor,
-			machineServices: { files: true, git: true, gh: true, terminals: true },
+			machineServices: { files: true, git: true, gh: true, terminals: true, directoryCreation: true },
 		};
 		const remote = { ...remoteExecutor, machineServices: local.machineServices };
 		executors.applySnapshot([local, remote]);

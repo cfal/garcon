@@ -1,44 +1,48 @@
-import { constants, promises as fs } from 'node:fs';
+import { constants, existsSync, promises as fs } from 'node:fs';
 import path from 'node:path';
+import { DomainError } from '../../common/domain-error.js';
 import { hasNodeErrorCode } from '../../common/errors.js';
-import { assertRealWithinBase } from '../../common/path-boundary.js';
 import { fileRevisionConflict } from './errors.js';
 
 // Linux names an open descriptor by a path the kernel resolves to the pinned
 // directory itself, without walking the directory's original path again.
-const DESCRIPTOR_PATHS = '/proc/self/fd';
+const LINUX_DESCRIPTOR_PATHS = '/proc/self/fd';
 
 /**
- * Creates one child of `parent`, the canonical path of a directory inside
- * `root`, and returns the child's path. On Linux the parent is opened and the
- * child is created through that descriptor, so replacing a path component with
- * a link after validation cannot redirect the creation. Other platforms cannot
- * create relative to a descriptor; there the parent is resolved again
- * immediately before creating, which narrows that window without closing it.
+ * Returns the directory whose entries name this process's open descriptors, or
+ * null where the system has none. Creating a directory safely needs one: this
+ * runtime has no descriptor-relative mkdir, and a path-based mkdir can be
+ * redirected outside the project base by swapping a path component for a link.
  */
-export async function createChildDirectory(root: string, parent: string, name: string): Promise<string> {
-  const target = path.join(parent, name);
-  if (process.platform === 'linux' && await createThroughDescriptor(parent, name)) return target;
-  if (await assertRealWithinBase(root, parent) !== parent) throw fileRevisionConflict();
-  await fs.mkdir(target);
-  return target;
+export function descriptorPathsDirectory(): string | null {
+  return process.platform === 'linux' && existsSync(LINUX_DESCRIPTOR_PATHS) ? LINUX_DESCRIPTOR_PATHS : null;
 }
 
-// Reports false when this system has no descriptor paths to create through.
-async function createThroughDescriptor(parent: string, name: string): Promise<boolean> {
+export function directoryCreationUnsupported(): DomainError {
+  return new DomainError('OPERATION_UNSUPPORTED', 'This executor cannot create directories', 501);
+}
+
+/**
+ * Creates one child of `parent`, the canonical path of a validated directory,
+ * and returns the child's path. The parent is opened and the child is created
+ * through that descriptor, so replacing a path component with a link after
+ * validation cannot redirect the creation. There is no path-based fallback.
+ */
+export async function createChildDirectory(descriptorPaths: string, parent: string, name: string): Promise<string> {
   const handle = await fs.open(parent, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
   try {
-    const pinned = `${DESCRIPTOR_PATHS}/${handle.fd}`;
+    const pinned = `${descriptorPaths}/${handle.fd}`;
     let location: string;
     try { location = await fs.readlink(pinned); }
     catch (error) {
-      if (hasNodeErrorCode(error, 'ENOENT')) return false;
+      // The descriptor directory is not usable after all, so nothing is created.
+      if (hasNodeErrorCode(error, 'ENOENT')) throw directoryCreationUnsupported();
       throw error;
     }
     // The kernel reports where the opened directory is now. Anything but the
     // validated path means a component changed between validation and opening.
     if (location !== parent) throw fileRevisionConflict();
     await fs.mkdir(`${pinned}/${name}`);
-    return true;
+    return path.join(parent, name);
   } finally { await handle.close(); }
 }

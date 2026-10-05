@@ -227,7 +227,7 @@ describe('PermissionRequestRow', () => {
 			},
 			executors: [
 				localExecutor,
-				{ ...remoteExecutor, machineServices: { files: true, git: false, gh: false, terminals: false } },
+				{ ...remoteExecutor, machineServices: { files: true, git: false, gh: false, terminals: false, directoryCreation: true } },
 			],
 		});
 		await fireEvent.click(screen.getByRole('link', { name: 'Plan file' }));

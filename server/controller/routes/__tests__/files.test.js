@@ -1112,6 +1112,20 @@ describe('files route', () => {
     expect(await fs.readdir(outsidePath)).toEqual([]);
   });
 
+  it('reports creation as unsupported where it cannot be made safe, without touching the filesystem', async () => {
+    const mkdir = spyOn(fs, 'mkdir');
+    try {
+      for (const descriptorPaths of [null, path.join(outsidePath, 'no-descriptor-paths')]) {
+        const routes = createFilesRoutes({ getChat: () => null }, { descriptorPaths });
+        const response = await createDirectory(routes, projectPath, { name: 'child' });
+        expect(response.status).toBe(501);
+        expect((await response.json()).errorCode).toBe('OPERATION_UNSUPPORTED');
+      }
+      expect(mkdir).not.toHaveBeenCalled();
+    } finally { mkdir.mockRestore(); }
+    expect(await fs.readdir(projectPath)).toEqual(['src']);
+  });
+
   it('maps a denied creation without reporting success', async () => {
     const routes = createFilesRoutes({ getChat: () => null });
     const mkdir = spyOn(fs, 'mkdir').mockRejectedValueOnce(Object.assign(new Error('denied'), { code: 'EACCES' }));

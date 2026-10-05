@@ -122,6 +122,8 @@ for (const backend of ['remote-controller-dials', 'remote-executor-dials'] as co
       expect(await readdir(controllerBase)).toEqual(['shared name']);
       const { executors } = await fixture.client.get<{ executors: ExecutorSnapshot[] }>('/api/v1/executors');
       expect(executors.find((executor) => executor.id === executorId)?.availability).toBe('ready');
+      // These lanes run on Linux, where both the controller and the worker can create safely.
+      expect(executors.map((executor) => executor.machineServices.directoryCreation)).toEqual([true, true]);
     }, { executionBackend: backend, projectRoots: 'separate' });
   }, 60_000);
 }

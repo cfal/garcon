@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { runAgentIntegrationConformance } from '@garcon/server-agent-interface/testing';
 import { defaultAgentIntegrations } from '../../runtime/agents/default-agent-integrations.js';
 import { ExecutionRuntime } from '../../runtime/execution-runtime.js';
+import { descriptorPathsDirectory } from '../../runtime/files/directory-creation.js';
 import { runtimeAdapter, RUNTIME_BACKENDS } from './runtime-adapter.js';
 import { linkOptions } from './integration-fixture.js';
 
@@ -25,7 +26,7 @@ for (const backend of RUNTIME_BACKENDS) {
       const { executor } = adapter;
       const info = await executor.getInfo();
       expect(info.integrationIds).toHaveLength(defaultAgentIntegrations.length);
-      expect(info.services).toEqual({ files: true, git: true, gh: true, terminals: true });
+      expect(info.services).toEqual({ files: true, git: true, gh: true, terminals: true, directoryCreation: descriptorPathsDirectory() !== null });
       for (const integrationClass of defaultAgentIntegrations) {
         const integration = await executor.getAgentIntegration(integrationClass.integrationId);
         await runAgentIntegrationConformance({ integrationClass, integration });

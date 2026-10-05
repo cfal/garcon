@@ -4,6 +4,8 @@
 	import { WorkspaceInteractionGate } from '$lib/workspace/workspace-interaction-gate.svelte';
 	import { TransientLayerRegistry } from '$lib/workspace/transient-layers.svelte';
 	import ProjectPathField from '$lib/components/project-paths/ProjectPathField.svelte';
+	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
+	import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 
 	let {
 		value = $bindable(''),
@@ -12,6 +14,10 @@
 	}: ComponentProps<typeof ProjectPathField> & { onSubmit?: () => void } = $props();
 	let input = $state<HTMLInputElement | null>(null);
 	setTransientLayers(new TransientLayerRegistry(new WorkspaceInteractionGate()));
+	setExecutorsTestContext([
+		localExecutor,
+		{ ...remoteExecutor, machineServices: { ...localExecutor.machineServices } },
+	]);
 </script>
 
 <form

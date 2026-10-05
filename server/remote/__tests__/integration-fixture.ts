@@ -86,7 +86,7 @@ export function integrationFixture(projectBasePath = '/test-project', executorId
       return {
         executorId: scope.executorId, instanceId: scope.instanceId, integrationIds: ['test'],
         projectBasePath,
-        services: { files: false, git: false, gh: false, terminals: false },
+        services: { files: false, git: false, gh: false, terminals: false, directoryCreation: false },
       };
     },
     async getAgentIntegration() { return integration; },

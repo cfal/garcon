@@ -32,7 +32,7 @@ test.each(['stay', 'chat switch', 'reload'])('committed agent choices survive na
           if (url.pathname !== '/api/v1/executors' || !response.ok) return response;
           const snapshot = await response.json() as { executors: ExecutorSnapshot[] };
           snapshot.executors = snapshot.executors.map(executor => executor.id === executorId
-            ? { ...executor, machineServices: { files: false, git: false, gh: false, terminals: false } }
+            ? { ...executor, machineServices: { files: false, git: false, gh: false, terminals: false, directoryCreation: false } }
             : executor);
           return new Response(JSON.stringify(snapshot), { headers: { 'content-type': 'application/json' } });
         },

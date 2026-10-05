@@ -5,7 +5,7 @@ import { inspectProjectDirectory } from '../../__tests__/project-inspector.js';
 
 export function createLocalFilesRoutes(
   registry: Parameters<typeof createFilesRoutes>[0],
-  options: Pick<FilesServiceOptions, 'resolveSaveTarget' | 'readDirectory'> = {},
+  options: Pick<FilesServiceOptions, 'resolveSaveTarget' | 'readDirectory' | 'descriptorPaths'> = {},
 ) {
   const files = new FilesService({
     executorId: 'local', projectBasePath: getProjectBasePath(), homeDirectory: getHomeDirectoryPath(), ...options,

@@ -25,6 +25,8 @@ export interface DirectoryBrowserStateOptions {
 	get basePath(): string;
 	/** Keeps navigation local until confirm() instead of publishing each step. */
 	get confirmsSelection(): boolean;
+	/** Whether the executor can create directories; the browser offers creation only then. */
+	get supportsCreation(): boolean;
 	onSelect(path: string): void;
 	onClose(): void;
 }
@@ -162,7 +164,7 @@ export class DirectoryBrowserState {
 
 	// Offers the name being looked for when no directory already has it.
 	readonly suggestedName = $derived.by((): string | null => {
-		if (this.listing.status !== 'ready' || this.creation) return null;
+		if (!this.canCreate || this.listing.status !== 'ready' || this.creation) return null;
 		const name = this.query.trim();
 		if (directoryNameProblem(name) !== null) return null;
 		return this.listing.entries.some((entry) => entry.name === name) ? null : name;
@@ -199,7 +201,7 @@ export class DirectoryBrowserState {
 	}
 
 	get canCreate(): boolean {
-		return this.canConfirm;
+		return this.#options.supportsCreation && this.canConfirm;
 	}
 
 	get creationName(): string {
