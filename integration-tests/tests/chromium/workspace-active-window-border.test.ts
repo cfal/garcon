@@ -72,24 +72,27 @@ async function measureWorkspaceGeometry(page: Page) {
     );
 }
 
-test("the local active-window border preserves geometry and only appears with multiple visible windows", async () => {
+test("the default active-window border preserves geometry, respects opt-out, and only appears with multiple visible windows", async () => {
   await withChromiumFixture(
     "workspace-active-border-preference",
     async (fixture) => {
       const { page } = fixture;
       const activeBorder = page.locator(BORDER);
       await openChat(fixture);
-      expect(await activeBorder.count()).toBe(0);
-      const before = await measureWorkspaceGeometry(page);
-      await toggleHighlight(page);
       await activeBorder.waitFor();
-      expect(await measureWorkspaceGeometry(page)).toEqual(before);
+      expect(await activeBorder.count()).toBe(1);
+      const before = await measureWorkspaceGeometry(page);
       await captureScreenshot(page, "active-window-desktop");
 
       await toggleHighlight(page);
       expect(await activeBorder.count()).toBe(0);
       expect(await measureWorkspaceGeometry(page)).toEqual(before);
+      await page.reload();
+      await page.locator("[data-composer] textarea").waitFor();
+      expect(await activeBorder.count()).toBe(0);
       await toggleHighlight(page);
+      await activeBorder.waitFor();
+      expect(await measureWorkspaceGeometry(page)).toEqual(before);
       await page.reload();
       await activeBorder.waitFor();
       expect(
@@ -183,7 +186,7 @@ test("one-pixel active borders cover shared separators across themes, nested spl
       await page.setViewportSize({ width: 1440, height: 900 });
       await initializeFixtureRepository(fixture.integration.dirs.project);
       await openChat(fixture);
-      await toggleHighlight(page);
+      await activeBorder.waitFor();
       // Keeps half splits and 24px keyboard resize steps on whole pixel boundaries.
       const host = await page.locator(".workspace-host-region").boundingBox();
       expect(host).toEqual({ x: 320, y: 0, width: 1120, height: 900 });

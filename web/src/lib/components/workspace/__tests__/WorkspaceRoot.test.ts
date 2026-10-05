@@ -547,11 +547,12 @@ describe('WorkspaceRoot', () => {
 		expect(panel.getAttribute('aria-labelledby')).toBe('window-main-tab-chat-view:window-main');
 		expect(document.getElementById('window-main-tab-chat-view:window-main')).not.toBeNull();
 		expect(container.querySelector('[data-workspace-window-focus-ring]')).toBeNull();
-		expect(container.querySelector('[data-workspace-window-active-border]')).toBeNull();
+		expect(container.querySelector('[data-workspace-window-active-border]')).not.toBeNull();
 	});
 
 	it('moves the optional border without remounting windows or the composer', async () => {
 		const { localSettings, workspace } = installContext();
+		localSettings.set('highlightActiveWindow', false);
 		const { container } = renderRoot();
 		const windows = [...container.querySelectorAll('[data-workspace-window-id]')];
 		const composer = container.querySelector('[data-workspace-live-chat-body]');
@@ -577,7 +578,6 @@ describe('WorkspaceRoot', () => {
 
 	it('suppresses the enabled border in fullscreen, mobile, and the last remaining window', async () => {
 		const { localSettings, workspace } = installContext();
-		localSettings.set('highlightActiveWindow', true);
 		const { container, rerender } = renderRoot();
 		const border = () => container.querySelector('[data-workspace-window-active-border]');
 		expect(border()).not.toBeNull();

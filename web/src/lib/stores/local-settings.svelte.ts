@@ -206,7 +206,7 @@ type BooleanLocalSettingKey =
 const DEFAULTS: LocalSettingsSnapshot = {
 	themePreference: DEFAULT_THEME_PREFERENCE,
 	overlayBackdropEffects: true,
-	highlightActiveWindow: false,
+	highlightActiveWindow: true,
 	autoExpandTools: false,
 	combineToolUseMessages: true,
 	alwaysExpandCliMessages: false,
