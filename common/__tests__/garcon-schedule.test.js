@@ -1,6 +1,27 @@
 import { describe, expect, it } from 'bun:test';
-import { garconScheduleActionContent, parseGarconSchedule, parseGarconScheduleAction, parseGarconScheduleInstant } from '../garcon-schedule.ts';
+import {
+  garconScheduleActionContent, parseGarconSchedule, parseGarconScheduleAction, parseGarconScheduleInstant,
+  scheduledPromptLabel,
+} from '../garcon-schedule.ts';
+import { SCHEDULED_PROMPT_LABEL_MAX_LENGTH } from '../scheduled-prompts.ts';
 import { parseScheduleDuration, parseScheduleInterval } from '../schedule-duration.ts';
+
+describe('scheduled prompt label', () => {
+  it('uses the first line of the prompt or of a schedule action body', () => {
+    expect(scheduledPromptLabel('  Review the build  \r\nSecond line')).toBe('Review the build');
+    expect(scheduledPromptLabel(garconScheduleActionContent('Review A & B\nSecond line'))).toBe('Review A & B');
+    expect(scheduledPromptLabel('<garcon-schedule-action />')).toBe('');
+    expect(scheduledPromptLabel('<garcon-schedule-action>\nMalformed &unknown;\n</garcon-schedule-action>'))
+      .toBe('<garcon-schedule-action>');
+  });
+
+  it('bounds the label without leaving half of a surrogate pair', () => {
+    expect(scheduledPromptLabel('x'.repeat(SCHEDULED_PROMPT_LABEL_MAX_LENGTH + 50)))
+      .toBe('x'.repeat(SCHEDULED_PROMPT_LABEL_MAX_LENGTH));
+    const bounded = scheduledPromptLabel(`${'x'.repeat(SCHEDULED_PROMPT_LABEL_MAX_LENGTH - 1)}\u{1F600} tail`);
+    expect(bounded).toBe('x'.repeat(SCHEDULED_PROMPT_LABEL_MAX_LENGTH - 1));
+  });
+});
 
 describe('same-chat schedule grammar', () => {
   it.each(['1m', '59m', '60m', '90m', '1h30m', '1d', '366d', '3650d'])('accepts recurring %s with a distinct default first-run form', (every) => {

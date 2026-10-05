@@ -158,6 +158,7 @@ describe('ScheduledPromptRow', () => {
 		const lastRun: ScheduledPromptRunLogEntry = {
 			at: new Date(2030, 0, 1, 8, 0, 0, 0).toISOString(),
 			scheduledPromptId: 'prompt-1',
+			promptLabel: 'Review the build',
 			outcome: 'created-chat',
 			chatId: '456',
 			message: 'Prompt executed successfully; created chat 456.',
@@ -186,6 +187,7 @@ describe('ScheduledPromptRow', () => {
 			lastRun: {
 				at: new Date(2029, 11, 31, 8, 0, 0, 0).toISOString(),
 				scheduledPromptId: 'prompt-1',
+				promptLabel: 'Review the build',
 				outcome: 'failed',
 				chatId: null,
 				message: 'Prompt failed: Chat is unavailable.',

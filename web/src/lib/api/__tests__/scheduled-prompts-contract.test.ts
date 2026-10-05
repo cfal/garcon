@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { scheduleChatPrompt } from '../scheduled-prompts';
 import {
+	SCHEDULED_PROMPT_LABEL_MAX_LENGTH,
 	normalizeScheduledPromptTarget,
 	normalizeScheduledPromptsSnapshot,
 } from '$shared/scheduled-prompts';
@@ -146,28 +147,38 @@ describe('scheduled prompt run log normalization', () => {
 	const entry = {
 		at: '2030-01-01T09:00:00.000Z',
 		scheduledPromptId: 'prompt-in',
+		promptLabel: 'Continue the work',
 		outcome: 'created-chat',
 		chatId: '123',
 		message: 'Prompt executed successfully; created chat 123.',
 	};
 
 	it('keeps typed entries and drops malformed or legacy string entries', () => {
+		const schedulerEntry = {
+			...entry,
+			scheduledPromptId: null,
+			promptLabel: null,
+			chatId: null,
+			outcome: 'failed',
+		};
 		const snapshot = normalizeScheduledPromptsSnapshot({
 			revision: 1,
 			prompts: [scheduledPrompt],
 			runLog: [
 				entry,
-				{ ...entry, scheduledPromptId: null, chatId: null, outcome: 'failed' },
+				schedulerEntry,
+				{ ...entry, promptLabel: '' },
 				'[2030-01-01T09:00:00.000Z] Prompt sent to chat 123.',
 				{ ...entry, outcome: 'unknown' },
 				{ ...entry, at: 'invalid' },
 				{ ...entry, chatId: 42 },
+				{ ...entry, promptLabel: null },
+				{ ...entry, promptLabel: undefined },
+				{ ...entry, promptLabel: 'x'.repeat(SCHEDULED_PROMPT_LABEL_MAX_LENGTH + 1) },
+				{ ...schedulerEntry, promptLabel: 'Continue the work' },
 			],
 		});
 
-		expect(snapshot?.runLog).toEqual([
-			entry,
-			{ ...entry, scheduledPromptId: null, chatId: null, outcome: 'failed' },
-		]);
+		expect(snapshot?.runLog).toEqual([entry, schedulerEntry, { ...entry, promptLabel: '' }]);
 	});
 });

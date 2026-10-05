@@ -4,6 +4,7 @@ import {
 	recurringCadenceLabel,
 	scheduledInstantLabel,
 	scheduledPromptTitle,
+	scheduledRunSourceLabel,
 	scheduledRunOutcomeLabel,
 	scheduledRunOutcomeTone,
 } from '../schedule-labels';
@@ -29,6 +30,22 @@ describe('schedule labels', () => {
 		expect(scheduledPromptTitle('  Review the build  \nSecond line')).toBe('Review the build');
 		expect(scheduledPromptTitle('\nSecond line')).toBe('Untitled prompt');
 		expect(scheduledPromptTitle('<garcon-schedule-action />')).toBe('Scheduled action');
+	});
+
+	it('names a run from its recorded label rather than the current prompt', () => {
+		const run = {
+			at: '2030-01-01T09:00:00.000Z',
+			scheduledPromptId: 'prompt-1',
+			promptLabel: 'Review the build',
+			outcome: 'sent' as const,
+			chatId: '123',
+			message: 'Prompt sent to chat 123.',
+		};
+		expect(scheduledRunSourceLabel(run)).toBe('Review the build');
+		expect(scheduledRunSourceLabel({ ...run, promptLabel: '' })).toBe('Scheduled action');
+		expect(scheduledRunSourceLabel({ ...run, scheduledPromptId: null, promptLabel: null })).toBe(
+			'Scheduler',
+		);
 	});
 
 	it('labels common cadences by name', () => {

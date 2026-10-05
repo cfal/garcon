@@ -3,36 +3,26 @@
 	import { Button } from '$lib/components/ui/button';
 	import {
 		scheduledInstantLabel,
-		scheduledPromptTitle,
 		scheduledRunOutcomeLabel,
+		scheduledRunSourceLabel,
 	} from '$lib/scheduling/schedule-labels';
 	import { formatScheduledInstant } from '$lib/scheduling/local-schedule';
-	import type { ScheduledPrompt, ScheduledPromptRunLogEntry } from '$shared/scheduled-prompts';
+	import type { ScheduledPromptRunLogEntry } from '$shared/scheduled-prompts';
 	import ScheduledRunOutcomeIcon from './ScheduledRunOutcomeIcon.svelte';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface Props {
 		open: boolean;
 		entries: ScheduledPromptRunLogEntry[];
-		prompts: ScheduledPrompt[];
 		currentTime: Date;
 		openableChatId: (chatId: string | null) => string | null;
 		onOpenChat: (chatId: string) => void;
 		onClose: () => void;
 	}
 
-	let { open, entries, prompts, currentTime, openableChatId, onOpenChat, onClose }: Props =
-		$props();
+	let { open, entries, currentTime, openableChatId, onOpenChat, onClose }: Props = $props();
 
-	const titleByPromptId = $derived(
-		new Map(prompts.map((scheduledPrompt) => [scheduledPrompt.id, scheduledPromptTitle(scheduledPrompt.prompt)])),
-	);
 	const newestFirst = $derived([...entries].reverse());
-
-	function sourceLabel(entry: ScheduledPromptRunLogEntry): string {
-		if (!entry.scheduledPromptId) return m.scheduled_prompts_run_log_scheduler();
-		return titleByPromptId.get(entry.scheduledPromptId) ?? m.scheduled_prompts_run_log_removed_prompt();
-	}
 </script>
 
 <Dialog.Root {open} onOpenChange={(value) => !value && onClose()}>
@@ -57,7 +47,7 @@
 								<p class="text-sm font-medium text-foreground">
 									{scheduledRunOutcomeLabel(entry.outcome)}
 								</p>
-								<p class="truncate text-xs text-foreground">{sourceLabel(entry)}</p>
+								<p class="truncate text-xs text-foreground">{scheduledRunSourceLabel(entry)}</p>
 								{#if showDetail}
 									<p class="break-words text-xs text-muted-foreground">{entry.message}</p>
 								{/if}

@@ -115,6 +115,7 @@ describe('ScheduledPromptsSection', () => {
 		const run = (overrides: Partial<ScheduledPromptRunLogEntry>): ScheduledPromptRunLogEntry => ({
 			at: '2030-01-01T09:00:00.000Z',
 			scheduledPromptId: 'local-new',
+			promptLabel: 'Local new chat',
 			outcome: 'failed',
 			chatId: null,
 			message: 'Prompt failed: Chat is unavailable.',

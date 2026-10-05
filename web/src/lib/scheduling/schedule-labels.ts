@@ -1,5 +1,8 @@
-import { parseGarconScheduleAction } from '$shared/garcon-schedule';
-import type { ScheduledPromptRunOutcome } from '$shared/scheduled-prompts';
+import { parseGarconScheduleAction, scheduledPromptLabel } from '$shared/garcon-schedule';
+import type {
+	ScheduledPromptRunLogEntry,
+	ScheduledPromptRunOutcome,
+} from '$shared/scheduled-prompts';
 import * as m from '$lib/paraglide/messages.js';
 import {
 	formatScheduledInstant,
@@ -14,9 +17,20 @@ const MINUTES_PER_WEEK = 7 * MINUTES_PER_DAY;
 export type ScheduledRunTone = 'success' | 'warning' | 'error';
 
 export function scheduledPromptTitle(prompt: string): string {
-	const action = parseGarconScheduleAction(prompt);
-	if (action) return action.body.split(/\r?\n/, 1)[0]?.trim() || m.scheduled_prompts_action();
-	return prompt.split(/\r?\n/, 1)[0]?.trim() || m.scheduled_prompts_untitled();
+	return (
+		scheduledPromptLabel(prompt) ||
+		(parseGarconScheduleAction(prompt)
+			? m.scheduled_prompts_action()
+			: m.scheduled_prompts_untitled())
+	);
+}
+
+// Names a run from the label recorded with it, so the entry keeps its name after the
+// prompt is edited or removed. A stored prompt always has text, so an empty label
+// means a schedule action without a body.
+export function scheduledRunSourceLabel(entry: ScheduledPromptRunLogEntry): string {
+	if (entry.promptLabel === null) return m.scheduled_prompts_run_log_scheduler();
+	return entry.promptLabel || m.scheduled_prompts_action();
 }
 
 export function recurringCadenceLabel(intervalMinutes: number): string {

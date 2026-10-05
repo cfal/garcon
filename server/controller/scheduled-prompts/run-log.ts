@@ -4,8 +4,15 @@ import {
   type ScheduledPromptRunOutcome,
 } from '../../../common/scheduled-prompts.js';
 
+// The prompt a run belongs to, captured when the run is recorded.
+export interface ScheduledPromptRunSource {
+  scheduledPromptId: string;
+  promptLabel: string;
+}
+
 export interface ScheduledPromptRunRecord {
-  scheduledPromptId: string | null;
+  // Null for scheduler-wide events that no single prompt owns.
+  source: ScheduledPromptRunSource | null;
   outcome: ScheduledPromptRunOutcome;
   chatId?: string | null;
   message: string;
@@ -19,7 +26,8 @@ export class ScheduledPromptRunLog {
     if (!message) return;
     const entry: ScheduledPromptRunLogEntry = {
       at: now.toISOString(),
-      scheduledPromptId: record.scheduledPromptId,
+      scheduledPromptId: record.source?.scheduledPromptId ?? null,
+      promptLabel: record.source?.promptLabel ?? null,
       outcome: record.outcome,
       chatId: record.chatId ?? null,
       message,

@@ -11,7 +11,7 @@ function nextRunAtWithBoundaryBuffer(now = Date.now()): string {
   return new Date(nextRunAt).toISOString();
 }
 
-test('scheduled prompts preview their schedule, report the last run, and open the chat it created', async () => {
+test('scheduled prompts preview their schedule, report runs under the label they ran with, and open the created chat', async () => {
   await withChromiumFixture('scheduled-prompt-runs', async ({ page, integration }, phase) => {
     const { client } = integration;
     const agent = integration.directAgents.openAi;
@@ -77,18 +77,41 @@ test('scheduled prompts preview their schedule, report the last run, and open th
     const createdChatId = run?.chatId;
     if (!createdChatId) throw new Error('The scheduled run did not report its chat');
 
-    phase('checking the run log');
+    phase('editing the prompt after it ran');
+    const ran = await client.getScheduledPrompts();
+    const saved = ran.prompts[0];
+    if (saved?.schedule.type !== 'recurring') throw new Error('The recurring prompt was not kept');
+    await client.put('/api/v1/scheduled-prompts', {
+      id: saved.id,
+      expectedRevision: ran.revision,
+      scheduledPrompt: {
+        schedule: {
+          type: 'recurring',
+          firstRunAtUtc: saved.schedule.nextRunAt,
+          intervalMinutes: saved.schedule.intervalMinutes,
+          endAtUtc: saved.schedule.endAt,
+        },
+        target: saved.target,
+        prompt: 'Triage overnight alerts.',
+      },
+    });
+    const editedRow = list.getByRole('article').filter({ hasText: 'Triage overnight alerts.' });
+    const editedLastRun = editedRow.locator('[data-slot="scheduled-prompt-last-run"]');
+    await browserExpect(editedLastRun).toContainText('Started a new chat');
+
+    phase('checking the run log keeps the label the run was recorded with');
     await list.getByRole('button', { name: 'Run Log', exact: true }).click();
     const runLog = page.getByRole('dialog', { name: 'Run Log', exact: true });
     const entry = runLog.locator('[data-slot="scheduled-run-entry"]');
     await browserExpect(entry).toHaveCount(1);
     await browserExpect(entry).toContainText('Started a new chat');
     await browserExpect(entry).toContainText('Summarize new error reports.');
+    await browserExpect(entry).not.toContainText('Triage overnight alerts.');
     await runLog.getByRole('button', { name: 'Close', exact: true }).first().click();
     await runLog.waitFor({ state: 'detached' });
 
     phase('opening the chat the run created');
-    await lastRun.getByRole('button', { name: 'Open chat', exact: true }).click();
+    await editedLastRun.getByRole('button', { name: 'Open chat', exact: true }).click();
     await list.waitFor({ state: 'detached' });
     await browserExpect(page).toHaveURL(new RegExp(`/chat/${createdChatId}$`));
   });

@@ -17,6 +17,7 @@ import {
   type ScheduledPromptsSnapshot,
   type UpdateScheduledPromptRequest,
 } from '../../../common/scheduled-prompts.js';
+import { scheduledPromptLabel } from '../../../common/garcon-schedule.js';
 import { parseScheduleDuration, scheduleInRunAt, SCHEDULE_IN_MAX_DELAY_MINUTES, type ScheduleDurationError } from '../../../common/schedule-duration.js';
 import { AtomicJsonWriteError } from '../../common/json-file-store.js';
 import type { AgentRegistryServiceContract } from '../agents/registry.js';
@@ -33,7 +34,11 @@ import {
   resolveNewChatPreambleSelection,
 } from '../preambles/selection.js';
 import type { ScheduledPromptDispatcher } from './dispatcher.js';
-import { ScheduledPromptRunLog, type ScheduledPromptRunRecord } from './run-log.js';
+import {
+  ScheduledPromptRunLog,
+  type ScheduledPromptRunRecord,
+  type ScheduledPromptRunSource,
+} from './run-log.js';
 import { ScheduledPromptDomainError, ScheduledPromptStore } from './store.js';
 
 const logger = createLogger('scheduled-prompts');
@@ -58,6 +63,13 @@ function sameUtcMinute(left: number, right: number): boolean {
 
 function nextMinute(now: Date): number {
   return Math.floor(now.getTime() / 60_000) * 60_000 + 60_000;
+}
+
+function runSource(scheduledPrompt: ScheduledPrompt): ScheduledPromptRunSource {
+  return {
+    scheduledPromptId: scheduledPrompt.id,
+    promptLabel: scheduledPromptLabel(scheduledPrompt.prompt),
+  };
 }
 
 function scheduleDurationDomainError(error: ScheduleDurationError): ScheduledPromptDomainError {
@@ -165,7 +177,7 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
         } catch (error) {
           logger.error('hourly reconciliation failed:', errorMessage(error));
           scheduler.#appendLog({
-            scheduledPromptId: null,
+            source: null,
             outcome: 'failed',
             message: `Prompt reconciliation failed: ${errorMessage(error)}.`,
           });
@@ -457,12 +469,15 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
           return claimed;
         });
         if (!claim) return;
+        // Names the run from the claimed prompt: a one-off or final occurrence is already
+        // gone from the store, and a later edit must not relabel this run.
+        const source = runSource(claim.scheduledPrompt);
         try {
           const outcome = await scheduler.deps.dispatcher.dispatch(claim.scheduledPrompt, expectedRunAt);
-          scheduler.#appendLog({ scheduledPromptId: scheduledPrompt.id, ...outcome }, false);
+          scheduler.#appendLog({ source, ...outcome }, false);
         } catch (error) {
           scheduler.#appendLog({
-            scheduledPromptId: scheduledPrompt.id,
+            source,
             outcome: 'failed',
             message: `Prompt failed: ${errorMessage(error)}.`,
           }, false);
@@ -471,7 +486,7 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
       } catch (error) {
         logger.error(`callback failed for prompt ${scheduledPrompt.id}:`, errorMessage(error));
         scheduler.#appendLog({
-          scheduledPromptId: scheduledPrompt.id,
+          source: runSource(scheduledPrompt),
           outcome: 'failed',
           message: `Prompt scheduler failure: ${errorMessage(error)}.`,
         });
@@ -486,7 +501,8 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
     });
     if (!result.changed) return;
     for (const event of result.events) {
-      this.deps.runLog.append({ scheduledPromptId: event.scheduledPromptId, outcome: 'missed', message: event.message }, now);
+      const source = { scheduledPromptId: event.scheduledPromptId, promptLabel: event.promptLabel };
+      this.deps.runLog.append({ source, outcome: 'missed', message: event.message }, now);
     }
     this.#rebuildJobs();
     this.#emitInvalidated('missed');

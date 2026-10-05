@@ -466,6 +466,7 @@ describe('scheduled prompt persistence', () => {
       events: [
         {
           scheduledPromptId: 'weekly',
+          promptLabel: 'Prompt weekly',
           message: 'Skipped 3 missed occurrences; next run is 2030-01-22T09:00:00.000Z.',
         },
       ],
@@ -781,16 +782,22 @@ describe('scheduled prompt process-local helpers', () => {
     const log = new ScheduledPromptRunLog();
     for (let index = 0; index < 205; index += 1) {
       log.append(
-        { scheduledPromptId: 'repeat', outcome: 'sent', chatId: '123', message: `entry\n${index}` },
+        {
+          source: { scheduledPromptId: 'repeat', promptLabel: 'Continue the work' },
+          outcome: 'sent',
+          chatId: '123',
+          message: `entry\n${index}`,
+        },
         new Date('2030-01-01T00:00:00.000Z'),
       );
     }
-    log.append({ scheduledPromptId: null, outcome: 'failed', message: ' \n ' });
+    log.append({ source: null, outcome: 'failed', message: ' \n ' });
     const entries = log.list();
     expect(entries).toHaveLength(200);
     expect(entries[0]).toEqual({
       at: '2030-01-01T00:00:00.000Z',
       scheduledPromptId: 'repeat',
+      promptLabel: 'Continue the work',
       outcome: 'sent',
       chatId: '123',
       message: 'entry 5',

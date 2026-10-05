@@ -2120,7 +2120,6 @@
 	"scheduled_prompts_preset_minutes": "{count} min",
 	"scheduled_prompts_preview_next_runs": "Next runs",
 	"scheduled_prompts_preview_runs": "Runs",
-	"scheduled_prompts_run_log_removed_prompt": "Removed prompt",
 	"scheduled_prompts_run_log_scheduler": "Scheduler",
 	"scheduled_prompts_schedule_end_before_start": "The end date must be on or after the first run.",
 	"scheduled_prompts_schedule_incomplete": "Choose a date and time.",

@@ -2,6 +2,7 @@ import { decodeGarconXmlText, escapeGarconXmlText, parseGarconCommandEnvelope } 
 import { normalizeGarconCommandBody } from './garcon-command-text.js';
 import { parseScheduleDuration, parseScheduleInterval } from './schedule-duration.js';
 import {
+  SCHEDULED_PROMPT_LABEL_MAX_LENGTH,
   SCHEDULED_PROMPT_MAX_LENGTH,
   scheduledPromptFitsRenderedLimit,
   type ScheduleForChatFirstRun,
@@ -79,4 +80,13 @@ export function parseGarconScheduleAction(content: string): { readonly body: str
   if (!content.startsWith(ACTION_OPEN) || !content.endsWith(ACTION_CLOSE)) return null;
   const body = decodeGarconXmlText(content.slice(ACTION_OPEN.length, -ACTION_CLOSE.length));
   return body === null ? null : { body: normalizeGarconCommandBody(body) };
+}
+
+// Names a scheduled prompt by the first line of its text, or of its schedule action's
+// body, bounded for display and for the run log. Empty only for an action without a body.
+export function scheduledPromptLabel(prompt: string): string {
+  const text = parseGarconScheduleAction(prompt)?.body ?? prompt;
+  const firstLine = text.split(/\r?\n/, 1)[0]?.trim() ?? '';
+  // Drops a surrogate half left dangling by the length bound.
+  return firstLine.slice(0, SCHEDULED_PROMPT_LABEL_MAX_LENGTH).replace(/[\uD800-\uDBFF]$/, '');
 }

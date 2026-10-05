@@ -259,7 +259,6 @@
 <ScheduledPromptRunLogDialog
 	open={runLogOpen}
 	entries={prompts.runLog}
-	prompts={prompts.prompts}
 	{currentTime}
 	{openableChatId}
 	{onOpenChat}
