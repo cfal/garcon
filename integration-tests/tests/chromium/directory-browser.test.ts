@@ -3,9 +3,11 @@ import { expect as browserExpect } from 'playwright/test';
 import { mkdir, readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
+import { descriptorPathsDirectory } from '../../../server/runtime/files/directory-creation.js';
 
 for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote-executor-dials'] as const) {
-  test(`directory browser selects and creates directories on the owning executor (${executionBackend})`, async () => {
+  // Creating needs executors that name open descriptors by path; elsewhere the picker hides the controls.
+  test.skipIf(descriptorPathsDirectory() === null)(`directory browser selects and creates directories on the owning executor (${executionBackend})`, async () => {
     await withChromiumFixture(`directory-browser-${executionBackend}`, async ({ page, context, integration, browserErrors, failedResponses }, phase) => {
       const root = integration.executionDirs.project;
       for (const name of ['alpha/nested', 'alpha/notes', 'beta']) await mkdir(join(root, name), { recursive: true });

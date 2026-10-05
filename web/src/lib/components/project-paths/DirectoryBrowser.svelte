@@ -50,7 +50,7 @@
 	const transientLayers = getTransientLayers();
 	const executors = getExecutors();
 	// An executor that cannot create directories safely does not offer the controls.
-	const supportsCreation = $derived(executors.directoryCreationAvailable(executorId));
+	const supportsCreation = $derived(executors.supportsDirectoryCreation(executorId));
 	const openedFrom =
 		typeof document !== 'undefined' && document.activeElement instanceof HTMLElement
 			? document.activeElement

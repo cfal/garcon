@@ -225,7 +225,12 @@ export class DirectoryBrowserState {
 
 	get canSubmitCreation(): boolean {
 		const creation = this.creation;
-		return creation !== null && !creation.submitting && this.#creationNameProblem === null;
+		return (
+			this.#options.supportsCreation &&
+			creation !== null &&
+			!creation.submitting &&
+			this.#creationNameProblem === null
+		);
 	}
 
 	/**

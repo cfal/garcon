@@ -48,6 +48,7 @@
     "test:transcript-inventory": "bun scripts/validate-transcript-ledger-v5-cases.js",
     "test:cli": "bun run --cwd cli test",
     "test:server": "bun test common/__tests__/*.test.js && bun test scripts/__tests__/*.test.js && bun scripts/run-test-files.js 'server-agents/**/__tests__/*.{test.js,test.ts}' && bun scripts/run-test-files.js 'server/**/__tests__/*.{test.js,test.ts}'",
+    "test:server:no-descriptor-paths": "bun test --preload ./scripts/test-preloads/no-descriptor-paths.ts server/runtime/files/__tests__/service.test.ts server/controller/routes/__tests__/files.test.js server/remote/__tests__/files-rpc.test.ts server/remote/__tests__/integration-conformance.test.ts",
     "test:integration": "bun run --cwd integration-tests test",
     "test:integration:server": "bun run --cwd integration-tests test:server",
     "test:integration:e2e": "bun run --cwd integration-tests test:e2e",

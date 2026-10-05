@@ -36,6 +36,11 @@ jobs:
       - name: Run server tests
         run: bun run test:server
 
+      # Runners have procfs; this repeats the file-service tests as a system
+      # without descriptor paths, where directory creation is unsupported.
+      - name: Run file-service tests without descriptor paths
+        run: bun run test:server:no-descriptor-paths
+
   transcript-search-scale-gate:
     runs-on: ubuntu-latest
     permissions:

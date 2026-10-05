@@ -1,7 +1,6 @@
 import { constants, existsSync, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { DomainError } from '../../common/domain-error.js';
-import { hasNodeErrorCode } from '../../common/errors.js';
 import { fileRevisionConflict } from './errors.js';
 
 // Linux names an open descriptor by a path the kernel resolves to the pinned
@@ -29,19 +28,14 @@ export function directoryCreationUnsupported(): DomainError {
  * validation cannot redirect the creation. There is no path-based fallback.
  */
 export async function createChildDirectory(descriptorPaths: string, parent: string, name: string): Promise<string> {
+  // A system that turns out not to name open descriptors creates nothing.
+  await fs.access(descriptorPaths).catch(() => { throw directoryCreationUnsupported(); });
   const handle = await fs.open(parent, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
   try {
     const pinned = `${descriptorPaths}/${handle.fd}`;
-    let location: string;
-    try { location = await fs.readlink(pinned); }
-    catch (error) {
-      // The descriptor directory is not usable after all, so nothing is created.
-      if (hasNodeErrorCode(error, 'ENOENT')) throw directoryCreationUnsupported();
-      throw error;
-    }
     // The kernel reports where the opened directory is now. Anything but the
     // validated path means a component changed between validation and opening.
-    if (location !== parent) throw fileRevisionConflict();
+    if (await fs.readlink(pinned) !== parent) throw fileRevisionConflict();
     await fs.mkdir(`${pinned}/${name}`);
     return path.join(parent, name);
   } finally { await handle.close(); }

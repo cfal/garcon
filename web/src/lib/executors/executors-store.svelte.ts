@@ -60,8 +60,9 @@ export class ExecutorsStore {
 		return this.isReady(id) && this.get(id)?.machineServices.files === true;
 	}
 
-	directoryCreationAvailable(id?: string | null): boolean {
-		return this.filesAvailable(id) && this.get(id)?.machineServices.directoryCreation === true;
+	/** A capability of the executor, not its readiness: controls stay in place across a reconnect. */
+	supportsDirectoryCreation(id?: string | null): boolean {
+		return this.get(id)?.machineServices.directoryCreation === true;
 	}
 
 	gitAvailable(id?: string | null): boolean {

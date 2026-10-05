@@ -12,7 +12,6 @@ import { IntegrationRegistry } from './agents/integration-registry.js';
 import { ProjectService } from './projects/project-service.js';
 import { discoverApiProviderModels } from './providers/discovery.js';
 import { FilesService } from './files/service.js';
-import { descriptorPathsDirectory } from './files/directory-creation.js';
 import { TerminalRuntime, type TerminalService } from './terminals/runtime.js';
 import { GitRuntime } from './git/runtime.js';
 
@@ -53,7 +52,7 @@ export class ExecutionRuntime implements ExecutionRuntimeApi {
       instanceId,
       projectBasePath: this.#projects.projectBasePath,
       integrationIds: Object.freeze(this.#registry.list().map((integration) => integration.descriptor.id)),
-      services: Object.freeze({ files: true, git: true, gh: true, terminals: true, directoryCreation: descriptorPathsDirectory() !== null }),
+      services: Object.freeze({ files: true, git: true, gh: true, terminals: true, directoryCreation: this.#files.canCreateDirectories }),
     });
   }
 

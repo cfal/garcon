@@ -7,6 +7,7 @@ import { createLocalFilesRoutes as createFilesRoutes } from './files-fixture.js'
 import createExecutorFilesRoutes from '../files.js';
 import { resetServerConfigForTests } from '../../config.js';
 import { resolveRealWithinBase } from '../../../common/path-boundary.ts';
+import { descriptorPathsDirectory } from '../../../runtime/files/directory-creation.ts';
 import {
   FILE_REVISION_HEADER,
   MAX_FILE_VIEW_BYTES,
@@ -1012,6 +1013,14 @@ describe('files route', () => {
     );
   });
 
+  // Creating needs a system that names open descriptors by path. Validation
+  // runs before any descriptor is used, so an injected location covers it elsewhere.
+  const creates = descriptorPathsDirectory() === null ? it.skip : it;
+  const validatingRoutes = () => createFilesRoutes(
+    { getChat: () => null },
+    { descriptorPaths: descriptorPathsDirectory() ?? '/garcon-injected-descriptor-paths' },
+  );
+
   function createDirectory(routes, parentPath, body, query = '') {
     const url = new URL(`http://localhost/api/v1/files/directories?path=${encodeURIComponent(parentPath)}${query}`);
     return routes['/api/v1/files/directories'].POST(
@@ -1020,7 +1029,7 @@ describe('files route', () => {
     );
   }
 
-  it('creates one directory inside an existing parent and lists it', async () => {
+  creates('creates one directory inside an existing parent and lists it', async () => {
     const routes = createFilesRoutes({ getChat: () => null });
     const parent = path.join(projectPath, 'src');
     const response = await createDirectory(routes, parent, { name: 'new project' });
@@ -1051,7 +1060,7 @@ describe('files route', () => {
     }
   });
 
-  it('reports an existing name without replacing it', async () => {
+  creates('reports an existing name without replacing it', async () => {
     const routes = createFilesRoutes({ getChat: () => null });
     for (const name of ['src', 'file.txt', 'dangling']) {
       await fs.writeFile(path.join(projectPath, 'file.txt'), 'kept');
@@ -1066,7 +1075,7 @@ describe('files route', () => {
   });
 
   it('rejects names that address anything but one new child', async () => {
-    const routes = createFilesRoutes({ getChat: () => null });
+    const routes = validatingRoutes();
     const names = ['', '.', '..', 'a/b', 'a\\b', '../escape', 'line\nbreak', 'nul\0byte', 'x'.repeat(256), 42, null];
     for (const name of names) {
       const response = await createDirectory(routes, projectPath, { name });
@@ -1078,7 +1087,7 @@ describe('files route', () => {
   });
 
   it('requires an existing parent directory inside the configured base', async () => {
-    const routes = createFilesRoutes({ getChat: () => null });
+    const routes = validatingRoutes();
     await fs.symlink(outsidePath, path.join(projectPath, 'outside-dir'), 'dir');
     const cases = [
       [outsidePath, 403, 'FILE_OUTSIDE_ROOT'],
@@ -1097,7 +1106,7 @@ describe('files route', () => {
   });
 
   it('takes the directory target only from the URL', async () => {
-    const routes = createFilesRoutes({ getChat: () => null });
+    const routes = validatingRoutes();
     for (const body of [{ name: 'child', path: outsidePath }, { name: 'child', parentPath: outsidePath }, { name: 'child', executorId: 'local' }]) {
       const response = await createDirectory(routes, projectPath, body);
       expect(response.status).toBe(400);
@@ -1126,7 +1135,7 @@ describe('files route', () => {
     expect(await fs.readdir(projectPath)).toEqual(['src']);
   });
 
-  it('maps a denied creation without reporting success', async () => {
+  creates('maps a denied creation without reporting success', async () => {
     const routes = createFilesRoutes({ getChat: () => null });
     const mkdir = spyOn(fs, 'mkdir').mockRejectedValueOnce(Object.assign(new Error('denied'), { code: 'EACCES' }));
     try {

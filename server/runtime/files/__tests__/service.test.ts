@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { FilesService } from '../service.js';
+import { descriptorPathsDirectory } from '../directory-creation.js';
 import type { ExecutionFilesService } from '@garcon/server-agent-interface';
 import { ExecutionRuntime } from '../../execution-runtime.js';
 import { runtimeAdapter, RUNTIME_BACKENDS } from '../../../remote/__tests__/runtime-adapter.js';
@@ -205,6 +206,17 @@ const target = () => ({ projectPath: path.join(directory, 'project'), filePath: 
     } finally { intercepted.mockRestore(); }
   });
 
+  it.skipIf(descriptorPathsDirectory() !== null)('reports creation as unsupported where this system cannot create safely', async () => {
+    const project = target().projectPath;
+    for (const request of [{ parentPath: project, name: 'created' }, { parentPath: project, name: '..' }, { parentPath: path.join(project, 'absent'), name: 'child' }]) {
+      await expect(service.createDirectory(request)).rejects.toMatchObject({ code: 'OPERATION_UNSUPPORTED', status: 501 });
+    }
+    expect((await runtime.getInfo()).services.directoryCreation).toBe(false);
+    expect(await fs.readdir(project)).toEqual(['file.txt']);
+  });
+
+  // Creating needs a system that names open descriptors by path.
+  describe.skipIf(descriptorPathsDirectory() === null)('directory creation', () => {
   it('creates one directory in its canonical parent and makes it browsable', async () => {
     const project = target().projectPath;
     await fs.symlink(project, path.join(directory, 'alias'));
@@ -245,7 +257,7 @@ const target = () => ({ projectPath: path.join(directory, 'project'), filePath: 
     } finally { await fs.rm(outside, { recursive: true, force: true }); }
   });
 
-  describe.skipIf(process.platform !== 'linux')('with a parent swapped for a link during creation', () => {
+  describe('with a parent swapped for a link during creation', () => {
     let outside: string;
     let parent: string;
     beforeEach(async () => {
@@ -322,6 +334,47 @@ const target = () => ({ projectPath: path.join(directory, 'project'), filePath: 
       expect(mkdir).toHaveBeenCalledTimes(1);
     } finally { mkdir.mockRestore(); }
     await expect(fs.stat(path.join(project, 'denied'))).rejects.toThrow();
+  });
+  });
+});
+
+// Validation runs before any descriptor is used, so an injected location
+// covers it on systems that cannot create.
+describe('directory creation validation', () => {
+  let base: string;
+  let outside: string;
+  let service: FilesService;
+  beforeEach(async () => {
+    base = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-files-validation-'));
+    outside = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-files-outside-'));
+    await fs.mkdir(path.join(base, 'project'));
+    await fs.writeFile(path.join(base, 'project', 'file.txt'), 'initial');
+    await fs.symlink(outside, path.join(base, 'project', 'escape'));
+    service = new FilesService({ executorId: 'synthetic-executor', projectBasePath: base, descriptorPaths: descriptorPathsDirectory() ?? '/garcon-injected-descriptor-paths' });
+  });
+  afterEach(async () => {
+    await fs.rm(base, { recursive: true, force: true });
+    await fs.rm(outside, { recursive: true, force: true });
+  });
+
+  it('rejects names and parents that cannot hold one new child, before creating anything', async () => {
+    const project = path.join(base, 'project');
+    const mkdir = spyOn(fs, 'mkdir');
+    try {
+      for (const name of ['', '.', '..', 'a/b', 'a\\b', '../child', 'tab\tname', 'x'.repeat(256)]) {
+        await expect(service.createDirectory({ parentPath: project, name })).rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 400 });
+      }
+      await expect(service.createDirectory({ parentPath: '', name: 'child' })).rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 400 });
+      for (const parentPath of [path.join(project, 'escape'), outside]) {
+        await expect(service.createDirectory({ parentPath, name: 'child' })).rejects.toMatchObject({ code: 'FILE_OUTSIDE_ROOT', status: 403 });
+      }
+      await expect(service.createDirectory({ parentPath: path.join(project, 'absent'), name: 'child' })).rejects.toMatchObject({ code: 'FILE_NOT_FOUND', status: 404 });
+      await expect(service.createDirectory({ parentPath: path.join(project, 'file.txt'), name: 'child' })).rejects.toMatchObject({ code: 'FILE_DIRECTORY_REQUIRED' });
+      await expect(service.createDirectory({ parentPath: project, name: 'cancelled' }, { signal: AbortSignal.abort() })).rejects.toThrow();
+      expect(mkdir).not.toHaveBeenCalled();
+    } finally { mkdir.mockRestore(); }
+    expect((await fs.readdir(project)).sort()).toEqual(['escape', 'file.txt']);
+    expect(await fs.readdir(outside)).toEqual([]);
   });
 });
 

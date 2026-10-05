@@ -5,6 +5,7 @@ import type { DirectoryEntry, ReadTextResponse, SaveTextResponse, FileIdentityRe
 import { MAX_FILE_VIEW_BYTES } from '../../../common/file-contracts.js';
 import type { ExecutorSnapshot } from '../../../common/executors.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import { descriptorPathsDirectory } from '../../../server/runtime/files/directory-creation.js';
 import { rejectionOf } from '../../support/promise-assertions.js';
 
 for (const backend of ['remote-controller-dials', 'remote-executor-dials'] as const) {
@@ -96,6 +97,17 @@ for (const backend of ['remote-controller-dials', 'remote-executor-dials'] as co
       const controllerBase = fixture.dirs.project;
       const route = (target: string, path: string) => `/api/v1/files/directories?${new URLSearchParams({ executorId: target, path })}`;
       const create = (target: string, path: string, name: unknown) => fixture.client.post<DirectoryEntry>(route(target, path), { name });
+      // The controller and worker run on this machine, so both detect what this process detects.
+      const supported = descriptorPathsDirectory() !== null;
+      const reported = await fixture.client.get<{ executors: ExecutorSnapshot[] }>('/api/v1/executors');
+      expect(reported.executors.map((executor) => executor.machineServices.directoryCreation)).toEqual([supported, supported]);
+      if (!supported) {
+        for (const [target, base] of [[executorId, workerBase], ['local', controllerBase]] as const) {
+          expect(await rejectionOf(create(target, base, 'shared name'))).toMatchObject({ status: 501, body: { errorCode: 'OPERATION_UNSUPPORTED' } });
+          expect(await readdir(base)).toEqual([]);
+        }
+        return;
+      }
 
       expect(await create(executorId, workerBase, 'shared name')).toEqual({ name: 'shared name', path: join(workerBase, 'shared name'), type: 'directory' });
       expect(await readdir(workerBase)).toEqual(['shared name']);
@@ -122,8 +134,7 @@ for (const backend of ['remote-controller-dials', 'remote-executor-dials'] as co
       expect(await readdir(controllerBase)).toEqual(['shared name']);
       const { executors } = await fixture.client.get<{ executors: ExecutorSnapshot[] }>('/api/v1/executors');
       expect(executors.find((executor) => executor.id === executorId)?.availability).toBe('ready');
-      // These lanes run on Linux, where both the controller and the worker can create safely.
-      expect(executors.map((executor) => executor.machineServices.directoryCreation)).toEqual([true, true]);
+      expect(executors.map((executor) => executor.machineServices.directoryCreation)).toEqual([supported, supported]);
     }, { executionBackend: backend, projectRoots: 'separate' });
   }, 60_000);
 }

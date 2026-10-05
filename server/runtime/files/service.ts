@@ -19,7 +19,10 @@ export interface FilesServiceOptions {
   readonly assertAvailable?: (options?: ExecutorCallOptions) => void;
   readonly resolveSaveTarget?: typeof resolveRealWithinBase;
   readonly readDirectory?: typeof readFileDirectory;
-  /** Overrides where this system names open descriptors; null stands for a system that cannot. */
+  /**
+   * Overrides the directory in which this system names open descriptors; null
+   * stands for a system that has none. Only a descriptor directory is safe here.
+   */
   readonly descriptorPaths?: string | null;
 }
 
@@ -40,7 +43,16 @@ let activeContentOperations = 0;
 const MAX_FILE_CONTENT_OPERATIONS = 8;
 
 export class FilesService implements ExecutionFilesService {
-  constructor(private readonly options: FilesServiceOptions) {}
+  readonly #descriptorPaths: string | null;
+
+  constructor(private readonly options: FilesServiceOptions) {
+    this.#descriptorPaths = options.descriptorPaths === undefined ? descriptorPathsDirectory() : options.descriptorPaths;
+  }
+
+  /** Whether this service can create directories; the executor advertises exactly this. */
+  get canCreateDirectories(): boolean {
+    return this.#descriptorPaths !== null;
+  }
 
   async tree(request: Parameters<ExecutionFilesService['tree']>[0], options?: ExecutorCallOptions) {
     return this.#run(options, async () => {
@@ -123,7 +135,7 @@ export class FilesService implements ExecutionFilesService {
 
   async createDirectory(request: Parameters<ExecutionFilesService['createDirectory']>[0], options?: ExecutorCallOptions) {
     return this.#run(options, async () => {
-      const descriptorPaths = this.options.descriptorPaths === undefined ? descriptorPathsDirectory() : this.options.descriptorPaths;
+      const descriptorPaths = this.#descriptorPaths;
       if (descriptorPaths === null) throw directoryCreationUnsupported();
       const problem = typeof request.name === 'string' ? directoryNameProblem(request.name) : 'empty';
       if (problem) throw new ValidationDomainError(DIRECTORY_NAME_PROBLEMS[problem]);

@@ -3,6 +3,7 @@ import * as fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { ExecutionRuntime } from '../../runtime/execution-runtime.js';
+import { descriptorPathsDirectory } from '../../runtime/files/directory-creation.js';
 import { connectRemoteExecutor, servePairedRuntime } from './runtime-adapter.js';
 import { serveExecutionRuntime } from '../server/executor-rpc-server.js';
 import { ProducerRelay } from '../server/producer-relay.js';
@@ -48,7 +49,7 @@ test('directory creation requests are checked for shape and leave name policy to
 
 
 for (const phase of ['before dispatch', 'after creation'] as const) {
-  test(`directory creation failure ${phase} never blindly retries or reports success`, async () => {
+  test.skipIf(descriptorPathsDirectory() === null)(`directory creation failure ${phase} never blindly retries or reports success`, async () => {
     const directory = await fs.mkdtemp(path.join(os.homedir(), 'tmp', 'garcon-files-create-failure-'));
     const local = new ExecutionRuntime({ id: linkOptions.executorId, workspaceDir: directory, projectBasePath: directory, integrations: [], resolveCredential: async () => null });
     const controller = new WebSocketLink({ ...linkOptions, role: 'controller' });
