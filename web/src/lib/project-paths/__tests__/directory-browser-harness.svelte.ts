@@ -14,7 +14,7 @@ export function openDirectoryBrowser(initial: DirectoryBrowserHarnessOptions = {
 	let executorId = $state(initial.executorId ?? 'local');
 	let executorContextKey = $state(initial.executorContextKey ?? 'instance-1');
 	let currentPath = $state(initial.currentPath ?? '');
-	const basePath = initial.basePath ?? '/repo';
+	let basePath = $state(initial.basePath ?? '/repo');
 	const confirmsSelection = initial.confirmsSelection ?? false;
 	const selections: string[] = [];
 	let closes = 0;
@@ -58,6 +58,10 @@ export function openDirectoryBrowser(initial: DirectoryBrowserHarnessOptions = {
 		},
 		type(path: string) {
 			currentPath = path;
+			flushSync();
+		},
+		resolveBase(path: string) {
+			basePath = path;
 			flushSync();
 		},
 		switchExecutor(nextExecutorId: string, nextContextKey: string) {

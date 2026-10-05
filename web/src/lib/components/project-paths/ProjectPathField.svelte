@@ -62,7 +62,7 @@
 	// ArrowDown enters the popover's list, because an owner may reserve Tab for completion.
 	const handleKeydown: NonNullable<HTMLInputAttributes['onkeydown']> = (event) => {
 		inputProps.onkeydown?.(event);
-		if (event.defaultPrevented || event.key !== 'ArrowDown' || browser.isMobile) return;
+		if (event.defaultPrevented || event.key !== 'ArrowDown') return;
 		if (directoryBrowser?.focusFirstRow()) event.preventDefault();
 	};
 
@@ -134,6 +134,7 @@
 			isMobile={browser.isMobile}
 			onSelect={browser.onSelect}
 			onClose={browser.onClose}
+			onReturnFocus={() => ref?.focus()}
 		/>
 	{/if}
 </div>

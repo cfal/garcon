@@ -29,6 +29,11 @@
 		basePath: string;
 		onSelect: (path: string) => void;
 		onClose: () => void;
+		/**
+		 * Moves keyboard focus from the open popover back to its field. Defaults to
+		 * the element that was focused when the browser opened.
+		 */
+		onReturnFocus?: () => void;
 		isMobile: boolean;
 	}
 
@@ -39,13 +44,19 @@
 		basePath,
 		onSelect,
 		onClose,
+		onReturnFocus,
 		isMobile,
 	}: DirectoryBrowserProps = $props();
 	const transientLayers = getTransientLayers();
-	const focusReturnTarget =
+	const openedFrom =
 		typeof document !== 'undefined' && document.activeElement instanceof HTMLElement
 			? document.activeElement
 			: null;
+
+	function returnFocus(): void {
+		if (onReturnFocus) onReturnFocus();
+		else openedFrom?.focus();
+	}
 	const creationErrorId = $props.id();
 
 	const browser = new DirectoryBrowserState({
@@ -75,11 +86,19 @@
 	// A creation still in flight when the browser closes must not select or refocus.
 	onDestroy(() => browser.dispose());
 
-	/** Moves keyboard focus into the list; reports whether a row took it. */
+	const rowClass = $derived(
+		`flex w-full items-center gap-3 text-start transition-colors hover:bg-muted/50 focus-visible:bg-muted/70 focus-visible:outline-none active:bg-muted/70 ${
+			isMobile ? 'min-h-12 px-4 text-base' : 'px-3 py-2 text-sm'
+		}`,
+	);
+	const rowIconClass = $derived(isMobile ? 'size-5 shrink-0' : 'size-4 shrink-0');
+
+	/** Moves keyboard focus from the field into the popover's list; reports whether a row took it. */
 	export function focusFirstRow(): boolean {
-		const row = list?.querySelector<HTMLElement>('button');
-		row?.focus();
-		return row !== null && row !== undefined;
+		const row = isMobile ? null : list?.querySelector<HTMLElement>('button');
+		if (!row) return false;
+		row.focus();
+		return true;
 	}
 
 	// Splits the path so the footer can emphasize the directory that would be selected.
@@ -121,25 +140,30 @@
 	}
 
 	// Arrow keys move focus between the rows of the list. Above its first row,
-	// the popover hands focus back to the control it was opened from.
+	// the popover hands focus back to its field.
 	function handleRowKeydown(event: KeyboardEvent): void {
-		const offset = event.key === 'ArrowDown' ? 1 : event.key === 'ArrowUp' ? -1 : 0;
+		const forward = event.key === 'ArrowDown';
 		const row = event.currentTarget;
-		if (offset === 0 || !(row instanceof HTMLElement)) return;
-		const rows = Array.from(list?.querySelectorAll<HTMLElement>('button') ?? []);
-		const index = rows.indexOf(row) + offset;
-		const next = index < 0 && !isMobile ? focusReturnTarget : rows[index];
-		if (!next) return;
+		if ((!forward && event.key !== 'ArrowUp') || !(row instanceof HTMLElement)) return;
+		// Steps by sibling, skipping the item that only reports an empty list.
+		let item: Element | null = row.closest('li');
+		let next: HTMLElement | null = null;
+		while (item && !next) {
+			item = forward ? item.nextElementSibling : item.previousElementSibling;
+			next = item?.querySelector<HTMLElement>('button') ?? null;
+		}
+		if (!next && (forward || isMobile)) return;
 		event.preventDefault();
-		next.focus();
+		if (next) next.focus();
+		else returnFocus();
 	}
 
-	// The popover hands focus back to the control it was opened from. The sheet
-	// covers that control, so focus moves to the one that continues the task.
+	// The popover hands focus back to its field. The sheet covers the field, so
+	// focus moves to the control that continues the task.
 	async function focusAfterCreation(sheetControl: () => HTMLElement | null): Promise<void> {
 		await tick();
 		if (isMobile) sheetControl()?.focus();
-		else focusReturnTarget?.focus();
+		else returnFocus();
 	}
 
 	async function cancelCreation(): Promise<void> {
@@ -206,6 +230,20 @@
 	/>
 {/snippet}
 
+{#snippet createButton(sizeClass: string)}
+	<Button
+		class={sizeClass}
+		disabled={!browser.canSubmitCreation}
+		aria-busy={browser.creation?.submitting}
+		onclick={() => void submitCreation()}
+	>
+		{#if browser.creation?.submitting}
+			<Loader2 class="animate-spin" aria-hidden="true" />
+		{/if}
+		{m.chat_directory_browser_create()}
+	</Button>
+{/snippet}
+
 {#snippet creationError()}
 	{#if browser.creationError}
 		<p id={creationErrorId} role="alert" class="text-xs text-destructive">
@@ -233,17 +271,16 @@
 	{:else}
 		<ul bind:this={list} class="m-0 list-none p-0">
 			{#if browser.parentPath !== null}
+				{@const parentPath = browser.parentPath}
 				<li>
 					<button
 						type="button"
-						onclick={() => browser.parentPath !== null && browser.navigate(browser.parentPath)}
+						onclick={() => browser.navigate(parentPath)}
 						onkeydown={handleRowKeydown}
 						aria-label={m.chat_directory_browser_parent_directory()}
-						class="flex w-full items-center gap-3 text-start text-muted-foreground transition-colors hover:bg-muted/50 focus-visible:bg-muted/70 focus-visible:outline-none active:bg-muted/70 {isMobile
-							? 'min-h-12 px-4 text-base'
-							: 'px-3 py-2 text-sm'}"
+						class="{rowClass} text-muted-foreground"
 					>
-						<CornerLeftUp class={isMobile ? 'size-5 shrink-0' : 'size-4 shrink-0'} aria-hidden="true" />
+						<CornerLeftUp class={rowIconClass} aria-hidden="true" />
 						..
 					</button>
 				</li>
@@ -255,14 +292,9 @@
 							type="button"
 							onclick={() => browser.navigate(entry.path)}
 							onkeydown={handleRowKeydown}
-							class="flex w-full items-center gap-3 text-start text-foreground transition-colors hover:bg-muted/50 focus-visible:bg-muted/70 focus-visible:outline-none active:bg-muted/70 {isMobile
-								? 'min-h-12 px-4 text-base'
-								: 'px-3 py-2 text-sm'}"
+							class="{rowClass} text-foreground"
 						>
-							<Folder
-								class={isMobile ? 'size-5 shrink-0 text-primary' : 'size-4 shrink-0 text-primary'}
-								aria-hidden="true"
-							/>
+							<Folder class="{rowIconClass} text-primary" aria-hidden="true" />
 							<span class="min-w-0 flex-1 truncate">{entry.name}</span>
 							{#if isMobile}
 								<ChevronRight class="size-4 shrink-0 text-muted-foreground/60" aria-hidden="true" />
@@ -288,11 +320,9 @@
 						type="button"
 						onclick={() => browser.startCreation(name)}
 						onkeydown={handleRowKeydown}
-						class="flex w-full items-center gap-3 text-start text-interactive-accent transition-colors hover:bg-muted/50 focus-visible:bg-muted/70 focus-visible:outline-none active:bg-muted/70 {isMobile
-							? 'min-h-12 px-4 text-base'
-							: 'px-3 py-2 text-sm'}"
+						class="{rowClass} text-interactive-accent"
 					>
-						<Plus class={isMobile ? 'size-5 shrink-0' : 'size-4 shrink-0'} aria-hidden="true" />
+						<Plus class={rowIconClass} aria-hidden="true" />
 						<span class="min-w-0 flex-1 truncate">
 							{m.chat_directory_browser_create_named({ name })}
 						</span>
@@ -377,17 +407,7 @@
 						>
 							{m.common_cancel()}
 						</Button>
-						<Button
-							class="h-12 flex-1 text-sm"
-							disabled={!browser.canSubmitCreation}
-							aria-busy={browser.creation.submitting}
-							onclick={() => void submitCreation()}
-						>
-							{#if browser.creation.submitting}
-								<Loader2 class="animate-spin" aria-hidden="true" />
-							{/if}
-							{m.chat_directory_browser_create()}
-						</Button>
+						{@render createButton('h-12 flex-1 text-sm')}
 					</div>
 				{:else}
 					<p
@@ -441,13 +461,12 @@
 			kind: 'popover',
 			modality: 'nonmodal',
 			onEscape: handleLayerEscape,
-			restoreFocus: () => focusReturnTarget?.focus(),
+			restoreFocus: () => openedFrom?.focus(),
 		})}
 	>
 		<div class="flex shrink-0 items-center gap-2 border-b border-border py-1 pl-2 pr-1">
 			{@render breadcrumbTrail()}
 			<button
-				bind:this={newDirectoryButton}
 				type="button"
 				disabled={!browser.canCreate}
 				onclick={() => browser.startCreation()}
@@ -463,18 +482,7 @@
 			<div class="shrink-0 space-y-1.5 border-b border-border p-2">
 				<div class="flex items-center gap-2">
 					{@render creationFields()}
-					<Button
-						size="sm"
-						class="h-9"
-						disabled={!browser.canSubmitCreation}
-						aria-busy={browser.creation.submitting}
-						onclick={() => void submitCreation()}
-					>
-						{#if browser.creation.submitting}
-							<Loader2 class="animate-spin" aria-hidden="true" />
-						{/if}
-						{m.chat_directory_browser_create()}
-					</Button>
+					{@render createButton('h-9 px-3')}
 					<Button
 						variant="ghost"
 						size="icon"

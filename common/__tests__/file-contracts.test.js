@@ -5,7 +5,7 @@ import {
   directoryNameProblem,
   isFileRevision,
   parseCreateDirectoryRequest,
-  parseCreatedDirectory,
+  parseDirectoryEntry,
   parseFileRevisionResponse,
   parseReadTextResponse,
   parseSaveTextRequest,
@@ -57,9 +57,9 @@ describe('directory creation contract', () => {
     expect(parseCreateDirectoryRequest({ name: 'project', ignored: true })).toEqual({ name: 'project' });
     for (const value of [null, [], {}, { name: 7 }, 'project']) expect(parseCreateDirectoryRequest(value)).toBeNull();
     const created = { name: 'project', path: '/base/project', type: 'directory' };
-    expect(parseCreatedDirectory({ ...created, ignored: true })).toEqual(created);
+    expect(parseDirectoryEntry({ ...created, ignored: true })).toEqual(created);
     for (const value of [null, { ...created, type: 'file' }, { ...created, path: '' }, { ...created, name: '' }, { name: 'project' }]) {
-      expect(parseCreatedDirectory(value)).toBeNull();
+      expect(parseDirectoryEntry(value)).toBeNull();
     }
   });
 });

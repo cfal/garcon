@@ -1,3 +1,5 @@
+import { isWithinExecutorPath } from '$shared/executor-path';
+
 export interface TypedDirectoryPath {
 	/** Directory whose children complete the typed path. */
 	readonly directory: string;
@@ -16,9 +18,7 @@ export function normalizeDirectoryPath(path: string): string {
 }
 
 export function isWithinBasePath(path: string, basePath: string): boolean {
-	const base = normalizeDirectoryPath(basePath);
-	const candidate = normalizeDirectoryPath(path);
-	return candidate === base || candidate.startsWith(base === '/' ? '/' : `${base}/`);
+	return isWithinExecutorPath(normalizeDirectoryPath(basePath), normalizeDirectoryPath(path));
 }
 
 /** Splits a path under edit into its listed directory and the partial child name. */

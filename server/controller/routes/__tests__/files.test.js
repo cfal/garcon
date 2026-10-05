@@ -11,7 +11,7 @@ import {
   FILE_REVISION_HEADER,
   MAX_FILE_VIEW_BYTES,
   isFileRevision,
-  parseCreatedDirectory,
+  parseDirectoryEntry,
   parseFileTreeResponse,
   parseReadTextResponse,
   parseSaveTextResponse,
@@ -1026,7 +1026,7 @@ describe('files route', () => {
     const response = await createDirectory(routes, parent, { name: 'new project' });
 
     expect(response.status).toBe(201);
-    expect(parseCreatedDirectory(await response.json())).toEqual({
+    expect(parseDirectoryEntry(await response.json())).toEqual({
       name: 'new project', path: path.join(parent, 'new project'), type: 'directory',
     });
     expect((await fs.stat(path.join(parent, 'new project'))).isDirectory()).toBe(true);

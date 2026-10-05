@@ -36,26 +36,16 @@ test.each([MAX_FILE_REVISION_LENGTH + 1, 17 * 1024 * 1024])('rejects a %d-charac
   expect(backingCalls).toBe(0);
 });
 
-test('rejects an invalid directory name before accessing the RPC session', async () => {
-  let backingCalls = 0;
-  const untouched = () => {
-    backingCalls++;
-    throw new Error('Creation must not access the RPC session');
-  };
-  const files = new RemoteFilesService({ latest: untouched, acquire: untouched, send: untouched, call: untouched } satisfies RemoteSessions);
-  for (const name of ['', '..', 'a/b', 'x'.repeat(256)]) {
-    await expect(files.createDirectory({ parentPath: '/project', name })).rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 400 });
+test('directory creation requests are checked for shape and leave name policy to the file service', () => {
+  for (const request of [
+    { parentPath: '/project' }, { name: 'child' }, { parentPath: '', name: 'child' }, { parentPath: '/project', name: 'x'.repeat(4097) },
+    { parentPath: `/${'x'.repeat(4096)}`, name: 'child' }, { parentPath: '/project', name: 7 }, null,
+  ]) expect(() => validateFileRpcRequest('files.createDirectory', request)).toThrow(expect.objectContaining({ code: 'FILE_INVALID_DATA' }));
+  for (const name of ['child', '', '..', 'a/b']) {
+    expect(() => validateFileRpcRequest('files.createDirectory', { parentPath: '/project', name })).not.toThrow();
   }
-  expect(backingCalls).toBe(0);
 });
 
-test('directory creation requests are validated before they reach the file service', () => {
-  for (const request of [
-    { parentPath: '/project' }, { name: 'child' }, { parentPath: '', name: 'child' }, { parentPath: '/project', name: '..' },
-    { parentPath: '/project', name: 'a/b' }, { parentPath: `/${'x'.repeat(4096)}`, name: 'child' }, { parentPath: '/project', name: 7 }, null,
-  ]) expect(() => validateFileRpcRequest('files.createDirectory', request)).toThrow(expect.objectContaining({ code: 'FILE_INVALID_DATA' }));
-  expect(() => validateFileRpcRequest('files.createDirectory', { parentPath: '/project', name: 'child' })).not.toThrow();
-});
 
 for (const phase of ['before dispatch', 'after creation'] as const) {
   test(`directory creation failure ${phase} never blindly retries or reports success`, async () => {

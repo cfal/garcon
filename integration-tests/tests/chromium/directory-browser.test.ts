@@ -91,24 +91,25 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await browserExpect(input).toHaveValue(touchCreated);
       expect(await readdir(join(root, 'alpha'))).not.toContain('ghost');
 
-      phase('desktop popover follows the typed path and creates from it');
-      await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: false });
-      await page.setViewportSize({ width: 1280, height: 800 });
-      await openNewChat();
-      await input.fill(join(root, 'alpha', 'ghost', 'deeper'));
-      await input.press('Enter');
-      await browserExpect(browser).toHaveCount(0);
-      await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true });
-      await page.setViewportSize({ width: 390, height: 844 });
+      // The touch field opens the sheet on focus, so the stale path is written without focusing it.
+      const stalePath = join(root, 'alpha', 'ghost', 'deeper');
+      await input.evaluate((element, value) => {
+        (element as HTMLInputElement).value = value;
+        element.dispatchEvent(new Event('input', { bubbles: true }));
+      }, stalePath);
       await input.click();
       await browserExpect(browser.getByRole('textbox', { name: 'Filter directories...' })).toHaveValue('ghost');
       await browserExpect(browser.locator('[aria-current="location"]')).toHaveText('alpha');
       await browserExpect(control('Create directory "ghost"')).toBeVisible();
       await control('Cancel').click();
-      await browserExpect(input).toHaveValue(join(root, 'alpha', 'ghost', 'deeper'));
+      await browserExpect(browser).toHaveCount(0);
+      await browserExpect(input).toHaveValue(stalePath);
+
+      phase('desktop popover follows the typed path and creates from it');
       await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: false });
       await cdp.detach();
       await page.setViewportSize({ width: 1280, height: 800 });
+      await openNewChat();
       await input.fill(join(root, 'al'));
       await browserExpect(control('alpha')).toBeVisible();
       await browserExpect(control('beta')).toHaveCount(0);
@@ -147,13 +148,11 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       expect((await readdir(join(root, 'alpha'))).sort()).toEqual(['desktop created', 'nested', 'notes', 'touch created']);
       if (executionBackend !== 'in-process') expect(await readdir(integration.dirs.project)).toEqual([]);
       expect((await integration.client.listChats()).sessions).toEqual([]);
-      // Listing the missing path is the only request expected to fail; how often
-      // the popover lists it depends on when it reopens.
-      const ghost = join(root, 'alpha', 'ghost');
-      expect([...new Set(failedResponses.map((response) => {
+      // Listing the stale path and its missing parent are the only requests expected to fail.
+      expect(failedResponses.map((response) => {
         const [status, method, url] = response.split(' ');
         return `${status} ${method} ${new URL(url!).pathname} ${new URL(url!).searchParams.get('path')}`;
-      }))].sort()).toEqual([ghost, join(ghost, 'deeper')].map((path) => `404 GET /api/v1/files/browse ${path}`));
+      })).toEqual([stalePath, join(root, 'alpha', 'ghost')].map((path) => `404 GET /api/v1/files/browse ${path}`));
       expect(browserErrors.filter((error) => !error.includes('status of 404'))).toEqual([]);
     }, undefined, { executionBackend, projectRoots: 'separate' });
   }, 120_000);

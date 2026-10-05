@@ -1,5 +1,5 @@
 import type { ExecutionFileTarget, ExecutionFilesService, ExecutionFileRead } from '@garcon/server-agent-interface';
-import { MAX_FILE_VIEW_BYTES, directoryNameProblem } from '../../../common/file-contracts.js';
+import { MAX_FILE_VIEW_BYTES } from '../../../common/file-contracts.js';
 import { DomainError } from '../../common/domain-error.js';
 import { isRecord } from '../../../common/json.js';
 
@@ -43,7 +43,8 @@ export function validateFileRpcRequest(method: string, request: unknown): void {
   if (method === 'files.tree' || method === 'files.browse') {
     if (request.directoryPath !== undefined && !validPath(request.directoryPath)) throw invalidFileData();
   } else if (method === 'files.createDirectory') {
-    if (!validPath(request.parentPath) || typeof request.name !== 'string' || directoryNameProblem(request.name) !== null) throw invalidFileData();
+    // The file service decides which names are acceptable; only the shape is checked here.
+    if (!validPath(request.parentPath) || typeof request.name !== 'string' || request.name.length > 4096) throw invalidFileData();
   } else {
     if (!validPath(request.projectPath) || method !== 'files.list' && !validPath(request.filePath)) throw invalidFileData();
   }

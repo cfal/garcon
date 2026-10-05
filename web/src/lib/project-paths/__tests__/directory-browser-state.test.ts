@@ -1,7 +1,8 @@
 import { flushSync } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, ApiMutationOutcomeUnknownError } from '$lib/api/client';
-import { browseDirectory, createDirectory, type DirectoryEntry } from '$lib/api/files';
+import { browseDirectory, createDirectory } from '$lib/api/files';
+import type { DirectoryEntry } from '$shared/file-contracts';
 import { openDirectoryBrowser } from './directory-browser-harness.svelte.js';
 
 vi.mock('$lib/api/files', () => ({ browseDirectory: vi.fn(), createDirectory: vi.fn() }));
@@ -110,6 +111,21 @@ describe('DirectoryBrowserState following a typed path', () => {
 		await settle();
 		expect(field.browser.directory).toBe('/repo');
 		expect(field.browser.parentPath).toBeNull();
+	});
+
+	it('lists nothing until its host knows the base', async () => {
+		for (const confirmsSelection of [false, true]) {
+			const field = open({ basePath: '', currentPath: '', confirmsSelection });
+			await settle();
+			expect(browseDirectory).not.toHaveBeenCalled();
+			expect(field.browser.listing.status).toBe('loading');
+			expect(field.browser.canConfirm).toBe(false);
+			field.resolveBase('/repo');
+			await settle();
+			expect(browsedPaths()).toEqual(['/repo']);
+			expect(names(field)).toEqual(['alpha', 'alpha-two', 'beta']);
+			vi.mocked(browseDirectory).mockClear();
+		}
 	});
 
 	it('stays inside the base', async () => {
@@ -336,7 +352,7 @@ describe('DirectoryBrowserState creating a directory', () => {
 		sheet.browser.startCreation('beta');
 		expect(await sheet.browser.submitCreation()).toBe(false);
 		await settle();
-		expect(sheet.browser.creation).toEqual({
+		expect(sheet.browser.creation).toMatchObject({
 			name: 'beta',
 			submitting: false,
 			error: '"beta" already exists here.',
@@ -357,7 +373,36 @@ describe('DirectoryBrowserState creating a directory', () => {
 		);
 		expect(sheet.browser.listing.status).toBe('ready');
 		expect(names(sheet)).toEqual(['alpha', 'alpha-two', 'beta', 'gamma']);
-		expect(createDirectory).toHaveBeenCalledTimes(2);
+
+		// A definite refusal cannot have changed the directory, so it is not read again.
+		const listings = browsedPaths().length;
+		vi.mocked(createDirectory).mockRejectedValueOnce(
+			new ApiError(403, 'Permission denied', 'FILE_PERMISSION_DENIED'),
+		);
+		sheet.browser.creationName = 'delta';
+		expect(await sheet.browser.submitCreation()).toBe(false);
+		await settle();
+		expect(sheet.browser.creationError).toBe('Permission denied');
+		expect(browsedPaths()).toHaveLength(listings);
+		expect(createDirectory).toHaveBeenCalledTimes(3);
+	});
+
+	it('keeps the form with the directory it was opened in', async () => {
+		const field = open({ currentPath: '/repo/' });
+		await settle();
+		field.browser.startCreation('fresh');
+		field.type('/repo/alpha/');
+		await settle();
+		expect(field.browser.creation).toBeNull();
+		expect(field.browser.creationName).toBe('');
+		expect(field.browser.canSubmitCreation).toBe(false);
+		expect(await field.browser.submitCreation()).toBe(false);
+		field.type('/repo/');
+		expect(field.browser.creation).toMatchObject({ name: 'fresh', submitting: false });
+		field.browser.navigate('/repo/alpha');
+		field.type('/repo/');
+		expect(field.browser.creation).toBeNull();
+		expect(createDirectory).not.toHaveBeenCalled();
 	});
 
 	it('does not move a browser that left the directory before its creation settled', async () => {
@@ -446,7 +491,7 @@ describe('DirectoryBrowserState creating a directory', () => {
 			expect(await submitted).toBe(false);
 			expect(field.selections).toEqual([]);
 			expect(field.browser.directory).toBe('/repo');
-			expect(field.browser.creation).toMatchObject({ submitting: true, error: null });
+			expect(field.browser.creation).toBeNull();
 		}
 	});
 

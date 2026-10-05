@@ -57,7 +57,8 @@ export interface CreateDirectoryRequest {
   name: string;
 }
 
-export interface CreatedDirectory {
+// One directory as browsing lists it and as creation returns it.
+export interface DirectoryEntry {
   name: string;
   path: string;
   type: 'directory';
@@ -152,20 +153,12 @@ export function parseSaveTextRequest(value: unknown): SaveTextRequest | null {
   };
 }
 
-function hasSeparatorOrControlCharacter(name: string): boolean {
-  for (let index = 0; index < name.length; index += 1) {
-    const code = name.charCodeAt(index);
-    if (code < 0x20 || code === 0x7f || code === 0x2f || code === 0x5c) return true;
-  }
-  return false;
-}
-
 // Reports why a name cannot identify one new directory inside its parent.
 // Separators and dot segments would address another directory.
 export function directoryNameProblem(name: string): DirectoryNameProblem | null {
   if (name.length === 0) return 'empty';
   if (name === '.' || name === '..') return 'reserved';
-  if (hasSeparatorOrControlCharacter(name)) return 'invalid-character';
+  if (/[\u0000-\u001f\u007f/\\]/.test(name)) return 'invalid-character';
   if (new TextEncoder().encode(name).length > MAX_DIRECTORY_NAME_BYTES) return 'too-long';
   return null;
 }
@@ -177,7 +170,7 @@ export function parseCreateDirectoryRequest(
   return { name: value.name };
 }
 
-export function parseCreatedDirectory(value: unknown): CreatedDirectory | null {
+export function parseDirectoryEntry(value: unknown): DirectoryEntry | null {
   if (
     !isRecord(value) ||
     !isNonEmptyString(value.name) ||

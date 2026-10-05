@@ -1,7 +1,12 @@
 import { ApiError, ApiMutationOutcomeUnknownError } from '$lib/api/client.js';
-import { browseDirectory, createDirectory, type DirectoryEntry } from '$lib/api/files.js';
+import { browseDirectory, createDirectory } from '$lib/api/files.js';
 import * as m from '$lib/paraglide/messages.js';
-import { directoryNameProblem, type DirectoryNameProblem } from '$shared/file-contracts';
+import { errorMessage } from '$lib/utils/error-message.js';
+import {
+	directoryNameProblem,
+	type DirectoryEntry,
+	type DirectoryNameProblem,
+} from '$shared/file-contracts';
 import {
 	directoryBreadcrumbs,
 	isWithinBasePath,
@@ -9,7 +14,6 @@ import {
 	parentDirectoryPath,
 	splitTypedDirectoryPath,
 	type DirectoryBreadcrumb,
-	type TypedDirectoryPath,
 } from './directory-location.js';
 
 export interface DirectoryBrowserStateOptions {
@@ -30,15 +34,16 @@ export type DirectoryListing =
 	| { readonly status: 'ready'; readonly entries: readonly DirectoryEntry[] }
 	| { readonly status: 'error'; readonly message: string };
 
-export interface DirectoryCreation {
-	readonly name: string;
-	readonly submitting: boolean;
-	readonly error: string | null;
-}
-
 interface DirectoryTarget {
 	readonly executorId: string;
 	readonly directory: string;
+}
+
+// What the browser lists and how the looked-for name narrows it.
+interface DirectoryView {
+	readonly directory: string;
+	readonly query: string;
+	readonly matchesAnywhere: boolean;
 }
 
 const NAME_PROBLEM_MESSAGES: Record<Exclude<DirectoryNameProblem, 'empty'>, () => string> = {
@@ -47,23 +52,29 @@ const NAME_PROBLEM_MESSAGES: Record<Exclude<DirectoryNameProblem, 'empty'>, () =
 	'too-long': m.chat_directory_browser_name_too_long,
 };
 
-function nameProblemMessage(name: string): string | null {
-	const problem = directoryNameProblem(name);
-	return problem === null || problem === 'empty' ? null : NAME_PROBLEM_MESSAGES[problem]();
-}
-
-function creationFailureMessage(error: unknown, name: string): string {
-	if (error instanceof ApiMutationOutcomeUnknownError) {
-		return m.chat_directory_browser_create_unconfirmed();
-	}
-	if (isFileError(error, 'FILE_ALREADY_EXISTS')) {
-		return m.chat_directory_browser_name_exists({ name });
-	}
-	return (error instanceof Error && error.message) || m.chat_directory_browser_create_failed();
-}
-
 function isFileError(error: unknown, errorCode: string): boolean {
 	return error instanceof ApiError && error.errorCode === errorCode;
+}
+
+// A typed path lists its parent and narrows it by the name under edit. The
+// base, a path ending in a separator, and a path the browser navigated to are
+// known directories, so they list themselves.
+function fieldView(typed: string, basePath: string, navigated: string | undefined): DirectoryView {
+	const directory = normalizeDirectoryPath(typed);
+	if (
+		typed === navigated ||
+		typed.endsWith('/') ||
+		directory === normalizeDirectoryPath(basePath)
+	) {
+		return { directory, query: '', matchesAnywhere: false };
+	}
+	const split = splitTypedDirectoryPath(typed);
+	return {
+		directory: normalizeDirectoryPath(split.directory),
+		// Kept exactly as typed, so names differing only in spacing stay distinct.
+		query: split.partial,
+		matchesAnywhere: false,
+	};
 }
 
 /** Browses, selects, and creates directories for one path field on one executor. */
@@ -76,42 +87,42 @@ export class DirectoryBrowserState {
 	#listed = $state.raw<{ readonly target: string; readonly listing: DirectoryListing } | null>(
 		null,
 	);
-	#creation = $state<{ name: string; submitting: boolean; error: string | null } | null>(null);
+	#creation = $state<{
+		readonly target: string;
+		name: string;
+		submitting: boolean;
+		error: string | null;
+	} | null>(null);
 	#reloads = $state(0);
-	#creationAttempt = 0;
-	#navigated = false;
-	#disposed = false;
 
-	// A typed path lists its parent and filters by the name under edit. A path
-	// this browser navigated to is a known directory, so it lists that directory.
-	readonly #location = $derived.by((): TypedDirectoryPath => {
-		const { basePath, currentPath, executorId, confirmsSelection } = this.#options;
+	// A host may still be resolving its base; nothing is listable before it arrives.
+	readonly #hasBase = $derived.by(() => this.#options.basePath !== '');
+
+	// Navigation made on another executor does not apply to this one.
+	readonly #currentNavigation = $derived.by(() =>
+		this.#navigation?.executorId === this.#options.executorId ? this.#navigation : null,
+	);
+
+	// The confirming browser owns its location and filter; the other follows the field.
+	readonly #view = $derived.by((): DirectoryView => {
+		const { basePath, currentPath, confirmsSelection } = this.#options;
 		const typed =
 			currentPath.trim() && isWithinBasePath(currentPath, basePath) ? currentPath : basePath;
-		const navigation = this.#navigation?.executorId === executorId ? this.#navigation : null;
-		if (navigation && (confirmsSelection || navigation.directory === typed)) {
-			return { directory: navigation.directory, partial: '' };
-		}
-		const directory = normalizeDirectoryPath(typed);
-		if (
-			confirmsSelection ||
-			typed.endsWith('/') ||
-			directory === normalizeDirectoryPath(basePath)
-		) {
-			return { directory, partial: '' };
-		}
-		const split = splitTypedDirectoryPath(typed);
-		return { directory: normalizeDirectoryPath(split.directory), partial: split.partial };
+		const navigated = this.#currentNavigation?.directory;
+		if (!confirmsSelection) return fieldView(typed, basePath, navigated);
+		const directory = navigated ?? normalizeDirectoryPath(typed);
+		return { directory, query: this.#filterIn(directory).trim(), matchesAnywhere: true };
 	});
 
 	// Compared by value, so a typed name changing inside one directory does not
 	// retarget the listing.
-	readonly #directory = $derived.by((): string => this.#location.directory);
+	readonly directory = $derived(this.#view.directory);
+	readonly query = $derived(this.#view.query);
 
 	// Identifies one listing: a directory as one serving instance of an executor sees it.
 	readonly #target = $derived.by((): string => {
 		const { executorId, executorContextKey } = this.#options;
-		return JSON.stringify([executorId, executorContextKey, this.#directory]);
+		return JSON.stringify([executorId, executorContextKey, this.directory]);
 	});
 
 	// A result counts only for the target it was requested for, so entries of
@@ -121,17 +132,11 @@ export class DirectoryBrowserState {
 		return listed?.target === this.#target ? listed.listing : { status: 'loading' };
 	});
 
-	// The confirming browser filters by its own input; the other follows the
-	// typed name exactly, so names differing only in spacing stay distinct.
-	readonly #query = $derived.by((): string =>
-		this.#options.confirmsSelection ? this.filter.trim() : this.#location.partial,
-	);
-
 	readonly entries = $derived.by((): readonly DirectoryEntry[] => {
 		if (this.listing.status !== 'ready') return [];
-		const query = this.#query.toLowerCase();
+		const query = this.query.toLowerCase();
 		if (!query) return this.listing.entries;
-		const matchesAnywhere = this.#options.confirmsSelection;
+		const { matchesAnywhere } = this.#view;
 		return this.listing.entries.filter((entry) => {
 			const name = entry.name.toLowerCase();
 			return matchesAnywhere ? name.includes(query) : name.startsWith(query);
@@ -142,10 +147,20 @@ export class DirectoryBrowserState {
 		directoryBreadcrumbs(this.directory, this.#options.basePath),
 	);
 
+	/** The creation form, which belongs to the directory it was opened in. */
+	readonly creation = $derived.by(() => {
+		const creation = this.#creation;
+		return creation?.target === this.#target ? creation : null;
+	});
+
+	readonly #creationNameProblem = $derived(
+		directoryNameProblem((this.creation?.name ?? '').trim()),
+	);
+
 	// Offers the name being looked for when no directory already has it.
 	readonly suggestedName = $derived.by((): string | null => {
-		if (this.listing.status !== 'ready' || this.#creation) return null;
-		const name = this.#query.trim();
+		if (this.listing.status !== 'ready' || this.creation) return null;
+		const name = this.query.trim();
 		if (directoryNameProblem(name) !== null) return null;
 		return this.listing.entries.some((entry) => entry.name === name) ? null : name;
 	});
@@ -154,27 +169,17 @@ export class DirectoryBrowserState {
 		this.#options = options;
 	}
 
-	get directory(): string {
-		return this.#directory;
-	}
-
 	get parentPath(): string | null {
 		return parentDirectoryPath(this.directory, this.#options.basePath);
 	}
 
 	/** Name filter typed into the browser, kept only for the directory it was typed in. */
 	get filter(): string {
-		const filter = this.#filter;
-		if (filter?.executorId !== this.#options.executorId) return '';
-		return filter.directory === this.directory ? filter.text : '';
+		return this.#filterIn(this.directory);
 	}
 
 	set filter(text: string) {
 		this.#filter = { executorId: this.#options.executorId, directory: this.directory, text };
-	}
-
-	get query(): string {
-		return this.#query;
 	}
 
 	/**
@@ -184,44 +189,36 @@ export class DirectoryBrowserState {
 	get canConfirm(): boolean {
 		const { status } = this.listing;
 		if (status !== 'loading') return status === 'ready';
-		const navigation = this.#navigation;
-		return (
-			navigation !== null &&
-			navigation.listed &&
-			navigation.executorId === this.#options.executorId &&
-			navigation.directory === this.#directory
-		);
+		const navigation = this.#currentNavigation;
+		return navigation !== null && navigation.listed && navigation.directory === this.directory;
 	}
 
 	get canCreate(): boolean {
 		return this.canConfirm;
 	}
 
-	get creation(): DirectoryCreation | null {
-		return this.#creation;
-	}
-
 	get creationName(): string {
-		return this.#creation?.name ?? '';
+		return this.creation?.name ?? '';
 	}
 
 	set creationName(name: string) {
-		if (!this.#creation || this.#creation.submitting) return;
-		this.#creation.name = name;
-		this.#creation.error = null;
+		const creation = this.creation;
+		if (!creation || creation.submitting) return;
+		creation.name = name;
+		creation.error = null;
 	}
 
 	get creationError(): string | null {
-		if (!this.#creation) return null;
-		return this.#creation.error ?? nameProblemMessage(this.#creation.name.trim());
+		const creation = this.creation;
+		if (!creation) return null;
+		if (creation.error !== null) return creation.error;
+		const problem = this.#creationNameProblem;
+		return problem === null || problem === 'empty' ? null : NAME_PROBLEM_MESSAGES[problem]();
 	}
 
 	get canSubmitCreation(): boolean {
-		return (
-			this.#creation !== null &&
-			!this.#creation.submitting &&
-			directoryNameProblem(this.#creation.name.trim()) === null
-		);
+		const creation = this.creation;
+		return creation !== null && !creation.submitting && this.#creationNameProblem === null;
 	}
 
 	/**
@@ -229,8 +226,9 @@ export class DirectoryBrowserState {
 	 * effect so it follows navigation, and returns the cancellation of its request.
 	 */
 	trackListing(): () => void {
+		if (!this.#hasBase) return () => undefined;
 		const { executorId } = this.#options;
-		const directory = this.#directory;
+		const directory = this.directory;
 		const target = this.#target;
 		void this.#reloads;
 		const abort = new AbortController();
@@ -240,8 +238,7 @@ export class DirectoryBrowserState {
 			},
 			(error: unknown) => {
 				if (abort.signal.aborted || this.#retreatToParent(error, executorId, directory)) return;
-				const message =
-					(error instanceof Error && error.message) || m.chat_directory_browser_load_failed();
+				const message = errorMessage(error, m.chat_directory_browser_load_failed());
 				this.#listed = { target, listing: { status: 'error', message } };
 			},
 		);
@@ -259,18 +256,11 @@ export class DirectoryBrowserState {
 		const { basePath, executorId, confirmsSelection, onSelect } = this.#options;
 		if (!isWithinBasePath(path, basePath)) return false;
 		const directory = normalizeDirectoryPath(path);
-		this.#navigated = true;
 		this.#navigation = { executorId, directory, listed: true };
 		this.#filter = null;
-		this.#creationAttempt += 1;
 		this.#creation = null;
 		if (!confirmsSelection) onSelect(directory);
 		return true;
-	}
-
-	/** Ends the browser's life; work still in flight must not select or move it. */
-	dispose(): void {
-		this.#disposed = true;
 	}
 
 	confirm(): void {
@@ -281,63 +271,74 @@ export class DirectoryBrowserState {
 
 	startCreation(name = ''): void {
 		if (!this.canCreate) return;
-		this.#creationAttempt += 1;
-		this.#creation = { name, submitting: false, error: null };
+		this.#creation = { target: this.#target, name, submitting: false, error: null };
 	}
 
 	cancelCreation(): void {
-		this.#creationAttempt += 1;
+		this.#creation = null;
+	}
+
+	/** Ends the browser's life; a creation still in flight must not select or move it. */
+	dispose(): void {
 		this.#creation = null;
 	}
 
 	/** Resolves true once the browser has moved into the created directory. */
 	async submitCreation(): Promise<boolean> {
-		const creation = this.#creation;
+		const creation = this.creation;
 		if (!creation || !this.canSubmitCreation) return false;
-		const { executorId } = this.#options;
-		const parentPath = this.directory;
 		// Surrounding whitespace in a typed name is almost always accidental.
 		const name = creation.name.trim();
-		const target = this.#target;
-		const attempt = this.#creationAttempt;
+		const request = { executorId: this.#options.executorId, parentPath: this.directory, name };
 		creation.submitting = true;
 		creation.error = null;
-		try {
-			const created = await createDirectory({ executorId, parentPath, name });
-			if (this.#disposed || this.#settleStaleCreation(target, attempt)) return false;
-			if (this.navigate(created.path)) return true;
+		const outcome = await createDirectory(request).then(
+			(created) => ({ created }),
+			(error: unknown) => ({ error }),
+		);
+		// A form the user cancelled or replaced, or a closed browser, ignores the
+		// result. The directory may exist all the same, so the list is read again.
+		if (this.#creation !== creation) {
+			this.#reloads += 1;
+			return false;
+		}
+		// The field or executor moved the browser elsewhere while the request ran.
+		if (creation.target !== this.#target) {
+			this.#creation = null;
+			return false;
+		}
+		if ('created' in outcome) {
+			if (this.navigate(outcome.created.path)) return true;
 			// The executor reported a path this browser cannot address, so the
 			// directory is shown where it was created instead.
 			this.#creation = null;
-			this.reload();
-			return false;
-		} catch (error) {
-			if (this.#disposed) return false;
-			if (this.#settleStaleCreation(target, attempt) || !this.#creation) return false;
-			// The directory may exist after a failure, so the list is read again.
-			this.reload();
-			this.#creation.submitting = false;
-			this.#creation.error = creationFailureMessage(error, name);
+			this.#reloads += 1;
 			return false;
 		}
+		const { error } = outcome;
+		const exists = isFileError(error, 'FILE_ALREADY_EXISTS');
+		const unconfirmed = error instanceof ApiMutationOutcomeUnknownError;
+		creation.submitting = false;
+		if (exists) creation.error = m.chat_directory_browser_name_exists({ name });
+		else if (unconfirmed) creation.error = m.chat_directory_browser_create_unconfirmed();
+		else creation.error = errorMessage(error, m.chat_directory_browser_create_failed());
+		// Only these failures can leave a directory the list does not show yet.
+		if (exists || unconfirmed) this.#reloads += 1;
+		return false;
 	}
 
-	// A result for a directory no longer on screen, or for a form the user left,
-	// must not move the browser. The form is cleared unless a newer one replaced it.
-	#settleStaleCreation(target: string, attempt: number): boolean {
-		const sameTarget = target === this.#target;
-		const sameAttempt = attempt === this.#creationAttempt;
-		if (sameTarget && sameAttempt) return false;
-		if (sameAttempt) this.#creation = null;
-		if (sameTarget) this.reload();
-		return true;
+	#filterIn(directory: string): string {
+		const filter = this.#filter;
+		const applies =
+			filter?.executorId === this.#options.executorId && filter.directory === directory;
+		return applies ? filter.text : '';
 	}
 
 	// The confirming browser opens on the field's path as a directory. A path that
 	// names none opens its nearest listable ancestor instead. A missing name
 	// becomes the filter, so the list offers to create it; a file's name does not.
 	#retreatToParent(error: unknown, executorId: string, directory: string): boolean {
-		if (!this.#options.confirmsSelection || this.#navigated) return false;
+		if (!this.#options.confirmsSelection || this.#currentNavigation?.listed) return false;
 		const missing = isFileError(error, 'FILE_NOT_FOUND');
 		if (!missing && !isFileError(error, 'FILE_DIRECTORY_REQUIRED')) return false;
 		const parent = parentDirectoryPath(directory, this.#options.basePath);

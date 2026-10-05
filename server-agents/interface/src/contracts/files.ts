@@ -1,5 +1,5 @@
 import type {
-  CanonicalFileIdentity, CreatedDirectory, FileRevisionResponse, FileTreeResponse,
+  CanonicalFileIdentity, DirectoryEntry, FileRevisionResponse, FileTreeResponse,
   SaveTextRequest, SaveTextResponse, FileRevision,
 } from '@garcon/common/file-contracts';
 import type { ExecutorCallOptions } from './resources.js';
@@ -36,5 +36,5 @@ export interface ExecutionFilesService {
   read(request: ExecutionFileTarget, options?: ExecutorCallOptions): Promise<ExecutionFileRead>;
   save(request: ExecutionFileTarget & SaveTextRequest, options?: ExecutorCallOptions): Promise<SaveTextResponse>;
   /** Creates one directory inside an existing parent; never creates intermediate directories. */
-  createDirectory(request: ExecutionDirectoryCreation, options?: ExecutorCallOptions): Promise<CreatedDirectory>;
+  createDirectory(request: ExecutionDirectoryCreation, options?: ExecutorCallOptions): Promise<DirectoryEntry>;
 }
