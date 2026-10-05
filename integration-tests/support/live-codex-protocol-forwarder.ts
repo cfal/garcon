@@ -36,12 +36,35 @@ function observe(line: string): void {
   } catch {
     return;
   }
+  const params = message.params && typeof message.params === 'object' && !Array.isArray(message.params)
+    ? message.params as Record<string, unknown>
+    : {};
+  const item = params.item && typeof params.item === 'object' && !Array.isArray(params.item)
+    ? params.item as Record<string, unknown>
+    : {};
+  if (
+    message.method === 'item/started'
+    && item.type === 'commandExecution'
+    && typeof item.id === 'string'
+  ) {
+    appendFileSync(
+      approvalPath,
+      `${JSON.stringify({ type: 'command-item', itemId: item.id })}\n`,
+    );
+    return;
+  }
   if (!isApprovalMethod(message.method) || !['number', 'string'].includes(typeof message.id)) {
     return;
   }
   appendFileSync(
     approvalPath,
-    `${JSON.stringify({ type: 'approval-request', method: message.method })}\n`,
+    `${JSON.stringify({
+      type: 'approval-request',
+      method: message.method,
+      approvalId: typeof params.approvalId === 'string' ? params.approvalId : null,
+      itemId: typeof params.itemId === 'string' ? params.itemId : null,
+      kind: typeof params.kind === 'string' ? params.kind : null,
+    })}\n`,
   );
 }
 

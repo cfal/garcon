@@ -11,12 +11,24 @@ const PROTOCOL_PROBE_TIMEOUT_MS = 90_000;
 export interface LiveCodexProtocolProbe {
   prepareWorkspace(directories: IntegrationDirectories): Promise<void>;
   readApprovalRequests(): Promise<string[]>;
+  readApprovalRequestDetails(): Promise<LiveCodexApprovalRequest[]>;
+  readCommandItemIds(): Promise<string[]>;
   waitForApprovalRequest(count?: number): Promise<string>;
 }
 
+export interface LiveCodexApprovalRequest {
+  readonly method: string;
+  readonly approvalId: string | null;
+  readonly itemId: string | null;
+  readonly kind: string | null;
+}
+
 interface LiveCodexProbeEntry {
-  type: 'approval-request';
+  type: 'approval-request' | 'command-item';
   method?: string;
+  approvalId?: string | null;
+  itemId?: string | null;
+  kind?: string | null;
 }
 
 async function readProbeEntries(path: string): Promise<LiveCodexProbeEntry[]> {
@@ -45,10 +57,19 @@ export function createLiveCodexProtocolProbe(
   let approvalPath = '';
 
   async function readApprovalRequests(): Promise<string[]> {
-    return (await readProbeEntries(approvalPath)).flatMap((entry) =>
-      entry.type === 'approval-request' && typeof entry.method === 'string'
-        ? [entry.method]
-        : []);
+    return (await readApprovalRequestDetails()).map((entry) => entry.method);
+  }
+
+  async function readApprovalRequestDetails(): Promise<LiveCodexApprovalRequest[]> {
+    return (await readProbeEntries(approvalPath)).flatMap((entry) => {
+      if (entry.type !== 'approval-request' || typeof entry.method !== 'string') return [];
+      return [{
+        method: entry.method,
+        approvalId: typeof entry.approvalId === 'string' ? entry.approvalId : null,
+        itemId: typeof entry.itemId === 'string' ? entry.itemId : null,
+        kind: typeof entry.kind === 'string' ? entry.kind : null,
+      }];
+    });
   }
 
   return {
@@ -65,6 +86,14 @@ exec "$GARCON_LIVE_CODEX_BUN_BINARY" "$GARCON_LIVE_CODEX_FORWARDER" "$@"
       serverEnvironment.GARCON_CODEX_CLI = wrapperPath;
     },
     readApprovalRequests,
+    readApprovalRequestDetails,
+    async readCommandItemIds() {
+      return (await readProbeEntries(approvalPath)).flatMap((entry) => (
+        entry.type === 'command-item' && typeof entry.itemId === 'string'
+          ? [entry.itemId]
+          : []
+      ));
+    },
     async waitForApprovalRequest(count = 1) {
       const deadline = Date.now() + PROTOCOL_PROBE_TIMEOUT_MS;
       while (Date.now() < deadline) {

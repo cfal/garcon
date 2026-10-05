@@ -7,7 +7,10 @@ import { BoundedLog } from '../../support/bounded-log.js';
 import { Deferred, withTimeout } from '../../support/deferred.js';
 import { FakeAnthropicServer } from '../../support/fake-anthropic-server.js';
 import { FakeClaudeModel } from '../../support/fake-claude-model.js';
-import { FakeCodexModel } from '../../support/fake-codex-model.js';
+import {
+  codexAssistantMessage,
+  FakeCodexModel,
+} from '../../support/fake-codex-model.js';
 import { FakeOpenAiServer } from '../../support/fake-openai-server.js';
 import { FakeOpenAiResponsesServer } from '../../support/fake-openai-responses-server.js';
 import { GarconTestClient } from '../../support/garcon-client.js';
@@ -922,6 +925,34 @@ describe('integration support contracts', () => {
         userTexts: ['first', 'second\nthird'],
         lastUserText: 'second\nthird',
       });
+      fake.assertSettled();
+    } finally {
+      fake.stop();
+    }
+  });
+
+  test('keeps ordered Codex turns ahead of later routed turns', async () => {
+    const fake = FakeCodexModel.start();
+    try {
+      fake.scriptTurn([codexAssistantMessage('ordered response')]);
+      fake.scriptTurnMatching(
+        'later routed response',
+        (request) => request.lastUserText === 'matching request',
+        [codexAssistantMessage('routed response')],
+      );
+      const request = () => fetch(fake.responsesUrl, {
+        method: 'POST',
+        body: JSON.stringify({
+          model: 'scripted',
+          input: [{ type: 'message', role: 'user', content: 'matching request' }],
+        }),
+      }).then((response) => response.text());
+
+      const first = await request();
+      expect(first).toContain('ordered response');
+      expect(first).not.toContain('routed response');
+      const second = await request();
+      expect(second).toContain('routed response');
       fake.assertSettled();
     } finally {
       fake.stop();
