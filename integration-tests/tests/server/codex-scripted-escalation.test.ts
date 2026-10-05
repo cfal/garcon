@@ -195,7 +195,10 @@ describe('scripted Codex escalation', () => {
         name: 'request_permissions',
         arguments: JSON.stringify({
           reason: 'test retained interactive terminal permissions',
-          permissions: { file_system: { write: [fixture.dirs.root] } },
+          permissions: {
+            network: { enabled: true },
+            file_system: { write: [fixture.dirs.root] },
+          },
         }),
         call_id: 'grant_terminal_permissions',
       }]);
