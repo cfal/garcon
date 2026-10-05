@@ -344,9 +344,7 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 		let entriesChanged = applied.status === 'applied' && applied.changed;
 		const previouslyHadLaterMessages = this.hasLaterMessages;
 		if (applied.status === 'applied') {
-			if (entriesChanged && this.visibleWindowStartOrdinal === null) {
-				this.rememberVisibleWindowStart();
-			}
+			if (entriesChanged && this.visibleWindowStartOrdinal === null) this.rememberVisibleWindowStart();
 			this.transcriptViewId = transcriptViewId;
 			if (applied.messages !== this.entries) this.entries = applied.messages;
 			this.loadedThroughOrdinal = applied.lastOrdinal;
