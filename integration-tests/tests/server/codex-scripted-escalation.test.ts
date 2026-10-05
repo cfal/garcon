@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { appendFile, readFile, rm } from 'node:fs/promises';
+import { readFile, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { shellQuote } from '../../../cli/shell-quote.js';
@@ -190,28 +190,14 @@ describe('scripted Codex escalation', () => {
     const terminalCommand = '/bin/bash --noprofile --norc';
     let sessionId = 0;
     await withIntegrationFixture('codex-scripted-stdin-approvals', async (fixture) => {
-      testEnvironment.model.scriptTurn([{
-        type: 'function_call',
-        name: 'request_permissions',
-        arguments: JSON.stringify({
-          reason: 'test retained interactive terminal permissions',
-          permissions: {
-            network: { enabled: true },
-            file_system: { write: [fixture.dirs.root] },
-          },
-        }),
-        call_id: 'grant_terminal_permissions',
-      }]);
-      testEnvironment.model.scriptTurn((request) => {
-        const grant = request.functionCallOutputs.find(
-          (output) => output.callId === 'grant_terminal_permissions',
-        );
-        if (!grant) throw new Error('Permission grant output never reached the model.');
-        return [codexExecCommandCall('open_terminal', terminalCommand, {
+      testEnvironment.model.scriptTurn([
+        codexExecCommandCall('open_terminal', terminalCommand, {
           tty: true,
           yield_time_ms: 200,
-        })];
-      });
+          sandbox_permissions: 'require_escalated',
+          justification: 'test requires an unsandboxed interactive terminal',
+        }),
+      ]);
       testEnvironment.model.scriptTurn((request) => {
         const opened = request.functionCallOutputs.find(
           (output) => output.callId === 'open_terminal',
@@ -298,13 +284,6 @@ describe('scripted Codex escalation', () => {
       serverEnvironment,
       prepareWorkspace: async (directories) => {
         await testEnvironment.prepareWorkspace(directories);
-        await appendFile(join(directories.home, '.codex', 'config.toml'), [
-          '',
-          '[features]',
-          'exec_permission_approvals = true',
-          'request_permissions_tool = true',
-          '',
-        ].join('\n'));
         await protocolProbe.prepareWorkspace(directories);
       },
     });
