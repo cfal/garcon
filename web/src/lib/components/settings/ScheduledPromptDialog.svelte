@@ -36,11 +36,12 @@
 	interface Props {
 		open: boolean;
 		scheduledPrompt: ScheduledPrompt | null;
+		currentTime: Date;
 		onSave: (definition: ScheduledPromptDefinitionInput) => Promise<void>;
 		onClose: () => void;
 	}
 
-	let { open, scheduledPrompt, onSave, onClose }: Props = $props();
+	let { open, scheduledPrompt, currentTime, onSave, onClose }: Props = $props();
 	const rootModelCatalog = getModelCatalog();
 	const executors = getExecutors();
 	const localSettings = getLocalSettings();
@@ -95,14 +96,15 @@
 	const selectedChat = $derived(
 		form.existingChatId ? sessions.byId[form.existingChatId] : undefined,
 	);
-	const minimumDate = $derived(localDateValue(new Date()));
+	const minimumDate = $derived(localDateValue(currentTime));
 	const snippetContextKey = $derived(
 		form.targetType === 'new-chat'
 			? form.startup.pathContextKey
 			: `${selectedChat?.executorId ?? 'local'}\u0000${selectedChat?.projectPath ?? ''}`,
 	);
-	const timezone = $derived(browserTimeZoneLabel());
-	const schedulePreview = $derived(form.schedulePreview(PREVIEW_RUN_COUNT));
+	const timezone = $derived(browserTimeZoneLabel(currentTime));
+	const schedulePreview = $derived(form.schedulePreview(PREVIEW_RUN_COUNT, currentTime));
+	const canSave = $derived(form.canSaveAt(currentTime));
 	// A saved recurring prompt has already started, so its date and time are its next run.
 	const editingRecurrence = $derived(scheduledPrompt?.schedule.type === 'recurring');
 	const dateLabel = $derived.by(() => {
@@ -363,6 +365,7 @@
 				{/if}
 				<ScheduledPromptSchedulePreview
 					preview={schedulePreview}
+					{currentTime}
 					recurring={form.scheduleType === 'recurring'}
 					cadence={form.scheduleType === 'recurring'
 						? recurringCadenceLabel(form.intervalMinutes)
@@ -483,7 +486,7 @@
 			<Button variant="secondary" onclick={onClose} disabled={form.saving}>
 				{m.scheduled_prompts_cancel()}
 			</Button>
-			<Button onclick={() => void save()} disabled={!form.canSave}>
+			<Button onclick={() => void save()} disabled={!canSave}>
 				{form.saving ? m.scheduled_prompts_saving() : m.scheduled_prompts_save()}
 			</Button>
 		</Dialog.Footer>

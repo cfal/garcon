@@ -244,6 +244,7 @@
 
 <ScheduledPromptDialog
 	open={formOpen}
+	{currentTime}
 	scheduledPrompt={editingPrompt}
 	onSave={save}
 	onClose={() => (formOpen = false)}

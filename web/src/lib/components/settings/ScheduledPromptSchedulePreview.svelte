@@ -8,11 +8,12 @@
 
 	interface Props {
 		preview: SchedulePreview;
+		currentTime: Date;
 		recurring: boolean;
 		cadence: string;
 	}
 
-	let { preview, recurring, cadence }: Props = $props();
+	let { preview, currentTime, recurring, cadence }: Props = $props();
 
 	const issueMessage = $derived.by(() => {
 		switch (preview.issue) {
@@ -55,7 +56,7 @@
 				</p>
 				<ul class="text-xs text-foreground">
 					{#each preview.upcomingRuns as run (run)}
-						<li>{scheduledInstantLabel(run)}</li>
+						<li>{scheduledInstantLabel(run, currentTime)}</li>
 					{/each}
 				</ul>
 			</div>

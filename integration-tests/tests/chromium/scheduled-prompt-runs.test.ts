@@ -116,3 +116,76 @@ test('scheduled prompts preview their schedule, report runs under the label they
     await browserExpect(page).toHaveURL(new RegExp(`/chat/${createdChatId}$`));
   });
 }, 150_000);
+
+test('scheduled prompt previews and save admission follow the clock while editing', async () => {
+  await withChromiumFixture('scheduled-prompt-clock', async ({ page, integration }, phase) => {
+    const { client } = integration;
+    const agent = integration.directAgents.openAi;
+    const firstRunAtUtc = '2030-01-01T09:00:00.000Z';
+    const target = {
+      type: 'new-chat' as const,
+      executorId: client.executorId,
+      agentId: agent.agentId,
+      projectPath: integration.executionDirs.project,
+      model: agent.provider.model,
+      apiProviderId: agent.provider.providerId,
+      modelEndpointId: agent.provider.endpointId,
+      modelProtocol: agent.provider.protocol,
+      permissionMode: 'default' as const,
+      thinkingMode: 'none' as const,
+      agentSettingsById: { [agent.agentId]: agent.agentSettings },
+      tags: [],
+      preambleChoice: { mode: 'defaults' as const },
+    };
+    const initial = await client.getScheduledPrompts();
+    const once = await client.createScheduledPrompt({
+      expectedRevision: initial.revision,
+      scheduledPrompt: {
+        schedule: { type: 'once', runAtUtc: firstRunAtUtc },
+        target,
+        prompt: 'One-off clock check',
+      },
+    });
+    await client.createScheduledPrompt({
+      expectedRevision: once.snapshot.revision,
+      scheduledPrompt: {
+        schedule: { type: 'recurring', firstRunAtUtc, intervalMinutes: 60, endAtUtc: null },
+        target,
+        prompt: 'Recurring clock check',
+      },
+    });
+
+    await page.clock.install({ time: new Date('2030-01-01T08:59:30.000Z') });
+    await page.goto(integration.garcon.baseUrl);
+    await page.getByRole('button', { name: 'More actions', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Scheduled prompts', exact: true }).click();
+    const list = page.getByRole('dialog', { name: 'Scheduled Prompts', exact: true });
+    await list.getByRole('article').filter({ hasText: 'One-off clock check' })
+      .getByRole('button', { name: 'Edit prompt', exact: true }).click();
+    const editor = page.getByRole('dialog', { name: 'Edit Scheduled Prompt', exact: true });
+    const preview = editor.locator('[data-slot="scheduled-prompt-schedule-preview"]');
+    const save = editor.getByRole('button', { name: 'Save Prompt', exact: true });
+    await browserExpect(save).toBeEnabled();
+
+    phase('letting the one-off expire without changing any inputs');
+    await page.clock.fastForward(60_000);
+    await browserExpect(preview).toHaveText('Choose a time at least one minute from now.');
+    await browserExpect(save).toBeDisabled();
+    await editor.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await editor.waitFor({ state: 'detached' });
+
+    phase('advancing an untouched recurring anchor in both preview and saved schedule');
+    await list.getByRole('article').filter({ hasText: 'Recurring clock check' })
+      .getByRole('button', { name: 'Edit prompt', exact: true }).click();
+    await browserExpect(preview.getByRole('listitem').first()).toContainText('10:00');
+    await page.clock.fastForward(60 * MINUTE_MS);
+    await browserExpect(preview.getByRole('listitem').first()).toContainText('11:00');
+    await browserExpect(save).toBeEnabled();
+    await save.click();
+    await editor.waitFor({ state: 'detached' });
+    const saved = (await client.getScheduledPrompts()).prompts.find(
+      (prompt) => prompt.prompt === 'Recurring clock check',
+    );
+    expect(saved?.schedule.nextRunAt).toBe('2030-01-01T11:00:00.000Z');
+  });
+}, 60_000);

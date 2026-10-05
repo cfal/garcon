@@ -86,6 +86,37 @@ it('blocks saving while a snippet expansion is pending', async () => {
 	expect(form.canSave).toBe(true);
 });
 
+it('expires one-off admission and its preview at the same clock boundary', async () => {
+	const form = createForm();
+	await form.initialize(existingPrompt({ type: 'once', nextRunAt: '2030-01-01T09:00:00.000Z' }));
+	const before = new Date('2030-01-01T08:59:30.000Z');
+	const after = new Date('2030-01-01T09:00:30.000Z');
+
+	expect(form.canSaveAt(before)).toBe(true);
+	expect(form.schedulePreview(3, before).upcomingRuns).toEqual(['2030-01-01T09:00:00.000Z']);
+	expect(form.canSaveAt(after)).toBe(false);
+	expect(form.schedulePreview(3, after)).toMatchObject({ issue: 'past', upcomingRuns: [] });
+	expect(form.buildDefinition(after)).toBeNull();
+});
+
+it('advances a recurring preview and stops admission once the final occurrence expires', async () => {
+	const form = createForm();
+	await form.initialize(existingPrompt({
+		type: 'recurring',
+		nextRunAt: '2030-01-01T09:00:00.000Z',
+		intervalMinutes: 60,
+		endAt: '2030-01-01T10:00:00.000Z',
+	}));
+	const beforeEnd = new Date('2030-01-01T09:00:30.000Z');
+	const afterEnd = new Date('2030-01-01T10:00:30.000Z');
+
+	expect(form.canSaveAt(beforeEnd)).toBe(true);
+	expect(form.schedulePreview(3, beforeEnd).upcomingRuns).toEqual(['2030-01-01T10:00:00.000Z']);
+	expect(form.canSaveAt(afterEnd)).toBe(false);
+	expect(form.schedulePreview(3, afterEnd)).toMatchObject({ issue: 'end-before-start', upcomingRuns: [] });
+	expect(form.buildDefinition(afterEnd)).toBeNull();
+});
+
 function newChatPrompt(
 	target: Omit<Extract<ScheduledPrompt['target'], { type: 'new-chat' }>, 'preambleChoice'> &
 		Partial<Pick<Extract<ScheduledPrompt['target'], { type: 'new-chat' }>, 'preambleChoice'>>,

@@ -91,11 +91,15 @@ export class ScheduledPromptFormState {
 	}
 
 	get canSave(): boolean {
+		return this.canSaveAt(new Date());
+	}
+
+	canSaveAt(now: Date): boolean {
 		return (
 			!this.saving &&
 			!this.promptTransformPending &&
 			this.promptError === null &&
-			this.scheduleValid &&
+			this.scheduleIssue(now) === null &&
 			this.targetValid
 		);
 	}
@@ -118,10 +122,6 @@ export class ScheduledPromptFormState {
 		}
 		if (hasLeadingSlashCommand(this.prompt)) return m.scheduled_prompts_slash_command_error();
 		return null;
-	}
-
-	get scheduleValid(): boolean {
-		return this.scheduleIssue() === null;
 	}
 
 	scheduleIssue(now = new Date()): ScheduleIssue | null {
