@@ -1119,7 +1119,8 @@ describe('files route', () => {
       const response = await createDirectory(routes, projectPath, { name: 'child' });
       expect(response.status).toBe(403);
       expect((await response.json()).errorCode).toBe('FILE_PERMISSION_DENIED');
-      expect(mkdir).toHaveBeenCalledWith(path.join(projectPath, 'child'));
+      expect(mkdir).toHaveBeenCalledOnce();
+      expect(path.basename(mkdir.mock.calls[0][0])).toBe('child');
     } finally { mkdir.mockRestore(); }
     await expect(fs.stat(path.join(projectPath, 'child'))).rejects.toThrow();
   });

@@ -245,6 +245,73 @@ const target = () => ({ projectPath: path.join(directory, 'project'), filePath: 
     } finally { await fs.rm(outside, { recursive: true, force: true }); }
   });
 
+  describe.skipIf(process.platform !== 'linux')('with a parent swapped for a link during creation', () => {
+    let outside: string;
+    let parent: string;
+    beforeEach(async () => {
+      outside = await fs.mkdtemp(path.join(os.tmpdir(), 'garcon-files-outside-'));
+      parent = path.join(target().projectPath, 'a', 'b');
+      await fs.mkdir(parent, { recursive: true });
+      await fs.mkdir(path.join(outside, 'b'));
+    });
+    afterEach(async () => { await fs.rm(outside, { recursive: true, force: true }); });
+    const moved = () => path.join(target().projectPath, 'a-moved');
+    // Replaces an ancestor of the validated parent with a link that leads outside the base.
+    const swapAncestor = async () => {
+      await fs.rename(path.join(target().projectPath, 'a'), moved());
+      await fs.symlink(outside, path.join(target().projectPath, 'a'));
+    };
+
+    it('creates in the validated directory when the swap lands immediately before creation', async () => {
+      const mkdir = fs.mkdir;
+      let swapped = false;
+      const intercepted = spyOn(fs, 'mkdir').mockImplementation(async (...args) => {
+        if (!swapped && String(args[0]).endsWith('/child')) { swapped = true; await swapAncestor(); }
+        return mkdir(...args);
+      });
+      try {
+        expect(await service.createDirectory({ parentPath: parent, name: 'child' })).toMatchObject({ name: 'child', type: 'directory' });
+      } finally { intercepted.mockRestore(); }
+      expect(swapped).toBe(true);
+      expect(await fs.readdir(path.join(outside, 'b'))).toEqual([]);
+      expect(await fs.readdir(path.join(moved(), 'b'))).toEqual(['child']);
+    });
+
+    it('creates nothing when the swap lands before the parent is opened', async () => {
+      const open = fs.open;
+      let swapped = false;
+      const intercepted = spyOn(fs, 'open').mockImplementation(async (...args) => {
+        if (!swapped && args[0] === parent) { swapped = true; await swapAncestor(); }
+        return open(...args);
+      });
+      try {
+        await expect(service.createDirectory({ parentPath: parent, name: 'child' })).rejects.toMatchObject({ code: 'FILE_REVISION_CONFLICT', status: 409 });
+      } finally { intercepted.mockRestore(); }
+      expect(swapped).toBe(true);
+      expect(await fs.readdir(path.join(outside, 'b'))).toEqual([]);
+      expect(await fs.readdir(path.join(moved(), 'b'))).toEqual([]);
+    });
+
+    it('creates nothing when the parent itself becomes a link before it is opened', async () => {
+      const open = fs.open;
+      let swapped = false;
+      const intercepted = spyOn(fs, 'open').mockImplementation(async (...args) => {
+        if (!swapped && args[0] === parent) {
+          swapped = true;
+          await fs.rename(parent, `${parent}-moved`);
+          await fs.symlink(path.join(outside, 'b'), parent);
+        }
+        return open(...args);
+      });
+      try {
+        await expect(service.createDirectory({ parentPath: parent, name: 'child' })).rejects.toMatchObject({ code: 'FILE_NOT_FOUND', status: 404 });
+      } finally { intercepted.mockRestore(); }
+      expect(swapped).toBe(true);
+      expect(await fs.readdir(path.join(outside, 'b'))).toEqual([]);
+      expect(await fs.readdir(`${parent}-moved`)).toEqual([]);
+    });
+  });
+
   it('accepts the longest name and reports a denied creation as definite', async () => {
     const project = target().projectPath;
     const longest = 'é'.repeat(127) + 'x';

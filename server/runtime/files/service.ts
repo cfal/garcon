@@ -10,6 +10,7 @@ import { toNativePath, toExecutorPath } from '../../common/executor-path.js';
 import { readVersionedFile, getFileRevisionOrMissing, getFileLockKey, writeVersionedTextFile, FileTooLargeError } from './file-revision.js';
 import { readDirectoryCandidates, fileBreadcrumbs, listProjectFiles, readFileDirectory, relativeFilePath } from './directory-reader.js';
 import { directoryCreationError, fileOperationError, fileRevisionConflict } from './errors.js';
+import { createChildDirectory } from './directory-creation.js';
 
 export interface FilesServiceOptions {
   readonly executorId: string;
@@ -123,12 +124,10 @@ export class FilesService implements ExecutionFilesService {
       const problem = typeof request.name === 'string' ? directoryNameProblem(request.name) : 'empty';
       if (problem) throw new ValidationDomainError(DIRECTORY_NAME_PROBLEMS[problem]);
       if (!isPathInput(request.parentPath)) throw new ValidationDomainError('Invalid directory path');
-      const { directory } = await this.#directory(request.parentPath);
-      // The name is one segment, so the target stays inside its canonical parent.
-      const target = path.join(directory, request.name);
+      const { root, directory } = await this.#directory(request.parentPath);
       this.#available(options);
-      try { await fs.mkdir(target); }
-      catch (error) { throw directoryCreationError(error); }
+      // The name is one segment, so the target stays inside its canonical parent.
+      const target = await createChildDirectory(root, directory, request.name).catch((error: unknown) => { throw directoryCreationError(error); });
       return { name: request.name, path: toExecutorPath(target), type: 'directory' as const };
     });
   }

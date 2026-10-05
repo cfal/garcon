@@ -206,6 +206,32 @@ describe('DirectoryBrowserState confirming a selection', () => {
 		expect(names(sheet)).toEqual(['alpine', 'nested']);
 	});
 
+	it('opens the base after a bounded number of listings when a deep path is missing', async () => {
+		const segments = Array.from({ length: 2000 }, (_, index) => `s${index}`);
+		const sheet = open({ currentPath: `/repo/${segments.join('/')}`, confirmsSelection: true });
+		for (let turn = 0; turn < 8; turn += 1) await settle();
+		expect(browsedPaths()).toEqual([
+			`/repo/${segments.join('/')}`,
+			`/repo/${segments.slice(0, -1).join('/')}`,
+			`/repo/${segments.slice(0, -2).join('/')}`,
+			`/repo/${segments.slice(0, -3).join('/')}`,
+			'/repo',
+		]);
+		expect(sheet.browser.directory).toBe('/repo');
+		expect(sheet.browser.filter).toBe('');
+		expect(names(sheet)).toEqual(['alpha', 'alpha-two', 'beta']);
+		expect(sheet.browser.canConfirm).toBe(true);
+	});
+
+	it('reports a base it cannot list instead of looking further', async () => {
+		directories.delete('/repo');
+		const sheet = open({ currentPath: '/repo/a/b/c/d/e', confirmsSelection: true });
+		for (let turn = 0; turn < 8; turn += 1) await settle();
+		expect(browsedPaths()).toHaveLength(5);
+		expect(sheet.browser.directory).toBe('/repo');
+		expect(sheet.browser.listing.status).toBe('error');
+	});
+
 	it('opens the directory of a path that names a file without offering to create it', async () => {
 		vi.mocked(browseDirectory).mockImplementation(async (path) => {
 			if (path === '/repo/alpha/README.md') {

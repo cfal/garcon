@@ -52,6 +52,9 @@ const NAME_PROBLEM_MESSAGES: Record<Exclude<DirectoryNameProblem, 'empty'>, () =
 	'too-long': m.chat_directory_browser_name_too_long,
 };
 
+// Ancestors tried one listing at a time before a missing path opens the base.
+const MAX_PARENT_FALLBACKS = 3;
+
 function isFileError(error: unknown, errorCode: string): boolean {
 	return error instanceof ApiError && error.errorCode === errorCode;
 }
@@ -80,9 +83,9 @@ function fieldView(typed: string, basePath: string, navigated: string | undefine
 /** Browses, selects, and creates directories for one path field on one executor. */
 export class DirectoryBrowserState {
 	readonly #options: DirectoryBrowserStateOptions;
-	// `listed` marks a directory the user reached from a listing, as opposed to
-	// one this browser fell back to.
-	#navigation = $state.raw<(DirectoryTarget & { readonly listed: boolean }) | null>(null);
+	// `fallbacks` counts the steps this browser took away from a path that names
+	// no directory; zero marks a directory the user reached from a listing.
+	#navigation = $state.raw<(DirectoryTarget & { readonly fallbacks: number }) | null>(null);
 	#filter = $state.raw<(DirectoryTarget & { readonly text: string }) | null>(null);
 	#listed = $state.raw<{ readonly target: string; readonly listing: DirectoryListing } | null>(
 		null,
@@ -190,7 +193,9 @@ export class DirectoryBrowserState {
 		const { status } = this.listing;
 		if (status !== 'loading') return status === 'ready';
 		const navigation = this.#currentNavigation;
-		return navigation !== null && navigation.listed && navigation.directory === this.directory;
+		return (
+			navigation !== null && navigation.fallbacks === 0 && navigation.directory === this.directory
+		);
 	}
 
 	get canCreate(): boolean {
@@ -256,7 +261,7 @@ export class DirectoryBrowserState {
 		const { basePath, executorId, confirmsSelection, onSelect } = this.#options;
 		if (!isWithinBasePath(path, basePath)) return false;
 		const directory = normalizeDirectoryPath(path);
-		this.#navigation = { executorId, directory, listed: true };
+		this.#navigation = { executorId, directory, fallbacks: 0 };
 		this.#filter = null;
 		this.#creation = null;
 		if (!confirmsSelection) onSelect(directory);
@@ -335,15 +340,24 @@ export class DirectoryBrowserState {
 	}
 
 	// The confirming browser opens on the field's path as a directory. A path that
-	// names none opens its nearest listable ancestor instead. A missing name
-	// becomes the filter, so the list offers to create it; a file's name does not.
+	// names none opens a nearby ancestor instead. A missing name becomes the
+	// filter, so the list offers to create it; a file's name does not. Each step
+	// costs one listing, so a path missing more than a few levels opens the base.
 	#retreatToParent(error: unknown, executorId: string, directory: string): boolean {
-		if (!this.#options.confirmsSelection || this.#currentNavigation?.listed) return false;
+		const navigation = this.#currentNavigation;
+		if (!this.#options.confirmsSelection || navigation?.fallbacks === 0) return false;
 		const missing = isFileError(error, 'FILE_NOT_FOUND');
 		if (!missing && !isFileError(error, 'FILE_DIRECTORY_REQUIRED')) return false;
 		const parent = parentDirectoryPath(directory, this.#options.basePath);
 		if (parent === null) return false;
-		this.#navigation = { executorId, directory: parent, listed: false };
+		const fallbacks = (navigation?.fallbacks ?? 0) + 1;
+		if (fallbacks > MAX_PARENT_FALLBACKS) {
+			const base = normalizeDirectoryPath(this.#options.basePath);
+			this.#navigation = { executorId, directory: base, fallbacks };
+			this.#filter = null;
+			return true;
+		}
+		this.#navigation = { executorId, directory: parent, fallbacks };
 		this.#filter = missing
 			? { executorId, directory: parent, text: splitTypedDirectoryPath(directory).partial }
 			: null;
