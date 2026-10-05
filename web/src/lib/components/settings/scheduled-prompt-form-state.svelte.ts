@@ -5,10 +5,12 @@ import type { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 import type { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 import { NewChatFormState } from '$lib/chat/new-chat/new-chat-form-state.svelte.js';
 import {
+	advanceRecurringAnchor,
 	localDateTimeToUtcIso,
 	localDateValue,
 	localTimeValue,
 	nextLocalTimeUtcIso,
+	recurringOccurrences,
 } from '$lib/scheduling/local-schedule';
 import {
 	SCHEDULED_PROMPT_INTERVAL_MINUTES_MAX,
@@ -22,6 +24,26 @@ import {
 import * as m from '$lib/paraglide/messages.js';
 
 const MINUTES_BY_UNIT = { minutes: 1, hours: 60, days: 1440 } as const;
+
+export const SCHEDULE_INTERVAL_PRESET_MINUTES = [15, 60, 1440, 10080] as const;
+
+export type ScheduleIssue = 'incomplete' | 'past' | 'interval' | 'end-before-start';
+
+type ScheduleInput = ScheduledPromptDefinitionInput['schedule'];
+type ScheduleEvaluation =
+	| { schedule: ScheduleInput; issue: null }
+	| { schedule: null; issue: ScheduleIssue };
+
+export interface SchedulePreview {
+	issue: ScheduleIssue | null;
+	// Empty while `issue` is set.
+	upcomingRuns: string[];
+	endAt: string | null;
+}
+
+function invalidSchedule(issue: ScheduleIssue): ScheduleEvaluation {
+	return { schedule: null, issue };
+}
 
 export interface ScheduledPromptFormStateOptions {
 	executors?: ExecutorsStore;
@@ -47,6 +69,7 @@ export class ScheduledPromptFormState {
 	promptTransformPending = $state(false);
 	error = $state<string | null>(null);
 	#originalNextRunAt: string | null = null;
+	#originalLocalDate: string | null = null;
 	#originalLocalTime: string | null = null;
 	#originalEndAt: string | null = null;
 	#originalEndDate: string | null = null;
@@ -68,13 +91,21 @@ export class ScheduledPromptFormState {
 	}
 
 	get canSave(): boolean {
+		return this.canSaveAt(new Date());
+	}
+
+	canSaveAt(now: Date): boolean {
 		return (
 			!this.saving &&
 			!this.promptTransformPending &&
 			this.promptError === null &&
-			this.scheduleValid &&
+			this.scheduleIssue(now) === null &&
 			this.targetValid
 		);
+	}
+
+	get intervalMinutes(): number {
+		return this.intervalAmount * MINUTES_BY_UNIT[this.intervalUnit];
 	}
 
 	get intervalAmountMax(): number {
@@ -93,8 +124,42 @@ export class ScheduledPromptFormState {
 		return null;
 	}
 
-	get scheduleValid(): boolean {
-		return this.buildSchedule(new Date()) !== null;
+	scheduleIssue(now = new Date()): ScheduleIssue | null {
+		return this.#evaluateSchedule(now).issue;
+	}
+
+	// Describes what the current inputs would do, so the form can show the first runs
+	// or the reason the schedule cannot be saved.
+	schedulePreview(runCount: number, now = new Date()): SchedulePreview {
+		const { schedule, issue } = this.#evaluateSchedule(now);
+		if (!schedule) return { issue, upcomingRuns: [], endAt: null };
+		if (schedule.type === 'once') {
+			return { issue: null, upcomingRuns: [schedule.runAtUtc], endAt: null };
+		}
+		return {
+			issue: null,
+			upcomingRuns: recurringOccurrences(
+				schedule.firstRunAtUtc,
+				schedule.intervalMinutes,
+				schedule.endAtUtc,
+				runCount,
+			),
+			endAt: schedule.endAtUtc,
+		};
+	}
+
+	// Expresses the interval in the largest unit that divides it evenly.
+	setIntervalMinutes(intervalMinutes: number): void {
+		if (intervalMinutes % MINUTES_BY_UNIT.days === 0) {
+			this.intervalUnit = 'days';
+			this.intervalAmount = intervalMinutes / MINUTES_BY_UNIT.days;
+		} else if (intervalMinutes % MINUTES_BY_UNIT.hours === 0) {
+			this.intervalUnit = 'hours';
+			this.intervalAmount = intervalMinutes / MINUTES_BY_UNIT.hours;
+		} else {
+			this.intervalUnit = 'minutes';
+			this.intervalAmount = intervalMinutes;
+		}
 	}
 
 	get targetValid(): boolean {
@@ -122,9 +187,8 @@ export class ScheduledPromptFormState {
 	async initialize(scheduledPrompt: ScheduledPrompt | null): Promise<void> {
 		this.error = null;
 		this.saving = false;
-		const defaultDate = new Date();
-		defaultDate.setDate(defaultDate.getDate() + 1);
-		this.date = localDateValue(defaultDate);
+		const defaultRunAt = nextLocalTimeUtcIso(this.time);
+		if (defaultRunAt) this.date = localDateValue(new Date(defaultRunAt));
 		if (!scheduledPrompt) {
 			await this.startup.loadSettingsAndModels();
 			return;
@@ -139,18 +203,9 @@ export class ScheduledPromptFormState {
 		this.time = localTimeValue(next);
 		if (scheduledPrompt.schedule.type === 'recurring') {
 			this.#originalNextRunAt = scheduledPrompt.schedule.nextRunAt;
+			this.#originalLocalDate = this.date;
 			this.#originalLocalTime = this.time;
-			const intervalMinutes = scheduledPrompt.schedule.intervalMinutes;
-			if (intervalMinutes % MINUTES_BY_UNIT.days === 0) {
-				this.intervalUnit = 'days';
-				this.intervalAmount = intervalMinutes / MINUTES_BY_UNIT.days;
-			} else if (intervalMinutes % MINUTES_BY_UNIT.hours === 0) {
-				this.intervalUnit = 'hours';
-				this.intervalAmount = intervalMinutes / MINUTES_BY_UNIT.hours;
-			} else {
-				this.intervalUnit = 'minutes';
-				this.intervalAmount = intervalMinutes;
-			}
+			this.setIntervalMinutes(scheduledPrompt.schedule.intervalMinutes);
 			this.recurrenceEnd = scheduledPrompt.schedule.endAt ? 'until' : 'forever';
 			this.endDate = scheduledPrompt.schedule.endAt
 				? localDateValue(new Date(scheduledPrompt.schedule.endAt))
@@ -187,7 +242,7 @@ export class ScheduledPromptFormState {
 	}
 
 	buildDefinition(now = new Date()): ScheduledPromptDefinitionInput | null {
-		const schedule = this.buildSchedule(now);
+		const { schedule } = this.#evaluateSchedule(now);
 		if (!schedule || !this.targetValid || this.promptError) return null;
 		if (this.targetType === 'existing-chat') {
 			if (!this.existingChatId) return null;
@@ -236,33 +291,51 @@ export class ScheduledPromptFormState {
 		return localDateTimeToUtcIso(this.endDate, this.time);
 	}
 
-	private buildSchedule(now: Date): ScheduledPromptDefinitionInput['schedule'] | null {
-		const minimum = Math.floor(now.getTime() / 60_000) * 60_000 + 60_000;
-		if (this.scheduleType === 'once') {
-			const runAtUtc = localDateTimeToUtcIso(this.date, this.time);
-			return runAtUtc && Date.parse(runAtUtc) >= minimum ? { type: 'once', runAtUtc } : null;
+	// An untouched recurring anchor keeps its exact UTC instant; one that passed while
+	// the dialog was open advances by whole intervals instead of becoming invalid.
+	#recurringFirstRunAt(
+		anchor: string | null,
+		intervalMinutes: number,
+		minimumMs: number,
+	): string | null {
+		if (
+			this.#originalNextRunAt &&
+			this.#originalLocalDate === this.date &&
+			this.#originalLocalTime === this.time
+		) {
+			return advanceRecurringAnchor(this.#originalNextRunAt, intervalMinutes, minimumMs);
 		}
-		const intervalMinutes = this.intervalAmount * MINUTES_BY_UNIT[this.intervalUnit];
+		return anchor;
+	}
+
+	#evaluateSchedule(now: Date): ScheduleEvaluation {
+		const minimumMs = Math.floor(now.getTime() / 60_000) * 60_000 + 60_000;
+		const anchor = localDateTimeToUtcIso(this.date, this.time);
+		if (this.scheduleType === 'once') {
+			if (!anchor) return invalidSchedule('incomplete');
+			if (Date.parse(anchor) < minimumMs) return invalidSchedule('past');
+			return { schedule: { type: 'once', runAtUtc: anchor }, issue: null };
+		}
+		const intervalMinutes = this.intervalMinutes;
 		if (
 			!Number.isSafeInteger(this.intervalAmount) ||
 			!Number.isSafeInteger(intervalMinutes) ||
 			intervalMinutes < SCHEDULED_PROMPT_INTERVAL_MINUTES_MIN ||
 			intervalMinutes > SCHEDULED_PROMPT_INTERVAL_MINUTES_MAX
-		)
-			return null;
-		let firstRunAtUtc: string | null;
-		if (
-			this.#originalNextRunAt &&
-			this.#originalLocalTime === this.time &&
-			Date.parse(this.#originalNextRunAt) >= minimum
 		) {
-			firstRunAtUtc = this.#originalNextRunAt;
-		} else {
-			firstRunAtUtc = nextLocalTimeUtcIso(this.time, now);
+			return invalidSchedule('interval');
 		}
-		if (!firstRunAtUtc || Date.parse(firstRunAtUtc) < minimum) return null;
+		const firstRunAtUtc = this.#recurringFirstRunAt(anchor, intervalMinutes, minimumMs);
+		if (!firstRunAtUtc) return invalidSchedule('incomplete');
+		if (Date.parse(firstRunAtUtc) < minimumMs) return invalidSchedule('past');
 		const endAtUtc = this.buildRecurringEndAtUtc();
-		if (this.recurrenceEnd === 'until' && (!endAtUtc || endAtUtc < firstRunAtUtc)) return null;
-		return { type: 'recurring', firstRunAtUtc, intervalMinutes, endAtUtc };
+		if (this.recurrenceEnd === 'until') {
+			if (!endAtUtc) return invalidSchedule('incomplete');
+			if (endAtUtc < firstRunAtUtc) return invalidSchedule('end-before-start');
+		}
+		return {
+			schedule: { type: 'recurring', firstRunAtUtc, intervalMinutes, endAtUtc },
+			issue: null,
+		};
 	}
 }

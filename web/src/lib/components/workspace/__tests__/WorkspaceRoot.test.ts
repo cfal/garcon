@@ -36,6 +36,7 @@ import { terminalDisplayName } from '$lib/terminal/sessions/terminal-display-nam
 import { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
 import type { GhCapabilityStore } from '$lib/git/pull-requests/gh-capability.svelte.js';
 import type { WorkspaceContextStore } from '$lib/workspace/workspace-context.svelte.js';
+import { LocalSettingsStore } from '$lib/stores/local-settings.svelte.js';
 
 const testContext = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
 const chatApiMocks = vi.hoisted(() => ({ getChatMessages: vi.fn() }));
@@ -405,12 +406,8 @@ function installContext({ showQuickCommitTray = false }: { showQuickCommitTray?:
 		reattach: vi.fn(),
 		rename: vi.fn(async (_terminalId: string, _title: string | null) => undefined),
 	};
-	const localSettings = {
-		terminalFontSize: '13',
-		workspaceWindowTitlebarHeightDeltaPx: 0,
-		showQuickCommitTray,
-		set: vi.fn(),
-	};
+	const localSettings = new LocalSettingsStore();
+	localSettings.showQuickCommitTray = showQuickCommitTray;
 	const fetchProjectResolution = vi.fn(async (target: ProjectTarget) => ({
 		target,
 		resolution: { kind: 'available' as const, effectiveProjectKey: target.projectPath },
@@ -518,6 +515,7 @@ function panelPresentation(
 
 describe('WorkspaceRoot', () => {
 	beforeEach(() => {
+		localStorage.clear();
 		vi.clearAllMocks();
 		chatApiMocks.getChatMessages.mockReset();
 		chatApiMocks.getChatMessages.mockImplementation(async (request: ChatMessagesRequest) =>
@@ -528,6 +526,7 @@ describe('WorkspaceRoot', () => {
 
 	afterEach(() => {
 		cleanup();
+		(testContext.current?.localSettings as LocalSettingsStore | undefined)?.destroy();
 		(testContext.current?.projectResolution as ProjectResolutionStore | undefined)?.destroy();
 		testContext.current = null;
 		vi.unstubAllGlobals();
@@ -548,6 +547,55 @@ describe('WorkspaceRoot', () => {
 		expect(panel.getAttribute('aria-labelledby')).toBe('window-main-tab-chat-view:window-main');
 		expect(document.getElementById('window-main-tab-chat-view:window-main')).not.toBeNull();
 		expect(container.querySelector('[data-workspace-window-focus-ring]')).toBeNull();
+		expect(container.querySelector('[data-workspace-window-active-border]')).not.toBeNull();
+	});
+
+	it('moves the optional border without remounting windows or the composer', async () => {
+		const { localSettings, workspace } = installContext();
+		localSettings.set('highlightActiveWindow', false);
+		const { container } = renderRoot();
+		const windows = [...container.querySelectorAll('[data-workspace-window-id]')];
+		const composer = container.querySelector('[data-workspace-live-chat-body]');
+		const border = () => container.querySelector('[data-workspace-window-active-border]');
+		localSettings.set('highlightActiveWindow', true);
+		await tick();
+		expect(border()?.getAttribute('data-workspace-window-active-border')).toBe('window-main');
+		expect(border()?.getAttribute('aria-hidden')).toBe('true');
+		expect(border()?.classList.contains('pointer-events-none')).toBe(true);
+
+		await workspace.focusSurface('singleton:files');
+		await tick();
+		expect(border()?.getAttribute('data-workspace-window-active-border')).toBe('window-files');
+		for (const element of windows) {
+			const id = element.getAttribute('data-workspace-window-id');
+			expect(container.querySelector(`[data-workspace-window-id="${id}"]`)).toBe(element);
+		}
+		expect(container.querySelector('[data-workspace-live-chat-body]')).toBe(composer);
+		localSettings.set('highlightActiveWindow', false);
+		await tick();
+		expect(border()).toBeNull();
+	});
+
+	it('suppresses the enabled border in fullscreen, mobile, and the last remaining window', async () => {
+		const { localSettings, workspace } = installContext();
+		const { container, rerender } = renderRoot();
+		const border = () => container.querySelector('[data-workspace-window-active-border]');
+		expect(border()).not.toBeNull();
+		await workspace.enterWindowFullscreen('window-main');
+		await tick();
+		expect(border()).toBeNull();
+		await workspace.exitWindowFullscreen();
+		await tick();
+		expect(border()).not.toBeNull();
+		await rerender({ isMobile: true, chatActions });
+		expect(border()).toBeNull();
+		await rerender({ isMobile: false, chatActions });
+		expect(border()).not.toBeNull();
+		await workspace.closeWindow('window-files');
+		await tick();
+		expect(container.querySelectorAll('[data-workspace-window-id]')).toHaveLength(1);
+		expect(border()).toBeNull();
+		expect(localSettings.highlightActiveWindow).toBe(true);
 	});
 
 	it('keeps fine-pointer content flush while reserving coarse-pointer separator gutters', () => {

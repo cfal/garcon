@@ -1,8 +1,12 @@
-import { render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 import type { ChatListEntry } from '$shared/chat-list';
-import type { ScheduledPrompt, ScheduledPromptTarget } from '$shared/scheduled-prompts';
+import type {
+	ScheduledPrompt,
+	ScheduledPromptRunLogEntry,
+	ScheduledPromptTarget,
+} from '$shared/scheduled-prompts';
 
 vi.mock('../ScheduledPromptDialog.svelte', async () => import('./ScheduledPromptDialogTestStub.svelte'));
 
@@ -104,5 +108,45 @@ describe('ScheduledPromptsSection', () => {
 
 		expect(screen.getByRole('heading', { name: 'Local new chat' })).toBeTruthy();
 		expect(executorPill('Local new chat')).toBeNull();
+	});
+
+	it('shows each prompt its latest run and opens the chat that run created', async () => {
+		const onOpenChat = vi.fn();
+		const run = (overrides: Partial<ScheduledPromptRunLogEntry>): ScheduledPromptRunLogEntry => ({
+			at: '2030-01-01T09:00:00.000Z',
+			scheduledPromptId: 'local-new',
+			promptLabel: 'Local new chat',
+			outcome: 'failed',
+			chatId: null,
+			message: 'Prompt failed: Chat is unavailable.',
+			...overrides,
+		});
+		render(ScheduledPromptsSectionTestHost, {
+			executors: [localExecutor],
+			chats: [chat('chat-created', localExecutor.id)],
+			prompts: [
+				prompt('local-new', 'Local new chat', newChat()),
+				prompt('never-run', 'Never run', newChat()),
+				prompt('stale-chat', 'Stale chat', newChat()),
+			],
+			runLog: [
+				run({}),
+				run({ at: '2030-01-01T10:00:00.000Z', outcome: 'created-chat', chatId: 'chat-created' }),
+				run({ scheduledPromptId: 'stale-chat', outcome: 'created-chat', chatId: 'chat-deleted' }),
+			],
+			onOpenChat,
+		});
+
+		const row = (title: string) =>
+			screen.getByRole('heading', { name: title }).closest('article') as HTMLElement;
+		const lastRun = (title: string) => row(title).querySelector('[data-slot="scheduled-prompt-last-run"]');
+
+		expect(lastRun('Local new chat')?.textContent).toContain('Started a new chat');
+		expect(lastRun('Never run')).toBeNull();
+		expect(lastRun('Stale chat')?.textContent).toContain('Started a new chat');
+		expect(within(row('Stale chat')).queryByRole('button', { name: 'Open chat' })).toBeNull();
+
+		await fireEvent.click(within(row('Local new chat')).getByRole('button', { name: 'Open chat' }));
+		expect(onOpenChat).toHaveBeenCalledWith('chat-created');
 	});
 });

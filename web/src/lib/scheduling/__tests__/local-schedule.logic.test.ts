@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
+	advanceRecurringAnchor,
 	browserTimeZoneLabel,
 	formatCompactTimeUntil,
+	localCalendarDayOffset,
 	localDateTimeToUtcIso,
 	localDateValue,
 	localTimeValue,
 	nextLocalTimeUtcIso,
+	recurringOccurrences,
 } from '../local-schedule';
 import {
 	hasLeadingSlashCommand,
@@ -81,5 +84,42 @@ describe('scheduled prompt validation', () => {
 			intervalMinutes: 120,
 			endAtUtc: '2030-01-10T09:00:00.000Z',
 		});
+	});
+});
+
+describe('schedule presentation helpers', () => {
+	it('counts calendar days rather than elapsed hours', () => {
+		const now = new Date(2030, 0, 1, 23, 30, 0, 0);
+		expect(localCalendarDayOffset(new Date(2030, 0, 1, 23, 59).toISOString(), now)).toBe(0);
+		expect(localCalendarDayOffset(new Date(2030, 0, 2, 0, 15).toISOString(), now)).toBe(1);
+		expect(localCalendarDayOffset(new Date(2029, 11, 31, 23, 45).toISOString(), now)).toBe(-1);
+		expect(localCalendarDayOffset(new Date(2030, 0, 8, 9, 0).toISOString(), now)).toBe(7);
+	});
+
+	it('lists recurring occurrences up to an inclusive end instant', () => {
+		const first = '2030-01-01T09:00:00.000Z';
+		expect(recurringOccurrences(first, 90, null, 3)).toEqual([
+			'2030-01-01T09:00:00.000Z',
+			'2030-01-01T10:30:00.000Z',
+			'2030-01-01T12:00:00.000Z',
+		]);
+		expect(recurringOccurrences(first, 90, '2030-01-01T10:30:00.000Z', 3)).toEqual([
+			'2030-01-01T09:00:00.000Z',
+			'2030-01-01T10:30:00.000Z',
+		]);
+		expect(recurringOccurrences('invalid', 90, null, 3)).toEqual([]);
+		expect(recurringOccurrences(first, 0, null, 3)).toEqual([]);
+	});
+
+	it('advances a passed anchor by whole intervals and keeps a future one', () => {
+		const anchor = '2030-01-01T09:00:00.000Z';
+		expect(advanceRecurringAnchor(anchor, 60, Date.parse('2030-01-01T08:00:00.000Z'))).toBe(anchor);
+		expect(advanceRecurringAnchor(anchor, 60, Date.parse(anchor))).toBe(anchor);
+		expect(advanceRecurringAnchor(anchor, 60, Date.parse('2030-01-01T09:01:00.000Z'))).toBe(
+			'2030-01-01T10:00:00.000Z',
+		);
+		expect(advanceRecurringAnchor(anchor, 90, Date.parse('2030-01-01T12:00:00.000Z'))).toBe(
+			'2030-01-01T12:00:00.000Z',
+		);
 	});
 });

@@ -83,7 +83,13 @@ describe('scheduled prompt chat ID variables', () => {
 
       const after = await fixture.client.getScheduledPrompts();
       expect(after.prompts).toEqual([]);
-      expect(after.runLog.some((entry) => entry.includes(`created chat ${renderedChatId}`))).toBe(true);
+      // The one-off is gone, so the entry carries the label it ran with.
+      expect(after.runLog).toContainEqual(expect.objectContaining({
+        scheduledPromptId: created.snapshot.prompts[0]?.id,
+        promptLabel: rawPrompt,
+        outcome: 'created-chat',
+        chatId: renderedChatId,
+      }));
     });
   }, 120_000);
 });

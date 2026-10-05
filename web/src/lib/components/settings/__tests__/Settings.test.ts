@@ -259,6 +259,11 @@ describe('Settings', () => {
 			await fireEvent.click(allowDirectChats);
 			expect(onLocalToggle).toHaveBeenCalledWith('allowDirectChats');
 			const reduceMotion = screen.getByRole('switch', { name: 'Reduce motion' });
+			const highlightActiveWindow = screen.getByRole('switch', { name: 'Highlight active window' });
+			expect(highlightActiveWindow.getAttribute('aria-checked')).toBe('true');
+			await fireEvent.click(highlightActiveWindow);
+			expect(onLocalToggle).toHaveBeenCalledWith('highlightActiveWindow');
+			expect(highlightActiveWindow.getAttribute('aria-checked')).toBe('false');
 			expect(reduceMotion.getAttribute('aria-checked')).toBe('false');
 			await fireEvent.click(reduceMotion);
 			expect(onLocalToggle).toHaveBeenCalledWith('reduceMotion');

@@ -2,12 +2,15 @@ import {
   renderScheduledPrompt,
   scheduledPromptFitsRenderedLimit,
   type ScheduledPrompt,
+  type ScheduledPromptRunOutcome,
 } from '../../../common/scheduled-prompts.js';
 import type { ChatIdAllocator } from '../chats/chat-id-allocator.js';
 import type { ChatCommandService } from '../commands/chat-command-service.js';
 import type { ScheduledChatStartInput } from '../commands/command-support.js';
 
 export interface ScheduledPromptDispatchOutcome {
+  outcome: Exclude<ScheduledPromptRunOutcome, 'missed' | 'failed'>;
+  chatId: string;
   message: string;
 }
 
@@ -37,14 +40,20 @@ export class ScheduledPromptDispatcher {
         clientMessageId: messageId,
       });
       if (outcome.type === 'queued') {
-        return { message: `Prompt queued for busy chat ${outcome.chatId}.` };
+        return {
+          outcome: 'queued',
+          chatId: outcome.chatId,
+          message: `Prompt queued for busy chat ${outcome.chatId}.`,
+        };
       }
       if (outcome.type === 'skipped-busy') {
         return {
+          outcome: 'skipped-busy',
+          chatId: outcome.chatId,
           message: `Prompt skipped because chat ${outcome.chatId} was busy.`,
         };
       }
-      return { message: `Prompt sent to chat ${outcome.chatId}.` };
+      return { outcome: 'sent', chatId: outcome.chatId, message: `Prompt sent to chat ${outcome.chatId}.` };
     }
 
     const chatId = this.deps.chatIds.allocate();
@@ -73,6 +82,8 @@ export class ScheduledPromptDispatcher {
       throw new Error('Scheduled chat start did not return the allocated chat ID');
     }
     return {
+      outcome: 'created-chat',
+      chatId: result.chatId,
       message: `Prompt executed successfully; created chat ${result.chatId}.`,
     };
   }

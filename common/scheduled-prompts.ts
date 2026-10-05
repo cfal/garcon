@@ -21,6 +21,7 @@ export const SCHEDULED_PROMPT_INTERVAL_MINUTES_MIN = 1;
 export const SCHEDULED_PROMPT_INTERVAL_MINUTES_MAX = 3650 * 24 * 60;
 export const SCHEDULED_PROMPT_MAX_LENGTH = 32_000;
 export const SCHEDULED_PROMPT_RUN_LOG_LIMIT = 200;
+export const SCHEDULED_PROMPT_LABEL_MAX_LENGTH = 200;
 export const SCHEDULED_PROMPT_MAX_COUNT = 500;
 
 export type ScheduleForChatFirstRun =
@@ -90,10 +91,35 @@ export interface ScheduledPrompt {
   updatedAt: string;
 }
 
+export const SCHEDULED_PROMPT_RUN_OUTCOMES = [
+  'created-chat',
+  'sent',
+  'queued',
+  'skipped-busy',
+  'missed',
+  'failed',
+] as const;
+
+export type ScheduledPromptRunOutcome = (typeof SCHEDULED_PROMPT_RUN_OUTCOMES)[number];
+
+export interface ScheduledPromptRunLogEntry {
+  at: string;
+  // Null for scheduler-wide events that no single prompt owns.
+  scheduledPromptId: string | null;
+  // The prompt's label when the run was claimed or reconciled, kept so the entry still
+  // names its prompt after that prompt is edited or removed. Null exactly when
+  // `scheduledPromptId` is; empty only for a schedule action without a body.
+  promptLabel: string | null;
+  outcome: ScheduledPromptRunOutcome;
+  // The chat that received or was created by the run, when one exists.
+  chatId: string | null;
+  message: string;
+}
+
 export interface ScheduledPromptsSnapshot {
   revision: number;
   prompts: ScheduledPrompt[];
-  runLog: string[];
+  runLog: ScheduledPromptRunLogEntry[];
 }
 
 export interface OneOffScheduleInput {
@@ -397,7 +423,32 @@ export function normalizeScheduledPromptsSnapshot(value: unknown): ScheduledProm
     .filter((scheduledPrompt): scheduledPrompt is ScheduledPrompt => Boolean(scheduledPrompt));
   if (prompts.length !== raw.prompts.length) return null;
   const runLog = Array.isArray(raw.runLog)
-    ? raw.runLog.filter((entry): entry is string => typeof entry === 'string').slice(-SCHEDULED_PROMPT_RUN_LOG_LIMIT)
+    ? raw.runLog
+        .map(normalizeScheduledPromptRunLogEntry)
+        .filter((entry): entry is ScheduledPromptRunLogEntry => entry !== null)
+        .slice(-SCHEDULED_PROMPT_RUN_LOG_LIMIT)
     : [];
   return { revision: raw.revision as number, prompts, runLog };
+}
+
+// A label accompanies exactly the entries that a prompt owns.
+function isRunLogPromptLabel(value: unknown, scheduledPromptId: string | null): value is string | null {
+  if (scheduledPromptId === null) return value === null;
+  return typeof value === 'string' && value.length <= SCHEDULED_PROMPT_LABEL_MAX_LENGTH;
+}
+
+function isScheduledPromptRunOutcome(value: unknown): value is ScheduledPromptRunOutcome {
+  return typeof value === 'string' && (SCHEDULED_PROMPT_RUN_OUTCOMES as readonly string[]).includes(value);
+}
+
+export function normalizeScheduledPromptRunLogEntry(value: unknown): ScheduledPromptRunLogEntry | null {
+  const raw = asRecord(value);
+  if (!raw || typeof raw.at !== 'string' || Number.isNaN(Date.parse(raw.at))) return null;
+  if (!isScheduledPromptRunOutcome(raw.outcome) || typeof raw.message !== 'string') return null;
+  const scheduledPromptId = nullableString(raw.scheduledPromptId);
+  const chatId = nullableString(raw.chatId);
+  if (scheduledPromptId === undefined || chatId === undefined) return null;
+  const promptLabel = raw.promptLabel;
+  if (!isRunLogPromptLabel(promptLabel, scheduledPromptId)) return null;
+  return { at: raw.at, scheduledPromptId, promptLabel, outcome: raw.outcome, chatId, message: raw.message };
 }

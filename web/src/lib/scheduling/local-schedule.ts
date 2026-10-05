@@ -76,6 +76,55 @@ export function formatScheduledInstant(value: string): string {
 	}).format(new Date(value));
 }
 
+export function formatScheduledDate(value: string): string {
+	return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(value));
+}
+
+export function formatScheduledTime(value: string): string {
+	return new Intl.DateTimeFormat(undefined, { timeStyle: 'short' }).format(new Date(value));
+}
+
+// Counts browser-local calendar days, so a run at 00:30 tomorrow is one day away even
+// when it is less than 24 hours from now.
+export function localCalendarDayOffset(value: string, now = new Date()): number {
+	const target = new Date(value);
+	const targetDay = Date.UTC(target.getFullYear(), target.getMonth(), target.getDate());
+	const currentDay = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+	return Math.round((targetDay - currentDay) / (MINUTES_PER_DAY * MINUTE_MS));
+}
+
+export function recurringOccurrences(
+	firstRunAt: string,
+	intervalMinutes: number,
+	endAt: string | null,
+	count: number,
+): string[] {
+	const firstMs = Date.parse(firstRunAt);
+	const endMs = endAt === null ? Number.POSITIVE_INFINITY : Date.parse(endAt);
+	if (!Number.isFinite(firstMs) || intervalMinutes <= 0) return [];
+	const occurrences: string[] = [];
+	for (let index = 0; index < count; index += 1) {
+		const occurrenceMs = firstMs + index * intervalMinutes * MINUTE_MS;
+		if (occurrenceMs > endMs) break;
+		occurrences.push(new Date(occurrenceMs).toISOString());
+	}
+	return occurrences;
+}
+
+// Moves a recurring anchor forward by whole intervals until it reaches `minimumMs`,
+// matching how the server skips occurrences that passed while a schedule was idle.
+export function advanceRecurringAnchor(
+	anchor: string,
+	intervalMinutes: number,
+	minimumMs: number,
+): string {
+	const anchorMs = Date.parse(anchor);
+	if (anchorMs >= minimumMs) return anchor;
+	const intervalMs = intervalMinutes * MINUTE_MS;
+	const steps = Math.ceil((minimumMs - anchorMs) / intervalMs);
+	return new Date(anchorMs + steps * intervalMs).toISOString();
+}
+
 export function formatCompactTimeUntil(value: string, now = new Date()): string | null {
 	const remainingMs = Date.parse(value) - now.getTime();
 	if (!Number.isFinite(remainingMs) || remainingMs <= 0) return null;

@@ -135,6 +135,7 @@ export type HideableToolType = (typeof HIDEABLE_TOOL_GROUPS)[number]['toolTypes'
 export interface LocalSettingsSnapshot {
 	themePreference: ThemePreference;
 	overlayBackdropEffects: boolean;
+	highlightActiveWindow: boolean;
 	autoExpandTools: boolean;
 	combineToolUseMessages: boolean;
 	alwaysExpandCliMessages: boolean;
@@ -183,6 +184,7 @@ export interface LocalSettingsSnapshot {
 
 type BooleanLocalSettingKey =
 	| 'overlayBackdropEffects'
+	| 'highlightActiveWindow'
 	| 'autoExpandTools'
 	| 'combineToolUseMessages'
 	| 'alwaysExpandCliMessages'
@@ -204,6 +206,7 @@ type BooleanLocalSettingKey =
 const DEFAULTS: LocalSettingsSnapshot = {
 	themePreference: DEFAULT_THEME_PREFERENCE,
 	overlayBackdropEffects: true,
+	highlightActiveWindow: true,
 	autoExpandTools: false,
 	combineToolUseMessages: true,
 	alwaysExpandCliMessages: false,
@@ -380,6 +383,10 @@ function normalizeHiddenToolTypes(value: unknown): HideableToolType[] {
 function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 	return {
 		themePreference: parseThemePreference(parsed.themePreference),
+		highlightActiveWindow: parseBoolean(
+			parsed.highlightActiveWindow,
+			DEFAULTS.highlightActiveWindow,
+		),
 		overlayBackdropEffects: parseBoolean(
 			parsed.overlayBackdropEffects,
 			DEFAULTS.overlayBackdropEffects,
@@ -492,6 +499,7 @@ function persistLocalSettings(snapshot: LocalSettingsSnapshot): void {
 export class LocalSettingsStore {
 	themePreference = $state<ThemePreference>(DEFAULTS.themePreference);
 	overlayBackdropEffects = $state(DEFAULTS.overlayBackdropEffects);
+	highlightActiveWindow = $state(DEFAULTS.highlightActiveWindow);
 	autoExpandTools = $state(DEFAULTS.autoExpandTools);
 	combineToolUseMessages = $state(DEFAULTS.combineToolUseMessages);
 	alwaysExpandCliMessages = $state(DEFAULTS.alwaysExpandCliMessages);
@@ -617,6 +625,7 @@ export class LocalSettingsStore {
 		return {
 			themePreference: this.themePreference,
 			overlayBackdropEffects: this.overlayBackdropEffects,
+			highlightActiveWindow: this.highlightActiveWindow,
 			autoExpandTools: this.autoExpandTools,
 			combineToolUseMessages: this.combineToolUseMessages,
 			alwaysExpandCliMessages: this.alwaysExpandCliMessages,
@@ -667,6 +676,7 @@ export class LocalSettingsStore {
 	#apply(snap: LocalSettingsSnapshot): void {
 		this.themePreference = snap.themePreference;
 		this.overlayBackdropEffects = snap.overlayBackdropEffects;
+		this.highlightActiveWindow = snap.highlightActiveWindow;
 		this.autoExpandTools = snap.autoExpandTools;
 		this.combineToolUseMessages = snap.combineToolUseMessages;
 		this.alwaysExpandCliMessages = snap.alwaysExpandCliMessages;

@@ -7,6 +7,7 @@ import {
   normalizeScheduledPrompt,
   type ScheduledPrompt,
 } from '../../../common/scheduled-prompts.js';
+import { scheduledPromptLabel } from '../../../common/garcon-schedule.js';
 import { hasNodeErrorCode } from '../../common/errors.js';
 import { AtomicJsonWriteError, syncDirectory, writeJsonFileAtomic } from '../../common/json-file-store.js';
 import { parseStoredJson } from '../../common/stored-json.js';
@@ -45,6 +46,8 @@ export interface OccurrenceClaim {
 
 export interface ReconciliationEvent {
   scheduledPromptId: string;
+  // Captured here because a missed prompt may be removed by the same reconciliation.
+  promptLabel: string;
   message: string;
 }
 
@@ -435,6 +438,7 @@ export class ScheduledPromptStore {
           if (scheduledPrompt.schedule.type === 'once') {
             events.push({
               scheduledPromptId: scheduledPrompt.id,
+              promptLabel: scheduledPromptLabel(scheduledPrompt.prompt),
               message: `Removed missed one-off prompt scheduled for ${scheduledPrompt.schedule.nextRunAt}.`,
             });
             continue;
@@ -449,6 +453,7 @@ export class ScheduledPromptStore {
           if (scheduledPrompt.schedule.endAt && nextRunAt > scheduledPrompt.schedule.endAt) {
             events.push({
               scheduledPromptId: scheduledPrompt.id,
+              promptLabel: scheduledPromptLabel(scheduledPrompt.prompt),
               message: `Removed recurring prompt after skipping ${missedCount} missed occurrence${missedCount === 1 ? '' : 's'}.`,
             });
             continue;
@@ -458,6 +463,7 @@ export class ScheduledPromptStore {
           nextScheduledPrompts.push(scheduledPrompt);
           events.push({
             scheduledPromptId: scheduledPrompt.id,
+            promptLabel: scheduledPromptLabel(scheduledPrompt.prompt),
             message: `Skipped ${missedCount} missed occurrence${missedCount === 1 ? '' : 's'}; next run is ${nextRunAt}.`,
           });
         }

@@ -3,7 +3,11 @@
 	import { getChatSessions, getExecutors, getScheduledPrompts } from '$lib/context';
 	import { scheduledPromptExecutorId } from '$lib/scheduling/scheduled-prompt-executor.js';
 	import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
-	import type { ScheduledPrompt, ScheduledPromptDefinitionInput } from '$shared/scheduled-prompts';
+	import type {
+		ScheduledPrompt,
+		ScheduledPromptDefinitionInput,
+		ScheduledPromptRunLogEntry,
+	} from '$shared/scheduled-prompts';
 	import ScheduledPromptDialog from './ScheduledPromptDialog.svelte';
 	import ScheduledPromptRemoveDialog from './ScheduledPromptRemoveDialog.svelte';
 	import ScheduledPromptRow from './ScheduledPromptRow.svelte';
@@ -20,9 +24,10 @@
 
 	interface Props {
 		active: boolean;
+		onOpenChat: (chatId: string) => void;
 	}
 
-	let { active }: Props = $props();
+	let { active, onOpenChat }: Props = $props();
 	const prompts = getScheduledPrompts();
 	const sessions = getChatSessions();
 	const executors = getExecutors();
@@ -35,6 +40,13 @@
 	let movingPromptId = $state<string | null>(null);
 	let operationError = $state<string | null>(null);
 	let currentTime = $state(new Date());
+	const lastRunByPromptId = $derived.by(() => {
+		const lastRuns = new Map<string, ScheduledPromptRunLogEntry>();
+		for (const entry of prompts.runLog) {
+			if (entry.scheduledPromptId) lastRuns.set(entry.scheduledPromptId, entry);
+		}
+		return lastRuns;
+	});
 
 	$effect(() => {
 		if (!active) return;
@@ -109,6 +121,10 @@
 		const executorId = scheduledPromptExecutorId(scheduledPrompt, existingChat);
 		if (!executorId || (executorId === 'local' && !executors.hasRemoteExecutors)) return undefined;
 		return executors.label(executorId);
+	}
+
+	function openableChatId(chatId: string | null): string | null {
+		return chatId && sessions.byId[chatId] ? chatId : null;
 	}
 
 	async function move(scheduledPrompt: ScheduledPrompt, direction: 'up' | 'down'): Promise<void> {
@@ -193,6 +209,7 @@
 						scheduledPrompt.target.type === 'existing-chat'
 							? sessions.byId[scheduledPrompt.target.chatId]
 							: undefined}
+					{@const lastRun = lastRunByPromptId.get(scheduledPrompt.id)}
 					<ScheduledPromptRow
 						{scheduledPrompt}
 						{index}
@@ -200,6 +217,10 @@
 						total={prompts.prompts.length}
 						{existingChat}
 						executorLabel={executorLabelFor(scheduledPrompt, existingChat)}
+						{lastRun}
+						lastRunChatId={lastRun?.outcome === 'created-chat'
+							? openableChatId(lastRun.chatId)
+							: null}
 						disabled={movingPromptId !== null}
 						onEdit={() => openEdit(scheduledPrompt)}
 						onRemove={() => {
@@ -208,6 +229,7 @@
 						}}
 						onMoveUp={() => void move(scheduledPrompt, 'up')}
 						onMoveDown={() => void move(scheduledPrompt, 'down')}
+						{onOpenChat}
 					/>
 					{#snippet failed()}
 						<div class="rounded-md border border-destructive/50 p-3 text-sm text-destructive">
@@ -222,6 +244,7 @@
 
 <ScheduledPromptDialog
 	open={formOpen}
+	{currentTime}
 	scheduledPrompt={editingPrompt}
 	onSave={save}
 	onClose={() => (formOpen = false)}
@@ -237,5 +260,8 @@
 <ScheduledPromptRunLogDialog
 	open={runLogOpen}
 	entries={prompts.runLog}
+	{currentTime}
+	{openableChatId}
+	{onOpenChat}
 	onClose={() => (runLogOpen = false)}
 />
