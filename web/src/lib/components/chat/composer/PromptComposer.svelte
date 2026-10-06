@@ -92,6 +92,7 @@
 	import { PromptComposerFocusDelivery } from './prompt-composer-focus-delivery.svelte.js';
 	import { PromptComposerProjectState } from './prompt-composer-project-state.svelte.js';
 	import type { PromptComposerProps } from './prompt-composer-props.js';
+	import { PromptRecallController } from '$lib/chat/composer/prompt-recall';
 
 	let {
 		onsubmit,
@@ -102,6 +103,8 @@
 		onThinkingModeChange,
 		onAgentSettingChange,
 		resendCandidates = [],
+		recallPrompts = [],
+		recallIdentity = null,
 		onExcludeResendCandidate,
 		directAdmissionPending = false,
 		requiresQueuedSubmission = false,
@@ -137,6 +140,11 @@
 	const workspaceShortcuts = getWorkspaceShortcuts();
 	const projectResolution = getProjectResolution();
 	const ui = new PromptComposerUiState();
+	const promptRecall = new PromptRecallController();
+	$effect(() => {
+		void recallIdentity;
+		promptRecall.reset();
+	});
 	const snippetExpansion = new SnippetExpansionController();
 	const snippetExpansionLayer = transientLayerAttachment({
 		registry: transientLayers,
@@ -606,6 +614,7 @@
 			return;
 		}
 		if (handleCompletionKeyDown(event)) return;
+		if (handlePromptRecall(event)) return;
 		if (event.key !== 'Enter') return;
 		const action = resolveKeydownAction(event);
 		if (action === 'newline') return;
@@ -635,6 +644,7 @@
 	}
 
 	function handleInput(event: Event) {
+		promptRecall.reset();
 		const target = event.currentTarget as HTMLTextAreaElement;
 		if (isDisabled || promptRefinement.pending) {
 			target.value = composerState.inputText;
@@ -651,6 +661,42 @@
 			(event as InputEvent).isComposing,
 		);
 		queueCurrentDraft(value);
+	}
+
+	function handlePromptRecall(event: KeyboardEvent): boolean {
+		if (
+			isDisabled ||
+			!isVisible ||
+			event.isComposing ||
+			event.keyCode === 229 ||
+			event.altKey ||
+			event.ctrlKey ||
+			event.metaKey ||
+			event.shiftKey ||
+			(event.key !== 'ArrowUp' && event.key !== 'ArrowDown')
+		) {
+			promptRecall.reset();
+			return false;
+		}
+		const text = promptRecall.navigate(
+			event.key,
+			recallIdentity,
+			composerState.inputText,
+			recallPrompts,
+		);
+		if (text === null) return false;
+		event.preventDefault();
+		composerState.inputText = text;
+		queueCurrentDraft(text);
+		const target = textarea;
+		const identity = recallIdentity;
+		void tick().then(() => {
+			if (target !== textarea || identity !== recallIdentity || composerState.inputText !== text)
+				return;
+			autoResize();
+			target?.setSelectionRange(text.length, text.length);
+		});
+		return true;
 	}
 
 	const selectedIsProcessing = $derived(isChatProcessing(sessions.selectedChat));
@@ -848,6 +894,7 @@
 						bind:this={textarea}
 						value={composerState.inputText}
 						onkeydown={handleKeyDown}
+						onpointerdown={() => promptRecall.reset()}
 						oninput={handleInput}
 						onpaste={(event) => attachmentController.handlePaste(event)}
 						placeholder={m.chat_composer_reply_placeholder()}
