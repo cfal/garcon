@@ -2,7 +2,10 @@
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import * as Tabs from '$lib/components/ui/tabs';
 	import * as m from '$lib/paraglide/messages.js';
-	import { untrack } from 'svelte';
+	import { tick, untrack } from 'svelte';
+	import { Input } from '$lib/components/ui/input';
+	import { Button } from '$lib/components/ui/button';
+	import { searchSettings, settingsSearchEntries } from './settings-search';
 	import { getAppShell, getRemoteSettings, getExecutors } from '$lib/context';
 	import { isServerSettingsTab } from '$lib/stores/app-shell.svelte';
 	import Network from '@lucide/svelte/icons/network';
@@ -28,6 +31,8 @@
 	const appShell = getAppShell();
 	const remoteSettings = getRemoteSettings();
 	const executors = getExecutors();
+	let searchQuery = $state('');
+	const searchResults = $derived(searchSettings(settingsSearchEntries(), searchQuery));
 	let scrollContainer = $state<HTMLDivElement | null>(null);
 	// App tabs are stored in this browser; server tabs are shared by every client.
 	const tabGroups = $derived([
@@ -67,10 +72,23 @@
 	});
 
 	function handleOpenChange(open: boolean) {
-		if (!open) appShell.closeSettings();
+		if (!open) {
+			searchQuery = '';
+			appShell.closeSettings();
+		}
+	}
+
+	async function openSearchResult(tab: string): Promise<void> {
+		handleTabChange(tab);
+		await tick();
+		scrollContainer
+			?.closest('[role="dialog"]')
+			?.querySelector<HTMLElement>(`[data-settings-tab="${tab}"]`)
+			?.focus();
 	}
 
 	function handleTabChange(value: string) {
+		searchQuery = '';
 		appShell.setSettingsTab(value);
 		requestAnimationFrame(() => {
 			scrollContainer?.scrollTo({ top: 0 });
@@ -86,6 +104,13 @@
 		<Dialog.Header class="px-6 py-3 border-b border-border">
 			<Dialog.Title class="text-lg font-semibold">{m.settings_title()}</Dialog.Title>
 			<Dialog.Description class="sr-only">{m.settings_title()}</Dialog.Description>
+			<Input
+				type="search"
+				class="mt-2"
+				bind:value={searchQuery}
+				aria-label={m.settings_search_label()}
+				placeholder={m.settings_search_placeholder()}
+			/>
 		</Dialog.Header>
 
 		<Tabs.Root
@@ -114,6 +139,7 @@
 					{#each group.tabs as tab (tab.value)}
 						<Tabs.Trigger
 							value={tab.value}
+							data-settings-tab={tab.value}
 							aria-label={tab.label}
 							aria-describedby="settings-tab-group-{group.id}"
 							title={tab.label}
@@ -127,68 +153,92 @@
 			</Tabs.List>
 
 			<div class="min-w-0 flex-1 min-h-0 overflow-y-auto p-3 sm:p-6" bind:this={scrollContainer}>
-				<Tabs.Content value="interface" class="mt-0 space-y-6">
-					{#if appShell.settingsTab === 'interface'}
-						<p class="text-sm text-muted-foreground">{m.settings_scope_local_description()}</p>
-						<LocalSettingsSection />
-					{/if}
-				</Tabs.Content>
+				{#if searchQuery.trim()}
+					<div class="space-y-2" aria-label={m.settings_search_results()}>
+						<p role="status" class="text-sm text-muted-foreground">
+							{searchResults.length
+								? m.settings_search_result_count({ count: searchResults.length })
+								: m.settings_search_empty()}
+						</p>
+						{#each searchResults as result (`${result.tab}:${result.label}`)}
+							<Button
+								variant="ghost"
+								class="h-auto w-full justify-start whitespace-normal text-left"
+								onclick={() => openSearchResult(result.tab)}
+							>
+								<span
+									><span class="block">{result.label}</span><span
+										class="block text-xs text-muted-foreground">{result.section}</span
+									></span
+								>
+							</Button>
+						{/each}
+					</div>
+				{/if}
+				<div hidden={Boolean(searchQuery.trim())}>
+					<Tabs.Content value="interface" class="mt-0 space-y-6">
+						{#if appShell.settingsTab === 'interface'}
+							<p class="text-sm text-muted-foreground">{m.settings_scope_local_description()}</p>
+							<LocalSettingsSection />
+						{/if}
+					</Tabs.Content>
 
-				<Tabs.Content value="shortcuts" class="mt-0 space-y-6">
-					{#if appShell.settingsTab === 'shortcuts'}
-						<KeyboardShortcutsSection />
-					{/if}
-				</Tabs.Content>
+					<Tabs.Content value="shortcuts" class="mt-0 space-y-6">
+						{#if appShell.settingsTab === 'shortcuts'}
+							<KeyboardShortcutsSection />
+						{/if}
+					</Tabs.Content>
 
-				<Tabs.Content value="providers" class="mt-0 space-y-6">
-					{#if appShell.settingsTab === 'providers'}
-						<ApiProvidersSection />
-					{/if}
-				</Tabs.Content>
+					<Tabs.Content value="providers" class="mt-0 space-y-6">
+						{#if appShell.settingsTab === 'providers'}
+							<ApiProvidersSection />
+						{/if}
+					</Tabs.Content>
 
-				<Tabs.Content value="other-agents" class="mt-0 space-y-6">
-					{#if appShell.settingsTab === 'other-agents'}
-						<p class="text-sm text-muted-foreground">{m.settings_other_agents_description()}</p>
-						<SettingsExecutorSections>
-							{#snippet children(executorId)}<ExecutorAgentSettings
-									{executorId}
-									section="other-agents"
-								/>{/snippet}
-						</SettingsExecutorSections>
-					{/if}
-				</Tabs.Content>
+					<Tabs.Content value="other-agents" class="mt-0 space-y-6">
+						{#if appShell.settingsTab === 'other-agents'}
+							<p class="text-sm text-muted-foreground">{m.settings_other_agents_description()}</p>
+							<SettingsExecutorSections>
+								{#snippet children(executorId)}<ExecutorAgentSettings
+										{executorId}
+										section="other-agents"
+									/>{/snippet}
+							</SettingsExecutorSections>
+						{/if}
+					</Tabs.Content>
 
-				<Tabs.Content value="general" class="mt-0 space-y-6">
-					{#if appShell.settingsTab === 'general'}
-						<GeneralSettingsSection />
-					{/if}
-				</Tabs.Content>
+					<Tabs.Content value="general" class="mt-0 space-y-6">
+						{#if appShell.settingsTab === 'general'}
+							<GeneralSettingsSection />
+						{/if}
+					</Tabs.Content>
 
-				<Tabs.Content value="automation" class="mt-0 space-y-6">
-					{#if appShell.settingsTab === 'automation'}
-						<AutomationSettingsSection />
-					{/if}
-				</Tabs.Content>
+					<Tabs.Content value="automation" class="mt-0 space-y-6">
+						{#if appShell.settingsTab === 'automation'}
+							<AutomationSettingsSection />
+						{/if}
+					</Tabs.Content>
 
-				<Tabs.Content value="notifications" class="mt-0 space-y-6">
-					{#if appShell.settingsTab === 'notifications'}
-						<NotificationsSettingsSection />
-					{/if}
-				</Tabs.Content>
+					<Tabs.Content value="notifications" class="mt-0 space-y-6">
+						{#if appShell.settingsTab === 'notifications'}
+							<NotificationsSettingsSection />
+						{/if}
+					</Tabs.Content>
 
-				<Tabs.Content value="github" class="mt-0 space-y-6">
-					{#if appShell.settingsTab === 'github'}
-						<SettingsExecutorSections>
-							{#snippet children(executorId)}<GitHubCliSettingsCard {executorId} />{/snippet}
-						</SettingsExecutorSections>
-					{/if}
-				</Tabs.Content>
+					<Tabs.Content value="github" class="mt-0 space-y-6">
+						{#if appShell.settingsTab === 'github'}
+							<SettingsExecutorSections>
+								{#snippet children(executorId)}<GitHubCliSettingsCard {executorId} />{/snippet}
+							</SettingsExecutorSections>
+						{/if}
+					</Tabs.Content>
 
-				<Tabs.Content value="executors" class="mt-0 space-y-6">
-					{#if appShell.settingsTab === 'executors'}
-						<ExecutorsSection />
-					{/if}
-				</Tabs.Content>
+					<Tabs.Content value="executors" class="mt-0 space-y-6">
+						{#if appShell.settingsTab === 'executors'}
+							<ExecutorsSection />
+						{/if}
+					</Tabs.Content>
+				</div>
 			</div>
 		</Tabs.Root>
 	</Dialog.Content>
