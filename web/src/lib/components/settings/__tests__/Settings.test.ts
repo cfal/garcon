@@ -43,6 +43,48 @@ const completionSound = await import('$lib/notifications/completion-sound.js');
 const SettingsTestHost = (await import('./SettingsTestHost.svelte')).default;
 
 describe('Settings', () => {
+	it('preserves an unsaved setting draft while searching', async () => {
+		const appShell = createAppShellStore();
+		appShell.openSettings('interface');
+		const rendered = render(SettingsTestHost, { appShell, remoteSettings: new RemoteSettingsStore() });
+		try {
+			const trigger = screen.getByLabelText('Snippet trigger');
+			await fireEvent.input(trigger, { target: { value: 'invalid draft' } });
+			const input = screen.getByRole('searchbox', { name: 'Search settings' });
+			await fireEvent.input(input, { target: { value: 'theme' } });
+			await fireEvent.input(input, { target: { value: '' } });
+			expect((screen.getByLabelText('Snippet trigger') as HTMLInputElement).value).toBe('invalid draft');
+		} finally { rendered.unmount(); }
+	});
+	it('finds controls across tabs, opens their section, and keeps browser searches independent of server loading', async () => {
+		const appShell = createAppShellStore();
+		appShell.openSettings('interface');
+		const remoteSettings = new RemoteSettingsStore();
+		remoteSettings.applySnapshot(makeRemoteSettingsSnapshot());
+		const refresh = vi.spyOn(remoteSettings, 'refreshInBackground').mockResolvedValue();
+		const rendered = render(SettingsTestHost, { appShell, remoteSettings });
+		try {
+			const input = screen.getByRole('searchbox', { name: 'Search settings' });
+			await fireEvent.input(input, { target: { value: 'MAX width' } });
+			const result = screen.getByRole('button', { name: 'Max chat width Interface' });
+			expect(refresh).not.toHaveBeenCalled();
+			await fireEvent.click(result);
+			expect((input as HTMLInputElement).value).toBe('');
+			expect(screen.getByRole('tabpanel', { name: 'Interface' })).toBeTruthy();
+			await fireEvent.input(input, { target: { value: 'commit model' } });
+			await fireEvent.click(
+				screen.getByRole('button', { name: 'Commit message model Automation' }),
+			);
+			expect(appShell.settingsTab).toBe('automation');
+			expect(refresh).toHaveBeenCalledOnce();
+			await fireEvent.input(input, { target: { value: 'zzzz-no-result' } });
+			expect(screen.getByRole('status').textContent).toContain('No matching settings');
+			await fireEvent.click(screen.getByRole('tab', { name: 'Interface' }));
+			expect((input as HTMLInputElement).value).toBe('');
+		} finally {
+			rendered.unmount();
+		}
+	});
 	it('reports recovery cleanup failures and allows retry without concurrent cleanup', async () => {
 		const appShell = createAppShellStore();
 		appShell.openSettings('interface');
