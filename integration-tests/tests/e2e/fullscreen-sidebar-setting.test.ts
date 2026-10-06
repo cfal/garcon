@@ -37,7 +37,7 @@ test('retained fullscreen sidebar preserves chat placement and single-window cov
     const secondWindowId =
       await app.openSidebarChatInNewWindowById(secondChatId);
     await app.focusWorkspaceWindow(firstWindowId);
-    const before = await fixture.page.evaluate(() =>
+    const initialLayout = await fixture.page.evaluate(() =>
       localStorage.getItem('workspace_layout_v2'),
     );
 
@@ -47,7 +47,7 @@ test('retained fullscreen sidebar preserves chat placement and single-window cov
       await fixture.page.evaluate(() =>
         localStorage.getItem('workspace_layout_v2'),
       ),
-    ).toBe(before);
+    ).toBe(initialLayout);
     await app.clickSidebarChatById(secondChatId);
     await app.waitForSelectedChat(secondChatId);
     expect(await app.currentWorkspaceWindowId()).toBe(secondWindowId);
@@ -104,6 +104,7 @@ async function waitForFullscreenSidebar(
 ): Promise<void> {
   await page.waitForFunction(
     ({ id, expectedSidebar }) => {
+      const sidebarHidden = expectedSidebar === 'hidden';
       const button = document.querySelector(
         `[data-workspace-window-fullscreen="${id}"]`,
       );
@@ -112,11 +113,9 @@ async function waitForFullscreenSidebar(
       );
       return (
         button?.getAttribute('aria-label') === 'Exit fullscreen' &&
-        chatList?.getAttribute('aria-hidden') ===
-          String(expectedSidebar === 'hidden') &&
-        chatList.inert === (expectedSidebar === 'hidden') &&
-        chatList.style.width ===
-          (expectedSidebar === 'hidden' ? '0px' : '320px')
+        chatList?.getAttribute('aria-hidden') === String(sidebarHidden) &&
+        chatList.inert === sidebarHidden &&
+        chatList.style.width === (sidebarHidden ? '0px' : '320px')
       );
     },
     { timeout: 20_000 },

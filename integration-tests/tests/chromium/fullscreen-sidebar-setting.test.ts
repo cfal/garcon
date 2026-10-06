@@ -1,11 +1,11 @@
 import { expect, test } from 'bun:test';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { Page } from 'playwright';
+import type { Locator, Page } from 'playwright';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { collapseCanonicalFilesWindow } from '../../support/chromium-workspace.js';
 
-async function openInterfaceSettings(page: Page) {
+async function openInterfaceSettings(page: Page): Promise<Locator> {
   await page.keyboard.press('Control+,');
   const settings = page.getByRole('dialog', { name: 'Settings', exact: true });
   await settings.getByRole('tab', { name: 'Interface', exact: true }).click();
@@ -77,21 +77,23 @@ test('fullscreen sidebar setting persists, resizes on either dock, and yields to
         (id) => localStorage.getItem('workspace_layout_v2')?.includes(id),
         chatId,
       );
-      const before = await page.evaluate(() =>
+      const initialLayout = await page.evaluate(() =>
         localStorage.getItem('workspace_layout_v2'),
       );
       await composer.press('Control+Shift+F');
       await expectFullscreenBounds(page, 'hidden');
 
       const settings = await openInterfaceSettings(page);
+      const closeSettings = settings.getByRole('button', {
+        name: 'Close',
+        exact: true,
+      });
       const coverage = settings.getByRole('switch', {
         name: 'Always cover chat sidebar in fullscreen',
       });
       expect(await coverage.getAttribute('aria-checked')).toBe('true');
       await coverage.click();
-      await settings
-        .getByRole('button', { name: 'Close', exact: true })
-        .click();
+      await closeSettings.click();
       await expectFullscreenBounds(page, 'visible');
       expect(await composer.inputValue()).toBe(
         'Retained sidebar fullscreen draft',
@@ -115,18 +117,14 @@ test('fullscreen sidebar setting persists, resizes on either dock, and yields to
         .locator('[data-workspace-window-id="window-main"]')
         .boundingBox();
       expect(sidebarBounds!.x).toBeGreaterThan(windowBounds!.x);
-      const resize = await page
+      const resizeHandle = await page
         .getByRole('separator', { name: 'Resize sidebar' })
         .boundingBox();
-      await page.mouse.move(
-        resize!.x + resize!.width / 2,
-        resize!.y + resize!.height / 2,
-      );
+      const resizeStartX = resizeHandle!.x + resizeHandle!.width / 2;
+      const resizeY = resizeHandle!.y + resizeHandle!.height / 2;
+      await page.mouse.move(resizeStartX, resizeY);
       await page.mouse.down();
-      await page.mouse.move(
-        resize!.x + resize!.width / 2 - 48,
-        resize!.y + resize!.height / 2,
-      );
+      await page.mouse.move(resizeStartX - 48, resizeY);
       await page.mouse.up();
       await page.waitForFunction(
         () =>
@@ -149,7 +147,7 @@ test('fullscreen sidebar setting persists, resizes on either dock, and yields to
         .waitFor({ state: 'visible' });
       expect(
         await page.evaluate(() => localStorage.getItem('workspace_layout_v2')),
-      ).toBe(before);
+      ).toBe(initialLayout);
       await page.reload();
       await composer.focus();
       await composer.press('Control+Shift+F');
@@ -160,9 +158,7 @@ test('fullscreen sidebar setting persists, resizes on either dock, and yields to
       await openInterfaceSettings(page);
       expect(await coverage.isDisabled()).toBe(true);
       expect(await coverage.getAttribute('aria-checked')).toBe('false');
-      await settings
-        .getByRole('button', { name: 'Close', exact: true })
-        .click();
+      await closeSettings.click();
       await composer.focus();
       await composer.press('Control+Shift+F');
       await expectFullscreenBounds(page, 'hidden');
@@ -174,9 +170,7 @@ test('fullscreen sidebar setting persists, resizes on either dock, and yields to
       await openInterfaceSettings(page);
       expect(await coverage.isEnabled()).toBe(true);
       expect(await coverage.getAttribute('aria-checked')).toBe('false');
-      await settings
-        .getByRole('button', { name: 'Close', exact: true })
-        .click();
+      await closeSettings.click();
       await collapseCanonicalFilesWindow(page);
       await composer.focus();
       await composer.press('Control+Shift+F');
