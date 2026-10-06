@@ -18,10 +18,10 @@ test('settings search preserves drafts and opens matching sections on desktop an
       await page.setViewportSize({ width, height: 900 });
       await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: width < 640 });
       await settings.getByRole('tab', { name: 'Interface', exact: true }).click();
-      await settings.getByLabel('Snippet trigger', { exact: true }).fill('invalid draft');
+      await settings.getByLabel('Snippet trigger', { exact: true }).fill('@a');
       await input.fill('theme');
       await input.fill('');
-      await browserExpect(settings.getByLabel('Snippet trigger', { exact: true })).toHaveValue('invalid draft');
+      await browserExpect(settings.getByLabel('Snippet trigger', { exact: true })).toHaveValue('@a');
       await input.fill('model');
       await browserExpect(settings.getByRole('button', { name: 'Commit message model Automation', exact: true })).toBeVisible();
       expect(await settings.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
