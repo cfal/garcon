@@ -2913,5 +2913,11 @@
 	"settings_search_placeholder": "Search settings...",
 	"settings_search_results": "Settings search results",
 	"settings_search_result_count": "{count} matching settings. Choose a result to open its section.",
-	"settings_search_empty": "No matching settings. Try a different term."
+	"settings_search_empty": "No matching settings. Try a different term.",
+	"settings_key_setup_title": "Paste an API key",
+	"settings_key_setup_description": "Detect the provider and review its endpoint before saving. Keys stay in this draft until you choose Save, Test, or Fetch Models.",
+	"settings_key_setup_placeholder": "Paste your API key",
+	"settings_key_setup_review": "Review provider",
+	"settings_key_setup_detected": "Detected {provider}. Review the endpoint and choose a model.",
+	"settings_key_setup_unknown": "Provider not recognized. Choose a provider from the menus below."
 }

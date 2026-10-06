@@ -43,6 +43,35 @@ const completionSound = await import('$lib/notifications/completion-sound.js');
 const SettingsTestHost = (await import('./SettingsTestHost.svelte')).default;
 
 describe('Settings', () => {
+	it('reviews a detected key in the existing endpoint editor and rejects unknown keys', async () => {
+		const appShell = createAppShellStore();
+		appShell.openSettings('providers');
+		const rendered = render(SettingsTestHost, {
+			appShell,
+			remoteSettings: new RemoteSettingsStore(),
+		});
+		try {
+			const input = screen.getByLabelText('Paste an API key');
+			const review = screen.getByRole<HTMLButtonElement>('button', { name: 'Review provider' });
+			await fireEvent.input(input, { target: { value: 'unrecognized_synthetic_key' } });
+			expect(review.disabled).toBe(true);
+			await fireEvent.input(input, { target: { value: ' sk-or-v1-synthetic_key ' } });
+			expect(review.disabled).toBe(false);
+			await fireEvent.click(review);
+			const label = await screen.findByLabelText('Display name');
+			expect((label as HTMLInputElement).value).toBe('OpenRouter');
+			expect((screen.getByLabelText('Base URL') as HTMLInputElement).value).toBe(
+				'https://openrouter.ai/api/v1',
+			);
+			expect((screen.getByLabelText('API key or token') as HTMLInputElement).value).toBe(
+				'sk-or-v1-synthetic_key',
+			);
+			await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+			expect((input as HTMLInputElement).value).toBe('');
+		} finally {
+			rendered.unmount();
+		}
+	});
 	it('preserves an unsaved setting draft while searching', async () => {
 		const appShell = createAppShellStore();
 		appShell.openSettings('interface');

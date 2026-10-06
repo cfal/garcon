@@ -16,6 +16,8 @@ import {
 	type OpenAiEndpointCapabilities,
 } from '$shared/api-providers';
 
+import type { ApiKeyProviderDraft } from './api-key-provider';
+
 interface DialogOptions {
 	readonly modelCatalog: Pick<ModelCatalogStore, 'executorId' | 'forceRefresh'>;
 	readonly providers: Pick<ApiProvidersStore, 'findEndpoint' | 'isAssigned' | 'executorIdsFor' | 'invalidate' | 'refresh'>;
@@ -24,6 +26,7 @@ interface DialogOptions {
 	getEndpointId: () => string | null;
 	getTemplateId?: () => ApiProviderTemplateId;
 	getDuplicate?: () => boolean;
+	getInitialKeyDraft?: () => ApiKeyProviderDraft | undefined;
 	onSaved?: () => void;
 }
 
@@ -84,7 +87,9 @@ export class ApiProviderEndpointDialogState {
 	}
 
 	get apiKeyRequired(): boolean {
-		return this.#duplicateRequiresApiKey || apiProviderTemplate(this.protocol, this.templateId)?.apiKeyRequired === true;
+		return this.#duplicateRequiresApiKey ||
+			(!this.apiProviderId && this.options.getInitialKeyDraft?.()?.template.apiKeyRequired === true) ||
+			apiProviderTemplate(this.protocol, this.templateId)?.apiKeyRequired === true;
 	}
 
 	get title(): string {
@@ -235,7 +240,9 @@ export class ApiProviderEndpointDialogState {
 
 	beginCreate(): void {
 		this.#duplicateRequiresApiKey = false;
+		const initialKeyDraft = this.options.getInitialKeyDraft?.();
 		const template =
+			initialKeyDraft?.template ??
 			apiProviderTemplate(this.protocol, this.options.getTemplateId?.() ?? 'custom') ??
 			apiProviderTemplate(this.protocol, 'custom');
 		if (!template) {
@@ -253,7 +260,7 @@ export class ApiProviderEndpointDialogState {
 		this.templateId = template.id;
 		this.label = template.label;
 		this.baseUrl = template.baseUrl;
-		this.apiKey = '';
+		this.apiKey = initialKeyDraft?.apiKey ?? '';
 		this.defaultModel = template.defaultModel;
 		this.modelsText = template.models.map((model) => formatModelLine(model)).join('\n');
 		this.supportsImages = template.supportsImages;
