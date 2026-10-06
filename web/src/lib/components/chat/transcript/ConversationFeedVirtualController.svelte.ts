@@ -341,6 +341,7 @@ export class ConversationFeedVirtualController implements ConversationViewportPo
 		this.#configuredVisible = false;
 		this.#pendingResumeTarget = null;
 		this.#endRestoreEpoch += 1;
+		this.#clearPendingToolGroupFocus();
 		this.#cancelTargetScroll();
 		this.cancelPendingLayoutMutation();
 		this.#virt.suspend();

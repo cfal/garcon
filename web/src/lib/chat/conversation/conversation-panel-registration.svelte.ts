@@ -16,6 +16,7 @@ import type {
 } from '$lib/chat/transcript/transcript-row-navigation.js';
 import type { UserMessageNavigatorSelectionResult } from '$lib/chat/transcript/user-message-navigator-controller.svelte.js';
 import type {
+	ConversationPanelDescriptor,
 	ConversationPanelRegistration,
 	ConversationPanelPresentationPort,
 	ConversationPanelSnapshotAdmission,
@@ -33,6 +34,9 @@ export class PanelRegistration implements ConversationPanelRegistration {
 	#rowNavigation: AbortController | null = null;
 	#lifetime = new AbortController();
 	#presentationReady: (() => void) | null = null;
+	#presentationVisible = true;
+	#presentationHost: ConversationPanelDescriptor['presentation'];
+	#recoveryRequired = false;
 
 	readonly transcript: ActiveTranscriptState;
 	readonly lifecycle: ConversationLifecycleState;
@@ -41,6 +45,7 @@ export class PanelRegistration implements ConversationPanelRegistration {
 	constructor(
 		readonly surfaceId: ChatViewSurfaceId,
 		readonly chatId: string,
+		presentationHost: ConversationPanelDescriptor['presentation'],
 		snapshotAdmission: ConversationPanelSnapshotAdmission,
 		cache: ChatTranscriptCache,
 		lifecycle: Pick<ConversationLifecycleRegistry, 'forChat'>,
@@ -49,13 +54,20 @@ export class PanelRegistration implements ConversationPanelRegistration {
 		private readonly snapshots: {
 			load(options: ChatLoadMessagesOptions): Promise<boolean>;
 			wait(signal: AbortSignal): Promise<void>;
+			canLoad(): boolean;
+			interrupted(): void;
 		},
 		retainedTranscript?: ActiveTranscriptState,
 	) {
+		this.#presentationHost = presentationHost;
 		this.#snapshotAdmission = snapshotAdmission;
-		this.transcript = retainedTranscript ?? new ActiveTranscriptState(cache, overlays.forChat(chatId), {
-			onSnapshotResendCandidates,
-		});
+		this.transcript =
+			retainedTranscript ??
+			new ActiveTranscriptState(cache, overlays.forChat(chatId), {
+				onSnapshotResendCandidates,
+				canLoadSnapshot: snapshots.canLoad,
+				onSnapshotInterrupted: snapshots.interrupted,
+			});
 		if (!retainedTranscript) this.transcript.activateChat(chatId);
 		this.lifecycle = lifecycle.forChat(chatId);
 		this.scroll = new ConversationScrollController({
@@ -71,6 +83,40 @@ export class PanelRegistration implements ConversationPanelRegistration {
 		return this.#snapshotAdmission;
 	}
 
+	get isPresentationVisible(): boolean {
+		return this.#presentationVisible;
+	}
+
+	canRetain(presentation: ConversationPanelDescriptor['presentation']): boolean {
+		return this.#presentation !== null && this.#presentationHost === presentation;
+	}
+
+	get recoveryRequired(): boolean {
+		return this.#recoveryRequired;
+	}
+
+	markRecoveryRequired(): void {
+		this.#recoveryRequired = true;
+	}
+
+	completeRecovery(): void {
+		this.#recoveryRequired = false;
+	}
+
+	resumePresentation(presentation: ConversationPanelDescriptor['presentation']): void {
+		this.#presentationHost = presentation;
+		this.#presentationVisible = true;
+		this.resumePendingRestore();
+	}
+
+	resetForViewReplacement(): void {
+		// Allows in-flight row navigation to report the replaced view rather than cancellation.
+		this.#lastTarget = { kind: 'end' };
+		this.#readyRestoreEpoch = ++this.#restoreEpoch;
+		this.scroll.setPinnedToBottom(true);
+		this.resumePendingRestore();
+	}
+
 	updateSnapshotAdmission(snapshotAdmission: ConversationPanelSnapshotAdmission): boolean {
 		const becameAdmitted =
 			this.#snapshotAdmission === 'deferred' && snapshotAdmission === 'admitted';
@@ -81,13 +127,14 @@ export class PanelRegistration implements ConversationPanelRegistration {
 	attachPresentation(port: ConversationPanelPresentationPort): () => void {
 		if (this.#destroyed) return () => {};
 		this.#presentation = port;
-		this.scroll.setViewportVisible(true);
+		this.scroll.setViewportVisible(this.#presentationVisible);
 		if (port.getViewport()) this.#presentationReady?.();
 		this.resumePendingRestore();
 		return () => {
 			if (this.#presentation !== port) return;
 			this.#rowNavigation?.abort();
-			this.#lastTarget = port.captureRestoreTarget() ?? this.#lastTarget;
+			if (this.#presentationVisible)
+				this.#lastTarget = port.captureRestoreTarget() ?? this.#lastTarget;
 			port.closeTransients();
 			this.#presentation = null;
 		};
@@ -108,7 +155,7 @@ export class PanelRegistration implements ConversationPanelRegistration {
 	}
 
 	captureRestoreTarget(): ConversationPanelRestoreTarget {
-		if (this.#presentation) {
+		if (this.#presentation && this.#presentationVisible) {
 			this.#lastTarget = this.#presentation.captureRestoreTarget() ?? this.#lastTarget;
 		}
 		return this.#lastTarget;
@@ -119,9 +166,12 @@ export class PanelRegistration implements ConversationPanelRegistration {
 	}
 
 	prepareForHide(): ConversationPanelRestoreTarget {
+		if (!this.#presentationVisible) return this.#lastTarget;
 		this.#rowNavigation?.abort();
 		const target = this.captureRestoreTarget();
+		this.#presentation?.prepareForHide();
 		this.#presentation?.closeTransients();
+		this.#presentationVisible = false;
 		this.scroll.setViewportVisible(false);
 		this.scroll.cancelNativeScroll();
 		this.transcript.invalidatePendingHistoryLoad();
@@ -165,6 +215,7 @@ export class PanelRegistration implements ConversationPanelRegistration {
 		signal: AbortSignal,
 		ownsNavigation: () => boolean,
 	): Promise<TranscriptRowNavigationResult> {
+		if (!this.#presentationVisible) return 'cancelled';
 		this.#rowNavigation?.abort();
 		const operation = new AbortController();
 		this.#rowNavigation = operation;
@@ -221,6 +272,7 @@ export class PanelRegistration implements ConversationPanelRegistration {
 		const restoreEpoch = this.#readyRestoreEpoch;
 		if (
 			this.#destroyed ||
+			!this.#presentationVisible ||
 			restoreEpoch === null ||
 			restoreEpoch !== this.#restoreEpoch ||
 			this.#applyingRestoreEpoch !== null

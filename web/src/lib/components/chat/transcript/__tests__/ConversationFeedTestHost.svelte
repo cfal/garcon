@@ -35,6 +35,7 @@
 	import { setCanonicalWorkspaceLayout } from '../../__tests__/workspace-layout-test-context.js';
 
 	interface Props {
+		isVisible?: boolean;
 		chatContext?: ConversationMessageChatContext;
 		sessionsStore?: ReturnType<typeof createChatSessionsStore>;
 		onUserScrollIntent?: (direction: 'earlier' | 'later' | null) => void;
@@ -58,6 +59,7 @@
 	}
 
 	const {
+		isVisible = true,
 		chatContext = { chatId: 'chat-1', executorId: 'local', projectPath: '/workspace' },
 		sessionsStore = createChatSessionsStore(),
 		onUserScrollIntent,
@@ -274,7 +276,7 @@
 		{onUserScrollIntent}
 	{isPreparingInitialScroll}
 	onLoadEarlier={retryEarlierPage}
-	isVisible={true}
+	{isVisible}
 	pinnedToBottom={true}
 		surfaceIdentity={`${chatState.activeChatId ?? 'none'}:${chatState.transcriptViewId}`}
 		onViewportPortChange={(port) => (viewportPort = port)}

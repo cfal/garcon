@@ -97,6 +97,7 @@ function port(
 		getQueueContainer: () => undefined,
 		captureRestoreTarget: () => target,
 		closeTransients: vi.fn(),
+		prepareForHide: vi.fn(),
 	};
 }
 
@@ -113,6 +114,208 @@ function switchPanel(
 describe('ConversationPanelRegistry', () => {
 	beforeEach(() => {
 		localStorage.clear();
+	});
+
+	it.each([false, true])(
+		'retains eight fullscreen panels without snapshot admission (parking=%s)',
+		async (retainInactive) => {
+			const loadTranscriptSnapshot = vi.fn();
+			const hiddenSurfaceId = 'chat-view:window-7';
+			const { cache, registry } = fixture({
+				retainInactiveWindows: () => retainInactive,
+				loadTranscriptSnapshot,
+				getComposerAnchorSurfaceId: () => hiddenSurfaceId,
+				getSelectedChatId: () => 'chat-7',
+			});
+			const visible = Array.from({ length: 8 }, (_, index) => {
+				const chatId = `chat-${index}`;
+				seed(cache, chatId);
+				return presentation(`chat-view:window-${index}`, chatId);
+			});
+			registry.reconcile(visible);
+			await Promise.resolve();
+			const panels = visible.map((item) => registry.panel(item.surfaceId));
+			for (const panel of panels) panel?.attachPresentation(port({ kind: 'end' }));
+			const focused = visible.slice(0, 1);
+			const hidden = visible.slice(1);
+			registry.prepareForReconcile(focused, hidden);
+			registry.reconcile(focused, hidden);
+
+			expect(registry.visibleChatIds()).toEqual(['chat-0']);
+			expect(registry.composerPanel).toBeNull();
+			for (const [index, item] of visible.entries()) {
+				expect(registry.panel(item.surfaceId)).toBe(panels[index]);
+			}
+			await expect(registry.loadChatSnapshot('chat-7')).resolves.toBe(false);
+			expect(registry.hasInactiveWindow('chat-7')).toBe(true);
+			registry.applyCommittedBatch({
+				chatId: 'chat-7',
+				transcriptViewId: 'view-1',
+				messages: [message(2)],
+				firstOrdinal: 2,
+				lastOrdinal: 2,
+				resendCandidates: [],
+				noticeRevision: 0,
+			});
+			registry.reconcile(visible);
+			expect(registry.panel(hiddenSurfaceId)).toBe(panels[7]);
+			expect(panels[7]?.transcript.entries.map((entry) => entry.ordinal)).toEqual([1, 2]);
+			expect(registry.composerPanel).toBe(panels[7]);
+			expect(loadTranscriptSnapshot).not.toHaveBeenCalled();
+			registry.destroy();
+			cache.flush();
+		},
+	);
+
+	it('does not construct a new Chat that is hidden by fullscreen', () => {
+		const { cache, registry } = fixture();
+		seed(cache);
+		registry.reconcile(
+			[presentation('chat-view:window-left', 'chat-1')],
+			[presentation('chat-view:window-right', 'unopened-chat')],
+		);
+		expect(registry.panel('chat-view:window-right')).toBeNull();
+		registry.destroy();
+		cache.flush();
+	});
+
+	it.each(['unattached', 'changed-host'])('does not retain a %s presentation', (kind) => {
+		const { cache, registry } = fixture();
+		seed(cache);
+		const item = presentation('chat-view:window-left', 'chat-1');
+		registry.reconcile([item]);
+		if (kind === 'changed-host')
+			registry.panel(item.surfaceId)?.attachPresentation(port({ kind: 'end' }));
+		const hidden =
+			kind === 'changed-host' ? { ...item, presentation: 'window-other' as const } : item;
+		registry.prepareForReconcile([], [hidden]);
+		registry.reconcile([], [hidden]);
+		expect(registry.panel(item.surfaceId)).toBeNull();
+		registry.destroy();
+		cache.flush();
+	});
+
+	it('remembers hidden recovery debt after a later commit makes the cache fresh', async () => {
+		const loadTranscriptSnapshot = vi.fn(async (transcript, chatId: string) => {
+			transcript.transcriptCache.replace(chatId, 'view-1', [message(1), message(2)], 2, null);
+			transcript.installCachedSnapshot(chatId);
+		});
+		const { cache, registry } = fixture({ loadTranscriptSnapshot });
+		seed(cache);
+		const visible = [presentation('chat-view:window-left', 'chat-1')];
+		registry.reconcile(visible);
+		const panel = registry.panel(visible[0]!.surfaceId)!;
+		panel.attachPresentation(port({ kind: 'end' }));
+		registry.prepareForReconcile([], visible);
+		registry.reconcile([], visible);
+		registry.markChatStale('chat-1');
+		registry.applyCommittedBatch({
+			chatId: 'chat-1',
+			transcriptViewId: 'view-1',
+			messages: [message(2)],
+			firstOrdinal: 2,
+			lastOrdinal: 2,
+			resendCandidates: [],
+			noticeRevision: 0,
+		});
+		expect(cache.readAppliedCursor('chat-1')?.stale).toBe(false);
+		registry.reconcile(visible);
+		await vi.waitFor(() => expect(loadTranscriptSnapshot).toHaveBeenCalledOnce());
+		expect(registry.panel(visible[0]!.surfaceId)).toBe(panel);
+		registry.destroy();
+		cache.flush();
+	});
+
+	it('defers hidden draft admission and coalesces recovery when duplicate panels return', async () => {
+		const loadTranscriptSnapshot = vi.fn(async (transcript, chatId: string) => {
+			transcript.transcriptCache.replace(chatId, 'view-1', [message(1)], 1, null);
+			transcript.installCachedSnapshot(chatId);
+		});
+		const { cache, registry } = fixture({ loadTranscriptSnapshot });
+		const draft = [
+			presentation('chat-view:window-left', 'chat-1', 'deferred'),
+			presentation('chat-view:window-right', 'chat-1', 'deferred'),
+		];
+		registry.reconcile(draft);
+		const panels = draft.map((item) => registry.panel(item.surfaceId));
+		for (const panel of panels) panel?.attachPresentation(port({ kind: 'end' }));
+		registry.prepareForReconcile([], draft);
+		registry.reconcile(
+			[],
+			draft.map((item) => ({ ...item, snapshotAdmission: 'admitted' })),
+		);
+		await expect(registry.loadChatSnapshot('chat-1')).resolves.toBe(false);
+		expect(loadTranscriptSnapshot).not.toHaveBeenCalled();
+		registry.reconcile(draft.map((item) => ({ ...item, snapshotAdmission: 'admitted' })));
+		await vi.waitFor(() => expect(loadTranscriptSnapshot).toHaveBeenCalledOnce());
+		for (const [index, item] of draft.entries())
+			expect(registry.panel(item.surfaceId)).toBe(panels[index]);
+		registry.destroy();
+		cache.flush();
+	});
+
+	it('repairs a retained local frontier from a fresh shared cache without fetching', () => {
+		const loadTranscriptSnapshot = vi.fn();
+		const { cache, registry } = fixture({ loadTranscriptSnapshot });
+		seed(cache);
+		const visible = [presentation('chat-view:window-left', 'chat-1')];
+		registry.reconcile(visible);
+		const panel = registry.panel(visible[0]!.surfaceId)!;
+		panel.attachPresentation(port({ kind: 'end' }));
+		registry.prepareForReconcile([], visible);
+		registry.reconcile([], visible);
+		cache.replace('chat-1', 'view-1', [message(1), message(2)], 2, null);
+		registry.reconcile(visible);
+		expect(panel.transcript.entries.map((entry) => entry.ordinal)).toEqual([1, 2]);
+		expect(loadTranscriptSnapshot).not.toHaveBeenCalled();
+		registry.destroy();
+		cache.flush();
+	});
+
+	it('recovers a hidden view replacement only when the retained panel becomes visible', async () => {
+		const loadTranscriptSnapshot = vi.fn(async (transcript, chatId: string) => {
+			transcript.transcriptCache.replace(chatId, 'view-2', [message(1)], 1, null);
+			transcript.installCachedSnapshot(chatId);
+		});
+		const { cache, registry } = fixture({ loadTranscriptSnapshot });
+		seed(cache);
+		const visible = [presentation('chat-view:window-left', 'chat-1')];
+		registry.reconcile(visible);
+		const original = registry.panel('chat-view:window-left');
+		original?.attachPresentation(port({ kind: 'end' }));
+		original?.scroll.setPinnedToBottom(false);
+		registry.prepareForReconcile([], visible);
+		registry.reconcile([], visible);
+		registry.handleViewReplacement('chat-1');
+		await expect(registry.loadChatSnapshot('chat-1')).resolves.toBe(false);
+		expect(loadTranscriptSnapshot).not.toHaveBeenCalled();
+		registry.reconcile(visible);
+		await vi.waitFor(() => expect(original?.transcript.transcriptViewId).toBe('view-2'));
+		expect(loadTranscriptSnapshot).toHaveBeenCalledOnce();
+		expect(registry.panel('chat-view:window-left')).toBe(original);
+		expect(original?.scroll.isPinnedToBottom).toBe(true);
+		registry.destroy();
+		cache.flush();
+	});
+
+	it('drops retained panels when their active Chat changes or their presentation is removed', () => {
+		const { cache, registry } = fixture();
+		seed(cache);
+		seed(cache, 'chat-2');
+		const visible = [presentation('chat-view:window-left', 'chat-1')];
+		registry.reconcile(visible);
+		registry.panel('chat-view:window-left')?.attachPresentation(port({ kind: 'end' }));
+		registry.prepareForReconcile([], visible);
+		registry.reconcile([], visible);
+		registry.reconcile([], [presentation('chat-view:window-left', 'chat-2')]);
+		expect(registry.panel('chat-view:window-left')).toBeNull();
+		registry.reconcile(visible);
+		registry.prepareForReconcile([], visible);
+		registry.reconcile([], visible);
+		registry.reconcile([]);
+		expect(registry.panel('chat-view:window-left')).toBeNull();
+		registry.destroy();
+		cache.flush();
 	});
 
 	it('restores an expanded transcript immediately after rapid chat switches', () => {
@@ -251,63 +454,77 @@ describe('ConversationPanelRegistry', () => {
 		cache.flush();
 	});
 
-	it('holds live shared commits behind a fixed reconnect replay watermark', () => {
-		const { cache, registry } = fixture();
-		seed(cache);
-		registry.reconcile([
-			presentation('chat-view:window-left', 'chat-1'),
-			presentation('chat-view:window-right', 'chat-1'),
-		]);
-		const applyMessages = vi.spyOn(cache, 'applyMessages');
-		const replayToken = registry.beginReconnectReplay('chat-1', 'view-1');
-
-		expect(
-			registry.applyReconnectReplayPage(replayToken, 'chat-1', {
-				transcriptViewId: 'view-1',
-				messages: [message(2)],
-				firstOrdinal: 2,
-				lastOrdinal: 2,
-				resendCandidates: [],
-				noticeRevision: 0,
-			}),
-		).toBe('applied');
-		expect(
-			registry.applyCommittedBatch({
-				chatId: 'chat-1',
-				transcriptViewId: 'view-1',
-				messages: [message(4)],
-				firstOrdinal: 4,
-				lastOrdinal: 4,
-				resendCandidates: [],
-				noticeRevision: 0,
-			}),
-		).toEqual({ kind: 'applied', localRecoverySurfaceIds: [] });
-
-		expect(cache.readAppliedCursor('chat-1')?.lastOrdinal).toBe(2);
-		expect(
-			registry.panel('chat-view:window-left')?.transcript.entries.map((entry) => entry.ordinal),
-		).toEqual([1, 2]);
-		expect(
-			registry.applyReconnectReplayPage(replayToken, 'chat-1', {
-				transcriptViewId: 'view-1',
-				messages: [message(3)],
-				firstOrdinal: 3,
-				lastOrdinal: 3,
-				resendCandidates: [],
-				noticeRevision: 0,
-			}),
-		).toBe('applied');
-		expect(registry.finishReconnectReplay(replayToken, 'chat-1')).toBe('applied');
-
-		expect(applyMessages).toHaveBeenCalledTimes(3);
-		expect(cache.readAppliedCursor('chat-1')?.lastOrdinal).toBe(4);
-		for (const surfaceId of ['chat-view:window-left', 'chat-view:window-right'] as const) {
-			expect(registry.panel(surfaceId)?.transcript.entries.map((entry) => entry.ordinal)).toEqual([
-				1, 2, 3, 4,
+	it.each([false, true])(
+		'holds live shared commits behind a fixed reconnect replay watermark (hidden=%s)',
+		(hidden) => {
+			const { cache, registry } = fixture();
+			seed(cache);
+			registry.reconcile([
+				presentation('chat-view:window-left', 'chat-1'),
+				presentation('chat-view:window-right', 'chat-1'),
 			]);
-		}
-		cache.flush();
-	});
+			const applyMessages = vi.spyOn(cache, 'applyMessages');
+			if (hidden) {
+				for (const panel of registry.panelsForChat('chat-1'))
+					panel.attachPresentation(port({ kind: 'end' }));
+				const fullscreenHidden = [
+					presentation('chat-view:window-left', 'chat-1'),
+					presentation('chat-view:window-right', 'chat-1'),
+				];
+				registry.prepareForReconcile([], fullscreenHidden);
+				registry.reconcile([], fullscreenHidden);
+				expect(registry.hasInactiveWindow('chat-1')).toBe(true);
+			}
+			const replayToken = registry.beginReconnectReplay('chat-1', 'view-1');
+
+			expect(
+				registry.applyReconnectReplayPage(replayToken, 'chat-1', {
+					transcriptViewId: 'view-1',
+					messages: [message(2)],
+					firstOrdinal: 2,
+					lastOrdinal: 2,
+					resendCandidates: [],
+					noticeRevision: 0,
+				}),
+			).toBe('applied');
+			expect(
+				registry.applyCommittedBatch({
+					chatId: 'chat-1',
+					transcriptViewId: 'view-1',
+					messages: [message(4)],
+					firstOrdinal: 4,
+					lastOrdinal: 4,
+					resendCandidates: [],
+					noticeRevision: 0,
+				}),
+			).toEqual({ kind: 'applied', localRecoverySurfaceIds: [] });
+
+			expect(cache.readAppliedCursor('chat-1')?.lastOrdinal).toBe(2);
+			expect(
+				registry.panel('chat-view:window-left')?.transcript.entries.map((entry) => entry.ordinal),
+			).toEqual([1, 2]);
+			expect(
+				registry.applyReconnectReplayPage(replayToken, 'chat-1', {
+					transcriptViewId: 'view-1',
+					messages: [message(3)],
+					firstOrdinal: 3,
+					lastOrdinal: 3,
+					resendCandidates: [],
+					noticeRevision: 0,
+				}),
+			).toBe('applied');
+			expect(registry.finishReconnectReplay(replayToken, 'chat-1', 3)).toBe('applied');
+
+			expect(applyMessages).toHaveBeenCalledTimes(3);
+			expect(cache.readAppliedCursor('chat-1')?.lastOrdinal).toBe(4);
+			for (const surfaceId of ['chat-view:window-left', 'chat-view:window-right'] as const) {
+				expect(registry.panel(surfaceId)?.transcript.entries.map((entry) => entry.ordinal)).toEqual(
+					[1, 2, 3, 4],
+				);
+			}
+			cache.flush();
+		},
+	);
 
 	it('keeps duplicate surfaces independent while sharing lifecycle identity', () => {
 		const { cache, registry } = fixture();

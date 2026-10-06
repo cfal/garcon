@@ -45,7 +45,11 @@ export interface ReconnectPanelRegistryPort {
 		chatId: string,
 		batch: TranscriptBufferedBatch,
 	): TranscriptReplayApplyResult | 'stale';
-	finishReconnectReplay(token: number, chatId: string): TranscriptReplayApplyResult | 'stale';
+	finishReconnectReplay(
+		token: number,
+		chatId: string,
+		throughOrdinal: number,
+	): TranscriptReplayApplyResult | 'stale';
 	abortReconnectReplay(token: number, chatId: string): void;
 	abortReconnectReplays(): void;
 	noticeRevisionFor(chatId: string): number;
@@ -186,22 +190,16 @@ export class ChatReconnectCoordinator {
 					}) === 'applied',
 			});
 			if (!message) return;
-			const replayResult = panels.finishReconnectReplay(replayToken, chatId);
+			const replayResult = panels.finishReconnectReplay(
+				replayToken,
+				chatId,
+				message.throughOrdinal,
+			);
 			if (replayResult === 'stale') return;
 			if (replayResult !== 'applied') {
 				await this.#loadRenderedSnapshot(chatId, epoch);
 				return;
 			}
-			const applied = panels.transcriptCache.readAppliedCursor(chatId);
-			if (
-				!applied ||
-				applied.transcriptViewId !== cursor.transcriptViewId ||
-				applied.lastOrdinal < message.throughOrdinal
-			) {
-				await this.#loadRenderedSnapshot(chatId, epoch);
-				return;
-			}
-			panels.transcriptCache.markValidated(chatId);
 		} catch {
 			panels.abortReconnectReplay(replayToken, chatId);
 			if (epoch === this.#reconnectEpoch) await this.#loadRenderedSnapshot(chatId, epoch);
@@ -339,12 +337,15 @@ export class ChatReconnectCoordinator {
 					});
 					if (!message) return;
 					if (replayToken !== null) {
-						const result = this.options.panels.finishReconnectReplay(replayToken, cursor.chatId);
+						const result = this.options.panels.finishReconnectReplay(
+							replayToken,
+							cursor.chatId,
+							message.throughOrdinal,
+						);
 						replayTokens.delete(cursor.chatId);
 						if (result !== 'applied') {
 							throw new Error('Retained transcript replay could not finish');
 						}
-						this.options.panels.transcriptCache.markValidated(cursor.chatId);
 					}
 					shouldRefresh = message.throughOrdinal > cursor.lastOrdinal || shouldRefresh;
 				} catch {
@@ -354,6 +355,9 @@ export class ChatReconnectCoordinator {
 					}
 					if (epoch !== this.#reconnectEpoch) return;
 					this.options.markBackgroundStale(cursor.chatId);
+					if (this.options.panels.visibleChatIds().includes(cursor.chatId)) {
+						await this.#loadRenderedSnapshot(cursor.chatId, epoch);
+					}
 					shouldRefresh = true;
 				}
 			}

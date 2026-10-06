@@ -103,6 +103,7 @@ function fixture() {
 		getQueueContainer: () => undefined,
 		captureRestoreTarget: () => null,
 		closeTransients: () => {},
+		prepareForHide: () => {},
 	});
 	return {
 		registry,

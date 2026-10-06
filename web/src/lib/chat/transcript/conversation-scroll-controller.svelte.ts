@@ -475,7 +475,8 @@ export class ConversationScrollController {
 
 	async loadEarlierPageForNavigator(chatId: string): Promise<TranscriptPageLoadResult> {
 		const viewport = this.deps.getViewport();
-		if (!viewport || this.deps.getChatId() !== chatId) return 'invalidated';
+		if (!this.#isViewportVisible || !viewport || this.deps.getChatId() !== chatId)
+			return 'invalidated';
 		const operationEpoch = this.#beginViewportOperation();
 		const shouldRemainPinned = this.isPinnedToBottom || !this.deps.chatState.isUserScrolledUp;
 		const result = await this.deps.chatState.loadEarlierPage(chatId);
@@ -503,6 +504,7 @@ export class ConversationScrollController {
 		options: { viewportOffset?: number; presentation?: 'group-summary' } = {},
 	): Promise<UserMessageNavigatorSelectionResult> {
 		if (
+			!this.#isViewportVisible ||
 			this.deps.getChatId() !== target.chatId ||
 			this.deps.chatState.transcriptViewId !== target.transcriptViewId
 		) {
@@ -538,6 +540,7 @@ export class ConversationScrollController {
 		loadWindow: (isCurrent: () => boolean) => Promise<TranscriptRowWindowResult>,
 		ownsNavigation: () => boolean,
 	): Promise<TranscriptRowNavigationResult> {
+		if (!this.#isViewportVisible) return 'cancelled';
 		const epoch = this.#beginViewportOperation();
 		const current = () =>
 			!signal.aborted && ownsNavigation() && this.#isCurrentViewportOperation(target.chatId, epoch);
@@ -566,7 +569,7 @@ export class ConversationScrollController {
 	async jumpToDomAnchor(anchorId: string): Promise<boolean> {
 		const chatId = this.deps.getChatId();
 		const viewport = this.deps.getViewport();
-		if (!chatId || !viewport) return false;
+		if (!this.#isViewportVisible || !chatId || !viewport) return false;
 		let shouldResumeAutoFill = false;
 		this.#activeTargetNavigations += 1;
 		try {
@@ -656,7 +659,11 @@ export class ConversationScrollController {
 	setViewportVisible(isVisible: boolean): void {
 		if (isVisible === this.#isViewportVisible) return;
 		this.#isViewportVisible = isVisible;
-		if (!isVisible) this.cancelNativeScroll();
+		if (!isVisible) {
+			this.cancelNativeScroll();
+			this.#expireUserScrollIntent();
+			this.#resetPagingContext();
+		}
 		if (!isVisible || this.#activeTargetNavigations === 0) this.#cancelViewportOperations();
 		this.#previousLogicalOffset =
 			this.deps.getViewport()?.viewportPosition()?.logicalOffset ?? null;
@@ -664,10 +671,9 @@ export class ConversationScrollController {
 		void this.#restoreVisibleViewport();
 	}
 
-	// Scrolls the feed through its virtual viewport and reconciles pinning state.
 	scrollFeedHalfPage(direction: TranscriptPageDirection): void {
 		const scrollContainer = this.deps.getScrollContainer();
-		if (!scrollContainer) return;
+		if (!this.#isViewportVisible || !scrollContainer) return;
 		this.noteUserScrollIntent(direction);
 		const half = scrollContainer.clientHeight / 2;
 		const viewport = this.deps.getViewport();
@@ -793,6 +799,7 @@ export class ConversationScrollController {
 
 	#canRequestPage(direction: TranscriptPageDirection, allowRetry = false): boolean {
 		if (
+			!this.#isViewportVisible ||
 			this.#activeTargetNavigations > 0 ||
 			this.#isPageMutationInProgress ||
 			this.deps.chatState.pageStates[direction].status === 'loading' ||
@@ -870,7 +877,7 @@ export class ConversationScrollController {
 		target: TranscriptWindowTarget,
 		onCommitted: () => void,
 	): Promise<WindowNavigationResult> {
-		if (this.deps.getChatId() !== chatId) return 'invalidated';
+		if (!this.#isViewportVisible || this.deps.getChatId() !== chatId) return 'invalidated';
 		const operationEpoch = this.#beginViewportOperation();
 		const result = await this.deps.chatState.navigateToWindow(chatId, target);
 		if (result !== 'loaded' || !this.#isCurrentViewportOperation(chatId, operationEpoch)) {

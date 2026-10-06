@@ -44,6 +44,7 @@
 			measuredCollapsedHeight = undefined;
 			return;
 		}
+		if (element.clientWidth <= 0 || element.clientHeight <= 0) return;
 
 		const collapsedHeight = bodyExpanded
 			? (measuredCollapsedHeight ?? element.clientHeight)

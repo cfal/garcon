@@ -155,6 +155,28 @@ describe('CollapsibleBody', () => {
 		});
 	});
 
+	it('preserves expansion while an ancestor has no measurable layout', async () => {
+		layout.contentHeight = 260;
+		const { container } = render(CollapsibleBodyTestHost, { content: 'Retained content' });
+		await fireEvent.click(await screen.findByRole('button', { name: 'Show more' }));
+		const body = container.querySelector<HTMLElement>('[data-slot="collapsible-body"]')!;
+		const content = container.querySelector<HTMLElement>('[data-slot="collapsible-body-content"]')!;
+		layout.width = 0;
+		layout.contentHeight = 0;
+		ResizeObserverHarness.emit(body, 0, 0);
+		ResizeObserverHarness.emit(content, 0, 0);
+		await waitFor(() =>
+			expect(screen.getByRole('button', { name: 'Show less' }).getAttribute('aria-expanded')).toBe(
+				'true',
+			),
+		);
+		layout.width = 600;
+		layout.contentHeight = 260;
+		ResizeObserverHarness.emit(body, 600, 260);
+		ResizeObserverHarness.emit(content, 600, 260);
+		await waitFor(() => expect(body.classList).not.toContain('collapsible-body-collapsed'));
+	});
+
 	it('expands overflowing interactive content before focus remains inside it', async () => {
 		layout.contentHeight = 260;
 		render(CollapsibleBodyTestHost, { content: 'Interactive content', focusable: true });

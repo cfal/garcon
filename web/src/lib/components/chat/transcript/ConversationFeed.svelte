@@ -343,10 +343,11 @@
 	const virtualItems = $derived(selectVirtualItems(virtualSnapshot, renderedIndexes));
 
 	$effect.pre(() => {
-		toolGroups.reconcile(
-			surfaceIdentity,
-			new Set(chatState.visibleRows.map((row) => row.id)),
-		);
+		if (!isVisible) {
+			untrack(prepareForHide);
+			return;
+		}
+		toolGroups.reconcile(surfaceIdentity, new Set(chatState.visibleRows.map((row) => row.id)));
 		const input = projectionInput;
 		const pendingPermissionOccurrences = new Set(
 			activePendingPermissionRequests.map((request) => request.permissionOccurrenceId),
@@ -378,8 +379,10 @@
 	});
 
 	function prepareForHide(): void {
-		retention.closeAllTransients();
 		virtualController.prepareForHide();
+		retention.closeAllTransients();
+		settleRevealWaiters(false);
+		scrollbarPointerY = null;
 	}
 
 	function closeTransients(): void {
@@ -391,6 +394,7 @@
 			captureRestoreTarget: () =>
 				virtualController.captureRestoreTarget(chatState.transcriptViewId, pinnedToBottom),
 			closeTransients,
+			prepareForHide,
 		};
 		onPresentationPortChange?.(port);
 		return () => onPresentationPortChange?.(null);
@@ -401,16 +405,17 @@
 		return () => onRegisterPrepareHide?.(null);
 	});
 
-	$effect(() =>
-		retention.observeSelection({
+	$effect(() => {
+		if (!isVisible) return;
+		return retention.observeSelection({
 			get root() {
 				return virtualRoot;
 			},
 			get visible() {
 				return isVisible;
 			},
-		}),
-	);
+		});
+	});
 
 	$effect(() => {
 		if (isVisible) return;

@@ -523,6 +523,7 @@ function panelPresentation(
 		getQueueContainer: () => undefined,
 		captureRestoreTarget: () => target,
 		closeTransients: () => {},
+		prepareForHide: () => {},
 	};
 }
 
@@ -1403,6 +1404,12 @@ describe('WorkspaceRoot', () => {
 		const mainWindow = container.querySelector('[data-workspace-window-id="window-main"]')!;
 		const gitWindow = container.querySelector('[data-workspace-window-id="window-2"]')!;
 		const composerLayer = container.querySelector('[data-workspace-live-chat-body]')?.parentElement;
+		const originalPanelNode = mainWindow.querySelector('[data-testid="conversation-panel"]');
+		const panels = testContext.current?.conversationPanels as ConversationPanelRegistry;
+		const originalPanel = panels.panel('chat-view:window-main');
+		if (!originalPanel || !originalPanelNode) throw new Error('Expected the active Chat panel');
+		const preparedWhileVisible = vi.fn(() => expect(mainWindow.classList.contains('hidden')).toBe(false));
+		originalPanel.attachPresentation({ ...panelPresentation({ kind: 'end' }), prepareForHide: preparedWhileVisible });
 		if (!composerLayer) throw new Error('Expected composer layer');
 		expect(container.querySelectorAll('[data-workspace-window-id]')).toHaveLength(3);
 
@@ -1417,6 +1424,11 @@ describe('WorkspaceRoot', () => {
 		expect(mainWindow.classList.contains('hidden')).toBe(true);
 		expect(mainWindow.getAttribute('aria-hidden')).toBe('true');
 		expect(mainWindow.hasAttribute('inert')).toBe(true);
+		expect(mainWindow.querySelector('[data-testid="conversation-panel"]')).toBe(originalPanelNode);
+		expect(panels.panel('chat-view:window-main')).toBe(originalPanel);
+		expect(preparedWhileVisible).toHaveBeenCalledOnce();
+		expect(originalPanelNode.getAttribute('data-owns-composer')).toBe('false');
+		expect(originalPanelNode.getAttribute('data-command-owner')).toBe('false');
 		expect(composerLayer.getAttribute('aria-hidden')).toBe('true');
 		expect(composerLayer.hasAttribute('inert')).toBe(true);
 		expect(gitWindow.getAttribute('style')).toContain('width: 100%');
@@ -1441,6 +1453,8 @@ describe('WorkspaceRoot', () => {
 		expect(composerLayer.getAttribute('aria-hidden')).toBe('false');
 		expect(composerLayer.hasAttribute('inert')).toBe(false);
 		expect(gitWindow.getAttribute('style')).not.toContain('width: 100%');
+		expect(mainWindow.querySelector('[data-testid="conversation-panel"]')).toBe(originalPanelNode);
+		expect(panels.panel('chat-view:window-main')).toBe(originalPanel);
 	});
 
 	it('passes committed dynamic bounds to partition resizers', async () => {

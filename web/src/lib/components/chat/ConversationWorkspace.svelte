@@ -356,47 +356,54 @@
 		return panel;
 	}
 
+	function assertVisiblePanel(surfaceId: ChatViewSurfaceId, chatId: string) {
+		if (!conversationPanels.isPanelVisible(surfaceId, chatId)) {
+			throw new StaleConversationSurfaceError(surfaceId, chatId);
+		}
+		return assertRenderedPanel(surfaceId, chatId);
+	}
+
 	const panelActions: ConversationPanelActions = {
 		reload(surfaceId, chatId) {
-			const panel = assertRenderedPanel(surfaceId, chatId);
+			const panel = assertVisiblePanel(surfaceId, chatId);
 			void controller.loadPanelChat(chatId, panel.transcript, (options) =>
 				conversationPanels.loadChatSnapshot(chatId, options),
 			);
 		},
 		decidePermission(surfaceId, chatId, permissionOccurrenceId, decision) {
-			assertRenderedPanel(surfaceId, chatId);
+			assertVisiblePanel(surfaceId, chatId);
 			controller.handlePermissionDecisionForChat(chatId, permissionOccurrenceId, decision);
 		},
 		exitPlanMode(surfaceId, chatId, permissionOccurrenceId, choice, plan) {
-			assertRenderedPanel(surfaceId, chatId);
+			assertVisiblePanel(surfaceId, chatId);
 			controller.handleExitPlanModeForChat(chatId, permissionOccurrenceId, choice, plan);
 		},
 		fork(surfaceId, chatId, upToOrdinal) {
-			const panel = assertRenderedPanel(surfaceId, chatId);
+			const panel = assertVisiblePanel(surfaceId, chatId);
 			void controller.forkChat(chatId, upToOrdinal, panel.transcript);
 		},
 		appendToDraft(surfaceId, chatId, block) {
-			assertRenderedPanel(surfaceId, chatId);
+			assertVisiblePanel(surfaceId, chatId);
 			composerState.appendDraftBlock(chatId, block, { allowDuplicate: true });
 		},
 		async generateTitle(surfaceId, chatId, message, ordinal) {
-			assertRenderedPanel(surfaceId, chatId);
+			assertVisiblePanel(surfaceId, chatId);
 			await sessions.generateChatTitleFromMessage(chatId, message, ordinal);
 		},
 		interruptQueue(surfaceId, chatId) {
-			assertRenderedPanel(surfaceId, chatId);
+			assertVisiblePanel(surfaceId, chatId);
 			return controller.handleInterruptAndSendForChat(chatId);
 		},
 		steerQueue(surfaceId, chatId, entry, reorderRevision) {
-			assertRenderedPanel(surfaceId, chatId);
+			assertVisiblePanel(surfaceId, chatId);
 			return controller.handleSteerQueuedInputForChat(chatId, entry, reorderRevision);
 		},
 		pauseQueue(surfaceId, chatId) {
-			assertRenderedPanel(surfaceId, chatId);
+			assertVisiblePanel(surfaceId, chatId);
 			return controller.pauseQueueForChat(chatId);
 		},
 		resumeQueue(surfaceId, chatId, pauseId) {
-			assertRenderedPanel(surfaceId, chatId);
+			assertVisiblePanel(surfaceId, chatId);
 			return controller.resumeQueueForChat(chatId, pauseId);
 		},
 		reportQueueControlError(surfaceId, chatId, action, error) {
@@ -404,27 +411,27 @@
 			controller.handleQueueControlErrorForChat(chatId, action, error);
 		},
 		editQueue(surfaceId, chatId, entry) {
-			assertRenderedPanel(surfaceId, chatId);
+			assertVisiblePanel(surfaceId, chatId);
 			editQueuedInput(chatId, entry);
 		},
 		openQueue(surfaceId, chatId) {
-			assertRenderedPanel(surfaceId, chatId);
+			assertVisiblePanel(surfaceId, chatId);
 			openQueuedInputsManager(chatId);
 		},
 		deleteQueue(surfaceId, chatId, entryId) {
-			assertRenderedPanel(surfaceId, chatId);
+			assertVisiblePanel(surfaceId, chatId);
 			return controller.deleteQueueEntryFromPanelForChat(chatId, entryId);
 		},
 		stop(surfaceId, chatId) {
-			assertRenderedPanel(surfaceId, chatId);
+			assertVisiblePanel(surfaceId, chatId);
 			return controller.handleAbortForChat(chatId);
 		},
 		openCommit(surfaceId, chatId) {
-			assertRenderedPanel(surfaceId, chatId);
+			assertVisiblePanel(surfaceId, chatId);
 			openCommitForPanel(surfaceId, chatId);
 		},
 		toggleBranch(surfaceId, chatId) {
-			assertRenderedPanel(surfaceId, chatId);
+			assertVisiblePanel(surfaceId, chatId);
 			return toggleCommitBranchDropdown(surfaceId, chatId);
 		},
 		closeBranch(surfaceId, chatId) {
@@ -432,26 +439,30 @@
 			closeCommitBranchDropdown();
 		},
 		createBranch(surfaceId, chatId) {
-			assertRenderedPanel(surfaceId, chatId);
+			assertVisiblePanel(surfaceId, chatId);
 			void openNewBranchDialog(surfaceId, chatId);
 		},
 		switchBranch(surfaceId, chatId, branch) {
-			assertRenderedPanel(surfaceId, chatId);
+			assertVisiblePanel(surfaceId, chatId);
 			return switchCommitBranch(surfaceId, chatId, branch);
 		},
 		searchBranches(surfaceId, chatId, query) {
-			assertRenderedPanel(surfaceId, chatId);
+			assertVisiblePanel(surfaceId, chatId);
 			const projectPath = sessions.byId[chatId]?.projectPath;
 			if (projectPath) void quickGitBranches.searchBranchRefs(projectPath, query);
 		},
 		sortBranches(surfaceId, chatId, key, query) {
-			assertRenderedPanel(surfaceId, chatId);
+			assertVisiblePanel(surfaceId, chatId);
 			const projectPath = sessions.byId[chatId]?.projectPath;
 			if (projectPath) void quickGitBranches.toggleBranchSort(projectPath, key, query);
 		},
 		closeSwitchBranchDialog(surfaceId, chatId) {
 			assertRenderedPanel(surfaceId, chatId);
-			if (workspace.composerAnchorSurfaceId === surfaceId && sessions.selectedChatId === chatId) {
+			if (
+				conversationPanels.isPanelVisible(surfaceId, chatId) &&
+				workspace.composerAnchorSurfaceId === surfaceId &&
+				sessions.selectedChatId === chatId
+			) {
 				appShell.requestComposerFocus();
 			}
 		},

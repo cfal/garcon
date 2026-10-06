@@ -3,4 +3,5 @@ import type { ConversationPanelRestoreTarget } from './conversation-panel-restor
 export interface ConversationFeedPresentationPort {
 	captureRestoreTarget(): ConversationPanelRestoreTarget | null;
 	closeTransients(): void;
+	prepareForHide(): void;
 }

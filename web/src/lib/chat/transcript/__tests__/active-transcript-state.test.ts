@@ -1626,6 +1626,69 @@ describe('ActiveTranscriptState', () => {
 		expect(chat.visibleRows.map(rowContentOf)).toEqual(['existing', 'live', 'newer notice']);
 	});
 
+	it('stops hidden snapshot continuation without losing buffered live messages', async () => {
+		let admitted = true;
+		const interrupted = vi.fn();
+		const chat = new ActiveTranscriptState(undefined, null, {
+			canLoadSnapshot: () => admitted,
+			onSnapshotInterrupted: interrupted,
+		});
+		chat.replaceGeneration('chat-1', 'generation-1', [entry(1, assistant('existing'))], {
+			lastOrdinal: 1,
+			pageOldestOrdinal: 1,
+			nextBeforeOrdinal: null,
+			hasMore: false,
+		});
+		let resolveSnapshot!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
+		vi.mocked(getChatMessages).mockReturnValueOnce(
+			new Promise((resolve) => {
+				resolveSnapshot = resolve;
+			}),
+		);
+		const pending = chat.loadMessages('chat-1');
+		applyMessages(chat, 'chat-1', 'generation-1', [entry(2, assistant('live'))]);
+		admitted = false;
+		resolveSnapshot({
+			chatId: 'chat-1',
+			limit: 50,
+			...page({
+				messages: [],
+				lastOrdinal: 100,
+				pageOldestOrdinal: 0,
+				pageNewestOrdinal: 100,
+				nextBeforeOrdinal: 51,
+				hasMore: true,
+			}),
+		});
+		await pending;
+		expect(getChatMessages).toHaveBeenCalledOnce();
+		expect(chat.chatMessages.map(contentOf)).toEqual(['existing', 'live']);
+		expect(chat.isLoadingMessages).toBe(false);
+		expect(chat.transcriptCache.readAppliedCursor('chat-1')?.stale).toBe(true);
+		expect(interrupted).toHaveBeenCalledWith('chat-1');
+		await chat.loadMessages('chat-1');
+		expect(getChatMessages).toHaveBeenCalledOnce();
+	});
+
+	it('fences a snapshot without discarding buffered live messages', async () => {
+		const chat = new ActiveTranscriptState();
+		chat.activateChat('chat-1');
+		chat.replaceGeneration('chat-1', 'generation-1', [entry(1, assistant('existing'))], {
+			lastOrdinal: 1, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false,
+		});
+		let release!: (value: Awaited<ReturnType<typeof getChatMessages>>) => void;
+		vi.mocked(getChatMessages).mockReturnValueOnce(new Promise((resolve) => { release = resolve; }));
+		const pending = chat.loadMessages('chat-1');
+		applyMessages(chat, 'chat-1', 'generation-1', [entry(2, assistant('live'))]);
+		chat.invalidatePendingSnapshotLoad();
+		expect(chat.chatMessages.map(contentOf)).toEqual(['existing', 'live']);
+		expect(chat.isLoadingMessages).toBe(false);
+		release({ chatId: 'chat-1', limit: 50, ...page({ messages: [entry(1, assistant('existing'))], lastOrdinal: 1 }) });
+		await pending;
+		expect(chat.chatMessages.map(contentOf)).toEqual(['existing', 'live']);
+		expect(chat.lastOrdinal).toBe(2);
+	});
+
 	it('applies buffered live messages when a snapshot load fails', async () => {
 		const chat = new ActiveTranscriptState();
 		chat.replaceGeneration('chat-1', 'generation-1', [entry(1, assistant('existing'))], {
