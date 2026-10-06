@@ -11,6 +11,7 @@ import {
 } from '../api-provider-endpoint-dialog-state.svelte.ts';
 import { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
 import type { ApiProviderCatalogEntry } from '$shared/api-providers';
+import { detectApiKeyProvider } from '../api-key-provider';
 
 vi.mock('$lib/api/api-providers.js', () => ({
 	createApiProvider: vi.fn(),
@@ -44,6 +45,27 @@ function dialogPorts(catalog: Pick<ModelCatalogStore, 'executorId' | 'findEndpoi
 }
 
 describe('ApiProviderEndpointDialogState', () => {
+	it('prefills a key draft without probing or saving and clears credentials on dispose', async () => {
+		const apiKey = 'sk-or-v1-synthetic_key';
+		const template = detectApiKeyProvider(apiKey)!;
+		const dialog = new ApiProviderEndpointDialogState({
+			...dialogPorts(),
+			getProtocol: () => template.protocol,
+			getEndpointId: () => null,
+			getInitialKeyDraft: () => ({ apiKey, template }),
+		});
+		await dialog.load();
+		expect(dialog.payload()).toMatchObject({
+			label: 'OpenRouter',
+			endpoint: { baseUrl: template.baseUrl, apiKey },
+		});
+		expect(dialog.executorIds).toEqual(['local']);
+		expect(createApiProvider).not.toHaveBeenCalled();
+		expect(discoverApiProviderModels).not.toHaveBeenCalled();
+		expect(testApiProvider).not.toHaveBeenCalled();
+		dialog.dispose();
+		expect(dialog.apiKey).toBe('');
+	});
 	beforeEach(() => {
 		vi.mocked(createApiProvider).mockReset();
 		vi.mocked(updateApiProvider).mockReset();

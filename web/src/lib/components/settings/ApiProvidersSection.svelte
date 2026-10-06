@@ -1,11 +1,13 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages.js';
+	import ApiKeyProviderSetup from './ApiKeyProviderSetup.svelte';
 	import ApiProviderProtocolPanel from './ApiProviderProtocolPanel.svelte';
 	import ExecutorAgentSettings from './ExecutorAgentSettings.svelte';
 	import SettingsExecutorSections from './SettingsExecutorSections.svelte';
 </script>
 
 <div class="space-y-8">
+	<ApiKeyProviderSetup />
 	<section class="space-y-4">
 		<h2 class="text-base font-semibold">{m.settings_native_providers()}</h2>
 		<SettingsExecutorSections>

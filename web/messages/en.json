@@ -2908,5 +2908,11 @@
 			"match": { "countPlural=one": "{count} worktree", "countPlural=other": "{count} worktrees" }
 		}
 	],
-	"scheduled_prompts_snippet_help": "Snippets insert editable text. Arguments and project path are filled now; {token} is filled when the prompt runs."
+	"scheduled_prompts_snippet_help": "Snippets insert editable text. Arguments and project path are filled now; {token} is filled when the prompt runs.",
+	"settings_key_setup_title": "Paste an API key",
+	"settings_key_setup_description": "Detect the provider and review its endpoint before saving. Keys stay in this draft until you choose Save, Test, or Fetch Models.",
+	"settings_key_setup_placeholder": "Paste your API key",
+	"settings_key_setup_review": "Review provider",
+	"settings_key_setup_detected": "Detected {provider}. Review the endpoint and choose a model.",
+	"settings_key_setup_unknown": "Provider not recognized. Choose a provider from the menus below."
 }

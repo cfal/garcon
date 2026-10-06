@@ -13,6 +13,7 @@
 	import type { ApiProtocol } from '$shared/api-providers';
 	import type { ApiProviderTemplateId } from '$shared/api-provider-templates';
 	import { ApiProviderEndpointDialogState } from './api-provider-endpoint-dialog-state.svelte';
+	import type { ApiKeyProviderDraft } from './api-key-provider';
 
 	let {
 		open = false,
@@ -20,6 +21,7 @@
 		endpointId = null,
 		templateId = 'custom',
 		duplicate = false,
+		initialKeyDraft,
 		onOpenChange = () => undefined,
 	} = $props<{
 		open?: boolean;
@@ -27,6 +29,7 @@
 		endpointId?: string | null;
 		templateId?: ApiProviderTemplateId;
 		duplicate?: boolean;
+		initialKeyDraft?: ApiKeyProviderDraft;
 		onOpenChange?: (open: boolean) => void;
 	}>();
 
@@ -45,6 +48,7 @@
 		getEndpointId: () => endpointId,
 		getTemplateId: () => templateId,
 		getDuplicate: () => duplicate,
+		getInitialKeyDraft: () => initialKeyDraft,
 		onSaved: () => onOpenChange(false),
 	});
 
