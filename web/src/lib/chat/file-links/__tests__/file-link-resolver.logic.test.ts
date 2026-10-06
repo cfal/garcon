@@ -104,6 +104,30 @@ describe('Markdown image file targets', () => {
 });
 
 describe('resolveFileLinkTarget', () => {
+	it('resolves absolute UNC links from chat and file without allowing traversal', () => {
+		const uncOpts = {
+			fileRootPath: '//server/share',
+			sourceDirectoryPath: '//server/share/project',
+		};
+		expect(resolveFileLinkTarget('//server/share/report.md:42:7', uncOpts)).toMatchObject({
+			relativePath: 'report.md',
+			line: 42,
+			col: 7,
+		});
+		expect(
+			resolveFileLinkFromFile('%2F%2Fserver%2Fshare%2Freport.md', {
+				fileRootPath: uncOpts.fileRootPath,
+				sourceFilePath: 'project/guide.md',
+			}),
+		).toMatchObject({ relativePath: 'report.md' });
+		expect(
+			resolveFileLinkTarget('//server/share/project/../outside.md', {
+				fileRootPath: '//server/share/project',
+				sourceDirectoryPath: '//server/share/project',
+			}),
+		).toBeNull();
+	});
+
 	it('resolves absolute links under the configured base', () => {
 		expect(resolveFileLinkTarget('/workspace/other/README.md', opts)).toMatchObject({
 			fileRootPath: '/workspace',

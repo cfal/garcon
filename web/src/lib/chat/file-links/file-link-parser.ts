@@ -91,6 +91,14 @@ function stripBasePath(absolutePath: string, basePath: string): string | null {
 	return null;
 }
 
+/** Lets a confirmed UNC filesystem root claim its paths before URL classification. */
+function matchesUncBasePath(path: string, basePath: string | undefined): boolean {
+	if (!basePath || !/^\/\/[^/]+\/[^/]+(?:\/|$)/.test(basePath.replace(/\\/g, '/'))) {
+		return false;
+	}
+	return stripBasePath(path, basePath) !== null;
+}
+
 export interface ParseFileLinkOptions {
 	/** Absolute paths under this directory are accepted and relativized. */
 	projectBasePath: string;
@@ -121,21 +129,26 @@ export function parseFileLink(
 	// Reject URLs with schemes (http:, https:, mailto:, etc.)
 	if (SCHEME_RE.test(href) && !DRIVE_LETTER_RE.test(href)) return ignored(href);
 
-	// Reject protocol-relative URLs
-	if (PROTOCOL_RELATIVE_RE.test(href)) return ignored(href);
-
 	// Decode URI components safely
 	let decoded: string;
 	try {
 		decoded = decodeURIComponent(href);
 	} catch {
+		if (PROTOCOL_RELATIVE_RE.test(href) && !matchesUncBasePath(href, options?.projectBasePath)) {
+			return ignored(href);
+		}
 		if (ABSOLUTE_UNIX_RE.test(href) || DRIVE_LETTER_RE.test(href)) {
 			return { ...ignored(href), blockedReason: 'invalid-path' };
 		}
 		return ignored(href);
 	}
 	if (SCHEME_RE.test(decoded) && !DRIVE_LETTER_RE.test(decoded)) return ignored(href);
-	if (PROTOCOL_RELATIVE_RE.test(decoded)) return ignored(href);
+	if (
+		PROTOCOL_RELATIVE_RE.test(decoded) &&
+		!matchesUncBasePath(decoded, options?.projectBasePath)
+	) {
+		return ignored(href);
+	}
 
 	// Extract line/col info before stripping hash, since #Lxx is both
 	// a hash fragment and a line marker.

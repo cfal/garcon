@@ -263,7 +263,8 @@ describe('Markdown', () => {
 
 	describe('file link interception', () => {
 		it.each(['/workspace/.', '/workspace/./', '/workspace/./?view=1'])(
-			'blocks absolute paths that normalize to the root: %s', async (href) => {
+			'blocks absolute paths that normalize to the root: %s',
+			async (href) => {
 				render(Markdown, { source: `Open [directory](${href})`, fileLinkBasePath: '/workspace' });
 				const link = screen.getByRole('link', { name: 'directory' });
 				const event = new MouseEvent('click', { bubbles: true, cancelable: true });
@@ -312,6 +313,25 @@ describe('Markdown', () => {
 			await fireEvent.click(screen.getByRole('link', { name: 'report' }));
 			expect(screen.getByRole('alert').textContent).toContain('valid file path');
 		});
+
+		it.each(['//server/share/report.md', '%2F%2Fserver%2Fshare%2Freport.md'])(
+			'routes a confirmed UNC file link to the viewer: %s',
+			async (href) => {
+				const handler = vi.fn();
+				render(Markdown, {
+					source: `Open [report](${href})`,
+					fileLinkBasePath: '//server/share',
+					onLinkNavigate: handler,
+				});
+				const link = screen.getByRole('link', { name: 'report' });
+				const event = new MouseEvent('click', { bubbles: true, cancelable: true });
+				link.dispatchEvent(event);
+				await tick();
+				expect(event.defaultPrevented).toBe(true);
+				expect(link.getAttribute('target')).toBeNull();
+				expect(handler).toHaveBeenCalledWith({ rawHref: href, kind: 'file' });
+			},
+		);
 
 		it('keeps protocol-relative web links navigable', () => {
 			render(Markdown, { source: 'Open [docs](//example.com/docs)' });

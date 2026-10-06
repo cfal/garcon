@@ -149,6 +149,35 @@ describe('parseFileLink', () => {
 		});
 	});
 
+	it.each(['//server/share', '\\\\server\\share', '//server/share/'])(
+		'claims matching UNC links under confirmed root %s',
+		(projectBasePath) => {
+			for (const href of [
+				'//server/share/report.md:42:7',
+				'//server%2Fshare%2Freport.md:42:7',
+				'%2F%2Fserver%2Fshare%2Freport.md:42:7',
+			]) {
+				expect(parseFileLink(href, { projectBasePath })).toMatchObject({
+					kind: 'file',
+					relativePath: 'report.md',
+					line: 42,
+					col: 7,
+				});
+			}
+		},
+	);
+
+	it.each(['//server/share2/report.md', '//other/share/report.md', '//example.com/docs'])(
+		'leaves nonmatching protocol-relative URL external: %s',
+		(href) => {
+			expect(parseFileLink(href, { projectBasePath: '//server/share' })).toEqual({
+				kind: 'ignored',
+				relativePath: '',
+				rawHref: href,
+			});
+		},
+	);
+
 	describe('ignores URLs with schemes', () => {
 		it('https URL', () => {
 			const result = parseFileLink('https://example.com/foo');
