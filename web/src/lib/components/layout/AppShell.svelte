@@ -175,7 +175,12 @@
 	const newWindowEdges = $derived<WorkspaceSplitAdmissions>(
 		workspace.resolveSplitAdmissions(workspace.currentWindowId),
 	);
-	const hideChatList = $derived(workspaceFullscreen);
+	const hideChatList = $derived(
+		workspaceFullscreen &&
+			(localSettings.fullscreenCoversSidebar ||
+				localSettings.chatListAutohide ||
+				workspace.windowCount === 1),
+	);
 	const chatListAutohideActive = $derived(
 		!isMobile && !hideChatList && localSettings.chatListAutohide && hoverCapability.current,
 	);

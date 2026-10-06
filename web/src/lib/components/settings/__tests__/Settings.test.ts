@@ -6,6 +6,7 @@ import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures
 import { ExecutorsStore } from '$lib/executors/executors-store.svelte';
 import { makeTestGhCapability } from './gh-capability-test-context';
 import { makeRemoteSettingsSnapshot } from '$lib/stores/__tests__/remote-settings-snapshot-fixture';
+import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
 
 vi.mock('$lib/api/settings.js', () => ({
 	beginTelegramRecipientLink: vi.fn(),
@@ -161,6 +162,52 @@ describe('Settings', () => {
 			state: 'idle',
 			running: false,
 		});
+	});
+
+	it('finds fullscreen sidebar coverage and preserves it while auto-hide disables the control', async () => {
+		const appShell = createAppShellStore();
+		appShell.openSettings('interface');
+		const onLocalToggle = vi.fn();
+		const rendered = render(SettingsTestHost, {
+			appShell,
+			remoteSettings: new RemoteSettingsStore(),
+			onLocalToggle,
+		});
+		try {
+			const search = screen.getByRole('searchbox', { name: 'Search settings' });
+			await fireEvent.input(search, { target: { value: 'cover sidebar' } });
+			await fireEvent.click(
+				screen.getByRole('button', {
+					name: 'Always cover chat sidebar in fullscreen Interface',
+				}),
+			);
+			const control = screen.getByRole('switch', {
+				name: 'Always cover chat sidebar in fullscreen',
+			});
+			expect(control.getAttribute('aria-checked')).toBe('true');
+			await fireEvent.click(control);
+			expect(onLocalToggle).toHaveBeenCalledExactlyOnceWith('fullscreenCoversSidebar');
+			expect(control.getAttribute('aria-checked')).toBe('false');
+			const settingsKey = LOCAL_STORAGE_KEYS.localSettings;
+			const saved = JSON.parse(localStorage.getItem(settingsKey) ?? '{}');
+			expect(saved.fullscreenCoversSidebar).toBe(false);
+			for (const chatListAutohide of [true, false]) {
+				const newValue = JSON.stringify({ ...saved, chatListAutohide });
+				localStorage.setItem(settingsKey, newValue);
+				window.dispatchEvent(
+					new StorageEvent('storage', { key: settingsKey, newValue, storageArea: localStorage }),
+				);
+				await waitFor(() => expect(control.hasAttribute('disabled')).toBe(chatListAutohide));
+				expect(control.getAttribute('aria-checked')).toBe('false');
+				if (chatListAutohide) {
+					expect(screen.getByText('Disabled while sidebar auto-hide is enabled.')).toBeTruthy();
+					await fireEvent.click(control);
+					expect(onLocalToggle).toHaveBeenCalledOnce();
+				}
+			}
+		} finally {
+			rendered.unmount();
+		}
 	});
 
 	it('combines app and server settings while preserving their controls', async () => {

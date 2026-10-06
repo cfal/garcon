@@ -20,6 +20,7 @@ describe('LocalSettingsStore', () => {
 		expect(store.themePreference).toEqual(DEFAULT_THEME_PREFERENCE);
 		expect(store.chatListDock).toBe('left');
 		expect(store.chatListAutohide).toBe(false);
+		expect(store.fullscreenCoversSidebar).toBe(true);
 		expect(store.chatMaxWidth).toBe('none');
 		expect(store.inlineImageThumbnailSize).toBe('medium');
 		expect(store.overlayBackdropEffects).toBe(true);
@@ -125,6 +126,36 @@ describe('LocalSettingsStore', () => {
 			);
 			const store = createLocalSettingsStore();
 			expect(store.highlightActiveWindow).toBe(true);
+			store.destroy();
+		},
+	);
+
+	it('persists fullscreen sidebar coverage independently of auto-hide', () => {
+		const store = createLocalSettingsStore();
+		store.toggle('fullscreenCoversSidebar');
+		store.set('chatListAutohide', true);
+		expect(store.snapshot().fullscreenCoversSidebar).toBe(false);
+		const restored = createLocalSettingsStore();
+		expect(restored.fullscreenCoversSidebar).toBe(false);
+		restored.set('chatListAutohide', false);
+		expect(restored.fullscreenCoversSidebar).toBe(false);
+		restored.toggle('fullscreenCoversSidebar');
+		expect(
+			JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.localSettings) ?? '{}'),
+		).toMatchObject({ fullscreenCoversSidebar: true });
+		store.destroy();
+		restored.destroy();
+	});
+
+	it.each([undefined, 'true', 'false', 1, null, {}, []])(
+		'defaults missing or malformed fullscreen sidebar coverage %j to enabled',
+		(value) => {
+			localStorage.setItem(
+				LOCAL_STORAGE_KEYS.localSettings,
+				JSON.stringify({ fullscreenCoversSidebar: value }),
+			);
+			const store = createLocalSettingsStore();
+			expect(store.fullscreenCoversSidebar).toBe(true);
 			store.destroy();
 		},
 	);
@@ -935,6 +966,7 @@ describe('LocalSettingsStore', () => {
 				inlineImageThumbnailSize: 'large',
 				overlayBackdropEffects: false,
 				highlightActiveWindow: false,
+				fullscreenCoversSidebar: false,
 				sidebarGrouping: 'project',
 				sidebarInactivityDuration: '1-month',
 				sidebarGroupNestedProjectPaths: true,
@@ -963,6 +995,7 @@ describe('LocalSettingsStore', () => {
 		expect(secondStore.inlineImageThumbnailSize).toBe('large');
 		expect(secondStore.overlayBackdropEffects).toBe(false);
 		expect(secondStore.highlightActiveWindow).toBe(false);
+		expect(secondStore.fullscreenCoversSidebar).toBe(false);
 		expect(secondStore.sidebarGrouping).toBe('project');
 		expect(secondStore.sidebarInactivityDuration).toBe('1-month');
 		expect(secondStore.sidebarGroupNestedProjectPaths).toBe(true);

@@ -14,6 +14,7 @@ export function settingsSearchEntries(): SettingsSearchEntry[] {
 		...[
 			m.settings_tab_interface(),
 			m.settings_highlight_active_window(),
+			m.settings_fullscreen_covers_sidebar(),
 			m.settings_workspace_titlebar_size(),
 			m.settings_chat_max_width(),
 			m.settings_inline_image_thumbnail_size(),
