@@ -150,6 +150,7 @@ export interface LocalSettingsSnapshot {
 	chatMaxWidth: ChatMaxWidth;
 	inlineImageThumbnailSize: InlineImageThumbnailSize;
 	workspaceWindowTitlebarHeightDeltaPx: number;
+	fullscreenCoversSidebar: boolean;
 	chatListAutohide: boolean;
 	chatListDock: ChatListDock;
 	sidebarVisible: boolean;
@@ -195,6 +196,7 @@ type BooleanLocalSettingKey =
 	| 'autoScrollToBottom'
 	| 'sendByShiftEnter'
 	| 'steerWithCtrlEnter'
+	| 'fullscreenCoversSidebar'
 	| 'chatListAutohide'
 	| 'sidebarVisible'
 	| 'sidebarGroupNestedProjectPaths'
@@ -221,6 +223,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	chatMaxWidth: 'none',
 	inlineImageThumbnailSize: 'medium',
 	workspaceWindowTitlebarHeightDeltaPx: 0,
+	fullscreenCoversSidebar: true,
 	chatListAutohide: false,
 	chatListDock: DEFAULT_CHAT_LIST_DOCK,
 	sidebarVisible: true,
@@ -415,6 +418,10 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 		workspaceWindowTitlebarHeightDeltaPx: parseWorkspaceWindowTitlebarHeightDeltaPx(
 			parsed.workspaceWindowTitlebarHeightDeltaPx,
 		),
+		fullscreenCoversSidebar: parseBoolean(
+			parsed.fullscreenCoversSidebar,
+			DEFAULTS.fullscreenCoversSidebar,
+		),
 		chatListAutohide: parseBoolean(parsed.chatListAutohide, DEFAULTS.chatListAutohide),
 		chatListDock: normalizeChatListDock(parsed.chatListDock),
 		sidebarVisible: parseBoolean(parsed.sidebarVisible, DEFAULTS.sidebarVisible),
@@ -514,6 +521,7 @@ export class LocalSettingsStore {
 	chatMaxWidth = $state<ChatMaxWidth>(DEFAULTS.chatMaxWidth);
 	inlineImageThumbnailSize = $state<InlineImageThumbnailSize>(DEFAULTS.inlineImageThumbnailSize);
 	workspaceWindowTitlebarHeightDeltaPx = $state(DEFAULTS.workspaceWindowTitlebarHeightDeltaPx);
+	fullscreenCoversSidebar = $state(DEFAULTS.fullscreenCoversSidebar);
 	chatListAutohide = $state(DEFAULTS.chatListAutohide);
 	chatListDock = $state<ChatListDock>(DEFAULTS.chatListDock);
 	sidebarVisible = $state(DEFAULTS.sidebarVisible);
@@ -640,6 +648,7 @@ export class LocalSettingsStore {
 			chatMaxWidth: this.chatMaxWidth,
 			inlineImageThumbnailSize: this.inlineImageThumbnailSize,
 			workspaceWindowTitlebarHeightDeltaPx: this.workspaceWindowTitlebarHeightDeltaPx,
+			fullscreenCoversSidebar: this.fullscreenCoversSidebar,
 			chatListAutohide: this.chatListAutohide,
 			chatListDock: this.chatListDock,
 			sidebarVisible: this.sidebarVisible,
@@ -691,6 +700,7 @@ export class LocalSettingsStore {
 		this.chatMaxWidth = snap.chatMaxWidth;
 		this.inlineImageThumbnailSize = snap.inlineImageThumbnailSize;
 		this.workspaceWindowTitlebarHeightDeltaPx = snap.workspaceWindowTitlebarHeightDeltaPx;
+		this.fullscreenCoversSidebar = snap.fullscreenCoversSidebar;
 		this.chatListAutohide = snap.chatListAutohide;
 		this.chatListDock = snap.chatListDock;
 		this.sidebarVisible = snap.sidebarVisible;

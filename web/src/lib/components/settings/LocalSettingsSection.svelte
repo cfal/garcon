@@ -196,6 +196,17 @@
 				{@render settingRow(m.settings_highlight_active_window(), ls.highlightActiveWindow, () =>
 					ls.toggle('highlightActiveWindow'),
 				)}
+				{@render settingRow(
+					m.settings_fullscreen_covers_sidebar(),
+					ls.fullscreenCoversSidebar,
+					() => ls.toggle('fullscreenCoversSidebar'),
+					{
+						disabled: ls.chatListAutohide,
+						description: ls.chatListAutohide
+							? m.settings_fullscreen_covers_sidebar_autohide()
+							: undefined,
+					},
+				)}
 			</div>
 			<div
 				class="flex flex-col gap-2 border-t border-border py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
