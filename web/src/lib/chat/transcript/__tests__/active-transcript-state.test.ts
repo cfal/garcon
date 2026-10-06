@@ -4899,6 +4899,32 @@ describe('ActiveTranscriptState', () => {
 		expect(transcriptCache.get('chat-1')?.messages.map((item) => item.ordinal)).toEqual([3, 4]);
 	});
 
+	it.each(['snapshot', 'window', 'hidden window'] as const)('releases the cancelled %s controller when parking', async (operation) => {
+		const chat = new ActiveTranscriptState();
+		chat.replaceGeneration('chat-1', 'generation-1', assistantEntries(1, 50), {
+			lastOrdinal: 100, pageOldestOrdinal: 1, pageNewestOrdinal: 50,
+			nextBeforeOrdinal: null, hasMore: false,
+		});
+		vi.mocked(getChatMessages).mockResolvedValueOnce({
+			chatId: 'chat-1', limit: 50,
+			...page({ messages: assistantEntries(51, 100), lastOrdinal: 100, hasMore: true }),
+		});
+		if (operation === 'snapshot') await chat.loadMessages('chat-1');
+		else await chat.navigateToWindow('chat-1', 'latest');
+		const abort = vi.spyOn(AbortController.prototype, 'abort');
+
+		if (operation === 'hidden window') {
+			chat.invalidatePendingWindowNavigation();
+			expect(abort).toHaveBeenCalledOnce();
+		}
+		expect(chat.suspendForParking()).toBe(true);
+		expect(abort).toHaveBeenCalledOnce();
+		chat.invalidatePendingWindowNavigation();
+		expect(chat.suspendForParking()).toBe(true);
+		chat.clearMessages();
+		expect(abort).toHaveBeenCalledOnce();
+	});
+
 	it('parks committed rows buffered by an obsolete snapshot and rejects its late result', () => {
 		const transcriptCache = new ChatTranscriptCache({ limit: 2 });
 		const chat = new ActiveTranscriptState(transcriptCache);

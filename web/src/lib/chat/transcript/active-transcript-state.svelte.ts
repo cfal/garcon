@@ -89,13 +89,9 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 	readonly transcriptCache: ChatTranscriptCache;
 	#snapshotBuffer: TranscriptBatchBuffer | null = null;
 	#reconnectReplay = new TranscriptReconnectReplayState((chatId, batch) => this.applyMessages(
-		chatId,
-		batch.transcriptViewId,
-		batch.messages,
-		batch.firstOrdinal,
-		batch.lastOrdinal,
-		batch.resendCandidates,
-		batch.noticeRevision,
+		chatId, batch.transcriptViewId, batch.messages,
+		batch.firstOrdinal, batch.lastOrdinal,
+		batch.resendCandidates, batch.noticeRevision,
 	));
 	#loadEpoch = 0;
 	#historyAbortController: AbortController | null = null;
@@ -365,7 +361,7 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 
 	abortSnapshotLoad(epoch: number): void {
 		if (epoch !== this.#loadEpoch) return;
-		this.#historyAbortController?.abort();
+		this.#abortHistoryLoad();
 		if (this.activeChatId) this.#finishFailedSnapshotLoad(this.activeChatId, epoch);
 		else {
 			this.#snapshotBuffer = null;
@@ -376,7 +372,7 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 	#finishFailedSnapshotLoad(chatId: string, epoch: number): boolean {
 		if (epoch !== this.#loadEpoch) return false;
 		if (this.activeChatId && this.activeChatId !== chatId) {
-			this.#historyAbortController?.abort();
+			this.#abortHistoryLoad();
 			this.#snapshotBuffer = null;
 			this.isLoadingMessages = false;
 			return false;
@@ -430,7 +426,7 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 		this.historyState = { kind: 'complete' };
 		this.activeChatId = chatId;
 		this.#loadEpoch += 1;
-		this.#historyAbortController?.abort();
+		this.#abortHistoryLoad();
 		this.#snapshotBuffer = null;
 		this.#reconnectReplay.reset();
 		this.transcriptCache.replaceFromPage(chatId, {
@@ -657,10 +653,7 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 		options: ChatLoadMessagesOptions = {},
 	): Promise<ChatMessage[]> {
 		if (!chatId) return [];
-		const limit = Math.max(
-			MESSAGES_PER_PAGE,
-			Math.floor(options.minimumLimit ?? MESSAGES_PER_PAGE),
-		);
+		const limit = Math.max(MESSAGES_PER_PAGE, Math.floor(options.minimumLimit ?? MESSAGES_PER_PAGE));
 		const maxAttempts = 2;
 
 		for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
@@ -737,7 +730,7 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 
 	invalidatePendingWindowNavigation(): void {
 		this.#windowNavigationEpoch += 1;
-		this.#windowAbortController?.abort();
+		this.#abortHistoryLoad(this.#windowAbortController);
 	}
 
 	suspendForParking(): boolean {
@@ -748,7 +741,7 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 			return false;
 		}
 		this.#loadEpoch += 1;
-		this.#historyAbortController?.abort();
+		this.#abortHistoryLoad();
 		this.#windowNavigationEpoch += 1;
 		this.invalidatePendingHistoryLoad();
 		if (this.#snapshotBuffer?.overflowed) return false;
@@ -787,7 +780,7 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 	#resetToEmptyTranscript(): void {
 		this.#invalidatePageLoad();
 		this.#loadEpoch += 1;
-		this.#historyAbortController?.abort();
+		this.#abortHistoryLoad();
 		this.windowRevision += 1;
 		this.entries = [];
 		this.discardPendingEchoes();
@@ -940,10 +933,17 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 	}
 
 	#beginLoadEpoch(): number {
-		this.#historyAbortController?.abort();
+		this.#abortHistoryLoad();
 		this.#historyAbortController = new AbortController();
 		if (!this.usesSharedOverlay) this.notices.markLoadStart();
 		return ++this.#loadEpoch;
+	}
+
+	#abortHistoryLoad(controller = this.#historyAbortController): void {
+		// Aborted signals retain teardown stacks, so parked windows release their owners first.
+		if (this.#historyAbortController === controller) this.#historyAbortController = null;
+		if (this.#windowAbortController === controller) this.#windowAbortController = null;
+		controller?.abort();
 	}
 
 	resetForNewChat(): void {
