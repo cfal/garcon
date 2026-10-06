@@ -183,11 +183,11 @@
 						{/if}
 					</Tabs.Content>
 
-				<Tabs.Content value="shortcuts" class="mt-0 space-y-6">
-					{#if appShell.settingsTab === 'shortcuts'}
-						<KeyboardShortcutsSection />
-					{/if}
-				</Tabs.Content>
+					<Tabs.Content value="shortcuts" class="mt-0 space-y-6">
+						{#if appShell.settingsTab === 'shortcuts'}
+							<KeyboardShortcutsSection />
+						{/if}
+					</Tabs.Content>
 
 					<Tabs.Content value="providers" class="mt-0 space-y-6">
 						{#if appShell.settingsTab === 'providers'}

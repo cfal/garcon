@@ -16,6 +16,9 @@ describe('settings search', () => {
 			{ tab: 'automation', label: 'Commit message model', section: 'Automation' },
 		]);
 		expect(searchSettings(entries, 'interface theme').length).toBeGreaterThan(0);
+		expect(searchSettings(entries, 'paste key')).toEqual([
+			{ tab: 'providers', label: 'Paste an API key', section: 'Providers' },
+		]);
 		expect(searchSettings(entries, ' ')).toEqual([]);
 		expect(searchSettings(entries, 'not-a-setting')).toEqual([]);
 	});

@@ -49,6 +49,7 @@ export function settingsSearchEntries(): SettingsSearchEntry[] {
 		].map((label) => ({ tab: 'shortcuts' as const, label, section: m.settings_tab_shortcuts() })),
 		...[
 			m.settings_tab_providers(),
+			m.settings_key_setup_title(),
 			m.settings_native_providers(),
 			m.settings_custom_providers(),
 			m.settings_api_providers_openai_title(),
