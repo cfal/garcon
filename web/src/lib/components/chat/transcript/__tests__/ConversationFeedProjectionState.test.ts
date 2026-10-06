@@ -68,6 +68,37 @@ function input(overrides: Partial<ProjectionInput> = {}): ProjectionInput {
 }
 
 describe('ConversationFeedProjectionState', () => {
+	it.each([false, true])('keeps the virtual key through optimistic settlement without changing the ledger address (combined=%s)', (combined) => {
+		const transcript = new ActiveTranscriptState();
+		transcript.replaceGeneration('chat-1', 'generation-1', [{ ordinal: 1, message: new AssistantMessage(TS, 'Context') }], {
+			lastOrdinal: 1, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false,
+		});
+		transcript.upsertOptimisticUserInput({
+			chatId: 'chat-1', clientMessageId: 'synthetic-input', content: 'Pending input', createdAt: TS, delivery: 'pending',
+		});
+		const controller = new ConversationFeedProjectionState();
+		const project = () => controller.reconcile(input({
+			rows: transcript.displayRows, mutationClock: transcript.feedMutationClock,
+			combineToolUseMessages: combined,
+		}));
+		const pending = project();
+		const pendingIndex = pending.model.indexByRowId.get('optimistic:synthetic-input');
+		expect(pendingIndex).toBeDefined();
+		const pendingKey = pending.model.items[pendingIndex!]?.key;
+		transcript.markOptimisticUserInputDelivered('synthetic-input');
+		expect(project().model.items[pendingIndex!]?.key).toBe(pendingKey);
+		transcript.applyMessages('chat-1', 'generation-1', [{
+			ordinal: 2, message: new UserMessage(TS, 'Pending input', undefined, { clientMessageId: 'synthetic-input' }),
+		}], 2, 2);
+		const settled = project();
+		const durableIndex = settled.model.indexByRowId.get('generation-1:2');
+		expect(durableIndex).toBeDefined();
+		expect(settled.model.items[durableIndex!]?.key).toBe(pendingKey);
+		expect(settled.model.indexByRowId.has('optimistic:synthetic-input')).toBe(false);
+		expect(settled.model.targetByDomAnchorId.get('generation-1:2')).toEqual({ index: durableIndex, innerRowId: 'generation-1:2' });
+		expect(settled.renderModel.items.at(-1)).toMatchObject({ id: 'generation-1:2', ordinal: 2 });
+	});
+
 	it('groups only visible adjacent ordinary inputs after result and thinking policy', () => {
 		const projectedRows: ChatDisplayRow[] = [
 			{ kind: 'message', id: 'generation-1:1', message: new BashToolUseMessage(TS, 'a', 'pwd') },
@@ -135,6 +166,96 @@ describe('ConversationFeedProjectionState', () => {
 		expect(off.model.items.some((item) => item.kind === 'tool-group')).toBe(false);
 		expect(off.model.indexByRowId.size).toBe(3);
 	});
+
+	it.each([false, true])('keeps pinned context through live growth with combination=%s', (combineToolUseMessages) => {
+		const transcript = new ActiveTranscriptState();
+		transcript.replaceGeneration('chat-1', 'generation-1', [
+			{ ordinal: 1, message: new UserMessage(TS, 'prompt') },
+			{ ordinal: 2, message: new AssistantMessage(TS, 'response') },
+			...Array.from({ length: 98 }, (_, index) => ({
+				ordinal: index + 3,
+				message: new ReadToolUseMessage(TS, `tool-${index + 3}`, '/synthetic'),
+			})),
+		], { lastOrdinal: 100, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false });
+		const projections = new ConversationFeedProjectionState();
+		const reconcile = () => projections.reconcile(input({
+			rows: transcript.displayRows,
+			mutationClock: transcript.feedMutationClock,
+			combineToolUseMessages,
+			earlierBoundary: transcript.canLoadEarlier ? 'when-collapsed' : 'hidden',
+		}));
+		const groupKey = reconcile().model.items.find((item) => item.kind === 'tool-group')?.key;
+		for (let ordinal = 101; ordinal <= 201; ordinal += 1) {
+			transcript.applyMessages('chat-1', 'generation-1', [{
+				ordinal, message: new ReadToolUseMessage(TS, `tool-${ordinal}`, '/synthetic'),
+			}], ordinal, ordinal);
+			const projected = reconcile();
+			expect(projected.model.indexByRowId.has('generation-1:1')).toBe(true);
+			expect(projected.model.indexByRowId.has('generation-1:2')).toBe(true);
+			expect(projected.model.indexByRowId.has(`generation-1:${ordinal}`)).toBe(true);
+			expect(projected.model.items.some((item) => item.kind === 'earlier-boundary')).toBe(false);
+			expect(projected.model.items.find((item) => item.kind === 'tool-group')?.key).toBe(groupKey);
+			expect(projected.geometry.endBehavior).toBe('restore-if-pinned');
+		}
+	});
+
+	it('keeps a grouped detached interval after repinning and appending', () => {
+		const transcript = new ActiveTranscriptState();
+		transcript.replaceGeneration(
+			'chat-1',
+			'generation-1',
+			[
+				{ ordinal: 1, message: new UserMessage(TS, 'prompt') },
+				...Array.from({ length: 99 }, (_, index) => ({
+					ordinal: index + 2,
+					message: new BashToolUseMessage(TS, `tool-${index + 2}`, 'pwd'),
+				})),
+			],
+			{ lastOrdinal: 100, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false },
+		);
+		transcript.isUserScrolledUp = true;
+		transcript.applyMessages(
+			'chat-1',
+			'generation-1',
+			Array.from({ length: 100 }, (_, index) => ({
+				ordinal: index + 101,
+				message: new BashToolUseMessage(TS, `tool-${index + 101}`, 'pwd'),
+			})),
+			101,
+			200,
+		);
+		const projections = new ConversationFeedProjectionState();
+		projections.reconcile(
+			input({
+				rows: transcript.displayRows,
+				mutationClock: transcript.feedMutationClock,
+				combineToolUseMessages: true,
+			}),
+		);
+		transcript.isUserScrolledUp = false;
+
+		transcript.applyMessages(
+			'chat-1',
+			'generation-1',
+			[{ ordinal: 201, message: new AssistantMessage(TS, 'done') }],
+			201,
+			201,
+		);
+		const appended = projections.reconcile(
+			input({
+				rows: transcript.displayRows,
+				mutationClock: transcript.feedMutationClock,
+				combineToolUseMessages: true,
+				earlierBoundary: transcript.canLoadEarlier ? 'when-collapsed' : 'hidden',
+			}),
+		);
+
+		expect(appended.model.items.some((item) => item.kind === 'earlier-boundary')).toBe(false);
+		expect(appended.model.indexByRowId.has('generation-1:1')).toBe(true);
+		expect(appended.model.indexByRowId.has('generation-1:201')).toBe(true);
+		expect(appended.geometry.endBehavior).toBe('restore-if-pinned');
+	});
+
 	it('namespaces virtual keys without changing semantic row targets', () => {
 		const projection = new ConversationFeedProjectionState().reconcile(input());
 
@@ -225,8 +346,7 @@ describe('ConversationFeedProjectionState', () => {
 			nextBeforeOrdinal: null,
 			hasMore: false,
 		});
-		transcript.revealAllLoadedMessages();
-		const initialRows = transcript.visibleRows;
+		const initialRows = transcript.displayRows;
 		const first = projections.reconcile(
 			input({ rows: initialRows, mutationClock: transcript.feedMutationClock }),
 		);
@@ -244,7 +364,7 @@ describe('ConversationFeedProjectionState', () => {
 			ACTIVE_TRANSCRIPT_RETENTION_LIMIT,
 			ACTIVE_TRANSCRIPT_RETENTION_LIMIT,
 		);
-		const appendedRows = transcript.visibleRows;
+		const appendedRows = transcript.displayRows;
 		const appendedTail = appendedRows.at(-1);
 		if (appendedTail?.kind !== 'message') throw new Error('Expected an appended transcript row');
 

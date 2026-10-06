@@ -1,23 +1,23 @@
-const MAX_AUTOMATIC_COMPRESSED_PAGE_DEMANDS = 10;
+import { TranscriptReadBudget, TRANSCRIPT_READ_REQUEST_LIMIT } from './transcript-read-budget.js';
 
-export class ConversationCompressedAutoFillBudget {
+export class ConversationAutoFillBudget {
 	#chatId: string | null = null;
 	#transcriptViewId: string | null = null;
 	#admittedDemands = 0;
 
-	constructor(private readonly maxDemands = MAX_AUTOMATIC_COMPRESSED_PAGE_DEMANDS) {}
+	reads = new TranscriptReadBudget();
 
 	startView(chatId: string, transcriptViewId: string): void {
 		if (this.#chatId !== chatId || this.#transcriptViewId !== transcriptViewId) {
 			this.#chatId = chatId;
 			this.#transcriptViewId = transcriptViewId;
 			this.#admittedDemands = 0;
+			this.reads = new TranscriptReadBudget();
 		}
 	}
 
-	admitDemand(compressed: boolean): boolean {
-		if (!compressed) return true;
-		if (this.#admittedDemands >= this.maxDemands) return false;
+	admitDemand(): boolean {
+		if (this.reads.exhausted || this.#admittedDemands >= TRANSCRIPT_READ_REQUEST_LIMIT) return false;
 		this.#admittedDemands += 1;
 		return true;
 	}

@@ -68,6 +68,32 @@ const enabled = {
 };
 
 describe('ConversationFeedAnnouncerState', () => {
+	it('does not announce known inputs again when their echoes reverse submission order', () => {
+		const announcer = new ConversationFeedAnnouncerState();
+		const first = new UserMessage('', 'First synthetic input', undefined, { clientMessageId: 'first' });
+		const second = new UserMessage('', 'Second synthetic input', undefined, { clientMessageId: 'second' });
+		announcer.reconcile({
+			surfaceIdentity: 'chat:view', rows: [messageRow('optimistic:first', first), messageRow('optimistic:second', second)],
+			mutationClock: clock(1, 0, 1), ...enabled,
+		});
+		expect(announcer.reconcile({
+			surfaceIdentity: 'chat:view', rows: [messageRow('view:1', second), messageRow('view:2', first)],
+			mutationClock: clock(2, 2), ...enabled,
+		})).toBeNull();
+	});
+	it('does not repeat an optimistic input when only its durable address changes', () => {
+		const announcer = new ConversationFeedAnnouncerState();
+		const message = new UserMessage('2026-01-01T00:00:00.000Z', 'Synthetic input', undefined, { clientMessageId: 'input-1' });
+		announcer.reconcile({ surfaceIdentity: 'chat:view', rows: [], mutationClock: clock(0), ...enabled });
+		expect(announcer.reconcile({
+			surfaceIdentity: 'chat:view', rows: [messageRow('optimistic:input-1', message)],
+			mutationClock: clock(1, 0, 1), ...enabled,
+		})).toBe('Synthetic input');
+		expect(announcer.reconcile({
+			surfaceIdentity: 'chat:view', rows: [messageRow('view:1', message)],
+			mutationClock: clock(2, 2), ...enabled,
+		})).toBeNull();
+	});
 	it('does not announce the initial or replacement transcript', () => {
 		const announcer = new ConversationFeedAnnouncerState();
 		expect(

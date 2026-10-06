@@ -260,6 +260,59 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 describe('reconnect and transcript stability', () => {
+  test('[TLV5-L04.07-SERVER-01] only indexed submissions carry settlement identity through live, HTTP, and replay projections', async () => {
+    await withIntegrationFixture('transcript-submission-identity', async (fixture) => {
+      const chatId = fixture.newChatId();
+      const eventCursor = fixture.client.markEvents();
+      const accepted = await fixture.client.startDirectChat({
+        chatId, content: 'Synthetic indexed input', projectPath: fixture.dirs.project,
+        agent: fixture.directAgents.openAi,
+      });
+      await fixture.client.waitForTurnTerminal(chatId, accepted.turnId);
+      await fixture.client.waitForProcessing(chatId, false);
+      const initial = await fixture.client.getMessages(chatId);
+      const input = initial.messages.find((entry): entry is TranscriptMessage & { message: UserMessage } => entry.message.type === 'user-message');
+      const clientMessageId = input?.message.metadata?.clientMessageId;
+      expect(typeof clientMessageId).toBe('string');
+      if (!input || !clientMessageId) throw new Error('Missing indexed submission identity');
+      const liveRows = fixture.client.eventsSince(eventCursor).flatMap((event) =>
+        event.type === 'chat-messages' && event.chatId === chatId ? event.messages : [],
+      );
+      expect(liveRows.find((entry) => entry.ordinal === input.ordinal)?.message).toEqual(input.message);
+
+      await fixture.restartGarcon({ beforeStart: async () => {
+        const ledger = new TranscriptLedgerStore(join(fixture.dirs.workspace, 'transcript-ledgers'));
+        try {
+          const view = ledger.currentView(chatId);
+          if (!view) throw new Error('Missing synthetic transcript view');
+          const at = '2026-01-01T00:00:00.000Z';
+          const message = new UserMessage(at, 'Synthetic imported input', undefined, {
+            clientMessageId, upstreamRequestId: 'synthetic-upstream',
+          });
+          ledger.append(chatId, view.viewId, [
+            { kind: 'user-input', at, detail: {
+              clientMessageId: null, message, attachments: [], steer: false,
+              preambleBoundary: null, preamblePrefixReceipt: null,
+            } },
+            { kind: 'provider-row', at, message },
+          ]);
+        } finally {
+          ledger.close();
+        }
+      } });
+      const page = await fixture.client.getMessages(chatId);
+      const replay = await fixture.client.subscribe(chatId, page.transcriptViewId, 0);
+      expect(replay.messages).toEqual(page.messages);
+      const users = page.messages.filter((entry): entry is TranscriptMessage & { message: UserMessage } => entry.message.type === 'user-message');
+      expect(users.map((entry) => entry.message.metadata?.clientMessageId)).toEqual([
+        clientMessageId, undefined, undefined,
+      ]);
+      expect(users.slice(1).map((entry) => entry.message.metadata?.upstreamRequestId))
+        .toEqual(['synthetic-upstream', 'synthetic-upstream']);
+      expect(new Set(users.map((entry) => entry.ordinal)).size).toBe(3);
+    });
+  });
+
   test('reconnects while processing with view-qualified transcript and control snapshots', async () => {
     await withIntegrationFixture('reconnect-while-processing', async (fixture) => {
       const chatId = fixture.newChatId();

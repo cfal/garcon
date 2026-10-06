@@ -10,6 +10,7 @@ const appCss = readFileSync('src/app.css', 'utf8');
 function item(id: string, content: string): UserMessageNavigatorItem {
 	return {
 		id,
+		uiKey: `ui:${id}`,
 		ordinal: Number(id.split(':').at(-1)),
 		content,
 		timestamp: '2026-07-22T00:00:00.000Z',
@@ -41,6 +42,7 @@ describe('UserMessageNavigatorDialog', () => {
 		expect(within(dialog).getByText(m.chat_user_message_navigator_title())).toBeTruthy();
 		expect(within(dialog).getByText(m.chat_user_message_navigator_description())).toBeTruthy();
 		const rows = dialog.querySelectorAll<HTMLButtonElement>('[data-user-message-navigator-row]');
+		expect(rows[0]?.dataset.userMessageNavigatorRow).toBe('generation-1:3');
 		expect(Array.from(rows, (row) => row.textContent?.trim())).toEqual([
 			'Newest message',
 			'Oldest message',

@@ -57,7 +57,7 @@ it('loads one bounded raw target page even across a long hidden interval, preser
 			beforeOrdinal: 101,
 			limit: 50,
 		},
-		{ signal: abort.signal },
+		{ signal: expect.any(AbortSignal) },
 	);
 	expect(transcript.entries.map((entry) => entry.ordinal)).toEqual([100]);
 	expect(transcript.loadedThroughOrdinal).toBe(100);
@@ -67,6 +67,27 @@ it('loads one bounded raw target page even across a long hidden interval, preser
 	expect(
 		transcript.transcriptCache.get(target.chatId)?.messages.map((entry) => entry.ordinal),
 	).toEqual([1000]);
+});
+
+it.each(['caller', 'window', 'chat', 'snapshot'] as const)('aborts exact-row transport when superseded by %s', async (owner) => {
+	const transcript = fixture();
+	const caller = new AbortController();
+	let requestSignal: AbortSignal | null | undefined;
+	vi.mocked(getChatMessages).mockImplementation((_request, options) => new Promise((_resolve, reject) => {
+		requestSignal = options?.signal;
+		requestSignal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+	}));
+	const work = transcript.navigateToRow(target, caller.signal, () => true);
+	expect(requestSignal?.aborted).toBe(false);
+	let snapshotEpoch: number | undefined;
+	if (owner === 'caller') caller.abort();
+	else if (owner === 'window') transcript.invalidatePendingWindowNavigation();
+	else if (owner === 'chat') transcript.activateChat('1000000000000002');
+	else snapshotEpoch = transcript.beginSnapshotLoad();
+	expect(requestSignal?.aborted).toBe(true);
+	await expect(work).resolves.toBe(owner === 'snapshot' ? 'unavailable' : 'cancelled');
+	expect(transcript.entries.some((entry) => entry.ordinal === target.ordinal)).toBe(false);
+	if (snapshotEpoch !== undefined) transcript.abortSnapshotLoad(snapshotEpoch);
 });
 
 it.each(['cancel', 'focus', 'window', 'chat'] as const)(

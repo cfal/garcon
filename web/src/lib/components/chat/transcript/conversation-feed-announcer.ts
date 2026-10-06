@@ -9,6 +9,7 @@ import {
 	isToolUseMessage,
 } from '$shared/chat-types';
 import type { ChatDisplayRow } from '$lib/chat/transcript/active-transcript-state.svelte.js';
+import { transcriptPresentationKey } from '$lib/chat/transcript/transcript-presentation-key.js';
 import {
 	isHiddenBashToolUse,
 	type BashCommandMatcher,
@@ -62,7 +63,7 @@ function rememberAnnouncementLineage(ids: Set<string>, id: string): void {
 
 interface ConversationFeedAnnouncerInput {
 	surfaceIdentity: string;
-	rows: ChatDisplayRow[];
+	rows: readonly ChatDisplayRow[];
 	mutationClock: ConversationFeedMutationClock;
 	visible: boolean;
 	pinnedToBottom: boolean;
@@ -193,8 +194,8 @@ export class ConversationFeedAnnouncerState {
 		if (input.surfaceIdentity !== this.#surfaceIdentity) {
 			this.#surfaceIdentity = input.surfaceIdentity;
 			this.#contentByRowId = this.#visibleContentByRowId(tailRows);
-			this.#rowIds = new Set(tailRows.map((row) => row.id));
-			this.#tailRowId = tailRows.at(-1)?.id ?? null;
+			this.#rowIds = new Set(tailRows.map(transcriptPresentationKey));
+			this.#tailRowId = tailRows.length ? transcriptPresentationKey(tailRows[tailRows.length - 1]) : null;
 			this.#floatingPermissionOccurrences = new Set(input.floatingPermissionOccurrences);
 			this.#observedUserRequestIds = this.#userRequestIds(tailRows);
 			this.#observedPermissionOccurrences = this.#permissionOccurrences(
@@ -218,28 +219,28 @@ export class ConversationFeedAnnouncerState {
 		const priorContent = this.#contentByRowId;
 		const priorRowIds = this.#rowIds;
 		const priorTailIndex = this.#tailRowId
-			? tailRows.findIndex((row) => row.id === this.#tailRowId)
+			? tailRows.findIndex((row) => transcriptPresentationKey(row) === this.#tailRowId)
 			: -1;
 		const appendedRows =
 			priorTailIndex >= 0
-				? tailRows.slice(priorTailIndex + 1)
+				? tailRows.slice(priorTailIndex + 1).filter((row) => !priorRowIds.has(transcriptPresentationKey(row)))
 				: (() => {
 						let lastKnownIndex = -1;
 						for (let index = tailRows.length - 1; index >= 0; index -= 1) {
-							if (priorRowIds.has(tailRows[index].id)) {
+							if (priorRowIds.has(transcriptPresentationKey(tailRows[index]))) {
 								lastKnownIndex = index;
 								break;
 							}
 						}
 						const newRows = tailRows
 							.slice(lastKnownIndex + 1)
-							.filter((row) => !priorRowIds.has(row.id));
+							.filter((row) => !priorRowIds.has(transcriptPresentationKey(row)));
 						return lastKnownIndex >= 0 ? newRows : newRows.slice(-1);
 					})();
 		const nextContent = this.#visibleContentByRowId(tailRows);
 		const streamedRows = tailRows.filter((row) => {
-			const prior = priorContent.get(row.id);
-			const next = nextContent.get(row.id);
+			const prior = priorContent.get(transcriptPresentationKey(row));
+			const next = nextContent.get(transcriptPresentationKey(row));
 			return prior !== undefined && next !== undefined && next !== prior;
 		});
 		const nextFloatingPermissionOccurrences = new Set(input.floatingPermissionOccurrences);
@@ -247,8 +248,8 @@ export class ConversationFeedAnnouncerState {
 			(occurrence) => !this.#floatingPermissionOccurrences.has(occurrence),
 		);
 		this.#contentByRowId = nextContent;
-		this.#rowIds = new Set(tailRows.map((row) => row.id));
-		this.#tailRowId = tailRows.at(-1)?.id ?? null;
+		this.#rowIds = new Set(tailRows.map(transcriptPresentationKey));
+		this.#tailRowId = tailRows.length ? transcriptPresentationKey(tailRows[tailRows.length - 1]) : null;
 		this.#floatingPermissionOccurrences = nextFloatingPermissionOccurrences;
 		this.#dataRevision = input.mutationClock.dataRevision;
 		const resumedLiveEnd =
@@ -291,7 +292,7 @@ export class ConversationFeedAnnouncerState {
 		}
 
 		const candidatesById = new Map<string, ChatDisplayRow>();
-		for (const row of [...appendedRows, ...streamedRows]) candidatesById.set(row.id, row);
+		for (const row of [...appendedRows, ...streamedRows]) candidatesById.set(transcriptPresentationKey(row), row);
 		const candidates = [...candidatesById.values()];
 		const announcementCandidates = candidates.filter((row) => {
 			if (row.kind !== 'message') return true;
@@ -368,7 +369,7 @@ export class ConversationFeedAnnouncerState {
 		);
 	}
 
-	#rememberLineages(rows: ChatDisplayRow[], floatingPermissionOccurrences: readonly string[]): void {
+	#rememberLineages(rows: readonly ChatDisplayRow[], floatingPermissionOccurrences: readonly string[]): void {
 		for (const requestId of this.#userRequestIds(rows)) {
 			rememberAnnouncementLineage(this.#observedUserRequestIds, requestId);
 		}
@@ -377,7 +378,7 @@ export class ConversationFeedAnnouncerState {
 		}
 	}
 
-	#userRequestIds(rows: ChatDisplayRow[]): Set<string> {
+	#userRequestIds(rows: readonly ChatDisplayRow[]): Set<string> {
 		return new Set(
 			rows
 				.flatMap((row) => {
@@ -390,7 +391,7 @@ export class ConversationFeedAnnouncerState {
 	}
 
 	#permissionOccurrences(
-		rows: ChatDisplayRow[],
+		rows: readonly ChatDisplayRow[],
 		floatingPermissionOccurrences: readonly string[],
 	): Set<string> {
 		return new Set(
@@ -405,14 +406,14 @@ export class ConversationFeedAnnouncerState {
 		);
 	}
 
-	#visibleContentByRowId(rows: ChatDisplayRow[]): Map<string, string> {
+	#visibleContentByRowId(rows: readonly ChatDisplayRow[]): Map<string, string> {
 		return new Map(
 			rows.flatMap((row) => {
 				if (row.kind !== 'message') return [];
 				if (!(row.message instanceof AssistantMessage || row.message instanceof UserMessage)) {
 					return [];
 				}
-				return [[row.id, String(row.message.content ?? '')] as const];
+					return [[transcriptPresentationKey(row), String(row.message.content ?? '')] as const];
 			}),
 		);
 	}

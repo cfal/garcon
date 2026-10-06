@@ -2,7 +2,8 @@ import { CHAT_MESSAGES_MAX_LIMIT } from '$shared/chat-view';
 import type { ConversationScrollState } from './conversation-scroll-controller-contract.js';
 import type { ConversationViewportPort } from './conversation-viewport-port.js';
 import type { TranscriptPageDirection, TranscriptPageLoadResult } from './transcript-page-progress.js';
-import type { ConversationCompressedAutoFillBudget } from './conversation-compressed-autofill-budget.js';
+import type { ConversationAutoFillBudget } from './conversation-auto-fill-budget.js';
+import type { TranscriptReadBudget } from './transcript-read-budget.js';
 
 const COMPRESSED_AUTO_FILL_VISIBLE_LIMIT = Math.min(200, CHAT_MESSAGES_MAX_LIMIT);
 
@@ -11,14 +12,13 @@ interface ConversationViewportAutoFillOptions {
 	transcriptViewId: string;
 	viewport: ConversationViewportPort;
 	chatState: ConversationScrollState;
-	budget: ConversationCompressedAutoFillBudget;
+	budget: ConversationAutoFillBudget;
 	isCurrent: () => boolean;
 	canRequestPage: (direction: TranscriptPageDirection) => boolean;
 	mutatePage: (
 		direction: TranscriptPageDirection,
 		load: () => Promise<TranscriptPageLoadResult>,
 	) => Promise<TranscriptPageLoadResult>;
-	waitForCurrentLayout: () => Promise<TranscriptPageLoadResult>;
 	isPinnedToBottom: () => boolean;
 }
 
@@ -27,21 +27,16 @@ function loadAutoFillPage(
 	direction: TranscriptPageDirection,
 	chatId: string,
 	compressed: boolean,
+	budget: TranscriptReadBudget,
 ): Promise<TranscriptPageLoadResult> {
+	const options = {
+		budget,
+		...(compressed ? { visibleLimit: COMPRESSED_AUTO_FILL_VISIBLE_LIMIT } : {}),
+	};
 	if (direction === 'earlier') {
-		if (compressed) {
-			return chatState.loadEarlierPage(chatId, {
-				visibleLimit: COMPRESSED_AUTO_FILL_VISIBLE_LIMIT,
-			});
-		}
-		return chatState.loadEarlierPage(chatId);
+		return chatState.loadEarlierPage(chatId, options);
 	}
-	if (compressed) {
-		return chatState.loadLaterPage(chatId, {
-			visibleLimit: COMPRESSED_AUTO_FILL_VISIBLE_LIMIT,
-		});
-	}
-	return chatState.loadLaterPage(chatId);
+	return chatState.loadLaterPage(chatId, options);
 }
 
 export async function fillConversationViewport(options: ConversationViewportAutoFillOptions): Promise<void> {
@@ -54,7 +49,6 @@ export async function fillConversationViewport(options: ConversationViewportAuto
 		isCurrent,
 		canRequestPage,
 		mutatePage,
-		waitForCurrentLayout,
 		isPinnedToBottom,
 	} = options;
 	budget.startView(chatId, transcriptViewId);
@@ -70,24 +64,28 @@ export async function fillConversationViewport(options: ConversationViewportAuto
 
 		let result: TranscriptPageLoadResult;
 		if (chatState.hasLaterMessages) {
-			if (!canRequestPage('later') || !budget.admitDemand(compressed)) return;
+			if (!canRequestPage('later')) return;
+			if (!budget.admitDemand()) {
+				chatState.pageStates.later = { status: 'bounded', error: null };
+				return;
+			}
 			result = await mutatePage('later', () =>
-				loadAutoFillPage(chatState, 'later', chatId, compressed),
+				loadAutoFillPage(chatState, 'later', chatId, compressed, budget.reads),
 			);
 		} else if (chatState.canLoadEarlier) {
 			if (!canRequestPage('earlier')) return;
-			if (chatState.revealEarlierLoadedRows()) {
-				result = await waitForCurrentLayout();
-			} else {
-				if (!budget.admitDemand(compressed)) return;
-				result = await mutatePage('earlier', () =>
-					loadAutoFillPage(chatState, 'earlier', chatId, compressed),
-				);
+			if (!budget.admitDemand()) {
+				chatState.pageStates.earlier = { status: 'bounded', error: null };
+				return;
 			}
+			result = await mutatePage('earlier', () =>
+				loadAutoFillPage(chatState, 'earlier', chatId, compressed, budget.reads),
+			);
 		} else {
 			return;
 		}
-		if (result !== 'loaded') return;
+		if (result !== 'loaded' && result !== 'bounded') return;
 		if (isPinnedToBottom() && !chatState.hasLaterMessages) viewport.scrollToEnd();
+		if (result === 'bounded') return;
 	}
 }

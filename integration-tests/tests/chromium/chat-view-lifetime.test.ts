@@ -2,8 +2,13 @@ import { expect, test } from 'bun:test';
 import { expect as browserExpect } from 'playwright/test';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
 
-test('chat switching releases old views and keeps new-chat model selection usable', async () => {
+test.each([true, false])('chat switching releases old views with combination=%s and keeps new-chat model selection usable', async (combineToolUseMessages) => {
   await withChromiumFixture('chat-view-lifetime', async ({ page, context, integration, assertNoBrowserErrors }, phase) => {
+    await context.addInitScript((combineToolUseMessages) => {
+      const key = 'pref_local_settings';
+      const settings = JSON.parse(localStorage.getItem(key) ?? '{}');
+      localStorage.setItem(key, JSON.stringify({ ...settings, combineToolUseMessages }));
+    }, combineToolUseMessages);
     const chats: { chatId: string; marker: string }[] = [];
     for (let index = 0; index < 3; index++) {
       const chatId = integration.newChatId();

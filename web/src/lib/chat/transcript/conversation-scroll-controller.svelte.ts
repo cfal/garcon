@@ -16,7 +16,7 @@ import type {
 	TranscriptWindowTarget,
 } from '$lib/chat/transcript/transcript-page-progress.js';
 import { ConversationNativeScrollSettlement } from '$lib/chat/transcript/conversation-native-scroll-settlement.js';
-import { ConversationCompressedAutoFillBudget } from './conversation-compressed-autofill-budget.js';
+import { ConversationAutoFillBudget } from './conversation-auto-fill-budget.js';
 import { fillConversationViewport } from './conversation-viewport-auto-fill.js';
 import { observeConversationQueueResize } from './conversation-queue-resize.js';
 import type { ConversationNativeTouchPhase } from '$lib/chat/transcript/conversation-scroll-gesture.js';
@@ -60,7 +60,7 @@ export class ConversationScrollController {
 	#isAutoFillingViewport = $state(false);
 	#isViewportAtStart = $state(true);
 	#refillViewportAfterCurrentFill = false;
-	#compressedAutoFillBudget = new ConversationCompressedAutoFillBudget();
+	#autoFillBudget = new ConversationAutoFillBudget();
 	#isViewportVisible = true;
 	#initialBottomRestoreChatId = $state<string | null>(null);
 	#initialBottomPaintChatId = $state<string | null>(null);
@@ -260,7 +260,6 @@ export class ConversationScrollController {
 	completeInitialBottomRestore(waitForReady: () => Promise<void> = () => Promise.resolve()): void {
 		const chatId = this.deps.getChatId();
 		if (!chatId || this.#initialBottomRestoreChatId !== chatId) return;
-		if (!this.deps.chatState.displayMessageCount) return;
 		this.#initialBottomPaintChatId = null;
 		this.#initialBottomRestoreChatId = null;
 		const intentEpoch = this.#userScrollIntent.epoch;
@@ -273,7 +272,7 @@ export class ConversationScrollController {
 				this.isPinnedToBottom &&
 				!this.deps.chatState.isUserScrolledUp &&
 				this.#userScrollIntent.epoch === intentEpoch &&
-				this.deps.getViewport()?.hasCollapsedToolGroups()
+				(this.deps.chatState.canLoadEarlier || this.deps.chatState.hasLaterMessages)
 			) {
 				void this.fillUnderfilledViewport();
 			}
@@ -285,9 +284,9 @@ export class ConversationScrollController {
 		if (this.#isAutoFillingViewport || this.#activeTargetNavigations > 0) return;
 		if (
 			!autoScrollToBottom ||
-			this.deps.chatState.loadStatus === 'empty' ||
 			this.deps.chatState.loadStatus === 'error' ||
-			(!this.deps.chatState.isLoadingMessages && this.deps.chatState.displayMessageCount === 0)
+			(!this.deps.chatState.isLoadingMessages && this.deps.chatState.displayMessageCount === 0 &&
+				!this.deps.chatState.canLoadEarlier && !this.deps.chatState.hasLaterMessages)
 		) {
 			this.#clearInitialBottomRestore();
 			return;
@@ -403,8 +402,7 @@ export class ConversationScrollController {
 		const requestBoundarySignature =
 			direction === 'earlier' ? this.#earlierBoundarySignature() : null;
 
-		// Records the crossed boundary before awaiting data. Earlier history advances
-		// its signature, while later paging re-arms only after leaving or continuing.
+		// Records the boundary before awaiting; later paging requires renewed intent.
 		if (direction === 'later') this.#laterBoundaryArmed = false;
 		if (requestBoundarySignature) {
 			this.#earlierBoundaryRequestSignature = requestBoundarySignature;
@@ -421,17 +419,27 @@ export class ConversationScrollController {
 		try {
 			result = await this.#mutatePage(
 				direction,
-				async (applicationGate) => {
-					if (direction === 'earlier' && this.deps.chatState.hasEarlierRowsToReveal) {
-						if (applicationGate && (await applicationGate()) !== 'apply') return 'invalidated';
-						if (this.deps.chatState.revealEarlierLoadedRows()) return 'loaded';
-					}
-					return direction === 'earlier'
-						? this.deps.chatState.loadEarlierPage(chatId, { applicationGate })
-						: this.deps.chatState.loadLaterPage(chatId, { applicationGate });
-				},
+				(applicationGate) => direction === 'earlier'
+					? this.deps.chatState.loadEarlierPage(chatId, { applicationGate })
+					: this.deps.chatState.loadLaterPage(chatId, { applicationGate }),
 				reason === 'scroll' ? 'after-native-scroll' : 'immediate',
 			);
+			if (result === 'loaded' && reason === 'button') {
+				const operationEpoch = this.#viewportOperationEpoch;
+				const windowRevision = this.deps.chatState.windowRevision;
+				const fill = await this.deps.getViewport()?.measureViewportFill();
+				if (!this.#isCurrentViewportOperation(chatId, operationEpoch) || this.deps.chatState.windowRevision !== windowRevision) {
+					result = 'invalidated';
+				} else if (fill === 'underfilled' && (direction === 'earlier'
+					? this.deps.chatState.canLoadEarlier
+					: this.deps.chatState.hasLaterMessages)) {
+					// Client-hidden rows can satisfy raw demand without creating a scrollable boundary.
+					this.deps.chatState.pageStates[direction] = { status: 'bounded', error: null };
+					result = 'bounded';
+				} else if (fill === 'overflow' && this.deps.chatState.pageStates[direction].status === 'bounded') {
+					this.deps.chatState.pageStates[direction] = { status: 'idle', error: null };
+				}
+			}
 		} finally {
 			const latestIntentEpoch = this.#userScrollIntent.epoch;
 			continuedPageIntent =
@@ -478,8 +486,9 @@ export class ConversationScrollController {
 		const operationEpoch = this.#beginViewportOperation();
 		const shouldRemainPinned = this.isPinnedToBottom || !this.deps.chatState.isUserScrolledUp;
 		const result = await this.deps.chatState.loadEarlierPage(chatId);
-		if (result !== 'loaded' || !this.#isCurrentViewportOperation(chatId, operationEpoch)) {
-			return result === 'loaded' ? 'invalidated' : result;
+		if (result !== 'loaded' && result !== 'bounded') return result;
+		if (!this.#isCurrentViewportOperation(chatId, operationEpoch)) {
+			return 'invalidated';
 		}
 		const layout = await viewport.waitForLayout({
 			minimumDataRevision: this.deps.chatState.feedMutationClock.dataRevision,
@@ -494,7 +503,7 @@ export class ConversationScrollController {
 		} else {
 			this.#preserveHistoryBrowsing();
 		}
-		return 'loaded';
+		return result;
 	}
 
 	async jumpToMessageRow(
@@ -618,11 +627,10 @@ export class ConversationScrollController {
 				transcriptViewId,
 				viewport,
 				chatState: this.deps.chatState,
-				budget: this.#compressedAutoFillBudget,
+				budget: this.#autoFillBudget,
 				isCurrent: ownsFill,
 				canRequestPage: (direction) => this.#canRequestPage(direction),
 				mutatePage: (direction, load) => this.#mutatePage(direction, load),
-				waitForCurrentLayout: () => this.#waitForCurrentLayout('loaded'),
 				isPinnedToBottom: () => this.isPinnedToBottom,
 			});
 		} finally {
@@ -704,7 +712,7 @@ export class ConversationScrollController {
 		) {
 			return 'invalidated';
 		}
-		if (result !== 'loaded') return result;
+		if (result !== 'loaded' && result !== 'bounded') return result;
 		// Waits until the data revision and anchor correction settle. A continued paging
 		// gesture already owns the viewport, so it may proceed after superseding that correction.
 		const layout = await viewport.waitForLayout({
@@ -739,13 +747,6 @@ export class ConversationScrollController {
 			})();
 			return decision;
 		};
-	}
-
-	async #waitForCurrentLayout(result: TranscriptPageLoadResult): Promise<TranscriptPageLoadResult> {
-		const layout = await this.deps.getViewport()?.waitForLayout({
-			minimumDataRevision: this.deps.chatState.feedMutationClock.dataRevision,
-		});
-		return layout === 'settled' ? result : 'invalidated';
 	}
 
 	#syncViewportStart(position?: ConversationViewportPosition | null): void {
@@ -903,7 +904,6 @@ export class ConversationScrollController {
 			this.deps.getViewport()?.viewportPosition()?.logicalOffset ?? null;
 	}
 	#preserveHistoryBrowsing(): void {
-		this.deps.chatState.isUserScrolledUp = true;
 		this.setPinnedToBottom(false);
 	}
 	#expireUserScrollIntent(): void {

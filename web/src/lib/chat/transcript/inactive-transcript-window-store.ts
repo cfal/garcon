@@ -83,7 +83,7 @@ export class InactiveTranscriptWindowStore {
 			!cached
 			|| cached.stale
 			|| cached.transcriptViewId !== window.transcript.transcriptViewId
-			|| cached.lastOrdinal !== window.transcript.lastOrdinal
+			|| cached.lastOrdinal > window.transcript.lastOrdinal
 		) return null;
 		return window;
 	}
@@ -92,10 +92,7 @@ export class InactiveTranscriptWindowStore {
 		this.#windows.delete(this.#key(surfaceId, chatId));
 	}
 
-	applySharedCommit(
-		commit: SharedTranscriptCommit,
-		overlayMutation: ConversationTranscriptOverlayMutation,
-	): void {
+	applySharedCommit(commit: SharedTranscriptCommit): void {
 		for (const [key, window] of this.#windows) {
 			if (window.chatId !== commit.chatId) continue;
 			const previousEntries = window.transcript.entries;
@@ -103,9 +100,6 @@ export class InactiveTranscriptWindowStore {
 			if (result !== 'applied') {
 				this.#windows.delete(key);
 				continue;
-			}
-			if (overlayMutation.feedStructureChanged) {
-				window.transcript.applySharedOverlayMutation(overlayMutation);
 			}
 			const entries = window.transcript.entries;
 			window.messageCount = entries.length;
@@ -126,6 +120,19 @@ export class InactiveTranscriptWindowStore {
 		for (const window of this.#windows.values()) {
 			if (window.chatId === chatId) window.transcript.applySharedOverlayMutation(mutation);
 		}
+	}
+
+	installCachedSnapshot(chatId: string, source?: ActiveTranscriptState): void {
+		for (const [key, window] of this.#windows) {
+			if (window.chatId !== chatId) continue;
+			if (window.transcript.installCachedSnapshot(chatId, source) !== 'applied') {
+				this.#windows.delete(key);
+				continue;
+			}
+			window.messageCount = window.transcript.entries.length;
+			window.estimatedBytes = estimatedTranscriptBytes(window.transcript.entries, this.limits.bytes);
+		}
+		this.#prune();
 	}
 
 	removeChat(chatId: string): void {

@@ -105,7 +105,7 @@ describe('reloadChatFromNative', () => {
 			limit: 50,
 			beforeOrdinal: 3,
 			transcriptViewId: 'generation-2',
-		});
+		}, { signal: expect.any(AbortSignal) });
 		expect(chat.chatMessages.map((message) => (message as AssistantMessage).content)).toEqual([
 			'one',
 			'two',

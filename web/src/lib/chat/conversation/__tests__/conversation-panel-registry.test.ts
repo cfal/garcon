@@ -13,6 +13,8 @@ import {
 } from '../conversation-panel-registry.svelte.js';
 import { CurrentConversationPanelTranscript } from '../current-conversation-panel-transcript.js';
 import type { ChatViewSurfaceId } from '$lib/workspace/surface-types.js';
+import { transcriptPresentationKey } from '$lib/chat/transcript/transcript-presentation-key.js';
+import { TRANSCRIPT_BUFFER_BYTE_LIMIT, TRANSCRIPT_BUFFER_ROW_LIMIT } from '$lib/chat/transcript/transcript-batch-buffer.js';
 
 function message(ordinal: number): TranscriptMessage {
 	return {
@@ -131,7 +133,6 @@ describe('ConversationPanelRegistry', () => {
 			resendCandidates: [],
 			noticeRevision: 0,
 		});
-		first.revealAllLoadedMessages();
 		expect(first.entries).toHaveLength(250);
 		expect(cache.get('chat-1')?.messages).toHaveLength(100);
 
@@ -143,7 +144,7 @@ describe('ConversationPanelRegistry', () => {
 		expect(restored?.entries.map((entry) => entry.ordinal)).toEqual(
 			Array.from({ length: 250 }, (_, index) => index + 1),
 		);
-		expect(restored?.visibleRows[0]).toMatchObject({ kind: 'message', ordinal: 1 });
+		expect(restored?.displayRows[0]).toMatchObject({ kind: 'message', ordinal: 1 });
 		expect(registry.hasInactiveWindow('chat-1')).toBe(false);
 		registry.destroy();
 		cache.flush();
@@ -186,14 +187,13 @@ describe('ConversationPanelRegistry', () => {
 			messages: Array.from({ length: 249 }, (_, index) => message(index + 2)),
 			firstOrdinal: 2, lastOrdinal: 250, resendCandidates: [], noticeRevision: 0,
 		});
-		first.revealAllLoadedMessages();
 		switchPanel(registry, 'chat-2');
 
 		registry.appendServerNotice('chat-1', 'info', 'background notice');
 		switchPanel(registry, 'chat-1');
 
 		expect(registry.panel('chat-view:window-left')?.transcript).toBe(first);
-		expect(first.visibleRows.find((row) => row.kind === 'message')).toMatchObject({ ordinal: 1 });
+		expect(first.displayRows.find((row) => row.kind === 'message')).toMatchObject({ ordinal: 1 });
 		registry.destroy();
 		cache.flush();
 	});
@@ -324,6 +324,55 @@ describe('ConversationPanelRegistry', () => {
 		expect(left?.scroll.isPinnedToBottom).toBe(false);
 		expect(right?.scroll.isPinnedToBottom).toBe(true);
 		expect(left?.lifecycle).toBe(right?.lifecycle);
+		cache.flush();
+	});
+
+	it('settles shared inputs without changing either surface interval', () => {
+		const { cache, registry } = fixture();
+		const messages = Array.from({ length: 200 }, (_, index) => message(index + 1));
+		cache.replace('chat-1', 'view-1', messages, 200, null);
+		registry.reconcile([
+			presentation('chat-view:window-left', 'chat-1'),
+			presentation('chat-view:window-right', 'chat-1'),
+		]);
+		const left = registry.panel('chat-view:window-left');
+		const right = registry.panel('chat-view:window-right');
+		if (!left || !right) throw new Error('Expected duplicate panels');
+		left.transcript.replaceGeneration('chat-1', 'view-1', messages, {
+			lastOrdinal: 200, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false,
+		});
+		left.scroll.setPinnedToBottom(false);
+		for (const clientMessageId of ['pending-first', 'pending-second']) {
+			registry.upsertOptimisticInput('chat-1', {
+				chatId: 'chat-1', clientMessageId, content: clientMessageId,
+				createdAt: '2026-08-30T00:00:00.000Z', delivery: 'pending',
+			});
+		}
+		registry.markOptimisticInputDelivered('chat-1', 'pending-second');
+		registry.appendLocalNotice('chat-1', 'progress', 'synthetic status');
+
+		for (const [index, clientMessageId] of ['pending-second', 'pending-first'].entries()) {
+			const ordinal = 201 + index;
+			expect(registry.applyCommittedBatch({
+				chatId: 'chat-1', transcriptViewId: 'view-1',
+				messages: [{ ordinal, message: new UserMessage(
+					'2026-08-30T00:00:00.000Z', clientMessageId, undefined, { clientMessageId },
+				) }],
+				firstOrdinal: ordinal, lastOrdinal: ordinal, resendCandidates: [], noticeRevision: 0,
+			})).toEqual({ kind: 'applied', localRecoverySurfaceIds: [] });
+			for (const [panel, firstOrdinal] of [[left, 1], [right, 101]] as const) {
+				expect(panel.transcript.displayRows.flatMap((row) =>
+					row.kind === 'message' && row.ordinal !== undefined ? [row.ordinal] : [],
+				)).toEqual(Array.from({ length: ordinal - firstOrdinal + 1 }, (_, i) => firstOrdinal + i));
+				expect(panel.transcript.displayRows.filter((row) => row.id.startsWith('optimistic:')))
+					.toHaveLength(1 - index);
+			}
+		}
+		expect(left.transcript.canLoadEarlier).toBe(false);
+		expect(right.transcript.canLoadEarlier).toBe(true);
+		expect(left.scroll.isPinnedToBottom).toBe(false);
+		expect(right.scroll.isPinnedToBottom).toBe(true);
+		registry.destroy();
 		cache.flush();
 	});
 
@@ -488,6 +537,211 @@ describe('ConversationPanelRegistry', () => {
 		expect(left.transcript.transcriptViewId).toBe('view-2');
 		expect(right.transcript.transcriptViewId).toBe('view-2');
 		expect(right.transcript.entries.map((item) => item.ordinal)).toEqual([1, 2]);
+		cache.flush();
+	});
+
+	it.each(['snapshot', 'buffer', 'cancel'] as const)('keeps one UI identity across a held snapshot and %s settlement', async (settlement) => {
+		const { cache, registry } = fixture();
+		seed(cache);
+		registry.reconcile([
+			presentation('chat-view:window-left', 'chat-1'),
+			presentation('chat-view:window-right', 'chat-1'),
+		]);
+		const left = registry.panel('chat-view:window-left')!.transcript;
+		const right = registry.panel('chat-view:window-right')!.transcript;
+		registry.upsertOptimisticInput('chat-1', {
+			chatId: 'chat-1', clientMessageId: 'synthetic-buffered-input',
+			createdAt: '2026-01-01T00:00:00.000Z', content: 'Synthetic input', delivery: 'pending',
+		});
+		const epoch = left.beginSnapshotLoad();
+		const echoed = { ordinal: 2, message: new UserMessage('2026-01-01T00:00:00.000Z', 'Synthetic input', undefined, {
+			clientMessageId: 'synthetic-buffered-input',
+		}) };
+		registry.applyCommittedBatch({
+			chatId: 'chat-1', transcriptViewId: 'view-1', messages: [echoed],
+			firstOrdinal: 2, lastOrdinal: 2, resendCandidates: [], noticeRevision: 0,
+		});
+		for (const transcript of [left, right]) {
+			expect(transcript.optimisticUserInputs).toHaveLength(0);
+			expect(transcript.displayRows.map(transcriptPresentationKey)).toEqual([
+				'view-1:1', JSON.stringify(['user-input', 'synthetic-buffered-input']),
+			]);
+		}
+		expect(left.isLoadingMessages).toBe(true);
+		expect(left.entries.map(({ ordinal }) => ordinal)).toEqual([1]);
+		if (settlement === 'cancel') left.abortSnapshotLoad(epoch);
+		else expect(left.setFromPage('chat-1', {
+			transcriptViewId: 'view-1',
+			messages: settlement === 'snapshot' ? [message(1), echoed] : [message(1)],
+			lastOrdinal: settlement === 'snapshot' ? 2 : 1,
+			pageOldestOrdinal: 1, pageNewestOrdinal: settlement === 'snapshot' ? 2 : 1,
+			nextBeforeOrdinal: null, hasMore: false,
+		}, epoch)).toBe('applied');
+		expect(left.entries.map(({ ordinal }) => ordinal)).toEqual([1, 2]);
+		expect(left.displayRows.at(-1)?.id).toBe('view-1:2');
+		registry.destroy();
+		cache.flush();
+	});
+
+	it('rebases an unknown submission frontier after the first snapshot without placing it above history', async () => {
+		const release = deferred<void>();
+		const { cache, registry } = fixture({ loadTranscriptSnapshot: async (transcript) => {
+			const epoch = transcript.beginSnapshotLoad();
+			await release.promise;
+			transcript.setFromPage('chat-1', {
+				transcriptViewId: 'view-1', messages: [message(1)], lastOrdinal: 1,
+				pageOldestOrdinal: 1, pageNewestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false,
+			}, epoch);
+		} });
+		registry.reconcile([presentation('chat-view:window-left', 'chat-1')]);
+		registry.upsertOptimisticInput('chat-1', {
+			chatId: 'chat-1', clientMessageId: 'unknown-frontier', content: 'Synthetic pending input',
+			createdAt: '2026-01-01T00:00:00.000Z', delivery: 'pending',
+		});
+		release.resolve();
+		await registry.loadChatSnapshot('chat-1');
+		const transcript = registry.panel('chat-view:window-left')!.transcript;
+		expect(transcript.displayRows.map((row) => row.id)).toEqual(['view-1:1', 'optimistic:unknown-frontier']);
+		registry.applyCommittedBatch({
+			chatId: 'chat-1', transcriptViewId: 'view-1', messages: [message(2)],
+			firstOrdinal: 2, lastOrdinal: 2, resendCandidates: [], noticeRevision: 0,
+		});
+		expect(transcript.displayRows.map((row) => row.id)).toEqual(['view-1:1', 'optimistic:unknown-frontier', 'view-1:2']);
+		registry.destroy();
+		cache.flush();
+	});
+
+	it('settles a disjoint snapshot echo before cache eviction, including parked windows', async () => {
+		const { cache, registry } = fixture({
+			retainInactiveWindows: () => true,
+			loadTranscriptSnapshot: async (transcript, chatId) => {
+				const messages = Array.from({ length: 200 }, (_, index) => message(index + 101));
+				messages[0] = { ordinal: 101, message: new UserMessage('', 'Synthetic input', undefined, { clientMessageId: 'disjoint-input' }) };
+				expect(transcript.setFromPage(chatId, {
+					transcriptViewId: 'view-1', messages, lastOrdinal: 300,
+					pageOldestOrdinal: 101, pageNewestOrdinal: 300, nextBeforeOrdinal: 101, hasMore: true,
+				}, transcript.beginSnapshotLoad())).toBe('applied');
+			},
+		});
+		seed(cache);
+		registry.reconcile([presentation('chat-view:window-left', 'chat-1'), presentation('chat-view:window-right', 'chat-1')]);
+		const left = registry.panel('chat-view:window-left')!.transcript;
+		const right = registry.panel('chat-view:window-right')!.transcript;
+		registry.upsertOptimisticInput('chat-1', {
+			chatId: 'chat-1', clientMessageId: 'disjoint-input', content: 'Synthetic input', createdAt: '', delivery: 'pending',
+		});
+		registry.prepareForReconcile([presentation('chat-view:window-left', 'chat-1')]);
+		registry.reconcile([presentation('chat-view:window-left', 'chat-1')]);
+		expect(registry.hasInactiveWindow('chat-1')).toBe(true);
+		await expect(registry.loadChatSnapshot('chat-1')).resolves.toBe(true);
+		for (const transcript of [left, right]) {
+			expect(transcript.entries.map((row) => row.ordinal)).toEqual([1]);
+			expect(transcript.displayRows.map((row) => row.id)).toEqual(['view-1:1']);
+			expect(transcript.optimisticUserInputs).toEqual([]);
+			expect(transcript.lastOrdinal).toBe(300);
+		}
+		expect(cache.get('chat-1')?.messages[0]?.ordinal).toBe(201);
+		registry.reconcile([presentation('chat-view:window-left', 'chat-1'), presentation('chat-view:window-right', 'chat-1')]);
+		expect(registry.panel('chat-view:window-right')!.transcript).toBe(right);
+		left.activateChat('chat-1');
+		expect(left.displayRows).toHaveLength(100);
+		expect(left.displayRows.every((row) => !row.id.startsWith('optimistic:'))).toBe(true);
+		registry.destroy();
+		cache.flush();
+	});
+
+	it('settles a published snapshot after its loader disappears and a peer retries publication', async () => {
+		let removedLoader = false;
+		const { cache, registry } = fixture({ loadTranscriptSnapshot: async (transcript, chatId) => {
+			transcript.setFromPage(chatId, {
+				transcriptViewId: 'view-1', messages: [message(1), {
+					ordinal: 2, message: new UserMessage('', 'Synthetic input', undefined, { clientMessageId: 'removed-loader' }),
+				}], lastOrdinal: 2, pageOldestOrdinal: 1, pageNewestOrdinal: 2, nextBeforeOrdinal: null, hasMore: false,
+			}, transcript.beginSnapshotLoad());
+			if (!removedLoader) {
+				removedLoader = true;
+				registry.reconcile([presentation('chat-view:window-right', chatId)]);
+			}
+		} });
+		seed(cache);
+		registry.reconcile([presentation('chat-view:window-left', 'chat-1'), presentation('chat-view:window-right', 'chat-1')]);
+		registry.upsertOptimisticInput('chat-1', {
+			chatId: 'chat-1', clientMessageId: 'removed-loader', content: 'Synthetic input', createdAt: '', delivery: 'pending',
+		});
+		await expect(registry.loadChatSnapshot('chat-1')).resolves.toBe(true);
+		expect(registry.overlayFor('chat-1')?.optimisticInputs).toEqual([]);
+		expect(registry.panel('chat-view:window-right')!.transcript.displayRows.map((row) => row.id)).toEqual(['view-1:1', 'view-1:2']);
+		registry.destroy();
+		cache.flush();
+	});
+
+	it('rebases a submission made against a stale frontier after replacement history arrives', async () => {
+		const { cache, registry } = fixture({ loadTranscriptSnapshot: async (transcript, chatId) => {
+			transcript.setFromPage(chatId, {
+				transcriptViewId: 'view-2', messages: [message(150), message(200)], lastOrdinal: 200,
+				pageOldestOrdinal: 150, pageNewestOrdinal: 200, nextBeforeOrdinal: 150, hasMore: true,
+			}, transcript.beginSnapshotLoad());
+		} });
+		cache.replace('chat-1', 'view-1', [message(100)], 100, 100);
+		registry.reconcile([presentation('chat-view:window-left', 'chat-1')]);
+		cache.markStale('chat-1');
+		registry.upsertOptimisticInput('chat-1', {
+			chatId: 'chat-1', clientMessageId: 'stale-frontier', content: 'Synthetic input', createdAt: '', delivery: 'pending',
+		});
+		await registry.loadChatSnapshot('chat-1');
+		expect(registry.panel('chat-view:window-left')!.transcript.displayRows.map((row) => row.id)).toEqual([
+			'view-2:150', 'view-2:200', 'optimistic:stale-frontier',
+		]);
+		expect(registry.overlayFor('chat-1')?.optimisticAfterOrdinals.get('stale-frontier')).toBe(200);
+		registry.destroy();
+		cache.flush();
+	});
+
+	it.each(['rows', 'bytes'] as const)('keeps echo evidence across replay %s overflow, abort, failed recovery and a disjoint snapshot', async (limit) => {
+		let failRecovery = true;
+		const through = TRANSCRIPT_BUFFER_ROW_LIMIT + 200;
+		const { cache, registry } = fixture({ loadTranscriptSnapshot: async (transcript, chatId) => {
+			if (failRecovery) throw new Error('Synthetic recovery failure');
+			transcript.setFromPage(chatId, {
+				transcriptViewId: 'view-1', messages: [message(through)], lastOrdinal: through,
+				pageOldestOrdinal: through, pageNewestOrdinal: through, nextBeforeOrdinal: through, hasMore: true,
+			}, transcript.beginSnapshotLoad());
+		} });
+		seed(cache);
+		registry.reconcile([presentation('chat-view:window-left', 'chat-1')]);
+		registry.upsertOptimisticInput('chat-1', {
+			chatId: 'chat-1', clientMessageId: 'replay-input', content: 'Synthetic input', createdAt: '', delivery: 'pending',
+		});
+		const token = registry.beginReconnectReplay('chat-1', 'view-1');
+		const echoed = { chatId: 'chat-1', transcriptViewId: 'view-1', messages: [
+			{ ordinal: 101, message: new UserMessage('', 'Synthetic input', undefined, { clientMessageId: 'replay-input' }) },
+		], firstOrdinal: 101, lastOrdinal: 101, resendCandidates: [], noticeRevision: 0 };
+		const transcript = registry.panel('chat-view:window-left')!.transcript;
+		const revision = transcript.feedMutationClock.dataRevision;
+		expect(registry.applyCommittedBatch(echoed).kind).toBe('applied');
+		expect(transcript.feedMutationClock.dataRevision).toBeGreaterThan(revision);
+		expect(transcript.displayRows.at(-1)).not.toHaveProperty('awaitingDelivery', true);
+		expect(registry.applyCommittedBatch({
+			...echoed, firstOrdinal: 102, lastOrdinal: through,
+			messages: limit === 'rows' ? [] : [{ ordinal: through, message: new AssistantMessage('', 'x'.repeat(TRANSCRIPT_BUFFER_BYTE_LIMIT)) }],
+			...(limit === 'bytes' ? { firstOrdinal: through } : {}),
+		}).kind).toBe('chat-recovery-required');
+		expect(registry.applyReconnectReplayPage(token, 'chat-1', { ...echoed, messages: [], firstOrdinal: 2, lastOrdinal: 100 })).toBe('gap-detected');
+		registry.abortReconnectReplay(token, 'chat-1');
+		expect(cache.readAppliedCursor('chat-1')?.lastOrdinal).toBe(1);
+		await expect(registry.loadChatSnapshot('chat-1')).rejects.toThrow('Synthetic recovery failure');
+		expect(registry.overlayFor('chat-1')?.optimisticInputs).toMatchObject([{ clientMessageId: 'replay-input', delivery: 'delivered' }]);
+		expect(transcript.displayRows.at(-1)).not.toHaveProperty('awaitingDelivery', true);
+		failRecovery = false;
+		await expect(registry.loadChatSnapshot('chat-1')).resolves.toBe(true);
+		expect(cache.readAppliedCursor('chat-1')?.lastOrdinal).toBe(through);
+		expect(registry.panel('chat-view:window-left')!.transcript.loadedThroughOrdinal).toBe(1);
+		expect(registry.overlayFor('chat-1')?.optimisticInputs).toHaveLength(0);
+		const resumed = registry.beginReconnectReplay('chat-1', 'view-1');
+		expect(registry.applyReconnectReplayPage(resumed, 'chat-1', { ...echoed, firstOrdinal: through + 1, lastOrdinal: through + 1, messages: [message(through + 1)] })).toBe('applied');
+		expect(registry.finishReconnectReplay(resumed, 'chat-1')).toBe('applied');
+		expect(cache.readAppliedCursor('chat-1')?.lastOrdinal).toBe(through + 1);
+		registry.destroy();
 		cache.flush();
 	});
 
@@ -674,7 +928,6 @@ describe('ConversationPanelRegistry', () => {
 		right.transcript.nextBeforeOrdinal = null;
 		right.transcript.hasEarlierMessages = false;
 		right.transcript.hasLaterMessages = true;
-		right.transcript.visibleMessageCount = 37;
 		right.transcript.isUserScrolledUp = true;
 		right.scroll.setPinnedToBottom(false);
 		const preservedEntries = right.transcript.entries;
@@ -696,7 +949,7 @@ describe('ConversationPanelRegistry', () => {
 		expect(right.transcript.entries.map((item) => item.ordinal)).toEqual(
 			Array.from({ length: 50 }, (_, index) => index + 1),
 		);
-		expect(right.transcript.visibleMessageCount).toBe(37);
+		expect(right.transcript.displayRows).toHaveLength(50);
 		expect(right.transcript.hasLaterMessages).toBe(true);
 		expect(right.transcript.isUserScrolledUp).toBe(true);
 		expect(right.scroll.isPinnedToBottom).toBe(false);
@@ -720,7 +973,6 @@ describe('ConversationPanelRegistry', () => {
 		const rightEntries = Array.from({ length: 150 }, (_, index) => message(index + 1));
 		left.transcript.entries = leftEntries;
 		right.transcript.entries = rightEntries;
-		right.transcript.visibleMessageCount = 121;
 		right.transcript.hasLaterMessages = true;
 		right.transcript.isUserScrolledUp = true;
 		right.scroll.setPinnedToBottom(false);
@@ -736,7 +988,7 @@ describe('ConversationPanelRegistry', () => {
 
 		expect(left.transcript.entries).toBe(preservedLeftEntries);
 		expect(right.transcript.entries).toBe(preservedRightEntries);
-		expect(right.transcript.visibleMessageCount).toBe(121);
+		expect(right.transcript.displayRows).toHaveLength(150);
 		expect(right.transcript.hasLaterMessages).toBe(true);
 		expect(right.transcript.isUserScrolledUp).toBe(true);
 		expect(right.scroll.isPinnedToBottom).toBe(false);
@@ -927,7 +1179,6 @@ describe('ConversationPanelRegistry', () => {
 			messages: Array.from({ length: 149 }, (_, index) => message(index + 2)),
 			firstOrdinal: 2, lastOrdinal: 150, resendCandidates: [], noticeRevision: 0,
 		});
-		source.transcript.revealAllLoadedMessages();
 		const target = {
 			kind: 'row' as const,
 			transcriptViewId: 'view-1',
@@ -976,7 +1227,6 @@ describe('ConversationPanelRegistry', () => {
 			messages: Array.from({ length: 149 }, (_, index) => message(index + 2)),
 			firstOrdinal: 2, lastOrdinal: 150, resendCandidates: [], noticeRevision: 0,
 		});
-		source.transcript.revealAllLoadedMessages();
 		const target = {
 			kind: 'row' as const, transcriptViewId: 'view-1', ordinal: 1, viewportOffset: -17,
 		};
@@ -1021,7 +1271,6 @@ describe('ConversationPanelRegistry', () => {
 			messages: Array.from({ length: 199 }, (_, index) => message(index + 2)),
 			firstOrdinal: 2, lastOrdinal: 200, resendCandidates: [], noticeRevision: 0,
 		});
-		source.transcript.revealAllLoadedMessages();
 		registry.prepareChatSurfaceTransfer({
 			sourceSurfaceId: 'chat-view:window-left',
 			destinationSurfaceId: 'chat-view:window-right',

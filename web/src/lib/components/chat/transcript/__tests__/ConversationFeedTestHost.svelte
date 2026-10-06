@@ -35,6 +35,7 @@
 	import { setCanonicalWorkspaceLayout } from '../../__tests__/workspace-layout-test-context.js';
 
 	interface Props {
+		onTranscript?: (transcript: ActiveTranscriptState) => void;
 		chatContext?: ConversationMessageChatContext;
 		sessionsStore?: ReturnType<typeof createChatSessionsStore>;
 		onUserScrollIntent?: (direction: 'earlier' | 'later' | null) => void;
@@ -43,6 +44,7 @@
 		remoteSettingsStore?: RemoteSettingsStore;
 		transcriptScenario?:
 			| 'empty'
+			| 'hidden-only-bounded'
 			| 'file-links'
 			| 'local-truncation'
 			| 'loading-earlier'
@@ -58,6 +60,7 @@
 	}
 
 	const {
+		onTranscript,
 		chatContext = { chatId: 'chat-1', executorId: 'local', projectPath: '/workspace' },
 		sessionsStore = createChatSessionsStore(),
 		onUserScrollIntent,
@@ -79,7 +82,13 @@
 			id: `generation-1:${ordinal}`,
 		}) ?? 'not-ready';
 	}
-	if (initialTranscriptScenario === 'file-links') {
+	if (initialTranscriptScenario === 'hidden-only-bounded') {
+		chatState.replaceGeneration(initialChatContext.chatId, 'generation-1', [], {
+			lastOrdinal: 10_000, pageOldestOrdinal: 0, pageNewestOrdinal: 10_000,
+			nextBeforeOrdinal: 8_001, hasMore: true,
+		});
+		chatState.pageStates.earlier = { status: 'bounded', error: null };
+	} else if (initialTranscriptScenario === 'file-links') {
 		chatState.replaceGeneration(initialChatContext.chatId, 'generation-1', [
 			{ ordinal: 1, message: new AssistantMessage('2026-07-01T00:00:00.000Z', '[Message file](./message.txt)') },
 		], { lastOrdinal: 1, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false });
@@ -123,7 +132,6 @@
 			})),
 			{ lastOrdinal: count, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false },
 		);
-		chatState.revealAllLoadedMessages();
 	} else if (initialTranscriptScenario === 'bash-filter') {
 		chatState.replaceGeneration(
 			'chat-1',
@@ -180,13 +188,6 @@
 		if (initialTranscriptScenario === 'error-earlier') {
 			chatState.pageStates.earlier = { status: 'error', error: 'Network unavailable' };
 		}
-		if (
-			initialTranscriptScenario === 'twenty-thousand' ||
-			initialTranscriptScenario === 'count-shrink' ||
-			initialTranscriptScenario === 'count-shrink-survivors'
-		) {
-			chatState.revealAllLoadedMessages();
-		}
 	}
 
 	function shrinkTranscript(): void {
@@ -200,7 +201,6 @@
 			nextBeforeOrdinal: null,
 			hasMore: false,
 		});
-		chatState.revealAllLoadedMessages();
 	}
 
 	function shrinkTranscriptKeepingTail(): void {
@@ -214,7 +214,6 @@
 			nextBeforeOrdinal: null,
 			hasMore: false,
 		});
-		chatState.revealAllLoadedMessages();
 	}
 
 	function showInterleavedEarlierError(): void {
@@ -225,6 +224,7 @@
 		chatState.pageStates.earlier = {
 			status: 'loading',
 			error: chatState.pageStates.earlier.error,
+			...(chatState.pageStates.earlier.status === 'bounded' ? { continuation: 'manual' as const } : {}),
 		};
 	}
 	setCanonicalWorkspaceLayout();
@@ -263,6 +263,7 @@
 		unsubscribeSidebarRecenter();
 		localSettings.destroy();
 	});
+	untrack(() => onTranscript?.(chatState));
 </script>
 
 	<ConversationFeed

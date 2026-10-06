@@ -2,9 +2,11 @@ import { UserMessage } from '$shared/chat-types';
 import type { UserMessagePresentation } from '$shared/chat-types';
 import type { ChatDisplayRow, ChatLoadStatus } from './active-transcript-state.svelte.js';
 import type { TranscriptPageLoadResult } from './transcript-page-progress.js';
+import { transcriptPresentationKey } from './transcript-presentation-key.js';
 
 export interface UserMessageNavigatorItem {
 	id: string;
+	uiKey: string;
 	ordinal?: number;
 	content: string;
 	timestamp: string;
@@ -33,7 +35,6 @@ export interface UserMessageNavigatorTranscriptPort {
 	readonly isLoadingMessages: boolean;
 	readonly hasLaterMessages: boolean;
 	readonly loadStatus: ChatLoadStatus;
-	revealAllLoadedMessages(): void;
 }
 
 export interface UserMessageNavigatorOptions {
@@ -77,6 +78,7 @@ export class UserMessageNavigatorController implements UserMessageNavigatorDialo
 				return [
 					{
 						id: row.id,
+						uiKey: transcriptPresentationKey(row),
 						ordinal: row.ordinal,
 						content: row.message.content,
 						timestamp: row.message.timestamp,
@@ -209,13 +211,12 @@ export class UserMessageNavigatorController implements UserMessageNavigatorDialo
 	}
 
 	async select(item: UserMessageNavigatorItem): Promise<void> {
-		const target = this.#targetFor(item.id);
+		const target = this.#targetFor(item.uiKey);
 		if (!target) return;
 		const lifecycleEpoch = ++this.#lifecycleEpoch;
 
 		this.isLoadingOlder = false;
 		this.selectionError = null;
-		this.options.transcript.revealAllLoadedMessages();
 		this.open = false;
 
 		const result = await this.options.jumpToRow(target);
@@ -232,12 +233,13 @@ export class UserMessageNavigatorController implements UserMessageNavigatorDialo
 		this.open = true;
 	}
 
-	#targetFor(rowId: string): UserMessageNavigatorTarget | null {
+	#targetFor(uiKey: string): UserMessageNavigatorTarget | null {
 		const chatId = this.openedChatId;
 		const transcriptViewId = this.openedTranscriptViewId ?? this.options.transcript.transcriptViewId;
 		if (!this.open || !chatId) return null;
 		if (!this.#matchesActiveTranscript(chatId, transcriptViewId)) return null;
-		return { chatId, transcriptViewId, rowId };
+		const row = this.options.transcript.displayRows.find((candidate) => transcriptPresentationKey(candidate) === uiKey);
+		return row ? { chatId, transcriptViewId, rowId: row.id } : null;
 	}
 
 	#matchesOpenTranscript(

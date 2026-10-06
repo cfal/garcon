@@ -38,20 +38,11 @@ export function ledgerRowsToTranscriptMessages(rows: readonly LedgerRow[]): Tran
 export function ledgerRowToMessage(row: LedgerRow): ChatMessage | null {
   switch (row.kind) {
     case 'user-input':
-      return row.detail.clientMessageId
-        ? new UserMessage(
-          row.detail.message.timestamp,
-          row.detail.message.content,
-          row.detail.message.images,
-          {
-            ...row.detail.message.metadata,
-            clientMessageId: row.detail.clientMessageId,
-          },
-          row.detail.message.presentation,
-        )
-        : row.detail.message;
+      return userMessageWithSubmissionIdentity(row.detail.message, row.detail.clientMessageId);
     case 'provider-row':
-      return row.message;
+      return row.message instanceof UserMessage
+        ? userMessageWithSubmissionIdentity(row.message, null)
+        : row.message;
     case 'notice': {
       if (isLedgerPrivateGarconCommandRow(row)) return null;
       if (isLedgerCliRowNoticeDetail(row.detail)) {
@@ -130,4 +121,19 @@ export function ledgerRowToMessage(row: LedgerRow): ChatMessage | null {
     case 'run-ended':
       return null;
   }
+}
+
+function userMessageWithSubmissionIdentity(message: UserMessage, clientMessageId: string | null): UserMessage {
+  if ((message.metadata?.clientMessageId ?? null) === clientMessageId) return message;
+  // Only the ledger's indexed submission identity may settle an optimistic input.
+  const metadata = { ...message.metadata };
+  delete metadata.clientMessageId;
+  if (clientMessageId !== null) metadata.clientMessageId = clientMessageId;
+  return new UserMessage(
+    message.timestamp,
+    message.content,
+    message.images,
+    Object.keys(metadata).length > 0 ? metadata : undefined,
+    message.presentation,
+  );
 }

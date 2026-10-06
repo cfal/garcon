@@ -17,6 +17,7 @@
 		PermissionTerminalState,
 	} from '$lib/chat/transcript/conversation-feed-items.js';
 	import type { ConversationFeedItemState } from './ConversationFeedItemState.svelte.js';
+	import { transcriptPresentationKey } from '$lib/chat/transcript/transcript-presentation-key.js';
 
 	interface PermissionDecision {
 		allow: PermissionDecisionPayload['allow'];
@@ -70,7 +71,7 @@
 				.map((request) => request.permissionOccurrenceId),
 		),
 	);
-	const disclosureState = $derived(itemState?.disclosurePort(item.id));
+	const disclosureState = $derived(itemState?.disclosurePort(transcriptPresentationKey(item)));
 
 	function permissionActionableFor(message: ChatMessage): boolean {
 		if (message instanceof PermissionRequestMessage) {

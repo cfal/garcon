@@ -227,10 +227,6 @@ export class CurrentConversationPanelTranscript implements ActiveTranscriptPort 
 		return this.#fallback.activateChat(chatId);
 	}
 
-	revealAllLoadedMessages(): void {
-		this.#transcript().revealAllLoadedMessages();
-	}
-
 	#current() {
 		return this.options.panels.composerPanel;
 	}

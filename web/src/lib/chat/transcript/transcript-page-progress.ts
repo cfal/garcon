@@ -1,16 +1,17 @@
 import type { TranscriptMessage } from '$shared/chat-view';
 
-export type TranscriptPageLoadResult = 'loaded' | 'exhausted' | 'invalidated' | 'failed';
+export type TranscriptPageLoadResult = 'loaded' | 'bounded' | 'exhausted' | 'invalidated' | 'failed';
 export type TranscriptPageDirection = 'earlier' | 'later';
 export type TranscriptPageApplicationDecision = 'apply' | 'invalidated';
 export type TranscriptPageApplicationGate = () => Promise<TranscriptPageApplicationDecision>;
-export type TranscriptPageStatus = 'idle' | 'loading' | 'error';
+export type TranscriptPageStatus = 'idle' | 'loading' | 'bounded' | 'error';
 export type TranscriptWindowLoadResult = 'loaded' | 'invalidated' | 'failed';
 export type TranscriptWindowTarget = 'initial' | 'latest';
 
 export interface TranscriptPageState {
 	status: TranscriptPageStatus;
 	error: string | null;
+	continuation?: 'manual';
 }
 
 export const idlePageState = (): TranscriptPageState => ({ status: 'idle', error: null });
@@ -35,6 +36,18 @@ export function retainedEarlierPageCursor(
 	return retainedMessages.length < sourceMessages.length
 		? retainedMessages[0]?.ordinal ?? null
 		: nextBeforeOrdinal;
+}
+
+export function retainedWindow(
+	messages: TranscriptMessage[],
+	edge: 'earlier' | 'later',
+	nextBeforeOrdinal: number | null,
+): { retainedMessages: TranscriptMessage[]; nextBeforeOrdinal: number | null } {
+	const retainedMessages = retainTranscriptEntries(messages, edge);
+	return {
+		retainedMessages,
+		nextBeforeOrdinal: retainedEarlierPageCursor(messages, retainedMessages, nextBeforeOrdinal),
+	};
 }
 
 export function mergeTranscriptEntriesByOrdinal(

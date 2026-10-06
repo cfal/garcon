@@ -15,6 +15,7 @@ import {
 } from './transcript-page-progress.js';
 
 export const CHAT_TRANSCRIPT_CACHE_LIMIT = 25;
+export const CHAT_TRANSCRIPT_CACHE_MESSAGE_LIMIT = 100;
 
 export type ChatTranscriptApplyResult =
 	| { status: 'applied'; changed: boolean; lastOrdinal: number }

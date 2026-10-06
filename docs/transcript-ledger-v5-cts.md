@@ -335,6 +335,7 @@ routine local testing.
 | TLV5-L04.04 | An identical `clientMessageId` retry returns the existing disposition and never redispatches. | Unit, restart black-box        |
 | TLV5-L04.05 | Reusing a `clientMessageId` with different content or attachments is a typed conflict.        | Unit, API contract             |
 | TLV5-L04.06 | A stale-view submission is rejected rather than deduplicated into the replacement view.       | API contract, server black-box |
+| TLV5-L04.07 | Only indexed user-input identity reaches public settlement metadata; imported/provider metadata and pre-correction browser caches cannot alias durable rows. | Presentation unit, server black-box, storage unit |
 
 ### L5 Observed Order and At-Most-Once Acceptance
 
@@ -539,11 +540,11 @@ bounded inactive combined-tool windows, and cold bounded-cache restoration.
 
 | ID         | Obligation                                                                                                               | Required evidence                 |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------ | --------------------------------- |
-| TLV5-UX.01 | The selected transcript holds one ascending, unique loaded presentation interval backed by a hole-free loaded raw range. | State unit, Chromium              |
+| TLV5-UX.01 | The selected transcript holds one ascending, unique loaded presentation interval backed by a hole-free loaded raw range. Every presentable loaded row enters feed projection without a second count-sized slice. | State unit, Chromium              |
 | TLV5-UX.02 | Detached live append extends the later edge without removing either reading neighborhood.                                | State unit, Chromium              |
 | TLV5-UX.03 | Earlier paging prepends without removing the later edge.                                                                 | State unit, Chromium              |
 | TLV5-UX.04 | Later paging appends without removing the earlier edge.                                                                  | State unit, Chromium              |
-| TLV5-UX.05 | Mutation-time retention never trims expanded active history.                                                             | State unit, static                |
+| TLV5-UX.05 | Mutation-time retention never trims expanded active history. Appends, optimistic settlement, and notice changes never displace loaded durable rows, regardless of pinning or append batch size. | State unit, static                |
 | TLV5-UX.06 | Page publication preserves an address-keyed reading anchor on every sampled frame.                                       | Chromium geometry                 |
 | TLV5-UX.07 | Directional intent, error retry, reversal, and programmatic ownership cannot cause runaway or unauthorized paging.       | Controller unit, browser behavior |
 | TLV5-UX.08 | Every message retains its distinct view-qualified ordinal address and exact order; a collapsed combined-tool summary represents its member interval without changing the ledger. | Logic unit, Chromium |
@@ -562,9 +563,9 @@ bounded inactive combined-tool windows, and cold bounded-cache restoration.
 | TLV5-PAGE.04   | Earlier and later merges are relationally disjoint from the loaded interval.                | State unit                             |
 | TLV5-PAGE.05   | Held old work cannot cross reload, chat switch, or navigation.                              | State unit, Chromium                   |
 | TLV5-PAGE.06   | Page errors require explicit retry and cannot tight-loop.                                   | State and controller unit              |
-| TLV5-PAGE.07   | Normal paging is automatic and exposes no ordinary boundary button.                         | Component, browser behavior            |
+| TLV5-PAGE.07   | Normal paging is automatic; an exhausted cumulative demand budget exposes an explicit resumable boundary, including hidden-only intervals. | Component, browser behavior |
 | TLV5-PAGE.08   | One request performs one bounded raw query and returns the exact clamped interval ceiling and continuation. | Store static, server and web contract |
-| TLV5-PAGE.09   | Client-owned earlier, later, and newest visible demand advances across sparse raw budgets; newest active/background/split loads share the demand helper, and raw continuation survives cache switch and hydration. | Contract, server and web unit |
+| TLV5-PAGE.09   | Client-owned earlier, later, and newest demand advances across sparse raw pages within ten requests and 2,000 reserved raw rows. Automatic refill shares its allowance across demands. Budget exhaustion preserves partial rows and continuation; cancellation aborts transport. | Contract, server and web unit, Chromium |
 | TLV5-PAGE.10   | Malformed or stalled raw continuation is rejected before mutation and cannot loop.          | Contract and web unit                  |
 | TLV5-REPLAY.01 | The first replay page captures a fixed high watermark.                                      | Contract, server black-box             |
 | TLV5-REPLAY.02 | Every continuation repeats the watermark and advances raw ordinal coverage.                 | Contract, server black-box             |
@@ -1064,7 +1065,7 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-PAGE.09-WEB-WINDOW-PREVIEW-01 | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: `fills a rendered panel across hidden raw budgets without activation` | PAGE.09                  |
 | TLV5-PAGE.09-WEB-STATIC-01     | `web/src/lib/chat/transcript/__tests__/transcript-retention-architecture.logic.test.ts`: `routes rendered-panel snapshots through visible-demand paging` | PAGE.09, supplementary |
 | TLV5-PAGE.09-WEB-STORAGE-01    | `web/src/lib/chat/transcript/__tests__/chat-transcript-cache.test.ts`: cache hydration preserves the raw earlier continuation independently of visible rows | PAGE.09                  |
-| TLV5-PAGE.09-WEB-UNIT-01       | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: one earlier action aggregates fifty sparse bounded pages before one interval mutation with the exact cursor | PAGE.09 |
+| TLV5-PAGE.09-WEB-UNIT-01       | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: one earlier action stops after ten sparse pages, publishes partial progress, and retains the exact resumable cursor | PAGE.09 |
 | TLV5-PAGE.09-WEB-UNIT-02       | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: switch invalidation restores the bounded tail and resumes from its raw cursor      | PAGE.09, UX.17              |
 | TLV5-PAGE.09-WEB-UNIT-03       | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: one later action fills its sparse visible target by raw ceiling before one interval mutation | PAGE.09 |
 | TLV5-PAGE.09-WEB-UNIT-04       | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts`: active newest loading crosses two trailing hidden raw budgets before installing the visible target | PAGE.09 |
@@ -1089,6 +1090,17 @@ for each atomic requirement and records any required complementary tier.
 | TLV5-OPENCODE.01-SCRIPTED-01   | `integration-tests/tests/server/opencode-scripted-compaction.test.ts`: threshold compaction shows a boundary and pins native markers              | OPENCODE.01                 |
 | TLV5-OPENCODE.02-STATIC-01     | `server-agents/opencode/src/agents/opencode/__tests__/autocompaction-architecture.test.js`: compaction stays enabled with no plugin or session-latest route | OPENCODE.02              |
 | TLV5-PAGE.07-LIGHTPANDA-01     | `integration-tests/tests/e2e/transcript-scrolling.test.ts`: `pages earlier history while keeping the virtual DOM bounded`                                 | PAGE.05, PAGE.07            |
+| TLV5-PAGE.07-CHROMIUM-BOUNDED-01 | `integration-tests/tests/chromium/transcript-bounded-paging.test.ts`: server-hidden and client-hidden tails retain manual focus through paging, preserve initial/latest navigation, and hydrate raw progress after reload | PAGE.07, PAGE.09 |
+| TLV5-PAGE.07-WEB-COMPONENT-01 | `web/src/lib/components/chat/transcript/__tests__/ConversationFeed.test.ts` and `web/src/lib/components/chat/__tests__/ConversationPanel.test.ts`: hidden-only history keeps navigation available and retains its focused continuation through response publication and viewport settlement | PAGE.07 |
+| TLV5-PAGE.09-WEB-DEMAND-01 | `web/src/lib/chat/transcript/__tests__/transcript-page-demand.test.ts`: hidden-only demand stops at the shared allowance and resumes without skipping raw coverage | PAGE.09 |
+| TLV5-PAGE.09-WEB-WINDOW-01 | `web/src/lib/chat/transcript/__tests__/active-transcript-state.test.ts` and `web/src/lib/chat/conversation/__tests__/conversation-snapshot-publication.test.ts`: window publication preserves cursor-qualified bounded stops and known heads across active and parked panels; replay clears exhausted later boundaries | PAGE.07, PAGE.09 |
+| TLV5-UX.05-WEB-SETTLEMENT-01 | `web/src/lib/chat/transcript/__tests__/transcript-settlement.test.ts`: snapshot-only and buffered echoes preserve one presentation key across cold-panel publication | UX.05, design 3.1 and 4.4 |
+| TLV5-UX.05-WEB-COMPONENT-01 | `web/src/lib/components/chat/transcript/__tests__/ConversationFeed.test.ts`: disclosure survives delivery, echo, and live append while DOM addresses remain canonical | UX.05, design 3.1 |
+| TLV5-UX.05-CHROMIUM-SETTLEMENT-01 | `integration-tests/tests/chromium/transcript-optimistic-window.test.ts`: desktop/mobile frame sampling preserves context and one mounted input through acknowledgement and echo | UX.05, design 3.1 |
+| TLV5-UX.05-CHROMIUM-SNAPSHOT-01 | `integration-tests/tests/chromium/transcript-optimistic-window.test.ts`: a held recovery snapshot retains delivery, disclosure, focus, and the mounted row before HTTP acknowledgement | UX.05, UX.11, design 4.4 |
+| TLV5-L04.07-PRESENTATION-UNIT-01 | `server/controller/ledger/__tests__/presentation-identity.test.ts`: imported/provider metadata cannot create submission-key aliases; canonical payloads remain unchanged | L04.07, design 3.1 |
+| TLV5-L04.07-SERVER-01 | `integration-tests/tests/server/reconnect-transcript.test.ts`: indexed identity survives live, HTTP, and replay projections while unindexed metadata is stripped | L04.07 |
+| TLV5-L04.07-WEB-STORAGE-01 | `web/src/lib/chat/transcript/__tests__/chat-transcript-storage.test.ts`: version-six snapshots with duplicate provider identities are rejected before hydration or merge | L04.07 |
 
 ## Cataloged Follow-up and Release Procedures
 
