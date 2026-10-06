@@ -19,6 +19,7 @@ import { ConversationNativeScrollSettlement } from '$lib/chat/transcript/convers
 import { ConversationCompressedAutoFillBudget } from './conversation-compressed-autofill-budget.js';
 import { fillConversationViewport } from './conversation-viewport-auto-fill.js';
 import { observeConversationQueueResize } from './conversation-queue-resize.js';
+import { observeConversationViewportResize } from './conversation-viewport-resize.js';
 import type { ConversationNativeTouchPhase } from '$lib/chat/transcript/conversation-scroll-gesture.js';
 import type {
 	ConversationViewportIntentCancellationResult,
@@ -645,19 +646,11 @@ export class ConversationScrollController {
 	}
 
 	observeScrollContainerResize(): (() => void) | undefined {
-		const scroller = this.deps.getScrollContainer();
-		if (!scroller || typeof ResizeObserver === 'undefined') return undefined;
-		let previousHeight = scroller.clientHeight;
-		const observer = new ResizeObserver((entries) => {
-			const nextHeight = entries[0]?.contentRect.height ?? scroller.clientHeight;
-			if (nextHeight <= 0 || nextHeight === previousHeight) return;
-			previousHeight = nextHeight;
-			if (this.#isViewportVisible && this.#activeTargetNavigations === 0 && this.isPinnedToBottom) {
-				this.scrollToBottom();
-			}
-		});
-		observer.observe(scroller);
-		return () => observer.disconnect();
+		return observeConversationViewportResize(
+			this.deps.getScrollContainer(),
+			() => this.#isViewportVisible && this.#activeTargetNavigations === 0 && this.isPinnedToBottom,
+			() => this.scrollToBottom(),
+		);
 	}
 
 	setViewportVisible(isVisible: boolean): void {
