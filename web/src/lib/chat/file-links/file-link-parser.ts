@@ -156,7 +156,7 @@ export function parseFileLink(
 		if (!relative) return { ...ignored(href), blockedReason: 'invalid-path' };
 
 		const normalized = normalizePath(relative);
-		if (!normalized) return ignored(href);
+		if (!normalized) return { ...ignored(href), blockedReason: 'invalid-path' };
 
 		return { kind: 'file', relativePath: normalized, rawHref: href, line, col };
 	}

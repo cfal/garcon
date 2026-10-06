@@ -149,6 +149,12 @@
 			notifications.error(m.file_command_executor_unavailable(), { key: 'file-executor-unavailable' });
 			return true;
 		}
+		if (!projectBasePath) {
+			notifications.error(m.markdown_file_link_root_unavailable({ path: link.rawHref }), {
+				key: 'file-root-unavailable',
+			});
+			return true;
+		}
 		const resolved = resolveFileLinkTarget(link.rawHref, {
 			fileRootPath: projectBasePath,
 			sourceDirectoryPath: chat.projectPath,

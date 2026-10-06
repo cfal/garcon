@@ -262,6 +262,18 @@ describe('Markdown', () => {
 	});
 
 	describe('file link interception', () => {
+		it.each(['/workspace/.', '/workspace/./', '/workspace/./?view=1'])(
+			'blocks absolute paths that normalize to the root: %s', async (href) => {
+				render(Markdown, { source: `Open [directory](${href})`, fileLinkBasePath: '/workspace' });
+				const link = screen.getByRole('link', { name: 'directory' });
+				const event = new MouseEvent('click', { bubbles: true, cancelable: true });
+				link.dispatchEvent(event);
+				await tick();
+				expect(event.defaultPrevented).toBe(true);
+				expect(link.getAttribute('target')).toBeNull();
+				expect(screen.getByRole('alert').textContent).toContain('valid file path');
+			},
+		);
 		it.each(['/tmp/synthetic-report/REPORT.md', '%2Ftmp%2Fsynthetic-report%2FREPORT.md'])(
 			'explains why an out-of-root report cannot open: %s',
 			async (href) => {
