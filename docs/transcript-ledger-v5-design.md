@@ -760,6 +760,13 @@ and confers no authority. Chat, native-session, journal-operation, and durable
 ownership identities exist elsewhere in the system and are not part of
 transcript addressing.
 
+Browser presentation keys are ephemeral UI identity, not a third durable
+identity. Own user inputs use their `clientMessageId` within the feed's
+chat/view namespace before and after their ledger echo. Mounting,
+measurements, disclosure, announcements, and local navigator selection use
+that key; API calls, DOM addresses, bookmarks, and fork actions retain the
+canonical view-qualified ordinal.
+
 ### 3.2 Batches
 
 The atomic append unit is the batch: exactly one producer event or one
@@ -1159,8 +1166,12 @@ CREATE INDEX transcript_session_rows
 - Live backups use SQLite's backup API or `VACUUM INTO`; copying only
   `ledger.sqlite` while the WAL may contain commits is not a valid
   backup.
-- The durable ledger is paged from disk. The selected chat may hold an
-  expanded active interval without mutation-time trimming. With combined tool
+- The durable ledger is paged from disk. Every presentable row in the selected
+  chat's loaded interval enters feed projection; there is no second count-sized
+  presentation window. Optimistic inputs and local notices have independent
+  eligibility and never displace durable rows. Pinning controls scrolling, not
+  transcript membership. The active interval may expand without mutation-time
+  trimming. With combined tool
   use enabled, the browser parks the transcript data and semantic reading
   target for a recently inactive `(surfaceId, chatId)` window, not its panel,
   DOM, or virtual measurements. Up to four parked windows share limits of
@@ -1170,7 +1181,11 @@ CREATE INDEX transcript_session_rows
   view-qualified ordinal address and returns as an individual row on expansion.
   Parked windows receive background commits and ordered reconnect replay.
   Activation validates the chat, view, and cached frontier before restoring
-  the loaded interval. Disabling combination, view replacement, stale
+  the loaded interval. The window's known head may exceed the applied cache
+  frontier; only a cache frontier beyond that head invalidates its continuity.
+  Warm restoration preserves cursor-qualified manual continuations and any
+  later history between its loaded frontier and known head.
+  Disabling combination, view replacement, stale
   continuity, chat deletion, permanent surface removal, and root teardown
   discard parked state.
   A manual transcript Reload has no old parked state to restore. With
@@ -1179,15 +1194,34 @@ CREATE INDEX transcript_session_rows
   That cache persists the raw earlier-page continuation independently of its
   oldest visible ordinal, so an all-hidden page remains resumable. Evicting
   memory never truncates the ledger: older rows remain pageable.
-- An initially underfilled feed with collapsed tool groups starts measured
-  refill after its activation snapshot settles. Each compressed logical page
-  demands at most 200 presented messages, with at most ten automatic demands
-  per panel controller and chat/view; a logical demand may require multiple
-  bounded raw HTTP reads.
-  Cached-row reveals do not consume that allowance. The loop stops when
+- An initially underfilled feed starts measured refill after its activation
+  snapshot settles. Each logical demand admits at most ten HTTP requests and
+  2,000 raw rows, including failed or cancelled requests. Automatic refill
+  shares that raw-work allowance across at most ten logical demands per
+  panel controller and chat/view. Combined-tool demands target at most 200
+  presented messages; ordinary demands retain their existing page size.
+  Loaded rows are already presented. The loop stops when
   measured content fills the viewport, history ends, ownership changes, or the
-  allowance is exhausted. Manual paging remains available. Non-combined
-  initial restoration and its page size are unchanged.
+  allowance is exhausted. Budget exhaustion publishes accepted rows and raw
+  cursor progress, exposes an explicit resumable boundary, and never claims
+  history exhaustion. Manual paging starts a fresh allowance. Superseded
+  history and window requests abort their HTTP transport.
+- Shared optimistic settlement follows each panel's commit admission. A
+  panel awaiting a snapshot retains a local handoff for each visible echoed
+  input until its canonical row is published or the window/view intentionally
+  excludes it. Snapshot failure and cancellation drain accepted buffered
+  commits without withdrawing the only visible representation. Snapshot and
+  reconnect buffers admit at most 1,000 raw rows and 8 MiB estimated payload;
+  overflow requires ledger recovery rather than advancing past unaccepted
+  rows. A snapshot covering the overflow watermark can recover directly.
+  Echoes confirm delivery even while their rows await publication. The shared
+  overlay retains only view-qualified echo addresses for unresolved inputs
+  across replay aborts; a successful same-view snapshot covering those
+  addresses settles them even if its bounded tail omits their bodies.
+  Snapshot settlement uses accepted snapshot evidence, not a detached
+  panel's retained historical interval. A successful disjoint publication
+  releases handoffs outside that interval; a failed or cancelled publication
+  keeps the only visible representation until recovery.
 
 ## 5. Producer Boundary
 
