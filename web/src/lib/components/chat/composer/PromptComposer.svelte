@@ -92,7 +92,7 @@
 	import { PromptComposerFocusDelivery } from './prompt-composer-focus-delivery.svelte.js';
 	import { PromptComposerProjectState } from './prompt-composer-project-state.svelte.js';
 	import type { PromptComposerProps } from './prompt-composer-props.js';
-	import { PromptRecallController } from '$lib/chat/composer/prompt-recall';
+	import { PromptComposerRecallController } from './prompt-composer-recall-controller';
 
 	let {
 		onsubmit,
@@ -140,7 +140,15 @@
 	const workspaceShortcuts = getWorkspaceShortcuts();
 	const projectResolution = getProjectResolution();
 	const ui = new PromptComposerUiState();
-	const promptRecall = new PromptRecallController();
+	const promptRecall = new PromptComposerRecallController({
+		getIdentity: () => recallIdentity,
+		getPrompts: () => recallPrompts,
+		getText: () => composerState.inputText,
+		getTextarea: () => textarea,
+		canRecall: () => !isDisabled && isVisible,
+		setText: (text) => { composerState.inputText = text; queueCurrentDraft(text); },
+		resize: autoResize,
+	});
 	$effect(() => {
 		void recallIdentity;
 		promptRecall.reset();
@@ -614,7 +622,7 @@
 			return;
 		}
 		if (handleCompletionKeyDown(event)) return;
-		if (handlePromptRecall(event)) return;
+		if (promptRecall.handleKeyDown(event)) return;
 		if (event.key !== 'Enter') return;
 		const action = resolveKeydownAction(event);
 		if (action === 'newline') return;
@@ -661,42 +669,6 @@
 			(event as InputEvent).isComposing,
 		);
 		queueCurrentDraft(value);
-	}
-
-	function handlePromptRecall(event: KeyboardEvent): boolean {
-		if (
-			isDisabled ||
-			!isVisible ||
-			event.isComposing ||
-			event.keyCode === 229 ||
-			event.altKey ||
-			event.ctrlKey ||
-			event.metaKey ||
-			event.shiftKey ||
-			(event.key !== 'ArrowUp' && event.key !== 'ArrowDown')
-		) {
-			promptRecall.reset();
-			return false;
-		}
-		const text = promptRecall.navigate(
-			event.key,
-			recallIdentity,
-			composerState.inputText,
-			recallPrompts,
-		);
-		if (text === null) return false;
-		event.preventDefault();
-		composerState.inputText = text;
-		queueCurrentDraft(text);
-		const target = textarea;
-		const identity = recallIdentity;
-		void tick().then(() => {
-			if (target !== textarea || identity !== recallIdentity || composerState.inputText !== text)
-				return;
-			autoResize();
-			target?.setSelectionRange(text.length, text.length);
-		});
-		return true;
 	}
 
 	const selectedIsProcessing = $derived(isChatProcessing(sessions.selectedChat));
