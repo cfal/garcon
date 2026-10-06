@@ -5,6 +5,7 @@ import {
 	isInterAgentMessageReceivedNoticeDetail,
 } from '$shared/transcript-notice-details';
 import type { PendingPermissionRequest } from '$lib/types/chat';
+import { transcriptPresentationKey } from '$lib/chat/transcript/transcript-presentation-key.js';
 import {
 	conversationFeedItemLayout,
 	type ConversationFeedRenderItem,
@@ -198,7 +199,7 @@ export function buildConversationVirtualFeedModel(
 		const isLastItem = transcriptIndex === input.transcriptItems.length - 1;
 		body.push({
 			kind: 'transcript',
-			key: key(`transcript:${item.id}`),
+			key: key(`transcript:${transcriptPresentationKey(item)}`),
 			item,
 			spacingAfter: anchored.length > 0 ? 'none' : transcriptSpacing(item),
 		});
@@ -329,7 +330,7 @@ export function appendConversationVirtualTranscriptTail(
 	const insertIndex = model.transcriptEndIndex;
 	const appendedVirtualItems = appendedItems.map((item): ConversationVirtualFeedItem => ({
 		kind: 'transcript',
-		key: namespacedKey(surfaceIdentity, `transcript:${item.id}`),
+		key: namespacedKey(surfaceIdentity, `transcript:${transcriptPresentationKey(item)}`),
 		item,
 		spacingAfter: transcriptSpacing(item),
 	}));

@@ -6,9 +6,10 @@ import type { ChatTranscriptSnapshot } from './chat-transcript-cache.svelte.js';
 import {
 	collapseBackwardTranscriptDemand,
 	loadTranscriptPageDemand,
+	type CompleteTranscriptPageDemand,
 	type TranscriptPageDemandResult,
 } from './transcript-page-demand.js';
-import type { TranscriptWindowTarget } from './transcript-page-progress.js';
+import { mergeTranscriptEntriesByOrdinal, type TranscriptWindowTarget } from './transcript-page-progress.js';
 
 export type TranscriptWindowPage = TranscriptPage & {
 	resendCandidates?: ResendCandidate[];
@@ -17,7 +18,7 @@ export type TranscriptWindowPage = TranscriptPage & {
 export type TranscriptSnapshotInstallMode = 'merge' | 'preserve-window' | 'replace';
 
 export type TranscriptWindowPageResult =
-	| { kind: 'complete'; page: TranscriptWindowPage }
+	| { kind: 'complete'; page: TranscriptWindowPage; stop: CompleteTranscriptPageDemand['stop'] }
 	| Exclude<TranscriptPageDemandResult, { kind: 'complete' }>;
 
 export async function loadTranscriptWindowPage(options: {
@@ -27,6 +28,7 @@ export async function loadTranscriptWindowPage(options: {
 	lastOrdinal: number;
 	visibleLimit: number;
 	isCurrent: () => boolean;
+	signal?: AbortSignal;
 }): Promise<TranscriptWindowPageResult> {
 	const demand = await loadTranscriptPageDemand(
 		options.target === 'initial'
@@ -38,6 +40,7 @@ export async function loadTranscriptWindowPage(options: {
 					throughOrdinal: options.lastOrdinal,
 					visibleLimit: options.visibleLimit,
 					isCurrent: options.isCurrent,
+					signal: options.signal,
 				}
 			: {
 					direction: 'backward',
@@ -45,11 +48,12 @@ export async function loadTranscriptWindowPage(options: {
 					transcriptViewId: options.transcriptViewId,
 					visibleLimit: options.visibleLimit,
 					isCurrent: options.isCurrent,
+					signal: options.signal,
 				},
 	);
 	if (demand.kind !== 'complete') return demand;
 	if (options.target === 'latest') {
-		return { kind: 'complete', page: collapseBackwardTranscriptDemand(demand) };
+		return { kind: 'complete', page: collapseBackwardTranscriptDemand(demand), stop: demand.stop };
 	}
 
 	const firstPage = demand.pages[0];
@@ -59,6 +63,7 @@ export async function loadTranscriptWindowPage(options: {
 	}
 	return {
 		kind: 'complete',
+		stop: demand.stop,
 		page: {
 			transcriptViewId: options.transcriptViewId,
 			messages: demand.messages,
@@ -81,18 +86,22 @@ export function preferCachedLatestTranscriptPage(
 		!cached
 		|| cached.stale
 		|| cached.transcriptViewId !== page.transcriptViewId
-		|| cached.lastOrdinal <= page.lastOrdinal
+		|| cached.lastOrdinal < page.pageNewestOrdinal
+		|| (cached.lastOrdinal === page.pageNewestOrdinal &&
+			(cached.nextBeforeOrdinal ?? 1) >= (page.nextBeforeOrdinal ?? 1))
 	) return page;
 
+	const sameHead = cached.lastOrdinal === page.pageNewestOrdinal;
+	const messages = sameHead ? mergeTranscriptEntriesByOrdinal(page.messages, cached.messages) : cached.messages;
 	return {
 		...page,
-		messages: cached.messages,
-		lastOrdinal: cached.lastOrdinal,
-		pageOldestOrdinal: cached.oldestOrdinal,
+		messages,
+		lastOrdinal: Math.max(cached.lastOrdinal, page.lastOrdinal),
+		pageOldestOrdinal: messages[0]?.ordinal ?? 0,
 		pageNewestOrdinal: cached.lastOrdinal,
 		nextBeforeOrdinal: cached.nextBeforeOrdinal,
 		hasMore: cached.nextBeforeOrdinal !== null,
-		resendCandidates: [...resendCandidates],
+		resendCandidates: sameHead ? page.resendCandidates : [...resendCandidates],
 	};
 }
 
@@ -100,7 +109,6 @@ export function transcriptSnapshotInstallMode(options: {
 	activeChatId: string | null;
 	chatId: string;
 	transcriptViewId: string;
-	entryCount: number;
 	loadedThroughOrdinal: number;
 	nextBeforeOrdinal: number | null;
 	page: TranscriptPage;
@@ -109,7 +117,7 @@ export function transcriptSnapshotInstallMode(options: {
 		options.activeChatId !== options.chatId
 		|| options.transcriptViewId === ''
 		|| options.transcriptViewId !== options.page.transcriptViewId
-		|| options.entryCount === 0
+		|| options.loadedThroughOrdinal === 0
 	) {
 		return 'replace';
 	}

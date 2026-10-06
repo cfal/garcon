@@ -3,10 +3,8 @@
 import { getChatSnapshot, handoffChat, interruptAndSendChat, stopChat } from '$lib/api/chats.js';
 import { isStopSatisfied, type ChatImage, type ChatStopOutcome } from '$shared/chat-types';
 import { createClientCommandId } from '$lib/chat/conversation/client-command-id.js';
-import {
-	INITIAL_VISIBLE_MESSAGES,
-	type ChatLoadMessagesOptions,
-} from '$lib/chat/transcript/active-transcript-state.svelte.js';
+import type { ChatLoadMessagesOptions } from '$lib/chat/transcript/active-transcript-state.svelte.js';
+import { CHAT_TRANSCRIPT_CACHE_MESSAGE_LIMIT } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 import type { PermissionMode, ThinkingMode } from '$lib/types/chat';
 import type { AgentSettingDescriptor } from '$shared/agent-integration';
 import type { JsonValue } from '$shared/json';
@@ -385,7 +383,7 @@ export class ConversationSessionController {
 		const { deps } = this;
 		let minimumMessageLimit =
 			options.minimumMessageLimit ??
-			Math.min(transcript.chatMessages.length, INITIAL_VISIBLE_MESSAGES);
+			Math.min(transcript.chatMessages.length, CHAT_TRANSCRIPT_CACHE_MESSAGE_LIMIT);
 
 		// Restore from cache if no messages are loaded yet (e.g., WS reconnect path).
 		// The primary restore happens earlier in handleChatSwitch.

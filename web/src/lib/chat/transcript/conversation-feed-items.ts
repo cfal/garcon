@@ -122,7 +122,7 @@ interface ConversationToolPairs {
 	permissionWrapperRowIdByResultRowId: Map<string, string>;
 }
 
-function pairToolResults(rows: ChatDisplayRow[]): ConversationToolPairs {
+function pairToolResults(rows: readonly ChatDisplayRow[]): ConversationToolPairs {
 	const pendingByToolId = new Map<string, PendingToolUse[]>();
 	const pendingPermissionWrappersByToolId = new Map<string, string[]>();
 	const toolResultByUseRowId = new Map<string, ToolResultMessage>();
@@ -188,7 +188,7 @@ function pairToolResults(rows: ChatDisplayRow[]): ConversationToolPairs {
 }
 
 export function buildConversationFeedRenderModel(
-	rows: ChatDisplayRow[],
+	rows: readonly ChatDisplayRow[],
 ): ConversationFeedRenderModel {
 	const items: ConversationFeedRenderItem[] = [];
 	const toolPairs = pairToolResults(rows);
@@ -252,13 +252,13 @@ export function buildConversationFeedRenderModel(
 }
 
 export function buildConversationFeedRenderItems(
-	rows: ChatDisplayRow[],
+	rows: readonly ChatDisplayRow[],
 ): ConversationFeedRenderItem[] {
 	return buildConversationFeedRenderModel(rows).items;
 }
 
 export function visiblePendingPermissionRequests(
-	rows: ChatDisplayRow[],
+	rows: readonly ChatDisplayRow[],
 	pendingPermissionRequests: readonly PendingPermissionRequest[],
 ): PendingPermissionRequest[] {
 	const renderedPermissionOccurrences = new Set<string>();

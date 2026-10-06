@@ -124,7 +124,7 @@
 				</div>
 			{:else}
 				<div class="divide-y divide-border">
-					{#each controller.items as item (item.id)}
+					{#each controller.items as item (item.uiKey)}
 						{@const customStyle = item.presentation?.style === 'custom' ? item.presentation.customStyle : null}
 						<svelte:boundary {failed}>
 							<button

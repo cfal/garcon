@@ -5,6 +5,7 @@ import {
 	type TranscriptBufferedBatch,
 	type TranscriptReplayApplyResult,
 } from '../transcript-reconnect-replay.js';
+import { TRANSCRIPT_BUFFER_BYTE_LIMIT, TRANSCRIPT_BUFFER_ROW_LIMIT } from '../transcript-batch-buffer.js';
 
 const TIMESTAMP = '2026-08-15T00:00:00.000Z';
 
@@ -25,6 +26,32 @@ function batch(
 }
 
 describe('transcript reconnect replay state', () => {
+	it('treats an unserializable buffered payload as recoverable overflow', () => {
+		const replay = new TranscriptReconnectReplayState(() => 'applied');
+		const token = replay.begin('chat-1', 'view-1');
+		const incoming = batch(1, 'Synthetic input');
+		Object.defineProperty(incoming, 'toJSON', { value: () => { throw new Error('Synthetic serialization failure'); } });
+		expect(replay.buffer('chat-1', incoming)).toBe('overflow');
+		expect(replay.applyPage(token, 'chat-1', batch(1, 'retry'))).toBe('gap-detected');
+	});
+	it.each(['rows', 'bytes'] as const)('keeps its accepted prefix and requests recovery after %s overflow', (limit) => {
+		const applied: TranscriptBufferedBatch[] = [];
+		const replay = new TranscriptReconnectReplayState((_chatId, incoming) => { applied.push(incoming); return 'applied'; });
+		const token = replay.begin('chat-1', 'view-1');
+		const first = batch(1, 'accepted');
+		expect(replay.buffer('chat-1', first)).toBe(true);
+		const oversized = limit === 'rows'
+			? batch(2, 'too many raw rows', { messages: [], lastOrdinal: TRANSCRIPT_BUFFER_ROW_LIMIT + 2 })
+			: batch(2, 'x'.repeat(TRANSCRIPT_BUFFER_BYTE_LIMIT));
+		expect(replay.buffer('chat-1', oversized)).toBe('overflow');
+		expect(replay.buffer('chat-1', batch(3, 'after overflow'))).toBe('overflow');
+		expect(replay.applyPage(token, 'chat-1', batch(1, 'stale page'))).toBe('gap-detected');
+		expect(replay.finish(token, 'chat-1')).toBe('gap-detected');
+		expect(applied).toEqual([first]);
+		const recovered = replay.begin('chat-1', 'view-1');
+		expect(replay.applyPage(recovered, 'chat-1', batch(2, 'recovered'))).toBe('applied');
+		expect(replay.finish(recovered, 'chat-1')).toBe('applied');
+	});
 	it('applies replay pages immediately and drains live batches in observed order', () => {
 		const applied: Array<{ chatId: string; batch: TranscriptBufferedBatch }> = [];
 		const replay = new TranscriptReconnectReplayState((chatId, appliedBatch) => {

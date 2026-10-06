@@ -26,6 +26,7 @@
 		canUseForkAtMessageAction,
 	} from '$lib/chat/actions/fork-at-message-action.js';
 	import { visiblePendingPermissionRequests } from '$lib/chat/transcript/conversation-feed-items.js';
+	import { transcriptPresentationKey } from '$lib/chat/transcript/transcript-presentation-key.js';
 	import { createHiddenBashCommandMatcherCache } from '$lib/chat/transcript/hidden-bash-commands.js';
 	import {
 		conversationScrollbarScrollDirection,
@@ -199,7 +200,7 @@
 		),
 	);
 	const projectedPendingPermissionRequests = $derived(
-		visiblePendingPermissionRequests(chatState.visibleRows, activePendingPermissionRequests),
+		visiblePendingPermissionRequests(chatState.displayRows, activePendingPermissionRequests),
 	);
 	const projectionState = new ConversationFeedProjectionState();
 	const retention = new ConversationFeedRetentionState();
@@ -250,9 +251,11 @@
 	);
 	function earlierBoundaryMode(): ConversationFeedProjectionInput['earlierBoundary'] {
 		if (
+			(chatState.canLoadEarlier && (chatState.displayMessageCount === 0 ||
+				chatState.pageStates.earlier.status === 'bounded')) ||
 			chatState.pageStates.earlier.status === 'error' ||
 			(chatState.pageStates.earlier.status === 'loading' &&
-				chatState.pageStates.earlier.error !== null)
+				(chatState.pageStates.earlier.error !== null || chatState.pageStates.earlier.continuation === 'manual'))
 		) {
 			return 'visible';
 		}
@@ -263,7 +266,7 @@
 	}
 	const projectionInput: ConversationFeedProjectionInput = $derived({
 		surfaceIdentity,
-		rows: chatState.visibleRows,
+		rows: chatState.displayRows,
 		mutationClock: chatState.feedMutationClock,
 		hiddenToolTypes: localSettings.hiddenToolTypes,
 		hiddenBashCommands,
@@ -292,7 +295,7 @@
 	$effect.pre(() => {
 		const input = {
 			surfaceIdentity,
-			rows: chatState.visibleRows,
+			rows: chatState.displayRows,
 			mutationClock: chatState.feedMutationClock,
 			visible: isVisible && announcementsEnabled,
 			pinnedToBottom,
@@ -345,7 +348,7 @@
 	$effect.pre(() => {
 		toolGroups.reconcile(
 			surfaceIdentity,
-			new Set(chatState.visibleRows.map((row) => row.id)),
+			new Set(chatState.displayRows.map(transcriptPresentationKey)),
 		);
 		const input = projectionInput;
 		const pendingPermissionOccurrences = new Set(
@@ -366,7 +369,7 @@
 			settleRevealWaiters(true);
 			itemState.reconcile(
 				input.surfaceIdentity,
-				new Set(input.rows.map((row) => row.id)),
+				new Set(input.rows.map(transcriptPresentationKey)),
 				pendingPermissionOccurrences,
 			);
 		});
@@ -452,7 +455,7 @@
 				</Button>
 			{/if}
 		</div>
-	{:else if chatState.displayMessageCount === 0}
+	{:else if chatState.displayMessageCount === 0 && !chatState.canLoadEarlier && !chatState.hasLaterMessages}
 		<div class="text-center text-muted-foreground mt-8">
 			<p class="text-sm">{m.chat_messages_no_messages()}</p>
 			<p class="text-xs mt-1">{m.chat_messages_send_first_message()}</p>
@@ -540,6 +543,8 @@
 		data-chat-scroll-viewport
 		data-chat-pinned-to-bottom={pinnedToBottom}
 		data-chat-user-scrolled-up={chatState.isUserScrolledUp}
+		data-chat-earlier-page-status={chatState.pageStates.earlier.status}
+		data-chat-next-before-ordinal={chatState.nextBeforeOrdinal}
 		class={feedViewportClass}
 		{@attach virtualController.viewport}
 	>

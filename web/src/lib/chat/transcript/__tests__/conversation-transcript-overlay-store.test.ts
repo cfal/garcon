@@ -27,6 +27,41 @@ function echoed(clientMessageId: string, ordinal: number): TranscriptMessage {
 }
 
 describe('ConversationTranscriptOverlayStore', () => {
+	it('confirms delivery on observed echoes without settling their buffered rows', () => {
+		const overlays = new ConversationTranscriptOverlayStore();
+		overlays.upsertOptimisticInput('chat-1', optimistic('input-1'), 1);
+		overlays.upsertOptimisticInput('chat-1', optimistic('input-2'), 1);
+		expect(overlays.observeEchoes('chat-1', 'view-1', [echoed('input-1', 101)]).feedStructureChanged).toBe(true);
+		expect(overlays.forChat('chat-1').optimisticInputs.map((input) => input.delivery)).toEqual(['delivered', 'pending']);
+		expect(overlays.forChat('chat-1').optimisticAfterOrdinals.get('input-1')).toBe(1);
+		expect(overlays.observeEchoes('chat-1', 'view-1', [echoed('input-1', 101)]).feedStructureChanged).toBe(false);
+	});
+
+	it('settles retained echo addresses only after a same-view snapshot covers them', () => {
+		const overlays = new ConversationTranscriptOverlayStore();
+		overlays.upsertOptimisticInput('chat-1', optimistic('input-1'), null);
+		overlays.observeEchoes('chat-1', 'view-1', [echoed('input-1', 101)]);
+		overlays.settleSnapshot('chat-1', 'view-2', [], 200);
+		expect(overlays.forChat('chat-1').optimisticInputs).toHaveLength(1);
+		overlays.settleSnapshot('chat-1', 'view-1', [], 100);
+		expect(overlays.forChat('chat-1').optimisticInputs).toHaveLength(1);
+		overlays.settleSnapshot('chat-1', 'view-1', [], 200);
+		expect(overlays.forChat('chat-1').optimisticInputs).toHaveLength(0);
+	});
+
+	it.each(['clear', 'replace', 'remove', 'prune'] as const)('discards echo evidence on %s rather than settling a later submission', (operation) => {
+		const overlays = new ConversationTranscriptOverlayStore();
+		overlays.upsertOptimisticInput('chat-1', optimistic('input-1'), null);
+		overlays.observeEchoes('chat-1', 'view-1', [echoed('input-1', 101)]);
+		if (operation === 'clear') overlays.clearOptimisticInput('chat-1', 'input-1');
+		else if (operation === 'replace') overlays.resetForTranscriptReplacement('chat-1');
+		else if (operation === 'remove') overlays.remove('chat-1');
+		else overlays.prune(new Set());
+		overlays.upsertOptimisticInput('chat-1', optimistic('input-1'), null);
+		overlays.settleSnapshot('chat-1', 'view-1', [], 200);
+		expect(overlays.forChat('chat-1').optimisticInputs).toHaveLength(1);
+	});
+
 	it('reads a missing chat without creating reactive state', () => {
 		const overlays = new ConversationTranscriptOverlayStore();
 

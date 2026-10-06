@@ -1,5 +1,6 @@
 import {
 	ActiveTranscriptState,
+	type ActiveTranscriptStateOptions,
 	type ChatLoadMessagesOptions,
 	type SharedTranscriptCommit,
 } from '$lib/chat/transcript/active-transcript-state.svelte.js';
@@ -142,7 +143,7 @@ class PanelRegistration implements ConversationPanelRegistration {
 		cache: ChatTranscriptCache,
 		lifecycle: Pick<ConversationLifecycleRegistry, 'forChat'>,
 		overlays: ConversationTranscriptOverlayStore,
-		onSnapshotResendCandidates: (chatId: string, candidates: readonly ResendCandidate[]) => void,
+		snapshotCallbacks: ActiveTranscriptStateOptions,
 		private readonly snapshots: {
 			load(options: ChatLoadMessagesOptions): Promise<boolean>;
 			wait(signal: AbortSignal): Promise<void>;
@@ -150,9 +151,7 @@ class PanelRegistration implements ConversationPanelRegistration {
 		retainedTranscript?: ActiveTranscriptState,
 	) {
 		this.#snapshotAdmission = snapshotAdmission;
-		this.transcript = retainedTranscript ?? new ActiveTranscriptState(cache, overlays.forChat(chatId), {
-			onSnapshotResendCandidates,
-		});
+		this.transcript = retainedTranscript ?? new ActiveTranscriptState(cache, overlays.forChat(chatId), snapshotCallbacks);
 		if (!retainedTranscript) this.transcript.activateChat(chatId);
 		this.lifecycle = lifecycle.forChat(chatId);
 		this.scroll = new ConversationScrollController({
@@ -550,7 +549,12 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 				this.options.cache,
 				this.options.lifecycle,
 				this.options.overlays,
-				this.#onSnapshotResendCandidates,
+				{
+					onSnapshotResendCandidates: this.#onSnapshotResendCandidates,
+					onSnapshotAccepted: (chatId, page) => this.#applyOverlayMutation(chatId,
+						this.options.overlays.observeEchoes(chatId, page.transcriptViewId, page.messages)),
+					onLatestSnapshotPublished: (chatId, transcript) => this.#publishChatSnapshot(chatId, transcript),
+				},
 				{
 					load: (options) => this.loadChatSnapshot(item.chatId, options),
 					wait: (signal) => this.#waitForChatSnapshot(item.chatId, signal),
@@ -666,6 +670,10 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 				? this.#performChatSnapshotLoad(chatId, options, false)
 				: false;
 		}
+		return this.#publishChatSnapshot(chatId, loader.transcript);
+	}
+
+	#publishChatSnapshot(chatId: string, source: ActiveTranscriptState): boolean {
 		const cursor = this.options.cache.readAppliedCursor(chatId);
 		if (!cursor || cursor.stale) {
 			return false;
@@ -673,8 +681,19 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		const currentPanels = this.panelsForChat(chatId);
 		if (currentPanels.length === 0) return false;
 		for (const panel of currentPanels) {
-			if (panel !== loader) panel.transcript.installCachedSnapshot(chatId);
+			if (panel.transcript === source) continue;
+			let result = panel.transcript.installCachedSnapshot(chatId, source);
+			// Rejected installations release their snapshot buffer before the retry.
+			if (result !== 'applied') result = panel.transcript.installCachedSnapshot(chatId, source);
+			if (result !== 'applied') {
+				this.markChatStale(chatId);
+				throw new Error('Transcript snapshot could not be published to every active panel');
+			}
 		}
+		this.#inactiveWindows.installCachedSnapshot(chatId, source);
+		this.#applyOverlayMutation(chatId, this.options.overlays.settleSnapshot(
+			chatId, cursor.transcriptViewId, this.options.cache.get(chatId)?.messages ?? [], cursor.lastOrdinal,
+		));
 		return true;
 	}
 
@@ -736,8 +755,16 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 	}
 
 	applyCommittedBatch(batch: CommittedTranscriptBatch): ConversationPanelBatchApplyResult {
+		this.#applyOverlayMutation(batch.chatId, this.options.overlays.observeEchoes(batch.chatId, batch.transcriptViewId, batch.messages));
 		const replay = this.#reconnectReplays.get(batch.chatId);
-		if (replay?.replay.buffer(batch.chatId, batch)) {
+		const buffered = replay?.replay.buffer(batch.chatId, batch);
+		if (buffered === 'overflow') {
+			return {
+				kind: 'chat-recovery-required',
+				outcome: { status: 'gap-detected', expectedOrdinal: (this.options.cache.readAppliedCursor(batch.chatId)?.lastOrdinal ?? 0) + 1, receivedOrdinal: batch.firstOrdinal },
+			};
+		}
+		if (buffered) {
 			return { kind: 'applied', localRecoverySurfaceIds: [] };
 		}
 		const outcome = this.options.cache.applyMessages(batch.chatId, batch.transcriptViewId, {
@@ -749,18 +776,15 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 			this.#inactiveWindows.removeChat(batch.chatId);
 			return { kind: 'chat-recovery-required', outcome };
 		}
-		const overlayMutation = this.options.overlays.applyCommittedBatch(batch);
-		const commit: SharedTranscriptCommit = { ...batch, outcome, overlayMutation };
+		const commit: SharedTranscriptCommit = { ...batch, outcome };
 		const localRecoverySurfaceIds: ChatViewSurfaceId[] = [];
 		for (const panel of this.#panels.values()) {
 			if (panel.chatId !== batch.chatId) continue;
 			const result = panel.transcript.applySharedCommit(commit);
-			if (overlayMutation.feedStructureChanged) {
-				panel.transcript.applySharedOverlayMutation(overlayMutation);
-			}
 			if (result !== 'applied') localRecoverySurfaceIds.push(panel.surfaceId);
 		}
-		this.#inactiveWindows.applySharedCommit(commit, overlayMutation);
+		this.#inactiveWindows.applySharedCommit(commit);
+		this.#applyOverlayMutation(batch.chatId, this.options.overlays.applyCommittedBatch(batch));
 		return { kind: 'applied', localRecoverySurfaceIds };
 	}
 
@@ -786,7 +810,7 @@ export class ConversationPanelRegistry implements ChatSurfaceTransferPort {
 		const cursor = this.options.cache.readAppliedCursor(chatId);
 		this.#applyOverlayMutation(
 			chatId,
-			this.options.overlays.upsertOptimisticInput(chatId, input, cursor?.lastOrdinal ?? 0),
+			this.options.overlays.upsertOptimisticInput(chatId, input, cursor && !cursor.stale ? cursor.lastOrdinal : null),
 		);
 	}
 

@@ -29,7 +29,7 @@ import {
 
 export interface ConversationFeedProjectionInput {
 	surfaceIdentity: string;
-	rows: ChatDisplayRow[];
+	rows: readonly ChatDisplayRow[];
 	mutationClock: ConversationFeedMutationClock;
 	hiddenToolTypes: readonly string[];
 	hiddenBashCommands: BashCommandMatcher | null;

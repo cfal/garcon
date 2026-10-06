@@ -136,6 +136,7 @@ describe('UserMessageNavigatorController', () => {
 
 		expect(controller.items[0]).toMatchObject({
 			id: 'optimistic:message-1',
+			uiKey: JSON.stringify(['user-input', 'message-1']),
 			content: '',
 			attachmentCount: 1,
 		});
@@ -319,11 +320,26 @@ describe('UserMessageNavigatorController', () => {
 		expect(controller.items).toHaveLength(1);
 	});
 
-	it('reveals loaded rows before jumping and clears identity after success', async () => {
+	it('resolves a selection captured before echo to its current durable address', async () => {
 		const { controller, transcript, jumpToRow } = setup();
-		const reveal = vi.spyOn(transcript, 'revealAllLoadedMessages');
+		transcript.upsertOptimisticUserInput({
+			chatId: 'chat-1', clientMessageId: 'settling-input', content: 'Synthetic input',
+			createdAt: '2026-01-01T00:00:00.000Z', delivery: 'pending',
+		});
+		await controller.openForActiveChat();
+		const item = controller.items[0];
+		transcript.applyMessages('chat-1', 'generation-1', [{
+			ordinal: 2, message: new UserMessage('2026-01-01T00:00:00.000Z', 'Synthetic input', undefined, { clientMessageId: 'settling-input' }),
+		}], 2, 2);
+		expect(controller.items[0]).toMatchObject({ id: 'generation-1:2', uiKey: item.uiKey });
+		await controller.select(item);
+		expect(jumpToRow).toHaveBeenCalledWith({ chatId: 'chat-1', transcriptViewId: 'generation-1', rowId: 'generation-1:2' });
+	});
+
+	it('jumps to an already presented row and clears identity after success', async () => {
+		const { controller, transcript, jumpToRow } = setup();
 		jumpToRow.mockImplementationOnce(async () => {
-			expect(reveal).toHaveBeenCalledOnce();
+			expect(transcript.displayRows[0]?.id).toBe('generation-1:1');
 			return 'completed' as const;
 		});
 		controller.openForActiveChat();

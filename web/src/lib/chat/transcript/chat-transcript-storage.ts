@@ -1,16 +1,16 @@
-import { parseTranscriptMessages, type TranscriptMessage } from '$shared/chat-view';
+import { isRelationallyValidTranscriptPage, parseTranscriptMessages, type TranscriptMessage } from '$shared/chat-view';
 import {
 	CHAT_TRANSCRIPT_INDEX_KEY as INDEX_KEY,
 	CHAT_TRANSCRIPT_SNAPSHOT_PREFIX as SNAPSHOT_PREFIX,
 	setLocalStorageWithCacheRecovery,
 } from '$lib/utils/local-storage-cache-recovery';
 
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 const MAX_ENTRIES = 25;
 const MAX_SNAPSHOT_CHARACTERS = 1_500_000;
 
 interface ChatSnapshotEnvelope {
-	version: 6;
+	version: typeof SCHEMA_VERSION;
 	chatId: string;
 	savedAt: string;
 	transcriptViewId: string;
@@ -23,12 +23,12 @@ interface ChatSnapshotIndexEntry {
 	chatId: string;
 	lastAccessedAt: string;
 	lastValidatedAt: string | null;
-	schemaVersion: 6;
+	schemaVersion: typeof SCHEMA_VERSION;
 	stale: boolean;
 }
 
 interface ChatSnapshotIndex {
-	version: 6;
+	version: typeof SCHEMA_VERSION;
 	entries: ChatSnapshotIndexEntry[];
 }
 
@@ -149,6 +149,18 @@ function hasSnapshot(chatId: string): boolean {
 	return Boolean(localStorage.getItem(snapshotKey(chatId)));
 }
 
+function validSnapshotCursor(
+	entries: TranscriptMessage[],
+	cursor: Pick<ChatSnapshotEnvelope, 'transcriptViewId' | 'lastOrdinal' | 'nextBeforeOrdinal'>,
+): boolean {
+	return typeof cursor.transcriptViewId === 'string' && cursor.transcriptViewId !== '' &&
+		cursor.lastOrdinal > 0 && isRelationallyValidTranscriptPage({
+			messages: entries, lastOrdinal: cursor.lastOrdinal,
+			pageOldestOrdinal: entries[0]?.ordinal ?? 0, pageNewestOrdinal: cursor.lastOrdinal,
+			nextBeforeOrdinal: cursor.nextBeforeOrdinal, hasMore: cursor.nextBeforeOrdinal !== null,
+		});
+}
+
 export class LocalChatTranscriptStorage {
 	restore(
 		chatId: string,
@@ -167,19 +179,7 @@ export class LocalChatTranscriptStorage {
 				return null;
 			}
 			const entries = parseTranscriptMessages(parsed.entries);
-			if (
-				entries === null
-				|| typeof parsed.transcriptViewId !== 'string'
-				|| !parsed.transcriptViewId
-				|| (
-					parsed.nextBeforeOrdinal !== null
-					&& (
-						typeof parsed.nextBeforeOrdinal !== 'number'
-						|| !Number.isSafeInteger(parsed.nextBeforeOrdinal)
-						|| parsed.nextBeforeOrdinal <= 1
-					)
-				)
-			) {
+			if (entries === null || !validSnapshotCursor(entries, parsed)) {
 				this.remove(chatId);
 				return null;
 			}
@@ -193,7 +193,7 @@ export class LocalChatTranscriptStorage {
 			return {
 				entries: restoredEntries,
 				transcriptViewId: parsed.transcriptViewId,
-				lastOrdinal: Number(parsed.lastOrdinal) || 0,
+				lastOrdinal: parsed.lastOrdinal,
 				nextBeforeOrdinal,
 				stale: entry?.stale ?? false,
 			};
@@ -214,7 +214,7 @@ export class LocalChatTranscriptStorage {
 		options: ChatTranscriptWindowOptions = {},
 	): void {
 		if (!chatId) return;
-		if (entries.length === 0 || !cursor.transcriptViewId) {
+		if (!validSnapshotCursor(entries, cursor)) {
 			this.remove(chatId);
 			return;
 		}

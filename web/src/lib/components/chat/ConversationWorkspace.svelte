@@ -14,10 +14,9 @@
 		StaleConversationSurfaceError,
 		type ConversationPanelActions,
 	} from './conversation-panel-actions.js';
-	import { INITIAL_VISIBLE_MESSAGES } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 	import { sameGitProject } from '$lib/git/targets/git-target.js';
 	import type { ProjectTarget } from '$shared/project-resolution';
-	import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
+	import { ChatTranscriptCache, CHAT_TRANSCRIPT_CACHE_MESSAGE_LIMIT } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 	import { ComposerState } from '$lib/chat/composer/composer.svelte.js';
 	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
 	import type { SubagentToolbarState } from '$lib/chat/transcript/subagent-toolbar-state.svelte.js';
@@ -97,7 +96,7 @@
 		isPresented?: boolean;
 	}
 
-	const fallbackTranscriptCache = new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES });
+	const fallbackTranscriptCache = new ChatTranscriptCache({ limit: CHAT_TRANSCRIPT_CACHE_MESSAGE_LIMIT });
 
 	let {
 		onRegisterSubmit,

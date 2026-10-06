@@ -16,7 +16,7 @@ export type TranscriptRowWindowResult =
 export async function loadTranscriptRowPage(
 	target: TranscriptRowTarget,
 	signal: AbortSignal,
-): Promise<{ kind: 'loaded'; page: TranscriptPage } | { kind: 'view-changed' | 'unavailable' }> {
+): Promise<{ kind: 'loaded'; page: TranscriptPage } | { kind: 'view-changed' | 'unavailable' | 'cancelled' }> {
 	if (
 		!Number.isSafeInteger(target.ordinal) ||
 		target.ordinal < 1 ||
@@ -41,6 +41,7 @@ export async function loadTranscriptRowPage(
 			return { kind: 'unavailable' };
 		return { kind: 'loaded', page };
 	} catch (error) {
+		if (signal.aborted) return { kind: 'cancelled' };
 		if (error instanceof ApiError && error.errorCode === 'STALE_TRANSCRIPT_VIEW')
 			return { kind: 'view-changed' };
 		throw error;

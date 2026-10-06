@@ -5,6 +5,7 @@ import { ConversationScrollController } from '../conversation-scroll-controller.
 import type { ConversationFeedMutationClock } from '../conversation-feed-mutations';
 import type { ConversationViewportPort } from '../conversation-viewport-port';
 import { ActiveTranscriptState } from '../active-transcript-state.svelte.js';
+import { TranscriptReadBudget } from '../transcript-read-budget.js';
 import { NATIVE_SCROLL_SETTLE_DELAY_MS } from '../conversation-native-scroll-settlement.js';
 import { AssistantMessage } from '$shared/chat-types';
 import { CHAT_MESSAGES_MAX_LIMIT, type TranscriptMessage } from '$shared/chat-view';
@@ -43,7 +44,6 @@ function scrollState(
 		feedMutationClock: mutationClock(),
 		transcriptViewId: 'generation-1',
 		hasLaterMessages: false,
-		hasEarlierRowsToReveal: false,
 		isLoadingMessages: false,
 		isUserScrolledUp: false,
 		invalidatePendingHistoryLoad: vi.fn(),
@@ -56,7 +56,6 @@ function scrollState(
 			earlier: { status: 'idle', error: null },
 			later: { status: 'idle', error: null },
 		},
-		revealEarlierLoadedRows: vi.fn(() => false),
 		windowRevision: 0,
 		...overrides,
 	};
@@ -79,7 +78,6 @@ function expandedTranscriptState(): ActiveTranscriptState {
 		hasMore: false,
 	});
 	chat.applyMessages('chat-1', 'generation-1', messages(201, 250), 201, 250);
-	chat.visibleMessageCount = 250;
 	chat.isUserScrolledUp = true;
 	return chat;
 }
@@ -684,30 +682,6 @@ describe('ConversationScrollController', () => {
 		expect(applied).toBe(false);
 	});
 
-	it('defers revealing already loaded rows until native scrolling settles', async () => {
-		vi.useFakeTimers();
-		const revealEarlierLoadedRows = vi.fn(() => true);
-		const fixture = controllerFixture({
-			state: {
-				canLoadEarlier: true,
-				hasEarlierRowsToReveal: true,
-				revealEarlierLoadedRows,
-			},
-		});
-		fixture.controller.noteNativeTouchLifecycle('move');
-		fixture.controller.noteUserScrollIntent('earlier', 'native-touch');
-
-		const request = fixture.controller.requestPage('earlier', 'scroll');
-		expect(revealEarlierLoadedRows).not.toHaveBeenCalled();
-
-		fixture.controller.noteNativeTouchLifecycle('end');
-		await vi.advanceTimersByTimeAsync(NATIVE_SCROLL_SETTLE_DELAY_MS);
-
-		await expect(request).resolves.toBe('loaded');
-		expect(revealEarlierLoadedRows).toHaveBeenCalledOnce();
-		expect(fixture.state.loadEarlierPage).not.toHaveBeenCalled();
-	});
-
 	it('does not carry earlier intent across a paging-context reset', async () => {
 		const loadEarlierPage = vi.fn(async () => 'exhausted' as const);
 		const fixture = controllerFixture({
@@ -1153,19 +1127,19 @@ describe('ConversationScrollController', () => {
 		expect(viewport.scrollToEnd).toHaveBeenCalledOnce();
 	});
 
-	it('reveals earlier rows until measured content overflows', async () => {
+	it('loads earlier rows until measured content overflows', async () => {
 		const measureViewportFill = vi
 			.fn<ConversationViewportPort['measureViewportFill']>()
 			.mockResolvedValueOnce('underfilled')
 			.mockResolvedValueOnce('overflow');
-		const revealEarlierLoadedRows = vi.fn(() => true);
+		const loadEarlierPage = vi.fn(async () => 'loaded' as const);
 		const viewport = fakeViewport({ measureViewportFill });
 		const { controller } = controllerFixture({
 			viewport,
-			state: { canLoadEarlier: true, revealEarlierLoadedRows },
+			state: { canLoadEarlier: true, loadEarlierPage },
 		});
 		await controller.fillUnderfilledViewport();
-		expect(revealEarlierLoadedRows).toHaveBeenCalledOnce();
+		expect(loadEarlierPage).toHaveBeenCalledOnce();
 		expect(viewport.scrollToEnd).toHaveBeenCalledOnce();
 	});
 
@@ -1183,7 +1157,7 @@ describe('ConversationScrollController', () => {
 		expect(loadEarlierPage).toHaveBeenCalledTimes(10);
 		await fixture.controller.fillUnderfilledViewport();
 		expect(loadEarlierPage).toHaveBeenCalledTimes(10);
-		await expect(fixture.controller.requestPage('earlier', 'button')).resolves.toBe('loaded');
+		await expect(fixture.controller.requestPage('earlier', 'button')).resolves.toBe('bounded');
 		expect(loadEarlierPage).toHaveBeenCalledTimes(11);
 		fixture.sessions.selectedChatId = 'chat-2';
 		fixture.state.isUserScrolledUp = false;
@@ -1207,28 +1181,6 @@ describe('ConversationScrollController', () => {
 		state.transcriptViewId = 'generation-2';
 		await controller.fillUnderfilledViewport();
 		expect(loadEarlierPage).toHaveBeenCalledTimes(20);
-	});
-
-	it('does not charge cached-row reveals against the compressed request budget', async () => {
-		const revealEarlierLoadedRows = vi
-			.fn()
-			.mockReturnValueOnce(true)
-			.mockReturnValueOnce(true)
-			.mockReturnValueOnce(true)
-			.mockReturnValue(false);
-		const loadEarlierPage = vi.fn(async () => 'loaded' as const);
-		const { controller } = controllerFixture({
-			viewport: fakeViewport({
-				hasCollapsedToolGroups: vi.fn(() => true),
-				measureViewportFill: vi.fn<ConversationViewportPort['measureViewportFill']>(
-					async () => 'underfilled',
-				),
-			}),
-			state: { canLoadEarlier: true, revealEarlierLoadedRows, loadEarlierPage },
-		});
-		await controller.fillUnderfilledViewport();
-		expect(loadEarlierPage).toHaveBeenCalledTimes(10);
-		expect(revealEarlierLoadedRows).toHaveBeenCalledTimes(14);
 	});
 
 	it('counts a failed compressed request toward the automatic work limit', async () => {
@@ -1268,10 +1220,11 @@ describe('ConversationScrollController', () => {
 		expect(loadEarlierPage).toHaveBeenCalledTimes(8);
 		expect(loadEarlierPage).toHaveBeenNthCalledWith(1, 'chat-1', {
 			visibleLimit: CHAT_MESSAGES_MAX_LIMIT,
+			budget: expect.any(TranscriptReadBudget),
 		});
 	});
 
-	it('does not limit uncompressed viewport filling', async () => {
+	it('bounds uncompressed viewport filling without disabling manual continuation', async () => {
 		let loadedPages = 0;
 		const loadEarlierPage = vi.fn(async () => {
 			loadedPages += 1;
@@ -1286,8 +1239,119 @@ describe('ConversationScrollController', () => {
 			state: { canLoadEarlier: true, loadEarlierPage },
 		});
 		await controller.fillUnderfilledViewport();
-		expect(loadEarlierPage).toHaveBeenCalledTimes(12);
-		expect(loadEarlierPage).toHaveBeenNthCalledWith(1, 'chat-1');
+		expect(loadEarlierPage).toHaveBeenCalledTimes(10);
+		expect(loadEarlierPage).toHaveBeenNthCalledWith(1, 'chat-1', { budget: expect.any(TranscriptReadBudget) });
+		await controller.fillUnderfilledViewport();
+		expect(loadEarlierPage).toHaveBeenCalledTimes(10);
+		await controller.requestPage('earlier', 'button');
+		expect(loadEarlierPage).toHaveBeenCalledTimes(11);
+	});
+
+	it.each(['earlier', 'later'] as const)('exposes manual %s continuation when ten full demands exhaust refill without filling the viewport', async (direction) => {
+		const loadPage = vi.fn<ConversationScrollState['loadEarlierPage']>(async (_chatId, options) => {
+			expect(options?.budget?.admit(50)).toBe(50);
+			return 'loaded';
+		});
+		const { controller, state } = controllerFixture({
+			viewport: fakeViewport({ measureViewportFill: vi.fn(async () => 'underfilled' as const) }),
+			state: {
+				canLoadEarlier: direction === 'earlier', hasLaterMessages: direction === 'later',
+				loadEarlierPage: loadPage, loadLaterPage: loadPage, displayMessageCount: 500,
+			},
+		});
+		await controller.fillUnderfilledViewport();
+		expect(loadPage).toHaveBeenCalledTimes(10);
+		expect(state.pageStates[direction]).toEqual({ status: 'bounded', error: null });
+		loadPage.mockImplementationOnce(async () => {
+			state.pageStates[direction] = { status: 'idle', error: null };
+			return 'loaded';
+		});
+		await expect(controller.requestPage(direction, 'button')).resolves.toBe('bounded');
+		expect(state.pageStates[direction]).toEqual({ status: 'bounded', error: null });
+		expect(loadPage).toHaveBeenCalledTimes(11);
+	});
+
+	it.each(['earlier', 'later'] as const)('clears the manual %s boundary when a page exhausts history', async (direction) => {
+		const loadPage = vi.fn<ConversationScrollState['loadEarlierPage']>(async () => {
+			state.canLoadEarlier = false;
+			state.hasLaterMessages = false;
+			state.pageStates[direction] = { status: 'idle', error: null };
+			return 'loaded';
+		});
+		const { controller, state } = controllerFixture({
+			viewport: fakeViewport({ measureViewportFill: vi.fn(async () => 'underfilled' as const) }),
+			state: {
+				canLoadEarlier: direction === 'earlier', hasLaterMessages: direction === 'later',
+				loadEarlierPage: loadPage, loadLaterPage: loadPage,
+			},
+		});
+		await expect(controller.requestPage(direction, 'button')).resolves.toBe('loaded');
+		expect(state.pageStates[direction]).toEqual({ status: 'idle', error: null });
+	});
+
+	it('does not publish a manual boundary after navigation supersedes its viewport measurement', async () => {
+		let finishMeasurement!: (fill: 'underfilled') => void;
+		const measureViewportFill = vi.fn<ConversationViewportPort['measureViewportFill']>(() =>
+			new Promise((resolve) => { finishMeasurement = resolve; }),
+		);
+		const { controller, state } = controllerFixture({
+			viewport: fakeViewport({ measureViewportFill }),
+			state: { canLoadEarlier: true, loadEarlierPage: vi.fn(async () => 'loaded' as const) },
+		});
+		const page = controller.requestPage('earlier', 'button');
+		await vi.waitFor(() => expect(measureViewportFill).toHaveBeenCalledOnce());
+		await controller.jumpToDomAnchor('synthetic-anchor');
+		finishMeasurement('underfilled');
+		await expect(page).resolves.toBe('invalidated');
+		expect(state.pageStates.earlier).toEqual({ status: 'idle', error: null });
+	});
+
+	it.each(['underfilled', 'overflow'] as const)('does not apply a stale %s measurement to a replacement window', async (fill) => {
+		let finishMeasurement!: (fill: 'underfilled' | 'overflow') => void;
+		const measureViewportFill = vi.fn<ConversationViewportPort['measureViewportFill']>(() =>
+			new Promise((resolve) => { finishMeasurement = resolve; }),
+		);
+		const { controller, state } = controllerFixture({
+			viewport: fakeViewport({ measureViewportFill }),
+			state: { canLoadEarlier: true, loadEarlierPage: vi.fn(async () => 'loaded' as const) },
+		});
+		const page = controller.requestPage('earlier', 'button');
+		await vi.waitFor(() => expect(measureViewportFill).toHaveBeenCalledOnce());
+		state.windowRevision += 1;
+		const boundary = { status: fill === 'underfilled' ? 'idle' as const : 'bounded' as const, error: null };
+		state.pageStates.earlier = boundary;
+		finishMeasurement(fill);
+		await expect(page).resolves.toBe('invalidated');
+		expect(state.pageStates.earlier).toEqual(boundary);
+	});
+
+	it('shares real raw-request work across automatic demands and stops before a third demand', async () => {
+		const loadEarlierPage = vi.fn<ConversationScrollState['loadEarlierPage']>(async (_chatId, options) => {
+			expect(options?.budget).toBeInstanceOf(TranscriptReadBudget);
+			for (let i = 0; i < 5; i += 1) expect(options?.budget?.admit(50)).toBe(50);
+			return 'loaded';
+		});
+		const { controller } = controllerFixture({
+			viewport: fakeViewport({ measureViewportFill: vi.fn(async () => 'underfilled' as const) }),
+			state: { canLoadEarlier: true, loadEarlierPage },
+		});
+		await controller.fillUnderfilledViewport();
+		await controller.fillUnderfilledViewport();
+		expect(loadEarlierPage).toHaveBeenCalledTimes(2);
+		expect(loadEarlierPage.mock.calls[0]?.[1]?.budget).toBe(loadEarlierPage.mock.calls[1]?.[1]?.budget);
+	});
+
+	it('settles bounded page mutations before leaving automatic fill resumable', async () => {
+		const viewport = fakeViewport({ measureViewportFill: vi.fn(async () => 'underfilled' as const) });
+		const loadEarlierPage = vi.fn(async () => 'bounded' as const);
+		const { controller } = controllerFixture({ viewport, state: { canLoadEarlier: true, loadEarlierPage } });
+		await controller.fillUnderfilledViewport();
+		expect(loadEarlierPage).toHaveBeenCalledOnce();
+		expect(viewport.waitForLayout).toHaveBeenCalledTimes(2);
+		expect(viewport.scrollToEnd).toHaveBeenCalledOnce();
+		await expect(controller.requestPage('earlier', 'button')).resolves.toBe('bounded');
+		expect(loadEarlierPage).toHaveBeenCalledTimes(2);
+		expect(viewport.waitForLayout).toHaveBeenCalledTimes(3);
 	});
 
 	it('does not request another auto page after the reader takes scroll ownership', async () => {
@@ -1323,7 +1387,7 @@ describe('ConversationScrollController', () => {
 			state: { ...state, loadLaterPage },
 		});
 		await controller.fillUnderfilledViewport();
-		expect(loadLaterPage).toHaveBeenCalledWith('chat-1');
+		expect(loadLaterPage).toHaveBeenCalledWith('chat-1', { budget: expect.any(TranscriptReadBudget) });
 	});
 
 	it('uses larger logical pages for a compressed older window', async () => {
@@ -1348,6 +1412,7 @@ describe('ConversationScrollController', () => {
 
 		expect(loadLaterPage).toHaveBeenCalledWith('chat-1', {
 			visibleLimit: CHAT_MESSAGES_MAX_LIMIT,
+			budget: expect.any(TranscriptReadBudget),
 		});
 	});
 
@@ -1384,31 +1449,6 @@ describe('ConversationScrollController', () => {
 		});
 
 		await controller.fillUnderfilledViewport();
-		expect(loadEarlierPage).not.toHaveBeenCalled();
-	});
-
-	it('does not reveal loaded rows to bypass an earlier-page error latch', async () => {
-		const revealEarlierLoadedRows = vi.fn(() => true);
-		const loadEarlierPage = vi.fn(async () => 'loaded' as const);
-		const { controller } = controllerFixture({
-			viewport: fakeViewport({
-				measureViewportFill: vi.fn<ConversationViewportPort['measureViewportFill']>(
-					async () => 'underfilled',
-				),
-			}),
-			state: {
-				canLoadEarlier: true,
-				loadEarlierPage,
-				pageStates: {
-					earlier: { status: 'error', error: 'network unavailable' },
-					later: { status: 'idle', error: null },
-				},
-				revealEarlierLoadedRows,
-			},
-		});
-
-		await controller.fillUnderfilledViewport();
-		expect(revealEarlierLoadedRows).not.toHaveBeenCalled();
 		expect(loadEarlierPage).not.toHaveBeenCalled();
 	});
 
@@ -1688,14 +1728,25 @@ describe('ConversationScrollController', () => {
 		await vi.waitFor(() => expect(loadEarlierPage).toHaveBeenCalledTimes(3));
 	});
 
-	it('does not start viewport filling after restoring a non-combined feed', async () => {
-		const viewport = fakeViewport();
-		const { controller } = controllerFixture({ viewport });
+	it.each([0, 1])('refills an ordinary feed with %i presented rows after activation', async (displayMessageCount) => {
+		const viewport = fakeViewport({ measureViewportFill: vi.fn(async () => 'underfilled' as const) });
+		const { controller, state } = controllerFixture({
+			viewport,
+			state: { canLoadEarlier: true, displayMessageCount, loadStatus: displayMessageCount ? 'loaded' : 'empty' },
+		});
+		viewport.restoreInitialEnd.mockImplementation(() => controller.completeInitialBottomRestore());
+		controller.prepareInitialBottomRestore('chat-1');
+		controller.reconcileInitialBottomRestore(true);
+		await vi.waitFor(() => expect(state.loadEarlierPage).toHaveBeenCalledOnce());
+		expect(viewport.measureViewportFill).toHaveBeenCalledOnce();
+	});
+
+	it('does not refill an empty feed without remaining history', async () => {
+		const { controller } = controllerFixture({ state: { displayMessageCount: 0, loadStatus: 'empty' } });
 		const fill = vi.spyOn(controller, 'fillUnderfilledViewport').mockResolvedValue();
 		controller.prepareInitialBottomRestore('chat-1');
 		controller.completeInitialBottomRestore();
-		await vi.waitFor(() => expect(viewport.hasCollapsedToolGroups).toHaveBeenCalledOnce());
-
+		await tick();
 		expect(fill).not.toHaveBeenCalled();
 	});
 
@@ -1707,7 +1758,7 @@ describe('ConversationScrollController', () => {
 				return 'cancelled';
 			}),
 		});
-		const fixture = controllerFixture({ viewport });
+		const fixture = controllerFixture({ viewport, state: { canLoadEarlier: true } });
 		const fill = vi.spyOn(fixture.controller, 'fillUnderfilledViewport').mockResolvedValue();
 		fixture.controller.prepareInitialBottomRestore('chat-1');
 		fixture.controller.noteUserScrollIntent();
@@ -1718,6 +1769,7 @@ describe('ConversationScrollController', () => {
 
 	it('does not start a completed restore for a chat that was switched away', async () => {
 		const fixture = controllerFixture({
+			state: { canLoadEarlier: true },
 			viewport: fakeViewport({
 				hasCollapsedToolGroups: vi.fn(() => true),
 			}),

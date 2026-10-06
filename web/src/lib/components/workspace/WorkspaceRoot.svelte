@@ -52,8 +52,7 @@
 		UserMessageNavigatorRegistration,
 	} from '$lib/chat/transcript/user-message-navigator-controller.svelte.js';
 	import { SubagentToolbarState } from '$lib/chat/transcript/subagent-toolbar-state.svelte.js';
-	import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
-	import { INITIAL_VISIBLE_MESSAGES } from '$lib/chat/transcript/active-transcript-state.svelte.js';
+	import { ChatTranscriptCache, CHAT_TRANSCRIPT_CACHE_MESSAGE_LIMIT } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
 	import { ConversationUiState } from '$lib/chat/conversation/conversation-ui-state.svelte.js';
 	import { ConversationLifecycleRegistry } from '$lib/chat/conversation/conversation-lifecycle-registry.svelte.js';
 	import {
@@ -116,7 +115,7 @@
 	const surfaceFrames = getSurfaceFrames();
 	const processingReconciler = getChatProcessingReconciler();
 	const subagentToolbar = new SubagentToolbarState();
-	const chatTranscriptCache = new ChatTranscriptCache({ limit: INITIAL_VISIBLE_MESSAGES });
+	const chatTranscriptCache = new ChatTranscriptCache({ limit: CHAT_TRANSCRIPT_CACHE_MESSAGE_LIMIT });
 	const conversationUi = new ConversationUiState();
 	setConversationUi(conversationUi);
 	const conversationLifecycles = new ConversationLifecycleRegistry({

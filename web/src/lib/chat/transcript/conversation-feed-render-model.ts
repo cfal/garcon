@@ -20,16 +20,16 @@ export interface ConversationFeedRenderModelReconciliation {
 
 export class ConversationFeedRenderModelController {
 	#surfaceIdentity: string | null = null;
-	#rows: ChatDisplayRow[] = [];
+	#rows: readonly ChatDisplayRow[] = [];
 	#model: ConversationFeedRenderModel | null = null;
 
-	reconcile(surfaceIdentity: string, rows: ChatDisplayRow[]): ConversationFeedRenderModel {
+	reconcile(surfaceIdentity: string, rows: readonly ChatDisplayRow[]): ConversationFeedRenderModel {
 		return this.reconcileDetailed(surfaceIdentity, rows).model;
 	}
 
 	reconcileDetailed(
 		surfaceIdentity: string,
-		rows: ChatDisplayRow[],
+		rows: readonly ChatDisplayRow[],
 	): ConversationFeedRenderModelReconciliation {
 		if (surfaceIdentity !== this.#surfaceIdentity) this.#resetForSurface(surfaceIdentity);
 		if (this.#model && this.#sameRows(rows)) {
@@ -62,11 +62,11 @@ export class ConversationFeedRenderModelController {
 		this.#surfaceIdentity = surfaceIdentity;
 	}
 
-	#sameRows(rows: ChatDisplayRow[]): boolean {
+	#sameRows(rows: readonly ChatDisplayRow[]): boolean {
 		return rows.length === this.#rows.length && this.#samePrefix(rows, rows.length);
 	}
 
-	#samePrefix(rows: ChatDisplayRow[], count: number): boolean {
+	#samePrefix(rows: readonly ChatDisplayRow[], count: number): boolean {
 		for (let index = 0; index < count; index += 1) {
 			const previous = this.#rows[index];
 			const next = rows[index];
@@ -83,7 +83,7 @@ export class ConversationFeedRenderModelController {
 	}
 
 	#appendedTailItems(
-		rows: ChatDisplayRow[],
+		rows: readonly ChatDisplayRow[],
 		nextItems: ConversationFeedRenderItem[],
 	): ConversationFeedRenderItem[] | null {
 		const previousItems = this.#model?.items;

@@ -90,6 +90,19 @@ describe('LocalChatTranscriptStorage', () => {
 		expect(storage.restore('chat-2')).toBeNull();
 	});
 
+	it.each([8_001, null])('persists a cursor-only hidden snapshot with earlier continuation %s', (nextBeforeOrdinal) => {
+		storage.persist('chat-1', [], { ...cursor(10_000), nextBeforeOrdinal });
+		expect(new LocalChatTranscriptStorage().restore('chat-1')).toMatchObject({
+			entries: [], transcriptViewId: 'generation-1', lastOrdinal: 10_000, nextBeforeOrdinal,
+		});
+		expect(storage.listCursors()).toEqual([{ chatId: 'chat-1', transcriptViewId: 'generation-1', lastOrdinal: 10_000 }]);
+	});
+
+	it.each([0, 1, 10_001, 1.5])('rejects an invalid hidden cursor continuation %s', (nextBeforeOrdinal) => {
+		storage.persist('chat-1', [], { ...cursor(10_000), nextBeforeOrdinal });
+		expect(storage.restore('chat-1')).toBeNull();
+	});
+
 	it('rejects old snapshot schemas and invalid entry envelopes', () => {
 		localStorage.setItem(
 			snapshotKey('chat-1'),
@@ -118,6 +131,24 @@ describe('LocalChatTranscriptStorage', () => {
 			}),
 		);
 		expect(storage.restore('chat-2')).toBeNull();
+	});
+
+	it('[TLV5-L04.07-WEB-STORAGE-01] invalidates cached pre-sanitization submission identities before they can merge into a current snapshot', () => {
+		localStorage.setItem(snapshotKey('chat-1'), JSON.stringify({
+			version: 6, chatId: 'chat-1', savedAt: TS, ...cursor(2),
+			entries: [1, 2].map((ordinal) => ({
+				ordinal, message: new UserMessage(TS, 'Synthetic imported input', undefined, { clientMessageId: 'provider-duplicate' }),
+			})),
+		}));
+		localStorage.setItem(INDEX_KEY, JSON.stringify({
+			version: 6, entries: [{ chatId: 'chat-1', schemaVersion: 6, lastAccessedAt: TS, lastValidatedAt: TS, stale: false }],
+		}));
+		expect(storage.listCursors()).toEqual([]);
+		expect(storage.restore('chat-1')).toBeNull();
+		expect(localStorage.getItem(snapshotKey('chat-1'))).toBeNull();
+		const sanitized = [entry(1, 'Synthetic imported input'), entry(2, 'Synthetic imported input')];
+		storage.persist('chat-1', sanitized, cursor(2));
+		expect(storage.restore('chat-1')?.entries).toEqual(sanitized);
 	});
 
 	it('preserves stale bit and clears it after validation', () => {

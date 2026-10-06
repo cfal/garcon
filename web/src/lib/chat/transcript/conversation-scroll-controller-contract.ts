@@ -6,7 +6,6 @@ export type ConversationScrollState = Pick<
 	| 'canLoadEarlier'
 	| 'displayMessageCount'
 	| 'feedMutationClock'
-	| 'hasEarlierRowsToReveal'
 	| 'hasLaterMessages'
 	| 'isLoadingMessages'
 	| 'isUserScrolledUp'
@@ -17,7 +16,6 @@ export type ConversationScrollState = Pick<
 	| 'loadStatus'
 	| 'navigateToWindow'
 	| 'pageStates'
-	| 'revealEarlierLoadedRows'
 	| 'transcriptViewId'
 	| 'windowRevision'
 >;

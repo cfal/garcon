@@ -2,7 +2,7 @@ import type { ResendCandidate, TranscriptMessage, TranscriptReadPurpose } from '
 import type { ChatMessage } from '$shared/chat-types';
 import type { OptimisticUserInput } from './optimistic-user-input.js';
 import type { LocalNoticeType } from './local-notice.js';
-import type { ChatTranscriptCache } from './chat-transcript-cache.svelte.js';
+import type { ChatTranscriptApplyResult, ChatTranscriptCache } from './chat-transcript-cache.svelte.js';
 import type { ConversationFeedMutationClock } from './conversation-feed-mutations.js';
 
 export interface ChatLoadMessagesOptions {
@@ -18,6 +18,17 @@ export interface ChatRestoreResult {
 export interface ChatCursor {
 	transcriptViewId: string;
 	lastOrdinal: number;
+}
+
+export interface SharedTranscriptCommit {
+	readonly chatId: string;
+	readonly transcriptViewId: string;
+	readonly messages: TranscriptMessage[];
+	readonly firstOrdinal: number;
+	readonly lastOrdinal: number;
+	readonly resendCandidates: ResendCandidate[];
+	readonly noticeRevision: number;
+	readonly outcome: Extract<ChatTranscriptApplyResult, { status: 'applied' }>;
 }
 
 export interface ActiveTranscriptPort {

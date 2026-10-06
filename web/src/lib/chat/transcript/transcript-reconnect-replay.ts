@@ -2,6 +2,7 @@ import type {
 	ResendCandidate,
 	TranscriptAppend,
 } from '$shared/chat-view';
+import { TranscriptBatchBuffer } from './transcript-batch-buffer.js';
 
 export type TranscriptReplayApplyResult = 'applied' | 'view-changed' | 'gap-detected';
 
@@ -18,7 +19,7 @@ interface ActiveReconnectReplay {
 	token: number;
 	chatId: string;
 	transcriptViewId: string;
-	buffered: TranscriptBufferedBatch[];
+	buffered: TranscriptBatchBuffer;
 }
 
 type ApplyBufferedBatch = (
@@ -35,7 +36,7 @@ export class TranscriptReconnectReplayState {
 
 	begin(chatId: string, transcriptViewId: string): number {
 		const token = ++this.#epoch;
-		this.#active = { token, chatId, transcriptViewId, buffered: [] };
+		this.#active = { token, chatId, transcriptViewId, buffered: new TranscriptBatchBuffer() };
 		return token;
 	}
 
@@ -45,6 +46,7 @@ export class TranscriptReconnectReplayState {
 		batch: TranscriptBufferedBatch,
 	): TranscriptReplayApplyResult | 'stale' {
 		if (!this.#matches(token, chatId, batch.transcriptViewId)) return 'stale';
+		if (this.#active?.buffered.overflowed) return 'gap-detected';
 
 		this.#applyingToken = token;
 		try {
@@ -54,7 +56,7 @@ export class TranscriptReconnectReplayState {
 		}
 	}
 
-	buffer(chatId: string, batch: TranscriptBufferedBatch): boolean {
+	buffer(chatId: string, batch: TranscriptBufferedBatch): boolean | 'overflow' {
 		const replay = this.#active;
 		if (
 			!replay
@@ -64,8 +66,7 @@ export class TranscriptReconnectReplayState {
 		) {
 			return false;
 		}
-		replay.buffered.push(batch);
-		return true;
+		return replay.buffered.append(batch) ? true : 'overflow';
 	}
 
 	finish(
@@ -76,11 +77,11 @@ export class TranscriptReconnectReplayState {
 		if (!replay || replay.token !== token || replay.chatId !== chatId) return 'stale';
 
 		this.#active = null;
-		for (const batch of replay.buffered) {
+		for (const batch of replay.buffered.batches) {
 			const result = this.apply(chatId, batch);
 			if (result !== 'applied') return result;
 		}
-		return 'applied';
+		return replay.buffered.overflowed ? 'gap-detected' : 'applied';
 	}
 
 	abort(token: number): void {

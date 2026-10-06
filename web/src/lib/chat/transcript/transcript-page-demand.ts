@@ -14,13 +14,16 @@ import {
 	type ChatMessagesRequest,
 } from '$lib/api/chats.js';
 import { ApiError } from '$lib/api/client.js';
+import { TranscriptReadBudget } from './transcript-read-budget.js';
 
 type CompletePage = CompleteChatHistoryResponse;
 
 interface TranscriptPageDemandBase {
 	chatId: string;
 	visibleLimit: number;
-	loadPage?: (request: ChatMessagesRequest) => Promise<ChatHistoryResponse>;
+	loadPage?: typeof getChatMessages;
+	signal?: AbortSignal;
+	budget?: TranscriptReadBudget;
 	isCurrent?: () => boolean;
 	onPageValidated?: (request: ChatMessagesRequest, page: CompletePage) => void;
 }
@@ -43,6 +46,7 @@ export type TranscriptPageDemandOptions = TranscriptPageDemandBase & (
 
 export interface CompleteTranscriptPageDemand {
 	kind: 'complete';
+	stop: 'visible-limit' | 'history-end' | 'budget';
 	pages: CompletePage[];
 	messages: TranscriptMessage[];
 	lastOrdinal: number;
@@ -66,6 +70,8 @@ export async function loadTranscriptPageDemand(
 	}
 
 	const loadPage = options.loadPage ?? getChatMessages;
+	const budget = options.budget ?? new TranscriptReadBudget();
+	const isCurrent = () => !options.signal?.aborted && (options.isCurrent?.() ?? true);
 	let expectedTranscriptViewId = options.transcriptViewId ?? null;
 	let remainingVisible = options.visibleLimit;
 	let beforeOrdinal = options.direction === 'backward' ? options.beforeOrdinal : undefined;
@@ -73,12 +79,25 @@ export async function loadTranscriptPageDemand(
 	const pages: CompletePage[] = [];
 	let messages: TranscriptMessage[] = [];
 	let lastOrdinal = 0;
+	let stop: CompleteTranscriptPageDemand['stop'] = 'visible-limit';
 
 	while (remainingVisible > 0) {
+		if (!isCurrent()) return { kind: 'invalidated' };
+		if (options.direction === 'later' && loadedThroughOrdinal >= options.throughOrdinal) {
+			stop = 'history-end';
+			break;
+		}
+		const limit = budget.admit(options.direction === 'later'
+			? Math.min(remainingVisible, options.throughOrdinal - loadedThroughOrdinal)
+			: remainingVisible);
+		if (limit === 0) {
+			stop = 'budget';
+			break;
+		}
 		const request = pageRequest(
 			options,
 			expectedTranscriptViewId,
-			remainingVisible,
+			limit,
 			beforeOrdinal,
 			loadedThroughOrdinal,
 		);
@@ -86,14 +105,15 @@ export async function loadTranscriptPageDemand(
 
 		let response: ChatHistoryResponse;
 		try {
-			response = await loadPage(request);
+			response = await loadPage(request, { signal: options.signal });
 		} catch (error) {
+			if (!isCurrent()) return { kind: 'invalidated' };
 			if (error instanceof ApiError && error.errorCode === 'STALE_TRANSCRIPT_VIEW') {
 				return { kind: 'view-changed' };
 			}
 			throw error;
 		}
-		if (options.isCurrent && !options.isCurrent()) return { kind: 'invalidated' };
+		if (!isCurrent()) return { kind: 'invalidated' };
 		if (isUnavailableChatHistoryResponse(response)) {
 			return { kind: 'unavailable', response };
 		}
@@ -126,13 +146,17 @@ export async function loadTranscriptPageDemand(
 		options.onPageValidated?.(request, response);
 
 		if (options.direction === 'later') {
-			if (loadedThroughOrdinal >= options.throughOrdinal) break;
+			if (loadedThroughOrdinal >= options.throughOrdinal) {
+				stop = 'history-end';
+				break;
+			}
 		} else if (response.nextBeforeOrdinal === null) {
+			stop = 'history-end';
 			break;
 		}
 	}
 
-	return { kind: 'complete', pages, messages, lastOrdinal };
+	return { kind: 'complete', stop, pages, messages, lastOrdinal };
 }
 
 export function collapseBackwardTranscriptDemand(

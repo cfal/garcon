@@ -42,6 +42,8 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 	#noticeRevision = $state(0);
 	#optimisticInputs = $state<OptimisticUserInput[]>([]);
 	#optimisticAfterOrdinals = $state.raw<ReadonlyMap<string, number>>(new Map());
+	// Retains only address evidence for unresolved inputs across replay aborts.
+	readonly #observedEchoes = new Map<string, { transcriptViewId: string; ordinal: number }>();
 	#resendCandidates = $state<ResendCandidate[]>([]);
 	#excludedResendOrdinals = $state<number[]>([]);
 
@@ -118,9 +120,9 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 
 	upsertOptimisticInput(
 		input: OptimisticUserInput,
-		afterOrdinal: number,
+		afterOrdinal: number | null,
 	): ConversationTranscriptOverlayMutation {
-		if (!this.#optimisticAfterOrdinals.has(input.clientMessageId)) {
+		if (afterOrdinal !== null && !this.#optimisticAfterOrdinals.has(input.clientMessageId)) {
 			this.#optimisticAfterOrdinals = new Map(this.#optimisticAfterOrdinals).set(
 				input.clientMessageId,
 				afterOrdinal,
@@ -148,6 +150,7 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 	}
 
 	clearOptimisticInput(clientMessageId: string): ConversationTranscriptOverlayMutation {
+		this.#observedEchoes.delete(clientMessageId);
 		const next = this.#optimisticInputs.filter(
 			(input) => input.clientMessageId !== clientMessageId,
 		);
@@ -190,8 +193,41 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 			this.#notices = notices;
 			feedStructureChanged = true;
 		}
+		const settlement = this.settleEchoes(batch.messages);
+		this.#installResendCandidates(batch.resendCandidates);
+		return feedMutation(feedStructureChanged || settlement.feedStructureChanged);
+	}
 
-		const echoed = echoedClientMessageOrdinals(batch.messages);
+	settleEchoes(messages: readonly TranscriptMessage[]): ConversationTranscriptOverlayMutation {
+		return this.#settleEchoOrdinals(echoedClientMessageOrdinals(messages));
+	}
+
+	observeEchoes(transcriptViewId: string, messages: readonly TranscriptMessage[]): ConversationTranscriptOverlayMutation {
+		const echoed = echoedClientMessageOrdinals(messages);
+		let feedStructureChanged = false;
+		for (const input of this.#optimisticInputs) {
+			const ordinal = echoed.get(input.clientMessageId);
+			if (ordinal === undefined) continue;
+			this.#observedEchoes.set(input.clientMessageId, { transcriptViewId, ordinal });
+			const mutation = this.markOptimisticInputDelivered(input.clientMessageId);
+			feedStructureChanged ||= mutation.feedStructureChanged;
+		}
+		return feedMutation(feedStructureChanged);
+	}
+
+	settleSnapshot(transcriptViewId: string, messages: readonly TranscriptMessage[], lastOrdinal: number): ConversationTranscriptOverlayMutation {
+		this.observeEchoes(transcriptViewId, messages);
+		const echoed = new Map<string, number>();
+		for (const [id, echo] of this.#observedEchoes) {
+			if (echo.transcriptViewId === transcriptViewId && echo.ordinal <= lastOrdinal) echoed.set(id, echo.ordinal);
+		}
+		const settlement = this.#settleEchoOrdinals(echoed);
+		const rebase = this.rebaseUnknownInputs(lastOrdinal);
+		return feedMutation(settlement.feedStructureChanged || rebase.feedStructureChanged);
+	}
+
+	#settleEchoOrdinals(echoed: ReadonlyMap<string, number>): ConversationTranscriptOverlayMutation {
+		let feedStructureChanged = false;
 		if (echoed.size > 0) {
 			const ordinals = new Map(this.#optimisticAfterOrdinals);
 			const remaining: OptimisticUserInput[] = [];
@@ -199,6 +235,7 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 			for (const input of this.#optimisticInputs) {
 				const echoOrdinal = echoed.get(input.clientMessageId);
 				if (echoOrdinal !== undefined) {
+					this.#observedEchoes.delete(input.clientMessageId);
 					latestPriorEchoOrdinal = Math.max(latestPriorEchoOrdinal ?? 0, echoOrdinal);
 					ordinals.delete(input.clientMessageId);
 					continue;
@@ -218,8 +255,17 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 			}
 		}
 
-		this.#installResendCandidates(batch.resendCandidates);
 		return feedMutation(feedStructureChanged);
+	}
+
+	rebaseUnknownInputs(afterOrdinal: number): ConversationTranscriptOverlayMutation {
+		const ordinals = new Map(this.#optimisticAfterOrdinals);
+		for (const input of this.#optimisticInputs) {
+			if (!ordinals.has(input.clientMessageId)) ordinals.set(input.clientMessageId, afterOrdinal);
+		}
+		if (ordinals.size === this.#optimisticAfterOrdinals.size) return feedMutation(false);
+		this.#optimisticAfterOrdinals = ordinals;
+		return feedMutation(true);
 	}
 
 	#installResendCandidates(candidates: readonly ResendCandidate[]): void {
@@ -240,6 +286,7 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 		// captured before the reset cannot clear notices appended after it.
 		this.#optimisticInputs = [];
 		this.#optimisticAfterOrdinals = new Map();
+		this.#observedEchoes.clear();
 		this.#resendCandidates = [];
 		this.#excludedResendOrdinals = [];
 		return feedMutation(feedStructureChanged);
@@ -284,7 +331,7 @@ export class ConversationTranscriptOverlayStore {
 	upsertOptimisticInput(
 		chatId: string,
 		input: OptimisticUserInput,
-		afterOrdinal: number,
+		afterOrdinal: number | null,
 	): ConversationTranscriptOverlayMutation {
 		return this.#entry(chatId).upsertOptimisticInput(input, afterOrdinal);
 	}
@@ -320,6 +367,14 @@ export class ConversationTranscriptOverlayStore {
 
 	applyCommittedBatch(batch: CommittedOverlayBatch): ConversationTranscriptOverlayMutation {
 		return this.#entry(batch.chatId).applyCommittedBatch(batch);
+	}
+
+	observeEchoes(chatId: string, transcriptViewId: string, messages: readonly TranscriptMessage[]): ConversationTranscriptOverlayMutation {
+		return this.#entries.get(chatId)?.observeEchoes(transcriptViewId, messages) ?? feedMutation(false);
+	}
+
+	settleSnapshot(chatId: string, transcriptViewId: string, messages: readonly TranscriptMessage[], lastOrdinal: number): ConversationTranscriptOverlayMutation {
+		return this.#entry(chatId).settleSnapshot(transcriptViewId, messages, lastOrdinal);
 	}
 
 	resetForTranscriptReplacement(chatId: string): ConversationTranscriptOverlayMutation {

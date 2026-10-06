@@ -66,6 +66,7 @@ vi.mock('$lib/components/chat/transcript/ConversationFeed.svelte', async () => (
 }));
 
 import ConversationPanel from '../ConversationPanel.svelte';
+import ConversationPanelScrollControls from '../ConversationPanelScrollControls.svelte';
 
 function chat(): ChatSessionRecord {
 	return {
@@ -218,6 +219,27 @@ describe('ConversationPanel', () => {
 		runtime.queue = null;
 		runtime.summary = null;
 		vi.clearAllMocks();
+	});
+
+	it.each(['earlier', 'later', 'none'] as const)('keeps window navigation available for a zero-row %s interval', async (direction) => {
+		const { panel } = makePanel();
+		panel.scroll.setPinnedToBottom(false);
+		panel.transcript.hasEarlierMessages = direction === 'earlier';
+		panel.transcript.hasLaterMessages = direction === 'later';
+		const initial = vi.spyOn(panel.scroll, 'scrollToTop').mockResolvedValue(undefined);
+		const latest = vi.spyOn(panel.scroll, 'scrollToLatestAndFill').mockResolvedValue(undefined);
+		render(ConversationPanelScrollControls, { panel });
+		if (direction === 'none') {
+			expect(screen.queryByTitle(m.workspace_scroll_to_bottom())).toBeNull();
+		} else {
+			await fireEvent.click(screen.getByTitle(m.workspace_scroll_to_bottom()));
+			expect(latest).toHaveBeenCalledOnce();
+			if (direction === 'earlier') {
+				await fireEvent.click(screen.getByTitle(m.workspace_scroll_to_initial_prompt()));
+				expect(initial).toHaveBeenCalledOnce();
+			}
+		}
+		panel.scroll.setViewportVisible(false);
 	});
 
 	it('keeps the presentation attached when its viewport becomes available', async () => {

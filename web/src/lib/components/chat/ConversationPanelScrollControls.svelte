@@ -23,7 +23,7 @@
 	);
 </script>
 
-{#if (panel.transcript.isUserScrolledUp || panel.scroll.isScrollingToBottom) && panel.transcript.displayMessageCount > 0}
+{#if (panel.transcript.isUserScrolledUp || panel.scroll.isScrollingToBottom) && (panel.transcript.displayMessageCount > 0 || panel.transcript.hasEarlierMessages || panel.transcript.hasLaterMessages)}
 	{#if panel.scroll.canScrollToTop && !panel.scroll.isScrollingToBottom}
 		<Button
 			variant="outline"

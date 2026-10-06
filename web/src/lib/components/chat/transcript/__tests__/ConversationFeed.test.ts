@@ -12,6 +12,11 @@ import { makeRemoteSettingsSnapshot } from '$lib/stores/__tests__/remote-setting
 import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence.js';
 import { createChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 import { FileSessionRegistry } from '$lib/files/sessions/file-session-registry.svelte.js';
+import type { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
+import { ConversationScrollController } from '$lib/chat/transcript/conversation-scroll-controller.svelte.js';
+import type { ConversationViewportPort } from '$lib/chat/transcript/conversation-viewport-port.js';
+import * as chatApi from '$lib/api/chats.js';
+import { AssistantMessage, ToolResultMessage, UserMessage } from '$shared/chat-types';
 
 async function showFeedScrollbar(container: HTMLElement): Promise<{
 	scrollbar: HTMLElement;
@@ -101,6 +106,105 @@ describe('ConversationFeed', () => {
 				return originalClientHeight?.get?.call(this) ?? 0;
 			},
 		});
+	});
+
+	it('[TLV5-PAGE.07-WEB-COMPONENT-01] keeps hidden-only bounded history pageable instead of presenting a false empty transcript', async () => {
+		render(ConversationFeedTestHost, { transcriptScenario: 'hidden-only-bounded' });
+		const earlier = await screen.findByRole('button', { name: 'Load earlier messages' });
+		expect(earlier).not.toBeNull();
+		expect(screen.queryByText('No messages yet')).toBeNull();
+		await fireEvent.click(earlier);
+		expect(earlier.getAttribute('aria-disabled')).toBe('true');
+	});
+
+	it('keeps the focused explicit boundary mounted while loading beside retained rows', async () => {
+		let transcript!: ActiveTranscriptState;
+		render(ConversationFeedTestHost, { transcriptScenario: 'hidden-only-bounded', onTranscript: (value) => { transcript = value; } });
+		transcript.entries = [{ ordinal: 10_000, message: new AssistantMessage('', 'Synthetic retained tail') }];
+		await tick();
+		const button = await screen.findByRole('button', { name: 'Load earlier messages' });
+		button.focus();
+		await fireEvent.click(button);
+		await waitFor(() => expect(button.getAttribute('aria-busy')).toBe('true'));
+		expect(button.isConnected).toBe(true);
+		expect(document.activeElement).toBe(button);
+		expect(transcript.pageStates.earlier.status).toBe('loading');
+	});
+
+	it('retains the focused manual boundary through hidden-row publication and viewport settlement', async () => {
+		let transcript!: ActiveTranscriptState;
+		render(ConversationFeedTestHost, { transcriptScenario: 'hidden-only-bounded', onTranscript: (value) => { transcript = value; } });
+		const row = (ordinal: number) => ({ ordinal, message: new ToolResultMessage('', `Synthetic result ${ordinal}`, {}, false) });
+		transcript.entries = [row(10_000)];
+		await tick();
+		const button = await screen.findByRole('button', { name: 'Load earlier messages' });
+		button.focus();
+		const request = vi.spyOn(chatApi, 'getChatMessages').mockImplementation(async (input) => {
+			const newest = input.beforeOrdinal! - 1;
+			const oldest = newest - input.limit! + 1;
+			return {
+				chatId: 'chat-1', transcriptViewId: 'generation-1', limit: input.limit!, lastOrdinal: 10_000,
+				messages: Array.from({ length: input.limit! }, (_, index) => row(oldest + index)),
+				pageOldestOrdinal: oldest, pageNewestOrdinal: newest, nextBeforeOrdinal: oldest,
+				hasMore: true, historyState: { kind: 'complete' }, resendCandidates: [],
+			};
+		});
+		const assertRetained = async () => {
+			await tick();
+			expect(button.isConnected).toBe(true);
+			expect(document.activeElement).toBe(button);
+		};
+		const viewport = {
+			isReady: () => true, hasCollapsedToolGroups: () => false, isAtEnd: () => false,
+			ownsScrollPosition: () => false, viewportPosition: () => null,
+			scrollToStart: () => {}, scrollToEnd: () => {}, restoreInitialEnd: () => {}, scrollBy: () => {},
+			waitForLayout: async () => { await assertRetained(); return 'settled'; },
+			measureViewportFill: async () => { await assertRetained(); return 'underfilled'; },
+			restoreHiddenReadingPosition: async () => 'restored', cancelPendingLayoutMutation: () => {},
+			cancelForUserIntent: () => 'cancelled', setNativeScrollActivity: () => {}, scrollToTarget: async () => 'completed',
+		} satisfies ConversationViewportPort;
+		const controller = new ConversationScrollController({
+			chatState: transcript, getChatId: () => 'chat-1', getViewport: () => viewport,
+			getScrollContainer: () => null, getQueueContainer: () => undefined,
+		});
+		expect(await controller.requestPage('earlier', 'button')).toBe('bounded');
+		expect(request).toHaveBeenCalledOnce();
+		await assertRetained();
+		expect(screen.getByRole('button', { name: 'Load earlier messages' })).toBe(button);
+		controller.setViewportVisible(false);
+		transcript.transcriptCache.flush();
+	});
+
+	it('[TLV5-UX.05-WEB-COMPONENT-01] retains an expanded user body across delivery, echo and live append with canonical DOM addresses', async () => {
+		vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(600);
+		let transcript!: ActiveTranscriptState;
+		const { container } = render(ConversationFeedTestHost, {
+			transcriptScenario: 'row-ids', onTranscript: (value) => { transcript = value; },
+		});
+		const optimistic = await waitFor(() => {
+			const row = container.querySelector<HTMLElement>('[data-chat-row-id="optimistic:message-1"]');
+			expect(row).not.toBeNull();
+			return row!;
+		});
+		const expand = await waitFor(() => {
+			const button = optimistic.querySelector<HTMLButtonElement>('button[aria-expanded="false"]');
+			expect(button).not.toBeNull();
+			return button!;
+		});
+		await fireEvent.click(expand);
+		expect(expand.getAttribute('aria-expanded')).toBe('true');
+		transcript.markOptimisticUserInputDelivered('message-1');
+		await tick();
+		expect(expand.getAttribute('aria-expanded')).toBe('true');
+		transcript.applyMessages('chat-1', 'generation-1', [{
+			ordinal: 2, message: new UserMessage('2026-07-01T00:00:01.000Z', 'Pending user message', undefined, { clientMessageId: 'message-1' }),
+		}], 2, 2);
+		await waitFor(() => expect(container.querySelector('[data-chat-row-id="generation-1:2"]')).toBe(optimistic));
+		expect(expand.getAttribute('aria-expanded')).toBe('true');
+		transcript.applyMessages('chat-1', 'generation-1', [{ ordinal: 3, message: new AssistantMessage('', 'Synthetic response') }], 3, 3);
+		await tick();
+		expect(expand.getAttribute('aria-expanded')).toBe('true');
+		expect(optimistic.querySelector('button[aria-expanded="true"]')).toBe(expand);
 	});
 
 	it('does not recenter the sidebar when the message feed receives focus', async () => {

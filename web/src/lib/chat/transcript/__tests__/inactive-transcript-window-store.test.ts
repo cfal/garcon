@@ -51,6 +51,40 @@ describe('InactiveTranscriptWindowStore', () => {
 		expect(store.take('right', 'chat-1')?.transcript).toBe(right);
 	});
 
+	it('restores an expanded interval and reading target with a published head beyond the cache frontier', () => {
+		const store = new InactiveTranscriptWindowStore();
+		const window = transcript('chat-1');
+		const messages = Array.from({ length: 200 }, (_, index) => ({
+			ordinal: index + 1, message: new AssistantMessage('', `Synthetic row ${index + 1}`),
+		}));
+		window.replaceGeneration('chat-1', 'view-1', messages, {
+			lastOrdinal: 200, pageOldestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false,
+		});
+		const target = { kind: 'row' as const, transcriptViewId: 'view-1', ordinal: 10, viewportOffset: 40 };
+		expect(window.suspendForParking()).toBe(true);
+		store.park({ surfaceId: 'left', chatId: 'chat-1', transcript: window, target });
+		const source = new ActiveTranscriptState(window.transcriptCache);
+		source.replaceGeneration('chat-1', 'view-1', messages.slice(-2), {
+			lastOrdinal: 201, pageNewestOrdinal: 200, pageOldestOrdinal: 199,
+			nextBeforeOrdinal: 199, hasMore: true,
+		});
+		store.installCachedSnapshot('chat-1', source);
+		expect(window.transcriptCache.readAppliedCursor('chat-1')?.lastOrdinal).toBe(200);
+		const restored = store.take('left', 'chat-1');
+		expect(restored?.transcript).toBe(window);
+		expect(restored?.target).toEqual(target);
+		expect(window.entries).toEqual(messages);
+		expect(window.lastOrdinal).toBe(201);
+		expect(window.loadedThroughOrdinal).toBe(200);
+		expect(window.hasLaterMessages).toBe(true);
+		expect(window.suspendForParking()).toBe(true);
+		park(store, 'left', 'chat-1', window);
+		window.transcriptCache.applyMessages('chat-1', 'view-1', { firstOrdinal: 201, lastOrdinal: 202, messages: [] });
+		expect(window.suspendForParking()).toBe(false);
+		expect(store.take('left', 'chat-1')).toBeNull();
+		window.transcriptCache.flush();
+	});
+
 	it('rejects oversized and stale windows rather than truncating their context', () => {
 		const store = new InactiveTranscriptWindowStore({ windows: 2, messages: 10, bytes: 1_000 });
 		park(store, 'left', 'chat-1', transcript('chat-1', 'x'.repeat(1_000)));
@@ -84,8 +118,7 @@ describe('InactiveTranscriptWindowStore', () => {
 			resendCandidates: [],
 			noticeRevision: 0,
 			outcome,
-			overlayMutation: { feedStructureChanged: false },
-		}, { feedStructureChanged: false });
+		});
 		expect(store.size).toBe(0);
 	});
 
@@ -118,8 +151,7 @@ describe('InactiveTranscriptWindowStore', () => {
 			resendCandidates: [],
 			noticeRevision: 0,
 			outcome,
-			overlayMutation: { feedStructureChanged: false },
-		}, { feedStructureChanged: false });
+		});
 
 		expect(window.loadedThroughOrdinal).toBe(4);
 		expect(window.hasLaterMessages).toBe(false);

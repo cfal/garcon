@@ -11,28 +11,32 @@ import { idlePageState, type TranscriptPageDirection, type TranscriptPageState }
 import { TranscriptResendCandidates } from './transcript-resend-candidates.svelte.js';
 import {
 	echoedClientMessageIds,
-	hasEarlierTranscriptRowsToReveal,
+	echoedClientMessageOrdinals,
 	messagesFromDisplayRows,
 	transcriptDisplayRows,
 	visibleOptimisticTranscriptInputs,
-	visibleTranscriptRows,
 	type ChatDisplayRow,
 } from './transcript-row-projection.js';
 
-export const INITIAL_VISIBLE_MESSAGES = 100;
-
 export type ChatLoadStatus = 'idle' | 'loading' | 'loaded' | 'empty' | 'error';
+
+interface PendingEcho {
+	readonly input: OptimisticUserInput;
+	readonly transcriptViewId: string;
+	readonly ordinal: number;
+	readonly afterOrdinal: number | undefined;
+	readonly position: number;
+}
 
 export class ActiveTranscriptPresentationState {
 	activeChatId = $state<string | null>(null);
-	entries = $state<TranscriptMessage[]>([]);
+	entries = $state.raw<TranscriptMessage[]>([]);
 	transcriptViewId = $state('');
 	windowRevision = $state(0);
 	lastOrdinal = $state(0);
 	nextBeforeOrdinal = $state<number | null>(null);
 	loadedThroughOrdinal = $state(0);
 	hasLaterMessages = $state(false);
-	visibleMessageCount = $state(INITIAL_VISIBLE_MESSAGES);
 	isLoadingMessages = $state(false);
 	hasEarlierMessages = $state(false);
 	pageStates = $state<Record<TranscriptPageDirection, TranscriptPageState>>({
@@ -47,13 +51,12 @@ export class ActiveTranscriptPresentationState {
 	protected readonly resend = new TranscriptResendCandidates();
 	protected readonly notices = new TranscriptNoticeFeed();
 	protected readonly optimisticInputs = new TranscriptOptimisticInputs(() => {
-		this.growVisibleWindow();
 		this.feedMutations.record('presentation-structure');
 	});
 	protected readonly feedMutations = new ConversationFeedMutationState();
-	protected visibleWindowStartOrdinal: number | null = null;
 
 	readonly #sharedOverlay: ConversationTranscriptOverlayView | null;
+	#pendingEchoes = $state.raw<readonly PendingEcho[]>([]);
 	#echoedClientMessageIds = $derived(echoedClientMessageIds(this.entries));
 	#displayLocalNotices = $derived(
 		displayLocalNotices(this.hasLaterMessages, this.historyState, this.localNotices),
@@ -64,14 +67,6 @@ export class ActiveTranscriptPresentationState {
 		optimisticInputs: this.visibleOptimisticInputs,
 		optimisticAfterOrdinals: this.optimisticAfterOrdinals,
 		notices: this.#displayLocalNotices,
-	}));
-	#visibleRows = $derived(visibleTranscriptRows({
-		entries: this.entries,
-		transcriptViewId: this.transcriptViewId,
-		optimisticInputs: this.visibleOptimisticInputs,
-		optimisticAfterOrdinals: this.optimisticAfterOrdinals,
-		notices: this.#displayLocalNotices,
-		visibleCount: this.visibleMessageCount,
 	}));
 
 	constructor(sharedOverlay: ConversationTranscriptOverlayView | null) {
@@ -87,10 +82,16 @@ export class ActiveTranscriptPresentationState {
 	}
 
 	private get optimisticAfterOrdinals(): ReadonlyMap<string, number> {
-		return (
+		const ordinals = (
 			this.#sharedOverlay?.optimisticAfterOrdinals ??
 			this.optimisticInputs.afterOrdinalByClientMessageId
 		);
+		if (this.#pendingEchoes.length === 0) return ordinals;
+		const merged = new Map(ordinals);
+		for (const echo of this.#pendingEchoes) {
+			if (echo.afterOrdinal !== undefined) merged.set(echo.input.clientMessageId, echo.afterOrdinal);
+		}
+		return merged;
 	}
 
 	get localNotices(): readonly (LocalNoticeRow & { revision: number })[] {
@@ -140,38 +141,69 @@ export class ActiveTranscriptPresentationState {
 		return this.#displayRows;
 	}
 
-	get visibleRows(): ChatDisplayRow[] {
-		return this.#visibleRows;
-	}
-
 	get displayMessageCount(): number {
 		return this.entries.length + this.visibleOptimisticInputs.length + this.#displayLocalNotices.length;
 	}
 
-	get visibleMessages(): ChatMessage[] {
-		return messagesFromDisplayRows(this.#visibleRows);
-	}
-
-	get hasEarlierRowsToReveal(): boolean {
-		return hasEarlierTranscriptRowsToReveal(this.#visibleRows, this.entries);
-	}
-
 	get canLoadEarlier(): boolean {
-		return this.hasEarlierRowsToReveal || this.hasEarlierMessages;
+		return this.hasEarlierMessages;
 	}
 
 	get visibleOptimisticInputs(): OptimisticUserInput[] {
-		return visibleOptimisticTranscriptInputs(
+		const visible = visibleOptimisticTranscriptInputs(
 			this.hasLaterMessages,
 			this.optimisticUserInputs,
 			this.#echoedClientMessageIds,
 		);
+		const included = new Set(visible.map((input) => input.clientMessageId));
+		for (const echo of [...this.#pendingEchoes].sort((left, right) => left.position - right.position)) {
+			if (this.#echoedClientMessageIds.has(echo.input.clientMessageId) || included.has(echo.input.clientMessageId)) continue;
+			visible.splice(Math.min(echo.position, visible.length), 0, echo.input);
+		}
+		return visible;
+	}
+
+	protected retainPendingEchoes(transcriptViewId: string, messages: readonly TranscriptMessage[]): void {
+		if (!this.#sharedOverlay) return;
+		const ordinals = echoedClientMessageOrdinals(messages);
+		const pending = [...this.#pendingEchoes];
+		const retained = new Set(pending.map((echo) => echo.input.clientMessageId));
+		for (const [position, input] of this.visibleOptimisticInputs.entries()) {
+			const ordinal = ordinals.get(input.clientMessageId);
+			if (ordinal === undefined || retained.has(input.clientMessageId)) continue;
+			pending.push({ input: { ...input, delivery: 'delivered' }, ordinal, transcriptViewId, position, afterOrdinal: this.optimisticAfterOrdinals.get(input.clientMessageId) });
+		}
+		if (pending.length !== this.#pendingEchoes.length) this.#pendingEchoes = pending;
+	}
+
+	protected settlePendingEchoes(): void {
+		const remaining = this.#pendingEchoes.filter((echo) =>
+			(!this.transcriptViewId || echo.transcriptViewId === this.transcriptViewId)
+			&& echo.ordinal >= (this.nextBeforeOrdinal ?? 1)
+			&& !this.#echoedClientMessageIds.has(echo.input.clientMessageId),
+		);
+		if (remaining.length !== this.#pendingEchoes.length) {
+			this.#pendingEchoes = remaining;
+			this.feedMutations.record('presentation-structure');
+		}
+	}
+
+	protected settlePublishedSnapshotEchoes(): void {
+		this.settlePendingEchoes();
+		const remaining = this.#pendingEchoes.filter((echo) => echo.ordinal <= this.loadedThroughOrdinal);
+		if (remaining.length !== this.#pendingEchoes.length) {
+			this.#pendingEchoes = remaining;
+			this.feedMutations.record('presentation-structure');
+		}
+	}
+
+	protected discardPendingEchoes(): void {
+		this.#pendingEchoes = [];
 	}
 
 	appendLocalNotice(noticeType: LocalNoticeType, content: string): void {
 		if (this.#sharedOverlay) return;
 		this.notices.append(noticeType, content);
-		this.growVisibleWindow();
 		this.feedMutations.record('presentation-structure');
 	}
 
@@ -188,13 +220,11 @@ export class ActiveTranscriptPresentationState {
 
 	protected drainServerNotices(chatId: string): void {
 		if (this.#sharedOverlay || !this.notices.drain(chatId)) return;
-		this.growVisibleWindow();
 		this.feedMutations.record('presentation-structure');
 	}
 
 	clearLocalNotices(throughRevision?: number): void {
 		if (this.#sharedOverlay || !this.notices.clearThrough(throughRevision)) return;
-		this.growVisibleWindow();
 		this.feedMutations.record('presentation-structure');
 	}
 
@@ -213,54 +243,5 @@ export class ActiveTranscriptPresentationState {
 	clearOptimisticUserInput(clientMessageId: string): void {
 		if (this.#sharedOverlay) return;
 		this.optimisticInputs.clear(clientMessageId);
-	}
-
-	revealEarlierLoadedRows(): boolean {
-		const previousCount = this.visibleMessageCount;
-		const nextCount = Math.min(this.displayMessageCount, previousCount + 100);
-		if (nextCount <= previousCount) return false;
-		this.visibleMessageCount = nextCount;
-		this.pageStates.earlier = idlePageState();
-		this.rememberVisibleWindowStart();
-		this.feedMutations.record('history-earlier');
-		return true;
-	}
-
-	revealAllLoadedMessages(): void {
-		const changed = this.visibleMessageCount < this.displayMessageCount;
-		this.visibleMessageCount = Math.max(this.visibleMessageCount, this.displayMessageCount);
-		this.rememberVisibleWindowStart();
-		if (changed) this.feedMutations.record('initial');
-	}
-
-	protected rememberVisibleWindowStart(): void {
-		let firstVisibleOrdinal: number | undefined;
-		for (const row of this.#visibleRows) {
-			if (row.kind !== 'message' || row.ordinal === undefined) continue;
-			firstVisibleOrdinal = row.ordinal;
-			break;
-		}
-		if (firstVisibleOrdinal === undefined) return;
-		this.visibleWindowStartOrdinal = firstVisibleOrdinal;
-	}
-
-	protected preserveVisibleWindowStart(): void {
-		if (this.visibleWindowStartOrdinal === null) {
-			this.rememberVisibleWindowStart();
-			return;
-		}
-		this.growVisibleWindow();
-	}
-
-	protected growVisibleWindow(): void {
-		if (this.visibleWindowStartOrdinal === null) return;
-		const firstVisibleIndex = this.#displayRows.findIndex(
-			(row) => row.kind === 'message' && row.ordinal === this.visibleWindowStartOrdinal,
-		);
-		if (firstVisibleIndex === -1) {
-			this.visibleWindowStartOrdinal = null;
-			return;
-		}
-		this.visibleMessageCount = this.#displayRows.length - firstVisibleIndex;
 	}
 }

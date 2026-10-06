@@ -43,9 +43,8 @@ export function mergeRowsWithOptimisticInputs(
 	while (messageIndex < rows.length && optimisticIndex < optimisticRows.length) {
 		const row = rows[messageIndex];
 		const optimistic = optimisticRows[optimisticIndex];
-		const rowPrecedesOptimistic = optimistic.afterOrdinal !== undefined
-			&& row.ordinal !== undefined
-			&& row.ordinal <= optimistic.afterOrdinal;
+		const rowPrecedesOptimistic = row.ordinal !== undefined
+			&& (optimistic.afterOrdinal === undefined || row.ordinal <= optimistic.afterOrdinal);
 		if (rowPrecedesOptimistic) {
 			merged.push(row);
 			messageIndex += 1;
@@ -95,17 +94,6 @@ export function visibleOptimisticTranscriptInputs(
 	return inputs.filter((input) => !echoedIds.has(input.clientMessageId));
 }
 
-export function hasEarlierTranscriptRowsToReveal(
-	visibleRows: readonly ChatDisplayRow[],
-	entries: readonly TranscriptMessage[],
-): boolean {
-	const firstVisibleOrdinal = visibleRows.find(
-		(row): row is ChatTranscriptRow => row.kind === 'message' && row.ordinal !== undefined,
-	)?.ordinal;
-	return firstVisibleOrdinal !== undefined
-		&& (entries[0]?.ordinal ?? firstVisibleOrdinal) < firstVisibleOrdinal;
-}
-
 export function responseMessageTypesAfter(
 	entries: readonly TranscriptMessage[],
 	ordinal: number,
@@ -133,30 +121,6 @@ export function transcriptDisplayRows(input: {
 			input.optimisticAfterOrdinals,
 		);
 	return input.notices.length === 0 ? messages : [...messages, ...input.notices];
-}
-
-export function visibleTranscriptRows(input: {
-	readonly entries: readonly TranscriptMessage[];
-	readonly transcriptViewId: string;
-	readonly optimisticInputs: OptimisticUserInput[];
-	readonly optimisticAfterOrdinals: ReadonlyMap<string, number>;
-	readonly notices: readonly LocalNoticeRow[];
-	readonly visibleCount: number;
-}): ChatDisplayRow[] {
-	const noticeCount = Math.min(input.notices.length, input.visibleCount);
-	const visibleNotices = input.notices.slice(-noticeCount);
-	const messageLimit = input.visibleCount - noticeCount;
-	if (messageLimit === 0) return visibleNotices;
-
-	const durableRows = durableRowsFor(input.entries.slice(-messageLimit), input.transcriptViewId);
-	const messageRows = input.optimisticInputs.length === 0
-		? durableRows
-		: mergeRowsWithOptimisticInputs(
-			durableRows,
-			input.optimisticInputs,
-			input.optimisticAfterOrdinals,
-		).slice(-messageLimit);
-	return [...messageRows, ...visibleNotices];
 }
 
 export function messagesFromDisplayRows(rows: readonly ChatDisplayRow[]): ChatMessage[] {
