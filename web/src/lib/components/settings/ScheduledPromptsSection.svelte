@@ -113,13 +113,12 @@
 		}
 	}
 
-	// Matches the executor selector, which stays hidden while Local is the only executor.
 	function executorLabelFor(
 		scheduledPrompt: ScheduledPrompt,
 		existingChat: ChatSessionRecord | undefined,
 	): string | undefined {
 		const executorId = scheduledPromptExecutorId(scheduledPrompt, existingChat);
-		if (!executorId || (executorId === 'local' && !executors.hasRemoteExecutors)) return undefined;
+		if (!executorId) return undefined;
 		return executors.label(executorId);
 	}
 

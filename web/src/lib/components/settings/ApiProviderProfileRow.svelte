@@ -3,7 +3,7 @@
 	import PencilIcon from '@lucide/svelte/icons/pencil';
 	import CopyIcon from '@lucide/svelte/icons/copy';
 	import TrashIcon from '@lucide/svelte/icons/trash';
-	import Network from '@lucide/svelte/icons/network';
+	import ExecutorPill from '$lib/components/shared/ExecutorPill.svelte';
 	import { getApiProviders, getExecutors } from '$lib/context';
 	import * as m from '$lib/paraglide/messages.js';
 	import type {
@@ -73,15 +73,7 @@
 	</div>
 	<div class="mt-3 flex min-w-0 flex-wrap gap-1.5">
 		{#each assignedExecutors as executor (executor.id)}
-			<span
-				class="flex w-fit min-w-0 max-w-full items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground"
-				data-slot="api-provider-executor"
-				title={m.executors_named_label({ label: executor.label })}
-			>
-				<Network class="size-3 shrink-0 text-file-icon-folder" aria-hidden="true" />
-				<span class="sr-only">{m.executors_named_label({ label: executor.label })}</span>
-				<span class="truncate" aria-hidden="true">{executor.label}</span>
-			</span>
+			<ExecutorPill label={executor.label} data-slot="api-provider-executor" />
 		{:else}
 			<span class="text-xs text-muted-foreground">{m.settings_provider_unassigned()}</span>
 		{/each}

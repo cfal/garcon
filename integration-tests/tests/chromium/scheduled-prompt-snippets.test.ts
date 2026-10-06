@@ -28,9 +28,21 @@ test('scheduled snippets support defaults, inline triggers, both targets, and mo
     await page.goto(integration.garcon.baseUrl);
     await page.getByRole('button', { name: 'More actions', exact: true }).click();
     await page.getByRole('menuitem', { name: 'Scheduled prompts', exact: true }).click();
+    const list = page.getByRole('dialog', { name: 'Scheduled Prompts', exact: true });
+    await capture('desktop-list');
     await page.getByRole('button', { name: 'Add Prompt', exact: true }).click();
     const editor = page.getByRole('dialog', { name: 'Add Scheduled Prompt', exact: true });
     await editor.waitFor();
+    const assertHeader = async (dialog: Locator) => {
+      const title = await dialog.getByRole('heading').first().boundingBox();
+      const close = await dialog.getByRole('button', { name: 'Close', exact: true }).boundingBox();
+      expect(title).not.toBeNull();
+      expect(close).not.toBeNull();
+      expect(title!.x + title!.width).toBeLessThanOrEqual(close!.x);
+      expect(close!.width).toBeGreaterThanOrEqual(44);
+      expect(close!.height).toBeGreaterThanOrEqual(44);
+    };
+    await assertHeader(editor);
     await editor.locator('input[name="schedule-cadence"][value="recurring"]').check();
     await editor.getByLabel('Project Path', { exact: true }).fill('.');
     const browserDismiss = page.locator('[data-slot="directory-browser-dismiss"]');
@@ -101,22 +113,49 @@ test('scheduled snippets support defaults, inline triggers, both targets, and mo
       return bounds !== null && Math.abs(bounds.x) < 1 && Math.abs(bounds.y) < 1 && Math.abs(bounds.width - 390) < 1;
     }).toBe(true);
     await editor.locator(':scope > .overflow-y-auto').evaluate(element => { element.scrollTop = 0; });
+    await assertHeader(editor);
+    const headerBeforeScroll = await editor.getByRole('heading').first().boundingBox();
     await capture('mobile-options');
     await existingPrompt.scrollIntoViewIfNeeded();
+    expect((await editor.getByRole('heading').first().boundingBox())!.y).toBe(headerBeforeScroll!.y);
     await capture('mobile-prompt');
     const assertContained = async (dialog: Locator) => {
-      const bounds = await dialog.boundingBox();
-      expect(bounds).not.toBeNull();
-      expect(bounds!.x).toBeGreaterThanOrEqual(0);
-      expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(391);
+      await browserExpect.poll(async () => {
+        const bounds = await dialog.boundingBox();
+        return bounds !== null && bounds.x >= 0 && bounds.x + bounds.width <= page.viewportSize()!.width + 1;
+      }).toBe(true);
       expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
     };
     await assertContained(editor);
+    await page.setViewportSize({ width: 320, height: 740 });
+    await assertContained(editor);
+    await assertHeader(editor);
+    await page.setViewportSize({ width: 390, height: 844 });
     expect(await existingPrompt.evaluate(element => getComputedStyle(element).fontSize)).toBe('16px');
     const save = editor.getByRole('button', { name: 'Save Prompt', exact: true });
     await browserExpect(save).toBeEnabled();
+    const saveEntered = new Deferred<void>();
+    const releaseSave = new Deferred<void>();
+    await page.route('**/api/v1/scheduled-prompts', async route => {
+      if (route.request().method() === 'POST') {
+        saveEntered.resolve(undefined);
+        await releaseSave.promise;
+      }
+      await route.continue();
+    });
     await existingPrompt.press('Control+Enter');
+    try {
+      await saveEntered.promise;
+      await browserExpect(editor.getByRole('button', { name: 'Close', exact: true })).toBeDisabled();
+      await browserExpect(editor.getByRole('button', { name: 'Cancel', exact: true })).toBeDisabled();
+      // Escape asks to close like the buttons do and is refused while the save is in flight.
+      await page.keyboard.press('Escape');
+      await browserExpect(editor).toBeVisible();
+    } finally {
+      releaseSave.resolve(undefined);
+    }
     await editor.waitFor({ state: 'detached' });
+    await page.unroute('**/api/v1/scheduled-prompts');
     const saved = (await client.getScheduledPrompts()).prompts[0];
     expect(saved.target).toEqual({ type: 'existing-chat', chatId, busyBehavior: 'skip' });
     expect(saved.prompt).toContain('{{chat_id}}');
@@ -136,5 +175,13 @@ test('scheduled snippets support defaults, inline triggers, both targets, and mo
     const resaved = (await client.getScheduledPrompts()).prompts[0];
     expect(resaved.target.type).toBe('new-chat');
     expect(resaved.prompt).toBe(newChatText);
+    await capture('mobile-list');
+    await assertHeader(list);
+    await list.getByRole('button', { name: 'Add Prompt', exact: true }).click();
+    await editor.getByRole('button', { name: 'Close', exact: true }).click();
+    await editor.waitFor({ state: 'detached' });
+    await browserExpect(list).toBeVisible();
+    await list.getByRole('button', { name: 'Close', exact: true }).click();
+    await list.waitFor({ state: 'detached' });
   });
 }, 120_000);

@@ -73,10 +73,10 @@ describe('CommitSurface', () => {
 		const folder = screen.getByRole('button', { name: '/project' });
 		const toolbar = container.querySelector('[data-git-surface-toolbar]');
 		expect(toolbar?.querySelector('[data-git-folder-picker]')).toBe(folder);
-		expect(toolbar?.querySelector('button')).toBe(
-			screen.getByRole('button', { name: /current ref HEAD/i }),
-		);
-		expect(screen.queryByRole('button', { name: /Executor:/ })).toBeNull();
+		const executor = screen.getByRole('button', { name: 'Executor: Local' });
+		const branch = screen.getByRole('button', { name: /current ref HEAD/i });
+		expect(toolbar?.querySelector('button')).toBe(executor);
+		expect(executor.compareDocumentPosition(branch) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 	});
 
 	it('places the selected-file summary between the file tree and commit message', () => {

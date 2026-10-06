@@ -103,7 +103,7 @@ describe('GitSurfaceToolbar', async () => {
 
 		expect(folder.getAttribute('title')).toBe('/very/long/workspace/project/path');
 		expect(folder.querySelector('span')?.className).toContain('truncate');
-		expect(screen.queryByRole('button', { name: /Executor:/ })).toBeNull();
+		expect(screen.getByRole('button', { name: 'Executor: Local' })).toBeTruthy();
 		expect(screen.getByRole('button', { name: /current ref HEAD/i })).toBeTruthy();
 	});
 

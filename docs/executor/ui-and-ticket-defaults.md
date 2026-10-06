@@ -9,7 +9,7 @@ Reuse the [executor selector](../../web/src/lib/components/shared/ExecutorSelect
 - Keep the existing Network icon and semantic theme color.
 - For the chat composer, match the model selector's height, spacing, rounding, and hover treatment.
 - Use available container width for responsive behavior, including narrow desktop panels.
-- Retain the existing visibility policy: hide when Local is the only configured executor. Configured offline executors still count; a retained unavailable selection must remain visible.
+- Keep the selected executor visible even when Local is the only configured executor. A retained unavailable selection must remain visible.
 - Keep availability specific to the operation. Selecting an execution target must not require Files or Git support. Offline or unsupported targets must never silently fall back to Local.
 
 ## New Chat And Scheduled New Chat
@@ -24,7 +24,7 @@ Executor selection sits beside the project directory rather than in the model pi
 
 Changing the executor chooses the destination's saved default or most recent directory, falling back to its advertised project base. Prompt text and attachments are preserved. An agent/model selection is kept only when valid on the destination, and submission requires a validated destination catalog.
 
-The scheduled prompts list shows each prompt's executor as a pill: the executor a new chat will start on, or the current executor of an existing chat. A prompt whose chat no longer exists shows no pill, and the pill is hidden while Local is the only executor.
+The scheduled prompts list shows each prompt's executor as a pill: the executor a new chat will start on, or the current executor of an existing chat. The Local pill remains visible when it is the only executor. A prompt whose chat no longer exists shows no pill.
 
 ## Chat Composer
 
@@ -59,7 +59,7 @@ Generation placement is independent of project placement. In particular, selecti
 
 ## Remaining Directory Pickers
 
-- Scheduled New Chat gates browsing and completion on Files capability and passes the selected executor into the directory browser.
+- Scheduled New Chat gates browsing and completion on Files capability and passes the selected executor into the directory browser. The fullscreen mobile browser shows that owning executor in its header.
 - Preamble path rules keep per-rule executor selection with the shared selector styling, and browse against that rule's executor and project base instead of the controller's directory.
 - The composer handoff's destination picker uses the same executor-qualified browser.
 

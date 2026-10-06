@@ -173,7 +173,7 @@
 	{/if}
 	<div class="min-h-0 min-w-0 flex-1">
 		<FileTree
-			executorCrumb={executors.hasRemoteExecutors || tree.executorId !== 'local' ? executorCrumb : undefined}
+			{executorCrumb}
 			{contentGate}
 			onGoToChatProject={() => controller.goToChatProject()}
 			canGoToChatProject={controller.canGoToChatProject}

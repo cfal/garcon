@@ -99,15 +99,21 @@ describe('ScheduledPromptsSection', () => {
 		expect(executorPill('Missing existing chat')).toBeNull();
 	});
 
-	it('omits the executor while Local is the only executor', () => {
+	it('keeps Local executor pills for new and existing chats when it is the only executor', () => {
 		render(ScheduledPromptsSectionTestHost, {
 			executors: [localExecutor],
-			chats: [],
-			prompts: [prompt('local-new', 'Local new chat', newChat())],
+			chats: [chat('chat-local', 'local')],
+			prompts: [
+				prompt('local-new', 'Local new chat', newChat()),
+				prompt('local-existing', 'Local existing chat', existingChat('chat-local')),
+				prompt('missing-existing', 'Missing existing chat', existingChat('chat-missing')),
+			],
 		});
 
 		expect(screen.getByRole('heading', { name: 'Local new chat' })).toBeTruthy();
-		expect(executorPill('Local new chat')).toBeNull();
+		expect(executorPill('Local new chat')).toBe('Executor: Local');
+		expect(executorPill('Local existing chat')).toBe('Executor: Local');
+		expect(executorPill('Missing existing chat')).toBeNull();
 	});
 
 	it('shows each prompt its latest run and opens the chat that run created', async () => {

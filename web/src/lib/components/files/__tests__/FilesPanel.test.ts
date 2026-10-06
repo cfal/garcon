@@ -242,6 +242,7 @@ describe('FilesPanel', () => {
 
 			setFilesPanelTestContext({ fileSessions, singletonSurfaces });
 			render(FilesPanelTestHost, { presentation });
+			expect(screen.getByRole('button', { name: 'Executor: Local' })).toBeTruthy();
 			await fireEvent.click(screen.getByRole('rowheader', { name: /^file\.ts/ }));
 
 			expect(open).toHaveBeenCalledWith(

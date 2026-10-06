@@ -16,6 +16,7 @@
 	import * as m from '$lib/paraglide/messages.js';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
+	import ExecutorPill from '$lib/components/shared/ExecutorPill.svelte';
 	import { getExecutors, getTransientLayers } from '$lib/context';
 	import { DirectoryBrowserState } from '$lib/project-paths/directory-browser-state.svelte.js';
 	import { splitTypedDirectoryPath } from '$lib/project-paths/directory-location.js';
@@ -346,10 +347,13 @@
 			showCloseButton={false}
 			class="top-[var(--app-viewport-center-y)] flex h-[var(--app-height)] max-h-[var(--app-height)] w-screen max-w-none flex-col gap-0 overflow-hidden rounded-none border-0 p-0 sm:max-w-none"
 		>
-			<div class="flex shrink-0 items-center justify-between gap-2 border-b border-border pl-4 pr-2">
-				<Dialog.Title class="min-w-0 truncate text-base font-semibold">
-					{m.chat_directory_browser_select_directory()}
-				</Dialog.Title>
+			<div class="flex shrink-0 items-center justify-between gap-3 border-b border-border py-2 pl-4 pr-2">
+				<div class="min-w-0 space-y-1.5">
+					<Dialog.Title class="min-w-0 truncate text-base font-semibold">
+						{m.chat_directory_browser_select_directory()}
+					</Dialog.Title>
+					<ExecutorPill label={executors.label(executorId)} data-slot="directory-browser-executor" />
+				</div>
 				<button
 					type="button"
 					onclick={onClose}

@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { flushSync } from 'svelte';
 import { afterEach, expect, it, vi } from 'vitest';
 import { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
 import {
@@ -50,12 +51,19 @@ it('selects file-capable executors and keeps unavailable executors visible but d
 });
 
 it.each(['files', 'git', 'agents'] as const)(
-	'hides the %s selector for a Local-only inventory',
-	(service) => {
-		const executors = new ExecutorsStore();
+	'keeps the %s selector usable for a Local-only inventory',
+	async (service) => {
+		const read = vi.fn(async () => [localExecutor]);
+		const executors = new ExecutorsStore(read);
 		executors.applySnapshot([localExecutor]);
-		render(ExecutorSelector, { executors, executorId: 'local', service, onSelect: vi.fn() });
-		expect(screen.queryByRole('button', { name: /Executor:/ })).toBeNull();
+		const onSelect = vi.fn();
+		render(ExecutorSelector, { executors, executorId: 'local', service, onSelect });
+		await fireEvent.click(screen.getByRole('button', { name: 'Executor: Local' }));
+		expect(read).toHaveBeenCalledOnce();
+		const local = screen.getByRole('menuitemradio', { name: 'Local' });
+		expect(local.getAttribute('aria-checked')).toBe('true');
+		await fireEvent.click(local);
+		expect(onSelect).toHaveBeenCalledWith('local');
 	},
 );
 
@@ -131,4 +139,15 @@ it('updates the selected label and open menu availability when inventory changes
 			screen.getByRole('menuitemradio', { name: 'Renamed worker' }).getAttribute('aria-disabled'),
 		).not.toBe('true'),
 	);
+});
+
+it('keeps the same Local trigger when the remote inventory is removed', () => {
+	const executors = new ExecutorsStore();
+	executors.applySnapshot([localExecutor, remoteExecutor]);
+	render(ExecutorSelector, { executors, executorId: 'local', service: 'agents', onSelect: vi.fn() });
+	const trigger = screen.getByRole('button', { name: 'Executor: Local' });
+	executors.applySnapshot([localExecutor]);
+	// Flushed first, so a trigger that unmounts with the inventory fails here.
+	flushSync();
+	expect(screen.getByRole('button', { name: 'Executor: Local' })).toBe(trigger);
 });

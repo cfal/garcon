@@ -3,6 +3,8 @@ import { tick } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '$lib/api/client';
 import { browseDirectory, createDirectory } from '$lib/api/files';
+import { ExecutorsStore } from '$lib/executors/executors-store.svelte';
+import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 import DirectoryBrowserTestHost from '$lib/components/project-paths/__tests__/DirectoryBrowserTestHost.svelte';
 
 vi.mock('$lib/api/files', () => ({ browseDirectory: vi.fn(), createDirectory: vi.fn() }));
@@ -275,4 +277,38 @@ describe('mobile directory sheet', () => {
 		await screen.findByRole('button', { name: 'alpha' });
 		expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Select this directory' }).disabled).toBe(false);
 	});
+});
+
+function executorPill(): Element | null {
+	return document.querySelector('[data-slot="directory-browser-executor"]');
+}
+
+function renderMobileBrowser(executors: ExecutorsStore, executorId: string) {
+	vi.mocked(browseDirectory).mockResolvedValue([]);
+	return render(DirectoryBrowserTestHost, {
+		executors, executorId, currentPath: '/repo/', basePath: '/repo', isMobile: true, onSelect: vi.fn(), onClose: vi.fn(),
+	});
+}
+
+it('shows the owning Local executor in the mobile browser when Local is the only executor', async () => {
+	const executors = new ExecutorsStore();
+	executors.applySnapshot([localExecutor]);
+	renderMobileBrowser(executors, 'local');
+	expect(executorPill()?.getAttribute('title')).toBe('Executor: Local');
+	expect(executorPill()?.textContent).toContain('Executor: Local');
+	await waitFor(() => expect(browseDirectory).toHaveBeenCalledWith('/repo', expect.any(AbortSignal), 'local'));
+});
+
+it('keeps the mobile browser pill bound to the remote owner through label and availability changes', async () => {
+	const executors = new ExecutorsStore();
+	executors.applySnapshot([localExecutor, remoteExecutor]);
+	renderMobileBrowser(executors, remoteExecutor.id);
+	const pill = executorPill();
+	expect(pill?.getAttribute('title')).toBe('Executor: Worker');
+	await waitFor(() => expect(browseDirectory).toHaveBeenCalledWith('/repo', expect.any(AbortSignal), remoteExecutor.id));
+	executors.applySnapshot([localExecutor, { ...remoteExecutor, label: 'Renamed worker', availability: 'offline' }]);
+	await waitFor(() => expect(pill?.getAttribute('title')).toBe('Executor: Renamed worker'));
+	executors.applySnapshot([localExecutor]);
+	await waitFor(() => expect(pill?.getAttribute('title')).toBe('Executor: Unavailable executor'));
+	expect(browseDirectory).toHaveBeenCalledOnce();
 });

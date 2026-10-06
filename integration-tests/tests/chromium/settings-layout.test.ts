@@ -81,7 +81,6 @@ test('scheduled-chat executor and path fields align for mouse and touch input', 
     await page.getByRole('menuitem', { name: 'Scheduled prompts', exact: true }).click();
     await page.getByRole('button', { name: 'Add Prompt', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: 'Add Scheduled Prompt', exact: true });
-    const picker = dialog.locator('[data-executor-picker]');
     const project = dialog.locator('#scheduled-project-path');
     await browserExpect(project).toBeVisible();
     await browserExpect(dialog.getByRole('button', { name: 'Select a different worktree', exact: true })).toBeVisible();
@@ -94,18 +93,32 @@ test('scheduled-chat executor and path fields align for mouse and touch input', 
       for (const width of [1440, 768, 390, 320]) {
         await page.setViewportSize({ width, height: 900 });
         await browserExpect(dialog).toHaveCSS('width', `${Math.min(width, 768)}px`);
-        const pickerRect = (await picker.boundingBox())!;
-        const projectRect = (await project.boundingBox())!;
-        expect(pickerRect.height).toBe(projectRect.height);
-        expect(pickerRect.x + pickerRect.width <= projectRect.x || pickerRect.y + pickerRect.height <= projectRect.y).toBe(true);
-        expect(await dialog.locator('[data-slot="project-path-field"]').evaluate(element => {
-          const feedback = element.nextElementSibling!;
-          return feedback.getBoundingClientRect().top - element.getBoundingClientRect().bottom;
-        })).toBe(4);
-        expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
-        const bounds = (await dialog.boundingBox())!;
-        expect(bounds.x).toBeGreaterThanOrEqual(0);
-        expect(bounds.x + bounds.width).toBeLessThanOrEqual(width);
+        for (const scrollTop of [0, 64]) {
+          await dialog.locator('div.overflow-y-auto').evaluate((element, top) => {
+            element.scrollTop = top;
+          }, scrollTop);
+          // Captures one layout snapshot so scroll anchoring cannot mix field coordinates.
+          const geometry = await dialog.evaluate(element => {
+            const picker = element.querySelector('[data-executor-picker]')!;
+            const project = element.querySelector('#scheduled-project-path')!;
+            const field = element.querySelector('[data-slot="project-path-field"]')!;
+            const readRect = ({ x, y, width, height }: DOMRect) => ({ x, y, width, height });
+            return {
+              picker: readRect(picker.getBoundingClientRect()),
+              project: readRect(project.getBoundingClientRect()),
+              feedbackGap: field.nextElementSibling!.getBoundingClientRect().top - field.getBoundingClientRect().bottom,
+              contained: element.scrollWidth <= element.clientWidth + 1,
+              bounds: readRect(element.getBoundingClientRect()),
+            };
+          });
+          const { picker: pickerRect, project: projectRect, bounds } = geometry;
+          expect(pickerRect.height).toBe(projectRect.height);
+          expect(pickerRect.x + pickerRect.width <= projectRect.x || pickerRect.y + pickerRect.height <= projectRect.y).toBe(true);
+          expect(geometry.feedbackGap).toBe(4);
+          expect(geometry.contained).toBe(true);
+          expect(bounds.x).toBeGreaterThanOrEqual(0);
+          expect(bounds.x + bounds.width).toBeLessThanOrEqual(width);
+        }
         await page.screenshot({ path: join(artifacts, `scheduled-chat-fields-${touch ? 'touch' : 'mouse'}-${width}.png`) });
       }
     }

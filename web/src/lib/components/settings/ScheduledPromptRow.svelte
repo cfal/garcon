@@ -25,7 +25,7 @@
 	import FileText from '@lucide/svelte/icons/file-text';
 	import Folder from '@lucide/svelte/icons/folder';
 	import MessageSquare from '@lucide/svelte/icons/message-square';
-	import Network from '@lucide/svelte/icons/network';
+	import ExecutorPill from '$lib/components/shared/ExecutorPill.svelte';
 	import Pencil from '@lucide/svelte/icons/pencil';
 	import Repeat from '@lucide/svelte/icons/repeat';
 	import CalendarClock from '@lucide/svelte/icons/calendar-clock';
@@ -117,16 +117,7 @@
 	<div class="flex min-w-0 items-start gap-2">
 		<div class="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 pt-1 text-xs">
 			{#if executorLabel}
-				{@const executorDescription = m.scheduled_prompts_executor({ label: executorLabel })}
-				<span
-					class={chipClass}
-					data-slot="scheduled-prompt-executor"
-					title={executorDescription}
-				>
-					<Network class="h-3 w-3 shrink-0 text-file-icon-folder" aria-hidden="true" />
-					<span class="sr-only">{executorDescription}</span>
-					<span class="truncate" aria-hidden="true">{executorLabel}</span>
-				</span>
+				<ExecutorPill label={executorLabel} data-slot="scheduled-prompt-executor" />
 			{/if}
 			<span
 				class="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 font-medium text-foreground"
