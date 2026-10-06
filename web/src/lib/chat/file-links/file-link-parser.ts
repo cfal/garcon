@@ -14,6 +14,8 @@ export interface ParsedFileLink {
 	line?: number;
 	/** Column extracted from :line:col suffix (future use). */
 	col?: number;
+	/** Explains why an absolute filesystem link cannot be routed to the viewer. */
+	blockedReason?: 'outside-root' | 'root-unavailable' | 'invalid-path';
 }
 
 // Excludes dots from the scheme character class to avoid matching
@@ -127,6 +129,9 @@ export function parseFileLink(
 	try {
 		decoded = decodeURIComponent(href);
 	} catch {
+		if (ABSOLUTE_UNIX_RE.test(href) || DRIVE_LETTER_RE.test(href)) {
+			return { ...ignored(href), blockedReason: 'invalid-path' };
+		}
 		return ignored(href);
 	}
 	if (SCHEME_RE.test(decoded) && !DRIVE_LETTER_RE.test(decoded)) return ignored(href);
@@ -144,10 +149,11 @@ export function parseFileLink(
 	if (isAbsolute) {
 		// Try to relativize against the base path
 		const basePath = options?.projectBasePath;
-		if (!basePath) return ignored(href);
+		if (!basePath) return { ...ignored(href), blockedReason: 'root-unavailable' };
 
 		const relative = stripBasePath(pathOnly, basePath);
-		if (!relative) return ignored(href);
+		if (relative === null) return { ...ignored(href), blockedReason: 'outside-root' };
+		if (!relative) return { ...ignored(href), blockedReason: 'invalid-path' };
 
 		const normalized = normalizePath(relative);
 		if (!normalized) return ignored(href);

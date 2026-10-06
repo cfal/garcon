@@ -100,9 +100,7 @@
 			'local',
 	);
 	const filesAvailable = $derived(executors.filesAvailable(executorId));
-	const projectBasePath = $derived(
-		executorId === 'local' ? appShell.projectBasePath : (executors.get(executorId)?.projectBasePath ?? ''),
-	);
+	const projectBasePath = $derived(executors.get(executorId)?.projectBasePath ?? '');
 	const imageFileRootPath = $derived(executors.get(executorId)?.projectBasePath);
 	const resolveChatReference: ResolveChatReference = (chatId) =>
 		resolveChatReferenceTarget(chatId, activeChatContext?.chatId, sessions.byId[chatId]);

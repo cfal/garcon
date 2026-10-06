@@ -44,13 +44,14 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 </script>
 
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages.js';
 	import SvelteMarkdown from '@humanspeak/svelte-markdown';
 	import MarkdownImage from './MarkdownImage.svelte';
 	import type { ResolveMarkdownImageFile } from '$lib/chat/file-links/file-link-resolver.js';
 	import CodeBlock from '$lib/components/rich-text/CodeBlock.svelte';
 	import ChatReference from '$lib/components/chat/ChatReference.svelte';
 	import MermaidBlock from '$lib/components/rich-text/MermaidBlock.svelte';
-	import { parseFileLink } from '$lib/chat/file-links/file-link-parser.js';
+	import { parseFileLink, type ParsedFileLink } from '$lib/chat/file-links/file-link-parser.js';
 	import {
 		parseChatReferenceHref,
 		type ResolveChatReference,
@@ -137,6 +138,28 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 	const parserOptions = $derived(
 		fileLinkBasePath ? { projectBasePath: fileLinkBasePath } : undefined,
 	);
+	let blockedLink = $state<{
+		href: string;
+		source: string;
+		basePath?: string;
+		reason: ParsedFileLink['blockedReason'];
+	} | null>(null);
+	const blockedLinkMessage = $derived.by(() => {
+		if (
+			!blockedLink ||
+			blockedLink.source !== source ||
+			blockedLink.basePath !== fileLinkBasePath
+		) {
+			return null;
+		}
+		if (blockedLink.reason === 'invalid-path') {
+			return m.markdown_file_link_invalid_path({ path: blockedLink.href });
+		}
+		if (fileLinkBasePath) {
+			return m.markdown_file_link_outside_root({ path: blockedLink.href, root: fileLinkBasePath });
+		}
+		return m.markdown_file_link_root_unavailable({ path: blockedLink.href });
+	});
 
 	const styles = $derived(VARIANT_STYLES[variant]);
 	const containerClass = $derived(`${styles.container} ${className}`.trim());
@@ -210,7 +233,7 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 			{:else}
 				{@const parsed = parseFileLink(href, parserOptions)}
 				{@const isFile = parsed.kind === 'file'}
-				{@const isAbsPath = !isFile && /^(\/|[A-Za-z]:[/\\])/.test(href ?? '')}
+				{@const isAbsPath = parsed.blockedReason !== undefined}
 				{@const isExternal = !isFile && !isAbsPath}
 				<a
 					{href}
@@ -223,8 +246,16 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 					onclick={isFile || isAbsPath
 						? (event: MouseEvent) => {
 								event.preventDefault();
+								blockedLink = null;
 								if (isFile) {
 									onLinkNavigate?.({ rawHref: href ?? '', kind: parsed.kind });
+								} else {
+									blockedLink = {
+										href: href ?? '',
+										source,
+										basePath: fileLinkBasePath,
+										reason: parsed.blockedReason,
+									};
 								}
 							}
 						: undefined}
@@ -246,4 +277,12 @@ Supports visual variants for assistant, user, presented, and thinking contexts.
 			</div>
 		{/snippet}
 	</SvelteMarkdown>
+	{#if blockedLinkMessage}
+		<div
+			role="alert"
+			class="not-prose mt-2 rounded-md border border-border bg-muted p-3 text-sm text-foreground break-words"
+		>
+			{blockedLinkMessage}
+		</div>
+	{/if}
 </div>

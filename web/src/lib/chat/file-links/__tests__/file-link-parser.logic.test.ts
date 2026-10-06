@@ -2,6 +2,31 @@ import { describe, it, expect } from 'vitest';
 import { parseFileLink } from '$lib/chat/file-links/file-link-parser.js';
 
 describe('parseFileLink', () => {
+	it('distinguishes blocked filesystem links from external URLs', () => {
+		expect(parseFileLink('/tmp/report.md', { projectBasePath: '/workspace' })).toMatchObject({
+			kind: 'ignored',
+			blockedReason: 'outside-root',
+		});
+		expect(parseFileLink('/tmp/report.md')).toMatchObject({
+			kind: 'ignored',
+			blockedReason: 'root-unavailable',
+		});
+		expect(parseFileLink('/tmp/report%ZZ.md')).toMatchObject({
+			kind: 'ignored',
+			blockedReason: 'invalid-path',
+		});
+		expect(parseFileLink('/', { projectBasePath: '/' })).toMatchObject({
+			kind: 'ignored',
+			blockedReason: 'invalid-path',
+		});
+		for (const href of [
+			'//example.com/docs',
+			'https://example.com/docs',
+			'%2F%2Fexample.com/docs',
+		]) {
+			expect(parseFileLink(href)).not.toHaveProperty('blockedReason');
+		}
+	});
 	describe('accepts relative file paths', () => {
 		it('simple filename', () => {
 			const result = parseFileLink('README.md');

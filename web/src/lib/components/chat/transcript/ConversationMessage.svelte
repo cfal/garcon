@@ -158,9 +158,7 @@
 			'local',
 	);
 	const filesAvailable = $derived(executors.filesAvailable(executorId));
-	const projectBasePath = $derived(
-		executorId === 'local' ? appShell.projectBasePath : (executors.get(executorId)?.projectBasePath ?? ''),
-	);
+	const projectBasePath = $derived(executors.get(executorId)?.projectBasePath ?? '');
 	// Automatic reads wait for the confirmed executor root, not the shell's startup default.
 	const imageFileRootPath = $derived(executors.get(executorId)?.projectBasePath);
 	const chatProjectPath = $derived(
