@@ -74,6 +74,38 @@ function quickSummary(overrides: Partial<GitQuickSummaryReady> = {}): GitQuickSu
 }
 
 describe('PromptComposer focus', () => {
+	it('recalls only into an empty draft, browses with arrows, and releases recall after editing or switching chats', async () => {
+		const rendered = render(PromptComposerTestHost, {
+			recallPrompts: [
+				{ ordinal: 3, content: 'Synthetic latest prompt' },
+				{ ordinal: 1, content: 'Synthetic earlier prompt' },
+			],
+		});
+		const textarea = screen.getByRole<HTMLTextAreaElement>('textbox');
+		await fireEvent.keyDown(textarea, { key: 'ArrowUp', isComposing: true });
+		expect(textarea.value).toBe('');
+		await fireEvent.keyDown(textarea, { key: 'ArrowUp', shiftKey: true });
+		expect(textarea.value).toBe('');
+		await fireEvent.keyDown(textarea, { key: 'ArrowUp' });
+		expect(textarea.value).toBe('Synthetic latest prompt');
+		await fireEvent.keyDown(textarea, { key: 'ArrowUp' });
+		expect(textarea.value).toBe('Synthetic earlier prompt');
+		await fireEvent.keyDown(textarea, { key: 'ArrowDown' });
+		expect(textarea.value).toBe('Synthetic latest prompt');
+		await fireEvent.keyDown(textarea, { key: 'ArrowDown' });
+		expect(textarea.value).toBe('');
+		await fireEvent.keyDown(textarea, { key: 'ArrowUp' });
+		await fireEvent.input(textarea, { target: { value: 'Synthetic edited draft' } });
+		await fireEvent.keyDown(textarea, { key: 'ArrowUp' });
+		expect(textarea.value).toBe('Synthetic edited draft');
+		await fireEvent.input(textarea, { target: { value: '' } });
+		await rendered.rerender({
+			selectedChatId: 'chat-2',
+			recallPrompts: [{ ordinal: 1, content: 'Synthetic second chat prompt' }],
+		});
+		await fireEvent.keyDown(textarea, { key: 'ArrowUp' });
+		expect(textarea.value).toBe('Synthetic second chat prompt');
+	});
 	afterEach(() => {
 		cleanup();
 		resetPromptEditorStub();

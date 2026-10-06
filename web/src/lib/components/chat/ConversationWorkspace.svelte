@@ -15,6 +15,7 @@
 		type ConversationPanelActions,
 	} from './conversation-panel-actions.js';
 	import { INITIAL_VISIBLE_MESSAGES } from '$lib/chat/transcript/active-transcript-state.svelte.js';
+	import { recentRecallPrompts } from '$lib/chat/composer/prompt-recall';
 	import { sameGitProject } from '$lib/git/targets/git-target.js';
 	import type { ProjectTarget } from '$shared/project-resolution';
 	import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.svelte.js';
@@ -867,6 +868,10 @@
 			onAgentSettingChange={(descriptor, value) =>
 				controller.handleAgentSettingChange(descriptor, value)}
 			resendCandidates={chatState.resendCandidates}
+			recallIdentity={sessions.selectedChatId && chatState.activeChatId === sessions.selectedChatId
+				? `${sessions.selectedChatId}:${chatState.transcriptViewId}`
+				: null}
+			recallPrompts={recentRecallPrompts(chatState.entries)}
 			onExcludeResendCandidate={(ordinal) => chatState.excludeResendCandidate(ordinal)}
 		/>
 	</div>
