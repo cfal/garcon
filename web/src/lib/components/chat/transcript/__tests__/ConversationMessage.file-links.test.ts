@@ -20,6 +20,40 @@ import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures
 const TS = '2026-05-14T00:00:00.000Z';
 
 describe('ConversationMessage file links', () => {
+	it.each([
+		['assistant', new AssistantMessage(TS, 'Open [report](REPORT.md)')],
+		['permission', new PermissionRequestMessage(TS, 'synthetic-plan',
+			new ExitPlanModeToolUseMessage(TS, 'synthetic-tool', 'Open [report](REPORT.md)'))],
+	] as const)('explains a relative link before the executor root loads in %s', async (_kind, message) => {
+		const openAuto = vi.fn();
+		render(ConversationMessageHost, {
+			message, openAuto,
+			executors: [{ ...localExecutor, projectBasePath: null }],
+			executorUpdate: [localExecutor],
+		});
+		await fireEvent.click(screen.getByRole('link', { name: 'report' }));
+		expect(openAuto).not.toHaveBeenCalled();
+		expect(screen.getByText('Cannot open REPORT.md: the accessible folder is not available yet. Wait for the executor to connect and try again.')).toBeTruthy();
+		await fireEvent.click(screen.getByRole('button', { name: 'Update executors' }));
+		await fireEvent.click(screen.getByRole('link', { name: 'report' }));
+		expect(openAuto).toHaveBeenCalledOnce();
+		expect(openAuto).toHaveBeenCalledWith(expect.objectContaining({
+			fileRootPath: '/workspace', relativePath: 'project/REPORT.md',
+		}));
+	});
+	it('uses the Local executor root while the shell still has its startup default', async () => {
+		const openAuto = vi.fn();
+		render(ConversationMessageHost, {
+			message: new AssistantMessage(TS, 'Open [report](/tmp/report.md)'),
+			openAuto,
+			projectBasePath: '/',
+			chatProjectPath: '/workspace/project',
+			executors: [localExecutor],
+		});
+		await fireEvent.click(screen.getByRole('link', { name: 'report' }));
+		expect(openAuto).not.toHaveBeenCalled();
+		expect(screen.getByRole('alert').textContent).toContain('outside the accessible folder /workspace');
+	});
 	it('opens a remote panel link on its owning executor while Local is selected', async () => {
 		const openAuto = vi.fn();
 		render(ConversationMessageHost, {
@@ -143,6 +177,9 @@ describe('ConversationMessage file links', () => {
 		await fireEvent.click(screen.getByRole('link', { name: 'secret' }));
 
 		expect(openAuto).not.toHaveBeenCalled();
+		expect(screen.getByRole('alert').textContent).toContain(
+			'outside the accessible folder /workspace',
+		);
 	});
 
 	it('does not resolve received inter-agent file links against the receiving chat project', async () => {

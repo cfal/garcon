@@ -158,9 +158,7 @@
 			'local',
 	);
 	const filesAvailable = $derived(executors.filesAvailable(executorId));
-	const projectBasePath = $derived(
-		executorId === 'local' ? appShell.projectBasePath : (executors.get(executorId)?.projectBasePath ?? ''),
-	);
+	const projectBasePath = $derived(executors.get(executorId)?.projectBasePath ?? '');
 	// Automatic reads wait for the confirmed executor root, not the shell's startup default.
 	const imageFileRootPath = $derived(executors.get(executorId)?.projectBasePath);
 	const chatProjectPath = $derived(
@@ -477,6 +475,12 @@
 		if (link.kind !== 'file') return;
 		if (!filesAvailable) {
 			notifications.error(m.file_command_executor_unavailable(), { key: 'file-executor-unavailable' });
+			return true;
+		}
+		if (!projectBasePath) {
+			notifications.error(m.markdown_file_link_root_unavailable({ path: link.rawHref }), {
+				key: 'file-root-unavailable',
+			});
 			return true;
 		}
 		const chat = activeChatContext;

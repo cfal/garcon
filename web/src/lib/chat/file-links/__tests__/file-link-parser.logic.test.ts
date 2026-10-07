@@ -2,6 +2,31 @@ import { describe, it, expect } from 'vitest';
 import { parseFileLink } from '$lib/chat/file-links/file-link-parser.js';
 
 describe('parseFileLink', () => {
+	it('distinguishes blocked filesystem links from external URLs', () => {
+		expect(parseFileLink('/tmp/report.md', { projectBasePath: '/workspace' })).toMatchObject({
+			kind: 'ignored',
+			blockedReason: 'outside-root',
+		});
+		expect(parseFileLink('/tmp/report.md')).toMatchObject({
+			kind: 'ignored',
+			blockedReason: 'root-unavailable',
+		});
+		expect(parseFileLink('/tmp/report%ZZ.md')).toMatchObject({
+			kind: 'ignored',
+			blockedReason: 'invalid-path',
+		});
+		expect(parseFileLink('/', { projectBasePath: '/' })).toMatchObject({
+			kind: 'ignored',
+			blockedReason: 'invalid-path',
+		});
+		for (const href of [
+			'//example.com/docs',
+			'https://example.com/docs',
+			'%2F%2Fexample.com/docs',
+		]) {
+			expect(parseFileLink(href)).not.toHaveProperty('blockedReason');
+		}
+	});
 	describe('accepts relative file paths', () => {
 		it('simple filename', () => {
 			const result = parseFileLink('README.md');
@@ -123,6 +148,35 @@ describe('parseFileLink', () => {
 			expect(result.relativePath).toBe('docs/guide.md');
 		});
 	});
+
+	it.each(['//server/share', '\\\\server\\share', '//server/share/'])(
+		'claims matching UNC links under confirmed root %s',
+		(projectBasePath) => {
+			for (const href of [
+				'//server/share/report.md:42:7',
+				'//server%2Fshare%2Freport.md:42:7',
+				'%2F%2Fserver%2Fshare%2Freport.md:42:7',
+			]) {
+				expect(parseFileLink(href, { projectBasePath })).toMatchObject({
+					kind: 'file',
+					relativePath: 'report.md',
+					line: 42,
+					col: 7,
+				});
+			}
+		},
+	);
+
+	it.each(['//server/share2/report.md', '//other/share/report.md', '//example.com/docs'])(
+		'leaves nonmatching protocol-relative URL external: %s',
+		(href) => {
+			expect(parseFileLink(href, { projectBasePath: '//server/share' })).toEqual({
+				kind: 'ignored',
+				relativePath: '',
+				rawHref: href,
+			});
+		},
+	);
 
 	describe('ignores URLs with schemes', () => {
 		it('https URL', () => {

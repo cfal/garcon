@@ -262,6 +262,86 @@ describe('Markdown', () => {
 	});
 
 	describe('file link interception', () => {
+		it.each(['/workspace/.', '/workspace/./', '/workspace/./?view=1'])(
+			'blocks absolute paths that normalize to the root: %s',
+			async (href) => {
+				render(Markdown, { source: `Open [directory](${href})`, fileLinkBasePath: '/workspace' });
+				const link = screen.getByRole('link', { name: 'directory' });
+				const event = new MouseEvent('click', { bubbles: true, cancelable: true });
+				link.dispatchEvent(event);
+				await tick();
+				expect(event.defaultPrevented).toBe(true);
+				expect(link.getAttribute('target')).toBeNull();
+				expect(screen.getByRole('alert').textContent).toContain('valid file path');
+			},
+		);
+		it.each(['/tmp/synthetic-report/REPORT.md', '%2Ftmp%2Fsynthetic-report%2FREPORT.md'])(
+			'explains why an out-of-root report cannot open: %s',
+			async (href) => {
+				const handler = vi.fn();
+				const view = render(Markdown, {
+					source: `Open [report](${href})`,
+					fileLinkBasePath: '/workspace',
+					onLinkNavigate: handler,
+				});
+				const link = screen.getByRole('link', { name: 'report' });
+				const event = new MouseEvent('click', { bubbles: true, cancelable: true });
+				link.dispatchEvent(event);
+				await tick();
+				expect(event.defaultPrevented).toBe(true);
+				expect(handler).not.toHaveBeenCalled();
+				expect(screen.getByRole('alert').textContent).toContain('/workspace');
+				expect(screen.getByRole('alert').textContent).toContain(href);
+				await view.rerender({ source: 'Another message' });
+				expect(screen.queryByRole('alert')).toBeNull();
+			},
+		);
+
+		it('explains an absolute file link before the root is available', async () => {
+			render(Markdown, { source: 'Open [report](/tmp/report.md)' });
+			await fireEvent.click(screen.getByRole('link', { name: 'report' }));
+			expect(screen.getByRole('alert').textContent).toContain(
+				'accessible folder is not available yet',
+			);
+		});
+
+		it('reports malformed absolute paths without navigating', async () => {
+			render(Markdown, {
+				source: 'Open [report](/tmp/report%ZZ.md)',
+				fileLinkBasePath: '/workspace',
+			});
+			await fireEvent.click(screen.getByRole('link', { name: 'report' }));
+			expect(screen.getByRole('alert').textContent).toContain('valid file path');
+		});
+
+		it.each(['//server/share/report.md', '%2F%2Fserver%2Fshare%2Freport.md'])(
+			'routes a confirmed UNC file link to the viewer: %s',
+			async (href) => {
+				const handler = vi.fn();
+				render(Markdown, {
+					source: `Open [report](${href})`,
+					fileLinkBasePath: '//server/share',
+					onLinkNavigate: handler,
+				});
+				const link = screen.getByRole('link', { name: 'report' });
+				const event = new MouseEvent('click', { bubbles: true, cancelable: true });
+				link.dispatchEvent(event);
+				await tick();
+				expect(event.defaultPrevented).toBe(true);
+				expect(link.getAttribute('target')).toBeNull();
+				expect(handler).toHaveBeenCalledWith({ rawHref: href, kind: 'file' });
+			},
+		);
+
+		it('keeps protocol-relative web links navigable', () => {
+			render(Markdown, { source: 'Open [docs](//example.com/docs)' });
+			const link = screen.getByRole('link', { name: 'docs' });
+			const event = new MouseEvent('click', { bubbles: true, cancelable: true });
+			link.dispatchEvent(event);
+			expect(event.defaultPrevented).toBe(false);
+			expect(link.getAttribute('target')).toBe('_blank');
+		});
+
 		it('renders file-like links without target="_blank"', () => {
 			render(Markdown, { source: 'See [config](src/config.ts)' });
 

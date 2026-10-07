@@ -14,6 +14,8 @@ export interface ParsedFileLink {
 	line?: number;
 	/** Column extracted from :line:col suffix (future use). */
 	col?: number;
+	/** Explains why an absolute filesystem link cannot be routed to the viewer. */
+	blockedReason?: 'outside-root' | 'root-unavailable' | 'invalid-path';
 }
 
 // Excludes dots from the scheme character class to avoid matching
@@ -89,6 +91,14 @@ function stripBasePath(absolutePath: string, basePath: string): string | null {
 	return null;
 }
 
+/** Lets a confirmed UNC filesystem root claim its paths before URL classification. */
+function matchesUncBasePath(path: string, basePath: string | undefined): boolean {
+	if (!basePath || !/^\/\/[^/]+\/[^/]+(?:\/|$)/.test(basePath.replace(/\\/g, '/'))) {
+		return false;
+	}
+	return stripBasePath(path, basePath) !== null;
+}
+
 export interface ParseFileLinkOptions {
 	/** Absolute paths under this directory are accepted and relativized. */
 	projectBasePath: string;
@@ -119,18 +129,26 @@ export function parseFileLink(
 	// Reject URLs with schemes (http:, https:, mailto:, etc.)
 	if (SCHEME_RE.test(href) && !DRIVE_LETTER_RE.test(href)) return ignored(href);
 
-	// Reject protocol-relative URLs
-	if (PROTOCOL_RELATIVE_RE.test(href)) return ignored(href);
-
 	// Decode URI components safely
 	let decoded: string;
 	try {
 		decoded = decodeURIComponent(href);
 	} catch {
+		if (PROTOCOL_RELATIVE_RE.test(href) && !matchesUncBasePath(href, options?.projectBasePath)) {
+			return ignored(href);
+		}
+		if (ABSOLUTE_UNIX_RE.test(href) || DRIVE_LETTER_RE.test(href)) {
+			return { ...ignored(href), blockedReason: 'invalid-path' };
+		}
 		return ignored(href);
 	}
 	if (SCHEME_RE.test(decoded) && !DRIVE_LETTER_RE.test(decoded)) return ignored(href);
-	if (PROTOCOL_RELATIVE_RE.test(decoded)) return ignored(href);
+	if (
+		PROTOCOL_RELATIVE_RE.test(decoded) &&
+		!matchesUncBasePath(decoded, options?.projectBasePath)
+	) {
+		return ignored(href);
+	}
 
 	// Extract line/col info before stripping hash, since #Lxx is both
 	// a hash fragment and a line marker.
@@ -140,28 +158,22 @@ export function parseFileLink(
 	const pathOnly = stripQueryAndHash(afterLineExtract);
 
 	const isAbsolute = ABSOLUTE_UNIX_RE.test(pathOnly) || DRIVE_LETTER_RE.test(pathOnly);
+	let relativePath = pathOnly;
 
 	if (isAbsolute) {
 		// Try to relativize against the base path
 		const basePath = options?.projectBasePath;
-		if (!basePath) return ignored(href);
+		if (!basePath) return { ...ignored(href), blockedReason: 'root-unavailable' };
 
 		const relative = stripBasePath(pathOnly, basePath);
-		if (!relative) return ignored(href);
-
-		const normalized = normalizePath(relative);
-		if (!normalized) return ignored(href);
-
-		return { kind: 'file', relativePath: normalized, rawHref: href, line, col };
+		if (relative === null) return { ...ignored(href), blockedReason: 'outside-root' };
+		relativePath = relative;
 	}
 
-	// Normalize
-	const normalized = normalizePath(pathOnly);
-
-	// Reject if normalization collapses to empty
-	if (!normalized) return ignored(href);
-
-	// At this point it's a relative path-like pattern
+	const normalized = normalizePath(relativePath);
+	if (!normalized) {
+		return isAbsolute ? { ...ignored(href), blockedReason: 'invalid-path' } : ignored(href);
+	}
 	return {
 		kind: 'file',
 		relativePath: normalized,

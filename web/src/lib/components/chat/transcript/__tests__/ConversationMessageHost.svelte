@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
+	import { localExecutor } from '$lib/executors/__tests__/fixtures';
 	import type { ExecutorSnapshot } from '$shared/executors';
 	import type { ConversationMessageChatContext } from '$lib/chat/transcript/conversation-message-context';
 	import ConversationMessage from '../ConversationMessage.svelte';
@@ -64,7 +65,9 @@
 		selectedChatId = 'chat-1',
 		removableChatId,
 	}: Props = $props();
-	const executorStore = setExecutorsTestContext(untrack(() => executors));
+	const executorStore = setExecutorsTestContext(
+		untrack(() => executors ?? [{ ...localExecutor, projectBasePath }]),
+	);
 	setCanonicalWorkspaceLayout();
 	const notifications = setNotifications(createNotificationsStore());
 	const initialHost = untrack(() => ({

@@ -100,9 +100,7 @@
 			'local',
 	);
 	const filesAvailable = $derived(executors.filesAvailable(executorId));
-	const projectBasePath = $derived(
-		executorId === 'local' ? appShell.projectBasePath : (executors.get(executorId)?.projectBasePath ?? ''),
-	);
+	const projectBasePath = $derived(executors.get(executorId)?.projectBasePath ?? '');
 	const imageFileRootPath = $derived(executors.get(executorId)?.projectBasePath);
 	const resolveChatReference: ResolveChatReference = (chatId) =>
 		resolveChatReferenceTarget(chatId, activeChatContext?.chatId, sessions.byId[chatId]);
@@ -149,6 +147,12 @@
 		if (!chat?.projectPath) return;
 		if (!filesAvailable) {
 			notifications.error(m.file_command_executor_unavailable(), { key: 'file-executor-unavailable' });
+			return true;
+		}
+		if (!projectBasePath) {
+			notifications.error(m.markdown_file_link_root_unavailable({ path: link.rawHref }), {
+				key: 'file-root-unavailable',
+			});
 			return true;
 		}
 		const resolved = resolveFileLinkTarget(link.rawHref, {
