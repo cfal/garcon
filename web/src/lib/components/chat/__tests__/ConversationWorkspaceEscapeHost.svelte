@@ -158,10 +158,10 @@
 		upsertServerChat: () => {},
 		removeChat: () => {},
 		setSelectedChatId: () => {},
-		applyProcessingEvent: () => {},
-		reconcileProcessing: () => {},
+		applyProcessingEvent: (chatId, phase) => ({ chatId, previousPhase: selectedChat.processingPhase, phase }),
+		reconcileProcessing: () => [],
 		quietRefreshChats: () => Promise.resolve(),
-	};
+	} satisfies Partial<ChatSessionsStore>;
 
 	setChatSessions(Object.defineProperties(new ChatSessionsStore(), Object.getOwnPropertyDescriptors(sessions)));
 	setLocalSettings({
