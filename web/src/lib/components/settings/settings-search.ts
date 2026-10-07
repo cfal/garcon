@@ -87,6 +87,8 @@ export function settingsSearchEntries(): SettingsSearchEntry[] {
 		].map((label) => ({ tab: 'automation' as const, label, section: m.settings_tab_automation() })),
 		...[
 			m.settings_tab_notifications(),
+			m.browser_notifications_title(),
+			m.browser_notifications_toggle(),
 			m.settings_telegram_notifications(),
 			m.settings_telegram_bot_token(),
 		].map((label) => ({

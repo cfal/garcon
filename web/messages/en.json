@@ -2924,5 +2924,16 @@
 	"settings_key_setup_unknown": "Provider not recognized. Choose a provider from the menus below.",
 	"markdown_file_link_outside_root": "Cannot open {path}: this file is outside the accessible folder {root}. Save or copy it under that folder, then link to the new path.",
 	"markdown_file_link_root_unavailable": "Cannot open {path}: the accessible folder is not available yet. Wait for the executor to connect and try again.",
-	"markdown_file_link_invalid_path": "Cannot open {path}: this link does not identify a valid file path."
+	"markdown_file_link_invalid_path": "Cannot open {path}: this link does not identify a valid file path.",
+	"browser_notifications_title": "Browser notifications",
+	"browser_notifications_description": "Get a notification when a chat finishes or needs permission while Garcon is open and unfocused. Notification text hides chat content. This is a setting for this browser.",
+	"browser_notifications_toggle": "Notify for completion and permission requests",
+	"browser_notifications_default": "Notifications are off. Enable to request permission from your browser.",
+	"browser_notifications_granted": "Browser permission granted. Garcon must stay open to receive new events.",
+	"browser_notifications_denied": "Notifications are blocked. Allow notifications in your browser site settings.",
+	"browser_notifications_unsupported": "Notifications are unavailable in this browser. Use a supported browser over HTTPS; mobile browsers may require installing Garcon.",
+	"browser_notifications_enable": "Enable browser notifications",
+	"browser_notification_completed": "Garcon: chat completed",
+	"browser_notification_permission": "Garcon: permission needed",
+	"browser_notification_answer": "Garcon: answer needed"
 }
