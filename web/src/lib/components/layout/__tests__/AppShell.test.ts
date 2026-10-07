@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { tick } from 'svelte';
 import {
 	AppShellBreakpointWorkspace,
 	AppShellLocalSettingsState,
@@ -779,6 +780,90 @@ describe('AppShell responsive workspace binding', () => {
 			).toBe('false'),
 		);
 	});
+
+	it.each(['left', 'right'] as const)(
+		'retains an interactive %s sidebar during multi-window fullscreen',
+		async (dock) => {
+			const workspace = installContext();
+			const localSettings = testContext.current?.localSettings as AppShellLocalSettingsState;
+			localSettings.fullscreenCoversSidebar = false;
+			localSettings.chatListDock = dock;
+			render(AppShell);
+			const chatList = document.querySelector<HTMLElement>('[data-workspace-chat-list]');
+			const panel = document.querySelector<HTMLElement>('[data-workspace-chat-list-panel]');
+			const selectChat = screen.getByRole('button', { name: 'Select test chat' });
+
+			await workspace.enterWindowFullscreen('window-main');
+			await tick();
+			await waitFor(() => expect(chatList?.getAttribute('aria-hidden')).toBe('false'));
+			expect(workspace.windowCount).toBe(2);
+			expect(chatList?.style.width).toBe('320px');
+			expect(chatList?.inert).toBe(false);
+			expect(panel?.inert).toBe(false);
+			expect(chatList?.classList.contains(dock === 'left' ? 'order-first' : 'order-last')).toBe(true);
+			selectChat.focus();
+			expect(document.activeElement).toBe(selectChat);
+			await fireEvent.click(selectChat);
+			expect(workspace.showChatCalls).toBe(1);
+			expect(workspace.layout.snapshot.fullscreenWindowId).toBe('window-main');
+
+			localSettings.sidebarWidth = 360;
+			await waitFor(() => expect(chatList?.style.width).toBe('360px'));
+			localSettings.fullscreenCoversSidebar = true;
+			await waitFor(() => expect(chatList?.getAttribute('aria-hidden')).toBe('true'));
+			expect(chatList?.inert).toBe(true);
+			expect(chatList?.style.width).toBe('0px');
+			localSettings.fullscreenCoversSidebar = false;
+			await waitFor(() => expect(chatList?.getAttribute('aria-hidden')).toBe('false'));
+			await workspace.exitWindowFullscreen('window-main');
+			expect(document.querySelector('[data-workspace-chat-list]')).toBe(chatList);
+			expect(screen.getByRole('button', { name: 'Select test chat' })).toBe(selectChat);
+		},
+	);
+
+	it('always covers the sidebar when only one workspace window remains', async () => {
+		const workspace = installContext();
+		const localSettings = testContext.current?.localSettings as AppShellLocalSettingsState;
+		localSettings.fullscreenCoversSidebar = false;
+		workspace.layout.publish(
+			workspace.layout.revision,
+			reduceWorkspaceLayout(workspace.layout.snapshot, [
+				{ type: 'close-window', windowId: 'window-files' },
+			]),
+		);
+		expect(workspace.windowCount).toBe(1);
+		render(AppShell);
+		const chatList = document.querySelector<HTMLElement>('[data-workspace-chat-list]');
+		await workspace.enterWindowFullscreen('window-main');
+		await waitFor(() => expect(chatList?.getAttribute('aria-hidden')).toBe('true'));
+		expect(chatList?.style.width).toBe('0px');
+		expect(chatList?.inert).toBe(true);
+		await workspace.exitWindowFullscreen('window-main');
+		await waitFor(() => expect(chatList?.getAttribute('aria-hidden')).toBe('false'));
+		expect(chatList?.style.width).toBe('320px');
+	});
+
+	it.each([true, false])(
+		'auto-hide overrides fullscreen sidebar coverage with hover capability %s',
+		async (hoverCapable) => {
+			hoverMediaQuery.setMatches(hoverCapable);
+			const workspace = installContext();
+			const localSettings = testContext.current?.localSettings as AppShellLocalSettingsState;
+			localSettings.fullscreenCoversSidebar = false;
+			localSettings.chatListAutohide = true;
+			render(AppShell);
+			await workspace.enterWindowFullscreen('window-main');
+			const chatList = document.querySelector<HTMLElement>('[data-workspace-chat-list]');
+			await waitFor(() => expect(chatList?.getAttribute('aria-hidden')).toBe('true'));
+			expect(chatList?.style.width).toBe('0px');
+			expect(chatList?.inert).toBe(true);
+			expect(screen.queryByRole('button', { name: 'Show chat sidebar' })).toBeNull();
+			localSettings.chatListAutohide = false;
+			await waitFor(() => expect(chatList?.getAttribute('aria-hidden')).toBe('false'));
+			expect(localSettings.fullscreenCoversSidebar).toBe(false);
+			expect(chatList?.style.width).toBe('320px');
+		},
+	);
 
 	it.each(['git-history', 'git-compare', 'chat-map', 'chat-canvas', 'pull-requests'] as const)(
 		'hides the mobile bottom bar for transient %s',

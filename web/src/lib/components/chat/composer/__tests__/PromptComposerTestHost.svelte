@@ -29,7 +29,11 @@
 	import { ChatDraftStore } from '$lib/chat/composer/chat-draft-store.svelte.js';
 	import { AppShellStore } from '$lib/stores/app-shell.svelte';
 	import { ConversationLifecycleState } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
-	import type { ChatSessionRecord, ChatStatus, SessionAgentId } from '$lib/chat/sessions/chat-session-types';
+	import type {
+		ChatSessionRecord,
+		ChatStatus,
+		SessionAgentId,
+	} from '$lib/chat/sessions/chat-session-types';
 	import type { ModelCatalogStore, ModelOption } from '$lib/agents/model-catalog-store.svelte';
 	import type { GitQuickSummaryReady } from '$lib/api/git.js';
 	import type { RecentAgentSetting, RemoteSettingsSnapshot } from '$shared/settings';
@@ -55,8 +59,10 @@
 	import { setCanonicalWorkspaceLayout } from '../../__tests__/workspace-layout-test-context.js';
 	import { ProjectResolutionStore } from '$lib/workspace/project-resolution-store.svelte.js';
 	import type { ProjectTarget } from '$shared/project-resolution';
+	import type { RecallPrompt } from '$lib/chat/composer/prompt-recall';
 
 	interface Props {
+		recallPrompts?: readonly RecallPrompt[];
 		selectedExecutorId?: string;
 		executors?: readonly ExecutorSnapshot[];
 		catalog?: ModelCatalogStore;
@@ -95,6 +101,7 @@
 	}
 
 	let {
+		recallPrompts = [],
 		selectedExecutorId = 'local',
 		executors: executorSnapshots,
 		catalog,
@@ -501,6 +508,8 @@
 	{onQuickCommit}
 />
 <PromptComposer
+	{recallPrompts}
+	recallIdentity={`${selectedChatId}:synthetic-view`}
 	{onsubmit}
 	{onSteerPreferredSubmit}
 	{isVisible}

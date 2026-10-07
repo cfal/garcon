@@ -6,6 +6,7 @@ import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures
 import { ExecutorsStore } from '$lib/executors/executors-store.svelte';
 import { makeTestGhCapability } from './gh-capability-test-context';
 import { makeRemoteSettingsSnapshot } from '$lib/stores/__tests__/remote-settings-snapshot-fixture';
+import { LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence';
 
 vi.mock('$lib/api/settings.js', () => ({
 	beginTelegramRecipientLink: vi.fn(),
@@ -72,6 +73,55 @@ describe('Settings', () => {
 			rendered.unmount();
 		}
 	});
+	it('preserves an unsaved setting draft while searching', async () => {
+		const appShell = createAppShellStore();
+		appShell.openSettings('interface');
+		const rendered = render(SettingsTestHost, {
+			appShell,
+			remoteSettings: new RemoteSettingsStore(),
+		});
+		try {
+			const trigger = screen.getByLabelText('Snippet trigger');
+			await fireEvent.input(trigger, { target: { value: 'invalid draft' } });
+			const input = screen.getByRole('searchbox', { name: 'Search settings' });
+			await fireEvent.input(input, { target: { value: 'theme' } });
+			await fireEvent.input(input, { target: { value: '' } });
+			expect((screen.getByLabelText('Snippet trigger') as HTMLInputElement).value).toBe(
+				'invalid draft',
+			);
+		} finally {
+			rendered.unmount();
+		}
+	});
+	it('finds controls across tabs, opens their section, and keeps browser searches independent of server loading', async () => {
+		const appShell = createAppShellStore();
+		appShell.openSettings('interface');
+		const remoteSettings = new RemoteSettingsStore();
+		remoteSettings.applySnapshot(makeRemoteSettingsSnapshot());
+		const refresh = vi.spyOn(remoteSettings, 'refreshInBackground').mockResolvedValue();
+		const rendered = render(SettingsTestHost, { appShell, remoteSettings });
+		try {
+			const input = screen.getByRole('searchbox', { name: 'Search settings' });
+			await fireEvent.input(input, { target: { value: 'MAX width' } });
+			const result = screen.getByRole('button', { name: 'Max chat width Interface' });
+			expect(refresh).not.toHaveBeenCalled();
+			await fireEvent.click(result);
+			expect((input as HTMLInputElement).value).toBe('');
+			expect(screen.getByRole('tabpanel', { name: 'Interface' })).toBeTruthy();
+			await fireEvent.input(input, { target: { value: 'commit model' } });
+			await fireEvent.click(
+				screen.getByRole('button', { name: 'Commit message model Automation' }),
+			);
+			expect(appShell.settingsTab).toBe('automation');
+			expect(refresh).toHaveBeenCalledOnce();
+			await fireEvent.input(input, { target: { value: 'zzzz-no-result' } });
+			expect(screen.getByRole('status').textContent).toContain('No matching settings');
+			await fireEvent.click(screen.getByRole('tab', { name: 'Interface' }));
+			expect((input as HTMLInputElement).value).toBe('');
+		} finally {
+			rendered.unmount();
+		}
+	});
 	it('reports recovery cleanup failures and allows retry without concurrent cleanup', async () => {
 		const appShell = createAppShellStore();
 		appShell.openSettings('interface');
@@ -108,7 +158,56 @@ describe('Settings', () => {
 			label: '',
 		});
 		vi.mocked(providersApi.getAgentReadiness).mockResolvedValue({});
-		vi.mocked(providersApi.getAgentAuthLoginStatus).mockResolvedValue({ state: 'idle', running: false });
+		vi.mocked(providersApi.getAgentAuthLoginStatus).mockResolvedValue({
+			state: 'idle',
+			running: false,
+		});
+	});
+
+	it('finds fullscreen sidebar coverage and preserves it while auto-hide disables the control', async () => {
+		const appShell = createAppShellStore();
+		appShell.openSettings('interface');
+		const onLocalToggle = vi.fn();
+		const rendered = render(SettingsTestHost, {
+			appShell,
+			remoteSettings: new RemoteSettingsStore(),
+			onLocalToggle,
+		});
+		try {
+			const search = screen.getByRole('searchbox', { name: 'Search settings' });
+			await fireEvent.input(search, { target: { value: 'cover sidebar' } });
+			await fireEvent.click(
+				screen.getByRole('button', {
+					name: 'Always cover chat sidebar in fullscreen Interface',
+				}),
+			);
+			const control = screen.getByRole('switch', {
+				name: 'Always cover chat sidebar in fullscreen',
+			});
+			expect(control.getAttribute('aria-checked')).toBe('true');
+			await fireEvent.click(control);
+			expect(onLocalToggle).toHaveBeenCalledExactlyOnceWith('fullscreenCoversSidebar');
+			expect(control.getAttribute('aria-checked')).toBe('false');
+			const settingsKey = LOCAL_STORAGE_KEYS.localSettings;
+			const saved = JSON.parse(localStorage.getItem(settingsKey) ?? '{}');
+			expect(saved.fullscreenCoversSidebar).toBe(false);
+			for (const chatListAutohide of [true, false]) {
+				const newValue = JSON.stringify({ ...saved, chatListAutohide });
+				localStorage.setItem(settingsKey, newValue);
+				window.dispatchEvent(
+					new StorageEvent('storage', { key: settingsKey, newValue, storageArea: localStorage }),
+				);
+				await waitFor(() => expect(control.hasAttribute('disabled')).toBe(chatListAutohide));
+				expect(control.getAttribute('aria-checked')).toBe('false');
+				if (chatListAutohide) {
+					expect(screen.getByText('Disabled while sidebar auto-hide is enabled.')).toBeTruthy();
+					await fireEvent.click(control);
+					expect(onLocalToggle).toHaveBeenCalledOnce();
+				}
+			}
+		} finally {
+			rendered.unmount();
+		}
 	});
 
 	it('combines app and server settings while preserving their controls', async () => {
@@ -153,7 +252,9 @@ describe('Settings', () => {
 			expect(screen.getByRole('button', { name: 'Add Executor' })).toBeTruthy();
 			expect(screen.getAllByRole('dialog')).toHaveLength(1);
 			await fireEvent.click(screen.getByRole('button', { name: 'Add Executor' }));
-			await fireEvent.input(screen.getByLabelText('Label'), { target: { value: 'Unsaved executor' } });
+			await fireEvent.input(screen.getByLabelText('Label'), {
+				target: { value: 'Unsaved executor' },
+			});
 			await fireEvent.click(screen.getByRole('tab', { name: 'General' }));
 			await fireEvent.click(screen.getByRole('tab', { name: 'Executors' }));
 			await fireEvent.click(screen.getByRole('button', { name: 'Add Executor' }));
@@ -485,7 +586,16 @@ describe('Settings', () => {
 			remoteSettings: new RemoteSettingsStore(),
 		});
 		try {
-			for (const name of ['Interface', 'Shortcuts', 'Other Agents', 'General', 'Automation', 'Notifications', 'GitHub', 'Executors']) {
+			for (const name of [
+				'Interface',
+				'Shortcuts',
+				'Other Agents',
+				'General',
+				'Automation',
+				'Notifications',
+				'GitHub',
+				'Executors',
+			]) {
 				await fireEvent.click(screen.getByRole('tab', { name }));
 				expect(screen.getByRole('tabpanel', { name })).toBeTruthy();
 				expect(screen.queryByRole('heading', { name })).toBeNull();
@@ -516,28 +626,46 @@ describe('Settings', () => {
 	});
 
 	it('shows native authentication for every ready executor without querying offline executors', async () => {
-		const offline = { ...remoteExecutor, id: '33333333-3333-4333-8333-333333333333', label: 'Offline worker', availability: 'offline' as const };
+		const offline = {
+			...remoteExecutor,
+			id: '33333333-3333-4333-8333-333333333333',
+			label: 'Offline worker',
+			availability: 'offline' as const,
+		};
 		const appShell = createAppShellStore();
 		appShell.openSettings('providers');
 		const rendered = render(SettingsTestHost, {
-			appShell, remoteSettings: new RemoteSettingsStore(),
+			appShell,
+			remoteSettings: new RemoteSettingsStore(),
 			executors: [localExecutor, remoteExecutor, offline],
 		});
 		try {
 			for (const executor of [localExecutor, remoteExecutor]) {
 				const section = screen.getByRole('region', { name: executor.label });
 				expect(within(section).getByRole('heading', { name: executor.label })).toBeTruthy();
-				await waitFor(() => expect(providersApi.getAgentAuthStatus).toHaveBeenCalledWith('claude', executor.id));
+				await waitFor(() =>
+					expect(providersApi.getAgentAuthStatus).toHaveBeenCalledWith('claude', executor.id),
+				);
 				expect(providersApi.getAgentAuthStatus).toHaveBeenCalledWith('codex', executor.id);
 				expect(within(section).getAllByRole('button', { name: 'Sign in' })).toHaveLength(2);
 			}
 			expect(screen.getByText('Offline worker is unavailable.')).toBeTruthy();
 			expect(providersApi.getAgentReadiness).not.toHaveBeenCalledWith(offline.id);
 			expect(screen.queryByRole('combobox')).toBeNull();
-			vi.mocked(providersApi.launchAgentAuthLogin).mockRejectedValueOnce(new Error('Synthetic login error'));
-			await fireEvent.click(within(screen.getByRole('region', { name: 'Worker' })).getAllByRole('button', { name: 'Sign in' })[0]);
-			await waitFor(() => expect(providersApi.launchAgentAuthLogin).toHaveBeenCalledWith('claude', remoteExecutor.id));
-		} finally { rendered.unmount(); }
+			vi.mocked(providersApi.launchAgentAuthLogin).mockRejectedValueOnce(
+				new Error('Synthetic login error'),
+			);
+			await fireEvent.click(
+				within(screen.getByRole('region', { name: 'Worker' })).getAllByRole('button', {
+					name: 'Sign in',
+				})[0],
+			);
+			await waitFor(() =>
+				expect(providersApi.launchAgentAuthLogin).toHaveBeenCalledWith('claude', remoteExecutor.id),
+			);
+		} finally {
+			rendered.unmount();
+		}
 	});
 
 	it('rechecks native authentication when a ready executor snapshot replaces its runtime', async () => {
@@ -549,16 +677,26 @@ describe('Settings', () => {
 		const auth = { authenticated: true, canReauth: true, label: 'Initial account' };
 		vi.mocked(providersApi.getAgentAuthStatus).mockResolvedValue(auth);
 		const rendered = render(SettingsTestHost, {
-			appShell, remoteSettings: new RemoteSettingsStore(), executorStore,
+			appShell,
+			remoteSettings: new RemoteSettingsStore(),
+			executorStore,
 		});
 		try {
 			const worker = within(screen.getByRole('region', { name: remoteExecutor.label }));
 			await worker.findAllByText('Initial account');
-			vi.mocked(providersApi.getAgentAuthStatus).mockResolvedValue({ ...auth, label: 'Replacement account' });
-			executorStore.applySnapshot([localExecutor, { ...remoteExecutor, instanceId: 'replacement-runtime' }]);
+			vi.mocked(providersApi.getAgentAuthStatus).mockResolvedValue({
+				...auth,
+				label: 'Replacement account',
+			});
+			executorStore.applySnapshot([
+				localExecutor,
+				{ ...remoteExecutor, instanceId: 'replacement-runtime' },
+			]);
 			await worker.findAllByText('Replacement account');
 			expect(worker.queryByText('Initial account')).toBeNull();
-		} finally { rendered.unmount(); }
+		} finally {
+			rendered.unmount();
+		}
 	});
 
 	it('preserves an entered OAuth code when another executor changes availability', async () => {
@@ -569,10 +707,15 @@ describe('Settings', () => {
 		appShell.openSettings('providers');
 		const deviceAuth = { url: 'https://example.test/authorize', needsCode: true };
 		vi.mocked(providersApi.launchAgentAuthLogin).mockResolvedValue({
-			launched: true, alreadyRunning: false, sessionId: 'synthetic-login', deviceAuth,
+			launched: true,
+			alreadyRunning: false,
+			sessionId: 'synthetic-login',
+			deviceAuth,
 		});
 		const rendered = render(SettingsTestHost, {
-			appShell, remoteSettings: new RemoteSettingsStore(), executorStore,
+			appShell,
+			remoteSettings: new RemoteSettingsStore(),
+			executorStore,
 		});
 		try {
 			const local = within(screen.getByRole('region', { name: 'Local' }));
@@ -580,38 +723,69 @@ describe('Settings', () => {
 			await fireEvent.click(signIn[0]);
 			const input = await local.findByRole('textbox');
 			await fireEvent.input(input, { target: { value: 'synthetic-oauth-code' } });
-			vi.mocked(providersApi.getAgentAuthLoginStatus).mockImplementation(async (agentId, _sessionId, executorId) => {
-				if (agentId === 'claude' && executorId === 'local') {
-					return { state: 'running', running: true, completionPending: false, sessionId: 'synthetic-login', deviceAuth };
-				}
-				return { state: 'idle', running: false };
-			});
+			vi.mocked(providersApi.getAgentAuthLoginStatus).mockImplementation(
+				async (agentId, _sessionId, executorId) => {
+					if (agentId === 'claude' && executorId === 'local') {
+						return {
+							state: 'running',
+							running: true,
+							completionPending: false,
+							sessionId: 'synthetic-login',
+							deviceAuth,
+						};
+					}
+					return { state: 'idle', running: false };
+				},
+			);
 			vi.mocked(providersApi.getAgentAuthStatus).mockClear();
-			executorStore.applySnapshot([{ ...localExecutor }, { ...remoteExecutor, availability: 'offline' }]);
+			executorStore.applySnapshot([
+				{ ...localExecutor },
+				{ ...remoteExecutor, availability: 'offline' },
+			]);
 			await screen.findByText('Worker is unavailable.');
 			expect((local.getByRole('textbox') as HTMLInputElement).value).toBe('synthetic-oauth-code');
 			expect(providersApi.getAgentAuthStatus).not.toHaveBeenCalledWith('claude', 'local');
 			expect(providersApi.getAgentAuthStatus).not.toHaveBeenCalledWith('codex', 'local');
-		} finally { rendered.unmount(); }
+		} finally {
+			rendered.unmount();
+		}
 	});
 
 	it('shows and refreshes GitHub status per executor independently of server settings loading', async () => {
-		const remote = { ...remoteExecutor, machineServices: { ...remoteExecutor.machineServices, git: true, gh: true } };
+		const remote = {
+			...remoteExecutor,
+			machineServices: { ...remoteExecutor.machineServices, git: true, gh: true },
+		};
 		const localStatus = makeTestGhCapability();
-		const remoteStatus = makeTestGhCapability({ available: false, authenticated: false, reason: 'unauthenticated', login: null, host: null, refresh: vi.fn(async () => {}) });
+		const remoteStatus = makeTestGhCapability({
+			available: false,
+			authenticated: false,
+			reason: 'unauthenticated',
+			login: null,
+			host: null,
+			refresh: vi.fn(async () => {}),
+		});
 		const appShell = createAppShellStore();
 		appShell.openSettings('github');
 		const rendered = render(SettingsTestHost, {
-			appShell, remoteSettings: new RemoteSettingsStore(), executors: [localExecutor, remote],
-			ghCapability: { forExecutor: (id) => id === 'local' ? localStatus : remoteStatus },
+			appShell,
+			remoteSettings: new RemoteSettingsStore(),
+			executors: [localExecutor, remote],
+			ghCapability: { forExecutor: (id) => (id === 'local' ? localStatus : remoteStatus) },
 		});
 		try {
-			expect(within(screen.getByRole('region', { name: 'Local' })).getByText('Connected as octocat@github.com')).toBeTruthy();
+			expect(
+				within(screen.getByRole('region', { name: 'Local' })).getByText(
+					'Connected as octocat@github.com',
+				),
+			).toBeTruthy();
 			const worker = within(screen.getByRole('region', { name: 'Worker' }));
 			expect(worker.getByText('gh auth login')).toBeTruthy();
 			await fireEvent.click(worker.getByRole('button', { name: 'Refresh GitHub CLI status' }));
 			expect(remoteStatus.refresh).toHaveBeenCalledOnce();
 			expect(screen.queryByRole('combobox')).toBeNull();
-		} finally { rendered.unmount(); }
+		} finally {
+			rendered.unmount();
+		}
 	});
 });

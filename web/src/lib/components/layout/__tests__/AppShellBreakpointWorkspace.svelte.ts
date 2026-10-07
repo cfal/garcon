@@ -10,7 +10,7 @@ import {
 import type { PortableSingletonKind, WorkspaceWindowId } from '$lib/workspace/surface-types';
 import type { WorkspaceSplitAdmissions } from '$lib/workspace/window-geometry-policy';
 import { workspaceSplitAdmissions } from '$lib/workspace/__tests__/workspace-geometry-test-fixtures';
-import { windowNodeById } from '$lib/workspace/window-tree';
+import { collectWindowNodes, windowNodeById } from '$lib/workspace/window-tree';
 import type { ChatListDock } from '$lib/layout/desktop-layout.js';
 import type {
 	SidebarChatGrouping,
@@ -19,6 +19,7 @@ import type {
 import type { WorkspaceCoordinator } from '$lib/workspace/workspace-coordinator.svelte';
 
 export class AppShellLocalSettingsState {
+	fullscreenCoversSidebar = $state(true);
 	chatListAutohide = $state(false);
 	chatListDock = $state<ChatListDock>('left');
 	sidebarWidth = $state(320);
@@ -46,6 +47,10 @@ export class AppShellBreakpointWorkspace implements Pick<
 
 	get currentWindowId(): WorkspaceWindowId {
 		return CANONICAL_WINDOW_ID;
+	}
+
+	get windowCount(): number {
+		return collectWindowNodes(this.layout.snapshot.desktopRoot).length;
 	}
 
 	get focusedChatId(): string | null {

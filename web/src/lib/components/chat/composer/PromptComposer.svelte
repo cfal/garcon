@@ -92,6 +92,7 @@
 	import { PromptComposerFocusDelivery } from './prompt-composer-focus-delivery.svelte.js';
 	import { PromptComposerProjectState } from './prompt-composer-project-state.svelte.js';
 	import type { PromptComposerProps } from './prompt-composer-props.js';
+	import { PromptComposerRecallController } from './prompt-composer-recall-controller';
 
 	let {
 		onsubmit,
@@ -102,6 +103,8 @@
 		onThinkingModeChange,
 		onAgentSettingChange,
 		resendCandidates = [],
+		recallPrompts = [],
+		recallIdentity = null,
 		onExcludeResendCandidate,
 		directAdmissionPending = false,
 		requiresQueuedSubmission = false,
@@ -137,6 +140,19 @@
 	const workspaceShortcuts = getWorkspaceShortcuts();
 	const projectResolution = getProjectResolution();
 	const ui = new PromptComposerUiState();
+	const promptRecall = new PromptComposerRecallController({
+		getIdentity: () => recallIdentity,
+		getPrompts: () => recallPrompts,
+		getText: () => composerState.inputText,
+		getTextarea: () => textarea,
+		canRecall: () => !isDisabled && isVisible,
+		setText: (text) => { composerState.inputText = text; queueCurrentDraft(text); },
+		resize: autoResize,
+	});
+	$effect(() => {
+		void recallIdentity;
+		promptRecall.reset();
+	});
 	const snippetExpansion = new SnippetExpansionController();
 	const snippetExpansionLayer = transientLayerAttachment({
 		registry: transientLayers,
@@ -606,6 +622,7 @@
 			return;
 		}
 		if (handleCompletionKeyDown(event)) return;
+		if (promptRecall.handleKeyDown(event)) return;
 		if (event.key !== 'Enter') return;
 		const action = resolveKeydownAction(event);
 		if (action === 'newline') return;
@@ -635,6 +652,7 @@
 	}
 
 	function handleInput(event: Event) {
+		promptRecall.reset();
 		const target = event.currentTarget as HTMLTextAreaElement;
 		if (isDisabled || promptRefinement.pending) {
 			target.value = composerState.inputText;
@@ -848,6 +866,7 @@
 						bind:this={textarea}
 						value={composerState.inputText}
 						onkeydown={handleKeyDown}
+						onpointerdown={() => promptRecall.reset()}
 						oninput={handleInput}
 						onpaste={(event) => attachmentController.handlePaste(event)}
 						placeholder={m.chat_composer_reply_placeholder()}
