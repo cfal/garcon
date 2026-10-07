@@ -67,6 +67,8 @@ import {
 	toRecord,
 } from './chat-session-records.js';
 
+const VISITED_CHAT_LIMIT = 30;
+
 interface ArchiveMutationSettlement {
 	chatId: string;
 	result: PromiseSettledResult<ToggleArchiveResponse>;
@@ -79,6 +81,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	#baseOrder = $state.raw<string[]>([]);
 	selectedChatId = $state<string | null>(null);
 	lastSelectedChatId = $state<string | null>(null);
+	#visitedChatIds = $state.raw<readonly string[]>([]);
 	startupByChatId = $state<Record<string, ChatStartupConfig>>({});
 	isLoadingChats = $state(true);
 	chatListStatus = $state<ChatListLoadStatus>('loading');
@@ -158,6 +161,25 @@ export class ChatSessionsStore implements ChatSessionsPort {
 
 	setSelectedChatId(chatId: string | null): void {
 		this.selectedChatId = chatId;
+		if (chatId && this.hasChat(chatId)) {
+			this.#visitedChatIds = [chatId, ...this.#visitedChatIds.filter((id) => id !== chatId)].slice(
+				0,
+				VISITED_CHAT_LIMIT,
+			);
+		}
+	}
+
+	get recentChats(): readonly ChatSessionRecord[] {
+		const eligible = this.#orderedChats.filter((chat) => !chat.isArchived);
+		const visits = new Map(this.#visitedChatIds.map((id, index) => [id, index]));
+		return eligible.sort((a, b) => {
+			const visitOrder =
+				(visits.get(a.id) ?? VISITED_CHAT_LIMIT) - (visits.get(b.id) ?? VISITED_CHAT_LIMIT);
+			if (visitOrder !== 0) return visitOrder;
+			return (b.lastActivityAt ?? b.createdAt ?? '').localeCompare(
+				a.lastActivityAt ?? a.createdAt ?? '',
+			);
+		});
 	}
 
 	async #runFetch(showLoading: boolean): Promise<void> {
@@ -767,7 +789,13 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	#mergeServerEntry(entry: ChatListEntry, clearStartup: boolean): void {
 		const next = toRecord(entry);
 		const previous = this.#baseById[entry.id];
-		this.#projectBindings.publishIfChanged(entry.id, previous?.projectPath, next.projectPath, previous?.executorId, next.executorId);
+		this.#projectBindings.publishIfChanged(
+			entry.id,
+			previous?.projectPath,
+			next.projectPath,
+			previous?.executorId,
+			next.executorId,
+		);
 		reconcileActivityProjection(previous, next);
 		next.processingPhase = this.#resolveProcessing(entry.id, next.processingPhase);
 		next.isProcessing = next.processingPhase !== null;
@@ -791,6 +819,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	}
 
 	removeChat(chatId: string): void {
+		this.#visitedChatIds = this.#visitedChatIds.filter((id) => id !== chatId);
 		this.#processingOverrides.delete(chatId);
 		this.#processingSnapshot?.delete(chatId);
 		this.#serverEntryFetchGenerationByChatId.delete(chatId);
@@ -815,6 +844,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	}
 
 	#pruneSnapshotGenerations(records: Readonly<Record<string, ChatSessionRecord>>): void {
+		this.#visitedChatIds = this.#visitedChatIds.filter((id) => Boolean(records[id]));
 		for (const chatId of this.#serverEntryGenerationByChatId.keys()) {
 			if (records[chatId]) continue;
 			this.#serverEntryGenerationByChatId.delete(chatId);
@@ -860,8 +890,13 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	patchChat(chatId: string, patch: Partial<ChatSessionRecord>): void {
 		const chat = this.#baseById[chatId];
 		if (!chat) return;
-		this.#projectBindings.publishIfChanged(chatId, chat.projectPath, patch.projectPath ?? chat.projectPath,
-			chat.executorId, 'executorId' in patch ? patch.executorId : chat.executorId);
+		this.#projectBindings.publishIfChanged(
+			chatId,
+			chat.projectPath,
+			patch.projectPath ?? chat.projectPath,
+			chat.executorId,
+			'executorId' in patch ? patch.executorId : chat.executorId,
+		);
 		const nextChat = {
 			...chat,
 			...patch,

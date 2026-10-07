@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { CHAT_OPEN_COMMAND_PREFIX } from '$lib/workspace/workbench-commands.svelte.js';
 	import Fuse from 'fuse.js';
 	import Search from '@lucide/svelte/icons/search';
 	import MessageSquarePlus from '@lucide/svelte/icons/message-square-plus';
@@ -59,7 +60,13 @@
 		}),
 	);
 
-	let filteredCommands = $derived(query.trim() ? fuse.search(query).map((r) => r.item) : commands);
+	let filteredCommands = $derived(
+		query.trim()
+			? fuse.search(query).map((r) => r.item)
+			: commands.filter(
+					(command, index) => !command.id.startsWith(CHAT_OPEN_COMMAND_PREFIX) || index < 10,
+				),
+	);
 	let selectedCommand = $derived(filteredCommands[selectedIndex]);
 
 	function isEnabled(command: WorkbenchCommand): boolean {

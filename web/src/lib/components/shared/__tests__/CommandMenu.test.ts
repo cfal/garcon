@@ -108,6 +108,49 @@ afterEach(() => {
 	vi.clearAllMocks();
 });
 
+it('switches captured recent chats through the same registry action for keyboard and click', async () => {
+	const { ChatSessionsStore } = await import('$lib/chat/sessions/chat-sessions.svelte.js');
+	const sessions = new ChatSessionsStore();
+	sessions.createDraft({
+		id: 'recent',
+		projectPath: '/synthetic',
+		startup: {
+			agentId: 'claude',
+			model: 'opus',
+			firstMessage: 'Synthetic navigation',
+			permissionMode: 'default',
+			thinkingMode: 'none',
+			agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
+		},
+	});
+	sessions.patchChat('recent', { isProcessing: true, isUnread: true });
+	const open = vi.fn(async () => {});
+	const unregister = commandRegistry.registerChatNavigation({
+		get recentChats() {
+			return sessions.recentChats;
+		},
+		hasChat: (id) => sessions.hasChat(id),
+		open,
+	});
+	try {
+		const { component } = render(CommandMenu);
+		component.toggle();
+		const input = await screen.findByRole('combobox');
+		await fireEvent.input(input, { target: { value: 'Synthetic navigation' } });
+		expect(screen.getByRole('option').textContent).toContain('Running · Unread');
+		await fireEvent.keyDown(input, { key: 'Enter' });
+		expect(open).toHaveBeenCalledWith('recent');
+		component.toggle();
+		await fireEvent.input(await screen.findByRole('combobox'), {
+			target: { value: 'Synthetic navigation' },
+		});
+		await fireEvent.click(screen.getByRole('option'));
+		expect(open).toHaveBeenCalledTimes(2);
+	} finally {
+		unregister();
+	}
+});
+
 describe('CommandMenu', () => {
 	it('routes the settings command to the combined settings dialog', async () => {
 		expect(commandRegistry.isEnabled('open-app-settings')).toBe(false);

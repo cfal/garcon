@@ -18,6 +18,15 @@ import type { WorkspaceCoordinator } from './workspace-coordinator.svelte.js';
 import { windowIdOfSurface } from './window-tree.js';
 import { copyToClipboard } from '$lib/utils/clipboard.js';
 import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
+import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types.js';
+
+export const CHAT_OPEN_COMMAND_PREFIX = 'chat.open:';
+
+export interface ChatCommandNavigationPort {
+	readonly recentChats: readonly ChatSessionRecord[];
+	hasChat(chatId: string): boolean;
+	open(chatId: string): Promise<void>;
+}
 
 export type WorkbenchCommandCategory = 'Chat' | 'Navigation' | 'Workspace' | 'Editor' | 'File';
 
@@ -52,6 +61,7 @@ export interface WorkbenchCommandRegistryDeps {
 }
 
 export class WorkbenchCommandRegistry {
+	#chatNavigation = $state.raw<ChatCommandNavigationPort | null>(null);
 	readonly #surfacePorts = new Map<string, FileCommandSurfacePort>();
 	readonly #baseCommands: readonly WorkbenchCommand[];
 
@@ -60,9 +70,10 @@ export class WorkbenchCommandRegistry {
 	}
 
 	get commands(): readonly WorkbenchCommand[] {
-		if (!this.deps.terminals.hasRemoteHosts) return this.#baseCommands;
+		const commands = [...this.#chatCommands(), ...this.#baseCommands];
+		if (!this.deps.terminals.hasRemoteHosts) return commands;
 		return [
-			...this.#baseCommands,
+			...commands,
 			...this.deps.terminals.hosts.map((host) => ({
 				id: `workspace-new-terminal:${host.id}`,
 				label: `${m.workspace_new_terminal()}: ${host.label}`,
@@ -72,6 +83,32 @@ export class WorkbenchCommandRegistry {
 					this.deps.workspace.createTerminalInAvailableSpace('command-menu:new-terminal', host.id),
 			})),
 		];
+	}
+
+	registerChatNavigation(port: ChatCommandNavigationPort): () => void {
+		this.#chatNavigation = port;
+		return () => {
+			if (this.#chatNavigation === port) this.#chatNavigation = null;
+		};
+	}
+
+	#chatCommands(): WorkbenchCommand[] {
+		const port = this.#chatNavigation;
+		if (!port) return [];
+		return port.recentChats.map((chat) => ({
+			id: `${CHAT_OPEN_COMMAND_PREFIX}${chat.id}`,
+			label: m.command_switch_chat_named({ title: chat.title || m.chat_window_untitled() }),
+			description: [
+				m.command_recent_chat(),
+				chat.isProcessing ? m.command_chat_running() : null,
+				chat.isUnread ? m.command_chat_unread() : null,
+			]
+				.filter(Boolean)
+				.join(' · '),
+			category: 'Chat',
+			isEnabled: () => port.hasChat(chat.id),
+			run: () => port.open(chat.id),
+		}));
 	}
 
 	get knownFileLocations(): readonly FileLocation[] {

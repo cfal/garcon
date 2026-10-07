@@ -32,6 +32,37 @@ function makeServerSession(overrides: Partial<ChatListEntry> = {}): ChatListEntr
 }
 
 describe('ChatSessionsStore', () => {
+	it('keeps older titles searchable while limiting remembered visits to thirty', () => {
+		const store = new ChatSessionsStore();
+		store.upsertFromServer(Array.from({ length: 35 }, (_, index) => makeServerSession({ id: `chat-${index}`, title: `Synthetic ${index}` })));
+		for (let index = 0; index < 35; index++) store.setSelectedChatId(`chat-${index}`);
+		expect(store.recentChats).toHaveLength(35);
+		expect(store.recentChats[0]?.id).toBe('chat-34');
+		expect(store.recentChats[29]?.id).toBe('chat-5');
+		expect(store.recentChats.some(chat => chat.title === 'Synthetic 0')).toBe(true);
+	});
+	it('orders recent chats by visits, falls back to activity and prunes deleted visits', () => {
+		const store = new ChatSessionsStore();
+		store.upsertFromServer([
+			makeServerSession({
+				id: 'old',
+				activity: { createdAt: '2026-01-01', lastActivityAt: '2026-01-01', lastReadAt: null },
+			}),
+			makeServerSession({
+				id: 'new',
+				activity: { createdAt: '2026-02-01', lastActivityAt: '2026-02-01', lastReadAt: null },
+			}),
+			makeServerSession({ id: 'archived', isArchived: true }),
+		]);
+		expect(store.recentChats.map((chat) => chat.id)).toEqual(['new', 'old']);
+		store.setSelectedChatId('old');
+		expect(store.recentChats.map((chat) => chat.id)).toEqual(['old', 'new']);
+		store.setSelectedChatId('new');
+		store.setSelectedChatId('old');
+		store.removeChat('old');
+		store.upsertServerChat(makeServerSession({ id: 'old' }));
+		expect(store.recentChats.map((chat) => chat.id)).toEqual(['new', 'old']);
+	});
 	it('publishes each changed project binding through one ordered boundary', () => {
 		const store = new ChatSessionsStore();
 		const listener = vi.fn();
@@ -249,11 +280,13 @@ describe('ChatSessionsStore', () => {
 			},
 		});
 
-		await expect(store.replaceChatTags({
-			chatId: 'draft-1',
-			expectedTags: [],
-			tags: ['urgent'],
-		})).resolves.toMatchObject({ success: true });
+		await expect(
+			store.replaceChatTags({
+				chatId: 'draft-1',
+				expectedTags: [],
+				tags: ['urgent'],
+			}),
+		).resolves.toMatchObject({ success: true });
 
 		expect(store.byId['draft-1'].tags).toEqual(['urgent']);
 		expect(store.startupByChatId['draft-1'].tags).toEqual(['urgent']);
@@ -436,15 +469,17 @@ describe('ChatSessionsStore', () => {
 
 	it('patchPreview derives unread state when live activity advances past the read receipt', () => {
 		const store = new ChatSessionsStore();
-		store.upsertFromServer([makeServerSession({
-			id: 'a',
-			activity: {
-				createdAt: null,
-				lastActivityAt: '2026-02-25T10:00:00.000Z',
-				lastReadAt: '2026-02-25T10:00:00.000Z',
-			},
-			isUnread: false,
-		})]);
+		store.upsertFromServer([
+			makeServerSession({
+				id: 'a',
+				activity: {
+					createdAt: null,
+					lastActivityAt: '2026-02-25T10:00:00.000Z',
+					lastReadAt: '2026-02-25T10:00:00.000Z',
+				},
+				isUnread: false,
+			}),
+		]);
 
 		store.patchPreview('a', 'Background reply', '2026-02-25T12:00:00.000Z');
 
@@ -470,27 +505,31 @@ describe('ChatSessionsStore', () => {
 
 	it('upsertFromServer does not let a stale list snapshot overwrite live activity', () => {
 		const store = new ChatSessionsStore();
-		store.upsertFromServer([makeServerSession({
-			id: 'a',
-			activity: {
-				createdAt: null,
-				lastActivityAt: '2026-02-25T10:00:00.000Z',
-				lastReadAt: '2026-02-25T10:00:00.000Z',
-			},
-			preview: { lastMessage: 'Initial message' },
-		})]);
+		store.upsertFromServer([
+			makeServerSession({
+				id: 'a',
+				activity: {
+					createdAt: null,
+					lastActivityAt: '2026-02-25T10:00:00.000Z',
+					lastReadAt: '2026-02-25T10:00:00.000Z',
+				},
+				preview: { lastMessage: 'Initial message' },
+			}),
+		]);
 		store.patchPreview('a', 'Live background reply', '2026-02-25T12:00:00.000Z');
 
-		store.upsertFromServer([makeServerSession({
-			id: 'a',
-			activity: {
-				createdAt: null,
-				lastActivityAt: '2026-02-25T11:00:00.000Z',
-				lastReadAt: '2026-02-25T10:00:00.000Z',
-			},
-			preview: { lastMessage: 'Stale server preview' },
-			isUnread: false,
-		})]);
+		store.upsertFromServer([
+			makeServerSession({
+				id: 'a',
+				activity: {
+					createdAt: null,
+					lastActivityAt: '2026-02-25T11:00:00.000Z',
+					lastReadAt: '2026-02-25T10:00:00.000Z',
+				},
+				preview: { lastMessage: 'Stale server preview' },
+				isUnread: false,
+			}),
+		]);
 
 		expect(store.byId['a']).toMatchObject({
 			lastMessage: 'Live background reply',
@@ -502,25 +541,29 @@ describe('ChatSessionsStore', () => {
 
 	it('upsertFromServer preserves a newer local read receipt while accepting newer activity', () => {
 		const store = new ChatSessionsStore();
-		store.upsertFromServer([makeServerSession({
-			id: 'a',
-			activity: {
-				createdAt: null,
-				lastActivityAt: '2026-02-25T10:00:00.000Z',
-				lastReadAt: '2026-02-25T10:00:00.000Z',
-			},
-		})]);
+		store.upsertFromServer([
+			makeServerSession({
+				id: 'a',
+				activity: {
+					createdAt: null,
+					lastActivityAt: '2026-02-25T10:00:00.000Z',
+					lastReadAt: '2026-02-25T10:00:00.000Z',
+				},
+			}),
+		]);
 		store.patchLastReadAt('a', '2026-02-25T12:00:00.000Z');
 
-		store.upsertFromServer([makeServerSession({
-			id: 'a',
-			activity: {
-				createdAt: null,
-				lastActivityAt: '2026-02-25T11:00:00.000Z',
-				lastReadAt: '2026-02-25T10:00:00.000Z',
-			},
-			isUnread: true,
-		})]);
+		store.upsertFromServer([
+			makeServerSession({
+				id: 'a',
+				activity: {
+					createdAt: null,
+					lastActivityAt: '2026-02-25T11:00:00.000Z',
+					lastReadAt: '2026-02-25T10:00:00.000Z',
+				},
+				isUnread: true,
+			}),
+		]);
 
 		expect(store.byId['a']).toMatchObject({
 			lastActivityAt: '2026-02-25T11:00:00.000Z',
@@ -531,16 +574,18 @@ describe('ChatSessionsStore', () => {
 
 	it('ignores preview and read updates older than the current projection', () => {
 		const store = new ChatSessionsStore();
-		store.upsertFromServer([makeServerSession({
-			id: 'a',
-			activity: {
-				createdAt: null,
-				lastActivityAt: '2026-02-25T12:00:00.000Z',
-				lastReadAt: '2026-02-25T11:00:00.000Z',
-			},
-			preview: { lastMessage: 'Current preview' },
-			isUnread: true,
-		})]);
+		store.upsertFromServer([
+			makeServerSession({
+				id: 'a',
+				activity: {
+					createdAt: null,
+					lastActivityAt: '2026-02-25T12:00:00.000Z',
+					lastReadAt: '2026-02-25T11:00:00.000Z',
+				},
+				preview: { lastMessage: 'Current preview' },
+				isUnread: true,
+			}),
+		]);
 
 		store.patchPreview('a', 'Older preview', '2026-02-25T10:00:00.000Z');
 		store.patchLastReadAt('a', '2026-02-25T09:00:00.000Z');
