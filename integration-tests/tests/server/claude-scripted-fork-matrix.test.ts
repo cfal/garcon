@@ -555,7 +555,14 @@ describe('scripted Claude fork lifecycle matrix', () => {
       );
       expect((await fixture.client.ping()).processing).toEqual({
         outcome: 'snapshot',
-        chats: [{ chatId: sourceChatId, phase: 'running' }],
+        chats: [{
+          chatId: sourceChatId,
+          phase: 'running',
+          timing: expect.objectContaining({
+            startedAt: expect.any(Number),
+            observedAt: expect.any(Number),
+          }),
+        }],
       });
       await waitForNativeFileContains(
         fixture.dirs.workspace,

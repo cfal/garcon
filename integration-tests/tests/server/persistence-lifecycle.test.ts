@@ -255,7 +255,14 @@ describe('persistence lifecycle', () => {
       expect(initialControl.control.serverInstanceId).toBe(initialInstanceId);
       expect(initialReconnect.processing).toEqual({
         outcome: 'snapshot',
-        chats: [{ chatId, phase: 'running' }],
+        chats: [{
+          chatId,
+          phase: 'running',
+          timing: expect.objectContaining({
+            startedAt: expect.any(Number),
+            observedAt: expect.any(Number),
+          }),
+        }],
       });
 
       const activeAborted = held.expectAbort();

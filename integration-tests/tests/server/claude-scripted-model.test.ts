@@ -188,7 +188,14 @@ describe('Claude against a scripted model', () => {
       await held.requested;
       expect((await fixture.client.ping()).processing).toEqual({
         outcome: 'snapshot',
-        chats: [{ chatId, phase: 'running' }],
+        chats: [{
+          chatId,
+          phase: 'running',
+          timing: expect.objectContaining({
+            startedAt: expect.any(Number),
+            observedAt: expect.any(Number),
+          }),
+        }],
       });
 
       held.release();
