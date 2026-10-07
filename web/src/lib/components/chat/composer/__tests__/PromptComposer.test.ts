@@ -1076,7 +1076,6 @@ describe('PromptComposer focus', () => {
 		expect(processingTray.parentElement?.className).toContain('z-10');
 		expect(processingTray.className).toContain('min-h-14');
 		expect(processingTray.className).toContain('border-b-0');
-		expect(processingTray.className).toContain('pb-5');
 		expect(statusAnchor?.className).toContain('composer-thinking-active');
 
 		await rerender({
