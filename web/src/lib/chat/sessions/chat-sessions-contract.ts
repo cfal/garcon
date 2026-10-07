@@ -16,6 +16,7 @@ import type { ChatOrderBoundary, ReorderChatResponse } from '$shared/chat-order-
 import type {
 	ChatProcessingEntry,
 	ChatProcessingPhase,
+	ChatProcessingTiming,
 } from '$shared/chat-types';
 import type {
 	ApplyChatTagDeltaRequest,
@@ -54,10 +55,7 @@ export interface ChatProcessingTransition {
 
 export type ChatListLoadStatus = 'loading' | 'ready' | 'error';
 export type ChatTagReconciliationKind =
-	| 'durability'
-	| 'committed-refresh'
-	| 'conflict-refresh'
-	| null;
+	'durability' | 'committed-refresh' | 'conflict-refresh' | null;
 
 export function isChatTagRefreshRequired(
 	kind: ChatTagReconciliationKind,
@@ -105,6 +103,10 @@ export interface ChatSessionsPort {
 	patchLastReadAt(chatId: string, lastReadAt: string): void;
 	isChatProcessing(chatId: string): boolean;
 	processingPhase(chatId: string): ChatProcessingPhase | null;
-	applyProcessingEvent(chatId: string, phase: ChatProcessingPhase | null): ChatProcessingTransition;
+	applyProcessingEvent(
+		chatId: string,
+		phase: ChatProcessingPhase | null,
+		timing?: ChatProcessingTiming | null,
+	): ChatProcessingTransition;
 	reconcileProcessing(entries: readonly ChatProcessingEntry[]): ChatProcessingTransition[];
 }

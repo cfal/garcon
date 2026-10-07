@@ -335,6 +335,7 @@
 		},
 	} as never);
 	setChatSessions({
+		processingTiming: () => null,
 		get selectedChatId() {
 			return selectedChatId;
 		},
@@ -491,10 +492,10 @@
 	</div>
 {/if}
 <ConversationPanelStatusDock
+	chatId={selectedChatId}
 	{chatMaxWidth}
 	isProcessing={selectedIsProcessing}
 	status={lifecycle.loadingStatus}
-	agentId={selectedAgentId}
 	spinnerSelectionKey={selectedChatId}
 	quickCommitEnabled={true}
 	{quickCommitTrayVisible}

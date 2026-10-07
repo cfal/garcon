@@ -13,6 +13,8 @@ import {
 import {
   CHAT_STOP_OUTCOMES,
   CHAT_PROCESSING_PHASES,
+  parseChatProcessingTiming,
+  type ChatProcessingTiming,
   type ChatProcessingEntry,
   type ChatProcessingPhase,
   type ChatStopIntent,
@@ -200,10 +202,12 @@ export class ChatSessionStoppedMessage {
 
 export class ChatProcessingUpdatedMessage {
   readonly type = 'chat-processing-updated' as const;
+  readonly timing?: ChatProcessingTiming;
   constructor(
     public chatId: string,
     public phase: ChatProcessingPhase | null,
-  ) {}
+    timing: ChatProcessingTiming | null = null,
+  ) { if (phase && timing) this.timing = timing; }
 }
 
 export class ChatExecutionControlUpdatedMessage {
@@ -561,7 +565,9 @@ function chatProcessingSnapshotResult(value: unknown): ChatProcessingSnapshotRes
     const phase = CHAT_PROCESSING_PHASES.find((valuePhase) => valuePhase === entry.phase);
     if (!chatId || !phase || seen.has(chatId)) return null;
     seen.add(chatId);
-    chats.push({ chatId, phase });
+    const timing = entry.timing === undefined ? null : parseChatProcessingTiming(entry.timing);
+    if (entry.timing !== undefined && !timing) return null;
+    chats.push({ chatId, phase, ...(timing ? { timing } : {}) });
   }
 
   return { outcome: 'snapshot', chats };
@@ -803,8 +809,9 @@ export function parseServerWsMessage(
       const phase = data.phase === null
         ? null
         : CHAT_PROCESSING_PHASES.find((entry) => entry === data.phase);
-      return chatId && phase !== undefined
-        ? new ChatProcessingUpdatedMessage(chatId, phase)
+      const timing = data.timing === undefined ? null : parseChatProcessingTiming(data.timing);
+      return chatId && phase !== undefined && (data.timing === undefined || (phase !== null && timing !== null))
+        ? new ChatProcessingUpdatedMessage(chatId, phase, timing)
         : null;
     }
     case 'chat-execution-control-updated': {

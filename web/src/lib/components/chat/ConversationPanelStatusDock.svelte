@@ -11,12 +11,13 @@
 		chatDockFrameClass,
 	} from '$lib/chat/conversation/chat-max-width.js';
 	import { cn } from '$lib/utils/cn';
+	import { getChatSessions } from '$lib/context';
 
 	interface Props {
 		chatMaxWidth: ChatMaxWidth;
+		chatId: string;
 		isProcessing: boolean;
 		status: ChatLoadingStatus | null;
-		agentId: string;
 		spinnerSelectionKey: string;
 		quickCommitEnabled: boolean;
 		quickCommitTrayVisible: boolean;
@@ -33,9 +34,9 @@
 
 	let {
 		chatMaxWidth,
+		chatId,
 		isProcessing,
 		status,
-		agentId,
 		spinnerSelectionKey,
 		quickCommitEnabled,
 		quickCommitTrayVisible,
@@ -49,6 +50,7 @@
 		onQuickCommit,
 		announcementsEnabled = true,
 	}: Props = $props();
+	const sessions = getChatSessions();
 
 	const shellClass = $derived(
 		cn(CHAT_DOCK_SHELL_BASE_CLASS, CHAT_MAX_WIDTH_DOCK_SHELL_CLASS[chatMaxWidth]),
@@ -74,7 +76,7 @@
 				<LoadingStatus
 					isVisible={true}
 					{status}
-					{agentId}
+					timing={sessions.processingTiming(chatId)}
 					{spinnerSelectionKey}
 					quickCommitVisible={runningQuickCommitVisible}
 					{quickCommitSummary}

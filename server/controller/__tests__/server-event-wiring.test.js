@@ -245,6 +245,10 @@ function createFixture(overrides = {}) {
     ...overrides.shareStore,
   };
   const processing = {
+    timing: mock(() => null),
+    update: mock(() => null),
+    observeOutput: mock(() => undefined),
+    remove: mock(() => undefined),
     phase: mock(() => null),
     snapshot: mock(() => []),
     ...overrides.processing,
@@ -344,6 +348,16 @@ function providerCommit(content = 'answer') {
     }],
   };
 }
+
+it('publishes live output timing after transcript rows using controller observations', async () => {
+  const timing = { startedAt: 1000, lastOutputAt: 2000, observedAt: 3000 };
+  const fixture = createFixture({ processing: { phase: mock(() => 'running'), timing: mock(() => timing) } });
+  fixture.agent.transcript(providerCommit());
+  await fixture.wiring.waitForIdle();
+  expect(fixture.processing.observeOutput).toHaveBeenCalledWith('chat-1');
+  expect(fixture.published.map(message => message.type)).toEqual(['chat-messages', 'chat-processing-updated']);
+  expect(fixture.published[1].timing).toEqual(timing);
+});
 
 function terminalCommit(outcome = 'finished') {
   return {

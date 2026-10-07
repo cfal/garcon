@@ -86,7 +86,9 @@
 	);
 	const canSteer = $derived(isProcessing && modelCatalog.supportsSteering(chat.agentId));
 	const executorId = $derived(chat.executorId ?? 'local');
-	const projectPath = $derived(executors.gitAvailable(executorId) ? chat.projectPath || null : null);
+	const projectPath = $derived(
+		executors.gitAvailable(executorId) ? chat.projectPath || null : null,
+	);
 	const gitProject = $derived(projectPath ? { executorId, projectPath } : null);
 	const quickGitSummary = $derived(quickGit.summaryFor(gitProject));
 	const quickGitBranchError = $derived(
@@ -257,7 +259,11 @@
 	<div class="relative min-h-0 flex-1">
 		<svelte:boundary>
 			<ConversationFeed
-				chatContext={{ chatId, executorId: chat.executorId ?? 'local', projectPath: chat.projectPath }}
+				chatContext={{
+					chatId,
+					executorId: chat.executorId ?? 'local',
+					projectPath: chat.projectPath,
+				}}
 				transcript={panel.transcript}
 				agentId={chat.agentId}
 				bind:scrollContainer
@@ -329,10 +335,10 @@
 	{/if}
 
 	<ConversationPanelStatusDock
+		{chatId}
 		chatMaxWidth={localSettings.chatMaxWidth}
 		{isProcessing}
 		status={panel.lifecycle.loadingStatus}
-		agentId={chat.agentId}
 		spinnerSelectionKey={`${surfaceId}:${chatId}`}
 		quickCommitEnabled={localSettings.showQuickCommitTray}
 		quickCommitTrayVisible={quickGitTrayVisible}

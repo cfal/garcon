@@ -3,6 +3,21 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import LoadingStatus from '../LoadingStatus.svelte';
 
 describe('LoadingStatus', () => {
+	it('shows Codex stopping and keeps elapsed updates out of live announcements', () => {
+		const { container } = render(LoadingStatus, {
+			isVisible: true,
+			status: { text: 'Stopping', tokens: 0, can_interrupt: false },
+			onAbort: vi.fn(),
+			timing: {
+				timing: { startedAt: 1000, lastOutputAt: null, observedAt: 5000 },
+				receivedAt: Date.now(),
+			},
+		});
+		expect(screen.getByText('Stopping...')).toBeTruthy();
+		const timing = container.querySelector('[data-processing-timing]');
+		expect(timing?.textContent).toContain('Elapsed 4s');
+		expect(timing?.getAttribute('aria-live')).toBe('off');
+	});
 	afterEach(() => {
 		cleanup();
 	});
@@ -12,7 +27,6 @@ describe('LoadingStatus', () => {
 			props: {
 				isVisible: true,
 				status: { text: 'Processing', tokens: 0, can_interrupt: true },
-				agentId: 'claude',
 				onAbort: vi.fn(),
 				spinnerSelectionKey: 'chat-1',
 			},
@@ -24,7 +38,6 @@ describe('LoadingStatus', () => {
 		await rerender({
 			isVisible: true,
 			status: { text: 'Stopping', tokens: 0, can_interrupt: false },
-			agentId: 'claude',
 			onAbort: vi.fn(),
 			spinnerSelectionKey: 'chat-1',
 		});
@@ -39,7 +52,6 @@ describe('LoadingStatus', () => {
 			props: {
 				isVisible: true,
 				status: { text: 'Processing', tokens: 0, can_interrupt: true },
-				agentId: 'claude',
 				onAbort: vi.fn(),
 				spinnerSelectionKey: 'chat-1',
 				announcementsEnabled: false,

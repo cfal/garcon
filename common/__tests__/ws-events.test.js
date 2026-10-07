@@ -8,7 +8,20 @@ import {
   PreamblesInvalidatedMessage,
   parseServerWsMessage,
   TranscriptSearchStatusMessage,
+  ChatProcessingUpdatedMessage,
+  ReconnectStateMessage,
 } from '../ws-events.ts';
+
+it('round-trips processing timing in events and snapshots and rejects malformed observations', () => {
+  const timing = { startedAt: 1000, lastOutputAt: 2000, observedAt: 3000 };
+  const event = new ChatProcessingUpdatedMessage('chat-1', 'running', timing);
+  expect(parseServerWsMessage(JSON.parse(JSON.stringify(event)))).toEqual(event);
+  const snapshot = new ReconnectStateMessage({ outcome: 'snapshot', chats: [{ chatId: 'chat-1', phase: 'running', timing }] }, [], 'synthetic-instance');
+  expect(parseServerWsMessage(JSON.parse(JSON.stringify(snapshot)))).toEqual(snapshot);
+  for (const invalid of [{ ...timing, observedAt: 0 }, { ...timing, lastOutputAt: 4000 }, { ...timing, startedAt: -1 }]) {
+    expect(parseServerWsMessage({ ...event, timing: invalid })).toBeNull();
+  }
+});
 import { ChatReloadCancelRequest, parseClientWsMessage } from '../ws-requests.ts';
 
 it('round-trips execution settings invalidations', () => {

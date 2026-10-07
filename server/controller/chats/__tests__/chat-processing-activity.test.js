@@ -1,4 +1,4 @@
-import { describe, expect, it, mock } from 'bun:test';
+import { describe, expect, it, mock, spyOn } from 'bun:test';
 import { ChatProcessingActivity } from '../chat-processing-activity.ts';
 
 function makeActivity({
@@ -76,4 +76,21 @@ describe('ChatProcessingActivity', () => {
       { chatId: 'chat-z', phase: 'running' },
     ]);
   });
+});
+
+it('owns ephemeral processing timing while keeping reads pure', () => {
+  let active = true;
+  let reconnecting = false;
+  const clock = spyOn(Date, 'now').mockReturnValue(1000);
+  const activity = new ChatProcessingActivity({ isChatRunning: () => active, getRunningChatIdsSnapshot: () => active ? ['one'] : [] }, { isChatTurnReserved: () => false, getTurnReservedChatIds: () => [], isChatStopInFlight: () => false }, { isChatExecutorReconnecting: () => reconnecting });
+  try {
+    expect(activity.timing('one')).toBeNull();
+    expect(activity.update('one')).toEqual({ startedAt: 1000, lastOutputAt: null, observedAt: 1000 });
+    clock.mockReturnValue(3000); activity.observeOutput('one'); reconnecting = true;
+    expect(activity.update('one')).toEqual({ startedAt: 1000, lastOutputAt: 3000, observedAt: 3000 });
+    active = false; activity.update('one'); active = true;
+    expect(activity.timing('one')).toBeNull();
+    expect(activity.update('one').startedAt).toBe(3000);
+    activity.remove('one'); expect(activity.timing('one')).toBeNull();
+  } finally { clock.mockRestore(); }
 });

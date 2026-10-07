@@ -2924,5 +2924,8 @@
 	"settings_key_setup_unknown": "Provider not recognized. Choose a provider from the menus below.",
 	"markdown_file_link_outside_root": "Cannot open {path}: this file is outside the accessible folder {root}. Save or copy it under that folder, then link to the new path.",
 	"markdown_file_link_root_unavailable": "Cannot open {path}: the accessible folder is not available yet. Wait for the executor to connect and try again.",
-	"markdown_file_link_invalid_path": "Cannot open {path}: this link does not identify a valid file path."
+	"markdown_file_link_invalid_path": "Cannot open {path}: this link does not identify a valid file path.",
+	"chat_processing_elapsed": "Elapsed {time}",
+	"chat_processing_last_output": "Last output {time} ago",
+	"chat_processing_no_output": "Waiting for output"
 }

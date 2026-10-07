@@ -104,7 +104,7 @@ describe('ChatProcessingReconciler', () => {
 				phase: 'stopping',
 			}),
 		).toBe(true);
-		expect(sessions.applyProcessingEvent).toHaveBeenCalledWith('chat-1', 'stopping');
+		expect(sessions.applyProcessingEvent).toHaveBeenCalledWith('chat-1', 'stopping', null);
 		expect(presentation.applyProcessingPhase).toHaveBeenCalledWith('chat-1', 'stopping');
 		expect(sessions.applyProcessingEvent.mock.invocationCallOrder[0]).toBeLessThan(
 			presentation.applyProcessingPhase.mock.invocationCallOrder[0],

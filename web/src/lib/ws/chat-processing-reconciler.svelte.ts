@@ -61,7 +61,7 @@ export class ChatProcessingReconciler implements ChatProcessingPresentationRegis
 
 		const message = parseServerWsMessage(data);
 		if (message instanceof ChatProcessingUpdatedMessage) {
-			this.sessions.applyProcessingEvent(message.chatId, message.phase);
+			this.sessions.applyProcessingEvent(message.chatId, message.phase, message.timing ?? null);
 			this.#applyPresentationPhase(message.chatId, message.phase);
 			return true;
 		}

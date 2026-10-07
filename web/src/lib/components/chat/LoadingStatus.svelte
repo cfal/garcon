@@ -7,30 +7,44 @@
 	import type { LoadingStatus as ChatLoadingStatus } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
 	import GitCommitHorizontal from '@lucide/svelte/icons/git-commit-horizontal';
 	import Square from '@lucide/svelte/icons/square';
+	import {
+		processingDurations,
+		type ProcessingTimingObservation,
+	} from '$lib/chat/sessions/processing-timing.js';
 
 	interface Props {
 		isVisible: boolean;
 		status: ChatLoadingStatus | null;
-		agentId: string;
 		onAbort: (() => void) | null;
 		spinnerSelectionKey?: string | null;
 		quickCommitVisible?: boolean;
 		quickCommitSummary?: GitQuickSummaryReady | null;
 		onQuickCommit?: (() => void) | null;
 		announcementsEnabled?: boolean;
+		timing?: ProcessingTimingObservation | null;
 	}
 
 	let {
 		isVisible,
 		status,
-		agentId,
 		onAbort,
 		spinnerSelectionKey = null,
 		quickCommitVisible = false,
 		quickCommitSummary = null,
 		onQuickCommit = null,
 		announcementsEnabled = true,
+		timing = null,
 	}: Props = $props();
+	let clock = $state(Date.now());
+	$effect(() => {
+		if (!isVisible || !timing) return;
+		clock = Date.now();
+		const interval = setInterval(() => {
+			clock = Date.now();
+		}, 1000);
+		return () => clearInterval(interval);
+	});
+	const durations = $derived(timing ? processingDurations(timing, clock) : null);
 
 	// Frame cadence for the character spinner. Lower feels snappier; the scale
 	// pulse transition is tied to the same value so the two stay in step.
@@ -101,9 +115,7 @@
 		if (animTimer) clearInterval(animTimer);
 	});
 
-	const statusText = $derived(
-		agentId === 'codex' ? m.chat_loading_thinking() : status?.text || m.chat_loading_thinking(),
-	);
+	const statusText = $derived(status?.text || m.chat_loading_thinking());
 	const canInterrupt = $derived(status?.can_interrupt !== false);
 	const quickCommitHasDiffStats = $derived(
 		Boolean(
@@ -116,7 +128,7 @@
 	// Extra bottom padding gives the composer something solid to overlap, hiding
 	// the tray's lower edge behind the composer's stable rounded corners.
 	const statusPanelClass = cn(
-		'pointer-events-auto flex min-h-14 items-center justify-between gap-3 rounded-t-2xl border border-b-0 border-border bg-chat-thinking px-3 pb-5 pt-2 sm:px-4',
+		'pointer-events-auto flex min-h-14 items-center justify-between gap-3 rounded-t-2xl border border-b-0 border-border bg-chat-thinking px-3 pb-4 pt-1 sm:px-4',
 	);
 </script>
 
@@ -139,7 +151,23 @@
 				>
 					{activeSpinners[animationPhase]}
 				</span>
-				<span class="truncate text-sm font-medium text-foreground">{statusText}...</span>
+				<div class="min-w-0">
+					<span class="block truncate text-sm leading-4 font-medium text-foreground"
+						>{statusText}...</span
+					>
+					<span
+						class="block min-h-4 truncate text-[11px] text-muted-foreground tabular-nums"
+						aria-live="off"
+						data-processing-timing
+					>
+						{#if durations}
+							{m.chat_processing_elapsed({ time: durations.elapsed })} · {durations.lastOutput ===
+							null
+								? m.chat_processing_no_output()
+								: m.chat_processing_last_output({ time: durations.lastOutput })}
+						{/if}
+					</span>
+				</div>
 			</div>
 
 			{#if quickCommitVisible || (canInterrupt && onAbort)}

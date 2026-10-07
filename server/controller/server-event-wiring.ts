@@ -365,7 +365,7 @@ export function wireServerEvents({
     queueErrorMessage: string,
     options: TurnEventMetadata,
   ): Promise<void> {
-    broadcast(new ChatProcessingUpdatedMessage(chatId, processing.phase(chatId)));
+    broadcast(new ChatProcessingUpdatedMessage(chatId, processing.phase(chatId), processing.update(chatId)));
     if (!markTurnFailure(chatId, options)) return;
     await settleExecutionCommand(chatId, options, 'failed', queueErrorMessage);
     broadcastAgentFailure(chatId, queueErrorMessage, options);
@@ -408,6 +408,14 @@ export function wireServerEvents({
   });
   agentRegistry.onTranscriptCommitted(async (event) => {
     transcriptFanout(event);
+    if (event.type === 'rows' && event.rows.some(row => row.kind === 'provider-row' && row.message.type !== 'user-message')) {
+      processing.observeOutput(event.chatId);
+      const timing = processing.timing(event.chatId);
+      const phase = processing.phase(event.chatId);
+      if (timing && phase) scheduleChatTask(event.chatId, 'processing output observation', () => {
+        if (chatExists(event.chatId)) broadcast(new ChatProcessingUpdatedMessage(event.chatId, phase, timing));
+      });
+    }
     // A committed Preambles-updated notice invalidates the per-chat selection
     // cache. Scheduling here, immediately after the fanout has enqueued the
     // notice's chat-messages task on the per-chat queue, fixes the broadcast
@@ -436,9 +444,10 @@ export function wireServerEvents({
     // Captures the phase before scheduling so rapid stop and terminal transitions
     // preserve the intermediate stopping state.
     const phase = processing.phase(chatId);
+    const timing = processing.update(chatId);
     scheduleChatTask(chatId, 'processing broadcast', () => {
       if (!chatExists(chatId)) return;
-      broadcast(new ChatProcessingUpdatedMessage(chatId, phase));
+      broadcast(new ChatProcessingUpdatedMessage(chatId, phase, timing));
     });
   };
   queue.onProcessingInvalidated((chatId) => {
@@ -472,7 +481,7 @@ export function wireServerEvents({
       inlineTerminalReleases.delete(chatId);
     }
     if (chatExists(chatId)) {
-      broadcast(new ChatProcessingUpdatedMessage(chatId, processing.phase(chatId)));
+      broadcast(new ChatProcessingUpdatedMessage(chatId, processing.phase(chatId), processing.update(chatId)));
     }
   };
   agentRegistry.onRunSteerable((chatId) => { queue.retryQueuedSteers(chatId); });
@@ -584,6 +593,7 @@ export function wireServerEvents({
     transientFeeds.deleteChat(chatId);
     deleteSearchChat(chatId);
     scheduleChatTask(chatId, 'chat removal settlement', async () => {
+      processing.remove(chatId);
       broadcast(new ChatSessionDeletedWsMessage(chatId));
       if (removalReason === 'user-deletion') {
         await commandLedger.markChatInterrupted(chatId, 'chat-deleted');

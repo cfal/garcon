@@ -50,9 +50,27 @@ export type { ChatStopIntent, ChatStopOutcome } from './chat-stop.js';
 export const CHAT_PROCESSING_PHASES = ['running', 'stopping', 'reconnecting'] as const;
 export type ChatProcessingPhase = typeof CHAT_PROCESSING_PHASES[number];
 
+export interface ChatProcessingTiming {
+  readonly startedAt: number;
+  readonly lastOutputAt: number | null;
+  readonly observedAt: number;
+}
+
+export function parseChatProcessingTiming(value: unknown): ChatProcessingTiming | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const timing = value as Record<string, unknown>;
+  const { startedAt, lastOutputAt, observedAt } = timing;
+  if (typeof startedAt !== 'number' || !Number.isFinite(startedAt) || startedAt < 0
+    || typeof observedAt !== 'number' || !Number.isFinite(observedAt) || observedAt < startedAt
+    || (lastOutputAt !== null && (typeof lastOutputAt !== 'number' || !Number.isFinite(lastOutputAt)
+      || lastOutputAt < startedAt || lastOutputAt > observedAt))) return null;
+  return { startedAt, lastOutputAt, observedAt };
+}
+
 export interface ChatProcessingEntry {
   chatId: string;
   phase: ChatProcessingPhase;
+  timing?: ChatProcessingTiming;
 }
 
 export interface ChatMessageMetadata {
