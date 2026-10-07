@@ -1,3 +1,4 @@
+import { RecentChatHistoryState } from './recent-chat-history.svelte.js';
 // Canonical chat session store. Single source of truth for chat entities,
 // selection state, and draft lifecycle. Replaces split ownership between
 // AppShell's local chats array and NavigationStore's selectedChat snapshot.
@@ -67,7 +68,6 @@ import {
 	toRecord,
 } from './chat-session-records.js';
 
-const VISITED_CHAT_LIMIT = 30;
 
 interface ArchiveMutationSettlement {
 	chatId: string;
@@ -81,7 +81,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	#baseOrder = $state.raw<string[]>([]);
 	selectedChatId = $state<string | null>(null);
 	lastSelectedChatId = $state<string | null>(null);
-	#visitedChatIds = $state.raw<readonly string[]>([]);
+	readonly #recentHistory = new RecentChatHistoryState();
 	startupByChatId = $state<Record<string, ChatStartupConfig>>({});
 	isLoadingChats = $state(true);
 	chatListStatus = $state<ChatListLoadStatus>('loading');
@@ -161,27 +161,12 @@ export class ChatSessionsStore implements ChatSessionsPort {
 
 	setSelectedChatId(chatId: string | null): void {
 		this.selectedChatId = chatId;
-		if (chatId && this.hasChat(chatId)) {
-			this.#visitedChatIds = [chatId, ...this.#visitedChatIds.filter((id) => id !== chatId)].slice(
-				0,
-				VISITED_CHAT_LIMIT,
-			);
-		}
+		if (chatId && this.hasChat(chatId)) this.#recentHistory.visit(chatId);
 	}
 
 	get recentChats(): readonly ChatSessionRecord[] {
-		const eligible = this.#orderedChats.filter((chat) => !chat.isArchived);
-		const visits = new Map(this.#visitedChatIds.map((id, index) => [id, index]));
-		return eligible.sort((a, b) => {
-			const visitOrder =
-				(visits.get(a.id) ?? VISITED_CHAT_LIMIT) - (visits.get(b.id) ?? VISITED_CHAT_LIMIT);
-			if (visitOrder !== 0) return visitOrder;
-			return (b.lastActivityAt ?? b.createdAt ?? '').localeCompare(
-				a.lastActivityAt ?? a.createdAt ?? '',
-			);
-		});
+		return this.#recentHistory.rankChats(this.#orderedChats);
 	}
-
 	async #runFetch(showLoading: boolean): Promise<void> {
 		const fetchGeneration = ++this.#nextFetchGeneration;
 		const initial = this.chatListStatus !== 'ready';
@@ -819,7 +804,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	}
 
 	removeChat(chatId: string): void {
-		this.#visitedChatIds = this.#visitedChatIds.filter((id) => id !== chatId);
+		this.#recentHistory.remove(chatId);
 		this.#processingOverrides.delete(chatId);
 		this.#processingSnapshot?.delete(chatId);
 		this.#serverEntryFetchGenerationByChatId.delete(chatId);
@@ -844,7 +829,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	}
 
 	#pruneSnapshotGenerations(records: Readonly<Record<string, ChatSessionRecord>>): void {
-		this.#visitedChatIds = this.#visitedChatIds.filter((id) => Boolean(records[id]));
+		this.#recentHistory.prune(records);
 		for (const chatId of this.#serverEntryGenerationByChatId.keys()) {
 			if (records[chatId]) continue;
 			this.#serverEntryGenerationByChatId.delete(chatId);
