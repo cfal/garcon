@@ -2924,5 +2924,9 @@
 	"settings_key_setup_unknown": "Provider not recognized. Choose a provider from the menus below.",
 	"markdown_file_link_outside_root": "Cannot open {path}: this file is outside the accessible folder {root}. Save or copy it under that folder, then link to the new path.",
 	"markdown_file_link_root_unavailable": "Cannot open {path}: the accessible folder is not available yet. Wait for the executor to connect and try again.",
-	"markdown_file_link_invalid_path": "Cannot open {path}: this link does not identify a valid file path."
+	"markdown_file_link_invalid_path": "Cannot open {path}: this link does not identify a valid file path.",
+	"archive_undo_action": "Undo",
+	"archive_undo_notice": "Archived {count} chats.",
+	"archive_undo_notice_one": "Chat archived.",
+	"archive_undo_failed": "Could not restore archived chats: {detail}"
 }

@@ -172,6 +172,14 @@
 	const virtual = new SidebarVirtualChatListController();
 	let virtualSnapshot = $derived(virtual.snapshot);
 	let virtualItems = $derived(virtual.items(virtualSnapshot, rows));
+	// Matches rows by identity while the geometry effect catches up with regrouping.
+	const rowsByKey = $derived(new Map(rows.map((row, index) => [row.key, { row, index }])));
+	const renderedItems = $derived.by(() => {
+		return virtualItems.flatMap((virtualItem) => {
+			const match = rowsByKey.get(virtualItem.key);
+			return match ? [{ row: match.row, virtualItem: { ...virtualItem, index: match.index } }] : [];
+		});
+	});
 	let totalHeight = $derived(virtualSnapshot.sizerSize + bottomPadding);
 	// Single-line rows drop the separator line entirely; no trailing slot is
 	// reserved for it.
@@ -888,74 +896,69 @@
 				data-sidebar-virtual-list-separator={separator.key}
 			></div>
 		{/each}
-		{#each virtualItems as virtualItem (virtualItem.key)}
-			{@const row = rows[virtualItem.index]}
-			{#if row}
-				<div
-					data-sidebar-virtual-item={row.type}
-					class="absolute left-0 right-0 top-0"
-					style={`height:${virtualItem.size}px; transform:translateY(${virtualItem.start}px);`}
-				>
-					{#if row.type === 'project-header'}
-						<SidebarProjectHeaderRow
-							{row}
-							containsSelectedChat={Boolean(
-								row.isCollapsed && selectedChatId && row.chatIds.includes(selectedChatId),
-							)}
-							onToggle={onToggleProjectCollapsed}
-						/>
-					{:else if row.type === 'section-header'}
-						<SidebarSectionHeaderRow
-							{row}
-							containsSelectedChat={Boolean(
-								row.isCollapsed && selectedChatId && row.chatIds.includes(selectedChatId),
-							)}
-							onToggle={onToggleProjectCollapsed}
-						/>
-					{:else}
-						<SidebarVirtualSortableChatRow
-							{row}
-							index={virtualItem.index}
-							{instanceId}
-							{selectedChatId}
-							{currentTime}
-							{isMobile}
-							{isMultiSelectMode}
-							isMultiSelected={isMultiSelected?.(row.chat.id) ?? false}
-							{displayOptions}
-							{dragEnabled}
-							{reorderEnabled}
-							isDragging={draggingChatId === row.chat.id}
-							dropIndicatorEdge={activeDrop?.chatId === row.chat.id ? activeDrop.edge : null}
-							onDragStart={startSidebarDrag}
-							onDragSourceUnmount={cancelUnmountedDragSource}
-							onDragUpdate={previewSidebarDrop}
-							onDropOnRow={finishSidebarDrop}
-							{onChatSelect}
-							{onDeleteChat}
-							{onStartRenameChat}
-							{onTogglePinned}
-							{onToggleArchive}
-							isArchiveMutationPending={isArchiveMutationPending(row.chat.id)}
-							{onShowDetails}
-							{onForkChat}
-							{onShareChat}
-							{onTagClick}
-							{onManageTags}
-							{onOpenInNewWindow}
-							{newWindowEdges}
-							{onEnterMultiSelect}
-							{onMultiSelectToggle}
-							onMoveToTop={getMoveToTop(row)}
-							onMoveToBottom={getMoveToBottom(row)}
-							onSortChatOrder={displayOptions.sortMode === 'manual'
-								? onSortChatOrder
-								: undefined}
-							{hasPinnedChats}
-						/>
-					{/if}
-				</div>
-			{/if}
+		{#each renderedItems as { row, virtualItem } (row.key)}
+			<div
+				data-sidebar-virtual-item={row.type}
+				class="absolute left-0 right-0 top-0"
+				style={`height:${virtualItem.size}px; transform:translateY(${virtualItem.start}px);`}
+			>
+				{#if row.type === 'project-header'}
+					<SidebarProjectHeaderRow
+						{row}
+						containsSelectedChat={Boolean(
+							row.isCollapsed && selectedChatId && row.chatIds.includes(selectedChatId),
+						)}
+						onToggle={onToggleProjectCollapsed}
+					/>
+				{:else if row.type === 'section-header'}
+					<SidebarSectionHeaderRow
+						{row}
+						containsSelectedChat={Boolean(
+							row.isCollapsed && selectedChatId && row.chatIds.includes(selectedChatId),
+						)}
+						onToggle={onToggleProjectCollapsed}
+					/>
+				{:else}
+					<SidebarVirtualSortableChatRow
+						{row}
+						index={virtualItem.index}
+						{instanceId}
+						{selectedChatId}
+						{currentTime}
+						{isMobile}
+						{isMultiSelectMode}
+						isMultiSelected={isMultiSelected?.(row.chat.id) ?? false}
+						{displayOptions}
+						{dragEnabled}
+						{reorderEnabled}
+						isDragging={draggingChatId === row.chat.id}
+						dropIndicatorEdge={activeDrop?.chatId === row.chat.id ? activeDrop.edge : null}
+						onDragStart={startSidebarDrag}
+						onDragSourceUnmount={cancelUnmountedDragSource}
+						onDragUpdate={previewSidebarDrop}
+						onDropOnRow={finishSidebarDrop}
+						{onChatSelect}
+						{onDeleteChat}
+						{onStartRenameChat}
+						{onTogglePinned}
+						{onToggleArchive}
+						isArchiveMutationPending={isArchiveMutationPending(row.chat.id)}
+						{onShowDetails}
+						{onForkChat}
+						{onShareChat}
+						{onTagClick}
+						{onManageTags}
+						{onOpenInNewWindow}
+						{newWindowEdges}
+						{onEnterMultiSelect}
+						{onMultiSelectToggle}
+						onMoveToTop={getMoveToTop(row)}
+						onMoveToBottom={getMoveToBottom(row)}
+						onSortChatOrder={displayOptions.sortMode === 'manual' ? onSortChatOrder : undefined}
+						{hasPinnedChats}
+					/>
+				{/if}
+			</div>
 		{/each}
 	</div>
 </div>

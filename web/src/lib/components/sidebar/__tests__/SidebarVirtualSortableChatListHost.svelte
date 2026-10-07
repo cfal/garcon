@@ -24,6 +24,7 @@
 
 	interface SidebarVirtualSortableChatListHostProps {
 		rows: SidebarVirtualRow[];
+		pendingChatIds?: string[];
 		selectedChatId?: string | null;
 		isMobile?: boolean;
 		isFiltered?: boolean;
@@ -41,6 +42,7 @@
 
 	let {
 		rows,
+		pendingChatIds = [],
 		selectedChatId = null,
 		isMobile = false,
 		isFiltered = false,
@@ -147,6 +149,7 @@
 		onStartRenameChat={() => {}}
 		onTogglePinned={() => {}}
 		onToggleArchive={() => {}}
+		isArchiveMutationPending={(id) => pendingChatIds.includes(id)}
 		onShowDetails={() => {}}
 		onForkChat={() => {}}
 		onShareChat={() => {}}
