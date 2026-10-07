@@ -26,11 +26,12 @@
 	interface Props {
 		open: boolean;
 		snippet: Snippet | null;
+		initialTemplate?: string;
 		onSave: (definition: SnippetDefinitionInput) => Promise<void>;
 		onClose: () => void;
 	}
 
-	let { open, snippet, onSave, onClose }: Props = $props();
+	let { open, snippet, initialTemplate = '', onSave, onClose }: Props = $props();
 	const snippets = getSnippets();
 	const notifications = getNotifications();
 	const transientLayers = getTransientLayers();
@@ -45,6 +46,7 @@
 		const nextForm = new SnippetFormState(() => snippets.snippets);
 		const nextEditor = new PromptEditorDialogState();
 		nextForm.reset(snippet);
+		if (!snippet) nextForm.template = initialTemplate;
 		form = nextForm;
 		templateEditor = nextEditor;
 		let nextRefinement: SnippetTemplateRefinementController;
@@ -78,13 +80,15 @@
 		if (!definition || form.saving || refinementPending) return;
 		form.saving = true;
 		form.error = null;
+		const savingForm = form;
+		const close = onClose;
 		try {
 			await onSave(definition);
-			onClose();
+			if (form === savingForm) close();
 		} catch (error) {
-			form.error = m.snippets_save_error({ detail: errorDetail(error) });
+			savingForm.error = m.snippets_save_error({ detail: errorDetail(error) });
 		} finally {
-			form.saving = false;
+			savingForm.saving = false;
 		}
 	}
 

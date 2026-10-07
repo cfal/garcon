@@ -436,6 +436,10 @@
 		});
 	}
 
+	function saveAsSnippet(): void {
+		appShell.openSnippetDraft(messageSelectionText ?? messageMenuText);
+	}
+
 	function handleFork(e: MouseEvent) {
 		e.stopPropagation();
 		if (!canForkAtMessageNow) return;
@@ -651,6 +655,7 @@
 							onQuoteSelection={quoteSelection}
 							onSendToNewSession={sendToNewSession}
 							onSelectText={openSelectTextDialog}
+							onSaveAsSnippet={messageMenuText.trim() ? saveAsSnippet : undefined}
 							onGenerateTitleFromMessage={canGenerateTitleFromMessage
 								? generateTitleFromCurrentMessage
 								: undefined}
@@ -817,6 +822,7 @@
 									onQuoteSelection={quoteSelection}
 									onSendToNewSession={sendToNewSession}
 									onSelectText={openSelectTextDialog}
+									onSaveAsSnippet={messageMenuText.trim() ? saveAsSnippet : undefined}
 									onGenerateTitleFromMessage={canGenerateTitleFromMessage
 										? generateTitleFromCurrentMessage
 										: undefined}

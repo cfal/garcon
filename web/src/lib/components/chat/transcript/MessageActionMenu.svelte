@@ -7,6 +7,7 @@
 	import SquareArrowOutUpRight from '@lucide/svelte/icons/square-arrow-out-up-right';
 	import TextSelect from '@lucide/svelte/icons/text-select';
 	import Quote from '@lucide/svelte/icons/quote';
+	import FilePlus from '@lucide/svelte/icons/file-plus';
 
 	interface Props {
 		hasSelection: boolean;
@@ -17,6 +18,7 @@
 		onQuoteSelection: () => void;
 		onSendToNewSession: () => void;
 		onSelectText: () => void;
+		onSaveAsSnippet?: () => void;
 		onGenerateTitleFromMessage?: () => void | Promise<void>;
 	}
 
@@ -29,6 +31,7 @@
 		onQuoteSelection,
 		onSendToNewSession,
 		onSelectText,
+		onSaveAsSnippet,
 		onGenerateTitleFromMessage,
 	}: Props = $props();
 
@@ -42,6 +45,13 @@
 	<Copy />
 	{hasSelection ? m.chat_message_copy_selection() : m.chat_message_copy_text()}
 </ContextMenuItem>
+
+{#if onSaveAsSnippet}
+	<ContextMenuItem onclick={onSaveAsSnippet}>
+		<FilePlus />
+		{hasSelection ? m.chat_message_save_selection_as_snippet() : m.chat_message_save_as_snippet()}
+	</ContextMenuItem>
+{/if}
 
 {#if hasSelection}
 	<ContextMenuItem onclick={onQuoteSelection}>

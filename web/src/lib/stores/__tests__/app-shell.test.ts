@@ -2,6 +2,18 @@ import { describe, it, expect, vi } from 'vitest';
 import { AppShellStore } from '../app-shell.svelte';
 
 describe('AppShellStore', () => {
+	it('fences an old snippet form close and discards drafts on other dialog navigation', () => {
+		const store = new AppShellStore();
+		store.openSnippetDraft('first');
+		const first = store.snippetDraft!;
+		store.openSnippetDraft('second');
+		store.closeSnippetDraft(first);
+		expect(store.snippetDraft?.template).toBe('second');
+		expect(store.showSnippets).toBe(true);
+		store.openSettings();
+		expect(store.snippetDraft).toBeNull();
+		expect(store.showSnippets).toBe(false);
+	});
 	it('keeps scheduled prompt drafts mounted while editing snippets and restores focus on return', async () => {
 		const store = new AppShellStore();
 		store.openScheduledPrompts();

@@ -28,6 +28,33 @@ function menuItemLabels(): (string | undefined)[] {
 }
 
 describe('ConversationMessage actions', () => {
+	it.each([UserMessage, AssistantMessage])(
+		'opens a snippet draft with the unchanged message text',
+		async (Message) => {
+			render(ConversationMessageHost, {
+				message: new Message('2026-06-27T00:00:00.000Z', '**Reusable** instructions'),
+			});
+			await fireEvent.click(screen.getByRole('button', { name: 'More message actions' }));
+			await fireEvent.click(await screen.findByRole('menuitem', { name: 'Save as snippet' }));
+			expect(screen.getByTestId('snippet-draft').textContent).toBe('**Reusable** instructions');
+		},
+	);
+
+	it('saves the captured selection after the browser selection clears', async () => {
+		render(ConversationMessageHost, {
+			message: new AssistantMessage(
+				'2026-06-27T00:00:00.000Z',
+				'Only selected text belongs in the snippet',
+			),
+		});
+		const trigger = document.querySelector('[data-slot="context-menu-trigger"]') as HTMLElement;
+		selectIn(trigger, 'selected text');
+		await fireEvent.contextMenu(trigger);
+		await screen.findByRole('menuitem', { name: 'Save selection as snippet' });
+		window.getSelection()?.removeAllRanges();
+		await fireEvent.click(screen.getByRole('menuitem', { name: 'Save selection as snippet' }));
+		expect(screen.getByTestId('snippet-draft').textContent).toBe('selected text');
+	});
 	afterEach(() => {
 		cleanup();
 		window.getSelection()?.removeAllRanges();
@@ -110,18 +137,14 @@ describe('ConversationMessage actions', () => {
 
 	it('styles the complete presented user message without changing ordinary bubbles', () => {
 		const { container } = render(ConversationMessageHost, {
-			message: new UserMessage(
-				'2026-06-27T00:00:00.000Z',
-				'**Body** only',
-				undefined,
-				undefined,
-				{ origin: 'cli', style: 'info', title: 'Deployment context' },
-			),
+			message: new UserMessage('2026-06-27T00:00:00.000Z', '**Body** only', undefined, undefined, {
+				origin: 'cli',
+				style: 'info',
+				title: 'Deployment context',
+			}),
 		});
 
-		const bubble = container.querySelector<HTMLElement>(
-			'[data-user-message-presentation="info"]',
-		);
+		const bubble = container.querySelector<HTMLElement>('[data-user-message-presentation="info"]');
 		expect(bubble?.textContent).toContain('CLI info');
 		expect(bubble?.textContent).toContain('Deployment context');
 		expect(bubble?.classList.contains('bg-status-neutral/25')).toBe(true);
@@ -135,18 +158,12 @@ describe('ConversationMessage actions', () => {
 
 	it('styles a complete custom user message with both theme accents', () => {
 		const { container } = render(ConversationMessageHost, {
-			message: new UserMessage(
-				'2026-06-27T00:00:00.000Z',
-				'Custom body',
-				undefined,
-				undefined,
-				{
-					origin: 'cli',
-					style: 'custom',
-					customStyle: { lightAccent: '#7c3aed', darkAccent: '#c4b5fd' },
-					title: 'Custom context',
-				},
-			),
+			message: new UserMessage('2026-06-27T00:00:00.000Z', 'Custom body', undefined, undefined, {
+				origin: 'cli',
+				style: 'custom',
+				customStyle: { lightAccent: '#7c3aed', darkAccent: '#c4b5fd' },
+				title: 'Custom context',
+			}),
 		});
 
 		const bubble = container.querySelector<HTMLElement>(
@@ -194,7 +211,13 @@ describe('ConversationMessage actions', () => {
 		await fireEvent.contextMenu(trigger);
 
 		const labels = (await screen.findAllByRole('menuitem')).map((item) => item.textContent?.trim());
-		expect(labels).toEqual(['Copy text', 'Select text', 'Fork at message', 'Send to new session']);
+		expect(labels).toEqual([
+			'Copy text',
+			'Save as snippet',
+			'Select text',
+			'Fork at message',
+			'Send to new session',
+		]);
 		const menuParts = Array.from(
 			document.querySelector<HTMLElement>('[data-slot="context-menu-content"]')?.children ?? [],
 		).map((item) =>
@@ -204,6 +227,7 @@ describe('ConversationMessage actions', () => {
 		);
 		expect(menuParts).toEqual([
 			'Copy text',
+			'Save as snippet',
 			'Select text',
 			'separator',
 			'Fork at message',
@@ -436,6 +460,7 @@ describe('ConversationMessage actions', () => {
 		expect(await screen.findByRole('menuitem', { name: 'Copy selection' })).toBeTruthy();
 		expect(menuItemLabels()).toEqual([
 			'Copy selection',
+			'Save selection as snippet',
 			'Quote selection',
 			'Select text',
 			'Send to new session',

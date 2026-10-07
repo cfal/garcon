@@ -43,6 +43,7 @@ export class AppShellStore {
 	showScheduledPrompts = $state(false);
 	showPreambles = $state(false);
 	showSnippets = $state(false);
+	snippetDraft = $state.raw<{ readonly template: string } | null>(null);
 	showOnboardingWizard = $state(false);
 	chatPreambleSelectionTarget = $state<ChatPreambleSelectionTarget | null>(null);
 	settingsTab = $state<SettingsTab>('interface');
@@ -143,6 +144,7 @@ export class AppShellStore {
 	}
 
 	openSnippets(returnFocus?: () => void): void {
+		this.snippetDraft = null;
 		this.showSettings = false;
 		this.showScheduledPrompts = false;
 		this.showOnboardingWizard = false;
@@ -153,12 +155,14 @@ export class AppShellStore {
 
 	closeSnippets(): void {
 		this.showSnippets = false;
+		this.snippetDraft = null;
 		const returnFocus = this.#snippetsReturnFocus;
 		this.#snippetsReturnFocus = null;
 		if (returnFocus) queueMicrotask(returnFocus);
 	}
 
 	openSnippetsOverScheduledPrompts(returnFocus?: () => void): void {
+		this.snippetDraft = null;
 		this.showSettings = false;
 		this.showOnboardingWizard = false;
 		this.dismissPreambles();
@@ -168,7 +172,18 @@ export class AppShellStore {
 
 	dismissSnippets(): void {
 		this.showSnippets = false;
+		this.snippetDraft = null;
 		this.#snippetsReturnFocus = null;
+	}
+
+	openSnippetDraft(template: string): void {
+		if (!template.trim()) return;
+		this.openSnippets();
+		this.snippetDraft = { template };
+	}
+
+	closeSnippetDraft(draft: { readonly template: string }): void {
+		if (this.snippetDraft === draft) this.closeSnippets();
 	}
 
 	setSettingsTab(tab: string): void {

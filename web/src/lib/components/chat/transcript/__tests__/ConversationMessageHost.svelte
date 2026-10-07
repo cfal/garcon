@@ -176,3 +176,5 @@
 		Remove chat
 	</button>
 {/if}
+
+<output data-testid="snippet-draft">{appShell.snippetDraft?.template ?? ''}</output>
