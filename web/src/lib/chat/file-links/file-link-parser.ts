@@ -158,6 +158,7 @@ export function parseFileLink(
 	const pathOnly = stripQueryAndHash(afterLineExtract);
 
 	const isAbsolute = ABSOLUTE_UNIX_RE.test(pathOnly) || DRIVE_LETTER_RE.test(pathOnly);
+	let relativePath = pathOnly;
 
 	if (isAbsolute) {
 		// Try to relativize against the base path
@@ -166,21 +167,13 @@ export function parseFileLink(
 
 		const relative = stripBasePath(pathOnly, basePath);
 		if (relative === null) return { ...ignored(href), blockedReason: 'outside-root' };
-		if (!relative) return { ...ignored(href), blockedReason: 'invalid-path' };
-
-		const normalized = normalizePath(relative);
-		if (!normalized) return { ...ignored(href), blockedReason: 'invalid-path' };
-
-		return { kind: 'file', relativePath: normalized, rawHref: href, line, col };
+		relativePath = relative;
 	}
 
-	// Normalize
-	const normalized = normalizePath(pathOnly);
-
-	// Reject if normalization collapses to empty
-	if (!normalized) return ignored(href);
-
-	// At this point it's a relative path-like pattern
+	const normalized = normalizePath(relativePath);
+	if (!normalized) {
+		return isAbsolute ? { ...ignored(href), blockedReason: 'invalid-path' } : ignored(href);
+	}
 	return {
 		kind: 'file',
 		relativePath: normalized,
