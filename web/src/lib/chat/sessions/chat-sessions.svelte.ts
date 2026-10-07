@@ -26,7 +26,7 @@ import type {
 	ChatProcessingPhase,
 	ChatProcessingTiming,
 } from '$shared/chat-types';
-import type { ProcessingTimingObservation } from './processing-timing.js';
+import { ChatProcessingState } from './chat-processing-state.svelte.js';
 import { normalizeTags } from '$shared/tags';
 import type {
 	ApplyChatTagDeltaRequest,
@@ -101,9 +101,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	#selectionWriteInFlight = false;
 	#selectionWritePending: string | null | undefined = undefined;
 	#selectionWriteAcked: string | null = null;
-	#processingSnapshot: Map<string, ChatProcessingPhase> | null = null;
-	#processingTimings = $state.raw<Readonly<Record<string, ProcessingTimingObservation>>>({});
-	readonly #processingOverrides = new Map<string, ChatProcessingPhase | null>();
+	readonly #processing = new ChatProcessingState();
 	readonly #archiveProjection = new ChatArchiveProjectionState();
 	readonly #projectBindings = new ChatProjectBindingState();
 
@@ -673,7 +671,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 
 		for (const session of sessions) {
 			let next = toRecord(session);
-			next.processingPhase = this.#resolveProcessing(next.id, next.processingPhase);
+			next.processingPhase = this.#processing.phaseFor(next.id, next.processingPhase);
 			next.isProcessing = next.processingPhase !== null;
 			const prev = this.#baseById[next.id];
 			next = this.#projectBindings.reconcileFetchedRecord(next, prev, requestProjectPathRevisions);
@@ -711,9 +709,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		for (const chatId of previousServerChatIds) {
 			if (serverIdSet.has(chatId)) continue;
 			this.#projectBindings.publish(chatId, null);
-			this.#setProcessingTiming(chatId, null);
-			this.#processingOverrides.delete(chatId);
-			this.#processingSnapshot?.delete(chatId);
+			this.#processing.forget(chatId);
 		}
 		const draftOrder: string[] = [];
 		for (const id of this.#baseOrder) {
@@ -782,7 +778,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 			next.executorId,
 		);
 		reconcileActivityProjection(previous, next);
-		next.processingPhase = this.#resolveProcessing(entry.id, next.processingPhase);
+		next.processingPhase = this.#processing.phaseFor(entry.id, next.processingPhase);
 		next.isProcessing = next.processingPhase !== null;
 		const nextById = { ...this.#baseById, [entry.id]: next };
 		const nextOrder = insertServerEntry(
@@ -804,9 +800,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	}
 
 	removeChat(chatId: string): void {
-		this.#setProcessingTiming(chatId, null);
-		this.#processingOverrides.delete(chatId);
-		this.#processingSnapshot?.delete(chatId);
+		this.#processing.forget(chatId);
 		this.#serverEntryFetchGenerationByChatId.delete(chatId);
 		this.#tagReconciliation.remove(chatId);
 		if (!this.#baseById[chatId]) return;
@@ -922,20 +916,11 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	}
 
 	processingPhase(chatId: string): ChatProcessingPhase | null {
-		return this.#resolveProcessing(chatId, this.#baseById[chatId]?.processingPhase ?? null);
+		return this.#processing.phaseFor(chatId, this.#baseById[chatId]?.processingPhase ?? null);
 	}
 
-	processingTiming(chatId: string): ProcessingTimingObservation | null {
-		return this.#processingTimings[chatId] ?? null;
-	}
-
-	#setProcessingTiming(chatId: string, timing: ChatProcessingTiming | null): void {
-		const next = { ...this.#processingTimings };
-		const previous = next[chatId];
-		if (timing && previous && previous.timing.observedAt > timing.observedAt) return;
-		if (timing) next[chatId] = { timing, receivedAt: Date.now() };
-		else delete next[chatId];
-		this.#processingTimings = next;
+	processingTiming(chatId: string) {
+		return this.#processing.timingFor(chatId);
 	}
 
 	/** Applies a WebSocket-authoritative processing event for one chat. */
@@ -944,9 +929,8 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		phase: ChatProcessingPhase | null,
 		timing: ChatProcessingTiming | null = null,
 	): ChatProcessingTransition {
-		this.#setProcessingTiming(chatId, phase ? timing : null);
 		const previousPhase = this.processingPhase(chatId);
-		this.#processingOverrides.set(chatId, phase);
+		this.#processing.applyEvent(chatId, phase, timing);
 		const chat = this.#baseById[chatId];
 		if (!chat) return { chatId, previousPhase, phase };
 
@@ -962,35 +946,16 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	/** Replaces processing state from a correlated snapshot. Later WebSocket
 	 *  events override this baseline; REST list responses never do. */
 	reconcileProcessing(entries: readonly ChatProcessingEntry[]): ChatProcessingTransition[] {
-		const receivedAt = Date.now();
-		const nextTimings: Record<string, ProcessingTimingObservation> = {};
-		for (const entry of entries) {
-			const previous = this.#processingTimings[entry.chatId];
-			if (previous && (!entry.timing || previous.timing.observedAt > entry.timing.observedAt))
-				nextTimings[entry.chatId] = previous;
-			else if (entry.timing) nextTimings[entry.chatId] = { timing: entry.timing, receivedAt };
-		}
-		this.#processingTimings = nextTimings;
-		const snapshot = new Map(entries.map((entry) => [entry.chatId, entry.phase]));
-		const chatIds = new Set([
-			...Object.keys(this.#baseById),
-			...(this.#processingSnapshot?.keys() ?? []),
-			...this.#processingOverrides.keys(),
-			...snapshot.keys(),
-		]);
-		const transitions = [...chatIds].map((chatId) => ({
-			chatId,
-			previousPhase: this.processingPhase(chatId),
-			phase: snapshot.get(chatId) ?? null,
-		}));
-		this.#processingSnapshot = snapshot;
-		this.#processingOverrides.clear();
+		const { phases, transitions } = this.#processing.reconcile(
+			entries,
+			new Map(Object.entries(this.#baseById).map(([id, record]) => [id, record.processingPhase])),
+		);
 
 		let changed = false;
 		const nextById = { ...this.#baseById };
 
 		for (const [id, record] of Object.entries(nextById)) {
-			const phase = snapshot.get(id) ?? null;
+			const phase = phases.get(id) ?? null;
 			if (record.processingPhase !== phase || record.isProcessing !== (phase !== null)) {
 				nextById[id] = { ...record, isProcessing: phase !== null, processingPhase: phase };
 				changed = true;
@@ -1000,18 +965,9 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		if (changed) {
 			this.#baseById = nextById;
 		}
-		return transitions.filter((transition) => transition.previousPhase !== transition.phase);
+		return transitions;
 	}
 
-	#resolveProcessing(
-		chatId: string,
-		restValue: ChatProcessingPhase | null,
-	): ChatProcessingPhase | null {
-		const override = this.#processingOverrides.get(chatId);
-		if (override !== undefined || this.#processingOverrides.has(chatId)) return override ?? null;
-		if (this.#processingSnapshot) return this.#processingSnapshot.get(chatId) ?? null;
-		return restValue;
-	}
 }
 
 export function createChatSessionsStore(deps: ChatSessionsStoreDeps = {}): ChatSessionsStore {

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 	import { unusedSingletonFactories } from '$lib/workspace/__tests__/unused-singleton-factories';
 	import { setExecutorsTestContext } from '$lib/executors/__tests__/executors-test-context';
 	setExecutorsTestContext();
@@ -147,6 +148,7 @@
 		isDraft: () => false,
 		isChatProcessing: (chatId: string) => chatId === selectedChat.id && selectedChat.isProcessing,
 		processingPhase: () => selectedChat.processingPhase,
+		processingTiming: () => null,
 		patchDraftStartup: () => {},
 		patchPreview: () => {},
 		patchActivity: (chatId: string, timestamp: string) => onPatchActivity?.(chatId, timestamp),
@@ -161,7 +163,7 @@
 		quietRefreshChats: () => Promise.resolve(),
 	};
 
-	setChatSessions(sessions as never);
+	setChatSessions(Object.defineProperties(new ChatSessionsStore(), Object.getOwnPropertyDescriptors(sessions)));
 	setLocalSettings({
 		autoScrollToBottom: true,
 		showQuickCommitTray: false,

@@ -1,3 +1,4 @@
+import type { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
@@ -32,7 +33,7 @@ const runtime = vi.hoisted(() => ({
 vi.mock('$lib/context', () => ({
 	getExecutors: () => executors,
 	getAppShell: () => ({ isMobile: false }),
-	getChatSessions: () => ({ isChatProcessing: () => runtime.processing }),
+	getChatSessions: () => ({ isChatProcessing: () => runtime.processing, processingTiming: () => null } satisfies Pick<ChatSessionsStore, 'isChatProcessing' | 'processingTiming'>),
 	getConversationUi: () => ({
 		getExecutionControl: () => (runtime.queue ? { queue: runtime.queue } : null),
 		pendingPermissionsFor: () => [],

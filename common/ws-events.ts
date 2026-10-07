@@ -1,3 +1,4 @@
+import { parseChatProcessingEntries } from './chat-processing';
 import type { ResendCandidate, TranscriptMessage } from './chat-view';
 import {
   isRelationallyValidNewestTranscriptPage,
@@ -556,21 +557,8 @@ function chatProcessingSnapshotResult(value: unknown): ChatProcessingSnapshotRes
   if (result.outcome === 'unavailable') return { outcome: 'unavailable' };
   if (result.outcome !== 'snapshot' || !Array.isArray(result.chats)) return null;
 
-  const chats: ChatProcessingEntry[] = [];
-  const seen = new Set<string>();
-  for (const valueEntry of result.chats) {
-    if (!valueEntry || typeof valueEntry !== 'object' || Array.isArray(valueEntry)) return null;
-    const entry = valueEntry as Record<string, unknown>;
-    const chatId = requiredStr(entry.chatId);
-    const phase = CHAT_PROCESSING_PHASES.find((valuePhase) => valuePhase === entry.phase);
-    if (!chatId || !phase || seen.has(chatId)) return null;
-    seen.add(chatId);
-    const timing = entry.timing === undefined ? null : parseChatProcessingTiming(entry.timing);
-    if (entry.timing !== undefined && !timing) return null;
-    chats.push({ chatId, phase, ...(timing ? { timing } : {}) });
-  }
-
-  return { outcome: 'snapshot', chats };
+  const chats = parseChatProcessingEntries(result.chats);
+  return chats ? { outcome: 'snapshot', chats } : null;
 }
 
 function parseChatListInvalidationReason(
