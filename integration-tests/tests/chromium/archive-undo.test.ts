@@ -68,9 +68,12 @@ test('archive Undo restores the captured chat without changing selection', async
     await firstRow.locator('button').first().click({ button: 'right' });
     await page.getByRole('menuitem', { name: 'Archive', exact: true }).click();
     await expect(page.getByText('Chat archived.', { exact: true })).toBeVisible();
-    await page.getByRole('button', { name: 'Undo', exact: true }).click();
+    await Promise.all([
+      page.waitForResponse(response => response.url().endsWith('/api/v1/chats/archive') && response.request().method() === 'PUT' && response.request().postDataJSON().isArchived === false),
+      page.getByRole('button', { name: 'Undo', exact: true }).click(),
+    ]);
     await expect.poll(async () => (await integration.client.listChats()).sessions.find(chat => chat.id === ids[0])?.isArchived).toBe(false);
-    await page.unroute('**/api/v1/chats/archive');
+    await page.unrouteAll({ behavior: 'wait' });
 
     // Commits the archive but replaces its response with a transport failure.
     assertNoBrowserErrors();
@@ -86,7 +89,7 @@ test('archive Undo restores the captured chat without changing selection', async
     await expect(page.getByText('Chat archived.', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Undo', exact: true }).click();
     await expect.poll(async () => (await integration.client.listChats()).sessions.find(chat => chat.id === ids[0])?.isArchived).toBe(false);
-    await page.unroute('**/api/v1/chats/archive');
+    await page.unrouteAll({ behavior: 'wait' });
     expect(browserErrors.some(error => error.startsWith('console.error: Failed to toggle archive:'))).toBe(true);
     for (const error of browserErrors) {
       expect(error.startsWith('console.error: Failed to toggle archive:') || error === 'console.error: Failed to load resource: net::ERR_FAILED').toBe(true);
