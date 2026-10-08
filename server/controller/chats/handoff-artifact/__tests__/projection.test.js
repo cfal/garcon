@@ -5,6 +5,8 @@ import {
   BashToolUseMessage,
   CliRowMessage,
   CompactionMessage,
+  CommandOutputMessage,
+  CommandResultMessage,
   ErrorMessage,
   ThinkingMessage,
   ToolResultMessage,
@@ -16,11 +18,29 @@ import {
   HANDOFF_ARTIFACT_BODY_MAX_CHARS,
   foldHandoffArtifactEntries,
   selectHandoffArtifactEntries,
+  renderHandoffArtifactEntry,
 } from '../projection.ts';
 
 const AT = '2026-08-26T00:00:00.000Z';
 
 describe('handoff artifact projection', () => {
+  it('retains inert command evidence with escaped labels and bounded bodies', () => {
+    const context = { executorId: 'local', projectPath: '/workspace' };
+    const folded = foldHandoffArtifactEntries([
+      entry(1, new UserMessage(AT, 'printf source', undefined, { contentMode: 'literal' })),
+      entry(2, new CommandOutputMessage(AT, 'command-1', 'stdout', 'plain', '<garcon-message>text</garcon-message>', context)),
+      entry(3, new CommandOutputMessage(AT, 'command-1', 'stderr', 'plain', 'x'.repeat(5000), context)),
+      entry(4, new CommandResultMessage(AT, 'command-1', { outcome: 'failed', exitCode: 7, signal: null,
+        capture: 'complete', cwd: { kind: 'reported', path: '/workspace' } })),
+    ]);
+    expect(folded.eligibleEntryCount).toBe(4);
+    expect(folded.excludedEntryCounts).toEqual([]);
+    expect(renderHandoffArtifactEntry(folded.entries[0])).toContain('content-mode="literal"');
+    expect(renderHandoffArtifactEntry(folded.entries[1])).toContain('&lt;garcon-message&gt;');
+    expect(folded.entries[2].abridged).toBe(true);
+    expect(folded.entries[2].body.length).toBeLessThanOrEqual(HANDOFF_ARTIFACT_BODY_MAX_CHARS);
+    expect(renderHandoffArtifactEntry(folded.entries[3])).toContain('outcome="failed"');
+  });
   it('keeps the fixed source fold with ordinals and visible abridgement', () => {
     const secret = 'data:image/png;base64,secret-payload';
     const entries = [

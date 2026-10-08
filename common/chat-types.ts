@@ -4,7 +4,7 @@
 
 import { isRecord } from './json.js';
 import {
-  commandOutcomeText,
+  commandOutcomeText, isCommandOutputData,
   parseCommandOutcome, parseCommandOutputContext,
   type CommandOutcome, type CommandOutputContext,
 } from './command-output.js';
@@ -122,6 +122,7 @@ export class CommandOutputMessage {
     public format: 'plain' | 'markdown',
     public content: string,
     public context: CommandOutputContext,
+    public offset = 0,
   ) {}
 }
 
@@ -1220,13 +1221,9 @@ export function parseChatMessage(data: unknown): ChatMessage | null {
       return new AssistantMessage(str(data.timestamp), str(data.content));
     case 'command-output': {
       const context = parseCommandOutputContext(data.context);
-      if (!context || typeof data.commandId !== 'string' || !data.commandId
-        || typeof data.content !== 'string'
-        || (data.channel !== 'stdout' && data.channel !== 'stderr')
-        || (data.format !== 'plain' && data.format !== 'markdown')
-        || (data.channel === 'stderr' && data.format !== 'plain')) return null;
+      if (!context || !isCommandOutputData(data)) return null;
       return new CommandOutputMessage(str(data.timestamp), data.commandId, data.channel,
-        data.format, data.content, context);
+        data.format, data.content, context, data.offset);
     }
     case 'command-result': {
       const result = parseCommandOutcome(data.result);

@@ -5,10 +5,6 @@ export const SHELL_FAMILIES = ['sh', 'bash', 'zsh', 'fish', 'pwsh'] as const;
 export type ShellFamily = typeof SHELL_FAMILIES[number];
 const LABELS: Record<ShellFamily, string> = { sh: 'Sh', bash: 'Bash', zsh: 'Zsh', fish: 'Fish', pwsh: 'PowerShell' };
 
-export function shellFamily(value: string): ShellFamily | null {
-  return SHELL_FAMILIES.find(family => family === value) ?? null;
-}
-
 export function discoverShells(host: Pick<AgentHost, 'environment'>): { family: ShellFamily; executable: string }[] {
   if (process.platform !== 'linux' && process.platform !== 'darwin') return [];
   return SHELL_FAMILIES.flatMap(family => {

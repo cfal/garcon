@@ -5,12 +5,13 @@ import { join } from 'node:path';
 import type { CommandWorkingDirectory } from '@garcon/common/command-output';
 import { parseCommandWorkingDirectory } from '@garcon/common/command-output';
 import type { ShellFamily } from './catalog.js';
-import { commandFooter, shellInvocation, POWERSHELL_ENTRY } from './source.js';
+import { shellInvocation, POWERSHELL_ENTRY } from './source.js';
 
 export const COMMAND_OUTPUT_LIMIT = 16 * 1024 * 1024;
 export const OUTPUT_BATCH_BYTES = 32 * 1024;
 const DRAIN_TIMEOUT_MS = 1500;
 const KILL_GRACE_MS = 500;
+const CWD_REPORT_MAX_BYTES = 65_537;
 
 export interface ShellProcessResult {
   exitCode: number | null;
@@ -39,7 +40,11 @@ export async function executeShell(options: ShellProcessOptions): Promise<ShellP
   let captureOpen = true;
   const signalGroup = (signal: NodeJS.Signals) => {
     if (!child?.pid) return;
-    try { process.kill(-child.pid, signal); } catch { /* Process-group termination is best effort. */ }
+    try {
+      process.kill(-child.pid, signal);
+    } catch {
+      // Process-group termination is best effort.
+    }
   };
   const terminate = () => {
     signalGroup('SIGTERM');
@@ -49,17 +54,22 @@ export async function executeShell(options: ShellProcessOptions): Promise<ShellP
     const sourcePath = join(directory, options.family === 'pwsh' ? 'source.ps1' : 'source');
     const resultPath = join(directory, 'cwd');
     const entryPath = join(directory, 'entry.ps1');
-    if (options.family === 'pwsh') await writeFile(entryPath, POWERSHELL_ENTRY, { mode: 0o600, flag: 'wx' });
-    await writeFile(sourcePath, `${options.source}\n\n${commandFooter(options.family, resultPath)}\n`, { mode: 0o600, flag: 'wx' });
+    if (options.family === 'pwsh') {
+      await writeFile(entryPath, POWERSHELL_ENTRY, { mode: 0o600, flag: 'wx' });
+    }
+    await writeFile(sourcePath, options.source, { mode: 0o600, flag: 'wx' });
     await writeFile(resultPath, '', { mode: 0o600, flag: 'wx' });
     options.signal.throwIfAborted();
-    child = spawn(options.executable, shellInvocation(options.family, sourcePath, options.cwd, entryPath), {
-      cwd: options.cwd, env: options.environment ?? process.env,
-      detached: true, stdio: ['pipe', 'pipe', 'pipe'],
+    const spawned = spawn(options.executable, shellInvocation(options.family, sourcePath, options.cwd, entryPath, resultPath), {
+      cwd: options.cwd,
+      env: options.environment ?? process.env,
+      detached: true,
+      stdio: ['pipe', 'pipe', 'pipe'],
     });
+    child = spawned;
     const exit = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
-      child!.once('error', reject);
-      child!.once('exit', (code, signal) => resolve({ code, signal }));
+      spawned.once('error', reject);
+      spawned.once('exit', (code, signal) => resolve({ code, signal }));
     });
     let complete = true;
     let outputBytes = 0;
@@ -74,7 +84,11 @@ export async function executeShell(options: ShellProcessOptions): Promise<ShellP
             if (!captureOpen) return;
             const part = buffer.subarray(offset, offset + OUTPUT_BATCH_BYTES);
             outputBytes += part.length;
-            if (outputBytes > COMMAND_OUTPUT_LIMIT) { complete = false; terminate(); return; }
+            if (outputBytes > COMMAND_OUTPUT_LIMIT) {
+              complete = false;
+              terminate();
+              return;
+            }
             const text = decoder.decode(part, { stream: true });
             if (text) await options.output(channel, text);
           }
@@ -96,7 +110,9 @@ export async function executeShell(options: ShellProcessOptions): Promise<ShellP
     let drainTimer: ReturnType<typeof setTimeout> | undefined;
     const drained = await Promise.race([
       readers.then(() => true),
-      new Promise<false>(resolve => { drainTimer = setTimeout(() => resolve(false), DRAIN_TIMEOUT_MS); }),
+      new Promise<false>(resolve => {
+        drainTimer = setTimeout(() => resolve(false), DRAIN_TIMEOUT_MS);
+      }),
     ]);
     clearTimeout(drainTimer);
     if (!drained) {
@@ -129,14 +145,18 @@ async function readWorkingDirectory(path: string): Promise<CommandWorkingDirecto
     const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     try {
       const stat = await file.stat();
-      if (!stat.isFile() || stat.size > 65_537) throw new Error('Invalid cwd report');
-      const buffer = Buffer.alloc(65_538);
+      if (!stat.isFile() || stat.size > CWD_REPORT_MAX_BYTES) throw new Error('Invalid cwd report');
+      const buffer = Buffer.alloc(CWD_REPORT_MAX_BYTES + 1);
       const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
-      if (bytesRead > 65_537) throw new Error('Invalid cwd report');
+      if (bytesRead > CWD_REPORT_MAX_BYTES) throw new Error('Invalid cwd report');
       const text = buffer.toString('utf8', 0, bytesRead);
       const parsed = parseCommandWorkingDirectory({ kind: 'reported', path: text.endsWith('\n') ? text.slice(0, -1) : text });
       if (parsed) return parsed;
-    } finally { await file.close(); }
-  } catch { /* A command can exit before the footer or replace its private report. */ }
+    } finally {
+      await file.close();
+    }
+  } catch {
+    // A command can exit before the footer or replace its private report.
+  }
   return { kind: 'unavailable', reason: 'The command did not report a valid filesystem directory.' };
 }

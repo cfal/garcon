@@ -12,6 +12,15 @@ import { renderSharedChatText } from '../transcript.ts';
 const AT = '2026-08-18T12:00:00.000Z';
 
 describe('shared transcript chat rows', () => {
+  it('preserves whitespace in literal source', () => {
+    const source = '  printf text\n ';
+    const rendered = renderSharedChatText({
+      shareToken: 'synthetic-share', chatId: 'synthetic-chat', title: 'Literal source',
+      agentId: 'shell', model: 'sh', projectPath: '/workspace', sharedAt: AT,
+      messages: [new UserMessage(AT, source, undefined, { contentMode: 'literal' })],
+    });
+    expect(rendered).toContain(`[User] ${AT}\n${source}`);
+  });
   it.each([undefined, 'Review the removal target.\nThe target is ambiguous.'])(
     'preserves optional permission reasons in shared text: %s',
     (reason) => {

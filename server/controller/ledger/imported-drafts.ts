@@ -11,6 +11,7 @@ import { EventLoopSteps } from '@garcon/server-agent-common/shared/event-loop';
 import {
   isCarryoverMigrationQuarantineNoticeDetail,
   isPreambleApplicationNoticeDetail,
+  isPublicationGapNoticeDetail,
 } from '../../../common/transcript-notice-details.js';
 import {
   chatIdDisclosureNoticeContent,
@@ -255,6 +256,15 @@ function frozenDraftFor(message: ChatMessage, now: () => string): LedgerRowDraft
         providerMeta: null,
       }];
     case 'transcript-notice':
+      if (isPublicationGapNoticeDetail(message.detail)) {
+        return [{
+          kind: 'notice',
+          at,
+          message: message.content,
+          detail: { type: message.detail.type, ...(message.title ? { title: message.title } : {}) },
+          providerMeta: null,
+        }];
+      }
       if (
         !isCarryoverMigrationQuarantineNoticeDetail(message.detail)
         && !isPreambleApplicationNoticeDetail(message.detail)

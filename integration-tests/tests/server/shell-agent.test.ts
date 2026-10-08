@@ -59,18 +59,39 @@ for (const backend of ['in-process', 'remote-controller-dials', 'remote-executor
       await client.waitForProcessing(chatId, false, { afterIndex: resumedAt });
       expect(await readFile(join(next, 'result.txt'), 'utf8')).toBe('queued');
 
+      await client.runChat({ chatId, clientRequestId: crypto.randomUUID(), clientMessageId: crypto.randomUUID(),
+        command: "trap '' TERM; printf ready > interrupt-ready; while :; do sleep 1; done" });
+      for (let retry = 0; retry < 1000 && !await Bun.file(join(next, 'interrupt-ready')).exists(); retry++) {
+        await Bun.sleep(10);
+      }
+      expect(await Bun.file(join(next, 'interrupt-ready')).exists()).toBe(true);
+      const successor = 'printf replacement >> replacement.txt';
+      await client.enqueueNew(chatId, successor);
+      const interruptCursor = client.markEvents();
+      expect((await client.interruptAndSend({ chatId, clientRequestId: crypto.randomUUID() })).outcome)
+        .toBe('interrupt-requested');
+      const input = await client.waitForCommittedUserInput(chatId, successor, { afterIndex: interruptCursor });
+      expect((await client.waitForTurnTerminal(chatId, undefined, {
+        afterIndex: client.events().lastIndexOf(input) + 1,
+      })).type).toBe('agent-run-finished');
+      await client.waitForProcessing(chatId, false);
+      expect(await readFile(join(next, 'replacement.txt'), 'utf8')).toBe('replacement');
+      expect((await client.getExecutionControl(chatId)).queue.pause).toBeNull();
+
       expect(await rejectionOf(client.refinePrompt({ draft: 'echo command', target: 'prompt', subject: { kind: 'chat', chatId } })))
         .toMatchObject({ status: 422, body: { errorCode: 'PROMPT_REFINEMENT_UNAVAILABLE' } });
       const before = (await client.getMessages(chatId)).messages.map(row => row.message).filter(message => ['user-message', 'command-output', 'command-result'].includes(message.type));
       await client.reloadChat(chatId);
       const after = (await client.getMessages(chatId)).messages.map(row => row.message).filter(message => ['user-message', 'command-output', 'command-result'].includes(message.type));
-      expect(after).toEqual(before);
+      // Stop admits the successor before late cleanup rows; native Reload groups each command.
+      expect(after.map(message => JSON.stringify(message)).sort())
+        .toEqual(before.map(message => JSON.stringify(message)).sort());
 
       const forkId = fixture.newChatId();
       await client.forkChat({ sourceChatId: chatId, chatId: forkId, allowHandoffFork: true });
       const frozen = (await client.getMessages(forkId)).messages.map(row => row.message)
         .filter(message => ['user-message', 'command-output', 'command-result'].includes(message.type));
-      expect(frozen).toEqual(before);
+      expect(frozen).toEqual(after);
       const forkRun = await client.runChat({ chatId: forkId, clientRequestId: crypto.randomUUID(),
         clientMessageId: crypto.randomUUID(), command: 'printf fork-only' });
       await client.waitForTurnTerminal(forkId, forkRun.turnId);
@@ -98,7 +119,7 @@ for (const backend of ['in-process', 'remote-controller-dials', 'remote-executor
       await fixture.client.reloadChat(chatId);
       const recovered = (await fixture.client.getMessages(chatId)).messages.map(row => row.message)
         .filter(message => ['user-message', 'command-output', 'command-result'].includes(message.type));
-      expect(recovered).toEqual(before);
+      expect(recovered).toEqual(after);
       expect((await fixture.client.listChats()).sessions.find(chat => chat.id === chatId)?.projectPath).toBe(next);
     }, { executionBackend: backend, projectRoots: 'separate' });
   }, 60_000);

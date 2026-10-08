@@ -140,6 +140,8 @@ export function renderHandoffArtifactEntry(
 function isEligibleMessage(message: ChatMessage): boolean {
   return message.type === 'user-message'
     || message.type === 'assistant-message'
+    || message.type === 'command-output'
+    || message.type === 'command-result'
     || message.type === 'compaction'
     || message.type === 'agent-switch'
     || isToolUseMessage(message)
@@ -166,6 +168,21 @@ function projectEntry(
     });
   }
   switch (message.type) {
+    case 'command-output':
+    case 'command-result': {
+      const body = artifactBody(message.content);
+      return sourceEntry({
+        ordinal,
+        turn,
+        level: projectionPriorityLevel(message.type),
+        tag: message.type,
+        attributes: message.type === 'command-output'
+          ? [{ name: 'channel', value: message.channel }, { name: 'format', value: message.format }]
+          : [{ name: 'outcome', value: message.result.outcome }],
+        body: body.text,
+        abridged: body.abridged,
+      });
+    }
     case 'user-message': {
       const body = artifactBody(message.content);
       const presentation = transcriptExportEntryCliPresentation(entry);
@@ -174,9 +191,9 @@ function projectEntry(
         turn,
         level: projectionPriorityLevel(message.type),
         tag: 'user',
-        attributes: presentation === null
-          ? []
-          : [
+        attributes: [
+          ...(message.metadata?.contentMode === 'literal' ? [{ name: 'content-mode', value: 'literal' }] : []),
+          ...(presentation === null ? [] : [
             { name: 'origin', value: presentation.origin },
             ...(presentation.style === undefined
               ? []
@@ -184,7 +201,8 @@ function projectEntry(
             ...(presentation.title === undefined
               ? []
               : [{ name: 'title', value: presentation.title }]),
-          ],
+          ]),
+        ],
         body: body.text,
         abridged: body.abridged || (message.images?.length ?? 0) > 0,
       });

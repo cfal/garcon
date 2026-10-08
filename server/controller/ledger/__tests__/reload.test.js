@@ -3,7 +3,10 @@ import { describe, expect, it } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { AssistantMessage, ErrorMessage, UserMessage } from '../../../../common/chat-types.ts';
+import { AssistantMessage, CommandOutputMessage, CommandResultMessage, ErrorMessage, TranscriptNoticeMessage, UserMessage } from '../../../../common/chat-types.ts';
+import { frozenDrafts } from '../imported-drafts.ts';
+import { frozenConversationDrafts } from '../projection.ts';
+import { ledgerRowsToMessages } from '../presentation.ts';
 import { TranscriptAdoptionService } from '../adoption.ts';
 import { TranscriptReloadService } from '../reload.ts';
 import { TranscriptLedgerService } from '../service.ts';
@@ -15,6 +18,31 @@ const TS = '2026-08-12T00:00:00.000Z';
 const PREAMBLE_ID = '3502b645-222b-49d2-ac39-1c91f9fb1174';
 
 describe('TranscriptReloadService', () => {
+  it('preserves publication gaps through frozen message copies, forks, and prefix Reload', async () => {
+    const output = new CommandOutputMessage(TS, 'command-1', 'stdout', 'markdown', '```text\nprefix', {
+      executorId: 'local', projectPath: '/workspace',
+    });
+    const gap = new TranscriptNoticeMessage(TS, 'Reload native history.', { type: 'publication-gap' }, 'Output not delivered');
+    const result = new CommandResultMessage(TS, 'command-1', {
+      outcome: 'finished', exitCode: 0, signal: null, capture: 'complete',
+      cwd: { kind: 'reported', path: '/workspace' },
+    });
+    const evidence = [output, gap, result];
+    await withReload(async ({ ledger, reload }) => {
+      const frozen = frozenConversationDrafts(ledger.currentRows('chat-1'));
+      await ledger.seedChat('fork-1', frozen, frozen.length + 1);
+      const retainedEvidence = (chatId) => ledgerRowsToMessages(ledger.currentRows(chatId))
+        .filter((message) => message.type === 'command-output'
+          || message.type === 'command-result'
+          || message.type === 'transcript-notice');
+      expect(retainedEvidence('fork-1')).toEqual(evidence);
+      await reload.reload('chat-1');
+      expect(retainedEvidence('chat-1')).toEqual(evidence);
+      await reload.reload('chat-1');
+      expect(retainedEvidence('chat-1')).toEqual(evidence);
+    }, { frozenDrafts: frozenDrafts(evidence) });
+  });
+
   it('[TLV5-L10.02-CORE-UNIT-01] atomically repeats replacement while preserving one frozen conversation prefix', async () => {
     await withReload(async ({ ledger, reload, lease, replacementLease, oldViewId }) => {
       const firstReplacement = await reload.reload('chat-1');

@@ -116,6 +116,39 @@ describe('Shell integration', () => {
     while ((await integration.execution.runningSessions()).length) await Bun.sleep(5);
     expect(events.some(event => event.type === 'run-ended')).toBe(false);
     expect((await history()).some(row => row.type === 'command-output' && row.content === 'retained')).toBe(true);
+    await integration.producers.detach(request.producerBinding);
+    await integration.producers.bind({ binding: request.producerBinding, chatId: request.chatId });
+  });
+
+  it('retires idle detached bindings and tolerates stale detach', async () => {
+    await integration.producers.detach(request.producerBinding);
+    await integration.producers.detach(request.producerBinding);
+    await integration.producers.bind({ binding: request.producerBinding, chatId: request.chatId });
+  });
+
+  it('waits for cancelled invocation cleanup before admitting its replacement', async () => {
+    const handle = await integration.execution.start({ ...request, prompt: "trap '' TERM; touch ready; sleep 60" });
+    while (!await Bun.file(join(root, 'ready')).exists()) await Bun.sleep(5);
+    const ref = chat();
+    const stopping = integration.execution.abort(handle);
+    await integration.execution.resume({ ...request, runId: 'run-2', agentSessionId: ref.agentSessionId!, nativeSession: ref.nativeSession,
+      prompt: 'printf replacement' });
+    await stopping;
+    expect(await terminal('run-2')).toMatchObject({ outcome: 'finished', finalResponse: { text: 'replacement' } });
+  });
+
+  it('publishes both captured streams only after the process exits', async () => {
+    await integration.execution.start({ ...request, prompt: 'printf first; printf diagnostic >&2; touch ready; while [ ! -e release ]; do sleep 0.01; done; printf second' });
+    while (!await Bun.file(join(root, 'ready')).exists()) await Bun.sleep(5);
+    expect(events.some(event => event.type === 'rows')).toBe(false);
+    await Bun.write(join(root, 'release'), '');
+    await terminal();
+    const live = events.flatMap(event => event.type === 'rows' ? event.rows.map(row => row.message) : []);
+    const output = live.filter(message => message.type === 'command-output');
+    expect(output.filter(message => message.channel === 'stdout').map(message => message.content).join('')).toBe('firstsecond');
+    expect(output.at(-1)).toMatchObject({ channel: 'stderr', content: 'diagnostic' });
+    expect(live.at(-1)?.type).toBe('command-result');
+    expect((await history()).slice(1)).toEqual(live);
   });
 
   it('returns explicitly empty final stdout for silent success and rejects executable context', async () => {

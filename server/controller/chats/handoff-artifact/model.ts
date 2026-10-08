@@ -18,7 +18,7 @@ export interface HandoffArtifactSourceEntry {
   readonly ordinal: number;
   readonly level: number;
   readonly turn: number;
-  readonly tag: 'user' | 'assistant' | 'compaction' | 'tool-call' | 'handoff' | 'notice';
+  readonly tag: 'user' | 'assistant' | 'command-output' | 'command-result' | 'compaction' | 'tool-call' | 'handoff' | 'notice';
   readonly attributes: readonly HandoffArtifactAttribute[];
   readonly body: string | null;
   readonly abridged: boolean;

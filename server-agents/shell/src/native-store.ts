@@ -6,6 +6,7 @@ import { CommandResultMessage, parseChatMessage, type ChatMessage } from '@garco
 import { AgentIntegrationError, type AgentHost, type AgentNativeSessionRef } from '@garcon/server-agent-interface';
 import { syncDirectory } from '@garcon/server-agent-common/lib/json-file-store';
 import { EventLoopSteps } from '@garcon/server-agent-common/shared/event-loop';
+import { CommandOutputCapture } from './output.js';
 
 // Reserves room for normalized row envelopes under the controller's 64 MiB import limit.
 export const NATIVE_HISTORY_MAX_BYTES = 60 * 1024 * 1024;
@@ -113,6 +114,7 @@ export class NativeLog {
   async *messages(signal: AbortSignal): AsyncIterable<readonly { message: ChatMessage }[]> {
     let seq = 0;
     const steps = new EventLoopSteps('shell-native-import');
+    const output = new CommandOutputCapture();
     while (true) {
       signal.throwIfAborted();
       const rows = this.db.query<{ seq: number; message: string }, [number]>(
@@ -124,7 +126,19 @@ export class NativeLog {
         const message = parseChatMessage(JSON.parse(row.message));
         if (!message || !['user-message', 'command-output', 'command-result'].includes(message.type)
           || (message.type === 'user-message' && message.metadata?.contentMode !== 'literal')) throw unavailable();
-        batch.push({ message });
+        if (message.type === 'command-output') {
+          output.append(message);
+        } else {
+          for (const captured of output.drain()) {
+            batch.push({ message: captured });
+            if (batch.length >= 64) {
+              yield batch.splice(0);
+              signal.throwIfAborted();
+              await steps.next();
+            }
+          }
+          batch.push({ message });
+        }
         seq = row.seq;
         await steps.next();
       }

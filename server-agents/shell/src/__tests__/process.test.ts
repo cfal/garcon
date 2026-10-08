@@ -50,7 +50,7 @@ for (const family of SHELL_FAMILIES) {
       expect(result.cwd).toEqual({ kind: 'reported', path: directory });
     });
     it('retains unknown cwd when exit bypasses the footer', async () => {
-      const result = await run('exit 7');
+      const result = await run(family === 'pwsh' ? '[Environment]::Exit(7)' : "exec /bin/sh -c 'exit 7'");
       expect(result.exitCode).toBe(7);
       expect(result.cwd.kind).toBe('unavailable');
     });
@@ -105,6 +105,17 @@ for (const family of SHELL_FAMILIES) {
     });
 
     if (family === 'sh') {
+      it('preserves a trailing backslash without adding a newline', async () => {
+        const result = await run('printf x\\');
+        expect(result.stdout).toBe('x\\');
+      });
+
+      it('fails sourced syntax errors without falling back to interactive stdin', async () => {
+        const result = await run('echo )', AbortSignal.timeout(2000));
+        expect(result.interrupted).toBe(false);
+        expect(result.exitCode).not.toBe(0);
+      });
+
       it('decodes split UTF-8 independently and preserves terminal controls as inert text', async () => {
         const result = await run("printf '\\342'; sleep 0.02; printf '\\202\\254\\033[31mred\\033[0m\\r\\b'");
         expect(result.stdout).toBe('\u20ac\x1b[31mred\x1b[0m\r\b');
@@ -131,11 +142,22 @@ for (const family of SHELL_FAMILIES) {
     }
 
     if (family === 'pwsh') {
-      it('preserves using and param headers and treats return as successful without a cwd report', async () => {
+      it('preserves using and param headers and observes cwd after return', async () => {
         const result = await run("using namespace System.Text\nparam()\n[Console]::Out.Write([StringBuilder]::new('header').ToString())\nreturn");
         expect(result.stdout).toBe('header');
         expect(result.exitCode).toBe(0);
-        expect(result.cwd.kind).toBe('unavailable');
+        expect(result.cwd).toEqual({ kind: 'reported', path: directory });
+      });
+
+      it.each([
+        ['if (', 1], ['Write-Error failure', 1], ["throw 'failure'", 1], ['exit 7', 7],
+        ["& /bin/sh -c 'exit 7'; Write-Output recovered", 7],
+        ['Write-Error failure; Write-Output recovered', 1],
+        ['Write-Output literal`', 0],
+      ] as const)('classifies untouched source conservatively: %s', async (source, status) => {
+        const result = await run(source);
+        expect(result.exitCode).toBe(status);
+        if (source.endsWith('literal`')) expect(result.stdout).toBe('literal`\n');
       });
     }
 

@@ -187,7 +187,7 @@ test('a Stop requested while its executor reconnects is delivered once it resume
   expect(f.providers[1]!.calls.abort).toBe(1);
 });
 
-test('a remote delivery gap records a notice on the active run', async () => {
+test.each(['active', 'stopped'])('a remote delivery gap records a notice while the run is %s', async (phase) => {
   const f = await fixture();
   const chatId = CHAT_IDS[1]!;
   const producers = f.providers[1]!.integration.producers;
@@ -201,11 +201,22 @@ test('a remote delivery gap records a notice on the active run', async () => {
     type: 'rows', rows: [{ message: new AssistantMessage('2026-09-23T00:00:00.000Z', 'Synthetic output') }],
   });
   unsubscribe();
+  if (phase === 'stopped') await f.router.abortSession(chatId);
 
   for (const route of routes) route({ binding: bindings[0]!, event: { type: 'publication-gap' } });
+  f.providers[1]!.nativePublishers[0]!({
+    type: 'rows', rows: [{ message: new AssistantMessage('2026-09-23T00:00:01.000Z', 'Late output') }],
+  });
 
   expect(f.ledger.currentRows(chatId).filter((row) => row.kind === 'notice')).toEqual([
-    expect.objectContaining({ message: expect.stringContaining('Reload from native history') }),
+    expect.objectContaining({
+      message: expect.stringContaining('Reload from native history'),
+      detail: { type: 'publication-gap', title: 'Output not delivered' },
+    }),
   ]);
-  expect(f.router.isChatRunning(chatId)).toBe(true);
+  expect(f.ledger.currentRows(chatId).at(-1)).toMatchObject({ kind: 'provider-row', message: { content: 'Late output' } });
+  expect(f.router.isChatRunning(chatId)).toBe(phase === 'active');
+  f.ledger.closeProducer(chatId);
+  for (const route of routes) route({ binding: bindings[0]!, event: { type: 'publication-gap' } });
+  expect(f.ledger.currentRows(chatId).filter((row) => row.kind === 'notice')).toHaveLength(1);
 });

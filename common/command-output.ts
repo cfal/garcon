@@ -1,8 +1,19 @@
 import { isRecord } from './json.js';
+import type { CommandOutputMessage } from './chat-types.js';
 
 export interface CommandOutputContext {
   readonly executorId: string;
   readonly projectPath: string;
+}
+
+export function isCommandOutputData(value: unknown): value is Record<string, unknown> & Pick<CommandOutputMessage, 'commandId' | 'content' | 'offset' | 'channel' | 'format'> {
+  return isRecord(value)
+    && typeof value.commandId === 'string' && value.commandId.length > 0
+    && typeof value.content === 'string'
+    && typeof value.offset === 'number' && Number.isSafeInteger(value.offset) && value.offset >= 0
+    && (value.channel === 'stdout' || value.channel === 'stderr')
+    && (value.format === 'plain' || value.format === 'markdown')
+    && (value.channel !== 'stderr' || value.format === 'plain');
 }
 
 export type CommandWorkingDirectory =
@@ -37,7 +48,8 @@ export function parseCommandWorkingDirectory(value: unknown): CommandWorkingDire
 }
 
 export function parseCommandOutcome(value: unknown): CommandOutcome | null {
-  if (!isRecord(value) || !['finished', 'failed', 'interrupted', 'unknown'].includes(String(value.outcome))
+  if (!isRecord(value) || typeof value.outcome !== 'string'
+    || !['finished', 'failed', 'interrupted', 'unknown'].includes(value.outcome)
     || (value.exitCode !== null && (!Number.isSafeInteger(value.exitCode) || Number(value.exitCode) < 0))
     || (value.signal !== null && typeof value.signal !== 'string')
     || (value.capture !== 'complete' && value.capture !== 'incomplete')) return null;
@@ -53,14 +65,26 @@ export function parseCommandOutcome(value: unknown): CommandOutcome | null {
 }
 
 export function commandOutcomeText(result: CommandOutcome): string {
-  const status = result.outcome === 'finished' ? 'Completed'
-    : result.outcome === 'interrupted' ? 'Interrupted'
-      : result.outcome === 'unknown' ? 'Outcome unknown'
-        : result.exitCode !== null ? `Exit ${result.exitCode}` : 'Command failed';
-  return [
-    status,
-    ...(result.signal ? [`Signal: ${result.signal}`] : []),
-    ...(result.capture === 'incomplete' ? ['Output capture incomplete'] : []),
-    ...(result.cwd.kind === 'unavailable' ? [`Working directory not captured: ${result.cwd.reason}`] : []),
-  ].join('\n');
+  let status: string;
+  switch (result.outcome) {
+    case 'finished':
+      status = 'Completed';
+      break;
+    case 'interrupted':
+      status = 'Interrupted';
+      break;
+    case 'unknown':
+      status = 'Outcome unknown';
+      break;
+    default:
+      status = result.exitCode !== null ? `Exit ${result.exitCode}` : 'Command failed';
+  }
+
+  const lines = [status];
+  if (result.signal) lines.push(`Signal: ${result.signal}`);
+  if (result.capture === 'incomplete') lines.push('Output capture incomplete');
+  if (result.cwd.kind === 'unavailable') {
+    lines.push(`Working directory not captured: ${result.cwd.reason}`);
+  }
+  return lines.join('\n');
 }

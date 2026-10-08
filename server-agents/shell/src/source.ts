@@ -10,25 +10,53 @@ export function parseSubmission(submission: string): { source: string; format: '
   return { source, format: prefix ? 'markdown' : 'plain' };
 }
 
-// Only private generated paths enter the bootstrap; submitted source is never interpolated.
-export function commandFooter(family: ShellFamily, resultPath: string): string {
+function commandFooter(family: ShellFamily, resultPath: string): string {
   const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
   if (family === 'fish') {
     const fishQuote = (value: string) => `'${value.replaceAll('\\', '\\\\').replaceAll("'", "\\'")}'`;
-    return `set -l __garcon_status $status\nbuiltin pwd -P > ${fishQuote(resultPath)}\nexit $__garcon_status`;
+    return [
+      'set -l __garcon_status $status',
+      `builtin pwd -P > ${fishQuote(resultPath)}`,
+      'exit $__garcon_status',
+    ].join('\n');
   }
-  if (family === 'pwsh') {
-    const psQuote = (value: string) => `'${value.replaceAll("'", "''")}'`;
-    return `$__garcon_ok = $?\n$__garcon_status = if ($__garcon_ok) { 0 } elseif ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0) { $LASTEXITCODE } else { 1 }\n$__garcon_location = Get-Location\nif ($__garcon_location.Provider.Name -eq 'FileSystem') { [System.IO.File]::WriteAllText(${psQuote(resultPath)}, $__garcon_location.ProviderPath + "\u0060n", [System.Text.UTF8Encoding]::new($false)) }\nexit $__garcon_status`;
-  }
-  return `__garcon_status=$?\ncommand pwd -P > ${quote(resultPath)}\nexit "$__garcon_status"`;
+  return [
+    '__garcon_status=$?',
+    `command pwd -P > ${quote(resultPath)}`,
+    '(exit "$__garcon_status")',
+  ].join('\n');
 }
 
-export const POWERSHELL_ENTRY = 'Set-Location -LiteralPath $args[0] -ErrorAction Stop\n. $args[1]\nexit $LASTEXITCODE\n';
+export const POWERSHELL_ENTRY = [
+  'param([string]$__garcon_initialCwd, [string]$__garcon_sourcePath, [string]$__garcon_resultPath)',
+  'Set-Location -LiteralPath $__garcon_initialCwd -ErrorAction Stop',
+  '$__garcon_previousError = if ($Error.Count) { $Error[0] } else { $null }',
+  '$LASTEXITCODE = 0',
+  'try {',
+  '  . $__garcon_sourcePath',
+  '  $__garcon_ok = $?',
+  '} catch {',
+  '  $__garcon_ok = $false',
+  '  Write-Error -ErrorRecord $_ -ErrorAction Continue',
+  '}',
+  '$__garcon_nativeFailed = $LASTEXITCODE -is [int] -and $LASTEXITCODE -ne 0',
+  '$__garcon_currentError = if ($Error.Count) { $Error[0] } else { $null }',
+  '$__garcon_newError = -not [object]::ReferenceEquals($__garcon_previousError, $__garcon_currentError)',
+  '$__garcon_status = if ($__garcon_nativeFailed) { $LASTEXITCODE } elseif (-not $__garcon_ok -or $__garcon_newError) { 1 } else { 0 }',
+  '$__garcon_location = Get-Location',
+  'if ($__garcon_location.Provider.Name -eq \'FileSystem\') {',
+  '  [System.IO.File]::WriteAllText($__garcon_resultPath, $__garcon_location.ProviderPath + "`n", [System.Text.UTF8Encoding]::new($false))',
+  '}',
+  'exit $__garcon_status',
+  '',
+].join('\n');
 
-export function shellInvocation(family: ShellFamily, sourcePath: string, cwd: string, entryPath: string): string[] {
-  if (family === 'pwsh') return ['-NoLogo', '-File', entryPath, cwd, sourcePath];
-  if (family === 'fish') return ['-i', '-c', 'status job-control none; builtin cd $argv[2]; or exit $status; source $argv[1]', sourcePath, cwd];
+export function shellInvocation(family: ShellFamily, sourcePath: string, cwd: string, entryPath: string, resultPath: string): string[] {
+  if (family === 'pwsh') return ['-NoLogo', '-File', entryPath, cwd, sourcePath, resultPath];
+  const footer = commandFooter(family, resultPath);
+  if (family === 'fish') return ['-i', '-c', `status job-control none; builtin cd $argv[2]; or exit $status; source $argv[1]\n${footer}`, sourcePath, cwd];
   const cd = family === 'sh' ? 'command cd' : 'builtin cd';
-  return ['-i', '-c', `set +m; ${cd} -P -- "$2" || exit $?; . "$1"`, 'garcon', sourcePath, cwd];
+  // Dash otherwise returns to interactive stdin after a sourced syntax error.
+  const noninteractive = family === 'sh' ? '(set +i) 2>/dev/null && set +i; ' : '';
+  return ['-i', '-c', `${noninteractive}set +m; ${cd} -P -- "$2" || exit $?; . "$1"\n${footer}`, 'garcon', sourcePath, cwd];
 }

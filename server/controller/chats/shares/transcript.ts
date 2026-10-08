@@ -205,7 +205,8 @@ function formatMessage(message: ChatMessage, raw: unknown): TranscriptEntry {
     return {
       role,
       timestamp: message.timestamp,
-      content: `${message.content}${normalizeImages(message.images)}`.trim(),
+      content: message.metadata?.contentMode === 'literal'
+        ? message.content : `${message.content}${normalizeImages(message.images)}`.trim(),
     };
   }
   if (message instanceof AssistantMessage) {
