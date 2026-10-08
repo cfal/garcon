@@ -7,7 +7,7 @@ import SidebarHost from './SidebarHost.svelte';
 
 vi.mock('$lib/api/chats', async () => {
 	const actual = await vi.importActual<typeof import('$lib/api/chats')>('$lib/api/chats');
-	return { ...actual, toggleArchive: vi.fn() };
+	return { ...actual, setChatArchived: vi.fn() };
 });
 
 function makeServerChat(
@@ -58,8 +58,8 @@ afterEach(() => {
 
 describe('sidebar bulk archive flow', () => {
 	it('moves selected chats ahead of archived rows before the requests complete', async () => {
-		const archive = deferred<Awaited<ReturnType<typeof chatsApi.toggleArchive>>>();
-		vi.mocked(chatsApi.toggleArchive).mockReturnValueOnce(archive.promise);
+		const archive = deferred<Awaited<ReturnType<typeof chatsApi.setChatArchived>>>();
+		vi.mocked(chatsApi.setChatArchived).mockReturnValueOnce(archive.promise);
 		const listChats = vi.fn(async () => ({
 			sessions: [
 				makeServerChat('recent-order-neighbor', false, '2026-01-01T00:00:00.000Z'),
@@ -71,7 +71,7 @@ describe('sidebar bulk archive flow', () => {
 			lastSelectedChatId: 'recent-order-neighbor',
 		}));
 		const chatSessions = new ChatSessionsStore({
-			toggleArchive: chatsApi.toggleArchive,
+			setChatArchived: chatsApi.setChatArchived,
 			listChats,
 		});
 		chatSessions.upsertFromServer([
@@ -97,7 +97,7 @@ describe('sidebar bulk archive flow', () => {
 		await fireEvent.click(await screen.findByRole('menuitem', { name: 'Select' }));
 		await fireEvent.click(await screen.findByRole('button', { name: 'Archive' }));
 
-		expect(chatsApi.toggleArchive).toHaveBeenCalledWith('selected');
+		expect(chatsApi.setChatArchived).toHaveBeenCalledWith({ chatId: 'selected', isArchived: true });
 		expect(onChatSelect).toHaveBeenCalledOnce();
 		expect(onChatSelect).toHaveBeenCalledWith('recent-order-neighbor');
 		expect(
@@ -107,9 +107,9 @@ describe('sidebar bulk archive flow', () => {
 		).toEqual(['selected', 'archived']);
 
 		expect(screen.getByRole('button', { name: 'Unarchive' }).hasAttribute('disabled')).toBe(true);
-		expect(chatsApi.toggleArchive).toHaveBeenCalledOnce();
+		expect(chatsApi.setChatArchived).toHaveBeenCalledOnce();
 
-		archive.resolve({ success: true, isArchived: true });
+		archive.resolve({ success: true, chatId: 'selected', isArchived: true, isPinned: false, orderGroup: 'archived', changed: true });
 		await waitFor(() => expect(listChats).toHaveBeenCalledOnce());
 		expect(onChatSelect).toHaveBeenCalledOnce();
 		expect(chatSessions.isArchiveMutationPending('selected')).toBe(false);

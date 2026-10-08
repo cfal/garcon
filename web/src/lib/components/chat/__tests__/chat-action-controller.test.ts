@@ -24,7 +24,7 @@ vi.mock('$lib/api/chats', () => ({
 	forkChat: vi.fn(),
 	getChatDetails: vi.fn(),
 	reorderChat: vi.fn(),
-	toggleArchive: vi.fn(),
+	setChatArchived: vi.fn(),
 	togglePinned: vi.fn(),
 	updateChatProjectPath: vi.fn(),
 }));
@@ -151,7 +151,7 @@ function createHarness(
 		for (const chatId of admittedIds) pendingArchiveIds.add(chatId);
 		const completion = (async () => {
 			try {
-				await Promise.all(admittedIds.map((chatId) => chatsApi.toggleArchive(chatId)));
+				await Promise.all(admittedIds.map((chatId) => chatsApi.setChatArchived({ chatId, isArchived: true })));
 				await callbacks.onQuietRefresh();
 			} finally {
 				for (const chatId of admittedIds) pendingArchiveIds.delete(chatId);
@@ -189,7 +189,7 @@ function createHarness(
 beforeEach(() => {
 	vi.resetAllMocks();
 	vi.mocked(chatsApi.togglePinned).mockResolvedValue({ success: true, isPinned: true });
-	vi.mocked(chatsApi.toggleArchive).mockResolvedValue({ success: true, isArchived: true });
+	vi.mocked(chatsApi.setChatArchived).mockResolvedValue({ success: true, chatId: 'selected', isArchived: true, isPinned: false, orderGroup: 'archived', changed: true });
 });
 
 describe('ChatActionController', () => {
@@ -229,8 +229,8 @@ describe('ChatActionController', () => {
 			makeChat({ id: 'selected' }),
 			makeChat({ id: 'next' }),
 		];
-		const archive = deferred<Awaited<ReturnType<typeof chatsApi.toggleArchive>>>();
-		vi.mocked(chatsApi.toggleArchive).mockReturnValueOnce(archive.promise);
+		const archive = deferred<Awaited<ReturnType<typeof chatsApi.setChatArchived>>>();
+		vi.mocked(chatsApi.setChatArchived).mockReturnValueOnce(archive.promise);
 		const { controller, callbacks, setSelectedChatId } = createHarness({
 			chats,
 			selectedChatId: 'selected',
@@ -238,13 +238,13 @@ describe('ChatActionController', () => {
 
 		const completion = controller.toggleArchive('selected');
 
-		expect(chatsApi.toggleArchive).toHaveBeenCalledWith('selected');
+		expect(chatsApi.setChatArchived).toHaveBeenCalledWith({ chatId: 'selected', isArchived: true });
 		expect(callbacks.onSelectChat).toHaveBeenCalledOnce();
 		expect(callbacks.onSelectChat).toHaveBeenCalledWith('next');
 		expect(callbacks.onNewChat).not.toHaveBeenCalled();
 
 		setSelectedChatId('manually-selected');
-		archive.resolve({ success: true, isArchived: true });
+		archive.resolve({ success: true, chatId: 'selected', isArchived: true, isPinned: false, orderGroup: 'archived', changed: true });
 		await completion;
 
 		expect(callbacks.onQuietRefresh).toHaveBeenCalledOnce();
@@ -269,8 +269,8 @@ describe('ChatActionController', () => {
 	});
 
 	it('creates a new chat when archiving the only selected chat', async () => {
-		const archive = deferred<Awaited<ReturnType<typeof chatsApi.toggleArchive>>>();
-		vi.mocked(chatsApi.toggleArchive).mockReturnValueOnce(archive.promise);
+		const archive = deferred<Awaited<ReturnType<typeof chatsApi.setChatArchived>>>();
+		vi.mocked(chatsApi.setChatArchived).mockReturnValueOnce(archive.promise);
 		const { controller, callbacks } = createHarness();
 
 		const completion = controller.toggleArchive('chat-1');
@@ -278,14 +278,14 @@ describe('ChatActionController', () => {
 		expect(callbacks.onNewChat).toHaveBeenCalledOnce();
 		expect(callbacks.onSelectChat).not.toHaveBeenCalled();
 
-		archive.resolve({ success: true, isArchived: true });
+		archive.resolve({ success: true, chatId: 'selected', isArchived: true, isPinned: false, orderGroup: 'archived', changed: true });
 		await completion;
 		expect(callbacks.onNewChat).toHaveBeenCalledOnce();
 	});
 
 	it('ignores a duplicate archive while the first mutation is pending', async () => {
-		const archive = deferred<Awaited<ReturnType<typeof chatsApi.toggleArchive>>>();
-		vi.mocked(chatsApi.toggleArchive).mockReturnValueOnce(archive.promise);
+		const archive = deferred<Awaited<ReturnType<typeof chatsApi.setChatArchived>>>();
+		vi.mocked(chatsApi.setChatArchived).mockReturnValueOnce(archive.promise);
 		const { controller, callbacks } = createHarness({
 			chats: [makeChat({ id: 'selected' }), makeChat({ id: 'next' })],
 			selectedChatId: 'selected',
@@ -294,9 +294,9 @@ describe('ChatActionController', () => {
 		const firstCompletion = controller.toggleArchive('selected');
 		await controller.toggleArchive('selected');
 
-		expect(chatsApi.toggleArchive).toHaveBeenCalledOnce();
+		expect(chatsApi.setChatArchived).toHaveBeenCalledOnce();
 		expect(callbacks.onSelectChat).toHaveBeenCalledOnce();
-		archive.resolve({ success: true, isArchived: true });
+		archive.resolve({ success: true, chatId: 'selected', isArchived: true, isPinned: false, orderGroup: 'archived', changed: true });
 		await firstCompletion;
 	});
 
@@ -313,8 +313,8 @@ describe('ChatActionController', () => {
 	});
 
 	it('does not recenter after unarchive when the user selects another chat', async () => {
-		const archive = deferred<Awaited<ReturnType<typeof chatsApi.toggleArchive>>>();
-		vi.mocked(chatsApi.toggleArchive).mockReturnValueOnce(archive.promise);
+		const archive = deferred<Awaited<ReturnType<typeof chatsApi.setChatArchived>>>();
+		vi.mocked(chatsApi.setChatArchived).mockReturnValueOnce(archive.promise);
 		const { controller, callbacks, setSelectedChatId } = createHarness({
 			chats: [makeChat({ isArchived: true })],
 			selectedChatId: 'chat-1',
@@ -322,7 +322,7 @@ describe('ChatActionController', () => {
 
 		const completion = controller.toggleArchive('chat-1');
 		setSelectedChatId('manually-selected');
-		archive.resolve({ success: true, isArchived: false });
+		archive.resolve({ success: true, chatId: 'chat-1', isArchived: false, isPinned: false, orderGroup: 'normal', changed: true });
 		await completion;
 
 		expect(callbacks.requestSidebarRecenter).not.toHaveBeenCalled();
@@ -330,7 +330,7 @@ describe('ChatActionController', () => {
 
 	it('retains immediate archive navigation when the mutation fails', async () => {
 		vi.spyOn(console, 'error').mockImplementation(() => undefined);
-		vi.mocked(chatsApi.toggleArchive).mockRejectedValueOnce(new Error('offline'));
+		vi.mocked(chatsApi.setChatArchived).mockRejectedValueOnce(new Error('offline'));
 		const { controller, callbacks } = createHarness({
 			chats: [makeChat({ id: 'selected' }), makeChat({ id: 'next' })],
 			selectedChatId: 'selected',
