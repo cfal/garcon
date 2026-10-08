@@ -65,6 +65,13 @@ export class PromptComposerProjectState {
 		return target ? this.deps.projectResolution.snapshotFor(target) : { kind: 'unchecked' };
 	}
 
+	get snippetInteractionKey(): string {
+		const chat = this.deps.selectedChat;
+		const execution = this.deps.executionTarget;
+		return chat ? [chat.id, chat.status, execution?.executorId ?? chat.executorId,
+			execution?.projectPath || chat.projectPath].join('\u0000') : '';
+	}
+
 	get completionProjectPath(): string {
 		return this.snapshot.kind === 'available' ? (this.target?.projectPath ?? '') : '';
 	}

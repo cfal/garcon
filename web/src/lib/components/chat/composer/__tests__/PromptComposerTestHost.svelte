@@ -71,6 +71,7 @@
 		selectedAgentId?: SessionAgentId;
 		selectedThinkingMode?: ChatSessionRecord['thinkingMode'];
 		selectedStatus?: ChatStatus;
+		executionPolicy?: 'conversation' | 'literal';
 		selectedIsProcessing?: boolean;
 		isVisible?: boolean;
 		isPresented?: boolean;
@@ -110,6 +111,7 @@
 		selectedAgentId = 'claude',
 		selectedThinkingMode = 'none',
 		selectedStatus = 'running',
+		executionPolicy = 'conversation',
 		selectedIsProcessing = false,
 		isVisible = true,
 		isPresented,
@@ -338,6 +340,7 @@
 		get selectedChatId() {
 			return selectedChatId;
 		},
+		isDraft: () => selectedStatus === 'draft',
 		get selectedChat() {
 			return selectedChat;
 		},
@@ -355,6 +358,7 @@
 		getSelectableAgents: () => selectableAgents,
 		getAgent: (agentId: string) => ({
 			id: agentId,
+			executionPolicy,
 			label: labelForAgent(agentId),
 			description: '',
 			supportsFork: agentId !== 'amp',

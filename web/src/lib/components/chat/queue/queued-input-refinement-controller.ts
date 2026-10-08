@@ -12,6 +12,7 @@ import * as m from '$lib/paraglide/messages.js';
 
 interface QueuedInputRefinementOptions {
 	get chatId(): string;
+	get executionKey(): string;
 	editor: QueuedInputEditorState;
 	expandedEditor: PromptEditorDialogState;
 	notifications: Pick<NotificationsStore, 'info' | 'error'>;
@@ -93,11 +94,13 @@ export class QueuedInputRefinementController {
 		if (!entryId) return;
 		const sessionRevision = editor.sessionRevision;
 		const sourceText = editor.draft;
+		const executionKey = this.options.executionKey;
 
 		try {
 			const chatId = this.options.chatId;
 			const result = await this.#request.run({ draft: sourceText, target: 'prompt', subject: { kind: 'chat', chatId } });
 			if (result.kind !== 'refined') return;
+			if (this.options.startBlocked || this.options.executionKey !== executionKey) return;
 			if (this.options.chatId !== chatId || !editor.matchesSession(entryId, sessionRevision) || editor.draft !== sourceText) {
 				this.options.notifications.info(m.prompt_refinement_draft_changed());
 				await this.#focusEditor();

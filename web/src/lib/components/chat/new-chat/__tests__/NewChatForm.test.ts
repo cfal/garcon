@@ -1435,6 +1435,31 @@ describe('NewChatForm', () => {
 		expect(screen.getByRole('dialog', { name: 'Arguments for /snippet review' })).toBeTruthy();
 	});
 
+	it('cancels a pending snippet when the execution policy becomes literal', async () => {
+		stubMatchMedia(false);
+		const pending = deferred<Awaited<ReturnType<typeof snippetsApi.expandSnippet>>>();
+		vi.mocked(snippetsApi.expandSnippet).mockReturnValueOnce(pending.promise);
+		const chatsApi = await import('$lib/api/chats');
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
+			makeSnapshot({ paths: { recentProjectPaths: ['/workspace/project'] } }),
+		);
+		const { rerender } = render(NewChatFormTestHost);
+		await waitFor(() => expect(screen.queryByRole('status', { name: 'Loading chat defaults...' })).toBeNull());
+		const input = screen.getByPlaceholderText<HTMLTextAreaElement>('How can I help you today?');
+		await fireEvent.input(input, { target: { value: '/snippet review source' } });
+		await waitFor(() => expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Start session' }).disabled).toBe(false));
+		await fireEvent.keyDown(input, { key: 'Enter' });
+		await waitFor(() => expect(snippetsApi.expandSnippet).toHaveBeenCalledOnce());
+		await rerender({ executionPolicy: 'literal' });
+		await waitFor(() => expect(vi.mocked(snippetsApi.expandSnippet).mock.calls[0][1]?.signal?.aborted).toBe(true));
+		pending.resolve({ success: true, source: 'snippet', sourceId: 'snippet-review',
+			sourceUpdatedAt: '2026-01-01T00:00:00.000Z', shortName: 'review',
+			contextExecutorId: 'local', contextProjectPath: '/workspace/project', expandedText: 'Must not apply' });
+		await pending.promise;
+		expect(input.value).toBe('/snippet review source');
+	});
+
 	it('does not apply a pending expansion after the project path changes', async () => {
 		stubMatchMedia(false);
 		const pending = deferred<Awaited<ReturnType<typeof snippetsApi.expandSnippet>>>();

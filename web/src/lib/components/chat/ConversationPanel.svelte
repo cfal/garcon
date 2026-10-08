@@ -69,6 +69,10 @@
 	const localSettings = getLocalSettings();
 	const rootModelCatalog = getModelCatalog();
 	const modelCatalog = $derived(rootModelCatalog.forExecutor(chat.executorId));
+	const conversationActions = $derived.by(() => {
+		const agent = modelCatalog.getAgent(chat.agentId);
+		return Boolean(agent && agent.executionPolicy !== 'literal');
+	});
 	const appShell = getAppShell();
 	const quickGit = getGitQuickSummary();
 	const quickGitBranches = getGitBranchActions();
@@ -272,9 +276,9 @@
 				pendingPermissionRequests={pendingPermissions}
 				onRetry={() => actions?.reload(surfaceId, chatId)}
 				onForkChat={(ordinal) => actions?.fork(surfaceId, chatId, ordinal)}
-				onAppendToDraft={(block) => actions?.appendToDraft(surfaceId, chatId, block)}
-				onGenerateTitleFromMessage={(message, ordinal) =>
-					actions?.generateTitle(surfaceId, chatId, message, ordinal) ?? Promise.resolve()}
+				onAppendToDraft={conversationActions ? (block) => actions?.appendToDraft(surfaceId, chatId, block) : undefined}
+				onGenerateTitleFromMessage={conversationActions ? (message, ordinal) =>
+					actions?.generateTitle(surfaceId, chatId, message, ordinal) ?? Promise.resolve() : undefined}
 				reserveComposerTraySpace={capSpace.feed}
 				{isPreparingInitialScroll}
 				{isVisible}

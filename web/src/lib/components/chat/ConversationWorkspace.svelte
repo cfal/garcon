@@ -159,6 +159,8 @@
 
 	let queuedInputsDialogOpen = $state(false);
 	let queuedInputsDialogChatId = $state<string | null>(null);
+	const queuedChat = $derived(sessions.byId[queuedInputsDialogChatId ?? '']);
+	const queuedAgent = $derived(queuedChat ? rootModelCatalog.forExecutor(queuedChat.executorId).getAgent(queuedChat.agentId) : null);
 	let composerEditorOpenRequestId = $state(0);
 	const reloadDialog = new ReloadChatDialogState();
 	const dialogControl = $derived(conversationUi.getExecutionControl(queuedInputsDialogChatId));
@@ -356,6 +358,13 @@
 		return panel;
 	}
 
+	function allowsConversationalActions(chatId: string): boolean {
+		const chat = sessions.byId[chatId];
+		if (!chat) return false;
+		const agent = rootModelCatalog.forExecutor(chat.executorId).getAgent(chat.agentId);
+		return Boolean(agent && agent.executionPolicy !== 'literal');
+	}
+
 	const panelActions: ConversationPanelActions = {
 		reload(surfaceId, chatId) {
 			const panel = assertRenderedPanel(surfaceId, chatId);
@@ -377,10 +386,12 @@
 		},
 		appendToDraft(surfaceId, chatId, block) {
 			assertRenderedPanel(surfaceId, chatId);
+			if (!allowsConversationalActions(chatId)) return;
 			composerState.appendDraftBlock(chatId, block, { allowDuplicate: true });
 		},
 		async generateTitle(surfaceId, chatId, message, ordinal) {
 			assertRenderedPanel(surfaceId, chatId);
+			if (!allowsConversationalActions(chatId)) return;
 			await sessions.generateChatTitleFromMessage(chatId, message, ordinal);
 		},
 		interruptQueue(surfaceId, chatId) {
@@ -883,7 +894,8 @@
 	{#if queuedInputsDialogOpen && queuedInputsDialogChatId}
 		<QueuedInputsDialog
 			chatId={queuedInputsDialogChatId}
-			literalInput={rootModelCatalog.forExecutor(sessions.byId[queuedInputsDialogChatId]?.executorId ?? 'local').getAgent(sessions.byId[queuedInputsDialogChatId]?.agentId ?? '')?.executionPolicy === 'literal'}
+			literalInput={!queuedAgent || queuedAgent.executionPolicy === 'literal'}
+			executionKey={JSON.stringify([queuedChat?.executorId, queuedChat?.agentId, queuedAgent?.executionPolicy])}
 			open={true}
 			queue={dialogQueue}
 			editor={queuedInputEditor}

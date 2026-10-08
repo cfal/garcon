@@ -61,7 +61,7 @@
 		parseSnippetCommand,
 		type SnippetCommandParseResult,
 	} from '$lib/chat/composer/slash-commands.js';
-	import { SnippetExpansionController } from '$lib/snippets/snippet-expansion-controller.svelte.js';
+	import { SnippetExpansionController, snippetErrorDetail } from '$lib/snippets/snippet-expansion-controller.svelte.js';
 	import { ApiError } from '$lib/api/client.js';
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
@@ -112,7 +112,9 @@
 	const rootModelCatalog = getModelCatalog();
 	const executors = getExecutors();
 	const modelCatalog = $derived(rootModelCatalog.forExecutor(agentState.executorId));
-	const literalInput = $derived(modelCatalog.getAgent(agentState.agentId)?.executionPolicy === 'literal');
+	const executionAgent = $derived(modelCatalog.getAgent(agentState.agentId));
+	const conversationInput = $derived(Boolean(executionAgent && executionAgent.executionPolicy !== 'literal'));
+	const executionKey = $derived(JSON.stringify([agentState.executorId, agentState.agentId, executionAgent?.executionPolicy]));
 	const providerAvailable = $derived(isCustomProviderSelectionAvailable(modelCatalog, agentState));
 	const filesAvailable = $derived(executors.filesAvailable(agentState.executorId));
 
@@ -166,17 +168,6 @@
 	let handledAppShellFocusRequestId = 0;
 	let handledDraftAppendRequestId = 0;
 	const focusDelivery = new PromptComposerFocusDelivery();
-	const snippetInteractionKey = $derived.by(() => {
-		const chat = sessions.selectedChat;
-		return chat
-			? [
-					chat.id,
-					chat.status,
-					agentState.executorId,
-					agentState.projectPath || chat.projectPath,
-				].join('\u0000')
-			: '';
-	});
 	const snippetContextHint = $derived(
 		sessions.selectedChat?.projectPath.trim() ? null : m.snippets_palette_context_hint(),
 	);
@@ -196,6 +187,7 @@
 		},
 	});
 	const selectedProjectTarget = $derived(projectState.target);
+	const snippetInteractionKey = $derived(projectState.snippetInteractionKey);
 	const selectedProjectResolution = $derived(projectState.snapshot);
 	const availabilityNotice = $derived(
 		resolveComposerAvailabilityNotice({
@@ -261,6 +253,8 @@
 	});
 
 	const promptRefinement = new PromptComposerRefinementController({
+		get selection() { return { agentId: agentState.agentId, executorId: agentState.executorId }; },
+		get executionKey() { return executionKey; },
 		composer: composerState,
 		sessions,
 		notifications,
@@ -276,10 +270,17 @@
 			return isPresented;
 		},
 		get startBlocked() {
-			return literalInput || isDisabled || directAdmissionPending || snippetExpansion.pending;
+			return !conversationInput || isDisabled || directAdmissionPending || snippetExpansion.pending;
 		},
 	});
 	const promptTransformPending = $derived(snippetExpansion.pending || promptRefinement.pending);
+	$effect(() => {
+		executionKey;
+		return () => {
+			snippetExpansion.cancel();
+			promptRefinement.abort();
+		};
+	});
 	const attachmentController = new PromptComposerAttachmentController({
 		composer: composerState,
 		get attachmentInputBlocked() {
@@ -437,11 +438,6 @@
 		textarea?.setSelectionRange(replacement.caret, replacement.caret);
 	}
 
-	function snippetErrorDetail(error: unknown): string {
-		if (error instanceof ApiError) return error.details || error.message;
-		return error instanceof Error ? error.message : String(error);
-	}
-
 	function returnComposerFocus(): void {
 		if (destroyed || !isVisible) return;
 		textarea?.focus({ preventScroll: true });
@@ -458,7 +454,8 @@
 		argumentsText: string,
 		range: { start: number; end: number } | null = null,
 	): Promise<SnippetInsertionResult> {
-		if (promptTransformPending || !textarea) return 'cancelled';
+		if (!conversationInput || promptTransformPending || !textarea) return 'cancelled';
+		const sourceExecutionKey = executionKey;
 		ui.closeSlashMenu();
 		ui.closeFileMenu();
 		composerState.isDragActive = false;
@@ -486,6 +483,7 @@
 				return 'cancelled';
 			}
 			if (
+				!conversationInput || executionKey !== sourceExecutionKey ||
 				!projectState.matchesSnippetContext(result.prepared, result.response) ||
 				composerState.inputText !== sourceText
 			)
@@ -514,6 +512,8 @@
 	async function expandSnippetInvocation(
 		command: Extract<SnippetCommandParseResult, { kind: 'valid' }>,
 	): Promise<void> {
+		if (!conversationInput) return;
+		const sourceExecutionKey = executionKey;
 		const sourceText = composerState.inputText;
 		ui.closeSlashMenu();
 		ui.closeFileMenu();
@@ -532,6 +532,7 @@
 			});
 			if (result.kind !== 'expanded') return;
 			if (
+				!conversationInput || executionKey !== sourceExecutionKey ||
 				!projectState.matchesSnippetContext(result.prepared, result.response) ||
 				composerState.inputText !== sourceText
 			)
@@ -556,7 +557,7 @@
 
 	function handleCompletionKeyDown(event: KeyboardEvent): boolean {
 		const showFileMenu = filesAvailable && ui.showFileMenu;
-		if (literalInput || (!showFileMenu && !ui.showSlashMenu)) return false;
+		if (!conversationInput || (!showFileMenu && !ui.showSlashMenu)) return false;
 		const menu = showFileMenu ? fileMentionMenu : slashCommandMenu;
 		if (menu?.handleKeyDown(event)) return true;
 		if (menu && !showFileMenu && event.key === 'Enter') return false;
@@ -592,7 +593,7 @@
 
 	function handleFormSubmit(action: Exclude<ComposerEnterAction, 'newline'> = 'submit') {
 		if (!canSubmit || promptTransformPending) return;
-		const command = literalInput ? { kind: 'none' as const } : parseSnippetCommand(composerState.inputText);
+		const command = conversationInput ? parseSnippetCommand(composerState.inputText) : { kind: 'none' as const };
 		if (command.kind === 'invalid') {
 			notifications.error(
 				command.error === 'short-name-required'
@@ -625,21 +626,19 @@
 			textarea?.selectionStart ?? value.length,
 			localSettings.snippetTrigger,
 			(event as InputEvent).isComposing,
-			literalInput ? 'literal' : 'conversation',
+			conversationInput ? 'conversation' : 'literal',
 		);
 		queueCurrentDraft(value);
 	}
 	const selectedIsProcessing = $derived(isChatProcessing(sessions.selectedChat));
 	const thinkingReducedMotion = $derived(selectedIsProcessing && localSettings.reduceMotion);
 	const capabilityAgentId = $derived(sessions.selectedChat?.agentId ?? agentState.agentId);
-	const isDraftStartupSubmitting = $derived(
+	const isDisabled = $derived(
 		directAdmissionPending && sessions.selectedChat?.status === 'draft',
 	);
-	const isQueueMode = $derived(requiresQueuedSubmission);
-	const isDisabled = $derived(isDraftStartupSubmitting);
 	const controllerCommand = $derived(
 		sessions.selectedChat?.status === 'running' &&
-			!literalInput && isControllerSlashCommand(composerState.inputText),
+			conversationInput && isControllerSlashCommand(composerState.inputText),
 	);
 	// Loading is explained by the disabled send button so the composer keeps its height.
 	const modelsLoading = $derived(
@@ -647,12 +646,12 @@
 	);
 	const sendTitle = $derived.by(() => {
 		if (modelsLoading && !controllerCommand) return m.chat_composer_loading_models();
-		return isQueueMode ? m.chat_composer_queue_message() : m.chat_composer_send_message();
+		return requiresQueuedSubmission ? m.chat_composer_queue_message() : m.chat_composer_send_message();
 	});
 
 	const canSubmit = $derived(
 		canSubmitComposer(
-			isDisabled ||
+			!executionAgent || isDisabled ||
 				directAdmissionPending ||
 				promptTransformPending ||
 				(!controllerCommand &&
@@ -728,7 +727,7 @@
 				executorId={agentState.executorId}
 				bind:this={fileMentionMenu}
 				projectPath={completionProjectPath}
-				isVisible={!literalInput && ui.showFileMenu && !showProjectNotice}
+				isVisible={conversationInput && ui.showFileMenu && !showProjectNotice}
 				projectPending={Boolean(
 					selectedProjectTarget &&
 					(selectedProjectResolution.kind === 'unchecked' ||
@@ -742,7 +741,7 @@
 			/>
 		{/if}
 		<ComposerSnippetPalette
-			open={!literalInput && ui.snippetPalette.isOpen}
+			open={conversationInput && ui.snippetPalette.isOpen}
 			onOpenChange={(nextOpen) => {
 				// The hidden trigger remains available to the chained insertion.
 				if (!nextOpen) ui.snippetPalette.hide();
@@ -838,13 +837,13 @@
 			</div>
 
 			<ComposerBottomBar
-				showAddMenu={!literalInput}
+				showAddMenu={conversationInput}
 				canAttachImages={canAttachAttachments}
 				attachImagesTooltip={m.chat_composer_image_attachments_unavailable()}
 				onAddImage={() => attachmentController.pick()}
 				onOpenSnippetPalette={() => ui.snippetPalette.openFromMenu()}
 				onOpenExpandedEditor={() => expandedEditor?.open()}
-				onRefinePrompt={literalInput ? undefined : () => promptRefinement.handleAction()}
+				onRefinePrompt={conversationInput ? () => promptRefinement.handleAction() : undefined}
 				canRefinePrompt={promptRefinement.canStart}
 				isPromptRefinementPending={promptRefinement.pending}
 				addMenuDisabled={isDisabled}
@@ -904,7 +903,7 @@
 			executorId={agentState.executorId}
 			projectPath={completionProjectPath}
 			chatId={selectedProjectTarget?.kind === 'chat' ? sessions.selectedChatId : null}
-			isVisible={!literalInput && ui.showSlashMenu && executors.isReady(agentState.executorId) && !showProjectNotice}
+			isVisible={conversationInput && ui.showSlashMenu && executors.isReady(agentState.executorId) && !showProjectNotice}
 			projectPending={Boolean(
 				selectedProjectTarget &&
 				(selectedProjectResolution.kind === 'unchecked' ||
@@ -940,6 +939,6 @@
 	{promptTransformPending}
 	isPromptRefinementPending={promptRefinement.pending}
 	canRefinePrompt={promptRefinement.canStart}
-	onRefinePrompt={literalInput ? undefined : () => promptRefinement.handleAction()}
+	onRefinePrompt={conversationInput ? () => promptRefinement.handleAction() : undefined}
 	openRequestId={composerEditorOpenRequestId}
 />

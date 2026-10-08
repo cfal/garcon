@@ -26,6 +26,7 @@
 	interface Props {
 		chatId: string;
 		literalInput?: boolean;
+		executionKey?: string;
 		open: boolean;
 		queue: ChatQueueState | null;
 		editor: QueuedInputEditorState;
@@ -46,6 +47,7 @@
 	let {
 		chatId,
 		literalInput = false,
+		executionKey = '',
 		open,
 		queue,
 		editor,
@@ -64,6 +66,7 @@
 	// relocating from its inline row to the departed-draft recovery slot.
 	const refinement = new QueuedInputRefinementController({
 		get chatId() { return chatId; },
+		get executionKey() { return executionKey; },
 		get editor() {
 			return editor;
 		},
@@ -94,6 +97,11 @@
 	const queuedCount = $derived(entries.length);
 	const editorOpen = $derived(editor.phase !== 'closed');
 	const refinementPending = $derived(refinement.pending);
+	$effect(() => {
+		executionKey;
+		literalInput;
+		return () => refinement.abort();
+	});
 	// A live entry edits in place inside the list; a departed draft (sent or
 	// removed) is recovered above the list without a stale queue position.
 	const editorInline = $derived(editorOpen && editor.liveEntry !== null);

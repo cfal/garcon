@@ -678,7 +678,15 @@ function createDeps(chat = createRunningChat()) {
 			openNewChatDialog: vi.fn(),
 		},
 		modelCatalog: {
-			getAgent: vi.fn<SessionControllerDeps['modelCatalog']['getAgent']>(() => null),
+			getAgent: vi.fn<SessionControllerDeps['modelCatalog']['getAgent']>((id) => ({
+				id, label: id, executionPolicy: 'conversation', defaultModel: '',
+				supportsCompact: false, supportsFork: true, supportsForkAtMessage: true,
+				supportsForkWhileRunning: false, supportsUpdateProjectPath: true,
+				supportsSteering: true, supportsImages: true, fileAttachmentMimeTypes: [],
+				acceptsApiProviderEndpoints: false, supportedProtocols: [], authLoginSupported: false,
+				supportedPermissionModes: ['default'], supportedThinkingModes: ['none'], settings: [],
+				defaultSettings: { ownerId: id, schemaVersion: 1, values: {} },
+			})),
 			getModelForSelection: vi.fn<SessionControllerDeps['modelCatalog']['getModelForSelection']>(
 				(_agentId, model) => ({ value: model, label: model }),
 			),
@@ -813,6 +821,22 @@ describe('ConversationSessionController', () => {
 		expect(mockSteerChat).not.toHaveBeenCalled();
 		expect(deps.composerState.clearAfterSubmit).not.toHaveBeenCalled();
 	});
+
+	it.each(['submitForChat', 'submitComposerWithSteerPreference'] as const)(
+		'preserves source without interpreting controls while policy is unknown through %s',
+		async (submit) => {
+			const { deps } = createDeps();
+			deps.modelCatalog.getAgent.mockReturnValue(null);
+			deps.canSubmitToExecutor.mockReturnValue(false);
+			const source = '/rename not-a-title  \n';
+			deps.composerState.inputText = source;
+			const controller = new ConversationSessionController(deps);
+			expect(await controller[submit]('chat-1')).toBe('no-op');
+			expect(deps.sessions.renameChat).not.toHaveBeenCalled();
+			expect(deps.composerState.inputText).toBe(source);
+			expect(mockRunChat).not.toHaveBeenCalled();
+		},
+	);
 
 	it.each(['submitForChat', 'submitComposerWithSteerPreference'] as const)(
 		'keeps controller commands available without executor admission through %s',

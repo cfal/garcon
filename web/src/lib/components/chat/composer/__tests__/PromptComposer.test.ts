@@ -12,11 +12,25 @@ import { chatDraftStorageKey } from '$lib/utils/local-persistence.js';
 import * as snippetsApi from '$lib/api/snippets';
 import * as commandsApi from '$lib/api/commands.js';
 import type { ProjectResolutionResponse, ProjectTarget } from '$shared/project-resolution';
-import { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
+import { ModelCatalogStore, type AgentMetadata } from '$lib/agents/model-catalog-store.svelte';
 import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
 import type { ComposerAvailabilityNoticePresentation } from '$lib/chat/composer/composer-availability.js';
 
 const appCss = readFileSync('src/app.css', 'utf8');
+
+function conversationalCatalog(): ModelCatalogStore {
+	const catalog = new ModelCatalogStore();
+	catalog.forExecutor(remoteExecutor.id).agentMetadata.claude = {
+		id: 'claude', label: 'Claude', executionPolicy: 'conversation', defaultModel: 'opus',
+		supportsCompact: false, supportsFork: false, supportsForkAtMessage: false,
+		supportsForkWhileRunning: false, supportsUpdateProjectPath: true,
+		supportsSteering: false, supportsImages: false, fileAttachmentMimeTypes: [],
+		acceptsApiProviderEndpoints: false, supportedProtocols: [], authLoginSupported: false,
+		supportedPermissionModes: [], supportedThinkingModes: [], settings: [],
+		defaultSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
+	} satisfies AgentMetadata;
+	return catalog;
+}
 
 vi.mock('$lib/api/snippets', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('$lib/api/snippets')>();
@@ -169,7 +183,7 @@ describe('PromptComposer focus', () => {
 	});
 
 	it('loads a cold remote catalog and blocks click and Enter until it is validated, including reconnect', async () => {
-		const catalog = new ModelCatalogStore();
+		const catalog = conversationalCatalog();
 		const remote = catalog.forExecutor(remoteExecutor.id);
 		remote.invalidate();
 		const coldLoad = Promise.withResolvers<void>();
@@ -223,7 +237,7 @@ describe('PromptComposer focus', () => {
 	it.each(['offline', 'cold-catalog'])(
 		'allows controller commands through click, Enter and steer shortcut with %s',
 		async (availability) => {
-			const catalog = new ModelCatalogStore();
+			const catalog = conversationalCatalog();
 			const remote = catalog.forExecutor(remoteExecutor.id);
 			remote.invalidate();
 			vi.spyOn(catalog, 'refreshIfStale').mockResolvedValue();
@@ -300,7 +314,7 @@ describe('PromptComposer focus', () => {
 	});
 
 	it('keeps remote submission blocked after catalog failure and offers an explicit retry', async () => {
-		const catalog = new ModelCatalogStore();
+		const catalog = conversationalCatalog();
 		const remote = catalog.forExecutor(remoteExecutor.id);
 		remote.invalidate();
 		vi.spyOn(catalog, 'refreshIfStale').mockResolvedValue();
@@ -355,7 +369,7 @@ describe('PromptComposer focus', () => {
 	});
 
 	it('submits file mentions with click and Enter when the ready executor has no Files capability', async () => {
-		const catalog = new ModelCatalogStore();
+		const catalog = conversationalCatalog();
 		catalog.forExecutor(remoteExecutor.id).lastValidatedAt = Date.now();
 		vi.spyOn(catalog, 'refreshIfStale').mockResolvedValue();
 		vi.spyOn(catalog.forExecutor(remoteExecutor.id), 'refreshIfStale').mockResolvedValue();
@@ -2272,7 +2286,7 @@ describe('PromptComposer focus', () => {
 	it.each(['missing', 'request-failed'])(
 		'prioritizes executor, project (%s), then catalog notices across disconnect and recovery without losing the draft',
 		async (failure) => {
-			const catalog = new ModelCatalogStore();
+			const catalog = conversationalCatalog();
 			const remote = catalog.forExecutor(remoteExecutor.id);
 			remote.invalidate();
 			remote.error = 'Synthetic catalog failure';

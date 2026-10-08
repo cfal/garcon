@@ -545,7 +545,9 @@ export class ConversationSessionController {
 			selection = deps.agentState;
 		}
 		const executorId = selection.executorId ?? 'local';
-		const literal = deps.modelCatalogForExecutor(executorId).getAgent(selection.agentId ?? '')?.executionPolicy === 'literal';
+		const agent = deps.modelCatalogForExecutor(executorId).getAgent(selection.agentId ?? '');
+		if (!agent) return isDraft && source === 'automatic-start' ? rejectUnavailableDraftStart(deps, chatId) : 'no-op';
+		const literal = agent.executionPolicy === 'literal';
 		if (!literal) text = text.trim();
 		if (
 			(literal || isDraft || !isControllerSlashCommand(text)) &&
@@ -680,7 +682,9 @@ export class ConversationSessionController {
 		if (deps.sessions.selectedChatId !== chatId || this.isDirectAdmissionPending(chatId)) {
 			return 'no-op';
 		}
-		if (deps.modelCatalogForExecutor(deps.agentState.executorId).getAgent(deps.agentState.agentId)?.executionPolicy === 'literal') return this.submitForChat(chatId);
+		const agent = deps.modelCatalogForExecutor(deps.agentState.executorId).getAgent(deps.agentState.agentId);
+		if (!agent) return 'no-op';
+		if (agent.executionPolicy === 'literal') return this.submitForChat(chatId);
 		const selected = deps.sessions.byId[chatId];
 		if (!selected?.projectPath) return 'no-op';
 		const text = deps.composerState.inputText.trim();

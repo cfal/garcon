@@ -78,6 +78,22 @@ afterEach(() => {
 });
 
 describe('QueuedInputEditor composer affordances', () => {
+	it('discards pending refinement when execution switches to literal', async () => {
+		const pending = deferredRefinement();
+		vi.mocked(refinementApi.refinePrompt).mockReturnValueOnce(pending.promise);
+		const { rerender } = renderHost(queue([entry(0)]));
+		const textarea = await beginEditing();
+		await fireEvent.click(screen.getByRole('button', { name: m.prompt_refinement_refine() }));
+		await screen.findByRole('button', { name: m.prompt_refinement_cancel() });
+		const signal = vi.mocked(refinementApi.refinePrompt).mock.calls[0][1]?.signal;
+		await rerender({ literalInput: true, executionKey: 'literal-target' });
+		expect(signal?.aborted).toBe(true);
+		pending.resolve({ success: true, refinedPrompt: 'Must not execute' });
+		await pending.promise;
+		expect(textarea.value).toBe('Queued message 0');
+		expect(textarea.readOnly).toBe(false);
+	});
+
 	it.each(['apply', 'cancel', 'close'] as const)(
 		'preserves pending refinement across draft relocation (%s)',
 		async (action) => {

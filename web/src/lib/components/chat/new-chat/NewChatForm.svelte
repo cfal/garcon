@@ -70,7 +70,7 @@
 		parseSnippetCommand,
 		type SnippetCommandParseResult,
 	} from '$lib/chat/composer/slash-commands.js';
-	import { SnippetExpansionController } from '$lib/snippets/snippet-expansion-controller.svelte.js';
+	import { SnippetExpansionController, snippetErrorDetail } from '$lib/snippets/snippet-expansion-controller.svelte.js';
 	import { ApiError } from '$lib/api/client.js';
 	import { snippetTemplateUsesArguments } from '$shared/snippets';
 	import {
@@ -114,7 +114,9 @@
 		},
 	});
 	const modelCatalog = $derived(rootModelCatalog.forExecutor(form.executorId));
-	const literalInput = $derived(modelCatalog.getAgent(form.agentId)?.executionPolicy === 'literal');
+	const executionAgent = $derived(modelCatalog.getAgent(form.agentId));
+	const conversationInput = $derived(Boolean(executionAgent && executionAgent.executionPolicy !== 'literal'));
+	const executionKey = $derived(JSON.stringify([form.executorId, form.agentId, executionAgent?.executionPolicy]));
 	function selectableAgentsForExecutor(executorId: string) {
 		const allAgentIds = rootModelCatalog.forExecutor(executorId).getSelectableAgents();
 		return localSettings.allowDirectChats ? allAgentIds : nonDirectAgentIds(allAgentIds);
@@ -171,11 +173,18 @@
 			return textareaRef;
 		},
 		get startBlocked() {
-			return literalInput || !initialContentReady || snippetExpansion.pending;
+		return !conversationInput || !initialContentReady || snippetExpansion.pending;
 		},
 		closePromptSurfaces: () => snippetPalette.dismiss(),
 	});
 	const promptTransformPending = $derived(snippetExpansion.pending || promptRefinement.pending);
+	$effect(() => {
+		executionKey;
+		return () => {
+			snippetExpansion.cancel();
+			promptRefinement.abort();
+		};
+	});
 	const promptTransformStatus = $derived(
 		promptRefinement.pending ? m.chat_composer_refining_prompt() : m.snippets_expanding(),
 	);
@@ -337,16 +346,11 @@
 		}
 		if (snippetExpansion.pending) snippetExpansion.cancel();
 		form.firstMessage = input.value;
-		if (literalInput || (event as InputEvent).isComposing) return;
+		if (!conversationInput || (event as InputEvent).isComposing) return;
 		snippetPalette.updateDetectedTrigger(
 			findSnippetTrigger(input.value, input.selectionStart, localSettings.snippetTrigger),
 			input.value,
 		);
-	}
-
-	function snippetErrorDetail(error: unknown): string {
-		if (error instanceof ApiError) return error.details || error.message;
-		return error instanceof Error ? error.message : String(error);
 	}
 
 	function returnTextareaFocus(): void {
@@ -408,7 +412,8 @@
 		argumentsText: string,
 		range: { start: number; end: number } | null = null,
 	): Promise<SnippetInsertionResult> {
-		if (promptTransformPending || !textareaRef) return 'cancelled';
+		if (!conversationInput || promptTransformPending || !textareaRef) return 'cancelled';
+		const sourceExecutionKey = executionKey;
 		const context = expansionContext();
 		if (!context) {
 			await settleTextareaAfterSnippet();
@@ -433,7 +438,7 @@
 				return 'cancelled';
 			}
 			if (
-				form.nonblankPath !== projectPath ||
+				!conversationInput || executionKey !== sourceExecutionKey || form.nonblankPath !== projectPath ||
 				result.response.contextProjectPath !== projectPath ||
 				result.response.contextExecutorId !== form.executorId ||
 				form.firstMessage !== sourceText
@@ -462,7 +467,8 @@
 	async function expandSnippetInvocation(
 		command: Extract<SnippetCommandParseResult, { kind: 'valid' }>,
 	): Promise<void> {
-		if (promptTransformPending) return;
+		if (!conversationInput || promptTransformPending) return;
+		const sourceExecutionKey = executionKey;
 		const context = expansionContext();
 		if (!context) return;
 		const sourceText = form.firstMessage;
@@ -475,7 +481,7 @@
 			});
 			if (result.kind !== 'expanded') return;
 			if (
-				form.nonblankPath !== projectPath ||
+				!conversationInput || executionKey !== sourceExecutionKey || form.nonblankPath !== projectPath ||
 				result.response.contextProjectPath !== projectPath ||
 				result.response.contextExecutorId !== form.executorId ||
 				form.firstMessage !== sourceText
@@ -501,7 +507,7 @@
 
 	function handleSubmit(): void {
 		if (!form.canSubmit || promptTransformPending) return;
-		const command = literalInput ? { kind: 'none' as const } : parseSnippetCommand(form.firstMessage);
+		const command = conversationInput ? parseSnippetCommand(form.firstMessage) : { kind: 'none' as const };
 		if (command.kind === 'invalid') {
 			notifications.error(
 				command.error === 'short-name-required'
@@ -709,7 +715,7 @@
 					onClose={() => (form.showTagInput = false)}
 				/>
 
-				{#if !literalInput}
+				{#if conversationInput}
 					<NewChatPreambleControls
 						selection={form.preambles}
 						nonblankPath={form.nonblankPath}
@@ -765,10 +771,10 @@
 					canAttachImages={canAttachAttachments}
 					attachImagesTooltip={m.chat_composer_image_attachments_unavailable()}
 					onAddImage={openImagePicker}
-					showAddMenu={!literalInput}
+					showAddMenu={conversationInput}
 					onOpenSnippetPalette={() => snippetPalette.openFromMenu()}
 					onOpenExpandedEditor={openExpandedEditor}
-					onRefinePrompt={literalInput ? undefined : () => promptRefinement.handleAction()}
+					onRefinePrompt={conversationInput ? () => promptRefinement.handleAction() : undefined}
 					canRefinePrompt={promptRefinement.canStart}
 					isPromptRefinementPending={promptRefinement.pending}
 					isPromptTransformPending={promptTransformPending}
@@ -810,7 +816,7 @@
 				</ComposerBottomBar>
 
 				<ComposerSnippetPalette
-					open={!literalInput && snippetPalette.isOpen}
+					open={conversationInput && snippetPalette.isOpen}
 					onOpenChange={(nextOpen) => {
 						// The hidden trigger remains available to the chained insertion.
 						if (!nextOpen) snippetPalette.hide();
@@ -938,7 +944,7 @@
 		isPromptRefinementPending={promptRefinement.pending}
 		onTextChange={handleExpandedTextChange}
 		onSelectionChange={handleExpandedSelectionChange}
-		onRefinePrompt={literalInput ? undefined : () => promptRefinement.handleAction()}
+		onRefinePrompt={conversationInput ? () => promptRefinement.handleAction() : undefined}
 		onClose={() => void closeExpandedEditor()}
 	/>
 {/if}
