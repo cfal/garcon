@@ -34,10 +34,10 @@ import type {
 import type {
 	ChatOrderBoundary,
 	ReorderChatResponse,
-	SetChatOrderStateResponse,
 } from '$shared/chat-order-contracts';
 import {
 	ChatArchiveProjectionState,
+	type ArchiveMutationSettlement,
 	type ChatArchiveProjectionOperation,
 } from './chat-archive-projection-state.svelte.js';
 import {
@@ -71,13 +71,6 @@ import {
 	toRecord,
 } from './chat-session-records.js';
 
-
-interface ArchiveMutationSettlement {
-	chatId: string;
-	result: PromiseSettledResult<SetChatOrderStateResponse>;
-	requiredRefreshGeneration: number;
-	serverEntryGenerationAtSettlement: number;
-}
 
 export class ChatSessionsStore implements ChatSessionsPort {
 	#baseById = $state.raw<Record<string, ChatSessionRecord>>({});
@@ -288,7 +281,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	): Promise<ArchiveMutationSettlement> {
 		// Lets the initiating handler navigate before archive I/O begins.
 		await Promise.resolve();
-		let result: PromiseSettledResult<SetChatOrderStateResponse>;
+		let result: ArchiveMutationSettlement['result'];
 		try {
 			const value = await setRemoteArchived({ chatId, isArchived });
 			result = { status: 'fulfilled', value };

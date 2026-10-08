@@ -1,4 +1,12 @@
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
+import type { SetChatOrderStateResponse } from '$shared/chat-order-contracts';
+
+export interface ArchiveMutationSettlement {
+	chatId: string;
+	result: PromiseSettledResult<SetChatOrderStateResponse>;
+	requiredRefreshGeneration: number;
+	serverEntryGenerationAtSettlement: number;
+}
 
 interface PendingArchiveChange {
 	operationId: number;
