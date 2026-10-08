@@ -25,6 +25,7 @@
 	const lazySnippets = () => import('../snippets/SnippetsDialog.svelte');
 	const lazyOnboardingWizard = () => import('../onboarding/OnboardingWizard.svelte');
 	import {
+		getWorkbenchCommands,
 		getNavigation,
 		getChatSessions,
 		getAppShell,
@@ -74,6 +75,7 @@
 	import { transientLayerAttachment } from '$lib/workspace/transient-layer-action.js';
 	import { allocateTransientLayerId } from '$lib/workspace/transient-layer-id.js';
 
+	const commandRegistry = getWorkbenchCommands();
 	const navigation = getNavigation();
 	const sessions = getChatSessions();
 	const appShell = getAppShell();
@@ -615,6 +617,15 @@
 		};
 	});
 
+	onMount(() =>
+		commandRegistry.registerChatNavigation({
+			get recentChats() {
+				return sessions.recentChats;
+			},
+			hasChat: (id) => sessions.hasChat(id),
+			open: (id) => chatNavigation.showChatInCurrentWindow(id, { navigate: true }),
+		}),
+	);
 	onMount(() => chatDrafts.mountPersistenceLifecycle());
 	onDestroy(() => {
 		chatNavigation.destroy();
