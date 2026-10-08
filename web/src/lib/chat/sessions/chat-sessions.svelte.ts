@@ -1,3 +1,4 @@
+import { RecentChatHistoryState } from './recent-chat-history.svelte.js';
 // Canonical chat session store. Single source of truth for chat entities,
 // selection state, and draft lifecycle. Replaces split ownership between
 // AppShell's local chats array and NavigationStore's selectedChat snapshot.
@@ -70,6 +71,7 @@ import {
 	toRecord,
 } from './chat-session-records.js';
 
+
 interface ArchiveMutationSettlement {
 	chatId: string;
 	result: PromiseSettledResult<SetChatOrderStateResponse>;
@@ -82,6 +84,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	#baseOrder = $state.raw<string[]>([]);
 	selectedChatId = $state<string | null>(null);
 	lastSelectedChatId = $state<string | null>(null);
+	readonly #recentHistory = new RecentChatHistoryState();
 	startupByChatId = $state<Record<string, ChatStartupConfig>>({});
 	isLoadingChats = $state(true);
 	chatListStatus = $state<ChatListLoadStatus>('loading');
@@ -161,8 +164,12 @@ export class ChatSessionsStore implements ChatSessionsPort {
 
 	setSelectedChatId(chatId: string | null): void {
 		this.selectedChatId = chatId;
+		if (chatId) this.#recentHistory.visit(chatId);
 	}
 
+	get recentChats(): readonly ChatSessionRecord[] {
+		return this.#recentHistory.rankChats(this.#orderedChats);
+	}
 	async #runFetch(showLoading: boolean): Promise<void> {
 		const fetchGeneration = ++this.#nextFetchGeneration;
 		const initial = this.chatListStatus !== 'ready';
@@ -773,7 +780,13 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	#mergeServerEntry(entry: ChatListEntry, clearStartup: boolean): void {
 		const next = toRecord(entry);
 		const previous = this.#baseById[entry.id];
-		this.#projectBindings.publishIfChanged(entry.id, previous?.projectPath, next.projectPath, previous?.executorId, next.executorId);
+		this.#projectBindings.publishIfChanged(
+			entry.id,
+			previous?.projectPath,
+			next.projectPath,
+			previous?.executorId,
+			next.executorId,
+		);
 		reconcileActivityProjection(previous, next);
 		next.processingPhase = this.#resolveProcessing(entry.id, next.processingPhase);
 		next.isProcessing = next.processingPhase !== null;
@@ -797,6 +810,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	}
 
 	removeChat(chatId: string): void {
+		this.#recentHistory.remove(chatId);
 		this.#processingOverrides.delete(chatId);
 		this.#processingSnapshot?.delete(chatId);
 		this.#serverEntryFetchGenerationByChatId.delete(chatId);
@@ -821,6 +835,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	}
 
 	#pruneSnapshotGenerations(records: Readonly<Record<string, ChatSessionRecord>>): void {
+		this.#recentHistory.prune(records);
 		for (const chatId of this.#serverEntryGenerationByChatId.keys()) {
 			if (records[chatId]) continue;
 			this.#serverEntryGenerationByChatId.delete(chatId);
@@ -866,8 +881,13 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	patchChat(chatId: string, patch: Partial<ChatSessionRecord>): void {
 		const chat = this.#baseById[chatId];
 		if (!chat) return;
-		this.#projectBindings.publishIfChanged(chatId, chat.projectPath, patch.projectPath ?? chat.projectPath,
-			chat.executorId, 'executorId' in patch ? patch.executorId : chat.executorId);
+		this.#projectBindings.publishIfChanged(
+			chatId,
+			chat.projectPath,
+			patch.projectPath ?? chat.projectPath,
+			chat.executorId,
+			'executorId' in patch ? patch.executorId : chat.executorId,
+		);
 		const nextChat = {
 			...chat,
 			...patch,

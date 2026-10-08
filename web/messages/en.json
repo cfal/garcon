@@ -2928,5 +2928,10 @@
 	"archive_undo_action": "Undo",
 	"archive_undo_notice": "Archived {count} chats.",
 	"archive_undo_notice_one": "Chat archived.",
-	"archive_undo_failed": "Could not restore archived chats: {detail}"
+	"archive_undo_failed": "Could not restore archived chats: {detail}",
+	"command_switch_chat_named": "Switch to {title}",
+	"command_recent_chat": "Recent chat",
+	"command_chat_running": "Running",
+	"command_chat_unread": "Unread",
+	"command_chat_location": "{executor}: {path} · #{chatId}"
 }
