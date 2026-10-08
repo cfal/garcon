@@ -54,10 +54,14 @@ test('archive Undo restores the captured chat without changing selection', async
     const newChatDialog = page
       .locator('[data-slot="dialog-content"]')
       .filter({ has: page.locator('[data-slot="new-chat-form-content"]') });
+    const directoryBrowser = page.getByRole('dialog', { name: 'Select Directory', exact: true });
     await expect(newChatDialog).toBeVisible();
-    for (let attempt = 0; attempt < 2 && (await newChatDialog.count()) > 0; attempt += 1) {
+    if (await directoryBrowser.count() > 0) {
+      await expect(directoryBrowser).toBeVisible();
       await page.keyboard.press('Escape');
+      await expect(directoryBrowser).toHaveCount(0);
     }
+    await page.keyboard.press('Escape');
     await expect(newChatDialog).toHaveCount(0);
 
     // Holds the browser restore after admission while another client restores the same chat.
