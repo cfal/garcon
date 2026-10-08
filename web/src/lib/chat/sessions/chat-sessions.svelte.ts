@@ -1,3 +1,4 @@
+import { RecentChatHistoryState } from './recent-chat-history.svelte.js';
 // Canonical chat session store. Single source of truth for chat entities,
 // selection state, and draft lifecycle. Replaces split ownership between
 // AppShell's local chats array and NavigationStore's selectedChat snapshot.
@@ -13,8 +14,7 @@ import {
 	reorderChat as reorderChatApi,
 	setLastSelectedChat,
 	transitionChatTags as transitionChatTagsApi,
-	toggleArchive as toggleArchiveApi,
-	type ToggleArchiveResponse,
+	setChatArchived as setChatArchivedApi,
 } from '$lib/api/chats.js';
 import { ApiError } from '$lib/api/client.js';
 import { updateSessionName } from '$lib/api/settings.js';
@@ -31,9 +31,13 @@ import type {
 	ReplaceChatTagsRequest,
 	TransitionChatTagsRequest,
 } from '$shared/chat-tag-mutations';
-import type { ChatOrderBoundary, ReorderChatResponse } from '$shared/chat-order-contracts';
+import type {
+	ChatOrderBoundary,
+	ReorderChatResponse,
+} from '$shared/chat-order-contracts';
 import {
 	ChatArchiveProjectionState,
+	type ArchiveMutationSettlement,
 	type ChatArchiveProjectionOperation,
 } from './chat-archive-projection-state.svelte.js';
 import {
@@ -67,18 +71,13 @@ import {
 	toRecord,
 } from './chat-session-records.js';
 
-interface ArchiveMutationSettlement {
-	chatId: string;
-	result: PromiseSettledResult<ToggleArchiveResponse>;
-	requiredRefreshGeneration: number;
-	serverEntryGenerationAtSettlement: number;
-}
 
 export class ChatSessionsStore implements ChatSessionsPort {
 	#baseById = $state.raw<Record<string, ChatSessionRecord>>({});
 	#baseOrder = $state.raw<string[]>([]);
 	selectedChatId = $state<string | null>(null);
 	lastSelectedChatId = $state<string | null>(null);
+	readonly #recentHistory = new RecentChatHistoryState();
 	startupByChatId = $state<Record<string, ChatStartupConfig>>({});
 	isLoadingChats = $state(true);
 	chatListStatus = $state<ChatListLoadStatus>('loading');
@@ -158,8 +157,12 @@ export class ChatSessionsStore implements ChatSessionsPort {
 
 	setSelectedChatId(chatId: string | null): void {
 		this.selectedChatId = chatId;
+		if (chatId) this.#recentHistory.visit(chatId);
 	}
 
+	get recentChats(): readonly ChatSessionRecord[] {
+		return this.#recentHistory.rankChats(this.#orderedChats);
+	}
 	async #runFetch(showLoading: boolean): Promise<void> {
 		const fetchGeneration = ++this.#nextFetchGeneration;
 		const initial = this.chatListStatus !== 'ready';
@@ -250,9 +253,11 @@ export class ChatSessionsStore implements ChatSessionsPort {
 
 	async #executeArchiveMutation(operation: ChatArchiveProjectionOperation): Promise<void> {
 		if (operation.chatIds.length === 0) return;
-		const toggleRemoteArchive = this.#deps.toggleArchive ?? toggleArchiveApi;
+		const setRemoteArchived = this.#deps.setChatArchived ?? setChatArchivedApi;
 		const settlements = await Promise.all(
-			operation.chatIds.map((chatId) => this.#settleArchiveMutation(chatId, toggleRemoteArchive)),
+			operation.chatIds.map((chatId) =>
+				this.#settleArchiveMutation(chatId, operation.targetArchived, setRemoteArchived),
+			),
 		);
 		await this.#refresh(false);
 
@@ -271,13 +276,14 @@ export class ChatSessionsStore implements ChatSessionsPort {
 
 	async #settleArchiveMutation(
 		chatId: string,
-		toggleRemoteArchive: typeof toggleArchiveApi,
+		isArchived: boolean,
+		setRemoteArchived: typeof setChatArchivedApi,
 	): Promise<ArchiveMutationSettlement> {
 		// Lets the initiating handler navigate before archive I/O begins.
 		await Promise.resolve();
-		let result: PromiseSettledResult<ToggleArchiveResponse>;
+		let result: ArchiveMutationSettlement['result'];
 		try {
-			const value = await toggleRemoteArchive(chatId);
+			const value = await setRemoteArchived({ chatId, isArchived });
 			result = { status: 'fulfilled', value };
 		} catch (reason) {
 			result = { status: 'rejected', reason };
@@ -767,7 +773,13 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	#mergeServerEntry(entry: ChatListEntry, clearStartup: boolean): void {
 		const next = toRecord(entry);
 		const previous = this.#baseById[entry.id];
-		this.#projectBindings.publishIfChanged(entry.id, previous?.projectPath, next.projectPath, previous?.executorId, next.executorId);
+		this.#projectBindings.publishIfChanged(
+			entry.id,
+			previous?.projectPath,
+			next.projectPath,
+			previous?.executorId,
+			next.executorId,
+		);
 		reconcileActivityProjection(previous, next);
 		next.processingPhase = this.#resolveProcessing(entry.id, next.processingPhase);
 		next.isProcessing = next.processingPhase !== null;
@@ -791,6 +803,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	}
 
 	removeChat(chatId: string): void {
+		this.#recentHistory.remove(chatId);
 		this.#processingOverrides.delete(chatId);
 		this.#processingSnapshot?.delete(chatId);
 		this.#serverEntryFetchGenerationByChatId.delete(chatId);
@@ -815,6 +828,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	}
 
 	#pruneSnapshotGenerations(records: Readonly<Record<string, ChatSessionRecord>>): void {
+		this.#recentHistory.prune(records);
 		for (const chatId of this.#serverEntryGenerationByChatId.keys()) {
 			if (records[chatId]) continue;
 			this.#serverEntryGenerationByChatId.delete(chatId);
@@ -860,8 +874,13 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	patchChat(chatId: string, patch: Partial<ChatSessionRecord>): void {
 		const chat = this.#baseById[chatId];
 		if (!chat) return;
-		this.#projectBindings.publishIfChanged(chatId, chat.projectPath, patch.projectPath ?? chat.projectPath,
-			chat.executorId, 'executorId' in patch ? patch.executorId : chat.executorId);
+		this.#projectBindings.publishIfChanged(
+			chatId,
+			chat.projectPath,
+			patch.projectPath ?? chat.projectPath,
+			chat.executorId,
+			'executorId' in patch ? patch.executorId : chat.executorId,
+		);
 		const nextChat = {
 			...chat,
 			...patch,

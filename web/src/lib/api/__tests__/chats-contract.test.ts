@@ -4,7 +4,7 @@ import {
 	startChat,
 	deleteChat,
 	togglePinned,
-	toggleArchive,
+	setChatArchived,
 	markChatsReadBatch,
 	reorderChat,
 	sortChatOrder,
@@ -1494,16 +1494,20 @@ describe('chats API contract', () => {
 		expect(JSON.parse(opts.body)).toEqual({ chatId: 'c-1' });
 	});
 
-	it('toggleArchive sends chatId in the JSON body', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({ success: true, isArchived: true }));
-
-		const result = await toggleArchive('c-1');
-
-		expect(result).toEqual({ success: true, isArchived: true });
+	it('sets the explicit archived state through the existing PUT contract', async () => {
+		const response = { success: true, chatId: 'c-1', isArchived: false, isPinned: false, orderGroup: 'normal', changed: false };
+		fetchMock.mockResolvedValue(jsonResponse(response));
+		expect(await setChatArchived({ chatId: 'c-1', isArchived: false })).toEqual(response);
 		const [url, opts] = fetchMock.mock.calls[0];
 		expect(url).toBe('/api/v1/chats/archive');
-		expect(opts.method).toBe('POST');
-		expect(JSON.parse(opts.body)).toEqual({ chatId: 'c-1' });
+		expect(opts.method).toBe('PUT');
+		expect(JSON.parse(opts.body)).toEqual({ chatId: 'c-1', isArchived: false });
+	});
+
+	it('rejects an archive acknowledgement for a different chat or desired state', async () => {
+		const response = { success: true, chatId: 'other', isArchived: true, isPinned: false, orderGroup: 'archived', changed: true };
+		fetchMock.mockResolvedValue(jsonResponse(response));
+		await expect(setChatArchived({ chatId: 'c-1', isArchived: false })).rejects.toThrow('could not be confirmed');
 	});
 
 	it('markChatsReadBatch sends entries array', async () => {

@@ -1,4 +1,7 @@
 <script lang="ts">
+	import { BrowserNotificationsRouter } from '$lib/events/browser-notifications-router.js';
+	import { BrowserNotificationService } from '$lib/notifications/browser-notifications.js';
+	import { gotoChat } from '$lib/chat/actions/chat-navigation.js';
 	import '../app.css';
 	import { onMount, onDestroy, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
@@ -326,6 +329,22 @@
 		});
 	});
 
+	const browserNotifications = new BrowserNotificationService({
+		enabled: () => localSettings.browserNotifications,
+		openChat: gotoChat,
+		isFocused: () => document.visibilityState === 'visible' && document.hasFocus(),
+	});
+	const browserNotificationsRouter = new BrowserNotificationsRouter(ws, browserNotifications, {
+		enabled: () => localSettings.browserNotifications,
+		isFocused: () => document.visibilityState === 'visible' && document.hasFocus(),
+		isChatProcessing: (id) => chatSessions.isChatProcessing(id),
+	});
+	onMount(() => {
+		browserNotifications.start();
+		return ws.onConnectionChange((connected) => {
+			if (!connected) browserNotificationsRouter.clearPermissions();
+		});
+	});
 	// Pushes settings-changed WebSocket messages into the remote store.
 	const settingsRouter = new RemoteSettingsRouter(ws, remoteSettings);
 	const transcriptSearchStatus = new TranscriptSearchStatusController(ws, (status) =>
@@ -340,6 +359,7 @@
 	const apiProvidersRouter = new ApiProvidersRouter(ws, apiProviders);
 	const chatBoardsRouter = new ChatBoardsRouter(ws, chatBoardInvalidations);
 	const ticketsRouter = new TicketsRouter(ws, ticketsInvalidations);
+	browserNotificationsRouter.start();
 	settingsRouter.start();
 	transcriptSearchStatus.start();
 	scheduledPromptsRouter.start();
@@ -351,6 +371,7 @@
 	ticketsRouter.start();
 	$effect(() => {
 		ws.messageVersion;
+		browserNotificationsRouter.tick();
 		settingsRouter.tick();
 		transcriptSearchStatus.tick();
 		scheduledPromptsRouter.tick();
@@ -455,6 +476,8 @@
 
 	onDestroy(() => {
 		window.removeEventListener('pagehide', handlePageHide);
+		browserNotificationsRouter.destroy();
+		browserNotifications.destroy();
 		settingsRouter.destroy();
 		transcriptSearchStatus.destroy();
 		scheduledPromptsRouter.destroy();

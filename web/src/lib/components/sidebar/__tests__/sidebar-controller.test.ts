@@ -4,7 +4,7 @@ import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 
 vi.mock('$lib/api/chats.js', () => ({
 	togglePinned: vi.fn(),
-	toggleArchive: vi.fn(),
+	setChatArchived: vi.fn(),
 	deleteChat: vi.fn(),
 	reorderChat: vi.fn(),
 	sortChatOrder: vi.fn(),
@@ -14,14 +14,14 @@ vi.mock('$lib/api/chats.js', () => ({
 
 import {
 	togglePinned,
-	toggleArchive,
+	setChatArchived,
 	reorderChat,
 	sortChatOrder,
 
 } from '$lib/api/chats.js';
 
 const mockTogglePinned = vi.mocked(togglePinned);
-const mockToggleArchive = vi.mocked(toggleArchive);
+const mockSetChatArchived = vi.mocked(setChatArchived);
 const mockReorderChat = vi.mocked(reorderChat);
 const mockSortChatOrder = vi.mocked(sortChatOrder);
 
@@ -63,7 +63,7 @@ describe('SidebarController', () => {
 		quietRefresh = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
 		const startArchiveMutation = (chatIds: readonly string[]) => ({
 			chatIds: [...chatIds],
-			completion: Promise.all(chatIds.map((chatId) => mockToggleArchive(chatId))).then(async () => {
+			completion: Promise.all(chatIds.map((chatId) => mockSetChatArchived({ chatId, isArchived: true }))).then(async () => {
 				await quietRefresh();
 			}),
 		});
@@ -173,7 +173,7 @@ describe('SidebarController', () => {
 		});
 
 		it('plans the next visible chat before archiving the selected chat', async () => {
-			mockToggleArchive.mockResolvedValue({ success: true, isArchived: true });
+			mockSetChatArchived.mockResolvedValue({ success: true, chatId: 'c-1', isArchived: true, isPinned: false, orderGroup: 'archived', changed: true });
 			const operation = controller.startBulkOperation('archive', {
 				selectedChats: [makeChat({ id: 'c-1', isArchived: false })],
 				allChats: [
@@ -191,7 +191,7 @@ describe('SidebarController', () => {
 			});
 			await operation.completion;
 
-			expect(mockToggleArchive).toHaveBeenCalledWith('c-1');
+			expect(mockSetChatArchived).toHaveBeenCalledWith({ chatId: 'c-1', isArchived: true });
 		});
 
 		it('plans a new chat when bulk archive removes the last visible chat', () => {
@@ -210,7 +210,7 @@ describe('SidebarController', () => {
 		});
 
 		it('plans an adjacent survivor from the displayed recent-activity order', async () => {
-			mockToggleArchive.mockResolvedValue({ success: true, isArchived: true });
+			mockSetChatArchived.mockResolvedValue({ success: true, chatId: 'c-1', isArchived: true, isPinned: false, orderGroup: 'archived', changed: true });
 			const operation = controller.startBulkOperation('archive', {
 				selectedChats: [makeChat({ id: 'selected', isArchived: false })],
 				allChats: [
