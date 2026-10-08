@@ -155,7 +155,7 @@ File content and directory traffic are isolated from primary's socket queue. Bot
 
 ## Failure And UI Behavior
 
-Files and Git share an executor selector. Its Network icon matches the Executors menu item and uses the semantic folder-icon theme color. Keep the selected executor visible even when Local is the only configured executor. Without a selected chat, Files opens the Local project base and follows the next selected chat. Explicit executor browsing remains independent of chat changes until the user chooses "Go to chat project".
+Files and Git share an executor selector. Its Network icon matches the Executors menu item and uses the semantic folder-icon theme color. Hide the selector whenever Local is the only configured executor, including retained unavailable selections. Configured offline or disabled remotes still count; hiding never changes the selected executor or falls back to Local. Without a selected chat, Files opens the Local project base and follows the next selected chat. Explicit executor browsing remains independent of chat changes until the user chooses "Go to chat project".
 
 When switching executors, try the current directory on the destination before defaulting to its project base. Fall back only for a missing, non-directory, or outside-base path. Permission and connectivity failures remain explicit. Abort and generation fencing prevent an old executor's directory response from replacing the newly selected executor's tree. No executor switch retargets already-open file tabs or unsaved buffers.
 

@@ -51,10 +51,12 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await list.getByRole('button', { name: 'Edit prompt', exact: true }).first().click();
       const editor = page.getByRole('dialog', { name: 'Edit Scheduled Prompt', exact: true });
       const selector = editor.getByRole('button', { name: `Executor: ${label}`, exact: true });
-      await browserExpect(selector).toBeVisible();
-      await selector.click();
-      await browserExpect(page.getByRole('menuitemradio', { name: label, exact: true })).toHaveAttribute('aria-checked', 'true');
-      await page.keyboard.press('Escape');
+      await browserExpect(selector).toHaveCount(executionBackend === 'in-process' ? 0 : 1);
+      if (executionBackend !== 'in-process') {
+        await selector.click();
+        await browserExpect(page.getByRole('menuitemradio', { name: label, exact: true })).toHaveAttribute('aria-checked', 'true');
+        await page.keyboard.press('Escape');
+      }
       await browserExpect(editor).toBeVisible();
       // Saving waits for the executor's model catalog, which a worker takes several seconds to report.
       await browserExpect(editor.getByRole('button', { name: 'Save Prompt', exact: true })).toBeEnabled({ timeout: 20_000 });
@@ -68,7 +70,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
         const bounds = await editor.boundingBox();
         return bounds !== null && Math.abs(bounds.x) < 1 && Math.abs(bounds.width - 390) < 1;
       }).toBe(true);
-      await browserExpect(selector).toBeVisible();
+      await browserExpect(selector).toHaveCount(executionBackend === 'in-process' ? 0 : 1);
       await capture('mobile-editor');
       const browseRequest = page.waitForRequest(request => new URL(request.url()).pathname === '/api/v1/files/browse');
       await editor.getByLabel('Project Path', { exact: true }).click();
@@ -85,7 +87,7 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       await browserExpect(browserPill).toBeVisible();
       expect(await browser.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
       await browser.getByRole('button', { name: 'Cancel', exact: true }).click();
-      await browserExpect(selector).toBeVisible();
+      await browserExpect(selector).toHaveCount(executionBackend === 'in-process' ? 0 : 1);
       await editor.getByRole('button', { name: 'Close', exact: true }).click();
       await page.setViewportSize({ width: 390, height: 844 });
       await browserExpect.poll(async () => {

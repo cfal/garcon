@@ -27,18 +27,18 @@ async function selectFolder(page: Page, panel: Locator, path: string): Promise<v
   await browserExpect(panel.locator('[data-git-folder-picker]')).toHaveAttribute('title', path);
 }
 
-test('Local-only Files and Git show the selected executor and allow Git browsing without a chat', async () => {
+test('Local-only Files and Git hide executor selectors and allow Git browsing without a chat', async () => {
   await withChromiumFixture('git-local-independent-selection', async ({ page, integration, assertNoBrowserErrors }) => {
     await initializeFixtureRepository(integration.dirs.project);
     await writeFile(join(integration.dirs.project, 'example.txt'), 'Local independent change\n');
     await page.goto(integration.garcon.baseUrl);
     await page.locator('[data-file-tree-entry-text]').getByText('example.txt', { exact: true }).waitFor();
-    await browserExpect(surface(page, 'files').getByRole('button', { name: 'Executor: Local', exact: true })).toBeVisible();
+    await browserExpect(surface(page, 'files').locator('[data-executor-picker]')).toHaveCount(0);
     await collapseCanonicalFilesWindow(page);
     for (const [action, kind] of [['Open Git Workbench', 'git'], ['Open Git Compare', 'git-compare']]) {
       await clickWorkspaceWindowAddAction(page, action);
       const panel = surface(page, kind);
-      await browserExpect(panel.getByRole('button', { name: 'Executor: Local', exact: true })).toBeVisible();
+      await browserExpect(panel.locator('[data-executor-picker]')).toHaveCount(0);
       await selectFolder(page, panel, integration.dirs.project);
       await panel.getByText('Local independent change', { exact: false }).first().waitFor();
     }

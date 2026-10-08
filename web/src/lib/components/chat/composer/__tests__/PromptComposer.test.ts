@@ -114,6 +114,61 @@ describe('PromptComposer focus', () => {
 		localStorage.removeItem(LOCAL_STORAGE_KEYS.composerHeight);
 	});
 
+	it('hides the composer executor selector when only Local is configured', () => {
+		render(PromptComposerTestHost, { executors: [localExecutor] });
+
+		expect(screen.queryByRole('button', { name: /Executor:/ })).toBeNull();
+	});
+
+	it.each([
+		remoteExecutor,
+		{ ...remoteExecutor, availability: 'offline' as const },
+		{ ...remoteExecutor, enabled: false },
+	])(
+		'shows the composer executor selector with a configured remote (availability=$availability, enabled=$enabled)',
+		(executor) => {
+			render(PromptComposerTestHost, {
+				executors: [localExecutor, executor],
+			});
+
+			expect(screen.getByRole('button', { name: 'Executor: Local' })).toBeTruthy();
+		},
+	);
+
+	it('hides the composer executor selector for a removed remote when only Local remains', () => {
+		render(PromptComposerTestHost, {
+			executors: [localExecutor],
+			selectedExecutorId: remoteExecutor.id,
+		});
+
+		expect(screen.queryByRole('button', { name: /Executor:/ })).toBeNull();
+	});
+
+	it('updates executor visibility without remounting or clearing the composer draft', async () => {
+		const { component, rerender } = render(PromptComposerTestHost, {
+			executors: [localExecutor],
+		});
+		const textarea = screen.getByRole<HTMLTextAreaElement>('textbox');
+		await fireEvent.input(textarea, { target: { value: 'Synthetic preserved draft' } });
+		textarea.focus();
+
+		component.applyExecutors([localExecutor, remoteExecutor]);
+		await screen.findByRole('button', { name: 'Executor: Local' });
+		component.applyExecutors([localExecutor]);
+		await waitFor(() => expect(screen.queryByRole('button', { name: /Executor:/ })).toBeNull());
+		expect(screen.getByRole('textbox')).toBe(textarea);
+		expect(textarea.value).toBe('Synthetic preserved draft');
+		expect(document.activeElement).toBe(textarea);
+
+		await rerender({ selectedChatId: 'remote-chat', selectedExecutorId: remoteExecutor.id });
+		expect(screen.queryByRole('button', { name: /Executor:/ })).toBeNull();
+		await rerender({ selectedChatId: 'chat-1', selectedExecutorId: 'local' });
+		await waitFor(() => expect(screen.queryByRole('button', { name: /Executor:/ })).toBeNull());
+		expect(screen.getByRole('textbox')).toBe(textarea);
+		expect(textarea.value).toBe('Synthetic preserved draft');
+		await expectComposerFocus(textarea);
+	});
+
 	it('loads a cold remote catalog and blocks click and Enter until it is validated, including reconnect', async () => {
 		const catalog = new ModelCatalogStore();
 		const remote = catalog.forExecutor(remoteExecutor.id);

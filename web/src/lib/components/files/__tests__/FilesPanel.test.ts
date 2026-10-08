@@ -241,8 +241,12 @@ describe('FilesPanel', () => {
 			};
 
 			setFilesPanelTestContext({ fileSessions, singletonSurfaces });
-			render(FilesPanelTestHost, { presentation });
-			expect(screen.getByRole('button', { name: 'Executor: Local' })).toBeTruthy();
+			tree.showBreadcrumbs = true;
+			const { container } = render(FilesPanelTestHost, { presentation });
+			expect(screen.queryByRole('button', { name: 'Executor: Local' })).toBeNull();
+			expect(container.querySelector('[data-file-tree-breadcrumbs]')?.firstElementChild?.classList.contains('lucide-folder')).toBe(true);
+			tree.showBreadcrumbs = false;
+			await waitFor(() => expect(container.querySelector('[data-file-tree-breadcrumbs]')).toBeNull());
 			await fireEvent.click(screen.getByRole('rowheader', { name: /^file\.ts/ }));
 
 			expect(open).toHaveBeenCalledWith(
