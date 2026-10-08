@@ -329,7 +329,6 @@
 		});
 	});
 
-	// Pushes settings-changed WebSocket messages into the remote store.
 	const browserNotifications = new BrowserNotificationService({
 		enabled: () => localSettings.browserNotifications,
 		openChat: gotoChat,
@@ -340,10 +339,13 @@
 		isFocused: () => document.visibilityState === 'visible' && document.hasFocus(),
 		isChatProcessing: (id) => chatSessions.isChatProcessing(id),
 	});
-	onMount(() => browserNotifications.start());
-	onMount(() => ws.onConnectionChange(connected => {
-		if (!connected) browserNotificationsRouter.clearPermissions();
-	}));
+	onMount(() => {
+		browserNotifications.start();
+		return ws.onConnectionChange((connected) => {
+			if (!connected) browserNotificationsRouter.clearPermissions();
+		});
+	});
+	// Pushes settings-changed WebSocket messages into the remote store.
 	const settingsRouter = new RemoteSettingsRouter(ws, remoteSettings);
 	const transcriptSearchStatus = new TranscriptSearchStatusController(ws, (status) =>
 		sidebarSearch.applyTranscriptSearchStatus(status),
