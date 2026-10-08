@@ -1,3 +1,5 @@
+import { BrowserNotificationCoordinator } from './browser-notification-coordinator.js';
+
 export type BrowserNotificationPermission = NotificationPermission | 'unsupported';
 
 export function browserNotificationPermission(): BrowserNotificationPermission {
@@ -144,4 +146,3 @@ export class BrowserNotificationService implements BrowserNotificationDeliveryPo
 		for (const tag of this.#deliveries.keys()) this.#closeOwned(tag);
 	}
 }
-import { BrowserNotificationCoordinator } from './browser-notification-coordinator.js';

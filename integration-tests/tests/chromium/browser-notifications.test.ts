@@ -86,7 +86,7 @@ test('two Garcon pages suppress notifications while either is focused and delive
     await page.bringToFront();
     const focusedTurn = await integration.client.runDirectChat({ chatId: ids[2]!, content: 'Synthetic focused completion', agent: integration.directAgents.anthropic });
     await integration.client.waitForTurnTerminal(ids[2]!, focusedTurn.turnId);
-    await expect.poll(async () => Promise.all([page, peer].map(tab => tab.evaluate(turnId => (window as typeof window & { finishedTurns: string[] }).finishedTurns.includes(turnId), focusedTurn.turnId)))).toEqual([true, true]);
+    await expect.poll(async () => Promise.all([page, peer].map(tab => tab.evaluate(turnId => (window as typeof window & { finishedTurns: string[] }).finishedTurns.includes(turnId), focusedTurn.turnId!)))).toEqual([true, true]);
     await Promise.all([page, peer].map(tab => tab.evaluate(() => navigator.locks.request('garcon-browser-notifications', () => {}))));
     const titles = () => Promise.all([page, peer].map(tab => tab.evaluate(() => (window as typeof window & { notificationTitles: string[] }).notificationTitles)));
     expect((await titles()).flat()).toEqual([]);
