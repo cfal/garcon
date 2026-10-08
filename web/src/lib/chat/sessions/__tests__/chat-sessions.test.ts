@@ -32,14 +32,43 @@ function makeServerSession(overrides: Partial<ChatListEntry> = {}): ChatListEntr
 }
 
 describe('ChatSessionsStore', () => {
+	it('remembers a deep-link visit before hydration and prunes absent targets afterward', () => {
+		const store = new ChatSessionsStore();
+		store.setSelectedChatId('deep-link');
+		store.upsertFromServer([
+			makeServerSession({
+				id: 'newer',
+				activity: { createdAt: '2026-02-01', lastActivityAt: '2026-02-01', lastReadAt: null },
+			}),
+			makeServerSession({
+				id: 'deep-link',
+				activity: { createdAt: '2026-01-01', lastActivityAt: '2026-01-01', lastReadAt: null },
+			}),
+		]);
+		expect(store.recentChats[0]?.id).toBe('deep-link');
+		store.setSelectedChatId('absent');
+		store.upsertFromServer([
+			makeServerSession({
+				id: 'newer',
+				activity: { createdAt: '2026-02-01', lastActivityAt: '2026-02-01', lastReadAt: null },
+			}),
+		]);
+		expect(store.selectedChatId).toBeNull();
+		store.upsertServerChat(makeServerSession({ id: 'absent' }));
+		expect(store.recentChats[0]?.id).toBe('newer');
+	});
 	it('keeps older titles searchable while limiting remembered visits to thirty', () => {
 		const store = new ChatSessionsStore();
-		store.upsertFromServer(Array.from({ length: 35 }, (_, index) => makeServerSession({ id: `chat-${index}`, title: `Synthetic ${index}` })));
+		store.upsertFromServer(
+			Array.from({ length: 35 }, (_, index) =>
+				makeServerSession({ id: `chat-${index}`, title: `Synthetic ${index}` }),
+			),
+		);
 		for (let index = 0; index < 35; index++) store.setSelectedChatId(`chat-${index}`);
 		expect(store.recentChats).toHaveLength(35);
 		expect(store.recentChats[0]?.id).toBe('chat-34');
 		expect(store.recentChats[29]?.id).toBe('chat-5');
-		expect(store.recentChats.some(chat => chat.title === 'Synthetic 0')).toBe(true);
+		expect(store.recentChats.some((chat) => chat.title === 'Synthetic 0')).toBe(true);
 	});
 	it('orders recent chats by visits, falls back to activity and prunes deleted visits', () => {
 		const store = new ChatSessionsStore();

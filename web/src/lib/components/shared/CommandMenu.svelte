@@ -12,6 +12,8 @@
 		WorkbenchCommandCategory,
 	} from '$lib/workspace/workbench-commands.svelte.js';
 	const knownFilePrefix = 'file.open-known:';
+	const searchResultLimit = 50;
+	const recentChatLimit = 10;
 	const categoryLabels: Record<WorkbenchCommandCategory, () => string> = {
 		Chat: m.command_category_chat,
 		Navigation: m.command_category_navigation,
@@ -33,10 +35,12 @@
 	let paletteRef = $state<HTMLDivElement | null>(null);
 
 	let commandContext = $derived(commandRegistry.context());
-	let commands = $derived.by<WorkbenchCommand[]>(() => {
-		if (!isOpen) return [];
+	let commands = $state.raw<readonly WorkbenchCommand[]>([]);
+
+	// Captures one catalog per opening so typing does not rebuild the search index.
+	function captureCommands(): readonly WorkbenchCommand[] {
 		return [
-			...commandRegistry.available(commandContext),
+			...commandRegistry.paletteCandidates(commandContext),
 			...commandRegistry.knownFileLocations.map<WorkbenchCommand>((location) => ({
 				id: `${knownFilePrefix}${location.key}`,
 				label: m.command_open_known_file_named({ path: location.displayPath }),
@@ -46,7 +50,7 @@
 				run: (context) => commandRegistry.openLocation(location, context),
 			})),
 		];
-	});
+	}
 
 	let fuse = $derived(
 		new Fuse(commands, {
@@ -62,10 +66,13 @@
 
 	let filteredCommands = $derived(
 		query.trim()
-			? fuse.search(query).map((r) => r.item)
-			: commands.filter(
-					(command, index) => !command.id.startsWith(CHAT_OPEN_COMMAND_PREFIX) || index < 10,
-				),
+			? fuse.search(query, { limit: searchResultLimit }).map((r) => r.item)
+			: commands
+					.filter(
+						(command, index) =>
+							!command.id.startsWith(CHAT_OPEN_COMMAND_PREFIX) || index < recentChatLimit,
+					)
+					.slice(0, searchResultLimit),
 	);
 	let selectedCommand = $derived(filteredCommands[selectedIndex]);
 
@@ -86,6 +93,7 @@
 		focusReturnTarget =
 			document.activeElement instanceof HTMLElement ? document.activeElement : null;
 		transientLayers.open('main-inert', () => {
+			commands = captureCommands();
 			isOpen = true;
 			query = '';
 			selectedIndex = 0;
@@ -95,6 +103,7 @@
 
 	function close() {
 		isOpen = false;
+		commands = [];
 		query = '';
 	}
 
@@ -240,7 +249,12 @@
 							<div class="flex-1 min-w-0">
 								<div class="text-sm font-medium truncate">{item.label}</div>
 								{#if item.description}
-									<div class="text-xs text-muted-foreground truncate">{item.description}</div>
+									<div
+										class="text-xs text-muted-foreground line-clamp-2 break-words"
+										title={item.description}
+									>
+										{item.description}
+									</div>
 								{/if}
 							</div>
 							<span class="text-[10px] text-muted-foreground uppercase flex-shrink-0">

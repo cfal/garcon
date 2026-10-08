@@ -14,6 +14,12 @@ test('recent chat palette searches titles and switches without remounting the co
     await page.goto(`${integration.garcon.baseUrl}/chat/${ids[0]}`);
     const textarea = page.getByPlaceholder('Reply...', { exact: true });
     await textarea.waitFor();
+    await page.reload();
+    await textarea.waitFor();
+    await textarea.press('Control+p');
+    const initialPalette = page.getByRole('dialog', { name: 'Command palette' });
+    await browserExpect(initialPalette.getByRole('option').first()).toContainText('Switch to Synthetic review 0');
+    await initialPalette.getByRole('combobox').press('Escape');
     await textarea.fill('Retained review draft');
     const composer = await page.locator('[data-composer]').elementHandle();
     const artifacts = join(import.meta.dirname, '../../artifacts/chromium');

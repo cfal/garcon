@@ -9,6 +9,8 @@ import type { FilesSurfaceController } from '$lib/files/surface/files-surface-co
 import { FileNavigationStore } from '$lib/files/navigation/file-navigation-store.svelte.js';
 import { createMemoryFileDraftRepository } from '$lib/files/persistence/file-draft-repository.js';
 import { fileIdentityKey } from '$lib/files/documents/file-identity.js';
+import { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte.js';
+import type { ChatCommandNavigationPort } from '$lib/workspace/workbench-commands.svelte.js';
 
 type CommandMenuWorkspacePort = Pick<
 	WorkspaceCoordinator,
@@ -106,6 +108,135 @@ afterEach(() => {
 	fileRootPath = null;
 	vi.restoreAllMocks();
 	vi.clearAllMocks();
+});
+
+function createCatalog(count: number): ChatSessionsStore {
+	const sessions = new ChatSessionsStore();
+	for (let index = 0; index < count; index++) {
+		const id = `catalog-${index}`;
+		sessions.createDraft({
+			id,
+			projectPath: `/synthetic/project-${index}`,
+			startup: {
+				agentId: 'claude',
+				model: 'opus',
+				firstMessage: 'Synthetic instructions',
+				permissionMode: 'default',
+				thinkingMode: 'none',
+				agentSettings: { ownerId: 'claude', schemaVersion: 1, values: {} },
+			},
+		});
+		sessions.patchChat(id, { title: `Catalog title ${index}` });
+	}
+	return sessions;
+}
+
+it('keeps static command lookup independent of the chat catalog and caches candidates per opening', async () => {
+	const sessions = createCatalog(120);
+	let enumerations = 0;
+	const port: ChatCommandNavigationPort = {
+		get recentChats() {
+			enumerations++;
+			return sessions.recentChats;
+		},
+		hasChat: (id) => sessions.hasChat(id),
+		open: vi.fn(async () => {}),
+	};
+	const unregister = commandRegistry.registerChatNavigation(port);
+	try {
+		await commandRegistry.execute('open-settings');
+		expect(commandRegistry.isEnabled('open-settings')).toBe(true);
+		expect(enumerations).toBe(0);
+		fileRootPath = '/synthetic';
+		knownFiles = Array.from({ length: 120 }, (_, index) => ({
+			name: `known-${index}.ts`,
+			path: `/synthetic/known-${index}.ts`,
+			relativePath: `known-${index}.ts`,
+			type: 'file',
+			size: 0,
+			modified: null,
+			permissionsRwx: 'rw-r--r--',
+		}));
+		const { component } = render(CommandMenu);
+		component.toggle();
+		const input = await screen.findByRole('combobox');
+		expect(
+			screen.getAllByRole('option').filter((option) => option.textContent?.includes('Recent chat')),
+		).toHaveLength(10);
+		expect(screen.getAllByRole('option')).toHaveLength(50);
+		await fireEvent.input(input, { target: { value: 'chat' } });
+		expect(screen.getAllByRole('option')).toHaveLength(50);
+		await fireEvent.input(input, { target: { value: 'Catalog title 0' } });
+		expect(screen.getAllByRole('option')[0]?.textContent).toContain('Catalog title 0');
+		expect(enumerations).toBe(1);
+		sessions.patchChat('catalog-0', { title: 'Reopened title' });
+		await fireEvent.input(input, { target: { value: 'Catalog title 0' } });
+		expect(screen.getAllByRole('option')[0]?.textContent).toContain('Catalog title 0');
+		component.toggle();
+		component.toggle();
+		await fireEvent.input(await screen.findByRole('combobox'), {
+			target: { value: 'Reopened title' },
+		});
+		expect(screen.getAllByRole('option')[0]?.textContent).toContain('Reopened title');
+		expect(enumerations).toBe(2);
+	} finally {
+		unregister();
+	}
+});
+
+it('exposes executor-qualified projects and chat identities for duplicate titles', async () => {
+	const sessions = createCatalog(2);
+	const executorId = '2bd1ff29-7045-40eb-a5ab-c97b9071a213';
+	for (const chat of sessions.orderedChats) sessions.patchChat(chat.id, { title: 'Same title' });
+	const localId = 'catalog-0';
+	const remoteId = 'catalog-1';
+	const open = vi.fn(async () => {});
+	const unregister = commandRegistry.registerChatNavigation({
+		get recentChats() {
+			return sessions.recentChats;
+		},
+		hasChat: (id) => sessions.hasChat(id),
+		open,
+	});
+	sessions.patchChat(remoteId, { executorId });
+	try {
+		const { component } = render(CommandMenu);
+		component.toggle();
+		await screen.findByRole('combobox');
+		const local = screen.getByRole('option', { name: /Same title Local: \/synthetic\/project-0/ });
+		const remote = screen.getByRole('option', {
+			name: new RegExp(`Same title ${executorId}: /synthetic/project-1`),
+		});
+		expect(local.textContent).toContain(`#${localId}`);
+		expect(remote.textContent).toContain(`#${remoteId}`);
+		await fireEvent.click(remote);
+		expect(open).toHaveBeenCalledExactlyOnceWith(remoteId);
+	} finally {
+		unregister();
+	}
+});
+
+it('rejects a palette command after its navigation owner is replaced', async () => {
+	const sessions = createCatalog(1);
+	const open = vi.fn(async () => {});
+	const first = commandRegistry.registerChatNavigation({
+		recentChats: sessions.recentChats,
+		hasChat: () => true,
+		open,
+	});
+	const captured = commandRegistry.paletteCandidates()[0]!;
+	const second = commandRegistry.registerChatNavigation({
+		recentChats: sessions.recentChats,
+		hasChat: () => true,
+		open,
+	});
+	try {
+		first();
+		expect(await commandRegistry.invoke(captured)).toBe(false);
+		expect(open).not.toHaveBeenCalled();
+	} finally {
+		second();
+	}
 });
 
 it('switches captured recent chats through the same registry action for keyboard and click', async () => {

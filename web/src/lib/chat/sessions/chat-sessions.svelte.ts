@@ -161,7 +161,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 
 	setSelectedChatId(chatId: string | null): void {
 		this.selectedChatId = chatId;
-		if (chatId && this.hasChat(chatId)) this.#recentHistory.visit(chatId);
+		if (chatId) this.#recentHistory.visit(chatId);
 	}
 
 	get recentChats(): readonly ChatSessionRecord[] {

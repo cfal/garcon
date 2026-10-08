@@ -19,6 +19,7 @@ import { windowIdOfSurface } from './window-tree.js';
 import { copyToClipboard } from '$lib/utils/clipboard.js';
 import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types.js';
+import { effectiveExecutorId, LOCAL_EXECUTOR_ID, LOCAL_EXECUTOR_LABEL } from '$shared/executors';
 
 export const CHAT_OPEN_COMMAND_PREFIX = 'chat.open:';
 
@@ -70,10 +71,9 @@ export class WorkbenchCommandRegistry {
 	}
 
 	get commands(): readonly WorkbenchCommand[] {
-		const commands = [...this.#chatCommands(), ...this.#baseCommands];
-		if (!this.deps.terminals.hasRemoteHosts) return commands;
+		if (!this.deps.terminals.hasRemoteHosts) return this.#baseCommands;
 		return [
-			...commands,
+			...this.#baseCommands,
 			...this.deps.terminals.hosts.map((host) => ({
 				id: `workspace-new-terminal:${host.id}`,
 				label: `${m.workspace_new_terminal()}: ${host.label}`,
@@ -83,6 +83,10 @@ export class WorkbenchCommandRegistry {
 					this.deps.workspace.createTerminalInAvailableSpace('command-menu:new-terminal', host.id),
 			})),
 		];
+	}
+
+	paletteCandidates(context = this.context()): readonly WorkbenchCommand[] {
+		return [...this.#chatCommands(), ...this.available(context)];
 	}
 
 	registerChatNavigation(port: ChatCommandNavigationPort): () => void {
@@ -99,6 +103,14 @@ export class WorkbenchCommandRegistry {
 			id: `${CHAT_OPEN_COMMAND_PREFIX}${chat.id}`,
 			label: m.command_switch_chat_named({ title: chat.title || m.chat_window_untitled() }),
 			description: [
+				m.command_chat_location({
+					executor:
+						effectiveExecutorId(chat.executorId) === LOCAL_EXECUTOR_ID
+							? LOCAL_EXECUTOR_LABEL
+							: effectiveExecutorId(chat.executorId),
+					path: chat.projectPath,
+					chatId: chat.id,
+				}),
 				m.command_recent_chat(),
 				chat.isProcessing ? m.command_chat_running() : null,
 				chat.isUnread ? m.command_chat_unread() : null,
@@ -106,7 +118,7 @@ export class WorkbenchCommandRegistry {
 				.filter(Boolean)
 				.join(' · '),
 			category: 'Chat',
-			isEnabled: () => port.hasChat(chat.id),
+			isEnabled: () => this.#chatNavigation === port && port.hasChat(chat.id),
 			run: () => port.open(chat.id),
 		}));
 	}
