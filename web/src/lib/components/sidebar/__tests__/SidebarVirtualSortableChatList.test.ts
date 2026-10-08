@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import SidebarChatListHost from './SidebarChatListHost.svelte';
 import SidebarVirtualSortableChatListHost from './SidebarVirtualSortableChatListHost.svelte';
+import { SidebarVirtualChatListController } from '../SidebarVirtualChatListController.svelte.js';
 import {
 	CHAT_ROW_SEPARATOR_SLOT_HEIGHT,
 	PROJECT_HEADER_ROW_HEIGHT,
@@ -245,6 +246,30 @@ afterEach(() => {
 });
 
 describe('SidebarVirtualSortableChatList', () => {
+	it('keeps chat props coherent when regrouping inserts a header at the old index', async () => {
+		const rows = makeRows(2);
+		const view = render(SidebarVirtualSortableChatListHost, { rows, rowHeight, selectedChatId: 'chat-1', displayOptions: { chatItemLayout: 'detailed' } });
+		await tick();
+		const update = vi.spyOn(SidebarVirtualChatListController.prototype, 'update').mockImplementation(() => {});
+		await view.rerender({
+			rows: [makeProjectHeader('/tmp/project', 2), ...rows],
+			rowHeight,
+			pendingChatIds: ['chat-0'],
+		});
+		await tick();
+		expect(screen.getByText('Chat 0')).toBeTruthy();
+		const selected = document.querySelector<HTMLElement>('[data-sidebar-virtual-list-selected-background]');
+		expect(selected?.dataset.sidebarVirtualListSelectedBackground).toBe('normal:chat-1');
+		expect(selected?.style.top).toBe(`${rowHeight - CHAT_ROW_SEPARATOR_SLOT_HEIGHT}px`);
+		expect(selected?.style.height).toBe(`${rowHeight + CHAT_ROW_SEPARATOR_SLOT_HEIGHT}px`);
+		expect(document.querySelector<HTMLElement>('[data-sidebar-virtual-list-separator="normal:chat-0"]')?.style.top).toBe('87px');
+		expect(document.querySelector<HTMLElement>('[data-sidebar-virtual-list-separator="normal:chat-1"]')?.style.top).toBe('175px');
+		update.mockRestore();
+		await view.rerender({ rows, rowHeight });
+		await tick();
+		expect(screen.getByText('Chat 1')).toBeTruthy();
+	});
+
 	it('renders a bounded visible slice for large chat arrays', () => {
 		render(SidebarVirtualSortableChatListHost, {
 			rows: makeRows(500),
@@ -1042,7 +1067,9 @@ describe('SidebarVirtualSortableChatList', () => {
 			});
 			const firstItem = document.querySelector<HTMLElement>('[data-sidebar-virtual-item="chat"]')!;
 			const initialHeight = Number.parseFloat(firstItem.style.height);
-			const viewport = document.querySelector<HTMLElement>('[data-testid="virtual-sidebar-viewport"]')!;
+			const viewport = document.querySelector<HTMLElement>(
+				'[data-testid="virtual-sidebar-viewport"]',
+			)!;
 			viewport.scrollTop = initialHeight * 20 + initialHeight / 2;
 			await fireEvent.scroll(viewport);
 			await tick();
@@ -1064,7 +1091,7 @@ describe('SidebarVirtualSortableChatList', () => {
 			displayOptions: { chatItemLayout: 'single-line', showProjectPath: true },
 		});
 		const items = document.querySelectorAll<HTMLElement>('[data-sidebar-virtual-item="chat"]');
-		expect(Array.from(items, item => item.style.height)).toEqual(['40px', '58px']);
+		expect(Array.from(items, (item) => item.style.height)).toEqual(['40px', '58px']);
 	});
 
 	it('anchors through project headers with fractional scroll offsets', async () => {

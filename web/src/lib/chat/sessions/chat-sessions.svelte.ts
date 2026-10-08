@@ -14,8 +14,7 @@ import {
 	reorderChat as reorderChatApi,
 	setLastSelectedChat,
 	transitionChatTags as transitionChatTagsApi,
-	toggleArchive as toggleArchiveApi,
-	type ToggleArchiveResponse,
+	setChatArchived as setChatArchivedApi,
 } from '$lib/api/chats.js';
 import { ApiError } from '$lib/api/client.js';
 import { updateSessionName } from '$lib/api/settings.js';
@@ -32,9 +31,13 @@ import type {
 	ReplaceChatTagsRequest,
 	TransitionChatTagsRequest,
 } from '$shared/chat-tag-mutations';
-import type { ChatOrderBoundary, ReorderChatResponse } from '$shared/chat-order-contracts';
+import type {
+	ChatOrderBoundary,
+	ReorderChatResponse,
+} from '$shared/chat-order-contracts';
 import {
 	ChatArchiveProjectionState,
+	type ArchiveMutationSettlement,
 	type ChatArchiveProjectionOperation,
 } from './chat-archive-projection-state.svelte.js';
 import {
@@ -68,13 +71,6 @@ import {
 	toRecord,
 } from './chat-session-records.js';
 
-
-interface ArchiveMutationSettlement {
-	chatId: string;
-	result: PromiseSettledResult<ToggleArchiveResponse>;
-	requiredRefreshGeneration: number;
-	serverEntryGenerationAtSettlement: number;
-}
 
 export class ChatSessionsStore implements ChatSessionsPort {
 	#baseById = $state.raw<Record<string, ChatSessionRecord>>({});
@@ -257,9 +253,11 @@ export class ChatSessionsStore implements ChatSessionsPort {
 
 	async #executeArchiveMutation(operation: ChatArchiveProjectionOperation): Promise<void> {
 		if (operation.chatIds.length === 0) return;
-		const toggleRemoteArchive = this.#deps.toggleArchive ?? toggleArchiveApi;
+		const setRemoteArchived = this.#deps.setChatArchived ?? setChatArchivedApi;
 		const settlements = await Promise.all(
-			operation.chatIds.map((chatId) => this.#settleArchiveMutation(chatId, toggleRemoteArchive)),
+			operation.chatIds.map((chatId) =>
+				this.#settleArchiveMutation(chatId, operation.targetArchived, setRemoteArchived),
+			),
 		);
 		await this.#refresh(false);
 
@@ -278,13 +276,14 @@ export class ChatSessionsStore implements ChatSessionsPort {
 
 	async #settleArchiveMutation(
 		chatId: string,
-		toggleRemoteArchive: typeof toggleArchiveApi,
+		isArchived: boolean,
+		setRemoteArchived: typeof setChatArchivedApi,
 	): Promise<ArchiveMutationSettlement> {
 		// Lets the initiating handler navigate before archive I/O begins.
 		await Promise.resolve();
-		let result: PromiseSettledResult<ToggleArchiveResponse>;
+		let result: ArchiveMutationSettlement['result'];
 		try {
-			const value = await toggleRemoteArchive(chatId);
+			const value = await setRemoteArchived({ chatId, isArchived });
 			result = { status: 'fulfilled', value };
 		} catch (reason) {
 			result = { status: 'rejected', reason };
