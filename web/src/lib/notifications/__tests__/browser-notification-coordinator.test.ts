@@ -25,7 +25,8 @@ describe('cross-tab browser notifications', () => {
 			background.destroy();
 		}
 	});
-	it('elects one unfocused tab and remembers its receipt for a later duplicate', async () => {
+	it('elects one unfocused tab and remembers its receipt without randomUUID', async () => {
+		vi.stubGlobal('crypto', { getRandomValues: crypto.getRandomValues.bind(crypto) });
 		vi.stubGlobal('BroadcastChannel', BroadcastChannel);
 		vi.stubGlobal('navigator', {});
 		const first = new BrowserNotificationCoordinator({

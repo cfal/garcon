@@ -1,3 +1,5 @@
+import { createRandomId } from '$lib/utils/random-id.js';
+
 const CHANNEL_NAME = 'garcon-browser-notifications';
 const FOCUS_PROBE_MS = 75;
 
@@ -23,7 +25,7 @@ interface Probe {
 
 /** Coordinates generic notification receipts and fresh focus checks across open tabs. */
 export class BrowserNotificationCoordinator {
-	readonly #peerId = crypto.randomUUID();
+	readonly #peerId = createRandomId();
 	readonly #channel: BroadcastChannel | null;
 	readonly #seen = new Set<string>();
 	readonly #probes = new Map<string, Probe>();
@@ -94,7 +96,7 @@ export class BrowserNotificationCoordinator {
 
 	#probe(tag: string): Promise<PeerReply[]> {
 		if (!this.#channel) return Promise.resolve([]);
-		const requestId = crypto.randomUUID();
+		const requestId = createRandomId();
 		return new Promise((resolve) => {
 			const replies: PeerReply[] = [];
 			const timer = setTimeout(() => finish(), FOCUS_PROBE_MS);
