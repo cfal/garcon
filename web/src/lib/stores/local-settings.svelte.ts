@@ -177,6 +177,7 @@ export interface LocalSettingsSnapshot {
 	markdownViewerOpenPlacement: FileOpenPlacementPreference;
 	hiddenToolTypes: HideableToolType[];
 	globalShortcuts: GlobalShortcutOverrides;
+	browserNotifications: boolean;
 	completionSoundMode: CompletionSoundMode;
 	completionSoundVolume: number;
 	completionSoundVisibility: CompletionSoundVisibility;
@@ -250,6 +251,7 @@ const DEFAULTS: LocalSettingsSnapshot = {
 	markdownViewerOpenPlacement: 'same-window',
 	hiddenToolTypes: [],
 	globalShortcuts: {},
+	browserNotifications: false,
 	completionSoundMode: 'off',
 	completionSoundVolume: 0.7,
 	completionSoundVisibility: 'unfocused',
@@ -433,7 +435,10 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 			DEFAULTS.sidebarGroupNestedProjectPaths,
 		),
 		sidebarChatItemLayout: parseSidebarChatItemLayout(parsed.sidebarChatItemLayout),
-		sidebarShowProjectPath: parseBoolean(parsed.sidebarShowProjectPath, DEFAULTS.sidebarShowProjectPath),
+		sidebarShowProjectPath: parseBoolean(
+			parsed.sidebarShowProjectPath,
+			DEFAULTS.sidebarShowProjectPath,
+		),
 		selectedChatBoardId: isChatBoardId(parsed.selectedChatBoardId)
 			? parsed.selectedChatBoardId
 			: null,
@@ -473,6 +478,7 @@ function parseFromRaw(parsed: Record<string, unknown>): LocalSettingsSnapshot {
 		),
 		hiddenToolTypes: normalizeHiddenToolTypes(parsed.hiddenToolTypes),
 		globalShortcuts: sanitizeGlobalShortcutOverrides(parsed.globalShortcuts),
+		browserNotifications: parseBoolean(parsed.browserNotifications, DEFAULTS.browserNotifications),
 		completionSoundMode: parseCompletionSoundMode(parsed.completionSoundMode),
 		completionSoundVolume: parseCompletionSoundVolume(parsed.completionSoundVolume),
 		completionSoundVisibility: parseCompletionSoundVisibility(parsed.completionSoundVisibility),
@@ -550,6 +556,7 @@ export class LocalSettingsStore {
 	);
 	hiddenToolTypes = $state<HideableToolType[]>(DEFAULTS.hiddenToolTypes);
 	globalShortcuts = $state<GlobalShortcutOverrides>(DEFAULTS.globalShortcuts);
+	browserNotifications = $state(DEFAULTS.browserNotifications);
 	completionSoundMode = $state<CompletionSoundMode>(DEFAULTS.completionSoundMode);
 	completionSoundVolume = $state(DEFAULTS.completionSoundVolume);
 	completionSoundVisibility = $state<CompletionSoundVisibility>(DEFAULTS.completionSoundVisibility);
@@ -675,6 +682,7 @@ export class LocalSettingsStore {
 			markdownViewerOpenPlacement: this.markdownViewerOpenPlacement,
 			hiddenToolTypes: this.hiddenToolTypes,
 			globalShortcuts: { ...this.globalShortcuts },
+			browserNotifications: this.browserNotifications,
 			completionSoundMode: this.completionSoundMode,
 			completionSoundVolume: this.completionSoundVolume,
 			completionSoundVisibility: this.completionSoundVisibility,
@@ -727,6 +735,7 @@ export class LocalSettingsStore {
 		this.markdownViewerOpenPlacement = snap.markdownViewerOpenPlacement;
 		this.hiddenToolTypes = snap.hiddenToolTypes;
 		this.globalShortcuts = { ...snap.globalShortcuts };
+		this.browserNotifications = snap.browserNotifications;
 		this.completionSoundMode = snap.completionSoundMode;
 		this.completionSoundVolume = snap.completionSoundVolume;
 		this.completionSoundVisibility = snap.completionSoundVisibility;

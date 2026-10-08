@@ -4,6 +4,7 @@
 /// <reference lib="webworker" />
 declare const self: ServiceWorkerGlobalScope;
 
+import { openNotificationChat } from './service-worker-notifications.js';
 import { build, files, version } from '$service-worker';
 import {
 	withNavigationTimeout,
@@ -18,6 +19,21 @@ const CACHE_NAME = `garcon-${version}`;
 const CACHE_PREFIX = 'garcon-';
 const PRECACHE_MANIFEST: ServiceWorkerPrecacheManifest = { build, files };
 
+self.addEventListener('notificationclick', (event) => {
+	event.notification.close();
+	event.waitUntil(
+		self.clients
+			.matchAll({ type: 'window', includeUncontrolled: true })
+			.then((windows) =>
+				openNotificationChat(
+					event.notification.data?.chatId,
+					self.location.origin,
+					windows as WindowClient[],
+					(url) => self.clients.openWindow(url),
+				),
+			),
+	);
+});
 // Paths that must never be cached (API, WebSocket upgrades).
 const PASSTHROUGH_PREFIXES = ['/api', '/ws'];
 
