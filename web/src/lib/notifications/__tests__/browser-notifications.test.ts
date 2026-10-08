@@ -7,6 +7,34 @@ import {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('browser notification delivery', () => {
+	it('retracts a resolved permission even when worker delivery finishes after close', async () => {
+		let release!: () => void;
+		const close = vi.fn();
+		const registration = {
+			active: {},
+			showNotification: async () => {
+				await new Promise<void>((resolve) => {
+					release = resolve;
+				});
+			},
+			getNotifications: async (options?: { tag?: string }) =>
+				options?.tag === 'permission' ? [{ close }] : [],
+		};
+		vi.stubGlobal('Notification', { permission: 'granted' });
+		vi.stubGlobal('isSecureContext', true);
+		vi.stubGlobal('navigator', { serviceWorker: { getRegistration: async () => registration } });
+		const service = new BrowserNotificationService({
+			enabled: () => true,
+			isFocused: () => false,
+			openChat: vi.fn(),
+		});
+		service.show('Generic permission', 'captured', 'permission');
+		await vi.waitFor(() => expect(release).toBeDefined());
+		service.close('permission');
+		release();
+		await vi.waitFor(() => expect(close).toHaveBeenCalled());
+		service.destroy();
+	});
 	it('rechecks focus after registration resolves', async () => {
 		let focused = false;
 		let release!: (value: undefined) => void;
@@ -30,7 +58,6 @@ describe('browser notification delivery', () => {
 		const service = new BrowserNotificationService({
 			enabled: () => true,
 			isFocused: () => focused,
-			hasChat: () => true,
 			openChat: vi.fn(),
 		});
 		service.show('Generic', 'captured', 'tag');
@@ -62,7 +89,6 @@ describe('browser notification delivery', () => {
 		const service = new BrowserNotificationService({
 			enabled: () => true,
 			isFocused: () => false,
-			hasChat: () => true,
 			openChat: vi.fn(),
 		});
 		service.show('Generic A', 'captured', 'a');
@@ -94,7 +120,6 @@ describe('browser notification delivery', () => {
 		const service = new BrowserNotificationService({
 			enabled: () => true,
 			isFocused: () => false,
-			hasChat: () => true,
 			openChat,
 		});
 		service.show('Generic completion', 'captured', 'tag');

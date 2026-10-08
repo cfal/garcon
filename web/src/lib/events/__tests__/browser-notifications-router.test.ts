@@ -32,7 +32,8 @@ function permission(kind: 'upsert' | 'remove' | 'clear-run' = 'upsert') {
 	);
 }
 
-function fixture(messages: unknown[], enabled = true, focused = false) {
+function fixture(messages: unknown[], enabled = true, focused = false, processing = false) {
+	let currentProcessing = processing;
 	const ws = {
 		messages: messages.map((data) => ({
 			data: JSON.parse(JSON.stringify(data)),
@@ -41,18 +42,91 @@ function fixture(messages: unknown[], enabled = true, focused = false) {
 		trimOffset: 0,
 		registerCursor: vi.fn(() => vi.fn()),
 	} satisfies WsMessageLog;
-	const delivery = { show: vi.fn() } satisfies Pick<BrowserNotificationDeliveryPort, 'show'>;
+	const delivery = { show: vi.fn(), close: vi.fn() } satisfies Pick<BrowserNotificationDeliveryPort, 'show' | 'close'>;
 	const router = new BrowserNotificationsRouter(ws, delivery, {
 		enabled: () => enabled,
 		isFocused: () => focused,
-		hasChat: () => true,
+		isChatProcessing: () => currentProcessing,
 	});
 	router.start();
 	router.tick();
-	return { ws, delivery, router };
+	return {
+		ws,
+		delivery,
+		router,
+		setProcessing: (next: boolean) => {
+			currentProcessing = next;
+		},
+	};
 }
 
 describe('root browser notifications routing', () => {
+	it('suppresses intermediate queued completion and notifies after the queue becomes idle', () => {
+		const completed = new AgentRunFinishedMessage(
+			'background',
+			0,
+			'turn',
+			undefined,
+			undefined,
+			'finished',
+		);
+		const busy = fixture([completed], true, false, true);
+		expect(busy.delivery.show).not.toHaveBeenCalled();
+		busy.setProcessing(false);
+		busy.ws.messages.push({
+			data: JSON.parse(
+				JSON.stringify(
+					new AgentRunFinishedMessage(
+						'background',
+						0,
+						'next-turn',
+						undefined,
+						undefined,
+						'finished',
+					),
+				),
+			),
+			timestamp: Date.now(),
+		});
+		busy.router.tick();
+		expect(busy.delivery.show).toHaveBeenCalledWith(
+			'Garcon: chat completed',
+			'background',
+			'completion:background:next-turn',
+		);
+		expect(busy.delivery.show).toHaveBeenCalledOnce();
+		busy.router.destroy();
+	});
+	it('delivers authenticated live events before chat-list hydration finishes', () => {
+		const completed = new AgentRunFinishedMessage(
+			'background',
+			0,
+			'turn',
+			undefined,
+			undefined,
+			'finished',
+		);
+		const f = fixture([completed, permission()]);
+		expect(f.delivery.show).toHaveBeenCalledTimes(2);
+		f.router.destroy();
+	});
+	it.each(['remove', 'clear-run'] as const)(
+		'closes permission notifications resolved by %s in a later tick',
+		(kind) => {
+			const f = fixture([permission()]);
+			expect(f.delivery.show).toHaveBeenCalledOnce();
+			f.ws.messages.push({
+				data: JSON.parse(JSON.stringify(permission(kind))),
+				timestamp: Date.now(),
+			});
+			f.router.tick();
+			expect(f.delivery.close).toHaveBeenCalledWith(
+				'permission:synthetic-instance:background:occurrence',
+			);
+			expect(f.delivery.show).toHaveBeenCalledOnce();
+			f.router.destroy();
+		},
+	);
 	it('notifies background completions and live permissions once without private text', () => {
 		const completed = new AgentRunFinishedMessage(
 			'background',

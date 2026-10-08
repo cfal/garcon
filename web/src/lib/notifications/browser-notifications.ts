@@ -17,89 +17,131 @@ export async function requestBrowserNotificationPermission(): Promise<BrowserNot
 
 export interface BrowserNotificationDeliveryPort {
 	show(title: string, chatId: string, tag: string): void;
+	close(tag: string): void;
 	destroy(): void;
+}
+
+interface NotificationDelivery {
+	cancelled: boolean;
+	workerStarted: boolean;
+	notification?: Notification;
 }
 
 export class BrowserNotificationService implements BrowserNotificationDeliveryPort {
 	#destroyed = false;
-	readonly #notifications = new Set<Notification>();
-	readonly #tags = new Set<string>();
+	readonly #deliveries = new Map<string, NotificationDelivery>();
+	#coordinator: BrowserNotificationCoordinator | null = null;
 	constructor(
 		private readonly deps: {
 			enabled(): boolean;
-			hasChat(chatId: string): boolean;
 			isFocused(): boolean;
 			openChat(chatId: string): Promise<void>;
 		},
 	) {}
 
+	start(): void {
+		if (!this.#destroyed)
+			this.#coordinator ??= new BrowserNotificationCoordinator({
+				isFocused: this.deps.isFocused,
+				eligible: () => this.deps.enabled() && browserNotificationPermission() === 'granted',
+			});
+	}
+
 	#open(chatId: string): void {
-		if (this.#destroyed || !this.deps.hasChat(chatId)) return;
+		if (this.#destroyed) return;
 		window.focus();
 		void this.deps.openChat(chatId).catch(() => {});
 	}
 
 	show(title: string, chatId: string, tag: string): void {
-		void this.#deliver(title, chatId, tag).catch(() => {});
+		if (this.#destroyed || this.#deliveries.has(tag)) return;
+		const delivery: NotificationDelivery = { cancelled: false, workerStarted: false };
+		this.#deliveries.set(tag, delivery);
+		while (this.#deliveries.size > 20) this.#closeOwned(this.#deliveries.keys().next().value!);
+		void this.#deliver(title, chatId, tag, delivery)
+			.catch(() => {
+				if (delivery.workerStarted) this.close(tag);
+			})
+			.finally(() => {
+				if (
+					!delivery.workerStarted &&
+					!delivery.notification &&
+					this.#deliveries.get(tag) === delivery
+				)
+					this.#deliveries.delete(tag);
+			});
 	}
 
-	async #deliver(title: string, chatId: string, tag: string): Promise<void> {
-		if (!this.#canDeliver(chatId)) return;
+	async #deliver(
+		title: string,
+		chatId: string,
+		tag: string,
+		delivery: NotificationDelivery,
+	): Promise<void> {
+		if (!this.#canDeliver(delivery)) return;
 		const registration = await navigator.serviceWorker?.getRegistration();
-		if (!this.#canDeliver(chatId)) return;
-		if (registration?.active && registration.showNotification) {
-			await registration.showNotification(title, { tag, data: { chatId } });
-			this.#tags.add(tag);
-			while (this.#tags.size > 20) {
-				const oldest = this.#tags.values().next().value!;
-				this.#tags.delete(oldest);
-				for (const notification of await registration.getNotifications({ tag: oldest }))
+		if (!this.#canDeliver(delivery)) return;
+		const publish = async () => {
+			if (!this.#canDeliver(delivery)) return;
+			if (registration?.active && registration.showNotification) {
+				delivery.workerStarted = true;
+				await registration.showNotification(title, { tag, data: { chatId } });
+				if (!this.#canDeliver(delivery)) await this.#closeWorkerTag(tag, registration);
+			} else {
+				const notification = new Notification(title, { tag });
+				delivery.notification = notification;
+				notification.onclick = () => {
 					notification.close();
+					this.#open(chatId);
+				};
+				notification.onclose = () => {
+					if (this.#deliveries.get(tag) === delivery) this.#deliveries.delete(tag);
+				};
 			}
-			if (!this.#canDeliver(chatId)) {
-				this.#tags.delete(tag);
-				for (const notification of await registration.getNotifications({ tag }))
-					notification.close();
-			}
-			return;
-		}
-		const notification = new Notification(title, { tag });
-		this.#notifications.add(notification);
-		notification.onclick = () => {
-			notification.close();
-			this.#open(chatId);
 		};
-		notification.onclose = () => this.#notifications.delete(notification);
-		while (this.#notifications.size > 20) {
-			const oldest = this.#notifications.values().next().value!;
-			oldest.close();
-			this.#notifications.delete(oldest);
-		}
+		if (this.#coordinator) await this.#coordinator.run(tag, publish);
+		else await publish();
 	}
 
-	#canDeliver(chatId: string): boolean {
+	#canDeliver(delivery: { cancelled: boolean }): boolean {
 		return (
 			!this.#destroyed &&
+			!delivery.cancelled &&
 			!this.deps.isFocused() &&
 			this.deps.enabled() &&
-			this.deps.hasChat(chatId) &&
 			browserNotificationPermission() === 'granted'
 		);
 	}
 
-	async #closeWorkerNotifications(): Promise<void> {
-		const tags = new Set(this.#tags);
-		this.#tags.clear();
-		const registration = await navigator.serviceWorker?.getRegistration();
-		for (const notification of (await registration?.getNotifications()) ?? []) {
-			if (tags.has(notification.tag)) notification.close();
+	async #closeWorkerTag(tag: string, registration?: ServiceWorkerRegistration): Promise<void> {
+		registration ??= await navigator.serviceWorker?.getRegistration();
+		for (const notification of (await registration?.getNotifications({ tag })) ?? [])
+			notification.close();
+	}
+
+	close(tag: string): void {
+		this.#cancel(tag);
+		void this.#closeWorkerTag(tag).catch(() => {});
+	}
+
+	#cancel(tag: string): NotificationDelivery | undefined {
+		const delivery = this.#deliveries.get(tag);
+		if (delivery) {
+			delivery.cancelled = true;
+			delivery.notification?.close();
+			this.#deliveries.delete(tag);
 		}
+		return delivery;
+	}
+
+	#closeOwned(tag: string): void {
+		if (this.#cancel(tag)?.workerStarted) void this.#closeWorkerTag(tag).catch(() => {});
 	}
 
 	destroy(): void {
 		this.#destroyed = true;
-		for (const notification of this.#notifications) notification.close();
-		this.#notifications.clear();
-		void this.#closeWorkerNotifications().catch(() => {});
+		this.#coordinator?.destroy();
+		for (const tag of this.#deliveries.keys()) this.#closeOwned(tag);
 	}
 }
+import { BrowserNotificationCoordinator } from './browser-notification-coordinator.js';

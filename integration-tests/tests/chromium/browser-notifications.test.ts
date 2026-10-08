@@ -46,3 +46,55 @@ test('browser notifications enable explicitly and route a background completion 
     assertNoBrowserErrors();
   });
 }, 180_000);
+
+test('two Garcon pages suppress notifications while either is focused and deliver once when both are unfocused', async () => {
+  await withChromiumFixture('browser-notifications-two-pages', async ({ page, context, integration, assertNoBrowserErrors }) => {
+    await context.addInitScript(() => {
+      const capture = window as typeof window & { notificationTitles: string[]; notificationFocused: boolean; finishedTurns: string[] };
+      capture.notificationTitles = []; capture.notificationFocused = false; capture.finishedTurns = [];
+      localStorage.setItem('pref_local_settings', JSON.stringify({ browserNotifications: true }));
+      class DesktopNotification {
+        static permission = 'granted';
+        constructor(title: string) { capture.notificationTitles.push(title); }
+        close() {}
+      }
+      const NativeWebSocket = window.WebSocket;
+      class ObservedWebSocket extends NativeWebSocket {
+        constructor(url: string | URL, protocols?: string | string[]) {
+          super(url, protocols);
+          this.addEventListener('message', event => {
+            const data = JSON.parse(String(event.data));
+            if (data.type === 'agent-run-finished') capture.finishedTurns.push(data.turnId);
+          });
+        }
+      }
+      Object.defineProperty(window, 'WebSocket', { value: ObservedWebSocket });
+      Object.defineProperty(window, 'Notification', { value: DesktopNotification });
+      Object.defineProperty(document, 'hasFocus', { value: () => capture.notificationFocused });
+    });
+    const ids = [integration.newChatId(), integration.newChatId(), integration.newChatId()];
+    for (const chatId of ids) {
+      const turn = await integration.client.startDirectChat({ chatId, content: 'Synthetic multi-tab setup', projectPath: integration.dirs.project, agent: integration.directAgents.anthropic });
+      await integration.client.waitForTurnTerminal(chatId, turn.turnId);
+    }
+    await page.goto(`${integration.garcon.baseUrl}/chat/${ids[0]}`);
+    await page.getByPlaceholder('Reply...', { exact: true }).waitFor();
+    await page.evaluate(() => { (window as typeof window & { notificationFocused: boolean }).notificationFocused = true; });
+    const peer = await context.newPage();
+    await peer.goto(`${integration.garcon.baseUrl}/chat/${ids[1]}`);
+    await peer.getByPlaceholder('Reply...', { exact: true }).waitFor();
+    await page.bringToFront();
+    const focusedTurn = await integration.client.runDirectChat({ chatId: ids[2]!, content: 'Synthetic focused completion', agent: integration.directAgents.anthropic });
+    await integration.client.waitForTurnTerminal(ids[2]!, focusedTurn.turnId);
+    await expect.poll(async () => Promise.all([page, peer].map(tab => tab.evaluate(turnId => (window as typeof window & { finishedTurns: string[] }).finishedTurns.includes(turnId), focusedTurn.turnId)))).toEqual([true, true]);
+    await Promise.all([page, peer].map(tab => tab.evaluate(() => navigator.locks.request('garcon-browser-notifications', () => {}))));
+    const titles = () => Promise.all([page, peer].map(tab => tab.evaluate(() => (window as typeof window & { notificationTitles: string[] }).notificationTitles)));
+    expect((await titles()).flat()).toEqual([]);
+    await page.evaluate(() => { (window as typeof window & { notificationFocused: boolean }).notificationFocused = false; });
+    const unfocusedTurn = await integration.client.runDirectChat({ chatId: ids[2]!, content: 'Synthetic unfocused completion', agent: integration.directAgents.anthropic });
+    await integration.client.waitForTurnTerminal(ids[2]!, unfocusedTurn.turnId);
+    await expect.poll(async () => (await titles()).flat()).toEqual(['Garcon: chat completed']);
+    assertNoBrowserErrors();
+    await peer.close();
+  });
+}, 180_000);

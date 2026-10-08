@@ -332,15 +332,18 @@
 	// Pushes settings-changed WebSocket messages into the remote store.
 	const browserNotifications = new BrowserNotificationService({
 		enabled: () => localSettings.browserNotifications,
-		hasChat: (id) => chatSessions.hasChat(id),
 		openChat: gotoChat,
 		isFocused: () => document.visibilityState === 'visible' && document.hasFocus(),
 	});
 	const browserNotificationsRouter = new BrowserNotificationsRouter(ws, browserNotifications, {
 		enabled: () => localSettings.browserNotifications,
 		isFocused: () => document.visibilityState === 'visible' && document.hasFocus(),
-		hasChat: (id) => chatSessions.hasChat(id),
+		isChatProcessing: (id) => chatSessions.isChatProcessing(id),
 	});
+	onMount(() => browserNotifications.start());
+	onMount(() => ws.onConnectionChange(connected => {
+		if (!connected) browserNotificationsRouter.clearPermissions();
+	}));
 	const settingsRouter = new RemoteSettingsRouter(ws, remoteSettings);
 	const transcriptSearchStatus = new TranscriptSearchStatusController(ws, (status) =>
 		sidebarSearch.applyTranscriptSearchStatus(status),
