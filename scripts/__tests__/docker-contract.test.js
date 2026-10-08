@@ -67,6 +67,16 @@ beforeAll(async () => {
 });
 
 describe('Docker contract', () => {
+  test('stages every workspace manifest before the frozen install', async () => {
+    const installLayer = dockerfile.slice(0, dockerfile.indexOf('RUN bun install --frozen-lockfile'));
+    for (const workspace of rootPackage.workspaces) {
+      const glob = new Bun.Glob(`${workspace}/package.json`);
+      for await (const manifest of glob.scan({ cwd: repositoryRoot })) {
+        expect(installLayer).toContain(`COPY ${manifest} ${path.dirname(manifest)}/`);
+      }
+    }
+  });
+
   test('installs the HTTP CLI independently of container working directory', async () => {
     expect(dockerfile).toContain('COPY cli/ cli/');
     expect(dockerfile).toContain('COPY --from=build /app/cli/ cli/');
