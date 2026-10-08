@@ -23,13 +23,14 @@ export class ArchiveUndoController {
 		const generation = ++this.#generation;
 		this.#targets = [];
 		this.notifications.dismissKey(noticeKey);
-		void mutation.completion.then(
-			() => {
-				if (generation !== this.#generation) return;
-				this.#showUndo(mutation.chatIds, generation);
-			},
-			() => {},
-		);
+		const offerUndo = () => {
+			if (generation !== this.#generation) return;
+			const archivedIds = mutation.chatIds.filter(
+				(id) => this.sessions.byId[id]?.isArchived && !this.sessions.isArchiveMutationPending(id),
+			);
+			if (archivedIds.length > 0) this.#showUndo(archivedIds, generation);
+		};
+		void mutation.completion.then(offerUndo, offerUndo);
 		return mutation;
 	}
 

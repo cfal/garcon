@@ -62,7 +62,7 @@ describe('archive Undo', () => {
 		expect(f.restore).toHaveBeenCalledExactlyOnceWith(['one']);
 		expect(f.sessions.selectedChatId).toBe('different');
 	});
-	it('never offers Undo for failures or obsolete archive completions', async () => {
+	it('never offers Undo for unconfirmed failures or obsolete archive completions', async () => {
 		const f = fixture();
 		f.archive.mockReturnValueOnce({
 			chatIds: ['one'],

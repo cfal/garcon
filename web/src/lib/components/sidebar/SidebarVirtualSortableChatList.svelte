@@ -186,16 +186,20 @@
 	let separatorItems = $derived(
 		displayOptions.chatItemLayout === 'single-line'
 			? []
-			: computeSidebarSeparatorItems(virtualItems, rows, separatorLineHeight, separatorPixelRatio),
+			: computeSidebarSeparatorItems(
+					renderedItems.map(({ virtualItem }) => virtualItem),
+					rows,
+					separatorLineHeight,
+					separatorPixelRatio,
+				),
 	);
 	let selectedBackgroundItem = $derived.by(() => {
 		if (isMultiSelectMode || !selectedChatId) return null;
 		const separatorSlot =
 			displayOptions.chatItemLayout === 'single-line' ? 0 : CHAT_ROW_SEPARATOR_SLOT_HEIGHT;
 
-		for (const virtualItem of virtualItems) {
-			const row = rows[virtualItem.index];
-			if (!row || row.type !== 'chat' || row.chat.id !== selectedChatId) continue;
+		for (const { row, virtualItem } of renderedItems) {
+			if (row.type !== 'chat' || row.chat.id !== selectedChatId) continue;
 
 			const top = virtualItem.start > 0 ? virtualItem.start - separatorSlot : virtualItem.start;
 			return {

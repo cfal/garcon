@@ -110,6 +110,9 @@ import { AGENT_HANDOFF_HTTP_TIMEOUT_MS } from '$shared/handoff-timeouts';
 import {
 	parseReorderChatResponse,
 	parseSortChatOrderResponse,
+	parseSetChatOrderStateResponse,
+	type SetChatArchivedRequest,
+	type SetChatOrderStateResponse,
 	type ReorderChatRequest,
 	type ReorderChatResponse,
 	type SortChatOrderRequest,
@@ -462,14 +465,16 @@ export async function togglePinned(
 	return apiPost('/api/v1/chats/pin', { chatId });
 }
 
-export interface ToggleArchiveResponse {
-	success: boolean;
-	isArchived: boolean;
-}
-
-/** Toggles the archived state of a chat session. */
-export async function toggleArchive(chatId: string): Promise<ToggleArchiveResponse> {
-	return apiPost<ToggleArchiveResponse>('/api/v1/chats/archive', { chatId });
+/** Sets the archived state without reversing a concurrent restore. */
+export async function setChatArchived(
+	request: SetChatArchivedRequest,
+): Promise<SetChatOrderStateResponse> {
+	const response = await apiPut<unknown>('/api/v1/chats/archive', request);
+	const parsed = parseSetChatOrderStateResponse(response);
+	if (!parsed || parsed.chatId !== request.chatId || parsed.isArchived !== request.isArchived) {
+		throw new ApiMutationOutcomeUnknownError('The archived state could not be confirmed.');
+	}
+	return parsed;
 }
 
 /** Marks chats as read in a single batched request. */
