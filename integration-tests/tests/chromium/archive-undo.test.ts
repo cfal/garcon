@@ -51,8 +51,14 @@ test('archive Undo restores the captured chat without changing selection', async
       const response = await integration.client.listChats();
       return response.sessions.filter(chat => ids.includes(chat.id) && !chat.isArchived).length;
     }).toBe(2);
-    await page.keyboard.press('Escape');
-    await expect(page.getByRole('dialog')).toHaveCount(0);
+    const newChatDialog = page
+      .locator('[data-slot="dialog-content"]')
+      .filter({ has: page.locator('[data-slot="new-chat-form-content"]') });
+    await expect(newChatDialog).toBeVisible();
+    for (let attempt = 0; attempt < 2 && (await newChatDialog.count()) > 0; attempt += 1) {
+      await page.keyboard.press('Escape');
+    }
+    await expect(newChatDialog).toHaveCount(0);
 
     // Holds the browser restore after admission while another client restores the same chat.
     await page.route('**/api/v1/chats/archive', async route => {

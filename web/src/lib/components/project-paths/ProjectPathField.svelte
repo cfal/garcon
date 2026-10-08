@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import type { Snippet } from 'svelte';
 	import type { HTMLInputAttributes } from 'svelte/elements';
 	import Check from '@lucide/svelte/icons/check';
@@ -52,12 +53,37 @@
 		feedback,
 		leading,
 		children,
+		onfocus: onPathFocus,
 		class: inputClass,
 		...inputProps
 	}: Props = $props();
 
 	const hasPath = $derived(value.trim().length > 0);
 	let directoryBrowser = $state<ReturnType<typeof DirectoryBrowser> | null>(null);
+	let suppressNextFocus = false;
+	let clearSuppressedFocusTimer: ReturnType<typeof setTimeout> | null = null;
+
+	const handleFocus: NonNullable<HTMLInputAttributes['onfocus']> = (event) => {
+		if (suppressNextFocus) {
+			suppressNextFocus = false;
+			return;
+		}
+		onPathFocus?.(event);
+	};
+
+	function handleBrowserClose(): void {
+		suppressNextFocus = true;
+		browser.onClose();
+		if (clearSuppressedFocusTimer) clearTimeout(clearSuppressedFocusTimer);
+		clearSuppressedFocusTimer = setTimeout(() => {
+			clearSuppressedFocusTimer = null;
+			suppressNextFocus = false;
+		}, 0);
+	}
+
+	onDestroy(() => {
+		if (clearSuppressedFocusTimer) clearTimeout(clearSuppressedFocusTimer);
+	});
 
 	// ArrowDown enters the popover's list, because an owner may reserve Tab for completion.
 	const handleKeydown: NonNullable<HTMLInputAttributes['onkeydown']> = (event) => {
@@ -80,6 +106,7 @@
 			<input
 				title={validationTitle}
 				{...inputProps}
+				onfocus={handleFocus}
 				onkeydown={handleKeydown}
 				type="text"
 				bind:this={ref}
@@ -133,7 +160,7 @@
 			basePath={browser.basePath}
 			isMobile={browser.isMobile}
 			onSelect={browser.onSelect}
-			onClose={browser.onClose}
+			onClose={handleBrowserClose}
 			onReturnFocus={() => ref?.focus()}
 		/>
 	{/if}

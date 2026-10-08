@@ -215,6 +215,25 @@ describe('ProjectPathField', () => {
 		expect(screen.queryByRole('dialog')).toBeNull();
 	});
 
+	it('does not reopen the browser when Escape returns focus to the path field', async () => {
+		const onfocus = vi.fn();
+		vi.mocked(browseDirectory).mockResolvedValue([]);
+		const next = browser({ open: true });
+		next.onClose = () => {
+			next.open = false;
+			input.focus();
+		};
+		const view = renderField({ browser: next, onfocus });
+		const input = screen.getByRole<HTMLInputElement>('textbox', { name: 'Project path' });
+		const directoryBrowser = await screen.findByRole('dialog');
+
+		await fireEvent.keyDown(directoryBrowser, { key: 'Escape' });
+		await view.rerender({ browser: next });
+
+		expect(onfocus).not.toHaveBeenCalled();
+		expect(next.open).toBe(false);
+	});
+
 	it('moves focus between the field and the popover list with the arrow keys', async () => {
 		vi.mocked(browseDirectory).mockResolvedValue([
 			{ name: 'existing', path: '/workspace/existing', type: 'directory' },
