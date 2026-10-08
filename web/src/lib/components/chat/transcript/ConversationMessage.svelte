@@ -31,6 +31,7 @@
 		getWorkspaceCoordinator,
 	} from '$lib/context';
 	import Markdown from '$lib/components/rich-text/Markdown.svelte';
+	import CodeBlock from '$lib/components/rich-text/CodeBlock.svelte';
 	import type { MarkdownLinkNavigateEvent } from '$lib/components/rich-text/Markdown.svelte';
 	import { resolveFileOpenTarget } from '$lib/chat/file-links/file-open-target.js';
 	import {
@@ -489,11 +490,10 @@
 			});
 			return true;
 		}
-		const chat = activeChatContext;
-		if (!chat?.projectPath) return;
+		if (!chatProjectPath) return true;
 		const resolved = resolveFileLinkTarget(link.rawHref, {
 			fileRootPath: projectBasePath,
-			sourceDirectoryPath: chat.projectPath,
+			sourceDirectoryPath: chatProjectPath,
 		});
 		if (!resolved) return;
 		void fileSessions.open({
@@ -658,7 +658,7 @@
 							canForkNow={canForkAtMessageNow}
 							onFork={handleFork}
 							onCopy={copyText}
-							onQuoteSelection={quoteSelection}
+							onQuoteSelection={onAppendToDraft ? quoteSelection : undefined}
 							onSendToNewSession={sendToNewSession}
 							onSelectText={openSelectTextDialog}
 							onGenerateTitleFromMessage={canGenerateTitleFromMessage
@@ -803,7 +803,7 @@
 								<div class="group/message relative [@media(hover:hover)_and_(pointer:fine)]:pr-8">
 									<div class="px-px text-sm text-foreground">
 										{#if plainResponse}
-											<pre class="whitespace-pre-wrap break-words font-mono">{formattedContent}</pre>
+											<CodeBlock text={formattedContent} />
 										{:else}
 										<Markdown
 											source={formattedContent}
@@ -830,7 +830,7 @@
 									canForkNow={canForkAtMessageNow}
 									onFork={handleFork}
 									onCopy={copyText}
-									onQuoteSelection={quoteSelection}
+									onQuoteSelection={onAppendToDraft ? quoteSelection : undefined}
 									onSendToNewSession={sendToNewSession}
 									onSelectText={openSelectTextDialog}
 									onGenerateTitleFromMessage={canGenerateTitleFromMessage

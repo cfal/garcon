@@ -28,6 +28,23 @@ function menuItemLabels(): (string | undefined)[] {
 }
 
 describe('ConversationMessage actions', () => {
+	it.each(['stdout', 'stderr'] as const)('renders plain %s in the shared fenced-code component', (channel) => {
+		const content = '```\n**literal** <garcon-get-chat-id />\n';
+		const { container } = render(ConversationMessageHost, { message: new CommandOutputMessage(
+			'2026-01-01T00:00:00Z', 'command-1', channel, 'plain', content, { executorId: 'local', projectPath: '/project' },
+		) });
+		expect(container.querySelector('.markdown-code-block pre')?.textContent).toBe(content);
+		expect(container.querySelector('strong')).toBeNull();
+	});
+
+	it('renders opted-in stdout as Markdown instead of a plain code block', async () => {
+		const { container } = render(ConversationMessageHost, { message: new CommandOutputMessage(
+			'2026-01-01T00:00:00Z', 'command-1', 'stdout', 'markdown', '**formatted**', { executorId: 'local', projectPath: '/project' },
+		) });
+		await waitFor(() => expect(container.querySelector('strong')?.textContent).toBe('formatted'));
+		expect(container.querySelector('.markdown-code-block')).toBeNull();
+	});
+
 	it('renders literal source and plain output without Markdown interpretation', () => {
 		const content = '  **literal**\n<garcon-get-chat-id />\n';
 		for (const message of [

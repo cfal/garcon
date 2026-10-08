@@ -5,6 +5,7 @@ import { CollapsibleBodyLayoutHarness } from '../transcript/__tests__/collapsibl
 import * as sharesApi from '$lib/api/shares';
 import type { GetSharedChatResponse } from '$shared/share-types';
 import { ApiError } from '$lib/api/client';
+import { UserMessage, CommandOutputMessage, CommandResultMessage } from '$shared/chat-types';
 
 vi.mock('$lib/api/shares', () => ({
 	getSharedChat: vi.fn(),
@@ -63,6 +64,26 @@ describe('SharedChatPage', () => {
 	afterEach(() => {
 		cleanup();
 		vi.restoreAllMocks();
+	});
+
+	it('retains literal source, Markdown stdout, fenced stderr and command outcomes', async () => {
+		const snapshot = response([], 0, 4);
+		const at = '2026-01-01T00:00:00.000Z';
+		const context = { executorId: 'local', projectPath: '/workspace/original' };
+		snapshot.snapshot.messages = [
+			new UserMessage(at, '  **source**\n ', undefined, { contentMode: 'literal' }),
+			new CommandOutputMessage(at, 'command-1', 'stdout', 'markdown', '**stdout**', context),
+			new CommandOutputMessage(at, 'command-1', 'stderr', 'plain', '**stderr**', context),
+			new CommandResultMessage(at, 'command-1', { outcome: 'finished', exitCode: 0, signal: null,
+				capture: 'complete', cwd: { kind: 'reported', path: '/workspace/original' } }),
+		];
+		snapshot.page.end = 4;
+		vi.mocked(sharesApi.getSharedChat).mockResolvedValueOnce(snapshot);
+		const { container } = render(SharedChatPageTestHost, { token: 'share-token' });
+		await waitFor(() => expect(container.querySelector('strong')?.textContent).toBe('stdout'));
+		expect([...container.querySelectorAll('pre')].map(node => node.textContent)).toContain('  **source**\n ');
+		expect(container.querySelector('.markdown-code-block pre')?.textContent).toBe('**stderr**');
+		expect(screen.getByText('Completed')).toBeTruthy();
 	});
 
 	it('renders a bounded newest page and prepends older messages on demand', async () => {

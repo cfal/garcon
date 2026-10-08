@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	AssistantMessage,
+	CommandOutputMessage,
+	CommandResultMessage,
 	BashToolUseMessage,
 	CliRowMessage,
 	ExternalToolUseMessage,
@@ -68,6 +70,16 @@ const enabled = {
 };
 
 describe('ConversationFeedAnnouncerState', () => {
+	it('announces bounded command evidence without Markdown normalization', () => {
+		const source = '  > file; printf "**literal**"\n';
+		expect(announcementForAppendedRow(messageRow('1', new UserMessage('', source, undefined, { contentMode: 'literal' })), [])).toBe(source);
+		expect(announcementForAppendedRow(messageRow('2', new CommandOutputMessage('', 'command-1', 'stderr', 'plain',
+			source, { executorId: 'local', projectPath: '/workspace' })), [])).toBe(source);
+		expect(announcementForAppendedRow(messageRow('3', new CommandResultMessage('', 'command-1', {
+			outcome: 'finished', exitCode: 0, signal: null, capture: 'complete', cwd: { kind: 'reported', path: '/workspace' },
+		})), [])).toBe('Completed');
+	});
+
 	it('does not announce the initial or replacement transcript', () => {
 		const announcer = new ConversationFeedAnnouncerState();
 		expect(

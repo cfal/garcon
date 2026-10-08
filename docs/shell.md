@@ -26,27 +26,32 @@ automatic resend, and conversational control messages do not alter or launch
 commands. Shell makes no automatic AI calls for titles, refinement, or carried
 history. Forks and handoffs retain visible history without executing it.
 
-Stdout is preformatted text; stderr is a separate retained block. Prefix a
+Stdout and stderr appear together after process exit and output draining, not
+as live output. Both use separate fenced-code-style blocks by default. Prefix a
 submission with `/md ` or `/markdown ` to render stdout through the normal
 sanitized Markdown renderer. These prefixes are interpreted only by the Shell
-integration. Relative file links use the command's starting executor/directory,
+integration; stderr always stays literal. Relative file links use the command's starting executor/directory,
 not the chat's later directory. A command that changes directory before
 printing relative links should print absolute paths instead.
 
 ## Completion And Stop
 
-A footer observes the shell's final physical directory without parsing `cd` or
+A wrapper observes the shell's final physical directory without parsing `cd` or
 stdout. A valid changed path is checked and persisted before another queued
 command can start. Failed commands can still change directory. Invalid or
 unusable reported paths fail synchronization and pause the queue; missing
-reports retain the previous confirmed path. `exit`, `exec`, Stop, or terminating
-shell errors may bypass the footer.
+reports retain the previous confirmed path. `exec`, Stop, process termination,
+and some shells' `exit` behavior may bypass the wrapper's observation.
 
 Nonzero status fails the turn and pauses waiting work, whether the failed
 command was direct or queued. Stderr alone does not indicate failure. Status
 follows the selected shell; Garcon does not add `errexit` or `pipefail`.
-PowerShell's logical/native status mapping provides success/failure, not a
-universal exact last-command exit code.
+PowerShell uses a conservative approximation: failed invocation, a newly
+recorded error, or a nonzero native status fails the turn. A later successful
+cmdlet does not necessarily clear an earlier failure, including a recovered
+exception. Profile-stale native status is reset before source execution.
+Scripts that modify `$Error` or `$LASTEXITCODE`, or ignore errors, can defeat
+this observation. This is not an exact final-statement exit code.
 
 There is no PTY or stdin UI. Stdin remains open and unwritten; prompts may
 block until Stop. Stop sends group termination, then escalates after 500 ms.
@@ -76,8 +81,10 @@ controller-confirmed directory, not an unapplied historical cwd observation.
   explicitly empty result for silent commands. Larger results have no final
   receipt text; use transcript export. Forwarded CLI receipt envelopes retain
   their existing 64 KiB limit.
-- Pipe ordering is preserved within each stream; cross-stream ordering is
-  observed arrival order.
+- Pipe ordering is preserved within each stream. Presentation groups stdout
+  before stderr, without promising cross-stream ordering. Partial Markdown
+  history windows or capture gaps render literally until a complete document
+  is available.
 
 ## CLI
 

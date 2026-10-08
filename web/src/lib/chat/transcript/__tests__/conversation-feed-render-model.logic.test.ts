@@ -24,7 +24,7 @@ describe('ConversationFeedRenderModelController', () => {
 		const first = row(1, new CommandOutputMessage(TS, 'command-1', 'stdout', 'plain', 'first', context));
 		controller.reconcile('surface', [first]);
 		const next = controller.reconcileDetailed('surface', [first,
-			row(2, new CommandOutputMessage(TS, 'command-1', 'stdout', 'plain', 'second', context))]);
+			row(2, new CommandOutputMessage(TS, 'command-1', 'stdout', 'plain', 'second', context, 'first'.length))]);
 		expect(next.change.kind).toBe('rebuilt');
 		expect(next.model.items[0]).toMatchObject({ message: { content: 'firstsecond' } });
 		expect(next.model.items[1]).toMatchObject({ commandOutputParentId: first.id });

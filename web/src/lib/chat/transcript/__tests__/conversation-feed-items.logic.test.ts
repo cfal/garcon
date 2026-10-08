@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	AssistantMessage,
 	CommandOutputMessage,
+	CommandResultMessage,
 	AskUserQuestionToolUseMessage,
 	BashToolUseMessage,
 	ExecToolUseMessage,
@@ -33,13 +34,15 @@ const TS = '2026-05-29T00:00:00.000Z';
 it('joins adjacent command chunks across loaded pages without mutating durable messages', () => {
 	const context = { executorId: 'local', projectPath: '/original' };
 	const first = new CommandOutputMessage(TS, 'command-1', 'stdout', 'markdown', '```ts\nconst ', context);
-	const second = new CommandOutputMessage(TS, 'command-1', 'stdout', 'markdown', 'n = 1;\n```', context);
-	const items = buildConversationFeedRenderItems(rows([first, second]));
-	expect(items).toHaveLength(2);
+	const second = new CommandOutputMessage(TS, 'command-1', 'stdout', 'markdown', 'n = 1;\n```', context, first.content.length);
+	const result = new CommandResultMessage(TS, 'command-1', { outcome: 'finished', exitCode: 0, signal: null,
+		capture: 'complete', cwd: { kind: 'reported', path: '/original' } });
+	const items = buildConversationFeedRenderItems(rows([first, second, result]));
+	expect(items).toHaveLength(3);
 	expect(items[0]).toMatchObject({ id: 'row-0', message: { content: '```ts\nconst n = 1;\n```', context } });
 	expect(conversationFeedItemLayout(items[1])).toBe('hidden');
 	expect(first.content).toBe('```ts\nconst ');
-	expect(buildConversationFeedRenderItems(rows([second]))[0]).toMatchObject({ message: second });
+	expect(buildConversationFeedRenderItems(rows([second]))[0]).toMatchObject({ message: { ...second, format: 'plain' } });
 });
 
 it('does not combine output across missing rows or command boundaries', () => {

@@ -23,7 +23,7 @@ test('Shell composer preserves literal commands and stable chat switching on des
     const composer = page.locator('[data-composer]');
     const editor = composer.locator('textarea');
     await browserExpect(editor).toBeVisible();
-    await browserExpect(page.locator('pre').filter({ hasText: '**plain output**' }).last()).toBeVisible();
+    await browserExpect(page.locator('.markdown-code-block pre').filter({ hasText: '**plain output**' })).toBeVisible();
     await browserExpect(composer.getByRole('button', { name: 'Refine prompt', exact: true })).toHaveCount(0);
     await editor.evaluate(element => element.setAttribute('data-retained-shell-editor', 'true'));
 
@@ -37,9 +37,10 @@ test('Shell composer preserves literal commands and stable chat switching on des
       .flatMap(row => row.message.type === 'user-message' ? [row.message.content] : [])).toContain(source);
 
     phase('executor-owned Markdown prefix through button submission');
-    await editor.fill('/md printf "# Command heading\\n"');
+    await editor.fill('/markdown printf "# Command heading\\n"; printf "**literal diagnostic**" >&2');
     await composer.getByRole('button', { name: 'Send message', exact: true }).click();
     await browserExpect(page.getByRole('heading', { name: 'Command heading', exact: true })).toBeVisible();
+    await browserExpect(page.locator('.markdown-code-block pre').filter({ hasText: '**literal diagnostic**' })).toBeVisible();
     await editor.fill('retained draft');
     const top = (await composer.boundingBox())!.y;
     for (const id of [chatIds[1]!, chatIds[0]!, chatIds[1]!, chatIds[0]!]) {

@@ -14,7 +14,7 @@
 		canForkNow?: boolean;
 		onFork?: (event: MouseEvent) => void;
 		onCopy: () => void | Promise<void>;
-		onQuoteSelection: () => void;
+		onQuoteSelection?: () => void;
 		onSendToNewSession: () => void;
 		onSelectText: () => void;
 		onGenerateTitleFromMessage?: () => void | Promise<void>;
@@ -43,7 +43,7 @@
 	{hasSelection ? m.chat_message_copy_selection() : m.chat_message_copy_text()}
 </ContextMenuItem>
 
-{#if hasSelection}
+{#if hasSelection && onQuoteSelection}
 	<ContextMenuItem onclick={onQuoteSelection}>
 		<Quote />
 		{m.chat_message_quote_selection()}

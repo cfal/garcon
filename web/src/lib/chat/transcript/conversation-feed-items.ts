@@ -1,6 +1,5 @@
 import {
 	AskUserQuestionToolUseMessage,
-	CommandOutputMessage,
 	PermissionCancelledMessage,
 	PermissionExpiredMessage,
 	PermissionRequestMessage,
@@ -15,6 +14,7 @@ import type { PendingPermissionRequest } from '$lib/types/chat';
 import { TOOL_DISPLAY_REGISTRY } from '$lib/chat/tools/tool-display-registry.js';
 import { resolveDisplayRule, shouldRenderToolResult } from '$lib/chat/tools/tool-display-policy.js';
 import { isHiddenBashToolUse, type BashCommandMatcher } from './hidden-bash-commands.js';
+import { projectCommandOutput } from './command-output-projection.js';
 
 export interface PermissionTerminalState {
 	permissionOccurrenceId: string;
@@ -255,25 +255,12 @@ export function buildConversationFeedRenderModel(
 }
 
 function groupCommandOutput(items: ConversationFeedRenderItem[]): ConversationFeedRenderItem[] {
-	let first: ConversationFeedMessageRenderItem | null = null;
-	let previousOrdinal: number | undefined;
-	for (const item of items) {
-		const message = item.kind === 'message' ? item.message : null;
-		if (item.kind !== 'message' || message?.type !== 'command-output') {
-			first = null;
-			continue;
-		}
-		const output = first?.message;
-		if (first && output?.type === 'command-output' && previousOrdinal !== undefined
-			&& item.ordinal === previousOrdinal + 1 && output.commandId === message.commandId
-			&& output.channel === message.channel && output.format === message.format
-			&& output.context.executorId === message.context.executorId && output.context.projectPath === message.context.projectPath
-			&& output.content.length + message.content.length <= 256 * 1024) {
-			first.message = new CommandOutputMessage(output.timestamp, output.commandId, output.channel,
-				output.format, output.content + message.content, output.context);
-			item.commandOutputParentId = first.id;
-		} else first = item;
-		previousOrdinal = item.ordinal;
+	const documents = projectCommandOutput(items.map(item => item.kind === 'message' ? item.message : null));
+	for (const [index, projection] of documents) {
+		const item = items[index];
+		if (item.kind !== 'message') continue;
+		item.message = projection.message;
+		if (index !== projection.parentIndex) item.commandOutputParentId = items[projection.parentIndex].id;
 	}
 	return items;
 }
