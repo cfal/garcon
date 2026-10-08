@@ -490,6 +490,30 @@ describe('ModelSelectorPopover', () => {
 		});
 	});
 
+	it('leaves an open compact executor pane when only Local remains without changing selection', async () => {
+		installMatchMedia(true);
+		const onChange = vi.fn();
+		const { component } = render(ModelSelectorPopoverHost, {
+			value: { executorId: remoteExecutor.id, agentId: 'claude', model: 'model-0' },
+			mode: { executor: 'select', agent: 'fixed', source: 'hidden', surface: 'settings' },
+			executors: [localExecutor, remoteExecutor],
+			onChange,
+		});
+		const trigger = screen.getByRole('button', { name: /Claude .* Model 0/ });
+		await fireEvent.click(trigger);
+		await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+		expect(screen.getByRole('button', { name: 'Local' })).toBeTruthy();
+
+		component.applyExecutors([localExecutor]);
+
+		await waitFor(() => {
+			expect(document.querySelector('[data-slot="model-selector-executors"]')).toBeNull();
+		});
+		expect(screen.getByPlaceholderText('Filter models...')).toBeTruthy();
+		expect(trigger.getAttribute('aria-label')).toMatch(/Unavailable executor.*Claude.*Model 0/);
+		expect(onChange).not.toHaveBeenCalled();
+	});
+
 	it('resets the compact effort pane when changing executors', async () => {
 		installMatchMedia(true);
 		const onChange = vi.fn();

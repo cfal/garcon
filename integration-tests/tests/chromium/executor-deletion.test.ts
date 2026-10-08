@@ -58,13 +58,10 @@ test('executor deletion confirmation and unavailable chat remain usable on deskt
       await browserExpect(page.getByRole('listbox')).toHaveCount(0);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       const picker = page.locator('[data-slot="composer-bottom-bar"] [data-executor-picker]');
-      await browserExpect(picker).toHaveAttribute('title', client.executorId);
-      await picker.click();
-      await browserExpect(page.getByRole('menuitemradio', { name: 'Local', exact: true })).toBeVisible();
+      await browserExpect(picker).toHaveCount(0);
       await page.screenshot({ path: join(artifacts, `executor-deleted-chat-${width}.png`) });
-      await page.keyboard.press('Escape');
-      await browserExpect(picker).toBeFocused();
     }
+    expect((await client.getChatSnapshot(chatId)).chat.executorId).toBe(client.executorId);
     assertNoBrowserErrors();
   }, undefined, { executionBackend: 'remote-controller-dials', projectRoots: 'separate' });
 }, 120_000);

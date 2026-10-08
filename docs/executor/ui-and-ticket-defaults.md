@@ -9,7 +9,7 @@ Reuse the [executor selector](../../web/src/lib/components/shared/ExecutorSelect
 - Keep the existing Network icon and semantic theme color.
 - For the chat composer, match the model selector's height, spacing, rounding, and hover treatment.
 - Use available container width for responsive behavior, including narrow desktop panels.
-- Keep the selected executor visible even when Local is the only configured executor. A retained unavailable selection must remain visible.
+- Hide executor selectors whenever Local is the only configured executor, including retained unavailable selections. Configured offline or disabled remote executors still count. Hiding a selector must not change the selected executor or fall back to Local.
 - Keep availability specific to the operation. Selecting an execution target must not require Files or Git support. Offline or unsupported targets must never silently fall back to Local.
 
 ## New Chat And Scheduled New Chat
@@ -51,7 +51,7 @@ Title generation, commit-message generation, and other one-shot preferences keep
 Executor | Agent | Provider | Model | Effort
 ```
 
-The executor column appears once a remote executor is configured or the saved selection is not Local. Other columns remain conditional on the selection's capabilities. New Chat, scheduled New Chat, and the chat composer omit the executor column because their enclosing UI owns executor selection.
+The executor column appears only while a remote executor is configured. Other columns remain conditional on the selection's capabilities. New Chat, scheduled New Chat, and the chat composer omit the executor column because their enclosing UI owns executor selection.
 
 In the compact picker, Executor is a pane rather than an additional column squeezed onto a small screen. Draft selection and cancellation behavior are preserved when navigating between panes.
 

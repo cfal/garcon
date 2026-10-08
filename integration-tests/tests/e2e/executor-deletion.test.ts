@@ -50,6 +50,11 @@ test('deleting a referenced executor preserves the transcript and draft and perm
     expect(fakeProviders.openAi.requests()).toHaveLength(1);
     expect(await fixture.page.$eval('[data-composer] textarea', (element) => (element as HTMLTextAreaElement).value)).toBe(draft);
 
+    expect(await fixture.page.$('[data-slot="composer-bottom-bar"] [data-executor-picker]')).toBeNull();
+    await client.post('/api/v1/executors', {
+      label: 'Synthetic other worker', direction: 'executor-connects', noTls: true,
+    });
+    await fixture.page.waitForSelector('[data-slot="composer-bottom-bar"] [data-executor-picker]');
     await selectExecutor(fixture.page, '[data-slot="composer-bottom-bar"] [data-executor-picker]', 'Local');
     await app.waitForText('Move to Local');
     await app.fill('[role="dialog"] input', dirs.project);

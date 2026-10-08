@@ -62,7 +62,10 @@
 		catalogError = null,
 		onRetryCatalog = () => {},
 	}: Props = $props();
-	setExecutorsTestContext(untrack(() => executors));
+	const executorInventory = setExecutorsTestContext(untrack(() => executors));
+	export function applyExecutors(snapshot: readonly ExecutorSnapshot[]): void {
+		executorInventory.applySnapshot(snapshot);
+	}
 
 	let claudeModels = $derived.by<ModelOption[]>(() => {
 		const generated = Array.from({ length: modelCount }, (_, index): ModelOption => ({

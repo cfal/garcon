@@ -77,8 +77,10 @@
 	$effect(() => {
 		const openNow = selector.open;
 		const executorId = selector.executorId;
+		const executorChanged = executorId !== previousExecutorId;
+		const executorPaneUnavailable = pane === 'executor' && !selector.showExecutorPicker;
 		if (openNow && !wasOpen) pane = firstPane();
-		else if (openNow && executorId !== previousExecutorId) pane = firstModelPane();
+		else if (openNow && (executorChanged || executorPaneUnavailable)) pane = firstModelPane();
 		wasOpen = openNow;
 		previousExecutorId = executorId;
 	});

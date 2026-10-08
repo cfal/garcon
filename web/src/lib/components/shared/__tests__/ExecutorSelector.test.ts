@@ -50,22 +50,30 @@ it('selects file-capable executors and keeps unavailable executors visible but d
 	expect(onSelect).toHaveBeenLastCalledWith('local');
 });
 
-it.each(['files', 'git', 'agents'] as const)(
-	'keeps the %s selector usable for a Local-only inventory',
-	async (service) => {
-		const read = vi.fn(async () => [localExecutor]);
-		const executors = new ExecutorsStore(read);
-		executors.applySnapshot([localExecutor]);
-		const onSelect = vi.fn();
-		render(ExecutorSelector, { executors, executorId: 'local', service, onSelect });
-		await fireEvent.click(screen.getByRole('button', { name: 'Executor: Local' }));
-		expect(read).toHaveBeenCalledOnce();
-		const local = screen.getByRole('menuitemradio', { name: 'Local' });
-		expect(local.getAttribute('aria-checked')).toBe('true');
-		await fireEvent.click(local);
-		expect(onSelect).toHaveBeenCalledWith('local');
-	},
-);
+for (const presentation of ['toolbar', 'composer', 'field'] as const) {
+	it.each(['files', 'git', 'agents'] as const)(
+		`hides the %s ${presentation} selector for a Local-only inventory`,
+		(service) => {
+			const executors = new ExecutorsStore();
+			executors.applySnapshot([localExecutor]);
+			render(ExecutorSelector, { executors, executorId: 'local', service, presentation, onSelect: vi.fn() });
+			expect(screen.queryByRole('button', { name: /Executor:/ })).toBeNull();
+		},
+	);
+}
+
+it('hides a retained missing selection when only Local remains configured', () => {
+	const executors = new ExecutorsStore();
+	executors.applySnapshot([localExecutor]);
+	render(ExecutorSelector, { executors, executorId: remoteExecutor.id, service: 'agents', onSelect: vi.fn() });
+	expect(screen.queryByRole('button', { name: /Executor:/ })).toBeNull();
+});
+
+it('hides the selector before executor discovery completes', () => {
+	const executors = new ExecutorsStore();
+	render(ExecutorSelector, { executors, executorId: 'local', service: 'agents', onSelect: vi.fn() });
+	expect(screen.queryByRole('button', { name: /Executor:/ })).toBeNull();
+});
 
 it.each(['files', 'git', 'agents'] as const)(
 	'shows the themed executor icon with an offline remote (%s)',
@@ -141,13 +149,15 @@ it('updates the selected label and open menu availability when inventory changes
 	);
 });
 
-it('keeps the same Local trigger when the remote inventory is removed', () => {
+it('updates visibility when remote executors are removed and added', () => {
 	const executors = new ExecutorsStore();
 	executors.applySnapshot([localExecutor, remoteExecutor]);
 	render(ExecutorSelector, { executors, executorId: 'local', service: 'agents', onSelect: vi.fn() });
-	const trigger = screen.getByRole('button', { name: 'Executor: Local' });
+	expect(screen.getByRole('button', { name: 'Executor: Local' })).toBeTruthy();
 	executors.applySnapshot([localExecutor]);
-	// Flushed first, so a trigger that unmounts with the inventory fails here.
 	flushSync();
-	expect(screen.getByRole('button', { name: 'Executor: Local' })).toBe(trigger);
+	expect(screen.queryByRole('button', { name: /Executor:/ })).toBeNull();
+	executors.applySnapshot([localExecutor, remoteExecutor]);
+	flushSync();
+	expect(screen.getByRole('button', { name: 'Executor: Local' })).toBeTruthy();
 });

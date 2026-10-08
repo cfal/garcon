@@ -44,6 +44,29 @@ function fixture(remoteAgent = 'sample', executor: 'fixed' | 'select' = 'select'
 describe('model selector executor selection', () => {
 	beforeEach(() => localStorage.clear());
 
+	it.each(['local', remoteExecutor.id])(
+		'hides executor selection for a Local-only inventory with %s selected',
+		(executorId) => {
+			const { executors, catalog, onChange } = fixture();
+			const selector = new ModelSelectorState({
+				modelCatalog: catalog,
+				executors,
+				value: { executorId, agentId: 'sample', model: 'same' },
+				mode: { executor: 'select', agent: 'select', source: 'select', surface: 'settings' },
+				getRecents: () => [],
+				preferRecentsOnOpen: false,
+				onChange,
+			});
+			expect(selector.showExecutorPicker).toBe(true);
+			executors.applySnapshot([localExecutor]);
+			expect(selector.showExecutorPicker).toBe(false);
+			expect(selector.committedExecutorId).toBe(executorId);
+			expect(onChange).not.toHaveBeenCalled();
+			executors.applySnapshot([localExecutor, { ...remoteExecutor, availability: 'offline' }]);
+			expect(selector.showExecutorPicker).toBe(true);
+		},
+	);
+
 	it('fixed-executor selection and recents cannot change hosts', async () => {
 		const { selector, catalog, onChange } = fixture('sample', 'fixed');
 		selector.openDraft();

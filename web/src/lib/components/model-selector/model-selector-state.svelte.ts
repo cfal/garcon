@@ -132,9 +132,7 @@ export class ModelSelectorState {
 	}
 
 	get showExecutorPicker(): boolean {
-		return this.executorSelectionEnabled && (
-			this.#options.executors?.hasRemoteExecutors === true || this.committedExecutorId !== 'local'
-		);
+		return this.executorSelectionEnabled && this.#options.executors?.hasRemoteExecutors === true;
 	}
 
 	get executorId(): string {
