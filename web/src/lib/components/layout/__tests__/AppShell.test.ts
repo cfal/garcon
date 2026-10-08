@@ -14,6 +14,7 @@ import { WorkspaceInteractionGate } from '$lib/workspace/workspace-interaction-g
 import { page } from '$lib/mocks/app/state';
 import type { WorkspaceCoordinator } from '$lib/workspace/workspace-coordinator.svelte.js';
 import type { TicketsController } from '$lib/tickets/catalog/tickets-controller.svelte.js';
+import type { WorkbenchCommandRegistry } from '$lib/workspace/workbench-commands.svelte.js';
 import { searchNavigationPort } from './app-shell-search-navigation-test-port.js';
 
 const testContext = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
@@ -41,6 +42,7 @@ vi.mock('$lib/context', () => ({
 	getSidebarSearch: () => testContext.current?.sidebarSearch,
 	getTerminalRegistry: () => testContext.current?.terminals,
 	getWorkspaceCoordinator: () => testContext.current?.workspace,
+	getWorkbenchCommands: () => testContext.current?.commands,
 	getSingletonSurfaces: () => testContext.current?.singletons,
 	getTransientLayers: () => testContext.current?.transientLayers,
 	getWs: () => testContext.current?.ws,
@@ -193,6 +195,11 @@ function installContext(): AppShellBreakpointWorkspace {
 	};
 	testContext.current = {
 		workspace,
+		commands: {
+			registerChatNavigation: vi.fn<WorkbenchCommandRegistry['registerChatNavigation']>(
+				() => () => undefined,
+			),
+		} satisfies Pick<WorkbenchCommandRegistry, 'registerChatNavigation'>,
 		transientLayers,
 		navigation: {
 			onNavigateChatAboveRequested: noOpSubscription,

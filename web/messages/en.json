@@ -2935,5 +2935,10 @@
 	"browser_notifications_enable": "Enable browser notifications",
 	"browser_notification_completed": "Garcon: chat completed",
 	"browser_notification_permission": "Garcon: permission needed",
-	"browser_notification_answer": "Garcon: answer needed"
+	"browser_notification_answer": "Garcon: answer needed",
+	"command_switch_chat_named": "Switch to {title}",
+	"command_recent_chat": "Recent chat",
+	"command_chat_running": "Running",
+	"command_chat_unread": "Unread",
+	"command_chat_location": "{executor}: {path} · #{chatId}"
 }
