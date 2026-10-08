@@ -90,6 +90,7 @@ describe('PromptComposer prompt refinement', () => {
 		expect(vi.mocked(refinementApi.refinePrompt).mock.calls[0][0]).toEqual({
 			draft: 'Keep this draft',
 			target: 'prompt',
+			subject: { kind: 'chat', chatId: 'chat-refine-lock' },
 		});
 		expect(textarea.readOnly).toBe(true);
 		expect(textarea.getAttribute('aria-busy')).toBe('true');

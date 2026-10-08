@@ -221,7 +221,7 @@ export class QueueCommands {
 
   async submitScheduledExistingChat(input: ScheduledExistingChatInput): Promise<ScheduledExistingChatOutcome> {
     const chatId = input.chatId.trim();
-    const command = input.command.trim();
+    const command = input.command;
     this.support.assertContent(command);
     return this.support.withChatMutationLock(chatId, async (deadline) => {
       const session = this.deps.chats.getChat(chatId);

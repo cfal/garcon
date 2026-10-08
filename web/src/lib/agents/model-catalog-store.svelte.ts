@@ -48,6 +48,9 @@ export interface ModelOption {
 }
 
 export interface AgentMetadata {
+	executionPolicy?: 'conversation' | 'literal';
+	selectionKind?: 'model' | 'execution-variant';
+	selectionLabel?: string;
 	id: string;
 	label: string;
 	description?: string;
@@ -337,6 +340,9 @@ function parseCatalogResponse(data: unknown): {
 		if (!isAgentId(id)) continue;
 		agentMetadata[id] = {
 			id,
+			executionPolicy: entry.executionPolicy === 'literal' ? 'literal' : 'conversation',
+			selectionKind: entry.selectionKind === 'execution-variant' ? 'execution-variant' : 'model',
+			selectionLabel: typeof entry.selectionLabel === 'string' ? entry.selectionLabel : 'Model',
 			label: typeof entry.label === 'string' ? entry.label : id,
 			description: typeof entry.description === 'string' ? entry.description : undefined,
 			supportsCompact: Boolean(entry.supportsCompact),

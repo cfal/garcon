@@ -322,7 +322,7 @@ export class ConversationSessionController {
 				deps.agentState.thinkingMode = startup.thinkingMode;
 				deps.agentState.setAgentSettings(startup.agentSettings);
 				if (startup.firstMessage?.trim() || (startup.initialImages?.length ?? 0) > 0) {
-					const startupText = startup.firstMessage.trim();
+					const startupText = startup.firstMessage;
 					const startupImages = startup.initialImages ?? [];
 					const startupChatId = chatId;
 					queueMicrotask(() => {
@@ -528,7 +528,7 @@ export class ConversationSessionController {
 		if (!selected?.projectPath) return 'no-op';
 		const isDraft = selected.status === 'draft';
 		const draft = deps.composerState.draftSnapshot(chatId);
-		const text = messageOverride ?? draft.text.trim();
+		let text = messageOverride ?? draft.text;
 		const submissionImages = imageOverride ?? draft.attachments;
 		const startup = deps.sessions.startupByChatId[chatId];
 		if (
@@ -545,8 +545,10 @@ export class ConversationSessionController {
 			selection = deps.agentState;
 		}
 		const executorId = selection.executorId ?? 'local';
+		const literal = deps.modelCatalogForExecutor(executorId).getAgent(selection.agentId ?? '')?.executionPolicy === 'literal';
+		if (!literal) text = text.trim();
 		if (
-			(isDraft || !isControllerSlashCommand(text)) &&
+			(literal || isDraft || !isControllerSlashCommand(text)) &&
 			(!deps.canSubmitToExecutor(executorId) ||
 				!isCustomProviderSelectionAvailable(deps.modelCatalogForExecutor(executorId), selection))
 		) {
@@ -554,10 +556,10 @@ export class ConversationSessionController {
 				? rejectUnavailableDraftStart(deps, chatId)
 				: 'no-op';
 		}
-		if (!text && submissionImages.length === 0) return 'no-op';
+		if (!text.trim() && submissionImages.length === 0) return 'no-op';
 		const previousText = draft.text;
 		const previousImages = [...draft.attachments];
-		const slash = this.#slashCommands.dispatchSubmission({
+		const slash = literal ? { kind: 'pass-through' as const, content: text } : this.#slashCommands.dispatchSubmission({
 			chatId,
 			chat: selected,
 			text,
@@ -678,6 +680,7 @@ export class ConversationSessionController {
 		if (deps.sessions.selectedChatId !== chatId || this.isDirectAdmissionPending(chatId)) {
 			return 'no-op';
 		}
+		if (deps.modelCatalogForExecutor(deps.agentState.executorId).getAgent(deps.agentState.agentId)?.executionPolicy === 'literal') return this.submitForChat(chatId);
 		const selected = deps.sessions.byId[chatId];
 		if (!selected?.projectPath) return 'no-op';
 		const text = deps.composerState.inputText.trim();

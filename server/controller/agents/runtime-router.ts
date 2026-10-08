@@ -99,6 +99,7 @@ type PreparedPrompt =
       readonly attachments: ReturnType<typeof attachments>;
       readonly excludedOrdinals: ReadonlySet<number>;
       readonly viewId: TranscriptViewId;
+      readonly submission?: { readonly clientMessageId: string | null; readonly timestamp: string };
     };
 
 export class AgentRuntimeRouter {
@@ -196,13 +197,16 @@ export class AgentRuntimeRouter {
       assertExecutionAdmissionOpen(opts);
       if (!prepared.dispatch) return;
       const operation = operationIdentity(entry, opts, opts.commandType ?? 'chat-start');
-      this.#events.trackTurn(chatId, operationMetadata(operation));
       const producer = this.#producer(chatId);
+      this.#events.trackTurn(chatId, { ...operationMetadata(operation), executionSnapshot: {
+        agentId: entry.agentId, executorId: effectiveExecutorId(entry.executorId), projectPath: entry.projectPath,
+        transcriptViewId: prepared.viewId, producerLease: producer,
+      } });
       runId = this.#beginRun(chatId, operation.turnId);
       assertExecutionAdmissionOpen(opts);
-      const messages = await this.#ledger.conversationMessages(chatId, prepared.excludedOrdinals);
+      const messages = integration.literalExecution ? [] : await this.#ledger.conversationMessages(chatId, prepared.excludedOrdinals);
       assertExecutionAdmissionOpen(opts);
-      const outcome = await this.#createCarriedContext({
+      const outcome = integration.literalExecution ? { kind: 'no-history' as const } : await this.#createCarriedContext({
         chatId,
         entry,
         messages,
@@ -226,6 +230,7 @@ export class AgentRuntimeRouter {
         ...this.#executionContextV5(chatId, entry, selection, runId, opts),
         producerBinding: await this.#bindings.bind(integration, chatId, producer, sending),
         prompt: prepared.outboundPrompt,
+        submission: prepared.submission,
         attachments: prepared.attachments,
         carriedContext: carryover.context,
       };
@@ -275,8 +280,11 @@ export class AgentRuntimeRouter {
       if (!prepared.dispatch) return;
       assertExecutionAdmissionOpen(opts);
       const operation = operationIdentity(entry, opts, opts.commandType ?? 'agent-run');
-      this.#events.trackTurn(chatId, operationMetadata(operation));
       const producer = this.#producer(chatId);
+      this.#events.trackTurn(chatId, { ...operationMetadata(operation), executionSnapshot: {
+        agentId: entry.agentId, executorId: effectiveExecutorId(entry.executorId), projectPath: entry.projectPath,
+        transcriptViewId: prepared.viewId, producerLease: producer,
+      } });
       runId = this.#beginRun(chatId, operation.turnId);
       const request = {
         ...this.#executionContextV5(chatId, entry, selection, runId, opts),
@@ -284,6 +292,7 @@ export class AgentRuntimeRouter {
         agentSessionId: entry.agentSessionId,
         nativeSession: entry.nativeSession ?? null,
         prompt: prepared.outboundPrompt,
+        submission: prepared.submission,
         attachments: prepared.attachments,
       };
       assertExecutionAdmissionOpen(opts);
@@ -798,6 +807,12 @@ export class AgentRuntimeRouter {
       ? promptRows.flatMap((row) => row.detail.attachments)
       : attachments(opts.images);
     const entry = requireAgentChatEntry(chatId, this.#registry.getChat(chatId));
+    if (this.#directory.require(entry.agentId, entry.executorId).literalExecution) {
+      if (preparedAttachments.length) throw new DomainError('UNSUPPORTED_LITERAL_INPUT', 'Literal execution does not accept attachments.', 422);
+      const source = composition?.input.detail.message.content ?? fallbackPrompt;
+      return { dispatch: true, prompt: source, outboundPrompt: source, attachments: [], excludedOrdinals: excluded, viewId,
+        submission: composition ? { clientMessageId: composition.input.detail.clientMessageId, timestamp: composition.input.at } : undefined };
+    }
     // The input is already taken, so only the resolution itself is repeated.
     const signal = opts.executionAdmission?.signal;
     const resolvedPrompt = await retryAfterSessionLoss(

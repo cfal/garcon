@@ -134,6 +134,10 @@ export class StartCommands {
     if (!this.deps.agents.hasAgent(input.agentId, executorId)) {
       throw new CommandValidationError('UNSUPPORTED_AGENT', `Unsupported agent: ${input.agentId}`);
     }
+    const literal = this.deps.agents.executionPolicy(input.agentId, executorId) === 'literal';
+    if (literal && input.origin === 'agent-command') {
+      throw new CommandValidationError('UNSUPPORTED_CONTROL_INPUT', 'Literal execution requires an explicit user command.');
+    }
     this.deps.agents.assertExecutionModeSelectionSupported(input.agentId, {
       executorId,
       thinkingMode: input.thinkingMode,
@@ -148,7 +152,8 @@ export class StartCommands {
         404,
       );
     }
-    const title = input.origin === 'agent-command' ? parseChatRowTitle(input.title) ?? null : null;
+    const title = literal ? input.command.replace(/\s+/g, ' ').trim().slice(0, 100)
+      : input.origin === 'agent-command' ? parseChatRowTitle(input.title) ?? null : null;
     const transcriptSnapshot = input.origin === 'agent-command' ? input.transcriptSnapshot ?? null : null;
     if (transcriptSnapshot) {
       if (parentChatId === null || !Number.isSafeInteger(transcriptSnapshot.ordinal) || transcriptSnapshot.ordinal < 1) {
@@ -187,7 +192,7 @@ export class StartCommands {
 
     // Omitted IDs resolve the newest defaults here, at actual creation; an
     // explicit list is proven safe against this same catalog snapshot.
-    const preambleSelection = resolveNewChatPreambleSelection({
+    const preambleSelection = literal ? { revision: 0, orderedPreambleIds: [] } : resolveNewChatPreambleSelection({
       catalog: this.deps.preambles.snapshot(),
       canonicalProjectPath: projectPath,
       executorId,
@@ -404,6 +409,7 @@ export class StartCommands {
   }
 
   private generateTitle(input: NormalizedChatStart): void {
+    if (this.deps.agents.executionPolicy(input.agentId, input.executorId) === 'literal') return;
     void maybeGenerateChatTitle({
       chatId: input.chatId,
       firstPrompt: input.command,

@@ -88,6 +88,8 @@ function createFixture(overrides = {}) {
     {
       projectAdmission,
       attachmentAdmission,
+      executionPolicy: overrides.executionPolicy,
+      workingDirectorySettlement: overrides.workingDirectorySettlement,
       unsettledQueueReceiptKeys: () => new Set(),
       appendControlReceipt,
       isControlInputViewCurrent: overrides.isControlInputViewCurrent ?? (() => true),
@@ -113,6 +115,72 @@ describe('ChatExecutionCoordinator', () => {
 
   afterEach(async () => {
     coordinator.beginShutdown();
+  });
+
+  it('retains a committed terminal owner across Stop and interrupt-and-send while cwd settles', async () => {
+    const inspection = deferred();
+    const fixture = createFixture({
+      executionPolicy: () => 'literal',
+      workingDirectorySettlement: { settle: mock(() => inspection.promise) },
+    });
+    coordinator = fixture.coordinator;
+    const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'command-1' });
+    await coordinator.runReservedTurn(reservation, 'cd next', { turnId: 'command-1' });
+    coordinator.markRunTerminalCommitted('chat-1', 'command-1');
+    const settling = coordinator.onAgentTurnTerminal('chat-1', { turnId: 'command-1' });
+    await coordinator.createChatQueueEntry('chat-1', 'pwd');
+    expect(await coordinator.interruptActiveTurn('chat-1')).toBe('already-idle');
+    expect((await coordinator.stopActiveTurn('chat-1')).outcome).toBe('already-idle');
+    expect(coordinator.ownsExecution('chat-1')).toBe(true);
+    expect(fixture.turnRunner.abortSession).not.toHaveBeenCalled();
+    expect(fixture.turnRunner.runAgentTurn).toHaveBeenCalledTimes(1);
+    inspection.resolve({ kind: 'settled' });
+    await settling;
+    expect(coordinator.ownsExecution('chat-1')).toBe(false);
+    expect((await coordinator.readChatExecutionControl('chat-1')).entries).toHaveLength(1);
+  });
+
+  it.each(['failed', 'cwd-failed', 'cwd-threw'])('pauses waiting literal work after a direct %s terminal', async (failure) => {
+    const fixture = createFixture({
+      executionPolicy: () => 'literal',
+      workingDirectorySettlement: { settle: async () => {
+        if (failure === 'cwd-threw') throw new Error('Unexpected settlement failure');
+        return failure === 'cwd-failed' ? { kind: 'failed', message: 'Cwd persistence failed' } : { kind: 'settled' };
+      } },
+    });
+    coordinator = fixture.coordinator;
+    const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'command-1' });
+    await coordinator.runReservedTurn(reservation, 'false', { turnId: 'command-1' });
+    await coordinator.createChatQueueEntry('chat-1', 'pending');
+    coordinator.markRunTerminalCommitted('chat-1', 'command-1');
+    await coordinator.onAgentTurnTerminal('chat-1', { turnId: 'command-1' }, failure === 'failed' ? 'failed' : 'finished');
+    await coordinator.checkChatIdle('chat-1');
+    const control = await coordinator.readChatExecutionControl('chat-1');
+    expect(control.pause).toMatchObject({ kind: 'turn-failed', turnId: 'command-1' });
+    expect(control.entries).toHaveLength(1);
+    expect(fixture.turnRunner.runAgentTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('pauses literal work when direct admission fails before a terminal exists', async () => {
+    const admission = deferred();
+    const fixture = createFixture({ executionPolicy: () => 'literal', turnRunner: { runAgentTurn: () => admission.promise } });
+    coordinator = fixture.coordinator;
+    const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'command-1' });
+    const running = coordinator.runReservedTurn(reservation, 'command', { turnId: 'command-1' }).catch(error => error);
+    await coordinator.createChatQueueEntry('chat-1', 'pending');
+    admission.reject(new Error('Unavailable executable'));
+    expect(await running).toBeInstanceOf(Error);
+    expect((await coordinator.readChatExecutionControl('chat-1')).pause).toMatchObject({ kind: 'turn-failed' });
+  });
+
+  it('refuses conversational control inputs before capture or queueing on literal targets', async () => {
+    const fixture = createFixture({ executionPolicy: () => 'literal' });
+    coordinator = fixture.coordinator;
+    const signal = new AbortController().signal;
+    await expect(coordinator.offerServerControlInput('chat-1', interAgentInput(), signal, null)).rejects.toMatchObject({ code: 'UNSUPPORTED_CONTROL_INPUT' });
+    await expect(coordinator.queueServerControlInput('chat-1', interAgentInput(), signal)).rejects.toMatchObject({ code: 'UNSUPPORTED_CONTROL_INPUT' });
+    expect(fixture.appendControlReceipt).not.toHaveBeenCalled();
+    expect((await coordinator.readChatExecutionControl('chat-1')).entries).toEqual([]);
   });
 
   it('stops a startup before a provider run exists and fences its late completion from a successor', async () => {

@@ -11,6 +11,7 @@ import type { TransientLayerRegistry } from '$lib/workspace/transient-layers.sve
 import * as m from '$lib/paraglide/messages.js';
 
 interface QueuedInputRefinementOptions {
+	get chatId(): string;
 	editor: QueuedInputEditorState;
 	expandedEditor: PromptEditorDialogState;
 	notifications: Pick<NotificationsStore, 'info' | 'error'>;
@@ -94,9 +95,10 @@ export class QueuedInputRefinementController {
 		const sourceText = editor.draft;
 
 		try {
-			const result = await this.#request.run({ draft: sourceText, target: 'prompt' });
+			const chatId = this.options.chatId;
+			const result = await this.#request.run({ draft: sourceText, target: 'prompt', subject: { kind: 'chat', chatId } });
 			if (result.kind !== 'refined') return;
-			if (!editor.matchesSession(entryId, sessionRevision) || editor.draft !== sourceText) {
+			if (this.options.chatId !== chatId || !editor.matchesSession(entryId, sessionRevision) || editor.draft !== sourceText) {
 				this.options.notifications.info(m.prompt_refinement_draft_changed());
 				await this.#focusEditor();
 				return;

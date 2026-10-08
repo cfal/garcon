@@ -26,6 +26,8 @@ function harness(overrides = {}) {
     getUiSettings: mock(() => ({ promptRefinement: config })),
   };
   const agents = {
+    executionPolicy: mock(() => 'conversation'),
+    chatExecutionPolicy: mock(() => 'conversation'),
     getAgentAuthStatusMap: mock(() => Promise.resolve({})),
     getAgentReadinessMap: mock(() => Promise.resolve({})),
     getAgentCatalogEntries: mock(() => Promise.resolve([])),
@@ -41,6 +43,20 @@ function harness(overrides = {}) {
 }
 
 describe('refinePrompt', () => {
+  it.each([
+    { kind: 'chat', chatId: '1783725900000000' },
+    { kind: 'selection', agentId: 'literal-test', executorId: 'local' },
+  ])('rejects literal subjects before generation discovery: %j', async subject => {
+    const fixture = harness();
+    fixture.agents.executionPolicy.mockReturnValue('literal');
+    fixture.agents.chatExecutionPolicy.mockReturnValue('literal');
+    await expect(refinePrompt({ draft: 'printf untouched', target: 'prompt', subject }, fixture))
+      .rejects.toMatchObject({ code: 'PROMPT_REFINEMENT_UNAVAILABLE' });
+    expect(fixture.settings.getUiSettings).not.toHaveBeenCalled();
+    expect(fixture.agents.getAgentCatalogEntries).not.toHaveBeenCalled();
+    expect(fixture.agents.runSingleQuery).not.toHaveBeenCalled();
+  });
+
   it('renders the default template without supplying filesystem context', async () => {
     const test = harness();
     const draft = 'Keep $& and $1 exactly.';
@@ -64,7 +80,7 @@ describe('refinePrompt', () => {
       return '  Refined prompt.  ';
     });
 
-    await expect(refinePrompt({ draft, target: 'prompt' }, test)).resolves.toEqual({
+    await expect(refinePrompt({ draft, target: 'prompt', subject: { kind: 'selection', agentId: 'claude', executorId: 'local' } }, test)).resolves.toEqual({
       success: true,
       refinedPrompt: 'Refined prompt.',
     });
@@ -85,7 +101,7 @@ describe('refinePrompt', () => {
       return 'Done';
     });
 
-    await refinePrompt({ draft: '$& $1', target: 'prompt' }, test);
+    await refinePrompt({ draft: '$& $1', target: 'prompt', subject: { kind: 'selection', agentId: 'claude', executorId: 'local' } }, test);
   });
 
   it('adds fixed snippet constraints and accepts an unchanged token signature', async () => {
@@ -131,7 +147,7 @@ describe('refinePrompt', () => {
 
   it('rejects invalid input before settings or model discovery', async () => {
     const blank = harness();
-    await expect(refinePrompt({ draft: '   ', target: 'prompt' }, blank)).rejects.toMatchObject({
+    await expect(refinePrompt({ draft: '   ', target: 'prompt', subject: { kind: 'selection', agentId: 'claude', executorId: 'local' } }, blank)).rejects.toMatchObject({
       code: 'PROMPT_REFINEMENT_INVALID_REQUEST',
       status: 400,
     });
@@ -142,7 +158,7 @@ describe('refinePrompt', () => {
       refinePrompt(
         {
           draft: 'x'.repeat(PROMPT_REFINEMENT_DRAFT_MAX_LENGTH + 1),
-          target: 'prompt',
+          target: 'prompt', subject: { kind: 'selection', agentId: 'claude', executorId: 'local' },
         },
         oversized,
       ),
@@ -174,7 +190,7 @@ describe('refinePrompt', () => {
     test.agents.singleQueryRunsToolsWithoutPermission.mockImplementationOnce(() => true);
 
     await expect(
-      refinePrompt({ draft: 'private draft', target: 'prompt' }, test),
+      refinePrompt({ draft: 'private draft', target: 'prompt', subject: { kind: 'selection', agentId: 'claude', executorId: 'local' } }, test),
     ).rejects.toMatchObject({
       code: 'PROMPT_REFINEMENT_UNSAFE_AGENT',
       status: 422,
@@ -201,7 +217,7 @@ describe('refinePrompt', () => {
     ];
     for (const { customPrompt, draft } of cases) {
       const test = harness({ config: { customPrompt } });
-      await expect(refinePrompt({ draft, target: 'prompt' }, test)).rejects.toMatchObject({
+      await expect(refinePrompt({ draft, target: 'prompt', subject: { kind: 'selection', agentId: 'claude', executorId: 'local' } }, test)).rejects.toMatchObject({
         code: 'PROMPT_REFINEMENT_TEMPLATE_INVALID',
         status: 409,
       });
@@ -286,7 +302,7 @@ describe('refinePrompt', () => {
       });
 
       try {
-        await refinePrompt({ draft: 'private sentinel', target: 'prompt' }, test);
+        await refinePrompt({ draft: 'private sentinel', target: 'prompt', subject: { kind: 'selection', agentId: 'claude', executorId: 'local' } }, test);
         throw new Error('Expected prompt refinement to fail');
       } catch (error) {
         expect(error).toBeInstanceOf(PromptRefinementError);
@@ -315,7 +331,7 @@ describe('refinePrompt', () => {
     });
 
     const running = refinePrompt(
-      { draft: 'private draft sentinel', target: 'prompt' },
+      { draft: 'private draft sentinel', target: 'prompt', subject: { kind: 'selection', agentId: 'claude', executorId: 'local' } },
       test,
       controller.signal,
     );

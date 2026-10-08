@@ -24,7 +24,7 @@ test.each(['remote-controller-dials', 'remote-executor-dials'] as const)('provid
       apiProviderId: providerId, modelEndpointId: agent.provider.endpointId, modelProtocol: agent.provider.protocol, thinkingMode: 'none' as const };
     await client.updateSettings({ ui: { promptRefinement: selection } });
     const generation = fixture.fakeProviders.openAi.holdNext({ model: agent.provider.model });
-    const permittedRefinement = client.refinePrompt({ draft: 'Synthetic permitted generation', target: 'prompt' });
+    const permittedRefinement = client.refinePrompt({ draft: 'Synthetic permitted generation', target: 'prompt', subject: { kind: 'selection', agentId: 'claude', executorId: 'local' } });
     await generation.received;
     generation.releaseText('Synthetic refined prompt');
     expect(await permittedRefinement).toEqual({ success: true, refinedPrompt: 'Synthetic refined prompt' });
@@ -39,7 +39,7 @@ test.each(['remote-controller-dials', 'remote-executor-dials'] as const)('provid
     const denied = await client.runDirectChat({ chatId, agent, content: 'Synthetic blocked resume' });
     expect(await client.waitForTurnTerminal(chatId, denied.turnId)).toMatchObject({ type: 'agent-run-failed', error: expect.stringContaining('unavailable') });
     await client.waitForProcessing(chatId, false);
-    expect(await rejectionOf(client.refinePrompt({ draft: 'Synthetic blocked generation', target: 'prompt' }))).toMatchObject({ status: 502, body: { errorCode: 'PROMPT_REFINEMENT_FAILED' } });
+    expect(await rejectionOf(client.refinePrompt({ draft: 'Synthetic blocked generation', target: 'prompt', subject: { kind: 'selection', agentId: 'claude', executorId: 'local' } }))).toMatchObject({ status: 502, body: { errorCode: 'PROMPT_REFINEMENT_FAILED' } });
     expect(fixture.fakeProviders.openAi.requests()).toHaveLength(before);
     expect(await rejectionOf(client.delete(`/api/v1/api-providers?id=${providerId}&acknowledgeSharedImpact=true`))).toMatchObject({ status: 409, body: { errorCode: 'API_PROVIDER_IN_USE' } });
     await fixture.restartGarcon();

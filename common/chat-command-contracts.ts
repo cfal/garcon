@@ -103,6 +103,8 @@ export type CommandErrorCode = Extract<
   | 'PERMISSION_DECISION_NOT_DELIVERED'
   | 'PERMISSION_DECISION_OUTCOME_UNKNOWN'
   | 'UNSUPPORTED_AGENT'
+  | 'UNSUPPORTED_CONTROL_INPUT'
+  | 'UNSUPPORTED_LITERAL_INPUT'
   | 'EXPECTED_AGENT_MISMATCH'
   | 'EXPLICIT_BYPASS_REQUIRED'
   | 'INCOMPLETE_EXECUTION_CONFIG'
@@ -549,7 +551,7 @@ export function parseStartChatCommandRequest(value: unknown): StartChatCommandRe
   const parentChatId = optionalChatId(body, 'parentChatId');
   const agentId = requiredString(body, 'agentId');
   const images = optionalImages(body.images);
-  const command = contentOrImages(body, 'command', images).trim();
+  const command = contentOrImages(body, 'command', images);
   const agentSettings = requiredAgentSettings(body.agentSettings, 'agentSettings');
   const userMessagePresentation = parseCommandUserMessagePresentation(body.userMessagePresentation);
   const orderedPreambleIds = optionalOrderedPreambleIds(body.orderedPreambleIds);

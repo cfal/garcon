@@ -549,6 +549,8 @@ function makeService(overrides = {}) {
     getChatMetadata: mock(() => null),
   };
   const agents = {
+    executionPolicy: mock(() => 'conversation'),
+    chatExecutionPolicy: mock(() => 'conversation'),
     currentTranscriptViewId: mock(() => Promise.resolve('view-1')),
     hasAgent: mock(() => true),
     assertExecutorReady: mock(() => undefined),

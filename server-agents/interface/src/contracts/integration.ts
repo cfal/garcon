@@ -12,6 +12,8 @@ import type {
   AgentSettings,
   AgentSingleQuery,
   AgentSteering,
+  AgentReadiness,
+  AgentLiteralExecution,
 } from './services.js';
 import type { AgentNativeFork } from './native-fork.js';
 import type {
@@ -29,6 +31,8 @@ import type {
 
 export interface AgentIntegration {
   readonly descriptor: AgentDescriptor;
+  readonly literalExecution: AgentLiteralExecution | null;
+  readonly readiness: AgentReadiness | null;
   readonly attachments: AgentAttachments | null;
   readonly execution: AgentExecutionV5;
   readonly producers: AgentProducers;

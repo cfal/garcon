@@ -24,6 +24,8 @@
 	import Play from '@lucide/svelte/icons/play';
 
 	interface Props {
+		chatId: string;
+		literalInput?: boolean;
 		open: boolean;
 		queue: ChatQueueState | null;
 		editor: QueuedInputEditorState;
@@ -42,6 +44,8 @@
 	}
 
 	let {
+		chatId,
+		literalInput = false,
 		open,
 		queue,
 		editor,
@@ -59,6 +63,7 @@
 	// Lives at dialog lifetime so a pending refinement survives the draft card
 	// relocating from its inline row to the departed-draft recovery slot.
 	const refinement = new QueuedInputRefinementController({
+		get chatId() { return chatId; },
 		get editor() {
 			return editor;
 		},
@@ -69,7 +74,7 @@
 			return editorTextarea;
 		},
 		get startBlocked() {
-			return !open;
+			return !open || literalInput;
 		},
 	});
 	let editorTextarea = $state<HTMLTextAreaElement | null>(null);
@@ -173,6 +178,7 @@
 			case 'manual':
 				return null;
 			case 'queued-turn-failed':
+			case 'turn-failed':
 				return m.chat_queue_pause_failed_detail();
 			case 'completion-uncertain':
 				return m.chat_queue_pause_completion_uncertain_detail();
@@ -378,7 +384,7 @@
 		{onCreate}
 		{onReplace}
 		onExpand={openExpandedEditor}
-		onRefinePrompt={() => refinement.handleAction()}
+		onRefinePrompt={literalInput ? undefined : () => refinement.handleAction()}
 		onClose={closeEditor}
 	/>
 {/snippet}
@@ -530,7 +536,7 @@
 		isPromptRefinementPending={refinementPending}
 		onTextChange={handleExpandedTextChange}
 		onSelectionChange={(selection) => expandedEditor.updateSelection(selection)}
-		onRefinePrompt={() => refinement.handleAction()}
+		onRefinePrompt={literalInput ? undefined : () => refinement.handleAction()}
 		onClose={() => void closeExpandedEditor()}
 	/>
 {/if}

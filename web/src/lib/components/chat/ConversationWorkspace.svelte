@@ -880,8 +880,10 @@
 		<UserMessageNavigatorDialog controller={userMessageNavigator} />
 	{/if}
 
-	{#if queuedInputsDialogOpen}
+	{#if queuedInputsDialogOpen && queuedInputsDialogChatId}
 		<QueuedInputsDialog
+			chatId={queuedInputsDialogChatId}
+			literalInput={rootModelCatalog.forExecutor(sessions.byId[queuedInputsDialogChatId]?.executorId ?? 'local').getAgent(sessions.byId[queuedInputsDialogChatId]?.agentId ?? '')?.executionPolicy === 'literal'}
 			open={true}
 			queue={dialogQueue}
 			editor={queuedInputEditor}

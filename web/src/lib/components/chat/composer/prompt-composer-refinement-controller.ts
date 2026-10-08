@@ -93,7 +93,7 @@ export class PromptComposerRefinementController {
 		this.options.composer.isDragActive = false;
 
 		try {
-			const result = await this.#request.run({ draft: sourceText, target: 'prompt' });
+      const result = await this.#request.run({ draft: sourceText, target: 'prompt', subject: { kind: 'chat', chatId: sourceChatId } });
 			if (result.kind !== 'refined') return;
 			if (
 				this.options.sessions.selectedChatId !== sourceChatId ||

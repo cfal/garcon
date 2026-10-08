@@ -114,6 +114,7 @@
 		},
 	});
 	const modelCatalog = $derived(rootModelCatalog.forExecutor(form.executorId));
+	const literalInput = $derived(modelCatalog.getAgent(form.agentId)?.executionPolicy === 'literal');
 	function selectableAgentsForExecutor(executorId: string) {
 		const allAgentIds = rootModelCatalog.forExecutor(executorId).getSelectableAgents();
 		return localSettings.allowDirectChats ? allAgentIds : nonDirectAgentIds(allAgentIds);
@@ -170,7 +171,7 @@
 			return textareaRef;
 		},
 		get startBlocked() {
-			return !initialContentReady || snippetExpansion.pending;
+			return literalInput || !initialContentReady || snippetExpansion.pending;
 		},
 		closePromptSurfaces: () => snippetPalette.dismiss(),
 	});
@@ -336,7 +337,7 @@
 		}
 		if (snippetExpansion.pending) snippetExpansion.cancel();
 		form.firstMessage = input.value;
-		if ((event as InputEvent).isComposing) return;
+		if (literalInput || (event as InputEvent).isComposing) return;
 		snippetPalette.updateDetectedTrigger(
 			findSnippetTrigger(input.value, input.selectionStart, localSettings.snippetTrigger),
 			input.value,
@@ -500,7 +501,7 @@
 
 	function handleSubmit(): void {
 		if (!form.canSubmit || promptTransformPending) return;
-		const command = parseSnippetCommand(form.firstMessage);
+		const command = literalInput ? { kind: 'none' as const } : parseSnippetCommand(form.firstMessage);
 		if (command.kind === 'invalid') {
 			notifications.error(
 				command.error === 'short-name-required'
@@ -762,9 +763,10 @@
 					canAttachImages={canAttachAttachments}
 					attachImagesTooltip={m.chat_composer_image_attachments_unavailable()}
 					onAddImage={openImagePicker}
+					showAddMenu={!literalInput}
 					onOpenSnippetPalette={() => snippetPalette.openFromMenu()}
 					onOpenExpandedEditor={openExpandedEditor}
-					onRefinePrompt={() => promptRefinement.handleAction()}
+					onRefinePrompt={literalInput ? undefined : () => promptRefinement.handleAction()}
 					canRefinePrompt={promptRefinement.canStart}
 					isPromptRefinementPending={promptRefinement.pending}
 					isPromptTransformPending={promptTransformPending}
@@ -806,7 +808,7 @@
 				</ComposerBottomBar>
 
 				<ComposerSnippetPalette
-					open={snippetPalette.isOpen}
+					open={!literalInput && snippetPalette.isOpen}
 					onOpenChange={(nextOpen) => {
 						// The hidden trigger remains available to the chained insertion.
 						if (!nextOpen) snippetPalette.hide();
@@ -934,7 +936,7 @@
 		isPromptRefinementPending={promptRefinement.pending}
 		onTextChange={handleExpandedTextChange}
 		onSelectionChange={handleExpandedSelectionChange}
-		onRefinePrompt={() => promptRefinement.handleAction()}
+		onRefinePrompt={literalInput ? undefined : () => promptRefinement.handleAction()}
 		onClose={() => void closeExpandedEditor()}
 	/>
 {/if}

@@ -31,6 +31,10 @@ export function isThinkingModeSupported(
   return supported.includes(value) || (value === 'none' && supported.length === 0);
 }
 
+export function isPermissionModeSupported(value: PermissionMode, supported: readonly PermissionMode[]): boolean {
+  return supported.includes(value) || (value === 'default' && supported.length === 0);
+}
+
 export function executionDefaultsForAgent(
   defaults: RemoteExecutionDefaults | null | undefined,
   agentId: string,

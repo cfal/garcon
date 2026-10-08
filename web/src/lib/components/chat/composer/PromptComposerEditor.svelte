@@ -22,7 +22,7 @@
 		isPromptRefinementPending: boolean;
 		canRefinePrompt: boolean;
 		openRequestId: number;
-		onRefinePrompt: () => void;
+		onRefinePrompt?: () => void;
 	}
 
 	let {

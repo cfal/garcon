@@ -22,6 +22,18 @@ import type {
 import type { AgentNativeSessionRef } from './transcript.js';
 import type { AgentProducerBinding, AgentResourceRef, ExecutorCallOptions } from './resources.js';
 
+// Executes only the accepted source, without conversational preparation or automatic AI.
+export interface AgentLiteralExecution {
+  readonly selectionLabel: string;
+}
+
+export interface AgentReadiness {
+  status(signal: AbortSignal): Promise<{
+    readonly ready: boolean;
+    readonly reason: string;
+  }>;
+}
+
 export interface AgentCatalog {
   snapshot(request: {
     readonly strict: boolean;

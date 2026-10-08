@@ -25,7 +25,7 @@ import type { CarryOverCompactionInput } from '../chats/carryover/compaction.js'
 import type { CarryOverOutcome } from '../chats/carryover/outcome.js';
 import type { PreparedCarryover } from '../chats/carryover/prepared-store.js';
 import { OwnershipTransferPendingError } from './ownership-transfer-fence.js';
-import { isThinkingModeSupported } from '../../../common/execution-defaults.js';
+import { isThinkingModeSupported, isPermissionModeSupported } from '../../../common/execution-defaults.js';
 
 const logger = createLogger('agents:handoff');
 const MAX_RECOVERY_RETRY_DELAY_MS = 1_000;
@@ -204,7 +204,9 @@ export class AgentHandoffService {
       catalog.supportedThinkingModes,
       'none',
     );
-    assertSupported(catalog.supportedPermissionModes, permissionMode, 'permission mode');
+    if (!isPermissionModeSupported(permissionMode, catalog.supportedPermissionModes)) {
+      throwUnsupported(permissionMode, 'permission mode');
+    }
     if (!isThinkingModeSupported(thinkingMode, catalog.supportedThinkingModes)) {
       throwUnsupported(thinkingMode, 'reasoning effort');
     }
@@ -288,7 +290,7 @@ export class AgentHandoffService {
           }
           let carryoverOutcome: CarryOverOutcome | null = null;
           // Selection-only changes defer compaction to dispatch with the actual prompt.
-          if (input.command !== null) {
+          if (input.command !== null && !this.deps.integrations.require(input.target.agentId, input.target.executorId).literalExecution) {
             const planningController = new AbortController();
             this.#carryoverPreparations.set(input.chatId, planningController);
             try {
@@ -735,12 +737,6 @@ function stableStringify(value: unknown): string {
 
 function preferredValue<T extends string>(supported: readonly T[], preferred: T): T {
   return supported.includes(preferred) ? preferred : supported[0] ?? preferred;
-}
-
-function assertSupported(values: readonly string[], value: string, label: string): void {
-  if (!values.includes(value)) {
-    throwUnsupported(value, label);
-  }
 }
 
 function throwUnsupported(value: string, label: string): never {

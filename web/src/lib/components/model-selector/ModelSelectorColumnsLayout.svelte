@@ -185,7 +185,7 @@
 			{:else}
 				<VirtualModelList
 					listId={modelListId}
-					ariaLabel={m.model_selector_model()}
+					ariaLabel={selector.selectionLabel}
 					rows={selector.filteredModelRows.items}
 					selectedValue={selector.committedModelValueForVisibleRows}
 					activeIndex={selector.activeModelIndex}

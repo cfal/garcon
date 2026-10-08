@@ -46,7 +46,9 @@ describe('prompt refinement', () => {
           model: target.provider.model,
           lastUserText: expectedModelPrompt,
         });
-        const response = fixture.client.refinePrompt({ draft, target: refinementTarget });
+        const response = fixture.client.refinePrompt(refinementTarget === 'prompt'
+          ? { draft, target: refinementTarget, subject: { kind: 'selection', agentId: 'claude', executorId: 'local' } }
+          : { draft, target: refinementTarget });
 
         expect((await held.received).lastUserText).toBe(expectedModelPrompt);
         expect(held.releaseText(`  ${refinedPrompt}  `)).toBe(true);

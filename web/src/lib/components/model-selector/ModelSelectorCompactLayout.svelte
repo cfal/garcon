@@ -54,7 +54,7 @@
 	});
 	const headerTitle = $derived.by(() => {
 		if (pane === 'executor') return 'Executor';
-		if (pane === 'menu') return m.model_selector_model();
+		if (pane === 'menu') return selector.selectionLabel;
 		if (pane === 'recent') return m.model_selector_recent_models();
 		if (pane === 'agent') return m.model_selector_agent();
 		if (pane === 'source') return m.model_selector_provider_title({ agent: selector.agentLabel });
@@ -63,7 +63,7 @@
 			showCurrentSource ? selector.source?.label : '',
 			pane === 'effort' ? selector.selectedModelLabel : '',
 		].filter(Boolean);
-		return parts.length > 0 ? parts.join(' / ') : m.model_selector_model();
+		return parts.length > 0 ? parts.join(' / ') : selector.selectionLabel;
 	});
 	const headerSubtitle = $derived.by(() => {
 		if (pane === 'executor') return '';
@@ -71,7 +71,7 @@
 		if (pane === 'recent') return '';
 		if (pane === 'agent') return '';
 		if (pane === 'source') return '';
-		return pane === 'effort' ? m.model_selector_effort() : m.model_selector_model();
+		return pane === 'effort' ? m.model_selector_effort() : selector.selectionLabel;
 	});
 
 	$effect(() => {
@@ -344,7 +344,7 @@
 			{:else}
 				<VirtualModelList
 					listId={modelListId}
-					ariaLabel={m.model_selector_model()}
+					ariaLabel={selector.selectionLabel}
 					rows={selector.filteredModelRows.items}
 					selectedValue={selector.committedModelValueForVisibleRows}
 					activeIndex={selector.activeModelIndex}

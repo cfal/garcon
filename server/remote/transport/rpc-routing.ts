@@ -33,6 +33,7 @@ const METHOD_LANES = {
   'migration.translateLegacyNativeSession': 'primary',
   'migration.translateLegacySettings': 'primary',
   'auth.status': 'primary',
+  'readiness.status': 'primary',
   'auth.launchLogin': 'primary',
   'auth.completeLogin': 'primary',
   'auth.loginStatus': 'primary',

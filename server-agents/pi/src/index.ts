@@ -61,6 +61,8 @@ export default class PiAgentIntegration implements AgentIntegration {
   static readonly integrationId = 'pi';
   static readonly apiVersion = 5 as const;
   readonly descriptor = PI_DESCRIPTOR;
+  readonly literalExecution = null;
+  readonly readiness = null;
   readonly attachments = null;
   readonly execution;
   readonly producers;

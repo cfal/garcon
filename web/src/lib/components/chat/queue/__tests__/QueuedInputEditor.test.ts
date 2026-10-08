@@ -144,6 +144,7 @@ describe('QueuedInputEditor composer affordances', () => {
 		expect(vi.mocked(refinementApi.refinePrompt).mock.calls[0]?.[0]).toEqual({
 			draft: 'Queued message 0',
 			target: 'prompt',
+			subject: { kind: 'chat', chatId: '1783725900000000' },
 		});
 		expect(screen.getByTestId('queue-notifications').textContent).toContain(
 			m.prompt_refinement_refined(),

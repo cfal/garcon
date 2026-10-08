@@ -132,6 +132,24 @@ function command(
 }
 
 describe('runCatalogQuery', () => {
+  test('labels execution variants without inventing provider or model columns', async () => {
+    const variants = structuredClone(catalog);
+    const agent = variants.catalog.agents[0]!;
+    Object.assign(agent, {
+      selectionKind: 'execution-variant', selectionLabel: 'Runtime', executionPolicy: 'literal',
+      acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: 'variant',
+      models: [{ value: 'variant', label: 'Variant', isLocal: true }],
+    });
+    const plain = output();
+    await runCatalogQuery(command('models', { agentId: agent.id }), client(variants), plain);
+    expect(plain.listings[0]).toContain('RUNTIME');
+    expect(plain.listings[0]).not.toContain('PROVIDER');
+    expect(plain.listings[0]).not.toContain('MODEL');
+    const json = output();
+    await runCatalogQuery(command('models', { agentId: agent.id, json: true }), client(variants), json);
+    expect(JSON.parse(json.listings[0]!)).toMatchObject({ selectionKind: 'execution-variant', selectionLabel: 'Runtime' });
+  });
+
   test('lists preamble IDs directly without loading the model catalog', async () => {
     let modelCatalogRequested = false;
     const queryClient = client();
@@ -190,7 +208,7 @@ describe('runCatalogQuery', () => {
   test('prints actionable agent and model selections', async () => {
     const agents = output();
     await runCatalogQuery(command('agents'), client(), agents);
-    expect(agents.listings[0]).toContain('AGENT  LABEL  DEFAULT MODEL');
+    expect(agents.listings[0]).toContain('AGENT  LABEL  DEFAULT SELECTION');
     expect(agents.listings[0]).toContain('codex  Codex  gpt-5.4');
 
     const models = output();

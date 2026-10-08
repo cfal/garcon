@@ -678,6 +678,7 @@ function createDeps(chat = createRunningChat()) {
 			openNewChatDialog: vi.fn(),
 		},
 		modelCatalog: {
+			getAgent: vi.fn<SessionControllerDeps['modelCatalog']['getAgent']>(() => null),
 			getModelForSelection: vi.fn<SessionControllerDeps['modelCatalog']['getModelForSelection']>(
 				(_agentId, model) => ({ value: model, label: model }),
 			),
@@ -3747,6 +3748,31 @@ describe('ConversationSessionController', () => {
 		expect(mockRunChat).not.toHaveBeenCalled();
 		expect(deps.composerState.clearAfterSubmit).toHaveBeenCalledWith('chat-1');
 	});
+
+	it.each(['submitForChat', 'submitComposerWithSteerPreference'] as const)(
+		'preserves literal source and bypasses controller slash commands through %s', async (submit) => {
+			const { deps } = createDeps(createRunningChat({ agentId: 'codex', model: 'variant',
+				agentSettings: { ownerId: 'codex', schemaVersion: 1, values: {} }, isProcessing: false }));
+			deps.agentState.model = 'variant';
+			deps.modelCatalog.getAgent.mockImplementation((id) => id !== 'codex' ? null : ({
+				id, label: 'Literal test', executionPolicy: 'literal', defaultModel: 'variant',
+				supportsCompact: false, supportsFork: false, supportsForkAtMessage: false,
+				supportsForkWhileRunning: false, supportsUpdateProjectPath: false, supportsSteering: false,
+				supportsImages: false, fileAttachmentMimeTypes: [], acceptsApiProviderEndpoints: false,
+				supportedProtocols: [], authLoginSupported: false, supportedPermissionModes: [],
+				supportedThinkingModes: [], settings: [], defaultSettings: { ownerId: id, schemaVersion: 1, values: {} },
+			}));
+			const command = "/compact '  exact source @file  '\n ";
+			deps.composerState.inputText = command;
+			mockRunChat.mockResolvedValueOnce({ success: true, commandType: 'agent-run', clientRequestId: 'req-literal',
+				chatId: 'chat-1', turnId: 'literal-turn', status: 'accepted', acceptedAt: '2026-08-10T00:00:00.000Z' });
+			const outcome = await new ConversationSessionController(deps)[submit]('chat-1');
+			expect(deps.chatState.appendLocalNoticeForChat).not.toHaveBeenCalled();
+			expect(outcome).toBe('accepted');
+			expect(mockRunChat).toHaveBeenCalledWith(expect.objectContaining({ command }));
+			expect(mockSteerChat).not.toHaveBeenCalled();
+		},
+	);
 
 	it('uses normal submission for Ctrl+Enter preference while idle', async () => {
 		const { deps } = createDeps(createRunningChat({ isProcessing: false }));

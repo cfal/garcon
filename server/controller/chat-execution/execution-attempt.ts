@@ -6,6 +6,7 @@ export class QueueExecutionAttempt {
   #turn: TurnIdentity;
   #launched = false;
   #settled = false;
+  #terminalCommitted = false;
   #settledWaiters: Array<() => void> = [];
 
   constructor(turn: TurnIdentity, entryId?: string) {
@@ -16,6 +17,10 @@ export class QueueExecutionAttempt {
   get isSettled(): boolean {
     return this.#settled;
   }
+
+  get hasTerminalCommit(): boolean { return this.#terminalCommitted; }
+
+  markTerminalCommitted(): void { this.#terminalCommitted = true; }
 
   identity(): TurnIdentity {
     return { ...this.#turn };

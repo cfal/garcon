@@ -9,16 +9,11 @@ import type {
   AgentRunFailureDetail,
 } from '@garcon/server-agent-interface';
 import type { AgentAttachment } from '../../../common/agent-execution.js';
-import {
-  parseChatRowContent,
-  parseChatRowTitle,
-} from '../../../common/chat-row-contracts.js';
 import type { ChatMessage, UserMessage } from '../../../common/chat-types.js';
 import type { CliBodyDisclosure, CliPresentation, CliRowFormat } from '../../../common/cli-presentation.js';
 import type { ChatTransientControlAction } from '../../../common/chat-transient-feed.js';
 import type { ResendCandidate } from '../../../common/chat-view.js';
 import type { JsonObject } from '../../../common/json.js';
-import type { TranscriptNoticeDetail } from '../../../common/transcript-notice-details.js';
 import type {
   AppendChatRowResult,
   AppendSelectionChangeNoticeResult,
@@ -51,8 +46,10 @@ import { PermissionNotActionableError, TranscriptSinkClosedError } from './error
 import { permissionRowKind, validatePermissionDecision } from './permission-rows.js';
 import { ProducerLease } from './producer-lease.js';
 import { projectFinalResponse } from './final-response.js';
+import { parseCommandWorkingDirectory, type CommandWorkingDirectory } from '../../../common/command-output.js';
 import { TranscriptLedgerStore, type StoredRowsWork } from './store.js';
 import { messageForConversationRow, previewMessages } from './projection.js';
+import { normalizeNotice, type NormalizedTranscriptNotice, type TranscriptNoticeInput } from './notice.js';
 
 export interface TranscriptProducerLease {
   readonly sink: AgentProducerSink;
@@ -88,6 +85,7 @@ export type TranscriptCommitEvent =
       readonly runId: string;
       readonly row: LedgerRunEndedRow;
       readonly finalResponse: AgentFinalResponse | null;
+      readonly workingDirectory?: CommandWorkingDirectory;
     }
   | {
       readonly type: 'view-replaced';
@@ -125,19 +123,6 @@ interface ActivePermission {
   readonly claimId: string | null;
 }
 
-interface TranscriptNoticeInput {
-  readonly title?: string;
-  readonly content: string;
-  readonly detail?: TranscriptNoticeDetail;
-  readonly at?: string;
-}
-
-interface NormalizedTranscriptNotice {
-  readonly content: string;
-  readonly detail: JsonObject;
-  readonly at?: string;
-}
-
 export class TranscriptLedgerService {
   readonly #store: TranscriptLedgerStore;
   readonly #now: () => string;
@@ -147,6 +132,7 @@ export class TranscriptLedgerService {
   readonly #commandSinks: GarconCommandSinks;
   readonly #listeners = new Set<(event: TranscriptCommitEvent) => void | Promise<void>>();
   readonly #sessionCommitListeners = new Set<(event: TranscriptSessionCommitEvent) => void>();
+  readonly #runEndCommitListeners = new Set<(chatId: string, runId: string) => void>();
   readonly #permissionRetiredListeners = new Set<(control: RetiredPermissionControl) => void>();
   readonly #leases = new Map<string, ProducerLease>();
   readonly #activeRuns = new Map<string, string>();
@@ -180,6 +166,11 @@ export class TranscriptLedgerService {
   subscribeSessionCommitted(listener: (event: TranscriptSessionCommitEvent) => void): () => void {
     this.#sessionCommitListeners.add(listener);
     return () => this.#sessionCommitListeners.delete(listener);
+  }
+
+  subscribeRunEndedCommitted(listener: (chatId: string, runId: string) => void): () => void {
+    this.#runEndCommitListeners.add(listener);
+    return () => this.#runEndCommitListeners.delete(listener);
   }
 
   subscribePermissionRetired(listener: (control: RetiredPermissionControl) => void): () => void {
@@ -727,6 +718,7 @@ export class TranscriptLedgerService {
     this.#permissionClaims.clear();
     this.#preparedInputs.clear();
     this.#sessionCommitListeners.clear();
+    this.#runEndCommitListeners.clear();
     this.#permissionRetiredListeners.clear();
     this.#store.close();
   }
@@ -848,6 +840,7 @@ export class TranscriptLedgerService {
           'provider',
           event.error,
           event.outcome === 'finished' ? projectFinalResponse(event.finalResponse) : null,
+          parseCommandWorkingDirectory(event.workingDirectory) ?? undefined,
         );
       }
     }
@@ -860,6 +853,7 @@ export class TranscriptLedgerService {
     origin: LedgerRunEndedRow['origin'],
     error?: AgentRunFailureDetail,
     finalResponse: AgentFinalResponse | null = null,
+    workingDirectory?: CommandWorkingDirectory,
   ): LedgerRunEndedRow {
     const view = this.#store.currentView(chatId);
     if (!view) throw new TypeError(`Transcript view is not initialized for ${chatId}`);
@@ -873,7 +867,8 @@ export class TranscriptLedgerService {
     }]);
     const ended = row as LedgerRunEndedRow;
     this.#clearRunPermissions(chatId, runId);
-    this.#notify({ type: 'run-ended', chatId, viewId: view.viewId, runId, row: ended, finalResponse });
+    for (const listener of this.#runEndCommitListeners) listener(chatId, runId);
+    this.#notify({ type: 'run-ended', chatId, viewId: view.viewId, runId, row: ended, finalResponse, workingDirectory });
     return ended;
   }
 
@@ -951,15 +946,6 @@ export class TranscriptLedgerService {
       }
     });
   }
-}
-
-function normalizeNotice(input: TranscriptNoticeInput): NormalizedTranscriptNotice {
-  const title = parseChatRowTitle(input.title);
-  return {
-    content: parseChatRowContent(input.content),
-    detail: { ...(input.detail ?? {}), ...(title ? { title } : {}) },
-    at: input.at,
-  };
 }
 
 function inputKey(chatId: string, clientMessageId: string): string {

@@ -27,7 +27,7 @@
 		isPromptRefinementPending: boolean;
 		onkeydown?: (event: KeyboardEvent) => void;
 		onExpand: () => void;
-		onRefinePrompt: () => void;
+		onRefinePrompt?: () => void;
 	}
 
 	let {
@@ -93,6 +93,7 @@
 		>
 			<Maximize2 class="size-4" aria-hidden="true" />
 		</Button>
+		{#if onRefinePrompt}
 		<Button
 			type="button"
 			variant="ghost"
@@ -111,5 +112,6 @@
 				<Sparkles class="size-4" aria-hidden="true" />
 			{/if}
 		</Button>
+		{/if}
 	</div>
 </div>

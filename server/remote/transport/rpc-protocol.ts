@@ -32,9 +32,10 @@ type Call<Q, R> = { readonly request: Q; readonly result: R };
 // frames. Bump it with any change to what either side sends or accepts. Builds
 // of one release share a package version, so without the bump a mismatched
 // pair passes the handshake and fails mid-session instead.
-export const EXECUTOR_PROTOCOL_REVISION = 17;
+export const EXECUTOR_PROTOCOL_REVISION = 18;
 
 export const NULLABLE_AGENT_FACETS = [
+  'literalExecution', 'readiness',
   'auth', 'commands', 'compaction', 'forking', 'steering', 'endpoints', 'singleQuery',
   'legacyHistoryImport', 'nativeHistoryImport', 'nativeActivity', 'nativeSessions',
   'configurationValidation', 'sessionConfiguration', 'projectPathUpdates',
@@ -50,6 +51,7 @@ export interface IntegrationManifest {
   readonly attachments: AgentIntegration['attachments'];
   readonly capabilities: Readonly<Record<typeof NULLABLE_AGENT_FACETS[number], boolean>>;
   readonly authMethods: { readonly launchLogin: boolean; readonly completeLogin: boolean; readonly loginStatus: boolean };
+  readonly literalExecution: AgentIntegration['literalExecution'];
   readonly singleQueryRunsToolsWithoutPermission: boolean;
 }
 
@@ -84,6 +86,7 @@ export interface ExecutorRpcMethods extends FileRpcMethods, TerminalRpcMethods, 
   'migration.translateLegacyNativeSession': Call<WithoutSignal<Request<'migration', 'translateLegacyNativeSession'>>, Result<'migration', 'translateLegacyNativeSession'>>;
   'migration.translateLegacySettings': Call<WithoutSignal<Request<'migration', 'translateLegacySettings'>>, Result<'migration', 'translateLegacySettings'>>;
   'auth.status': Call<null, Result<'auth', 'status'>>;
+  'readiness.status': Call<null, Result<'readiness', 'status'>>;
   'auth.launchLogin': Call<null, Awaited<ReturnType<NonNullable<Facet<'auth'>['launchLogin']>>>>;
   'auth.completeLogin': Call<{ readonly sessionId: string; readonly code: string }, Awaited<ReturnType<NonNullable<Facet<'auth'>['completeLogin']>>>>;
   'auth.loginStatus': Call<{ readonly expectedSessionId?: string }, Awaited<ReturnType<NonNullable<Facet<'auth'>['loginStatus']>>>>;
@@ -167,6 +170,7 @@ const CONTINUITY: Readonly<Record<ClassifiedMethod, RpcContinuity>> = {
   'migration.translateLegacyNativeSession': 'journaled',
   'migration.translateLegacySettings': 'journaled',
   'auth.status': 'journaled',
+  'readiness.status': 'journaled',
   'auth.launchLogin': 'journaled',
   'auth.completeLogin': 'journaled',
   'auth.loginStatus': 'journaled',

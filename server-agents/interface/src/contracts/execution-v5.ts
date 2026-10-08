@@ -19,6 +19,7 @@ export interface AgentExecutionContextV5 {
   readonly endpoint: AgentEndpointSelection | null;
   readonly runId: string;
   readonly producerBinding: AgentProducerBinding;
+  readonly submission?: { readonly clientMessageId: string | null; readonly timestamp: string };
 }
 
 export interface AgentStartRequestV5 extends AgentExecutionContextV5 {

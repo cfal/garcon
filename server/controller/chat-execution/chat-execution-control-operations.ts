@@ -29,6 +29,7 @@ import {
   reserveQueueSteer,
   requeueAndPause,
   pauseAfterDispatchFailure,
+  pauseAfterTurnFailure,
   resumeQueue,
   type ObservedQueueHead,
   type ControlTransition,
@@ -448,6 +449,14 @@ export class ChatExecutionControlOperations {
         pauseAfterDispatchFailure(current, entryId, transitionContext()),
       );
       if (committed.changed) this.#logPauseMutation('pause', chatId, committed.control, entryId);
+    });
+  }
+
+  async pauseAfterTurnFailure(chatId: string, turnId: string): Promise<void> {
+    await this.host.runExclusive(chatId, async () => {
+      const current = await this.#load(chatId);
+      const committed = await this.#commitTransition(chatId, current, pauseAfterTurnFailure(current, turnId, transitionContext()));
+      if (committed.changed) this.#logPauseMutation('pause', chatId, committed.control);
     });
   }
 

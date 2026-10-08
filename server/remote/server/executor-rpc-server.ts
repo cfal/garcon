@@ -170,6 +170,7 @@ export function serveExecutionRuntime(
       case 'migration.translateLegacyNativeSession': return integration.migration.translateLegacyNativeSession({ ...call.request, signal });
       case 'migration.translateLegacySettings': return integration.migration.translateLegacySettings({ ...call.request, signal });
       case 'auth.status': return required(integration.auth).status(signal);
+      case 'readiness.status': return required(integration.readiness).status(signal);
       case 'auth.launchLogin': return required(required(integration.auth).launchLogin)();
       case 'auth.completeLogin': return required(required(integration.auth).completeLogin)(call.request.sessionId, call.request.code);
       case 'auth.loginStatus': return required(required(integration.auth).loginStatus)(call.request.expectedSessionId);
@@ -224,6 +225,7 @@ function manifest(integration: AgentIntegration): IntegrationManifest {
     settings: { descriptors: integration.settings.describe(), defaults: integration.settings.defaults() },
     attachments: integration.attachments,
     capabilities: Object.fromEntries(NULLABLE_AGENT_FACETS.map((key) => [key, integration[key] !== null])) as IntegrationManifest['capabilities'],
+    literalExecution: integration.literalExecution,
     authMethods: {
       launchLogin: typeof integration.auth?.launchLogin === 'function',
       completeLogin: typeof integration.auth?.completeLogin === 'function',

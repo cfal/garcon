@@ -60,8 +60,8 @@ describe('AgentRegistry session cache', () => {
     adoption = { ensure: () => Promise.reject(new Error('unused')) },
     preambles = { snapshot: () => ({ revision: 0, preambles: [] }) },
     integrations = {
-      has: () => false,
-      get: () => null,
+      has: (agentId) => agentId === 'test',
+      get: (agentId) => agentId === 'test' ? { literalExecution: null } : null,
       require: () => { throw new Error('unused'); },
       list: () => [],
     },

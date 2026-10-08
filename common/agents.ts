@@ -40,6 +40,9 @@ export interface AgentCatalogEntry {
   label: string;
   description?: string;
   kind: "agent";
+  executionPolicy?: 'conversation' | 'literal';
+  selectionKind?: 'model' | 'execution-variant';
+  selectionLabel?: string;
   supportsCompact: boolean;
   supportsFork: boolean;
   supportsForkAtMessage: boolean;

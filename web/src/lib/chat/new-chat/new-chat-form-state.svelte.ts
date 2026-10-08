@@ -792,7 +792,7 @@ export class NewChatFormState {
 			permissionMode: normalizeSupportedPermissionMode(this.permissionMode, this.permissionModes),
 			thinkingMode: normalizeSupportedThinkingMode(this.thinkingMode, this.thinkingModes),
 			agentSettings: this.agentSettings,
-			firstMessage: this.firstMessage.trim(),
+			firstMessage: this.firstMessage,
 			initialImages: this.attachedImages,
 			tags: this.chatTags.length > 0 ? this.chatTags : undefined,
 			...this.preambles.creationFields,

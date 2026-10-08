@@ -118,6 +118,7 @@ const chatViews = {
   })),
 };
 const agents = {
+  executionPolicy: () => 'conversation',
   startSession: mock(() => Promise.resolve(undefined)),
   getModels: mock(() => Promise.resolve([])),
   isAgentSessionRunning: mock(() => false),

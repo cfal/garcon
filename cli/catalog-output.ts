@@ -10,6 +10,9 @@ export type CatalogQueryResult =
         label: string;
         description: string | null;
         defaultModel: string;
+        selectionKind?: 'model' | 'execution-variant';
+        selectionLabel?: string;
+        executionPolicy?: 'conversation' | 'literal';
         acceptsApiProviders: boolean;
         supportedProtocols: ApiProtocol[];
         permissions: string[];
@@ -41,6 +44,8 @@ export type CatalogQueryResult =
   | {
       resource: 'models';
       agentId: string;
+      selectionKind?: 'model' | 'execution-variant';
+      selectionLabel?: string;
       defaultModel: string;
       models: Array<{
         value: string;
@@ -78,7 +83,7 @@ function humanListing(result: CatalogQueryResult): string {
   switch (result.resource) {
     case 'agents':
       return formatTextTable(
-        ['AGENT', 'LABEL', 'DEFAULT MODEL'],
+        ['AGENT', 'LABEL', 'DEFAULT SELECTION'],
         result.agents.map((agent) => [agent.id, agent.label, agent.defaultModel]),
       );
     case 'preambles':
@@ -111,6 +116,10 @@ function humanListing(result: CatalogQueryResult): string {
         ]),
       );
     case 'models':
+      if (result.selectionKind === 'execution-variant') return formatTextTable(
+        [(result.selectionLabel ?? 'EXECUTION VARIANT').toUpperCase(), 'LABEL', 'DEFAULT'],
+        result.models.map(model => [model.value, model.label, model.isDefault ? 'yes' : '']),
+      );
       return formatTextTable(
         ['MODEL', 'LABEL', 'PROVIDER', 'ENDPOINT', 'DEFAULT'],
         result.models.map((model) => [

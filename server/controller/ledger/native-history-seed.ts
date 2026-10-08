@@ -59,11 +59,17 @@ export async function importNativeHistoryDrafts({
     carryOverRevision,
   );
   const steps = new EventLoopSteps('native-history-import');
+  let importedBytes = 0;
   for await (const batch of nativeHistoryImport.load({ chat, signal })) {
     signal.throwIfAborted();
     for (const row of batch) {
+      importedBytes += Buffer.byteLength(JSON.stringify(row));
+      if (importedBytes > 64 * 1024 * 1024 || messages.length >= 100_000) {
+        throw new DomainError('HISTORY_LOAD_FAILED', 'Native history exceeds the supported import size.', 413);
+      }
       messages.push(row.message);
       providerMetas.push(row.providerMeta ?? null);
+      await steps.next();
     }
     onRowsRead?.(messages.length);
     await steps.next();

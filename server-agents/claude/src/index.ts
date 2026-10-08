@@ -72,6 +72,8 @@ export default class ClaudeAgentIntegration implements AgentIntegration {
   static readonly integrationId = 'claude';
   static readonly apiVersion = 5 as const;
   readonly descriptor = CLAUDE_DESCRIPTOR;
+  readonly literalExecution = null;
+  readonly readiness = null;
   readonly attachments = {
     fileMimeTypes: CHAT_FILE_ATTACHMENT_MIME_TYPES,
   } as const;

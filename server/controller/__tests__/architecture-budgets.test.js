@@ -24,7 +24,9 @@ const MAX_LINES = 1000;
 // turn once the turn can take it, and the steer commands' choice to queue a steer the turn
 // cannot take yet instead of refusing it.
 // Queued attachments add bounded payload storage and capability checks at admission.
-const EXECUTION_FOOTPRINT_BUDGET = 9144;
+// Literal execution adds exact-source admission, control rejection, failure pausing,
+// and terminal settlement while keeping shell mechanics in its integration.
+const EXECUTION_FOOTPRINT_BUDGET = 9260;
 
 const GRANDFATHER = {
   'server/runtime/git/diff-engine.ts': 1575,

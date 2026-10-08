@@ -25,7 +25,7 @@ describe('prompt refinement API contract', () => {
 		const controller = new AbortController();
 
 		await expect(
-			refinePrompt({ draft: 'rough request', target: 'prompt' }, { signal: controller.signal }),
+			refinePrompt({ draft: 'rough request', target: 'prompt', subject: { kind: 'selection', agentId: 'claude', executorId: 'local' } }, { signal: controller.signal }),
 		).resolves.toEqual({ success: true, refinedPrompt: 'Refined request.' });
 		expect(PROMPT_REFINEMENT_CLIENT_TIMEOUT_MS).toBe(120_000);
 
@@ -34,7 +34,7 @@ describe('prompt refinement API contract', () => {
 		expect(options.method).toBe('POST');
 		expect(JSON.parse(options.body as string)).toEqual({
 			draft: 'rough request',
-			target: 'prompt',
+			target: 'prompt', subject: { kind: 'selection', agentId: 'claude', executorId: 'local' },
 		});
 		expect(options.signal).toBeInstanceOf(AbortSignal);
 		controller.abort();
@@ -44,7 +44,7 @@ describe('prompt refinement API contract', () => {
 	it('rejects malformed success responses at the client boundary', async () => {
 		fetchMock.mockResolvedValueOnce(Response.json({ success: true, refinedPrompt: ' ' }));
 
-		await expect(refinePrompt({ draft: 'rough request', target: 'prompt' })).rejects.toMatchObject({
+		await expect(refinePrompt({ draft: 'rough request', target: 'prompt', subject: { kind: 'selection', agentId: 'claude', executorId: 'local' } })).rejects.toMatchObject({
 			status: 502,
 			errorCode: 'PROMPT_REFINEMENT_INVALID_RESPONSE',
 		});
@@ -64,7 +64,7 @@ describe('prompt refinement API contract', () => {
 		);
 
 		try {
-			await refinePrompt({ draft: 'rough request', target: 'prompt' });
+			await refinePrompt({ draft: 'rough request', target: 'prompt', subject: { kind: 'selection', agentId: 'claude', executorId: 'local' } });
 			throw new Error('Expected request to fail');
 		} catch (error) {
 			expect(error).toBeInstanceOf(ApiError);

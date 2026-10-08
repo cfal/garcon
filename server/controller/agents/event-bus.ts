@@ -1,8 +1,18 @@
 import type { AgentExecutionCommandType } from './session-types.js';
+import type { CommandWorkingDirectory } from '../../../common/command-output.js';
+import type { TranscriptProducerLease } from '../ledger/service.js';
 import { createLogger } from '../../common/log.js';
 import { matchesTurnIdentity, type TurnReceiptOwner } from '../lib/turn-identity.js';
 import type { LedgerRunEndedRow } from '../ledger/contracts.js';
 import { dispatchListenersSequentially } from './listener-dispatch.js';
+
+export interface TurnExecutionSnapshot {
+  readonly agentId: string;
+  readonly executorId: string;
+  readonly projectPath: string;
+  readonly transcriptViewId: string;
+  readonly producerLease: TranscriptProducerLease;
+}
 
 const logger = createLogger('agents:event-bus');
 
@@ -15,6 +25,8 @@ export interface TurnEventMetadata {
   agentOwnershipEpoch?: string;
   turnOwner?: TurnReceiptOwner;
   entryIds?: readonly string[];
+  executionSnapshot?: TurnExecutionSnapshot;
+  workingDirectory?: CommandWorkingDirectory;
 }
 
 export type AgentRunCompletionOutcome = 'finished' | 'interrupted';
@@ -107,9 +119,10 @@ export class AgentEventBus {
     await this.#dispatch('run steerable', chatId, this.#steerableListeners, chatId);
   }
 
-  async publishRunEnded(chatId: string, runId: string, row: LedgerRunEndedRow): Promise<void> {
-    const metadata = this.#terminalMetadata(chatId, runId);
-    if (!metadata) return;
+  async publishRunEnded(chatId: string, runId: string, row: LedgerRunEndedRow, workingDirectory?: CommandWorkingDirectory): Promise<void> {
+    const captured = this.#terminalMetadata(chatId, runId);
+    if (!captured) return;
+    const metadata = { ...captured, ...(workingDirectory ? { workingDirectory } : {}) };
     this.#settledTurnByChatId.delete(chatId);
     this.#turnMetadataByChatId.delete(chatId);
     if (row.outcome === 'failed') {
@@ -177,5 +190,6 @@ function turnMetadata(opts: TurnEventMetadata): TurnEventMetadata {
     ...(opts.upstreamRequestId ? { upstreamRequestId: opts.upstreamRequestId } : {}),
     ...(opts.agentOwnershipEpoch ? { agentOwnershipEpoch: opts.agentOwnershipEpoch } : {}),
     ...(opts.turnOwner ? { turnOwner: opts.turnOwner } : {}),
+    ...(opts.executionSnapshot ? { executionSnapshot: opts.executionSnapshot } : {}),
   };
 }

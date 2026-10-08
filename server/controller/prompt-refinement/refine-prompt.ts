@@ -235,6 +235,12 @@ export async function refinePrompt(
   }
 
   const startedAt = performance.now();
+  if (input.target === 'prompt') {
+    const subject = input.subject;
+    const policy = subject.kind === 'chat' ? dependencies.agents.chatExecutionPolicy(subject.chatId)
+      : dependencies.agents.executionPolicy(subject.agentId, subject.executorId);
+    if (policy === 'literal') throw new PromptRefinementError('PROMPT_REFINEMENT_UNAVAILABLE', 'Literal execution does not use prompt refinement.', 422);
+  }
   const generationSignal = createGenerationRequestSignal(signal);
   const log = dependencies.log ?? logger;
   let selection: ReturnType<typeof resolveEffectiveGenerationConfig> | null = null;

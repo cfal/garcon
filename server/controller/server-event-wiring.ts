@@ -17,6 +17,7 @@ import type { MetadataIndex } from './chats/metadata-store.js';
 import type { ShareStore } from './chats/shares/store.js';
 import type { SettingsStore } from './settings/store.js';
 import type { ChatExecutionCoordinator } from './chat-execution/chat-execution-coordinator.js';
+import type { WorkingDirectorySettlement } from './projects/working-directory-settlement.js';
 import type { ChatProcessingActivity } from './chats/chat-processing-activity.js';
 import { commandLedgerKey, type CommandLedger } from './commands/command-ledger.js';
 import type { TelegramNotifier } from './notifications/telegram.js';
@@ -464,16 +465,18 @@ export function wireServerEvents({
     chatId: string,
     turnMetadata: TurnEventMetadata | undefined,
     outcome: 'finished' | 'failed',
-  ): Promise<void> => {
+  ): Promise<WorkingDirectorySettlement> => {
     inlineTerminalReleases.add(chatId);
+    let result: WorkingDirectorySettlement;
     try {
-      await queue.onAgentTurnTerminal(chatId, turnMetadata, outcome);
+      result = await queue.onAgentTurnTerminal(chatId, turnMetadata, outcome);
     } finally {
       inlineTerminalReleases.delete(chatId);
     }
     if (chatExists(chatId)) {
       broadcast(new ChatProcessingUpdatedMessage(chatId, processing.phase(chatId)));
     }
+    return result;
   };
   agentRegistry.onRunSteerable((chatId) => { queue.retryQueuedSteers(chatId); });
   agentRegistry.onSessionCreated((chatId) => {
@@ -491,8 +494,12 @@ export function wireServerEvents({
       try {
         if (!chatExists(chatId)) return;
         if (queuedFinalization && await queuedFinalization !== 'committed') return;
-        await releaseTerminalOwnership(chatId, turnMetadata, 'finished');
+        const settlement = await releaseTerminalOwnership(chatId, turnMetadata, 'finished');
         released = true;
+        if (settlement.kind === 'failed') {
+          await handleAgentFailure(chatId, settlement.message, 'PROJECT_PATH_DESTINATION_REJECTED', turnMetadata);
+          return;
+        }
         await settleExecutionCommand(chatId, turnMetadata, 'finished');
         if (!chatExists(chatId)) return;
         broadcast(
@@ -511,7 +518,12 @@ export function wireServerEvents({
           outcome === 'interrupted' ? 'user-stop' : undefined,
         );
       } finally {
-        if (!released) await releaseTerminalOwnership(chatId, turnMetadata, 'finished');
+        if (!released) {
+          const settlement = await releaseTerminalOwnership(chatId, turnMetadata, 'failed');
+          if (settlement.kind === 'failed') {
+            await handleAgentFailure(chatId, settlement.message, 'PROJECT_PATH_DESTINATION_REJECTED', turnMetadata);
+          }
+        }
         void queue.checkChatIdle(chatId).catch((err) => {
           logger.warn('queue: checkChatIdle error:', errorMessage(err));
         });
@@ -526,9 +538,11 @@ export function wireServerEvents({
       try {
         if (!chatExists(chatId)) return;
         if (queuedFinalization && await queuedFinalization !== 'committed') return;
-        await releaseTerminalOwnership(chatId, turnMetadata, 'failed');
+        const settlement = await releaseTerminalOwnership(chatId, turnMetadata, 'failed');
         released = true;
-        await handleAgentFailure(chatId, agentErrorMessage, agentErrorCode, turnMetadata);
+        await handleAgentFailure(chatId,
+          settlement.kind === 'failed' ? `${agentErrorMessage}\n${settlement.message}` : agentErrorMessage,
+          agentErrorCode, turnMetadata);
       } finally {
         if (!released) await releaseTerminalOwnership(chatId, turnMetadata, 'failed');
         void queue.checkChatIdle(chatId).catch((err) => {

@@ -67,6 +67,7 @@
 
 {#if open}
 	<QueuedInputsDialog
+		chatId="1783725900000000"
 		open={true}
 		{queue}
 		{editor}

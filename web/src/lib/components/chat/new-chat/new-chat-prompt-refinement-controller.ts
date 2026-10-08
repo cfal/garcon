@@ -11,7 +11,7 @@ import * as m from '$lib/paraglide/messages.js';
 import type { NewChatComposerEditorState } from './new-chat-composer-editor-state.svelte.js';
 
 interface NewChatPromptRefinementOptions {
-	form: Pick<NewChatFormState, 'firstMessage' | 'contentRevision'>;
+	form: Pick<NewChatFormState, 'firstMessage' | 'contentRevision' | 'agentId' | 'executorId'>;
 	notifications: Pick<NotificationsStore, 'info' | 'error'>;
 	transientLayers: TransientLayerRegistry;
 	editor: NewChatComposerEditorState;
@@ -82,9 +82,11 @@ export class NewChatPromptRefinementController {
 		this.options.closePromptSurfaces();
 
 		try {
-			const result = await this.#request.run({ draft: sourceText, target: 'prompt' });
+			const subject = { kind: 'selection' as const, agentId: this.options.form.agentId, executorId: this.options.form.executorId };
+			const result = await this.#request.run({ draft: sourceText, target: 'prompt', subject });
 			if (result.kind !== 'refined') return;
 			if (
+				this.options.form.agentId !== subject.agentId || this.options.form.executorId !== subject.executorId ||
 				this.options.form.contentRevision !== sourceRevision ||
 				this.options.form.firstMessage !== sourceText
 			) {

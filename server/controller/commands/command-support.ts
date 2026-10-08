@@ -95,6 +95,8 @@ export interface MetadataDep {
 export type AgentRegistryDep = Pick<
   AgentRegistryServiceContract,
   | 'hasAgent'
+  | 'executionPolicy'
+  | 'chatExecutionPolicy'
   | 'assertExecutorReady'
   | 'supportsImages'
   | 'supportsFileAttachmentMimeType'

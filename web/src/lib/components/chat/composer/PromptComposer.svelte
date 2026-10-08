@@ -112,6 +112,7 @@
 	const rootModelCatalog = getModelCatalog();
 	const executors = getExecutors();
 	const modelCatalog = $derived(rootModelCatalog.forExecutor(agentState.executorId));
+	const literalInput = $derived(modelCatalog.getAgent(agentState.agentId)?.executionPolicy === 'literal');
 	const providerAvailable = $derived(isCustomProviderSelectionAvailable(modelCatalog, agentState));
 	const filesAvailable = $derived(executors.filesAvailable(agentState.executorId));
 
@@ -275,7 +276,7 @@
 			return isPresented;
 		},
 		get startBlocked() {
-			return isDisabled || directAdmissionPending || snippetExpansion.pending;
+			return literalInput || isDisabled || directAdmissionPending || snippetExpansion.pending;
 		},
 	});
 	const promptTransformPending = $derived(snippetExpansion.pending || promptRefinement.pending);
@@ -555,7 +556,7 @@
 
 	function handleCompletionKeyDown(event: KeyboardEvent): boolean {
 		const showFileMenu = filesAvailable && ui.showFileMenu;
-		if (!showFileMenu && !ui.showSlashMenu) return false;
+		if (literalInput || (!showFileMenu && !ui.showSlashMenu)) return false;
 		const menu = showFileMenu ? fileMentionMenu : slashCommandMenu;
 		if (menu?.handleKeyDown(event)) return true;
 		if (menu && !showFileMenu && event.key === 'Enter') return false;
@@ -591,7 +592,7 @@
 
 	function handleFormSubmit(action: Exclude<ComposerEnterAction, 'newline'> = 'submit') {
 		if (!canSubmit || promptTransformPending) return;
-		const command = parseSnippetCommand(composerState.inputText);
+		const command = literalInput ? { kind: 'none' as const } : parseSnippetCommand(composerState.inputText);
 		if (command.kind === 'invalid') {
 			notifications.error(
 				command.error === 'short-name-required'
@@ -619,16 +620,15 @@
 		if (snippetExpansion.pending) snippetExpansion.cancel();
 		const value = target.value;
 		composerState.inputText = value;
-		const caret = textarea?.selectionStart ?? value.length;
 		ui.updateTriggers(
 			value,
-			caret,
+			textarea?.selectionStart ?? value.length,
 			localSettings.snippetTrigger,
 			(event as InputEvent).isComposing,
+			literalInput ? 'literal' : 'conversation',
 		);
 		queueCurrentDraft(value);
 	}
-
 	const selectedIsProcessing = $derived(isChatProcessing(sessions.selectedChat));
 	const thinkingReducedMotion = $derived(selectedIsProcessing && localSettings.reduceMotion);
 	const capabilityAgentId = $derived(sessions.selectedChat?.agentId ?? agentState.agentId);
@@ -639,7 +639,7 @@
 	const isDisabled = $derived(isDraftStartupSubmitting);
 	const controllerCommand = $derived(
 		sessions.selectedChat?.status === 'running' &&
-			isControllerSlashCommand(composerState.inputText),
+			!literalInput && isControllerSlashCommand(composerState.inputText),
 	);
 	// Loading is explained by the disabled send button so the composer keeps its height.
 	const modelsLoading = $derived(
@@ -728,7 +728,7 @@
 				executorId={agentState.executorId}
 				bind:this={fileMentionMenu}
 				projectPath={completionProjectPath}
-				isVisible={ui.showFileMenu && !showProjectNotice}
+				isVisible={!literalInput && ui.showFileMenu && !showProjectNotice}
 				projectPending={Boolean(
 					selectedProjectTarget &&
 					(selectedProjectResolution.kind === 'unchecked' ||
@@ -742,7 +742,7 @@
 			/>
 		{/if}
 		<ComposerSnippetPalette
-			open={ui.snippetPalette.isOpen}
+			open={!literalInput && ui.snippetPalette.isOpen}
 			onOpenChange={(nextOpen) => {
 				// The hidden trigger remains available to the chained insertion.
 				if (!nextOpen) ui.snippetPalette.hide();
@@ -838,12 +838,13 @@
 			</div>
 
 			<ComposerBottomBar
+				showAddMenu={!literalInput}
 				canAttachImages={canAttachAttachments}
 				attachImagesTooltip={m.chat_composer_image_attachments_unavailable()}
 				onAddImage={() => attachmentController.pick()}
 				onOpenSnippetPalette={() => ui.snippetPalette.openFromMenu()}
 				onOpenExpandedEditor={() => expandedEditor?.open()}
-				onRefinePrompt={() => promptRefinement.handleAction()}
+				onRefinePrompt={literalInput ? undefined : () => promptRefinement.handleAction()}
 				canRefinePrompt={promptRefinement.canStart}
 				isPromptRefinementPending={promptRefinement.pending}
 				addMenuDisabled={isDisabled}
@@ -903,7 +904,7 @@
 			executorId={agentState.executorId}
 			projectPath={completionProjectPath}
 			chatId={selectedProjectTarget?.kind === 'chat' ? sessions.selectedChatId : null}
-			isVisible={ui.showSlashMenu && executors.isReady(agentState.executorId) && !showProjectNotice}
+			isVisible={!literalInput && ui.showSlashMenu && executors.isReady(agentState.executorId) && !showProjectNotice}
 			projectPending={Boolean(
 				selectedProjectTarget &&
 				(selectedProjectResolution.kind === 'unchecked' ||
@@ -939,6 +940,6 @@
 	{promptTransformPending}
 	isPromptRefinementPending={promptRefinement.pending}
 	canRefinePrompt={promptRefinement.canStart}
-	onRefinePrompt={() => promptRefinement.handleAction()}
+	onRefinePrompt={literalInput ? undefined : () => promptRefinement.handleAction()}
 	openRequestId={composerEditorOpenRequestId}
 />

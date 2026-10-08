@@ -65,6 +65,7 @@ function makeRouter(overrides = {}) {
   const providerTarget = overrides.providerTarget ?? {};
   const captureTarget = overrides.captureTarget ?? mock(async () => providerTarget);
   const integration = {
+    literalExecution: overrides.literalExecution ?? null,
     producers: producer.producers,
     descriptor: {
       id: 'test',
@@ -139,6 +140,18 @@ function makeRouter(overrides = {}) {
 }
 
 describe('AgentRuntimeRouter producer boundary', () => {
+  it('dispatches only the exact literal submission without reading history, expanding files, or planning AI context', async () => {
+    const forbidden = mock(() => { throw new Error('Conversational transformation invoked'); });
+    const source = '  /bin/cat @notes.txt\n  ';
+    const { router, start } = makeRouter({
+      literalExecution: { selectionLabel: 'Runtime' },
+      composition: { inserted: true, input: inputRow(2, source), prompt: [inputRow(1, 'never resend'), inputRow(2, source)], providerPrefix: 'never prepend' },
+      conversationMessages: forbidden, createCarriedContext: forbidden, resolveFileMentions: forbidden,
+    });
+    await router.runAgentTurn('chat-1', 'fallback', { clientMessageId: 'message-2', turnId: 'turn-1' });
+    expect(start.mock.calls[0][0]).toMatchObject({ prompt: source, carriedContext: null, attachments: [] });
+    expect(forbidden).not.toHaveBeenCalled();
+  });
   it('forwards actual compaction and context readiness in order before provider startup', async () => {
     const observed = [];
     const f = makeRouter({

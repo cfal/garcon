@@ -20,7 +20,7 @@
 		onCreate: (content: string) => Promise<void>;
 		onReplace: (entryId: string, content: string, expectedRevision: number) => Promise<void>;
 		onExpand: () => void;
-		onRefinePrompt: () => void;
+		onRefinePrompt?: () => void;
 		onClose: (restoreEntryId?: string | null) => void;
 	}
 

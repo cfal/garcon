@@ -15,6 +15,8 @@ function dependencies() {
       })),
     },
     agents: {
+      executionPolicy: () => 'conversation',
+      chatExecutionPolicy: () => 'conversation',
       getAgentAuthStatusMap: mock(() => Promise.resolve({})),
       getAgentReadinessMap: mock(() => Promise.resolve({})),
       getAgentCatalogEntries: mock(() => Promise.resolve([])),
@@ -46,7 +48,7 @@ describe('prompt refinement routes', () => {
     const handler = routes['/api/v1/prompts/refine'].POST;
     expect(isNoAuthHandler(handler)).toBe(false);
 
-    const result = await post(routes, { draft: 'rough request', target: 'prompt' });
+    const result = await post(routes, { draft: 'rough request', target: 'prompt', subject: { kind: 'selection', agentId: 'claude', executorId: 'local' } });
     expect(result.response.status).toBe(200);
     expect(result.body).toEqual({ success: true, refinedPrompt: 'Refined request' });
     expect(deps.agents.runSingleQuery).toHaveBeenCalledTimes(1);
@@ -75,7 +77,7 @@ describe('prompt refinement routes', () => {
     });
 
     deps.agents.runSingleQuery.mockRejectedValueOnce(new Error('private provider detail'));
-    const failed = await post(routes, { draft: 'rough request', target: 'prompt' });
+    const failed = await post(routes, { draft: 'rough request', target: 'prompt', subject: { kind: 'selection', agentId: 'claude', executorId: 'local' } });
     expect(failed.response.status).toBe(502);
     expect(failed.body).toMatchObject({
       success: false,

@@ -21,6 +21,8 @@ const integration = {
     configuration: [],
   },
   attachments: null,
+  literalExecution: null,
+  readiness: null,
   execution: {
     start: async () => createAgentResourceRef(scope, 'execution'),
     resume: async () => createAgentResourceRef(scope, 'execution'),

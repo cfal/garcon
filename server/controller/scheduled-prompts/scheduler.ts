@@ -219,7 +219,7 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
       await this.#reconcileMissed(fixedNow ?? new Date(), false);
       const now = fixedNow ?? new Date();
       const chatId = typeof request?.chatId === 'string' ? request.chatId.trim() : '';
-      const prompt = typeof request?.prompt === 'string' ? request.prompt.trim() : '';
+      const prompt = typeof request?.prompt === 'string' ? request.prompt : '';
       const durationToken = typeof request?.duration === 'string' ? request.duration : '';
       const duration = parseScheduleDuration(durationToken);
       if (!duration.ok) throw scheduleDurationDomainError(duration.error);
