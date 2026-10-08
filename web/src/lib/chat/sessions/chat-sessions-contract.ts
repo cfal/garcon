@@ -7,7 +7,7 @@ import type {
 	replaceChatTags,
 	setLastSelectedChat,
 	transitionChatTags,
-	toggleArchive,
+	setChatArchived,
 } from '$lib/api/chats.js';
 import type { updateSessionName } from '$lib/api/settings.js';
 import type { ChatSessionRecord, ChatStartupConfig } from '$lib/chat/sessions/chat-session-types';
@@ -37,7 +37,7 @@ export interface ChatSessionsStoreDeps {
 	applyChatTagDelta?: typeof applyChatTagDelta;
 	transitionChatTags?: typeof transitionChatTags;
 	recoverChatTags?: typeof recoverChatTags;
-	toggleArchive?: typeof toggleArchive;
+	setChatArchived?: typeof setChatArchived;
 	notifyError?: (message: string) => void;
 }
 

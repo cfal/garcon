@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { ArchiveUndoController } from '$lib/chat/actions/archive-undo-controller.js';
 	import { onDestroy, onMount, tick, untrack } from 'svelte';
 	import { MediaQuery } from 'svelte/reactivity';
 	import { Dialog as DialogPrimitive } from 'bits-ui';
@@ -124,6 +125,8 @@
 		},
 		restoreFocus: restoreMobileSidebarFocus,
 	});
+	const archiveUndo = new ArchiveUndoController(sessions, notifications);
+	$effect(() => archiveUndo.reconcile());
 	const chatActionController = new ChatActionController({
 		get chats() {
 			return sessions.orderedChats;
@@ -137,8 +140,8 @@
 		projectPathRevision: (chatId) => sessions.projectPathRevision(chatId),
 		onQuietRefresh: quietRefresh,
 		isArchiveMutationPending: (chatId) => sessions.isArchiveMutationPending(chatId),
-		startArchivingChats: (chatIds) => sessions.startArchivingChats(chatIds),
-		startUnarchivingChats: (chatIds) => sessions.startUnarchivingChats(chatIds),
+		startArchivingChats: (chatIds) => archiveUndo.startArchivingChats(chatIds),
+		startUnarchivingChats: (chatIds) => archiveUndo.startUnarchivingChats(chatIds),
 		onSelectChat: handleChatSelect,
 		onNewChat: handleNewChat,
 		onDeleteChat: handleChatDelete,
@@ -628,6 +631,7 @@
 	);
 	onMount(() => chatDrafts.mountPersistenceLifecycle());
 	onDestroy(() => {
+		archiveUndo.destroy();
 		chatNavigation.destroy();
 		chatDrafts.destroy();
 	});
@@ -693,8 +697,8 @@
 		onToggleArchive={(id) => chatActionController.toggleArchive(id)}
 		isArchiveMutationPending={(id) => sessions.isArchiveMutationPending(id)}
 		isChatOptimisticallyArchived={(id) => sessions.isChatOptimisticallyArchived(id)}
-		startArchivingChats={(chatIds) => sessions.startArchivingChats(chatIds)}
-		startUnarchivingChats={(chatIds) => sessions.startUnarchivingChats(chatIds)}
+		startArchivingChats={(chatIds) => archiveUndo.startArchivingChats(chatIds)}
+		startUnarchivingChats={(chatIds) => archiveUndo.startUnarchivingChats(chatIds)}
 		onShowDetails={requestDetailsChat}
 		onForkChat={(id) => chatActionController.forkChat(id)}
 		onShareChat={requestShareChat}

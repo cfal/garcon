@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatSessionsStore } from '../chat-sessions.svelte';
+import { ArchiveUndoController } from '$lib/chat/actions/archive-undo-controller.js';
+import { NotificationsStore } from '$lib/stores/notifications.svelte.js';
+import type { SetChatOrderStateResponse } from '$shared/chat-order-contracts';
 import type { ChatListEntry } from '$shared/chat-list';
 import { ApiError, ApiMutationOutcomeUnknownError } from '$lib/api/client';
 import { ChatTagMutationBlockedError } from '../chat-tag-mutation-result.js';
@@ -15,7 +18,7 @@ vi.mock('$lib/api/chats.js', async (importOriginal) => ({
 	applyChatTagDelta: vi.fn(),
 	transitionChatTags: vi.fn(),
 	recoverChatTags: vi.fn(),
-	toggleArchive: vi.fn(),
+	setChatArchived: vi.fn(),
 }));
 
 vi.mock('$lib/api/settings.js', () => ({
@@ -29,7 +32,7 @@ import {
 	reorderChat,
 	replaceChatTags,
 	setLastSelectedChat,
-	toggleArchive,
+	setChatArchived,
 } from '$lib/api/chats.js';
 import { updateSessionName } from '$lib/api/settings.js';
 
@@ -39,8 +42,12 @@ const mockSetLastSelectedChat = vi.mocked(setLastSelectedChat);
 const mockGenerateChatTitle = vi.mocked(generateChatTitle);
 const mockReorderChat = vi.mocked(reorderChat);
 const mockReplaceChatTags = vi.mocked(replaceChatTags);
-const mockToggleArchive = vi.mocked(toggleArchive);
+const mockSetChatArchived = vi.mocked(setChatArchived);
 const mockUpdateSessionName = vi.mocked(updateSessionName);
+
+function archivedState(chatId: string, isArchived = true): SetChatOrderStateResponse {
+	return { success: true, chatId, isArchived, isPinned: false, orderGroup: isArchived ? "archived" : "normal", changed: true };
+}
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
@@ -223,13 +230,13 @@ describe('ChatSessionsStore IO', () => {
 	});
 
 	it('projects an archive at the front of the archived list until refresh reconciles it', async () => {
-		const archive = deferred<{ success: boolean; isArchived: boolean }>();
+		const archive = deferred<SetChatOrderStateResponse>();
 		const refresh = deferred<{
 			sessions: ChatListEntry[];
 			total: number;
 			lastSelectedChatId: string | null;
 		}>();
-		mockToggleArchive.mockReturnValue(archive.promise);
+		mockSetChatArchived.mockReturnValue(archive.promise);
 		mockListChats.mockReturnValue(refresh.promise);
 		const store = new ChatSessionsStore();
 		store.upsertFromServer([
@@ -253,9 +260,9 @@ describe('ChatSessionsStore IO', () => {
 		]);
 		expect(store.startArchivingChats(['target']).chatIds).toEqual([]);
 		await flushMicrotasks();
-		expect(mockToggleArchive).toHaveBeenCalledOnce();
+		expect(mockSetChatArchived).toHaveBeenCalledOnce();
 
-		archive.resolve({ success: true, isArchived: true });
+		archive.resolve(archivedState("target"));
 		await flushMicrotasks();
 		expect(store.isArchiveMutationPending('target')).toBe(true);
 		refresh.resolve({
@@ -276,8 +283,49 @@ describe('ChatSessionsStore IO', () => {
 		]);
 	});
 
+	it.each(['mixed batch', 'lost response'])('offers Undo for reconciled archives after %s', async (scenario) => {
+		const archivedId = scenario === 'mixed batch' ? 'second' : 'first';
+		const chatIds = scenario === 'mixed batch' ? ['first', 'second'] : ['first'];
+		mockSetChatArchived.mockImplementation(async ({ chatId }) => {
+			if (chatId === 'first') throw new Error('response lost');
+			return archivedState(chatId);
+		});
+		mockListChats.mockResolvedValue({ sessions: chatIds.map((id) => makeServerSession({ id, isArchived: id === archivedId, orderGroup: id === archivedId ? 'archived' : 'normal' })), total: chatIds.length, lastSelectedChatId: null });
+		const store = new ChatSessionsStore();
+		store.upsertFromServer(chatIds.map((id) => makeServerSession({ id })));
+		const notifications = new NotificationsStore();
+		const controller = new ArchiveUndoController(store, notifications);
+		const restore = vi.spyOn(store, 'startUnarchivingChats').mockReturnValue({ chatIds: [archivedId], completion: Promise.resolve() });
+		await expect(controller.startArchivingChats(chatIds).completion).rejects.toThrow('response lost');
+		expect(notifications.items).toHaveLength(1);
+		notifications.items[0]!.action!.onClick();
+		expect(restore).toHaveBeenCalledExactlyOnceWith([archivedId]);
+	});
+
+	it('Undo requests an explicit restore when another client already restored the stale local chat', async () => {
+		let serverArchived = true;
+		mockSetChatArchived.mockImplementation(async ({ chatId, isArchived }) => {
+			serverArchived = isArchived;
+			return archivedState(chatId, isArchived);
+		});
+		mockListChats.mockImplementation(async () => ({ sessions: [makeServerSession({ id: 'target', isArchived: serverArchived, orderGroup: serverArchived ? 'archived' : 'normal' })], total: 1, lastSelectedChatId: null }));
+		const store = new ChatSessionsStore();
+		store.upsertFromServer([makeServerSession({ id: 'target' })]);
+		const notifications = new NotificationsStore();
+		const controller = new ArchiveUndoController(store, notifications);
+		await controller.startArchivingChats(['target']).completion;
+		serverArchived = false;
+		expect(store.byId.target?.isArchived).toBe(true);
+		const restore = vi.spyOn(store, 'startUnarchivingChats');
+		notifications.items[0]!.action!.onClick();
+		await restore.mock.results[0]!.value.completion;
+		expect(mockSetChatArchived).toHaveBeenLastCalledWith({ chatId: 'target', isArchived: false });
+		expect(serverArchived).toBe(false);
+		expect(store.byId.target?.isArchived).toBe(false);
+	});
+
 	it('uses refreshed server truth when an archive response fails after committing', async () => {
-		mockToggleArchive.mockRejectedValue(new Error('response lost'));
+		mockSetChatArchived.mockRejectedValue(new Error('response lost'));
 		mockListChats.mockResolvedValue({
 			sessions: [makeServerSession({ id: 'target', isArchived: true, orderGroup: 'archived' })],
 			total: 1,
@@ -296,7 +344,7 @@ describe('ChatSessionsStore IO', () => {
 
 	it('restores the latest local record when archive mutation and recovery refresh fail', async () => {
 		vi.spyOn(console, 'error').mockImplementation(() => undefined);
-		mockToggleArchive.mockRejectedValue(new Error('offline'));
+		mockSetChatArchived.mockRejectedValue(new Error('offline'));
 		mockListChats.mockRejectedValue(new Error('refresh offline'));
 		const store = new ChatSessionsStore();
 		store.upsertFromServer([
@@ -304,7 +352,9 @@ describe('ChatSessionsStore IO', () => {
 			makeServerSession({ id: 'archived', isArchived: true, orderGroup: 'archived' }),
 		]);
 
-		const mutation = store.startArchivingChats(['target']);
+		const notifications = new NotificationsStore();
+		const controller = new ArchiveUndoController(store, notifications);
+		const mutation = controller.startArchivingChats(['target']);
 		store.patchChat('target', { title: 'Updated while pending' });
 		await expect(mutation.completion).rejects.toThrow('offline');
 
@@ -315,11 +365,12 @@ describe('ChatSessionsStore IO', () => {
 			orderGroup: 'normal',
 		});
 		expect(store.order).toEqual(['target', 'archived']);
+		expect(notifications.items).toHaveLength(0);
 	});
 
 	it('keeps an acknowledged archive when reconciliation fails', async () => {
 		vi.spyOn(console, 'error').mockImplementation(() => undefined);
-		mockToggleArchive.mockResolvedValue({ success: true, isArchived: true });
+		mockSetChatArchived.mockResolvedValue(archivedState("target"));
 		mockListChats.mockRejectedValue(new Error('refresh offline'));
 		const store = new ChatSessionsStore();
 		store.upsertFromServer([
@@ -336,7 +387,7 @@ describe('ChatSessionsStore IO', () => {
 
 	it('keeps an acknowledged archive when a tag response settles during failed reconciliation', async () => {
 		vi.spyOn(console, 'error').mockImplementation(() => undefined);
-		const archive = deferred<{ success: boolean; isArchived: boolean }>();
+		const archive = deferred<SetChatOrderStateResponse>();
 		const refresh = deferred<{
 			sessions: ChatListEntry[];
 			total: number;
@@ -355,13 +406,13 @@ describe('ChatSessionsStore IO', () => {
 		const store = new ChatSessionsStore({
 			listChats,
 			applyChatTagDelta,
-			toggleArchive: () => archive.promise,
+			setChatArchived: () => archive.promise,
 		});
 		store.upsertFromServer([makeServerSession({ id: 'target' })]);
 
 		const archiveMutation = store.startArchivingChats(['target']);
 		await flushMicrotasks();
-		archive.resolve({ success: true, isArchived: true });
+		archive.resolve(archivedState("target"));
 		await vi.waitFor(() => expect(listChats).toHaveBeenCalledOnce());
 
 		await store.applyChatTagDelta({ chatId: 'target', addTags: ['urgent'] });
@@ -386,7 +437,7 @@ describe('ChatSessionsStore IO', () => {
 		mockListChats
 			.mockReturnValueOnce(staleRefresh.promise)
 			.mockRejectedValueOnce(new Error('follow-up refresh failed'));
-		mockToggleArchive.mockResolvedValue({ success: true, isArchived: true });
+		mockSetChatArchived.mockResolvedValue(archivedState("target"));
 		const store = new ChatSessionsStore();
 		store.upsertFromServer([makeServerSession({ id: 'target' })]);
 
@@ -412,10 +463,10 @@ describe('ChatSessionsStore IO', () => {
 			total: number;
 			lastSelectedChatId: string | null;
 		}>();
-		const secondArchive = deferred<{ success: boolean; isArchived: boolean }>();
-		mockToggleArchive.mockImplementation((chatId) =>
+		const secondArchive = deferred<SetChatOrderStateResponse>();
+		mockSetChatArchived.mockImplementation(({ chatId }) =>
 			chatId === 'first'
-				? Promise.resolve({ success: true, isArchived: true })
+				? Promise.resolve(archivedState("first"))
 				: secondArchive.promise,
 		);
 		mockListChats
@@ -430,7 +481,7 @@ describe('ChatSessionsStore IO', () => {
 		const firstMutation = store.startArchivingChats(['first']);
 		await vi.waitFor(() => expect(mockListChats).toHaveBeenCalledOnce());
 		const secondMutation = store.startArchivingChats(['second']);
-		secondArchive.resolve({ success: true, isArchived: true });
+		secondArchive.resolve(archivedState("second"));
 		await flushMicrotasks();
 		firstRefresh.resolve({
 			sessions: [
@@ -453,9 +504,9 @@ describe('ChatSessionsStore IO', () => {
 
 	it('preserves newer server truth for an early-settling bulk archive', async () => {
 		vi.spyOn(console, 'error').mockImplementation(() => undefined);
-		const firstArchive = deferred<{ success: boolean; isArchived: boolean }>();
-		const secondArchive = deferred<{ success: boolean; isArchived: boolean }>();
-		mockToggleArchive.mockImplementation((chatId) =>
+		const firstArchive = deferred<SetChatOrderStateResponse>();
+		const secondArchive = deferred<SetChatOrderStateResponse>();
+		mockSetChatArchived.mockImplementation(({ chatId }) =>
 			chatId === 'first' ? firstArchive.promise : secondArchive.promise,
 		);
 		mockListChats
@@ -476,11 +527,11 @@ describe('ChatSessionsStore IO', () => {
 
 		const mutation = store.startArchivingChats(['first', 'second']);
 		await flushMicrotasks();
-		firstArchive.resolve({ success: true, isArchived: true });
+		firstArchive.resolve(archivedState("first"));
 		await flushMicrotasks();
 		await store.quietRefreshChats();
 
-		secondArchive.resolve({ success: true, isArchived: true });
+		secondArchive.resolve(archivedState("second"));
 		await mutation.completion;
 
 		expect(mockListChats).toHaveBeenCalledTimes(2);
@@ -494,10 +545,10 @@ describe('ChatSessionsStore IO', () => {
 
 	it('preserves a newer single-chat server response after a bulk member settles', async () => {
 		vi.spyOn(console, 'error').mockImplementation(() => undefined);
-		const secondArchive = deferred<{ success: boolean; isArchived: boolean }>();
-		mockToggleArchive.mockImplementation((chatId) =>
+		const secondArchive = deferred<SetChatOrderStateResponse>();
+		mockSetChatArchived.mockImplementation(({ chatId }) =>
 			chatId === 'first'
-				? Promise.resolve({ success: true, isArchived: true })
+				? Promise.resolve(archivedState("first"))
 				: secondArchive.promise,
 		);
 		mockListChats.mockRejectedValue(new Error('final refresh failed'));
@@ -512,7 +563,7 @@ describe('ChatSessionsStore IO', () => {
 		store.upsertServerChat(
 			makeServerSession({ id: 'first', isPinned: true, orderGroup: 'pinned' }),
 		);
-		secondArchive.resolve({ success: true, isArchived: true });
+		secondArchive.resolve(archivedState("second"));
 		await mutation.completion;
 
 		expect(store.byId.first).toMatchObject({
@@ -524,9 +575,9 @@ describe('ChatSessionsStore IO', () => {
 	});
 
 	it('keeps a newer optimistic archive when disjoint operations settle in reverse order', async () => {
-		const firstArchive = deferred<{ success: boolean; isArchived: boolean }>();
-		const secondArchive = deferred<{ success: boolean; isArchived: boolean }>();
-		mockToggleArchive.mockImplementation((chatId) =>
+		const firstArchive = deferred<SetChatOrderStateResponse>();
+		const secondArchive = deferred<SetChatOrderStateResponse>();
+		mockSetChatArchived.mockImplementation(({ chatId }) =>
 			chatId === 'first' ? firstArchive.promise : secondArchive.promise,
 		);
 		mockListChats
@@ -556,22 +607,22 @@ describe('ChatSessionsStore IO', () => {
 		const secondMutation = store.startArchivingChats(['second']);
 		expect(store.orderedChats.map((chat) => chat.id)).toEqual(['second', 'first']);
 
-		secondArchive.resolve({ success: true, isArchived: true });
+		secondArchive.resolve(archivedState("second"));
 		await secondMutation.completion;
 		expect(store.byId.first?.isArchived).toBe(true);
 		expect(store.isArchiveMutationPending('first')).toBe(true);
 		expect(store.isArchiveMutationPending('second')).toBe(false);
 
-		firstArchive.resolve({ success: true, isArchived: true });
+		firstArchive.resolve(archivedState("first"));
 		await firstMutation.completion;
 		expect(store.orderedChats.map((chat) => chat.id)).toEqual(['first', 'second']);
 		expect(store.isArchiveMutationPending('first')).toBe(false);
 	});
 
 	it('waits for every bulk archive result before one recovery refresh', async () => {
-		const first = deferred<{ success: boolean; isArchived: boolean }>();
-		const second = deferred<{ success: boolean; isArchived: boolean }>();
-		mockToggleArchive.mockImplementation((chatId) => {
+		const first = deferred<SetChatOrderStateResponse>();
+		const second = deferred<SetChatOrderStateResponse>();
+		mockSetChatArchived.mockImplementation(({ chatId }) => {
 			return chatId === 'first' ? first.promise : second.promise;
 		});
 		mockListChats.mockResolvedValue({
@@ -595,7 +646,7 @@ describe('ChatSessionsStore IO', () => {
 		expect(store.isArchiveMutationPending('first')).toBe(true);
 		expect(store.isArchiveMutationPending('second')).toBe(true);
 
-		second.resolve({ success: true, isArchived: true });
+		second.resolve(archivedState("second"));
 		await expect(mutation.completion).rejects.toThrow('first failed');
 
 		expect(mockListChats).toHaveBeenCalledOnce();
@@ -606,8 +657,8 @@ describe('ChatSessionsStore IO', () => {
 	});
 
 	it('keeps unarchive placement unchanged until the mutation reconciles', async () => {
-		const unarchive = deferred<{ success: boolean; isArchived: boolean }>();
-		mockToggleArchive.mockReturnValue(unarchive.promise);
+		const unarchive = deferred<SetChatOrderStateResponse>();
+		mockSetChatArchived.mockReturnValue(unarchive.promise);
 		mockListChats.mockResolvedValue({
 			sessions: [makeServerSession({ id: 'target', orderGroup: 'normal' })],
 			total: 1,
@@ -626,7 +677,7 @@ describe('ChatSessionsStore IO', () => {
 		expect(store.isChatOptimisticallyArchived('target')).toBe(false);
 		expect(store.order).toEqual(['archived-first', 'target']);
 		expect(store.startArchivingChats(['target']).chatIds).toEqual([]);
-		unarchive.resolve({ success: true, isArchived: false });
+		unarchive.resolve(archivedState("target", false));
 		await mutation.completion;
 
 		expect(store.byId.target?.isArchived).toBe(false);
@@ -634,8 +685,8 @@ describe('ChatSessionsStore IO', () => {
 	});
 
 	it('retains archive ownership while a removed chat is restored', async () => {
-		const archive = deferred<{ success: boolean; isArchived: boolean }>();
-		mockToggleArchive.mockReturnValue(archive.promise);
+		const archive = deferred<SetChatOrderStateResponse>();
+		mockSetChatArchived.mockReturnValue(archive.promise);
 		mockListChats.mockResolvedValue({
 			sessions: [makeServerSession({ id: 'target', isArchived: true, orderGroup: 'archived' })],
 			total: 1,
@@ -649,10 +700,10 @@ describe('ChatSessionsStore IO', () => {
 		expect(store.isArchiveMutationPending('target')).toBe(true);
 		await store.quietRefreshChats();
 		expect(store.startUnarchivingChats(['target']).chatIds).toEqual([]);
-		archive.resolve({ success: true, isArchived: true });
+		archive.resolve(archivedState("target"));
 		await mutation.completion;
 
-		expect(mockToggleArchive).toHaveBeenCalledOnce();
+		expect(mockSetChatArchived).toHaveBeenCalledOnce();
 		expect(store.byId.target).toMatchObject({ isArchived: true, orderGroup: 'archived' });
 		expect(store.isArchiveMutationPending('target')).toBe(false);
 	});

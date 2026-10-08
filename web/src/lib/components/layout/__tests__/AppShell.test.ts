@@ -14,6 +14,7 @@ import { WorkspaceInteractionGate } from '$lib/workspace/workspace-interaction-g
 import { page } from '$lib/mocks/app/state';
 import type { WorkspaceCoordinator } from '$lib/workspace/workspace-coordinator.svelte.js';
 import type { TicketsController } from '$lib/tickets/catalog/tickets-controller.svelte.js';
+import { NotificationsStore } from '$lib/stores/notifications.svelte.js';
 import type { WorkbenchCommandRegistry } from '$lib/workspace/workbench-commands.svelte.js';
 import { searchNavigationPort } from './app-shell-search-navigation-test-port.js';
 
@@ -168,6 +169,11 @@ function installContext(): AppShellBreakpointWorkspace {
 	vi.spyOn(appShell, 'requestComposerFocus');
 	vi.spyOn(appShell, 'requestSidebarRecenterToSelected');
 	const transientLayers = new TransientLayerRegistry(new WorkspaceInteractionGate());
+	const notifications = new NotificationsStore();
+	vi.spyOn(notifications, 'error');
+	vi.spyOn(notifications, 'info');
+	vi.spyOn(notifications, 'hasKey');
+	vi.spyOn(notifications, 'dismissKey');
 	let selectedChatId: string | null = null;
 	const sessions = {
 		orderedChats: [],
@@ -220,12 +226,7 @@ function installContext(): AppShellBreakpointWorkspace {
 		remoteSettings: { snapshot: null },
 		minuteClock: { currentTime: new Date('2025-01-02T00:00:00.000Z') },
 		terminals: { orderedSessions: [] },
-		notifications: {
-			error: vi.fn(),
-			info: vi.fn(),
-			hasKey: vi.fn(() => false),
-			dismissKey: vi.fn(),
-		},
+		notifications,
 		sidebarSearch: { filteredChats: [], allKnownTags: [], resetDialogs: vi.fn() },
 		projectCollapse: { collapsedProjectKeys: new Set<string>() },
 		ghCapability: { available: true },
