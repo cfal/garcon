@@ -3,6 +3,8 @@ import { EventEmitter } from 'events';
 import type { ProjectInspector } from '../../../common/project-resolution.js';
 import {
   normalizeScheduledPromptDefinitionInput,
+  hasLeadingSlashCommand,
+  scheduledPromptFitsRenderedLimit,
   isMinuteAlignedIso,
   isScheduledPromptIntervalMinutes,
   type ScheduleForChatRequest,
@@ -146,7 +148,7 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
       chats: Pick<IChatRegistry, 'getChat'>;
       agents: Pick<
         AgentRegistryServiceContract,
-        'hasAgent' | 'assertExecutorReady' | 'assertExecutionModeSelectionSupported'
+        'hasAgent' | 'assertExecutorReady' | 'assertExecutionModeSelectionSupported' | 'executionPolicy' | 'chatExecutionPolicy'
       >;
       preambles: Pick<PreambleService, 'snapshot'>;
       inspectProject: ProjectInspector;
@@ -248,6 +250,9 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
       const now = fixedNow ?? new Date();
       assertValidScheduleForChatRequest(request);
       await this.#reconcileMissed(now, false);
+      if (this.deps.agents.chatExecutionPolicy(request.chatId) === 'literal') {
+        throw new ScheduledPromptDomainError('UNSUPPORTED_CONTROL_INPUT', 'Conversational schedules cannot target literal execution.', 422);
+      }
       const firstRunAtUtc = request.firstRun.type === 'at'
         ? request.firstRun.atUtc
         : scheduleInRunAt(now, request.firstRun.type === 'after'
@@ -331,6 +336,7 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
     if (!definition) {
       throw new ScheduledPromptDomainError('SCHEDULED_PROMPT_VALIDATION_FAILED', 'Scheduled prompt is invalid', 400);
     }
+    const target = definition.target;
     const firstRunAt =
       definition.schedule.type === 'once' ? definition.schedule.runAtUtc : definition.schedule.firstRunAtUtc;
     if (Date.parse(firstRunAt) < nextMinute(now)) {
@@ -340,21 +346,29 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
         400,
       );
     }
-    if (definition.target.type === 'existing-chat') {
-      if (!this.deps.chats.getChat(definition.target.chatId)) {
+    if (target.type === 'existing-chat') {
+      if (!this.deps.chats.getChat(target.chatId)) {
         throw new ScheduledPromptDomainError('SESSION_NOT_FOUND', 'Selected chat was not found', 404);
       }
-      return definition;
+    } else {
+      this.deps.agents.assertExecutorReady(target.executorId);
+      if (!this.deps.agents.hasAgent(target.agentId, target.executorId)) {
+        throw new ScheduledPromptDomainError('UNSUPPORTED_AGENT', `Unsupported agent: ${target.agentId}`, 422);
+      }
+      this.deps.agents.assertExecutionModeSelectionSupported(target.agentId, {
+        executorId: target.executorId,
+        permissionMode: target.permissionMode,
+        thinkingMode: target.thinkingMode,
+      });
     }
-    this.deps.agents.assertExecutorReady(definition.target.executorId);
-    if (!this.deps.agents.hasAgent(definition.target.agentId, definition.target.executorId)) {
-      throw new ScheduledPromptDomainError('UNSUPPORTED_AGENT', `Unsupported agent: ${definition.target.agentId}`, 422);
+    const policy = target.type === 'existing-chat'
+      ? this.deps.agents.chatExecutionPolicy(target.chatId)
+      : this.deps.agents.executionPolicy(target.agentId, target.executorId);
+    if (policy === 'conversation') {
+      if (hasLeadingSlashCommand(definition.prompt) || !scheduledPromptFitsRenderedLimit(definition.prompt.trim())) {
+        throw new ScheduledPromptDomainError('SCHEDULED_PROMPT_VALIDATION_FAILED', 'Scheduled prompt is invalid', 400);
+      }
     }
-    this.deps.agents.assertExecutionModeSelectionSupported(definition.target.agentId, {
-      executorId: definition.target.executorId,
-      permissionMode: definition.target.permissionMode,
-      thinkingMode: definition.target.thinkingMode,
-    });
     return definition;
   }
 
@@ -371,7 +385,7 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
       throw new ScheduledPromptDomainError('PROJECT_PATH_NOT_FOUND', 'Project path was not found', 404);
     }
     const canonicalProjectPath = resolution.effectiveProjectKey;
-    if (target.preambleChoice.mode === 'explicit') {
+    if (this.deps.agents.executionPolicy(target.agentId, target.executorId) === 'conversation' && target.preambleChoice.mode === 'explicit') {
       try {
         resolveNewChatPreambleSelection({
           catalog: this.deps.preambles.snapshot(),
@@ -423,6 +437,10 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
     now: Date,
     createdAt = now.toISOString(),
   ): ScheduledPrompt {
+    const target = definition.target;
+    const policy = target.type === 'existing-chat'
+      ? this.deps.agents.chatExecutionPolicy(target.chatId)
+      : this.deps.agents.executionPolicy(target.agentId, target.executorId);
     return {
       id,
       schedule:
@@ -435,7 +453,8 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
               endAt: definition.schedule.endAtUtc,
             },
       target: structuredClone(definition.target),
-      prompt: definition.prompt,
+      prompt: policy === 'literal' ? definition.prompt : definition.prompt.trim(),
+      ...(policy === 'literal' ? { contentMode: 'literal' as const } : {}),
       createdAt,
       updatedAt: now.toISOString(),
     };

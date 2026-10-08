@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { ExecutorsChangedMessage } from '../../../common/ws-events.js';
+import type { ExecutorsChangedMessage, ScheduledPromptsInvalidatedMessage } from '../../../common/ws-events.js';
 import { tcpLinkProxy } from '../../../server/remote/__tests__/tcp-link-proxy.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { waitForExecutorReconnect } from '../../support/executor-link.js';
@@ -23,6 +23,7 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
           await Bun.sleep(10);
         }
         expect(await readFile(join(executionDirs.project, 'executions'), 'utf8')).toBe('once');
+        expect((await client.getMessages(chatId)).messages.some(row => row.message.type === 'command-output')).toBe(false);
         const cursor = client.markEvents();
         proxy!.refuseConnections();
         proxy!.disconnect();
@@ -65,6 +66,14 @@ test('handoff into literal execution retains history without AI preparation or r
       projectPath: fixture.executionDirs.project, content: 'Synthetic historical request' });
     await client.waitForTurnTerminal(chatId, first.turnId);
     await client.waitForProcessing(chatId, false);
+    const scheduled = await client.getScheduledPrompts();
+    const runAt = Math.ceil((Date.now() + 15_000) / 60_000) * 60_000;
+    await client.createScheduledPrompt({ expectedRevision: scheduled.revision, scheduledPrompt: {
+      schedule: { type: 'once', runAtUtc: new Date(runAt).toISOString() },
+      target: { type: 'existing-chat', chatId, busyBehavior: 'queue' },
+      prompt: 'touch inherited-schedule-ran',
+    } });
+    const scheduleCursor = client.markEvents();
     const requests = fixture.fakeProviders.openAi.requests().length;
     const chat = (await client.listChats()).sessions.find(chat => chat.id === chatId)!;
     const switched = await client.runChat({ chatId, clientRequestId: crypto.randomUUID(), clientMessageId: crypto.randomUUID(),
@@ -82,5 +91,13 @@ test('handoff into literal execution retains history without AI preparation or r
       ? [message.content] : []).join('')).toBe('current-command');
     expect(fixture.fakeProviders.openAi.requests()).toHaveLength(requests);
     expect(fixture.fakeProviders.anthropic.requests()).toHaveLength(0);
+    await client.waitForEvent(
+      (event): event is ScheduledPromptsInvalidatedMessage => event.type === 'scheduled-prompts-invalidated'
+        && event.reason === 'executed',
+      'inherited schedule rejection', { afterIndex: scheduleCursor, timeoutMs: 90_000 },
+    );
+    expect((await client.getScheduledPrompts()).runLog).toContainEqual(expect.objectContaining({ outcome: 'failed' }));
+    expect(await Bun.file(join(fixture.executionDirs.project, 'inherited-schedule-ran')).exists()).toBe(false);
+    expect(fixture.fakeProviders.openAi.requests()).toHaveLength(requests);
   });
-}, 60_000);
+}, 120_000);

@@ -33,6 +33,7 @@
 		remoteSettings: RemoteSettingsStore;
 		getSelectableAgentIds: (executorId: string) => readonly SessionAgentId[];
 		prompt: string;
+		conversationInput: boolean;
 		promptError: string | null;
 		knownTags: string[];
 		isMobile: boolean;
@@ -50,6 +51,7 @@
 		remoteSettings,
 		getSelectableAgentIds,
 		prompt,
+		conversationInput,
 		promptError,
 		knownTags,
 		isMobile,
@@ -207,6 +209,7 @@
 		{/if}
 	</div>
 
+	{#if conversationInput}
 	<div class="space-y-1.5" data-slot="scheduled-new-chat-preambles">
 		<NewChatPreambleControls
 			selection={startup.preambles}
@@ -224,7 +227,9 @@
 		</p>
 	</div>
 
+	{/if}
 	<ScheduledPromptField
+		templateVariables={conversationInput}
 		bind:ref={textarea}
 		{prompt}
 		{promptError}

@@ -17,7 +17,6 @@ import { QueueExecutionAttempt } from './execution-attempt.ts';
 import type { QueuedTurnFinalizationOutcome } from './turn-finalization-tracker.js';
 import {
   hasPendingTurnInput,
-  type StoredControlInputEntry,
   type StoredChatExecutionControlState,
 } from './control-state.ts';
 import type { ChatExecutionControlRepository } from './chat-execution-control-repository.ts';
@@ -39,6 +38,7 @@ import {
   type AgentTurnRunnerPort,
   type ChatExecutionService,
   type ChatExecutionCoordinatorEvents,
+  type ChatExecutionCoordinatorOptions,
   type ChatExistsResolver,
   type CapturedSteerTarget,
   type ChatIdleCallback,
@@ -67,7 +67,7 @@ import { ExecutionOwnership } from './execution-ownership.ts';
 import { AcceptedInputHandler } from './accepted-input-handler.ts';
 import { AcceptedInputTranscript, type AcceptedInputTranscriptPort } from './accepted-input-transcript.ts';
 import { SteerInputDelivery } from './steer-input-delivery.ts';
-import { QueuedSteerDelivery, type QueuedSteerDeliveryOptions } from './queued-steer-delivery.ts';
+import { QueuedSteerDelivery } from './queued-steer-delivery.ts';
 import { ControlInputDelivery } from './control-input-delivery.ts';
 import { settleAgentTurn } from './turn-terminal-settlement.js';
 import { assertControlInputSupported, controlInputBlockedError, serverShuttingDownError, chatNotFoundError } from './execution-errors.js';
@@ -88,19 +88,6 @@ export {
 } from './types.ts';
 
 const logger = createLogger('queue');
-
-interface ChatExecutionCoordinatorOptions {
-  executionPolicy?: (chatId: string) => 'conversation' | 'literal';
-  workingDirectorySettlement?: WorkingDirectorySettlementPort;
-  projectAdmission: ProjectAdmissionPort;
-  attachmentAdmission: QueuedAttachmentAdmissionPort;
-  canDispatch?: (chatId: string) => boolean;
-  isControlInputViewCurrent: (chatId: string, viewId: string) => boolean;
-  unsettledQueueReceiptKeys?: (chatId: string) => ReadonlySet<string>;
-  appendControlReceipt?: (chatId: string, entry: StoredControlInputEntry) => void;
-  selectionAdmissionLock?: KeyedPromiseLock;
-  resolveSteerContent?: QueuedSteerDeliveryOptions['resolveContent'];
-}
 
 export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordinatorEvents> implements ChatExecutionService {
   #locks = new KeyedPromiseLock();
@@ -129,7 +116,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     getDrainOptions: QueueDrainOptionsResolver,
     chatExists: ChatExistsResolver,
     controls: ChatExecutionControlRepository,
-    options: ChatExecutionCoordinatorOptions,
+    options: ChatExecutionCoordinatorOptions & { selectionAdmissionLock?: KeyedPromiseLock },
   ) {
     super();
     if (!turnRunner) throw new Error('ChatExecutionCoordinator requires an agent turn runner');
@@ -236,6 +223,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       callbacks: {
         canDispatch: this.#canDispatch,
         isShuttingDown: () => this.#shuttingDown,
+        executionPolicy: this.#executionPolicy,
         registerQueued: (chatId, content, options) => (
           this.#acceptedInputTranscript.registerQueued(chatId, content, options)
         ),
@@ -872,18 +860,26 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       return;
     }
     const attempt = this.#ownership.attempt(reservation.chatId);
-    if (outcome === 'failed' && !attempt?.hasTerminalCommit && this.#executionPolicy(reservation.chatId) === 'literal') {
-      const turnId = attempt?.identity().turnId;
-      if (turnId) await this.#controlOperations.pauseAfterTurnFailure(reservation.chatId, turnId);
-      if (!this.#ownership.isDirectCurrent(reservation)) return;
+    let released = false;
+    try {
+      if (outcome === 'failed' && !attempt?.hasTerminalCommit && this.#chatExists(reservation.chatId)
+        && this.#executionPolicy(reservation.chatId) === 'literal') {
+        const turnId = attempt?.identity().turnId;
+        if (turnId) await this.#controlOperations.pauseAfterTurnFailure(reservation.chatId, turnId);
+      }
+    } finally {
+      if (this.#ownership.isDirectCurrent(reservation)) {
+        this.#ownership.releaseDirect(reservation);
+        released = true;
+        if (attempt && outcome !== 'completed' && !attempt.hasTerminalCommit && !this.#turnRunner.isChatRunning(reservation.chatId)) {
+          this.#retireAttempt(reservation.chatId, attempt);
+        }
+        this.#ownership.notifyOwnersChanged();
+        this.#invalidateProcessing(reservation.chatId);
+      }
     }
-    this.#ownership.releaseDirect(reservation);
-    if (attempt && outcome !== 'completed' && !attempt.hasTerminalCommit && !this.#turnRunner.isChatRunning(reservation.chatId)) {
-      this.#retireAttempt(reservation.chatId, attempt);
-    }
+    if (!released) return;
     const drainRequested = this.#ownership.hasDrainRequest(reservation.chatId);
-    this.#ownership.notifyOwnersChanged();
-    this.#invalidateProcessing(reservation.chatId);
     if (!this.#chatExists(reservation.chatId) || this.#shuttingDown) return;
     if (outcome !== 'released' || drainRequested) {
       try {

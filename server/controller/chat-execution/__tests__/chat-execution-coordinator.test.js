@@ -183,6 +183,26 @@ describe('ChatExecutionCoordinator', () => {
     expect((await coordinator.readChatExecutionControl('chat-1')).entries).toEqual([]);
   });
 
+  it('releases direct ownership after startup compensation removes the chat', async () => {
+    let exists = true;
+    const fixture = createFixture({
+      chatExists: () => exists,
+      executionPolicy: () => {
+        if (!exists) throw new Error('Session not initialized');
+        return 'literal';
+      },
+      turnRunner: { runAgentTurn: async () => {
+        exists = false;
+        throw new Error('Session limit reached');
+      } },
+    });
+    coordinator = fixture.coordinator;
+    const reservation = coordinator.reserveDirectTurn('chat-1', { turnId: 'command-1' });
+    await expect(coordinator.runReservedTurn(reservation, 'command', { turnId: 'command-1' }))
+      .rejects.toThrow('Session limit reached');
+    expect(coordinator.ownsExecution('chat-1')).toBe(false);
+  });
+
   it('stops a startup before a provider run exists and fences its late completion from a successor', async () => {
     const starting = deferred();
     const f = createFixture({ turnRunner: { runAgentTurn: mock(() => starting.promise) } });
@@ -272,6 +292,24 @@ describe('ChatExecutionCoordinator', () => {
     expect(fixture.projection.admitQueuedInput).toHaveBeenCalledTimes(1);
     expect(fixture.turnRunner.runAgentTurn).not.toHaveBeenCalled();
     expect((await coordinator.readChatExecutionControl('chat-1')).entries).toEqual([]);
+  });
+
+  it('rejects a queued schedule whose execution policy changed before dequeue', async () => {
+    let policy = 'conversation';
+    const fixture = createFixture({ executionPolicy: () => policy });
+    coordinator = fixture.coordinator;
+    const snapshot = coordinator.reserveTranscriptSnapshot('chat-1');
+    await coordinator.enqueueAccepted({
+      command: { key: 'schedule-command', chatId: 'chat-1', clientRequestId: 'schedule-request', entryId: 'schedule-entry' },
+      content: '<garcon-schedule-action>must not execute</garcon-schedule-action>', images: [],
+      clientMessageId: 'schedule-input', transcriptViewId: 'view-1', requiredExecutionPolicy: 'conversation',
+      admissionDeadline: null, settlement: { settleQueueMutation: mock(async () => undefined) },
+    });
+    policy = 'literal';
+    await coordinator.releaseTranscriptSnapshot(snapshot);
+    await coordinator.triggerDrain('chat-1');
+    expect(fixture.projection.admitQueuedInput).not.toHaveBeenCalled();
+    expect(fixture.turnRunner.runAgentTurn).not.toHaveBeenCalled();
   });
 
   it('does not restore a committed queue input when provider dispatch fails', async () => {

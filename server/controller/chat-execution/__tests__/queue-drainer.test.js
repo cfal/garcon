@@ -49,6 +49,7 @@ function idleOwnership(overrides = {}) {
 
 function queueCallbacks(overrides = {}) {
   return {
+    executionPolicy: () => 'conversation',
     isShuttingDown: () => false,
     registerQueued: mock(() => true),
     appendControlReceipt: mock(() => undefined),

@@ -136,7 +136,13 @@ describe('scheduled prompt variables', () => {
     expect(scheduledPromptFitsRenderedLimit(exact)).toBe(true);
     expect(scheduledPromptFitsRenderedLimit(tooLong)).toBe(false);
     expect(normalizeScheduledPromptDefinitionInput(definition(exact))).not.toBeNull();
-    expect(normalizeScheduledPromptDefinitionInput(definition(tooLong))).toBeNull();
+    expect(normalizeScheduledPromptDefinitionInput(definition(tooLong))?.prompt).toBe(tooLong);
+  });
+
+  it('preserves source until admission determines whether to expand variables', () => {
+    const source = '  /markdown printf "{{chat_id}}"  \n';
+    expect(normalizeScheduledPromptDefinitionInput(definition(source))?.prompt).toBe(source);
+    expect(normalizeScheduledPromptDefinitionInput(definition('x'.repeat(SCHEDULED_PROMPT_MAX_LENGTH + 1)))).toBeNull();
   });
 
   it('does not drop persisted prompts that exceed the rendered limit', () => {

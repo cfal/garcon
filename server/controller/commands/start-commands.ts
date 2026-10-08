@@ -75,6 +75,9 @@ export class StartCommands {
   }
 
   async submitScheduledStart(input: ScheduledChatStartInput): Promise<StartChatCommandResponse> {
+    if (this.deps.agents.executionPolicy(input.agentId, input.executorId) !== (input.executionPolicy ?? 'conversation')) {
+      throw new CommandValidationError('UNSUPPORTED_CONTROL_INPUT', 'The scheduled input no longer matches the execution policy.', 422);
+    }
     return this.submitStart({
       ...input,
       origin: 'scheduled',

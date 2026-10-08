@@ -77,6 +77,8 @@ function newChatDefinition(firstRunAtUtc, thinkingMode = 'none') {
 
 function agentCapabilities(supportedThinkingModes = ['none', 'high']) {
   return {
+    executionPolicy: () => 'conversation',
+    chatExecutionPolicy: () => 'conversation',
     hasAgent() {
       return true;
     },
@@ -120,19 +122,41 @@ class FakeCron {
   }
 }
 
-async function sameChatScheduler() {
+async function sameChatScheduler(agents = agentCapabilities()) {
   const store = new ScheduledPromptStore(await tempDir());
   await store.init();
   const cron = new FakeCron();
   const scheduler = new ScheduledPromptScheduler({
     inspectProject: inspectProjectDirectory,
-    store, cron, runLog: new ScheduledPromptRunLog(), agents: agentCapabilities(),
+    store, cron, runLog: new ScheduledPromptRunLog(), agents,
     preambles: preambleCatalog(),
     chats: { getChat: (chatId) => chatId === '123' ? {} : null },
     dispatcher: { dispatch: async () => ({ outcome: 'sent', chatId: '123', message: 'sent' }) },
   });
   return { store, cron, scheduler };
 }
+
+it('preserves explicitly configured literal schedules and refuses conversational agent schedules', async () => {
+  const { scheduler } = await sameChatScheduler({ ...agentCapabilities(), chatExecutionPolicy: () => 'literal' });
+  const now = new Date('2030-01-01T00:00:00.000Z');
+  const source = '/markdown printf "{{chat_id}}"  \n';
+  const created = await scheduler.scheduleIn({ chatId: '123', duration: '1h', prompt: source }, now);
+  expect(created.scheduledPrompt).toMatchObject({ contentMode: 'literal', prompt: source });
+  await expect(scheduler.scheduleForChat({
+    chatId: '123', prompt: 'Conversational action', busyBehavior: 'queue', firstRun: { type: 'after', minutes: 60 },
+    intervalMinutes: null, endAtUtc: null,
+  }, now)).rejects.toMatchObject({ code: 'UNSUPPORTED_CONTROL_INPUT' });
+});
+
+it('checks expanded schedule limits only for conversational admission', async () => {
+  const now = new Date('2030-01-01T00:00:00.000Z');
+  const prompt = `${'x'.repeat(32_000 - '{{chat_id}}'.length)}{{chat_id}}`;
+  const conversational = await sameChatScheduler();
+  await expect(conversational.scheduler.scheduleIn({ chatId: '123', duration: '1h', prompt }, now))
+    .rejects.toMatchObject({ code: 'SCHEDULED_PROMPT_VALIDATION_FAILED' });
+  const literal = await sameChatScheduler({ ...agentCapabilities(), chatExecutionPolicy: () => 'literal' });
+  expect((await literal.scheduler.scheduleIn({ chatId: '123', duration: '1h', prompt }, now)).scheduledPrompt.prompt).toBe(prompt);
+});
 
 it('does not dispatch a registered occurrence after an uncertain schedule mutation', async () => {
   const dir = await tempDir();

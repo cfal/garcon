@@ -13,6 +13,7 @@ import { RemoteSettingsStore } from '$lib/stores/remote-settings.svelte';
 import { findModelForSelection } from '../../../../test/model-catalog';
 
 interface CatalogOverrides {
+	executionPolicy?: 'conversation' | 'literal';
 	getModels?(agentId: string): ModelOption[];
 	getPermissionModes?: ModelCatalogStore['getPermissionModes'];
 	getThinkingModes?: ModelCatalogStore['getThinkingModes'];
@@ -27,6 +28,7 @@ function createForm(
 	catalogOverrides: CatalogOverrides = {},
 ): ScheduledPromptFormState {
 	const sessions = {
+		get byId() { return Object.fromEntries([...existingIds].map(id => [id, { agentId: 'claude', executorId: 'local' }])); },
 		hasChat: (chatId: string) => existingIds.has(chatId),
 		isDraft: () => false,
 	};
@@ -41,6 +43,14 @@ function createForm(
 	vi.spyOn(modelCatalog, 'isValidated', 'get').mockImplementation(() => catalogOverrides.isValidated ?? true);
 	vi.spyOn(modelCatalog, 'error', 'get').mockImplementation(() => catalogOverrides.error ?? null);
 	Object.assign(modelCatalog, {
+		getAgent: (id: string) => ({
+			id, label: id, executionPolicy: catalogOverrides.executionPolicy ?? 'conversation', defaultModel: 'gpt-5',
+			supportsCompact: false, supportsFork: false, supportsForkAtMessage: false,
+			supportsForkWhileRunning: false, supportsUpdateProjectPath: false, supportsSteering: false,
+			supportsImages: false, fileAttachmentMimeTypes: [], acceptsApiProviderEndpoints: false,
+			supportedProtocols: [], authLoginSupported: false, supportedPermissionModes: ['default'],
+			supportedThinkingModes: ['none'], settings: [], defaultSettings: { ownerId: id, schemaVersion: 1, values: {} },
+		}),
 		forExecutor: () => modelCatalog,
 		refreshIfStale: catalogOverrides.refreshIfStale ?? vi.fn(async () => {}),
 		getSelectableAgents: () => [...selectableAgentIds()],
@@ -285,6 +295,15 @@ describe('ScheduledPromptFormState', () => {
 		expect(form.canSave).toBe(true);
 		form.prompt = '/compact first';
 		expect(form.canSave).toBe(false);
+	});
+
+	it('preserves literal scheduled source including slash prefixes and template-looking text', async () => {
+		const form = createForm(undefined, undefined, { executionPolicy: 'literal' });
+		await form.initialize(existingPrompt({ type: 'once', nextRunAt: '2099-01-02T09:00:00.000Z' }));
+		const source = '/markdown printf "{{chat_id}}"  \n';
+		form.prompt = source;
+		expect(form.canSave).toBe(true);
+		expect(form.buildDefinition()?.prompt).toBe(source);
 	});
 
 	it('validates the prompt length after chat ID substitution', () => {

@@ -5,6 +5,7 @@ import ScheduledPromptField from '../ScheduledPromptField.svelte';
 function renderField(
 	overrides: Partial<{
 		prompt: string;
+		templateVariables: boolean;
 		promptError: string | null;
 		targetType: 'new-chat' | 'existing-chat';
 		surface: 'composer' | 'standalone';
@@ -14,6 +15,7 @@ function renderField(
 	const onPromptKeydown = vi.fn();
 	const result = render(ScheduledPromptField, {
 		prompt: overrides.prompt ?? 'Review this section',
+		templateVariables: overrides.templateVariables ?? true,
 		promptError: overrides.promptError ?? null,
 		targetType: overrides.targetType ?? 'new-chat',
 		surface: overrides.surface ?? 'standalone',
@@ -24,6 +26,13 @@ function renderField(
 }
 
 describe('ScheduledPromptField', () => {
+	it('omits variable controls and help for literal commands', () => {
+		renderField({ templateVariables: false, prompt: 'echo {{chat_id}}' });
+		expect(screen.queryByRole('button', { name: 'Insert {{chat_id}}' })).toBeNull();
+		expect(screen.queryByText(/Use \{\{chat_id\}\}/)).toBeNull();
+		const textarea = screen.getByRole('textbox', { name: 'Prompt' });
+		expect(textarea.getAttribute('aria-describedby')).not.toContain('variable-help');
+	});
 	it('inserts the chat ID token at the selection and restores the caret and focus', async () => {
 		const { onPromptChange } = renderField({ prompt: 'Review this section' });
 		const textarea = screen.getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement;

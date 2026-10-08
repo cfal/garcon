@@ -23,6 +23,7 @@ import {
 const logger = createLogger('queue-dispatch');
 
 export interface QueueDispatchCallbacks {
+  executionPolicy(chatId: string): 'conversation' | 'literal';
   canDispatch?(chatId: string): boolean;
   isShuttingDown(): boolean;
   registerQueued(chatId: string, content: string, options: RunAgentTurnOptions): boolean;
@@ -139,6 +140,9 @@ export class QueueDrainer {
             if (this.#shouldHalt(chatId)) throw halted;
             options = optionsForTurn(this.deps.getDrainOptions(chatId), input);
             if (input.kind === 'control') {
+              if (callbacks.executionPolicy(chatId) === 'literal') {
+                return false;
+              }
               if (!callbacks.isControlInputViewCurrent(chatId, input.entry.transcriptViewId)) {
                 logger.debug('queue: discarded stale control input', {
                   chatId,
@@ -150,6 +154,11 @@ export class QueueDrainer {
               callbacks.appendControlReceipt(chatId, input.entry);
               inputInserted = true;
               return true;
+            }
+            const requiredPolicy = input.entry.submission?.requiredExecutionPolicy;
+            if (requiredPolicy && callbacks.executionPolicy(chatId) !== requiredPolicy) {
+              admission.failure = new DomainError('UNSUPPORTED_CONTROL_INPUT', 'The scheduled input no longer matches the execution policy.', 422);
+              return false;
             }
             // The selection may have changed since enqueue. Throwing aborts the
             // dequeue uncommitted, so the entry and its attachments stay queued.

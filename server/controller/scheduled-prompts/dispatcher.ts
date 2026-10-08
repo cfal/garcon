@@ -28,13 +28,14 @@ export class ScheduledPromptDispatcher {
     const fitsRenderedLimit = scheduledPrompt.target.type === 'existing-chat'
       ? scheduledPromptFitsRenderedLimit(scheduledPrompt.prompt, scheduledPrompt.target.chatId)
       : scheduledPromptFitsRenderedLimit(scheduledPrompt.prompt);
-    if (!fitsRenderedLimit) {
+    if (scheduledPrompt.contentMode !== 'literal' && !fitsRenderedLimit) {
       throw new Error('Scheduled prompt exceeds the maximum length after variable expansion');
     }
     if (scheduledPrompt.target.type === 'existing-chat') {
       const outcome = await this.deps.commands.submitScheduledExistingChat({
         chatId: scheduledPrompt.target.chatId,
-        command: renderScheduledPrompt(scheduledPrompt.prompt, scheduledPrompt.target.chatId),
+        command: scheduledPrompt.contentMode === 'literal' ? scheduledPrompt.prompt : renderScheduledPrompt(scheduledPrompt.prompt, scheduledPrompt.target.chatId),
+        executionPolicy: scheduledPrompt.contentMode === 'literal' ? 'literal' : 'conversation',
         busyBehavior: scheduledPrompt.target.busyBehavior,
         clientRequestId: requestId,
         clientMessageId: messageId,
@@ -64,7 +65,8 @@ export class ScheduledPromptDispatcher {
       agentId: scheduledPrompt.target.agentId,
       executorId: scheduledPrompt.target.executorId,
       projectPath: scheduledPrompt.target.projectPath,
-      command: renderScheduledPrompt(scheduledPrompt.prompt, chatId),
+      command: scheduledPrompt.contentMode === 'literal' ? scheduledPrompt.prompt : renderScheduledPrompt(scheduledPrompt.prompt, chatId),
+      executionPolicy: scheduledPrompt.contentMode === 'literal' ? 'literal' : 'conversation',
       model: scheduledPrompt.target.model,
       apiProviderId: scheduledPrompt.target.apiProviderId,
       modelEndpointId: scheduledPrompt.target.modelEndpointId,

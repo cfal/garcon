@@ -11,6 +11,7 @@
 	import ScheduledNewChatComposer from '../ScheduledNewChatComposer.svelte';
 
 	let {
+		conversationInput = true,
 		startup,
 		modelCatalog,
 		remoteSettings,
@@ -23,6 +24,7 @@
 		onPromptKeydown,
 		onAppShell,
 	}: {
+		conversationInput?: boolean;
 		startup: NewChatFormState;
 		modelCatalog: ModelCatalogStore;
 		remoteSettings: RemoteSettingsStore;
@@ -46,6 +48,7 @@
 </script>
 
 <ScheduledNewChatComposer
+	{conversationInput}
 	{startup}
 	{modelCatalog}
 	{remoteSettings}

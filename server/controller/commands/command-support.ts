@@ -242,6 +242,7 @@ export interface AgentCommandStopInput {
 }
 
 export interface ScheduledChatStartInput {
+  executionPolicy?: 'conversation' | 'literal';
   executorId?: string | null;
   chatId: ChatId;
   clientRequestId: string;
@@ -291,6 +292,7 @@ export interface NormalizedChatStart {
 }
 
 export interface ScheduledExistingChatInput {
+  executionPolicy?: 'conversation' | 'literal';
   chatId: string;
   transcriptViewId?: string;
   command: string;

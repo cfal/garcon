@@ -26,7 +26,9 @@ const MAX_LINES = 1000;
 // Queued attachments add bounded payload storage and capability checks at admission.
 // Literal execution adds exact-source admission, control rejection, failure pausing,
 // and terminal settlement while keeping shell mechanics in its integration.
-const EXECUTION_FOOTPRINT_BUDGET = 9260;
+// Schedule policy is fenced again at dequeue; compensated startup failures release
+// direct ownership even when their chat no longer exists.
+const EXECUTION_FOOTPRINT_BUDGET = 9280;
 
 const GRANDFATHER = {
   'server/runtime/git/diff-engine.ts': 1575,

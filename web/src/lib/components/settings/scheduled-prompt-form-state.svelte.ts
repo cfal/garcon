@@ -75,9 +75,11 @@ export class ScheduledPromptFormState {
 	#originalEndDate: string | null = null;
 
 	constructor(
-		modelCatalog: ModelCatalogStore,
+		private readonly modelCatalog: ModelCatalogStore,
 		remoteSettings: RemoteSettingsStore,
-		private readonly sessions: Pick<ChatSessionsStore, 'hasChat' | 'isDraft'>,
+		private readonly sessions: Pick<ChatSessionsStore, 'hasChat' | 'isDraft'> & {
+			readonly byId: Record<string, Pick<ChatSessionsStore['byId'][string], 'agentId' | 'executorId'>>;
+		},
 		private readonly options: ScheduledPromptFormStateOptions,
 	) {
 		this.startup = new NewChatFormState({
@@ -114,14 +116,21 @@ export class ScheduledPromptFormState {
 
 	get promptError(): string | null {
 		if (!this.prompt.trim()) return m.scheduled_prompts_prompt_required();
-		if (this.prompt.trim().length > SCHEDULED_PROMPT_MAX_LENGTH) {
+		if (this.prompt.length > SCHEDULED_PROMPT_MAX_LENGTH) {
 			return m.scheduled_prompts_prompt_too_long();
 		}
-		if (!scheduledPromptFitsRenderedLimit(this.prompt.trim())) {
+		if (this.executionPolicy === 'conversation' && !scheduledPromptFitsRenderedLimit(this.prompt.trim())) {
 			return m.scheduled_prompts_prompt_rendered_too_long();
 		}
-		if (hasLeadingSlashCommand(this.prompt)) return m.scheduled_prompts_slash_command_error();
+		if (this.executionPolicy === 'conversation' && hasLeadingSlashCommand(this.prompt)) return m.scheduled_prompts_slash_command_error();
 		return null;
+	}
+
+	get executionPolicy(): 'literal' | 'conversation' | null {
+		const selection = this.targetType === 'new-chat' ? this.startup : this.sessions.byId[this.existingChatId ?? ''];
+		if (!selection) return null;
+		const agent = this.modelCatalog.forExecutor(selection.executorId).getAgent(selection.agentId);
+		return agent ? agent.executionPolicy ?? 'conversation' : null;
 	}
 
 	scheduleIssue(now = new Date()): ScheduleIssue | null {
@@ -163,6 +172,7 @@ export class ScheduledPromptFormState {
 	}
 
 	get targetValid(): boolean {
+		if (!this.executionPolicy) return false;
 		if (this.targetType === 'existing-chat') {
 			return Boolean(
 				this.existingChatId &&
@@ -253,7 +263,7 @@ export class ScheduledPromptFormState {
 					chatId: this.existingChatId,
 					busyBehavior: this.busyBehavior,
 				},
-				prompt: this.prompt.trim(),
+				prompt: this.executionPolicy === 'literal' ? this.prompt : this.prompt.trim(),
 			};
 		}
 		const selection = this.startup.resolvedModelSelection;
@@ -275,7 +285,7 @@ export class ScheduledPromptFormState {
 				tags: [...this.startup.chatTags],
 				preambleChoice: this.startup.preambles.choiceSnapshot,
 			},
-			prompt: this.prompt.trim(),
+			prompt: this.executionPolicy === 'literal' ? this.prompt : this.prompt.trim(),
 		};
 	}
 

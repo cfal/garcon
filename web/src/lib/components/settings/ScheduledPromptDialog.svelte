@@ -50,6 +50,7 @@
 	const sessions = getChatSessions();
 	const appShell = getAppShell();
 	const snippetContext = $derived.by(() => {
+		if (form.executionPolicy !== 'conversation') return undefined;
 		if (form.targetType === 'existing-chat') {
 			return selectedChat
 				? {
@@ -147,8 +148,10 @@
 	});
 
 	$effect(() => {
-		if (!open || form.targetType !== 'new-chat' || !form.startup.executorReady) return;
-		const catalog = modelCatalog;
+		if (!open) return;
+		const executorId = form.targetType === 'new-chat' ? form.startup.executorId : selectedChat?.executorId;
+		if (!executorId || !executors.isReady(executorId)) return;
+		const catalog = rootModelCatalog.forExecutor(executorId);
 		void catalog.version;
 		untrack(() => void catalog.refreshIfStale());
 	});
@@ -410,6 +413,7 @@
 
 				{#if form.targetType === 'new-chat'}
 					<ScheduledNewChatComposer
+						conversationInput={form.executionPolicy === 'conversation'}
 						startup={form.startup}
 						{modelCatalog}
 						{remoteSettings}
@@ -470,6 +474,7 @@
 
 			{#if form.targetType === 'existing-chat'}
 				<ScheduledPromptField
+					templateVariables={form.executionPolicy === 'conversation'}
 					prompt={form.prompt}
 					promptError={form.promptError}
 					targetType="existing-chat"

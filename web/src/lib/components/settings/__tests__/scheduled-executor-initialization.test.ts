@@ -36,7 +36,7 @@ describe('scheduled chat executor initialization', () => {
 	function fixture() {
 		const deps = createExecutorStartupFixture();
 		const form: ScheduledPromptFormState = new ScheduledPromptFormState(
-			deps.modelCatalog, deps.remoteSettings, { hasChat: () => false, isDraft: () => false }, {
+			deps.modelCatalog, deps.remoteSettings, { byId: {}, hasChat: () => false, isDraft: () => false }, {
 				executors: deps.executors,
 				get selectableAgentIds() {
 					return deps.modelCatalog.forExecutor(form.startup.executorId).getSelectableAgents();

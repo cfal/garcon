@@ -228,6 +228,10 @@ export class QueueCommands {
       if (!session) {
         throw new CommandValidationError('SESSION_NOT_FOUND', 'Session not found', 404);
       }
+      const executionPolicy = input.executionPolicy ?? 'conversation';
+      if (this.deps.agents.chatExecutionPolicy(chatId) !== executionPolicy) {
+        throw new CommandValidationError('UNSUPPORTED_CONTROL_INPUT', 'The scheduled input no longer matches the execution policy.', 422);
+      }
       const transcriptViewId = input.transcriptViewId
         ?? await this.deps.agents.currentTranscriptViewId(chatId);
       await this.support.assertCurrentTranscriptView(chatId, transcriptViewId);
@@ -245,7 +249,7 @@ export class QueueCommands {
           clientRequestId: input.clientRequestId,
           clientMessageId: input.clientMessageId,
           transcriptViewId,
-        }, deadline);
+        }, deadline, executionPolicy);
         return { type: 'queued', chatId, entryId: result.entryId };
       }
       await this.support.submitHttpRun({
@@ -268,6 +272,7 @@ export class QueueCommands {
   private async submitQueueEntryCreateLocked(
     input: QueueEntryCreateCommandRequest,
     deadline: number,
+    requiredExecutionPolicy?: 'conversation' | 'literal',
   ): Promise<QueueEntryCommandResponse> {
     const content = input.content;
     const preparedEntryId = crypto.randomUUID();
@@ -282,6 +287,7 @@ export class QueueCommands {
         excludedResendOrdinals: input.excludedResendOrdinals,
         content,
         images: input.images,
+        requiredExecutionPolicy,
       },
       entryId: preparedEntryId,
     });
@@ -309,6 +315,7 @@ export class QueueCommands {
       clientMessageId: input.clientMessageId,
       transcriptViewId: input.transcriptViewId,
       excludedResendOrdinals: input.excludedResendOrdinals,
+      requiredExecutionPolicy,
       settlement: this.support.settlement,
       admissionDeadline: deadline,
     });

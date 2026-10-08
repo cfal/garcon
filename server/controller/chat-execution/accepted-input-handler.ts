@@ -100,6 +100,7 @@ export class AcceptedInputHandler {
         images: input.images,
         command: { key: input.command.key, entryId: input.command.entryId },
         submission: {
+          ...(input.requiredExecutionPolicy ? { requiredExecutionPolicy: input.requiredExecutionPolicy } : {}),
           clientMessageId: input.clientMessageId,
           transcriptViewId: input.transcriptViewId,
           ...(input.excludedResendOrdinals?.length
