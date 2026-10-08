@@ -709,12 +709,14 @@
 					onClose={() => (form.showTagInput = false)}
 				/>
 
-				<NewChatPreambleControls
-					selection={form.preambles}
-					nonblankPath={form.nonblankPath}
-					validationStatus={form.validationStatus}
-					onClear={() => form.preambles.setExplicit([])}
-				/>
+				{#if !literalInput}
+					<NewChatPreambleControls
+						selection={form.preambles}
+						nonblankPath={form.nonblankPath}
+						validationStatus={form.validationStatus}
+						onClear={() => form.preambles.setExplicit([])}
+					/>
+				{/if}
 
 				{#if displayedFormError}
 					<div role="status" class="flex items-center gap-2 text-sm text-destructive">

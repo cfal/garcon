@@ -5,6 +5,7 @@ import OpenCodeAgentIntegration from '@garcon/server-agent-opencode';
 import AmpAgentIntegration from '@garcon/server-agent-amp';
 import FactoryAgentIntegration from '@garcon/server-agent-factory';
 import PiAgentIntegration from '@garcon/server-agent-pi';
+import ShellIntegration from '@garcon/server-agent-shell';
 import DirectOpenAiCompatibleIntegration from '@garcon/server-agent-direct-openai-compatible';
 import DirectOpenAiResponsesCompatibleIntegration from '@garcon/server-agent-direct-openai-responses-compatible';
 import DirectAnthropicCompatibleIntegration from '@garcon/server-agent-direct-anthropic-compatible';
@@ -21,4 +22,5 @@ export const defaultAgentIntegrations = [
   CursorAgentIntegration,
   FactoryAgentIntegration,
   PiAgentIntegration,
+  ...(process.platform === 'linux' || process.platform === 'darwin' ? [ShellIntegration] : []),
 ] satisfies readonly AgentIntegrationClass[];

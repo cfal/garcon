@@ -12,6 +12,7 @@ const provisionedAgents = {
   factory: 'https://app.factory.ai/cli',
   opencode: 'npm install -g "opencode-ai@${OPENCODE_VERSION}"',
   pi: '/app/server-agents/pi/node_modules/.bin/pi',
+  shell: '/bin/bash',
 };
 const persistedPaths = [
   '/home/garcon/.agents',

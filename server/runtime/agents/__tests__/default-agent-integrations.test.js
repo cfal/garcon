@@ -14,6 +14,7 @@ describe('default agent integrations', () => {
       'cursor',
       'factory',
       'pi',
+      ...(process.platform === 'linux' || process.platform === 'darwin' ? ['shell'] : []),
     ]);
     expect(new Set(defaultAgentIntegrations).size).toBe(defaultAgentIntegrations.length);
   });

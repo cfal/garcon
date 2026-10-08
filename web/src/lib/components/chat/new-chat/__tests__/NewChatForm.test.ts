@@ -139,6 +139,7 @@ function stubMatchMedia(matches: boolean): void {
 async function renderSubmittableForm(
 	onStartChat: () => void,
 	props: {
+		executionPolicy?: 'conversation' | 'literal';
 		supportsImages?: boolean;
 		snippetTrigger?: string;
 		snippetTemplate?: string;
@@ -247,6 +248,19 @@ describe('NewChatForm', () => {
 			orderedPreambleIds: request.orderedPreambleIds ?? [],
 			projection: { catalogRevision: 0, eligiblePreambles: [], unavailable: [] },
 		}));
+	});
+
+	it('hides conversational controls and submits literal slash source unchanged', async () => {
+		stubMatchMedia(false);
+		const onStartChat = vi.fn();
+		const input = await renderSubmittableForm(onStartChat, { executionPolicy: 'literal' });
+		expect(screen.queryByRole('button', { name: 'Edit preambles' })).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Refine prompt' })).toBeNull();
+		const firstMessage = '/snippet untouched\n  ';
+		await fireEvent.input(input, { target: { value: firstMessage } });
+		await fireEvent.keyDown(input, { key: 'Enter' });
+		expect(onStartChat).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ firstMessage }), PROSPECTIVE_CHAT_ID);
+		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
 	});
 
 	it('reveals the form after settings and loads preamble data independently', async () => {

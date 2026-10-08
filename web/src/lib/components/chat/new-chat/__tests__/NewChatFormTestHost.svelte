@@ -38,6 +38,7 @@
 	import { untrack } from 'svelte';
 
 	interface Props {
+		executionPolicy?: 'conversation' | 'literal';
 		allowDirectChats?: boolean;
 		catalogVersion?: number;
 		catalogValidated?: boolean;
@@ -56,6 +57,7 @@
 	}
 
 	let {
+		executionPolicy = 'conversation',
 		allowDirectChats = false,
 		catalogVersion = 0,
 		catalogValidated = true,
@@ -205,6 +207,7 @@
 		},
 		getAgent(agentId: string) {
 			return {
+				executionPolicy,
 				id: agentId,
 				label: agentLabelFor(agentId),
 				description: '',
