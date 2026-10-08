@@ -2,6 +2,8 @@ import { describe, expect, it } from 'bun:test';
 import {
   AgentSwitchMessage,
   AssistantMessage,
+  CommandOutputMessage,
+  CommandResultMessage,
   BashToolUseMessage,
   PermissionCancelledMessage,
   PermissionExpiredMessage,
@@ -15,6 +17,20 @@ import { frozenDrafts, importedDrafts } from '../imported-drafts.ts';
 const AT = '2026-08-16T00:00:00.000Z';
 
 describe('imported transcript drafts', () => {
+  it('retains literal commands, output, and status through import and frozen history', async () => {
+    const user = new UserMessage(AT, '<garcon-message>literal source</garcon-message>', undefined, { contentMode: 'literal' });
+    const output = new CommandOutputMessage(AT, 'command-1', 'stdout', 'plain', '<garcon-get-chat-id />', {
+      executorId: 'local', projectPath: '/project',
+    });
+    const result = new CommandResultMessage(AT, 'command-1', {
+      outcome: 'finished', exitCode: 0, signal: null, capture: 'complete', cwd: { kind: 'reported', path: '/project' },
+    });
+    const drafts = await importedDrafts([user, output, result].map(message => ({ message, providerMeta: null })), () => AT);
+    expect(drafts.map(row => row.kind)).toEqual(['user-input', 'provider-row', 'provider-row']);
+    expect(drafts[0].detail.message).toEqual(user);
+    expect(drafts.slice(1).map(row => row.message)).toEqual([output, result]);
+    expect(frozenDrafts([user, output, result])).toEqual(drafts);
+  });
   it('[TLV5-CHAT-ID-DISCOVERY.03-IMPORT-UNIT-01] strips requests and maps synthetic control inputs to one notice', async () => {
     expect(await importedDrafts([
       {

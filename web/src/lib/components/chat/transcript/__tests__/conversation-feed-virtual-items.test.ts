@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	BashToolUseMessage,
+	CommandOutputMessage,
 	GlobToolUseMessage,
 	ToolResultMessage,
 	TranscriptNoticeMessage,
@@ -66,6 +67,17 @@ function build(
 }
 
 describe('conversation virtual feed model', () => {
+	it('routes a grouped output search target to its visible parent', () => {
+		const rows = [1, 2].map(index => ({ ...userItem(index), message: new CommandOutputMessage(
+			'2026-08-03T00:00:00.000Z', 'command-1', 'stdout', 'plain', `part ${index}`,
+			{ executorId: 'local', projectPath: '/project' },
+		) }));
+		const rendered = buildConversationFeedRenderModel(rows).items;
+		const model = build(rendered);
+		expect(model.indexByRowId.get('generation-1:2')).toBe(model.indexByRowId.get('generation-1:1'));
+		expect(model.targetByDomAnchorId.get('generation-1:2')?.innerRowId).toBe('generation-1:1');
+	});
+
 	it('combines two ordinary tool inputs and indexes each hidden member to the summary', () => {
 		const model = build([bashItem(1), bashItem(2, 'reused')], {
 			combineToolUseMessages: true,

@@ -4,6 +4,11 @@
 
 import { isRecord } from './json.js';
 import {
+  commandOutcomeText,
+  parseCommandOutcome, parseCommandOutputContext,
+  type CommandOutcome, type CommandOutputContext,
+} from './command-output.js';
+import {
   asAllowedPrompts,
   asAskUserQuestions,
   asChatImages,
@@ -56,6 +61,7 @@ export interface ChatProcessingEntry {
 }
 
 export interface ChatMessageMetadata {
+  contentMode?: 'literal';
   clientRequestId?: string;
   clientMessageId?: string;
   upstreamRequestId?: string;
@@ -105,6 +111,26 @@ export class UserMessage {
 export class AssistantMessage {
   readonly type = 'assistant-message' as const;
   constructor(public timestamp: string, public content: string) {}
+}
+
+export class CommandOutputMessage {
+  readonly type = 'command-output' as const;
+  constructor(
+    public timestamp: string,
+    public commandId: string,
+    public channel: 'stdout' | 'stderr',
+    public format: 'plain' | 'markdown',
+    public content: string,
+    public context: CommandOutputContext,
+  ) {}
+}
+
+export class CommandResultMessage {
+  readonly type = 'command-result' as const;
+  readonly content: string;
+  constructor(public timestamp: string, public commandId: string, public result: CommandOutcome) {
+    this.content = commandOutcomeText(result);
+  }
 }
 
 export class ThinkingMessage {
@@ -800,6 +826,8 @@ export type ToolUseChatMessage =
 export type ChatMessage =
   | UserMessage
   | AssistantMessage
+  | CommandOutputMessage
+  | CommandResultMessage
   | ThinkingMessage
   | ToolUseChatMessage
   | ToolResultMessage
@@ -1190,6 +1218,22 @@ export function parseChatMessage(data: unknown): ChatMessage | null {
     }
     case 'assistant-message':
       return new AssistantMessage(str(data.timestamp), str(data.content));
+    case 'command-output': {
+      const context = parseCommandOutputContext(data.context);
+      if (!context || typeof data.commandId !== 'string' || !data.commandId
+        || typeof data.content !== 'string'
+        || (data.channel !== 'stdout' && data.channel !== 'stderr')
+        || (data.format !== 'plain' && data.format !== 'markdown')
+        || (data.channel === 'stderr' && data.format !== 'plain')) return null;
+      return new CommandOutputMessage(str(data.timestamp), data.commandId, data.channel,
+        data.format, data.content, context);
+    }
+    case 'command-result': {
+      const result = parseCommandOutcome(data.result);
+      return result && typeof data.commandId === 'string' && data.commandId
+        ? new CommandResultMessage(str(data.timestamp), data.commandId, result)
+        : null;
+    }
     case 'thinking':
       return new ThinkingMessage(str(data.timestamp), str(data.content));
 

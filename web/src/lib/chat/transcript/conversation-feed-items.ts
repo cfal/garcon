@@ -1,5 +1,6 @@
 import {
 	AskUserQuestionToolUseMessage,
+	CommandOutputMessage,
 	PermissionCancelledMessage,
 	PermissionExpiredMessage,
 	PermissionRequestMessage,
@@ -32,6 +33,7 @@ export interface ConversationFeedMessageRenderItem {
 	awaitingDelivery?: boolean;
 	pairedToolUse?: ToolUseChatMessage;
 	permissionWrapperRowId?: string;
+	commandOutputParentId?: string;
 }
 
 export type ConversationFeedRenderItem =
@@ -79,6 +81,7 @@ export function conversationFeedItemLayout(
 	item: ConversationFeedRenderItem,
 ): ConversationFeedItemLayout {
 	if (item.kind === 'local-notice') return 'standard';
+	if (item.commandOutputParentId) return 'hidden';
 	const message = item.message;
 	if (
 		message instanceof PermissionResolvedMessage ||
@@ -244,11 +247,35 @@ export function buildConversationFeedRenderModel(
 	}
 
 	return {
-		items,
+		items: groupCommandOutput(items),
 		toolResultByUseRowId: toolPairs.toolResultByUseRowId,
 		toolResultRowIdByUseRowId: toolPairs.toolResultRowIdByUseRowId,
 		permissionTerminalByOccurrence,
 	};
+}
+
+function groupCommandOutput(items: ConversationFeedRenderItem[]): ConversationFeedRenderItem[] {
+	let first: ConversationFeedMessageRenderItem | null = null;
+	let previousOrdinal: number | undefined;
+	for (const item of items) {
+		const message = item.kind === 'message' ? item.message : null;
+		if (item.kind !== 'message' || message?.type !== 'command-output') {
+			first = null;
+			continue;
+		}
+		const output = first?.message;
+		if (first && output?.type === 'command-output' && previousOrdinal !== undefined
+			&& item.ordinal === previousOrdinal + 1 && output.commandId === message.commandId
+			&& output.channel === message.channel && output.format === message.format
+			&& output.context.executorId === message.context.executorId && output.context.projectPath === message.context.projectPath
+			&& output.content.length + message.content.length <= 256 * 1024) {
+			first.message = new CommandOutputMessage(output.timestamp, output.commandId, output.channel,
+				output.format, output.content + message.content, output.context);
+			item.commandOutputParentId = first.id;
+		} else first = item;
+		previousOrdinal = item.ordinal;
+	}
+	return items;
 }
 
 export function buildConversationFeedRenderItems(

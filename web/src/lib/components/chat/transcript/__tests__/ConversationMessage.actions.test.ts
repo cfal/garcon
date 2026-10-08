@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { AssistantMessage, BashToolUseMessage, UserMessage } from '$shared/chat-types';
+import { AssistantMessage, BashToolUseMessage, CommandOutputMessage, CommandResultMessage, UserMessage } from '$shared/chat-types';
 import ConversationMessageHost from './ConversationMessageHost.svelte';
 
 const copyToClipboard = vi.hoisted(() => vi.fn().mockResolvedValue(true));
@@ -28,6 +28,26 @@ function menuItemLabels(): (string | undefined)[] {
 }
 
 describe('ConversationMessage actions', () => {
+	it('renders literal source and plain output without Markdown interpretation', () => {
+		const content = '  **literal**\n<garcon-get-chat-id />\n';
+		for (const message of [
+			new UserMessage('2026-01-01T00:00:00Z', content, undefined, { contentMode: 'literal' }),
+			new CommandOutputMessage('2026-01-01T00:00:00Z', 'command-1', 'stdout', 'plain', content, { executorId: 'local', projectPath: '/project' }),
+		]) {
+			const { container, unmount } = render(ConversationMessageHost, { message });
+			expect(container.querySelector('pre')?.textContent).toBe(content);
+			expect(container.querySelector('strong')).toBeNull();
+			unmount();
+		}
+	});
+
+	it('renders retained command status independently of presentation-only rows', () => {
+		const { container } = render(ConversationMessageHost, { message: new CommandResultMessage('2026-01-01T00:00:00Z', 'command-1', {
+			outcome: 'failed', exitCode: 7, signal: null, capture: 'complete', cwd: { kind: 'reported', path: '/project' },
+		}) });
+		expect(container.querySelector('[data-chat-message-type="command-result"]')).not.toBeNull();
+		expect(screen.getByText('Exit 7')).toBeTruthy();
+	});
 	afterEach(() => {
 		cleanup();
 		window.getSelection()?.removeAllRanges();

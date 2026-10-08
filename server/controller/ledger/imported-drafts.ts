@@ -70,6 +70,9 @@ function importedDraftFor(
   preambleApplication?: PreambleHistoryEvidence,
 ): LedgerRowDraft[] {
   const at = original.timestamp || now();
+  if (original.type === 'user-message' && original.metadata?.contentMode === 'literal') {
+    return importedUserInputDrafts(original, providerMeta, at);
+  }
   if (original.type === 'user-message' && preambleApplication) {
     return importedUserInputDrafts(original, providerMeta, at, preambleApplication);
   }
@@ -228,6 +231,8 @@ function frozenDraftFor(message: ChatMessage, now: () => string): LedgerRowDraft
         providerMeta: null,
       }];
     case 'assistant-message':
+    case 'command-output':
+    case 'command-result':
     case 'thinking':
     case 'tool-result':
     case 'error':

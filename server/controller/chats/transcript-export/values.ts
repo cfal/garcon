@@ -94,6 +94,8 @@ export function transcriptExportEntryText(entry: TranscriptExportEntry): string 
   switch (entry.message.type) {
     case 'user-message':
     case 'assistant-message':
+    case 'command-output':
+    case 'command-result':
     case 'thinking':
     case 'error':
     case 'transcript-notice':
@@ -175,6 +177,8 @@ function fieldsFromMessage(message: ChatMessage): TranscriptExportField[] {
   if (
     message.type === 'user-message'
     || message.type === 'assistant-message'
+    || message.type === 'command-output'
+    || message.type === 'command-result'
     || message.type === 'thinking'
     || message.type === 'error'
     || message.type === 'transcript-notice'

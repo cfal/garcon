@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import type { ChatMessage, TodoItem, ToolUseChatMessage } from './chat-types.js';
-import { AssistantMessage, UserMessage, isToolUseMessage } from './chat-types.js';
+import { AssistantMessage, CommandOutputMessage, UserMessage, isToolUseMessage } from './chat-types.js';
 import {
   projectionPriorityLevel,
   selectPrioritizedProjection,
@@ -449,6 +449,8 @@ export function renderTranscriptSeed(
 export function isProjectableMessage(message: ChatMessage): boolean {
   return message.type === 'user-message'
     || message.type === 'assistant-message'
+    || message.type === 'command-output'
+    || message.type === 'command-result'
     || isToolUseMessage(message);
 }
 
@@ -473,6 +475,10 @@ export function boundProjectedMessage(message: ChatMessage): ChatMessage {
     if (message.content.length <= PROJECTED_BODY_MAX_CHARS) return message;
     return new AssistantMessage(message.timestamp, message.content.slice(0, PROJECTED_BODY_MAX_CHARS));
   }
+  if (message.type === 'command-output' && message.content.length > PROJECTED_BODY_MAX_CHARS) {
+    return new CommandOutputMessage(message.timestamp, message.commandId, message.channel,
+      message.format, message.content.slice(0, PROJECTED_BODY_MAX_CHARS), message.context);
+  }
   return message;
 }
 
@@ -491,6 +497,9 @@ function renderMessageElement(message: ChatMessage, maximum = Number.POSITIVE_IN
       return fitElement('    <user>', boundedCollapse(message.content), '</user>', maximum);
     case 'assistant-message':
       return fitElement('    <assistant>', boundedCollapse(message.content), '</assistant>', maximum);
+    case 'command-output':
+    case 'command-result':
+      return fitElement('    <execution-output>', boundedCollapse(commandContent(message)), '</execution-output>', maximum);
     default:
       return '';
   }
@@ -528,9 +537,17 @@ function refitMessageElement(
         maximumCost,
         cost,
       );
+    case 'command-output':
+    case 'command-result':
+      return fitElementWithinCost('    <execution-output>', boundedCollapse(commandContent(message)),
+        '</execution-output>', maximumCost, cost);
     default:
       return '';
   }
+}
+
+function commandContent(message: Extract<ChatMessage, { type: 'command-output' | 'command-result' }>): string {
+  return `${message.type === 'command-output' ? message.channel : 'Command result'}: ${message.content}`;
 }
 
 function fitElement(open: string, content: string, close: string, maximum: number): string {

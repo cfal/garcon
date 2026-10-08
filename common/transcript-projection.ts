@@ -1,6 +1,6 @@
 const PRIORITY_LADDER: readonly (readonly string[])[] = [
   ['user-message'],
-  ['assistant-message'],
+  ['assistant-message', 'command-output', 'command-result'],
   ['read-tool-use', 'grep-tool-use', 'glob-tool-use', 'list-tool-use'],
   ['edit-tool-use', 'write-tool-use', 'apply-patch-tool-use'],
   ['bash-tool-use', 'exec-tool-use'],

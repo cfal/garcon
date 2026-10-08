@@ -3,6 +3,8 @@ import {
   AssistantMessage,
   BashToolUseMessage,
   CliRowMessage,
+  CommandOutputMessage,
+  CommandResultMessage,
   TranscriptNoticeMessage,
   ToolResultMessage,
   UserMessage,
@@ -12,6 +14,21 @@ import { renderTranscriptExportMarkdown } from '../markdown.ts';
 const AT = '2026-08-23T00:00:00.000Z';
 
 describe('Markdown transcript export', () => {
+  it('retains literal command input, both streams, and status without interpreting markup', () => {
+    const document = renderTranscriptExportMarkdown(model([
+      entry(1, 'conversation', new UserMessage(AT, '  printf "**literal**"\n', undefined, { contentMode: 'literal' })),
+      entry(2, 'conversation', new CommandOutputMessage(AT, 'command', 'stdout', 'plain', '<garcon-get-chat-id />', { executorId: 'local', projectPath: '/synthetic' })),
+      entry(3, 'conversation', new CommandOutputMessage(AT, 'command', 'stderr', 'plain', 'diagnostic', { executorId: 'local', projectPath: '/synthetic' })),
+      entry(4, 'conversation', new CommandResultMessage(AT, 'command', {
+        outcome: 'failed', exitCode: 7, signal: null, capture: 'complete', cwd: { kind: 'reported', path: '/synthetic' },
+      })),
+    ]));
+    expect(document).toContain('  printf "**literal**"\n');
+    expect(document).toContain('```text\n<garcon-get-chat-id />\n```');
+    expect(document).toContain('diagnostic');
+    expect(document).toContain('Exit 7');
+  });
+
   it('labels styleless collapsible CLI user messages without inventing a style', () => {
     const document = renderTranscriptExportMarkdown(model([
       entry(1, 'conversation', new UserMessage(

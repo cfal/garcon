@@ -41,7 +41,15 @@ export function renderTranscriptExportMarkdown(model: TranscriptExportDocumentMo
     );
 
     const content = transcriptExportEntryText(entry);
-    if (content !== null) lines.push(content, '');
+    if (content !== null) {
+      const literal = entry.kind === 'message' && (
+        (entry.message.type === 'user-message' && entry.message.metadata?.contentMode === 'literal')
+        || (entry.message.type === 'command-output' && entry.message.format === 'plain')
+        || entry.message.type === 'command-result'
+      );
+      const fence = '`'.repeat(Math.max(3, longestBacktickRun(content) + 1));
+      lines.push(...(literal ? [`${fence}text`, content, fence] : [content]), '');
+    }
 
     const fields = [...transcriptExportEntryFields(entry)];
     const toolId = transcriptExportEntryToolId(entry);

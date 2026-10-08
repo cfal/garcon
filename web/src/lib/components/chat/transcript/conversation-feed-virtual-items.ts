@@ -293,6 +293,15 @@ export function buildConversationVirtualFeedModel(
 				}
 			}
 		} else if (virtualItem.kind === 'transcript') {
+			const parentId = virtualItem.item.kind === 'message' ? virtualItem.item.commandOutputParentId : undefined;
+			const parent = parentId ? targetByDomAnchorId.get(parentId) : undefined;
+			if (parent) {
+				indexByRowId.set(virtualItem.item.id, parent.index);
+				targetByDomAnchorId.set(virtualItem.item.id, parent);
+				memberRowIdByDomAnchorId.set(virtualItem.item.id, parent.innerRowId);
+				representativeRowIdByKey.set(virtualItem.key, parent.innerRowId);
+				continue;
+			}
 			representativeRowIdByKey.set(virtualItem.key, virtualItem.item.id);
 			indexByRowId.set(virtualItem.item.id, index);
 			targetByDomAnchorId.set(virtualItem.item.id, {
@@ -326,6 +335,7 @@ export function appendConversationVirtualTranscriptTail(
 	appendedItems: ConversationFeedRenderItem[],
 ): ConversationVirtualFeedModel | null {
 	if (appendedItems.length === 0) return null;
+	if (appendedItems.some(item => item.kind === 'message' && item.message.type === 'command-output')) return null;
 	const insertIndex = model.transcriptEndIndex;
 	const appendedVirtualItems = appendedItems.map((item): ConversationVirtualFeedItem => ({
 		kind: 'transcript',

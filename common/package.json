@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./command-output": "./command-output.ts",
     "./agent-auth": "./agent-auth.ts",
     "./agent-execution": "./agent-execution.ts",
     "./agent-integration": "./agent-integration.ts",
