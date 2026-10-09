@@ -3,10 +3,7 @@
 	// to NewChatFormState and retains only DOM interactions and template logic.
 
 	import { onDestroy, onMount, tick, untrack } from 'svelte';
-	import {
-		contentSizedTextarea,
-		fitTextareaToContent,
-	} from '$lib/components/ui/textarea/content-sized-textarea.svelte.js';
+	import { contentSizedTextarea } from '$lib/components/ui/textarea/content-sized-textarea.svelte.js';
 	import type { NewChatConfig } from '$lib/chat/sessions/chat-session-types.js';
 	import { NewChatFormState } from '$lib/chat/new-chat/new-chat-form-state.svelte.js';
 	import {
@@ -176,7 +173,6 @@
 			return !initialContentReady || snippetExpansion.pending;
 		},
 		closePromptSurfaces: () => snippetPalette.dismiss(),
-		resizeTextarea: autoResizeTextarea,
 	});
 	const promptTransformPending = $derived(snippetExpansion.pending || promptRefinement.pending);
 	const promptTransformStatus = $derived(
@@ -330,10 +326,6 @@
 		}
 	}
 
-	function autoResizeTextarea(): void {
-		if (!textareaRef) return;
-		fitTextareaToContent(textareaRef);
-	}
 	const contentSizing = contentSizedTextarea(() => form.firstMessage);
 
 	function handleMessageInput(event: Event): void {
@@ -344,7 +336,6 @@
 		}
 		if (snippetExpansion.pending) snippetExpansion.cancel();
 		form.firstMessage = input.value;
-		autoResizeTextarea();
 		if ((event as InputEvent).isComposing) return;
 		snippetPalette.updateDetectedTrigger(
 			findSnippetTrigger(input.value, input.selectionStart, localSettings.snippetTrigger),
@@ -364,7 +355,6 @@
 	async function settleTextareaAfterSnippet(caret?: number): Promise<void> {
 		await tick();
 		if (caret !== undefined) textareaRef?.setSelectionRange(caret, caret);
-		autoResizeTextarea();
 	}
 
 	function openExpandedEditor(): void {
@@ -381,7 +371,6 @@
 		await tick();
 		if (!textareaRef) return;
 		restorePromptEditorSelection(textareaRef, selection);
-		autoResizeTextarea();
 		textareaRef.focus({ preventScroll: true });
 	}
 
@@ -766,7 +755,7 @@
 					placeholder={form.placeholder}
 					readonly={promptRefinement.pending}
 					aria-busy={promptTransformPending}
-					class="content-sized-textarea chat-input-placeholder block w-full px-4 py-1.5 sm:py-3 bg-transparent outline-none text-foreground placeholder-muted-foreground text-base leading-6 transition-colors duration-200"
+					class="content-sized-textarea chat-input-placeholder block w-full px-4 py-2.5 sm:py-3 bg-transparent outline-none text-foreground placeholder-muted-foreground text-base leading-6 transition-colors duration-200"
 					rows="1"></textarea>
 
 				<ComposerBottomBar

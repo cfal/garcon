@@ -4,7 +4,6 @@ interface PromptComposerFocusDeliveryOptions {
 	visible: boolean;
 	textarea: HTMLTextAreaElement | undefined;
 	userInteractionGeneration(): number;
-	resize(): void;
 }
 
 interface PendingFocusRequest {
@@ -52,7 +51,6 @@ export class PromptComposerFocusDelivery {
 				this.#complete(request);
 				return;
 			}
-			options.resize();
 			target.focus();
 			if (
 				document.activeElement === target ||

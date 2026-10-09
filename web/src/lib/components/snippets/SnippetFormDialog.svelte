@@ -176,6 +176,7 @@
 					bind:ref={templateTextarea}
 					bind:value={form.template}
 					onkeydown={handleFormKeyDown}
+					rows={3}
 					placeholder={m.snippets_template_placeholder({
 						argumentsToken: SNIPPET_ARGUMENTS_TOKEN,
 						projectPathToken: SNIPPET_PROJECT_PATH_TOKEN,

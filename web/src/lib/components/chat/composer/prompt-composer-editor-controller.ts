@@ -16,7 +16,6 @@ interface PromptComposerEditorControllerOptions {
 	get isDisabled(): boolean;
 	get promptTransformPending(): boolean;
 	get snippetTrigger(): unknown;
-	get resizeTextarea(): () => void;
 }
 
 export class PromptComposerEditorController {
@@ -100,6 +99,5 @@ export class PromptComposerEditorController {
 				this.options.snippetTrigger,
 			);
 		}
-		this.options.resizeTextarea();
 	}
 }

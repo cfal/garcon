@@ -25,6 +25,23 @@ describe('content-sized textarea', () => {
 		expect(textarea.style.height).toBe('44px');
 	});
 
+	it('measures from the resting rows so a long-form field keeps its floor', async () => {
+		const { rerender } = render(Textarea, { value: '', rows: 3 });
+		const textarea = screen.getByRole<HTMLTextAreaElement>('textbox');
+		const heightsWhileMeasuring = new Set<string>();
+		Object.defineProperty(textarea, 'scrollHeight', {
+			get: () => {
+				heightsWhileMeasuring.add(textarea.style.height);
+				return 76;
+			},
+		});
+		await rerender({ value: 'Synthetic draft', rows: 3 });
+		expect(textarea.getAttribute('rows')).toBe('3');
+		// An automatic height lets the browser apply the rows; a collapsed one would ignore them.
+		expect([...heightsWhileMeasuring]).toEqual(['auto']);
+		expect(textarea.style.height).toBe('76px');
+	});
+
 	it('refits wrapped content when its panel width changes and releases the observer', async () => {
 		const restore = installResizeObserverHarness();
 		try {

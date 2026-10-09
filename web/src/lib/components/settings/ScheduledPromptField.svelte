@@ -1,9 +1,6 @@
 <script lang="ts">
 	import { onDestroy, tick, untrack, type Snippet } from 'svelte';
-	import {
-		contentSizedTextarea,
-		fitTextareaToContent,
-	} from '$lib/components/ui/textarea/content-sized-textarea.svelte.js';
+	import { contentSizedTextarea } from '$lib/components/ui/textarea/content-sized-textarea.svelte.js';
 	import Braces from '@lucide/svelte/icons/braces';
 	import FileText from '@lucide/svelte/icons/file-text';
 	import { getSnippets, getPreambles } from '$lib/context';
@@ -71,7 +68,6 @@
 			if (!ref) return;
 			ref.focus({ preventScroll: true });
 			ref.setSelectionRange(caret, caret);
-			resizeTextarea();
 		},
 		onPendingChange: (pending) => onSnippetPendingChange?.(pending),
 		onSourceChanged: (source) => {
@@ -99,15 +95,10 @@
 			.join(' '),
 	);
 
-	function resizeTextarea(): void {
-		if (ref) fitTextareaToContent(ref);
-	}
-
 	function handleInput(event: Event): void {
 		const textarea = event.currentTarget;
 		if (!(textarea instanceof HTMLTextAreaElement)) return;
 		onPromptChange(textarea.value);
-		resizeTextarea();
 		if (snippetContext !== undefined && !(event as InputEvent).isComposing) {
 			snippets.detectTrigger(textarea.selectionStart, snippetTrigger, textarea.value);
 		}
@@ -124,7 +115,6 @@
 		await tick();
 		ref.focus();
 		ref.setSelectionRange(nextCaret, nextCaret);
-		resizeTextarea();
 	}
 </script>
 
@@ -148,12 +138,12 @@
 			readonly={snippets.expansion.pending}
 			oninput={handleInput}
 			onkeydown={onPromptKeydown}
-			rows="1"
+			rows={surface === 'composer' ? 1 : 3}
 			aria-describedby={describedBy}
 			aria-invalid={visibleError ? 'true' : undefined}
 			placeholder={m.scheduled_prompts_prompt_placeholder()}
 			class={surface === 'composer'
-				? 'content-sized-textarea chat-input-placeholder block w-full bg-transparent px-4 py-1.5 text-base leading-6 text-foreground outline-none placeholder:text-muted-foreground sm:py-3 sm:pointer-fine:text-sm'
+				? 'content-sized-textarea chat-input-placeholder block w-full bg-transparent px-4 py-2.5 text-base leading-6 text-foreground outline-none placeholder:text-muted-foreground sm:py-3 sm:pointer-fine:text-sm'
 				: 'content-sized-textarea block w-full rounded-md border border-border bg-background px-3 py-2 text-base leading-6 outline-none focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:text-sm'}
 		></textarea>
 

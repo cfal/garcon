@@ -8,7 +8,6 @@ interface RecallOptions {
 	getTextarea(): HTMLTextAreaElement | undefined;
 	canRecall(): boolean;
 	setText(text: string): void;
-	resize(): void;
 }
 
 export class PromptComposerRecallController {
@@ -37,7 +36,6 @@ export class PromptComposerRecallController {
 		const textarea = this.options.getTextarea();
 		void tick().then(() => {
 			if (textarea !== this.options.getTextarea() || identity !== this.options.getIdentity() || this.options.getText() !== text) return;
-			this.options.resize();
 			textarea?.setSelectionRange(text.length, text.length);
 		});
 		return true;

@@ -331,6 +331,7 @@
 					bind:ref={contentTextarea}
 					bind:value={form.content}
 					onkeydown={handleFormKeyDown}
+					rows={3}
 					placeholder={m.preambles_content_placeholder()}
 					invalid={Boolean(form.contentError)}
 					readOnly={false}

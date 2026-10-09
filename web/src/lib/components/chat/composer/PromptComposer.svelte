@@ -148,7 +148,6 @@
 		getTextarea: () => textarea,
 		canRecall: () => !isDisabled && isVisible,
 		setText: (text) => { composerState.inputText = text; queueCurrentDraft(text); },
-		resize: autoResize,
 	});
 	$effect(() => {
 		void recallIdentity;
@@ -286,7 +285,6 @@
 		get startBlocked() {
 			return isDisabled || directAdmissionPending || snippetExpansion.pending;
 		},
-		resizeTextarea: autoResize,
 	});
 	const promptTransformPending = $derived(snippetExpansion.pending || promptRefinement.pending);
 	const attachmentController = new PromptComposerAttachmentController({
@@ -339,7 +337,6 @@
 			visible: isVisible,
 			textarea,
 			userInteractionGeneration: () => workspaceShortcuts.userInteractionGeneration,
-			resize: autoResize,
 		}),
 	);
 
@@ -420,7 +417,6 @@
 			) {
 				return;
 			}
-			autoResize();
 			textarea.scrollTop = textarea.scrollHeight;
 			handledDraftAppendRequestId = request.requestId;
 		});
@@ -451,7 +447,6 @@
 		await tick();
 		textarea?.focus();
 		textarea?.setSelectionRange(replacement.caret, replacement.caret);
-		autoResize();
 	}
 
 	async function insertFileMention(path: string) {
@@ -473,7 +468,6 @@
 		await tick();
 		textarea?.focus();
 		textarea?.setSelectionRange(replacement.caret, replacement.caret);
-		autoResize();
 	}
 
 	function snippetErrorDetail(error: unknown): string {
@@ -490,7 +484,6 @@
 		await tick();
 		if (destroyed || !isVisible) return;
 		if (caret !== undefined) textarea?.setSelectionRange(caret, caret);
-		autoResize();
 	}
 
 	async function insertSnippet(
@@ -740,7 +733,7 @@
 	const textareaClass = $derived(
 		cn(
 			'block w-full bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-ring text-foreground placeholder:text-muted-foreground disabled:opacity-50 resize-none max-h-[40vh] sm:max-h-[500px] overflow-y-auto text-base leading-6 transition-colors duration-200',
-			'px-4 py-2.5 sm:px-5 sm:py-3 min-h-[48px]',
+			'px-4 py-3 sm:px-5 sm:py-3.5 min-h-[48px]',
 		),
 	);
 </script>
@@ -995,5 +988,4 @@
 	canRefinePrompt={promptRefinement.canStart}
 	onRefinePrompt={() => promptRefinement.handleAction()}
 	openRequestId={composerEditorOpenRequestId}
-	resizeTextarea={autoResize}
 />

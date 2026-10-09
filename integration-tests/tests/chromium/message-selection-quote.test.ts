@@ -10,13 +10,18 @@ interface SelectionClickPoint {
 	y: number;
 }
 
-/** Selects the marker text inside the assistant message and returns a clickable point within it. */
-async function selectAssistantMarker(
+/**
+ * Returns a clickable point within the marker text of the assistant message, optionally
+ * selecting that text first. The composer grows with every quoted block and moves the
+ * transcript above it, so the point is read only once it holds still across frames.
+ */
+async function assistantMarkerPoint(
 	trigger: Locator,
 	marker: string,
+	selection: 'select' | 'keep',
 ): Promise<SelectionClickPoint> {
 	return trigger.evaluate(
-		(element, selectedMarker) => {
+		async (element, { selectedMarker, selectionMode }) => {
 			const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
 			let node = walker.nextNode();
 			while (node && !(node.textContent ?? '').includes(selectedMarker)) {
@@ -28,19 +33,34 @@ async function selectAssistantMarker(
 			const range = document.createRange();
 			range.setStart(node, start);
 			range.setEnd(node, start + selectedMarker.length);
-			const selection = document.getSelection();
-			if (!selection) throw new Error('The browser selection API is unavailable.');
-			selection.removeAllRanges();
-			selection.addRange(range);
-			document.dispatchEvent(new Event('selectionchange'));
-			const rect = [...range.getClientRects()].find((candidate) => candidate.width > 0);
-			if (!rect) throw new Error('The selected assistant range has no visible client rect.');
+			if (selectionMode === 'select') {
+				const selection = document.getSelection();
+				if (!selection) throw new Error('The browser selection API is unavailable.');
+				selection.removeAllRanges();
+				selection.addRange(range);
+				document.dispatchEvent(new Event('selectionchange'));
+			}
+			const markerRect = (): DOMRect => {
+				const rect = [...range.getClientRects()].find((candidate) => candidate.width > 0);
+				if (!rect) throw new Error('The assistant marker range has no visible client rect.');
+				return rect;
+			};
+			const nextFrame = (): Promise<void> =>
+				new Promise((resolve) => requestAnimationFrame(() => resolve()));
+			let rect = markerRect();
+			for (;;) {
+				await nextFrame();
+				await nextFrame();
+				const settled = markerRect();
+				if (settled.left === rect.left && settled.top === rect.top) break;
+				rect = settled;
+			}
 			if (rect.left < 0 || rect.top < 0 || rect.right > innerWidth || rect.bottom > innerHeight) {
-				throw new Error('The selected assistant range is not fully inside the viewport.');
+				throw new Error('The assistant marker range is not fully inside the viewport.');
 			}
 			return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
 		},
-		marker,
+		{ selectedMarker: marker, selectionMode: selection },
 	);
 }
 
@@ -101,13 +121,13 @@ describe('Chromium message selection actions', () => {
 			await fixture.page.locator(COMPOSER_TEXTAREA_SELECTOR).waitFor();
 
 			markPhase('first quote');
-			const point = await selectAssistantMarker(trigger, `echo:${marker}`);
+			const point = await assistantMarkerPoint(trigger, `echo:${marker}`, 'select');
 			await openMessageMenuAtSelection(fixture.page, point);
 			await fixture.page.getByRole('menuitem', { name: 'Copy selection' }).waitFor();
 			await quoteSelectionAndWaitForDraft(fixture.page, `echo:${marker}`);
 
 			markPhase('repeat quote');
-			const repeatPoint = await selectAssistantMarker(trigger, `echo:${marker}`);
+			const repeatPoint = await assistantMarkerPoint(trigger, `echo:${marker}`, 'select');
 			await openMessageMenuAtSelection(fixture.page, repeatPoint);
 			const quotedTwice = `> echo:${marker}\n\n> echo:${marker}\n\n`;
 			await fixture.page.getByRole('menuitem', { name: 'Quote selection' }).click();
@@ -124,7 +144,8 @@ describe('Chromium message selection actions', () => {
 				document.getSelection()?.removeAllRanges();
 				document.dispatchEvent(new Event('selectionchange'));
 			});
-			await openMessageMenuAtSelection(fixture.page, repeatPoint);
+			const clearedPoint = await assistantMarkerPoint(trigger, `echo:${marker}`, 'keep');
+			await openMessageMenuAtSelection(fixture.page, clearedPoint);
 			await fixture.page.getByRole('menuitem', { name: 'Copy text' }).waitFor();
 			expect(
 				await fixture.page

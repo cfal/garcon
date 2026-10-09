@@ -15,6 +15,8 @@
 		invalid: boolean;
 		readOnly: boolean;
 		disabled?: boolean;
+		/** Resting height in lines; the field grows from there with its content. */
+		rows?: number;
 		textareaClass?: string;
 		class?: string;
 		describedBy?: string;
@@ -36,6 +38,7 @@
 		invalid,
 		readOnly,
 		disabled = false,
+		rows = 1,
 		textareaClass = '',
 		class: className,
 		describedBy = '',
@@ -69,7 +72,7 @@
 		bind:value
 		{id}
 		{onkeydown}
-		rows="1"
+		{rows}
 		{placeholder}
 		readonly={readOnly}
 		{disabled}
