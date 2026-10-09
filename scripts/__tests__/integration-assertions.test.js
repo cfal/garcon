@@ -8,7 +8,9 @@ const root = resolve(import.meta.dir, '../..');
 
 test('integration assertions await IO outside Bun promise matchers', () => {
   const violations = [];
-  for (const file of new Bun.Glob('integration-tests/{tests,support}/**/*.ts').scanSync(root)) {
+  const patterns = ['integration-tests/{tests,support}/**/*.ts', 'server-agents/shell/src/__tests__/*.test.ts'];
+  const files = patterns.flatMap(pattern => [...new Bun.Glob(pattern).scanSync(root)]);
+  for (const file of files) {
     const tree = ts.createSourceFile(file, readFileSync(resolve(root, file), 'utf8'), ts.ScriptTarget.Latest, true);
     const visit = (node) => {
       if (ts.isPropertyAccessExpression(node) && ['resolves', 'rejects'].includes(node.name.text)) {

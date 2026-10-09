@@ -12,6 +12,7 @@ import ShellIntegration from '../index.js';
 import { ShellNativeStore } from '../native-store.js';
 import { UserMessage } from '@garcon/common/chat-types';
 import { COMMAND_OUTPUT_BYTES } from '../output.js';
+import { rejectionOf, throwingRejectionOf } from '../../../../integration-tests/support/promise-assertions.js';
 
 describe('Shell integration', () => {
   let root: string;
@@ -112,26 +113,28 @@ describe('Shell integration', () => {
   });
 
   it('rejects malformed Unicode from JSON before starting a process or native log', async () => {
-    await expect(integration.execution.start({ ...request, prompt: JSON.parse('"printf \\ud800"') }))
-      .rejects.toMatchObject({ code: 'INVALID_SETTINGS' });
+    expect(await rejectionOf(integration.execution.start({ ...request, prompt: JSON.parse('"printf \\ud800"') })))
+      .toMatchObject({ code: 'INVALID_SETTINGS' });
     expect(events).toEqual([]);
     expect(await integration.execution.runningSessions()).toEqual([]);
   });
 
   it('blocks overlapping starts and Reload until Stop has settled', async () => {
     const handle = await integration.execution.start({ ...request, prompt: 'cat' });
-    await expect(integration.execution.start({ ...request, runId: 'run-2' })).rejects.toMatchObject({ code: 'SESSION_BUSY' });
+    expect(await rejectionOf(integration.execution.start({ ...request, runId: 'run-2' }))).toMatchObject({ code: 'SESSION_BUSY' });
     while (!events.some(event => event.type === 'started')) await Bun.sleep(5);
-    await expect(history()).rejects.toMatchObject({ code: 'SESSION_BUSY' });
+    expect(await rejectionOf(history())).toMatchObject({ code: 'SESSION_BUSY' });
     await integration.execution.abort(handle);
     expect(await terminal()).toMatchObject({ outcome: 'interrupted' });
     expect((await history()).at(-1)).toMatchObject({ result: { outcome: 'interrupted' } });
   });
 
   it('continues native logging when publication is detached', async () => {
-    await integration.execution.start({ ...request, prompt: 'sleep 0.1; printf retained' });
-    while (!events.some(event => event.type === 'started')) await Bun.sleep(5);
+    await integration.execution.start({ ...request,
+      prompt: 'touch ready; while [ ! -e release ]; do sleep 0.01; done; printf retained' });
+    while (!await Bun.file(join(root, 'ready')).exists()) await Bun.sleep(5);
     await integration.producers.detach(request.producerBinding);
+    await Bun.write(join(root, 'release'), '');
     while ((await integration.execution.runningSessions()).length) await Bun.sleep(5);
     expect(events.some(event => event.type === 'run-ended')).toBe(false);
     expect((await history()).some(row => row.type === 'command-output' && row.content === 'retained')).toBe(true);
@@ -174,7 +177,9 @@ describe('Shell integration', () => {
   it('returns explicitly empty final stdout for silent success and rejects executable context', async () => {
     await integration.execution.start(request);
     expect(await terminal()).toMatchObject({ finalResponse: { type: 'literal-text', text: '' } });
-    await expect(integration.execution.start({ ...request, attachments: [{ kind: 'image', name: 'file', mimeType: 'image/png', data: 'c291cmNl' }] })).rejects.toThrow();
+    expect(await throwingRejectionOf(integration.execution.start({
+      ...request, attachments: [{ kind: 'image', name: 'file', mimeType: 'image/png', data: 'c291cmNl' }],
+    }))).toThrow();
   });
 
   it('recovers an incomplete native command as unknown without replaying it', async () => {
@@ -196,12 +201,12 @@ describe('Shell integration', () => {
     const store = new ShellNativeStore(host);
     const id = crypto.randomUUID();
     (await store.create(id, request.chatId)).close();
-    await expect(store.load(id, '1783725900000001')).rejects.toThrow();
+    expect(await throwingRejectionOf(store.load(id, '1783725900000001'))).toThrow();
     expect(() => store.sessionId({ ownerId: 'shell', schemaVersion: 1, value: { sessionId: '../escape' } } satisfies AgentNativeSessionRef)).toThrow();
-    await expect(store.load(crypto.randomUUID(), request.chatId)).rejects.toThrow();
+    expect(await throwingRejectionOf(store.load(crypto.randomUUID(), request.chatId))).toThrow();
     const linked = crypto.randomUUID();
     await symlink(await store.path(id), await store.path(linked));
-    await expect(store.load(linked, request.chatId)).rejects.toThrow();
+    expect(await throwingRejectionOf(store.load(linked, request.chatId))).toThrow();
   });
 
   it('retains only the combined output tail without interrupting the command', async () => {

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { SHELL_FAMILIES } from '../catalog.js';
 import { executeShell } from '../process.js';
 import { parseSubmission } from '../source.js';
+import { throwingRejectionOf } from '../../../../integration-tests/support/promise-assertions.js';
 
 it('parses only executor-owned Markdown prefixes without trimming source', () => {
   expect(parseSubmission('/md\n  echo text\n')).toEqual({ source: '  echo text\n', format: 'markdown' });
@@ -106,8 +107,8 @@ for (const family of SHELL_FAMILIES) {
     }, 10_000);
 
     it('fails on output persistence rejection instead of reporting success', async () => {
-      await expect(run('printf output', undefined,
-        async () => { throw new Error('Synthetic storage failure'); })).rejects.toThrow('Synthetic storage failure');
+      expect(await throwingRejectionOf(run('printf output', undefined,
+        async () => { throw new Error('Synthetic storage failure'); }))).toThrow('Synthetic storage failure');
     });
 
     if (family === 'sh') {
