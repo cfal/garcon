@@ -86,11 +86,13 @@ async function withPipeline(run) {
     });
   const commands = new QueueCommands(new CommandSupport({ chats: registry, queue: execution,
     ledger: new CommandLedger(), chatMutationLock: lock,
-    agents: { currentTranscriptViewId: async (chatId) => ledger.currentView(chatId).viewId },
+    agents: { currentTranscriptViewId: async (chatId) => ledger.currentView(chatId).viewId,
+      executionPolicy: () => 'conversation' },
   }));
   const scheduler = new ScheduledPromptScheduler({ store: schedules, cron, chats: registry,
     inspectProject: inspectProjectDirectory,
-    agents: { hasAgent: () => true, assertExecutionModeSelectionSupported: () => {} },
+    agents: { hasAgent: () => true, assertExecutionModeSelectionSupported: () => {},
+      chatExecutionPolicy: () => 'conversation' },
     preambles: { snapshot: () => ({ revision: 0, preambles: [] }) },
     runLog: new ScheduledPromptRunLog(),
     dispatcher: new ScheduledPromptDispatcher({
