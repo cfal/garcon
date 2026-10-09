@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { contentSizedTextarea } from '$lib/components/ui/textarea/content-sized-textarea.svelte.js';
 	import type { TicketsController } from '$lib/tickets/catalog/tickets-controller.svelte.js';
 	import type { TicketDraftState } from '$lib/tickets/drafts/ticket-draft-state.svelte.js';
 	import * as m from '$lib/paraglide/messages.js';
@@ -39,6 +40,7 @@
 		lines[lines.length - 1] = label;
 		draft.setField('labels', `${lines.join('\n')}\n`);
 	}
+	const contentSizing = contentSizedTextarea(() => draft.field('labels'));
 </script>
 
 <div
@@ -52,8 +54,9 @@
 >
 	<label class="ticket-field"
 		>{m.tickets_labels()}<textarea
-			class="ticket-input"
-			rows="2"
+			{@attach contentSizing}
+			class="ticket-input content-sized-textarea"
+			rows="1"
 			placeholder={m.tickets_labels_hint()}
 			value={draft.field('labels')}
 			onkeydown={onKeydown}

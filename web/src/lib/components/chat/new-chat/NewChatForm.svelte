@@ -3,6 +3,10 @@
 	// to NewChatFormState and retains only DOM interactions and template logic.
 
 	import { onDestroy, onMount, tick, untrack } from 'svelte';
+	import {
+		contentSizedTextarea,
+		fitTextareaToContent,
+	} from '$lib/components/ui/textarea/content-sized-textarea.svelte.js';
 	import type { NewChatConfig } from '$lib/chat/sessions/chat-session-types.js';
 	import { NewChatFormState } from '$lib/chat/new-chat/new-chat-form-state.svelte.js';
 	import {
@@ -328,9 +332,9 @@
 
 	function autoResizeTextarea(): void {
 		if (!textareaRef) return;
-		textareaRef.style.height = 'auto';
-		textareaRef.style.height = `${textareaRef.scrollHeight}px`;
+		fitTextareaToContent(textareaRef);
 	}
+	const contentSizing = contentSizedTextarea(() => form.firstMessage);
 
 	function handleMessageInput(event: Event): void {
 		const input = event.currentTarget as HTMLTextAreaElement;
@@ -740,7 +744,7 @@
 
 			<div
 				data-slot="new-chat-composer"
-				class="relative mt-3 min-h-[120px] border border-border rounded-lg"
+				class="relative mt-3 border border-border rounded-lg"
 				aria-busy={promptTransformPending}
 			>
 				<input
@@ -753,6 +757,7 @@
 					onchange={handleImageInputChange}
 				/>
 				<textarea
+					{@attach contentSizing}
 					bind:this={textareaRef}
 					value={form.firstMessage}
 					onkeydown={handleKeyDown}
@@ -761,8 +766,8 @@
 					placeholder={form.placeholder}
 					readonly={promptRefinement.pending}
 					aria-busy={promptTransformPending}
-					class="chat-input-placeholder block w-full px-4 py-1.5 sm:py-3 bg-transparent outline-none text-foreground placeholder-muted-foreground resize-none min-h-[44px] max-h-[40vh] sm:max-h-[500px] overflow-y-auto text-base leading-6 transition-all duration-200"
-					rows="2"></textarea>
+					class="content-sized-textarea chat-input-placeholder block w-full px-4 py-1.5 sm:py-3 bg-transparent outline-none text-foreground placeholder-muted-foreground text-base leading-6 transition-colors duration-200"
+					rows="1"></textarea>
 
 				<ComposerBottomBar
 					canAttachImages={canAttachAttachments}

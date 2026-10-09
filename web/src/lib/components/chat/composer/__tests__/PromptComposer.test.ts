@@ -485,7 +485,7 @@ describe('PromptComposer focus', () => {
 		await fireEvent.click(screen.getByTestId('clear-draft'));
 
 		expect(textarea.value).toBe('');
-		expect(textarea.style.height).toBe('140px');
+		expect(textarea.style.height).toBe('52px');
 	});
 
 	it('does not resync attachment URLs for text-only draft changes', async () => {

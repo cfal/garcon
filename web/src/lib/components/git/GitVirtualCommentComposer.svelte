@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { contentSizedTextarea } from '$lib/components/ui/textarea/content-sized-textarea.svelte.js';
 	import { onDestroy } from 'svelte';
 	import type { GitDiffSeverity } from '$lib/git/review/git-inline-comment.svelte.js';
 	import * as m from '$lib/paraglide/messages.js';
@@ -64,6 +65,7 @@
 			onClose?.();
 		}
 	}
+	const contentSizing = contentSizedTextarea(() => body);
 </script>
 
 <div
@@ -85,12 +87,13 @@
 		{/each}
 	</div>
 	<textarea
+		{@attach contentSizing}
 		value={body}
 		oninput={(event) => onBodyChange?.(event.currentTarget.value)}
 		onkeydown={handleKeydown}
 		placeholder={m.git_comment_placeholder()}
-		class="w-full resize-none rounded border border-border bg-background p-2 text-base focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent sm:pointer-fine:text-xs"
-		rows="3"></textarea>
+		class="content-sized-textarea w-full rounded border border-border bg-background p-2 text-base focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent sm:pointer-fine:text-xs"
+		rows="1"></textarea>
 	<div class="flex justify-end gap-1.5">
 		<button
 			type="button"

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { contentSizedTextarea } from '$lib/components/ui/textarea/content-sized-textarea.svelte.js';
 	import { flushSync, tick } from 'svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
@@ -111,6 +112,7 @@
 		cancelOnClose = true;
 		onReturnFocus();
 	}
+	const contentSizing = contentSizedTextarea(() => argumentsText);
 </script>
 
 <Dialog.Root {open} requestClose={closeDialog}>
@@ -134,15 +136,16 @@
 					{m.snippets_arguments_label()}
 				</label>
 				<textarea
+					{@attach contentSizing}
 					bind:this={argumentsRef}
 					id={argumentsId}
 					bind:value={argumentsText}
 					onkeydown={handleKeyDown}
-					rows="5"
+					rows="1"
 					placeholder={m.snippets_arguments_placeholder()}
 					aria-invalid={argumentsTooLong}
 					aria-describedby={argumentsErrorId}
-					class="min-h-28 w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-base leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:text-sm"
+					class="content-sized-textarea w-full rounded-md border border-input bg-background px-3 py-2 text-base leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:text-sm"
 				></textarea>
 				<div class="flex min-h-8 justify-end">
 					<Button

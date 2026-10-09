@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy, tick, untrack } from 'svelte';
+	import { contentSizedTextarea } from '$lib/components/ui/textarea/content-sized-textarea.svelte.js';
 	import FileMentionMenu from './FileMentionMenu.svelte';
 	import SlashCommandMenu from './SlashCommandMenu.svelte';
 	import ComposerBottomBar from './ComposerBottomBar.svelte';
@@ -366,20 +367,18 @@
 	});
 
 	const composerHeight = new PromptComposerHeightState();
+	const contentSizing = contentSizedTextarea(() => composerState.inputText, autoResize);
 
 	function autoResize(): void {
 		if (!textarea || !isVisible) return;
 		composerHeight.fitToContent(textarea, appShell.isMobile);
 	}
 
-	// Programmatic draft changes do not emit input events. The effect measures
-	// the updated DOM value while Svelte remains the sole owner of its height.
 	$effect(() => {
 		const target = textarea;
-		const inputText = composerState.inputText;
 		const mobile = appShell.isMobile;
 		const visible = isVisible;
-		if (!target || !visible || target.value !== inputText) return;
+		if (!target || !visible) return;
 		untrack(() => composerHeight.fitToContent(target, mobile));
 	});
 
@@ -389,7 +388,7 @@
 		const parsed = Number(stored);
 		if (!Number.isFinite(parsed)) return;
 		composerHeight.restorePreferredHeight(parsed);
-		if (appShell.isMobile) autoResize();
+		autoResize();
 	});
 
 	function commitComposerHeight(height: number): void {
@@ -741,7 +740,7 @@
 	const textareaClass = $derived(
 		cn(
 			'block w-full bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-ring text-foreground placeholder:text-muted-foreground disabled:opacity-50 resize-none max-h-[40vh] sm:max-h-[500px] overflow-y-auto text-base leading-6 transition-colors duration-200',
-			'px-4 py-2.5 sm:px-5 sm:py-4 min-h-[48px]',
+			'px-4 py-2.5 sm:px-5 sm:py-3 min-h-[48px]',
 		),
 	);
 </script>
@@ -863,6 +862,8 @@
 			<div class="relative overflow-hidden bg-transparent focus-within:ring-0">
 				<div class="relative z-10">
 					<textarea
+						{@attach contentSizing}
+						rows="1"
 						bind:this={textarea}
 						value={composerState.inputText}
 						onkeydown={handleKeyDown}

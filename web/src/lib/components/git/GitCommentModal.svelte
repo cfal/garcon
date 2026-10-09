@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { contentSizedTextarea } from '$lib/components/ui/textarea/content-sized-textarea.svelte.js';
 	// Full-screen modal for composing an inline review comment on mobile.
 
 	import X from '@lucide/svelte/icons/x';
@@ -55,6 +56,7 @@
 		onClose();
 		return true;
 	}
+	const contentSizing = contentSizedTextarea(() => composer.body);
 </script>
 
 <div
@@ -104,12 +106,13 @@
 
 		<!-- Body -->
 		<textarea
+			{@attach contentSizing}
 			bind:this={textareaElement}
 			value={composer.body}
 			oninput={(e) => onBodyChange(e.currentTarget.value)}
 			placeholder={m.git_comment_placeholder()}
-			class="w-full p-3 text-base sm:pointer-fine:text-sm bg-background border border-border rounded resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
-			rows="6"></textarea>
+			class="content-sized-textarea w-full p-3 text-base sm:pointer-fine:text-sm bg-background border border-border rounded resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-interactive-accent"
+			rows="1"></textarea>
 		{#if error}<GitCommentAppendError {error} {copyText} />{/if}
 	</div>
 

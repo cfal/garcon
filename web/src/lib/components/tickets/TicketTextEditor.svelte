@@ -170,7 +170,6 @@
 			{id}
 			bind:ref={textarea}
 			bind:value={() => draft.field(field), setText}
-			rows={kind === 'description' ? 6 : 4}
 			placeholder={kind === 'comment' ? m.tickets_comment_placeholder() : ''}
 			{onkeydown}
 			invalid={false}

@@ -1,4 +1,6 @@
-export const COMPOSER_DEFAULT_HEIGHT = 140;
+import { measureTextareaHeight } from '$lib/components/ui/textarea/content-sized-textarea.svelte.js';
+
+export const COMPOSER_DEFAULT_HEIGHT = 52;
 export const COMPOSER_MIN_HEIGHT = 52;
 export const COMPOSER_MAX_HEIGHT = 500;
 
@@ -25,15 +27,11 @@ export class PromptComposerHeightState {
 	}
 
 	fitToContent(target: HTMLTextAreaElement, isMobile: boolean): void {
-		const renderedHeight = target.style.height;
-		// Releases the constraint only for measurement; rendered height remains state-owned.
-		target.style.height = 'auto';
 		const maximum = isMobile ? MOBILE_CONTENT_MAX_HEIGHT : DESKTOP_CONTENT_MAX_HEIGHT;
 		const measuredHeight = Math.max(
 			COMPOSER_CONTENT_MIN_HEIGHT,
-			Math.min(target.scrollHeight, maximum),
+			Math.min(measureTextareaHeight(target), maximum),
 		);
-		target.style.height = renderedHeight;
 		this.#contentHeight = isMobile
 			? measuredHeight
 			: Math.max(this.#preferredHeight, measuredHeight);

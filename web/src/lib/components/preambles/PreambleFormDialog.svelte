@@ -331,12 +331,11 @@
 					bind:ref={contentTextarea}
 					bind:value={form.content}
 					onkeydown={handleFormKeyDown}
-					rows={12}
 					placeholder={m.preambles_content_placeholder()}
 					invalid={Boolean(form.contentError)}
 					readOnly={false}
 					describedBy="preamble-content-help preamble-content-error"
-					textareaClass="min-h-48 font-mono"
+					textareaClass="font-mono"
 					canExpand={!form.saving}
 					expandLabel={m.preambles_expand_editor()}
 					canRefinePrompt={false}
