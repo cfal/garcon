@@ -42,16 +42,18 @@ export function createAgentTurnReceiptRoutes(ledger: CommandLedger): RouteMap {
 
 function fitForwardedOutput(receipt: AgentTurnReceipt): AgentTurnReceipt {
   if (receipt.state !== 'completed' || receipt.output.availability !== 'available') return receipt;
-  const limit = cliReplyBytes('primary');
-  const fits = () => Buffer.byteLength(JSON.stringify({ status: 200, body: receipt })) + CLI_ENVELOPE_BYTES <= limit;
-  if (fits()) return receipt;
+  const byteLimit = cliReplyBytes('primary');
+  const fits = (candidate: AgentTurnReceipt) => (
+    Buffer.byteLength(JSON.stringify({ status: 200, body: candidate })) + CLI_ENVELOPE_BYTES <= byteLimit
+  );
+  if (fits(receipt)) return receipt;
 
   const text = receipt.output.text;
   const notice = '[CLI output truncated; full retained output is in the transcript]\n';
   const output = { ...receipt.output, completeness: 'best-effort' as const, text: notice };
-  receipt = { ...receipt, output };
+  const forwardedReceipt = { ...receipt, output };
   // Bounds fitting work even when another integration returns a multi-megabyte response.
-  let low = Math.max(0, text.length - limit);
+  let low = Math.max(0, text.length - byteLimit);
   let high = text.length;
   const tail = (start: number) => {
     if (start > 0 && /[\uDC00-\uDFFF]/.test(text[start] ?? '')) start++;
@@ -60,11 +62,11 @@ function fitForwardedOutput(receipt: AgentTurnReceipt): AgentTurnReceipt {
   while (low < high) {
     const start = Math.floor((low + high) / 2);
     output.text = tail(start);
-    if (fits()) high = start;
+    if (fits(forwardedReceipt)) high = start;
     else low = start + 1;
   }
   output.text = tail(low);
-  return receipt;
+  return forwardedReceipt;
 }
 
 function noStore(response: Response): Response {
