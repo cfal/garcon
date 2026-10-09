@@ -11,7 +11,7 @@ test.skipIf(process.platform !== 'linux' && process.platform !== 'darwin')('disc
       await symlink(process.execPath, join(root, family));
     }
     const host = { environment: { get: (key: string) => key === 'PATH' ? root : undefined } };
-    expect(discoverShells(host)).toEqual(['sh', 'bash', 'zsh', 'fish'].map(family => ({
+    expect(discoverShells(host)).toEqual((['sh', 'bash', 'zsh', 'fish'] as const).map(family => ({
       family, executable: join(root, family),
     })));
     expect(() => requireShell(host, 'pwsh')).toThrow('Selected shell is unavailable: pwsh');
