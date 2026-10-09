@@ -182,7 +182,7 @@ describe('ChatExecutionCoordinator', () => {
     expect(fixture.appendControlReceipt).toHaveBeenCalled();
   });
 
-  it('releases direct ownership after startup compensation removes the chat', async () => {
+  it.each([false, true])('releases direct ownership after startup compensation removes the chat (terminal committed: %s)', async (terminalCommitted) => {
     let exists = true;
     const fixture = createFixture({
       chatExists: () => exists,
@@ -191,6 +191,7 @@ describe('ChatExecutionCoordinator', () => {
         return 'literal';
       },
       turnRunner: { runAgentTurn: async () => {
+        if (terminalCommitted) coordinator.markRunTerminalCommitted('chat-1', 'command-1');
         exists = false;
         throw new Error('Session limit reached');
       } },
@@ -200,6 +201,7 @@ describe('ChatExecutionCoordinator', () => {
     await expect(coordinator.runReservedTurn(reservation, 'command', { turnId: 'command-1' }))
       .rejects.toThrow('Session limit reached');
     expect(coordinator.ownsExecution('chat-1')).toBe(false);
+    await coordinator.waitForExecutionOwners();
   });
 
   it('stops a startup before a provider run exists and fences its late completion from a successor', async () => {

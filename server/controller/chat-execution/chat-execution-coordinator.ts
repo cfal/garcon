@@ -866,7 +866,9 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       if (this.#ownership.isDirectCurrent(reservation)) {
         this.#ownership.releaseDirect(reservation);
         released = true;
-        if (attempt && outcome !== 'completed' && !attempt.hasTerminalCommit && !this.#turnRunner.isChatRunning(reservation.chatId)) {
+        // Startup compensation removes the chat before its terminal notification can retire the attempt.
+        const awaitingTerminal = attempt?.hasTerminalCommit && this.#chatExists(reservation.chatId);
+        if (attempt && outcome !== 'completed' && !awaitingTerminal && !this.#turnRunner.isChatRunning(reservation.chatId)) {
           this.#retireAttempt(reservation.chatId, attempt);
         }
         this.#ownership.notifyOwnersChanged();
