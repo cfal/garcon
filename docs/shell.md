@@ -21,10 +21,22 @@ before executing the submission. Terminal-dependent profile code may behave
 differently or block.
 
 Commands are literal, including whitespace, absolute executable paths, and
-`@file` text. Composer slash commands, snippets, preambles, attachments,
-automatic resend, and conversational control messages do not alter or launch
-commands. Shell makes no automatic AI calls for titles, refinement, or carried
-history. Forks and handoffs retain visible history without executing it.
+`@file` text. Automatic slash/snippet interpretation, preambles, attachments,
+file expansion, and automatic resend are disabled. Explicit snippet insertion,
+prose refinement, and title generation remain available. These are authoring
+actions, not shell-aware validation; inspect their results before submitting.
+Shell does not generate titles or call AI automatically during command execution.
+
+Schedules substitute `{{chat_id}}` using the usual template escaping rules.
+Agent-created tasks and incoming automation are allowed without additional
+Shell-specific checks. The user is responsible for supplying valid commands.
+Printed output remains inert even when it contains Garcon control envelopes.
+
+Shell chats can hand off to AI agents with retained command history and normal
+carryover compaction. Handoffs into Shell, including executor transfers, are
+rejected; new chats and draft selections can still choose Shell. Shell forks copy
+the retained history and cwd, start a fresh native session on first submission,
+and never execute the copied history. Shell has no native AI compaction action.
 
 Stdout and stderr appear together after process exit and output draining, not
 as live output. Both use separate fenced-code-style blocks by default. Prefix a
@@ -67,24 +79,28 @@ Reload, search, export, sharing, and frozen fork/handoff history.
 
 Shell maintains private SQLite native logs under the executor's
 `agent-data/shell/sessions-v1` directory. Commands commit before launch, and
-output commits before publication. Reload imports a bound native session; it
+the last 64 KiB of combined stdout/stderr is held in memory until settlement,
+then commits before publication. A crash during execution can lose that
+in-flight output. Reload imports a bound native session; it
 never replays commands or restores processes. A restart starts with the last
 controller-confirmed directory, not an unapplied historical cwd observation.
 
 - Output is incremental UTF-8 text, not lossless binary or terminal emulation.
-- Each command captures at most 16 MiB across both pipes, in 32 KiB batches.
+- Each command retains only the last 64 KiB across both pipes, at UTF-8
+  character boundaries. Older output is discarded with a truncation notice;
+  truncation does not stop execution or fail a successful command.
 - After process exit, output drain has a 1.5-second deadline. Held descriptors
   or stalled capture produce an explicit incomplete-capture outcome.
-- Each native session allows 60 MiB of serialized records or 100,000 rows.
-  Exhaustion fails explicitly; history is never silently pruned.
-- Successful CLI receipts contain complete stdout up to 4 MiB, including an
-  explicitly empty result for silent commands. Larger results have no final
-  receipt text; use transcript export. Forwarded CLI receipt envelopes retain
-  their existing 64 KiB limit.
+- No cumulative native-session or import row/byte quota is imposed. History
+  grows until the chat is deleted; storage failures remain errors.
+- Successful CLI receipts contain retained stdout and a notice when output was
+  truncated, including an explicitly empty result for silent commands.
+  Forwarded CLI receipt envelopes retain their existing 64 KiB limit, shortening
+  optional output further with a notice when JSON encoding needs more room.
 - Pipe ordering is preserved within each stream. Presentation groups stdout
   before stderr, without promising cross-stream ordering. Partial Markdown
-  history windows or capture gaps render literally until a complete document
-  is available.
+  history windows, truncated output, or capture gaps render literally rather
+  than interpreting an incomplete Markdown document.
 
 ## CLI
 

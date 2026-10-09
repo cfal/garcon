@@ -124,7 +124,9 @@ list's `BULK` column and detail panel report bulk separately. Files content, mos
 Git operations, history import, and large CLI operations wait up to 20 seconds
 for bulk within their existing deadline; they never fall back to Local or primary.
 CLI context, turn receipts, Stop, and permission decisions stay on primary with
-a 64 KiB encoded RPC cap. Other forwarded operations retain their 1 MiB request
+a 64 KiB encoded RPC cap. Oversized successful receipt output is shortened to
+its tail with a notice and `completeness: best-effort`; the terminal outcome and
+retained transcript stay intact. Other forwarded operations retain their 1 MiB request
 and 8 MiB reply limits. An undeliverable mutation reply remains an unknown
 outcome, not permission to retry. See [Executor Transport](./executor/transport.md).
 

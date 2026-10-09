@@ -79,7 +79,10 @@ The gateway shares the executor's primary/bulk authority, not a separate executo
 `controllerCli.describe` and the exact turn-receipt, Stop, and permission-decision
 routes use primary. Every other forwarded operation uses bulk, regardless of
 its actual payload size. Both sides validate the route. Primary exchanges are
-capped at 64 KiB including RPC envelopes; bulk retains 1 MiB requests and 8 MiB
+capped at 64 KiB including RPC envelopes. Successful receipts shorten optional
+output to a tail with an explicit notice and `completeness: best-effort` when
+needed to fit the serialized envelope, without changing the retained result.
+Bulk retains 1 MiB requests and 8 MiB
 replies. Oversized mutation replies report `CLI_OUTCOME_UNKNOWN`, not a retryable
 size rejection.
 
