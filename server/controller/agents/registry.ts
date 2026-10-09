@@ -1,4 +1,5 @@
 import type {
+  AgentIntegration,
   AgentNativeSessionRef,
   AgentProjectPathUpdatePreparation,
   AgentSteerResult,
@@ -6,6 +7,7 @@ import type {
   AgentTranscriptSourceLocation,
   ExecutorCallOptions,
 } from '@garcon/server-agent-interface';
+import type { AgentAuthStatus } from '../../../common/agent-execution.js';
 import type { PermissionDecisionPayload } from '../../../common/chat-command-contracts.js';
 import type { ChatMessage } from '@garcon/common/chat-types';
 import type { ChatTransientControlAction } from '../../../common/chat-transient-feed.js';
@@ -67,6 +69,12 @@ import {
 } from '../../../common/execution-defaults.js';
 
 const logger = createLogger('agents:registry');
+
+async function getIntegrationAuthStatus(integration: AgentIntegration): Promise<AgentAuthStatus> {
+  return integration.auth
+    ? integration.auth.status(new AbortController().signal)
+    : { authenticated: false, canReauth: false, label: integration.descriptor.label, source: 'none' };
+}
 
 // Whether an agent can be steered. It is unknown while the agent's executor has not reported the
 // integration, as before a remote executor first connects after the controller starts.
@@ -479,15 +487,13 @@ export class AgentRegistry implements AgentRegistryServiceContract {
       ?? { state: 'idle', running: false };
   }
   async getAgentAuthStatus(agentId: string, executorId?: string | null): Promise<unknown | null> {
-    const auth = this.#directory.list(executorId).find(integration => integration.descriptor.id === agentId)?.auth;
-    return auth ? auth.status(new AbortController().signal) : null;
+    const integration = this.#directory.list(executorId).find(integration => integration.descriptor.id === agentId);
+    return integration ? getIntegrationAuthStatus(integration) : null;
   }
   async getAgentAuthStatusMap(executorId?: string | null): Promise<Record<string, unknown>> {
     return Object.fromEntries(await Promise.all(this.#directory.list(executorId).map(async (integration) => [
       integration.descriptor.id,
-      integration.auth
-        ? await integration.auth.status(new AbortController().signal)
-        : { authenticated: false, canReauth: false, label: integration.descriptor.label, source: 'none' },
+      await getIntegrationAuthStatus(integration),
     ])));
   }
   async getAgentReadinessMap(authByAgent?: Record<string, unknown>, executorId?: string | null) {

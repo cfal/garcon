@@ -131,6 +131,23 @@ describe('AgentRegistry session cache', () => {
       .rejects.toMatchObject({ code: 'ENOENT' });
   });
 
+  it('returns the same no-auth status for known agents in individual and catalog requests', async () => {
+    const integration = { descriptor: { id: 'test', label: 'Synthetic agent' }, auth: null };
+    const registry = createRegistry(undefined, undefined, {
+      list: () => [integration],
+      get: (id) => id === 'test' ? integration : null,
+    });
+    const routes = createAgentRoutes({ agents: registry });
+    const expected = { test: { authenticated: false, canReauth: false, label: 'Synthetic agent', source: 'none' } };
+    for (const query of ['', '?agent=test']) {
+      const url = new URL(`http://localhost/api/v1/agents/auth${query}`);
+      const response = await routes['/api/v1/agents/auth'].GET(new Request(url), url);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual(expected);
+    }
+    expect(registry.supportsAuthLogin('test')).toBe(false);
+  });
+
   it('returns a client error for unknown-agent auth and an empty command catalog', async () => {
     const registry = createRegistry();
     const routes = createAgentRoutes({ agents: registry });

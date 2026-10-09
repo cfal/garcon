@@ -28,6 +28,8 @@ for (const backend of ['in-process', 'remote-controller-dials', 'remote-executor
       const agent = catalog.catalog.agents.find(entry => entry.id === 'shell');
       expect(agent).toMatchObject({ executionPolicy: 'literal', selectionKind: 'execution-variant', selectionLabel: 'Shell', supportedPermissionModes: [], generation: null });
       expect(agent?.models.some(model => model.value === 'sh')).toBe(true);
+      const auth = await client.get(`/api/v1/agents/auth?agent=shell&executorId=${client.executorId}`);
+      expect(auth).toEqual({ shell: { authenticated: false, canReauth: false, label: 'Shell', source: 'none' } });
 
       const chatId = fixture.newChatId();
       const source = '  printf "<garcon-get-chat-id />\\n"; printf diagnostic >&2; cd next\n ';
