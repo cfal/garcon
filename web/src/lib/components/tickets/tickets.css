@@ -191,6 +191,10 @@ textarea.ticket-input {
 	min-height: 70px;
 	line-height: 1.6;
 }
+textarea.ticket-input.content-sized-textarea {
+	resize: none;
+	min-height: 44px;
+}
 .ticket-input::placeholder {
 	color: hsl(var(--muted-foreground));
 }

@@ -171,12 +171,11 @@
 		bind:ref={textarea}
 		bind:value={editor.draft}
 		onkeydown={handleEditorKeydown}
-		rows={4}
 		invalid={false}
 		readOnly={editor.mutationBlocked || isPromptRefinementPending}
 		disabled={editor.mutation !== 'idle'}
 		describedBy={describedBy}
-		textareaClass="min-h-24 max-h-48 placeholder:text-muted-foreground"
+		textareaClass="max-h-48 placeholder:text-muted-foreground"
 		canExpand={editor.mutation === 'idle'}
 		expandLabel={m.chat_queue_open_expanded_editor()}
 		{canRefinePrompt}

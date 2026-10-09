@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { contentSizedTextarea } from '$lib/components/ui/textarea/content-sized-textarea.svelte.js';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import type { TicketDraftState } from '$lib/tickets/drafts/ticket-draft-state.svelte.js';
 	import TicketDraftFeedback from './TicketDraftFeedback.svelte';
@@ -28,6 +29,7 @@
 			void close();
 		}
 	}
+	const contentSizing = contentSizedTextarea(() => draft.field('body'));
 </script>
 
 <Dialog.Root
@@ -68,8 +70,9 @@
 			>
 			<label class="ticket-field"
 				>{m.tickets_close_comment()}<textarea
-					class="ticket-input text-base"
-					rows="3"
+					{@attach contentSizing}
+					class="ticket-input content-sized-textarea text-base"
+					rows="1"
 					onkeydown={keydown}
 					disabled={!draft.canEdit}
 					value={draft.field('body')}

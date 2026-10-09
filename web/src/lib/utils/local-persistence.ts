@@ -4,7 +4,6 @@ type ValueOf<T> = T[keyof T];
 
 export const LOCAL_STORAGE_KEYS = {
 	authToken: 'bearer-token',
-	composerHeight: 'composerHeight',
 	fileTreeFoldersFirst: 'file-tree-folders-first',
 	fileTreeColumnVisibility: 'file-tree-column-visibility-v1',
 	fileTreeColumnWidths: 'file-tree-column-widths',

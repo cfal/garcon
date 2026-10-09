@@ -234,6 +234,7 @@
 						</Button>
 					</div>
 					<Textarea
+						autoSize={false}
 						id="api-provider-models"
 						class="h-40 max-h-60 resize-y overflow-y-auto [field-sizing:fixed]"
 						value={dialog.modelsText}

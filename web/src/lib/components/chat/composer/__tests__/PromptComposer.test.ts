@@ -8,10 +8,9 @@ import {
 } from '$lib/components/prompt-editor/__tests__/PromptEditorStub.svelte';
 import type { GitQuickSummaryReady } from '$lib/api/git.js';
 import { ImageAttachmentState } from '$lib/chat/composer/image-attachment.svelte.js';
-import { chatDraftStorageKey, LOCAL_STORAGE_KEYS } from '$lib/utils/local-persistence.js';
+import { chatDraftStorageKey } from '$lib/utils/local-persistence.js';
 import * as snippetsApi from '$lib/api/snippets';
 import * as commandsApi from '$lib/api/commands.js';
-import { PromptComposerHeightState } from '../prompt-composer-height-state.svelte.js';
 import type { ProjectResolutionResponse, ProjectTarget } from '$shared/project-resolution';
 import { ModelCatalogStore } from '$lib/agents/model-catalog-store.svelte';
 import { localExecutor, remoteExecutor } from '$lib/executors/__tests__/fixtures';
@@ -111,7 +110,7 @@ describe('PromptComposer focus', () => {
 		resetPromptEditorStub();
 		vi.mocked(snippetsApi.expandSnippet).mockReset();
 		document.querySelector('[data-testid="outside-focus"]')?.remove();
-		localStorage.removeItem(LOCAL_STORAGE_KEYS.composerHeight);
+		localStorage.removeItem('composerHeight');
 	});
 
 	it('hides the composer executor selector when only Local is configured', () => {
@@ -333,10 +332,12 @@ describe('PromptComposer focus', () => {
 		expect(container.querySelector('[data-composer-shell]')?.contains(notice)).toBe(false);
 		expect(surface.querySelector('[role="status"]')).toBeNull();
 		expect(surface.className).toBe(surfaceMarkup);
-		expect(onAvailabilityNoticeChange).toHaveBeenLastCalledWith(expect.objectContaining({
-			notice: { kind: 'catalog-failed', message: 'Catalog unavailable' },
-			onRetryCatalog: expect.any(Function),
-		}));
+		expect(onAvailabilityNoticeChange).toHaveBeenLastCalledWith(
+			expect.objectContaining({
+				notice: { kind: 'catalog-failed', message: 'Catalog unavailable' },
+				onRetryCatalog: expect.any(Function),
+			}),
+		);
 		expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Send message' }).disabled).toBe(
 			true,
 		);
@@ -413,59 +414,29 @@ describe('PromptComposer focus', () => {
 	});
 
 	it('measures content once after an input update', async () => {
-		const fitToContent = vi.spyOn(PromptComposerHeightState.prototype, 'fitToContent');
-		try {
-			render(PromptComposerTestHost, { selectedChatId: 'chat-single-input-measurement' });
-			const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
-			await waitFor(() => expect(fitToContent).toHaveBeenCalled());
-			fitToContent.mockClear();
-
-			await fireEvent.input(textarea, { target: { value: 'First line\nSecond line' } });
-
-			await waitFor(() => expect(fitToContent).toHaveBeenCalledOnce());
-		} finally {
-			fitToContent.mockRestore();
-		}
+		render(PromptComposerTestHost, { selectedChatId: 'chat-single-input-measurement' });
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		const measure = vi.fn(() => 96);
+		Object.defineProperty(textarea, 'scrollHeight', { configurable: true, get: measure });
+		await fireEvent.input(textarea, { target: { value: 'First line\nSecond line' } });
+		expect(measure).toHaveBeenCalledOnce();
+		expect(textarea.style.height).toBe('96px');
 	});
 
-	it('keeps manual resizing live after content auto-expands while the selected chat is processing', async () => {
-		const { rerender } = render(PromptComposerTestHost, {
-			selectedChatId: 'chat-1',
-			selectedStatus: 'running',
-			selectedIsProcessing: true,
-		});
+	it('ignores a saved manual height and leaves the composer entirely content-sized', async () => {
+		localStorage.setItem('composerHeight', '300');
+		render(PromptComposerTestHost, { selectedChatId: 'chat-no-manual-height' });
 		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
-		const slider = screen.getByRole('slider', { name: 'Resize message composer' });
-		slider.setPointerCapture = vi.fn();
-		slider.hasPointerCapture = vi.fn(() => true);
-		slider.releasePointerCapture = vi.fn();
-		Object.defineProperty(textarea, 'scrollHeight', { configurable: true, value: 420 });
-
-		await fireEvent.input(textarea, { target: { value: 'A long prompt' } });
-		expect(textarea.style.height).toBe('300px');
-		await fireEvent.pointerDown(slider, {
-			pointerId: 11,
-			clientY: 400,
-			button: 0,
-			isPrimary: true,
+		Object.defineProperty(textarea, 'scrollHeight', {
+			configurable: true,
+			get: () => (textarea.value ? 100 : 52),
 		});
-		await fireEvent.pointerMove(slider, { pointerId: 11, clientY: 540 });
-
-		expect(textarea.style.height).toBe('160px');
-		expect(localStorage.getItem(LOCAL_STORAGE_KEYS.composerHeight)).toBeNull();
-
-		await rerender({
-			selectedChatId: 'chat-1',
-			selectedStatus: 'running',
-			selectedIsProcessing: true,
-			quickCommitRefreshing: true,
-		});
-		expect(textarea.style.height).toBe('160px');
-
-		await fireEvent.pointerUp(slider, { pointerId: 11, clientY: 540 });
-
-		expect(textarea.style.height).toBe('160px');
-		expect(localStorage.getItem(LOCAL_STORAGE_KEYS.composerHeight)).toBe('160');
+		await fireEvent.input(textarea, { target: { value: 'Synthetic multiline draft' } });
+		expect(textarea.style.height).toBe('100px');
+		await fireEvent.input(textarea, { target: { value: '' } });
+		expect(textarea.style.height).toBe('52px');
+		expect(textarea.getAttribute('rows')).toBe('1');
+		expect(screen.queryByRole('slider', { name: 'Resize message composer' })).toBeNull();
 	});
 
 	it('removes stale content height when the draft is cleared programmatically', async () => {
@@ -476,16 +447,16 @@ describe('PromptComposer focus', () => {
 		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
 		Object.defineProperty(textarea, 'scrollHeight', {
 			configurable: true,
-			get: () => (textarea.value ? 420 : 48),
+			get: () => (textarea.value ? 420 : 52),
 		});
 
 		await fireEvent.input(textarea, { target: { value: 'A long prompt' } });
-		expect(textarea.style.height).toBe('300px');
+		expect(textarea.style.height).toBe('420px');
 
 		await fireEvent.click(screen.getByTestId('clear-draft'));
 
 		expect(textarea.value).toBe('');
-		expect(textarea.style.height).toBe('140px');
+		expect(textarea.style.height).toBe('52px');
 	});
 
 	it('does not resync attachment URLs for text-only draft changes', async () => {
@@ -765,7 +736,7 @@ describe('PromptComposer focus', () => {
 		await nextAnimationFrame();
 
 		expect(textarea.value).toBe('Appended review block');
-		expect(textarea.style.height).toBe('300px');
+		expect(textarea.style.height).toBe('420px');
 		expect(textarea.scrollTop).toBe(420);
 
 		textarea.scrollTop = 100;
@@ -2392,7 +2363,8 @@ describe('PromptComposer focus', () => {
 			target,
 			resolution: { kind: 'unavailable' as const, reason: 'not-found' as const },
 		}));
-		const onAvailabilityNoticeChange = vi.fn<(notice: ComposerAvailabilityNoticePresentation | null) => void>();
+		const onAvailabilityNoticeChange =
+			vi.fn<(notice: ComposerAvailabilityNoticePresentation | null) => void>();
 		const onChooseProjectFolder = vi.fn();
 		const props = {
 			selectedChatId: 'notice-chat-one',
@@ -2414,9 +2386,11 @@ describe('PromptComposer focus', () => {
 		expect(onChooseProjectFolder).toHaveBeenCalledWith('notice-chat-one');
 
 		await fireEvent.input(screen.getByRole('textbox'), { target: { value: '/' } });
-		await waitFor(() => expect(onAvailabilityNoticeChange).toHaveBeenLastCalledWith(
-			expect.objectContaining({ chatId: 'notice-chat-two' }),
-		));
+		await waitFor(() =>
+			expect(onAvailabilityNoticeChange).toHaveBeenLastCalledWith(
+				expect.objectContaining({ chatId: 'notice-chat-two' }),
+			),
+		);
 		await rendered.rerender({ ...props, selectedChatId: 'notice-chat-two', isVisible: false });
 		expect(onAvailabilityNoticeChange).toHaveBeenLastCalledWith(null);
 		await rendered.rerender({ ...props, selectedChatId: 'notice-chat-two', isVisible: true });

@@ -4,6 +4,7 @@
 	import Square from '@lucide/svelte/icons/square';
 	import { Button } from '$lib/components/ui/button';
 	import { cn } from '$lib/utils/cn.js';
+	import { contentSizedTextarea } from '$lib/components/ui/textarea/content-sized-textarea.svelte.js';
 	import * as m from '$lib/paraglide/messages.js';
 
 	interface Props {
@@ -14,6 +15,7 @@
 		invalid: boolean;
 		readOnly: boolean;
 		disabled?: boolean;
+		/** Resting height in lines; the field grows from there with its content. */
 		rows?: number;
 		textareaClass?: string;
 		class?: string;
@@ -36,7 +38,7 @@
 		invalid,
 		readOnly,
 		disabled = false,
-		rows = 4,
+		rows = 1,
 		textareaClass = '',
 		class: className,
 		describedBy = '',
@@ -52,6 +54,7 @@
 	let refinementActionLabel = $derived(
 		isPromptRefinementPending ? m.prompt_refinement_cancel() : m.prompt_refinement_refine(),
 	);
+	const contentSizing = contentSizedTextarea(() => value);
 </script>
 
 <div
@@ -63,6 +66,7 @@
 	aria-busy={isPromptRefinementPending}
 >
 	<textarea
+		{@attach contentSizing}
 		{...dataAttributes}
 		bind:this={ref}
 		bind:value
@@ -74,7 +78,7 @@
 		{disabled}
 		aria-invalid={invalid}
 		aria-describedby={describedBy || undefined}
-		class="block w-full resize-y border-0 bg-transparent px-3 py-2 text-base leading-5 outline-none disabled:cursor-wait disabled:opacity-70 read-only:cursor-wait read-only:opacity-70 sm:pointer-fine:text-sm {textareaClass}"
+		class="content-sized-textarea block w-full border-0 bg-transparent px-3 py-2 text-base leading-5 outline-none disabled:cursor-wait disabled:opacity-70 read-only:cursor-wait read-only:opacity-70 sm:pointer-fine:text-sm {textareaClass}"
 	></textarea>
 	<div class="flex min-h-11 items-center justify-end gap-1 px-1.5 pb-1.5 sm:pointer-fine:min-h-9">
 		<Button

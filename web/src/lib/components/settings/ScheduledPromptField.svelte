@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onDestroy, tick, untrack, type Snippet } from 'svelte';
+	import { contentSizedTextarea } from '$lib/components/ui/textarea/content-sized-textarea.svelte.js';
 	import Braces from '@lucide/svelte/icons/braces';
 	import FileText from '@lucide/svelte/icons/file-text';
 	import { getSnippets, getPreambles } from '$lib/context';
@@ -47,7 +48,7 @@
 	const variableHelpId = `${id}-variable-help`;
 	const snippetHelpId = `${id}-snippet-help`;
 	const errorId = `${id}-error`;
-	let resizeFrame: number | null = null;
+	const contentSizing = contentSizedTextarea(() => prompt);
 	const interactionKey = $derived(`${JSON.stringify(snippetContext)}\u0000${snippetContextKey}`);
 	const snippetCatalog = untrack(() => (snippetContext !== undefined ? getSnippets() : null));
 	const preambleCatalog = untrack(() => (snippetContext !== undefined ? getPreambles() : null));
@@ -67,7 +68,6 @@
 			if (!ref) return;
 			ref.focus({ preventScroll: true });
 			ref.setSelectionRange(caret, caret);
-			resizeTextarea();
 		},
 		onPendingChange: (pending) => onSnippetPendingChange?.(pending),
 		onSourceChanged: (source) => {
@@ -95,33 +95,10 @@
 			.join(' '),
 	);
 
-	function resizeTextarea(): void {
-		if (!ref || surface !== 'composer') return;
-		ref.style.height = 'auto';
-		ref.style.height = `${ref.scrollHeight}px`;
-	}
-
-	$effect(() => {
-		prompt;
-		ref;
-		if (surface !== 'composer' || !ref) return;
-		if (resizeFrame !== null) cancelAnimationFrame(resizeFrame);
-		resizeFrame = requestAnimationFrame(() => {
-			resizeFrame = null;
-			resizeTextarea();
-		});
-		return () => {
-			if (resizeFrame === null) return;
-			cancelAnimationFrame(resizeFrame);
-			resizeFrame = null;
-		};
-	});
-
 	function handleInput(event: Event): void {
 		const textarea = event.currentTarget;
 		if (!(textarea instanceof HTMLTextAreaElement)) return;
 		onPromptChange(textarea.value);
-		resizeTextarea();
 		if (snippetContext !== undefined && !(event as InputEvent).isComposing) {
 			snippets.detectTrigger(textarea.selectionStart, snippetTrigger, textarea.value);
 		}
@@ -138,7 +115,6 @@
 		await tick();
 		ref.focus();
 		ref.setSelectionRange(nextCaret, nextCaret);
-		resizeTextarea();
 	}
 </script>
 
@@ -151,25 +127,24 @@
 	</div>
 
 	<div
-		class={surface === 'composer'
-			? 'relative min-h-[120px] rounded-lg border border-border'
-			: undefined}
+		class={surface === 'composer' ? 'relative rounded-lg border border-border' : undefined}
 		data-slot={surface === 'composer' ? 'scheduled-new-chat-composer' : undefined}
 	>
 		<textarea
+			{@attach contentSizing}
 			bind:this={ref}
 			id={inputId}
 			value={prompt}
 			readonly={snippets.expansion.pending}
 			oninput={handleInput}
 			onkeydown={onPromptKeydown}
-			rows={surface === 'composer' ? 2 : 5}
+			rows={surface === 'composer' ? 1 : 3}
 			aria-describedby={describedBy}
 			aria-invalid={visibleError ? 'true' : undefined}
 			placeholder={m.scheduled_prompts_prompt_placeholder()}
 			class={surface === 'composer'
-				? 'chat-input-placeholder block min-h-11 max-h-[40vh] w-full resize-none overflow-y-auto bg-transparent px-4 py-1.5 text-base leading-6 text-foreground outline-none placeholder:text-muted-foreground sm:max-h-[500px] sm:py-3 sm:pointer-fine:text-sm'
-				: 'block min-h-32 w-full resize-y rounded-md border border-border bg-background px-3 py-2 text-base leading-6 outline-none focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:text-sm'}
+				? 'content-sized-textarea chat-input-placeholder block w-full bg-transparent px-4 py-2.5 text-base leading-6 text-foreground outline-none placeholder:text-muted-foreground sm:py-3 sm:pointer-fine:text-sm'
+				: 'content-sized-textarea block w-full rounded-md border border-border bg-background px-3 py-2 text-base leading-6 outline-none focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:text-sm'}
 		></textarea>
 
 		{#if controls}

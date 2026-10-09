@@ -23,7 +23,6 @@
 		canRefinePrompt: boolean;
 		openRequestId: number;
 		onRefinePrompt: () => void;
-		resizeTextarea: () => void;
 	}
 
 	let {
@@ -37,7 +36,6 @@
 		canRefinePrompt,
 		openRequestId,
 		onRefinePrompt,
-		resizeTextarea,
 	}: Props = $props();
 	const composer = getComposerState();
 	const sessions = getChatSessions();
@@ -66,9 +64,6 @@
 		},
 		get snippetTrigger() {
 			return localSettings.snippetTrigger;
-		},
-		get resizeTextarea() {
-			return resizeTextarea;
 		},
 	});
 

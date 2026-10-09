@@ -293,6 +293,14 @@
 	--cli-presentation-accent: var(--cli-presentation-accent-dark);
 }
 
+@utility content-sized-textarea {
+	field-sizing: fixed;
+	min-height: 2.75rem;
+	max-height: min(40dvh, 18.75rem);
+	resize: none;
+	overflow-y: auto;
+}
+
 @layer components {
 	.select-native {
 		appearance: none;

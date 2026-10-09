@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy, tick, untrack } from 'svelte';
+	import { contentSizedTextarea } from '$lib/components/ui/textarea/content-sized-textarea.svelte.js';
 	import FileMentionMenu from './FileMentionMenu.svelte';
 	import SlashCommandMenu from './SlashCommandMenu.svelte';
 	import ComposerBottomBar from './ComposerBottomBar.svelte';
@@ -9,7 +10,6 @@
 		resolveComposerAvailabilityNotice,
 		type ComposerAvailabilityNoticePresentation,
 	} from '$lib/chat/composer/composer-availability.js';
-	import ComposerResizeHandle from './ComposerResizeHandle.svelte';
 	import PromptComposerEditor from './PromptComposerEditor.svelte';
 	import ComposerSnippetPalette from './ComposerSnippetPalette.svelte';
 	import AgentSettingsControls from './AgentSettingsControls.svelte';
@@ -43,12 +43,6 @@
 	import { isChatProcessing } from '$lib/chat/sessions/chat-processing.js';
 	import { PromptComposerUiState } from './prompt-composer-state.svelte';
 	import {
-		COMPOSER_DEFAULT_HEIGHT,
-		COMPOSER_MAX_HEIGHT,
-		COMPOSER_MIN_HEIGHT,
-		PromptComposerHeightState,
-	} from './prompt-composer-height-state.svelte.js';
-	import {
 		buildPermissionOptions,
 		buildThinkingOptions,
 	} from '$lib/chat/composer/composer-controls.js';
@@ -71,11 +65,6 @@
 	import { ApiError } from '$lib/api/client.js';
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
-	import {
-		getLocalStorageItem,
-		LOCAL_STORAGE_KEYS,
-		setLocalStorageItem,
-	} from '$lib/utils/local-persistence';
 	import { CHAT_FILE_ATTACHMENT_MIME_TYPES } from '@garcon/common/attachments';
 	import ImagePlus from '@lucide/svelte/icons/image-plus';
 	import PromptComposerModelSelector from './PromptComposerModelSelector.svelte';
@@ -146,8 +135,10 @@
 		getText: () => composerState.inputText,
 		getTextarea: () => textarea,
 		canRecall: () => !isDisabled && isVisible,
-		setText: (text) => { composerState.inputText = text; queueCurrentDraft(text); },
-		resize: autoResize,
+		setText: (text) => {
+			composerState.inputText = text;
+			queueCurrentDraft(text);
+		},
 	});
 	$effect(() => {
 		void recallIdentity;
@@ -239,7 +230,8 @@
 					sessions.selectedChatId !== chatId ||
 					modelCatalog !== catalog ||
 					selectedProjectTarget?.projectPath !== projectPath
-				) return;
+				)
+					return;
 				projectState.retry();
 			},
 			onChooseProjectFolder: canChooseProjectFolder
@@ -285,7 +277,6 @@
 		get startBlocked() {
 			return isDisabled || directAdmissionPending || snippetExpansion.pending;
 		},
-		resizeTextarea: autoResize,
 	});
 	const promptTransformPending = $derived(snippetExpansion.pending || promptRefinement.pending);
 	const attachmentController = new PromptComposerAttachmentController({
@@ -338,7 +329,6 @@
 			visible: isVisible,
 			textarea,
 			userInteractionGeneration: () => workspaceShortcuts.userInteractionGeneration,
-			resize: autoResize,
 		}),
 	);
 
@@ -365,37 +355,9 @@
 		imageAttachments.revokeAll();
 	});
 
-	const composerHeight = new PromptComposerHeightState();
-
-	function autoResize(): void {
-		if (!textarea || !isVisible) return;
-		composerHeight.fitToContent(textarea, appShell.isMobile);
-	}
-
-	// Programmatic draft changes do not emit input events. The effect measures
-	// the updated DOM value while Svelte remains the sole owner of its height.
-	$effect(() => {
-		const target = textarea;
-		const inputText = composerState.inputText;
-		const mobile = appShell.isMobile;
-		const visible = isVisible;
-		if (!target || !visible || target.value !== inputText) return;
-		untrack(() => composerHeight.fitToContent(target, mobile));
-	});
-
-	onMount(() => {
-		const stored = getLocalStorageItem(LOCAL_STORAGE_KEYS.composerHeight);
-		if (stored === null || stored.trim() === '') return;
-		const parsed = Number(stored);
-		if (!Number.isFinite(parsed)) return;
-		composerHeight.restorePreferredHeight(parsed);
-		if (appShell.isMobile) autoResize();
-	});
-
-	function commitComposerHeight(height: number): void {
-		const committedHeight = composerHeight.commit(height);
-		setLocalStorageItem(LOCAL_STORAGE_KEYS.composerHeight, String(Math.round(committedHeight)));
-	}
+	const contentSizing = contentSizedTextarea(() =>
+		isVisible ? composerState.inputText : undefined,
+	);
 
 	// Reveals blocks appended from another surface without moving focus away from that surface.
 	$effect(() => {
@@ -421,7 +383,6 @@
 			) {
 				return;
 			}
-			autoResize();
 			textarea.scrollTop = textarea.scrollHeight;
 			handledDraftAppendRequestId = request.requestId;
 		});
@@ -452,7 +413,6 @@
 		await tick();
 		textarea?.focus();
 		textarea?.setSelectionRange(replacement.caret, replacement.caret);
-		autoResize();
 	}
 
 	async function insertFileMention(path: string) {
@@ -474,7 +434,6 @@
 		await tick();
 		textarea?.focus();
 		textarea?.setSelectionRange(replacement.caret, replacement.caret);
-		autoResize();
 	}
 
 	function snippetErrorDetail(error: unknown): string {
@@ -491,7 +450,6 @@
 		await tick();
 		if (destroyed || !isVisible) return;
 		if (caret !== undefined) textarea?.setSelectionRange(caret, caret);
-		autoResize();
 	}
 
 	async function insertSnippet(
@@ -740,8 +698,8 @@
 	const imageListClass = $derived(cn('p-2 bg-muted/40 rounded-lg mx-2 mt-2'));
 	const textareaClass = $derived(
 		cn(
-			'block w-full bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-ring text-foreground placeholder:text-muted-foreground disabled:opacity-50 resize-none max-h-[40vh] sm:max-h-[500px] overflow-y-auto text-base leading-6 transition-colors duration-200',
-			'px-4 py-2.5 sm:px-5 sm:py-4 min-h-[48px]',
+			'content-sized-textarea block w-full bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-ring text-foreground placeholder:text-muted-foreground disabled:opacity-50 max-h-[min(40dvh,150px)] sm:max-h-[min(40dvh,300px)] text-base leading-6 transition-colors duration-200',
+			'px-4 py-3 sm:px-5 sm:py-3.5 min-h-[48px]',
 		),
 	);
 </script>
@@ -863,6 +821,8 @@
 			<div class="relative overflow-hidden bg-transparent focus-within:ring-0">
 				<div class="relative z-10">
 					<textarea
+						{@attach contentSizing}
+						rows="1"
 						bind:this={textarea}
 						value={composerState.inputText}
 						onkeydown={handleKeyDown}
@@ -873,8 +833,7 @@
 						disabled={isDisabled}
 						readonly={promptRefinement.pending}
 						aria-busy={promptTransformPending}
-						class={textareaClass}
-						style:height={`${composerHeight.renderedHeight}px`}></textarea>
+						class={textareaClass}></textarea>
 				</div>
 			</div>
 
@@ -960,18 +919,6 @@
 			onClose={() => ui.closeSlashMenu()}
 		/>
 
-		{#if !appShell.isMobile}
-			<ComposerResizeHandle
-				value={composerHeight.renderedHeight}
-				minimum={COMPOSER_MIN_HEIGHT}
-				maximum={COMPOSER_MAX_HEIGHT}
-				label={m.chat_composer_resize()}
-				onPreview={(height) => composerHeight.preview(height)}
-				onCommit={commitComposerHeight}
-				onCancel={() => composerHeight.cancelPreview()}
-				onReset={() => commitComposerHeight(COMPOSER_DEFAULT_HEIGHT)}
-			/>
-		{/if}
 		{@render composerSurface()}
 	</div>
 {/snippet}
@@ -994,5 +941,4 @@
 	canRefinePrompt={promptRefinement.canStart}
 	onRefinePrompt={() => promptRefinement.handleAction()}
 	openRequestId={composerEditorOpenRequestId}
-	resizeTextarea={autoResize}
 />

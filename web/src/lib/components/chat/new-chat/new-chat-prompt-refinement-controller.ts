@@ -18,7 +18,6 @@ interface NewChatPromptRefinementOptions {
 	get textarea(): HTMLTextAreaElement | undefined;
 	get startBlocked(): boolean;
 	closePromptSurfaces(): void;
-	resizeTextarea(): void;
 }
 
 export class NewChatPromptRefinementController {
@@ -122,7 +121,6 @@ export class NewChatPromptRefinementController {
 		const textarea = this.options.textarea;
 		if (this.#destroyed || !textarea) return;
 		if (caret !== undefined) textarea.setSelectionRange(caret, caret);
-		this.options.resizeTextarea();
 		textarea.focus({ preventScroll: true });
 	}
 }

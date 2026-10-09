@@ -24,7 +24,6 @@ interface PromptComposerRefinementOptions {
 	get visible(): boolean;
 	get presented(): boolean;
 	get startBlocked(): boolean;
-	resizeTextarea(): void;
 }
 
 export class PromptComposerRefinementController {
@@ -149,7 +148,6 @@ export class PromptComposerRefinementController {
 			return;
 		}
 		if (caret !== undefined) textarea.setSelectionRange(caret, caret);
-		this.options.resizeTextarea();
 		textarea.focus({ preventScroll: true });
 	}
 }

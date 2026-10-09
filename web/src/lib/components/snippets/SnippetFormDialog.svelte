@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { contentSizedTextarea } from '$lib/components/ui/textarea/content-sized-textarea.svelte.js';
 	import { tick } from 'svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
@@ -125,6 +126,7 @@
 		event.preventDefault();
 		void save();
 	}
+	const contentSizing = contentSizedTextarea(() => form.defaultArguments);
 </script>
 
 <Dialog.Root {open} requestClose={closeForm}>
@@ -174,7 +176,7 @@
 					bind:ref={templateTextarea}
 					bind:value={form.template}
 					onkeydown={handleFormKeyDown}
-					rows={12}
+					rows={3}
 					placeholder={m.snippets_template_placeholder({
 						argumentsToken: SNIPPET_ARGUMENTS_TOKEN,
 						projectPathToken: SNIPPET_PROJECT_PATH_TOKEN,
@@ -183,7 +185,7 @@
 					invalid={Boolean(form.templateError)}
 					readOnly={refinementPending}
 					describedBy="snippet-template-help snippet-template-error"
-					textareaClass="min-h-48 font-mono"
+					textareaClass="font-mono"
 					canExpand={!form.saving}
 					expandLabel={m.snippets_template_expand()}
 					canRefinePrompt={refinement?.canStart ?? false}
@@ -208,14 +210,15 @@
 					{m.snippets_default_arguments_label()}
 				</label>
 				<textarea
+					{@attach contentSizing}
 					id="snippet-default-arguments"
 					bind:value={form.defaultArguments}
 					onkeydown={handleFormKeyDown}
-					rows="4"
+					rows="1"
 					placeholder={m.snippets_default_arguments_placeholder()}
 					aria-invalid={Boolean(form.defaultArgumentsError)}
 					aria-describedby="snippet-default-arguments-help snippet-default-arguments-error"
-					class="min-h-24 w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-base leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:text-sm"
+					class="content-sized-textarea w-full rounded-md border border-input bg-background px-3 py-2 text-base leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:text-sm"
 				></textarea>
 				<p id="snippet-default-arguments-help" class="text-xs text-muted-foreground">
 					{m.snippets_default_arguments_help()}
