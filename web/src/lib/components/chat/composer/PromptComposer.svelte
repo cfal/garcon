@@ -10,7 +10,6 @@
 		resolveComposerAvailabilityNotice,
 		type ComposerAvailabilityNoticePresentation,
 	} from '$lib/chat/composer/composer-availability.js';
-	import ComposerResizeHandle from './ComposerResizeHandle.svelte';
 	import PromptComposerEditor from './PromptComposerEditor.svelte';
 	import ComposerSnippetPalette from './ComposerSnippetPalette.svelte';
 	import AgentSettingsControls from './AgentSettingsControls.svelte';
@@ -44,12 +43,6 @@
 	import { isChatProcessing } from '$lib/chat/sessions/chat-processing.js';
 	import { PromptComposerUiState } from './prompt-composer-state.svelte';
 	import {
-		COMPOSER_DEFAULT_HEIGHT,
-		COMPOSER_MAX_HEIGHT,
-		COMPOSER_MIN_HEIGHT,
-		PromptComposerHeightState,
-	} from './prompt-composer-height-state.svelte.js';
-	import {
 		buildPermissionOptions,
 		buildThinkingOptions,
 	} from '$lib/chat/composer/composer-controls.js';
@@ -72,11 +65,6 @@
 	import { ApiError } from '$lib/api/client.js';
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
-	import {
-		getLocalStorageItem,
-		LOCAL_STORAGE_KEYS,
-		setLocalStorageItem,
-	} from '$lib/utils/local-persistence';
 	import { CHAT_FILE_ATTACHMENT_MIME_TYPES } from '@garcon/common/attachments';
 	import ImagePlus from '@lucide/svelte/icons/image-plus';
 	import PromptComposerModelSelector from './PromptComposerModelSelector.svelte';
@@ -147,7 +135,10 @@
 		getText: () => composerState.inputText,
 		getTextarea: () => textarea,
 		canRecall: () => !isDisabled && isVisible,
-		setText: (text) => { composerState.inputText = text; queueCurrentDraft(text); },
+		setText: (text) => {
+			composerState.inputText = text;
+			queueCurrentDraft(text);
+		},
 	});
 	$effect(() => {
 		void recallIdentity;
@@ -239,7 +230,8 @@
 					sessions.selectedChatId !== chatId ||
 					modelCatalog !== catalog ||
 					selectedProjectTarget?.projectPath !== projectPath
-				) return;
+				)
+					return;
 				projectState.retry();
 			},
 			onChooseProjectFolder: canChooseProjectFolder
@@ -363,35 +355,9 @@
 		imageAttachments.revokeAll();
 	});
 
-	const composerHeight = new PromptComposerHeightState();
-	const contentSizing = contentSizedTextarea(() => composerState.inputText, autoResize);
-
-	function autoResize(): void {
-		if (!textarea || !isVisible) return;
-		composerHeight.fitToContent(textarea, appShell.isMobile);
-	}
-
-	$effect(() => {
-		const target = textarea;
-		const mobile = appShell.isMobile;
-		const visible = isVisible;
-		if (!target || !visible) return;
-		untrack(() => composerHeight.fitToContent(target, mobile));
-	});
-
-	onMount(() => {
-		const stored = getLocalStorageItem(LOCAL_STORAGE_KEYS.composerHeight);
-		if (stored === null || stored.trim() === '') return;
-		const parsed = Number(stored);
-		if (!Number.isFinite(parsed)) return;
-		composerHeight.restorePreferredHeight(parsed);
-		autoResize();
-	});
-
-	function commitComposerHeight(height: number): void {
-		const committedHeight = composerHeight.commit(height);
-		setLocalStorageItem(LOCAL_STORAGE_KEYS.composerHeight, String(Math.round(committedHeight)));
-	}
+	const contentSizing = contentSizedTextarea(() =>
+		isVisible ? composerState.inputText : undefined,
+	);
 
 	// Reveals blocks appended from another surface without moving focus away from that surface.
 	$effect(() => {
@@ -732,7 +698,7 @@
 	const imageListClass = $derived(cn('p-2 bg-muted/40 rounded-lg mx-2 mt-2'));
 	const textareaClass = $derived(
 		cn(
-			'block w-full bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-ring text-foreground placeholder:text-muted-foreground disabled:opacity-50 resize-none max-h-[40vh] sm:max-h-[500px] overflow-y-auto text-base leading-6 transition-colors duration-200',
+			'content-sized-textarea block w-full bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-ring text-foreground placeholder:text-muted-foreground disabled:opacity-50 max-h-[min(40dvh,150px)] sm:max-h-[min(40dvh,300px)] text-base leading-6 transition-colors duration-200',
 			'px-4 py-3 sm:px-5 sm:py-3.5 min-h-[48px]',
 		),
 	);
@@ -867,8 +833,7 @@
 						disabled={isDisabled}
 						readonly={promptRefinement.pending}
 						aria-busy={promptTransformPending}
-						class={textareaClass}
-						style:height={`${composerHeight.renderedHeight}px`}></textarea>
+						class={textareaClass}></textarea>
 				</div>
 			</div>
 
@@ -954,18 +919,6 @@
 			onClose={() => ui.closeSlashMenu()}
 		/>
 
-		{#if !appShell.isMobile}
-			<ComposerResizeHandle
-				value={composerHeight.renderedHeight}
-				minimum={COMPOSER_MIN_HEIGHT}
-				maximum={COMPOSER_MAX_HEIGHT}
-				label={m.chat_composer_resize()}
-				onPreview={(height) => composerHeight.preview(height)}
-				onCommit={commitComposerHeight}
-				onCancel={() => composerHeight.cancelPreview()}
-				onReset={() => commitComposerHeight(COMPOSER_DEFAULT_HEIGHT)}
-			/>
-		{/if}
 		{@render composerSurface()}
 	</div>
 {/snippet}

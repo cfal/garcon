@@ -33,7 +33,6 @@ test('ArrowUp recalls current-chat prompts without replacing drafts or remountin
     }
     await page.setViewportSize({ width: 1440, height: 900 });
     // The desktop baseline requires Svelte's responsive handoff and textarea sizing to finish.
-    await browserExpect(page.getByRole('slider', { name: 'Resize message composer' })).toHaveValue('52');
     await browserExpect(textarea).toHaveCSS('height', '52px');
     const bounds = (await composer.boundingBox())!;
     for (const id of [ids[1], ids[0], ids[1], ids[0]]) {

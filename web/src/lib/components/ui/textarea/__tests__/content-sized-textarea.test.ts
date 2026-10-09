@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import Textarea from '../textarea.svelte';
 import {
@@ -40,6 +40,46 @@ describe('content-sized textarea', () => {
 		// An automatic height lets the browser apply the rows; a collapsed one would ignore them.
 		expect([...heightsWhileMeasuring]).toEqual(['auto']);
 		expect(textarea.style.height).toBe('76px');
+	});
+
+	it('measures without a scrollbar or a shrinking layout and restores the field afterwards', async () => {
+		const { rerender } = render(Textarea, { value: '' });
+		const textarea = screen.getByRole<HTMLTextAreaElement>('textbox');
+		textarea.style.marginBottom = '4px';
+		textarea.style.width = '320px';
+		Object.defineProperty(textarea, 'offsetHeight', { get: () => 120 });
+		let whileMeasuring = { overflowY: '', marginBottom: '', width: '' };
+		Object.defineProperty(textarea, 'scrollHeight', {
+			get: () => {
+				whileMeasuring = {
+					overflowY: textarea.style.overflowY,
+					marginBottom: textarea.style.marginBottom,
+					width: textarea.style.width,
+				};
+				return 96;
+			},
+		});
+		await rerender({ value: 'Synthetic multiline draft' });
+		expect(whileMeasuring.overflowY).toBe('hidden');
+		expect(whileMeasuring.width).toBe('320px');
+		// The previous height stays reserved so nothing around the field moves up meanwhile.
+		expect(whileMeasuring.marginBottom).toContain('120px');
+		expect(textarea.style.overflowY).toBe('');
+		expect(textarea.style.marginBottom).toBe('4px');
+		expect(textarea.style.width).toBe('320px');
+		expect(textarea.style.height).toBe('96px');
+	});
+
+	it('keeps its height while it has no layout box', async () => {
+		const { rerender } = render(Textarea, { value: 'Synthetic draft' });
+		const textarea = screen.getByRole<HTMLTextAreaElement>('textbox');
+		Object.defineProperty(textarea, 'scrollHeight', { configurable: true, get: () => 96 });
+		await rerender({ value: 'Synthetic longer draft' });
+		expect(textarea.style.height).toBe('96px');
+		Object.defineProperty(textarea, 'scrollHeight', { get: () => 0 });
+		vi.spyOn(textarea, 'getClientRects').mockReturnValue(Object.assign([], { item: () => null }));
+		await rerender({ value: 'Synthetic draft changed while hidden' });
+		expect(textarea.style.height).toBe('96px');
 	});
 
 	it('refits wrapped content when its panel width changes and releases the observer', async () => {
