@@ -87,6 +87,30 @@ function quickSummary(overrides: Partial<GitQuickSummaryReady> = {}): GitQuickSu
 }
 
 describe('PromptComposer focus', () => {
+	it.each(['', 'printf command'])('preserves incompatible draft attachments and blocks all submit paths: %s', async (source) => {
+		const onsubmit = vi.fn();
+		const { container, rerender } = render(PromptComposerTestHost, {
+			selectedChatId: 'synthetic-draft', selectedStatus: 'draft', onsubmit,
+		});
+		const input = screen.getByRole<HTMLTextAreaElement>('textbox');
+		await fireEvent.input(input, { target: { value: source } });
+		await fireEvent.change(container.querySelector('input[type="file"]')!, {
+			target: { files: [new File(['notes'], 'notes.pdf', { type: 'application/pdf' })] },
+		});
+		expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Send message' }).disabled).toBe(false);
+		await rerender({ executionPolicy: 'literal' });
+		expect(screen.getByRole('alert').textContent).toContain('Remove attachments');
+		const send = screen.getByRole<HTMLButtonElement>('button', { name: 'Send message' });
+		expect(send.disabled).toBe(true);
+		await fireEvent.click(send);
+		await fireEvent.keyDown(input, { key: 'Enter' });
+		await fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true });
+		expect(onsubmit).not.toHaveBeenCalled();
+		expect(screen.getByTestId('composer-attachment-count').textContent).toBe('1');
+		await fireEvent.click(screen.getByRole('button', { name: 'Remove attachment notes.pdf' }));
+		expect(send.disabled).toBe(!source);
+		expect(screen.queryByRole('alert')).toBeNull();
+	});
 	it('recalls only into an empty draft, browses with arrows, and releases recall after editing or switching chats', async () => {
 		const rendered = render(PromptComposerTestHost, {
 			recallPrompts: [

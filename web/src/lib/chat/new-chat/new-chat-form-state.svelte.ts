@@ -208,6 +208,7 @@ export class NewChatFormState {
 			this.#selectableAgentIds.includes(this.agentId) &&
 			!this.modelSelectionPending &&
 			!this.modelSelectionError &&
+			!this.attachmentError &&
 			canSubmitNewChat(
 				this.nonblankPath,
 				this.validationStatus,
@@ -269,6 +270,13 @@ export class NewChatFormState {
 			return this.#modelCatalog.error ?? m.model_selector_unavailable();
 		if (this.resolvedModelSelection) return null;
 		return m.model_selector_unavailable();
+	}
+
+	get attachmentError(): string | null {
+		const agent = this.#modelCatalog.getAgent(this.agentId);
+		return agent?.executionPolicy === 'literal' && this.attachedImages.length > 0
+			? m.chat_composer_remove_attachments({ agent: agent.label })
+			: null;
 	}
 
 	get agentSettings(): AgentSettingsEnvelope {
@@ -759,7 +767,7 @@ export class NewChatFormState {
 			this.error = m.chat_new_chat_errors_agent_unavailable();
 			return null;
 		}
-		if (!this.modelCatalogValidated || this.modelSelectionPending || this.modelSelectionError)
+		if (!this.modelCatalogValidated || this.modelSelectionPending || this.modelSelectionError || this.attachmentError)
 			return null;
 		if (!this.nonblankPath) {
 			this.error = m.chat_new_chat_errors_project_path_required();

@@ -66,7 +66,6 @@
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
 	import { CHAT_FILE_ATTACHMENT_MIME_TYPES } from '@garcon/common/attachments';
-	import ImagePlus from '@lucide/svelte/icons/image-plus';
 	import PromptComposerModelSelector from './PromptComposerModelSelector.svelte';
 	import { snippetTemplateUsesArguments } from '$shared/snippets';
 	import {
@@ -115,6 +114,11 @@
 	const executionAgent = $derived(modelCatalog.getAgent(agentState.agentId));
 	const conversationInput = $derived(Boolean(executionAgent && executionAgent.executionPolicy !== 'literal'));
 	const executionKey = $derived(JSON.stringify([agentState.executorId, agentState.agentId, executionAgent?.executionPolicy]));
+	const attachmentError = $derived(
+		executionAgent?.executionPolicy === 'literal' && composerState.images.length > 0
+			? m.chat_composer_remove_attachments({ agent: executionAgent.label })
+			: null,
+	);
 	const providerAvailable = $derived(isCustomProviderSelectionAvailable(modelCatalog, agentState));
 	const filesAvailable = $derived(executors.filesAvailable(agentState.executorId));
 
@@ -650,7 +654,7 @@
 
 	const canSubmit = $derived(
 		canSubmitComposer(
-			!executionAgent || isDisabled ||
+			!executionAgent || isDisabled || attachmentError !== null ||
 				directAdmissionPending ||
 				promptTransformPending ||
 				(!controllerCommand &&
@@ -787,22 +791,12 @@
 					onExclude={(ordinal) => onExcludeResendCandidate?.(ordinal)}
 				/>
 			{/if}
-			{#if composerState.isDragActive}
-				<div
-					data-attachment-drop-overlay
-					class="pointer-events-none absolute inset-0 bg-primary/20 border-2 border-dashed border-primary flex items-center justify-center z-50 rounded-lg"
-				>
-					<div class="bg-card rounded-lg p-4 shadow-md">
-						<ImagePlus class="w-8 h-8 text-primary mx-auto mb-2" />
-						<p class="text-sm font-medium text-foreground">{m.chat_composer_drop_images()}</p>
-					</div>
-				</div>
-			{/if}
-
 			<ComposerAttachmentList
 				files={composerState.images}
 				previewUrls={imageAttachments.urls}
 				disabled={isDisabled || promptTransformPending}
+				isDragActive={composerState.isDragActive}
+				error={attachmentError}
 				class={imageListClass}
 				onRemove={(index) => composerState.removeImage(index)}
 			/>

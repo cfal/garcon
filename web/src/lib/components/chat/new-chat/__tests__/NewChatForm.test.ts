@@ -1461,6 +1461,34 @@ describe('NewChatForm', () => {
 		expect(input.value).toBe('/snippet review source');
 	});
 
+	it.each(['', 'printf command'])('keeps attachments visible but blocks a new literal selection: %s', async (source) => {
+		stubMatchMedia(false);
+		const chatsApi = await import('$lib/api/chats');
+		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(
+			makeSnapshot({ paths: { recentProjectPaths: ['/workspace/project'] } }),
+		);
+		const onStartChat = vi.fn();
+		const { container, rerender } = render(NewChatFormTestHost, { onStartChat });
+		const input = screen.getByPlaceholderText<HTMLTextAreaElement>('How can I help you today?');
+		await fireEvent.input(input, { target: { value: source } });
+		await fireEvent.change(container.querySelector('input[type="file"]')!, {
+			target: { files: [new File(['notes'], 'notes.pdf', { type: 'application/pdf' })] },
+		});
+		const send = screen.getByRole<HTMLButtonElement>('button', { name: 'Start session' });
+		await waitFor(() => expect(send.disabled).toBe(false));
+		await rerender({ executionPolicy: 'literal' });
+		expect(await screen.findByText(/Remove attachments before submitting/)).toBeTruthy();
+		expect(send.disabled).toBe(true);
+		await fireEvent.click(send);
+		await fireEvent.keyDown(input, { key: 'Enter' });
+		await fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true });
+		expect(onStartChat).not.toHaveBeenCalled();
+		await fireEvent.click(screen.getByRole('button', { name: 'Remove attachment notes.pdf' }));
+		expect(send.disabled).toBe(!source);
+		expect(screen.queryByText(/Remove attachments before submitting/)).toBeNull();
+	});
+
 	it('does not apply a pending expansion after the project path changes', async () => {
 		stubMatchMedia(false);
 		const pending = deferred<Awaited<ReturnType<typeof snippetsApi.expandSnippet>>>();

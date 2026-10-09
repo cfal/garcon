@@ -1,6 +1,7 @@
 <script lang="ts">
 	import FileText from '@lucide/svelte/icons/file-text';
 	import FileVideo from '@lucide/svelte/icons/file-video';
+	import ImagePlus from '@lucide/svelte/icons/image-plus';
 	import X from '@lucide/svelte/icons/x';
 	import {
 		isImageAttachment,
@@ -12,16 +13,32 @@
 		files,
 		previewUrls,
 		disabled,
+		isDragActive = false,
+		error = null,
 		class: className,
 		onRemove,
 	}: {
 		files: File[];
 		previewUrls: ReadonlyMap<File, string>;
 		disabled: boolean;
+		isDragActive?: boolean;
+		error?: string | null;
 		class: string;
 		onRemove: (index: number) => void;
 	} = $props();
 </script>
+
+{#if isDragActive}
+	<div
+		data-attachment-drop-overlay
+		class="pointer-events-none absolute inset-0 bg-primary/20 border-2 border-dashed border-primary flex items-center justify-center z-50 rounded-lg"
+	>
+		<div class="bg-card rounded-lg p-4 shadow-md">
+			<ImagePlus class="w-8 h-8 text-primary mx-auto mb-2" />
+			<p class="text-sm font-medium text-foreground">{m.chat_composer_drop_images()}</p>
+		</div>
+	</div>
+{/if}
 
 {#if files.length > 0}
 	<div class={className}>
@@ -65,4 +82,8 @@
 			{/each}
 		</div>
 	</div>
+{/if}
+
+{#if error}
+	<p role="alert" class="px-3 text-sm text-destructive">{error}</p>
 {/if}

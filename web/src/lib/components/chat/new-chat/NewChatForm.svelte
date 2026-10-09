@@ -582,7 +582,7 @@
 			remoteSettings.snapshot?.recentAgentSettings ?? [],
 		);
 	}
-	const displayedFormError = $derived(form.modelSelectionError ?? form.error);
+	const displayedFormError = $derived(form.modelSelectionError ?? form.attachmentError ?? form.error);
 	const sendButtonClass =
 		'bg-primary text-primary-foreground border-primary/30 hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:border-border disabled:cursor-not-allowed';
 
