@@ -440,7 +440,7 @@ names the generated target chat ID to inspect first.
 ## Discover Exact Selections
 
 For [Shell command chats](./shell.md), `list models --agent shell` lists shell
-execution variants and `--model sh|bash|zsh|fish|pwsh` selects one. No provider,
+execution variants and `--model sh|bash|zsh|fish` selects one. No provider,
 endpoint, permission, or reasoning selection is needed. Start/resume preserve
 literal source and return inert stdout, including an empty silent-success result.
 

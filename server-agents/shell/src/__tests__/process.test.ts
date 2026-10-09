@@ -39,9 +39,7 @@ for (const family of SHELL_FAMILIES) {
       return { ...result, stdout, stderr };
     }
     it('separates streams and observes cwd after same-scope execution', async () => {
-      const result = await run(family === 'pwsh'
-        ? 'Set-Location "space and`nnewline"; [Console]::Out.Write("output"); [Console]::Error.Write("error")'
-        : "cd 'space and\nnewline'\nprintf output\nprintf error >&2");
+      const result = await run("cd 'space and\nnewline'\nprintf output\nprintf error >&2");
       expect(result.stdout.endsWith('output')).toBe(true);
       expect(result.stderr).toContain('error');
       expect(result.exitCode).toBe(0);
@@ -49,8 +47,8 @@ for (const family of SHELL_FAMILIES) {
       expect(result.complete).toBe(true);
     });
     it('preserves nonzero status and reports cwd even on failure', async () => {
-      const result = await run(family === 'pwsh' ? "& /bin/sh -c 'exit 7'" : 'false');
-      expect(result.exitCode).toBe(family === 'pwsh' ? 7 : 1);
+      const result = await run('false');
+      expect(result.exitCode).toBe(1);
       expect(result.cwd).toEqual({ kind: 'reported', path: directory });
     });
     if (family === 'sh' || family === 'bash' || family === 'zsh') {
@@ -61,14 +59,12 @@ for (const family of SHELL_FAMILIES) {
       });
     }
     it('retains unknown cwd when exit bypasses the footer', async () => {
-      const result = await run(family === 'pwsh' ? '[Environment]::Exit(7)' : "exec /bin/sh -c 'exit 7'");
+      const result = await run("exec /bin/sh -c 'exit 7'");
       expect(result.exitCode).toBe(7);
       expect(result.cwd.kind).toBe('unavailable');
     });
     it('drains fast large output before completion', async () => {
-      const result = await run(family === 'pwsh'
-        ? "[Console]::Out.Write(('x' * 262144)); [Console]::Error.Write(('y' * 262144))"
-        : "head -c 262144 /dev/zero | tr '\\0' x\nhead -c 262144 /dev/zero | tr '\\0' y >&2");
+      const result = await run("head -c 262144 /dev/zero | tr '\\0' x\nhead -c 262144 /dev/zero | tr '\\0' y >&2");
       expect(result.stdout.endsWith('x'.repeat(262144))).toBe(true);
       expect(result.stderr.endsWith('y'.repeat(262144))).toBe(true);
       expect(result.complete).toBe(true);
@@ -77,19 +73,18 @@ for (const family of SHELL_FAMILIES) {
       const cancellation = new AbortController();
       const timer = setTimeout(() => cancellation.abort(), 1000);
       try {
-        const result = await run(family === 'pwsh' ? '[Console]::ReadLine()' : 'cat', cancellation.signal);
+        const result = await run('cat', cancellation.signal);
         expect(result.interrupted).toBe(true);
       } finally { clearTimeout(timer); }
     }, 10_000);
 
     it('restores cwd after the usual profile changes it and captures profile output', async () => {
-      const file = join(directory, family === 'pwsh' ? 'powershell/profile.ps1'
-        : family === 'fish' ? 'fish/config.fish' : family === 'bash' ? '.bashrc' : family === 'zsh' ? '.zshrc' : 'profile');
-      await mkdir(join(directory, family === 'pwsh' ? 'powershell' : 'fish'), { recursive: true });
-      await writeFile(file, family === 'pwsh' ? 'Set-Location /; [Console]::Out.Write("startup")'
-        : 'cd /\nprintf startup\n');
+      const profiles = { sh: 'profile', bash: '.bashrc', zsh: '.zshrc', fish: 'fish/config.fish' };
+      const file = join(directory, profiles[family]);
+      await mkdir(join(directory, 'fish'), { recursive: true });
+      await writeFile(file, 'cd /\nprintf startup\n');
       try {
-        const result = await run(family === 'pwsh' ? '[Console]::Out.Write("command")' : 'printf command');
+        const result = await run('printf command');
         expect(result.stdout.endsWith('startupcommand')).toBe(true);
         expect(result.cwd).toEqual({ kind: 'reported', path: directory });
       } finally { await rm(file, { force: true }); }
@@ -99,7 +94,7 @@ for (const family of SHELL_FAMILIES) {
       const gate = Promise.withResolvers<void>();
       let calls = 0;
       try {
-        const result = await run(family === 'pwsh' ? '[Console]::Out.Write("output")' : 'printf output', undefined, async () => {
+        const result = await run('printf output', undefined, async () => {
           calls++; await gate.promise;
         });
         expect(result.complete).toBe(false);
@@ -111,7 +106,7 @@ for (const family of SHELL_FAMILIES) {
     }, 10_000);
 
     it('fails on output persistence rejection instead of reporting success', async () => {
-      await expect(run(family === 'pwsh' ? '[Console]::Out.Write("output")' : 'printf output', undefined,
+      await expect(run('printf output', undefined,
         async () => { throw new Error('Synthetic storage failure'); })).rejects.toThrow('Synthetic storage failure');
     });
 
@@ -163,34 +158,6 @@ for (const family of SHELL_FAMILIES) {
         expect(result.exitCode).toBe(0);
         expect(result.cwd.kind).toBe('invalid');
         expect(result.complete).toBe(true);
-      });
-    }
-
-    if (family === 'pwsh') {
-      it('reports a completed footer with a non-filesystem location as invalid', async () => {
-        const result = await run('Set-Location "space and`nnewline"; Set-Location Env:; [Console]::Out.Write((Get-Location -PSProvider FileSystem).Path)');
-        expect(result.stdout).toBe(join(directory, 'space and\nnewline'));
-        expect(result.exitCode).toBe(0);
-        expect(result.complete).toBe(true);
-        expect(result.cwd.kind).toBe('invalid');
-      });
-
-      it('preserves using and param headers and observes cwd after return', async () => {
-        const result = await run("using namespace System.Text\nparam()\n[Console]::Out.Write([StringBuilder]::new('header').ToString())\nreturn");
-        expect(result.stdout).toBe('header');
-        expect(result.exitCode).toBe(0);
-        expect(result.cwd).toEqual({ kind: 'reported', path: directory });
-      });
-
-      it.each([
-        ['if (', 1], ['Write-Error failure', 1], ["throw 'failure'", 1], ['exit 7', 7],
-        ["& /bin/sh -c 'exit 7'; Write-Output recovered", 7],
-        ['Write-Error failure; Write-Output recovered', 1],
-        ['Write-Output literal`', 0],
-      ] as const)('classifies untouched source conservatively: %s', async (source, status) => {
-        const result = await run(source);
-        expect(result.exitCode).toBe(status);
-        if (source.endsWith('literal`')) expect(result.stdout).toBe('literal`\n');
       });
     }
 

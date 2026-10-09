@@ -118,14 +118,6 @@ describe('Shell integration', () => {
     expect(await integration.execution.runningSessions()).toEqual([]);
   });
 
-  it.skipIf(!Bun.which('pwsh'))('fails a non-filesystem PowerShell location even when the process succeeds', async () => {
-    await mkdir(join(root, 'next'));
-    await integration.execution.start({ ...request, model: 'pwsh', prompt: 'Set-Location next; Set-Location Env:' });
-    expect(await terminal()).toMatchObject({ outcome: 'failed', workingDirectory: { kind: 'unavailable' },
-      error: { message: expect.stringContaining('working directory report is invalid') } });
-    expect((await history()).at(-1)).toMatchObject({ result: { outcome: 'failed', exitCode: 0, capture: 'complete' } });
-  });
-
   it('blocks overlapping starts and Reload until Stop has settled', async () => {
     const handle = await integration.execution.start({ ...request, prompt: 'cat' });
     await expect(integration.execution.start({ ...request, runId: 'run-2' })).rejects.toMatchObject({ code: 'SESSION_BUSY' });

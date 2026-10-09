@@ -1,7 +1,7 @@
 # Shell Commands In Chat
 
-Shell executes commands on the selected executor, using Sh, Bash, Zsh, Fish,
-or PowerShell (`pwsh`) discovered on that executor's PATH. Linux and macOS
+Shell executes commands on the selected executor, using Sh, Bash, Zsh, or Fish
+discovered on that executor's PATH. Linux and macOS
 executors advertise Shell; Windows executors do not. No API profile, model,
 credentials, or permission mode is involved. Commands run with the executor
 account's privileges, not in a sandbox.
@@ -14,8 +14,8 @@ and activated environments do not survive; combine dependent operations into
 one multiline submission. Filesystem changes persist normally.
 
 Usual non-login shell configuration loads on each invocation. Sh, Bash, Zsh,
-and Fish use interactive startup over pipes, not a terminal. PowerShell uses
-its normal profiles and `-File`. Startup output is retained. Garcon restores
+and Fish use interactive startup over pipes, not a terminal. Startup output is
+retained. Garcon restores
 the confirmed directory after startup and disables Unix shell job control
 before executing the submission. Terminal-dependent profile code may behave
 differently or block.
@@ -56,18 +56,12 @@ unusable reported paths, and corrupt or unreadable reports, fail the turn and
 pause the queue. An untouched report from a skipped footer retains the previous
 confirmed path. `exec`, Stop, process termination,
 and some shells' `exit` behavior may bypass the wrapper's observation.
-PowerShell non-filesystem locations fail cwd capture. The report is a best-effort
-observation, not a security boundary against commands that modify it.
+The report is a best-effort observation, not a security boundary against commands
+that modify it.
 
 Nonzero status fails the turn and pauses waiting work, whether the failed
 command was direct or queued. Stderr alone does not indicate failure. Status
 follows the selected shell; Garcon does not add `errexit` or `pipefail`.
-PowerShell uses a conservative approximation: failed invocation, a newly
-recorded error, or a nonzero native status fails the turn. A later successful
-cmdlet does not necessarily clear an earlier failure, including a recovered
-exception. Profile-stale native status is reset before source execution.
-Scripts that modify `$Error` or `$LASTEXITCODE`, or ignore errors, can defeat
-this observation. This is not an exact final-statement exit code.
 
 There is no PTY or stdin UI. Stdin remains open and unwritten; prompts may
 block until Stop. Stop sends group termination, then escalates after 500 ms.

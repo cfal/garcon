@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import type { CommandWorkingDirectory } from '@garcon/common/command-output';
 import { parseCommandWorkingDirectory } from '@garcon/common/command-output';
 import type { ShellFamily } from './catalog.js';
-import { shellInvocation, POWERSHELL_ENTRY } from './source.js';
+import { shellInvocation } from './source.js';
 
 export const OUTPUT_BATCH_BYTES = 32 * 1024;
 const DRAIN_TIMEOUT_MS = 1500;
@@ -53,16 +53,12 @@ export async function executeShell(options: ShellProcessOptions): Promise<ShellP
     escalation ??= setTimeout(() => signalGroup('SIGKILL'), KILL_GRACE_MS);
   };
   try {
-    const sourcePath = join(directory, options.family === 'pwsh' ? 'source.ps1' : 'source');
+    const sourcePath = join(directory, 'source');
     const resultPath = join(directory, 'cwd');
-    const entryPath = join(directory, 'entry.ps1');
-    if (options.family === 'pwsh') {
-      await writeFile(entryPath, POWERSHELL_ENTRY, { mode: 0o600, flag: 'wx' });
-    }
     await writeFile(sourcePath, options.source, { mode: 0o600, flag: 'wx' });
     await writeFile(resultPath, CWD_REPORT_PENDING, { mode: 0o600, flag: 'wx' });
     options.signal.throwIfAborted();
-    const spawned = spawn(options.executable, shellInvocation(options.family, sourcePath, options.cwd, entryPath, resultPath), {
+    const spawned = spawn(options.executable, shellInvocation(options.family, sourcePath, options.cwd, resultPath), {
       cwd: options.cwd,
       env: options.environment ?? process.env,
       detached: true,

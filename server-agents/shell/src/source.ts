@@ -30,34 +30,7 @@ function commandFooter(family: ShellFamily, resultPath: string): string {
   ].join('\n');
 }
 
-export const POWERSHELL_ENTRY = [
-  'param([string]$__garcon_initialCwd, [string]$__garcon_sourcePath, [string]$__garcon_resultPath)',
-  'Set-Location -LiteralPath $__garcon_initialCwd -ErrorAction Stop',
-  '$__garcon_previousError = if ($Error.Count) { $Error[0] } else { $null }',
-  '$LASTEXITCODE = 0',
-  'try {',
-  '  . $__garcon_sourcePath',
-  '  $__garcon_ok = $?',
-  '} catch {',
-  '  $__garcon_ok = $false',
-  '  Write-Error -ErrorRecord $_ -ErrorAction Continue',
-  '}',
-  '$__garcon_nativeFailed = $LASTEXITCODE -is [int] -and $LASTEXITCODE -ne 0',
-  '$__garcon_currentError = if ($Error.Count) { $Error[0] } else { $null }',
-  '$__garcon_newError = -not [object]::ReferenceEquals($__garcon_previousError, $__garcon_currentError)',
-  '$__garcon_status = if ($__garcon_nativeFailed) { $LASTEXITCODE } elseif (-not $__garcon_ok -or $__garcon_newError) { 1 } else { 0 }',
-  '$__garcon_location = Get-Location',
-  'if ($__garcon_location.Provider.Name -eq \'FileSystem\') {',
-  '  [System.IO.File]::WriteAllText($__garcon_resultPath, $__garcon_location.ProviderPath + "`n", [System.Text.UTF8Encoding]::new($false))',
-  '} else {',
-  '  [System.IO.File]::WriteAllText($__garcon_resultPath, \'\')',
-  '}',
-  'exit $__garcon_status',
-  '',
-].join('\n');
-
-export function shellInvocation(family: ShellFamily, sourcePath: string, cwd: string, entryPath: string, resultPath: string): string[] {
-  if (family === 'pwsh') return ['-NoLogo', '-File', entryPath, cwd, sourcePath, resultPath];
+export function shellInvocation(family: ShellFamily, sourcePath: string, cwd: string, resultPath: string): string[] {
   const footer = commandFooter(family, resultPath);
   if (family === 'fish') return ['-i', '-c', `status job-control none; builtin cd $argv[2]; or exit $status; source $argv[1]\n${footer}`, sourcePath, cwd];
   const cd = family === 'sh' ? 'command cd' : 'builtin cd';

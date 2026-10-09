@@ -1,9 +1,9 @@
 import { basename } from 'node:path';
 import { AgentIntegrationError, type AgentCatalog, type AgentHost } from '@garcon/server-agent-interface';
 
-export const SHELL_FAMILIES = ['sh', 'bash', 'zsh', 'fish', 'pwsh'] as const;
+export const SHELL_FAMILIES = ['sh', 'bash', 'zsh', 'fish'] as const;
 export type ShellFamily = typeof SHELL_FAMILIES[number];
-const LABELS: Record<ShellFamily, string> = { sh: 'Sh', bash: 'Bash', zsh: 'Zsh', fish: 'Fish', pwsh: 'PowerShell' };
+const LABELS: Record<ShellFamily, string> = { sh: 'Sh', bash: 'Bash', zsh: 'Zsh', fish: 'Fish' };
 
 export function discoverShells(host: Pick<AgentHost, 'environment'>): { family: ShellFamily; executable: string }[] {
   if (process.platform !== 'linux' && process.platform !== 'darwin') return [];
