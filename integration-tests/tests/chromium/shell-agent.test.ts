@@ -24,7 +24,7 @@ test('Shell composer preserves literal commands and stable chat switching on des
     const editor = composer.locator('textarea');
     await browserExpect(editor).toBeVisible();
     await browserExpect(page.locator('.markdown-code-block pre').filter({ hasText: '**plain output**' })).toBeVisible();
-    await browserExpect(composer.getByRole('button', { name: 'Refine prompt', exact: true })).toHaveCount(0);
+    await browserExpect(composer.getByRole('button', { name: 'Refine prompt', exact: true })).toBeVisible();
     await editor.evaluate(element => element.setAttribute('data-retained-shell-editor', 'true'));
 
     phase('literal absolute path through Enter submission');

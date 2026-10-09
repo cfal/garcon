@@ -98,7 +98,7 @@ export class QueuedInputRefinementController {
 
 		try {
 			const chatId = this.options.chatId;
-			const result = await this.#request.run({ draft: sourceText, target: 'prompt', subject: { kind: 'chat', chatId } });
+			const result = await this.#request.run({ draft: sourceText, target: 'prompt' });
 			if (result.kind !== 'refined') return;
 			if (this.options.startBlocked || this.options.executionKey !== executionKey) return;
 			if (this.options.chatId !== chatId || !editor.matchesSession(entryId, sessionRevision) || editor.draft !== sourceText) {

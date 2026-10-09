@@ -229,7 +229,6 @@
 
 	{/if}
 	<ScheduledPromptField
-		templateVariables={conversationInput}
 		bind:ref={textarea}
 		{prompt}
 		{promptError}

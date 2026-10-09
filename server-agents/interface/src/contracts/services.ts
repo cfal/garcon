@@ -22,7 +22,7 @@ import type {
 import type { AgentNativeSessionRef } from './transcript.js';
 import type { AgentProducerBinding, AgentResourceRef, ExecutorCallOptions } from './resources.js';
 
-// Executes only the accepted source, without conversational preparation or automatic AI.
+// Executes the accepted source without conversational preparation.
 export interface AgentLiteralExecution {
   readonly selectionLabel: string;
 }

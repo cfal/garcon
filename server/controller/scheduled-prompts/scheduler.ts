@@ -250,9 +250,6 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
       const now = fixedNow ?? new Date();
       assertValidScheduleForChatRequest(request);
       await this.#reconcileMissed(now, false);
-      if (this.deps.agents.chatExecutionPolicy(request.chatId) === 'literal') {
-        throw new ScheduledPromptDomainError('UNSUPPORTED_CONTROL_INPUT', 'Conversational schedules cannot target literal execution.', 422);
-      }
       const firstRunAtUtc = request.firstRun.type === 'at'
         ? request.firstRun.atUtc
         : scheduleInRunAt(now, request.firstRun.type === 'after'
@@ -364,10 +361,9 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
     const policy = target.type === 'existing-chat'
       ? this.deps.agents.chatExecutionPolicy(target.chatId)
       : this.deps.agents.executionPolicy(target.agentId, target.executorId);
-    if (policy === 'conversation') {
-      if (hasLeadingSlashCommand(definition.prompt) || !scheduledPromptFitsRenderedLimit(definition.prompt.trim())) {
-        throw new ScheduledPromptDomainError('SCHEDULED_PROMPT_VALIDATION_FAILED', 'Scheduled prompt is invalid', 400);
-      }
+    const prompt = policy === 'literal' ? definition.prompt : definition.prompt.trim();
+    if ((policy === 'conversation' && hasLeadingSlashCommand(prompt)) || !scheduledPromptFitsRenderedLimit(prompt)) {
+      throw new ScheduledPromptDomainError('SCHEDULED_PROMPT_VALIDATION_FAILED', 'Scheduled prompt is invalid', 400);
     }
     return definition;
   }
@@ -454,7 +450,6 @@ export class ScheduledPromptScheduler extends EventEmitter<ScheduledPromptSchedu
             },
       target: structuredClone(definition.target),
       prompt: policy === 'literal' ? definition.prompt : definition.prompt.trim(),
-      ...(policy === 'literal' ? { contentMode: 'literal' as const } : {}),
       createdAt,
       updatedAt: now.toISOString(),
     };

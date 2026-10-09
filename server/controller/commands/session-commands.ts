@@ -100,9 +100,6 @@ export class SessionCommands {
   ): Promise<AgentTurnCommandResponse> {
     signal.throwIfAborted();
     const child = this.deps.chats.getChat(input.chatId);
-    if (child && this.deps.agents.executionPolicy(child.agentId, child.executorId) === 'literal') {
-      throw new CommandValidationError('UNSUPPORTED_CONTROL_INPUT', 'Literal execution requires an explicit user command.');
-    }
     if (!this.deps.chats.getChat(input.sourceChatId)
       || !isDirectDelegatedChild(input.sourceChatId, input.chatId, child)) {
       throw new CommandValidationError('AGENT_RESUME_NOT_DELEGATED', 'Only a directly delegated child can be resumed', 403);

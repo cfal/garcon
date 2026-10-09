@@ -1770,7 +1770,7 @@ describe('PromptComposer focus', () => {
 		expect(textarea.value).toBe('/snippet review cancellable');
 	});
 
-	it('inserts a menu-selected snippet at the current selection without sending', async () => {
+	it.each(['conversation', 'literal'] as const)('inserts a menu-selected snippet into a %s draft without sending', async (executionPolicy) => {
 		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
 			success: true,
 			source: 'snippet',
@@ -1784,6 +1784,7 @@ describe('PromptComposer focus', () => {
 		const onsubmit = vi.fn();
 		render(PromptComposerTestHost, {
 			selectedChatId: 'chat-snippet-insert',
+			executionPolicy,
 			selectedStatus: 'running',
 			snippetDefaultArguments: 'the API',
 			onsubmit,
@@ -1793,6 +1794,9 @@ describe('PromptComposer focus', () => {
 		textarea.setSelectionRange(7, 14);
 		await fireEvent.click(screen.getByRole('button', { name: 'Add to prompt' }));
 		await fireEvent.click(await screen.findByRole('menuitem', { name: /Snippets/ }));
+		await screen.findByRole('option', { name: /^review/ });
+		expect(Boolean(screen.queryByText('Tip: type ;; while composing to open this palette')))
+			.toBe(executionPolicy === 'conversation');
 		await fireEvent.click(await screen.findByRole('option', { name: /^review/ }));
 		const argumentsInput = (await screen.findByRole('textbox', {
 			name: 'Arguments',

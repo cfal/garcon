@@ -173,7 +173,7 @@
 			return textareaRef;
 		},
 		get startBlocked() {
-		return !conversationInput || !initialContentReady || snippetExpansion.pending;
+			return !initialContentReady || snippetExpansion.pending;
 		},
 		closePromptSurfaces: () => snippetPalette.dismiss(),
 	});
@@ -412,7 +412,7 @@
 		argumentsText: string,
 		range: { start: number; end: number } | null = null,
 	): Promise<SnippetInsertionResult> {
-		if (!conversationInput || promptTransformPending || !textareaRef) return 'cancelled';
+		if (promptTransformPending || !textareaRef) return 'cancelled';
 		const sourceExecutionKey = executionKey;
 		const context = expansionContext();
 		if (!context) {
@@ -438,7 +438,7 @@
 				return 'cancelled';
 			}
 			if (
-				!conversationInput || executionKey !== sourceExecutionKey || form.nonblankPath !== projectPath ||
+				executionKey !== sourceExecutionKey || form.nonblankPath !== projectPath ||
 				result.response.contextProjectPath !== projectPath ||
 				result.response.contextExecutorId !== form.executorId ||
 				form.firstMessage !== sourceText
@@ -771,10 +771,9 @@
 					canAttachImages={canAttachAttachments}
 					attachImagesTooltip={m.chat_composer_image_attachments_unavailable()}
 					onAddImage={openImagePicker}
-					showAddMenu={conversationInput}
 					onOpenSnippetPalette={() => snippetPalette.openFromMenu()}
 					onOpenExpandedEditor={openExpandedEditor}
-					onRefinePrompt={conversationInput ? () => promptRefinement.handleAction() : undefined}
+					onRefinePrompt={() => promptRefinement.handleAction()}
 					canRefinePrompt={promptRefinement.canStart}
 					isPromptRefinementPending={promptRefinement.pending}
 					isPromptTransformPending={promptTransformPending}
@@ -816,7 +815,8 @@
 				</ComposerBottomBar>
 
 				<ComposerSnippetPalette
-					open={conversationInput && snippetPalette.isOpen}
+					open={snippetPalette.isOpen}
+					triggerPrefix={conversationInput ? localSettings.snippetTrigger : ''}
 					onOpenChange={(nextOpen) => {
 						// The hidden trigger remains available to the chained insertion.
 						if (!nextOpen) snippetPalette.hide();
@@ -944,7 +944,7 @@
 		isPromptRefinementPending={promptRefinement.pending}
 		onTextChange={handleExpandedTextChange}
 		onSelectionChange={handleExpandedSelectionChange}
-		onRefinePrompt={conversationInput ? () => promptRefinement.handleAction() : undefined}
+	onRefinePrompt={() => promptRefinement.handleAction()}
 		onClose={() => void closeExpandedEditor()}
 	/>
 {/if}

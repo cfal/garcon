@@ -13,9 +13,9 @@ describe('PromptRefinementController', () => {
 		const refine = vi.fn(() => new Promise<RefinePromptResponse>((done) => (resolve = done)));
 		const controller = new PromptRefinementController({ refine });
 
-		const running = controller.run({ draft: 'draft', target: 'prompt', subject: { kind: 'selection', agentId: 'claude', executorId: 'local' } });
+		const running = controller.run({ draft: 'draft', target: 'prompt' });
 		expect(controller.pending).toBe(true);
-		expect(await controller.run({ draft: 'duplicate', target: 'prompt', subject: { kind: 'selection', agentId: 'claude', executorId: 'local' } })).toEqual({
+		expect(await controller.run({ draft: 'duplicate', target: 'prompt' })).toEqual({
 			kind: 'cancelled',
 		});
 		expect(refine).toHaveBeenCalledTimes(1);
@@ -34,7 +34,7 @@ describe('PromptRefinementController', () => {
 		});
 		const controller = new PromptRefinementController({ refine });
 
-		const running = controller.run({ draft: 'draft', target: 'prompt', subject: { kind: 'selection', agentId: 'claude', executorId: 'local' } });
+		const running = controller.run({ draft: 'draft', target: 'prompt' });
 		controller.cancel();
 		expect(controller.pending).toBe(false);
 		expect(signal.aborted).toBe(true);
@@ -53,7 +53,7 @@ describe('PromptRefinementController', () => {
 					}),
 			),
 		});
-		const cancelledRejection = rejecting.run({ draft: 'draft', target: 'prompt', subject: { kind: 'selection', agentId: 'claude', executorId: 'local' } });
+		const cancelledRejection = rejecting.run({ draft: 'draft', target: 'prompt' });
 		rejecting.cancel();
 		await expect(cancelledRejection).resolves.toEqual({ kind: 'cancelled' });
 	});
@@ -65,7 +65,7 @@ describe('PromptRefinementController', () => {
 		);
 		const controller = new PromptRefinementController({ refine });
 
-		const first = controller.run({ draft: 'first', target: 'prompt', subject: { kind: 'selection', agentId: 'claude', executorId: 'local' } });
+		const first = controller.run({ draft: 'first', target: 'prompt' });
 		controller.cancel();
 		const second = controller.run({ draft: 'second', target: 'snippet-template' });
 		resolvers[0](response);
@@ -87,7 +87,7 @@ describe('PromptRefinementController', () => {
 			refine: vi.fn().mockRejectedValue(failure),
 		});
 
-		await expect(controller.run({ draft: 'draft', target: 'prompt', subject: { kind: 'selection', agentId: 'claude', executorId: 'local' } })).rejects.toBe(failure);
+		await expect(controller.run({ draft: 'draft', target: 'prompt' })).rejects.toBe(failure);
 		expect(controller.pending).toBe(false);
 	});
 });

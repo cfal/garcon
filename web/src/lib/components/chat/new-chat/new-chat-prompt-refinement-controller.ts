@@ -82,12 +82,12 @@ export class NewChatPromptRefinementController {
 		this.options.closePromptSurfaces();
 
 		try {
-			const subject = { kind: 'selection' as const, agentId: this.options.form.agentId, executorId: this.options.form.executorId };
-			const result = await this.#request.run({ draft: sourceText, target: 'prompt', subject });
+			const { agentId, executorId } = this.options.form;
+			const result = await this.#request.run({ draft: sourceText, target: 'prompt' });
 			if (result.kind !== 'refined') return;
 			if (this.options.startBlocked) return;
 			if (
-				this.options.form.agentId !== subject.agentId || this.options.form.executorId !== subject.executorId ||
+				this.options.form.agentId !== agentId || this.options.form.executorId !== executorId ||
 				this.options.form.contentRevision !== sourceRevision ||
 				this.options.form.firstMessage !== sourceText
 			) {

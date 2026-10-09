@@ -96,7 +96,6 @@ export type AgentRegistryDep = Pick<
   AgentRegistryServiceContract,
   | 'hasAgent'
   | 'executionPolicy'
-  | 'chatExecutionPolicy'
   | 'assertExecutorReady'
   | 'supportsImages'
   | 'supportsFileAttachmentMimeType'
@@ -242,7 +241,6 @@ export interface AgentCommandStopInput {
 }
 
 export interface ScheduledChatStartInput {
-  executionPolicy?: 'conversation' | 'literal';
   executorId?: string | null;
   chatId: ChatId;
   clientRequestId: string;
@@ -264,6 +262,7 @@ export interface ScheduledChatStartInput {
 export interface NormalizedChatStart {
   executorId: string;
   title: string | null;
+  requestedTitle: string | null;
   transcriptSnapshot: TranscriptWatermark | null;
   origin: ChatStartOrigin;
   chatId: ChatId;
@@ -292,7 +291,6 @@ export interface NormalizedChatStart {
 }
 
 export interface ScheduledExistingChatInput {
-  executionPolicy?: 'conversation' | 'literal';
   chatId: string;
   transcriptViewId?: string;
   command: string;

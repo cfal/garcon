@@ -50,7 +50,6 @@
 	const sessions = getChatSessions();
 	const appShell = getAppShell();
 	const snippetContext = $derived.by(() => {
-		if (form.executionPolicy !== 'conversation') return undefined;
 		if (form.targetType === 'existing-chat') {
 			return selectedChat
 				? {
@@ -426,7 +425,7 @@
 						onPromptKeydown={handlePromptKeydown}
 						{snippetContext}
 						{snippetContextKey}
-						snippetTrigger={localSettings.snippetTrigger}
+						snippetTrigger={form.executionPolicy === 'conversation' ? localSettings.snippetTrigger : ''}
 						onSnippetPendingChange={(pending) => (form.promptTransformPending = pending)}
 					/>
 				{:else}
@@ -474,7 +473,6 @@
 
 			{#if form.targetType === 'existing-chat'}
 				<ScheduledPromptField
-					templateVariables={form.executionPolicy === 'conversation'}
 					prompt={form.prompt}
 					promptError={form.promptError}
 					targetType="existing-chat"
@@ -483,7 +481,7 @@
 					onPromptKeydown={handlePromptKeydown}
 					{snippetContext}
 					{snippetContextKey}
-					snippetTrigger={localSettings.snippetTrigger}
+					snippetTrigger={form.executionPolicy === 'conversation' ? localSettings.snippetTrigger : ''}
 					onSnippetPendingChange={(pending) => (form.promptTransformPending = pending)}
 					onEditSnippets={(returnFocus) => appShell.openSnippetsOverScheduledPrompts(returnFocus)}
 				/>

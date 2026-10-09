@@ -75,9 +75,6 @@ export class StartCommands {
   }
 
   async submitScheduledStart(input: ScheduledChatStartInput): Promise<StartChatCommandResponse> {
-    if (this.deps.agents.executionPolicy(input.agentId, input.executorId) !== (input.executionPolicy ?? 'conversation')) {
-      throw new CommandValidationError('UNSUPPORTED_CONTROL_INPUT', 'The scheduled input no longer matches the execution policy.', 422);
-    }
     return this.submitStart({
       ...input,
       origin: 'scheduled',
@@ -138,9 +135,6 @@ export class StartCommands {
       throw new CommandValidationError('UNSUPPORTED_AGENT', `Unsupported agent: ${input.agentId}`);
     }
     const literal = this.deps.agents.executionPolicy(input.agentId, executorId) === 'literal';
-    if (literal && input.origin === 'agent-command') {
-      throw new CommandValidationError('UNSUPPORTED_CONTROL_INPUT', 'Literal execution requires an explicit user command.');
-    }
     this.deps.agents.assertExecutionModeSelectionSupported(input.agentId, {
       executorId,
       thinkingMode: input.thinkingMode,
@@ -155,8 +149,9 @@ export class StartCommands {
         404,
       );
     }
-    const title = literal ? input.command.replace(/\s+/g, ' ').trim().slice(0, 100)
-      : input.origin === 'agent-command' ? parseChatRowTitle(input.title) ?? null : null;
+    const requestedTitle = input.origin === 'agent-command' ? parseChatRowTitle(input.title) ?? null : null;
+    let title = requestedTitle;
+    if (title === null && literal) title = input.command.replace(/\s+/g, ' ').trim().slice(0, 100);
     const transcriptSnapshot = input.origin === 'agent-command' ? input.transcriptSnapshot ?? null : null;
     if (transcriptSnapshot) {
       if (parentChatId === null || !Number.isSafeInteger(transcriptSnapshot.ordinal) || transcriptSnapshot.ordinal < 1) {
@@ -210,6 +205,7 @@ export class StartCommands {
     return {
       executorId,
       title,
+      requestedTitle,
       transcriptSnapshot: transcriptSnapshot ? { ...transcriptSnapshot } : null,
       origin: input.origin,
       chatId,
@@ -462,7 +458,7 @@ export class StartCommands {
 function startPayload(input: NormalizedChatStart): Record<string, unknown> {
   return {
     executorId: input.executorId,
-    title: input.title,
+    title: input.requestedTitle,
     transcriptSnapshot: input.transcriptSnapshot,
     origin: input.origin,
     chatId: input.chatId,

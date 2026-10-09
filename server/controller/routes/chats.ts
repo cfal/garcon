@@ -694,9 +694,6 @@ export default function createChatRoutes({
       const session = registry.getChat(chatId);
       if (!session) return jsonError('Session not found', 404, 'SESSION_NOT_FOUND');
 
-      if (agents.executionPolicy(session.agentId, session.executorId) === 'literal') {
-        return jsonError('Title generation is unavailable for literal execution.', 422, 'UNSUPPORTED_LITERAL_INPUT');
-      }
       const result = await generateChatTitleFromMessage({
         chatId,
         message,

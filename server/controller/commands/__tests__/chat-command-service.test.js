@@ -891,6 +891,23 @@ describe('ChatCommandService', () => {
       clientRequestId: 'agent-start', clientMessageId: 'agent-start-message', ...overrides };
   }
 
+  it.each(['agent-command', 'interactive'])('replays untitled literal starts by requested intent: %s', async (origin) => {
+    const f = makeService();
+    f.agents.executionPolicy.mockReturnValue('literal');
+    const input = { ...agentStartInput('view-1'), command: 'printf synthetic', origin };
+    if (origin === 'agent-command') {
+      const first = await f.service.submitAgentCommandStartLocked(input, new AbortController().signal);
+      first.start();
+      const replay = await f.service.submitAgentCommandStartLocked(input, new AbortController().signal);
+      expect(replay).toMatchObject({ status: 'duplicate', turnId: first.turnId });
+    } else {
+      const first = await f.service.submitStart(input);
+      expect(await f.service.submitStart(input)).toMatchObject({ status: 'duplicate', turnId: first.turnId });
+    }
+    expect(f.settings.setSessionName).toHaveBeenCalledWith(TARGET_CHAT_ID, 'printf synthetic');
+    expect(f.agents.startSession).toHaveBeenCalledTimes(1);
+  });
+
   it.each([false, true])('reports title-write failure by compensation durability, not title rename: uncertain=%s', async (uncertain) => {
     const projection = makeInputProjection();
     const queueService = makeRealQueue(projection);
@@ -6894,15 +6911,14 @@ describe('ChatCommandService', () => {
     expect(queue.createChatQueueEntry).not.toHaveBeenCalled();
   });
 
-  it('rejects a conversational schedule after the destination becomes literal', async () => {
+  it('admits a schedule after the destination becomes literal', async () => {
     const { service, queue, agents } = makeService();
     agents.chatExecutionPolicy.mockReturnValue('literal');
     await expect(service.submitScheduledExistingChat({
       chatId: SOURCE_CHAT_ID, command: '<garcon-schedule-action>echo must-not-run</garcon-schedule-action>',
       busyBehavior: 'queue', clientRequestId: 'stale-schedule', clientMessageId: 'stale-schedule-input',
-    })).rejects.toMatchObject({ code: 'UNSUPPORTED_CONTROL_INPUT' });
-    expect(queue.admitUserInput).not.toHaveBeenCalled();
-    expect(queue.createChatQueueEntry).not.toHaveBeenCalled();
+    })).resolves.toMatchObject({ type: 'sent' });
+    expect(queue.admitUserInput).toHaveBeenCalled();
   });
 
   it('admits explicitly literal schedules without trimming command source', async () => {
@@ -6910,7 +6926,7 @@ describe('ChatCommandService', () => {
     agents.chatExecutionPolicy.mockReturnValue('literal');
     const source = '  printf source  \n';
     await service.submitScheduledExistingChat({
-      chatId: SOURCE_CHAT_ID, command: source, executionPolicy: 'literal',
+      chatId: SOURCE_CHAT_ID, command: source,
       busyBehavior: 'queue', clientRequestId: 'literal-schedule', clientMessageId: 'literal-schedule-input',
     });
     expect(queue.admitUserInput).toHaveBeenCalledWith(SOURCE_CHAT_ID, source, expect.anything());

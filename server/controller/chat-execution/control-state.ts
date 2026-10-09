@@ -13,7 +13,6 @@ import type { ServerControlReceiptDetail } from '../../../common/transcript-noti
 export { MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES } from '../../../common/queue-state.ts';
 
 export interface StoredQueueSubmissionIdentity {
-  requiredExecutionPolicy?: 'conversation' | 'literal';
   clientMessageId: string;
   transcriptViewId: string;
   excludedResendOrdinals?: readonly number[];

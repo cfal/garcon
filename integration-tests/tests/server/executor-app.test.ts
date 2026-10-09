@@ -164,7 +164,7 @@ test('Local and two public workers coexist and retain chats and settings for del
       await client.delete(`/api/v1/executors/${inbound.id}`);
       expect(await rejectionOf(client.get(`/api/v1/models?executorId=${inbound.id}`))).toMatchObject({ status: 503 });
       const requestCount = fixture.fakeProviders.openAi.requests().length;
-      expect(await rejectionOf(client.refinePrompt({ draft: 'Synthetic draft', target: 'prompt', subject: { kind: 'selection', agentId: 'claude', executorId: 'local' } }))).toMatchObject({ status: 502, body: { errorCode: 'PROMPT_REFINEMENT_FAILED' } });
+      expect(await rejectionOf(client.refinePrompt({ draft: 'Synthetic draft', target: 'prompt' }))).toMatchObject({ status: 502, body: { errorCode: 'PROMPT_REFINEMENT_FAILED' } });
       expect(fixture.fakeProviders.openAi.requests()).toHaveLength(requestCount);
 
       for (const worker of workers) await worker.stop();

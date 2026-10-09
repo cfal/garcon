@@ -14,7 +14,6 @@
 	interface Props {
 		ref?: HTMLTextAreaElement | null;
 		prompt: string;
-		templateVariables?: boolean;
 		promptError: string | null;
 		targetType: 'new-chat' | 'existing-chat';
 		surface: 'composer' | 'standalone';
@@ -31,7 +30,6 @@
 	let {
 		ref = $bindable(null),
 		prompt,
-		templateVariables = true,
 		promptError,
 		targetType,
 		surface,
@@ -89,7 +87,7 @@
 	const describedBy = $derived(
 		[
 			descriptionId,
-			templateVariables ? variableHelpId : null,
+			variableHelpId,
 			snippetContext !== undefined ? snippetHelpId : null,
 			visibleError ? errorId : null,
 		]
@@ -107,7 +105,7 @@
 	}
 
 	async function insertChatId(): Promise<void> {
-		if (!templateVariables || !ref) return;
+		if (!ref) return;
 		const start = ref.selectionStart;
 		const end = ref.selectionEnd;
 		const nextPrompt = `${ref.value.slice(0, start)}${SCHEDULED_PROMPT_CHAT_ID_TOKEN}${ref.value.slice(end)}`;
@@ -167,7 +165,6 @@
 				<FileText class="size-4" />{m.snippets_picker_title()}
 			</Button>
 		{/if}
-		{#if templateVariables}
 		<Button
 			variant="ghost"
 			size="sm"
@@ -179,9 +176,7 @@
 				token: SCHEDULED_PROMPT_CHAT_ID_TOKEN,
 			})}
 		</Button>
-		{/if}
 	</div>
-	{#if templateVariables}
 	<div>
 		<p id={variableHelpId} class="text-xs text-muted-foreground">
 			{targetType === 'new-chat'
@@ -189,7 +184,6 @@
 				: m.scheduled_prompts_existing_chat_id_help({ token: SCHEDULED_PROMPT_CHAT_ID_TOKEN })}
 		</p>
 	</div>
-	{/if}
 
 	<div class="min-h-5">
 		{#if snippetContext !== undefined}
@@ -211,6 +205,7 @@
 {#if snippetContext !== undefined}
 	<ComposerSnippetPalette
 		open={snippets.palette.isOpen}
+		triggerPrefix={snippetTrigger}
 		onOpenChange={(open) => (open ? snippets.palette.openFromMenu() : snippets.palette.hide())}
 		initialQuery={snippets.palette.initialQuery}
 		{interactionKey}

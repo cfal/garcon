@@ -93,7 +93,7 @@ for (const backend of ['remote-controller-dials', 'remote-executor-dials'] as co
         modelProtocol: target.provider.protocol, thinkingMode: 'none',
       } } });
       const query = fixture.fakeProviders.openAi.holdNext({ model: target.provider.model });
-      const refinement = fixture.client.refinePrompt({ draft: 'Synthetic draft', target: 'prompt', subject: { kind: 'selection', agentId: 'claude', executorId: 'local' } });
+      const refinement = fixture.client.refinePrompt({ draft: 'Synthetic draft', target: 'prompt' });
       await query.received;
       expect(query.releaseText('Synthetic refinement')).toBe(true);
       expect(await refinement).toEqual({ success: true, refinedPrompt: 'Synthetic refinement' });

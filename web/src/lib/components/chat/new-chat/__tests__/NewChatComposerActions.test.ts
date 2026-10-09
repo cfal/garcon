@@ -175,7 +175,7 @@ describe('NewChatForm composer actions', () => {
 		pending.resolve({ success: true, refinedPrompt: 'Must not apply' });
 		await pending.promise;
 		expect(input.value).toBe('Original draft');
-		expect(screen.queryByRole('button', { name: 'Refine prompt' })).toBeNull();
+		expect(screen.getByRole('button', { name: 'Refine prompt' })).toBeTruthy();
 	});
 
 	it('places Refine between expanded composer and Start and enforces draft limits', async () => {

@@ -253,8 +253,7 @@
 	const messageMenuText = $derived(getMessageMenuText());
 	const canGenerateTitleFromMessage = $derived(
 		Boolean(
-			(asUser || asAssistant) &&
-			asUser?.metadata?.contentMode !== 'literal' &&
+			(asUser || asAssistant || asCommandOutput) &&
 			messageMenuText.trim() &&
 			activeChatContext?.chatId &&
 			forkUpToSeq !== undefined &&

@@ -70,7 +70,7 @@ import { SteerInputDelivery } from './steer-input-delivery.ts';
 import { QueuedSteerDelivery } from './queued-steer-delivery.ts';
 import { ControlInputDelivery } from './control-input-delivery.ts';
 import { settleAgentTurn } from './turn-terminal-settlement.js';
-import { assertControlInputSupported, controlInputBlockedError, serverShuttingDownError, chatNotFoundError } from './execution-errors.js';
+import { controlInputBlockedError, serverShuttingDownError, chatNotFoundError } from './execution-errors.js';
 import type { TurnEventMetadata } from '../agents/event-bus.js';
 import type { WorkingDirectorySettlement, WorkingDirectorySettlementPort } from '../projects/working-directory-settlement.js';
 
@@ -223,7 +223,6 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       callbacks: {
         canDispatch: this.#canDispatch,
         isShuttingDown: () => this.#shuttingDown,
-        executionPolicy: this.#executionPolicy,
         registerQueued: (chatId, content, options) => (
           this.#acceptedInputTranscript.registerQueued(chatId, content, options)
         ),
@@ -447,7 +446,6 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     signal: AbortSignal,
     onControlRun: (turnId: string) => void,
   ): Promise<void> {
-    assertControlInputSupported(this.#executionPolicy(chatId));
     return this.#controlInputDelivery.deliver(chatId, content, transcriptViewId, emittingRunId, signal, onControlRun);
   }
 
@@ -474,7 +472,6 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     signal: AbortSignal,
     deadline: number | null,
   ): Promise<ServerControlOffer> {
-    assertControlInputSupported(this.#executionPolicy(chatId));
     signal.throwIfAborted();
     if (this.#shuttingDown) throw serverShuttingDownError();
     if (!this.#chatExists(chatId)) throw chatNotFoundError();
@@ -495,7 +492,6 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     input: ServerControlInput,
     signal: AbortSignal,
   ): Promise<'queued'> {
-    assertControlInputSupported(this.#executionPolicy(chatId));
     signal.throwIfAborted();
     if (this.#shuttingDown) throw serverShuttingDownError();
     if (!this.#chatExists(chatId)) throw chatNotFoundError();
@@ -792,7 +788,6 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
     transcriptViewId: string,
     onReserved: (turnId: string) => void,
   ): Promise<void> {
-    assertControlInputSupported(this.#executionPolicy(chatId));
     const clientRequestId = crypto.randomUUID();
     const turnId = crypto.randomUUID();
     const reservation = this.#reserveDirect(chatId, { clientRequestId, turnId });

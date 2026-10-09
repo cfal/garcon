@@ -119,7 +119,7 @@ export class ScheduledPromptFormState {
 		if (this.prompt.length > SCHEDULED_PROMPT_MAX_LENGTH) {
 			return m.scheduled_prompts_prompt_too_long();
 		}
-		if (this.executionPolicy === 'conversation' && !scheduledPromptFitsRenderedLimit(this.prompt.trim())) {
+		if (!scheduledPromptFitsRenderedLimit(this.normalizedPrompt)) {
 			return m.scheduled_prompts_prompt_rendered_too_long();
 		}
 		if (this.executionPolicy === 'conversation' && hasLeadingSlashCommand(this.prompt)) return m.scheduled_prompts_slash_command_error();
@@ -131,6 +131,10 @@ export class ScheduledPromptFormState {
 		if (!selection) return null;
 		const agent = this.modelCatalog.forExecutor(selection.executorId).getAgent(selection.agentId);
 		return agent ? agent.executionPolicy ?? 'conversation' : null;
+	}
+
+	private get normalizedPrompt(): string {
+		return this.executionPolicy === 'literal' ? this.prompt : this.prompt.trim();
 	}
 
 	scheduleIssue(now = new Date()): ScheduleIssue | null {
@@ -263,7 +267,7 @@ export class ScheduledPromptFormState {
 					chatId: this.existingChatId,
 					busyBehavior: this.busyBehavior,
 				},
-				prompt: this.executionPolicy === 'literal' ? this.prompt : this.prompt.trim(),
+				prompt: this.normalizedPrompt,
 			};
 		}
 		const selection = this.startup.resolvedModelSelection;
@@ -285,7 +289,7 @@ export class ScheduledPromptFormState {
 				tags: [...this.startup.chatTags],
 				preambleChoice: this.startup.preambles.choiceSnapshot,
 			},
-			prompt: this.executionPolicy === 'literal' ? this.prompt : this.prompt.trim(),
+			prompt: this.normalizedPrompt,
 		};
 	}
 

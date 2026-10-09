@@ -139,7 +139,7 @@ describe('scheduled prompt variables', () => {
     expect(normalizeScheduledPromptDefinitionInput(definition(tooLong))?.prompt).toBe(tooLong);
   });
 
-  it('preserves source until admission determines whether to expand variables', () => {
+  it('preserves source before dispatch expands template variables', () => {
     const source = '  /markdown printf "{{chat_id}}"  \n';
     expect(normalizeScheduledPromptDefinitionInput(definition(source))?.prompt).toBe(source);
     expect(normalizeScheduledPromptDefinitionInput(definition('x'.repeat(SCHEDULED_PROMPT_MAX_LENGTH + 1)))).toBeNull();

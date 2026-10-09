@@ -253,7 +253,6 @@
 	});
 
 	const promptRefinement = new PromptComposerRefinementController({
-		get selection() { return { agentId: agentState.agentId, executorId: agentState.executorId }; },
 		get executionKey() { return executionKey; },
 		composer: composerState,
 		sessions,
@@ -270,7 +269,7 @@
 			return isPresented;
 		},
 		get startBlocked() {
-			return !conversationInput || isDisabled || directAdmissionPending || snippetExpansion.pending;
+			return isDisabled || directAdmissionPending || snippetExpansion.pending;
 		},
 	});
 	const promptTransformPending = $derived(snippetExpansion.pending || promptRefinement.pending);
@@ -454,7 +453,7 @@
 		argumentsText: string,
 		range: { start: number; end: number } | null = null,
 	): Promise<SnippetInsertionResult> {
-		if (!conversationInput || promptTransformPending || !textarea) return 'cancelled';
+		if (promptTransformPending || !textarea) return 'cancelled';
 		const sourceExecutionKey = executionKey;
 		ui.closeSlashMenu();
 		ui.closeFileMenu();
@@ -483,7 +482,7 @@
 				return 'cancelled';
 			}
 			if (
-				!conversationInput || executionKey !== sourceExecutionKey ||
+				executionKey !== sourceExecutionKey ||
 				!projectState.matchesSnippetContext(result.prepared, result.response) ||
 				composerState.inputText !== sourceText
 			)
@@ -741,7 +740,8 @@
 			/>
 		{/if}
 		<ComposerSnippetPalette
-			open={conversationInput && ui.snippetPalette.isOpen}
+			open={ui.snippetPalette.isOpen}
+			triggerPrefix={conversationInput ? localSettings.snippetTrigger : ''}
 			onOpenChange={(nextOpen) => {
 				// The hidden trigger remains available to the chained insertion.
 				if (!nextOpen) ui.snippetPalette.hide();
@@ -837,13 +837,12 @@
 			</div>
 
 			<ComposerBottomBar
-				showAddMenu={conversationInput}
 				canAttachImages={canAttachAttachments}
 				attachImagesTooltip={m.chat_composer_image_attachments_unavailable()}
 				onAddImage={() => attachmentController.pick()}
 				onOpenSnippetPalette={() => ui.snippetPalette.openFromMenu()}
 				onOpenExpandedEditor={() => expandedEditor?.open()}
-				onRefinePrompt={conversationInput ? () => promptRefinement.handleAction() : undefined}
+				onRefinePrompt={() => promptRefinement.handleAction()}
 				canRefinePrompt={promptRefinement.canStart}
 				isPromptRefinementPending={promptRefinement.pending}
 				addMenuDisabled={isDisabled}
@@ -939,6 +938,6 @@
 	{promptTransformPending}
 	isPromptRefinementPending={promptRefinement.pending}
 	canRefinePrompt={promptRefinement.canStart}
-	onRefinePrompt={conversationInput ? () => promptRefinement.handleAction() : undefined}
+	onRefinePrompt={() => promptRefinement.handleAction()}
 	openRequestId={composerEditorOpenRequestId}
 />

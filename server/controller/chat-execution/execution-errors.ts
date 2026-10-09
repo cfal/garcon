@@ -1,11 +1,5 @@
 import { DomainError } from '../../common/domain-error.js';
 
-export function assertControlInputSupported(policy: 'conversation' | 'literal'): void {
-  if (policy === 'literal') {
-    throw new DomainError('UNSUPPORTED_CONTROL_INPUT', 'Literal execution does not accept conversational control input.', 422);
-  }
-}
-
 export function controlInputBlockedError(): DomainError {
   return new DomainError('SESSION_BUSY', 'Server control input is currently blocked', 409, true);
 }

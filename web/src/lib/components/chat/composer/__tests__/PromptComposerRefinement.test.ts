@@ -72,14 +72,15 @@ describe('PromptComposer prompt refinement', () => {
 		expect((refine as HTMLButtonElement).disabled).toBe(true);
 	});
 
-	it('uses a selection subject for a browser-only draft', async () => {
+	it.each(['conversation', 'literal'] as const)('refines a browser-only %s draft without a persisted chat', async (executionPolicy) => {
 		vi.mocked(refinementApi.refinePrompt).mockResolvedValueOnce({ success: true, refinedPrompt: 'Refined draft' });
-		render(PromptComposerTestHost, { selectedChatId: 'draft-refine', selectedStatus: 'draft' });
+		render(PromptComposerTestHost, { selectedChatId: 'draft-refine', selectedStatus: 'draft', executionPolicy });
 		await typeDraft('Source draft');
 		await fireEvent.click(screen.getByRole('button', { name: 'Refine prompt' }));
 		await waitFor(() => expect(refinementApi.refinePrompt).toHaveBeenCalledWith({
-			draft: 'Source draft', target: 'prompt', subject: { kind: 'selection', agentId: 'claude', executorId: 'local' },
+			draft: 'Source draft', target: 'prompt',
 		}, expect.anything()));
+		await waitFor(() => expect(compactTextarea().value).toBe('Refined draft'));
 	});
 
 	it('cancels a pending transform when the same chat switches to literal execution', async () => {
@@ -117,7 +118,6 @@ describe('PromptComposer prompt refinement', () => {
 		expect(vi.mocked(refinementApi.refinePrompt).mock.calls[0][0]).toEqual({
 			draft: 'Keep this draft',
 			target: 'prompt',
-			subject: { kind: 'chat', chatId: 'chat-refine-lock' },
 		});
 		expect(textarea.readOnly).toBe(true);
 		expect(textarea.getAttribute('aria-busy')).toBe('true');

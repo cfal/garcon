@@ -25,7 +25,6 @@
 
 	interface Props {
 		chatId: string;
-		literalInput?: boolean;
 		executionKey?: string;
 		open: boolean;
 		queue: ChatQueueState | null;
@@ -46,7 +45,6 @@
 
 	let {
 		chatId,
-		literalInput = false,
 		executionKey = '',
 		open,
 		queue,
@@ -77,7 +75,7 @@
 			return editorTextarea;
 		},
 		get startBlocked() {
-			return !open || literalInput;
+			return !open;
 		},
 	});
 	let editorTextarea = $state<HTMLTextAreaElement | null>(null);
@@ -99,7 +97,6 @@
 	const refinementPending = $derived(refinement.pending);
 	$effect(() => {
 		executionKey;
-		literalInput;
 		return () => refinement.abort();
 	});
 	// A live entry edits in place inside the list; a departed draft (sent or
@@ -392,7 +389,7 @@
 		{onCreate}
 		{onReplace}
 		onExpand={openExpandedEditor}
-		onRefinePrompt={literalInput ? undefined : () => refinement.handleAction()}
+		onRefinePrompt={() => refinement.handleAction()}
 		onClose={closeEditor}
 	/>
 {/snippet}
@@ -544,7 +541,7 @@
 		isPromptRefinementPending={refinementPending}
 		onTextChange={handleExpandedTextChange}
 		onSelectionChange={(selection) => expandedEditor.updateSelection(selection)}
-		onRefinePrompt={literalInput ? undefined : () => refinement.handleAction()}
+		onRefinePrompt={() => refinement.handleAction()}
 		onClose={() => void closeExpandedEditor()}
 	/>
 {/if}

@@ -5,6 +5,8 @@ import { remoteExecutor } from '$lib/executors/__tests__/fixtures';
 import { ChatSessionsStore } from '$lib/chat/sessions/chat-sessions.svelte';
 import { AppShellStore } from '$lib/stores/app-shell.svelte';
 import { LocalSettingsStore } from '$lib/stores/local-settings.svelte';
+import { createSnippetsStore } from '$lib/snippets/snippets-store.svelte';
+import { createPreamblesStore } from '$lib/preambles/preambles-store.svelte';
 import type { ChatListEntry } from '$shared/chat-list';
 import type { ScheduledPrompt } from '$shared/scheduled-prompts';
 import ScheduledPromptDialog from '../ScheduledPromptDialog.svelte';
@@ -20,12 +22,14 @@ vi.mock('$lib/context', async (original) => ({
 	getLocalSettings: () => settings,
 	getChatSessions: () => sessions,
 	getAppShell: () => new AppShellStore(),
+	getSnippets: () => createSnippetsStore({ get: async () => ({ revision: 0, snippets: [] }) }),
+	getPreambles: () => createPreamblesStore({ get: async () => ({ revision: 0, preambles: [] }) }),
 }));
 vi.mock('../ScheduledNewChatComposer.svelte', async () => import('./ScheduledPromptDialogTestStub.svelte'));
 
 afterEach(() => { cleanup(); settings?.destroy(); vi.restoreAllMocks(); });
 
-it('refreshes a cold existing remote target and hides literal template controls', async () => {
+it('refreshes a cold existing remote target and retains literal template controls', async () => {
 	localStorage.clear();
 	deps = createExecutorStartupFixture();
 	const snapshot = executorStartupSnapshot();
@@ -54,7 +58,7 @@ it('refreshes a cold existing remote target and hides literal template controls'
 	} satisfies ChatListEntry;
 	sessions.upsertFromServer([chat]);
 	const prompt: ScheduledPrompt = {
-		id: 'synthetic-schedule', prompt: 'echo {{chat_id}}', contentMode: 'literal',
+		id: 'synthetic-schedule', prompt: 'echo {{chat_id}}',
 		schedule: { type: 'once', nextRunAt: '2099-01-02T09:00:00.000Z' },
 		createdAt: '2029-01-01T00:00:00.000Z', updatedAt: '2029-01-01T00:00:00.000Z',
 		target: { type: 'existing-chat', chatId: chat.id, busyBehavior: 'queue' },
@@ -65,6 +69,6 @@ it('refreshes a cold existing remote target and hides literal template controls'
 	expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Save Prompt' }).disabled).toBe(true);
 	discovery.resolve();
 	await waitFor(() => expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Save Prompt' }).disabled).toBe(false));
-	expect(screen.queryByRole('button', { name: 'Insert {{chat_id}}' })).toBeNull();
+	expect(screen.getByRole('button', { name: 'Insert {{chat_id}}' })).toBeTruthy();
 	expect(screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Prompt' }).value).toBe(prompt.prompt);
 });

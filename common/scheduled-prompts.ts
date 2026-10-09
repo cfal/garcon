@@ -87,7 +87,6 @@ export interface ScheduledPrompt {
   schedule: ScheduledPromptSchedule;
   target: ScheduledPromptTarget;
   prompt: string;
-  contentMode?: 'literal';
   createdAt: string;
   updatedAt: string;
 }
@@ -362,7 +361,6 @@ export function normalizeScheduledPrompt(value: unknown): ScheduledPrompt | null
     !id ||
     !prompt ||
     prompt.length > SCHEDULED_PROMPT_MAX_LENGTH ||
-    (raw.contentMode !== undefined && raw.contentMode !== 'literal') ||
     !schedule ||
     !target ||
     typeof raw.createdAt !== 'string' ||
@@ -376,7 +374,6 @@ export function normalizeScheduledPrompt(value: unknown): ScheduledPrompt | null
     schedule,
     target,
     prompt,
-    ...(raw.contentMode === 'literal' ? { contentMode: 'literal' as const } : {}),
     createdAt: new Date(raw.createdAt).toISOString(),
     updatedAt: new Date(raw.updatedAt).toISOString(),
   };

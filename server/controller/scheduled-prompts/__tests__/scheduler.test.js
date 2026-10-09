@@ -136,26 +136,39 @@ async function sameChatScheduler(agents = agentCapabilities()) {
   return { store, cron, scheduler };
 }
 
-it('preserves explicitly configured literal schedules and refuses conversational agent schedules', async () => {
+it('preserves literal schedules from both user and agent admission', async () => {
   const { scheduler } = await sameChatScheduler({ ...agentCapabilities(), chatExecutionPolicy: () => 'literal' });
   const now = new Date('2030-01-01T00:00:00.000Z');
   const source = '/markdown printf "{{chat_id}}"  \n';
   const created = await scheduler.scheduleIn({ chatId: '123', duration: '1h', prompt: source }, now);
-  expect(created.scheduledPrompt).toMatchObject({ contentMode: 'literal', prompt: source });
+  expect(created.scheduledPrompt).toMatchObject({ prompt: source });
   await expect(scheduler.scheduleForChat({
     chatId: '123', prompt: 'Conversational action', busyBehavior: 'queue', firstRun: { type: 'after', minutes: 60 },
     intervalMinutes: null, endAtUtc: null,
-  }, now)).rejects.toMatchObject({ code: 'UNSUPPORTED_CONTROL_INPUT' });
+  }, now)).resolves.toBeDefined();
 });
 
-it('checks expanded schedule limits only for conversational admission', async () => {
+it('checks expanded schedule limits for every execution policy', async () => {
   const now = new Date('2030-01-01T00:00:00.000Z');
   const prompt = `${'x'.repeat(32_000 - '{{chat_id}}'.length)}{{chat_id}}`;
   const conversational = await sameChatScheduler();
   await expect(conversational.scheduler.scheduleIn({ chatId: '123', duration: '1h', prompt }, now))
     .rejects.toMatchObject({ code: 'SCHEDULED_PROMPT_VALIDATION_FAILED' });
   const literal = await sameChatScheduler({ ...agentCapabilities(), chatExecutionPolicy: () => 'literal' });
-  expect((await literal.scheduler.scheduleIn({ chatId: '123', duration: '1h', prompt }, now)).scheduledPrompt.prompt).toBe(prompt);
+  await expect(literal.scheduler.scheduleIn({ chatId: '123', duration: '1h', prompt }, now))
+    .rejects.toMatchObject({ code: 'SCHEDULED_PROMPT_VALIDATION_FAILED' });
+});
+
+it('checks conversation expansion after trimming but preserves literal source for validation', async () => {
+  const now = new Date('2030-01-01T00:00:00.000Z');
+  const prompt = ' '.repeat(100) + 'x'.repeat(32_000 - 100 - '{{chat_id}} '.length) + '{{chat_id}} ';
+  expect(prompt).toHaveLength(32_000);
+  const conversation = await sameChatScheduler();
+  expect((await conversation.scheduler.scheduleIn({ chatId: '123', duration: '1h', prompt }, now)).scheduledPrompt.prompt)
+    .toBe(prompt.trim());
+  const literal = await sameChatScheduler({ ...agentCapabilities(), chatExecutionPolicy: () => 'literal' });
+  await expect(literal.scheduler.scheduleIn({ chatId: '123', duration: '1h', prompt }, now))
+    .rejects.toMatchObject({ code: 'SCHEDULED_PROMPT_VALIDATION_FAILED' });
 });
 
 it('does not dispatch a registered occurrence after an uncertain schedule mutation', async () => {
@@ -864,7 +877,7 @@ describe('scheduled prompt scheduler', () => {
     scheduler.stop();
   });
 
-  it('rejects an unsafe explicit preamble composition before persistence', async () => {
+  it.each(['conversation', 'literal'])('validates preamble composition only when it will be applied: %s', async (policy) => {
     const dir = await tempDir();
     const store = new ScheduledPromptStore(dir);
     await store.init();
@@ -880,7 +893,7 @@ describe('scheduled prompt scheduler', () => {
       runLog: new ScheduledPromptRunLog(),
       dispatcher: { dispatch: async () => ({ outcome: 'sent', chatId: '123', message: 'sent' }) },
       chats: { getChat: () => null },
-      agents: agentCapabilities(),
+      agents: { ...agentCapabilities(), executionPolicy: () => policy },
       preambles: preambleCatalog(ids.map((id, index) => ({
         id,
         enabled: true,
@@ -895,9 +908,14 @@ describe('scheduled prompt scheduler', () => {
       cron: new FakeCron(),
     });
 
-    await expect(scheduler.create({ expectedRevision: 0, scheduledPrompt: definition }))
-      .rejects.toMatchObject({ code: 'PREAMBLE_SELECTION_COMPOSITION_INVALID', status: 422 });
-    expect(store.list()).toEqual([]);
+    if (policy === 'literal') {
+      await scheduler.create({ expectedRevision: 0, scheduledPrompt: definition });
+      expect(store.list()).toHaveLength(1);
+    } else {
+      await expect(scheduler.create({ expectedRevision: 0, scheduledPrompt: definition }))
+        .rejects.toMatchObject({ code: 'PREAMBLE_SELECTION_COMPOSITION_INVALID', status: 422 });
+      expect(store.list()).toEqual([]);
+    }
   });
 
   it('keeps the current cron handle active when an edit conflicts', async () => {

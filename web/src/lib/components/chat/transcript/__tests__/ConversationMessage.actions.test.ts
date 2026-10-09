@@ -280,10 +280,14 @@ describe('ConversationMessage actions', () => {
 		expect(onGenerateTitleFromMessage).toHaveBeenCalledWith('user text', 9);
 	});
 
-	it('shows generate title from message at the bottom for durable assistant messages', async () => {
+	it.each([
+		new AssistantMessage('2026-06-27T00:00:00.000Z', 'assistant text'),
+		new UserMessage('2026-06-27T00:00:00.000Z', 'printf source', undefined, { contentMode: 'literal' }),
+		new CommandOutputMessage('2026-06-27T00:00:00.000Z', 'command-1', 'stdout', 'plain', 'command output', { executorId: 'local', projectPath: '/project' }),
+	])('offers explicit title generation for durable $type', async (message) => {
 		const onGenerateTitleFromMessage = vi.fn();
 		render(ConversationMessageHost, {
-			message: new AssistantMessage('2026-06-27T00:00:00.000Z', 'assistant text'),
+			message,
 			forkUpToSeq: 9,
 			onGenerateTitleFromMessage,
 		});
@@ -305,7 +309,7 @@ describe('ConversationMessage actions', () => {
 
 		await fireEvent.click(screen.getByRole('menuitem', { name: 'Generate title from message' }));
 
-		expect(onGenerateTitleFromMessage).toHaveBeenCalledWith('assistant text', 9);
+		expect(onGenerateTitleFromMessage).toHaveBeenCalledWith(message.content, 9);
 	});
 
 	it('does not show generate title from message for user rows without a sequence', async () => {

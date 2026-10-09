@@ -277,8 +277,8 @@
 				onRetry={() => actions?.reload(surfaceId, chatId)}
 				onForkChat={(ordinal) => actions?.fork(surfaceId, chatId, ordinal)}
 				onAppendToDraft={conversationActions ? (block) => actions?.appendToDraft(surfaceId, chatId, block) : undefined}
-				onGenerateTitleFromMessage={conversationActions ? (message, ordinal) =>
-					actions?.generateTitle(surfaceId, chatId, message, ordinal) ?? Promise.resolve() : undefined}
+				onGenerateTitleFromMessage={(message, ordinal) =>
+					actions?.generateTitle(surfaceId, chatId, message, ordinal) ?? Promise.resolve()}
 				reserveComposerTraySpace={capSpace.feed}
 				{isPreparingInitialScroll}
 				{isVisible}

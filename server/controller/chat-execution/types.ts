@@ -171,7 +171,6 @@ export interface AcceptedDirectOperation {
 }
 
 export interface AcceptedQueueCreate {
-  requiredExecutionPolicy?: 'conversation' | 'literal';
   command: AcceptedExecutionCommand & { entryId: string };
   content: string;
   images: readonly AgentCommandImage[];

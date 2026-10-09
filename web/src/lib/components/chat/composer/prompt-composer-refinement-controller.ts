@@ -1,5 +1,5 @@
 import { tick } from 'svelte';
-import { PROMPT_REFINEMENT_DRAFT_MAX_LENGTH, type PromptRefinementSubject } from '$shared/prompt-refinement';
+import { PROMPT_REFINEMENT_DRAFT_MAX_LENGTH } from '$shared/prompt-refinement';
 import type { ComposerState } from '$lib/chat/composer/composer.svelte.js';
 import { PromptRefinementController } from '$lib/prompt-editor/prompt-refinement-controller.svelte.js';
 import { promptRefinementErrorMessage } from '$lib/prompt-editor/prompt-refinement-error-message.js';
@@ -12,13 +12,12 @@ import * as m from '$lib/paraglide/messages.js';
 import type { PromptComposerUiState } from './prompt-composer-state.svelte.js';
 
 interface PromptComposerRefinementOptions {
-	readonly selection: { agentId: string; executorId: string };
 	get executionKey(): string;
 	composer: Pick<
 		ComposerState,
 		'inputText' | 'contentRevision' | 'queueDraftSave' | 'isDragActive'
 	>;
-	sessions: Pick<ChatSessionsStore, 'selectedChatId' | 'isDraft'>;
+	sessions: Pick<ChatSessionsStore, 'selectedChatId'>;
 	notifications: Pick<NotificationsStore, 'info' | 'error'>;
 	ui: PromptComposerUiState;
 	transientLayers: TransientLayerRegistry;
@@ -87,9 +86,6 @@ export class PromptComposerRefinementController {
 	async #run(): Promise<void> {
 		const sourceChatId = this.options.sessions.selectedChatId;
 		if (!sourceChatId || this.options.startBlocked) return;
-		const subject: PromptRefinementSubject = this.options.sessions.isDraft(sourceChatId)
-			? { kind: 'selection', ...this.options.selection }
-			: { kind: 'chat', chatId: sourceChatId };
 		const executionKey = this.options.executionKey;
 		const sourceText = this.options.composer.inputText;
 		const sourceRevision = this.options.composer.contentRevision;
@@ -99,7 +95,7 @@ export class PromptComposerRefinementController {
 		this.options.composer.isDragActive = false;
 
 		try {
-			const result = await this.#request.run({ draft: sourceText, target: 'prompt', subject });
+			const result = await this.#request.run({ draft: sourceText, target: 'prompt' });
 			if (result.kind !== 'refined') return;
 			if (this.options.executionKey !== executionKey || this.options.startBlocked) return;
 			if (

@@ -1,23 +1,16 @@
 import { isRecord } from './json.js';
 import { SNIPPET_TEMPLATE_MAX_LENGTH } from './snippets.js';
 import { TICKET_LIMITS } from './tickets.js';
-import { isAgentId } from './agents.js';
-import { isExecutorId } from './executors.js';
-import { parseChatId } from './chat-id.js';
 
 export const PROMPT_REFINEMENT_DRAFT_MAX_LENGTH = 64_000;
 export const PROMPT_REFINEMENT_OUTPUT_MAX_LENGTH = 64_000;
 
 export type PromptRefinementTarget = 'prompt' | 'snippet-template' | 'ticket-description' | 'ticket-comment';
 
-export type PromptRefinementSubject =
-  | { kind: 'chat'; chatId: string }
-  | { kind: 'selection'; agentId: string; executorId: string };
-
-export type RefinePromptRequest = { draft: string } & (
-  | { target: 'prompt'; subject: PromptRefinementSubject }
-  | { target: Exclude<PromptRefinementTarget, 'prompt'> }
-);
+export interface RefinePromptRequest {
+  draft: string;
+  target: PromptRefinementTarget;
+}
 
 export interface RefinePromptResponse {
   success: true;
@@ -55,18 +48,7 @@ export function normalizeRefinePromptRequest(value: unknown): RefinePromptReques
     || !fitsTicketText(value.draft, value.target)) {
     return null;
   }
-  if (value.target !== 'prompt') return { draft: value.draft, target: value.target };
-  const subject = value.subject;
-  if (!isRecord(subject)) return null;
-  if (subject.kind === 'chat') {
-    try {
-      return { draft: value.draft, target: 'prompt', subject: { kind: 'chat', chatId: parseChatId(subject.chatId) } };
-    } catch { return null; }
-  }
-  if (subject.kind === 'selection' && isAgentId(subject.agentId) && isExecutorId(subject.executorId)) return {
-    draft: value.draft, target: 'prompt', subject: { kind: 'selection', agentId: subject.agentId, executorId: subject.executorId },
-  };
-  return null;
+  return { draft: value.draft, target: value.target };
 }
 
 export function normalizeRefinePromptResponse(

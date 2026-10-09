@@ -529,7 +529,6 @@ export async function startServer(): Promise<void> {
         unsettledQueueReceiptKeys: (chatId) => commandLedger.unsettledQueueReceiptKeys(chatId),
         appendControlReceipt: agentCommands.appendControlReceipt,
         isControlInputViewCurrent: (chatId, viewId) => chatRegistry.getChat(chatId) !== null
-          && agentRegistry.chatExecutionPolicy(chatId) !== 'literal'
           && transcriptLedger.existingCurrentView(chatId)?.viewId === viewId,
         selectionAdmissionLock,
         resolveSteerContent: queuedSteerContentResolver({ resolve: resolveFileMentions }, chatRegistry),

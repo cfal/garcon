@@ -20,21 +20,21 @@ describe('prompt refinement contracts', () => {
     expect(normalizeRefinePromptResponse({ success: true, refinedPrompt: '\uD800' }, target)).toBeNull();
   });
   it('preserves request whitespace while rejecting blank drafts', () => {
-    expect(normalizeRefinePromptRequest({ draft: '  improve this  ', target: 'prompt', subject: { kind: 'selection', agentId: 'claude', executorId: 'local' } })).toEqual({
+    expect(normalizeRefinePromptRequest({ draft: '  improve this  ', target: 'prompt' })).toEqual({
       draft: '  improve this  ',
-      target: 'prompt', subject: { kind: 'selection', agentId: 'claude', executorId: 'local' },
+      target: 'prompt',
     });
-    expect(normalizeRefinePromptRequest({ draft: ' \n\t ', target: 'prompt', subject: { kind: 'selection', agentId: 'claude', executorId: 'local' } })).toBeNull();
+    expect(normalizeRefinePromptRequest({ draft: ' \n\t ', target: 'prompt' })).toBeNull();
   });
 
   it('enforces the exact request ceiling', () => {
     expect(normalizeRefinePromptRequest({
       draft: 'x'.repeat(PROMPT_REFINEMENT_DRAFT_MAX_LENGTH),
-      target: 'prompt', subject: { kind: 'selection', agentId: 'claude', executorId: 'local' },
+      target: 'prompt',
     })).not.toBeNull();
     expect(normalizeRefinePromptRequest({
       draft: 'x'.repeat(PROMPT_REFINEMENT_DRAFT_MAX_LENGTH + 1),
-      target: 'prompt', subject: { kind: 'selection', agentId: 'claude', executorId: 'local' },
+      target: 'prompt',
     })).toBeNull();
     expect(normalizeRefinePromptRequest({
       draft: 'x'.repeat(SNIPPET_TEMPLATE_MAX_LENGTH),

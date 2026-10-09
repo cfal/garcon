@@ -327,6 +327,14 @@ describe('ScheduledPromptFormState', () => {
 		expect(form.canSave).toBe(true);
 	});
 
+	it.each(['conversation', 'literal'] as const)('validates template expansion on the normalized %s source', async (executionPolicy) => {
+		const form = createForm(undefined, undefined, { executionPolicy });
+		await form.initialize(existingPrompt({ type: 'once', nextRunAt: '2099-01-02T09:00:00.000Z' }));
+		form.prompt = ' '.repeat(100) + 'x'.repeat(32_000 - 100 - '{{chat_id}} '.length) + '{{chat_id}} ';
+		expect(form.canSave).toBe(executionPolicy === 'conversation');
+		if (executionPolicy === 'conversation') expect(form.buildDefinition()?.prompt).toBe(form.prompt.trim());
+	});
+
 	it('starts a recurring schedule at the visible date and time of a converted one-off prompt', async () => {
 		const form = createForm();
 		const original = new Date(2030, 0, 20, 9, 0, 0, 0);

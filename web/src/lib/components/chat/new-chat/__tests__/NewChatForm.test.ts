@@ -250,12 +250,12 @@ describe('NewChatForm', () => {
 		}));
 	});
 
-	it('hides conversational controls and submits literal slash source unchanged', async () => {
+	it('retains explicit helpers and submits literal slash source unchanged', async () => {
 		stubMatchMedia(false);
 		const onStartChat = vi.fn();
 		const input = await renderSubmittableForm(onStartChat, { executionPolicy: 'literal' });
 		expect(screen.queryByRole('button', { name: 'Edit preambles' })).toBeNull();
-		expect(screen.queryByRole('button', { name: 'Refine prompt' })).toBeNull();
+		expect(screen.getByRole('button', { name: 'Refine prompt' })).toBeTruthy();
 		const firstMessage = '/snippet untouched\n  ';
 		await fireEvent.input(input, { target: { value: firstMessage } });
 		await fireEvent.keyDown(input, { key: 'Enter' });
@@ -1273,7 +1273,7 @@ describe('NewChatForm', () => {
 		);
 	});
 
-	it('inserts an unchanged saved default as an explicit palette value', async () => {
+	it.each(['conversation', 'literal'] as const)('inserts an explicit snippet into a new %s draft', async (executionPolicy) => {
 		stubMatchMedia(false);
 		vi.mocked(snippetsApi.expandSnippet).mockResolvedValueOnce({
 			success: true,
@@ -1287,6 +1287,7 @@ describe('NewChatForm', () => {
 		});
 		const messageInput = await renderSubmittableForm(vi.fn(), {
 			snippetDefaultArguments: 'saved default',
+			executionPolicy,
 		});
 		await fireEvent.input(messageInput, { target: { value: 'Before replace after' } });
 		messageInput.setSelectionRange(7, 14);

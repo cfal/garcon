@@ -173,14 +173,13 @@ describe('ChatExecutionCoordinator', () => {
     expect((await coordinator.readChatExecutionControl('chat-1')).pause).toMatchObject({ kind: 'turn-failed' });
   });
 
-  it('refuses conversational control inputs before capture or queueing on literal targets', async () => {
+  it('admits server control input on literal targets', async () => {
     const fixture = createFixture({ executionPolicy: () => 'literal' });
     coordinator = fixture.coordinator;
     const signal = new AbortController().signal;
-    await expect(coordinator.offerServerControlInput('chat-1', interAgentInput(), signal, null)).rejects.toMatchObject({ code: 'UNSUPPORTED_CONTROL_INPUT' });
-    await expect(coordinator.queueServerControlInput('chat-1', interAgentInput(), signal)).rejects.toMatchObject({ code: 'UNSUPPORTED_CONTROL_INPUT' });
-    expect(fixture.appendControlReceipt).not.toHaveBeenCalled();
-    expect((await coordinator.readChatExecutionControl('chat-1')).entries).toEqual([]);
+    expect(await coordinator.offerServerControlInput('chat-1', interAgentInput('printf scheduled'), signal, null)).toEqual({ kind: 'queued' });
+    await waitFor(() => fixture.turnRunner.runAgentTurn.mock.calls.length === 1);
+    expect(fixture.appendControlReceipt).toHaveBeenCalled();
   });
 
   it('releases direct ownership after startup compensation removes the chat', async () => {
@@ -294,22 +293,23 @@ describe('ChatExecutionCoordinator', () => {
     expect((await coordinator.readChatExecutionControl('chat-1')).entries).toEqual([]);
   });
 
-  it('rejects a queued schedule whose execution policy changed before dequeue', async () => {
+  it('admits queued schedules under the current execution policy', async () => {
     let policy = 'conversation';
     const fixture = createFixture({ executionPolicy: () => policy });
     coordinator = fixture.coordinator;
     const snapshot = coordinator.reserveTranscriptSnapshot('chat-1');
     await coordinator.enqueueAccepted({
       command: { key: 'schedule-command', chatId: 'chat-1', clientRequestId: 'schedule-request', entryId: 'schedule-entry' },
-      content: '<garcon-schedule-action>must not execute</garcon-schedule-action>', images: [],
-      clientMessageId: 'schedule-input', transcriptViewId: 'view-1', requiredExecutionPolicy: 'conversation',
+      content: 'printf scheduled', images: [],
+      clientMessageId: 'schedule-input', transcriptViewId: 'view-1',
       admissionDeadline: null, settlement: { settleQueueMutation: mock(async () => undefined) },
     });
     policy = 'literal';
     await coordinator.releaseTranscriptSnapshot(snapshot);
     await coordinator.triggerDrain('chat-1');
-    expect(fixture.projection.admitQueuedInput).not.toHaveBeenCalled();
-    expect(fixture.turnRunner.runAgentTurn).not.toHaveBeenCalled();
+    await waitFor(() => fixture.turnRunner.runAgentTurn.mock.calls.length === 1);
+    expect(fixture.projection.admitQueuedInput).toHaveBeenCalled();
+    expect(fixture.turnRunner.runAgentTurn).toHaveBeenCalled();
   });
 
   it('does not restore a committed queue input when provider dispatch fails', async () => {
