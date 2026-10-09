@@ -606,7 +606,7 @@ export class AgentRegistry implements AgentRegistryServiceContract {
         viewId: options.transcriptViewId
           ? transcriptViewId(options.transcriptViewId)
           : current.viewId,
-        message: this.#normalizeInput(chatId, message),
+        message,
         attachments: inputAttachments(options),
         clientMessageId: options.clientMessageId ?? null,
         steer: options.commandType === 'steer',

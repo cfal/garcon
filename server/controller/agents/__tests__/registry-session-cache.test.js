@@ -216,6 +216,30 @@ describe('AgentRegistry session cache', () => {
     );
   }
 
+  it.each([undefined, 'literal'])('checks input identity without executor inventory: %s', async (contentMode) => {
+    const viewId = ledger.currentView(CHAT_ID).viewId;
+    ledger.appendInputAndCompose({
+      chatId: CHAT_ID,
+      viewId,
+      message: new UserMessage(AT, 'Synthetic input', undefined, contentMode ? { contentMode } : undefined),
+      attachments: [],
+      clientMessageId: 'input-original',
+      steer: false,
+    });
+    await chats.installAgentOwnership(CHAT_ID, {
+      executorId: '22222222-2222-4222-8222-222222222222', projectPath: '/repo', patch: {},
+    });
+    const registry = createRegistry();
+    const matches = (clientMessageId, content = 'Synthetic input') => registry.hasMatchingInput(
+      CHAT_ID, new UserMessage(AT, content), { transcriptViewId: viewId, clientMessageId, commandType: 'agent-run' },
+    );
+
+    expect(matches('input-new')).toBe(false);
+    expect(matches('input-original')).toBe(true);
+    expect(() => matches('input-original', 'Different input')).toThrow();
+    expect(() => registry.chatExecutionPolicy(CHAT_ID)).toThrow('Executor is unavailable');
+  });
+
   it('applies the saved selection order, not catalog order', async () => {
     armBoundary('epoch-current');
     setSelection([PREAMBLE_B, PREAMBLE_A]);
