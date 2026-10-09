@@ -14,6 +14,37 @@ import { renderTranscriptExportMarkdown } from '../markdown.ts';
 const AT = '2026-08-23T00:00:00.000Z';
 
 describe('Markdown transcript export', () => {
+  const context = { executorId: 'local', projectPath: '/synthetic' };
+  const stdout = (content, offset = 0, outputContext = context) => new CommandOutputMessage(AT, 'command', 'stdout', 'markdown', content, outputContext, offset);
+  const result = (capture = 'complete') => new CommandResultMessage(AT, 'command', {
+    outcome: 'finished', exitCode: 0, signal: null, capture, cwd: { kind: 'reported', path: '/synthetic' },
+  });
+
+  it.each([
+    ['unfinished', [stdout('# incomplete heading')]],
+    ['incomplete', [stdout('# incomplete heading'), result('incomplete')]],
+    ['truncated', [stdout('# incomplete heading'), result('truncated')]],
+    ['partial tail', [stdout('# incomplete heading', 10), result()]],
+    ['noncontiguous', [stdout('# incomplete heading'), stdout('suffix', 100), result()]],
+    ['changed context', [stdout('# incomplete heading'), stdout('suffix', 20, { ...context, projectPath: '/different' }), result()]],
+    ['publication gap', [stdout('# incomplete heading'), new TranscriptNoticeMessage(AT, 'Lost output', { type: 'publication-gap' }), result()]],
+  ])('fences %s Markdown output', (_label, messages) => {
+    const document = renderTranscriptExportMarkdown(model(messages.map((message, index) => entry(index + 1, 'conversation', message))));
+    expect(document).toContain('```text\n# incomplete heading\n```');
+  });
+
+  it('renders complete stdout as one document across interleaved stderr', () => {
+    const first = '```text\nprefix\n';
+    const document = renderTranscriptExportMarkdown(model([
+      entry(1, 'conversation', stdout(first)),
+      entry(2, 'conversation', new CommandOutputMessage(AT, 'command', 'stderr', 'plain', 'diagnostic', context)),
+      entry(3, 'conversation', stdout('# still code\n```', first.length)),
+      entry(4, 'conversation', result()),
+    ]));
+    expect(document).toContain(`${first}# still code\n\x60\x60\x60`);
+    expect(document).toContain('```text\ndiagnostic\n```');
+  });
+
   it('fences a settled literal tail without interpreting its Markdown-looking contents', () => {
     const document = renderTranscriptExportMarkdown(model([
       entry(1, 'conversation', new CommandOutputMessage(AT, 'command', 'stdout', 'plain', '# retained tail',

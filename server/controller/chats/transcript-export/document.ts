@@ -43,6 +43,6 @@ export function buildTranscriptExportResponse(
     omitted: filtered.omitted,
     document: request.format === 'xml'
       ? renderTranscriptExportXml(model)
-      : renderTranscriptExportMarkdown(model),
+      : renderTranscriptExportMarkdown(model, allEntries),
   };
 }

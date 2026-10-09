@@ -14,7 +14,7 @@ import type { PendingPermissionRequest } from '$lib/types/chat';
 import { TOOL_DISPLAY_REGISTRY } from '$lib/chat/tools/tool-display-registry.js';
 import { resolveDisplayRule, shouldRenderToolResult } from '$lib/chat/tools/tool-display-policy.js';
 import { isHiddenBashToolUse, type BashCommandMatcher } from './hidden-bash-commands.js';
-import { projectCommandOutput } from './command-output-projection.js';
+import { projectCommandOutput } from '$shared/command-output-projection.js';
 
 export interface PermissionTerminalState {
 	permissionOccurrenceId: string;

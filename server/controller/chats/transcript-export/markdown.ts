@@ -1,4 +1,6 @@
 import type { TranscriptExportDocumentModel } from './model.js';
+import { projectCommandOutput } from '../../../../common/command-output-projection.js';
+import type { TranscriptExportEntry } from '../../ledger/export-fold.js';
 import type { TranscriptExportField } from './values.js';
 import {
   textSafe,
@@ -12,7 +14,18 @@ import {
   transcriptExportEntryPreambleSnapshot,
 } from './values.js';
 
-export function renderTranscriptExportMarkdown(model: TranscriptExportDocumentModel): string {
+export function renderTranscriptExportMarkdown(
+  model: TranscriptExportDocumentModel,
+  sourceEntries: readonly TranscriptExportEntry[] = model.entries,
+): string {
+  // Completeness uses the unfiltered evidence, including excluded gap notices.
+  const output = projectCommandOutput(sourceEntries.map(entry => entry.kind === 'message' ? entry.message : null));
+  const projected = new Map<number, TranscriptExportEntry | null>();
+  for (const [index, projection] of output) {
+    const entry = sourceEntries[index]!;
+    if (entry.kind !== 'message') continue;
+    projected.set(entry.ordinal, projection.parentIndex === index ? { ...entry, message: projection.message } : null);
+  }
   const omitted = model.omitted
     .filter(({ count }) => count > 0)
     .map(({ category, count }) => `${category} ${count}`)
@@ -25,7 +38,9 @@ export function renderTranscriptExportMarkdown(model: TranscriptExportDocumentMo
     '',
   ];
 
-  for (const entry of model.entries) {
+  for (const original of model.entries) {
+    const entry = projected.has(original.ordinal) ? projected.get(original.ordinal) : original;
+    if (!entry) continue;
     const type = transcriptExportEntryType(entry);
     const preambleSnapshot = transcriptExportEntryPreambleSnapshot(entry);
     const preambles = preambleSnapshot?.preambles ?? null;

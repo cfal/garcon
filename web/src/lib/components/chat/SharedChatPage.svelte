@@ -20,7 +20,7 @@
 	import ChatEventCard from '$lib/components/chat/transcript/rows/ChatEventCard.svelte';
 	import CliRow from '$lib/components/chat/transcript/rows/CliRow.svelte';
 	import CommandStatusRow from '$lib/components/chat/transcript/rows/CommandStatusRow.svelte';
-	import { projectCommandOutput } from '$lib/chat/transcript/command-output-projection.js';
+	import { projectCommandOutput } from '$shared/command-output-projection.js';
 	import CliPresentationHeader from '$lib/components/chat/transcript/rows/CliPresentationHeader.svelte';
 	import CollapsibleBody from '$lib/components/chat/transcript/rows/CollapsibleBody.svelte';
 	import TranscriptNoticeRow from '$lib/components/chat/transcript/rows/TranscriptNoticeRow.svelte';
