@@ -100,6 +100,32 @@ describe('Shell integration', () => {
     expect((await history()).filter(row => row.type === 'user-message')).toHaveLength(2);
   });
 
+  it('fails invalid cwd capture without losing process exit or output evidence', async () => {
+    await integration.execution.start({ ...request, model: 'bash',
+      prompt: 'printf retained; report="$(dirname "${BASH_SOURCE[0]}")/cwd"; rm "$report"; mkfifo "$report"; exit 0' });
+    expect(await terminal()).toMatchObject({ outcome: 'failed',
+      error: { message: expect.stringContaining('working directory report is invalid') },
+      workingDirectory: { kind: 'unavailable' } });
+    const rows = await history();
+    expect(rows.some(row => row.type === 'command-output' && row.content === 'retained')).toBe(true);
+    expect(rows.at(-1)).toMatchObject({ result: { outcome: 'failed', exitCode: 0, capture: 'complete' } });
+  });
+
+  it('rejects malformed Unicode from JSON before starting a process or native log', async () => {
+    await expect(integration.execution.start({ ...request, prompt: JSON.parse('"printf \\ud800"') }))
+      .rejects.toMatchObject({ code: 'INVALID_SETTINGS' });
+    expect(events).toEqual([]);
+    expect(await integration.execution.runningSessions()).toEqual([]);
+  });
+
+  it.skipIf(!Bun.which('pwsh'))('fails a non-filesystem PowerShell location even when the process succeeds', async () => {
+    await mkdir(join(root, 'next'));
+    await integration.execution.start({ ...request, model: 'pwsh', prompt: 'Set-Location next; Set-Location Env:' });
+    expect(await terminal()).toMatchObject({ outcome: 'failed', workingDirectory: { kind: 'unavailable' },
+      error: { message: expect.stringContaining('working directory report is invalid') } });
+    expect((await history()).at(-1)).toMatchObject({ result: { outcome: 'failed', exitCode: 0, capture: 'complete' } });
+  });
+
   it('blocks overlapping starts and Reload until Stop has settled', async () => {
     const handle = await integration.execution.start({ ...request, prompt: 'cat' });
     await expect(integration.execution.start({ ...request, runId: 'run-2' })).rejects.toMatchObject({ code: 'SESSION_BUSY' });
@@ -143,7 +169,7 @@ describe('Shell integration', () => {
     while (!await Bun.file(join(root, 'ready')).exists()) await Bun.sleep(5);
     expect(events.some(event => event.type === 'rows')).toBe(false);
     await Bun.write(join(root, 'release'), '');
-    await terminal();
+    expect(await terminal()).toMatchObject({ finalResponse: { type: 'literal-text', text: 'firstsecond' } });
     const live = events.flatMap(event => event.type === 'rows' ? event.rows.map(row => row.message) : []);
     const output = live.filter(message => message.type === 'command-output');
     expect(output.filter(message => message.channel === 'stdout').map(message => message.content).join('')).toBe('firstsecond');
@@ -188,13 +214,18 @@ describe('Shell integration', () => {
 
   it('retains only the combined output tail without interrupting the command', async () => {
     await integration.execution.start({ ...request, prompt: '/md head -c 17825792 /dev/zero | tr "\\0" x; printf tail; printf diagnostic >&2; touch completed' });
-    expect(await terminal()).toMatchObject({ outcome: 'finished', finalResponse: { type: 'literal-text' } });
+    const result = await terminal();
+    expect(result).toMatchObject({ outcome: 'finished', finalResponse: { type: 'literal-text' } });
     expect(await Bun.file(join(root, 'completed')).exists()).toBe(true);
     const rows = await history();
     const output = rows.filter(row => row.type === 'command-output');
     expect(output.reduce((size, row) => size + Buffer.byteLength(row.content), 0)).toBe(COMMAND_OUTPUT_BYTES);
     expect(output.every(row => row.type === 'command-output' && row.format === 'plain')).toBe(true);
-    expect(output.filter(row => row.channel === 'stdout').map(row => row.content).join('').endsWith('tail')).toBe(true);
+    const stdout = output.filter(row => row.channel === 'stdout').map(row => row.content).join('');
+    expect(stdout.endsWith('tail')).toBe(true);
+    expect(result).toMatchObject({ finalResponse: {
+      type: 'literal-text', text: `[Output truncated to the last 64 KiB across stdout and stderr]\n${stdout}`,
+    } });
     expect(output.filter(row => row.channel === 'stderr').map(row => row.content).join('')).toContain('diagnostic');
     expect(rows.at(-1)).toMatchObject({ result: { outcome: 'finished', exitCode: 0, capture: 'truncated' } });
     const live = events.flatMap(event => event.type === 'rows' ? event.rows.map(row => row.message) : []);

@@ -20,7 +20,8 @@ the confirmed directory after startup and disables Unix shell job control
 before executing the submission. Terminal-dependent profile code may behave
 differently or block.
 
-Commands are literal, including whitespace, absolute executable paths, and
+Commands must contain well-formed Unicode and no NUL bytes. They are literal,
+including whitespace, absolute executable paths, and
 `@file` text. Automatic slash/snippet interpretation, preambles, attachments,
 file expansion, and automatic resend are disabled. Explicit snippet insertion,
 prose refinement, and title generation remain available. These are authoring
@@ -51,9 +52,12 @@ printing relative links should print absolute paths instead.
 A wrapper observes the shell's final physical directory without parsing `cd` or
 stdout. A valid changed path is checked and persisted before another queued
 command can start. Failed commands can still change directory. Invalid or
-unusable reported paths fail synchronization and pause the queue; missing
-reports retain the previous confirmed path. `exec`, Stop, process termination,
+unusable reported paths, and corrupt or unreadable reports, fail the turn and
+pause the queue. An untouched report from a skipped footer retains the previous
+confirmed path. `exec`, Stop, process termination,
 and some shells' `exit` behavior may bypass the wrapper's observation.
+PowerShell non-filesystem locations fail cwd capture. The report is a best-effort
+observation, not a security boundary against commands that modify it.
 
 Nonzero status fails the turn and pauses waiting work, whether the failed
 command was direct or queued. Stderr alone does not indicate failure. Status

@@ -11,11 +11,14 @@ export const OUTPUT_BATCH_BYTES = 32 * 1024;
 const DRAIN_TIMEOUT_MS = 1500;
 const KILL_GRACE_MS = 500;
 const CWD_REPORT_MAX_BYTES = 65_537;
+const CWD_REPORT_PENDING = 'Garcon cwd report pending\n';
+
+type ShellWorkingDirectory = CommandWorkingDirectory | { readonly kind: 'invalid'; readonly reason: string };
 
 export interface ShellProcessResult {
   exitCode: number | null;
   signal: string | null;
-  cwd: CommandWorkingDirectory;
+  cwd: ShellWorkingDirectory;
   interrupted: boolean;
   complete: boolean;
 }
@@ -57,7 +60,7 @@ export async function executeShell(options: ShellProcessOptions): Promise<ShellP
       await writeFile(entryPath, POWERSHELL_ENTRY, { mode: 0o600, flag: 'wx' });
     }
     await writeFile(sourcePath, options.source, { mode: 0o600, flag: 'wx' });
-    await writeFile(resultPath, '', { mode: 0o600, flag: 'wx' });
+    await writeFile(resultPath, CWD_REPORT_PENDING, { mode: 0o600, flag: 'wx' });
     options.signal.throwIfAborted();
     const spawned = spawn(options.executable, shellInvocation(options.family, sourcePath, options.cwd, entryPath, resultPath), {
       cwd: options.cwd,
@@ -132,7 +135,7 @@ export async function executeShell(options: ShellProcessOptions): Promise<ShellP
   }
 }
 
-async function readWorkingDirectory(path: string): Promise<CommandWorkingDirectory> {
+async function readWorkingDirectory(path: string): Promise<ShellWorkingDirectory> {
   try {
     const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     try {
@@ -141,14 +144,15 @@ async function readWorkingDirectory(path: string): Promise<CommandWorkingDirecto
       const buffer = Buffer.alloc(CWD_REPORT_MAX_BYTES + 1);
       const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
       if (bytesRead > CWD_REPORT_MAX_BYTES) throw new Error('Invalid cwd report');
-      const text = buffer.toString('utf8', 0, bytesRead);
+      const text = new TextDecoder('utf-8', { fatal: true }).decode(buffer.subarray(0, bytesRead));
+      if (text === CWD_REPORT_PENDING) return { kind: 'unavailable', reason: 'The command did not report a filesystem directory.' };
       const parsed = parseCommandWorkingDirectory({ kind: 'reported', path: text.endsWith('\n') ? text.slice(0, -1) : text });
       if (parsed) return parsed;
     } finally {
       await file.close();
     }
   } catch {
-    // A command can exit before the footer or replace its private report.
+    // Only the pending sentinel represents a footer that did not run.
   }
-  return { kind: 'unavailable', reason: 'The command did not report a valid filesystem directory.' };
+  return { kind: 'invalid', reason: 'The working directory report is invalid or unreadable; the previous directory was retained.' };
 }

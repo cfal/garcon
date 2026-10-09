@@ -202,7 +202,7 @@ export class ShellExecution {
       let status: CommandOutcome['outcome'] = 'failed';
       if (result.interrupted) {
         status = 'interrupted';
-      } else if (result.exitCode === 0 && result.complete) {
+      } else if (result.exitCode === 0 && result.complete && result.cwd.kind !== 'invalid') {
         status = 'finished';
       }
       let capture: CommandOutcome['capture'] = 'complete';
@@ -212,24 +212,30 @@ export class ShellExecution {
         outcome: status,
         exitCode: result.exitCode,
         signal: result.signal,
-        cwd: result.cwd,
+        cwd: result.cwd.kind === 'invalid' ? { kind: 'unavailable', reason: result.cwd.reason } : result.cwd,
         capture,
       };
       const message = new CommandResultMessage(new Date().toISOString(), commandId, outcome);
       await publishOutput();
       commandLog.append(commandId, message);
       this.#emit(invocation.binding, { type: 'rows', rows: [{ message }] });
-      const terminal = { type: 'run-ended', runId: request.runId, workingDirectory: result.cwd } as const;
+      const terminal = { type: 'run-ended', runId: request.runId, workingDirectory: outcome.cwd } as const;
       if (outcome.outcome === 'finished') {
-        const stdout = output.messages().filter(message => message.channel === 'stdout').map(message => message.content).join('');
+        let text = output.messages().find(message => message.channel === 'stdout')?.content ?? '';
+        if (output.truncated) {
+          text = `[Output truncated to the last 64 KiB across stdout and stderr]\n${text}`;
+        }
         return {
           ...terminal,
           outcome: 'finished',
-          finalResponse: { type: 'literal-text', text: output.truncated ? `[Output truncated to the last 64 KiB across stdout and stderr]\n${stdout}` : stdout },
+          finalResponse: { type: 'literal-text', text },
         };
       }
       if (outcome.outcome === 'interrupted') return { ...terminal, outcome: 'interrupted' };
-      return { ...terminal, outcome: 'failed', error: { code: 'PROVIDER_FAILURE', message: message.content } };
+      const failure = result.cwd.kind === 'invalid'
+        ? `Process exited ${result.exitCode ?? 'without an exit code'}. ${result.cwd.reason}`
+        : message.content;
+      return { ...terminal, outcome: 'failed', error: { code: 'PROVIDER_FAILURE', message: failure } };
     } catch (error) {
       await publishOutput();
       if (log && commandRecorded) {

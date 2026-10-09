@@ -894,7 +894,7 @@ describe('ChatCommandService', () => {
   it.each(['agent-command', 'interactive'])('replays untitled literal starts by requested intent: %s', async (origin) => {
     const f = makeService();
     f.agents.executionPolicy.mockReturnValue('literal');
-    const input = { ...agentStartInput('view-1'), command: 'printf synthetic', origin };
+    const input = { ...agentStartInput('view-1'), command: `${'x'.repeat(99)}\u{1f600}`, origin };
     if (origin === 'agent-command') {
       const first = await f.service.submitAgentCommandStartLocked(input, new AbortController().signal);
       first.start();
@@ -904,7 +904,7 @@ describe('ChatCommandService', () => {
       const first = await f.service.submitStart(input);
       expect(await f.service.submitStart(input)).toMatchObject({ status: 'duplicate', turnId: first.turnId });
     }
-    expect(f.settings.setSessionName).toHaveBeenCalledWith(TARGET_CHAT_ID, 'printf synthetic');
+    expect(f.settings.setSessionName).toHaveBeenCalledWith(TARGET_CHAT_ID, 'x'.repeat(99));
     expect(f.agents.startSession).toHaveBeenCalledTimes(1);
   });
 

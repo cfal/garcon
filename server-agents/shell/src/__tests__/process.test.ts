@@ -13,6 +13,10 @@ it('parses only executor-owned Markdown prefixes without trimming source', () =>
     expect(parseSubmission(source)).toEqual({ source, format: 'plain' });
   }
   expect(() => parseSubmission('/md')).toThrow();
+  for (const json of ['"echo \\ud800"', '"/md echo \\udfff"']) {
+    expect(() => parseSubmission(JSON.parse(json))).toThrow('well-formed Unicode');
+  }
+  expect(parseSubmission('printf "\u{1f600}"').source).toBe('printf "\u{1f600}"');
 });
 
 for (const family of SHELL_FAMILIES) {
@@ -20,7 +24,7 @@ for (const family of SHELL_FAMILIES) {
   describe.skipIf(!executable)(`fresh ${family} command`, () => {
     let directory: string;
     beforeAll(async () => {
-      directory = await mkdtemp(join(tmpdir(), 'garcon-shell-test-'));
+      directory = await mkdtemp(join(tmpdir(), "garcon-shell-'test-"));
       await mkdir(join(directory, 'space and\nnewline'));
     });
     afterAll(async () => { await rm(directory, { recursive: true, force: true }); });
@@ -49,6 +53,13 @@ for (const family of SHELL_FAMILIES) {
       expect(result.exitCode).toBe(family === 'pwsh' ? 7 : 1);
       expect(result.cwd).toEqual({ kind: 'reported', path: directory });
     });
+    if (family === 'sh' || family === 'bash' || family === 'zsh') {
+      it('does not expose wrapper arguments to submitted source', async () => {
+        const result = await run('printf "%s|%s|%s" "$#" "${1-unset}" "${2-unset}"');
+        expect(result.stdout).toEndWith('0|unset|unset');
+        expect(result.exitCode).toBe(0);
+      });
+    }
     it('retains unknown cwd when exit bypasses the footer', async () => {
       const result = await run(family === 'pwsh' ? '[Environment]::Exit(7)' : "exec /bin/sh -c 'exit 7'");
       expect(result.exitCode).toBe(7);
@@ -131,12 +142,6 @@ for (const family of SHELL_FAMILIES) {
         expect(result.exitCode).toBe(0);
       });
 
-      it('rejects a FIFO cwd report without blocking', async () => {
-        const result = await run('report="$(dirname "$1")/cwd"; rm "$report"; mkfifo "$report"; exit 0');
-        expect(result.exitCode).toBe(0);
-        expect(result.cwd.kind).toBe('unavailable');
-      });
-
       it('bounds background-held pipes and marks incomplete capture', async () => {
         const result = await run('sleep 60 &\nprintf foreground');
         expect(result.stdout).toBe('foreground');
@@ -144,7 +149,32 @@ for (const family of SHELL_FAMILIES) {
       });
     }
 
+    if (family === 'bash') {
+      it.each([
+        'rm "$report"; mkfifo "$report"',
+        'rm "$report"; ln -s /dev/null "$report"',
+        'rm "$report"',
+        ': > "$report"',
+        'printf relative > "$report"',
+        'printf "\\377" > "$report"',
+        'head -c 65538 /dev/zero > "$report"',
+      ])('distinguishes an invalid cwd report from a missing footer: %s', async (replace) => {
+        const result = await run('report="$(dirname "${BASH_SOURCE[0]}")/cwd"; ' + replace + '; exit 0');
+        expect(result.exitCode).toBe(0);
+        expect(result.cwd.kind).toBe('invalid');
+        expect(result.complete).toBe(true);
+      });
+    }
+
     if (family === 'pwsh') {
+      it('reports a completed footer with a non-filesystem location as invalid', async () => {
+        const result = await run('Set-Location "space and`nnewline"; Set-Location Env:; [Console]::Out.Write((Get-Location -PSProvider FileSystem).Path)');
+        expect(result.stdout).toBe(join(directory, 'space and\nnewline'));
+        expect(result.exitCode).toBe(0);
+        expect(result.complete).toBe(true);
+        expect(result.cwd.kind).toBe('invalid');
+      });
+
       it('preserves using and param headers and observes cwd after return', async () => {
         const result = await run("using namespace System.Text\nparam()\n[Console]::Out.Write([StringBuilder]::new('header').ToString())\nreturn");
         expect(result.stdout).toBe('header');

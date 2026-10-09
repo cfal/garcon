@@ -151,7 +151,9 @@ export class StartCommands {
     }
     const requestedTitle = input.origin === 'agent-command' ? parseChatRowTitle(input.title) ?? null : null;
     let title = requestedTitle;
-    if (title === null && literal) title = input.command.replace(/\s+/g, ' ').trim().slice(0, 100);
+    if (title === null && literal) {
+      title = input.command.replace(/\s+/g, ' ').trim().slice(0, 100).replace(/[\uD800-\uDBFF]$/, '');
+    }
     const transcriptSnapshot = input.origin === 'agent-command' ? input.transcriptSnapshot ?? null : null;
     if (transcriptSnapshot) {
       if (parentChatId === null || !Number.isSafeInteger(transcriptSnapshot.ordinal) || transcriptSnapshot.ordinal < 1) {
