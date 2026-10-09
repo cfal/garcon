@@ -9,8 +9,9 @@ import {
 } from '@garcon/server-agent-interface';
 import { validateAgentIntegration } from '@garcon/server-agent-interface/testing';
 import ShellIntegration from '../index.js';
-import { NATIVE_HISTORY_MAX_BYTES, ShellNativeStore } from '../native-store.js';
-import { CommandResultMessage, UserMessage } from '@garcon/common/chat-types';
+import { ShellNativeStore } from '../native-store.js';
+import { UserMessage } from '@garcon/common/chat-types';
+import { COMMAND_OUTPUT_BYTES } from '../output.js';
 
 describe('Shell integration', () => {
   let root: string;
@@ -146,7 +147,8 @@ describe('Shell integration', () => {
     const live = events.flatMap(event => event.type === 'rows' ? event.rows.map(row => row.message) : []);
     const output = live.filter(message => message.type === 'command-output');
     expect(output.filter(message => message.channel === 'stdout').map(message => message.content).join('')).toBe('firstsecond');
-    expect(output.at(-1)).toMatchObject({ channel: 'stderr', content: 'diagnostic' });
+    expect(output).toHaveLength(2);
+    expect(output.at(-1)).toMatchObject({ channel: 'stderr', content: expect.stringContaining('diagnostic') });
     expect(live.at(-1)?.type).toBe('command-result');
     expect((await history()).slice(1)).toEqual(live);
   });
@@ -184,22 +186,19 @@ describe('Shell integration', () => {
     await expect(store.load(linked, request.chatId)).rejects.toThrow();
   });
 
-  it('refuses native quota overflow while retaining space for an incomplete outcome', async () => {
-    const store = new ShellNativeStore(host);
-    const id = crypto.randomUUID();
-    (await store.create(id, request.chatId)).close();
-    const db = new Database(await store.path(id));
-    db.query('UPDATE session SET bytes = ?').run(NATIVE_HISTORY_MAX_BYTES - 8192);
-    db.close();
-    const log = await store.load(id, request.chatId);
-    try {
-      expect(() => log.append('command-1', new UserMessage('2026-01-01T00:00:00.000Z', 'printf never-started')))
-        .toThrow('size limit');
-      expect(() => log.append('command-1', new CommandResultMessage('2026-01-01T00:00:00.000Z', 'command-1', {
-        outcome: 'failed', exitCode: null, signal: null, capture: 'incomplete',
-        cwd: { kind: 'unavailable', reason: 'Synthetic quota failure' },
-      }))).not.toThrow();
-    } finally { log.close(); }
+  it('retains only the combined output tail without interrupting the command', async () => {
+    await integration.execution.start({ ...request, prompt: '/md head -c 17825792 /dev/zero | tr "\\0" x; printf tail; printf diagnostic >&2; touch completed' });
+    expect(await terminal()).toMatchObject({ outcome: 'finished', finalResponse: { type: 'literal-text' } });
+    expect(await Bun.file(join(root, 'completed')).exists()).toBe(true);
+    const rows = await history();
+    const output = rows.filter(row => row.type === 'command-output');
+    expect(output.reduce((size, row) => size + Buffer.byteLength(row.content), 0)).toBe(COMMAND_OUTPUT_BYTES);
+    expect(output.every(row => row.type === 'command-output' && row.format === 'plain')).toBe(true);
+    expect(output.filter(row => row.channel === 'stdout').map(row => row.content).join('').endsWith('tail')).toBe(true);
+    expect(output.filter(row => row.channel === 'stderr').map(row => row.content).join('')).toContain('diagnostic');
+    expect(rows.at(-1)).toMatchObject({ result: { outcome: 'finished', exitCode: 0, capture: 'truncated' } });
+    const live = events.flatMap(event => event.type === 'rows' ? event.rows.map(row => row.message) : []);
+    expect(rows.slice(1)).toEqual(live);
   });
 
   it('rejects corrupt complete records without replacing native evidence', async () => {

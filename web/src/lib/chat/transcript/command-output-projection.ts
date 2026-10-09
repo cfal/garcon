@@ -10,8 +10,6 @@ export interface CommandOutputProjection {
 	parentIndex: number;
 }
 
-const MAX_DOCUMENT_CHARS = 16 * 1024 * 1024;
-
 // Storage chunks remain addressable; incomplete Markdown windows render literally.
 export function projectCommandOutput(messages: readonly (ChatMessage | null)[]): Map<number, CommandOutputProjection> {
 	const documents = new Map<string, OutputChunk[]>();
@@ -44,7 +42,7 @@ export function projectCommandOutput(messages: readonly (ChatMessage | null)[]):
 				|| message.context.projectPath !== first.message.context.projectPath) contiguous = false;
 			length += message.content.length;
 		}
-		if (!contiguous || length > MAX_DOCUMENT_CHARS) {
+		if (!contiguous) {
 			for (const { index, message } of chunks) {
 				projections.set(index, { parentIndex: index, message: new CommandOutputMessage(
 					message.timestamp, message.commandId, message.channel, 'plain', message.content, message.context, message.offset,

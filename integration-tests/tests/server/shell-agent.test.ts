@@ -5,7 +5,6 @@ import { fileURLToPath } from 'node:url';
 import type { ModelCatalogResponse } from '../../../common/model-catalog.js';
 import { withIntegrationFixture, type IntegrationFixture } from '../../support/integration-fixture.js';
 import { cliEnvironment } from '../../support/cli-environment.js';
-import { rejectionOf } from '../../support/promise-assertions.js';
 
 async function runCli(fixture: IntegrationFixture, args: string[]) {
   const child = Bun.spawn([process.execPath, fileURLToPath(new URL('../../../cli/main.ts', import.meta.url)), ...args], {
@@ -78,8 +77,27 @@ for (const backend of ['in-process', 'remote-controller-dials', 'remote-executor
       expect(await readFile(join(next, 'replacement.txt'), 'utf8')).toBe('replacement');
       expect((await client.getExecutionControl(chatId)).queue.pause).toBeNull();
 
-      expect(await rejectionOf(client.refinePrompt({ draft: 'echo command', target: 'prompt', subject: { kind: 'chat', chatId } })))
-        .toMatchObject({ status: 422, body: { errorCode: 'PROMPT_REFINEMENT_UNAVAILABLE' } });
+      const noisy = await client.runChat({ chatId, clientRequestId: crypto.randomUUID(), clientMessageId: crypto.randomUUID(),
+        command: "sleep 0.2; head -c 131072 /dev/zero | tr '\\0' x; printf tail; printf diagnostic >&2" });
+      const tailCursor = client.markEvents();
+      await client.enqueueNew(chatId, 'printf after-tail > after-tail.txt');
+      expect((await client.waitForTurnTerminal(chatId, noisy.turnId)).type).toBe('agent-run-finished');
+      const tailInput = await client.waitForCommittedUserInput(chatId, 'printf after-tail > after-tail.txt', { afterIndex: tailCursor });
+      expect((await client.waitForTurnTerminal(chatId, undefined, {
+        afterIndex: client.events().lastIndexOf(tailInput) + 1,
+      })).type).toBe('agent-run-finished');
+      await client.waitForProcessing(chatId, false);
+      expect(await readFile(join(next, 'after-tail.txt'), 'utf8')).toBe('after-tail');
+      const tailRows = (await client.getMessages(chatId)).messages.map(row => row.message);
+      const tailOutput = tailRows.find(message => message.type === 'command-output' && message.content.endsWith('tail'));
+      expect(tailOutput?.type).toBe('command-output');
+      if (tailOutput?.type !== 'command-output') throw new Error('Missing retained tail');
+      const retained = tailRows.filter(message => message.type === 'command-output' && message.commandId === tailOutput.commandId);
+      expect(retained).toHaveLength(2);
+      expect(retained.reduce((bytes, message) => bytes + (message.type === 'command-output' ? Buffer.byteLength(message.content) : 0), 0)).toBe(64 * 1024);
+      expect(tailRows.find(message => message.type === 'command-result' && message.commandId === tailOutput.commandId))
+        .toMatchObject({ result: { outcome: 'finished', capture: 'truncated' } });
+
       const before = (await client.getMessages(chatId)).messages.map(row => row.message).filter(message => ['user-message', 'command-output', 'command-result'].includes(message.type));
       await client.reloadChat(chatId);
       const after = (await client.getMessages(chatId)).messages.map(row => row.message).filter(message => ['user-message', 'command-output', 'command-result'].includes(message.type));
@@ -109,6 +127,14 @@ for (const backend of ['in-process', 'remote-controller-dials', 'remote-executor
       const silent = await runCli(fixture, ['resume', cliChatId, 'true']);
       expect(silent).toMatchObject({ exitCode: 0, stderr: '' });
       expect(silent.stdout).toMatch(/^chat id: \d{16}\nturn id: [^\n]+\n$/);
+      const large = await runCli(fixture, ['resume', cliChatId,
+        "head -c 5242880 /dev/zero | tr '\\0' x; printf receipt-tail"]);
+      expect(large).toMatchObject({ exitCode: 0, stderr: '' });
+      expect(large.stdout).toEndWith('receipt-tail\n');
+      if (backend !== 'in-process') expect(large.stdout).toContain('[CLI output truncated;');
+      const cliOutput = (await client.getMessages(cliChatId)).messages.map(row => row.message)
+        .find(message => message.type === 'command-output' && message.content.endsWith('receipt-tail'));
+      expect(cliOutput?.type === 'command-output' && Buffer.byteLength(cliOutput.content)).toBe(64 * 1024);
       const failed = await runCli(fixture, ['resume', cliChatId, 'exit 7']);
       expect(failed.exitCode).not.toBe(0);
       expect(failed.stderr).toContain('Exit 7');

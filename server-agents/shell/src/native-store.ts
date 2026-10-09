@@ -6,11 +6,7 @@ import { CommandResultMessage, parseChatMessage, type ChatMessage } from '@garco
 import { AgentIntegrationError, type AgentHost, type AgentNativeSessionRef } from '@garcon/server-agent-interface';
 import { syncDirectory } from '@garcon/server-agent-common/lib/json-file-store';
 import { EventLoopSteps } from '@garcon/server-agent-common/shared/event-loop';
-import { CommandOutputCapture } from './output.js';
 
-// Reserves room for normalized row envelopes under the controller's 64 MiB import limit.
-export const NATIVE_HISTORY_MAX_BYTES = 60 * 1024 * 1024;
-export const NATIVE_HISTORY_MAX_ROWS = 100_000;
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 export class ShellNativeStore {
@@ -42,8 +38,8 @@ export class ShellNativeStore {
     const db = new Database(path, { strict: true });
     try {
       db.exec('PRAGMA journal_mode = DELETE; PRAGMA synchronous = FULL;');
-      db.exec('CREATE TABLE session (version INTEGER NOT NULL, id TEXT NOT NULL, chat_id TEXT NOT NULL, bytes INTEGER NOT NULL, rows INTEGER NOT NULL); CREATE TABLE records (seq INTEGER PRIMARY KEY, command_id TEXT NOT NULL, message TEXT NOT NULL, execution TEXT);');
-      db.query('INSERT INTO session VALUES (1, ?, ?, 0, 0)').run(sessionId, chatId);
+      db.exec('CREATE TABLE session (version INTEGER NOT NULL, id TEXT NOT NULL, chat_id TEXT NOT NULL); CREATE TABLE records (seq INTEGER PRIMARY KEY, command_id TEXT NOT NULL, message TEXT NOT NULL, execution TEXT);');
+      db.query('INSERT INTO session VALUES (1, ?, ?)').run(sessionId, chatId);
       await syncDirectory(await this.directory());
       return new NativeLog(db);
     } catch (error) { db.close(); throw error; }
@@ -52,7 +48,7 @@ export class ShellNativeStore {
   async load(sessionId: string, chatId: string): Promise<NativeLog> {
     const path = await this.path(sessionId);
     const info = await lstat(path);
-    if (!info.isFile() || info.isSymbolicLink() || info.size > NATIVE_HISTORY_MAX_BYTES * 2) throw unavailable();
+    if (!info.isFile() || info.isSymbolicLink()) throw unavailable();
     const db = new Database(path, { strict: true, readwrite: true });
     try {
       db.exec('PRAGMA synchronous = FULL;');
@@ -66,36 +62,15 @@ export class ShellNativeStore {
 }
 
 export class NativeLog {
-  #bytes: number;
-  #rows: number;
-  constructor(private readonly db: Database) {
-    const totals = db.query<{ bytes: number; rows: number }, []>(
-      'SELECT bytes, rows FROM session',
-    ).get()!;
-    if (!totals || !Number.isSafeInteger(totals.bytes) || totals.bytes < 0 || totals.bytes > NATIVE_HISTORY_MAX_BYTES
-      || !Number.isSafeInteger(totals.rows) || totals.rows < 0 || totals.rows > NATIVE_HISTORY_MAX_ROWS) throw unavailable();
-    this.#bytes = totals.bytes;
-    this.#rows = totals.rows;
-  }
+  constructor(private readonly db: Database) {}
 
   append(commandId: string, message: ChatMessage, execution?: {
     source: string; family: string; executable: string; projectPath: string; executorId: string; format: 'plain' | 'markdown';
   }): void {
     const json = JSON.stringify(message);
     const executionJson = execution ? JSON.stringify(execution) : null;
-    const bytes = Buffer.byteLength(json) + Buffer.byteLength(executionJson ?? '');
-    // Leaves room for a final capture-failure record without pruning history.
-    const reserve = message.type === 'command-result' ? 0 : 16_384;
-    if (this.#bytes + bytes + reserve > NATIVE_HISTORY_MAX_BYTES || this.#rows >= NATIVE_HISTORY_MAX_ROWS - (reserve ? 1 : 0)) {
-      throw new AgentIntegrationError('TRANSCRIPT_UNAVAILABLE', 'Shell native history reached its size limit. Start a new chat.', false);
-    }
-    this.db.transaction(() => {
-      this.db.query('INSERT INTO records (command_id, message, execution) VALUES (?, ?, ?)')
-        .run(commandId, json, executionJson);
-      this.db.query('UPDATE session SET bytes = bytes + ?, rows = rows + 1').run(bytes);
-    })();
-    this.#bytes += bytes;
-    this.#rows++;
+    this.db.query('INSERT INTO records (command_id, message, execution) VALUES (?, ?, ?)')
+      .run(commandId, json, executionJson);
   }
 
   reconcile(): void {
@@ -114,7 +89,6 @@ export class NativeLog {
   async *messages(signal: AbortSignal): AsyncIterable<readonly { message: ChatMessage }[]> {
     let seq = 0;
     const steps = new EventLoopSteps('shell-native-import');
-    const output = new CommandOutputCapture();
     while (true) {
       signal.throwIfAborted();
       const rows = this.db.query<{ seq: number; message: string }, [number]>(
@@ -126,19 +100,7 @@ export class NativeLog {
         const message = parseChatMessage(JSON.parse(row.message));
         if (!message || !['user-message', 'command-output', 'command-result'].includes(message.type)
           || (message.type === 'user-message' && message.metadata?.contentMode !== 'literal')) throw unavailable();
-        if (message.type === 'command-output') {
-          output.append(message);
-        } else {
-          for (const captured of output.drain()) {
-            batch.push({ message: captured });
-            if (batch.length >= 64) {
-              yield batch.splice(0);
-              signal.throwIfAborted();
-              await steps.next();
-            }
-          }
-          batch.push({ message });
-        }
+        batch.push({ message });
         seq = row.seq;
         await steps.next();
       }

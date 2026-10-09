@@ -7,6 +7,9 @@ import { cliPair, CLI_EXECUTOR_ID } from '../../../remote/__tests__/cli-fixture.
 import type { JsonValue } from '../../../../common/json.js';
 import type { RouteMap } from '../../lib/http-route-types.js';
 import { CliAdmission } from '../../../remote/transport/cli-admission.js';
+import { CommandLedger } from '../../commands/command-ledger.js';
+import { createAgentTurnReceiptRoutes } from '../../routes/agent-turn-receipt.js';
+import { parseAgentTurnReceipt } from '../../../../common/agent-turn-receipt.js';
 
 test('bulk short admission preserves per-executor and global primary reservations', () => {
   const admission = new CliAdmission();
@@ -33,6 +36,34 @@ test.each([false, true])('primary CLI reply bounds preserve mutation uncertainty
     await expect(pair.primary.worker.call('', 'controllerCli.request', request(operation, mutation ? {} : null)))
       .rejects.toMatchObject({ code: mutation ? 'CLI_OUTCOME_UNKNOWN' : 'CLI_RESULT_TOO_LARGE' });
     expect(pair.primary.worker.active).toBe(true);
+  } finally { pair.close(); }
+});
+
+test.each(['x', '\0', '\u{1f600}'])('forwarded receipts fit escaped output without losing success: %j', async (character) => {
+  const ledger = new CommandLedger();
+  const accepted = await ledger.accept({ commandType: 'agent-run', chatId: 'chat-1',
+    clientRequestId: 'request-1', turnId: 'turn-1', payload: {} });
+  const text = character.repeat(64 * 1024) + 'retained ending';
+  await ledger.setTurnResult('chat-1', 'turn-1', { type: 'literal-text', text });
+  await ledger.settleTerminal(accepted.record.key, 'finished');
+  await ledger.markPublicTerminal('chat-1', 'turn-1');
+  const routes = createAgentTurnReceiptRoutes(ledger);
+  const pair = cliPair(dispatcher(routes));
+  try {
+    const reply = await pair.primary.worker.call('', 'controllerCli.request', {
+      expectedServerInstanceId: 'controller', http: { operation: 'GET /api/v1/chats/turn-receipt',
+        query: [['chatId', 'chat-1'], ['turnId', 'turn-1']], body: null },
+    });
+    expect(reply.status).toBe(200);
+    const receipt = parseAgentTurnReceipt(reply.body);
+    if (receipt.state !== 'completed' || receipt.output.availability !== 'available') throw new Error('Missing completed output');
+    expect(receipt.output.completeness).toBe('best-effort');
+    expect(receipt.output.text).toStartWith('[CLI output truncated;');
+    expect(receipt.output.text).toEndWith('retained ending');
+    expect(receipt.output.text).not.toContain('\ufffd');
+    const url = new URL('http://localhost/api/v1/chats/turn-receipt?chatId=chat-1&turnId=turn-1');
+    const direct = await routes['/api/v1/chats/turn-receipt']!.GET!(new Request(url), url);
+    expect((await direct.json()).output.text).toBe(text);
   } finally { pair.close(); }
 });
 

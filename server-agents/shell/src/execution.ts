@@ -11,7 +11,7 @@ import { EventLoopSteps } from '@garcon/server-agent-common/shared/event-loop';
 import { requireShell } from './catalog.js';
 import { executeShell } from './process.js';
 import { parseSubmission } from './source.js';
-import { CommandOutputCapture } from './output.js';
+import { CommandOutputTail } from './output.js';
 import { ShellNativeStore, type NativeLog } from './native-store.js';
 
 interface Binding {
@@ -29,8 +29,6 @@ interface Invocation {
   settled: Promise<void>;
   handle: AgentExecutionHandle;
 }
-
-const FINAL_OUTPUT_LIMIT = 4 * 1024 * 1024;
 
 export class ShellExecution {
   readonly execution: AgentIntegration['execution'];
@@ -149,10 +147,14 @@ export class ShellExecution {
     const commandId = crypto.randomUUID();
     let log: NativeLog | undefined;
     let commandRecorded = false;
-    const output = new CommandOutputCapture();
+    const output = new CommandOutputTail();
+    let outputPublished = false;
     const publishOutput = async () => {
+      if (outputPublished) return;
+      outputPublished = true;
       const steps = new EventLoopSteps('shell-output-publication');
-      for (const message of output.drain()) {
+      for (const message of output.messages()) {
+        log!.append(commandId, message);
         this.#emit(invocation.binding, { type: 'rows', rows: [{ message }] });
         await steps.next();
       }
@@ -184,8 +186,6 @@ export class ShellExecution {
         executorId: this.host.scope.executorId,
       });
       commandRecorded = true;
-      let stdout = '';
-      let stdoutBytes = 0;
       const offsets = { stdout: 0, stderr: 0 };
       this.#emit(invocation.binding, { type: 'started', runId: request.runId });
       const result = await executeShell({
@@ -195,13 +195,8 @@ export class ShellExecution {
           const message = new CommandOutputMessage(new Date().toISOString(), commandId, channel,
             channel === 'stdout' ? parsed.format : 'plain', content,
             { executorId: this.host.scope.executorId, projectPath: request.projectPath }, offsets[channel]);
-          commandLog.append(commandId, message);
           offsets[channel] += content.length;
           output.append(message);
-          if (channel === 'stdout') {
-            stdoutBytes += Buffer.byteLength(content);
-            stdout = stdoutBytes <= FINAL_OUTPUT_LIMIT ? stdout + content : '';
-          }
         },
       });
       let status: CommandOutcome['outcome'] = 'failed';
@@ -210,23 +205,27 @@ export class ShellExecution {
       } else if (result.exitCode === 0 && result.complete) {
         status = 'finished';
       }
+      let capture: CommandOutcome['capture'] = 'complete';
+      if (!result.complete) capture = 'incomplete';
+      else if (output.truncated) capture = 'truncated';
       const outcome: CommandOutcome = {
         outcome: status,
         exitCode: result.exitCode,
         signal: result.signal,
         cwd: result.cwd,
-        capture: result.complete ? 'complete' : 'incomplete',
+        capture,
       };
       const message = new CommandResultMessage(new Date().toISOString(), commandId, outcome);
-      commandLog.append(commandId, message);
       await publishOutput();
+      commandLog.append(commandId, message);
       this.#emit(invocation.binding, { type: 'rows', rows: [{ message }] });
       const terminal = { type: 'run-ended', runId: request.runId, workingDirectory: result.cwd } as const;
       if (outcome.outcome === 'finished') {
+        const stdout = output.messages().filter(message => message.channel === 'stdout').map(message => message.content).join('');
         return {
           ...terminal,
           outcome: 'finished',
-          ...(stdoutBytes <= FINAL_OUTPUT_LIMIT ? { finalResponse: { type: 'literal-text', text: stdout } as const } : {}),
+          finalResponse: { type: 'literal-text', text: output.truncated ? `[Output truncated to the last 64 KiB across stdout and stderr]\n${stdout}` : stdout },
         };
       }
       if (outcome.outcome === 'interrupted') return { ...terminal, outcome: 'interrupted' };

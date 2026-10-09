@@ -2,11 +2,13 @@ import type { CommandLedger } from '../commands/command-ledger.js';
 import { projectAgentTurnReceipt } from '../commands/agent-turn-receipt-projector.js';
 import { jsonError } from '../../common/http-error.js';
 import type { RouteMap } from '../lib/http-route-types.js';
+import type { AgentTurnReceipt } from '../../../common/agent-turn-receipt.js';
+import { CLI_ENVELOPE_BYTES, cliReplyBytes } from '../../remote/transport/cli-protocol.js';
 
 export function createAgentTurnReceiptRoutes(ledger: CommandLedger): RouteMap {
   return {
     '/api/v1/chats/turn-receipt': {
-      GET: async (_request, url) => {
+      GET: async (_request, url, _server, context) => {
         const chatId = url.searchParams.get('chatId')?.trim() ?? '';
         const turnId = url.searchParams.get('turnId')?.trim() ?? '';
         if (!chatId || !turnId) {
@@ -30,10 +32,39 @@ export function createAgentTurnReceiptRoutes(ledger: CommandLedger): RouteMap {
             false,
           ));
         }
-        return noStore(Response.json(projected.receipt));
+        const receipt = context?.principal?.mode === 'executor'
+          ? fitForwardedOutput(projected.receipt) : projected.receipt;
+        return noStore(Response.json(receipt));
       },
     },
   };
+}
+
+function fitForwardedOutput(receipt: AgentTurnReceipt): AgentTurnReceipt {
+  if (receipt.state !== 'completed' || receipt.output.availability !== 'available') return receipt;
+  const limit = cliReplyBytes('primary');
+  const fits = () => Buffer.byteLength(JSON.stringify({ status: 200, body: receipt })) + CLI_ENVELOPE_BYTES <= limit;
+  if (fits()) return receipt;
+
+  const text = receipt.output.text;
+  const notice = '[CLI output truncated; full retained output is in the transcript]\n';
+  const output = { ...receipt.output, completeness: 'best-effort' as const, text: notice };
+  receipt = { ...receipt, output };
+  // Bounds fitting work even when another integration returns a multi-megabyte response.
+  let low = Math.max(0, text.length - limit);
+  let high = text.length;
+  const tail = (start: number) => {
+    if (start > 0 && /[\uDC00-\uDFFF]/.test(text[start] ?? '')) start++;
+    return notice + text.slice(start);
+  };
+  while (low < high) {
+    const start = Math.floor((low + high) / 2);
+    output.text = tail(start);
+    if (fits()) high = start;
+    else low = start + 1;
+  }
+  output.text = tail(low);
+  return receipt;
 }
 
 function noStore(response: Response): Response {

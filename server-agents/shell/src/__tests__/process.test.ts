@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, rm, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SHELL_FAMILIES } from '../catalog.js';
-import { COMMAND_OUTPUT_LIMIT, executeShell } from '../process.js';
+import { executeShell } from '../process.js';
 import { parseSubmission } from '../source.js';
 
 it('parses only executor-owned Markdown prefixes without trimming source', () => {
@@ -122,10 +122,13 @@ for (const family of SHELL_FAMILIES) {
         expect(result.complete).toBe(true);
       });
 
-      it('stops capture at the byte limit instead of silently reporting complete output', async () => {
-        const result = await run(`head -c ${COMMAND_OUTPUT_LIMIT + 1} /dev/zero | tr '\\0' x`);
-        expect(result.stdout.length).toBeLessThanOrEqual(COMMAND_OUTPUT_LIMIT);
-        expect(result.complete).toBe(false);
+      it('continues execution beyond the former output limit', async () => {
+        const bytes = 17 * 1024 * 1024;
+        const result = await run(`head -c ${bytes} /dev/zero | tr '\\0' x; printf finished`);
+        expect(result.stdout.length).toBe(bytes + 'finished'.length);
+        expect(result.stdout.endsWith('finished')).toBe(true);
+        expect(result.complete).toBe(true);
+        expect(result.exitCode).toBe(0);
       });
 
       it('rejects a FIFO cwd report without blocking', async () => {

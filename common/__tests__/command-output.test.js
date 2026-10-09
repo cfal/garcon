@@ -19,6 +19,7 @@ describe('retained command content', () => {
     new CommandOutputMessage(timestamp, 'command-1', 'stdout', 'markdown', '<garcon-get-chat-id />', context),
     new CommandOutputMessage(timestamp, 'command-1', 'stderr', 'plain', 'failure\n', context),
     new CommandResultMessage(timestamp, 'command-1', result),
+    new CommandResultMessage(timestamp, 'command-truncated', { ...result, outcome: 'finished', exitCode: 0, capture: 'truncated' }),
   ]) {
     it(`roundtrips ${message.type} without interpreting content`, () => {
       const parsed = parseChatMessage(JSON.parse(JSON.stringify(message)));
@@ -66,5 +67,10 @@ describe('retained command content', () => {
       capture: 'incomplete',
       cwd: { kind: 'unavailable', reason: 'Synthetic missing report' },
     })).toBe('Exit 3\nSignal: SIGTERM\nOutput capture incomplete\nWorking directory not captured: Synthetic missing report');
+  });
+
+  it('distinguishes successful tail retention from capture failure', () => {
+    expect(commandOutcomeText({ ...result, outcome: 'finished', exitCode: 0, capture: 'truncated' }))
+      .toBe('Completed\nOutput truncated to the last 64 KiB across stdout and stderr');
   });
 });

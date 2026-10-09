@@ -14,6 +14,18 @@ import { renderTranscriptExportMarkdown } from '../markdown.ts';
 const AT = '2026-08-23T00:00:00.000Z';
 
 describe('Markdown transcript export', () => {
+  it('fences a settled literal tail without interpreting its Markdown-looking contents', () => {
+    const document = renderTranscriptExportMarkdown(model([
+      entry(1, 'conversation', new CommandOutputMessage(AT, 'command', 'stdout', 'plain', '# retained tail',
+        { executorId: 'local', projectPath: '/synthetic' }, 65_536)),
+      entry(2, 'conversation', new CommandResultMessage(AT, 'command', {
+        outcome: 'finished', exitCode: 0, signal: null, capture: 'truncated', cwd: { kind: 'reported', path: '/synthetic' },
+      })),
+    ]));
+    expect(document).toContain('```text\n# retained tail\n```');
+    expect(document).toContain('Output truncated');
+  });
+
   it('retains literal command input, both streams, and status without interpreting markup', () => {
     const document = renderTranscriptExportMarkdown(model([
       entry(1, 'conversation', new UserMessage(AT, '  printf "**literal**"\n', undefined, { contentMode: 'literal' })),

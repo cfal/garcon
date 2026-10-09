@@ -13,6 +13,10 @@ function stdout(content: string, offset = 0) {
 }
 
 describe('command Markdown documents', () => {
+	it('renders a truncated tail literally even when stdout begins at offset zero', () => {
+		const truncated = new CommandResultMessage(at, 'command-1', { ...terminal.result, capture: 'truncated' });
+		expect(projectCommandOutput([stdout('# retained'), truncated]).get(0)?.message.format).toBe('plain');
+	});
 	it('does not promote a delivered prefix when a gap precedes the complete native result', () => {
 		const gap = new TranscriptNoticeMessage(at, 'Reload native history.', { type: 'publication-gap' }, 'Output not delivered');
 		expect(projectCommandOutput([stdout('```text\nprefix'), gap, terminal]).get(0)?.message.format).toBe('plain');

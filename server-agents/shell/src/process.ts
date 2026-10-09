@@ -7,7 +7,6 @@ import { parseCommandWorkingDirectory } from '@garcon/common/command-output';
 import type { ShellFamily } from './catalog.js';
 import { shellInvocation, POWERSHELL_ENTRY } from './source.js';
 
-export const COMMAND_OUTPUT_LIMIT = 16 * 1024 * 1024;
 export const OUTPUT_BATCH_BYTES = 32 * 1024;
 const DRAIN_TIMEOUT_MS = 1500;
 const KILL_GRACE_MS = 500;
@@ -72,7 +71,6 @@ export async function executeShell(options: ShellProcessOptions): Promise<ShellP
       spawned.once('exit', (code, signal) => resolve({ code, signal }));
     });
     let complete = true;
-    let outputBytes = 0;
     let outputFailure: unknown;
     const consume = async (stream: NodeJS.ReadableStream, channel: 'stdout' | 'stderr') => {
       const decoder = new TextDecoder();
@@ -83,12 +81,6 @@ export async function executeShell(options: ShellProcessOptions): Promise<ShellP
           for (let offset = 0; offset < buffer.length; offset += OUTPUT_BATCH_BYTES) {
             if (!captureOpen) return;
             const part = buffer.subarray(offset, offset + OUTPUT_BATCH_BYTES);
-            outputBytes += part.length;
-            if (outputBytes > COMMAND_OUTPUT_LIMIT) {
-              complete = false;
-              terminate();
-              return;
-            }
             const text = decoder.decode(part, { stream: true });
             if (text) await options.output(channel, text);
           }

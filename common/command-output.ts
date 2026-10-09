@@ -25,7 +25,7 @@ export interface CommandOutcome {
   readonly exitCode: number | null;
   readonly signal: string | null;
   readonly cwd: CommandWorkingDirectory;
-  readonly capture: 'complete' | 'incomplete';
+  readonly capture: 'complete' | 'truncated' | 'incomplete';
 }
 
 export function parseCommandOutputContext(value: unknown): CommandOutputContext | null {
@@ -52,7 +52,7 @@ export function parseCommandOutcome(value: unknown): CommandOutcome | null {
     || !['finished', 'failed', 'interrupted', 'unknown'].includes(value.outcome)
     || (value.exitCode !== null && (!Number.isSafeInteger(value.exitCode) || Number(value.exitCode) < 0))
     || (value.signal !== null && typeof value.signal !== 'string')
-    || (value.capture !== 'complete' && value.capture !== 'incomplete')) return null;
+    || (value.capture !== 'complete' && value.capture !== 'truncated' && value.capture !== 'incomplete')) return null;
   const cwd = parseCommandWorkingDirectory(value.cwd);
   if (!cwd) return null;
   return {
@@ -83,6 +83,7 @@ export function commandOutcomeText(result: CommandOutcome): string {
   const lines = [status];
   if (result.signal) lines.push(`Signal: ${result.signal}`);
   if (result.capture === 'incomplete') lines.push('Output capture incomplete');
+  if (result.capture === 'truncated') lines.push('Output truncated to the last 64 KiB across stdout and stderr');
   if (result.cwd.kind === 'unavailable') {
     lines.push(`Working directory not captured: ${result.cwd.reason}`);
   }
