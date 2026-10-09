@@ -29,13 +29,13 @@ for (const family of SHELL_FAMILIES) {
       await mkdir(join(directory, 'space and\nnewline'));
     });
     afterAll(async () => { await rm(directory, { recursive: true, force: true }); });
-    async function run(source: string, signal = new AbortController().signal, output?: () => Promise<void>) {
+    async function run(source: string, signal = new AbortController().signal, output?: () => void) {
       let stdout = '';
       let stderr = '';
       const result = await executeShell({
         family, executable: executable!, source, cwd: directory, temporaryRoot: directory, signal,
         environment: { ...process.env, HOME: directory, XDG_CONFIG_HOME: directory, ZDOTDIR: directory, ENV: join(directory, 'profile'), TERM: 'dumb' },
-        async output(channel, text) { if (channel === 'stdout') stdout += text; else stderr += text; await output?.(); },
+        output(channel, text) { if (channel === 'stdout') stdout += text; else stderr += text; output?.(); },
       });
       return { ...result, stdout, stderr };
     }
@@ -91,24 +91,9 @@ for (const family of SHELL_FAMILIES) {
       } finally { await rm(file, { force: true }); }
     });
 
-    it('bounds output-sink stalls and prevents late callbacks from continuing capture', async () => {
-      const gate = Promise.withResolvers<void>();
-      let calls = 0;
-      try {
-        const result = await run('printf output', undefined, async () => {
-          calls++; await gate.promise;
-        });
-        expect(result.complete).toBe(false);
-        const before = calls;
-        gate.resolve();
-        await Bun.sleep(10);
-        expect(calls).toBe(before);
-      } finally { gate.resolve(); }
-    }, 10_000);
-
-    it('fails on output persistence rejection instead of reporting success', async () => {
+    it('fails on capture errors instead of reporting success', async () => {
       expect(await throwingRejectionOf(run('printf output', undefined,
-        async () => { throw new Error('Synthetic storage failure'); }))).toThrow('Synthetic storage failure');
+        () => { throw new Error('Synthetic capture failure'); }))).toThrow('Synthetic capture failure');
     });
 
     if (family === 'sh') {

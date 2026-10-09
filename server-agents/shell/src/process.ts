@@ -31,7 +31,7 @@ export interface ShellProcessOptions {
   temporaryRoot: string;
   signal: AbortSignal;
   environment?: NodeJS.ProcessEnv;
-  output(channel: 'stdout' | 'stderr', content: string): Promise<void>;
+  output(channel: 'stdout' | 'stderr', content: string): void;
 }
 
 export async function executeShell(options: ShellProcessOptions): Promise<ShellProcessResult> {
@@ -81,11 +81,11 @@ export async function executeShell(options: ShellProcessOptions): Promise<ShellP
             if (!captureOpen) return;
             const part = buffer.subarray(offset, offset + OUTPUT_BATCH_BYTES);
             const text = decoder.decode(part, { stream: true });
-            if (text) await options.output(channel, text);
+            if (text) options.output(channel, text);
           }
         }
         const tail = decoder.decode();
-        if (captureOpen && tail) await options.output(channel, tail);
+        if (captureOpen && tail) options.output(channel, tail);
       } catch (error) {
         if (!captureOpen) return;
         complete = false;

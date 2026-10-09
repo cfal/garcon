@@ -7,7 +7,6 @@ import {
 } from '@garcon/server-agent-interface';
 import { AgentResourceTable } from '@garcon/server-agent-common/execution/resource-table';
 import { failureDetail } from '@garcon/server-agent-common/execution/producer-adapter';
-import { EventLoopSteps } from '@garcon/server-agent-common/shared/event-loop';
 import { requireShell } from './catalog.js';
 import { executeShell } from './process.js';
 import { parseSubmission } from './source.js';
@@ -149,14 +148,12 @@ export class ShellExecution {
     let commandRecorded = false;
     const output = new CommandOutputTail();
     let outputPublished = false;
-    const publishOutput = async () => {
+    const publishOutput = () => {
       if (outputPublished) return;
       outputPublished = true;
-      const steps = new EventLoopSteps('shell-output-publication');
       for (const message of output.messages()) {
         log!.append(commandId, message);
         this.#emit(invocation.binding, { type: 'rows', rows: [{ message }] });
-        await steps.next();
       }
     };
     try {
@@ -191,7 +188,7 @@ export class ShellExecution {
       const result = await executeShell({
         ...shell, source: parsed.source, cwd: request.projectPath, temporaryRoot: await this.store.directory(),
         signal: invocation.cancellation.signal,
-        output: async (channel, content) => {
+        output: (channel, content) => {
           const message = new CommandOutputMessage(new Date().toISOString(), commandId, channel,
             channel === 'stdout' ? parsed.format : 'plain', content,
             { executorId: this.host.scope.executorId, projectPath: request.projectPath }, offsets[channel]);
@@ -216,7 +213,7 @@ export class ShellExecution {
         capture,
       };
       const message = new CommandResultMessage(new Date().toISOString(), commandId, outcome);
-      await publishOutput();
+      publishOutput();
       commandLog.append(commandId, message);
       this.#emit(invocation.binding, { type: 'rows', rows: [{ message }] });
       const terminal = { type: 'run-ended', runId: request.runId, workingDirectory: outcome.cwd } as const;
@@ -237,7 +234,7 @@ export class ShellExecution {
         : message.content;
       return { ...terminal, outcome: 'failed', error: { code: 'PROVIDER_FAILURE', message: failure } };
     } catch (error) {
-      await publishOutput();
+      publishOutput();
       if (log && commandRecorded) {
         const message = new CommandResultMessage(new Date().toISOString(), commandId, {
           outcome: invocation.cancellation.signal.aborted ? 'interrupted' : 'failed', exitCode: null, signal: null,

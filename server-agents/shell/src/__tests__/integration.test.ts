@@ -174,6 +174,29 @@ describe('Shell integration', () => {
     expect((await history()).slice(1)).toEqual(live);
   });
 
+  it('fails settlement without publishing output rejected by native storage', async () => {
+    await integration.execution.start({ ...request,
+      prompt: 'touch ready; while [ ! -e release ]; do sleep 0.01; done; printf output' });
+    while (!await Bun.file(join(root, 'ready')).exists()) await Bun.sleep(5);
+    const store = new ShellNativeStore(host);
+    const db = new Database(await store.path(chat().agentSessionId!));
+    try {
+      db.exec(`CREATE TRIGGER reject_output BEFORE INSERT ON records
+        WHEN json_extract(NEW.message, '$.type') = 'command-output'
+        BEGIN SELECT RAISE(FAIL, 'Synthetic output persistence failure'); END;`);
+    } finally {
+      db.close();
+      await Bun.write(join(root, 'release'), '');
+    }
+    expect(await terminal()).toMatchObject({ outcome: 'failed',
+      error: { message: expect.stringContaining('Synthetic output persistence failure') } });
+    const live = events.flatMap(event => event.type === 'rows' ? event.rows.map(row => row.message) : []);
+    expect(live).toEqual([expect.objectContaining({
+      type: 'command-result', result: expect.objectContaining({ outcome: 'failed', capture: 'incomplete' }),
+    })]);
+    expect((await history()).slice(1)).toEqual(live);
+  });
+
   it('returns explicitly empty final stdout for silent success and rejects executable context', async () => {
     await integration.execution.start(request);
     expect(await terminal()).toMatchObject({ finalResponse: { type: 'literal-text', text: '' } });
