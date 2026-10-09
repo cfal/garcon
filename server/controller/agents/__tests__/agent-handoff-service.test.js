@@ -95,6 +95,39 @@ function installFakeTimers() {
 }
 
 describe('AgentHandoffService', () => {
+  it('rejects literal destinations during resolution without changing ownership', async () => {
+    const deps = targetResolutionDeps();
+    deps.integrations.get('target-agent').literalExecution = { selectionLabel: 'Runtime' };
+    const service = createService(deps);
+    await expect(service.resolveTarget({ chat: sourceChat(), handoff: handoff(), deadline: Date.now() + 10_000 }))
+      .rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 422 });
+  });
+
+  it.each(['before-preparation', 'during-compaction'])('fences a destination that becomes literal %s', async (when) => {
+    const current = sourceChat();
+    const calls = [];
+    const deps = targetResolutionDeps();
+    const destination = deps.integrations.get('target-agent');
+    if (when === 'before-preparation') destination.literalExecution = { selectionLabel: 'Runtime' };
+    const ownership = handoffState(current, calls).ownership;
+    const service = createService({
+      ...deps, registry: { getChat: () => current }, ownership, ledger: ledgerState(calls),
+      carryover: { planFor: async () => {
+        destination.literalExecution = { selectionLabel: 'Runtime' };
+        return { kind: 'no-history' };
+      } },
+      reopenProducer: () => calls.push('reopen'),
+    });
+    await expect(service.createPreparation({ chatId: 'chat', clientRequestId: 'request-1',
+      handoff: handoff(), source: current, target: target(), command: 'continue',
+    }).prepare(context())).rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 422 });
+    expect(current.agentId).toBe('source-agent');
+    expect(ownership.pendingHandoffs()).toEqual([]);
+    expect(calls).not.toContain('decision');
+    if (when === 'before-preparation') expect(calls).toEqual([]);
+    else expect(calls.at(-1)).toBe('reopen');
+  });
+
   it('preserves delayed control input on the source when it arrives before a promptless decision', async () => {
     const current = sourceChat();
     const calls = [];
@@ -901,12 +934,15 @@ describe('AgentHandoffService', () => {
     }
   });
 
-  it('recovers every durable handoff through the ledger boundary', async () => {
+  it('recovers durable handoffs even when the destination now requires literal execution', async () => {
     const current = sourceChat();
     const calls = [];
     const state = handoffState(current, calls);
     state.setIntent(persistedIntent());
+    const deps = targetResolutionDeps();
+    deps.integrations.require('target-agent').literalExecution = {};
     const service = createService({
+      ...deps,
       registry: { getChat: () => current },
       ownership: state.ownership,
       ledger: ledgerState(calls),

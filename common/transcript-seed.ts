@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import type { ChatMessage, TodoItem, ToolUseChatMessage } from './chat-types.js';
-import { AssistantMessage, CommandOutputMessage, UserMessage, isToolUseMessage } from './chat-types.js';
+import { AssistantMessage, UserMessage, isToolUseMessage } from './chat-types.js';
 import {
   projectionPriorityLevel,
   selectPrioritizedProjection,
@@ -460,6 +460,7 @@ export function isProjectableMessage(message: ChatMessage): boolean {
 // byte of output. The loader uses this to keep its byte guard a real bound: user
 // messages are deliberately never evicted, so without it one oversized ask
 // defeats the guard entirely.
+// Command evidence retains its body and is fitted by the document budget instead.
 export function boundProjectedMessage(message: ChatMessage): ChatMessage {
   if (message.type === 'user-message') {
     if (message.content.length <= PROJECTED_BODY_MAX_CHARS && !message.images?.length) return message;
@@ -474,10 +475,6 @@ export function boundProjectedMessage(message: ChatMessage): ChatMessage {
   if (message.type === 'assistant-message') {
     if (message.content.length <= PROJECTED_BODY_MAX_CHARS) return message;
     return new AssistantMessage(message.timestamp, message.content.slice(0, PROJECTED_BODY_MAX_CHARS));
-  }
-  if (message.type === 'command-output' && message.content.length > PROJECTED_BODY_MAX_CHARS) {
-    return new CommandOutputMessage(message.timestamp, message.commandId, message.channel,
-      message.format, message.content.slice(0, PROJECTED_BODY_MAX_CHARS), message.context);
   }
   return message;
 }
@@ -499,7 +496,7 @@ function renderMessageElement(message: ChatMessage, maximum = Number.POSITIVE_IN
       return fitElement('    <assistant>', boundedCollapse(message.content), '</assistant>', maximum);
     case 'command-output':
     case 'command-result':
-      return fitElement('    <execution-output>', boundedCollapse(commandContent(message)), '</execution-output>', maximum);
+      return fitElement('    <execution-output>', commandContent(message), '</execution-output>', maximum);
     default:
       return '';
   }
@@ -539,7 +536,7 @@ function refitMessageElement(
       );
     case 'command-output':
     case 'command-result':
-      return fitElementWithinCost('    <execution-output>', boundedCollapse(commandContent(message)),
+      return fitElementWithinCost('    <execution-output>', commandContent(message),
         '</execution-output>', maximumCost, cost);
     default:
       return '';
@@ -547,7 +544,11 @@ function refitMessageElement(
 }
 
 function commandContent(message: Extract<ChatMessage, { type: 'command-output' | 'command-result' }>): string {
-  return `${message.type === 'command-output' ? message.channel : 'Command result'}: ${message.content}`;
+  if (message.type === 'command-output') {
+    return `${message.channel}: ${message.content}\nExecutor: ${message.context.executorId}\nStarting directory: ${message.context.projectPath}`;
+  }
+  const reportedDirectory = message.result.cwd.kind === 'reported' ? `\nWorking directory: ${message.result.cwd.path}` : '';
+  return `Command result: ${message.content}${reportedDirectory}`;
 }
 
 function fitElement(open: string, content: string, close: string, maximum: number): string {

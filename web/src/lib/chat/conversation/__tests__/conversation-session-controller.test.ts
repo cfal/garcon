@@ -800,6 +800,20 @@ describe('ConversationSessionController', () => {
 		});
 	});
 
+	it('permits literal executor selections only for drafts, even when the initial model is available', () => {
+		const { deps } = createDeps();
+		const metadata = deps.modelCatalog.getAgent('claude')!;
+		deps.modelCatalog.getAgent.mockReturnValue({ ...metadata, executionPolicy: 'literal' });
+		const controller = new ConversationSessionController(deps);
+		void controller.executorHandoff.ask('chat-1', 'local', '/workspace/project', {
+			agentId: 'claude', model: 'opus', apiProviderId: null, modelEndpointId: null, modelProtocol: null,
+		});
+		expect(controller.executorHandoff.canConfirm).toBe(false);
+		deps.sessions.isDraft.mockReturnValue(true);
+		expect(controller.executorHandoff.canConfirm).toBe(true);
+		controller.executorHandoff.cancel();
+	});
+
 	it('preserves saved remote settings while its catalog is empty and fences every submit route', async () => {
 		const executorId = '22222222-2222-4222-8222-222222222222';
 		const { deps } = createDeps(

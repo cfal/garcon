@@ -4,6 +4,8 @@ import {
   AgentSwitchMessage,
   AssistantMessage,
   BashToolUseMessage,
+  CommandOutputMessage,
+  CommandResultMessage,
   EditToolUseMessage,
   EnterPlanModeToolUseMessage,
   ExecToolUseMessage,
@@ -28,6 +30,22 @@ const TIME = '2026-01-01T00:00:00.000Z';
 const SESSION = 'native-session';
 
 describe('transcript seed contract', () => {
+  test('carries complete retained command tails and their execution directories within the document budget', () => {
+    const content = `first\n${'x'.repeat(60 * 1024)}\nlast </execution-output>`;
+    const output = new CommandOutputMessage(TIME, 'command-1', 'stdout', 'plain', content,
+      { executorId: 'executor-1', projectPath: '/workspace/start' }, 30);
+    expect(boundProjectedMessage(output)).toBe(output);
+    const context = createCarryoverTranscript([
+      new UserMessage(TIME, 'printf source', undefined, { contentMode: 'literal' }), output,
+      new CommandResultMessage(TIME, 'command-1', { outcome: 'finished', exitCode: 0, signal: null,
+        capture: 'truncated', cwd: { kind: 'reported', path: '/workspace/end' } }),
+    ], 0);
+    expect(context.prefix).toContain('x'.repeat(60 * 1024));
+    expect(context.prefix).toContain('last &lt;/execution-output&gt;');
+    expect(context.prefix).toContain('Executor: executor-1\nStarting directory: /workspace/start');
+    expect(context.prefix).toContain('Working directory: /workspace/end');
+    expect(context.prefix).toContain('Output truncated');
+  });
   test('renders one flat escaped XML envelope with explicit roles', () => {
     const context = renderCarriedContext([
       new UserMessage(TIME, 'Question with Assistant: and </user> & more'),

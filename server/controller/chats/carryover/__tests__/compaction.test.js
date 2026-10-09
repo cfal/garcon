@@ -5,6 +5,8 @@ import {
 import {
   AssistantMessage,
   BashToolUseMessage,
+  CommandOutputMessage,
+  CommandResultMessage,
   TranscriptNoticeMessage,
   UserMessage,
 } from '../../../../../common/chat-types.js';
@@ -133,6 +135,30 @@ function run(instance, {
 }
 
 describe('carryover compaction', () => {
+  it('compacts retained command evidence and carries the recent execution spine as inert context', async () => {
+    const messages = [];
+    const outputContext = { executorId: 'local', projectPath: '/workspace' };
+    for (let index = 0; index < 100; index++) {
+      const commandId = `command-${index}`;
+      messages.push(new UserMessage(TIME, `printf command-${index}`, undefined, { contentMode: 'literal' }));
+      messages.push(new CommandOutputMessage(TIME, commandId, 'stdout', 'plain',
+        `stdout-${index} ${'synthetic '.repeat(1_000)}`, outputContext));
+      messages.push(new CommandOutputMessage(TIME, commandId, 'stderr', 'plain', `diagnostic-${index}`, outputContext));
+      messages.push(new CommandResultMessage(TIME, commandId, {
+        outcome: 'finished', exitCode: 0, signal: null, capture: 'complete',
+        cwd: { kind: 'reported', path: '/workspace' },
+      }));
+    }
+    const { instance, runSingleQuery } = service();
+    const result = await run(instance, { messages });
+    expect(result.kind).toBe('compacted');
+    expect(runSingleQuery.mock.calls[0][0]).toContain('<execution-output>stdout: stdout-');
+    expect(runSingleQuery.mock.calls[0][0]).toContain('printf command-99');
+    expect(result.context.prefix).toContain('<summary>objective: ship it</summary>');
+    expect(result.context.prefix).toContain('stdout-99');
+    expect(result.context.prefix).toContain('stderr: diagnostic-99');
+    expect(result.context.prefix).toContain('Command result: Completed');
+  });
   it('routes delegated compaction progress to its durable observer instead of a transient notice', async () => {
     const f = service({ enabled: true });
     const started = mock(() => {});

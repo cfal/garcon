@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import type { AgentIntegration } from '@garcon/server-agent-interface';
 import type {
   AgentHandoffRequest,
 } from '../../../common/chat-command-contracts.js';
@@ -154,6 +155,7 @@ export class AgentHandoffService {
         422,
       );
     }
+    assertHandoffDestination(integration);
     const selection = this.deps.endpointResolver.resolveSelection({
       executorId,
       agentId: requested.agentId,
@@ -281,6 +283,7 @@ export class AgentHandoffService {
           }
 
           context.assertAdmissionActive();
+          assertHandoffDestination(this.deps.integrations.require(input.target.agentId, input.target.executorId));
           this.deps.ledger.closeProducer(input.chatId);
           producerClosed = true;
           const watermark = this.deps.ledger.highWatermark(input.chatId);
@@ -290,7 +293,7 @@ export class AgentHandoffService {
           }
           let carryoverOutcome: CarryOverOutcome | null = null;
           // Selection-only changes defer compaction to dispatch with the actual prompt.
-          if (input.command !== null && !this.deps.integrations.require(input.target.agentId, input.target.executorId).literalExecution) {
+          if (input.command !== null) {
             const planningController = new AbortController();
             this.#carryoverPreparations.set(input.chatId, planningController);
             try {
@@ -315,7 +318,7 @@ export class AgentHandoffService {
           const decide = () => {
             this.#requireUnchangedSource(input.chatId, sourceFence);
             context.assertAdmissionActive();
-            this.deps.integrations.require(input.target.agentId, input.target.executorId);
+            assertHandoffDestination(this.deps.integrations.require(input.target.agentId, input.target.executorId));
             this.deps.endpointResolver.resolveSelection(input.target);
             decisionAttempted = true;
             return this.deps.ownership.decideHandoff({
@@ -601,6 +604,12 @@ export class AgentHandoffService {
         reason: error instanceof Error ? error.message : String(error),
       });
     }
+  }
+}
+
+function assertHandoffDestination(integration: AgentIntegration): void {
+  if (integration.literalExecution) {
+    throw new DomainError('VALIDATION_FAILED', 'Literal execution agents cannot receive handoffs. Start a new chat instead.', 422);
   }
 }
 

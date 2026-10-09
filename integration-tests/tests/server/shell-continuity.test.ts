@@ -1,10 +1,12 @@
 import { expect, test } from 'bun:test';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { ExecutorsChangedMessage, ScheduledPromptsInvalidatedMessage } from '../../../common/ws-events.js';
+import type { ExecutorsChangedMessage } from '../../../common/ws-events.js';
+import type { AgentHandoffRequest } from '../../../common/chat-command-contracts.js';
 import { tcpLinkProxy } from '../../../server/remote/__tests__/tcp-link-proxy.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { waitForExecutorReconnect } from '../../support/executor-link.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
 
 for (const executionBackend of ['remote-controller-dials', 'remote-executor-dials'] as const) {
   test(`Shell output and side effects survive reconnect without replay (${executionBackend})`, async () => {
@@ -58,46 +60,78 @@ for (const executionBackend of ['remote-controller-dials', 'remote-executor-dial
   }, 90_000);
 }
 
-test('handoff into literal execution retains history without AI preparation or replay', async () => {
-  await withIntegrationFixture('shell-handoff', async fixture => {
+test('both handoff routes reject literal destinations without changing ownership or history', async () => {
+  await withIntegrationFixture('shell-handoff-rejection', async fixture => {
     const { client } = fixture;
     const chatId = fixture.newChatId();
     const first = await client.startDirectChat({ chatId, agent: fixture.directAgents.openAi,
       projectPath: fixture.executionDirs.project, content: 'Synthetic historical request' });
     await client.waitForTurnTerminal(chatId, first.turnId);
     await client.waitForProcessing(chatId, false);
-    const scheduled = await client.getScheduledPrompts();
-    const runAt = Math.ceil((Date.now() + 15_000) / 60_000) * 60_000;
-    await client.createScheduledPrompt({ expectedRevision: scheduled.revision, scheduledPrompt: {
-      schedule: { type: 'once', runAtUtc: new Date(runAt).toISOString() },
-      target: { type: 'existing-chat', chatId, busyBehavior: 'queue' },
-      prompt: 'touch inherited-schedule-ran',
-    } });
-    const scheduleCursor = client.markEvents();
-    const requests = fixture.fakeProviders.openAi.requests().length;
+    const before = (await client.getMessages(chatId)).messages;
     const chat = (await client.listChats()).sessions.find(chat => chat.id === chatId)!;
-    const switched = await client.runChat({ chatId, clientRequestId: crypto.randomUUID(), clientMessageId: crypto.randomUUID(),
-      command: 'printf current-command', handoff: { expectedAgentOwnershipEpoch: chat.agentOwnershipEpoch,
-        target: { agentId: 'shell', model: 'sh', permissionMode: 'default', thinkingMode: 'none',
-          agentSettings: { ownerId: 'shell', schemaVersion: 1, values: {} } },
-      },
+    const handoff = { expectedAgentOwnershipEpoch: chat.agentOwnershipEpoch,
+      target: { agentId: 'shell', model: 'sh', permissionMode: 'default', thinkingMode: 'none',
+        agentSettings: { ownerId: 'shell', schemaVersion: 1, values: {} } },
+    } satisfies AgentHandoffRequest;
+    expect(await rejectionOf(client.post('/api/v1/chats/agent-handoff', {
+      chatId, clientRequestId: crypto.randomUUID(), handoff,
+    }))).toMatchObject({ status: 422 });
+    expect(await rejectionOf(client.runChat({
+      chatId, clientRequestId: crypto.randomUUID(), clientMessageId: crypto.randomUUID(),
+      command: 'touch rejected-command', handoff,
+    }))).toMatchObject({ status: 422 });
+    expect((await client.listChats()).sessions.find(chat => chat.id === chatId)).toMatchObject({
+      agentId: chat.agentId, agentOwnershipEpoch: chat.agentOwnershipEpoch,
     });
-    expect((await client.waitForTurnTerminal(chatId, switched.turnId)).type).toBe('agent-run-finished');
-    await client.waitForProcessing(chatId, false);
-    await client.reloadChat(chatId);
-    const messages = (await client.getMessages(chatId)).messages.map(row => row.message);
-    expect(messages.some(message => message.type === 'user-message' && message.content === 'Synthetic historical request')).toBe(true);
-    expect(messages.flatMap(message => message.type === 'command-output' && message.channel === 'stdout'
-      ? [message.content] : []).join('')).toBe('current-command');
-    expect(fixture.fakeProviders.openAi.requests()).toHaveLength(requests);
-    expect(fixture.fakeProviders.anthropic.requests()).toHaveLength(0);
-    await client.waitForEvent(
-      (event): event is ScheduledPromptsInvalidatedMessage => event.type === 'scheduled-prompts-invalidated'
-        && event.reason === 'executed',
-      'inherited schedule rejection', { afterIndex: scheduleCursor, timeoutMs: 90_000 },
-    );
-    expect((await client.getScheduledPrompts()).runLog).toContainEqual(expect.objectContaining({ outcome: 'failed' }));
-    expect(await Bun.file(join(fixture.executionDirs.project, 'inherited-schedule-ran')).exists()).toBe(false);
-    expect(fixture.fakeProviders.openAi.requests()).toHaveLength(requests);
+    expect((await client.getMessages(chatId)).messages).toEqual(before);
+    expect(await Bun.file(join(fixture.executionDirs.project, 'rejected-command')).exists()).toBe(false);
   });
-}, 120_000);
+}, 60_000);
+
+for (const promptless of [false, true]) {
+  test(`Shell hands retained command evidence to AI (${promptless ? 'selection-only' : 'with prompt'})`, async () => {
+    await withIntegrationFixture(`shell-outgoing-handoff-${promptless}`, async fixture => {
+      const { client } = fixture;
+      const chatId = fixture.newChatId();
+      const command = 'mkdir next; printf once >> executions; printf synthetic-stdout; printf synthetic-stderr >&2; cd next';
+      const started = await client.startChat({
+        chatId, agentId: 'shell', model: 'sh', projectPath: fixture.executionDirs.project,
+        permissionMode: 'default', thinkingMode: 'none', agentSettings: { ownerId: 'shell', schemaVersion: 1, values: {} },
+        origin: 'interactive', clientRequestId: crypto.randomUUID(), clientMessageId: crypto.randomUUID(), command,
+      });
+      await client.waitForTurnTerminal(chatId, started.turnId);
+      await client.waitForProcessing(chatId, false);
+      const agent = fixture.directAgents.openAi;
+      if (promptless) {
+        const chat = (await client.listChats()).sessions.find(chat => chat.id === chatId)!;
+        await client.post('/api/v1/chats/agent-handoff', {
+          chatId, clientRequestId: crypto.randomUUID(),
+          handoff: { expectedAgentOwnershipEpoch: chat.agentOwnershipEpoch,
+            target: { agentId: agent.agentId, model: agent.provider.model,
+              apiProviderId: agent.provider.providerId, modelEndpointId: agent.provider.endpointId,
+              permissionMode: 'default', thinkingMode: 'none', agentSettings: agent.agentSettings },
+          },
+        });
+        expect(fixture.fakeProviders.openAi.requests()).toHaveLength(0);
+      }
+      const received = fixture.fakeProviders.openAi.holdNext({ model: agent.provider.model });
+      const input = { chatId, agent, content: 'Summarize the synthetic command.' };
+      const next = await (promptless ? client.runDirectChat(input) : client.handoffDirectChat(input));
+      const request = await received.received;
+      expect(request.lastUserText).toContain('<execution-output>');
+      expect(request.lastUserText).toContain('synthetic-stdout');
+      expect(request.lastUserText).toContain('synthetic-stderr');
+      expect(request.lastUserText).toContain('Starting directory: ' + fixture.executionDirs.project);
+      expect(request.lastUserText).toContain('Working directory: ' + join(fixture.executionDirs.project, 'next'));
+      expect(request.lastUserText).toContain('Completed');
+      received.releaseText('Synthetic summary.');
+      expect((await client.waitForTurnTerminal(chatId, next.turnId)).type).toBe('agent-run-finished');
+      await client.waitForProcessing(chatId, false);
+      expect(await readFile(join(fixture.executionDirs.project, 'executions'), 'utf8')).toBe('once');
+      const messages = (await client.getMessages(chatId)).messages.map(row => row.message);
+      expect(messages).toContainEqual(expect.objectContaining({ type: 'user-message', content: command }));
+      expect(messages.some(message => message.type === 'command-result')).toBe(true);
+    });
+  }, 60_000);
+}

@@ -1343,6 +1343,27 @@ describe('PromptComposer focus', () => {
 		expect(screen.getByRole('button', { name: 'Codex · OpenAI OAuth · GPT-5' })).toBeTruthy();
 	});
 
+	it('keeps the current literal owner selectable beside AI destinations but excludes incoming literal choices', async () => {
+		const catalog = conversationalCatalog();
+		const metadata = catalog.forExecutor(remoteExecutor.id).getAgent('claude')!;
+		catalog.agentMetadata = {
+			claude: { ...metadata, executionPolicy: 'literal' },
+			codex: { ...metadata, id: 'codex', label: 'Codex', defaultModel: 'gpt-5' },
+		};
+		catalog.agentModels = {
+			claude: [{ value: 'opus', label: 'Opus' }],
+			codex: [{ value: 'gpt-5', label: 'GPT-5' }],
+		};
+		const view = render(PromptComposerTestHost, {
+			catalog, selectedChatId: 'chat-1', selectedAgentId: 'claude', selectedStatus: 'running',
+		});
+		await fireEvent.click(screen.getByRole('button', { name: /Claude .* Opus/ }));
+		expect(await screen.findByRole('button', { name: 'Codex' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Claude' })).toBeTruthy();
+		await view.rerender({ selectedAgentId: 'codex' });
+		await waitFor(() => expect(screen.queryByRole('button', { name: 'Claude' })).toBeNull());
+	});
+
 	it('hides direct agents and direct recents in a non-direct chat when disabled', async () => {
 		render(PromptComposerTestHost, {
 			selectedChatId: 'chat-1',

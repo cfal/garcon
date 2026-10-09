@@ -91,13 +91,14 @@ export class ConversationSessionController {
 
 	constructor(private deps: SessionControllerDeps) {
 		this.executorHandoff = new ExecutorHandoffProjectState(
-			(executorId, selection) =>
-				deps.canSubmitToExecutor(executorId) &&
-				Boolean(
-					deps
-						.modelCatalogForExecutor(executorId)
-						.getModelForSelection(selection.agentId, selection.model, selection.modelEndpointId),
-				),
+			(executorId, selection) => {
+				if (!deps.canSubmitToExecutor(executorId)) return false;
+				const catalog = deps.modelCatalogForExecutor(executorId);
+				const target = this.executorHandoff.target;
+				const isDraft = target !== null && deps.sessions.isDraft(target.chatId);
+				if (!isDraft && catalog.getAgent(selection.agentId)?.executionPolicy === 'literal') return false;
+				return Boolean(catalog.getModelForSelection(selection.agentId, selection.model, selection.modelEndpointId));
+			},
 		);
 		this.#acceptedInputs = new AcceptedInputSubmissionService();
 		this.#slashCommands = new ConversationSlashCommandService(
