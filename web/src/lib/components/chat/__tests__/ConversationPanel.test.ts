@@ -243,6 +243,42 @@ describe('ConversationPanel', () => {
 		expect(detach).toHaveBeenCalledOnce();
 	});
 
+	it('suspends observers and managed scrolling while retained offscreen', async () => {
+		const { panel } = makePanel();
+		const stopQueueObserver = vi.fn();
+		const stopViewportObserver = vi.fn();
+		const observeQueue = vi.spyOn(panel.scroll, 'observeQueueResize').mockReturnValue(stopQueueObserver);
+		const observeViewport = vi.spyOn(panel.scroll, 'observeScrollContainerResize').mockReturnValue(stopViewportObserver);
+		const props = {
+			surfaceId: panel.surfaceId,
+			chat: chat(),
+			panel,
+			isCommandOwner: false,
+			ownsComposer: false,
+			actions: makeActions(),
+		};
+		const rendered = render(ConversationPanel, props);
+		await waitFor(() => expect(rendered.container.querySelector('[data-workspace-scroll-region="primary"]')).toBeTruthy());
+		const root = rendered.container.querySelector('[data-conversation-panel]');
+		observeQueue.mockClear();
+		observeViewport.mockClear();
+		stopQueueObserver.mockClear();
+		stopViewportObserver.mockClear();
+
+		await rendered.rerender({ isVisible: false });
+		expect(stopQueueObserver).toHaveBeenCalledOnce();
+		expect(stopViewportObserver).toHaveBeenCalledOnce();
+		expect(observeQueue).not.toHaveBeenCalled();
+		expect(observeViewport).not.toHaveBeenCalled();
+		expect(rendered.container.querySelector('[data-workspace-scroll-region]')).toBeNull();
+
+		await rendered.rerender({ isVisible: true });
+		expect(observeQueue).toHaveBeenCalledOnce();
+		expect(observeViewport).toHaveBeenCalledOnce();
+		expect(rendered.container.querySelector('[data-workspace-scroll-region="primary"]')).toBeTruthy();
+		expect(rendered.container.querySelector('[data-conversation-panel]')).toBe(root);
+	});
+
 	it('passes each simultaneous panel its own executor and project context', async () => {
 		const localChat = chat();
 		const remoteChat = { ...chat(), id: 'chat-remote', executorId: '22222222-2222-4222-8222-222222222222', projectPath: '/remote/project' };
@@ -371,6 +407,27 @@ describe('ConversationPanel', () => {
 				.querySelector('[data-slot="chat-processing-status"]')
 				?.closest('.composer-thinking-active'),
 		).toBe(anchor);
+	});
+
+	it('stops the retained processing spinner while the panel is hidden', async () => {
+		const intervals = vi.spyOn(globalThis, 'setInterval');
+		const clearInterval = vi.spyOn(globalThis, 'clearInterval');
+		const { panel } = makePanel();
+		const props = {
+			surfaceId: panel.surfaceId,
+			chat: chat(),
+			panel,
+			isCommandOwner: true,
+			ownsComposer: true,
+			actions: makeActions(),
+		};
+		const rendered = render(ConversationPanel, props);
+		await waitFor(() => expect(intervals.mock.calls.some((call) => call[1] === 120)).toBe(true));
+		const spinnerIndex = intervals.mock.calls.findIndex((call) => call[1] === 120);
+		const timer = intervals.mock.results[spinnerIndex]?.value;
+		await rendered.rerender({ ...props, isVisible: false, isCommandOwner: false, ownsComposer: false });
+		expect(clearInterval).toHaveBeenCalledWith(timer);
+		expect(rendered.container.querySelector('[data-slot="chat-processing-status"]')).toBeNull();
 	});
 
 	it('separates command ownership from composer inset and announcement ownership', async () => {

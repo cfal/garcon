@@ -684,6 +684,44 @@ describe('ConversationScrollController', () => {
 		expect(applied).toBe(false);
 	});
 
+	it('rejects all hidden paging and row navigation entry points', async () => {
+		const { controller, state } = controllerFixture({
+			state: { canLoadEarlier: true, hasLaterMessages: true },
+		});
+		const loadWindow = vi.fn(async () => 'loaded' as const);
+		controller.setViewportVisible(false);
+		await expect(controller.requestPage('earlier', 'button')).resolves.toBe('invalidated');
+		await expect(controller.requestPage('later', 'button')).resolves.toBe('invalidated');
+		await expect(controller.loadEarlierPageForNavigator('chat-1')).resolves.toBe('invalidated');
+		await expect(controller.restoreLatestWindow('chat-1')).resolves.toBe(false);
+		await controller.scrollToTop();
+		await expect(
+			controller.navigateToTranscriptRow(
+				{ chatId: 'chat-1', transcriptViewId: 'generation-1', ordinal: 1 },
+				new AbortController().signal,
+				loadWindow,
+				() => true,
+			),
+		).resolves.toBe('cancelled');
+		expect(state.loadEarlierPage).not.toHaveBeenCalled();
+		expect(state.loadLaterPage).not.toHaveBeenCalled();
+		expect(state.navigateToWindow).not.toHaveBeenCalled();
+		expect(loadWindow).not.toHaveBeenCalled();
+	});
+
+	it('expires scroll intent across a fast hide and reveal', async () => {
+		const { controller, state } = controllerFixture({
+			state: { canLoadEarlier: true, isUserScrolledUp: true },
+			scroller: { scrollTop: 0 },
+		});
+		controller.noteUserScrollIntent('earlier');
+		controller.setViewportVisible(false);
+		controller.setViewportVisible(true);
+		await tick();
+		controller.handleScroll();
+		expect(state.loadEarlierPage).not.toHaveBeenCalled();
+	});
+
 	it('defers revealing already loaded rows until native scrolling settles', async () => {
 		vi.useFakeTimers();
 		const revealEarlierLoadedRows = vi.fn(() => true);
@@ -1258,9 +1296,7 @@ describe('ConversationScrollController', () => {
 		const { controller } = controllerFixture({
 			viewport: fakeViewport({
 				hasCollapsedToolGroups: vi.fn(() => true),
-				measureViewportFill: vi.fn(async () =>
-					loadedPages < 8 ? 'underfilled' : 'overflow',
-				),
+				measureViewportFill: vi.fn(async () => (loadedPages < 8 ? 'underfilled' : 'overflow')),
 			}),
 			state: { canLoadEarlier: true, loadEarlierPage },
 		});
@@ -1279,9 +1315,7 @@ describe('ConversationScrollController', () => {
 		});
 		const { controller } = controllerFixture({
 			viewport: fakeViewport({
-				measureViewportFill: vi.fn(async () =>
-					loadedPages < 12 ? 'underfilled' : 'overflow',
-				),
+				measureViewportFill: vi.fn(async () => (loadedPages < 12 ? 'underfilled' : 'overflow')),
 			}),
 			state: { canLoadEarlier: true, loadEarlierPage },
 		});
@@ -1638,7 +1672,7 @@ describe('ConversationScrollController', () => {
 		expect(viewport.restoreHiddenReadingPosition).not.toHaveBeenCalled();
 	});
 
-	it('cancels a hidden-position restore scheduled during explicit navigation', async () => {
+	it('does not let hidden navigation supersede reveal restoration', async () => {
 		const { controller, viewport } = controllerFixture({ state: { isUserScrolledUp: true } });
 		controller.setPinnedToBottom(false);
 		controller.setViewportVisible(false);
@@ -1649,11 +1683,11 @@ describe('ConversationScrollController', () => {
 		});
 		controller.setViewportVisible(true);
 
-		await expect(navigation).resolves.toBe('completed');
+		await expect(navigation).resolves.toBe('unavailable');
 		await tick();
 
-		expect(viewport.scrollToTarget).toHaveBeenCalledOnce();
-		expect(viewport.restoreHiddenReadingPosition).not.toHaveBeenCalled();
+		expect(viewport.scrollToTarget).not.toHaveBeenCalled();
+		expect(viewport.restoreHiddenReadingPosition).toHaveBeenCalledOnce();
 	});
 
 	it('starts viewport filling after initial restoration and snapshot validation complete', async () => {

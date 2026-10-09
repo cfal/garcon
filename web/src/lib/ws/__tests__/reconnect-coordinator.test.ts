@@ -16,6 +16,7 @@ import { ChatTranscriptCache } from '$lib/chat/transcript/chat-transcript-cache.
 import { ConversationTranscriptOverlayStore } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte.js';
 import { ConversationLifecycleState } from '$lib/chat/conversation/conversation-lifecycle-state.svelte.js';
 import { ConversationPanelRegistry } from '$lib/chat/conversation/conversation-panel-registry.svelte.js';
+import type { ActiveTranscriptState } from '$lib/chat/transcript/active-transcript-state.svelte.js';
 
 const TS = '2024-01-01T00:00:00.000Z';
 
@@ -264,6 +265,7 @@ function createReconnectDeps(
 		hasInactiveWindow: vi.fn((_chatId: string) => false),
 		markChatStale: vi.fn((chatId: string) => chatState.transcriptCache.markStale(chatId)),
 		loadChatSnapshot: vi.fn(async (chatId: string) => {
+			if (chatId !== sessions.selectedChatId) return false;
 			await chatState.loadMessages(chatId);
 			return true;
 		}),
@@ -288,9 +290,14 @@ function createReconnectDeps(
 					batch.resendCandidates,
 				),
 		),
-		finishReconnectReplay: vi.fn((token: number, chatId: string) => {
+		finishReconnectReplay: vi.fn((token: number, chatId: string, throughOrdinal: number): ReturnType<ReconnectPanelRegistryPort['finishReconnectReplay']> => {
 			const result = chatState.finishReconnectReplay(token, chatId);
 			if (replayTokens.get(chatId) === token) replayTokens.delete(chatId);
+			if (result === 'applied') {
+				const cursor = panels.transcriptCache.readAppliedCursor(chatId);
+				if (chatId === sessions.selectedChatId && (!cursor || cursor.lastOrdinal < throughOrdinal)) return 'gap-detected';
+				chatState.transcriptCache.markValidated(chatId);
+			}
 			return result;
 		}),
 		abortReconnectReplay: vi.fn((token: number, chatId: string) => {
@@ -569,6 +576,112 @@ describe('ChatReconnectCoordinator', () => {
 		cache.flush();
 	});
 
+	it.each([false, true])('recovers a failed background replay only after reveal (revealed=%s)', async (revealed) => {
+		const cache = new ChatTranscriptCache({ limit: 100, persistenceDelayMs: 60_000 });
+		cache.replace('chat-1', 'generation-selected', [
+			{ ordinal: 1, message: new AssistantMessage(TS, 'initial-one') },
+			{ ordinal: 2, message: new AssistantMessage(TS, 'initial-two') },
+		], 2, null);
+		const loadTranscriptSnapshot = vi.fn(async (transcript: ActiveTranscriptState, chatId: string) => {
+			cache.replace(chatId, 'generation-selected', [
+				{ ordinal: 1, message: new AssistantMessage(TS, 'initial-one') },
+				{ ordinal: 2, message: new AssistantMessage(TS, 'initial-two') },
+				{ ordinal: 3, message: new AssistantMessage(TS, 'replayed-three') },
+				{ ordinal: 4, message: new AssistantMessage(TS, 'recovered-four') },
+			], 4, null);
+			transcript.installCachedSnapshot(chatId);
+		});
+		const panels = new ConversationPanelRegistry({
+			cache, overlays: new ConversationTranscriptOverlayStore(),
+			lifecycle: { forChat: () => new ConversationLifecycleState(), remove: vi.fn() },
+			getComposerAnchorSurfaceId: () => null, getSelectedChatId: () => null,
+			loadTranscriptSnapshot,
+		});
+		const descriptor = {
+			surfaceId: 'chat-view:window-left', chatId: 'chat-1', snapshotAdmission: 'admitted',
+			presentation: 'window-left', windowId: 'window-left',
+		} as const;
+		panels.reconcile([descriptor]);
+		const panel = panels.panel(descriptor.surfaceId)!;
+		panel.attachPresentation({
+			getScrollContainer: () => null, getViewport: () => null,
+			getQueueContainer: () => undefined, captureRestoreTarget: () => ({ kind: 'end' }),
+			closeTransients: vi.fn(), prepareForHide: vi.fn(),
+		});
+		panels.prepareForReconcile([], [descriptor]);
+		panels.reconcile([], [descriptor]);
+		const heldContinuation = deferred<Record<string, unknown>>();
+		let subscribeCount = 0;
+		const deps = createReconnectDeps({ selectedChatId: '' });
+		deps.ws.sendRequest.mockImplementation(async (raw: object) => {
+			const request = raw as Record<string, unknown>;
+			if (request.type === 'reconnect-state-query') return reconnectStateResponse();
+			subscribeCount++;
+			if (subscribeCount === 1) return boundedReplayResponse({
+				afterOrdinal: 2, nextAfterOrdinal: 3, throughOrdinal: 4, hasMore: true,
+				messages: [messageJson(3, 'replayed-three')],
+			});
+			return heldContinuation.promise;
+		});
+		const coordinator = new ChatReconnectCoordinator({
+			...deps, panels,
+			getBackgroundCursors: () => [{ chatId: 'chat-1', transcriptViewId: 'generation-selected', lastOrdinal: 2 }],
+			markBackgroundStale: (chatId) => panels.markChatStale(chatId),
+		});
+		await coordinator.handleConnectionState(true);
+		await coordinator.handleConnectionState(false);
+		const reconnect = coordinator.handleConnectionState(true);
+		await flushUntil(() => subscribeCount === 2);
+		if (revealed) panels.reconcile([descriptor]);
+		heldContinuation.resolve({ type: 'invalid-continuation' });
+		await reconnect;
+		expect(loadTranscriptSnapshot).toHaveBeenCalledTimes(revealed ? 1 : 0);
+		expect(cache.readAppliedCursor('chat-1')?.stale).toBe(!revealed);
+		if (revealed) expect(panel.transcript.entries.at(-1)?.message).toEqual(expect.objectContaining({ content: 'recovered-four' }));
+		panels.destroy();
+		cache.flush();
+	});
+
+	it('recovers newer visible invalidation at the final replay publication', async () => {
+		const cache = new ChatTranscriptCache({ limit: 100, persistenceDelayMs: 60_000 });
+		cache.replace('chat-1', 'generation-selected', [
+			{ ordinal: 1, message: new AssistantMessage(TS, 'initial-one') },
+			{ ordinal: 2, message: new AssistantMessage(TS, 'initial-two') },
+		], 2, null);
+		const loadTranscriptSnapshot = vi.fn(async (transcript: ActiveTranscriptState, chatId: string) => {
+			transcript.installCachedSnapshot(chatId);
+			cache.markValidated(chatId);
+		});
+		const panels = new ConversationPanelRegistry({
+			cache, overlays: new ConversationTranscriptOverlayStore(),
+			lifecycle: { forChat: () => new ConversationLifecycleState(), remove: vi.fn() },
+			getComposerAnchorSurfaceId: () => null, getSelectedChatId: () => null,
+			loadTranscriptSnapshot,
+		});
+		panels.reconcile([{
+			surfaceId: 'chat-view:window-left', chatId: 'chat-1', snapshotAdmission: 'admitted',
+			presentation: 'window-left', windowId: 'window-left',
+		}]);
+		const apply = panels.applyReconnectReplayPage.bind(panels);
+		vi.spyOn(panels, 'applyReconnectReplayPage').mockImplementation((...args) => {
+			const result = apply(...args);
+			queueMicrotask(() => panels.markChatStale('chat-1'));
+			return result;
+		});
+		const deps = createReconnectDeps({
+			subscribeResponses: { 'chat-1': deltaResponse('chat-1', 'generation-selected') },
+		});
+		const coordinator = new ChatReconnectCoordinator({ ...deps, panels });
+		await coordinator.handleConnectionState(true);
+		await coordinator.handleConnectionState(false);
+		await coordinator.handleConnectionState(true);
+		expect(loadTranscriptSnapshot).toHaveBeenCalledOnce();
+		expect(panels.applyReconnectReplayPage).toHaveBeenCalledOnce();
+		expect(cache.readAppliedCursor('chat-1')?.stale).toBe(false);
+		panels.destroy();
+		cache.flush();
+	});
+
 	it('keeps reconnect reconciliation resolved when a rendered snapshot load fails', async () => {
 		const deps = createReconnectDeps();
 		const cache = new ChatTranscriptCache({ limit: 100, persistenceDelayMs: 60_000 });
@@ -782,7 +895,7 @@ describe('ChatReconnectCoordinator', () => {
 				transcriptViewId: 'generation-2', firstOrdinal: 3, lastOrdinal: 3,
 			}),
 		);
-		expect(deps.panels.finishReconnectReplay).toHaveBeenCalledWith(expect.any(Number), 'chat-2');
+		expect(deps.panels.finishReconnectReplay).toHaveBeenCalledWith(expect.any(Number), 'chat-2', 3);
 		expect(deps.onBackgroundMessages).not.toHaveBeenCalled();
 	});
 
@@ -1657,7 +1770,7 @@ describe('ChatReconnectCoordinator', () => {
 		cache.flush();
 	});
 
-	it('buffers live events behind replay for a parked transcript window', async () => {
+	it.each(['parked', 'fullscreen'] as const)('buffers live events behind replay for a %s transcript window', async (retention) => {
 		const cache = new ChatTranscriptCache({ limit: 100, persistenceDelayMs: 60_000 });
 		cache.replace(
 			'chat-background',
@@ -1692,14 +1805,31 @@ describe('ChatReconnectCoordinator', () => {
 			surfaceId: 'chat-view:window-background', chatId: 'chat-background',
 			snapshotAdmission: 'admitted', presentation: 'window-background', windowId: 'window-background',
 		}]);
-		panels.prepareForReconcile([{
-			surfaceId: 'chat-view:window-background', chatId: 'chat-other',
-			snapshotAdmission: 'admitted', presentation: 'window-background', windowId: 'window-background',
-		}]);
-		panels.reconcile([{
-			surfaceId: 'chat-view:window-background', chatId: 'chat-other',
-			snapshotAdmission: 'admitted', presentation: 'window-background', windowId: 'window-background',
-		}]);
+		if (retention === 'fullscreen') {
+			panels.panel('chat-view:window-background')!.attachPresentation({
+				getScrollContainer: () => null,
+				getViewport: () => null,
+				getQueueContainer: () => undefined,
+				captureRestoreTarget: () => ({ kind: 'end' }),
+				prepareForHide: vi.fn(),
+				closeTransients: vi.fn(),
+			});
+			const hidden = [{
+				surfaceId: 'chat-view:window-background' as const, chatId: 'chat-background',
+				snapshotAdmission: 'admitted' as const, presentation: 'window-background' as const, windowId: 'window-background' as const,
+			}];
+			panels.prepareForReconcile([], hidden);
+			panels.reconcile([], hidden);
+		} else {
+			panels.prepareForReconcile([{
+				surfaceId: 'chat-view:window-background', chatId: 'chat-other',
+				snapshotAdmission: 'admitted', presentation: 'window-background', windowId: 'window-background',
+			}]);
+			panels.reconcile([{
+				surfaceId: 'chat-view:window-background', chatId: 'chat-other',
+				snapshotAdmission: 'admitted', presentation: 'window-background', windowId: 'window-background',
+			}]);
+		}
 		expect(panels.hasInactiveWindow('chat-background')).toBe(true);
 		const deps = createReconnectDeps({
 			selectedChatId: '',

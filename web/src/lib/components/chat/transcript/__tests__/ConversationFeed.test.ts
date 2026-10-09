@@ -3,6 +3,8 @@ import { tick } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ConversationFeedTestHost from './ConversationFeedTestHost.svelte';
+import { ConversationFeedProjectionState } from '../ConversationFeedProjectionState.svelte.js';
+import { ConversationFeedRetentionState } from '../ConversationFeedRetentionState.svelte.js';
 import {
 	installResizeObserverHarness,
 	ResizeObserverHarness,
@@ -111,6 +113,38 @@ describe('ConversationFeed', () => {
 		await fireEvent.focusIn(viewport);
 
 		expect(screen.getByTestId('sidebar-recenter-request-count').textContent).toBe('0');
+	});
+
+	it('defers hidden feed projection and resumes accumulated updates without remounting', async () => {
+		const reconcile = vi.spyOn(ConversationFeedProjectionState.prototype, 'reconcile');
+		const props = { transcriptScenario: 'row-ids' as const, showAnnouncementTrigger: true };
+		const rendered = render(ConversationFeedTestHost, props);
+		await waitFor(() => expect(rendered.container.querySelector('[data-chat-virtual-sizer]')).toBeTruthy());
+		const sizer = rendered.container.querySelector('[data-chat-virtual-sizer]');
+		const count = sizer?.getAttribute('data-chat-virtual-model-count');
+
+		await rendered.rerender({ ...props, isVisible: false });
+		reconcile.mockClear();
+		await fireEvent.click(screen.getByRole('button', { name: 'Announce' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Announce' }));
+		expect(reconcile).not.toHaveBeenCalled();
+		expect(sizer?.getAttribute('data-chat-virtual-model-count')).toBe(count);
+
+		await rendered.rerender({ ...props, isVisible: true });
+		await waitFor(() => expect(reconcile).toHaveBeenCalled());
+		expect(rendered.container.querySelector('[data-chat-virtual-sizer]')).toBe(sizer);
+		expect(Number(sizer?.getAttribute('data-chat-virtual-model-count'))).toBe(Number(count) + 2);
+	});
+
+	it('disconnects selection observation while the retained feed is hidden', async () => {
+		const stop = vi.fn();
+		const observe = vi.spyOn(ConversationFeedRetentionState.prototype, 'observeSelection').mockReturnValue(stop);
+		const rendered = render(ConversationFeedTestHost);
+		await waitFor(() => expect(observe).toHaveBeenCalledOnce());
+		await rendered.rerender({ isVisible: false });
+		expect(stop).toHaveBeenCalledOnce();
+		await rendered.rerender({ isVisible: true });
+		expect(observe).toHaveBeenCalledTimes(2);
 	});
 
 	it('combines ordinary tool rows behind an accessible disclosure without changing the off path', async () => {

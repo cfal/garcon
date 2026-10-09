@@ -174,13 +174,14 @@
 				captureRestoreTarget: () =>
 					feedPresentation?.captureRestoreTarget() ?? detachedRestoreTarget,
 				closeTransients: () => feedPresentation?.closeTransients(),
+				prepareForHide: () => feedPresentation?.prepareForHide(),
 			}),
 		);
 	});
 
 	$effect(() => {
 		const viewport = conversationViewport;
-		if (viewport) panel.resumePendingRestore();
+		if (viewport && isVisible) panel.resumePendingRestore();
 	});
 
 	$effect(() => {
@@ -193,6 +194,7 @@
 	});
 
 	$effect(() => {
+		if (!isVisible) return;
 		void chatId;
 		void panel.transcript.loadStatus;
 		void panel.transcript.displayMessageCount;
@@ -226,6 +228,7 @@
 	});
 
 	$effect(() => {
+		if (!isVisible) return;
 		void queueControlsContainer;
 		void scrollContainer;
 		void chatId;
@@ -233,6 +236,7 @@
 	});
 
 	$effect(() => {
+		if (!isVisible) return;
 		void scrollContainer;
 		void chatId;
 		return panel.scroll.observeScrollContainerResize();
@@ -240,7 +244,7 @@
 
 	$effect(() => {
 		const region = scrollContainer;
-		if (!region) return;
+		if (!region || !isVisible) return;
 		return registerManagedWorkspaceScrollRegion(region, 'primary', (_element, direction) =>
 			panel.scroll.scrollFeedHalfPage(direction),
 		);
@@ -332,6 +336,7 @@
 		chatMaxWidth={localSettings.chatMaxWidth}
 		{isProcessing}
 		status={panel.lifecycle.loadingStatus}
+		{isVisible}
 		agentId={chat.agentId}
 		spinnerSelectionKey={`${surfaceId}:${chatId}`}
 		quickCommitEnabled={localSettings.showQuickCommitTray}

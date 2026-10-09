@@ -16,7 +16,7 @@ export interface RenderedPortablePresentation extends PortablePresentation {
 	windowId: WorkspaceWindowId | null;
 }
 
-export interface VisibleChatPresentation {
+export interface ChatPresentation {
 	readonly surfaceId: ChatViewSurfaceId;
 	readonly chatId: string;
 	readonly presentation: WorkspaceWindowId | 'mobile';
@@ -95,11 +95,30 @@ export function visiblePortablePresentations(
 export function visibleChatPresentations(
 	snapshot: WorkspaceLayoutSnapshot,
 	mode: 'desktop' | 'mobile',
-): VisibleChatPresentation[] {
-	const presentations: VisibleChatPresentation[] = [];
-	for (const [presentation, surfaceId] of visiblePresentationMap(snapshot, mode, {
-		includeDialog: false,
-	})) {
+): ChatPresentation[] {
+	return chatPresentations(snapshot, visiblePresentationMap(snapshot, mode, { includeDialog: false }));
+}
+
+export function fullscreenHiddenChatPresentations(
+	snapshot: WorkspaceLayoutSnapshot,
+	mode: 'desktop' | 'mobile',
+): ChatPresentation[] {
+	if (mode === 'mobile' || !snapshot.fullscreenWindowId) return [];
+	const hidden = new Map<PresentationHostId, string>();
+	for (const workspaceWindow of collectWindowNodes(snapshot.desktopRoot)) {
+		if (workspaceWindow.id !== snapshot.fullscreenWindowId) {
+			hidden.set(workspaceWindow.id, workspaceWindow.tabs.activeId);
+		}
+	}
+	return chatPresentations(snapshot, hidden);
+}
+
+function chatPresentations(
+	snapshot: WorkspaceLayoutSnapshot,
+	active: ReadonlyMap<PresentationHostId, string>,
+): ChatPresentation[] {
+	const presentations: ChatPresentation[] = [];
+	for (const [presentation, surfaceId] of active) {
 		const surface = snapshot.surfaces[surfaceId];
 		if (surface?.type !== 'chat' || !surface.chatId) continue;
 		presentations.push({

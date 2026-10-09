@@ -74,6 +74,8 @@ export type MessageApplyResult = TranscriptReplayApplyResult;
 type PageApplyResult = MessageApplyResult | 'stale';
 
 interface ActiveTranscriptStateOptions {
+	canLoadSnapshot?: () => boolean;
+	onSnapshotInterrupted?: (chatId: string) => void;
 	onSnapshotResendCandidates?: (
 		chatId: string,
 		candidates: readonly ResendCandidate[],
@@ -657,10 +659,7 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 		this.feedMutations.record('replacement');
 	}
 
-	async loadMessages(
-		chatId: string,
-		options: ChatLoadMessagesOptions = {},
-	): Promise<ChatMessage[]> {
+	async loadMessages(chatId: string, options: ChatLoadMessagesOptions = {}): Promise<ChatMessage[]> {
 		if (!chatId) return [];
 		const limit = Math.max(
 			MESSAGES_PER_PAGE,
@@ -669,6 +668,7 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 		const maxAttempts = 2;
 
 		for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+			if (this.options.canLoadSnapshot && !this.options.canLoadSnapshot()) return this.chatMessages;
 			const epoch = this.beginSnapshotLoad();
 			try {
 				const demand = await loadTranscriptPageDemand({
@@ -676,11 +676,19 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 					chatId,
 					visibleLimit: limit,
 					purpose: options.purpose,
-					isCurrent: () => (
-						epoch === this.#loadEpoch
-						&& (!this.activeChatId || this.activeChatId === chatId)
-					),
+					isCurrent: () =>
+						epoch === this.#loadEpoch &&
+						(!this.activeChatId || this.activeChatId === chatId) &&
+						(this.options.canLoadSnapshot?.() ?? true),
 				});
+				if (this.options.canLoadSnapshot && !this.options.canLoadSnapshot()) {
+					if (this.#finishFailedSnapshotLoad(chatId, epoch)) {
+						this.transcriptCache.markStale(chatId);
+						this.options.onSnapshotInterrupted?.(chatId);
+						this.loadStatus = this.entries.length > 0 ? 'loaded' : 'idle';
+					}
+					return this.chatMessages;
+				}
 				if (demand.kind === 'invalidated') {
 					this.abortSnapshotLoad(epoch);
 					return this.chatMessages;
@@ -731,6 +739,11 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 
 	invalidatePendingHistoryLoad(): void {
 		this.#invalidatePageLoad();
+	}
+
+	invalidatePendingSnapshotLoad(): void {
+		if (this.activeChatId) this.#finishFailedSnapshotLoad(this.activeChatId, this.#loadEpoch);
+		this.#loadEpoch += 1;
 	}
 
 	invalidatePendingWindowNavigation(): void {
@@ -982,5 +995,4 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 	removeCachedMessages(chatId: string): void {
 		this.transcriptCache.remove(chatId);
 	}
-
 }

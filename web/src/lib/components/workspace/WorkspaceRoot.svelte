@@ -83,8 +83,10 @@
 	import { surfaceFrame } from '$lib/workspace/surface-frame-action.js';
 	import {
 		renderedPortablePresentations,
+		fullscreenHiddenChatPresentations,
 		visibleChatPresentations,
 		visiblePortablePresentations,
+		type ChatPresentation,
 	} from '$lib/workspace/visible-presentations.js';
 	import { cn } from '$lib/utils/cn';
 	import * as m from '$lib/paraglide/messages.js';
@@ -186,8 +188,14 @@
 	const projectedWindowId = $derived(fullscreenWindowId);
 	const presentedCurrentWindowId = $derived(projectedWindowId ?? currentWindowId);
 	const portablePresentations = $derived(visiblePortablePresentations(snapshot, isMobile));
-	const chatPresentations = $derived.by<ConversationPanelDescriptor[]>(() =>
-		visibleChatPresentations(snapshot, isMobile ? 'mobile' : 'desktop').flatMap((presentation) => {
+	const chatPresentations = $derived(
+		panelDescriptors(visibleChatPresentations(snapshot, isMobile ? 'mobile' : 'desktop')),
+	);
+	const fullscreenHiddenChats = $derived(
+		panelDescriptors(fullscreenHiddenChatPresentations(snapshot, isMobile ? 'mobile' : 'desktop')),
+	);
+	function panelDescriptors(presentations: readonly ChatPresentation[]): ConversationPanelDescriptor[] {
+		return presentations.flatMap((presentation) => {
 			const chat = sessions.byId[presentation.chatId] ?? null;
 			if (resolveChatSurfacePresentation(chat, sessions.isLoadingChats) !== 'conversation') {
 				return [];
@@ -198,8 +206,8 @@
 					snapshotAdmission: chat?.status === 'draft' ? 'deferred' : 'admitted',
 				},
 			];
-		}),
-	);
+		});
+	}
 	const existingChatSurfaceIds = $derived.by(
 		() =>
 			new Set<ChatViewSurfaceId>(
@@ -431,15 +439,17 @@
 
 	$effect.pre(() => {
 		const visible = chatPresentations;
-		untrack(() => conversationPanels.prepareForReconcile(visible));
+		const hidden = fullscreenHiddenChats;
+		untrack(() => conversationPanels.prepareForReconcile(visible, hidden));
 	});
 
 	$effect(() => {
 		const visible = chatPresentations;
+		const hidden = fullscreenHiddenChats;
 		const existingSurfaceIds = existingChatSurfaceIds;
 		void localSettings.combineToolUseMessages;
 		untrack(() => {
-			conversationPanels.reconcile(visible);
+			conversationPanels.reconcile(visible, hidden);
 			conversationPanels.pruneRemovedSurfaces(existingSurfaceIds);
 		});
 	});
@@ -614,6 +624,7 @@
 				{workspaceWindow}
 				isCurrent={presentedCurrentWindowId === workspaceWindow.id}
 				isVisible={!isMobile && (!projectedWindowId || projectedWindowId === workspaceWindow.id)}
+				retainChatWhileFullscreen={!isMobile && fullscreenWindowId !== null}
 				hasLeftSeparator={hasLeftSeparator(renderedRect)}
 				hasRightSeparator={hasRightSeparator(renderedRect)}
 				presentations={renderedPresentations}

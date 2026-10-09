@@ -35,6 +35,7 @@
 		workspaceWindow,
 		isCurrent,
 		isVisible,
+		retainChatWhileFullscreen = false,
 		hasLeftSeparator = false,
 		hasRightSeparator = false,
 		presentations,
@@ -54,6 +55,7 @@
 		workspaceWindow: WorkspaceWindowNode;
 		isCurrent: boolean;
 		isVisible: boolean;
+		retainChatWhileFullscreen?: boolean;
 		hasLeftSeparator?: boolean;
 		hasRightSeparator?: boolean;
 		presentations: readonly RenderedPortablePresentation[];
@@ -80,7 +82,8 @@
 	const activeSurface = $derived(snapshot.surfaces[workspaceWindow.tabs.activeId] ?? null);
 	const activeChatIsLive = $derived(isCurrent && activeSurface?.type === 'chat');
 	const activeSurfaceIsCommandOwner = $derived(
-		workspace.focusOwner.kind !== 'chat-list' &&
+		isVisible &&
+			workspace.focusOwner.kind !== 'chat-list' &&
 			workspace.focusOwner.surfaceId === activeSurface?.id,
 	);
 	const activeChat = $derived(
@@ -97,7 +100,9 @@
 			activeSurface.chatId !== null &&
 			conversationPanels.isComposerTarget(activeSurface.id, activeSurface.chatId),
 	);
-	const activeChatOwnsComposer = $derived(activePanel !== null && activePanel === composerPanel);
+	const activeChatOwnsComposer = $derived(
+		isVisible && activePanel !== null && activePanel === composerPanel,
+	);
 	const activeChatPresentation = $derived(
 		resolveChatSurfacePresentation(activeChat, sessions.isLoadingChats),
 	);
@@ -317,7 +322,7 @@
 				class:pointer-events-none={!chatIsActive}
 				onfocusin={() => workspace.noteSurfaceFocus(chatSurface.id)}
 			>
-				{#if isVisible && chatIsActive && activeChat && activePanel}
+				{#if (isVisible || retainChatWhileFullscreen) && chatIsActive && activeChat && activePanel}
 					{#key activePanel}
 						<!-- Keeps the admitted chat stable while panel registration publication catches up. -->
 						{const panel = activePanel}
