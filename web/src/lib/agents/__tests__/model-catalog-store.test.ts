@@ -186,7 +186,7 @@ describe('ModelCatalogStore', () => {
 	it('retains the remote schema and literal policy through reconciliation and cold hydration', async () => {
 		const store = createModelCatalogStore();
 		vi.mocked(clientApi.apiFetch).mockResolvedValue(mockResponse(catalogBody([agentEntry('sample', {
-			executionPolicy: 'literal', selectionKind: 'execution-variant',
+			executionPolicy: 'literal',
 		})])));
 		await store.forExecutor(remoteExecutor.id).forceRefresh();
 		store.reconcileExecutors([localExecutor, remoteExecutor]);
