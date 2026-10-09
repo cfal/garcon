@@ -903,7 +903,19 @@ describe('ChatCommandService', () => {
       const first = await f.service.submitStart(input);
       expect(await f.service.submitStart(input)).toMatchObject({ status: 'duplicate', turnId: first.turnId });
     }
-    expect(f.settings.setSessionName).toHaveBeenCalledWith(TARGET_CHAT_ID, 'x'.repeat(99));
+    expect(f.settings.setSessionName).not.toHaveBeenCalled();
+    expect(f.agents.startSession).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['conversation', 'literal'])('normalizes %s starts without requiring policy for exact retries', async (policy) => {
+    const f = makeService();
+    f.agents.executionPolicy.mockReturnValue(policy);
+    const input = { ...agentStartInput('view-1'), origin: 'interactive', command: '  synthetic input\n ' };
+    const first = await f.service.submitStart(input);
+    expect(f.agents.startSession).toHaveBeenCalledWith(TARGET_CHAT_ID,
+      policy === 'literal' ? input.command : input.command.trim(), expect.anything());
+    f.agents.executionPolicy.mockImplementation(() => { throw new Error('Executor inventory unavailable'); });
+    expect(await f.service.submitStart(input)).toMatchObject({ status: 'duplicate', turnId: first.turnId });
     expect(f.agents.startSession).toHaveBeenCalledTimes(1);
   });
 

@@ -1,8 +1,62 @@
 import { expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { ChatMessagesMessage } from '../../../common/ws-events.js';
+import type { ChatMessagesMessage, ChatTitleUpdatedMessage } from '../../../common/ws-events.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
+import { rejectionOf } from '../../support/promise-assertions.js';
+
+for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote-executor-dials'] as const) {
+  test(`Shell uses configured automatic title generation (${executionBackend})`, async () => {
+    await withIntegrationFixture(`shell-title-${executionBackend}`, async fixture => {
+      const { client } = fixture;
+      const chatId = fixture.newChatId();
+      const source = '  printf synthetic-title-output\n ';
+      const title = fixture.fakeProviders.openAi.holdNext({});
+      const cursor = client.markEvents();
+      const started = await client.startChat({
+        chatId, agentId: 'shell', model: 'sh', projectPath: fixture.executionDirs.project,
+        permissionMode: 'default', thinkingMode: 'none', agentSettings: { ownerId: 'shell', schemaVersion: 1, values: {} },
+        origin: 'interactive', clientRequestId: crypto.randomUUID(), clientMessageId: crypto.randomUUID(), command: source,
+      });
+      expect((await title.received).lastUserText).toContain(source.trim());
+      title.releaseText('Synthetic automatic title');
+      const updated = await client.waitForEvent(
+        (event): event is ChatTitleUpdatedMessage => event.type === 'chat-title-updated' && event.chatId === chatId,
+        'automatic Shell title', { afterIndex: cursor },
+      );
+      expect(updated).toMatchObject({ title: 'Synthetic automatic title' });
+      expect((await client.waitForTurnTerminal(chatId, started.turnId)).type).toBe('agent-run-finished');
+      expect((await client.getMessages(chatId)).messages.find(row => row.message.type === 'user-message')?.message)
+        .toMatchObject({ content: source, metadata: { contentMode: 'literal' } });
+      expect(fixture.fakeProviders.openAi.requests()).toHaveLength(1);
+
+      const before = (await client.getMessages(chatId)).messages.length;
+      expect(await rejectionOf(client.runChat({ chatId, clientRequestId: crypto.randomUUID(),
+        clientMessageId: crypto.randomUUID(), command: 'touch unsupported-attachment',
+        images: [{ name: 'synthetic.png', mimeType: 'image/png', data: 'data:image/png;base64,YQ==' }],
+      }))).toMatchObject({ status: 422, body: { errorCode: 'UNSUPPORTED_AGENT' } });
+      expect((await client.getMessages(chatId)).messages).toHaveLength(before);
+    }, { executionBackend, chatTitleEnabled: true });
+  }, 60_000);
+}
+
+test('conversation starts trim execution input while exact retries preserve request identity', async () => {
+  await withIntegrationFixture('conversation-start-normalization', async fixture => {
+    const { client } = fixture;
+    const source = '  Synthetic conversation input.\n ';
+    const response = fixture.fakeProviders.openAi.holdNext({ lastUserText: source.trim() });
+    const request = client.directStartRequest({ chatId: fixture.newChatId(),
+      agent: fixture.directAgents.openAi, projectPath: fixture.executionDirs.project, content: source });
+    const started = await client.startChat(request);
+    expect((await response.received).lastUserText).toBe(source.trim());
+    response.releaseText('Synthetic response.');
+    await client.waitForTurnTerminal(started.chatId, started.turnId);
+    expect((await client.getMessages(started.chatId)).messages.find(row => row.message.type === 'user-message')?.message)
+      .toMatchObject({ content: source.trim() });
+    expect(await client.startChat(request)).toMatchObject({ status: 'duplicate', turnId: started.turnId });
+    expect(fixture.fakeProviders.openAi.requests()).toHaveLength(1);
+  });
+}, 30_000);
 
 test('Shell permits explicit title generation, prose refinement, and scheduled chat ID templates', async () => {
   await withIntegrationFixture('shell-authoring', async fixture => {

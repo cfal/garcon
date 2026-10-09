@@ -262,7 +262,6 @@ export interface ScheduledChatStartInput {
 export interface NormalizedChatStart {
   executorId: string;
   title: string | null;
-  requestedTitle: string | null;
   transcriptSnapshot: TranscriptWatermark | null;
   origin: ChatStartOrigin;
   chatId: ChatId;
@@ -272,6 +271,7 @@ export interface NormalizedChatStart {
   agentId: string;
   projectPath: string;
   idempotencyProjectPath: string;
+  idempotencyCommand: string;
   command: string;
   images: NonNullable<RunAgentTurnOptions['images']>;
   model: string;

@@ -149,11 +149,7 @@ export class StartCommands {
         404,
       );
     }
-    const requestedTitle = input.origin === 'agent-command' ? parseChatRowTitle(input.title) ?? null : null;
-    let title = requestedTitle;
-    if (title === null && literal) {
-      title = input.command.replace(/\s+/g, ' ').trim().slice(0, 100).replace(/[\uD800-\uDBFF]$/, '');
-    }
+    const title = input.origin === 'agent-command' ? parseChatRowTitle(input.title) ?? null : null;
     const transcriptSnapshot = input.origin === 'agent-command' ? input.transcriptSnapshot ?? null : null;
     if (transcriptSnapshot) {
       if (parentChatId === null || !Number.isSafeInteger(transcriptSnapshot.ordinal) || transcriptSnapshot.ordinal < 1) {
@@ -207,7 +203,6 @@ export class StartCommands {
     return {
       executorId,
       title,
-      requestedTitle,
       transcriptSnapshot: transcriptSnapshot ? { ...transcriptSnapshot } : null,
       origin: input.origin,
       chatId,
@@ -217,7 +212,9 @@ export class StartCommands {
       agentId: input.agentId,
       projectPath,
       idempotencyProjectPath,
-      command: input.command,
+      // Exact retries must remain independent of executor inventory and prompt normalization.
+      idempotencyCommand: input.command,
+      command: literal ? input.command : input.command.trim(),
       images,
       model: input.model,
       apiProviderId: input.apiProviderId ?? null,
@@ -410,7 +407,6 @@ export class StartCommands {
   }
 
   private generateTitle(input: NormalizedChatStart): void {
-    if (this.deps.agents.executionPolicy(input.agentId, input.executorId) === 'literal') return;
     void maybeGenerateChatTitle({
       chatId: input.chatId,
       firstPrompt: input.command,
@@ -460,7 +456,7 @@ export class StartCommands {
 function startPayload(input: NormalizedChatStart): Record<string, unknown> {
   return {
     executorId: input.executorId,
-    title: input.requestedTitle,
+    title: input.title,
     transcriptSnapshot: input.transcriptSnapshot,
     origin: input.origin,
     chatId: input.chatId,
@@ -468,7 +464,7 @@ function startPayload(input: NormalizedChatStart): Record<string, unknown> {
     clientMessageId: input.clientMessageId,
     agentId: input.agentId,
     projectPath: input.idempotencyProjectPath,
-    command: input.command,
+    command: input.idempotencyCommand,
     model: input.model,
     images: input.images,
     apiProviderId: input.apiProviderId,

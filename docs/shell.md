@@ -26,7 +26,9 @@ including whitespace, absolute executable paths, and
 file expansion, and automatic resend are disabled. Explicit snippet insertion,
 prose refinement, and title generation remain available. These are authoring
 actions, not shell-aware validation; inspect their results before submitting.
-Shell does not generate titles or call AI automatically during command execution.
+Automatic chat titles use the same configured generation model and settings as
+other chats. Title generation sends the first command to that model; it does not
+rewrite the command or run the Shell integration as an AI model.
 
 Schedules substitute `{{chat_id}}` using the usual template escaping rules.
 Agent-created tasks and incoming automation are allowed without additional
@@ -103,7 +105,7 @@ controller-confirmed directory, not an unapplied historical cwd observation.
 ## CLI
 
 The existing opaque `--model` selection slot selects a shell family. Catalog
-entries label it as an execution variant, not an AI model:
+entries label the selection as "Shell":
 
 ```sh
 garcon-cli list models --agent shell

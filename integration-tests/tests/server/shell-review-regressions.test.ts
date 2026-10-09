@@ -22,7 +22,6 @@ for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote
       const initial = await start(titlePrefix + '\u{1f600}\nprintf "%s|%s|%s" "$#" "${1-unset}" "${2-unset}"');
       expect((await client.waitForTurnTerminal(initial.chatId, initial.turnId)).type).toBe('agent-run-finished');
       await client.waitForProcessing(initial.chatId, false);
-      expect((await client.listChats()).sessions.find(chat => chat.id === initial.chatId)?.title).toBe(titlePrefix);
       expect((await client.getMessages(initial.chatId)).messages.some(row =>
         row.message.type === 'command-output' && row.message.content.endsWith('0|unset|unset'))).toBe(true);
 
