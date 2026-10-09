@@ -33,16 +33,26 @@ describe('Markdown transcript export', () => {
     expect(document).toContain('```text\n# incomplete heading\n```');
   });
 
-  it('renders complete stdout as one document across interleaved stderr', () => {
-    const first = '```text\nprefix\n';
+  it('renders complete stdout as Markdown and stderr as literal text', () => {
     const document = renderTranscriptExportMarkdown(model([
-      entry(1, 'conversation', stdout(first)),
+      entry(1, 'conversation', stdout('# complete heading')),
       entry(2, 'conversation', new CommandOutputMessage(AT, 'command', 'stderr', 'plain', 'diagnostic', context)),
-      entry(3, 'conversation', stdout('# still code\n```', first.length)),
       entry(4, 'conversation', result()),
     ]));
-    expect(document).toContain(`${first}# still code\n\x60\x60\x60`);
+    expect(document).toContain('\n\n# complete heading\n\n');
     expect(document).toContain('```text\ndiagnostic\n```');
+  });
+
+  it('keeps duplicate stream records literal and preserves their original ordinals', () => {
+    const document = renderTranscriptExportMarkdown(model([
+      entry(2, 'conversation', stdout('# first')),
+      entry(5, 'conversation', stdout('# second', 7)),
+      entry(6, 'conversation', result()),
+    ]));
+    expect(document).toContain('## [2]');
+    expect(document).toContain('## [5]');
+    expect(document).toContain('```text\n# first\n```');
+    expect(document).toContain('```text\n# second\n```');
   });
 
   it('fences a settled literal tail without interpreting its Markdown-looking contents', () => {

@@ -86,6 +86,25 @@ describe('SharedChatPage', () => {
 		expect(screen.getByText('Completed')).toBeTruthy();
 	});
 
+	it.each(['incomplete', 'duplicate'] as const)('keeps %s command output literal and individually visible', async kind => {
+		const at = '2026-01-01T00:00:00.000Z';
+		const context = { executorId: 'local', projectPath: '/workspace/original' };
+		const messages = [new CommandOutputMessage(at, 'command-1', 'stdout', 'markdown', '**first**', context)];
+		if (kind === 'duplicate') messages.push(new CommandOutputMessage(at, 'command-1', 'stdout', 'markdown', '**second**', context, 9));
+		const snapshot = response([], 0, messages.length + 1);
+		snapshot.snapshot.messages = [...messages, new CommandResultMessage(at, 'command-1', {
+			outcome: 'finished', exitCode: 0, signal: null, capture: kind === 'incomplete' ? 'incomplete' : 'complete',
+			cwd: { kind: 'reported', path: '/workspace/original' },
+		})];
+		snapshot.page.end = snapshot.snapshot.messages.length;
+		vi.mocked(sharesApi.getSharedChat).mockResolvedValueOnce(snapshot);
+		const { container } = render(SharedChatPageTestHost, { token: 'share-token' });
+		await waitFor(() => expect(container.querySelectorAll('.markdown-code-block pre')).toHaveLength(messages.length));
+		expect([...container.querySelectorAll('.markdown-code-block pre')].map(node => node.textContent))
+			.toEqual(messages.map(message => message.content));
+		expect(container.querySelector('strong')).toBeNull();
+	});
+
 	it('renders a bounded newest page and prepends older messages on demand', async () => {
 		vi.mocked(sharesApi.getSharedChat)
 			.mockResolvedValueOnce(response(['newest-1', 'newest-2'], 50))

@@ -31,7 +31,7 @@ import type { PendingPermissionRequest } from '$lib/types/chat';
 
 const TS = '2026-05-29T00:00:00.000Z';
 
-it('joins adjacent command chunks across loaded pages without mutating durable messages', () => {
+it('keeps duplicate command output records separately visible without mutating durable messages', () => {
 	const context = { executorId: 'local', projectPath: '/original' };
 	const first = new CommandOutputMessage(TS, 'command-1', 'stdout', 'markdown', '```ts\nconst ', context);
 	const second = new CommandOutputMessage(TS, 'command-1', 'stdout', 'markdown', 'n = 1;\n```', context, first.content.length);
@@ -39,9 +39,12 @@ it('joins adjacent command chunks across loaded pages without mutating durable m
 		capture: 'complete', cwd: { kind: 'reported', path: '/original' } });
 	const items = buildConversationFeedRenderItems(rows([first, second, result]));
 	expect(items).toHaveLength(3);
-	expect(items[0]).toMatchObject({ id: 'row-0', message: { content: '```ts\nconst n = 1;\n```', context } });
-	expect(conversationFeedItemLayout(items[1])).toBe('hidden');
+	expect(items[0]).toMatchObject({ id: 'row-0', message: { ...first, format: 'plain' } });
+	expect(items[1]).toMatchObject({ id: 'row-1', message: { ...second, format: 'plain' } });
+	expect(conversationFeedItemLayout(items[0])).toBe('standard');
+	expect(conversationFeedItemLayout(items[1])).toBe('standard');
 	expect(first.content).toBe('```ts\nconst ');
+	expect(first.format).toBe('markdown');
 	expect(buildConversationFeedRenderItems(rows([second]))[0]).toMatchObject({ message: { ...second, format: 'plain' } });
 });
 

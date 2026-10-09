@@ -33,7 +33,6 @@ export interface ConversationFeedMessageRenderItem {
 	awaitingDelivery?: boolean;
 	pairedToolUse?: ToolUseChatMessage;
 	permissionWrapperRowId?: string;
-	commandOutputParentId?: string;
 }
 
 export type ConversationFeedRenderItem =
@@ -81,7 +80,6 @@ export function conversationFeedItemLayout(
 	item: ConversationFeedRenderItem,
 ): ConversationFeedItemLayout {
 	if (item.kind === 'local-notice') return 'standard';
-	if (item.commandOutputParentId) return 'hidden';
 	const message = item.message;
 	if (
 		message instanceof PermissionResolvedMessage ||
@@ -247,20 +245,19 @@ export function buildConversationFeedRenderModel(
 	}
 
 	return {
-		items: groupCommandOutput(items),
+		items: projectCommandOutputs(items),
 		toolResultByUseRowId: toolPairs.toolResultByUseRowId,
 		toolResultRowIdByUseRowId: toolPairs.toolResultRowIdByUseRowId,
 		permissionTerminalByOccurrence,
 	};
 }
 
-function groupCommandOutput(items: ConversationFeedRenderItem[]): ConversationFeedRenderItem[] {
-	const documents = projectCommandOutput(items.map(item => item.kind === 'message' ? item.message : null));
-	for (const [index, projection] of documents) {
+function projectCommandOutputs(items: ConversationFeedRenderItem[]): ConversationFeedRenderItem[] {
+	const output = projectCommandOutput(items.map(item => item.kind === 'message' ? item.message : null));
+	for (const [index, message] of output) {
 		const item = items[index];
 		if (item.kind !== 'message') continue;
-		item.message = projection.message;
-		if (index !== projection.parentIndex) item.commandOutputParentId = items[projection.parentIndex].id;
+		item.message = message;
 	}
 	return items;
 }

@@ -71,6 +71,6 @@ describe('retained command content', () => {
 
   it('distinguishes successful tail retention from capture failure', () => {
     expect(commandOutcomeText({ ...result, outcome: 'finished', exitCode: 0, capture: 'truncated' }))
-      .toBe('Completed\nOutput truncated to the last 64 KiB across stdout and stderr');
+      .toBe('Completed\nOutput truncated');
   });
 });

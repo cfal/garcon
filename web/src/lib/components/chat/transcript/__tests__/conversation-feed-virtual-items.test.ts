@@ -68,18 +68,18 @@ function build(
 }
 
 describe('conversation virtual feed model', () => {
-	it('routes a grouped output search target to its visible parent', () => {
+	it('routes each command output search target to its own visible row', () => {
 		const rows = [1, 2].map(index => ({ ...userItem(index), message: new CommandOutputMessage(
 			'2026-08-03T00:00:00.000Z', 'command-1', 'stdout', 'plain', `part ${index}`,
 			{ executorId: 'local', projectPath: '/project' }, (index - 1) * 'part 1'.length,
 		) }));
 		const rendered = buildConversationFeedRenderModel(rows).items;
 		const model = build(rendered);
-		expect(model.indexByRowId.get('generation-1:2')).toBe(model.indexByRowId.get('generation-1:1'));
-		expect(model.targetByDomAnchorId.get('generation-1:2')?.innerRowId).toBe('generation-1:1');
+		expect(model.indexByRowId.get('generation-1:2')).not.toBe(model.indexByRowId.get('generation-1:1'));
+		expect(model.targetByDomAnchorId.get('generation-1:2')?.innerRowId).toBe('generation-1:2');
 	});
 
-	it('rebuilds grouped output when a result arrives without more stdout', () => {
+	it('rebuilds output when a result arrives without more stdout', () => {
 		const output = { ...userItem(1), message: new CommandOutputMessage(
 			'', 'command-1', 'stdout', 'markdown', '# heading', { executorId: 'local', projectPath: '/project' },
 		) };

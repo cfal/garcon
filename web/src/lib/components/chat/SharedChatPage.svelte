@@ -50,11 +50,10 @@
 
 	let messages = $state<SharedMessageEntry[]>([]);
 	const renderedMessages = $derived.by(() => {
-		const documents = projectCommandOutput(messages.map(entry => entry.message));
-		return messages.flatMap((entry, index) => {
-			const projection = documents.get(index);
-			if (!projection) return [entry];
-			return projection.parentIndex === index ? [{ ...entry, message: projection.message }] : [];
+		const output = projectCommandOutput(messages.map(entry => entry.message));
+		return messages.map((entry, index) => {
+			const message = output.get(index);
+			return message ? { ...entry, message } : entry;
 		});
 	});
 	let title = $state('');

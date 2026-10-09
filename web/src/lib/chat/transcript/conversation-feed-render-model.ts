@@ -94,7 +94,7 @@ export class ConversationFeedRenderModelController {
 			const next = nextItems[index];
 			if (!next || next.kind !== previous.kind || next.id !== previous.id) return null;
 			if (previous.kind === 'message' && next.kind === 'message'
-				&& (previous.message !== next.message || previous.commandOutputParentId !== next.commandOutputParentId)) return null;
+				&& previous.message !== next.message) return null;
 		}
 		return nextItems.slice(previousItems.length);
 	}

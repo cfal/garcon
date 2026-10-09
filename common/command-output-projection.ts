@@ -1,62 +1,40 @@
 import { CommandOutputMessage, type ChatMessage } from './chat-types.js';
 
-interface OutputChunk {
-  index: number;
-  message: CommandOutputMessage;
-}
-
-export interface CommandOutputProjection {
-  message: CommandOutputMessage;
-  parentIndex: number;
-}
-
-// Storage chunks remain addressable; incomplete Markdown windows render literally.
-export function projectCommandOutput(messages: readonly (ChatMessage | null)[]): Map<number, CommandOutputProjection> {
-  const documents = new Map<string, OutputChunk[]>();
-  const completed = new Set<string>();
-  const open = new Set<string>();
-  const interrupted = new Set<string>();
+// Markdown requires complete capture and delivery evidence in the loaded window.
+export function projectCommandOutput(messages: readonly (ChatMessage | null)[]): Map<number, CommandOutputMessage> {
+  const firstOutput = new Map<string, number>();
+  const streamCounts = new Map<string, number>();
+  const results = new Map<string, { index: number; complete: boolean; lastGapIndex: number }>();
+  let lastGapIndex = -1;
   for (const [index, message] of messages.entries()) {
     if (message?.type === 'transcript-notice' && message.detail?.type === 'publication-gap') {
-      for (const commandId of open) interrupted.add(commandId);
+      lastGapIndex = index;
     }
     if (message?.type === 'command-result') {
-      open.delete(message.commandId);
-      if (message.result.capture === 'complete' && !interrupted.has(message.commandId)) completed.add(message.commandId);
+      results.set(message.commandId, {
+        index,
+        complete: message.result.capture === 'complete' && !results.has(message.commandId),
+        lastGapIndex,
+      });
     }
     if (message?.type !== 'command-output') continue;
-    open.add(message.commandId);
+    if (!firstOutput.has(message.commandId)) firstOutput.set(message.commandId, index);
     const key = JSON.stringify([message.commandId, message.channel]);
-    const chunks = documents.get(key) ?? [];
-    chunks.push({ index, message });
-    documents.set(key, chunks);
+    streamCounts.set(key, (streamCounts.get(key) ?? 0) + 1);
   }
-  const projections = new Map<number, CommandOutputProjection>();
-  for (const chunks of documents.values()) {
-    const first = chunks[0];
-    let length = 0;
-    let contiguous = true;
-    for (const { message } of chunks) {
-      if (message.offset !== first.message.offset + length || message.format !== first.message.format
-        || message.context.executorId !== first.message.context.executorId
-        || message.context.projectPath !== first.message.context.projectPath) contiguous = false;
-      length += message.content.length;
-    }
-    if (!contiguous) {
-      for (const { index, message } of chunks) {
-        projections.set(index, { parentIndex: index, message: new CommandOutputMessage(
-          message.timestamp, message.commandId, message.channel, 'plain', message.content, message.context, message.offset,
-        ) });
-      }
-      continue;
-    }
-    const message = first.message;
-    const format = message.offset === 0 && completed.has(message.commandId) ? message.format : 'plain';
-    const document = new CommandOutputMessage(message.timestamp, message.commandId, message.channel, format,
-      chunks.map(chunk => chunk.message.content).join(''), message.context, message.offset);
-    for (const chunk of chunks) {
-      projections.set(chunk.index, { parentIndex: first.index, message: chunk === first ? document : chunk.message });
-    }
+
+  const projections = new Map<number, CommandOutputMessage>();
+  for (const [index, message] of messages.entries()) {
+    if (message?.type !== 'command-output') continue;
+    const result = results.get(message.commandId);
+    const complete = message.channel === 'stdout' && message.offset === 0
+      && streamCounts.get(JSON.stringify([message.commandId, message.channel])) === 1
+      && result?.complete && result.index > index
+      && result.lastGapIndex < firstOutput.get(message.commandId)!;
+    projections.set(index, message.format === 'markdown' && !complete
+      ? new CommandOutputMessage(message.timestamp, message.commandId, message.channel, 'plain',
+        message.content, message.context, message.offset)
+      : message);
   }
   return projections;
 }

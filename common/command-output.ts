@@ -83,7 +83,7 @@ export function commandOutcomeText(result: CommandOutcome): string {
   const lines = [status];
   if (result.signal) lines.push(`Signal: ${result.signal}`);
   if (result.capture === 'incomplete') lines.push('Output capture incomplete');
-  if (result.capture === 'truncated') lines.push('Output truncated to the last 64 KiB across stdout and stderr');
+  if (result.capture === 'truncated') lines.push('Output truncated');
   if (result.cwd.kind === 'unavailable') {
     lines.push(`Working directory not captured: ${result.cwd.reason}`);
   }
