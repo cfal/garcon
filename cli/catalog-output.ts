@@ -10,7 +10,6 @@ export type CatalogQueryResult =
         label: string;
         description: string | null;
         defaultModel: string;
-        selectionKind?: 'model' | 'execution-variant';
         selectionLabel?: string;
         executionPolicy?: 'conversation' | 'literal';
         acceptsApiProviders: boolean;
@@ -44,7 +43,6 @@ export type CatalogQueryResult =
   | {
       resource: 'models';
       agentId: string;
-      selectionKind?: 'model' | 'execution-variant';
       selectionLabel?: string;
       defaultModel: string;
       models: Array<{
@@ -116,12 +114,8 @@ function humanListing(result: CatalogQueryResult): string {
         ]),
       );
     case 'models':
-      if (result.selectionKind === 'execution-variant') return formatTextTable(
-        [(result.selectionLabel ?? 'EXECUTION VARIANT').toUpperCase(), 'LABEL', 'DEFAULT'],
-        result.models.map(model => [model.value, model.label, model.isDefault ? 'yes' : '']),
-      );
       return formatTextTable(
-        ['MODEL', 'LABEL', 'PROVIDER', 'ENDPOINT', 'DEFAULT'],
+        [(result.selectionLabel ?? 'Model').toUpperCase(), 'LABEL', 'PROVIDER', 'ENDPOINT', 'DEFAULT'],
         result.models.map((model) => [
           model.value,
           model.label,

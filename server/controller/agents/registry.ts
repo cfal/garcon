@@ -640,9 +640,6 @@ export class AgentRegistry implements AgentRegistryServiceContract {
     if (!session) throw new Error(`Session not initialized: ${chatId}`);
     message = this.#normalizeInput(chatId, message);
     const literal = message.metadata?.contentMode === 'literal';
-    if (literal && (options.commandType === 'steer' || inputAttachments(options).length || message.images?.length)) {
-      throw new DomainError('UNSUPPORTED_LITERAL_INPUT', 'Literal execution does not accept steering or attachments.', 422);
-    }
     const pending = literal || options.commandType === 'steer'
       ? null
       : session.pendingPreambleBoundary ?? null;

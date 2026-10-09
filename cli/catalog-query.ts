@@ -128,7 +128,7 @@ function agentListing(catalog: ModelCatalogResponse): QueryResult<'agents'> {
       description: agent.description ?? null,
       defaultModel: agent.defaultModel,
       ...(agent.executionPolicy ? { executionPolicy: agent.executionPolicy } : {}),
-      ...(agent.selectionKind ? { selectionKind: agent.selectionKind, selectionLabel: agent.selectionLabel } : {}),
+      ...(agent.selectionLabel ? { selectionLabel: agent.selectionLabel } : {}),
       acceptsApiProviders: agent.acceptsApiProviderEndpoints,
       supportedProtocols: agent.supportedProtocols,
       permissions: agent.supportedPermissionModes,
@@ -225,7 +225,7 @@ function modelListing(
   return {
     resource: 'models',
     agentId: agent.id,
-    ...(agent.selectionKind ? { selectionKind: agent.selectionKind, selectionLabel: agent.selectionLabel } : {}),
+    ...(agent.selectionLabel ? { selectionLabel: agent.selectionLabel } : {}),
     defaultModel: agent.defaultModel,
     models: listed,
   };

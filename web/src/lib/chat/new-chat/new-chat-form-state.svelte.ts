@@ -8,6 +8,7 @@ import type { ExecutorsStore } from '$lib/executors/executors-store.svelte.js';
 import { validateStart, type ValidateStartErrorCode } from '$lib/api/chats.js';
 import {
 	ImageAttachmentState,
+	isSupportedChatAttachment,
 	type ChatAttachmentSupport,
 } from '$lib/chat/composer/image-attachment.svelte.js';
 import { getGitWorktrees, gitCreateWorktree } from '$lib/api/git.js';
@@ -273,8 +274,14 @@ export class NewChatFormState {
 	}
 
 	get attachmentError(): string | null {
+		if (this.attachedImages.length === 0) return null;
 		const agent = this.#modelCatalog.getAgent(this.agentId);
-		return agent?.executionPolicy === 'literal' && this.attachedImages.length > 0
+		if (!agent) return null;
+		const support = {
+			allowImages: this.#modelCatalog.supportsImages(this.agentId, this.modelValue, this.modelSelectionTarget?.modelEndpointId),
+			fileMimeTypes: this.#modelCatalog.fileAttachmentMimeTypes(this.agentId),
+		};
+		return this.attachedImages.some(file => !isSupportedChatAttachment(file, support))
 			? m.chat_composer_remove_attachments({ agent: agent.label })
 			: null;
 	}

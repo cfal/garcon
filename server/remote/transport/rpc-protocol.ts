@@ -32,7 +32,7 @@ type Call<Q, R> = { readonly request: Q; readonly result: R };
 // frames. Bump it with any change to what either side sends or accepts. Builds
 // of one release share a package version, so without the bump a mismatched
 // pair passes the handshake and fails mid-session instead.
-export const EXECUTOR_PROTOCOL_REVISION = 21;
+export const EXECUTOR_PROTOCOL_REVISION = 22;
 
 export const NULLABLE_AGENT_FACETS = [
   'literalExecution', 'readiness',

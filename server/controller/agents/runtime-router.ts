@@ -810,9 +810,8 @@ export class AgentRuntimeRouter {
       : attachments(opts.images);
     const entry = requireAgentChatEntry(chatId, this.#registry.getChat(chatId));
     if (this.#directory.require(entry.agentId, entry.executorId).literalExecution) {
-      if (preparedAttachments.length) throw new DomainError('UNSUPPORTED_LITERAL_INPUT', 'Literal execution does not accept attachments.', 422);
       const source = composition?.input.detail.message.content ?? fallbackPrompt;
-      return { dispatch: true, prompt: source, outboundPrompt: source, attachments: [], excludedOrdinals: excluded, viewId,
+      return { dispatch: true, prompt: source, outboundPrompt: source, attachments: [...preparedAttachments], excludedOrdinals: excluded, viewId,
         submission: composition ? { clientMessageId: composition.input.detail.clientMessageId, timestamp: composition.input.at } : undefined };
     }
     // The input is already taken, so only the resolution itself is repeated.

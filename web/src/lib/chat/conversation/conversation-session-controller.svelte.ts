@@ -685,13 +685,12 @@ export class ConversationSessionController {
 		}
 		const agent = deps.modelCatalogForExecutor(deps.agentState.executorId).getAgent(deps.agentState.agentId);
 		if (!agent) return 'no-op';
-		if (agent.executionPolicy === 'literal') return this.submitForChat(chatId);
 		const selected = deps.sessions.byId[chatId];
 		if (!selected?.projectPath) return 'no-op';
-		const text = deps.composerState.inputText.trim();
+		const text = agent.executionPolicy === 'literal' ? deps.composerState.inputText : deps.composerState.inputText.trim();
 		const hasAttachments = deps.composerState.images.length > 0;
-		if (!text && !hasAttachments) return 'no-op';
-		if (selected.status === 'running' && isControllerSlashCommand(text))
+		if (!text.trim() && !hasAttachments) return 'no-op';
+		if (agent.executionPolicy !== 'literal' && selected.status === 'running' && isControllerSlashCommand(text))
 			return this.submitForChat(chatId);
 		if (
 			!deps.canSubmitToExecutor(deps.agentState.executorId) ||

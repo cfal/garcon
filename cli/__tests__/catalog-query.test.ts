@@ -132,22 +132,23 @@ function command(
 }
 
 describe('runCatalogQuery', () => {
-  test('labels execution variants without inventing provider or model columns', async () => {
+  test('uses the agent selection label without a separate selection kind', async () => {
     const variants = structuredClone(catalog);
     const agent = variants.catalog.agents[0]!;
     Object.assign(agent, {
-      selectionKind: 'execution-variant', selectionLabel: 'Runtime', executionPolicy: 'literal',
+      selectionLabel: 'Runtime', executionPolicy: 'literal',
       acceptsApiProviderEndpoints: false, supportedProtocols: [], defaultModel: 'variant',
       models: [{ value: 'variant', label: 'Variant', isLocal: true }],
     });
     const plain = output();
     await runCatalogQuery(command('models', { agentId: agent.id }), client(variants), plain);
     expect(plain.listings[0]).toContain('RUNTIME');
-    expect(plain.listings[0]).not.toContain('PROVIDER');
+    expect(plain.listings[0]).toContain('PROVIDER');
     expect(plain.listings[0]).not.toContain('MODEL');
     const json = output();
     await runCatalogQuery(command('models', { agentId: agent.id, json: true }), client(variants), json);
-    expect(JSON.parse(json.listings[0]!)).toMatchObject({ selectionKind: 'execution-variant', selectionLabel: 'Runtime' });
+    expect(JSON.parse(json.listings[0]!)).toMatchObject({ selectionLabel: 'Runtime' });
+    expect(JSON.parse(json.listings[0]!)).not.toHaveProperty('selectionKind');
   });
 
   test('lists preamble IDs directly without loading the model catalog', async () => {

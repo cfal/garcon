@@ -26,7 +26,8 @@ for (const backend of ['in-process', 'remote-controller-dials', 'remote-executor
       await mkdir(next);
       const catalog = await client.get<ModelCatalogResponse>(`/api/v1/models?executorId=${client.executorId}`);
       const agent = catalog.catalog.agents.find(entry => entry.id === 'shell');
-      expect(agent).toMatchObject({ executionPolicy: 'literal', selectionKind: 'execution-variant', selectionLabel: 'Shell', supportedPermissionModes: [], generation: null });
+      expect(agent).toMatchObject({ executionPolicy: 'literal', selectionLabel: 'Shell', supportedPermissionModes: [], generation: null });
+      expect(agent).not.toHaveProperty('selectionKind');
       expect(agent?.models.some(model => model.value === 'sh')).toBe(true);
       const auth = await client.get(`/api/v1/agents/auth?agent=shell&executorId=${client.executorId}`);
       expect(auth).toEqual({ shell: { authenticated: false, canReauth: false, label: 'Shell', source: 'none' } });

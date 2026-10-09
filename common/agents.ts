@@ -41,7 +41,6 @@ export interface AgentCatalogEntry {
   description?: string;
   kind: "agent";
   executionPolicy?: 'conversation' | 'literal';
-  selectionKind?: 'model' | 'execution-variant';
   selectionLabel?: string;
   supportsCompact: boolean;
   supportsFork: boolean;

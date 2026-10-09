@@ -98,7 +98,7 @@ describe('PromptComposer focus', () => {
 			target: { files: [new File(['notes'], 'notes.pdf', { type: 'application/pdf' })] },
 		});
 		expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Send message' }).disabled).toBe(false);
-		await rerender({ executionPolicy: 'literal' });
+		await rerender({ executionPolicy: 'literal', fileAttachmentMimeTypes: [] });
 		expect(screen.getByRole('alert').textContent).toContain('Remove attachments');
 		const send = screen.getByRole<HTMLButtonElement>('button', { name: 'Send message' });
 		expect(send.disabled).toBe(true);
@@ -829,6 +829,28 @@ describe('PromptComposer focus', () => {
 		await fireEvent.focus(textarea);
 
 		expect(screen.getByTestId('sidebar-recenter-request-count').textContent).toBe('0');
+	});
+
+	it.each(['conversation', 'literal'] as const)('validates retained attachments by capability, not %s policy', async (executionPolicy) => {
+		const onsubmit = vi.fn();
+		const { container, rerender } = render(PromptComposerTestHost, { onsubmit, executionPolicy });
+		const input = screen.getByRole('textbox');
+		await fireEvent.input(input, { target: { value: 'synthetic command' } });
+		await fireEvent.change(container.querySelector('input[type="file"]')!, {
+			target: { files: [new File(['notes'], 'notes.pdf', { type: 'application/pdf' })] },
+		});
+		const send = screen.getByRole<HTMLButtonElement>('button', { name: 'Send message' });
+		expect(send.disabled).toBe(false);
+		await rerender({ fileAttachmentMimeTypes: [] });
+		expect(await screen.findByText(/Remove attachments before submitting/)).toBeTruthy();
+		expect(send.disabled).toBe(true);
+		await fireEvent.click(send);
+		await fireEvent.keyDown(input, { key: 'Enter' });
+		await fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true });
+		expect(onsubmit).not.toHaveBeenCalled();
+		await rerender({ fileAttachmentMimeTypes: ['application/pdf'] });
+		expect(send.disabled).toBe(false);
+		expect(screen.queryByText(/Remove attachments before submitting/)).toBeNull();
 	});
 
 	it('names permission and thinking controls by purpose and active value', () => {

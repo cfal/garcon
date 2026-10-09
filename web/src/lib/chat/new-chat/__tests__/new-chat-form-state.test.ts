@@ -192,6 +192,8 @@ const mockModelCatalog = {
 		return metadata ? { ...metadata, executionPolicy: 'conversation' } : null;
 	}),
 	getAgents: vi.fn(() => ['claude', 'codex', 'direct-openai-compatible']),
+	supportsImages: vi.fn(() => true),
+	fileAttachmentMimeTypes: vi.fn(() => ['application/pdf', 'text/plain', 'text/markdown']),
 	getSelectableAgents: vi.fn(() => [
 		'claude',
 		'codex',

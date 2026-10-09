@@ -1461,7 +1461,8 @@ describe('NewChatForm', () => {
 		expect(input.value).toBe('/snippet review source');
 	});
 
-	it.each(['', 'printf command'])('keeps attachments visible but blocks a new literal selection: %s', async (source) => {
+	it.each(['conversation', 'literal'] as const)('blocks unsupported attachments regardless of input policy: %s', async (executionPolicy) => {
+		const source = 'printf command';
 		stubMatchMedia(false);
 		const chatsApi = await import('$lib/api/chats');
 		vi.mocked(chatsApi.validateStart).mockResolvedValue({ valid: true, isGitRepo: false });
@@ -1477,7 +1478,10 @@ describe('NewChatForm', () => {
 		});
 		const send = screen.getByRole<HTMLButtonElement>('button', { name: 'Start session' });
 		await waitFor(() => expect(send.disabled).toBe(false));
-		await rerender({ executionPolicy: 'literal' });
+		await rerender({ executionPolicy });
+		expect(send.disabled).toBe(false);
+		expect(screen.queryByText(/Remove attachments before submitting/)).toBeNull();
+		await rerender({ executionPolicy, supportsImages: false, fileAttachmentMimeTypes: [] });
 		expect(await screen.findByText(/Remove attachments before submitting/)).toBeTruthy();
 		expect(send.disabled).toBe(true);
 		await fireEvent.click(send);

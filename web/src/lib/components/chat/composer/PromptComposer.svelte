@@ -31,6 +31,7 @@
 	import {
 		chatAttachmentAccept,
 		ImageAttachmentState,
+		isSupportedChatAttachment,
 	} from '$lib/chat/composer/image-attachment.svelte.js';
 	import {
 		resolveComposerKeydownAction,
@@ -115,7 +116,7 @@
 	const conversationInput = $derived(Boolean(executionAgent && executionAgent.executionPolicy !== 'literal'));
 	const executionKey = $derived(JSON.stringify([agentState.executorId, agentState.agentId, executionAgent?.executionPolicy]));
 	const attachmentError = $derived(
-		executionAgent?.executionPolicy === 'literal' && composerState.images.length > 0
+		executionAgent && composerState.images.some(file => !isSupportedChatAttachment(file, attachmentSupport))
 			? m.chat_composer_remove_attachments({ agent: executionAgent.label })
 			: null,
 	);

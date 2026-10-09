@@ -944,7 +944,7 @@
 		isPromptRefinementPending={promptRefinement.pending}
 		onTextChange={handleExpandedTextChange}
 		onSelectionChange={handleExpandedSelectionChange}
-	onRefinePrompt={() => promptRefinement.handleAction()}
+		onRefinePrompt={() => promptRefinement.handleAction()}
 		onClose={() => void closeExpandedEditor()}
 	/>
 {/if}

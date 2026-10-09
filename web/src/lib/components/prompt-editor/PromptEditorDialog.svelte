@@ -24,7 +24,7 @@
 		isPromptRefinementPending: boolean;
 		onTextChange: (text: string) => void;
 		onSelectionChange: (selection: PromptEditorSelection) => void;
-		onRefinePrompt?: () => void;
+		onRefinePrompt: () => void;
 		onClose: () => void;
 	}
 
@@ -74,7 +74,6 @@
 			{#if headerStatus}
 				{@render headerStatus()}
 			{/if}
-			{#if onRefinePrompt}
 			<Button
 				variant="outline"
 				size="sm"
@@ -94,7 +93,6 @@
 					<span class="hidden sm:inline">{m.prompt_refinement_refine()}</span>
 				{/if}
 			</Button>
-			{/if}
 			<Button
 				variant="ghost"
 				size="icon-sm"

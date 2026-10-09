@@ -3873,10 +3873,12 @@ describe('ConversationSessionController', () => {
 		expect(mockCreateQueuedInput).not.toHaveBeenCalled();
 	});
 
-	it('rejects unsupported or attachment steering without clearing or queueing', async () => {
+	it.each(['conversation', 'literal'] as const)('rejects unsupported or attachment steering without clearing or queueing: %s', async (executionPolicy) => {
 		const unsupported = createDeps(
 			createRunningChat({ agentId: 'cursor', model: 'auto', isProcessing: true }),
 		);
+		const metadata = unsupported.deps.modelCatalog.getAgent('cursor')!;
+		unsupported.deps.modelCatalog.getAgent.mockReturnValue({ ...metadata, executionPolicy });
 		unsupported.deps.composerState.inputText = 'keep this draft';
 		const unsupportedOutcome = await new ConversationSessionController(
 			unsupported.deps,

@@ -36,6 +36,7 @@
 		resolveModelSelection,
 	} from '../../../../../test/model-catalog';
 	import { untrack } from 'svelte';
+	import { CHAT_FILE_ATTACHMENT_MIME_TYPES } from '$shared/attachments';
 
 	interface Props {
 		executionPolicy?: 'conversation' | 'literal';
@@ -47,6 +48,7 @@
 		endpointBackedDirectModel?: boolean;
 		modelsAvailable?: boolean;
 		supportsImages?: boolean;
+		fileAttachmentMimeTypes?: readonly string[];
 		snippetTrigger?: string;
 		snippetTemplate?: string;
 		snippetDefaultArguments?: string;
@@ -66,6 +68,7 @@
 		endpointBackedDirectModel = false,
 		modelsAvailable = true,
 		supportsImages = true,
+		fileAttachmentMimeTypes = CHAT_FILE_ATTACHMENT_MIME_TYPES,
 		snippetTrigger = ';;',
 		snippetTemplate = 'Review {{arguments}} in {{project_path}}',
 		snippetDefaultArguments = '',
@@ -274,6 +277,9 @@
 		},
 		supportsImages() {
 			return supportsImages;
+		},
+		fileAttachmentMimeTypes() {
+			return fileAttachmentMimeTypes;
 		},
 		getModelForSelection(agentId: string, model: string, endpointId?: string | null) {
 			return modelForSelection(agentId, model, endpointId);
