@@ -563,11 +563,12 @@ export class AgentRegistry implements AgentRegistryServiceContract {
   }
 
   #normalizeInput(chatId: string, message: UserMessage): UserMessage {
-    if (this.chatExecutionPolicy(chatId) !== 'literal' && message.metadata?.contentMode === undefined) return message;
+    const literal = this.chatExecutionPolicy(chatId) === 'literal';
+    if (!literal && message.metadata?.contentMode === undefined) return message;
     const { contentMode: _mode, ...metadata } = message.metadata ?? {};
     return new UserMessage(message.timestamp, message.content, message.images, {
       ...metadata,
-      ...(this.chatExecutionPolicy(chatId) === 'literal' ? { contentMode: 'literal' as const } : {}),
+      ...(literal ? { contentMode: 'literal' as const } : {}),
     }, message.presentation);
   }
 
