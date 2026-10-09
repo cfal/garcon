@@ -134,7 +134,7 @@ export class ScheduledPromptFormState {
 	}
 
 	private get normalizedPrompt(): string {
-		return this.executionPolicy === 'literal' ? this.prompt : this.prompt.trim();
+		return this.executionPolicy === 'conversation' ? this.prompt.trim() : this.prompt;
 	}
 
 	scheduleIssue(now = new Date()): ScheduleIssue | null {
@@ -176,7 +176,6 @@ export class ScheduledPromptFormState {
 	}
 
 	get targetValid(): boolean {
-		if (!this.executionPolicy) return false;
 		if (this.targetType === 'existing-chat') {
 			return Boolean(
 				this.existingChatId &&
@@ -185,6 +184,7 @@ export class ScheduledPromptFormState {
 			);
 		}
 		return (
+			this.executionPolicy !== null &&
 			this.startup.settingsLoaded &&
 			this.startup.executorReady &&
 			this.startup.modelCatalogValidated &&

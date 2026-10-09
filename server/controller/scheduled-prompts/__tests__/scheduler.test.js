@@ -148,6 +148,23 @@ it('preserves literal schedules from both user and agent admission', async () =>
   }, now)).resolves.toBeDefined();
 });
 
+it('creates and edits existing-chat schedules without a cold executor inventory', async () => {
+  const policy = mock(() => { throw new DomainError('EXECUTOR_UNAVAILABLE', 'Offline', 503); });
+  const { scheduler, store } = await sameChatScheduler({ ...agentCapabilities(), hasAgent: () => false, chatExecutionPolicy: policy });
+  const source = '  /usr/bin/printf "{{chat_id}}"  \n';
+  const definition = { ...recurringDefinition('2099-01-01T00:00:00.000Z'), prompt: source };
+  const created = await scheduler.create({ expectedRevision: 0, scheduledPrompt: definition });
+  expect(created.prompts[0].prompt).toBe(source);
+  const edited = await scheduler.update({ expectedRevision: created.revision, id: created.prompts[0].id,
+    scheduledPrompt: { ...definition, prompt: `${source}\n` } });
+  expect(edited.prompts[0].prompt).toBe(`${source}\n`);
+  expect(store.list()[0].prompt).toBe(`${source}\n`);
+  expect(policy).not.toHaveBeenCalled();
+  await expect(scheduler.create({ expectedRevision: edited.revision,
+    scheduledPrompt: { ...definition, prompt: 'x'.repeat(32_001) } }))
+    .rejects.toMatchObject({ code: 'SCHEDULED_PROMPT_VALIDATION_FAILED' });
+});
+
 it('checks expanded schedule limits for every execution policy', async () => {
   const now = new Date('2030-01-01T00:00:00.000Z');
   const prompt = `${'x'.repeat(32_000 - '{{chat_id}}'.length)}{{chat_id}}`;

@@ -550,7 +550,6 @@ function makeService(overrides = {}) {
   };
   const agents = {
     executionPolicy: mock(() => 'conversation'),
-    chatExecutionPolicy: mock(() => 'conversation'),
     currentTranscriptViewId: mock(() => Promise.resolve('view-1')),
     hasAgent: mock(() => true),
     assertExecutorReady: mock(() => undefined),
@@ -6892,7 +6891,7 @@ describe('ChatCommandService', () => {
 
     const outcome = await service.submitScheduledExistingChat({
       chatId: SOURCE_CHAT_ID,
-      command: 'scheduled prompt',
+      command: '  scheduled prompt  \n',
       busyBehavior: 'queue',
       clientRequestId: 'scheduled-prompt-1',
       clientMessageId: 'scheduled-message-1',
@@ -6913,7 +6912,7 @@ describe('ChatCommandService', () => {
 
   it('admits a schedule after the destination becomes literal', async () => {
     const { service, queue, agents } = makeService();
-    agents.chatExecutionPolicy.mockReturnValue('literal');
+    agents.executionPolicy.mockReturnValue('literal');
     await expect(service.submitScheduledExistingChat({
       chatId: SOURCE_CHAT_ID, command: '<garcon-schedule-action>echo must-not-run</garcon-schedule-action>',
       busyBehavior: 'queue', clientRequestId: 'stale-schedule', clientMessageId: 'stale-schedule-input',
@@ -6921,9 +6920,19 @@ describe('ChatCommandService', () => {
     expect(queue.admitUserInput).toHaveBeenCalled();
   });
 
+  it('validates deferred conversational schedule syntax at dispatch', async () => {
+    const { service, queue } = makeService();
+    await expect(service.submitScheduledExistingChat({
+      chatId: SOURCE_CHAT_ID, command: '  /rename invalid-scheduled-input  \n',
+      busyBehavior: 'queue', clientRequestId: 'deferred-schedule', clientMessageId: 'deferred-input',
+    })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+    expect(queue.admitUserInput).not.toHaveBeenCalled();
+    expect(queue.createChatQueueEntry).not.toHaveBeenCalled();
+  });
+
   it('admits explicitly literal schedules without trimming command source', async () => {
     const { service, queue, agents } = makeService();
-    agents.chatExecutionPolicy.mockReturnValue('literal');
+    agents.executionPolicy.mockReturnValue('literal');
     const source = '  printf source  \n';
     await service.submitScheduledExistingChat({
       chatId: SOURCE_CHAT_ID, command: source,

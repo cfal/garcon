@@ -98,11 +98,13 @@
 		form.existingChatId ? sessions.byId[form.existingChatId] : undefined,
 	);
 	const minimumDate = $derived(localDateValue(currentTime));
-	const snippetContextKey = $derived(
-		form.targetType === 'new-chat'
+	const snippetContextKey = $derived.by(() => {
+		const pathKey = form.targetType === 'new-chat'
 			? form.startup.pathContextKey
-			: `${selectedChat?.executorId ?? 'local'}\u0000${selectedChat?.projectPath ?? ''}`,
-	);
+			: `${selectedChat?.executorId ?? 'local'}\u0000${selectedChat?.projectPath ?? ''}`;
+		const agentId = form.targetType === 'new-chat' ? form.startup.agentId : selectedChat?.agentId;
+		return JSON.stringify([pathKey, agentId, form.executionPolicy]);
+	});
 	const timezone = $derived(browserTimeZoneLabel(currentTime));
 	const schedulePreview = $derived(form.schedulePreview(PREVIEW_RUN_COUNT, currentTime));
 	const canSave = $derived(form.canSaveAt(currentTime));
