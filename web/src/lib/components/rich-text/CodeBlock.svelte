@@ -49,7 +49,9 @@ language packages are fetched.
 	data-wrap={wrapsCodeBlock ? 'true' : 'false'}
 >
 	<div class="flex items-center gap-2 px-3 pt-2 pb-0.5 text-[11px] leading-none">
-		<span class="shrink-0 font-medium text-muted-foreground tracking-wide">{lang || 'text'}</span>
+		{#if lang}
+			<span class="shrink-0 font-medium text-muted-foreground tracking-wide">{lang}</span>
+		{/if}
 		<button
 			type="button"
 			onclick={handleCopy}

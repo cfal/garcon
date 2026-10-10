@@ -25,6 +25,17 @@ describe('CodeBlock', () => {
 		vi.mocked(copyToClipboard).mockReset();
 	});
 
+	it('keeps unlabeled output literal and copyable without inventing a language label', async () => {
+		vi.mocked(copyToClipboard).mockResolvedValue(true);
+		const source = '  **literal**\n<example>\n';
+		const { container } = render(CodeBlock, { text: source });
+		expect(container.querySelector('.font-medium')).toBeNull();
+		expect(container.querySelector('pre')?.textContent).toBe(source);
+		expect(container.querySelector('strong')).toBeNull();
+		await fireEvent.click(container.querySelector('button')!);
+		expect(copyToClipboard).toHaveBeenCalledWith(source);
+	});
+
 	it('renders escaped source text on the first client paint', () => {
 		const { container } = render(CodeBlock, {
 			lang: 'js',
