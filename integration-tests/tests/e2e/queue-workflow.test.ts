@@ -239,15 +239,14 @@ describe('Lightpanda queue workflow', () => {
 			await app.sendComposer('ui-reorder-b');
 			await app.sendComposer('ui-reorder-c');
 			await app.sendComposer('ui-reorder-d');
-			await app.clickResponsiveAction('Edit queue');
-			await app.waitForQueuedDialogOrder(['ui-reorder-b', 'ui-reorder-c', 'ui-reorder-d']);
+			await app.waitForQueuedOrder(['ui-reorder-b', 'ui-reorder-c', 'ui-reorder-d']);
 
 			await app.clickQueuedMove('ui-reorder-d', 'up');
-			await app.waitForQueuedDialogOrder(['ui-reorder-b', 'ui-reorder-d', 'ui-reorder-c']);
-			await app.waitForFocusedQueuedMove('ui-reorder-d');
+			await app.waitForQueuedOrder(['ui-reorder-b', 'ui-reorder-d', 'ui-reorder-c']);
+			await app.waitForFocusedQueueActions('ui-reorder-d');
 			await app.clickQueuedMove('ui-reorder-d', 'up');
-			await app.waitForQueuedDialogOrder(['ui-reorder-d', 'ui-reorder-b', 'ui-reorder-c']);
-			await app.waitForFocusedQueuedMove('ui-reorder-d');
+			await app.waitForQueuedOrder(['ui-reorder-d', 'ui-reorder-b', 'ui-reorder-c']);
+			await app.waitForFocusedQueueActions('ui-reorder-d');
 
 			const heldD = fixture.integration.fakeProviders.openAi.holdNext({
 				lastUserText: 'ui-reorder-d',
@@ -258,7 +257,6 @@ describe('Lightpanda queue workflow', () => {
 			const heldC = fixture.integration.fakeProviders.openAi.holdNext({
 				lastUserText: 'ui-reorder-c',
 			});
-			await app.clickDialogButton('Close');
 			active.releaseEcho();
 			await heldD.received;
 			heldD.releaseEcho();
@@ -275,7 +273,7 @@ describe('Lightpanda queue workflow', () => {
 		});
 	});
 
-  test('browses, edits, deletes, pauses, and resumes queued messages', async () => {
+  test('shows, edits, deletes, pauses, and resumes queued messages inline', async () => {
     await withE2eFixture('queue-workflow', async (fixture) => {
       const app = new SpaDriver(fixture.page, fixture.integration);
       const active = fixture.integration.fakeProviders.openAi.holdNext({ lastUserText: 'ui-queue-a' });
@@ -291,27 +289,18 @@ describe('Lightpanda queue workflow', () => {
       await app.sendComposer('ui-queue-b');
       await app.waitForQueuedPreview('ui-queue-b');
       await app.sendComposer('ui-queue-c');
-      await app.waitForText('1 of 2');
-      expect(await app.hasResponsiveAction('Send now')).toBe(true);
-      expect(await app.hasResponsiveAction('Steer')).toBe(false);
+      await app.waitForQueuedOrder(['ui-queue-b', 'ui-queue-c']);
+      expect(await app.hasButton('Steer')).toBe(false);
 
-      await app.clickButton('Next queued message');
-      await app.waitForQueuedPreview('ui-queue-c');
-      await app.waitForText('2 of 2');
-      expect(await app.hasResponsiveAction('Send now')).toBe(false);
-      await app.clickButton('Previous queued message');
-      await app.waitForQueuedPreview('ui-queue-b');
-
-      await app.clickResponsiveAction('Edit queue');
       await app.clickQueuedRowAction('ui-queue-b', 'Edit queued message');
       await app.fillQueuedEditor('ui-queue-b-edited');
       await app.clickDialogButton('Save edit');
       await app.waitForText('ui-queue-b-edited');
+      await app.clickDialogButton('Close');
       await app.clickQueuedRowAction('ui-queue-c', 'Remove from queue');
       await app.waitForTextAbsent('ui-queue-c');
-      await app.clickDialogButton('Pause');
+      await app.clickButton('Pause');
       await app.waitForText('Resume queue');
-      await app.clickDialogButton('Close');
 
       active.releaseEcho();
       await app.waitForText('echo:ui-queue-a');

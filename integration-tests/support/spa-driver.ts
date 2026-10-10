@@ -17,7 +17,7 @@ interface ResponsiveActionClickOptions {
   within?: string;
 }
 
-type QueueRowAction = 'Edit queued message' | 'Remove from queue';
+type QueueRowAction = 'Edit queued message' | 'Remove from queue' | 'Queue actions';
 type QueueMoveDirection = 'up' | 'down';
 type ComposerAction = 'Send message' | 'Queue message';
 
@@ -1240,86 +1240,35 @@ export class SpaDriver {
   }
 
   async clickQueuedRowAction(content: string, action: QueueRowAction): Promise<void> {
-    await this.#page.evaluate(
-      ({ content, action }) => {
-        const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
-        if (!dialog) throw new Error('Queued messages dialog is not open.');
-        const message = [...dialog.querySelectorAll<HTMLElement>('p')].find(
-          (element) => element.textContent?.trim() === content,
-        );
-        const row = message?.parentElement?.parentElement;
-        const button = row
-          ? [...row.querySelectorAll<HTMLButtonElement>('button')].find(
-              (element) =>
-                (element.getAttribute('aria-label') || element.textContent?.trim()) === action,
-            )
-          : null;
-        if (!button) throw new Error(`Missing ${action} action for queued message: ${content}`);
-        if (button.disabled)
-          throw new Error(`${action} is disabled for queued message: ${content}`);
-        button.click();
-      },
-      { content, action },
-    );
+    await this.#page.evaluate(({ content, action }) => {
+      const owner = document.querySelector('[role="dialog"]') ?? document.querySelector('[data-queue-status-summary]');
+      const row = [...(owner?.querySelectorAll('ol > li') ?? [])].find((item) =>
+        [...item.querySelectorAll('p, [data-queue-preview]')].some((message) => message.textContent?.trim() === content));
+      const button = [...(row?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find((item) => item.getAttribute('aria-label') === action);
+      if (!button || button.disabled) throw new Error('Unavailable queue action: ' + action + ' for ' + content);
+      button.click();
+    }, { content, action });
   }
 
   async clickQueuedMove(content: string, direction: QueueMoveDirection): Promise<void> {
-    await this.#page.evaluate(
-      ({ content, direction }) => {
-        const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
-        if (!dialog) throw new Error('Queued messages dialog is not open.');
-        const row = [...dialog.querySelectorAll<HTMLLIElement>('ol > li')].find((element) =>
-          [...element.querySelectorAll('p')].some(
-            (message) => message.textContent?.trim() === content,
-          ),
-        );
-        const button = row?.querySelector<HTMLButtonElement>(
-          `[data-queue-move-direction="${direction}"]`,
-        );
-        if (!button)
-          throw new Error(`Missing move ${direction} action for queued message: ${content}`);
-        if (button.disabled || button.getAttribute('aria-disabled') === 'true') {
-          throw new Error(`Move ${direction} is disabled for queued message: ${content}`);
-        }
-        button.focus();
-        button.click();
-      },
-      { content, direction },
-    );
+    const position = await this.#page.evaluate((expected) => [...document.querySelectorAll('[data-queue-status-summary] [data-queue-preview]')].findIndex((item) => item.textContent?.trim() === expected) + 1, content);
+    await this.clickQueuedRowAction(content, 'Queue actions');
+    await this.waitForMenuItemEnabled('Move queued message ' + position + ' ' + direction);
+    await this.clickMenuItem('Move queued message ' + position + ' ' + direction);
   }
 
-  async waitForQueuedDialogOrder(contents: string[]): Promise<void> {
-    await this.#page.waitForFunction(
-      (expected) => {
-        const rows = [...document.querySelectorAll<HTMLLIElement>('[role="dialog"] ol > li')];
-        const actual = rows.map((row) =>
-          [...row.querySelectorAll('p')]
-            .find((message) => expected.includes(message.textContent?.trim() ?? ''))
-            ?.textContent?.trim(),
-        );
-        return (
-          actual.length === expected.length &&
-          actual.every((content, index) => content === expected[index])
-        );
-      },
-      { timeout: 20_000 },
-      contents,
-    );
+  async waitForQueuedOrder(contents: string[]): Promise<void> {
+    await this.#page.waitForFunction((expected) => {
+      const actual = [...document.querySelectorAll('[data-queue-status-summary] [data-queue-preview]')].map((item) => item.textContent?.trim());
+      return actual.length === expected.length && actual.every((content, index) => content === expected[index]);
+    }, { timeout: 20_000 }, contents);
   }
 
-  async waitForFocusedQueuedMove(content: string): Promise<void> {
-    await this.#page.waitForFunction(
-      (expected) => {
-        const active = document.activeElement as HTMLButtonElement | null;
-        if (!active?.matches('[data-queue-move-id]')) return false;
-        const row = active.closest('li');
-        return [...(row?.querySelectorAll('p') ?? [])].some(
-          (message) => message.textContent?.trim() === expected,
-        );
-      },
-      { timeout: 20_000 },
-      content,
-    );
+  async waitForFocusedQueueActions(content: string): Promise<void> {
+    await this.#page.waitForFunction((expected) => {
+      const active = document.activeElement;
+      return active?.matches('[data-queue-menu-id]') && active.closest('li')?.querySelector('[data-queue-preview]')?.textContent?.trim() === expected;
+    }, { timeout: 20_000 }, content);
   }
 
   async fillQueuedEditor(value: string): Promise<void> {
@@ -1475,7 +1424,7 @@ export class SpaDriver {
   async waitForQueuedPreview(content: string): Promise<void> {
     await this.#page.waitForFunction(
       (expected) =>
-        document.querySelector('[data-queue-preview]')?.textContent?.trim() === expected,
+        [...document.querySelectorAll('[data-queue-preview]')].some((item) => item.textContent?.trim() === expected),
       { timeout: 20_000 },
       content,
     );

@@ -90,7 +90,9 @@
 	);
 	const canSteer = $derived(isProcessing && modelCatalog.supportsSteering(chat.agentId));
 	const executorId = $derived(chat.executorId ?? 'local');
-	const projectPath = $derived(executors.gitAvailable(executorId) ? chat.projectPath || null : null);
+	const projectPath = $derived(
+		executors.gitAvailable(executorId) ? chat.projectPath || null : null,
+	);
 	const gitProject = $derived(projectPath ? { executorId, projectPath } : null);
 	const quickGitSummary = $derived(quickGit.summaryFor(gitProject));
 	const quickGitBranchError = $derived(
@@ -103,9 +105,7 @@
 	const quickGitError = $derived(quickGit.lastErrorFor(gitProject) ?? quickGitBranchError);
 	const quickGitRefreshing = $derived(quickGit.isRefreshingFor(gitProject));
 	const quickGitTrayVisible = $derived(
-		!isProcessing &&
-			localSettings.showQuickCommitTray &&
-			quickGit.canShowTrayFor(gitProject),
+		!isProcessing && localSettings.showQuickCommitTray && quickGit.canShowTrayFor(gitProject),
 	);
 	const statusTrayVisible = $derived(isProcessing || quickGitTrayVisible);
 	const reserveStatusCap = $derived(
@@ -261,7 +261,11 @@
 	<div class="relative min-h-0 flex-1">
 		<svelte:boundary>
 			<ConversationFeed
-				chatContext={{ chatId, executorId: chat.executorId ?? 'local', projectPath: chat.projectPath }}
+				chatContext={{
+					chatId,
+					executorId: chat.executorId ?? 'local',
+					projectPath: chat.projectPath,
+				}}
 				transcript={panel.transcript}
 				agentId={chat.agentId}
 				bind:scrollContainer
@@ -310,10 +314,12 @@
 				onPause={() => actions?.pauseQueue(surfaceId, chatId) ?? Promise.resolve()}
 				onResume={(pauseId) =>
 					actions?.resumeQueue(surfaceId, chatId, pauseId) ?? Promise.resolve()}
-				onQueueControlError={(action, error) =>
-					actions?.reportQueueControlError(surfaceId, chatId, action, error)}
+				onQueueControlError={(operationChatId, action, error) =>
+					actions?.reportQueueControlError(surfaceId, operationChatId, action, error)}
 				onEdit={(entry) => actions?.editQueue(surfaceId, chatId, entry)}
-				onOpenManager={() => actions?.openQueue(surfaceId, chatId)}
+				onMove={(source, target, placement, revision) =>
+					actions?.moveQueue(surfaceId, chatId, source, target, placement, revision) ??
+					Promise.resolve()}
 				onDelete={(entryId) =>
 					actions?.deleteQueue(surfaceId, chatId, entryId) ?? Promise.resolve()}
 			/>

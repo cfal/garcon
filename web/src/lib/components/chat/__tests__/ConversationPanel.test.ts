@@ -194,7 +194,7 @@ function makeActions(): ConversationPanelActions {
 		resumeQueue: vi.fn().mockResolvedValue(undefined),
 		reportQueueControlError: vi.fn(),
 		editQueue: vi.fn(),
-		openQueue: vi.fn(),
+		moveQueue: vi.fn().mockResolvedValue(undefined),
 		deleteQueue: vi.fn().mockResolvedValue(undefined),
 		stop: vi.fn().mockResolvedValue(undefined),
 		openCommit: vi.fn(),

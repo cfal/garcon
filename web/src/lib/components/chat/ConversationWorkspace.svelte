@@ -410,16 +410,15 @@
 			return controller.resumeQueueForChat(chatId, pauseId);
 		},
 		reportQueueControlError(surfaceId, chatId, action, error) {
-			assertRenderedPanel(surfaceId, chatId);
 			controller.handleQueueControlErrorForChat(chatId, action, error);
 		},
 		editQueue(surfaceId, chatId, entry) {
 			assertRenderedPanel(surfaceId, chatId);
 			editQueuedInput(chatId, entry);
 		},
-		openQueue(surfaceId, chatId) {
+		moveQueue(surfaceId, chatId, source, target, placement, reorderRevision) {
 			assertRenderedPanel(surfaceId, chatId);
-			openQueuedInputsManager(chatId);
+			return controller.moveQueueEntryForChat(chatId, source, target, placement, reorderRevision);
 		},
 		deleteQueue(surfaceId, chatId, entryId) {
 			assertRenderedPanel(surfaceId, chatId);
@@ -571,13 +570,6 @@
 		const chatId = sessions.selectedChatId;
 		if (!chatId) return;
 		void controller.submitComposerWithSteerPreference(chatId);
-	}
-
-	function openQueuedInputsManager(chatId = sessions.selectedChatId): void {
-		if (!chatId || !sessions.byId[chatId]) return;
-		queuedInputEditor.close();
-		queuedInputsDialogChatId = chatId;
-		queuedInputsDialogOpen = true;
 	}
 
 	function editQueuedInput(chatId: string, entry: QueueEntry): void {
