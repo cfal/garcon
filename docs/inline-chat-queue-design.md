@@ -4,8 +4,8 @@ Queued messages remain visible above the composer, with drag ordering, per-messa
 and full-list expansion, a direct edit button, and a Steer button on every text
 message while the current provider supports steering. Compact rows keep message
 text and actions aligned on both desktop and mobile. Expanded text uses the full
-reading width in narrow panes, with its actions below. Steer remains a labeled
-action at every width; editing and overflow use icons with accessible labels.
+reading width in narrow panes, with its actions below. Steer uses an icon in rows narrower than 30rem and adds its label when space
+permits. All icon actions retain accessible labels and explanatory tooltips.
 Remove and Send now belong in the overflow menu; Send now retains its existing
 first-entry behavior.
 

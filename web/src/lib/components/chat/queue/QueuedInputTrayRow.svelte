@@ -266,11 +266,11 @@
 					title={entry.attachments.length > 0
 						? m.chat_queue_steer_attachments_unavailable()
 						: m.chat_queue_steer_queue()}
-					class="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-lg px-2 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 sm:pointer-fine:min-h-8"
+					class="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-lg px-0 text-xs font-medium @min-[30rem]/queue-row:px-2 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 sm:pointer-fine:min-h-8 sm:pointer-fine:min-w-8"
 				>
 					{#if steering}<Loader2 class="size-3.5 shrink-0 animate-spin" />{:else}<CornerUpRight
-							class="hidden size-3.5 shrink-0 @min-[30rem]/queue-row:block"
-						/>{/if}<span>{m.chat_queue_steer()}</span>
+							class="size-3.5 shrink-0"
+						/>{/if}<span class="hidden @min-[30rem]/queue-row:inline">{m.chat_queue_steer()}</span>
 				</button>
 			{/if}
 			<button

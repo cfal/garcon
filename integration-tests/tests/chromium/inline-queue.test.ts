@@ -71,6 +71,9 @@ test("reorders, expands, edits, and steers queued messages from the chat on desk
         await browserExpect(
           page.getByRole("button", { name: "Edit queue", exact: true }),
         ).toHaveCount(0);
+        const desktopSteer = tray.getByRole("button", { name: "Steer", exact: true }).first();
+        await browserExpect(desktopSteer.locator("span")).toBeVisible();
+        await browserExpect(desktopSteer.locator("svg")).toBeVisible();
         await captureDesktop("desktop-compact.png");
 
         phase("checking the head overflow menu");
@@ -165,6 +168,10 @@ test("reorders, expands, edits, and steers queued messages from the chat on desk
           )
           .toBe(true);
         const firstMobileRow = tray.locator("[data-queue-entry-id]").first();
+        const mobileSteer = firstMobileRow.getByRole("button", { name: "Steer", exact: true });
+        await browserExpect(mobileSteer.locator("span")).toBeHidden();
+        await browserExpect(mobileSteer.locator("svg")).toBeVisible();
+        expect((await mobileSteer.boundingBox())?.width).toBe(44);
         for (const name of ["Drag queued message 1", "Steer", "Edit queued message", "Queue actions"]) {
           const bounds = await firstMobileRow
             .getByRole("button", { name, exact: true })
