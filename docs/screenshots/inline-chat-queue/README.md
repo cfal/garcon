@@ -8,7 +8,7 @@ Captured from the implemented application with isolated synthetic chats by
 - `desktop-keyboard-reorder.png`: focused grip with keyboard reordering instructions.
 - `desktop-menu.png`: Send now and Remove in the overflow menu.
 - `desktop-editor.png`: focused single-message editor in a side drawer.
-- `mobile-compact.png`: compact rows with aligned controls and labeled Steer actions.
+- `mobile-compact.png`: compact rows with aligned controls and icon-only Steer actions.
 - `mobile-expanded.png`: full-width message text with flat actions below each message.
 - `mobile-menu.png`: mobile overflow actions.
 - `mobile-editor.png`: full-screen message editor with Save and Cancel.
