@@ -9,7 +9,7 @@ import {
 	isToolUseMessage,
 } from '$shared/chat-types';
 import type { ChatDisplayRow } from '$lib/chat/transcript/active-transcript-state.svelte.js';
-import { commandFailureNoticeDuplicate, commandResultPresentation } from '$lib/chat/transcript/command-result-presentation.js';
+import { commandResultNoticeDuplicate, commandResultPresentation } from '$lib/chat/transcript/command-result-presentation.js';
 import {
 	isHiddenBashToolUse,
 	type BashCommandMatcher,
@@ -300,7 +300,7 @@ export class ConversationFeedAnnouncerState {
 		const candidatesById = new Map<string, ChatDisplayRow>();
 		for (const row of [...appendedRows, ...streamedRows]) candidatesById.set(row.id, row);
 		const candidates = [...candidatesById.values()];
-		const duplicate = commandFailureNoticeDuplicate(tailRows);
+		const duplicate = commandResultNoticeDuplicate(tailRows);
 		const announcementCandidates = candidates.filter((row) => {
 			if (row.id === duplicate?.noticeId) return false;
 			if (row.kind !== 'message') return true;

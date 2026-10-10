@@ -231,12 +231,10 @@ export class ShellExecution {
         };
       }
       if (outcome.outcome === 'interrupted') return { ...terminal, outcome: 'interrupted' };
-      const failure = result.cwd.kind === 'invalid'
-        ? `Process exited ${result.exitCode ?? 'without an exit code'}. ${result.cwd.reason}`
-        : message.content;
-      return { ...terminal, outcome: 'failed', error: { code: 'PROVIDER_FAILURE', message: failure } };
+      return { ...terminal, outcome: 'failed', error: { code: 'PROVIDER_FAILURE', message: message.content } };
     } catch (error) {
       publishOutput();
+      let failure = failureDetail(error);
       if (log && commandRecorded) {
         const message = new CommandResultMessage(new Date().toISOString(), commandId, {
           outcome: invocation.cancellation.signal.aborted ? 'interrupted' : 'failed', exitCode: null, signal: null,
@@ -245,13 +243,14 @@ export class ShellExecution {
         try {
           log.append(commandId, message);
           this.#emit(invocation.binding, { type: 'rows', rows: [{ message }] });
-        } catch (failure) {
-          this.host.logger.error('Shell native history is incomplete', { reason: String(failure) });
+          failure = { ...failure, message: message.content };
+        } catch (persistenceError) {
+          this.host.logger.error('Shell native history is incomplete', { reason: String(persistenceError) });
         }
       }
       return invocation.cancellation.signal.aborted
         ? { type: 'run-ended', runId: request.runId, outcome: 'interrupted' }
-        : { type: 'run-ended', runId: request.runId, outcome: 'failed', error: failureDetail(error) };
+        : { type: 'run-ended', runId: request.runId, outcome: 'failed', error: failure };
     } finally {
       log?.close();
       if (log && !('nativeSession' in request) && !sessionPublished) await this.store.remove(invocation.sessionId);

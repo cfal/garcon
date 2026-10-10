@@ -121,6 +121,7 @@ class ConversationTranscriptOverlayEntry implements ConversationTranscriptOverla
 		afterOrdinal: number,
 	): ConversationTranscriptOverlayMutation {
 		if (!this.#optimisticAfterOrdinals.has(input.clientMessageId)) {
+			this.clearNoticesThrough();
 			this.#optimisticAfterOrdinals = new Map(this.#optimisticAfterOrdinals).set(
 				input.clientMessageId,
 				afterOrdinal,

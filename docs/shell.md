@@ -70,10 +70,14 @@ Nonzero status fails the turn and pauses waiting work, whether the failed
 command was direct or queued. Stderr alone does not indicate failure. Status
 follows the selected shell; Garcon does not add `errexit` or `pipefail`.
 Shell chats do not send Telegram or browser attention notifications or play
-completion sounds. Clean successful status rows are hidden in chat and shared
-views. Failures appear as compact errors; interruption, uncertain outcomes,
-capture warnings, cwd warnings, and queue pauses remain visible. Native history
-and exports retain every command result.
+completion sounds. Clean successful status rows are omitted from chat, shared
+views, and search. Failures appear as compact errors; interruption, uncertain
+outcomes, capture warnings, cwd warnings, and queue pauses remain visible.
+Native history and exports retain every command result. Matching transient
+error or warning notices are suppressed while the final durable result is
+visible. A new submission clears previous transient notices, not historical
+command results. Older derived search indexes rebuild automatically to remove
+routine completion hits; transcript ledgers remain unchanged.
 
 There is no PTY or stdin UI. Stdin remains open and unwritten; prompts may
 block until Stop. Stop sends group termination, then escalates after 500 ms.

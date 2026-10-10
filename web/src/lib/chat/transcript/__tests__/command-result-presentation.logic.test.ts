@@ -5,6 +5,8 @@ import type { ChatDisplayRow } from '../transcript-row-projection.js';
 import { commandResultPresentation } from '../command-result-presentation.js';
 import { buildConversationFeedRenderModel, conversationFeedItemLayout } from '../conversation-feed-items.js';
 import { ConversationFeedRenderModelController } from '../conversation-feed-render-model.js';
+import { ConversationTranscriptOverlayStore } from '../conversation-transcript-overlay-store.svelte.js';
+import { ActiveTranscriptPresentationState } from '../active-transcript-presentation-state.svelte.js';
 
 const at = '2026-01-01T00:00:00.000Z';
 const complete: CommandOutcome = {
@@ -49,6 +51,36 @@ describe('command result presentation', () => {
 		expect(layouts([resultRow, { ...notice, content: 'Cwd persistence failed' }, notice])).toEqual(['standard', 'standard', 'standard']);
 		expect(layouts([notice])).toEqual(['standard']);
 		expect(layouts([resultRow])).toEqual(['standard']);
+	});
+
+	it.each(['pending', 'delivered'] as const)('keeps prior failures single during %s follow-up delivery', delivery => {
+		const overlays = new ConversationTranscriptOverlayStore();
+		const transcript = new ActiveTranscriptPresentationState(overlays.forChat('chat-1'));
+		transcript.transcriptViewId = 'view';
+		transcript.entries = [{ ordinal: 3, message: failed }];
+		overlays.appendServerNotice('chat-1', 'error', failed.content);
+		expect(layouts(transcript.visibleRows)).toEqual(['standard', 'hidden']);
+
+		overlays.upsertOptimisticInput('chat-1', { chatId: 'chat-1', clientMessageId: 'next-input',
+			content: 'true', createdAt: at, contentMode: 'literal', delivery }, 3);
+		expect(layouts(transcript.visibleRows)).toEqual(['standard', 'standard']);
+		expect(transcript.entries[0].message).toBe(failed);
+	});
+
+	it.each(['warning', 'error'] as const)('suppresses an exact %s duplicate of a durable warning', noticeType => {
+		for (const diagnostic of [
+			{ ...complete, capture: 'truncated' as const },
+			{ ...complete, outcome: 'interrupted' as const },
+			{ ...complete, outcome: 'unknown' as const },
+			{ ...complete, cwd: { kind: 'unavailable' as const, reason: 'Synthetic cwd failure' } },
+		]) {
+			const message = new CommandResultMessage(at, 'command-1', diagnostic);
+			const warning = { ...notice, noticeType, content: message.content };
+			expect(layouts([{ ...resultRow, message }, warning])).toEqual(['standard', 'hidden']);
+			expect(layouts([warning])).toEqual(['standard']);
+			expect(layouts([{ ...resultRow, message }, { ...warning, content: 'Distinct diagnostic' }]))
+				.toEqual(['standard', 'standard']);
+		}
 	});
 
 	it('does not match an earlier failure across new input or collapse identical commands', () => {

@@ -80,18 +80,21 @@ describe('ConversationFeedAnnouncerState', () => {
 		})), [])).toBeNull();
 	});
 
-	it('announces the durable command failure once and keeps missing-result fallback', () => {
+	it.each(['error', 'warning'] as const)('announces a durable %s once and keeps missing-result fallback', noticeType => {
 		const initial = assistantRow('1', 'initial');
-		const result = messageRow('2', new CommandResultMessage('', 'command-1', {
-			outcome: 'failed', exitCode: 127, signal: null, capture: 'complete', cwd: { kind: 'reported', path: '/workspace' },
-		}));
-		const notice = { kind: 'local-notice' as const, id: 'notice', noticeType: 'error' as const, content: 'Exit 127', timestamp: '' };
+		const message = new CommandResultMessage('', 'command-1', {
+			outcome: noticeType === 'error' ? 'failed' : 'finished',
+			exitCode: noticeType === 'error' ? 127 : 0, signal: null,
+			capture: noticeType === 'error' ? 'complete' : 'truncated', cwd: { kind: 'reported', path: '/workspace' },
+		});
+		const result = messageRow('2', message);
+		const notice = { kind: 'local-notice' as const, id: 'notice', noticeType, content: message.content, timestamp: '' };
 		const announcer = new ConversationFeedAnnouncerState();
 		announcer.reconcile({ surfaceIdentity: 'chat', rows: [initial], mutationClock: clock(1), ...enabled });
-		expect(announcer.reconcile({ surfaceIdentity: 'chat', rows: [initial, result], mutationClock: clock(2, 2), ...enabled })).toBe('Exit 127');
+		expect(announcer.reconcile({ surfaceIdentity: 'chat', rows: [initial, result], mutationClock: clock(2, 2), ...enabled })).toBe(message.content);
 		expect(announcer.reconcile({ surfaceIdentity: 'chat', rows: [initial, result, notice], mutationClock: clock(3, 2, 3), ...enabled })).toBeNull();
 		announcer.reconcile({ surfaceIdentity: 'other', rows: [initial], mutationClock: clock(1), ...enabled });
-		expect(announcer.reconcile({ surfaceIdentity: 'other', rows: [initial, notice], mutationClock: clock(2, 0, 2), ...enabled })).toBe('Exit 127');
+		expect(announcer.reconcile({ surfaceIdentity: 'other', rows: [initial, notice], mutationClock: clock(2, 0, 2), ...enabled })).toBe(plainAnnouncementText(message.content));
 	});
 
 	it('does not announce the initial or replacement transcript', () => {

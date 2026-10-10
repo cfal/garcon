@@ -76,10 +76,43 @@ test('Shell composer preserves literal commands and stable chat switching on des
       await client.waitForProcessing(chatIds[0]!, false);
       await browserExpect(page.getByText('Exit 127', { exact: true })).toHaveCount(count);
     }
+
+    phase('delayed follow-up does not resurrect the prior duplicate error');
+    const followUpReceived = new Deferred<void>();
+    const followUpRelease = new Deferred<void>();
+    await page.route('**/api/v1/chats/run', async route => {
+      followUpReceived.resolve();
+      await followUpRelease.promise;
+      await route.continue();
+    });
+    try {
+      await editor.fill('printf follow-up-output');
+      await editor.press('Enter');
+      await withTimeout(followUpReceived.promise, 5000, () => 'Expected held follow-up');
+      await browserExpect(page.locator('pre').filter({ hasText: 'printf follow-up-output' })).toBeVisible();
+      await browserExpect(page.getByText('Exit 127', { exact: true })).toHaveCount(2);
+    } finally {
+      followUpRelease.resolve();
+    }
+    await browserExpect(page.locator('.markdown-code-block pre').filter({ hasText: 'follow-up-output' })).toBeVisible();
+    await page.unroute('**/api/v1/chats/run');
+    await client.waitForProcessing(chatIds[0]!, false);
+
+    phase('native Reload preserves failures without completion rows');
+    await client.reloadChat(chatIds[0]!);
     await page.reload();
     await browserExpect(editor).toBeVisible();
     await browserExpect(page.getByText('Exit 127', { exact: true })).toHaveCount(2);
     await browserExpect(page.getByText('Completed', { exact: true })).toHaveCount(0);
+
+    phase('frozen history preserves the same status presentation');
+    const forkId = integration.newChatId();
+    await client.forkChat({ sourceChatId: chatIds[0]!, chatId: forkId, allowHandoffFork: true });
+    await page.goto(`${integration.garcon.baseUrl}/chat/${forkId}`);
+    await browserExpect(page.getByText('Exit 127', { exact: true })).toHaveCount(2);
+    await browserExpect(page.getByText('Completed', { exact: true })).toHaveCount(0);
+    await page.goto(`${integration.garcon.baseUrl}/chat/${chatIds[0]}`);
+    await browserExpect(editor).toBeVisible();
     await editor.evaluate(element => element.setAttribute('data-retained-shell-editor', 'true'));
     await editor.fill('retained draft');
     const top = (await composer.boundingBox())!.y;

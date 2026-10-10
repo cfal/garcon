@@ -15,7 +15,7 @@ import { TOOL_DISPLAY_REGISTRY } from '$lib/chat/tools/tool-display-registry.js'
 import { resolveDisplayRule, shouldRenderToolResult } from '$lib/chat/tools/tool-display-policy.js';
 import { isHiddenBashToolUse, type BashCommandMatcher } from './hidden-bash-commands.js';
 import { projectCommandOutput } from '$shared/command-output-projection.js';
-import { commandFailureNoticeDuplicate, commandResultPresentation } from './command-result-presentation.js';
+import { commandResultNoticeDuplicate, commandResultPresentation } from './command-result-presentation.js';
 
 export interface PermissionTerminalState {
 	permissionOccurrenceId: string;
@@ -196,7 +196,7 @@ export function buildConversationFeedRenderModel(
 ): ConversationFeedRenderModel {
 	const items: ConversationFeedRenderItem[] = [];
 	const toolPairs = pairToolResults(rows);
-	const duplicate = commandFailureNoticeDuplicate(rows);
+	const duplicate = commandResultNoticeDuplicate(rows);
 	const permissionTerminalByOccurrence = new Map<string, PermissionTerminalState>();
 
 	for (const [index, row] of rows.entries()) {
