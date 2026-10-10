@@ -91,6 +91,26 @@ describe('Shell integration', () => {
     expect(events.flatMap(event => event.type === 'rows' ? event.rows : []).every(row => row.message.type !== 'user-message')).toBe(true);
   });
 
+  it('does not retain native preparations for repeated project path updates', async () => {
+    await integration.execution.start(request);
+    expect(await terminal()).toMatchObject({ outcome: 'finished' });
+    const reference = chat();
+    const timer = spyOn(globalThis, 'setTimeout');
+    try {
+      for (let index = 0; index < 65; index++) {
+        expect(await integration.projectPathUpdates.prepare({ chat: reference, nextProjectPath: root })).toBeNull();
+      }
+      expect(timer).not.toHaveBeenCalled();
+      const cancelled = AbortSignal.abort();
+      const failure = await rejectionOf(integration.projectPathUpdates.prepare(
+        { chat: reference, nextProjectPath: root }, { signal: cancelled },
+      ));
+      expect(failure).toBe(cancelled.reason);
+    } finally {
+      timer.mockRestore();
+    }
+  });
+
   it('reports failed cwd changes and starts a fresh process on resume', async () => {
     const next = join(root, 'next'); await mkdir(next);
     await integration.execution.start({ ...request, prompt: 'export PRIVATE_VALUE=old; cd next; false' });
