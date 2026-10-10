@@ -39,7 +39,7 @@ export class QueuedInputListController {
 		});
 	}
 
-	items(snapshot: VirtualListSnapshot) {
+	items(snapshot: VirtualListSnapshot, entries: readonly QueueEntry[]) {
 		const range = snapshot.overscanRange;
 		const indexes = range
 			? Array.from(
@@ -51,7 +51,10 @@ export class QueuedInputListController {
 			const index = this.#indexById.get(id);
 			if (index !== undefined) indexes.push(index);
 		}
-		return virtualItems(snapshot, indexes);
+		return virtualItems(snapshot, indexes).flatMap((virtualItem) => {
+			const entry = entries[virtualItem.index];
+			return entry?.id === virtualItem.key ? [{ entry, virtualItem }] : [];
+		});
 	}
 
 	retain(id: string, reason: 'focus' | 'drag' | 'menu', active: boolean): void {

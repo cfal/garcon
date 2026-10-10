@@ -88,6 +88,16 @@ describe('inline queue', () => {
 		await tick();
 		const list = view.container.querySelector<HTMLElement>('[data-queue-list]');
 		if (!list) throw new Error('Missing queue list');
+		const sizer = list.querySelector('ol');
+		if (!sizer) throw new Error('Missing queue sizer');
+		Object.defineProperty(list, 'clientHeight', { value: 100, configurable: true });
+		Object.defineProperty(list, 'scrollHeight', {
+			get: () => Number.parseFloat(sizer.style.height),
+			configurable: true,
+		});
+		vi.spyOn(sizer, 'getBoundingClientRect').mockImplementation(
+			() => new DOMRect(0, -list.scrollTop, 100, Number.parseFloat(sizer.style.height)),
+		);
 		list.scrollTop = 400;
 		await view.rerender({
 			queue: makeQueue(Array.from({ length: 21 }, (_, index) => `q${index}`)),

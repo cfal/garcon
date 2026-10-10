@@ -64,7 +64,7 @@
 	let listElement = $state<HTMLDivElement | null>(null);
 	const listController = new QueuedInputListController();
 	const snapshot = $derived(listController.virtual.snapshot);
-	const renderedItems = $derived(listController.items(snapshot));
+	const renderedItems = $derived(listController.items(snapshot, entries));
 	let notice = $state<{ chatId: string; message: string } | null>(null);
 	const entries = $derived(queue?.entries ?? []);
 	const pauseId = $derived(queue?.pause?.id);
@@ -212,9 +212,8 @@
 				style:height={`${snapshot.sizerSize}px`}
 				{@attach listController.virtual.sizer}
 			>
-				{#each renderedItems as virtualItem (`${chatId}:${virtualItem.key}`)}
+				{#each renderedItems as { entry, virtualItem } (`${chatId}:${virtualItem.key}`)}
 					{@const index = virtualItem.index}
-					{@const entry = entries[index]}
 					<svelte:boundary>
 						{@const steering =
 							queue.steeringEntryId === entry.id ||
