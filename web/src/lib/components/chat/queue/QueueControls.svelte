@@ -65,9 +65,12 @@
 	const blocked = $derived(Boolean(mutation) || queue?.steeringEntryId != null);
 	const expanded = $derived(chatId !== null && expandedChatId === chatId);
 	const visibleNotice = $derived(notice?.chatId === chatId ? notice : null);
+	let scrollTarget: { chatId: string; element: HTMLOListElement } | null = null;
 
 	$effect(() => {
 		if (!chatId || !listElement) return;
+		if (scrollTarget?.chatId === chatId && scrollTarget.element === listElement) return;
+		scrollTarget = { chatId, element: listElement };
 		listElement.scrollTop = 0;
 	});
 
