@@ -12,7 +12,7 @@
 	} from '$lib/prompt-editor/prompt-editor-selection.js';
 	import { getNotifications, getTransientLayers } from '$lib/context';
 	import { ApiError } from '$lib/api/client.js';
-	import { queuedInputMoveError } from './queued-input-move-error.js';
+	import { queuedInputMoveError } from '$lib/chat/conversation/queued-input-move-error.js';
 	import { errorMessage } from '$lib/utils/error-message.js';
 	import QueuedInputEditorPanel from './QueuedInputEditorPanel.svelte';
 	import QueuedInputRow from './QueuedInputRow.svelte';

@@ -1,4 +1,6 @@
 <script lang="ts">
+	import type { Attachment } from 'svelte/attachments';
+	import type { VirtualItem } from '$lib/virt/virtual-list-types.js';
 	import {
 		draggable,
 		dropTargetForElements,
@@ -35,8 +37,12 @@
 		chatId: string;
 		entry: QueueEntry;
 		position: number;
+		count: number;
+		virtualItem: VirtualItem;
+		measurement: Attachment<HTMLElement>;
 		expanded: boolean;
-		expansionRevision: number;
+		onToggle: () => void;
+		onRetain: (reason: 'focus' | 'drag' | 'menu', active: boolean) => void;
 		blocked: boolean;
 		steering: boolean;
 		deleting: boolean;
@@ -52,8 +58,12 @@
 		chatId,
 		entry,
 		position,
+		count,
+		virtualItem,
+		measurement,
 		expanded,
-		expansionRevision,
+		onToggle,
+		onRetain,
 		blocked,
 		steering,
 		deleting,
@@ -69,18 +79,17 @@
 	let dragHandle = $state<HTMLSpanElement | null>(null);
 	let menuTrigger = $state<HTMLElement | null>(null);
 	let menuOpen = $state(false);
-	let expansionOverride = $state<{ revision: number; expanded: boolean } | null>(null);
 	let dragging = $state(false);
 	let edge = $state<Edge | null>(null);
-	const messageExpanded = $derived(
-		expansionOverride?.revision === expansionRevision ? expansionOverride.expanded : expanded,
-	);
 	const attachmentNames = $derived(
 		entry.attachments.map((attachment) => attachment.name).join(', '),
 	);
 	const steerBlocked = $derived(blocked || entry.attachments.length > 0);
 	const iconButtonClass =
 		'grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50';
+	$effect(() => {
+		onRetain('menu', menuOpen);
+	});
 
 	$effect(() => {
 		if (!rowElement || !dragHandle || blocked) return;
@@ -91,8 +100,14 @@
 				dragHandle,
 				getInitialData: () => ({ ...queuedInputDragData(entry.id), chatId: operationChatId }),
 				canDrag: () => !blocked && !menuOpen,
-				onDragStart: () => (dragging = true),
-				onDrop: () => (dragging = false),
+				onDragStart: () => {
+					dragging = true;
+					onRetain('drag', true);
+				},
+				onDrop: () => {
+					dragging = false;
+					onRetain('drag', false);
+				},
 			}),
 			dropTargetForElements({
 				element: rowElement,
@@ -131,8 +146,17 @@
 	bind:this={rowElement}
 	data-queue-entry-id={entry.id}
 	aria-busy={steering || deleting}
-	class="relative px-2 py-1.5 sm:px-3"
+	aria-posinset={position}
+	aria-setsize={count}
+	class="absolute inset-x-0 top-0 border-b border-border/50 px-2 py-1.5 sm:px-3"
+	style:transform={`translateY(${virtualItem.start}px)`}
 	class:opacity-50={dragging}
+	onfocusin={() => onRetain('focus', true)}
+	onfocusout={() =>
+		queueMicrotask(() => {
+			if (!rowElement?.contains(document.activeElement)) onRetain('focus', false);
+		})}
+	{@attach measurement}
 >
 	{#if edge}<div
 			class="pointer-events-none absolute inset-x-2 h-0.5 bg-primary"
@@ -153,23 +177,23 @@
 		</span>
 		<button
 			type="button"
-			onclick={() =>
-				(expansionOverride = { revision: expansionRevision, expanded: !messageExpanded })}
-			aria-expanded={messageExpanded}
-			aria-label={m.chat_queue_toggle_message({ position })}
+			onclick={onToggle}
+			aria-expanded={expanded}
+			aria-label={expanded
+				? m.chat_queue_collapse_message({ position })
+				: m.chat_queue_toggle_message({ position })}
 			title={entry.content || attachmentNames}
 			class="min-w-0 flex-1 rounded text-left text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 		>
 			<span
 				data-queue-preview
 				class="block"
-				class:truncate={!messageExpanded}
-				class:whitespace-pre-wrap={messageExpanded}
-				class:break-words={messageExpanded}
-				>{entry.content.trim() ? entry.content : attachmentNames}</span
+				class:truncate={!expanded}
+				class:whitespace-pre-wrap={expanded}
+				class:break-words={expanded}>{entry.content.trim() ? entry.content : attachmentNames}</span
 			>
 		</button>
-		{#if entry.attachments.length > 0 && !messageExpanded}<span
+		{#if entry.attachments.length > 0 && !expanded}<span
 				data-queue-preview-attachments
 				title={attachmentNames}
 				class="flex shrink-0 items-center gap-1 text-xs text-muted-foreground"
@@ -242,7 +266,7 @@
 			</DropdownMenu>
 		</div>
 	</div>
-	{#if messageExpanded && entry.attachments.length > 0}<div class="mt-2 sm:pl-8">
+	{#if expanded && entry.attachments.length > 0}<div class="mt-2 sm:pl-8">
 			<QueuedInputAttachments attachments={entry.attachments} />
 		</div>{/if}
 	{#if entry.kind === 'steer' && !steering}<p

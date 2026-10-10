@@ -587,6 +587,7 @@
   "chat_queue_expand_all": "Expand all queued messages",
   "chat_queue_collapse_all": "Collapse queued messages",
   "chat_queue_toggle_message": "Expand queued message {position}",
+  "chat_queue_collapse_message": "Collapse queued message {position}",
 	"chat_queue_empty": "No queued messages",
 	"chat_queue_expanded_editor_label": "Expanded queued message",
 	"chat_queue_expanded_editor_title": "Edit queued message",

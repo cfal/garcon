@@ -1,10 +1,11 @@
 <script lang="ts">
+	import { onDestroy, untrack } from 'svelte';
 	import type { ChatQueueState, QueueEntry } from '$lib/types/chat';
 	import type { QueueEntryPlacement } from '$shared/chat-command-contracts';
 	import { CHAT_DOCK_SURFACE_CLASS } from '$lib/chat/conversation/chat-max-width.js';
-	import { queuedInputMoveError } from './queued-input-move-error.js';
 	import { isQueuedInputDragData } from './queued-input-dnd.js';
 	import QueuedInputTrayRow from './QueuedInputTrayRow.svelte';
+	import { QueuedInputListController } from './QueuedInputListController.svelte.js';
 	import * as m from '$lib/paraglide/messages.js';
 	import ChevronsDownUp from '@lucide/svelte/icons/chevrons-down-up';
 	import ChevronsUpDown from '@lucide/svelte/icons/chevrons-up-down';
@@ -21,7 +22,11 @@
 		onSteer?: (entry: QueueEntry, expectedReorderRevision: number) => void | Promise<void>;
 		onPause: () => Promise<void>;
 		onResume: (pauseId: string) => Promise<void>;
-		onQueueControlError: (chatId: string, action: 'pause' | 'resume', error: unknown) => void;
+		onQueueControlError: (
+			chatId: string,
+			action: 'pause' | 'resume' | 'move',
+			error: unknown,
+		) => void;
 		onEdit: (entry: QueueEntry) => void;
 		onDelete: (entryId: string) => Promise<void>;
 		onMove: (
@@ -56,16 +61,18 @@
 	}
 	let mutations = $state<Record<string, Mutation>>({});
 	let expandedChatId = $state<string | null>(null);
-	let expansionRevision = $state(0);
-	let listElement = $state<HTMLOListElement | null>(null);
-	let notice = $state<{ chatId: string; message: string; error: boolean } | null>(null);
+	let listElement = $state<HTMLDivElement | null>(null);
+	const listController = new QueuedInputListController();
+	const snapshot = $derived(listController.virtual.snapshot);
+	const renderedItems = $derived(listController.items(snapshot));
+	let notice = $state<{ chatId: string; message: string } | null>(null);
 	const entries = $derived(queue?.entries ?? []);
 	const pauseId = $derived(queue?.pause?.id);
 	const mutation = $derived(chatId ? mutations[chatId] : undefined);
 	const blocked = $derived(Boolean(mutation) || queue?.steeringEntryId != null);
 	const expanded = $derived(chatId !== null && expandedChatId === chatId);
 	const visibleNotice = $derived(notice?.chatId === chatId ? notice : null);
-	let scrollTarget: { chatId: string; element: HTMLOListElement } | null = null;
+	let scrollTarget: { chatId: string; element: HTMLDivElement } | null = null;
 
 	$effect(() => {
 		if (!chatId || !listElement) return;
@@ -73,6 +80,12 @@
 		scrollTarget = { chatId, element: listElement };
 		listElement.scrollTop = 0;
 	});
+	$effect.pre(() => {
+		const targetChatId = chatId;
+		const currentEntries = entries;
+		untrack(() => listController.update(targetChatId, currentEntries));
+	});
+	onDestroy(() => listController.virtual.destroy());
 
 	$effect(() => {
 		if (!listElement || !chatId) return;
@@ -109,12 +122,12 @@
 		try {
 			await action();
 			if (kind === 'moving' && chatId === operationChatId)
-				notice = { chatId: operationChatId, message: m.chat_queue_move_success(), error: false };
+				notice = { chatId: operationChatId, message: m.chat_queue_move_success() };
 		} catch (error) {
 			if (kind === 'pausing' || kind === 'resuming') {
 				onQueueControlError(operationChatId, kind === 'pausing' ? 'pause' : 'resume', error);
-			} else if (kind === 'moving' && chatId === operationChatId) {
-				notice = { chatId: operationChatId, message: queuedInputMoveError(error), error: true };
+			} else if (kind === 'moving') {
+				onQueueControlError(operationChatId, 'move', error);
 			}
 		} finally {
 			const { [operationChatId]: _completed, ...remaining } = mutations;
@@ -138,11 +151,11 @@
 
 {#if queue && chatId && entries.length > 0}
 	<section
-		class={CHAT_DOCK_SURFACE_CLASS}
+		class={`${CHAT_DOCK_SURFACE_CLASS} flex min-h-0 flex-col`}
 		aria-label={m.chat_queue_dialog_title()}
 		data-queue-status-summary
 	>
-		<header class="flex items-center gap-2 border-b border-border px-3 py-1.5">
+		<header class="flex shrink-0 items-center gap-2 border-b border-border px-3 py-1.5">
 			<span
 				class="text-xs font-medium text-muted-foreground"
 				aria-live={announcementsEnabled ? 'polite' : 'off'}
@@ -175,7 +188,7 @@
 					type="button"
 					onclick={() => {
 						expandedChatId = expanded ? null : chatId;
-						expansionRevision += 1;
+						listController.resetExpansion();
 					}}
 					aria-expanded={expanded}
 					aria-label={expanded ? m.chat_queue_collapse_all() : m.chat_queue_expand_all()}
@@ -188,53 +201,61 @@
 				</button>
 			</div>
 		</header>
-		<ol
+		<div
 			bind:this={listElement}
-			class={`overflow-y-auto overscroll-contain divide-y divide-border/50 ${expanded ? 'max-h-[40dvh]' : 'max-h-[25dvh]'}`}
+			data-queue-list
+			class={`min-h-0 overflow-y-auto overscroll-contain ${expanded ? 'max-h-[40dvh]' : 'max-h-[25dvh]'}`}
+			{@attach listController.virtual.viewport}
 		>
-			{#each entries as entry, index (`${chatId}:${entry.id}`)}
-				<svelte:boundary>
-					{@const steering =
-						queue.steeringEntryId === entry.id ||
-						(mutation?.kind === 'steering' && mutation.entryId === entry.id)}
-					<QueuedInputTrayRow
-						{chatId}
-						{entry}
-						position={index + 1}
-						{expanded}
-						{expansionRevision}
-						{blocked}
-						{steering}
-						deleting={mutation?.kind === 'deleting' && mutation.entryId === entry.id}
-						canSteer={index === 0 && canSteer && entry.kind !== 'steer' && Boolean(onSteer)}
-						canInterrupt={index === 0 && canInterrupt && !queue.pause && Boolean(onInterrupt)}
-						onSteer={() => {
-							if (onSteer && queue && entries[0]?.id === entry.id) {
-								const revision = queue.reorderRevision;
-								void mutate('steering', () => onSteer!(entry, revision), entry.id);
-							}
-						}}
-						onInterrupt={() => {
-							if (onInterrupt && entries[0]?.id === entry.id)
-								void mutate('interrupting', onInterrupt);
-						}}
-						onEdit={() => onEdit(entry)}
-						onDelete={() => void mutate('deleting', () => onDelete(entry.id), entry.id)}
-						onDrop={moveRelative}
-					/>
-					{#snippet failed(error)}<li class="px-3 py-2 text-xs text-destructive" role="alert">
-							{m.chat_queue_item_render_failed({ detail: String(error) })}
-						</li>{/snippet}
-				</svelte:boundary>
-			{/each}
-		</ol>
-		{#if visibleNotice}<p
-				class="px-3 py-2 text-xs"
-				class:text-destructive={visibleNotice.error}
-				class:sr-only={!visibleNotice.error}
-				role={visibleNotice.error ? 'alert' : undefined}
-				aria-live={announcementsEnabled ? 'polite' : 'off'}
+			<ol
+				class="relative"
+				style:height={`${snapshot.sizerSize}px`}
+				{@attach listController.virtual.sizer}
 			>
+				{#each renderedItems as virtualItem (`${chatId}:${virtualItem.key}`)}
+					{@const index = virtualItem.index}
+					{@const entry = entries[index]}
+					<svelte:boundary>
+						{@const steering =
+							queue.steeringEntryId === entry.id ||
+							(mutation?.kind === 'steering' && mutation.entryId === entry.id)}
+						<QueuedInputTrayRow
+							{chatId}
+							{entry}
+							position={index + 1}
+							{virtualItem}
+							count={entries.length}
+							measurement={listController.virtual.item(virtualItem.key)}
+							expanded={listController.isExpanded(entry.id, expanded)}
+							onToggle={() => listController.toggleExpanded(entry.id, expanded)}
+							onRetain={(reason, active) => listController.retain(entry.id, reason, active)}
+							{blocked}
+							{steering}
+							deleting={mutation?.kind === 'deleting' && mutation.entryId === entry.id}
+							canSteer={index === 0 && canSteer && entry.kind !== 'steer' && Boolean(onSteer)}
+							canInterrupt={index === 0 && canInterrupt && !queue.pause && Boolean(onInterrupt)}
+							onSteer={() => {
+								if (onSteer && queue && entries[0]?.id === entry.id) {
+									const revision = queue.reorderRevision;
+									void mutate('steering', () => onSteer!(entry, revision), entry.id);
+								}
+							}}
+							onInterrupt={() => {
+								if (onInterrupt && entries[0]?.id === entry.id)
+									void mutate('interrupting', onInterrupt);
+							}}
+							onEdit={() => onEdit(entry)}
+							onDelete={() => void mutate('deleting', () => onDelete(entry.id), entry.id)}
+							onDrop={moveRelative}
+						/>
+						{#snippet failed(error)}<li class="px-3 py-2 text-xs text-destructive" role="alert">
+								{m.chat_queue_item_render_failed({ detail: String(error) })}
+							</li>{/snippet}
+					</svelte:boundary>
+				{/each}
+			</ol>
+		</div>
+		{#if visibleNotice}<p class="sr-only" aria-live={announcementsEnabled ? 'polite' : 'off'}>
 				{visibleNotice.message}
 			</p>{/if}
 	</section>

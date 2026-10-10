@@ -63,17 +63,19 @@ async function openMenu(id: string) {
 }
 
 describe('inline queue', () => {
-	it('shows all entries in FIFO order with no manager or carousel', () => {
-		renderControls(makeQueue(Array.from({ length: 100 }, (_, index) => `q${index}`)));
-		expect(screen.getAllByText(/^queued q/)).toHaveLength(100);
-		expect(screen.getByText(m.chat_queue_pending_count({ count: 100 }))).toBeTruthy();
+	it('bounds mounted rows while preserving the full queue count and FIFO order', () => {
+		renderControls(makeQueue(Array.from({ length: 1_000 }, (_, index) => `q${index}`)));
+		const mountedRows = document.querySelectorAll('[data-queue-entry-id]');
+		expect(mountedRows.length).toBeGreaterThan(0);
+		expect(mountedRows.length).toBeLessThan(30);
+		expect(screen.getByText(m.chat_queue_pending_count({ count: 1_000 }))).toBeTruthy();
 		expect(screen.queryByRole('button', { name: m.chat_queue_edit_queue() })).toBeNull();
 		expect(screen.queryByRole('button', { name: m.chat_queue_next_message() })).toBeNull();
 		expect(
 			[...document.querySelectorAll('[data-queue-entry-id]')].map((item) =>
 				item.getAttribute('data-queue-entry-id'),
 			),
-		).toEqual(Array.from({ length: 100 }, (_, index) => `q${index}`));
+		).toEqual(Array.from({ length: mountedRows.length }, (_, index) => `q${index}`));
 	});
 
 	it('hides an empty queue', () => {
@@ -84,7 +86,7 @@ describe('inline queue', () => {
 	it('starts each chat at its queue head without resetting same-chat snapshots', async () => {
 		const view = renderControls(makeQueue(Array.from({ length: 20 }, (_, index) => `q${index}`)));
 		await tick();
-		const list = view.container.querySelector('ol');
+		const list = view.container.querySelector<HTMLElement>('[data-queue-list]');
 		if (!list) throw new Error('Missing queue list');
 		list.scrollTop = 400;
 		await view.rerender({
@@ -108,10 +110,13 @@ describe('inline queue', () => {
 			row('q0').getByRole('button', { name: m.chat_queue_toggle_message({ position: 1 }) }),
 		);
 		expect(preview.classList.contains('whitespace-pre-wrap')).toBe(true);
+		expect(
+			row('q0').getByRole('button', { name: m.chat_queue_collapse_message({ position: 1 }) }),
+		).toBeTruthy();
 		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_expand_all() }));
 		expect(
 			row('q1')
-				.getByRole('button', { name: m.chat_queue_toggle_message({ position: 2 }) })
+				.getByRole('button', { name: m.chat_queue_collapse_message({ position: 2 }) })
 				.getAttribute('aria-expanded'),
 		).toBe('true');
 		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_collapse_all() }));

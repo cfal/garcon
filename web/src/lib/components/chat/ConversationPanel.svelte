@@ -123,7 +123,11 @@
 	);
 	const queueShellClass = $derived.by(() => {
 		if (!queueVisible) return '';
-		return cn(dockShellClass, capSpace.queue ? 'pb-14' : 'pb-2');
+		return cn(
+			'flex min-h-0 flex-col',
+			CHAT_MAX_WIDTH_DOCK_SHELL_CLASS[localSettings.chatMaxWidth],
+			capSpace.queue ? 'pb-14' : 'pb-2',
+		);
 	});
 	const dockFrameClass = $derived(chatDockFrameClass(localSettings.chatMaxWidth));
 	const surfaceIdentity = $derived(`${surfaceId}:${panel.transcript.transcriptViewId}`);
@@ -302,7 +306,7 @@
 	</div>
 
 	<div bind:this={queueControlsContainer} class={queueShellClass}>
-		<div class={dockFrameClass}>
+		<div class={cn(dockFrameClass, 'flex min-h-0 flex-col')}>
 			<QueueControls
 				{chatId}
 				{queue}
@@ -357,6 +361,7 @@
 		onQuickCommit={() => actions?.openCommit(surfaceId, chatId)}
 	/>
 	<div
+		class="shrink-0"
 		aria-hidden="true"
 		data-conversation-panel-composer-spacer
 		style:height={`${ownsComposer ? composerInsetPx : 0}px`}

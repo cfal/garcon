@@ -816,7 +816,11 @@ export class ConversationSessionController {
 		this.#permissions.handleExitPlanMode(chatId, permissionOccurrenceId, choice, plan);
 	}
 
-	handleQueueControlErrorForChat(chatId: string, action: 'pause' | 'resume', error: unknown): void {
+	handleQueueControlErrorForChat(
+		chatId: string,
+		action: 'pause' | 'resume' | 'move',
+		error: unknown,
+	): void {
 		this.#queue.handleControlErrorForChat(chatId, action, error);
 	}
 

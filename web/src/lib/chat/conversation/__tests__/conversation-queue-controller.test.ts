@@ -357,6 +357,25 @@ describe('ConversationQueueController', () => {
 		expect(conversationUi.setExecutionControlFromRefresh).toHaveBeenCalledWith('chat-1', control);
 	});
 
+	it('preserves late move errors on their original chat after selection changes', () => {
+		const { controller, sessions, chatState } = createHarness();
+		sessions.selectedChatId = 'chat-2';
+		chatState.activeChatId = 'chat-2';
+		controller.handleControlErrorForChat(
+			'chat-1',
+			'move',
+			new ApiError(409, 'conflict', 'QUEUE_ENTRY_REORDER_CONFLICT'),
+		);
+		expect(chatState.appendLocalNoticeForChat).toHaveBeenCalledWith(
+			'chat-1',
+			'error',
+			m.chat_queue_move_conflict(),
+		);
+		delete sessions.byId['chat-1'];
+		controller.handleControlErrorForChat('chat-1', 'move', new Error('late deleted chat'));
+		expect(chatState.appendLocalNoticeForChat).toHaveBeenCalledTimes(1);
+	});
+
 	it('applies accepted queued steering control without duplicating pending event state', async () => {
 		const { controller, acceptedInputs, chatState, conversationUi, scrollToBottom } =
 			createHarness();

@@ -48,7 +48,7 @@ export interface ConversationPanelActions {
 	reportQueueControlError(
 		surfaceId: ChatViewSurfaceId,
 		chatId: string,
-		action: 'pause' | 'resume',
+		action: 'pause' | 'resume' | 'move',
 		error: unknown,
 	): void;
 	editQueue(surfaceId: ChatViewSurfaceId, chatId: string, entry: QueueEntry): void;

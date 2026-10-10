@@ -111,7 +111,7 @@ test("reorders, expands, edits, and steers queued messages from the chat on desk
           .getByRole("button", { name: "Expand all queued messages" })
           .click();
         await browserExpect(
-          tray.getByRole("button", { name: "Expand queued message 3" }),
+          tray.getByRole("button", { name: "Collapse queued message 3" }),
         ).toHaveAttribute("aria-expanded", "true");
         await captureDesktop("desktop-expanded.png");
         await tray
@@ -137,6 +137,20 @@ test("reorders, expands, edits, and steers queued messages from the chat on desk
         await tray
           .getByRole("button", { name: "Expand all queued messages" })
           .click();
+        await browserExpect
+          .poll(() =>
+            tray
+              .locator("[data-queue-entry-id]")
+              .evaluateAll((rows) =>
+                rows.every(
+                  (row, index) =>
+                    index === 0 ||
+                    rows[index - 1].getBoundingClientRect().bottom <=
+                      row.getBoundingClientRect().top + 1,
+                ),
+              ),
+          )
+          .toBe(true);
         await page.screenshot({
           path: join(artifactDir, "mobile-expanded.png"),
         });
@@ -192,6 +206,178 @@ test("reorders, expands, edits, and steers queued messages from the chat on desk
     held.release();
     await environment.dispose();
   }
+}, 120_000);
+
+test("retains late reorder errors and keeps a large expanded queue above a tall landscape composer", async () => {
+  await withChromiumFixture(
+    "inline-queue-review-regressions",
+    async (
+      { page, integration, assertNoBrowserErrors, browserErrors },
+      phase,
+    ) => {
+      const chatA = integration.newChatId();
+      const chatB = integration.newChatId();
+      const held = integration.fakeProviders.openAi.holdNext({
+        lastUserText: "Synthetic queue regression",
+      });
+      try {
+        await integration.client.startDirectChat({
+          chatId: chatA,
+          content: "Synthetic queue regression",
+          projectPath: integration.dirs.project,
+          agent: integration.directAgents.openAi,
+        });
+        await held.received;
+        await integration.client.startDirectChat({
+          chatId: chatB,
+          content: "Synthetic alternate chat",
+          projectPath: integration.dirs.project,
+          agent: integration.directAgents.openAi,
+        });
+        for (let index = 0; index < 3; index++)
+          await integration.client.enqueueNew(
+            chatA,
+            `Synthetic initial message ${index}`,
+          );
+        await integration.client.pauseQueue(chatA);
+        const control = await integration.client.getExecutionControl(chatA);
+        await page.goto(`${integration.garcon.baseUrl}/chat/${chatA}`);
+        const tray = page.locator("[data-queue-status-summary]");
+        await browserExpect(tray.locator("[data-queue-preview]")).toHaveCount(
+          3,
+        );
+        let releaseFailure!: () => void;
+        const failureGate = new Promise<void>((resolve) => {
+          releaseFailure = resolve;
+        });
+        await page.route(
+          "**/api/v1/chats/queue/entries/move",
+          async (route) => {
+            await failureGate;
+            await route.fulfill({
+              status: 409,
+              contentType: "application/json",
+              body: JSON.stringify({
+                success: false,
+                error: "Synthetic reorder conflict",
+                errorCode: "QUEUE_ENTRY_REORDER_CONFLICT",
+                retryable: false,
+                control: control,
+              }),
+            });
+          },
+        );
+        const pendingMove = page.waitForRequest(
+          "**/api/v1/chats/queue/entries/move",
+        );
+        await tray
+          .locator(`[data-queue-drag-id="${control.queue.entries[2].id}"]`)
+          .dragTo(
+            tray.locator(
+              `[data-queue-entry-id="${control.queue.entries[0].id}"]`,
+            ),
+            { targetPosition: { x: 100, y: 2 } },
+          );
+        await pendingMove;
+        const select = async (chatId: string) => {
+          await page
+            .locator(`[data-sidebar-virtual-row="${chatId}"]`)
+            .getByRole("button")
+            .first()
+            .click();
+          await browserExpect(
+            page.locator(`[data-conversation-panel-chat-id="${chatId}"]`),
+          ).toBeVisible();
+        };
+        await select(chatB);
+        releaseFailure();
+        await browserExpect(
+          page.getByText(
+            "Queue order changed. Review the latest order and try again.",
+            { exact: true },
+          ),
+        ).toHaveCount(0);
+        await select(chatA);
+        await browserExpect(
+          page.getByText(
+            "Queue order changed. Review the latest order and try again.",
+            { exact: true },
+          ),
+        ).toBeVisible();
+        expect(browserErrors.splice(0)).toEqual([
+          "console.error: Failed to load resource: the server responded with a status of 409 (Conflict)",
+        ]);
+        await page.unroute("**/api/v1/chats/queue/entries/move");
+
+        phase("verifying bounded rendering and access to the queue tail");
+        for (let index = 0; index < 250; index++)
+          await integration.client.enqueueNew(
+            chatA,
+            `Synthetic budget message ${index}\nSynthetic expanded detail.`,
+          );
+        await browserExpect(
+          tray.getByText("253 queued", { exact: true }),
+        ).toBeVisible();
+        expect(
+          await tray.locator("[data-queue-entry-id]").count(),
+        ).toBeLessThan(40);
+        const list = tray.locator("[data-queue-list]");
+        await list.evaluate((element) => {
+          element.scrollTop = element.scrollHeight;
+        });
+        await browserExpect(
+          tray.locator("[data-queue-preview]").last(),
+        ).toHaveText(
+          "Synthetic budget message 249\nSynthetic expanded detail.",
+        );
+        await tray
+          .getByRole("button", {
+            name: "Expand all queued messages",
+            exact: true,
+          })
+          .click();
+        await page.setViewportSize({ width: 900, height: 480 });
+        const composer = page.getByPlaceholder("Reply...", { exact: true });
+        await composer.fill(
+          Array.from(
+            { length: 9 },
+            (_, index) => `Synthetic tall draft line ${index}`,
+          ).join("\n"),
+        );
+        await browserExpect(composer).toBeInViewport();
+        await browserExpect
+          .poll(async () => {
+            const queueBounds = await tray.boundingBox();
+            const composerBounds = await page
+              .locator("[data-composer]")
+              .boundingBox();
+            return Boolean(
+              queueBounds &&
+              composerBounds &&
+              queueBounds.y + queueBounds.height <= composerBounds.y,
+            );
+          })
+          .toBe(true);
+        await list.evaluate((element) => {
+          element.scrollTop = 0;
+        });
+        await browserExpect(
+          tray.locator("[data-queue-preview]").first(),
+        ).toHaveText("Synthetic initial message 0");
+        const artifactDir = join(
+          import.meta.dir,
+          "../../artifacts/chromium/inline-queue",
+        );
+        await mkdir(artifactDir, { recursive: true });
+        await page.screenshot({
+          path: join(artifactDir, "landscape-tall-composer.png"),
+        });
+        assertNoBrowserErrors();
+      } finally {
+        held.releaseEcho();
+      }
+    },
+  );
 }, 120_000);
 
 test("preserves the composer and background queue updates across rapid chat switches", async () => {
@@ -285,21 +471,25 @@ test("preserves the composer and background queue updates across rapid chat swit
             ),
           ]);
         }
-        await browserExpect(tray.locator("[data-queue-preview]")).toHaveCount(
-          13,
-        );
-        await tray.locator("ol").evaluate((list) => {
+        await browserExpect(
+          tray.getByText("13 queued", { exact: true }),
+        ).toBeVisible();
+        await tray.locator("[data-queue-list]").evaluate((list) => {
           list.scrollTop = list.scrollHeight;
         });
         expect(
-          await tray.locator("ol").evaluate((list) => list.scrollTop),
+          await tray
+            .locator("[data-queue-list]")
+            .evaluate((list) => list.scrollTop),
         ).toBeGreaterThan(0);
         await select(chatA);
         await browserExpect(
           tray.getByText("14 queued", { exact: true }),
         ).toBeVisible();
         expect(
-          await tray.locator("ol").evaluate((list) => list.scrollTop),
+          await tray
+            .locator("[data-queue-list]")
+            .evaluate((list) => list.scrollTop),
         ).toBe(0);
         await browserExpect(
           tray.locator("[data-queue-preview]").first(),
