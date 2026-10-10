@@ -350,10 +350,10 @@ export class SteerCommands {
           throw error;
         }
         outcomeTurnId = target?.identity.turnId;
-        // The message waits as a steer while the turn cannot take it, or behind a steer in flight.
-        const inFlight = (await this.deps.queue.readChatExecutionControl(input.chatId)).entries
-          .some((entry) => entry.status === 'steering');
-        if (!target?.providerTarget || inFlight) {
+        // Earlier steers retain their delivery order when a follow-up becomes guidance.
+        const pendingSteer = (await this.deps.queue.readChatExecutionControl(input.chatId)).entries
+          .some((entry) => entry.status === 'steering' || (entry.kind === 'steer' && entry.id !== entryId));
+        if (!target?.providerTarget || pendingSteer) {
           const control = await this.deps.queue.markAcceptedQueueEntrySteer({
             command,
             expectedRevision: input.expectedRevision,

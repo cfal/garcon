@@ -1501,8 +1501,13 @@ The guarantee is durable before provider dispatch, not durable at send:
   delivered into that turn as soon as its run reports that it can take
   steering input, and is appended then like any steer. With no turn running,
   the drain dequeues it as the next turn's ordinary input. A queued message's
-  Steer action keeps the message as a pending steer when the turn cannot take
-  it yet. An agent known to lack steering refuses a pending steer. While the
+  Steer action can select any queued text message by ID, guarded by its content
+  and queue-order revisions. It consumes only the selected message on delivery;
+  other future-turn entries retain their relative order. When the turn cannot
+  take it yet, or another steer is pending, the selected message becomes a
+  pending steer after existing pending steers and before future-turn entries.
+  Repositioning it increments the queue-order revision. Automatic delivery still
+  reserves only the queue head. An agent known to lack steering refuses a pending steer. While the
   chat's executor has not reported the agent, as before a remote executor
   first connects, the steer waits instead, and it runs as the next turn if the
   agent turns out to lack steering. Like the rest of the queue, pending steers

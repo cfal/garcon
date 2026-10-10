@@ -120,7 +120,7 @@ describe('scripted Claude steering before the turn can take it', () => {
 
       await gate.open();
       await held.requested;
-      await waitForEmptyQueue(fixture.client, chatId);
+      await waitForQueuedContents(fixture.client, chatId, []);
       expect(userContents((await fixture.client.getMessages(chatId)).messages)).toEqual([
         prompt,
         firstSteer,
@@ -144,12 +144,13 @@ describe('scripted Claude steering before the turn can take it', () => {
     });
   }, 120_000);
 
-  test('keeps a queued message steered before the turn can take it and delivers it into that turn', async () => {
+  test('promotes a later queued message before the turn can take guidance and preserves earlier follow-up work', async () => {
     if (!environment) throw new Error('Scripted Claude environment was not initialized.');
     const testEnvironment = environment;
     const gate = new ClaudeSessionStartGate();
     const prompt = marker('FIRST_PROMPT');
     const queuedPrompt = marker('QUEUED_PROMPT');
+    const futurePrompt = marker('FUTURE_PROMPT');
     const requestCursor = testEnvironment.model.markRequests();
     const held = testEnvironment.model.scriptHeldTurn([claudeText(marker('FIRST_REPLY'))]);
     testEnvironment.model.scriptTurn([claudeText(marker('STEER_REPLY'))]);
@@ -164,8 +165,9 @@ describe('scripted Claude steering before the turn can take it', () => {
         permissionMode: 'bypassPermissions',
       }));
       if (!started.turnId) throw new Error('Scripted Claude start did not return a turn identity.');
+      await fixture.client.enqueueNew(chatId, futurePrompt);
       const queued = await fixture.client.enqueueNew(chatId, queuedPrompt);
-      const source = queued.control.queue.entries[0];
+      const source = queued.control.queue.entries[1];
       if (!source) throw new Error('The queued message is missing.');
 
       const kept = await fixture.client.steerQueued({
@@ -178,12 +180,16 @@ describe('scripted Claude steering before the turn can take it', () => {
       expect(kept).toMatchObject({ delivery: 'queued', entryId: source.id });
       expect(kept.control?.queue.entries).toEqual([
         expect.objectContaining({ id: source.id, kind: 'steer' }),
+        expect.objectContaining({ content: futurePrompt, kind: 'turn' }),
       ]);
+      expect(kept.control?.queue.reorderRevision).toBe(queued.control.queue.reorderRevision + 1);
       expect(userContents((await fixture.client.getMessages(chatId)).messages)).toEqual([prompt]);
 
       await gate.open();
       await held.requested;
-      await waitForEmptyQueue(fixture.client, chatId);
+      await fixture.client.waitForCommittedUserInput(chatId, queuedPrompt, { afterIndex: cursor });
+      await fixture.client.pauseQueue(chatId);
+      await waitForQueuedContents(fixture.client, chatId, [futurePrompt]);
       held.release();
       expectFinished((await fixture.client.waitForTurnTerminal(chatId, started.turnId, {
         afterIndex: cursor,
@@ -204,9 +210,11 @@ describe('scripted Claude steering before the turn can take it', () => {
   }, 120_000);
 });
 
-async function waitForEmptyQueue(client: GarconTestClient, chatId: string): Promise<void> {
+async function waitForQueuedContents(client: GarconTestClient, chatId: string, contents: string[]): Promise<void> {
   const deadline = Date.now() + LIVE_TURN_TIMEOUT_MS;
-  while ((await client.getExecutionControl(chatId)).queue.entries.length > 0) {
+  while (true) {
+    const entries = (await client.getExecutionControl(chatId)).queue.entries;
+    if (entries.length === contents.length && entries.every((entry, index) => entry.content === contents[index])) return;
     if (Date.now() > deadline) throw new Error('Queued steers were not delivered');
     await Bun.sleep(20);
   }

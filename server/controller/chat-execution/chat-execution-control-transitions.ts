@@ -70,8 +70,8 @@ export interface ReservedQueueSteer {
   entry: StoredQueueEntry;
 }
 
-// The queue head a steer operation observed; the operation is rejected once it changed.
-export interface ObservedQueueHead {
+// The selected queued message and order a steer operation observed.
+export interface ObservedQueueEntry {
   entryId: string;
   expectedRevision: number;
   expectedReorderRevision: number;
@@ -255,14 +255,20 @@ function insertQueueEntry(
     updatedAt: context.now,
     ...(input.submission ? { submission: { ...input.submission } } : {}),
   };
-  const firstQueuedTurn = next.entries.findIndex((candidate) => (
-    candidate.status === 'queued' && candidate.kind === 'turn'
-  ));
-  if (kind === 'steer' && firstQueuedTurn >= 0) next.entries.splice(firstQueuedTurn, 0, entry);
+  if (kind === 'steer') insertPendingSteer(next.entries, entry);
   else next.entries.push(entry);
   if (input.command) recordAppliedCommand(next, input.command, 'create', context);
   bump(next, context.now);
   return accepted(next, { entryId: entry.id, entry: toClientQueueEntry(entry), duplicate: false }, true);
+}
+
+function insertPendingSteer(entries: StoredQueueEntry[], entry: StoredQueueEntry): number {
+  const firstQueuedTurn = entries.findIndex((candidate) => (
+    candidate.status === 'queued' && candidate.kind === 'turn'
+  ));
+  const index = firstQueuedTurn < 0 ? entries.length : firstQueuedTurn;
+  entries.splice(index, 0, entry);
+  return index;
 }
 
 export function enqueueControlInput(
@@ -576,7 +582,7 @@ export function dequeueNextTurn(
 
 export function reserveQueueSteer(
   current: StoredChatExecutionControlState,
-  input: ObservedQueueHead,
+  input: ObservedQueueEntry,
   context: TransitionContext,
 ): ControlTransition<ReservedQueueSteer> {
   const next = cloneStoredChatExecutionControl(current);
@@ -595,11 +601,6 @@ export function reserveQueueSteer(
   if (next.reorderRevision !== input.expectedReorderRevision) {
     return rejected(current, { code: 'QUEUE_ENTRY_REORDER_CONFLICT' });
   }
-  const head = next.entries.find((candidate) => candidate.status === 'queued');
-  if (head?.id !== entry.id) {
-    return rejected(current, { code: 'QUEUE_ENTRY_REORDER_CONFLICT' });
-  }
-
   entry.status = 'steering';
   bump(next, context.now);
   return accepted(next, {
@@ -611,17 +612,21 @@ export function reserveQueueSteer(
 // queued message reserves through `reserveQueueSteer` regardless of the pause.
 export function reservePendingSteer(
   current: StoredChatExecutionControlState,
-  input: ObservedQueueHead,
+  input: ObservedQueueEntry,
   context: TransitionContext,
 ): ControlTransition<ReservedQueueSteer> {
   if (current.pause) return rejected(current, { code: 'QUEUE_PAUSE_CHANGED' });
+  const head = current.entries.find((candidate) => candidate.status === 'queued');
+  if (head?.id !== input.entryId) {
+    return rejected(current, { code: 'QUEUE_ENTRY_REORDER_CONFLICT' });
+  }
   return reserveQueueSteer(current, input, context);
 }
 
-// Turns the head entry into a steer, so it reaches the active turn once the turn can take it.
+// Places the selected message behind pending steers and before future turns.
 export function markQueueEntrySteer(
   current: StoredChatExecutionControlState,
-  input: ObservedQueueHead,
+  input: ObservedQueueEntry,
   context: TransitionContext,
 ): ControlTransition<void> {
   const next = cloneStoredChatExecutionControl(current);
@@ -637,12 +642,14 @@ export function markQueueEntrySteer(
       actualRevision: entry.revision,
     });
   }
-  const head = next.entries.find((candidate) => candidate.status === 'queued');
-  if (next.reorderRevision !== input.expectedReorderRevision || head?.id !== entry.id) {
+  if (next.reorderRevision !== input.expectedReorderRevision) {
     return rejected(current, { code: 'QUEUE_ENTRY_REORDER_CONFLICT' });
   }
   if (entry.kind === 'steer') return accepted(next, undefined, false);
   entry.kind = 'steer';
+  const previousIndex = next.entries.indexOf(entry);
+  next.entries.splice(previousIndex, 1);
+  if (insertPendingSteer(next.entries, entry) !== previousIndex) next.reorderRevision += 1;
   bump(next, context.now);
   return accepted(next, undefined, true);
 }

@@ -6,7 +6,7 @@ import { liveCodexStartRequest } from '../../support/live-codex.js';
 import { startScriptedCodexTestEnvironment } from '../../support/scripted-codex.js';
 import { SpaDriver } from '../../support/spa-driver.js';
 
-test('steers the visible Codex queue head and preserves later paused work', async () => {
+test('steers a later Codex queue message and preserves earlier paused work', async () => {
   const environment = await startScriptedCodexTestEnvironment();
   const held = environment.model.scriptHeldTurn([codexAssistantMessage('queue steer active reply')]);
   environment.model.scriptTurn([codexAssistantMessage('queue steer guidance reply')]);
@@ -26,15 +26,15 @@ test('steers the visible Codex queue head and preserves later paused work', asyn
 
       await app.openChat(chatId);
       await fixture.waitForSpaWebSocket();
-      await app.sendComposer('queue steer guidance');
       await app.sendComposer('queue steer future');
+      await app.sendComposer('queue steer guidance');
       await app.waitForQueuedPreview('queue steer guidance');
       await fixture.integration.client.pauseQueue(chatId);
       await app.waitForText('Resume queue');
 
-      await app.waitForQueuedOrder(['queue steer guidance', 'queue steer future']);
+      await app.waitForQueuedOrder(['queue steer future', 'queue steer guidance']);
       expect(await app.hasButton('Steer')).toBe(true);
-      await app.clickButton('Steer');
+      await app.clickQueuedRowAction('queue steer guidance', 'Steer');
       await app.waitForQueuedOrder(['queue steer future']);
       const afterSteer = await fixture.integration.client.getExecutionControl(chatId);
       expect(afterSteer.queue.entries.map((entry) => entry.content)).toEqual(['queue steer future']);

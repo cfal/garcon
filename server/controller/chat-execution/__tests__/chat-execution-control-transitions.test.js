@@ -209,36 +209,38 @@ describe('chat execution control transitions', () => {
     expect(value(dequeueNextTurn(resumed.next, context(6))).entry.content).toBe('first');
   });
 
-  it('reserves only the queue head for steering and consumes it atomically', () => {
+  it('steers a selected later entry while preserving the other entries and rejection recovery order', () => {
     const first = add(initial(), 'first', 1);
     const firstId = value(first).entryId;
     const second = add(first.next, 'second', 2);
     const secondId = value(second).entryId;
 
-    expect(rejection(reserveQueueSteer(second.next, {
-      entryId: secondId,
-      expectedRevision: 1,
-      expectedReorderRevision: 0,
-    }, context(3))).code).toBe('QUEUE_ENTRY_REORDER_CONFLICT');
-
     const reserved = reserveQueueSteer(second.next, {
-      entryId: firstId,
+      entryId: secondId,
       expectedRevision: 1,
       expectedReorderRevision: 0,
     }, context(4));
     expect(value(reserved).entry.status).toBe('steering');
+    expect(reserved.next.entries.map((entry) => entry.id)).toEqual([firstId, secondId]);
     expect(value(dequeueNextTurn(reserved.next, context(5)))).toBeNull();
-
-    const released = releaseQueueSteer(reserved.next, firstId, context(6));
-    expect(released.next.entries[0].status).toBe('queued');
-    const reservedAgain = reserveQueueSteer(released.next, {
+    expect(rejection(reserveQueueSteer(reserved.next, {
       entryId: firstId,
       expectedRevision: 1,
       expectedReorderRevision: 0,
+    }, context(5))).code).toBe('QUEUE_ENTRY_IN_FLIGHT');
+
+    const released = releaseQueueSteer(reserved.next, secondId, context(6));
+    expect(released.next.entries.map((entry) => [entry.id, entry.status])).toEqual([
+      [firstId, 'queued'], [secondId, 'queued'],
+    ]);
+    const reservedAgain = reserveQueueSteer(released.next, {
+      entryId: secondId,
+      expectedRevision: 1,
+      expectedReorderRevision: 0,
     }, context(7));
-    const consumed = consumeQueueSteer(reservedAgain.next, firstId, context(8));
-    expect(consumed.next.entries.map((entry) => entry.id)).toEqual([secondId]);
-    expect(consumed.next.recentlyDispatched.at(-1)?.entryId).toBe(firstId);
+    const consumed = consumeQueueSteer(reservedAgain.next, secondId, context(8));
+    expect(consumed.next.entries.map((entry) => entry.id)).toEqual([firstId]);
+    expect(consumed.next.recentlyDispatched.at(-1)?.entryId).toBe(secondId);
   });
 
   it('reserves a steer for automatic delivery only while the queue is unpaused', () => {
@@ -252,6 +254,10 @@ describe('chat execution control transitions', () => {
     expect(rejection(reservePendingSteer(paused.next, input, context(3))).code).toBe('QUEUE_PAUSE_CHANGED');
     expect(value(reserveQueueSteer(paused.next, input, context(4))).entry.status).toBe('steering');
     expect(value(reservePendingSteer(steer.next, input, context(5))).entry.status).toBe('steering');
+    const later = createQueuedSteer(steer.next, { content: 'later guidance' }, context(6));
+    expect(rejection(reservePendingSteer(later.next, {
+      ...input, entryId: value(later).entryId,
+    }, context(7))).code).toBe('QUEUE_ENTRY_REORDER_CONFLICT');
   });
 
   it('queues steers in order ahead of queued turns and behind an entry being steered', () => {
@@ -291,7 +297,7 @@ describe('chat execution control transitions', () => {
     }, context(7))).code).toBe('IDEMPOTENCY_CONFLICT');
   });
 
-  it('turns only the unchanged queue head into a steer', () => {
+  it('promotes a selected later entry to a pending steer with revision guards', () => {
     const first = add(initial(), 'first', 1);
     const firstId = value(first).entryId;
     const second = add(first.next, 'second', 2);
@@ -303,7 +309,7 @@ describe('chat execution control transitions', () => {
       ...overrides,
     });
 
-    expect(rejection(markQueueEntrySteer(second.next, request(secondId), context(3))).code)
+    expect(rejection(markQueueEntrySteer(second.next, request(secondId, { expectedReorderRevision: 2 }), context(3))).code)
       .toBe('QUEUE_ENTRY_REORDER_CONFLICT');
     expect(rejection(markQueueEntrySteer(
       second.next,
@@ -311,14 +317,38 @@ describe('chat execution control transitions', () => {
       context(4),
     )).code).toBe('QUEUE_ENTRY_REVISION_CONFLICT');
 
-    const marked = markQueueEntrySteer(second.next, request(firstId), context(5));
+    const marked = markQueueEntrySteer(second.next, request(secondId), context(5));
     expect(marked.changed).toBe(true);
     expect(marked.next.entries.map(({ id, kind, revision }) => [id, kind, revision])).toEqual([
-      [firstId, 'steer', 1],
-      [secondId, 'turn', 1],
+      [secondId, 'steer', 1],
+      [firstId, 'turn', 1],
     ]);
     expect(marked.next.version).toBe(second.next.version + 1);
-    expect(markQueueEntrySteer(marked.next, request(firstId), context(6)).changed).toBe(false);
+    expect(marked.next.reorderRevision).toBe(1);
+    expect(markQueueEntrySteer(marked.next, request(secondId, { expectedReorderRevision: 1 }), context(6)).changed).toBe(false);
+  });
+
+  it('promotes selected guidance behind existing pending steers without reordering other follow-ups', () => {
+    const pending = createQueuedSteer(initial(), { content: 'earlier guidance' }, context(1));
+    const first = add(pending.next, 'first follow-up', 2);
+    const selected = add(first.next, 'selected guidance', 3);
+    const last = add(selected.next, 'last follow-up', 4);
+    const marked = markQueueEntrySteer(last.next, {
+      entryId: value(selected).entryId,
+      expectedRevision: 1,
+      expectedReorderRevision: 0,
+    }, context(5));
+
+    expect(marked.next.entries.map(({ content, kind }) => [content, kind])).toEqual([
+      ['earlier guidance', 'steer'],
+      ['selected guidance', 'steer'],
+      ['first follow-up', 'turn'],
+      ['last follow-up', 'turn'],
+    ]);
+    expect(marked.next.reorderRevision).toBe(1);
+    expect(last.next.entries.map((entry) => entry.content)).toEqual([
+      'earlier guidance', 'first follow-up', 'selected guidance', 'last follow-up',
+    ]);
   });
 
   it('keeps the entry kind through replace, move, and requeue', () => {

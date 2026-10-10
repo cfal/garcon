@@ -398,7 +398,7 @@ describe('ConversationQueueController', () => {
 		});
 		const entry = queueEntry('entry-head', 3);
 
-		await controller.steerHeadForChat('chat-1', entry, 7);
+		await controller.steerEntryForChat('chat-1', entry, 7);
 
 		expect(acceptedInputs.steerQueuedEntry).toHaveBeenCalledWith({
 			chatId: 'chat-1',
@@ -436,7 +436,7 @@ describe('ConversationQueueController', () => {
 			})),
 		});
 
-		await controller.steerHeadForChat('chat-1', queueEntry('entry-head', 3), 7);
+		await controller.steerEntryForChat('chat-1', queueEntry('entry-head', 3), 7);
 
 		expect(conversationUi.setExecutionControlFromLiveUpdate).toHaveBeenCalledWith(
 			'chat-1',
@@ -468,7 +468,7 @@ describe('ConversationQueueController', () => {
 		});
 
 		await expect(
-			controller.steerHeadForChat('chat-1', queueEntry('entry-head', 3), 7),
+			controller.steerEntryForChat('chat-1', queueEntry('entry-head', 3), 7),
 		).resolves.toBeUndefined();
 
 		expect(chatState.loadMessages).toHaveBeenCalledWith('chat-1');
@@ -496,7 +496,7 @@ describe('ConversationQueueController', () => {
 			})),
 		});
 
-		await controller.steerHeadForChat('chat-1', queueEntry('entry-head', 3), 7);
+		await controller.steerEntryForChat('chat-1', queueEntry('entry-head', 3), 7);
 
 		expect(conversationUi.setExecutionControlFromLiveUpdate).not.toHaveBeenCalled();
 		expect(chatState.loadMessages).not.toHaveBeenCalled();
@@ -537,7 +537,7 @@ describe('ConversationQueueController', () => {
 		});
 
 		await expect(
-			controller.steerHeadForChat('chat-1', queueEntry('entry-head', 3), 7),
+			controller.steerEntryForChat('chat-1', queueEntry('entry-head', 3), 7),
 		).rejects.toBe(error);
 
 		expect(conversationUi.setExecutionControlFromRefresh).toHaveBeenCalledWith('chat-1', control);
@@ -566,7 +566,7 @@ describe('ConversationQueueController', () => {
 		});
 
 		await expect(
-			controller.steerHeadForChat('chat-1', queueEntry('entry-head', 3), 7),
+			controller.steerEntryForChat('chat-1', queueEntry('entry-head', 3), 7),
 		).rejects.toMatchObject({ name: 'CommandOutcomeUnknownError' });
 
 		expect(attempts).toBe(2);
@@ -605,7 +605,7 @@ describe('ConversationQueueController', () => {
 			})),
 		});
 
-		await controller.steerHeadForChat('chat-1', queueEntry('entry-head', 3), 7);
+		await controller.steerEntryForChat('chat-1', queueEntry('entry-head', 3), 7);
 
 		expect(conversationUi.getExecutionControl('chat-1')).toEqual(serverBControl);
 		expect(harness.chatState.loadMessages).toHaveBeenCalledWith('chat-1');
@@ -639,7 +639,7 @@ describe('ConversationQueueController', () => {
 		});
 
 		await expect(
-			controller.steerHeadForChat('chat-1', queueEntry('entry-head', 3), 7),
+			controller.steerEntryForChat('chat-1', queueEntry('entry-head', 3), 7),
 		).rejects.toBe(error);
 
 		expect(conversationUi.getExecutionControl('chat-1')).toEqual(serverBControl);
@@ -667,7 +667,7 @@ describe('ConversationQueueController', () => {
 		});
 
 		await expect(
-			controller.steerHeadForChat('chat-1', queueEntry('entry-head', 3), 7),
+			controller.steerEntryForChat('chat-1', queueEntry('entry-head', 3), 7),
 		).rejects.toBe(error);
 
 		expect(conversationUi.setExecutionControlFromRefresh).toHaveBeenCalledWith('chat-1', control);
@@ -697,7 +697,7 @@ describe('ConversationQueueController', () => {
 		});
 
 		await expect(
-			controller.steerHeadForChat('chat-1', queueEntry('entry-head', 3), 7),
+			controller.steerEntryForChat('chat-1', queueEntry('entry-head', 3), 7),
 		).rejects.toBe(error);
 
 		expect(conversationUi.setExecutionControlFromRefresh).toHaveBeenCalledWith('chat-1', control);
@@ -728,7 +728,7 @@ describe('ConversationQueueController', () => {
 		});
 
 		await expect(
-			controller.steerHeadForChat('chat-1', queueEntry('entry-head', 3), 7),
+			controller.steerEntryForChat('chat-1', queueEntry('entry-head', 3), 7),
 		).rejects.toBe(error);
 
 		expect(conversationUi.isExecutionControlSocketInstanceConfirmed).toHaveBeenCalledWith(
@@ -759,7 +759,7 @@ describe('ConversationQueueController', () => {
 		});
 
 		await expect(
-			controller.steerHeadForChat('chat-1', queueEntry('entry-head', 3), 7),
+			controller.steerEntryForChat('chat-1', queueEntry('entry-head', 3), 7),
 		).rejects.toBe(error);
 
 		expect(conversationUi.setExecutionControlFromRefresh).toHaveBeenCalledWith('chat-1', control);
@@ -794,7 +794,7 @@ describe('ConversationQueueController', () => {
 		const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 
 		await expect(
-			controller.steerHeadForChat('chat-1', queueEntry('entry-head', 3), 7),
+			controller.steerEntryForChat('chat-1', queueEntry('entry-head', 3), 7),
 		).rejects.toBe(error);
 
 		expect(harness.chatState.upsertPendingUserInput).not.toHaveBeenCalled();
@@ -824,7 +824,7 @@ describe('ConversationQueueController', () => {
 		});
 
 		await expect(
-			controller.steerHeadForChat('chat-1', queueEntry('entry-head', 3), 7),
+			controller.steerEntryForChat('chat-1', queueEntry('entry-head', 3), 7),
 		).rejects.toBe(error);
 
 		expect(chatState.upsertPendingUserInput).not.toHaveBeenCalled();

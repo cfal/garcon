@@ -249,7 +249,8 @@ describe('Lightpanda queue workflow', () => {
       await app.clickDialogButton('Save edit');
       await app.waitForText('ui-queue-b-edited');
       await app.clickDialogButton('Close');
-      await app.clickQueuedRowAction('ui-queue-c', 'Remove from queue');
+      await app.clickQueuedRowAction('ui-queue-c', 'Queue actions');
+      await app.clickMenuItem('Remove from queue');
       await app.waitForTextAbsent('ui-queue-c');
       await app.clickButton('Pause');
       await app.waitForText('Resume queue');

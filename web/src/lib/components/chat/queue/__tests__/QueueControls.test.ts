@@ -141,29 +141,28 @@ describe('inline queue', () => {
 		).toBe('false');
 	});
 
-	it('edits and removes the selected stable entry directly', async () => {
+	it('edits directly and removes the selected stable entry from its menu', async () => {
 		const onEdit = vi.fn();
 		const onDelete = vi.fn().mockResolvedValue(undefined);
 		const queue = makeQueue();
 		renderControls(queue, { onEdit, onDelete });
 		await fireEvent.click(row('q1').getByRole('button', { name: m.chat_queue_edit_message() }));
-		await fireEvent.click(
-			row('q2').getByRole('button', { name: m.chat_queue_remove_from_queue() }),
-		);
+		await openMenu('q2');
+		await fireEvent.click(screen.getByRole('menuitem', { name: m.chat_queue_remove_from_queue() }));
 		expect(onEdit).toHaveBeenCalledWith(queue.entries[1]);
 		expect(onDelete).toHaveBeenCalledWith('q2');
 	});
 
-	it('puts Send now in the head overflow while Steer stays on the row', async () => {
+	it('offers Steer on every queued message and keeps Send now in the head overflow', async () => {
 		const onInterrupt = vi.fn();
 		const onSteer = vi.fn().mockResolvedValue(undefined);
 		const queue = makeQueue();
 		renderControls(queue, { canInterrupt: true, canSteer: true, onInterrupt, onSteer });
 		expect(screen.queryByRole('button', { name: m.chat_queue_interrupt_and_send() })).toBeNull();
 		expect(row('q0').getByRole('button', { name: m.chat_queue_steer() })).toBeTruthy();
-		expect(row('q1').queryByRole('button', { name: m.chat_queue_steer() })).toBeNull();
-		await fireEvent.click(row('q0').getByRole('button', { name: m.chat_queue_steer() }));
-		expect(onSteer).toHaveBeenCalledWith(queue.entries[0], 7);
+		expect(screen.getAllByRole('button', { name: m.chat_queue_steer() })).toHaveLength(3);
+		await fireEvent.click(row('q1').getByRole('button', { name: m.chat_queue_steer() }));
+		expect(onSteer).toHaveBeenCalledWith(queue.entries[1], 7);
 		await waitFor(() =>
 			expect(
 				row('q0').getByRole('button', { name: m.chat_queue_actions() }).hasAttribute('disabled'),
@@ -175,6 +174,9 @@ describe('inline queue', () => {
 		);
 		expect(onInterrupt).toHaveBeenCalledOnce();
 		await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+		await openMenu('q1');
+		expect(screen.queryByRole('menuitem', { name: m.chat_queue_interrupt_and_send() })).toBeNull();
+		expect(screen.queryByRole('menuitem', { name: m.chat_queue_edit_message() })).toBeNull();
 	});
 
 	it('omits all ordering actions from the inline queue menu', async () => {
@@ -251,13 +253,14 @@ describe('inline queue', () => {
 		const pending = deferred();
 		const onDelete = vi.fn(() => pending.promise);
 		renderControls(makeQueue(), { onDelete });
-		const remove = row('q1').getByRole('button', { name: m.chat_queue_remove_from_queue() });
+		await openMenu('q1');
+		const remove = screen.getByRole('menuitem', { name: m.chat_queue_remove_from_queue() });
 		await fireEvent.click(remove);
 		await fireEvent.click(remove);
 		expect(onDelete).toHaveBeenCalledOnce();
-		expect(remove.hasAttribute('disabled')).toBe(true);
+		expect(row('q1').getByRole('button', { name: m.chat_queue_actions() }).hasAttribute('disabled')).toBe(true);
 		pending.resolve();
-		await waitFor(() => expect(remove.hasAttribute('disabled')).toBe(false));
+		await waitFor(() => expect(row('q1').getByRole('button', { name: m.chat_queue_actions() }).hasAttribute('disabled')).toBe(false));
 	});
 
 	it('reports a late pause failure to the originating chat', async () => {

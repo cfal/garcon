@@ -231,10 +231,10 @@
 							{blocked}
 							{steering}
 							deleting={mutation?.kind === 'deleting' && mutation.entryId === entry.id}
-							canSteer={index === 0 && canSteer && entry.kind !== 'steer' && Boolean(onSteer)}
+							canSteer={canSteer && entry.kind !== 'steer' && Boolean(onSteer)}
 							canInterrupt={index === 0 && canInterrupt && !queue.pause && Boolean(onInterrupt)}
 							onSteer={() => {
-								if (onSteer && queue && entries[0]?.id === entry.id) {
+								if (onSteer && queue && entries.some((candidate) => candidate.id === entry.id)) {
 									const revision = queue.reorderRevision;
 									void mutate('steering', () => onSteer!(entry, revision), entry.id);
 								}

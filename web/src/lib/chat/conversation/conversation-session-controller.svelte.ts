@@ -868,7 +868,7 @@ export class ConversationSessionController {
 		entry: QueueEntry,
 		reorderRevision: number,
 	): Promise<void> {
-		await this.#queue.steerHeadForChat(chatId, entry, reorderRevision);
+		await this.#queue.steerEntryForChat(chatId, entry, reorderRevision);
 	}
 
 	handleModelSelectionChange(next: AgentSwitchSelection): void {

@@ -275,7 +275,7 @@ export class ConversationQueueController {
 		}
 	}
 
-	async steerHeadForChat(
+	async steerEntryForChat(
 		chatId: string,
 		entry: QueueEntry,
 		expectedReorderRevision: number,

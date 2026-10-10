@@ -67,6 +67,7 @@ test("reorders, expands, edits, and steers queued messages from the chat on desk
           });
         };
         await browserExpect(previews).toHaveText(messages);
+        await browserExpect(tray.getByRole("button", { name: "Steer", exact: true })).toHaveCount(3);
         await browserExpect(
           page.getByRole("button", { name: "Edit queue", exact: true }),
         ).toHaveCount(0);
@@ -182,8 +183,8 @@ test("reorders, expands, edits, and steers queued messages from the chat on desk
         await browserExpect(
           tray.getByRole("button", { name: "Resume queue", exact: true }),
         ).toBeVisible();
-        await tray.getByRole("button", { name: "Steer", exact: true }).click();
-        await browserExpect(previews).toHaveText([messages[0], editedMessage]);
+        await tray.getByRole("button", { name: "Steer", exact: true }).nth(1).click();
+        await browserExpect(previews).toHaveText([messages[2], editedMessage]);
         expect(
           (await integration.client.getExecutionControl(chatId)).queue.pause,
         ).not.toBeNull();

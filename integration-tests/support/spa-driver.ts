@@ -17,7 +17,7 @@ interface ResponsiveActionClickOptions {
   within?: string;
 }
 
-type QueueRowAction = 'Edit queued message' | 'Remove from queue' | 'Queue actions';
+type QueueRowAction = 'Edit queued message' | 'Queue actions' | 'Steer';
 type ComposerAction = 'Send message' | 'Queue message';
 
 const NEW_WORKSPACE_WINDOW_ACTIONS = [
