@@ -111,6 +111,8 @@ describe('validateAgentIntegration', () => {
 
   test('requires every nullable capability to declare its state', () => {
     const nullableFacets = [
+      'literalExecution',
+      'readiness',
       'attachments',
       'auth',
       'commands',
@@ -139,6 +141,8 @@ describe('validateAgentIntegration', () => {
 
   test('rejects malformed required and advertised facet shapes', () => {
     const invalidFacets = [
+      ['literalExecution', false],
+      ['readiness', {}],
       ['execution', { ...integration.execution, runningSessions: undefined }],
       ['catalog', {}],
       ['settings', { ...integration.settings, applyPatch: undefined }],
@@ -179,6 +183,18 @@ describe('validateAgentIntegration', () => {
       integrationClass: { integrationId: 'other', apiVersion: 5 },
       integration: missingLegacyHistoryImport as AgentIntegration,
     })).toThrow('missing required legacyHistoryImport capability state');
+  });
+
+  test.each([
+    { literalExecution: { selectionLabel: '' } },
+    { singleQuery: { async run() { return ''; } } },
+    { compaction: { async compact() { return createAgentResourceRef(scope, 'execution'); } } },
+    { steering: { async captureTarget() { return null; }, async steer() { return { kind: 'accepted' as const }; } } },
+  ])('rejects incompatible literal execution capabilities: %j', patch => {
+    expect(() => validateAgentIntegration({
+      integrationClass: { integrationId: 'other', apiVersion: 5 },
+      integration: { ...integration, literalExecution: { selectionLabel: 'Runtime' }, ...patch },
+    })).toThrow('invalid literal execution contract');
   });
 });
 
