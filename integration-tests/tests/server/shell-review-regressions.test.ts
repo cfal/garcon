@@ -7,17 +7,59 @@ import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { rejectionOf } from '../../support/promise-assertions.js';
 
 for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote-executor-dials'] as const) {
+  test.each([
+    { name: 'plain', presentation: undefined },
+    { name: 'styled', presentation: { origin: 'cli', style: 'notice', title: 'Synthetic command', disclosure: 'collapsed' } },
+    { name: 'collapsed', presentation: { origin: 'cli', disclosure: 'collapsed' } },
+  ] as const)(`Shell native Reload retains $name submission identity (${executionBackend})`, async ({ presentation }) => {
+    await withIntegrationFixture(`shell-reload-identity-${executionBackend}`, async fixture => {
+      const { client } = fixture;
+      const chatId = fixture.newChatId();
+      const clientMessageId = crypto.randomUUID();
+      const command = 'printf x >> side-effects';
+      const initial = await client.startChat({
+        chatId, agentId: 'shell', model: 'sh', projectPath: fixture.executionDirs.project,
+        permissionMode: 'default', thinkingMode: 'none', agentSettings: { ownerId: 'shell', schemaVersion: 1, values: {} },
+        origin: 'interactive', clientRequestId: crypto.randomUUID(), clientMessageId, command,
+        userMessagePresentation: presentation,
+      });
+      expect((await client.waitForTurnTerminal(chatId, initial.turnId)).type).toBe('agent-run-finished');
+      await client.waitForProcessing(chatId, false);
+      const sideEffects = join(fixture.executionDirs.project, 'side-effects');
+      expect(await readFile(sideEffects, 'utf8')).toBe('x');
+
+      for (let reload = 0; reload < 2; reload += 1) {
+        await client.reloadChat(chatId);
+        const beforeRetry = await client.getMessages(chatId);
+        const input = beforeRetry.messages.find(row => row.message.type === 'user-message')?.message;
+        expect(input?.type === 'user-message' ? input.presentation : null).toEqual(presentation);
+        const retry = await client.runChat({
+          chatId, clientRequestId: crypto.randomUUID(), clientMessageId, command, userMessagePresentation: presentation,
+        });
+        expect(retry.status).toBe('duplicate');
+        expect((await client.getMessages(chatId)).messages).toEqual(beforeRetry.messages);
+        expect(await readFile(sideEffects, 'utf8')).toBe('x');
+        expect(await rejectionOf(client.runChat({
+          chatId, clientRequestId: crypto.randomUUID(), clientMessageId, command: 'printf y >> side-effects',
+          userMessagePresentation: presentation,
+        }))).toMatchObject({ status: 409, body: { errorCode: 'IDEMPOTENCY_CONFLICT' } });
+        if (presentation) {
+          expect(await rejectionOf(client.runChat({
+            chatId, clientRequestId: crypto.randomUUID(), clientMessageId, command,
+          }))).toMatchObject({ status: 409, body: { errorCode: 'IDEMPOTENCY_CONFLICT' } });
+        }
+      }
+    }, { executionBackend });
+  }, 60_000);
+
   test(`Shell source, cwd failure, and incomplete export regressions (${executionBackend})`, async () => {
     await withIntegrationFixture(`shell-review-${executionBackend}`, async fixture => {
       const { client } = fixture;
-      const start = async (command: string, chatId = fixture.newChatId()) => {
-        const receipt = await client.startChat({
+      const start = (command: string, chatId = fixture.newChatId()) => client.startChat({
           chatId, agentId: 'shell', model: 'bash', projectPath: fixture.executionDirs.project,
           permissionMode: 'default', thinkingMode: 'none', agentSettings: { ownerId: 'shell', schemaVersion: 1, values: {} },
           origin: 'interactive', clientRequestId: crypto.randomUUID(), clientMessageId: crypto.randomUUID(), command,
-        });
-        return receipt;
-      };
+      });
       const titlePrefix = '#' + 'x'.repeat(98);
       const initial = await start(titlePrefix + '\u{1f600}\nprintf "%s|%s|%s" "$#" "${1-unset}" "${2-unset}"');
       expect((await client.waitForTurnTerminal(initial.chatId, initial.turnId)).type).toBe('agent-run-finished');

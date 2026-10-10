@@ -188,7 +188,9 @@ function importedUserInputDrafts(
       kind: 'user-input',
       at,
       detail: {
-        clientMessageId: null,
+        clientMessageId: message.metadata?.contentMode === 'literal'
+          ? message.metadata.clientMessageId || null
+          : null,
         message,
         attachments: (message.images ?? []).map((image) => ({
           kind: 'image' as const,

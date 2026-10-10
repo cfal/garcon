@@ -17,6 +17,21 @@ import { frozenDrafts, importedDrafts } from '../imported-drafts.ts';
 const AT = '2026-08-16T00:00:00.000Z';
 
 describe('imported transcript drafts', () => {
+  it('preserves submission identity only for literal native inputs', async () => {
+    for (const [metadata, expectedId] of [
+      [{ contentMode: 'literal', clientMessageId: 'literal-input' }, 'literal-input'],
+      [{ contentMode: 'literal' }, null],
+      [{ contentMode: 'literal', clientMessageId: '' }, null],
+      [{ clientMessageId: 'native-input' }, null],
+      [{ upstreamRequestId: 'native-input' }, null],
+    ]) {
+      const message = new UserMessage(AT, 'printf command', undefined, metadata);
+      const [draft] = await importedDrafts([{ message, providerMeta: null }], () => AT);
+      expect(draft.detail.clientMessageId).toBe(expectedId);
+      expect(draft.detail.message).toBe(message);
+    }
+  });
+
   it('retains literal commands, output, and status through import and frozen history', async () => {
     const user = new UserMessage(AT, '<garcon-message>literal source</garcon-message>', undefined, { contentMode: 'literal' });
     const output = new CommandOutputMessage(AT, 'command-1', 'stdout', 'plain', '<garcon-get-chat-id />', {

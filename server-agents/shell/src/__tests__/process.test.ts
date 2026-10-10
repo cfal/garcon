@@ -97,6 +97,30 @@ for (const family of SHELL_FAMILIES) {
     });
 
     if (family === 'sh') {
+      it('lets descendants finish TERM cleanup after their shell exits', async () => {
+        await writeFile(join(directory, 'cleanup.cjs'), `
+          const fs = require('node:fs');
+          process.on('SIGHUP', () => {});
+          process.once('SIGTERM', () => setTimeout(() => {
+            fs.writeFileSync('child-cleaned', '');
+            process.exit(0);
+          }, 200));
+          setInterval(() => {}, 1000);
+          fs.writeFileSync('child-ready', '');
+        `);
+        const cancellation = new AbortController();
+        const command = run(`${JSON.stringify(process.execPath)} cleanup.cjs >/dev/null 2>&1 & wait`, cancellation.signal);
+        try {
+          while (!await Bun.file(join(directory, 'child-ready')).exists()) await Bun.sleep(5);
+          cancellation.abort();
+          expect((await command).interrupted).toBe(true);
+          expect(await Bun.file(join(directory, 'child-cleaned')).exists()).toBe(true);
+        } finally {
+          cancellation.abort();
+          await command;
+        }
+      });
+
       it('preserves a trailing backslash without adding a newline', async () => {
         const result = await run('printf x\\');
         expect(result.stdout).toBe('x\\');
@@ -111,6 +135,15 @@ for (const family of SHELL_FAMILIES) {
       it('decodes split UTF-8 independently and preserves terminal controls as inert text', async () => {
         const result = await run("printf '\\342'; sleep 0.02; printf '\\202\\254\\033[31mred\\033[0m\\r\\b'");
         expect(result.stdout).toBe('\u20ac\x1b[31mred\x1b[0m\r\b');
+        expect(result.complete).toBe(true);
+      });
+
+      it.each([
+        "printf '\\357\\273\\277X'",
+        "printf '\\357'; sleep 0.02; printf '\\273\\277X'",
+      ])('preserves a leading Unicode BOM: %s', async source => {
+        const result = await run(source);
+        expect(result.stdout).toBe('\ufeffX');
         expect(result.complete).toBe(true);
       });
 

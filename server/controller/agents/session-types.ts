@@ -1,4 +1,4 @@
-import type { AgentEndpointSelection } from '@garcon/common/agent-execution';
+import type { AgentAttachment, AgentEndpointSelection } from '@garcon/common/agent-execution';
 import type { AgentSettingsEnvelope } from '@garcon/common/agent-integration';
 import type { ApiProtocol } from '@garcon/common/api-providers';
 import {
@@ -10,10 +10,11 @@ import {
 import type { JsonObject } from '@garcon/common/json';
 import type { NativeSeedReceipt } from '@garcon/common/transcript-seed';
 import type { AgentCommandImage } from '@garcon/common/ws-requests';
-import type { AgentNativeSessionRef, AgentResourceScope } from '@garcon/server-agent-interface';
+import type { AgentExecutionContextV5, AgentNativeSessionRef, AgentResourceScope } from '@garcon/server-agent-interface';
 import type { CarryOverSegmentRef } from '../chats/registry-contracts.js';
 import type { TurnCommandType } from '../lib/turn-identity.js';
 import type { ChatPreambleSelection, PendingPreambleBoundary } from '@garcon/common/preambles';
+import type { TranscriptViewId } from '../ledger/contracts.js';
 
 export type { AgentCommandImage, PermissionMode, ThinkingMode };
 export type AgentName = string;
@@ -34,6 +35,18 @@ export interface AgentExecutionAdmission {
   readonly signal: AbortSignal;
   markStarted(): Promise<void>;
 }
+
+export type PreparedAgentPrompt =
+  | { readonly dispatch: false }
+  | {
+      readonly dispatch: true;
+      readonly prompt: string;
+      readonly outboundPrompt: string;
+      readonly attachments: AgentAttachment[];
+      readonly excludedOrdinals: ReadonlySet<number>;
+      readonly viewId: TranscriptViewId;
+      readonly submission?: AgentExecutionContextV5['submission'];
+    };
 
 export function assertExecutionAdmissionOpen(
   request: { executionAdmission?: AgentExecutionAdmission },

@@ -68,7 +68,7 @@ export default class ShellIntegration implements AgentIntegration {
     } };
     this.settings = createVersionedSettings({ ownerId: 'shell', schemaVersion: 1, defaults: {}, descriptors: [] });
     this.migration = createVersion1RecordMigration({ settings: this.settings, nativeSessions: null });
-    this.lifecycle = createIntegrationLifecycle({ start: async () => { await store.directory(); }, stop: () => runtime.stop() });
+    this.lifecycle = createIntegrationLifecycle({ start: () => store.initialize(), stop: () => runtime.stop() });
     this.projectPathUpdates = createAgentProjectPathUpdates(host.scope, async () => ({
       async commit() {}, async rollback() {},
     }));

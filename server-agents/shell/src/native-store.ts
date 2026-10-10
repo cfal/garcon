@@ -1,7 +1,7 @@
 import { Database } from 'bun:sqlite';
 import { constants } from 'node:fs';
-import { lstat, open, rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { lstat, open, opendir, rm } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { CommandResultMessage, parseChatMessage, type ChatMessage } from '@garcon/common/chat-types';
 import { AgentIntegrationError, type AgentHost, type AgentNativeSessionRef } from '@garcon/server-agent-interface';
 import { syncDirectory } from '@garcon/server-agent-common/lib/json-file-store';
@@ -10,9 +10,37 @@ import { EventLoopSteps } from '@garcon/server-agent-common/shared/event-loop';
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 export class ShellNativeStore {
+  #directory: Promise<string> | undefined;
+
   constructor(private readonly host: AgentHost) {}
 
-  directory(): Promise<string> { return this.host.storage.directory('sessions-v1'); }
+  directory(): Promise<string> {
+    return this.#directory ??= this.#prepareDirectory().catch(error => {
+      this.#directory = undefined;
+      throw error;
+    });
+  }
+
+  async #prepareDirectory(): Promise<string> {
+    const directory = await this.host.storage.directory('sessions-v1');
+    // Scoped storage may create the whole hierarchy; persist every ancestor entry.
+    for (let current = directory; ; current = dirname(current)) {
+      await syncDirectory(current);
+      if (dirname(current) === current) break;
+    }
+    return directory;
+  }
+
+  async initialize(): Promise<void> {
+    const directory = await this.directory();
+    const entries = await opendir(directory);
+    for await (const entry of entries) {
+      if (entry.name.startsWith('command-')) {
+        await rm(join(directory, entry.name), { recursive: true, force: true });
+      }
+    }
+    await syncDirectory(directory);
+  }
 
   reference(sessionId: string): AgentNativeSessionRef {
     if (!ID.test(sessionId)) throw new TypeError('Invalid shell session ID');
@@ -34,15 +62,21 @@ export class ShellNativeStore {
   async create(sessionId: string, chatId: string): Promise<NativeLog> {
     const path = await this.path(sessionId);
     const file = await open(path, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600);
-    await file.close();
-    const db = new Database(path, { strict: true });
+    let db: Database | undefined;
     try {
-      db.exec('PRAGMA journal_mode = DELETE; PRAGMA synchronous = FULL;');
+      await file.close();
+      db = new Database(path, { strict: true });
+      // EXTRA syncs the directory after each DELETE-journal commit.
+      db.exec('PRAGMA journal_mode = DELETE; PRAGMA synchronous = EXTRA;');
       db.exec('CREATE TABLE session (version INTEGER NOT NULL, id TEXT NOT NULL, chat_id TEXT NOT NULL); CREATE TABLE records (seq INTEGER PRIMARY KEY, command_id TEXT NOT NULL, message TEXT NOT NULL, execution TEXT);');
       db.query('INSERT INTO session VALUES (1, ?, ?)').run(sessionId, chatId);
       await syncDirectory(await this.directory());
       return new NativeLog(db);
-    } catch (error) { db.close(); throw error; }
+    } catch (error) {
+      db?.close();
+      await this.remove(sessionId);
+      throw error;
+    }
   }
 
   async load(sessionId: string, chatId: string): Promise<NativeLog> {
@@ -51,14 +85,22 @@ export class ShellNativeStore {
     if (!info.isFile() || info.isSymbolicLink()) throw unavailable();
     const db = new Database(path, { strict: true, readwrite: true });
     try {
-      db.exec('PRAGMA synchronous = FULL;');
+      db.exec('PRAGMA synchronous = EXTRA;');
       const header = db.query<{ version: number; id: string; chat_id: string }, []>('SELECT * FROM session').all();
       if (header.length !== 1 || header[0]?.version !== 1 || header[0].id !== sessionId || header[0].chat_id !== chatId) throw unavailable();
+      if (!db.query('SELECT 1 FROM records LIMIT 1').get()) throw unavailable();
       return new NativeLog(db);
     } catch (error) { db.close(); throw error; }
   }
 
-  async remove(sessionId: string): Promise<void> { await rm(await this.path(sessionId), { force: true }); }
+  async remove(sessionId: string): Promise<void> {
+    this.reference(sessionId);
+    const directory = await this.directory();
+    for (const suffix of ['', '-journal', '-wal', '-shm']) {
+      await rm(join(directory, `${sessionId}.sqlite${suffix}`), { force: true });
+    }
+    await syncDirectory(directory);
+  }
 }
 
 export class NativeLog {

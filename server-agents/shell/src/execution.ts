@@ -89,8 +89,8 @@ export class ShellExecution {
     };
   }
 
-  #emit(binding: Binding, event: AgentProducerNotification['event']): void {
-    if (binding.closed || binding.detached) return;
+  #emit(binding: Binding, event: AgentProducerNotification['event']): boolean {
+    if (binding.closed || binding.detached) return false;
     for (const listener of this.#listeners) {
       try {
         listener({ binding: binding.ref, event });
@@ -98,6 +98,7 @@ export class ShellExecution {
         this.host.logger.warn('Shell transcript publication failed; native history retained', { reason: String(error) });
       }
     }
+    return true;
   }
 
   async #launch(request: AgentStartRequestV5 | AgentResumeRequestV5, options?: ExecutorCallOptions): Promise<AgentExecutionHandle> {
@@ -146,6 +147,7 @@ export class ShellExecution {
     const commandId = crypto.randomUUID();
     let log: NativeLog | undefined;
     let commandRecorded = false;
+    let sessionPublished = false;
     const output = new CommandOutputTail();
     let outputPublished = false;
     const publishOutput = () => {
@@ -163,18 +165,10 @@ export class ShellExecution {
       log = commandLog;
       commandLog.reconcile();
       invocation.cancellation.signal.throwIfAborted();
-      this.#emit(invocation.binding, {
-        type: 'session',
-        session: {
-          agentSessionId: invocation.sessionId,
-          nativeSession: this.store.reference(invocation.sessionId),
-          nativeSeedReceipt: null,
-        },
-      });
       const input = new UserMessage(request.submission?.timestamp ?? invocation.startedAt, request.prompt, undefined, {
         contentMode: 'literal',
         ...(request.submission?.clientMessageId ? { clientMessageId: request.submission.clientMessageId } : {}),
-      });
+      }, request.submission?.presentation);
       commandLog.append(commandId, input, {
         ...parsed,
         family: shell.family,
@@ -183,6 +177,14 @@ export class ShellExecution {
         executorId: this.host.scope.executorId,
       });
       commandRecorded = true;
+      sessionPublished = this.#emit(invocation.binding, {
+        type: 'session',
+        session: {
+          agentSessionId: invocation.sessionId,
+          nativeSession: this.store.reference(invocation.sessionId),
+          nativeSeedReceipt: null,
+        },
+      });
       const offsets = { stdout: 0, stderr: 0 };
       this.#emit(invocation.binding, { type: 'started', runId: request.runId });
       const result = await executeShell({
@@ -252,6 +254,7 @@ export class ShellExecution {
         : { type: 'run-ended', runId: request.runId, outcome: 'failed', error: failureDetail(error) };
     } finally {
       log?.close();
+      if (log && !('nativeSession' in request) && !sessionPublished) await this.store.remove(invocation.sessionId);
     }
   }
 
@@ -284,7 +287,6 @@ export class ShellExecution {
     for (const invocation of active) invocation.cancellation.abort();
     await Promise.all(active.map(invocation => invocation.settled));
     this.#bindings.clear();
-    this.#listeners.clear();
   }
 }
 

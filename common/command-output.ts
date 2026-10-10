@@ -37,8 +37,8 @@ export function parseCommandOutputContext(value: unknown): CommandOutputContext 
 
 export function parseCommandWorkingDirectory(value: unknown): CommandWorkingDirectory | null {
   if (!isRecord(value)) return null;
-  if (value.kind === 'reported' && typeof value.path === 'string' && value.path.startsWith('/')
-    && value.path.length <= 65_536 && !value.path.includes('\0')) {
+  if (value.kind === 'reported' && typeof value.path === 'string' && value.path.length > 0
+    && !value.path.includes('\0')) {
     return { kind: 'reported', path: value.path };
   }
   if (value.kind === 'unavailable' && typeof value.reason === 'string' && value.reason.length <= 4096) {

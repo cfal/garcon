@@ -38,6 +38,7 @@ import type {
   AgentSteerOptions,
   ForkedAgentSessionOutcome,
   PrepareProjectPathUpdateRequest,
+  PreparedAgentPrompt,
   RunAgentTurnOptions,
   NativeForkCleanup,
 } from './session-types.js';
@@ -50,7 +51,6 @@ import type {
   TranscriptLedgerService,
   TranscriptProducerLease,
 } from '../ledger/service.js';
-import type { TranscriptViewId } from '../ledger/contracts.js';
 import {
   dispatchFailureDetail,
   executionSetupFailure,
@@ -89,18 +89,6 @@ export interface RunSingleQueryOptions {
   readonly agentSettings?: AgentSettingsEnvelope;
   readonly [key: string]: unknown;
 }
-
-type PreparedPrompt =
-  | { readonly dispatch: false }
-  | {
-      readonly dispatch: true;
-      readonly prompt: string;
-      readonly outboundPrompt: string;
-      readonly attachments: ReturnType<typeof attachments>;
-      readonly excludedOrdinals: ReadonlySet<number>;
-      readonly viewId: TranscriptViewId;
-      readonly submission?: { readonly clientMessageId: string | null; readonly timestamp: string };
-    };
 
 export class AgentRuntimeRouter {
   readonly #registry: IChatRegistry;
@@ -793,7 +781,7 @@ export class AgentRuntimeRouter {
     chatId: string,
     fallbackPrompt: string,
     opts: Pick<RunAgentTurnOptions, 'clientMessageId' | 'images' | 'executionAdmission'> & { readonly dispatchDeadline?: number },
-  ): Promise<PreparedPrompt> {
+  ): Promise<PreparedAgentPrompt> {
     const composition = this.#ledger.takePreparedInput(chatId, opts.clientMessageId);
     if (composition && !composition.inserted) {
       return { dispatch: false };
@@ -811,8 +799,19 @@ export class AgentRuntimeRouter {
     const entry = requireAgentChatEntry(chatId, this.#registry.getChat(chatId));
     if (this.#directory.require(entry.agentId, entry.executorId).literalExecution) {
       const source = composition?.input.detail.message.content ?? fallbackPrompt;
-      return { dispatch: true, prompt: source, outboundPrompt: source, attachments: [...preparedAttachments], excludedOrdinals: excluded, viewId,
-        submission: composition ? { clientMessageId: composition.input.detail.clientMessageId, timestamp: composition.input.at } : undefined };
+      return {
+        dispatch: true,
+        prompt: source,
+        outboundPrompt: source,
+        attachments: [...preparedAttachments],
+        excludedOrdinals: excluded,
+        viewId,
+        submission: composition ? {
+          clientMessageId: composition.input.detail.clientMessageId,
+          timestamp: composition.input.at,
+          presentation: composition.input.detail.message.presentation,
+        } : undefined,
+      };
     }
     // The input is already taken, so only the resolution itself is repeated.
     const signal = opts.executionAdmission?.signal;

@@ -145,6 +145,8 @@ describe('AgentRuntimeRouter producer boundary', () => {
     const forbidden = mock(() => { throw new Error('Conversational transformation invoked'); });
     const source = '  /bin/cat @notes.txt\n  ';
     const input = inputRow(2, source);
+    const presentation = { origin: 'cli', style: 'notice', disclosure: 'collapsed' };
+    input.detail.message.presentation = presentation;
     input.detail.attachments = attachments;
     const { router, start } = makeRouter({
       literalExecution: { selectionLabel: 'Runtime' },
@@ -152,7 +154,10 @@ describe('AgentRuntimeRouter producer boundary', () => {
       carryoverMessages: forbidden, createCarriedContext: forbidden, resolveFileMentions: forbidden,
     });
     await router.runAgentTurn('chat-1', 'fallback', { clientMessageId: 'message-2', turnId: 'turn-1' });
-    expect(start.mock.calls[0][0]).toMatchObject({ prompt: source, carriedContext: null, attachments });
+    expect(start.mock.calls[0][0]).toMatchObject({
+      prompt: source, carriedContext: null, attachments,
+      submission: { clientMessageId: input.detail.clientMessageId, timestamp: input.at, presentation },
+    });
     expect(forbidden).not.toHaveBeenCalled();
   });
   it('forwards actual compaction and context readiness in order before provider startup', async () => {

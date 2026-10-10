@@ -3,7 +3,6 @@ import { constants } from 'node:fs';
 import { mkdtemp, open, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { CommandWorkingDirectory } from '@garcon/common/command-output';
-import { parseCommandWorkingDirectory } from '@garcon/common/command-output';
 import type { ShellFamily } from './catalog.js';
 import { shellInvocation } from './source.js';
 
@@ -38,7 +37,7 @@ export async function executeShell(options: ShellProcessOptions): Promise<ShellP
   options.signal.throwIfAborted();
   const directory = await mkdtemp(join(options.temporaryRoot, 'command-'));
   let child: ChildProcessWithoutNullStreams | null = null;
-  let escalation: ReturnType<typeof setTimeout> | undefined;
+  let escalation: Promise<void> | undefined;
   let captureOpen = true;
   const signalGroup = (signal: NodeJS.Signals) => {
     if (!child?.pid) return;
@@ -50,7 +49,12 @@ export async function executeShell(options: ShellProcessOptions): Promise<ShellP
   };
   const terminate = () => {
     signalGroup('SIGTERM');
-    escalation ??= setTimeout(() => signalGroup('SIGKILL'), KILL_GRACE_MS);
+    escalation ??= new Promise(resolve => {
+      setTimeout(() => {
+        signalGroup('SIGKILL');
+        resolve();
+      }, KILL_GRACE_MS);
+    });
   };
   try {
     const sourcePath = join(directory, 'source');
@@ -72,7 +76,7 @@ export async function executeShell(options: ShellProcessOptions): Promise<ShellP
     let complete = true;
     let outputFailure: unknown;
     const consume = async (stream: NodeJS.ReadableStream, channel: 'stdout' | 'stderr') => {
-      const decoder = new TextDecoder();
+      const decoder = new TextDecoder('utf-8', { ignoreBOM: true });
       try {
         for await (const bytes of stream) {
           if (!captureOpen) return;
@@ -119,11 +123,8 @@ export async function executeShell(options: ShellProcessOptions): Promise<ShellP
   } finally {
     captureOpen = false;
     options.signal.removeEventListener('abort', terminate);
-    if (escalation) {
-      // Escalation belongs to this invocation even if its parent shell exited first.
-      signalGroup('SIGKILL');
-      clearTimeout(escalation);
-    }
+    // Descendants retain their termination grace even if the shell exits first.
+    await escalation;
     child?.stdin.destroy();
     child?.stdout.destroy();
     child?.stderr.destroy();
@@ -142,8 +143,8 @@ async function readWorkingDirectory(path: string): Promise<ShellWorkingDirectory
       if (bytesRead > CWD_REPORT_MAX_BYTES) throw new Error('Invalid cwd report');
       const text = new TextDecoder('utf-8', { fatal: true }).decode(buffer.subarray(0, bytesRead));
       if (text === CWD_REPORT_PENDING) return { kind: 'unavailable', reason: 'The command did not report a filesystem directory.' };
-      const parsed = parseCommandWorkingDirectory({ kind: 'reported', path: text.endsWith('\n') ? text.slice(0, -1) : text });
-      if (parsed) return parsed;
+      const directory = text.endsWith('\n') ? text.slice(0, -1) : text;
+      if (directory.startsWith('/') && !directory.includes('\0')) return { kind: 'reported', path: directory };
     } finally {
       await file.close();
     }

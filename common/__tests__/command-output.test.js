@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { CommandOutputMessage, CommandResultMessage, TranscriptNoticeMessage, UserMessage, parseChatMessage } from '../chat-types.ts';
 import { extractGarconCommands } from '../garcon-commands.ts';
 import { transcriptEntryCategoryForMessage } from '../transcript-entry-categories.ts';
-import { commandOutcomeText } from '../command-output.ts';
+import { commandOutcomeText, parseCommandWorkingDirectory } from '../command-output.ts';
 
 const timestamp = '2026-01-01T00:00:00.000Z';
 const context = { executorId: 'local', projectPath: '/workspace/project' };
@@ -46,7 +46,16 @@ describe('retained command content', () => {
     expect(parseChatMessage({ ...message, result: { ...result, outcome: 'invalid' } })).toBeNull();
     expect(parseChatMessage({ ...message, result: { ...result, outcome: ['finished'] } })).toBeNull();
     expect(parseChatMessage({ ...message, result: { ...result, exitCode: -1 } })).toBeNull();
-    expect(parseChatMessage({ ...message, result: { ...result, cwd: { kind: 'reported', path: 'relative' } } })).toBeNull();
+    expect(parseChatMessage({ ...message, result: { ...result, cwd: { kind: 'reported', path: '' } } })).toBeNull();
+  });
+
+  it('keeps wire paths executor-native rather than enforcing POSIX syntax', () => {
+    for (const path of ['/workspace', 'C:/workspace', 'C:\\workspace', '\\\\host\\share\\workspace']) {
+      expect(parseCommandWorkingDirectory({ kind: 'reported', path })).toEqual({ kind: 'reported', path });
+    }
+    for (const path of ['', '/workspace\0invalid']) {
+      expect(parseCommandWorkingDirectory({ kind: 'reported', path })).toBeNull();
+    }
   });
 
   it.each([

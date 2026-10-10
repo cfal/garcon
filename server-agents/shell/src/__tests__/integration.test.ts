@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { mkdtemp, mkdir, rm, symlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, readdir, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -9,9 +9,10 @@ import {
 } from '@garcon/server-agent-interface';
 import { validateAgentIntegration } from '@garcon/server-agent-interface/testing';
 import ShellIntegration from '../index.js';
-import { ShellNativeStore } from '../native-store.js';
+import { NativeLog, ShellNativeStore } from '../native-store.js';
 import { UserMessage } from '@garcon/common/chat-types';
 import { COMMAND_OUTPUT_BYTES } from '../output.js';
+import * as jsonFileStore from '@garcon/server-agent-common/lib/json-file-store';
 import { rejectionOf, throwingRejectionOf } from '../../../../integration-tests/support/promise-assertions.js';
 
 describe('Shell integration', () => {
@@ -101,6 +102,21 @@ describe('Shell integration', () => {
     expect((await history()).filter(row => row.type === 'user-message')).toHaveLength(2);
   });
 
+  it('retains admitted presentation for both initial and resumed submissions', async () => {
+    const initialPresentation = { origin: 'cli', style: 'notice', title: 'Synthetic command', disclosure: 'collapsed' } as const;
+    const resumedPresentation = { origin: 'cli', disclosure: 'collapsed' } as const;
+    await integration.execution.start({ ...request, submission: { ...request.submission!, presentation: initialPresentation } });
+    expect(await terminal()).toMatchObject({ outcome: 'finished' });
+    const ref = chat();
+    await integration.execution.resume({
+      ...request, runId: 'run-2', agentSessionId: ref.agentSessionId!, nativeSession: ref.nativeSession,
+      submission: { ...request.submission!, clientMessageId: 'input-2', presentation: resumedPresentation },
+    });
+    expect(await terminal('run-2')).toMatchObject({ outcome: 'finished' });
+    expect((await history()).filter(row => row.type === 'user-message').map(row => row.presentation))
+      .toEqual([initialPresentation, resumedPresentation]);
+  });
+
   it('fails invalid cwd capture without losing process exit or output evidence', async () => {
     await integration.execution.start({ ...request, model: 'bash',
       prompt: 'printf retained; report="$(dirname "${BASH_SOURCE[0]}")/cwd"; rm "$report"; mkfifo "$report"; exit 0' });
@@ -117,6 +133,144 @@ describe('Shell integration', () => {
       .toMatchObject({ code: 'INVALID_SETTINGS' });
     expect(events).toEqual([]);
     expect(await integration.execution.runningSessions()).toEqual([]);
+  });
+
+  it('does not publish or retain a native session when the first input cannot be stored', async () => {
+    const append = spyOn(NativeLog.prototype, 'append').mockImplementationOnce(() => { throw new Error('Synthetic input write failure'); });
+    try {
+      await integration.execution.start(request);
+      expect(await terminal()).toMatchObject({ outcome: 'failed' });
+      expect(events.map(event => event.type)).toEqual(['run-ended']);
+      expect(await readdir(join(root, 'sessions-v1'))).toEqual([]);
+    } finally { append.mockRestore(); }
+  });
+
+  it('removes a newly created session when admission is cancelled before publication', async () => {
+    const cancellation = new AbortController();
+    const create = ShellNativeStore.prototype.create;
+    const creating = spyOn(ShellNativeStore.prototype, 'create').mockImplementation(async function (this: ShellNativeStore, id, chatId) {
+      const log = await create.call(this, id, chatId);
+      cancellation.abort();
+      return log;
+    });
+    try {
+      await integration.execution.start(request, { signal: cancellation.signal });
+      expect(await terminal()).toMatchObject({ outcome: 'interrupted' });
+      expect(events.map(event => event.type)).toEqual(['run-ended']);
+      expect(await readdir(join(root, 'sessions-v1'))).toEqual([]);
+    } finally { creating.mockRestore(); }
+  });
+
+  it('rejects an empty native session instead of importing an empty transcript', async () => {
+    const store = new ShellNativeStore(host);
+    const id = crypto.randomUUID();
+    (await store.create(id, request.chatId)).close();
+    expect(await rejectionOf(store.load(id, request.chatId))).toMatchObject({ code: 'TRANSCRIPT_UNAVAILABLE' });
+  });
+
+  it('persists new storage ancestors before returning the native log', async () => {
+    const synced: string[] = [];
+    const syncDirectory = jsonFileStore.syncDirectory;
+    const sync = spyOn(jsonFileStore, 'syncDirectory').mockImplementation(async directory => {
+      await syncDirectory(directory);
+      synced.push(directory);
+    });
+    try {
+      const storageRoot = join(root, 'workspace', 'agent-data', 'shell');
+      host.storage.directory = async namespace => {
+        const directory = join(storageRoot, namespace);
+        await mkdir(directory, { recursive: true });
+        return directory;
+      };
+      const store = new ShellNativeStore(host);
+      (await store.create(crypto.randomUUID(), request.chatId)).close();
+      expect(synced).toEqual(expect.arrayContaining([
+        join(storageRoot, 'sessions-v1'), storageRoot, join(root, 'workspace', 'agent-data'),
+        join(root, 'workspace'), root,
+      ]));
+    } finally { sync.mockRestore(); }
+  });
+
+  it('removes crash-hot SQLite sidecars with the released session', async () => {
+    const store = new ShellNativeStore(host);
+    const id = crypto.randomUUID();
+    (await store.create(id, request.chatId)).close();
+    const path = await store.path(id);
+    for (const suffix of ['-journal', '-wal', '-shm']) await Bun.write(`${path}${suffix}`, 'Synthetic private history');
+    await store.remove(id);
+    expect(await readdir(join(root, 'sessions-v1'))).toEqual([]);
+  });
+
+  it('uses extra synchronization for new and reopened native logs', async () => {
+    const configured: unknown[] = [];
+    const exec = Database.prototype.exec;
+    const configure = spyOn(Database.prototype, 'exec').mockImplementation(function (this: Database, sql, ...bindings) {
+      const result = exec.call(this, sql, ...bindings);
+      if (sql.includes('PRAGMA synchronous')) configured.push(this.query('PRAGMA synchronous').get());
+      return result;
+    });
+    let log: NativeLog | undefined;
+    try {
+      const store = new ShellNativeStore(host);
+      const id = crypto.randomUUID();
+      log = await store.create(id, request.chatId);
+      log.append('command-1', new UserMessage('2026-01-01T00:00:00.000Z', 'true', undefined, { contentMode: 'literal' }));
+      log.close();
+      log = undefined;
+      log = await store.load(id, request.chatId);
+      expect(configured).toEqual([{ synchronous: 3 }, { synchronous: 3 }]);
+    } finally {
+      log?.close();
+      configure.mockRestore();
+    }
+  });
+
+  it('rejects an undurable storage hierarchy and retries initialization on the next start', async () => {
+    const syncDirectory = jsonFileStore.syncDirectory;
+    const sync = spyOn(jsonFileStore, 'syncDirectory').mockImplementation(async directory => {
+      if (directory === root) throw new Error('Synthetic ancestor sync failure');
+      await syncDirectory(directory);
+    });
+    try {
+      await integration.execution.start(request);
+      expect(await terminal()).toMatchObject({ outcome: 'failed' });
+      expect(events.map(event => event.type)).toEqual(['run-ended']);
+      expect(await readdir(join(root, 'sessions-v1'))).toEqual([]);
+    } finally { sync.mockRestore(); }
+    await integration.execution.start({ ...request, runId: 'run-2' });
+    expect(await terminal('run-2')).toMatchObject({ outcome: 'finished' });
+  });
+
+  it('sweeps abandoned command workspaces at startup without removing sessions or symlink targets', async () => {
+    const store = new ShellNativeStore(host);
+    const id = crypto.randomUUID();
+    (await store.create(id, request.chatId)).close();
+    const directory = await store.directory();
+    const abandoned = join(directory, 'command-stale');
+    await mkdir(abandoned);
+    await Bun.write(join(abandoned, 'source'), 'Synthetic private command');
+    await Bun.write(join(root, 'retained'), 'Synthetic unrelated data');
+    await symlink(root, join(directory, 'command-linked'));
+    await integration.lifecycle.start();
+    expect(await readdir(directory)).toEqual([`${id}.sqlite`]);
+    expect(await Bun.file(join(root, 'retained')).text()).toBe('Synthetic unrelated data');
+  });
+
+  it.each(['failed-start', 'stop-start'])('retains producer subscriptions across %s', async scenario => {
+    if (scenario === 'failed-start') {
+      const directory = spyOn(host.storage, 'directory').mockRejectedValueOnce(new Error('Synthetic startup failure'));
+      try { expect(await rejectionOf(integration.lifecycle.start())).toBeInstanceOf(Error); }
+      finally { directory.mockRestore(); }
+    } else {
+      await integration.lifecycle.start();
+      await integration.lifecycle.stop();
+    }
+    await integration.lifecycle.start();
+    await integration.producers.bind({ binding: request.producerBinding, chatId: request.chatId });
+    await integration.execution.start(request);
+    expect(await terminal()).toMatchObject({ outcome: 'finished' });
+    expect(events.some(event => event.type === 'session')).toBe(true);
+    expect((await history())[0]).toMatchObject({ type: 'user-message', content: request.prompt });
   });
 
   it('blocks overlapping starts and Reload until Stop has settled', async () => {
@@ -140,6 +294,22 @@ describe('Shell integration', () => {
     expect((await history()).some(row => row.type === 'command-output' && row.content === 'retained')).toBe(true);
     await integration.producers.detach(request.producerBinding);
     await integration.producers.bind({ binding: request.producerBinding, chatId: request.chatId });
+  });
+
+  it('runs detached work but removes a fresh session that was never published', async () => {
+    const create = ShellNativeStore.prototype.create;
+    const creating = spyOn(ShellNativeStore.prototype, 'create').mockImplementation(async function (this: ShellNativeStore, id, chatId) {
+      const log = await create.call(this, id, chatId);
+      integration.producers.detach(request.producerBinding);
+      return log;
+    });
+    try {
+      await integration.execution.start({ ...request, prompt: 'touch completed-detached' });
+      while ((await integration.execution.runningSessions()).length) await Bun.sleep(5);
+      expect(events).toEqual([]);
+      expect(await Bun.file(join(root, 'completed-detached')).exists()).toBe(true);
+      expect(await readdir(join(root, 'sessions-v1'))).toEqual([]);
+    } finally { creating.mockRestore(); }
   });
 
   it('retires idle detached bindings and tolerates stale detach', async () => {
