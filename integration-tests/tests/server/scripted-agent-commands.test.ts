@@ -43,7 +43,8 @@ async function environmentFor(
         ...environment,
         extraDiagnostics: () => ({ codexModelIssues: environment.model.issues() }),
       },
-      startRequest: (input) => ({ ...liveCodexStartRequest(input), model }),
+      // Runs synthetic shell barriers independently of host sandbox support.
+      startRequest: (input) => ({ ...liveCodexStartRequest({ ...input, permissionMode: 'bypassPermissions' }), model }),
       script: (reply) => environment.model.scriptTurn(async (request) => {
         const output = await reply(request.lastUserText);
         const gate = codexCommandGate?.(output);

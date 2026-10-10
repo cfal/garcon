@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import NewChatFormTestHost from './NewChatFormTestHost.svelte';
 import * as settingsApi from '$lib/api/settings';
@@ -415,13 +415,16 @@ describe('NewChatForm', () => {
 		expect(screen.queryByRole('alert')).toBeNull();
 		expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
 
-		await fireEvent.click(screen.getByTestId('reseed-new-chat'));
+		const reseedButton = screen.getByTestId('reseed-new-chat');
+		reseedButton.focus();
+		await fireEvent.click(reseedButton);
 
 		await waitFor(() => {
 			expect(screen.queryByRole('status', { name: 'Loading chat defaults...' })).toBeNull();
 			const content = document.querySelector<HTMLElement>('[data-slot="new-chat-form-content"]')!;
 			expect(content.classList.contains('invisible')).toBe(false);
 		});
+		expect(document.activeElement).toBe(screen.getByPlaceholderText('How can I help you today?'));
 	});
 
 	it('summarizes eligible preambles with responsive overflow counts', async () => {
@@ -556,21 +559,23 @@ describe('NewChatForm', () => {
 		expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
 	});
 
-	it('cancels pending reseed focus when unmounted', () => {
+	it('keeps path focus after the initial prompt focus has been delivered', async () => {
 		stubMatchMedia(false);
-		vi.mocked(settingsApi.getRemoteSettings).mockReturnValue(new Promise(() => {}));
-		const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
-		const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout');
-		const view = render(NewChatFormTestHost, { props: { onStartChat: vi.fn() } });
-		const focusTimerIndex = setTimeoutSpy.mock.calls.findIndex(([, delay]) => delay === 50);
-
-		expect(focusTimerIndex).toBeGreaterThanOrEqual(0);
-		const focusTimer = setTimeoutSpy.mock.results[focusTimerIndex]?.value;
-		view.unmount();
-
-		expect(clearTimeoutSpy).toHaveBeenCalledWith(focusTimer);
-		setTimeoutSpy.mockRestore();
-		clearTimeoutSpy.mockRestore();
+		vi.mocked(settingsApi.getRemoteSettings).mockResolvedValueOnce(makeSnapshot());
+		vi.useFakeTimers();
+		try {
+			render(NewChatFormTestHost);
+			await vi.advanceTimersByTimeAsync(0);
+			const prompt = screen.getByPlaceholderText('How can I help you today?');
+			expect(document.activeElement).toBe(prompt);
+			const path = screen.getByRole('textbox', { name: 'Project Path' });
+			path.focus();
+			await vi.advanceTimersByTimeAsync(50);
+			expect(document.activeElement).toBe(path);
+		} finally {
+			cleanup();
+			vi.useRealTimers();
+		}
 	});
 
 	it('does not submit on Enter on mobile (Enter inserts a newline)', async () => {
