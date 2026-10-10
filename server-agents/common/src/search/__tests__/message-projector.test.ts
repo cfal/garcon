@@ -2,8 +2,31 @@ import { describe, expect, test } from 'bun:test';
 import { CommandOutputMessage, CommandResultMessage, PiToolSearchToolUseMessage, UserMessage } from '@garcon/common/chat-types';
 import { projectSearchMessage } from '../message-projector.js';
 import { SEARCH_TIMESTAMP_MAX_BYTES } from '../schema.js';
+import type { CommandOutcome } from '@garcon/common/command-output';
+
+const complete: CommandOutcome = {
+  outcome: 'finished', exitCode: 0, signal: null, capture: 'complete',
+  cwd: { kind: 'reported', path: '/synthetic/project' },
+};
 
 describe('transcript search message projector', () => {
+  test('omits only clean command completion without filtering authored content', () => {
+    expect(projectSearchMessage(new CommandResultMessage('', 'command', complete))).toBeNull();
+    expect(projectSearchMessage(new UserMessage('', 'Completed'))).toMatchObject({ body: 'Completed' });
+    expect(projectSearchMessage(new CommandOutputMessage('', 'command', 'stdout', 'plain', 'Completed',
+      { executorId: 'local', projectPath: '/synthetic/project' }))).toMatchObject({ body: 'Completed' });
+    const diagnostics: Partial<CommandOutcome>[] = [
+      { outcome: 'failed', exitCode: 7 }, { outcome: 'interrupted' }, { outcome: 'unknown' },
+      { signal: 'SIGTERM' }, { exitCode: null }, { exitCode: 1 },
+      { capture: 'incomplete' }, { capture: 'truncated' },
+      { cwd: { kind: 'unavailable', reason: 'Synthetic cwd failure' } },
+    ];
+    for (const diagnostic of diagnostics) {
+      const result = new CommandResultMessage('', 'command', { ...complete, ...diagnostic });
+      expect(projectSearchMessage(result)).toMatchObject({ role: 'system', body: result.content.replaceAll('\n', ' ') });
+    }
+  });
+
   test('indexes retained command streams and outcomes with their semantic roles', () => {
     for (const channel of ['stdout', 'stderr'] as const) {
       const output = new CommandOutputMessage('', 'command', channel, 'plain', '<garcon-get-chat-id />',

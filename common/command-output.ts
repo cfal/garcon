@@ -28,6 +28,11 @@ export interface CommandOutcome {
   readonly capture: 'complete' | 'truncated' | 'incomplete';
 }
 
+export function isCleanCommandSuccess(result: CommandOutcome): boolean {
+  return result.outcome === 'finished' && result.exitCode === 0 && result.signal === null
+    && result.capture === 'complete' && result.cwd.kind === 'reported';
+}
+
 export function parseCommandOutputContext(value: unknown): CommandOutputContext | null {
   if (!isRecord(value) || typeof value.executorId !== 'string' || !value.executorId
     || typeof value.projectPath !== 'string' || !value.projectPath

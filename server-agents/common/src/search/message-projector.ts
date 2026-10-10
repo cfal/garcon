@@ -1,4 +1,5 @@
 import type { ChatMessage } from '@garcon/common/chat-types';
+import { isCleanCommandSuccess } from '@garcon/common/command-output';
 import type { ChatSearchSnippetRole } from '@garcon/common/chat-search';
 import type { SearchMessageRowInput } from './rows.js';
 import { SEARCH_TIMESTAMP_MAX_BYTES } from './schema.js';
@@ -156,9 +157,10 @@ function messageText(message: ChatMessage, budget: ExtractionBudget): string {
     case 'user-message':
     case 'assistant-message':
     case 'command-output':
-    case 'command-result':
     case 'thinking':
       return joinBounded(MAX_BODY_CHARS, [message.content], budget);
+    case 'command-result':
+      return isCleanCommandSuccess(message.result) ? '' : joinBounded(MAX_BODY_CHARS, [message.content], budget);
     case 'error':
     case 'cli-row':
       return '';

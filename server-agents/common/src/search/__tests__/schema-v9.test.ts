@@ -96,19 +96,34 @@ function markerSearch(
 
 describe('schema v9', () => {
   test('[TLV5-SEARCH.10-SCHEMA-01] recreates stale and malformed derived files', async () => {
-    for (const staleVersion of [7, 8, 3]) {
+    for (const staleVersion of [7, 8, 9, 3]) {
       rmSync(dbPath, { force: true });
       const stale = new Database(dbPath, { create: true });
       stale.exec(`CREATE TABLE stale_marker(value TEXT); PRAGMA user_version = ${staleVersion}`);
       stale.close();
       const opened = await openSearchDatabase(dbPath);
       expect(opened.recreated).toBe(true);
-      expect(opened.db.query('PRAGMA user_version').get()).toEqual({ user_version: 9 });
+      expect(opened.db.query('PRAGMA user_version').get()).toEqual({ user_version: 10 });
       expect(opened.db.query(
         "SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'stale_marker'",
       ).get()).toEqual({ count: 0 });
       opened.db.close();
     }
+  });
+
+  test('discards prior completion search hits when reopening a version 9 index', async () => {
+    const prior = await openFresh();
+    buildChat(prior, 'chat-1', 'view-1', 1, 'Completed');
+    expect(markerSearch(prior, 'chat-1', 'view-1', 1, 'completed').results).toHaveLength(1);
+    prior.exec('PRAGMA user_version = 9');
+    closeSearchDatabase(prior);
+
+    const reopened = await openSearchDatabase(dbPath);
+    try {
+      expect(reopened.recreated).toBe(true);
+      expect(listChatStates(reopened.db)).toEqual([]);
+      expect(markerSearch(reopened.db, 'chat-1', 'view-1', 1, 'completed').results).toEqual([]);
+    } finally { closeSearchDatabase(reopened.db); }
   });
 
   test('[TLV5-SEARCH.10-SCHEMA-03] validates the complete v9 identity', async () => {
