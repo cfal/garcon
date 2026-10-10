@@ -13,6 +13,27 @@ function host() {
 }
 
 describe('ChatExecutionControlOperations', () => {
+  it.each([
+    { kind: 'queued-turn-failed', entryId: 'failed-entry' },
+    { kind: 'turn-failed', turnId: 'failed-turn' },
+  ])('commits $kind under the chat lock only when input remains', async cause => {
+    const repository = new InMemoryChatExecutionControlRepository('server-instance-test');
+    const publish = mock(() => undefined);
+    const runExclusive = mock((_chatId, operation) => operation());
+    const operations = new ChatExecutionControlOperations(repository,
+      { ...host(), publish, runExclusive }, { assertAvailable: mock(async () => undefined) });
+    await operations.pauseAfterFailure('chat-1', cause);
+    expect(publish).not.toHaveBeenCalled();
+    expect(repository.load('chat-1').version).toBe(0);
+    await operations.create('chat-1', { content: 'synthetic tail', images: [] });
+    publish.mockClear();
+    runExclusive.mockClear();
+    await operations.pauseAfterFailure('chat-1', cause);
+    expect(runExclusive).toHaveBeenCalledWith('chat-1', expect.any(Function));
+    expect(publish).toHaveBeenCalledTimes(1);
+    expect(repository.load('chat-1')).toMatchObject({ version: 2, pause: cause });
+  });
+
   it('returns a committed steering reservation when publication fails', async () => {
     const repository = new InMemoryChatExecutionControlRepository('server-instance-test');
     let publicationFails = false;

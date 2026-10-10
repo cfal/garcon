@@ -717,29 +717,22 @@ export function requeueAndPause(
   return accepted(next, undefined, true);
 }
 
-export function pauseAfterDispatchFailure(
+export type FailurePauseCause =
+  | { readonly kind: 'queued-turn-failed'; readonly entryId: string }
+  | { readonly kind: 'turn-failed'; readonly turnId: string };
+
+export function pauseAfterFailure(
   current: StoredChatExecutionControlState,
-  entryId: string,
+  cause: FailurePauseCause,
   context: TransitionContext,
 ): ControlTransition<void> {
   const next = cloneStoredChatExecutionControl(current);
   if (!hasPendingTurnInput(next)) return accepted(next, undefined, false);
   next.pause = {
     id: context.newId(),
-    kind: 'queued-turn-failed',
-    entryId,
+    ...cause,
     pausedAt: context.now,
   };
-  bump(next, context.now);
-  return accepted(next, undefined, true);
-}
-
-export function pauseAfterTurnFailure(
-  current: StoredChatExecutionControlState, turnId: string, context: TransitionContext,
-): ControlTransition<void> {
-  const next = cloneStoredChatExecutionControl(current);
-  if (!hasPendingTurnInput(next)) return accepted(next, undefined, false);
-  next.pause = { id: context.newId(), kind: 'turn-failed', turnId, pausedAt: context.now };
   bump(next, context.now);
   return accepted(next, undefined, true);
 }

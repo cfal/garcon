@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it, mock } from 'bun:test';
 import {
   MAX_CONTROL_INPUT_ENTRIES,
   MAX_QUEUED_ATTACHMENT_BYTES,
@@ -15,7 +15,7 @@ import {
   deleteQueueEntry,
   markQueueEntrySteer,
   moveQueueEntry,
-  pauseAfterDispatchFailure,
+  pauseAfterFailure,
   pauseQueue,
   releaseQueueSteer,
   replaceQueueEntry,
@@ -414,18 +414,50 @@ describe('chat execution control transitions', () => {
     const only = add(initial(), 'only', 1);
     const onlyId = value(only).entryId;
     const empty = dequeueNextTurn(only.next, context(2));
-    const noTail = pauseAfterDispatchFailure(empty.next, onlyId, context(3));
+    const cause = { kind: 'queued-turn-failed', entryId: onlyId };
+    const noTail = pauseAfterFailure(empty.next, cause, context(3));
     expect(noTail.changed).toBe(false);
     expect(noTail.next.pause).toBeNull();
 
     const withTail = add(only.next, 'tail', 2);
     const dequeued = dequeueNextTurn(withTail.next, context(3));
-    const failed = pauseAfterDispatchFailure(dequeued.next, onlyId, context(4));
+    const failed = pauseAfterFailure(dequeued.next, cause, context(4));
     expect(failed.next.entries.map((entry) => entry.content)).toEqual(['tail']);
     expect(failed.next.pause).toMatchObject({
       kind: 'queued-turn-failed',
       entryId: onlyId,
     });
+  });
+
+  describe.each([
+    { kind: 'queued-turn-failed', entryId: 'failed-entry' },
+    { kind: 'turn-failed', turnId: 'failed-turn' },
+  ])('failure pause: $kind', cause => {
+    for (const tail of ['empty', 'user', 'control']) {
+      it.each([false, true])(`preserves the ${tail} tail and replaces only an eligible pause (prior=%s)`, prior => {
+        let current = initial();
+        if (tail === 'user') current = add(current, 'synthetic tail', 1).next;
+        if (tail === 'control') current = enqueueControlInput(current, controlInput('synthetic control'), context(1)).next;
+        if (prior) {
+          current.pause = { id: 'old-pause', kind: 'turn-failed', turnId: 'old-turn', pausedAt: context(1).now };
+          current.resumePauses = [{ ...current.pause }];
+        }
+        const before = structuredClone(current);
+        const transitionContext = { ...context(2), newId: mock(() => 'new-pause') };
+        const result = pauseAfterFailure(current, cause, transitionContext);
+        const changed = tail !== 'empty';
+        expect(result).toMatchObject({ outcome: { status: 'ok' }, changed, publicChanged: changed });
+        expect(result.next.entries).toEqual(before.entries);
+        expect(result.next.controlEntries).toEqual(before.controlEntries);
+        expect(result.next.resumePauses).toEqual(before.resumePauses);
+        expect(result.next.version).toBe(before.version + Number(changed));
+        expect(result.next.updatedAt).toBe(changed ? transitionContext.now : before.updatedAt);
+        expect(result.next.pause).toEqual(changed
+          ? { id: 'new-pause', ...cause, pausedAt: transitionContext.now } : before.pause);
+        expect(transitionContext.newId).toHaveBeenCalledTimes(Number(changed));
+        expect(current).toEqual(before);
+      });
+    }
   });
 
   it('clears queue entries and pause state together', () => {

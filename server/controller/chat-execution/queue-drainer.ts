@@ -179,7 +179,7 @@ export class QueueDrainer {
             entryId: admission.attachmentEntryId,
             message,
           });
-          await controls.pauseAfterDispatchFailure(chatId, admission.attachmentEntryId);
+          await controls.pauseAfterFailure(chatId, { kind: 'queued-turn-failed', entryId: admission.attachmentEntryId });
           callbacks.publishTurnFailed(chatId, message, options);
           return;
         }
@@ -251,7 +251,7 @@ export class QueueDrainer {
       inputKind: input.kind,
       message,
     });
-    if (input.kind === 'user') await this.deps.controls.pauseAfterDispatchFailure(chatId, input.entry.id);
+    if (input.kind === 'user') await this.deps.controls.pauseAfterFailure(chatId, { kind: 'queued-turn-failed', entryId: input.entry.id });
     this.deps.callbacks.publishTurnFailed(chatId, message, options);
     if (!attempt.isSettled && !this.deps.turnRunner.isChatRunning(chatId)) this.deps.callbacks.retireAttempt(chatId, attempt);
     return input.kind === 'control';

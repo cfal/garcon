@@ -1,6 +1,5 @@
 import type { AgentExecutionCommandType } from './session-types.js';
 import type { CommandWorkingDirectory } from '../../../common/command-output.js';
-import type { TranscriptProducerLease } from '../ledger/service.js';
 import { createLogger } from '../../common/log.js';
 import { matchesTurnIdentity, type TurnReceiptOwner } from '../lib/turn-identity.js';
 import type { LedgerRunEndedRow } from '../ledger/contracts.js';
@@ -11,7 +10,7 @@ export interface TurnExecutionSnapshot {
   readonly executorId: string;
   readonly projectPath: string;
   readonly transcriptViewId: string;
-  readonly producerLease: TranscriptProducerLease;
+  readonly producerLease: { readonly closed: boolean };
 }
 
 const logger = createLogger('agents:event-bus');

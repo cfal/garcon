@@ -860,7 +860,7 @@ export class ChatExecutionCoordinator extends EventEmitter<ChatExecutionCoordina
       if (outcome === 'failed' && !attempt?.hasTerminalCommit && this.#chatExists(reservation.chatId)
         && this.#executionPolicy(reservation.chatId) === 'literal') {
         const turnId = attempt?.identity().turnId;
-        if (turnId) await this.#controlOperations.pauseAfterTurnFailure(reservation.chatId, turnId);
+        if (turnId) await this.#controlOperations.pauseAfterFailure(reservation.chatId, { kind: 'turn-failed', turnId });
       }
     } finally {
       if (this.#ownership.isDirectCurrent(reservation)) {
