@@ -38,6 +38,7 @@ describe('handleAgentComplete', () => {
 		const ctx = createCtx();
 		handleAgentComplete(new AgentRunFinishedMessage('chat-1', 0), ctx);
 		expect(ctx.notifyCompletion).toHaveBeenCalledOnce();
+		expect(ctx.notifyCompletion).toHaveBeenCalledWith('chat-1');
 	});
 
 	it('does not notify or mark validated when exitCode is 1', () => {

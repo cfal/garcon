@@ -35,6 +35,7 @@ export interface SubmissionContext {
 	startup: ChatStartupConfig | undefined;
 	text: string;
 	content: string;
+	contentMode: 'literal' | undefined;
 	images: ChatImage[];
 	previousText: string;
 	previousImages: File[];
@@ -147,7 +148,7 @@ export async function submitSteerRoute(
 		whenTurnUnavailable: 'queue',
 	});
 	deps.chatState.upsertOptimisticUserInput(
-		optimisticUserInput(context.chatId, context.content, [], submission.clientMessageId),
+		optimisticUserInput(context.chatId, context.content, [], submission.clientMessageId, context.contentMode),
 	);
 	if (deps.sessions.selectedChatId === context.chatId) deps.scrollToBottom();
 	const clearedComposerRevision = clearOwnedComposer(deps, context);
@@ -184,6 +185,7 @@ export function submitSteerPreferenceRoute(
 		chat: ChatSessionRecord;
 		text: string;
 		supportsSteering: boolean;
+		contentMode: 'literal' | undefined;
 	},
 ): Promise<ConversationSubmissionOutcome> {
 	const rejection = steerSubmissionRejection({
@@ -206,6 +208,7 @@ export function submitSteerPreferenceRoute(
 		startup: deps.sessions.startupByChatId[input.chatId],
 		text: input.text,
 		content: input.text,
+		contentMode: input.contentMode,
 		images: [],
 		previousText: deps.composerState.inputText,
 		previousImages: [...deps.composerState.images],
@@ -339,7 +342,7 @@ function beginOptimisticInput(
 	clientMessageId: string,
 ): number | null {
 	deps.chatState.upsertOptimisticUserInput(
-		optimisticUserInput(context.chatId, context.text, context.images, clientMessageId),
+		optimisticUserInput(context.chatId, context.text, context.images, clientMessageId, context.contentMode),
 	);
 	if (deps.sessions.selectedChatId === context.chatId) deps.scrollToBottom();
 	const composerRevisionAfterClear = clearOwnedComposer(deps, context);

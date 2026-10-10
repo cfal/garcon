@@ -924,6 +924,7 @@
 </div>
 
 <PromptComposerEditor
+	{conversationInput}
 	bind:this={expandedEditor}
 	{ui}
 	{textarea}

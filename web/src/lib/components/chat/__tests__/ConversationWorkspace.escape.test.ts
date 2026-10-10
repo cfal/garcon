@@ -12,6 +12,12 @@ import { GitQuickSummaryStore } from '$lib/git/surface/git-quick-summary.svelte.
 import { createGitSurfaceTestDeps } from '$lib/git/__tests__/git-surface-test-deps.js';
 import { GIT_QUICK_SUMMARY_FINGERPRINT_VERSION } from '$shared/git';
 import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
+import { ConversationSessionController } from '$lib/chat/conversation/conversation-session-controller.svelte.js';
+import { mountConversationRouter } from '$lib/chat/conversation/conversation-router-adapter.svelte.js';
+import { playCompletionSound } from '$lib/notifications/completion-sound.js';
+import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
+
+vi.mock('$lib/notifications/completion-sound.js', () => ({ playCompletionSound: vi.fn() }));
 
 type BackgroundMessagesHandler = (
 	chatId: string,
@@ -93,6 +99,30 @@ const mockStopChat = vi.mocked(stopChat);
 const mockGetGitRefs = vi.mocked(getGitRefs);
 
 describe('ConversationWorkspace Escape abort handling', () => {
+	it.each(['conversation', 'literal', null] as const)('gates sibling prose and completion sounds with %s policy', async (executionPolicy) => {
+		const submit = vi.spyOn(ConversationSessionController.prototype, 'submitForChat').mockResolvedValue('accepted');
+		let registeredSubmit!: (message: string) => Promise<boolean>;
+		let registeredAppend!: ChatDraftAppend;
+		try {
+			render(ConversationWorkspaceEscapeHost, {
+				executionPolicy,
+				onRegisterSubmit: fn => { registeredSubmit = fn; },
+				onRegisterAppendToDraft: fn => { registeredAppend = fn; },
+			});
+			await waitFor(() => expect(registeredSubmit).toBeTypeOf('function'));
+			expect(await registeredSubmit('Address this comment: $(printf review)')).toBe(executionPolicy === 'conversation');
+			expect(registeredAppend('```text\nfile selection\n```')).toBe(executionPolicy === 'conversation' ? 'appended' : 'unavailable');
+			expect(submit).toHaveBeenCalledTimes(executionPolicy === 'conversation' ? 1 : 0);
+			const router = vi.mocked(mountConversationRouter).mock.calls.at(-1)?.[0];
+			if (!router) throw new Error('Expected conversation router registration');
+			router.notifyCompletion('chat-1');
+			expect(playCompletionSound).toHaveBeenCalledTimes(executionPolicy === 'conversation' ? 1 : 0);
+			router.notifyCompletion('unknown-chat');
+			expect(playCompletionSound).toHaveBeenCalledTimes(executionPolicy === 'conversation' ? 1 : 0);
+		} finally {
+			submit.mockRestore();
+		}
+	});
 	beforeEach(() => {
 		reconnectHarness.onBackgroundMessages = null;
 		mockGetChatMessages.mockResolvedValue({

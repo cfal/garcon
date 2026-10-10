@@ -9,6 +9,7 @@ import {
 import ConversationMessageHost from './ConversationMessageHost.svelte';
 import { CollapsibleBodyLayoutHarness } from './collapsible-body-layout-harness.js';
 import { ConversationFeedItemState } from '../ConversationFeedItemState.svelte';
+import { mergeRowsWithOptimisticInputs } from '$lib/chat/transcript/transcript-row-projection.js';
 
 const AT = '2026-08-18T12:00:00.000Z';
 const SOURCE_CHAT_ID = '1788090107980900';
@@ -35,6 +36,18 @@ describe('ConversationMessage chat rows', () => {
 	afterEach(() => {
 		cleanup();
 		vi.restoreAllMocks();
+	});
+
+	it.each(['pending', 'delivered'] as const)('renders %s optimistic literal input without Markdown', (delivery) => {
+		const content = '# command\n  printf "**literal**"\n';
+		const [row] = mergeRowsWithOptimisticInputs([], [{
+			clientMessageId: 'command-1', chatId: SOURCE_CHAT_ID, content, contentMode: 'literal',
+			createdAt: AT, delivery,
+		}], new Map());
+		const { container } = render(ConversationMessageHost, { message: row.message });
+		expect(container.querySelector('pre')?.textContent).toBe(content);
+		expect(container.querySelector('h1')).toBeNull();
+		expect(container.querySelector('strong')).toBeNull();
 	});
 
 	it('keeps internal notices on the generic information-card path', () => {

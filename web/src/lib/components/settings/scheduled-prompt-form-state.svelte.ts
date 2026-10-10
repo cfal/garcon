@@ -116,7 +116,7 @@ export class ScheduledPromptFormState {
 
 	get promptError(): string | null {
 		if (!this.prompt.trim()) return m.scheduled_prompts_prompt_required();
-		if (this.prompt.length > SCHEDULED_PROMPT_MAX_LENGTH) {
+		if (this.normalizedPrompt.length > SCHEDULED_PROMPT_MAX_LENGTH) {
 			return m.scheduled_prompts_prompt_too_long();
 		}
 		if (!scheduledPromptFitsRenderedLimit(this.normalizedPrompt)) {

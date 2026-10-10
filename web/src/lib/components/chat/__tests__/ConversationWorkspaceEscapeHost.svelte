@@ -57,9 +57,14 @@
 	import { ProjectResolutionStore } from '$lib/workspace/project-resolution-store.svelte.js';
 	import GitBranchSelector from '$lib/components/git/GitBranchSelector.svelte';
 	import type { FocusOwner } from '$lib/workspace/surface-types.js';
+	import type { AgentMetadata } from '$lib/agents/model-catalog-store.svelte.js';
+	import type { ChatDraftAppend } from '$lib/chat/composer/chat-draft-append.js';
 	import { sameFocusOwner } from '$lib/workspace/workspace-presentation-controller.svelte.js';
 
 	interface ConversationWorkspaceEscapeHostProps {
+		executionPolicy?: 'conversation' | 'literal' | null;
+		onRegisterSubmit?: (submit: (message: string) => Promise<boolean>) => void;
+		onRegisterAppendToDraft?: (append: ChatDraftAppend) => void;
 		onPatchActivity?: (chatId: string, timestamp: string) => void;
 		fetchProjectResolution?: ConstructorParameters<typeof ProjectResolutionStore>[0];
 		commit?: CommitController;
@@ -69,6 +74,9 @@
 	}
 
 	let {
+		executionPolicy = 'conversation',
+		onRegisterSubmit,
+		onRegisterAppendToDraft,
 		onPatchActivity,
 		fetchProjectResolution,
 		commit,
@@ -190,6 +198,14 @@
 	} as never);
 	setRemoteSettings({} as never);
 	setModelCatalog({
+		getAgent: (id: string): AgentMetadata | null => executionPolicy === null ? null : ({
+			id, label: id, executionPolicy, defaultModel: 'sonnet',
+			supportsCompact: false, supportsFork: true, supportsForkAtMessage: true,
+			supportsForkWhileRunning: true, supportsUpdateProjectPath: true, supportsSteering: true,
+			supportsImages: false, fileAttachmentMimeTypes: [], acceptsApiProviderEndpoints: false,
+			supportedProtocols: [], authLoginSupported: false, supportedPermissionModes: [],
+			supportedThinkingModes: [], settings: [], defaultSettings: { ownerId: id, schemaVersion: 1, values: {} },
+		}),
 		forExecutor() {
 			return this;
 		},
@@ -425,6 +441,8 @@
 	</div>
 {/if}
 <ConversationWorkspace
+	{onRegisterSubmit}
+	{onRegisterAppendToDraft}
 	isVisible={!showTestLayer}
 	isPresented={true}
 	{subagentToolbar}

@@ -522,6 +522,24 @@ describe('PromptComposer focus', () => {
 		}
 	});
 
+	it('keeps automatic snippet triggers disabled when closing a literal expanded editor', async () => {
+		render(PromptComposerTestHost, { selectedChatId: 'chat-literal-expanded', executionPolicy: 'literal' });
+		const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+		await fireEvent.click(screen.getByRole('button', { name: 'Open expanded composer' }));
+		const editor = await screen.findByRole('textbox', { name: 'Expanded composer text' }) as HTMLTextAreaElement;
+		const source = 'case x in x) true ;;';
+		editor.value = source;
+		editor.setSelectionRange(source.length, source.length);
+		await fireEvent.input(editor);
+		await fireEvent.pointerUp(editor);
+		await fireEvent.keyDown(editor, { key: 'Escape' });
+		await waitFor(() => expect(document.activeElement).toBe(textarea));
+		expect(textarea.value).toBe(source);
+		expect(screen.queryByRole('option', { name: /^review/ })).toBeNull();
+		expect(screen.queryByRole('dialog')).toBeNull();
+		expect(snippetsApi.expandSnippet).not.toHaveBeenCalled();
+	});
+
 	it('opens a live expanded editor and restores directional selection on Escape', async () => {
 		const chatId = 'chat-expanded-live';
 		localStorage.removeItem(chatDraftStorageKey(chatId));

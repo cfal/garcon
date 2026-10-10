@@ -317,6 +317,14 @@ describe('ScheduledPromptFormState', () => {
 		expect(form.canSave).toBe(false);
 	});
 
+	it.each(['conversation', 'literal'] as const)('validates the saved rather than discarded whitespace for %s prompts', async (executionPolicy) => {
+		const form = createForm(undefined, undefined, { executionPolicy });
+		await form.initialize(existingPrompt({ type: 'once', nextRunAt: '2099-01-02T09:00:00.000Z' }));
+		form.prompt = ' '.repeat(SCHEDULED_PROMPT_MAX_LENGTH) + 'printf result\n';
+		expect(form.canSave).toBe(executionPolicy === 'conversation');
+		if (executionPolicy === 'conversation') expect(form.buildDefinition()?.prompt).toBe('printf result');
+	});
+
 	it('validates the prompt length after chat ID substitution', () => {
 		const form = createForm();
 		const tomorrow = new Date();

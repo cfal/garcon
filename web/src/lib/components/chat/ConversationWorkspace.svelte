@@ -238,7 +238,8 @@
 		conversationUi,
 		startupCoordinator,
 		readReceiptOutbox,
-		notifyCompletion: () => {
+		notifyCompletion: (chatId) => {
+			if (!allowsConversationalActions(chatId)) return;
 			void playCompletionSound({
 				mode: localSettings.completionSoundMode,
 				volume: localSettings.completionSoundVolume,
@@ -361,7 +362,7 @@
 		const chat = sessions.byId[chatId];
 		if (!chat) return false;
 		const agent = rootModelCatalog.forExecutor(chat.executorId).getAgent(chat.agentId);
-		return Boolean(agent && agent.executionPolicy !== 'literal');
+		return agent?.executionPolicy === 'conversation';
 	}
 
 	const panelActions: ConversationPanelActions = {
@@ -599,7 +600,7 @@
 	// Exposes a chat submit function for sibling components (e.g. git review).
 	async function submitToActiveChat(message: string): Promise<boolean> {
 		const chatId = sessions.selectedChatId;
-		if (!chatId) return false;
+		if (!chatId || !allowsConversationalActions(chatId)) return false;
 		try {
 			return isAcceptedConversationSubmission(await controller.submitForChat(chatId, message));
 		} catch {
@@ -608,7 +609,9 @@
 	}
 
 	function appendToActiveDraft(block: string) {
-		return composerState.appendDraftBlock(sessions.selectedChatId ?? '', block);
+		const chatId = sessions.selectedChatId;
+		if (!chatId || !allowsConversationalActions(chatId)) return 'unavailable';
+		return composerState.appendDraftBlock(chatId, block);
 	}
 
 	async function reloadSelectedChat(chatId: string): Promise<void> {

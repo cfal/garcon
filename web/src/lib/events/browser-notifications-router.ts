@@ -24,6 +24,7 @@ export class BrowserNotificationsRouter {
 			enabled(): boolean;
 			isFocused(): boolean;
 			isChatProcessing(chatId: string): boolean;
+			allowsNotifications(chatId: string): boolean;
 		},
 	) {}
 
@@ -114,8 +115,8 @@ export class BrowserNotificationsRouter {
 		if (this.#seen.has(key)) return;
 		this.#seen.set(key, chatId);
 		while (this.#seen.size > 256) this.#seen.delete(this.#seen.keys().next().value!);
-		// Authenticated live events establish chat identity before list hydration finishes.
-		if (this.deps.enabled() && !this.deps.isFocused()) this.delivery.show(title, chatId, key);
+		if (this.deps.enabled() && !this.deps.isFocused() && this.deps.allowsNotifications(chatId))
+			this.delivery.show(title, chatId, key);
 	}
 
 	destroy(): void {

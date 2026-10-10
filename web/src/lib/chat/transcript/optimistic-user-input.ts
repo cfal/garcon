@@ -4,6 +4,7 @@ export interface OptimisticUserInput {
 	readonly chatId: string;
 	readonly clientMessageId: string;
 	readonly content: string;
+	readonly contentMode?: 'literal';
 	readonly createdAt: string;
 	readonly images?: ChatImage[];
 	// Whether the submitting request has come back. A row stays pending while the HTTP call is

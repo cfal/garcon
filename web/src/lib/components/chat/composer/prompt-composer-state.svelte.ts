@@ -48,7 +48,7 @@ export class PromptComposerUiState {
 		this.setSlashCommandTrigger(null);
 	}
 
-	updateTriggers(value: string, caret: number, snippetTrigger: unknown, isComposing = false, mode: 'conversation' | 'literal' = 'conversation'): void {
+	updateTriggers(value: string, caret: number, snippetTrigger: unknown, isComposing: boolean, mode: 'conversation' | 'literal'): void {
 		if (mode === 'literal') {
 			this.closeFileMenu();
 			this.closeSlashMenu();

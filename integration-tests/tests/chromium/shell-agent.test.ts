@@ -3,6 +3,7 @@ import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect as browserExpect } from 'playwright/test';
 import { withChromiumFixture } from '../../support/chromium-fixture.js';
+import { Deferred, withTimeout } from '../../support/deferred.js';
 
 test('Shell composer preserves literal commands and stable chat switching on desktop and mobile', async () => {
   await withChromiumFixture('shell-composer', async ({ page, integration, assertNoBrowserErrors }, phase) => {
@@ -26,6 +27,28 @@ test('Shell composer preserves literal commands and stable chat switching on des
     await browserExpect(page.locator('.markdown-code-block pre').filter({ hasText: '**plain output**' })).toBeVisible();
     await browserExpect(composer.getByRole('button', { name: 'Refine prompt', exact: true })).toBeVisible();
     await editor.evaluate(element => element.setAttribute('data-retained-shell-editor', 'true'));
+
+    phase('optimistic input stays literal before command delivery');
+    const received = new Deferred<void>();
+    const release = new Deferred<void>();
+    await page.route('**/api/v1/chats/run', async route => {
+      received.resolve();
+      await release.promise;
+      await route.continue();
+    });
+    const pendingSource = '# Pending literal heading\n  printf "pending output"\n';
+    try {
+      await editor.fill(pendingSource);
+      await editor.press('Enter');
+      await withTimeout(received.promise, 5000, () => 'Expected held Shell submission');
+      const pending = page.locator('pre').filter({ hasText: '# Pending literal heading' });
+      await browserExpect(pending).toHaveText(pendingSource);
+      await browserExpect(page.getByRole('heading', { name: 'Pending literal heading', exact: true })).toHaveCount(0);
+    } finally {
+      release.resolve();
+    }
+    await browserExpect(page.locator('.markdown-code-block pre').filter({ hasText: 'pending output' })).toBeVisible();
+    await page.unroute('**/api/v1/chats/run');
 
     phase('literal absolute path through Enter submission');
     const source = '  /bin/printf "<garcon-get-chat-id />\\n"\n ';

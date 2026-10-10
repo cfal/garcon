@@ -16,6 +16,7 @@ interface PromptComposerEditorControllerOptions {
 	get isDisabled(): boolean;
 	get promptTransformPending(): boolean;
 	get snippetTrigger(): unknown;
+	get conversationInput(): boolean;
 }
 
 export class PromptComposerEditorController {
@@ -97,6 +98,8 @@ export class PromptComposerEditorController {
 				this.options.composer.inputText,
 				restoredSelection.head,
 				this.options.snippetTrigger,
+				false,
+				this.options.conversationInput ? 'conversation' : 'literal',
 			);
 		}
 	}

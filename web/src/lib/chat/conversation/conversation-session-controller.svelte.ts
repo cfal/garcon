@@ -549,6 +549,7 @@ export class ConversationSessionController {
 		const agent = deps.modelCatalogForExecutor(executorId).getAgent(selection.agentId ?? '');
 		if (!agent) return isDraft && source === 'automatic-start' ? rejectUnavailableDraftStart(deps, chatId) : 'no-op';
 		const literal = agent.executionPolicy === 'literal';
+		const contentMode = literal ? 'literal' as const : undefined;
 		if (!literal) text = text.trim();
 		if (
 			(literal || isDraft || !isControllerSlashCommand(text)) &&
@@ -572,6 +573,7 @@ export class ConversationSessionController {
 		if (slash.kind === 'handled') return slash.outcome;
 
 		const specializedContext = {
+			contentMode,
 			chatId,
 			chat: selected,
 			startup,
@@ -650,6 +652,7 @@ export class ConversationSessionController {
 			}
 
 			const context = {
+				contentMode,
 				chatId,
 				chat: selected,
 				startup,
@@ -708,6 +711,7 @@ export class ConversationSessionController {
 			chatId,
 			chat: selected,
 			text,
+			contentMode: agent.executionPolicy === 'literal' ? 'literal' : undefined,
 			supportsSteering: deps
 				.modelCatalogForExecutor(selected.executorId ?? 'local')
 				.supportsSteering(selected.agentId),

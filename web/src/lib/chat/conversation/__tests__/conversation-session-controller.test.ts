@@ -3809,6 +3809,9 @@ describe('ConversationSessionController', () => {
 			expect(outcome).toBe('accepted');
 			expect(mockRunChat).toHaveBeenCalledWith(expect.objectContaining({ command }));
 			expect(mockSteerChat).not.toHaveBeenCalled();
+			expect(deps.chatState.optimisticUserInputs).toEqual([
+				expect.objectContaining({ content: command, contentMode: 'literal' }),
+			]);
 		},
 	);
 
