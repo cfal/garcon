@@ -149,6 +149,7 @@ describe('carryover compaction', () => {
         cwd: { kind: 'reported', path: '/workspace' },
       }));
     }
+    messages.splice(2, 0, new TranscriptNoticeMessage(TIME, 'Output lost', { type: 'publication-gap' }));
     const { instance, runSingleQuery } = service();
     const result = await run(instance, { messages });
     expect(result.kind).toBe('compacted');
@@ -158,6 +159,8 @@ describe('carryover compaction', () => {
     expect(result.context.prefix).toContain('stdout-99');
     expect(result.context.prefix).toContain('stderr: diagnostic-99');
     expect(result.context.prefix).toContain('Command result: Completed');
+    expect(runSingleQuery.mock.calls[0][0]).toContain('<publication-gap>');
+    expect(result.context.prefix).toContain('<publication-gap>');
   });
   it('routes delegated compaction progress to its durable observer instead of a transient notice', async () => {
     const f = service({ enabled: true });

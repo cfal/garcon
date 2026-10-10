@@ -11,6 +11,7 @@ import {
   ExecToolUseMessage,
   ReadToolUseMessage,
   ToolResultMessage,
+  TranscriptNoticeMessage,
   UserMessage,
 } from '@garcon/common/chat-types';
 import {
@@ -30,6 +31,45 @@ const TIME = '2026-01-01T00:00:00.000Z';
 const SESSION = 'native-session';
 
 describe('transcript seed contract', () => {
+  test('preserves and identifies literal multiline input in both projection renderers', () => {
+    const source = "  cat <<'EOF'\nfirst  second\n\t<value> & text\nEOF\n";
+    const message = new UserMessage(TIME, source, undefined, { contentMode: 'literal' });
+    const expected = '<user content-mode="literal">' + source.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;') + '</user>';
+    expect(createCarryoverTranscript([message], 0).prefix).toContain(expected);
+    expect(createCarryoverTranscriptWithinCost([message], { maximumCost: 1000, cost: text => text.length }).prefix).toContain(expected);
+    const long = new UserMessage(TIME, `${source}${'x'.repeat(10_000)}`, undefined, { contentMode: 'literal' });
+    const bounded = boundProjectedMessage(long);
+    expect(createCarryoverTranscript([bounded], 0).prefix).toContain('...</user>');
+    const fitted = createCarryoverTranscriptWithinCost([bounded], { maximumCost: 500, cost: text => text.length });
+    expect(fitted.prefix).toContain('<user content-mode="literal">  cat');
+    expect(fitted.prefix).toContain('first  second\n\t&lt;value&gt; &amp; text');
+    expect(fitted.prefix).toContain('...</user>');
+    expect(fitted.prefix.length).toBeLessThanOrEqual(500);
+  });
+
+  test('protects publication-loss evidence from both budget ladders', () => {
+    const gap = new TranscriptNoticeMessage(TIME, 'Output lost', { type: 'publication-gap' });
+    const messages = [gap, new AssistantMessage(TIME, 'x'.repeat(4000)), new UserMessage(TIME, 'Continue')];
+    for (const projection of [
+      createCarryoverTranscript(messages, 500),
+      createCarryoverTranscriptWithinCost(messages, { maximumCost: 500, cost: text => text.length }),
+      createCarryoverTranscript([gap], 0),
+    ]) {
+      expect(projection.prefix).toContain('<publication-gap>');
+      expect(projection.prefix).toContain('Retained command results do not establish complete output.');
+      expect(projection.prefix.length).toBeLessThanOrEqual(500);
+    }
+  });
+
+  test('bounds literal source once without changing its truncation marker', () => {
+    const source = `${'x'.repeat(7_999)}\u{1f600}${'y'.repeat(1_000)}`;
+    const message = new UserMessage(TIME, source, undefined, { contentMode: 'literal' });
+    const direct = createCarryoverTranscript([message], 0);
+    const bounded = createCarryoverTranscript([boundProjectedMessage(message)], 0);
+    expect(bounded.prefix).toBe(direct.prefix);
+    expect(bounded.prefix).toContain('xxx...</user>');
+    expect(bounded.prefix.isWellFormed()).toBe(true);
+  });
   test('carries complete retained command tails and their execution directories within the document budget', () => {
     const content = `first\n${'x'.repeat(60 * 1024)}\nlast </execution-output>`;
     const output = new CommandOutputMessage(TIME, 'command-1', 'stdout', 'plain', content,

@@ -12,7 +12,7 @@ import {
   selectPrioritizedProjection,
   type PrioritizedProjectionEntry,
 } from '../../../../common/transcript-projection.js';
-import { projectToolUseSummary } from '../../../../common/transcript-seed.js';
+import { isPublicationGapMessage, projectToolUseSummary } from '../../../../common/transcript-seed.js';
 import type { TranscriptExportEntry } from '../../ledger/export-fold.js';
 import {
   redactDataUrl,
@@ -42,8 +42,12 @@ export function foldHandoffArtifactEntries(
 ): HandoffArtifactSourceFold {
   const source: HandoffArtifactSourceEntry[] = [];
   const excludedCounts = new Map<ChatHandoffArtifactExclusionCategory, number>();
+  let hasPublicationGap = false;
   let turn = -1;
   for (const entry of entries) {
+    if (entry.kind === 'message' && isPublicationGapMessage(entry.message)) {
+      hasPublicationGap = true;
+    }
     if (entry.kind !== 'message' || !isEligibleMessage(entry.message)) {
       excludedCounts.set(entry.category, (excludedCounts.get(entry.category) ?? 0) + 1);
       continue;
@@ -58,6 +62,7 @@ export function foldHandoffArtifactEntries(
   }
   return {
     entries: source,
+    hasPublicationGap,
     sourceEntryCount: entries.length,
     eligibleEntryCount: source.length,
     excludedEntryCounts: CHAT_HANDOFF_ARTIFACT_EXCLUSION_CATEGORIES.flatMap((category) => {

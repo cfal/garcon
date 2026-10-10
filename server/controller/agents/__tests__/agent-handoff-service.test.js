@@ -500,7 +500,7 @@ describe('AgentHandoffService', () => {
 
     expect(state.ownership.decideHandoff).toHaveBeenCalledTimes(2);
     expect(ledger.checkpointForHandoff).toHaveBeenCalledTimes(2);
-    expect(ledger.conversationMessages).not.toHaveBeenCalled();
+    expect(ledger.carryoverMessages).not.toHaveBeenCalled();
     expect(planFor).not.toHaveBeenCalled();
     expect(deposit).not.toHaveBeenCalled();
   });
@@ -1478,7 +1478,7 @@ function ledgerState(calls) {
       calls.push('checkpoint');
       return { viewId: 'view-1', ordinal: 7 };
     }),
-    conversationMessages: mock(() => {
+    carryoverMessages: mock(() => {
       calls.push('messages');
       return [];
     }),

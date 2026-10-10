@@ -52,6 +52,7 @@ export interface HandoffArtifactSelection {
 
 export interface HandoffArtifactSourceFold {
   readonly entries: readonly HandoffArtifactSourceEntry[];
+  readonly hasPublicationGap: boolean;
   readonly sourceEntryCount: number;
   readonly eligibleEntryCount: number;
   readonly excludedEntryCounts: readonly ChatHandoffArtifactExcludedEntryCount[];

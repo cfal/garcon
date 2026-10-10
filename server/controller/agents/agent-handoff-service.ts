@@ -297,7 +297,7 @@ export class AgentHandoffService {
             const planningController = new AbortController();
             this.#carryoverPreparations.set(input.chatId, planningController);
             try {
-              const messages = await this.deps.ledger.conversationMessages(input.chatId);
+              const messages = await this.deps.ledger.carryoverMessages(input.chatId);
               carryoverOutcome = await this.deps.carryover.planFor({
                 operation: 'agent-switch',
                 chatId: input.chatId,

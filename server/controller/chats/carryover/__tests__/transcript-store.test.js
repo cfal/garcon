@@ -7,6 +7,7 @@ import {
   AssistantMessage,
   BashToolUseMessage,
   ToolResultMessage,
+  TranscriptNoticeMessage,
   UserMessage,
 } from '@garcon/common/chat-types';
 import { createCarryoverTranscript } from '@garcon/common/transcript-seed';
@@ -32,6 +33,15 @@ describe('CarryOverTranscriptStore', () => {
 
   afterEach(async () => {
     await fs.rm(workspaceDir, { recursive: true, force: true });
+  });
+
+  it('retains one publication-loss warning even when the byte guard evicts its surrounding output', async () => {
+    const gap = new TranscriptNoticeMessage(TIME, 'Output lost', { type: 'publication-gap' });
+    const messages = [gap, new AssistantMessage(TIME, 'x'.repeat(8000)), gap, new UserMessage(TIME, 'Continue')];
+    await commit(store, FIRST, messages);
+    const source = await store.loadProjectionSource({ refs: [ref(FIRST, 'test', 'model', messages.length)], maxBytes: 200 });
+    expect(source.map(message => message.type)).toEqual(['transcript-notice', 'user-message']);
+    expect(createCarryoverTranscript(source, 0).prefix).toContain('<publication-gap>');
   });
 
   it('writes independent immutable segments and renders explicit boundaries in array order', async () => {

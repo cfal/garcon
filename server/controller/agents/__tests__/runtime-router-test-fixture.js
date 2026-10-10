@@ -135,8 +135,8 @@ export function createRuntimeTranscriptFixture(options = {}) {
         : undefined;
       return existing ?? appendNotice(chatId, viewId, input);
     },
-    conversationMessages: (chatId, excludedOrdinals) => options.conversationMessages
-      ? options.conversationMessages(chatId, excludedOrdinals)
+    carryoverMessages: (chatId, excludedOrdinals) => options.carryoverMessages
+      ? options.carryoverMessages(chatId, excludedOrdinals)
       : options.conversation ?? [],
     claimPermissionResolution: (control) => {
       permissionClaim = {

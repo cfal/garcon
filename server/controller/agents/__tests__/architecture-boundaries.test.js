@@ -151,8 +151,8 @@ describe('agent architecture boundaries', () => {
     }
 
     const router = readFileSync('server/controller/agents/runtime-router.ts', 'utf8');
-    expect(router.split('conversationMessages(')).toHaveLength(2);
-    expect(router.indexOf('conversationMessages(')).toBeLessThan(
+    expect(router.split('carryoverMessages(')).toHaveLength(2);
+    expect(router.indexOf('carryoverMessages(')).toBeLessThan(
       router.indexOf('integration.execution.start('),
     );
   });

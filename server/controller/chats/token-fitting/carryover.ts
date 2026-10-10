@@ -10,6 +10,7 @@ import {
   createCarryoverTranscript,
   createCarryoverTranscriptWithinCost,
   isProjectableMessage,
+  isPublicationGapMessage,
 } from '../../../../common/transcript-seed.js';
 import { estimateHandoffTokens, fitEstimatedTokenDocument } from './budget.js';
 
@@ -56,7 +57,7 @@ export function assessCarryover(messages: readonly ChatMessage[]): CarryoverAsse
 
 export function fitCompactionPrompt(input: CompactionPromptInput): CompactionPromptFit {
   const boundary = spineStart(input.messages);
-  const spine = input.messages.slice(boundary);
+  const spine = carryoverSpine(input.messages);
   const older = input.messages.slice(0, boundary);
   if (createCarryoverTranscript(spine, CARRYOVER_INJECTION_MAX_CHARS, { summary: '.' })
     ?.summaryTruncated) {
@@ -112,6 +113,24 @@ export function spineStart(messages: readonly ChatMessage[]): number {
     if (userTurns === RECENT_TURNS_VERBATIM) return index;
   }
   return 0;
+}
+
+export function projectCompactedCarryover(messages: readonly ChatMessage[], summary: string): CarriedContext {
+  const projected = createCarryoverTranscript(carryoverSpine(messages), CARRYOVER_INJECTION_MAX_CHARS, { summary });
+  if (!projected || projected.summaryTruncated || projected.prefix.length > CARRYOVER_INJECTION_MAX_CHARS) {
+    throw new Error(
+      `Agent-switch compaction produced a summary too large for the ${CARRYOVER_INJECTION_MAX_CHARS} character carryover limit`,
+    );
+  }
+  return projected;
+}
+
+function carryoverSpine(messages: readonly ChatMessage[]): readonly ChatMessage[] {
+  const boundary = spineStart(messages);
+  const spine = messages.slice(boundary);
+  const gapIndex = messages.findIndex(isPublicationGapMessage);
+  const olderGap = gapIndex >= 0 && gapIndex < boundary ? messages[gapIndex] : undefined;
+  return olderGap ? [olderGap, ...spine] : spine;
 }
 
 function buildCompactionPrompt(

@@ -10,6 +10,8 @@ import type {
 } from '@garcon/server-agent-interface';
 import type { AgentAttachment } from '../../../common/agent-execution.js';
 import type { ChatMessage, UserMessage } from '../../../common/chat-types.js';
+import { TranscriptNoticeMessage } from '../../../common/chat-types.js';
+import { isPublicationGapNoticeDetail } from '../../../common/transcript-notice-details.js';
 import type { CliBodyDisclosure, CliPresentation, CliRowFormat } from '../../../common/cli-presentation.js';
 import type { ChatTransientControlAction } from '../../../common/chat-transient-feed.js';
 import type { ResendCandidate } from '../../../common/chat-view.js';
@@ -613,6 +615,21 @@ export class TranscriptLedgerService {
   async conversationMessages(chatId: string, excludedOrdinals: ReadonlySet<number> = new Set()): Promise<readonly ChatMessage[]> {
     const messages: ChatMessage[] = [];
     for await (const page of this.conversationMessagePages(chatId, excludedOrdinals)) messages.push(...page);
+    return messages;
+  }
+
+  async carryoverMessages(chatId: string, excludedOrdinals: ReadonlySet<number> = new Set()): Promise<readonly ChatMessage[]> {
+    const messages: ChatMessage[] = [];
+    const watermark = this.#store.highWatermark(chatId);
+    for await (const page of this.#store.rowPagesThrough(chatId, watermark)) {
+      for (const row of page) {
+        if (isConversationalLedgerRow(row) && !excludedOrdinals.has(row.ordinal)) {
+          messages.push(messageForConversationRow(row));
+        } else if (row.kind === 'notice' && isPublicationGapNoticeDetail(row.detail)) {
+          messages.push(new TranscriptNoticeMessage(row.at, row.message, row.detail));
+        }
+      }
+    }
     return messages;
   }
 
