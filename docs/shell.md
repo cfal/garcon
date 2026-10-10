@@ -40,6 +40,10 @@ carryover compaction. Handoffs into Shell, including executor transfers, are
 rejected; new chats and draft selections can still choose Shell. Shell forks copy
 the retained history and cwd, start a fresh native session on first submission,
 and never execute the copied history. Shell has no native AI compaction action.
+Carryover marks commands as literal input and preserves their whitespace within
+its per-message bound. Publication loss adds a protected warning to carried
+context, including after compaction; retained results do not imply complete output.
+Handoff XML includes the same protected publication-loss warning.
 
 Stdout and stderr appear together after process exit and output draining, not
 as live output. Both use separate fenced-code-style blocks by default. Prefix a
@@ -64,6 +68,8 @@ that modify it.
 Nonzero status fails the turn and pauses waiting work, whether the failed
 command was direct or queued. Stderr alone does not indicate failure. Status
 follows the selected shell; Garcon does not add `errexit` or `pipefail`.
+Shell chats do not send Telegram or browser attention notifications or play
+completion sounds. Command status, errors, and queue pauses remain visible in-chat.
 
 There is no PTY or stdin UI. Stdin remains open and unwritten; prompts may
 block until Stop. Stop sends group termination, then escalates after 500 ms.
@@ -82,8 +88,13 @@ Shell maintains private SQLite native logs under the executor's
 the last 64 KiB of combined stdout/stderr is held in memory until settlement,
 then commits before publication. A crash during execution can lose that
 in-flight output. Reload imports a bound native session; it
-never replays commands or restores processes. A restart starts with the last
+never replays commands or restores processes. Native literal inputs retain their
+submission IDs and presentation so retries after Reload cannot repeat a recorded command
+or conflict solely because a command was styled or collapsed.
+A restart starts with the last
 controller-confirmed directory, not an unapplied historical cwd observation.
+Startup removes abandoned command-source workspaces. Deleting a native session
+also removes its SQLite recovery sidecars.
 
 - Output is incremental UTF-8 text, not lossless binary or terminal emulation.
 - Each command retains only the last 64 KiB across both pipes, at UTF-8
