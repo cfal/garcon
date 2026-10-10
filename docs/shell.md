@@ -13,9 +13,10 @@ continues between commands. Variables, exports, functions, aliases, options,
 and activated environments do not survive; combine dependent operations into
 one multiline submission. Filesystem changes persist normally.
 
-Usual non-login shell configuration loads on each invocation. Sh, Bash, Zsh,
-and Fish use interactive startup over pipes, not a terminal. Startup output is
-retained. Garcon restores
+Non-login shell configuration loads on each invocation. Bash runs non-interactively
+with alias expansion enabled and explicitly sources `~/.bashrc`; sections guarded
+for interactive shells are skipped. Sh, Zsh, and Fish use interactive startup over
+pipes, not a terminal. Startup output and errors are retained. Garcon restores
 the confirmed directory after startup and disables Unix shell job control
 before executing the submission. Terminal-dependent profile code may behave
 differently or block.

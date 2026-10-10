@@ -164,6 +164,24 @@ for (const family of SHELL_FAMILIES) {
     }
 
     if (family === 'bash') {
+      it('loads noninteractive configuration without terminal warnings or hiding stderr', async () => {
+        const file = join(directory, '.bashrc');
+        await writeFile(file, 'printf "profile diagnostic\\n" >&2\nalias configured_command="printf configured"\n');
+        try {
+          const result = await run('configured_command; printf "command diagnostic\\n" >&2');
+          expect(result.stdout).toBe('configured');
+          expect(result.stderr).toBe('profile diagnostic\ncommand diagnostic\n');
+          expect(result.exitCode).toBe(0);
+        } finally { await rm(file, { force: true }); }
+      });
+
+      it('runs without a terminal or startup diagnostics', async () => {
+        const result = await run('printf ready');
+        expect(result.stdout).toBe('ready');
+        expect(result.stderr).toBe('');
+        expect(result.exitCode).toBe(0);
+      });
+
       it.each([
         'rm "$report"; mkfifo "$report"',
         'rm "$report"; ln -s /dev/null "$report"',

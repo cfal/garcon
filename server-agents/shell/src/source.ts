@@ -34,7 +34,10 @@ export function shellInvocation(family: ShellFamily, sourcePath: string, cwd: st
   const footer = commandFooter(family, resultPath);
   if (family === 'fish') return ['-i', '-c', `status job-control none; builtin cd $argv[2]; or exit $status; source $argv[1]\n${footer}`, sourcePath, cwd];
   const cd = family === 'sh' ? 'command cd' : 'builtin cd';
+  // Bash interactive startup requires a terminal even with job control disabled.
+  const startup = family === 'bash' ? 'shopt -s expand_aliases; if [ -f ~/.bashrc ]; then . ~/.bashrc; fi; ' : '';
   // Dash otherwise returns to interactive stdin after a sourced syntax error.
   const noninteractive = family === 'sh' ? '(set +i) 2>/dev/null && set +i; ' : '';
-  return ['-i', '-c', `${noninteractive}set +m; ${cd} -P -- ${quotePosix(cwd)} || exit $?; . ${quotePosix(sourcePath)}\n${footer}`];
+  const flags = family === 'bash' ? ['-c'] : ['-i', '-c'];
+  return [...flags, `${startup}${noninteractive}set +m; ${cd} -P -- ${quotePosix(cwd)} || exit $?; . ${quotePosix(sourcePath)}\n${footer}`];
 }
