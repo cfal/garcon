@@ -190,6 +190,7 @@ export interface IChatRegistry {
   updateChat(id: string, patch: ChatRegistryPatch): ChatRegistryResolvedEntry | null;
   updateChat(id: string, patch: ChatRegistryPatch, options: ChatRegistryUpdateOptions & { flush: true }): Promise<ChatRegistryResolvedEntry | null>;
   updateChatPhased(id: string, patch: ChatRegistryPatch): Promise<PhasedChatUpdateResult | null>;
+  updateObservedProjectPath(id: string, update: ChatProjectPathUpdatedPayload): Promise<PhasedChatUpdateResult | null>;
   installAgentOwnership(id: string, target: {
     executorId?: string | null;
     projectPath: string;
@@ -589,6 +590,17 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
     id: string,
     patch: ChatRegistryPatch,
   ): Promise<PhasedChatUpdateResult | null> {
+    return this.#updateChatPhased(id, patch);
+  }
+
+  async updateObservedProjectPath(id: string, update: ChatProjectPathUpdatedPayload): Promise<PhasedChatUpdateResult | null> {
+    if (update.chatId !== id) throw new Error(`Project path update identity mismatch: ${id}`);
+    const result = await this.#updateChatPhased(id, {}, update.projectPath);
+    if (result?.durability === 'durable') this.#publishProjectPathUpdate(update);
+    return result;
+  }
+
+  async #updateChatPhased(id: string, patch: ChatRegistryPatch, observedProjectPath?: string): Promise<PhasedChatUpdateResult | null> {
     const target = this.#sessionsFilePath();
     return this.#registryWriteLock.runExclusive(target, async () => {
       const registry = this.getRegistry();
@@ -599,7 +611,10 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
           `The chat registry has an unconfirmed save for ${id}; reload before further changes.`,
         );
       }
-      const normalizedPatch = this.#normalizeChatPatch(id, existing, patch);
+      const normalizedPatch = {
+        ...this.#normalizeChatPatch(id, existing, patch),
+        ...(observedProjectPath !== undefined ? { projectPath: observedProjectPath } : {}),
+      };
       const candidateEntry = { ...existing, ...normalizedPatch };
       assertPreambleBoundaryBinding(candidateEntry);
       assertSeedReceiptBinding(candidateEntry);
@@ -630,6 +645,10 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
 
       const current = this.getRegistry().sessions[id];
       if (!current) return null;
+      // An unconfirmed observation must not become the next command's directory.
+      if (observedProjectPath !== undefined && durability === 'unknown') {
+        return { entry: { id, ...cloneRegistryEntry(candidateEntry) }, durability, changed };
+      }
       const previousTags = current.tags;
       if (changed) Object.assign(current, normalizedPatch);
       assertPreambleBoundaryBinding(current);
@@ -702,6 +721,11 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
       restoreIfCurrent();
       throw error;
     }
+    this.#publishProjectPathUpdate(update);
+    return { id, ...cloneRegistryEntry(existing) };
+  }
+
+  #publishProjectPathUpdate(update: ChatProjectPathUpdatedPayload): void {
     try {
       this.#emitChatProjectPathUpdated({
         chatId: update.chatId,
@@ -711,11 +735,10 @@ export class ChatRegistry extends EventEmitter<ChatRegistryEvents> implements IC
       });
     } catch (error) {
       logger.warn('Project-path update publication failed after persistence', {
-        chatId: id,
+        chatId: update.chatId,
         error: error instanceof Error ? error.message : String(error),
       });
     }
-    return { id, ...cloneRegistryEntry(existing) };
   }
 
   removeChat(id: string, reason: ChatRemovalReason = 'user-deletion'): boolean {

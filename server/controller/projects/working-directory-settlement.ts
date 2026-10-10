@@ -12,7 +12,7 @@ export interface WorkingDirectorySettlementPort {
 
 export class WorkingDirectorySettler implements WorkingDirectorySettlementPort {
   constructor(private readonly deps: {
-    registry: Pick<IChatRegistry, 'getChat' | 'updateProjectPath'>;
+    registry: Pick<IChatRegistry, 'getChat' | 'updateObservedProjectPath'>;
     ledger: Pick<TranscriptLedgerService, 'existingCurrentView'>;
     inspect: ProjectInspector;
     lock: KeyedPromiseLock;
@@ -40,10 +40,13 @@ export class WorkingDirectorySettler implements WorkingDirectorySettlementPort {
           kind: 'failed', message: `Command completed, but its working directory is unavailable (${resolution.reason}).`,
         };
         if (resolution.effectiveProjectKey !== snapshot.projectPath) {
-          await this.deps.registry.updateProjectPath(chatId, {
+          const persisted = await this.deps.registry.updateObservedProjectPath(chatId, {
             chatId, projectPath: resolution.effectiveProjectKey, effectiveProjectKey: resolution.effectiveProjectKey,
             previousProjectPath: snapshot.projectPath,
-          }, { flush: true });
+          });
+          if (!persisted || persisted.durability !== 'durable') return {
+            kind: 'failed', message: 'Command completed, but its working directory save could not be confirmed.',
+          };
         }
         return { kind: 'settled' };
       } catch (error) {
