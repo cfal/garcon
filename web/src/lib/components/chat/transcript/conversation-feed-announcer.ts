@@ -9,6 +9,7 @@ import {
 	isToolUseMessage,
 } from '$shared/chat-types';
 import type { ChatDisplayRow } from '$lib/chat/transcript/active-transcript-state.svelte.js';
+import { commandFailureNoticeDuplicate, commandResultPresentation } from '$lib/chat/transcript/command-result-presentation.js';
 import {
 	isHiddenBashToolUse,
 	type BashCommandMatcher,
@@ -137,6 +138,7 @@ export function announcementForAppendedRow(
 ): string | null {
 	if (row.kind === 'local-notice') return plainAnnouncementText(row.content) || null;
 	const message = row.message;
+	if (message.type === 'command-result' && commandResultPresentation(message.result) === 'hidden') return null;
 	if (message.type === 'command-output' || message.type === 'command-result'
 		|| (message.type === 'user-message' && message.metadata?.contentMode === 'literal')) {
 		return message.content.length <= 4096 ? message.content : `${message.content.slice(0, 4096)}...`;
@@ -298,7 +300,9 @@ export class ConversationFeedAnnouncerState {
 		const candidatesById = new Map<string, ChatDisplayRow>();
 		for (const row of [...appendedRows, ...streamedRows]) candidatesById.set(row.id, row);
 		const candidates = [...candidatesById.values()];
+		const duplicate = commandFailureNoticeDuplicate(tailRows);
 		const announcementCandidates = candidates.filter((row) => {
+			if (row.id === duplicate?.noticeId) return false;
 			if (row.kind !== 'message') return true;
 			if (row.message instanceof UserMessage) {
 				const requestId = row.message.metadata?.clientRequestId;
@@ -361,9 +365,10 @@ export class ConversationFeedAnnouncerState {
 		hiddenBashCommands: BashCommandMatcher | null,
 	): boolean {
 		if (row.kind !== 'message') return false;
+		if (row.message.type === 'command-result') return commandResultPresentation(row.message.result) !== 'hidden';
 		if (
 			row.message instanceof AssistantMessage ||
-			row.message.type === 'command-output' || row.message.type === 'command-result' ||
+			row.message.type === 'command-output' ||
 			row.message instanceof PermissionRequestMessage
 		) {
 			return true;

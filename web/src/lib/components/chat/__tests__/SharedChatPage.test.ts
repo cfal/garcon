@@ -83,7 +83,23 @@ describe('SharedChatPage', () => {
 		await waitFor(() => expect(container.querySelector('strong')?.textContent).toBe('stdout'));
 		expect([...container.querySelectorAll('pre')].map(node => node.textContent)).toContain('  **source**\n ');
 		expect(container.querySelector('.markdown-code-block pre')?.textContent).toBe('**stderr**');
-		expect(screen.getByText('Completed')).toBeTruthy();
+		expect(screen.queryByText('Completed')).toBeNull();
+		expect(container.querySelectorAll('.chat-message')).toHaveLength(3);
+	});
+
+	it('renders durable failures once as errors without any lifecycle notice', async () => {
+		const snapshot = response([], 0, 2);
+		snapshot.snapshot.messages = ['command-1', 'command-2'].map(commandId =>
+			new CommandResultMessage('2026-01-01T00:00:00.000Z', commandId, {
+				outcome: 'failed', exitCode: 127, signal: null, capture: 'complete',
+				cwd: { kind: 'reported', path: '/workspace' },
+			}));
+		snapshot.page.end = 2;
+		vi.mocked(sharesApi.getSharedChat).mockResolvedValueOnce(snapshot);
+		render(SharedChatPageTestHost, { token: 'share-token' });
+		const errors = await screen.findAllByText('Exit 127');
+		expect(errors).toHaveLength(2);
+		for (const error of errors) expect(error.closest('article')?.className).toContain('border-status-error-border');
 	});
 
 	it.each(['incomplete', 'duplicate'] as const)('keeps %s command output literal and individually visible', async kind => {
@@ -103,6 +119,8 @@ describe('SharedChatPage', () => {
 		expect([...container.querySelectorAll('.markdown-code-block pre')].map(node => node.textContent))
 			.toEqual(messages.map(message => message.content));
 		expect(container.querySelector('strong')).toBeNull();
+		if (kind === 'incomplete') expect(screen.getByText(/Output capture incomplete/).closest('article')?.className)
+			.toContain('border-status-warning-border');
 	});
 
 	it('renders a bounded newest page and prepends older messages on demand', async () => {

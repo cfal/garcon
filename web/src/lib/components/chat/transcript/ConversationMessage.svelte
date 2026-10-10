@@ -791,7 +791,7 @@
 							{/snippet}
 						</ChatEventCard>
 					{:else if message.type === 'command-result' || (message.type === 'command-output' && message.channel === 'stderr')}
-						<CommandStatusRow {message} {disclosureState} />
+						<CommandStatusRow {message} />
 					{:else if asAssistant || asCommandOutput}
 						<ContextMenu open={messageMenuOpen} onOpenChange={handleMessageMenuOpenChange}>
 							<ContextMenuTrigger

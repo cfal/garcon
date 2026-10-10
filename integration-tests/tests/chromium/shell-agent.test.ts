@@ -11,7 +11,7 @@ test('Shell composer preserves literal commands and stable chat switching on des
     const chatIds: string[] = [];
     for (const text of ['**plain output**', 'second chat']) {
       const chatId = integration.newChatId();
-      const started = await client.startChat({ chatId, agentId: 'shell', model: 'sh',
+      const started = await client.startChat({ chatId, agentId: 'shell', model: 'bash',
         projectPath: executionDirs.project, permissionMode: 'default', thinkingMode: 'none',
         agentSettings: { ownerId: 'shell', schemaVersion: 1, values: {} }, origin: 'interactive',
         clientRequestId: crypto.randomUUID(), clientMessageId: crypto.randomUUID(), command: `printf '${text}'`,
@@ -25,6 +25,9 @@ test('Shell composer preserves literal commands and stable chat switching on des
     const editor = composer.locator('textarea');
     await browserExpect(editor).toBeVisible();
     await browserExpect(page.locator('.markdown-code-block pre').filter({ hasText: '**plain output**' })).toBeVisible();
+    await browserExpect(page.getByText('Completed', { exact: true })).toHaveCount(0);
+    await browserExpect(page.getByText('text', { exact: true })).toHaveCount(0);
+    await browserExpect(page.getByText(/cannot set terminal process group|no job control in this shell/)).toHaveCount(0);
     await browserExpect(composer.getByRole('button', { name: 'Refine prompt', exact: true })).toBeVisible();
     await editor.evaluate(element => element.setAttribute('data-retained-shell-editor', 'true'));
 
@@ -64,6 +67,20 @@ test('Shell composer preserves literal commands and stable chat switching on des
     await composer.getByRole('button', { name: 'Send message', exact: true }).click();
     await browserExpect(page.getByRole('heading', { name: 'Command heading', exact: true })).toBeVisible();
     await browserExpect(page.locator('.markdown-code-block pre').filter({ hasText: '**literal diagnostic**' })).toBeVisible();
+
+    phase('one durable error per failed command, including after browser reload');
+    for (let count = 1; count <= 2; count++) {
+      await editor.fill('garcon_nonexistent_command');
+      await editor.press('Enter');
+      await browserExpect(page.getByText('Exit 127', { exact: true })).toHaveCount(count);
+      await client.waitForProcessing(chatIds[0]!, false);
+      await browserExpect(page.getByText('Exit 127', { exact: true })).toHaveCount(count);
+    }
+    await page.reload();
+    await browserExpect(editor).toBeVisible();
+    await browserExpect(page.getByText('Exit 127', { exact: true })).toHaveCount(2);
+    await browserExpect(page.getByText('Completed', { exact: true })).toHaveCount(0);
+    await editor.evaluate(element => element.setAttribute('data-retained-shell-editor', 'true'));
     await editor.fill('retained draft');
     const top = (await composer.boundingBox())!.y;
     for (const id of [chatIds[1]!, chatIds[0]!, chatIds[1]!, chatIds[0]!]) {

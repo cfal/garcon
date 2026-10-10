@@ -1,31 +1,26 @@
 <script lang="ts">
 	import type { CommandOutputMessage, CommandResultMessage } from '$shared/chat-types';
-	import type { ConversationDisclosureStatePort } from '../ConversationFeedItemState.svelte.js';
+	import CircleAlert from '@lucide/svelte/icons/circle-alert';
+	import { commandResultPresentation } from '$lib/chat/transcript/command-result-presentation.js';
 	import ChatEventCard from './ChatEventCard.svelte';
-	import CollapsibleBody from './CollapsibleBody.svelte';
 	import CodeBlock from '$lib/components/rich-text/CodeBlock.svelte';
 
-	let { message, disclosureState }: {
+	let { message }: {
 		message: CommandOutputMessage | CommandResultMessage;
-		disclosureState?: ConversationDisclosureStatePort;
 	} = $props();
+	const presentation = $derived(message.type === 'command-result' ? commandResultPresentation(message.result) : null);
 </script>
 
 {#if message.type === 'command-output'}
 	<div class="text-xs font-medium text-muted-foreground">stderr</div>
 	<CodeBlock text={message.content} />
-{:else}
-	<ChatEventCard variant="neutral" compact>
+{:else if presentation && presentation !== 'hidden'}
+	<ChatEventCard variant={presentation} compact>
 		{#snippet body()}
-			<CollapsibleBody
-				disclosure="collapsed"
-				expanded={disclosureState?.open('cli-body', 'body', false)}
-				onExpandedChange={disclosureState
-					? (expanded) => disclosureState.setOpen('cli-body', 'body', expanded, false)
-					: undefined}
-			>
-				<pre class="whitespace-pre-wrap break-words font-mono text-sm">{message.content}</pre>
-			</CollapsibleBody>
+			<div class="flex min-w-0 items-center gap-2 text-xs font-medium">
+				<CircleAlert class="size-3.5 shrink-0" />
+				<span class="min-w-0 whitespace-pre-wrap break-words">{message.content}</span>
+			</div>
 		{/snippet}
 	</ChatEventCard>
 {/if}

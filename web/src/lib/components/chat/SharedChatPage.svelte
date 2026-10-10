@@ -21,6 +21,7 @@
 	import CliRow from '$lib/components/chat/transcript/rows/CliRow.svelte';
 	import CommandStatusRow from '$lib/components/chat/transcript/rows/CommandStatusRow.svelte';
 	import { projectCommandOutput } from '$shared/command-output-projection.js';
+	import { commandResultPresentation } from '$lib/chat/transcript/command-result-presentation.js';
 	import CliPresentationHeader from '$lib/components/chat/transcript/rows/CliPresentationHeader.svelte';
 	import CollapsibleBody from '$lib/components/chat/transcript/rows/CollapsibleBody.svelte';
 	import TranscriptNoticeRow from '$lib/components/chat/transcript/rows/TranscriptNoticeRow.svelte';
@@ -54,7 +55,8 @@
 		return messages.map((entry, index) => {
 			const message = output.get(index);
 			return message ? { ...entry, message } : entry;
-		});
+		}).filter(entry => entry.message.type !== 'command-result'
+			|| commandResultPresentation(entry.message.result) !== 'hidden');
 	});
 	let title = $state('');
 	let agentId = $state('');
