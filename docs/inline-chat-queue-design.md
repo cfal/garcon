@@ -22,8 +22,10 @@ The controller owns message selection and delivery:
   the same position; an uncertain delivery retains the existing consume and
   reconciliation behavior.
 - If the active turn cannot take guidance, or another steer is pending, the
-  selected entry becomes a pending steer before queued turns and after existing
-  pending steers. Moving it increments the order revision. Other follow-ups
+  selected entry becomes a pending steer after the last existing pending steer,
+  or before queued turns when no steer is pending. A steer dragged below a
+  follow-up keeps that position when newer guidance is added. Moving the selected
+  entry increments the order revision. Other follow-ups
   retain their relative order, and the input keeps its submission identity.
 - Automatic delivery still selects only the first entry and observes queue
   pause. An explicit ready Steer retains its existing ability to act while the

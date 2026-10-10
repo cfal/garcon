@@ -376,6 +376,40 @@ describe('chat execution control transitions', () => {
     ]);
   });
 
+  it.each(['create', 'promote'])('keeps %s guidance behind a pending steer dragged below a follow-up', (operation) => {
+    const first = add(initial(), 'first follow-up', 1);
+    const pending = createQueuedSteer(first.next, { content: 'earlier guidance' }, context(2));
+    const selected = add(pending.next, 'selected guidance', 3);
+    const last = add(selected.next, 'last follow-up', 4);
+    const moved = moveQueueEntry(last.next, {
+      entryId: value(pending).entryId,
+      targetEntryId: value(first).entryId,
+      placement: 'after',
+      expectedReorderRevision: 0,
+      expectedSourceRevision: 1,
+      expectedTargetRevision: 1,
+    }, context(5));
+    const paused = pauseQueue(moved.next, context(6));
+    const updated = operation === 'create'
+      ? createQueuedSteer(paused.next, { content: 'new guidance' }, context(7))
+      : markQueueEntrySteer(paused.next, {
+        entryId: value(last).entryId,
+        expectedRevision: 1,
+        expectedReorderRevision: 1,
+      }, context(7));
+
+    expect(updated.outcome.status).toBe('ok');
+    expect(updated.next.entries.map(({ content, kind }) => [content, kind])).toEqual([
+      ['first follow-up', 'turn'],
+      ['earlier guidance', 'steer'],
+      [operation === 'create' ? 'new guidance' : 'last follow-up', 'steer'],
+      ['selected guidance', 'turn'],
+      ...(operation === 'create' ? [['last follow-up', 'turn']] : []),
+    ]);
+    expect(updated.next.reorderRevision).toBe(operation === 'create' ? 1 : 2);
+    expect(updated.next.pause).toEqual(paused.next.pause);
+  });
+
   it('pauses only the remaining tail after a dequeued dispatch fails', () => {
     const only = add(initial(), 'only', 1);
     const onlyId = value(only).entryId;

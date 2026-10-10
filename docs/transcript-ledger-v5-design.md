@@ -1505,7 +1505,9 @@ The guarantee is durable before provider dispatch, not durable at send:
   and queue-order revisions. It consumes only the selected message on delivery;
   other future-turn entries retain their relative order. When the turn cannot
   take it yet, or another steer is pending, the selected message becomes a
-  pending steer after existing pending steers and before future-turn entries.
+  pending steer after the last existing pending steer, or before future-turn
+  entries when no steer is pending. Dragged guidance retains its queue position
+  when newer guidance is added.
   Repositioning it increments the queue-order revision. Automatic delivery still
   reserves only the queue head. An agent known to lack steering refuses a pending steer. While the
   chat's executor has not reported the agent, as before a remote executor

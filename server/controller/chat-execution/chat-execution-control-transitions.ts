@@ -263,10 +263,9 @@ function insertQueueEntry(
 }
 
 function insertPendingSteer(entries: StoredQueueEntry[], entry: StoredQueueEntry): number {
-  const firstQueuedTurn = entries.findIndex((candidate) => (
-    candidate.status === 'queued' && candidate.kind === 'turn'
-  ));
-  const index = firstQueuedTurn < 0 ? entries.length : firstQueuedTurn;
+  const lastSteer = entries.findLastIndex((candidate) => candidate.kind === 'steer');
+  const nextTurn = entries.findIndex((candidate) => candidate.status === 'queued' && candidate.kind === 'turn');
+  const index = lastSteer >= 0 ? lastSteer + 1 : nextTurn < 0 ? entries.length : nextTurn;
   entries.splice(index, 0, entry);
   return index;
 }
@@ -588,7 +587,7 @@ export function reserveQueueSteer(
   const next = cloneStoredChatExecutionControl(current);
   const entry = next.entries.find((candidate) => candidate.id === input.entryId);
   if (!entry) return rejected(current, missingEntryRejection(current, input.entryId));
-  if (entry.status === 'steering' || next.entries.some((candidate) => candidate.status === 'steering')) {
+  if (next.entries.some((candidate) => candidate.status === 'steering')) {
     return rejected(current, { code: 'QUEUE_ENTRY_IN_FLIGHT', entryId: input.entryId });
   }
   if (entry.revision !== input.expectedRevision) {
@@ -603,9 +602,7 @@ export function reserveQueueSteer(
   }
   entry.status = 'steering';
   bump(next, context.now);
-  return accepted(next, {
-    entry: cloneStoredQueueEntry(entry),
-  }, true);
+  return accepted(next, { entry: cloneStoredQueueEntry(entry) }, true);
 }
 
 // Automatic delivery holds back while the queue is paused, although the Steer action on a
@@ -623,18 +620,17 @@ export function reservePendingSteer(
   return reserveQueueSteer(current, input, context);
 }
 
-// Places the selected message behind pending steers and before future turns.
+// Places the selected message after existing guidance, preserving its drag order.
 export function markQueueEntrySteer(
   current: StoredChatExecutionControlState,
   input: ObservedQueueEntry,
   context: TransitionContext,
 ): ControlTransition<void> {
   const next = cloneStoredChatExecutionControl(current);
-  const entry = next.entries.find((candidate) => candidate.id === input.entryId);
+  const previousIndex = next.entries.findIndex((candidate) => candidate.id === input.entryId);
+  const entry = next.entries[previousIndex];
   if (!entry) return rejected(current, missingEntryRejection(current, input.entryId));
-  if (entry.status !== 'queued') {
-    return rejected(current, { code: 'QUEUE_ENTRY_IN_FLIGHT', entryId: input.entryId });
-  }
+  if (entry.status !== 'queued') return rejected(current, { code: 'QUEUE_ENTRY_IN_FLIGHT', entryId: input.entryId });
   if (entry.revision !== input.expectedRevision) {
     return rejected(current, {
       code: 'QUEUE_ENTRY_REVISION_CONFLICT',
@@ -647,7 +643,6 @@ export function markQueueEntrySteer(
   }
   if (entry.kind === 'steer') return accepted(next, undefined, false);
   entry.kind = 'steer';
-  const previousIndex = next.entries.indexOf(entry);
   next.entries.splice(previousIndex, 1);
   if (insertPendingSteer(next.entries, entry) !== previousIndex) next.reorderRevision += 1;
   bump(next, context.now);
