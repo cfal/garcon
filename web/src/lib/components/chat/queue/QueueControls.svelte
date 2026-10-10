@@ -67,6 +67,11 @@
 	const visibleNotice = $derived(notice?.chatId === chatId ? notice : null);
 
 	$effect(() => {
+		if (!chatId || !listElement) return;
+		listElement.scrollTop = 0;
+	});
+
+	$effect(() => {
 		if (!listElement || !chatId) return;
 		const element = listElement;
 		const targetChatId = chatId;
@@ -100,12 +105,12 @@
 		notice = null;
 		try {
 			await action();
-			if (kind === 'moving')
+			if (kind === 'moving' && chatId === operationChatId)
 				notice = { chatId: operationChatId, message: m.chat_queue_move_success(), error: false };
 		} catch (error) {
 			if (kind === 'pausing' || kind === 'resuming') {
 				onQueueControlError(operationChatId, kind === 'pausing' ? 'pause' : 'resume', error);
-			} else if (kind === 'moving') {
+			} else if (kind === 'moving' && chatId === operationChatId) {
 				notice = { chatId: operationChatId, message: queuedInputMoveError(error), error: true };
 			}
 		} finally {
@@ -125,12 +130,6 @@
 		if (!source || !target || source === target) return;
 		const revision = queue.reorderRevision;
 		await mutate('moving', () => onMove(source, target, placement, revision), source.id);
-	}
-
-	async function moveEntry(entryId: string, destination: 'up' | 'down' | 'first'): Promise<void> {
-		const index = entries.findIndex((entry) => entry.id === entryId);
-		const target = entries[destination === 'first' ? 0 : index + (destination === 'up' ? -1 : 1)];
-		if (target) await moveRelative(entryId, target.id, destination === 'down' ? 'after' : 'before');
 	}
 </script>
 
@@ -206,8 +205,6 @@
 						deleting={mutation?.kind === 'deleting' && mutation.entryId === entry.id}
 						canSteer={index === 0 && canSteer && entry.kind !== 'steer' && Boolean(onSteer)}
 						canInterrupt={index === 0 && canInterrupt && !queue.pause && Boolean(onInterrupt)}
-						canMoveUp={index > 0}
-						canMoveDown={index < entries.length - 1}
 						onSteer={() => {
 							if (onSteer && queue && entries[0]?.id === entry.id) {
 								const revision = queue.reorderRevision;
@@ -220,7 +217,6 @@
 						}}
 						onEdit={() => onEdit(entry)}
 						onDelete={() => void mutate('deleting', () => onDelete(entry.id), entry.id)}
-						onMove={(destination) => moveEntry(entry.id, destination)}
 						onDrop={moveRelative}
 					/>
 					{#snippet failed(error)}<li class="px-3 py-2 text-xs text-destructive" role="alert">

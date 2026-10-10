@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import type { ComponentProps } from 'svelte';
+import { tick } from 'svelte';
 import QueueControls from '../QueueControls.svelte';
 import type { ChatQueueState, QueueEntry } from '$lib/types/chat';
-import { ApiError } from '$lib/api/client.js';
 import * as m from '$lib/paraglide/messages.js';
 
 function deferred() {
@@ -81,6 +81,23 @@ describe('inline queue', () => {
 		expect(container.querySelector('[data-queue-status-summary]')).toBeNull();
 	});
 
+	it('starts each chat at its queue head without resetting same-chat snapshots', async () => {
+		const view = renderControls(makeQueue(Array.from({ length: 20 }, (_, index) => `q${index}`)));
+		await tick();
+		const list = view.container.querySelector('ol');
+		if (!list) throw new Error('Missing queue list');
+		list.scrollTop = 400;
+		await view.rerender({
+			queue: makeQueue(Array.from({ length: 21 }, (_, index) => `q${index}`)),
+		});
+		expect(list.scrollTop).toBe(400);
+		await view.rerender({
+			chatId: 'chat-2',
+			queue: makeQueue(Array.from({ length: 20 }, (_, index) => `b${index}`)),
+		});
+		expect(list.scrollTop).toBe(0);
+	});
+
 	it('expands full content without changing order or mutating entries', async () => {
 		const queue = makeQueue();
 		queue.entries[0].content = 'First line\nSecond line with full details';
@@ -142,34 +159,19 @@ describe('inline queue', () => {
 			screen.getByRole('menuitem', { name: m.chat_queue_interrupt_and_send() }),
 		);
 		expect(onInterrupt).toHaveBeenCalledOnce();
-	});
-
-	it('offers revision-checked move actions for keyboard and touch users', async () => {
-		const onMove = vi.fn().mockResolvedValue(undefined);
-		const queue = makeQueue();
-		renderControls(queue, { onMove });
-		await openMenu('q2');
-		await fireEvent.click(screen.getByRole('menuitem', { name: m.chat_queue_move_first() }));
-		expect(onMove).toHaveBeenCalledWith(queue.entries[2], queue.entries[0], 'before', 7);
 		await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
 	});
 
-	it('reports conflicts without pretending the queue moved', async () => {
-		const onMove = vi
-			.fn()
-			.mockRejectedValue(new ApiError(409, 'Conflict', 'QUEUE_ENTRY_REORDER_CONFLICT'));
-		renderControls(makeQueue(), { onMove });
+	it('omits all ordering actions from the inline queue menu', async () => {
+		renderControls();
 		await openMenu('q1');
-		await fireEvent.click(screen.getByRole('menuitem', { name: m.chat_queue_move_first() }));
-		expect(await screen.findByRole('alert')).toHaveProperty(
-			'textContent',
-			m.chat_queue_move_conflict(),
-		);
-		expect(screen.getAllByText(/^queued q/).map((item) => item.textContent)).toEqual([
-			'queued q0',
-			'queued q1',
-			'queued q2',
-		]);
+		expect(
+			screen.queryByRole('menuitem', { name: m.chat_queue_move_down({ position: 2 }) }),
+		).toBeNull();
+		expect(screen.queryByRole('menuitem', { name: 'Move to top' })).toBeNull();
+		expect(
+			screen.queryByRole('menuitem', { name: m.chat_queue_move_up({ position: 2 }) }),
+		).toBeNull();
 	});
 
 	it('disables steering with attachments and preserves attachment-only previews', () => {

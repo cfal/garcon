@@ -35,7 +35,7 @@ test('steers the visible Codex queue head and preserves later paused work', asyn
       await app.waitForQueuedOrder(['queue steer guidance', 'queue steer future']);
       expect(await app.hasButton('Steer')).toBe(true);
       await app.clickButton('Steer');
-      await app.waitForQueuedPreview('queue steer future');
+      await app.waitForQueuedOrder(['queue steer future']);
       const afterSteer = await fixture.integration.client.getExecutionControl(chatId);
       expect(afterSteer.queue.entries.map((entry) => entry.content)).toEqual(['queue steer future']);
       expect(afterSteer.queue.pause).not.toBeNull();

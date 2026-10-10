@@ -18,7 +18,6 @@ interface ResponsiveActionClickOptions {
 }
 
 type QueueRowAction = 'Edit queued message' | 'Remove from queue' | 'Queue actions';
-type QueueMoveDirection = 'up' | 'down';
 type ComposerAction = 'Send message' | 'Queue message';
 
 const NEW_WORKSPACE_WINDOW_ACTIONS = [
@@ -1250,12 +1249,6 @@ export class SpaDriver {
     }, { content, action });
   }
 
-  async clickQueuedMove(content: string, direction: QueueMoveDirection): Promise<void> {
-    const position = await this.#page.evaluate((expected) => [...document.querySelectorAll('[data-queue-status-summary] [data-queue-preview]')].findIndex((item) => item.textContent?.trim() === expected) + 1, content);
-    await this.clickQueuedRowAction(content, 'Queue actions');
-    await this.waitForMenuItemEnabled('Move queued message ' + position + ' ' + direction);
-    await this.clickMenuItem('Move queued message ' + position + ' ' + direction);
-  }
 
   async waitForQueuedOrder(contents: string[]): Promise<void> {
     await this.#page.waitForFunction((expected) => {
@@ -1264,12 +1257,6 @@ export class SpaDriver {
     }, { timeout: 20_000 }, contents);
   }
 
-  async waitForFocusedQueueActions(content: string): Promise<void> {
-    await this.#page.waitForFunction((expected) => {
-      const active = document.activeElement;
-      return active?.matches('[data-queue-menu-id]') && active.closest('li')?.querySelector('[data-queue-preview]')?.textContent?.trim() === expected;
-    }, { timeout: 20_000 }, content);
-  }
 
   async fillQueuedEditor(value: string): Promise<void> {
     await this.fill('[role="dialog"] textarea', value);

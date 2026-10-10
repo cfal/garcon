@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { tick } from 'svelte';
 	import {
 		draggable,
 		dropTargetForElements,
@@ -20,13 +19,9 @@
 		DropdownMenu,
 		DropdownMenuContent,
 		DropdownMenuItem,
-		DropdownMenuSeparator,
 		DropdownMenuTrigger,
 	} from '$lib/components/ui/dropdown-menu';
 	import * as m from '$lib/paraglide/messages.js';
-	import ArrowUpToLine from '@lucide/svelte/icons/arrow-up-to-line';
-	import ChevronUp from '@lucide/svelte/icons/chevron-up';
-	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import Ellipsis from '@lucide/svelte/icons/ellipsis';
 	import FastForward from '@lucide/svelte/icons/fast-forward';
 	import GripVertical from '@lucide/svelte/icons/grip-vertical';
@@ -47,13 +42,10 @@
 		deleting: boolean;
 		canSteer: boolean;
 		canInterrupt: boolean;
-		canMoveUp: boolean;
-		canMoveDown: boolean;
 		onEdit: () => void;
 		onDelete: () => void;
 		onSteer: () => void;
 		onInterrupt: () => void;
-		onMove: (destination: 'up' | 'down' | 'first') => Promise<void>;
 		onDrop: (sourceId: string, targetId: string, placement: QueueEntryPlacement) => Promise<void>;
 	}
 	let {
@@ -67,13 +59,10 @@
 		deleting,
 		canSteer,
 		canInterrupt,
-		canMoveUp,
-		canMoveDown,
 		onEdit,
 		onDelete,
 		onSteer,
 		onInterrupt,
-		onMove,
 		onDrop,
 	}: Props = $props();
 	let rowElement = $state<HTMLLIElement | null>(null);
@@ -92,14 +81,6 @@
 	const steerBlocked = $derived(blocked || entry.attachments.length > 0);
 	const iconButtonClass =
 		'grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50';
-
-	async function move(destination: 'up' | 'down' | 'first'): Promise<void> {
-		if (blocked) return;
-		menuOpen = false;
-		await onMove(destination);
-		await tick();
-		menuTrigger?.focus({ preventScroll: true });
-	}
 
 	$effect(() => {
 		if (!rowElement || !dragHandle || blocked) return;
@@ -165,7 +146,7 @@
 			role="img"
 			aria-label={m.chat_queue_drag_handle({ position })}
 			title={m.chat_queue_drag_handle({ position })}
-			class="hidden size-6 shrink-0 items-center justify-center text-muted-foreground sm:flex"
+			class="flex size-6 shrink-0 items-center justify-center text-muted-foreground"
 			class:cursor-grab={!blocked}
 		>
 			<GripVertical class="size-3.5" />
@@ -248,46 +229,14 @@
 					title={m.chat_queue_actions()}><Ellipsis class="size-4" /></DropdownMenuTrigger
 				>
 				<DropdownMenuContent align="end" class="w-56" getFocusReturnTarget={() => menuTrigger}>
-					<DropdownMenuItem
-						disabled={blocked}
-						onclick={() => {
-							if (!blocked) onEdit();
-						}}><Pencil class="size-4" />{m.chat_queue_edit_message()}</DropdownMenuItem
+					<DropdownMenuItem disabled={blocked} onSelect={onEdit}
+						><Pencil class="size-4" />{m.chat_queue_edit_message()}</DropdownMenuItem
 					>
 					{#if canInterrupt}<DropdownMenuItem
 							disabled={blocked}
-							onclick={() => {
-								if (!blocked) {
-									menuOpen = false;
-									onInterrupt();
-								}
-							}}
+							onSelect={onInterrupt}
 							title={m.chat_queue_interrupt_and_send_queue()}
 							><FastForward class="size-4" />{m.chat_queue_interrupt_and_send()}</DropdownMenuItem
-						>{/if}
-					{#if canMoveUp || canMoveDown}<DropdownMenuSeparator />{/if}
-					{#if canMoveUp}
-						<DropdownMenuItem
-							disabled={blocked}
-							onclick={() => {
-								void move('first');
-							}}><ArrowUpToLine class="size-4" />{m.chat_queue_move_first()}</DropdownMenuItem
-						>
-						<DropdownMenuItem
-							disabled={blocked}
-							onclick={() => {
-								void move('up');
-							}}><ChevronUp class="size-4" />{m.chat_queue_move_up({ position })}</DropdownMenuItem
-						>
-					{/if}
-					{#if canMoveDown}<DropdownMenuItem
-							disabled={blocked}
-							onclick={() => {
-								void move('down');
-							}}
-							><ChevronDown class="size-4" />{m.chat_queue_move_down({
-								position,
-							})}</DropdownMenuItem
 						>{/if}
 				</DropdownMenuContent>
 			</DropdownMenu>

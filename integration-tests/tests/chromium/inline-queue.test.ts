@@ -6,6 +6,7 @@ import { withChromiumFixture } from '../../support/chromium-fixture.js';
 import { codexAssistantMessage } from '../../support/fake-codex-model.js';
 import { liveCodexStartRequest } from '../../support/live-codex.js';
 import { startScriptedCodexTestEnvironment } from '../../support/scripted-codex.js';
+import { Deferred } from '../../support/deferred.js';
 
 test('reorders, expands, edits, and steers queued messages from the chat on desktop and mobile', async () => {
   const environment = await startScriptedCodexTestEnvironment();
@@ -84,19 +85,20 @@ test('reorders, expands, edits, and steers queued messages from the chat on desk
       await tray.getByRole('button', { name: 'Expand all queued messages' }).click();
       await page.screenshot({ path: join(artifactDir, 'mobile-expanded.png') });
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-      await tray.getByRole('button', { name: 'Queue actions', exact: true }).last().click();
-      await browserExpect(page.getByRole('menuitem', { name: 'Move to top', exact: true })).toBeVisible();
+      await tray.getByRole('button', { name: 'Queue actions', exact: true }).first().click();
+      await browserExpect(page.getByRole('menuitem', { name: 'Send now', exact: true })).toBeVisible();
+      await browserExpect(page.getByRole('menuitem', { name: /Move/ })).toHaveCount(0);
       await page.screenshot({ path: join(artifactDir, 'mobile-menu.png') });
-      await page.getByRole('menuitem', { name: 'Move to top', exact: true }).click();
+      await page.keyboard.press('Escape');
       await browserExpect(page.getByRole('menu')).toHaveCount(0);
-      await browserExpect(previews.first()).toHaveText(editedMessage);
+      await browserExpect(previews.first()).toHaveText(messages[2]);
       await browserExpect(composer).toHaveValue('Keep this draft while arranging the queue.');
 
       phase('steering from the chat while later work remains paused');
       await tray.getByRole('button', { name: 'Pause', exact: true }).click();
       await browserExpect(tray.getByRole('button', { name: 'Resume queue', exact: true })).toBeVisible();
       await tray.getByRole('button', { name: 'Steer', exact: true }).click();
-      await browserExpect(previews).toHaveText([messages[2], messages[0]]);
+      await browserExpect(previews).toHaveText([messages[0], editedMessage]);
       expect((await integration.client.getExecutionControl(chatId)).queue.pause).not.toBeNull();
       held.release();
       if (!active.turnId) throw new Error('Missing active turn');
@@ -110,6 +112,83 @@ test('reorders, expands, edits, and steers queued messages from the chat on desk
     await environment.dispose();
   }
 }, 120_000);
+
+for (const lateOutcome of ['success', 'failure'] as const) {
+  test(`preserves the selected chat's drag conflict when another chat's drag settles with ${lateOutcome}`, async () => {
+    await withChromiumFixture(`inline-queue-drag-${lateOutcome}`, async ({ page, integration, browserErrors, failedResponses }) => {
+      const chatA = integration.newChatId();
+      const chatB = integration.newChatId();
+      const heldA = integration.fakeProviders.openAi.holdNext({ lastUserText: 'Synthetic drag chat A' });
+      const heldB = integration.fakeProviders.openAi.holdNext({ lastUserText: 'Synthetic drag chat B' });
+      const requested = new Deferred<void>();
+      const release = new Deferred<void>();
+      try {
+        for (const [chatId, content] of [[chatA, 'Synthetic drag chat A'], [chatB, 'Synthetic drag chat B']]) {
+          await integration.client.startDirectChat({ chatId, content, projectPath: integration.dirs.project, agent: integration.directAgents.openAi });
+        }
+        await Promise.all([heldA.received, heldB.received]);
+        for (const [chatId, prefix] of [[chatA, 'A'], [chatB, 'B']]) {
+          for (let index = 0; index < 3; index++) await integration.client.enqueueNew(chatId, `Synthetic queued ${prefix} ${index}`);
+        }
+        await page.route('**/api/v1/chats/queue/entries/move', async (route) => {
+          if (route.request().postDataJSON().chatId === chatA) {
+            requested.resolve();
+            await release.promise;
+            if (lateOutcome === 'success') {
+              await route.continue();
+              return;
+            }
+          }
+          await route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({
+            success: false, error: 'Synthetic reorder conflict', errorCode: 'QUEUE_ENTRY_REORDER_CONFLICT', retryable: false,
+          }) });
+        });
+        await page.goto(`${integration.garcon.baseUrl}/chat/${chatA}`);
+        const tray = page.locator('[data-queue-status-summary]');
+        const composer = page.getByPlaceholder('Reply...', { exact: true });
+        const select = async (chatId: string) => {
+          await page.locator(`[data-sidebar-virtual-row="${chatId}"]`).getByRole('button').first().click();
+          await browserExpect(page.locator(`[data-conversation-panel-chat-id="${chatId}"]`)).toBeVisible();
+        };
+        const dragLastToFirst = async () => {
+          await browserExpect(tray.locator('[data-queue-preview]')).toHaveCount(3);
+          await tray.locator('[data-queue-drag-id]').last().dragTo(tray.locator('[data-queue-entry-id]').first(), { targetPosition: { x: 100, y: 2 } });
+        };
+        await dragLastToFirst();
+        await requested.promise;
+        await select(chatB);
+        await dragLastToFirst();
+        const conflict = 'Queue order changed. Review the latest order and try again.';
+        await browserExpect(tray.getByRole('alert')).toHaveText(conflict);
+        await browserExpect(tray.locator('[data-queue-preview]')).toHaveText(['Synthetic queued B 0', 'Synthetic queued B 1', 'Synthetic queued B 2']);
+        await composer.fill('Synthetic draft stays focused');
+        await composer.focus();
+        const settled = page.waitForResponse((response) => response.url().endsWith('/api/v1/chats/queue/entries/move') && response.request().postDataJSON().chatId === chatA);
+        release.resolve();
+        await settled;
+        await select(chatA);
+        await browserExpect(tray.getByRole('button', { name: 'Queue actions', exact: true }).first()).toBeEnabled();
+        const expectedOrder = lateOutcome === 'success'
+          ? ['Synthetic queued A 2', 'Synthetic queued A 0', 'Synthetic queued A 1']
+          : ['Synthetic queued A 0', 'Synthetic queued A 1', 'Synthetic queued A 2'];
+        await browserExpect(tray.locator('[data-queue-preview]')).toHaveText(expectedOrder);
+        await select(chatB);
+        await browserExpect(tray.getByRole('alert')).toHaveText(conflict);
+        await browserExpect(composer).toHaveValue('Synthetic draft stays focused');
+        await select(chatA);
+        heldA.releaseEcho();
+        await browserExpect(page.getByText(`echo:${expectedOrder[2]}`, { exact: true })).toBeVisible();
+        expect(integration.fakeProviders.openAi.requests().map((request) => request.lastUserText).filter((text) => text.startsWith('Synthetic queued A'))).toEqual(expectedOrder);
+        expect(failedResponses).toHaveLength(lateOutcome === 'success' ? 1 : 2);
+        expect(browserErrors.filter((error) => !/^console.error: Failed to load resource: the server responded with a status of 409/.test(error))).toEqual([]);
+      } finally {
+        release.resolve();
+        heldA.releaseEcho();
+        heldB.releaseEcho();
+      }
+    });
+  }, 120_000);
+}
 
 test('preserves the composer and background queue updates across rapid chat switches', async () => {
   await withChromiumFixture('inline-queue-chat-switch', async ({ page, integration, assertNoBrowserErrors }) => {
@@ -149,8 +228,16 @@ test('preserves the composer and background queue updates across rapid chat swit
         expect((await composer.boundingBox())?.y).toBe(composerTop);
       }
       expect(await page.evaluate((element) => element === document.querySelector('textarea[placeholder="Reply..."]'), composerElement)).toBe(true);
+      for (let index = 0; index < 12; index++) {
+        await Promise.all([integration.client.enqueueNew(chatA, `Synthetic long queue A ${index}`), integration.client.enqueueNew(chatB, `Synthetic long queue B ${index}`)]);
+      }
+      await browserExpect(tray.locator('[data-queue-preview]')).toHaveCount(13);
+      await tray.locator('ol').evaluate((list) => { list.scrollTop = list.scrollHeight; });
+      expect(await tray.locator('ol').evaluate((list) => list.scrollTop)).toBeGreaterThan(0);
       await select(chatA);
-      await browserExpect(tray.getByText('2 queued', { exact: true })).toBeVisible();
+      await browserExpect(tray.getByText('14 queued', { exact: true })).toBeVisible();
+      expect(await tray.locator('ol').evaluate((list) => list.scrollTop)).toBe(0);
+      await browserExpect(tray.locator('[data-queue-preview]').first()).toBeInViewport();
       await integration.client.pauseQueue(chatA);
       heldA.releaseEcho();
       await browserExpect(tray.getByText('Queue paused', { exact: true })).toBeVisible();
