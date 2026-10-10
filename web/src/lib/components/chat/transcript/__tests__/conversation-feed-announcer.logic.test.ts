@@ -9,6 +9,7 @@ import {
 	McpToolUseMessage,
 	PermissionRequestMessage,
 	ToolResultMessage,
+	TranscriptNoticeMessage,
 	UnknownToolUseMessage,
 	UserMessage,
 	WaitToolUseMessage,
@@ -77,7 +78,35 @@ describe('ConversationFeedAnnouncerState', () => {
 			source, { executorId: 'local', projectPath: '/workspace' })), [])).toBe(source);
 		expect(announcementForAppendedRow(messageRow('3', new CommandResultMessage('', 'command-1', {
 			outcome: 'finished', exitCode: 0, signal: null, capture: 'complete', cwd: { kind: 'reported', path: '/workspace' },
-		})), [])).toBe('Completed');
+		})), [])).toBeNull();
+	});
+
+	it.each(['error', 'warning'] as const)('announces a durable %s once and keeps missing-result fallback', noticeType => {
+		const initial = assistantRow('1', 'initial');
+		const message = new CommandResultMessage('', 'command-1', {
+			outcome: noticeType === 'error' ? 'failed' : 'finished',
+			exitCode: noticeType === 'error' ? 127 : 0, signal: null,
+			capture: noticeType === 'error' ? 'complete' : 'truncated', cwd: { kind: 'reported', path: '/workspace' },
+		});
+		const result = messageRow('2', message);
+		const notice = { kind: 'local-notice' as const, id: 'notice', noticeType, content: message.content, timestamp: '' };
+		const announcer = new ConversationFeedAnnouncerState();
+		announcer.reconcile({ surfaceIdentity: 'chat', rows: [initial], mutationClock: clock(1), ...enabled });
+		expect(announcer.reconcile({ surfaceIdentity: 'chat', rows: [initial, result], mutationClock: clock(2, 2), ...enabled })).toBe(message.content);
+		expect(announcer.reconcile({ surfaceIdentity: 'chat', rows: [initial, result, notice], mutationClock: clock(3, 2, 3), ...enabled })).toBeNull();
+		announcer.reconcile({ surfaceIdentity: 'other', rows: [initial], mutationClock: clock(1), ...enabled });
+		expect(announcer.reconcile({ surfaceIdentity: 'other', rows: [initial, notice], mutationClock: clock(2, 0, 2), ...enabled })).toBe(plainAnnouncementText(message.content));
+	});
+
+	it('announces the error once when its durable notice has no announcement', () => {
+		const initial = assistantRow('1', 'initial');
+		const message = new TranscriptNoticeMessage('', 'Working directory save failed');
+		const diagnostic = messageRow('2', message);
+		const notice = { kind: 'local-notice' as const, id: 'notice', noticeType: 'error' as const, content: message.content, timestamp: '' };
+		const announcer = new ConversationFeedAnnouncerState();
+		announcer.reconcile({ surfaceIdentity: 'chat', rows: [initial], mutationClock: clock(1), ...enabled });
+		expect(announcer.reconcile({ surfaceIdentity: 'chat', rows: [initial, diagnostic], mutationClock: clock(2, 2), ...enabled })).toBeNull();
+		expect(announcer.reconcile({ surfaceIdentity: 'chat', rows: [initial, diagnostic, notice], mutationClock: clock(3, 2, 3), ...enabled })).toBe(message.content);
 	});
 
 	it('does not announce the initial or replacement transcript', () => {

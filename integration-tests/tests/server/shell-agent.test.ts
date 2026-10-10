@@ -122,6 +122,14 @@ for (const backend of ['in-process', 'remote-controller-dials', 'remote-executor
         .toHaveLength(before.filter(message => message.type === 'user-message').length + 1);
 
       if (backend !== 'in-process') await client.patch(`/api/v1/executors/${client.executorId}`, { allowControllerCli: true });
+      const cliAgents = await runCli(fixture, ['list', 'agents', '--json']);
+      expect(cliAgents).toMatchObject({ exitCode: 0, stderr: '' });
+      expect(JSON.parse(cliAgents.stdout).agents).toContainEqual(expect.objectContaining({
+        id: 'shell', executionPolicy: 'literal', selectionLabel: 'Shell',
+      }));
+      const cliModels = await runCli(fixture, ['list', 'models', '--agent', 'shell', '--json']);
+      expect(cliModels).toMatchObject({ exitCode: 0, stderr: '' });
+      expect(JSON.parse(cliModels.stdout)).toMatchObject({ agentId: 'shell', selectionLabel: 'Shell' });
       const cliStart = await runCli(fixture, ['start', '--agent', 'shell', '--model', 'sh', '--cwd', next,
         'printf "<garcon-get-chat-id />"']);
       expect(cliStart).toMatchObject({ exitCode: 0, stderr: '' });

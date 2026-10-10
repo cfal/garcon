@@ -15,6 +15,8 @@ function agent(overrides: Partial<AgentCatalogEntry> = {}): AgentCatalogEntry {
   return {
     id: 'codex',
     label: 'Codex',
+    executionPolicy: 'conversation',
+    selectionLabel: 'Model',
     kind: 'agent',
     supportsFork: true,
     supportsForkAtMessage: true,

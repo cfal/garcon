@@ -29,6 +29,19 @@ for (const backend of RUNTIME_BACKENDS) {
       expect(info.services).toEqual({ files: true, git: true, gh: true, terminals: true, directoryCreation: descriptorPathsDirectory() !== null });
       for (const integrationClass of defaultAgentIntegrations) {
         const integration = await executor.getAgentIntegration(integrationClass.integrationId);
+        const native = await local.getAgentIntegration(integrationClass.integrationId);
+        expect(integration.literalExecution).toEqual(native.literalExecution);
+        expect(integration.readiness === null).toBe(native.readiness === null);
+        if (integrationClass.integrationId === 'shell') {
+          const request = { nextProjectPath: workspaceDir, chat: {
+            chatId: '1783725900000000', agentId: 'shell', agentSessionId: null, projectPath: workspaceDir,
+            model: 'sh', nativeSession: null, carryOverRevision: '', nativeSeedReceipt: null,
+            settings: integration.settings.defaults(),
+          } };
+          // A caller can abandon a preparation reply without retaining native work.
+          await integration.projectPathUpdates!.prepare(request);
+          expect(await integration.projectPathUpdates!.prepare(request)).toBeNull();
+        }
         await runAgentIntegrationConformance({ integrationClass, integration });
         expect(await executor.getAgentIntegration(integrationClass.integrationId)).toBe(integration);
       }

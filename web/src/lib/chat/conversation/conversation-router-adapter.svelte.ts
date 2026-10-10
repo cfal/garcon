@@ -117,7 +117,10 @@ export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRoute
 					// Leaves the stale cache flag set so a later activation retries.
 				}
 			},
-			markRenderedChatStale: (chatId) => deps.panels.handleViewReplacement(chatId),
+			markRenderedChatStale: (chatId) => {
+				deps.chatState.discardChat(chatId);
+				deps.panels.handleViewReplacement(chatId);
+			},
 			appendLocalNotice: (noticeType, content) => {
 				const chatId = deps.sessions.selectedChatId;
 				if (chatId) deps.panels.appendLocalNotice(chatId, noticeType, content);
@@ -131,7 +134,10 @@ export function buildRouterStores(deps: ConversationRouterStoreDeps): EventRoute
 				deps.panels.removeChat(chatId);
 				deps.chatDrafts?.discardChat(chatId);
 			},
-			markChatTranscriptStale: (chatId) => deps.panels.markChatStale(chatId),
+			markChatTranscriptStale: (chatId) => {
+				deps.chatState.discardChat(chatId);
+				deps.panels.handleViewReplacement(chatId);
+			},
 			markChatTranscriptValidated: (chatId) => transcriptCache.markValidated(chatId),
 		},
 		lifecycle: {

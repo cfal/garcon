@@ -28,6 +28,8 @@
 
 	function agentMetadata(id: string, label: string): AgentMetadata {
 		return {
+			executionPolicy: 'conversation',
+			selectionLabel: 'Model',
 			id,
 			label,
 			supportsCompact: false,

@@ -97,6 +97,8 @@ function service({
     getAgentCatalogEntries: mock(async () => (discovery === 'throws' ? fail() : (empty ? [] : [{
       id: 'claude',
       label: 'Claude',
+      executionPolicy: 'conversation',
+      selectionLabel: 'Model',
       kind: 'agent',
       models: [{ id: 'haiku', label: 'Haiku' }],
     }]))),

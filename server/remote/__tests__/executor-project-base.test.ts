@@ -15,7 +15,7 @@ function nextAvailability(executor: RemoteExecutorClient, expected: ExecutorAvai
 }
 
 for (const dialer of ['controller', 'worker'] as const) {
-  test(`fresh sessions accept widened/narrowed bases without replacing facades (${dialer} dials)`, async () => {
+  test.each([false, true])(`fresh sessions retain facades and execution policy (${dialer} dials, literal=%s)`, async literal => {
     const controller = new WebSocketLink({ ...linkOptions, role: 'controller' });
     const worker = new WebSocketLink({ ...linkOptions, role: 'worker' });
     const errors: string[] = [];
@@ -32,7 +32,11 @@ for (const dialer of ['controller', 'worker'] as const) {
       const entering = entered;
       fixture.integration.lifecycle.start = async () => { entering.resolve(); await barrier; };
       generations.push(fixture);
-      scopes.push(servePairedRuntime(worker, transport, fixture.executor, new ProducerRelay()));
+      const integration: AgentIntegration = literal
+        ? { ...fixture.integration, literalExecution: { selectionLabel: 'Runtime' }, singleQuery: null }
+        : fixture.integration;
+      scopes.push(servePairedRuntime(worker, transport,
+        { ...fixture.executor, getAgentIntegration: async () => integration }, new ProducerRelay()));
     });
     try {
       const firstReady = nextAvailability(executor, 'ready');
@@ -40,6 +44,7 @@ for (const dialer of ['controller', 'worker'] as const) {
       else worker.dial(controller.listen());
       await firstReady;
       const integration = await executor.getAgentIntegration('test');
+      expect(integration.literalExecution).toEqual(literal ? { selectionLabel: 'Runtime' } : null);
       const projects = await executor.getProjectService();
       const inventory = executor.inventory;
       let info = await executor.getInfo();
@@ -60,6 +65,7 @@ for (const dialer of ['controller', 'worker'] as const) {
         expect(replacement.projectBasePath).toBe(nextBase);
         expect(replacement.instanceId).not.toBe(info.instanceId);
         expect(await executor.getAgentIntegration('test')).toBe(integration);
+        expect(integration.literalExecution).toEqual(literal ? { selectionLabel: 'Runtime' } : null);
         expect(await executor.getProjectService()).toBe(projects);
         expect(executor.inventory).toEqual(inventory);
         info = replacement;
@@ -77,36 +83,41 @@ const manifestChanges: Record<string, (integration: AgentIntegration) => AgentIn
   descriptor: (integration) => ({ ...integration, descriptor: { ...integration.descriptor, label: 'Changed' } }),
   settings: (integration) => ({ ...integration, settings: { ...integration.settings, defaults: () => ({ ownerId: 'test', schemaVersion: 2, values: {} }) } }),
   capability: (integration) => ({ ...integration, singleQuery: null }),
+  literalExecution: (integration) => ({ ...integration, literalExecution: { selectionLabel: 'Runtime' }, singleQuery: null }),
+  readiness: (integration) => ({ ...integration, readiness: { async status() { return { ready: true, reason: 'Available' }; } } }),
 };
 
-for (const [name, change] of Object.entries(manifestChanges)) {
-  test(`a root change does not permit a changed provider ${name}`, async () => {
-    const controller = new WebSocketLink({ ...linkOptions, role: 'controller' });
-    const worker = new WebSocketLink({ ...linkOptions, role: 'worker' });
-    const failure = Promise.withResolvers<string>();
-    const executor = new RemoteExecutorClient(linkOptions.executorId, controller, undefined, failure.resolve);
-    const scopes: ReturnType<typeof serveExecutionRuntime>[] = [];
-    let replacement = false;
-    worker.onSession((transport) => {
-      const fixture = integrationFixture(replacement ? '/' : '/workspace');
-      const integration = replacement ? change(fixture.integration) : fixture.integration;
-      scopes.push(servePairedRuntime(worker, transport, { ...fixture.executor, getAgentIntegration: async () => integration }, new ProducerRelay()));
+for (const dialer of ['controller', 'worker'] as const) {
+  for (const [name, change] of Object.entries(manifestChanges)) {
+    test(`a root change does not permit a changed provider ${name} (${dialer} dials)`, async () => {
+      const controller = new WebSocketLink({ ...linkOptions, role: 'controller' });
+      const worker = new WebSocketLink({ ...linkOptions, role: 'worker' });
+      const failure = Promise.withResolvers<string>();
+      const executor = new RemoteExecutorClient(linkOptions.executorId, controller, undefined, failure.resolve);
+      const scopes: ReturnType<typeof serveExecutionRuntime>[] = [];
+      let replacement = false;
+      worker.onSession((transport) => {
+        const fixture = integrationFixture(replacement ? '/' : '/workspace');
+        const integration = replacement ? change(fixture.integration) : fixture.integration;
+        scopes.push(servePairedRuntime(worker, transport, { ...fixture.executor, getAgentIntegration: async () => integration }, new ProducerRelay()));
+      });
+      try {
+        const ready = nextAvailability(executor, 'ready');
+        if (dialer === 'controller') controller.dial(worker.listen());
+        else worker.dial(controller.listen());
+        await ready;
+        const inventory = executor.inventory;
+        replacement = true;
+        controller.current!.close();
+        expect(await failure.promise).toContain('provider capabilities changed');
+        expect(executor.availability).toBe('offline');
+        expect(executor.inventory).toEqual(inventory);
+      } finally {
+        await executor.dispose(); await worker.dispose();
+        await Promise.all(scopes.map((scope) => scope.dispose()));
+      }
     });
-    try {
-      const ready = nextAvailability(executor, 'ready');
-      controller.dial(worker.listen());
-      await ready;
-      const inventory = executor.inventory;
-      replacement = true;
-      controller.current!.close();
-      expect(await failure.promise).toContain('provider capabilities changed');
-      expect(executor.availability).toBe('offline');
-      expect(executor.inventory).toEqual(inventory);
-    } finally {
-      await executor.dispose(); await worker.dispose();
-      await Promise.all(scopes.map((scope) => scope.dispose()));
-    }
-  });
+  }
 }
 
 test('a superseded candidate cannot publish metadata or errors over the accepted session', async () => {

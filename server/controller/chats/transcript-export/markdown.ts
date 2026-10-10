@@ -61,8 +61,12 @@ export function renderTranscriptExportMarkdown(
         || (entry.message.type === 'command-output' && entry.message.format === 'plain')
         || entry.message.type === 'command-result'
       );
-      const fence = '`'.repeat(Math.max(3, longestBacktickRun(content) + 1));
-      lines.push(...(literal ? [`${fence}text`, content, fence] : [content]), '');
+      if (literal) {
+        const fence = '`'.repeat(Math.max(3, longestBacktickRun(content) + 1));
+        lines.push(`${fence}text`, content, fence, '');
+      } else {
+        lines.push(content, '');
+      }
     }
 
     const fields = [...transcriptExportEntryFields(entry)];

@@ -78,6 +78,14 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
         run: bun run check
 
+      - name: Install Shell test dependencies
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends zsh fish
+          zsh --version
+          fish --version
+
       - name: Run server tests for release validation
         if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
         run: bun run test:server

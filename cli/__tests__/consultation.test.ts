@@ -98,7 +98,7 @@ function catalog(): ModelCatalogResponse {
   return {
     catalog: {
       agents: [{
-        id: 'codex', label: 'Codex', kind: 'agent', supportsFork: true,
+        id: 'codex', label: 'Codex', executionPolicy: 'conversation', selectionLabel: 'Model', kind: 'agent', supportsFork: true,
         supportsForkAtMessage: true, supportsForkWhileRunning: false,
         supportsUpdateProjectPath: true, supportsImages: true,
         acceptsApiProviderEndpoints: false, supportedProtocols: [], authLoginSupported: true,

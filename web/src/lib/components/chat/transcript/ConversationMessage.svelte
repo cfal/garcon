@@ -163,9 +163,11 @@
 	const projectBasePath = $derived(executors.get(executorId)?.projectBasePath ?? '');
 	// Automatic reads wait for the confirmed executor root, not the shell's startup default.
 	const imageFileRootPath = $derived(executors.get(executorId)?.projectBasePath);
-	const chatProjectPath = $derived(
-		filesAvailable ? (message.type === 'command-output' ? message.context.projectPath : activeChatContext?.projectPath ?? null) : null,
-	);
+	const chatProjectPath = $derived.by(() => {
+		if (!filesAvailable) return null;
+		if (message.type === 'command-output') return message.context.projectPath;
+		return activeChatContext?.projectPath ?? null;
+	});
 	const resolveChatReference: ResolveChatReference = (chatId) =>
 		resolveChatReferenceTarget(chatId, activeChatContext?.chatId, sessions.byId[chatId]);
 
@@ -791,7 +793,7 @@
 							{/snippet}
 						</ChatEventCard>
 					{:else if message.type === 'command-result' || (message.type === 'command-output' && message.channel === 'stderr')}
-						<CommandStatusRow {message} {disclosureState} />
+						<CommandStatusRow {message} />
 					{:else if asAssistant || asCommandOutput}
 						<ContextMenu open={messageMenuOpen} onOpenChange={handleMessageMenuOpenChange}>
 							<ContextMenuTrigger

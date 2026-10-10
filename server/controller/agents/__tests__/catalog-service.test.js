@@ -87,6 +87,8 @@ describe("AgentCatalogService", () => {
     const entry = await service.getAgentCatalogEntry("sample-agent");
 
     expect(entry).toMatchObject({
+      executionPolicy: 'conversation',
+      selectionLabel: 'Model',
       id: "sample-agent",
       label: "Sample Agent",
       supportsFork: true,

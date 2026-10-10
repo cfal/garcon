@@ -24,6 +24,21 @@ import {
 const AT = '2026-08-26T00:00:00.000Z';
 
 describe('handoff artifact projection', () => {
+  it('orders literal and CLI presentation attributes without changing command text', () => {
+    const command = '  printf "example"\n';
+    const folded = foldHandoffArtifactEntries([
+      entry(1, new UserMessage(AT, command, undefined, { contentMode: 'literal' }, {
+        origin: 'cli', style: 'notice', title: 'Command input', disclosure: 'collapsed',
+      })),
+    ]);
+    expect(folded.entries[0].attributes).toEqual([
+      { name: 'content-mode', value: 'literal' },
+      { name: 'origin', value: 'cli' },
+      { name: 'style', value: 'notice' },
+      { name: 'title', value: 'Command input' },
+    ]);
+    expect(folded.entries[0].body).toBe(command);
+  });
   it('retains inert command evidence with escaped labels and bounded bodies', () => {
     const context = { executorId: 'local', projectPath: '/workspace' };
     const folded = foldHandoffArtifactEntries([

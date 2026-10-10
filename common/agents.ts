@@ -7,6 +7,7 @@ import type {
   AgentSettingsEnvelope,
 } from "./agent-integration.js";
 import type { PermissionMode, ThinkingMode } from "./chat-modes.js";
+import { isRecord } from './json.js';
 
 export const DIRECT_OPENAI_CHAT_COMPLETIONS_COMPATIBLE_AGENT_ID =
   "direct-openai-compatible" as const;
@@ -40,8 +41,8 @@ export interface AgentCatalogEntry {
   label: string;
   description?: string;
   kind: "agent";
-  executionPolicy?: 'conversation' | 'literal';
-  selectionLabel?: string;
+  executionPolicy: 'conversation' | 'literal';
+  selectionLabel: string;
   supportsCompact: boolean;
   supportsFork: boolean;
   supportsForkAtMessage: boolean;
@@ -72,4 +73,12 @@ const SAFE_ID_RE = /^[a-z][a-z0-9_-]{1,63}$/;
 
 export function isAgentId(value: unknown): value is AgentId {
   return typeof value === "string" && SAFE_ID_RE.test(value);
+}
+
+export function hasAgentExecutionMetadata(
+  value: unknown,
+): value is Record<string, unknown> & Pick<AgentCatalogEntry, 'executionPolicy' | 'selectionLabel'> {
+  return isRecord(value)
+    && (value.executionPolicy === 'conversation' || value.executionPolicy === 'literal')
+    && typeof value.selectionLabel === 'string' && value.selectionLabel.length > 0;
 }

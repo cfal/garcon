@@ -13,9 +13,10 @@ continues between commands. Variables, exports, functions, aliases, options,
 and activated environments do not survive; combine dependent operations into
 one multiline submission. Filesystem changes persist normally.
 
-Usual non-login shell configuration loads on each invocation. Sh, Bash, Zsh,
-and Fish use interactive startup over pipes, not a terminal. Startup output is
-retained. Garcon restores
+Non-login shell configuration loads on each invocation. Bash runs non-interactively
+with alias expansion enabled and explicitly sources `~/.bashrc`; sections guarded
+for interactive shells are skipped. Sh, Zsh, and Fish use interactive startup over
+pipes, not a terminal. Startup output and errors are retained. Garcon restores
 the confirmed directory after startup and disables Unix shell job control
 before executing the submission. Terminal-dependent profile code may behave
 differently or block.
@@ -59,7 +60,8 @@ A wrapper observes the shell's final physical directory without parsing `cd` or
 stdout. A valid changed path is checked and persisted before another queued
 command can start. Failed commands can still change directory. Invalid or
 unusable reported paths, and corrupt or unreadable reports, fail the turn and
-pause the queue. An untouched report from a skipped footer retains the previous
+pause the queue. Controller-side cwd settlement failures also retain a transcript
+diagnostic across browser refresh and controller restart. An untouched report from a skipped footer retains the previous
 confirmed path. `exec`, Stop, process termination,
 and some shells' `exit` behavior may bypass the wrapper's observation.
 The report is a best-effort observation, not a security boundary against commands
@@ -69,7 +71,14 @@ Nonzero status fails the turn and pauses waiting work, whether the failed
 command was direct or queued. Stderr alone does not indicate failure. Status
 follows the selected shell; Garcon does not add `errexit` or `pipefail`.
 Shell chats do not send Telegram or browser attention notifications or play
-completion sounds. Command status, errors, and queue pauses remain visible in-chat.
+completion sounds. Clean successful status rows are omitted from chat, shared
+views, and search. Failures appear as compact errors; interruption, uncertain
+outcomes, capture warnings, cwd warnings, and queue pauses remain visible.
+Native history and exports retain every command result. Matching transient
+error or warning notices are suppressed while the final durable result is
+visible. A new submission clears previous transient notices, not historical
+command results. Older derived search indexes rebuild automatically to remove
+routine completion hits; transcript ledgers remain unchanged.
 
 There is no PTY or stdin UI. Stdin remains open and unwritten; prompts may
 block until Stop. Stop sends group termination, then escalates after 500 ms.

@@ -64,6 +64,8 @@ describe('ConversationMessage actions', () => {
 		}) });
 		expect(container.querySelector('[data-chat-message-type="command-result"]')).not.toBeNull();
 		expect(screen.getByText('Exit 7')).toBeTruthy();
+		expect(screen.getByText('Exit 7').closest('article')?.className).toContain('border-status-error-border');
+		expect(screen.queryByRole('button', { name: 'Show more' })).toBeNull();
 	});
 	afterEach(() => {
 		cleanup();

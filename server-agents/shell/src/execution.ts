@@ -149,14 +149,16 @@ export class ShellExecution {
     let commandRecorded = false;
     let sessionPublished = false;
     const output = new CommandOutputTail();
-    let outputPublished = false;
-    const publishOutput = () => {
-      if (outputPublished) return;
-      outputPublished = true;
-      for (const message of output.messages()) {
+    let outputSnapshot: CommandOutputMessage[] | undefined;
+    const publishOutput = (): CommandOutputMessage[] => {
+      if (outputSnapshot) return outputSnapshot;
+      // Caching before writes prevents retries after a partial persistence failure.
+      outputSnapshot = output.messages();
+      for (const message of outputSnapshot) {
         log!.append(commandId, message);
         this.#emit(invocation.binding, { type: 'rows', rows: [{ message }] });
       }
+      return outputSnapshot;
     };
     try {
       const commandLog = 'nativeSession' in request
@@ -215,12 +217,12 @@ export class ShellExecution {
         capture,
       };
       const message = new CommandResultMessage(new Date().toISOString(), commandId, outcome);
-      publishOutput();
+      const publishedOutput = publishOutput();
       commandLog.append(commandId, message);
       this.#emit(invocation.binding, { type: 'rows', rows: [{ message }] });
       const terminal = { type: 'run-ended', runId: request.runId, workingDirectory: outcome.cwd } as const;
       if (outcome.outcome === 'finished') {
-        let text = output.messages().find(message => message.channel === 'stdout')?.content ?? '';
+        let text = publishedOutput.find(message => message.channel === 'stdout')?.content ?? '';
         if (output.truncated) {
           text = `[Output truncated to the last 64 KiB across stdout and stderr]\n${text}`;
         }
@@ -231,12 +233,10 @@ export class ShellExecution {
         };
       }
       if (outcome.outcome === 'interrupted') return { ...terminal, outcome: 'interrupted' };
-      const failure = result.cwd.kind === 'invalid'
-        ? `Process exited ${result.exitCode ?? 'without an exit code'}. ${result.cwd.reason}`
-        : message.content;
-      return { ...terminal, outcome: 'failed', error: { code: 'PROVIDER_FAILURE', message: failure } };
+      return { ...terminal, outcome: 'failed', error: { code: 'PROVIDER_FAILURE', message: message.content } };
     } catch (error) {
       publishOutput();
+      let failure = failureDetail(error);
       if (log && commandRecorded) {
         const message = new CommandResultMessage(new Date().toISOString(), commandId, {
           outcome: invocation.cancellation.signal.aborted ? 'interrupted' : 'failed', exitCode: null, signal: null,
@@ -245,13 +245,14 @@ export class ShellExecution {
         try {
           log.append(commandId, message);
           this.#emit(invocation.binding, { type: 'rows', rows: [{ message }] });
-        } catch (failure) {
-          this.host.logger.error('Shell native history is incomplete', { reason: String(failure) });
+          failure = { ...failure, message: message.content };
+        } catch (persistenceError) {
+          this.host.logger.error('Shell native history is incomplete', { reason: String(persistenceError) });
         }
       }
       return invocation.cancellation.signal.aborted
         ? { type: 'run-ended', runId: request.runId, outcome: 'interrupted' }
-        : { type: 'run-ended', runId: request.runId, outcome: 'failed', error: failureDetail(error) };
+        : { type: 'run-ended', runId: request.runId, outcome: 'failed', error: failure };
     } finally {
       log?.close();
       if (log && !('nativeSession' in request) && !sessionPublished) await this.store.remove(invocation.sessionId);

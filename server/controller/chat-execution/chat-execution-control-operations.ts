@@ -28,8 +28,8 @@ import {
   reservePendingSteer,
   reserveQueueSteer,
   requeueAndPause,
-  pauseAfterDispatchFailure,
-  pauseAfterTurnFailure,
+  pauseAfterFailure,
+  type FailurePauseCause,
   resumeQueue,
   type ObservedQueueEntry,
   type ControlTransition,
@@ -440,23 +440,17 @@ export class ChatExecutionControlOperations {
     });
   }
 
-  async pauseAfterDispatchFailure(chatId: string, entryId: string): Promise<void> {
+  async pauseAfterFailure(chatId: string, cause: FailurePauseCause): Promise<void> {
     await this.host.runExclusive(chatId, async () => {
       const current = await this.#load(chatId);
       const committed = await this.#commitTransition(
         chatId,
         current,
-        pauseAfterDispatchFailure(current, entryId, transitionContext()),
+        pauseAfterFailure(current, cause, transitionContext()),
       );
-      if (committed.changed) this.#logPauseMutation('pause', chatId, committed.control, entryId);
-    });
-  }
-
-  async pauseAfterTurnFailure(chatId: string, turnId: string): Promise<void> {
-    await this.host.runExclusive(chatId, async () => {
-      const current = await this.#load(chatId);
-      const committed = await this.#commitTransition(chatId, current, pauseAfterTurnFailure(current, turnId, transitionContext()));
-      if (committed.changed) this.#logPauseMutation('pause', chatId, committed.control);
+      if (committed.changed) {
+        this.#logPauseMutation('pause', chatId, committed.control, cause.kind === 'queued-turn-failed' ? cause.entryId : undefined);
+      }
     });
   }
 

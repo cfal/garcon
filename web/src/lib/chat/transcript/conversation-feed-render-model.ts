@@ -95,6 +95,8 @@ export class ConversationFeedRenderModelController {
 			if (!next || next.kind !== previous.kind || next.id !== previous.id) return null;
 			if (previous.kind === 'message' && next.kind === 'message'
 				&& previous.message !== next.message) return null;
+			if (previous.kind === 'local-notice' && next.kind === 'local-notice'
+				&& previous.duplicateOfRowId !== next.duplicateOfRowId) return null;
 		}
 		return nextItems.slice(previousItems.length);
 	}

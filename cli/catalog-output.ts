@@ -10,8 +10,8 @@ export type CatalogQueryResult =
         label: string;
         description: string | null;
         defaultModel: string;
-        selectionLabel?: string;
-        executionPolicy?: 'conversation' | 'literal';
+        selectionLabel: string;
+        executionPolicy: 'conversation' | 'literal';
         acceptsApiProviders: boolean;
         supportedProtocols: ApiProtocol[];
         permissions: string[];
@@ -43,7 +43,7 @@ export type CatalogQueryResult =
   | {
       resource: 'models';
       agentId: string;
-      selectionLabel?: string;
+      selectionLabel: string;
       defaultModel: string;
       models: Array<{
         value: string;
@@ -115,7 +115,7 @@ function humanListing(result: CatalogQueryResult): string {
       );
     case 'models':
       return formatTextTable(
-        [(result.selectionLabel ?? 'Model').toUpperCase(), 'LABEL', 'PROVIDER', 'ENDPOINT', 'DEFAULT'],
+        [result.selectionLabel.toUpperCase(), 'LABEL', 'PROVIDER', 'ENDPOINT', 'DEFAULT'],
         result.models.map((model) => [
           model.value,
           model.label,

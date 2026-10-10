@@ -25,6 +25,21 @@ describe('CodeBlock', () => {
 		vi.mocked(copyToClipboard).mockReset();
 	});
 
+	it('keeps unlabeled output literal and copyable without inventing a language label', async () => {
+		vi.mocked(copyToClipboard).mockResolvedValue(true);
+		const source = '  **literal**\n<example>\n';
+		const { container } = render(CodeBlock, { text: source });
+		expect(container.querySelector('.font-medium')).toBeNull();
+		expect(container.querySelector('pre')?.textContent).toBe(source);
+		expect(container.querySelector('strong')).toBeNull();
+		expect(container.querySelector('button')?.parentElement?.classList.contains('absolute')).toBe(true);
+		expect(container.querySelector('button')?.classList.contains('bg-background')).toBe(true);
+		expect(container.querySelector('button')?.classList.contains('border')).toBe(true);
+		expect(container.querySelector('pre')?.classList.contains('p-3')).toBe(true);
+		await fireEvent.click(container.querySelector('button')!);
+		expect(copyToClipboard).toHaveBeenCalledWith(source);
+	});
+
 	it('renders escaped source text on the first client paint', () => {
 		const { container } = render(CodeBlock, {
 			lang: 'js',
@@ -36,6 +51,14 @@ describe('CodeBlock', () => {
 		expect(code?.textContent).toBe('const value = 1 < 2 && 3 > 2;');
 		expect(container.querySelector('.markdown-code-block')).toBeTruthy();
 		expect(container.querySelector('.markdown-code-block span')?.textContent).toBe('js');
+		expect(container.querySelector('button')?.parentElement?.classList.contains('absolute')).toBe(false);
+		expect(container.querySelector('pre')?.classList.contains('pt-1')).toBe(true);
+	});
+
+	it('keeps the floating copy control inside an empty unlabeled block', () => {
+		const { container } = render(CodeBlock, { text: '' });
+		expect(container.querySelector('pre')?.classList.contains('min-h-10')).toBe(true);
+		expect(container.querySelector('code')?.textContent).toBe('');
 	});
 
 	it('keeps escaped source text visible when the code block updates', async () => {

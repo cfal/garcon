@@ -412,7 +412,7 @@ test('[TLV5-SEARCH.10-GATE-01] production-shape cold start remains available and
     const rssPeak = await rssTracker.stop();
     expect(rssPeak - baselineRss).toBeLessThan(SERVER_RSS_DELTA_CEILING_BYTES);
     const snapshot = readDerivedIndexSnapshot(fixture.dirs.workspace);
-    expect(snapshot.userVersion).toBe(9);
+    expect(snapshot.userVersion).toBe(10);
     expect(derivedIndexDiskBytes(fixture.dirs.workspace)).toBeLessThan(
       totals.bodyBytes * DERIVED_BYTES_PER_BODY_BYTE,
     );

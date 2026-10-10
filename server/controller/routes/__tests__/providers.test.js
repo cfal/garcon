@@ -297,7 +297,7 @@ describe('agent auth login routes', () => {
   });
 
   it('returns the clean agent/API provider catalog', async () => {
-    agents.getAgentCatalogEntries.mockImplementationOnce(() => Promise.resolve([{ id: 'claude', kind: 'agent', models: [] }]));
+    agents.getAgentCatalogEntries.mockImplementationOnce(() => Promise.resolve([{ id: 'claude', executionPolicy: 'conversation', selectionLabel: 'Model', kind: 'agent', models: [] }]));
     apiProviders.getCatalog.mockImplementationOnce(() => [{ id: 'zai', endpoints: [] }]);
     const handler = routes['/api/v1/agents'].GET;
 
@@ -307,7 +307,7 @@ describe('agent auth login routes', () => {
 
     expect(response.status).toBe(200);
     expect(body).toEqual({
-      agents: [{ id: 'claude', kind: 'agent', models: [] }],
+      agents: [{ id: 'claude', executionPolicy: 'conversation', selectionLabel: 'Model', kind: 'agent', models: [] }],
       apiProviders: [{ id: 'zai', endpoints: [] }],
     });
   });

@@ -15,6 +15,7 @@ import { TOOL_DISPLAY_REGISTRY } from '$lib/chat/tools/tool-display-registry.js'
 import { resolveDisplayRule, shouldRenderToolResult } from '$lib/chat/tools/tool-display-policy.js';
 import { isHiddenBashToolUse, type BashCommandMatcher } from './hidden-bash-commands.js';
 import { projectCommandOutput } from '$shared/command-output-projection.js';
+import { trailingDiagnosticNoticeDuplicate, commandResultPresentation } from './command-result-presentation.js';
 
 export interface PermissionTerminalState {
 	permissionOccurrenceId: string;
@@ -42,6 +43,7 @@ export type ConversationFeedRenderItem =
 			id: string;
 			notice: LocalNoticeRow;
 			index: number;
+			duplicateOfRowId?: string;
 	  };
 
 export interface ConversationFeedRenderModel {
@@ -79,8 +81,9 @@ export function filterHiddenToolRenderItems<T extends ConversationFeedRenderItem
 export function conversationFeedItemLayout(
 	item: ConversationFeedRenderItem,
 ): ConversationFeedItemLayout {
-	if (item.kind === 'local-notice') return 'standard';
+	if (item.kind === 'local-notice') return item.duplicateOfRowId ? 'hidden' : 'standard';
 	const message = item.message;
+	if (message.type === 'command-result' && commandResultPresentation(message.result) === 'hidden') return 'hidden';
 	if (
 		message instanceof PermissionResolvedMessage ||
 		message instanceof PermissionCancelledMessage ||
@@ -193,6 +196,7 @@ export function buildConversationFeedRenderModel(
 ): ConversationFeedRenderModel {
 	const items: ConversationFeedRenderItem[] = [];
 	const toolPairs = pairToolResults(rows);
+	const duplicate = trailingDiagnosticNoticeDuplicate(rows);
 	const permissionTerminalByOccurrence = new Map<string, PermissionTerminalState>();
 
 	for (const [index, row] of rows.entries()) {
@@ -202,6 +206,7 @@ export function buildConversationFeedRenderModel(
 				id: row.id,
 				notice: row,
 				index,
+				...(duplicate?.noticeId === row.id ? { duplicateOfRowId: duplicate.messageRowId } : {}),
 			});
 			continue;
 		}

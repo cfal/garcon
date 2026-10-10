@@ -679,6 +679,7 @@ function createDeps(chat = createRunningChat()) {
 		},
 		modelCatalog: {
 			getAgent: vi.fn<SessionControllerDeps['modelCatalog']['getAgent']>((id) => ({
+				selectionLabel: 'Model',
 				id, label: id, executionPolicy: 'conversation', defaultModel: '',
 				supportsCompact: false, supportsFork: true, supportsForkAtMessage: true,
 				supportsForkWhileRunning: false, supportsUpdateProjectPath: true,
@@ -3793,6 +3794,7 @@ describe('ConversationSessionController', () => {
 				agentSettings: { ownerId: 'codex', schemaVersion: 1, values: {} }, isProcessing: false }));
 			deps.agentState.model = 'variant';
 			deps.modelCatalog.getAgent.mockImplementation((id) => id !== 'codex' ? null : ({
+				selectionLabel: 'Model',
 				id, label: 'Literal test', executionPolicy: 'literal', defaultModel: 'variant',
 				supportsCompact: false, supportsFork: false, supportsForkAtMessage: false,
 				supportsForkWhileRunning: false, supportsUpdateProjectPath: false, supportsSteering: false,

@@ -30,6 +30,13 @@ jobs:
         working-directory: server
         run: bun install --frozen-lockfile
 
+      - name: Install Shell test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends zsh fish
+          zsh --version
+          fish --version
+
       - name: Type-check server and provider agents
         run: bun run typecheck:server
 

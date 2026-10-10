@@ -30,9 +30,9 @@ export async function settleAgentTurn(
   }
   if (!isCurrent()) return settlement;
   if (outcome === 'failed' || settlement.kind === 'failed') {
-    if (attempt.entryId) await deps.control.pauseAfterDispatchFailure(chatId, attempt.entryId);
+    if (attempt.entryId) await deps.control.pauseAfterFailure(chatId, { kind: 'queued-turn-failed', entryId: attempt.entryId });
     else if ((deps.executionPolicy(chatId) === 'literal' || settlement.kind === 'failed') && turn?.turnId) {
-      await deps.control.pauseAfterTurnFailure(chatId, turn.turnId);
+      await deps.control.pauseAfterFailure(chatId, { kind: 'turn-failed', turnId: turn.turnId });
     }
   }
   if (isCurrent()) deps.retire(chatId, attempt);

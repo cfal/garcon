@@ -14,7 +14,7 @@ vi.mock('$lib/api/client', async (importOriginal) => ({
 const catalogBody = {
 	catalog: {
 		agents: [{
-			id: 'sample', label: 'Sample', kind: 'agent', defaultModel: 'cached',
+			id: 'sample', label: 'Sample', executionPolicy: 'conversation', selectionLabel: 'Model', kind: 'agent', defaultModel: 'cached',
 			models: [{ value: 'cached', label: 'Cached Model' }],
 			supportsCompact: false, supportsFork: false, supportsForkAtMessage: false,
 			supportsForkWhileRunning: false, supportsUpdateProjectPath: false,

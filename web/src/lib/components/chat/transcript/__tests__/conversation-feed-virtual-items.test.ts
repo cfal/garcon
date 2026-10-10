@@ -11,6 +11,7 @@ import {
 import type { PendingPermissionRequest } from '$lib/types/chat';
 import type { ConversationFeedRenderItem } from '$lib/chat/transcript/conversation-feed-items.js';
 import { buildConversationFeedRenderModel } from '$lib/chat/transcript/conversation-feed-items.js';
+import { ConversationFeedRenderModelController } from '$lib/chat/transcript/conversation-feed-render-model.js';
 import {
 	appendConversationVirtualTranscriptTail,
 	buildConversationVirtualFeedModel,
@@ -87,10 +88,12 @@ describe('conversation virtual feed model', () => {
 			outcome: 'finished', exitCode: 0, signal: null, capture: 'complete',
 			cwd: { kind: 'reported', path: '/project' },
 		}) };
-		const initial = buildConversationFeedRenderModel([output]);
+		const controller = new ConversationFeedRenderModelController();
+		const initial = controller.reconcile('chat-1:generation-1', [output]);
 		expect(initial.items[0]).toMatchObject({ message: { format: 'plain' } });
-		expect(appendConversationVirtualTranscriptTail(build(initial.items), 'chat-1:generation-1', [terminal])).toBeNull();
-		expect(buildConversationFeedRenderModel([output, terminal]).items[0]).toMatchObject({ message: { format: 'markdown' } });
+		const completed = controller.reconcileDetailed('chat-1:generation-1', [output, terminal]);
+		expect(completed.change.kind).toBe('rebuilt');
+		expect(completed.model.items[0]).toMatchObject({ message: { format: 'markdown' } });
 	});
 
 	it('combines two ordinary tool inputs and indexes each hidden member to the summary', () => {

@@ -47,7 +47,7 @@ describe('ConversationTranscriptOverlayStore', () => {
 		overlays.upsertOptimisticInput('chat-1', optimistic('input-1'), 4);
 
 		expect(second).toBe(first);
-		expect(first.notices).toHaveLength(1);
+		expect(first.notices).toHaveLength(0);
 		expect(first.optimisticInputs).toHaveLength(1);
 		expect(first.optimisticAfterOrdinals.get('input-1')).toBe(4);
 		expect(other.notices).toHaveLength(0);
@@ -55,11 +55,11 @@ describe('ConversationTranscriptOverlayStore', () => {
 
 	it('clears only overlays captured by an applied batch', () => {
 		const overlays = new ConversationTranscriptOverlayStore();
+		overlays.upsertOptimisticInput('chat-1', optimistic('input-1'), 2);
+		overlays.upsertOptimisticInput('chat-1', optimistic('input-2'), 2);
 		overlays.appendLocalNotice('chat-1', 'progress', 'before');
 		const capturedRevision = overlays.noticeRevisionFor('chat-1');
 		overlays.appendLocalNotice('chat-1', 'error', 'after');
-		overlays.upsertOptimisticInput('chat-1', optimistic('input-1'), 2);
-		overlays.upsertOptimisticInput('chat-1', optimistic('input-2'), 2);
 		overlays.excludeResendCandidate('chat-1', 1);
 
 		const mutation = overlays.applyCommittedBatch({
@@ -75,6 +75,19 @@ describe('ConversationTranscriptOverlayStore', () => {
 		expect(view.optimisticInputs.map((input) => input.clientMessageId)).toEqual(['input-2']);
 		expect(view.optimisticAfterOrdinals.get('input-2')).toBe(3);
 		expect(view.resendCandidates).toEqual([candidate(3)]);
+	});
+
+	it('clears prior notices only when a new optimistic submission begins', () => {
+		const overlays = new ConversationTranscriptOverlayStore();
+		overlays.appendServerNotice('chat-1', 'error', 'Exit 127');
+		overlays.appendLocalNotice('chat-2', 'warning', 'Other chat');
+		overlays.upsertOptimisticInput('chat-1', optimistic('input-1'), 2);
+		expect(overlays.forChat('chat-1').notices).toEqual([]);
+		expect(overlays.forChat('chat-2').notices).toHaveLength(1);
+
+		overlays.appendServerNotice('chat-1', 'warning', 'Delivery uncertain');
+		overlays.upsertOptimisticInput('chat-1', { ...optimistic('input-1'), delivery: 'delivered' }, 2);
+		expect(overlays.forChat('chat-1').notices.map(notice => notice.content)).toEqual(['Delivery uncertain']);
 	});
 
 	it('clears notices through a captured revision while keeping later ones', () => {

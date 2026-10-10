@@ -228,7 +228,7 @@ export class RemoteAgentIntegration implements AgentIntegration {
       translateLegacySettings: ({ signal, ...request }) => call('migration.translateLegacySettings', request, { signal }),
     };
     const cap = manifest.capabilities;
-    this.literalExecution = cap.literalExecution ? manifest.literalExecution : null;
+    this.literalExecution = manifest.literalExecution;
     this.readiness = cap.readiness ? { status: (signal) => call('readiness.status', null, { signal }) } : null;
     this.auth = cap.auth ? {
       status: (signal) => call('auth.status', null, { signal }),

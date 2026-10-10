@@ -349,6 +349,7 @@ export function wireServerEvents({
     agentErrorCode: string,
     turnMetadata?: TurnEventMetadata,
   ): Promise<void> {
+    if (!chatExists(chatId)) return;
     if (!markTurnFailure(chatId, turnMetadata)) return;
     await settleExecutionCommand(
       chatId,
@@ -357,7 +358,7 @@ export function wireServerEvents({
       agentErrorMessage,
       agentErrorCode,
     );
-    broadcastAgentFailure(chatId, agentErrorMessage, turnMetadata);
+    if (chatExists(chatId)) broadcastAgentFailure(chatId, agentErrorMessage, turnMetadata);
     await markPublicTurnTerminal(chatId, turnMetadata);
   }
 
@@ -474,7 +475,8 @@ export function wireServerEvents({
       inlineTerminalReleases.delete(chatId);
     }
     if (chatExists(chatId)) {
-      broadcast(new ChatProcessingUpdatedMessage(chatId, processing.phase(chatId)));
+      if (result.kind === 'failed') publishProcessing(chatId);
+      else broadcast(new ChatProcessingUpdatedMessage(chatId, processing.phase(chatId)));
     }
     return result;
   };
@@ -489,6 +491,8 @@ export function wireServerEvents({
   agentRegistry.onFinished((chatId, exitCode, turnMetadata, outcome) => {
     if (!chatExists(chatId)) return;
     const queuedFinalization = queue.getQueuedTurnFinalization(chatId, turnMetadata?.turnId);
+    // Settlement notices enqueue their fanout here; failure delivery waits outside this task.
+    let failurePublication: Promise<void> | undefined;
     return scheduleChatTask(chatId, 'turn completion', async () => {
       let released = false;
       try {
@@ -497,7 +501,8 @@ export function wireServerEvents({
         const settlement = await releaseTerminalOwnership(chatId, turnMetadata, 'finished');
         released = true;
         if (settlement.kind === 'failed') {
-          await handleAgentFailure(chatId, settlement.message, 'PROJECT_PATH_DESTINATION_REJECTED', turnMetadata);
+          failurePublication = scheduleChatTask(chatId, 'settlement failure', () =>
+            handleAgentFailure(chatId, settlement.message, 'PROJECT_PATH_DESTINATION_REJECTED', turnMetadata));
           return;
         }
         await settleExecutionCommand(chatId, turnMetadata, 'finished');
@@ -521,18 +526,20 @@ export function wireServerEvents({
         if (!released) {
           const settlement = await releaseTerminalOwnership(chatId, turnMetadata, 'failed');
           if (settlement.kind === 'failed') {
-            await handleAgentFailure(chatId, settlement.message, 'PROJECT_PATH_DESTINATION_REJECTED', turnMetadata);
+            failurePublication = scheduleChatTask(chatId, 'settlement failure', () =>
+              handleAgentFailure(chatId, settlement.message, 'PROJECT_PATH_DESTINATION_REJECTED', turnMetadata));
           }
         }
         void queue.checkChatIdle(chatId).catch((err) => {
           logger.warn('queue: checkChatIdle error:', errorMessage(err));
         });
       }
-    });
+    }).then(() => failurePublication);
   });
   agentRegistry.onFailed(async (chatId, agentErrorMessage, agentErrorCode, turnMetadata) => {
     if (!chatExists(chatId)) return;
     const queuedFinalization = queue.getQueuedTurnFinalization(chatId, turnMetadata?.turnId);
+    let failurePublication: Promise<void> | undefined;
     return scheduleChatTask(chatId, 'turn failure handling', async () => {
       let released = false;
       try {
@@ -540,16 +547,19 @@ export function wireServerEvents({
         if (queuedFinalization && await queuedFinalization !== 'committed') return;
         const settlement = await releaseTerminalOwnership(chatId, turnMetadata, 'failed');
         released = true;
-        await handleAgentFailure(chatId,
-          settlement.kind === 'failed' ? `${agentErrorMessage}\n${settlement.message}` : agentErrorMessage,
-          agentErrorCode, turnMetadata);
+        if (settlement.kind === 'failed') {
+          failurePublication = scheduleChatTask(chatId, 'settlement failure', () =>
+            handleAgentFailure(chatId, `${agentErrorMessage}\n${settlement.message}`, agentErrorCode, turnMetadata));
+        } else {
+          await handleAgentFailure(chatId, agentErrorMessage, agentErrorCode, turnMetadata);
+        }
       } finally {
         if (!released) await releaseTerminalOwnership(chatId, turnMetadata, 'failed');
         void queue.checkChatIdle(chatId).catch((err) => {
           logger.warn('queue: checkChatIdle error:', errorMessage(err));
         });
       }
-    });
+    }).then(() => failurePublication);
   });
 
   settings.onSessionNameChanged((chatId, title) => {

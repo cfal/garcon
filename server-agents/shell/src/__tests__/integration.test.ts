@@ -91,6 +91,26 @@ describe('Shell integration', () => {
     expect(events.flatMap(event => event.type === 'rows' ? event.rows : []).every(row => row.message.type !== 'user-message')).toBe(true);
   });
 
+  it('does not retain native preparations for repeated project path updates', async () => {
+    await integration.execution.start(request);
+    expect(await terminal()).toMatchObject({ outcome: 'finished' });
+    const reference = chat();
+    const timer = spyOn(globalThis, 'setTimeout');
+    try {
+      for (let index = 0; index < 65; index++) {
+        expect(await integration.projectPathUpdates.prepare({ chat: reference, nextProjectPath: root })).toBeNull();
+      }
+      expect(timer).not.toHaveBeenCalled();
+      const cancelled = AbortSignal.abort();
+      const failure = await rejectionOf(integration.projectPathUpdates.prepare(
+        { chat: reference, nextProjectPath: root }, { signal: cancelled },
+      ));
+      expect(failure).toBe(cancelled.reason);
+    } finally {
+      timer.mockRestore();
+    }
+  });
+
   it('reports failed cwd changes and starts a fresh process on resume', async () => {
     const next = join(root, 'next'); await mkdir(next);
     await integration.execution.start({ ...request, prompt: 'export PRIVATE_VALUE=old; cd next; false' });
@@ -120,12 +140,15 @@ describe('Shell integration', () => {
   it('fails invalid cwd capture without losing process exit or output evidence', async () => {
     await integration.execution.start({ ...request, model: 'bash',
       prompt: 'printf retained; report="$(dirname "${BASH_SOURCE[0]}")/cwd"; rm "$report"; mkfifo "$report"; exit 0' });
-    expect(await terminal()).toMatchObject({ outcome: 'failed',
-      error: { message: expect.stringContaining('working directory report is invalid') },
-      workingDirectory: { kind: 'unavailable' } });
+    const ended = await terminal();
+    expect(ended).toMatchObject({ outcome: 'failed', workingDirectory: { kind: 'unavailable' } });
+    expect(ended.error?.message).toContain('working directory report is invalid');
     const rows = await history();
     expect(rows.some(row => row.type === 'command-output' && row.content === 'retained')).toBe(true);
     expect(rows.at(-1)).toMatchObject({ result: { outcome: 'failed', exitCode: 0, capture: 'complete' } });
+    const result = rows.at(-1);
+    if (result?.type !== 'command-result') throw new Error('Expected the durable command result');
+    expect(ended.error?.message).toBe(result.content);
   });
 
   it('rejects malformed Unicode from JSON before starting a process or native log', async () => {
@@ -344,27 +367,55 @@ describe('Shell integration', () => {
     expect((await history()).slice(1)).toEqual(live);
   });
 
-  it('fails settlement without publishing output rejected by native storage', async () => {
+  it.each(['stdout', 'stderr'])('fails settlement without retrying output when native storage rejects %s', async channel => {
     await integration.execution.start({ ...request,
-      prompt: 'touch ready; while [ ! -e release ]; do sleep 0.01; done; printf output' });
+      prompt: 'touch ready; while [ ! -e release ]; do sleep 0.01; done; printf output; printf diagnostic >&2' });
     while (!await Bun.file(join(root, 'ready')).exists()) await Bun.sleep(5);
     const store = new ShellNativeStore(host);
     const db = new Database(await store.path(chat().agentSessionId!));
     try {
       db.exec(`CREATE TRIGGER reject_output BEFORE INSERT ON records
         WHEN json_extract(NEW.message, '$.type') = 'command-output'
+          AND json_extract(NEW.message, '$.channel') = '${channel}'
         BEGIN SELECT RAISE(FAIL, 'Synthetic output persistence failure'); END;`);
     } finally {
       db.close();
       await Bun.write(join(root, 'release'), '');
     }
-    expect(await terminal()).toMatchObject({ outcome: 'failed',
-      error: { message: expect.stringContaining('Synthetic output persistence failure') } });
+    const ended = await terminal();
+    expect(ended.outcome).toBe('failed');
+    expect(ended.error?.message).toContain('Synthetic output persistence failure');
     const live = events.flatMap(event => event.type === 'rows' ? event.rows.map(row => row.message) : []);
-    expect(live).toEqual([expect.objectContaining({
+    const expectedOutput = channel === 'stderr'
+      ? [expect.objectContaining({ type: 'command-output', channel: 'stdout', content: 'output' })]
+      : [];
+    expect(live).toEqual([...expectedOutput, expect.objectContaining({
       type: 'command-result', result: expect.objectContaining({ outcome: 'failed', capture: 'incomplete' }),
     })]);
+    const result = live.at(-1);
+    if (result?.type !== 'command-result') throw new Error('Expected the published command result');
+    expect(ended.error?.message).toBe(result.content);
     expect((await history()).slice(1)).toEqual(live);
+  });
+
+  it('retains the terminal failure when native storage cannot retain its result', async () => {
+    await integration.execution.start({ ...request,
+      prompt: 'touch ready; while [ ! -e release ]; do sleep 0.01; done; exit 7' });
+    while (!await Bun.file(join(root, 'ready')).exists()) await Bun.sleep(5);
+    const store = new ShellNativeStore(host);
+    const db = new Database(await store.path(chat().agentSessionId!));
+    try {
+      db.exec(`CREATE TRIGGER reject_result BEFORE INSERT ON records
+        WHEN json_extract(NEW.message, '$.type') = 'command-result'
+        BEGIN SELECT RAISE(FAIL, 'Synthetic result persistence failure'); END;`);
+    } finally {
+      db.close();
+      await Bun.write(join(root, 'release'), '');
+    }
+    expect(await terminal()).toMatchObject({ outcome: 'failed',
+      error: { message: expect.stringContaining('Synthetic result persistence failure') } });
+    expect(events.flatMap(event => event.type === 'rows' ? event.rows : [])
+      .some(row => row.message.type === 'command-result')).toBe(false);
   });
 
   it('returns explicitly empty final stdout for silent success and rejects executable context', async () => {

@@ -8,6 +8,7 @@ import type { SessionAgentId } from '$lib/chat/sessions/chat-session-types';
 
 function metadata(id: SessionAgentId, defaultModel: string): AgentMetadata {
 	return {
+		executionPolicy: 'conversation', selectionLabel: 'Model',
 		id, label: id, defaultModel, supportsCompact: false, supportsFork: false,
 		supportsForkAtMessage: false, supportsForkWhileRunning: false,
 		supportsUpdateProjectPath: true, supportsSteering: true, supportsImages: false,

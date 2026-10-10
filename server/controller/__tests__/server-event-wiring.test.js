@@ -3,7 +3,7 @@ import { describe, expect, it, mock } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { AssistantMessage, BashToolUseMessage } from '../../../common/chat-types.js';
+import { AssistantMessage, BashToolUseMessage, CommandResultMessage } from '../../../common/chat-types.js';
 import { emptyStoredChatExecutionControl } from '../chat-execution/control-state.ts';
 import { ChatTransientFeedStore } from '../chats/chat-transient-feed.js';
 import { ProjectUnavailableError } from '../../common/domain-error.ts';
@@ -19,6 +19,7 @@ import { TranscriptLedgerService } from '../ledger/service.js';
 import { TranscriptLedgerStore } from '../ledger/store.js';
 import { KeyedPromiseLock } from '../../common/keyed-lock.js';
 import { AttentionTracker } from '../notifications/attention-tracker.js';
+import { WorkingDirectorySettler } from '../projects/working-directory-settlement.js';
 import {
   attachNativeMessageSource,
   getNativeMessageRevisionSource,
@@ -383,6 +384,7 @@ function createExecutionFixture(directory, ensureAdopted, beforeWiringCommitList
   let sink;
   const producer = createProducerFixture();
   const integration = {
+    literalExecution: options.literalExecution ?? null,
     descriptor: { id: 'test', supportedPermissionModes: ['default'], supportedThinkingModes: ['none'] },
     settings: { defaults: () => agentSettings, parse: (input) => input },
     producers: producer.producers,
@@ -416,6 +418,12 @@ function createExecutionFixture(directory, ensureAdopted, beforeWiringCommitList
     projectAdmission: { assertAvailable: async () => undefined }, isControlInputViewCurrent: () => true,
     attachmentAdmission: { assertSupported: () => undefined },
     ...options.coordinator,
+    ...(options.workingDirectory ? {
+      workingDirectorySettlement: new WorkingDirectorySettler({
+        registry: { getChat: () => entry, updateObservedProjectPath: options.workingDirectory.persist },
+        ledger: transcripts, lock: new KeyedPromiseLock(), inspect: options.workingDirectory.inspect,
+      }),
+    } : {}),
   });
   const ledger = new CommandLedger();
   if (beforeWiringCommitListener) agents.onTranscriptCommitted(beforeWiringCommitListener);
@@ -445,6 +453,77 @@ function observeTelegram({ agents, execution }, directory, send, enabled = true)
 }
 
 describe('server event wiring', () => {
+  for (const outcome of ['finished', 'failed']) {
+    it.each(['unavailable', 'write-rejected', 'write-unknown'])(
+      `retains %s cwd failure after ${outcome} and publishes its notice before terminal UI`, async failure => {
+        const directory = await mkdtemp(path.join(tmpdir(), 'cwd-diagnostic-'));
+        const fixture = createExecutionFixture(directory, undefined, undefined, {
+          literalExecution: { selectionLabel: 'Runtime' },
+          inputTranscript: agents => agents,
+          coordinator: { executionPolicy: () => 'literal' },
+          workingDirectory: {
+            inspect: async projectPath => failure === 'unavailable'
+              ? { kind: 'unavailable', reason: 'outside-base' }
+              : { kind: 'available', effectiveProjectKey: projectPath },
+            persist: async () => {
+              if (failure === 'write-rejected') throw new Error('Synthetic write failure');
+              return { durability: 'unknown' };
+            },
+          },
+          beforeWiring({ execution, transcripts }) {
+            transcripts.subscribeRunEndedCommitted((chatId, runId) => execution.markRunTerminalCommitted(chatId, runId));
+          },
+        });
+        try {
+          const turn = { commandType: 'agent-run', clientRequestId: 'request-1', turnId: 'turn-1', clientMessageId: 'input-1' };
+          const accepted = await fixture.ledger.accept({ ...turn, chatId: 'chat-1', payload: {} });
+          await fixture.execution.scheduleDirectInput({
+            command: { key: accepted.record.key, ...turn, chatId: 'chat-1' },
+            content: 'cd next', options: turn, settlement: new ChatCommandSettlement(fixture.ledger),
+          });
+          await fixture.execution.waitForDispatches();
+          await fixture.execution.createChatQueueEntry('chat-1', 'printf queued');
+          const delivered = Promise.withResolvers();
+          fixture.agents.onFinished(() => delivered.resolve());
+          fixture.agents.onFailed(() => delivered.resolve());
+          const cwd = { kind: 'reported', path: path.join(directory, 'next') };
+          const result = new CommandResultMessage(at, 'command-1', {
+            outcome, exitCode: outcome === 'finished' ? 0 : 7, signal: null, cwd, capture: 'complete',
+          });
+          fixture.sink.publish({ type: 'rows', rows: [{ message: result }] });
+          fixture.sink.publish({ type: 'run-ended', runId: turn.turnId, outcome, workingDirectory: cwd,
+            ...(outcome === 'failed' ? { error: { code: 'PROVIDER_FAILURE', message: result.content } } : {}),
+          });
+          await delivered.promise;
+          await fixture.wiring.waitForIdle();
+          expect((await fixture.execution.readChatExecutionControl('chat-1')).pause).not.toBeNull();
+          const rows = fixture.transcripts.currentRows('chat-1');
+          const notice = rows.at(-1);
+          expect(notice.kind).toBe('notice');
+          expect(rows.filter(row => row.kind === 'notice')).toHaveLength(1);
+          expect(rows.find(row => row.kind === 'run-ended')).toMatchObject({ outcome, origin: 'provider' });
+          const noticeIndex = fixture.published.findIndex(message => message.type === 'chat-messages'
+            && message.messages.some(row => row.message.type === 'transcript-notice' && row.message.content === notice.message));
+          const terminalIndex = fixture.published.findIndex(message => message.type === 'agent-run-failed');
+          const idleIndex = fixture.published.findLastIndex(message => message.type === 'chat-processing-updated');
+          expect(noticeIndex).toBeGreaterThanOrEqual(0);
+          expect(terminalIndex).toBeGreaterThan(noticeIndex);
+          expect(idleIndex).toBeGreaterThan(noticeIndex);
+          expect(fixture.published.some(message => message.type === 'agent-run-finished')).toBe(false);
+          expect(fixture.published[terminalIndex].error).toContain(notice.message);
+          fixture.transcripts.close();
+          const reopened = new TranscriptLedgerService(new TranscriptLedgerStore(directory));
+          try { expect(reopened.currentRows('chat-1')).toEqual(rows); }
+          finally { reopened.close(); }
+        } finally {
+          fixture.execution.beginShutdown();
+          fixture.transcripts.close();
+          await rm(directory, { recursive: true, force: true });
+        }
+      },
+    );
+  }
+
   it.each([false, true])('startup does not drain empty queues or read transcripts for Telegram: enabled=%p', async (enabled) => {
     const directory = await mkdtemp(path.join(tmpdir(), 'startup-attention-'));
     const send = mock(async () => true);
