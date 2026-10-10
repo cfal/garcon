@@ -246,6 +246,29 @@ afterEach(() => {
 });
 
 describe('SidebarVirtualSortableChatList', () => {
+	it.each(['recent', 'manual'] as const)(
+		'updates a renamed row without reordering or remounting it in %s mode',
+		async (sortMode) => {
+			const chats = [makeChat(1, { status: 'running' }), makeChat(2, { status: 'running' })];
+			const view = render(SidebarChatListHost, {
+				chats,
+				displayOptions: { sortMode, grouping: 'none' },
+			});
+			const row = view.container.querySelector('[data-sidebar-virtual-row="chat-1"]');
+			expect(screen.getByText('Chat 1')).toBeTruthy();
+
+			await view.rerender({ chats: [{ ...chats[0], title: 'Renamed chat' }, chats[1]] });
+
+			expect(screen.getByText('Renamed chat')).toBeTruthy();
+			expect(screen.queryByText('Chat 1')).toBeNull();
+			expect(view.container.querySelector('[data-sidebar-virtual-row="chat-1"]')).toBe(row);
+			expect(Array.from(
+				view.container.querySelectorAll('[data-sidebar-virtual-row]'),
+				(element) => element.getAttribute('data-sidebar-virtual-row'),
+			)).toEqual(['chat-1', 'chat-2']);
+		},
+	);
+
 	it('keeps chat props coherent when regrouping inserts a header at the old index', async () => {
 		const rows = makeRows(2);
 		const view = render(SidebarVirtualSortableChatListHost, { rows, rowHeight, selectedChatId: 'chat-1', displayOptions: { chatItemLayout: 'detailed' } });

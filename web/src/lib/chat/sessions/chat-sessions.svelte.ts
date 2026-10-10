@@ -17,7 +17,7 @@ import {
 	setChatArchived as setChatArchivedApi,
 } from '$lib/api/chats.js';
 import { ApiError } from '$lib/api/client.js';
-import { updateSessionName } from '$lib/api/settings.js';
+import { ChatTitleController } from './chat-title-controller.js';
 import type { ChatSessionRecord, ChatStartupConfig } from '$lib/chat/sessions/chat-session-types';
 import * as m from '$lib/paraglide/messages.js';
 import type { ChatListEntry } from '$shared/chat-list';
@@ -88,6 +88,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 	#nextFetchGeneration = 0;
 	#latestSuccessfulFetchGeneration = 0;
 	#nextServerEntryGeneration = 0;
+	readonly #titles: ChatTitleController;
 	readonly #serverEntryGenerationByChatId = new Map<string, number>();
 	readonly #serverEntryFetchGenerationByChatId = new Map<string, number>();
 	readonly #tagRecoveryByChatId = new Map<string, Promise<RecoverChatTagsResponse>>();
@@ -116,6 +117,11 @@ export class ChatSessionsStore implements ChatSessionsPort {
 
 	constructor(deps: ChatSessionsStoreDeps = {}) {
 		this.#deps = deps;
+		this.#titles = new ChatTitleController({
+			sessions: this,
+			deps,
+			readServerEntryGeneration: () => this.#nextServerEntryGeneration,
+		});
 	}
 
 	get selectedChat(): ChatSessionRecord | null {
@@ -172,9 +178,13 @@ export class ChatSessionsStore implements ChatSessionsPort {
 			const fetchChats = this.#deps.listChats ?? listChats;
 			const projectPathRevisions = this.#projectBindings.captureRevisions();
 			const serverEntryGeneration = this.#nextServerEntryGeneration;
+			const titleRevision = this.#titles.revision;
 			const res = await fetchChats();
-			// Command responses can install newer records while this snapshot is in flight.
-			if (serverEntryGeneration !== this.#nextServerEntryGeneration) {
+			// Command responses and title events can supersede an in-flight list snapshot.
+			if (
+				serverEntryGeneration !== this.#nextServerEntryGeneration ||
+				titleRevision !== this.#titles.revision
+			) {
 				this.#needsFollowUpFetch = true;
 				return;
 			}
@@ -356,16 +366,8 @@ export class ChatSessionsStore implements ChatSessionsPort {
 		}
 	}
 
-	async renameChat(chatId: string, newTitle: string): Promise<boolean> {
-		try {
-			const renameRemoteChat = this.#deps.updateSessionName ?? updateSessionName;
-			await renameRemoteChat(chatId, newTitle);
-			return true;
-		} catch (err) {
-			console.error('[ChatSessionsStore] Rename failed:', err);
-			this.#deps.notifyError?.(m.notifications_rename_chat_failed());
-			return false;
-		}
+	renameChat(chatId: string, newTitle: string): Promise<boolean> {
+		return this.#titles.renameChat(chatId, newTitle);
 	}
 
 	async moveChatToBoundary(
@@ -886,6 +888,7 @@ export class ChatSessionsStore implements ChatSessionsPort {
 			...patch,
 			...normalizeExecutionFields({ ...chat, ...patch }),
 		};
+		if (patch.title !== undefined) this.#titles.noteConfirmation();
 		this.#baseById = {
 			...this.#baseById,
 			[chatId]: nextChat,
