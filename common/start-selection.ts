@@ -1,6 +1,6 @@
 import { normalizeAgentSettings } from './agent-settings.js';
 import { parseAgentSettingsEnvelope, type AgentSettingsEnvelope } from './agent-integration.js';
-import type { AgentCatalogEntry, AgentModelOption } from './agents.js';
+import { hasAgentExecutionMetadata, type AgentCatalogEntry, type AgentModelOption } from './agents.js';
 import type { ApiProtocol, ApiProviderCatalogEntry } from './api-providers.js';
 import {
   isPermissionMode,
@@ -93,7 +93,8 @@ export function requireCatalogAgent(
   }
   const defaultSettings = parseAgentSettingsEnvelope(raw.defaultSettings);
   if (
-    !Array.isArray(raw.models)
+    !hasAgentExecutionMetadata(raw)
+    || !Array.isArray(raw.models)
     || !Array.isArray(raw.supportedPermissionModes)
     || !raw.supportedPermissionModes.every(isPermissionMode)
     || !Array.isArray(raw.supportedThinkingModes)

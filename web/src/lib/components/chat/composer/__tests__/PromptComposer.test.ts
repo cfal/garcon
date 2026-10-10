@@ -21,6 +21,7 @@ const appCss = readFileSync('src/app.css', 'utf8');
 function conversationalCatalog(): ModelCatalogStore {
 	const catalog = new ModelCatalogStore();
 	catalog.forExecutor(remoteExecutor.id).agentMetadata.claude = {
+		selectionLabel: 'Model',
 		id: 'claude', label: 'Claude', executionPolicy: 'conversation', defaultModel: 'opus',
 		supportsCompact: false, supportsFork: false, supportsForkAtMessage: false,
 		supportsForkWhileRunning: false, supportsUpdateProjectPath: true,

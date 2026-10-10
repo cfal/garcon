@@ -12,6 +12,8 @@ const catalog: ModelCatalogResponse = {
       id: 'codex',
       label: 'Codex',
       description: 'OpenAI Codex',
+      executionPolicy: 'conversation',
+      selectionLabel: 'Model',
       kind: 'agent',
       supportsFork: true,
       supportsForkAtMessage: true,
@@ -132,6 +134,13 @@ function command(
 }
 
 describe('runCatalogQuery', () => {
+  test.each(['agents', 'models'] as const)('rejects missing execution metadata in %s listings', async resource => {
+    const invalid = structuredClone(catalog);
+    Reflect.deleteProperty(invalid.catalog.agents[0]!, 'executionPolicy');
+    await expect(runCatalogQuery(command(resource, { agentId: 'codex' }), client(invalid), output()))
+      .rejects.toMatchObject({ exitCode: 3 });
+  });
+
   test('uses the agent selection label without a separate selection kind', async () => {
     const variants = structuredClone(catalog);
     const agent = variants.catalog.agents[0]!;
@@ -221,6 +230,7 @@ describe('runCatalogQuery', () => {
     }), client(), models);
     expect(JSON.parse(models.listings[0]!)).toEqual({
       agentId: 'codex',
+      selectionLabel: 'Model',
       defaultModel: 'gpt-5.4',
       models: [{
         value: 'acme:east:qwen',

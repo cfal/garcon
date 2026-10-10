@@ -85,6 +85,7 @@ describe('ExecutorHandoffDialog', () => {
 		vi.spyOn(ChatSessionsStore.prototype, 'isDraft').mockReturnValue(isDraft);
 		vi.spyOn(ModelCatalogStore.prototype, 'getSelectableAgents').mockReturnValue(['claude', 'shell']);
 		const metadata = {
+			selectionLabel: 'Model',
 			id: 'claude', label: 'Claude', defaultModel: 'opus', executionPolicy: 'conversation',
 			supportsCompact: false, supportsFork: false, supportsForkAtMessage: false,
 			supportsForkWhileRunning: false, supportsUpdateProjectPath: true, supportsSteering: false,

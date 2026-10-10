@@ -5,6 +5,7 @@ import { StartSelectionError } from '../../../../common/start-selection.js';
 function fixture() {
   const envelope = (source) => ({ ownerId: 'test', schemaVersion: 1, values: { nested: { source } } });
   const entry = {
+    executionPolicy: 'conversation', selectionLabel: 'Model',
     id: 'test', models: [
       { value: 'first', label: 'First' }, { value: 'second', label: 'Second' },
       ...['east', 'west'].flatMap((endpointId) => ['first', 'second'].map((rawModel) => ({

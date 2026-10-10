@@ -130,7 +130,7 @@ export class ScheduledPromptFormState {
 		const selection = this.targetType === 'new-chat' ? this.startup : this.sessions.byId[this.existingChatId ?? ''];
 		if (!selection) return null;
 		const agent = this.modelCatalog.forExecutor(selection.executorId).getAgent(selection.agentId);
-		return agent ? agent.executionPolicy ?? 'conversation' : null;
+		return agent?.executionPolicy ?? null;
 	}
 
 	private get normalizedPrompt(): string {

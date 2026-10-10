@@ -177,6 +177,8 @@ function startModelCatalogResponse(): Response {
       agents: [{
         id: 'codex',
         label: 'Codex',
+        executionPolicy: 'conversation',
+        selectionLabel: 'Model',
         kind: 'agent',
         supportsFork: true,
         supportsForkAtMessage: true,

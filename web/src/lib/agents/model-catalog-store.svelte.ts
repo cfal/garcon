@@ -19,7 +19,7 @@ import {
 	type AgentSettingsEnvelope,
 } from '$shared/agent-integration';
 import { createEmptyAgentSettings } from '$shared/agent-settings';
-import { isAgentId } from '$shared/agents';
+import { hasAgentExecutionMetadata, isAgentId, type AgentCatalogEntry } from '$shared/agents';
 import {
 	isPermissionMode,
 	isThinkingMode,
@@ -47,9 +47,7 @@ export interface ModelOption {
 	protocol?: ApiProtocol;
 }
 
-export interface AgentMetadata {
-	executionPolicy?: 'conversation' | 'literal';
-	selectionLabel?: string;
+export interface AgentMetadata extends Pick<AgentCatalogEntry, 'executionPolicy' | 'selectionLabel'> {
 	id: string;
 	label: string;
 	description?: string;
@@ -333,14 +331,15 @@ function parseCatalogResponse(data: unknown): {
 	const agentMetadata: AgentMetadataMap = {};
 
 	for (const entry of inner.agents as Array<Record<string, unknown>>) {
-		if (typeof entry.id !== 'string') continue;
+		if (!entry || typeof entry.id !== 'string') continue;
 
 		const id = entry.id;
 		if (!isAgentId(id)) continue;
+		if (!hasAgentExecutionMetadata(entry)) return null;
 		agentMetadata[id] = {
 			id,
-			executionPolicy: entry.executionPolicy === 'literal' ? 'literal' : 'conversation',
-			selectionLabel: typeof entry.selectionLabel === 'string' ? entry.selectionLabel : 'Model',
+			executionPolicy: entry.executionPolicy,
+			selectionLabel: entry.selectionLabel,
 			label: typeof entry.label === 'string' ? entry.label : id,
 			description: typeof entry.description === 'string' ? entry.description : undefined,
 			supportsCompact: Boolean(entry.supportsCompact),
@@ -387,16 +386,15 @@ function emptySnapshot(): ModelCatalogSnapshot {
 }
 
 function normalizeSnapshot(parsed: Record<string, unknown>): ModelCatalogSnapshot {
-  if (parsed.schemaVersion !== 2) return emptySnapshot();
+	if (parsed.schemaVersion !== 2) return emptySnapshot();
+	if (!parsed.agentMetadata || typeof parsed.agentMetadata !== 'object'
+		|| Array.isArray(parsed.agentMetadata)
+		|| !Object.values(parsed.agentMetadata).every(hasAgentExecutionMetadata)) return emptySnapshot();
 	const agentModels =
 		typeof parsed.agentModels === 'object' && parsed.agentModels !== null
 			? (parsed.agentModels as AgentModels)
 			: {};
-	const agentMetadata = normalizeAgentMetadataMap(
-		typeof parsed.agentMetadata === 'object' && parsed.agentMetadata !== null
-			? (parsed.agentMetadata as AgentMetadataMap)
-			: {},
-	);
+	const agentMetadata = normalizeAgentMetadataMap(parsed.agentMetadata as AgentMetadataMap);
 	const apiProviderCatalog = normalizeApiProviders(parsed.apiProviderCatalog);
 	const lastFetchedAt = typeof parsed.lastFetchedAt === 'number' ? parsed.lastFetchedAt : null;
 	const lastValidatedAt =

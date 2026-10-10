@@ -199,6 +199,7 @@
 	setRemoteSettings({} as never);
 	setModelCatalog({
 		getAgent: (id: string): AgentMetadata | null => executionPolicy === null ? null : ({
+			selectionLabel: 'Model',
 			id, label: id, executionPolicy, defaultModel: 'sonnet',
 			supportsCompact: false, supportsFork: true, supportsForkAtMessage: true,
 			supportsForkWhileRunning: true, supportsUpdateProjectPath: true, supportsSteering: true,

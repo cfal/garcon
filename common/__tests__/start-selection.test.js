@@ -36,6 +36,8 @@ function agent(overrides = {}) {
   return {
     id: 'codex',
     label: 'Codex',
+    executionPolicy: 'conversation',
+    selectionLabel: 'Model',
     kind: 'agent',
     supportsFork: true,
     supportsForkAtMessage: true,
@@ -106,6 +108,15 @@ function expectCode(operation, code) {
 }
 
 describe('shared start selection', () => {
+  test.each([
+    { executionPolicy: undefined }, { executionPolicy: 'unknown' },
+    { selectionLabel: undefined }, { selectionLabel: '' },
+  ])('rejects incomplete execution metadata: %j', invalid => {
+    expectCode(() => resolveModelSelection(catalog(agent(invalid)), 'codex', {
+      model: 'gpt-5.4',
+    }), 'INVALID_CATALOG');
+  });
+
   test('resolves exact provider names to canonical routes without mutating the request', () => {
     const namedCatalog = catalog();
     namedCatalog.catalog.apiProviders = [{ ...provider, label: 'Example Proxy & Co' }];

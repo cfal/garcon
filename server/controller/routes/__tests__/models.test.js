@@ -12,6 +12,8 @@ const agentCatalogEntries = [
   {
     id: "claude",
     label: "Claude",
+    executionPolicy: 'conversation',
+    selectionLabel: 'Model',
     kind: "agent",
     supportsFork: true,
     supportsForkAtMessage: true,
@@ -27,6 +29,8 @@ const agentCatalogEntries = [
   {
     id: "codex",
     label: "Codex",
+    executionPolicy: 'conversation',
+    selectionLabel: 'Model',
     kind: "agent",
     supportsFork: true,
     supportsForkAtMessage: true,
@@ -58,6 +62,8 @@ const agentCatalogEntries = [
   {
     id: "opencode",
     label: "OpenCode",
+    executionPolicy: 'conversation',
+    selectionLabel: 'Model',
     kind: "agent",
     supportsFork: true,
     supportsForkAtMessage: false,
@@ -73,6 +79,8 @@ const agentCatalogEntries = [
   {
     id: "amp",
     label: "Amp",
+    executionPolicy: 'conversation',
+    selectionLabel: 'Model',
     kind: "agent",
     supportsFork: false,
     supportsForkAtMessage: false,
@@ -88,6 +96,8 @@ const agentCatalogEntries = [
   {
     id: "factory",
     label: "Factory",
+    executionPolicy: 'conversation',
+    selectionLabel: 'Model',
     kind: "agent",
     supportsFork: false,
     supportsForkAtMessage: false,
@@ -103,6 +113,8 @@ const agentCatalogEntries = [
   {
     id: "pi",
     label: "Pi",
+    executionPolicy: 'conversation',
+    selectionLabel: 'Model',
     kind: "agent",
     supportsFork: true,
     supportsForkAtMessage: false,
@@ -124,6 +136,8 @@ const agentCatalogEntries = [
   {
     id: "direct-anthropic-compatible",
     label: "Direct (Anthropic)",
+    executionPolicy: 'conversation',
+    selectionLabel: 'Model',
     kind: "agent",
     supportsFork: true,
     supportsForkAtMessage: true,
@@ -139,6 +153,8 @@ const agentCatalogEntries = [
   {
     id: "direct-openai-compatible",
     label: "Direct (Chat Completions)",
+    executionPolicy: 'conversation',
+    selectionLabel: 'Model',
     kind: "agent",
     supportsFork: true,
     supportsForkAtMessage: true,
@@ -154,6 +170,8 @@ const agentCatalogEntries = [
   {
     id: "direct-openai-responses-compatible",
     label: "Direct (Responses)",
+    executionPolicy: 'conversation',
+    selectionLabel: 'Model',
     kind: "agent",
     supportsFork: true,
     supportsForkAtMessage: true,

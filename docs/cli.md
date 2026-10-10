@@ -444,6 +444,11 @@ execution variants and `--model sh|bash|zsh|fish` selects one. No provider,
 endpoint, permission, or reasoning selection is needed. Start/resume preserve
 literal source and return inert stdout, including an empty silent-success result.
 
+Agent catalog entries and `list agents --json` always include `executionPolicy`
+(`conversation` or `literal`) and `selectionLabel`. `list models --json` includes
+that label too; the plain listing uses it as the selection column heading.
+Incomplete execution metadata is rejected rather than assumed conversational.
+
 Query the running server rather than guessing provider, model, permission, or effort values:
 
 ```bash

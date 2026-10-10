@@ -83,6 +83,8 @@ function makeCatalog(options: { multiEndpointProvider?: boolean } = {}) {
 	return {
 		getSelectableAgents: () => ['claude', 'codex'],
 		getAgent: (id: string) => ({
+			executionPolicy: 'conversation',
+			selectionLabel: 'Model',
 			id,
 			label: id === 'codex' ? 'Cached Codex' : 'Cached Claude',
 			description: '',

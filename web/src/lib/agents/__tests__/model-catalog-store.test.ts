@@ -25,6 +25,8 @@ function agentEntry(id: string, overrides: Record<string, unknown> = {}): Record
 		id,
 		label: id,
 		kind: 'agent',
+		executionPolicy: 'conversation',
+		selectionLabel: 'Model',
 		supportsFork: false,
 		supportsForkAtMessage: false,
 		supportsForkWhileRunning: false,
@@ -85,6 +87,41 @@ describe('ModelCatalogStore', () => {
 		const restored = createModelCatalogStore();
 		expect(restored.getModels('sample')[0]?.label).toBe('Local model');
 		expect(restored.forExecutor(remoteExecutor.id).getModels('sample')[0]?.label).toBe('Worker model');
+	});
+
+	describe.each(['local', remoteExecutor.id])('execution metadata on %s', executorId => {
+		it.each(['conversation', 'literal'])('retains %s policy and label across cold hydration', async executionPolicy => {
+			const selectionLabel = executionPolicy === 'literal' ? 'Shell' : 'Model';
+			const entry = agentEntry('sample', { executionPolicy, selectionLabel });
+			vi.mocked(clientApi.apiFetch).mockResolvedValue(mockResponse(catalogBody([entry])));
+			await createModelCatalogStore().forExecutor(executorId).forceRefresh();
+			const restored = createModelCatalogStore().forExecutor(executorId);
+			expect(restored.getAgent('sample')).toMatchObject({ executionPolicy, selectionLabel });
+			expect(restored.isValidated).toBe(true);
+		});
+
+		it.each([
+			{ executionPolicy: undefined }, { executionPolicy: 'unknown' },
+			{ selectionLabel: undefined }, { selectionLabel: '' },
+		])('rejects incomplete HTTP and persisted metadata: %j', async missing => {
+			const entry = agentEntry('sample', missing);
+			const cached = { schemaVersion: 2, agentMetadata: { sample: entry },
+				agentModels: { sample: [{ value: 'cached', label: 'Cached' }] }, apiProviderCatalog: [],
+				etag: 'old-etag', lastFetchedAt: Date.now(), lastValidatedAt: Date.now() };
+			localStorage.setItem(executorId === 'local' ? STORAGE_KEY : LOCAL_STORAGE_KEYS.modelCatalogExecutors,
+				JSON.stringify(executorId === 'local' ? cached : { [executorId]: cached }));
+			const catalog = createModelCatalogStore().forExecutor(executorId);
+			expect(catalog.getAgent('sample')).toBeNull();
+			expect(catalog.getModels('sample')).toEqual([]);
+			expect(catalog.isValidated).toBe(false);
+			vi.mocked(clientApi.apiFetch).mockResolvedValue(mockResponse(catalogBody([entry])));
+			await catalog.forceRefresh();
+			expect(catalog.getAgent('sample')).toBeNull();
+			expect(catalog.error).toBe('Model catalog response is invalid');
+			expect(catalog.isValidated).toBe(false);
+			expect(clientApi.apiFetch).toHaveBeenLastCalledWith(executorId === 'local'
+				? '/api/v1/models' : `/api/v1/models?executorId=${executorId}`);
+		});
 	});
 
 	it('fences a pending catalog request when its executor disconnects or is deleted', async () => {

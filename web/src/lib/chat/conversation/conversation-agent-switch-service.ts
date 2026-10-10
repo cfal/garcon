@@ -36,7 +36,7 @@ interface AgentSwitchState extends ResolvedModelSelection {
 }
 
 interface AgentSwitchModelCatalog {
-	getAgent(agentId: string): { executionPolicy?: 'conversation' | 'literal' } | null;
+	getAgent(agentId: string): { executionPolicy: 'conversation' | 'literal' } | null;
 	selectionFor(
 		agentId: SessionAgentId,
 		model: string,
