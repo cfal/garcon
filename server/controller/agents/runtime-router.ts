@@ -200,12 +200,10 @@ export class AgentRuntimeRouter {
       const producer = this.#producer(chatId);
       runId = this.#beginRun(chatId, operation.turnId);
       assertExecutionAdmissionOpen(opts);
-      const messages = await this.#ledger.conversationMessages(chatId, prepared.excludedOrdinals);
-      assertExecutionAdmissionOpen(opts);
       const outcome = await this.#createCarriedContext({
         chatId,
         entry,
-        messages,
+        readMessages: () => this.#ledger.conversationMessages(chatId, prepared.excludedOrdinals),
         transcriptViewId: prepared.viewId,
         destinationPrompt: prepared.prompt,
         clientRequestId: opts.clientRequestId ?? null,

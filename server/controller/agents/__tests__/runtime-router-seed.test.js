@@ -6,6 +6,8 @@ import path from 'node:path';
 
 import { AssistantMessage, UserMessage } from '../../../../common/chat-types.js';
 import { renderCarriedContext } from '../../../../common/transcript-seed.js';
+import { createCarriedContext } from '../../chats/carryover/context.js';
+import { PreparedCarryoverStore } from '../../chats/carryover/prepared-store.js';
 import { AgentRuntimeRouter } from '../runtime-router.ts';
 import { DomainError } from '../../../common/domain-error.ts';
 import { INTERACTIVE_EXECUTOR_WAIT_MS, SENT_READ_GRACE_MS } from '../../../common/interactive-deadline.ts';
@@ -114,8 +116,8 @@ function makeRouter(overrides = {}) {
     endpointResolver,
     events,
     getCarryOverRevision: () => 'carry-1',
-    createCarriedContext: overrides.createCarriedContext ?? (async ({ messages }) => {
-      const context = renderCarriedContext(messages);
+    createCarriedContext: overrides.createCarriedContext ?? (async ({ readMessages }) => {
+      const context = renderCarriedContext(await readMessages());
       return context ? { kind: 'complete', context } : { kind: 'no-history' };
     }),
     ledger: transcript.ledger,
@@ -218,6 +220,38 @@ describe('AgentRuntimeRouter producer boundary', () => {
     expect(start.mock.calls[0][0]).not.toHaveProperty('priorContext');
   });
 
+  it('starts with matching prepared handoff context without rereading the ledger', async () => {
+    const prepared = new PreparedCarryoverStore();
+    const result = { kind: 'complete', context: { prefix: 'synthetic prepared context' } };
+    prepared.deposit({
+      chatId: 'chat-1',
+      transcriptViewId: 'view-1',
+      targetAgentId: 'test',
+      targetExecutorId: 'local',
+      targetOwnershipEpoch: 'epoch-1',
+      clientRequestId: 'request-1',
+      result,
+    });
+    const conversationMessages = mock(() => {
+      throw new Error('Prepared handoff context must not reread the ledger');
+    });
+    const { router, start } = makeRouter({
+      conversationMessages,
+      createCarriedContext: (input) => createCarriedContext(input, prepared, null),
+    });
+
+    await router.runAgentTurn('chat-1', 'synthetic next task', {
+      clientRequestId: 'request-1',
+      turnId: 'turn-1',
+    });
+
+    expect(conversationMessages).not.toHaveBeenCalled();
+    expect(start).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: 'synthetic next task',
+      carriedContext: result.context,
+    }), expect.anything());
+  });
+
   it('keeps the private preamble out of carryover planning and prepends it to the outbound prompt', async () => {
     const providerPrefix = '<garcon-preambles>PRIVATE</garcon-preambles>\n\n';
     const createCarriedContext = mock(async ({ destinationPrompt }) => {
@@ -276,10 +310,10 @@ describe('AgentRuntimeRouter producer boundary', () => {
   });
 
   it('derives a new session seed from the authoritative ledger context', async () => {
-    const createCarriedContext = mock(async ({ messages }) => ({
+    const createCarriedContext = mock(async ({ readMessages }) => ({
       kind: 'compacted',
       context: {
-        prefix: `compacted:${messages.map((message) => message.content).join('|')}`,
+        prefix: `compacted:${(await readMessages()).map((message) => message.content).join('|')}`,
       },
       summary: 'compacted prior context',
     }));
@@ -293,7 +327,7 @@ describe('AgentRuntimeRouter producer boundary', () => {
     expect(createCarriedContext).toHaveBeenCalledWith({
       chatId: 'chat-1',
       entry: expect.objectContaining({ agentId: 'test' }),
-      messages: conversation,
+      readMessages: expect.any(Function),
       transcriptViewId: 'view-1',
       destinationPrompt: 'continue',
       clientRequestId: null,

@@ -2290,6 +2290,9 @@ execution remains unavailable until the destination is ready and an explicit
 new dispatch is admitted. Source unavailability does not prevent a ledger-based
 handoff. Prepared carryover reuse is fenced by destination executor and ownership
 epoch as well as the existing request and view identities.
+The matching prepared result is consumed before reading the conversation fold;
+only an unprepared or mismatched start materializes that fold. Cancellation is
+checked before consuming prepared context and after an awaited history read.
 
 Composer executor and agent selections commit through the promptless
 `POST /api/v1/chats/agent-handoff` command, under a transcript-snapshot
