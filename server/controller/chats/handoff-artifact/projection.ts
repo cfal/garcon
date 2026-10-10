@@ -191,23 +191,25 @@ function projectEntry(
     case 'user-message': {
       const body = artifactBody(message.content);
       const presentation = transcriptExportEntryCliPresentation(entry);
+      const attributes: HandoffArtifactAttribute[] = [];
+      if (message.metadata?.contentMode === 'literal') {
+        attributes.push({ name: 'content-mode', value: 'literal' });
+      }
+      if (presentation !== null) {
+        attributes.push({ name: 'origin', value: presentation.origin });
+        if (presentation.style !== undefined) {
+          attributes.push({ name: 'style', value: presentation.style });
+        }
+        if (presentation.title !== undefined) {
+          attributes.push({ name: 'title', value: presentation.title });
+        }
+      }
       return sourceEntry({
         ordinal,
         turn,
         level: projectionPriorityLevel(message.type),
         tag: 'user',
-        attributes: [
-          ...(message.metadata?.contentMode === 'literal' ? [{ name: 'content-mode', value: 'literal' }] : []),
-          ...(presentation === null ? [] : [
-            { name: 'origin', value: presentation.origin },
-            ...(presentation.style === undefined
-              ? []
-              : [{ name: 'style', value: presentation.style }]),
-            ...(presentation.title === undefined
-              ? []
-              : [{ name: 'title', value: presentation.title }]),
-          ]),
-        ],
+        attributes,
         body: body.text,
         abridged: body.abridged || (message.images?.length ?? 0) > 0,
       });

@@ -347,15 +347,16 @@ describe('Shell integration', () => {
     expect((await history()).slice(1)).toEqual(live);
   });
 
-  it('fails settlement without publishing output rejected by native storage', async () => {
+  it.each(['stdout', 'stderr'])('fails settlement without retrying output when native storage rejects %s', async channel => {
     await integration.execution.start({ ...request,
-      prompt: 'touch ready; while [ ! -e release ]; do sleep 0.01; done; printf output' });
+      prompt: 'touch ready; while [ ! -e release ]; do sleep 0.01; done; printf output; printf diagnostic >&2' });
     while (!await Bun.file(join(root, 'ready')).exists()) await Bun.sleep(5);
     const store = new ShellNativeStore(host);
     const db = new Database(await store.path(chat().agentSessionId!));
     try {
       db.exec(`CREATE TRIGGER reject_output BEFORE INSERT ON records
         WHEN json_extract(NEW.message, '$.type') = 'command-output'
+          AND json_extract(NEW.message, '$.channel') = '${channel}'
         BEGIN SELECT RAISE(FAIL, 'Synthetic output persistence failure'); END;`);
     } finally {
       db.close();
@@ -365,10 +366,13 @@ describe('Shell integration', () => {
     expect(ended.outcome).toBe('failed');
     expect(ended.error?.message).toContain('Synthetic output persistence failure');
     const live = events.flatMap(event => event.type === 'rows' ? event.rows.map(row => row.message) : []);
-    expect(live).toEqual([expect.objectContaining({
+    const expectedOutput = channel === 'stderr'
+      ? [expect.objectContaining({ type: 'command-output', channel: 'stdout', content: 'output' })]
+      : [];
+    expect(live).toEqual([...expectedOutput, expect.objectContaining({
       type: 'command-result', result: expect.objectContaining({ outcome: 'failed', capture: 'incomplete' }),
     })]);
-    const result = live[0];
+    const result = live.at(-1);
     if (result?.type !== 'command-result') throw new Error('Expected the published command result');
     expect(ended.error?.message).toBe(result.content);
     expect((await history()).slice(1)).toEqual(live);

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { AssistantMessage, BashToolUseMessage, GrepToolUseMessage, ReadToolUseMessage, ThinkingMessage, ToolResultMessage, UserMessage } from '$shared/chat-types';
+import { CommandOutputMessage, CommandResultMessage, TranscriptNoticeMessage } from '$shared/chat-types';
 import {
 	ActiveTranscriptState,
 	type ChatDisplayRow,
@@ -68,6 +69,47 @@ function input(overrides: Partial<ProjectionInput> = {}): ProjectionInput {
 }
 
 describe('ConversationFeedProjectionState', () => {
+	const commandContext = { executorId: 'local', projectPath: '/project' };
+	const plain = new CommandOutputMessage(TS, 'command', 'stdout', 'plain', 'output', commandContext);
+	const markdown = new CommandOutputMessage(TS, 'command', 'stdout', 'markdown', '# heading', commandContext);
+	const stderr = new CommandOutputMessage(TS, 'command', 'stderr', 'plain', 'diagnostic', commandContext);
+	const complete = new CommandResultMessage(TS, 'command', {
+		outcome: 'finished', exitCode: 0, signal: null, capture: 'complete',
+		cwd: { kind: 'reported', path: '/project' },
+	});
+	const failed = new CommandResultMessage(TS, 'command', { ...complete.result, outcome: 'failed', exitCode: 7 });
+	const warning = new CommandResultMessage(TS, 'command', { ...complete.result, capture: 'truncated' });
+	const gap = new TranscriptNoticeMessage(TS, 'Lost output', { type: 'publication-gap' });
+	const errorNotice: ChatDisplayRow = { kind: 'local-notice', id: 'local-error', noticeType: 'error', content: failed.content, timestamp: TS };
+
+	it.each([
+		{ name: 'plain streams and failure', messages: [plain, stderr, failed, errorNotice], retainsPrefix: true },
+		{ name: 'warning', messages: [plain, warning], retainsPrefix: true },
+		{ name: 'hidden success', messages: [plain, complete], retainsPrefix: true },
+		{ name: 'Markdown completion', messages: [markdown, complete], retainsPrefix: false },
+		{ name: 'duplicate output', messages: [markdown, complete, markdown], retainsPrefix: false },
+		{ name: 'duplicate result', messages: [markdown, complete, complete], retainsPrefix: false },
+		{ name: 'publication gap', messages: [stderr, gap, markdown, complete], retainsPrefix: false },
+	])('matches full virtualization for $name while preserving keys and geometry', ({ messages, retainsPrefix }) => {
+		const projections = new ConversationFeedProjectionState();
+		let config = input({ rows: [rows()[0]!] });
+		let previous = projections.reconcile(config);
+		for (const [index, message] of messages.entries()) {
+			const row: ChatDisplayRow = 'kind' in message ? message : {
+				kind: 'message', id: `command-row:${index}`, ordinal: index + 2, message,
+			};
+			config = { ...config, rows: [...config.rows, row], mutationClock: clock(index + 2, { 'live-append': index + 2 }) };
+			const next = projections.reconcile(config);
+			const rebuilt = new ConversationFeedProjectionState().reconcile(config);
+			expect(next.model).toEqual(rebuilt.model);
+			expect(next.geometry.keys).toEqual(rebuilt.geometry.keys);
+			expect(next.geometry.estimates).toEqual(rebuilt.geometry.estimates);
+			if (next.geometry !== previous.geometry) expect(next.geometry.endBehavior).toBe('restore-if-pinned');
+			if (retainsPrefix) expect(next.model.items[1]).toBe(previous.model.items[1]);
+			previous = next;
+		}
+	});
+
 	it('groups only visible adjacent ordinary inputs after result and thinking policy', () => {
 		const projectedRows: ChatDisplayRow[] = [
 			{ kind: 'message', id: 'generation-1:1', message: new BashToolUseMessage(TS, 'a', 'pwd') },

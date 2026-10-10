@@ -31,6 +31,15 @@ describe('shared command output projection', () => {
     expect(result.get(0)).toBe(output);
     expect(result.get(1)).toBe(error);
   });
+  it('checks delivery gaps from the first output even when stderr precedes stdout', () => {
+    const error = new CommandOutputMessage(at, 'command-1', 'stderr', 'plain', 'diagnostic', context);
+    const output = stdout('# complete');
+    const gap = new TranscriptNoticeMessage(at, 'Lost output', { type: 'publication-gap' });
+    const result = projectCommandOutput([error, gap, output, terminal]);
+    expect(result.get(0)).toBe(error);
+    expect(result.get(2)).toEqual({ ...output, format: 'plain' });
+    expect(output.format).toBe('markdown');
+  });
   it('keeps duplicate stream records separate and literal without mutating their source', () => {
     const outputs = [stdout('```text\nprefix'), stdout('# suffix', 14)];
     const result = projectCommandOutput([...outputs, terminal]);

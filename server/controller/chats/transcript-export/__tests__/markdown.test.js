@@ -20,6 +20,16 @@ describe('Markdown transcript export', () => {
     outcome: 'finished', exitCode: 0, signal: null, capture, cwd: { kind: 'reported', path: '/synthetic' },
   });
 
+  it('fences literal backticks while leaving ordinary Markdown untouched', () => {
+    const content = '``````\nexample\n``````';
+    const document = renderTranscriptExportMarkdown(model([
+      entry(1, 'conversation', new UserMessage(AT, content)),
+      entry(2, 'conversation', new UserMessage(AT, content, undefined, { contentMode: 'literal' })),
+    ]));
+    expect(document).toContain(`## [1] User\n\n${content}\n\n## [2] User\n\n`);
+    expect(document).toContain(`\n\n\`\`\`\`\`\`\`text\n${content}\n\`\`\`\`\`\`\`\n`);
+  });
+
   it.each([
     ['unfinished', [stdout('# incomplete heading')]],
     ['incomplete', [stdout('# incomplete heading'), result('incomplete')]],
