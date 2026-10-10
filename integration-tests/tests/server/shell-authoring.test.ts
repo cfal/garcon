@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { garconCommandResultContent } from '../../../common/garcon-command-results.js';
 import type { ChatMessagesMessage, ChatTitleUpdatedMessage } from '../../../common/ws-events.js';
 import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { rejectionOf } from '../../support/promise-assertions.js';
@@ -112,9 +113,10 @@ test('agent commands can start and resume Shell tasks', async () => {
     const parent = fixture.newChatId();
     const source = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'Start a synthetic task.' });
     const cursor = client.markEvents();
-    await client.startDirectChat({ chatId: parent, agent: fixture.directAgents.openAi,
+    const initial = await client.startDirectChat({ chatId: parent, agent: fixture.directAgents.openAi,
       projectPath: fixture.executionDirs.project, content: 'Start a synthetic task.' });
     await source.received;
+    const acknowledgment = fixture.fakeProviders.openAi.holdNext({});
     source.releaseText('<garcon-start-agent ref="shell-task" async="true" agent="shell" model="sh" title="Synthetic task">printf started > automated-task</garcon-start-agent>');
     const event = await client.waitForEvent(
       (event): event is ChatMessagesMessage => event.type === 'chat-messages' && event.chatId === parent
@@ -132,7 +134,11 @@ test('agent commands can start and resume Shell tasks', async () => {
     expect(await readFile(join(fixture.executionDirs.project, 'automated-task'), 'utf8')).toBe('started');
     expect((await client.listChats()).sessions.find(chat => chat.id === child)?.title).toBe('Synthetic task');
 
-    await client.waitForProcessing(parent, false);
+    await client.waitForTurnTerminal(parent, initial.turnId);
+    expect((await acknowledgment.received).lastUserText).toBe(garconCommandResultContent(notice.detail));
+    const acknowledgmentCursor = client.markEvents();
+    acknowledgment.releaseText('Synthetic task admission received.');
+    await client.waitForTurnTerminal(parent, undefined, { afterIndex: acknowledgmentCursor });
     const resume = fixture.fakeProviders.openAi.holdNext({ lastUserText: 'Continue the synthetic task.' });
     const resumeCursor = client.markEvents();
     await client.runDirectChat({ chatId: parent, agent: fixture.directAgents.openAi, content: 'Continue the synthetic task.' });
