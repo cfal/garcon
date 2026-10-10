@@ -384,6 +384,7 @@ export interface QueuedSteerCommandResponse extends CommandAcceptedResponse {
   control: ChatExecutionControlState;
 }
 
+// Selects any queued text message; content and order revisions fence stale selections.
 export interface QueueEntrySteerCommandRequest {
   clientRequestId: string;
   chatId: string;

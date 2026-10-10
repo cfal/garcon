@@ -1,20 +1,17 @@
 <script lang="ts">
+	import { onDestroy, tick, untrack } from 'svelte';
 	import type { ChatQueueState, QueueEntry } from '$lib/types/chat';
+	import type { QueueEntryPlacement } from '$shared/chat-command-contracts';
+	import { CHAT_DOCK_SURFACE_CLASS } from '$lib/chat/conversation/chat-max-width.js';
+	import { isQueuedInputDragData } from './queued-input-dnd.js';
+	import QueuedInputTrayRow from './QueuedInputTrayRow.svelte';
+	import { QueuedInputListController } from './QueuedInputListController.svelte.js';
 	import * as m from '$lib/paraglide/messages.js';
-	import ChevronLeft from '@lucide/svelte/icons/chevron-left';
-	import ChevronRight from '@lucide/svelte/icons/chevron-right';
-	import FastForward from '@lucide/svelte/icons/fast-forward';
-	import ListTodo from '@lucide/svelte/icons/list-todo';
+	import ChevronsDownUp from '@lucide/svelte/icons/chevrons-down-up';
+	import ChevronsUpDown from '@lucide/svelte/icons/chevrons-up-down';
 	import Loader2 from '@lucide/svelte/icons/loader-2';
 	import Pause from '@lucide/svelte/icons/pause';
-	import Pencil from '@lucide/svelte/icons/pencil';
 	import Play from '@lucide/svelte/icons/play';
-	import Route from '@lucide/svelte/icons/route';
-	import Trash2 from '@lucide/svelte/icons/trash-2';
-	import ResponsiveSurfaceActions, {
-		type ResponsiveSurfaceAction,
-	} from '$lib/components/shared/ResponsiveSurfaceActions.svelte';
-	import QueueStatusSummary from './QueueStatusSummary.svelte';
 
 	interface Props {
 		chatId: string | null;
@@ -25,10 +22,19 @@
 		onSteer?: (entry: QueueEntry, expectedReorderRevision: number) => void | Promise<void>;
 		onPause: () => Promise<void>;
 		onResume: (pauseId: string) => Promise<void>;
-		onQueueControlError: (action: 'pause' | 'resume', error: unknown) => void;
+		onQueueControlError: (
+			chatId: string,
+			action: 'pause' | 'resume' | 'move',
+			error: unknown,
+		) => void;
 		onEdit: (entry: QueueEntry) => void;
-		onOpenManager: () => void;
 		onDelete: (entryId: string) => Promise<void>;
+		onMove: (
+			source: QueueEntry,
+			target: QueueEntry,
+			placement: QueueEntryPlacement,
+			reorderRevision: number,
+		) => Promise<void>;
 		announcementsEnabled?: boolean;
 	}
 
@@ -43,291 +49,291 @@
 		onResume,
 		onQueueControlError,
 		onEdit,
-		onOpenManager,
 		onDelete,
+		onMove,
 		announcementsEnabled = true,
 	}: Props = $props();
 
-	interface QueuePreviewSelection {
-		chatId: string;
-		entryId: string;
-	}
-	type DispatchMutationKind = 'pausing' | 'resuming' | 'interrupting' | 'steering';
-	interface DispatchMutation {
-		token: number;
-		kind: DispatchMutationKind;
-		chatId: string;
+	type MutationKind = 'pausing' | 'resuming' | 'interrupting' | 'steering' | 'deleting' | 'moving';
+	interface Mutation {
+		kind: MutationKind;
 		entryId?: string;
 	}
-
-	let previewSelection = $state<QueuePreviewSelection | null>(null);
-	let dispatchMutationToken = 0;
-	let dispatchMutations = $state<Record<string, DispatchMutation>>({});
+	let mutations = $state<Record<string, Mutation>>({});
+	let expandedChatId = $state<string | null>(null);
+	let listElement = $state<HTMLDivElement | null>(null);
 	const entries = $derived(queue?.entries ?? []);
-	const queuedEntryCount = $derived(entries.length);
-	const dispatchMutation = $derived(chatId ? (dispatchMutations[chatId] ?? null) : null);
-	const localSteeringEntryId = $derived(
-		dispatchMutation?.kind === 'steering' ? (dispatchMutation.entryId ?? null) : null,
-	);
-	const previewIndex = $derived.by(() => {
-		if (entries.length === 0) return -1;
-		const steeringEntryId = queue?.steeringEntryId ?? localSteeringEntryId;
-		const steeringIndex = steeringEntryId
-			? entries.findIndex((entry) => entry.id === steeringEntryId)
-			: -1;
-		if (steeringIndex >= 0) return steeringIndex;
-		if (!chatId || previewSelection?.chatId !== chatId) return 0;
-
-		const retainedIndex = entries.findIndex((entry) => entry.id === previewSelection?.entryId);
-		return retainedIndex >= 0 ? retainedIndex : 0;
+	const entriesById = $derived(new Map(entries.map((entry) => [entry.id, entry])));
+	const listController = new QueuedInputListController();
+	const snapshot = $derived(listController.virtual.snapshot);
+	const renderedItems = $derived(listController.items(snapshot, entriesById));
+	let notice = $state<{ chatId: string; message: string } | null>(null);
+	const pauseId = $derived(queue?.pause?.id);
+	const pauseDetail = $derived.by(() => {
+		switch (queue?.pause?.kind) {
+			case 'manual':
+				return m.chat_queue_paused_detail();
+			case 'queued-turn-failed':
+				return m.chat_queue_pause_failed_detail();
+			case 'turn-failed':
+				return m.chat_queue_pause_turn_failed_detail();
+			case 'completion-uncertain':
+				return m.chat_queue_pause_completion_uncertain_detail();
+			case 'unknown':
+				return m.chat_queue_pause_unknown_detail();
+			default:
+				return m.chat_queue_follow_up_detail();
+		}
 	});
-	const previewEntry = $derived(entries[previewIndex] ?? null);
-	const canBrowsePrevious = $derived(previewIndex > 0);
-	const canBrowseNext = $derived(previewIndex >= 0 && previewIndex < queuedEntryCount - 1);
-	const showQueueManager = $derived(queuedEntryCount > 1);
-	const queueSteering = $derived(queue?.steeringEntryId != null);
-	const previewSteering = $derived(
-		queue?.steeringEntryId === previewEntry?.id || localSteeringEntryId === previewEntry?.id,
-	);
-	// A steer entry is delivered automatically, so only its delivery in flight shows the action.
-	const canSteerPreview = $derived(
-		previewIndex === 0 && canSteer && previewEntry?.kind !== 'steer',
-	);
-	const showSteerAction = $derived((canSteerPreview || previewSteering) && Boolean(onSteer));
-	// Steering delivers text only, so an entry with attachments runs as its own turn.
-	const previewSteerBlocked = $derived((previewEntry?.attachments.length ?? 0) > 0);
-	const showInterruptAction = $derived(
-		previewIndex === 0 && !queue?.pause && !queueSteering && canInterrupt && Boolean(onInterrupt),
-	);
-	let deletingEntryIds = $state<Set<string>>(new Set());
-	const queueActionPending = $derived(dispatchMutation !== null);
-	const queueMutationsBlocked = $derived(queueActionPending || queueSteering);
-	const queueActions = $derived.by<ResponsiveSurfaceAction[]>(() => {
-		const actions: ResponsiveSurfaceAction[] = [];
-		const neutralButtonClass =
-			'rounded-lg px-2.5 text-sm text-foreground hover:bg-accent hover:text-accent-foreground';
+	const affectedEntryRemoved = $derived.by(() => {
+		const pause = queue?.pause;
+		return Boolean(
+			pause &&
+			'entryId' in pause &&
+			pause.entryId &&
+			!entries.some((entry) => entry.id === pause.entryId),
+		);
+	});
+	const mutation = $derived(chatId ? mutations[chatId] : undefined);
+	const blocked = $derived(Boolean(mutation) || queue?.steeringEntryId != null);
+	const expanded = $derived(chatId !== null && expandedChatId === chatId);
+	const visibleNotice = $derived(notice?.chatId === chatId ? notice : null);
+	let scrollTarget: { chatId: string; element: HTMLDivElement } | null = null;
 
-		if (showSteerAction && onSteer && previewEntry && queue) {
-			const observedEntry = previewEntry;
-			const expectedReorderRevision = queue.reorderRevision;
-			const steerBusy = previewSteering;
-			const steerBlocked = previewSteerBlocked && !steerBusy;
-			actions.push({
-				id: 'steer',
-				renderKey: `steer:${chatId ?? ''}:${observedEntry.id}`,
-				label: m.chat_queue_steer(),
-				title: steerBlocked
-					? m.chat_queue_steer_attachments_unavailable()
-					: m.chat_queue_steer_queue(),
-				icon: steerBusy ? Loader2 : Route,
-				iconClass: steerBusy ? 'animate-spin' : undefined,
-				onclick: () => {
-					if (previewSteering || steerBlocked) return;
-					void mutateDispatch(
-						'steering',
-						() => onSteer(observedEntry, expectedReorderRevision),
-						observedEntry.id,
-					);
-				},
-				disabled: (queueActionPending && !steerBusy) || steerBlocked,
-				busy: steerBusy,
-				priority: 1,
-				showLabel: true,
-				buttonClass: neutralButtonClass,
-			});
-		}
+	$effect(() => {
+		if (!chatId || !listElement) return;
+		if (scrollTarget?.chatId === chatId && scrollTarget.element === listElement) return;
+		scrollTarget = { chatId, element: listElement };
+		listElement.scrollTop = 0;
+	});
+	$effect.pre(() => {
+		const targetChatId = chatId;
+		const currentEntries = entries;
+		untrack(() => listController.update(targetChatId, currentEntries));
+	});
+	onDestroy(() => listController.virtual.destroy());
 
-		if (showInterruptAction && onInterrupt) {
-			actions.push({
-				id: 'send-now',
-				label: m.chat_queue_interrupt_and_send(),
-				title: m.chat_queue_interrupt_and_send_queue(),
-				icon: dispatchMutation?.kind === 'interrupting' ? Loader2 : FastForward,
-				iconClass: dispatchMutation?.kind === 'interrupting' ? 'animate-spin' : undefined,
-				onclick: () => void mutateDispatch('interrupting', onInterrupt),
-				disabled: queueMutationsBlocked,
-				busy: dispatchMutation?.kind === 'interrupting',
-				priority: 0,
-				showLabel: true,
-				buttonClass: neutralButtonClass,
-			});
-		}
-
-		if (showQueueManager) {
-			actions.push({
-				id: 'edit-queue',
-				label: m.chat_queue_edit_queue(),
-				icon: ListTodo,
-				onclick: onOpenManager,
-				disabled: queueMutationsBlocked,
-				priority: 3,
-				showLabel: true,
-				buttonClass: neutralButtonClass,
-			});
-		}
-
-		if (queue?.pause) {
-			const pauseId = queue.pause.id;
-			actions.push({
-				id: 'resume-queue',
-				label: m.chat_queue_resume(),
-				title: m.chat_queue_resume_queue(),
-				icon: dispatchMutation?.kind === 'resuming' ? Loader2 : Play,
-				iconClass: dispatchMutation?.kind === 'resuming' ? 'animate-spin' : undefined,
-				onclick: () => void mutateDispatch('resuming', () => onResume(pauseId)),
-				disabled: queueMutationsBlocked,
-				busy: dispatchMutation?.kind === 'resuming',
-				priority: 2,
-				showLabel: true,
-				buttonClass:
-					'rounded-lg bg-queue-action-bg px-2.5 text-sm text-queue-foreground hover:bg-queue-action-hover-bg hover:text-queue-foreground',
-			});
-		} else {
-			actions.push({
-				id: 'pause-queue',
-				label: m.chat_queue_pause(),
-				title: m.chat_queue_pause_queue(),
-				icon: dispatchMutation?.kind === 'pausing' ? Loader2 : Pause,
-				iconClass: dispatchMutation?.kind === 'pausing' ? 'animate-spin' : undefined,
-				onclick: () => void mutateDispatch('pausing', onPause),
-				disabled: queueMutationsBlocked,
-				busy: dispatchMutation?.kind === 'pausing',
-				priority: 2,
-				showLabel: true,
-				buttonClass: neutralButtonClass,
-			});
-		}
-
-		return actions;
+	$effect(() => {
+		if (!listElement || !chatId) return;
+		const element = listElement;
+		const targetChatId = chatId;
+		let disposed = false;
+		let cleanup: (() => void) | undefined;
+		void import('@atlaskit/pragmatic-drag-and-drop-auto-scroll/element').then(
+			({ autoScrollForElements }) => {
+				if (disposed) return;
+				cleanup = autoScrollForElements({
+					element,
+					canScroll: ({ source }) =>
+						!blocked && isQueuedInputDragData(source.data) && source.data.chatId === targetChatId,
+					getAllowedAxis: () => 'vertical',
+				});
+			},
+		);
+		return () => {
+			disposed = true;
+			cleanup?.();
+		};
 	});
 
-	function selectPreview(index: number): void {
-		if (!chatId) return;
-		const entry = entries[index];
-		if (!entry) return;
-		previewSelection = { chatId, entryId: entry.id };
-	}
-
-	async function deleteEntry(entryId: string): Promise<void> {
-		if (deletingEntryIds.has(entryId)) return;
-		deletingEntryIds = new Set([...deletingEntryIds, entryId]);
-		try {
-			await onDelete(entryId);
-		} finally {
-			const nextDeletingEntryIds = new Set(deletingEntryIds);
-			nextDeletingEntryIds.delete(entryId);
-			deletingEntryIds = nextDeletingEntryIds;
-		}
-	}
-
-	async function mutateDispatch(
-		kind: DispatchMutationKind,
+	async function mutate(
+		kind: MutationKind,
 		action: () => void | Promise<void>,
 		entryId?: string,
 	): Promise<void> {
-		if (!chatId || dispatchMutation || queueSteering) return;
-		const operation: DispatchMutation = {
-			token: ++dispatchMutationToken,
-			kind,
-			chatId,
-			...(entryId ? { entryId } : {}),
-		};
-		dispatchMutations = { ...dispatchMutations, [operation.chatId]: operation };
+		const operationChatId = chatId;
+		if (!operationChatId || blocked) return;
+		mutations = { ...mutations, [operationChatId]: { kind, entryId } };
+		notice = null;
 		try {
 			await action();
+			if (kind === 'moving' && chatId === operationChatId)
+				notice = { chatId: operationChatId, message: m.chat_queue_move_success() };
 		} catch (error) {
 			if (kind === 'pausing' || kind === 'resuming') {
-				onQueueControlError(kind === 'pausing' ? 'pause' : 'resume', error);
+				onQueueControlError(operationChatId, kind === 'pausing' ? 'pause' : 'resume', error);
+			} else if (kind === 'moving') {
+				onQueueControlError(operationChatId, 'move', error);
 			}
 		} finally {
-			if (dispatchMutations[operation.chatId]?.token === operation.token) {
-				const { [operation.chatId]: _completed, ...remaining } = dispatchMutations;
-				dispatchMutations = remaining;
-			}
+			const { [operationChatId]: _completed, ...remaining } = mutations;
+			mutations = remaining;
 		}
+	}
+
+	async function moveRelative(
+		sourceId: string,
+		targetId: string,
+		placement: QueueEntryPlacement,
+	): Promise<void> {
+		if (!queue || blocked) return;
+		const source = entries.find((entry) => entry.id === sourceId);
+		const target = entries.find((entry) => entry.id === targetId);
+		if (!source || !target || source === target) return;
+		const revision = queue.reorderRevision;
+		await mutate('moving', () => onMove(source, target, placement, revision), source.id);
+	}
+
+	async function moveByKeyboard(entryId: string, direction: -1 | 1): Promise<void> {
+		const operationChatId = chatId;
+		if (!operationChatId || blocked) return;
+		const index = entries.findIndex((entry) => entry.id === entryId);
+		const target = index < 0 ? undefined : entries[index + direction];
+		if (!target) return;
+		const focusedGrip = document.activeElement;
+		await moveRelative(entryId, target.id, direction === -1 ? 'before' : 'after');
+		await tick();
+		if (
+			chatId !== operationChatId ||
+			!(focusedGrip instanceof HTMLElement) ||
+			focusedGrip.dataset.queueDragId !== entryId ||
+			focusedGrip.getAttribute('aria-pressed') !== 'true' ||
+			(document.activeElement !== focusedGrip && document.activeElement !== document.body)
+		)
+			return;
+		const rowBounds = focusedGrip.closest('li')?.getBoundingClientRect();
+		const listBounds = listElement?.getBoundingClientRect();
+		if (rowBounds && listBounds) {
+			if (rowBounds.top < listBounds.top)
+				listController.virtual.scrollToKey(entryId, { align: 'start' });
+			else if (rowBounds.bottom > listBounds.bottom)
+				listController.virtual.scrollToKey(entryId, { align: 'end' });
+		}
+		await tick();
+		if (
+			chatId === operationChatId &&
+			(document.activeElement === focusedGrip || document.activeElement === document.body) &&
+			focusedGrip.isConnected
+		)
+			focusedGrip.focus({ preventScroll: true });
 	}
 </script>
 
-{#if queue && previewEntry}
-	<QueueStatusSummary {queue} entry={previewEntry} position={previewIndex + 1}>
-		{#snippet entryActions()}
-			<div class="flex shrink-0 items-center gap-0.5">
+{#if queue && chatId && entries.length > 0}
+	<section
+		class={`${CHAT_DOCK_SURFACE_CLASS} flex min-h-0 flex-col`}
+		aria-label={m.chat_queue_dialog_title()}
+		data-queue-status-summary
+		data-queue-chat-id={chatId}
+		tabindex="-1"
+	>
+		<header
+			class="flex shrink-0 flex-wrap items-center gap-x-2 border-b border-border/60 px-3 py-1"
+		>
+			<span
+				class="text-xs font-medium text-foreground"
+				aria-live={announcementsEnabled ? 'polite' : 'off'}
+				aria-atomic="true"
+				title={m.chat_queue_follow_up_detail()}
+				>{m.chat_queue_pending_count({ count: entries.length })}</span
+			>
+			{#if queue.pause}<span class="min-w-0 truncate text-xs text-queue-foreground"
+					>{queue.pause.kind === 'manual'
+						? m.chat_queue_paused()
+						: m.chat_queue_needs_attention()}</span
+				>{/if}
+			<div class="ml-auto flex shrink-0 items-center gap-1">
 				<button
 					type="button"
-					onclick={() => onEdit(previewEntry)}
-					disabled={deletingEntryIds.has(previewEntry.id) || queueMutationsBlocked}
-					class="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
-					title={m.chat_queue_edit_message()}
-					aria-label={m.chat_queue_edit_message()}
+					onclick={() =>
+						void mutate(
+							pauseId ? 'resuming' : 'pausing',
+							pauseId ? () => onResume(pauseId) : onPause,
+						)}
+					disabled={blocked}
+					class="inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-lg px-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 sm:pointer-fine:min-h-8 sm:pointer-fine:min-w-8"
+					aria-label={pauseId ? m.chat_queue_resume() : m.chat_queue_pause()}
+					title={pauseId ? m.chat_queue_resume_queue() : m.chat_queue_pause_queue()}
 				>
-					<Pencil class="h-4 w-4" />
+					{#if mutation?.kind === 'pausing' || mutation?.kind === 'resuming'}<Loader2
+							class="size-3.5 animate-spin"
+						/>{:else if pauseId}<Play class="size-3.5" />{:else}<Pause class="size-3.5" />{/if}
+					<span class:sr-only={!pauseId}
+						>{pauseId ? m.chat_queue_resume() : m.chat_queue_pause()}</span
+					>
 				</button>
 				<button
 					type="button"
-					onclick={() => void deleteEntry(previewEntry.id)}
-					disabled={deletingEntryIds.has(previewEntry.id) || queueMutationsBlocked}
-					class="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
-					title={m.chat_queue_remove_from_queue()}
-					aria-label={m.chat_queue_remove_from_queue()}
+					onclick={() => {
+						expandedChatId = expanded ? null : chatId;
+						listController.resetExpansion();
+					}}
+					aria-expanded={expanded}
+					aria-label={expanded ? m.chat_queue_collapse_all() : m.chat_queue_expand_all()}
+					title={expanded ? m.chat_queue_collapse_all() : m.chat_queue_expand_all()}
+					class="inline-flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:min-h-8"
 				>
-					{#if deletingEntryIds.has(previewEntry.id)}
-						<Loader2 class="h-4 w-4 animate-spin" />
-					{:else}
-						<Trash2 class="h-4 w-4" />
-					{/if}
+					{#if expanded}<ChevronsDownUp class="size-3.5" />{:else}<ChevronsUpDown
+							class="size-3.5"
+						/>{/if}
+					{expanded ? m.common_collapse_all() : m.common_expand_all()}
 				</button>
 			</div>
-		{/snippet}
-
-		{#snippet navigation()}
-			{#if showQueueManager}
-				<div
-					role="group"
-					aria-label={m.chat_queue_browse_messages()}
-					class="flex shrink-0 items-center"
-				>
-					<button
-						type="button"
-						onclick={() => selectPreview(previewIndex - 1)}
-						disabled={!canBrowsePrevious || queueMutationsBlocked}
-						class="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40"
-						title={m.chat_queue_previous_message()}
-						aria-label={m.chat_queue_previous_message()}
-					>
-						<ChevronLeft class="h-4 w-4" />
-					</button>
-					<span
-						class="min-w-[4.5rem] text-center text-xs tabular-nums text-muted-foreground"
-						aria-live={announcementsEnabled ? 'polite' : 'off'}
-						aria-atomic="true"
-					>
-						{m.chat_queue_message_position({
-							current: previewIndex + 1,
-							total: queuedEntryCount,
-						})}
-					</span>
-					<button
-						type="button"
-						onclick={() => selectPreview(previewIndex + 1)}
-						disabled={!canBrowseNext || queueMutationsBlocked}
-						class="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40"
-						title={m.chat_queue_next_message()}
-						aria-label={m.chat_queue_next_message()}
-					>
-						<ChevronRight class="h-4 w-4" />
-					</button>
-				</div>
-			{:else}
-				<span class="text-xs text-muted-foreground">{m.chat_queue_single_message()}</span>
+			{#if queue.pause}
+				<p class="basis-full pb-2 pt-1 text-xs text-muted-foreground">
+					{pauseDetail}
+					{#if affectedEntryRemoved}
+						{m.chat_queue_pause_affected_removed()}{/if}
+				</p>
 			{/if}
-		{/snippet}
-
-		{#snippet actions()}
-			<ResponsiveSurfaceActions
-				actions={queueActions}
-				menuLabel={m.chat_queue_actions()}
-				class="ml-auto"
-			/>
-		{/snippet}
-	</QueueStatusSummary>
+		</header>
+		<div
+			bind:this={listElement}
+			data-queue-list
+			class={`min-h-0 overflow-y-auto overscroll-contain ${expanded ? 'max-h-[40dvh]' : 'max-h-[25dvh]'}`}
+			{@attach listController.virtual.viewport}
+		>
+			<ol
+				class="relative"
+				style:height={`${snapshot.sizerSize}px`}
+				{@attach listController.virtual.sizer}
+			>
+				{#each renderedItems as { entry, virtualItem } (`${chatId}:${virtualItem.key}`)}
+					{@const index = virtualItem.index}
+					<svelte:boundary>
+						{@const steering =
+							queue.steeringEntryId === entry.id ||
+							(mutation?.kind === 'steering' && mutation.entryId === entry.id)}
+						<QueuedInputTrayRow
+							{chatId}
+							{entry}
+							position={index + 1}
+							{virtualItem}
+							count={entries.length}
+							measurement={listController.virtual.item(virtualItem.key)}
+							expanded={listController.isExpanded(entry.id, expanded)}
+							onToggle={() => listController.toggleExpanded(entry.id, expanded)}
+							onRetain={(reason, active) => listController.retain(entry.id, reason, active)}
+							{blocked}
+							{steering}
+							{announcementsEnabled}
+							deleting={mutation?.kind === 'deleting' && mutation.entryId === entry.id}
+							canSteer={canSteer && entry.kind !== 'steer' && Boolean(onSteer)}
+							canInterrupt={index === 0 && canInterrupt && !queue.pause && Boolean(onInterrupt)}
+							onSteer={() => {
+								if (onSteer && queue && entries.some((candidate) => candidate.id === entry.id)) {
+									const revision = queue.reorderRevision;
+									void mutate('steering', () => onSteer!(entry, revision), entry.id);
+								}
+							}}
+							onInterrupt={() => {
+								if (onInterrupt && entries[0]?.id === entry.id)
+									void mutate('interrupting', onInterrupt);
+							}}
+							onEdit={() => onEdit(entry)}
+							onDelete={() => void mutate('deleting', () => onDelete(entry.id), entry.id)}
+							onDrop={moveRelative}
+							onKeyboardMove={(direction) => moveByKeyboard(entry.id, direction)}
+						/>
+						{#snippet failed(error)}<li class="px-3 py-2 text-xs text-destructive" role="alert">
+								{m.chat_queue_item_render_failed({ detail: String(error) })}
+							</li>{/snippet}
+					</svelte:boundary>
+				{/each}
+			</ol>
+		</div>
+		{#if visibleNotice}<p class="sr-only" aria-live={announcementsEnabled ? 'polite' : 'off'}>
+				{visibleNotice.message}
+			</p>{/if}
+	</section>
 {/if}

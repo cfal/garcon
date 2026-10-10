@@ -31,7 +31,7 @@ import {
   pauseAfterDispatchFailure,
   pauseAfterTurnFailure,
   resumeQueue,
-  type ObservedQueueHead,
+  type ObservedQueueEntry,
   type ControlTransition,
   type DequeuedTurnInput,
   type QueueCommandIdentity,
@@ -127,7 +127,7 @@ export class ChatExecutionControlOperations {
     });
   }
 
-  async markSteer(chatId: string, input: ObservedQueueHead): Promise<StoredChatExecutionControlState> {
+  async markSteer(chatId: string, input: ObservedQueueEntry): Promise<StoredChatExecutionControlState> {
     return this.host.runExclusive(chatId, async () => {
       this.#assertChatExists(chatId);
       const current = await this.#load(chatId);
@@ -357,18 +357,18 @@ export class ChatExecutionControlOperations {
     });
   }
 
-  reserveSteer(chatId: string, input: ObservedQueueHead): Promise<ReservedSteer> {
+  reserveSteer(chatId: string, input: ObservedQueueEntry): Promise<ReservedSteer> {
     return this.#reserveSteer(chatId, input, reserveQueueSteer);
   }
 
   // Reserves the head steer for automatic delivery, which a paused queue holds back.
-  reservePendingSteer(chatId: string, input: ObservedQueueHead): Promise<ReservedSteer> {
+  reservePendingSteer(chatId: string, input: ObservedQueueEntry): Promise<ReservedSteer> {
     return this.#reserveSteer(chatId, input, reservePendingSteer);
   }
 
   #reserveSteer(
     chatId: string,
-    input: ObservedQueueHead,
+    input: ObservedQueueEntry,
     reserve: typeof reserveQueueSteer,
   ): Promise<ReservedSteer> {
     return this.host.runExclusive(chatId, async () => {

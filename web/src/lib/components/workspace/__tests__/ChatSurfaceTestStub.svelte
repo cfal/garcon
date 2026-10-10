@@ -41,7 +41,7 @@
 		resumeQueue: async (surfaceId, chatId) => recordPanelAction(surfaceId, chatId, 'resume'),
 		reportQueueControlError: (surfaceId, chatId) => recordPanelAction(surfaceId, chatId, 'queue-error'),
 		editQueue: (surfaceId, chatId) => recordPanelAction(surfaceId, chatId, 'edit-queue'),
-		openQueue: (surfaceId, chatId) => recordPanelAction(surfaceId, chatId, 'open-queue'),
+		moveQueue: async (surfaceId, chatId) => recordPanelAction(surfaceId, chatId, 'move-queue'),
 		deleteQueue: async (surfaceId, chatId) => recordPanelAction(surfaceId, chatId, 'delete-queue'),
 		stop: async (surfaceId, chatId) => recordPanelAction(surfaceId, chatId, 'stop'),
 		openCommit: (surfaceId, chatId) => recordPanelAction(surfaceId, chatId, 'commit'),

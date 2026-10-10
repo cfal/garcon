@@ -84,7 +84,7 @@ function defineSteeringConformance(
       await environment?.dispose();
     });
 
-    test('uses the FIFO queue head as same-turn steering input exactly once', async () => {
+    test.each([0, 1])('uses queue position %i as same-turn steering input exactly once', async (sourceIndex) => {
       if (!environment) throw new Error(`${providerName} environment was not initialized.`);
       const { driver } = environment;
       const firstPrompt = marker(driver.id, 'QUEUE_FIRST_PROMPT');
@@ -109,14 +109,11 @@ function defineSteeringConformance(
           if (!active.turnId) throw new Error(`${providerName} omitted the active turn id.`);
           await held.requested;
 
-          await fixture.client.enqueueNew(chatId, steerPrompt);
-          await fixture.client.enqueueNew(chatId, futurePrompt);
+          const queuedPrompts = sourceIndex === 0 ? [steerPrompt, futurePrompt] : [futurePrompt, steerPrompt];
+          for (const content of queuedPrompts) await fixture.client.enqueueNew(chatId, content);
           const paused = await fixture.client.pauseQueue(chatId);
-          expect(paused.control.queue.entries.map((entry) => entry.content)).toEqual([
-            steerPrompt,
-            futurePrompt,
-          ]);
-          const source = paused.control.queue.entries[0];
+          expect(paused.control.queue.entries.map((entry) => entry.content)).toEqual(queuedPrompts);
+          const source = paused.control.queue.entries[sourceIndex];
           if (!source) throw new Error(`${providerName} omitted the queued steer source.`);
           const request = {
             clientRequestId: crypto.randomUUID(),

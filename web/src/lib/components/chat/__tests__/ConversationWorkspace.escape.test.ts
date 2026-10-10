@@ -89,7 +89,7 @@ vi.mock('$lib/components/chat/queue/QueueControls.svelte', async () => ({
 	default: (await import('../queue/__tests__/QueueControlsCapabilityStub.svelte')).default,
 }));
 
-vi.mock('$lib/components/chat/queue/QueuedInputsDialog.svelte', async () => ({
+vi.mock('$lib/components/chat/queue/QueuedInputEditorDialog.svelte', async () => ({
 	default: (await import('./GenericStub.svelte')).default,
 }));
 

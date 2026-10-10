@@ -6116,6 +6116,35 @@ describe('ChatCommandService', () => {
     expect(queue.markAcceptedQueueEntrySteer).toHaveBeenCalledTimes(1);
   });
 
+  it('queues selected guidance behind earlier pending steers even when the turn is ready', async () => {
+    const target = { attempt: {}, providerTarget: {}, identity: { turnId: 'turn-active' } };
+    const queued = storedQueue([
+      queueEntry('earlier-steer', 'earlier guidance', 'queued', 1, [], 'steer'),
+      queueEntry('future-turn', 'future work', 'queued', 1),
+      queueEntry('selected-entry', 'selected guidance', 'queued', 2),
+    ], { reorderRevision: 3 });
+    const { service, queue } = makeService({
+      queue: {
+        captureSteerTarget: mock(() => target),
+        readChatExecutionControl: mock(async () => queued),
+      },
+    });
+
+    await expect(service.submitQueueEntrySteer({
+      chatId: SOURCE_CHAT_ID,
+      clientRequestId: 'request-selected-behind-pending',
+      entryId: 'selected-entry',
+      expectedRevision: 2,
+      expectedReorderRevision: 3,
+    })).resolves.toMatchObject({ delivery: 'queued', entryId: 'selected-entry' });
+    expect(queue.markAcceptedQueueEntrySteer).toHaveBeenCalledWith(expect.objectContaining({
+      command: expect.objectContaining({ entryId: 'selected-entry' }),
+      expectedRevision: 2,
+      expectedReorderRevision: 3,
+    }));
+    expect(queue.deliverAcceptedQueueEntrySteer).not.toHaveBeenCalled();
+  });
+
   it('replays a queued-message steer after delivery consumed its entry and compaction dropped its payload', async () => {
     const ledger = new CommandLedger({ recordLimit: 1 });
     let currentControl = storedQueue([{

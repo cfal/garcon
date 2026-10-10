@@ -23,6 +23,7 @@ import type { AcceptedInputSubmissionService } from './accepted-input-submission
 import type { SessionControllerDeps } from './conversation-session-controller.svelte.js';
 import { errorDetail } from './conversation-submission-helpers.js';
 import { steerFailureNotice } from './steer-failure-notice.js';
+import { queuedInputMoveError } from './queued-input-move-error.js';
 import * as m from '$lib/paraglide/messages.js';
 import { CommandOutcomeUnknownError, submitIdempotentCommand } from './idempotent-command.js';
 
@@ -138,14 +139,20 @@ export class ConversationQueueController {
 		}
 	}
 
-	handleControlErrorForChat(chatId: string, action: 'pause' | 'resume', error: unknown): void {
+	handleControlErrorForChat(
+		chatId: string,
+		action: 'pause' | 'resume' | 'move',
+		error: unknown,
+	): void {
 		if (!this.#hasChat(chatId)) return;
 		this.options.chatState.appendLocalNoticeForChat(
 			chatId,
 			'error',
-			action === 'pause'
-				? m.chat_notice_failed_pause_queue({ detail: errorDetail(error) })
-				: m.chat_notice_failed_resume_queue({ detail: errorDetail(error) }),
+			action === 'move'
+				? queuedInputMoveError(error)
+				: action === 'pause'
+					? m.chat_notice_failed_pause_queue({ detail: errorDetail(error) })
+					: m.chat_notice_failed_resume_queue({ detail: errorDetail(error) }),
 		);
 	}
 
@@ -268,7 +275,7 @@ export class ConversationQueueController {
 		}
 	}
 
-	async steerHeadForChat(
+	async steerEntryForChat(
 		chatId: string,
 		entry: QueueEntry,
 		expectedReorderRevision: number,

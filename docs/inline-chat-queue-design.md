@@ -1,0 +1,76 @@
+# Inline chat queue
+
+Queued messages remain visible above the composer, with drag ordering, per-message
+and full-list expansion, a direct edit button, and a Steer button on every text
+message while the current provider supports steering. Compact rows keep message
+text and actions aligned on both desktop and mobile. Expanded text uses the full
+reading width in narrow panes, with its actions below. Steer uses an icon in rows narrower than 30rem and adds its label when space
+permits. All icon actions retain accessible labels and explanatory tooltips.
+Remove and Send now belong in the overflow menu; Send now retains its existing
+first-entry behavior.
+
+The queue identifies its next entry and names Expand all and Collapse all
+explicitly. The count's tooltip explains automatic delivery and drag ordering;
+pause explanations appear only while paused. The normal header occupies one line,
+and row controls use a flat treatment instead of repeated bordered buttons.
+Touch controls have 44px targets. The pencil opens only the selected message in a
+desktop side drawer or full-screen mobile editor; Save closes it and returns to the chat. The editor
+retains its textarea, focus, and draft when the message departs or changes
+elsewhere, with the existing conflict and queue-as-new recovery actions. Queue
+ordering, deletion, and pause controls live only in the inline queue.
+
+The grip is a focusable button with a 44px target on coarse-pointer screens.
+Space or Enter activates keyboard reordering; Up and Down move the selected
+message one position through the same revision-checked mutation as pointer
+dragging. Space, Enter, Escape, or leaving the grip finishes the interaction.
+Each arrow move commits immediately; finishing does not undo completed moves.
+The active grip shows a short instruction and announces its current position.
+Virtualization retains and reveals the moved row, with focus restored only in
+the originating chat while the user still owns that keyboard interaction.
+Rows resolve messages by stable ID while virtual geometry catches up to a new
+queue order, preserving their mounted controls and keyboard interaction.
+Escape finishes reordering before workspace shortcuts can stop the active turn.
+Ordering controls remain absent from the overflow menu.
+
+The public Codex CLI distinguishes pending steers from queued follow-ups and
+keeps both visible above the composer. Its pending preview explains that guidance
+waits for the next tool/result boundary and keeps editing separate from delivery:
+[pending input preview](https://github.com/openai/codex/blob/322bbf4d8486efd7dbbcf49598711a9e3fefc282/codex-rs/tui/src/bottom_pane/pending_input_preview.rs#L14-L22).
+Its [preview rendering](https://github.com/openai/codex/blob/322bbf4d8486efd7dbbcf49598711a9e3fefc282/codex-rs/tui/src/bottom_pane/pending_input_preview.rs#L98-L175)
+shows pending guidance before ordinary follow-ups. Garcon adapts that distinction
+to explicit per-message buttons and a visible Waiting to steer status.
+
+The controller owns message selection and delivery:
+
+- An explicit Steer selects any queued entry by its stable ID, guarded by its
+  content revision and the observed queue order revision. Successful delivery
+  consumes only that entry. A definite rejection restores its queued status in
+  the same position; an uncertain delivery retains the existing consume and
+  reconciliation behavior.
+- If the active turn cannot take guidance, or another steer is pending, the
+  selected entry becomes a pending steer after the last existing pending steer,
+  or before queued turns when no steer is pending. A steer dragged below a
+  follow-up keeps that position when newer guidance is added. Moving the selected
+  entry increments the order revision. Other follow-ups
+  retain their relative order, and the input keeps its submission identity.
+- Automatic delivery still selects only the first entry and observes queue
+  pause. An explicit ready Steer retains its existing ability to act while the
+  follow-up queue is paused.
+- Messages with attachments retain the disabled Steer action and its explanation.
+  Unsupported providers do not expose it. Pending steers show their waiting
+  status instead of offering duplicate submission.
+
+The existing HTTP request/response shapes and executor messages remain unchanged.
+No queue persistence, transport retry, or provider-specific client behavior is
+introduced. The transcript boundary remains governed by
+[transcript-ledger-v5-design.md](transcript-ledger-v5-design.md#71-the-queuetranscript-boundary).
+
+Control-Enter retains the composer steering preference while ordinary messages
+are queued or paused. A long queue stays in the scrollable inline list; its
+pencil opens the selected entry directly, including entries beyond the initial
+viewport. Queue drags do not activate workspace window dragging.
+
+Verification covers selected middle/tail entries, original-order recovery on
+rejection, revision conflicts, pending-steer ordering, delayed provider readiness,
+exactly-once submission, Local and both remote executor directions, and desktop
+and mobile layout, including long queues and rapid chat switches.

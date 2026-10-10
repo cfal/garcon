@@ -1,4 +1,7 @@
-import type { PermissionDecisionPayload } from '$shared/chat-command-contracts';
+import type {
+	PermissionDecisionPayload,
+	QueueEntryPlacement,
+} from '$shared/chat-command-contracts';
 import type { QueueEntry } from '$lib/types/chat.js';
 import type { ChatViewSurfaceId } from '$lib/workspace/surface-types.js';
 import type { GitRefSortKey } from '$lib/api/git.js';
@@ -45,11 +48,18 @@ export interface ConversationPanelActions {
 	reportQueueControlError(
 		surfaceId: ChatViewSurfaceId,
 		chatId: string,
-		action: 'pause' | 'resume',
+		action: 'pause' | 'resume' | 'move',
 		error: unknown,
 	): void;
 	editQueue(surfaceId: ChatViewSurfaceId, chatId: string, entry: QueueEntry): void;
-	openQueue(surfaceId: ChatViewSurfaceId, chatId: string): void;
+	moveQueue(
+		surfaceId: ChatViewSurfaceId,
+		chatId: string,
+		source: QueueEntry,
+		target: QueueEntry,
+		placement: QueueEntryPlacement,
+		reorderRevision: number,
+	): Promise<void>;
 	deleteQueue(surfaceId: ChatViewSurfaceId, chatId: string, entryId: string): Promise<void>;
 	stop(surfaceId: ChatViewSurfaceId, chatId: string): Promise<void>;
 	openCommit(surfaceId: ChatViewSurfaceId, chatId: string): void;

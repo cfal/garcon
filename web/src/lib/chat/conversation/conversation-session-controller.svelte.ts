@@ -816,7 +816,11 @@ export class ConversationSessionController {
 		this.#permissions.handleExitPlanMode(chatId, permissionOccurrenceId, choice, plan);
 	}
 
-	handleQueueControlErrorForChat(chatId: string, action: 'pause' | 'resume', error: unknown): void {
+	handleQueueControlErrorForChat(
+		chatId: string,
+		action: 'pause' | 'resume' | 'move',
+		error: unknown,
+	): void {
 		this.#queue.handleControlErrorForChat(chatId, action, error);
 	}
 
@@ -864,7 +868,7 @@ export class ConversationSessionController {
 		entry: QueueEntry,
 		reorderRevision: number,
 	): Promise<void> {
-		await this.#queue.steerHeadForChat(chatId, entry, reorderRevision);
+		await this.#queue.steerEntryForChat(chatId, entry, reorderRevision);
 	}
 
 	handleModelSelectionChange(next: AgentSwitchSelection): void {

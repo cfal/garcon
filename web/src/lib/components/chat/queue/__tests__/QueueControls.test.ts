@@ -1,76 +1,43 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
+import type { ComponentProps } from 'svelte';
+import { tick } from 'svelte';
 import QueueControls from '../QueueControls.svelte';
-import type { ChatQueueState, QueueEntry, QueuePause } from '$lib/types/chat';
+import { QueuedInputListController } from '../QueuedInputListController.svelte.js';
+import type { ChatQueueState, QueueEntry } from '$lib/types/chat';
 import * as m from '$lib/paraglide/messages.js';
-import {
-	installResizeObserverHarness,
-	ResizeObserverHarness,
-} from '../../../shared/__tests__/resize-observer-harness.js';
 
-function deferred<T>() {
-	let resolve!: (value: T) => void;
-	let reject!: (reason?: unknown) => void;
-	const promise = new Promise<T>((resolvePromise, rejectPromise) => {
-		resolve = resolvePromise;
-		reject = rejectPromise;
+function deferred() {
+	let resolve!: () => void;
+	let reject!: (error: unknown) => void;
+	const promise = new Promise<void>((yes, no) => {
+		resolve = yes;
+		reject = no;
 	});
 	return { promise, resolve, reject };
 }
 
-function makeEntry(index: number): QueueEntry {
+function makeQueue(ids = ['q0', 'q1', 'q2']): ChatQueueState {
 	return {
-		id: `q${index}`,
-		content: `queued ${index}`,
-		kind: 'turn',
-		attachments: [],
-		revision: 1,
-		createdAt: '2026-02-27T00:00:00.000Z',
-		updatedAt: '2026-02-27T00:00:00.000Z',
-	};
-}
-
-function manualPause(id = 'pause-1'): QueuePause {
-	return { id, kind: 'manual', pausedAt: '2026-02-27T00:00:00.000Z' };
-}
-
-function makeQueue(count: number, pause: QueuePause | null = null): ChatQueueState {
-	return {
-		entries: Array.from({ length: count }, (_, index) => makeEntry(index)),
-		steeringEntryId: null,
-		recentlyDispatched: [],
-		pause: count > 0 ? pause : null,
-		reorderRevision: 0,
-	};
-}
-
-function makeQueueWithIds(ids: string[], pause: QueuePause | null = null): ChatQueueState {
-	return {
-		...makeQueue(ids.length, pause),
-		entries: ids.map((id, index) => ({
-			...makeEntry(index),
+		entries: ids.map((id) => ({
 			id,
 			content: `queued ${id}`,
+			kind: 'turn',
+			attachments: [],
+			revision: 1,
+			createdAt: '2026-10-10T00:00:00.000Z',
+			updatedAt: '2026-10-10T00:00:00.000Z',
 		})),
+		steeringEntryId: null,
+		recentlyDispatched: [],
+		pause: null,
+		reorderRevision: 7,
 	};
 }
 
 function renderControls(
-	queue: ChatQueueState,
-	props: Partial<{
-		chatId: string | null;
-		canInterrupt: boolean;
-		canSteer: boolean;
-		announcementsEnabled: boolean;
-		onInterrupt: () => void | Promise<void>;
-		onSteer: (entry: QueueEntry, expectedReorderRevision: number) => void | Promise<void>;
-		onPause: () => Promise<void>;
-		onResume: (pauseId: string) => Promise<void>;
-		onQueueControlError: (action: 'pause' | 'resume', error: unknown) => void;
-		onEdit: (entry: QueueEntry) => void;
-		onOpenManager: () => void;
-		onDelete: (entryId: string) => Promise<void>;
-	}> = {},
+	queue = makeQueue(),
+	props: Partial<ComponentProps<typeof QueueControls>> = {},
 ) {
 	return render(QueueControls, {
 		chatId: 'chat-1',
@@ -79,666 +46,344 @@ function renderControls(
 		onResume: vi.fn().mockResolvedValue(undefined),
 		onQueueControlError: vi.fn(),
 		onEdit: vi.fn(),
-		onOpenManager: vi.fn(),
 		onDelete: vi.fn().mockResolvedValue(undefined),
+		onMove: vi.fn().mockResolvedValue(undefined),
 		...props,
 	});
 }
 
-describe('QueueControls', () => {
-	it('hides the tray when there are no queued entries', () => {
-		const { container } = renderControls(makeQueue(0, manualPause()));
+function row(id: string) {
+	const element = document.querySelector<HTMLElement>(`[data-queue-entry-id="${id}"]`);
+	if (!element) throw new Error(`Missing row ${id}`);
+	return within(element);
+}
 
-		expect(container.textContent?.trim() || '').toBe('');
-	});
+async function openMenu(id: string) {
+	await fireEvent.click(row(id).getByRole('button', { name: m.chat_queue_actions() }));
+	return screen.findByRole('menu');
+}
 
-	it('shows the resume action for a paused queue', () => {
-		const onResume = vi.fn();
-		renderControls(makeQueue(1, manualPause()), { onResume });
-
-		expect(screen.getByRole('button', { name: m.chat_queue_resume() })).toBeTruthy();
-		expect(screen.queryByRole('button', { name: m.chat_queue_pause() })).toBeNull();
-	});
-
-	it('shows pause for an unpaused single-entry queue', async () => {
-		const onPause = vi.fn().mockResolvedValue(undefined);
-		renderControls(makeQueue(1), { onPause });
-
-		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_pause() }));
-		expect(onPause).toHaveBeenCalledOnce();
-	});
-
-	it('keeps queue controls visible while disabling non-anchor announcements', () => {
-		const { container } = renderControls(makeQueue(2), { announcementsEnabled: false });
-
-		const position = screen.getByText('1 of 2');
-		expect(position.getAttribute('aria-live')).toBe('off');
-		expect(screen.getByRole('button', { name: m.chat_queue_pause() })).toBeTruthy();
-		expect(container.textContent).toContain('queued 0');
-	});
-
-	it('shows Send now with a fast-forward icon when the current turn can be interrupted', async () => {
-		const onInterrupt = vi.fn();
-		renderControls(makeQueue(1), { canInterrupt: true, onInterrupt });
-
-		const sendNow = screen.getByRole('button', { name: m.chat_queue_interrupt_and_send() });
-		expect(m.chat_queue_interrupt_and_send()).toBe('Send now');
-		expect(sendNow.querySelector('.lucide-fast-forward')).toBeTruthy();
-		await fireEvent.click(sendNow);
-		expect(onInterrupt).toHaveBeenCalledOnce();
-	});
-
-	it('shows Steer only for a capable FIFO head with a callback', async () => {
-		const onSteer = vi.fn().mockResolvedValue(undefined);
-		const queue = makeQueueWithIds(['q0', 'q1']);
-		queue.reorderRevision = 5;
-		renderControls(queue, { canSteer: true, onSteer });
-
-		const steer = screen.getByRole('button', { name: m.chat_queue_steer() });
-		expect(steer.querySelector('.lucide-route')).toBeTruthy();
-		await fireEvent.click(steer);
-		expect(onSteer).toHaveBeenCalledWith(queue.entries[0], 5);
-
-		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_next_message() }));
-		expect(screen.queryByRole('button', { name: m.chat_queue_steer() })).toBeNull();
-		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_previous_message() }));
-		expect(screen.getByRole('button', { name: m.chat_queue_steer() })).toBeTruthy();
-	});
-
-	it('hides Steer without both capability and a callback', () => {
-		const first = renderControls(makeQueue(1), { onSteer: vi.fn() });
-		expect(screen.queryByRole('button', { name: m.chat_queue_steer() })).toBeNull();
-		first.unmount();
-
-		renderControls(makeQueue(1), { canSteer: true });
-		expect(screen.queryByRole('button', { name: m.chat_queue_steer() })).toBeNull();
-	});
-
-	it('keeps Steer available for the paused FIFO head', () => {
-		renderControls(makeQueue(1, manualPause()), {
-			canSteer: true,
-			onSteer: vi.fn(),
-		});
-
-		expect(screen.getByRole('button', { name: m.chat_queue_steer() })).toBeTruthy();
-		expect(screen.getByRole('button', { name: m.chat_queue_resume() })).toBeTruthy();
-	});
-
-	it('labels a pending steer and leaves its delivery to the server', () => {
-		const queue = makeQueueWithIds(['q0', 'q1']);
-		queue.entries[0] = { ...queue.entries[0], kind: 'steer' };
-		renderControls(queue, {
-			canInterrupt: true,
-			onInterrupt: vi.fn(),
-			canSteer: true,
-			onSteer: vi.fn(),
-		});
-
-		const label = screen.getByText(m.chat_queue_pending_steer());
-		expect(label.getAttribute('title')).toBe(m.chat_queue_pending_steer_detail());
-		expect(screen.queryByRole('button', { name: m.chat_queue_steer() })).toBeNull();
-		expect(screen.getByRole('button', { name: m.chat_queue_interrupt_and_send() })).toBeTruthy();
-	});
-
-	it('shows a pending steer being delivered as steering', () => {
-		const queue = makeQueueWithIds(['q0', 'q1']);
-		queue.entries[0] = { ...queue.entries[0], kind: 'steer' };
-		queue.steeringEntryId = 'q0';
-		renderControls(queue, { canSteer: true, onSteer: vi.fn() });
-
-		expect(screen.queryByText(m.chat_queue_pending_steer())).toBeNull();
-		expect(
-			screen.getByRole('button', { name: m.chat_queue_steer() }).getAttribute('aria-busy'),
-		).toBe('true');
-	});
-
-	it('guards a pending queued steer and keeps the captured render observation', async () => {
-		const pending = deferred<void>();
-		const onSteer = vi.fn(() => pending.promise);
-		const queue = makeQueueWithIds(['q0', 'q1']);
-		queue.reorderRevision = 4;
-		renderControls(queue, {
-			canInterrupt: true,
-			onInterrupt: vi.fn(),
-			canSteer: true,
-			onSteer,
-		});
-		const steer = screen.getByRole('button', { name: m.chat_queue_steer() });
-
-		await fireEvent.click(steer);
-		await fireEvent.click(steer);
-
-		expect(onSteer).toHaveBeenCalledOnce();
-		expect(onSteer).toHaveBeenCalledWith(queue.entries[0], 4);
-		expect(steer.getAttribute('aria-busy')).toBe('true');
-		expect(steer.getAttribute('aria-disabled')).toBe('true');
-		expect(steer.querySelector('.lucide-loader-circle, .lucide-loader-2')).toBeTruthy();
-		pending.resolve();
-		await waitFor(() => expect(steer.getAttribute('aria-busy')).toBeNull());
-	});
-
-	it('pins local steering feedback to its source while live queue order changes', async () => {
-		const pending = deferred<void>();
-		const onSteer = vi.fn(() => pending.promise);
-		const view = renderControls(makeQueueWithIds(['q0', 'q1']), {
-			canSteer: true,
-			onSteer,
-		});
-		const steer = screen.getByRole('button', { name: m.chat_queue_steer() });
-		steer.focus();
-
-		await fireEvent.click(steer);
-		await view.rerender({ queue: makeQueueWithIds(['q1', 'q0']) });
-
-		expect(screen.getByText('queued q0')).toBeTruthy();
-		expect(screen.getByRole('button', { name: m.chat_queue_steer() }).getAttribute('aria-busy')).toBe(
-			'true',
-		);
-
-		await view.rerender({ queue: makeQueueWithIds(['q1']) });
-		const nextHeadSteer = screen.getByRole('button', { name: m.chat_queue_steer() });
-		expect(screen.getByText('queued q1')).toBeTruthy();
-		expect(nextHeadSteer.getAttribute('aria-busy')).toBeNull();
-		expect(nextHeadSteer.hasAttribute('disabled')).toBe(true);
-		expect(nextHeadSteer).not.toBe(steer);
-		expect(steer.isConnected).toBe(false);
-		expect(document.activeElement).not.toBe(nextHeadSteer);
-
-		pending.resolve();
-		await waitFor(() => expect(nextHeadSteer.hasAttribute('disabled')).toBe(false));
-		await fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Enter', code: 'Enter' });
-		expect(onSteer).toHaveBeenCalledOnce();
-	});
-
-	it('keeps pending queue actions scoped to their originating chat', async () => {
-		const pending = deferred<void>();
-		const onSteer = vi.fn((entry: QueueEntry) =>
-			entry.id === 'a0' ? pending.promise : Promise.resolve(),
-		);
-		const view = renderControls(makeQueueWithIds(['a0']), { canSteer: true, onSteer });
-
-		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_steer() }));
-		await view.rerender({ chatId: 'chat-2', queue: makeQueueWithIds(['b0']) });
-
-		const chatBSteer = screen.getByRole('button', { name: m.chat_queue_steer() });
-		expect(chatBSteer.getAttribute('aria-busy')).toBeNull();
-		expect(chatBSteer.getAttribute('aria-disabled')).toBeNull();
-		await fireEvent.click(chatBSteer);
-		expect(onSteer).toHaveBeenNthCalledWith(2, expect.objectContaining({ id: 'b0' }), 0);
-
-		await view.rerender({ chatId: 'chat-1', queue: makeQueueWithIds(['a0']) });
-		expect(screen.getByRole('button', { name: m.chat_queue_steer() }).getAttribute('aria-busy')).toBe(
-			'true',
-		);
-		pending.resolve();
-	});
-
-	it('uses authoritative steering state to block every conflicting queue affordance', async () => {
-		const queue = makeQueueWithIds(['q0', 'q1']);
-		queue.steeringEntryId = 'q0';
-		const view = renderControls(queue, {
-			canInterrupt: true,
-			onInterrupt: vi.fn(),
-			canSteer: true,
-			onSteer: vi.fn(),
-		});
-
-		const steer = screen.getByRole('button', { name: m.chat_queue_steer() });
-		expect(steer.getAttribute('aria-busy')).toBe('true');
-		expect(screen.queryByRole('button', { name: m.chat_queue_interrupt_and_send() })).toBeNull();
-		for (const name of [
-			m.chat_queue_edit_message(),
-			m.chat_queue_remove_from_queue(),
-			m.chat_queue_previous_message(),
-			m.chat_queue_next_message(),
-			m.chat_queue_edit_queue(),
-			m.chat_queue_pause(),
-		]) {
-			expect((screen.getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(true);
+describe('inline queue', () => {
+	it('keeps moved rows mounted before virtual geometry catches up to the queue order', () => {
+		const controller = new QueuedInputListController();
+		const { entries } = makeQueue();
+		try {
+			controller.update('chat-1', entries);
+			const snapshot = controller.virtual.snapshot;
+			const reordered = [entries[1], entries[0], entries[2]];
+			const currentEntries = new Map(reordered.map((entry) => [entry.id, entry]));
+			expect(controller.items(snapshot, currentEntries).map(({ entry }) => entry.id)).toEqual([
+				'q0',
+				'q1',
+				'q2',
+			]);
+		} finally {
+			controller.virtual.destroy();
 		}
+	});
 
-		const reordered = makeQueueWithIds(['q1', 'q0']);
-		reordered.steeringEntryId = 'q0';
-		await view.rerender({ queue: reordered });
-		expect(screen.getByText('queued q0')).toBeTruthy();
+	it('reorders through the focused grip without adding menu ordering actions', async () => {
+		const pending = deferred();
+		const onMove = vi.fn(() => pending.promise);
+		const queue = makeQueue();
+		const view = renderControls(queue, { onMove });
+		const grip = row('q0').getByRole('button', { name: m.chat_queue_drag_handle({ position: 1 }) });
+		grip.focus();
+		await fireEvent.click(grip);
+		expect(grip.getAttribute('aria-pressed')).toBe('true');
+		await fireEvent.keyDown(grip, { key: 'ArrowUp' });
+		expect(onMove).not.toHaveBeenCalled();
+		await fireEvent.keyDown(grip, { key: 'ArrowDown' });
+		await fireEvent.keyDown(grip, { key: 'ArrowDown' });
+		expect(onMove).toHaveBeenCalledExactlyOnceWith(queue.entries[0], queue.entries[1], 'after', 7);
+		expect(grip.getAttribute('aria-disabled')).toBe('true');
+		await view.rerender({
+			queue: {
+				...queue,
+				entries: [queue.entries[1], queue.entries[0], queue.entries[2]],
+				reorderRevision: 8,
+			},
+		});
+		pending.resolve();
+		await waitFor(() => expect(grip.getAttribute('aria-disabled')).toBe('false'));
+		await waitFor(() => expect(document.activeElement).toBe(grip));
+		expect(grip.getAttribute('aria-pressed')).toBe('true');
+		await fireEvent.keyDown(grip, { key: 'Escape' });
+		expect(grip.getAttribute('aria-pressed')).toBe('false');
+		await fireEvent.keyDown(grip, { key: 'ArrowDown' });
+		expect(onMove).toHaveBeenCalledOnce();
+	});
+
+	it('bounds mounted rows while preserving the full queue count and FIFO order', () => {
+		renderControls(makeQueue(Array.from({ length: 1_000 }, (_, index) => `q${index}`)));
+		const mountedRows = document.querySelectorAll('[data-queue-entry-id]');
+		expect(mountedRows.length).toBeGreaterThan(0);
+		expect(mountedRows.length).toBeLessThan(30);
+		expect(screen.getByText(m.chat_queue_pending_count({ count: 1_000 }))).toBeTruthy();
+		expect(screen.queryByRole('button', { name: m.chat_queue_edit_queue() })).toBeNull();
+		expect(screen.queryByRole('button', { name: m.chat_queue_next_message() })).toBeNull();
 		expect(
-			screen.getByRole('button', { name: m.chat_queue_steer() }).getAttribute('aria-busy'),
-		).toBe('true');
+			[...document.querySelectorAll('[data-queue-entry-id]')].map((item) =>
+				item.getAttribute('data-queue-entry-id'),
+			),
+		).toEqual(Array.from({ length: mountedRows.length }, (_, index) => `q${index}`));
+	});
+
+	it('hides an empty queue', () => {
+		const { container } = renderControls(makeQueue([]));
+		expect(container.querySelector('[data-queue-status-summary]')).toBeNull();
 	});
 
 	it.each([
-		{ pause: manualPause(), name: m.chat_queue_resume(), prop: 'onResume' as const },
-		{ pause: null, name: m.chat_queue_pause(), prop: 'onPause' as const },
-		{
-			pause: null,
-			name: m.chat_queue_interrupt_and_send(),
-			prop: 'onInterrupt' as const,
-		},
-	])('guards $prop while its request is pending', async ({ pause, name, prop }) => {
-		const pendingMutation = deferred<void>();
-		const mutation = vi.fn(() => pendingMutation.promise);
-		renderControls(makeQueue(1, pause), {
-			canInterrupt: !pause,
-			[prop]: mutation,
-		});
-		const button = screen.getByRole('button', { name });
-
-		await fireEvent.click(button);
-		await fireEvent.click(button);
-
-		expect(mutation).toHaveBeenCalledOnce();
-		expect((button as HTMLButtonElement).disabled).toBe(true);
-		pendingMutation.resolve();
-		await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
-	});
-
-	it('resumes with the rendered pause ID and hides interrupt while paused', async () => {
-		const onResume = vi.fn().mockResolvedValue(undefined);
-		renderControls(makeQueue(1, manualPause('pause-captured')), {
-			canInterrupt: true,
-			onInterrupt: vi.fn(),
-			onResume,
-		});
-
-		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_resume() }));
-		expect(onResume).toHaveBeenCalledWith('pause-captured');
-		expect(screen.queryByRole('button', { name: m.chat_queue_interrupt_and_send() })).toBeNull();
-	});
-
-	it('renders automatic pauses as needing attention', () => {
-		renderControls(
-			makeQueue(1, {
-				id: 'pause-failed',
-				kind: 'queued-turn-failed',
-				entryId: 'q0',
-				pausedAt: '2026-02-27T00:00:00.000Z',
-			}),
-		);
-
+		['queued-turn-failed', m.chat_queue_pause_failed_detail()],
+		['completion-uncertain', m.chat_queue_pause_completion_uncertain_detail()],
+		['unknown', m.chat_queue_pause_unknown_detail()],
+	] as const)('explains the %s automatic pause in the chat', (kind, detail) => {
+		const paused = makeQueue();
+		paused.pause =
+			kind === 'unknown'
+				? { id: 'pause-1', kind, entryId: 'departed', pausedAt: null }
+				: { id: 'pause-1', kind, entryId: 'departed', pausedAt: '2026-10-10T00:00:00.000Z' };
+		renderControls(paused);
 		expect(screen.getByText(m.chat_queue_needs_attention())).toBeTruthy();
+		expect(screen.getByText(detail, { exact: false })).toBeTruthy();
+		expect(screen.getByText(m.chat_queue_pause_affected_removed(), { exact: false })).toBeTruthy();
 	});
 
-	it.each(['pause', 'resume'] as const)(
-		'catches a rejected %s callback and restores the control',
-		async (action) => {
-			const pending = deferred<void>();
-			const onQueueControlError = vi.fn();
-			const props =
-				action === 'pause'
-					? { onPause: vi.fn(() => pending.promise) }
-					: { onResume: vi.fn(() => pending.promise) };
-			renderControls(makeQueue(1, action === 'resume' ? manualPause() : null), {
-				...props,
-				onQueueControlError,
-			});
-			const button = screen.getByRole('button', {
-				name: action === 'pause' ? m.chat_queue_pause() : m.chat_queue_resume(),
-			});
-
-			await fireEvent.click(button);
-			pending.reject(new Error(`${action} failed`));
-
-			await waitFor(() =>
-				expect(onQueueControlError).toHaveBeenCalledWith(
-					action,
-					expect.objectContaining({ message: `${action} failed` }),
-				),
-			);
-			expect((button as HTMLButtonElement).disabled).toBe(false);
-		},
-	);
-
-	it('starts a multi-entry browser at the FIFO head', () => {
-		renderControls(makeQueueWithIds(['q0', 'q1', 'q2']));
-
-		expect(screen.getByRole('region', { name: m.chat_queue_dialog_title() })).toBeTruthy();
-		expect(screen.getByText('queued q0')).toBeTruthy();
-		expect(screen.queryByText('queued q1')).toBeNull();
-		expect(screen.getByText(m.chat_queue_message_position({ current: 1, total: 3 }))).toBeTruthy();
-		expect(
-			(
-				screen.getByRole('button', {
-					name: m.chat_queue_previous_message(),
-				}) as HTMLButtonElement
-			).disabled,
-		).toBe(true);
-		expect(
-			(
-				screen.getByRole('button', {
-					name: m.chat_queue_next_message(),
-				}) as HTMLButtonElement
-			).disabled,
-		).toBe(false);
+	it('explains an active-turn failure without claiming a queued entry departed', () => {
+		const queue = makeQueue();
+		queue.pause = {
+			id: 'pause-1',
+			kind: 'turn-failed',
+			turnId: 'turn-1',
+			pausedAt: '2026-10-10T00:00:00.000Z',
+		};
+		renderControls(queue);
+		expect(screen.getByText(m.chat_queue_needs_attention())).toBeTruthy();
+		expect(screen.getByText(m.chat_queue_pause_turn_failed_detail())).toBeTruthy();
+		expect(screen.queryByText(m.chat_queue_pause_affected_removed(), { exact: false })).toBeNull();
 	});
 
-	it('renders a single-entry count without browse or manager controls', () => {
-		renderControls(makeQueue(1));
-
-		expect(screen.getByText(m.chat_queue_single_message())).toBeTruthy();
-		expect(screen.queryByRole('button', { name: m.chat_queue_previous_message() })).toBeNull();
-		expect(screen.queryByRole('button', { name: m.chat_queue_next_message() })).toBeNull();
-		expect(screen.queryByRole('button', { name: m.chat_queue_edit_queue() })).toBeNull();
-		expect(screen.queryByText('Queued input')).toBeNull();
-	});
-
-	it('browses in FIFO order without wrapping', async () => {
-		renderControls(makeQueueWithIds(['q0', 'q1', 'q2']));
-		const previous = screen.getByRole('button', { name: m.chat_queue_previous_message() });
-		const next = screen.getByRole('button', { name: m.chat_queue_next_message() });
-
-		await fireEvent.click(next);
-		expect(screen.getByText('queued q1')).toBeTruthy();
-		expect(screen.getByText(m.chat_queue_message_position({ current: 2, total: 3 }))).toBeTruthy();
-		expect((previous as HTMLButtonElement).disabled).toBe(false);
-		expect((next as HTMLButtonElement).disabled).toBe(false);
-
-		await fireEvent.click(next);
-		expect(screen.getByText('queued q2')).toBeTruthy();
-		expect((next as HTMLButtonElement).disabled).toBe(true);
-
-		await fireEvent.click(previous);
-		expect(screen.getByText('queued q1')).toBeTruthy();
-	});
-
-	it('uses the displayed stable ID for entry actions while browse remains local', async () => {
-		const queue = makeQueueWithIds(['q0', 'q1', 'q2']);
-		const onEdit = vi.fn();
-		const onDelete = vi.fn().mockResolvedValue(undefined);
-		const onOpenManager = vi.fn();
-		const onPause = vi.fn().mockResolvedValue(undefined);
-		const onResume = vi.fn().mockResolvedValue(undefined);
-		const onInterrupt = vi.fn();
-		renderControls(queue, {
-			canInterrupt: true,
-			onEdit,
-			onDelete,
-			onOpenManager,
-			onPause,
-			onResume,
-			onInterrupt,
+	it('starts each chat at its queue head without resetting same-chat snapshots', async () => {
+		const view = renderControls(makeQueue(Array.from({ length: 20 }, (_, index) => `q${index}`)));
+		await tick();
+		const list = view.container.querySelector<HTMLElement>('[data-queue-list]');
+		if (!list) throw new Error('Missing queue list');
+		const sizer = list.querySelector('ol');
+		if (!sizer) throw new Error('Missing queue sizer');
+		Object.defineProperty(list, 'clientHeight', { value: 100, configurable: true });
+		Object.defineProperty(list, 'scrollHeight', {
+			get: () => Number.parseFloat(sizer.style.height),
+			configurable: true,
 		});
-
-		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_next_message() }));
-		expect(onEdit).not.toHaveBeenCalled();
-		expect(onDelete).not.toHaveBeenCalled();
-		expect(onOpenManager).not.toHaveBeenCalled();
-		expect(onPause).not.toHaveBeenCalled();
-		expect(onResume).not.toHaveBeenCalled();
-		expect(onInterrupt).not.toHaveBeenCalled();
-
-		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_edit_message() }));
-		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_remove_from_queue() }));
-
-		expect(onEdit).toHaveBeenCalledWith(queue.entries[1]);
-		expect(onDelete).toHaveBeenCalledWith('q1');
-	});
-
-	it('tracks the displayed entry by ID across live snapshots', async () => {
-		const view = renderControls(makeQueueWithIds(['q0', 'q1', 'q2']), {
-			canInterrupt: true,
-			onInterrupt: vi.fn(),
+		vi.spyOn(sizer, 'getBoundingClientRect').mockImplementation(
+			() => new DOMRect(0, -list.scrollTop, 100, Number.parseFloat(sizer.style.height)),
+		);
+		list.scrollTop = 400;
+		await view.rerender({
+			queue: makeQueue(Array.from({ length: 21 }, (_, index) => `q${index}`)),
 		});
-
-		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_next_message() }));
-		await view.rerender({ queue: makeQueueWithIds(['q0', 'q1', 'q2', 'q3']) });
-		expect(screen.getByText('queued q1')).toBeTruthy();
-		expect(screen.getByText(m.chat_queue_message_position({ current: 2, total: 4 }))).toBeTruthy();
-
-		await view.rerender({ queue: makeQueueWithIds(['q1', 'q2', 'q3']) });
-		expect(screen.getByText('queued q1')).toBeTruthy();
-		expect(screen.getByText(m.chat_queue_message_position({ current: 1, total: 3 }))).toBeTruthy();
-		expect(screen.getByRole('button', { name: m.chat_queue_interrupt_and_send() })).toBeTruthy();
-
-		await view.rerender({ queue: makeQueueWithIds(['q2', 'q3']) });
-		expect(screen.getByText('queued q2')).toBeTruthy();
-		expect(screen.getByText(m.chat_queue_message_position({ current: 1, total: 2 }))).toBeTruthy();
-	});
-
-	it('starts at the new chat head when a retained component switches chats', async () => {
-		const view = renderControls(makeQueueWithIds(['q0', 'q1']));
-		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_next_message() }));
-		expect(screen.getByText('queued q1')).toBeTruthy();
-
+		expect(list.scrollTop).toBe(400);
 		await view.rerender({
 			chatId: 'chat-2',
-			queue: makeQueueWithIds(['other-0', 'other-1']),
+			queue: makeQueue(Array.from({ length: 20 }, (_, index) => `b${index}`)),
 		});
-
-		expect(screen.getByText('queued other-0')).toBeTruthy();
-		expect(screen.getByText(m.chat_queue_message_position({ current: 1, total: 2 }))).toBeTruthy();
+		expect(list.scrollTop).toBe(0);
 	});
 
-	it.each([2, 5, 100])('uses stable manager copy for %i entries', async (count) => {
-		const onOpenManager = vi.fn();
-		renderControls(makeQueue(count), { onOpenManager });
-
-		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_edit_queue() }));
-		expect(onOpenManager).toHaveBeenCalledOnce();
+	it('expands full content without changing order or mutating entries', async () => {
+		const queue = makeQueue();
+		queue.entries[0].content = 'First line\nSecond line with full details';
+		const view = renderControls(queue);
+		const preview = row('q0').getByText(/First line/);
+		expect(preview.classList.contains('truncate')).toBe(true);
+		await fireEvent.click(
+			row('q0').getByRole('button', { name: m.chat_queue_toggle_message({ position: 1 }) }),
+		);
+		expect(preview.classList.contains('whitespace-pre-wrap')).toBe(true);
+		expect(
+			row('q0').getByRole('button', { name: m.chat_queue_collapse_message({ position: 1 }) }),
+		).toBeTruthy();
+		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_expand_all() }));
+		expect(
+			row('q1')
+				.getByRole('button', { name: m.chat_queue_collapse_message({ position: 2 }) })
+				.getAttribute('aria-expanded'),
+		).toBe('true');
+		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_collapse_all() }));
+		expect(
+			row('q0')
+				.getByRole('button', { name: m.chat_queue_toggle_message({ position: 1 }) })
+				.getAttribute('aria-expanded'),
+		).toBe('false');
+		await view.rerender({ chatId: 'chat-2', queue: makeQueue(['b0']) });
+		expect(
+			screen.getByRole('button', { name: m.chat_queue_expand_all() }).getAttribute('aria-expanded'),
+		).toBe('false');
 	});
 
-	it('disables Steer for a FIFO head with attachments and explains why', async () => {
-		const onSteer = vi.fn().mockResolvedValue(undefined);
-		const queue = makeQueue(2);
-		queue.entries[0] = {
-			...queue.entries[0],
-			attachments: [{ name: 'screen.png', mimeType: 'image/png' }],
-		};
-		renderControls(queue, { canSteer: true, onSteer });
-
-		const steer = screen.getByRole('button', { name: m.chat_queue_steer() }) as HTMLButtonElement;
-		expect(steer.disabled).toBe(true);
-		expect(steer.getAttribute('title')).toBe(m.chat_queue_steer_attachments_unavailable());
-		await fireEvent.click(steer);
-		expect(onSteer).not.toHaveBeenCalled();
+	it('edits directly and removes the selected stable entry from its menu', async () => {
+		const onEdit = vi.fn();
+		const onDelete = vi.fn().mockResolvedValue(undefined);
+		const queue = makeQueue();
+		renderControls(queue, { onEdit, onDelete });
+		await fireEvent.click(row('q1').getByRole('button', { name: m.chat_queue_edit_message() }));
+		await openMenu('q2');
+		await fireEvent.click(screen.getByRole('menuitem', { name: m.chat_queue_remove_from_queue() }));
+		expect(onEdit).toHaveBeenCalledWith(queue.entries[1]);
+		expect(onDelete).toHaveBeenCalledWith('q2');
 	});
 
-	it('summarizes attachments without changing the fixed preview height', () => {
-		const queue = makeQueue(1);
-		queue.entries[0] = {
-			...queue.entries[0],
-			content: '',
-			attachments: [
-				{ name: 'screen.png', mimeType: 'image/png' },
-				{ name: 'trace.pdf', mimeType: 'application/pdf' },
-			],
-		};
-		const { container } = renderControls(queue);
-		const preview = container.querySelector('[data-queue-preview]');
-		const indicator = container.querySelector('[data-queue-preview-attachments]');
-
-		expect(preview?.textContent?.trim()).toBe('screen.png, trace.pdf');
-		expect(preview?.classList.contains('h-10')).toBe(true);
-		expect(indicator?.getAttribute('title')).toBe('screen.png, trace.pdf');
-		expect(indicator?.textContent).toContain(m.chat_queue_attachments({ count: 2 }));
-	});
-
-	it('keeps complete content in a fixed two-line CSS clamp', () => {
-		const queue = makeQueue(1);
-		const content = `${'x'.repeat(260)}\nsecond line`;
-		queue.entries[0] = { ...queue.entries[0], content };
-		const { container } = renderControls(queue);
-		const preview = container.querySelector('[data-queue-preview]');
-
-		expect(preview?.textContent?.trim()).toBe(content);
-		expect(preview?.classList.contains('line-clamp-2')).toBe(true);
-		expect(preview?.classList.contains('h-10')).toBe(true);
-		expect(preview?.classList.contains('whitespace-pre-wrap')).toBe(true);
-		expect(preview?.classList.contains('break-words')).toBe(true);
-	});
-
-	it('shows a neutral interrupt action only while viewing the FIFO head', async () => {
+	it('offers Steer on every queued message and keeps Send now in the head overflow', async () => {
 		const onInterrupt = vi.fn();
-		const { container } = renderControls(makeQueueWithIds(['q0', 'q1']), {
-			canInterrupt: true,
-			onInterrupt,
-		});
-
-		const interrupt = screen.getByRole('button', { name: m.chat_queue_interrupt_and_send() });
-		expect(interrupt.classList.contains('bg-queue-action-bg')).toBe(false);
-		expect(interrupt.classList.contains('hover:bg-queue-action-hover-bg')).toBe(false);
-		expect(
-			[...container.querySelectorAll<HTMLElement>('[data-surface-action-id]')].map(
-				(element) => element.dataset.surfaceActionId,
-			),
-		).toEqual(['send-now', 'edit-queue', 'pause-queue']);
-
-		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_next_message() }));
-		expect(screen.queryByRole('button', { name: m.chat_queue_interrupt_and_send() })).toBeNull();
-		expect(
-			[...container.querySelectorAll<HTMLElement>('[data-surface-action-id]')].map(
-				(element) => element.dataset.surfaceActionId,
-			),
-		).toEqual(['edit-queue', 'pause-queue']);
-
-		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_previous_message() }));
-		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_interrupt_and_send() }));
-		expect(onInterrupt).toHaveBeenCalledOnce();
-	});
-
-	it('orders Steer immediately before Send now while preserving Send now priority', () => {
-		const { container } = renderControls(makeQueueWithIds(['q0', 'q1']), {
-			canInterrupt: true,
-			onInterrupt: vi.fn(),
-			canSteer: true,
-			onSteer: vi.fn(),
-		});
-
-		expect(
-			[...container.querySelectorAll<HTMLElement>('[data-surface-action-id]')].map(
-				(element) => element.dataset.surfaceActionId,
-			),
-		).toEqual(['steer', 'send-now', 'edit-queue', 'pause-queue']);
-	});
-
-	it('moves lower-priority queue actions into an overflow menu when space contracts', async () => {
-		const restoreResizeObserver = installResizeObserverHarness();
-		const onPause = vi.fn().mockResolvedValue(undefined);
 		const onSteer = vi.fn().mockResolvedValue(undefined);
-		const rendered = renderControls(makeQueueWithIds(['q0', 'q1']), {
-			canInterrupt: true,
-			onInterrupt: vi.fn(),
-			canSteer: true,
-			onSteer,
-			onPause,
-		});
+		const queue = makeQueue();
+		renderControls(queue, { canInterrupt: true, canSteer: true, onInterrupt, onSteer });
+		expect(screen.queryByRole('button', { name: m.chat_queue_interrupt_and_send() })).toBeNull();
+		expect(row('q0').getByRole('button', { name: m.chat_queue_steer() })).toBeTruthy();
+		expect(screen.getAllByRole('button', { name: m.chat_queue_steer() })).toHaveLength(3);
+		await fireEvent.click(row('q1').getByRole('button', { name: m.chat_queue_steer() }));
+		expect(onSteer).toHaveBeenCalledWith(queue.entries[1], 7);
+		await waitFor(() =>
+			expect(
+				row('q0').getByRole('button', { name: m.chat_queue_actions() }).hasAttribute('disabled'),
+			).toBe(false),
+		);
+		await openMenu('q0');
+		await fireEvent.click(
+			screen.getByRole('menuitem', { name: m.chat_queue_interrupt_and_send() }),
+		);
+		expect(onInterrupt).toHaveBeenCalledOnce();
+		await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+		await openMenu('q1');
+		expect(screen.queryByRole('menuitem', { name: m.chat_queue_interrupt_and_send() })).toBeNull();
+		expect(screen.queryByRole('menuitem', { name: m.chat_queue_edit_message() })).toBeNull();
+	});
 
-		try {
-			await Promise.resolve();
-			const root = rendered.container.querySelector<HTMLElement>(
-				'[data-responsive-surface-actions]',
-			);
-			if (!root) throw new Error('Expected responsive queue actions');
-			Object.defineProperty(root, 'clientWidth', { get: () => 140 });
-			for (const element of rendered.container.querySelectorAll<HTMLElement>(
-				'[data-surface-action-measure]',
-			)) {
-				const width =
-					element.dataset.surfaceActionMeasure === 'send-now'
-						? 96
-						: element.dataset.surfaceActionMeasure === 'steer'
-							? 72
-							: element.dataset.surfaceActionMeasure === 'edit-queue'
-								? 64
-								: 68;
-				element.getBoundingClientRect = () => ({ width }) as DOMRect;
+	it('omits all ordering actions from the inline queue menu', async () => {
+		renderControls();
+		await openMenu('q1');
+		expect(
+			screen.queryByRole('menuitem', { name: m.chat_queue_move_down({ position: 2 }) }),
+		).toBeNull();
+		expect(screen.queryByRole('menuitem', { name: 'Move to top' })).toBeNull();
+		expect(
+			screen.queryByRole('menuitem', { name: m.chat_queue_move_up({ position: 2 }) }),
+		).toBeNull();
+	});
+
+	it('disables steering with attachments and preserves attachment-only previews', () => {
+		const queue = makeQueue(['q0']);
+		queue.entries[0].content = '';
+		queue.entries[0].attachments = [{ name: 'synthetic.png', mimeType: 'image/png' }];
+		renderControls(queue, { canSteer: true, onSteer: vi.fn() });
+		const steer = row('q0').getByRole('button', { name: m.chat_queue_steer() });
+		expect(steer.hasAttribute('disabled')).toBe(true);
+		expect(steer.getAttribute('title')).toBe(m.chat_queue_steer_attachments_unavailable());
+		expect(screen.getByText('synthetic.png')).toBeTruthy();
+	});
+
+	it('keeps pending steers visible without offering another steering request', () => {
+		const queue = makeQueue(['q0']);
+		queue.entries[0].kind = 'steer';
+		renderControls(queue, { canSteer: true, onSteer: vi.fn() });
+		expect(screen.queryByRole('button', { name: m.chat_queue_steer() })).toBeNull();
+		expect(screen.getByText(m.chat_queue_pending_steer())).toBeTruthy();
+	});
+
+	it('blocks all mutations during authoritative steering', async () => {
+		const queue = makeQueue();
+		queue.steeringEntryId = 'q0';
+		renderControls(queue, { canSteer: true, onSteer: vi.fn() });
+		expect(
+			row('q0').getByRole('button', { name: m.chat_queue_steer() }).getAttribute('aria-busy'),
+		).toBe('true');
+		for (const button of screen.getAllByRole('button')) {
+			if (button.getAttribute('aria-expanded') !== null) continue;
+			if (button.hasAttribute('data-queue-drag-id')) {
+				expect(button.getAttribute('aria-disabled')).toBe('true');
+				await fireEvent.click(button);
+				expect(button.getAttribute('aria-pressed')).toBe('false');
+				continue;
 			}
-			const menuMeasure = rendered.container.querySelector<HTMLElement>(
-				'[data-surface-action-overflow-measure]',
-			);
-			if (!menuMeasure) throw new Error('Expected queue overflow measurement control');
-			menuMeasure.getBoundingClientRect = () => ({ width: 32 }) as DOMRect;
-
-			ResizeObserverHarness.emit(root, 140);
-			await waitFor(() => {
-				expect(screen.queryByRole('button', { name: m.chat_queue_steer() })).toBeNull();
-				expect(screen.queryByRole('button', { name: m.chat_queue_edit_queue() })).toBeNull();
-				expect(screen.queryByRole('button', { name: m.chat_queue_pause() })).toBeNull();
-			});
-			expect(screen.getByRole('button', { name: m.chat_queue_interrupt_and_send() })).toBeTruthy();
-
-			await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_actions() }));
-			expect(screen.getAllByRole('menuitem').map((item) => item.textContent?.trim())).toEqual([
-				m.chat_queue_steer(),
-				m.chat_queue_edit_queue(),
-				m.chat_queue_pause(),
-			]);
-			await fireEvent.click(screen.getByRole('menuitem', { name: m.chat_queue_steer() }));
-			expect(onSteer).toHaveBeenCalledWith(expect.objectContaining({ id: 'q0' }), 0);
-
-			await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_actions() }));
-			await fireEvent.click(screen.getByRole('menuitem', { name: m.chat_queue_pause() }));
-			expect(onPause).toHaveBeenCalledOnce();
-		} finally {
-			rendered.unmount();
-			restoreResizeObserver();
+			expect(button.hasAttribute('disabled')).toBe(true);
 		}
 	});
 
-	it('keeps pending deletion state scoped to each browsed entry ID', async () => {
-		const firstDelete = deferred<void>();
-		const secondDelete = deferred<void>();
-		const onDelete = vi.fn((entryId: string) =>
-			entryId === 'q0' ? firstDelete.promise : secondDelete.promise,
+	it('keeps pending operations scoped to their chat and prevents duplicate delivery', async () => {
+		const pending = deferred();
+		const onSteer = vi.fn((entry: QueueEntry) =>
+			entry.id === 'q0' ? pending.promise : Promise.resolve(),
 		);
-		renderControls(makeQueueWithIds(['q0', 'q1']), { onDelete });
-
-		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_remove_from_queue() }));
-		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_next_message() }));
-		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_remove_from_queue() }));
-
-		expect(onDelete).toHaveBeenNthCalledWith(1, 'q0');
-		expect(onDelete).toHaveBeenNthCalledWith(2, 'q1');
+		const view = renderControls(makeQueue(['q0']), { canSteer: true, onSteer });
+		const steer = row('q0').getByRole('button', { name: m.chat_queue_steer() });
+		steer.focus();
+		await fireEvent.click(steer);
+		await fireEvent.click(steer);
+		expect(onSteer).toHaveBeenCalledOnce();
+		await view.rerender({ chatId: 'chat-2', queue: makeQueue(['b0']) });
+		await fireEvent.click(row('b0').getByRole('button', { name: m.chat_queue_steer() }));
+		expect(onSteer).toHaveBeenCalledTimes(2);
+		await view.rerender({ chatId: 'chat-1', queue: makeQueue(['q0', 'q1']) });
 		expect(
-			(
-				screen.getByRole('button', {
-					name: m.chat_queue_remove_from_queue(),
-				}) as HTMLButtonElement
-			).disabled,
-		).toBe(true);
+			row('q0').getByRole('button', { name: m.chat_queue_steer() }).getAttribute('aria-busy'),
+		).toBe('true');
+		await view.rerender({ queue: makeQueue(['q1']) });
+		const nextSteer = row('q1').getByRole('button', { name: m.chat_queue_steer() });
+		expect(nextSteer.hasAttribute('disabled')).toBe(true);
+		expect(document.activeElement).not.toBe(nextSteer);
+		pending.resolve();
+		await waitFor(() => expect(nextSteer.hasAttribute('disabled')).toBe(false));
+	});
 
-		secondDelete.resolve();
+	it('guards deletion until it settles', async () => {
+		const pending = deferred();
+		const onDelete = vi.fn(() => pending.promise);
+		renderControls(makeQueue(), { onDelete });
+		await openMenu('q1');
+		const remove = screen.getByRole('menuitem', { name: m.chat_queue_remove_from_queue() });
+		await fireEvent.click(remove);
+		await fireEvent.click(remove);
+		expect(onDelete).toHaveBeenCalledOnce();
+		expect(
+			row('q1').getByRole('button', { name: m.chat_queue_actions() }).hasAttribute('disabled'),
+		).toBe(true);
+		pending.resolve();
 		await waitFor(() =>
 			expect(
-				(
-					screen.getByRole('button', {
-						name: m.chat_queue_remove_from_queue(),
-					}) as HTMLButtonElement
-				).disabled,
-			).toBe(false),
-		);
-
-		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_previous_message() }));
-		expect(
-			(
-				screen.getByRole('button', {
-					name: m.chat_queue_remove_from_queue(),
-				}) as HTMLButtonElement
-			).disabled,
-		).toBe(true);
-		firstDelete.resolve();
-		await waitFor(() =>
-			expect(
-				(
-					screen.getByRole('button', {
-						name: m.chat_queue_remove_from_queue(),
-					}) as HTMLButtonElement
-				).disabled,
+				row('q1').getByRole('button', { name: m.chat_queue_actions() }).hasAttribute('disabled'),
 			).toBe(false),
 		);
 	});
 
-	it('guards inline deletion while the request is pending', async () => {
-		const pendingDelete = deferred<void>();
-		const onDelete = vi.fn(() => pendingDelete.promise);
-		renderControls(makeQueue(1), { onDelete });
-		const deleteButton = screen.getByRole('button', { name: m.chat_queue_remove_from_queue() });
+	it('reports a late pause failure to the originating chat', async () => {
+		const pending = deferred();
+		const onQueueControlError = vi.fn();
+		const view = renderControls(makeQueue(), {
+			onPause: () => pending.promise,
+			onQueueControlError,
+		});
+		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_pause() }));
+		await view.rerender({ chatId: 'chat-2', queue: makeQueue(['b0']) });
+		pending.reject(new Error('pause failed'));
+		await waitFor(() =>
+			expect(onQueueControlError).toHaveBeenCalledWith(
+				'chat-1',
+				'pause',
+				expect.objectContaining({ message: 'pause failed' }),
+			),
+		);
+	});
 
-		await fireEvent.click(deleteButton);
-		await fireEvent.click(deleteButton);
-
-		expect(onDelete).toHaveBeenCalledOnce();
-		expect((deleteButton as HTMLButtonElement).disabled).toBe(true);
-		pendingDelete.resolve();
-		await waitFor(() => expect((deleteButton as HTMLButtonElement).disabled).toBe(false));
+	it('resumes the captured pause and hides Send now while paused', async () => {
+		const queue = makeQueue();
+		queue.pause = { id: 'pause-1', kind: 'manual', pausedAt: '2026-10-10T00:00:00.000Z' };
+		const onResume = vi.fn().mockResolvedValue(undefined);
+		renderControls(queue, { onResume, canInterrupt: true, onInterrupt: vi.fn() });
+		await openMenu('q0');
+		expect(screen.queryByRole('menuitem', { name: m.chat_queue_interrupt_and_send() })).toBeNull();
+		await fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
+		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_resume() }));
+		expect(onResume).toHaveBeenCalledWith('pause-1');
 	});
 });

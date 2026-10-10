@@ -5,7 +5,7 @@
 	import { onDestroy, onMount } from 'svelte';
 	import type { ComposerAvailabilityNoticePresentation } from '$lib/chat/composer/composer-availability.js';
 	import PromptComposer from './composer/PromptComposer.svelte';
-	import QueuedInputsDialog from './queue/QueuedInputsDialog.svelte';
+	import QueuedInputEditorDialog from './queue/QueuedInputEditorDialog.svelte';
 	import HandoffForkDialog from './HandoffForkDialog.svelte';
 	import ExecutorHandoffDialog from './ExecutorHandoffDialog.svelte';
 	import ReloadChatDialog from './ReloadChatDialog.svelte';
@@ -157,13 +157,10 @@
 	});
 	const conversationUi = getConversationUi();
 
-	let queuedInputsDialogOpen = $state(false);
-	let queuedInputsDialogChatId = $state<string | null>(null);
-	const queuedChat = $derived(sessions.byId[queuedInputsDialogChatId ?? '']);
+	let queueEditorChatId = $state<string | null>(null);
 	let composerEditorOpenRequestId = $state(0);
 	const reloadDialog = new ReloadChatDialogState();
-	const dialogControl = $derived(conversationUi.getExecutionControl(queuedInputsDialogChatId));
-	const dialogQueue = $derived(dialogControl?.queue ?? null);
+	const editorQueue = $derived(conversationUi.getExecutionControl(queueEditorChatId)?.queue ?? null);
 	const composerRequiresQueuedSubmission = $derived.by(() => {
 		const chatId = sessions.selectedChatId;
 		return requiresQueuedSubmission({
@@ -173,7 +170,7 @@
 	});
 	const queuedInputEditor = new QueuedInputEditorState({
 		get queue() {
-			return dialogQueue;
+			return editorQueue;
 		},
 	});
 	const quickGit = getGitQuickSummary();
@@ -410,16 +407,15 @@
 			return controller.resumeQueueForChat(chatId, pauseId);
 		},
 		reportQueueControlError(surfaceId, chatId, action, error) {
-			assertRenderedPanel(surfaceId, chatId);
 			controller.handleQueueControlErrorForChat(chatId, action, error);
 		},
 		editQueue(surfaceId, chatId, entry) {
 			assertRenderedPanel(surfaceId, chatId);
 			editQueuedInput(chatId, entry);
 		},
-		openQueue(surfaceId, chatId) {
+		moveQueue(surfaceId, chatId, source, target, placement, reorderRevision) {
 			assertRenderedPanel(surfaceId, chatId);
-			openQueuedInputsManager(chatId);
+			return controller.moveQueueEntryForChat(chatId, source, target, placement, reorderRevision);
 		},
 		deleteQueue(surfaceId, chatId, entryId) {
 			assertRenderedPanel(surfaceId, chatId);
@@ -506,8 +502,8 @@
 		const chatId = sessions.selectedChatId;
 		// The selected record may hydrate after the route-selected ID.
 		void sessions.selectedChat;
-		if (queuedInputsDialogOpen && queuedInputsDialogChatId !== chatId) {
-			closeQueuedInputsDialog();
+		if (queueEditorChatId && queueEditorChatId !== chatId) {
+			closeQueueEditor();
 		}
 		if (reloadDialog.open && !reloadDialog.running && reloadDialog.chatId !== chatId) {
 			reloadDialog.cancel();
@@ -573,23 +569,14 @@
 		void controller.submitComposerWithSteerPreference(chatId);
 	}
 
-	function openQueuedInputsManager(chatId = sessions.selectedChatId): void {
-		if (!chatId || !sessions.byId[chatId]) return;
-		queuedInputEditor.close();
-		queuedInputsDialogChatId = chatId;
-		queuedInputsDialogOpen = true;
-	}
-
 	function editQueuedInput(chatId: string, entry: QueueEntry): void {
 		if (!sessions.byId[chatId]) return;
-		queuedInputsDialogChatId = chatId;
+		queueEditorChatId = chatId;
 		queuedInputEditor.begin(entry);
-		queuedInputsDialogOpen = true;
 	}
 
-	function closeQueuedInputsDialog(): void {
-		queuedInputsDialogOpen = false;
-		queuedInputsDialogChatId = null;
+	function closeQueueEditor(): void {
+		queueEditorChatId = null;
 		queuedInputEditor.close();
 	}
 
@@ -892,43 +879,28 @@
 		<UserMessageNavigatorDialog controller={userMessageNavigator} />
 	{/if}
 
-	{#if queuedInputsDialogOpen && queuedInputsDialogChatId}
-		<QueuedInputsDialog
-			chatId={queuedInputsDialogChatId}
-			executionKey={JSON.stringify([queuedChat?.executorId, queuedChat?.agentId])}
-			open={true}
-			queue={dialogQueue}
+	{#if queueEditorChatId}
+		<QueuedInputEditorDialog
+			chatId={queueEditorChatId}
+			executionKey={JSON.stringify([sessions.byId[queueEditorChatId]?.executorId, sessions.byId[queueEditorChatId]?.agentId])}
 			editor={queuedInputEditor}
-			onClose={closeQueuedInputsDialog}
+			onClose={closeQueueEditor}
+			onFocusComposer={(chatId) => {
+				if (sessions.selectedChatId === chatId && isPresented)
+					composerHost?.querySelector<HTMLTextAreaElement>('textarea')?.focus({ preventScroll: true });
+			}}
 			onCreate={async (content) => {
-				if (!queuedInputsDialogChatId) return;
-				await controller.createQueueEntryForChat(queuedInputsDialogChatId, content);
+				if (!queueEditorChatId) return;
+				await controller.createQueueEntryForChat(queueEditorChatId, content);
 			}}
 			onReplace={async (entryId, content, expectedRevision) => {
-				if (!queuedInputsDialogChatId) return;
+				if (!queueEditorChatId) return;
 				await controller.replaceQueueEntryForChat(
-					queuedInputsDialogChatId,
+					queueEditorChatId,
 					entryId,
 					content,
 					expectedRevision,
 				);
-			}}
-			onDelete={async (entryId) => {
-				if (!queuedInputsDialogChatId) return;
-				await controller.deleteQueueEntryForChat(queuedInputsDialogChatId, entryId);
-			}}
-			onMove={async (source, target, placement, reorderRevision) => {
-				const chatId = queuedInputsDialogChatId;
-				if (!chatId) return;
-				await controller.moveQueueEntryForChat(chatId, source, target, placement, reorderRevision);
-			}}
-			onPause={async () => {
-				if (!queuedInputsDialogChatId) return;
-				await controller.pauseQueueForChat(queuedInputsDialogChatId);
-			}}
-			onResume={async (pauseId) => {
-				if (!queuedInputsDialogChatId) return;
-				await controller.resumeQueueForChat(queuedInputsDialogChatId, pauseId);
 			}}
 		/>
 	{/if}
