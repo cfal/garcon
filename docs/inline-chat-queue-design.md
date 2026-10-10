@@ -65,6 +65,11 @@ No queue persistence, transport retry, or provider-specific client behavior is
 introduced. The transcript boundary remains governed by
 [transcript-ledger-v5-design.md](transcript-ledger-v5-design.md#71-the-queuetranscript-boundary).
 
+Control-Enter retains the composer steering preference while ordinary messages
+are queued or paused. A long queue stays in the scrollable inline list; its
+pencil opens the selected entry directly, including entries beyond the initial
+viewport. Queue drags do not activate workspace window dragging.
+
 Verification covers selected middle/tail entries, original-order recovery on
 rejection, revision conflicts, pending-steer ordering, delayed provider readiness,
 exactly-once submission, Local and both remote executor directions, and desktop

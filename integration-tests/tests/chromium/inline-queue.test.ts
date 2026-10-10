@@ -92,13 +92,18 @@ test("reorders, expands, edits, and steers queued messages from the chat on desk
         const entriesBeforeMove = (
           await integration.client.getExecutionControl(chatId)
         ).queue.entries;
+        const windowIdsBeforeDrag = await page.locator("[data-workspace-window-id]").evaluateAll((windows) => windows.map((element) => element.getAttribute("data-workspace-window-id")));
         const lastHandle = tray.locator(
           `[data-queue-drag-id="${entriesBeforeMove[2].id}"]`,
         );
         const firstRow = tray.locator(
           `[data-queue-entry-id="${entriesBeforeMove[0].id}"]`,
         );
+        await lastHandle.dragTo(page.locator("[data-workspace-window-titlebar]").first());
+        await browserExpect(previews).toHaveText(messages);
         await lastHandle.dragTo(firstRow, { targetPosition: { x: 100, y: 2 } });
+        expect(await page.locator("[data-workspace-window-id]").evaluateAll((windows) => windows.map((element) => element.getAttribute("data-workspace-window-id")))).toEqual(windowIdsBeforeDrag);
+        await browserExpect(page.locator("[data-workspace-window-drop-layer]")).toHaveCount(0);
         const reordered = [messages[2], messages[0], messages[1]];
         await browserExpect(previews).toHaveText(reordered);
         expect(
@@ -300,6 +305,58 @@ test("reorders, expands, edits, and steers queued messages from the chat on desk
   }
 }, 120_000);
 
+test("Control-Enter steers the composer while ordinary queued work remains paused", async () => {
+  const environment = await startScriptedCodexTestEnvironment();
+  const held = environment.model.scriptHeldTurn([
+    codexAssistantMessage("Synthetic active shortcut turn completed."),
+  ]);
+  environment.model.scriptTurn([
+    codexAssistantMessage("Synthetic shortcut guidance received."),
+  ]);
+  try {
+    await withChromiumFixture(
+      "inline-queue-steer-shortcut",
+      async ({ page, integration, assertNoBrowserErrors }) => {
+        const chatId = integration.newChatId();
+        const active = await integration.client.startChat(liveCodexStartRequest({
+          chatId,
+          projectPath: integration.dirs.project,
+          command: "Synthetic active shortcut prompt.",
+        }));
+        await held.requested;
+        await integration.client.enqueueNew(chatId, "Synthetic future work.");
+        await integration.client.pauseQueue(chatId);
+        const before = (await integration.client.getExecutionControl(chatId)).queue;
+        await page.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
+        const tray = page.locator("[data-queue-status-summary]");
+        await browserExpect(tray.getByRole("button", { name: "Resume queue", exact: true })).toBeVisible();
+        const composer = page.getByPlaceholder("Reply...", { exact: true });
+        await composer.fill("Synthetic shortcut guidance.");
+        const submitted = page.waitForResponse((response) =>
+          response.url().endsWith("/api/v1/chats/steer") && response.request().method() === "POST",
+        );
+        await composer.press("Control+Enter");
+        expect((await submitted).status()).toBe(202);
+        await browserExpect(composer).toHaveValue("");
+        const after = (await integration.client.getExecutionControl(chatId)).queue;
+        expect(after.entries).toEqual(before.entries);
+        expect(after.pause).toEqual(before.pause);
+        held.release();
+        if (!active.turnId) throw new Error("Missing active turn");
+        await integration.client.waitForTurnTerminal(chatId, active.turnId);
+        await browserExpect(page.getByText("Synthetic shortcut guidance received.", { exact: true })).toBeVisible();
+        environment.model.assertSettled();
+        assertNoBrowserErrors();
+      },
+      undefined,
+      { serverEnvironment: environment.serverEnvironment, prepareWorkspace: environment.prepareWorkspace },
+    );
+  } finally {
+    held.release();
+    await environment.dispose();
+  }
+}, 120_000);
+
 test("retains late reorder errors and keeps a large expanded queue above a tall landscape composer", async () => {
   await withChromiumFixture(
     "inline-queue-review-regressions",
@@ -426,6 +483,14 @@ test("retains late reorder errors and keeps a large expanded queue above a tall 
         phase("retaining keyboard focus while moving beyond the mounted viewport");
         const tailEntry = (await integration.client.getExecutionControl(chatA)).queue.entries.at(-1)!;
         const tailRow = tray.locator(`[data-queue-entry-id="${tailEntry.id}"]`);
+        await tailRow.getByRole("button", { name: "Edit queued message", exact: true }).click();
+        const tailEditor = page.getByRole("dialog");
+        const editedTail = "Synthetic distant message edited from the inline queue.";
+        await tailEditor.locator("textarea").fill(editedTail);
+        await tailEditor.getByRole("button", { name: "Save edit", exact: true }).click();
+        await browserExpect(tailEditor).toHaveCount(0);
+        await browserExpect(tailRow.locator("[data-queue-preview]")).toHaveText(editedTail);
+        expect((await integration.client.getExecutionControl(chatA)).queue.entries.at(-1)?.content).toBe(editedTail);
         const tailGrip = tailRow.locator("[data-queue-drag-id]");
         await tailGrip.focus();
         await page.keyboard.press("Space");
