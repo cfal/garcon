@@ -669,21 +669,29 @@ export class ActiveTranscriptState extends ActiveTranscriptPresentationState imp
 		const maxAttempts = 2;
 
 		for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+			const cachedViewAtStart = this.transcriptCache.readAppliedCursor(chatId)?.transcriptViewId;
 			const epoch = this.beginSnapshotLoad();
+			const isCurrent = () => epoch === this.#loadEpoch
+				&& (!this.activeChatId || this.activeChatId === chatId);
 			try {
 				const demand = await loadTranscriptPageDemand({
 					direction: 'backward',
 					chatId,
 					visibleLimit: limit,
 					purpose: options.purpose,
-					isCurrent: () => (
-						epoch === this.#loadEpoch
-						&& (!this.activeChatId || this.activeChatId === chatId)
-					),
+					isCurrent,
 				});
-				if (demand.kind === 'invalidated') {
+				if (demand.kind === 'invalidated' || !isCurrent()) {
 					this.abortSnapshotLoad(epoch);
 					return this.chatMessages;
+				}
+				const cachedView = this.transcriptCache.readAppliedCursor(chatId)?.transcriptViewId;
+				const responseView = demand.kind === 'complete' ? demand.pages[0]?.transcriptViewId : undefined;
+				// Independent snapshot owners must not restore a view replaced in the shared cache.
+				if (cachedView && cachedView !== cachedViewAtStart && cachedView !== responseView) {
+					this.abortSnapshotLoad(epoch);
+					if (this.installCachedSnapshot(chatId) === 'applied') return this.chatMessages;
+					continue;
 				}
 				if (demand.kind === 'unavailable') {
 					if (epoch !== this.#loadEpoch) return this.chatMessages;

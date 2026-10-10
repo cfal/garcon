@@ -161,7 +161,7 @@ export class CurrentConversationPanelTranscript implements ActiveTranscriptPort 
 		if (!panel) {
 			const messages = await this.#fallback.loadMessages(chatId, options);
 			for (const mounted of this.options.panels.panelsForChat(chatId)) {
-				mounted.transcript.installCachedSnapshot(chatId);
+				if (!mounted.transcript.isLoadingMessages) mounted.transcript.installCachedSnapshot(chatId);
 			}
 			return this.#panelForChat(chatId)?.transcript.chatMessages ?? messages;
 		}

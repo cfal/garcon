@@ -33,7 +33,7 @@ function presentation(
 	};
 }
 
-function deferredPage() {
+function deferredPage(lastOrdinal = 2, transcriptViewId = 'view-1') {
 	let resolve!: (page: Awaited<ReturnType<typeof getChatMessages>>) => void;
 	vi.mocked(getChatMessages).mockReturnValueOnce(
 		new Promise((done) => {
@@ -44,11 +44,11 @@ function deferredPage() {
 		resolve({
 			chatId: 'chat-1',
 			historyState: { kind: 'complete' },
-			transcriptViewId: 'view-1',
-			messages: [entry(1), entry(2)],
-			lastOrdinal: 2,
+			transcriptViewId,
+			messages: Array.from({ length: lastOrdinal }, (_, index) => entry(index + 1)),
+			lastOrdinal,
 			pageOldestOrdinal: 1,
-			pageNewestOrdinal: 2,
+			pageNewestOrdinal: lastOrdinal,
 			nextBeforeOrdinal: null,
 			hasMore: false,
 			limit: 50,
@@ -135,6 +135,108 @@ describe('CurrentConversationPanelTranscript activation handoff', () => {
 			expect(getChatMessages).toHaveBeenCalledOnce();
 		},
 	);
+
+	it.each([1, 2])('preserves the newer snapshot load for %i mounted panels', async (panelCount) => {
+		const { cache, registry, selected } = fixture();
+		cache.markStale('chat-1');
+		const resolveFallback = deferredPage();
+		const activation = selected.loadMessages('chat-1', { purpose: 'activation' });
+		const resolveMounted = deferredPage(3);
+		registry.reconcile([
+			presentation('window-left'),
+			...(panelCount === 2 ? [presentation('window-right')] : []),
+		]);
+		const mountedLoad = registry.loadChatSnapshot('chat-1');
+		expect(selected.isLoadingMessages).toBe(true);
+		expect(getChatMessages).toHaveBeenCalledTimes(2);
+
+		resolveFallback();
+		await activation;
+		resolveMounted();
+		await mountedLoad;
+
+		expect(cache.get('chat-1')?.lastOrdinal).toBe(3);
+		for (const panel of registry.panelsForChat('chat-1')) {
+			expect(panel.transcript.lastOrdinal).toBe(3);
+			expect(panel.transcript.entries).toEqual([entry(1), entry(2), entry(3)]);
+			expect(panel.transcript.isLoadingMessages).toBe(false);
+		}
+	});
+
+	it.each([1, 2])('retains a newer replacement snapshot in %i mounted panels', async (panelCount) => {
+		const { cache, registry, selected } = fixture();
+		cache.markStale('chat-1');
+		const resolveFallback = deferredPage();
+		const activation = selected.loadMessages('chat-1', { purpose: 'activation' });
+		const resolveMounted = deferredPage(3, 'view-2');
+		registry.reconcile([
+			presentation('window-left'),
+			...(panelCount === 2 ? [presentation('window-right')] : []),
+		]);
+		const mountedLoad = registry.loadChatSnapshot('chat-1');
+		resolveMounted();
+		await mountedLoad;
+		expect(selected.transcriptViewId).toBe('view-2');
+
+		resolveFallback();
+		await activation;
+
+		expect(cache.get('chat-1')?.transcriptViewId).toBe('view-2');
+		for (const panel of registry.panelsForChat('chat-1')) {
+			expect(panel.transcript.transcriptViewId).toBe('view-2');
+			expect(panel.transcript.entries).toEqual([entry(1), entry(2), entry(3)]);
+		}
+	});
+
+	it.each([1, 2])('keeps a fallback-established replacement in %i mounted panels', async (panelCount) => {
+		const { cache, registry, selected } = fixture();
+		cache.markStale('chat-1');
+		const resolveFallback = deferredPage(2, 'view-2');
+		const activation = selected.loadMessages('chat-1', { purpose: 'activation' });
+		const resolveMounted = deferredPage(3);
+		registry.reconcile([
+			presentation('window-left'),
+			...(panelCount === 2 ? [presentation('window-right')] : []),
+		]);
+		const mountedLoad = registry.loadChatSnapshot('chat-1');
+		resolveFallback();
+		await activation;
+		expect(cache.get('chat-1')?.transcriptViewId).toBe('view-2');
+
+		resolveMounted();
+		await mountedLoad;
+
+		expect(cache.get('chat-1')?.transcriptViewId).toBe('view-2');
+		for (const panel of registry.panelsForChat('chat-1')) {
+			expect(panel.transcript.transcriptViewId).toBe('view-2');
+			expect(panel.transcript.entries).toEqual([entry(1), entry(2)]);
+		}
+	});
+
+	it.each([0, 1, 2])('accepts same-view history after cold cache initialization with %i panels', async (panelCount) => {
+		const { cache, registry, selected } = fixture();
+		cache.remove('chat-1');
+		selected.activateChat(null);
+		selected.activateChat('chat-1');
+		const resolve = deferredPage();
+		const activation = selected.loadMessages('chat-1', { purpose: 'activation' });
+		expect(selected.applyMessages('chat-1', 'view-1', [entry(1)], 1, 1)).toBe('applied');
+		if (panelCount > 0) {
+			registry.reconcile([
+				presentation('window-left'),
+				...(panelCount === 2 ? [presentation('window-right')] : []),
+			]);
+		}
+
+		resolve();
+		expect(await activation).toEqual([entry(1).message, entry(2).message]);
+		expect(cache.get('chat-1')?.lastOrdinal).toBe(2);
+		expect(selected.lastOrdinal).toBe(2);
+		for (const panel of registry.panelsForChat('chat-1')) {
+			expect(panel.transcript.entries).toEqual([entry(1), entry(2)]);
+		}
+		expect(getChatMessages).toHaveBeenCalledOnce();
+	});
 
 	it('publishes only to the captured chat after selection changes', async () => {
 		const { cache, registry, selected, selectChat } = fixture();
