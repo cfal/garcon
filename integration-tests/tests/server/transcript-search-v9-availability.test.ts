@@ -52,7 +52,7 @@ describe('transcript search v9 availability', () => {
       expect(result.results.every((entry) => corpus.denseChatIds.includes(entry.chatId))).toBe(true);
 
       const before = readDerivedIndexSnapshot(fixture.dirs.workspace);
-      expect(before.userVersion).toBe(9);
+      expect(before.userVersion).toBe(10);
       await fixture.restartGarcon();
       await fixture.client.waitForSearchPhase(['ready'], { timeoutMs: 5_000 });
       const after = readDerivedIndexSnapshot(fixture.dirs.workspace);
@@ -82,7 +82,7 @@ describe('transcript search v9 availability', () => {
     });
   }, 120_000);
 
-  test('[TLV5-SEARCH.10-SERVER-01] discards v7/v8 files and recreates corrupt v9 files', async () => {
+  test('[TLV5-SEARCH.10-SERVER-01] discards v7/v8 files and recreates corrupt current index files', async () => {
     await withIntegrationFixture('transcript-search-v9-recreation', async (fixture) => {
       const corpus = await createSearchCorpusChats(fixture, {
         ...SEARCH_CORPUS_TIER_S,
@@ -99,7 +99,7 @@ describe('transcript search v9 availability', () => {
         });
         await fixture.client.waitForSearchPhase(['ready'], { timeoutMs: 30_000 });
         const snapshot = readDerivedIndexSnapshot(fixture.dirs.workspace);
-        expect(snapshot.userVersion).toBe(9);
+        expect(snapshot.userVersion).toBe(10);
         const found = await fixture.client.searchChats({
           query: corpus.markerTerm,
           chatIds: [...corpus.denseChatIds],
@@ -119,7 +119,7 @@ describe('transcript search v9 availability', () => {
         },
       });
       await fixture.client.waitForSearchPhase(['ready'], { timeoutMs: 30_000 });
-      expect(readDerivedIndexSnapshot(fixture.dirs.workspace).userVersion).toBe(9);
+      expect(readDerivedIndexSnapshot(fixture.dirs.workspace).userVersion).toBe(10);
       const recovered = await fixture.client.searchChats({
         query: corpus.markerTerm,
         chatIds: [...corpus.denseChatIds],
