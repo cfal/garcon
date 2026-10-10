@@ -5,7 +5,7 @@ import * as refinementApi from '$lib/api/prompt-refinement.js';
 import { resetPromptEditorStub } from '$lib/components/prompt-editor/__tests__/PromptEditorStub.svelte';
 import type { ChatQueueState, QueueEntry } from '$lib/types/chat';
 import * as m from '$lib/paraglide/messages.js';
-import QueuedInputsDialogTestHost from './QueuedInputsDialogTestHost.svelte';
+import QueuedInputEditorDialogTestHost from './QueuedInputEditorDialogTestHost.svelte';
 
 vi.mock('$lib/api/prompt-refinement.js', () => ({
 	refinePrompt: vi.fn(),
@@ -56,13 +56,15 @@ function renderHost(initialQueue: ChatQueueState) {
 		onPause: vi.fn(noopAction),
 		onResume: vi.fn(noopAction),
 	};
-	return { ...render(QueuedInputsDialogTestHost, { initialQueue, ...actions }), actions };
+	return { ...render(QueuedInputEditorDialogTestHost, { initialQueue, ...actions }), actions };
 }
 
 async function beginEditing(index = 0): Promise<HTMLTextAreaElement> {
-	await fireEvent.click(
-		(await screen.findAllByRole('button', { name: m.chat_queue_edit_message() }))[index],
-	);
+	const trigger = (await screen.findAllByRole('button', { name: m.chat_queue_edit_message() }))[
+		index
+	];
+	trigger.focus();
+	await fireEvent.click(trigger);
 	const textarea = (await screen.findByRole('textbox', {
 		name: m.chat_queue_edit_message(),
 	})) as HTMLTextAreaElement;
@@ -95,7 +97,7 @@ describe('QueuedInputEditor composer affordances', () => {
 	});
 
 	it.each(['apply', 'cancel', 'close'] as const)(
-		'preserves pending refinement across draft relocation (%s)',
+		'preserves pending refinement when the queued message departs (%s)',
 		async (action) => {
 			const pending = deferredRefinement();
 			vi.mocked(refinementApi.refinePrompt).mockReturnValueOnce(pending.promise);
@@ -109,12 +111,12 @@ describe('QueuedInputEditor composer affordances', () => {
 			const recovery = screen.getByRole<HTMLTextAreaElement>('textbox', {
 				name: m.chat_queue_edit_message(),
 			});
-			expect(recovery).not.toBe(original);
+			expect(recovery).toBe(original);
 			expect(signal?.aborted).toBe(false);
 			if (action === 'cancel') {
 				await fireEvent.click(screen.getByRole('button', { name: m.prompt_refinement_cancel() }));
 			} else if (action === 'close') {
-				await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_discard() }));
+				await fireEvent.click(screen.getByRole('button', { name: m.common_cancel() }));
 			}
 			pending.resolve({ success: true, refinedPrompt: 'Refined recovered draft' });
 			await pending.promise;
@@ -130,20 +132,15 @@ describe('QueuedInputEditor composer affordances', () => {
 		},
 	);
 
-	it('edits inline in place of the row without duplicating its content', async () => {
+	it('opens only the selected message without queue management controls', async () => {
 		renderHost(queue([entry(0), entry(1)]));
 		const textarea = await beginEditing(0);
-
-		expect(screen.queryByText('Queued message 0')).toBeNull();
-		expect(screen.getByText('Queued message 1')).toBeTruthy();
+		const dialog = screen.getByRole('dialog');
 		expect(textarea.value).toBe('Queued message 0');
-		expect(document.querySelector('[data-queue-move-id="entry-0"]')).toBeNull();
-		expect(document.querySelector('[data-queue-edit-id="entry-0"]')).toBeNull();
-		const remainingPencil = screen.getByRole('button', {
-			name: m.chat_queue_edit_message(),
-		}) as HTMLButtonElement;
-		expect(remainingPencil.disabled).toBe(true);
-		expect(document.querySelector('ol')?.contains(textarea)).toBe(true);
+		expect(dialog.contains(textarea)).toBe(true);
+		expect(within(dialog).queryByText('Queued message 1')).toBeNull();
+		expect(within(dialog).queryByRole('list')).toBeNull();
+		expect(within(dialog).queryByRole('button', { name: /Move|Pause|Remove/ })).toBeNull();
 	});
 
 	it('refines the queued draft through the prompt target', async () => {
@@ -185,8 +182,11 @@ describe('QueuedInputEditor composer affordances', () => {
 				.disabled,
 		).toBe(true);
 		expect(
-			(screen.getByRole('button', { name: m.chat_queue_open_expanded_editor() }) as HTMLButtonElement)
-				.disabled,
+			(
+				screen.getByRole('button', {
+					name: m.chat_queue_open_expanded_editor(),
+				}) as HTMLButtonElement
+			).disabled,
 		).toBe(true);
 		await fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
 		expect(vi.mocked(refinementApi.refinePrompt)).toHaveBeenCalledOnce();
@@ -211,7 +211,7 @@ describe('QueuedInputEditor composer affordances', () => {
 		await screen.findByRole('button', { name: m.prompt_refinement_cancel() });
 		const [, options] = vi.mocked(refinementApi.refinePrompt).mock.calls[0];
 
-		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_discard() }));
+		await fireEvent.click(screen.getByRole('button', { name: m.common_cancel() }));
 
 		expect((options?.signal as AbortSignal).aborted).toBe(true);
 		await waitFor(() => expect(screen.queryByRole('textbox')).toBeNull());
@@ -262,7 +262,9 @@ describe('QueuedInputEditor composer affordances', () => {
 		await fireEvent.input(textarea, { target: { value: 'Draft to expand' } });
 		textarea.setSelectionRange(5, 9, 'backward');
 
-		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_open_expanded_editor() }));
+		await fireEvent.click(
+			screen.getByRole('button', { name: m.chat_queue_open_expanded_editor() }),
+		);
 		const editorDialog = await screen.findByRole('dialog', {
 			name: m.chat_queue_expanded_editor_title(),
 		});
@@ -271,9 +273,8 @@ describe('QueuedInputEditor composer affordances', () => {
 		});
 		expect((expandedEditor as HTMLTextAreaElement).value).toBe('Draft to expand');
 
-		const { emitLastPromptEditorTextChange } = await import(
-			'$lib/components/prompt-editor/__tests__/PromptEditorStub.svelte'
-		);
+		const { emitLastPromptEditorTextChange } =
+			await import('$lib/components/prompt-editor/__tests__/PromptEditorStub.svelte');
 		emitLastPromptEditorTextChange('Draft expanded and edited');
 		await waitFor(() => expect(textarea.value).toBe('Draft expanded and edited'));
 
@@ -291,11 +292,13 @@ describe('QueuedInputEditor composer affordances', () => {
 		expect(textarea.selectionDirection).toBe('backward');
 	});
 
-	it('keeps an expanded departed draft editable and syncs the recovery card', async () => {
+	it('keeps an expanded departed draft editable and preserves its field', async () => {
 		const { component } = renderHost(queue([entry(0), entry(1)]));
 		const textarea = await beginEditing(0);
 
-		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_open_expanded_editor() }));
+		await fireEvent.click(
+			screen.getByRole('button', { name: m.chat_queue_open_expanded_editor() }),
+		);
 		const editorDialog = await screen.findByRole('dialog', {
 			name: m.chat_queue_expanded_editor_title(),
 		});
@@ -306,17 +309,18 @@ describe('QueuedInputEditor composer affordances', () => {
 		component.setQueue(queue([entry(1)]));
 
 		await waitFor(() => expect(screen.getByText(m.chat_queue_no_longer_queued())).toBeTruthy());
-		const { emitLastPromptEditorTextChange } = await import(
-			'$lib/components/prompt-editor/__tests__/PromptEditorStub.svelte'
-		);
+		const { emitLastPromptEditorTextChange } =
+			await import('$lib/components/prompt-editor/__tests__/PromptEditorStub.svelte');
 		emitLastPromptEditorTextChange('Recovered from the expanded editor');
 
 		const recoveryTextarea = (await waitFor(() =>
 			screen.getByRole('textbox', { name: m.chat_queue_edit_message() }),
 		)) as HTMLTextAreaElement;
-		expect(recoveryTextarea).not.toBe(textarea);
+		expect(recoveryTextarea).toBe(textarea);
 		expect(recoveryTextarea.value).toBe('Recovered from the expanded editor');
-		expect(document.querySelector('ol')?.contains(recoveryTextarea)).toBe(false);
+		expect(
+			screen.getByRole('dialog', { name: m.chat_queue_edit_message() }).contains(recoveryTextarea),
+		).toBe(true);
 		expect(
 			(screen.getByRole('button', { name: m.chat_queue_queue_draft_as_new() }) as HTMLButtonElement)
 				.disabled,
@@ -336,7 +340,9 @@ describe('QueuedInputEditor composer affordances', () => {
 		renderHost(queue([entry(0)]));
 		await beginEditing(0);
 
-		await fireEvent.click(screen.getByRole('button', { name: m.chat_queue_open_expanded_editor() }));
+		await fireEvent.click(
+			screen.getByRole('button', { name: m.chat_queue_open_expanded_editor() }),
+		);
 		const editorDialog = await screen.findByRole('dialog', {
 			name: m.chat_queue_expanded_editor_title(),
 		});

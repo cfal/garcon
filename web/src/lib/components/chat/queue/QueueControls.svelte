@@ -68,6 +68,29 @@
 	const renderedItems = $derived(listController.items(snapshot, entries));
 	let notice = $state<{ chatId: string; message: string } | null>(null);
 	const pauseId = $derived(queue?.pause?.id);
+	const pauseDetail = $derived.by(() => {
+		switch (queue?.pause?.kind) {
+			case 'manual':
+				return m.chat_queue_paused_detail();
+			case 'queued-turn-failed':
+				return m.chat_queue_pause_failed_detail();
+			case 'completion-uncertain':
+				return m.chat_queue_pause_completion_uncertain_detail();
+			case 'unknown':
+				return m.chat_queue_pause_unknown_detail();
+			default:
+				return m.chat_queue_follow_up_detail();
+		}
+	});
+	const affectedEntryRemoved = $derived.by(() => {
+		const pause = queue?.pause;
+		return Boolean(
+			pause &&
+			'entryId' in pause &&
+			pause.entryId &&
+			!entries.some((entry) => entry.id === pause.entryId),
+		);
+	});
 	const mutation = $derived(chatId ? mutations[chatId] : undefined);
 	const blocked = $derived(Boolean(mutation) || queue?.steeringEntryId != null);
 	const expanded = $derived(chatId !== null && expandedChatId === chatId);
@@ -154,10 +177,12 @@
 		class={`${CHAT_DOCK_SURFACE_CLASS} flex min-h-0 flex-col`}
 		aria-label={m.chat_queue_dialog_title()}
 		data-queue-status-summary
+		data-queue-chat-id={chatId}
+		tabindex="-1"
 	>
-		<header class="flex shrink-0 items-center gap-2 border-b border-border px-3 py-1.5">
+		<header class="flex shrink-0 flex-wrap items-center gap-x-2 border-b border-border px-3 py-1.5">
 			<span
-				class="text-xs font-medium text-muted-foreground"
+				class="text-xs font-medium text-foreground"
 				aria-live={announcementsEnabled ? 'polite' : 'off'}
 				aria-atomic="true">{m.chat_queue_pending_count({ count: entries.length })}</span
 			>
@@ -175,7 +200,7 @@
 							pauseId ? () => onResume(pauseId) : onPause,
 						)}
 					disabled={blocked}
-					class="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+					class="inline-flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 sm:pointer-fine:min-h-8"
 					aria-label={pauseId ? m.chat_queue_resume() : m.chat_queue_pause()}
 					title={pauseId ? m.chat_queue_resume_queue() : m.chat_queue_pause_queue()}
 				>
@@ -193,13 +218,19 @@
 					aria-expanded={expanded}
 					aria-label={expanded ? m.chat_queue_collapse_all() : m.chat_queue_expand_all()}
 					title={expanded ? m.chat_queue_collapse_all() : m.chat_queue_expand_all()}
-					class="grid size-8 place-items-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+					class="inline-flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:min-h-8"
 				>
-					{#if expanded}<ChevronsDownUp class="size-4" />{:else}<ChevronsUpDown
-							class="size-4"
+					{#if expanded}<ChevronsDownUp class="size-3.5" />{:else}<ChevronsUpDown
+							class="size-3.5"
 						/>{/if}
+					{expanded ? m.common_collapse_all() : m.common_expand_all()}
 				</button>
 			</div>
+			<p class="basis-full pb-1 text-xs text-muted-foreground">
+				{pauseDetail}
+				{#if affectedEntryRemoved}
+					{m.chat_queue_pause_affected_removed()}{/if}
+			</p>
 		</header>
 		<div
 			bind:this={listElement}

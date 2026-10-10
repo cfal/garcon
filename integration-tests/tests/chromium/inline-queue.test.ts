@@ -123,13 +123,17 @@ test("reorders, expands, edits, and steers queued messages from the chat on desk
         const editedMessage =
           "Check the mobile layout, keyboard navigation, and focus after reordering.";
         await dialog.locator("textarea").fill(editedMessage);
+        await browserExpect.poll(async () => (await dialog.boundingBox())?.y).toBe(0);
+        const drawerBounds = await dialog.boundingBox();
+        if (!drawerBounds) throw new Error("Queue editor is not visible");
+        expect(drawerBounds.y).toBe(0);
+        expect(drawerBounds.x + drawerBounds.width).toBe(page.viewportSize()!.width);
+        await page.screenshot({ path: join(artifactDir, "desktop-editor.png") });
         await dialog
           .getByRole("button", { name: "Save edit", exact: true })
           .click();
-        await dialog
-          .getByRole("button", { name: "Close", exact: true })
-          .click();
         await browserExpect(dialog).toHaveCount(0);
+        await browserExpect(tray.getByRole("button", { name: "Edit queued message", exact: true }).last()).toBeFocused();
         await browserExpect(previews.last()).toHaveText(editedMessage);
 
         phase("using the queue on a narrow screen");
@@ -178,6 +182,19 @@ test("reorders, expands, edits, and steers queued messages from the chat on desk
           "Keep this draft while arranging the queue.",
         );
 
+        phase("editing one message on mobile");
+        const mobilePencil = tray.getByRole("button", { name: "Edit queued message", exact: true }).first();
+        await mobilePencil.click();
+        await browserExpect(dialog).toBeVisible();
+        await browserExpect.poll(async () => (await dialog.boundingBox())?.y).toBe(0);
+        const mobileEditorBounds = await dialog.boundingBox();
+        expect(mobileEditorBounds).toMatchObject({ x: 0, y: 0, width: 390, height: 844 });
+        expect(await dialog.locator("textarea").evaluate((field) => parseFloat(getComputedStyle(field).fontSize))).toBeGreaterThanOrEqual(16);
+        await page.screenshot({ path: join(artifactDir, "mobile-editor.png") });
+        await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+        await browserExpect(dialog).toHaveCount(0);
+        await browserExpect(mobilePencil).toBeFocused();
+
         phase("steering from the chat while later work remains paused");
         await tray.getByRole("button", { name: "Pause", exact: true }).click();
         await browserExpect(
@@ -188,6 +205,17 @@ test("reorders, expands, edits, and steers queued messages from the chat on desk
         expect(
           (await integration.client.getExecutionControl(chatId)).queue.pause,
         ).not.toBeNull();
+
+        phase("recovering focus after the last queued entry departs");
+        await tray.getByRole("button", { name: "Edit queued message", exact: true }).first().click();
+        const remaining = (await integration.client.getExecutionControl(chatId)).queue.entries;
+        for (const entry of remaining) await integration.client.deleteQueued({
+          chatId, entryId: entry.id, clientRequestId: crypto.randomUUID(),
+        });
+        await browserExpect(dialog.getByText("This message is no longer queued", { exact: true })).toBeVisible();
+        await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+        await browserExpect(dialog).toHaveCount(0);
+        await browserExpect(composer).toBeFocused();
         held.release();
         if (!active.turnId) throw new Error("Missing active turn");
         await integration.client.waitForTurnTerminal(chatId, active.turnId);

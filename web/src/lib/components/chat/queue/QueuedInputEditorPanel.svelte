@@ -21,7 +21,7 @@
 		onReplace: (entryId: string, content: string, expectedRevision: number) => Promise<void>;
 		onExpand: () => void;
 		onRefinePrompt: () => void;
-		onClose: (restoreEntryId?: string | null) => void;
+		onClose: () => void;
 	}
 
 	let {
@@ -76,7 +76,7 @@
 		editor.error = null;
 		try {
 			await onReplace(entryId, draft, baseRevision);
-			if (editor.matchesSession(entryId, sessionRevision)) onClose(entryId);
+			if (editor.matchesSession(entryId, sessionRevision)) onClose();
 		} catch (error) {
 			if (editor.matchesSession(entryId, sessionRevision)) editor.error = errorMessage(error);
 		} finally {
@@ -112,7 +112,7 @@
 		editor.error = null;
 		try {
 			await onCreate(draft);
-			if (editor.matchesSession(entryId, sessionRevision)) onClose(entryId);
+			if (editor.matchesSession(entryId, sessionRevision)) onClose();
 		} catch (error) {
 			if (editor.matchesSession(entryId, sessionRevision)) {
 				if (error instanceof CommandOutcomeUnknownError) {
@@ -133,19 +133,7 @@
 	}
 </script>
 
-<section class="flex flex-col gap-2">
-	<div class="flex items-center justify-between gap-3">
-		<h4 class="text-sm font-medium">{m.chat_queue_edit_message()}</h4>
-		<button
-			type="button"
-			onclick={() => onClose()}
-			disabled={editor.mutation !== 'idle'}
-			class="rounded-lg px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
-		>
-			{m.chat_queue_discard()}
-		</button>
-	</div>
-
+<section class="flex flex-col gap-4">
 	{#if editor.phase === 'conflict'}
 		<div
 			id="queued-input-status"
@@ -174,8 +162,9 @@
 		invalid={false}
 		readOnly={editor.mutationBlocked || isPromptRefinementPending}
 		disabled={editor.mutation !== 'idle'}
-		describedBy={describedBy}
-		textareaClass="max-h-48 placeholder:text-muted-foreground"
+		{describedBy}
+		rows={8}
+		textareaClass="max-h-[50dvh] placeholder:text-muted-foreground"
 		canExpand={editor.mutation === 'idle'}
 		expandLabel={m.chat_queue_open_expanded_editor()}
 		{canRefinePrompt}
@@ -201,12 +190,20 @@
 	{/if}
 
 	<div class="flex flex-wrap items-center gap-2">
+		<button
+			type="button"
+			onclick={onClose}
+			disabled={editor.mutation !== 'idle'}
+			class="inline-flex min-h-11 items-center rounded-lg border border-border px-3 text-sm font-medium hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 sm:pointer-fine:min-h-9"
+		>
+			{m.common_cancel()}
+		</button>
 		{#if editor.phase === 'editable'}
 			<button
 				type="button"
 				onclick={() => void saveEdit()}
 				disabled={!canCommit}
-				class="inline-flex min-h-9 items-center gap-2 rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+				class="inline-flex min-h-11 sm:pointer-fine:min-h-9 items-center gap-2 rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
 			>
 				{#if editor.mutation === 'saving'}
 					<Loader2 class="h-4 w-4 animate-spin" />
@@ -220,7 +217,7 @@
 				type="button"
 				onclick={() => editor.reloadLatest()}
 				disabled={isPromptRefinementPending || editor.mutation !== 'idle'}
-				class="inline-flex min-h-9 items-center gap-2 rounded-lg border border-border px-3 text-sm font-medium hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+				class="inline-flex min-h-11 sm:pointer-fine:min-h-9 items-center gap-2 rounded-lg border border-border px-3 text-sm font-medium hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
 			>
 				<RefreshCw class="h-4 w-4" />
 				{m.chat_queue_reload_latest()}
@@ -228,8 +225,11 @@
 			<button
 				type="button"
 				onclick={() => void replaceLatest()}
-				disabled={!editor.hasReplacementContent || editor.mutation !== 'idle' || editor.mutationBlocked || isPromptRefinementPending}
-				class="inline-flex min-h-9 items-center gap-2 rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+				disabled={!editor.hasReplacementContent ||
+					editor.mutation !== 'idle' ||
+					editor.mutationBlocked ||
+					isPromptRefinementPending}
+				class="inline-flex min-h-11 sm:pointer-fine:min-h-9 items-center gap-2 rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
 			>
 				<Undo2 class="h-4 w-4" />
 				{m.chat_queue_replace_latest()}
@@ -239,7 +239,7 @@
 				type="button"
 				onclick={() => void queueDraftAsNew()}
 				disabled={!editor.draft.trim() || editor.mutation !== 'idle'}
-				class="inline-flex min-h-9 items-center gap-2 rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+				class="inline-flex min-h-11 sm:pointer-fine:min-h-9 items-center gap-2 rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
 			>
 				{#if editor.mutation === 'queueing-draft'}
 					<Loader2 class="h-4 w-4 animate-spin" />

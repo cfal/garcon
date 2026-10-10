@@ -248,7 +248,6 @@ describe('Lightpanda queue workflow', () => {
       await app.fillQueuedEditor('ui-queue-b-edited');
       await app.clickDialogButton('Save edit');
       await app.waitForText('ui-queue-b-edited');
-      await app.clickDialogButton('Close');
       await app.clickQueuedRowAction('ui-queue-c', 'Queue actions');
       await app.clickMenuItem('Remove from queue');
       await app.waitForTextAbsent('ui-queue-c');
@@ -314,7 +313,6 @@ describe('Lightpanda queue workflow', () => {
         expect.objectContaining({ content: 'ui-queue-draft-retry' }),
       ]);
 
-      await app.clickDialogButton('Close');
       active.releaseEcho();
       await app.waitForText('echo:ui-queue-draft-retry');
       expect(fixture.integration.fakeProviders.openAi.requests().filter((request) => (

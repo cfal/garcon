@@ -6,6 +6,14 @@ message while the current provider supports steering. Mobile rows place actions
 below the message to preserve its reading width. Remove and Send now belong in
 the overflow menu; Send now retains its existing first-entry behavior.
 
+The queue identifies its next entry, explains that follow-ups run after the active
+turn, and names Expand all and Collapse all explicitly. Touch controls have 44px
+targets. The pencil opens only the selected message in a desktop side drawer or
+full-screen mobile editor; Save closes it and returns to the chat. The editor
+retains its textarea, focus, and draft when the message departs or changes
+elsewhere, with the existing conflict and queue-as-new recovery actions. Queue
+ordering, deletion, and pause controls live only in the inline queue.
+
 The public Codex CLI distinguishes pending steers from queued follow-ups and
 keeps both visible above the composer. Its pending preview explains that guidance
 waits for the next tool/result boundary and keeps editing separate from delivery:

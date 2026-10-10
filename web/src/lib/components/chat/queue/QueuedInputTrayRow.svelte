@@ -88,7 +88,7 @@
 	);
 	const steerBlocked = $derived(blocked || entry.attachments.length > 0);
 	const iconButtonClass =
-		'grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50';
+		'grid size-11 shrink-0 place-items-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 sm:pointer-fine:size-8';
 	$effect(() => {
 		onRetain('menu', menuOpen);
 	});
@@ -165,7 +165,9 @@
 			class:top-0={edge === 'top'}
 			class:bottom-0={edge === 'bottom'}
 		></div>{/if}
-	<div class="grid grid-cols-[1.5rem_minmax(0,1fr)] items-center gap-x-2 gap-y-1 @min-[30rem]/queue-row:grid-cols-[1.5rem_minmax(0,1fr)_auto]">
+	<div
+		class="grid grid-cols-[1.5rem_minmax(0,1fr)] items-center gap-x-2 gap-y-1 @min-[30rem]/queue-row:grid-cols-[1.5rem_minmax(0,1fr)_auto]"
+	>
 		<span
 			bind:this={dragHandle}
 			data-queue-drag-id={entry.id}
@@ -187,6 +189,12 @@
 			title={entry.content || attachmentNames}
 			class="flex min-w-0 items-start gap-2 rounded text-left text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 		>
+			{#if position === 1 && entry.kind === 'turn' && !steering}
+				<span
+					class="mt-0.5 shrink-0 rounded bg-muted px-1.5 text-[10px] font-medium leading-4 text-muted-foreground"
+					>{m.chat_queue_next_up()}</span
+				>
+			{/if}
 			<span
 				data-queue-preview
 				class="block min-w-0 flex-1"
@@ -194,17 +202,25 @@
 				class:whitespace-pre-wrap={expanded}
 				class:break-words={expanded}>{entry.content.trim() ? entry.content : attachmentNames}</span
 			>
-			<ChevronDown class={`mt-1 size-3 shrink-0 text-muted-foreground transition-transform ${expanded ? 'rotate-180' : ''}`} aria-hidden="true" />
+			<ChevronDown
+				class={`mt-1 size-3 shrink-0 text-muted-foreground transition-transform ${expanded ? 'rotate-180' : ''}`}
+				aria-hidden="true"
+			/>
 		</button>
-		<div class="col-start-2 flex items-center justify-end gap-1 @min-[30rem]/queue-row:col-start-3 @min-[30rem]/queue-row:row-start-1">
-		{#if entry.attachments.length > 0 && !expanded}<span
-				data-queue-preview-attachments
-				title={attachmentNames}
-				class="flex shrink-0 items-center gap-1 text-xs text-muted-foreground"
-				><Paperclip class="size-3.5" /><span>{entry.attachments.length}</span></span
-			>{/if}
+		<div
+			class="col-start-2 flex items-center justify-end gap-1 @min-[30rem]/queue-row:col-start-3 @min-[30rem]/queue-row:row-start-1"
+		>
+			{#if entry.attachments.length > 0 && !expanded}<span
+					data-queue-preview-attachments
+					title={attachmentNames}
+					class="flex shrink-0 items-center gap-1 text-xs text-muted-foreground"
+					><Paperclip class="size-3.5" /><span>{entry.attachments.length}</span></span
+				>{/if}
 			{#if entry.kind === 'steer' && !steering}
-				<span class="mr-auto inline-flex h-8 items-center gap-1.5 text-xs text-muted-foreground @min-[30rem]/queue-row:mr-1" title={m.chat_queue_pending_steer_detail()}>
+				<span
+					class="mr-auto inline-flex h-8 items-center gap-1.5 text-xs text-muted-foreground @min-[30rem]/queue-row:mr-1"
+					title={m.chat_queue_pending_steer_detail()}
+				>
 					<Clock3 class="size-3.5" aria-hidden="true" />{m.chat_queue_pending_steer()}
 				</span>
 			{:else if canSteer || steering}
@@ -219,7 +235,7 @@
 					title={entry.attachments.length > 0
 						? m.chat_queue_steer_attachments_unavailable()
 						: m.chat_queue_steer_queue()}
-					class="mr-auto inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-2 text-xs font-medium text-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 @min-[30rem]/queue-row:mr-0"
+					class="mr-auto inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-border px-3 text-xs font-medium text-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 sm:pointer-fine:min-h-8 sm:pointer-fine:px-2 @min-[30rem]/queue-row:mr-0"
 				>
 					{#if steering}<Loader2 class="size-3.5 animate-spin" />{:else}<CornerUpRight
 							class="size-3.5"
@@ -229,8 +245,10 @@
 			<button
 				type="button"
 				data-queue-edit-id={entry.id}
-				onclick={() => {
-					if (!blocked) onEdit();
+				onclick={(event) => {
+					if (blocked) return;
+					event.currentTarget.focus({ preventScroll: true });
+					onEdit();
 				}}
 				disabled={blocked}
 				class={iconButtonClass}
@@ -244,7 +262,10 @@
 					disabled={blocked}
 					class={iconButtonClass}
 					aria-label={m.chat_queue_actions()}
-					title={m.chat_queue_actions()}>{#if deleting}<Loader2 class="size-3.5 animate-spin" />{:else}<Ellipsis class="size-4" />{/if}</DropdownMenuTrigger
+					title={m.chat_queue_actions()}
+					>{#if deleting}<Loader2 class="size-3.5 animate-spin" />{:else}<Ellipsis
+							class="size-4"
+						/>{/if}</DropdownMenuTrigger
 				>
 				<DropdownMenuContent align="end" class="w-56" getFocusReturnTarget={() => menuTrigger}>
 					{#if canInterrupt}<DropdownMenuItem
@@ -253,7 +274,11 @@
 							title={m.chat_queue_interrupt_and_send_queue()}
 							><FastForward class="size-4" />{m.chat_queue_interrupt_and_send()}</DropdownMenuItem
 						>{/if}
-					<DropdownMenuItem disabled={blocked} onSelect={onDelete} class="text-destructive focus:text-destructive">
+					<DropdownMenuItem
+						disabled={blocked}
+						onSelect={onDelete}
+						class="text-destructive focus:text-destructive"
+					>
 						<Trash2 class="size-4" />{m.chat_queue_remove_from_queue()}
 					</DropdownMenuItem>
 				</DropdownMenuContent>

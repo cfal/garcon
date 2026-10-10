@@ -83,6 +83,22 @@ describe('inline queue', () => {
 		expect(container.querySelector('[data-queue-status-summary]')).toBeNull();
 	});
 
+	it.each([
+		['queued-turn-failed', m.chat_queue_pause_failed_detail()],
+		['completion-uncertain', m.chat_queue_pause_completion_uncertain_detail()],
+		['unknown', m.chat_queue_pause_unknown_detail()],
+	] as const)('explains the %s automatic pause in the chat', (kind, detail) => {
+		const paused = makeQueue();
+		paused.pause =
+			kind === 'unknown'
+				? { id: 'pause-1', kind, entryId: 'departed', pausedAt: null }
+				: { id: 'pause-1', kind, entryId: 'departed', pausedAt: '2026-10-10T00:00:00.000Z' };
+		renderControls(paused);
+		expect(screen.getByText(m.chat_queue_needs_attention())).toBeTruthy();
+		expect(screen.getByText(detail, { exact: false })).toBeTruthy();
+		expect(screen.getByText(m.chat_queue_pause_affected_removed(), { exact: false })).toBeTruthy();
+	});
+
 	it('starts each chat at its queue head without resetting same-chat snapshots', async () => {
 		const view = renderControls(makeQueue(Array.from({ length: 20 }, (_, index) => `q${index}`)));
 		await tick();
@@ -258,9 +274,15 @@ describe('inline queue', () => {
 		await fireEvent.click(remove);
 		await fireEvent.click(remove);
 		expect(onDelete).toHaveBeenCalledOnce();
-		expect(row('q1').getByRole('button', { name: m.chat_queue_actions() }).hasAttribute('disabled')).toBe(true);
+		expect(
+			row('q1').getByRole('button', { name: m.chat_queue_actions() }).hasAttribute('disabled'),
+		).toBe(true);
 		pending.resolve();
-		await waitFor(() => expect(row('q1').getByRole('button', { name: m.chat_queue_actions() }).hasAttribute('disabled')).toBe(false));
+		await waitFor(() =>
+			expect(
+				row('q1').getByRole('button', { name: m.chat_queue_actions() }).hasAttribute('disabled'),
+			).toBe(false),
+		);
 	});
 
 	it('reports a late pause failure to the originating chat', async () => {

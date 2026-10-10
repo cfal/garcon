@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import QueuedInputsDialog from '../QueuedInputsDialog.svelte';
+	import QueueControls from '../QueueControls.svelte';
+	import QueuedInputEditorDialog from '../QueuedInputEditorDialog.svelte';
 	import { QueuedInputEditorState } from '$lib/chat/conversation/queued-input-editor-state.svelte';
 	import { setNotifications, setTransientLayers } from '$lib/context';
 	import { createNotificationsStore } from '$lib/stores/notifications.svelte.js';
@@ -25,17 +26,9 @@
 		onResume: (pauseId: string) => Promise<void>;
 	}
 
-	let {
-		executionKey = '',
-		initialQueue,
-		onCreate,
-		onReplace,
-		onDelete,
-		onMove,
-		onPause,
-		onResume,
-	}: Props = $props();
-	let open = $state(true);
+	let { executionKey = '', initialQueue, onCreate, onReplace, onDelete, onMove, onPause, onResume }: Props = $props();
+	let open = $state(false);
+	let composer = $state<HTMLButtonElement | null>(null);
 	let queue = $state<ChatQueueState>(untrack(() => initialQueue));
 	const editor = new QueuedInputEditorState({
 		get queue() {
@@ -53,36 +46,40 @@
 
 	export function beginEdit(entry: QueueEntry): void {
 		editor.begin(entry);
+		open = true;
 	}
 
 	export function closeDialog(): void {
 		open = false;
 		editor.close();
 	}
-
-	export function openDialog(): void {
-		open = true;
-	}
 </script>
 
 <svelte:window onkeydowncapture={(event) => transientLayers.handleEscape(event)} />
 
+<QueueControls
+	chatId="chat-1"
+	{queue}
+	{onDelete}
+	{onMove}
+	{onPause}
+	{onResume}
+	onQueueControlError={() => {}}
+	onEdit={beginEdit}
+/>
 {#if open}
-	<QueuedInputsDialog
-		chatId="1783725900000000"
+	<QueuedInputEditorDialog
+		chatId="chat-1"
 		{executionKey}
-		open={true}
-		{queue}
 		{editor}
 		{onCreate}
 		{onReplace}
-		{onDelete}
-		{onMove}
-		{onPause}
-		{onResume}
 		onClose={closeDialog}
+		onFocusComposer={() => composer?.focus()}
 	/>
 {/if}
+
+<button bind:this={composer} type="button">Composer</button>
 
 <div data-testid="queue-notifications">
 	{notifications.items.map((notification) => notification.message).join('\n')}
