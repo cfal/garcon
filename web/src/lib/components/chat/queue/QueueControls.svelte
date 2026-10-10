@@ -62,11 +62,11 @@
 	let mutations = $state<Record<string, Mutation>>({});
 	let expandedChatId = $state<string | null>(null);
 	let listElement = $state<HTMLDivElement | null>(null);
+	const entries = $derived(queue?.entries ?? []);
 	const listController = new QueuedInputListController();
 	const snapshot = $derived(listController.virtual.snapshot);
 	const renderedItems = $derived(listController.items(snapshot, entries));
 	let notice = $state<{ chatId: string; message: string } | null>(null);
-	const entries = $derived(queue?.entries ?? []);
 	const pauseId = $derived(queue?.pause?.id);
 	const mutation = $derived(chatId ? mutations[chatId] : undefined);
 	const blocked = $derived(Boolean(mutation) || queue?.steeringEntryId != null);
