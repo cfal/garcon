@@ -180,11 +180,15 @@
 		data-queue-chat-id={chatId}
 		tabindex="-1"
 	>
-		<header class="flex shrink-0 flex-wrap items-center gap-x-2 border-b border-border px-3 py-1.5">
+		<header
+			class="flex shrink-0 flex-wrap items-center gap-x-2 border-b border-border/60 px-3 py-1"
+		>
 			<span
 				class="text-xs font-medium text-foreground"
 				aria-live={announcementsEnabled ? 'polite' : 'off'}
-				aria-atomic="true">{m.chat_queue_pending_count({ count: entries.length })}</span
+				aria-atomic="true"
+				title={m.chat_queue_follow_up_detail()}
+				>{m.chat_queue_pending_count({ count: entries.length })}</span
 			>
 			{#if queue.pause}<span class="min-w-0 truncate text-xs text-queue-foreground"
 					>{queue.pause.kind === 'manual'
@@ -200,14 +204,16 @@
 							pauseId ? () => onResume(pauseId) : onPause,
 						)}
 					disabled={blocked}
-					class="inline-flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 sm:pointer-fine:min-h-8"
+					class="inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-lg px-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 sm:pointer-fine:min-h-8 sm:pointer-fine:min-w-8"
 					aria-label={pauseId ? m.chat_queue_resume() : m.chat_queue_pause()}
 					title={pauseId ? m.chat_queue_resume_queue() : m.chat_queue_pause_queue()}
 				>
 					{#if mutation?.kind === 'pausing' || mutation?.kind === 'resuming'}<Loader2
 							class="size-3.5 animate-spin"
 						/>{:else if pauseId}<Play class="size-3.5" />{:else}<Pause class="size-3.5" />{/if}
-					{pauseId ? m.chat_queue_resume() : m.chat_queue_pause()}
+					<span class:sr-only={!pauseId}
+						>{pauseId ? m.chat_queue_resume() : m.chat_queue_pause()}</span
+					>
 				</button>
 				<button
 					type="button"
@@ -226,11 +232,13 @@
 					{expanded ? m.common_collapse_all() : m.common_expand_all()}
 				</button>
 			</div>
-			<p class="basis-full pb-1 text-xs text-muted-foreground">
-				{pauseDetail}
-				{#if affectedEntryRemoved}
-					{m.chat_queue_pause_affected_removed()}{/if}
-			</p>
+			{#if queue.pause}
+				<p class="basis-full pb-2 pt-1 text-xs text-muted-foreground">
+					{pauseDetail}
+					{#if affectedEntryRemoved}
+						{m.chat_queue_pause_affected_removed()}{/if}
+				</p>
+			{/if}
 		</header>
 		<div
 			bind:this={listElement}

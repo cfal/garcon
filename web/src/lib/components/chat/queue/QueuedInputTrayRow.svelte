@@ -25,7 +25,6 @@
 	} from '$lib/components/ui/dropdown-menu';
 	import * as m from '$lib/paraglide/messages.js';
 	import Ellipsis from '@lucide/svelte/icons/ellipsis';
-	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import Clock3 from '@lucide/svelte/icons/clock-3';
 	import CornerUpRight from '@lucide/svelte/icons/corner-up-right';
 	import FastForward from '@lucide/svelte/icons/fast-forward';
@@ -150,7 +149,7 @@
 	aria-busy={steering || deleting}
 	aria-posinset={position}
 	aria-setsize={count}
-	class="@container/queue-row absolute inset-x-0 top-0 border-b border-border/50 px-2 py-1.5 sm:px-3"
+	class="@container/queue-row absolute inset-x-0 top-0 border-b border-border/40 px-2 py-1 last:border-b-0 hover:bg-accent/40 focus-within:bg-accent/40 sm:px-3"
 	style:transform={`translateY(${virtualItem.start}px)`}
 	class:opacity-50={dragging}
 	onfocusin={() => onRetain('focus', true)}
@@ -165,16 +164,14 @@
 			class:top-0={edge === 'top'}
 			class:bottom-0={edge === 'bottom'}
 		></div>{/if}
-	<div
-		class="grid grid-cols-[1.5rem_minmax(0,1fr)] items-center gap-x-2 gap-y-1 @min-[30rem]/queue-row:grid-cols-[1.5rem_minmax(0,1fr)_auto]"
-	>
+	<div class="grid grid-cols-[1.5rem_minmax(0,1fr)_auto] items-start gap-x-1">
 		<span
 			bind:this={dragHandle}
 			data-queue-drag-id={entry.id}
 			role="img"
 			aria-label={m.chat_queue_drag_handle({ position })}
 			title={m.chat_queue_drag_handle({ position })}
-			class="row-span-2 flex size-6 items-center justify-center text-muted-foreground @min-[30rem]/queue-row:row-span-1"
+			class="flex h-11 w-6 items-center justify-center text-muted-foreground/60 hover:text-foreground sm:pointer-fine:h-8"
 			class:cursor-grab={!blocked}
 		>
 			<GripVertical class="size-3.5" />
@@ -187,11 +184,12 @@
 				? m.chat_queue_collapse_message({ position })
 				: m.chat_queue_toggle_message({ position })}
 			title={entry.content || attachmentNames}
-			class="flex min-w-0 items-start gap-2 rounded text-left text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+			class={`flex min-h-11 min-w-0 items-start gap-1.5 rounded px-1 ${expanded ? 'py-1.5' : 'py-3'} text-left text-sm leading-5 text-foreground hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:min-h-8 sm:pointer-fine:py-1.5 @min-[30rem]/queue-row:col-span-1`}
+			class:col-span-2={expanded}
 		>
 			{#if position === 1 && entry.kind === 'turn' && !steering}
 				<span
-					class="mt-0.5 shrink-0 rounded bg-muted px-1.5 text-[10px] font-medium leading-4 text-muted-foreground"
+					class="sr-only shrink-0 text-[10px] font-medium leading-5 text-muted-foreground @min-[30rem]/queue-row:not-sr-only"
 					>{m.chat_queue_next_up()}</span
 				>
 			{/if}
@@ -202,13 +200,11 @@
 				class:whitespace-pre-wrap={expanded}
 				class:break-words={expanded}>{entry.content.trim() ? entry.content : attachmentNames}</span
 			>
-			<ChevronDown
-				class={`mt-1 size-3 shrink-0 text-muted-foreground transition-transform ${expanded ? 'rotate-180' : ''}`}
-				aria-hidden="true"
-			/>
 		</button>
 		<div
-			class="col-start-2 flex items-center justify-end gap-1 @min-[30rem]/queue-row:col-start-3 @min-[30rem]/queue-row:row-start-1"
+			class="flex items-center justify-end gap-0.5 @min-[30rem]/queue-row:col-span-1 @min-[30rem]/queue-row:col-start-3"
+			class:col-start-2={expanded}
+			class:col-span-2={expanded}
 		>
 			{#if entry.attachments.length > 0 && !expanded}<span
 					data-queue-preview-attachments
@@ -218,10 +214,12 @@
 				>{/if}
 			{#if entry.kind === 'steer' && !steering}
 				<span
-					class="mr-auto inline-flex h-8 items-center gap-1.5 text-xs text-muted-foreground @min-[30rem]/queue-row:mr-1"
+					class="inline-flex min-h-11 items-center gap-1 text-xs text-muted-foreground sm:pointer-fine:min-h-8"
 					title={m.chat_queue_pending_steer_detail()}
 				>
-					<Clock3 class="size-3.5" aria-hidden="true" />{m.chat_queue_pending_steer()}
+					<Clock3 class="size-3.5" aria-hidden="true" /><span
+						class="sr-only @min-[30rem]/queue-row:not-sr-only">{m.chat_queue_pending_steer()}</span
+					>
 				</span>
 			{:else if canSteer || steering}
 				<button
@@ -235,10 +233,10 @@
 					title={entry.attachments.length > 0
 						? m.chat_queue_steer_attachments_unavailable()
 						: m.chat_queue_steer_queue()}
-					class="mr-auto inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-border px-3 text-xs font-medium text-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 sm:pointer-fine:min-h-8 sm:pointer-fine:px-2 @min-[30rem]/queue-row:mr-0"
+					class="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-lg px-2 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 sm:pointer-fine:min-h-8"
 				>
-					{#if steering}<Loader2 class="size-3.5 animate-spin" />{:else}<CornerUpRight
-							class="size-3.5"
+					{#if steering}<Loader2 class="size-3.5 shrink-0 animate-spin" />{:else}<CornerUpRight
+							class="hidden size-3.5 shrink-0 @min-[30rem]/queue-row:block"
 						/>{/if}<span>{m.chat_queue_steer()}</span>
 				</button>
 			{/if}

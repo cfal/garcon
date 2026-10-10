@@ -139,6 +139,26 @@ test("reorders, expands, edits, and steers queued messages from the chat on desk
         phase("using the queue on a narrow screen");
         await page.setViewportSize({ width: 390, height: 844 });
         await browserExpect(composer).toBeVisible();
+        await browserExpect
+          .poll(() =>
+            tray
+              .locator("[data-queue-entry-id]")
+              .evaluateAll((rows) =>
+                rows.every((row) => row.getBoundingClientRect().height <= 60),
+              ),
+          )
+          .toBe(true);
+        const firstMobileRow = tray.locator("[data-queue-entry-id]").first();
+        for (const name of ["Steer", "Edit queued message", "Queue actions"]) {
+          const bounds = await firstMobileRow
+            .getByRole("button", { name, exact: true })
+            .boundingBox();
+          expect(bounds?.width).toBeGreaterThanOrEqual(44);
+          expect(bounds?.height).toBeGreaterThanOrEqual(44);
+        }
+        await page.screenshot({
+          path: join(artifactDir, "mobile-compact.png"),
+        });
         await tray
           .getByRole("button", { name: "Expand all queued messages" })
           .click();
@@ -156,6 +176,10 @@ test("reorders, expands, edits, and steers queued messages from the chat on desk
               ),
           )
           .toBe(true);
+        const expandedPreviewBounds = await previews.first().boundingBox();
+        const mobileTrayBounds = await tray.boundingBox();
+        if (!expandedPreviewBounds || !mobileTrayBounds) throw new Error("Queue text is not visible");
+        expect(expandedPreviewBounds.width).toBeGreaterThan(mobileTrayBounds.width * 0.75);
         await page.screenshot({
           path: join(artifactDir, "mobile-expanded.png"),
         });

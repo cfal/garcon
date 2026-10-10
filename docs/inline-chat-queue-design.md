@@ -2,13 +2,19 @@
 
 Queued messages remain visible above the composer, with drag ordering, per-message
 and full-list expansion, a direct edit button, and a Steer button on every text
-message while the current provider supports steering. Mobile rows place actions
-below the message to preserve its reading width. Remove and Send now belong in
-the overflow menu; Send now retains its existing first-entry behavior.
+message while the current provider supports steering. Compact rows keep message
+text and actions aligned on both desktop and mobile. Expanded text uses the full
+reading width in narrow panes, with its actions below. Steer remains a labeled
+action at every width; editing and overflow use icons with accessible labels.
+Remove and Send now belong in the overflow menu; Send now retains its existing
+first-entry behavior.
 
-The queue identifies its next entry, explains that follow-ups run after the active
-turn, and names Expand all and Collapse all explicitly. Touch controls have 44px
-targets. The pencil opens only the selected message in a desktop side drawer or
+The queue identifies its next entry and names Expand all and Collapse all
+explicitly. The count's tooltip explains automatic delivery and drag ordering;
+pause explanations appear only while paused. The normal header occupies one line,
+and row controls use a flat treatment instead of repeated bordered buttons.
+Touch controls have 44px targets. The pencil opens only the selected message in a
+desktop side drawer or
 full-screen mobile editor; Save closes it and returns to the chat. The editor
 retains its textarea, focus, and draft when the message departs or changes
 elsewhere, with the existing conflict and queue-as-new recovery actions. Queue
