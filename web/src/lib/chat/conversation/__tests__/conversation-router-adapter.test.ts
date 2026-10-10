@@ -11,8 +11,12 @@ import { StartupCoordinator } from '$lib/chat/conversation/startup-coordinator.j
 import type { ChatSessionRecord } from '$lib/chat/sessions/chat-session-types';
 import type { TranscriptMessage } from '$shared/chat-view';
 import { UserMessage } from '$shared/chat-types';
-import { ConversationPanelRegistry } from '../conversation-panel-registry.svelte.js';
+import { ConversationPanelRegistry, type ConversationPanelDescriptor } from '../conversation-panel-registry.svelte.js';
 import { ConversationTranscriptOverlayStore } from '$lib/chat/transcript/conversation-transcript-overlay-store.svelte.js';
+import { getChatMessages } from '$lib/api/chats.js';
+import { CurrentConversationPanelTranscript } from '../current-conversation-panel-transcript.js';
+
+vi.mock('$lib/api/chats.js', () => ({ getChatMessages: vi.fn() }));
 
 vi.mock('$app/navigation', () => ({
 	goto: vi.fn(),
@@ -114,9 +118,19 @@ function entry(ordinal: number, content: string): TranscriptMessage {
 	};
 }
 
+function page(transcriptViewId: string) {
+	return {
+		chatId: 'chat-1', historyState: { kind: 'complete' as const }, transcriptViewId,
+		messages: [entry(1, transcriptViewId)], lastOrdinal: 1, pageOldestOrdinal: 1,
+		pageNewestOrdinal: 1, nextBeforeOrdinal: null, hasMore: false, limit: 50,
+		resendCandidates: [],
+	};
+}
+
 describe('buildRouterStores', () => {
 	beforeEach(() => {
 		localStorage.clear();
+		vi.mocked(getChatMessages).mockReset();
 	});
 
 	it('returns the selected chat record directly for router consumers', () => {
@@ -237,6 +251,83 @@ describe('buildRouterStores', () => {
 
 		expect(deps.chatState.discardChat).toHaveBeenCalledWith('chat-1');
 		expect(discardChat).toHaveBeenCalledWith('chat-1');
+	});
+
+	it.each(['rendered', 'not-yet-rendered'])('fences fallback activation before recovering a %s replacement view', async (presentation) => {
+		const deps = depsFor(chatRecord());
+		const cache = deps.panels.transcriptCache;
+		deps.chatState = new CurrentConversationPanelTranscript({
+			panels: deps.panels,
+			getSelectedChatId: () => 'chat-1',
+		});
+		cache.replace('chat-1', 'view-1', page('view-1').messages, 1, null);
+		deps.chatState.activateChat('chat-1');
+		let resolve!: (response: ReturnType<typeof page>) => void;
+		vi.mocked(getChatMessages).mockReturnValueOnce(new Promise(done => { resolve = done; }));
+		const stores = buildRouterStores(deps);
+		try {
+			const activation = stores.chatState.loadMessages('chat-1', { purpose: 'activation' });
+			const panels: ConversationPanelDescriptor[] = [{
+				surfaceId: 'chat-view:window-left', chatId: 'chat-1', presentation: 'window-left',
+				windowId: 'window-left', snapshotAdmission: 'admitted',
+			}];
+			if (presentation === 'rendered') deps.panels.reconcile(panels);
+			vi.mocked(getChatMessages).mockResolvedValueOnce(page('view-2'));
+			if (presentation === 'rendered') {
+				stores.chatState.markRenderedChatStale('chat-1');
+			} else {
+				stores.chatState.markChatTranscriptStale('chat-1');
+				deps.panels.reconcile(panels);
+			}
+			await stores.chatState.loadRenderedChat('chat-1');
+			const panel = deps.panels.panel('chat-view:window-left')!;
+			expect(panel.transcript.transcriptViewId).toBe('view-2');
+			resolve(page('view-1'));
+			await activation;
+			expect(panel.transcript.transcriptViewId).toBe('view-2');
+			expect(cache.get('chat-1')?.transcriptViewId).toBe('view-2');
+			expect(panel.transcript.entries).toEqual(page('view-2').messages);
+		} finally {
+			deps.panels.destroy();
+			cache.flush();
+		}
+	});
+
+	it('clears rejected optimistic input after replacement while its panel is unmounted', async () => {
+		const deps = depsFor(chatRecord());
+		const cache = deps.panels.transcriptCache;
+		deps.chatState = new CurrentConversationPanelTranscript({
+			panels: deps.panels,
+			getSelectedChatId: () => deps.sessions.selectedChatId,
+		});
+		cache.replace('chat-1', 'view-1', page('view-1').messages, 1, null);
+		const panels: ConversationPanelDescriptor[] = [{
+			surfaceId: 'chat-view:window-left', chatId: 'chat-1', presentation: 'window-left',
+			windowId: 'window-left', snapshotAdmission: 'admitted',
+		}];
+		const stores = buildRouterStores(deps);
+		try {
+			deps.panels.reconcile(panels);
+			deps.chatState.upsertOptimisticUserInput({
+				chatId: 'chat-1', clientMessageId: 'input-1', content: 'pending input',
+				createdAt: '2026-01-01T00:00:00.000Z', delivery: 'pending',
+			});
+			expect(deps.panels.overlayFor('chat-1')?.optimisticInputs).toHaveLength(1);
+			deps.panels.reconcile([]);
+			deps.chatState.activateChat(null);
+			stores.chatState.markChatTranscriptStale('chat-1');
+			deps.chatState.clearOptimisticUserInput('input-1');
+			vi.mocked(getChatMessages).mockResolvedValueOnce(page('view-2'));
+			deps.panels.reconcile(panels);
+			await stores.chatState.loadRenderedChat('chat-1');
+			const panel = deps.panels.panel('chat-view:window-left')!;
+			expect(panel.transcript.transcriptViewId).toBe('view-2');
+			expect(panel.transcript.visibleOptimisticInputs).toHaveLength(0);
+			expect(deps.panels.overlayFor('chat-1')?.optimisticInputs).toHaveLength(0);
+		} finally {
+			deps.panels.destroy();
+			cache.flush();
+		}
 	});
 
 	it('maps remote chat deletion to workspace presentation cleanup', () => {

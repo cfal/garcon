@@ -158,7 +158,13 @@ export class CurrentConversationPanelTranscript implements ActiveTranscriptPort 
 
 	async loadMessages(chatId: string, options?: ChatLoadMessagesOptions): Promise<ChatMessage[]> {
 		const panel = this.#panelForChat(chatId);
-		if (!panel) return this.#fallback.loadMessages(chatId, options);
+		if (!panel) {
+			const messages = await this.#fallback.loadMessages(chatId, options);
+			for (const mounted of this.options.panels.panelsForChat(chatId)) {
+				mounted.transcript.installCachedSnapshot(chatId);
+			}
+			return this.#panelForChat(chatId)?.transcript.chatMessages ?? messages;
+		}
 		await this.options.panels.loadChatSnapshot(chatId, options);
 		return this.#panelForChat(chatId)?.transcript.chatMessages ?? panel.transcript.chatMessages;
 	}
