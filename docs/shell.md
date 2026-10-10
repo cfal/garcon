@@ -60,7 +60,8 @@ A wrapper observes the shell's final physical directory without parsing `cd` or
 stdout. A valid changed path is checked and persisted before another queued
 command can start. Failed commands can still change directory. Invalid or
 unusable reported paths, and corrupt or unreadable reports, fail the turn and
-pause the queue. An untouched report from a skipped footer retains the previous
+pause the queue. Controller-side cwd settlement failures also retain a transcript
+diagnostic across browser refresh and controller restart. An untouched report from a skipped footer retains the previous
 confirmed path. `exec`, Stop, process termination,
 and some shells' `exit` behavior may bypass the wrapper's observation.
 The report is a best-effort observation, not a security boundary against commands

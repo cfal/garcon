@@ -7,6 +7,37 @@ import { withIntegrationFixture } from '../../support/integration-fixture.js';
 import { rejectionOf } from '../../support/promise-assertions.js';
 
 for (const executionBackend of ['in-process', 'remote-controller-dials', 'remote-executor-dials'] as const) {
+  test(`Shell cwd settlement failure remains visible after controller restart (${executionBackend})`, async () => {
+    await withIntegrationFixture(`shell-cwd-diagnostic-${executionBackend}`, async fixture => {
+      const { client, executionDirs } = fixture;
+      const chatId = fixture.newChatId();
+      const started = await client.startChat({
+        chatId, agentId: 'shell', model: 'sh', projectPath: executionDirs.project,
+        permissionMode: 'default', thinkingMode: 'none', agentSettings: { ownerId: 'shell', schemaVersion: 1, values: {} },
+        origin: 'interactive', clientRequestId: crypto.randomUUID(), clientMessageId: crypto.randomUUID(),
+        command: 'cd "$HOME"',
+      });
+      const terminal = await client.waitForTurnTerminal(chatId, started.turnId);
+      expect(terminal.type).toBe('agent-run-failed');
+      if (terminal.type !== 'agent-run-failed') throw new Error('Expected cwd settlement failure');
+      expect(terminal.error).toContain('working directory is unavailable');
+      await client.waitForProcessing(chatId, false);
+      const before = (await client.getMessages(chatId)).messages;
+      expect(before.filter(row => row.message.type === 'transcript-notice' && row.message.content === terminal.error))
+        .toHaveLength(1);
+      expect(before.find(row => row.message.type === 'command-result')?.message).toMatchObject({
+        result: { outcome: 'finished', exitCode: 0, capture: 'complete' },
+      });
+      expect((await client.listChats()).sessions.find(chat => chat.id === chatId)?.projectPath).toBe(executionDirs.project);
+      await fixture.restartGarcon();
+      expect((await fixture.client.getMessages(chatId)).messages).toEqual(before);
+      const exported = await fixture.client.get<TranscriptExportResponse>(
+        `/api/v1/chats/export?chatId=${chatId}&format=markdown`,
+      );
+      expect(exported.document).toContain(terminal.error);
+    }, { executionBackend, projectRoots: 'separate' });
+  }, 60_000);
+
   test.each([
     { name: 'plain', presentation: undefined },
     { name: 'styled', presentation: { origin: 'cli', style: 'notice', title: 'Synthetic command', disclosure: 'collapsed' } },

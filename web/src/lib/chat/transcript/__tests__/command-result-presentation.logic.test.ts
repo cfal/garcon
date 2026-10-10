@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CommandOutputMessage, CommandResultMessage, UserMessage } from '$shared/chat-types';
+import { CommandOutputMessage, CommandResultMessage, TranscriptNoticeMessage, UserMessage } from '$shared/chat-types';
 import type { CommandOutcome } from '$shared/command-output.js';
 import type { ChatDisplayRow } from '../transcript-row-projection.js';
 import { commandResultPresentation } from '../command-result-presentation.js';
@@ -51,6 +51,20 @@ describe('command result presentation', () => {
 		expect(layouts([resultRow, { ...notice, content: 'Cwd persistence failed' }, notice])).toEqual(['standard', 'standard', 'standard']);
 		expect(layouts([notice])).toEqual(['standard']);
 		expect(layouts([resultRow])).toEqual(['standard']);
+	});
+
+	it('keeps a durable settlement diagnostic without repeating its terminal error', () => {
+		const message = new TranscriptNoticeMessage(at, 'Working directory save failed');
+		const diagnostic: ChatDisplayRow = { kind: 'message', id: 'view:4', ordinal: 4, message };
+		const local = { ...notice, content: message.content };
+		expect(layouts([diagnostic, local])).toEqual(['standard', 'hidden']);
+		expect(layouts([local])).toEqual(['standard']);
+		expect(layouts([resultRow, diagnostic, { ...local, content: `${failed.content}\n${message.content}` }]))
+			.toEqual(['standard', 'standard', 'hidden']);
+		expect(layouts([diagnostic, { ...local, content: 'Different error' }])).toEqual(['standard', 'standard']);
+		const input: ChatDisplayRow = { kind: 'message', id: 'view:5', message: new UserMessage(at, 'next') };
+		expect(layouts([resultRow, input, diagnostic, { ...local, content: `${failed.content}\n${message.content}` }]))
+			.toEqual(['standard', 'standard', 'standard', 'standard']);
 	});
 
 	it.each(['pending', 'delivered'] as const)('keeps prior failures single during %s follow-up delivery', delivery => {

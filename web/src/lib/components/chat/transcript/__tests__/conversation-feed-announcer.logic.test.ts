@@ -9,6 +9,7 @@ import {
 	McpToolUseMessage,
 	PermissionRequestMessage,
 	ToolResultMessage,
+	TranscriptNoticeMessage,
 	UnknownToolUseMessage,
 	UserMessage,
 	WaitToolUseMessage,
@@ -95,6 +96,17 @@ describe('ConversationFeedAnnouncerState', () => {
 		expect(announcer.reconcile({ surfaceIdentity: 'chat', rows: [initial, result, notice], mutationClock: clock(3, 2, 3), ...enabled })).toBeNull();
 		announcer.reconcile({ surfaceIdentity: 'other', rows: [initial], mutationClock: clock(1), ...enabled });
 		expect(announcer.reconcile({ surfaceIdentity: 'other', rows: [initial, notice], mutationClock: clock(2, 0, 2), ...enabled })).toBe(plainAnnouncementText(message.content));
+	});
+
+	it('announces the error once when its durable notice has no announcement', () => {
+		const initial = assistantRow('1', 'initial');
+		const message = new TranscriptNoticeMessage('', 'Working directory save failed');
+		const diagnostic = messageRow('2', message);
+		const notice = { kind: 'local-notice' as const, id: 'notice', noticeType: 'error' as const, content: message.content, timestamp: '' };
+		const announcer = new ConversationFeedAnnouncerState();
+		announcer.reconcile({ surfaceIdentity: 'chat', rows: [initial], mutationClock: clock(1), ...enabled });
+		expect(announcer.reconcile({ surfaceIdentity: 'chat', rows: [initial, diagnostic], mutationClock: clock(2, 2), ...enabled })).toBeNull();
+		expect(announcer.reconcile({ surfaceIdentity: 'chat', rows: [initial, diagnostic, notice], mutationClock: clock(3, 2, 3), ...enabled })).toBe(message.content);
 	});
 
 	it('does not announce the initial or replacement transcript', () => {
