@@ -39,7 +39,7 @@ export class QueuedInputListController {
 		});
 	}
 
-	items(snapshot: VirtualListSnapshot, entries: readonly QueueEntry[]) {
+	items(snapshot: VirtualListSnapshot, entries: ReadonlyMap<string, QueueEntry>) {
 		const range = snapshot.overscanRange;
 		const indexes = range
 			? Array.from(
@@ -52,8 +52,9 @@ export class QueuedInputListController {
 			if (index !== undefined) indexes.push(index);
 		}
 		return virtualItems(snapshot, indexes).flatMap((virtualItem) => {
-			const entry = entries[virtualItem.index];
-			return entry?.id === virtualItem.key ? [{ entry, virtualItem }] : [];
+			// Keeps keyed rows mounted while the virtual list publishes new geometry.
+			const entry = entries.get(virtualItem.key);
+			return entry ? [{ entry, virtualItem }] : [];
 		});
 	}
 

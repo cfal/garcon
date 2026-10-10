@@ -2,7 +2,7 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, test } from "bun:test";
 import { expect as browserExpect } from "playwright/test";
-import { withChromiumFixture } from "../../support/chromium-fixture.js";
+import { authenticateChromiumContext, withChromiumFixture } from "../../support/chromium-fixture.js";
 import { codexAssistantMessage } from "../../support/fake-codex-model.js";
 import { liveCodexStartRequest } from "../../support/live-codex.js";
 import { startScriptedCodexTestEnvironment } from "../../support/scripted-codex.js";
@@ -28,7 +28,7 @@ test("reorders, expands, edits, and steers queued messages from the chat on desk
   try {
     await withChromiumFixture(
       "inline-queue",
-      async ({ page, integration, assertNoBrowserErrors }, phase) => {
+      async ({ page, browser, integration, assertNoBrowserErrors }, phase) => {
         const chatId = integration.newChatId();
         const active = await integration.client.startChat(
           liveCodexStartRequest({
@@ -107,6 +107,22 @@ test("reorders, expands, edits, and steers queued messages from the chat on desk
           "Keep this draft while arranging the queue.",
         );
 
+        phase("reordering through the keyboard grip");
+        const keyboardGrip = tray.locator(`[data-queue-drag-id="${entriesBeforeMove[2].id}"]`);
+        await keyboardGrip.focus();
+        await page.keyboard.press("Space");
+        await browserExpect(keyboardGrip).toHaveAttribute("aria-pressed", "true");
+        await page.keyboard.press("ArrowDown");
+        await browserExpect(previews).toHaveText([messages[0], messages[2], messages[1]]);
+        await browserExpect(keyboardGrip).toHaveAttribute("aria-disabled", "false");
+        await browserExpect(keyboardGrip).toBeFocused();
+        await captureDesktop("desktop-keyboard-reorder.png");
+        await page.keyboard.press("ArrowUp");
+        await browserExpect(previews).toHaveText(reordered);
+        await browserExpect(keyboardGrip).toHaveAttribute("aria-disabled", "false");
+        await page.keyboard.press("Enter");
+        await browserExpect(keyboardGrip).toHaveAttribute("aria-pressed", "false");
+
         phase("expanding and editing directly from the tray");
         await tray
           .getByRole("button", { name: "Expand all queued messages" })
@@ -149,7 +165,7 @@ test("reorders, expands, edits, and steers queued messages from the chat on desk
           )
           .toBe(true);
         const firstMobileRow = tray.locator("[data-queue-entry-id]").first();
-        for (const name of ["Steer", "Edit queued message", "Queue actions"]) {
+        for (const name of ["Drag queued message 1", "Steer", "Edit queued message", "Queue actions"]) {
           const bounds = await firstMobileRow
             .getByRole("button", { name, exact: true })
             .boundingBox();
@@ -188,6 +204,22 @@ test("reorders, expands, edits, and steers queued messages from the chat on desk
             () => document.documentElement.scrollWidth <= window.innerWidth,
           ),
         ).toBe(true);
+
+        phase("checking the grip on a wide coarse-pointer screen");
+        const touchContext = await browser.newContext({ viewport: { width: 900, height: 700 }, hasTouch: true, serviceWorkers: "block" });
+        try {
+          await authenticateChromiumContext(touchContext, integration);
+          const touchPage = await touchContext.newPage();
+          await touchPage.goto(`${integration.garcon.baseUrl}/chat/${chatId}`);
+          const touchGrip = touchPage.locator("[data-queue-drag-id]").first();
+          await browserExpect(touchGrip).toBeVisible();
+          expect(await touchPage.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
+          const touchBounds = await touchGrip.boundingBox();
+          expect(touchBounds?.width).toBeGreaterThanOrEqual(44);
+          expect(touchBounds?.height).toBeGreaterThanOrEqual(44);
+        } finally {
+          await touchContext.close();
+        }
         await tray
           .getByRole("button", { name: "Queue actions", exact: true })
           .first()
@@ -383,6 +415,24 @@ test("retains late reorder errors and keeps a large expanded queue above a tall 
         ).toHaveText(
           "Synthetic budget message 249\nSynthetic expanded detail.",
         );
+
+        phase("retaining keyboard focus while moving beyond the mounted viewport");
+        const tailEntry = (await integration.client.getExecutionControl(chatA)).queue.entries.at(-1)!;
+        const tailRow = tray.locator(`[data-queue-entry-id="${tailEntry.id}"]`);
+        const tailGrip = tailRow.locator("[data-queue-drag-id]");
+        await tailGrip.focus();
+        await page.keyboard.press("Space");
+        await browserExpect(tailGrip).toHaveAttribute("aria-pressed", "true");
+        for (let move = 1; move <= 16; move++) {
+          await page.keyboard.press("ArrowUp");
+          await browserExpect(tailRow).toHaveAttribute("aria-posinset", String(253 - move));
+          await browserExpect(tailGrip).toHaveAttribute("aria-disabled", "false");
+          await browserExpect(tailGrip).toBeFocused();
+        }
+        await browserExpect(tailGrip).toBeInViewport();
+        await page.keyboard.press("Escape");
+        await browserExpect(tailGrip).toHaveAttribute("aria-pressed", "false");
+        expect((await integration.client.getExecutionControl(chatA)).queue.entries).toHaveLength(253);
         await tray
           .getByRole("button", {
             name: "Expand all queued messages",

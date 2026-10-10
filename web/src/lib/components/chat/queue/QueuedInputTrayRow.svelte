@@ -11,12 +11,14 @@
 	import type { Edge } from '@atlaskit/pragmatic-drag-and-drop-hitbox/types';
 	import type { QueueEntry } from '$lib/types/chat';
 	import type { QueueEntryPlacement } from '$shared/chat-command-contracts';
+	import { getOptionalTransientLayers } from '$lib/context';
 	import {
 		isQueuedInputDragData,
 		placementFromEdge,
 		queuedInputDragData,
 	} from './queued-input-dnd.js';
 	import QueuedInputAttachments from './QueuedInputAttachments.svelte';
+	import { QueuedInputKeyboardDragState } from './QueuedInputKeyboardDragState.svelte.js';
 	import {
 		DropdownMenu,
 		DropdownMenuContent,
@@ -47,6 +49,7 @@
 		blocked: boolean;
 		steering: boolean;
 		deleting: boolean;
+		announcementsEnabled: boolean;
 		canSteer: boolean;
 		canInterrupt: boolean;
 		onEdit: () => void;
@@ -54,6 +57,7 @@
 		onSteer: () => void;
 		onInterrupt: () => void;
 		onDrop: (sourceId: string, targetId: string, placement: QueueEntryPlacement) => Promise<void>;
+		onKeyboardMove: (direction: -1 | 1) => Promise<void>;
 	}
 	let {
 		chatId,
@@ -68,6 +72,7 @@
 		blocked,
 		steering,
 		deleting,
+		announcementsEnabled,
 		canSteer,
 		canInterrupt,
 		onEdit,
@@ -75,9 +80,22 @@
 		onSteer,
 		onInterrupt,
 		onDrop,
+		onKeyboardMove,
 	}: Props = $props();
 	let rowElement = $state<HTMLLIElement | null>(null);
-	let dragHandle = $state<HTMLSpanElement | null>(null);
+	let dragHandle = $state<HTMLButtonElement | null>(null);
+	const keyboardHelpId = $props.id();
+	const keyboardDrag = new QueuedInputKeyboardDragState({
+		id: keyboardHelpId,
+		transientLayers: getOptionalTransientLayers(),
+		get blocked() {
+			return blocked;
+		},
+		get handle() {
+			return dragHandle;
+		},
+		onMove: (direction) => onKeyboardMove(direction),
+	});
 	let menuTrigger = $state<HTMLElement | null>(null);
 	let menuOpen = $state(false);
 	let dragging = $state(false);
@@ -91,6 +109,9 @@
 	$effect(() => {
 		onRetain('menu', menuOpen);
 	});
+	$effect(() => {
+		onRetain('drag', keyboardDrag.active || dragging);
+	});
 
 	$effect(() => {
 		if (!rowElement || !dragHandle || blocked) return;
@@ -100,14 +121,12 @@
 				element: rowElement,
 				dragHandle,
 				getInitialData: () => ({ ...queuedInputDragData(entry.id), chatId: operationChatId }),
-				canDrag: () => !blocked && !menuOpen,
+				canDrag: () => !blocked && !menuOpen && !keyboardDrag.active,
 				onDragStart: () => {
 					dragging = true;
-					onRetain('drag', true);
 				},
 				onDrop: () => {
 					dragging = false;
-					onRetain('drag', false);
 				},
 			}),
 			dropTargetForElements({
@@ -164,18 +183,32 @@
 			class:top-0={edge === 'top'}
 			class:bottom-0={edge === 'bottom'}
 		></div>{/if}
-	<div class="grid grid-cols-[1.5rem_minmax(0,1fr)_auto] items-start gap-x-1">
-		<span
+	<div
+		class="grid grid-cols-[2.75rem_minmax(0,1fr)_auto] items-start gap-x-1 sm:pointer-fine:grid-cols-[2rem_minmax(0,1fr)_auto]"
+	>
+		<button
+			type="button"
 			bind:this={dragHandle}
 			data-queue-drag-id={entry.id}
-			role="img"
 			aria-label={m.chat_queue_drag_handle({ position })}
-			title={m.chat_queue_drag_handle({ position })}
-			class="flex h-11 w-6 items-center justify-center text-muted-foreground/60 hover:text-foreground sm:pointer-fine:h-8"
-			class:cursor-grab={!blocked}
+			aria-describedby={keyboardHelpId}
+			aria-pressed={keyboardDrag.active}
+			aria-disabled={blocked}
+			aria-keyshortcuts="Space Enter ArrowUp ArrowDown Escape"
+			title={m.chat_queue_keyboard_drag_help()}
+			onclick={() => keyboardDrag.toggle()}
+			onkeydown={(event) => keyboardDrag.handleKeydown(event)}
+			onblur={() => keyboardDrag.handleBlur()}
+			class="grid size-11 place-items-center rounded-lg text-muted-foreground/60 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:pointer-fine:size-8"
+			class:cursor-grab={!blocked && !keyboardDrag.active}
+			class:bg-accent={keyboardDrag.active}
 		>
 			<GripVertical class="size-3.5" />
-		</span>
+		</button>
+		<p id={keyboardHelpId} class="sr-only">{m.chat_queue_keyboard_drag_help()}</p>
+		<p class="sr-only" aria-live={announcementsEnabled ? 'polite' : 'off'} aria-atomic="true">
+			{keyboardDrag.active ? m.chat_queue_keyboard_drag_position({ position }) : ''}
+		</p>
 		<button
 			type="button"
 			onclick={onToggle}
@@ -283,6 +316,11 @@
 			</DropdownMenu>
 		</div>
 	</div>
+	{#if keyboardDrag.active}
+		<p class="pl-12 text-xs text-muted-foreground sm:pointer-fine:pl-10">
+			{m.chat_queue_keyboard_drag_short_help()}
+		</p>
+	{/if}
 	{#if expanded && entry.attachments.length > 0}<div class="mt-2 sm:pl-8">
 			<QueuedInputAttachments attachments={entry.attachments} />
 		</div>{/if}

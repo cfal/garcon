@@ -14,11 +14,23 @@ explicitly. The count's tooltip explains automatic delivery and drag ordering;
 pause explanations appear only while paused. The normal header occupies one line,
 and row controls use a flat treatment instead of repeated bordered buttons.
 Touch controls have 44px targets. The pencil opens only the selected message in a
-desktop side drawer or
-full-screen mobile editor; Save closes it and returns to the chat. The editor
+desktop side drawer or full-screen mobile editor; Save closes it and returns to the chat. The editor
 retains its textarea, focus, and draft when the message departs or changes
 elsewhere, with the existing conflict and queue-as-new recovery actions. Queue
 ordering, deletion, and pause controls live only in the inline queue.
+
+The grip is a focusable button with a 44px target on coarse-pointer screens.
+Space or Enter activates keyboard reordering; Up and Down move the selected
+message one position through the same revision-checked mutation as pointer
+dragging. Space, Enter, Escape, or leaving the grip finishes the interaction.
+Each arrow move commits immediately; finishing does not undo completed moves.
+The active grip shows a short instruction and announces its current position.
+Virtualization retains and reveals the moved row, with focus restored only in
+the originating chat while the user still owns that keyboard interaction.
+Rows resolve messages by stable ID while virtual geometry catches up to a new
+queue order, preserving their mounted controls and keyboard interaction.
+Escape finishes reordering before workspace shortcuts can stop the active turn.
+Ordering controls remain absent from the overflow menu.
 
 The public Codex CLI distinguishes pending steers from queued follow-ups and
 keeps both visible above the composer. Its pending preview explains that guidance

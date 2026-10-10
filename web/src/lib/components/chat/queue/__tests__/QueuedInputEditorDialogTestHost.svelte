@@ -26,7 +26,16 @@
 		onResume: (pauseId: string) => Promise<void>;
 	}
 
-	let { executionKey = '', initialQueue, onCreate, onReplace, onDelete, onMove, onPause, onResume }: Props = $props();
+	let {
+		executionKey = '',
+		initialQueue,
+		onCreate,
+		onReplace,
+		onDelete,
+		onMove,
+		onPause,
+		onResume,
+	}: Props = $props();
 	let open = $state(false);
 	let composer = $state<HTMLButtonElement | null>(null);
 	let queue = $state<ChatQueueState>(untrack(() => initialQueue));

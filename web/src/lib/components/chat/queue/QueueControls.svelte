@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy, untrack } from 'svelte';
+	import { onDestroy, tick, untrack } from 'svelte';
 	import type { ChatQueueState, QueueEntry } from '$lib/types/chat';
 	import type { QueueEntryPlacement } from '$shared/chat-command-contracts';
 	import { CHAT_DOCK_SURFACE_CLASS } from '$lib/chat/conversation/chat-max-width.js';
@@ -63,9 +63,10 @@
 	let expandedChatId = $state<string | null>(null);
 	let listElement = $state<HTMLDivElement | null>(null);
 	const entries = $derived(queue?.entries ?? []);
+	const entriesById = $derived(new Map(entries.map((entry) => [entry.id, entry])));
 	const listController = new QueuedInputListController();
 	const snapshot = $derived(listController.virtual.snapshot);
-	const renderedItems = $derived(listController.items(snapshot, entries));
+	const renderedItems = $derived(listController.items(snapshot, entriesById));
 	let notice = $state<{ chatId: string; message: string } | null>(null);
 	const pauseId = $derived(queue?.pause?.id);
 	const pauseDetail = $derived.by(() => {
@@ -74,6 +75,8 @@
 				return m.chat_queue_paused_detail();
 			case 'queued-turn-failed':
 				return m.chat_queue_pause_failed_detail();
+			case 'turn-failed':
+				return m.chat_queue_pause_turn_failed_detail();
 			case 'completion-uncertain':
 				return m.chat_queue_pause_completion_uncertain_detail();
 			case 'unknown':
@@ -169,6 +172,40 @@
 		if (!source || !target || source === target) return;
 		const revision = queue.reorderRevision;
 		await mutate('moving', () => onMove(source, target, placement, revision), source.id);
+	}
+
+	async function moveByKeyboard(entryId: string, direction: -1 | 1): Promise<void> {
+		const operationChatId = chatId;
+		if (!operationChatId || blocked) return;
+		const index = entries.findIndex((entry) => entry.id === entryId);
+		const target = index < 0 ? undefined : entries[index + direction];
+		if (!target) return;
+		const focusedGrip = document.activeElement;
+		await moveRelative(entryId, target.id, direction === -1 ? 'before' : 'after');
+		await tick();
+		if (
+			chatId !== operationChatId ||
+			!(focusedGrip instanceof HTMLElement) ||
+			focusedGrip.dataset.queueDragId !== entryId ||
+			focusedGrip.getAttribute('aria-pressed') !== 'true' ||
+			(document.activeElement !== focusedGrip && document.activeElement !== document.body)
+		)
+			return;
+		const rowBounds = focusedGrip.closest('li')?.getBoundingClientRect();
+		const listBounds = listElement?.getBoundingClientRect();
+		if (rowBounds && listBounds) {
+			if (rowBounds.top < listBounds.top)
+				listController.virtual.scrollToKey(entryId, { align: 'start' });
+			else if (rowBounds.bottom > listBounds.bottom)
+				listController.virtual.scrollToKey(entryId, { align: 'end' });
+		}
+		await tick();
+		if (
+			chatId === operationChatId &&
+			(document.activeElement === focusedGrip || document.activeElement === document.body) &&
+			focusedGrip.isConnected
+		)
+			focusedGrip.focus({ preventScroll: true });
 	}
 </script>
 
@@ -269,6 +306,7 @@
 							onRetain={(reason, active) => listController.retain(entry.id, reason, active)}
 							{blocked}
 							{steering}
+							{announcementsEnabled}
 							deleting={mutation?.kind === 'deleting' && mutation.entryId === entry.id}
 							canSteer={canSteer && entry.kind !== 'steer' && Boolean(onSteer)}
 							canInterrupt={index === 0 && canInterrupt && !queue.pause && Boolean(onInterrupt)}
@@ -285,6 +323,7 @@
 							onEdit={() => onEdit(entry)}
 							onDelete={() => void mutate('deleting', () => onDelete(entry.id), entry.id)}
 							onDrop={moveRelative}
+							onKeyboardMove={(direction) => moveByKeyboard(entry.id, direction)}
 						/>
 						{#snippet failed(error)}<li class="px-3 py-2 text-xs text-destructive" role="alert">
 								{m.chat_queue_item_render_failed({ detail: String(error) })}

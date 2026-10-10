@@ -22,7 +22,15 @@
 		onCreate: (content: string) => Promise<void>;
 		onReplace: (entryId: string, content: string, expectedRevision: number) => Promise<void>;
 	}
-	let { chatId, executionKey = '', editor, onClose, onFocusComposer, onCreate, onReplace }: Props = $props();
+	let {
+		chatId,
+		executionKey = '',
+		editor,
+		onClose,
+		onFocusComposer,
+		onCreate,
+		onReplace,
+	}: Props = $props();
 	const notifications = getNotifications();
 	const transientLayers = getTransientLayers();
 	const expandedEditor = new PromptEditorDialogState();
@@ -33,8 +41,12 @@
 	const originChatId = untrack(() => chatId);
 	let editorTextarea = $state<HTMLTextAreaElement | null>(null);
 	const refinement = new QueuedInputRefinementController({
-		get chatId() { return chatId; },
-		get executionKey() { return executionKey; },
+		get chatId() {
+			return chatId;
+		},
+		get executionKey() {
+			return executionKey;
+		},
 		get editor() {
 			return editor;
 		},

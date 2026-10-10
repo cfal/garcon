@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/sve
 import type { ComponentProps } from 'svelte';
 import { tick } from 'svelte';
 import QueueControls from '../QueueControls.svelte';
+import { QueuedInputListController } from '../QueuedInputListController.svelte.js';
 import type { ChatQueueState, QueueEntry } from '$lib/types/chat';
 import * as m from '$lib/paraglide/messages.js';
 
@@ -63,6 +64,56 @@ async function openMenu(id: string) {
 }
 
 describe('inline queue', () => {
+	it('keeps moved rows mounted before virtual geometry catches up to the queue order', () => {
+		const controller = new QueuedInputListController();
+		const { entries } = makeQueue();
+		try {
+			controller.update('chat-1', entries);
+			const snapshot = controller.virtual.snapshot;
+			const reordered = [entries[1], entries[0], entries[2]];
+			const currentEntries = new Map(reordered.map((entry) => [entry.id, entry]));
+			expect(controller.items(snapshot, currentEntries).map(({ entry }) => entry.id)).toEqual([
+				'q0',
+				'q1',
+				'q2',
+			]);
+		} finally {
+			controller.virtual.destroy();
+		}
+	});
+
+	it('reorders through the focused grip without adding menu ordering actions', async () => {
+		const pending = deferred();
+		const onMove = vi.fn(() => pending.promise);
+		const queue = makeQueue();
+		const view = renderControls(queue, { onMove });
+		const grip = row('q0').getByRole('button', { name: m.chat_queue_drag_handle({ position: 1 }) });
+		grip.focus();
+		await fireEvent.click(grip);
+		expect(grip.getAttribute('aria-pressed')).toBe('true');
+		await fireEvent.keyDown(grip, { key: 'ArrowUp' });
+		expect(onMove).not.toHaveBeenCalled();
+		await fireEvent.keyDown(grip, { key: 'ArrowDown' });
+		await fireEvent.keyDown(grip, { key: 'ArrowDown' });
+		expect(onMove).toHaveBeenCalledExactlyOnceWith(queue.entries[0], queue.entries[1], 'after', 7);
+		expect(grip.getAttribute('aria-disabled')).toBe('true');
+		await view.rerender({
+			queue: {
+				...queue,
+				entries: [queue.entries[1], queue.entries[0], queue.entries[2]],
+				reorderRevision: 8,
+			},
+		});
+		pending.resolve();
+		await waitFor(() => expect(grip.getAttribute('aria-disabled')).toBe('false'));
+		await waitFor(() => expect(document.activeElement).toBe(grip));
+		expect(grip.getAttribute('aria-pressed')).toBe('true');
+		await fireEvent.keyDown(grip, { key: 'Escape' });
+		expect(grip.getAttribute('aria-pressed')).toBe('false');
+		await fireEvent.keyDown(grip, { key: 'ArrowDown' });
+		expect(onMove).toHaveBeenCalledOnce();
+	});
+
 	it('bounds mounted rows while preserving the full queue count and FIFO order', () => {
 		renderControls(makeQueue(Array.from({ length: 1_000 }, (_, index) => `q${index}`)));
 		const mountedRows = document.querySelectorAll('[data-queue-entry-id]');
@@ -97,6 +148,20 @@ describe('inline queue', () => {
 		expect(screen.getByText(m.chat_queue_needs_attention())).toBeTruthy();
 		expect(screen.getByText(detail, { exact: false })).toBeTruthy();
 		expect(screen.getByText(m.chat_queue_pause_affected_removed(), { exact: false })).toBeTruthy();
+	});
+
+	it('explains an active-turn failure without claiming a queued entry departed', () => {
+		const queue = makeQueue();
+		queue.pause = {
+			id: 'pause-1',
+			kind: 'turn-failed',
+			turnId: 'turn-1',
+			pausedAt: '2026-10-10T00:00:00.000Z',
+		};
+		renderControls(queue);
+		expect(screen.getByText(m.chat_queue_needs_attention())).toBeTruthy();
+		expect(screen.getByText(m.chat_queue_pause_turn_failed_detail())).toBeTruthy();
+		expect(screen.queryByText(m.chat_queue_pause_affected_removed(), { exact: false })).toBeNull();
 	});
 
 	it('starts each chat at its queue head without resetting same-chat snapshots', async () => {
@@ -226,7 +291,7 @@ describe('inline queue', () => {
 		expect(screen.getByText(m.chat_queue_pending_steer())).toBeTruthy();
 	});
 
-	it('blocks all mutations during authoritative steering', () => {
+	it('blocks all mutations during authoritative steering', async () => {
 		const queue = makeQueue();
 		queue.steeringEntryId = 'q0';
 		renderControls(queue, { canSteer: true, onSteer: vi.fn() });
@@ -235,6 +300,12 @@ describe('inline queue', () => {
 		).toBe('true');
 		for (const button of screen.getAllByRole('button')) {
 			if (button.getAttribute('aria-expanded') !== null) continue;
+			if (button.hasAttribute('data-queue-drag-id')) {
+				expect(button.getAttribute('aria-disabled')).toBe('true');
+				await fireEvent.click(button);
+				expect(button.getAttribute('aria-pressed')).toBe('false');
+				continue;
+			}
 			expect(button.hasAttribute('disabled')).toBe(true);
 		}
 	});
